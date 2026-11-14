@@ -4,7 +4,9 @@
 #include "compiler/semantic/code/calls/code_calls_registry_errors.h"
 #include "compiler/semantic/code/functions/code_functions_registry_errors.h"
 #include "compiler/semantic/flow/children_first/children_first.h"
+#include "llvm/ADT/STLExtras.h"
 
+using llvm::cast;
 using llvm::dyn_cast;
 using llvm::isa;
 
@@ -176,8 +178,7 @@ void ArrayCallbacks::checkArrayCallbackResult(const CheckArrayCallbackResult &ta
     case ArrayCallback::FLAT_MAP:
       return this->checkMappedResult(shape, result);
     case ArrayCallback::FILTER:
-      call->type = this->filteredArray(shape);
-      return;
+      return this->startFilterResult(shape);
     case ArrayCallback::REDUCE:
       return this->finishArrayReduce(shape);
     case ArrayCallback::FIND:
@@ -229,17 +230,11 @@ void ArrayCallbacks::checkCompareResult(const ArrayCallbackShape &shape, const T
 }
 
 bool ArrayCallbacks::isKeepingDefined(const Expr *callback) const {
-  auto *functionExpr = dyn_cast<FunctionExpr>(callback);
-  bool isSingleStatement = functionExpr != nullptr && !functionExpr->fn->params.empty() &&
-                           functionExpr->fn->params[0].sym != nullptr &&
-                           functionExpr->fn->body->body.size() == 1;
-  if (!isSingleStatement) {
+  const auto *returnStmt = this->singleReturn(callback);
+  if (returnStmt == nullptr) {
     return false;
   }
-  auto *returnStmt = dyn_cast<ReturnStmt>(functionExpr->fn->body->body[0]);
-  if (returnStmt == nullptr || returnStmt->value == nullptr) {
-    return false;
-  }
+  auto *functionExpr = cast<FunctionExpr>(callback);
   auto whole = SignedCondition{
       .cond = returnStmt->value,
       .isWantedTrue = true,
@@ -251,6 +246,43 @@ bool ArrayCallbacks::isKeepingDefined(const Expr *callback) const {
   }
 
   return answers.back().contains(functionExpr->fn->params[0].sym);
+}
+
+const ReturnStmt *ArrayCallbacks::singleReturn(const Expr *callback) const {
+  auto *functionExpr = dyn_cast<FunctionExpr>(callback);
+  bool isSingleStatement = functionExpr != nullptr && !functionExpr->fn->params.empty() &&
+                           functionExpr->fn->params[0].sym != nullptr &&
+                           functionExpr->fn->body->body.size() == 1;
+  if (!isSingleStatement) {
+    return nullptr;
+  }
+  auto *returnStmt = dyn_cast<ReturnStmt>(functionExpr->fn->body->body[0]);
+  if (returnStmt == nullptr || returnStmt->value == nullptr) {
+    return nullptr;
+  }
+
+  return returnStmt;
+}
+
+std::vector<const FuncSymbol *> ArrayCallbacks::definedNeeds(const Expr *callback) const {
+  auto needs = std::vector<const FuncSymbol *>();
+  const auto *returnStmt = this->singleReturn(callback);
+  if (returnStmt == nullptr) {
+    return needs;
+  }
+  auto whole = SignedCondition{
+      .cond = returnStmt->value,
+      .isWantedTrue = true,
+  };
+  for (SignedCondition part : ChildrenFirst::order(whole, this, &ArrayCallbacks::signedParts)) {
+    const auto *cond = this->unconvertedCondition(part.cond);
+    const auto *function = this->state.flow.functions.findPredicateNeed(cond);
+    if (function != nullptr) {
+      needs.push_back(function);
+    }
+  }
+
+  return needs;
 }
 
 NodeChildren<SignedCondition> ArrayCallbacks::signedParts(SignedCondition part) const {
@@ -526,16 +558,41 @@ std::optional<ElementCallback> ArrayCallbacks::literalElements(const ArrayLitExp
   };
 }
 
-const Type *ArrayCallbacks::filteredArray(const ArrayCallbackShape &shape) {
+void ArrayCallbacks::startFilterResult(const ArrayCallbackShape &shape) {
+  const auto *function = this->state.flow.functions.findFilterNeed(shape.call->args[0]);
+  if (function == nullptr) {
+    return this->finishFilterResult(FinishFilterResult{.shape = shape});
+  }
+  auto &tasks = this->state.walk.tasks;
+  tasks.pushTask(FinishFilterResult{.shape = shape});
+
+  return tasks.pushTask(BuildPredicate{.function = function});
+}
+
+void ArrayCallbacks::finishFilterResult(const FinishFilterResult &task) {
+  const ArrayCallbackShape &shape = task.shape;
   const Expr *predicate = shape.call->args[0];
   const Type *element = shape.element;
-  const auto *kept = this->state.flow.predicates.filteredType(predicate, element);
+  const auto *kept = this->state.flow.functions.filteredType(predicate, element);
   if (kept != nullptr) {
-    return Type::array(kept);
+    shape.call->type = Type::array(kept);
+    return;
   }
-  bool isDefined = element->isOptional() && (shape.isBoolean || this->isKeepingDefined(predicate));
+  if (!element->isOptional() || shape.isBoolean) {
+    shape.call->type = element->isOptional() ? Type::array(element->inner()) : shape.arrayType;
+    return;
+  }
+  auto &tasks = this->state.walk.tasks;
+  tasks.pushTask(FinishFilterDefined{.shape = shape});
+  for (const FuncSymbol *function : llvm::reverse(this->definedNeeds(predicate))) {
+    tasks.pushTask(BuildPredicate{.function = function});
+  }
+}
 
-  return isDefined ? Type::array(element->inner()) : shape.arrayType;
+void ArrayCallbacks::finishFilterDefined(const FinishFilterDefined &task) {
+  const ArrayCallbackShape &shape = task.shape;
+  bool isDefined = this->isKeepingDefined(shape.call->args[0]);
+  shape.call->type = isDefined ? Type::array(shape.element->inner()) : shape.arrayType;
 }
 
 }

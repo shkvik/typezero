@@ -54,12 +54,14 @@ public:
   void afterCallbackValue(const AfterCallbackValue &task);
   void checkListArguments(const CheckListArguments &task);
   void afterTopReturnType(const AfterTopReturnType &task);
+  void finishFilterResult(const FinishFilterResult &task);
   void afterBodyTypeParams(const AfterBodyTypeParams &task);
   void afterDefaultedParam(const AfterDefaultedParam &task);
   void afterBodyStatements(const AfterBodyStatements &task);
   void declareArgumentList(const DeclareArgumentList &task);
   void checkCallbackMethod(const CheckCallbackMethod &task);
   void startLiftedFunction(const StartLiftedFunction &task);
+  void finishFilterDefined(const FinishFilterDefined &task);
   void rememberArgumentList(const RememberArgumentList &task);
   void checkFunctionArgSlot(const CheckFunctionArgSlot &task);
   void afterLiteralCallback(const AfterLiteralCallback &task);

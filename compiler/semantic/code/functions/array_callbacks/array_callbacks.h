@@ -19,7 +19,9 @@ public:
   explicit ArrayCallbacks(SemanticState &owner);
 
   void afterReduceInit(const AfterReduceInit &task);
+  void finishFilterResult(const FinishFilterResult &task);
   void checkCallbackMethod(const CheckCallbackMethod &task);
+  void finishFilterDefined(const FinishFilterDefined &task);
   void finishCallbackMethod(const FinishCallbackMethod &task);
   void afterExtraCallbackArgs(const AfterExtraCallbackArgs &task);
   void checkArrayCallbackResult(const CheckArrayCallbackResult &task);
@@ -33,9 +35,10 @@ private:
   using ResultInitialValueType = Result<const Type *, CodeFunctionsRegistryInitialValueError>;
 
   void finishArrayReduce(const ArrayCallbackShape &shape);
+  void startFilterResult(const ArrayCallbackShape &shape);
   void rememberCallbackFacts(const ArrayCallbackShape &shape);
-  void startReduceInit(const ArrayCallbackShape &shape, const Type *expected);
   void checkMappedResult(const ArrayCallbackShape &shape, const Type *result);
+  void startReduceInit(const ArrayCallbackShape &shape, const Type *expected);
   void checkCompareResult(const ArrayCallbackShape &shape, const Type *result);
   void rememberByteFacts(const ArrayCallbackShape &shape, FunctionDecl *callback);
   void rememberIndexFacts(const ArrayCallbackShape &shape, FunctionDecl *callback);
@@ -47,7 +50,6 @@ private:
 
 
   const Expr *unconvertedCondition(const Expr *cond) const;
-  const Type *filteredArray(const ArrayCallbackShape &shape);
   const Type *mappedReturn(const ArrayCallbackShape &shape, const Type *expected) const;
   const Type *callbackReturn(const ArrayCallbackShape &shape, const Type *expected) const;
 
@@ -67,7 +69,9 @@ private:
 
   Builtin callbackBuiltin(const MemberExpr *member) const;
   ArrayCallback callbackKind(const MemberExpr *member) const;
+  const ReturnStmt *singleReturn(const Expr *callback) const;
   NodeChildren<SignedCondition> signedParts(SignedCondition part) const;
+  std::vector<const FuncSymbol *> definedNeeds(const Expr *callback) const;
   std::vector<const Type *> callbackParams(const ArrayCallbackShape &shape) const;
   Signature callbackSignature(const ArrayCallbackShape &shape, const Type *expected) const;
   std::optional<ElementCallback> literalElements(const ArrayLitExpr *literal, unsigned param);

@@ -4,6 +4,7 @@
 #include "compiler/semantic/code/arithmetic/code_arithmetic_registry_errors.h"
 #include "compiler/semantic/code/operators/code_operators_registry_errors.h"
 #include "compiler/semantic/flow/expr_parts/expr_parts.h"
+#include "compiler/semantic/flow_v2/proofs/flow_proofs_errors.h"
 #include "compiler/semantic/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
 
 using llvm::dyn_cast;
@@ -253,8 +254,11 @@ void AssignValues::afterAssignValue(const AfterAssignValue &task) {
     element->mayAppend = !isInRange;
   }
   if (!isInRange) {
-    return this->state.walk.tasks.pushTask(
-        NoteArrayResized{.array = index->object->type, .isGrowing = true});
+    return this->state.walk.tasks.pushTask(NoteArrayResized{
+        .array = index->object->type,
+        .resize = Resize::GROWS,
+        .except = nullptr,
+    });
   }
 }
 
@@ -268,13 +272,21 @@ void AssignValues::assignedLength(const AssignedLength &task) {
   }
   this->state.walk.tasks.pushTask(AssignedField{.assign = assign, .place = task.place});
   this->state.walk.tasks.pushTask(LengthFacts{.member = member, .value = assign->value});
-  this->state.walk.tasks.pushTask(
-      NoteArrayResized{.array = member->object->type, .isGrowing = false});
+  this->state.walk.tasks.pushTask(NoteArrayResized{
+      .array = member->object->type,
+      .resize = Resize::CHANGES,
+      .except = nullptr,
+  });
   const Type *element = member->object->type->inner();
   if (element->hasZeroValue()) {
     auto what = ErrorTextAssign::length();
-    return this->state.walk.tasks.pushTask(
-        RequireNonNegative{.value = assign->value, .what = what});
+    auto between = this->state.flow.proofs.requireBetween(assign->value, 0, std::nullopt, what);
+    bool isReported =
+        between.isErr() && between.error().code != FlowProofsRequireBetweenErrorCode::EXEMPT;
+    if (isReported) {
+      return this->state.diagnostics.error(assign->value->loc(), between.error().message);
+    }
+    return;
   }
   auto length = this->checkLengthProven(member, assign->value);
   if (length.isErr()) {

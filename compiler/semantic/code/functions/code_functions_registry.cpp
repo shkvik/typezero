@@ -188,6 +188,14 @@ void CodeFunctionsRegistry::checkArrayCallbackResult(const CheckArrayCallbackRes
   return this->arrayCallbacks.checkArrayCallbackResult(task);
 }
 
+void CodeFunctionsRegistry::finishFilterResult(const FinishFilterResult &task) {
+  return this->arrayCallbacks.finishFilterResult(task);
+}
+
+void CodeFunctionsRegistry::finishFilterDefined(const FinishFilterDefined &task) {
+  return this->arrayCallbacks.finishFilterDefined(task);
+}
+
 void CodeFunctionsRegistry::checkThisCall(const CheckThisCall &task) {
   return this->functionMethods.checkThisCall(task);
 }

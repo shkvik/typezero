@@ -619,7 +619,6 @@ enum class CheckTaskKind {
   CHECK_REGEX_LITERAL,
   CHECK_AWAIT,
   CHECK_USED_VALUE,
-  ADD_CONDITION_FACTS,
   WALK_REDUNDANT_TESTS,
   MATCH_ITEMS,
   WALK_COMPARISON_OPERANDS,
@@ -660,26 +659,19 @@ enum class CheckTaskKind {
   CHECK_BYTES_UNION_MEMBER,
   PROCESS_ALIAS_SLOT,
   MARK_FUSED,
-  CALLED_FUNCTION,
   RESOLVE_WEAK_REF_TYPE,
   INSTANTIATE_CALL_TARGET,
   SEGMENTS_ARRAY_SLOT,
-  NOTE_PREDICATE_EXIT,
   NOTE_INHERITED_RETURN,
   CHECK_USED_CALLBACK_VALUE,
-  CHECK_BYTE_CALLBACK_RESULT,
   WALK_FOR_AWAIT,
   NOTE_ERRORS_HANDLED,
   FIND_CALL_CYCLES,
-  NOTE_ASSIGNED,
   CHECK_PROCESS_ASSIGN,
   CHECK_JSON_TARGET,
   CHECK_RUNTIME_TARGET,
   WALK_DECIMAL_ASSIGN,
   WALK_BYTES_STORE,
-  NOTE_ARRAY_RESIZED,
-  NOTE_INCREMENTED,
-  REQUIRE_NON_NEGATIVE,
   CHECK_NODE_CALL,
   CHECK_PROMISE_STATIC,
   CHECK_RESULT_STATIC,
@@ -749,10 +741,6 @@ enum class CheckTaskKind {
   CHECK_JSON_OBJECT_LIT,
   CHECK_JSON_ARRAY_LIT,
   WALK_EXTERNAL,
-  ADD_BYTE_CALLBACK_FACTS,
-  ADD_INDEX_CALLBACK_FACTS,
-  BEGIN_PREDICATE,
-  END_PREDICATE,
   ENTER_RETURN_BODY,
   LEAVE_RETURN_BODY,
   INFER_FROM_BODY,
@@ -865,6 +853,24 @@ enum class CheckTaskKind {
   FINISH_PAIRS_DICT,
   AFTER_DICT_SOURCE,
   FINISH_DICT_SOURCE,
+  CALLED_FUNCTION,
+  NOTE_ASSIGNED,
+  NOTE_INCREMENTED,
+  NOTE_ARRAY_RESIZED,
+  BEGIN_PREDICATE,
+  END_PREDICATE,
+  NOTE_PREDICATE_EXIT,
+  BUILD_PREDICATE,
+  START_PREDICATE_COPY,
+  ADD_BYTE_CALLBACK_FACTS,
+  ADD_INDEX_CALLBACK_FACTS,
+  CHECK_BYTE_CALLBACK_RESULT,
+  ADD_CONDITION_FACTS,
+  FINISH_CONDITION_FACTS,
+  WALK_FRESH_COPY,
+  WALK_BODY_NOW,
+  FINISH_FILTER_RESULT,
+  FINISH_FILTER_DEFINED,
 };
 
 struct DeclaredSignatureMatch {
@@ -1429,6 +1435,12 @@ struct ReflectNewDraft {
   const Type *type;
   std::vector<const Type *> argTypes;
   size_t index;
+};
+
+enum class Resize {
+  GROWS,
+  SHRINKS,
+  CHANGES,
 };
 
 struct UseModule {
@@ -4804,11 +4816,6 @@ struct CheckUsedValue {
   Expr *expr;
 };
 
-struct AddConditionFacts {
-  static constexpr CheckTaskKind kind = CheckTaskKind::ADD_CONDITION_FACTS;
-  const Expr *cond;
-};
-
 struct WalkRedundantTests {
   static constexpr CheckTaskKind kind = CheckTaskKind::WALK_REDUNDANT_TESTS;
   BinaryExpr *binary;
@@ -5009,10 +5016,6 @@ struct MarkFused {
   Expr *expr;
 };
 
-struct CalledFunction {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CALLED_FUNCTION;
-};
-
 struct ResolveWeakRefType {
   static constexpr CheckTaskKind kind = CheckTaskKind::RESOLVE_WEAK_REF_TYPE;
   const TypeRef *ref;
@@ -5031,13 +5034,6 @@ struct SegmentsArraySlot {
   Expr **slot;
 };
 
-struct NotePredicateExit {
-  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_PREDICATE_EXIT;
-  const Expr *value;
-  Flow whenTrue;
-  Flow whenFalse;
-};
-
 struct NoteInheritedReturn {
   static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_INHERITED_RETURN;
   const FunctionDecl *functionDecl;
@@ -5046,12 +5042,6 @@ struct NoteInheritedReturn {
 struct CheckUsedCallbackValue {
   static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_USED_CALLBACK_VALUE;
   Expr *expr;
-};
-
-struct CheckByteCallbackResult {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BYTE_CALLBACK_RESULT;
-  const FunctionDecl *functionDecl;
-  Expr *value;
 };
 
 struct WalkForAwait {
@@ -5067,12 +5057,6 @@ struct NoteErrorsHandled {
 struct FindCallCycles {
   static constexpr CheckTaskKind kind = CheckTaskKind::FIND_CALL_CYCLES;
   std::vector<FunctionDecl *> functions;
-};
-
-struct NoteAssigned {
-  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_ASSIGNED;
-  const VarSymbol *variable;
-  const Expr *value;
 };
 
 struct CheckProcessAssign {
@@ -5100,24 +5084,6 @@ struct WalkBytesStore {
   static constexpr CheckTaskKind kind = CheckTaskKind::WALK_BYTES_STORE;
   IndexExpr *index;
   const Expr *value;
-};
-
-struct NoteArrayResized {
-  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_ARRAY_RESIZED;
-  const Type *array;
-  bool isGrowing;
-};
-
-struct NoteIncremented {
-  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_INCREMENTED;
-  const VarSymbol *variable;
-  int64_t step;
-};
-
-struct RequireNonNegative {
-  static constexpr CheckTaskKind kind = CheckTaskKind::REQUIRE_NON_NEGATIVE;
-  const Expr *value;
-  std::string what;
 };
 
 struct CheckNodeCall {
@@ -5539,26 +5505,6 @@ struct CheckJsonArrayLit {
 
 struct WalkExternal {
   static constexpr CheckTaskKind kind = CheckTaskKind::WALK_EXTERNAL;
-  FunctionDecl *functionDecl;
-};
-
-struct AddByteCallbackFacts {
-  static constexpr CheckTaskKind kind = CheckTaskKind::ADD_BYTE_CALLBACK_FACTS;
-  FunctionDecl *functionDecl;
-};
-
-struct AddIndexCallbackFacts {
-  static constexpr CheckTaskKind kind = CheckTaskKind::ADD_INDEX_CALLBACK_FACTS;
-  FunctionDecl *functionDecl;
-};
-
-struct BeginPredicate {
-  static constexpr CheckTaskKind kind = CheckTaskKind::BEGIN_PREDICATE;
-  FunctionDecl *functionDecl;
-};
-
-struct EndPredicate {
-  static constexpr CheckTaskKind kind = CheckTaskKind::END_PREDICATE;
   FunctionDecl *functionDecl;
 };
 
@@ -6189,6 +6135,280 @@ struct FinishDictSource {
   bool isMap;
 };
 
-using CheckTask = Union<UseModule, DeclareClassTypeParams, BindClassTypeParams, DeclareFunctionTypeParams, BindFunctionTypeParams, InstantiateOwnAlias, SubstituteInstanceFields, InstantiateEmitterParent, MarkOverridden, FindStreamHookParams, WalkHookParams, WalkIterableParam, WalkGeneratorReturn, WalkAsyncReturn, WalkStmt, ReportUnlistenedErrors, EnterLoadBody, LeaveLoadBody, ImportBuiltinModule, InstantiateClassType, InstantiateAlias, SubstituteType, FindIntlType, ResolveResultType, ResolveIteratorType, ResolveDictType, ResolvePromiseType, MakeMethodDescriptor, ResolveConstructorType, CheckConstructorArgs, ClassValueType, LiteralShape, CreatedType, InferReturnType, ReturnTypeOf, ResolveTypeRef, ResolveInnerTypeRef, ResolveObjectFields, WriteResolvedType, ResolveTypeAnswer, FinishTypeUse, FinishArrayType, NextUnionMember, AfterUnionMember, FinishAliasType, FinishEnumType, FinishEnumMember, FinishIntlType, NextTypeArgument, AfterTypeArgument, FinishDescriptor, FinishInstanceType, NextUtilityOperand, AfterUtilityOperand, AfterUtilitySignature, NextFunctionParam, AfterFunctionParam, FinishFunctionType, FinishAssertsType, FinishTupleType, NextObjectField, AfterObjectField, AfterObjectSignature, EvalTypeOp, EvalKeyOf, EvalIndexed, EvalSpread, StartKeyOf, AfterKeyOfOperand, AfterKeyOfEval, StartIndexed, AfterIndexedOperands, AfterIndexedEval, EvalMapped, NextMappedKey, AfterMappedValue, AfterMappedRename, StartMapped, AfterMappedKeys, AfterMappedSource, AfterMappedParts, StartIntersection, NextIntersectionPart, AfterIntersectionPart, StartConditional, AfterConditionalCheck, AfterInferConstraint, AfterConditionalPattern, ChooseBranch, CloseConditionalScope, AfterDistributedMember, EvalConditional, AfterEvalConditional, EvalFiltered, FinishFiltered, PrepareExpectation, FinishBranches, StartTemplate, AfterTemplateHole, FinishTemplate, EvalTemplate, EvalStringCase, EvalFunctionPart, StartTypeOf, FindTypeOfCandidates, AfterTypeOfCandidate, AfterTypeOfMember, AfterFunctionValue, FinishDeclaredFunctionValue, SignatureForUtility, ContinueSignature, AfterErasedReturn, ResolveImport, StartTopLevel, NextTopLevelItem, FinishTopLevel, CloseTopLevel, StartLoadEarly, LoadEarlyBody, FinishLoadEarly, BindLoadedNames, ResolveAlias, StartAlias, EnterAlias, FinishAlias, ResolveEnum, EnterEnum, NextEnumMember, StartFunctionSymbol, FinishFunctionSymbol, StartFunctionParams, StartFunctionParam, FinishFunctionParam, StartFunctionReturn, FinishFunctionReturn, StartReturnType, FinishAssertsReturn, FinishPredicateReturn, ResolveClass, OpenClassScope, CloseClassScope, ResolveClassMembers, StartClassField, FinishClassField, StartClassBases, FinishClassBases, FinishParentClass, FinishLinkParent, FinishImplemented, AddBase, DeclareMethods, FinishConstructor, FinishClassMethod, StartFieldMethod, FinishFieldMethod, StartTypedMethod, FinishTypedParam, FinishTypedMethod, FinishMethods, NextFieldDefault, ContinueFieldDefault, MakeFieldInit, FinishFieldInit, FinishVariants, FinishItemMethods, CompleteClass, FinishCompletion, StartInterfaceFields, StartInterfaceBase, FinishInterfaceBase, FinishInterfaceFields, ReportVariantPair, StartLinkClasses, FinishLinkClasses, StartLinkOverrides, FinishLinkOverrides, LinkOverride, StartDeclarationFile, FinishDeclarationFile, StartDeclaredAlias, FinishDeclaredAlias, StartDeclaredFunction, StartDeclaredClass, FinishDeclaredClass, StartDeclaredMember, FinishDeclaredField, StartDeclaredParam, FinishDeclaredParam, FinishDeclaredReturn, CheckExpr, CheckExprSlot, WriteCheckedSlot, ReportError, CheckExprKind, AfterConditionTest, AfterElseFirst, AfterThenSecond, AfterThenFirst, AfterElseSecond, FinishConditional, JoinConditionalBranches, AfterCastTarget, FinishCast, NextSequenceItem, AfterSequenceItem, FinishSequence, FinishOptionalChain, CheckIntLiteral, CheckTemplate, CheckArrayLiteral, CheckObjectLiteral, NextTemplatePart, AfterTemplatePart, AfterTemplateType, AfterComputedKey, AfterUnionNeeds, NextInferredKey, AfterInferredKey, NextKeyedProperty, NextNamedProperty, AfterUntargetedField, NextRecordProperty, AfterRecordSpread, NextSpreadProperty, AfterNamedProp, AfterSpreadProp, NextLiteralMember, AfterLiteralField, AfterLiteralMethods, WalkLiteralMethods, WalkLiteralMethod, AfterLiteralMethodReturn, MatchLiteralTarget, FinishPairLiteral, NextArrayElement, AfterLiteralElement, AfterSpreadElement, AfterSpreadMatch, CheckEnumObject, AfterEnumObjectResolved, RememberEnumObject, CheckField, CheckFieldCall, AfterFieldCallee, CheckObjectFieldTarget, CheckKeyedField, AfterTupleKey, AfterObjectKey, ObjectKeyReady, CheckName, LookupName, VariableTypeKnown, FinishVariableName, FinishFunctionName, ConstText, ToInt32, NoteUnsignedVar, CheckShift, CheckArithmetic, AfterArithmeticRight, AfterArithmeticLeft, AfterArithmeticOperands, FinishArithmetic, ResolveArithmetic, ArithmeticResult, FinishIntegerArithmetic, CheckWrappingDivisor, StartBits, FinishBits, FoldBinaryNode, CheckSign, FinishSign, SignOperandReady, CheckBitNot, FinishBitNot, CheckConcatenation, TrackMixedConcat, ToStringSlot, ToStringOperand, MarkTextCast, CheckMember, AfterListPart, AfterNodeMember, AfterProcessMember, AfterBytesStaticMember, AfterMemberObject, MemberOfCommonBase, AfterEnumResolved, CheckTupleMember, CheckTupleMethod, FinishTupleMethod, ReportTupleJoin, FinishTupleJoin, CheckUnionMember, CheckUnionFieldTarget, CheckUnionMethodCall, ResolveUnionMethodCall, ReportUnionMethodCall, CheckUnknownMember, CheckUnknownMethod, FinishUnknownStaticCall, FinishUnknownMethod, CheckIndex, CheckPosition, FinishPosition, AfterIndexListPart, AfterProcessEnvIndex, AfterIndexObject, FinishGenericIndex, WriteIndexType, FinishUnknownIndex, ReportUndefinedIndex, FinishPositionIndex, AfterEnumIndexResolved, FinishEnumIndex, EnumIndexValue, CheckUnary, CheckBinary, FinishTypeOf, FinishVoid, FinishNonNull, CheckInOperator, AfterInOperands, CheckEquality, AfterEqualityOperands, FinishEqualOperands, CheckComparison, AfterComparisonOperands, FinishComparison, CompareOperands, FinishNumberComparison, WalkTypeOfName, CheckAssign, CheckUpdate, CheckDeleteValue, AfterTargetAlias, AfterProcessAssign, AfterLogicalAssign, AfterNullishHolder, AfterRecordFieldNullish, AfterIndexNullish, AfterFieldNullish, AfterNullishVariable, FinishNullishVariable, FinishVarTarget, VarTargetTypeKnown, AnswerVarTarget, DiscardChecked, AfterIndexTargetObject, AfterGenericTarget, AfterTypedArrayPosition, AfterKeyedTarget, AfterArrayPosition, AfterMemberTargetObject, AfterAssignTarget, AfterInferredField, AfterPlainValue, AfterStringCompound, AfterNumericCompound, CheckAssignDivisor, CompoundFacts, AfterAssignValue, AssignedLength, LengthFacts, AssignedField, AfterUpdateTarget, AfterMemberDelete, AfterOtherDelete, AfterIndexDeleteObject, AfterIndexDeleteKey, CheckCall, WalkArgsLoosely, CheckArgSlot, CheckArguments, CheckNew, CheckValueCall, CheckDirectCall, AfterNodeCallTry, AfterResultStaticTry, AfterConsoleTry, AfterProcessTry, AfterBytesStaticTry, AfterReceiverObject, AfterResultMethodTry, AfterDateMethodTry, AfterMatchReceiver, AfterCommonReceiver, AfterSubtleTry, AfterClassMethodCall, AfterNamedCallTry, ScopedCall, AfterKnownFunctionType, AfterFunctionNameTry, AfterNotCallableName, AfterCalleeValue, AfterDirectReturnType, AfterSpreadRest, AfterNewLoad, AfterClassNew, AfterArrayElement, AfterArrayLength, CheckClassExpr, CheckClassStmt, CheckFieldsSet, CheckFieldTarget, CheckStaticTarget, CheckMethodCall, CheckInstanceOfOperator, CheckThis, CheckStaticMember, CheckClassMember, CheckOverloadMember, CheckClassRefMember, CheckClassStaticCall, CheckSuperCall, CheckSuperMethodCall, CheckValueNew, CheckClassNew, CheckOverloadCall, CheckClassValue, BindOuterTypeParams, DeclareThis, WalkClassBodies, AfterLateClassExpr, FinishClassExpr, WalkStaticFields, LeaveStaticFields, WalkStaticField, AfterStaticField, DecorateClass, LeaveClassContext, AfterLateBase, LeaveDeclaringClass, FinishLateClass, WalkClassFunction, WalkFieldStarts, WalkClassMethod, AfterClassMethodReturn, FinishClassBodies, NextLateClass, WalkLateClass, FinishLateClassWalk, AfterConstructorTypeArgument, AfterMethodVariants, AfterMemberFunctionType, AfterStaticVariants, AfterNameFunctionType, AfterClassRefStatic, AfterOverloadVariants, AfterInstanceOfLeft, InstanceOfRight, AfterInstanceOfRight, AfterMethodCallTry, AfterClassFieldCallee, AfterMethodChoice, AfterPlainMethodType, AfterGenericMethodCall, AfterBoundTypes, AfterGenericCallee, ChooseVariant, RankVariants, NextRankedVariant, AfterGenericParams, FinishSuperCall, AfterParentConstructorChoice, AfterSuperObject, AfterSuperEmitterTry, AfterSuperMethodChoice, AfterValueNewCallee, NextReflectedArg, AfterReflectedArg, AfterConstructorChoice, FinishClassNew, AfterOverloadChoice, AfterEventsFunctionTry, AfterStaticFieldCallee, AfterStaticMethodChoice, Decorate, NextHoistedDecorator, DeclareHoistedDecorator, AfterDescriptorDeclared, NextAppliedDecorator, AfterDecoratorApplied, RelinkClass, DropDiagnosticList, WalkInferredBody, CheckThisCall, CheckListMethod, CheckListArguments, WalkStatements, NoteUse, FindListPart, CheckFunctionExpr, CheckFunctionValue, WalkFunctionBody, AfterBodyTypeParams, AfterBodyThis, NextBodyParam, AfterDefaultedParam, AfterBodyStatements, EnterErrorWatch, LeaveErrorWatch, AfterPredicateEnd, FinishFunctionBody, WalkFunctionFromScratch, DeclareArgumentList, RememberArgumentList, AfterBlockTypes, EnterStatements, NextStatement, AfterStatement, GroupMember, AfterGroupMemberReturn, GroupUseOrder, LeaveGroup, NextClosureParam, AfterClosureParamType, AfterClosureReturnType, AfterClosureReturn, StartClosureBody, LeaveInitializerClosure, KeepConstantFlow, DeclareOwnName, AfterClosureType, CheckFunctionArgSlot, AfterLiteralCallback, AfterCallbackValue, LeaveCallback, CheckCallbackMethod, AfterExtraCallbackArgs, AfterReduceInit, FinishCallbackMethod, CheckArrayCallbackResult, NextListArgument, AfterListArgument, StartModuleBodies, WalkTopFunction, AfterTopReturnType, StartLiftedFunction, CheckYield, FindIterator, AsyncUserIterator, IterableOfSlot, ElementTypeOf, DestructuredIteratorSlot, FinishIteratorResult, FinishIteratorArgs, FinishIterableParam, AfterYieldValue, AfterYieldDelegate, FinishYield, AfterIterableUser, AfterBuiltinIterator, UserIterator, AfterSymbolIterator, AfterResultIterator, AfterAsyncSymbolIterator, IteratorOf, AfterIteratorValue, BuildIterateCall, FinishIterateSymbol, FinishIterateCall, NextValueOf, AfterNextMethods, AfterSoleIteratorReturn, CheckCondition, FinishCondition, StartBranch, AfterBranchLeaf, FinishBranchLeaf, AfterAssignedLeaf, AfterBranchLeft, AfterBranchRight, AfterBranchNot, CheckNot, CheckLogicalOperator, FinishBranchJoin, StartTestedValue, AfterTestedLeaf, StartLogical, AfterLogicalLeft, StartLogicalRight, FinishTestedLogical, FinishValueLogical, FinishLogicalType, StartNullish, AfterNullishLeft, StartNullishRight, FinishNullish, Convert, Coerce, CoerceSlot, CoerceIteratorFound, CoerceAsyncIteratorFound, ApparentSlot, ConvertSlot, AdaptLiteralSlot, ForceConversion, CheckGenericValue, CheckDecimalLiteralRange, CheckRegexLiteral, CheckAwait, CheckUsedValue, AddConditionFacts, WalkRedundantTests, MatchItems, WalkComparisonOperands, NeverOperands, CheckDateOperands, CheckDecimalComparison, CheckNullEquality, CheckJsonEquality, ReportDecimalMix, CheckDecimalArithmetic, DateToTime, RegexToString, DateToString, BytesToString, NoteReflectedConversion, NoteConstructorFlow, CheckNodeName, FunctionTypeOf, NoteHttpsValue, CheckJsonMember, CheckResultMember, CheckRegexMember, CheckMatchMember, CheckDateMember, CheckBytesMember, CheckCryptoMember, CheckRuntimeMember, CheckRegExpStaticMember, CheckWebCryptoMember, CheckNodeMember, CheckProcessMember, CheckBytesStaticMember, CheckIntlMember, CheckMatchIndex, CheckJsonIndex, CheckBytesIndex, CheckProcessEnvIndex, CheckBytesUnionMember, ProcessAliasSlot, MarkFused, CalledFunction, ResolveWeakRefType, InstantiateCallTarget, SegmentsArraySlot, NotePredicateExit, NoteInheritedReturn, CheckUsedCallbackValue, CheckByteCallbackResult, WalkForAwait, NoteErrorsHandled, FindCallCycles, NoteAssigned, CheckProcessAssign, CheckJsonTarget, CheckRuntimeTarget, WalkDecimalAssign, WalkBytesStore, NoteArrayResized, NoteIncremented, RequireNonNegative, CheckNodeCall, CheckPromiseStatic, CheckResultStatic, CheckJsonStatic, CheckArrayIsArray, CheckJsonIsJson, CheckReflectCall, CheckConsoleCall, CheckProcessCall, CheckBitCall, CheckMathCall, CheckRegExpStatic, CheckIntlCall, CheckLocaleStatic, CheckIntlStatic, CheckDecimalStatic, CheckX509Parse, CheckWebCryptoCall, CheckBytesStatic, CheckNumberStatic, CheckObjectCall, CheckIteratorFrom, CheckArrayFrom, CheckMapStatic, CheckRuntimeMethod, CheckResultMethod, CheckJsonMethod, CheckRegexMethod, CheckDateMethod, CheckDateFormatMethod, CheckIntlMethod, CheckCryptoMethod, CheckWeakRefMethod, CheckBytesMethod, CheckPromiseMethod, CheckTimerMethod, CheckSubtleCall, WalkHeadersCall, CheckStringLocale, CheckNumberLocale, CheckDecimalMethod, CheckIteratorMethod, CheckDictMethod, CheckStringMethod, CheckArrayMethod, CheckNumberMethod, CheckLibCall, CheckResultCall, CheckJsonGlobal, CheckAsyncGlobal, CheckGlobalCall, CheckEventsLibraryCall, CheckStreamLibraryCall, NoteHttpsCall, CheckGenericCall, CheckCryptoNew, CheckLocaleNew, CheckDateFormatNew, CheckIntlNew, NoteLibraryInstance, CheckRegExpConstructor, CheckDateNew, CheckPromiseNew, CheckWeakRefNew, CheckBytesNew, FindMethodCycles, CheckJsonObjectLit, CheckJsonArrayLit, WalkExternal, AddByteCallbackFacts, AddIndexCallbackFacts, BeginPredicate, EndPredicate, EnterReturnBody, LeaveReturnBody, InferFromBody, InferCycle, EnterHomeModule, NoteTlsMethod, CheckStatsDate, ReportEmitterMethodValue, CheckFsClassMethod, CheckStreamCall, CheckEmitterCall, CheckEventTargetCall, CheckEventsFunction, CheckStreamFrom, CheckGenericNew, SubstituteValueType, ReportInstance, WriteDesignRecords, BuildVtable, NoteRegexVariable, LeaveBranch, MarkUnreachable, AfterExprStmt, FinishExprStmt, WalkBody, WalkVarDecl, CloseScope, NextDeclarator, AfterDeclaredType, AfterConstFunctionSymbol, FinishConstFunction, AfterEarlyTimer, AfterInit, DestructureValue, AfterDestructuredIterator, RememberValueDeclarator, WalkIf, WalkSwitch, AfterIfCondition, AfterThenBranch, FinishIf, AfterSwitchValue, NextCaseTest, AfterCaseTest, AddCaseFacts, FinishConstantCase, FinishCaseTest, NextCaseBody, WalkCaseStatement, AfterCaseBody, FinishSwitch, DeclareBlockTypes, DeclareMethodReturn, FinishMethodReturn, DeclareVariableSlot, DeclareVariable, WalkWhile, WalkDoWhile, WalkFor, WalkForOf, WalkLabeled, CheckJump, FinishLabeledBlock, LeaveLoopBody, RestoreLoopFlow, AfterWhileCondition, AfterDoWhileBody, AfterDoWhileCondition, AfterForInit, AfterForCondition, AfterForBody, AfterForStep, FinishFor, AfterForAwait, AfterForOfSource, AfterIterable, AfterForInObject, BindForOf, AfterForOfBinding, WalkReturn, AfterUnlistenedErrors, AfterReturnValue, AfterTestedReturn, AfterPredicateReturn, AfterPredicateFacts, AfterValueCoerce, AfterConstructorValue, AfterInferredReturn, AfterAsyncGeneratorReturn, CheckDictIn, CheckDictMember, CheckDictIndex, CheckRecordKeySlot, FinishRecordKey, FinishDictIndexRead, FinishDictIndexError, CheckDictTarget, FinishDictTarget, CheckRecordNullishAssign, AfterNullishRecordObject, AfterNullishRecordKey, FinishNullishRecord, CheckDictDelete, FinishDictDelete, FinishDictTypeAnswer, CheckDictNew, AfterDictNewTypeArgs, NextPairPart, AfterPairPart, FinishPairsDict, AfterDictSource, FinishDictSource>;
+struct CalledFunction {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CALLED_FUNCTION;
+};
+
+struct NoteAssigned {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_ASSIGNED;
+  const VarSymbol *variable;
+  const Expr *value;
+};
+
+struct NoteIncremented {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_INCREMENTED;
+  const VarSymbol *variable;
+  int64_t step;
+};
+
+struct NoteArrayResized {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_ARRAY_RESIZED;
+  const Type *array;
+  Resize resize;
+  const VarSymbol *except;
+};
+
+struct BeginPredicate {
+  static constexpr CheckTaskKind kind = CheckTaskKind::BEGIN_PREDICATE;
+  FunctionDecl *functionDecl;
+};
+
+struct EndPredicate {
+  static constexpr CheckTaskKind kind = CheckTaskKind::END_PREDICATE;
+  FunctionDecl *functionDecl;
+};
+
+struct NotePredicateExit {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_PREDICATE_EXIT;
+  const Expr *value;
+  Flow whenTrue;
+  Flow whenFalse;
+};
+
+struct BuildPredicate {
+  static constexpr CheckTaskKind kind = CheckTaskKind::BUILD_PREDICATE;
+  const FuncSymbol *function;
+};
+
+struct StartPredicateCopy {
+  static constexpr CheckTaskKind kind = CheckTaskKind::START_PREDICATE_COPY;
+  FunctionDecl *functionDecl;
+};
+
+struct AddByteCallbackFacts {
+  static constexpr CheckTaskKind kind = CheckTaskKind::ADD_BYTE_CALLBACK_FACTS;
+  FunctionDecl *functionDecl;
+};
+
+struct AddIndexCallbackFacts {
+  static constexpr CheckTaskKind kind = CheckTaskKind::ADD_INDEX_CALLBACK_FACTS;
+  FunctionDecl *functionDecl;
+};
+
+struct CheckByteCallbackResult {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BYTE_CALLBACK_RESULT;
+  const FunctionDecl *functionDecl;
+  Expr *value;
+};
+
+struct AddConditionFacts {
+  static constexpr CheckTaskKind kind = CheckTaskKind::ADD_CONDITION_FACTS;
+  const Expr *cond;
+};
+
+struct FinishConditionFacts {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_CONDITION_FACTS;
+  const Expr *cond;
+};
+
+struct WalkFreshCopy {
+  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_FRESH_COPY;
+  FunctionDecl *functionDecl;
+};
+
+struct WalkBodyNow {
+  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_BODY_NOW;
+  FunctionDecl *functionDecl;
+};
+
+struct FinishFilterResult {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_FILTER_RESULT;
+  ArrayCallbackShape shape;
+};
+
+struct FinishFilterDefined {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_FILTER_DEFINED;
+  ArrayCallbackShape shape;
+};
+
+using CheckTask = Union<
+    UseModule, DeclareClassTypeParams, BindClassTypeParams, DeclareFunctionTypeParams,
+    BindFunctionTypeParams, InstantiateOwnAlias, SubstituteInstanceFields, InstantiateEmitterParent,
+    MarkOverridden, FindStreamHookParams, WalkHookParams, WalkIterableParam, WalkGeneratorReturn,
+    WalkAsyncReturn, WalkStmt, ReportUnlistenedErrors, EnterLoadBody, LeaveLoadBody,
+    ImportBuiltinModule, InstantiateClassType, InstantiateAlias, SubstituteType, FindIntlType,
+    ResolveResultType, ResolveIteratorType, ResolveDictType, ResolvePromiseType,
+    MakeMethodDescriptor, ResolveConstructorType, CheckConstructorArgs, ClassValueType,
+    LiteralShape, CreatedType, InferReturnType, ReturnTypeOf, ResolveTypeRef, ResolveInnerTypeRef,
+    ResolveObjectFields, WriteResolvedType, ResolveTypeAnswer, FinishTypeUse, FinishArrayType,
+    NextUnionMember, AfterUnionMember, FinishAliasType, FinishEnumType, FinishEnumMember,
+    FinishIntlType, NextTypeArgument, AfterTypeArgument, FinishDescriptor, FinishInstanceType,
+    NextUtilityOperand, AfterUtilityOperand, AfterUtilitySignature, NextFunctionParam,
+    AfterFunctionParam, FinishFunctionType, FinishAssertsType, FinishTupleType, NextObjectField,
+    AfterObjectField, AfterObjectSignature, EvalTypeOp, EvalKeyOf, EvalIndexed, EvalSpread,
+    StartKeyOf, AfterKeyOfOperand, AfterKeyOfEval, StartIndexed, AfterIndexedOperands,
+    AfterIndexedEval, EvalMapped, NextMappedKey, AfterMappedValue, AfterMappedRename, StartMapped,
+    AfterMappedKeys, AfterMappedSource, AfterMappedParts, StartIntersection, NextIntersectionPart,
+    AfterIntersectionPart, StartConditional, AfterConditionalCheck, AfterInferConstraint,
+    AfterConditionalPattern, ChooseBranch, CloseConditionalScope, AfterDistributedMember,
+    EvalConditional, AfterEvalConditional, EvalFiltered, FinishFiltered, PrepareExpectation,
+    FinishBranches, StartTemplate, AfterTemplateHole, FinishTemplate, EvalTemplate, EvalStringCase,
+    EvalFunctionPart, StartTypeOf, FindTypeOfCandidates, AfterTypeOfCandidate, AfterTypeOfMember,
+    AfterFunctionValue, FinishDeclaredFunctionValue, SignatureForUtility, ContinueSignature,
+    AfterErasedReturn, ResolveImport, StartTopLevel, NextTopLevelItem, FinishTopLevel,
+    CloseTopLevel, StartLoadEarly, LoadEarlyBody, FinishLoadEarly, BindLoadedNames, ResolveAlias,
+    StartAlias, EnterAlias, FinishAlias, ResolveEnum, EnterEnum, NextEnumMember,
+    StartFunctionSymbol, FinishFunctionSymbol, StartFunctionParams, StartFunctionParam,
+    FinishFunctionParam, StartFunctionReturn, FinishFunctionReturn, StartReturnType,
+    FinishAssertsReturn, FinishPredicateReturn, ResolveClass, OpenClassScope, CloseClassScope,
+    ResolveClassMembers, StartClassField, FinishClassField, StartClassBases, FinishClassBases,
+    FinishParentClass, FinishLinkParent, FinishImplemented, AddBase, DeclareMethods,
+    FinishConstructor, FinishClassMethod, StartFieldMethod, FinishFieldMethod, StartTypedMethod,
+    FinishTypedParam, FinishTypedMethod, FinishMethods, NextFieldDefault, ContinueFieldDefault,
+    MakeFieldInit, FinishFieldInit, FinishVariants, FinishItemMethods, CompleteClass,
+    FinishCompletion, StartInterfaceFields, StartInterfaceBase, FinishInterfaceBase,
+    FinishInterfaceFields, ReportVariantPair, StartLinkClasses, FinishLinkClasses,
+    StartLinkOverrides, FinishLinkOverrides, LinkOverride, StartDeclarationFile,
+    FinishDeclarationFile, StartDeclaredAlias, FinishDeclaredAlias, StartDeclaredFunction,
+    StartDeclaredClass, FinishDeclaredClass, StartDeclaredMember, FinishDeclaredField,
+    StartDeclaredParam, FinishDeclaredParam, FinishDeclaredReturn, CheckExpr, CheckExprSlot,
+    WriteCheckedSlot, ReportError, CheckExprKind, AfterConditionTest, AfterElseFirst,
+    AfterThenSecond, AfterThenFirst, AfterElseSecond, FinishConditional, JoinConditionalBranches,
+    AfterCastTarget, FinishCast, NextSequenceItem, AfterSequenceItem, FinishSequence,
+    FinishOptionalChain, CheckIntLiteral, CheckTemplate, CheckArrayLiteral, CheckObjectLiteral,
+    NextTemplatePart, AfterTemplatePart, AfterTemplateType, AfterComputedKey, AfterUnionNeeds,
+    NextInferredKey, AfterInferredKey, NextKeyedProperty, NextNamedProperty, AfterUntargetedField,
+    NextRecordProperty, AfterRecordSpread, NextSpreadProperty, AfterNamedProp, AfterSpreadProp,
+    NextLiteralMember, AfterLiteralField, AfterLiteralMethods, WalkLiteralMethods,
+    WalkLiteralMethod, AfterLiteralMethodReturn, MatchLiteralTarget, FinishPairLiteral,
+    NextArrayElement, AfterLiteralElement, AfterSpreadElement, AfterSpreadMatch, CheckEnumObject,
+    AfterEnumObjectResolved, RememberEnumObject, CheckField, CheckFieldCall, AfterFieldCallee,
+    CheckObjectFieldTarget, CheckKeyedField, AfterTupleKey, AfterObjectKey, ObjectKeyReady,
+    CheckName, LookupName, VariableTypeKnown, FinishVariableName, FinishFunctionName, ConstText,
+    ToInt32, NoteUnsignedVar, CheckShift, CheckArithmetic, AfterArithmeticRight,
+    AfterArithmeticLeft, AfterArithmeticOperands, FinishArithmetic, ResolveArithmetic,
+    ArithmeticResult, FinishIntegerArithmetic, CheckWrappingDivisor, StartBits, FinishBits,
+    FoldBinaryNode, CheckSign, FinishSign, SignOperandReady, CheckBitNot, FinishBitNot,
+    CheckConcatenation, TrackMixedConcat, ToStringSlot, ToStringOperand, MarkTextCast, CheckMember,
+    AfterListPart, AfterNodeMember, AfterProcessMember, AfterBytesStaticMember, AfterMemberObject,
+    MemberOfCommonBase, AfterEnumResolved, CheckTupleMember, CheckTupleMethod, FinishTupleMethod,
+    ReportTupleJoin, FinishTupleJoin, CheckUnionMember, CheckUnionFieldTarget, CheckUnionMethodCall,
+    ResolveUnionMethodCall, ReportUnionMethodCall, CheckUnknownMember, CheckUnknownMethod,
+    FinishUnknownStaticCall, FinishUnknownMethod, CheckIndex, CheckPosition, FinishPosition,
+    AfterIndexListPart, AfterProcessEnvIndex, AfterIndexObject, FinishGenericIndex, WriteIndexType,
+    FinishUnknownIndex, ReportUndefinedIndex, FinishPositionIndex, AfterEnumIndexResolved,
+    FinishEnumIndex, EnumIndexValue, CheckUnary, CheckBinary, FinishTypeOf, FinishVoid,
+    FinishNonNull, CheckInOperator, AfterInOperands, CheckEquality, AfterEqualityOperands,
+    FinishEqualOperands, CheckComparison, AfterComparisonOperands, FinishComparison,
+    CompareOperands, FinishNumberComparison, WalkTypeOfName, CheckAssign, CheckUpdate,
+    CheckDeleteValue, AfterTargetAlias, AfterProcessAssign, AfterLogicalAssign, AfterNullishHolder,
+    AfterRecordFieldNullish, AfterIndexNullish, AfterFieldNullish, AfterNullishVariable,
+    FinishNullishVariable, FinishVarTarget, VarTargetTypeKnown, AnswerVarTarget, DiscardChecked,
+    AfterIndexTargetObject, AfterGenericTarget, AfterTypedArrayPosition, AfterKeyedTarget,
+    AfterArrayPosition, AfterMemberTargetObject, AfterAssignTarget, AfterInferredField,
+    AfterPlainValue, AfterStringCompound, AfterNumericCompound, CheckAssignDivisor, CompoundFacts,
+    AfterAssignValue, AssignedLength, LengthFacts, AssignedField, AfterUpdateTarget,
+    AfterMemberDelete, AfterOtherDelete, AfterIndexDeleteObject, AfterIndexDeleteKey, CheckCall,
+    WalkArgsLoosely, CheckArgSlot, CheckArguments, CheckNew, CheckValueCall, CheckDirectCall,
+    AfterNodeCallTry, AfterResultStaticTry, AfterConsoleTry, AfterProcessTry, AfterBytesStaticTry,
+    AfterReceiverObject, AfterResultMethodTry, AfterDateMethodTry, AfterMatchReceiver,
+    AfterCommonReceiver, AfterSubtleTry, AfterClassMethodCall, AfterNamedCallTry, ScopedCall,
+    AfterKnownFunctionType, AfterFunctionNameTry, AfterNotCallableName, AfterCalleeValue,
+    AfterDirectReturnType, AfterSpreadRest, AfterNewLoad, AfterClassNew, AfterArrayElement,
+    AfterArrayLength, CheckClassExpr, CheckClassStmt, CheckFieldsSet, CheckFieldTarget,
+    CheckStaticTarget, CheckMethodCall, CheckInstanceOfOperator, CheckThis, CheckStaticMember,
+    CheckClassMember, CheckOverloadMember, CheckClassRefMember, CheckClassStaticCall,
+    CheckSuperCall, CheckSuperMethodCall, CheckValueNew, CheckClassNew, CheckOverloadCall,
+    CheckClassValue, BindOuterTypeParams, DeclareThis, WalkClassBodies, AfterLateClassExpr,
+    FinishClassExpr, WalkStaticFields, LeaveStaticFields, WalkStaticField, AfterStaticField,
+    DecorateClass, LeaveClassContext, AfterLateBase, LeaveDeclaringClass, FinishLateClass,
+    WalkClassFunction, WalkFieldStarts, WalkClassMethod, AfterClassMethodReturn, FinishClassBodies,
+    NextLateClass, WalkLateClass, FinishLateClassWalk, AfterConstructorTypeArgument,
+    AfterMethodVariants, AfterMemberFunctionType, AfterStaticVariants, AfterNameFunctionType,
+    AfterClassRefStatic, AfterOverloadVariants, AfterInstanceOfLeft, InstanceOfRight,
+    AfterInstanceOfRight, AfterMethodCallTry, AfterClassFieldCallee, AfterMethodChoice,
+    AfterPlainMethodType, AfterGenericMethodCall, AfterBoundTypes, AfterGenericCallee,
+    ChooseVariant, RankVariants, NextRankedVariant, AfterGenericParams, FinishSuperCall,
+    AfterParentConstructorChoice, AfterSuperObject, AfterSuperEmitterTry, AfterSuperMethodChoice,
+    AfterValueNewCallee, NextReflectedArg, AfterReflectedArg, AfterConstructorChoice,
+    FinishClassNew, AfterOverloadChoice, AfterEventsFunctionTry, AfterStaticFieldCallee,
+    AfterStaticMethodChoice, Decorate, NextHoistedDecorator, DeclareHoistedDecorator,
+    AfterDescriptorDeclared, NextAppliedDecorator, AfterDecoratorApplied, RelinkClass,
+    DropDiagnosticList, WalkInferredBody, CheckThisCall, CheckListMethod, CheckListArguments,
+    WalkStatements, NoteUse, FindListPart, CheckFunctionExpr, CheckFunctionValue, WalkFunctionBody,
+    AfterBodyTypeParams, AfterBodyThis, NextBodyParam, AfterDefaultedParam, AfterBodyStatements,
+    EnterErrorWatch, LeaveErrorWatch, AfterPredicateEnd, FinishFunctionBody,
+    WalkFunctionFromScratch, DeclareArgumentList, RememberArgumentList, AfterBlockTypes,
+    EnterStatements, NextStatement, AfterStatement, GroupMember, AfterGroupMemberReturn,
+    GroupUseOrder, LeaveGroup, NextClosureParam, AfterClosureParamType, AfterClosureReturnType,
+    AfterClosureReturn, StartClosureBody, LeaveInitializerClosure, KeepConstantFlow, DeclareOwnName,
+    AfterClosureType, CheckFunctionArgSlot, AfterLiteralCallback, AfterCallbackValue, LeaveCallback,
+    CheckCallbackMethod, AfterExtraCallbackArgs, AfterReduceInit, FinishCallbackMethod,
+    CheckArrayCallbackResult, NextListArgument, AfterListArgument, StartModuleBodies,
+    WalkTopFunction, AfterTopReturnType, StartLiftedFunction, CheckYield, FindIterator,
+    AsyncUserIterator, IterableOfSlot, ElementTypeOf, DestructuredIteratorSlot,
+    FinishIteratorResult, FinishIteratorArgs, FinishIterableParam, AfterYieldValue,
+    AfterYieldDelegate, FinishYield, AfterIterableUser, AfterBuiltinIterator, UserIterator,
+    AfterSymbolIterator, AfterResultIterator, AfterAsyncSymbolIterator, IteratorOf,
+    AfterIteratorValue, BuildIterateCall, FinishIterateSymbol, FinishIterateCall, NextValueOf,
+    AfterNextMethods, AfterSoleIteratorReturn, CheckCondition, FinishCondition, StartBranch,
+    AfterBranchLeaf, FinishBranchLeaf, AfterAssignedLeaf, AfterBranchLeft, AfterBranchRight,
+    AfterBranchNot, CheckNot, CheckLogicalOperator, FinishBranchJoin, StartTestedValue,
+    AfterTestedLeaf, StartLogical, AfterLogicalLeft, StartLogicalRight, FinishTestedLogical,
+    FinishValueLogical, FinishLogicalType, StartNullish, AfterNullishLeft, StartNullishRight,
+    FinishNullish, Convert, Coerce, CoerceSlot, CoerceIteratorFound, CoerceAsyncIteratorFound,
+    ApparentSlot, ConvertSlot, AdaptLiteralSlot, ForceConversion, CheckGenericValue,
+    CheckDecimalLiteralRange, CheckRegexLiteral, CheckAwait, CheckUsedValue, WalkRedundantTests,
+    MatchItems, WalkComparisonOperands, NeverOperands, CheckDateOperands, CheckDecimalComparison,
+    CheckNullEquality, CheckJsonEquality, ReportDecimalMix, CheckDecimalArithmetic, DateToTime,
+    RegexToString, DateToString, BytesToString, NoteReflectedConversion, NoteConstructorFlow,
+    CheckNodeName, FunctionTypeOf, NoteHttpsValue, CheckJsonMember, CheckResultMember,
+    CheckRegexMember, CheckMatchMember, CheckDateMember, CheckBytesMember, CheckCryptoMember,
+    CheckRuntimeMember, CheckRegExpStaticMember, CheckWebCryptoMember, CheckNodeMember,
+    CheckProcessMember, CheckBytesStaticMember, CheckIntlMember, CheckMatchIndex, CheckJsonIndex,
+    CheckBytesIndex, CheckProcessEnvIndex, CheckBytesUnionMember, ProcessAliasSlot, MarkFused,
+    ResolveWeakRefType, InstantiateCallTarget, SegmentsArraySlot, NoteInheritedReturn,
+    CheckUsedCallbackValue, WalkForAwait, NoteErrorsHandled, FindCallCycles, CheckProcessAssign,
+    CheckJsonTarget, CheckRuntimeTarget, WalkDecimalAssign, WalkBytesStore, CheckNodeCall,
+    CheckPromiseStatic, CheckResultStatic, CheckJsonStatic, CheckArrayIsArray, CheckJsonIsJson,
+    CheckReflectCall, CheckConsoleCall, CheckProcessCall, CheckBitCall, CheckMathCall,
+    CheckRegExpStatic, CheckIntlCall, CheckLocaleStatic, CheckIntlStatic, CheckDecimalStatic,
+    CheckX509Parse, CheckWebCryptoCall, CheckBytesStatic, CheckNumberStatic, CheckObjectCall,
+    CheckIteratorFrom, CheckArrayFrom, CheckMapStatic, CheckRuntimeMethod, CheckResultMethod,
+    CheckJsonMethod, CheckRegexMethod, CheckDateMethod, CheckDateFormatMethod, CheckIntlMethod,
+    CheckCryptoMethod, CheckWeakRefMethod, CheckBytesMethod, CheckPromiseMethod, CheckTimerMethod,
+    CheckSubtleCall, WalkHeadersCall, CheckStringLocale, CheckNumberLocale, CheckDecimalMethod,
+    CheckIteratorMethod, CheckDictMethod, CheckStringMethod, CheckArrayMethod, CheckNumberMethod,
+    CheckLibCall, CheckResultCall, CheckJsonGlobal, CheckAsyncGlobal, CheckGlobalCall,
+    CheckEventsLibraryCall, CheckStreamLibraryCall, NoteHttpsCall, CheckGenericCall, CheckCryptoNew,
+    CheckLocaleNew, CheckDateFormatNew, CheckIntlNew, NoteLibraryInstance, CheckRegExpConstructor,
+    CheckDateNew, CheckPromiseNew, CheckWeakRefNew, CheckBytesNew, FindMethodCycles,
+    CheckJsonObjectLit, CheckJsonArrayLit, WalkExternal, EnterReturnBody, LeaveReturnBody,
+    InferFromBody, InferCycle, EnterHomeModule, NoteTlsMethod, CheckStatsDate,
+    ReportEmitterMethodValue, CheckFsClassMethod, CheckStreamCall, CheckEmitterCall,
+    CheckEventTargetCall, CheckEventsFunction, CheckStreamFrom, CheckGenericNew,
+    SubstituteValueType, ReportInstance, WriteDesignRecords, BuildVtable, NoteRegexVariable,
+    LeaveBranch, MarkUnreachable, AfterExprStmt, FinishExprStmt, WalkBody, WalkVarDecl, CloseScope,
+    NextDeclarator, AfterDeclaredType, AfterConstFunctionSymbol, FinishConstFunction,
+    AfterEarlyTimer, AfterInit, DestructureValue, AfterDestructuredIterator,
+    RememberValueDeclarator, WalkIf, WalkSwitch, AfterIfCondition, AfterThenBranch, FinishIf,
+    AfterSwitchValue, NextCaseTest, AfterCaseTest, AddCaseFacts, FinishConstantCase, FinishCaseTest,
+    NextCaseBody, WalkCaseStatement, AfterCaseBody, FinishSwitch, DeclareBlockTypes,
+    DeclareMethodReturn, FinishMethodReturn, DeclareVariableSlot, DeclareVariable, WalkWhile,
+    WalkDoWhile, WalkFor, WalkForOf, WalkLabeled, CheckJump, FinishLabeledBlock, LeaveLoopBody,
+    RestoreLoopFlow, AfterWhileCondition, AfterDoWhileBody, AfterDoWhileCondition, AfterForInit,
+    AfterForCondition, AfterForBody, AfterForStep, FinishFor, AfterForAwait, AfterForOfSource,
+    AfterIterable, AfterForInObject, BindForOf, AfterForOfBinding, WalkReturn,
+    AfterUnlistenedErrors, AfterReturnValue, AfterTestedReturn, AfterPredicateReturn,
+    AfterPredicateFacts, AfterValueCoerce, AfterConstructorValue, AfterInferredReturn,
+    AfterAsyncGeneratorReturn, CheckDictIn, CheckDictMember, CheckDictIndex, CheckRecordKeySlot,
+    FinishRecordKey, FinishDictIndexRead, FinishDictIndexError, CheckDictTarget, FinishDictTarget,
+    CheckRecordNullishAssign, AfterNullishRecordObject, AfterNullishRecordKey, FinishNullishRecord,
+    CheckDictDelete, FinishDictDelete, FinishDictTypeAnswer, CheckDictNew, AfterDictNewTypeArgs,
+    NextPairPart, AfterPairPart, FinishPairsDict, AfterDictSource, FinishDictSource, CalledFunction,
+    NoteAssigned, NoteIncremented, NoteArrayResized, BeginPredicate, EndPredicate,
+    NotePredicateExit, BuildPredicate, StartPredicateCopy, AddByteCallbackFacts,
+    AddIndexCallbackFacts, CheckByteCallbackResult, AddConditionFacts, FinishConditionFacts,
+    WalkFreshCopy, WalkBodyNow, FinishFilterResult, FinishFilterDefined>;
 
 }

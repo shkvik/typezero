@@ -3,6 +3,7 @@
 #include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
 #include "compiler/program/library/intl/intl_type_name_table/intl_type_name_table.h"
 #include "compiler/semantic/code/functions/code_functions_registry_errors.h"
+#include "compiler/semantic/flow_v2/proofs/flow_proofs_errors.h"
 #include "compiler/semantic/library/decimal/decimal_checker/decimal_checker_errors.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -358,8 +359,12 @@ void NamedCalls::afterArrayLength(const AfterArrayLength &task) {
     this->state.diagnostics.error(expr->loc(), zero.error().message);
   }
   auto what = ErrorTextNewArray::length();
-
-  return this->state.walk.tasks.pushTask(RequireNonNegative{.value = expr->args[0], .what = what});
+  auto between = this->state.flow.proofs.requireBetween(expr->args[0], 0, std::nullopt, what);
+  bool isReported =
+      between.isErr() && between.error().code != FlowProofsRequireBetweenErrorCode::EXEMPT;
+  if (isReported) {
+    return this->state.diagnostics.error(expr->args[0]->loc(), between.error().message);
+  }
 }
 
 NamedCalls::ResultTypeArgsUsable
