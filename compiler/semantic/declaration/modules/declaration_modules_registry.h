@@ -7,12 +7,6 @@
 
 namespace tz {
 
-class StmtChecker;
-class SemanticParts;
-class EmitterChecker;
-class ReturnInferrer;
-class BuiltinModuleChecker;
-
 enum class ExportStepKind { BAD_SOURCE, NAMED, STAR };
 
 struct BadSourceStep {
@@ -51,21 +45,29 @@ public:
   using ResultExportTarget = Result<ModuleBinding, DeclarationModulesRegistryFindExportError>;
   using ResultSourceIsLoaded = Result<const NameExpr *, DeclarationModulesRegistryCheckLoadedError>;
 
-  DeclarationModulesRegistry(SemanticState &owner, SemanticParts &all);
+  explicit DeclarationModulesRegistry(SemanticState &owner);
 
   void bindImports();
   void useModule(Module *module);
   void declareNames(Module *module);
   void resolveImports(Module *module);
+  void closeTopLevel(const CloseTopLevel &task);
+  void loadEarlyBody(const LoadEarlyBody &task);
+  void resolveImport(const ResolveImport &task);
+  void startTopLevel(const StartTopLevel &task);
+  void finishTopLevel(const FinishTopLevel &task);
+  void startLoadEarly(const StartLoadEarly &task);
   void noteImportsInFunctions(SourceFile &program);
+  void bindLoadedNames(const BindLoadedNames &task);
+  void finishLoadEarly(const FinishLoadEarly &task);
+  void nextTopLevelItem(const NextTopLevelItem &task);
   void enterHomeModule(const FunctionDecl *functionDecl);
   void bindAllImports(const std::vector<Module *> &modules);
-  void loadAllTopLevels(const std::vector<Module *> &modules);
 
 
-  ScopeEntry lookupValue(llvm::StringRef name);
   ResultSourceIsLoaded checkLoaded(const NameExpr *name);
   const llvm::StringMap<ModuleExport> &exportsOf(Module *module);
+  std::optional<StartLoadEarly> findEarlyLoad(llvm::StringRef name) const;
   FunctionDecl *cycleCallee(FunctionDecl *functionDecl, llvm::StringRef name);
 
 private:
@@ -86,10 +88,8 @@ private:
   void runExportStep(std::vector<ExportsFrame> &frames);
   void applyExportStep(Module *module, const ExportStep &step);
   void exportName(Module *module, const NamedExportStep &step);
-  void loadTopLevel(Module *module, llvm::StringRef until = {});
   void addDeclaredItem(ModuleState &here, const Stmt *item) const;
   void mergeStarExport(Module *module, const StarExportStep &star);
-  void resolveImport(Module *module, const ImportDecl &importDecl);
   void startExports(std::vector<ExportsFrame> &frames, Module *module);
   void bindImportedType(llvm::StringRef alias, const ModuleBinding &target);
   void addDeclared(ModuleState &here, llvm::StringRef name, llvm::SMLoc loc) const;
@@ -100,7 +100,8 @@ private:
                    const DeclarationModulesRegistryFreeNameError &error);
 
 
-  bool loadEarly(Module *source, llvm::StringRef name);
+  bool isLoadable(Module *source, llvm::StringRef name) const;
+  bool isDeclaringName(const Stmt *item, llvm::StringRef name) const;
   bool isImportedByName(const Module *module, llvm::StringRef alias) const;
   bool isNamedIn(const ImportDecl &importDecl, llvm::StringRef alias) const;
   bool isFromBuiltinModule(const Module *module, llvm::StringRef alias) const;
@@ -108,8 +109,8 @@ private:
 
   Module *unreadyModule(const ExportsFrame &frame);
   Module *stepNeeds(Module *module, const ExportStep &step);
-  Module *laterSource(llvm::StringRef name, llvm::StringRef &declared);
   Module *namedExportNeeds(Module *module, const NamedExportStep &step);
+  Module *laterSource(llvm::StringRef name, llvm::StringRef &declared) const;
 
 
   ResultExportTarget findExport(Module *from, llvm::StringRef path, const ModuleName &name);
@@ -142,10 +143,6 @@ private:
                                 const ExportAll *all, const ModuleBinding &target) const;
 
   SemanticState &state;
-  StmtChecker *stmtChecker = nullptr;
-  EmitterChecker *emitterChecker = nullptr;
-  ReturnInferrer *returnInferrer = nullptr;
-  BuiltinModuleChecker *builtinModuleChecker = nullptr;
 };
 
 }

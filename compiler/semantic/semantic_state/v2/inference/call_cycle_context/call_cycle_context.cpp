@@ -23,8 +23,8 @@ std::vector<FuncSymbol *> CallCycleContext::getCycleOf(const FuncSymbol *functio
   return this->cycles[found->second];
 }
 
-void CallCycleContext::rememberDeclaredFunctions(std::vector<FunctionDecl *> functions) {
-  this->declaredFunctions = std::move(functions);
+void CallCycleContext::addDeclaredFunction(FunctionDecl *functionDecl) {
+  this->declaredFunctions.push_back(functionDecl);
 }
 
 std::vector<FunctionDecl *> CallCycleContext::getDeclaredFunctions() const {

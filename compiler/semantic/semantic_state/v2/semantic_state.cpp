@@ -1,5 +1,6 @@
 #include "compiler/semantic/semantic_state/v2/semantic_state.h"
 #include "compiler/program/ast/ast.h"
+#include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/program/library/bytes/buffer_export_table/buffer_export_table.h"
 
 using llvm::dyn_cast;
@@ -87,6 +88,12 @@ TypeAliasDecl *SemanticState::findModuleExport(const NodeName &nodeName) const {
   }
 
   return declarations.findModuleAlias(nodeName.name);
+}
+
+bool SemanticState::isIterableRef(const TypeRef &ref) const {
+  return ref.kind() == TypeRefKind::GENERIC_REF &&
+         TypeNameTable::isName(ref.name, TypeName::ITERABLE) &&
+         this->findTypeDeclaration(ref.name) == nullptr;
 }
 
 bool SemanticState::isUnshadowedGlobal(const NameExpr *name) const {

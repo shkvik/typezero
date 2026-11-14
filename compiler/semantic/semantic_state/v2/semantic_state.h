@@ -25,6 +25,7 @@ public:
   void restoreBody(Checkpoint saved);
 
 
+  bool isIterableRef(const TypeRef &ref) const;
   bool isUnshadowedGlobal(const NameExpr *name) const;
   bool isGlobalName(const Expr *expr, GlobalName global) const;
   bool isGlobalMember(const MemberExpr *member, GlobalMember which) const;

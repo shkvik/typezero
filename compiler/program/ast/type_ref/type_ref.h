@@ -1,5 +1,7 @@
 #pragma once
 
+#include "compiler/program/types/field/field.h"
+#include "compiler/program/types/overload/overload.h"
 #include "compiler/union/union/union.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -70,6 +72,9 @@ struct ObjectTypeRef {
   std::vector<bool> optional;
   std::vector<bool> readonly;
   std::vector<bool> methods;
+  std::vector<Field> resolvedFields;
+  std::vector<Overload> resolvedOverloads;
+  std::vector<const Type *> resolvedBases;
 };
 
 struct TupleTypeRef {

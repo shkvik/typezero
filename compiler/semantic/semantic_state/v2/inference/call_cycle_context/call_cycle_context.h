@@ -9,7 +9,7 @@ namespace tz {
 class CallCycleContext {
 public:
   void addCycle(std::vector<FuncSymbol *> cycle);
-  void rememberDeclaredFunctions(std::vector<FunctionDecl *> functions);
+  void addDeclaredFunction(FunctionDecl *functionDecl);
 
 
   bool isInCycle(const FuncSymbol *function) const;

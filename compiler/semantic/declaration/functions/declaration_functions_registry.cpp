@@ -4,16 +4,8 @@
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
-#include "compiler/semantic/bodies/iterators/generator_checker/generator_checker.h"
-#include "compiler/semantic/bodies/iterators/iterable_checker/iterable_checker.h"
 #include "compiler/semantic/bodies/shared_helpers/shared_helpers.h"
 #include "compiler/semantic/flow/placed_nodes/placed_nodes.h"
-#include "compiler/semantic/generics/generic_class_checker/generic_class_checker.h"
-#include "compiler/semantic/generics/type_params/type_params.h"
-#include "compiler/semantic/library/async/async_checker/async_checker.h"
-#include "compiler/semantic/library/stream/chunk_types/chunk_types.h"
-#include "compiler/semantic/semantic_parts/semantic_parts.h"
-#include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSet.h"
@@ -24,16 +16,16 @@ using llvm::dyn_cast;
 
 namespace tz {
 
-DeclarationFunctionsRegistry::DeclarationFunctionsRegistry(SemanticState &owner, SemanticParts &all)
-    : state(owner) {
-  this->chunkTypes = &all.chunkTypes;
-  this->typeParams = &all.typeParams;
-  this->asyncChecker = &all.asyncChecker;
-  this->typeResolver = &all.typeResolver;
-  this->iterableChecker = &all.iterableChecker;
-  this->generatorChecker = &all.generatorChecker;
-  this->genericClassChecker = &all.genericClassChecker;
+namespace {
+
+constexpr int kThisPosition = -1;
+constexpr llvm::StringLiteral kHiddenPrefix = "%";
+constexpr llvm::StringLiteral kRestPartSuffix = ".rest";
+
 }
+
+DeclarationFunctionsRegistry::DeclarationFunctionsRegistry(SemanticState &owner)
+    : state(owner) {}
 
 DeclarationFunctionsRegistry::ResultTopLevelGenerics
 DeclarationFunctionsRegistry::checkTopLevelGeneric(const FunctionDecl *functionDecl) const {
@@ -139,19 +131,8 @@ DeclarationFunctionsRegistry::checkParamTypeKnown(const Param &param) const {
   });
 }
 
-void DeclarationFunctionsRegistry::declareFunction(FunctionDecl *functionDecl,
-                                                   VarSymbol *variable) {
-  this->declareSymbol(functionDecl, variable);
-  if (!functionDecl->name.empty()) {
-    this->declareFunctionName(functionDecl, functionDecl->sym, variable);
-  }
-}
-
-void DeclarationFunctionsRegistry::declareSignature(FunctionDecl *functionDecl) {
-  this->declareSymbol(functionDecl, nullptr);
-}
-
-void DeclarationFunctionsRegistry::declareSymbol(FunctionDecl *functionDecl, VarSymbol *variable) {
+void DeclarationFunctionsRegistry::startFunctionSymbol(const StartFunctionSymbol &task) {
+  FunctionDecl *functionDecl = task.functionDecl;
   auto *function = this->state.ast.newFunc();
   function->setCompleter(this->state.completer);
   function->name = functionDecl->name;
@@ -160,37 +141,49 @@ void DeclarationFunctionsRegistry::declareSymbol(FunctionDecl *functionDecl, Var
   bool isGeneric = this->isGenericDeclaration(functionDecl);
   bool isClassParams = functionDecl->cls() != nullptr && !functionDecl->isStatic() &&
                        !functionDecl->cls()->typeParams.empty();
-  if (isGeneric || isClassParams) {
+  auto draft = FunctionSymbolDraft{
+      .functionDecl = functionDecl,
+      .function = function,
+      .variable = task.variable,
+      .isNamed = task.isNamed,
+      .isTypeScoped = isGeneric || isClassParams,
+  };
+  if (draft.isTypeScoped) {
     this->state.walk.scopes.openTypeScope();
   }
-  if (isClassParams) {
-    this->genericClassChecker->bindClassTypeParams(functionDecl->cls());
+  this->state.walk.tasks.pushTask(FinishFunctionSymbol{.draft = draft});
+  this->state.walk.tasks.pushTask(StartFunctionReturn{.draft = draft});
+  this->state.walk.tasks.pushTask(StartFunctionParams{.draft = draft});
+  if (functionDecl->cls() != nullptr) {
+    this->state.walk.tasks.pushTask(FindStreamHookParams{.functionDecl = functionDecl});
   }
   if (isGeneric) {
-    this->declareFunctionTypeParams(functionDecl, function, variable);
+    this->pushFunctionTypeParams(draft);
   }
-  std::optional<std::vector<const Type *>> hook =
-      functionDecl->cls() != nullptr ? this->chunkTypes->streamHookParams(functionDecl)
-                                     : std::nullopt;
-  this->padHookParams(functionDecl, hook);
-  for (size_t index = 0; index < functionDecl->params.size(); ++index) {
-    const Type *hooked = hook.has_value() && index < hook->size() ? (*hook)[index] : nullptr;
-    this->declareFunctionParam(functionDecl, function, index, hooked);
+  if (isClassParams) {
+    this->state.walk.tasks.pushTask(BindClassTypeParams{.classDecl = functionDecl->cls()});
   }
-  this->declareFunctionReturn(functionDecl, function);
-  if (isGeneric || isClassParams) {
-    this->state.walk.scopes.closeTypeScope();
-  }
-  this->expandArgumentList(functionDecl, function);
-  functionDecl->sym = function;
 }
 
-bool DeclarationFunctionsRegistry::isGenericDeclaration(const FunctionDecl *functionDecl) {
+void DeclarationFunctionsRegistry::finishFunctionSymbol(const FinishFunctionSymbol &task) {
+  const FunctionSymbolDraft &draft = task.draft;
+  FunctionDecl *functionDecl = draft.functionDecl;
+  if (draft.isTypeScoped) {
+    this->state.walk.scopes.closeTypeScope();
+  }
+  this->expandArgumentList(functionDecl, draft.function);
+  functionDecl->sym = draft.function;
+  if (draft.isNamed && !functionDecl->name.empty()) {
+    this->declareFunctionName(functionDecl, draft.function, draft.variable);
+  }
+}
+
+bool DeclarationFunctionsRegistry::isGenericDeclaration(const FunctionDecl *functionDecl) const {
   if (!functionDecl->typeParams.empty()) {
     return true;
   }
   for (const Param &param : functionDecl->params) {
-    if (param.type.has_value() && this->iterableChecker->isIterableRef(*param.type)) {
+    if (param.type.has_value() && this->state.isIterableRef(*param.type)) {
       return true;
     }
   }
@@ -198,25 +191,30 @@ bool DeclarationFunctionsRegistry::isGenericDeclaration(const FunctionDecl *func
   return false;
 }
 
-void DeclarationFunctionsRegistry::declareFunctionTypeParams(FunctionDecl *functionDecl,
-                                                             FuncSymbol *function,
-                                                             VarSymbol *variable) {
-  if (variable == nullptr) {
-    function->typeParams =
-        this->typeParams->declareTypeParams(functionDecl->typeParams, &function->typeDefaults);
-    functionDecl->typeArgs = function->typeParams;
-    return;
+void DeclarationFunctionsRegistry::pushFunctionTypeParams(const FunctionSymbolDraft &draft) {
+  FunctionDecl *functionDecl = draft.functionDecl;
+  if (draft.variable == nullptr) {
+    return this->state.walk.tasks.pushTask(
+        DeclareFunctionTypeParams{.functionDecl = functionDecl, .function = draft.function});
   }
   auto topLevel = this->checkTopLevelGeneric(functionDecl);
   if (topLevel.isErr()) {
     this->state.diagnostics.error(functionDecl->loc(), topLevel.error().message);
   }
   functionDecl->typeArgs.assign(functionDecl->typeParams.size(), Type::error());
-  this->typeParams->bindTypeParams(functionDecl->typeParams, functionDecl->typeArgs);
+  this->state.walk.tasks.pushTask(BindFunctionTypeParams{.functionDecl = functionDecl});
 }
 
-void DeclarationFunctionsRegistry::padHookParams(
-    FunctionDecl *functionDecl, const std::optional<std::vector<const Type *>> &hook) {
+void DeclarationFunctionsRegistry::startFunctionParams(const StartFunctionParams &task) {
+  FunctionDecl *functionDecl = task.draft.functionDecl;
+  this->padHookParams(functionDecl);
+  for (size_t index = functionDecl->params.size(); index > 0; --index) {
+    this->state.walk.tasks.pushTask(StartFunctionParam{.draft = task.draft, .index = index - 1});
+  }
+}
+
+void DeclarationFunctionsRegistry::padHookParams(FunctionDecl *functionDecl) {
+  auto hook = this->state.library.streams.findHookParams(functionDecl);
   if (!hook.has_value() || this->hasRestParam(functionDecl)) {
     return;
   }
@@ -229,6 +227,14 @@ void DeclarationFunctionsRegistry::padHookParams(
   }
 }
 
+const Type *DeclarationFunctionsRegistry::hookedParam(const FunctionDecl *functionDecl,
+                                                      size_t index) const {
+  auto hook = this->state.library.streams.findHookParams(functionDecl);
+  bool isHooked = hook.has_value() && index < hook->size();
+
+  return isHooked ? (*hook)[index] : nullptr;
+}
+
 bool DeclarationFunctionsRegistry::hasRestParam(const FunctionDecl *functionDecl) const {
   for (const Param &param : functionDecl->params) {
     if (param.rest()) {
@@ -239,15 +245,73 @@ bool DeclarationFunctionsRegistry::hasRestParam(const FunctionDecl *functionDecl
   return false;
 }
 
-void DeclarationFunctionsRegistry::declareFunctionParam(FunctionDecl *functionDecl,
-                                                        FuncSymbol *function, size_t index,
-                                                        const Type *hooked) {
-  Param &param = functionDecl->params[index];
+void DeclarationFunctionsRegistry::startFunctionParam(const StartFunctionParam &task) {
+  FunctionDecl *functionDecl = task.draft.functionDecl;
+  Param &param = functionDecl->params[task.index];
   auto decorated = this->checkParamDecorators(functionDecl, param);
   if (decorated.isErr()) {
     this->state.diagnostics.error(param.decorators[0].loc, decorated.error().message);
   }
-  const auto *declared = this->declaredParamType(functionDecl, function, param, hooked);
+  if (!param.type.has_value()) {
+    const auto *hooked = this->hookedParam(functionDecl, task.index);
+    const auto *declared = this->unwrittenParamType(param, hooked);
+
+    return this->placeFunctionParam(task.draft, task.index, declared);
+  }
+  TypeRef *ref = &*param.type;
+  if (this->state.isIterableRef(*ref)) {
+    this->state.walk.tasks.pushTask(
+        FinishFunctionParam{.draft = task.draft, .index = task.index, .isListContext = false});
+
+    return this->state.walk.tasks.pushTask(WalkIterableParam{
+        .functionDecl = functionDecl,
+        .function = task.draft.function,
+        .ref = ref,
+    });
+  }
+  this->state.types.context.enterListContext(param.rest());
+  this->state.walk.tasks.pushTask(
+      FinishFunctionParam{.draft = task.draft, .index = task.index, .isListContext = true});
+  this->state.walk.tasks.pushTask(ResolveTypeRef{.ref = ref, .isVoidAllowed = false});
+}
+
+void DeclarationFunctionsRegistry::finishFunctionParam(const FinishFunctionParam &task) {
+  if (task.isListContext) {
+    this->state.types.context.leaveListContext();
+  }
+  const FunctionDecl *functionDecl = task.draft.functionDecl;
+  const Param &param = functionDecl->params[task.index];
+  const auto *hooked = this->hookedParam(functionDecl, task.index);
+  const auto *type = param.type->resolved;
+  bool isIntHook = hooked != nullptr && type != nullptr && type->isFloat() && hooked->isInt();
+  const Type *declared = isIntHook ? hooked : type;
+
+  return this->placeFunctionParam(task.draft, task.index, declared);
+}
+
+const Type *DeclarationFunctionsRegistry::unwrittenParamType(const Param &param,
+                                                             const Type *hooked) {
+  if (hooked != nullptr && !param.rest()) {
+    return hooked;
+  }
+  const Type *literal =
+      param.defaultValue() != nullptr ? SharedHelpers::literalType(param.defaultValue()) : nullptr;
+  if (literal != nullptr) {
+    return literal;
+  }
+  auto known = this->checkParamTypeKnown(param);
+  if (known.isErr()) {
+    this->state.diagnostics.error(param.loc, known.error().message);
+  }
+
+  return Type::error();
+}
+
+void DeclarationFunctionsRegistry::placeFunctionParam(const FunctionSymbolDraft &draft,
+                                                      size_t index, const Type *declared) {
+  FunctionDecl *functionDecl = draft.functionDecl;
+  FuncSymbol *function = draft.function;
+  Param &param = functionDecl->params[index];
   const Type *type = param.optional() ? Type::optional(declared) : declared;
   param.declaredType = type;
   if (index == 0) {
@@ -293,56 +357,6 @@ bool DeclarationFunctionsRegistry::hasOptionalBefore(const FunctionDecl *functio
   return false;
 }
 
-const Type *DeclarationFunctionsRegistry::declaredParamType(FunctionDecl *functionDecl,
-                                                            FuncSymbol *function,
-                                                            const Param &param,
-                                                            const Type *hooked) {
-  if (param.type.has_value()) {
-    return this->writtenParamType(functionDecl, function, param, hooked);
-  }
-  if (hooked != nullptr && !param.rest()) {
-    return hooked;
-  }
-  const Type *literal =
-      param.defaultValue() != nullptr ? SharedHelpers::literalType(param.defaultValue()) : nullptr;
-  if (literal != nullptr) {
-    return literal;
-  }
-  auto known = this->checkParamTypeKnown(param);
-  if (known.isErr()) {
-    this->state.diagnostics.error(param.loc, known.error().message);
-  }
-
-  return Type::error();
-}
-
-const Type *DeclarationFunctionsRegistry::writtenParamType(FunctionDecl *functionDecl,
-                                                           FuncSymbol *function, const Param &param,
-                                                           const Type *hooked) {
-  const auto *type = this->resolvedParamType(functionDecl, function, param);
-  bool isIntHook = hooked != nullptr && type != nullptr && type->isFloat() && hooked->isInt();
-
-  return isIntHook ? hooked : type;
-}
-
-const Type *DeclarationFunctionsRegistry::resolvedParamType(FunctionDecl *functionDecl,
-                                                            FuncSymbol *function,
-                                                            const Param &param) {
-  auto iterable = this->iterableChecker->checkIterableParam(functionDecl, function, *param.type);
-  if (iterable.isOk()) {
-    return iterable.value();
-  }
-  if (iterable.error().code != IterableCheckerIterableParamErrorCode::NOT_ITERABLE) {
-    this->state.diagnostics.error(param.type->loc, iterable.error().message);
-    return Type::error();
-  }
-  this->state.types.context.enterListContext(param.rest());
-  const auto *type = this->typeResolver->resolveType(*param.type);
-  this->state.types.context.leaveListContext();
-
-  return type;
-}
-
 void DeclarationFunctionsRegistry::walkThisParam(const FunctionDecl *functionDecl,
                                                  FuncSymbol *function, const Param &param) {
   if (param.name != KeywordTable::getName(Keyword::THIS) || param.rest() ||
@@ -357,28 +371,30 @@ void DeclarationFunctionsRegistry::walkThisParam(const FunctionDecl *functionDec
   function->hasThis = !param.optional() && param.defaultValue() == nullptr;
 }
 
-void DeclarationFunctionsRegistry::declareFunctionReturn(FunctionDecl *functionDecl,
-                                                         FuncSymbol *function) {
+void DeclarationFunctionsRegistry::startFunctionReturn(const StartFunctionReturn &task) {
+  FunctionDecl *functionDecl = task.draft.functionDecl;
   if (functionDecl->returnType.has_value()) {
-    return this->declareWrittenReturn(functionDecl, function);
+    this->state.walk.tasks.pushTask(FinishFunctionReturn{.draft = task.draft});
+
+    return this->startReturnType(
+        StartReturnType{.functionDecl = functionDecl, .function = task.draft.function});
   }
   if (functionDecl->isGenerator || this->isReturningValue(functionDecl->body)) {
     return;
   }
   const Type *nothing = functionDecl->isAsync ? Type::promise(Type::voidTy()) : Type::voidTy();
-  function->setReturnType(nothing);
+  task.draft.function->setReturnType(nothing);
 }
 
-void DeclarationFunctionsRegistry::declareWrittenReturn(FunctionDecl *functionDecl,
-                                                        FuncSymbol *function) {
-  const auto *declared = this->resolveReturnType(functionDecl, function);
-  auto generator = this->generatorChecker->checkGeneratorReturnType(functionDecl, declared);
-  if (generator.isErr()) {
-    this->state.diagnostics.error(functionDecl->returnType->loc, generator.error().message);
-  }
-  const Type *returned = generator.isOk() ? generator.value() : Type::error();
-  const auto *returnType = this->asyncChecker->asyncReturnType(functionDecl, returned);
-  function->setReturnType(returnType);
+void DeclarationFunctionsRegistry::finishFunctionReturn(const FinishFunctionReturn &task) {
+  const FunctionDecl *functionDecl = task.draft.functionDecl;
+  FuncSymbol *function = task.draft.function;
+  const auto *declared = this->declaredReturnType(functionDecl);
+  function->setReturnType(declared);
+  this->state.walk.tasks.pushTask(
+      WalkAsyncReturn{.functionDecl = functionDecl, .function = function});
+  this->state.walk.tasks.pushTask(
+      WalkGeneratorReturn{.functionDecl = functionDecl, .function = function});
 }
 
 void DeclarationFunctionsRegistry::declareFunctionName(FunctionDecl *functionDecl,
@@ -398,7 +414,8 @@ void DeclarationFunctionsRegistry::declareFunctionName(FunctionDecl *functionDec
 }
 
 DeclarationFunctionsRegistry::ResultNotAsserting
-DeclarationFunctionsRegistry::notAsserting(const FunctionDecl *functionDecl, const TypeRef &ref) {
+DeclarationFunctionsRegistry::notAsserting(const FunctionDecl *functionDecl,
+                                           const TypeRef &ref) const {
   if (!ref.asserts()) {
     return ok(&ref);
   }
@@ -419,7 +436,7 @@ const Type *DeclarationFunctionsRegistry::predicateType(const TypeRef &ref) cons
     return nullptr;
   }
 
-  return this->typeResolver->resolveType(ref.args[0]);
+  return ref.args[0].resolved;
 }
 
 std::string DeclarationFunctionsRegistry::callText(const FunctionDecl *functionDecl) const {
@@ -496,38 +513,66 @@ std::optional<int> DeclarationFunctionsRegistry::lastParamNamed(const FunctionDe
   return found;
 }
 
-const Type *DeclarationFunctionsRegistry::resolveReturnType(FunctionDecl *functionDecl,
-                                                            FuncSymbol *function) {
-  const TypeRef &ref = *functionDecl->returnType;
+void DeclarationFunctionsRegistry::startReturnType(const StartReturnType &task) {
+  FunctionDecl *functionDecl = task.functionDecl;
+  TypeRef &ref = *functionDecl->returnType;
   if (ref.kind() != TypeRefKind::PREDICATE_REF) {
-    return this->typeResolver->resolveTypeOrVoid(ref);
+    return this->state.walk.tasks.pushTask(ResolveTypeRef{.ref = &ref, .isVoidAllowed = true});
   }
-  bool isReporting = function != nullptr;
-  if (isReporting) {
-    this->reportAsserting(functionDecl, ref);
+  bool isReporting = task.function != nullptr;
+  if (ref.asserts() && !isReporting) {
+    return;
   }
   if (ref.asserts()) {
-    return Type::voidTy();
+    this->state.walk.tasks.pushTask(FinishAssertsReturn{.functionDecl = functionDecl});
+
+    return this->pushPredicateType(ref);
   }
   auto named = this->predicateArg(functionDecl, ref);
   if (named.isErr() && isReporting) {
     this->state.diagnostics.error(ref.loc, named.error().message);
   }
-  const auto *type = this->predicateType(ref);
-  bool isRecorded = isReporting && named.isOk() && type != nullptr && !type->isError();
-  if (isRecorded) {
-    function->predicate = TypePredicate{.param = named.value(), .type = type};
-  }
-
-  return Type::boolTy();
+  this->state.walk.tasks.pushTask(
+      FinishPredicateReturn{.functionDecl = functionDecl, .function = task.function});
+  this->pushPredicateType(ref);
 }
 
-void DeclarationFunctionsRegistry::reportAsserting(const FunctionDecl *functionDecl,
-                                                   const TypeRef &ref) {
-  auto plain = this->notAsserting(functionDecl, ref);
+void DeclarationFunctionsRegistry::pushPredicateType(TypeRef &ref) {
+  if (ref.args.empty()) {
+    return;
+  }
+  this->state.walk.tasks.pushTask(ResolveTypeRef{.ref = &ref.args[0], .isVoidAllowed = false});
+}
+
+void DeclarationFunctionsRegistry::finishAssertsReturn(const FinishAssertsReturn &task) {
+  const TypeRef &ref = *task.functionDecl->returnType;
+  auto plain = this->notAsserting(task.functionDecl, ref);
   if (plain.isErr()) {
     this->state.diagnostics.error(ref.loc, plain.error().message);
   }
+}
+
+void DeclarationFunctionsRegistry::finishPredicateReturn(const FinishPredicateReturn &task) {
+  const TypeRef &ref = *task.functionDecl->returnType;
+  auto named = this->predicateArg(task.functionDecl, ref);
+  const auto *type = this->predicateType(ref);
+  bool isRecorded = task.function != nullptr && named.isOk() && type != nullptr && !type->isError();
+  if (isRecorded) {
+    task.function->predicate = TypePredicate{.param = named.value(), .type = type};
+  }
+}
+
+const Type *
+DeclarationFunctionsRegistry::declaredReturnType(const FunctionDecl *functionDecl) const {
+  const TypeRef &ref = *functionDecl->returnType;
+  if (ref.kind() != TypeRefKind::PREDICATE_REF) {
+    return ref.resolved;
+  }
+  if (ref.asserts()) {
+    return Type::voidTy();
+  }
+
+  return Type::boolTy();
 }
 
 bool DeclarationFunctionsRegistry::isExpandableRest(const FunctionDecl *functionDecl,
@@ -618,15 +663,15 @@ bool DeclarationFunctionsRegistry::isGivingValue(const ReturnStmt *returnStmt) c
   return !isDiscarded;
 }
 
-void DeclarationFunctionsRegistry::declareItemFunction(Stmt *item, Module *module,
-                                                       std::vector<FunctionDecl *> &functions) {
+void DeclarationFunctionsRegistry::declareItemFunction(Stmt *item, Module *module) {
   auto *functionDecl = dyn_cast<FunctionDecl>(item);
   if (functionDecl == nullptr) {
     return;
   }
-  this->declareFunction(functionDecl);
   this->state.declaration.modules.rememberDeclModule(functionDecl, module);
-  functions.push_back(functionDecl);
+  this->state.inference.cycles.addDeclaredFunction(functionDecl);
+  this->state.walk.tasks.pushTask(
+      StartFunctionSymbol{.functionDecl = functionDecl, .variable = nullptr, .isNamed = true});
 }
 
 }

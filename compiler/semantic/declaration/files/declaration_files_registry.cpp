@@ -9,6 +9,12 @@ using llvm::dyn_cast_or_null;
 
 namespace tz {
 
+namespace {
+
+constexpr const char *kStaticPrefix = "static ";
+
+}
+
 DeclarationFilesRegistry::DeclarationFilesRegistry(SemanticState &owner)
     : state(owner) {}
 

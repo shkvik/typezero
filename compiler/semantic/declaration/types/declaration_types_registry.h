@@ -9,49 +9,26 @@
 
 namespace tz {
 
-class TypeResolver;
-class SemanticParts;
-class AliasInstantiator;
-class DeclarationClassesRegistry;
-class DeclarationModulesRegistry;
-
-struct AliasFrame {
-  TypeAliasDecl *alias;
-  std::optional<Module *> previousModule;
-  bool isBuiltinModule;
-  std::vector<TypeAliasDecl *> needed;
-  size_t nextNeeded;
-};
-
-struct EnumCount {
-  double next;
-  bool isCounting;
-  bool hasNumbers;
-  bool hasStrings;
-};
-
-struct EnumFrame {
-  EnumDecl *enumDecl;
-  std::optional<Module *> previousModule;
-  size_t nextMember;
-  EnumCount count;
-};
-
 class DeclarationTypesRegistry {
 public:
-  DeclarationTypesRegistry(SemanticState &owner, SemanticParts &all);
+  explicit DeclarationTypesRegistry(SemanticState &owner);
 
-  void resolveEnum(EnumDecl *enumDecl);
+  void enterEnum(const EnterEnum &task);
+  void enterAlias(const EnterAlias &task);
+  void startAlias(const StartAlias &task);
+  void finishAlias(const FinishAlias &task);
+  void resolveEnum(const ResolveEnum &task);
+  void resolveAlias(const ResolveAlias &task);
+  void nextEnumMember(const NextEnumMember &task);
   void resolveTypes(llvm::ArrayRef<Stmt *> declared);
-
-
-  const Type *enumType(EnumDecl *enumDecl);
-  const Type *resolveAlias(TypeAliasDecl *alias);
 
 
   std::vector<Stmt *> declareModuleTypes(Module *module);
   std::vector<Stmt *> declareTypes(llvm::ArrayRef<Stmt *> stmts);
   std::vector<Stmt *> declareTypeNames(llvm::ArrayRef<Stmt *> stmts);
+
+
+  const Type *enumType(const EnumDecl *enumDecl) const;
 
 private:
   using ResultMemberIntValue = Result<double, DeclarationTypesRegistryWholeMemberError>;
@@ -69,20 +46,23 @@ private:
   using ResultAliasIsOwnType =
       Result<const TypeAliasDecl *, DeclarationTypesRegistryBuiltinAliasError>;
 
-  void resolveDeclared(Stmt *stmt);
+  void pushDeclaredType(Stmt *stmt);
   void countMember(EnumFrame &frame);
+  void beginAlias(TypeAliasDecl *alias);
+  void declareClass(ClassDecl *classDecl);
+  void finishEnum(const EnumFrame &frame);
   void enterMember(const EnumFrame &frame);
+  void pushAliasBody(TypeAliasDecl *alias);
+  void pushDeclaredAlias(TypeAliasDecl *alias);
+  void walkResolvingAlias(TypeAliasDecl *alias);
   void reportEnumCycle(const EnumDecl *enumDecl);
-  void finishEnum(std::vector<EnumFrame> &frames);
   void reportNeededCycles(const EnumFrame &frame);
-  void resolveDeclaredAlias(TypeAliasDecl *alias);
   void markTextsAssigned(const EnumDecl *enumDecl);
-  void finishAlias(std::vector<AliasFrame> &frames);
   void nameBuiltinUnion(const TypeAliasDecl *alias);
-  void resolveNextMember(std::vector<EnumFrame> &frames);
-  void startEnum(std::vector<EnumFrame> &frames, EnumDecl *enumDecl);
+  void pushAliasBases(const TypeAliasDecl *alias, const Type *type);
   void numberMember(EnumFrame &frame, EnumMember &member, double value);
-  void startAlias(std::vector<AliasFrame> &frames, TypeAliasDecl *alias);
+  void openEnum(EnumDecl *enumDecl, std::optional<Module *> previousModule);
+  void openAlias(TypeAliasDecl *alias, std::optional<Module *> previousModule);
   void addNamedType(llvm::StringRef name, Stmt *stmt, std::vector<Stmt *> &declared);
 
 
@@ -93,10 +73,9 @@ private:
   EnumDecl *unresolvedEnum(const EnumFrame &frame) const;
 
 
-  const Type *resolvingAlias(TypeAliasDecl *alias);
-  const Type *resolveAliasBody(TypeAliasDecl *alias);
-  const Type *resolveUnionAlias(TypeAliasDecl *alias);
-  const Type *resolveObjectAlias(TypeAliasDecl *alias);
+  const Type *aliasBodyType(TypeAliasDecl *alias);
+  const Type *unionAliasType(TypeAliasDecl *alias);
+  const Type *objectAliasType(const TypeAliasDecl *alias) const;
   const Type *definedObject(const TypeAliasDecl *alias, std::vector<Field> fields,
                             std::vector<Overload> overloads) const;
 
@@ -105,10 +84,6 @@ private:
   ConstantValue textValue(std::u16string text) const;
   ConstantValue memberValue(const EnumMember &member) const;
   ConstantValue int32Result(BinaryOp op, int32_t left, int32_t right) const;
-
-
-  TypeAliasDecl *plainAliasNamed(const TypeRef &part) const;
-  TypeAliasDecl *takeUnresolvedAlias(AliasFrame &frame) const;
 
 
   std::optional<ConstantValue> numberResult(BinaryOp op, double left, double right) const;
@@ -136,10 +111,11 @@ private:
   int32_t jsToInt32(double number) const;
   std::string formatNumber(double value) const;
   double power(double base, double exponent) const;
+  Module *elsewhereHome(const Stmt *declared) const;
   Type *declareSelf(const TypeAliasDecl *alias) const;
   llvm::StringRef declareEnumName(EnumDecl *enumDecl);
+  TypeAliasDecl *plainAliasNamed(const TypeRef &part) const;
   ResultTypeNameIsFree freeTypeName(llvm::StringRef name) const;
-  std::optional<Module *> enterHomeModule(const Stmt *declared);
   ResultEnumIsResolved enumCycle(const EnumDecl *enumDecl) const;
   NodeChildren<const Expr *> constantParts(const Expr *expr) const;
   ResultAliasNotCyclic aliasCycle(const TypeAliasDecl *alias) const;
@@ -155,10 +131,6 @@ private:
   ResultMemberIsUnique uniqueMember(const EnumMember &member, const EnumMember &other) const;
 
   SemanticState &state;
-  TypeResolver *typeResolver = nullptr;
-  DeclarationClassesRegistry *classes = nullptr;
-  DeclarationModulesRegistry *modules = nullptr;
-  AliasInstantiator *aliasInstantiator = nullptr;
 };
 
 }

@@ -7,30 +7,23 @@
 #include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/semantic/bodies/classes/overload_resolver/overload_resolver_errors.h"
 #include "compiler/semantic/bodies/shared_helpers/shared_helpers.h"
-#include "compiler/semantic/declaration/functions/declaration_functions_registry.h"
-#include "compiler/semantic/declaration/modules/declaration_modules_registry.h"
 #include "compiler/semantic/flow/children_first/children_first.h"
-#include "compiler/semantic/generics/generic_class_checker/generic_class_checker.h"
-#include "compiler/semantic/generics/generic_class_instantiator/generic_class_instantiator.h"
-#include "compiler/semantic/library/events/event_map_inference/event_map_inference.h"
-#include "compiler/semantic/semantic_parts/semantic_parts.h"
-#include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/STLExtras.h"
 #include <limits>
 
+using llvm::dyn_cast;
 using llvm::isa;
 
 namespace tz {
 
-DeclarationClassesRegistry::DeclarationClassesRegistry(SemanticState &owner, SemanticParts &all)
-    : state(owner) {
-  this->typeResolver = &all.typeResolver;
-  this->modules = &all.declaration.modules;
-  this->functions = &all.declaration.functions;
-  this->eventMapInference = &all.eventMapInference;
-  this->genericClassChecker = &all.genericClassChecker;
-  this->genericClassInstantiator = &all.genericClassInstantiator;
+namespace {
+
+constexpr llvm::StringLiteral kInternalPrefix = "%";
+
 }
+
+DeclarationClassesRegistry::DeclarationClassesRegistry(SemanticState &owner)
+    : state(owner) {}
 
 bool DeclarationClassesRegistry::hasSameSignature(const FuncSymbol *first,
                                                   const FuncSymbol *second) const {
@@ -40,21 +33,6 @@ bool DeclarationClassesRegistry::hasSameSignature(const FuncSymbol *first,
 
   return first->params == second->params && first->minArgs == second->minArgs &&
          first->hasRest == second->hasRest;
-}
-
-void DeclarationClassesRegistry::declareClass(ClassDecl *classDecl) {
-  classDecl->id = this->state.declaration.classes.takeClassId();
-  classDecl->type = Type::classType(classDecl->name, classDecl);
-  this->state.declaration.classes.addClass(classDecl);
-  auto added = this->state.walk.scopes.declare(classDecl->name, {ClassEntry{.cls = classDecl}});
-  if (added.isErr()) {
-    this->state.diagnostics.error(classDecl->loc(), added.error().message);
-  }
-  if (added.isErr() && added.error().code != ScopeStackContextDeclareErrorCode::UNDEFINED_AS_NAME) {
-    auto previousEntry = this->state.walk.scopes.findName(classDecl->name);
-    auto declaredHere = ErrorTextDeclareName::previous();
-    this->state.diagnostics.note(previousEntry.loc(), declaredHere);
-  }
 }
 
 const ClassField *DeclarationClassesRegistry::earlierField(const ClassDecl *classDecl,
@@ -187,8 +165,7 @@ DeclarationClassesRegistry::fieldValue(const ClassDecl *classDecl, const ClassFi
 }
 
 DeclarationClassesRegistry::ResultFieldTypeSource
-DeclarationClassesRegistry::typedField(const ClassDecl *classDecl, const ClassField &field) const {
-  const Param *property = field.parameter() ? this->propertyParam(classDecl, field.name) : nullptr;
+DeclarationClassesRegistry::typedField(const ClassField &field, const Param *property) const {
   if (property != nullptr && !property->type.has_value()) {
     auto message = ErrorTextTypedField::property(field.name);
 
@@ -209,22 +186,19 @@ DeclarationClassesRegistry::typedField(const ClassDecl *classDecl, const ClassFi
   return ok(&field);
 }
 
-const Param *DeclarationClassesRegistry::propertyParam(const ClassDecl *classDecl,
-                                                       llvm::StringRef name) const {
-  for (FunctionDecl *constructor : classDecl->constructors) {
-    for (const Param &param : constructor->params) {
-      if (param.property && param.name == name) {
-        return &param;
-      }
-    }
+TypeRef *DeclarationClassesRegistry::writtenFieldRef(ClassField &field, Param *property) const {
+  if (property != nullptr) {
+    return &*property->type;
+  }
+  if (field.type.has_value()) {
+    return &*field.type;
   }
 
   return nullptr;
 }
 
-const Type *DeclarationClassesRegistry::resolvedFieldType(const ClassDecl *classDecl,
-                                                          ClassField &field) {
-  const Type *written = this->writtenFieldType(classDecl, field);
+const Type *DeclarationClassesRegistry::optionalFieldType(const ClassField &field,
+                                                          const Type *written) const {
   if (written != nullptr && field.optional()) {
     return Type::optional(written);
   }
@@ -232,31 +206,7 @@ const Type *DeclarationClassesRegistry::resolvedFieldType(const ClassDecl *class
   return written;
 }
 
-const Type *DeclarationClassesRegistry::writtenFieldType(const ClassDecl *classDecl,
-                                                         ClassField &field) {
-  auto source = this->typedField(classDecl, field);
-  if (source.isErr()) {
-    this->state.diagnostics.error(field.loc, source.error().message);
-
-    return Type::error();
-  }
-
-  return this->declaredFieldType(classDecl, field);
-}
-
-const Type *DeclarationClassesRegistry::declaredFieldType(const ClassDecl *classDecl,
-                                                          ClassField &field) {
-  if (field.parameter()) {
-    const auto *param = this->propertyParam(classDecl, field.name);
-    if (param->optional()) {
-      field.presence = FieldPresence::OPTIONAL;
-    }
-
-    return this->typeResolver->resolveType(*param->type);
-  }
-  if (field.type.has_value()) {
-    return this->typeResolver->resolveType(*field.type);
-  }
+const Type *DeclarationClassesRegistry::unwrittenFieldType(const ClassField &field) const {
   const auto *literal = SharedHelpers::literalType(field.init);
   bool isFromValueLater = field.isStatic() || llvm::isa<FunctionExpr>(field.init);
   if (literal != nullptr || isFromValueLater) {
@@ -264,6 +214,18 @@ const Type *DeclarationClassesRegistry::declaredFieldType(const ClassDecl *class
   }
 
   return Type::error();
+}
+
+Param *DeclarationClassesRegistry::propertyParam(ClassDecl *classDecl, llvm::StringRef name) const {
+  for (FunctionDecl *constructor : classDecl->constructors) {
+    for (Param &param : constructor->params) {
+      if (param.property && param.name == name) {
+        return &param;
+      }
+    }
+  }
+
+  return nullptr;
 }
 
 void DeclarationClassesRegistry::arrowMethod(ClassDecl *classDecl, ClassField &field,
@@ -355,7 +317,9 @@ void DeclarationClassesRegistry::declareStaticVar(const ClassDecl *classDecl,
   }
 }
 
-void DeclarationClassesRegistry::resolveField(ClassDecl *classDecl, ClassField &field) {
+void DeclarationClassesRegistry::startClassField(const StartClassField &task) {
+  ClassDecl *classDecl = task.classDecl;
+  ClassField &field = classDecl->fields[task.index];
   auto early = this->setLater(field);
   if (early.isErr()) {
     this->state.diagnostics.error(field.loc, early.error().message);
@@ -364,7 +328,38 @@ void DeclarationClassesRegistry::resolveField(ClassDecl *classDecl, ClassField &
   if (valueless.isErr()) {
     this->state.diagnostics.error(field.loc, valueless.error().message);
   }
-  const Type *type = this->resolvedFieldType(classDecl, field);
+  Param *property = field.parameter() ? this->propertyParam(classDecl, field.name) : nullptr;
+  auto source = this->typedField(field, property);
+  if (source.isErr()) {
+    this->state.diagnostics.error(field.loc, source.error().message);
+    const auto *failed = this->optionalFieldType(field, Type::error());
+
+    return this->placeClassField(classDecl, field, failed);
+  }
+  if (property != nullptr && property->optional()) {
+    field.presence = FieldPresence::OPTIONAL;
+  }
+  TypeRef *written = this->writtenFieldRef(field, property);
+  if (written == nullptr) {
+    const auto *unwritten = this->unwrittenFieldType(field);
+    const auto *type = this->optionalFieldType(field, unwritten);
+
+    return this->placeClassField(classDecl, field, type);
+  }
+  this->state.walk.tasks.pushTask(
+      FinishClassField{.classDecl = classDecl, .index = task.index, .written = written});
+  this->state.walk.tasks.pushTask(ResolveTypeRef{.ref = written, .isVoidAllowed = false});
+}
+
+void DeclarationClassesRegistry::finishClassField(const FinishClassField &task) {
+  ClassField &field = task.classDecl->fields[task.index];
+  const auto *type = this->optionalFieldType(field, task.written->resolved);
+
+  return this->placeClassField(task.classDecl, field, type);
+}
+
+void DeclarationClassesRegistry::placeClassField(ClassDecl *classDecl, ClassField &field,
+                                                 const Type *type) {
   field.resolved = type;
   this->arrowMethod(classDecl, field, type);
   auto seen = this->typeSeen(field);
@@ -385,22 +380,37 @@ void DeclarationClassesRegistry::resolveField(ClassDecl *classDecl, ClassField &
   }
 }
 
-void DeclarationClassesRegistry::resolveClass(ClassDecl *classDecl) {
+void DeclarationClassesRegistry::resolveClass(const ResolveClass &task) {
+  ClassDecl *classDecl = task.classDecl;
   if (classDecl->stage != ClassStage::UNRESOLVED) {
     return;
   }
   classDecl->stage = ClassStage::RESOLVED;
-  this->genericClassChecker->declareClassTypeParams(classDecl);
+  this->state.walk.tasks.pushTask(OpenClassScope{.classDecl = classDecl});
+  this->state.walk.tasks.pushTask(DeclareClassTypeParams{.classDecl = classDecl});
+}
+
+void DeclarationClassesRegistry::openClassScope(const OpenClassScope &task) {
+  ClassDecl *classDecl = task.classDecl;
   this->state.walk.scopes.openTypeScope();
-  this->genericClassChecker->bindClassTypeParams(classDecl);
-  this->resolveClassBases(classDecl);
+  this->state.walk.tasks.pushTask(CloseClassScope{});
+  this->state.walk.tasks.pushTask(ResolveClassMembers{.classDecl = classDecl});
+  this->state.walk.tasks.pushTask(StartClassBases{.classDecl = classDecl});
+  this->state.walk.tasks.pushTask(BindClassTypeParams{.classDecl = classDecl});
+}
+
+void DeclarationClassesRegistry::closeClassScope() {
+  this->state.walk.scopes.closeTypeScope();
+}
+
+void DeclarationClassesRegistry::resolveClassMembers(const ResolveClassMembers &task) {
+  ClassDecl *classDecl = task.classDecl;
   for (size_t index = 0; index < classDecl->fields.size(); ++index) {
     this->walkMemberName(classDecl, index);
   }
-  for (ClassField &field : classDecl->fields) {
-    this->resolveField(classDecl, field);
+  for (size_t index = classDecl->fields.size(); index > 0; --index) {
+    this->state.walk.tasks.pushTask(StartClassField{.classDecl = classDecl, .index = index - 1});
   }
-  this->state.walk.scopes.closeTypeScope();
 }
 
 DeclarationClassesRegistry::ResultParamTypePassed
@@ -418,21 +428,44 @@ DeclarationClassesRegistry::paramType(const Param &param, const Type *type,
   return ok(type);
 }
 
-void DeclarationClassesRegistry::declareTyped(FunctionDecl *functionDecl, const Type *declared) {
+void DeclarationClassesRegistry::startTypedMethod(const StartTypedMethod &task) {
+  FunctionDecl *functionDecl = task.functionDecl;
   auto *function = this->state.ast.newFunc();
   function->setCompleter(this->state.completer);
   function->name = functionDecl->name;
   function->loc = functionDecl->loc();
   function->decl = functionDecl;
   functionDecl->sym = function;
-  const auto &declaredParams = declared->params();
-  for (size_t index = 0; index < functionDecl->params.size(); ++index) {
-    Param &param = functionDecl->params[index];
-    const Type *given = index < declaredParams.size() ? declaredParams[index] : nullptr;
-    const Type *type = this->typedParam(param, given, declared);
-    param.declaredType = param.defaultValue() != nullptr ? type->nonOptional() : type;
-    function->params.push_back(type);
+  this->state.walk.tasks.pushTask(
+      FinishTypedMethod{.functionDecl = functionDecl, .declared = task.declared});
+  for (size_t index = functionDecl->params.size(); index > 0; --index) {
+    Param &param = functionDecl->params[index - 1];
+    this->state.walk.tasks.pushTask(FinishTypedParam{
+        .functionDecl = functionDecl,
+        .declared = task.declared,
+        .index = index - 1,
+    });
+    if (param.type.has_value()) {
+      this->state.walk.tasks.pushTask(ResolveTypeRef{.ref = &*param.type, .isVoidAllowed = false});
+    }
   }
+}
+
+void DeclarationClassesRegistry::finishTypedParam(const FinishTypedParam &task) {
+  FunctionDecl *functionDecl = task.functionDecl;
+  Param &param = functionDecl->params[task.index];
+  const auto &declaredParams = task.declared->params();
+  const Type *given = task.index < declaredParams.size() ? declaredParams[task.index] : nullptr;
+  const Type *type = this->typedParam(param, given, task.declared);
+  param.declaredType = param.defaultValue() != nullptr ? type->nonOptional() : type;
+  functionDecl->sym->params.push_back(type);
+}
+
+void DeclarationClassesRegistry::finishTypedMethod(const FinishTypedMethod &task) {
+  FunctionDecl *functionDecl = task.functionDecl;
+  const Type *declared = task.declared;
+  FuncSymbol *function = functionDecl->sym;
+  const auto &declaredParams = declared->params();
   for (size_t index = functionDecl->params.size(); index < declaredParams.size(); ++index) {
     this->addHiddenParam(functionDecl, declaredParams[index]);
   }
@@ -444,8 +477,7 @@ void DeclarationClassesRegistry::declareTyped(FunctionDecl *functionDecl, const 
 
 const Type *DeclarationClassesRegistry::typedParam(const Param &param, const Type *given,
                                                    const Type *declared) {
-  const Type *written =
-      param.type.has_value() ? this->typeResolver->resolveType(*param.type) : given;
+  const Type *written = param.type.has_value() ? param.type->resolved : given;
   auto passed = this->paramType(param, written, declared);
   if (passed.isErr()) {
     this->state.diagnostics.error(param.loc, passed.error().message);
@@ -520,31 +552,36 @@ void DeclarationClassesRegistry::numberVariants(llvm::ArrayRef<FunctionDecl *> f
   }
 }
 
-void DeclarationClassesRegistry::declareMethods(ClassDecl *classDecl) {
-  for (FunctionDecl *constructor : classDecl->constructors) {
-    this->functions->declareSignature(constructor);
-    constructor->sym->setReturnType(Type::voidTy());
-  }
-  for (FunctionDecl *method : classDecl->methods) {
-    this->declareClassMethod(classDecl, method);
-  }
-  for (const ClassField &field : classDecl->fields) {
-    if (field.method() != nullptr) {
-      this->declareFieldMethod(classDecl, field);
+void DeclarationClassesRegistry::declareMethods(const DeclareMethods &task) {
+  ClassDecl *classDecl = task.classDecl;
+  this->state.walk.tasks.pushTask(FinishMethods{.classDecl = classDecl});
+  for (size_t index = classDecl->fields.size(); index > 0; --index) {
+    if (classDecl->fields[index - 1].method() != nullptr) {
+      this->state.walk.tasks.pushTask(StartFieldMethod{.classDecl = classDecl, .index = index - 1});
     }
   }
-  if (classDecl->findConstructors().empty()) {
-    this->fillDefaultValues(classDecl);
+  for (FunctionDecl *method : llvm::reverse(classDecl->methods)) {
+    this->state.walk.tasks.pushTask(FinishClassMethod{.classDecl = classDecl, .method = method});
+    this->pushSignature(method);
   }
-  this->makeFieldInit(classDecl);
-  this->numberVariants(classDecl->methods);
-  this->numberVariants(classDecl->constructors);
-  this->walkVariants(classDecl);
+  for (FunctionDecl *constructor : llvm::reverse(classDecl->constructors)) {
+    this->state.walk.tasks.pushTask(FinishConstructor{.constructor = constructor});
+    this->pushSignature(constructor);
+  }
 }
 
-void DeclarationClassesRegistry::declareClassMethod(const ClassDecl *classDecl,
-                                                    FunctionDecl *method) {
-  this->functions->declareSignature(method);
+void DeclarationClassesRegistry::pushSignature(FunctionDecl *functionDecl) {
+  this->state.walk.tasks.pushTask(
+      StartFunctionSymbol{.functionDecl = functionDecl, .variable = nullptr, .isNamed = false});
+}
+
+void DeclarationClassesRegistry::finishConstructor(const FinishConstructor &task) {
+  task.constructor->sym->setReturnType(Type::voidTy());
+}
+
+void DeclarationClassesRegistry::finishClassMethod(const FinishClassMethod &task) {
+  const ClassDecl *classDecl = task.classDecl;
+  FunctionDecl *method = task.method;
   bool isReturnOpen = method->isAbstract() && !method->returnType.has_value();
   auto returns = this->abstractReturn(classDecl, method);
   if (returns.isErr()) {
@@ -559,29 +596,94 @@ void DeclarationClassesRegistry::declareClassMethod(const ClassDecl *classDecl,
   }
 }
 
-void DeclarationClassesRegistry::declareFieldMethod(ClassDecl *classDecl, const ClassField &field) {
-  FunctionDecl *method = field.method();
+void DeclarationClassesRegistry::startFieldMethod(const StartFieldMethod &task) {
+  ClassDecl *classDecl = task.classDecl;
+  ClassField &field = classDecl->fields[task.index];
   this->state.walk.scopes.openTypeScope();
-  this->genericClassChecker->bindClassTypeParams(classDecl);
-  const Type *declared =
-      field.type.has_value() ? this->typeResolver->resolveType(*field.type) : nullptr;
-  this->state.walk.scopes.closeTypeScope();
-  if (declared == nullptr || !declared->isFunction()) {
-    return this->functions->declareSignature(method);
+  this->state.walk.tasks.pushTask(FinishFieldMethod{.classDecl = classDecl, .index = task.index});
+  if (field.type.has_value()) {
+    this->state.walk.tasks.pushTask(ResolveTypeRef{.ref = &*field.type, .isVoidAllowed = false});
   }
-
-  return this->declareTyped(method, declared);
+  this->state.walk.tasks.pushTask(BindClassTypeParams{.classDecl = classDecl});
 }
 
-void DeclarationClassesRegistry::fillDefaultValues(ClassDecl *classDecl) {
-  for (ClassField &field : classDecl->fields) {
+void DeclarationClassesRegistry::finishFieldMethod(const FinishFieldMethod &task) {
+  const ClassField &field = task.classDecl->fields[task.index];
+  FunctionDecl *method = field.method();
+  this->state.walk.scopes.closeTypeScope();
+  const Type *declared = field.type.has_value() ? field.type->resolved : nullptr;
+  if (declared == nullptr || !declared->isFunction()) {
+    return this->pushSignature(method);
+  }
+
+  return this->startTypedMethod(StartTypedMethod{.functionDecl = method, .declared = declared});
+}
+
+void DeclarationClassesRegistry::finishMethods(const FinishMethods &task) {
+  ClassDecl *classDecl = task.classDecl;
+  this->state.walk.tasks.pushTask(MakeFieldInit{.classDecl = classDecl});
+  if (classDecl->findConstructors().empty()) {
+    this->state.walk.tasks.pushTask(NextFieldDefault{.classDecl = classDecl, .fieldIndex = 0});
+  }
+}
+
+void DeclarationClassesRegistry::nextFieldDefault(const NextFieldDefault &task) {
+  ClassDecl *classDecl = task.classDecl;
+  for (size_t index = task.fieldIndex; index < classDecl->fields.size(); ++index) {
+    const ClassField &field = classDecl->fields[index];
     if (this->isNeedingDefault(field)) {
-      auto visiting = llvm::SmallPtrSet<const ClassDecl *, 4>();
-      visiting.insert(classDecl);
-      const TypeRef *ref = field.type.has_value() ? &*field.type : nullptr;
-      field.init = this->defaultValue(field.resolved, ref, field.loc, visiting);
+      auto run = this->fieldDefaultRun(classDecl, field);
+
+      return this->runFieldDefault(classDecl, index, std::move(run));
     }
   }
+}
+
+void DeclarationClassesRegistry::continueFieldDefault(const ContinueFieldDefault &task) {
+  return this->runFieldDefault(task.classDecl, task.fieldIndex, task.run);
+}
+
+DefaultRun DeclarationClassesRegistry::fieldDefaultRun(const ClassDecl *classDecl,
+                                                       const ClassField &field) const {
+  auto visiting = llvm::SmallPtrSet<const ClassDecl *, 4>();
+  visiting.insert(classDecl);
+  const TypeRef *ref = field.type.has_value() ? &*field.type : nullptr;
+  auto run = DefaultRun{
+      .visiting = visiting,
+      .loc = field.loc,
+      .steps = {DefaultFor{.type = field.resolved, .ref = ref}},
+      .values = {},
+      .hasNoDefault = false,
+  };
+
+  return run;
+}
+
+void DeclarationClassesRegistry::runFieldDefault(ClassDecl *classDecl, size_t index,
+                                                 DefaultRun run) {
+  while (!run.steps.empty() && !run.hasNoDefault) {
+    auto *needed = this->unresolvedFamily(run.steps.back());
+    if (needed != nullptr) {
+      this->state.walk.tasks.pushTask(
+          ContinueFieldDefault{.classDecl = classDecl, .fieldIndex = index, .run = run});
+
+      return this->state.walk.tasks.pushTask(ResolveClass{.classDecl = needed});
+    }
+    DefaultStep step = run.steps.back();
+    run.steps.pop_back();
+    this->applyDefaultStep(step, run);
+  }
+  ClassField &field = classDecl->fields[index];
+  field.init = run.hasNoDefault ? nullptr : run.values.back();
+  this->state.walk.tasks.pushTask(
+      NextFieldDefault{.classDecl = classDecl, .fieldIndex = index + 1});
+}
+
+ClassDecl *DeclarationClassesRegistry::unresolvedFamily(const DefaultStep &step) const {
+  const ResolveFamily *family = step.as<ResolveFamily>();
+  bool isUnresolved = family != nullptr && family->classDecl->stage == ClassStage::UNRESOLVED;
+
+  return isUnresolved ? family->classDecl : nullptr;
 }
 
 bool DeclarationClassesRegistry::isNeedingDefault(const ClassField &field) const {
@@ -591,15 +693,28 @@ bool DeclarationClassesRegistry::isNeedingDefault(const ClassField &field) const
   return !isValued && !isLeftEmpty && field.resolved != nullptr;
 }
 
-void DeclarationClassesRegistry::makeFieldInit(ClassDecl *classDecl) {
+void DeclarationClassesRegistry::makeFieldInit(const MakeFieldInit &task) {
+  ClassDecl *classDecl = task.classDecl;
   auto sets = this->fieldSets(classDecl);
+  this->state.walk.tasks.pushTask(FinishVariants{.classDecl = classDecl});
   if (sets.empty()) {
     return;
   }
   auto *init = this->makeInitDecl(classDecl, std::move(sets));
-  this->functions->declareSignature(init);
-  init->sym->setReturnType(Type::voidTy());
-  classDecl->init = init;
+  this->state.walk.tasks.pushTask(FinishFieldInit{.classDecl = classDecl, .init = init});
+  this->pushSignature(init);
+}
+
+void DeclarationClassesRegistry::finishFieldInit(const FinishFieldInit &task) {
+  task.init->sym->setReturnType(Type::voidTy());
+  task.classDecl->init = task.init;
+}
+
+void DeclarationClassesRegistry::finishVariants(const FinishVariants &task) {
+  ClassDecl *classDecl = task.classDecl;
+  this->numberVariants(classDecl->methods);
+  this->numberVariants(classDecl->constructors);
+  this->walkVariants(classDecl);
 }
 
 std::vector<Stmt *> DeclarationClassesRegistry::fieldSets(const ClassDecl *classDecl) {
@@ -663,28 +778,6 @@ Expr *DeclarationClassesRegistry::sizeLiteral(const Type *base, double size, llv
   auto magnitude = static_cast<uint64_t>(size);
 
   return ast.make<IntLitExpr>(loc, magnitude);
-}
-
-Expr *DeclarationClassesRegistry::defaultValue(const Type *type, const TypeRef *ref,
-                                               llvm::SMLoc loc,
-                                               llvm::SmallPtrSetImpl<const ClassDecl *> &visiting) {
-  auto run = DefaultRun{
-      .visiting = visiting,
-      .loc = loc,
-      .steps = {DefaultFor{.type = type, .ref = ref}},
-      .values = {},
-      .hasNoDefault = false,
-  };
-  while (!run.steps.empty() && !run.hasNoDefault) {
-    DefaultStep step = run.steps.back();
-    run.steps.pop_back();
-    this->applyDefaultStep(step, run);
-  }
-  if (run.hasNoDefault) {
-    return nullptr;
-  }
-
-  return run.values.back();
 }
 
 void DeclarationClassesRegistry::applyDefaultStep(const DefaultStep &step, DefaultRun &run) {
@@ -855,7 +948,6 @@ void DeclarationClassesRegistry::leaveEmptyClass(const ClassDecl *classDecl,
 }
 
 void DeclarationClassesRegistry::resolveFamily(ClassDecl *classDecl, DefaultRun &run) {
-  this->resolveClass(classDecl);
   if (classDecl->parent != nullptr) {
     run.steps.push_back(ResolveFamily{.classDecl = classDecl->parent});
   }
@@ -1037,42 +1129,29 @@ DeclarationClassesRegistry::narrowedField(const ClassDecl *classDecl, const Clas
   return ok(&field);
 }
 
-void DeclarationClassesRegistry::completeClass(ClassDecl *classDecl) {
-  std::vector<CompletionStep> steps = {StartCompletion{.classDecl = classDecl}};
-  while (!steps.empty()) {
-    CompletionStep step = steps.back();
-    steps.pop_back();
-    const StartCompletion *start = step.as<StartCompletion>();
-    if (start != nullptr) {
-      this->startCompletion(start->classDecl, steps);
-    } else {
-      this->finishCompletion(step.as<FinishCompletion>()->classDecl);
-    }
-  }
-}
-
-void DeclarationClassesRegistry::startCompletion(ClassDecl *classDecl,
-                                                 std::vector<CompletionStep> &steps) {
+void DeclarationClassesRegistry::completeClass(const CompleteClass &task) {
+  ClassDecl *classDecl = task.classDecl;
   bool isIncomplete = classDecl->type->isIncomplete() && classDecl->literal() == nullptr;
   if (!isIncomplete || this->state.declaration.classes.isCompleting(classDecl)) {
     return;
   }
   this->state.declaration.classes.enterCompletion(classDecl);
-  steps.push_back(FinishCompletion{.classDecl = classDecl});
+  this->state.walk.tasks.pushTask(FinishCompletion{.classDecl = classDecl});
   ClassDecl *generic = classDecl->generic();
   if (generic != nullptr) {
-    steps.push_back(StartCompletion{.classDecl = generic});
+    this->state.walk.tasks.pushTask(SubstituteInstanceFields{.instance = classDecl});
+    this->state.walk.tasks.pushTask(CompleteClass{.classDecl = generic});
   }
   if (classDecl->parent != nullptr) {
-    steps.push_back(StartCompletion{.classDecl = classDecl->parent});
+    this->state.walk.tasks.pushTask(CompleteClass{.classDecl = classDecl->parent});
   }
 }
 
-void DeclarationClassesRegistry::finishCompletion(ClassDecl *classDecl) {
+void DeclarationClassesRegistry::finishCompletion(const FinishCompletion &task) {
+  ClassDecl *classDecl = task.classDecl;
   auto *type = const_cast<Type *>(classDecl->type);
   const ClassDecl *generic = classDecl->generic();
   if (generic != nullptr) {
-    this->resolveInstanceFields(classDecl, generic);
     this->state.diagnostics.pushList(DiagnosticRoute::DISCARD);
   }
   auto fields = this->inheritedFields(classDecl);
@@ -1086,27 +1165,6 @@ void DeclarationClassesRegistry::finishCompletion(ClassDecl *classDecl) {
   if (generic != nullptr) {
     this->state.diagnostics.popList();
   }
-}
-
-void DeclarationClassesRegistry::resolveInstanceFields(ClassDecl *instance,
-                                                       const ClassDecl *generic) {
-  for (size_t index = 0; index < instance->fields.size() && index < generic->fields.size();
-       ++index) {
-    ClassField &field = instance->fields[index];
-    bool isUnresolved = !field.isStatic() && field.method() == nullptr && field.resolved == nullptr;
-    if (isUnresolved) {
-      field.resolved = this->instanceFieldType(instance, generic->fields[index].resolved);
-    }
-  }
-}
-
-const Type *DeclarationClassesRegistry::instanceFieldType(const ClassDecl *instance,
-                                                          const Type *original) {
-  if (original == nullptr) {
-    return Type::error();
-  }
-
-  return this->genericClassChecker->instanceValueType(instance, original);
 }
 
 std::vector<Field> DeclarationClassesRegistry::inheritedFields(const ClassDecl *classDecl) const {
@@ -1377,24 +1435,83 @@ DeclarationClassesRegistry::checkValueGiven(const ClassDecl *classDecl, const Cl
   return ok(&field);
 }
 
-void DeclarationClassesRegistry::resolveClassBases(ClassDecl *classDecl) {
+void DeclarationClassesRegistry::startClassBases(const StartClassBases &task) {
+  ClassDecl *classDecl = task.classDecl;
   classDecl->stage = ClassStage::RESOLVING_BASE;
+  this->state.walk.tasks.pushTask(FinishClassBases{.classDecl = classDecl});
+  for (TypeRef &ref : llvm::reverse(classDecl->interfaces)) {
+    this->state.walk.tasks.pushTask(FinishImplemented{.classDecl = classDecl, .ref = &ref});
+    this->state.walk.tasks.pushTask(ResolveTypeRef{.ref = &ref, .isVoidAllowed = false});
+  }
   if (classDecl->base.has_value()) {
-    this->resolveParentClass(classDecl, *classDecl->base);
+    this->startParentClass(classDecl);
   }
-  for (const TypeRef &ref : classDecl->interfaces) {
-    this->addImplemented(classDecl, ref);
-  }
+}
+
+void DeclarationClassesRegistry::finishClassBases(const FinishClassBases &task) {
+  ClassDecl *classDecl = task.classDecl;
   classDecl->stage = ClassStage::RESOLVED;
   for (ClassField &field : classDecl->fields) {
     this->walkRedeclaredField(classDecl, field);
   }
 }
 
-void DeclarationClassesRegistry::resolveParentClass(ClassDecl *classDecl, const TypeRef &ref) {
-  bool isNamed = ref.kind() == TypeRefKind::NAME_REF || ref.kind() == TypeRefKind::GENERIC_REF;
+void DeclarationClassesRegistry::startParentClass(ClassDecl *classDecl) {
+  TypeRef &ref = *classDecl->base;
+  bool isNamed = this->isNamedRef(ref);
   Stmt *found = isNamed ? this->state.findTypeDeclaration(ref.name) : nullptr;
-  auto lookup = this->parentOf(classDecl, ref, found);
+  auto *parent = llvm::dyn_cast_or_null<ClassDecl>(found);
+  if (this->isEmitterParent(parent, ref)) {
+    this->state.walk.tasks.pushTask(FinishParentClass{.classDecl = classDecl, .found = found});
+
+    return this->state.walk.tasks.pushTask(
+        InstantiateEmitterParent{.classDecl = classDecl, .emitter = parent, .ref = &ref});
+  }
+  if (this->isGenericParent(parent, ref)) {
+    this->state.walk.tasks.pushTask(FinishParentClass{.classDecl = classDecl, .found = found});
+
+    return this->state.walk.tasks.pushTask(ResolveTypeRef{.ref = &ref, .isVoidAllowed = false});
+  }
+  auto lookup = ParentLookup{
+      .parent = parent,
+      .found = found,
+      .isInstance = false,
+  };
+
+  return this->linkFoundParent(classDecl, lookup);
+}
+
+bool DeclarationClassesRegistry::isNamedRef(const TypeRef &ref) const {
+  return ref.kind() == TypeRefKind::NAME_REF || ref.kind() == TypeRefKind::GENERIC_REF;
+}
+
+bool DeclarationClassesRegistry::isEmitterParent(const ClassDecl *parent,
+                                                 const TypeRef &ref) const {
+  return parent != nullptr && parent->library() &&
+         LibraryClassTable::isName(parent->name, LibraryClass::EVENT_EMITTER) &&
+         ref.kind() == TypeRefKind::NAME_REF;
+}
+
+bool DeclarationClassesRegistry::isGenericParent(const ClassDecl *parent,
+                                                 const TypeRef &ref) const {
+  return parent != nullptr && (parent->isGeneric() || ref.kind() == TypeRefKind::GENERIC_REF);
+}
+
+void DeclarationClassesRegistry::finishParentClass(const FinishParentClass &task) {
+  ClassDecl *classDecl = task.classDecl;
+  auto *instance = this->classOf(classDecl->base->resolved);
+  auto lookup = ParentLookup{
+      .parent = instance,
+      .found = instance != nullptr ? task.found : nullptr,
+      .isInstance = true,
+  };
+
+  return this->linkFoundParent(classDecl, lookup);
+}
+
+void DeclarationClassesRegistry::linkFoundParent(ClassDecl *classDecl, const ParentLookup &lookup) {
+  const TypeRef &ref = *classDecl->base;
+  bool isNamed = this->isNamedRef(ref);
   auto base = this->checkBaseClass(classDecl, ref, isNamed, lookup);
   if (base.isErr() &&
       base.error().code != DeclarationClassesRegistryBaseClassErrorCode::ALREADY_REPORTED) {
@@ -1407,78 +1524,19 @@ void DeclarationClassesRegistry::resolveParentClass(ClassDecl *classDecl, const 
   return this->linkParent(classDecl, lookup.parent);
 }
 
-DeclarationClassesRegistry::ParentLookup
-DeclarationClassesRegistry::parentOf(ClassDecl *classDecl, const TypeRef &ref, Stmt *found) {
-  auto *parent = llvm::dyn_cast_or_null<ClassDecl>(found);
-  bool isEmitter = parent != nullptr && parent->library() &&
-                   LibraryClassTable::isName(parent->name, LibraryClass::EVENT_EMITTER) &&
-                   ref.kind() == TypeRefKind::NAME_REF;
-  if (isEmitter) {
-    return this->emitterParent(classDecl, ref, parent, found);
-  }
-  bool isGeneric =
-      parent != nullptr && (parent->isGeneric() || ref.kind() == TypeRefKind::GENERIC_REF);
-  if (!isGeneric) {
-    return ParentLookup{
-        .parent = parent,
-        .found = found,
-        .isInstance = false,
-    };
-  }
-  const auto *type = this->typeResolver->resolveType(ref);
-  auto *instance = this->classOf(type);
-
-  return ParentLookup{
-      .parent = instance,
-      .found = instance != nullptr ? found : nullptr,
-      .isInstance = true,
-  };
-}
-
-DeclarationClassesRegistry::ParentLookup
-DeclarationClassesRegistry::emitterParent(ClassDecl *classDecl, const TypeRef &ref,
-                                          ClassDecl *emitter, Stmt *found) {
-  auto *events = this->eventMapInference->classEventMap(classDecl);
-  auto made = this->genericClassInstantiator->instantiateClass(emitter, {events}, ref.loc);
-  bool isReportable =
-      made.isErr() &&
-      made.error().code != GenericClassInstantiatorInstantiateClassErrorCode::ALREADY_REPORTED;
-  if (isReportable) {
-    bool isEndless =
-        made.error().code == GenericClassInstantiatorInstantiateClassErrorCode::ENDLESS_INSTANCES;
-    llvm::SMLoc at = isEndless ? emitter->loc() : ref.loc;
-    this->state.diagnostics.error(at, made.error().message);
-  }
-  ClassDecl *parent = made.isOk() ? made.value() : nullptr;
-
-  return ParentLookup{
-      .parent = parent,
-      .found = parent != nullptr ? found : nullptr,
-      .isInstance = true,
-  };
-}
-
-void DeclarationClassesRegistry::linkParent(ClassDecl *classDecl, ClassDecl *parent) {
-  auto topTypes = this->state.walk.scopes.getTopTypes();
-  this->state.walk.scopes.enterOnlyTypes(topTypes);
-  auto *home = this->state.declaration.modules.findDeclModule(parent);
-  auto *here = this->state.declaration.modules.getCurrentModule();
-  bool isForeign = home != nullptr && home != here && this->state.walk.scopes.isTopLevel();
-  if (isForeign) {
-    this->modules->useModule(home);
-    this->resolveClass(parent);
-    this->modules->useModule(here);
-  } else {
-    this->resolveClass(parent);
-  }
+void DeclarationClassesRegistry::finishLinkParent(const FinishLinkParent &task) {
+  ClassDecl *classDecl = task.classDecl;
+  ClassDecl *parent = task.parent;
   this->state.walk.scopes.leaveOnlyTypes();
   classDecl->parent = parent;
   parent->children.push_back(classDecl);
   this->addBase(classDecl->type, parent->type);
 }
 
-void DeclarationClassesRegistry::addImplemented(ClassDecl *classDecl, const TypeRef &ref) {
-  const auto *type = this->typeResolver->resolveType(ref);
+void DeclarationClassesRegistry::finishImplemented(const FinishImplemented &task) {
+  ClassDecl *classDecl = task.classDecl;
+  const TypeRef &ref = *task.ref;
+  const auto *type = ref.resolved;
   if (type->isError()) {
     return;
   }
@@ -1492,6 +1550,21 @@ void DeclarationClassesRegistry::addImplemented(ClassDecl *classDecl, const Type
   }
   classDecl->implemented.push_back(type);
   this->addBase(classDecl->type, type);
+}
+
+void DeclarationClassesRegistry::linkParent(ClassDecl *classDecl, ClassDecl *parent) {
+  auto topTypes = this->state.walk.scopes.getTopTypes();
+  this->state.walk.scopes.enterOnlyTypes(topTypes);
+  auto *home = this->state.declaration.modules.findDeclModule(parent);
+  auto *here = this->state.declaration.modules.getCurrentModule();
+  bool isForeign = home != nullptr && home != here && this->state.walk.scopes.isTopLevel();
+  this->state.walk.tasks.pushTask(FinishLinkParent{.classDecl = classDecl, .parent = parent});
+  if (!isForeign) {
+    return this->state.walk.tasks.pushTask(ResolveClass{.classDecl = parent});
+  }
+  this->state.walk.tasks.pushTask(UseModule{.module = here});
+  this->state.walk.tasks.pushTask(ResolveClass{.classDecl = parent});
+  this->state.walk.tasks.pushTask(UseModule{.module = home});
 }
 
 void DeclarationClassesRegistry::walkRedeclaredField(ClassDecl *classDecl, ClassField &field) {
@@ -1649,47 +1722,60 @@ DeclarationClassesRegistry::checkNarrowsField(const TypeAliasDecl *alias, const 
   return ok(&field);
 }
 
-std::vector<Field> DeclarationClassesRegistry::interfaceFields(TypeAliasDecl *alias,
-                                                               std::vector<const Type *> &bases,
-                                                               std::vector<Overload> &overloads) {
-  auto shape = InterfaceShape();
-  for (const TypeRef &ref : alias->bases) {
-    const auto *base = this->interfaceBaseType(alias, ref, bases);
-    if (base != nullptr) {
-      bases.push_back(base);
-      this->mergeBaseOverloads(alias, ref, base, overloads);
-      this->mergeBaseFields(alias, ref, base, shape);
-    }
-  }
-  auto ownOverloads = std::vector<Overload>();
-  auto ownFields = this->typeResolver->resolveFields(alias->type, &ownOverloads);
-  for (const Overload &overload : ownOverloads) {
-    auto unused = this->checkNewOverload(alias, overload, shape.fields, overloads);
-    if (unused.isErr()) {
-      this->state.diagnostics.error(alias->loc(), unused.error().message);
-    } else {
-      overloads.push_back(overload);
-    }
-  }
-  for (const Field &field : ownFields) {
-    this->addOwnField(alias, field, overloads, shape);
-  }
+void DeclarationClassesRegistry::startInterfaceFields(const StartInterfaceFields &task) {
+  auto draft = InterfaceDraft{
+      .alias = task.alias,
+      .fields = {},
+      .origins = {},
+      .overloads = {},
+      .bases = {},
+  };
 
-  return shape.fields;
+  return this->pushInterfaceBase(draft, 0);
 }
 
-const Type *DeclarationClassesRegistry::interfaceBaseType(const TypeAliasDecl *alias,
-                                                          const TypeRef &ref,
-                                                          llvm::ArrayRef<const Type *> bases) {
+void DeclarationClassesRegistry::pushInterfaceBase(const InterfaceDraft &draft, size_t index) {
+  TypeAliasDecl *alias = draft.alias;
+  if (index == alias->bases.size()) {
+    this->state.walk.tasks.pushTask(FinishInterfaceFields{.draft = draft});
+
+    return this->state.walk.tasks.pushTask(ResolveObjectFields{.ref = &alias->type});
+  }
+  this->state.walk.tasks.pushTask(StartInterfaceBase{.draft = draft, .index = index});
+}
+
+void DeclarationClassesRegistry::startInterfaceBase(const StartInterfaceBase &task) {
+  TypeAliasDecl *alias = task.draft.alias;
+  TypeRef &ref = alias->bases[task.index];
   Stmt *found =
       ref.kind() == TypeRefKind::NAME_REF ? this->state.findTypeDeclaration(ref.name) : nullptr;
   auto *other = llvm::dyn_cast_or_null<TypeAliasDecl>(found);
   auto self = this->checkNotSelf(alias, other);
   if (self.isErr()) {
     this->state.diagnostics.error(ref.loc, self.error().message);
-    return nullptr;
+
+    return this->pushInterfaceBase(task.draft, task.index + 1);
   }
-  const auto *base = this->typeResolver->resolveType(ref);
+  this->state.walk.tasks.pushTask(FinishInterfaceBase{.draft = task.draft, .index = task.index});
+  this->state.walk.tasks.pushTask(ResolveTypeRef{.ref = &ref, .isVoidAllowed = false});
+}
+
+void DeclarationClassesRegistry::finishInterfaceBase(const FinishInterfaceBase &task) {
+  InterfaceDraft draft = task.draft;
+  const TypeRef &ref = draft.alias->bases[task.index];
+  const auto *base = this->acceptedInterfaceBase(ref, draft.bases);
+  if (base != nullptr) {
+    draft.bases.push_back(base);
+    this->mergeBaseOverloads(ref, base, draft);
+    this->mergeBaseFields(ref, base, draft);
+  }
+
+  return this->pushInterfaceBase(draft, task.index + 1);
+}
+
+const Type *DeclarationClassesRegistry::acceptedInterfaceBase(const TypeRef &ref,
+                                                              llvm::ArrayRef<const Type *> bases) {
+  const auto *base = ref.resolved;
   if (base->isError()) {
     return nullptr;
   }
@@ -1705,15 +1791,34 @@ const Type *DeclarationClassesRegistry::interfaceBaseType(const TypeAliasDecl *a
   return base;
 }
 
-void DeclarationClassesRegistry::mergeBaseOverloads(const TypeAliasDecl *alias, const TypeRef &ref,
-                                                    const Type *base,
-                                                    std::vector<Overload> &overloads) {
-  for (const Overload &overload : base->overloads()) {
-    const auto *known = this->overloadNamed(overloads, overload.name);
-    if (known == nullptr) {
-      overloads.push_back(overload);
+void DeclarationClassesRegistry::finishInterfaceFields(const FinishInterfaceFields &task) {
+  InterfaceDraft draft = task.draft;
+  TypeAliasDecl *alias = draft.alias;
+  ObjectTypeRef *shape = alias->type.form.as<ObjectTypeRef>();
+  for (const Overload &overload : shape->resolvedOverloads) {
+    auto unused = this->checkNewOverload(alias, overload, draft.fields, draft.overloads);
+    if (unused.isErr()) {
+      this->state.diagnostics.error(alias->loc(), unused.error().message);
     } else {
-      this->walkSameSignatures(alias, ref, *known, overload);
+      draft.overloads.push_back(overload);
+    }
+  }
+  for (const Field &field : shape->resolvedFields) {
+    this->addOwnField(field, draft);
+  }
+  shape->resolvedFields = std::move(draft.fields);
+  shape->resolvedOverloads = std::move(draft.overloads);
+  shape->resolvedBases = std::move(draft.bases);
+}
+
+void DeclarationClassesRegistry::mergeBaseOverloads(const TypeRef &ref, const Type *base,
+                                                    InterfaceDraft &draft) {
+  for (const Overload &overload : base->overloads()) {
+    const auto *known = this->overloadNamed(draft.overloads, overload.name);
+    if (known == nullptr) {
+      draft.overloads.push_back(overload);
+    } else {
+      this->walkSameSignatures(draft.alias, ref, *known, overload);
     }
   }
 }
@@ -1749,25 +1854,25 @@ size_t DeclarationClassesRegistry::fieldIndex(llvm::ArrayRef<Field> fields,
   return fields.size();
 }
 
-void DeclarationClassesRegistry::mergeBaseFields(const TypeAliasDecl *alias, const TypeRef &ref,
-                                                 const Type *base, InterfaceShape &shape) {
+void DeclarationClassesRegistry::mergeBaseFields(const TypeRef &ref, const Type *base,
+                                                 InterfaceDraft &draft) {
   std::string baseName = ref.name.str();
   for (const Field &field : base->fields()) {
-    this->mergeBaseField(alias, ref, field, baseName, shape);
+    this->mergeBaseField(ref, field, baseName, draft);
   }
 }
 
-void DeclarationClassesRegistry::mergeBaseField(const TypeAliasDecl *alias, const TypeRef &ref,
-                                                const Field &field, const std::string &baseName,
-                                                InterfaceShape &shape) {
-  size_t at = this->fieldIndex(shape.fields, field.name);
-  if (at == shape.fields.size()) {
-    shape.fields.push_back(field);
-    shape.origins.push_back(baseName);
+void DeclarationClassesRegistry::mergeBaseField(const TypeRef &ref, const Field &field,
+                                                const std::string &baseName,
+                                                InterfaceDraft &draft) {
+  size_t at = this->fieldIndex(draft.fields, field.name);
+  if (at == draft.fields.size()) {
+    draft.fields.push_back(field);
+    draft.origins.push_back(baseName);
     return;
   }
-  Field &known = shape.fields[at];
-  auto one = this->checkSameFieldType(alias, known, field, shape.origins[at], baseName);
+  Field &known = draft.fields[at];
+  auto one = this->checkSameFieldType(draft.alias, known, field, draft.origins[at], baseName);
   if (one.isErr()) {
     this->state.diagnostics.error(ref.loc, one.error().message);
     return;
@@ -1775,23 +1880,22 @@ void DeclarationClassesRegistry::mergeBaseField(const TypeAliasDecl *alias, cons
   known.readonly = known.readonly && field.readonly;
 }
 
-void DeclarationClassesRegistry::addOwnField(const TypeAliasDecl *alias, const Field &field,
-                                             llvm::ArrayRef<Overload> overloads,
-                                             InterfaceShape &shape) {
-  auto unused = this->checkNewField(alias, field, overloads);
+void DeclarationClassesRegistry::addOwnField(const Field &field, InterfaceDraft &draft) {
+  const TypeAliasDecl *alias = draft.alias;
+  auto unused = this->checkNewField(alias, field, draft.overloads);
   if (unused.isErr()) {
     this->state.diagnostics.error(alias->loc(), unused.error().message);
     return;
   }
   auto loc = this->ownFieldLoc(alias, field.name);
-  size_t at = this->fieldIndex(shape.fields, field.name);
-  if (at == shape.fields.size()) {
-    shape.fields.push_back(field);
-    shape.origins.push_back(alias->name.str());
+  size_t at = this->fieldIndex(draft.fields, field.name);
+  if (at == draft.fields.size()) {
+    draft.fields.push_back(field);
+    draft.origins.push_back(alias->name.str());
     return;
   }
-  Field &known = shape.fields[at];
-  auto narrows = this->checkNarrowsField(alias, field, known, shape.origins[at]);
+  Field &known = draft.fields[at];
+  auto narrows = this->checkNarrowsField(alias, field, known, draft.origins[at]);
   if (narrows.isErr()) {
     this->state.diagnostics.error(loc, narrows.error().message);
     return;
@@ -1815,18 +1919,21 @@ llvm::SMLoc DeclarationClassesRegistry::ownFieldLoc(const TypeAliasDecl *alias,
   return alias->loc();
 }
 
-void DeclarationClassesRegistry::declareItemMethods(Stmt *item, Module *module,
-                                                    std::vector<FunctionDecl *> &functions) {
+void DeclarationClassesRegistry::declareItemMethods(Stmt *item, Module *module) {
   auto *classDecl = dyn_cast<ClassDecl>(item);
   bool isDeclared =
       classDecl != nullptr && classDecl->type != nullptr && classDecl->baseExpr == nullptr;
   if (!isDeclared) {
     return;
   }
-  this->declareMethods(classDecl);
-  for (FunctionDecl *method : classDecl->collectMemberFunctions()) {
-    this->state.declaration.modules.rememberDeclModule(method, module);
-    functions.push_back(method);
+  this->state.walk.tasks.pushTask(FinishItemMethods{.classDecl = classDecl, .module = module});
+  this->state.walk.tasks.pushTask(DeclareMethods{.classDecl = classDecl});
+}
+
+void DeclarationClassesRegistry::finishItemMethods(const FinishItemMethods &task) {
+  for (FunctionDecl *method : task.classDecl->collectMemberFunctions()) {
+    this->state.declaration.modules.rememberDeclModule(method, task.module);
+    this->state.inference.cycles.addDeclaredFunction(method);
   }
 }
 

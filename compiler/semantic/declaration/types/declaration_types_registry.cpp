@@ -4,15 +4,10 @@
 #include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/program/to_utf16/to_utf16.h"
 #include "compiler/program/to_utf8/to_utf8.h"
-#include "compiler/semantic/declaration/classes/declaration_classes_registry.h"
-#include "compiler/semantic/declaration/modules/declaration_modules_registry.h"
 #include "compiler/semantic/flow/children_first/children_first.h"
 #include "compiler/semantic/flow/expr_parts/expr_parts.h"
-#include "compiler/semantic/generics/alias_instantiator/alias_instantiator.h"
-#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "compiler/semantic/types/type_parts/type_routes.h"
 #include "compiler/semantic/types/type_ref_parts/type_ref_parts.h"
-#include "compiler/semantic/types/type_resolver/type_resolver.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/CheckedArithmetic.h"
@@ -27,13 +22,16 @@ using llvm::dyn_cast_or_null;
 
 namespace tz {
 
-DeclarationTypesRegistry::DeclarationTypesRegistry(SemanticState &owner, SemanticParts &all)
-    : state(owner) {
-  this->typeResolver = &all.typeResolver;
-  this->classes = &all.declaration.classes;
-  this->modules = &all.declaration.modules;
-  this->aliasInstantiator = &all.aliasInstantiator;
+namespace {
+
+constexpr double kTwoTo32 = 4294967296.0;
+constexpr int kShiftMask = 31;
+constexpr double kMaxSafeInteger = 9007199254740992.0;
+
 }
+
+DeclarationTypesRegistry::DeclarationTypesRegistry(SemanticState &owner)
+    : state(owner) {}
 
 std::string DeclarationTypesRegistry::formatNumber(double value) const {
   char text[32];
@@ -123,12 +121,27 @@ std::optional<llvm::StringRef> DeclarationTypesRegistry::declaredTypeName(Stmt *
     return this->declareEnumName(enumDecl);
   }
   if (classDecl != nullptr && this->state.walk.scopes.isTopLevel()) {
-    this->classes->declareClass(classDecl);
+    this->declareClass(classDecl);
 
     return llvm::StringRef(classDecl->name);
   }
 
   return std::nullopt;
+}
+
+void DeclarationTypesRegistry::declareClass(ClassDecl *classDecl) {
+  classDecl->id = this->state.declaration.classes.takeClassId();
+  classDecl->type = Type::classType(classDecl->name, classDecl);
+  this->state.declaration.classes.addClass(classDecl);
+  auto added = this->state.walk.scopes.declare(classDecl->name, {ClassEntry{.cls = classDecl}});
+  if (added.isErr()) {
+    this->state.diagnostics.error(classDecl->loc(), added.error().message);
+  }
+  if (added.isErr() && added.error().code != ScopeStackContextDeclareErrorCode::UNDEFINED_AS_NAME) {
+    auto previousEntry = this->state.walk.scopes.findName(classDecl->name);
+    auto declaredHere = ErrorTextDeclareName::previous();
+    this->state.diagnostics.note(previousEntry.loc(), declaredHere);
+  }
 }
 
 std::optional<llvm::StringRef> DeclarationTypesRegistry::ownAliasName(const TypeAliasDecl *alias) {
@@ -189,36 +202,34 @@ bool DeclarationTypesRegistry::isMentioningTypeOf(const TypeRef &ref) const {
 }
 
 void DeclarationTypesRegistry::resolveTypes(llvm::ArrayRef<Stmt *> declared) {
-  for (Stmt *stmt : declared) {
-    this->resolveDeclared(stmt);
+  for (Stmt *stmt : llvm::reverse(declared)) {
+    this->pushDeclaredType(stmt);
   }
 }
 
-void DeclarationTypesRegistry::resolveDeclared(Stmt *stmt) {
+void DeclarationTypesRegistry::pushDeclaredType(Stmt *stmt) {
   auto *alias = dyn_cast<TypeAliasDecl>(stmt);
   auto *classDecl = dyn_cast<ClassDecl>(stmt);
   auto *enumDecl = dyn_cast<EnumDecl>(stmt);
   if (alias != nullptr) {
-    this->resolveDeclaredAlias(alias);
+    this->pushDeclaredAlias(alias);
   }
   if (classDecl != nullptr && classDecl->baseExpr == nullptr) {
-    this->classes->resolveClass(classDecl);
+    this->state.walk.tasks.pushTask(ResolveClass{.classDecl = classDecl});
   }
   if (enumDecl != nullptr) {
-    this->resolveEnum(enumDecl);
+    this->state.walk.tasks.pushTask(ResolveEnum{.enumDecl = enumDecl});
   }
 }
 
-void DeclarationTypesRegistry::resolveDeclaredAlias(TypeAliasDecl *alias) {
+void DeclarationTypesRegistry::pushDeclaredAlias(TypeAliasDecl *alias) {
   if (this->isMentioningTypeOf(alias->type)) {
     return;
   }
   if (alias->typeParams.empty()) {
-    this->resolveAlias(alias);
-    return;
+    return this->state.walk.tasks.pushTask(ResolveAlias{.alias = alias});
   }
-  auto params = this->aliasInstantiator->aliasTypeParams(alias);
-  this->aliasInstantiator->instantiateAlias(alias, std::move(params), alias->loc());
+  this->state.walk.tasks.pushTask(InstantiateOwnAlias{.alias = alias});
 }
 
 DeclarationTypesRegistry::ResultAliasNotCyclic
@@ -249,42 +260,54 @@ DeclarationTypesRegistry::recursiveUnion(const TypeAliasDecl *alias, const Type 
   return ok(type);
 }
 
-const Type *DeclarationTypesRegistry::resolveAlias(TypeAliasDecl *alias) {
+void DeclarationTypesRegistry::resolveAlias(const ResolveAlias &task) {
+  TypeAliasDecl *alias = task.alias;
   if (alias->resolved != nullptr) {
-    return alias->resolved;
+    return;
   }
   if (alias->resolving) {
-    return this->resolvingAlias(alias);
-  }
-  auto frames = std::vector<AliasFrame>();
-  this->startAlias(frames, alias);
-  while (!frames.empty()) {
-    auto *needed = this->takeUnresolvedAlias(frames.back());
-    if (needed != nullptr) {
-      this->startAlias(frames, needed);
-    } else {
-      this->finishAlias(frames);
-    }
+    return this->walkResolvingAlias(alias);
   }
 
-  return alias->resolved;
+  return this->beginAlias(alias);
 }
 
-const Type *DeclarationTypesRegistry::resolvingAlias(TypeAliasDecl *alias) {
+void DeclarationTypesRegistry::walkResolvingAlias(TypeAliasDecl *alias) {
   auto cycle = this->aliasCycle(alias);
   if (cycle.isOk()) {
     alias->recursive = true;
-
-    return alias->self;
+    return;
   }
   this->state.diagnostics.error(alias->loc(), cycle.error().message);
   alias->resolved = Type::error();
-
-  return alias->resolved;
 }
 
-void DeclarationTypesRegistry::startAlias(std::vector<AliasFrame> &frames, TypeAliasDecl *alias) {
-  auto previousModule = this->enterHomeModule(alias);
+void DeclarationTypesRegistry::startAlias(const StartAlias &task) {
+  TypeAliasDecl *alias = task.alias;
+  bool isWaiting = alias->resolved == nullptr && !alias->resolving;
+  if (!isWaiting) {
+    return;
+  }
+
+  return this->beginAlias(alias);
+}
+
+void DeclarationTypesRegistry::beginAlias(TypeAliasDecl *alias) {
+  auto *home = this->elsewhereHome(alias);
+  if (home == nullptr) {
+    return this->openAlias(alias, std::nullopt);
+  }
+  auto *here = this->state.declaration.modules.getCurrentModule();
+  this->state.walk.tasks.pushTask(EnterAlias{.alias = alias, .previousModule = here});
+  this->state.walk.tasks.pushTask(UseModule{.module = home});
+}
+
+void DeclarationTypesRegistry::enterAlias(const EnterAlias &task) {
+  return this->openAlias(task.alias, task.previousModule);
+}
+
+void DeclarationTypesRegistry::openAlias(TypeAliasDecl *alias,
+                                         std::optional<Module *> previousModule) {
   alias->resolving = true;
   bool isBuiltinModule = this->state.library.declarations.findModuleAlias(alias->name) == alias;
   if (isBuiltinModule) {
@@ -292,58 +315,52 @@ void DeclarationTypesRegistry::startAlias(std::vector<AliasFrame> &frames, TypeA
   }
   alias->self = this->declareSelf(alias);
   auto needed = this->neededAliases(alias);
-  auto frame = AliasFrame{
+  this->state.walk.tasks.pushTask(FinishAlias{
       .alias = alias,
       .previousModule = previousModule,
       .isBuiltinModule = isBuiltinModule,
-      .needed = std::move(needed),
-      .nextNeeded = 0,
-  };
-  frames.push_back(std::move(frame));
-}
-
-TypeAliasDecl *DeclarationTypesRegistry::takeUnresolvedAlias(AliasFrame &frame) const {
-  while (frame.nextNeeded < frame.needed.size()) {
-    TypeAliasDecl *needed = frame.needed[frame.nextNeeded];
-    frame.nextNeeded += 1;
-    bool isWaiting = needed->resolved == nullptr && !needed->resolving;
-    if (isWaiting) {
-      return needed;
-    }
+  });
+  this->pushAliasBody(alias);
+  for (TypeAliasDecl *other : llvm::reverse(needed)) {
+    this->state.walk.tasks.pushTask(StartAlias{.alias = other});
   }
-
-  return nullptr;
 }
 
-void DeclarationTypesRegistry::finishAlias(std::vector<AliasFrame> &frames) {
-  AliasFrame frame = std::move(frames.back());
-  frames.pop_back();
-  TypeAliasDecl *alias = frame.alias;
-  const auto *type = this->resolveAliasBody(alias);
+void DeclarationTypesRegistry::pushAliasBody(TypeAliasDecl *alias) {
+  TypeRefKind kind = alias->type.kind();
+  if (kind == TypeRefKind::OBJECT_REF && !alias->bases.empty()) {
+    return this->state.walk.tasks.pushTask(StartInterfaceFields{.alias = alias});
+  }
+  if (kind == TypeRefKind::OBJECT_REF) {
+    return this->state.walk.tasks.pushTask(ResolveObjectFields{.ref = &alias->type});
+  }
+  this->state.walk.tasks.pushTask(ResolveInnerTypeRef{.ref = &alias->type});
+}
+
+void DeclarationTypesRegistry::finishAlias(const FinishAlias &task) {
+  TypeAliasDecl *alias = task.alias;
+  const auto *type = this->aliasBodyType(alias);
   alias->resolving = false;
-  if (frame.isBuiltinModule) {
+  if (task.isBuiltinModule) {
     this->state.declaration.modules.leaveBuiltinModule();
   }
   if (alias->resolved == nullptr) {
     alias->resolved = type;
   }
   this->nameBuiltinUnion(alias);
-  if (frame.previousModule.has_value()) {
-    this->modules->useModule(*frame.previousModule);
+  if (task.previousModule.has_value()) {
+    this->state.walk.tasks.pushTask(UseModule{.module = *task.previousModule});
   }
+  this->pushAliasBases(alias, type);
 }
 
-std::optional<Module *> DeclarationTypesRegistry::enterHomeModule(const Stmt *declared) {
-  auto &modules = this->state.declaration.modules;
+Module *DeclarationTypesRegistry::elsewhereHome(const Stmt *declared) const {
+  const auto &modules = this->state.declaration.modules;
   auto *home = modules.findDeclModule(declared);
   auto *here = modules.getCurrentModule();
   bool isElsewhere = home != nullptr && home != here && this->state.walk.scopes.isTopLevel();
-  if (!isElsewhere) {
-    return std::nullopt;
-  }
-  this->modules->useModule(home);
 
-  return here;
+  return isElsewhere ? home : nullptr;
 }
 
 Type *DeclarationTypesRegistry::declareSelf(const TypeAliasDecl *alias) const {
@@ -392,32 +409,32 @@ TypeAliasDecl *DeclarationTypesRegistry::plainAliasNamed(const TypeRef &part) co
   return alias;
 }
 
-const Type *DeclarationTypesRegistry::resolveAliasBody(TypeAliasDecl *alias) {
+const Type *DeclarationTypesRegistry::aliasBodyType(TypeAliasDecl *alias) {
   TypeRefKind kind = alias->type.kind();
   if (kind == TypeRefKind::OBJECT_REF) {
-    return this->resolveObjectAlias(alias);
+    return this->objectAliasType(alias);
   }
   if (kind == TypeRefKind::UNION_REF) {
-    return this->resolveUnionAlias(alias);
+    return this->unionAliasType(alias);
   }
 
-  return this->typeResolver->resolveTypeInner(alias->type);
+  return alias->type.resolved;
 }
 
-const Type *DeclarationTypesRegistry::resolveObjectAlias(TypeAliasDecl *alias) {
-  auto bases = std::vector<const Type *>();
-  auto overloads = std::vector<Overload>();
-  std::vector<Field> fields = alias->bases.empty()
-                                  ? this->typeResolver->resolveFields(alias->type, &overloads)
-                                  : this->classes->interfaceFields(alias, bases, overloads);
-  const Type *type = this->definedObject(alias, std::move(fields), std::move(overloads));
-  for (const Type *base : bases) {
-    if (!type->isError()) {
-      this->classes->addBase(type, base);
-    }
-  }
+const Type *DeclarationTypesRegistry::objectAliasType(const TypeAliasDecl *alias) const {
+  const ObjectTypeRef *shape = alias->type.form.as<ObjectTypeRef>();
 
-  return type;
+  return this->definedObject(alias, shape->resolvedFields, shape->resolvedOverloads);
+}
+
+void DeclarationTypesRegistry::pushAliasBases(const TypeAliasDecl *alias, const Type *type) {
+  if (alias->type.kind() != TypeRefKind::OBJECT_REF || type->isError()) {
+    return;
+  }
+  const ObjectTypeRef *shape = alias->type.form.as<ObjectTypeRef>();
+  for (const Type *base : llvm::reverse(shape->resolvedBases)) {
+    this->state.walk.tasks.pushTask(AddBase{.type = type, .base = base});
+  }
 }
 
 const Type *DeclarationTypesRegistry::definedObject(const TypeAliasDecl *alias,
@@ -432,8 +449,8 @@ const Type *DeclarationTypesRegistry::definedObject(const TypeAliasDecl *alias,
   return Type::object(std::move(fields), alias->name, std::move(overloads));
 }
 
-const Type *DeclarationTypesRegistry::resolveUnionAlias(TypeAliasDecl *alias) {
-  const auto *type = this->typeResolver->resolveTypeInner(alias->type);
+const Type *DeclarationTypesRegistry::unionAliasType(TypeAliasDecl *alias) {
+  const auto *type = alias->type.resolved;
   auto recursion = this->recursiveUnion(alias, type);
   if (recursion.isErr()) {
     this->state.diagnostics.error(alias->loc(), recursion.error().message);
@@ -542,21 +559,18 @@ DeclarationTypesRegistry::enumKinds(const EnumDecl *enumDecl, const EnumCount &c
   return ok(enumDecl);
 }
 
-void DeclarationTypesRegistry::resolveEnum(EnumDecl *enumDecl) {
+void DeclarationTypesRegistry::resolveEnum(const ResolveEnum &task) {
+  EnumDecl *enumDecl = task.enumDecl;
   if (enumDecl->stage != EnumStage::UNRESOLVED) {
-    this->reportEnumCycle(enumDecl);
-    return;
+    return this->reportEnumCycle(enumDecl);
   }
-  auto frames = std::vector<EnumFrame>();
-  this->startEnum(frames, enumDecl);
-  while (!frames.empty()) {
-    auto *needed = this->unresolvedEnum(frames.back());
-    if (needed != nullptr) {
-      this->startEnum(frames, needed);
-    } else {
-      this->resolveNextMember(frames);
-    }
+  auto *home = this->elsewhereHome(enumDecl);
+  if (home == nullptr) {
+    return this->openEnum(enumDecl, std::nullopt);
   }
+  auto *here = this->state.declaration.modules.getCurrentModule();
+  this->state.walk.tasks.pushTask(EnterEnum{.enumDecl = enumDecl, .previousModule = here});
+  this->state.walk.tasks.pushTask(UseModule{.module = home});
 }
 
 void DeclarationTypesRegistry::reportEnumCycle(const EnumDecl *enumDecl) {
@@ -566,8 +580,12 @@ void DeclarationTypesRegistry::reportEnumCycle(const EnumDecl *enumDecl) {
   }
 }
 
-void DeclarationTypesRegistry::startEnum(std::vector<EnumFrame> &frames, EnumDecl *enumDecl) {
-  auto previousModule = this->enterHomeModule(enumDecl);
+void DeclarationTypesRegistry::enterEnum(const EnterEnum &task) {
+  return this->openEnum(task.enumDecl, task.previousModule);
+}
+
+void DeclarationTypesRegistry::openEnum(EnumDecl *enumDecl,
+                                        std::optional<Module *> previousModule) {
   enumDecl->stage = EnumStage::RESOLVING;
   auto count = EnumCount{
       .next = 0,
@@ -581,8 +599,8 @@ void DeclarationTypesRegistry::startEnum(std::vector<EnumFrame> &frames, EnumDec
       .nextMember = 0,
       .count = count,
   };
-  frames.push_back(frame);
-  this->enterMember(frames.back());
+  this->enterMember(frame);
+  this->state.walk.tasks.pushTask(NextEnumMember{.frame = frame});
 }
 
 void DeclarationTypesRegistry::enterMember(const EnumFrame &frame) {
@@ -615,16 +633,22 @@ EnumDecl *DeclarationTypesRegistry::unresolvedEnum(const EnumFrame &frame) const
   return nullptr;
 }
 
-void DeclarationTypesRegistry::resolveNextMember(std::vector<EnumFrame> &frames) {
-  EnumFrame &frame = frames.back();
+void DeclarationTypesRegistry::nextEnumMember(const NextEnumMember &task) {
+  EnumFrame frame = task.frame;
+  auto *needed = this->unresolvedEnum(frame);
+  if (needed != nullptr) {
+    this->state.walk.tasks.pushTask(NextEnumMember{.frame = frame});
+
+    return this->state.walk.tasks.pushTask(ResolveEnum{.enumDecl = needed});
+  }
   if (frame.nextMember == frame.enumDecl->members.size()) {
-    return this->finishEnum(frames);
+    return this->finishEnum(frame);
   }
   this->reportNeededCycles(frame);
   this->countMember(frame);
   frame.nextMember += 1;
-
-  return this->enterMember(frame);
+  this->enterMember(frame);
+  this->state.walk.tasks.pushTask(NextEnumMember{.frame = frame});
 }
 
 void DeclarationTypesRegistry::reportNeededCycles(const EnumFrame &frame) {
@@ -686,9 +710,7 @@ void DeclarationTypesRegistry::numberMember(EnumFrame &frame, EnumMember &member
   frame.count.isCounting = true;
 }
 
-void DeclarationTypesRegistry::finishEnum(std::vector<EnumFrame> &frames) {
-  EnumFrame frame = frames.back();
-  frames.pop_back();
+void DeclarationTypesRegistry::finishEnum(const EnumFrame &frame) {
   EnumDecl *enumDecl = frame.enumDecl;
   auto same = this->enumKinds(enumDecl, frame.count);
   if (same.isErr()) {
@@ -700,7 +722,7 @@ void DeclarationTypesRegistry::finishEnum(std::vector<EnumFrame> &frames) {
     this->markTextsAssigned(enumDecl);
   }
   if (frame.previousModule.has_value()) {
-    this->modules->useModule(*frame.previousModule);
+    this->state.walk.tasks.pushTask(UseModule{.module = *frame.previousModule});
   }
 }
 
@@ -711,8 +733,7 @@ void DeclarationTypesRegistry::markTextsAssigned(const EnumDecl *enumDecl) {
   }
 }
 
-const Type *DeclarationTypesRegistry::enumType(EnumDecl *enumDecl) {
-  this->resolveEnum(enumDecl);
+const Type *DeclarationTypesRegistry::enumType(const EnumDecl *enumDecl) const {
   if (!enumDecl->isString) {
     return Type::intTy();
   }

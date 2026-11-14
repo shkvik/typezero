@@ -8,29 +8,28 @@
 
 namespace tz {
 
-class ChunkTypes;
-class TypeParams;
-class AsyncChecker;
-class TypeResolver;
-class SemanticParts;
-class IterableChecker;
-class GeneratorChecker;
-class GenericClassChecker;
-
 class DeclarationFunctionsRegistry {
 public:
-  DeclarationFunctionsRegistry(SemanticState &owner, SemanticParts &all);
+  explicit DeclarationFunctionsRegistry(SemanticState &owner);
 
-  void declareSignature(FunctionDecl *functionDecl);
+  void startReturnType(const StartReturnType &task);
+  void declareItemFunction(Stmt *item, Module *module);
+  void startFunctionParam(const StartFunctionParam &task);
+  void finishAssertsReturn(const FinishAssertsReturn &task);
+  void finishFunctionParam(const FinishFunctionParam &task);
+  void startFunctionParams(const StartFunctionParams &task);
+  void startFunctionReturn(const StartFunctionReturn &task);
+  void startFunctionSymbol(const StartFunctionSymbol &task);
+  void finishFunctionReturn(const FinishFunctionReturn &task);
+  void finishFunctionSymbol(const FinishFunctionSymbol &task);
+  void finishPredicateReturn(const FinishPredicateReturn &task);
   void expandArgumentList(FunctionDecl *functionDecl, FuncSymbol *function);
-  void declareFunction(FunctionDecl *functionDecl, VarSymbol *variable = nullptr);
-  void declareItemFunction(Stmt *item, Module *module, std::vector<FunctionDecl *> &functions);
 
 
   bool isReturningValue(const Stmt *body) const;
 
 
-  const Type *resolveReturnType(FunctionDecl *functionDecl, FuncSymbol *function);
+  const Type *declaredReturnType(const FunctionDecl *functionDecl) const;
 
 private:
   using ResultPredicateArg = Result<int, DeclarationFunctionsRegistryPredicateArgError>;
@@ -47,24 +46,18 @@ private:
   using ResultTopLevelGenerics =
       Result<const FunctionDecl *, DeclarationFunctionsRegistryTopLevelGenericError>;
 
-  void declareSymbol(FunctionDecl *functionDecl, VarSymbol *variable);
-  void reportAsserting(const FunctionDecl *functionDecl, const TypeRef &ref);
+  void pushPredicateType(TypeRef &ref);
+  void padHookParams(FunctionDecl *functionDecl);
+  void pushFunctionTypeParams(const FunctionSymbolDraft &draft);
   void declareRestParam(FuncSymbol *function, Param &param, const Type *type);
-  void declareWrittenReturn(FunctionDecl *functionDecl, FuncSymbol *function);
-  void declareFunctionReturn(FunctionDecl *functionDecl, FuncSymbol *function);
+  void placeFunctionParam(const FunctionSymbolDraft &draft, size_t index, const Type *declared);
   void walkThisParam(const FunctionDecl *functionDecl, FuncSymbol *function, const Param &param);
   void declareFunctionName(FunctionDecl *functionDecl, FuncSymbol *function, VarSymbol *variable);
-  void padHookParams(FunctionDecl *functionDecl,
-                     const std::optional<std::vector<const Type *>> &hook);
-  void declareFunctionTypeParams(FunctionDecl *functionDecl, FuncSymbol *function,
-                                 VarSymbol *variable);
-  void declareFunctionParam(FunctionDecl *functionDecl, FuncSymbol *function, size_t index,
-                            const Type *hooked);
 
 
   bool isGivingValue(const ReturnStmt *returnStmt) const;
   bool hasRestParam(const FunctionDecl *functionDecl) const;
-  bool isGenericDeclaration(const FunctionDecl *functionDecl);
+  bool isGenericDeclaration(const FunctionDecl *functionDecl) const;
   bool hasOptionalBefore(const FunctionDecl *functionDecl, size_t index) const;
   bool isExpandableRest(const FunctionDecl *functionDecl, const FuncSymbol *function) const;
 
@@ -79,33 +72,22 @@ private:
 
 
   const Type *predicateType(const TypeRef &ref) const;
-  const Type *resolvedParamType(FunctionDecl *functionDecl, FuncSymbol *function,
-                                const Param &param);
-  const Type *writtenParamType(FunctionDecl *functionDecl, FuncSymbol *function, const Param &param,
-                               const Type *hooked);
-  const Type *declaredParamType(FunctionDecl *functionDecl, FuncSymbol *function,
-                                const Param &param, const Type *hooked);
+  const Type *unwrittenParamType(const Param &param, const Type *hooked);
+  const Type *hookedParam(const FunctionDecl *functionDecl, size_t index) const;
 
 
   ResultParamTypeIsKnown checkParamTypeKnown(const Param &param) const;
   ResultThisParamAllowed checkThisParam(const FunctionDecl *functionDecl) const;
   ResultRestParamIsArray checkRestType(const Type *type, const Param &param) const;
   ResultTopLevelGenerics checkTopLevelGeneric(const FunctionDecl *functionDecl) const;
-  ResultNotAsserting notAsserting(const FunctionDecl *functionDecl, const TypeRef &ref);
   ResultParamOrderIsKept checkRequiredOrder(const Param &param, bool isAfterOptional) const;
+  ResultNotAsserting notAsserting(const FunctionDecl *functionDecl, const TypeRef &ref) const;
   ResultPredicateArg predicateArg(const FunctionDecl *functionDecl, const TypeRef &ref) const;
   std::optional<int> lastParamNamed(const FunctionDecl *functionDecl, llvm::StringRef name) const;
   ResultDecoratorAllowed checkParamDecorators(const FunctionDecl *functionDecl,
                                               const Param &param) const;
 
   SemanticState &state;
-  ChunkTypes *chunkTypes = nullptr;
-  TypeParams *typeParams = nullptr;
-  AsyncChecker *asyncChecker = nullptr;
-  TypeResolver *typeResolver = nullptr;
-  IterableChecker *iterableChecker = nullptr;
-  GeneratorChecker *generatorChecker = nullptr;
-  GenericClassChecker *genericClassChecker = nullptr;
 };
 
 }

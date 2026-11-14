@@ -28,4 +28,19 @@ VarSymbol *StreamContext::getProcessStdin() const {
   return this->processStdin;
 }
 
+void StreamContext::rememberHookParams(const FunctionDecl *functionDecl,
+                                       std::vector<const Type *> params) {
+  this->hookParams[functionDecl] = std::move(params);
+}
+
+std::optional<std::vector<const Type *>>
+StreamContext::findHookParams(const FunctionDecl *functionDecl) const {
+  auto found = this->hookParams.find(functionDecl);
+  if (found == this->hookParams.end()) {
+    return std::nullopt;
+  }
+
+  return found->second;
+}
+
 }

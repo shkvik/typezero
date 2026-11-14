@@ -2,12 +2,7 @@
 #include "compiler/program/library/fs/fs_function_table/fs_function_table.h"
 #include "compiler/program/library/library_module_names/library_module_names.h"
 #include "compiler/program/module/load_chain/load_chain.h"
-#include "compiler/semantic/bodies/stmt/stmt_checker/stmt_checker.h"
-#include "compiler/semantic/infer/return_inferrer/return_inferrer.h"
-#include "compiler/semantic/library/builtin_modules/builtin_module_checker/builtin_module_checker.h"
-#include "compiler/semantic/library/events/emitter_checker/emitter_checker.h"
 #include "compiler/semantic/library/events/emitter_checker/emitter_checker_errors.h"
-#include "compiler/semantic/semantic_parts/semantic_parts.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cassert>
 
@@ -16,13 +11,8 @@ using llvm::isa;
 
 namespace tz {
 
-DeclarationModulesRegistry::DeclarationModulesRegistry(SemanticState &owner, SemanticParts &all)
-    : state(owner) {
-  this->stmtChecker = &all.stmtChecker;
-  this->emitterChecker = &all.emitterChecker;
-  this->returnInferrer = &all.returnInferrer;
-  this->builtinModuleChecker = &all.builtinModuleChecker;
-}
+DeclarationModulesRegistry::DeclarationModulesRegistry(SemanticState &owner)
+    : state(owner) {}
 
 void DeclarationModulesRegistry::useModule(Module *module) {
   auto &modules = this->state.declaration.modules;
@@ -580,12 +570,14 @@ void DeclarationModulesRegistry::importName(ModuleState &here, const ImportDecl 
 }
 
 void DeclarationModulesRegistry::resolveImports(Module *module) {
-  for (const ImportDecl &importDecl : module->file.imports) {
-    this->resolveImport(module, importDecl);
+  for (const ImportDecl &importDecl : llvm::reverse(module->file.imports)) {
+    this->state.walk.tasks.pushTask(ResolveImport{.module = module, .importDecl = &importDecl});
   }
 }
 
-void DeclarationModulesRegistry::resolveImport(Module *module, const ImportDecl &importDecl) {
+void DeclarationModulesRegistry::resolveImport(const ResolveImport &task) {
+  Module *module = task.module;
+  const ImportDecl &importDecl = *task.importDecl;
   auto &here = this->state.declaration.modules.getModuleState(module);
   auto source = this->checkImportSource(importDecl);
   if (source.isErr()) {
@@ -596,8 +588,8 @@ void DeclarationModulesRegistry::resolveImport(Module *module, const ImportDecl 
     return;
   }
   if (BuiltinModulePaths::isBuiltinModule(importDecl.path) && importDecl.from == nullptr) {
-    this->builtinModuleChecker->importBuiltinModule(module, importDecl);
-    return;
+    return this->state.walk.tasks.pushTask(
+        ImportBuiltinModule{.module = module, .importDecl = &importDecl});
   }
   auto whole = this->wholeImport(importDecl);
   if (whole.isErr()) {
@@ -735,7 +727,8 @@ FunctionDecl *DeclarationModulesRegistry::cycleCallee(FunctionDecl *functionDecl
   return found->func()->decl;
 }
 
-void DeclarationModulesRegistry::loadTopLevel(Module *module, llvm::StringRef until) {
+void DeclarationModulesRegistry::startTopLevel(const StartTopLevel &task) {
+  Module *module = task.module;
   auto &here = this->state.declaration.modules.getModuleState(module);
   auto *outer = this->state.declaration.modules.getCurrentModule();
   this->useModule(module);
@@ -746,45 +739,69 @@ void DeclarationModulesRegistry::loadTopLevel(Module *module, llvm::StringRef un
     this->state.walk.flow.replaceFlow(std::move(*here.flow));
     here.flow.reset();
   }
+  this->state.walk.tasks.pushTask(FinishTopLevel{.module = module, .outer = outer});
+  this->state.walk.tasks.pushTask(NextTopLevelItem{.module = module, .until = task.until});
+}
+
+void DeclarationModulesRegistry::nextTopLevelItem(const NextTopLevelItem &task) {
+  Module *module = task.module;
+  auto &here = this->state.declaration.modules.getModuleState(module);
   std::vector<Stmt *> &items = module->file.items;
-  while (here.next < items.size()) {
-    Stmt *item = items[here.next++];
-    if (isa<FunctionDecl>(item)) {
-      continue;
-    }
-    this->state.walk.block.rememberBlockPosition(items, here.next - 1);
-    this->stmtChecker->walkStmt(item);
-    auto *varDecl = dyn_cast<VarDeclStmt>(item);
-    if (!until.empty() && varDecl != nullptr &&
-        llvm::any_of(varDecl->decls,
-                     [&](const VarDeclarator &declarator) { return declarator.name == until; })) {
-      break;
+  if (here.next >= items.size()) {
+    return;
+  }
+  Stmt *item = items[here.next++];
+  if (isa<FunctionDecl>(item)) {
+    return this->state.walk.tasks.pushTask(task);
+  }
+  this->state.walk.block.rememberBlockPosition(items, here.next - 1);
+  if (!this->isDeclaringName(item, task.until)) {
+    this->state.walk.tasks.pushTask(task);
+  }
+  this->state.walk.tasks.pushTask(WalkStmt{.stmt = item});
+}
+
+bool DeclarationModulesRegistry::isDeclaringName(const Stmt *item, llvm::StringRef name) const {
+  auto *varDecl = dyn_cast<VarDeclStmt>(item);
+  if (name.empty() || varDecl == nullptr) {
+    return false;
+  }
+  for (const VarDeclarator &declarator : varDecl->decls) {
+    if (declarator.name == name) {
+      return true;
     }
   }
-  if (here.next == items.size()) {
-    here.loaded = true;
-    this->emitterChecker->reportUnlistenedErrors();
-  } else {
+
+  return false;
+}
+
+void DeclarationModulesRegistry::finishTopLevel(const FinishTopLevel &task) {
+  Module *module = task.module;
+  auto &here = this->state.declaration.modules.getModuleState(module);
+  auto close = CloseTopLevel{.module = module, .outer = task.outer};
+  if (here.next != module->file.items.size()) {
     here.flow = this->state.walk.flow.getFlow();
+
+    return this->closeTopLevel(close);
   }
+  here.loaded = true;
+  this->state.walk.tasks.pushTask(close);
+  this->state.walk.tasks.pushTask(ReportUnlistenedErrors{});
+}
+
+void DeclarationModulesRegistry::closeTopLevel(const CloseTopLevel &task) {
+  auto &here = this->state.declaration.modules.getModuleState(task.module);
   here.busy = false;
   this->state.declaration.modules.leaveLoading();
   here.values = this->state.walk.scopes.getTopValues();
   here.types = this->state.walk.scopes.getTopTypes();
-  if (outer != nullptr) {
-    this->useModule(outer);
+  if (task.outer != nullptr) {
+    this->useModule(task.outer);
   }
 }
 
-void DeclarationModulesRegistry::loadAllTopLevels(const std::vector<Module *> &modules) {
-  this->state.walk.flow.replaceFlow(Flow());
-  for (Module *module : modules) {
-    this->loadTopLevel(module);
-  }
-  this->state.declaration.modules.markTopLevelDone();
-}
-
-Module *DeclarationModulesRegistry::laterSource(llvm::StringRef name, llvm::StringRef &declared) {
+Module *DeclarationModulesRegistry::laterSource(llvm::StringRef name,
+                                                llvm::StringRef &declared) const {
   auto &here = this->state.declaration.modules.getModuleState(
       this->state.declaration.modules.getCurrentModule());
   declared = name;
@@ -804,54 +821,62 @@ Module *DeclarationModulesRegistry::laterSource(llvm::StringRef name, llvm::Stri
   return nullptr;
 }
 
-ScopeEntry DeclarationModulesRegistry::lookupValue(llvm::StringRef name) {
+std::optional<StartLoadEarly>
+DeclarationModulesRegistry::findEarlyLoad(llvm::StringRef name) const {
   auto entry = this->state.walk.scopes.findName(name);
-  if (entry.isFound() || this->state.declaration.modules.getLoadingModule() == nullptr) {
-    return entry;
+  auto *loading = this->state.declaration.modules.getLoadingModule();
+  if (entry.isFound() || loading == nullptr) {
+    return std::nullopt;
   }
   llvm::StringRef declared;
   auto *source = this->laterSource(name, declared);
-  if (source == nullptr ||
-      (!this->state.walk.functions.isInsideFunction() &&
-       this->state.declaration.modules.getCurrentModule() ==
-           this->state.declaration.modules.getLoadingModule()) ||
-      !this->loadEarly(source, declared)) {
-    return entry;
-  }
-  if (source == this->state.declaration.modules.getCurrentModule()) {
-    for (const auto &value : this->state.declaration.modules
-                                 .getModuleState(this->state.declaration.modules.getCurrentModule())
-                                 .values) {
-      this->state.walk.scopes.addTopValue(value.getKey(), value.getValue());
-    }
-  } else {
-    this->bindImports();
+  bool isLoadingHere = !this->state.walk.functions.isInsideFunction() &&
+                       this->state.declaration.modules.getCurrentModule() == loading;
+  if (source == nullptr || isLoadingHere || !this->isLoadable(source, declared)) {
+    return std::nullopt;
   }
 
-  return this->state.walk.scopes.findName(name);
+  return StartLoadEarly{.source = source, .name = declared};
 }
 
-bool DeclarationModulesRegistry::loadEarly(Module *source, llvm::StringRef name) {
-  auto &there = this->state.declaration.modules.getModuleState(source);
-  if (there.loaded || there.busy || !there.topLevelNames.contains(name)) {
-    return false;
-  }
-  auto saved = this->returnInferrer->enterBody(nullptr);
+bool DeclarationModulesRegistry::isLoadable(Module *source, llvm::StringRef name) const {
+  const auto &there = this->state.declaration.modules.getModuleState(source);
+
+  return !there.loaded && !there.busy && there.topLevelNames.contains(name);
+}
+
+void DeclarationModulesRegistry::startLoadEarly(const StartLoadEarly &task) {
+  this->state.walk.tasks.pushTask(LoadEarlyBody{.source = task.source, .name = task.name});
+  this->state.walk.tasks.pushTask(EnterLoadBody{});
+}
+
+void DeclarationModulesRegistry::loadEarlyBody(const LoadEarlyBody &task) {
   this->state.walk.functions.forgetEarlyFunction();
   this->state.code.variables.enterModuleLoad();
   this->state.code.concatenation.enterModuleLoad();
   this->state.inference.returns.enterModuleLoad();
   this->state.diagnostics.pushList(DiagnosticRoute::PROGRAM);
+  this->state.walk.tasks.pushTask(FinishLoadEarly{.source = task.source});
+  this->state.walk.tasks.pushTask(StartTopLevel{.module = task.source, .until = task.name});
+}
 
-  this->loadTopLevel(source, name);
-
+void DeclarationModulesRegistry::finishLoadEarly(const FinishLoadEarly &task) {
   this->state.diagnostics.popList();
   this->state.inference.returns.leaveModuleLoad();
   this->state.code.concatenation.leaveModuleLoad();
   this->state.code.variables.leaveModuleLoad();
-  this->returnInferrer->leaveBody(saved);
+  this->state.walk.tasks.pushTask(BindLoadedNames{.source = task.source});
+  this->state.walk.tasks.pushTask(LeaveLoadBody{});
+}
 
-  return true;
+void DeclarationModulesRegistry::bindLoadedNames(const BindLoadedNames &task) {
+  auto *current = this->state.declaration.modules.getCurrentModule();
+  if (task.source != current) {
+    return this->bindImports();
+  }
+  for (const auto &value : this->state.declaration.modules.getModuleState(current).values) {
+    this->state.walk.scopes.addTopValue(value.getKey(), value.getValue());
+  }
 }
 
 std::string DeclarationModulesRegistry::loadLabel(llvm::StringRef name, llvm::StringRef declared,
