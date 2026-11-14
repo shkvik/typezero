@@ -31,6 +31,14 @@ void DeclarationNamesRegistry::rememberNamesInFunctions(SourceFile &program) {
   this->state.declaration.mentions.markUsedInFunction(LibraryModuleNames::kSubtleName);
 }
 
+void DeclarationNamesRegistry::declareVariable(const DeclareVariable &task) {
+  this->declareVar(task.name, task.loc, task.type, task.isConst);
+}
+
+void DeclarationNamesRegistry::declareVariableSlot(const DeclareVariableSlot &task) {
+  *task.slot = this->declareVar(task.name, task.loc, task.type, task.isConst);
+}
+
 VarSymbol *DeclarationNamesRegistry::declareLet(llvm::StringRef name, llvm::SMLoc loc,
                                                 const Type *type) {
   bool isConst = false;

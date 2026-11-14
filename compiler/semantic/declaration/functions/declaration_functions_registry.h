@@ -13,6 +13,8 @@ public:
   explicit DeclarationFunctionsRegistry(SemanticState &owner);
 
   void startReturnType(const StartReturnType &task);
+  void finishMethodReturn(const FinishMethodReturn &task);
+  void declareMethodReturn(const DeclareMethodReturn &task);
   void declareItemFunction(Stmt *item, Module *module);
   void startFunctionParam(const StartFunctionParam &task);
   void finishAssertsReturn(const FinishAssertsReturn &task);

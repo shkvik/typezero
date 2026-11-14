@@ -3,6 +3,7 @@
 #include "compiler/program/ast/ast.h"
 #include "compiler/semantic/semantic_state/function_stack/function_stack_types.h"
 #include "llvm/ADT/StringRef.h"
+#include <optional>
 #include <vector>
 
 namespace tz {
@@ -24,12 +25,12 @@ public:
   void enterGroup(NestedGroup *group);
   void addCollectedYield(YieldExpr *yield);
   void restoreBody(FunctionSnapshot saved);
-  void enterCallback(const Signature *expected);
   void enterFunction(FunctionDecl *functionDecl);
   void addCollectedReturn(ReturnStmt *returnStmt);
   void keepGroupFunctions(const NestedGroup *group);
   void rememberCurrentFunction(FuncSymbol *function);
   void rememberEarlyFunction(const FuncSymbol *function);
+  void enterCallback(const std::optional<Signature> &expected);
   void rememberYieldCollector(std::vector<YieldExpr *> *yields);
   void rememberReturnCollector(std::vector<ReturnStmt *> *returns);
 
@@ -65,9 +66,9 @@ private:
   FuncSymbol *currentFunction = nullptr;
   std::vector<FunctionDecl *> functions;
   std::vector<bool> shortCircuits{false};
-  std::vector<const Signature *> callbacks;
   std::vector<YieldExpr *> *yields = nullptr;
   std::vector<ReturnStmt *> *returns = nullptr;
+  std::vector<std::optional<Signature>> callbacks;
 };
 
 }

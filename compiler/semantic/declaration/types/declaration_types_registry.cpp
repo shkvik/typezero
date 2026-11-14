@@ -98,6 +98,12 @@ std::vector<Stmt *> DeclarationTypesRegistry::declareTypes(llvm::ArrayRef<Stmt *
   return declared;
 }
 
+void DeclarationTypesRegistry::declareBlockTypes(const DeclareBlockTypes &task) {
+  auto declared = this->declareTypeNames(task.stmts);
+
+  return this->resolveTypes(declared);
+}
+
 std::vector<Stmt *> DeclarationTypesRegistry::declareTypeNames(llvm::ArrayRef<Stmt *> stmts) {
   auto declared = std::vector<Stmt *>();
   for (Stmt *stmt : stmts) {

@@ -47,6 +47,7 @@ public:
 
 
   const Type *findNarrowed(const VarSymbol *variable) const;
+  const Type *findVariableType(const VarSymbol *variable) const;
   const Type *findNarrowedField(const FieldPath &path) const;
 
 

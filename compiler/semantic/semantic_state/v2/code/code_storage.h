@@ -1,5 +1,7 @@
 #pragma once
 
+#include "compiler/semantic/code/conversions/code_conversions.h"
+#include "compiler/semantic/code/iterators/code_iteration.h"
 #include "compiler/semantic/semantic_state/v2/code/argument_list_context/argument_list_context.h"
 #include "compiler/semantic/semantic_state/v2/code/concat_chain_context/concat_chain_context.h"
 #include "compiler/semantic/semantic_state/v2/code/constant_context/constant_context.h"
@@ -21,7 +23,9 @@ struct CodeStorage {
   DecoratorContext decorators;
   ArgumentListContext arguments;
   ConstructorContext constructors;
+  CodeIteration iteration;
   ConcatChainContext concatenation;
+  CodeConversions conversions{*this};
 };
 
 }

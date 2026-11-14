@@ -11,6 +11,18 @@ void BlockPositionContext::forgetBlock() {
   this->block = {};
 }
 
+void BlockPositionContext::enterSwitchBlock(std::vector<Stmt *> stmts) {
+  this->switchBlocks.push_back(std::move(stmts));
+}
+
+void BlockPositionContext::leaveSwitchBlock() {
+  this->switchBlocks.pop_back();
+}
+
+llvm::ArrayRef<Stmt *> BlockPositionContext::getSwitchBlock() const {
+  return this->switchBlocks.back();
+}
+
 llvm::ArrayRef<Stmt *> BlockPositionContext::getBlock() const {
   return this->block;
 }

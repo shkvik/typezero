@@ -513,6 +513,20 @@ std::optional<int> DeclarationFunctionsRegistry::lastParamNamed(const FunctionDe
   return found;
 }
 
+void DeclarationFunctionsRegistry::declareMethodReturn(const DeclareMethodReturn &task) {
+  FunctionDecl *functionDecl = task.functionDecl;
+  this->state.walk.tasks.pushTask(FinishMethodReturn{.functionDecl = functionDecl});
+
+  return this->startReturnType(
+      StartReturnType{.functionDecl = functionDecl, .function = functionDecl->sym});
+}
+
+void DeclarationFunctionsRegistry::finishMethodReturn(const FinishMethodReturn &task) {
+  const auto *declared = this->declaredReturnType(task.functionDecl);
+
+  return task.functionDecl->sym->setReturnType(declared);
+}
+
 void DeclarationFunctionsRegistry::startReturnType(const StartReturnType &task) {
   FunctionDecl *functionDecl = task.functionDecl;
   TypeRef &ref = *functionDecl->returnType;

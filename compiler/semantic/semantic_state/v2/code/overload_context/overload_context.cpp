@@ -2,6 +2,17 @@
 
 namespace tz {
 
+void OverloadContext::pushChoice(VariantChoice choice) {
+  this->choices.push_back(std::move(choice));
+}
+
+VariantChoice OverloadContext::takeChoice() {
+  VariantChoice choice = std::move(this->choices.back());
+  this->choices.pop_back();
+
+  return choice;
+}
+
 void OverloadContext::rememberSignatureVariants(const Type *interfaceType, llvm::StringRef name,
                                                 std::vector<FunctionDecl *> variants) {
   this->signatureVariants[{interfaceType, name.str()}] = std::move(variants);

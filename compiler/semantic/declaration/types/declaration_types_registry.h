@@ -20,6 +20,7 @@ public:
   void resolveEnum(const ResolveEnum &task);
   void resolveAlias(const ResolveAlias &task);
   void nextEnumMember(const NextEnumMember &task);
+  void declareBlockTypes(const DeclareBlockTypes &task);
   void resolveTypes(llvm::ArrayRef<Stmt *> declared);
 
 

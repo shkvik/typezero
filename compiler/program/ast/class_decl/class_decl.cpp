@@ -130,6 +130,60 @@ const ClassField *ClassDecl::findInheritedField(llvm::StringRef name) const {
   return nullptr;
 }
 
+const ClassDecl *ClassDecl::findFieldOwner(llvm::StringRef name) const {
+  if (this->field(name) != nullptr) {
+    return this;
+  }
+
+  return this->findInheritedFieldOwner(name);
+}
+
+std::vector<FunctionDecl *> ClassDecl::findOwnMethods() const {
+  auto methods = std::vector<FunctionDecl *>();
+  for (FunctionDecl *functionDecl : this->methods) {
+    if (!functionDecl->isStatic()) {
+      methods.push_back(functionDecl);
+    }
+  }
+  for (const ClassField &field : this->fields) {
+    if (field.method() != nullptr) {
+      methods.push_back(field.method());
+    }
+  }
+
+  return methods;
+}
+
+FunctionDecl *ClassDecl::findSoleImplementation(FunctionDecl *variant) const {
+  if (variant->openToLate()) {
+    return nullptr;
+  }
+  if (!variant->overridden() && !variant->isAbstract()) {
+    return variant;
+  }
+  if (variant->generic != nullptr && variant->overridden()) {
+    return nullptr;
+  }
+  FunctionDecl *only = variant->isAbstract() ? nullptr : variant;
+  unsigned count = only != nullptr ? 1 : 0;
+  std::vector<const ClassDecl *> stack(this->children.rbegin(), this->children.rend());
+  while (!stack.empty()) {
+    const ClassDecl *child = stack.back();
+    stack.pop_back();
+    for (FunctionDecl *functionDecl : child->findOwnMethods()) {
+      bool isImplementing = !functionDecl->isAbstract() && functionDecl != variant &&
+                            this->isOverriding(functionDecl, variant);
+      if (isImplementing) {
+        only = functionDecl;
+        count += child->isEmitted() ? 1 : 2;
+      }
+    }
+    stack.insert(stack.end(), child->children.rbegin(), child->children.rend());
+  }
+
+  return count == 1 ? only : nullptr;
+}
+
 const ClassDecl *ClassDecl::findInheritedFieldOwner(llvm::StringRef name) const {
   for (const ClassDecl *current = this->parent; current != nullptr; current = current->parent) {
     const auto *field = current->field(name);

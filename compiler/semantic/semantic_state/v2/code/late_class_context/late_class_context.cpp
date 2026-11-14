@@ -1,4 +1,5 @@
 #include "compiler/semantic/semantic_state/v2/code/late_class_context/late_class_context.h"
+#include "compiler/semantic/flow/placed_nodes/placed_nodes.h"
 
 namespace tz {
 
@@ -86,6 +87,31 @@ bool LateClassContext::isClassExprKnown(const FunctionDecl *functionDecl) const 
 
 bool LateClassContext::hasClassExpr(const FunctionDecl *functionDecl) const {
   return this->classExprHolders.lookup(functionDecl);
+}
+
+bool LateClassContext::isTemplate(const FuncSymbol *generic) {
+  if (generic == nullptr || !generic->isGeneric() || generic->decl == nullptr) {
+    return false;
+  }
+
+  return !generic->decl->isInstance && this->findClassExpr(generic->decl);
+}
+
+bool LateClassContext::findClassExpr(const FunctionDecl *functionDecl) {
+  if (functionDecl == nullptr || functionDecl->body == nullptr) {
+    return false;
+  }
+  if (this->isClassExprKnown(functionDecl)) {
+    return this->hasClassExpr(functionDecl);
+  }
+  auto nodes = PlacedNodes::collect({functionDecl->body}, {});
+  bool hasClass = false;
+  for (const PlacedExpr &placed : nodes.getExprs()) {
+    hasClass = hasClass || llvm::isa<ClassExpr>(placed.expr);
+  }
+  this->rememberClassExpr(functionDecl, hasClass);
+
+  return hasClass;
 }
 
 }

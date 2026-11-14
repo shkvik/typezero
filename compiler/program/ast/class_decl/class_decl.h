@@ -151,6 +151,7 @@ struct ClassDecl : Stmt {
   bool hasMethodFields() const;
 
 
+  std::vector<FunctionDecl *> findOwnMethods() const;
   std::vector<FunctionDecl *> findConstructors() const;
   std::vector<FunctionDecl *> collectMemberFunctions() const;
   std::vector<FunctionDecl *> findMethodsNamed(llvm::StringRef name) const;
@@ -158,7 +159,11 @@ struct ClassDecl : Stmt {
 
 
   const ClassDecl *findFinalClass() const;
+  const ClassDecl *findFieldOwner(llvm::StringRef name) const;
   const ClassDecl *findInheritedFieldOwner(llvm::StringRef name) const;
+
+
+  FunctionDecl *findSoleImplementation(FunctionDecl *variant) const;
 
 
   const ClassField *findField(llvm::StringRef name) const;

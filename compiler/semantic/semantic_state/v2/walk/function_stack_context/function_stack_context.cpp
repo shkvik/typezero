@@ -116,7 +116,7 @@ const FuncSymbol *FunctionStackContext::getEarlyFunction() const {
   return this->early;
 }
 
-void FunctionStackContext::enterCallback(const Signature *expected) {
+void FunctionStackContext::enterCallback(const std::optional<Signature> &expected) {
   this->callbacks.push_back(expected);
 }
 
@@ -125,7 +125,11 @@ void FunctionStackContext::leaveCallback() {
 }
 
 const Signature *FunctionStackContext::getExpectedCallback() const {
-  return this->callbacks.empty() ? nullptr : this->callbacks.back();
+  if (this->callbacks.empty() || !this->callbacks.back().has_value()) {
+    return nullptr;
+  }
+
+  return &*this->callbacks.back();
 }
 
 void FunctionStackContext::enterAwaitLoop() {

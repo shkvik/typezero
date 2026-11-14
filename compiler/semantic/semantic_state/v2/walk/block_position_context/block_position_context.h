@@ -6,6 +6,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include <deque>
 #include <vector>
 
 namespace tz {
@@ -19,10 +20,12 @@ struct BlockSnapshot {
 class BlockPositionContext {
 public:
   void forgetBlock();
+  void leaveSwitchBlock();
   void forgetOtherCaseVars();
   void restoreBody(BlockSnapshot saved);
   void enterJumpTarget(JumpTarget target);
   void addOtherCaseVar(const VarSymbol *variable);
+  void enterSwitchBlock(std::vector<Stmt *> stmts);
   void forgetOtherCaseVar(const VarSymbol *variable);
   void rememberPendingLabels(llvm::ArrayRef<llvm::StringRef> labels);
   void rememberBlockPosition(llvm::ArrayRef<Stmt *> block, size_t index);
@@ -40,12 +43,14 @@ public:
   JumpTarget leaveJumpTarget();
   size_t getBlockIndex() const;
   llvm::ArrayRef<Stmt *> getBlock() const;
+  llvm::ArrayRef<Stmt *> getSwitchBlock() const;
   JumpTarget *findJumpTarget(llvm::StringRef label, bool isBreak);
 
 private:
   size_t blockIndex = 0;
   llvm::ArrayRef<Stmt *> block;
   std::vector<JumpTarget> targets;
+  std::deque<std::vector<Stmt *>> switchBlocks;
   llvm::SmallVector<llvm::StringRef, 1> pendingLabels;
   llvm::SmallPtrSet<const VarSymbol *, 4> otherCaseVars;
 };

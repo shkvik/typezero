@@ -81,6 +81,18 @@ const Type *FlowStateContext::findNarrowed(const VarSymbol *variable) const {
   return nullptr;
 }
 
+const Type *FlowStateContext::findVariableType(const VarSymbol *variable) const {
+  const Type *narrowed = this->findNarrowed(variable);
+  if (narrowed != nullptr) {
+    return narrowed;
+  }
+  if (variable->type->isOptional() && this->flow.defined.contains(variable)) {
+    return variable->type->inner();
+  }
+
+  return variable->type;
+}
+
 void FlowStateContext::markOkResult(const VarSymbol *variable) {
   this->flow.okResults.insert(variable);
 }

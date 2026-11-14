@@ -1749,4 +1749,69 @@ std::vector<FuncSymbol *> TypesRelations::findExtendsNeeds(const Type *type, con
   return needs;
 }
 
+const Type *TypesRelations::commonBaseWith(const Type *type, llvm::StringRef name) const {
+  if (!this->isAllObjects(type)) {
+    return nullptr;
+  }
+  llvm::ArrayRef<const Type *> members = type->members();
+  for (const Type *candidate : this->baseChain(members.front())) {
+    if (this->isCommonBase(candidate, members) && this->hasMember(candidate, name)) {
+      return candidate;
+    }
+  }
+
+  return nullptr;
+}
+
+bool TypesRelations::isAllObjects(const Type *type) const {
+  for (const Type *member : type->members()) {
+    if (!member->isObject()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+std::vector<const Type *> TypesRelations::baseChain(const Type *type) const {
+  auto chain = std::vector<const Type *>{type};
+  for (size_t index = 0; index < chain.size(); ++index) {
+    for (const Type *base : chain[index]->bases()) {
+      if (!llvm::is_contained(chain, base)) {
+        chain.push_back(base);
+      }
+    }
+  }
+
+  return chain;
+}
+
+bool TypesRelations::isCommonBase(const Type *candidate,
+                                  llvm::ArrayRef<const Type *> members) const {
+  bool isOneOfSeveral = llvm::is_contained(members, candidate) && members.size() > 1;
+  if (isOneOfSeveral) {
+    return false;
+  }
+  for (const Type *member : members.drop_front()) {
+    if (!member->isSubtypeOf(candidate)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool TypesRelations::hasMember(const Type *candidate, llvm::StringRef name) const {
+  const ClassDecl *classDecl = candidate->classDecl();
+  if (classDecl == nullptr) {
+    return candidate->field(name) != nullptr || candidate->overload(name) != nullptr;
+  }
+  if (classDecl->findField(name) != nullptr) {
+    return true;
+  }
+  auto methods = classDecl->findMethodsNamed(name);
+
+  return !methods.empty();
+}
+
 }

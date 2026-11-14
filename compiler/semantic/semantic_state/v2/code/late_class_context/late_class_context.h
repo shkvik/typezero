@@ -28,7 +28,9 @@ public:
 
   bool hasLateMethodNames() const;
   bool hasUncheckedLateClasses() const;
+  bool isTemplate(const FuncSymbol *generic);
   bool isLateMethodName(llvm::StringRef name) const;
+  bool findClassExpr(const FunctionDecl *functionDecl);
   bool hasClassExpr(const FunctionDecl *functionDecl) const;
   bool isClassExprKnown(const FunctionDecl *functionDecl) const;
 

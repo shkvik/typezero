@@ -130,6 +130,7 @@ public:
 
 
   const Type *unify(const Type *first, const Type *second) const;
+  const Type *commonBaseWith(const Type *type, llvm::StringRef name) const;
   const Type *commonNumericType(const Type *first, const Type *second);
   const Type *comparisonType(const Type *first, const Type *second) const;
   const Type *unifyAs(UnifyForm form, const Type *first, const Type *second);
@@ -139,6 +140,12 @@ public:
                                              const InferMatch *inference);
 
 private:
+  bool isAllObjects(const Type *type) const;
+  bool hasMember(const Type *candidate, llvm::StringRef name) const;
+  bool isCommonBase(const Type *candidate, llvm::ArrayRef<const Type *> members) const;
+  std::vector<const Type *> baseChain(const Type *type) const;
+
+
   void bindInfer(const BindInfer &bind, InferMatch *inference) const;
   void collectUnify(const CollectUnify &collect, std::vector<const Type *> &answers);
   void pushResultUnify(std::vector<UnifyTask> &tasks, const Type *first, const Type *second);

@@ -17,6 +17,17 @@ CheckTask CheckTaskContext::takeTask() {
   return task;
 }
 
+void CheckTaskContext::pushChecked(Expr *expr) {
+  this->checked.push_back(expr);
+}
+
+Expr *CheckTaskContext::takeChecked() {
+  Expr *expr = this->checked.back();
+  this->checked.pop_back();
+
+  return expr;
+}
+
 void CheckTaskContext::pushAnswer(const Type *type) {
   this->answers.push_back(type);
 }
@@ -26,6 +37,17 @@ const Type *CheckTaskContext::takeAnswer() {
   this->answers.pop_back();
 
   return answer;
+}
+
+void CheckTaskContext::pushConditionFlows(ConditionFlows flows) {
+  this->conditionFlows.push_back(std::move(flows));
+}
+
+ConditionFlows CheckTaskContext::takeConditionFlows() {
+  auto flows = std::move(this->conditionFlows.back());
+  this->conditionFlows.pop_back();
+
+  return flows;
 }
 
 }

@@ -15,7 +15,9 @@ public:
 
   void openScope();
   void closeScope();
+  void declareVariable(const DeclareVariable &task);
   void rememberNamesInFunctions(SourceFile &program);
+  void declareVariableSlot(const DeclareVariableSlot &task);
 
 
   VarSymbol *declareLet(llvm::StringRef name, llvm::SMLoc loc, const Type *type);
