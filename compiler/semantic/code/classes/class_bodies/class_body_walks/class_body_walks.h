@@ -16,10 +16,10 @@ public:
   void declareThis(const DeclareThis &task);
   void checkFieldsSet(const CheckFieldsSet &task);
   void walkClassBodies(const WalkClassBodies &task);
-  void walkFieldStarts(const WalkFieldStarts &task);
   void walkClassMethod(const WalkClassMethod &task);
-  void walkClassFunction(const WalkClassFunction &task);
+  void walkFieldStarts(const WalkFieldStarts &task);
   void finishClassBodies(const FinishClassBodies &task);
+  void walkClassFunction(const WalkClassFunction &task);
   void bindOuterTypeParams(const BindOuterTypeParams &task);
   void afterClassMethodReturn(const AfterClassMethodReturn &task);
 
@@ -41,26 +41,30 @@ private:
       Result<const FunctionDecl *, CodeClassesRegistryAbstractImplementedError>;
 
   void walkAbstract(ClassDecl *classDecl);
-  void walkImplements(ClassDecl *classDecl);
-  void walkOverrideReturns(const ClassDecl *classDecl);
   void walkEmptySlot(const ClassDecl *classDecl, size_t slot);
-  void walkImplementedInterface(ClassDecl *classDecl, const Type *interfaceType);
+  void walkImplements(ClassDecl *classDecl, KnownReturns &returns);
+  void walkOverrideReturns(const ClassDecl *classDecl, KnownReturns &returns);
   void interfacesOf(const ClassDecl *classDecl, std::vector<const Type *> &out) const;
+  void walkImplementedInterface(ClassDecl *classDecl, const Type *interfaceType,
+                                KnownReturns &returns);
   void addInterface(const Type *interfaceType, std::vector<const Type *> &queue,
                     std::vector<const Type *> &out) const;
   void walkImplementedMember(ClassDecl *classDecl, const Type *interfaceType, const Field &member,
-                             const std::string &prefix);
+                             const std::string &prefix, KnownReturns &returns);
   void walkImplementedField(const ClassDecl *classDecl, const Field &member,
                             const ClassField *field, const std::string &prefix);
   void walkImplementedOverload(ClassDecl *classDecl, const Type *interfaceType,
-                               const Overload &overload, const std::string &prefix);
+                               const Overload &overload, const std::string &prefix,
+                               KnownReturns &returns);
   void walkVariantReturn(const ClassDecl *classDecl, const Type *interfaceType, const Field &member,
-                         const FunctionDecl *functionDecl);
+                         const FunctionDecl *functionDecl, KnownReturns &returns);
   void walkVariantReturns(const ClassDecl *classDecl, const Type *interfaceType,
-                          const Field &member, llvm::ArrayRef<FunctionDecl *> methods);
+                          const Field &member, llvm::ArrayRef<FunctionDecl *> methods,
+                          KnownReturns &returns);
   void walkOverloadSignature(ClassDecl *classDecl, const Type *interfaceType,
                              const Overload &overload, llvm::ArrayRef<FunctionDecl *> methods,
-                             const Type *signature, const std::string &prefix);
+                             const Type *signature, const std::string &prefix,
+                             KnownReturns &returns);
 
 
   bool isTakingParams(const Type *functionType, const FuncSymbol *function) const;
@@ -74,7 +78,9 @@ private:
 
 
   ResultEveryFieldSet checkEveryFieldSet() const;
-  ResultReturnMatches checkOverrideReturn(const ClassDecl *classDecl, const FunctionDecl *method);
+  const Type *knownReturn(FuncSymbol *function, KnownReturns &returns) const;
+  ResultReturnMatches checkOverrideReturn(const ClassDecl *classDecl, const FunctionDecl *method,
+                                          KnownReturns &returns);
   ResultFieldHasValue checkFieldStartValue(const ClassDecl *classDecl,
                                            const ClassField &field) const;
 

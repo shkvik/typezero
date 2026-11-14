@@ -18,8 +18,10 @@ public:
   void decorate(const Decorate &task);
   void makeMethodDescriptor(const MakeMethodDescriptor &task);
   void nextHoistedDecorator(const NextHoistedDecorator &task);
-  void declareHoistedDecorator(const DeclareHoistedDecorator &task);
   void afterDescriptorDeclared(const AfterDescriptorDeclared &task);
+  void declareHoistedDecorator(const DeclareHoistedDecorator &task);
+  void afterFactoryMethodReturn(const AfterFactoryMethodReturn &task);
+  void afterDescriptorMethodReturn(const AfterDescriptorMethodReturn &task);
 
 private:
   struct KnownParams {
@@ -34,8 +36,9 @@ private:
       Result<const FunctionDecl *, CodeClassesRegistryMemberDecoratableError>;
 
   void startDescriptor(DecorateRun run);
-  void startHoistedDecorator(DecorateRun run);
+  void startKnownDescriptor(DecorateRun run);
   void startDecoratorApplies(DecorateRun run);
+  void startHoistedDecorator(DecorateRun run);
   void afterHoistedDecorators(DecorateRun run);
   void addProperty(ObjectLitExpr *literal, BuiltinProperty property, Expr *value,
                    llvm::SMLoc at) const;
@@ -44,14 +47,19 @@ private:
   bool matchDecorators(DecorateRun &run);
   bool isMetadataCall(const Expr *expr) const;
   bool isPlainReference(const Expr *expr) const;
-  bool hasKnownSignature(FuncSymbol *function) const;
   bool matchDecorator(DecorateRun &run, size_t index);
+  bool hasKnownSignature(const FuncSymbol *function, const Type *returnType) const;
+  bool isAskingMethodReturn(const DecorateRun &run, const DecoratorUse &use,
+                            const Expr *expr) const;
 
 
   const Type *methodDescriptor(DecorateRun &run);
   const Type *factoryHint(DecorateRun &run, const Expr *expr);
   const Type *thirdParam(const std::optional<KnownParams> &known) const;
   const Type *methodDescriptorType(const Type *args, const Type *returnType);
+
+
+  const FuncSymbol *genericFactory(const DecorateRun &run, const Expr *expr) const;
 
 
   ResultDescriptorUsable checkGenericDescriptor(const ClassDecl *classDecl,

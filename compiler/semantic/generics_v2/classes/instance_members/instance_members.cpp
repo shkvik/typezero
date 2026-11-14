@@ -91,7 +91,6 @@ void InstanceMembers::afterInstanceInit(const AfterInstanceInit &task) {
 
 FuncSymbol *InstanceMembers::makeInstanceSymbol(FunctionDecl *functionDecl, FunctionDecl *generic) {
   auto *function = this->state.ast.newFunc();
-  function->setCompleter(this->state.completer);
   function->name = functionDecl->name;
   function->loc = functionDecl->loc();
   function->decl = functionDecl;

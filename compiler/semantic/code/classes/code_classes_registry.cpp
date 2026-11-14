@@ -234,6 +234,14 @@ void CodeClassesRegistry::afterBoundTypes(const AfterBoundTypes &task) {
   return this->calls.afterBoundTypes(task);
 }
 
+void CodeClassesRegistry::startGenericCallTypes(const StartGenericCallTypes &task) {
+  return this->calls.startGenericCallTypes(task);
+}
+
+void CodeClassesRegistry::setCallType(const SetCallType &task) {
+  return this->calls.setCallType(task);
+}
+
 void CodeClassesRegistry::afterGenericCallee(const AfterGenericCallee &task) {
   return this->calls.afterGenericCallee(task);
 }
@@ -348,6 +356,14 @@ void CodeClassesRegistry::decorate(const Decorate &task) {
 
 void CodeClassesRegistry::nextHoistedDecorator(const NextHoistedDecorator &task) {
   return this->decorators.nextHoistedDecorator(task);
+}
+
+void CodeClassesRegistry::afterDescriptorMethodReturn(const AfterDescriptorMethodReturn &task) {
+  return this->decorators.afterDescriptorMethodReturn(task);
+}
+
+void CodeClassesRegistry::afterFactoryMethodReturn(const AfterFactoryMethodReturn &task) {
+  return this->decorators.afterFactoryMethodReturn(task);
 }
 
 void CodeClassesRegistry::declareHoistedDecorator(const DeclareHoistedDecorator &task) {

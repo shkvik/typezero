@@ -84,6 +84,12 @@ void DecoratorHoisting::startHoistedDecorator(DecorateRun run) {
   Expr *expr = use.decorator->expr;
   llvm::SMLoc loc = use.decorator->loc;
   auto &tasks = this->state.walk.tasks;
+  if (this->isAskingMethodReturn(run, use, expr)) {
+    FuncSymbol *method = run.method->sym;
+    tasks.pushTask(AfterFactoryMethodReturn{.run = std::move(run)});
+
+    return tasks.pushTask(ReturnTypeOf{.function = method});
+  }
   llvm::StringRef hidden = this->state.ast.hiddenName();
   auto *varDecl = this->state.ast.make<VarDeclStmt>(loc, true);
   VarDeclarator declarator{.name = hidden, .loc = loc, .init = expr};
@@ -102,6 +108,25 @@ void DecoratorHoisting::startHoistedDecorator(DecorateRun run) {
   return tasks.pushTask(CheckExprSlot{.slot = &varDecl->decls[0].init, .expected = hint});
 }
 
+void DecoratorHoisting::afterFactoryMethodReturn(const AfterFactoryMethodReturn &task) {
+  auto run = task.run;
+  run.methodReturn = this->state.walk.tasks.takeAnswer();
+  run.isMethodReturnKnown = true;
+
+  return this->startHoistedDecorator(std::move(run));
+}
+
+bool DecoratorHoisting::isAskingMethodReturn(const DecorateRun &run, const DecoratorUse &use,
+                                             const Expr *expr) const {
+  bool isUnknown =
+      !run.isMethodReturnKnown && run.earlyDescriptor == nullptr && run.method != nullptr;
+  if (!isUnknown || this->decoratorRules.isParamUse(use)) {
+    return false;
+  }
+
+  return this->genericFactory(run, expr) != nullptr;
+}
+
 void DecoratorHoisting::declareHoistedDecorator(const DeclareHoistedDecorator &task) {
   VarDeclarator &declarator = task.varDecl->decls[0];
 
@@ -115,6 +140,7 @@ void DecoratorHoisting::declareHoistedDecorator(const DeclareHoistedDecorator &t
 }
 
 void DecoratorHoisting::afterHoistedDecorators(DecorateRun run) {
+  auto &tasks = this->state.walk.tasks;
   if (!this->matchDecorators(run)) {
     return;
   }
@@ -122,14 +148,33 @@ void DecoratorHoisting::afterHoistedDecorators(DecorateRun run) {
   if (usable.isErr()) {
     return this->state.diagnostics.error(run.at, usable.error().message);
   }
-  if (run.hasDescriptor && !this->hasKnownSignature(run.method->sym)) {
-    return;
+  if (!run.hasDescriptor) {
+    return this->startDecoratorApplies(std::move(run));
   }
-  if (run.hasDescriptor) {
-    return this->startDescriptor(std::move(run));
+  if (!run.isMethodReturnKnown) {
+    FuncSymbol *method = run.method->sym;
+    tasks.pushTask(AfterDescriptorMethodReturn{.run = std::move(run)});
+
+    return tasks.pushTask(ReturnTypeOf{.function = method});
   }
 
-  return this->startDecoratorApplies(std::move(run));
+  return this->startKnownDescriptor(std::move(run));
+}
+
+void DecoratorHoisting::afterDescriptorMethodReturn(const AfterDescriptorMethodReturn &task) {
+  auto run = task.run;
+  run.methodReturn = this->state.walk.tasks.takeAnswer();
+  run.isMethodReturnKnown = true;
+
+  return this->startKnownDescriptor(std::move(run));
+}
+
+void DecoratorHoisting::startKnownDescriptor(DecorateRun run) {
+  if (!this->hasKnownSignature(run.method->sym, run.methodReturn)) {
+    return;
+  }
+
+  return this->startDescriptor(std::move(run));
 }
 
 void DecoratorHoisting::startDescriptor(DecorateRun run) {
@@ -377,9 +422,8 @@ DecoratorHoisting::checkGenericDescriptor(const ClassDecl *classDecl, bool hasDe
   return ok(classDecl);
 }
 
-bool DecoratorHoisting::hasKnownSignature(FuncSymbol *function) const {
-  const auto *returnType = function->getReturnType();
-
+bool DecoratorHoisting::hasKnownSignature(const FuncSymbol *function,
+                                          const Type *returnType) const {
   return returnType != nullptr && !returnType->isError() &&
          !llvm::is_contained(function->params, nullptr);
 }
@@ -401,16 +445,30 @@ const Type *DecoratorHoisting::methodDescriptor(DecorateRun &run) {
     return run.earlyDescriptor;
   }
   FuncSymbol *function = run.method->sym;
-  if (!this->hasKnownSignature(function)) {
+  if (!this->hasKnownSignature(function, run.methodReturn)) {
     return nullptr;
   }
   const auto *args = Type::tuple(function->params);
-  run.earlyDescriptor = this->methodDescriptorType(args, function->getReturnType());
+  run.earlyDescriptor = this->methodDescriptorType(args, run.methodReturn);
 
   return run.earlyDescriptor;
 }
 
 const Type *DecoratorHoisting::factoryHint(DecorateRun &run, const Expr *expr) {
+  if (this->genericFactory(run, expr) == nullptr) {
+    return nullptr;
+  }
+  const auto *descriptorType = this->methodDescriptor(run);
+  if (descriptorType == nullptr) {
+    return nullptr;
+  }
+  const Type *classRef = Type::classRef(run.classDecl, run.classDecl->name);
+
+  return Type::function({classRef, Type::string(), descriptorType}, 3, false, Type::voidTy());
+}
+
+const FuncSymbol *DecoratorHoisting::genericFactory(const DecorateRun &run,
+                                                    const Expr *expr) const {
   const auto *call = dyn_cast<CallExpr>(expr);
   const auto *name = call != nullptr ? dyn_cast<NameExpr>(call->callee) : nullptr;
   bool isFactoryShape = name != nullptr && name->typeArgs.empty() &&
@@ -422,13 +480,8 @@ const Type *DecoratorHoisting::factoryHint(DecorateRun &run, const Expr *expr) {
   if (factory == nullptr || factory->decl == nullptr || factory->decl->typeParams.empty()) {
     return nullptr;
   }
-  const auto *descriptorType = this->methodDescriptor(run);
-  if (descriptorType == nullptr) {
-    return nullptr;
-  }
-  const Type *classRef = Type::classRef(run.classDecl, run.classDecl->name);
 
-  return Type::function({classRef, Type::string(), descriptorType}, 3, false, Type::voidTy());
+  return factory;
 }
 
 bool DecoratorHoisting::matchDecorators(DecorateRun &run) {

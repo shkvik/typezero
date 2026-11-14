@@ -11,6 +11,10 @@ void GenericsFunctionsRegistry::checkGenericValue(const CheckGenericValue &task)
   return this->genericValues.checkGenericValue(task);
 }
 
+void GenericsFunctionsRegistry::startGenericValue(const StartGenericValue &task) {
+  return this->genericValues.startGenericValue(task);
+}
+
 void GenericsFunctionsRegistry::nextValueTypeArg(const NextValueTypeArg &task) {
   return this->genericValues.nextValueTypeArg(task);
 }

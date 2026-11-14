@@ -67,7 +67,6 @@ public:
 
   ResultSourceIsLoaded checkLoaded(const NameExpr *name);
   const llvm::StringMap<ModuleExport> &exportsOf(Module *module);
-  FunctionDecl *cycleCallee(FunctionDecl *functionDecl, llvm::StringRef name);
 
 private:
   using ResultAliasIsUnused = Result<const ModuleName *, DeclarationModulesRegistryFreeNameError>;

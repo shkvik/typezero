@@ -713,20 +713,6 @@ void DeclarationModulesRegistry::noteImportsInFunctions(SourceFile &program) {
   }
 }
 
-FunctionDecl *DeclarationModulesRegistry::cycleCallee(FunctionDecl *functionDecl,
-                                                      llvm::StringRef name) {
-  auto *home = this->state.declaration.modules.findDeclModule(functionDecl);
-  if (home == nullptr) {
-    return nullptr;
-  }
-  auto found = this->exportedValue(home, name);
-  if (!found.has_value() || found->func() == nullptr) {
-    return nullptr;
-  }
-
-  return found->func()->decl;
-}
-
 void DeclarationModulesRegistry::startTopLevel(const StartTopLevel &task) {
   Module *module = task.module;
   auto &here = this->state.declaration.modules.getModuleState(module);

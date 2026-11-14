@@ -27,6 +27,7 @@ SemanticState::SemanticState(AstContext &context, Diagnostics &collected, Source
       library{.declarations = LibraryDeclarationContext(loaded.builtins)},
       generics{.apparent = GenericsApparent(*this), .constraints = GenericsConstraints(*this)},
       diagnostics(collected),
+      inference{.destinations = InferenceDestinations(*this)},
       inventory(loaded.inventory) {}
 
 Checkpoint SemanticState::saveBody() {

@@ -282,7 +282,6 @@ FunctionDecl *ClassFacts::signatureVariant(const Overload &overload, const Type 
   auto name = this->state.ast.keepName(overload.name);
   auto *functionDecl = this->state.ast.make<FunctionDecl>(llvm::SMLoc(), name);
   auto *function = this->state.ast.newFunc();
-  function->setCompleter(this->state.completer);
   function->name = functionDecl->name;
   function->decl = functionDecl;
   function->params.assign(signature->params().begin(), signature->params().end());

@@ -36,6 +36,14 @@ void ClassCalls::afterBoundTypes(const AfterBoundTypes &task) {
   return this->methodCalls.afterBoundTypes(task);
 }
 
+void ClassCalls::startGenericCallTypes(const StartGenericCallTypes &task) {
+  return this->methodCalls.startGenericCallTypes(task);
+}
+
+void ClassCalls::setCallType(const SetCallType &task) {
+  return this->methodCalls.setCallType(task);
+}
+
 void ClassCalls::afterGenericCallee(const AfterGenericCallee &task) {
   return this->methodCalls.afterGenericCallee(task);
 }

@@ -28,6 +28,14 @@ void ClassDecorators::nextHoistedDecorator(const NextHoistedDecorator &task) {
   return this->decoratorHoisting.nextHoistedDecorator(task);
 }
 
+void ClassDecorators::afterDescriptorMethodReturn(const AfterDescriptorMethodReturn &task) {
+  return this->decoratorHoisting.afterDescriptorMethodReturn(task);
+}
+
+void ClassDecorators::afterFactoryMethodReturn(const AfterFactoryMethodReturn &task) {
+  return this->decoratorHoisting.afterFactoryMethodReturn(task);
+}
+
 void ClassDecorators::declareHoistedDecorator(const DeclareHoistedDecorator &task) {
   return this->decoratorHoisting.declareHoistedDecorator(task);
 }

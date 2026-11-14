@@ -35,11 +35,15 @@ bool ClassMemberRules::isFunctionWanted(llvm::ArrayRef<FunctionDecl *> variants,
 
 void ClassMemberRules::pushVariantTypes(llvm::ArrayRef<FunctionDecl *> variants,
                                         const Type *expected) {
+  auto &tasks = this->state.walk.tasks;
+  if (variants.size() > 1) {
+    tasks.pushTask(ReturnTypeOf{.function = variants.back()->sym});
+  }
   if (!this->isFunctionWanted(variants, expected)) {
     return;
   }
   for (FunctionDecl *variant : llvm::reverse(variants)) {
-    this->state.walk.tasks.pushTask(FunctionTypeOf{.function = variant->sym});
+    tasks.pushTask(FunctionTypeOf{.function = variant->sym});
   }
 }
 
@@ -56,10 +60,18 @@ ClassMemberRules::takeVariantTypes(llvm::ArrayRef<FunctionDecl *> variants, cons
   return types;
 }
 
+const Type *ClassMemberRules::takeLastVariantReturn(llvm::ArrayRef<FunctionDecl *> variants) {
+  if (variants.size() < 2) {
+    return nullptr;
+  }
+
+  return this->state.walk.tasks.takeAnswer();
+}
+
 ClassMemberRules::ResultVariantOfType
 ClassMemberRules::variantForType(llvm::ArrayRef<FunctionDecl *> variants,
-                                 llvm::ArrayRef<const Type *> types, const Type *expected,
-                                 const MemberExpr *member) const {
+                                 llvm::ArrayRef<const Type *> types, const Type *lastReturn,
+                                 const Type *expected, const MemberExpr *member) const {
   if (variants.size() == 1) {
     return ok(variants[0]->sym);
   }
@@ -67,7 +79,7 @@ ClassMemberRules::variantForType(llvm::ArrayRef<FunctionDecl *> variants,
   if (matching.size() == 1) {
     return ok(matching[0]->sym);
   }
-  auto type = this->signatureText(variants.back());
+  auto type = this->signatureText(variants.back(), lastReturn);
   auto object = this->shownObject(member);
   auto list = ErrorTextVariant::list(variants);
   auto message = ErrorTextVariantType::several(member->name, list, type, object);
@@ -169,7 +181,8 @@ bool ClassMemberRules::isFittingCallback(const FuncSymbol *function,
   return true;
 }
 
-std::string ClassMemberRules::signatureText(const FunctionDecl *variant) const {
+std::string ClassMemberRules::signatureText(const FunctionDecl *variant,
+                                            const Type *returned) const {
   FuncSymbol *function = variant->sym;
   size_t count = std::min(variant->params.size(), function->params.size());
   std::string text = "(";
@@ -180,7 +193,7 @@ std::string ClassMemberRules::signatureText(const FunctionDecl *variant) const {
     text += variant->params[index].label().str() + ": " + function->params[index]->name().str();
   }
 
-  return text + ") => " + function->getReturnType()->name().str();
+  return text + ") => " + returned->name().str();
 }
 
 std::string ClassMemberRules::shownObject(const MemberExpr *member) const {

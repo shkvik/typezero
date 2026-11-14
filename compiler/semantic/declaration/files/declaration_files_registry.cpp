@@ -828,12 +828,13 @@ void DeclarationFilesRegistry::pushReturn(const DeclaredSignatureMatch &match) {
   }
   bool isVoidAllowed = true;
   this->state.walk.tasks.pushTask(FinishDeclaredReturn{.match = match});
+  this->state.walk.tasks.pushTask(ReturnTypeOf{.function = match.returned});
   this->pushTypeRef(*match.returnType, isVoidAllowed);
 }
 
 void DeclarationFilesRegistry::finishDeclaredReturn(const FinishDeclaredReturn &task) {
   const auto *here = this->writtenType(*task.match.returnType);
-  const auto *there = task.match.returned->getReturnType();
+  const Type *there = this->state.walk.tasks.takeAnswer();
   auto matches = this->checkSameReturn(here, there, task.match.what);
   if (matches.isErr()) {
     this->state.diagnostics.error(task.match.loc, matches.error().message);

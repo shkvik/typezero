@@ -142,7 +142,6 @@ void FunctionInstances::buildInstanceDecl(InstantiateDraft draft) {
   copy->isInstance = true;
   copy->typeArgs = draft.reps;
   auto *function = this->state.ast.newFunc();
-  function->setCompleter(this->state.completer);
   function->name = generic->name;
   function->loc = generic->loc;
   function->decl = copy;

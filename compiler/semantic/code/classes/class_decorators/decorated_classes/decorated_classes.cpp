@@ -58,6 +58,8 @@ DecorateRun DecoratedClasses::decorateRun(ClassDecl *classDecl, ClassField *fiel
       .memberName = memberName,
       .at = at,
       .earlyDescriptor = nullptr,
+      .methodReturn = nullptr,
+      .isMethodReturnKnown = false,
       .callees = {},
       .takes = {},
       .hasDescriptor = false,

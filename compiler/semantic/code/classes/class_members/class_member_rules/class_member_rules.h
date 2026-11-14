@@ -33,9 +33,10 @@ public:
   OwnedStaticField staticField(ClassDecl *classDecl, llvm::StringRef name) const;
   std::vector<const Type *> takeVariantTypes(llvm::ArrayRef<FunctionDecl *> variants,
                                              const Type *expected);
+  const Type *takeLastVariantReturn(llvm::ArrayRef<FunctionDecl *> variants);
   ResultVariantOfType variantForType(llvm::ArrayRef<FunctionDecl *> variants,
-                                     llvm::ArrayRef<const Type *> types, const Type *expected,
-                                     const MemberExpr *member) const;
+                                     llvm::ArrayRef<const Type *> types, const Type *lastReturn,
+                                     const Type *expected, const MemberExpr *member) const;
 
 private:
   using ResultClassIsDeclared = Result<const ClassDecl *, CodeClassesRegistryClassDeclaredError>;
@@ -45,7 +46,7 @@ private:
 
 
   std::string shownObject(const MemberExpr *member) const;
-  std::string signatureText(const FunctionDecl *variant) const;
+  std::string signatureText(const FunctionDecl *variant, const Type *returned) const;
 
 
   ClassField *ownStaticField(ClassDecl *owner, llvm::StringRef name) const;

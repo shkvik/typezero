@@ -418,7 +418,6 @@ ClosureSignatures::checkParamOrder(const Param &param, bool isAfterOptional) con
 
 FuncSymbol *ClosureSignatures::makeClosureSymbol(FunctionDecl *functionDecl) {
   auto *function = this->state.ast.newFunc();
-  function->setCompleter(this->state.completer);
   function->name = functionDecl->name;
   function->loc = functionDecl->loc();
   function->decl = functionDecl;

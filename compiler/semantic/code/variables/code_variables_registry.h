@@ -18,6 +18,7 @@ public:
   void walkVarDecl(const WalkVarDecl &task);
   void nextDeclarator(const NextDeclarator &task);
   void afterEarlyTimer(const AfterEarlyTimer &task);
+  void findDestination(const FindDestination &task);
   void destructureValue(const DestructureValue &task);
   void afterDeclaredType(const AfterDeclaredType &task);
   void finishConstFunction(const FinishConstFunction &task);

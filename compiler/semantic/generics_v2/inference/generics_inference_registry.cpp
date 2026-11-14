@@ -23,6 +23,10 @@ void GenericsInferenceRegistry::bindGenericCall(const BindGenericCall &task) {
   return this->callBindings.bindGenericCall(task);
 }
 
+void GenericsInferenceRegistry::startBinding(const StartBinding &task) {
+  return this->callBindings.startBinding(task);
+}
+
 void GenericsInferenceRegistry::afterExplicitTypeArgs(const AfterExplicitTypeArgs &task) {
   return this->callBindings.afterExplicitTypeArgs(task);
 }

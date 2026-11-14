@@ -13,18 +13,20 @@ class MethodCalls {
 public:
   MethodCalls(SemanticState &owner, ClassFacts &sharedFacts, ClassCallRules &sharedClassCallRules);
 
-  void checkMethodCall(const CheckMethodCall &task);
+  void setCallType(const SetCallType &task);
   void afterBoundTypes(const AfterBoundTypes &task);
+  void checkMethodCall(const CheckMethodCall &task);
   void afterMethodChoice(const AfterMethodChoice &task);
   void checkOverloadCall(const CheckOverloadCall &task);
-  void afterMethodCallTry(const AfterMethodCallTry &task);
   void afterGenericCallee(const AfterGenericCallee &task);
+  void afterMethodCallTry(const AfterMethodCallTry &task);
   void afterOverloadChoice(const AfterOverloadChoice &task);
   void afterPlainMethodType(const AfterPlainMethodType &task);
   void checkClassStaticCall(const CheckClassStaticCall &task);
   void afterClassFieldCallee(const AfterClassFieldCallee &task);
-  void afterGenericMethodCall(const AfterGenericMethodCall &task);
+  void startGenericCallTypes(const StartGenericCallTypes &task);
   void afterEventsFunctionTry(const AfterEventsFunctionTry &task);
+  void afterGenericMethodCall(const AfterGenericMethodCall &task);
   void afterStaticFieldCallee(const AfterStaticFieldCallee &task);
   void afterStaticMethodChoice(const AfterStaticMethodChoice &task);
 

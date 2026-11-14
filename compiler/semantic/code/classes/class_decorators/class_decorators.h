@@ -19,11 +19,13 @@ public:
   void relinkClass(const RelinkClass &task);
   void decorateClass(const DecorateClass &task);
   void makeMethodDescriptor(const MakeMethodDescriptor &task);
-  void nextHoistedDecorator(const NextHoistedDecorator &task);
   void nextAppliedDecorator(const NextAppliedDecorator &task);
+  void nextHoistedDecorator(const NextHoistedDecorator &task);
   void afterDecoratorApplied(const AfterDecoratorApplied &task);
-  void declareHoistedDecorator(const DeclareHoistedDecorator &task);
   void afterDescriptorDeclared(const AfterDescriptorDeclared &task);
+  void declareHoistedDecorator(const DeclareHoistedDecorator &task);
+  void afterFactoryMethodReturn(const AfterFactoryMethodReturn &task);
+  void afterDescriptorMethodReturn(const AfterDescriptorMethodReturn &task);
 
 private:
   DecoratorRules decoratorRules;

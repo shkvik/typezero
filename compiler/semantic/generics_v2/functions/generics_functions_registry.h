@@ -16,6 +16,7 @@ public:
   void nextValueTypeArg(const NextValueTypeArg &task);
   void afterValueTypeArg(const AfterValueTypeArg &task);
   void checkGenericValue(const CheckGenericValue &task);
+  void startGenericValue(const StartGenericValue &task);
   void afterInstanceTypes(const AfterInstanceTypes &task);
   void nextMeaningfulParam(const NextMeaningfulParam &task);
   void afterMeaningfulParam(const AfterMeaningfulParam &task);

@@ -16,6 +16,7 @@ public:
   explicit GenericsInferenceRegistry(SemanticState &owner);
 
   void literalShape(const LiteralShape &task);
+  void startBinding(const StartBinding &task);
   void retryDeferred(const RetryDeferred &task);
   void finishTypeArgs(const FinishTypeArgs &task);
   void bindGenericCall(const BindGenericCall &task);

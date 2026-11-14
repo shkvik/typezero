@@ -1,5 +1,8 @@
 #include "compiler/semantic/semantic_state/v2/inference/return_inference_context/return_inference_context.h"
+#include "compiler/semantic/flow/placed_nodes/placed_nodes.h"
 #include "llvm/ADT/STLExtras.h"
+
+using llvm::dyn_cast;
 
 namespace tz {
 
@@ -52,6 +55,53 @@ void ReturnInferenceContext::rememberInheritedReturn(const FunctionDecl *functio
 
 bool ReturnInferenceContext::hasInheritedReturn(const FunctionDecl *functionDecl) const {
   return this->inheritedReturns.contains(functionDecl);
+}
+
+void ReturnInferenceContext::pushSavedBody(Checkpoint saved) {
+  this->savedBodies.push_back(std::move(saved));
+}
+
+Checkpoint ReturnInferenceContext::takeSavedBody() {
+  Checkpoint saved = std::move(this->savedBodies.back());
+  this->savedBodies.pop_back();
+
+  return saved;
+}
+
+CollectedReturns &ReturnInferenceContext::openCollection() {
+  this->collections.push_back(CollectedReturns{.returns = {}, .yields = {}});
+
+  return this->collections.back();
+}
+
+CollectedReturns ReturnInferenceContext::takeCollection() {
+  CollectedReturns collected = std::move(this->collections.back());
+  this->collections.pop_back();
+
+  return collected;
+}
+
+bool ReturnInferenceContext::isReturningValue(const Stmt *body) const {
+  auto nodes = PlacedNodes::collect({body}, {});
+  for (const PlacedStmt &placed : nodes.getStmts()) {
+    auto *returnStmt = dyn_cast<ReturnStmt>(placed.stmt);
+    bool isOwn = returnStmt != nullptr && !placed.place.isInsideFunction();
+    if (isOwn && this->isGivingValue(returnStmt)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool ReturnInferenceContext::isGivingValue(const ReturnStmt *returnStmt) const {
+  if (returnStmt->value == nullptr) {
+    return false;
+  }
+  auto *unary = dyn_cast<UnaryExpr>(returnStmt->value);
+  bool isDiscarded = unary != nullptr && unary->op == UnaryOp::Void;
+
+  return !isDiscarded;
 }
 
 }

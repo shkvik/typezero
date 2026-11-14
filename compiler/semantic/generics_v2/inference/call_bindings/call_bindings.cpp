@@ -24,29 +24,50 @@ void CallBindings::literalShape(const LiteralShape &task) {
 }
 
 void CallBindings::checkGenericCall(const CheckGenericCall &task) {
-  return this->startBinding(task.call, task.function, task.loc, task.expected, task.typeArgs,
-                            BindingOwner::CALL);
+  auto &tasks = this->state.walk.tasks;
+  task.call->type = Type::error();
+  tasks.pushTask(StartBinding{
+      .call = task.call,
+      .generic = task.function,
+      .loc = task.loc,
+      .expected = task.expected,
+      .typeArgs = task.typeArgs,
+      .owner = BindingOwner::CALL,
+  });
+
+  return tasks.pushTask(ReturnTypeOf{.function = task.function});
 }
 
 void CallBindings::bindGenericCall(const BindGenericCall &task) {
-  return this->startBinding(task.call, task.function, task.loc, task.expected, task.typeArgs,
-                            BindingOwner::BIND);
+  auto &tasks = this->state.walk.tasks;
+  task.call->type = Type::error();
+  tasks.pushTask(StartBinding{
+      .call = task.call,
+      .generic = task.function,
+      .loc = task.loc,
+      .expected = task.expected,
+      .typeArgs = task.typeArgs,
+      .owner = BindingOwner::BIND,
+  });
+
+  return tasks.pushTask(ReturnTypeOf{.function = task.function});
 }
 
-void CallBindings::startBinding(CallExpr *call, FuncSymbol *generic, llvm::SMLoc loc,
-                                const Type *expected, llvm::ArrayRef<TypeRef> typeArgs,
-                                BindingOwner owner) {
+void CallBindings::startBinding(const StartBinding &task) {
+  CallExpr *call = task.call;
+  FuncSymbol *generic = task.generic;
+  llvm::SMLoc loc = task.loc;
+  llvm::ArrayRef<TypeRef> typeArgs = task.typeArgs;
   auto &tasks = this->state.walk.tasks;
-  call->type = Type::error();
-  const auto *result = generic->getReturnType();
+  const Type *result = tasks.takeAnswer();
   bool isOwnClass = this->returnsOwnClass(generic, result);
   auto draft = GenericBindingDraft{
       .call = call,
       .generic = generic,
       .loc = loc,
-      .expected = expected,
+      .expected = task.expected,
       .typeArgs = typeArgs,
-      .owner = owner,
+      .owner = task.owner,
       .result = isOwnClass ? nullptr : result,
       .listRest = this->listRestOf(generic),
       .fixed = generic->params.size() - (generic->hasRest ? 1 : 0),

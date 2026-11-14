@@ -316,7 +316,6 @@ FuncSymbol *GenericNews::constructorFunction(ClassDecl *generic, FunctionDecl *c
     return known;
   }
   auto *function = this->state.ast.newFunc();
-  function->setCompleter(this->state.completer);
   copies.rememberConstructorFunction(generic, constructor, function);
   function->name = this->state.ast.keepName("new " + generic->name.str());
   function->loc = generic->loc();

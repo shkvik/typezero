@@ -212,7 +212,18 @@ void VariableDeclarations::startValueDeclarator(const DeclaratorDraft &start) {
   this->nameFunctionValue(declarator);
   draft.type = draft.declared;
   draft.hint = draft.declared;
-  this->findDestination(draft);
+  if (!this->isSeekingDestination(draft)) {
+    return this->startValueOrTimer(std::move(draft));
+  }
+
+  return this->findDestination(FindDestination{
+      .draft = std::move(draft),
+      .types = DestinationTypes{.known = {}, .missing = {}},
+  });
+}
+
+void VariableDeclarations::startValueOrTimer(DeclaratorDraft draft) {
+  VarDeclarator &declarator = draft.decl->decls[draft.number];
   bool isPlainInit = declarator.init != nullptr && !declarator.destructured();
   const Type *timer =
       isPlainInit ? this->state.library.timers.timerCallType(declarator.init) : nullptr;
@@ -221,6 +232,7 @@ void VariableDeclarations::startValueDeclarator(const DeclaratorDraft &start) {
   }
   draft.isEarly = true;
   const Type *type = draft.declared != nullptr ? draft.declared : timer;
+  bool isConst = draft.decl->isConst;
   this->state.walk.tasks.pushTask(AfterEarlyTimer{.draft = std::move(draft)});
 
   return this->state.walk.tasks.pushTask(DeclareVariableSlot{
@@ -228,24 +240,48 @@ void VariableDeclarations::startValueDeclarator(const DeclaratorDraft &start) {
       .name = declarator.name,
       .loc = declarator.loc,
       .type = type,
-      .isConst = start.decl->isConst,
+      .isConst = isConst,
   });
 }
 
-void VariableDeclarations::findDestination(DeclaratorDraft &draft) {
+bool VariableDeclarations::isSeekingDestination(const DeclaratorDraft &draft) const {
   const VarDeclarator &declarator = draft.decl->decls[draft.number];
-  bool isLiteralShaped = draft.declared == nullptr && declarator.init != nullptr &&
-                         !declarator.destructured() &&
-                         this->state.inference.destinations.isLiteralShaped(declarator.init);
-  if (!isLiteralShaped) {
-    return;
+  bool isPlainInit = declarator.init != nullptr && !declarator.destructured();
+
+  return draft.declared == nullptr && isPlainInit &&
+         this->state.inference.destinations.isLiteralShaped(declarator.init);
+}
+
+void VariableDeclarations::findDestination(const FindDestination &task) {
+  auto draft = task.draft;
+  auto types = task.types;
+  auto &tasks = this->state.walk.tasks;
+  auto resolved = tasks.takeAnswers(types.missing.size());
+  for (size_t index = 0; index < resolved.size(); ++index) {
+    types.known.push_back({types.missing[index].first, resolved[index]});
   }
+  types.missing.clear();
+  const VarDeclarator &declarator = draft.decl->decls[draft.number];
   auto following = draft.block.empty() ? std::vector<const Stmt *>()
                                        : this->followingStatements(draft.block, draft.blockIndex);
   llvm::ArrayRef<VarDeclarator> declarators = draft.decl->decls;
   auto later = declarators.drop_front(draft.number + 1);
-  draft.hint = this->state.inference.destinations.literalDestination(declarator, later, following);
-  draft.places = this->state.inference.destinations.takeDestinationConflict();
+  auto &destinations = this->state.inference.destinations;
+  auto found = destinations.literalDestination(declarator, later, following, types);
+  if (types.missing.empty()) {
+    draft.hint = found.hint;
+    draft.places = std::move(found.conflict);
+
+    return this->startValueOrTimer(std::move(draft));
+  }
+  auto missing = types.missing;
+  tasks.pushTask(FindDestination{.draft = std::move(draft), .types = std::move(types)});
+  tasks.pushTask(DropDiagnosticList{});
+  for (const auto &[ref, use] : llvm::reverse(missing)) {
+    tasks.pushTask(ResolveTypeAnswer{.ref = ref, .use = use});
+  }
+
+  return this->state.diagnostics.pushList(DiagnosticRoute::DISCARD);
 }
 
 void VariableDeclarations::afterEarlyTimer(const AfterEarlyTimer &task) {

@@ -11,7 +11,10 @@ ClassBodyWalks::ClassBodyWalks(SemanticState &owner, ClassFacts &sharedFacts)
 void ClassBodyWalks::walkClassBodies(const WalkClassBodies &task) {
   ClassDecl *classDecl = task.classDecl;
   auto &tasks = this->state.walk.tasks;
-  tasks.pushTask(FinishClassBodies{.classDecl = classDecl});
+  tasks.pushTask(FinishClassBodies{
+      .classDecl = classDecl,
+      .returns = KnownReturns{.known = {}, .missing = {}},
+  });
   for (FunctionDecl *functionDecl : llvm::reverse(this->classMethods(classDecl))) {
     tasks.pushTask(WalkClassMethod{.functionDecl = functionDecl});
   }
@@ -65,10 +68,41 @@ void ClassBodyWalks::afterClassMethodReturn(const AfterClassMethodReturn &task) 
 
 void ClassBodyWalks::finishClassBodies(const FinishClassBodies &task) {
   ClassDecl *classDecl = task.classDecl;
-  this->walkAbstract(classDecl);
-  this->walkImplements(classDecl);
+  auto returns = task.returns;
+  auto &tasks = this->state.walk.tasks;
+  auto answers = tasks.takeAnswers(returns.missing.size());
+  for (size_t index = 0; index < answers.size(); ++index) {
+    returns.known.push_back({returns.missing[index], answers[index]});
+  }
+  returns.missing.clear();
+  this->state.diagnostics.pushList(DiagnosticRoute::DISCARD);
+  this->walkImplements(classDecl, returns);
+  this->walkOverrideReturns(classDecl, returns);
+  this->state.diagnostics.popList();
+  if (returns.missing.empty()) {
+    this->walkAbstract(classDecl);
+    this->walkImplements(classDecl, returns);
 
-  return this->walkOverrideReturns(classDecl);
+    return this->walkOverrideReturns(classDecl, returns);
+  }
+  auto missing = returns.missing;
+  tasks.pushTask(FinishClassBodies{.classDecl = classDecl, .returns = std::move(returns)});
+  for (FuncSymbol *function : llvm::reverse(missing)) {
+    tasks.pushTask(ReturnTypeOf{.function = function});
+  }
+}
+
+const Type *ClassBodyWalks::knownReturn(FuncSymbol *function, KnownReturns &returns) const {
+  for (const auto &[known, type] : returns.known) {
+    if (known == function) {
+      return type;
+    }
+  }
+  if (!llvm::is_contained(returns.missing, function)) {
+    returns.missing.push_back(function);
+  }
+
+  return Type::error();
 }
 
 void ClassBodyWalks::bindOuterTypeParams(const BindOuterTypeParams &task) {
@@ -169,11 +203,13 @@ ClassBodyWalks::checkFieldStartValue(const ClassDecl *classDecl, const ClassFiel
   return ok(&field);
 }
 
-ClassBodyWalks::ResultReturnMatches
-ClassBodyWalks::checkOverrideReturn(const ClassDecl *classDecl, const FunctionDecl *method) {
+ClassBodyWalks::ResultReturnMatches ClassBodyWalks::checkOverrideReturn(const ClassDecl *classDecl,
+                                                                        const FunctionDecl *method,
+                                                                        KnownReturns &returns) {
   const FunctionDecl *overridden = method->overrides();
-  const Type *mine = overridden != nullptr ? method->sym->getReturnType() : nullptr;
-  const Type *theirs = overridden != nullptr ? overridden->sym->getReturnType() : nullptr;
+  const Type *mine = overridden != nullptr ? this->knownReturn(method->sym, returns) : nullptr;
+  const Type *theirs =
+      overridden != nullptr ? this->knownReturn(overridden->sym, returns) : nullptr;
 
   bool isKnown = mine != nullptr && theirs != nullptr && !mine->isError() && !theirs->isError();
   bool isNarrowerObject = isKnown && mine->nonOptional()->isObject() &&
@@ -204,9 +240,9 @@ std::vector<FunctionDecl *> ClassBodyWalks::classMethods(const ClassDecl *classD
   return methods;
 }
 
-void ClassBodyWalks::walkOverrideReturns(const ClassDecl *classDecl) {
+void ClassBodyWalks::walkOverrideReturns(const ClassDecl *classDecl, KnownReturns &returns) {
   for (FunctionDecl *functionDecl : this->facts.ownMethods(classDecl)) {
-    auto returned = this->checkOverrideReturn(classDecl, functionDecl);
+    auto returned = this->checkOverrideReturn(classDecl, functionDecl, returns);
     if (returned.isErr()) {
       this->state.diagnostics.error(functionDecl->loc(), returned.error().message);
     }
@@ -442,28 +478,30 @@ ClassBodyWalks::ResultSignatureVariant ClassBodyWalks::checkSignatureVariant(llv
   return ok(signature);
 }
 
-void ClassBodyWalks::walkImplements(ClassDecl *classDecl) {
+void ClassBodyWalks::walkImplements(ClassDecl *classDecl, KnownReturns &returns) {
   auto interfaces = std::vector<const Type *>();
   this->interfacesOf(classDecl, interfaces);
   for (const Type *interfaceType : interfaces) {
     if (llvm::is_contained(classDecl->implemented, interfaceType)) {
-      this->walkImplementedInterface(classDecl, interfaceType);
+      this->walkImplementedInterface(classDecl, interfaceType, returns);
     }
   }
 }
 
-void ClassBodyWalks::walkImplementedInterface(ClassDecl *classDecl, const Type *interfaceType) {
+void ClassBodyWalks::walkImplementedInterface(ClassDecl *classDecl, const Type *interfaceType,
+                                              KnownReturns &returns) {
   auto prefix = ErrorTextImplements::prefix(classDecl->name, interfaceType->name());
   for (const Field &member : interfaceType->fields()) {
-    this->walkImplementedMember(classDecl, interfaceType, member, prefix);
+    this->walkImplementedMember(classDecl, interfaceType, member, prefix, returns);
   }
   for (const Overload &overload : interfaceType->overloads()) {
-    this->walkImplementedOverload(classDecl, interfaceType, overload, prefix);
+    this->walkImplementedOverload(classDecl, interfaceType, overload, prefix, returns);
   }
 }
 
 void ClassBodyWalks::walkImplementedMember(ClassDecl *classDecl, const Type *interfaceType,
-                                           const Field &member, const std::string &prefix) {
+                                           const Field &member, const std::string &prefix,
+                                           KnownReturns &returns) {
   const auto *field = classDecl->findField(member.name);
   if (field != nullptr && field->method() == nullptr) {
     return this->walkImplementedField(classDecl, member, field, prefix);
@@ -484,7 +522,7 @@ void ClassBodyWalks::walkImplementedMember(ClassDecl *classDecl, const Type *int
     this->state.diagnostics.error(methods[0]->loc(), replaced.error().message);
     return;
   }
-  this->walkVariantReturns(classDecl, interfaceType, member, methods);
+  this->walkVariantReturns(classDecl, interfaceType, member, methods, returns);
   bool isFound = this->hasMatchingVariant(member, methods);
   auto variant = this->checkVariantFound(prefix, member, methods, classDecl, isFound);
   if (variant.isErr()) {
@@ -506,18 +544,19 @@ void ClassBodyWalks::walkImplementedField(const ClassDecl *classDecl, const Fiel
 }
 
 void ClassBodyWalks::walkVariantReturns(const ClassDecl *classDecl, const Type *interfaceType,
-                                        const Field &member,
-                                        llvm::ArrayRef<FunctionDecl *> methods) {
+                                        const Field &member, llvm::ArrayRef<FunctionDecl *> methods,
+                                        KnownReturns &returns) {
   for (FunctionDecl *functionDecl : methods) {
     if (this->isTakingMember(member, functionDecl)) {
-      this->walkVariantReturn(classDecl, interfaceType, member, functionDecl);
+      this->walkVariantReturn(classDecl, interfaceType, member, functionDecl, returns);
     }
   }
 }
 
 void ClassBodyWalks::walkVariantReturn(const ClassDecl *classDecl, const Type *interfaceType,
-                                       const Field &member, const FunctionDecl *functionDecl) {
-  const auto *returnType = functionDecl->sym->getReturnType();
+                                       const Field &member, const FunctionDecl *functionDecl,
+                                       KnownReturns &returns) {
+  const auto *returnType = this->knownReturn(functionDecl->sym, returns);
   auto agrees = this->checkReturnMatches(functionDecl->name, returnType, member.type->ret(),
                                          interfaceType, classDecl);
   if (agrees.isErr()) {
@@ -541,17 +580,20 @@ bool ClassBodyWalks::isTakingMember(const Field &member, const FunctionDecl *fun
 }
 
 void ClassBodyWalks::walkImplementedOverload(ClassDecl *classDecl, const Type *interfaceType,
-                                             const Overload &overload, const std::string &prefix) {
+                                             const Overload &overload, const std::string &prefix,
+                                             KnownReturns &returns) {
   auto methods = classDecl->findMethodsNamed(overload.name);
   for (const Type *signature : overload.signatures) {
-    this->walkOverloadSignature(classDecl, interfaceType, overload, methods, signature, prefix);
+    this->walkOverloadSignature(classDecl, interfaceType, overload, methods, signature, prefix,
+                                returns);
   }
 }
 
 void ClassBodyWalks::walkOverloadSignature(ClassDecl *classDecl, const Type *interfaceType,
                                            const Overload &overload,
                                            llvm::ArrayRef<FunctionDecl *> methods,
-                                           const Type *signature, const std::string &prefix) {
+                                           const Type *signature, const std::string &prefix,
+                                           KnownReturns &returns) {
   auto *functionDecl = this->methodTaking(methods, signature);
   auto variant =
       this->checkSignatureVariant(prefix, overload.name, signature, functionDecl != nullptr);
@@ -559,7 +601,7 @@ void ClassBodyWalks::walkOverloadSignature(ClassDecl *classDecl, const Type *int
     this->state.diagnostics.error(classDecl->loc(), variant.error().message);
     return;
   }
-  const auto *returnType = functionDecl->sym->getReturnType();
+  const auto *returnType = this->knownReturn(functionDecl->sym, returns);
   auto agrees = this->checkReturnMatches(overload.name, returnType, signature->ret(), interfaceType,
                                          classDecl);
   if (agrees.isErr()) {

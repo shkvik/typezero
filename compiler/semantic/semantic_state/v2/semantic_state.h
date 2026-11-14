@@ -5,7 +5,6 @@
 #include "compiler/program/library/builtin_names/global_member_table/global_member_table.h"
 #include "compiler/program/program_inventory/program_inventory.h"
 #include "compiler/program/source_file/source_file.h"
-#include "compiler/program/symbols/completer/completer.h"
 #include "compiler/semantic/semantic_state/v2/checkpoint/checkpoint.h"
 #include "compiler/semantic/semantic_state/v2/code/code_storage.h"
 #include "compiler/semantic/semantic_state/v2/declaration/declaration_storage.h"
@@ -48,7 +47,6 @@ public:
   Diagnostics &diagnostics;
   InferenceStorage inference;
   ProgramInventory &inventory;
-  Completer *completer = nullptr;
   DeclarationStorage declaration;
 
 private:

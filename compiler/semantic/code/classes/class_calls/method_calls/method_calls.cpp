@@ -181,8 +181,15 @@ void MethodCalls::afterMethodChoice(const AfterMethodChoice &task) {
 }
 
 void MethodCalls::afterPlainMethodType(const AfterPlainMethodType &task) {
-  task.member->type = this->state.walk.tasks.takeAnswer();
-  task.call->type = task.function->getReturnType();
+  auto &tasks = this->state.walk.tasks;
+  task.member->type = tasks.takeAnswer();
+  tasks.pushTask(SetCallType{.call = task.call});
+
+  return tasks.pushTask(ReturnTypeOf{.function = task.function});
+}
+
+void MethodCalls::setCallType(const SetCallType &task) {
+  task.call->type = this->state.walk.tasks.takeAnswer();
 }
 
 void MethodCalls::afterGenericMethodCall(const AfterGenericMethodCall &task) {
@@ -202,6 +209,30 @@ void MethodCalls::afterGenericMethodCall(const AfterGenericMethodCall &task) {
   tasks.pushTask(AfterMemberFunctionType{.member = task.member});
 
   return tasks.pushTask(FunctionTypeOf{.function = call->method()});
+}
+
+void MethodCalls::startGenericCallTypes(const StartGenericCallTypes &task) {
+  CallExpr *call = task.call;
+  FuncSymbol *function = task.function;
+  auto &tasks = this->state.walk.tasks;
+  const Type *returnType = tasks.takeAnswer();
+  this->state.generics.copies.enterInstanceLoc(task.loc);
+  tasks.pushTask(AfterBoundTypes{
+      .call = call,
+      .function = function,
+      .bound = task.bound,
+      .loc = task.loc,
+      .kind = task.kind,
+      .isReturnKnown = returnType != nullptr,
+  });
+  if (returnType != nullptr) {
+    tasks.pushTask(
+        SubstituteType{.type = returnType, .params = function->typeParams, .args = task.bound});
+  }
+  for (const Type *param : llvm::reverse(function->params)) {
+    tasks.pushTask(
+        SubstituteValueType{.type = param, .params = function->typeParams, .args = task.bound});
+  }
 }
 
 void MethodCalls::afterBoundTypes(const AfterBoundTypes &task) {
@@ -395,11 +426,12 @@ void MethodCalls::afterStaticMethodChoice(const AfterStaticMethodChoice &task) {
     });
   }
   call->target = FunctionCall{.func = function};
-  call->type = function->getReturnType();
-
   auto arguments =
       this->classCallRules.argumentsTask(call, function, member->loc(), choice.isChecked);
-  return tasks.pushTask(std::move(arguments));
+  tasks.pushTask(std::move(arguments));
+  tasks.pushTask(SetCallType{.call = call});
+
+  return tasks.pushTask(ReturnTypeOf{.function = function});
 }
 
 MethodCalls::ResultFieldIsCallable MethodCalls::checkFieldCallable(const Type *type,

@@ -31,6 +31,10 @@ void CodeVariablesRegistry::afterEarlyTimer(const AfterEarlyTimer &task) {
   return this->variableDeclarations.afterEarlyTimer(task);
 }
 
+void CodeVariablesRegistry::findDestination(const FindDestination &task) {
+  return this->variableDeclarations.findDestination(task);
+}
+
 void CodeVariablesRegistry::afterInit(const AfterInit &task) {
   return this->variableDeclarations.afterInit(task);
 }

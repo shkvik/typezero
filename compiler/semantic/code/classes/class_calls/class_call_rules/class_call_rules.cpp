@@ -40,24 +40,15 @@ void ClassCallRules::startGenericCall(CallExpr *call, FuncSymbol *function,
                                       const std::vector<const Type *> &bound, llvm::SMLoc loc,
                                       GenericCallee kind) {
   auto &tasks = this->state.walk.tasks;
-  const Type *returnType = function->getReturnType();
-  this->state.generics.copies.enterInstanceLoc(loc);
-  tasks.pushTask(AfterBoundTypes{
+  tasks.pushTask(StartGenericCallTypes{
       .call = call,
       .function = function,
       .bound = bound,
       .loc = loc,
       .kind = kind,
-      .isReturnKnown = returnType != nullptr,
   });
-  if (returnType != nullptr) {
-    tasks.pushTask(
-        SubstituteType{.type = returnType, .params = function->typeParams, .args = bound});
-  }
-  for (const Type *param : llvm::reverse(function->params)) {
-    tasks.pushTask(
-        SubstituteValueType{.type = param, .params = function->typeParams, .args = bound});
-  }
+
+  return tasks.pushTask(ReturnTypeOf{.function = function});
 }
 
 }

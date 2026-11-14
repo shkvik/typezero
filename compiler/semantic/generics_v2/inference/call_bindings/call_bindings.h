@@ -12,6 +12,7 @@ public:
   CallBindings(SemanticState &owner, BindingRules &sharedBindingRules);
 
   void literalShape(const LiteralShape &task);
+  void startBinding(const StartBinding &task);
   void bindGenericCall(const BindGenericCall &task);
   void checkGenericCall(const CheckGenericCall &task);
   void afterExplicitTypeArgs(const AfterExplicitTypeArgs &task);
@@ -24,8 +25,6 @@ private:
       Result<const FuncSymbol *, GenericsInferenceRegistryOwnClassReturnError>;
 
   void bindExplicitTypeArgs(GenericBindingDraft draft);
-  void startBinding(CallExpr *call, FuncSymbol *generic, llvm::SMLoc loc, const Type *expected,
-                    llvm::ArrayRef<TypeRef> typeArgs, BindingOwner owner);
 
 
   bool returnsOwnClass(const FuncSymbol *generic, const Type *returnType);

@@ -11,11 +11,22 @@ GenericValues::GenericValues(SemanticState &owner,
       functionInstanceRules(sharedFunctionInstanceRules) {}
 
 void GenericValues::checkGenericValue(const CheckGenericValue &task) {
+  auto &tasks = this->state.walk.tasks;
+  task.name->type = Type::error();
+  tasks.pushTask(StartGenericValue{
+      .name = task.name,
+      .generic = task.generic,
+      .wanted = task.wanted,
+  });
+
+  return tasks.pushTask(ReturnTypeOf{.function = task.generic});
+}
+
+void GenericValues::startGenericValue(const StartGenericValue &task) {
   NameExpr *name = task.name;
   FuncSymbol *generic = task.generic;
   auto &tasks = this->state.walk.tasks;
-  name->type = Type::error();
-  const auto *declaredReturn = generic->getReturnType();
+  const Type *declaredReturn = tasks.takeAnswer();
   bool isOwnClass = this->returnsOwnClass(generic, declaredReturn);
   const Signature *expected = task.wanted.has_value() ? &*task.wanted : nullptr;
   auto given = this->typeArgsGiven(generic, name, expected);

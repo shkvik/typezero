@@ -169,8 +169,10 @@ void MemberReads::startMethodMember(MemberExpr *member, ClassDecl *classDecl, co
 
 void MemberReads::afterMethodVariants(const AfterMethodVariants &task) {
   MemberExpr *member = task.member;
+  const Type *lastReturn = this->classMemberRules.takeLastVariantReturn(task.methods);
   auto types = this->classMemberRules.takeVariantTypes(task.methods, task.expected);
-  auto variant = this->classMemberRules.variantForType(task.methods, types, task.expected, member);
+  auto variant =
+      this->classMemberRules.variantForType(task.methods, types, lastReturn, task.expected, member);
   if (variant.isErr()) {
     return this->state.diagnostics.error(member->loc(), variant.error().message);
   }
@@ -206,8 +208,10 @@ void MemberReads::afterOverloadVariants(const AfterOverloadVariants &task) {
   MemberExpr *member = task.member;
   const Type *interfaceType = member->object->type;
   const Overload &overload = *interfaceType->overload(member->name);
+  const Type *lastReturn = this->classMemberRules.takeLastVariantReturn(task.variants);
   auto types = this->classMemberRules.takeVariantTypes(task.variants, task.expected);
-  auto variant = this->classMemberRules.variantForType(task.variants, types, task.expected, member);
+  auto variant = this->classMemberRules.variantForType(task.variants, types, lastReturn,
+                                                       task.expected, member);
   if (variant.isErr()) {
     return this->state.diagnostics.error(member->loc(), variant.error().message);
   }

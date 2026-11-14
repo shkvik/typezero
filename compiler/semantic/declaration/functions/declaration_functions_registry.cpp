@@ -134,7 +134,6 @@ DeclarationFunctionsRegistry::checkParamTypeKnown(const Param &param) const {
 void DeclarationFunctionsRegistry::startFunctionSymbol(const StartFunctionSymbol &task) {
   FunctionDecl *functionDecl = task.functionDecl;
   auto *function = this->state.ast.newFunc();
-  function->setCompleter(this->state.completer);
   function->name = functionDecl->name;
   function->loc = functionDecl->loc();
   function->decl = functionDecl;

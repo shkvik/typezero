@@ -431,7 +431,6 @@ DeclarationClassesRegistry::paramType(const Param &param, const Type *type,
 void DeclarationClassesRegistry::startTypedMethod(const StartTypedMethod &task) {
   FunctionDecl *functionDecl = task.functionDecl;
   auto *function = this->state.ast.newFunc();
-  function->setCompleter(this->state.completer);
   function->name = functionDecl->name;
   function->loc = functionDecl->loc();
   function->decl = functionDecl;

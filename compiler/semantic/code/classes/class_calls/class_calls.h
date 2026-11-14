@@ -13,33 +13,35 @@ class ClassCalls {
 public:
   ClassCalls(SemanticState &owner, ClassFacts &sharedFacts);
 
-  void checkValueNew(const CheckValueNew &task);
+  void setCallType(const SetCallType &task);
   void checkClassNew(const CheckClassNew &task);
+  void checkValueNew(const CheckValueNew &task);
   void checkSuperCall(const CheckSuperCall &task);
   void finishClassNew(const FinishClassNew &task);
-  void checkConstructorAccess(const CheckConstructorAccess &task);
-  void checkMethodCall(const CheckMethodCall &task);
   void afterBoundTypes(const AfterBoundTypes &task);
+  void checkMethodCall(const CheckMethodCall &task);
   void finishSuperCall(const FinishSuperCall &task);
   void afterSuperObject(const AfterSuperObject &task);
   void nextReflectedArg(const NextReflectedArg &task);
   void afterMethodChoice(const AfterMethodChoice &task);
   void afterReflectedArg(const AfterReflectedArg &task);
   void checkOverloadCall(const CheckOverloadCall &task);
-  void afterMethodCallTry(const AfterMethodCallTry &task);
   void afterGenericCallee(const AfterGenericCallee &task);
-  void afterValueNewCallee(const AfterValueNewCallee &task);
+  void afterMethodCallTry(const AfterMethodCallTry &task);
   void afterOverloadChoice(const AfterOverloadChoice &task);
+  void afterValueNewCallee(const AfterValueNewCallee &task);
   void afterPlainMethodType(const AfterPlainMethodType &task);
-  void checkSuperMethodCall(const CheckSuperMethodCall &task);
   void afterSuperEmitterTry(const AfterSuperEmitterTry &task);
   void checkClassStaticCall(const CheckClassStaticCall &task);
+  void checkSuperMethodCall(const CheckSuperMethodCall &task);
   void afterClassFieldCallee(const AfterClassFieldCallee &task);
-  void afterGenericMethodCall(const AfterGenericMethodCall &task);
-  void afterSuperMethodChoice(const AfterSuperMethodChoice &task);
+  void startGenericCallTypes(const StartGenericCallTypes &task);
   void afterConstructorChoice(const AfterConstructorChoice &task);
   void afterEventsFunctionTry(const AfterEventsFunctionTry &task);
+  void afterGenericMethodCall(const AfterGenericMethodCall &task);
   void afterStaticFieldCallee(const AfterStaticFieldCallee &task);
+  void afterSuperMethodChoice(const AfterSuperMethodChoice &task);
+  void checkConstructorAccess(const CheckConstructorAccess &task);
   void afterStaticMethodChoice(const AfterStaticMethodChoice &task);
   void afterParentConstructorChoice(const AfterParentConstructorChoice &task);
 

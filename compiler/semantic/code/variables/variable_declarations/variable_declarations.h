@@ -16,6 +16,7 @@ public:
   void walkVarDecl(const WalkVarDecl &task);
   void nextDeclarator(const NextDeclarator &task);
   void afterEarlyTimer(const AfterEarlyTimer &task);
+  void findDestination(const FindDestination &task);
   void destructureValue(const DestructureValue &task);
   void afterDeclaredType(const AfterDeclaredType &task);
   void finishConstFunction(const FinishConstFunction &task);
@@ -28,16 +29,19 @@ private:
   using ResultConstValued = Result<const VarDeclarator *, CodeVariablesRegistryConstValueError>;
 
   void startInit(DeclaratorDraft draft);
-  void findDestination(DeclaratorDraft &draft);
+  void startValueOrTimer(DeclaratorDraft draft);
   void startVariableValue(DeclaratorDraft draft);
-  void spreadTextIntoArray(DeclaratorDraft &draft);
   void declareValueVariable(DeclaratorDraft draft);
+  void spreadTextIntoArray(DeclaratorDraft &draft);
   void startDeclarator(const DeclaratorDraft &draft);
-  void startValueDeclarator(const DeclaratorDraft &start);
   void nameFunctionValue(VarDeclarator &declarator) const;
+  void startValueDeclarator(const DeclaratorDraft &start);
   void declareGenericAlias(const DeclaratorDraft &draft, FuncSymbol *generic);
   void startConstFunction(const DeclaratorDraft &draft, FunctionExpr *functionExpr);
   void liftGenericFunction(const DeclaratorDraft &draft, FunctionDecl *functionDecl);
+
+
+  bool isSeekingDestination(const DeclaratorDraft &draft) const;
 
 
   ResultDestructure checkDestructurable(const VarDeclarator &declarator, const Type *type) const;

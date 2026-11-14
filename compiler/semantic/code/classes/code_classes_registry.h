@@ -26,6 +26,7 @@ public:
   void checkThis(const CheckThis &task);
   void declareThis(const DeclareThis &task);
   void relinkClass(const RelinkClass &task);
+  void setCallType(const SetCallType &task);
   void markLateOverrides(SourceFile &program);
   void rankVariants(const RankVariants &task);
   void afterLateBase(const AfterLateBase &task);
@@ -92,6 +93,7 @@ public:
   void afterDecoratorApplied(const AfterDecoratorApplied &task);
   void afterNameFunctionType(const AfterNameFunctionType &task);
   void afterOverloadVariants(const AfterOverloadVariants &task);
+  void startGenericCallTypes(const StartGenericCallTypes &task);
   void afterClassMethodReturn(const AfterClassMethodReturn &task);
   void afterConstructorChoice(const AfterConstructorChoice &task);
   void afterEventsFunctionTry(const AfterEventsFunctionTry &task);
@@ -106,6 +108,8 @@ public:
   void afterStaticMethodChoice(const AfterStaticMethodChoice &task);
   void checkInstanceOfOperator(const CheckInstanceOfOperator &task);
   void declareHoistedDecorator(const DeclareHoistedDecorator &task);
+  void afterFactoryMethodReturn(const AfterFactoryMethodReturn &task);
+  void afterDescriptorMethodReturn(const AfterDescriptorMethodReturn &task);
   void afterConstructorTypeArgument(const AfterConstructorTypeArgument &task);
   void afterParentConstructorChoice(const AfterParentConstructorChoice &task);
 

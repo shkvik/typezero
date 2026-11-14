@@ -83,8 +83,10 @@ void StaticMemberReads::startStaticMethodValue(MemberExpr *member, ClassDecl *cl
 void StaticMemberReads::afterStaticVariants(const AfterStaticVariants &task) {
   MemberExpr *member = task.member;
   auto &tasks = this->state.walk.tasks;
+  const Type *lastReturn = this->classMemberRules.takeLastVariantReturn(task.methods);
   auto types = this->classMemberRules.takeVariantTypes(task.methods, task.expected);
-  auto variant = this->classMemberRules.variantForType(task.methods, types, task.expected, member);
+  auto variant =
+      this->classMemberRules.variantForType(task.methods, types, lastReturn, task.expected, member);
   if (variant.isErr()) {
     this->state.diagnostics.error(member->loc(), variant.error().message);
     return tasks.pushChecked(member);
