@@ -1,6 +1,83 @@
 #include "compiler/semantic/semantic_state/v2/walk/scope_stack_context/scope_stack_context.h"
+#include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 
 namespace tz {
+
+ScopeStackContext::ResultEntryDeclared ScopeStackContext::declare(llvm::StringRef name,
+                                                                  ScopeEntry entry) {
+  auto allowed = this->checkNameAllowed(name);
+  if (allowed.isErr()) {
+    return err(allowed.error());
+  }
+  auto function = this->checkFunctionOnce(name, entry);
+  if (function.isErr()) {
+    return err(function.error());
+  }
+  auto unique = this->checkNotDeclared(name);
+  if (unique.isErr()) {
+    return err(unique.error());
+  }
+  this->addToCurrentScope(name, entry);
+
+  return ok(entry);
+}
+
+FuncSymbol *ScopeStackContext::findGenericFunction(const NameExpr *name) const {
+  auto entry = this->findName(name->name);
+  FuncSymbol *function = entry.func();
+  bool isGenericFunction = function != nullptr && entry.var() == nullptr && function->isGeneric();
+  if (!isGenericFunction) {
+    return nullptr;
+  }
+
+  return function;
+}
+
+ScopeStackContext::ResultNameIsAllowed
+ScopeStackContext::checkNameAllowed(llvm::StringRef name) const {
+  if (TypeNameTable::isName(name, TypeName::UNDEFINED)) {
+    auto message = ErrorTextDeclareName::undefined();
+
+    return err(ScopeStackContextDeclareError{
+        .code = ScopeStackContextDeclareErrorCode::UNDEFINED_AS_NAME,
+        .message = message,
+    });
+  }
+
+  return ok();
+}
+
+ScopeStackContext::ResultNameIsAllowed
+ScopeStackContext::checkFunctionOnce(llvm::StringRef name, const ScopeEntry &entry) const {
+  auto previous = this->findInCurrentScope(name);
+  bool isSecondFunction =
+      previous.has_value() && entry.func() != nullptr && previous->func() != nullptr;
+  if (isSecondFunction) {
+    auto message = ErrorTextDeclareName::function(name);
+
+    return err(ScopeStackContextDeclareError{
+        .code = ScopeStackContextDeclareErrorCode::DUPLICATE_FUNCTION,
+        .message = message,
+    });
+  }
+
+  return ok();
+}
+
+ScopeStackContext::ResultNameIsAllowed
+ScopeStackContext::checkNotDeclared(llvm::StringRef name) const {
+  auto previous = this->findInCurrentScope(name);
+  if (previous.has_value()) {
+    auto message = ErrorTextDeclareName::duplicate(name);
+
+    return err(ScopeStackContextDeclareError{
+        .code = ScopeStackContextDeclareErrorCode::DUPLICATE_DECLARATION,
+        .message = message,
+    });
+  }
+
+  return ok();
+}
 
 void ScopeStackContext::openScope() {
   this->scopes.emplace_back();

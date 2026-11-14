@@ -1,8 +1,10 @@
 #pragma once
 
 #include "compiler/program/ast/ast.h"
+#include "compiler/result/result/result.h"
 #include "compiler/semantic/names/scopes/scope_entry.h"
 #include "compiler/semantic/semantic_state/flow_state/flow_state_types.h"
+#include "compiler/semantic/semantic_state/v2/walk/scope_stack_context/scope_stack_context_errors.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include <optional>
@@ -20,6 +22,8 @@ struct ScopeSnapshot {
 
 class ScopeStackContext {
 public:
+  using ResultEntryDeclared = Result<ScopeEntry, ScopeStackContextDeclareError>;
+
   void openScope();
   void closeScope();
   void enterBranch();
@@ -67,10 +71,18 @@ public:
   ScopeEntry findName(llvm::StringRef name) const;
   llvm::StringMap<ScopeEntry> getTopValues() const;
   std::vector<llvm::StringRef> getLocalVarNames() const;
+  FuncSymbol *findGenericFunction(const NameExpr *name) const;
   const BlockNames *findDeclaredLater(llvm::StringRef name) const;
+  ResultEntryDeclared declare(llvm::StringRef name, ScopeEntry entry);
   std::optional<size_t> findDeclaringScope(const VarSymbol *variable) const;
 
 private:
+  using ResultNameIsAllowed = Result<void, ScopeStackContextDeclareError>;
+
+  ResultNameIsAllowed checkNotDeclared(llvm::StringRef name) const;
+  ResultNameIsAllowed checkNameAllowed(llvm::StringRef name) const;
+  ResultNameIsAllowed checkFunctionOnce(llvm::StringRef name, const ScopeEntry &entry) const;
+
   int branchDepth = 0;
   std::vector<int> scopeBranches;
   std::vector<BlockNames> blockNames;

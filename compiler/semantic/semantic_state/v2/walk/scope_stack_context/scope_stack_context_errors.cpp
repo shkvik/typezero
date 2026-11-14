@@ -1,4 +1,4 @@
-#include "compiler/semantic/declaration/names/declaration_names_registry/declaration_names_registry_errors.h"
+#include "compiler/semantic/semantic_state/v2/walk/scope_stack_context/scope_stack_context_errors.h"
 #include "llvm/ADT/Twine.h"
 
 namespace tz {
@@ -19,13 +19,6 @@ std::string ErrorTextDeclareName::function(llvm::StringRef name) {
 
 std::string ErrorTextDeclareName::duplicate(llvm::StringRef name) {
   return (llvm::Twine("duplicate declaration of '") + name + "'").str();
-}
-
-std::string ErrorTextCheckVisible::otherCase(llvm::StringRef name) {
-  return (llvm::Twine("'") + name +
-          "' is declared in an earlier case of the 'switch'; declare it "
-          "before the 'switch' to use it in several cases")
-      .str();
 }
 
 }

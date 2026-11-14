@@ -73,8 +73,12 @@ struct GenericInstance {
 using ClassGenerics = Union<NotGeneric, GenericTemplate, GenericInstance>;
 
 struct ClassDecl : Stmt {
-  ClassDecl(llvm::SMLoc loc, llvm::StringRef name) : Stmt(Kind::Class, loc), name(name) {}
-  static bool classof(const Stmt *s) { return s->kind() == Kind::Class; }
+  ClassDecl(llvm::SMLoc loc, llvm::StringRef name)
+      : Stmt(Kind::Class, loc),
+        name(name) {}
+  static bool classof(const Stmt *s) {
+    return s->kind() == Kind::Class;
+  }
 
   const ClassField *field(llvm::StringRef member) const {
     for (const ClassField &f : fields) {
@@ -143,6 +147,36 @@ struct ClassDecl : Stmt {
   bool builtin() const;
   bool expression() const;
   ObjectLitExpr *literal() const;
+
+  bool hasMethodFields() const;
+
+
+  std::vector<FunctionDecl *> findConstructors() const;
+  std::vector<FunctionDecl *> collectMemberFunctions() const;
+  std::vector<FunctionDecl *> findMethodsNamed(llvm::StringRef name) const;
+  std::vector<FunctionDecl *> findStaticMethodsNamed(llvm::StringRef name) const;
+
+
+  const ClassField *findInheritedField(llvm::StringRef name) const;
+  const ClassDecl *findInheritedFieldOwner(llvm::StringRef name) const;
+
+private:
+  void addNotHidden(std::vector<FunctionDecl *> &found,
+                    const std::vector<FunctionDecl *> &own) const;
+  void addNotOverridden(std::vector<FunctionDecl *> &found,
+                        const std::vector<FunctionDecl *> &own) const;
+
+
+  bool hasOwnMethodField() const;
+  bool isOverriding(const FunctionDecl *method, const FunctionDecl *base) const;
+  bool hasSameSignature(const FuncSymbol *first, const FuncSymbol *second) const;
+  bool isHiddenByAny(const std::vector<FunctionDecl *> &found, const FunctionDecl *method) const;
+  bool isOverriddenByAny(const std::vector<FunctionDecl *> &found,
+                         const FunctionDecl *method) const;
+
+
+  std::vector<FunctionDecl *> ownMethodsNamed(llvm::StringRef name) const;
+  std::vector<FunctionDecl *> ownStaticMethodsNamed(llvm::StringRef name) const;
 };
 
 }

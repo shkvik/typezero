@@ -7,6 +7,7 @@ void ArgumentListContext::rememberArgumentList(const VarSymbol *variable,
   this->argumentLists[variable] = std::move(parts);
 }
 
+std::optional<std::vector<llvm::StringRef>>
 ArgumentListContext::findArgumentList(const VarSymbol *variable) const {
   auto found = this->argumentLists.find(variable);
   if (found == this->argumentLists.end()) {

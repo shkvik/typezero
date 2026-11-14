@@ -18,6 +18,8 @@
 
 namespace tz {
 
+class Type;
+
 enum class TypeRefKind {
   NAME_REF,
   ARRAY_REF,
@@ -135,6 +137,7 @@ struct TypeRef {
   llvm::SMLoc loc;
   std::vector<TypeRef> args;
   llvm::StringRef source;
+  const Type *resolved = nullptr;
 
   TypeRefKind kind() const;
   const std::vector<llvm::StringRef> &names() const;

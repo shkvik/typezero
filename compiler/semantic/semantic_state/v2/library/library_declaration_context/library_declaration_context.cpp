@@ -1,4 +1,5 @@
 #include "compiler/semantic/semantic_state/v2/library/library_declaration_context/library_declaration_context.h"
+#include "compiler/program/library/stream/stream_hook_table/stream_hook_table.h"
 
 namespace tz {
 
@@ -50,6 +51,25 @@ ClassDecl *LibraryDeclarationContext::findLibraryClass(LibraryClass libraryClass
   auto name = LibraryClassTable::getName(libraryClass);
 
   return this->libraryClasses.lookup(name);
+}
+
+bool LibraryDeclarationContext::isStreamClass(const ClassDecl *classDecl) const {
+  auto *stream = this->findLibraryClass(LibraryClass::STREAM);
+
+  return classDecl != nullptr && stream != nullptr && classDecl->derivesFrom(stream);
+}
+
+bool LibraryDeclarationContext::isStreamHook(const FunctionDecl *functionDecl) const {
+  const ClassDecl *classDecl = functionDecl->cls();
+  bool isUserMethod = classDecl != nullptr && !functionDecl->isStatic() && !classDecl->library() &&
+                      classDecl->literal() == nullptr && classDecl->parent != nullptr;
+  auto hook = StreamHookTable::find(functionDecl->name);
+
+  return isUserMethod && hook.has_value();
+}
+
+bool LibraryDeclarationContext::isLinkedStreamHook(const FunctionDecl *functionDecl) const {
+  return this->isStreamHook(functionDecl) && this->isStreamClass(functionDecl->cls()->parent);
 }
 
 void LibraryDeclarationContext::addLibraryRange(const char *begin, const char *end) {

@@ -31,6 +31,7 @@ public:
 
 
   ModuleState &getModuleState(const Module *module);
+  const ModuleState &getModuleState(const Module *module) const;
 
 private:
   bool topLevelDone = false;

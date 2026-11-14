@@ -33,6 +33,9 @@ public:
 
 
   bool isInsideLibrary(llvm::SMLoc loc) const;
+  bool isStreamClass(const ClassDecl *classDecl) const;
+  bool isStreamHook(const FunctionDecl *functionDecl) const;
+  bool isLinkedStreamHook(const FunctionDecl *functionDecl) const;
   bool isModuleExport(NodeModule module, llvm::StringRef name) const;
 
 

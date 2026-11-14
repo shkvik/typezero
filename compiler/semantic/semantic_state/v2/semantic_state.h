@@ -2,6 +2,7 @@
 
 #include "compiler/program/ast/ast_context/ast_context.h"
 #include "compiler/program/diagnostics/diagnostics.h"
+#include "compiler/program/library/builtin_names/global_member_table/global_member_table.h"
 #include "compiler/program/program_inventory/program_inventory.h"
 #include "compiler/program/source_file/source_file.h"
 #include "compiler/program/symbols/completer/completer.h"
@@ -24,7 +25,14 @@ public:
   void restoreBody(Checkpoint saved);
 
 
+  bool isUnshadowedGlobal(const NameExpr *name) const;
+  bool isGlobalName(const Expr *expr, GlobalName global) const;
+  bool isGlobalMember(const MemberExpr *member, GlobalMember which) const;
+
+
   Checkpoint saveBody();
+  Stmt *findTypeDeclaration(llvm::StringRef name) const;
+  const NodeName *findNodeName(llvm::StringRef name) const;
 
   AstContext &ast;
   CodeStorage code;
@@ -39,6 +47,13 @@ public:
   ProgramInventory &inventory;
   Completer *completer = nullptr;
   DeclarationStorage declaration;
+
+private:
+  bool isNamingGlobal(const Expr *expr, GlobalName global) const;
+  bool isGlobalThisMember(const Expr *expr, GlobalName global) const;
+
+
+  TypeAliasDecl *findModuleExport(const NodeName &nodeName) const;
 };
 
 }

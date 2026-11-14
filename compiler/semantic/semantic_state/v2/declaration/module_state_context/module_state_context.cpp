@@ -14,6 +14,10 @@ ModuleState &ModuleStateContext::getModuleState(const Module *module) {
   return this->moduleStates[module->order];
 }
 
+const ModuleState &ModuleStateContext::getModuleState(const Module *module) const {
+  return this->moduleStates[module->order];
+}
+
 void ModuleStateContext::rememberCurrentModule(Module *module) {
   this->currentModule = module;
 }

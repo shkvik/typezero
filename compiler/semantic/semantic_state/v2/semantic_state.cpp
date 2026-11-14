@@ -1,4 +1,8 @@
 #include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/library/bytes/buffer_export_table/buffer_export_table.h"
+
+using llvm::dyn_cast;
 
 namespace tz {
 
@@ -30,6 +34,108 @@ void SemanticState::restoreBody(Checkpoint saved) {
   this->declaration.modules.rememberCurrentModule(saved.module);
   this->walk.functions.restoreBody(std::move(saved.functions));
   this->generics.copies.rememberCheckingInstance(saved.instance);
+}
+
+const NodeName *SemanticState::findNodeName(llvm::StringRef name) const {
+  const auto &modules = this->declaration.modules;
+  auto *current = modules.getCurrentModule();
+  if (current == nullptr || !modules.hasModuleState(current)) {
+    return nullptr;
+  }
+  const auto &names = modules.getModuleState(current).nodeNames;
+  auto found = names.find(name);
+  if (found == names.end()) {
+    return nullptr;
+  }
+  bool isBufferName = BufferExportTable::find(name) == BufferExport::BUFFER;
+  bool isGlobalBuffer = found->second.module == NodeModule::Buffer && isBufferName;
+  if (isGlobalBuffer) {
+    return nullptr;
+  }
+  auto entry = this->walk.scopes.findName(name);
+  if (entry.isFound()) {
+    return nullptr;
+  }
+
+  return &found->second;
+}
+
+Stmt *SemanticState::findTypeDeclaration(llvm::StringRef name) const {
+  auto *declared = this->walk.scopes.findType(name);
+  if (declared != nullptr) {
+    return declared;
+  }
+  auto *alias = this->declaration.prelude.findBuiltinAlias(name);
+  if (alias != nullptr) {
+    return alias;
+  }
+  const auto *nodeName = this->findNodeName(name);
+  if (nodeName != nullptr) {
+    return this->findModuleExport(*nodeName);
+  }
+  if (this->declaration.modules.isInsideBuiltinModule()) {
+    return this->library.declarations.findModuleAlias(name);
+  }
+
+  return nullptr;
+}
+
+TypeAliasDecl *SemanticState::findModuleExport(const NodeName &nodeName) const {
+  const auto &declarations = this->library.declarations;
+  if (!declarations.isModuleExport(nodeName.module, nodeName.name)) {
+    return nullptr;
+  }
+
+  return declarations.findModuleAlias(nodeName.name);
+}
+
+bool SemanticState::isUnshadowedGlobal(const NameExpr *name) const {
+  const auto *nodeName = this->findNodeName(name->name);
+  if (nodeName != nullptr) {
+    return false;
+  }
+  auto shadow = this->walk.scopes.findName(name->name);
+
+  return shadow.var() == nullptr && shadow.func() == nullptr && shadow.cls() == nullptr;
+}
+
+bool SemanticState::isGlobalName(const Expr *expr, GlobalName global) const {
+  bool isThroughGlobalThis = global == GlobalName::CRYPTO && this->isGlobalThisMember(expr, global);
+  if (isThroughGlobalThis) {
+    return true;
+  }
+
+  return this->isNamingGlobal(expr, global);
+}
+
+bool SemanticState::isGlobalThisMember(const Expr *expr, GlobalName global) const {
+  auto name = GlobalNameTable::getName(global);
+  const auto *member = dyn_cast<MemberExpr>(expr);
+  if (member == nullptr || member->optional || member->name != name) {
+    return false;
+  }
+
+  return this->isNamingGlobal(member->object, GlobalName::GLOBAL_THIS);
+}
+
+bool SemanticState::isNamingGlobal(const Expr *expr, GlobalName global) const {
+  auto name = GlobalNameTable::getName(global);
+  const auto *named = dyn_cast<NameExpr>(expr);
+  if (named == nullptr || named->name != name) {
+    return false;
+  }
+
+  return this->isUnshadowedGlobal(named);
+}
+
+bool SemanticState::isGlobalMember(const MemberExpr *member, GlobalMember which) const {
+  auto owner = GlobalMemberTable::getOwner(which);
+  auto found = GlobalMemberTable::find(owner, member->name);
+  if (found != which) {
+    return false;
+  }
+
+  return this->isGlobalName(member->object, owner);
 }
 
 }
