@@ -291,7 +291,7 @@ InstanceOfChecks::checkGenericInstanceOf(BinaryExpr *binary, const ClassDecl *cl
       base->isUnion() ? base->members() : llvm::ArrayRef<const Type *>(base);
   auto matching = std::vector<const Type *>();
   for (const Type *member : members) {
-    if (GenericClassChecker::genericInstanceOf(member, classDecl) != nullptr) {
+    if (this->instanceOf(member, classDecl) != nullptr) {
       matching.push_back(member);
     }
   }
@@ -307,13 +307,19 @@ const Type *InstanceOfChecks::genericTestType(const Type *base,
                                               llvm::ArrayRef<const Type *> matching,
                                               const ClassDecl *classDecl) const {
   if (!base->isUnion()) {
-    return GenericClassChecker::genericInstanceOf(base, classDecl)->type;
+    return this->instanceOf(base, classDecl)->type;
   }
   if (matching.size() == 1) {
     return matching[0];
   }
 
   return Type::unionOf(matching);
+}
+
+const ClassDecl *InstanceOfChecks::instanceOf(const Type *type, const ClassDecl *generic) const {
+  const ClassDecl *own = type != nullptr ? type->classDecl() : nullptr;
+
+  return own != nullptr ? own->findInstanceOf(generic) : nullptr;
 }
 
 InstanceOfChecks::ResultInstanceTested

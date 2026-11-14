@@ -23,4 +23,8 @@ void OverloadChoice::afterGenericParams(const AfterGenericParams &task) {
   return this->candidateRanking.afterGenericParams(task);
 }
 
+void OverloadChoice::afterInferredArguments(const AfterInferredArguments &task) {
+  return this->candidateRanking.afterInferredArguments(task);
+}
+
 }

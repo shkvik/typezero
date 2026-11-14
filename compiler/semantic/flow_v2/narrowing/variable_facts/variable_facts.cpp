@@ -147,7 +147,7 @@ bool VariableFacts::canBe(const Type *param, bool (Type::*test)() const) const {
 const Type *VariableFacts::numberNamed(const Type *param, llvm::StringRef name) const {
   for (const Type *type : param->alternatives()) {
     if (type->isNumeric() && name == TypeSpelling::typeOfName(type)) {
-      return this->numberParam(param, type);
+      return this->state.generics.apparent.numberParam(param, type);
     }
   }
   auto wideName = ToUtf16::toUtf16(name);
@@ -157,7 +157,7 @@ const Type *VariableFacts::numberNamed(const Type *param, llvm::StringRef name) 
     return nullptr;
   }
 
-  return this->numberParam(param, named);
+  return this->state.generics.apparent.numberParam(param, named);
 }
 
 const Type *VariableFacts::otherAlternatives(const Type *param, const std::u16string &text) const {
@@ -201,31 +201,6 @@ bool VariableFacts::areAllNamed(llvm::ArrayRef<const Type *> types, llvm::String
   }
 
   return true;
-}
-
-const Type *VariableFacts::numberParam(const Type *param, const Type *only) const {
-  const auto *known = this->state.generics.parameters.findNumberParam(param, only);
-  if (known != nullptr) {
-    return known;
-  }
-  const Type *constraint = only != nullptr ? only : this->commonNumericAlternative(param);
-  auto *type = Type::param(param->name());
-  type->setConstraint(constraint != nullptr ? constraint : Type::doubleTy(), {});
-  this->state.generics.parameters.rememberNumberParam(param, only, type);
-
-  return type;
-}
-
-const Type *VariableFacts::commonNumericAlternative(const Type *param) const {
-  const Type *common = nullptr;
-  for (const Type *candidate : param->alternatives()) {
-    if (candidate->isNumeric()) {
-      common = common != nullptr ? this->state.types.relations.commonNumericType(common, candidate)
-                                 : candidate;
-    }
-  }
-
-  return common;
 }
 
 }

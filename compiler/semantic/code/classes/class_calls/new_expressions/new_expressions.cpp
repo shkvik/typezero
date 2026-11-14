@@ -186,6 +186,16 @@ void NewExpressions::finishClassNew(const FinishClassNew &task) {
   }
 }
 
+void NewExpressions::checkConstructorAccess(const CheckConstructorAccess &task) {
+  const FunctionDecl *constructor = task.constructor;
+  auto constructorName = ObjectMemberTable::getName(ObjectMember::CONSTRUCTOR);
+  auto accessible =
+      this->facts.checkAccess(constructor->cls(), constructor->access(), constructorName);
+  if (accessible.isErr()) {
+    return this->state.diagnostics.error(task.newExpr->loc(), accessible.error().message);
+  }
+}
+
 NewExpressions::ResultNewOfClassValue NewExpressions::checkValueNewClass(const Type *type) const {
   if (!type->isClassRef()) {
     auto message = ErrorTextValueNew::notClass(type->name());

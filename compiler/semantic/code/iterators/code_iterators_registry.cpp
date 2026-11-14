@@ -123,4 +123,12 @@ void CodeIteratorsRegistry::afterSoleIteratorReturn() {
   return this->iteratorSignatures.afterSoleIteratorReturn();
 }
 
+void CodeIteratorsRegistry::asyncIterableTypeOf(const AsyncIterableTypeOf &task) {
+  return this->iteratorSignatures.asyncIterableTypeOf(task);
+}
+
+void CodeIteratorsRegistry::afterAsyncIterableReturn() {
+  return this->iteratorSignatures.afterAsyncIterableReturn();
+}
+
 }

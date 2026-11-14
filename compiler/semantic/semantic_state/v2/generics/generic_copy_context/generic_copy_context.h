@@ -36,6 +36,8 @@ public:
                                    FuncSymbol *function);
   void rememberFunctionInstance(const FuncSymbol *generic, std::vector<const Type *> key,
                                 InstanceRecord *instance);
+  void rememberClassInstance(const ClassDecl *generic, std::vector<const Type *> args,
+                             ClassDecl *instance);
 
 
   bool hasForcedTypes() const;
@@ -63,6 +65,8 @@ public:
   const Type *findForcedType(const Expr *expr) const;
   const InstanceRecord *findFailedCall(llvm::SMLoc loc) const;
   std::vector<const Type *> getClassDefaults(const ClassDecl *classDecl) const;
+  ClassDecl *findClassInstance(const ClassDecl *generic,
+                               const std::vector<const Type *> &args) const;
   FuncSymbol *findConstructorFunction(const ClassDecl *generic,
                                       const FunctionDecl *constructor) const;
 
@@ -84,6 +88,7 @@ private:
   std::map<std::pair<const ClassDecl *, const FunctionDecl *>, FuncSymbol *> constructorFunctions;
   std::map<std::pair<const FuncSymbol *, std::vector<const Type *>>, InstanceRecord *>
       functionInstances;
+  std::map<std::pair<const ClassDecl *, std::vector<const Type *>>, ClassDecl *> classInstances;
 };
 
 }

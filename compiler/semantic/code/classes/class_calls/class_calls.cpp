@@ -96,6 +96,10 @@ void ClassCalls::finishClassNew(const FinishClassNew &task) {
   return this->newExpressions.finishClassNew(task);
 }
 
+void ClassCalls::checkConstructorAccess(const CheckConstructorAccess &task) {
+  return this->newExpressions.checkConstructorAccess(task);
+}
+
 void ClassCalls::checkOverloadCall(const CheckOverloadCall &task) {
   return this->methodCalls.checkOverloadCall(task);
 }

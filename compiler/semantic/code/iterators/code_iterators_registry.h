@@ -12,6 +12,7 @@ public:
   explicit CodeIteratorsRegistry(SemanticState &owner);
 
   void afterSoleIteratorReturn();
+  void afterAsyncIterableReturn();
   void checkYield(const CheckYield &task);
   void iteratorOf(const IteratorOf &task);
   void finishYield(const FinishYield &task);
@@ -21,25 +22,26 @@ public:
   void elementTypeOf(const ElementTypeOf &task);
   void iterableOfSlot(const IterableOfSlot &task);
   void afterYieldValue(const AfterYieldValue &task);
-  void buildIterateCall(const BuildIterateCall &task);
   void afterNextMethods(const AfterNextMethods &task);
-  void walkIterableParam(const WalkIterableParam &task);
+  void buildIterateCall(const BuildIterateCall &task);
   void afterIterableUser(const AfterIterableUser &task);
   void asyncUserIterator(const AsyncUserIterator &task);
   void finishIterateCall(const FinishIterateCall &task);
-  void finishIteratorArgs(const FinishIteratorArgs &task);
-  void afterYieldDelegate(const AfterYieldDelegate &task);
+  void walkIterableParam(const WalkIterableParam &task);
   void afterIteratorValue(const AfterIteratorValue &task);
-  void resolveIteratorType(const ResolveIteratorType &task);
-  void finishIterableParam(const FinishIterableParam &task);
-  void walkGeneratorReturn(const WalkGeneratorReturn &task);
-  void afterSymbolIterator(const AfterSymbolIterator &task);
+  void afterYieldDelegate(const AfterYieldDelegate &task);
+  void finishIteratorArgs(const FinishIteratorArgs &task);
   void afterResultIterator(const AfterResultIterator &task);
+  void afterSymbolIterator(const AfterSymbolIterator &task);
+  void asyncIterableTypeOf(const AsyncIterableTypeOf &task);
+  void finishIterableParam(const FinishIterableParam &task);
   void finishIterateSymbol(const FinishIterateSymbol &task);
-  void finishIteratorResult(const FinishIteratorResult &task);
+  void resolveIteratorType(const ResolveIteratorType &task);
+  void walkGeneratorReturn(const WalkGeneratorReturn &task);
   void afterBuiltinIterator(const AfterBuiltinIterator &task);
-  void destructuredIteratorSlot(const DestructuredIteratorSlot &task);
+  void finishIteratorResult(const FinishIteratorResult &task);
   void afterAsyncSymbolIterator(const AfterAsyncSymbolIterator &task);
+  void destructuredIteratorSlot(const DestructuredIteratorSlot &task);
 
 private:
   IteratorSignatures iteratorSignatures;

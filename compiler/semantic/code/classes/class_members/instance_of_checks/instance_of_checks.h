@@ -56,6 +56,7 @@ private:
 
 
   ClassDecl *knownClassOf(const Type *rhs) const;
+  const ClassDecl *instanceOf(const Type *type, const ClassDecl *generic) const;
   std::optional<GlobalName> collectionGlobal(const Expr *rhs) const;
   llvm::SMLoc instanceOfErrorPlace(const BinaryExpr *binary,
                                    CodeClassesRegistryCheckInstanceOfErrorCode code) const;

@@ -13,8 +13,9 @@ public:
 
   void leaveCallback();
   void afterCallbackValue(const AfterCallbackValue &task);
-  void checkFunctionArgSlot(const CheckFunctionArgSlot &task);
   void afterLiteralCallback(const AfterLiteralCallback &task);
+  void checkFunctionArgSlot(const CheckFunctionArgSlot &task);
+  void checkBuiltinCallbackSlot(const CheckBuiltinCallbackSlot &task);
 
 private:
   using ResultNothingIsDropped = Result<const Type *, CodeFunctionsRegistryResultKeptError>;

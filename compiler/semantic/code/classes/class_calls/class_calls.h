@@ -17,6 +17,7 @@ public:
   void checkClassNew(const CheckClassNew &task);
   void checkSuperCall(const CheckSuperCall &task);
   void finishClassNew(const FinishClassNew &task);
+  void checkConstructorAccess(const CheckConstructorAccess &task);
   void checkMethodCall(const CheckMethodCall &task);
   void afterBoundTypes(const AfterBoundTypes &task);
   void finishSuperCall(const FinishSuperCall &task);

@@ -14,13 +14,15 @@ public:
   explicit IteratorSignatures(SemanticState &owner);
 
   void afterSoleIteratorReturn();
+  void afterAsyncIterableReturn();
   void nextValueOf(const NextValueOf &task);
   void elementTypeOf(const ElementTypeOf &task);
   void afterNextMethods(const AfterNextMethods &task);
   void walkIterableParam(const WalkIterableParam &task);
   void finishIteratorArgs(const FinishIteratorArgs &task);
-  void resolveIteratorType(const ResolveIteratorType &task);
+  void asyncIterableTypeOf(const AsyncIterableTypeOf &task);
   void finishIterableParam(const FinishIterableParam &task);
+  void resolveIteratorType(const ResolveIteratorType &task);
   void walkGeneratorReturn(const WalkGeneratorReturn &task);
   void finishIteratorResult(const FinishIteratorResult &task);
 
@@ -57,14 +59,12 @@ private:
                                    const Type *element, const TypeRef &ref);
 
 
-  ResultIteratorForm checkIteratorForm(const TypeRef &ref) const;
-  const FunctionDecl *soleIteratorMethod(const Type *type) const;
-  ResultIterableArgs checkIterableArguments(const TypeRef &ref) const;
-
-
   ClassDecl *classOf(const Type *type) const;
   std::string shownElementName(const Type *element) const;
+  ResultIteratorForm checkIteratorForm(const TypeRef &ref) const;
+  ResultIterableArgs checkIterableArguments(const TypeRef &ref) const;
   std::vector<FunctionDecl *> plainNextMethods(const Type *object) const;
+  const FunctionDecl *soleSymbolMethod(const Type *type, llvm::StringRef name) const;
   ResultGeneratorReturns checkGeneratorReturnType(const FunctionDecl *functionDecl,
                                                   const Type *declared);
   ResultIterableParam checkIterableParam(FunctionDecl *functionDecl, FuncSymbol *function,

@@ -254,6 +254,10 @@ void CodeClassesRegistry::afterGenericParams(const AfterGenericParams &task) {
   return this->overloads.afterGenericParams(task);
 }
 
+void CodeClassesRegistry::afterInferredArguments(const AfterInferredArguments &task) {
+  return this->overloads.afterInferredArguments(task);
+}
+
 void CodeClassesRegistry::checkSuperCall(const CheckSuperCall &task) {
   return this->calls.checkSuperCall(task);
 }
@@ -308,6 +312,10 @@ void CodeClassesRegistry::afterConstructorChoice(const AfterConstructorChoice &t
 
 void CodeClassesRegistry::finishClassNew(const FinishClassNew &task) {
   return this->calls.finishClassNew(task);
+}
+
+void CodeClassesRegistry::checkConstructorAccess(const CheckConstructorAccess &task) {
+  return this->calls.checkConstructorAccess(task);
 }
 
 void CodeClassesRegistry::checkOverloadCall(const CheckOverloadCall &task) {

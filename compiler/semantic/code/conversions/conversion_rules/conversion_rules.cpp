@@ -64,7 +64,7 @@ Expr *ConversionRules::adaptLiteralExpr(Expr *expr, const Type *to) {
 bool ConversionRules::isWideningWrites(const Type *from, const Type *to) {
   const Type *bareFrom = from->nonOptional();
   const Type *bareTo = to->nonOptional();
-  if (bareFrom == bareTo || GenericWidening::isWidening(bareFrom, bareTo)) {
+  if (bareFrom == bareTo || this->state.generics.variance.isWidening(bareFrom, bareTo)) {
     return false;
   }
   bool hasArrays = bareFrom->isArray() && bareTo->isArray();

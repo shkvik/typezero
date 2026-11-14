@@ -1,7 +1,11 @@
 #include "compiler/semantic/generics_v2/apparent/generics_apparent.h"
+#include "compiler/semantic/semantic_state/v2/semantic_state.h"
 #include <vector>
 
 namespace tz {
+
+GenericsApparent::GenericsApparent(SemanticState &owner)
+    : state(owner) {}
 
 const Type *GenericsApparent::apparentType(const Type *type) const {
   if (this->isBoundedParam(type)) {
@@ -61,6 +65,31 @@ const Type *GenericsApparent::apparentUnion(const Type *type) const {
   const auto *joined = Type::unionOf(members);
 
   return joined->isTagged() ? type : joined;
+}
+
+const Type *GenericsApparent::numberParam(const Type *param, const Type *only) const {
+  const auto *known = this->state.generics.parameters.findNumberParam(param, only);
+  if (known != nullptr) {
+    return known;
+  }
+  const Type *constraint = only != nullptr ? only : this->commonNumericAlternative(param);
+  auto *type = Type::param(param->name());
+  type->setConstraint(constraint != nullptr ? constraint : Type::doubleTy(), {});
+  this->state.generics.parameters.rememberNumberParam(param, only, type);
+
+  return type;
+}
+
+const Type *GenericsApparent::commonNumericAlternative(const Type *param) const {
+  const Type *common = nullptr;
+  for (const Type *candidate : param->alternatives()) {
+    if (candidate->isNumeric()) {
+      common = common != nullptr ? this->state.types.relations.commonNumericType(common, candidate)
+                                 : candidate;
+    }
+  }
+
+  return common;
 }
 
 }

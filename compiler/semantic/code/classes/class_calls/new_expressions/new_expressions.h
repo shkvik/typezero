@@ -16,6 +16,7 @@ public:
   void checkValueNew(const CheckValueNew &task);
   void checkClassNew(const CheckClassNew &task);
   void finishClassNew(const FinishClassNew &task);
+  void checkConstructorAccess(const CheckConstructorAccess &task);
   void nextReflectedArg(const NextReflectedArg &task);
   void afterReflectedArg(const AfterReflectedArg &task);
   void afterValueNewCallee(const AfterValueNewCallee &task);

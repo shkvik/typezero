@@ -28,8 +28,6 @@ private:
 
 
   const Type *instanceType(const Type *type) const;
-  const Type *commonNumericAlternative(const Type *param) const;
-  const Type *numberParam(const Type *param, const Type *only) const;
   const Type *numberNamed(const Type *param, llvm::StringRef name) const;
   const Type *otherAlternatives(const Type *param, const std::u16string &text) const;
   const Type *paramTypeOfNarrowed(const Type *param, const std::u16string &text) const;

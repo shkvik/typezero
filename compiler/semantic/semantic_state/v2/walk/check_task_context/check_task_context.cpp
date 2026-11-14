@@ -39,6 +39,25 @@ const Type *CheckTaskContext::takeAnswer() {
   return answer;
 }
 
+std::vector<const Type *> CheckTaskContext::takeAnswers(size_t count) {
+  auto first = this->answers.end() - std::ptrdiff_t(count);
+  auto taken = std::vector<const Type *>(first, this->answers.end());
+  this->answers.erase(first, this->answers.end());
+
+  return taken;
+}
+
+void CheckTaskContext::pushVerdict(bool isYes) {
+  this->verdicts.push_back(isYes);
+}
+
+bool CheckTaskContext::takeVerdict() {
+  bool isYes = this->verdicts.back();
+  this->verdicts.pop_back();
+
+  return isYes;
+}
+
 void CheckTaskContext::pushConditionFlows(ConditionFlows flows) {
   this->conditionFlows.push_back(std::move(flows));
 }

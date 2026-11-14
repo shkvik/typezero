@@ -116,17 +116,18 @@ void NamedCalls::startNotCallable(CallExpr *call, NameExpr *name, const ScopeEnt
 void NamedCalls::checkDirectCall(const CheckDirectCall &task) {
   CallExpr *call = task.call;
   FuncSymbol *function = task.function;
+  auto *name = dyn_cast<NameExpr>(call->callee);
+  llvm::ArrayRef<TypeRef> typeArgs =
+      name != nullptr ? llvm::ArrayRef<TypeRef>(name->typeArgs) : llvm::ArrayRef<TypeRef>();
   if (function->isGeneric()) {
     return this->state.walk.tasks.pushTask(CheckGenericCall{
         .call = call,
         .function = function,
         .loc = task.loc,
         .expected = task.expected,
+        .typeArgs = typeArgs,
     });
   }
-  auto *name = dyn_cast<NameExpr>(call->callee);
-  llvm::ArrayRef<TypeRef> typeArgs =
-      name != nullptr ? llvm::ArrayRef<TypeRef>(name->typeArgs) : llvm::ArrayRef<TypeRef>();
   auto usable = this->checkDirectTypeArgs(function, typeArgs);
   if (usable.isErr()) {
     this->state.diagnostics.error(task.loc, usable.error().message);

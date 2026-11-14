@@ -160,6 +160,10 @@ void CodeFunctionsRegistry::afterLiteralCallback(const AfterLiteralCallback &tas
   return this->callbackArguments.afterLiteralCallback(task);
 }
 
+void CodeFunctionsRegistry::checkBuiltinCallbackSlot(const CheckBuiltinCallbackSlot &task) {
+  return this->callbackArguments.checkBuiltinCallbackSlot(task);
+}
+
 void CodeFunctionsRegistry::leaveCallback() {
   return this->callbackArguments.leaveCallback();
 }

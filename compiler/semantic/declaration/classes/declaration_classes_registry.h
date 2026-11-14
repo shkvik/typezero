@@ -21,6 +21,7 @@ public:
   void openClassScope(const OpenClassScope &task);
   void addBase(const Type *type, const Type *base);
   void finishFieldInit(const FinishFieldInit &task);
+  void buildInstanceInit(const BuildInstanceInit &task);
   void startClassBases(const StartClassBases &task);
   void startClassField(const StartClassField &task);
   void declareItemMethods(Stmt *item, Module *module);

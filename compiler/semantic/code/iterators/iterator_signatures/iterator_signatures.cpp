@@ -9,6 +9,7 @@ namespace tz {
 namespace {
 
 constexpr llvm::StringLiteral kIteratorMethod = "[Symbol.iterator]";
+constexpr llvm::StringLiteral kAsyncIteratorMethod = "[Symbol.asyncIterator]";
 
 }
 
@@ -281,7 +282,7 @@ void IteratorSignatures::elementTypeOf(const ElementTypeOf &task) {
   if (known != nullptr) {
     return this->state.walk.tasks.pushAnswer(known);
   }
-  const FunctionDecl *method = this->soleIteratorMethod(task.type);
+  const FunctionDecl *method = this->soleSymbolMethod(task.type, kIteratorMethod);
   if (method == nullptr) {
     return this->state.walk.tasks.pushAnswer(nullptr);
   }
@@ -310,17 +311,35 @@ const Type *IteratorSignatures::knownElementType(const Type *type) const {
   return this->state.code.iteration.iteratedType(type);
 }
 
-const FunctionDecl *IteratorSignatures::soleIteratorMethod(const Type *type) const {
+const FunctionDecl *IteratorSignatures::soleSymbolMethod(const Type *type,
+                                                         llvm::StringRef name) const {
   const ClassDecl *classDecl = this->classOf(type);
   if (classDecl == nullptr) {
     return nullptr;
   }
-  auto methods = classDecl->findMethodsNamed(kIteratorMethod);
+  auto methods = classDecl->findMethodsNamed(name);
   if (methods.size() != 1 || methods[0]->sym == nullptr) {
     return nullptr;
   }
 
   return methods[0];
+}
+
+void IteratorSignatures::asyncIterableTypeOf(const AsyncIterableTypeOf &task) {
+  const FunctionDecl *method = this->soleSymbolMethod(task.type, kAsyncIteratorMethod);
+  if (method == nullptr) {
+    return this->state.walk.tasks.pushAnswer(nullptr);
+  }
+  this->state.walk.tasks.pushTask(AfterAsyncIterableReturn{});
+
+  return this->state.walk.tasks.pushTask(ReturnTypeOf{.function = method->sym});
+}
+
+void IteratorSignatures::afterAsyncIterableReturn() {
+  const Type *result = this->state.walk.tasks.takeAnswer();
+  bool isAsyncIterator = result != nullptr && result->isAsyncIterator();
+
+  return this->state.walk.tasks.pushAnswer(isAsyncIterator ? result : nullptr);
 }
 
 void IteratorSignatures::afterSoleIteratorReturn() {

@@ -39,6 +39,22 @@ GenericCopyContext::findFunctionInstance(const FuncSymbol *generic,
   return found->second;
 }
 
+void GenericCopyContext::rememberClassInstance(const ClassDecl *generic,
+                                               std::vector<const Type *> args,
+                                               ClassDecl *instance) {
+  this->classInstances[{generic, std::move(args)}] = instance;
+}
+
+ClassDecl *GenericCopyContext::findClassInstance(const ClassDecl *generic,
+                                                 const std::vector<const Type *> &args) const {
+  auto found = this->classInstances.find({generic, args});
+  if (found == this->classInstances.end()) {
+    return nullptr;
+  }
+
+  return found->second;
+}
+
 void GenericCopyContext::addPendingInstance(InstanceRecord *instance) {
   this->pendingInstances.push_back(instance);
 }

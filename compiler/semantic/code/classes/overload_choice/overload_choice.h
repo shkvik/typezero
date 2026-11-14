@@ -16,6 +16,7 @@ public:
   void chooseVariant(const ChooseVariant &task);
   void nextRankedVariant(const NextRankedVariant &task);
   void afterGenericParams(const AfterGenericParams &task);
+  void afterInferredArguments(const AfterInferredArguments &task);
 
 private:
   ChoiceRules choiceRules;

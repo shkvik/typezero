@@ -44,6 +44,18 @@ void CallbackArguments::checkFunctionArgSlot(const CheckFunctionArgSlot &task) {
   return this->startCallbackValue(arg, task.expected);
 }
 
+void CallbackArguments::checkBuiltinCallbackSlot(const CheckBuiltinCallbackSlot &task) {
+  auto &tasks = this->state.walk.tasks;
+  auto arity = static_cast<unsigned>(task.expected.params.size());
+  auto *wrapper = this->functionRules.builtinFunctionValue(*task.slot, task.expected, arity, {});
+  if (wrapper != nullptr) {
+    tasks.pushTask(WriteCheckedSlot{.slot = task.slot});
+    return tasks.pushTask(CheckFunctionExpr{.functionExpr = wrapper, .expected = task.expected});
+  }
+
+  return tasks.pushTask(CheckExprSlot{.slot = task.slot, .expected = nullptr});
+}
+
 void CallbackArguments::afterLiteralCallback(const AfterLiteralCallback &task) {
   Expr *checked = this->state.walk.tasks.takeChecked();
   *task.slot = checked;

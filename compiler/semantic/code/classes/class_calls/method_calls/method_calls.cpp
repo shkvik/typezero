@@ -172,6 +172,7 @@ void MethodCalls::afterMethodChoice(const AfterMethodChoice &task) {
         .function = function,
         .loc = member->loc(),
         .expected = task.expected,
+        .typeArgs = member->typeArgs,
     });
   }
   call->target = this->methodTarget(task.classDecl, function);
@@ -230,6 +231,8 @@ void MethodCalls::afterBoundTypes(const AfterBoundTypes &task) {
         .generic = function,
         .typeArgs = task.bound,
         .loc = task.loc,
+        .exact = {},
+        .isCopyingReturn = false,
     });
   }
 }
@@ -388,6 +391,7 @@ void MethodCalls::afterStaticMethodChoice(const AfterStaticMethodChoice &task) {
         .function = function,
         .loc = member->loc(),
         .expected = task.expected,
+        .typeArgs = member->typeArgs,
     });
   }
   call->target = FunctionCall{.func = function};

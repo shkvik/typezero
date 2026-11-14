@@ -159,6 +159,7 @@ struct ClassDecl : Stmt {
 
 
   const ClassDecl *findFinalClass() const;
+  const ClassDecl *findInstanceOf(const ClassDecl *generic) const;
   const ClassDecl *findFieldOwner(llvm::StringRef name) const;
   const ClassDecl *findInheritedFieldOwner(llvm::StringRef name) const;
 

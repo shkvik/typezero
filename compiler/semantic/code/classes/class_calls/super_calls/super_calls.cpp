@@ -186,6 +186,7 @@ void SuperCalls::afterSuperMethodChoice(const AfterSuperMethodChoice &task) {
         .function = function,
         .loc = member->loc(),
         .expected = nullptr,
+        .typeArgs = member->typeArgs,
     });
   }
   call->target = SuperCall{.method = function};

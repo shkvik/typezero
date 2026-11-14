@@ -257,6 +257,8 @@ void IterableSources::pushIterateCall(Expr *it, const Type *value, FuncSymbol *i
       .generic = iterate,
       .typeArgs = {type->nonOptional(), value},
       .loc = loc,
+      .exact = {},
+      .isCopyingReturn = false,
   });
 }
 

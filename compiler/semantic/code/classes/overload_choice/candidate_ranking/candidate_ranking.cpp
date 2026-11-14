@@ -45,27 +45,36 @@ CandidateRanking::checkArgumentsTyped(llvm::ArrayRef<Expr *> args) const {
 
 void CandidateRanking::nextRankedVariant(const NextRankedVariant &task) {
   auto draft = task.draft;
+  auto &tasks = this->state.walk.tasks;
   std::vector<Expr *> &args = *draft.args;
   while (draft.index < draft.fit.size()) {
     FunctionDecl *variant = draft.fit[draft.index];
     FuncSymbol *function = variant->sym;
-    if (!function->isGeneric()) {
-      auto params = this->plainParams(function, args.size());
-      this->rankVariant(variant, args, params, {}, draft.ranking);
-      draft.index += 1;
-      continue;
+    if (function->isGeneric()) {
+      tasks.pushTask(AfterInferredArguments{.draft = draft});
+      return tasks.pushTask(InferFromArguments{.function = function, .args = args});
     }
-    auto typeArgs = std::vector<const Type *>();
-    bool isInferred = this->state.generics.inference.inferFromArguments(function, args, typeArgs);
-    if (isInferred) {
-      return this->pushGenericParams(std::move(draft), std::move(typeArgs));
-    }
-    auto shown = ErrorTextVariant::text(variant);
-    draft.ranking.why += ErrorTextVariant::typeParams(shown);
+    auto params = this->plainParams(function, args.size());
+    this->rankVariant(variant, args, params, {}, draft.ranking);
     draft.index += 1;
   }
 
   return this->finishChoice(draft);
+}
+
+void CandidateRanking::afterInferredArguments(const AfterInferredArguments &task) {
+  auto draft = task.draft;
+  auto &tasks = this->state.walk.tasks;
+  FunctionDecl *variant = draft.fit[draft.index];
+  if (tasks.takeVerdict()) {
+    auto typeArgs = tasks.takeAnswers(variant->sym->typeParams.size());
+    return this->pushGenericParams(std::move(draft), std::move(typeArgs));
+  }
+  auto shown = ErrorTextVariant::text(variant);
+  draft.ranking.why += ErrorTextVariant::typeParams(shown);
+  draft.index += 1;
+
+  return tasks.pushTask(NextRankedVariant{.draft = std::move(draft)});
 }
 
 std::vector<const Type *> CandidateRanking::plainParams(const FuncSymbol *function,

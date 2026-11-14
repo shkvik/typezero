@@ -710,6 +710,12 @@ void DeclarationClassesRegistry::finishFieldInit(const FinishFieldInit &task) {
   task.classDecl->init = task.init;
 }
 
+void DeclarationClassesRegistry::buildInstanceInit(const BuildInstanceInit &task) {
+  ClassDecl *instance = task.instance;
+  auto sets = this->fieldSets(instance);
+  instance->init = this->makeInitDecl(instance, std::move(sets));
+}
+
 void DeclarationClassesRegistry::finishVariants(const FinishVariants &task) {
   ClassDecl *classDecl = task.classDecl;
   this->numberVariants(classDecl->methods);

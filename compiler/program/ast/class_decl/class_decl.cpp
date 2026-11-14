@@ -110,6 +110,16 @@ const ClassDecl *ClassDecl::findFinalClass() const {
   return current;
 }
 
+const ClassDecl *ClassDecl::findInstanceOf(const ClassDecl *generic) const {
+  for (const ClassDecl *current = this; current != nullptr; current = current->parent) {
+    if (current == generic || current->generic() == generic) {
+      return current;
+    }
+  }
+
+  return nullptr;
+}
+
 const ClassField *ClassDecl::findField(llvm::StringRef name) const {
   const auto *own = this->field(name);
   if (own != nullptr) {

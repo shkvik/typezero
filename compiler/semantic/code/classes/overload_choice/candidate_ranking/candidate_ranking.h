@@ -52,6 +52,7 @@ public:
   void rankVariants(const RankVariants &task);
   void nextRankedVariant(const NextRankedVariant &task);
   void afterGenericParams(const AfterGenericParams &task);
+  void afterInferredArguments(const AfterInferredArguments &task);
 
 private:
   using ResultChoiceAllowed = Result<void, CodeClassesRegistryChooseVariantError>;
@@ -92,8 +93,8 @@ private:
 
 
   RankJoin rankJoin(const Type *from, const Type *to) const;
-  RankJoin resultJoin(const Type *from, const Type *to) const;
   RankJoin fieldsJoin(const Type *from, const Type *to) const;
+  RankJoin resultJoin(const Type *from, const Type *to) const;
   RankJoin membersJoin(const Type *from, const Type *to) const;
   RankJoin targetsJoin(const Type *from, const Type *to) const;
   RankJoin optionalJoin(const Type *from, const Type *to) const;
