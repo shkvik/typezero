@@ -312,10 +312,22 @@ void TypesConditionalsRegistry::startBranchChoice(const ConditionalDraft &draft,
   auto inference = InferMatch{.params = draft.infers, .bound = unbound};
   auto &relations = this->state.types.relations;
   auto needs = relations.findExtendsNeeds(draft.check, draft.pattern, &inference);
+  auto incomplete = this->state.findIncompleteClasses({draft.check, draft.pattern});
+  if (!incomplete.empty()) {
+    this->state.walk.tasks.pushTask(RetryBranchChoice{.draft = draft, .call = call});
+    for (ClassDecl *classDecl : llvm::reverse(incomplete)) {
+      this->state.walk.tasks.pushTask(CompleteClass{.classDecl = classDecl});
+    }
+    return;
+  }
   this->state.walk.tasks.pushTask(ChooseBranch{.draft = draft, .call = call});
   for (FuncSymbol *function : llvm::reverse(needs)) {
     this->state.walk.tasks.pushTask(InferReturnType{.function = function});
   }
+}
+
+void TypesConditionalsRegistry::retryBranchChoice(const RetryBranchChoice &task) {
+  return this->startBranchChoice(task.draft, task.call);
 }
 
 void TypesConditionalsRegistry::chooseBranch(const ChooseBranch &task) {

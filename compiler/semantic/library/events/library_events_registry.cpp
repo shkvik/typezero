@@ -77,7 +77,8 @@ void LibraryEventsRegistry::reportEmitterMethodValue(const ReportEmitterMethodVa
 void LibraryEventsRegistry::finishSentEmits() {
   auto &store = this->state.library.events;
   store.markSentEmitsFinished();
-  for (EventSite *site : llvm::reverse(store.getSites())) {
+  auto sites = store.getSites();
+  for (EventSite *site : llvm::reverse(sites)) {
     for (EventRecord &record : llvm::reverse(site->events)) {
       record.state = EventState::DONE;
       for (const SentEmit &emit : llvm::reverse(record.sent)) {

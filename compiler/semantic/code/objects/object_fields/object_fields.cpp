@@ -108,11 +108,11 @@ void ObjectFields::afterFieldCallee(const AfterFieldCallee &task) {
   CallExpr *call = task.call;
   MemberExpr *member = task.member;
   call->callee = this->state.walk.tasks.takeChecked();
-  this->state.walk.tasks.pushChecked(call);
   const Type *type = call->callee->type;
   if (type->isFunction()) {
     return this->startFieldValueCall(call, type);
   }
+  this->state.walk.tasks.pushChecked(call);
   call->type = Type::error();
   bool isOptionalFunction = type->isOptional() && type->inner()->isFunction();
   if (isOptionalFunction) {
@@ -131,6 +131,7 @@ void ObjectFields::afterFieldCallee(const AfterFieldCallee &task) {
 void ObjectFields::startFieldValueCall(CallExpr *call, const Type *type) {
   call->type = type->ret();
   if (type->hasThis()) {
+    this->state.walk.tasks.pushChecked(call);
     auto message = ErrorTextValueCall::takesThis();
     this->state.walk.tasks.pushTask(ReportError{.loc = call->callee->loc(), .message = message});
     return this->state.walk.tasks.pushTask(WalkArgsLoosely{.call = call});

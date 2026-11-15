@@ -49,6 +49,12 @@ void Coercions::coerceSlot(const CoerceSlot &task) {
   if (from == to || from->isError() || to->isError()) {
     return;
   }
+  bool isConditional = to->nonOptional()->typeOp() == TypeOp::Conditional;
+  if (isConditional && !this->state.types.context.hasConditionalBranches(to->nonOptional())) {
+    this->state.walk.tasks.pushTask(CoerceSlot{.slot = task.slot, .to = to, .what = task.what});
+
+    return this->state.walk.tasks.pushTask(PrepareExpectation{.type = to, .depth = 0});
+  }
   auto &relations = this->state.types.relations;
   if (relations.isImplicitlyConvertible(from, to)) {
     auto *converted = this->conversionRules.convertExpr(expr, to);

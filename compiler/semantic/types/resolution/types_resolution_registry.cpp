@@ -1542,6 +1542,14 @@ void TypesResolutionRegistry::finishObject(const ObjectDraft &draft) {
 }
 
 void TypesResolutionRegistry::evalTypeOp(const EvalTypeOp &task) {
+  auto incomplete = this->state.findIncompleteClasses(task.operands);
+  if (!incomplete.empty()) {
+    this->state.walk.tasks.pushTask(EvalTypeOp{.op = task.op, .operands = task.operands});
+    for (ClassDecl *classDecl : llvm::reverse(incomplete)) {
+      this->state.walk.tasks.pushTask(CompleteClass{.classDecl = classDecl});
+    }
+    return;
+  }
   TypeOp kind = task.op->typeOp();
   if (kind == TypeOp::Conditional) {
     return this->state.walk.tasks.pushTask(EvalConditional{.operands = task.operands});

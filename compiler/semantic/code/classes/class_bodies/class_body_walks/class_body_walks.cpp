@@ -15,7 +15,8 @@ void ClassBodyWalks::walkClassBodies(const WalkClassBodies &task) {
       .classDecl = classDecl,
       .returns = KnownReturns{.known = {}, .missing = {}},
   });
-  for (FunctionDecl *functionDecl : llvm::reverse(this->classMethods(classDecl))) {
+  auto methods = this->classMethods(classDecl);
+  for (FunctionDecl *functionDecl : llvm::reverse(methods)) {
     tasks.pushTask(WalkClassMethod{.functionDecl = functionDecl});
   }
   for (FunctionDecl *constructor : llvm::reverse(classDecl->constructors)) {

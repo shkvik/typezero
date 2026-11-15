@@ -142,7 +142,8 @@ Diagnostics::ResultTaken SemanticParts::walkProgram() {
   code.classes.markLateOverrides(state.file);
   state.walk.tasks.pushTask(StartLinkClasses{});
   runTasks();
-  for (ClassDecl *classDecl : llvm::reverse(state.declaration.classes.getClasses())) {
+  auto classes = state.declaration.classes.getClasses();
+  for (ClassDecl *classDecl : llvm::reverse(classes)) {
     state.walk.tasks.pushTask(CompleteClass{.classDecl = classDecl});
   }
   runTasks();
@@ -166,7 +167,8 @@ Diagnostics::ResultTaken SemanticParts::walkProgram() {
     state.walk.tasks.pushTask(StartModuleBodies{.module = module});
   }
   runTasks();
-  for (FunctionDecl *lifted : llvm::reverse(state.code.variables.getLiftedFunctions())) {
+  auto liftedFunctions = state.code.variables.getLiftedFunctions();
+  for (FunctionDecl *lifted : llvm::reverse(liftedFunctions)) {
     state.walk.tasks.pushTask(StartLiftedFunction{.functionDecl = lifted});
   }
   runTasks();
@@ -350,6 +352,8 @@ void SemanticParts::runTask(const CheckTask &task) {
       return types.conditionals.afterConditionalPattern(*task.as<AfterConditionalPattern>());
     case CheckTaskKind::CHOOSE_BRANCH:
       return types.conditionals.chooseBranch(*task.as<ChooseBranch>());
+    case CheckTaskKind::RETRY_BRANCH_CHOICE:
+      return types.conditionals.retryBranchChoice(*task.as<RetryBranchChoice>());
     case CheckTaskKind::CLOSE_CONDITIONAL_SCOPE:
       return types.conditionals.closeConditionalScope();
     case CheckTaskKind::AFTER_DISTRIBUTED_MEMBER:
@@ -2801,6 +2805,10 @@ void SemanticParts::runTask(const CheckTask &task) {
       return library.reflect.writeDesignRecords(*task.as<WriteDesignRecords>());
     case CheckTaskKind::AFTER_FIELD_COMPLETE:
       return library.reflect.afterFieldComplete(*task.as<AfterFieldComplete>());
+    case CheckTaskKind::WRITE_METHOD_RECORDS:
+      return library.reflect.writeMethodRecords(*task.as<WriteMethodRecords>());
+    case CheckTaskKind::READ_REFLECT_METHOD:
+      return library.reflect.readReflectMethod(*task.as<ReadReflectMethod>());
     case CheckTaskKind::AFTER_REFLECT_GET_OBJECT:
       return library.reflect.afterReflectGetObject(*task.as<AfterReflectGetObject>());
     case CheckTaskKind::CONTINUE_KNOWN_GET:

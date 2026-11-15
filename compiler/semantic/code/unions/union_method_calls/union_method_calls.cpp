@@ -55,7 +55,6 @@ void UnionMethodCalls::resolveUnionMethodCall(const ResolveUnionMethodCall &task
   call->target = UnionMethodCall{.unionMethods = resolved.value().methods};
   member->type = functionType;
   call->type = functionType->ret();
-  this->state.walk.tasks.pushChecked(call);
   llvm::ArrayRef<const Type *> params = functionType->params();
 
   return this->state.walk.tasks.pushTask(CheckArguments{

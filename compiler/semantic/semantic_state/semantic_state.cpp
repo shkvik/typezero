@@ -215,4 +215,27 @@ bool SemanticState::isLoadable(Module *source, llvm::StringRef name) const {
   return !there.loaded && !there.busy && there.topLevelNames.contains(name);
 }
 
+std::vector<ClassDecl *>
+SemanticState::findIncompleteClasses(llvm::ArrayRef<const Type *> operands) const {
+  auto found = std::vector<ClassDecl *>();
+  for (const Type *operand : operands) {
+    if (operand == nullptr) {
+      continue;
+    }
+    const Type *plain = operand->nonOptional();
+    auto members = plain->isUnion() ? plain->members() : llvm::ArrayRef<const Type *>(plain);
+    for (const Type *member : members) {
+      auto *classDecl = const_cast<ClassDecl *>(member->nonOptional()->classDecl());
+      bool isWaiting = classDecl != nullptr && member->nonOptional()->isIncomplete() &&
+                       classDecl->literal() == nullptr &&
+                       !this->declaration.classes.isCompleting(classDecl);
+      if (isWaiting && !llvm::is_contained(found, classDecl)) {
+        found.push_back(classDecl);
+      }
+    }
+  }
+
+  return found;
+}
+
 }

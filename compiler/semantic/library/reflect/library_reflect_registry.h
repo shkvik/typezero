@@ -44,6 +44,8 @@ public:
   void finishMetadataCall(const FinishMetadataCall &task);
   void nextMetadataWriter(const NextMetadataWriter &task);
   void writeDesignRecords(const WriteDesignRecords &task);
+  void writeMethodRecords(const WriteMethodRecords &task);
+  void readReflectMethod(const ReadReflectMethod &task);
   void afterConstructClass(const AfterConstructClass &task);
   void afterMetadataKeyArg(const AfterMetadataKeyArg &task);
   void afterMetadataTarget(const AfterMetadataTarget &task);
@@ -55,6 +57,8 @@ public:
   void noteReflectedConversion(const NoteReflectedConversion &task);
 
 private:
+  std::vector<FuncSymbol *> missingReturnTypes(const ClassDecl *classDecl,
+                                               llvm::StringRef name) const;
   struct NamedKey {
     const void *key;
     std::string label;
@@ -124,7 +128,7 @@ private:
   void failReflectName(CallExpr *call, MemberExpr *member, const std::string &message);
   void startReflectConstruct(CallExpr *call, MemberExpr *member, const Type *expected);
   void constructorsIn(const Type *type, llvm::SmallVectorImpl<const Type *> &out) const;
-  void writeMethodRecords(ClassDecl *classDecl, const FunctionDecl *method, llvm::SMLoc loc);
+  void recordMethodDesigns(ClassDecl *classDecl, const FunctionDecl *method, llvm::SMLoc loc);
   void readClassField(Expr *seen, const StringLitExpr *key, const std::string &name);
   void pushKnownMetadataCoerce(Expr **slot, const MetadataType *known, const std::string &label);
   void readNamedField(const NameExpr *object, const StringLitExpr *key, const std::string &name);
@@ -132,8 +136,6 @@ private:
                         ReachMap &reach);
   void startLiteralConstruct(CallExpr *call, const NameExpr *name, const ArrayLitExpr *list,
                              const Type *expected);
-  void readReflectMethod(const ReflectGetDraft &get, Expr *seen, ClassDecl *classDecl,
-                         const std::string &name);
   void writeDesignRecord(ClassDecl *classDecl, const DesignRecord &record,
                          std::vector<SlotConversion> &conversions);
   void startMetadataCall(CallExpr *call, MemberExpr *member, const Type *expected,

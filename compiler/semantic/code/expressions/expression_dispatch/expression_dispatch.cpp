@@ -11,6 +11,11 @@ ExpressionDispatch::ExpressionDispatch(SemanticState &owner)
     : state(owner) {}
 
 void ExpressionDispatch::checkExpr(const CheckExpr &task) {
+  if (this->isUnpreparedConditional(task.expected)) {
+    this->state.walk.tasks.pushTask(CheckExpr{.expr = task.expr, .expected = task.expected});
+
+    return this->state.walk.tasks.pushTask(PrepareExpectation{.type = task.expected, .depth = 0});
+  }
   const auto *forced = this->findForcedType(task.expr);
   if (forced != nullptr) {
     this->state.walk.tasks.pushTask(ForceConversion{.to = forced});
@@ -328,6 +333,14 @@ void ExpressionDispatch::startCast(CastExpr *castExpr) {
 
   return this->state.walk.tasks.pushTask(
       ResolveTypeRef{.ref = &*castExpr->target, .isVoidAllowed = false});
+}
+
+bool ExpressionDispatch::isUnpreparedConditional(const Type *expected) const {
+  if (expected == nullptr || expected->nonOptional()->typeOp() != TypeOp::Conditional) {
+    return false;
+  }
+
+  return !this->state.types.context.hasConditionalBranches(expected->nonOptional());
 }
 
 }

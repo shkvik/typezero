@@ -17,6 +17,7 @@ public:
 
   void closeConditionalScope();
   void chooseBranch(const ChooseBranch &task);
+  void retryBranchChoice(const RetryBranchChoice &task);
   void evalFiltered(const EvalFiltered &task);
   void finishBranches(const FinishBranches &task);
   void finishFiltered(const FinishFiltered &task);

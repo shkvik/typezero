@@ -207,7 +207,27 @@ void LibraryReflectRegistry::continueKnownGet(const ContinueKnownGet &task) {
     return this->startDynamicGet(get);
   }
 
-  return this->readReflectMethod(get, seen, classDecl, name);
+  auto read = ReadReflectMethod{.get = get, .seen = seen, .classDecl = classDecl, .name = name};
+  auto missing = this->missingReturnTypes(classDecl, name);
+  if (missing.empty()) {
+    return this->readReflectMethod(read);
+  }
+  this->state.walk.tasks.pushTask(std::move(read));
+  for (FuncSymbol *function : llvm::reverse(missing)) {
+    this->state.walk.tasks.pushTask(InferReturnType{.function = function});
+  }
+}
+
+std::vector<FuncSymbol *> LibraryReflectRegistry::missingReturnTypes(const ClassDecl *classDecl,
+                                                                     llvm::StringRef name) const {
+  auto missing = std::vector<FuncSymbol *>();
+  for (FunctionDecl *method : classDecl->findMethodsNamed(name)) {
+    if (method->sym != nullptr && method->typeParams.empty() && !method->sym->hasReturnType()) {
+      missing.push_back(method->sym);
+    }
+  }
+
+  return missing;
 }
 
 void LibraryReflectRegistry::readNamedField(const NameExpr *object, const StringLitExpr *key,
@@ -233,8 +253,11 @@ void LibraryReflectRegistry::readClassField(Expr *seen, const StringLitExpr *key
   return tasks.pushTask(CheckClassMember{.member = read, .expected = nullptr});
 }
 
-void LibraryReflectRegistry::readReflectMethod(const ReflectGetDraft &get, Expr *seen,
-                                               ClassDecl *classDecl, const std::string &name) {
+void LibraryReflectRegistry::readReflectMethod(const ReadReflectMethod &task) {
+  const ReflectGetDraft &get = task.get;
+  Expr *seen = task.seen;
+  ClassDecl *classDecl = task.classDecl;
+  const std::string &name = task.name;
   CallExpr *call = get.call;
   auto known = this->knownReflectMethod(classDecl, name);
   if (!known.has_value()) {
@@ -974,7 +997,12 @@ void LibraryReflectRegistry::writeDesignRecords(const WriteDesignRecords &task) 
     return tasks.pushTask(CompleteClass{.classDecl = classDecl});
   }
   if (task.method != nullptr) {
-    return this->writeMethodRecords(classDecl, task.method, loc);
+    tasks.pushTask(WriteMethodRecords{.classDecl = classDecl, .method = task.method, .loc = loc});
+    if (task.method->sym->hasReturnType()) {
+      return;
+    }
+
+    return tasks.pushTask(InferReturnType{.function = task.method->sym});
   }
   if (task.constructor == nullptr) {
     return;
@@ -999,8 +1027,12 @@ void LibraryReflectRegistry::afterFieldComplete(const AfterFieldComplete &task) 
   return this->pushConversions(conversions);
 }
 
-void LibraryReflectRegistry::writeMethodRecords(ClassDecl *classDecl, const FunctionDecl *method,
-                                                llvm::SMLoc loc) {
+void LibraryReflectRegistry::writeMethodRecords(const WriteMethodRecords &task) {
+  return this->recordMethodDesigns(task.classDecl, task.method, task.loc);
+}
+
+void LibraryReflectRegistry::recordMethodDesigns(ClassDecl *classDecl, const FunctionDecl *method,
+                                                 llvm::SMLoc loc) {
   auto conversions = std::vector<SlotConversion>();
   const auto *returnType = method->sym->getReturnType();
   if (returnType != nullptr && !returnType->isVoid() && !returnType->isError()) {

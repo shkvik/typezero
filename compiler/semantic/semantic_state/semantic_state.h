@@ -31,6 +31,7 @@ public:
 
 
   Checkpoint saveBody();
+  std::vector<ClassDecl *> findIncompleteClasses(llvm::ArrayRef<const Type *> types) const;
   Stmt *findTypeDeclaration(llvm::StringRef name) const;
   const NodeName *findNodeName(llvm::StringRef name) const;
   std::optional<StartLoadEarly> findEarlyLoad(llvm::StringRef name) const;

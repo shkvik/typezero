@@ -181,6 +181,7 @@ ClassDecl *ClassStatements::lateParent(ClassDecl *classDecl) {
 }
 
 void ClassStatements::attachLateParent(ClassDecl *classDecl, ClassDecl *parent) {
+  const_cast<Type *>(classDecl->type)->forgetFields();
   classDecl->parent = parent;
   if (classDecl->checkOnly) {
     const_cast<Type *>(classDecl->type)->addBase(parent->type);
@@ -208,6 +209,7 @@ void ClassStatements::finishLateClass(const FinishLateClass &task) {
   if (!this->state.declaration.classes.hasLinkedClasses()) {
     return;
   }
+  this->state.walk.tasks.pushTask(CompleteClass{.classDecl = classDecl});
   this->state.walk.tasks.pushTask(BuildVtable{.classDecl = classDecl});
 
   return this->state.walk.tasks.pushTask(StartLinkOverrides{.classDecl = classDecl});

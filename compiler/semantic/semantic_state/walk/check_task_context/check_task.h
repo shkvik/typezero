@@ -123,6 +123,7 @@ enum class CheckTaskKind {
   AFTER_INFER_CONSTRAINT,
   AFTER_CONDITIONAL_PATTERN,
   CHOOSE_BRANCH,
+  RETRY_BRANCH_CHOICE,
   CLOSE_CONDITIONAL_SCOPE,
   AFTER_DISTRIBUTED_MEMBER,
   EVAL_CONDITIONAL,
@@ -1346,6 +1347,8 @@ enum class CheckTaskKind {
   NOTE_CONSTRUCTOR_FLOW,
   WRITE_DESIGN_RECORDS,
   AFTER_FIELD_COMPLETE,
+  WRITE_METHOD_RECORDS,
+  READ_REFLECT_METHOD,
   AFTER_REFLECT_GET_OBJECT,
   CONTINUE_KNOWN_GET,
   FINISH_DYNAMIC_GET,
@@ -3129,6 +3132,12 @@ struct AfterConditionalPattern {
 
 struct ChooseBranch {
   static constexpr CheckTaskKind kind = CheckTaskKind::CHOOSE_BRANCH;
+  ConditionalDraft draft;
+  BranchCall call;
+};
+
+struct RetryBranchChoice {
+  static constexpr CheckTaskKind kind = CheckTaskKind::RETRY_BRANCH_CHOICE;
   ConditionalDraft draft;
   BranchCall call;
 };
@@ -10156,6 +10165,21 @@ struct AfterFieldComplete {
   llvm::SMLoc loc;
 };
 
+struct WriteMethodRecords {
+  static constexpr CheckTaskKind kind = CheckTaskKind::WRITE_METHOD_RECORDS;
+  ClassDecl *classDecl;
+  const FunctionDecl *method;
+  llvm::SMLoc loc;
+};
+
+struct ReadReflectMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::READ_REFLECT_METHOD;
+  ReflectGetDraft get;
+  Expr *seen;
+  ClassDecl *classDecl;
+  std::string name;
+};
+
 struct AfterReflectGetObject {
   static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_REFLECT_GET_OBJECT;
   CallExpr *call;
@@ -11189,7 +11213,7 @@ using CheckTask = Union<
     AfterMappedValue, AfterMappedRename, StartMapped, AfterMappedKeys, AfterMappedSource,
     AfterMappedParts, StartIntersection, NextIntersectionPart, AfterIntersectionPart,
     StartConditional, AfterConditionalCheck, AfterInferConstraint, AfterConditionalPattern,
-    ChooseBranch, CloseConditionalScope, AfterDistributedMember, EvalConditional,
+    ChooseBranch, RetryBranchChoice, CloseConditionalScope, AfterDistributedMember, EvalConditional,
     AfterEvalConditional, EvalFiltered, FinishFiltered, PrepareExpectation, FinishBranches,
     StartTemplate, AfterTemplateHole, FinishTemplate, EvalTemplate, EvalStringCase,
     EvalFunctionPart, StartTypeOf, FindTypeOfCandidates, AfterTypeOfCandidate, AfterTypeOfMember,
@@ -11448,44 +11472,44 @@ using CheckTask = Union<
     CheckFsValue, CheckFsConstant, AfterNativeError, NativeErrorType, CheckStatsDate,
     CheckFsClassMethod, CheckFsPromisesCall, AfterFsPromisesCall, CheckReadlineCall,
     AfterReadlineOptions, FinishReadline, CheckReflectCall, NoteReflectedConversion,
-    NoteConstructorFlow, WriteDesignRecords, AfterFieldComplete, AfterReflectGetObject,
-    ContinueKnownGet, FinishDynamicGet, AfterFillArgs, FinishFill, AfterApplyFunction,
-    AfterApplyThis, FinishApply, FinishApplyResult, AfterDirectMember, AfterDirectArguments,
-    MakeVoidSequence, ReflectOk, FinishReflectOk, AfterConstructClass, FinishDynamicConstruct,
-    ReflectArgsSlot, AfterReflectArgs, AfterMetadataKeyArg, AfterMetadataValue, AfterKnownMetadata,
-    MetadataValueUnknown, AfterMetadataTarget, FinishMetadataCall, NextMetadataWriter,
-    CheckBytesIndex, AfterBytesIndexPosition, WalkBytesStore, CheckBytesMember,
-    CheckBytesUnionMember, CheckBytesStaticMember, BytesToString, BufferEncodingValue,
-    AfterBufferEncodingArg, CheckBytesMethod, FinishBufferToString, FinishRangeMethod, NextWriteArg,
-    AfterWriteArg, FinishWrite, AfterBufferValue, ContinueValueMethod, NextValueSplit,
-    AfterValueSplit, FinishValueMethod, FinishVariableNumber, AfterFixedValue, FinishFixedNumber,
-    AfterDecodeInput, FinishFatalDecode, CheckBytesStatic, AfterBytesSource, AfterFromWithSource,
-    AfterFromWithMapper, FinishFromWith, NextBytesValue, AfterBytesValue, AfterSpreadValues,
-    AfterBufferFromSource, WriteEncodingArg, FinishView, AfterAllocSize, AfterAllocFill,
-    AfterByteFill, FinishAllocFill, AfterConcatList, AfterConcatTotal, AfterByteLengthArg,
-    AfterIsBufferArg, AfterDecoderParse, FinishDecoderParse, CheckBytesNew, AfterNonNegative,
-    AfterDataViewBuffer, ContinueDecoderNew, AfterDecoderLabelArg, AfterDecoderOptions,
-    FinishDecoderNew, AfterTypedNewSource, FinishLengthNew, AfterMappedCallback, AfterCopySort,
-    FinishTypedAt, AfterTypedSearchValue, FinishTypedSearch, AfterTypedValue, AfterSetLiteral,
-    AfterSetSource, FinishTypedSet, AfterWithIndex, FinishDataView, AfterDataViewValue,
-    AddByteCallbackFacts, CheckByteCallbackResult, CheckArrayIterator, CheckStringMethod,
-    AfterStringRegexTry, FinishStringMethod, CheckNumberStatic, AfterCodeArg, CheckNumberMethod,
-    AfterDigitsArg, CheckGlobalCall, AfterUriArg, FinishGlobalResult, AfterNumberArg,
-    FinishNumberOf, CheckArrayMethod, FinishGrowingCall, FinishAtCall, AfterConcatArg,
-    CheckDictMethod, AfterSetCombineArg, CheckMapStatic, AfterGroupSource, AfterGroupCallback,
-    CheckObjectCall, AfterEntriesPairs, AfterEntriesSource, AfterListingEnum, AfterEnumListing,
-    AfterListingArg, AfterListedClass, AfterListedFields, MarkFused, CheckIteratorFrom,
-    AfterIteratorFromSource, CheckArrayFrom, AfterArrayFromSource, AfterArrayFromMapper,
-    CheckIteratorMethod, AfterTakeCount, AfterReduceInitValue, AfterIteratorCallback,
-    CheckCryptoValue, CheckCryptoModuleMember, CheckCryptoMember, CheckCryptoNew, CheckX509Parse,
-    CheckWebCryptoCall, CheckWebCryptoMember, CryptoValue, AfterCryptoData, AfterCryptoNumber,
-    AfterCryptoKeyObject, AfterProvenNumber, AfterCryptoEncoding, CryptoFinishStep,
-    FinishCryptoResult, AfterRejectCallback, CheckCryptoCall, AfterCryptoAsync, AfterFillTarget,
-    AfterFillOffset, AfterFillSize, FinishKeyPair, CheckCryptoMethod, FinishBytesText,
-    CheckSubtleIntrinsic, AfterSubtleArg, CheckSubtleCall, AfterJwkArgument, AfterJwkWrap,
-    AfterSubtleFinish, WalkExternal, NoteHttpsCall, NoteTlsMethod, NoteHttpsValue, WalkHeadersCall,
-    NoteLibraryInstance, InferPairsSlot, CheckDictSourceSlot, AfterDictSourceSlot,
-    FinishIteratorFilter, FinishIteratorFilterDefined>;
+    NoteConstructorFlow, WriteDesignRecords, AfterFieldComplete, WriteMethodRecords,
+    ReadReflectMethod, AfterReflectGetObject, ContinueKnownGet, FinishDynamicGet, AfterFillArgs,
+    FinishFill, AfterApplyFunction, AfterApplyThis, FinishApply, FinishApplyResult,
+    AfterDirectMember, AfterDirectArguments, MakeVoidSequence, ReflectOk, FinishReflectOk,
+    AfterConstructClass, FinishDynamicConstruct, ReflectArgsSlot, AfterReflectArgs,
+    AfterMetadataKeyArg, AfterMetadataValue, AfterKnownMetadata, MetadataValueUnknown,
+    AfterMetadataTarget, FinishMetadataCall, NextMetadataWriter, CheckBytesIndex,
+    AfterBytesIndexPosition, WalkBytesStore, CheckBytesMember, CheckBytesUnionMember,
+    CheckBytesStaticMember, BytesToString, BufferEncodingValue, AfterBufferEncodingArg,
+    CheckBytesMethod, FinishBufferToString, FinishRangeMethod, NextWriteArg, AfterWriteArg,
+    FinishWrite, AfterBufferValue, ContinueValueMethod, NextValueSplit, AfterValueSplit,
+    FinishValueMethod, FinishVariableNumber, AfterFixedValue, FinishFixedNumber, AfterDecodeInput,
+    FinishFatalDecode, CheckBytesStatic, AfterBytesSource, AfterFromWithSource, AfterFromWithMapper,
+    FinishFromWith, NextBytesValue, AfterBytesValue, AfterSpreadValues, AfterBufferFromSource,
+    WriteEncodingArg, FinishView, AfterAllocSize, AfterAllocFill, AfterByteFill, FinishAllocFill,
+    AfterConcatList, AfterConcatTotal, AfterByteLengthArg, AfterIsBufferArg, AfterDecoderParse,
+    FinishDecoderParse, CheckBytesNew, AfterNonNegative, AfterDataViewBuffer, ContinueDecoderNew,
+    AfterDecoderLabelArg, AfterDecoderOptions, FinishDecoderNew, AfterTypedNewSource,
+    FinishLengthNew, AfterMappedCallback, AfterCopySort, FinishTypedAt, AfterTypedSearchValue,
+    FinishTypedSearch, AfterTypedValue, AfterSetLiteral, AfterSetSource, FinishTypedSet,
+    AfterWithIndex, FinishDataView, AfterDataViewValue, AddByteCallbackFacts,
+    CheckByteCallbackResult, CheckArrayIterator, CheckStringMethod, AfterStringRegexTry,
+    FinishStringMethod, CheckNumberStatic, AfterCodeArg, CheckNumberMethod, AfterDigitsArg,
+    CheckGlobalCall, AfterUriArg, FinishGlobalResult, AfterNumberArg, FinishNumberOf,
+    CheckArrayMethod, FinishGrowingCall, FinishAtCall, AfterConcatArg, CheckDictMethod,
+    AfterSetCombineArg, CheckMapStatic, AfterGroupSource, AfterGroupCallback, CheckObjectCall,
+    AfterEntriesPairs, AfterEntriesSource, AfterListingEnum, AfterEnumListing, AfterListingArg,
+    AfterListedClass, AfterListedFields, MarkFused, CheckIteratorFrom, AfterIteratorFromSource,
+    CheckArrayFrom, AfterArrayFromSource, AfterArrayFromMapper, CheckIteratorMethod, AfterTakeCount,
+    AfterReduceInitValue, AfterIteratorCallback, CheckCryptoValue, CheckCryptoModuleMember,
+    CheckCryptoMember, CheckCryptoNew, CheckX509Parse, CheckWebCryptoCall, CheckWebCryptoMember,
+    CryptoValue, AfterCryptoData, AfterCryptoNumber, AfterCryptoKeyObject, AfterProvenNumber,
+    AfterCryptoEncoding, CryptoFinishStep, FinishCryptoResult, AfterRejectCallback, CheckCryptoCall,
+    AfterCryptoAsync, AfterFillTarget, AfterFillOffset, AfterFillSize, FinishKeyPair,
+    CheckCryptoMethod, FinishBytesText, CheckSubtleIntrinsic, AfterSubtleArg, CheckSubtleCall,
+    AfterJwkArgument, AfterJwkWrap, AfterSubtleFinish, WalkExternal, NoteHttpsCall, NoteTlsMethod,
+    NoteHttpsValue, WalkHeadersCall, NoteLibraryInstance, InferPairsSlot, CheckDictSourceSlot,
+    AfterDictSourceSlot, FinishIteratorFilter, FinishIteratorFilterDefined>;
 
 }
 
@@ -11507,10 +11531,10 @@ extern template class Union<
     tz::AfterMappedKeys, tz::AfterMappedSource, tz::AfterMappedParts, tz::StartIntersection,
     tz::NextIntersectionPart, tz::AfterIntersectionPart, tz::StartConditional,
     tz::AfterConditionalCheck, tz::AfterInferConstraint, tz::AfterConditionalPattern,
-    tz::ChooseBranch, tz::CloseConditionalScope, tz::AfterDistributedMember, tz::EvalConditional,
-    tz::AfterEvalConditional, tz::EvalFiltered, tz::FinishFiltered, tz::PrepareExpectation,
-    tz::FinishBranches, tz::StartTemplate, tz::AfterTemplateHole, tz::FinishTemplate,
-    tz::EvalTemplate, tz::EvalStringCase, tz::EvalFunctionPart, tz::StartTypeOf,
+    tz::ChooseBranch, tz::RetryBranchChoice, tz::CloseConditionalScope, tz::AfterDistributedMember,
+    tz::EvalConditional, tz::AfterEvalConditional, tz::EvalFiltered, tz::FinishFiltered,
+    tz::PrepareExpectation, tz::FinishBranches, tz::StartTemplate, tz::AfterTemplateHole,
+    tz::FinishTemplate, tz::EvalTemplate, tz::EvalStringCase, tz::EvalFunctionPart, tz::StartTypeOf,
     tz::FindTypeOfCandidates, tz::AfterTypeOfCandidate, tz::AfterTypeOfMember,
     tz::AfterFunctionValue, tz::FinishDeclaredFunctionValue, tz::SignatureForUtility,
     tz::ContinueSignature, tz::AfterErasedReturn, tz::ResolveImport, tz::StartTopLevel,
@@ -11825,9 +11849,9 @@ extern template class Union<
     tz::AfterNativeError, tz::NativeErrorType, tz::CheckStatsDate, tz::CheckFsClassMethod,
     tz::CheckFsPromisesCall, tz::AfterFsPromisesCall, tz::CheckReadlineCall,
     tz::AfterReadlineOptions, tz::FinishReadline, tz::CheckReflectCall, tz::NoteReflectedConversion,
-    tz::NoteConstructorFlow, tz::WriteDesignRecords, tz::AfterFieldComplete,
-    tz::AfterReflectGetObject, tz::ContinueKnownGet, tz::FinishDynamicGet, tz::AfterFillArgs,
-    tz::FinishFill, tz::AfterApplyFunction, tz::AfterApplyThis, tz::FinishApply,
+    tz::NoteConstructorFlow, tz::WriteDesignRecords, tz::AfterFieldComplete, tz::WriteMethodRecords,
+    tz::ReadReflectMethod, tz::AfterReflectGetObject, tz::ContinueKnownGet, tz::FinishDynamicGet,
+    tz::AfterFillArgs, tz::FinishFill, tz::AfterApplyFunction, tz::AfterApplyThis, tz::FinishApply,
     tz::FinishApplyResult, tz::AfterDirectMember, tz::AfterDirectArguments, tz::MakeVoidSequence,
     tz::ReflectOk, tz::FinishReflectOk, tz::AfterConstructClass, tz::FinishDynamicConstruct,
     tz::ReflectArgsSlot, tz::AfterReflectArgs, tz::AfterMetadataKeyArg, tz::AfterMetadataValue,

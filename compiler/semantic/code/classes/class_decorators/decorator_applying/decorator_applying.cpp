@@ -172,6 +172,7 @@ void DecoratorApplying::relinkClass(const RelinkClass &task) {
   auto &tasks = this->state.walk.tasks;
   const_cast<Type *>(classDecl->type)->forgetFields();
   this->state.diagnostics.pushList(DiagnosticRoute::DISCARD);
+  tasks.pushTask(CompleteClass{.classDecl = classDecl});
   tasks.pushTask(BuildVtable{.classDecl = classDecl});
   tasks.pushTask(DropDiagnosticList{});
 

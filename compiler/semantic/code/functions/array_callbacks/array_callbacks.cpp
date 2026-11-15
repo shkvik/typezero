@@ -584,7 +584,8 @@ void ArrayCallbacks::finishFilterResult(const FinishFilterResult &task) {
   }
   auto &tasks = this->state.walk.tasks;
   tasks.pushTask(FinishFilterDefined{.shape = shape});
-  for (const FuncSymbol *function : llvm::reverse(this->definedNeeds(predicate))) {
+  auto needs = this->definedNeeds(predicate);
+  for (const FuncSymbol *function : llvm::reverse(needs)) {
     tasks.pushTask(BuildPredicate{.function = function});
   }
 }
@@ -612,7 +613,8 @@ void ArrayCallbacks::finishIteratorFilter(const FinishIteratorFilter &task) {
   }
   auto &tasks = this->state.walk.tasks;
   tasks.pushTask(FinishIteratorFilterDefined{.call = call, .element = element});
-  for (const FuncSymbol *function : llvm::reverse(this->definedNeeds(predicate))) {
+  auto needs = this->definedNeeds(predicate);
+  for (const FuncSymbol *function : llvm::reverse(needs)) {
     tasks.pushTask(BuildPredicate{.function = function});
   }
 }

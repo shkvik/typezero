@@ -21,6 +21,7 @@ public:
   void finishOptionalChain(const FinishOptionalChain &task);
 
 private:
+  bool isUnpreparedConditional(const Type *expected) const;
   void startCast(CastExpr *castExpr);
   void startOptionalChain(OptionalChainExpr *chain);
   void checkNameValue(NameExpr *name, const Type *expected);

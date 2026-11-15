@@ -121,7 +121,7 @@ bool ReturnRequests::isTemplateCopy(const FunctionDecl *functionDecl) {
     return false;
   }
 
-  return !this->state.code.late.hasClassExpr(functionDecl->generic);
+  return !this->state.code.late.findClassExpr(functionDecl->generic);
 }
 
 void ReturnRequests::afterTemplateReturn(const AfterTemplateReturn &task) {

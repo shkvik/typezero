@@ -140,6 +140,9 @@ void ClassInstances::finishInstanceChecks(ClassInstanceDraft draft) {
   this->rememberCheck(instance, draft.use);
   tasks.pushTask(FinishClassInstance{.instance = instance});
   tasks.pushTask(WalkOrPostpone{.instance = instance, .loc = loc});
+  if (this->state.declaration.classes.hasLinkedClasses()) {
+    tasks.pushTask(CompleteClass{.classDecl = instance});
+  }
 
   return this->fillOrPostpone(instance);
 }
