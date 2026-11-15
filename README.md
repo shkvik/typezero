@@ -2645,6 +2645,59 @@ import { red } from "@std/fmt/colors"   // путь внутри пакета �
   Uint8Array`; `v3.DNS` (свойство функции) — экспорт `DNS` и `URL`. Тест
   `tests/run/packages_uuid` печатает ровно то же, что оригинальный uuid 14.0.3 в node.
 
+## Вызов C (FFI)
+
+Программа вызывает функции на C ([docs/ffi.md](docs/ffi.md)). Функция объявляется
+`declare function`, указатель из C — ручкой `declare class X {}`; имя в C — ровно как написано:
+
+```ts
+import { cstring } from "tz:string"
+import { Out } from "tz:ffi"
+
+declare class LLVMContext {}
+declare function LLVMContextCreate(): LLVMContext
+declare function LLVMContextDispose(context: LLVMContext): void
+declare function strlen(text: cstring): uint64
+
+class Context {
+  public readonly handle: LLVMContext
+
+  public constructor() {
+    this.handle = LLVMContextCreate()
+  }
+
+  public [Symbol.dispose](): void {
+    LLVMContextDispose(this.handle)
+  }
+}
+
+console.log(strlen("hello"))   // 5
+```
+
+- **Через границу** проходят числа всех ширин, `boolean`, `cstring`, ручки и `ручка | undefined`,
+  массивы чисел и ручек и `Buffer` (указатель на элементы на время вызова), `Out<T>` из `tz:ffi`
+  (ячейка `T *`: числа, `boolean`, ручки). Остальное — ошибка на объявлении.
+- **`cstring`** из `tz:string` — UTF-8 с `\0` в конце: литерал проверяется при сборке,
+  `s.toCString()` даёт `cstring | undefined` (`undefined`, если в строке есть `\0`), обратно —
+  `c.toString()`; `==`, печать и шаблоны работают. Строку из C tz копирует сразу.
+- **`NULL`** там, где объявление его не допускает, — паника с именем функции; `| undefined` —
+  законный `NULL`.
+- **`[Symbol.dispose]`** tz вызывает сам на последней ссылке (и у глобальных — в конце программы,
+  в обратном порядке); `using` — `dispose` в конце блока и ошибка, если значение уходит из блока
+  (вернули, сохранили, захватили замыканием). Вызвать его руками нельзя, кроме
+  `super[Symbol.dispose]()`, который наследник обязан вызвать.
+- **Код на C** — массив `native` в `package.json`: готовые `.lib` (`libraries`, `dlls`) или исходники
+  `.c` (`sources` с масками `**` и `!`, `defines`, `includes`, `debug.defines`), которые собирает
+  clang внутри `tz.exe` — функции C встраиваются в код tz. `os`/`cpu` выбирают запись под
+  платформу, `license` и `licenseFile` обязательны и попадают в `tz licenses app.exe`. Функции нет
+  ни в одной библиотеке — ошибка на строке `declare function`. DLL кладётся рядом с exe; `tz run`
+  находит её через `PATH`.
+- **Параллельность:** вызовы C идут по одному (один общий ресурс на все библиотеки C).
+- **Проба:** компилятор LLVM из программы на tz через `LLVM-C.dll` строит модуль, проверяет его и
+  пишет `.obj`; 50 000 функций — 2,2 с, столько же, сколько та же программа на C.
+- Ещё нет: `Promise<T>` в объявлении (вызов в пуле потоков), колбэки из C в tz, структуры по
+  значению, текст из `char *`, который надо освобождать, кэш собранного биткода.
+
 ## JSON
 
 `Json` — встроенный тип значения JSON: `null`, `boolean`, число, строка, массив `Json` или объект

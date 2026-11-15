@@ -392,6 +392,12 @@ std::string ConversionRules::mismatchPrefix(const AssignAttempt &attempt,
   if (to->isNever()) {
     prefix += ErrorTextAssignable::never();
   }
+  if (to->nonOptional()->isCString() && from->isStringLiteral()) {
+    prefix += ErrorTextAssignable::cstringZero();
+  }
+  if (to->nonOptional()->isCString() && from->isString()) {
+    prefix += ErrorTextAssignable::cstringText();
+  }
 
   return prefix;
 }

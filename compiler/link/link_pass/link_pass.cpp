@@ -3,6 +3,7 @@
 #include "compiler/link/linker/linker.h"
 #include "compiler/optimize/target/target.h"
 #include "compiler/pipeline/build_options/build_options.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Process.h"
 #include <string>
@@ -30,7 +31,8 @@ bool LinkPass::inUse(llvm::StringRef path) {
 }
 
 LinkPass::ResultLinked LinkPass::run(const ObjectFile &object, const CryptoUse &crypto,
-                                     bool parallel) const {
+                                     bool parallel, const NativeLink &native,
+                                     llvm::ArrayRef<ForeignFunction> foreign) const {
   std::vector<Diagnostic> errors;
   const llvm::Triple &triple = this->target.triple();
   std::string variant = parallel ? "tzrt_mt" : "tzrt";
@@ -65,6 +67,7 @@ LinkPass::ResultLinked LinkPass::run(const ObjectFile &object, const CryptoUse &
     }
   }
 
+  inputs.insert(inputs.end(), native.inputs.begin(), native.inputs.end());
   std::string messages;
   std::string natvis;
   if (this->options.debug == DebugLevel::Full) {
@@ -82,7 +85,11 @@ LinkPass::ResultLinked LinkPass::run(const ObjectFile &object, const CryptoUse &
                             "': it is in use, probably still running; stop it and build again";
       errors.push_back({.form = Diagnostic::Form::Tool, .message = message});
     } else {
-      errors.push_back({.form = Diagnostic::Form::Raw, .message = messages});
+      auto located = this->foreignErrors(messages, foreign);
+      if (located.empty()) {
+        errors.push_back({.form = Diagnostic::Form::Raw, .message = messages});
+      }
+      errors.insert(errors.end(), located.begin(), located.end());
       errors.push_back({.form = Diagnostic::Form::Tool, .message = "linking failed"});
     }
     return err(errors);
@@ -96,4 +103,41 @@ LinkPass::ResultLinked LinkPass::run(const ObjectFile &object, const CryptoUse &
   return ok(warnings);
 }
 
+std::vector<Diagnostic> LinkPass::foreignErrors(llvm::StringRef messages,
+                                                llvm::ArrayRef<ForeignFunction> foreign) const {
+  constexpr llvm::StringLiteral marker = "undefined symbol: ";
+  auto located = std::vector<Diagnostic>();
+  auto lines = llvm::SmallVector<llvm::StringRef, 16>();
+  messages.split(lines, '\n');
+  for (llvm::StringRef line : lines) {
+    size_t at = line.find(marker);
+    llvm::StringRef name = at == llvm::StringRef::npos ? llvm::StringRef()
+                                                       : line.drop_front(at + marker.size()).trim();
+    const ForeignFunction *function = this->findForeign(name, foreign);
+    if (at != llvm::StringRef::npos && function == nullptr) {
+      return {};
+    }
+    if (function != nullptr) {
+      located.push_back({
+          .loc = function->loc,
+          .message = "'" + name.str() +
+                     "' is in no C library: add the library that has it to 'native' in "
+                     "package.json",
+      });
+    }
+  }
+
+  return located;
+}
+
+const ForeignFunction *LinkPass::findForeign(llvm::StringRef name,
+                                             llvm::ArrayRef<ForeignFunction> foreign) const {
+  for (const ForeignFunction &function : foreign) {
+    if (!name.empty() && function.name == name) {
+      return &function;
+    }
+  }
+
+  return nullptr;
+}
 }

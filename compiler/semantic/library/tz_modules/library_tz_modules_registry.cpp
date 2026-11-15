@@ -23,7 +23,8 @@ constexpr llvm::StringLiteral kTokenSymbols = "!#$%&'*+-.^_`|~";
 }
 
 LibraryTzModulesRegistry::LibraryTzModulesRegistry(SemanticState &owner)
-    : state(owner) {}
+    : state(owner),
+      foreign(owner) {}
 
 void LibraryTzModulesRegistry::noteLibraryInstance(const NoteLibraryInstance &task) {
   NewExpr *made = task.made;
@@ -155,6 +156,9 @@ LibraryTzModulesRegistry::checkExternalReturn(const Type *returnType, const Type
 
 void LibraryTzModulesRegistry::walkExternal(const WalkExternal &task) {
   FunctionDecl *functionDecl = task.functionDecl;
+  if (functionDecl->foreign()) {
+    return this->foreign.walkForeign(functionDecl);
+  }
   FuncSymbol *function = functionDecl->sym;
   functionDecl->checked = true;
   auto plain = this->checkPlainSignature(functionDecl);

@@ -50,6 +50,7 @@ struct Interned {
   std::map<std::pair<double, const Type *>, std::unique_ptr<Type>> numbers;
   std::map<std::vector<const Type *>, std::unique_ptr<Type>> unions;
   std::map<const ClassDecl *, std::unique_ptr<Type>> classRefs;
+  std::map<const TypeAliasDecl *, std::unique_ptr<Type>> handles;
   llvm::DenseMap<const Type *, std::unique_ptr<Type>> constructors;
 };
 
@@ -944,6 +945,22 @@ const Type *Type::classRef(const ClassDecl *cls, llvm::StringRef name) {
   return slot.get();
 }
 
+const Type *Type::handle(const TypeAliasDecl *decl, llvm::StringRef name) {
+  std::unique_ptr<Type> &slot = Type::interned().handles[decl];
+  if (!slot) {
+    slot.reset(new Type(Kind::Handle, name.str()));
+    slot->data = HandleData{.decl = decl};
+  }
+
+  return slot.get();
+}
+
+const TypeAliasDecl *Type::handleDecl() const {
+  const HandleData *found = this->data.as<HandleData>();
+
+  return found != nullptr ? found->decl : nullptr;
+}
+
 const Type *Type::constructorOf(const Type *instance) {
   if (instance->isError()) {
     return instance;
@@ -1090,7 +1107,7 @@ const Type *Type::bytesType(Bytes kind) {
 
 const Type *Type::runtimeObject(Runtime kind) {
   static Type *types[size_t(Runtime::AsyncIterator)];
-  static const char *const names[] = {"", "FileHandle", "Interface", "Interface"};
+  static const char *const names[] = {"", "FileHandle", "Interface", "Interface", "cstring"};
   Type *&type = types[size_t(kind)];
   if (!type) {
     type = Type::interned().objects.emplace_back(new Type(Kind::Object, names[size_t(kind)])).get();
@@ -1098,6 +1115,14 @@ const Type *Type::runtimeObject(Runtime kind) {
   }
 
   return type;
+}
+
+bool Type::isCString() const {
+  return this->runtimeKind() == Runtime::CString;
+}
+
+const Type *Type::cstring() {
+  return Type::runtimeObject(Runtime::CString);
 }
 
 const Type *Type::elementType() const {
@@ -1406,6 +1431,8 @@ Type::Data Type::dataFor(Kind kind) {
       return UnknownData{};
     case Kind::ClassRef:
       return ClassRefData{};
+    case Kind::Handle:
+      return HandleData{};
   }
 
   return ErrorData{};

@@ -3,11 +3,14 @@
 #include "compiler/cli/command_line/args/args.h"
 #include "compiler/cli/command_line/exit_codes/exit_codes.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FileUtilities.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/raw_ostream.h"
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -27,9 +30,11 @@ int RunCommand::run(const Args &args) const {
   llvm::sys::path::replace_extension(pdb, "pdb");
   llvm::FileRemover removePdb(pdb);
   BuildCommand build(this->runtime);
-  if (int status = build.run(args, exe)) {
+  auto dllDirs = std::vector<std::string>();
+  if (int status = build.run(args, exe, &dllDirs)) {
     return status;
   }
+  this->addSearchPath(dllDirs);
 
   std::vector<llvm::StringRef> programArgs{exe};
   for (const std::string &arg : args.programArgs) {
@@ -49,4 +54,19 @@ int RunCommand::run(const Args &args) const {
   return code;
 }
 
+void RunCommand::addSearchPath(llvm::ArrayRef<std::string> dirs) const {
+  if (dirs.empty()) {
+    return;
+  }
+  std::string path = llvm::join(dirs, ";");
+  auto inherited = llvm::sys::Process::GetEnv("PATH");
+  if (inherited.has_value()) {
+    path += ";" + *inherited;
+  }
+#ifdef _WIN32
+  _putenv_s("PATH", path.c_str());
+#else
+  setenv("PATH", path.c_str(), 1);
+#endif
+}
 }

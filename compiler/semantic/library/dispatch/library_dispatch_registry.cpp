@@ -9,6 +9,7 @@
 #include "compiler/program/library/fs/readline_method_table/readline_method_table.h"
 #include "compiler/program/library/iterator/iterator_method_table/iterator_method_table.h"
 #include "compiler/program/library/library_module_names/library_module_names.h"
+#include "compiler/program/library/string/string_method_table/string_method_table.h"
 #include "compiler/program/types/argument_lists/argument_lists.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cassert>
@@ -508,6 +509,8 @@ void LibraryDispatchRegistry::checkRuntimeMethod(const CheckRuntimeMethod &task)
       return this->startReadlineMethod(call, member);
     case Type::Runtime::AsyncIterator:
       return this->startAsyncIteratorMethod(call, member);
+    case Type::Runtime::CString:
+      return this->startCStringMethod(call, member);
     case Type::Runtime::None:
     case Type::Runtime::FileHandle:
       return this->reportNoMember(call, member);
@@ -564,6 +567,19 @@ void LibraryDispatchRegistry::startReadlineMethod(CallExpr *call, MemberExpr *me
     case ReadlineMethod::DISPATCH_EVENT:
       return this->reportReadlineEvents(call, member);
   }
+}
+
+void LibraryDispatchRegistry::startCStringMethod(CallExpr *call, MemberExpr *member) {
+  const auto *method = StringMethodTable::find(member->name);
+  bool isToString = method != nullptr && method->method == StringMethod::TO_STRING;
+  if (!isToString) {
+    return this->reportNoMember(call, member);
+  }
+  if (this->hasWrongArity(call, member, 0, 0)) {
+    return;
+  }
+  call->target = BuiltinCall{.builtin = Builtin::CStrToString};
+  call->type = Type::string();
 }
 
 void LibraryDispatchRegistry::reportReadlineEvents(CallExpr *call, MemberExpr *member) {

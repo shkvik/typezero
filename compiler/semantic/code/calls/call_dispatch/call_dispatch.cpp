@@ -16,6 +16,7 @@ namespace tz {
 namespace {
 
 constexpr const char *kIteratorMethod = "[Symbol.iterator]";
+constexpr const char *kDisposeMethod = "[Symbol.dispose]";
 constexpr const char *kAsyncIteratorMethod = "[Symbol.asyncIterator]";
 constexpr GlobalName kTypeArgFreeGlobals[] = {
     GlobalName::STRING,  GlobalName::NUMBER,  GlobalName::OBJECT, GlobalName::ITERATOR,
@@ -27,7 +28,8 @@ constexpr GlobalName kTypeArgFreeGlobals[] = {
 
 CallDispatch::CallDispatch(SemanticState &owner, CallRules &sharedCallRules)
     : callRules(sharedCallRules),
-      state(owner) {}
+      state(owner),
+      disposeRules(owner) {}
 
 void CallDispatch::checkCall(const CheckCall &task) {
   CallExpr *call = task.call;
@@ -617,11 +619,25 @@ void CallDispatch::rewriteSymbolCallee(CallExpr *call) {
       key != nullptr && this->state.isGlobalMember(key, GlobalMember::SYMBOL_ITERATOR);
   bool isAsyncIterator =
       key != nullptr && this->state.isGlobalMember(key, GlobalMember::SYMBOL_ASYNC_ITERATOR);
+  bool isDispose = key != nullptr && this->state.isGlobalMember(key, GlobalMember::SYMBOL_DISPOSE);
+  if (isDispose) {
+    return this->rewriteDisposeCallee(call, index);
+  }
   if (!isIterator && !isAsyncIterator) {
     return;
   }
   llvm::StringRef name = isIterator ? kIteratorMethod : kAsyncIteratorMethod;
   call->callee = this->state.ast.make<MemberExpr>(index->loc(), index->object, name);
+}
+
+void CallDispatch::rewriteDisposeCallee(CallExpr *call, IndexExpr *index) {
+  auto *object = dyn_cast<NameExpr>(index->object);
+  bool isSuper = object != nullptr && object->name == KeywordTable::getName(Keyword::SUPER);
+  if (!isSuper || !this->disposeRules.isInsideDispose()) {
+    auto message = ErrorTextDispose::manual();
+    this->state.diagnostics.error(call->loc(), message);
+  }
+  call->callee = this->state.ast.make<MemberExpr>(index->loc(), index->object, kDisposeMethod);
 }
 
 void CallDispatch::rejectTypeArgs(MemberExpr *member) {

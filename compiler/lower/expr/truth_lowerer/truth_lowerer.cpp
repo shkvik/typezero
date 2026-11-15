@@ -22,7 +22,7 @@ TruthLowerer::TruthLowerer(Lowering &owner)
 
 bool TruthLowerer::isReference(const Type *type) {
   return type->isObject() || type->isIterator() || type->isJson() || type->isDict() ||
-         type->isPromise() || type->isUnknown() || type->isClassRef() ||
+         type->isPromise() || type->isUnknown() || type->isClassRef() || type->isHandle() ||
          (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
 }
 

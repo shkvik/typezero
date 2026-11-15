@@ -70,6 +70,7 @@ enum class Res : uint8_t {
   Process,
   Metadata,
   Runtime,
+  Native,
 };
 
 struct Loc {

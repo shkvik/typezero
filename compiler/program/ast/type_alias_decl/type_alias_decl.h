@@ -22,6 +22,7 @@ struct TypeAliasDecl : Stmt {
   Type *self = nullptr;
   bool recursive = false;
   bool boundParam = false;
+  bool isHandle = false;
 };
 
 }

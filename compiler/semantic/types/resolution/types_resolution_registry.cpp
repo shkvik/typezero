@@ -460,6 +460,11 @@ const Type *TypesResolutionRegistry::builtinNamed(llvm::StringRef name) const {
   if (isInterface && node->module == NodeModule::ReadlinePromises) {
     return Type::runtimeObject(Type::Runtime::ReadlinePromises);
   }
+  bool isCString = node != nullptr && node->module == NodeModule::TzString &&
+                   node->name == Type::cstring()->name();
+  if (isCString) {
+    return Type::cstring();
+  }
   const auto *crypto = this->cryptoTypeNamed(name);
   if (crypto != nullptr) {
     return crypto;

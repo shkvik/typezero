@@ -18,6 +18,7 @@ endif()
 find_package(zstd CONFIG REQUIRED)
 find_package(LLVM REQUIRED CONFIG)
 find_package(LLD REQUIRED CONFIG)
+find_package(Clang REQUIRED CONFIG HINTS "${LLVM_DIR}/../clang")
 message(STATUS "Using LLVM ${LLVM_PACKAGE_VERSION} from ${LLVM_DIR}")
 
 set(TZ_OUTPUT_DIR ${CMAKE_BINARY_DIR}/bin)
@@ -33,6 +34,17 @@ include(editors/types/declarations.cmake)
 configure_file(editors/types/tsconfig.json ${TZ_OUTPUT_DIR}/types/tsconfig.json COPYONLY)
 configure_file(docs/ai.md ${TZ_OUTPUT_DIR}/ai.md COPYONLY)
 configure_file(editors/debug/tz.natvis ${TZ_OUTPUT_DIR}/tz.natvis COPYONLY)
+file(COPY ${LLVM_LIBRARY_DIR}/clang/${LLVM_VERSION_MAJOR}/include
+     DESTINATION ${TZ_OUTPUT_DIR}/clang
+     PATTERN "cuda_wrappers" EXCLUDE
+     PATTERN "openmp_wrappers" EXCLUDE
+     PATTERN "ppc_wrappers" EXCLUDE
+     PATTERN "llvm_libc_wrappers" EXCLUDE
+     PATTERN "__clang_cuda_*" EXCLUDE
+     PATTERN "__clang_hip_*" EXCLUDE
+     PATTERN "opencl-*" EXCLUDE
+     PATTERN "hexagon_*" EXCLUDE
+     PATTERN "riscv_*" EXCLUDE)
 
 add_subdirectory(runtime)
 add_subdirectory(compiler)

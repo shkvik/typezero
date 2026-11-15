@@ -108,12 +108,16 @@ bool ObjectTypeParser::parseFieldName(llvm::StringRef &name) {
       name = "[Symbol.asyncIterator]";
       return true;
     }
+    if (which == "dispose") {
+      name = "[Symbol.dispose]";
+      return true;
+    }
     if (which != "iterator") {
       this->parser.cursor().report(
           loc, "'Symbol." + which +
                    "' cannot name a member: of the symbols of JavaScript, only "
-                   "'Symbol.iterator' and 'Symbol.asyncIterator' can (docs/iterators.md, section "
-                   "5)");
+                   "'Symbol.iterator', 'Symbol.asyncIterator' (docs/iterators.md, section 5) and "
+                   "'Symbol.dispose' (docs/ffi.md, section 5) can");
     }
     name = "[Symbol.iterator]";
     return true;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "compiler/packages/native_entry/native_entry.h"
 #include "llvm/ADT/StringMap.h"
 #include <string>
 #include <utility>
@@ -19,6 +20,7 @@ struct Package {
   std::vector<std::pair<std::string, std::string>> exports;
   llvm::StringMap<unsigned> aliases;
   llvm::StringMap<unsigned> jsrDeps;
+  std::vector<NativeEntry> natives;
 };
 
 }

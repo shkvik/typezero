@@ -1,0 +1,57 @@
+import { Out } from "tz:ffi"
+
+declare class Memory {}
+
+declare function malloc(size: uint64): Memory
+declare function free(memory: Memory): void
+declare function strtol(text: Buffer, end: Out<Memory>, base: int32): int32
+declare function _get_errno(value: Out<int32>): int32
+
+class Block {
+  public readonly memory: Memory
+  public readonly name: string
+
+  public constructor(name: string) {
+    this.memory = malloc(32)
+    this.name = name
+  }
+
+  public [Symbol.dispose](): void {
+    console.log("dispose", this.name)
+    free(this.memory)
+  }
+}
+
+class Tagged extends Block {
+  public constructor() {
+    super("tagged")
+  }
+
+  public [Symbol.dispose](): void {
+    console.log("tagged first")
+    super[Symbol.dispose]()
+  }
+}
+
+function scope() {
+  using block = new Block("scoped")
+  console.log("inside", block.name)
+}
+
+function dropped() {
+  const block = new Block("dropped")
+  console.log("made", block.name)
+}
+
+scope()
+dropped()
+const kept = new Block("kept")
+const tagged = new Tagged()
+console.log("end of main", kept.name, tagged.name)
+
+const end = new Out<Memory>()
+const text = Buffer.from("123abc\0")
+console.log(strtol(text, end, 10), end.value != undefined)
+const errno = new Out<int32>()
+_get_errno(errno)
+console.log(errno.value)

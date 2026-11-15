@@ -6,7 +6,8 @@ namespace tz {
 
 ClassBodyWalks::ClassBodyWalks(SemanticState &owner, ClassFacts &sharedFacts)
     : facts(sharedFacts),
-      state(owner) {}
+      state(owner),
+      disposeRules(owner) {}
 
 void ClassBodyWalks::walkClassBodies(const WalkClassBodies &task) {
   ClassDecl *classDecl = task.classDecl;
@@ -82,6 +83,7 @@ void ClassBodyWalks::finishClassBodies(const FinishClassBodies &task) {
   this->state.diagnostics.popList();
   if (returns.missing.empty()) {
     this->walkAbstract(classDecl);
+    this->disposeRules.walkDispose(classDecl);
     this->walkImplements(classDecl, returns);
 
     return this->walkOverrideReturns(classDecl, returns);

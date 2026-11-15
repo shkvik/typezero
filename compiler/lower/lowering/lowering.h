@@ -115,6 +115,8 @@ class ErrSites;
 class DebugInfo;
 class StreamLowerer;
 class TzModulesLowerer;
+class ForeignLowerer;
+class CStringLowerer;
 
 class LowererRegistry;
 class Lowering {
@@ -727,6 +729,12 @@ public:
   TzModulesLowerer &tzModulesLowerer() const {
     return *this->tzModulesLowererPart;
   }
+  ForeignLowerer &foreignLowerer() const {
+    return *this->foreignLowererPart;
+  }
+  CStringLowerer &cstringLowerer() const {
+    return *this->cstringLowererPart;
+  }
 
 private:
   friend class ModuleBuilder;
@@ -826,6 +834,8 @@ private:
   friend class DebugTypes;
   friend class StreamLowerer;
   friend class TzModulesLowerer;
+  friend class ForeignLowerer;
+  friend class CStringLowerer;
   std::unique_ptr<ModuleBuilder> moduleBuilderPart;
   std::unique_ptr<FunctionBuilder> functionBuilderPart;
   std::unique_ptr<RuntimeFunctions> runtimeFunctionsPart;
@@ -916,6 +926,8 @@ private:
   std::unique_ptr<DebugInfo> debugInfoPart;
   std::unique_ptr<StreamLowerer> streamLowererPart;
   std::unique_ptr<TzModulesLowerer> tzModulesLowererPart;
+  std::unique_ptr<ForeignLowerer> foreignLowererPart;
+  std::unique_ptr<CStringLowerer> cstringLowererPart;
 };
 
 }

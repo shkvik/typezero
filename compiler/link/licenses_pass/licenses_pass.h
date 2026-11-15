@@ -7,7 +7,7 @@ namespace tz {
 
 class LicensesPass {
 public:
-  CryptoUse run(llvm::Module &module) const;
+  CryptoUse run(llvm::Module &module, const std::vector<NativeLicense> &natives) const;
 };
 
 }

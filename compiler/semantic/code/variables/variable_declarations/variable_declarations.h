@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/result/result/result.h"
+#include "compiler/semantic/code/classes/dispose_rules/dispose_rules.h"
 #include "compiler/semantic/code/variables/code_variables_registry_errors.h"
 #include "compiler/semantic/code/variables/variable_declarations/variable_declarations_types.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
@@ -56,6 +57,7 @@ private:
   std::vector<const Stmt *> followingStatements(llvm::ArrayRef<Stmt *> stmts, size_t index) const;
 
   SemanticState &state;
+  DisposeRules disposeRules;
 };
 
 }

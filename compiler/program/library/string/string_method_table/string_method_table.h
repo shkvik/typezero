@@ -30,6 +30,7 @@ enum class StringMethod {
   PAD_END,
   TO_UPPER_CASE,
   TO_LOWER_CASE,
+  TO_C_STRING,
   REPLACE,
   REPLACE_ALL,
   MATCH,
@@ -44,6 +45,7 @@ enum class StringResult {
   BOOL,
   STRING,
   STRINGS,
+  C_STRING_OR_UNDEFINED,
 };
 
 enum class StringMethodKind {

@@ -30,6 +30,7 @@ enum class LibraryClass {
   PASS_THROUGH,
   READABLE_STREAM,
   FORM_DATA,
+  FOREIGN_OUT,
 };
 
 struct LibraryClassInfo {

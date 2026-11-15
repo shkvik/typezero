@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compiler/packages/dependency/dependency.h"
+#include "compiler/packages/native_entry/native_entry.h"
 #include "llvm/ADT/StringRef.h"
 #include <string>
 #include <utility>
@@ -20,6 +21,7 @@ struct Manifest {
   std::vector<std::pair<std::string, std::string>> exports;
   std::vector<Dependency> dependencies;
   std::vector<std::pair<std::string, std::string>> scripts;
+  std::vector<NativeEntry> natives;
 
   size_t depsBegin = std::string::npos, depsEnd = 0;
   size_t lastMemberEnd = std::string::npos, rootBegin = 0, rootEnd = 0;

@@ -82,6 +82,10 @@ const LibraryClassInfo kRows[] = {
         .value = LibraryClass::URL,
     },
     {
+        .name = "Out",
+        .value = LibraryClass::FOREIGN_OUT,
+    },
+    {
         .name = "Writable",
         .value = LibraryClass::WRITABLE,
     },
@@ -106,7 +110,6 @@ const LibraryClassInfo kRows[] = {
         .value = LibraryClass::FORM_DATA,
     },
 };
-
 }
 
 llvm::StringRef LibraryClassTable::getName(LibraryClass value) {

@@ -3,6 +3,7 @@
 #include "compiler/packages/json_parser/json_parser.h"
 #include "compiler/packages/json_text/json_text.h"
 #include "compiler/packages/json_value/json_value.h"
+#include "compiler/packages/native_manifest/native_manifest.h"
 #include "compiler/packages/paths/paths.h"
 #include "compiler/packages/report/report.h"
 #include "compiler/packages/source/source.h"
@@ -117,6 +118,14 @@ bool ManifestFile::parseManifest(Manifest &out) {
       if (!ManifestFile::readExports(out, value, out.exports)) {
         return false;
       }
+    } else if (key == "native") {
+      NativeManifest natives(out.dir, out.path);
+      auto entries = natives.readEntries(value);
+      if (entries.isErr()) {
+        Report::reportAt(out.path, out.text, entries.error().offset, entries.error().message);
+        return false;
+      }
+      out.natives = entries.value();
     } else if (key == "dependencies") {
       if (!value.isObject()) {
         Report::reportAt(out.path, out.text, value.begin,

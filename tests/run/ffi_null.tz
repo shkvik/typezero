@@ -1,0 +1,8 @@
+// expect-exit: 2
+// expect-stderr: panic: malloc returned NULL, its declaration says it never does
+declare class Memory {}
+
+declare function malloc(size: uint64): Memory
+
+const memory = malloc(18446744073709551615)
+console.log(memory)

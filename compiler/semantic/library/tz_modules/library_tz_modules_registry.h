@@ -2,6 +2,7 @@
 
 #include "compiler/program/ast/ast.h"
 #include "compiler/result/result/result.h"
+#include "compiler/semantic/library/tz_modules/foreign_signatures/foreign_signatures.h"
 #include "compiler/semantic/library/tz_modules/library_tz_modules_registry_errors.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 #include <cstdint>
@@ -95,6 +96,7 @@ private:
   const ObjectLitExpr::Property *property(const ObjectLitExpr *literal, llvm::StringRef name) const;
 
   SemanticState &state;
+  ForeignSignatures foreign;
 };
 
 }

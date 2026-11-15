@@ -4,6 +4,7 @@
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/code/calls/call_rules/call_rules.h"
 #include "compiler/semantic/code/calls/code_calls_registry_errors.h"
+#include "compiler/semantic/code/classes/dispose_rules/dispose_rules.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
@@ -34,6 +35,7 @@ private:
 
   void rejectTypeArgs(MemberExpr *member);
   void rewriteSymbolCallee(CallExpr *call);
+  void rewriteDisposeCallee(CallExpr *call, IndexExpr *index);
   void rejectGlobalTypeArgs(MemberExpr *member);
   void nextNamedCall(const NamedCallDraft &draft);
   void reportMissingMethod(const MemberExpr *member, const Type *receiver);
@@ -61,6 +63,7 @@ private:
 
   CallRules &callRules;
   SemanticState &state;
+  DisposeRules disposeRules;
 };
 
 }

@@ -1,4 +1,5 @@
 #include "compiler/lower/layouts/object_layouts/object_layouts.h"
+#include "compiler/lower/classes/class_descriptors/class_descriptors.h"
 #include "compiler/lower/classes/inherit_lowerer/inherit_lowerer.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
@@ -18,6 +19,12 @@
 using llvm::cast;
 
 namespace tz {
+
+namespace {
+
+constexpr llvm::StringLiteral kDisposeMethod = "[Symbol.dispose]";
+
+}
 
 ObjectLayouts::ObjectLayouts(Lowering &owner)
     : lowering(owner) {}
@@ -169,6 +176,29 @@ const Lowering::ObjectLayout &ObjectLayouts::objectLayout(const Type *type) {
   return layout;
 }
 
+void ObjectLayouts::emitDispose(const Type *type, llvm::Value *object, bool isCounted) {
+  const FunctionDecl *dispose = this->disposeOf(type);
+  if (dispose == nullptr) {
+    return;
+  }
+  if (isCounted) {
+    this->lowering.builder.CreateStore(this->lowering.builder.getInt64(1), object);
+  }
+  auto *code = this->lowering.classDescriptors().methodCode(dispose);
+  this->lowering.builder.CreateCall(code, {object});
+}
+
+const FunctionDecl *ObjectLayouts::disposeOf(const Type *type) const {
+  for (const ClassDecl *owner = type->classDecl(); owner != nullptr; owner = owner->parent) {
+    auto found = owner->findMethodsNamed(kDisposeMethod);
+    if (!found.empty()) {
+      return found.front();
+    }
+  }
+
+  return nullptr;
+}
+
 void ObjectLayouts::emitObjectDrop(const Type *type, Lowering::ObjectLayout &layout) {
   llvm::IRBuilderBase::InsertPoint point = this->lowering.builder.saveIP();
   llvm::Function *drop = layout.drop;
@@ -188,6 +218,7 @@ void ObjectLayouts::emitObjectDrop(const Type *type, Lowering::ObjectLayout &lay
   if (this->lowering.isWeakTarget(type)) {
     this->lowering.storeLowerer().forgetWeakRefs(object);
   }
+  this->emitDispose(type, object, true);
 
   llvm::ArrayRef<Field> fields = type->fields();
   int next = -1;

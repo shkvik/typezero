@@ -91,6 +91,8 @@ std::string ErrorTextRuntimeObject::members(Type::Runtime kind) {
              "lines";
     case Type::Runtime::AsyncIterator:
       return "; iterate it with 'for await'";
+    case Type::Runtime::CString:
+      return "; it has 'toString()'";
     default:
       return "";
   }

@@ -197,6 +197,8 @@ llvm::Type *ModuleBuilder::lower(const Type *type) {
     return this->lowering.builder.getPtrTy();
   case Type::Kind::ClassRef:
     return this->lowering.builder.getPtrTy();
+  case Type::Kind::Handle:
+    return this->lowering.builder.getPtrTy();
   case Type::Kind::Error:
   case Type::Kind::Param:
     break;

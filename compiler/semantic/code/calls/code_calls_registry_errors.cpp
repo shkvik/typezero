@@ -128,6 +128,12 @@ std::string ErrorTextClassFound::notFound(llvm::StringRef name) {
   return (llvm::Twine("cannot find class '") + name + "'").str();
 }
 
+std::string ErrorTextClassFound::handle(llvm::StringRef name) {
+  return (llvm::Twine("'") + name +
+          "' is a handle from C ('declare class'): only functions in C give it out")
+      .str();
+}
+
 std::string ErrorTextNewArray::oneArg() {
   return "'Array' takes one type argument";
 }

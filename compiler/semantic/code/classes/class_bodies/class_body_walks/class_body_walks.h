@@ -3,6 +3,7 @@
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/code/classes/class_facts/class_facts.h"
 #include "compiler/semantic/code/classes/code_classes_registry_errors.h"
+#include "compiler/semantic/code/classes/dispose_rules/dispose_rules.h"
 #include "compiler/semantic/semantic_state/semantic_state.h"
 #include <string>
 #include <vector>
@@ -115,6 +116,7 @@ private:
 
   ClassFacts &facts;
   SemanticState &state;
+  DisposeRules disposeRules;
 };
 
 }

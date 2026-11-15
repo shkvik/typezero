@@ -64,6 +64,7 @@ struct FunctionDecl : Stmt {
   bool lifted() const;
   bool external() const;
   bool intrinsic() const;
+  bool foreign() const;
 
   Union<PlainFunction, ClassMember> role = PlainFunction{};
   ClassMember *member();

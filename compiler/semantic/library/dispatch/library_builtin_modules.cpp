@@ -357,6 +357,19 @@ LibraryBuiltinModules::checkTzCryptoExport(llvm::StringRef name, llvm::StringRef
 }
 
 LibraryBuiltinModules::ResultExportFound
+LibraryBuiltinModules::checkTzStringExport(llvm::StringRef name, llvm::StringRef path) const {
+  if (name == Type::cstring()->name()) {
+    return ok(name);
+  }
+  auto message = ErrorTextModuleExport::none(path, name);
+
+  return err(LibraryModulesExportFoundError{
+      .code = LibraryModulesExportFoundErrorCode::NO_EXPORT,
+      .message = message,
+  });
+}
+
+LibraryBuiltinModules::ResultExportFound
 LibraryBuiltinModules::checkModuleExport(NodeModule module, llvm::StringRef name,
                                          llvm::StringRef path) const {
   switch (module) {
@@ -389,6 +402,8 @@ LibraryBuiltinModules::checkModuleExport(NodeModule module, llvm::StringRef name
       return this->checkCryptoExport(name, path);
     case NodeModule::TzCrypto:
       return this->checkTzCryptoExport(name, path);
+    case NodeModule::TzString:
+      return this->checkTzStringExport(name, path);
   }
   llvm_unreachable("unknown node module");
 }

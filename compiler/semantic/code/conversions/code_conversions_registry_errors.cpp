@@ -112,6 +112,14 @@ std::string ErrorTextAssignable::request() {
          "'RequestInit' goes to 'fetch(url, init)'";
 }
 
+std::string ErrorTextAssignable::cstringZero() {
+  return "; a 'cstring' holds no '\\0' inside: C would see only the text before it";
+}
+
+std::string ErrorTextAssignable::cstringText() {
+  return "; make one with 'text.toCString()', which gives undefined when the text holds '\\0'";
+}
+
 std::string ErrorTextAssignable::never() {
   return "; nothing fits 'never': if it comes from a type argument left out, write it, "
          "e.g. 'new ReadableStream<int, MyError>(...)' for a stream that fails with "

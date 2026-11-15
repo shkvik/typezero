@@ -2068,6 +2068,8 @@ const Type *LibraryValuesRegistry::resultType(StringResult result) const {
       return Type::string();
     case StringResult::STRINGS:
       return Type::array(Type::string());
+    case StringResult::C_STRING_OR_UNDEFINED:
+      return Type::optional(Type::cstring());
   }
 
   return Type::error();

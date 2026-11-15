@@ -1,0 +1,57 @@
+const saved: Holder[] = []
+
+class Holder {
+  public readonly id: int
+
+  public constructor(id: int) {
+    this.id = id
+  }
+
+  // expect-error: 'this' cannot leave '[Symbol.dispose]'
+  public [Symbol.dispose](): void {
+    saved.push(this)
+  }
+}
+
+class Child extends Holder {
+  public constructor() {
+    super(2)
+  }
+
+  // expect-error: call 'super[Symbol.dispose]()' in it, or what 'Holder' holds leaks
+  public [Symbol.dispose](): void {
+    console.log("child")
+  }
+}
+
+class Wrong {
+  // expect-error: '[Symbol.dispose]' is an instance method with no parameters that gives nothing
+  public [Symbol.dispose](value: int): int {
+    return value
+  }
+}
+
+class Plain {
+  public readonly id: int
+
+  public constructor() {
+    this.id = 1
+  }
+}
+
+function leak() {
+  // expect-error: 'held' of 'using' cannot outlive its block
+  using held = new Holder(1)
+  return held
+}
+
+function plain() {
+  // expect-error: 'using' takes an object whose class has '[Symbol.dispose]'; 'Plain' has none
+  using value = new Plain()
+  console.log(value.id)
+}
+
+const holder = new Holder(3)
+// expect-error: tz calls '[Symbol.dispose]' itself when the last reference to the object is gone
+holder[Symbol.dispose]()
+console.log(saved.length)

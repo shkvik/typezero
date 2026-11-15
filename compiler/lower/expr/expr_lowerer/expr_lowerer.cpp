@@ -33,6 +33,7 @@
 #include "compiler/lower/types/unknown_lowerer/unknown_lowerer.h"
 #include "compiler/lower/values/array_lowerer/array_lowerer.h"
 #include "compiler/lower/values/array_method_lowerer/array_method_lowerer.h"
+#include "compiler/lower/values/cstring_lowerer/cstring_lowerer.h"
 #include "compiler/lower/values/number_lowerer/number_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "compiler/semantic/semantic_types.h"
@@ -50,7 +51,7 @@ ExprLowerer::ExprLowerer(Lowering &owner)
 
 bool ExprLowerer::isReference(const Type *type) {
   return type->isObject() || type->isIterator() || type->isJson() || type->isDict() ||
-         type->isPromise() || type->isUnknown() || type->isClassRef() ||
+         type->isPromise() || type->isUnknown() || type->isClassRef() || type->isHandle() ||
          (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
 }
 
@@ -211,6 +212,11 @@ llvm::Value *ExprLowerer::emitExprKind(Expr *expr) {
     }
     if (c->adaptsResult) {
       return this->lowering.tzModulesLowerer().emitResultAdapter(c);
+    }
+    bool isCStringLiteral =
+        c->type->nonOptional()->isCString() && c->operand->type->isStringLiteral();
+    if (isCStringLiteral) {
+      return this->lowering.cstringLowerer().emitLiteral(c->operand->type->literalText());
     }
     if (c->type->isFunction() && c->operand->type->isFunction()) {
       return this->lowering.closureLowerer().emitFunctionAdapter(c);

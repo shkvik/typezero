@@ -1,6 +1,7 @@
 #include "runtime/core/array/array.h"
 #include "runtime/core/alloc/alloc.h"
 #include "runtime/core/closure/closure.h"
+#include "runtime/core/string/cstring.h"
 #include "runtime/core/error/error.h"
 #include "runtime/core/group/group.h"
 #include "runtime/core/output/output.h"
@@ -713,7 +714,10 @@ void tz_buf_value(TzBuf *out, const TzType *type, const void *value, int in_join
     break;
   case TZ_T_OBJECT: {
     const TzInstance *object = *(const TzInstance *const *)value;
-    if (object && (object->layout->flags & TZ_LAYOUT_REGEX)) {
+    if (tz_is_cstring(object)) {
+      const TzCString *text = (const TzCString *)object;
+      tz_buf_utf8(out, text->text, (size_t)text->length);
+    } else if (object && (object->layout->flags & TZ_LAYOUT_REGEX)) {
       tz_buf_regex(out, (const TzRegex *)object);
     } else if (object && (object->layout->flags & TZ_LAYOUT_DATE)) {
       TzStr text;
@@ -721,6 +725,13 @@ void tz_buf_value(TzBuf *out, const TzType *type, const void *value, int in_join
       tz_buf_str(out, text);
       tz_str_release_value(text);
     }
+    break;
+  }
+  case TZ_T_HANDLE: {
+    const TzHandleType *handle = (const TzHandleType *)type;
+    tz_buf_push(out, '[');
+    tz_buf_utf8(out, handle->name, handle->name_length);
+    tz_buf_push(out, ']');
     break;
   }
   case TZ_T_OPTIONAL:

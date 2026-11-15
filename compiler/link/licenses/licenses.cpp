@@ -16,6 +16,7 @@ namespace {
 
 constexpr llvm::StringLiteral kSection = ".tzlic";
 constexpr llvm::StringLiteral kHeader = "tz-licenses\n";
+constexpr llvm::StringLiteral kNativeMark = "@native\t";
 
 struct Project {
   llvm::StringLiteral id;
@@ -97,6 +98,10 @@ void Licenses::addLicenseManifest(llvm::Module &module, const Embedded &embedded
   if (embedded.nghttp2) {
     text += "nghttp2\n";
   }
+  for (const NativeLicense &native : embedded.natives) {
+    text += kNativeMark.str() + native.name + "\t" + native.license + "\t" +
+            std::to_string(native.text.size()) + "\n" + native.text + "\n";
+  }
   llvm::Constant *data = llvm::ConstantDataArray::getString(module.getContext(), text);
   auto *manifest = new llvm::GlobalVariable(module, data->getType(), true,
                                             llvm::GlobalValue::PrivateLinkage, data, "tz.licenses");
@@ -134,30 +139,17 @@ int Licenses::printLicenses(llvm::StringRef exe, llvm::StringRef licensesDir) {
     llvm::errs() << "tz: '" << exe << "' was not built by tz\n";
     return 1;
   }
-  llvm::SmallVector<llvm::StringRef, 8> ids;
-  llvm::StringRef(manifest).drop_front(kHeader.size()).split(ids, '\n', -1, false);
+  llvm::StringRef rest = llvm::StringRef(manifest).drop_front(kHeader.size());
   llvm::outs() << llvm::sys::path::filename(exe)
                << " embeds code of these projects; their licenses go along with it.\n";
-  for (llvm::StringRef id : ids) {
-    id = id.trim(llvm::StringRef("\0 \r", 3));
-    for (const Project &p : kProjects) {
-      if (p.id != id) {
-        continue;
-      }
-      llvm::outs() << "\n== " << p.title << " (" << p.license << ")\n\n";
-      llvm::SmallString<256> path(licensesDir);
-      llvm::sys::path::append(path, p.file);
-      llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> text = llvm::MemoryBuffer::getFile(path);
-      if (!text) {
-        llvm::errs() << "tz: the license text is missing: " << path << "\n";
-        return 1;
-      }
-      llvm::StringRef body = (*text)->getBuffer();
-      llvm::outs() << body;
-      if (!body.ends_with("\n")) {
-        llvm::outs() << "\n";
-      }
+  while (!rest.empty()) {
+    auto [line, after] = rest.split('\n');
+    llvm::StringRef id = line.trim(llvm::StringRef("\0 \r", 3));
+    bool isNative = id.starts_with(kNativeMark);
+    if (!isNative && !id.empty() && !Licenses::printKnown(id, licensesDir)) {
+      return 1;
     }
+    rest = isNative ? Licenses::printNative(id, after) : after;
   }
   llvm::outs() << "\nNot embedded: ICU, which dates and Intl load from Windows (icu.dll), and "
                   "the libraries of Windows itself.\n";
@@ -165,4 +157,45 @@ int Licenses::printLicenses(llvm::StringRef exe, llvm::StringRef licensesDir) {
   return 0;
 }
 
+bool Licenses::printKnown(llvm::StringRef id, llvm::StringRef licensesDir) {
+  for (const Project &p : kProjects) {
+    if (p.id != id) {
+      continue;
+    }
+    llvm::outs() << "\n== " << p.title << " (" << p.license << ")\n\n";
+    llvm::SmallString<256> path(licensesDir);
+    llvm::sys::path::append(path, p.file);
+    llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> text = llvm::MemoryBuffer::getFile(path);
+    if (!text) {
+      llvm::errs() << "tz: the license text is missing: " << path << "\n";
+      return false;
+    }
+    llvm::StringRef body = (*text)->getBuffer();
+    llvm::outs() << body;
+    if (!body.ends_with("\n")) {
+      llvm::outs() << "\n";
+    }
+  }
+
+  return true;
+}
+
+llvm::StringRef Licenses::printNative(llvm::StringRef line, llvm::StringRef rest) {
+  llvm::SmallVector<llvm::StringRef, 4> fields;
+  line.drop_front(kNativeMark.size()).split(fields, '\t');
+  size_t size = 0;
+  if (fields.size() != 3 || fields[2].getAsInteger(10, size) || size > rest.size()) {
+    return llvm::StringRef();
+  }
+  llvm::StringRef body = rest.take_front(size);
+  llvm::outs() << "\n== " << fields[0] << ": a C library of the program (" << fields[1] << ")\n\n"
+               << body;
+  if (!body.ends_with("\n")) {
+    llvm::outs() << "\n";
+  }
+  llvm::StringRef after = rest.drop_front(size);
+  after.consume_front("\n");
+
+  return after;
+}
 }

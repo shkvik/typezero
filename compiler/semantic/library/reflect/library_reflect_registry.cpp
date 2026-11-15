@@ -1585,6 +1585,7 @@ bool LibraryReflectRegistry::isPlainAccepting(const Type *arg, const Type *param
     case Type::Kind::Union:
     case Type::Kind::Promise:
     case Type::Kind::Unknown:
+    case Type::Kind::Handle:
       return false;
   }
 

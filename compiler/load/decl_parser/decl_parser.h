@@ -11,8 +11,11 @@ public:
   Stmt *parseTypeAlias();
   Stmt *parseInterface();
   Stmt *parseEnum();
+  Stmt *parseHandleClass();
 
 private:
+  void skipHandleBody();
+
   Parser &parser;
 };
 

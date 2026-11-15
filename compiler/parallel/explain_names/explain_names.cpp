@@ -247,6 +247,8 @@ std::string ExplainNames::locName(const Loc &loc) const {
       return "the metadata";
     case Res::Runtime:
       return "the runtime";
+    case Res::Native:
+      return "the C libraries";
     }
   }
 

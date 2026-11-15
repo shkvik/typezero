@@ -245,6 +245,9 @@ CodeConcatenationRegistry::textProblem(const Expr *expr) const {
   if (type->isVoid()) {
     return CodeConcatenationRegistryConvertibleErrorCode::VOID_VALUE;
   }
+  if (base->isCString()) {
+    return std::nullopt;
+  }
   if (type->holdsFunctions()) {
     return CodeConcatenationRegistryConvertibleErrorCode::FUNCTION_VALUE;
   }

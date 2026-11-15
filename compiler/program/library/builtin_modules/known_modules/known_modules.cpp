@@ -17,6 +17,10 @@ const KnownModuleInfo kModules[] = {
      .module = NodeModule::TzCrypto,
      .isNode = false,
      .typicalName = "randomBytesAsync"},
+    {.path = "tz:string",
+     .module = NodeModule::TzString,
+     .isNode = false,
+     .typicalName = "cstring"},
     {.path = "fs", .module = NodeModule::Fs, .isNode = true, .typicalName = "readFileSync"},
     {.path = "fs/promises",
      .module = NodeModule::FsPromises,
@@ -69,7 +73,7 @@ KnownModules::ResultFind KnownModules::find(llvm::StringRef path) {
   llvm::StringRef bare = path;
   bare.consume_front(kNodePrefix);
   bool known = path.starts_with(kTzPrefix)
-                   ? path == "tz:string"
+                   ? false
                    : BuiltinModulePaths::isBuiltinModule(bare) || path.starts_with("node:sea") ||
                          path == "node:sqlite" || path.starts_with("node:test");
   if (!known) {

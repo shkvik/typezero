@@ -1,0 +1,25 @@
+declare class Memory {}
+
+declare function abs(value: int32): int32
+declare function llabs(value: int): int
+declare function sqrt(value: double): double
+declare function malloc(size: uint64): Memory | undefined
+declare function free(memory: Memory): void
+declare function memset(buffer: Buffer, value: int32, size: uint64): void
+declare function memcpy(to: Buffer, from: int32[], size: uint64): void
+declare function GetCurrentProcessId(): uint32
+
+console.log(abs(-5), llabs(-1234567890123), sqrt(2.25))
+const memory = malloc(16)
+if (memory != undefined) {
+  console.log("allocated", memory)
+  free(memory)
+}
+const filled = Buffer.alloc(4)
+memset(filled, 7, 4)
+console.log(filled)
+const numbers: int32[] = [1, 2, 3]
+const bytes = Buffer.alloc(12)
+memcpy(bytes, numbers, 12)
+console.log(bytes)
+console.log(GetCurrentProcessId() > 0)

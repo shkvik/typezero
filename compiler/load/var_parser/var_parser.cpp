@@ -36,6 +36,16 @@ VarDeclStmt *VarParser::parseVarDecl() {
   return decl;
 }
 
+VarDeclStmt *VarParser::parseUsingDecl() {
+  auto *decl = this->parser.ctx.make<VarDeclStmt>(this->parser.tok.loc(), true);
+  decl->isUsing = true;
+  this->parser.cursor().advance();
+  parseDeclarators(decl);
+  this->parser.cursor().expectSemicolon();
+
+  return decl;
+}
+
 void VarParser::parseDeclarators(VarDeclStmt *decl) {
   do {
     if (this->parser.tok.is(Tok::LBracket) || this->parser.tok.is(Tok::LBrace)) {

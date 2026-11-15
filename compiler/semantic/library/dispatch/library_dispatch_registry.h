@@ -61,6 +61,7 @@ private:
   void startReadlineMethod(CallExpr *call, MemberExpr *member);
   void reportReadlineEvents(CallExpr *call, MemberExpr *member);
   void startAsyncIteratorMethod(CallExpr *call, MemberExpr *member);
+  void startCStringMethod(CallExpr *call, MemberExpr *member);
   void startIntrinsic(const IntrinsicDraft &draft, const Type *typeArg);
   void startQuestionCallback(CallExpr *call, MemberExpr *member, Expr *query);
   void rememberLibraryFunction(FunctionDecl *functionDecl, bool hasIntrinsics);

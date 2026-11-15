@@ -67,6 +67,11 @@ const GlobalMemberInfo kGlobalMembers[] = {
         .member = GlobalMember::SYMBOL_ASYNC_ITERATOR,
     },
     {
+        .owner = GlobalName::SYMBOL,
+        .name = "dispose",
+        .member = GlobalMember::SYMBOL_DISPOSE,
+    },
+    {
         .owner = GlobalName::CRYPTO,
         .name = "subtle",
         .member = GlobalMember::CRYPTO_SUBTLE,
@@ -82,7 +87,6 @@ const GlobalMemberInfo kGlobalMembers[] = {
         .member = GlobalMember::PERFORMANCE_NOW,
     },
 };
-
 }
 
 std::optional<GlobalMember> GlobalMemberTable::find(GlobalName owner, llvm::StringRef name) {

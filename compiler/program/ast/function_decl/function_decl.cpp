@@ -34,6 +34,10 @@ bool FunctionDecl::intrinsic() const {
   return this->bodySource == FunctionBodySource::INTRINSIC;
 }
 
+bool FunctionDecl::foreign() const {
+  return this->bodySource == FunctionBodySource::FOREIGN;
+}
+
 ClassMember *FunctionDecl::member() {
   return this->role.as<ClassMember>();
 }

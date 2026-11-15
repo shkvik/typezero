@@ -101,11 +101,15 @@ Stmt *StmtParser::parseStatement(bool topLevel) {
                                           "code; put the code in a file of its own and import it "
                                           "by name");
         }
-        if (this->parser.library_ && this->parser.cursor().peek().is(Tok::KwFunction)) {
+        if (this->parser.cursor().peek().is(Tok::KwFunction)) {
           this->parser.cursor().advance();
           return this->parser.functions().parseDeclaredFunction();
         }
         llvm::StringRef what = this->parser.cursor().peek().text;
+        if (!this->parser.library_ && what == "class") {
+          this->parser.cursor().advance();
+          return this->parser.decls().parseHandleClass();
+        }
         if (what == "module" || what == "global" || what == "namespace") {
           return skipDeclaration(loc, "'declare " + what +
                                           "' is not supported: every file is a module of the "
@@ -114,6 +118,10 @@ Stmt *StmtParser::parseStatement(bool topLevel) {
         return skipDeclaration(loc,
                                "'declare' is not supported: the compiler needs the code of "
                                "every declaration; write the declaration itself, or import it");
+      }
+      if (this->parser.tok.text == "using" && this->parser.cursor().peek().is(Tok::Identifier) &&
+          !this->parser.cursor().peek().newlineBefore) {
+        return this->parser.vars().parseUsingDecl();
       }
       if (this->parser.cursor().peek().is(Tok::Colon)) {
         llvm::StringRef label = this->parser.tok.text;

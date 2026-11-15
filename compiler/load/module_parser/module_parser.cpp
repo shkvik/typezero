@@ -174,17 +174,17 @@ Stmt *ModuleParser::parseExport(bool topLevel) {
     return stmt;
   }
   const Token &next = this->parser.cursor().peek();
-  bool declaration = this->parser.tok.is(Tok::KwFunction) || this->parser.tok.is(Tok::KwConst) ||
-                     this->parser.tok.is(Tok::KwLet) || this->parser.tok.is(Tok::KwVar) ||
-                     this->parser.tok.is(Tok::KwEnum) ||
-                     this->parser.functions().asyncFunctionAhead() ||
-                     (this->parser.tok.is(Tok::Identifier) &&
-                      (this->parser.tok.text == "type" || this->parser.tok.text == "interface" ||
-                       this->parser.tok.text == "class" ||
-                       (this->parser.tok.text == "abstract" && next.text == "class")) &&
-                      next.is(Tok::Identifier) && !next.newlineBefore) ||
-                     (this->parser.library_ && this->parser.tok.is(Tok::Identifier) &&
-                      this->parser.tok.text == "declare" && next.is(Tok::KwFunction));
+  bool declaration =
+      this->parser.tok.is(Tok::KwFunction) || this->parser.tok.is(Tok::KwConst) ||
+      this->parser.tok.is(Tok::KwLet) || this->parser.tok.is(Tok::KwVar) ||
+      this->parser.tok.is(Tok::KwEnum) || this->parser.functions().asyncFunctionAhead() ||
+      (this->parser.tok.is(Tok::Identifier) &&
+       (this->parser.tok.text == "type" || this->parser.tok.text == "interface" ||
+        this->parser.tok.text == "class" ||
+        (this->parser.tok.text == "abstract" && next.text == "class")) &&
+       next.is(Tok::Identifier) && !next.newlineBefore) ||
+      (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "declare" &&
+       (next.is(Tok::KwFunction) || (!this->parser.library_ && next.text == "class")));
   if (declaration) {
     Stmt *stmt = this->parser.stmts().parseStatement(topLevel);
     if (topLevel) {

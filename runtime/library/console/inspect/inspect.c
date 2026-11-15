@@ -3,6 +3,7 @@
 #include "runtime/core/array/array.h"
 #include "runtime/core/async/async.h"
 #include "runtime/core/closure/closure.h"
+#include "runtime/core/string/cstring.h"
 #include "runtime/core/error/error.h"
 #include "runtime/core/group/group.h"
 #include "runtime/core/map/map.h"
@@ -983,6 +984,13 @@ static void format_entries(Ctx *ctx, TzBuf *out, const TzInstance *object, const
 static void format_object(Ctx *ctx, TzBuf *out, const TzInstance *object, int recurse_times) {
   const TzLayout *layout = object->layout;
   const char *fields = (const char *)object;
+  if (tz_is_cstring(object)) {
+    TzStr text;
+    tz_cstring_to_str(&text, object);
+    format_string(ctx, out, text);
+    tz_str_release_value(text);
+    return;
+  }
   if (layout->flags & TZ_LAYOUT_BOX) {
     const TzBox *box = (const TzBox *)object;
     format_value(ctx, out, box->type, TZ_BOX_VALUE(box), recurse_times);
@@ -1438,6 +1446,13 @@ void tz_print_value(const TzType *type, const void *value) {
   if (type->kind == TZ_T_STRING) {
     const TzStr *s = (const TzStr *)value;
     tz_print_string(s->obj, s->meta);
+    return;
+  }
+  if (type->kind == TZ_T_OBJECT && tz_is_cstring(*(const TzInstance *const *)value)) {
+    TzStr text;
+    tz_cstring_to_str(&text, *(const TzInstance *const *)value);
+    tz_print_string(text.obj, text.meta);
+    tz_str_release_value(text);
     return;
   }
   if (type->kind == TZ_T_JSON) {

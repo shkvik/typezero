@@ -117,6 +117,7 @@ class TypesRelations {
 public:
   explicit TypesRelations(TypeStorage &owner);
 
+  bool isCStringLiteral(const Type *type) const;
   bool isObjectReference(const Type *type) const;
   bool isHoldingWideInteger(const Type *type);
   bool isExpectingLiteral(const Type *param) const;

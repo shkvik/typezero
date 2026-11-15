@@ -1,6 +1,7 @@
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
 #include "compiler/lower/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/types/union_layout/union_layout.h"
+#include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -52,6 +53,8 @@ uint32_t TypeDescriptors::descriptorKind(const Type *type) {
     return 13;
   case Type::Kind::Unknown:
     return 16;
+  case Type::Kind::Handle:
+    return 24;
   default:
     llvm_unreachable("no runtime descriptor for this type");
   }
@@ -67,6 +70,9 @@ llvm::Constant *TypeDescriptors::typeDescriptor(const Type *type) {
   }
   if (type->isUnion() || type->isLiteral()) {
     return this->lowering.unionLayout().unionDescriptor(type);
+  }
+  if (type->isHandle()) {
+    return this->handleDescriptor(type);
   }
   llvm::Constant *inner = type->isArray() || type->isOptional()
                               ? this->typeDescriptor(type->inner())
@@ -88,4 +94,23 @@ llvm::Constant *TypeDescriptors::typeDescriptor(const Type *type) {
   return global;
 }
 
+llvm::Constant *TypeDescriptors::handleDescriptor(const Type *type) {
+  llvm::Type *ptr = this->lowering.builder.getPtrTy();
+  auto *handleTy = llvm::StructType::get(
+      this->lowering.ctx, {this->lowering.typeDescTy, ptr, this->lowering.builder.getInt32Ty()});
+  auto *null = llvm::ConstantPointerNull::get(this->lowering.builder.getPtrTy());
+  auto *base = llvm::ConstantStruct::get(
+      this->lowering.typeDescTy,
+      {this->lowering.builder.getInt32(TypeDescriptors::descriptorKind(type)),
+       this->lowering.builder.getInt32(8), null});
+  auto *name = this->lowering.stringLowerer().utf8Constant(type->name());
+  auto *length = this->lowering.builder.getInt32(static_cast<uint32_t>(type->name().size()));
+  auto *init = llvm::ConstantStruct::get(handleTy, {base, name, length});
+  auto *global = new llvm::GlobalVariable(*this->lowering.module_, handleTy, true,
+                                          llvm::GlobalValue::PrivateLinkage, init,
+                                          "tz.type.handle." + type->name());
+  this->lowering.typeDescriptors_[type] = global;
+
+  return global;
+}
 }

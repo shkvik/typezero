@@ -17,6 +17,7 @@ namespace tz {
 
 struct ClassDecl;
 struct Interned;
+struct TypeAliasDecl;
 
 class Type {
 public:
@@ -46,6 +47,7 @@ public:
     Promise,
     Unknown,
     ClassRef,
+    Handle,
   };
   enum class DictKind { Record, Map, Set };
 
@@ -131,6 +133,10 @@ public:
     return kind() == Kind::ClassRef;
   }
   const ClassDecl *classRef() const;
+  bool isHandle() const {
+    return kind() == Kind::Handle;
+  }
+  const TypeAliasDecl *handleDecl() const;
   bool isConstructor() const;
   const Type *constructed() const { return isConstructor() ? inner_ : nullptr; }
   bool isRecord() const;
@@ -169,11 +175,14 @@ public:
     FileHandle,
     Readline,
     ReadlinePromises,
+    CString,
     AsyncIterator,
   };
   Runtime runtimeKind() const;
   bool isRuntimeObject() const;
   bool isAsyncIterator() const;
+  bool isCString() const;
+  static const Type *cstring();
   enum class Crypto { None, Hash, Hmac, Cipheriv, Decipheriv, KeyObject, Sign, Verify, Ecdh, X509 };
   Crypto crypto() const;
   bool isCrypto() const;
@@ -298,6 +307,7 @@ public:
   static const Type *never();
   static const Type *unknown();
   static const Type *classRef(const ClassDecl *cls, llvm::StringRef name);
+  static const Type *handle(const TypeAliasDecl *decl, llvm::StringRef name);
   static const Type *constructorOf(const Type *instance);
   static const Type *result(const Type *ok, const Type *err);
   static Type *classType(llvm::StringRef name, const ClassDecl *decl);
@@ -547,10 +557,15 @@ private:
     const ClassDecl *refClass = nullptr;
   };
 
+  struct HandleData {
+    static constexpr Kind kind = Kind::Handle;
+    const TypeAliasDecl *decl = nullptr;
+  };
+
   using Data = Union<ErrorData, VoidData, UndefinedData, BoolData, IntData, DoubleData, DecimalData,
                      StringData, OptionalData, ArrayData, FunctionData, ObjectData, ParamData,
                      ResultData, NeverData, IteratorData, JsonData, DictData, LiteralData,
-                     UnionData, PromiseData, UnknownData, ClassRefData>;
+                     UnionData, PromiseData, UnknownData, ClassRefData, HandleData>;
 
   static Data dataFor(Kind kind);
   const ObjectForm *objectForm() const;

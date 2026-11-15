@@ -113,6 +113,7 @@ const Type *FunctionInstanceRules::nodeRepresentation(const Type *type,
     case Type::Kind::Promise:
     case Type::Kind::Unknown:
     case Type::Kind::ClassRef:
+    case Type::Kind::Handle:
       return type;
   }
 

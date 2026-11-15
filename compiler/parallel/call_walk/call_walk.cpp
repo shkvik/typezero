@@ -266,6 +266,13 @@ void CallWalk::call(const CallExpr *c, const Use &use) {
     this->analysis.libraryEffects.libraryCall(c, lib, use);
     return;
   }
+  if (c->func() && c->func()->decl && c->func()->decl->foreign()) {
+    for (const Expr *arg : c->args) {
+      this->analysis.exprWalk.expr(arg);
+    }
+    this->analysis.resource(Res::Native, true, c->loc());
+    return;
+  }
   auto *m = dyn_cast<MemberExpr>(c->callee);
   bool superCtor = c->superCall() && !m;
   std::optional<Ref> self;

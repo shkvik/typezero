@@ -10,6 +10,7 @@ struct VarDeclStmt : Stmt {
   static bool classof(const Stmt *s) { return s->kind() == Kind::VarDecl; }
 
   bool isConst;
+  bool isUsing = false;
   std::vector<VarDeclarator> decls;
 };
 

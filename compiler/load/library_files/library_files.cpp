@@ -30,6 +30,7 @@ const KnownFile kKnownFiles[] = {
     {"websocket.tz", "websocket.tz", "tz:websocket"},
     {"intrinsics.tz", "intrinsics.tz", "tz:intrinsics"},
     {"sync.tz", "sync.tz", "tz:sync"},
+    {"ffi.tz", "ffi.tz", "tz:ffi"},
     {"async_hooks.tz", "async_hooks.tz", "node:async_hooks"},
     {"net.tz", "net.tz", "node:net"},
     {"dgram.tz", "dgram.tz", "node:dgram"},
@@ -47,7 +48,6 @@ const KnownFile kKnownFiles[] = {
     {"webcrypto.tz", "webcrypto.tz", "tz:webcrypto"},
     {"locale.tz", "locale.tz", "tz:locale"},
 };
-
 }
 
 std::optional<LibraryFile> LibraryFiles::find(llvm::StringRef file) {

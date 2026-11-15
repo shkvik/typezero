@@ -162,6 +162,7 @@ std::optional<SubstituteForm> GenericsSubstitutionRegistry::substituteForm(const
     case Type::Kind::Json:
     case Type::Kind::Literal:
     case Type::Kind::Unknown:
+    case Type::Kind::Handle:
       return std::nullopt;
   }
 

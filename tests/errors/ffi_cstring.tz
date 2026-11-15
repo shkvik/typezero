@@ -1,0 +1,12 @@
+import { cstring } from "tz:string"
+
+declare function strlen(text: cstring): uint64
+
+function measure(text: string) {
+  // expect-error: type 'string' is not assignable to type 'cstring'; make one with 'text.toCString()'
+  return strlen(text)
+}
+
+// expect-error: is not assignable to type 'cstring'; a 'cstring' holds no '\0' inside
+strlen("a\0b")
+console.log(measure("x"))

@@ -432,6 +432,7 @@ llvm::DIType *DebugTypes::make(const Type *type) {
   case Type::Kind::Promise:
   case Type::Kind::Unknown:
   case Type::Kind::ClassRef:
+  case Type::Kind::Handle:
     break;
   }
 

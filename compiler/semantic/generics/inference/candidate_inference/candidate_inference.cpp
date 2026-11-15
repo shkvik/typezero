@@ -244,6 +244,7 @@ std::vector<InferStep> CandidateInference::inferInside(const Type *pattern, cons
     case Type::Kind::Json:
     case Type::Kind::Literal:
     case Type::Kind::Unknown:
+    case Type::Kind::Handle:
       return {};
   }
 

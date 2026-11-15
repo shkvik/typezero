@@ -146,6 +146,10 @@ void TypesLiterals::joinBranches(const JoinBranches &join,
 }
 
 const Type *TypesLiterals::stringLiteralFor(const Type *expected, const std::u16string &text) {
+  bool isCStringExpected = expected != nullptr && expected->nonOptional()->isCString();
+  if (isCStringExpected) {
+    return Type::stringLiteral(text);
+  }
   const Type *plain = this->literalExpectation(expected);
   bool isAtomExpected = this->literalPart(plain, UnionSlot::Atom) != nullptr;
   if (isAtomExpected || this->hasPatternMember(plain)) {

@@ -72,6 +72,8 @@ enum class Builtin {
   StrPadStart,
   StrPadEnd,
   StrToUpperCase,
+  StrToCString,
+  CStrToString,
   StrToLowerCase,
   StrReplace,
   StrReplaceAll,

@@ -8,6 +8,7 @@
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::dyn_cast;
+using llvm::dyn_cast_or_null;
 
 namespace tz {
 
@@ -459,6 +460,15 @@ NamedCalls::ResultNoTypeArgsOk NamedCalls::checkNoNewTypeArgs(const NewExpr *exp
 }
 
 NamedCalls::ResultClassIsFound NamedCalls::checkClassFound(const NewExpr *expr) const {
+  auto *declared = dyn_cast_or_null<TypeAliasDecl>(this->state.findTypeDeclaration(expr->name));
+  if (declared != nullptr && declared->isHandle) {
+    auto message = ErrorTextClassFound::handle(expr->name);
+
+    return err(CodeCallsRegistryClassFoundError{
+        .code = CodeCallsRegistryClassFoundErrorCode::HANDLE_FROM_C,
+        .message = message,
+    });
+  }
   auto global = GlobalNameTable::find(expr->name);
   if (global != GlobalName::ARRAY) {
     auto message = ErrorTextClassFound::notFound(expr->name);

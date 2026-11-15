@@ -32,6 +32,6 @@ enum class FunctionBodySource {
   WRITTEN,
   EXTERNAL,
   INTRINSIC,
+  FOREIGN,
 };
-
 }

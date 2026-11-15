@@ -46,6 +46,41 @@ Stmt *DeclParser::parseTypeAlias() {
   return alias;
 }
 
+Stmt *DeclParser::parseHandleClass() {
+  this->parser.cursor().advance();
+  llvm::SMLoc loc = this->parser.tok.loc();
+  llvm::StringRef name = this->parser.tok.text;
+  if (!this->parser.cursor().expect(Tok::Identifier, "after 'declare class'")) {
+    this->parser.cursor().synchronize();
+    return this->parser.ctx.make<EmptyStmt>(loc);
+  }
+  auto *alias = this->parser.ctx.make<TypeAliasDecl>(loc, name, TypeRef());
+  alias->isHandle = true;
+  bool hasBody = this->parser.tok.is(Tok::LBrace) && this->parser.cursor().peek().is(Tok::RBrace);
+  if (!hasBody) {
+    this->parser.cursor().report(this->parser.tok.loc(),
+                                 "a declared class is a handle from C: it is written "
+                                 "'declare class " +
+                                     name + " {}', with no type parameters, base or members");
+    this->skipHandleBody();
+    return alias;
+  }
+  this->parser.cursor().advance();
+  this->parser.cursor().advance();
+
+  return alias;
+}
+
+void DeclParser::skipHandleBody() {
+  while (!this->parser.tok.is(Tok::LBrace) && !this->parser.tok.is(Tok::Eof)) {
+    this->parser.cursor().advance();
+  }
+  if (this->parser.tok.is(Tok::LBrace)) {
+    this->parser.cursor().advance();
+    this->parser.cursor().skipToClosingBrace();
+  }
+}
+
 Stmt *DeclParser::parseInterface() {
   this->parser.cursor().advance();
   llvm::SMLoc loc = this->parser.tok.loc();

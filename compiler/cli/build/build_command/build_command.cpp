@@ -9,6 +9,7 @@
 #include "compiler/lower/library/lowerer_registry/lowerer_registry.h"
 #include "compiler/lower/lower_pass/lower_pass.h"
 #include "compiler/memory/memory_pass/memory_pass.h"
+#include "compiler/native/native_pass/native_pass.h"
 #include "compiler/optimize/optimize_pass/optimize_pass.h"
 #include "compiler/optimize/target/target.h"
 #include "compiler/packages/project_packages/project_packages.h"
@@ -16,6 +17,7 @@
 #include "compiler/parallel/parallel_pass/parallel_pass.h"
 #include "compiler/pipeline/build_options/build_options.h"
 #include "compiler/pipeline/check_program/check_program.h"
+#include "compiler/program/ast/ast.h"
 #include "compiler/program/program/program.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
@@ -26,7 +28,8 @@ namespace tz {
 BuildCommand::BuildCommand(const RuntimeFiles &runtime)
     : runtime(runtime) {}
 
-int BuildCommand::run(const Args &args, llvm::StringRef output) const {
+int BuildCommand::run(const Args &args, llvm::StringRef output,
+                      std::vector<std::string> *dllDirs) const {
   ProjectPackages packages;
   if (!packages.prepare(args.input)) {
     return kExitError;
@@ -58,6 +61,15 @@ int BuildCommand::run(const Args &args, llvm::StringRef output) const {
     return kExitError;
   }
   printer.print(built.value().warnings);
+  if (dllDirs != nullptr) {
+    for (const std::string &dll : built.value().dlls) {
+      dllDirs->push_back(llvm::sys::path::parent_path(dll).str());
+    }
+    return 0;
+  }
+  if (!this->copyDlls(built.value().dlls, output)) {
+    return kExitError;
+  }
 
   return 0;
 }
@@ -106,6 +118,13 @@ BuildCommand::ResultBuiltProgram BuildCommand::buildProgram(Program &program,
   }
   llvm::Module &module = *lowered.value().module;
 
+  auto foreign = this->foreignFunctions(program);
+  NativePass native(target.value(), options);
+  auto natives = native.run(module, foreign);
+  if (natives.isErr()) {
+    return err(natives.error());
+  }
+
   OptimizePass optimize(target.value(), options);
   std::vector<Diagnostic> optimizeErrors = optimize.run(module, lowered.value().parallel);
   if (!optimizeErrors.empty()) {
@@ -122,7 +141,7 @@ BuildCommand::ResultBuiltProgram BuildCommand::buildProgram(Program &program,
   }
 
   LicensesPass licenses;
-  CryptoUse crypto = licenses.run(module);
+  CryptoUse crypto = licenses.run(module, natives.value().licenses);
 
   EmitPass emit(target.value());
   auto object = emit.run(module);
@@ -131,14 +150,43 @@ BuildCommand::ResultBuiltProgram BuildCommand::buildProgram(Program &program,
   }
 
   LinkPass link(target.value(), options);
-  auto linked = link.run(object.value(), crypto, lowered.value().parallel);
+  auto linked =
+      link.run(object.value(), crypto, lowered.value().parallel, natives.value(), foreign);
   if (linked.isErr()) {
     return err(linked.error());
   }
 
   return ok(BuiltProgram{
       .warnings = linked.value(),
+      .dlls = natives.value().dlls,
   });
 }
 
+std::vector<ForeignFunction> BuildCommand::foreignFunctions(const Program &program) const {
+  auto foreign = std::vector<ForeignFunction>();
+  for (const Stmt *item : program.file.items) {
+    const auto *functionDecl = llvm::dyn_cast<FunctionDecl>(item);
+    if (functionDecl != nullptr && functionDecl->foreign()) {
+      foreign.push_back({.name = functionDecl->name.str(), .loc = functionDecl->loc()});
+    }
+  }
+
+  return foreign;
+}
+
+bool BuildCommand::copyDlls(llvm::ArrayRef<std::string> dlls, llvm::StringRef output) const {
+  for (const std::string &dll : dlls) {
+    llvm::SmallString<256> target(llvm::sys::path::parent_path(output));
+    llvm::sys::path::append(target, llvm::sys::path::filename(dll));
+    bool isSame = llvm::sys::fs::exists(target) && llvm::sys::fs::equivalent(dll, target);
+    std::error_code ec = isSame ? std::error_code() : llvm::sys::fs::copy_file(dll, target);
+    if (ec) {
+      llvm::errs() << "tz: cannot copy '" << dll << "' next to the program: " << ec.message()
+                   << "\n";
+      return false;
+    }
+  }
+
+  return true;
+}
 }

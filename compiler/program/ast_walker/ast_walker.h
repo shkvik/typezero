@@ -33,6 +33,7 @@ public:
   static std::vector<CallExpr *> tailCallsOf(Expr *value);
   static std::vector<Stmt *> tailStatementsOf(Stmt *body);
   static std::vector<CallExpr *> tailCallsIn(FunctionDecl *fn);
+  static std::vector<Expr *> returnValuesIn(Stmt *body);
 
 private:
   static void namesFrom(NamePart root, llvm::StringSet<> &names);
@@ -45,7 +46,6 @@ private:
   static void addClassChildren(const ClassDecl *cls, bool intoFunctions,
                                std::vector<AstPart> &children);
   static void addDecoratorChildren(const FunctionDecl *fn, std::vector<AstPart> &children);
-  static std::vector<Expr *> returnValuesIn(Stmt *body);
   static std::vector<Stmt *> returnScopeChildren(Stmt *stmt);
   static bool isTailAt(const BlockStmt *block, size_t i, bool tail);
   static bool isPlainCallStatement(const Stmt *stmt);

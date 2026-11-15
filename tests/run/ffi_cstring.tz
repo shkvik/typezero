@@ -1,0 +1,20 @@
+import { cstring } from "tz:string"
+
+declare function strlen(text: cstring): uint64
+declare function strstr(text: cstring, part: cstring): cstring | undefined
+declare function _strdup(text: cstring): cstring
+
+console.log(strlen("hello"))
+const name = "привет, мир"
+const converted = name.toCString()
+if (converted != undefined) {
+  console.log(strlen(converted), converted)
+  console.log(converted.toString() == name)
+  const copy = _strdup(converted)
+  console.log(copy == converted, `copy: ${copy}`)
+}
+const found = strstr("needle in haystack", "hay")
+console.log(found)
+const missing = strstr("needle", "hay")
+console.log(missing == undefined)
+console.log("a\0b".toCString() == undefined)

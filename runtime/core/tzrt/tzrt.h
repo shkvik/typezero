@@ -52,6 +52,7 @@ enum {
   TZ_T_UINT16 = 21,
   TZ_T_UINT32 = 22,
   TZ_T_UINT64 = 23,
+  TZ_T_HANDLE = 24,
 };
 
 enum {
@@ -178,6 +179,12 @@ typedef struct TzType {
   const struct TzType *inner;
 } TzType;
 
+typedef struct TzHandleType {
+  TzType base;
+  const char *name;
+  uint32_t name_length;
+} TzHandleType;
+
 typedef struct TzResultType {
   TzType base;
   const TzType *error;
@@ -197,7 +204,7 @@ typedef struct TzUnionType {
 
 static inline int tz_optional_has(const TzType *type, const void *value) {
   if (type->inner->kind == TZ_T_OBJECT || type->inner->kind == TZ_T_JSON ||
-      type->inner->kind == TZ_T_UNKNOWN) {
+      type->inner->kind == TZ_T_UNKNOWN || type->inner->kind == TZ_T_HANDLE) {
     return *(void *const *)value != NULL;
   }
   if (type->inner->kind == TZ_T_UNION || type->inner->kind == TZ_T_ATOM) {
@@ -224,6 +231,7 @@ enum {
   TZ_LAYOUT_MATCH = 64,
   TZ_LAYOUT_GROUPS = 128,
   TZ_LAYOUT_REGEX_ITERATOR = 256,
+  TZ_LAYOUT_CSTRING = 512,
   TZ_LAYOUT_DATE = 1024,
   TZ_LAYOUT_DATE_FORMAT = 2048,
   TZ_LAYOUT_DICT = 4096,

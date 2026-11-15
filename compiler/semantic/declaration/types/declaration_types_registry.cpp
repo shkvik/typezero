@@ -333,6 +333,9 @@ void DeclarationTypesRegistry::openAlias(TypeAliasDecl *alias,
 }
 
 void DeclarationTypesRegistry::pushAliasBody(TypeAliasDecl *alias) {
+  if (alias->isHandle) {
+    return;
+  }
   TypeRefKind kind = alias->type.kind();
   if (kind == TypeRefKind::OBJECT_REF && !alias->bases.empty()) {
     return this->state.walk.tasks.pushTask(StartInterfaceFields{.alias = alias});
@@ -416,6 +419,9 @@ TypeAliasDecl *DeclarationTypesRegistry::plainAliasNamed(const TypeRef &part) co
 }
 
 const Type *DeclarationTypesRegistry::aliasBodyType(TypeAliasDecl *alias) {
+  if (alias->isHandle) {
+    return Type::handle(alias, alias->name);
+  }
   TypeRefKind kind = alias->type.kind();
   if (kind == TypeRefKind::OBJECT_REF) {
     return this->objectAliasType(alias);

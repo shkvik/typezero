@@ -92,6 +92,7 @@ void ConsoleLowerer::emitConsoleLog(CallExpr *call) {
     case Type::Kind::Promise:
     case Type::Kind::Unknown:
     case Type::Kind::ClassRef:
+    case Type::Kind::Handle:
       this->lowering.builder.CreateCall(
           this->lowering.rt_.printValue,
           {this->lowering.typeDescriptors().typeDescriptor(type),

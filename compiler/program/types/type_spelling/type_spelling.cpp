@@ -219,6 +219,8 @@ const char *TypeSpelling::typeOfName(const Type *type) {
     return "";
   case Type::Kind::ClassRef:
     return "class";
+  case Type::Kind::Handle:
+    return "object";
   default:
     return "undefined";
   }

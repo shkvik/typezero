@@ -55,13 +55,20 @@ Stmt *FunctionParser::parseFunctionDecl(bool isAsync) {
 
 Stmt *FunctionParser::parseDeclaredFunction() {
   FunctionDecl *fn = parseFunction(false, false);
-  if (fn->body) {
+  if (fn->body && this->parser.library_) {
     this->parser.cursor().report(fn->loc(),
                                  "a declared function has no body: the runtime of tz has "
                                  "its code");
     return fn;
   }
-  fn->bodySource = FunctionBodySource::EXTERNAL;
+  if (fn->body) {
+    this->parser.cursor().report(fn->loc(),
+                                 "a declared function has no body: its code is in C, in a "
+                                 "library of 'native' in package.json");
+    return fn;
+  }
+  fn->bodySource =
+      this->parser.library_ ? FunctionBodySource::EXTERNAL : FunctionBodySource::FOREIGN;
   fn->body = this->parser.ctx.make<BlockStmt>(fn->loc());
 
   return fn;

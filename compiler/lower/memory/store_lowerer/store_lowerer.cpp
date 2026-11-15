@@ -2,6 +2,7 @@
 #include "compiler/lower/function_frame/function_frame.h"
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
 #include "compiler/lower/functions/env_lowerer/env_lowerer.h"
+#include "compiler/lower/layouts/object_layouts/object_layouts.h"
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
 #include "compiler/lower/library/process/process_lowerer/process_lowerer.h"
 #include "compiler/lower/memory/group_lowerer/group_lowerer.h"
@@ -348,6 +349,7 @@ void StoreLowerer::emitMemberDrop(const Type *type, Lowering::ObjectLayout &layo
   if (this->lowering.isWeakTarget(type)) {
     this->forgetWeakRefs(object);
   }
+  this->lowering.objectLayouts().emitDispose(type, object, false);
   llvm::ArrayRef<Field> fields = type->fields();
   for (unsigned i = 0; i < fields.size(); ++i) {
     const Type *fieldType = fields[i].type;

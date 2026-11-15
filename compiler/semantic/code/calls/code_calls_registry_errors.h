@@ -111,6 +111,7 @@ struct CodeCallsRegistrySupportedNewError {
 
 enum class CodeCallsRegistryClassFoundErrorCode {
   CLASS_NOT_FOUND,
+  HANDLE_FROM_C,
 };
 
 struct CodeCallsRegistryClassFoundError {
@@ -223,6 +224,7 @@ public:
 class ErrorTextClassFound {
 public:
   static std::string notFound(llvm::StringRef name);
+  static std::string handle(llvm::StringRef name);
 };
 
 class ErrorTextNewArray {

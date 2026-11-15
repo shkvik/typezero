@@ -14,7 +14,8 @@ constexpr unsigned kNoSequence = ~0u;
 }
 
 VariableDeclarations::VariableDeclarations(SemanticState &owner)
-    : state(owner) {}
+    : state(owner),
+      disposeRules(owner) {}
 
 void VariableDeclarations::walkVarDecl(const WalkVarDecl &task) {
   auto &position = this->state.walk.block;
@@ -415,6 +416,10 @@ void VariableDeclarations::declareValueVariable(DeclaratorDraft draft) {
   }
   const Type *type = draft.type;
   bool isConst = draft.decl->isConst;
+  if (draft.decl->isUsing) {
+    auto following = this->followingStatements(draft.block, draft.blockIndex);
+    this->disposeRules.walkUsing(draft.decl, type, following);
+  }
   this->state.walk.tasks.pushTask(RememberValueDeclarator{.draft = std::move(draft)});
 
   return this->state.walk.tasks.pushTask(DeclareVariableSlot{

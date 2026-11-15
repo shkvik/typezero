@@ -58,6 +58,7 @@
 #include "compiler/lower/library/result/result_combine_lowerer/result_combine_lowerer.h"
 #include "compiler/lower/library/result/result_lowerer/result_lowerer.h"
 #include "compiler/lower/library/stream/stream_lowerer/stream_lowerer.h"
+#include "compiler/lower/library/tz_modules/foreign_lowerer/foreign_lowerer.h"
 #include "compiler/lower/library/tz_modules/library_call_lowerer/library_call_lowerer.h"
 #include "compiler/lower/library/tz_modules/tz_modules_lowerer/tz_modules_lowerer.h"
 #include "compiler/lower/library/weakref/weak_ref_lowerer/weak_ref_lowerer.h"
@@ -86,6 +87,7 @@
 #include "compiler/lower/values/array_lowerer/array_lowerer.h"
 #include "compiler/lower/values/array_method_lowerer/array_method_lowerer.h"
 #include "compiler/lower/values/callback_method_lowerer/callback_method_lowerer.h"
+#include "compiler/lower/values/cstring_lowerer/cstring_lowerer.h"
 #include "compiler/lower/values/number_lowerer/number_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "compiler/lower/values/string_method_lowerer/string_method_lowerer.h"
@@ -200,6 +202,8 @@ Lowering::Lowering(llvm::LLVMContext &ctx, llvm::StringRef moduleName,
   this->debugInfoPart = std::make_unique<DebugInfo>(*this);
   this->streamLowererPart = std::make_unique<StreamLowerer>(*this);
   this->tzModulesLowererPart = std::make_unique<TzModulesLowerer>(*this);
+  this->foreignLowererPart = std::make_unique<ForeignLowerer>(*this);
+  this->cstringLowererPart = std::make_unique<CStringLowerer>(*this);
   module_->setDataLayout(layout);
   llvm::Type *ptr = this->builder.getPtrTy();
   llvm::Type *i32 = this->builder.getInt32Ty();

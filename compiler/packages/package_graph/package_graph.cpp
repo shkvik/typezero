@@ -220,6 +220,7 @@ bool PackageGraph::preparePackages(const Manifest &manifest, const PrepareOption
   project.manifestPath = manifest.path;
   project.main = manifest.main;
   project.exports = manifest.exports;
+  project.natives = manifest.natives;
   graph.packages.push_back(std::move(project));
   manifests.push_back(&manifest);
 
@@ -240,6 +241,7 @@ bool PackageGraph::preparePackages(const Manifest &manifest, const PrepareOption
     p.manifestPath = local.path;
     p.main = local.main;
     p.exports = local.exports;
+    p.natives = local.natives;
     index[id] = static_cast<unsigned>(graph.packages.size());
     graph.packages.push_back(std::move(p));
     manifests.push_back(&local);
@@ -280,6 +282,7 @@ bool PackageGraph::preparePackages(const Manifest &manifest, const PrepareOption
       p.manifestPath = m.path;
       p.main = m.main;
       p.exports = m.exports;
+      p.natives = m.natives;
       manifests.push_back(&fetched.back());
     }
     index[id] = static_cast<unsigned>(graph.packages.size());

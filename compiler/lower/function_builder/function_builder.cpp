@@ -7,6 +7,7 @@
 #include "compiler/lower/functions/closure_lowerer/closure_lowerer.h"
 #include "compiler/lower/functions/tail_call_lowerer/tail_call_lowerer.h"
 #include "compiler/lower/iterators/generator_lowerer/generator_lowerer.h"
+#include "compiler/lower/library/tz_modules/foreign_lowerer/foreign_lowerer.h"
 #include "compiler/lower/library/tz_modules/tz_modules_lowerer/tz_modules_lowerer.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/memory/store_lowerer/store_lowerer.h"
@@ -73,6 +74,10 @@ void FunctionBuilder::beginFunction(llvm::Function *function, FunctionDecl *fn) 
 }
 
 void FunctionBuilder::emitFunction(FunctionDecl *fn) {
+  if (fn->foreign()) {
+    this->lowering.foreignLowerer().emitForeign(fn);
+    return;
+  }
   if (fn->external()) {
     this->lowering.tzModulesLowerer().emitExternal(fn);
     return;

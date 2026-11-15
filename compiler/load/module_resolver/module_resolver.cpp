@@ -79,6 +79,9 @@ Module *ModuleResolver::resolve(Module *from, llvm::StringRef spec, llvm::SMLoc 
   if (spec == "tz:sync") {
     return this->loader.library().libraryModule("sync.tz", "tz:sync", loc);
   }
+  if (spec == "tz:ffi") {
+    return this->loader.library().libraryModule("ffi.tz", "tz:ffi", loc);
+  }
   if (spec == "node:async_hooks" || spec == "async_hooks") {
     return this->loader.library().libraryModule("async_hooks.tz", "node:async_hooks", loc);
   }

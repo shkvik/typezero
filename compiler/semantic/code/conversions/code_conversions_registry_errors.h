@@ -77,6 +77,8 @@ public:
   static std::string stream();
   static std::string request();
   static std::string never();
+  static std::string cstringZero();
+  static std::string cstringText();
   static std::string extendsBus(llvm::StringRef name);
   static std::string extendsInt(llvm::StringRef name);
   static std::string generic(llvm::StringRef name, llvm::StringRef example);

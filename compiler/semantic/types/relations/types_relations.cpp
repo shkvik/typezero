@@ -21,6 +21,7 @@ namespace tz {
 namespace {
 
 constexpr unsigned kMaxFitsDepth = 8;
+constexpr char16_t kNul = 0;
 constexpr size_t kFitsWayCount = 3;
 constexpr double kMaxWholeNumber = 9007199254740992.0;
 constexpr double kMaxExactInteger = 9007199254740992.0;
@@ -808,6 +809,13 @@ ConversionStep TypesRelations::conversionStep(const Type *from, const Type *to) 
 }
 
 std::optional<ConversionStep> TypesRelations::targetStep(const Type *from, const Type *to) {
+  bool isOpaqueTarget = to->isUnknown() || to->isAnyObject() || to->isJson();
+  if (from->isHandle() && isOpaqueTarget) {
+    return this->stepFails();
+  }
+  if (to->isCString()) {
+    return this->stepDecided(this->isCStringLiteral(from));
+  }
   if (to->isUnknown()) {
     return this->stepDecided(!from->isVoid());
   }
@@ -1369,7 +1377,7 @@ bool TypesRelations::isComparable(const Type *base) const {
   return base->isNumeric() || base->isDecimal() || base->isBool() || base->isString() ||
          base->isArray() || base->isFunction() || base->isObject() || base->isIterator() ||
          base->isJson() || base->isDict() || base->isUnknown() || base->isClassRef() ||
-         base->isLiteral() || isPlainUnion;
+         base->isHandle() || base->isLiteral() || isPlainUnion;
 }
 
 bool TypesRelations::isMatchingTemplate(const std::u16string &text,
@@ -1554,6 +1562,7 @@ TypesRelations::otherParamParts(const Type *type, llvm::SmallPtrSetImpl<const Ty
     case Type::Kind::Literal:
     case Type::Kind::Unknown:
     case Type::Kind::ClassRef:
+    case Type::Kind::Handle:
       return {};
   }
 
@@ -1700,6 +1709,7 @@ std::vector<const Type *> TypesRelations::paramParts(const Type *type) const {
     case Type::Kind::Literal:
     case Type::Kind::Unknown:
     case Type::Kind::ClassRef:
+    case Type::Kind::Handle:
       return {};
   }
 
@@ -1826,6 +1836,10 @@ bool TypesRelations::hasMember(const Type *candidate, llvm::StringRef name) cons
   auto methods = classDecl->findMethodsNamed(name);
 
   return !methods.empty();
+}
+
+bool TypesRelations::isCStringLiteral(const Type *type) const {
+  return type->isStringLiteral() && type->literalText().find(kNul) == std::u16string::npos;
 }
 
 bool TypesRelations::isObjectReference(const Type *type) const {

@@ -12,6 +12,8 @@ public:
   static uint32_t descriptorKind(const Type *type);
 
 private:
+  llvm::Constant *handleDescriptor(const Type *type);
+
   Lowering &lowering;
 };
 

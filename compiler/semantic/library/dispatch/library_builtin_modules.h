@@ -29,6 +29,7 @@ public:
   ResultExportFound checkProcessExport(llvm::StringRef name, llvm::StringRef path) const;
   ResultExportFound checkPromisesExport(llvm::StringRef name, llvm::StringRef path) const;
   ResultExportFound checkTzCryptoExport(llvm::StringRef name, llvm::StringRef path) const;
+  ResultExportFound checkTzStringExport(llvm::StringRef name, llvm::StringRef path) const;
   ResultExportFound checkReadlineExport(llvm::StringRef name, llvm::StringRef path,
                                         NodeModule module) const;
   ResultExportFound checkModuleExport(NodeModule module, llvm::StringRef name,

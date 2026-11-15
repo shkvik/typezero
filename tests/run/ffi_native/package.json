@@ -1,0 +1,23 @@
+{
+  "name": "ffi-native",
+  "version": "0.1.0",
+  "main": "main.tz",
+  "native": [
+    {
+      "name": "adder",
+      "license": "MIT",
+      "licenseFile": "native/LICENSE.txt",
+      "sources": ["native/**/*.c", "!native/skipped/*.c", "!native/linux_only.c"],
+      "includes": ["native/include"],
+      "defines": ["SCALE=3"],
+      "debug": { "defines": ["IN_DEBUG"] }
+    },
+    {
+      "name": "elsewhere",
+      "license": "MIT",
+      "licenseFile": "native/LICENSE.txt",
+      "os": ["linux"],
+      "sources": ["native/linux_only.c"]
+    }
+  ]
+}

@@ -13,6 +13,7 @@ public:
   llvm::Constant *layoutDescriptor(const Type *type, llvm::ArrayRef<unsigned> keys);
   llvm::Constant *layoutDescriptor(const Type *type, llvm::ArrayRef<unsigned> keys, uint32_t flags);
   void emitObjectDrop(const Type *type, Lowering::ObjectLayout &layout);
+  void emitDispose(const Type *type, llvm::Value *object, bool isCounted);
   llvm::Value *fieldAddress(llvm::Value *object, const Type *type, llvm::StringRef name,
                             bool exact = false);
   llvm::Value *allocObject(const Type *type, llvm::ArrayRef<unsigned> keys);
@@ -20,6 +21,7 @@ public:
   static unsigned fieldIndex(const Type *type, llvm::StringRef name);
 
 private:
+  const FunctionDecl *disposeOf(const Type *type) const;
   static std::string layoutName(const Type *type);
 
   Lowering &lowering;

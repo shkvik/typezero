@@ -307,6 +307,21 @@ const StringMethodInfo kStringMethods[] = {
             },
     },
     {
+        .name = "toCString",
+        .method = StringMethod::TO_C_STRING,
+        .form =
+            TextStringMethod{
+                .call =
+                    StringCall{
+                        .builtin = Builtin::StrToCString,
+                        .minArgs = 0,
+                        .maxArgs = 0,
+                        .args = "",
+                        .result = StringResult::C_STRING_OR_UNDEFINED,
+                    },
+            },
+    },
+    {
         .name = "toUpperCase",
         .method = StringMethod::TO_UPPER_CASE,
         .form =
@@ -392,7 +407,6 @@ const StringMethodInfo kStringMethods[] = {
         .form = LocaleStringMethod{},
     },
 };
-
 }
 
 const StringMethodInfo *StringMethodTable::find(llvm::StringRef name) {

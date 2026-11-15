@@ -1,6 +1,8 @@
 #pragma once
 
 #include "compiler/pipeline/runtime_files/runtime_files.h"
+#include "llvm/ADT/ArrayRef.h"
+#include <string>
 
 namespace tz {
 
@@ -13,6 +15,8 @@ public:
   int run(const Args &args) const;
 
 private:
+  void addSearchPath(llvm::ArrayRef<std::string> dirs) const;
+
   const RuntimeFiles &runtime;
 };
 

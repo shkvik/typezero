@@ -1,6 +1,6 @@
-// Of the symbols of JavaScript, only Symbol.iterator and Symbol.asyncIterator name
-// members.
+// Of the symbols of JavaScript, only Symbol.iterator, Symbol.asyncIterator and Symbol.dispose
+// name members.
 class Odd {
-  // expect-error: 'Symbol.species' cannot name a member: of the symbols of JavaScript, only 'Symbol.iterator' and 'Symbol.asyncIterator' can
+  // expect-error: 'Symbol.species' cannot name a member: of the symbols of JavaScript, only 'Symbol.iterator', 'Symbol.asyncIterator' (docs/iterators.md, section 5) and 'Symbol.dispose' (docs/ffi.md, section 5) can
   [Symbol.species]() { return 1 }
 }

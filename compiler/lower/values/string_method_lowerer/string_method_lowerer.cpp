@@ -5,6 +5,7 @@
 #include "compiler/lower/layouts/type_descriptors/type_descriptors.h"
 #include "compiler/lower/memory/ref_counts/ref_counts.h"
 #include "compiler/lower/values/array_lowerer/array_lowerer.h"
+#include "compiler/lower/values/cstring_lowerer/cstring_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
@@ -200,6 +201,9 @@ llvm::Value *StringMethodLowerer::emitStringMethod(CallExpr *call) {
       failable = true;
       break;
     }
+    case Builtin::StrToCString:
+      result = this->lowering.cstringLowerer().emitFromString(receiver.value);
+      break;
     case Builtin::StrToUpperCase:
     case Builtin::StrToLowerCase:
       result = this->lowering.stringLowerer().callReturningString(

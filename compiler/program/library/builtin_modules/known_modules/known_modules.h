@@ -20,6 +20,7 @@ enum class NodeModule {
   TzIo,
   TzFs,
   TzCrypto,
+  TzString,
   TimersPromises,
   Readline,
   ReadlinePromises,

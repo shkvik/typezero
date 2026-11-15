@@ -12,6 +12,7 @@
 #include "compiler/lower/types/union_layout/union_layout.h"
 #include "compiler/lower/types/union_lowerer/union_lowerer.h"
 #include "compiler/lower/types/unknown_lowerer/unknown_lowerer.h"
+#include "compiler/lower/values/cstring_lowerer/cstring_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/Intrinsics.h"
@@ -39,7 +40,7 @@ EqualityLowerer::EqualityLowerer(Lowering &owner)
 
 bool EqualityLowerer::isReference(const Type *type) {
   return type->isObject() || type->isIterator() || type->isJson() || type->isDict() ||
-         type->isPromise() || type->isUnknown() || type->isClassRef() ||
+         type->isPromise() || type->isUnknown() || type->isClassRef() || type->isHandle() ||
          (type->isUnion() && !type->isTagged() && type->slots().front() == UnionSlot::Object);
 }
 
@@ -50,6 +51,9 @@ llvm::Value *EqualityLowerer::emitValuesEqual(llvm::Value *a, llvm::Value *b, co
   }
   if (type->isTagged()) {
     return this->lowering.unionLowerer().emitUnionEqual(a, b, type);
+  }
+  if (type->nonOptional()->isCString()) {
+    return this->lowering.cstringLowerer().emitEqual(a, b);
   }
   if (type->nonOptional()->isJson()) {
     llvm::Type *ptr = this->lowering.builder.getPtrTy();
@@ -94,6 +98,7 @@ llvm::Value *EqualityLowerer::emitValuesEqual(llvm::Value *a, llvm::Value *b, co
   case Type::Kind::Dict:
   case Type::Kind::Bool:
   case Type::Kind::ClassRef:
+  case Type::Kind::Handle:
     return this->lowering.builder.CreateICmpEQ(a, b);
   case Type::Kind::Unknown: {
     llvm::Type *ptr = this->lowering.builder.getPtrTy();

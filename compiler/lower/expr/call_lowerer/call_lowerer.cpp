@@ -28,6 +28,7 @@
 #include "compiler/lower/types/unknown_lowerer/unknown_lowerer.h"
 #include "compiler/lower/values/array_method_lowerer/array_method_lowerer.h"
 #include "compiler/lower/values/callback_method_lowerer/callback_method_lowerer.h"
+#include "compiler/lower/values/cstring_lowerer/cstring_lowerer.h"
 #include "compiler/lower/values/number_lowerer/number_lowerer.h"
 #include "compiler/lower/values/string_lowerer/string_lowerer.h"
 #include "compiler/lower/values/string_method_lowerer/string_method_lowerer.h"
@@ -71,6 +72,8 @@ llvm::Value *CallLowerer::emitCall(CallExpr *call) {
       break;
     case Builtin::TupleJoin:
       return this->lowering.unknownLowerer().emitTupleJoin(call);
+    case Builtin::CStrToString:
+      return this->lowering.cstringLowerer().emitToStringCall(call);
     case Builtin::ArrForEach:
     case Builtin::ArrMap:
     case Builtin::ArrFilter:

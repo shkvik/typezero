@@ -488,7 +488,8 @@ bool LogicRules::isTestable(const Type *type, const Type *base) const {
     return true;
   }
   bool isHolder = base->isArray() || base->isFunction() || base->isObject() || base->isResult() ||
-                  base->isIterator() || base->isDict() || base->isPromise() || base->isClassRef();
+                  base->isIterator() || base->isDict() || base->isPromise() || base->isClassRef() ||
+                  base->isHandle();
   bool isOptionalObject = type->isOptional() && isHolder;
   if (type->isError() || base->isBool() || base->isString() || isOptionalObject) {
     return true;

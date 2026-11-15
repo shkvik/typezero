@@ -1,0 +1,19 @@
+declare class Memory {}
+
+// expect-error: a function in C cannot take a value of type 'string'
+declare function takesString(text: string): void
+// expect-error: a function in C cannot take a value of type '{ a: int }'
+declare function takesObject(value: { a: int }): void
+// expect-error: a function in C has no optional parameters
+declare function optionalParam(value?: int): void
+// expect-error: a function in C needs its return type written
+declare function noReturn(value: int)
+// expect-error: a function in C cannot give a value of type 'string'
+declare function givesString(): string
+// expect-error: a function in C takes plain parameters
+declare function generic<T>(value: T): void
+// expect-error: a function in C takes plain parameters
+declare function rest(...values: int[]): void
+
+// expect-error: 'Memory' is a handle from C ('declare class'): only functions in C give it out
+new Memory()

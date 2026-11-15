@@ -9,6 +9,7 @@ public:
   explicit VarParser(Parser &parser);
 
   VarDeclStmt *parseVarDecl();
+  VarDeclStmt *parseUsingDecl();
   void parseDeclarators(VarDeclStmt *decl);
   bool parseBinding(VarDeclarator &d);
   void recordConstant(llvm::StringRef name, const Expr *init);

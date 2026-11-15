@@ -160,7 +160,8 @@ void LogicValues::finishLogicalType(const FinishLogicalType &task) {
 const Type *LogicValues::falsyType(const Type *type) const {
   const Type *base = type->nonOptional();
   bool isAlwaysTruthy = base->isArray() || base->isFunction() || base->isObject() ||
-                        base->isIterator() || base->isDict() || base->isClassRef();
+                        base->isIterator() || base->isDict() || base->isClassRef() ||
+                        base->isHandle();
 
   return isAlwaysTruthy ? Type::undefinedTy() : type;
 }
