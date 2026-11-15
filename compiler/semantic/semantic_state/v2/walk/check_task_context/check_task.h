@@ -4,7 +4,36 @@
 #include "compiler/program/ast/declaration_file/declaration_file.h"
 #include "compiler/program/diagnostic/diagnostic.h"
 #include "compiler/program/library/array/array_method_table/array_method_table.h"
+#include "compiler/program/library/builtin_modules/known_modules/known_modules.h"
+#include "compiler/program/library/builtin_modules/node_option_table/node_option_table.h"
+#include "compiler/program/library/builtin_names/global_member_table/global_member_table.h"
+#include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
+#include "compiler/program/library/builtin_names/library_function_table/library_function_table.h"
+#include "compiler/program/library/builtin_names/library_method_table/library_method_table.h"
+#include "compiler/program/library/builtin_names/library_type_table/library_type_table.h"
+#include "compiler/program/library/builtin_names/prelude_type_table/prelude_type_table.h"
 #include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
+#include "compiler/program/library/bytes/bytes_method_table/bytes_method_table.h"
+#include "compiler/program/library/bytes/number_method_table/number_method_table.h"
+#include "compiler/program/library/child_process/child_function_table/child_function_table.h"
+#include "compiler/program/library/crypto/crypto_api/crypto_api.h"
+#include "compiler/program/library/crypto/crypto_method_table/crypto_method_table.h"
+#include "compiler/program/library/crypto/crypto_sync_function_table/crypto_sync_function_table.h"
+#include "compiler/program/library/crypto/subtle_key_format_table/subtle_key_format_table.h"
+#include "compiler/program/library/crypto/subtle_method_table/subtle_method_table.h"
+#include "compiler/program/library/decimal/decimal_method_table/decimal_method_table.h"
+#include "compiler/program/library/events/events_function_table/events_function_table.h"
+#include "compiler/program/library/fs/fs_function_table/fs_function_table.h"
+#include "compiler/program/library/intrinsic/library_intrinsic_table/library_intrinsic_table.h"
+#include "compiler/program/library/iterator/iterator_method_table/iterator_method_table.h"
+#include "compiler/program/library/math/bit_function_table/bit_function_table.h"
+#include "compiler/program/library/math/math_function_table/math_function_table.h"
+#include "compiler/program/library/path/path_function_table/path_function_table.h"
+#include "compiler/program/library/process/process_member_table/process_member_table.h"
+#include "compiler/program/library/regex/regex_member_table/regex_member_table.h"
+#include "compiler/program/library/stream/stream_function_table/stream_function_table.h"
+#include "compiler/program/library/stream/stream_method_table/stream_method_table.h"
+#include "compiler/program/library/string/string_method_table/string_method_table.h"
 #include "compiler/program/types/types.h"
 #include "compiler/semantic/bodies/expr/target_checker/target_checker_types.h"
 #include "compiler/semantic/generics/type_arg_inferrer/type_arg_inferrer_types.h"
@@ -13,8 +42,12 @@
 #include "compiler/semantic/semantic_state/function_stack/function_stack_types.h"
 #include "compiler/semantic/semantic_state/generic_store/generic_store_types.h"
 #include "compiler/semantic/semantic_state/v2/library/event_context/event_context.h"
+#include "compiler/semantic/semantic_state/v2/library/reflection_context/reflection_context.h"
+#include "compiler/semantic/semantic_state/v2/library/stream_context/stream_context.h"
 #include "compiler/union/union/union.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include <array>
+#include <optional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -23,28 +56,18 @@ namespace tz {
 
 enum class CheckTaskKind {
   USE_MODULE,
-  INSTANTIATE_EMITTER_PARENT,
-  FIND_STREAM_HOOK_PARAMS,
-  WALK_HOOK_PARAMS,
   WALK_ITERABLE_PARAM,
   WALK_GENERATOR_RETURN,
-  WALK_ASYNC_RETURN,
   WALK_STMT,
-  REPORT_UNLISTENED_ERRORS,
   ENTER_LOAD_BODY,
   LEAVE_LOAD_BODY,
-  IMPORT_BUILTIN_MODULE,
-  FIND_INTL_TYPE,
-  RESOLVE_RESULT_TYPE,
   RESOLVE_ITERATOR_TYPE,
   RESOLVE_DICT_TYPE,
-  RESOLVE_PROMISE_TYPE,
   MAKE_METHOD_DESCRIPTOR,
   RESOLVE_CONSTRUCTOR_TYPE,
   CHECK_CONSTRUCTOR_ARGS,
   CLASS_VALUE_TYPE,
   LITERAL_SHAPE,
-  CREATED_TYPE,
   INFER_RETURN_TYPE,
   RETURN_TYPE_OF,
   RESOLVE_TYPE_REF,
@@ -614,148 +637,17 @@ enum class CheckTaskKind {
   APPARENT_SLOT,
   CONVERT_SLOT,
   ADAPT_LITERAL_SLOT,
-  CHECK_DECIMAL_LITERAL_RANGE,
-  CHECK_REGEX_LITERAL,
-  CHECK_AWAIT,
-  CHECK_USED_VALUE,
-  WALK_REDUNDANT_TESTS,
-  MATCH_ITEMS,
-  WALK_COMPARISON_OPERANDS,
-  NEVER_OPERANDS,
-  CHECK_DATE_OPERANDS,
-  CHECK_DECIMAL_COMPARISON,
-  CHECK_NULL_EQUALITY,
-  CHECK_JSON_EQUALITY,
-  REPORT_DECIMAL_MIX,
-  CHECK_DECIMAL_ARITHMETIC,
-  DATE_TO_TIME,
-  REGEX_TO_STRING,
-  DATE_TO_STRING,
-  BYTES_TO_STRING,
-  NOTE_REFLECTED_CONVERSION,
-  NOTE_CONSTRUCTOR_FLOW,
-  CHECK_NODE_NAME,
   FUNCTION_TYPE_OF,
-  NOTE_HTTPS_VALUE,
-  CHECK_JSON_MEMBER,
-  CHECK_RESULT_MEMBER,
-  CHECK_REGEX_MEMBER,
-  CHECK_MATCH_MEMBER,
-  CHECK_DATE_MEMBER,
-  CHECK_BYTES_MEMBER,
-  CHECK_CRYPTO_MEMBER,
-  CHECK_RUNTIME_MEMBER,
-  CHECK_REG_EXP_STATIC_MEMBER,
-  CHECK_WEB_CRYPTO_MEMBER,
-  CHECK_NODE_MEMBER,
-  CHECK_PROCESS_MEMBER,
-  CHECK_BYTES_STATIC_MEMBER,
-  CHECK_INTL_MEMBER,
-  CHECK_MATCH_INDEX,
-  CHECK_JSON_INDEX,
-  CHECK_BYTES_INDEX,
-  CHECK_PROCESS_ENV_INDEX,
-  CHECK_BYTES_UNION_MEMBER,
-  PROCESS_ALIAS_SLOT,
-  MARK_FUSED,
-  RESOLVE_WEAK_REF_TYPE,
-  SEGMENTS_ARRAY_SLOT,
   NOTE_INHERITED_RETURN,
-  CHECK_USED_CALLBACK_VALUE,
-  WALK_FOR_AWAIT,
-  NOTE_ERRORS_HANDLED,
   FIND_CALL_CYCLES,
-  CHECK_PROCESS_ASSIGN,
-  CHECK_JSON_TARGET,
-  CHECK_RUNTIME_TARGET,
-  WALK_DECIMAL_ASSIGN,
-  WALK_BYTES_STORE,
-  CHECK_NODE_CALL,
-  CHECK_PROMISE_STATIC,
-  CHECK_RESULT_STATIC,
-  CHECK_JSON_STATIC,
-  CHECK_ARRAY_IS_ARRAY,
-  CHECK_JSON_IS_JSON,
-  CHECK_REFLECT_CALL,
-  CHECK_CONSOLE_CALL,
-  CHECK_PROCESS_CALL,
-  CHECK_BIT_CALL,
-  CHECK_MATH_CALL,
-  CHECK_REG_EXP_STATIC,
-  CHECK_INTL_CALL,
-  CHECK_LOCALE_STATIC,
-  CHECK_INTL_STATIC,
-  CHECK_DECIMAL_STATIC,
-  CHECK_X509_PARSE,
-  CHECK_WEB_CRYPTO_CALL,
-  CHECK_BYTES_STATIC,
-  CHECK_NUMBER_STATIC,
-  CHECK_OBJECT_CALL,
-  CHECK_ITERATOR_FROM,
-  CHECK_ARRAY_FROM,
-  CHECK_MAP_STATIC,
-  CHECK_RUNTIME_METHOD,
-  CHECK_RESULT_METHOD,
-  CHECK_JSON_METHOD,
-  CHECK_REGEX_METHOD,
-  CHECK_DATE_METHOD,
-  CHECK_DATE_FORMAT_METHOD,
-  CHECK_INTL_METHOD,
-  CHECK_CRYPTO_METHOD,
-  CHECK_WEAK_REF_METHOD,
-  CHECK_BYTES_METHOD,
-  CHECK_PROMISE_METHOD,
-  CHECK_TIMER_METHOD,
-  CHECK_SUBTLE_CALL,
-  WALK_HEADERS_CALL,
-  CHECK_STRING_LOCALE,
-  CHECK_NUMBER_LOCALE,
-  CHECK_DECIMAL_METHOD,
-  CHECK_ITERATOR_METHOD,
-  CHECK_DICT_METHOD,
-  CHECK_STRING_METHOD,
-  CHECK_ARRAY_METHOD,
-  CHECK_NUMBER_METHOD,
-  CHECK_LIB_CALL,
-  CHECK_RESULT_CALL,
-  CHECK_JSON_GLOBAL,
-  CHECK_ASYNC_GLOBAL,
-  CHECK_GLOBAL_CALL,
-  CHECK_EVENTS_LIBRARY_CALL,
-  CHECK_STREAM_LIBRARY_CALL,
-  NOTE_HTTPS_CALL,
   CHECK_GENERIC_CALL,
-  CHECK_CRYPTO_NEW,
-  CHECK_LOCALE_NEW,
-  CHECK_DATE_FORMAT_NEW,
-  CHECK_INTL_NEW,
-  NOTE_LIBRARY_INSTANCE,
-  CHECK_REG_EXP_CONSTRUCTOR,
-  CHECK_DATE_NEW,
-  CHECK_PROMISE_NEW,
-  CHECK_WEAK_REF_NEW,
-  CHECK_BYTES_NEW,
   FIND_METHOD_CYCLES,
-  CHECK_JSON_OBJECT_LIT,
-  CHECK_JSON_ARRAY_LIT,
-  WALK_EXTERNAL,
   ENTER_RETURN_BODY,
   LEAVE_RETURN_BODY,
   INFER_FROM_BODY,
   INFER_CYCLE,
   ENTER_HOME_MODULE,
-  NOTE_TLS_METHOD,
-  CHECK_STATS_DATE,
-  REPORT_EMITTER_METHOD_VALUE,
-  CHECK_FS_CLASS_METHOD,
-  CHECK_STREAM_CALL,
-  CHECK_EMITTER_CALL,
-  CHECK_EVENT_TARGET_CALL,
-  CHECK_EVENTS_FUNCTION,
-  CHECK_STREAM_FROM,
-  WRITE_DESIGN_RECORDS,
   BUILD_VTABLE,
-  NOTE_REGEX_VARIABLE,
   LEAVE_BRANCH,
   MARK_UNREACHABLE,
   AFTER_EXPR_STMT,
@@ -858,9 +750,7 @@ enum class CheckTaskKind {
   NOTE_PREDICATE_EXIT,
   BUILD_PREDICATE,
   START_PREDICATE_COPY,
-  ADD_BYTE_CALLBACK_FACTS,
   ADD_INDEX_CALLBACK_FACTS,
-  CHECK_BYTE_CALLBACK_RESULT,
   ADD_CONDITION_FACTS,
   FINISH_CONDITION_FACTS,
   WALK_FRESH_COPY,
@@ -923,6 +813,7 @@ enum class CheckTaskKind {
   AFTER_DEFAULT_CONSTRAINT,
   CHECK_GENERIC_NEW,
   AFTER_EMITTER_NEW,
+  AFTER_STREAM_NEW,
   NEXT_EXPLICIT_NEW_ARGUMENT,
   AFTER_EXPLICIT_NEW_ARGUMENT,
   AFTER_EXPLICIT_INSTANCE,
@@ -1007,9 +898,6 @@ enum class CheckTaskKind {
   AFTER_FITTING_CONSTRAINT,
   JOIN_INSTANCES,
   AFTER_JOINED_INSTANCE,
-  CHECK_EMITTER_NEW,
-  CHECK_STREAM_NEW,
-  ADD_STREAM_BASES,
   WALK_VARIANTS,
   BUILD_INSTANCE_INIT,
   CHECK_CONSTRUCTOR_ACCESS,
@@ -1030,7 +918,610 @@ enum class CheckTaskKind {
   AFTER_CYCLE_TRIAL,
   FINISH_TRIAL_RETURN,
   AFTER_BODY_NOW_INFERENCE,
+  CHECK_CONSOLE_CALL,
+  NEXT_CONSOLE_ARGUMENT,
+  AFTER_CONSOLE_ARGUMENT,
+  REJECT_SPREAD_CALL,
+  MARK_CALL_FAILED,
+  CALL_LIBRARY_FUNCTION,
+  CALL_LIBRARY_STATIC,
+  AFTER_LIBRARY_RETURN,
+  AFTER_LIBRARY_CALLEE,
+  FINISH_LIBRARY_CALL,
+  READ_NODE_OPTIONS,
+  PRELUDE_TYPE_OF,
+  ANSWER_ALIAS_TYPE,
+  CALL_LIBRARY_METHOD,
+  AFTER_METHOD_RETURN,
+  AFTER_METHOD_CALLEE,
+  AFTER_LIBRARY_MEMBER_TYPE,
+  PUSH_CHECKED_VALUE,
+  RESOLVE_WEAK_REF_TYPE,
+  AFTER_WEAK_REF_TARGET,
+  CHECK_WEAK_REF_NEW,
+  AFTER_WEAK_REF_TYPE_ARG,
+  AFTER_WEAK_REF_VALUE,
+  FINISH_WEAK_REF_NEW,
+  CHECK_WEAK_REF_METHOD,
+  CHECK_OS_CALL,
+  CHECK_OS_VALUE,
+  CHECK_PATH_CALL,
+  CHECK_PATH_VALUE,
+  AFTER_FORMAT_PATH_ARG,
+  FINISH_FORMAT_PATH,
+  FINISH_TEXT_PATH,
+  CHECK_MATH_CALL,
+  CHECK_BIT_CALL,
+  NUMERIC_ARG_SLOT,
+  AFTER_NUMERIC_ARG,
+  AFTER_MATH_ARGS,
+  NEXT_INT32_ARG,
+  AFTER_INT32_ARG,
+  BITS_ARG_SLOT,
+  FINISH_BITS_ARG,
+  AFTER_WRAP_FROM_ARG,
+  NEXT_WIDE_BITS_ARG,
+  AFTER_WIDE_BITS_ARG,
+  AFTER_PLAIN_BITS_ARG,
+  AFTER_BIT_COUNT,
+  FINISH_PLAIN_BITS,
+  NEXT_MIN_MAX_ARG,
+  AFTER_MIN_MAX_VALUE,
+  AFTER_MIN_MAX_SPREAD,
+  CHECK_PROCESS_CALL,
+  CHECK_PROCESS_MEMBER,
+  CHECK_PROCESS_ENV_INDEX,
+  CHECK_PROCESS_ASSIGN,
+  EXIT_CODE_SLOT,
+  AFTER_EXIT_CODE,
+  AFTER_STD_STREAM_CHUNK,
+  AFTER_SIGNAL_LISTENER,
+  AFTER_PROCESS_STREAM,
+  AFTER_ENV_INDEX_KEY,
+  AFTER_ASSIGNED_EXIT_CODE,
+  CHECK_DATE_STATIC,
+  CHECK_DATE_STATIC_MEMBER,
+  DATE_TO_TIME,
+  DATE_TO_STRING,
+  TIME_ARG_SLOT,
+  FINISH_TIME_ARG,
+  AFTER_DATE_FIELDS,
+  CHECK_DATE_NEW,
+  FINISH_DATE_FIELDS,
+  AFTER_DATE_VALUE,
+  FINISH_DATE_TIME,
+  CHECK_DATE_FUNCTION,
+  FINISH_DATE_PARSE,
+  CHECK_DATE_METHOD,
+  DATE_SETTER_FIELDS,
+  FINISH_DATE_SETTER,
+  AFTER_LOCALE_ARGS,
+  CHECK_DATE_MEMBER,
+  CHECK_DATE_OPERANDS,
+  CHECK_NEXT_TICK,
+  RESOLVE_PROMISE_TYPE,
+  FINISH_PROMISE_TYPE,
+  WALK_ASYNC_RETURN,
   FINISH_ASYNC_RETURNS,
+  CHECK_AWAIT,
+  AFTER_AWAIT_VALUE,
+  WALK_FOR_AWAIT,
+  AFTER_AWAIT_ITERABLE,
+  AFTER_JOINED_ITERABLE,
+  AFTER_ASYNC_USER_ITERATOR,
+  AFTER_ASYNC_SOURCE,
+  BIND_AWAIT_ELEMENT,
+  START_AWAIT_BODY,
+  ENTER_AWAIT_LOOP_BODY,
+  CHECK_PROMISE_NEW,
+  AFTER_PROMISE_TYPE_ARG,
+  AFTER_EXECUTOR_TRIAL,
+  FINISH_PROMISE_NEW,
+  CHECK_PROMISE_METHOD,
+  FINISH_PROMISE_THEN,
+  CHECK_PROMISE_STATIC,
+  AFTER_RESOLVE_VALUE,
+  AFTER_RESOLVER_TYPE_ARG,
+  FINISH_WITH_RESOLVERS,
+  NEXT_PROMISE_ELEMENT,
+  AFTER_PROMISE_ELEMENT,
+  AFTER_PROMISE_VALUES,
+  AFTER_TASK_CALLBACK,
+  CHECK_ASYNC_GLOBAL,
+  AFTER_ANY_NUMBER,
+  AFTER_TIMER_CALLBACK,
+  AFTER_TIMER_RECEIVER,
+  CHECK_TIMER_METHOD,
+  CHECK_TIMERS_PROMISES_CALL,
+  TIMER_PROMISE_VALUE,
+  AFTER_TIMER_PROMISE_VALUE,
+  TIMER_PROMISE_OPTIONS,
+  FINISH_TIMER_PROMISE,
+  CHECK_SCHEDULER_CALL,
+  PROCESS_STREAM,
+  ADD_STREAM_BASES,
+  AFTER_STREAM_SIDE,
+  FIND_STREAM_HOOK_PARAMS,
+  AFTER_HOOK_ERROR,
+  LIBRARY_ALIAS_OF,
+  AFTER_HOOK_CALLBACKS,
+  FINISH_WRITEV_HOOK,
+  FINISH_DESTROY_HOOK,
+  WALK_HOOK_PARAMS,
+  CHECK_STREAM_CALL,
+  AFTER_PLAIN_ENCODING,
+  FINISH_ENCODED_VIEW,
+  AFTER_WRITE_CHUNK,
+  AFTER_WRITE_SECOND,
+  WRITTEN_CALLBACK_TYPE,
+  ANSWER_STREAM_CALLBACK,
+  AFTER_WRITTEN_TYPE,
+  NEXT_END_ARG,
+  AFTER_END_ARG,
+  FINISH_STREAM_DATA,
+  AFTER_BYTE_CHUNK,
+  AFTER_ENCODING_TYPE,
+  AFTER_ENCODING_VALUE,
+  CHECK_STREAM_INTRINSIC,
+  AFTER_OVERRIDES_CLASS,
+  AFTER_NATIVE_IO_FAILURE,
+  CHECK_STREAM_LIBRARY_CALL,
+  AFTER_STREAM_CALLBACK,
+  AFTER_FINISHED_OPTIONS,
+  NOTE_TARGET_HANDLED,
+  FINISH_FINISHED,
+  NEXT_COMPOSED_PART,
+  AFTER_COMPOSED_PART,
+  NEXT_PIPELINE_STAGE,
+  AFTER_STAGE_VALUE,
+  AFTER_STAGE_ITERABLE,
+  START_STAGE_CALL,
+  AFTER_STAGE_CALL,
+  AFTER_STAGE_MADE,
+  FINISH_CALLBACK_PIPELINE,
+  FINISH_PROMISE_PIPELINE,
+  AFTER_FS_STREAM_TYPES,
+  AFTER_FS_STREAM_OPTION,
+  FINISH_FS_STREAM,
+  FINAL_FS_STREAM,
+  AFTER_PROCESS_STREAM_CALL,
+  CHECK_STREAM_NEW,
+  CHECK_STREAM_FROM,
+  AFTER_FROM_SOURCE,
+  AFTER_FROM_OPTIONS_TYPE,
+  AFTER_FROM_OPTIONS,
+  AFTER_FROM_ASYNC,
+  AFTER_FROM_ITERABLE,
+  NAMED_MODULE_TYPE,
+  IMPORT_BUILTIN_MODULE,
+  PROCESS_ALIAS_SLOT,
+  CHECK_NODE_NAME,
+  AFTER_MODULE_VALUE,
+  CHECK_NODE_MEMBER,
+  AFTER_CRYPTO_MODULE_MEMBER,
+  AFTER_FS_CONSTANT,
+  CHECK_NODE_CALL,
+  CHECK_LIB_CALL,
+  AFTER_INTRINSIC_TYPE,
+  FINISH_LISTENER_INTRINSIC,
+  FINISH_AS_CLASS,
+  FINISH_AHEAD,
+  FINISH_WITH_CONTEXT,
+  CHECK_RUNTIME_MEMBER,
+  CHECK_RUNTIME_TARGET,
+  CHECK_RUNTIME_METHOD,
+  AFTER_QUESTION_QUERY,
+  FINISH_QUESTION_PROMISE,
+  FINISH_QUESTION_CALLBACK,
+  CHECK_CHILD_CALL,
+  AFTER_CHILD_FILE,
+  AFTER_CHILD_ARGS,
+  AFTER_CHILD_OPTIONS,
+  WALK_CHILD_STDIO,
+  NEXT_STDIO_ENTRY,
+  WALK_CHILD_LIMITS,
+  NEXT_CHILD_OPTION,
+  AFTER_CHILD_OPTION,
+  AFTER_CHILD_INPUT,
+  CHECK_CHILD_INPUT,
+  FINISH_CHILD_INPUT,
+  AFTER_CHILD_KILL_SIGNAL,
+  FINISH_CHILD_KILL_SIGNAL,
+  AFTER_CHILD_SHELL,
+  FINISH_CHILD_SHELL,
+  FINISH_CHILD_CALL,
+  WALK_REDUNDANT_TESTS,
+  CHECK_JSON_MEMBER,
+  CHECK_JSON_INDEX,
+  AFTER_JSON_INDEX_KEY,
+  CHECK_JSON_TARGET,
+  AFTER_JSON_TARGET_INDEX,
+  AFTER_JSON_TARGET_MEMBER,
+  CHECK_JSON_METHOD,
+  CHECK_JSON_OBJECT_LIT,
+  FINISH_JSON_OBJECT_LIT,
+  NEXT_JSON_PROPERTY,
+  AFTER_JSON_KEY,
+  AFTER_JSON_PROPERTY_VALUE,
+  CHECK_JSON_ARRAY_LIT,
+  AFTER_JSON_ARRAY_LIT,
+  CHECK_NULL_EQUALITY,
+  AFTER_NULL_EQUALITY,
+  CHECK_JSON_EQUALITY,
+  CHECK_JSON_IS_JSON,
+  AFTER_JSON_IS_JSON_ARG,
+  CHECK_ARRAY_IS_ARRAY,
+  AFTER_ARRAY_IS_ARRAY_ARG,
+  CHECK_JSON_STATIC,
+  FINISH_JSON_PARSE,
+  AFTER_STRINGIFY_VALUE,
+  AFTER_STRINGIFY_REPLACER,
+  AFTER_STRINGIFY_SPACE,
+  FINISH_STRINGIFY,
+  AFTER_STRINGIFY_FAILURE,
+  CHECK_JSON_GLOBAL,
+  CHECK_RESULT_CALL,
+  AFTER_WRITTEN_RESULT,
+  AFTER_HALF_VALUE,
+  FINISH_OK_ERR,
+  CHECK_RESULT_STATIC,
+  AFTER_COMBINE_LIST,
+  AFTER_COMBINE_ARRAY,
+  CHECK_RESULT_MEMBER,
+  CHECK_USED_VALUE,
+  CHECK_USED_CALLBACK_VALUE,
+  CHECK_RESULT_METHOD,
+  AFTER_UNWRAP_OR_ARG,
+  AFTER_RESULT_MATCH,
+  RESULT_HALF_CALLBACK,
+  AFTER_PLAIN_HALF_CALLBACK,
+  AFTER_HALF_CALLBACK,
+  AFTER_RESULT_CALLBACK,
+  RESOLVE_RESULT_TYPE,
+  RESULT_HALF_TYPE,
+  FINISH_RESULT_TYPE,
+  NEVER_OPERANDS,
+  MATCH_ITEMS,
+  REGEX_TO_STRING,
+  CHECK_MATCH_MEMBER,
+  CHECK_MATCH_INDEX,
+  AFTER_MATCH_POSITION,
+  CHECK_REGEX_LITERAL,
+  NOTE_REGEX_VARIABLE,
+  CHECK_REGEX_METHOD,
+  AFTER_REGEX_RUN_ARG,
+  CHECK_REGEX_MEMBER,
+  CHECK_REG_EXP_CONSTRUCTOR,
+  CHECK_REG_EXP_CALL,
+  FINISH_REG_EXP_NEW,
+  CHECK_REG_EXP_STATIC,
+  FINISH_REG_EXP_PARSE,
+  CHECK_REG_EXP_STATIC_MEMBER,
+  CHECK_STRING_REGEX_METHOD,
+  AFTER_REGEX_PATTERN,
+  AFTER_TEXT_REPLACEMENT,
+  AFTER_FUNCTION_REPLACEMENT,
+  PREPARE_LOCALE_ARGS,
+  FIND_INTL_TYPE,
+  SEGMENTS_ARRAY_SLOT,
+  CHECK_INTL_NEW,
+  FINISH_INTL_NEW,
+  PREPARE_INTL_ARGS,
+  LOCALE_ARG_SLOT,
+  INTL_OPTIONS_ARG,
+  AFTER_INTL_OPTIONS,
+  LOCALE_LIST_SLOT,
+  AFTER_LOCALE_LIST,
+  CHECK_LOCALE_NEW,
+  AFTER_LOCALE_NEW,
+  CHECK_LOCALE_STATIC,
+  CHECK_INTL_CALL,
+  CHECK_INTL_STATIC,
+  AFTER_STATIC_LOCALE_LIST,
+  FINISH_SUPPORTED_LOCALES,
+  CHECK_INTL_MEMBER,
+  CHECK_INTL_METHOD,
+  AFTER_INTL_NUMBER,
+  AFTER_DOUBLE_NUMBER,
+  AFTER_RELATIVE_UNIT,
+  CHECK_NUMBER_LOCALE,
+  FINISH_LOCALE_CALL,
+  CHECK_STRING_LOCALE,
+  AFTER_NORMALIZE_FORM,
+  DATE_LOCALE_OPTIONS,
+  AFTER_DATE_OPTIONS,
+  CHECK_DATE_FORMAT_NEW,
+  FINISH_DATE_FORMAT_NEW,
+  CHECK_DATE_FORMAT_METHOD,
+  AFTER_DATE_FORMAT_ARG,
+  CHECK_DECIMAL_LITERAL_RANGE,
+  WALK_COMPARISON_OPERANDS,
+  AFTER_COMPARED_RIGHT,
+  AFTER_COMPARED_LEFT,
+  REPORT_DECIMAL_MIX,
+  CHECK_DECIMAL_ARITHMETIC,
+  CHECK_DECIMAL_COMPARISON,
+  CONVERT_DECIMAL_SIDE,
+  FINISH_DECIMAL_ARITHMETIC,
+  WALK_DECIMAL_ASSIGN,
+  AFTER_DECIMAL_ASSIGN,
+  CHECK_DECIMAL_CALL,
+  AFTER_DECIMAL_CALL_ARG,
+  FINISH_DECIMAL_TEXT,
+  CHECK_DECIMAL_STATIC,
+  AFTER_DECIMAL_SPREAD,
+  FINISH_DECIMAL_STATIC,
+  CHECK_DECIMAL_METHOD,
+  FINISH_DECIMAL_METHOD,
+  DECIMAL_ARG_SLOT,
+  AFTER_DECIMAL_COUNT,
+  AFTER_ROUNDING_MODE,
+  CLASSIFY_LISTENER,
+  NOTE_ERRORS_HANDLED,
+  REPORT_UNLISTENED_ERRORS,
+  REPORT_EMITTER_METHOD_VALUE,
+  INSTANTIATE_EMITTER_PARENT,
+  AFTER_EMITTER_PARENT,
+  CHECK_EMITTER_NEW,
+  AFTER_EMITTER_EVENTS,
+  AFTER_EMITTER_INSTANCE,
+  CREATED_TYPE,
+  AFTER_CREATED_ARGS,
+  AFTER_CREATED_INSTANCE,
+  EVENT_ARGS_OF,
+  AFTER_EVENT_NAME,
+  INFERRED_EVENT_ARGS,
+  AFTER_INFERRED_EVENT,
+  REPORT_NOT_EMITTED,
+  FIND_EVENT_ARGS,
+  ANSWER_EVENT_ARGS,
+  COMPLETE_EVENT,
+  FINISH_COMPLETE_EVENT,
+  COMPLETE_SITE,
+  TRY_EVENT_FUNCTION,
+  TRY_EVENT_STATEMENT,
+  BEGIN_EVENT_TRIAL,
+  END_EVENT_TRIAL,
+  CHECK_EMITTER_CALL,
+  AFTER_QUERY_EVENT,
+  AFTER_LISTENER_ARG,
+  AFTER_LISTENER_ERRORS,
+  FINISH_EMITTER_CALL,
+  SET_CHECKED_TYPE,
+  AFTER_EMIT_ARGS,
+  AFTER_SITE_EMIT_KEY,
+  AFTER_EMIT_EVENT,
+  NEXT_EMIT_VALUE,
+  AFTER_EMIT_VALUE,
+  AFTER_EMITTED_VALUE,
+  AFTER_LISTENER_THIS,
+  FINISH_LISTENER_LITERAL,
+  AFTER_LISTENER_VALUE,
+  CHECK_EVENT_TARGET_CALL,
+  AFTER_TARGET_OBJECT_TYPE,
+  AFTER_TARGET_PARAM_TYPE,
+  AFTER_TARGET_VALUE,
+  FINISH_TARGET_CALL,
+  CHECK_EVENTS_FUNCTION,
+  CHECK_EVENTS_LIBRARY_CALL,
+  AFTER_EVENTS_OBJECT,
+  AFTER_EVENTS_METHOD,
+  AFTER_WAIT_EVENT,
+  AFTER_WAIT_ERRORS,
+  CHECK_FS_CALL,
+  AFTER_PATH_ARG,
+  READ_ENCODING_OR_OPTIONS,
+  AFTER_ENCODING_ARG,
+  AFTER_READ_FILE_OPTIONS,
+  AFTER_WRITE_DATA,
+  AFTER_WRITE_OPTIONS,
+  FINISH_WRITE_FILE,
+  AFTER_PATH_CALL_OPTIONS,
+  FINISH_PATH_ARGUMENT,
+  AFTER_STAT_OPTIONS,
+  AFTER_READDIR_OPTIONS,
+  FINISH_READDIR,
+  AFTER_MKDIR_OPTIONS,
+  FINISH_MKDIR,
+  FINISH_RMDIR,
+  AFTER_RM_OPTIONS,
+  FINISH_RM,
+  FINISH_TWO_PATHS,
+  CHECK_FS_MODULE_CALL,
+  AFTER_FS_MODULE_CALL,
+  WRAP_FS_RESULT,
+  CHECK_TZ_IO_CALL,
+  CHECK_FS_VALUE,
+  CHECK_FS_CONSTANT,
+  AFTER_NATIVE_ERROR,
+  NATIVE_ERROR_TYPE,
+  CHECK_STATS_DATE,
+  CHECK_FS_CLASS_METHOD,
+  CHECK_FS_PROMISES_CALL,
+  AFTER_FS_PROMISES_CALL,
+  CHECK_READLINE_CALL,
+  AFTER_READLINE_OPTIONS,
+  FINISH_READLINE,
+  CHECK_REFLECT_CALL,
+  NOTE_REFLECTED_CONVERSION,
+  NOTE_CONSTRUCTOR_FLOW,
+  WRITE_DESIGN_RECORDS,
+  AFTER_FIELD_COMPLETE,
+  AFTER_REFLECT_GET_OBJECT,
+  CONTINUE_KNOWN_GET,
+  FINISH_DYNAMIC_GET,
+  AFTER_FILL_ARGS,
+  FINISH_FILL,
+  AFTER_APPLY_FUNCTION,
+  AFTER_APPLY_THIS,
+  FINISH_APPLY,
+  FINISH_APPLY_RESULT,
+  AFTER_DIRECT_MEMBER,
+  AFTER_DIRECT_ARGUMENTS,
+  MAKE_VOID_SEQUENCE,
+  REFLECT_OK,
+  FINISH_REFLECT_OK,
+  AFTER_CONSTRUCT_CLASS,
+  FINISH_DYNAMIC_CONSTRUCT,
+  REFLECT_ARGS_SLOT,
+  AFTER_REFLECT_ARGS,
+  AFTER_METADATA_KEY_ARG,
+  AFTER_METADATA_VALUE,
+  AFTER_KNOWN_METADATA,
+  METADATA_VALUE_UNKNOWN,
+  AFTER_METADATA_TARGET,
+  FINISH_METADATA_CALL,
+  NEXT_METADATA_WRITER,
+  CHECK_BYTES_INDEX,
+  AFTER_BYTES_INDEX_POSITION,
+  WALK_BYTES_STORE,
+  CHECK_BYTES_MEMBER,
+  CHECK_BYTES_UNION_MEMBER,
+  CHECK_BYTES_STATIC_MEMBER,
+  BYTES_TO_STRING,
+  BUFFER_ENCODING_VALUE,
+  AFTER_BUFFER_ENCODING_ARG,
+  CHECK_BYTES_METHOD,
+  FINISH_BUFFER_TO_STRING,
+  FINISH_RANGE_METHOD,
+  NEXT_WRITE_ARG,
+  AFTER_WRITE_ARG,
+  FINISH_WRITE,
+  AFTER_BUFFER_VALUE,
+  CONTINUE_VALUE_METHOD,
+  NEXT_VALUE_SPLIT,
+  AFTER_VALUE_SPLIT,
+  FINISH_VALUE_METHOD,
+  FINISH_VARIABLE_NUMBER,
+  AFTER_FIXED_VALUE,
+  FINISH_FIXED_NUMBER,
+  AFTER_DECODE_INPUT,
+  FINISH_FATAL_DECODE,
+  CHECK_BYTES_STATIC,
+  AFTER_BYTES_SOURCE,
+  AFTER_FROM_WITH_SOURCE,
+  AFTER_FROM_WITH_MAPPER,
+  FINISH_FROM_WITH,
+  NEXT_BYTES_VALUE,
+  AFTER_BYTES_VALUE,
+  AFTER_SPREAD_VALUES,
+  AFTER_BUFFER_FROM_SOURCE,
+  WRITE_ENCODING_ARG,
+  FINISH_VIEW,
+  AFTER_ALLOC_SIZE,
+  AFTER_ALLOC_FILL,
+  AFTER_BYTE_FILL,
+  FINISH_ALLOC_FILL,
+  AFTER_CONCAT_LIST,
+  AFTER_CONCAT_TOTAL,
+  AFTER_BYTE_LENGTH_ARG,
+  AFTER_IS_BUFFER_ARG,
+  AFTER_DECODER_PARSE,
+  FINISH_DECODER_PARSE,
+  CHECK_BYTES_NEW,
+  AFTER_NON_NEGATIVE,
+  AFTER_DATA_VIEW_BUFFER,
+  CONTINUE_DECODER_NEW,
+  AFTER_DECODER_LABEL_ARG,
+  AFTER_DECODER_OPTIONS,
+  FINISH_DECODER_NEW,
+  AFTER_TYPED_NEW_SOURCE,
+  FINISH_LENGTH_NEW,
+  AFTER_MAPPED_CALLBACK,
+  AFTER_COPY_SORT,
+  FINISH_TYPED_AT,
+  AFTER_TYPED_SEARCH_VALUE,
+  FINISH_TYPED_SEARCH,
+  AFTER_TYPED_VALUE,
+  AFTER_SET_LITERAL,
+  AFTER_SET_SOURCE,
+  FINISH_TYPED_SET,
+  AFTER_WITH_INDEX,
+  FINISH_DATA_VIEW,
+  AFTER_DATA_VIEW_VALUE,
+  ADD_BYTE_CALLBACK_FACTS,
+  CHECK_BYTE_CALLBACK_RESULT,
+  CHECK_ARRAY_ITERATOR,
+  CHECK_STRING_METHOD,
+  AFTER_STRING_REGEX_TRY,
+  FINISH_STRING_METHOD,
+  CHECK_NUMBER_STATIC,
+  AFTER_CODE_ARG,
+  CHECK_NUMBER_METHOD,
+  AFTER_DIGITS_ARG,
+  CHECK_GLOBAL_CALL,
+  AFTER_URI_ARG,
+  FINISH_GLOBAL_RESULT,
+  AFTER_NUMBER_ARG,
+  FINISH_NUMBER_OF,
+  CHECK_ARRAY_METHOD,
+  FINISH_GROWING_CALL,
+  FINISH_AT_CALL,
+  AFTER_CONCAT_ARG,
+  CHECK_DICT_METHOD,
+  AFTER_SET_COMBINE_ARG,
+  CHECK_MAP_STATIC,
+  AFTER_GROUP_SOURCE,
+  AFTER_GROUP_CALLBACK,
+  CHECK_OBJECT_CALL,
+  AFTER_ENTRIES_PAIRS,
+  AFTER_ENTRIES_SOURCE,
+  AFTER_LISTING_ENUM,
+  AFTER_ENUM_LISTING,
+  AFTER_LISTING_ARG,
+  AFTER_LISTED_CLASS,
+  AFTER_LISTED_FIELDS,
+  MARK_FUSED,
+  CHECK_ITERATOR_FROM,
+  AFTER_ITERATOR_FROM_SOURCE,
+  CHECK_ARRAY_FROM,
+  AFTER_ARRAY_FROM_SOURCE,
+  AFTER_ARRAY_FROM_MAPPER,
+  CHECK_ITERATOR_METHOD,
+  AFTER_TAKE_COUNT,
+  AFTER_REDUCE_INIT_VALUE,
+  AFTER_ITERATOR_CALLBACK,
+  CHECK_CRYPTO_VALUE,
+  CHECK_CRYPTO_MODULE_MEMBER,
+  CHECK_CRYPTO_MEMBER,
+  CHECK_CRYPTO_NEW,
+  CHECK_X509_PARSE,
+  CHECK_WEB_CRYPTO_CALL,
+  CHECK_WEB_CRYPTO_MEMBER,
+  CRYPTO_VALUE,
+  AFTER_CRYPTO_DATA,
+  AFTER_CRYPTO_NUMBER,
+  AFTER_CRYPTO_KEY_OBJECT,
+  AFTER_PROVEN_NUMBER,
+  AFTER_CRYPTO_ENCODING,
+  CRYPTO_FINISH_STEP,
+  FINISH_CRYPTO_RESULT,
+  AFTER_REJECT_CALLBACK,
+  CHECK_CRYPTO_CALL,
+  AFTER_CRYPTO_ASYNC,
+  AFTER_FILL_TARGET,
+  AFTER_FILL_OFFSET,
+  AFTER_FILL_SIZE,
+  FINISH_KEY_PAIR,
+  CHECK_CRYPTO_METHOD,
+  FINISH_BYTES_TEXT,
+  CHECK_SUBTLE_INTRINSIC,
+  AFTER_SUBTLE_ARG,
+  CHECK_SUBTLE_CALL,
+  AFTER_JWK_ARGUMENT,
+  AFTER_JWK_WRAP,
+  AFTER_SUBTLE_FINISH,
+  WALK_EXTERNAL,
+  NOTE_HTTPS_CALL,
+  NOTE_TLS_METHOD,
+  NOTE_HTTPS_VALUE,
+  WALK_HEADERS_CALL,
+  NOTE_LIBRARY_INSTANCE,
+  INFER_PAIRS_SLOT,
+  CHECK_DICT_SOURCE_SLOT,
+  AFTER_DICT_SOURCE_SLOT,
+  FINISH_ITERATOR_FILTER,
+  FINISH_ITERATOR_FILTER_DEFINED,
 };
 
 struct DeclaredSignatureMatch {
@@ -1827,27 +2318,456 @@ struct CycleDraft {
   CycleStep roundStep;
 };
 
+struct MinMaxDraft {
+  CallExpr *call;
+  const Type *hint;
+  const Type *common;
+  bool hasSomeValue;
+  bool isNumeric;
+  size_t index;
+};
+
+struct ChildRunDraft {
+  CallExpr *call;
+  ChildFunction function;
+  llvm::StringRef functionName;
+  llvm::SMLoc loc;
+  bool isExec;
+  bool isFailed;
+  std::vector<Expr *> args;
+  size_t optionsAt;
+  unsigned encoding;
+  std::array<unsigned, 3> stdio;
+  bool isStdioGiven;
+  bool isViaShell;
+};
+
+enum class ResultHalf {
+  OK,
+  ERR,
+};
+
+struct ResultCombineDraft {
+  CallExpr *call;
+  std::string what;
+  bool isAll;
+};
+
+struct ResultMethodDraft {
+  CallExpr *call;
+  MemberExpr *member;
+  const Type *type;
+  const Type *value;
+  const Type *error;
+  Builtin builtin;
+  llvm::StringRef name;
+};
+
+enum class ListenerUse {
+  EMITTER,
+  TIMER,
+};
+
+struct CombinatorDraft {
+  CallExpr *call;
+  const Type *wantedElement;
+  std::string functionName;
+  bool isRace;
+};
+
+struct TimerPromiseDraft {
+  CallExpr *call;
+  llvm::StringRef functionName;
+  llvm::SMLoc loc;
+  const Type *expected;
+  bool isImmediate;
+  bool isInterval;
+};
+
+enum class EmitterMethodKind { None, Listen, Remove, Emit, Listeners, RawListeners, Count, RemoveAll };
+
+struct EmitterDraft {
+  CallExpr *call;
+  MemberExpr *member;
+  ClassDecl *classDecl;
+  const Type *receiver;
+  const Type *events;
+  CallReceiver callReceiver;
+};
+
+struct EmitShapeDraft {
+  const Type *args;
+  std::string event;
+  std::string first;
+};
+
+struct ListenerWantDraft {
+  const Type *args;
+  std::string event;
+  const Type *receiver;
+  const Type *sync;
+  const Type *async;
+};
+
+struct EventsFunctionDraft {
+  CallExpr *call;
+  llvm::StringRef functionName;
+  llvm::SMLoc loc;
+  EventsFunction function;
+  bool isTimed;
+};
+
+struct TargetCallDraft {
+  CallExpr *call;
+  MemberExpr *member;
+  ClassDecl *classDecl;
+  ClassDecl *eventClass;
+  bool isAdd;
+};
+
+struct FsDraft {
+  CallExpr *call;
+  FsFunction function;
+  llvm::StringRef functionName;
+  llvm::SMLoc loc;
+};
+
+enum class FsPathForm {
+  PATH_ONLY,
+  PATH_OR_DESCRIPTOR,
+};
+
+enum class FsValueSource {
+  STACK,
+  ZERO,
+  OCTAL,
+};
+
+struct ReflectGetDraft {
+  CallExpr *call;
+  NameExpr *object;
+  StringLitExpr *key;
+  const Type *type;
+  const Type *base;
+};
+
+struct MetadataKeyDraft {
+  const void *key;
+  std::string label;
+  llvm::SMLoc loc;
+  const Type *design;
+};
+
+struct MetadataCallDraft {
+  CallExpr *call;
+  MetadataKeyDraft key;
+  Builtin builtin;
+  const Type *expected;
+};
+
+struct StreamSidesDraft {
+  const Type *readable;
+  const Type *writable;
+  const Type *error;
+  bool isTransform;
+};
+
+enum class StreamChunkSide {
+  PUSHED,
+  WRITTEN,
+};
+
+struct StreamDataDraft {
+  CallExpr *call;
+  MemberExpr *member;
+  ClassDecl *classDecl;
+  StreamMethod method;
+  const Type *chunk;
+};
+
+struct StreamFunctionDraft {
+  CallExpr *call;
+  llvm::SMLoc loc;
+  ClassDecl *streamClass;
+  const Type *streamType;
+  const Type *callback;
+  bool isPromises;
+};
+
+struct ComposeDraft {
+  StreamFunctionDraft stream;
+  size_t index;
+  const Type *chunk;
+  const Type *headWritable;
+  const Type *tailReadable;
+};
+
+struct PipelineDraft {
+  StreamFunctionDraft stream;
+  size_t count;
+  Expr *callback;
+  Expr *options;
+  size_t index;
+  const Type *chunk;
+  bool isLastStream;
+  const Type *sinkValue;
+};
+
+struct StageShapeDraft {
+  llvm::SMLoc loc;
+  const Type *stageType;
+  bool isFirst;
+  bool isLast;
+};
+
+enum class FsStreamOption {
+  NONE,
+  OPTIONS,
+  ENCODING,
+};
+
+struct FsStreamDraft {
+  CallExpr *call;
+  llvm::SMLoc loc;
+  bool isReading;
+  const Type *options;
+  const Type *encodingType;
+  bool isText;
+  bool isFresh;
+  FsStreamOption option;
+};
+
+struct BufferCallDraft {
+  CallExpr *call;
+  MemberExpr *member;
+  const Type *bufferType;
+  llvm::StringRef name;
+};
+
+enum class BufferValueMethod {
+  FILL,
+  SEARCH,
+};
+
+struct BufferValueDraft {
+  BufferCallDraft buffer;
+  BufferValueMethod method;
+  BytesSearchMode mode;
+};
+
+struct TypedArrayDraft {
+  CallExpr *call;
+  MemberExpr *member;
+  const Type *arrayType;
+  const Type *element;
+  const Type *copyType;
+  std::string what;
+};
+
+struct DecoderNewDraft {
+  CallExpr *call;
+  const Type *type;
+  IntLitExpr *resolved;
+  Expr *label;
+};
+
+struct CryptoDataKinds {
+  bool isString;
+  bool isKey;
+  bool isArrayBuffer;
+};
+
+enum class DigestUse {
+  HASH,
+  HMAC,
+};
+
+enum class CryptoValueKind {
+  LITERAL,
+  DATA,
+  MD,
+  CIPHER,
+  NUMBER,
+  ENCODING,
+  ARG,
+  CHECKED,
+  KEY_OBJECT,
+  PROVEN_NUMBER,
+  TO_DOUBLE,
+  BUFFER_ENCODING,
+  SUBTLE_ARG,
+};
+
+struct CryptoValueItem {
+  CryptoValueKind kind;
+  Expr *arg;
+  std::string what;
+  CryptoDataKinds kinds;
+  DigestUse use;
+  const Type *type;
+  CallExpr *call;
+  size_t index;
+  int64_t low;
+  std::optional<int64_t> high;
+  char subtleKind;
+};
+
+enum class CryptoFinish {
+  CALL,
+  RESULT,
+  CHECKED_RESULT,
+  HASH_MD,
+  HMAC,
+  HASH_ONCE,
+  RANDOM_BYTES_START,
+  RANDOM_BYTES,
+  RANDOM_INT_START,
+  RANDOM_INT,
+  RANDOM_FILL,
+  TIMING_SAFE,
+  PBKDF2,
+  HKDF,
+  SCRYPT_OPTIONS,
+  SCRYPT_COST,
+  ARGON_OPTIONS,
+  ARGON,
+  CIPHER_OPTIONS,
+  SECRET_KEY,
+  KEY_DETAILS,
+  CREATE_KEY,
+  GENERATE_KEY,
+  SIGN_ONCE_START,
+  SIGN_ONCE_KEY,
+  SIGN_KEY_READY,
+  SIGN_ONCE_DONE,
+  SIGN_ONCE_FINISH,
+  DIFFIE_HELLMAN,
+  GENERATE_PRIME,
+  CHECK_PRIME,
+  PAIR_OPTIONS,
+  PAIR_MODULUS,
+  PAIR_NUMBERS,
+  PAIR_FINISH,
+  METHOD_DATA_ENCODING,
+  METHOD_DIGEST,
+  METHOD_SIGN,
+  METHOD_VERIFY_KEY,
+  METHOD_VERIFY,
+  METHOD_SET_AAD,
+  METHOD_EXPORT,
+  METHOD_KEY_EQUALS,
+  METHOD_X509_NAME,
+  METHOD_X509_VERIFY,
+  BYTES_OR_TEXT,
+  SUBTLE_INTRINSIC,
+};
+
+struct CryptoPlanDraft {
+  CallExpr *call;
+  MemberExpr *member;
+  CryptoSyncFunction function;
+  CryptoMethod method;
+  llvm::StringRef fn;
+  llvm::StringRef shown;
+  llvm::SMLoc loc;
+  CryptoFn fnCode;
+  const Type *resultType;
+  CryptoFinish next;
+  Expr *option;
+  int choice;
+  int flags;
+  bool isMethod;
+};
+
+struct KeyEncodingDraft {
+  llvm::SMLoc loc;
+  int format;
+  int flags;
+  Expr *type;
+  Expr *cipher;
+  Expr *passphrase;
+};
+
+struct SubtleDraft {
+  CallExpr *call;
+  MemberExpr *member;
+  SubtleMethod method;
+  std::vector<bool> checkedArgs;
+  std::optional<SubtleKeyFormat> keyFormat;
+  std::optional<LibraryFunction> target;
+  bool isBad;
+  bool isJwkWrapped;
+  const Type *expected;
+};
+
+struct IntrinsicDraft {
+  CallExpr *call;
+  NameExpr *name;
+  llvm::StringRef intrinsicName;
+  LibraryIntrinsic intrinsic;
+};
+
+struct GlobalFunctionDraft {
+  CallExpr *call;
+  llvm::StringRef functionName;
+  llvm::SMLoc loc;
+  bool isArgumentPlaced;
+};
+
+struct ArrayMethodDraft {
+  CallExpr *call;
+  MemberExpr *member;
+  const Type *expected;
+  const Type *arrayType;
+  const Type *element;
+  const VarSymbol *self;
+  size_t count;
+  const ArrayMethodInfo *method;
+};
+
+struct DictDraft {
+  CallExpr *call;
+  MemberExpr *member;
+  const Type *type;
+  const Type *key;
+  const Type *value;
+  Builtin builtin;
+  llvm::StringRef name;
+  bool isMap;
+};
+
+enum class GroupByOwner {
+  MAP,
+  OBJECT,
+};
+
+struct GroupByDraft {
+  CallExpr *call;
+  GroupByOwner owner;
+  std::string functionName;
+  const Type *element;
+};
+
+struct ListingDraft {
+  CallExpr *call;
+  GlobalMember listing;
+  llvm::StringRef functionName;
+};
+
+struct IteratorCallbackDraft {
+  CallExpr *call;
+  llvm::StringRef name;
+  IteratorMethod method;
+  Builtin builtin;
+  const Type *element;
+  const Type *accumulator;
+  bool isBoolean;
+  size_t count;
+};
+
 struct UseModule {
   static constexpr CheckTaskKind kind = CheckTaskKind::USE_MODULE;
   Module *module;
-};
-
-struct InstantiateEmitterParent {
-  static constexpr CheckTaskKind kind = CheckTaskKind::INSTANTIATE_EMITTER_PARENT;
-  ClassDecl *classDecl;
-  ClassDecl *emitter;
-  TypeRef *ref;
-};
-
-struct FindStreamHookParams {
-  static constexpr CheckTaskKind kind = CheckTaskKind::FIND_STREAM_HOOK_PARAMS;
-  FunctionDecl *functionDecl;
-};
-
-struct WalkHookParams {
-  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_HOOK_PARAMS;
-  const FunctionDecl *functionDecl;
-  std::vector<FunctionDecl *> inherited;
 };
 
 struct WalkIterableParam {
@@ -1863,19 +2783,9 @@ struct WalkGeneratorReturn {
   FuncSymbol *function;
 };
 
-struct WalkAsyncReturn {
-  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_ASYNC_RETURN;
-  const FunctionDecl *functionDecl;
-  FuncSymbol *function;
-};
-
 struct WalkStmt {
   static constexpr CheckTaskKind kind = CheckTaskKind::WALK_STMT;
   Stmt *stmt;
-};
-
-struct ReportUnlistenedErrors {
-  static constexpr CheckTaskKind kind = CheckTaskKind::REPORT_UNLISTENED_ERRORS;
 };
 
 struct EnterLoadBody {
@@ -1886,23 +2796,6 @@ struct LeaveLoadBody {
   static constexpr CheckTaskKind kind = CheckTaskKind::LEAVE_LOAD_BODY;
 };
 
-struct ImportBuiltinModule {
-  static constexpr CheckTaskKind kind = CheckTaskKind::IMPORT_BUILTIN_MODULE;
-  Module *module;
-  const ImportDecl *importDecl;
-};
-
-struct FindIntlType {
-  static constexpr CheckTaskKind kind = CheckTaskKind::FIND_INTL_TYPE;
-  llvm::StringRef name;
-};
-
-struct ResolveResultType {
-  static constexpr CheckTaskKind kind = CheckTaskKind::RESOLVE_RESULT_TYPE;
-  const TypeRef *ref;
-  TypeName typeName;
-};
-
 struct ResolveIteratorType {
   static constexpr CheckTaskKind kind = CheckTaskKind::RESOLVE_ITERATOR_TYPE;
   const TypeRef *ref;
@@ -1910,11 +2803,6 @@ struct ResolveIteratorType {
 
 struct ResolveDictType {
   static constexpr CheckTaskKind kind = CheckTaskKind::RESOLVE_DICT_TYPE;
-  const TypeRef *ref;
-};
-
-struct ResolvePromiseType {
-  static constexpr CheckTaskKind kind = CheckTaskKind::RESOLVE_PROMISE_TYPE;
   const TypeRef *ref;
 };
 
@@ -1942,11 +2830,6 @@ struct ClassValueType {
 struct LiteralShape {
   static constexpr CheckTaskKind kind = CheckTaskKind::LITERAL_SHAPE;
   const Expr *init;
-};
-
-struct CreatedType {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CREATED_TYPE;
-  const NewExpr *create;
 };
 
 struct InferReturnType {
@@ -5140,235 +6023,9 @@ struct AdaptLiteralSlot {
   const Type *to;
 };
 
-struct CheckDecimalLiteralRange {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DECIMAL_LITERAL_RANGE;
-  FloatLitExpr *literal;
-};
-
-struct CheckRegexLiteral {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_REGEX_LITERAL;
-  RegexLitExpr *literal;
-};
-
-struct CheckAwait {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_AWAIT;
-  AwaitExpr *await;
-  const Type *expected;
-};
-
-struct CheckUsedValue {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_USED_VALUE;
-  Expr *expr;
-};
-
-struct WalkRedundantTests {
-  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_REDUNDANT_TESTS;
-  BinaryExpr *binary;
-};
-
-struct MatchItems {
-  static constexpr CheckTaskKind kind = CheckTaskKind::MATCH_ITEMS;
-};
-
-struct WalkComparisonOperands {
-  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_COMPARISON_OPERANDS;
-  BinaryExpr *binary;
-};
-
-struct NeverOperands {
-  static constexpr CheckTaskKind kind = CheckTaskKind::NEVER_OPERANDS;
-  BinaryExpr *binary;
-};
-
-struct CheckDateOperands {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DATE_OPERANDS;
-  BinaryExpr *binary;
-};
-
-struct CheckDecimalComparison {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DECIMAL_COMPARISON;
-  BinaryExpr *binary;
-};
-
-struct CheckNullEquality {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_NULL_EQUALITY;
-  BinaryExpr *binary;
-};
-
-struct CheckJsonEquality {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_EQUALITY;
-  BinaryExpr *binary;
-};
-
-struct ReportDecimalMix {
-  static constexpr CheckTaskKind kind = CheckTaskKind::REPORT_DECIMAL_MIX;
-  BinaryExpr *binary;
-};
-
-struct CheckDecimalArithmetic {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DECIMAL_ARITHMETIC;
-  BinaryExpr *binary;
-};
-
-struct DateToTime {
-  static constexpr CheckTaskKind kind = CheckTaskKind::DATE_TO_TIME;
-};
-
-struct RegexToString {
-  static constexpr CheckTaskKind kind = CheckTaskKind::REGEX_TO_STRING;
-};
-
-struct DateToString {
-  static constexpr CheckTaskKind kind = CheckTaskKind::DATE_TO_STRING;
-};
-
-struct BytesToString {
-  static constexpr CheckTaskKind kind = CheckTaskKind::BYTES_TO_STRING;
-};
-
-struct NoteReflectedConversion {
-  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_REFLECTED_CONVERSION;
-  const Type *from;
-  const Type *to;
-  CastExpr *castExpr;
-};
-
-struct NoteConstructorFlow {
-  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_CONSTRUCTOR_FLOW;
-  const Type *from;
-  const Type *to;
-};
-
-struct CheckNodeName {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_NODE_NAME;
-  NameExpr *name;
-};
-
 struct FunctionTypeOf {
   static constexpr CheckTaskKind kind = CheckTaskKind::FUNCTION_TYPE_OF;
   FuncSymbol *function;
-};
-
-struct NoteHttpsValue {
-  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_HTTPS_VALUE;
-  const FunctionDecl *functionDecl;
-  llvm::SMLoc loc;
-};
-
-struct CheckJsonMember {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_MEMBER;
-  MemberExpr *member;
-};
-
-struct CheckResultMember {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_RESULT_MEMBER;
-  MemberExpr *member;
-};
-
-struct CheckRegexMember {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_REGEX_MEMBER;
-  MemberExpr *member;
-};
-
-struct CheckMatchMember {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_MATCH_MEMBER;
-  MemberExpr *member;
-};
-
-struct CheckDateMember {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DATE_MEMBER;
-  MemberExpr *member;
-};
-
-struct CheckBytesMember {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BYTES_MEMBER;
-  MemberExpr *member;
-};
-
-struct CheckCryptoMember {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_CRYPTO_MEMBER;
-  MemberExpr *member;
-};
-
-struct CheckRuntimeMember {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_RUNTIME_MEMBER;
-  MemberExpr *member;
-};
-
-struct CheckRegExpStaticMember {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_REG_EXP_STATIC_MEMBER;
-  MemberExpr *member;
-};
-
-struct CheckWebCryptoMember {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_WEB_CRYPTO_MEMBER;
-  MemberExpr *member;
-};
-
-struct CheckNodeMember {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_NODE_MEMBER;
-  MemberExpr *member;
-};
-
-struct CheckProcessMember {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_PROCESS_MEMBER;
-  MemberExpr *member;
-};
-
-struct CheckBytesStaticMember {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BYTES_STATIC_MEMBER;
-  MemberExpr *member;
-};
-
-struct CheckIntlMember {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_INTL_MEMBER;
-  MemberExpr *member;
-  const Type *expected;
-};
-
-struct CheckMatchIndex {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_MATCH_INDEX;
-  IndexExpr *index;
-};
-
-struct CheckJsonIndex {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_INDEX;
-  IndexExpr *index;
-};
-
-struct CheckBytesIndex {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BYTES_INDEX;
-  IndexExpr *index;
-};
-
-struct CheckProcessEnvIndex {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_PROCESS_ENV_INDEX;
-  IndexExpr *index;
-};
-
-struct CheckBytesUnionMember {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BYTES_UNION_MEMBER;
-  MemberExpr *member;
-};
-
-struct ProcessAliasSlot {
-  static constexpr CheckTaskKind kind = CheckTaskKind::PROCESS_ALIAS_SLOT;
-  Expr **slot;
-};
-
-struct MarkFused {
-  static constexpr CheckTaskKind kind = CheckTaskKind::MARK_FUSED;
-  Expr *expr;
-};
-
-struct ResolveWeakRefType {
-  static constexpr CheckTaskKind kind = CheckTaskKind::RESOLVE_WEAK_REF_TYPE;
-  const TypeRef *ref;
-};
-
-struct SegmentsArraySlot {
-  static constexpr CheckTaskKind kind = CheckTaskKind::SEGMENTS_ARRAY_SLOT;
-  Expr **slot;
 };
 
 struct NoteInheritedReturn {
@@ -5376,389 +6033,9 @@ struct NoteInheritedReturn {
   const FunctionDecl *functionDecl;
 };
 
-struct CheckUsedCallbackValue {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_USED_CALLBACK_VALUE;
-  Expr *expr;
-};
-
-struct WalkForAwait {
-  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_FOR_AWAIT;
-  ForOfStmt *forOf;
-};
-
-struct NoteErrorsHandled {
-  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_ERRORS_HANDLED;
-  const Expr *expr;
-};
-
 struct FindCallCycles {
   static constexpr CheckTaskKind kind = CheckTaskKind::FIND_CALL_CYCLES;
   std::vector<FunctionDecl *> functions;
-};
-
-struct CheckProcessAssign {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_PROCESS_ASSIGN;
-  AssignExpr *assign;
-};
-
-struct CheckJsonTarget {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_TARGET;
-  Expr *target;
-};
-
-struct CheckRuntimeTarget {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_RUNTIME_TARGET;
-  MemberExpr *member;
-};
-
-struct WalkDecimalAssign {
-  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_DECIMAL_ASSIGN;
-  AssignExpr *assign;
-  BinaryOp op;
-};
-
-struct WalkBytesStore {
-  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_BYTES_STORE;
-  IndexExpr *index;
-  const Expr *value;
-};
-
-struct CheckNodeCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_NODE_CALL;
-  CallExpr *call;
-  const Type *expected;
-};
-
-struct CheckPromiseStatic {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_PROMISE_STATIC;
-  CallExpr *call;
-  MemberExpr *member;
-  const Type *expected;
-};
-
-struct CheckResultStatic {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_RESULT_STATIC;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckJsonStatic {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_STATIC;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckArrayIsArray {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_ARRAY_IS_ARRAY;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckJsonIsJson {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_IS_JSON;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckReflectCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_REFLECT_CALL;
-  CallExpr *call;
-  MemberExpr *member;
-  const Type *expected;
-};
-
-struct CheckConsoleCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_CONSOLE_CALL;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckProcessCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_PROCESS_CALL;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckBitCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BIT_CALL;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckMathCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_MATH_CALL;
-  CallExpr *call;
-  MemberExpr *member;
-  const Type *expected;
-};
-
-struct CheckRegExpStatic {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_REG_EXP_STATIC;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckIntlCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_INTL_CALL;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckLocaleStatic {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_LOCALE_STATIC;
-  CallExpr *call;
-  MemberExpr *member;
-  const Type *expected;
-};
-
-struct CheckIntlStatic {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_INTL_STATIC;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckDecimalStatic {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DECIMAL_STATIC;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckX509Parse {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_X509_PARSE;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckWebCryptoCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_WEB_CRYPTO_CALL;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckBytesStatic {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BYTES_STATIC;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckNumberStatic {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_NUMBER_STATIC;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckObjectCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_OBJECT_CALL;
-  CallExpr *call;
-  MemberExpr *member;
-  const Type *expected;
-};
-
-struct CheckIteratorFrom {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_ITERATOR_FROM;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckArrayFrom {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_ARRAY_FROM;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckMapStatic {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_MAP_STATIC;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckRuntimeMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_RUNTIME_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-  const Type *expected;
-};
-
-struct CheckResultMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_RESULT_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-  const Type *expected;
-};
-
-struct CheckJsonMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckRegexMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_REGEX_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckDateMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DATE_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckDateFormatMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DATE_FORMAT_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckIntlMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_INTL_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckCryptoMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_CRYPTO_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckWeakRefMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_WEAK_REF_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckBytesMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BYTES_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-  const Type *expected;
-};
-
-struct CheckPromiseMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_PROMISE_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-  const Type *expected;
-};
-
-struct CheckTimerMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_TIMER_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckSubtleCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_SUBTLE_CALL;
-  CallExpr *call;
-  MemberExpr *member;
-  const Type *expected;
-};
-
-struct WalkHeadersCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_HEADERS_CALL;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckStringLocale {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_STRING_LOCALE;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckNumberLocale {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_NUMBER_LOCALE;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckDecimalMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DECIMAL_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckIteratorMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_ITERATOR_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckDictMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DICT_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckStringMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_STRING_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckArrayMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_ARRAY_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-  const Type *expected;
-};
-
-struct CheckNumberMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_NUMBER_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct CheckLibCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_LIB_CALL;
-  CallExpr *call;
-  NameExpr *name;
-};
-
-struct CheckResultCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_RESULT_CALL;
-  CallExpr *call;
-  NameExpr *name;
-  const Type *expected;
-};
-
-struct CheckJsonGlobal {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_GLOBAL;
-  CallExpr *call;
-  NameExpr *name;
-};
-
-struct CheckAsyncGlobal {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_ASYNC_GLOBAL;
-  CallExpr *call;
-  NameExpr *name;
-};
-
-struct CheckGlobalCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_GLOBAL_CALL;
-  CallExpr *call;
-  NameExpr *name;
-};
-
-struct CheckEventsLibraryCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_EVENTS_LIBRARY_CALL;
-  CallExpr *call;
-  NameExpr *name;
-  FuncSymbol *function;
-};
-
-struct CheckStreamLibraryCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_STREAM_LIBRARY_CALL;
-  CallExpr *call;
-  NameExpr *name;
-  FuncSymbol *function;
-};
-
-struct NoteHttpsCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_HTTPS_CALL;
-  CallExpr *call;
-  const FunctionDecl *functionDecl;
 };
 
 struct CheckGenericCall {
@@ -5770,80 +6047,9 @@ struct CheckGenericCall {
   llvm::ArrayRef<TypeRef> typeArgs;
 };
 
-struct CheckCryptoNew {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_CRYPTO_NEW;
-  NewExpr *newExpr;
-  llvm::StringRef name;
-};
-
-struct CheckLocaleNew {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_LOCALE_NEW;
-  NewExpr *newExpr;
-  const Type *expected;
-};
-
-struct CheckDateFormatNew {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DATE_FORMAT_NEW;
-  NewExpr *newExpr;
-};
-
-struct CheckIntlNew {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_INTL_NEW;
-  NewExpr *newExpr;
-};
-
-struct NoteLibraryInstance {
-  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_LIBRARY_INSTANCE;
-  NewExpr *made;
-  const ClassDecl *classDecl;
-};
-
-struct CheckRegExpConstructor {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_REG_EXP_CONSTRUCTOR;
-  NewExpr *newExpr;
-};
-
-struct CheckDateNew {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DATE_NEW;
-  NewExpr *newExpr;
-};
-
-struct CheckPromiseNew {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_PROMISE_NEW;
-  NewExpr *newExpr;
-  const Type *expected;
-};
-
-struct CheckWeakRefNew {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_WEAK_REF_NEW;
-  NewExpr *newExpr;
-  const Type *expected;
-};
-
-struct CheckBytesNew {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BYTES_NEW;
-  NewExpr *newExpr;
-  const Type *bytes;
-};
-
 struct FindMethodCycles {
   static constexpr CheckTaskKind kind = CheckTaskKind::FIND_METHOD_CYCLES;
   std::vector<FunctionDecl *> methods;
-};
-
-struct CheckJsonObjectLit {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_OBJECT_LIT;
-  ObjectLitExpr *literal;
-};
-
-struct CheckJsonArrayLit {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_ARRAY_LIT;
-  ArrayLitExpr *literal;
-};
-
-struct WalkExternal {
-  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_EXTERNAL;
-  FunctionDecl *functionDecl;
 };
 
 struct EnterReturnBody {
@@ -5870,86 +6076,9 @@ struct EnterHomeModule {
   const FunctionDecl *functionDecl;
 };
 
-struct NoteTlsMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_TLS_METHOD;
-  const MemberExpr *member;
-  const ClassDecl *classDecl;
-};
-
-struct CheckStatsDate {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_STATS_DATE;
-  MemberExpr *member;
-  ClassDecl *classDecl;
-};
-
-struct ReportEmitterMethodValue {
-  static constexpr CheckTaskKind kind = CheckTaskKind::REPORT_EMITTER_METHOD_VALUE;
-  MemberExpr *member;
-};
-
-struct CheckFsClassMethod {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_FS_CLASS_METHOD;
-  CallExpr *call;
-  MemberExpr *member;
-  ClassDecl *classDecl;
-};
-
-struct CheckStreamCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_STREAM_CALL;
-  CallExpr *call;
-  MemberExpr *member;
-  ClassDecl *classDecl;
-};
-
-struct CheckEmitterCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_EMITTER_CALL;
-  CallExpr *call;
-  MemberExpr *member;
-  ClassDecl *classDecl;
-  CallReceiver receiver;
-};
-
-struct CheckEventTargetCall {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_EVENT_TARGET_CALL;
-  CallExpr *call;
-  MemberExpr *member;
-  ClassDecl *classDecl;
-};
-
-struct CheckEventsFunction {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_EVENTS_FUNCTION;
-  CallExpr *call;
-  llvm::StringRef name;
-  llvm::SMLoc loc;
-};
-
-struct CheckStreamFrom {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_STREAM_FROM;
-  CallExpr *call;
-  MemberExpr *member;
-};
-
-struct WriteDesignRecords {
-  static constexpr CheckTaskKind kind = CheckTaskKind::WRITE_DESIGN_RECORDS;
-  ClassDecl *classDecl;
-  ClassField *field;
-  FunctionDecl *method;
-  const FunctionDecl *constructor;
-  llvm::SMLoc loc;
-};
-
 struct BuildVtable {
   static constexpr CheckTaskKind kind = CheckTaskKind::BUILD_VTABLE;
   ClassDecl *classDecl;
-};
-
-struct NoteRegexVariable {
-  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_REGEX_VARIABLE;
-  const VarSymbol *variable;
-  const Expr *value;
-  bool isConst;
-  llvm::ArrayRef<Stmt *> block;
-  size_t blockIndex;
 };
 
 struct LeaveBranch {
@@ -6510,20 +6639,9 @@ struct StartPredicateCopy {
   FunctionDecl *functionDecl;
 };
 
-struct AddByteCallbackFacts {
-  static constexpr CheckTaskKind kind = CheckTaskKind::ADD_BYTE_CALLBACK_FACTS;
-  FunctionDecl *functionDecl;
-};
-
 struct AddIndexCallbackFacts {
   static constexpr CheckTaskKind kind = CheckTaskKind::ADD_INDEX_CALLBACK_FACTS;
   FunctionDecl *functionDecl;
-};
-
-struct CheckByteCallbackResult {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BYTE_CALLBACK_RESULT;
-  const FunctionDecl *functionDecl;
-  Expr *value;
 };
 
 struct AddConditionFacts {
@@ -6873,6 +6991,13 @@ struct CheckGenericNew {
 
 struct AfterEmitterNew {
   static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_EMITTER_NEW;
+  NewExpr *newExpr;
+  ClassDecl *classDecl;
+  const Type *expected;
+};
+
+struct AfterStreamNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_STREAM_NEW;
   NewExpr *newExpr;
   ClassDecl *classDecl;
   const Type *expected;
@@ -7354,26 +7479,6 @@ struct AfterJoinedInstance {
   Expr *expr;
 };
 
-struct CheckEmitterNew {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_EMITTER_NEW;
-  NewExpr *newExpr;
-  ClassDecl *classDecl;
-  const Type *expected;
-};
-
-struct CheckStreamNew {
-  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_STREAM_NEW;
-  NewExpr *newExpr;
-  ClassDecl *classDecl;
-  const Type *expected;
-};
-
-struct AddStreamBases {
-  static constexpr CheckTaskKind kind = CheckTaskKind::ADD_STREAM_BASES;
-  ClassDecl *instance;
-  llvm::SMLoc loc;
-};
-
 struct WalkVariants {
   static constexpr CheckTaskKind kind = CheckTaskKind::WALK_VARIANTS;
   ClassDecl *classDecl;
@@ -7479,12 +7584,3588 @@ struct AfterBodyNowInference {
   FunctionDecl *functionDecl;
 };
 
+struct CheckConsoleCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_CONSOLE_CALL;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct NextConsoleArgument {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NEXT_CONSOLE_ARGUMENT;
+  CallExpr *call;
+  size_t index;
+};
+
+struct AfterConsoleArgument {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CONSOLE_ARGUMENT;
+  CallExpr *call;
+  size_t index;
+};
+
+struct RejectSpreadCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::REJECT_SPREAD_CALL;
+  CallExpr *call;
+};
+
+struct MarkCallFailed {
+  static constexpr CheckTaskKind kind = CheckTaskKind::MARK_CALL_FAILED;
+  CallExpr *call;
+};
+
+struct CallLibraryFunction {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CALL_LIBRARY_FUNCTION;
+  CallExpr *call;
+  llvm::StringRef name;
+  std::vector<const Type *> bound;
+  std::vector<bool> given;
+  llvm::SMLoc loc;
+};
+
+struct CallLibraryStatic {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CALL_LIBRARY_STATIC;
+  CallExpr *call;
+  ClassDecl *classDecl;
+  llvm::StringRef name;
+  std::vector<const Type *> bound;
+  std::vector<bool> given;
+  llvm::SMLoc loc;
+};
+
+struct AfterLibraryReturn {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_LIBRARY_RETURN;
+  CallExpr *call;
+  FuncSymbol *function;
+  std::vector<const Type *> bound;
+  std::vector<bool> given;
+  llvm::SMLoc loc;
+};
+
+struct AfterLibraryCallee {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_LIBRARY_CALLEE;
+  CallExpr *call;
+  FuncSymbol *function;
+  std::vector<const Type *> bound;
+  std::vector<bool> given;
+  llvm::SMLoc loc;
+  const Type *returnType;
+};
+
+struct FinishLibraryCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_LIBRARY_CALL;
+  CallExpr *call;
+  FuncSymbol *callee;
+  std::vector<bool> given;
+  llvm::SMLoc loc;
+  bool hasReturn;
+  bool isOwnParams;
+};
+
+struct ReadNodeOptions {
+  static constexpr CheckTaskKind kind = CheckTaskKind::READ_NODE_OPTIONS;
+  CallExpr *call;
+  size_t index;
+  llvm::StringRef functionName;
+  std::vector<NodeOption> allowed;
+};
+
+struct PreludeTypeOf {
+  static constexpr CheckTaskKind kind = CheckTaskKind::PRELUDE_TYPE_OF;
+  PreludeType type;
+};
+
+struct AnswerAliasType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::ANSWER_ALIAS_TYPE;
+  TypeAliasDecl *alias;
+};
+
+struct CallLibraryMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CALL_LIBRARY_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+  ClassDecl *classDecl;
+  llvm::StringRef name;
+  std::vector<const Type *> bound;
+  std::vector<bool> given;
+  CallReceiver receiver;
+};
+
+struct AfterMethodReturn {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_METHOD_RETURN;
+  CallLibraryMethod draft;
+  FuncSymbol *function;
+};
+
+struct AfterMethodCallee {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_METHOD_CALLEE;
+  CallLibraryMethod draft;
+  FuncSymbol *function;
+  const Type *returnType;
+};
+
+struct AfterLibraryMemberType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_LIBRARY_MEMBER_TYPE;
+  MemberExpr *member;
+};
+
+struct PushCheckedValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::PUSH_CHECKED_VALUE;
+  Expr *expr;
+};
+
+struct ResolveWeakRefType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::RESOLVE_WEAK_REF_TYPE;
+  const TypeRef *ref;
+};
+
+struct AfterWeakRefTarget {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_WEAK_REF_TARGET;
+  const TypeRef *ref;
+};
+
+struct CheckWeakRefNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_WEAK_REF_NEW;
+  NewExpr *newExpr;
+  const Type *expected;
+};
+
+struct AfterWeakRefTypeArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_WEAK_REF_TYPE_ARG;
+  NewExpr *newExpr;
+};
+
+struct AfterWeakRefValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_WEAK_REF_VALUE;
+  NewExpr *newExpr;
+  const Type *written;
+};
+
+struct FinishWeakRefNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_WEAK_REF_NEW;
+  NewExpr *newExpr;
+  const Type *target;
+};
+
+struct CheckWeakRefMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_WEAK_REF_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct CheckOsCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_OS_CALL;
+  CallExpr *call;
+  llvm::StringRef functionName;
+  llvm::SMLoc loc;
+};
+
+struct CheckOsValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_OS_VALUE;
+  llvm::StringRef name;
+  Expr *expr;
+};
+
+struct CheckPathCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_PATH_CALL;
+  CallExpr *call;
+  NodeModule module;
+  llvm::StringRef functionName;
+  llvm::SMLoc loc;
+};
+
+struct CheckPathValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_PATH_VALUE;
+  NodeModule module;
+  llvm::StringRef name;
+  Expr *expr;
+};
+
+struct AfterFormatPathArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FORMAT_PATH_ARG;
+  CallExpr *call;
+  Expr *style;
+};
+
+struct FinishFormatPath {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_FORMAT_PATH;
+  CallExpr *call;
+  Expr *style;
+};
+
+struct FinishTextPath {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_TEXT_PATH;
+  CallExpr *call;
+  Expr *style;
+  Builtin builtin;
+  PathFunctionForm form;
+};
+
+struct CheckMathCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_MATH_CALL;
+  CallExpr *call;
+  MemberExpr *member;
+  const Type *expected;
+};
+
+struct CheckBitCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BIT_CALL;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct NumericArgSlot {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NUMERIC_ARG_SLOT;
+  Expr **slot;
+  const Type *hint;
+};
+
+struct AfterNumericArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_NUMERIC_ARG;
+  Expr **slot;
+};
+
+struct AfterMathArgs {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_MATH_ARGS;
+  CallExpr *call;
+  MemberExpr *member;
+  const MathFunctionInfo *function;
+};
+
+struct NextInt32Arg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NEXT_INT32_ARG;
+  CallExpr *call;
+  bool isImul;
+  std::string what;
+  size_t index;
+};
+
+struct AfterInt32Arg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_INT32_ARG;
+  CallExpr *call;
+  bool isImul;
+  std::string what;
+  size_t index;
+};
+
+struct BitsArgSlot {
+  static constexpr CheckTaskKind kind = CheckTaskKind::BITS_ARG_SLOT;
+  Expr **slot;
+  unsigned bits;
+  const Type *literal;
+  std::string what;
+};
+
+struct FinishBitsArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_BITS_ARG;
+  Expr **slot;
+  unsigned bits;
+  const Type *literal;
+  std::string what;
+};
+
+struct AfterWrapFromArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_WRAP_FROM_ARG;
+  CallExpr *call;
+  MemberExpr *inner;
+  unsigned bits;
+};
+
+struct NextWideBitsArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NEXT_WIDE_BITS_ARG;
+  CallExpr *call;
+  const BitFunctionInfo *function;
+  std::string what;
+  size_t index;
+};
+
+struct AfterWideBitsArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_WIDE_BITS_ARG;
+  CallExpr *call;
+  const BitFunctionInfo *function;
+  std::string what;
+  size_t index;
+};
+
+struct AfterPlainBitsArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_PLAIN_BITS_ARG;
+  CallExpr *call;
+  const BitFunctionInfo *function;
+  std::string what;
+};
+
+struct AfterBitCount {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_BIT_COUNT;
+  CallExpr *call;
+  const BitFunctionInfo *function;
+  std::string what;
+};
+
+struct FinishPlainBits {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_PLAIN_BITS;
+  CallExpr *call;
+  const BitFunctionInfo *function;
+};
+
+struct NextMinMaxArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NEXT_MIN_MAX_ARG;
+  MinMaxDraft draft;
+};
+
+struct AfterMinMaxValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_MIN_MAX_VALUE;
+  MinMaxDraft draft;
+};
+
+struct AfterMinMaxSpread {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_MIN_MAX_SPREAD;
+  MinMaxDraft draft;
+};
+
+struct CheckProcessCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_PROCESS_CALL;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct CheckProcessMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_PROCESS_MEMBER;
+  MemberExpr *member;
+};
+
+struct CheckProcessEnvIndex {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_PROCESS_ENV_INDEX;
+  IndexExpr *index;
+};
+
+struct CheckProcessAssign {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_PROCESS_ASSIGN;
+  AssignExpr *assign;
+};
+
+struct ExitCodeSlot {
+  static constexpr CheckTaskKind kind = CheckTaskKind::EXIT_CODE_SLOT;
+  Expr **slot;
+};
+
+struct AfterExitCode {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_EXIT_CODE;
+  Expr **slot;
+};
+
+struct AfterStdStreamChunk {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_STD_STREAM_CHUNK;
+  CallExpr *call;
+  bool isStdout;
+};
+
+struct AfterSignalListener {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_SIGNAL_LISTENER;
+  CallExpr *call;
+  MemberExpr *member;
+  ProcessMember method;
+};
+
+struct AfterProcessStream {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_PROCESS_STREAM;
+  MemberExpr *member;
+};
+
+struct AfterEnvIndexKey {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ENV_INDEX_KEY;
+  IndexExpr *index;
+};
+
+struct AfterAssignedExitCode {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ASSIGNED_EXIT_CODE;
+  AssignExpr *assign;
+};
+
+struct CheckDateStatic {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DATE_STATIC;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct CheckDateStaticMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DATE_STATIC_MEMBER;
+  MemberExpr *member;
+};
+
+struct DateToTime {
+  static constexpr CheckTaskKind kind = CheckTaskKind::DATE_TO_TIME;
+};
+
+struct DateToString {
+  static constexpr CheckTaskKind kind = CheckTaskKind::DATE_TO_STRING;
+};
+
+struct TimeArgSlot {
+  static constexpr CheckTaskKind kind = CheckTaskKind::TIME_ARG_SLOT;
+  Expr **slot;
+};
+
+struct FinishTimeArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_TIME_ARG;
+  Expr **slot;
+};
+
+struct AfterDateFields {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DATE_FIELDS;
+  std::vector<Expr *> *args;
+  size_t first;
+  llvm::StringRef setter;
+};
+
+struct CheckDateNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DATE_NEW;
+  NewExpr *newExpr;
+};
+
+struct FinishDateFields {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_DATE_FIELDS;
+  llvm::SMLoc loc;
+  std::vector<Expr *> *args;
+};
+
+struct AfterDateValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DATE_VALUE;
+  llvm::SMLoc loc;
+  std::vector<Expr *> *args;
+  const Expr *given;
+};
+
+struct FinishDateTime {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_DATE_TIME;
+  llvm::SMLoc loc;
+  std::vector<Expr *> *args;
+};
+
+struct CheckDateFunction {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DATE_FUNCTION;
+  CallExpr *call;
+  NameExpr *name;
+};
+
+struct FinishDateParse {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_DATE_PARSE;
+  CallExpr *call;
+};
+
+struct CheckDateMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DATE_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct DateSetterFields {
+  static constexpr CheckTaskKind kind = CheckTaskKind::DATE_SETTER_FIELDS;
+  CallExpr *call;
+  MemberExpr *member;
+  int field;
+};
+
+struct FinishDateSetter {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_DATE_SETTER;
+  CallExpr *call;
+  MemberExpr *member;
+  int field;
+};
+
+struct AfterLocaleArgs {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_LOCALE_ARGS;
+  CallExpr *call;
+  MemberExpr *member;
+  int field;
+};
+
+struct CheckDateMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DATE_MEMBER;
+  MemberExpr *member;
+};
+
+struct CheckDateOperands {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DATE_OPERANDS;
+  BinaryExpr *binary;
+};
+
+struct CheckNextTick {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_NEXT_TICK;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct ResolvePromiseType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::RESOLVE_PROMISE_TYPE;
+  const TypeRef *ref;
+};
+
+struct FinishPromiseType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_PROMISE_TYPE;
+};
+
+struct WalkAsyncReturn {
+  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_ASYNC_RETURN;
+  const FunctionDecl *functionDecl;
+  FuncSymbol *function;
+};
+
 struct FinishAsyncReturns {
   static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_ASYNC_RETURNS;
   FuncSymbol *function;
   std::vector<ReturnStmt *> returns;
 };
 
-using CheckTask = Union<UseModule, InstantiateEmitterParent, FindStreamHookParams, WalkHookParams, WalkIterableParam, WalkGeneratorReturn, WalkAsyncReturn, WalkStmt, ReportUnlistenedErrors, EnterLoadBody, LeaveLoadBody, ImportBuiltinModule, FindIntlType, ResolveResultType, ResolveIteratorType, ResolveDictType, ResolvePromiseType, MakeMethodDescriptor, ResolveConstructorType, CheckConstructorArgs, ClassValueType, LiteralShape, CreatedType, InferReturnType, ReturnTypeOf, ResolveTypeRef, ResolveInnerTypeRef, ResolveObjectFields, WriteResolvedType, ResolveTypeAnswer, FinishTypeUse, FinishArrayType, NextUnionMember, AfterUnionMember, FinishAliasType, FinishEnumType, FinishEnumMember, FinishIntlType, NextTypeArgument, AfterTypeArgument, FinishDescriptor, FinishInstanceType, NextUtilityOperand, AfterUtilityOperand, AfterUtilitySignature, NextFunctionParam, AfterFunctionParam, FinishFunctionType, FinishAssertsType, FinishTupleType, NextObjectField, AfterObjectField, AfterObjectSignature, EvalTypeOp, EvalKeyOf, EvalIndexed, EvalSpread, StartKeyOf, AfterKeyOfOperand, AfterKeyOfEval, StartIndexed, AfterIndexedOperands, AfterIndexedEval, EvalMapped, NextMappedKey, AfterMappedValue, AfterMappedRename, StartMapped, AfterMappedKeys, AfterMappedSource, AfterMappedParts, StartIntersection, NextIntersectionPart, AfterIntersectionPart, StartConditional, AfterConditionalCheck, AfterInferConstraint, AfterConditionalPattern, ChooseBranch, CloseConditionalScope, AfterDistributedMember, EvalConditional, AfterEvalConditional, EvalFiltered, FinishFiltered, PrepareExpectation, FinishBranches, StartTemplate, AfterTemplateHole, FinishTemplate, EvalTemplate, EvalStringCase, EvalFunctionPart, StartTypeOf, FindTypeOfCandidates, AfterTypeOfCandidate, AfterTypeOfMember, AfterFunctionValue, FinishDeclaredFunctionValue, SignatureForUtility, ContinueSignature, AfterErasedReturn, ResolveImport, StartTopLevel, NextTopLevelItem, FinishTopLevel, CloseTopLevel, StartLoadEarly, LoadEarlyBody, FinishLoadEarly, BindLoadedNames, ResolveAlias, StartAlias, EnterAlias, FinishAlias, ResolveEnum, EnterEnum, NextEnumMember, StartFunctionSymbol, FinishFunctionSymbol, StartFunctionParams, StartFunctionParam, FinishFunctionParam, StartFunctionReturn, FinishFunctionReturn, StartReturnType, FinishAssertsReturn, FinishPredicateReturn, ResolveClass, OpenClassScope, CloseClassScope, ResolveClassMembers, StartClassField, FinishClassField, StartClassBases, FinishClassBases, FinishParentClass, FinishLinkParent, FinishImplemented, AddBase, DeclareMethods, FinishConstructor, FinishClassMethod, StartFieldMethod, FinishFieldMethod, StartTypedMethod, FinishTypedParam, FinishTypedMethod, FinishMethods, NextFieldDefault, ContinueFieldDefault, MakeFieldInit, FinishFieldInit, FinishVariants, FinishItemMethods, CompleteClass, FinishCompletion, StartInterfaceFields, StartInterfaceBase, FinishInterfaceBase, FinishInterfaceFields, ReportVariantPair, StartLinkClasses, FinishLinkClasses, StartLinkOverrides, FinishLinkOverrides, LinkOverride, StartDeclarationFile, FinishDeclarationFile, StartDeclaredAlias, FinishDeclaredAlias, StartDeclaredFunction, StartDeclaredClass, FinishDeclaredClass, StartDeclaredMember, FinishDeclaredField, StartDeclaredParam, FinishDeclaredParam, FinishDeclaredReturn, CheckExpr, CheckExprSlot, WriteCheckedSlot, ReportError, CheckExprKind, AfterConditionTest, AfterElseFirst, AfterThenSecond, AfterThenFirst, AfterElseSecond, FinishConditional, JoinConditionalBranches, AfterCastTarget, FinishCast, NextSequenceItem, AfterSequenceItem, FinishSequence, FinishOptionalChain, CheckIntLiteral, CheckTemplate, CheckArrayLiteral, CheckObjectLiteral, NextTemplatePart, AfterTemplatePart, AfterTemplateType, AfterComputedKey, AfterUnionNeeds, NextInferredKey, AfterInferredKey, NextKeyedProperty, NextNamedProperty, AfterUntargetedField, NextRecordProperty, AfterRecordSpread, NextSpreadProperty, AfterNamedProp, AfterSpreadProp, NextLiteralMember, AfterLiteralField, AfterLiteralMethods, WalkLiteralMethods, WalkLiteralMethod, AfterLiteralMethodReturn, MatchLiteralTarget, FinishPairLiteral, NextArrayElement, AfterLiteralElement, AfterSpreadElement, AfterSpreadMatch, CheckEnumObject, AfterEnumObjectResolved, RememberEnumObject, CheckField, CheckFieldCall, AfterFieldCallee, CheckObjectFieldTarget, CheckKeyedField, AfterTupleKey, AfterObjectKey, ObjectKeyReady, CheckName, LookupName, VariableTypeKnown, FinishVariableName, FinishFunctionName, ConstText, ToInt32, NoteUnsignedVar, CheckShift, CheckArithmetic, AfterArithmeticRight, AfterArithmeticLeft, AfterArithmeticOperands, FinishArithmetic, ResolveArithmetic, ArithmeticResult, FinishIntegerArithmetic, CheckWrappingDivisor, StartBits, FinishBits, FoldBinaryNode, CheckSign, FinishSign, SignOperandReady, CheckBitNot, FinishBitNot, CheckConcatenation, TrackMixedConcat, ToStringSlot, ToStringOperand, MarkTextCast, CheckMember, AfterListPart, AfterNodeMember, AfterProcessMember, AfterBytesStaticMember, AfterMemberObject, MemberOfCommonBase, AfterEnumResolved, CheckTupleMember, CheckTupleMethod, FinishTupleMethod, ReportTupleJoin, FinishTupleJoin, CheckUnionMember, CheckUnionFieldTarget, CheckUnionMethodCall, ResolveUnionMethodCall, ReportUnionMethodCall, CheckUnknownMember, CheckUnknownMethod, FinishUnknownStaticCall, FinishUnknownMethod, CheckIndex, CheckPosition, FinishPosition, AfterIndexListPart, AfterProcessEnvIndex, AfterIndexObject, FinishGenericIndex, WriteIndexType, FinishUnknownIndex, ReportUndefinedIndex, FinishPositionIndex, AfterEnumIndexResolved, FinishEnumIndex, EnumIndexValue, CheckUnary, CheckBinary, FinishTypeOf, FinishVoid, FinishNonNull, CheckInOperator, AfterInOperands, CheckEquality, AfterEqualityOperands, FinishEqualOperands, CheckComparison, AfterComparisonOperands, FinishComparison, CompareOperands, FinishNumberComparison, WalkTypeOfName, CheckAssign, CheckUpdate, CheckDeleteValue, AfterTargetAlias, AfterProcessAssign, AfterLogicalAssign, AfterNullishHolder, AfterRecordFieldNullish, AfterIndexNullish, AfterFieldNullish, AfterNullishVariable, FinishNullishVariable, FinishVarTarget, VarTargetTypeKnown, AnswerVarTarget, DiscardChecked, AfterIndexTargetObject, AfterGenericTarget, AfterTypedArrayPosition, AfterKeyedTarget, AfterArrayPosition, AfterMemberTargetObject, AfterAssignTarget, AfterInferredField, AfterPlainValue, AfterStringCompound, AfterNumericCompound, CheckAssignDivisor, CompoundFacts, AfterAssignValue, AssignedLength, LengthFacts, AssignedField, AfterUpdateTarget, AfterMemberDelete, AfterOtherDelete, AfterIndexDeleteObject, AfterIndexDeleteKey, CheckCall, WalkArgsLoosely, CheckArgSlot, CheckArguments, CheckNew, CheckValueCall, CheckDirectCall, AfterNodeCallTry, AfterResultStaticTry, AfterConsoleTry, AfterProcessTry, AfterBytesStaticTry, AfterReceiverObject, AfterResultMethodTry, AfterDateMethodTry, AfterMatchReceiver, AfterCommonReceiver, AfterSubtleTry, AfterClassMethodCall, AfterNamedCallTry, ScopedCall, AfterKnownFunctionType, AfterFunctionNameTry, AfterNotCallableName, AfterCalleeValue, AfterDirectReturnType, AfterSpreadRest, AfterNewLoad, AfterClassNew, AfterArrayElement, AfterArrayLength, CheckClassExpr, CheckClassStmt, CheckFieldsSet, CheckFieldTarget, CheckStaticTarget, CheckMethodCall, CheckInstanceOfOperator, CheckThis, CheckStaticMember, CheckClassMember, CheckOverloadMember, CheckClassRefMember, CheckClassStaticCall, CheckSuperCall, CheckSuperMethodCall, CheckValueNew, CheckClassNew, CheckOverloadCall, CheckClassValue, BindOuterTypeParams, DeclareThis, WalkClassBodies, AfterLateClassExpr, FinishClassExpr, WalkStaticFields, LeaveStaticFields, WalkStaticField, AfterStaticField, DecorateClass, LeaveClassContext, AfterLateBase, LeaveDeclaringClass, FinishLateClass, WalkClassFunction, WalkFieldStarts, WalkClassMethod, AfterClassMethodReturn, FinishClassBodies, NextLateClass, WalkLateClass, FinishLateClassWalk, AfterConstructorTypeArgument, AfterMethodVariants, AfterMemberFunctionType, AfterStaticVariants, AfterNameFunctionType, AfterClassRefStatic, AfterOverloadVariants, AfterInstanceOfLeft, InstanceOfRight, AfterInstanceOfRight, AfterMethodCallTry, AfterClassFieldCallee, AfterMethodChoice, AfterPlainMethodType, AfterGenericMethodCall, SetCallType, StartGenericCallTypes, AfterBoundTypes, AfterGenericCallee, ChooseVariant, RankVariants, NextRankedVariant, AfterInferredArguments, AfterGenericParams, FinishSuperCall, AfterParentConstructorChoice, AfterSuperObject, AfterSuperEmitterTry, AfterSuperMethodChoice, AfterValueNewCallee, NextReflectedArg, AfterReflectedArg, AfterConstructorChoice, FinishClassNew, AfterOverloadChoice, AfterEventsFunctionTry, AfterStaticFieldCallee, AfterStaticMethodChoice, Decorate, NextHoistedDecorator, AfterFactoryMethodReturn, AfterDescriptorMethodReturn, DeclareHoistedDecorator, AfterDescriptorDeclared, NextAppliedDecorator, AfterDecoratorApplied, RelinkClass, DropDiagnosticList, WalkInferredBody, CheckThisCall, CheckListMethod, CheckListArguments, WalkStatements, NoteUse, FindListPart, CheckFunctionExpr, CheckFunctionValue, WalkFunctionBody, AfterBodyTypeParams, AfterBodyThis, NextBodyParam, AfterDefaultedParam, AfterBodyStatements, EnterErrorWatch, LeaveErrorWatch, AfterPredicateEnd, FinishFunctionBody, WalkFunctionFromScratch, DeclareArgumentList, RememberArgumentList, AfterBlockTypes, EnterStatements, NextStatement, AfterStatement, GroupMember, AfterGroupMemberReturn, GroupUseOrder, LeaveGroup, NextClosureParam, AfterClosureParamType, AfterClosureReturnType, AfterClosureReturn, StartClosureBody, LeaveInitializerClosure, KeepConstantFlow, DeclareOwnName, AfterClosureType, CheckFunctionArgSlot, AfterLiteralCallback, AfterCallbackValue, LeaveCallback, CheckCallbackMethod, AfterExtraCallbackArgs, AfterReduceInit, FinishCallbackMethod, CheckArrayCallbackResult, NextListArgument, AfterListArgument, StartModuleBodies, WalkTopFunction, AfterTopReturnType, StartLiftedFunction, CheckYield, FindIterator, AsyncUserIterator, IterableOfSlot, ElementTypeOf, DestructuredIteratorSlot, FinishIteratorResult, FinishIteratorArgs, FinishIterableParam, AfterYieldValue, AfterYieldDelegate, FinishYield, AfterIterableUser, AfterBuiltinIterator, UserIterator, AfterSymbolIterator, AfterResultIterator, AfterAsyncSymbolIterator, IteratorOf, AfterIteratorValue, BuildIterateCall, FinishIterateSymbol, FinishIterateCall, NextValueOf, AfterNextMethods, AfterSoleIteratorReturn, CheckCondition, FinishCondition, StartBranch, AfterBranchLeaf, FinishBranchLeaf, AfterAssignedLeaf, AfterBranchLeft, AfterBranchRight, AfterBranchNot, CheckNot, CheckLogicalOperator, FinishBranchJoin, StartTestedValue, AfterTestedLeaf, StartLogical, AfterLogicalLeft, StartLogicalRight, FinishTestedLogical, FinishValueLogical, FinishLogicalType, StartNullish, AfterNullishLeft, StartNullishRight, FinishNullish, Convert, Coerce, CoerceSlot, CoerceIteratorFound, CoerceAsyncIteratorFound, ApparentSlot, ConvertSlot, AdaptLiteralSlot, CheckDecimalLiteralRange, CheckRegexLiteral, CheckAwait, CheckUsedValue, WalkRedundantTests, MatchItems, WalkComparisonOperands, NeverOperands, CheckDateOperands, CheckDecimalComparison, CheckNullEquality, CheckJsonEquality, ReportDecimalMix, CheckDecimalArithmetic, DateToTime, RegexToString, DateToString, BytesToString, NoteReflectedConversion, NoteConstructorFlow, CheckNodeName, FunctionTypeOf, NoteHttpsValue, CheckJsonMember, CheckResultMember, CheckRegexMember, CheckMatchMember, CheckDateMember, CheckBytesMember, CheckCryptoMember, CheckRuntimeMember, CheckRegExpStaticMember, CheckWebCryptoMember, CheckNodeMember, CheckProcessMember, CheckBytesStaticMember, CheckIntlMember, CheckMatchIndex, CheckJsonIndex, CheckBytesIndex, CheckProcessEnvIndex, CheckBytesUnionMember, ProcessAliasSlot, MarkFused, ResolveWeakRefType, SegmentsArraySlot, NoteInheritedReturn, CheckUsedCallbackValue, WalkForAwait, NoteErrorsHandled, FindCallCycles, CheckProcessAssign, CheckJsonTarget, CheckRuntimeTarget, WalkDecimalAssign, WalkBytesStore, CheckNodeCall, CheckPromiseStatic, CheckResultStatic, CheckJsonStatic, CheckArrayIsArray, CheckJsonIsJson, CheckReflectCall, CheckConsoleCall, CheckProcessCall, CheckBitCall, CheckMathCall, CheckRegExpStatic, CheckIntlCall, CheckLocaleStatic, CheckIntlStatic, CheckDecimalStatic, CheckX509Parse, CheckWebCryptoCall, CheckBytesStatic, CheckNumberStatic, CheckObjectCall, CheckIteratorFrom, CheckArrayFrom, CheckMapStatic, CheckRuntimeMethod, CheckResultMethod, CheckJsonMethod, CheckRegexMethod, CheckDateMethod, CheckDateFormatMethod, CheckIntlMethod, CheckCryptoMethod, CheckWeakRefMethod, CheckBytesMethod, CheckPromiseMethod, CheckTimerMethod, CheckSubtleCall, WalkHeadersCall, CheckStringLocale, CheckNumberLocale, CheckDecimalMethod, CheckIteratorMethod, CheckDictMethod, CheckStringMethod, CheckArrayMethod, CheckNumberMethod, CheckLibCall, CheckResultCall, CheckJsonGlobal, CheckAsyncGlobal, CheckGlobalCall, CheckEventsLibraryCall, CheckStreamLibraryCall, NoteHttpsCall, CheckGenericCall, CheckCryptoNew, CheckLocaleNew, CheckDateFormatNew, CheckIntlNew, NoteLibraryInstance, CheckRegExpConstructor, CheckDateNew, CheckPromiseNew, CheckWeakRefNew, CheckBytesNew, FindMethodCycles, CheckJsonObjectLit, CheckJsonArrayLit, WalkExternal, EnterReturnBody, LeaveReturnBody, InferFromBody, InferCycle, EnterHomeModule, NoteTlsMethod, CheckStatsDate, ReportEmitterMethodValue, CheckFsClassMethod, CheckStreamCall, CheckEmitterCall, CheckEventTargetCall, CheckEventsFunction, CheckStreamFrom, WriteDesignRecords, BuildVtable, NoteRegexVariable, LeaveBranch, MarkUnreachable, AfterExprStmt, FinishExprStmt, WalkBody, WalkVarDecl, CloseScope, NextDeclarator, AfterDeclaredType, AfterConstFunctionSymbol, FinishConstFunction, AfterEarlyTimer, FindDestination, AfterInit, DestructureValue, AfterDestructuredIterator, RememberValueDeclarator, WalkIf, WalkSwitch, AfterIfCondition, AfterThenBranch, FinishIf, AfterSwitchValue, NextCaseTest, AfterCaseTest, AddCaseFacts, FinishConstantCase, FinishCaseTest, NextCaseBody, WalkCaseStatement, AfterCaseBody, FinishSwitch, DeclareBlockTypes, DeclareMethodReturn, FinishMethodReturn, DeclareVariableSlot, DeclareVariable, WalkWhile, WalkDoWhile, WalkFor, WalkForOf, WalkLabeled, CheckJump, FinishLabeledBlock, LeaveLoopBody, RestoreLoopFlow, AfterWhileCondition, AfterDoWhileBody, AfterDoWhileCondition, AfterForInit, AfterForCondition, AfterForBody, AfterForStep, FinishFor, AfterForAwait, AfterForOfSource, AfterIterable, AfterForInObject, BindForOf, AfterForOfBinding, WalkReturn, AfterUnlistenedErrors, AfterReturnValue, AfterTestedReturn, AfterPredicateReturn, AfterPredicateFacts, AfterValueCoerce, AfterConstructorValue, AfterInferredReturn, AfterAsyncGeneratorReturn, CheckDictIn, CheckDictMember, CheckDictIndex, CheckRecordKeySlot, FinishRecordKey, FinishDictIndexRead, FinishDictIndexError, CheckDictTarget, FinishDictTarget, CheckRecordNullishAssign, AfterNullishRecordObject, AfterNullishRecordKey, FinishNullishRecord, CheckDictDelete, FinishDictDelete, FinishDictTypeAnswer, CheckDictNew, AfterDictNewTypeArgs, NextPairPart, AfterPairPart, FinishPairsDict, AfterDictSource, FinishDictSource, CalledFunction, NoteAssigned, NoteIncremented, NoteArrayResized, BeginPredicate, EndPredicate, NotePredicateExit, BuildPredicate, StartPredicateCopy, AddByteCallbackFacts, AddIndexCallbackFacts, CheckByteCallbackResult, AddConditionFacts, FinishConditionFacts, WalkFreshCopy, WalkBodyNow, FinishFilterResult, FinishFilterDefined, SubstituteType, SubstituteValueType, SubstituteNode, BuildSubstitutedType, InstanceType, InstanceValueType, SubstituteInstanceFields, NextInstanceField, AfterInstanceField, SubstituteTypeList, AfterTypeListItem, StartGenericValue, CheckGenericValue, NextValueTypeArg, AfterValueTypeArg, AfterGenericValueArgs, AfterGenericValueType, InstantiateCallTarget, AfterReusedWalk, NextMeaningfulParam, AfterMeaningfulParam, AfterInstanceTypes, AfterNewInstanceWalk, WalkPreciseCopy, CheckConstraint, AfterConstraintSubstitution, EvaluateConstraint, AfterConstraintMethod, InstantiateOwnAlias, AfterOwnAliasParams, DropOwnAliasAnswer, InstantiateAlias, AfterAliasParams, AfterAliasDefault, AfterAliasMatch, AfterAliasObject, AfterAliasInner, CloseAliasBody, DeclareClassTypeParams, AfterClassTypeParams, LeaveClassTypeParams, BindClassTypeParams, DeclareFunctionTypeParams, AfterFunctionTypeParams, BindFunctionTypeParams, DeclareAliasTypeParams, AfterAliasTypeParams, StartTypeParams, NextTypeParam, AfterConstraintType, NextConstraintMember, AfterConstraintMember, AfterDefaultType, AfterDefaultConstraint, CheckGenericNew, AfterEmitterNew, NextExplicitNewArgument, AfterExplicitNewArgument, AfterExplicitInstance, AfterGenericNewBinding, AfterGenericNewInstance, InstantiateClassType, AfterInstanceTypeParams, NextInstanceDefault, AfterInstanceDefault, NextInstanceArgument, AfterInstanceArgument, FinishClassInstance, WalkOrPostpone, AfterInstanceWalk, FillInstance, LeaveFilling, LinkInstanceBases, AfterInstanceParent, NextInstanceInterface, AfterInstanceInterface, NextFilledField, AfterFilledField, DeclareInstanceMembers, NextInstanceMember, AfterInstanceInit, NextIteratedParam, AfterIteratedParam, AfterMemberSignature, NextMemberType, AfterMemberInstanceType, AfterMemberType, WalkInstanceVariants, AfterInstanceVariants, LinkInstance, MarkOverridden, ForceConversion, WalkInstance, WalkPreciseBody, WalkTemplateInstance, StartCopyBody, PopCopyDiagnostics, FinishCopyWalk, ReportInstance, ReportInstanceAt, NextPendingInstance, ReportFailedPending, WalkClassInstance, NextClassBody, StartClassBody, ClassBodyEntered, PopClassBodyDiagnostics, ReportClassInstance, FinishTypeArgs, BindGenericCall, StartBinding, InferFromArguments, NextBindingArgument, InferFromArgument, NextPrecheckedField, AfterPrecheckedField, InferPrecheckedField, InferFromListRest, RetryDeferred, NextContextualArgument, AfterContextualPartial, AfterDefaultedHint, AfterContextualArgument, AfterExplicitTypeArgs, AfterBindingTypeArgs, AfterBoundParams, NextLiteralArgument, AfterLiteralHint, AfterBoundResult, AfterBoundArguments, NextTypeArgCheck, AfterTypeArgDefault, AfterIteratedArgFit, AfterTypeArgConstraint, InferArgumentPatterns, NextFittingArgument, AfterFittingDefault, AfterFittingConstraint, JoinInstances, AfterJoinedInstance, CheckEmitterNew, CheckStreamNew, AddStreamBases, WalkVariants, BuildInstanceInit, CheckConstructorAccess, CheckBuiltinCallbackSlot, AsyncIterableTypeOf, AfterAsyncIterableReturn, AnswerReturnType, AnswerFunctionType, AfterTemplateReturn, AfterTemplateInstance, SetInferredReturn, AfterInheritedReturn, OpenBodyCheck, CloseBodyCheck, FinishTopLevelEntry, FinishInferFromBody, NextCycleTrial, AfterCycleTrial, FinishTrialReturn, AfterBodyNowInference, FinishAsyncReturns>;
+struct CheckAwait {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_AWAIT;
+  AwaitExpr *await;
+  const Type *expected;
+};
+
+struct AfterAwaitValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_AWAIT_VALUE;
+  AwaitExpr *await;
+};
+
+struct WalkForAwait {
+  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_FOR_AWAIT;
+  ForOfStmt *forOf;
+};
+
+struct AfterAwaitIterable {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_AWAIT_ITERABLE;
+  ForOfStmt *forOf;
+};
+
+struct AfterJoinedIterable {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_JOINED_ITERABLE;
+  ForOfStmt *forOf;
+};
+
+struct AfterAsyncUserIterator {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ASYNC_USER_ITERATOR;
+  ForOfStmt *forOf;
+};
+
+struct AfterAsyncSource {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ASYNC_SOURCE;
+  ForOfStmt *forOf;
+};
+
+struct BindAwaitElement {
+  static constexpr CheckTaskKind kind = CheckTaskKind::BIND_AWAIT_ELEMENT;
+  ForOfStmt *forOf;
+};
+
+struct StartAwaitBody {
+  static constexpr CheckTaskKind kind = CheckTaskKind::START_AWAIT_BODY;
+  ForOfStmt *forOf;
+  const Type *element;
+};
+
+struct EnterAwaitLoopBody {
+  static constexpr CheckTaskKind kind = CheckTaskKind::ENTER_AWAIT_LOOP_BODY;
+  Stmt *body;
+};
+
+struct CheckPromiseNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_PROMISE_NEW;
+  NewExpr *newExpr;
+  const Type *expected;
+};
+
+struct AfterPromiseTypeArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_PROMISE_TYPE_ARG;
+  CallExpr *call;
+};
+
+struct AfterExecutorTrial {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_EXECUTOR_TRIAL;
+  CallExpr *call;
+  FunctionDecl *copy;
+  llvm::StringRef resolve;
+};
+
+struct FinishPromiseNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_PROMISE_NEW;
+  CallExpr *call;
+  const Type *value;
+};
+
+struct CheckPromiseMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_PROMISE_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+  const Type *expected;
+};
+
+struct FinishPromiseThen {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_PROMISE_THEN;
+  CallExpr *call;
+  MemberExpr *member;
+  bool isCallback;
+};
+
+struct CheckPromiseStatic {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_PROMISE_STATIC;
+  CallExpr *call;
+  MemberExpr *member;
+  const Type *expected;
+};
+
+struct AfterResolveValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_RESOLVE_VALUE;
+  CallExpr *call;
+  std::string functionName;
+};
+
+struct AfterResolverTypeArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_RESOLVER_TYPE_ARG;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct FinishWithResolvers {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_WITH_RESOLVERS;
+  CallExpr *call;
+  MemberExpr *member;
+  const Type *value;
+};
+
+struct NextPromiseElement {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NEXT_PROMISE_ELEMENT;
+  CombinatorDraft draft;
+  ArrayLitExpr *literal;
+  size_t index;
+};
+
+struct AfterPromiseElement {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_PROMISE_ELEMENT;
+  CombinatorDraft draft;
+  ArrayLitExpr *literal;
+  size_t index;
+};
+
+struct AfterPromiseValues {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_PROMISE_VALUES;
+  CombinatorDraft draft;
+};
+
+struct AfterTaskCallback {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_TASK_CALLBACK;
+  Expr **slot;
+  llvm::StringRef functionName;
+};
+
+struct CheckAsyncGlobal {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_ASYNC_GLOBAL;
+  CallExpr *call;
+  NameExpr *name;
+};
+
+struct AfterAnyNumber {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ANY_NUMBER;
+  Expr **slot;
+};
+
+struct AfterTimerCallback {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_TIMER_CALLBACK;
+  CallExpr *call;
+  bool isInterval;
+};
+
+struct AfterTimerReceiver {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_TIMER_RECEIVER;
+  CallExpr *call;
+  bool isInterval;
+  IntLitExpr *bits;
+};
+
+struct CheckTimerMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_TIMER_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct CheckTimersPromisesCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_TIMERS_PROMISES_CALL;
+  CallExpr *call;
+  llvm::StringRef functionName;
+  llvm::SMLoc loc;
+  const Type *expected;
+};
+
+struct TimerPromiseValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::TIMER_PROMISE_VALUE;
+  TimerPromiseDraft draft;
+};
+
+struct AfterTimerPromiseValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_TIMER_PROMISE_VALUE;
+  TimerPromiseDraft draft;
+};
+
+struct TimerPromiseOptions {
+  static constexpr CheckTaskKind kind = CheckTaskKind::TIMER_PROMISE_OPTIONS;
+  TimerPromiseDraft draft;
+  const Type *value;
+  Expr **argument;
+};
+
+struct FinishTimerPromise {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_TIMER_PROMISE;
+  TimerPromiseDraft draft;
+  const Type *value;
+  Expr **argument;
+};
+
+struct CheckSchedulerCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_SCHEDULER_CALL;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct ProcessStream {
+  static constexpr CheckTaskKind kind = CheckTaskKind::PROCESS_STREAM;
+  MemberExpr *member;
+};
+
+struct AddStreamBases {
+  static constexpr CheckTaskKind kind = CheckTaskKind::ADD_STREAM_BASES;
+  ClassDecl *instance;
+  llvm::SMLoc loc;
+};
+
+struct AfterStreamSide {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_STREAM_SIDE;
+  ClassDecl *instance;
+};
+
+struct FindStreamHookParams {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FIND_STREAM_HOOK_PARAMS;
+  FunctionDecl *functionDecl;
+};
+
+struct AfterHookError {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_HOOK_ERROR;
+  const FunctionDecl *functionDecl;
+  const ClassDecl *lib;
+};
+
+struct LibraryAliasOf {
+  static constexpr CheckTaskKind kind = CheckTaskKind::LIBRARY_ALIAS_OF;
+  LibraryType libraryType;
+  const Type *arg;
+  llvm::SMLoc loc;
+};
+
+struct AfterHookCallbacks {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_HOOK_CALLBACKS;
+  const FunctionDecl *functionDecl;
+  StreamSidesDraft sides;
+};
+
+struct FinishWritevHook {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_WRITEV_HOOK;
+  const FunctionDecl *functionDecl;
+  const Type *callback;
+};
+
+struct FinishDestroyHook {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_DESTROY_HOOK;
+  const FunctionDecl *functionDecl;
+};
+
+struct WalkHookParams {
+  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_HOOK_PARAMS;
+  const FunctionDecl *functionDecl;
+  std::vector<FunctionDecl *> inherited;
+};
+
+struct CheckStreamCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_STREAM_CALL;
+  CallExpr *call;
+  MemberExpr *member;
+  ClassDecl *classDecl;
+};
+
+struct AfterPlainEncoding {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_PLAIN_ENCODING;
+  CallExpr *call;
+  const Type *receiver;
+};
+
+struct FinishEncodedView {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_ENCODED_VIEW;
+  CallExpr *call;
+  FieldPath path;
+  const char *here;
+};
+
+struct AfterWriteChunk {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_WRITE_CHUNK;
+  StreamDataDraft stream;
+};
+
+struct AfterWriteSecond {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_WRITE_SECOND;
+  StreamDataDraft stream;
+};
+
+struct WrittenCallbackType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::WRITTEN_CALLBACK_TYPE;
+  ClassDecl *classDecl;
+};
+
+struct AnswerStreamCallback {
+  static constexpr CheckTaskKind kind = CheckTaskKind::ANSWER_STREAM_CALLBACK;
+  bool isOptional;
+};
+
+struct AfterWrittenType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_WRITTEN_TYPE;
+  StreamDataDraft stream;
+  Expr *callback;
+  bool isCallbackChecked;
+};
+
+struct NextEndArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NEXT_END_ARG;
+  StreamDataDraft stream;
+  size_t index;
+  unsigned checked;
+};
+
+struct AfterEndArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_END_ARG;
+  StreamDataDraft stream;
+  size_t index;
+  unsigned checked;
+};
+
+struct FinishStreamData {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_STREAM_DATA;
+  StreamDataDraft stream;
+  size_t count;
+  LibraryMethod implementation;
+};
+
+struct AfterByteChunk {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_BYTE_CHUNK;
+  const Type *chunk;
+  StreamChunkSide side;
+  llvm::StringRef method;
+};
+
+struct AfterEncodingType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ENCODING_TYPE;
+  Expr *arg;
+  bool isChecked;
+};
+
+struct AfterEncodingValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ENCODING_VALUE;
+};
+
+struct CheckStreamIntrinsic {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_STREAM_INTRINSIC;
+  CallExpr *call;
+  NameExpr *name;
+  const Type *typeArg;
+};
+
+struct AfterOverridesClass {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_OVERRIDES_CLASS;
+  CallExpr *call;
+  NameExpr *name;
+};
+
+struct AfterNativeIoFailure {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_NATIVE_IO_FAILURE;
+  CallExpr *call;
+};
+
+struct CheckStreamLibraryCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_STREAM_LIBRARY_CALL;
+  CallExpr *call;
+  NameExpr *name;
+  FuncSymbol *function;
+};
+
+struct AfterStreamCallback {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_STREAM_CALLBACK;
+  StreamFunctionDraft stream;
+  StreamFunction function;
+};
+
+struct AfterFinishedOptions {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FINISHED_OPTIONS;
+  StreamFunctionDraft stream;
+};
+
+struct NoteTargetHandled {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_TARGET_HANDLED;
+};
+
+struct FinishFinished {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_FINISHED;
+  StreamFunctionDraft stream;
+};
+
+struct NextComposedPart {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NEXT_COMPOSED_PART;
+  ComposeDraft draft;
+};
+
+struct AfterComposedPart {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_COMPOSED_PART;
+  ComposeDraft draft;
+};
+
+struct NextPipelineStage {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NEXT_PIPELINE_STAGE;
+  PipelineDraft draft;
+};
+
+struct AfterStageValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_STAGE_VALUE;
+  PipelineDraft draft;
+  StageShapeDraft shape;
+};
+
+struct AfterStageIterable {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_STAGE_ITERABLE;
+  PipelineDraft draft;
+  StageShapeDraft shape;
+  Expr *collection;
+};
+
+struct StartStageCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::START_STAGE_CALL;
+  StageShapeDraft shape;
+  LibraryFunction function;
+  std::vector<const Type *> bound;
+};
+
+struct AfterStageCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_STAGE_CALL;
+  StageShapeDraft shape;
+};
+
+struct AfterStageMade {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_STAGE_MADE;
+  PipelineDraft draft;
+  bool isStream;
+};
+
+struct FinishCallbackPipeline {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_CALLBACK_PIPELINE;
+  PipelineDraft draft;
+};
+
+struct FinishPromisePipeline {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_PROMISE_PIPELINE;
+  PipelineDraft draft;
+};
+
+struct AfterFsStreamTypes {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FS_STREAM_TYPES;
+  CallExpr *call;
+  llvm::SMLoc loc;
+  bool isReading;
+};
+
+struct AfterFsStreamOption {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FS_STREAM_OPTION;
+  FsStreamDraft draft;
+};
+
+struct FinishFsStream {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_FS_STREAM;
+  FsStreamDraft draft;
+};
+
+struct FinalFsStream {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINAL_FS_STREAM;
+  FsStreamDraft draft;
+};
+
+struct AfterProcessStreamCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_PROCESS_STREAM_CALL;
+  llvm::SMLoc loc;
+  bool isIn;
+};
+
+struct CheckStreamNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_STREAM_NEW;
+  NewExpr *newExpr;
+  ClassDecl *classDecl;
+  const Type *expected;
+};
+
+struct CheckStreamFrom {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_STREAM_FROM;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterFromSource {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FROM_SOURCE;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterFromOptionsType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FROM_OPTIONS_TYPE;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterFromOptions {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FROM_OPTIONS;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterFromAsync {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FROM_ASYNC;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterFromIterable {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FROM_ITERABLE;
+  CallExpr *call;
+  MemberExpr *member;
+  Expr *source;
+};
+
+struct NamedModuleType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NAMED_MODULE_TYPE;
+  llvm::StringRef name;
+};
+
+struct ImportBuiltinModule {
+  static constexpr CheckTaskKind kind = CheckTaskKind::IMPORT_BUILTIN_MODULE;
+  Module *module;
+  const ImportDecl *importDecl;
+};
+
+struct ProcessAliasSlot {
+  static constexpr CheckTaskKind kind = CheckTaskKind::PROCESS_ALIAS_SLOT;
+  Expr **slot;
+};
+
+struct CheckNodeName {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_NODE_NAME;
+  NameExpr *name;
+};
+
+struct AfterModuleValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_MODULE_VALUE;
+  Expr *expr;
+  llvm::StringRef name;
+  NodeModule module;
+};
+
+struct CheckNodeMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_NODE_MEMBER;
+  MemberExpr *member;
+};
+
+struct AfterCryptoModuleMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CRYPTO_MODULE_MEMBER;
+  MemberExpr *member;
+};
+
+struct AfterFsConstant {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FS_CONSTANT;
+  MemberExpr *member;
+};
+
+struct CheckNodeCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_NODE_CALL;
+  CallExpr *call;
+  const Type *expected;
+};
+
+struct CheckLibCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_LIB_CALL;
+  CallExpr *call;
+  NameExpr *name;
+};
+
+struct AfterIntrinsicType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_INTRINSIC_TYPE;
+  IntrinsicDraft draft;
+};
+
+struct FinishListenerIntrinsic {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_LISTENER_INTRINSIC;
+  IntrinsicDraft draft;
+  const Type *functionType;
+};
+
+struct FinishAsClass {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_AS_CLASS;
+  IntrinsicDraft draft;
+  const Type *typeArg;
+};
+
+struct FinishAhead {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_AHEAD;
+  IntrinsicDraft draft;
+};
+
+struct FinishWithContext {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_WITH_CONTEXT;
+  IntrinsicDraft draft;
+};
+
+struct CheckRuntimeMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_RUNTIME_MEMBER;
+  MemberExpr *member;
+};
+
+struct CheckRuntimeTarget {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_RUNTIME_TARGET;
+  MemberExpr *member;
+};
+
+struct CheckRuntimeMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_RUNTIME_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+  const Type *expected;
+};
+
+struct AfterQuestionQuery {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_QUESTION_QUERY;
+  CallExpr *call;
+  MemberExpr *member;
+  bool hasPromises;
+};
+
+struct FinishQuestionPromise {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_QUESTION_PROMISE;
+  CallExpr *call;
+};
+
+struct FinishQuestionCallback {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_QUESTION_CALLBACK;
+  CallExpr *call;
+  Expr *query;
+};
+
+struct CheckChildCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_CHILD_CALL;
+  CallExpr *call;
+  llvm::StringRef functionName;
+  llvm::SMLoc loc;
+};
+
+struct AfterChildFile {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CHILD_FILE;
+  ChildRunDraft run;
+};
+
+struct AfterChildArgs {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CHILD_ARGS;
+  ChildRunDraft run;
+};
+
+struct AfterChildOptions {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CHILD_OPTIONS;
+  ChildRunDraft run;
+};
+
+struct WalkChildStdio {
+  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_CHILD_STDIO;
+  ChildRunDraft run;
+};
+
+struct NextStdioEntry {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NEXT_STDIO_ENTRY;
+  ChildRunDraft run;
+  size_t index;
+};
+
+struct WalkChildLimits {
+  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_CHILD_LIMITS;
+  ChildRunDraft run;
+};
+
+struct NextChildOption {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NEXT_CHILD_OPTION;
+  ChildRunDraft run;
+  size_t index;
+};
+
+struct AfterChildOption {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CHILD_OPTION;
+  ChildRunDraft run;
+  size_t index;
+};
+
+struct AfterChildInput {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CHILD_INPUT;
+  ChildRunDraft run;
+};
+
+struct CheckChildInput {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_CHILD_INPUT;
+  ChildRunDraft run;
+};
+
+struct FinishChildInput {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_CHILD_INPUT;
+  ChildRunDraft run;
+  bool isGiven;
+};
+
+struct AfterChildKillSignal {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CHILD_KILL_SIGNAL;
+  ChildRunDraft run;
+};
+
+struct FinishChildKillSignal {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_CHILD_KILL_SIGNAL;
+  ChildRunDraft run;
+};
+
+struct AfterChildShell {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CHILD_SHELL;
+  ChildRunDraft run;
+};
+
+struct FinishChildShell {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_CHILD_SHELL;
+  ChildRunDraft run;
+};
+
+struct FinishChildCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_CHILD_CALL;
+  ChildRunDraft run;
+};
+
+struct WalkRedundantTests {
+  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_REDUNDANT_TESTS;
+  BinaryExpr *binary;
+};
+
+struct CheckJsonMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_MEMBER;
+  MemberExpr *member;
+};
+
+struct CheckJsonIndex {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_INDEX;
+  IndexExpr *index;
+};
+
+struct AfterJsonIndexKey {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_JSON_INDEX_KEY;
+  IndexExpr *index;
+};
+
+struct CheckJsonTarget {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_TARGET;
+  Expr *target;
+};
+
+struct AfterJsonTargetIndex {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_JSON_TARGET_INDEX;
+  IndexExpr *index;
+};
+
+struct AfterJsonTargetMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_JSON_TARGET_MEMBER;
+};
+
+struct CheckJsonMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct CheckJsonObjectLit {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_OBJECT_LIT;
+  ObjectLitExpr *literal;
+};
+
+struct FinishJsonObjectLit {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_JSON_OBJECT_LIT;
+  ObjectLitExpr *literal;
+};
+
+struct NextJsonProperty {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NEXT_JSON_PROPERTY;
+  ObjectLitExpr *literal;
+  size_t index;
+};
+
+struct AfterJsonKey {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_JSON_KEY;
+  ObjectLitExpr *literal;
+  size_t index;
+};
+
+struct AfterJsonPropertyValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_JSON_PROPERTY_VALUE;
+  ObjectLitExpr *literal;
+  size_t index;
+};
+
+struct CheckJsonArrayLit {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_ARRAY_LIT;
+  ArrayLitExpr *literal;
+};
+
+struct AfterJsonArrayLit {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_JSON_ARRAY_LIT;
+};
+
+struct CheckNullEquality {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_NULL_EQUALITY;
+  BinaryExpr *binary;
+};
+
+struct AfterNullEquality {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_NULL_EQUALITY;
+  BinaryExpr *binary;
+};
+
+struct CheckJsonEquality {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_EQUALITY;
+  BinaryExpr *binary;
+};
+
+struct CheckJsonIsJson {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_IS_JSON;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterJsonIsJsonArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_JSON_IS_JSON_ARG;
+  CallExpr *call;
+};
+
+struct CheckArrayIsArray {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_ARRAY_IS_ARRAY;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterArrayIsArrayArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ARRAY_IS_ARRAY_ARG;
+  CallExpr *call;
+};
+
+struct CheckJsonStatic {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_STATIC;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct FinishJsonParse {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_JSON_PARSE;
+  CallExpr *call;
+};
+
+struct AfterStringifyValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_STRINGIFY_VALUE;
+  CallExpr *call;
+};
+
+struct AfterStringifyReplacer {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_STRINGIFY_REPLACER;
+  CallExpr *call;
+  bool isOk;
+};
+
+struct AfterStringifySpace {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_STRINGIFY_SPACE;
+  CallExpr *call;
+  bool isOk;
+};
+
+struct FinishStringify {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_STRINGIFY;
+  CallExpr *call;
+  bool isOk;
+  bool hasSpace;
+};
+
+struct AfterStringifyFailure {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_STRINGIFY_FAILURE;
+  CallExpr *call;
+};
+
+struct CheckJsonGlobal {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_JSON_GLOBAL;
+  CallExpr *call;
+  NameExpr *name;
+};
+
+struct CheckResultCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_RESULT_CALL;
+  CallExpr *call;
+  NameExpr *name;
+  const Type *expected;
+};
+
+struct AfterWrittenResult {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_WRITTEN_RESULT;
+  CallExpr *call;
+  NameExpr *name;
+  ResultHalf half;
+};
+
+struct AfterHalfValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_HALF_VALUE;
+  CallExpr *call;
+  NameExpr *name;
+  ResultHalf half;
+  const Type *wanted;
+};
+
+struct FinishOkErr {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_OK_ERR;
+  CallExpr *call;
+  ResultHalf half;
+  const Type *wanted;
+  const Type *given;
+};
+
+struct CheckResultStatic {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_RESULT_STATIC;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterCombineList {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_COMBINE_LIST;
+  ResultCombineDraft combine;
+  ArrayLitExpr *literal;
+};
+
+struct AfterCombineArray {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_COMBINE_ARRAY;
+  ResultCombineDraft combine;
+};
+
+struct CheckResultMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_RESULT_MEMBER;
+  MemberExpr *member;
+};
+
+struct CheckUsedValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_USED_VALUE;
+  Expr *expr;
+  llvm::SMLoc at;
+};
+
+struct CheckUsedCallbackValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_USED_CALLBACK_VALUE;
+  Expr *expr;
+};
+
+struct CheckResultMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_RESULT_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+  const Type *expected;
+};
+
+struct AfterUnwrapOrArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_UNWRAP_OR_ARG;
+  ResultMethodDraft run;
+};
+
+struct AfterResultMatch {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_RESULT_MATCH;
+  ResultMethodDraft run;
+};
+
+struct ResultHalfCallback {
+  static constexpr CheckTaskKind kind = CheckTaskKind::RESULT_HALF_CALLBACK;
+  ResultMethodDraft run;
+  size_t index;
+  const Type *half;
+  const Type *returnType;
+};
+
+struct AfterPlainHalfCallback {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_PLAIN_HALF_CALLBACK;
+  ResultMethodDraft run;
+  size_t index;
+};
+
+struct AfterHalfCallback {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_HALF_CALLBACK;
+  ResultMethodDraft run;
+  size_t index;
+};
+
+struct AfterResultCallback {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_RESULT_CALLBACK;
+  ResultMethodDraft run;
+};
+
+struct ResolveResultType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::RESOLVE_RESULT_TYPE;
+  const TypeRef *ref;
+  TypeName typeName;
+};
+
+struct ResultHalfType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::RESULT_HALF_TYPE;
+  const TypeRef *arg;
+};
+
+struct FinishResultType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_RESULT_TYPE;
+  TypeName typeName;
+};
+
+struct NeverOperands {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NEVER_OPERANDS;
+  BinaryExpr *binary;
+};
+
+struct MatchItems {
+  static constexpr CheckTaskKind kind = CheckTaskKind::MATCH_ITEMS;
+};
+
+struct RegexToString {
+  static constexpr CheckTaskKind kind = CheckTaskKind::REGEX_TO_STRING;
+};
+
+struct CheckMatchMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_MATCH_MEMBER;
+  MemberExpr *member;
+};
+
+struct CheckMatchIndex {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_MATCH_INDEX;
+  IndexExpr *index;
+};
+
+struct AfterMatchPosition {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_MATCH_POSITION;
+  IndexExpr *index;
+};
+
+struct CheckRegexLiteral {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_REGEX_LITERAL;
+  RegexLitExpr *literal;
+};
+
+struct NoteRegexVariable {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_REGEX_VARIABLE;
+  VarSymbol *variable;
+  const Expr *value;
+  bool isConst;
+  llvm::ArrayRef<Stmt *> block;
+  size_t blockIndex;
+};
+
+struct CheckRegexMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_REGEX_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterRegexRunArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_REGEX_RUN_ARG;
+  CallExpr *call;
+  MemberExpr *member;
+  const RegexLitExpr *regex;
+  RegexMember method;
+};
+
+struct CheckRegexMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_REGEX_MEMBER;
+  MemberExpr *member;
+};
+
+struct CheckRegExpConstructor {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_REG_EXP_CONSTRUCTOR;
+  NewExpr *newExpr;
+};
+
+struct CheckRegExpCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_REG_EXP_CALL;
+  CallExpr *call;
+  NameExpr *name;
+};
+
+struct FinishRegExpNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_REG_EXP_NEW;
+  llvm::SMLoc loc;
+  std::vector<Expr *> *args;
+};
+
+struct CheckRegExpStatic {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_REG_EXP_STATIC;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct FinishRegExpParse {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_REG_EXP_PARSE;
+  CallExpr *call;
+};
+
+struct CheckRegExpStaticMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_REG_EXP_STATIC_MEMBER;
+  MemberExpr *member;
+};
+
+struct CheckStringRegexMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_STRING_REGEX_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterRegexPattern {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_REGEX_PATTERN;
+  CallExpr *call;
+  MemberExpr *member;
+  StringMethod method;
+};
+
+struct AfterTextReplacement {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_TEXT_REPLACEMENT;
+  CallExpr *call;
+  const RegexLitExpr *regex;
+};
+
+struct AfterFunctionReplacement {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FUNCTION_REPLACEMENT;
+  CallExpr *call;
+};
+
+struct PrepareLocaleArgs {
+  static constexpr CheckTaskKind kind = CheckTaskKind::PREPARE_LOCALE_ARGS;
+  std::vector<Expr *> *args;
+  int field;
+};
+
+struct FindIntlType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FIND_INTL_TYPE;
+  llvm::StringRef name;
+};
+
+struct SegmentsArraySlot {
+  static constexpr CheckTaskKind kind = CheckTaskKind::SEGMENTS_ARRAY_SLOT;
+  Expr **slot;
+};
+
+struct CheckIntlNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_INTL_NEW;
+  NewExpr *newExpr;
+};
+
+struct FinishIntlNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_INTL_NEW;
+  llvm::SMLoc loc;
+  std::vector<Expr *> *args;
+  IntlKind kind;
+  int runtimeKind;
+};
+
+struct PrepareIntlArgs {
+  static constexpr CheckTaskKind kind = CheckTaskKind::PREPARE_INTL_ARGS;
+  std::vector<Expr *> *args;
+  size_t from;
+  IntlKind kind;
+  std::string what;
+};
+
+struct LocaleArgSlot {
+  static constexpr CheckTaskKind kind = CheckTaskKind::LOCALE_ARG_SLOT;
+  Expr **slot;
+  std::string what;
+};
+
+struct IntlOptionsArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::INTL_OPTIONS_ARG;
+  Expr **options;
+  IntlKind kind;
+  std::string what;
+};
+
+struct AfterIntlOptions {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_INTL_OPTIONS;
+  Expr **options;
+  IntlKind kind;
+  std::string what;
+  bool isLocaleOk;
+};
+
+struct LocaleListSlot {
+  static constexpr CheckTaskKind kind = CheckTaskKind::LOCALE_LIST_SLOT;
+  Expr **slot;
+  std::string what;
+};
+
+struct AfterLocaleList {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_LOCALE_LIST;
+  Expr **slot;
+  std::string what;
+};
+
+struct CheckLocaleNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_LOCALE_NEW;
+  NewExpr *newExpr;
+  const Type *expected;
+};
+
+struct AfterLocaleNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_LOCALE_NEW;
+};
+
+struct CheckLocaleStatic {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_LOCALE_STATIC;
+  CallExpr *call;
+  MemberExpr *member;
+  const Type *expected;
+};
+
+struct CheckIntlCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_INTL_CALL;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct CheckIntlStatic {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_INTL_STATIC;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterStaticLocaleList {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_STATIC_LOCALE_LIST;
+  CallExpr *call;
+  MemberExpr *member;
+  std::string what;
+};
+
+struct FinishSupportedLocales {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_SUPPORTED_LOCALES;
+  CallExpr *call;
+  MemberExpr *member;
+  std::string what;
+};
+
+struct CheckIntlMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_INTL_MEMBER;
+  MemberExpr *member;
+  const Type *expected;
+};
+
+struct CheckIntlMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_INTL_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterIntlNumber {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_INTL_NUMBER;
+  Expr **slot;
+  llvm::StringRef method;
+};
+
+struct AfterDoubleNumber {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DOUBLE_NUMBER;
+  Expr **slot;
+};
+
+struct AfterRelativeUnit {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_RELATIVE_UNIT;
+  CallExpr *call;
+  const Expr *written;
+};
+
+struct CheckNumberLocale {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_NUMBER_LOCALE;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct FinishLocaleCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_LOCALE_CALL;
+  CallExpr *call;
+  Builtin builtin;
+  const Type *type;
+};
+
+struct CheckStringLocale {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_STRING_LOCALE;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterNormalizeForm {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_NORMALIZE_FORM;
+  CallExpr *call;
+  const Expr *written;
+};
+
+struct DateLocaleOptions {
+  static constexpr CheckTaskKind kind = CheckTaskKind::DATE_LOCALE_OPTIONS;
+  Expr **options;
+  int field;
+};
+
+struct AfterDateOptions {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DATE_OPTIONS;
+  Expr **options;
+  int field;
+  bool isLocaleOk;
+};
+
+struct CheckDateFormatNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DATE_FORMAT_NEW;
+  NewExpr *newExpr;
+};
+
+struct FinishDateFormatNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_DATE_FORMAT_NEW;
+  llvm::SMLoc loc;
+  std::vector<Expr *> *args;
+};
+
+struct CheckDateFormatMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DATE_FORMAT_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterDateFormatArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DATE_FORMAT_ARG;
+  CallExpr *call;
+  MemberExpr *member;
+  bool isFormat;
+};
+
+struct CheckDecimalLiteralRange {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DECIMAL_LITERAL_RANGE;
+  FloatLitExpr *literal;
+};
+
+struct WalkComparisonOperands {
+  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_COMPARISON_OPERANDS;
+  BinaryExpr *binary;
+};
+
+struct AfterComparedRight {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_COMPARED_RIGHT;
+  BinaryExpr *binary;
+};
+
+struct AfterComparedLeft {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_COMPARED_LEFT;
+  BinaryExpr *binary;
+};
+
+struct ReportDecimalMix {
+  static constexpr CheckTaskKind kind = CheckTaskKind::REPORT_DECIMAL_MIX;
+  BinaryExpr *binary;
+};
+
+struct CheckDecimalArithmetic {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DECIMAL_ARITHMETIC;
+  BinaryExpr *binary;
+};
+
+struct CheckDecimalComparison {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DECIMAL_COMPARISON;
+  BinaryExpr *binary;
+};
+
+struct ConvertDecimalSide {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CONVERT_DECIMAL_SIDE;
+  BinaryExpr *binary;
+  bool isRight;
+  bool isArithmetic;
+};
+
+struct FinishDecimalArithmetic {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_DECIMAL_ARITHMETIC;
+  BinaryExpr *binary;
+};
+
+struct WalkDecimalAssign {
+  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_DECIMAL_ASSIGN;
+  AssignExpr *assign;
+  BinaryOp op;
+};
+
+struct AfterDecimalAssign {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DECIMAL_ASSIGN;
+  AssignExpr *assign;
+  BinaryOp op;
+};
+
+struct CheckDecimalCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DECIMAL_CALL;
+  CallExpr *call;
+  llvm::SMLoc loc;
+};
+
+struct AfterDecimalCallArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DECIMAL_CALL_ARG;
+  CallExpr *call;
+};
+
+struct FinishDecimalText {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_DECIMAL_TEXT;
+  CallExpr *call;
+};
+
+struct CheckDecimalStatic {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DECIMAL_STATIC;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterDecimalSpread {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DECIMAL_SPREAD;
+  Expr **slot;
+};
+
+struct FinishDecimalStatic {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_DECIMAL_STATIC;
+  CallExpr *call;
+  MemberExpr *member;
+  Builtin builtin;
+};
+
+struct CheckDecimalMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DECIMAL_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct FinishDecimalMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_DECIMAL_METHOD;
+  CallExpr *call;
+  const DecimalMethodInfo *method;
+};
+
+struct DecimalArgSlot {
+  static constexpr CheckTaskKind kind = CheckTaskKind::DECIMAL_ARG_SLOT;
+  Expr **slot;
+  DecimalArg kind;
+  Builtin builtin;
+};
+
+struct AfterDecimalCount {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DECIMAL_COUNT;
+  Expr **slot;
+  std::string what;
+  int64_t low;
+  int64_t high;
+};
+
+struct AfterRoundingMode {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ROUNDING_MODE;
+  Expr **slot;
+};
+
+struct ClassifyListener {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CLASSIFY_LISTENER;
+  Expr *arg;
+  const Expr *emitter;
+  ListenerUse use;
+  IntLitExpr *bits;
+};
+
+struct NoteErrorsHandled {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_ERRORS_HANDLED;
+  const Expr *expr;
+};
+
+struct ReportUnlistenedErrors {
+  static constexpr CheckTaskKind kind = CheckTaskKind::REPORT_UNLISTENED_ERRORS;
+};
+
+struct ReportEmitterMethodValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::REPORT_EMITTER_METHOD_VALUE;
+  MemberExpr *member;
+};
+
+struct InstantiateEmitterParent {
+  static constexpr CheckTaskKind kind = CheckTaskKind::INSTANTIATE_EMITTER_PARENT;
+  ClassDecl *classDecl;
+  ClassDecl *emitter;
+  TypeRef *ref;
+};
+
+struct AfterEmitterParent {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_EMITTER_PARENT;
+  TypeRef *ref;
+};
+
+struct CheckEmitterNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_EMITTER_NEW;
+  NewExpr *newExpr;
+  ClassDecl *classDecl;
+  const Type *expected;
+};
+
+struct AfterEmitterEvents {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_EMITTER_EVENTS;
+  NewExpr *newExpr;
+  ClassDecl *classDecl;
+  const Type *expected;
+};
+
+struct AfterEmitterInstance {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_EMITTER_INSTANCE;
+  NewExpr *newExpr;
+  const Type *expected;
+};
+
+struct CreatedType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CREATED_TYPE;
+  const NewExpr *create;
+};
+
+struct AfterCreatedArgs {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CREATED_ARGS;
+  const NewExpr *create;
+  ClassDecl *classDecl;
+};
+
+struct AfterCreatedInstance {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CREATED_INSTANCE;
+};
+
+struct EventArgsOf {
+  static constexpr CheckTaskKind kind = CheckTaskKind::EVENT_ARGS_OF;
+  const Type *events;
+  Expr **name;
+  llvm::StringRef method;
+};
+
+struct AfterEventName {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_EVENT_NAME;
+  const Type *events;
+  Expr **name;
+  llvm::StringRef method;
+};
+
+struct InferredEventArgs {
+  static constexpr CheckTaskKind kind = CheckTaskKind::INFERRED_EVENT_ARGS;
+  EventSite *site;
+  std::string key;
+  llvm::SMLoc loc;
+};
+
+struct AfterInferredEvent {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_INFERRED_EVENT;
+  EventSite *site;
+  std::string key;
+  llvm::SMLoc loc;
+};
+
+struct ReportNotEmitted {
+  static constexpr CheckTaskKind kind = CheckTaskKind::REPORT_NOT_EMITTED;
+  EventSite *site;
+  std::string key;
+  llvm::SMLoc loc;
+};
+
+struct FindEventArgs {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FIND_EVENT_ARGS;
+  const Type *events;
+  std::string name;
+};
+
+struct AnswerEventArgs {
+  static constexpr CheckTaskKind kind = CheckTaskKind::ANSWER_EVENT_ARGS;
+  EventSite *site;
+  std::string name;
+};
+
+struct CompleteEvent {
+  static constexpr CheckTaskKind kind = CheckTaskKind::COMPLETE_EVENT;
+  EventSite *site;
+  std::string name;
+};
+
+struct FinishCompleteEvent {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_COMPLETE_EVENT;
+  EventRecord *record;
+  std::string untyped;
+};
+
+struct CompleteSite {
+  static constexpr CheckTaskKind kind = CheckTaskKind::COMPLETE_SITE;
+  EventSite *site;
+};
+
+struct TryEventFunction {
+  static constexpr CheckTaskKind kind = CheckTaskKind::TRY_EVENT_FUNCTION;
+  FunctionDecl *functionDecl;
+};
+
+struct TryEventStatement {
+  static constexpr CheckTaskKind kind = CheckTaskKind::TRY_EVENT_STATEMENT;
+  Stmt *statement;
+};
+
+struct BeginEventTrial {
+  static constexpr CheckTaskKind kind = CheckTaskKind::BEGIN_EVENT_TRIAL;
+  FunctionDecl *functionDecl;
+  Stmt *statement;
+};
+
+struct EndEventTrial {
+  static constexpr CheckTaskKind kind = CheckTaskKind::END_EVENT_TRIAL;
+  std::vector<ReturnStmt *> *outerReturns;
+  std::vector<YieldExpr *> *outerYields;
+  bool isStatement;
+};
+
+struct CheckEmitterCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_EMITTER_CALL;
+  CallExpr *call;
+  MemberExpr *member;
+  ClassDecl *classDecl;
+  CallReceiver receiver;
+};
+
+struct AfterQueryEvent {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_QUERY_EVENT;
+  EmitterDraft emitter;
+  EmitterMethodKind kind;
+};
+
+struct AfterListenerArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_LISTENER_ARG;
+  EmitterDraft emitter;
+  EmitterMethodKind kind;
+  std::string event;
+  const Expr *original;
+};
+
+struct AfterListenerErrors {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_LISTENER_ERRORS;
+  EmitterDraft emitter;
+  std::string event;
+  int listenerBits;
+};
+
+struct FinishEmitterCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_EMITTER_CALL;
+  EmitterDraft emitter;
+  llvm::StringRef name;
+  std::vector<const Type *> bound;
+  bool isTyping;
+};
+
+struct SetCheckedType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::SET_CHECKED_TYPE;
+  const Type *type;
+};
+
+struct AfterEmitArgs {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_EMIT_ARGS;
+  EmitterDraft emitter;
+  bool isLibrary;
+};
+
+struct AfterSiteEmitKey {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_SITE_EMIT_KEY;
+  EmitterDraft emitter;
+  EventSite *site;
+  bool isLibrary;
+};
+
+struct AfterEmitEvent {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_EMIT_EVENT;
+  EmitterDraft emitter;
+  EventSite *site;
+  std::string key;
+  llvm::SMLoc loc;
+  bool isLibrary;
+};
+
+struct NextEmitValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NEXT_EMIT_VALUE;
+  EmitterDraft emitter;
+  EmitShapeDraft shape;
+  std::vector<bool> given;
+  size_t index;
+};
+
+struct AfterEmitValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_EMIT_VALUE;
+  EmitterDraft emitter;
+  EmitShapeDraft shape;
+  std::vector<bool> given;
+  size_t index;
+};
+
+struct AfterEmittedValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_EMITTED_VALUE;
+  SentEmit emit;
+  EventSite *site;
+  EventRecord *record;
+  std::string event;
+  bool isLibrary;
+};
+
+struct AfterListenerThis {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_LISTENER_THIS;
+  Expr **slot;
+  ListenerWantDraft want;
+};
+
+struct FinishListenerLiteral {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_LISTENER_LITERAL;
+  Expr **slot;
+  const Type *wanted;
+};
+
+struct AfterListenerValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_LISTENER_VALUE;
+  Expr **slot;
+  ListenerWantDraft want;
+};
+
+struct CheckEventTargetCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_EVENT_TARGET_CALL;
+  CallExpr *call;
+  MemberExpr *member;
+  ClassDecl *classDecl;
+};
+
+struct AfterTargetObjectType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_TARGET_OBJECT_TYPE;
+  TargetCallDraft target;
+};
+
+struct AfterTargetParamType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_TARGET_PARAM_TYPE;
+  TargetCallDraft target;
+};
+
+struct AfterTargetValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_TARGET_VALUE;
+  TargetCallDraft target;
+  const Type *object;
+};
+
+struct FinishTargetCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_TARGET_CALL;
+  TargetCallDraft target;
+  const Type *kind;
+};
+
+struct CheckEventsFunction {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_EVENTS_FUNCTION;
+  CallExpr *call;
+  llvm::StringRef name;
+  llvm::SMLoc loc;
+};
+
+struct CheckEventsLibraryCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_EVENTS_LIBRARY_CALL;
+  CallExpr *call;
+  NameExpr *name;
+  FuncSymbol *function;
+};
+
+struct AfterEventsObject {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_EVENTS_OBJECT;
+  EventsFunctionDraft draft;
+};
+
+struct AfterEventsMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_EVENTS_METHOD;
+  CallExpr *method;
+};
+
+struct AfterWaitEvent {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_WAIT_EVENT;
+  EventsFunctionDraft draft;
+  const Type *events;
+};
+
+struct AfterWaitErrors {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_WAIT_ERRORS;
+  EventsFunctionDraft draft;
+  const Type *events;
+  const Type *args;
+};
+
+struct CheckFsCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_FS_CALL;
+  CallExpr *call;
+  llvm::StringRef functionName;
+  llvm::SMLoc loc;
+};
+
+struct AfterPathArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_PATH_ARG;
+  Expr **slot;
+  FsPathForm form;
+};
+
+struct ReadEncodingOrOptions {
+  static constexpr CheckTaskKind kind = CheckTaskKind::READ_ENCODING_OR_OPTIONS;
+  CallExpr *call;
+  size_t index;
+  llvm::StringRef functionName;
+  std::vector<NodeOption> allowed;
+};
+
+struct AfterEncodingArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ENCODING_ARG;
+  CallExpr *call;
+  size_t index;
+  llvm::StringRef functionName;
+  NodeOption first;
+};
+
+struct AfterReadFileOptions {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_READ_FILE_OPTIONS;
+  FsDraft draft;
+};
+
+struct AfterWriteData {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_WRITE_DATA;
+  FsDraft draft;
+};
+
+struct AfterWriteOptions {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_WRITE_OPTIONS;
+  FsDraft draft;
+  bool hasBytes;
+};
+
+struct FinishWriteFile {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_WRITE_FILE;
+  FsDraft draft;
+  Expr *flag;
+  Expr *number;
+  bool hasBytes;
+  bool hasMode;
+};
+
+struct AfterPathCallOptions {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_PATH_CALL_OPTIONS;
+  FsDraft draft;
+  bool hasOptions;
+};
+
+struct FinishPathArgument {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_PATH_ARGUMENT;
+  FsDraft draft;
+  FsValueSource source;
+};
+
+struct AfterStatOptions {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_STAT_OPTIONS;
+  FsDraft draft;
+};
+
+struct AfterReaddirOptions {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_READDIR_OPTIONS;
+  FsDraft draft;
+};
+
+struct FinishReaddir {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_READDIR;
+  FsDraft draft;
+  bool hasTypes;
+  bool hasRecursive;
+};
+
+struct AfterMkdirOptions {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_MKDIR_OPTIONS;
+  FsDraft draft;
+  bool isModeGiven;
+};
+
+struct FinishMkdir {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_MKDIR;
+  FsDraft draft;
+  bool hasMode;
+  bool hasRecursive;
+};
+
+struct FinishRmdir {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_RMDIR;
+  FsDraft draft;
+};
+
+struct AfterRmOptions {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_RM_OPTIONS;
+  FsDraft draft;
+};
+
+struct FinishRm {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_RM;
+  FsDraft draft;
+  bool hasRecursive;
+  bool hasForce;
+};
+
+struct FinishTwoPaths {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_TWO_PATHS;
+  FsDraft draft;
+};
+
+struct CheckFsModuleCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_FS_MODULE_CALL;
+  CallExpr *call;
+  llvm::StringRef functionName;
+  llvm::SMLoc loc;
+};
+
+struct AfterFsModuleCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FS_MODULE_CALL;
+};
+
+struct WrapFsResult {
+  static constexpr CheckTaskKind kind = CheckTaskKind::WRAP_FS_RESULT;
+  CallExpr *call;
+  Builtin async;
+};
+
+struct CheckTzIoCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_TZ_IO_CALL;
+  CallExpr *call;
+  llvm::SMLoc loc;
+};
+
+struct CheckFsValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_FS_VALUE;
+  llvm::StringRef name;
+  Expr *expr;
+};
+
+struct CheckFsConstant {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_FS_CONSTANT;
+  MemberExpr *member;
+};
+
+struct AfterNativeError {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_NATIVE_ERROR;
+};
+
+struct NativeErrorType {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NATIVE_ERROR_TYPE;
+};
+
+struct CheckStatsDate {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_STATS_DATE;
+  MemberExpr *member;
+  ClassDecl *classDecl;
+};
+
+struct CheckFsClassMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_FS_CLASS_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+  ClassDecl *classDecl;
+};
+
+struct CheckFsPromisesCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_FS_PROMISES_CALL;
+  CallExpr *call;
+  llvm::StringRef functionName;
+  llvm::SMLoc loc;
+};
+
+struct AfterFsPromisesCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FS_PROMISES_CALL;
+  CallExpr *call;
+  llvm::StringRef functionName;
+  llvm::SMLoc loc;
+};
+
+struct CheckReadlineCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_READLINE_CALL;
+  CallExpr *call;
+  NodeModule module;
+  llvm::StringRef functionName;
+  llvm::SMLoc loc;
+};
+
+struct AfterReadlineOptions {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_READLINE_OPTIONS;
+  CallExpr *call;
+  NodeModule module;
+  llvm::SMLoc loc;
+};
+
+struct FinishReadline {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_READLINE;
+  CallExpr *call;
+  NodeModule module;
+  llvm::SMLoc loc;
+};
+
+struct CheckReflectCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_REFLECT_CALL;
+  CallExpr *call;
+  MemberExpr *member;
+  const Type *expected;
+};
+
+struct NoteReflectedConversion {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_REFLECTED_CONVERSION;
+  const Type *from;
+  const Type *to;
+  CastExpr *castExpr;
+};
+
+struct NoteConstructorFlow {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_CONSTRUCTOR_FLOW;
+  const Type *from;
+  const Type *to;
+};
+
+struct WriteDesignRecords {
+  static constexpr CheckTaskKind kind = CheckTaskKind::WRITE_DESIGN_RECORDS;
+  ClassDecl *classDecl;
+  ClassField *field;
+  FunctionDecl *method;
+  const FunctionDecl *constructor;
+  llvm::SMLoc loc;
+};
+
+struct AfterFieldComplete {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FIELD_COMPLETE;
+  ClassDecl *classDecl;
+  const ClassField *field;
+  llvm::SMLoc loc;
+};
+
+struct AfterReflectGetObject {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_REFLECT_GET_OBJECT;
+  CallExpr *call;
+  NameExpr *object;
+  StringLitExpr *key;
+};
+
+struct ContinueKnownGet {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CONTINUE_KNOWN_GET;
+  ReflectGetDraft get;
+  std::string name;
+};
+
+struct FinishDynamicGet {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_DYNAMIC_GET;
+  ReflectGetDraft get;
+};
+
+struct AfterFillArgs {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FILL_ARGS;
+  CallExpr *call;
+};
+
+struct FinishFill {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_FILL;
+  CallExpr *call;
+  const Type *type;
+};
+
+struct AfterApplyFunction {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_APPLY_FUNCTION;
+  CallExpr *call;
+};
+
+struct AfterApplyThis {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_APPLY_THIS;
+  CallExpr *call;
+};
+
+struct FinishApply {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_APPLY;
+  CallExpr *call;
+  const FunctionDecl *held;
+  const Type *gives;
+};
+
+struct FinishApplyResult {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_APPLY_RESULT;
+  CallExpr *call;
+  const Type *gives;
+};
+
+struct AfterDirectMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DIRECT_MEMBER;
+  MemberExpr *member;
+  CallExpr *direct;
+  FuncSymbol *function;
+};
+
+struct AfterDirectArguments {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DIRECT_ARGUMENTS;
+  llvm::SMLoc loc;
+};
+
+struct MakeVoidSequence {
+  static constexpr CheckTaskKind kind = CheckTaskKind::MAKE_VOID_SEQUENCE;
+  Expr *result;
+  llvm::SMLoc loc;
+};
+
+struct ReflectOk {
+  static constexpr CheckTaskKind kind = CheckTaskKind::REFLECT_OK;
+};
+
+struct FinishReflectOk {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_REFLECT_OK;
+  Expr *value;
+};
+
+struct AfterConstructClass {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CONSTRUCT_CLASS;
+  CallExpr *call;
+  NameExpr *name;
+  ArrayLitExpr *list;
+  const Type *expected;
+};
+
+struct FinishDynamicConstruct {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_DYNAMIC_CONSTRUCT;
+  CallExpr *call;
+  bool isKnown;
+};
+
+struct ReflectArgsSlot {
+  static constexpr CheckTaskKind kind = CheckTaskKind::REFLECT_ARGS_SLOT;
+  Expr **slot;
+};
+
+struct AfterReflectArgs {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_REFLECT_ARGS;
+  Expr **slot;
+};
+
+struct AfterMetadataKeyArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_METADATA_KEY_ARG;
+  MetadataCallDraft draft;
+};
+
+struct AfterMetadataValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_METADATA_VALUE;
+  MetadataCallDraft draft;
+  bool isKnown;
+};
+
+struct AfterKnownMetadata {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_KNOWN_METADATA;
+  std::string label;
+  const Type *knownType;
+  llvm::SMLoc knownLoc;
+};
+
+struct MetadataValueUnknown {
+  static constexpr CheckTaskKind kind = CheckTaskKind::METADATA_VALUE_UNKNOWN;
+  Expr **slot;
+};
+
+struct AfterMetadataTarget {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_METADATA_TARGET;
+  CallExpr *call;
+  size_t at;
+};
+
+struct FinishMetadataCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_METADATA_CALL;
+  MetadataCallDraft draft;
+};
+
+struct NextMetadataWriter {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NEXT_METADATA_WRITER;
+  MetadataCallDraft draft;
+  size_t index;
+};
+
+struct CheckBytesIndex {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BYTES_INDEX;
+  IndexExpr *index;
+};
+
+struct AfterBytesIndexPosition {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_BYTES_INDEX_POSITION;
+  IndexExpr *index;
+};
+
+struct WalkBytesStore {
+  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_BYTES_STORE;
+  IndexExpr *index;
+  const Expr *value;
+};
+
+struct CheckBytesMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BYTES_MEMBER;
+  MemberExpr *member;
+};
+
+struct CheckBytesUnionMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BYTES_UNION_MEMBER;
+  MemberExpr *member;
+};
+
+struct CheckBytesStaticMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BYTES_STATIC_MEMBER;
+  MemberExpr *member;
+};
+
+struct BytesToString {
+  static constexpr CheckTaskKind kind = CheckTaskKind::BYTES_TO_STRING;
+};
+
+struct BufferEncodingValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::BUFFER_ENCODING_VALUE;
+  Expr *arg;
+};
+
+struct AfterBufferEncodingArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_BUFFER_ENCODING_ARG;
+};
+
+struct CheckBytesMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BYTES_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+  const Type *expected;
+};
+
+struct FinishBufferToString {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_BUFFER_TO_STRING;
+  CallExpr *call;
+};
+
+struct FinishRangeMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_RANGE_METHOD;
+  BufferCallDraft buffer;
+  bool isCompare;
+};
+
+struct NextWriteArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NEXT_WRITE_ARG;
+  BufferCallDraft buffer;
+  size_t index;
+};
+
+struct AfterWriteArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_WRITE_ARG;
+  BufferCallDraft buffer;
+  size_t index;
+};
+
+struct FinishWrite {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_WRITE;
+  BufferCallDraft buffer;
+  size_t positionsEnd;
+  bool hasEncoding;
+};
+
+struct AfterBufferValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_BUFFER_VALUE;
+  BufferValueDraft draft;
+};
+
+struct ContinueValueMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CONTINUE_VALUE_METHOD;
+  BufferValueDraft draft;
+};
+
+struct NextValueSplit {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NEXT_VALUE_SPLIT;
+  BufferValueDraft draft;
+  size_t index;
+};
+
+struct AfterValueSplit {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_VALUE_SPLIT;
+  BufferValueDraft draft;
+  size_t index;
+};
+
+struct FinishValueMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_VALUE_METHOD;
+  BufferValueDraft draft;
+  size_t positionsEnd;
+  bool hasEncoding;
+};
+
+struct FinishVariableNumber {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_VARIABLE_NUMBER;
+  BufferCallDraft buffer;
+  BytesNumberMethod number;
+};
+
+struct AfterFixedValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FIXED_VALUE;
+  BufferCallDraft buffer;
+  BytesNumberMethod number;
+};
+
+struct FinishFixedNumber {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_FIXED_NUMBER;
+  BufferCallDraft buffer;
+  BytesNumberMethod number;
+};
+
+struct AfterDecodeInput {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DECODE_INPUT;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct FinishFatalDecode {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_FATAL_DECODE;
+  CallExpr *call;
+};
+
+struct CheckBytesStatic {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BYTES_STATIC;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterBytesSource {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_BYTES_SOURCE;
+  CallExpr *call;
+  const Type *type;
+};
+
+struct AfterFromWithSource {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FROM_WITH_SOURCE;
+  CallExpr *call;
+  const Type *type;
+  std::string what;
+};
+
+struct AfterFromWithMapper {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FROM_WITH_MAPPER;
+  CallExpr *call;
+  const Type *type;
+  bool isArrow;
+};
+
+struct FinishFromWith {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_FROM_WITH;
+  CallExpr *call;
+  const Type *type;
+};
+
+struct NextBytesValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NEXT_BYTES_VALUE;
+  CallExpr *call;
+  ArrayLitExpr *literal;
+  const Type *type;
+  size_t index;
+};
+
+struct AfterBytesValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_BYTES_VALUE;
+  Expr **slot;
+  const Type *type;
+};
+
+struct AfterSpreadValues {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_SPREAD_VALUES;
+  CallExpr *call;
+  ArrayLitExpr *literal;
+  const Type *type;
+};
+
+struct AfterBufferFromSource {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_BUFFER_FROM_SOURCE;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct WriteEncodingArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::WRITE_ENCODING_ARG;
+  CallExpr *call;
+  size_t index;
+};
+
+struct FinishView {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_VIEW;
+  CallExpr *call;
+  int64_t elementSize;
+  std::string what;
+};
+
+struct AfterAllocSize {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ALLOC_SIZE;
+  CallExpr *call;
+  bool isUnsafe;
+};
+
+struct AfterAllocFill {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ALLOC_FILL;
+  CallExpr *call;
+};
+
+struct AfterByteFill {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_BYTE_FILL;
+  Expr **slot;
+};
+
+struct FinishAllocFill {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_ALLOC_FILL;
+  CallExpr *call;
+  const Type *fillType;
+};
+
+struct AfterConcatList {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CONCAT_LIST;
+  CallExpr *call;
+};
+
+struct AfterConcatTotal {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CONCAT_TOTAL;
+  CallExpr *call;
+};
+
+struct AfterByteLengthArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_BYTE_LENGTH_ARG;
+  CallExpr *call;
+};
+
+struct AfterIsBufferArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_IS_BUFFER_ARG;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterDecoderParse {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DECODER_PARSE;
+  MemberExpr *member;
+};
+
+struct FinishDecoderParse {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_DECODER_PARSE;
+  CallExpr *result;
+  MemberExpr *member;
+};
+
+struct CheckBytesNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BYTES_NEW;
+  NewExpr *newExpr;
+  const Type *bytes;
+};
+
+struct AfterNonNegative {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_NON_NEGATIVE;
+  Expr **slot;
+  std::string what;
+};
+
+struct AfterDataViewBuffer {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DATA_VIEW_BUFFER;
+  CallExpr *call;
+  const Type *type;
+};
+
+struct ContinueDecoderNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CONTINUE_DECODER_NEW;
+  DecoderNewDraft decoder;
+};
+
+struct AfterDecoderLabelArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DECODER_LABEL_ARG;
+  DecoderNewDraft decoder;
+  llvm::SMLoc labelLoc;
+};
+
+struct AfterDecoderOptions {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DECODER_OPTIONS;
+  DecoderNewDraft decoder;
+};
+
+struct FinishDecoderNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_DECODER_NEW;
+  DecoderNewDraft decoder;
+  bool isFatal;
+};
+
+struct AfterTypedNewSource {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_TYPED_NEW_SOURCE;
+  CallExpr *call;
+  const Type *type;
+};
+
+struct FinishLengthNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_LENGTH_NEW;
+  CallExpr *call;
+  const Type *type;
+  std::string what;
+};
+
+struct AfterMappedCallback {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_MAPPED_CALLBACK;
+  TypedArrayDraft typed;
+};
+
+struct AfterCopySort {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_COPY_SORT;
+  CallExpr *call;
+  const Type *copyType;
+};
+
+struct FinishTypedAt {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_TYPED_AT;
+  TypedArrayDraft typed;
+};
+
+struct AfterTypedSearchValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_TYPED_SEARCH_VALUE;
+  TypedArrayDraft typed;
+  BytesSearchMode mode;
+};
+
+struct FinishTypedSearch {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_TYPED_SEARCH;
+  TypedArrayDraft typed;
+  BytesSearchMode mode;
+};
+
+struct AfterTypedValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_TYPED_VALUE;
+  TypedArrayDraft typed;
+  Expr **slot;
+  size_t positionsFrom;
+};
+
+struct AfterSetLiteral {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_SET_LITERAL;
+  TypedArrayDraft typed;
+  ArrayLitExpr *literal;
+};
+
+struct AfterSetSource {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_SET_SOURCE;
+  TypedArrayDraft typed;
+};
+
+struct FinishTypedSet {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_TYPED_SET;
+  TypedArrayDraft typed;
+};
+
+struct AfterWithIndex {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_WITH_INDEX;
+  TypedArrayDraft typed;
+};
+
+struct FinishDataView {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_DATA_VIEW;
+  CallExpr *call;
+  MemberExpr *member;
+  BytesNumberMethod number;
+};
+
+struct AfterDataViewValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DATA_VIEW_VALUE;
+  CallExpr *call;
+  BytesNumberMethod number;
+};
+
+struct AddByteCallbackFacts {
+  static constexpr CheckTaskKind kind = CheckTaskKind::ADD_BYTE_CALLBACK_FACTS;
+  FunctionDecl *functionDecl;
+};
+
+struct CheckByteCallbackResult {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_BYTE_CALLBACK_RESULT;
+  const FunctionDecl *functionDecl;
+  Expr *value;
+};
+
+struct CheckArrayIterator {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_ARRAY_ITERATOR;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct CheckStringMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_STRING_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterStringRegexTry {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_STRING_REGEX_TRY;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct FinishStringMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_STRING_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+  StringMethod method;
+};
+
+struct CheckNumberStatic {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_NUMBER_STATIC;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterCodeArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CODE_ARG;
+  Expr **slot;
+  bool isInt32;
+};
+
+struct CheckNumberMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_NUMBER_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterDigitsArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DIGITS_ARG;
+  CallExpr *call;
+  int64_t low;
+  int64_t high;
+  std::string what;
+};
+
+struct CheckGlobalCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_GLOBAL_CALL;
+  CallExpr *call;
+  NameExpr *name;
+};
+
+struct AfterUriArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_URI_ARG;
+  CallExpr *call;
+  std::optional<GlobalName> global;
+  Builtin builtin;
+};
+
+struct FinishGlobalResult {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_GLOBAL_RESULT;
+  CallExpr *call;
+  const Type *ok;
+};
+
+struct AfterNumberArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_NUMBER_ARG;
+  GlobalFunctionDraft draft;
+};
+
+struct FinishNumberOf {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_NUMBER_OF;
+  CallExpr *call;
+};
+
+struct CheckArrayMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_ARRAY_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+  const Type *expected;
+};
+
+struct FinishGrowingCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_GROWING_CALL;
+  ArrayMethodDraft draft;
+  bool isSpreading;
+};
+
+struct FinishAtCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_AT_CALL;
+  ArrayMethodDraft draft;
+};
+
+struct AfterConcatArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CONCAT_ARG;
+  Expr **slot;
+  ArrayMethodDraft draft;
+};
+
+struct CheckDictMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DICT_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterSetCombineArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_SET_COMBINE_ARG;
+  DictDraft dict;
+  bool isTesting;
+};
+
+struct CheckMapStatic {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_MAP_STATIC;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterGroupSource {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_GROUP_SOURCE;
+  GroupByDraft draft;
+};
+
+struct AfterGroupCallback {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_GROUP_CALLBACK;
+  GroupByDraft draft;
+};
+
+struct CheckObjectCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_OBJECT_CALL;
+  CallExpr *call;
+  MemberExpr *member;
+  const Type *expected;
+};
+
+struct AfterEntriesPairs {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ENTRIES_PAIRS;
+  CallExpr *call;
+};
+
+struct AfterEntriesSource {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ENTRIES_SOURCE;
+  CallExpr *call;
+  const Type *record;
+};
+
+struct AfterListingEnum {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_LISTING_ENUM;
+  ListingDraft listing;
+  EnumDecl *enumDecl;
+};
+
+struct AfterEnumListing {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ENUM_LISTING;
+  EnumDecl *enumDecl;
+  llvm::SMLoc at;
+};
+
+struct AfterListingArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_LISTING_ARG;
+  ListingDraft listing;
+};
+
+struct AfterListedClass {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_LISTED_CLASS;
+  ListingDraft listing;
+  const Type *type;
+};
+
+struct AfterListedFields {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_LISTED_FIELDS;
+  ListingDraft listing;
+  const Type *type;
+  std::vector<const Type *> subtypes;
+};
+
+struct MarkFused {
+  static constexpr CheckTaskKind kind = CheckTaskKind::MARK_FUSED;
+  Expr *expr;
+};
+
+struct CheckIteratorFrom {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_ITERATOR_FROM;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterIteratorFromSource {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ITERATOR_FROM_SOURCE;
+  CallExpr *call;
+};
+
+struct CheckArrayFrom {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_ARRAY_FROM;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterArrayFromSource {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ARRAY_FROM_SOURCE;
+  CallExpr *call;
+};
+
+struct AfterArrayFromMapper {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ARRAY_FROM_MAPPER;
+  CallExpr *call;
+};
+
+struct CheckIteratorMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_ITERATOR_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterTakeCount {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_TAKE_COUNT;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct AfterReduceInitValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_REDUCE_INIT_VALUE;
+  IteratorCallbackDraft draft;
+};
+
+struct AfterIteratorCallback {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_ITERATOR_CALLBACK;
+  IteratorCallbackDraft draft;
+};
+
+struct CheckCryptoValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_CRYPTO_VALUE;
+  llvm::StringRef name;
+  Expr *expr;
+};
+
+struct CheckCryptoModuleMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_CRYPTO_MODULE_MEMBER;
+  MemberExpr *member;
+};
+
+struct CheckCryptoMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_CRYPTO_MEMBER;
+  MemberExpr *member;
+};
+
+struct CheckCryptoNew {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_CRYPTO_NEW;
+  NewExpr *newExpr;
+  llvm::StringRef name;
+};
+
+struct CheckX509Parse {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_X509_PARSE;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct CheckWebCryptoCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_WEB_CRYPTO_CALL;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct CheckWebCryptoMember {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_WEB_CRYPTO_MEMBER;
+  MemberExpr *member;
+};
+
+struct CryptoValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CRYPTO_VALUE;
+  CryptoValueItem item;
+};
+
+struct AfterCryptoData {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CRYPTO_DATA;
+  std::string what;
+  CryptoDataKinds kinds;
+};
+
+struct AfterCryptoNumber {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CRYPTO_NUMBER;
+};
+
+struct AfterCryptoKeyObject {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CRYPTO_KEY_OBJECT;
+  std::string what;
+};
+
+struct AfterProvenNumber {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_PROVEN_NUMBER;
+  int64_t low;
+  std::optional<int64_t> high;
+  std::string what;
+};
+
+struct AfterCryptoEncoding {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CRYPTO_ENCODING;
+};
+
+struct CryptoFinishStep {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CRYPTO_FINISH_STEP;
+  CryptoPlanDraft draft;
+  CryptoFinish finish;
+  size_t count;
+};
+
+struct FinishCryptoResult {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_CRYPTO_RESULT;
+  CallExpr *call;
+  CryptoFn fn;
+  std::vector<Expr *> args;
+  const Type *type;
+};
+
+struct AfterRejectCallback {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_REJECT_CALLBACK;
+  CryptoPlanDraft draft;
+  size_t index;
+  std::string hint;
+};
+
+struct CheckCryptoCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_CRYPTO_CALL;
+  CallExpr *call;
+  llvm::StringRef functionName;
+  llvm::SMLoc loc;
+};
+
+struct AfterCryptoAsync {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_CRYPTO_ASYNC;
+  CallExpr *call;
+};
+
+struct AfterFillTarget {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FILL_TARGET;
+  CryptoPlanDraft draft;
+};
+
+struct AfterFillOffset {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FILL_OFFSET;
+  CryptoPlanDraft draft;
+};
+
+struct AfterFillSize {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_FILL_SIZE;
+  CryptoPlanDraft draft;
+  Expr *at;
+};
+
+struct FinishKeyPair {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_KEY_PAIR;
+  CallExpr *call;
+  const Type *pair;
+};
+
+struct CheckCryptoMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_CRYPTO_METHOD;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct FinishBytesText {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_BYTES_TEXT;
+  Expr *made;
+  Expr *encoding;
+};
+
+struct CheckSubtleIntrinsic {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_SUBTLE_INTRINSIC;
+  CallExpr *call;
+  NameExpr *name;
+  llvm::StringRef intrinsicName;
+};
+
+struct AfterSubtleArg {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_SUBTLE_ARG;
+  Expr *arg;
+  char subtleKind;
+  std::string name;
+};
+
+struct CheckSubtleCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_SUBTLE_CALL;
+  CallExpr *call;
+  MemberExpr *member;
+  const Type *expected;
+};
+
+struct AfterJwkArgument {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_JWK_ARGUMENT;
+  SubtleDraft subtle;
+};
+
+struct AfterJwkWrap {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_JWK_WRAP;
+  SubtleDraft subtle;
+};
+
+struct AfterSubtleFinish {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_SUBTLE_FINISH;
+  SubtleDraft subtle;
+};
+
+struct WalkExternal {
+  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_EXTERNAL;
+  FunctionDecl *functionDecl;
+};
+
+struct NoteHttpsCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_HTTPS_CALL;
+  CallExpr *call;
+  const FunctionDecl *functionDecl;
+};
+
+struct NoteTlsMethod {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_TLS_METHOD;
+  const MemberExpr *member;
+  const ClassDecl *classDecl;
+};
+
+struct NoteHttpsValue {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_HTTPS_VALUE;
+  const FunctionDecl *functionDecl;
+  llvm::SMLoc loc;
+};
+
+struct WalkHeadersCall {
+  static constexpr CheckTaskKind kind = CheckTaskKind::WALK_HEADERS_CALL;
+  CallExpr *call;
+  MemberExpr *member;
+};
+
+struct NoteLibraryInstance {
+  static constexpr CheckTaskKind kind = CheckTaskKind::NOTE_LIBRARY_INSTANCE;
+  NewExpr *made;
+  const ClassDecl *classDecl;
+};
+
+struct InferPairsSlot {
+  static constexpr CheckTaskKind kind = CheckTaskKind::INFER_PAIRS_SLOT;
+  Expr **slot;
+};
+
+struct CheckDictSourceSlot {
+  static constexpr CheckTaskKind kind = CheckTaskKind::CHECK_DICT_SOURCE_SLOT;
+  Expr **slot;
+  bool isPairs;
+  const Type *wanted;
+  std::string what;
+};
+
+struct AfterDictSourceSlot {
+  static constexpr CheckTaskKind kind = CheckTaskKind::AFTER_DICT_SOURCE_SLOT;
+  Expr **slot;
+  bool isPairs;
+  const Type *wanted;
+  std::string what;
+};
+
+struct FinishIteratorFilter {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_ITERATOR_FILTER;
+  CallExpr *call;
+  const Type *element;
+  bool isBoolean;
+};
+
+struct FinishIteratorFilterDefined {
+  static constexpr CheckTaskKind kind = CheckTaskKind::FINISH_ITERATOR_FILTER_DEFINED;
+  CallExpr *call;
+  const Type *element;
+};
+
+using CheckTask = Union<UseModule, WalkIterableParam, WalkGeneratorReturn, WalkStmt, EnterLoadBody, LeaveLoadBody, ResolveIteratorType, ResolveDictType, MakeMethodDescriptor, ResolveConstructorType, CheckConstructorArgs, ClassValueType, LiteralShape, InferReturnType, ReturnTypeOf, ResolveTypeRef, ResolveInnerTypeRef, ResolveObjectFields, WriteResolvedType, ResolveTypeAnswer, FinishTypeUse, FinishArrayType, NextUnionMember, AfterUnionMember, FinishAliasType, FinishEnumType, FinishEnumMember, FinishIntlType, NextTypeArgument, AfterTypeArgument, FinishDescriptor, FinishInstanceType, NextUtilityOperand, AfterUtilityOperand, AfterUtilitySignature, NextFunctionParam, AfterFunctionParam, FinishFunctionType, FinishAssertsType, FinishTupleType, NextObjectField, AfterObjectField, AfterObjectSignature, EvalTypeOp, EvalKeyOf, EvalIndexed, EvalSpread, StartKeyOf, AfterKeyOfOperand, AfterKeyOfEval, StartIndexed, AfterIndexedOperands, AfterIndexedEval, EvalMapped, NextMappedKey, AfterMappedValue, AfterMappedRename, StartMapped, AfterMappedKeys, AfterMappedSource, AfterMappedParts, StartIntersection, NextIntersectionPart, AfterIntersectionPart, StartConditional, AfterConditionalCheck, AfterInferConstraint, AfterConditionalPattern, ChooseBranch, CloseConditionalScope, AfterDistributedMember, EvalConditional, AfterEvalConditional, EvalFiltered, FinishFiltered, PrepareExpectation, FinishBranches, StartTemplate, AfterTemplateHole, FinishTemplate, EvalTemplate, EvalStringCase, EvalFunctionPart, StartTypeOf, FindTypeOfCandidates, AfterTypeOfCandidate, AfterTypeOfMember, AfterFunctionValue, FinishDeclaredFunctionValue, SignatureForUtility, ContinueSignature, AfterErasedReturn, ResolveImport, StartTopLevel, NextTopLevelItem, FinishTopLevel, CloseTopLevel, StartLoadEarly, LoadEarlyBody, FinishLoadEarly, BindLoadedNames, ResolveAlias, StartAlias, EnterAlias, FinishAlias, ResolveEnum, EnterEnum, NextEnumMember, StartFunctionSymbol, FinishFunctionSymbol, StartFunctionParams, StartFunctionParam, FinishFunctionParam, StartFunctionReturn, FinishFunctionReturn, StartReturnType, FinishAssertsReturn, FinishPredicateReturn, ResolveClass, OpenClassScope, CloseClassScope, ResolveClassMembers, StartClassField, FinishClassField, StartClassBases, FinishClassBases, FinishParentClass, FinishLinkParent, FinishImplemented, AddBase, DeclareMethods, FinishConstructor, FinishClassMethod, StartFieldMethod, FinishFieldMethod, StartTypedMethod, FinishTypedParam, FinishTypedMethod, FinishMethods, NextFieldDefault, ContinueFieldDefault, MakeFieldInit, FinishFieldInit, FinishVariants, FinishItemMethods, CompleteClass, FinishCompletion, StartInterfaceFields, StartInterfaceBase, FinishInterfaceBase, FinishInterfaceFields, ReportVariantPair, StartLinkClasses, FinishLinkClasses, StartLinkOverrides, FinishLinkOverrides, LinkOverride, StartDeclarationFile, FinishDeclarationFile, StartDeclaredAlias, FinishDeclaredAlias, StartDeclaredFunction, StartDeclaredClass, FinishDeclaredClass, StartDeclaredMember, FinishDeclaredField, StartDeclaredParam, FinishDeclaredParam, FinishDeclaredReturn, CheckExpr, CheckExprSlot, WriteCheckedSlot, ReportError, CheckExprKind, AfterConditionTest, AfterElseFirst, AfterThenSecond, AfterThenFirst, AfterElseSecond, FinishConditional, JoinConditionalBranches, AfterCastTarget, FinishCast, NextSequenceItem, AfterSequenceItem, FinishSequence, FinishOptionalChain, CheckIntLiteral, CheckTemplate, CheckArrayLiteral, CheckObjectLiteral, NextTemplatePart, AfterTemplatePart, AfterTemplateType, AfterComputedKey, AfterUnionNeeds, NextInferredKey, AfterInferredKey, NextKeyedProperty, NextNamedProperty, AfterUntargetedField, NextRecordProperty, AfterRecordSpread, NextSpreadProperty, AfterNamedProp, AfterSpreadProp, NextLiteralMember, AfterLiteralField, AfterLiteralMethods, WalkLiteralMethods, WalkLiteralMethod, AfterLiteralMethodReturn, MatchLiteralTarget, FinishPairLiteral, NextArrayElement, AfterLiteralElement, AfterSpreadElement, AfterSpreadMatch, CheckEnumObject, AfterEnumObjectResolved, RememberEnumObject, CheckField, CheckFieldCall, AfterFieldCallee, CheckObjectFieldTarget, CheckKeyedField, AfterTupleKey, AfterObjectKey, ObjectKeyReady, CheckName, LookupName, VariableTypeKnown, FinishVariableName, FinishFunctionName, ConstText, ToInt32, NoteUnsignedVar, CheckShift, CheckArithmetic, AfterArithmeticRight, AfterArithmeticLeft, AfterArithmeticOperands, FinishArithmetic, ResolveArithmetic, ArithmeticResult, FinishIntegerArithmetic, CheckWrappingDivisor, StartBits, FinishBits, FoldBinaryNode, CheckSign, FinishSign, SignOperandReady, CheckBitNot, FinishBitNot, CheckConcatenation, TrackMixedConcat, ToStringSlot, ToStringOperand, MarkTextCast, CheckMember, AfterListPart, AfterNodeMember, AfterProcessMember, AfterBytesStaticMember, AfterMemberObject, MemberOfCommonBase, AfterEnumResolved, CheckTupleMember, CheckTupleMethod, FinishTupleMethod, ReportTupleJoin, FinishTupleJoin, CheckUnionMember, CheckUnionFieldTarget, CheckUnionMethodCall, ResolveUnionMethodCall, ReportUnionMethodCall, CheckUnknownMember, CheckUnknownMethod, FinishUnknownStaticCall, FinishUnknownMethod, CheckIndex, CheckPosition, FinishPosition, AfterIndexListPart, AfterProcessEnvIndex, AfterIndexObject, FinishGenericIndex, WriteIndexType, FinishUnknownIndex, ReportUndefinedIndex, FinishPositionIndex, AfterEnumIndexResolved, FinishEnumIndex, EnumIndexValue, CheckUnary, CheckBinary, FinishTypeOf, FinishVoid, FinishNonNull, CheckInOperator, AfterInOperands, CheckEquality, AfterEqualityOperands, FinishEqualOperands, CheckComparison, AfterComparisonOperands, FinishComparison, CompareOperands, FinishNumberComparison, WalkTypeOfName, CheckAssign, CheckUpdate, CheckDeleteValue, AfterTargetAlias, AfterProcessAssign, AfterLogicalAssign, AfterNullishHolder, AfterRecordFieldNullish, AfterIndexNullish, AfterFieldNullish, AfterNullishVariable, FinishNullishVariable, FinishVarTarget, VarTargetTypeKnown, AnswerVarTarget, DiscardChecked, AfterIndexTargetObject, AfterGenericTarget, AfterTypedArrayPosition, AfterKeyedTarget, AfterArrayPosition, AfterMemberTargetObject, AfterAssignTarget, AfterInferredField, AfterPlainValue, AfterStringCompound, AfterNumericCompound, CheckAssignDivisor, CompoundFacts, AfterAssignValue, AssignedLength, LengthFacts, AssignedField, AfterUpdateTarget, AfterMemberDelete, AfterOtherDelete, AfterIndexDeleteObject, AfterIndexDeleteKey, CheckCall, WalkArgsLoosely, CheckArgSlot, CheckArguments, CheckNew, CheckValueCall, CheckDirectCall, AfterNodeCallTry, AfterResultStaticTry, AfterConsoleTry, AfterProcessTry, AfterBytesStaticTry, AfterReceiverObject, AfterResultMethodTry, AfterDateMethodTry, AfterMatchReceiver, AfterCommonReceiver, AfterSubtleTry, AfterClassMethodCall, AfterNamedCallTry, ScopedCall, AfterKnownFunctionType, AfterFunctionNameTry, AfterNotCallableName, AfterCalleeValue, AfterDirectReturnType, AfterSpreadRest, AfterNewLoad, AfterClassNew, AfterArrayElement, AfterArrayLength, CheckClassExpr, CheckClassStmt, CheckFieldsSet, CheckFieldTarget, CheckStaticTarget, CheckMethodCall, CheckInstanceOfOperator, CheckThis, CheckStaticMember, CheckClassMember, CheckOverloadMember, CheckClassRefMember, CheckClassStaticCall, CheckSuperCall, CheckSuperMethodCall, CheckValueNew, CheckClassNew, CheckOverloadCall, CheckClassValue, BindOuterTypeParams, DeclareThis, WalkClassBodies, AfterLateClassExpr, FinishClassExpr, WalkStaticFields, LeaveStaticFields, WalkStaticField, AfterStaticField, DecorateClass, LeaveClassContext, AfterLateBase, LeaveDeclaringClass, FinishLateClass, WalkClassFunction, WalkFieldStarts, WalkClassMethod, AfterClassMethodReturn, FinishClassBodies, NextLateClass, WalkLateClass, FinishLateClassWalk, AfterConstructorTypeArgument, AfterMethodVariants, AfterMemberFunctionType, AfterStaticVariants, AfterNameFunctionType, AfterClassRefStatic, AfterOverloadVariants, AfterInstanceOfLeft, InstanceOfRight, AfterInstanceOfRight, AfterMethodCallTry, AfterClassFieldCallee, AfterMethodChoice, AfterPlainMethodType, AfterGenericMethodCall, SetCallType, StartGenericCallTypes, AfterBoundTypes, AfterGenericCallee, ChooseVariant, RankVariants, NextRankedVariant, AfterInferredArguments, AfterGenericParams, FinishSuperCall, AfterParentConstructorChoice, AfterSuperObject, AfterSuperEmitterTry, AfterSuperMethodChoice, AfterValueNewCallee, NextReflectedArg, AfterReflectedArg, AfterConstructorChoice, FinishClassNew, AfterOverloadChoice, AfterEventsFunctionTry, AfterStaticFieldCallee, AfterStaticMethodChoice, Decorate, NextHoistedDecorator, AfterFactoryMethodReturn, AfterDescriptorMethodReturn, DeclareHoistedDecorator, AfterDescriptorDeclared, NextAppliedDecorator, AfterDecoratorApplied, RelinkClass, DropDiagnosticList, WalkInferredBody, CheckThisCall, CheckListMethod, CheckListArguments, WalkStatements, NoteUse, FindListPart, CheckFunctionExpr, CheckFunctionValue, WalkFunctionBody, AfterBodyTypeParams, AfterBodyThis, NextBodyParam, AfterDefaultedParam, AfterBodyStatements, EnterErrorWatch, LeaveErrorWatch, AfterPredicateEnd, FinishFunctionBody, WalkFunctionFromScratch, DeclareArgumentList, RememberArgumentList, AfterBlockTypes, EnterStatements, NextStatement, AfterStatement, GroupMember, AfterGroupMemberReturn, GroupUseOrder, LeaveGroup, NextClosureParam, AfterClosureParamType, AfterClosureReturnType, AfterClosureReturn, StartClosureBody, LeaveInitializerClosure, KeepConstantFlow, DeclareOwnName, AfterClosureType, CheckFunctionArgSlot, AfterLiteralCallback, AfterCallbackValue, LeaveCallback, CheckCallbackMethod, AfterExtraCallbackArgs, AfterReduceInit, FinishCallbackMethod, CheckArrayCallbackResult, NextListArgument, AfterListArgument, StartModuleBodies, WalkTopFunction, AfterTopReturnType, StartLiftedFunction, CheckYield, FindIterator, AsyncUserIterator, IterableOfSlot, ElementTypeOf, DestructuredIteratorSlot, FinishIteratorResult, FinishIteratorArgs, FinishIterableParam, AfterYieldValue, AfterYieldDelegate, FinishYield, AfterIterableUser, AfterBuiltinIterator, UserIterator, AfterSymbolIterator, AfterResultIterator, AfterAsyncSymbolIterator, IteratorOf, AfterIteratorValue, BuildIterateCall, FinishIterateSymbol, FinishIterateCall, NextValueOf, AfterNextMethods, AfterSoleIteratorReturn, CheckCondition, FinishCondition, StartBranch, AfterBranchLeaf, FinishBranchLeaf, AfterAssignedLeaf, AfterBranchLeft, AfterBranchRight, AfterBranchNot, CheckNot, CheckLogicalOperator, FinishBranchJoin, StartTestedValue, AfterTestedLeaf, StartLogical, AfterLogicalLeft, StartLogicalRight, FinishTestedLogical, FinishValueLogical, FinishLogicalType, StartNullish, AfterNullishLeft, StartNullishRight, FinishNullish, Convert, Coerce, CoerceSlot, CoerceIteratorFound, CoerceAsyncIteratorFound, ApparentSlot, ConvertSlot, AdaptLiteralSlot, FunctionTypeOf, NoteInheritedReturn, FindCallCycles, CheckGenericCall, FindMethodCycles, EnterReturnBody, LeaveReturnBody, InferFromBody, InferCycle, EnterHomeModule, BuildVtable, LeaveBranch, MarkUnreachable, AfterExprStmt, FinishExprStmt, WalkBody, WalkVarDecl, CloseScope, NextDeclarator, AfterDeclaredType, AfterConstFunctionSymbol, FinishConstFunction, AfterEarlyTimer, FindDestination, AfterInit, DestructureValue, AfterDestructuredIterator, RememberValueDeclarator, WalkIf, WalkSwitch, AfterIfCondition, AfterThenBranch, FinishIf, AfterSwitchValue, NextCaseTest, AfterCaseTest, AddCaseFacts, FinishConstantCase, FinishCaseTest, NextCaseBody, WalkCaseStatement, AfterCaseBody, FinishSwitch, DeclareBlockTypes, DeclareMethodReturn, FinishMethodReturn, DeclareVariableSlot, DeclareVariable, WalkWhile, WalkDoWhile, WalkFor, WalkForOf, WalkLabeled, CheckJump, FinishLabeledBlock, LeaveLoopBody, RestoreLoopFlow, AfterWhileCondition, AfterDoWhileBody, AfterDoWhileCondition, AfterForInit, AfterForCondition, AfterForBody, AfterForStep, FinishFor, AfterForAwait, AfterForOfSource, AfterIterable, AfterForInObject, BindForOf, AfterForOfBinding, WalkReturn, AfterUnlistenedErrors, AfterReturnValue, AfterTestedReturn, AfterPredicateReturn, AfterPredicateFacts, AfterValueCoerce, AfterConstructorValue, AfterInferredReturn, AfterAsyncGeneratorReturn, CheckDictIn, CheckDictMember, CheckDictIndex, CheckRecordKeySlot, FinishRecordKey, FinishDictIndexRead, FinishDictIndexError, CheckDictTarget, FinishDictTarget, CheckRecordNullishAssign, AfterNullishRecordObject, AfterNullishRecordKey, FinishNullishRecord, CheckDictDelete, FinishDictDelete, FinishDictTypeAnswer, CheckDictNew, AfterDictNewTypeArgs, NextPairPart, AfterPairPart, FinishPairsDict, AfterDictSource, FinishDictSource, CalledFunction, NoteAssigned, NoteIncremented, NoteArrayResized, BeginPredicate, EndPredicate, NotePredicateExit, BuildPredicate, StartPredicateCopy, AddIndexCallbackFacts, AddConditionFacts, FinishConditionFacts, WalkFreshCopy, WalkBodyNow, FinishFilterResult, FinishFilterDefined, SubstituteType, SubstituteValueType, SubstituteNode, BuildSubstitutedType, InstanceType, InstanceValueType, SubstituteInstanceFields, NextInstanceField, AfterInstanceField, SubstituteTypeList, AfterTypeListItem, StartGenericValue, CheckGenericValue, NextValueTypeArg, AfterValueTypeArg, AfterGenericValueArgs, AfterGenericValueType, InstantiateCallTarget, AfterReusedWalk, NextMeaningfulParam, AfterMeaningfulParam, AfterInstanceTypes, AfterNewInstanceWalk, WalkPreciseCopy, CheckConstraint, AfterConstraintSubstitution, EvaluateConstraint, AfterConstraintMethod, InstantiateOwnAlias, AfterOwnAliasParams, DropOwnAliasAnswer, InstantiateAlias, AfterAliasParams, AfterAliasDefault, AfterAliasMatch, AfterAliasObject, AfterAliasInner, CloseAliasBody, DeclareClassTypeParams, AfterClassTypeParams, LeaveClassTypeParams, BindClassTypeParams, DeclareFunctionTypeParams, AfterFunctionTypeParams, BindFunctionTypeParams, DeclareAliasTypeParams, AfterAliasTypeParams, StartTypeParams, NextTypeParam, AfterConstraintType, NextConstraintMember, AfterConstraintMember, AfterDefaultType, AfterDefaultConstraint, CheckGenericNew, AfterEmitterNew, AfterStreamNew, NextExplicitNewArgument, AfterExplicitNewArgument, AfterExplicitInstance, AfterGenericNewBinding, AfterGenericNewInstance, InstantiateClassType, AfterInstanceTypeParams, NextInstanceDefault, AfterInstanceDefault, NextInstanceArgument, AfterInstanceArgument, FinishClassInstance, WalkOrPostpone, AfterInstanceWalk, FillInstance, LeaveFilling, LinkInstanceBases, AfterInstanceParent, NextInstanceInterface, AfterInstanceInterface, NextFilledField, AfterFilledField, DeclareInstanceMembers, NextInstanceMember, AfterInstanceInit, NextIteratedParam, AfterIteratedParam, AfterMemberSignature, NextMemberType, AfterMemberInstanceType, AfterMemberType, WalkInstanceVariants, AfterInstanceVariants, LinkInstance, MarkOverridden, ForceConversion, WalkInstance, WalkPreciseBody, WalkTemplateInstance, StartCopyBody, PopCopyDiagnostics, FinishCopyWalk, ReportInstance, ReportInstanceAt, NextPendingInstance, ReportFailedPending, WalkClassInstance, NextClassBody, StartClassBody, ClassBodyEntered, PopClassBodyDiagnostics, ReportClassInstance, FinishTypeArgs, BindGenericCall, StartBinding, InferFromArguments, NextBindingArgument, InferFromArgument, NextPrecheckedField, AfterPrecheckedField, InferPrecheckedField, InferFromListRest, RetryDeferred, NextContextualArgument, AfterContextualPartial, AfterDefaultedHint, AfterContextualArgument, AfterExplicitTypeArgs, AfterBindingTypeArgs, AfterBoundParams, NextLiteralArgument, AfterLiteralHint, AfterBoundResult, AfterBoundArguments, NextTypeArgCheck, AfterTypeArgDefault, AfterIteratedArgFit, AfterTypeArgConstraint, InferArgumentPatterns, NextFittingArgument, AfterFittingDefault, AfterFittingConstraint, JoinInstances, AfterJoinedInstance, WalkVariants, BuildInstanceInit, CheckConstructorAccess, CheckBuiltinCallbackSlot, AsyncIterableTypeOf, AfterAsyncIterableReturn, AnswerReturnType, AnswerFunctionType, AfterTemplateReturn, AfterTemplateInstance, SetInferredReturn, AfterInheritedReturn, OpenBodyCheck, CloseBodyCheck, FinishTopLevelEntry, FinishInferFromBody, NextCycleTrial, AfterCycleTrial, FinishTrialReturn, AfterBodyNowInference, CheckConsoleCall, NextConsoleArgument, AfterConsoleArgument, RejectSpreadCall, MarkCallFailed, CallLibraryFunction, CallLibraryStatic, AfterLibraryReturn, AfterLibraryCallee, FinishLibraryCall, ReadNodeOptions, PreludeTypeOf, AnswerAliasType, CallLibraryMethod, AfterMethodReturn, AfterMethodCallee, AfterLibraryMemberType, PushCheckedValue, ResolveWeakRefType, AfterWeakRefTarget, CheckWeakRefNew, AfterWeakRefTypeArg, AfterWeakRefValue, FinishWeakRefNew, CheckWeakRefMethod, CheckOsCall, CheckOsValue, CheckPathCall, CheckPathValue, AfterFormatPathArg, FinishFormatPath, FinishTextPath, CheckMathCall, CheckBitCall, NumericArgSlot, AfterNumericArg, AfterMathArgs, NextInt32Arg, AfterInt32Arg, BitsArgSlot, FinishBitsArg, AfterWrapFromArg, NextWideBitsArg, AfterWideBitsArg, AfterPlainBitsArg, AfterBitCount, FinishPlainBits, NextMinMaxArg, AfterMinMaxValue, AfterMinMaxSpread, CheckProcessCall, CheckProcessMember, CheckProcessEnvIndex, CheckProcessAssign, ExitCodeSlot, AfterExitCode, AfterStdStreamChunk, AfterSignalListener, AfterProcessStream, AfterEnvIndexKey, AfterAssignedExitCode, CheckDateStatic, CheckDateStaticMember, DateToTime, DateToString, TimeArgSlot, FinishTimeArg, AfterDateFields, CheckDateNew, FinishDateFields, AfterDateValue, FinishDateTime, CheckDateFunction, FinishDateParse, CheckDateMethod, DateSetterFields, FinishDateSetter, AfterLocaleArgs, CheckDateMember, CheckDateOperands, CheckNextTick, ResolvePromiseType, FinishPromiseType, WalkAsyncReturn, FinishAsyncReturns, CheckAwait, AfterAwaitValue, WalkForAwait, AfterAwaitIterable, AfterJoinedIterable, AfterAsyncUserIterator, AfterAsyncSource, BindAwaitElement, StartAwaitBody, EnterAwaitLoopBody, CheckPromiseNew, AfterPromiseTypeArg, AfterExecutorTrial, FinishPromiseNew, CheckPromiseMethod, FinishPromiseThen, CheckPromiseStatic, AfterResolveValue, AfterResolverTypeArg, FinishWithResolvers, NextPromiseElement, AfterPromiseElement, AfterPromiseValues, AfterTaskCallback, CheckAsyncGlobal, AfterAnyNumber, AfterTimerCallback, AfterTimerReceiver, CheckTimerMethod, CheckTimersPromisesCall, TimerPromiseValue, AfterTimerPromiseValue, TimerPromiseOptions, FinishTimerPromise, CheckSchedulerCall, ProcessStream, AddStreamBases, AfterStreamSide, FindStreamHookParams, AfterHookError, LibraryAliasOf, AfterHookCallbacks, FinishWritevHook, FinishDestroyHook, WalkHookParams, CheckStreamCall, AfterPlainEncoding, FinishEncodedView, AfterWriteChunk, AfterWriteSecond, WrittenCallbackType, AnswerStreamCallback, AfterWrittenType, NextEndArg, AfterEndArg, FinishStreamData, AfterByteChunk, AfterEncodingType, AfterEncodingValue, CheckStreamIntrinsic, AfterOverridesClass, AfterNativeIoFailure, CheckStreamLibraryCall, AfterStreamCallback, AfterFinishedOptions, NoteTargetHandled, FinishFinished, NextComposedPart, AfterComposedPart, NextPipelineStage, AfterStageValue, AfterStageIterable, StartStageCall, AfterStageCall, AfterStageMade, FinishCallbackPipeline, FinishPromisePipeline, AfterFsStreamTypes, AfterFsStreamOption, FinishFsStream, FinalFsStream, AfterProcessStreamCall, CheckStreamNew, CheckStreamFrom, AfterFromSource, AfterFromOptionsType, AfterFromOptions, AfterFromAsync, AfterFromIterable, NamedModuleType, ImportBuiltinModule, ProcessAliasSlot, CheckNodeName, AfterModuleValue, CheckNodeMember, AfterCryptoModuleMember, AfterFsConstant, CheckNodeCall, CheckLibCall, AfterIntrinsicType, FinishListenerIntrinsic, FinishAsClass, FinishAhead, FinishWithContext, CheckRuntimeMember, CheckRuntimeTarget, CheckRuntimeMethod, AfterQuestionQuery, FinishQuestionPromise, FinishQuestionCallback, CheckChildCall, AfterChildFile, AfterChildArgs, AfterChildOptions, WalkChildStdio, NextStdioEntry, WalkChildLimits, NextChildOption, AfterChildOption, AfterChildInput, CheckChildInput, FinishChildInput, AfterChildKillSignal, FinishChildKillSignal, AfterChildShell, FinishChildShell, FinishChildCall, WalkRedundantTests, CheckJsonMember, CheckJsonIndex, AfterJsonIndexKey, CheckJsonTarget, AfterJsonTargetIndex, AfterJsonTargetMember, CheckJsonMethod, CheckJsonObjectLit, FinishJsonObjectLit, NextJsonProperty, AfterJsonKey, AfterJsonPropertyValue, CheckJsonArrayLit, AfterJsonArrayLit, CheckNullEquality, AfterNullEquality, CheckJsonEquality, CheckJsonIsJson, AfterJsonIsJsonArg, CheckArrayIsArray, AfterArrayIsArrayArg, CheckJsonStatic, FinishJsonParse, AfterStringifyValue, AfterStringifyReplacer, AfterStringifySpace, FinishStringify, AfterStringifyFailure, CheckJsonGlobal, CheckResultCall, AfterWrittenResult, AfterHalfValue, FinishOkErr, CheckResultStatic, AfterCombineList, AfterCombineArray, CheckResultMember, CheckUsedValue, CheckUsedCallbackValue, CheckResultMethod, AfterUnwrapOrArg, AfterResultMatch, ResultHalfCallback, AfterPlainHalfCallback, AfterHalfCallback, AfterResultCallback, ResolveResultType, ResultHalfType, FinishResultType, NeverOperands, MatchItems, RegexToString, CheckMatchMember, CheckMatchIndex, AfterMatchPosition, CheckRegexLiteral, NoteRegexVariable, CheckRegexMethod, AfterRegexRunArg, CheckRegexMember, CheckRegExpConstructor, CheckRegExpCall, FinishRegExpNew, CheckRegExpStatic, FinishRegExpParse, CheckRegExpStaticMember, CheckStringRegexMethod, AfterRegexPattern, AfterTextReplacement, AfterFunctionReplacement, PrepareLocaleArgs, FindIntlType, SegmentsArraySlot, CheckIntlNew, FinishIntlNew, PrepareIntlArgs, LocaleArgSlot, IntlOptionsArg, AfterIntlOptions, LocaleListSlot, AfterLocaleList, CheckLocaleNew, AfterLocaleNew, CheckLocaleStatic, CheckIntlCall, CheckIntlStatic, AfterStaticLocaleList, FinishSupportedLocales, CheckIntlMember, CheckIntlMethod, AfterIntlNumber, AfterDoubleNumber, AfterRelativeUnit, CheckNumberLocale, FinishLocaleCall, CheckStringLocale, AfterNormalizeForm, DateLocaleOptions, AfterDateOptions, CheckDateFormatNew, FinishDateFormatNew, CheckDateFormatMethod, AfterDateFormatArg, CheckDecimalLiteralRange, WalkComparisonOperands, AfterComparedRight, AfterComparedLeft, ReportDecimalMix, CheckDecimalArithmetic, CheckDecimalComparison, ConvertDecimalSide, FinishDecimalArithmetic, WalkDecimalAssign, AfterDecimalAssign, CheckDecimalCall, AfterDecimalCallArg, FinishDecimalText, CheckDecimalStatic, AfterDecimalSpread, FinishDecimalStatic, CheckDecimalMethod, FinishDecimalMethod, DecimalArgSlot, AfterDecimalCount, AfterRoundingMode, ClassifyListener, NoteErrorsHandled, ReportUnlistenedErrors, ReportEmitterMethodValue, InstantiateEmitterParent, AfterEmitterParent, CheckEmitterNew, AfterEmitterEvents, AfterEmitterInstance, CreatedType, AfterCreatedArgs, AfterCreatedInstance, EventArgsOf, AfterEventName, InferredEventArgs, AfterInferredEvent, ReportNotEmitted, FindEventArgs, AnswerEventArgs, CompleteEvent, FinishCompleteEvent, CompleteSite, TryEventFunction, TryEventStatement, BeginEventTrial, EndEventTrial, CheckEmitterCall, AfterQueryEvent, AfterListenerArg, AfterListenerErrors, FinishEmitterCall, SetCheckedType, AfterEmitArgs, AfterSiteEmitKey, AfterEmitEvent, NextEmitValue, AfterEmitValue, AfterEmittedValue, AfterListenerThis, FinishListenerLiteral, AfterListenerValue, CheckEventTargetCall, AfterTargetObjectType, AfterTargetParamType, AfterTargetValue, FinishTargetCall, CheckEventsFunction, CheckEventsLibraryCall, AfterEventsObject, AfterEventsMethod, AfterWaitEvent, AfterWaitErrors, CheckFsCall, AfterPathArg, ReadEncodingOrOptions, AfterEncodingArg, AfterReadFileOptions, AfterWriteData, AfterWriteOptions, FinishWriteFile, AfterPathCallOptions, FinishPathArgument, AfterStatOptions, AfterReaddirOptions, FinishReaddir, AfterMkdirOptions, FinishMkdir, FinishRmdir, AfterRmOptions, FinishRm, FinishTwoPaths, CheckFsModuleCall, AfterFsModuleCall, WrapFsResult, CheckTzIoCall, CheckFsValue, CheckFsConstant, AfterNativeError, NativeErrorType, CheckStatsDate, CheckFsClassMethod, CheckFsPromisesCall, AfterFsPromisesCall, CheckReadlineCall, AfterReadlineOptions, FinishReadline, CheckReflectCall, NoteReflectedConversion, NoteConstructorFlow, WriteDesignRecords, AfterFieldComplete, AfterReflectGetObject, ContinueKnownGet, FinishDynamicGet, AfterFillArgs, FinishFill, AfterApplyFunction, AfterApplyThis, FinishApply, FinishApplyResult, AfterDirectMember, AfterDirectArguments, MakeVoidSequence, ReflectOk, FinishReflectOk, AfterConstructClass, FinishDynamicConstruct, ReflectArgsSlot, AfterReflectArgs, AfterMetadataKeyArg, AfterMetadataValue, AfterKnownMetadata, MetadataValueUnknown, AfterMetadataTarget, FinishMetadataCall, NextMetadataWriter, CheckBytesIndex, AfterBytesIndexPosition, WalkBytesStore, CheckBytesMember, CheckBytesUnionMember, CheckBytesStaticMember, BytesToString, BufferEncodingValue, AfterBufferEncodingArg, CheckBytesMethod, FinishBufferToString, FinishRangeMethod, NextWriteArg, AfterWriteArg, FinishWrite, AfterBufferValue, ContinueValueMethod, NextValueSplit, AfterValueSplit, FinishValueMethod, FinishVariableNumber, AfterFixedValue, FinishFixedNumber, AfterDecodeInput, FinishFatalDecode, CheckBytesStatic, AfterBytesSource, AfterFromWithSource, AfterFromWithMapper, FinishFromWith, NextBytesValue, AfterBytesValue, AfterSpreadValues, AfterBufferFromSource, WriteEncodingArg, FinishView, AfterAllocSize, AfterAllocFill, AfterByteFill, FinishAllocFill, AfterConcatList, AfterConcatTotal, AfterByteLengthArg, AfterIsBufferArg, AfterDecoderParse, FinishDecoderParse, CheckBytesNew, AfterNonNegative, AfterDataViewBuffer, ContinueDecoderNew, AfterDecoderLabelArg, AfterDecoderOptions, FinishDecoderNew, AfterTypedNewSource, FinishLengthNew, AfterMappedCallback, AfterCopySort, FinishTypedAt, AfterTypedSearchValue, FinishTypedSearch, AfterTypedValue, AfterSetLiteral, AfterSetSource, FinishTypedSet, AfterWithIndex, FinishDataView, AfterDataViewValue, AddByteCallbackFacts, CheckByteCallbackResult, CheckArrayIterator, CheckStringMethod, AfterStringRegexTry, FinishStringMethod, CheckNumberStatic, AfterCodeArg, CheckNumberMethod, AfterDigitsArg, CheckGlobalCall, AfterUriArg, FinishGlobalResult, AfterNumberArg, FinishNumberOf, CheckArrayMethod, FinishGrowingCall, FinishAtCall, AfterConcatArg, CheckDictMethod, AfterSetCombineArg, CheckMapStatic, AfterGroupSource, AfterGroupCallback, CheckObjectCall, AfterEntriesPairs, AfterEntriesSource, AfterListingEnum, AfterEnumListing, AfterListingArg, AfterListedClass, AfterListedFields, MarkFused, CheckIteratorFrom, AfterIteratorFromSource, CheckArrayFrom, AfterArrayFromSource, AfterArrayFromMapper, CheckIteratorMethod, AfterTakeCount, AfterReduceInitValue, AfterIteratorCallback, CheckCryptoValue, CheckCryptoModuleMember, CheckCryptoMember, CheckCryptoNew, CheckX509Parse, CheckWebCryptoCall, CheckWebCryptoMember, CryptoValue, AfterCryptoData, AfterCryptoNumber, AfterCryptoKeyObject, AfterProvenNumber, AfterCryptoEncoding, CryptoFinishStep, FinishCryptoResult, AfterRejectCallback, CheckCryptoCall, AfterCryptoAsync, AfterFillTarget, AfterFillOffset, AfterFillSize, FinishKeyPair, CheckCryptoMethod, FinishBytesText, CheckSubtleIntrinsic, AfterSubtleArg, CheckSubtleCall, AfterJwkArgument, AfterJwkWrap, AfterSubtleFinish, WalkExternal, NoteHttpsCall, NoteTlsMethod, NoteHttpsValue, WalkHeadersCall, NoteLibraryInstance, InferPairsSlot, CheckDictSourceSlot, AfterDictSourceSlot, FinishIteratorFilter, FinishIteratorFilterDefined>;
 
 }

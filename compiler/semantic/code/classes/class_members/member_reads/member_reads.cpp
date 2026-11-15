@@ -147,7 +147,7 @@ void MemberReads::startMethodMember(MemberExpr *member, ClassDecl *classDecl, co
     this->state.diagnostics.error(member->loc(), accessible.error().message);
   }
   bool isEmitterValue = methods[0]->cls()->library() &&
-                        this->state.library.events.isEmitterClass(classDecl) &&
+                        this->state.library.emitters.isEmitterClass(classDecl) &&
                         !this->state.library.declarations.isInsideLibrary(member->loc()) &&
                         !EmitterMemberTable::isName(name, EmitterMember::EVENT_NAMES);
   if (isEmitterValue) {

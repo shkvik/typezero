@@ -1,5 +1,4 @@
 #include "compiler/semantic/inference_v2/returns/body_inference/body_inference.h"
-#include "compiler/semantic/library/async/async_checker/async_checker.h"
 
 namespace tz {
 
@@ -75,7 +74,7 @@ void BodyInference::convertReturns(const FunctionDecl *functionDecl,
 }
 
 bool BodyInference::isSettled(const Type *type) const {
-  const auto *awaited = AsyncChecker::awaitedType(type);
+  const auto *awaited = this->state.library.async.awaitedType(type);
 
   return awaited == type;
 }

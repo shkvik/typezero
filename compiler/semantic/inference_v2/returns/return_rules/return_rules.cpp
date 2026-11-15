@@ -1,7 +1,6 @@
 #include "compiler/semantic/inference_v2/returns/return_rules/return_rules.h"
 #include "compiler/program/ast/ast_cloner/ast_cloner.h"
 #include "compiler/semantic/code/functions/code_functions_registry_errors.h"
-#include "compiler/semantic/library/async/async_checker/async_checker.h"
 
 namespace tz {
 
@@ -24,8 +23,7 @@ const Type *ReturnRules::collectedType(const FunctionDecl *functionDecl, const F
                                     errors);
   }
   if (functionDecl->isAsync) {
-    return this->state.library.async.inferAsyncType(function, collected.returns, isFallingOff,
-                                                    errors);
+    return this->inferAsyncType(function, collected.returns, isFallingOff, errors);
   }
 
   return this->unifyReturns(function, collected.returns, isFallingOff, errors);
@@ -234,7 +232,7 @@ const Type *ReturnRules::yieldedValueType(const YieldExpr *yield, bool isAsync) 
     return type;
   }
 
-  return AsyncChecker::awaitedType(type);
+  return this->state.library.async.awaitedType(type);
 }
 
 const Type *ReturnRules::unknownYields(const FuncSymbol *function,
@@ -313,7 +311,7 @@ const Type *ReturnRules::returnedValueType(const ReturnStmt *returnStmt, bool is
   if (type->isError() || !isAsync) {
     return type;
   }
-  const auto *awaited = AsyncChecker::awaitedType(type);
+  const auto *awaited = this->state.library.async.awaitedType(type);
   if (awaited == nullptr || awaited->isUndefined()) {
     return nullptr;
   }
@@ -381,6 +379,92 @@ std::string ReturnRules::nothingYieldedReason(const Type *yielded, bool hasNoYie
   }
 
   return "";
+}
+
+const Type *ReturnRules::inferAsyncType(const FuncSymbol *function,
+                                        llvm::ArrayRef<ReturnStmt *> returns, bool isFallingOff,
+                                        ReturnErrors errors) {
+  auto sorted = this->sortedAsyncReturns(returns);
+  const Type *type = nullptr;
+  for (const ReturnStmt *returnStmt : sorted.valued) {
+    const auto *candidate = this->withoutPromise(returnStmt->value->type);
+    auto joined = this->checkAsyncReturnsJoin(type, candidate, function);
+    if (joined.isErr() && errors == ReturnErrors::REPORTED) {
+      this->state.diagnostics.error(returnStmt->value->loc(), joined.error().message);
+    }
+    if (joined.isErr()) {
+      return Type::error();
+    }
+    type = joined.value();
+  }
+  if (type != nullptr) {
+    bool isOptional = isFallingOff || sorted.hasNothing;
+    const Type *value = isOptional ? Type::optional(type) : type;
+
+    return Type::promise(value);
+  }
+  if (!sorted.hasUnknown) {
+    return Type::promise(Type::voidTy());
+  }
+
+  return errors == ReturnErrors::REPORTED ? Type::error() : nullptr;
+}
+
+ReturnRules::SortedAsyncReturns
+ReturnRules::sortedAsyncReturns(llvm::ArrayRef<ReturnStmt *> returns) const {
+  auto sorted = SortedAsyncReturns{.valued = {}, .hasNothing = false, .hasUnknown = false};
+  for (const ReturnStmt *returnStmt : returns) {
+    switch (this->asyncReturned(returnStmt)) {
+      case AsyncReturned::NOTHING:
+        sorted.hasNothing = true;
+        break;
+      case AsyncReturned::UNKNOWN:
+        sorted.hasUnknown = true;
+        break;
+      case AsyncReturned::VALUE:
+        sorted.valued.push_back(returnStmt);
+        break;
+    }
+  }
+
+  return sorted;
+}
+
+ReturnRules::AsyncReturned ReturnRules::asyncReturned(const ReturnStmt *returnStmt) const {
+  if (returnStmt->value == nullptr) {
+    return AsyncReturned::NOTHING;
+  }
+  const auto *settled = this->withoutPromise(returnStmt->value->type);
+  if (settled->isError()) {
+    return AsyncReturned::UNKNOWN;
+  }
+  if (settled->isUndefined() || settled->isVoid()) {
+    return AsyncReturned::NOTHING;
+  }
+
+  return AsyncReturned::VALUE;
+}
+
+ReturnRules::ResultAsyncReturnsJoin
+ReturnRules::checkAsyncReturnsJoin(const Type *type, const Type *candidate,
+                                   const FuncSymbol *function) const {
+  const Type *common =
+      type != nullptr ? this->state.types.relations.unify(type, candidate) : candidate;
+  if (common == nullptr || common->isError()) {
+    auto name = ErrorTextFunctionName::quoted(function->name);
+    auto message = ErrorTextAsyncReturnTypes::differ(name, candidate->name(), type->name());
+
+    return err(InferenceReturnsRegistryAsyncReturnsJoinError{
+        .code = InferenceReturnsRegistryAsyncReturnsJoinErrorCode::TYPES_DIFFER,
+        .message = message,
+    });
+  }
+
+  return ok(common);
+}
+
+const Type *ReturnRules::withoutPromise(const Type *type) const {
+  return type->isPromise() ? type->promised() : type;
 }
 
 FunctionDecl *ReturnRules::freshCopy(const FunctionDecl *functionDecl) {

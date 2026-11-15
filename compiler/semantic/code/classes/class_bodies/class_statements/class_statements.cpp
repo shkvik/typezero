@@ -136,7 +136,7 @@ void ClassStatements::afterStaticField(const AfterStaticField &task) {
 }
 
 void ClassStatements::startLateClass(ClassDecl *classDecl) {
-  classDecl->checkOnly = this->state.library.reflection.isOnlyChecked();
+  classDecl->checkOnly = this->state.library.reflect.isOnlyChecked();
   this->registerLateClass(classDecl);
   this->rememberLateScope(classDecl);
   this->state.walk.tasks.pushTask(AfterLateBase{.classDecl = classDecl});

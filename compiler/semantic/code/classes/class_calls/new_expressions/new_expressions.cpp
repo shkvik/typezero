@@ -96,7 +96,7 @@ void NewExpressions::afterReflectedArg(const AfterReflectedArg &task) {
 
 void NewExpressions::finishReflectNew(const ReflectNewDraft &draft) {
   NewExpr *expr = draft.newExpr;
-  bool isOnlyChecked = this->state.library.reflection.isOnlyChecked();
+  bool isOnlyChecked = this->state.library.reflect.isOnlyChecked();
   if (!isOnlyChecked) {
     auto argTypes = draft.argTypes;
     this->state.library.reflection.addReflectedNew(expr, std::move(argTypes));

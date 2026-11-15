@@ -200,6 +200,14 @@ void CodeFunctionsRegistry::finishFilterDefined(const FinishFilterDefined &task)
   return this->arrayCallbacks.finishFilterDefined(task);
 }
 
+void CodeFunctionsRegistry::finishIteratorFilter(const FinishIteratorFilter &task) {
+  return this->arrayCallbacks.finishIteratorFilter(task);
+}
+
+void CodeFunctionsRegistry::finishIteratorFilterDefined(const FinishIteratorFilterDefined &task) {
+  return this->arrayCallbacks.finishIteratorFilterDefined(task);
+}
+
 void CodeFunctionsRegistry::checkThisCall(const CheckThisCall &task) {
   return this->functionMethods.checkThisCall(task);
 }

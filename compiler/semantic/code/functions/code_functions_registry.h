@@ -54,6 +54,8 @@ public:
   void checkFunctionValue(const CheckFunctionValue &task);
   void checkListArguments(const CheckListArguments &task);
   void finishFilterResult(const FinishFilterResult &task);
+  void finishIteratorFilter(const FinishIteratorFilter &task);
+  void finishIteratorFilterDefined(const FinishIteratorFilterDefined &task);
   void finishFunctionBody(const FinishFunctionBody &task);
   void afterBodyStatements(const AfterBodyStatements &task);
   void afterBodyTypeParams(const AfterBodyTypeParams &task);

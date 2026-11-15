@@ -20,6 +20,7 @@ public:
   void nextMemberType(const NextMemberType &task);
   void walkOrPostpone(const WalkOrPostpone &task);
   void afterEmitterNew(const AfterEmitterNew &task);
+  void afterStreamNew(const AfterStreamNew &task);
   void afterMemberType(const AfterMemberType &task);
   void checkGenericNew(const CheckGenericNew &task);
   void nextFilledField(const NextFilledField &task);

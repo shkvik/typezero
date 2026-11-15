@@ -104,4 +104,17 @@ void CodeDictionariesRegistry::finishDictSource(const FinishDictSource &task) {
   return this->dictionarySources.finishDictSource(task);
 }
 
+
+void CodeDictionariesRegistry::inferPairsSlot(const InferPairsSlot &task) {
+  return this->dictionaryConstruction.inferPairsSlot(task);
+}
+
+void CodeDictionariesRegistry::checkDictSourceSlot(const CheckDictSourceSlot &task) {
+  return this->dictionarySources.checkDictSourceSlot(task);
+}
+
+void CodeDictionariesRegistry::afterDictSourceSlot(const AfterDictSourceSlot &task) {
+  return this->dictionarySources.afterDictSourceSlot(task);
+}
+
 }

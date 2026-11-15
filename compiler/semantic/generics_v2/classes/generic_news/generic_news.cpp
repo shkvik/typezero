@@ -42,7 +42,21 @@ void GenericNews::afterLibraryTries(const CheckGenericNew &task) {
     return this->startGenericNew(task);
   }
 
-  return this->state.walk.tasks.pushTask(CheckStreamNew{
+  auto &tasks = this->state.walk.tasks;
+  tasks.pushTask(
+      AfterStreamNew{.newExpr = task.newExpr, .classDecl = task.classDecl, .expected = task.expected});
+
+  return tasks.pushTask(CheckStreamNew{
+      .newExpr = task.newExpr, .classDecl = task.classDecl, .expected = task.expected});
+}
+
+void GenericNews::afterStreamNew(const AfterStreamNew &task) {
+  Expr *stream = this->state.walk.tasks.takeChecked();
+  if (stream != nullptr) {
+    return this->state.walk.tasks.pushChecked(stream);
+  }
+
+  return this->startGenericNew(CheckGenericNew{
       .newExpr = task.newExpr, .classDecl = task.classDecl, .expected = task.expected});
 }
 

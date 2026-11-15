@@ -59,24 +59,36 @@ void DictionarySources::finishInferredPairs(const PairsDraft &draft) {
   NewExpr *expr = draft.newExpr;
   ArrayLitExpr *literal = draft.literal;
   if (!draft.isTyped || draft.key == nullptr || draft.value == nullptr) {
-    expr->type = Type::error();
-    return this->state.walk.tasks.pushChecked(expr);
+    return this->failInferredPairs(draft);
   }
   auto known = this->checkPairsKnown(draft.key, draft.value);
   if (known.isErr()) {
     this->state.diagnostics.error(literal->loc(), known.error().message);
-    expr->type = Type::error();
-    return this->state.walk.tasks.pushChecked(expr);
+    return this->failInferredPairs(draft);
   }
   const auto *pairType = Type::tuple({draft.key, draft.value});
   for (const ArrayLitExpr::Element &element : literal->elements) {
     element.expr->type = pairType;
   }
   literal->type = Type::array(pairType);
-  this->state.walk.tasks.pushTask(
-      FinishPairsDict{.newExpr = expr, .key = draft.key, .value = draft.value});
+  if (expr == nullptr) {
+    this->state.walk.tasks.pushAnswer(pairType);
+  } else {
+    this->state.walk.tasks.pushTask(
+        FinishPairsDict{.newExpr = expr, .key = draft.key, .value = draft.value});
+  }
 
   return this->pushPairCoercions(literal, draft.key, draft.value);
+}
+
+void DictionarySources::failInferredPairs(const PairsDraft &draft) {
+  NewExpr *expr = draft.newExpr;
+  if (expr == nullptr) {
+    return this->state.walk.tasks.pushAnswer(Type::error());
+  }
+  expr->type = Type::error();
+
+  return this->state.walk.tasks.pushChecked(expr);
 }
 
 void DictionarySources::pushPairCoercions(ArrayLitExpr *literal, const Type *key,
@@ -290,6 +302,43 @@ std::optional<const Type *> DictionarySources::sourceElementDict(const NewExpr *
   }
 
   return Type::dict(Type::DictKind::Set, key, Type::voidTy());
+}
+
+
+void DictionarySources::checkDictSourceSlot(const CheckDictSourceSlot &task) {
+  auto &tasks = this->state.walk.tasks;
+  const Type *hint = task.wanted != nullptr ? Type::array(task.wanted) : nullptr;
+  tasks.pushTask(AfterDictSourceSlot{
+      .slot = task.slot, .isPairs = task.isPairs, .wanted = task.wanted, .what = task.what});
+  tasks.pushTask(IterableOfSlot{.slot = task.slot});
+  tasks.pushTask(CheckExprSlot{.slot = task.slot, .expected = hint});
+
+  return tasks.pushTask(MarkFused{.expr = *task.slot});
+}
+
+void DictionarySources::afterDictSourceSlot(const AfterDictSourceSlot &task) {
+  auto &tasks = this->state.walk.tasks;
+  const Expr *iterable = *task.slot;
+  const Type *type = iterable->type;
+  if (type->isError()) {
+    return tasks.pushAnswer(Type::error());
+  }
+  const auto *given = this->state.code.iteration.iteratedType(type);
+  if (given != nullptr && type->isIterator()) {
+    auto nothing = this->state.code.iteration.checkSendsNothing(type, task.what);
+    if (nothing.isErr()) {
+      this->state.diagnostics.error(iterable->loc(), nothing.error().message);
+    }
+    tasks.pushTask(CalledFunction{});
+  }
+  auto items = task.isPairs ? SourceItems::PAIRS : SourceItems::VALUES;
+  auto shaped = this->checkSourceShape(type, given, task.wanted, items, task.what);
+  if (shaped.isErr()) {
+    this->state.diagnostics.error(iterable->loc(), shaped.error().message);
+    return tasks.pushAnswer(Type::error());
+  }
+
+  return tasks.pushAnswer(given);
 }
 
 }

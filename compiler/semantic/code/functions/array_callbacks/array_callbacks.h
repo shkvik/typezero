@@ -20,6 +20,8 @@ public:
 
   void afterReduceInit(const AfterReduceInit &task);
   void finishFilterResult(const FinishFilterResult &task);
+  void finishIteratorFilter(const FinishIteratorFilter &task);
+  void finishIteratorFilterDefined(const FinishIteratorFilterDefined &task);
   void checkCallbackMethod(const CheckCallbackMethod &task);
   void finishFilterDefined(const FinishFilterDefined &task);
   void finishCallbackMethod(const FinishCallbackMethod &task);

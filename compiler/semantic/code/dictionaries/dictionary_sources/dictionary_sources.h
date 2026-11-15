@@ -18,6 +18,8 @@ public:
   void finishPairsDict(const FinishPairsDict &task);
   void afterDictSource(const AfterDictSource &task);
   void finishDictSource(const FinishDictSource &task);
+  void checkDictSourceSlot(const CheckDictSourceSlot &task);
+  void afterDictSourceSlot(const AfterDictSourceSlot &task);
 
 private:
   enum class PairPart {
@@ -36,6 +38,7 @@ private:
   using ResultDefinedType = Result<const Type *, CodeDictionariesRegistryElementsKnownError>;
 
   void finishInferredPairs(const PairsDraft &draft);
+  void failInferredPairs(const PairsDraft &draft);
   void joinPairPart(PairsDraft &draft, const Expr *part);
   void pushPairCoercions(ArrayLitExpr *literal, const Type *key, const Type *value);
 

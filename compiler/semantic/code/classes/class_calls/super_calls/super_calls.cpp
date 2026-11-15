@@ -124,7 +124,7 @@ void SuperCalls::afterSuperObject(const AfterSuperObject &task) {
   if (accessible.isErr()) {
     this->state.diagnostics.error(member->loc(), accessible.error().message);
   }
-  if (!this->state.library.events.isEmitterClass(parent)) {
+  if (!this->state.library.emitters.isEmitterClass(parent)) {
     return this->startSuperMethodChoice(call, member, methods);
   }
   tasks.pushTask(AfterSuperEmitterTry{.call = call, .member = member, .methods = methods});

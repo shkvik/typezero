@@ -119,7 +119,7 @@ void ClassInstances::finishInstanceChecks(ClassInstanceDraft draft) {
   llvm::SMLoc loc = draft.use.isValid() ? draft.use : generic->loc();
   auto &tasks = this->state.walk.tasks;
   if (this->isEmitterClass(generic)) {
-    auto fits = this->state.library.events.checkEventMapFits(draft.args[0]);
+    auto fits = this->state.library.emitters.checkEventMapFits(draft.args[0]);
     if (fits.isErr()) {
       this->state.diagnostics.error(loc, fits.error().message);
 

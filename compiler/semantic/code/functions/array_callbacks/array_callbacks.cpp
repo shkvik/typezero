@@ -595,4 +595,33 @@ void ArrayCallbacks::finishFilterDefined(const FinishFilterDefined &task) {
   shape.call->type = isDefined ? Type::array(shape.element->inner()) : shape.arrayType;
 }
 
+
+void ArrayCallbacks::finishIteratorFilter(const FinishIteratorFilter &task) {
+  CallExpr *call = task.call;
+  const Expr *predicate = call->args[0];
+  const Type *element = task.element;
+  const auto *kept = this->state.flow.functions.filteredType(predicate, element);
+  if (kept != nullptr) {
+    call->type = Type::iterator(kept);
+    return;
+  }
+  if (!element->isOptional() || task.isBoolean) {
+    const Type *left = element->isOptional() ? element->inner() : element;
+    call->type = Type::iterator(left);
+    return;
+  }
+  auto &tasks = this->state.walk.tasks;
+  tasks.pushTask(FinishIteratorFilterDefined{.call = call, .element = element});
+  for (const FuncSymbol *function : llvm::reverse(this->definedNeeds(predicate))) {
+    tasks.pushTask(BuildPredicate{.function = function});
+  }
+}
+
+void ArrayCallbacks::finishIteratorFilterDefined(const FinishIteratorFilterDefined &task) {
+  CallExpr *call = task.call;
+  bool isDefined = this->isKeepingDefined(call->args[0]);
+  const Type *left = isDefined ? task.element->inner() : task.element;
+  call->type = Type::iterator(left);
+}
+
 }

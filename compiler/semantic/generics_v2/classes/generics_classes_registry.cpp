@@ -16,6 +16,10 @@ void GenericsClassesRegistry::afterEmitterNew(const AfterEmitterNew &task) {
   return this->genericNews.afterEmitterNew(task);
 }
 
+void GenericsClassesRegistry::afterStreamNew(const AfterStreamNew &task) {
+  return this->genericNews.afterStreamNew(task);
+}
+
 void GenericsClassesRegistry::nextExplicitNewArgument(const NextExplicitNewArgument &task) {
   return this->genericNews.nextExplicitNewArgument(task);
 }

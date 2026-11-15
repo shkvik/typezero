@@ -1062,7 +1062,7 @@ void TypesRelations::pushUnify(std::vector<UnifyTask> &tasks, const Type *first,
 void TypesRelations::enterHalfUnify(const Type *first, const Type *second,
                                     std::vector<UnifyTask> &tasks,
                                     std::vector<const Type *> &answers) {
-  auto shortcut = ResultTypes::halfShortcut(first, second);
+  auto shortcut = this->halfShortcut(first, second);
   if (shortcut.isDecided) {
     return answers.push_back(shortcut.type);
   }
@@ -1207,6 +1207,20 @@ UnifyShortcut TypesRelations::shortUnify(const Type *first, const Type *second) 
     const Type *unified = this->optionalLike(first, second, Type::string());
 
     return this->decided(unified);
+  }
+
+  return UnifyShortcut{.isDecided = false, .type = nullptr};
+}
+
+UnifyShortcut TypesRelations::halfShortcut(const Type *first, const Type *second) {
+  if (first == second || second->isNever()) {
+    return this->decided(first);
+  }
+  if (first->isNever()) {
+    return this->decided(second);
+  }
+  if (first->isVoid() || second->isVoid()) {
+    return this->decided(nullptr);
   }
 
   return UnifyShortcut{.isDecided = false, .type = nullptr};

@@ -106,6 +106,20 @@ public:
   static std::string differ(llvm::StringRef fn, llvm::StringRef here, llvm::StringRef elsewhere);
 };
 
+enum class InferenceReturnsRegistryAsyncReturnsJoinErrorCode {
+  TYPES_DIFFER,
+};
+
+struct InferenceReturnsRegistryAsyncReturnsJoinError {
+  InferenceReturnsRegistryAsyncReturnsJoinErrorCode code;
+  std::string message;
+};
+
+class ErrorTextAsyncReturnTypes {
+public:
+  static std::string differ(llvm::StringRef fn, llvm::StringRef here, llvm::StringRef elsewhere);
+};
+
 class ErrorTextInheritedReturn {
 public:
   static std::string returns(llvm::StringRef name, llvm::StringRef base, llvm::StringRef type);

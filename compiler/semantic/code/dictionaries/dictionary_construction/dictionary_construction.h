@@ -12,6 +12,7 @@ namespace tz {
 
 class DictionaryConstruction {
 public:
+  void inferPairsSlot(const InferPairsSlot &task);
   DictionaryConstruction(SemanticState &owner, DictionaryRules &sharedDictionaryRules);
 
   void checkDictNew(const CheckDictNew &task);

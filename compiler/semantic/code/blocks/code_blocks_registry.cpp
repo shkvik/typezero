@@ -95,7 +95,8 @@ void CodeBlocksRegistry::startExprStmt(ExprStmt *statement) {
 void CodeBlocksRegistry::afterExprStmt(const AfterExprStmt &task) {
   this->state.walk.tasks.pushTask(FinishExprStmt{.statement = task.statement});
 
-  return this->state.walk.tasks.pushTask(CheckUsedValue{.expr = task.statement->expr});
+  return this->state.walk.tasks.pushTask(
+      CheckUsedValue{.expr = task.statement->expr, .at = task.statement->loc()});
 }
 
 void CodeBlocksRegistry::finishExprStmt(const FinishExprStmt &task) {

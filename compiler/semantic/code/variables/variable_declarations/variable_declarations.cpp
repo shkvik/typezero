@@ -226,7 +226,7 @@ void VariableDeclarations::startValueOrTimer(DeclaratorDraft draft) {
   VarDeclarator &declarator = draft.decl->decls[draft.number];
   bool isPlainInit = declarator.init != nullptr && !declarator.destructured();
   const Type *timer =
-      isPlainInit ? this->state.library.timers.timerCallType(declarator.init) : nullptr;
+      isPlainInit ? this->state.library.async.timerCallType(declarator.init) : nullptr;
   if (timer == nullptr) {
     return this->startVariableValue(std::move(draft));
   }

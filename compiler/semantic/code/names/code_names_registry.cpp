@@ -504,7 +504,7 @@ ClassDecl *CodeNamesRegistry::builtinClass(const NameExpr *name, const ScopeEntr
     return nullptr;
   }
 
-  return this->state.library.reflection.builtinConstructorNamed(name->name);
+  return this->state.library.reflect.builtinConstructorNamed(name->name);
 }
 
 const Type *CodeNamesRegistry::streamView(VarSymbol *variable, llvm::SMLoc loc) const {

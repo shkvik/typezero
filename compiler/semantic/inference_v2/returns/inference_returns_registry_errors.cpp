@@ -95,4 +95,11 @@ std::string ErrorTextInheritedReturn::returns(llvm::StringRef name, llvm::String
       .str();
 }
 
+std::string ErrorTextAsyncReturnTypes::differ(llvm::StringRef fn, llvm::StringRef here,
+                                              llvm::StringRef elsewhere) {
+  return (llvm::Twine(fn) + " returns '" + here + "' here and '" + elsewhere +
+          "' elsewhere; a function returns values of one type")
+      .str();
+}
+
 }

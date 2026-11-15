@@ -27,6 +27,9 @@ public:
   void finishDictTarget(const FinishDictTarget &task);
   void finishDictDelete(const FinishDictDelete &task);
   void finishDictSource(const FinishDictSource &task);
+  void inferPairsSlot(const InferPairsSlot &task);
+  void checkDictSourceSlot(const CheckDictSourceSlot &task);
+  void afterDictSourceSlot(const AfterDictSourceSlot &task);
   void checkRecordKeySlot(const CheckRecordKeySlot &task);
   void finishDictIndexRead(const FinishDictIndexRead &task);
   void finishNullishRecord(const FinishNullishRecord &task);

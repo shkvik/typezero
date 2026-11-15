@@ -432,4 +432,28 @@ const Type *DictionaryConstruction::onlyDictMember(const Type *expected, bool is
   return count == 1 ? only : nullptr;
 }
 
+
+void DictionaryConstruction::inferPairsSlot(const InferPairsSlot &task) {
+  Expr *arg = *task.slot;
+  this->markPairs(arg);
+  auto *literal = dyn_cast<ArrayLitExpr>(arg);
+  bool isPairList = literal != nullptr && !literal->elements.empty() &&
+                    llvm::all_of(literal->elements,
+                                 std::bind_front(&DictionaryConstruction::isPairElement, this));
+  if (!isPairList) {
+    return this->state.walk.tasks.pushAnswer(nullptr);
+  }
+  auto draft = PairsDraft{
+      .newExpr = nullptr,
+      .literal = literal,
+      .element = 0,
+      .isValue = false,
+      .key = nullptr,
+      .value = nullptr,
+      .isTyped = true,
+  };
+
+  return this->state.walk.tasks.pushTask(NextPairPart{.draft = draft});
+}
+
 }

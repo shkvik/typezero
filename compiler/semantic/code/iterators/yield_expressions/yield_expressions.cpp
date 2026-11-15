@@ -1,6 +1,5 @@
 #include "compiler/semantic/code/iterators/yield_expressions/yield_expressions.h"
 #include "compiler/semantic/code/functions/code_functions_registry_errors.h"
-#include "compiler/semantic/library/async/async_checker/async_checker.h"
 
 namespace tz {
 
@@ -65,7 +64,7 @@ void YieldExpressions::afterYieldValue(const AfterYieldValue &task) {
 
 void YieldExpressions::walkAsyncYieldValue(YieldExpr *yield, const YieldShape &shape) {
   const Type *type = yield->value->type;
-  const Type *given = type->isError() ? type : AsyncChecker::awaitedType(type);
+  const Type *given = type->isError() ? type : this->state.library.async.awaitedType(type);
   auto fits = this->checkPromiseYield(type, given, shape);
   if (fits.isErr()) {
     return this->state.diagnostics.error(yield->value->loc(), fits.error().message);

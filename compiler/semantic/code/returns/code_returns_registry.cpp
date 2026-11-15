@@ -1,6 +1,5 @@
 #include "compiler/semantic/code/returns/code_returns_registry.h"
 #include "compiler/semantic/code/functions/code_functions_registry_errors.h"
-#include "compiler/semantic/library/async/async_checker/async_checker.h"
 
 using llvm::isa;
 
@@ -240,7 +239,8 @@ void CodeReturnsRegistry::afterInferredReturn(const AfterInferredReturn &task) {
 void CodeReturnsRegistry::afterAsyncGeneratorReturn(const AfterAsyncGeneratorReturn &task) {
   const Expr *value = task.returnStmt->value;
   const Type *valueType = value->type;
-  const Type *given = valueType->isError() ? nullptr : AsyncChecker::awaitedType(valueType);
+  const Type *given =
+      valueType->isError() ? nullptr : this->state.library.async.awaitedType(valueType);
   auto gives = this->checkGeneratorReturn(given, task.returned, task.function);
   if (gives.isErr()) {
     return this->state.diagnostics.error(value->loc(), gives.error().message);

@@ -12,6 +12,7 @@ public:
   explicit GenericNews(SemanticState &owner);
 
   void afterEmitterNew(const AfterEmitterNew &task);
+  void afterStreamNew(const AfterStreamNew &task);
   void checkGenericNew(const CheckGenericNew &task);
   void afterExplicitInstance(const AfterExplicitInstance &task);
   void afterGenericNewBinding(const AfterGenericNewBinding &task);

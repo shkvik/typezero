@@ -50,7 +50,7 @@ void MethodCalls::nextMethodCall(const MethodCallDraft &draft) {
           CheckStreamCall{.call = call, .member = member, .classDecl = classDecl});
     case MethodCallStage::EMITTER:
       next.stage = MethodCallStage::EVENT_TARGET;
-      if (!this->state.library.events.isEmitterClass(classDecl)) {
+      if (!this->state.library.emitters.isEmitterClass(classDecl)) {
         return this->nextMethodCall(next);
       }
       tasks.pushTask(AfterMethodCallTry{.draft = next});

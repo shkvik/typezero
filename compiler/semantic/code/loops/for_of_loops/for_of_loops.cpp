@@ -108,7 +108,7 @@ const Type *ForOfLoops::listElementsType(const NameExpr *name) const {
 
 void ForOfLoops::startForIn(ForOfStmt *stmt) {
   auto *variable = dyn_cast<NameExpr>(stmt->iterable);
-  bool isEnv = this->state.library.process.isProcessMember(stmt->iterable, ProcessMember::ENV);
+  bool isEnv = this->state.library.common.isProcessMember(stmt->iterable, ProcessMember::ENV);
   this->state.walk.tasks.pushTask(
       AfterForInObject{.forOf = stmt, .variable = variable, .isEnv = isEnv});
 

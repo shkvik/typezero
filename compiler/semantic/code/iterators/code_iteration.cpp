@@ -1,5 +1,4 @@
 #include "compiler/semantic/code/iterators/code_iteration.h"
-#include "compiler/semantic/library/async/async_checker/async_checker.h"
 
 namespace tz {
 
@@ -35,7 +34,7 @@ const Type *CodeIteration::asyncIteratedType(const Type *type) const {
   if (element == nullptr) {
     return nullptr;
   }
-  const auto *awaited = AsyncChecker::awaitedType(element);
+  const auto *awaited = this->state.library.async.awaitedType(element);
 
   return awaited != nullptr && awaited->isVoid() ? Type::undefinedTy() : awaited;
 }

@@ -254,6 +254,7 @@ private:
 
   UnifyShortcut decided(const Type *type);
   UnifyShortcut shortUnify(const Type *first, const Type *second);
+  UnifyShortcut halfShortcut(const Type *first, const Type *second);
 
 
   ConversionStep stepFails();

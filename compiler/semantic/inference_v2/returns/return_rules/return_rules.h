@@ -34,6 +34,16 @@ private:
     const ReturnStmt *returnStmt;
     const Type *type;
   };
+  enum class AsyncReturned {
+    NOTHING,
+    UNKNOWN,
+    VALUE,
+  };
+  struct SortedAsyncReturns {
+    std::vector<const ReturnStmt *> valued;
+    bool hasNothing;
+    bool hasUnknown;
+  };
 
   using ResultReturnsUnified = Result<const Type *, InferenceReturnsRegistryCommonReturnError>;
   using ResultYieldedTypesJoin = Result<const Type *, InferenceReturnsRegistryYieldsJoinError>;
@@ -42,6 +52,8 @@ private:
       Result<const Type *, InferenceReturnsRegistryGeneratorReturnsError>;
   using ResultReturnsDefined =
       Result<const FuncSymbol *, InferenceReturnsRegistryDefinedReturnError>;
+  using ResultAsyncReturnsJoin =
+      Result<const Type *, InferenceReturnsRegistryAsyncReturnsJoinError>;
 
   void copyParams(const FunctionDecl *functionDecl, FunctionDecl *copy) const;
   void copyMemberRole(const FunctionDecl *functionDecl, FunctionDecl *copy) const;
@@ -54,10 +66,13 @@ private:
   bool hasUndefinedGeneratorReturn(llvm::ArrayRef<ReturnStmt *> returns, bool isAsync) const;
 
 
+  const Type *withoutPromise(const Type *type) const;
   const Type *yieldedValueType(const YieldExpr *yield, bool isAsync) const;
   const Type *returnedValueType(const ReturnStmt *returnStmt, bool isAsync) const;
   const Type *unifyReturns(const FuncSymbol *function, llvm::ArrayRef<ReturnStmt *> returns,
                            bool isFallingOff, ReturnErrors errors);
+  const Type *inferAsyncType(const FuncSymbol *function, llvm::ArrayRef<ReturnStmt *> returns,
+                             bool isFallingOff, ReturnErrors errors);
   const Type *unknownYields(const FuncSymbol *function, llvm::ArrayRef<YieldExpr *> yields,
                             const YieldJoin &join, ReturnErrors errors);
   const Type *inferGeneratorType(const FuncSymbol *function, llvm::ArrayRef<YieldExpr *> yields,
@@ -66,6 +81,10 @@ private:
 
 
   std::string nothingYieldedReason(const Type *yielded, bool hasNoYields) const;
+  AsyncReturned asyncReturned(const ReturnStmt *returnStmt) const;
+  SortedAsyncReturns sortedAsyncReturns(llvm::ArrayRef<ReturnStmt *> returns) const;
+  ResultAsyncReturnsJoin checkAsyncReturnsJoin(const Type *type, const Type *candidate,
+                                               const FuncSymbol *function) const;
   std::vector<ReturnStmt *> literalsLast(llvm::ArrayRef<ReturnStmt *> returns) const;
   std::vector<const ReturnStmt *> typedReturns(llvm::ArrayRef<ReturnStmt *> returns) const;
   std::vector<KnownYield> knownYields(llvm::ArrayRef<YieldExpr *> yields, bool isAsync) const;
