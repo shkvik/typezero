@@ -45,7 +45,7 @@ void ClassCallRules::startGenericCall(CallExpr *call, FuncSymbol *function,
       .function = function,
       .bound = bound,
       .loc = loc,
-      .kind = kind,
+      .callee = kind,
   });
 
   return tasks.pushTask(ReturnTypeOf{.function = function});

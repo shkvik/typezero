@@ -3,7 +3,7 @@
 #include "compiler/program/library/function/function_method_table/function_method_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/code/functions/code_functions_registry_errors.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 #include <optional>
 #include <vector>
 
@@ -43,7 +43,7 @@ private:
   void addListParts(llvm::ArrayRef<llvm::StringRef> parts, llvm::SMLoc loc, ExpandedArgs &expanded);
 
 
-  bool isSpreadingLists(const Type *type);
+  bool isSpreadingLists(const Type *type) const;
   bool isFixedTuple(const Type *type) const;
   bool isChecked(const std::vector<bool> &checked, size_t index) const;
 

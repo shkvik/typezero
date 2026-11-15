@@ -1,7 +1,7 @@
 #pragma once
 
 #include "compiler/program/library/builtin_names/prelude_type_table/prelude_type_table.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

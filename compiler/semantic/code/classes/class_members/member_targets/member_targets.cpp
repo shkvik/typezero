@@ -28,8 +28,8 @@ const Type *MemberTargets::fieldTargetType(MemberExpr *member, ClassDecl *classD
                                            AssignForm form) {
   const Type *type = member->object->type;
   llvm::StringRef name = member->name;
-  const ClassDecl *owner = nullptr;
-  const auto *field = classDecl->findField(name, &owner);
+  const auto *owner = classDecl->findFieldOwner(name);
+  const auto *field = classDecl->findField(name);
   auto stored = this->checkStatsDate(classDecl, member);
   if (stored.isErr()) {
     this->state.diagnostics.error(member->loc(), stored.error().message);

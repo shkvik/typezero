@@ -2,7 +2,7 @@
 
 #include "compiler/semantic/code/objects/keyed_fields/keyed_fields.h"
 #include "compiler/semantic/code/objects/object_fields/object_fields.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

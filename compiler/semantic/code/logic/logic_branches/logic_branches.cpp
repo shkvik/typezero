@@ -133,7 +133,7 @@ void LogicBranches::afterBranchRight(const AfterBranchRight &task) {
   binary->rhs = this->state.walk.tasks.takeChecked();
   auto right = this->state.walk.tasks.takeConditionFlows();
   bool isAnd = binary->op == BinaryOp::LogAnd;
-  const auto &joins = this->state.flow.joins;
+  auto &joins = this->state.flow.joins;
   auto whenTrue = isAnd ? right.whenTrue : joins.join(task.lhsTrue, right.whenTrue);
   auto whenFalse = isAnd ? joins.join(task.lhsFalse, right.whenFalse) : right.whenFalse;
   auto joined = joins.join(whenTrue, whenFalse);

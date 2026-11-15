@@ -5,7 +5,7 @@
 #include "compiler/semantic/code/names/code_names_registry_errors.h"
 #include "compiler/semantic/declaration/modules/declaration_modules_registry_errors.h"
 #include "compiler/semantic/declaration/names/declaration_names_registry_errors.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 #include <optional>
 
 namespace tz {
@@ -69,7 +69,7 @@ private:
   std::string loadLabel(llvm::StringRef name, llvm::StringRef declared, const Module *source) const;
 
 
-  const Type *streamView(VarSymbol *variable, llvm::SMLoc loc) const;
+  const Type *streamView(const VarSymbol *variable, llvm::SMLoc loc) const;
   const Type *shownType(const NameExpr *name, const VarSymbol *variable) const;
   const Type *definedType(const Type *narrowed, const VarSymbol *variable) const;
   const Type *knownResultType(const Type *type, const VarSymbol *variable) const;

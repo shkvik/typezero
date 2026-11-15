@@ -1,100 +1,61 @@
 #pragma once
 
-#include "compiler/program/ast/ast.h"
+#include "compiler/program/ast/ast_context/ast_context.h"
 #include "compiler/program/diagnostics/diagnostics.h"
+#include "compiler/program/library/builtin_names/global_member_table/global_member_table.h"
+#include "compiler/program/program_inventory/program_inventory.h"
 #include "compiler/program/source_file/source_file.h"
-#include "compiler/program/symbols/completer/completer.h"
-#include "compiler/program/types/types.h"
-#include "compiler/program/widening_store/widening_store.h"
-#include "compiler/semantic/semantic_state/alias_store/alias_store.h"
-#include "compiler/semantic/semantic_state/block_position/block_position.h"
-#include "compiler/semantic/semantic_state/bytes_store/bytes_store.h"
-#include "compiler/semantic/semantic_state/callback_facts/callback_facts.h"
-#include "compiler/semantic/semantic_state/class_context/class_context.h"
-#include "compiler/semantic/semantic_state/class_store/class_store.h"
-#include "compiler/semantic/semantic_state/constant_store/constant_store.h"
-#include "compiler/semantic/semantic_state/event_store/event_store.h"
-#include "compiler/semantic/semantic_state/expression_marks/expression_marks.h"
-#include "compiler/semantic/semantic_state/file_system_store/file_system_store.h"
-#include "compiler/semantic/semantic_state/flow_state/flow_state.h"
-#include "compiler/semantic/semantic_state/function_stack/function_stack.h"
-#include "compiler/semantic/semantic_state/generic_store/generic_store.h"
-#include "compiler/semantic/semantic_state/inventory_store/inventory_store.h"
-#include "compiler/semantic/semantic_state/late_class_store/late_class_store.h"
-#include "compiler/semantic/semantic_state/library_declarations/library_declarations.h"
-#include "compiler/semantic/semantic_state/module_states/module_states.h"
-#include "compiler/semantic/semantic_state/predicate_store/predicate_store.h"
-#include "compiler/semantic/semantic_state/reflect_store/reflect_store.h"
-#include "compiler/semantic/semantic_state/return_inference/return_inference.h"
-#include "compiler/semantic/semantic_state/scope_stack/scope_stack.h"
-#include "compiler/semantic/semantic_state/stream_store/stream_store.h"
-#include "compiler/semantic/semantic_state/type_context/type_context.h"
-#include "llvm/ADT/ArrayRef.h"
+#include "compiler/semantic/semantic_state/checkpoint/checkpoint.h"
+#include "compiler/semantic/semantic_state/code/code_storage.h"
+#include "compiler/semantic/semantic_state/declaration/declaration_storage.h"
+#include "compiler/semantic/semantic_state/flow/flow_storage.h"
+#include "compiler/semantic/semantic_state/generics/generic_storage.h"
+#include "compiler/semantic/semantic_state/inference/inference_storage.h"
+#include "compiler/semantic/semantic_state/library/library_storage.h"
+#include "compiler/semantic/semantic_state/types/type_storage.h"
+#include "compiler/semantic/semantic_state/walk/walk_storage.h"
 
 namespace tz {
 
 class SemanticState {
 public:
-  SemanticState(AstContext &context, Diagnostics &diags, SourceFile &file);
+  SemanticState(AstContext &context, Diagnostics &collected, SourceFile &loaded);
 
-  AstContext &getAst();
-  Diagnostics &getDiagnostics();
-  Completer *getCompleter() const;
-  void rememberCompleter(Completer *engine);
-  ModuleStates &getModuleStates();
-  ScopeStack &getScopeStack();
-  FunctionStack &getFunctionStack();
-  BlockPosition &getBlockPosition();
-  FlowState &getFlowState();
-  PredicateStore &getPredicateStore();
-  ReturnInference &getReturnInference();
-  GenericStore &getGenericStore();
-  AliasStore &getAliasStore();
-  TypeContext &getTypeContext();
-  ClassStore &getClassStore();
-  ClassContext &getClassContext();
-  LateClassStore &getLateClassStore();
-  ExpressionMarks &getExpressionMarks();
-  ConstantStore &getConstantStore();
-  CallbackFacts &getCallbackFacts();
-  InventoryStore &getInventoryStore();
-  LibraryDeclarations &getLibraryDeclarations();
-  EventStore &getEventStore();
-  ReflectStore &getReflectStore();
-  StreamStore &getStreamStore();
-  FileSystemStore &getFileSystemStore();
-  BytesStore &getBytesStore();
-  WideningStore &getWideningStore();
-  WideningStore takeWideningStore();
+  void restoreBody(Checkpoint saved);
+
+
+  bool isIterableRef(const TypeRef &ref) const;
+  bool isUnshadowedGlobal(const NameExpr *name) const;
+  bool isGlobalName(const Expr *expr, GlobalName global) const;
+  bool isGlobalMember(const MemberExpr *member, GlobalMember which) const;
+
+
+  Checkpoint saveBody();
+  Stmt *findTypeDeclaration(llvm::StringRef name) const;
+  const NodeName *findNodeName(llvm::StringRef name) const;
+  std::optional<StartLoadEarly> findEarlyLoad(llvm::StringRef name) const;
+  Module *findLaterSource(llvm::StringRef name, llvm::StringRef &declared) const;
+
+  AstContext &ast;
+  CodeStorage code;
+  FlowStorage flow;
+  SourceFile &file;
+  WalkStorage walk;
+  TypeStorage types;
+  LibraryStorage library;
+  GenericStorage generics;
+  Diagnostics &diagnostics;
+  InferenceStorage inference;
+  ProgramInventory &inventory;
+  DeclarationStorage declaration;
 
 private:
-  AstContext &ast;
-  Diagnostics &diagnostics;
-  Completer *completer = nullptr;
-  ModuleStates moduleStates;
-  ScopeStack scopeStack;
-  FunctionStack functionStack;
-  BlockPosition blockPosition;
-  FlowState flowState;
-  PredicateStore predicateStore;
-  ReturnInference returnInference;
-  GenericStore genericStore;
-  AliasStore aliasStore;
-  TypeContext typeContext;
-  ClassStore classStore;
-  ClassContext classContext;
-  LateClassStore lateClassStore;
-  ExpressionMarks expressionMarks;
-  ConstantStore constantStore;
-  CallbackFacts callbackFacts;
-  InventoryStore inventoryStore;
-  LibraryDeclarations libraryDeclarations;
-  EventStore eventStore;
-  ReflectStore reflectStore;
-  StreamStore streamStore;
-  FileSystemStore fileSystemStore;
-  BytesStore bytesStore;
-  WideningStore wideningStore;
+  bool isNamingGlobal(const Expr *expr, GlobalName global) const;
+  bool isLoadable(Module *source, llvm::StringRef name) const;
+  bool isGlobalThisMember(const Expr *expr, GlobalName global) const;
+
+
+  TypeAliasDecl *findModuleExport(const NodeName &nodeName) const;
 };
 
 }

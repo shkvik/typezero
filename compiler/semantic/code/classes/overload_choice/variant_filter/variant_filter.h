@@ -3,7 +3,7 @@
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/code/classes/code_classes_registry_errors.h"
 #include "compiler/semantic/code/classes/overload_choice/choice_rules/choice_rules.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 #include "compiler/union/union/union.h"
 #include <string>
 #include <vector>

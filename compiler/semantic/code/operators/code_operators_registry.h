@@ -3,7 +3,7 @@
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/code/operators/code_operators_registry_errors.h"
 #include "compiler/semantic/flow/children_first/children_first.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 #include <optional>
 
 namespace tz {

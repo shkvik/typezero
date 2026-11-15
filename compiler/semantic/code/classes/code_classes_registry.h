@@ -6,7 +6,7 @@
 #include "compiler/semantic/code/classes/class_facts/class_facts.h"
 #include "compiler/semantic/code/classes/class_members/class_members.h"
 #include "compiler/semantic/code/classes/overload_choice/overload_choice.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

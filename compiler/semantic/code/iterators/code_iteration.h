@@ -7,13 +7,20 @@
 
 namespace tz {
 
+class SemanticState;
+
 class CodeIteration {
 public:
   using ResultSendsNothing = Result<const Type *, CodeIteratorsRegistryCheckSendsNothingError>;
 
+  explicit CodeIteration(SemanticState &owner);
+
   const Type *iteratedType(const Type *type) const;
   const Type *asyncIteratedType(const Type *type) const;
   ResultSendsNothing checkSendsNothing(const Type *iterator, llvm::StringRef what) const;
+
+private:
+  SemanticState &state;
 };
 
 }

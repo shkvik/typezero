@@ -1,0 +1,31 @@
+#pragma once
+
+#include "compiler/semantic/code/conversions/code_conversions.h"
+#include "compiler/semantic/code/iterators/code_iteration.h"
+#include "compiler/semantic/semantic_state/code/argument_list_context/argument_list_context.h"
+#include "compiler/semantic/semantic_state/code/concat_chain_context/concat_chain_context.h"
+#include "compiler/semantic/semantic_state/code/constant_context/constant_context.h"
+#include "compiler/semantic/semantic_state/code/constructor_context/constructor_context.h"
+#include "compiler/semantic/semantic_state/code/decorator_context/decorator_context.h"
+#include "compiler/semantic/semantic_state/code/late_class_context/late_class_context.h"
+#include "compiler/semantic/semantic_state/code/literal_context/literal_context.h"
+#include "compiler/semantic/semantic_state/code/overload_context/overload_context.h"
+#include "compiler/semantic/semantic_state/code/variable_context/variable_context.h"
+
+namespace tz {
+
+struct CodeStorage {
+  LateClassContext late;
+  LiteralContext literals;
+  ConstantContext constants;
+  OverloadContext overloads;
+  VariableContext variables;
+  DecoratorContext decorators;
+  ArgumentListContext arguments;
+  ConstructorContext constructors;
+  CodeIteration iteration;
+  ConcatChainContext concatenation;
+  CodeConversions conversions{*this};
+};
+
+}

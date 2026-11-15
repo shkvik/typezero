@@ -3,8 +3,8 @@
 #include "compiler/program/ast/declaration_file/declaration_file.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/declaration/files/declaration_files_registry_errors.h"
-#include "compiler/semantic/names/scopes/scope_entry.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
+#include "compiler/semantic/semantic_state/walk/scope_stack_context/scope_entry.h"
 #include "llvm/ADT/StringSet.h"
 
 namespace tz {

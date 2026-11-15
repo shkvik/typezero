@@ -1,5 +1,5 @@
 #include "compiler/semantic/code/variables/variable_declarations/variable_declarations.h"
-#include "compiler/semantic/semantic_state/v2/walk/scope_stack_context/scope_stack_context_errors.h"
+#include "compiler/semantic/semantic_state/walk/scope_stack_context/scope_stack_context_errors.h"
 
 using llvm::dyn_cast;
 using llvm::dyn_cast_or_null;

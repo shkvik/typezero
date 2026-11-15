@@ -1,4 +1,5 @@
 #include "compiler/semantic/code/classes/code_classes_registry_errors.h"
+#include "compiler/program/types/types.h"
 #include "llvm/ADT/Twine.h"
 
 namespace tz {
@@ -948,6 +949,38 @@ std::string ErrorTextOverriddenCall::fieldsReach(llvm::StringRef className, llvm
 
   return ErrorTextOverriddenCall::overridden(caller, method, " (through the methods it calls)",
                                              child);
+}
+
+std::string ErrorTextConstructorType::typeArgs() {
+  return "'Constructor' takes the type of the objects the class makes, e.g. "
+         "'Constructor<User>', or nothing for any class";
+}
+
+std::string ErrorTextConstructorType::notObject(llvm::StringRef type) {
+  return (llvm::Twine("a class makes objects, and '") + type +
+          "' is not an object type; give the type of its objects, "
+          "e.g. 'Constructor<User>'")
+      .str();
+}
+
+std::string ErrorTextConstructorArgs::subclass() {
+  return "'ConstructorArgs' is the list of the parameters of the constructor of the "
+         "class extended, for the constructor of a class that extends another: "
+         "'constructor(...args: ConstructorArgs) { super(...args) }'";
+}
+
+std::string ErrorTextConstructorArgs::several(llvm::StringRef parent) {
+  return (llvm::Twine("'ConstructorArgs' is the list of the parameters of the constructor of '") +
+          parent +
+          "', which has several; write the parameters of the one to "
+          "call")
+      .str();
+}
+
+std::string ErrorTextConstructorArgs::later(llvm::StringRef parent) {
+  return (llvm::Twine("'ConstructorArgs' needs the constructor of '") + parent +
+          "', which is declared after this class; move '" + parent + "' up")
+      .str();
 }
 
 }

@@ -4,7 +4,7 @@
 #include "compiler/semantic/code/dictionaries/dictionary_construction/dictionary_construction.h"
 #include "compiler/semantic/code/dictionaries/dictionary_rules/dictionary_rules.h"
 #include "compiler/semantic/code/dictionaries/dictionary_sources/dictionary_sources.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

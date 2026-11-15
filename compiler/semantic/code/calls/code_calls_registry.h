@@ -4,7 +4,7 @@
 #include "compiler/semantic/code/calls/call_dispatch/call_dispatch.h"
 #include "compiler/semantic/code/calls/call_rules/call_rules.h"
 #include "compiler/semantic/code/calls/named_calls/named_calls.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

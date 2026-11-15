@@ -2,7 +2,7 @@
 
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/code/unknown_values/code_unknown_values_registry_errors.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

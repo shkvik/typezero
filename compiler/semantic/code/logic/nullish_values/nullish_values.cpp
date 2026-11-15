@@ -43,7 +43,7 @@ void NullishValues::startNullishRight(const StartNullishRight &task) {
 void NullishValues::finishNullish(const FinishNullish &task) {
   BinaryExpr *binary = task.binary;
   binary->rhs = this->state.walk.tasks.takeChecked();
-  const auto &afterRight = this->state.walk.flow.getFlow();
+  auto &afterRight = this->state.walk.flow.getFlow();
   auto joined = this->state.flow.joins.join(task.afterLeft, afterRight);
   this->state.walk.flow.replaceFlow(std::move(joined));
   const Type *leftType = binary->lhs->type;

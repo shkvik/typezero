@@ -3,7 +3,7 @@
 #include "compiler/program/library/array/array_method_table/array_method_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/code/functions/code_functions_registry_errors.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 #include <optional>
 #include <vector>
 

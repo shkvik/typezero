@@ -1,7 +1,7 @@
 #pragma once
 
 #include "compiler/semantic/code/arithmetic/code_arithmetic_registry_errors.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 #include <optional>
 #include <vector>
 

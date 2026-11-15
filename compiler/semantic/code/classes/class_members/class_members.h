@@ -6,7 +6,7 @@
 #include "compiler/semantic/code/classes/class_members/member_reads/member_reads.h"
 #include "compiler/semantic/code/classes/class_members/member_targets/member_targets.h"
 #include "compiler/semantic/code/classes/class_members/static_member_reads/static_member_reads.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

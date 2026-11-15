@@ -2,7 +2,7 @@
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/program/library/reflect/reflect_function_table/reflect_function_table.h"
-#include "compiler/semantic/declare/class_tree/class_tree.h"
+#include "compiler/semantic/declaration/class_tree/class_tree.h"
 #include "compiler/semantic/types/type_parts/type_routes.h"
 #include "llvm/ADT/STLExtras.h"
 

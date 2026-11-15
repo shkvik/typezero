@@ -23,6 +23,9 @@ public:
   T &value() {
     return *value_;
   }
+  const T &value() const {
+    return *value_;
+  }
   const E &error() const {
     return *error_;
   }

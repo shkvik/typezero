@@ -7,7 +7,7 @@ CodeClassesRegistry::CodeClassesRegistry(SemanticState &owner)
       calls(owner, this->facts),
       bodies(owner, this->facts),
       members(owner, this->facts),
-      overloads(owner, this->facts),
+      overloads(owner),
       decorators(owner, this->facts) {}
 
 void CodeClassesRegistry::checkClassStmt(const CheckClassStmt &task) {

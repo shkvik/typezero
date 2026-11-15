@@ -1,6 +1,6 @@
 #include "compiler/semantic/code/functions/closure_bodies/closure_bodies.h"
 #include "compiler/program/ast_walker/ast_walker.h"
-#include "compiler/semantic/semantic_state/v2/walk/scope_stack_context/scope_stack_context_errors.h"
+#include "compiler/semantic/semantic_state/walk/scope_stack_context/scope_stack_context_errors.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
 

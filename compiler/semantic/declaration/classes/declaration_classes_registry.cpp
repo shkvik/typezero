@@ -5,9 +5,9 @@
 #include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
 #include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
 #include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
-#include "compiler/semantic/bodies/classes/overload_resolver/overload_resolver_errors.h"
-#include "compiler/semantic/bodies/shared_helpers/shared_helpers.h"
+#include "compiler/semantic/code/classes/code_classes_registry_errors.h"
 #include "compiler/semantic/flow/children_first/children_first.h"
+#include "compiler/semantic/shared_helpers/shared_helpers.h"
 #include "llvm/ADT/STLExtras.h"
 #include <limits>
 
@@ -1119,8 +1119,9 @@ DeclarationClassesRegistry::parentMethod(const ClassDecl *classDecl,
 DeclarationClassesRegistry::ResultNarrowingLayout
 DeclarationClassesRegistry::narrowedField(const ClassDecl *classDecl, const ClassField &field,
                                           const Field &inherited, const ClassDecl *owner) const {
-  bool isOtherLayout = inherited.type != field.resolved &&
-                       !WideningRelations::isSameReference(field.resolved, inherited.type);
+  bool isOtherLayout =
+      inherited.type != field.resolved &&
+      !this->state.types.references.isSameReference(field.resolved, inherited.type);
   if (isOtherLayout) {
     auto message = ErrorTextNarrowedField::layout(
         field.name, classDecl->name, field.resolved->name(), owner->name, inherited.type->name());
@@ -1713,7 +1714,7 @@ DeclarationClassesRegistry::ResultFieldNarrowsDown
 DeclarationClassesRegistry::checkNarrowsField(const TypeAliasDecl *alias, const Field &field,
                                               const Field &known, llvm::StringRef origin) const {
   bool isWidened = known.type != field.type && !field.type->isError() && !known.type->isError() &&
-                   !WideningRelations::isSameReference(field.type, known.type);
+                   !this->state.types.references.isSameReference(field.type, known.type);
   if (isWidened) {
     auto message = ErrorTextInterfaceBases::narrowed(field.name, alias->name, field.type->name(),
                                                      origin, known.type->name());

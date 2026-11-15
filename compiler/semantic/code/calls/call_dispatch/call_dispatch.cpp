@@ -17,14 +17,17 @@ namespace {
 
 constexpr const char *kIteratorMethod = "[Symbol.iterator]";
 constexpr const char *kAsyncIteratorMethod = "[Symbol.asyncIterator]";
-constexpr GlobalName kTypeArgFreeGlobals[] =
-    {
+constexpr GlobalName kTypeArgFreeGlobals[] = {
+    GlobalName::STRING,  GlobalName::NUMBER,  GlobalName::OBJECT, GlobalName::ITERATOR,
+    GlobalName::ARRAY,   GlobalName::MAP,     GlobalName::SYMBOL, GlobalName::RESULT,
+    GlobalName::CONSOLE, GlobalName::PROCESS, GlobalName::MATH,   GlobalName::BIT,
+    GlobalName::REG_EXP, GlobalName::DATE,    GlobalName::INTL,   GlobalName::DECIMAL};
 
 }
 
-CallDispatch::CallDispatch(SemanticState & owner, CallRules &sharedCallRules)
+CallDispatch::CallDispatch(SemanticState &owner, CallRules &sharedCallRules)
     : callRules(sharedCallRules),
-                     state(owner) {}
+      state(owner) {}
 
 void CallDispatch::checkCall(const CheckCall &task) {
   CallExpr *call = task.call;

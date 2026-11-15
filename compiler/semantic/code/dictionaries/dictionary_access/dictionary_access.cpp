@@ -3,7 +3,7 @@
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/program/library/dict/dict_method_table/dict_method_table.h"
 #include "compiler/program/to_utf16/to_utf16.h"
-#include "compiler/semantic/bodies/objects/dict_check_helpers/dict_check_helpers.h"
+#include "compiler/semantic/code/dictionaries/dict_check_helpers/dict_check_helpers.h"
 
 using llvm::cast;
 using llvm::dyn_cast;

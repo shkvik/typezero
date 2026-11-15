@@ -2,7 +2,7 @@
 
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/code/logic/code_logic_registry_errors.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 #include <optional>
 #include <string>
 #include <vector>
@@ -18,8 +18,9 @@ public:
   void pushValueFacts(const Expr *value);
 
 
-  std::string hintText(const Expr *expr, const char *placeholder) const;
-  ResultTruthIsTested checkTruthy(const Expr *expr, TruthUse use, const Expr *other) const;
+  std::string hintText(const Expr *expr, const char *placeholder = "x") const;
+  ResultTruthIsTested checkTruthy(const Expr *expr, TruthUse use,
+                                  const Expr *other = nullptr) const;
 
 private:
   struct ObjectTruth {

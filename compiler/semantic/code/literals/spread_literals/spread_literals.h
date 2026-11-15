@@ -3,7 +3,7 @@
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/code/literals/code_literals_registry_errors.h"
 #include "compiler/semantic/code/literals/literal_rules/literal_rules.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 #include <vector>
 
 namespace tz {

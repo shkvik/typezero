@@ -163,7 +163,7 @@ void ConditionalExpressions::afterElseFirst(const AfterElseFirst &task) {
 
 void ConditionalExpressions::afterThenSecond(const AfterThenSecond &task) {
   task.conditional->thenExpr = this->state.walk.tasks.takeChecked();
-  const auto &afterThen = this->state.walk.flow.getFlow();
+  auto &afterThen = this->state.walk.flow.getFlow();
   auto joined = this->state.flow.joins.join(afterThen, task.afterElse);
 
   return this->state.walk.flow.replaceFlow(std::move(joined));
@@ -186,7 +186,7 @@ void ConditionalExpressions::afterThenFirst(const AfterThenFirst &task) {
 
 void ConditionalExpressions::afterElseSecond(const AfterElseSecond &task) {
   task.conditional->elseExpr = this->state.walk.tasks.takeChecked();
-  const auto &afterElse = this->state.walk.flow.getFlow();
+  auto &afterElse = this->state.walk.flow.getFlow();
   auto joined = this->state.flow.joins.join(task.afterThen, afterElse);
 
   return this->state.walk.flow.replaceFlow(std::move(joined));
@@ -217,7 +217,7 @@ void ConditionalExpressions::finishConditional(const FinishConditional &task) {
     conditional->type = thenType;
     return this->state.walk.tasks.pushChecked(conditional);
   }
-  const auto &conversions = this->state.code.conversions;
+  auto &conversions = this->state.code.conversions;
   bool isDifferent = thenType != elseType;
   bool isThenAdapting =
       isDifferent && conversions.isLiteralAdapting(conditional->thenExpr, elseType);

@@ -3,7 +3,7 @@
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/code/logic/code_logic_registry_errors.h"
 #include "compiler/semantic/code/logic/logic_rules/logic_rules.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 #include <string>
 
 namespace tz {

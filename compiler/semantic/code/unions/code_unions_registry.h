@@ -3,7 +3,7 @@
 #include "compiler/semantic/code/unions/union_members/union_members.h"
 #include "compiler/semantic/code/unions/union_method_calls/union_method_calls.h"
 #include "compiler/semantic/code/unions/union_rules/union_rules.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

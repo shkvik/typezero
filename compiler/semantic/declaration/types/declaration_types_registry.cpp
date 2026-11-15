@@ -361,7 +361,7 @@ void DeclarationTypesRegistry::finishAlias(const FinishAlias &task) {
 }
 
 Module *DeclarationTypesRegistry::elsewhereHome(const Stmt *declared) const {
-  const auto &modules = this->state.declaration.modules;
+  auto &modules = this->state.declaration.modules;
   auto *home = modules.findDeclModule(declared);
   auto *here = modules.getCurrentModule();
   bool isElsewhere = home != nullptr && home != here && this->state.walk.scopes.isTopLevel();

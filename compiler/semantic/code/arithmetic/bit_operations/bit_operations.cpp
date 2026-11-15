@@ -1,6 +1,6 @@
 #include "compiler/semantic/code/arithmetic/bit_operations/bit_operations.h"
-#include "compiler/semantic/bodies/shared_helpers/shared_helpers.h"
 #include "compiler/semantic/code/operators/code_operators_registry_errors.h"
+#include "compiler/semantic/shared_helpers/shared_helpers.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/CheckedArithmetic.h"
 #include <cstdio>

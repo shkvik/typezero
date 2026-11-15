@@ -1,11 +1,11 @@
 #include "compiler/semantic/code/assignments/assign_values/assign_values.h"
 #include "compiler/program/library/dict/dict_method_table/dict_method_table.h"
-#include "compiler/semantic/bodies/shared_helpers/shared_helpers.h"
 #include "compiler/semantic/code/arithmetic/code_arithmetic_registry_errors.h"
 #include "compiler/semantic/code/operators/code_operators_registry_errors.h"
 #include "compiler/semantic/flow/expr_parts/expr_parts.h"
-#include "compiler/semantic/flow_v2/proofs/flow_proofs_errors.h"
+#include "compiler/semantic/flow/proofs/flow_proofs_errors.h"
 #include "compiler/semantic/library/bytes/bytes_check_helpers/bytes_check_helpers.h"
+#include "compiler/semantic/shared_helpers/shared_helpers.h"
 
 using llvm::dyn_cast;
 

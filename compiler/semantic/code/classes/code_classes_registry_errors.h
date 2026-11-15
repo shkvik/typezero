@@ -1,5 +1,7 @@
 #pragma once
 
+#include "compiler/program/ast/ast.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
 #include <string>
 
@@ -1127,6 +1129,19 @@ public:
 private:
   static std::string overridden(llvm::StringRef caller, llvm::StringRef method,
                                 llvm::StringRef path, llvm::StringRef child);
+};
+
+class ErrorTextConstructorType {
+public:
+  static std::string typeArgs();
+  static std::string notObject(llvm::StringRef type);
+};
+
+class ErrorTextConstructorArgs {
+public:
+  static std::string subclass();
+  static std::string several(llvm::StringRef parent);
+  static std::string later(llvm::StringRef parent);
 };
 
 }

@@ -5,8 +5,8 @@
 #include "compiler/program/library/object/object_member_table/object_member_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/program/types/type_spelling/type_spelling.h"
-#include "compiler/semantic/bodies/shared_helpers/shared_helpers.h"
 #include "compiler/semantic/flow/expr_parts/expr_parts.h"
+#include "compiler/semantic/shared_helpers/shared_helpers.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cmath>
 

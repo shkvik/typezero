@@ -1,130 +1,218 @@
 #include "compiler/semantic/semantic_state/semantic_state.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
+#include "compiler/program/library/bytes/buffer_export_table/buffer_export_table.h"
+
+using llvm::dyn_cast;
 
 namespace tz {
 
-SemanticState::SemanticState(AstContext &context, Diagnostics &diags, SourceFile &file)
+SemanticState::SemanticState(AstContext &context, Diagnostics &collected, SourceFile &loaded)
     : ast(context),
-      diagnostics(diags),
-      inventoryStore(file),
-      libraryDeclarations(file.builtins) {}
+      code{.literals = LiteralContext(loaded), .iteration = CodeIteration(*this)},
+      flow{
+          .loops = FlowLoops(*this),
+          .proofs = FlowProofs(*this),
+          .changes = FlowChanges(*this),
+          .narrowing = FlowNarrowing(*this),
+          .conditions = FlowConditions(*this),
+          .defined = FlowDefinedValues(*this),
+          .tracked = FlowTrackedValues(*this),
+          .functions = FlowFunctionFacts(*this),
+          .inequalities = FlowInequalities(*this),
+          .measurements = FlowMeasurements(*this),
+          .reachability = FlowReachability(*this),
+      },
+      file(loaded),
+      library{
+          .declarations = LibraryDeclarationContext(loaded.builtins),
+          .common = LibraryCommon(*this),
+          .json = LibraryJson(*this),
+          .result = LibraryResult(*this),
+          .intl = LibraryIntl(*this),
+          .async = LibraryAsync(*this),
+          .emitters = LibraryEmitters(*this),
+          .reflect = LibraryReflect(*this),
+          .crypto = LibraryCrypto(*this),
+          .tzModules = LibraryTzModules(*this),
+          .modules = LibraryBuiltinModules(*this),
+      },
+      generics{.apparent = GenericsApparent(*this), .constraints = GenericsConstraints(*this)},
+      diagnostics(collected),
+      inference{.destinations = InferenceDestinations(*this)},
+      inventory(loaded.inventory) {}
 
-AstContext &SemanticState::getAst() {
-  return this->ast;
+Checkpoint SemanticState::saveBody() {
+  auto saved = Checkpoint{
+      .flow = this->walk.flow.takeFlow(),
+      .block = this->walk.block.saveBody(),
+      .scopes = this->walk.scopes.saveBody(),
+      .module = this->declaration.modules.getCurrentModule(),
+      .functions = this->walk.functions.saveBody(),
+      .instance = this->generics.copies.getCheckingInstance(),
+  };
+
+  return saved;
 }
 
-Diagnostics &SemanticState::getDiagnostics() {
-  return this->diagnostics;
+void SemanticState::restoreBody(Checkpoint saved) {
+  this->walk.flow.replaceFlow(std::move(saved.flow));
+  this->walk.block.restoreBody(std::move(saved.block));
+  this->walk.scopes.restoreBody(std::move(saved.scopes));
+  this->declaration.modules.rememberCurrentModule(saved.module);
+  this->walk.functions.restoreBody(std::move(saved.functions));
+  this->generics.copies.rememberCheckingInstance(saved.instance);
 }
 
-Completer *SemanticState::getCompleter() const {
-  return this->completer;
+const NodeName *SemanticState::findNodeName(llvm::StringRef name) const {
+  const auto &modules = this->declaration.modules;
+  auto *current = modules.getCurrentModule();
+  if (current == nullptr || !modules.hasModuleState(current)) {
+    return nullptr;
+  }
+  const auto &names = modules.getModuleState(current).nodeNames;
+  auto found = names.find(name);
+  if (found == names.end()) {
+    return nullptr;
+  }
+  bool isBufferName = BufferExportTable::find(name) == BufferExport::BUFFER;
+  bool isGlobalBuffer = found->second.module == NodeModule::Buffer && isBufferName;
+  if (isGlobalBuffer) {
+    return nullptr;
+  }
+  auto entry = this->walk.scopes.findName(name);
+  if (entry.isFound()) {
+    return nullptr;
+  }
+
+  return &found->second;
 }
 
-void SemanticState::rememberCompleter(Completer *engine) {
-  this->completer = engine;
+Stmt *SemanticState::findTypeDeclaration(llvm::StringRef name) const {
+  auto *declared = this->walk.scopes.findType(name);
+  if (declared != nullptr) {
+    return declared;
+  }
+  auto *alias = this->declaration.prelude.findBuiltinAlias(name);
+  if (alias != nullptr) {
+    return alias;
+  }
+  const auto *nodeName = this->findNodeName(name);
+  if (nodeName != nullptr) {
+    return this->findModuleExport(*nodeName);
+  }
+  if (this->declaration.modules.isInsideBuiltinModule()) {
+    return this->library.declarations.findModuleAlias(name);
+  }
+
+  return nullptr;
 }
 
-ModuleStates &SemanticState::getModuleStates() {
-  return this->moduleStates;
+TypeAliasDecl *SemanticState::findModuleExport(const NodeName &nodeName) const {
+  const auto &declarations = this->library.declarations;
+  if (!declarations.isModuleExport(nodeName.module, nodeName.name)) {
+    return nullptr;
+  }
+
+  return declarations.findModuleAlias(nodeName.name);
 }
 
-ScopeStack &SemanticState::getScopeStack() {
-  return this->scopeStack;
+bool SemanticState::isIterableRef(const TypeRef &ref) const {
+  return ref.kind() == TypeRefKind::GENERIC_REF &&
+         TypeNameTable::isName(ref.name, TypeName::ITERABLE) &&
+         this->findTypeDeclaration(ref.name) == nullptr;
 }
 
-FunctionStack &SemanticState::getFunctionStack() {
-  return this->functionStack;
+bool SemanticState::isUnshadowedGlobal(const NameExpr *name) const {
+  const auto *nodeName = this->findNodeName(name->name);
+  if (nodeName != nullptr) {
+    return false;
+  }
+  auto shadow = this->walk.scopes.findName(name->name);
+
+  return shadow.var() == nullptr && shadow.func() == nullptr && shadow.cls() == nullptr;
 }
 
-BlockPosition &SemanticState::getBlockPosition() {
-  return this->blockPosition;
+bool SemanticState::isGlobalName(const Expr *expr, GlobalName global) const {
+  bool isThroughGlobalThis = global == GlobalName::CRYPTO && this->isGlobalThisMember(expr, global);
+  if (isThroughGlobalThis) {
+    return true;
+  }
+
+  return this->isNamingGlobal(expr, global);
 }
 
-FlowState &SemanticState::getFlowState() {
-  return this->flowState;
+bool SemanticState::isGlobalThisMember(const Expr *expr, GlobalName global) const {
+  auto name = GlobalNameTable::getName(global);
+  const auto *member = dyn_cast<MemberExpr>(expr);
+  if (member == nullptr || member->optional || member->name != name) {
+    return false;
+  }
+
+  return this->isNamingGlobal(member->object, GlobalName::GLOBAL_THIS);
 }
 
-PredicateStore &SemanticState::getPredicateStore() {
-  return this->predicateStore;
+bool SemanticState::isNamingGlobal(const Expr *expr, GlobalName global) const {
+  auto name = GlobalNameTable::getName(global);
+  const auto *named = dyn_cast<NameExpr>(expr);
+  if (named == nullptr || named->name != name) {
+    return false;
+  }
+
+  return this->isUnshadowedGlobal(named);
 }
 
-ReturnInference &SemanticState::getReturnInference() {
-  return this->returnInference;
+bool SemanticState::isGlobalMember(const MemberExpr *member, GlobalMember which) const {
+  auto owner = GlobalMemberTable::getOwner(which);
+  auto found = GlobalMemberTable::find(owner, member->name);
+  if (found != which) {
+    return false;
+  }
+
+  return this->isGlobalName(member->object, owner);
 }
 
-GenericStore &SemanticState::getGenericStore() {
-  return this->genericStore;
+Module *SemanticState::findLaterSource(llvm::StringRef name, llvm::StringRef &declared) const {
+  auto &here =
+      this->declaration.modules.getModuleState(this->declaration.modules.getCurrentModule());
+  declared = name;
+  auto found = here.imports.find(name);
+  if (found != here.imports.end()) {
+    declared = found->second.target.name;
+    Module *source = found->second.target.module;
+    return this->declaration.modules.getModuleState(source).loaded ? nullptr : source;
+  }
+  if (this->declaration.modules.getLoadingModule() != nullptr &&
+      this->declaration.modules.getCurrentModule() !=
+          this->declaration.modules.getLoadingModule() &&
+      !here.loaded && here.topLevelNames.contains(name)) {
+    return this->declaration.modules.getCurrentModule();
+  }
+
+  return nullptr;
 }
 
-AliasStore &SemanticState::getAliasStore() {
-  return this->aliasStore;
+std::optional<StartLoadEarly> SemanticState::findEarlyLoad(llvm::StringRef name) const {
+  auto entry = this->walk.scopes.findName(name);
+  auto *loading = this->declaration.modules.getLoadingModule();
+  if (entry.isFound() || loading == nullptr) {
+    return std::nullopt;
+  }
+  llvm::StringRef declared;
+  auto *source = this->findLaterSource(name, declared);
+  bool isLoadingHere = !this->walk.functions.isInsideFunction() &&
+                       this->declaration.modules.getCurrentModule() == loading;
+  if (source == nullptr || isLoadingHere || !this->isLoadable(source, declared)) {
+    return std::nullopt;
+  }
+
+  return StartLoadEarly{.source = source, .name = declared};
 }
 
-TypeContext &SemanticState::getTypeContext() {
-  return this->typeContext;
-}
+bool SemanticState::isLoadable(Module *source, llvm::StringRef name) const {
+  const auto &there = this->declaration.modules.getModuleState(source);
 
-ClassStore &SemanticState::getClassStore() {
-  return this->classStore;
-}
-
-ClassContext &SemanticState::getClassContext() {
-  return this->classContext;
-}
-
-LateClassStore &SemanticState::getLateClassStore() {
-  return this->lateClassStore;
-}
-
-ExpressionMarks &SemanticState::getExpressionMarks() {
-  return this->expressionMarks;
-}
-
-ConstantStore &SemanticState::getConstantStore() {
-  return this->constantStore;
-}
-
-CallbackFacts &SemanticState::getCallbackFacts() {
-  return this->callbackFacts;
-}
-
-InventoryStore &SemanticState::getInventoryStore() {
-  return this->inventoryStore;
-}
-
-LibraryDeclarations &SemanticState::getLibraryDeclarations() {
-  return this->libraryDeclarations;
-}
-
-EventStore &SemanticState::getEventStore() {
-  return this->eventStore;
-}
-
-ReflectStore &SemanticState::getReflectStore() {
-  return this->reflectStore;
-}
-
-StreamStore &SemanticState::getStreamStore() {
-  return this->streamStore;
-}
-
-FileSystemStore &SemanticState::getFileSystemStore() {
-  return this->fileSystemStore;
-}
-
-BytesStore &SemanticState::getBytesStore() {
-  return this->bytesStore;
-}
-
-WideningStore &SemanticState::getWideningStore() {
-  return this->wideningStore;
-}
-
-WideningStore SemanticState::takeWideningStore() {
-  WideningStore taken = std::move(this->wideningStore);
-  this->wideningStore = WideningStore();
-
-  return taken;
+  return !there.loaded && !there.busy && there.topLevelNames.contains(name);
 }
 
 }

@@ -7,7 +7,7 @@
 #include "compiler/semantic/code/literals/object_literal_properties/object_literal_properties.h"
 #include "compiler/semantic/code/literals/scalar_literals/scalar_literals.h"
 #include "compiler/semantic/code/literals/spread_literals/spread_literals.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

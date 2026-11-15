@@ -4,7 +4,7 @@
 #include "compiler/semantic/code/classes/class_bodies/class_statements/class_statements.h"
 #include "compiler/semantic/code/classes/class_bodies/late_class_walks/late_class_walks.h"
 #include "compiler/semantic/code/classes/class_facts/class_facts.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

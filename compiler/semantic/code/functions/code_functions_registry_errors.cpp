@@ -1,4 +1,5 @@
 #include "compiler/semantic/code/functions/code_functions_registry_errors.h"
+#include "compiler/program/library/array/array_method_table/array_method_table.h"
 #include "llvm/ADT/Twine.h"
 
 namespace tz {

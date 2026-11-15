@@ -3,7 +3,7 @@
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/program/library/reflect/reflect_function_table/reflect_function_table.h"
-#include "compiler/semantic/semantic_state/v2/walk/scope_stack_context/scope_stack_context_errors.h"
+#include "compiler/semantic/semantic_state/walk/scope_stack_context/scope_stack_context_errors.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::dyn_cast;

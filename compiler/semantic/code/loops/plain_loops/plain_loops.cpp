@@ -32,7 +32,7 @@ PlainLoops::ResultJumpTargeted PlainLoops::checkJumpTarget(Stmt *stmt) {
     return err(looped.error());
   }
   if (isBreak && target->kind != JumpTarget::Kind::Loop) {
-    const auto &here = this->state.walk.flow.getFlow();
+    auto &here = this->state.walk.flow.getFlow();
     target->breaks = this->state.flow.joins.join(target->breaks, here);
   }
 
@@ -69,7 +69,7 @@ void PlainLoops::walkLabeled(const WalkLabeled &task) {
 
 void PlainLoops::finishLabeledBlock() {
   auto breaks = this->state.walk.block.leaveJumpTarget().breaks;
-  const auto &after = this->state.walk.flow.getFlow();
+  auto &after = this->state.walk.flow.getFlow();
   auto joined = this->state.flow.joins.join(after, breaks);
 
   return this->state.walk.flow.replaceFlow(std::move(joined));

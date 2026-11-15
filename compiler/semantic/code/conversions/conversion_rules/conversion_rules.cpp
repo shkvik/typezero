@@ -3,8 +3,6 @@
 #include "compiler/program/library/builtin_names/library_type_table/library_type_table.h"
 #include "compiler/program/library/builtin_names/type_of_name_table/type_of_name_table.h"
 #include "compiler/semantic/flow/expr_parts/expr_parts.h"
-#include "compiler/semantic/generics/generic_widening/generic_widening.h"
-#include "compiler/semantic/generics/widening_relations/widening_relations.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cctype>
 
@@ -64,11 +62,11 @@ Expr *ConversionRules::adaptLiteralExpr(Expr *expr, const Type *to) {
 bool ConversionRules::isWideningWrites(const Type *from, const Type *to) {
   const Type *bareFrom = from->nonOptional();
   const Type *bareTo = to->nonOptional();
-  if (bareFrom == bareTo || this->state.generics.variance.isWidening(bareFrom, bareTo)) {
+  if (bareFrom == bareTo || this->state.types.variance.isWidening(bareFrom, bareTo)) {
     return false;
   }
   bool hasArrays = bareFrom->isArray() && bareTo->isArray();
-  bool hasObjects = WideningRelations::areObjects(bareFrom, bareTo);
+  bool hasObjects = this->state.types.references.areObjects(bareFrom, bareTo);
   bool isUnionToObject = bareFrom->isUnion() && bareTo->isObject();
   if (!hasArrays && !hasObjects && !isUnionToObject) {
     return false;
@@ -77,7 +75,7 @@ bool ConversionRules::isWideningWrites(const Type *from, const Type *to) {
   if (widenings.hasKnownWidening(bareFrom, bareTo)) {
     return widenings.isNarrowingWidening(bareFrom, bareTo);
   }
-  auto narrowings = WideningRelations::narrowingsOf(bareFrom, bareTo);
+  auto narrowings = this->state.types.references.narrowingsOf(bareFrom, bareTo);
   bool isNarrowed = !narrowings.empty();
   widenings.rememberWidening(bareFrom, bareTo, isNarrowed);
 
@@ -319,7 +317,7 @@ ConversionRules::mismatchOf(const AssignAttempt &attempt) const {
   if (fromClass != nullptr && fromClass->literal() != nullptr && toObject->isObject()) {
     return CodeConversionsRegistryAssignableErrorCode::LITERAL_WITH_METHODS;
   }
-  auto widening = this->state.generics.variance.whyNot(fromObject, toObject);
+  auto widening = this->state.types.variance.whyNot(fromObject, toObject);
   if (!widening.empty()) {
     return CodeConversionsRegistryAssignableErrorCode::GENERIC_WIDENING;
   }
@@ -465,7 +463,7 @@ std::string ConversionRules::mismatchReason(const AssignAttempt &attempt,
     case CodeConversionsRegistryAssignableErrorCode::LITERAL_WITH_METHODS:
       return ErrorTextAssignable::methods();
     case CodeConversionsRegistryAssignableErrorCode::GENERIC_WIDENING:
-      return this->state.generics.variance.whyNot(fromObject, toObject);
+      return this->state.types.variance.whyNot(fromObject, toObject);
     case CodeConversionsRegistryAssignableErrorCode::CLASS_NOT_EXTENDED:
       return ErrorTextAssignable::classes(fromObject->name(), toObject->name());
     case CodeConversionsRegistryAssignableErrorCode::CLASS_NOT_IMPLEMENTED:

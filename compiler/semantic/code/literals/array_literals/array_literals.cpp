@@ -406,8 +406,8 @@ bool ArrayLiterals::isSpreadFitting(const Type *type, const Type *element,
 
 bool ArrayLiterals::isFittingObjectArray(const Type *type, const Type *element) const {
   const Type *inner = type->inner();
-  bool isObjects =
-      UnknownChecker::isObjectReference(inner->nonOptional()) && element->nonOptional()->isObject();
+  bool isObjects = this->state.types.relations.isObjectReference(inner->nonOptional()) &&
+                   element->nonOptional()->isObject();
   bool isOptionalFitting = inner->isOptional() == element->isOptional() || element->isOptional();
 
   return isObjects && isOptionalFitting &&

@@ -3,7 +3,7 @@
 #include "compiler/semantic/code/expressions/cast_expressions/cast_expressions.h"
 #include "compiler/semantic/code/expressions/conditional_expressions/conditional_expressions.h"
 #include "compiler/semantic/code/expressions/expression_dispatch/expression_dispatch.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

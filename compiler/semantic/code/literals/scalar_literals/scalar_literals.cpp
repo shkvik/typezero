@@ -17,7 +17,7 @@ void ScalarLiterals::checkIntLiteral(const CheckIntLiteral &task) {
 }
 
 void ScalarLiterals::checkTemplate(const CheckTemplate &task) {
-  auto draft = TemplateDraft{
+  auto draft = TemplateExprDraft{
       .templateExpr = task.templateExpr,
       .expected = task.expected,
       .parts = {},
@@ -52,7 +52,7 @@ void ScalarLiterals::afterTemplatePart(const AfterTemplatePart &task) {
   return this->state.walk.tasks.pushTask(ToStringSlot{.slot = slot});
 }
 
-void ScalarLiterals::finishTemplateParts(const TemplateDraft &draft) {
+void ScalarLiterals::finishTemplateParts(const TemplateExprDraft &draft) {
   TemplateExpr *templateExpr = draft.templateExpr;
   templateExpr->type = Type::string();
   const Type *want = draft.expected != nullptr ? draft.expected->nonOptional() : nullptr;

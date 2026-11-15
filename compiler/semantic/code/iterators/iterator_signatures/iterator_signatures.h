@@ -3,7 +3,7 @@
 #include "compiler/program/library/builtin_names/type_name_table/type_name_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/code/iterators/code_iterators_registry_errors.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 #include <string>
 #include <vector>
 

@@ -5,7 +5,7 @@
 #include "compiler/semantic/code/classes/class_calls/new_expressions/new_expressions.h"
 #include "compiler/semantic/code/classes/class_calls/super_calls/super_calls.h"
 #include "compiler/semantic/code/classes/class_facts/class_facts.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

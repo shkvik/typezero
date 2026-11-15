@@ -55,7 +55,7 @@ void ExpressionDispatch::reportError(const ReportError &task) {
 }
 
 const Type *ExpressionDispatch::findForcedType(const Expr *expr) const {
-  const auto &copies = this->state.generics.copies;
+  auto &copies = this->state.generics.copies;
   bool isForcing = copies.isCheckingInstance() && copies.hasForcedTypes();
 
   return isForcing ? copies.findForcedType(expr) : nullptr;
@@ -310,7 +310,7 @@ void ExpressionDispatch::finishOptionalChain(const FinishOptionalChain &task) {
   if (!type->isVoid()) {
     chain->type = Type::optional(type);
   }
-  const auto &after = this->state.walk.flow.getFlow();
+  auto &after = this->state.walk.flow.getFlow();
   auto joined = this->state.flow.joins.join(task.before, after);
 
   return this->state.walk.flow.replaceFlow(std::move(joined));

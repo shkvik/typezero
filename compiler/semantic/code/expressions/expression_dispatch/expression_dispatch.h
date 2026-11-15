@@ -1,7 +1,7 @@
 #pragma once
 
 #include "compiler/semantic/code/expressions/code_expressions_registry_errors.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 #include <optional>
 
 namespace tz {

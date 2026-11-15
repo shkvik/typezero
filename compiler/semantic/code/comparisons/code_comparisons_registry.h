@@ -4,7 +4,7 @@
 #include "compiler/semantic/code/comparisons/equality_checks/equality_checks.h"
 #include "compiler/semantic/code/comparisons/in_operators/in_operators.h"
 #include "compiler/semantic/code/comparisons/order_comparisons/order_comparisons.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

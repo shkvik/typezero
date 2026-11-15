@@ -1,7 +1,7 @@
 #include "compiler/semantic/code/classes/class_facts/class_facts.h"
 #include "compiler/program/library/builtin_names/access_keyword_table/access_keyword_table.h"
 #include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
-#include "compiler/semantic/declare/class_tree/class_tree.h"
+#include "compiler/semantic/declaration/class_tree/class_tree.h"
 #include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -263,7 +263,6 @@ const Type *ClassFacts::classRefType(const ClassDecl *classDecl) const {
 
 std::vector<FunctionDecl *> ClassFacts::signatureVariants(const Type *interfaceType,
                                                           const Overload &overload) {
-  auto &classes = this->state.declaration.classes;
   auto known = this->state.code.overloads.getSignatureVariants(interfaceType, overload.name);
   if (!known.empty()) {
     return known;

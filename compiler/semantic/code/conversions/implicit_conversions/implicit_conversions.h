@@ -2,7 +2,7 @@
 
 #include "compiler/semantic/code/conversions/code_conversions_registry_errors.h"
 #include "compiler/semantic/code/conversions/conversion_rules/conversion_rules.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

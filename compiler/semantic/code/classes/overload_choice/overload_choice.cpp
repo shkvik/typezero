@@ -2,7 +2,7 @@
 
 namespace tz {
 
-OverloadChoice::OverloadChoice(SemanticState &owner, ClassFacts &sharedFacts)
+OverloadChoice::OverloadChoice(SemanticState &owner)
     : choiceRules(owner),
       variantFilter(owner, this->choiceRules),
       candidateRanking(owner, this->choiceRules) {}

@@ -4,7 +4,7 @@
 #include "compiler/semantic/code/logic/logic_rules/logic_rules.h"
 #include "compiler/semantic/code/logic/logic_values/logic_values.h"
 #include "compiler/semantic/code/logic/nullish_values/nullish_values.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

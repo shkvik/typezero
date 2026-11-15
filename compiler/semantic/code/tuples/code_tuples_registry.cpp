@@ -1,8 +1,8 @@
 #include "compiler/semantic/code/tuples/code_tuples_registry.h"
 #include "compiler/program/library/array/array_method_table/array_method_table.h"
 #include "compiler/program/library/builtin_names/builtin_property_table/builtin_property_table.h"
-#include "compiler/semantic/bodies/objects/object_check_helpers/object_check_helpers.h"
 #include "compiler/semantic/code/calls/code_calls_registry_errors.h"
+#include "compiler/semantic/code/objects/object_check_helpers/object_check_helpers.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 

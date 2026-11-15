@@ -18,7 +18,7 @@ void SignOperations::checkSign(const CheckSign &task) {
   auto *integer = dyn_cast<IntLitExpr>(unary->operand);
   auto *real = dyn_cast<FloatLitExpr>(unary->operand);
   bool isNegated = unary->op == UnaryOp::Neg;
-  const auto &literals = this->state.types.literals;
+  auto &literals = this->state.types.literals;
   if (isNegated && integer != nullptr) {
     auto value = -double(integer->value);
     const auto *literal = literals.numberLiteralFor(task.expected, value, NumberSpelling::WHOLE);

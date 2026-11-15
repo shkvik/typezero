@@ -5,7 +5,7 @@
 #include "compiler/semantic/code/classes/class_decorators/decorator_hoisting/decorator_hoisting.h"
 #include "compiler/semantic/code/classes/class_decorators/decorator_rules/decorator_rules.h"
 #include "compiler/semantic/code/classes/class_facts/class_facts.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

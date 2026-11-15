@@ -3,8 +3,8 @@
 #include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
 #include "compiler/program/library/intl/intl_type_name_table/intl_type_name_table.h"
 #include "compiler/semantic/code/functions/code_functions_registry_errors.h"
-#include "compiler/semantic/flow_v2/proofs/flow_proofs_errors.h"
-#include "compiler/semantic/library/decimal/decimal_checker/decimal_checker_errors.h"
+#include "compiler/semantic/flow/proofs/flow_proofs_errors.h"
+#include "compiler/semantic/library/decimal/library_decimal_registry_errors.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::dyn_cast;
@@ -232,7 +232,7 @@ void NamedCalls::startClassInstanceNew(NewExpr *expr, ClassDecl *classDecl, cons
     this->state.diagnostics.error(expr->loc(), crypto.error().message);
     return this->pushNewArgsLoosely(expr);
   }
-  auto *finalClass = classDecl->findFinalClass();
+  auto *finalClass = const_cast<ClassDecl *>(classDecl->findFinalClass());
   this->state.walk.tasks.pushTask(AfterClassNew{.classDecl = classDecl});
 
   return this->state.walk.tasks.pushTask(

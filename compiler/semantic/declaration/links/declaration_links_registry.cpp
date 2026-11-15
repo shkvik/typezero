@@ -1,7 +1,7 @@
 #include "compiler/semantic/declaration/links/declaration_links_registry.h"
 #include "compiler/program/library/builtin_names/access_keyword_table/access_keyword_table.h"
-#include "compiler/semantic/bodies/classes/overload_resolver/overload_resolver_errors.h"
-#include "compiler/semantic/declare/class_tree/class_tree.h"
+#include "compiler/semantic/code/classes/code_classes_registry_errors.h"
+#include "compiler/semantic/declaration/class_tree/class_tree.h"
 #include "llvm/ADT/STLExtras.h"
 
 namespace tz {

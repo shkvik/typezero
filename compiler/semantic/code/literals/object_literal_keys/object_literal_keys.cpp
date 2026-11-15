@@ -197,7 +197,7 @@ ObjectLiteralKeys::checkComputedKey(const Type *keyType) const {
 
 ObjectLiteralKeys::ResultFieldNameIsFresh
 ObjectLiteralKeys::checkUniqueName(const ObjectLitExpr *literal, size_t index,
-                                   llvm::ArrayRef<bool> named) const {
+                                   const std::vector<bool> &named) const {
   if (!named[index]) {
     return ok(&literal->props[index]);
   }

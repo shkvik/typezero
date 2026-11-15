@@ -103,7 +103,7 @@ void CodeReturnsRegistry::afterPredicateReturn(const AfterPredicateReturn &task)
   if (!value->type->isBool()) {
     return;
   }
-  const auto &flow = this->state.walk.flow.getFlow();
+  auto &flow = this->state.walk.flow.getFlow();
   this->state.walk.tasks.pushConditionFlows(ConditionFlows{
       .whenTrue = flow,
       .whenFalse = flow,

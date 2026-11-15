@@ -49,7 +49,7 @@ void Coercions::coerceSlot(const CoerceSlot &task) {
   if (from == to || from->isError() || to->isError()) {
     return;
   }
-  const auto &relations = this->state.types.relations;
+  auto &relations = this->state.types.relations;
   if (relations.isImplicitlyConvertible(from, to)) {
     auto *converted = this->conversionRules.convertExpr(expr, to);
     return this->replaceCoerced(task.slot, converted);

@@ -287,7 +287,7 @@ void FunctionMethods::finishListArguments(const ListArgumentsDraft &draft) {
   return this->state.walk.tasks.pushTask(CalledFunction{});
 }
 
-bool FunctionMethods::isSpreadingLists(const Type *type) {
+bool FunctionMethods::isSpreadingLists(const Type *type) const {
   if (!type->isTuple()) {
     return false;
   }

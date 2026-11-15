@@ -119,7 +119,7 @@ void CodeBranchesRegistry::nextCaseTest(const NextCaseTest &task) {
 void CodeBranchesRegistry::afterCaseTest(const AfterCaseTest &task) {
   SwitchStmt *stmt = task.draft.switchStmt;
   size_t index = task.draft.index;
-  const auto &flow = this->state.walk.flow.getFlow();
+  auto &flow = this->state.walk.flow.getFlow();
   this->state.walk.tasks.pushConditionFlows(ConditionFlows{
       .whenTrue = flow,
       .whenFalse = flow,

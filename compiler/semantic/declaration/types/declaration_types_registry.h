@@ -4,10 +4,16 @@
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/declaration/types/declaration_types_registry_errors.h"
 #include "compiler/semantic/flow/children_first/children_first.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 #include "llvm/ADT/APInt.h"
 
 namespace tz {
+
+struct ConstantValue {
+  bool isString = false;
+  double number = 0;
+  std::u16string text;
+};
 
 class DeclarationTypesRegistry {
 public:

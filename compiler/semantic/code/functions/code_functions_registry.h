@@ -8,7 +8,7 @@
 #include "compiler/semantic/code/functions/function_methods/function_methods.h"
 #include "compiler/semantic/code/functions/function_rules/function_rules.h"
 #include "compiler/semantic/code/functions/function_statements/function_statements.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

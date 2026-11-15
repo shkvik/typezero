@@ -2,7 +2,7 @@
 
 #include "compiler/semantic/code/loops/for_of_loops/for_of_loops.h"
 #include "compiler/semantic/code/loops/plain_loops/plain_loops.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

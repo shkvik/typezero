@@ -41,8 +41,7 @@ bool NullishAssigns::isRecordHolder(const Expr *object) const {
   bool isRecordVariable =
       variable != nullptr && variable->type != nullptr && variable->type->isRecord();
 
-  return isRecordVariable ||
-         this->state.library.common.isProcessMember(object, ProcessMember::ENV);
+  return isRecordVariable || this->state.library.common.isProcessMember(object, ProcessMember::ENV);
 }
 
 void NullishAssigns::afterRecordFieldNullish(const AfterRecordFieldNullish &task) {

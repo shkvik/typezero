@@ -2,7 +2,7 @@
 #include "compiler/program/library/fs/fs_function_table/fs_function_table.h"
 #include "compiler/program/library/library_module_names/library_module_names.h"
 #include "compiler/program/module/load_chain/load_chain.h"
-#include "compiler/semantic/library/events/emitter_checker/emitter_checker_errors.h"
+#include "compiler/semantic/library/events/library_events_registry_errors.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cassert>
 
@@ -304,7 +304,7 @@ Module *DeclarationModulesRegistry::unreadyModule(const ExportsFrame &frame) {
   if (needed == nullptr) {
     return nullptr;
   }
-  const auto &neededState = this->state.declaration.modules.getModuleState(needed);
+  auto &neededState = this->state.declaration.modules.getModuleState(needed);
   bool isWaiting = !neededState.exportsDone && !neededState.exportsBusy;
 
   return isWaiting ? needed : nullptr;
@@ -326,7 +326,7 @@ Module *DeclarationModulesRegistry::namedExportNeeds(Module *module, const Named
   if (step.source != nullptr) {
     return step.source->from;
   }
-  const auto &here = this->state.declaration.modules.getModuleState(module);
+  auto &here = this->state.declaration.modules.getModuleState(module);
   if (here.declared.contains(step.name->name)) {
     return nullptr;
   }
@@ -420,7 +420,7 @@ DeclarationModulesRegistry::exportNamed(const llvm::StringMap<ModuleExport> &the
         .message = message,
     });
   }
-  const auto &theirState = this->state.declaration.modules.getModuleState(from);
+  auto &theirState = this->state.declaration.modules.getModuleState(from);
   if (isMissing && theirState.declared.contains(name.name)) {
     auto message = ErrorTextFindExport::unmarked(path, name.name, from->name);
 

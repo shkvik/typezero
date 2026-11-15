@@ -1,6 +1,8 @@
 #pragma once
 
-#include "compiler/semantic/semantic_state/semantic_state.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/types/types.h"
+#include "compiler/semantic/semantic_state/generics/generic_copy_context/generic_copy_types.h"
 #include "llvm/ADT/STLExtras.h"
 
 namespace tz {

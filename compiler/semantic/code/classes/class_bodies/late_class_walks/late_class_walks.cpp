@@ -1,6 +1,6 @@
 #include "compiler/semantic/code/classes/class_bodies/late_class_walks/late_class_walks.h"
 #include "compiler/program/ast_walker/ast_walker.h"
-#include "compiler/semantic/declare/class_tree/class_tree.h"
+#include "compiler/semantic/declaration/class_tree/class_tree.h"
 #include "compiler/semantic/flow/expr_parts/expr_parts.h"
 #include "compiler/semantic/flow/placed_nodes/placed_nodes.h"
 #include "llvm/ADT/STLExtras.h"

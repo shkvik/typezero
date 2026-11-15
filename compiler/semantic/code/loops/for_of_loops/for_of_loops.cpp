@@ -4,7 +4,7 @@
 #include "compiler/program/library/builtin_names/library_class_table/library_class_table.h"
 #include "compiler/program/library/process/process_member_table/process_member_table.h"
 #include "compiler/program/types/union_slots/union_slots.h"
-#include "compiler/semantic/bodies/objects/object_check_helpers/object_check_helpers.h"
+#include "compiler/semantic/code/objects/object_check_helpers/object_check_helpers.h"
 #include "compiler/semantic/flow/facts/facts.h"
 
 using llvm::dyn_cast;

@@ -3,7 +3,7 @@
 #include "compiler/program/library/builtin_names/type_of_name_table/type_of_name_table.h"
 #include "compiler/program/to_utf8/to_utf8.h"
 #include "compiler/program/types/type_spelling/type_spelling.h"
-#include "compiler/semantic/library/decimal/decimal_checker/decimal_checker_errors.h"
+#include "compiler/semantic/library/decimal/library_decimal_registry_errors.h"
 #include "llvm/ADT/STLExtras.h"
 
 using llvm::dyn_cast;

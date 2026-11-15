@@ -5,7 +5,7 @@
 #include "compiler/semantic/code/arithmetic/bit_operations/bit_operations.h"
 #include "compiler/semantic/code/arithmetic/constant_texts/constant_texts.h"
 #include "compiler/semantic/code/arithmetic/sign_operations/sign_operations.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

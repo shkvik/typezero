@@ -1,7 +1,7 @@
 #include "compiler/semantic/code/functions/closure_signatures/closure_signatures.h"
 #include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
-#include "compiler/semantic/bodies/shared_helpers/shared_helpers.h"
 #include "compiler/semantic/code/functions/code_functions_registry_errors.h"
+#include "compiler/semantic/shared_helpers/shared_helpers.h"
 
 namespace tz {
 

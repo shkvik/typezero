@@ -1,6 +1,8 @@
 #include "compiler/semantic/code/unions/union_members/union_members.h"
-#include "compiler/semantic/bodies/objects/object_check_helpers/object_check_helpers.h"
+#include "compiler/semantic/code/objects/object_check_helpers/object_check_helpers.h"
 #include "llvm/ADT/StringExtras.h"
+
+using llvm::dyn_cast;
 
 namespace tz {
 

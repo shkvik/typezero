@@ -3,7 +3,7 @@
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/code/loops/code_loops_registry_errors.h"
 #include "compiler/semantic/flow/tree_place/tree_place.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

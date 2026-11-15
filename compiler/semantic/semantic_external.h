@@ -23,18 +23,6 @@ public:
   ResultProgramChecked run();
 
 private:
-  Diagnostics::ResultTaken collectDeclarations();
-  Diagnostics::ResultTaken findRecursion();
-  Diagnostics::ResultTaken checkModuleCode();
-  Diagnostics::ResultTaken checkGenericCopies();
-  Diagnostics::ResultTaken finishProgram();
-  void walkModuleItems();
-  void walkLiftedFunctions();
-  void walkDeclarationFiles();
-  void walkClass(ClassDecl *classDecl);
-  void walkFunction(FunctionDecl *functionDecl);
-  void walkLiftedFunction(FunctionDecl *functionDecl);
-
   SourceFile &file;
   std::unique_ptr<SemanticState> state;
   std::unique_ptr<SemanticParts> parts;

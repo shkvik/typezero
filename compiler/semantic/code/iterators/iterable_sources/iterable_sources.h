@@ -2,7 +2,7 @@
 
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/code/iterators/code_iterators_registry_errors.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 
@@ -27,6 +27,7 @@ public:
   void afterAsyncSymbolIterator(const AfterAsyncSymbolIterator &task);
 
 private:
+  FuncSymbol *findIterateSymbol();
   using ResultIteratorGiven = Result<const Expr *, CodeIteratorsRegistryIteratorGivenError>;
   using ResultAsyncIterator = Result<const Expr *, CodeIteratorsRegistryAsyncIteratorGivenError>;
 

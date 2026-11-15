@@ -5,11 +5,27 @@
 #include "compiler/semantic/code/calls/code_calls_registry_errors.h"
 #include "compiler/semantic/declaration/modules/declaration_modules_registry_errors.h"
 #include "compiler/semantic/declaration/names/declaration_names_registry_errors.h"
-#include "compiler/semantic/library/decimal/decimal_checker/decimal_checker_errors.h"
+#include "compiler/semantic/library/decimal/library_decimal_registry_errors.h"
 #include "llvm/ADT/STLExtras.h"
 #include <cmath>
 
 namespace tz {
+
+namespace {
+
+const GlobalName kConversionNames[] = {
+    GlobalName::STRING,      GlobalName::NUMBER,  GlobalName::PARSE_INT,
+    GlobalName::PARSE_FLOAT, GlobalName::BOOLEAN,
+};
+
+const GlobalName kUriNames[] = {
+    GlobalName::ENCODE_URI_COMPONENT,
+    GlobalName::ENCODE_URI,
+    GlobalName::DECODE_URI_COMPONENT,
+    GlobalName::DECODE_URI,
+};
+
+}
 
 CodeNamesRegistry::CodeNamesRegistry(SemanticState &owner)
     : state(owner) {}
@@ -185,7 +201,7 @@ CodeNamesRegistry::ResultResolvedNameUse CodeNamesRegistry::checkNotLoaded(const
 }
 
 CodeNamesRegistry::ResultSourceIsLoaded CodeNamesRegistry::checkLoaded(const NameExpr *name) const {
-  const auto &modules = this->state.declaration.modules;
+  auto &modules = this->state.declaration.modules;
   if (modules.getModuleState(modules.getCurrentModule()).badImports.contains(name->name)) {
     return err(DeclarationModulesRegistryCheckLoadedError{
         .code = DeclarationModulesRegistryCheckLoadedErrorCode::ALREADY_REPORTED,
@@ -507,8 +523,8 @@ ClassDecl *CodeNamesRegistry::builtinClass(const NameExpr *name, const ScopeEntr
   return this->state.library.reflect.builtinConstructorNamed(name->name);
 }
 
-const Type *CodeNamesRegistry::streamView(VarSymbol *variable, llvm::SMLoc loc) const {
-  const auto &streams = this->state.library.streams;
+const Type *CodeNamesRegistry::streamView(const VarSymbol *variable, llvm::SMLoc loc) const {
+  auto &streams = this->state.library.streams;
   if (!streams.hasStreamViews()) {
     return nullptr;
   }

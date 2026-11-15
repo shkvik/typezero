@@ -5,7 +5,7 @@
 #include "compiler/semantic/code/assignments/assignment_rules/assignment_rules.h"
 #include "compiler/semantic/code/assignments/code_assignments_registry_errors.h"
 #include "compiler/semantic/declaration/names/declaration_names_registry_errors.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 #include <optional>
 #include <string>
 

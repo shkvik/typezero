@@ -25,7 +25,7 @@ void OrderComparisons::finishComparison(const FinishComparison &task) {
   if (isSameParam) {
     return this->state.walk.tasks.pushChecked(binary);
   }
-  const auto &apparent = this->state.generics.apparent;
+  auto &apparent = this->state.generics.apparent;
   const Type *leftType = apparent.apparentType(binary->lhs->type);
   const Type *rightType = apparent.apparentType(binary->rhs->type);
   this->state.walk.tasks.pushTask(CompareOperands{.binary = binary});

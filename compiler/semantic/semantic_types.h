@@ -6,6 +6,7 @@
 namespace tz {
 
 class Type;
+struct TypeStorage;
 
 class SemanticTypes {
 public:
@@ -13,6 +14,10 @@ public:
   static bool isCopyingIntoRecord(const Type *from, const Type *to);
   static bool isImplicitlyConvertible(const Type *from, const Type *to);
   static std::vector<NarrowedPart> narrowingsOf(const Type *from, const Type *to);
+
+private:
+  static bool hasPromiseMember(const Type *type);
+  static const Type *awaitedPlain(TypeStorage &types, const Type *type);
 };
 
 }

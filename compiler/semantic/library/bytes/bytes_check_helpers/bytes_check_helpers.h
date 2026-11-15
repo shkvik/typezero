@@ -1,9 +1,11 @@
 #pragma once
 
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/library/bytes/bytes_number_method_table/bytes_number_method_table.h"
 #include "compiler/program/library/bytes/encoding_name_table/encoding_name_table.h"
-#include "compiler/program/library/bytes/number_method_table/number_method_table.h"
+#include "compiler/program/types/types.h"
 #include "compiler/semantic/flow/children_first/children_first.h"
-#include "compiler/semantic/semantic_state/semantic_state.h"
+#include "compiler/semantic/flow/facts/facts.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
@@ -13,8 +15,6 @@
 namespace tz {
 
 using Bytes = Type::Bytes;
-
-using Range = IntegerRange;
 
 inline constexpr int64_t kInt32Min = std::numeric_limits<int32_t>::min();
 

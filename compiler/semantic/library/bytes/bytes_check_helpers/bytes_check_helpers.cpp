@@ -318,18 +318,18 @@ Range BytesCheckHelpers::operate(BinaryOp op, const Range &a, const Range &b, bo
 
 std::string BytesCheckHelpers::numberWhat(Bytes kind) {
   switch (kind) {
-  case Bytes::Int8:
-    return "an Int8";
-  case Bytes::Uint8:
-    return "a Uint8";
-  case Bytes::Int16:
-    return "an Int16";
-  case Bytes::Uint16:
-    return "a Uint16";
-  case Bytes::Int32:
-    return "an Int32";
-  default:
-    return "a Uint32";
+    case Bytes::Int8:
+      return "an Int8";
+    case Bytes::Uint8:
+      return "a Uint8";
+    case Bytes::Int16:
+      return "an Int16";
+    case Bytes::Uint16:
+      return "a Uint16";
+    case Bytes::Int32:
+      return "an Int32";
+    default:
+      return "a Uint32";
   }
 }
 

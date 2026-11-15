@@ -1,6 +1,6 @@
 #include "compiler/semantic/code/classes/class_bodies/class_statements/class_statements.h"
 #include "compiler/program/library/builtin_names/keyword_table/keyword_table.h"
-#include "compiler/semantic/bodies/classes/class_value_checker/class_value_checker_errors.h"
+#include "compiler/semantic/code/classes/code_classes_registry_errors.h"
 #include "llvm/ADT/STLExtras.h"
 
 namespace tz {

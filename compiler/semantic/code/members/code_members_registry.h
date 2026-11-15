@@ -3,7 +3,7 @@
 #include "compiler/program/library/builtin_names/global_name_table/global_name_table.h"
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/code/members/code_members_registry_errors.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 #include <optional>
 
 namespace tz {

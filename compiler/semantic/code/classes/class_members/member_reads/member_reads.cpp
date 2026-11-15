@@ -90,8 +90,8 @@ void MemberReads::checkClassMember(const CheckClassMember &task) {
     return tasks.pushTask(CheckStatsDate{.member = member, .classDecl = classDecl});
   }
   bool isViaThis = this->facts.isInitThis(member->object).isOk();
-  const ClassDecl *owner = nullptr;
-  const auto *field = classDecl->findField(member->name, &owner);
+  const auto *owner = classDecl->findFieldOwner(member->name);
+  const auto *field = classDecl->findField(member->name);
   if (field != nullptr && field->method() == nullptr) {
     return this->pushFieldMember(member, field, owner, isViaThis);
   }

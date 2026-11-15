@@ -1,6 +1,7 @@
 #pragma once
 
-#include "compiler/semantic/semantic_state/semantic_state.h"
+#include "compiler/program/ast/ast.h"
+#include "compiler/program/types/types.h"
 #include "llvm/Support/ConvertUTF.h"
 
 namespace tz {

@@ -266,7 +266,8 @@ InstanceOfChecks::checkUnknownRight(BinaryExpr *binary) const {
 InstanceOfChecks::ResultInstanceTested
 InstanceOfChecks::checkConstructorRight(BinaryExpr *binary) const {
   const Type *base = binary->lhs->type->nonOptional();
-  bool isObject = base->isError() || base->isUnknown() || UnknownChecker::isObjectReference(base);
+  bool isObject =
+      base->isError() || base->isUnknown() || this->state.types.relations.isObjectReference(base);
   if (!isObject) {
     auto message = ErrorTextInstanceOf::notObject(binary->lhs->type->name());
 

@@ -1,7 +1,7 @@
 #include "compiler/semantic/code/comparisons/comparison_rules/comparison_rules.h"
-#include "compiler/semantic/bodies/shared_helpers/shared_helpers.h"
 #include "compiler/semantic/code/arithmetic/code_arithmetic_registry_errors.h"
 #include "compiler/semantic/code/operators/code_operators_registry_errors.h"
+#include "compiler/semantic/shared_helpers/shared_helpers.h"
 #include <cstring>
 
 namespace tz {
@@ -22,7 +22,7 @@ void ComparisonRules::pushLiteralAdapting(BinaryExpr *binary) {
   if (!hasNumbers || (isBitwise && !hasIntegers)) {
     return;
   }
-  const auto &conversions = this->state.code.conversions;
+  auto &conversions = this->state.code.conversions;
   bool isPower = binary->op == BinaryOp::Pow;
   bool isLeftAdapting =
       conversions.isLiteralAdapting(binary->lhs, rightType) && !(isPower && rightType->isDecimal());

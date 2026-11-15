@@ -61,7 +61,7 @@ void ArithmeticOperators::checkArithmetic(const CheckArithmetic &task) {
     concatenation.rememberConcatChain(chainStart);
   }
   auto hints = this->operandHints(binary, task.expected);
-  const auto &conversions = this->state.code.conversions;
+  auto &conversions = this->state.code.conversions;
   bool isLiteralLeft = conversions.isNumberLiteralTree(binary->lhs) &&
                        !conversions.isNumberLiteralTree(binary->rhs) &&
                        (hints.canHintLiterals || this->hasOnlyIntLiterals(binary->lhs));
@@ -260,7 +260,7 @@ void ArithmeticOperators::pushLiteralAdapting(BinaryExpr *binary) {
   if (!hasNumbers || (isBitwise && !hasIntegers)) {
     return;
   }
-  const auto &conversions = this->state.code.conversions;
+  auto &conversions = this->state.code.conversions;
   bool isPower = binary->op == BinaryOp::Pow;
   bool isLeftAdapting =
       conversions.isLiteralAdapting(binary->lhs, rightType) && !(isPower && rightType->isDecimal());

@@ -1,6 +1,10 @@
 #include "compiler/semantic/code/iterators/code_iteration.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
+
+CodeIteration::CodeIteration(SemanticState &owner)
+    : state(owner) {}
 
 const Type *CodeIteration::iteratedType(const Type *type) const {
   if (type->isArray()) {

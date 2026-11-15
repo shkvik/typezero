@@ -2,7 +2,7 @@
 #include "compiler/program/library/number/number_method_table/number_method_table.h"
 #include "compiler/semantic/code/conversions/code_conversions_registry_errors.h"
 #include "compiler/semantic/flow/expr_parts/expr_parts.h"
-#include "compiler/semantic/semantic_state/v2/code/code_storage.h"
+#include "compiler/semantic/semantic_state/code/code_storage.h"
 #include <cctype>
 
 using llvm::dyn_cast;

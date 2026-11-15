@@ -14,14 +14,28 @@ struct Term {
   const VarSymbol *var2 = nullptr;
   bool length2 = false;
 
-  static Term zero() { return {}; }
-  static Term of(const VarSymbol *var) { return {var, false}; }
-  static Term lengthOf(const VarSymbol *var) { return {var, true}; }
+  static Term zero() {
+    return {};
+  }
+  static Term of(const VarSymbol *var) {
+    return {var, false};
+  }
+  static Term lengthOf(const VarSymbol *var) {
+    return {var, true};
+  }
   static std::optional<Term> sum(Term left, Term right);
-  bool isZero() const { return var == nullptr; }
-  bool isSum() const { return var2 != nullptr; }
-  Term first() const { return {var, length}; }
-  Term second() const { return {var2, length2}; }
+  bool isZero() const {
+    return var == nullptr;
+  }
+  bool isSum() const {
+    return var2 != nullptr;
+  }
+  Term first() const {
+    return {var, length};
+  }
+  Term second() const {
+    return {var2, length2};
+  }
   bool mentions(const VarSymbol *variable) const {
     return var == variable || var2 == variable;
   }
@@ -32,13 +46,17 @@ struct Term {
     return var == other.var && length == other.length && var2 == other.var2 &&
            length2 == other.length2;
   }
-  bool operator!=(const Term &other) const { return !(*this == other); }
+  bool operator!=(const Term &other) const {
+    return !(*this == other);
+  }
   std::pair<uintptr_t, bool> sortKey() const;
 };
 
 struct IntegerRange {
   std::optional<int64_t> lo, hi;
 };
+
+using Range = IntegerRange;
 
 struct Linear {
   Term term;

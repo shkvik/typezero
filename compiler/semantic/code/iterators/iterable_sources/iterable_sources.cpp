@@ -201,7 +201,7 @@ void IterableSources::afterIteratorValue(const AfterIteratorValue &task) {
   if (value == nullptr) {
     return this->state.walk.tasks.pushChecked(nullptr);
   }
-  auto *known = this->state.code.variables.getIterateSymbol();
+  auto *known = this->findIterateSymbol();
   if (known != nullptr) {
     return this->pushIterateCall(task.expr, value, known);
   }
@@ -224,12 +224,18 @@ void IterableSources::startIterateSymbol() {
 void IterableSources::finishIterateSymbol(const FinishIterateSymbol &task) {
   FuncSymbol *iterate = task.functionDecl->sym;
   this->state.walk.scopes.leaveOnlyTypes();
-  this->state.code.variables.rememberIterateSymbol(iterate);
   this->state.generics.parameters.rememberExactParams(iterate, {true, true});
 }
 
+FuncSymbol *IterableSources::findIterateSymbol() {
+  auto items = this->state.library.declarations.getBuiltinItems(BuiltinText::ITERATE);
+  auto *functionDecl = cast<FunctionDecl>(items.front());
+
+  return functionDecl->sym;
+}
+
 void IterableSources::buildIterateCall(const BuildIterateCall &task) {
-  auto *iterate = this->state.code.variables.getIterateSymbol();
+  auto *iterate = this->findIterateSymbol();
 
   return this->pushIterateCall(task.expr, task.value, iterate);
 }

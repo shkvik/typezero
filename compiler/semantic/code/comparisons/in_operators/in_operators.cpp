@@ -1,5 +1,5 @@
 #include "compiler/semantic/code/comparisons/in_operators/in_operators.h"
-#include "compiler/semantic/bodies/objects/object_check_helpers/object_check_helpers.h"
+#include "compiler/semantic/code/objects/object_check_helpers/object_check_helpers.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 

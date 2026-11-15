@@ -222,7 +222,7 @@ void MethodCalls::startGenericCallTypes(const StartGenericCallTypes &task) {
       .function = function,
       .bound = task.bound,
       .loc = task.loc,
-      .kind = task.kind,
+      .callee = task.callee,
       .isReturnKnown = returnType != nullptr,
   });
   if (returnType != nullptr) {
@@ -246,7 +246,7 @@ void MethodCalls::afterBoundTypes(const AfterBoundTypes &task) {
   }
   this->state.generics.copies.leaveInstanceLoc();
   call->type = returned;
-  this->setGenericTarget(call, function, task.kind);
+  this->setGenericTarget(call, function, task.callee);
   tasks.pushTask(CheckArguments{
       .call = call,
       .params = std::move(params),
@@ -255,7 +255,7 @@ void MethodCalls::afterBoundTypes(const AfterBoundTypes &task) {
       .loc = task.loc,
       .checked = std::vector<bool>(call->args.size(), true),
   });
-  tasks.pushTask(AfterGenericCallee{.call = call, .kind = task.kind});
+  tasks.pushTask(AfterGenericCallee{.call = call, .callee = task.callee});
   if (this->isInstantiatedNow(function)) {
     return tasks.pushTask(InstantiateCallTarget{
         .call = call,
@@ -271,7 +271,7 @@ void MethodCalls::afterBoundTypes(const AfterBoundTypes &task) {
 void MethodCalls::afterGenericCallee(const AfterGenericCallee &task) {
   CallExpr *call = task.call;
   auto *member = dyn_cast<MemberExpr>(call->callee);
-  if (member == nullptr || task.kind != GenericCallee::METHOD) {
+  if (member == nullptr || task.callee != GenericCallee::METHOD) {
     return;
   }
   this->state.walk.tasks.pushTask(AfterMemberFunctionType{.member = member});

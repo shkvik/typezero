@@ -362,8 +362,8 @@ FunctionDecl *ClassBodyWalks::ownSlotMethod(const ClassDecl *owner, size_t slot)
 ClassBodyWalks::ResultFieldTypeMatches
 ClassBodyWalks::checkFieldMatches(llvm::StringRef prefix, const Field &member, const Field *actual,
                                   const ClassDecl *classDecl) const {
-  bool isSame =
-      actual->type == member.type || WideningRelations::isSameReference(actual->type, member.type);
+  bool isSame = actual->type == member.type ||
+                this->state.types.references.isSameReference(actual->type, member.type);
   if (!isSame) {
     auto message = ErrorTextImplements::fieldType(prefix, member.name, member.type->name(),
                                                   classDecl->name, actual->type->name());
@@ -413,7 +413,7 @@ ClassBodyWalks::checkMethodForField(const Field &member, const Type *interfaceTy
 ClassBodyWalks::ResultReplaceableField
 ClassBodyWalks::checkReplaceable(const Field &member, llvm::ArrayRef<FunctionDecl *> methods,
                                  const Type *interfaceType, const ClassDecl *classDecl) const {
-  auto isArrow = std::bind_front(&ClassLinks::isArrowMethod, this->classLinks);
+  auto isArrow = std::bind_front(&ClassBodyWalks::isArrowMethod, this);
   if (!member.readonly && llvm::none_of(methods, isArrow)) {
     auto message =
         ErrorTextImplements::mustField(member.name, interfaceType->name(), classDecl->name);
@@ -618,6 +618,19 @@ FunctionDecl *ClassBodyWalks::methodTaking(llvm::ArrayRef<FunctionDecl *> method
   }
 
   return nullptr;
+}
+
+bool ClassBodyWalks::isArrowMethod(const FunctionDecl *functionDecl) const {
+  if (functionDecl->cls() == nullptr) {
+    return false;
+  }
+  for (const ClassField &field : functionDecl->cls()->fields) {
+    if (field.method() == functionDecl) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 }

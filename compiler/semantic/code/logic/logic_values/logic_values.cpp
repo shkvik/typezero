@@ -108,7 +108,7 @@ void LogicValues::joinLogicalFlows(LogicalDraft draft, ConditionFlows right) {
   BinaryExpr *binary = draft.binary;
   bool isAnd = binary->op == BinaryOp::LogAnd;
   bool isAssign = draft.use == TruthUse::OrAssign || draft.use == TruthUse::AndAssign;
-  const auto &joins = this->state.flow.joins;
+  auto &joins = this->state.flow.joins;
   auto whenTrue = isAnd ? right.whenTrue : joins.join(draft.lhsTrue, right.whenTrue);
   auto whenFalse = isAnd ? joins.join(draft.lhsFalse, right.whenFalse) : right.whenFalse;
   auto joined = joins.join(whenTrue, whenFalse);

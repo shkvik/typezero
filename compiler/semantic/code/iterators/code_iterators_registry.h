@@ -3,7 +3,7 @@
 #include "compiler/semantic/code/iterators/iterable_sources/iterable_sources.h"
 #include "compiler/semantic/code/iterators/iterator_signatures/iterator_signatures.h"
 #include "compiler/semantic/code/iterators/yield_expressions/yield_expressions.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

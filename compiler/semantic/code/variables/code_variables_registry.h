@@ -3,7 +3,7 @@
 #include "compiler/semantic/code/variables/scope_reports/scope_reports.h"
 #include "compiler/semantic/code/variables/value_declarators/value_declarators.h"
 #include "compiler/semantic/code/variables/variable_declarations/variable_declarations.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 

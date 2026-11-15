@@ -2,7 +2,7 @@
 
 #include "compiler/result/result/result.h"
 #include "compiler/semantic/declaration/modules/declaration_modules_registry_errors.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 #include "compiler/union/union/union.h"
 
 namespace tz {

@@ -435,7 +435,7 @@ DeclaredSignature *DeclarationFilesRegistry::memberSignature(DeclaredMember &mem
 DeclarationFilesRegistry::ResultDeclaredSignature
 DeclarationFilesRegistry::checkMethodSignature(DeclaredMember &member,
                                                const std::string &what) const {
-  const auto *signature = this->memberSignature(member);
+  auto *signature = this->memberSignature(member);
   if (signature == nullptr) {
     auto message = ErrorTextDeclaredClass::isMethod(what, this->fileName());
 

@@ -5,7 +5,7 @@
 #include "compiler/semantic/code/assignments/assignment_rules/assignment_rules.h"
 #include "compiler/semantic/code/assignments/nullish_assigns/nullish_assigns.h"
 #include "compiler/semantic/code/assignments/updates_and_deletes/updates_and_deletes.h"
-#include "compiler/semantic/semantic_state/v2/semantic_state.h"
+#include "compiler/semantic/semantic_state/semantic_state.h"
 
 namespace tz {
 
