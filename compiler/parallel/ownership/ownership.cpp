@@ -62,6 +62,17 @@ Ref Ownership::interned(const VarSymbol *root, const Type *type, Needs needs, bo
   return Ref{RefKind::Owned, &made};
 }
 
+Ref Ownership::settled(const VarSymbol *root, const Type *type, Needs needs, bool whole) {
+  if (!this->decided) {
+    return this->interned(root, type, std::move(needs), whole);
+  }
+  if (!this->needsOwn(needs)) {
+    return Ref{RefKind::Type, type};
+  }
+
+  return this->interned(root, type, Needs(), whole);
+}
+
 bool Ownership::isParam(const FunctionDecl *fn, const VarSymbol *v) {
   return fn && v &&
          (isSelf(fn, v) || llvm::any_of(fn->params, [&](const Param &p) { return p.sym == v; }));
@@ -1554,7 +1565,7 @@ std::optional<Ref> Ownership::substituted(Ref r, const FnInfo &callee, int calle
     const FunctionDecl *from = this->analysis.byFunction[caller]->decl;
     if (rec.call && rec.call->superCall() && builds(callee.decl) && from &&
         candidate(from, from->thisVar())) {
-      return interned(from->thisVar(), owned->type, owned->needs, owned->whole);
+      return this->settled(from->thisVar(), owned->type, owned->needs, owned->whole);
     }
     value = receiverOf(rec);
   } else {
@@ -1571,7 +1582,7 @@ std::optional<Ref> Ownership::substituted(Ref r, const FnInfo &callee, int calle
     auto *name = dyn_cast<NameExpr>(ParallelHelpers::strip(value));
     bool whole = owned->whole && needs.empty() && name && name->var() == root;
     needs.insert(needs.end(), owned->needs.begin(), owned->needs.end());
-    return interned(root, owned->type, std::move(needs), whole);
+    return this->settled(root, owned->type, std::move(needs), whole);
   }
   if (needsOwn(owned->needs) && valueOwn(caller, value, true, 0)) {
     return std::nullopt;
@@ -1739,9 +1750,11 @@ void Ownership::decide() {
     this->currentFunction = nullptr;
     this->deciding = false;
     if (this->forced.size() == before) {
+      this->decided = true;
       return;
     }
   }
+  this->decided = true;
 }
 
 void Ownership::decideOnce() {

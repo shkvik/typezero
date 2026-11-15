@@ -633,8 +633,13 @@ static int values_equal(const TzType *type, const void *a, const void *b, int sa
     const TzStr *x = (const TzStr *)a, *y = (const TzStr *)b;
     return tz_str_equal(x->obj, x->meta, y->obj, y->meta);
   }
-  case TZ_T_ARRAY:
   case TZ_T_OBJECT:
+    if (tz_is_cstring(*(const TzInstance *const *)a)) {
+      return tz_cstring_equal(*(void *const *)a, *(void *const *)b);
+    }
+    return *(void *const *)a == *(void *const *)b;
+  case TZ_T_ARRAY:
+  case TZ_T_HANDLE:
     return *(void *const *)a == *(void *const *)b;
   case TZ_T_JSON:
     return tz_json_strict_equal(*(TzJson *const *)a, *(TzJson *const *)b);

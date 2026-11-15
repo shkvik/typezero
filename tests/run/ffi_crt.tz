@@ -23,3 +23,14 @@ const bytes = Buffer.alloc(12)
 memcpy(bytes, numbers, 12)
 console.log(bytes)
 console.log(GetCurrentProcessId() > 0)
+const first = malloc(8)
+const second = malloc(8)
+if (first != undefined && second != undefined) {
+  const sizes = new Map<Memory, int>()
+  sizes.set(first, 8)
+  sizes.set(second, 16)
+  const list: Memory[] = [first, second]
+  console.log(sizes.get(second), list.indexOf(second))
+  free(first)
+  free(second)
+}

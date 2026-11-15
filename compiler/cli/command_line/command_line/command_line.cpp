@@ -12,6 +12,7 @@
 #include "compiler/cli/remove/remove_command/remove_command.h"
 #include "compiler/cli/run/run_command/run_command.h"
 #include "compiler/cli/run/script_command/script_command.h"
+#include "compiler/cli/syntax/syntax_command/syntax_command.h"
 #include "compiler/cli/update/update_command/update_command.h"
 #include "compiler/cli/version/version_command/version_command.h"
 #include "compiler/pipeline/runtime_files/runtime_files.h"
@@ -52,6 +53,10 @@ int CommandLine::run(int argc, char **argv) const {
     }
     if (name == "mcp") {
       McpCommand command(argv[0]);
+      return command.run(rest);
+    }
+    if (name == "syntax") {
+      SyntaxCommand command;
       return command.run(rest);
     }
     if (name == "map" || name == "context" || name == "query" || name == "impact") {

@@ -100,6 +100,7 @@ private:
   bool needsOwn(const Needs &needs);
   bool own(const OwnedRef *owned);
   Ref interned(const VarSymbol *root, const Type *type, Needs needs, bool whole);
+  Ref settled(const VarSymbol *root, const Type *type, Needs needs, bool whole);
   void scan(int fi);
   void decideOnce();
   struct SelfStore {
@@ -131,6 +132,7 @@ private:
   std::set<FieldKey> evaluated;
   std::set<FieldKey> notOwn;
   bool deciding = false;
+  bool decided = false;
   llvm::DenseSet<int> freshIndices;
   std::vector<int8_t> tail;
   std::optional<llvm::DenseSet<const Type *>> containers;
