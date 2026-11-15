@@ -37,7 +37,7 @@ void AstDump::dumpModules(const SourceFile &file) {
     this->open() << "Import " << this->text.offset(decl.loc) << " " << this->text.quote(decl.path)
                  << " " << this->text.offset(decl.pathLoc) << " " << this->text.quote(decl.whole)
                  << " " << this->text.offset(decl.wholeLoc) << " " << (decl.wholeIsDefault ? 1 : 0)
-                 << " " << decl.names.size() << "\n";
+                 << " " << (decl.isPartList ? 1 : 0) << " " << decl.names.size() << "\n";
     this->dumpModuleNames(decl.names);
   }
   this->open() << "exports " << file.exports.size() << "\n";
@@ -344,13 +344,13 @@ void AstDump::dumpDecorators(const std::vector<Decorator> &decorators) {
 void AstDump::dumpClass(const ClassDecl *cls) {
   bool generic = cls->generics.is<GenericTemplate>();
   this->open() << "Class " << this->text.offset(cls->loc()) << " " << this->text.quote(cls->name)
-               << " abstract=" << cls->isAbstract << " expr=" << cls->expression()
-               << " generic=" << generic << " src=" << this->text.span(cls->source)
-               << " tp=" << cls->typeParams.size() << " base=" << cls->base.has_value()
-               << " baseExpr=" << (cls->baseExpr != nullptr) << " ifaces=" << cls->interfaces.size()
-               << " dec=" << cls->decorators.size() << " fields=" << cls->fields.size()
-               << " methods=" << cls->methods.size() << " ctors=" << cls->constructors.size()
-               << "\n";
+               << " abstract=" << cls->isAbstract << " partial=" << cls->isPartial
+               << " expr=" << cls->expression() << " generic=" << generic
+               << " src=" << this->text.span(cls->source) << " tp=" << cls->typeParams.size()
+               << " base=" << cls->base.has_value() << " baseExpr=" << (cls->baseExpr != nullptr)
+               << " ifaces=" << cls->interfaces.size() << " dec=" << cls->decorators.size()
+               << " fields=" << cls->fields.size() << " methods=" << cls->methods.size()
+               << " ctors=" << cls->constructors.size() << "\n";
   ++this->depth;
   this->dumpDecorators(cls->decorators);
   this->dumpTypeParams(cls->typeParams);

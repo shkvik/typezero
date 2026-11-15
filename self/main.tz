@@ -1,0 +1,138 @@
+import { readFileSync } from "node:fs"
+import { tokenize } from "./load/lexer/lexer.tz"
+import { ParsedFile, Parser, SourceText } from "./load/parser/parser.tz"
+import { SourceFile } from "./ast.tz"
+import { Dumper } from "./dump.tz"
+
+function readList(path: string): string[] {
+  const text = readFileSync(path, "utf8")
+  if (text.isErr()) {
+    return []
+  }
+  const lines = text.value.split("\n")
+
+  return lines.map(line => line.trim()).filter(line => line.length > 0)
+}
+
+function readSources(files: string[]): SourceText[] {
+  const sources: SourceText[] = []
+  for (const path of files) {
+    const text = readFileSync(path)
+    if (text.isOk()) {
+      const isLibrary = path.replaceAll("\\", "/").includes("/library/")
+      sources.push({ path, text: text.value, isLibrary })
+    }
+  }
+
+  return sources
+}
+
+function printTokens(source: SourceText): void {
+  console.log(`== ${source.path}`)
+  for (const token of tokenize(source.text)) {
+    const newline = token.newline ? 1 : 0
+    const hash = token.hash ? 1 : 0
+    console.log(`${token.kind} ${token.start} ${token.end - token.start} ${newline} ${hash}`)
+  }
+}
+
+function printTree(parsed: ParsedFile): void {
+  const dumper = new Dumper(parsed.source.text)
+  dumper.dumpFile(parsed.file)
+  console.log(`== ${parsed.source.path}`)
+  console.log(dumper.text())
+  for (const error of parsed.errors) {
+    console.log(`!! ${error.loc}`)
+  }
+}
+
+function lexAll(sources: SourceText[]): int {
+  let tokens = 0
+  for (const source of sources) {
+    tokens += tokenize(source.text).length - 1
+  }
+
+  return tokens
+}
+
+function parseAll(sources: SourceText[]): int {
+  let items = 0
+  const parser = new Parser(sources)
+  for (const parsed of parser.run()) {
+    items += parsed.file.items.length
+  }
+
+  return items
+}
+
+function timeSources(sources: SourceText[], repeat: int): void {
+  if (repeat < 1 || repeat > 1000) {
+    return
+  }
+  let tokens = 0
+  let items = 0
+  const lexStarted = performance.now()
+  for (let pass = 0; pass < repeat; pass++) {
+    tokens = lexAll(sources)
+  }
+  const parseStarted = performance.now()
+  for (let pass = 0; pass < repeat; pass++) {
+    items = parseAll(sources)
+  }
+  const parseEnded = performance.now()
+  const passes = repeat.toDouble()
+  const lexMs = (parseStarted - lexStarted) / passes
+  const parseMs = (parseEnded - parseStarted) / passes
+  console.log(`files ${sources.length}, tokens ${tokens}, nodes ${items}`)
+  console.log(`lex ${lexMs.toFixed(2)} ms, lex + parse ${parseMs.toFixed(2)} ms per pass`)
+}
+
+function holdSources(sources: SourceText[], parseThem: boolean): void {
+  const files: SourceFile[] = []
+  if (parseThem) {
+    const parser = new Parser(sources)
+    for (const parsed of parser.run()) {
+      files.push(parsed.file)
+    }
+  }
+  let items = 0
+  for (const file of files) {
+    items += file.items.length
+  }
+  const until = performance.now() + 3000.0
+  let spins = 0
+  while (performance.now() < until) {
+    spins += 1
+  }
+  console.log(`files ${sources.length}, items ${items}, held ${files.length}, spins ${spins}`)
+}
+
+const mode = process.argv[2] ?? "tokens"
+const listPath = process.argv[3] ?? ""
+const repeatText = process.argv[4] ?? "20"
+const repeat = parseInt(repeatText).unwrapOr(20)
+const sources = readSources(readList(listPath))
+switch (mode) {
+  case "tokens":
+    for (const source of sources) {
+      printTokens(source)
+    }
+    break
+  case "tree": {
+    const parser = new Parser(sources)
+    for (const parsed of parser.run()) {
+      printTree(parsed)
+    }
+    break
+  }
+  case "time":
+    timeSources(sources, repeat)
+    break
+  case "hold":
+  case "read":
+    holdSources(sources, mode == "hold")
+    break
+  default:
+    console.log("usage: tzparse tokens|tree|time|hold|read <list> [repeat]")
+    break
+}

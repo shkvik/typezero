@@ -1,0 +1,30 @@
+import { Shape } from "./shape.tz"
+import { Other } from "./other.tz"
+import { EventEmitter } from "node:events"
+
+partial class Shape {
+  // expect-error: 'partial class Shape' has only methods: declare the field 'color' where 'Shape' is declared
+  private color: string
+  // expect-error: 'partial class Shape' has only methods: write the constructor where 'Shape' is declared
+  constructor() {}
+
+  // expect-error: method 'area' of 'Shape' is already declared in shape.tz: a method has one name in the whole class, and its overloads stay in one file
+  public area(): int {
+    return 0
+  }
+}
+
+// expect-error: 'partial class Shape' takes 'extends' and 'implements' from the class: write them where 'Shape' is declared
+partial class Shape extends EventEmitter {}
+
+// expect-error: 'partial class EventEmitter': "node:events" is a module of the library; parts are written only for classes of the program
+partial class EventEmitter {}
+
+// expect-error: 'partial class Other': other.tz does not list this file among the parts of 'Other'; add 'import "./shape_part.tz"' to other.tz
+partial class Other {}
+
+// expect-error: 'partial class Missing' adds methods to a class of another file: import the class from the file that declares it
+partial class Missing {}
+
+// expect-error: a part of a class is not exported: 'export' goes on the class itself, where it is declared
+export partial class Shape {}

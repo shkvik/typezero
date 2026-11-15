@@ -4,6 +4,10 @@
   "fileTypes": ["tz"],
   "patterns": [
     {
+      "match": "(?<![\\w$.])partial(?=[ \\t]+class\\b)",
+      "name": "storage.modifier.ts"
+    },
+    {
       "include": "source.ts"
     }
   ]

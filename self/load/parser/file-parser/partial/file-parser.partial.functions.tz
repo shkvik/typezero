@@ -1,0 +1,595 @@
+import { FileParser } from "../file-parser.tz";
+import { TokenKind } from "../../../../token.tz";
+import { Pattern } from "./file-parser.partial.patterns.tz";
+import { Mark } from "../../cursor.tz";
+import {
+  Access,
+  BlockStmt,
+  BodySource,
+  ClassMember,
+  Expr,
+  ExprKind,
+  FunctionDecl,
+  FunctionExpr,
+  FunctionPlace,
+  MethodKind,
+  Param,
+  ParamForm,
+  ParamKind,
+  ParamProperty,
+  Stmt,
+  StmtKind,
+  TypeParamDecl,
+  TypeRef,
+  VarDeclarator,
+  kNoSpan,
+  marker,
+} from "../../../../ast.tz";
+
+type ParamPattern = { readonly name: string; readonly pattern: Pattern };
+
+function isParamModifier(text: string): boolean {
+  switch (text) {
+    case "public":
+    case "private":
+    case "protected":
+    case "readonly":
+    case "override":
+      return true;
+    default:
+      return false;
+  }
+}
+
+partial class FileParser {
+  private functionDeclaration(isAsync: boolean): Stmt {
+    let fn = this.functionDecl(false, isAsync);
+    if (fn.body != undefined) {
+      return fn;
+    }
+    const name = fn.name;
+    const loc = fn.loc;
+    while (fn.body == undefined) {
+      if (
+        this.cursor.isWord("export") &&
+        this.cursor.lookahead().kind == TokenKind.Function
+      ) {
+        this.cursor.next();
+      }
+      if (
+        !this.cursor.is(TokenKind.Function) ||
+        this.cursor.lookahead().text != name
+      ) {
+        this.cursor.report(loc, `function '${name}' has no body`);
+        return marker(StmtKind.Empty, loc);
+      }
+      fn = this.functionDecl(false, isAsync);
+    }
+    this.cursor.report(loc, "overload signatures are not supported");
+
+    return fn;
+  }
+
+  private declaredFunction(): Stmt {
+    const fn = this.functionDecl(false, false);
+    if (fn.body != undefined) {
+      this.cursor.report(fn.loc, "a declared function has no body");
+      return fn;
+    }
+    fn.bodySource = this.library ? BodySource.External : BodySource.Foreign;
+    fn.body = { kind: StmtKind.Block, loc: fn.loc, body: [], end: -1 };
+
+    return fn;
+  }
+
+  private functionDecl(expression: boolean, isAsync: boolean): FunctionDecl {
+    const keyword = this.cursor.next();
+    const generator = this.cursor.accept(TokenKind.Star);
+    let name = "";
+    let loc = this.cursor.peek().start;
+    if (this.cursor.is(TokenKind.Identifier)) {
+      name = this.cursor.next().text;
+    } else if (expression) {
+      loc = keyword.start;
+    } else {
+      this.cursor.error(this.cursor.peek().start, "expected a function name");
+    }
+    const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
+    const outerGenerator = this.inGenerator;
+    this.inGenerator = generator;
+    const patterns: ParamPattern[] = [];
+    const params = this.params(false, false, patterns);
+    const returnType = this.cursor.accept(TokenKind.Colon)
+      ? this.returnType()
+      : undefined;
+    let body: BlockStmt | undefined = undefined;
+    if (this.cursor.is(TokenKind.LBrace)) {
+      body = this.block();
+      this.addPrologue(body, patterns);
+    } else {
+      body = this.missingBody(expression);
+    }
+    this.inGenerator = outerGenerator;
+
+    return {
+      kind: StmtKind.Function,
+      loc,
+      name,
+      typeParams,
+      params,
+      returnType,
+      body,
+      source: this.cursor.spanFrom(keyword.start),
+      isArrow: false,
+      concise: false,
+      ownName: expression ? name : "",
+      place: expression ? FunctionPlace.Expression : FunctionPlace.Declared,
+      bodySource: BodySource.Written,
+      isGenerator: generator,
+      isAsync,
+    };
+  }
+
+  private missingBody(expression: boolean): BlockStmt | undefined {
+    const token = this.cursor.peek();
+    const declaredOnly =
+      !expression &&
+      (this.cursor.accept(TokenKind.Semi) ||
+        token.newline ||
+        token.kind == TokenKind.RBrace ||
+        token.kind == TokenKind.End);
+    if (declaredOnly) {
+      return undefined;
+    }
+    this.cursor.error(
+      this.cursor.peek().start,
+      "expected '{' to start the function body",
+    );
+
+    return {
+      kind: StmtKind.Block,
+      loc: this.cursor.peek().start,
+      body: [],
+      end: -1,
+    };
+  }
+
+  private params(
+    arrow: boolean,
+    constructor: boolean,
+    patterns: ParamPattern[],
+  ): Param[] {
+    this.cursor.expect(
+      TokenKind.LParen,
+      arrow ? "to start the parameters" : "after the function name",
+    );
+    const params: Param[] = [];
+    let more =
+      !this.cursor.is(TokenKind.RParen) && !this.cursor.is(TokenKind.End);
+    while (more) {
+      const param = this.param(constructor, patterns);
+      if (param == undefined) {
+        more = false;
+        continue;
+      }
+      params.push(param);
+      more = this.cursor.accept(TokenKind.Comma);
+      const rest = param.form.kind == ParamKind.Rest;
+      if (more && rest && !this.cursor.is(TokenKind.RParen)) {
+        this.cursor.report(
+          param.loc,
+          "a rest parameter must be the last parameter",
+        );
+      }
+      more =
+        more &&
+        !this.cursor.is(TokenKind.RParen) &&
+        !this.cursor.is(TokenKind.End);
+    }
+    this.cursor.expect(TokenKind.RParen, "to close the parameter list");
+
+    return params;
+  }
+
+  private param(
+    constructor: boolean,
+    patterns: ParamPattern[],
+  ): Param | undefined {
+    const decorators = this.decorators();
+    if (this.cursor.isRecovering()) {
+      return undefined;
+    }
+    const property = this.paramModifiers(constructor);
+    const rest = this.cursor.accept(TokenKind.Ellipsis);
+    const loc = this.cursor.peek().start;
+    let name = "";
+    let pattern = kNoSpan;
+    if (this.cursor.is(TokenKind.Identifier)) {
+      name = this.cursor.next().text;
+    } else if (
+      (this.cursor.is(TokenKind.LBrace) ||
+        this.cursor.is(TokenKind.LBracket)) &&
+      !rest
+    ) {
+      const bound = this.bindingPattern();
+      name = this.hiddenName();
+      pattern = this.cursor.spanFrom(loc);
+      patterns.push({ name, pattern: bound });
+    } else {
+      this.cursor.error(
+        this.cursor.peek().start,
+        rest
+          ? "expected a parameter name after '...'"
+          : "expected a parameter name",
+      );
+      return undefined;
+    }
+    const optional = this.cursor.accept(TokenKind.Question);
+    const type = this.cursor.accept(TokenKind.Colon) ? this.type() : undefined;
+    let defaultValue: Expr | undefined = undefined;
+    if (this.cursor.is(TokenKind.Assign)) {
+      if (optional) {
+        this.cursor.report(
+          this.cursor.peek().start,
+          "a parameter with a default value is optional already",
+        );
+      }
+      this.cursor.next();
+      defaultValue = this.expression();
+    }
+    if (rest && (optional || defaultValue != undefined)) {
+      this.cursor.report(
+        loc,
+        "a rest parameter cannot be optional or have a default value",
+      );
+    }
+    const form = this.paramForm(rest, optional, defaultValue);
+
+    return { name, loc, type, form, property, pattern, decorators };
+  }
+
+  private paramForm(
+    rest: boolean,
+    optional: boolean,
+    defaultValue: Expr | undefined,
+  ): ParamForm {
+    if (rest) {
+      return { kind: ParamKind.Rest };
+    }
+    if (defaultValue != undefined) {
+      return { kind: ParamKind.Defaulted, defaultValue };
+    }
+
+    return { kind: optional ? ParamKind.Optional : ParamKind.Required };
+  }
+
+  private paramModifiers(constructor: boolean): ParamProperty | undefined {
+    let property: ParamProperty | undefined = undefined;
+    while (
+      this.cursor.is(TokenKind.Identifier) &&
+      isParamModifier(this.cursor.peek().text) &&
+      this.cursor.lookahead().kind == TokenKind.Identifier
+    ) {
+      const word = this.cursor.next();
+      if (!constructor) {
+        this.cursor.report(
+          word.start,
+          `'${word.text}' before a parameter makes it a field`,
+        );
+      }
+      const found = property ?? { readonly: false, access: Access.Public };
+      property = found;
+      if (word.text == "readonly") {
+        found.readonly = true;
+      } else if (word.text == "private") {
+        found.access = Access.Private;
+      } else if (word.text == "protected") {
+        found.access = Access.Protected;
+      }
+    }
+
+    return property;
+  }
+
+  private addPrologue(
+    body: BlockStmt | undefined,
+    patterns: ParamPattern[],
+  ): void {
+    if (patterns.length == 0 || body == undefined) {
+      return;
+    }
+    const decls: VarDeclarator[] = [];
+    for (const entry of patterns) {
+      this.declareElements(decls, entry.pattern, entry.name);
+    }
+    const prologue: Stmt[] = [
+      {
+        kind: StmtKind.VarDecl,
+        loc: body.loc,
+        isConst: false,
+        isUsing: false,
+        decls,
+      },
+    ];
+    body.body = prologue.concat(body.body);
+  }
+
+  private asyncFunctionAhead(): boolean {
+    const next = this.cursor.lookahead();
+
+    return (
+      this.cursor.isWord("async") &&
+      next.kind == TokenKind.Function &&
+      !next.newline
+    );
+  }
+
+  private tryAsyncFunction(): Expr | undefined {
+    const loc = this.cursor.peek().start;
+    if (this.asyncFunctionAhead()) {
+      this.cursor.next();
+      const fn = this.functionDecl(true, true);
+      return { kind: ExprKind.Function, loc, fn };
+    }
+    const next = this.cursor.lookahead();
+    const starts =
+      next.kind == TokenKind.Identifier ||
+      next.kind == TokenKind.LParen ||
+      next.kind == TokenKind.Less;
+    if (next.newline || !starts) {
+      return undefined;
+    }
+    const start = this.cursor.mark();
+    this.cursor.next();
+    if (this.cursor.is(TokenKind.Less)) {
+      return this.asyncGenericArrow(start);
+    }
+    const after = this.cursor.lookahead();
+    const isArrow = this.cursor.is(TokenKind.Identifier)
+      ? after.kind == TokenKind.Arrow && !after.newline
+      : this.arrowAhead();
+    if (!isArrow) {
+      this.cursor.reset(start);
+      return undefined;
+    }
+
+    return this.arrow([], -1, true);
+  }
+
+  private asyncGenericArrow(start: Mark): Expr | undefined {
+    const text = this.cursor.peek().start;
+    this.cursor.startDiscarding();
+    this.cursor.stopRecovering();
+    const typeParams = this.typeParams();
+    const isArrow =
+      !this.cursor.isRecovering() &&
+      this.cursor.is(TokenKind.LParen) &&
+      this.arrowAhead();
+    this.cursor.stopDiscarding();
+    if (!isArrow) {
+      this.cursor.reset(start);
+      return undefined;
+    }
+    this.cursor.restoreRecovering(start);
+
+    return this.arrow(typeParams, text, true);
+  }
+
+  private arrowAhead(): boolean {
+    const start = this.cursor.mark();
+    this.cursor.startDiscarding();
+    this.cursor.stopRecovering();
+    this.params(true, false, []);
+    let isArrow = !this.cursor.isRecovering();
+    if (isArrow && this.cursor.accept(TokenKind.Colon)) {
+      this.type();
+      isArrow = !this.cursor.isRecovering();
+    }
+    isArrow = isArrow && this.cursor.is(TokenKind.Arrow);
+    this.cursor.stopDiscarding();
+    this.cursor.reset(start);
+
+    return isArrow;
+  }
+
+  private arrow(
+    typeParams: TypeParamDecl[],
+    from: int,
+    isAsync: boolean,
+  ): FunctionExpr {
+    const start = from >= 0 ? from : this.cursor.peek().start;
+    const loc = this.cursor.peek().start;
+    const outerGenerator = this.inGenerator;
+    this.inGenerator = false;
+    const patterns: ParamPattern[] = [];
+    let params: Param[] = [];
+    let returnType: TypeRef | undefined = undefined;
+    if (this.cursor.is(TokenKind.Identifier)) {
+      const token = this.cursor.next();
+      params = [
+        {
+          name: token.text,
+          loc: token.start,
+          form: { kind: ParamKind.Required },
+          pattern: kNoSpan,
+          decorators: [],
+        },
+      ];
+    } else {
+      params = this.params(true, false, patterns);
+      returnType = this.cursor.accept(TokenKind.Colon)
+        ? this.returnType()
+        : undefined;
+    }
+    if (this.cursor.is(TokenKind.Arrow) && this.cursor.peek().newline) {
+      this.cursor.report(
+        this.cursor.peek().start,
+        "'=>' must be on the same line as the parameters",
+      );
+    }
+    this.cursor.expect(
+      TokenKind.Arrow,
+      "after the parameters of the arrow function",
+    );
+    const concise = !this.cursor.is(TokenKind.LBrace);
+    const body = concise ? this.conciseBody() : this.arrowBlock();
+    this.addPrologue(body, patterns);
+    const fn: FunctionDecl = {
+      kind: StmtKind.Function,
+      loc,
+      name: "",
+      typeParams,
+      params,
+      returnType,
+      body,
+      source: this.cursor.spanFrom(start),
+      isArrow: true,
+      concise,
+      ownName: "",
+      place: FunctionPlace.Expression,
+      bodySource: BodySource.Written,
+      isGenerator: false,
+      isAsync,
+    };
+    this.inGenerator = outerGenerator;
+
+    return { kind: ExprKind.Function, loc, fn };
+  }
+
+  private arrowBlock(): BlockStmt {
+    const body = this.block();
+    const only = body.body.length == 1 ? body.body[0] : undefined;
+    if (
+      only != undefined &&
+      only.kind == StmtKind.Labeled &&
+      only.body.kind == StmtKind.Expr
+    ) {
+      this.cursor.report(
+        only.loc,
+        `'{' after '=>' starts the body of the function, so '${only.label}:' is a label`,
+      );
+    }
+
+    return body;
+  }
+
+  private conciseBody(): BlockStmt {
+    const loc = this.cursor.peek().start;
+    const value = this.expression();
+
+    return {
+      kind: StmtKind.Block,
+      loc,
+      body: [{ kind: StmtKind.Return, loc, value }],
+      end: -1,
+    };
+  }
+
+  private typeParams(): TypeParamDecl[] {
+    const params: TypeParamDecl[] = [];
+    this.cursor.next();
+    let more =
+      !this.cursor.is(TokenKind.Greater) && !this.cursor.is(TokenKind.End);
+    while (more) {
+      const next = this.cursor.lookahead();
+      const modifier =
+        this.cursor.is(TokenKind.Const) ||
+        this.cursor.is(TokenKind.In) ||
+        this.cursor.isWord("out");
+      if (modifier && next.kind == TokenKind.Identifier) {
+        this.cursor.report(
+          this.cursor.peek().start,
+          "a modifier before a type parameter is not supported",
+        );
+        this.cursor.next();
+      }
+      const token = this.cursor.peek();
+      if (token.kind != TokenKind.Identifier) {
+        this.cursor.error(
+          token.start,
+          `expected a type parameter name, found ${token.kind}`,
+        );
+        return params;
+      }
+      this.cursor.next();
+      let constraint: TypeRef | undefined = undefined;
+      if (this.cursor.isWord("extends")) {
+        this.cursor.next();
+        constraint = this.type();
+      }
+      const defaultType = this.cursor.accept(TokenKind.Assign)
+        ? this.type()
+        : undefined;
+      params.push({
+        name: token.text,
+        loc: token.start,
+        constraint,
+        defaultType,
+      });
+      more =
+        this.cursor.accept(TokenKind.Comma) &&
+        !this.cursor.is(TokenKind.Greater) &&
+        !this.cursor.is(TokenKind.End);
+    }
+    this.cursor.expect(TokenKind.Greater, "to close the type parameters");
+
+    return params;
+  }
+
+  private method(
+    loc: int,
+    name: string,
+    start: int,
+    generator: boolean,
+    isAsync: boolean,
+    place: FunctionPlace,
+    role: ClassMember | undefined,
+  ): FunctionDecl {
+    const outerGenerator = this.inGenerator;
+    this.inGenerator = generator;
+    const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
+    const patterns: ParamPattern[] = [];
+    const constructor =
+      role != undefined && role.method == MethodKind.Constructor;
+    const params = this.params(false, constructor, patterns);
+    const returnType = this.cursor.accept(TokenKind.Colon)
+      ? this.returnType()
+      : undefined;
+    let body: BlockStmt | undefined = undefined;
+    if (this.cursor.is(TokenKind.LBrace)) {
+      body = this.block();
+      this.addPrologue(body, patterns);
+    } else if (
+      !this.cursor.accept(TokenKind.Semi) &&
+      !this.cursor.peek().newline &&
+      !this.cursor.is(TokenKind.RBrace) &&
+      !this.cursor.is(TokenKind.End)
+    ) {
+      this.cursor.error(
+        this.cursor.peek().start,
+        "expected '{' to start the body of the method",
+      );
+    }
+    const source = this.cursor.spanFrom(start);
+    this.inGenerator = outerGenerator;
+
+    return {
+      kind: StmtKind.Function,
+      loc,
+      name,
+      typeParams,
+      params,
+      returnType,
+      body,
+      source,
+      isArrow: false,
+      concise: false,
+      ownName: "",
+      place,
+      bodySource: BodySource.Written,
+      isGenerator: generator,
+      isAsync,
+      role,
+    };
+  }
+}

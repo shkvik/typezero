@@ -1,0 +1,13 @@
+import { Shape } from "./shape.tz"
+
+partial class Shape {
+  // expect-error: cannot find type 'Token'
+  public copy(): Token {
+    return this.token()
+  }
+
+  public twice(): int {
+    // expect-error: cannot find name 'halfOf'
+    return halfOf(this.side) * 4
+  }
+}

@@ -1,0 +1,789 @@
+import { FileParser } from "../file-parser.tz";
+import { TokenKind, isKeyword } from "../../../../token.tz";
+import { Arguments } from "./file-parser.partial.expressions.tz";
+import {
+  Access,
+  BlockStmt,
+  ClassDecl,
+  ClassField,
+  ClassMember,
+  Decorator,
+  EnumMember,
+  Expr,
+  ExprKind,
+  FieldKind,
+  FieldPresence,
+  FunctionDecl,
+  FunctionPlace,
+  MethodKind,
+  Stmt,
+  StmtKind,
+  TypeKind,
+  TypeRef,
+  isConstructor,
+  kNoSpan,
+  marker,
+  typeRef,
+} from "../../../../ast.tz";
+
+type Modifiers = {
+  isStatic: boolean;
+  readonly: boolean;
+  isAbstract: boolean;
+  isOverride: boolean;
+  isAsync: boolean;
+  accessor: boolean;
+  access: Access;
+  staticBlock: boolean;
+};
+
+type MemberName = {
+  readonly loc: int;
+  readonly start: int;
+  readonly name: string;
+  readonly generator: boolean;
+  readonly plain: boolean;
+};
+
+function isMemberModifier(text: string): boolean {
+  switch (text) {
+    case "public":
+    case "private":
+    case "protected":
+    case "readonly":
+    case "static":
+    case "override":
+    case "abstract":
+    case "declare":
+    case "accessor":
+    case "async":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function endsModifiers(kind: TokenKind): boolean {
+  switch (kind) {
+    case TokenKind.LParen:
+    case TokenKind.Colon:
+    case TokenKind.Assign:
+    case TokenKind.Semi:
+    case TokenKind.Question:
+    case TokenKind.Bang:
+    case TokenKind.Less:
+    case TokenKind.RBrace:
+    case TokenKind.End:
+      return true;
+    default:
+      return false;
+  }
+}
+
+partial class FileParser {
+  private classDecl(expression: boolean): ClassDecl {
+    const keyword = this.cursor.next();
+    const token = this.cursor.peek();
+    const named =
+      token.kind == TokenKind.Identifier &&
+      !(expression && (token.text == "extends" || token.text == "implements"));
+    if (named) {
+      this.cursor.next();
+    }
+    const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
+    let base: TypeRef | undefined = undefined;
+    let baseExpr: Expr | undefined = undefined;
+    if (this.cursor.isWord("extends")) {
+      this.cursor.next();
+      const next = this.cursor.lookahead();
+      const value =
+        !this.cursor.is(TokenKind.Identifier) ||
+        next.kind == TokenKind.LParen ||
+        next.kind == TokenKind.Dot ||
+        next.kind == TokenKind.LBracket;
+      if (value) {
+        baseExpr = this.callOrMember();
+      } else {
+        const baseToken = this.cursor.peek();
+        base = this.primaryType();
+        if (expression && base.form.kind == TypeKind.Name) {
+          baseExpr = {
+            kind: ExprKind.Name,
+            loc: baseToken.start,
+            name: baseToken.text,
+            typeArgs: [],
+          };
+        }
+      }
+    }
+    const interfaces: TypeRef[] = [];
+    if (this.cursor.isWord("implements")) {
+      this.cursor.next();
+      interfaces.push(this.primaryType());
+      while (this.cursor.accept(TokenKind.Comma)) {
+        interfaces.push(this.primaryType());
+      }
+    }
+    const cls: ClassDecl = {
+      kind: StmtKind.Class,
+      loc: named ? token.start : keyword.start,
+      name: named ? token.text : "",
+      isAbstract: false,
+      isPartial: false,
+      base,
+      baseExpr,
+      interfaces,
+      fields: [],
+      methods: [],
+      constructors: [],
+      expression,
+      decorators: [],
+      typeParams,
+      source: kNoSpan,
+    };
+    if (
+      !this.cursor.expect(TokenKind.LBrace, "to start the members of the class")
+    ) {
+      return cls;
+    }
+    while (
+      !this.cursor.is(TokenKind.RBrace) &&
+      !this.cursor.is(TokenKind.End)
+    ) {
+      this.classMember(cls);
+      if (this.cursor.isRecovering()) {
+        this.skipClassMember();
+        this.cursor.stopRecovering();
+      }
+    }
+    this.cursor.expect(TokenKind.RBrace, "to close the class");
+    cls.source = this.cursor.spanFrom(keyword.start);
+
+    return cls;
+  }
+
+  private memberModifierAhead(): boolean {
+    if (
+      !this.cursor.is(TokenKind.Identifier) ||
+      !isMemberModifier(this.cursor.peek().text)
+    ) {
+      return false;
+    }
+    const next = this.cursor.lookahead();
+    if (next.newline && next.kind != TokenKind.LBrace) {
+      return false;
+    }
+
+    return !endsModifiers(next.kind);
+  }
+
+  private skipClassMember(): void {
+    let moved = false;
+    while (
+      !this.cursor.is(TokenKind.End) &&
+      !this.cursor.is(TokenKind.RBrace) &&
+      !(moved && this.cursor.peek().newline)
+    ) {
+      if (this.cursor.accept(TokenKind.Semi)) {
+        return;
+      }
+      if (this.cursor.accept(TokenKind.LBrace)) {
+        this.cursor.skipToClosingBrace();
+      } else {
+        this.cursor.next();
+      }
+      moved = true;
+    }
+  }
+
+  private decorators(): Decorator[] {
+    const decorators: Decorator[] = [];
+    let more = this.cursor.is(TokenKind.At);
+    while (more) {
+      const loc = this.cursor.next().start;
+      const expr = this.decoratorExpr();
+      if (expr != undefined) {
+        decorators.push({ loc, expr });
+      }
+      more = !this.cursor.isRecovering() && this.cursor.is(TokenKind.At);
+    }
+
+    return decorators;
+  }
+
+  private decoratorExpr(): Expr | undefined {
+    if (this.cursor.accept(TokenKind.LParen)) {
+      const inner = this.sequence();
+      this.cursor.expect(TokenKind.RParen, "to close the decorator");
+      return inner;
+    }
+    if (!this.cursor.is(TokenKind.Identifier)) {
+      this.cursor.error(
+        this.cursor.peek().start,
+        `expected the name of a decorator after '@', found ${this.cursor.peek().kind}`,
+      );
+      return undefined;
+    }
+    const head = this.cursor.next();
+    let expr: Expr = {
+      kind: ExprKind.Name,
+      loc: head.start,
+      name: head.text,
+      typeArgs: [],
+    };
+    while (this.cursor.accept(TokenKind.Dot)) {
+      if (
+        !this.cursor.is(TokenKind.Identifier) &&
+        !isKeyword(this.cursor.peek().kind)
+      ) {
+        this.cursor.error(
+          this.cursor.peek().start,
+          "expected a property name after '.'",
+        );
+        return expr;
+      }
+      const name = this.cursor.next();
+      expr = {
+        kind: ExprKind.Member,
+        loc: name.start,
+        object: expr,
+        name: name.text,
+        optional: false,
+        typeArgs: [],
+      };
+    }
+    if (!this.cursor.accept(TokenKind.LParen)) {
+      return expr;
+    }
+    const list: Arguments = this.arguments();
+
+    return {
+      kind: ExprKind.Call,
+      loc: expr.loc,
+      callee: expr,
+      args: list.args,
+      spread: list.spread,
+      optional: false,
+      tagged: false,
+    };
+  }
+
+  private rejectDecorators(decorators: Decorator[]): void {
+    const first = decorators[0];
+    if (first != undefined) {
+      this.cursor.report(
+        first.loc,
+        "a decorator can decorate only a class, a member or a parameter",
+      );
+    }
+  }
+
+  private modifiers(): Modifiers {
+    const m: Modifiers = {
+      isStatic: false,
+      readonly: false,
+      isAbstract: false,
+      isOverride: false,
+      isAsync: false,
+      accessor: false,
+      access: Access.Public,
+      staticBlock: false,
+    };
+    while (!m.staticBlock && this.memberModifierAhead()) {
+      const word = this.cursor.next();
+      switch (word.text) {
+        case "static":
+          if (this.cursor.is(TokenKind.LBrace)) {
+            this.cursor.report(word.start, "static blocks are not supported");
+            this.cursor.next();
+            this.cursor.skipToClosingBrace();
+            m.staticBlock = true;
+          }
+          m.isStatic = true;
+          break;
+        case "public":
+          m.access = Access.Public;
+          break;
+        case "private":
+          m.access = Access.Private;
+          break;
+        case "protected":
+          m.access = Access.Protected;
+          break;
+        case "readonly":
+          m.readonly = true;
+          break;
+        case "override":
+          m.isOverride = true;
+          break;
+        case "abstract":
+          m.isAbstract = true;
+          break;
+        case "declare":
+          this.cursor.report(word.start, "'declare' is not supported");
+          break;
+        case "accessor":
+          m.accessor = true;
+          break;
+        default:
+          m.isAsync = true;
+          break;
+      }
+    }
+
+    return m;
+  }
+
+  private memberAccessorAhead(): boolean {
+    const next = this.cursor.lookahead();
+
+    return (
+      (this.cursor.isWord("get") || this.cursor.isWord("set")) &&
+      !next.newline &&
+      (next.kind == TokenKind.Identifier ||
+        isKeyword(next.kind) ||
+        next.kind == TokenKind.String)
+    );
+  }
+
+  private classMember(cls: ClassDecl): void {
+    if (this.cursor.accept(TokenKind.Semi)) {
+      return;
+    }
+    const decorators = this.decorators();
+    if (this.cursor.isRecovering()) {
+      return;
+    }
+    const loc = this.cursor.peek().start;
+    const m = this.modifiers();
+    if (m.staticBlock) {
+      return;
+    }
+    if (this.memberAccessorAhead()) {
+      this.cursor.next();
+      this.cursor.report(loc, "getters and setters are not supported");
+      return this.skipClassMember();
+    }
+    if (this.cursor.is(TokenKind.LBracket) && !this.cursor.symbolKeyAhead()) {
+      this.cursor.report(loc, "a member name in brackets is not supported");
+      return this.skipClassMember();
+    }
+    const member = this.memberName(m);
+    if (member == undefined) {
+      return;
+    }
+    if (this.cursor.is(TokenKind.LParen) || this.cursor.is(TokenKind.Less)) {
+      return this.classMethod(cls, m, decorators, loc, member);
+    }
+    if (member.generator || m.isAsync) {
+      return this.cursor.error(
+        this.cursor.peek().start,
+        "expected '(' after the name of the method",
+      );
+    }
+    this.classField(cls, m, decorators, loc, member);
+  }
+
+  private memberName(m: Modifiers): MemberName | undefined {
+    const start = this.cursor.peek().start;
+    const generator = this.cursor.accept(TokenKind.Star);
+    const token = this.cursor.peek();
+    const name = this.fieldName();
+    if (name == undefined) {
+      return undefined;
+    }
+    if (token.hash) {
+      this.cursor.report(token.start, `there is no '#${name}' in tz`);
+      m.access = Access.Private;
+    }
+
+    return {
+      loc: token.start,
+      start,
+      name,
+      generator,
+      plain: token.kind == TokenKind.Identifier,
+    };
+  }
+
+  private classMethod(
+    cls: ClassDecl,
+    m: Modifiers,
+    decorators: Decorator[],
+    loc: int,
+    member: MemberName,
+  ): void {
+    const constructor =
+      member.plain && member.name == "constructor" && !m.isStatic;
+    const abstractMethod = m.isAbstract && !constructor;
+    if (m.accessor) {
+      this.cursor.report(loc, "'accessor' goes before a field, not a method");
+    }
+    const first = decorators[0];
+    if (first != undefined && constructor) {
+      this.cursor.report(
+        first.loc,
+        "a decorator cannot decorate a constructor",
+      );
+    }
+    const role: ClassMember = {
+      access: m.access,
+      isOverride: m.isOverride && !constructor,
+      decorators: constructor ? [] : decorators,
+      method: constructor
+        ? MethodKind.Constructor
+        : m.isStatic
+          ? MethodKind.Static
+          : abstractMethod
+            ? MethodKind.Abstract
+            : MethodKind.Instance,
+    };
+    this.reportMethodModifiers(m, member.generator, constructor, loc);
+    const fn = this.method(
+      member.loc,
+      member.name,
+      member.start,
+      member.generator && !constructor,
+      m.isAsync && !constructor,
+      FunctionPlace.Declared,
+      role,
+    );
+    if (this.cursor.isRecovering()) {
+      return;
+    }
+    if (abstractMethod) {
+      if (fn.body != undefined) {
+        this.cursor.report(
+          member.loc,
+          `abstract method '${member.name}' cannot have a body`,
+        );
+      }
+      fn.body = { kind: StmtKind.Block, loc: member.loc, body: [], end: -1 };
+      cls.methods.push(fn);
+      return;
+    }
+    const body = fn.body;
+    if (body == undefined) {
+      return this.cursor.report(member.loc, "a method has no body");
+    }
+    if (!isConstructor(fn)) {
+      cls.methods.push(fn);
+      return;
+    }
+    const returnType = fn.returnType;
+    if (returnType != undefined) {
+      this.cursor.report(
+        returnType.loc,
+        "a constructor cannot have a return type",
+      );
+    }
+    this.addParameterFields(cls, fn, body);
+    cls.constructors.push(fn);
+  }
+
+  private reportMethodModifiers(
+    m: Modifiers,
+    generator: boolean,
+    constructor: boolean,
+    loc: int,
+  ): void {
+    if (generator && constructor) {
+      this.cursor.report(loc, "a constructor cannot be a generator");
+    }
+    if (m.isAsync && constructor) {
+      this.cursor.report(loc, "a constructor cannot be 'async'");
+    }
+    if (m.readonly) {
+      this.cursor.report(loc, "a method cannot be 'readonly'");
+    }
+    if ((m.isOverride || m.isAbstract) && constructor) {
+      this.cursor.report(
+        loc,
+        "a constructor cannot be 'override' or 'abstract'",
+      );
+    }
+    if (m.isAbstract && m.isStatic) {
+      this.cursor.report(loc, "a static method cannot be 'abstract'");
+    }
+  }
+
+  private hasParameterField(cls: ClassDecl, name: string): boolean {
+    for (const field of cls.fields) {
+      if (field.form == FieldKind.Parameter && field.name == name) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private superCallEnd(body: BlockStmt): int {
+    for (let i = 0; i < body.body.length; i++) {
+      const stmt = body.body[i];
+      if (stmt == undefined || stmt.kind != StmtKind.Expr) {
+        continue;
+      }
+      const call = stmt.expr;
+      if (call.kind != ExprKind.Call) {
+        continue;
+      }
+      const callee = call.callee;
+      if (callee.kind == ExprKind.Name && callee.name == "super") {
+        return i + 1;
+      }
+    }
+
+    return 0;
+  }
+
+  private addParameterFields(
+    cls: ClassDecl,
+    fn: FunctionDecl,
+    body: BlockStmt,
+  ): void {
+    const sets: Stmt[] = [];
+    let properties = 0;
+    for (const field of cls.fields) {
+      if (field.form == FieldKind.Parameter) {
+        properties += 1;
+      }
+    }
+    for (const param of fn.params) {
+      const property = param.property;
+      if (property == undefined) {
+        continue;
+      }
+      this.fieldNames.add(param.name);
+      if (!this.hasParameterField(cls, param.name)) {
+        const field: ClassField = {
+          name: param.name,
+          loc: param.loc,
+          type: param.type,
+          form: FieldKind.Parameter,
+          presence: FieldPresence.Required,
+          readonly: property.readonly,
+          isOverride: false,
+          access: property.access,
+          decorators: [],
+          accessor: false,
+        };
+        cls.fields.splice(properties, 0, field);
+        properties += 1;
+      }
+      const self: Expr = {
+        kind: ExprKind.Name,
+        loc: param.loc,
+        name: "this",
+        typeArgs: [],
+      };
+      const target: Expr = {
+        kind: ExprKind.Member,
+        loc: param.loc,
+        object: self,
+        name: param.name,
+        optional: false,
+        typeArgs: [],
+      };
+      const value: Expr = {
+        kind: ExprKind.Name,
+        loc: param.loc,
+        name: param.name,
+        typeArgs: [],
+      };
+      const set: Expr = {
+        kind: ExprKind.Assign,
+        loc: param.loc,
+        target,
+        value,
+        source: kNoSpan,
+      };
+      sets.push({ kind: StmtKind.Expr, loc: param.loc, expr: set });
+    }
+    const at = cls.base != undefined ? this.superCallEnd(body) : 0;
+    const before = body.body.slice(0, at);
+    const after = body.body.slice(at);
+    body.body = before.concat(sets).concat(after);
+  }
+
+  private classField(
+    cls: ClassDecl,
+    m: Modifiers,
+    decorators: Decorator[],
+    loc: int,
+    member: MemberName,
+  ): void {
+    if (m.isAbstract) {
+      this.cursor.report(loc, "abstract fields are not supported");
+    }
+    let presence = FieldPresence.Required;
+    if (this.cursor.accept(TokenKind.Question)) {
+      presence = FieldPresence.Optional;
+    } else if (this.cursor.is(TokenKind.Bang) && !this.cursor.peek().newline) {
+      this.cursor.next();
+      presence = FieldPresence.Definite;
+    }
+    const type = this.cursor.accept(TokenKind.Colon) ? this.type() : undefined;
+    const init = this.cursor.accept(TokenKind.Assign)
+      ? this.expression()
+      : undefined;
+    const ended =
+      this.cursor.accept(TokenKind.Semi) ||
+      this.cursor.accept(TokenKind.Comma) ||
+      this.cursor.is(TokenKind.RBrace) ||
+      this.cursor.peek().newline;
+    if (!ended) {
+      return this.cursor.error(
+        this.cursor.peek().start,
+        `expected ';' after the field, found ${this.cursor.peek().kind}`,
+      );
+    }
+    cls.fields.push({
+      name: member.name,
+      loc: member.loc,
+      type,
+      init,
+      form: m.isStatic ? FieldKind.Static : FieldKind.Instance,
+      presence,
+      readonly: m.readonly,
+      isOverride: m.isOverride,
+      access: m.access,
+      decorators,
+      accessor: m.accessor,
+    });
+  }
+
+  private typeAlias(): Stmt {
+    this.cursor.next();
+    const name = this.cursor.next();
+    const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
+    this.cursor.expect(TokenKind.Assign, "after the name of the type");
+    const type = this.type();
+    this.cursor.expectSemicolon();
+
+    return {
+      kind: StmtKind.TypeAlias,
+      loc: name.start,
+      name: name.text,
+      typeParams,
+      type,
+      bases: [],
+      isHandle: false,
+    };
+  }
+
+  private handleClass(): Stmt {
+    this.cursor.next();
+    const name = this.cursor.peek();
+    if (!this.cursor.expect(TokenKind.Identifier, "after 'declare class'")) {
+      this.cursor.synchronize();
+      return marker(StmtKind.Empty, name.start);
+    }
+    const alias: Stmt = {
+      kind: StmtKind.TypeAlias,
+      loc: name.start,
+      name: name.text,
+      typeParams: [],
+      type: typeRef(-1),
+      bases: [],
+      isHandle: true,
+    };
+    const hasBody =
+      this.cursor.is(TokenKind.LBrace) &&
+      this.cursor.lookahead().kind == TokenKind.RBrace;
+    if (!hasBody) {
+      this.cursor.report(
+        this.cursor.peek().start,
+        `a declared class is a handle from C: 'declare class ${name.text} {}'`,
+      );
+      this.skipHandleBody();
+      return alias;
+    }
+    this.cursor.skip(2);
+
+    return alias;
+  }
+
+  private skipHandleBody(): void {
+    while (
+      !this.cursor.is(TokenKind.LBrace) &&
+      !this.cursor.is(TokenKind.End)
+    ) {
+      this.cursor.next();
+    }
+    if (this.cursor.accept(TokenKind.LBrace)) {
+      this.cursor.skipToClosingBrace();
+    }
+  }
+
+  private interfaceDecl(): Stmt {
+    this.cursor.next();
+    const name = this.cursor.next();
+    const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
+    const bases: TypeRef[] = [];
+    if (this.cursor.isWord("extends")) {
+      this.cursor.next();
+      bases.push(this.type());
+      while (this.cursor.accept(TokenKind.Comma)) {
+        bases.push(this.type());
+      }
+    }
+    if (!this.cursor.is(TokenKind.LBrace)) {
+      this.cursor.error(
+        this.cursor.peek().start,
+        `expected '{' to start the fields of the interface, found ${this.cursor.peek().kind}`,
+      );
+      return marker(StmtKind.Empty, name.start);
+    }
+    const type = this.objectType();
+    this.cursor.accept(TokenKind.Semi);
+
+    return {
+      kind: StmtKind.TypeAlias,
+      loc: name.start,
+      name: name.text,
+      typeParams,
+      type,
+      bases,
+      isHandle: false,
+    };
+  }
+
+  private enumDecl(): Stmt {
+    this.cursor.next();
+    const name = this.cursor.peek();
+    if (name.kind != TokenKind.Identifier) {
+      this.cursor.error(name.start, "expected the name of the enum");
+      return marker(StmtKind.Empty, name.start);
+    }
+    this.cursor.next();
+    this.cursor.expect(TokenKind.LBrace, "to start the members of the enum");
+    const members: EnumMember[] = [];
+    let more =
+      !this.cursor.is(TokenKind.RBrace) && !this.cursor.is(TokenKind.End);
+    while (more) {
+      const member = this.cursor.peek();
+      if (member.kind != TokenKind.Identifier) {
+        this.cursor.error(
+          member.start,
+          `expected the name of an enum member, found ${member.kind}`,
+        );
+        more = false;
+        continue;
+      }
+      this.cursor.next();
+      let init: Expr | undefined = undefined;
+      if (this.cursor.accept(TokenKind.Assign)) {
+        init = this.expression();
+        this.recordConstant(`${name.text}.${member.text}`, init);
+      }
+      members.push({ name: member.text, loc: member.start, init });
+      more =
+        this.cursor.accept(TokenKind.Comma) &&
+        !this.cursor.is(TokenKind.RBrace) &&
+        !this.cursor.is(TokenKind.End);
+    }
+    this.cursor.expect(TokenKind.RBrace, "to close the enum");
+
+    return { kind: StmtKind.Enum, loc: name.start, name: name.text, members };
+  }
+}

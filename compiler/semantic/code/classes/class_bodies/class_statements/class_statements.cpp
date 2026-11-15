@@ -221,7 +221,7 @@ void ClassStatements::rememberMethodModules(const ClassDecl *classDecl) {
     return;
   }
   for (FunctionDecl *functionDecl : this->memberFunctions(classDecl)) {
-    this->state.declaration.modules.rememberDeclModule(functionDecl, home);
+    this->state.declaration.modules.rememberMemberModule(functionDecl, home);
   }
 }
 

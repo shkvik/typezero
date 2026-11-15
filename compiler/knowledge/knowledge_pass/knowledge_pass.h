@@ -38,6 +38,7 @@ public:
     return this->out.symbols[symbol].kind;
   }
   size_t enumMemberSymbol(size_t enumSymbol, llvm::StringRef name) const;
+  size_t memberModule(const FunctionDecl *method, size_t classModule) const;
   const Program &program() const { return program_; }
   bool reference(size_t symbol, size_t from, size_t module, llvm::SMLoc loc, bool call);
   void typed(size_t module, llvm::SMLoc loc, llvm::StringRef name, const Type *type);

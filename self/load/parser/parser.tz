@@ -1,0 +1,42 @@
+import { tokenize } from "../lexer/lexer.tz";
+import { FileParser } from "./file-parser/file-parser.tz";
+import { SourceFile } from "../../ast.tz";
+import { ParseError } from "./cursor.tz";
+
+export type SourceText = {
+  readonly path: string;
+  readonly text: Buffer;
+  readonly isLibrary: boolean;
+};
+
+export type ParsedFile = {
+  readonly source: SourceText;
+  readonly file: SourceFile;
+  readonly errors: ParseError[];
+};
+
+export class Parser {
+  private readonly sources: SourceText[];
+
+  public constructor(sources: SourceText[]) {
+    this.sources = sources;
+  }
+
+  public run(): ParsedFile[] {
+    const parsed: ParsedFile[] = [];
+    for (const source of this.sources) {
+      const file = this.parseFile(source);
+      parsed.push(file);
+    }
+
+    return parsed;
+  }
+
+  private parseFile(source: SourceText): ParsedFile {
+    const tokens = tokenize(source.text);
+    const fileParser = new FileParser(source.text, tokens, source.isLibrary);
+    const result = fileParser.run();
+
+    return { source, file: result.file, errors: result.errors };
+  }
+}

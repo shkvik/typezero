@@ -6,7 +6,7 @@
 import square from "./math"
 // expect-error: 'import * as' is not supported; list the names you need, e.g. 'import { a, b } from "./math"'
 import * as geo from "./math"
-// expect-error: an import must name what it takes: importing a file only to run it is not supported; import the names you need, e.g. 'import { a } from "./math"'
+// expect-error: an import must name what it takes: 'import "./math"' only lists a file with a part of a class declared here ('partial class'); import the names you need, e.g. 'import { a } from "./math"'
 import "./math"
 // expect-error: an import must name what it takes
 import {} from "./math"

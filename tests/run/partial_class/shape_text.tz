@@ -1,0 +1,20 @@
+import { Shape } from "./shape.tz"
+import { Unit, unitName } from "./units.tz"
+
+partial class Shape {
+  public describe(unit: Unit): string {
+    return `${this.name}: ${this.area()} ${unitName(unit)}`
+  }
+
+  public scaled(by: double): double {
+    return this.side * by
+  }
+
+  public scaled(by: int): double {
+    return this.side * by.toDouble()
+  }
+
+  public static unit(): Unit {
+    return "cm"
+  }
+}

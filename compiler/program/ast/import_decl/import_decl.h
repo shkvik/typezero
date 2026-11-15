@@ -16,6 +16,7 @@ struct ImportDecl {
   llvm::SMLoc wholeLoc;
   bool wholeIsDefault = false;
   bool implicit = false;
+  bool isPartList = false;
 };
 
 class BuiltinModulePaths {

@@ -561,7 +561,7 @@ void DeclarationClassesRegistry::declareMethods(const DeclareMethods &task) {
   }
   for (FunctionDecl *method : llvm::reverse(classDecl->methods)) {
     this->state.walk.tasks.pushTask(FinishClassMethod{.classDecl = classDecl, .method = method});
-    this->pushSignature(method);
+    this->pushMethodSignature(method);
   }
   for (FunctionDecl *constructor : llvm::reverse(classDecl->constructors)) {
     this->state.walk.tasks.pushTask(FinishConstructor{.constructor = constructor});
@@ -572,6 +572,19 @@ void DeclarationClassesRegistry::declareMethods(const DeclareMethods &task) {
 void DeclarationClassesRegistry::pushSignature(FunctionDecl *functionDecl) {
   this->state.walk.tasks.pushTask(
       StartFunctionSymbol{.functionDecl = functionDecl, .variable = nullptr, .isNamed = false});
+}
+
+void DeclarationClassesRegistry::pushMethodSignature(FunctionDecl *method) {
+  Module *partModule = method->member()->partModule;
+  if (partModule == nullptr) {
+    return this->pushSignature(method);
+  }
+  auto &tasks = this->state.walk.tasks;
+  auto *classModule = this->state.declaration.modules.getCurrentModule();
+  tasks.pushTask(UseModule{.module = classModule});
+  this->pushSignature(method);
+
+  return tasks.pushTask(UseModule{.module = partModule});
 }
 
 void DeclarationClassesRegistry::finishConstructor(const FinishConstructor &task) {
@@ -1938,7 +1951,7 @@ void DeclarationClassesRegistry::declareItemMethods(Stmt *item, Module *module) 
 
 void DeclarationClassesRegistry::finishItemMethods(const FinishItemMethods &task) {
   for (FunctionDecl *method : task.classDecl->collectMemberFunctions()) {
-    this->state.declaration.modules.rememberDeclModule(method, task.module);
+    this->state.declaration.modules.rememberMemberModule(method, task.module);
     this->state.inference.cycles.addDeclaredFunction(method);
   }
 }

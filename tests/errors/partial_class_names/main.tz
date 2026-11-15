@@ -1,0 +1,6 @@
+// A part sees the names of its own file: what the file of the class imports
+// and declares is not there.
+import { Shape } from "./shape.tz"
+
+const shape = new Shape(2)
+console.log(shape.copy(), shape.twice(), shape.half())

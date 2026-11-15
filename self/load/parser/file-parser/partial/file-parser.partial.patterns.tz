@@ -1,0 +1,516 @@
+import { FileParser } from "../file-parser.tz";
+import { TokenKind } from "../../../../token.tz";
+import {
+  ArrayLitExpr,
+  BinaryOp,
+  BindingForm,
+  BindingKind,
+  Expr,
+  ExprKind,
+  IndexExpr,
+  ObjectLitExpr,
+  PropertyKind,
+  Stmt,
+  StmtKind,
+  TypeRef,
+  VarDeclarator,
+  kNoSpan,
+} from "../../../../ast.tz";
+
+export type PatternElement = {
+  readonly loc: int;
+  hole: boolean;
+  rest: boolean;
+  name: string;
+  target?: Expr;
+  nested?: Pattern;
+  defaultValue?: Expr;
+  key: string;
+  keyExpr?: Expr;
+};
+
+export type Pattern = {
+  readonly loc: int;
+  readonly object: boolean;
+  readonly elements: PatternElement[];
+};
+
+function element(loc: int): PatternElement {
+  return { loc, hole: false, rest: false, name: "", key: "" };
+}
+
+function formOf(pattern: Pattern): BindingForm {
+  if (pattern.object) {
+    return { kind: BindingKind.Object };
+  }
+  const last = pattern.elements[pattern.elements.length - 1];
+  const rest = last != undefined && last.rest;
+
+  return { kind: BindingKind.Array, length: pattern.elements.length, rest };
+}
+
+function isDirect(pattern: Pattern, value: Expr): boolean {
+  if (pattern.object || value.kind != ExprKind.ArrayLit) {
+    return false;
+  }
+  if (value.elements.length < pattern.elements.length) {
+    return false;
+  }
+  for (const item of value.elements) {
+    if (item.spread || item.hole) {
+      return false;
+    }
+  }
+  for (const item of pattern.elements) {
+    if (item.rest) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+partial class FileParser {
+  private bindingPattern(): Pattern {
+    if (this.cursor.is(TokenKind.LBrace)) {
+      return this.objectPattern();
+    }
+    const bracket = this.cursor.next();
+    const pattern: Pattern = {
+      loc: bracket.start,
+      object: false,
+      elements: [],
+    };
+    let more =
+      !this.cursor.is(TokenKind.RBracket) && !this.cursor.is(TokenKind.End);
+    while (more) {
+      const e = element(this.cursor.peek().start);
+      if (this.cursor.accept(TokenKind.Comma)) {
+        e.hole = true;
+        pattern.elements.push(e);
+        more =
+          !this.cursor.is(TokenKind.RBracket) && !this.cursor.is(TokenKind.End);
+        continue;
+      }
+      e.rest = this.cursor.accept(TokenKind.Ellipsis);
+      if (
+        this.cursor.is(TokenKind.LBracket) ||
+        this.cursor.is(TokenKind.LBrace)
+      ) {
+        e.nested = this.bindingPattern();
+      } else if (this.cursor.is(TokenKind.Identifier)) {
+        e.name = this.cursor.next().text;
+      } else {
+        this.cursor.error(
+          this.cursor.peek().start,
+          "expected a variable name in the destructuring pattern",
+        );
+        return pattern;
+      }
+      if (this.cursor.is(TokenKind.Assign)) {
+        if (e.rest) {
+          this.cursor.report(
+            this.cursor.peek().start,
+            "a rest element cannot have a default value",
+          );
+        }
+        this.cursor.next();
+        e.defaultValue = this.expression();
+      }
+      pattern.elements.push(e);
+      more = this.cursor.accept(TokenKind.Comma);
+      if (more && e.rest) {
+        this.cursor.report(e.loc, "a rest element must be the last one");
+      }
+      more =
+        more &&
+        !this.cursor.is(TokenKind.RBracket) &&
+        !this.cursor.is(TokenKind.End);
+    }
+    this.cursor.expect(
+      TokenKind.RBracket,
+      "to close the destructuring pattern",
+    );
+
+    return pattern;
+  }
+
+  private objectPattern(): Pattern {
+    const brace = this.cursor.next();
+    const pattern: Pattern = {
+      loc: brace.start,
+      object: true,
+      elements: [],
+    };
+    let more =
+      !this.cursor.is(TokenKind.RBrace) && !this.cursor.is(TokenKind.End);
+    while (more) {
+      const e = element(this.cursor.peek().start);
+      if (this.cursor.accept(TokenKind.Ellipsis)) {
+        e.rest = true;
+        if (!this.cursor.is(TokenKind.Identifier)) {
+          this.cursor.error(
+            this.cursor.peek().start,
+            "expected a variable name after '...' in the destructuring pattern",
+          );
+          return pattern;
+        }
+        e.name = this.cursor.next().text;
+      } else if (!this.objectPatternEntry(e)) {
+        return pattern;
+      }
+      pattern.elements.push(e);
+      more = this.cursor.accept(TokenKind.Comma);
+      if (more && e.rest) {
+        this.cursor.report(e.loc, "a rest element must be the last one");
+      }
+      more =
+        more &&
+        !this.cursor.is(TokenKind.RBrace) &&
+        !this.cursor.is(TokenKind.End);
+    }
+    this.cursor.expect(TokenKind.RBrace, "to close the destructuring pattern");
+
+    return pattern;
+  }
+
+  private objectPatternEntry(e: PatternElement): boolean {
+    const identifier = this.cursor.is(TokenKind.Identifier);
+    if (this.cursor.accept(TokenKind.LBracket)) {
+      e.keyExpr = this.expression();
+      this.cursor.expect(TokenKind.RBracket, "to close the key");
+    } else {
+      const key = this.fieldName();
+      if (key == undefined) {
+        this.cursor.skipToClosingBrace();
+        return false;
+      }
+      e.key = key;
+    }
+    if (this.cursor.accept(TokenKind.Colon)) {
+      if (
+        this.cursor.is(TokenKind.LBracket) ||
+        this.cursor.is(TokenKind.LBrace)
+      ) {
+        e.nested = this.bindingPattern();
+      } else if (this.cursor.is(TokenKind.Identifier)) {
+        e.name = this.cursor.next().text;
+      } else {
+        this.cursor.error(
+          this.cursor.peek().start,
+          "expected a variable name in the destructuring pattern",
+        );
+        return false;
+      }
+    } else if (identifier && e.keyExpr == undefined) {
+      e.name = e.key;
+    } else {
+      this.cursor.error(
+        this.cursor.peek().start,
+        "a key in a destructuring pattern needs a variable",
+      );
+      return false;
+    }
+    if (this.cursor.accept(TokenKind.Assign)) {
+      e.defaultValue = this.expression();
+    }
+
+    return true;
+  }
+
+  private patternFromLiteral(expr: ArrayLitExpr | ObjectLitExpr): Pattern {
+    if (expr.kind == ExprKind.ObjectLit) {
+      const pattern: Pattern = { loc: expr.loc, object: true, elements: [] };
+      for (let i = 0; i < expr.props.length; i++) {
+        const prop = expr.props[i];
+        if (prop == undefined) {
+          continue;
+        }
+        const e = element(prop.loc);
+        const form = prop.form;
+        e.rest = form.kind == PropertyKind.Spread;
+        e.key = prop.name;
+        if (form.kind == PropertyKind.Computed) {
+          e.keyExpr = form.key;
+        }
+        if (e.rest && i + 1 != expr.props.length) {
+          this.cursor.report(e.loc, "a rest element must be the last one");
+        }
+        this.fillElement(e, prop.value, false);
+        pattern.elements.push(e);
+      }
+      return pattern;
+    }
+    const pattern: Pattern = { loc: expr.loc, object: false, elements: [] };
+    for (let i = 0; i < expr.elements.length; i++) {
+      const item = expr.elements[i];
+      if (item == undefined) {
+        continue;
+      }
+      const e = element(item.expr.loc);
+      e.hole = item.hole;
+      e.rest = item.spread;
+      if (e.rest && i + 1 != expr.elements.length) {
+        this.cursor.report(e.loc, "a rest element must be the last one");
+      }
+      this.fillElement(e, item.expr, e.hole);
+      pattern.elements.push(e);
+    }
+
+    return pattern;
+  }
+
+  private fillElement(e: PatternElement, value: Expr, hole: boolean): void {
+    let target = value;
+    if (value.kind == ExprKind.Assign && value.op == undefined && !e.rest) {
+      target = value.target;
+      e.defaultValue = value.value;
+    }
+    if (target.kind == ExprKind.ArrayLit || target.kind == ExprKind.ObjectLit) {
+      e.nested = this.patternFromLiteral(target);
+    } else if (!hole) {
+      e.target = target;
+    }
+  }
+
+  private hiddenDeclarator(
+    loc: int,
+    init: Expr,
+    typeAnn: TypeRef | undefined,
+    form: BindingForm,
+  ): VarDeclarator {
+    const name = this.hiddenName();
+
+    return { name, loc, typeAnn, init, form };
+  }
+
+  private declarePattern(
+    decls: VarDeclarator[],
+    pattern: Pattern,
+    value: Expr,
+    typeAnn: TypeRef | undefined,
+  ): void {
+    const hidden = this.hiddenDeclarator(
+      pattern.loc,
+      value,
+      typeAnn,
+      formOf(pattern),
+    );
+    decls.push(hidden);
+    this.declareElements(decls, pattern, hidden.name);
+  }
+
+  private declareElements(
+    decls: VarDeclarator[],
+    pattern: Pattern,
+    base: string,
+  ): void {
+    const keyReads: IndexExpr[] = [];
+    for (let i = 0; i < pattern.elements.length; i++) {
+      const e = pattern.elements[i];
+      if (e == undefined || e.hole) {
+        continue;
+      }
+      const value = this.elementOf(base, pattern, i, keyReads);
+      const nested = e.nested;
+      if (nested != undefined) {
+        this.declarePattern(decls, nested, value, undefined);
+        continue;
+      }
+      decls.push({
+        name: e.name,
+        loc: e.loc,
+        init: value,
+        form: { kind: BindingKind.Plain },
+      });
+    }
+  }
+
+  private assignPattern(loc: int, pattern: Pattern, value: Expr): Stmt {
+    const decls: VarDeclarator[] = [];
+    const body: Stmt[] = [
+      { kind: StmtKind.VarDecl, loc, isConst: true, isUsing: false, decls },
+    ];
+    const direct = isDirect(pattern, value);
+    const values: string[] = [];
+    if (direct && value.kind == ExprKind.ArrayLit) {
+      for (const item of value.elements) {
+        const hidden = this.hiddenDeclarator(
+          item.expr.loc,
+          item.expr,
+          undefined,
+          { kind: BindingKind.Plain },
+        );
+        decls.push(hidden);
+        values.push(hidden.name);
+      }
+    } else {
+      decls.push(
+        this.hiddenDeclarator(pattern.loc, value, undefined, formOf(pattern)),
+      );
+    }
+    const base = decls[0]?.name ?? "";
+    const keyReads: IndexExpr[] = [];
+    for (let i = 0; i < pattern.elements.length; i++) {
+      const e = pattern.elements[i];
+      if (e == undefined || e.hole) {
+        continue;
+      }
+      const part = direct
+        ? this.directElement(e, values[i] ?? "")
+        : this.elementOf(base, pattern, i, keyReads);
+      const nested = e.nested;
+      if (nested != undefined) {
+        body.push(this.assignPattern(e.loc, nested, part));
+        continue;
+      }
+      const target = e.target ?? part;
+      const assign: Expr = {
+        kind: ExprKind.Assign,
+        loc: e.loc,
+        target,
+        value: part,
+        source: kNoSpan,
+      };
+      body.push({ kind: StmtKind.Expr, loc: e.loc, expr: assign });
+    }
+
+    return { kind: StmtKind.Block, loc, body, end: -1 };
+  }
+
+  private directElement(e: PatternElement, name: string): Expr {
+    const read: Expr = { kind: ExprKind.Name, loc: e.loc, name, typeArgs: [] };
+    const fallback = e.defaultValue;
+    if (fallback == undefined) {
+      return read;
+    }
+
+    return {
+      kind: ExprKind.Binary,
+      loc: e.loc,
+      op: BinaryOp.Nullish,
+      lhs: read,
+      rhs: fallback,
+      source: kNoSpan,
+    };
+  }
+
+  private elementOf(
+    base: string,
+    pattern: Pattern,
+    i: int,
+    keyReads: IndexExpr[],
+  ): Expr {
+    const e = pattern.elements[i];
+    if (e == undefined) {
+      return {
+        kind: ExprKind.Name,
+        loc: pattern.loc,
+        name: base,
+        typeArgs: [],
+      };
+    }
+    const source: Expr = {
+      kind: ExprKind.Name,
+      loc: e.loc,
+      name: base,
+      typeArgs: [],
+    };
+    let read: Expr;
+    if (!pattern.object) {
+      const position: Expr = {
+        kind: ExprKind.IntLit,
+        loc: e.loc,
+        value: i.toUint64(),
+        text: kNoSpan,
+      };
+      if (e.rest) {
+        const slice: Expr = {
+          kind: ExprKind.Member,
+          loc: e.loc,
+          object: source,
+          name: "slice",
+          optional: false,
+          typeArgs: [],
+        };
+        return {
+          kind: ExprKind.Call,
+          loc: e.loc,
+          callee: slice,
+          args: [position],
+          spread: [],
+          optional: false,
+          tagged: false,
+        };
+      }
+      read = {
+        kind: ExprKind.Index,
+        loc: e.loc,
+        object: source,
+        index: position,
+        optional: false,
+      };
+    } else if (e.rest) {
+      return this.restOf(pattern, e, source, keyReads);
+    } else if (e.keyExpr != undefined) {
+      const keyed: IndexExpr = {
+        kind: ExprKind.Index,
+        loc: e.loc,
+        object: source,
+        index: e.keyExpr,
+        optional: false,
+      };
+      keyReads.push(keyed);
+      read = keyed;
+    } else {
+      read = {
+        kind: ExprKind.Member,
+        loc: e.loc,
+        object: source,
+        name: e.key,
+        optional: false,
+        typeArgs: [],
+      };
+    }
+    const fallback = e.defaultValue;
+    if (fallback == undefined) {
+      return read;
+    }
+
+    return {
+      kind: ExprKind.Binary,
+      loc: e.loc,
+      op: BinaryOp.Nullish,
+      lhs: read,
+      rhs: fallback,
+      source: kNoSpan,
+    };
+  }
+
+  private restOf(
+    pattern: Pattern,
+    e: PatternElement,
+    source: Expr,
+    keyReads: IndexExpr[],
+  ): Expr {
+    const omit: string[] = [];
+    for (const other of pattern.elements) {
+      if (!other.rest && other.keyExpr == undefined) {
+        omit.push(other.key);
+      }
+    }
+
+    return {
+      kind: ExprKind.ObjectLit,
+      loc: e.loc,
+      props: [
+        {
+          name: "",
+          loc: e.loc,
+          value: source,
+          form: { kind: PropertyKind.Spread, omit, omitKeys: keyReads.slice() },
+        },
+      ],
+    };
+  }
+}

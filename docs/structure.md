@@ -97,6 +97,14 @@ runtime/          весь C → tzrt.lib, tzrt.bc, tzcrypto.lib
   library/        C-часть тем: <тема>/<модуль>/
 library/          весь tz → bin/lib: <тема>/*.tz
 editors/          vscode/ — расширение VS Code; types/ — объявления для будущего плагина tsserver
+self/             компилятор на tz, пробный (порт compiler/load): token.tz, ast.tz, dump.tz,
+                  main.tz; load/lexer/lexer.tz (tokenize → массив токенов); load/parser/ — Parser (parser.tz:
+                  run() по списку файлов → ParsedFile[]), Cursor (позиция, откаты, ошибки),
+                  LiteralReader (literal.tz: значения литералов по токену);
+                  load/parser/file-parser/ — FileParser (file-parser.tz), его части
+                  `partial class` — в partial/file-parser.partial.<часть>.tz (types,
+                  expressions, patterns, statements, functions, classes, modules); сверка
+                  деревьев с C++ — скрытая `tz syntax tree|time|hold|read`
 tests/ docs/ bench/ examples/ third_party/
 ```
 
@@ -134,8 +142,8 @@ compiler/
                      to_utf8/, diagnostic/, diagnostics/, errors/
   result/            result/, ok/, err/
   load/              load_pass/, loader/, module_resolver/, library_modules/ (+ встроенные тексты),
-                     library_files/, source_overlay/, json_module/, lexer/, token/, literal_text/,
-                     parser/ и его части
+                     library_files/, source_overlay/, json_module/, partial_classes/, lexer/,
+                     token/, literal_text/, parser/ и его части
   parallel/          parallel_pass/, analysis/ (общее), pieces/, code_walk/, expr_walk/, call_walk/,
                      call_resolver/, alias_analysis/, escape_scan/, library_effects/,
                      builtin_effects/, conflicts/, parallel_analysis/, explainer/,

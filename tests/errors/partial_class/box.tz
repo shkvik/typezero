@@ -1,0 +1,13 @@
+import "./box_part.tz"
+
+export class Box<T> {
+  private readonly items: T[]
+
+  constructor() {
+    this.items = []
+  }
+
+  public size(): int {
+    return this.items.length
+  }
+}

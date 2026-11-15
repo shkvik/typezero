@@ -1,0 +1,15 @@
+// One class, its methods in several files: shape.tz lists its parts, and each
+// part sees what its own file imports and declares.
+import { Shape } from "./shape.tz"
+import { Box } from "./box.tz"
+
+const square = new Shape("square", 3)
+console.log(square.area())
+console.log(square.describe("cm"))
+console.log(square.scaled(2), square.scaled(0.5))
+console.log(square.isEven(10), square.isOdd(7), square.isEven(3))
+console.log(Shape.unit())
+const box = new Box<string>()
+box.put("a")
+box.put("b")
+console.log(box.first() ?? "none", box.count())

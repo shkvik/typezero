@@ -1,0 +1,22 @@
+import "./shape_part.tz"
+import { Token } from "./token.tz"
+
+function halfOf(value: int): int {
+  return value / 2
+}
+
+export class Shape {
+  private readonly side: int
+
+  constructor(side: int) {
+    this.side = side
+  }
+
+  public token(): Token {
+    return { text: "side" }
+  }
+
+  public half(): int {
+    return halfOf(this.side)
+  }
+}

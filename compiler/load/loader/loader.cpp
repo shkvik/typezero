@@ -5,6 +5,7 @@
 #include "compiler/load/library_modules/library_modules.h"
 #include "compiler/load/module_resolver/module_resolver.h"
 #include "compiler/load/parser/parser.h"
+#include "compiler/load/partial_classes/partial_classes.h"
 #include "compiler/load/source_overlay/source_overlay.h"
 #include "compiler/packages/graph/graph.h"
 #include "compiler/packages/package/package.h"
@@ -77,6 +78,8 @@ bool Loader::run(llvm::StringRef entryPath, SourceFile &program) {
   }
   entry->isEntry = true;
   visit(entry);
+  PartialClasses parts(this->diags);
+  parts.joinParts(this->order);
 
   for (Module *module : this->order) {
     program.modules.push_back(module);

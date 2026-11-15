@@ -206,9 +206,14 @@ std::string KnowledgeAnswers::map(size_t tokens, bool library) const {
       text += "export ";
     }
     text += known.signature.empty() ? title(symbol) : known.signature;
+    std::string where = ", line " + std::to_string(known.place.line + 1);
+    bool isFromPart = known.parent != Knowledge::kNone &&
+                      this->knowledge.symbols[known.parent].module != known.module;
+    if (isFromPart) {
+      where += " of " + this->knowledge.modules[known.module].name;
+    }
 
-    return text + "  - " + KnowledgeAnswers::uses(this->knowledge.useCount(symbol)) + ", line " +
-           std::to_string(known.place.line + 1);
+    return text + "  - " + KnowledgeAnswers::uses(this->knowledge.useCount(symbol)) + where;
   };
   std::vector<std::pair<double, size_t>> candidates;
   for (size_t m : listed) {

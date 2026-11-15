@@ -278,9 +278,10 @@ void KnowledgePass::declareClass(size_t module, const ClassDecl &cls, size_t par
   for (const auto *list : {&cls.constructors, &cls.methods}) {
     for (const FunctionDecl *method : *list) {
       const char *start = method->source.empty() ? nullptr : method->source.data();
-      size_t member = add(module, method->isConstructor() ? "constructor" : "method",
-                          method->isConstructor() ? llvm::StringRef("constructor") : method->name,
-                          method->loc(), start, KnowledgePass::endOf(method->source), own);
+      size_t member =
+          add(memberModule(method, module), method->isConstructor() ? "constructor" : "method",
+              method->isConstructor() ? llvm::StringRef("constructor") : method->name,
+              method->loc(), start, KnowledgePass::endOf(method->source), own);
       if (member == Knowledge::kNone) {
         continue;
       }
@@ -511,6 +512,16 @@ size_t KnowledgePass::enumMemberSymbol(size_t enumSymbol, llvm::StringRef name) 
   return found == this->enumMembers.end() ? Knowledge::kNone : found->second;
 }
 
+size_t KnowledgePass::memberModule(const FunctionDecl *method, size_t classModule) const {
+  const ClassMember *member = method->member();
+  if (member == nullptr || member->partModule == nullptr) {
+    return classModule;
+  }
+  auto found = this->moduleIndex.find(member->partModule);
+
+  return found == this->moduleIndex.end() ? classModule : found->second;
+}
+
 bool KnowledgePass::reference(size_t symbol, size_t from, size_t module, llvm::SMLoc loc,
                               bool call) {
   if (!this->seenReferences.insert({symbol, loc.getPointer()}).second) {
@@ -585,6 +596,12 @@ void KnowledgePass::walk() {
         from = found == this->scopes[index].end() ? Knowledge::kNone : found->second;
       }
       KnowledgeWalk(*this, index, from).stmt(item);
+    }
+    for (const ClassDecl *part : module->file.parts) {
+      size_t symbol = typeSymbol(index, part->name);
+      if (symbol != Knowledge::kNone) {
+        reference(symbol, Knowledge::kNone, index, part->loc(), false);
+      }
     }
   }
   for (const FunctionDecl *fn : program_.file.inventory.instances) {

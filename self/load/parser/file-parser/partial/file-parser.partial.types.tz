@@ -1,0 +1,934 @@
+import { FileParser } from "../file-parser.tz";
+import { TokenKind, isKeyword } from "../../../../token.tz";
+import {
+  ExprKind,
+  FunctionTypeForm,
+  MappedTypeForm,
+  ObjectTypeForm,
+  TemplateTypeForm,
+  TupleTypeForm,
+  TypeKind,
+  TypeRef,
+  typeRef,
+} from "../../../../ast.tz";
+
+partial class FileParser {
+  private type(): TypeRef {
+    const start = this.cursor.peek().start;
+    const noConditional = this.noConditional;
+    this.noConditional = false;
+    const outer = this.disallowConditional;
+    this.disallowConditional = noConditional;
+    const check = this.unionType();
+    this.disallowConditional = outer;
+    if (noConditional || !this.cursor.isWord("extends")) {
+      return check;
+    }
+    const ref = typeRef(check.loc);
+    ref.form = { kind: TypeKind.Conditional };
+    this.cursor.next();
+    ref.args.push(check);
+    this.noConditional = true;
+    const extendsType = this.type();
+    ref.args.push(extendsType);
+    if (
+      !this.cursor.expect(
+        TokenKind.Question,
+        "after the 'extends' clause of the conditional type",
+      )
+    ) {
+      return typeRef(-1);
+    }
+    const whenTrue = this.type();
+    ref.args.push(whenTrue);
+    if (
+      !this.cursor.expect(
+        TokenKind.Colon,
+        "between the branches of the conditional type",
+      )
+    ) {
+      return typeRef(-1);
+    }
+    const whenFalse = this.type();
+    ref.args.push(whenFalse);
+    ref.source = this.cursor.spanFrom(start);
+
+    return ref;
+  }
+
+  private unionType(): TypeRef {
+    const loc = this.cursor.peek().start;
+    this.cursor.accept(TokenKind.Pipe);
+    const first = this.intersectionType();
+    if (!this.cursor.is(TokenKind.Pipe)) {
+      return first;
+    }
+    const ref = typeRef(loc);
+    ref.form = { kind: TypeKind.Union };
+    ref.args.push(first);
+    while (this.cursor.accept(TokenKind.Pipe)) {
+      const next = this.intersectionType();
+      ref.args.push(next);
+    }
+
+    return ref;
+  }
+
+  private intersectionType(): TypeRef {
+    const loc = this.cursor.peek().start;
+    this.cursor.accept(TokenKind.Amp);
+    const first = this.arrayType();
+    if (!this.cursor.is(TokenKind.Amp)) {
+      return first;
+    }
+    const ref = typeRef(loc);
+    ref.form = { kind: TypeKind.Intersection };
+    ref.args.push(first);
+    while (this.cursor.accept(TokenKind.Amp)) {
+      const next = this.arrayType();
+      ref.args.push(next);
+    }
+
+    return ref;
+  }
+
+  private nextOnLine(text: string): boolean {
+    const next = this.cursor.lookahead();
+
+    return (
+      next.kind == TokenKind.Identifier &&
+      !next.newline &&
+      (text == "" || next.text == text)
+    );
+  }
+
+  private returnType(): TypeRef {
+    const asserts = this.cursor.isWord("asserts") && this.nextOnLine("");
+    if (
+      !asserts &&
+      !(this.cursor.is(TokenKind.Identifier) && this.nextOnLine("is"))
+    ) {
+      return this.type();
+    }
+    const ref = typeRef(this.cursor.peek().start);
+    ref.form = { kind: TypeKind.Predicate, asserts };
+    if (asserts) {
+      this.cursor.next();
+    }
+    ref.name = this.cursor.next().text;
+    if (this.cursor.isWord("is") && !this.cursor.peek().newline) {
+      this.cursor.next();
+      const type = this.type();
+      ref.args.push(type);
+    }
+
+    return ref;
+  }
+
+  private arrayType(): TypeRef {
+    const next = this.cursor.lookahead();
+    const keyOf =
+      this.cursor.isWord("keyof") &&
+      (next.kind == TokenKind.Identifier ||
+        next.kind == TokenKind.LParen ||
+        next.kind == TokenKind.LBrace ||
+        next.kind == TokenKind.Typeof);
+
+    if (keyOf) {
+      const ref = typeRef(this.cursor.peek().start);
+      ref.form = { kind: TypeKind.KeyOf };
+      this.cursor.next();
+      const inner = this.arrayType();
+      ref.args.push(inner);
+      return ref;
+    }
+
+    const readonly =
+      this.cursor.isWord("readonly") &&
+      (next.kind == TokenKind.Identifier ||
+        next.kind == TokenKind.LParen ||
+        next.kind == TokenKind.LBracket);
+
+    if (readonly) {
+      return this.readonlyType();
+    }
+    let ref = this.primaryType();
+
+    while (this.cursor.is(TokenKind.LBracket) && !this.cursor.peek().newline) {
+      const array = typeRef(ref.loc);
+      this.cursor.next();
+      if (this.cursor.accept(TokenKind.RBracket)) {
+        array.form = { kind: TypeKind.Array };
+        array.args.push(ref);
+        ref = array;
+        continue;
+      }
+      array.form = { kind: TypeKind.Indexed };
+      array.args.push(ref);
+      const index = this.type();
+      array.args.push(index);
+      this.cursor.expect(
+        TokenKind.RBracket,
+        "to close the indexed access type",
+      );
+      ref = array;
+    }
+
+    return ref;
+  }
+
+  private readonlyType(): TypeRef {
+    const loc = this.cursor.peek().start;
+    this.cursor.next();
+    const ref = this.arrayType();
+    const form = ref.form;
+    if (form.kind == TypeKind.Tuple) {
+      form.readonly = ref.args.map((arg) => true);
+    } else if (form.kind != TypeKind.Array) {
+      this.cursor.report(
+        loc,
+        "'readonly' applies only to array and tuple types",
+      );
+    }
+
+    return ref;
+  }
+
+  private primaryType(): TypeRef {
+    const ref = typeRef(this.cursor.peek().start);
+    const token = this.cursor.peek();
+    switch (token.kind) {
+      case TokenKind.LBrace:
+        return this.objectType();
+      case TokenKind.LBracket:
+        return this.tupleType();
+      case TokenKind.Less:
+        return this.genericFunctionType(ref);
+      case TokenKind.TemplateString:
+      case TokenKind.TemplateHead:
+        return this.templateType(ref);
+      case TokenKind.String: {
+        const decoded = this.literals.string(token);
+        ref.form = {
+          kind: TypeKind.Literal,
+          text: decoded.text,
+          number: 0.0,
+          integer: false,
+        };
+        ref.name = "string";
+        this.cursor.next();
+        return ref;
+      }
+      case TokenKind.True:
+      case TokenKind.False: {
+        const truth = token.kind == TokenKind.True ? 1.0 : 0.0;
+        ref.form = {
+          kind: TypeKind.Literal,
+          text: "",
+          number: truth,
+          integer: false,
+        };
+        ref.name = "boolean";
+        this.cursor.next();
+        return ref;
+      }
+      case TokenKind.Typeof:
+        return this.typeOfType(ref);
+      default:
+        return this.otherPrimaryType(ref);
+    }
+  }
+
+  private otherPrimaryType(ref: TypeRef): TypeRef {
+    const next = this.cursor.lookahead();
+    if (this.cursor.is(TokenKind.LParen) && this.functionTypeAhead()) {
+      return this.functionType();
+    }
+    if (this.cursor.isWord("infer") && next.kind == TokenKind.Identifier) {
+      return this.inferType(ref);
+    }
+    const negative =
+      this.cursor.is(TokenKind.Minus) &&
+      (next.kind == TokenKind.Int || next.kind == TokenKind.Float);
+    if (
+      negative ||
+      this.cursor.is(TokenKind.Int) ||
+      this.cursor.is(TokenKind.Float)
+    ) {
+      return this.numberType(ref, negative);
+    }
+    if (this.cursor.accept(TokenKind.LParen)) {
+      const inner = this.type();
+      this.cursor.expect(TokenKind.RParen, "to close the parenthesized type");
+      return inner;
+    }
+    if (
+      !this.cursor.is(TokenKind.Identifier) &&
+      !this.cursor.is(TokenKind.Void)
+    ) {
+      this.cursor.error(
+        this.cursor.peek().start,
+        `expected a type, found ${this.cursor.peek().kind}`,
+      );
+      return ref;
+    }
+    ref.name = this.cursor.next().text;
+    while (
+      this.cursor.is(TokenKind.Dot) &&
+      this.cursor.lookahead().kind == TokenKind.Identifier
+    ) {
+      this.cursor.next();
+      const part = this.cursor.next();
+      ref.name = this.keepName(`${ref.name}.${part.text}`);
+    }
+    if (this.cursor.is(TokenKind.Less)) {
+      ref.form = { kind: TypeKind.Generic };
+      ref.args = this.typeArguments();
+    }
+
+    return ref;
+  }
+
+  private genericFunctionType(ref: TypeRef): TypeRef {
+    this.typeParams();
+    if (this.cursor.is(TokenKind.LParen)) {
+      this.functionType();
+    }
+    this.cursor.report(ref.loc, "a function type cannot be generic itself");
+
+    return typeRef(-1);
+  }
+
+  private inferType(ref: TypeRef): TypeRef {
+    ref.form = { kind: TypeKind.Infer };
+    this.cursor.next();
+    ref.name = this.cursor.next().text;
+    if (!this.cursor.isWord("extends")) {
+      return ref;
+    }
+    const start = this.cursor.mark();
+    this.cursor.next();
+    this.noConditional = true;
+    const constraint = this.type();
+    if (this.disallowConditional || !this.cursor.is(TokenKind.Question)) {
+      ref.args.push(constraint);
+    } else {
+      this.cursor.reset(start);
+    }
+
+    return ref;
+  }
+
+  private templateType(ref: TypeRef): TypeRef {
+    const token = this.cursor.peek();
+    const first = this.literals.templatePart(token);
+    this.cursor.next();
+    if (token.kind == TokenKind.TemplateString) {
+      ref.form = {
+        kind: TypeKind.Literal,
+        text: first.text,
+        number: 0.0,
+        integer: false,
+      };
+      ref.name = "string";
+      return ref;
+    }
+    const parts: TemplateTypeForm = {
+      kind: TypeKind.Template,
+      texts: [first.text],
+    };
+    ref.form = parts;
+    let done = false;
+    while (!done) {
+      const part = this.type();
+      ref.args.push(part);
+      const middle = this.cursor.peek();
+      if (
+        middle.kind != TokenKind.TemplateMiddle &&
+        middle.kind != TokenKind.TemplateTail
+      ) {
+        this.cursor.error(
+          middle.start,
+          "expected '}' to close the type in the template literal type",
+        );
+        return typeRef(-1);
+      }
+      const text = this.literals.templatePart(middle);
+      parts.texts.push(text.text);
+      done = middle.kind == TokenKind.TemplateTail;
+      this.cursor.next();
+    }
+
+    return ref;
+  }
+
+  private numberType(ref: TypeRef, negative: boolean): TypeRef {
+    if (negative) {
+      this.cursor.next();
+    }
+    const lit = this.cursor.is(TokenKind.Int)
+      ? this.intLiteral()
+      : this.floatLiteral();
+    let number = 0.0;
+    let integer = false;
+    if (lit.kind == ExprKind.IntLit) {
+      const whole = lit.value;
+      number =
+        whole <= 9007199254740992
+          ? whole.toDouble()
+          : Number(`${whole}`).unwrapOr(0.0);
+      integer = true;
+    } else if (lit.kind == ExprKind.FloatLit) {
+      number = lit.value;
+    }
+    if (negative) {
+      number = -number;
+    }
+    ref.form = { kind: TypeKind.Literal, text: "", number, integer };
+    ref.name = "number";
+
+    return ref;
+  }
+
+  private typeOfType(ref: TypeRef): TypeRef {
+    const names: string[] = [];
+    ref.form = { kind: TypeKind.TypeOf, names };
+    this.cursor.next();
+    if (!this.cursor.is(TokenKind.Identifier)) {
+      this.cursor.error(
+        this.cursor.peek().start,
+        `expected the name of a value after 'typeof', found ${this.cursor.peek().kind}`,
+      );
+      return ref;
+    }
+    const first = this.cursor.next();
+    names.push(first.text);
+    while (
+      this.cursor.is(TokenKind.Dot) &&
+      this.cursor.lookahead().kind == TokenKind.Identifier
+    ) {
+      this.cursor.next();
+      const part = this.cursor.next();
+      names.push(part.text);
+    }
+
+    return ref;
+  }
+
+  private typeArguments(): TypeRef[] {
+    this.cursor.next();
+    const args: TypeRef[] = [this.type()];
+    while (this.cursor.accept(TokenKind.Comma)) {
+      const arg = this.type();
+      args.push(arg);
+    }
+    if (!this.cursor.accept(TokenKind.Greater)) {
+      this.cursor.error(
+        this.cursor.peek().start,
+        `expected '>' to close the type arguments, found ${this.cursor.peek().kind}`,
+      );
+    }
+
+    return args;
+  }
+
+  private tryTypeArguments(callOnly: boolean): TypeRef[] | undefined {
+    const start = this.cursor.mark();
+    this.cursor.startDiscarding();
+    this.cursor.stopRecovering();
+    const parsed = this.typeArguments();
+    const fits =
+      !this.cursor.isRecovering() && this.followsTypeArguments(callOnly);
+    this.cursor.stopDiscarding();
+    if (!fits) {
+      this.cursor.reset(start);
+      return undefined;
+    }
+    this.cursor.restoreRecovering(start);
+
+    return parsed;
+  }
+
+  private followsTypeArguments(callOnly: boolean): boolean {
+    switch (this.cursor.peek().kind) {
+      case TokenKind.LParen:
+        return true;
+      case TokenKind.RParen:
+      case TokenKind.RBracket:
+      case TokenKind.RBrace:
+      case TokenKind.Comma:
+      case TokenKind.Semi:
+      case TokenKind.Colon:
+      case TokenKind.End:
+        return !callOnly;
+      default:
+        return this.cursor.peek().newline && !callOnly;
+    }
+  }
+
+  private mappedTypeAhead(): boolean {
+    return (
+      this.cursor.is(TokenKind.LBracket) &&
+      this.cursor.lookahead().kind == TokenKind.Identifier &&
+      this.cursor.tokenAt(2).kind == TokenKind.In
+    );
+  }
+
+  private mappedType(object: TypeRef, readonlyChange: int): TypeRef {
+    const ref = typeRef(object.loc);
+    const mapped: MappedTypeForm = {
+      kind: TypeKind.Mapped,
+      mappedOptional: 0,
+      mappedReadonly: readonlyChange,
+    };
+    ref.form = mapped;
+    this.cursor.next();
+    ref.name = this.cursor.next().text;
+    this.cursor.next();
+    const keys = this.type();
+    ref.args.push(keys);
+    const rename = this.cursor.accept(TokenKind.As) ? this.type() : undefined;
+    if (
+      !this.cursor.expect(
+        TokenKind.RBracket,
+        "after the keys of the mapped type",
+      )
+    ) {
+      this.cursor.skipToClosingBrace();
+      return ref;
+    }
+    const optionalChange =
+      (this.cursor.is(TokenKind.Minus) || this.cursor.is(TokenKind.Plus)) &&
+      this.cursor.lookahead().kind == TokenKind.Question;
+    if (optionalChange) {
+      mapped.mappedOptional = this.cursor.is(TokenKind.Minus) ? -1 : 1;
+      this.cursor.skip(2);
+    } else if (this.cursor.accept(TokenKind.Question)) {
+      mapped.mappedOptional = 1;
+    }
+    if (
+      !this.cursor.expect(
+        TokenKind.Colon,
+        "before the type of the values of the mapped type",
+      )
+    ) {
+      this.cursor.skipToClosingBrace();
+      return ref;
+    }
+    const values = this.type();
+    ref.args.push(values);
+    if (rename != undefined) {
+      ref.args.push(rename);
+    }
+    if (!this.cursor.accept(TokenKind.Semi)) {
+      this.cursor.accept(TokenKind.Comma);
+    }
+    if (!this.cursor.is(TokenKind.RBrace) || object.args.length > 0) {
+      this.cursor.error(
+        this.cursor.peek().start,
+        "a mapped type cannot stand next to fields",
+      );
+      this.cursor.skipToClosingBrace();
+      return ref;
+    }
+    this.cursor.next();
+
+    return ref;
+  }
+
+  private fieldName(): string | undefined {
+    if (this.cursor.symbolKeyAhead()) {
+      return this.symbolName();
+    }
+    const token = this.cursor.peek();
+    if (token.kind == TokenKind.Identifier || isKeyword(token.kind)) {
+      this.fieldNames.add(token.text);
+      this.cursor.next();
+      return token.text;
+    }
+    if (token.kind == TokenKind.String) {
+      const decoded = this.literals.string(token);
+      const name = this.keepName(decoded.text);
+      this.fieldNames.add(name);
+      this.cursor.next();
+      return name;
+    }
+    if (token.kind == TokenKind.LBracket) {
+      this.cursor.error(
+        token.start,
+        "a field name in brackets is not supported yet",
+      );
+    } else if (token.kind == TokenKind.Int || token.kind == TokenKind.Float) {
+      this.cursor.error(token.start, "a number cannot name a field");
+    } else {
+      this.cursor.error(
+        token.start,
+        `expected a field name, found ${token.kind}`,
+      );
+    }
+
+    return undefined;
+  }
+
+  private symbolName(): string | undefined {
+    const loc = this.cursor.peek().start;
+    this.cursor.skip(2);
+    if (!this.cursor.expect(TokenKind.Dot, "after 'Symbol'")) {
+      return undefined;
+    }
+    const which = this.cursor.next().text;
+    if (!this.cursor.expect(TokenKind.RBracket, "to close the name")) {
+      return undefined;
+    }
+    if (which == "asyncIterator") {
+      return "[Symbol.asyncIterator]";
+    }
+    if (which == "dispose") {
+      return "[Symbol.dispose]";
+    }
+    if (which != "iterator") {
+      this.cursor.report(loc, `'Symbol.${which}' cannot name a member`);
+    }
+
+    return "[Symbol.iterator]";
+  }
+
+  private objectType(): TypeRef {
+    const ref = typeRef(this.cursor.peek().start);
+    const object: ObjectTypeForm = {
+      kind: TypeKind.Object,
+      names: [],
+      locs: [],
+      optional: [],
+      readonly: [],
+      methods: [],
+    };
+    ref.form = object;
+    this.cursor.next();
+    while (
+      !this.cursor.is(TokenKind.RBrace) &&
+      !this.cursor.is(TokenKind.End)
+    ) {
+      let loc = this.cursor.peek().start;
+      let readonly = false;
+      let readonlyChange = 0;
+      const next = this.cursor.lookahead();
+      if (
+        (this.cursor.is(TokenKind.Minus) || this.cursor.is(TokenKind.Plus)) &&
+        next.kind == TokenKind.Identifier &&
+        next.text == "readonly"
+      ) {
+        readonlyChange = this.cursor.is(TokenKind.Minus) ? -1 : 1;
+        this.cursor.next();
+      }
+      const after = this.cursor.lookahead();
+      if (
+        this.cursor.isWord("readonly") &&
+        after.kind != TokenKind.Colon &&
+        after.kind != TokenKind.Question &&
+        after.kind != TokenKind.LParen
+      ) {
+        readonly = true;
+        readonlyChange = readonlyChange != 0 ? readonlyChange : 1;
+        this.cursor.next();
+        loc = this.cursor.peek().start;
+      }
+      if (this.mappedTypeAhead()) {
+        return this.mappedType(ref, readonlyChange);
+      }
+      if (this.cursor.is(TokenKind.LBracket) && !this.cursor.symbolKeyAhead()) {
+        return this.indexSignature(ref, loc);
+      }
+      if (
+        this.cursor.is(TokenKind.LParen) ||
+        this.cursor.is(TokenKind.Less) ||
+        this.cursor.is(TokenKind.New)
+      ) {
+        this.cursor.error(loc, "call signatures are not supported");
+        this.cursor.skipToClosingBrace();
+        return ref;
+      }
+      if (!this.objectTypeMember(ref, object, loc, readonly)) {
+        return ref;
+      }
+    }
+    this.cursor.expect(TokenKind.RBrace, "to close the object type");
+
+    return ref;
+  }
+
+  private objectTypeMember(
+    ref: TypeRef,
+    object: ObjectTypeForm,
+    loc: int,
+    readonly: boolean,
+  ): boolean {
+    const name = this.fieldName();
+    if (name == undefined) {
+      this.cursor.skipToClosingBrace();
+      return false;
+    }
+    const optional = this.cursor.accept(TokenKind.Question);
+    if (this.cursor.is(TokenKind.Less)) {
+      this.cursor.error(
+        this.cursor.peek().start,
+        "generic methods in types are not supported yet",
+      );
+      this.cursor.skipToClosingBrace();
+      return false;
+    }
+    if (this.cursor.is(TokenKind.LParen)) {
+      return this.objectTypeMethod(ref, object, loc, name, optional);
+    }
+    if (!this.cursor.is(TokenKind.Colon)) {
+      this.cursor.error(
+        this.cursor.peek().start,
+        `field '${name}' needs a type`,
+      );
+      this.cursor.skipToClosingBrace();
+      return false;
+    }
+    this.cursor.next();
+    const type = this.type();
+    ref.args.push(type);
+    object.names.push(name);
+    object.locs.push(loc);
+    object.optional.push(optional);
+    object.readonly.push(readonly);
+
+    return this.endObjectTypeMember("the field");
+  }
+
+  private objectTypeMethod(
+    ref: TypeRef,
+    object: ObjectTypeForm,
+    loc: int,
+    name: string,
+    optional: boolean,
+  ): boolean {
+    const fn = typeRef(-1);
+    if (!this.signatureParams(fn) || this.cursor.isRecovering()) {
+      this.cursor.skipToClosingBrace();
+      return false;
+    }
+    if (!this.cursor.accept(TokenKind.Colon)) {
+      this.cursor.error(
+        this.cursor.peek().start,
+        `method '${name}' needs its return type`,
+      );
+      this.cursor.skipToClosingBrace();
+      return false;
+    }
+    const result = this.type();
+    fn.args.push(result);
+    ref.args.push(fn);
+    object.names.push(name);
+    object.locs.push(loc);
+    object.optional.push(optional);
+    object.readonly.push(true);
+    while (object.methods.length < ref.args.length - 1) {
+      object.methods.push(false);
+    }
+    object.methods.push(true);
+
+    return this.endObjectTypeMember("the method");
+  }
+
+  private endObjectTypeMember(what: string): boolean {
+    if (
+      this.cursor.accept(TokenKind.Semi) ||
+      this.cursor.accept(TokenKind.Comma)
+    ) {
+      return true;
+    }
+    if (!this.cursor.is(TokenKind.RBrace) && !this.cursor.peek().newline) {
+      this.cursor.error(
+        this.cursor.peek().start,
+        `expected ';' after ${what}, found ${this.cursor.peek().kind}`,
+      );
+      this.cursor.skipToClosingBrace();
+      return false;
+    }
+
+    return true;
+  }
+
+  private indexSignature(ref: TypeRef, loc: int): TypeRef {
+    this.cursor.next();
+    if (
+      !this.cursor.is(TokenKind.Identifier) ||
+      this.cursor.lookahead().kind != TokenKind.Colon
+    ) {
+      this.cursor.error(loc, "expected an index signature or a mapped type");
+      this.cursor.skipToClosingBrace();
+      return ref;
+    }
+    this.cursor.skip(2);
+    const key = this.type();
+    if (
+      !this.cursor.expect(TokenKind.RBracket, "after the type of the keys") ||
+      !this.cursor.expect(TokenKind.Colon, "before the type of the values")
+    ) {
+      this.cursor.skipToClosingBrace();
+      return ref;
+    }
+    const value = this.type();
+    if (!this.cursor.accept(TokenKind.Semi)) {
+      this.cursor.accept(TokenKind.Comma);
+    }
+    if (ref.args.length > 0 || !this.cursor.is(TokenKind.RBrace)) {
+      this.cursor.error(loc, "an index signature cannot stand next to fields");
+      this.cursor.skipToClosingBrace();
+      return ref;
+    }
+    this.cursor.next();
+    const record = typeRef(ref.loc);
+    record.form = { kind: TypeKind.Generic };
+    record.name = "Record";
+    record.args.push(key);
+    record.args.push(value);
+
+    return record;
+  }
+
+  private tupleType(): TypeRef {
+    const ref = typeRef(this.cursor.peek().start);
+    const tuple: TupleTypeForm = {
+      kind: TypeKind.Tuple,
+      readonly: [],
+      spread: [],
+    };
+    ref.form = tuple;
+    this.cursor.next();
+    let more =
+      !this.cursor.is(TokenKind.RBracket) && !this.cursor.is(TokenKind.End);
+    while (more) {
+      const spread = this.cursor.accept(TokenKind.Ellipsis);
+      if (
+        this.cursor.is(TokenKind.Identifier) &&
+        this.cursor.lookahead().kind == TokenKind.Colon
+      ) {
+        this.cursor.skip(2);
+      }
+      const element = this.type();
+      ref.args.push(element);
+      tuple.readonly.push(false);
+      tuple.spread.push(spread);
+      if (this.cursor.is(TokenKind.Question)) {
+        this.cursor.report(
+          this.cursor.peek().start,
+          "optional elements in a tuple type are not supported",
+        );
+        this.cursor.next();
+      }
+      more =
+        this.cursor.accept(TokenKind.Comma) &&
+        !this.cursor.is(TokenKind.RBracket) &&
+        !this.cursor.is(TokenKind.End);
+    }
+    this.cursor.expect(TokenKind.RBracket, "to close the tuple type");
+
+    return ref;
+  }
+
+  private functionTypeAhead(): boolean {
+    const start = this.cursor.mark();
+    this.cursor.startDiscarding();
+    this.cursor.stopRecovering();
+    this.cursor.next();
+    let fits = true;
+    let more = !this.cursor.is(TokenKind.RParen);
+    while (fits && more) {
+      this.cursor.accept(TokenKind.Ellipsis);
+      fits = this.cursor.accept(TokenKind.Identifier);
+      this.cursor.accept(TokenKind.Question);
+      if (fits && this.cursor.accept(TokenKind.Colon)) {
+        this.type();
+        fits = !this.cursor.isRecovering();
+      }
+      more =
+        fits &&
+        this.cursor.accept(TokenKind.Comma) &&
+        !this.cursor.is(TokenKind.RParen);
+    }
+    fits =
+      fits &&
+      this.cursor.accept(TokenKind.RParen) &&
+      this.cursor.is(TokenKind.Arrow);
+    this.cursor.stopDiscarding();
+    this.cursor.reset(start);
+
+    return fits;
+  }
+
+  private functionType(): TypeRef {
+    const ref = typeRef(-1);
+    if (!this.signatureParams(ref)) {
+      return ref;
+    }
+    this.cursor.expect(
+      TokenKind.Arrow,
+      "after the parameters of the function type",
+    );
+    const result = this.returnType();
+    ref.args.push(result);
+
+    return ref;
+  }
+
+  private signatureParams(ref: TypeRef): boolean {
+    const signature: FunctionTypeForm = {
+      kind: TypeKind.Function,
+      names: [],
+      optional: [],
+      rest: false,
+    };
+    ref.form = signature;
+    ref.loc = this.cursor.peek().start;
+    this.cursor.next();
+    let more =
+      !this.cursor.is(TokenKind.RParen) && !this.cursor.is(TokenKind.End);
+    while (more) {
+      const rest = this.cursor.accept(TokenKind.Ellipsis);
+      const token = this.cursor.peek();
+      if (
+        !this.cursor.expect(
+          TokenKind.Identifier,
+          "for a parameter of the function type",
+        )
+      ) {
+        return false;
+      }
+      const optional = this.cursor.accept(TokenKind.Question);
+      let param = typeRef(token.start);
+      if (this.cursor.accept(TokenKind.Colon)) {
+        param = this.type();
+      } else {
+        this.cursor.report(
+          token.start,
+          `parameter '${token.text}' of the function type needs a type`,
+        );
+      }
+      if (signature.rest) {
+        this.cursor.report(
+          token.start,
+          "a rest parameter must be the last parameter",
+        );
+      }
+      ref.args.push(param);
+      signature.optional.push(optional);
+      signature.names.push(token.text);
+      signature.rest = signature.rest || rest;
+      more =
+        this.cursor.accept(TokenKind.Comma) &&
+        !this.cursor.is(TokenKind.RParen) &&
+        !this.cursor.is(TokenKind.End);
+    }
+    this.cursor.expect(
+      TokenKind.RParen,
+      "to close the parameters of the function type",
+    );
+
+    return true;
+  }
+}

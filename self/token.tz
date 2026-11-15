@@ -1,0 +1,168 @@
+export enum TokenKind {
+  End,
+  Identifier,
+  Int,
+  Float,
+  String,
+  TemplateString,
+  TemplateHead,
+  TemplateMiddle,
+  TemplateTail,
+  Regex,
+
+  As,
+  Break,
+  Case,
+  Const,
+  Continue,
+  Debugger,
+  Default,
+  Delete,
+  Do,
+  Else,
+  Enum,
+  False,
+  For,
+  Function,
+  If,
+  In,
+  Let,
+  New,
+  Return,
+  Switch,
+  True,
+  Typeof,
+  Var,
+  Void,
+  While,
+
+  LParen,
+  RParen,
+  LBrace,
+  RBrace,
+  LBracket,
+  RBracket,
+  Comma,
+  Semi,
+  Colon,
+  Dot,
+  Ellipsis,
+  Question,
+  QuestionQuestion,
+  QuestionDot,
+  Arrow,
+  At,
+
+  Plus,
+  Minus,
+  Star,
+  StarStar,
+  Slash,
+  Percent,
+  PlusPlus,
+  MinusMinus,
+  Amp,
+  Pipe,
+  Caret,
+  Tilde,
+  Bang,
+  AmpAmp,
+  PipePipe,
+  Shl,
+  Shr,
+  UShr,
+  Less,
+  LessEq,
+  Greater,
+  GreaterEq,
+  EqEq,
+  EqEqEq,
+  BangEq,
+  BangEqEq,
+  Assign,
+  PlusAssign,
+  MinusAssign,
+  StarAssign,
+  StarStarAssign,
+  SlashAssign,
+  PercentAssign,
+  AmpAssign,
+  PipeAssign,
+  CaretAssign,
+  ShlAssign,
+  ShrAssign,
+  UShrAssign,
+  QuestionQuestionAssign,
+  AmpAmpAssign,
+  PipePipeAssign,
+}
+
+export type Token = {
+  readonly kind: TokenKind
+  readonly start: int
+  readonly end: int
+  readonly text: string
+  readonly newline: boolean
+  readonly hash: boolean
+}
+
+export function isKeyword(kind: TokenKind): boolean {
+  return kind >= TokenKind.As && kind <= TokenKind.While
+}
+
+export function keywordKind(word: string): TokenKind {
+  switch (word) {
+    case "as":
+      return TokenKind.As
+    case "break":
+      return TokenKind.Break
+    case "case":
+      return TokenKind.Case
+    case "const":
+      return TokenKind.Const
+    case "continue":
+      return TokenKind.Continue
+    case "debugger":
+      return TokenKind.Debugger
+    case "default":
+      return TokenKind.Default
+    case "delete":
+      return TokenKind.Delete
+    case "do":
+      return TokenKind.Do
+    case "else":
+      return TokenKind.Else
+    case "enum":
+      return TokenKind.Enum
+    case "false":
+      return TokenKind.False
+    case "for":
+      return TokenKind.For
+    case "function":
+      return TokenKind.Function
+    case "if":
+      return TokenKind.If
+    case "in":
+      return TokenKind.In
+    case "let":
+      return TokenKind.Let
+    case "new":
+      return TokenKind.New
+    case "return":
+      return TokenKind.Return
+    case "switch":
+      return TokenKind.Switch
+    case "true":
+      return TokenKind.True
+    case "typeof":
+      return TokenKind.Typeof
+    case "var":
+      return TokenKind.Var
+    case "void":
+      return TokenKind.Void
+    case "while":
+      return TokenKind.While
+    default:
+      return TokenKind.Identifier
+  }
+}

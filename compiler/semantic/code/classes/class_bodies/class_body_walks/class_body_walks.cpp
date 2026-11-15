@@ -64,8 +64,19 @@ void ClassBodyWalks::afterClassMethodReturn(const AfterClassMethodReturn &task) 
   if (functionDecl->checked || functionDecl->isAbstract()) {
     return;
   }
+  if (functionDecl->member()->partModule != nullptr) {
+    return this->walkPartMethod(functionDecl);
+  }
 
   return this->state.walk.tasks.pushTask(WalkFunctionFromScratch{.functionDecl = functionDecl});
+}
+
+void ClassBodyWalks::walkPartMethod(FunctionDecl *functionDecl) {
+  auto &tasks = this->state.walk.tasks;
+  tasks.pushTask(LeaveReturnBody{});
+  tasks.pushTask(WalkFunctionFromScratch{.functionDecl = functionDecl});
+
+  return tasks.pushTask(EnterReturnBody{.functionDecl = functionDecl});
 }
 
 void ClassBodyWalks::finishClassBodies(const FinishClassBodies &task) {

@@ -10,11 +10,13 @@
 
 namespace tz {
 
+struct ClassDecl;
 struct Module;
 class Type;
 
 struct SourceFile {
   std::vector<Stmt *> items;
+  std::vector<ClassDecl *> parts;
   std::vector<ImportDecl> imports;
   std::vector<ExportDecl> exports;
   std::vector<Module *> modules;

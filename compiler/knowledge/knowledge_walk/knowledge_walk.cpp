@@ -102,11 +102,14 @@ void KnowledgeWalk::classDecl(const ClassDecl *cls) {
     }
     this->from = outer;
   }
+  size_t classModule = module_;
   for (const auto *list : {&cls->constructors, &cls->methods}) {
     for (const FunctionDecl *method : *list) {
       size_t own = this->pass.functionSymbol(method);
       this->from = own == Knowledge::kNone ? outer : own;
+      module_ = this->pass.memberModule(method, classModule);
       function(method);
+      module_ = classModule;
       this->from = outer;
     }
   }

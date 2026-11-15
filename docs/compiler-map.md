@@ -189,6 +189,7 @@ load/                     проход LoadPass: файлы, лексер, ра�
   module_resolver/        ModuleResolver: путь импорта → файл, пакет или встроенный модуль
   object_type_parser/     ObjectTypeParser: типы объектов, кортежей, mapped
   parser/                 Parser: файл целиком; копии функций для обобщений
+  partial_classes/        PartialClasses: методы частей `partial class` → в класс, правила частей
   pattern_parser/         PatternParser: деструктуризация
   primary_parser/         PrimaryParser: литералы, скобки, имена
   source_overlay/         SourceOverlay: текст из редактора вместо файла на диске

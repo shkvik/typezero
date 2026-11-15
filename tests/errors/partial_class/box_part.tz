@@ -1,0 +1,4 @@
+import { Box } from "./box.tz"
+
+// expect-error: a part repeats the type parameters of the class by name: write 'partial class Box<T>'
+partial class Box<U> {}

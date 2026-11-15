@@ -1,0 +1,86 @@
+import "./partial/file-parser.partial.types.tz";
+import "./partial/file-parser.partial.expressions.tz";
+import "./partial/file-parser.partial.patterns.tz";
+import "./partial/file-parser.partial.statements.tz";
+import "./partial/file-parser.partial.functions.tz";
+import "./partial/file-parser.partial.classes.tz";
+import "./partial/file-parser.partial.modules.tz";
+import { Token, TokenKind } from "../../../token.tz";
+import { ExportDecl, ImportDecl, SourceFile, Stmt } from "../../../ast.tz";
+import { Cursor, ParseError } from "../cursor.tz";
+import { LiteralReader } from "../literal.tz";
+
+export type ParseResult = {
+  readonly file: SourceFile;
+  readonly errors: ParseError[];
+};
+
+export class FileParser {
+  private readonly cursor: Cursor;
+  private readonly literals: LiteralReader;
+  private readonly library: boolean;
+  private readonly fieldNames: Set<string>;
+  private readonly stringConstants: Map<string, string[]>;
+  private readonly imports: ImportDecl[];
+  private readonly exports: ExportDecl[];
+  private noIn: boolean;
+  private noConditional: boolean;
+  private disallowConditional: boolean;
+  private inGenerator: boolean;
+  private names: int;
+
+  public constructor(source: Buffer, tokens: Token[], library: boolean) {
+    this.cursor = new Cursor(tokens);
+    this.literals = new LiteralReader(source);
+    this.library = library;
+    this.fieldNames = new Set<string>();
+    this.stringConstants = new Map<string, string[]>();
+    this.imports = [];
+    this.exports = [];
+    this.noIn = false;
+    this.noConditional = false;
+    this.disallowConditional = false;
+    this.inGenerator = false;
+    this.names = 0;
+  }
+
+  public run(): ParseResult {
+    const items: Stmt[] = [];
+    while (!this.cursor.is(TokenKind.End)) {
+      if (this.cursor.is(TokenKind.RBrace)) {
+        const brace = this.cursor.next();
+
+        this.cursor.error(brace.start, "unexpected '}'");
+        this.cursor.stopRecovering();
+        
+        continue;
+      }
+      items.push(this.statement(true));
+      if (this.cursor.isRecovering()) {
+        this.cursor.synchronize();
+      }
+    }
+    const file: SourceFile = {
+      items,
+      imports: this.imports,
+      exports: this.exports,
+      fieldNames: this.fieldNames,
+      stringConstants: this.stringConstants,
+    };
+
+    return { file, errors: this.cursor.errors };
+  }
+
+  private hiddenName(): string {
+    const name = `%${this.names}`;
+    this.names += 1;
+
+    return name;
+  }
+
+  private keepName(name: string): string {
+    this.names += 1;
+
+    return name;
+  }
+}

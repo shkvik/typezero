@@ -172,6 +172,18 @@ Stmt *StmtParser::parseStatement(bool topLevel) {
         cls->isAbstract = true;
         return cls;
       }
+      if (this->parser.tok.text == "partial" && this->parser.cursor().peek().is(Tok::Identifier) &&
+          this->parser.cursor().peek().text == "class" &&
+          !this->parser.cursor().peek().newlineBefore) {
+        if (!topLevel) {
+          this->parser.cursor().report(
+              loc, "'partial class' is written only at the top level of a file");
+        }
+        this->parser.cursor().advance();
+        ClassDecl *cls = this->parser.classes().parseClass();
+        cls->isPartial = true;
+        return cls;
+      }
       if (this->parser.functions().asyncFunctionAhead()) {
         this->parser.cursor().advance();
         return this->parser.functions().parseFunctionDecl(true);

@@ -198,6 +198,55 @@ foreach(part "## function centroid - vec.tz:21:17"
   endif()
 endforeach()
 
+# A class with methods in two files (partial class): a method of the part
+# belongs to the file of the part, and the names lead from one file to the
+# other both ways.
+write(parts/package.json [[
+{
+  "name": "parts",
+  "main": "main.tz"
+}
+]])
+write(parts/counter.tz [[
+import "./counter_steps.tz"
+
+export class Counter {
+  private count: double
+
+  public constructor() {
+    this.count = 0
+  }
+
+  public twice(): double {
+    this.step()
+    return this.step()
+  }
+}
+]])
+write(parts/counter_steps.tz [[
+import { Counter } from "./counter.tz"
+
+partial class Counter {
+  public step(): double {
+    this.count += 1
+    return this.count
+  }
+}
+]])
+write(parts/main.tz [[
+import { Counter } from "./counter.tz"
+
+console.log(new Counter().twice())
+]])
+tz(query definition counter.tz:11:10 IN parts STDOUT "counter_steps.tz:4:10  step(): double\n")
+tz(query definition counter_steps.tz:5:10 IN parts STDOUT "counter.tz:4:11  private count: double\n")
+tz(query definition counter_steps.tz:3:15 IN parts STDOUT "counter.tz:3:14  class Counter\n")
+tz(map IN parts)
+string(FIND "${TZ_STDOUT}" "step(): double  - 2 uses, line 4 of counter_steps.tz" found)
+if(found EQUAL -1)
+  message(FATAL_ERROR "the map does not show the file of a method of a part:\n${TZ_STDOUT}")
+endif()
+
 tz(context nothingLikeThis IN shapes EXIT 1
    STDERR "tz: nothing in the program is named 'nothingLikeThis'")
 tz(context vec.tz:99 IN shapes EXIT 1 STDERR "tz: nothing is declared or used at vec.tz:99")

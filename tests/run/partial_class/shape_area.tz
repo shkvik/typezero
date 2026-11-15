@@ -1,0 +1,19 @@
+import { Shape } from "./shape.tz"
+
+function squared(value: double): double {
+  return value * value
+}
+
+partial class Shape {
+  public area(): double {
+    return squared(this.side)
+  }
+
+  public isOdd(n: int): boolean {
+    if (n <= 0) {
+      return false
+    }
+
+    return this.isEven(n - 1)
+  }
+}

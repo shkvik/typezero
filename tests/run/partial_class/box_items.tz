@@ -1,0 +1,15 @@
+import { Box } from "./box.tz"
+
+partial class Box<T> {
+  public put(item: T): void {
+    this.items.push(item)
+  }
+
+  public first(): T | undefined {
+    return this.items[0]
+  }
+
+  public count(): int {
+    return this.items.length
+  }
+}

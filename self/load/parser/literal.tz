@@ -1,0 +1,449 @@
+import { Token } from "../../token.tz";
+
+const kNewline = 10;
+const kReturn = 13;
+const kQuote = 34;
+const kApostrophe = 39;
+const kZero = 48;
+const kNine = 57;
+const kUpperA = 65;
+const kUpperF = 70;
+const kBackslash = 92;
+const kBacktick = 96;
+const kLowerA = 97;
+const kLowerB = 98;
+const kLowerF = 102;
+const kLowerN = 110;
+const kLowerO = 111;
+const kLowerR = 114;
+const kLowerT = 116;
+const kLowerU = 117;
+const kLowerV = 118;
+const kLowerX = 120;
+const kUpperB = 66;
+const kUpperO = 79;
+const kUpperX = 88;
+const kDollar = 36;
+const kLeftBrace = 123;
+const kRightBrace = 125;
+const kSlash = 47;
+const kUnderscore = 95;
+
+export type DecodedText = { readonly text: string; readonly ok: boolean };
+
+function byteAt(source: Buffer, i: int): int {
+  const value = source[i] ?? 0;
+
+  return value.toInt();
+}
+
+function hexValue(c: int): int {
+  if (c >= kZero && c <= kNine) {
+    return c - kZero;
+  }
+  if (c >= kLowerA && c <= kLowerF) {
+    return c - kLowerA + 10;
+  }
+  if (c >= kUpperA && c <= kUpperF) {
+    return c - kUpperA + 10;
+  }
+
+  return -1;
+}
+
+type Escape = { readonly text: string; readonly next: int };
+
+function hexEscape(
+  source: Buffer,
+  at: int,
+  end: int,
+  count: int,
+): Escape | undefined {
+  let value = 0;
+  for (let n = 0; n < count; n++) {
+    const digit = at + n < end ? hexValue(byteAt(source, at + n)) : -1;
+    if (digit < 0) {
+      return undefined;
+    }
+    value = value * 16 + digit;
+  }
+  const text = String.fromCharCode(value);
+
+  return { text, next: at + count };
+}
+
+function unicodeEscape(source: Buffer, at: int, end: int): Escape | undefined {
+  if (at >= end || byteAt(source, at) != kLeftBrace) {
+    return hexEscape(source, at, end, 4);
+  }
+  let i = at + 1;
+  let cp = 0;
+  let digits = 0;
+  while (i < end && hexValue(byteAt(source, i)) >= 0) {
+    cp = cp * 16 + hexValue(byteAt(source, i));
+    i += 1;
+    digits += 1;
+    if (digits > 6) {
+      return undefined;
+    }
+  }
+  if (digits == 0 || i >= end || byteAt(source, i) != kRightBrace) {
+    return undefined;
+  }
+  if (cp < 0 || cp > 0x10ffff) {
+    return undefined;
+  }
+  const text = String.fromCodePoint(cp);
+
+  return { text, next: i + 1 };
+}
+
+function simpleEscape(c: int): string | undefined {
+  if (c == kLowerN) {
+    return "\n";
+  }
+  if (c == kLowerT) {
+    return "\t";
+  }
+  if (c == kLowerR) {
+    return "\r";
+  }
+  if (c == kLowerB) {
+    return "\b";
+  }
+  if (c == kLowerF) {
+    return "\f";
+  }
+  if (c == kLowerV) {
+    return "\v";
+  }
+  if (c == kZero) {
+    return "\0";
+  }
+
+  return undefined;
+}
+
+function needsDecoding(
+  source: Buffer,
+  start: int,
+  end: int,
+  isTemplate: boolean,
+): boolean {
+  for (let i = start; i < end; i++) {
+    const c = byteAt(source, i);
+    if (c == kBackslash || (isTemplate && c == kReturn)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function decodeText(
+  source: Buffer,
+  start: int,
+  end: int,
+  isTemplate: boolean,
+): DecodedText {
+  if (!needsDecoding(source, start, end, isTemplate)) {
+    const plain = source.toString("utf8", start, end);
+    return { text: plain, ok: true };
+  }
+  const parts: string[] = [];
+  let segment = start;
+  let i = start;
+  while (i < end) {
+    const c = byteAt(source, i);
+    if (isTemplate && c == kReturn) {
+      parts.push(source.toString("utf8", segment, i));
+      parts.push("\n");
+      i += i + 1 < end && byteAt(source, i + 1) == kNewline ? 2 : 1;
+      segment = i;
+      continue;
+    }
+    if (c != kBackslash) {
+      i += 1;
+      continue;
+    }
+    parts.push(source.toString("utf8", segment, i));
+    i += 1;
+    if (i >= end) {
+      segment = i;
+      break;
+    }
+    const e = byteAt(source, i);
+    i += 1;
+    const simple = simpleEscape(e);
+    if (simple != undefined) {
+      parts.push(simple);
+      segment = i;
+      continue;
+    }
+    if (e == kReturn) {
+      if (i < end && byteAt(source, i) == kNewline) {
+        i += 1;
+      }
+      segment = i;
+      continue;
+    }
+    if (e == kNewline) {
+      segment = i;
+      continue;
+    }
+    if (e == kLowerX || e == kLowerU) {
+      const escape =
+        e == kLowerX
+          ? hexEscape(source, i, end, 2)
+          : unicodeEscape(source, i, end);
+      if (escape == undefined) {
+        const partial = parts.join("");
+        return { text: partial, ok: false };
+      }
+      parts.push(escape.text);
+      i = escape.next;
+      segment = i;
+      continue;
+    }
+    segment = i - 1;
+  }
+  parts.push(source.toString("utf8", segment, end));
+  const text = parts.join("");
+
+  return { text, ok: true };
+}
+
+function decodeStringLiteral(
+  source: Buffer,
+  start: int,
+  end: int,
+): DecodedText {
+  const quote = byteAt(source, start);
+  let last = end;
+  if (end > start + 1 && byteAt(source, end - 1) == quote) {
+    last = end - 1;
+  }
+
+  return decodeText(source, start + 1, last, false);
+}
+
+function templateEnd(source: Buffer, start: int, end: int): int {
+  if (
+    end - start >= 3 &&
+    byteAt(source, end - 2) == kDollar &&
+    byteAt(source, end - 1) == kLeftBrace
+  ) {
+    return end - 2;
+  }
+  if (end - start >= 2 && byteAt(source, end - 1) == kBacktick) {
+    return end - 1;
+  }
+
+  return end;
+}
+
+function decodeTemplatePart(
+  source: Buffer,
+  start: int,
+  end: int,
+): DecodedText {
+  const last = templateEnd(source, start, end);
+
+  return decodeText(source, start + 1, last, true);
+}
+
+function decodeTemplateRaw(
+  source: Buffer,
+  start: int,
+  end: int,
+): string {
+  const last = templateEnd(source, start, end);
+  const parts: string[] = [];
+  let segment = start + 1;
+  let i = start + 1;
+  while (i < last) {
+    if (byteAt(source, i) != kReturn) {
+      i += 1;
+      continue;
+    }
+    parts.push(source.toString("utf8", segment, i));
+    parts.push("\n");
+    i += i + 1 < last && byteAt(source, i + 1) == kNewline ? 2 : 1;
+    segment = i;
+  }
+  parts.push(source.toString("utf8", segment, last));
+
+  return parts.join("");
+}
+
+export type RegexText = { readonly pattern: string; readonly flags: string };
+
+function decodeRegex(source: Buffer, start: int, end: int): RegexText {
+  const from = start + 1;
+  let slash = end;
+  for (let i = end - 1; i >= from; i--) {
+    if (byteAt(source, i) == kSlash) {
+      slash = i;
+      break;
+    }
+  }
+  const pattern = source.toString("utf8", from, slash);
+  const flagsStart = slash + 1 < end ? slash + 1 : end;
+  const flags = source.toString("utf8", flagsStart, end);
+
+  return { pattern, flags };
+}
+
+export type NumberText = {
+  readonly isInt: boolean;
+  readonly intValue: uint64;
+  readonly doubleValue: double;
+  readonly valid: boolean;
+};
+
+function digitsOf(source: Buffer, start: int, end: int): int[] {
+  const digits: int[] = [];
+  for (let i = start; i < end; i++) {
+    const c = byteAt(source, i);
+    if (c != kUnderscore) {
+      digits.push(c);
+    }
+  }
+
+  return digits;
+}
+
+function radixOf(digits: int[]): int {
+  if (digits.length <= 2 || digits[0] != kZero) {
+    return 10;
+  }
+  const marker = digits[1] ?? 0;
+  if (marker == kLowerX || marker == kUpperX) {
+    return 16;
+  }
+  if (marker == kLowerB || marker == kUpperB) {
+    return 2;
+  }
+  if (marker == kLowerO || marker == kUpperO) {
+    return 8;
+  }
+
+  return 10;
+}
+
+function digitValue(c: int, radix: int): int {
+  if (c >= kZero && c <= kNine) {
+    return c - kZero;
+  }
+  const lower = c | 0x20;
+  if (lower >= kLowerA && lower <= 122) {
+    return lower - kLowerA + 10;
+  }
+
+  return radix;
+}
+
+function textOfDigits(digits: int[], from: int): string {
+  const chars: string[] = [];
+  for (let i = from; i < digits.length; i++) {
+    const c = digits[i] ?? 0;
+    chars.push(String.fromCharCode(c));
+  }
+
+  return chars.join("");
+}
+
+function parseIntText(source: Buffer, start: int, end: int): NumberText {
+  const digits = digitsOf(source, start, end);
+  const radix = radixOf(digits);
+  const from = radix == 10 ? 0 : 2;
+  const base = radix.toUint64();
+  let value: uint64 = 0;
+  let fits = from < digits.length;
+  for (let i = from; i < digits.length && fits; i++) {
+    const digit = digitValue(digits[i] ?? 0, radix);
+    if (digit >= radix) {
+      fits = false;
+      break;
+    }
+    if (digit < 0 || digit > 15) {
+      fits = false;
+      break;
+    }
+    const step = digit.toUint64();
+    const product = Bit.mul64(value, base);
+    if (product.hi != 0) {
+      fits = false;
+      break;
+    }
+    let sum = Bit.Wrap64.from(product.lo);
+    sum = sum + step;
+    if (sum.value < product.lo) {
+      fits = false;
+      break;
+    }
+    value = sum.value;
+  }
+  if (fits) {
+    return { isInt: true, intValue: value, doubleValue: 0.0, valid: true };
+  }
+  for (let i = from; i < digits.length; i++) {
+    const digit = digitValue(digits[i] ?? 0, radix);
+    if (digit >= radix) {
+      return { isInt: true, intValue: 0, doubleValue: 0.0, valid: false };
+    }
+  }
+  const text =
+    radix == 10 ? textOfDigits(digits, 0) : `0${textOfDigits(digits, 1)}`;
+  const parsed = Number(text);
+  const rounded = parsed.unwrapOr(0.0);
+
+  return { isInt: false, intValue: 0, doubleValue: rounded, valid: true };
+}
+
+function parseFloatText(
+  source: Buffer,
+  start: int,
+  end: int,
+): NumberText {
+  const digits = digitsOf(source, start, end);
+  const text = textOfDigits(digits, 0);
+  const parsed = Number(text);
+  if (parsed.isErr()) {
+    return { isInt: false, intValue: 0, doubleValue: 0.0, valid: false };
+  }
+
+  return { isInt: false, intValue: 0, doubleValue: parsed.value, valid: true };
+}
+
+export class LiteralReader {
+  private readonly source: Buffer;
+
+  public constructor(source: Buffer) {
+    this.source = source;
+  }
+
+  public string(token: Token): DecodedText {
+    return decodeStringLiteral(this.source, token.start, token.end);
+  }
+
+  public templatePart(token: Token): DecodedText {
+    return decodeTemplatePart(this.source, token.start, token.end);
+  }
+
+  public templateRaw(token: Token): string {
+    return decodeTemplateRaw(this.source, token.start, token.end);
+  }
+
+  public regex(token: Token): RegexText {
+    return decodeRegex(this.source, token.start, token.end);
+  }
+
+  public integer(token: Token): NumberText {
+    return parseIntText(this.source, token.start, token.end);
+  }
+
+  public float(token: Token): NumberText {
+    return parseFloatText(this.source, token.start, token.end);
+  }
+}

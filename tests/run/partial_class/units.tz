@@ -1,0 +1,5 @@
+export type Unit = "cm" | "m"
+
+export function unitName(unit: Unit): string {
+  return unit == "cm" ? "square centimetres" : "square metres"
+}

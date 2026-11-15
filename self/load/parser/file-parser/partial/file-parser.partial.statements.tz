@@ -1,0 +1,772 @@
+import { FileParser } from "../file-parser.tz";
+import { Token, TokenKind, isKeyword } from "../../../../token.tz";
+import { Pattern } from "./file-parser.partial.patterns.tz";
+import {
+  BindingForm,
+  BindingKind,
+  BlockStmt,
+  Expr,
+  ExprKind,
+  Stmt,
+  StmtKind,
+  SwitchCase,
+  TypeRef,
+  VarDeclStmt,
+  VarDeclarator,
+  marker,
+} from "../../../../ast.tz";
+
+type Binding = {
+  readonly name: string;
+  readonly loc: int;
+  readonly typeAnn?: TypeRef;
+};
+
+partial class FileParser {
+  private statement(topLevel: boolean): Stmt {
+    const token = this.cursor.peek();
+    const loc = token.start;
+    switch (token.kind) {
+      case TokenKind.At:
+        return this.decoratedStatement(topLevel);
+      case TokenKind.LBrace:
+        return this.block();
+      case TokenKind.Function:
+        return this.functionDeclaration(false);
+      case TokenKind.Var:
+      case TokenKind.Let:
+      case TokenKind.Const:
+        return this.variableStatement(token);
+      case TokenKind.If:
+        return this.ifStatement();
+      case TokenKind.While:
+        return this.whileStatement();
+      case TokenKind.Do:
+        return this.doWhileStatement();
+      case TokenKind.For:
+        return this.forStatement();
+      case TokenKind.Switch:
+        return this.switchStatement();
+      case TokenKind.Enum:
+        return this.enumDecl();
+      case TokenKind.Return:
+        return this.returnStatement();
+      case TokenKind.Break:
+      case TokenKind.Continue:
+        return this.jumpStatement(token);
+      case TokenKind.Debugger:
+        this.cursor.next();
+        this.cursor.expectSemicolon();
+        return marker(StmtKind.Debugger, loc);
+      case TokenKind.Semi:
+        this.cursor.next();
+        return marker(StmtKind.Empty, loc);
+      case TokenKind.Identifier:
+        return (
+          this.wordStatement(token, topLevel) ?? this.expressionStatement(loc)
+        );
+      default:
+        return this.expressionStatement(loc);
+    }
+  }
+
+  private decoratedStatement(topLevel: boolean): Stmt {
+    const decorators = this.decorators();
+    const stmt = this.statement(topLevel);
+    if (stmt.kind == StmtKind.Class) {
+      stmt.decorators = decorators.concat(stmt.decorators);
+    } else {
+      this.rejectDecorators(decorators);
+    }
+
+    return stmt;
+  }
+
+  private variableStatement(token: Token): Stmt {
+    if (token.kind == TokenKind.Var) {
+      this.cursor.report(
+        token.start,
+        "'var' is not supported; use 'let' or 'const'",
+      );
+    }
+    if (
+      token.kind == TokenKind.Const &&
+      this.cursor.lookahead().kind == TokenKind.Enum
+    ) {
+      this.cursor.next();
+      return this.enumDecl();
+    }
+    const decl = this.varDecl();
+    this.cursor.expectSemicolon();
+
+    return decl;
+  }
+
+  private wordStatement(token: Token, topLevel: boolean): Stmt | undefined {
+    const text = token.text;
+    const next = this.cursor.lookahead();
+    const loc = token.start;
+    if (
+      text == "import" &&
+      next.kind != TokenKind.LParen &&
+      next.kind != TokenKind.Dot
+    ) {
+      return this.importDecl(topLevel);
+    }
+    if (text == "export") {
+      return this.exportDecl(topLevel);
+    }
+    const grouping =
+      (text == "namespace" || text == "module" || text == "declare") &&
+      (next.kind == TokenKind.Identifier ||
+        isKeyword(next.kind) ||
+        next.kind == TokenKind.String) &&
+      !next.newline;
+    if (grouping) {
+      return this.declare(loc, text);
+    }
+    const onLine = next.kind == TokenKind.Identifier && !next.newline;
+    if (text == "using" && onLine) {
+      return this.usingDecl();
+    }
+    if (next.kind == TokenKind.Colon) {
+      this.cursor.skip(2);
+      const body = this.statement(false);
+      return { kind: StmtKind.Labeled, loc, label: text, body };
+    }
+    if (text == "type" && onLine) {
+      return this.typeAlias();
+    }
+    if (text == "interface" && onLine) {
+      return this.interfaceDecl();
+    }
+    if (text == "class" && onLine) {
+      return this.classDecl(false);
+    }
+    if (text == "throw") {
+      return this.throwStatement();
+    }
+    if (text == "try" && next.kind == TokenKind.LBrace) {
+      return this.tryStatement();
+    }
+    if (
+      (text == "catch" || text == "finally") &&
+      (next.kind == TokenKind.LBrace || next.kind == TokenKind.LParen)
+    ) {
+      return this.strayHandler(loc, text);
+    }
+    if (text == "abstract" && onLine && next.text == "class") {
+      this.cursor.next();
+      const cls = this.classDecl(false);
+      cls.isAbstract = true;
+      return cls;
+    }
+    if (text == "partial" && onLine && next.text == "class") {
+      return this.partialClass(loc, topLevel);
+    }
+    if (this.asyncFunctionAhead()) {
+      this.cursor.next();
+      return this.functionDeclaration(true);
+    }
+
+    return undefined;
+  }
+
+  private partialClass(loc: int, topLevel: boolean): Stmt {
+    if (!topLevel) {
+      this.cursor.report(
+        loc,
+        "'partial class' is written only at the top level of a file",
+      );
+    }
+    this.cursor.next();
+    const cls = this.classDecl(false);
+    cls.isPartial = true;
+
+    return cls;
+  }
+
+  private strayHandler(loc: int, text: string): Stmt {
+    this.cursor.report(loc, `there is no '${text}' in tz`);
+    this.cursor.next();
+    if (this.cursor.accept(TokenKind.LParen)) {
+      while (
+        !this.cursor.is(TokenKind.End) &&
+        !this.cursor.accept(TokenKind.RParen)
+      ) {
+        this.cursor.next();
+      }
+    }
+    this.block();
+
+    return marker(StmtKind.Empty, loc);
+  }
+
+  private declare(loc: int, text: string): Stmt {
+    if (text != "declare") {
+      return this.skipDeclaration(loc, `'${text}' is not supported`);
+    }
+    const next = this.cursor.lookahead();
+    if (next.kind == TokenKind.Function) {
+      this.cursor.next();
+      return this.declaredFunction();
+    }
+    if (!this.library && next.text == "class") {
+      this.cursor.next();
+      return this.handleClass();
+    }
+    if (
+      next.text == "module" ||
+      next.text == "global" ||
+      next.text == "namespace"
+    ) {
+      return this.skipDeclaration(
+        loc,
+        `'declare ${next.text}' is not supported`,
+      );
+    }
+
+    return this.skipDeclaration(loc, "'declare' is not supported");
+  }
+
+  private expressionStatement(loc: int): Stmt {
+    const expr = this.sequence();
+    if (expr.kind == ExprKind.Assign && expr.op == undefined) {
+      const target = expr.target;
+      if (
+        target.kind == ExprKind.ArrayLit ||
+        target.kind == ExprKind.ObjectLit
+      ) {
+        const pattern = this.patternFromLiteral(target);
+        const stmt = this.assignPattern(loc, pattern, expr.value);
+        this.cursor.expectSemicolon();
+        return stmt;
+      }
+    }
+    this.cursor.expectSemicolon();
+
+    return { kind: StmtKind.Expr, loc, expr };
+  }
+
+  private skipDeclaration(loc: int, message: string): Stmt {
+    this.cursor.report(loc, message);
+    this.cursor.next();
+    let more = true;
+    while (
+      more &&
+      !this.cursor.is(TokenKind.End) &&
+      !this.cursor.is(TokenKind.RBrace)
+    ) {
+      if (this.cursor.accept(TokenKind.LBrace)) {
+        this.cursor.skipToClosingBrace();
+        more = false;
+      } else if (this.cursor.accept(TokenKind.Semi)) {
+        more = false;
+      } else {
+        this.cursor.next();
+        more = !this.cursor.peek().newline;
+      }
+    }
+
+    return marker(StmtKind.Empty, loc);
+  }
+
+  private jumpStatement(token: Token): Stmt {
+    this.cursor.next();
+    let label = "";
+    if (this.cursor.is(TokenKind.Identifier) && !this.cursor.peek().newline) {
+      label = this.cursor.next().text;
+    }
+    this.cursor.expectSemicolon();
+    const kind =
+      token.kind == TokenKind.Break ? StmtKind.Break : StmtKind.Continue;
+
+    return { kind, loc: token.start, label };
+  }
+
+  private switchStatement(): Stmt {
+    const loc = this.cursor.next().start;
+    this.cursor.expect(TokenKind.LParen, "after 'switch'");
+    const discriminant = this.sequence();
+    this.cursor.expect(TokenKind.RParen, "after the value of 'switch'");
+    this.cursor.expect(TokenKind.LBrace, "to start the cases of 'switch'");
+    const cases: SwitchCase[] = [];
+    let hasDefault = false;
+    while (
+      this.cursor.is(TokenKind.Case) ||
+      this.cursor.is(TokenKind.Default)
+    ) {
+      const caseLoc = this.cursor.peek().start;
+      let test: Expr | undefined = undefined;
+      if (this.cursor.accept(TokenKind.Case)) {
+        test = this.expression();
+      } else {
+        if (hasDefault) {
+          this.cursor.report(caseLoc, "a 'switch' can have only one 'default'");
+        }
+        hasDefault = true;
+        this.cursor.next();
+      }
+      this.cursor.expect(
+        TokenKind.Colon,
+        test != undefined ? "after the value of 'case'" : "after 'default'",
+      );
+      const body = this.caseBody();
+      cases.push({ loc: caseLoc, test, body });
+    }
+    if (!this.cursor.is(TokenKind.RBrace) && !this.cursor.is(TokenKind.End)) {
+      this.cursor.error(
+        this.cursor.peek().start,
+        "expected 'case' or 'default'",
+      );
+    }
+    this.cursor.expect(TokenKind.RBrace, "to close 'switch'");
+
+    return { kind: StmtKind.Switch, loc, discriminant, cases };
+  }
+
+  private caseBody(): Stmt[] {
+    const body: Stmt[] = [];
+    while (
+      !this.cursor.is(TokenKind.Case) &&
+      !this.cursor.is(TokenKind.Default) &&
+      !this.cursor.is(TokenKind.RBrace) &&
+      !this.cursor.is(TokenKind.End)
+    ) {
+      body.push(this.statement(false));
+      if (this.cursor.isRecovering()) {
+        this.cursor.synchronize();
+      }
+    }
+
+    return body;
+  }
+
+  private block(): BlockStmt {
+    const loc = this.cursor.peek().start;
+    this.cursor.expect(TokenKind.LBrace, "");
+    const body: Stmt[] = [];
+    while (
+      !this.cursor.is(TokenKind.RBrace) &&
+      !this.cursor.is(TokenKind.End)
+    ) {
+      body.push(this.statement(false));
+      if (this.cursor.isRecovering()) {
+        this.cursor.synchronize();
+      }
+    }
+    const end = this.cursor.peek().start;
+    this.cursor.expect(TokenKind.RBrace, "to close the block");
+
+    return { kind: StmtKind.Block, loc, body, end };
+  }
+
+  private condition(keyword: string): Expr {
+    this.cursor.expect(TokenKind.LParen, `after '${keyword}'`);
+    const cond = this.sequence();
+    this.cursor.expect(TokenKind.RParen, "after the condition");
+
+    return cond;
+  }
+
+  private ifStatement(): Stmt {
+    const loc = this.cursor.next().start;
+    const cond = this.condition("if");
+    const thenStmt = this.statement(false);
+    const elseStmt = this.cursor.accept(TokenKind.Else)
+      ? this.statement(false)
+      : undefined;
+
+    return { kind: StmtKind.If, loc, cond, thenStmt, elseStmt };
+  }
+
+  private whileStatement(): Stmt {
+    const loc = this.cursor.next().start;
+    const cond = this.condition("while");
+    const body = this.statement(false);
+
+    return { kind: StmtKind.While, loc, cond, body };
+  }
+
+  private doWhileStatement(): Stmt {
+    const loc = this.cursor.next().start;
+    const body = this.statement(false);
+    this.cursor.expect(TokenKind.While, "after the body of 'do'");
+    const cond = this.condition("while");
+    this.cursor.accept(TokenKind.Semi);
+
+    return { kind: StmtKind.DoWhile, loc, body, cond };
+  }
+
+  private forStatement(): Stmt {
+    const saved = this.noIn;
+    this.noIn = true;
+    const loop = this.forInside();
+    this.noIn = saved;
+
+    return loop;
+  }
+
+  private forInside(): Stmt {
+    const loc = this.cursor.next().start;
+    let awaitLoc = -1;
+    if (this.cursor.isWord("await")) {
+      awaitLoc = this.cursor.next().start;
+    }
+    this.cursor.expect(TokenKind.LParen, "after 'for'");
+    let init: Stmt | undefined = undefined;
+    if (
+      this.cursor.is(TokenKind.Let) ||
+      this.cursor.is(TokenKind.Const) ||
+      this.cursor.is(TokenKind.Var)
+    ) {
+      const head = this.cursor.next();
+      if (head.kind == TokenKind.Var) {
+        this.cursor.error(
+          head.start,
+          "'var' is not supported; use 'let' or 'const'",
+        );
+      }
+      const isConst = head.kind == TokenKind.Const;
+      let pattern: Pattern | undefined = undefined;
+      let first: Binding = { name: "", loc: -1 };
+      if (
+        this.cursor.is(TokenKind.LBracket) ||
+        this.cursor.is(TokenKind.LBrace)
+      ) {
+        pattern = this.bindingPattern();
+      } else {
+        const binding = this.binding();
+        if (binding == undefined) {
+          return { kind: StmtKind.For, loc };
+        }
+        first = binding;
+      }
+      const forIn = this.cursor.is(TokenKind.In);
+      if (this.cursor.isWord("of") || forIn) {
+        return this.forOf(loc, awaitLoc, isConst, forIn, first, pattern);
+      }
+      const decls: VarDeclarator[] = [];
+      if (pattern != undefined) {
+        if (
+          !this.cursor.expect(
+            TokenKind.Assign,
+            "after the destructuring pattern",
+          )
+        ) {
+          return { kind: StmtKind.For, loc };
+        }
+        const value = this.expression();
+        this.declarePattern(decls, pattern, value, undefined);
+      } else {
+        const value = this.cursor.accept(TokenKind.Assign)
+          ? this.expression()
+          : undefined;
+        decls.push({
+          ...first,
+          init: value,
+          form: { kind: BindingKind.Plain },
+        });
+      }
+      if (this.cursor.accept(TokenKind.Comma)) {
+        this.declarators(decls, isConst);
+      }
+      init = {
+        kind: StmtKind.VarDecl,
+        loc: head.start,
+        isConst,
+        isUsing: false,
+        decls,
+      };
+    } else if (!this.cursor.is(TokenKind.Semi)) {
+      const initLoc = this.cursor.peek().start;
+      const expr = this.sequence();
+      init = { kind: StmtKind.Expr, loc: initLoc, expr };
+    }
+    if (this.cursor.is(TokenKind.In) || this.cursor.isWord("of")) {
+      this.cursor.error(
+        this.cursor.peek().start,
+        "'for...in' and 'for...of' need a new variable",
+      );
+      return { kind: StmtKind.For, loc, init };
+    }
+    this.noIn = false;
+    if (awaitLoc >= 0) {
+      this.cursor.report(
+        awaitLoc,
+        "'for await' goes over the values of an iterable",
+      );
+    }
+
+    return this.forRest(loc, init);
+  }
+
+  private forRest(loc: int, init: Stmt | undefined): Stmt {
+    this.cursor.expect(TokenKind.Semi, "after the loop initializer");
+    const cond = this.cursor.is(TokenKind.Semi) ? undefined : this.sequence();
+    this.cursor.expect(TokenKind.Semi, "after the loop condition");
+    const step = this.cursor.is(TokenKind.RParen) ? undefined : this.sequence();
+    this.cursor.expect(TokenKind.RParen, "to close the loop header");
+    const body = this.statement(false);
+
+    return { kind: StmtKind.For, loc, init, cond, step, body };
+  }
+
+  private forOf(
+    loc: int,
+    awaitLoc: int,
+    isConst: boolean,
+    keys: boolean,
+    first: Binding,
+    pattern: Pattern | undefined,
+  ): Stmt {
+    if (keys && pattern != undefined) {
+      this.cursor.report(
+        pattern.loc,
+        "the variable of 'for...in' is a key, a string, and cannot be destructured",
+      );
+    }
+    this.cursor.next();
+    this.noIn = false;
+    const isAwait = awaitLoc >= 0;
+    if (keys && isAwait) {
+      this.cursor.report(
+        awaitLoc,
+        "'for await' goes over the values of an iterable, with 'of'",
+      );
+    }
+    const iterable = this.expression();
+    this.cursor.expect(TokenKind.RParen, "to close the loop header");
+    const body = this.statement(false);
+    if (pattern == undefined) {
+      const binding: VarDeclarator = {
+        ...first,
+        form: { kind: BindingKind.Plain },
+      };
+      return {
+        kind: StmtKind.ForOf,
+        loc,
+        isConst,
+        keys,
+        isAwait,
+        binding,
+        iterable,
+        body,
+      };
+    }
+    const name = this.hiddenName();
+    if (keys) {
+      const binding: VarDeclarator = {
+        name,
+        loc: pattern.loc,
+        form: { kind: BindingKind.Plain },
+      };
+      return {
+        kind: StmtKind.ForOf,
+        loc,
+        isConst,
+        keys,
+        isAwait,
+        binding,
+        iterable,
+        body,
+      };
+    }
+    const form: BindingForm = pattern.object
+      ? { kind: BindingKind.Object }
+      : { kind: BindingKind.Array, length: 0, rest: false };
+    const binding: VarDeclarator = { name, loc: pattern.loc, form };
+    const decls: VarDeclarator[] = [];
+    this.declareElements(decls, pattern, name);
+    const elements: VarDeclStmt = {
+      kind: StmtKind.VarDecl,
+      loc: pattern.loc,
+      isConst,
+      isUsing: false,
+      decls,
+    };
+    const wrapper: Stmt = {
+      kind: StmtKind.Block,
+      loc: body.loc,
+      body: [elements, body],
+      end: -1,
+    };
+
+    return {
+      kind: StmtKind.ForOf,
+      loc,
+      isConst,
+      keys,
+      isAwait,
+      binding,
+      iterable,
+      body: wrapper,
+    };
+  }
+
+  private returnStatement(): Stmt {
+    const loc = this.cursor.next().start;
+    const token = this.cursor.peek();
+    const hasValue =
+      token.kind != TokenKind.Semi &&
+      token.kind != TokenKind.RBrace &&
+      token.kind != TokenKind.End &&
+      !token.newline;
+    const value = hasValue ? this.sequence() : undefined;
+    this.cursor.expectSemicolon();
+
+    return { kind: StmtKind.Return, loc, value };
+  }
+
+  private throwStatement(): Stmt {
+    const loc = this.cursor.next().start;
+    this.cursor.report(loc, "there is no 'throw' in tz");
+    const token = this.cursor.peek();
+    const hasValue =
+      !token.newline &&
+      token.kind != TokenKind.Semi &&
+      token.kind != TokenKind.RBrace &&
+      token.kind != TokenKind.End;
+    if (hasValue) {
+      this.sequence();
+      this.cursor.expectSemicolon();
+    }
+
+    return marker(StmtKind.Empty, loc);
+  }
+
+  private tryStatement(): Stmt {
+    this.cursor.report(this.cursor.peek().start, "there is no 'try' in tz");
+    this.cursor.next();
+    const block = this.block();
+    if (this.cursor.isWord("catch")) {
+      this.cursor.next();
+      if (this.cursor.accept(TokenKind.LParen)) {
+        while (
+          !this.cursor.is(TokenKind.RParen) &&
+          !this.cursor.is(TokenKind.End)
+        ) {
+          this.cursor.next();
+        }
+        this.cursor.expect(TokenKind.RParen, "after the variable of 'catch'");
+      }
+      this.block();
+    }
+    if (this.cursor.isWord("finally")) {
+      this.cursor.next();
+      this.block();
+    }
+
+    return block;
+  }
+
+  private varDecl(): VarDeclStmt {
+    const head = this.cursor.next();
+    const isConst = head.kind == TokenKind.Const;
+    const decls: VarDeclarator[] = [];
+    this.declarators(decls, isConst);
+
+    return {
+      kind: StmtKind.VarDecl,
+      loc: head.start,
+      isConst,
+      isUsing: false,
+      decls,
+    };
+  }
+
+  private usingDecl(): VarDeclStmt {
+    const loc = this.cursor.next().start;
+    const decls: VarDeclarator[] = [];
+    this.declarators(decls, true);
+    this.cursor.expectSemicolon();
+
+    return { kind: StmtKind.VarDecl, loc, isConst: true, isUsing: true, decls };
+  }
+
+  private declarators(decls: VarDeclarator[], isConst: boolean): void {
+    let more = true;
+    while (more) {
+      more =
+        this.cursor.is(TokenKind.LBracket) || this.cursor.is(TokenKind.LBrace)
+          ? this.patternDeclarator(decls)
+          : this.plainDeclarator(decls, isConst);
+      more = more && this.cursor.accept(TokenKind.Comma);
+    }
+  }
+
+  private patternDeclarator(decls: VarDeclarator[]): boolean {
+    const pattern = this.bindingPattern();
+    const typeAnn = this.cursor.accept(TokenKind.Colon)
+      ? this.type()
+      : undefined;
+    if (!this.cursor.is(TokenKind.Assign)) {
+      this.cursor.error(
+        pattern.loc,
+        "a destructuring declaration needs a value",
+      );
+      return false;
+    }
+    this.cursor.next();
+    const value = this.expression();
+    this.declarePattern(decls, pattern, value, typeAnn);
+
+    return true;
+  }
+
+  private plainDeclarator(decls: VarDeclarator[], isConst: boolean): boolean {
+    const binding = this.binding();
+    if (binding == undefined) {
+      return false;
+    }
+    const init = this.cursor.accept(TokenKind.Assign)
+      ? this.expression()
+      : undefined;
+    decls.push({ ...binding, init, form: { kind: BindingKind.Plain } });
+    if (init == undefined) {
+      return true;
+    }
+    if (init.kind == ExprKind.Class && init.decl.name == "") {
+      init.decl.name = binding.name;
+    }
+    if (isConst) {
+      this.recordConstant(binding.name, init);
+    }
+
+    return true;
+  }
+
+  private recordConstant(name: string, init: Expr): void {
+    let values: string[] = [];
+    if (init.kind == ExprKind.StringLit) {
+      values.push(init.value);
+    } else if (init.kind == ExprKind.Template && init.exprs.length == 0) {
+      values.push(init.quasis[0] ?? "");
+    } else if (init.kind == ExprKind.Name) {
+      const known = this.stringConstants.get(init.name);
+      values = known != undefined ? known.slice() : [];
+    }
+    const all = this.stringConstants.get(name);
+    if (all == undefined) {
+      this.stringConstants.set(name, values);
+      return;
+    }
+    for (const value of values) {
+      all.push(value);
+    }
+  }
+
+  private binding(): Binding | undefined {
+    const token = this.cursor.peek();
+    if (!this.cursor.is(TokenKind.Identifier)) {
+      this.cursor.error(token.start, "expected a variable name");
+      return undefined;
+    }
+    this.cursor.next();
+    const typeAnn = this.cursor.accept(TokenKind.Colon)
+      ? this.type()
+      : undefined;
+
+    return { name: token.text, loc: token.start, typeAnn };
+  }
+}

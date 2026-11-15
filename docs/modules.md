@@ -10,8 +10,10 @@
 
 - Файлы программ на tz — `.tz`: `main.tz`, `math.tz`. Файлы `.ts` и `.js` tz не собирает.
 - Импорт — одной формой: `import { a, b as c } from "./x"`. Импорта по умолчанию,
-  `export default`, `import * as`, `import "./x"` и слова `type` в импорте нет. Исключение —
-  файл JSON (с 29 октября, раздел 5): `import config from "./config.json" with { type: "json" }`.
+  `export default`, `import * as`, `import "./x"` и слова `type` в импорте нет. Исключения —
+  файл JSON (с 29 октября, раздел 5): `import config from "./config.json" with { type: "json" }`,
+  и список частей класса (с 15 ноября): `import "./expressions.tz"` в файле класса, у которого
+  в `expressions.tz` есть `partial class` ([objects.md](objects.md), раздел 6).
 - Экспорт: `export` перед объявлением, `export { a, b as c }`, `export { a } from "./x"`,
   `export * from "./x"`.
 - `as` есть только в `import` и `export` — как переименование. Оператора `as` нет.
@@ -52,7 +54,9 @@ import { area, Circle } from "./geometry"   // типы импортируютс
   - `import square from "./math"` и `export default` → экспортировать и импортировать по
     имени;
   - `import * as geo from "./geometry"` → перечислить нужные имена;
-  - `import "./x"` (ради побочных действий) → импортировать то, что нужно, по имени;
+  - `import "./x"` (ради побочных действий) → импортировать то, что нужно, по имени. Так
+    можно писать только про файл, где лежит часть класса этого файла (`partial class`):
+    импорт перечисляет части класса;
   - `import type { T }` и `import { type T }` → писать без `type`.
 - **`namespace` из TS** (`namespace Foo { ... }`) нет — это старая замена модулям; ошибка с
   подсказкой вынести в отдельный файл. `declare module`, `declare global`, `/// <reference>`,

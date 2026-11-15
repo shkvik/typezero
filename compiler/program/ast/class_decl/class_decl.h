@@ -101,6 +101,7 @@ struct ClassDecl : Stmt {
 
   llvm::StringRef name;
   bool isAbstract = false;
+  bool isPartial = false;
   std::optional<TypeRef> base;
   Expr *baseExpr = nullptr;
   std::vector<TypeRef> interfaces;

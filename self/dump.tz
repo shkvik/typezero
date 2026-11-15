@@ -1,0 +1,696 @@
+import {
+  BindingKind, ClassDecl, ClassField, Decorator, Expr, ExprKind, FunctionDecl, ModuleName, Param,
+  ParamKind, Property, PropertyKind, SourceFile, Span, Stmt, StmtKind, TypeKind, TypeParamDecl,
+  TypeRef, VarDeclarator,
+} from "./ast.tz"
+
+const kHex = "0123456789abcdef"
+
+function typeKindName(kind: TypeKind): string {
+  switch (kind) {
+    case TypeKind.Name:
+      return "Name"
+    case TypeKind.Array:
+      return "Array"
+    case TypeKind.Union:
+      return "Union"
+    case TypeKind.Generic:
+      return "Generic"
+    case TypeKind.Function:
+      return "Function"
+    case TypeKind.Object:
+      return "Object"
+    case TypeKind.Tuple:
+      return "Tuple"
+    case TypeKind.Literal:
+      return "Literal"
+    case TypeKind.Predicate:
+      return "Predicate"
+    case TypeKind.KeyOf:
+      return "KeyOf"
+    case TypeKind.Indexed:
+      return "Indexed"
+    case TypeKind.TypeOf:
+      return "TypeOf"
+    case TypeKind.Mapped:
+      return "Mapped"
+    case TypeKind.Conditional:
+      return "Conditional"
+    case TypeKind.Infer:
+      return "Infer"
+    case TypeKind.Template:
+      return "Template"
+    default:
+      return "Intersection"
+  }
+}
+
+export class Dumper {
+  private readonly source: Buffer
+  private readonly lines: string[]
+  private readonly indents: string[]
+  private depth: int
+
+  public constructor(source: Buffer) {
+    this.source = source
+    this.lines = []
+    this.indents = [""]
+    this.depth = 0
+  }
+
+  public text(): string {
+    return this.lines.join("\n")
+  }
+
+  public dumpFile(file: SourceFile): void {
+    this.line(`items ${file.items.length}`)
+    for (const item of file.items) {
+      this.dumpStmt(item)
+    }
+    this.dumpModules(file)
+    this.dumpTables(file)
+  }
+
+  private line(text: string): void {
+    while (this.indents.length <= this.depth) {
+      const last = this.indents[this.indents.length - 1] ?? ""
+      this.indents.push(`${last}  `)
+    }
+    const indent = this.indents[this.depth] ?? ""
+    this.lines.push(`${indent}${text}`)
+  }
+
+  private hex4(value: int): string {
+    const digits: string[] = []
+    for (let shift = 12; shift >= 0; shift -= 4) {
+      const digit = (value >> shift) & 15
+      digits.push(kHex.charAt(digit))
+    }
+
+    return digits.join("")
+  }
+
+  private needsEscape(c: int): boolean {
+    return c < 0x20 || c == 0x7f || c == 34 || c == 92
+  }
+
+  private quote(text: string): string {
+    let plain = true
+    for (let i = 0; i < text.length && plain; i++) {
+      plain = !this.needsEscape(text.charCodeAt(i))
+    }
+    if (plain) {
+      return `"${text}"`
+    }
+    const parts: string[] = []
+    for (let i = 0; i < text.length; i++) {
+      const c = text.charCodeAt(i)
+      parts.push(this.needsEscape(c) ? `\\u${this.hex4(c)}` : text.charAt(i))
+    }
+
+    return `"${parts.join("")}"`
+  }
+
+  private units(text: string): string {
+    const parts: string[] = []
+    for (let i = 0; i < text.length; i++) {
+      const c = text.charCodeAt(i)
+      const printable = c >= 0x20 && c < 0x7f && c != 34 && c != 92
+      parts.push(printable ? text.charAt(i) : `\\u${this.hex4(c)}`)
+    }
+
+    return `"${parts.join("")}"`
+  }
+
+  private bits(value: double): string {
+    const buffer = Buffer.alloc(8)
+    buffer.writeDoubleBE(value, 0)
+
+    return buffer.toString("hex")
+  }
+
+  private flag(value: boolean): string {
+    return value ? "1" : "0"
+  }
+
+  private flags(values: boolean[]): string {
+    if (values.length == 0) {
+      return "-"
+    }
+
+    return values.map(value => this.flag(value)).join("")
+  }
+
+  private quoteAll(names: string[]): string {
+    return `[${names.map(name => this.quote(name)).join(",")}]`
+  }
+
+  private span(text: Span): string {
+    if (text.end <= text.start) {
+      return "-"
+    }
+
+    return `${text.start}-${text.end}`
+  }
+
+  private spanText(text: Span): string {
+    if (text.end <= text.start) {
+      return ""
+    }
+
+    return this.source.toString("utf8", text.start, text.end)
+  }
+
+  private missing(): void {
+    this.line("-")
+  }
+
+  private nested(): void {
+    this.depth += 1
+  }
+
+  private back(): void {
+    this.depth -= 1
+  }
+
+  private dumpModules(file: SourceFile): void {
+    this.line(`imports ${file.imports.length}`)
+    for (const decl of file.imports) {
+      this.line(`Import ${decl.loc} ${this.quote(decl.path)} ${decl.pathLoc} ` +
+                `${this.quote(decl.whole)} ${decl.wholeLoc} ${this.flag(decl.wholeIsDefault)} ` +
+                `${this.flag(decl.isPartList)} ${decl.names.length}`)
+      this.dumpModuleNames(decl.names)
+    }
+    this.line(`exports ${file.exports.length}`)
+    for (const decl of file.exports) {
+      this.line(`Export ${decl.loc} ${decl.form} ${this.quote(decl.path)} ${decl.pathLoc} ` +
+                `${decl.names.length}`)
+      this.dumpModuleNames(decl.names)
+    }
+  }
+
+  private dumpModuleNames(names: ModuleName[]): void {
+    this.nested()
+    for (const name of names) {
+      this.line(`Name ${this.quote(name.name)} ${name.loc} ${this.quote(name.as)} ${name.asLoc}`)
+    }
+    this.back()
+  }
+
+  private dumpTables(file: SourceFile): void {
+    const fields: string[] = []
+    for (const field of file.fieldNames) {
+      fields.push(field)
+    }
+    fields.sort()
+    const quoted = fields.map(field => ` ${this.quote(field)}`).join("")
+    this.line(`fields ${fields.length}${quoted}`)
+    const keys: string[] = []
+    for (const key of file.stringConstants.keys()) {
+      keys.push(key)
+    }
+    keys.sort()
+    this.line(`constants ${keys.length}`)
+    for (const key of keys) {
+      const values = file.stringConstants.get(key) ?? []
+      const all = values.map(value => ` ${this.quote(value)}`).join("")
+      this.line(`  ${this.quote(key)} ${values.length}${all}`)
+    }
+  }
+
+  private dumpOptionalStmt(stmt: Stmt | undefined): void {
+    if (stmt == undefined) {
+      return this.missing()
+    }
+    this.dumpStmt(stmt)
+  }
+
+  private dumpStmts(stmts: Stmt[]): void {
+    this.nested()
+    for (const stmt of stmts) {
+      this.dumpStmt(stmt)
+    }
+    this.back()
+  }
+
+  private dumpStmt(stmt: Stmt): void {
+    const loc = stmt.loc
+    switch (stmt.kind) {
+      case StmtKind.Block:
+        this.line(`Block ${loc} end=${stmt.end} n=${stmt.body.length}`)
+        return this.dumpStmts(stmt.body)
+      case StmtKind.VarDecl:
+        this.line(`VarDecl ${loc} const=${this.flag(stmt.isConst)} using=${this.flag(stmt.isUsing)} ` +
+                  `n=${stmt.decls.length}`)
+        this.nested()
+        for (const d of stmt.decls) {
+          this.dumpDeclarator(d)
+        }
+        return this.back()
+      case StmtKind.Function:
+        return this.dumpFunction(stmt)
+      case StmtKind.Expr:
+        this.line(`ExprStmt ${loc}`)
+        return this.dumpChildren([stmt.expr])
+      case StmtKind.If:
+        this.line(`If ${loc}`)
+        this.nested()
+        this.dumpExpr(stmt.cond)
+        this.dumpStmt(stmt.thenStmt)
+        this.dumpOptionalStmt(stmt.elseStmt)
+        return this.back()
+      case StmtKind.While:
+        this.line(`While ${loc}`)
+        this.nested()
+        this.dumpExpr(stmt.cond)
+        this.dumpStmt(stmt.body)
+        return this.back()
+      case StmtKind.DoWhile:
+        this.line(`DoWhile ${loc}`)
+        this.nested()
+        this.dumpStmt(stmt.body)
+        this.dumpExpr(stmt.cond)
+        return this.back()
+      case StmtKind.For:
+        this.line(`For ${loc}`)
+        this.nested()
+        this.dumpOptionalStmt(stmt.init)
+        this.dumpOptionalExpr(stmt.cond)
+        this.dumpOptionalExpr(stmt.step)
+        this.dumpOptionalStmt(stmt.body)
+        return this.back()
+      case StmtKind.ForOf:
+        this.line(`ForOf ${loc} const=${this.flag(stmt.isConst)} keys=${this.flag(stmt.keys)} ` +
+                  `await=${this.flag(stmt.isAwait)}`)
+        this.nested()
+        this.dumpDeclarator(stmt.binding)
+        this.dumpExpr(stmt.iterable)
+        this.dumpStmt(stmt.body)
+        return this.back()
+      case StmtKind.Switch:
+        this.line(`Switch ${loc} n=${stmt.cases.length}`)
+        this.nested()
+        this.dumpExpr(stmt.discriminant)
+        for (const c of stmt.cases) {
+          this.line(`Case ${c.loc} n=${c.body.length}`)
+          this.nested()
+          this.dumpOptionalExpr(c.test)
+          this.back()
+          this.dumpStmts(c.body)
+        }
+        return this.back()
+      case StmtKind.Labeled:
+        this.line(`Labeled ${loc} ${this.quote(stmt.label)}`)
+        return this.dumpStmts([stmt.body])
+      case StmtKind.Return:
+        this.line(`Return ${loc}`)
+        this.nested()
+        this.dumpOptionalExpr(stmt.value)
+        return this.back()
+      case StmtKind.Break:
+        return this.line(`Break ${loc} ${this.quote(stmt.label)}`)
+      case StmtKind.Continue:
+        return this.line(`Continue ${loc} ${this.quote(stmt.label)}`)
+      case StmtKind.Empty:
+        return this.line(`Empty ${loc}`)
+      case StmtKind.Debugger:
+        return this.line(`Debugger ${loc}`)
+      case StmtKind.TypeAlias:
+        this.line(`TypeAlias ${loc} ${this.quote(stmt.name)} handle=${this.flag(stmt.isHandle)} ` +
+                  `tp=${stmt.typeParams.length} bases=${stmt.bases.length}`)
+        this.nested()
+        this.dumpTypeParams(stmt.typeParams)
+        this.dumpType(stmt.type)
+        this.dumpTypes(stmt.bases)
+        return this.back()
+      case StmtKind.Enum:
+        this.line(`Enum ${loc} ${this.quote(stmt.name)} n=${stmt.members.length}`)
+        this.nested()
+        for (const member of stmt.members) {
+          this.line(`EnumMember ${member.loc} ${this.quote(member.name)}`)
+          this.nested()
+          this.dumpOptionalExpr(member.init)
+          this.back()
+        }
+        return this.back()
+      case StmtKind.Class:
+        return this.dumpClass(stmt)
+    }
+  }
+
+  private dumpDeclarator(d: VarDeclarator): void {
+    const form = d.form
+    let shape = "form=plain"
+    if (form.kind == BindingKind.Object) {
+      shape = "form=object"
+    } else if (form.kind == BindingKind.Array) {
+      shape = `form=array ${form.length} ${this.flag(form.rest)}`
+    }
+    this.line(`Declarator ${d.loc} ${this.quote(d.name)} ${shape}`)
+    this.nested()
+    this.dumpOptionalType(d.typeAnn)
+    this.dumpOptionalExpr(d.init)
+    this.back()
+  }
+
+  private role(fn: FunctionDecl): string {
+    const member = fn.role
+    if (member == undefined) {
+      return "plain"
+    }
+
+    return `member ${member.access} ${this.flag(member.isOverride)} ${member.method} ` +
+      `${member.decorators.length}`
+  }
+
+  private dumpFunction(fn: FunctionDecl): void {
+    this.line(`Function ${fn.loc} ${this.quote(fn.name)} arrow=${this.flag(fn.isArrow)} ` +
+              `concise=${this.flag(fn.concise)} own=${this.quote(fn.ownName)} place=${fn.place} ` +
+              `body=${fn.bodySource} gen=${this.flag(fn.isGenerator)} ` +
+              `async=${this.flag(fn.isAsync)} role=${this.role(fn)} src=${this.span(fn.source)} ` +
+              `tp=${fn.typeParams.length} params=${fn.params.length}`)
+    this.nested()
+    const member = fn.role
+    if (member != undefined) {
+      this.dumpDecorators(member.decorators)
+    }
+    this.dumpTypeParams(fn.typeParams)
+    for (const param of fn.params) {
+      this.dumpParam(param)
+    }
+    this.dumpOptionalType(fn.returnType)
+    this.dumpOptionalStmt(fn.body)
+    this.back()
+  }
+
+  private dumpParam(param: Param): void {
+    const property = param.property
+    const prop = property == undefined ? "-" : `${this.flag(property.readonly)}${property.access}`
+    this.line(`Param ${param.loc} ${this.quote(param.name)} form=${param.form.kind} ` +
+              `prop=${prop} pattern=${this.span(param.pattern)} dec=${param.decorators.length}`)
+    this.nested()
+    this.dumpDecorators(param.decorators)
+    this.dumpOptionalType(param.type)
+    const form = param.form
+    if (form.kind == ParamKind.Defaulted) {
+      this.dumpExpr(form.defaultValue)
+    }
+    this.back()
+  }
+
+  private dumpTypeParams(params: TypeParamDecl[]): void {
+    for (const param of params) {
+      this.line(`TypeParam ${param.loc} ${this.quote(param.name)}`)
+      this.nested()
+      this.dumpOptionalType(param.constraint)
+      this.dumpOptionalType(param.defaultType)
+      this.back()
+    }
+  }
+
+  private dumpDecorators(decorators: Decorator[]): void {
+    for (const decorator of decorators) {
+      this.line(`Decorator ${decorator.loc}`)
+      this.dumpChildren([decorator.expr])
+    }
+  }
+
+  private dumpClass(cls: ClassDecl): void {
+    this.line(`Class ${cls.loc} ${this.quote(cls.name)} abstract=${this.flag(cls.isAbstract)} ` +
+              `partial=${this.flag(cls.isPartial)} expr=${this.flag(cls.expression)} generic=${this.flag(cls.typeParams.length > 0)} ` +
+              `src=${this.span(cls.source)} tp=${cls.typeParams.length} ` +
+              `base=${this.flag(cls.base != undefined)} ` +
+              `baseExpr=${this.flag(cls.baseExpr != undefined)} ifaces=${cls.interfaces.length} ` +
+              `dec=${cls.decorators.length} fields=${cls.fields.length} ` +
+              `methods=${cls.methods.length} ctors=${cls.constructors.length}`)
+    this.nested()
+    this.dumpDecorators(cls.decorators)
+    this.dumpTypeParams(cls.typeParams)
+    const base = cls.base
+    if (base != undefined) {
+      this.dumpType(base)
+    }
+    const baseExpr = cls.baseExpr
+    if (baseExpr != undefined) {
+      this.dumpExpr(baseExpr)
+    }
+    this.dumpTypes(cls.interfaces)
+    for (const field of cls.fields) {
+      this.dumpField(field)
+    }
+    for (const method of cls.methods) {
+      this.dumpFunction(method)
+    }
+    for (const ctor of cls.constructors) {
+      this.dumpFunction(ctor)
+    }
+    this.back()
+  }
+
+  private dumpField(field: ClassField): void {
+    this.line(`Field ${field.loc} ${this.quote(field.name)} form=${field.form} ` +
+              `presence=${field.presence} ro=${this.flag(field.readonly)} ` +
+              `override=${this.flag(field.isOverride)} access=${field.access} ` +
+              `accessor=${this.flag(field.accessor)} dec=${field.decorators.length}`)
+    this.nested()
+    this.dumpDecorators(field.decorators)
+    this.dumpOptionalType(field.type)
+    this.dumpOptionalExpr(field.init)
+    this.back()
+  }
+
+  private dumpOptionalExpr(expr: Expr | undefined): void {
+    if (expr == undefined) {
+      return this.missing()
+    }
+    this.dumpExpr(expr)
+  }
+
+  private dumpChildren(exprs: Expr[]): void {
+    this.nested()
+    for (const expr of exprs) {
+      this.dumpExpr(expr)
+    }
+    this.back()
+  }
+
+  private propertyForm(prop: Property): string {
+    const form = prop.form
+    switch (form.kind) {
+      case PropertyKind.Value:
+        return "Value"
+      case PropertyKind.Method:
+        return "Method"
+      case PropertyKind.Defaulted:
+        return "Defaulted"
+      case PropertyKind.Computed:
+        return "Computed"
+      case PropertyKind.Spread: {
+        const keys = form.omitKeys.map(key => `${key.loc}`).join(",")
+        return `Spread omit=${this.quoteAll(form.omit)} keys=[${keys}]`
+      }
+    }
+  }
+
+  private dumpExpr(expr: Expr): void {
+    const loc = expr.loc
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+        return this.line(`IntLit ${loc} ${expr.value} ${this.quote(this.spanText(expr.text))}`)
+      case ExprKind.FloatLit:
+        return this.line(`FloatLit ${loc} ${this.bits(expr.value)} ${this.quote(this.spanText(expr.text))}`)
+      case ExprKind.BoolLit:
+        return this.line(`BoolLit ${loc} ${this.flag(expr.value)}`)
+      case ExprKind.StringLit:
+        return this.line(`StringLit ${loc} ${this.units(expr.value)}`)
+      case ExprKind.Undefined:
+        return this.line(`Undefined ${loc}`)
+      case ExprKind.RegexLit:
+        return this.line(`RegexLit ${loc} ${this.units(expr.pattern)} ${this.units(expr.flags)} ` +
+                         `written=${expr.written}`)
+      case ExprKind.Template: {
+        const quasis = expr.quasis.map(quasi => ` ${this.units(quasi)}`).join("")
+        this.line(`Template ${loc} n=${expr.quasis.length}${quasis}`)
+        return this.dumpChildren(expr.exprs)
+      }
+      case ExprKind.ArrayLit:
+        this.line(`ArrayLit ${loc} n=${expr.elements.length}`)
+        this.nested()
+        for (const element of expr.elements) {
+          this.line(`Element ${this.flag(element.spread)} ${this.flag(element.hole)}`)
+          this.dumpChildren([element.expr])
+        }
+        return this.back()
+      case ExprKind.ObjectLit:
+        this.line(`ObjectLit ${loc} n=${expr.props.length}`)
+        this.nested()
+        for (const prop of expr.props) {
+          this.dumpProperty(prop)
+        }
+        return this.back()
+      default:
+        return this.dumpCompound(expr)
+    }
+  }
+
+  private dumpProperty(prop: Property): void {
+    this.line(`Property ${prop.loc} ${this.quote(prop.name)} ${this.propertyForm(prop)}`)
+    this.nested()
+    const form = prop.form
+    if (form.kind == PropertyKind.Computed) {
+      this.dumpExpr(form.key)
+    }
+    this.dumpExpr(prop.value)
+    this.back()
+  }
+
+  private dumpCompound(expr: Expr): void {
+    const loc = expr.loc
+    switch (expr.kind) {
+      case ExprKind.Name:
+        this.line(`Name ${loc} ${this.quote(expr.name)} targs=${expr.typeArgs.length}`)
+        this.nested()
+        this.dumpTypes(expr.typeArgs)
+        return this.back()
+      case ExprKind.Member:
+        this.line(`Member ${loc} ${this.quote(expr.name)} opt=${this.flag(expr.optional)} ` +
+                  `targs=${expr.typeArgs.length}`)
+        this.nested()
+        this.dumpExpr(expr.object)
+        this.dumpTypes(expr.typeArgs)
+        return this.back()
+      case ExprKind.Index:
+        this.line(`Index ${loc} opt=${this.flag(expr.optional)}`)
+        return this.dumpChildren([expr.object, expr.index])
+      case ExprKind.Unary:
+        this.line(`Unary ${loc} ${expr.op}`)
+        return this.dumpChildren([expr.operand])
+      case ExprKind.Binary:
+        this.line(`Binary ${loc} ${expr.op} src=${this.span(expr.source)}`)
+        return this.dumpChildren([expr.lhs, expr.rhs])
+      case ExprKind.Assign: {
+        const op = expr.op
+        const opText = op == undefined ? "-" : `${op}`
+        this.line(`Assign ${loc} ${opText} src=${this.span(expr.source)}`)
+        return this.dumpChildren([expr.target, expr.value])
+      }
+      case ExprKind.Update:
+        this.line(`Update ${loc} inc=${this.flag(expr.increment)} prefix=${this.flag(expr.prefix)}`)
+        return this.dumpChildren([expr.target])
+      case ExprKind.Conditional:
+        this.line(`Conditional ${loc}`)
+        return this.dumpChildren([expr.cond, expr.thenExpr, expr.elseExpr])
+      case ExprKind.Cast:
+        this.line(`Cast ${loc}`)
+        this.nested()
+        this.dumpExpr(expr.operand)
+        this.dumpType(expr.target)
+        return this.back()
+      case ExprKind.Sequence:
+        this.line(`Sequence ${loc} n=${expr.exprs.length}`)
+        return this.dumpChildren(expr.exprs)
+      default:
+        return this.dumpCall(expr)
+    }
+  }
+
+  private dumpCall(expr: Expr): void {
+    const loc = expr.loc
+    switch (expr.kind) {
+      case ExprKind.Call:
+        this.line(`Call ${loc} opt=${this.flag(expr.optional)} tagged=${this.flag(expr.tagged)} ` +
+                  `n=${expr.args.length} spread=${this.flags(expr.spread)}`)
+        return this.dumpChildren([expr.callee].concat(expr.args))
+      case ExprKind.New: {
+        const callee = expr.callee
+        this.line(`New ${loc} ${this.quote(expr.name)} ${this.quote(expr.member)} ` +
+                  `targs=${expr.typeArgs.length} n=${expr.args.length} ` +
+                  `callee=${this.flag(callee != undefined)}`)
+        this.nested()
+        if (callee != undefined) {
+          this.dumpExpr(callee)
+        }
+        this.dumpTypes(expr.typeArgs)
+        for (const arg of expr.args) {
+          this.dumpExpr(arg)
+        }
+        return this.back()
+      }
+      case ExprKind.OptionalChain:
+        this.line(`OptionalChain ${loc}`)
+        return this.dumpChildren([expr.chain])
+      case ExprKind.Function:
+        this.line(`FunctionExpr ${loc}`)
+        this.nested()
+        this.dumpFunction(expr.fn)
+        return this.back()
+      case ExprKind.Yield:
+        this.line(`Yield ${loc} delegate=${this.flag(expr.delegate)}`)
+        this.nested()
+        this.dumpOptionalExpr(expr.value)
+        return this.back()
+      case ExprKind.Await:
+        this.line(`Await ${loc}`)
+        return this.dumpChildren([expr.value])
+      case ExprKind.Class:
+        this.line(`ClassExpr ${loc}`)
+        this.nested()
+        this.dumpClass(expr.decl)
+        return this.back()
+      default:
+        return this.line(`Unknown ${loc}`)
+    }
+  }
+
+  private dumpOptionalType(ref: TypeRef | undefined): void {
+    if (ref == undefined) {
+      return this.missing()
+    }
+    this.dumpType(ref)
+  }
+
+  private dumpTypes(refs: TypeRef[]): void {
+    for (const ref of refs) {
+      this.dumpType(ref)
+    }
+  }
+
+  private typeExtras(ref: TypeRef): string {
+    const form = ref.form
+    switch (form.kind) {
+      case TypeKind.Function:
+        return ` names=${this.quoteAll(form.names)} opt=${this.flags(form.optional)} ` +
+          `rest=${this.flag(form.rest)}`
+      case TypeKind.Object: {
+        const locs = form.locs.map(loc => `${loc}`).join(",")
+        return ` names=${this.quoteAll(form.names)} locs=[${locs}] opt=${this.flags(form.optional)} ` +
+          `ro=${this.flags(form.readonly)} methods=${this.flags(form.methods)}`
+      }
+      case TypeKind.Tuple:
+        return ` ro=${this.flags(form.readonly)} spread=${this.flags(form.spread)}`
+      case TypeKind.Literal:
+        return ` text=${this.units(form.text)} number=${this.bits(form.number)} ` +
+          `int=${this.flag(form.integer)}`
+      case TypeKind.Predicate:
+        return ` asserts=${this.flag(form.asserts)}`
+      case TypeKind.TypeOf:
+        return ` names=${this.quoteAll(form.names)}`
+      case TypeKind.Mapped:
+        return ` opt=${form.mappedOptional} ro=${form.mappedReadonly}`
+      case TypeKind.Template: {
+        const texts = form.texts.map(text => this.units(text)).join(",")
+        return ` texts=[${texts}]`
+      }
+      default:
+        return ""
+    }
+  }
+
+  private dumpType(ref: TypeRef): void {
+    this.line(`Type ${ref.loc} ${typeKindName(ref.form.kind)} ${this.quote(ref.name)} ` +
+              `src=${this.span(ref.source)} n=${ref.args.length}${this.typeExtras(ref)}`)
+    this.nested()
+    this.dumpTypes(ref.args)
+    this.back()
+  }
+}

@@ -1,0 +1,14 @@
+// The rules of 'partial class': a part has only methods, the file of its class
+// lists it, and it sees only the names of its own file.
+import { Shape } from "./shape.tz"
+import { Box } from "./box.tz"
+// expect-error: an import must name what it takes: 'import "./plain.tz"' only lists a file with a part of a class declared here ('partial class')
+import "./plain.tz"
+
+function local(): void {
+  // expect-error: 'partial class' is written only at the top level of a file
+  partial class Inner {}
+}
+
+local()
+console.log(new Shape(2).area(), new Box<int>().size())

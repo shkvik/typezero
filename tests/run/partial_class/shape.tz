@@ -1,0 +1,20 @@
+import "./shape_area.tz"
+import "./shape_text.tz"
+
+export class Shape {
+  private readonly name: string
+  private readonly side: double
+
+  constructor(name: string, side: double) {
+    this.name = name
+    this.side = side
+  }
+
+  public isEven(n: int): boolean {
+    if (n <= 0) {
+      return true
+    }
+
+    return this.isOdd(n - 1)
+  }
+}

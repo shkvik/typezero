@@ -109,6 +109,7 @@ private:
 
   void startParentClass(ClassDecl *classDecl);
   void pushSignature(FunctionDecl *functionDecl);
+  void pushMethodSignature(FunctionDecl *method);
   void linkParent(ClassDecl *classDecl, ClassDecl *parent);
   void planObjectDefault(const Type *type, DefaultRun &run);
   void resolveFamily(ClassDecl *classDecl, DefaultRun &run);

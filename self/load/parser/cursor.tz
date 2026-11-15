@@ -1,0 +1,253 @@
+import { Token, TokenKind } from "../../token.tz";
+import { Span } from "../../ast.tz";
+
+export type Mark = { readonly at: int; readonly recovering: boolean };
+
+export type ParseError = { readonly loc: int; readonly message: string };
+
+const kEnd: Token = {
+  kind: TokenKind.End,
+  start: 0,
+  end: 0,
+  text: "",
+  newline: false,
+  hash: false,
+};
+
+export class Cursor {
+  private readonly tokens: Token[];
+  private at: int;
+  private recovering: boolean;
+  private discarding: int;
+  public readonly errors: ParseError[];
+
+  public constructor(tokens: Token[]) {
+    this.tokens = tokens;
+    this.at = 0;
+    this.recovering = false;
+    this.discarding = 0;
+    this.errors = [];
+  }
+
+  public peek(): Token {
+    return this.tokens[this.at] ?? this.last();
+  }
+
+  public lookahead(): Token {
+    return this.tokens[this.at + 1] ?? this.last();
+  }
+
+  public tokenAt(offset: int): Token {
+    return this.tokens[this.at + offset] ?? this.last();
+  }
+
+  public next(): Token {
+    const token = this.peek();
+    this.at += 1;
+
+    return token;
+  }
+
+  public skip(count: int): void {
+    for (let i = 0; i < count; i++) {
+      this.next();
+    }
+  }
+
+  public is(kind: TokenKind): boolean {
+    return this.peek().kind == kind;
+  }
+
+  public isWord(text: string): boolean {
+    const token = this.peek();
+
+    return token.kind == TokenKind.Identifier && token.text == text;
+  }
+
+  public accept(kind: TokenKind): boolean {
+    if (!this.is(kind)) {
+      return false;
+    }
+    this.next();
+
+    return true;
+  }
+
+  public expect(kind: TokenKind, context: string): boolean {
+    if (this.accept(kind)) {
+      return true;
+    }
+    this.error(
+      this.peek().start,
+      `expected ${kind} ${context}, found ${this.peek().kind}`,
+    );
+
+    return false;
+  }
+
+  public expectSemicolon(): void {
+    if (this.accept(TokenKind.Semi)) {
+      return;
+    }
+    const token = this.peek();
+    if (
+      token.kind == TokenKind.RBrace ||
+      token.kind == TokenKind.End ||
+      token.newline
+    ) {
+      return;
+    }
+    this.error(token.start, `expected ';', found ${token.kind}`);
+  }
+
+  public spanFrom(start: int): Span {
+    const end = this.previousEnd();
+
+    return { start, end: end > start ? end : start };
+  }
+
+  public error(loc: int, message: string): void {
+    if (this.recovering) {
+      return;
+    }
+    this.recovering = true;
+    this.record(loc, message);
+  }
+
+  public report(loc: int, message: string): void {
+    if (!this.recovering) {
+      this.record(loc, message);
+    }
+  }
+
+  public isRecovering(): boolean {
+    return this.recovering;
+  }
+
+  public stopRecovering(): void {
+    this.recovering = false;
+  }
+
+  public restoreRecovering(mark: Mark): void {
+    this.recovering = mark.recovering;
+  }
+
+  public startDiscarding(): void {
+    this.discarding += 1;
+  }
+
+  public stopDiscarding(): void {
+    this.discarding -= 1;
+  }
+
+  public mark(): Mark {
+    return { at: this.at, recovering: this.recovering };
+  }
+
+  public reset(mark: Mark): void {
+    this.at = mark.at;
+    this.recovering = mark.recovering;
+  }
+
+  public symbolKeyAhead(): boolean {
+    const next = this.lookahead();
+
+    return (
+      this.is(TokenKind.LBracket) &&
+      next.kind == TokenKind.Identifier &&
+      next.text == "Symbol"
+    );
+  }
+
+  public synchronize(): void {
+    this.recovering = false;
+    while (!this.is(TokenKind.End) && !this.is(TokenKind.RBrace)) {
+      if (this.accept(TokenKind.Semi)) {
+        return;
+      }
+      if (this.peek().newline && this.startsStatement()) {
+        return;
+      }
+      this.next();
+    }
+  }
+
+  public skipToClosingBrace(): void {
+    let depth = 0;
+    while (!this.is(TokenKind.End)) {
+      const token = this.next();
+      if (token.kind == TokenKind.LBrace) {
+        depth += 1;
+      } else if (token.kind == TokenKind.RBrace) {
+        if (depth == 0) {
+          return;
+        }
+        depth -= 1;
+      }
+    }
+  }
+
+  private previousEnd(): int {
+    const previous = this.tokens[this.at - 1];
+
+    return previous == undefined ? 0 : previous.end;
+  }
+
+  private startsStatement(): boolean {
+    const token = this.peek();
+    switch (token.kind) {
+      case TokenKind.Let:
+      case TokenKind.Const:
+      case TokenKind.Var:
+      case TokenKind.Function:
+      case TokenKind.If:
+      case TokenKind.While:
+      case TokenKind.Do:
+      case TokenKind.For:
+      case TokenKind.Switch:
+      case TokenKind.Case:
+      case TokenKind.Default:
+      case TokenKind.Enum:
+      case TokenKind.Return:
+      case TokenKind.Break:
+      case TokenKind.Continue:
+      case TokenKind.Debugger:
+        return true;
+      case TokenKind.Identifier:
+        return this.startsDeclaration(token.text);
+      default:
+        return false;
+    }
+  }
+
+  private startsDeclaration(text: string): boolean {
+    switch (text) {
+      case "import":
+      case "export":
+      case "throw":
+      case "try":
+        return true;
+      case "type":
+      case "interface":
+      case "namespace":
+      case "module":
+      case "declare":
+      case "class": {
+        const next = this.lookahead();
+        return next.kind == TokenKind.Identifier && !next.newline;
+      }
+      default:
+        return false;
+    }
+  }
+
+  private last(): Token {
+    return this.tokens[this.tokens.length - 1] ?? kEnd;
+  }
+
+  private record(loc: int, message: string): void {
+    if (this.discarding == 0) {
+      this.errors.push({ loc, message });
+    }
+  }
+}

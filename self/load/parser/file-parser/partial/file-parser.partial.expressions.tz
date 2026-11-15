@@ -1,0 +1,1277 @@
+import { FileParser } from "../file-parser.tz";
+import { Token, TokenKind, isKeyword } from "../../../../token.tz";
+import {
+  ArrayElement,
+  BinaryOp,
+  Expr,
+  ExprKind,
+  FunctionPlace,
+  Property,
+  PropertyKind,
+  TemplateExpr,
+  UnaryOp,
+  kNoSpan,
+} from "../../../../ast.tz";
+
+enum Precedence {
+  None,
+  Or,
+  And,
+  BitOr,
+  BitXor,
+  BitAnd,
+  Equality,
+  Relational,
+  Shift,
+  Additive,
+  Multiplicative,
+  Power,
+}
+
+type Operator = { readonly kind: TokenKind; readonly width: int };
+
+export type Arguments = { readonly args: Expr[]; readonly spread: boolean[] };
+
+type ChainState = { optional: boolean };
+
+function binaryPrecedence(kind: TokenKind): Precedence {
+  switch (kind) {
+    case TokenKind.PipePipe:
+    case TokenKind.QuestionQuestion:
+      return Precedence.Or;
+    case TokenKind.AmpAmp:
+      return Precedence.And;
+    case TokenKind.Pipe:
+      return Precedence.BitOr;
+    case TokenKind.Caret:
+      return Precedence.BitXor;
+    case TokenKind.Amp:
+      return Precedence.BitAnd;
+    case TokenKind.EqEq:
+    case TokenKind.EqEqEq:
+    case TokenKind.BangEq:
+    case TokenKind.BangEqEq:
+      return Precedence.Equality;
+    case TokenKind.Less:
+    case TokenKind.LessEq:
+    case TokenKind.Greater:
+    case TokenKind.GreaterEq:
+    case TokenKind.In:
+      return Precedence.Relational;
+    case TokenKind.Shl:
+    case TokenKind.Shr:
+    case TokenKind.UShr:
+      return Precedence.Shift;
+    case TokenKind.Plus:
+    case TokenKind.Minus:
+      return Precedence.Additive;
+    case TokenKind.Star:
+    case TokenKind.Slash:
+    case TokenKind.Percent:
+      return Precedence.Multiplicative;
+    case TokenKind.StarStar:
+      return Precedence.Power;
+    default:
+      return Precedence.None;
+  }
+}
+
+function binaryOpFor(kind: TokenKind): BinaryOp {
+  switch (kind) {
+    case TokenKind.PipePipe:
+      return BinaryOp.LogOr;
+    case TokenKind.QuestionQuestion:
+      return BinaryOp.Nullish;
+    case TokenKind.AmpAmp:
+      return BinaryOp.LogAnd;
+    case TokenKind.Pipe:
+      return BinaryOp.BitOr;
+    case TokenKind.Caret:
+      return BinaryOp.BitXor;
+    case TokenKind.Amp:
+      return BinaryOp.BitAnd;
+    case TokenKind.EqEq:
+    case TokenKind.EqEqEq:
+      return BinaryOp.Eq;
+    case TokenKind.BangEq:
+    case TokenKind.BangEqEq:
+      return BinaryOp.Ne;
+    case TokenKind.Less:
+      return BinaryOp.Lt;
+    case TokenKind.LessEq:
+      return BinaryOp.Le;
+    case TokenKind.Greater:
+      return BinaryOp.Gt;
+    case TokenKind.GreaterEq:
+      return BinaryOp.Ge;
+    case TokenKind.In:
+      return BinaryOp.In;
+    case TokenKind.Shl:
+      return BinaryOp.Shl;
+    case TokenKind.Shr:
+      return BinaryOp.Shr;
+    case TokenKind.UShr:
+      return BinaryOp.UShr;
+    case TokenKind.Plus:
+      return BinaryOp.Add;
+    case TokenKind.Minus:
+      return BinaryOp.Sub;
+    case TokenKind.Star:
+      return BinaryOp.Mul;
+    case TokenKind.StarStar:
+      return BinaryOp.Pow;
+    case TokenKind.Slash:
+      return BinaryOp.Div;
+    default:
+      return BinaryOp.Rem;
+  }
+}
+
+function isAssignment(kind: TokenKind): boolean {
+  return (
+    kind == TokenKind.Assign ||
+    (kind >= TokenKind.PlusAssign && kind <= TokenKind.PipePipeAssign)
+  );
+}
+
+function assignmentOp(kind: TokenKind): BinaryOp | undefined {
+  switch (kind) {
+    case TokenKind.PlusAssign:
+      return BinaryOp.Add;
+    case TokenKind.MinusAssign:
+      return BinaryOp.Sub;
+    case TokenKind.StarAssign:
+      return BinaryOp.Mul;
+    case TokenKind.StarStarAssign:
+      return BinaryOp.Pow;
+    case TokenKind.SlashAssign:
+      return BinaryOp.Div;
+    case TokenKind.PercentAssign:
+      return BinaryOp.Rem;
+    case TokenKind.AmpAssign:
+      return BinaryOp.BitAnd;
+    case TokenKind.PipeAssign:
+      return BinaryOp.BitOr;
+    case TokenKind.CaretAssign:
+      return BinaryOp.BitXor;
+    case TokenKind.ShlAssign:
+      return BinaryOp.Shl;
+    case TokenKind.ShrAssign:
+      return BinaryOp.Shr;
+    case TokenKind.UShrAssign:
+      return BinaryOp.UShr;
+    case TokenKind.QuestionQuestionAssign:
+      return BinaryOp.Nullish;
+    case TokenKind.AmpAmpAssign:
+      return BinaryOp.LogAnd;
+    case TokenKind.PipePipeAssign:
+      return BinaryOp.LogOr;
+    default:
+      return undefined;
+  }
+}
+
+function unaryOpFor(kind: TokenKind): UnaryOp | undefined {
+  switch (kind) {
+    case TokenKind.Minus:
+      return UnaryOp.Neg;
+    case TokenKind.Plus:
+      return UnaryOp.Plus;
+    case TokenKind.Bang:
+      return UnaryOp.Not;
+    case TokenKind.Tilde:
+      return UnaryOp.BitNot;
+    case TokenKind.Typeof:
+      return UnaryOp.TypeOf;
+    case TokenKind.Void:
+      return UnaryOp.Void;
+    case TokenKind.Delete:
+      return UnaryOp.Delete;
+    default:
+      return undefined;
+  }
+}
+
+function endsYield(kind: TokenKind): boolean {
+  switch (kind) {
+    case TokenKind.RParen:
+    case TokenKind.RBracket:
+    case TokenKind.RBrace:
+    case TokenKind.Comma:
+    case TokenKind.Semi:
+    case TokenKind.Colon:
+    case TokenKind.Question:
+    case TokenKind.End:
+    case TokenKind.TemplateMiddle:
+    case TokenKind.TemplateTail:
+      return true;
+    default:
+      return false;
+  }
+}
+
+function invalid(loc: int): Expr {
+  return { kind: ExprKind.IntLit, loc, value: 0, text: kNoSpan };
+}
+
+partial class FileParser {
+  private sequence(): Expr {
+    const first = this.expression();
+    if (!this.cursor.is(TokenKind.Comma)) {
+      return first;
+    }
+    const exprs: Expr[] = [first];
+    while (this.cursor.accept(TokenKind.Comma)) {
+      const next = this.expression();
+      exprs.push(next);
+    }
+
+    return { kind: ExprKind.Sequence, loc: first.loc, exprs };
+  }
+
+  private expression(): Expr {
+    const start = this.cursor.peek().start;
+    if (this.cursor.isWord("yield")) {
+      return this.yieldExpression();
+    }
+    const target = this.conditional();
+    const op = this.operator();
+    if (!isAssignment(op.kind)) {
+      return target;
+    }
+    const loc = this.cursor.peek().start;
+    this.cursor.skip(op.width);
+    const value = this.expression();
+
+    return {
+      kind: ExprKind.Assign,
+      loc,
+      op: assignmentOp(op.kind),
+      target,
+      value,
+      source: this.cursor.spanFrom(start),
+    };
+  }
+
+  private yieldExpression(): Expr {
+    const loc = this.cursor.next().start;
+    const delegate =
+      !this.cursor.peek().newline && this.cursor.accept(TokenKind.Star);
+    let value: Expr | undefined = undefined;
+    if (delegate) {
+      value = this.expression();
+    } else if (
+      !this.cursor.peek().newline &&
+      !endsYield(this.cursor.peek().kind)
+    ) {
+      const kind = this.cursor.peek().kind;
+      const operand =
+        binaryPrecedence(kind) == Precedence.None ||
+        kind == TokenKind.Plus ||
+        kind == TokenKind.Minus ||
+        kind == TokenKind.Less;
+      if (operand) {
+        value = this.expression();
+      }
+    }
+    if (!this.inGenerator) {
+      this.cursor.report(
+        loc,
+        "'yield' can only be used in a generator function",
+      );
+      return value ?? { kind: ExprKind.Undefined, loc };
+    }
+
+    return { kind: ExprKind.Yield, loc, value, delegate };
+  }
+
+  private conditional(): Expr {
+    const cond = this.binary(Precedence.None);
+    if (!this.cursor.is(TokenKind.Question)) {
+      return cond;
+    }
+    const loc = this.cursor.next().start;
+    const thenExpr = this.expression();
+    this.cursor.expect(TokenKind.Colon, "in the conditional expression");
+    const elseExpr = this.expression();
+
+    return { kind: ExprKind.Conditional, loc, cond, thenExpr, elseExpr };
+  }
+
+  private operator(): Operator {
+    const token = this.cursor.peek();
+    if (token.kind != TokenKind.Greater) {
+      return { kind: token.kind, width: 1 };
+    }
+    if (this.glued(1, TokenKind.Greater)) {
+      if (this.glued(2, TokenKind.Greater)) {
+        return this.glued(3, TokenKind.Assign)
+          ? { kind: TokenKind.UShrAssign, width: 4 }
+          : { kind: TokenKind.UShr, width: 3 };
+      }
+      return this.glued(2, TokenKind.Assign)
+        ? { kind: TokenKind.ShrAssign, width: 3 }
+        : { kind: TokenKind.Shr, width: 2 };
+    }
+
+    return this.glued(1, TokenKind.Assign)
+      ? { kind: TokenKind.GreaterEq, width: 2 }
+      : { kind: TokenKind.Greater, width: 1 };
+  }
+
+  private glued(offset: int, kind: TokenKind): boolean {
+    const token = this.cursor.tokenAt(offset);
+    const before = this.cursor.tokenAt(offset - 1);
+
+    return token.kind == kind && token.start == before.end;
+  }
+
+  private binary(above: Precedence): Expr {
+    const start = this.cursor.peek().start;
+    const unary = unaryOpFor(this.cursor.peek().kind) != undefined;
+    let left = this.unary();
+    if (unary && this.cursor.is(TokenKind.StarStar)) {
+      this.cursor.report(
+        this.cursor.peek().start,
+        "the left side of '**' cannot be a unary expression",
+      );
+    }
+    while (this.continuesBinary(above)) {
+      left = this.binaryStep(left, start);
+    }
+
+    return left;
+  }
+
+  private continuesBinary(above: Precedence): boolean {
+    const token = this.cursor.peek();
+    if (token.kind == TokenKind.As || this.cursor.isWord("instanceof")) {
+      return Precedence.Relational > above;
+    }
+    if (this.cursor.isWord("satisfies")) {
+      return !token.newline && Precedence.Relational > above;
+    }
+    if (token.kind == TokenKind.In && this.noIn) {
+      return false;
+    }
+
+    return binaryPrecedence(this.operator().kind) > above;
+  }
+
+  private binaryStep(left: Expr, start: int): Expr {
+    const token = this.cursor.peek();
+    if (token.kind == TokenKind.As) {
+      this.cursor.next();
+      const target = this.type();
+      return { kind: ExprKind.Cast, loc: token.start, operand: left, target };
+    }
+    if (this.cursor.isWord("satisfies")) {
+      this.cursor.next();
+      this.type();
+      this.cursor.report(
+        token.start,
+        "'satisfies' is not supported, just as 'as' is not",
+      );
+      return left;
+    }
+    if (this.cursor.isWord("instanceof")) {
+      this.cursor.next();
+      const right = this.binary(Precedence.Relational);
+      return {
+        kind: ExprKind.Binary,
+        loc: token.start,
+        op: BinaryOp.InstanceOf,
+        lhs: left,
+        rhs: right,
+        source: this.cursor.spanFrom(start),
+      };
+    }
+    const op = this.operator();
+    const precedence = binaryPrecedence(op.kind);
+    if (op.kind == TokenKind.EqEqEq) {
+      this.cursor.report(token.start, "'===' is not supported; use '=='");
+    } else if (op.kind == TokenKind.BangEqEq) {
+      this.cursor.report(token.start, "'!==' is not supported; use '!='");
+    }
+    this.cursor.skip(op.width);
+    const floor =
+      precedence == Precedence.Power ? Precedence.Multiplicative : precedence;
+    const right = this.binary(floor);
+
+    return {
+      kind: ExprKind.Binary,
+      loc: token.start,
+      op: binaryOpFor(op.kind),
+      lhs: left,
+      rhs: right,
+      source: this.cursor.spanFrom(start),
+    };
+  }
+
+  private unary(): Expr {
+    const token = this.cursor.peek();
+    if (this.cursor.isWord("await")) {
+      this.cursor.next();
+      const value = this.unary();
+      return { kind: ExprKind.Await, loc: token.start, value };
+    }
+    if (
+      token.kind == TokenKind.PlusPlus ||
+      token.kind == TokenKind.MinusMinus
+    ) {
+      this.cursor.next();
+      const target = this.unary();
+      return {
+        kind: ExprKind.Update,
+        loc: token.start,
+        increment: token.kind == TokenKind.PlusPlus,
+        prefix: true,
+        target,
+      };
+    }
+    const op = unaryOpFor(token.kind);
+    if (op == undefined) {
+      return this.postfix();
+    }
+    this.cursor.next();
+    const operand = this.unary();
+
+    return { kind: ExprKind.Unary, loc: token.start, op, operand };
+  }
+
+  private postfix(): Expr {
+    const target = this.callOrMember();
+    const token = this.cursor.peek();
+    const update =
+      (token.kind == TokenKind.PlusPlus ||
+        token.kind == TokenKind.MinusMinus) &&
+      !token.newline;
+    if (!update) {
+      return target;
+    }
+    this.cursor.next();
+
+    return {
+      kind: ExprKind.Update,
+      loc: token.start,
+      increment: token.kind == TokenKind.PlusPlus,
+      prefix: false,
+      target,
+    };
+  }
+
+  private arguments(): Arguments {
+    const saved = this.noIn;
+    this.noIn = false;
+    const args: Expr[] = [];
+    const spread: boolean[] = [];
+    let more =
+      !this.cursor.is(TokenKind.RParen) && !this.cursor.is(TokenKind.End);
+    while (more) {
+      const spreads = this.cursor.accept(TokenKind.Ellipsis);
+      if (spreads || spread.length > 0) {
+        while (spread.length < args.length) {
+          spread.push(false);
+        }
+        spread.push(spreads);
+      }
+      const arg = this.expression();
+      args.push(arg);
+      more =
+        this.cursor.accept(TokenKind.Comma) &&
+        !this.cursor.is(TokenKind.RParen) &&
+        !this.cursor.is(TokenKind.End);
+    }
+    this.cursor.expect(TokenKind.RParen, "to close the argument list");
+    this.noIn = saved;
+
+    return { args, spread };
+  }
+
+  private indexInside(): Expr {
+    const saved = this.noIn;
+    this.noIn = false;
+    const index = this.sequence();
+    this.cursor.expect(TokenKind.RBracket, "to close the index");
+    this.noIn = saved;
+
+    return index;
+  }
+
+  private isPropertyName(): boolean {
+    return (
+      this.cursor.is(TokenKind.Identifier) || isKeyword(this.cursor.peek().kind)
+    );
+  }
+
+  private callOrMember(): Expr {
+    const state: ChainState = { optional: false };
+    let expr = this.primary();
+    let link = this.chainLink(expr, state);
+    while (link != undefined) {
+      expr = link;
+      link = this.chainLink(expr, state);
+    }
+    if (!state.optional) {
+      return expr;
+    }
+
+    return { kind: ExprKind.OptionalChain, loc: expr.loc, chain: expr };
+  }
+
+  private chainLink(expr: Expr, state: ChainState): Expr | undefined {
+    if (this.cursor.is(TokenKind.Less) && this.typeArgumentsFor(expr, state)) {
+      return expr;
+    }
+    let optional = false;
+    if (this.cursor.is(TokenKind.QuestionDot)) {
+      optional = true;
+      state.optional = true;
+      this.cursor.next();
+      if (this.isPropertyName()) {
+        const name = this.cursor.next();
+        return {
+          kind: ExprKind.Member,
+          loc: name.start,
+          object: expr,
+          name: name.text,
+          optional: true,
+          typeArgs: [],
+        };
+      }
+      if (
+        !this.cursor.is(TokenKind.LParen) &&
+        !this.cursor.is(TokenKind.LBracket)
+      ) {
+        this.cursor.error(
+          this.cursor.peek().start,
+          "expected a property name, '[' or '(' after '?.'",
+        );
+        return undefined;
+      }
+    }
+    const token = this.cursor.peek();
+    switch (token.kind) {
+      case TokenKind.LParen: {
+        this.cursor.next();
+        const list = this.arguments();
+        return {
+          kind: ExprKind.Call,
+          loc: expr.loc,
+          callee: expr,
+          args: list.args,
+          spread: list.spread,
+          optional,
+          tagged: false,
+        };
+      }
+      case TokenKind.Dot: {
+        this.cursor.next();
+        if (!this.isPropertyName()) {
+          this.cursor.error(
+            this.cursor.peek().start,
+            "expected a property name after '.'",
+          );
+          return undefined;
+        }
+        const name = this.cursor.next();
+        return {
+          kind: ExprKind.Member,
+          loc: name.start,
+          object: expr,
+          name: name.text,
+          optional: false,
+          typeArgs: [],
+        };
+      }
+      case TokenKind.LBracket: {
+        this.cursor.next();
+        const index = this.indexInside();
+        return {
+          kind: ExprKind.Index,
+          loc: token.start,
+          object: expr,
+          index,
+          optional,
+        };
+      }
+      case TokenKind.TemplateString:
+      case TokenKind.TemplateHead:
+        return this.taggedTemplate(expr, state.optional);
+      case TokenKind.Bang:
+        if (token.newline) {
+          return undefined;
+        }
+        this.cursor.next();
+        return {
+          kind: ExprKind.Unary,
+          loc: token.start,
+          op: UnaryOp.NonNull,
+          operand: expr,
+        };
+      default:
+        return undefined;
+    }
+  }
+
+  private typeArgumentsFor(expr: Expr, state: ChainState): boolean {
+    if (
+      expr.kind == ExprKind.Name &&
+      !state.optional &&
+      expr.typeArgs.length == 0
+    ) {
+      const args = this.tryTypeArguments(false);
+      if (args != undefined) {
+        expr.typeArgs = args;
+        return true;
+      }
+      return false;
+    }
+    if (expr.kind == ExprKind.Member && expr.typeArgs.length == 0) {
+      const args = this.tryTypeArguments(true);
+      if (args != undefined) {
+        expr.typeArgs = args;
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private taggedTemplate(tag: Expr, optional: boolean): Expr {
+    if (optional) {
+      this.cursor.report(
+        this.cursor.peek().start,
+        "a tagged template cannot be part of an optional chain",
+      );
+    }
+    let raw = false;
+    if (tag.kind == ExprKind.Member && tag.name == "raw") {
+      const object = tag.object;
+      raw = object.kind == ExprKind.Name && object.name == "String";
+    }
+    const tmpl = this.template(raw);
+    const elements: ArrayElement[] = [];
+    for (const text of tmpl.quasis) {
+      const value: Expr = {
+        kind: ExprKind.StringLit,
+        loc: tmpl.loc,
+        value: text,
+      };
+      elements.push({ expr: value, spread: false, hole: false });
+    }
+    const texts: Expr = { kind: ExprKind.ArrayLit, loc: tmpl.loc, elements };
+    const args: Expr[] = [texts];
+    for (const part of tmpl.exprs) {
+      args.push(part);
+    }
+
+    return {
+      kind: ExprKind.Call,
+      loc: tag.loc,
+      callee: tag,
+      args,
+      spread: [],
+      optional: false,
+      tagged: true,
+    };
+  }
+
+  private newArguments(): Expr[] {
+    const args: Expr[] = [];
+    if (!this.cursor.accept(TokenKind.LParen)) {
+      return args;
+    }
+    let more =
+      !this.cursor.is(TokenKind.RParen) && !this.cursor.is(TokenKind.End);
+    while (more) {
+      const arg = this.expression();
+      args.push(arg);
+      more =
+        this.cursor.accept(TokenKind.Comma) &&
+        !this.cursor.is(TokenKind.RParen) &&
+        !this.cursor.is(TokenKind.End);
+    }
+    this.cursor.expect(TokenKind.RParen, "to close the argument list");
+
+    return args;
+  }
+
+  private newExpression(): Expr {
+    const loc = this.cursor.next().start;
+    if (this.cursor.is(TokenKind.LParen)) {
+      return this.newOfExpression();
+    }
+    if (!this.cursor.is(TokenKind.Identifier)) {
+      this.cursor.error(
+        this.cursor.peek().start,
+        "expected a class name after 'new'",
+      );
+      return invalid(loc);
+    }
+    const name = this.cursor.next();
+    let member: Token | undefined = undefined;
+    if (this.cursor.accept(TokenKind.Dot)) {
+      if (this.cursor.is(TokenKind.Identifier)) {
+        member = this.cursor.next();
+      } else {
+        this.cursor.error(
+          this.cursor.peek().start,
+          "expected a name after '.'",
+        );
+      }
+    }
+    if (this.cursor.is(TokenKind.Dot) || this.cursor.is(TokenKind.LBracket)) {
+      const callee = this.newCallee(name, member);
+      const typeArgs = this.cursor.is(TokenKind.Less)
+        ? this.typeArguments()
+        : [];
+      const args = this.newArguments();
+      return {
+        kind: ExprKind.New,
+        loc: name.start,
+        name: "",
+        member: "",
+        typeArgs,
+        args,
+        callee,
+      };
+    }
+    const typeArgs = this.cursor.is(TokenKind.Less) ? this.typeArguments() : [];
+    const args = this.newArguments();
+    const memberName = member == undefined ? "" : member.text;
+
+    return {
+      kind: ExprKind.New,
+      loc: name.start,
+      name: name.text,
+      member: memberName,
+      typeArgs,
+      args,
+    };
+  }
+
+  private newOfExpression(): Expr {
+    const at = this.cursor.next().start;
+    const saved = this.noIn;
+    this.noIn = false;
+    const callee = this.sequence();
+    this.cursor.expect(TokenKind.RParen, "to close the class");
+    const args = this.newArguments();
+    this.noIn = saved;
+
+    return {
+      kind: ExprKind.New,
+      loc: at,
+      name: "",
+      member: "",
+      typeArgs: [],
+      args,
+      callee,
+    };
+  }
+
+  private newCallee(name: Token, member: Token | undefined): Expr {
+    let path: Expr = {
+      kind: ExprKind.Name,
+      loc: name.start,
+      name: name.text,
+      typeArgs: [],
+    };
+    if (member != undefined) {
+      path = {
+        kind: ExprKind.Member,
+        loc: member.start,
+        object: path,
+        name: member.text,
+        optional: false,
+        typeArgs: [],
+      };
+    }
+    while (
+      this.cursor.is(TokenKind.Dot) ||
+      this.cursor.is(TokenKind.LBracket)
+    ) {
+      const token = this.cursor.next();
+      if (token.kind == TokenKind.LBracket) {
+        const index = this.indexInside();
+        path = {
+          kind: ExprKind.Index,
+          loc: token.start,
+          object: path,
+          index,
+          optional: false,
+        };
+        continue;
+      }
+      if (!this.isPropertyName()) {
+        this.cursor.error(
+          this.cursor.peek().start,
+          "expected a property name after '.'",
+        );
+        return path;
+      }
+      const property = this.cursor.next();
+      path = {
+        kind: ExprKind.Member,
+        loc: property.start,
+        object: path,
+        name: property.text,
+        optional: false,
+        typeArgs: [],
+      };
+    }
+
+    return path;
+  }
+
+  private template(raw: boolean): TemplateExpr {
+    const loc = this.cursor.peek().start;
+    const quasis: string[] = [this.templateText(raw)];
+    const exprs: Expr[] = [];
+    let done = this.cursor.is(TokenKind.TemplateString);
+    this.cursor.next();
+    while (!done) {
+      const part = this.sequence();
+      exprs.push(part);
+      if (
+        !this.cursor.is(TokenKind.TemplateMiddle) &&
+        !this.cursor.is(TokenKind.TemplateTail)
+      ) {
+        this.cursor.error(
+          this.cursor.peek().start,
+          "expected '}' to close the template substitution",
+        );
+        quasis.push("");
+        return { kind: ExprKind.Template, loc, quasis, exprs };
+      }
+      quasis.push(this.templateText(raw));
+      done = this.cursor.is(TokenKind.TemplateTail);
+      this.cursor.next();
+    }
+
+    return { kind: ExprKind.Template, loc, quasis, exprs };
+  }
+
+  private templateText(raw: boolean): string {
+    const token = this.cursor.peek();
+    if (raw) {
+      return this.literals.templateRaw(token);
+    }
+    const decoded = this.literals.templatePart(token);
+
+    return decoded.text;
+  }
+
+  private primary(): Expr {
+    const saved = this.noIn;
+    this.noIn = false;
+    const expr = this.primaryInside();
+    this.noIn = saved;
+
+    return expr;
+  }
+
+  private primaryInside(): Expr {
+    const token = this.cursor.peek();
+    const loc = token.start;
+    switch (token.kind) {
+      case TokenKind.At: {
+        const decorators = this.decorators();
+        this.rejectDecorators(decorators);
+        return this.cursor.isRecovering() ? invalid(loc) : this.primaryInside();
+      }
+      case TokenKind.Int:
+        return this.intLiteral();
+      case TokenKind.Float:
+        return this.floatLiteral();
+      case TokenKind.String: {
+        const decoded = this.literals.string(token);
+        this.cursor.next();
+        return { kind: ExprKind.StringLit, loc, value: decoded.text };
+      }
+      case TokenKind.TemplateString:
+      case TokenKind.TemplateHead:
+        return this.template(false);
+      case TokenKind.Regex: {
+        const text = this.literals.regex(token);
+        this.cursor.next();
+        return {
+          kind: ExprKind.RegexLit,
+          loc,
+          pattern: text.pattern,
+          flags: text.flags,
+          written: token.end - token.start,
+        };
+      }
+      case TokenKind.True:
+      case TokenKind.False:
+        this.cursor.next();
+        return {
+          kind: ExprKind.BoolLit,
+          loc,
+          value: token.kind == TokenKind.True,
+        };
+      case TokenKind.Identifier:
+        return this.identifierPrimary(token);
+      case TokenKind.Function: {
+        const fn = this.functionDecl(true, false);
+        return { kind: ExprKind.Function, loc, fn };
+      }
+      case TokenKind.LParen:
+        return this.parenthesized();
+      case TokenKind.LBracket:
+        return this.arrayLiteral();
+      case TokenKind.LBrace:
+        return this.objectLiteral();
+      case TokenKind.New:
+        return this.newExpression();
+      case TokenKind.Less:
+        return this.genericArrow(loc);
+      default:
+        this.cursor.error(loc, `expected an expression, found ${token.kind}`);
+        return invalid(loc);
+    }
+  }
+
+  private parenthesized(): Expr {
+    if (this.arrowAhead()) {
+      return this.arrow([], -1, false);
+    }
+    this.cursor.next();
+    const inner = this.sequence();
+    this.cursor.expect(
+      TokenKind.RParen,
+      "to close the parenthesized expression",
+    );
+
+    return inner;
+  }
+
+  private genericArrow(loc: int): Expr {
+    const start = this.cursor.mark();
+    const text = this.cursor.peek().start;
+    this.cursor.startDiscarding();
+    this.cursor.stopRecovering();
+    const typeParams = this.typeParams();
+    const isArrow =
+      !this.cursor.isRecovering() &&
+      this.cursor.is(TokenKind.LParen) &&
+      this.arrowAhead();
+    this.cursor.stopDiscarding();
+    if (isArrow) {
+      this.cursor.restoreRecovering(start);
+      return this.arrow(typeParams, text, false);
+    }
+    this.cursor.reset(start);
+    this.cursor.error(loc, "expected an expression, found '<'");
+
+    return invalid(loc);
+  }
+
+  private identifierPrimary(token: Token): Expr {
+    const loc = token.start;
+    const name = token.text;
+    const next = this.cursor.lookahead();
+    if (name == "import") {
+      this.cursor.report(
+        loc,
+        next.kind == TokenKind.Dot
+          ? "'import.meta' is not supported"
+          : "dynamic 'import()' is not supported",
+      );
+      this.cursor.next();
+      return invalid(loc);
+    }
+    if (next.kind == TokenKind.Arrow && !next.newline) {
+      return this.arrow([], -1, false);
+    }
+    if (name == "async") {
+      const fn = this.tryAsyncFunction();
+      if (fn != undefined) {
+        return fn;
+      }
+    }
+    if (
+      name == "class" &&
+      (next.kind == TokenKind.Identifier || next.kind == TokenKind.LBrace)
+    ) {
+      const decl = this.classDecl(true);
+      return { kind: ExprKind.Class, loc, decl };
+    }
+    if (name == "yield" && this.inGenerator) {
+      this.cursor.report(loc, "'yield' must be in parentheses here");
+      return this.yieldExpression();
+    }
+    this.cursor.next();
+    if (name == "undefined") {
+      return { kind: ExprKind.Undefined, loc };
+    }
+
+    return { kind: ExprKind.Name, loc, name, typeArgs: [] };
+  }
+
+  private arrayLiteral(): Expr {
+    const loc = this.cursor.next().start;
+    const elements: ArrayElement[] = [];
+    let more =
+      !this.cursor.is(TokenKind.RBracket) && !this.cursor.is(TokenKind.End);
+    while (more) {
+      if (this.cursor.is(TokenKind.Comma)) {
+        const hole = this.cursor.next();
+        elements.push({
+          expr: { kind: ExprKind.Undefined, loc: hole.start },
+          spread: false,
+          hole: true,
+        });
+        more =
+          !this.cursor.is(TokenKind.RBracket) && !this.cursor.is(TokenKind.End);
+        continue;
+      }
+      const spread = this.cursor.accept(TokenKind.Ellipsis);
+      const value = this.expression();
+      elements.push({ expr: value, spread, hole: false });
+      more =
+        this.cursor.accept(TokenKind.Comma) &&
+        !this.cursor.is(TokenKind.RBracket) &&
+        !this.cursor.is(TokenKind.End);
+    }
+    this.cursor.expect(TokenKind.RBracket, "to close the array");
+
+    return { kind: ExprKind.ArrayLit, loc, elements };
+  }
+
+  private objectLiteral(): Expr {
+    const loc = this.cursor.next().start;
+    const props: Property[] = [];
+    let more =
+      !this.cursor.is(TokenKind.RBrace) && !this.cursor.is(TokenKind.End);
+    while (more) {
+      if (this.cursor.is(TokenKind.At)) {
+        const decorators = this.decorators();
+        this.rejectDecorators(decorators);
+        if (this.cursor.isRecovering()) {
+          return { kind: ExprKind.ObjectLit, loc, props };
+        }
+      }
+      const prop = this.property();
+      if (prop == undefined) {
+        return { kind: ExprKind.ObjectLit, loc, props };
+      }
+      props.push(prop);
+      more =
+        this.cursor.accept(TokenKind.Comma) &&
+        !this.cursor.is(TokenKind.RBrace) &&
+        !this.cursor.is(TokenKind.End);
+    }
+    this.cursor.expect(TokenKind.RBrace, "to close the object");
+
+    return { kind: ExprKind.ObjectLit, loc, props };
+  }
+
+  private property(): Property | undefined {
+    const loc = this.cursor.peek().start;
+    if (this.cursor.accept(TokenKind.Ellipsis)) {
+      const value = this.expression();
+      return {
+        name: "",
+        loc,
+        value,
+        form: { kind: PropertyKind.Spread, omit: [], omitKeys: [] },
+      };
+    }
+    if (
+      !this.cursor.symbolKeyAhead() &&
+      this.cursor.accept(TokenKind.LBracket)
+    ) {
+      return this.computedProperty(loc);
+    }
+
+    return this.namedProperty(loc);
+  }
+
+  private computedProperty(loc: int): Property | undefined {
+    const key = this.expression();
+    this.cursor.expect(TokenKind.RBracket, "to close the key");
+    if (key.kind == ExprKind.Name) {
+      const constants = this.stringConstants.get(key.name) ?? [];
+      for (const text of constants) {
+        this.fieldNames.add(text);
+      }
+    } else if (key.kind == ExprKind.StringLit) {
+      this.fieldNames.add(key.value);
+    }
+    if (this.cursor.is(TokenKind.LParen) || this.cursor.is(TokenKind.Less)) {
+      this.cursor.error(loc, "a method cannot have a key in brackets");
+      this.cursor.skipToClosingBrace();
+      return undefined;
+    }
+    if (!this.cursor.expect(TokenKind.Colon, "after the key in brackets")) {
+      this.cursor.skipToClosingBrace();
+      return undefined;
+    }
+    const value = this.expression();
+
+    return { name: "", loc, value, form: { kind: PropertyKind.Computed, key } };
+  }
+
+  private accessorAhead(): boolean {
+    const next = this.cursor.lookahead();
+
+    return (
+      (this.cursor.isWord("get") || this.cursor.isWord("set")) &&
+      (next.kind == TokenKind.Identifier ||
+        isKeyword(next.kind) ||
+        next.kind == TokenKind.String)
+    );
+  }
+
+  private asyncMethodAhead(): boolean {
+    const next = this.cursor.lookahead();
+
+    return (
+      this.cursor.isWord("async") &&
+      next.kind != TokenKind.Colon &&
+      next.kind != TokenKind.Comma &&
+      next.kind != TokenKind.RBrace &&
+      next.kind != TokenKind.LParen &&
+      !next.newline
+    );
+  }
+
+  private namedProperty(loc: int): Property | undefined {
+    if (this.accessorAhead()) {
+      this.cursor.error(loc, "getters and setters are not supported");
+      this.cursor.skipToClosingBrace();
+      return undefined;
+    }
+    const isAsync = this.asyncMethodAhead();
+    if (isAsync) {
+      this.cursor.next();
+    }
+    const start = this.cursor.peek().start;
+    const generator = this.cursor.accept(TokenKind.Star);
+    const identifier = this.cursor.is(TokenKind.Identifier);
+    const name = this.fieldName();
+    if (name == undefined) {
+      this.cursor.skipToClosingBrace();
+      return undefined;
+    }
+    if (this.cursor.is(TokenKind.LParen) || this.cursor.is(TokenKind.Less)) {
+      return this.methodProperty(loc, name, start, generator, isAsync);
+    }
+    if (generator || isAsync) {
+      this.cursor.error(
+        this.cursor.peek().start,
+        "expected '(' after the name of the method",
+      );
+      this.cursor.skipToClosingBrace();
+      return undefined;
+    }
+    if (this.cursor.accept(TokenKind.Colon)) {
+      const value = this.expression();
+      return { name, loc, value, form: { kind: PropertyKind.Value } };
+    }
+    if (
+      identifier &&
+      (this.cursor.is(TokenKind.Comma) || this.cursor.is(TokenKind.RBrace))
+    ) {
+      const value: Expr =
+        name == "undefined"
+          ? { kind: ExprKind.Undefined, loc }
+          : { kind: ExprKind.Name, loc, name, typeArgs: [] };
+      return { name, loc, value, form: { kind: PropertyKind.Value } };
+    }
+    if (identifier && this.cursor.is(TokenKind.Assign)) {
+      const assignLoc = this.cursor.next().start;
+      const fallback = this.expression();
+      const value: Expr = {
+        kind: ExprKind.Assign,
+        loc: assignLoc,
+        target: { kind: ExprKind.Name, loc, name, typeArgs: [] },
+        value: fallback,
+        source: kNoSpan,
+      };
+      return { name, loc, value, form: { kind: PropertyKind.Defaulted } };
+    }
+    this.cursor.error(
+      this.cursor.peek().start,
+      `expected ':' after the field name, found ${this.cursor.peek().kind}`,
+    );
+    this.cursor.skipToClosingBrace();
+
+    return undefined;
+  }
+
+  private methodProperty(
+    loc: int,
+    name: string,
+    start: int,
+    generator: boolean,
+    isAsync: boolean,
+  ): Property | undefined {
+    const fn = this.method(
+      loc,
+      name,
+      start,
+      generator,
+      isAsync,
+      FunctionPlace.Expression,
+      undefined,
+    );
+    if (this.cursor.isRecovering() || fn.body == undefined) {
+      if (fn.body == undefined) {
+        this.cursor.error(
+          this.cursor.peek().start,
+          "expected '{' to start the body of the method",
+        );
+      }
+      this.cursor.skipToClosingBrace();
+      return undefined;
+    }
+    const value: Expr = { kind: ExprKind.Function, loc, fn };
+
+    return { name, loc, value, form: { kind: PropertyKind.Method } };
+  }
+
+  private intLiteral(): Expr {
+    const token = this.cursor.next();
+    const number = this.literals.integer(token);
+    if (!number.valid) {
+      this.cursor.report(token.start, "invalid integer literal");
+      return invalid(token.start);
+    }
+    const text = { start: token.start, end: token.end };
+    if (number.isInt) {
+      return {
+        kind: ExprKind.IntLit,
+        loc: token.start,
+        value: number.intValue,
+        text,
+      };
+    }
+
+    return {
+      kind: ExprKind.FloatLit,
+      loc: token.start,
+      value: number.doubleValue,
+      text,
+    };
+  }
+
+  private floatLiteral(): Expr {
+    const token = this.cursor.next();
+    const number = this.literals.float(token);
+    if (!number.valid) {
+      this.cursor.report(token.start, "invalid number literal");
+    }
+    const text = { start: token.start, end: token.end };
+
+    return {
+      kind: ExprKind.FloatLit,
+      loc: token.start,
+      value: number.doubleValue,
+      text,
+    };
+  }
+}

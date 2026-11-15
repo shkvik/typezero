@@ -43,6 +43,7 @@ private:
       Result<const FunctionDecl *, CodeClassesRegistryAbstractImplementedError>;
 
   void walkAbstract(ClassDecl *classDecl);
+  void walkPartMethod(FunctionDecl *functionDecl);
   void walkEmptySlot(const ClassDecl *classDecl, size_t slot);
   void walkImplements(ClassDecl *classDecl, KnownReturns &returns);
   void walkOverrideReturns(const ClassDecl *classDecl, KnownReturns &returns);

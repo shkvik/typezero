@@ -42,6 +42,14 @@ void ModuleStateContext::rememberDeclModule(const Stmt *decl, Module *module) {
   this->declModules[decl] = module;
 }
 
+void ModuleStateContext::rememberMemberModule(const FunctionDecl *method, Module *classModule) {
+  const ClassMember *member = method->member();
+  bool isFromPart = member != nullptr && member->partModule != nullptr;
+  Module *home = isFromPart ? member->partModule : classModule;
+
+  return this->rememberDeclModule(method, home);
+}
+
 bool ModuleStateContext::hasDeclModule(const Stmt *decl) const {
   return this->declModules.count(decl) > 0;
 }

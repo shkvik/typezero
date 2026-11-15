@@ -17,6 +17,7 @@ public:
   void enterLoading(Module *module);
   void rememberCurrentModule(Module *module);
   void rememberDeclModule(const Stmt *decl, Module *module);
+  void rememberMemberModule(const FunctionDecl *method, Module *classModule);
 
 
   bool isTopLevelDone() const;

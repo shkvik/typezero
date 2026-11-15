@@ -1,0 +1,9 @@
+import "./box_items.tz"
+
+export class Box<T> {
+  private readonly items: T[]
+
+  constructor() {
+    this.items = []
+  }
+}

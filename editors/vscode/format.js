@@ -12,6 +12,10 @@ const plugins = [require("./prettier/plugins/typescript.js"), require("./prettie
 // `range` ({ start, end }, offsets in the text), only the statements it
 // touches change. A Promise of the whole text; it rejects on a syntax error,
 // with "(line:column)" at the end of the first line of its message.
+// TypeScript has no `partial class` (docs/objects.md, section 6): Prettier
+// reads `partial` as a comment of the same length, so offsets stay as they are.
+const kPartialMask = "/*@pc*/"
+
 function format(text, { tabSize = 2, insertSpaces = true, range } = {}) {
   const options = {
     parser: "typescript",
@@ -24,7 +28,12 @@ function format(text, { tabSize = 2, insertSpaces = true, range } = {}) {
     options.rangeStart = range.start
     options.rangeEnd = range.end
   }
-  return prettier.format(text, options)
+  const masked = text.replace(/(^|[\r\n])([ \t]*)partial(?=[ \t]+class\b)/g, `$1$2${kPartialMask}`)
+  return prettier.format(masked, options).then(unmaskPartial)
+}
+
+function unmaskPartial(text) {
+  return text.replace(/\/\*@pc\*\/[ \t]*class\b/g, "partial class")
 }
 
 module.exports = { format }

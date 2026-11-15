@@ -1,0 +1,13 @@
+import "./shape_part.tz"
+
+export class Shape {
+  private readonly side: int
+
+  constructor(side: int) {
+    this.side = side
+  }
+
+  public area(): int {
+    return this.side
+  }
+}

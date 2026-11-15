@@ -38,13 +38,12 @@ Stmt *ModuleParser::parseImport(bool topLevel) {
   ImportDecl decl;
   decl.loc = loc;
   if (this->parser.tok.is(Tok::StringLiteral)) {
-    std::string path;
-    parseFromPath(path, decl.pathLoc, false);
-    this->parser.cursor().report(
-        loc, "an import must name what it takes: importing a file only to run it is not "
-             "supported; import the names you need, e.g. 'import { a } from \"" +
-                 path + "\"'");
+    parseFromPath(decl.path, decl.pathLoc, false);
     this->parser.cursor().expectSemicolon();
+    if (topLevel) {
+      decl.isPartList = true;
+      this->parser.imports.push_back(std::move(decl));
+    }
     return this->parser.ctx.make<EmptyStmt>(loc);
   }
   if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "type" &&
@@ -174,6 +173,12 @@ Stmt *ModuleParser::parseExport(bool topLevel) {
     return stmt;
   }
   const Token &next = this->parser.cursor().peek();
+  if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "partial" &&
+      next.is(Tok::Identifier) && next.text == "class" && !next.newlineBefore) {
+    this->parser.cursor().report(loc, "a part of a class is not exported: 'export' goes on the "
+                                      "class itself, where it is declared");
+    return this->parser.stmts().parseStatement(topLevel);
+  }
   bool declaration =
       this->parser.tok.is(Tok::KwFunction) || this->parser.tok.is(Tok::KwConst) ||
       this->parser.tok.is(Tok::KwLet) || this->parser.tok.is(Tok::KwVar) ||

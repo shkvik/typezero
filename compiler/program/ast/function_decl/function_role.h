@@ -9,6 +9,7 @@ namespace tz {
 
 struct ClassDecl;
 struct FunctionDecl;
+struct Module;
 struct VarSymbol;
 
 enum class MethodKind {
@@ -48,6 +49,7 @@ struct AbstractMethod {
 
 struct ClassMember {
   ClassDecl *cls = nullptr;
+  Module *partModule = nullptr;
   Access access = Access::Public;
   bool isOverride = false;
   unsigned variant = 0;
