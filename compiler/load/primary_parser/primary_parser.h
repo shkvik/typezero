@@ -15,6 +15,7 @@ public:
   Expr *parseFloatLiteral();
 
 private:
+  Expr *parseName(llvm::SMLoc loc);
   Parser &parser;
 };
 

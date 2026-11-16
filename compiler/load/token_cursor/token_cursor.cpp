@@ -94,6 +94,15 @@ bool TokenCursor::expect(Tok kind, llvm::StringRef context) {
   return false;
 }
 
+bool TokenCursor::expectName(llvm::StringRef context) {
+  if (!this->parser.tok.isName()) {
+    return expect(Tok::Identifier, context);
+  }
+  advance();
+
+  return true;
+}
+
 void TokenCursor::expectSemicolon() {
   if (accept(Tok::Semi)) {
     return;
@@ -146,20 +155,38 @@ void TokenCursor::synchronize() {
       advance();
       return;
     }
-    bool declaration = this->parser.tok.is(Tok::Identifier) &&
-                       (this->parser.tok.text == "type" || this->parser.tok.text == "interface" ||
-                        this->parser.tok.text == "namespace" || this->parser.tok.text == "module" ||
-                        this->parser.tok.text == "declare" || this->parser.tok.text == "class") &&
-                       peek().is(Tok::Identifier) && !peek().newlineBefore;
-    declaration |= this->parser.tok.is(Tok::Identifier) &&
-                   (this->parser.tok.text == "import" || this->parser.tok.text == "export" ||
-                    this->parser.tok.text == "throw" || this->parser.tok.text == "try");
+    Tok kind = this->parser.tok.kind;
+    bool namesDeclaration = kind == Tok::KwClass || kind == Tok::KwType ||
+                            kind == Tok::KwInterface || kind == Tok::KwNamespace ||
+                            kind == Tok::KwModule || kind == Tok::KwDeclare;
+    bool declaration = namesDeclaration && peek().isName() && !peek().newlineBefore;
+    declaration |= this->parser.tok.is(Tok::KwImport) || this->parser.tok.is(Tok::KwExport) ||
+                   (this->parser.tok.is(Tok::Identifier) &&
+                    (this->parser.tok.text == "throw" || this->parser.tok.text == "try"));
     if (this->parser.tok.newlineBefore &&
         (TokenCursor::startsStatement(this->parser.tok.kind) || declaration)) {
       return;
     }
     advance();
   }
+}
+
+std::string TokenCursor::expectedName(llvm::StringRef what) const {
+  if (TokenKinds::isKeyword(this->parser.tok.kind)) {
+    return ("'" + this->parser.tok.text + "' is a keyword in tz and cannot be a " + what +
+            "; choose another name")
+        .str();
+  }
+
+  return ("expected a " + what).str();
+}
+
+void TokenCursor::recoverStatement(const char *start) {
+  if (this->parser.tok.text.data() == start) {
+    advance();
+  }
+
+  return synchronize();
 }
 
 void TokenCursor::skipToClosingBrace() {

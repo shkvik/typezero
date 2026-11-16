@@ -35,8 +35,7 @@ Stmt *FunctionParser::parseFunctionDecl(bool isAsync) {
   llvm::StringRef name = fn->name;
   llvm::SMLoc loc = fn->loc();
   while (!fn->body) {
-    if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "export" &&
-        this->parser.cursor().peek().is(Tok::KwFunction)) {
+    if (this->parser.tok.is(Tok::KwExport) && this->parser.cursor().peek().is(Tok::KwFunction)) {
       this->parser.cursor().advance();
     }
     if (!this->parser.tok.is(Tok::KwFunction) || this->parser.cursor().peek().text != name) {
@@ -82,7 +81,13 @@ FunctionDecl *FunctionParser::parseFunction(bool expression, bool isAsync) {
 
   llvm::StringRef name;
   llvm::SMLoc nameLoc = this->parser.tok.loc();
-  if (this->parser.tok.is(Tok::Identifier)) {
+  bool isKeywordName =
+      !this->parser.tok.isName() && TokenKinds::isKeyword(this->parser.tok.kind) && !expression;
+  if (isKeywordName) {
+    this->parser.cursor().report(this->parser.tok.loc(),
+                                 this->parser.cursor().expectedName("function name"));
+  }
+  if (this->parser.tok.isName() || isKeywordName) {
     name = this->parser.tok.text;
     this->parser.cursor().advance();
   } else if (expression) {
@@ -135,11 +140,9 @@ void FunctionParser::parseParams(FunctionDecl *fn, Parser::ParamPatterns *patter
     if (this->parser.recovering) {
       break;
     }
-    while (this->parser.tok.is(Tok::Identifier) &&
-           (this->parser.tok.text == "public" || this->parser.tok.text == "private" ||
-            this->parser.tok.text == "protected" || this->parser.tok.text == "readonly" ||
-            this->parser.tok.text == "override") &&
-           this->parser.cursor().peek().is(Tok::Identifier)) {
+    while (this->isParamModifier(this->parser.tok.kind) &&
+           (this->parser.cursor().peek().is(Tok::Identifier) ||
+            TokenKinds::isKeyword(this->parser.cursor().peek().kind))) {
       if (!fn->isConstructor()) {
         this->parser.cursor().report(this->parser.tok.loc(),
                                      "'" + this->parser.tok.text +
@@ -149,18 +152,23 @@ void FunctionParser::parseParams(FunctionDecl *fn, Parser::ParamPatterns *patter
       if (!param.property) {
         param.property = ParamProperty{};
       }
-      if (this->parser.tok.text == "readonly") {
+      if (this->parser.tok.is(Tok::KwReadonly)) {
         param.property->readonly = true;
-      } else if (this->parser.tok.text == "private") {
+      } else if (this->parser.tok.is(Tok::KwPrivate)) {
         param.property->access = Access::Private;
-      } else if (this->parser.tok.text == "protected") {
+      } else if (this->parser.tok.is(Tok::KwProtected)) {
         param.property->access = Access::Protected;
       }
       this->parser.cursor().advance();
     }
     bool rest = this->parser.cursor().accept(Tok::Ellipsis);
     param.loc = this->parser.tok.loc();
-    if (this->parser.tok.is(Tok::Identifier)) {
+    bool isKeywordName = !this->parser.tok.isName() && TokenKinds::isKeyword(this->parser.tok.kind);
+    if (isKeywordName) {
+      this->parser.cursor().report(this->parser.tok.loc(),
+                                   this->parser.cursor().expectedName("parameter name"));
+    }
+    if (this->parser.tok.isName() || isKeywordName) {
       param.name = this->parser.tok.text;
       this->parser.cursor().advance();
     } else if ((this->parser.tok.is(Tok::LBrace) || this->parser.tok.is(Tok::LBracket)) && !rest) {
@@ -224,9 +232,13 @@ void FunctionParser::addPrologue(FunctionDecl *fn, Parser::ParamPatterns &patter
   fn->body->body.insert(fn->body->body.begin(), decl);
 }
 
+bool FunctionParser::isParamModifier(Tok kind) const {
+  return kind == Tok::KwPublic || kind == Tok::KwPrivate || kind == Tok::KwProtected ||
+         kind == Tok::KwReadonly || kind == Tok::KwOverride;
+}
+
 bool FunctionParser::asyncFunctionAhead() {
-  return this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "async" &&
-         this->parser.cursor().peek().is(Tok::KwFunction) &&
+  return this->parser.tok.is(Tok::KwAsync) && this->parser.cursor().peek().is(Tok::KwFunction) &&
          !this->parser.cursor().peek().newlineBefore;
 }
 
@@ -237,8 +249,7 @@ Expr *FunctionParser::tryAsyncFunction() {
     return this->parser.ctx.make<FunctionExpr>(loc, parseFunction(true, true));
   }
   const Token &next = this->parser.cursor().peek();
-  if (next.newlineBefore ||
-      !(next.is(Tok::Identifier) || next.is(Tok::LParen) || next.is(Tok::Less))) {
+  if (next.newlineBefore || !(next.isName() || next.is(Tok::LParen) || next.is(Tok::Less))) {
     return nullptr;
   }
   Parser::Snapshot start = this->parser.cursor().snapshot();
@@ -259,10 +270,9 @@ Expr *FunctionParser::tryAsyncFunction() {
     fe->fn->isAsync = true;
     return fe;
   }
-  bool arrow = this->parser.tok.is(Tok::Identifier)
-                   ? this->parser.cursor().peek().is(Tok::Arrow) &&
-                         !this->parser.cursor().peek().newlineBefore
-                   : arrowAhead();
+  bool arrow = this->parser.tok.isName() ? this->parser.cursor().peek().is(Tok::Arrow) &&
+                                               !this->parser.cursor().peek().newlineBefore
+                                         : arrowAhead();
   if (!arrow) {
     this->parser.cursor().rewind(std::move(start));
     return nullptr;
@@ -303,7 +313,7 @@ FunctionExpr *FunctionParser::parseArrow(std::vector<TypeParamDecl> typeParams, 
   fn->typeParams = std::move(typeParams);
   llvm::SaveAndRestore<bool> inGenerator(this->parser.inGenerator, false);
   Parser::ParamPatterns patterns;
-  if (this->parser.tok.is(Tok::Identifier)) {
+  if (this->parser.tok.isName()) {
     Param param;
     param.loc = this->parser.tok.loc();
     param.name = this->parser.tok.text;
@@ -349,7 +359,7 @@ std::vector<TypeParamDecl> FunctionParser::parseTypeParams() {
   while (!this->parser.tok.is(Tok::Greater) && !this->parser.tok.is(Tok::Eof)) {
     if ((this->parser.tok.is(Tok::KwConst) || this->parser.tok.is(Tok::KwIn) ||
          (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "out")) &&
-        this->parser.cursor().peek().is(Tok::Identifier)) {
+        this->parser.cursor().peek().isName()) {
       this->parser.cursor().report(this->parser.tok.loc(),
                                    "'" + this->parser.tok.text +
                                        "' before a type parameter is not supported; remove it");
@@ -357,7 +367,7 @@ std::vector<TypeParamDecl> FunctionParser::parseTypeParams() {
     }
     TypeParamDecl param;
     param.loc = this->parser.tok.loc();
-    if (!this->parser.tok.is(Tok::Identifier)) {
+    if (!this->parser.tok.isName()) {
       this->parser.cursor().error(this->parser.tok.loc(),
                                   llvm::Twine("expected a type parameter name, found ") +
                                       TokenKinds::tokSpelling(this->parser.tok.kind));
@@ -365,7 +375,7 @@ std::vector<TypeParamDecl> FunctionParser::parseTypeParams() {
     }
     param.name = this->parser.tok.text;
     this->parser.cursor().advance();
-    if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "extends") {
+    if (this->parser.tok.is(Tok::KwExtends)) {
       this->parser.cursor().advance();
       param.constraint = this->parser.types().parseType();
     }

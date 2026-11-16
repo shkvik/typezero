@@ -37,8 +37,7 @@ TypeRef TypeParser::parseType() {
   bool outer = std::exchange(this->parser.disallowConditional, noConditional);
   TypeRef check = parseUnionType();
   this->parser.disallowConditional = outer;
-  if (noConditional || !this->parser.tok.is(Tok::Identifier) ||
-      this->parser.tok.text != "extends") {
+  if (noConditional || !this->parser.tok.is(Tok::KwExtends)) {
     return check;
   }
   TypeRef ref;
@@ -102,13 +101,12 @@ TypeRef TypeParser::parseIntersectionType() {
 
 TypeRef TypeParser::parseReturnType() {
   auto onLine = [&](const char *text) {
-    return this->parser.cursor().peek().is(Tok::Identifier) &&
-           !this->parser.cursor().peek().newlineBefore &&
+    return this->parser.cursor().peek().isName() && !this->parser.cursor().peek().newlineBefore &&
            (!text || this->parser.cursor().peek().text == text);
   };
   bool asserts =
       this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "asserts" && onLine(nullptr);
-  if (!asserts && !(this->parser.tok.is(Tok::Identifier) && onLine("is"))) {
+  if (!asserts && !(this->parser.tok.isName() && onLine("is"))) {
     return parseType();
   }
   TypeRef ref;
@@ -130,8 +128,7 @@ TypeRef TypeParser::parseReturnType() {
 
 TypeRef TypeParser::parseArrayType() {
   if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "keyof" &&
-      (this->parser.cursor().peek().is(Tok::Identifier) ||
-       this->parser.cursor().peek().is(Tok::LParen) ||
+      (this->parser.cursor().peek().isName() || this->parser.cursor().peek().is(Tok::LParen) ||
        this->parser.cursor().peek().is(Tok::LBrace) ||
        this->parser.cursor().peek().is(Tok::KwTypeof))) {
     TypeRef ref;
@@ -141,9 +138,8 @@ TypeRef TypeParser::parseArrayType() {
     ref.args.push_back(parseArrayType());
     return ref;
   }
-  if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "readonly" &&
-      (this->parser.cursor().peek().is(Tok::Identifier) ||
-       this->parser.cursor().peek().is(Tok::LParen) ||
+  if (this->parser.tok.is(Tok::KwReadonly) &&
+      (this->parser.cursor().peek().isName() || this->parser.cursor().peek().is(Tok::LParen) ||
        this->parser.cursor().peek().is(Tok::LBracket))) {
     llvm::SMLoc loc = this->parser.tok.loc();
     this->parser.cursor().advance();
@@ -209,12 +205,12 @@ TypeRef TypeParser::parsePrimaryType() {
     return this->parser.functionTypes().parseFunctionType();
   }
   if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "infer" &&
-      this->parser.cursor().peek().is(Tok::Identifier)) {
+      this->parser.cursor().peek().isName()) {
     ref.form = InferTypeRef{};
     this->parser.cursor().advance();
     ref.name = this->parser.tok.text;
     this->parser.cursor().advance();
-    if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "extends") {
+    if (this->parser.tok.is(Tok::KwExtends)) {
       Parser::Snapshot start = this->parser.cursor().snapshot();
       this->parser.cursor().advance();
       this->parser.noConditional = true;
@@ -300,7 +296,7 @@ TypeRef TypeParser::parsePrimaryType() {
     ref.form = TypeOfTypeRef{};
     TypeOfTypeRef *path = ref.form.as<TypeOfTypeRef>();
     this->parser.cursor().advance();
-    if (!this->parser.tok.is(Tok::Identifier)) {
+    if (!this->parser.tok.isName()) {
       this->parser.cursor().error(
           this->parser.tok.loc(),
           llvm::Twine("expected the name of a value after 'typeof', found ") +
@@ -309,14 +305,14 @@ TypeRef TypeParser::parsePrimaryType() {
     }
     path->names.push_back(this->parser.tok.text);
     this->parser.cursor().advance();
-    while (this->parser.tok.is(Tok::Dot) && this->parser.cursor().peek().is(Tok::Identifier)) {
+    while (this->parser.tok.is(Tok::Dot) && this->parser.cursor().peek().isName()) {
       this->parser.cursor().advance();
       path->names.push_back(this->parser.tok.text);
       this->parser.cursor().advance();
     }
     return ref;
   }
-  if (!this->parser.tok.is(Tok::Identifier) && !this->parser.tok.is(Tok::KwVoid)) {
+  if (!this->parser.tok.isName() && !this->parser.tok.is(Tok::KwVoid)) {
     this->parser.cursor().error(this->parser.tok.loc(),
                                 llvm::Twine("expected a type, found ") +
                                     TokenKinds::tokSpelling(this->parser.tok.kind));
@@ -324,7 +320,7 @@ TypeRef TypeParser::parsePrimaryType() {
   }
   ref.name = this->parser.tok.text;
   this->parser.cursor().advance();
-  while (this->parser.tok.is(Tok::Dot) && this->parser.cursor().peek().is(Tok::Identifier)) {
+  while (this->parser.tok.is(Tok::Dot) && this->parser.cursor().peek().isName()) {
     this->parser.cursor().advance();
     ref.name = this->parser.ctx.keepName(ref.name.str() + "." + this->parser.tok.text.str());
     this->parser.cursor().advance();

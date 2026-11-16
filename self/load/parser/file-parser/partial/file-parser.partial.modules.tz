@@ -1,5 +1,5 @@
 import { FileParser } from "../file-parser.tz";
-import { TokenKind } from "../../../../token.tz";
+import { TokenKind, isKeyword, isName } from "../../../../token.tz";
 import {
   Decorator,
   ExportForm,
@@ -102,9 +102,9 @@ partial class FileParser {
     }
     const next = this.cursor.lookahead();
     const typeWord =
-      this.cursor.isWord("type") &&
+      this.cursor.is(TokenKind.Type) &&
       next.kind != TokenKind.Comma &&
-      !(next.kind == TokenKind.Identifier && next.text == "from");
+      next.kind != TokenKind.From;
     if (typeWord) {
       this.cursor.report(
         this.cursor.peek().start,
@@ -118,18 +118,12 @@ partial class FileParser {
     if (this.cursor.accept(TokenKind.Star)) {
       form = ImportForm.Namespace;
       if (this.cursor.expect(TokenKind.As, "after 'import *'")) {
-        if (this.cursor.is(TokenKind.Identifier)) {
+        if (this.cursor.atName()) {
           defaultName = this.cursor.peek().text;
         }
-        this.cursor.expect(TokenKind.Identifier, "after 'import * as'");
+        this.cursor.expectName("after 'import * as'");
       }
-    } else if (
-      this.cursor.is(TokenKind.Identifier) &&
-      !(
-        this.cursor.peek().text == "from" &&
-        this.cursor.lookahead().kind == TokenKind.String
-      )
-    ) {
+    } else if (this.cursor.atName()) {
       form = ImportForm.Default;
       defaultName = this.cursor.next().text;
       if (this.cursor.is(TokenKind.Assign)) {
@@ -281,9 +275,7 @@ partial class FileParser {
   private partialClassAhead(): boolean {
     const next = this.cursor.lookahead();
 
-    return (
-      next.kind == TokenKind.Identifier && next.text == "class" && !next.newline
-    );
+    return next.kind == TokenKind.Class && !next.newline;
   }
 
   private exportedDeclarationAhead(): boolean {
@@ -296,28 +288,20 @@ partial class FileParser {
       case TokenKind.Var:
       case TokenKind.Enum:
         return true;
-      case TokenKind.Identifier:
-        break;
+      case TokenKind.Class:
+      case TokenKind.Type:
+      case TokenKind.Interface:
+        return isName(next.kind) && !next.newline;
+      case TokenKind.Abstract:
+        return next.kind == TokenKind.Class && !next.newline;
+      case TokenKind.Declare:
+        return (
+          next.kind == TokenKind.Function ||
+          (!this.library && next.kind == TokenKind.Class)
+        );
       default:
-        return false;
+        return this.asyncFunctionAhead();
     }
-    if (this.asyncFunctionAhead()) {
-      return true;
-    }
-    const text = token.text;
-    const named =
-      (text == "type" ||
-        text == "interface" ||
-        text == "class" ||
-        (text == "abstract" && next.text == "class")) &&
-      next.kind == TokenKind.Identifier &&
-      !next.newline;
-    const declared =
-      text == "declare" &&
-      (next.kind == TokenKind.Function ||
-        (!this.library && next.text == "class"));
-
-    return named || declared;
   }
 
   private exportDecl(topLevel: boolean): Stmt {
@@ -352,7 +336,7 @@ partial class FileParser {
       return this.exportAll(loc);
     }
     if (
-      this.cursor.isWord("type") &&
+      this.cursor.is(TokenKind.Type) &&
       this.cursor.lookahead().kind == TokenKind.LBrace
     ) {
       this.cursor.report(
@@ -390,7 +374,8 @@ partial class FileParser {
   private exportNames(loc: int): Stmt {
     const names: ModuleName[] = [];
     this.moduleNames(names, false);
-    const reExport = !this.cursor.isRecovering() && this.cursor.isWord("from");
+    const reExport =
+      !this.cursor.isRecovering() && this.cursor.is(TokenKind.From);
     let path = "";
     let pathLoc = -1;
     if (reExport) {
@@ -415,7 +400,7 @@ partial class FileParser {
     this.cursor.next();
     if (
       this.cursor.is(TokenKind.Function) &&
-      this.cursor.lookahead().kind == TokenKind.Identifier
+      isName(this.cursor.lookahead().kind)
     ) {
       return this.statement(topLevel);
     }
@@ -439,7 +424,7 @@ partial class FileParser {
     this.cursor.next();
     if (this.cursor.is(TokenKind.As)) {
       const asLoc = this.cursor.next().start;
-      this.cursor.expect(TokenKind.Identifier, "after 'export * as'");
+      this.cursor.expectName("after 'export * as'");
       if (!this.cursor.isRecovering() && this.fromPath(true) != undefined) {
         this.cursor.report(asLoc, "'export * as' is not supported");
         this.cursor.expectSemicolon();
@@ -468,11 +453,7 @@ partial class FileParser {
       !this.cursor.is(TokenKind.RBrace) && !this.cursor.is(TokenKind.End);
     while (more) {
       const next = this.cursor.lookahead();
-      if (
-        this.cursor.isWord("type") &&
-        next.kind == TokenKind.Identifier &&
-        next.text != "as"
-      ) {
+      if (this.cursor.is(TokenKind.Type) && isName(next.kind)) {
         this.cursor.report(
           this.cursor.peek().start,
           `'type' is not needed in an ${keyword}`,
@@ -503,7 +484,17 @@ partial class FileParser {
       this.cursor.error(token.start, "there is no 'export default'");
       return undefined;
     }
-    if (token.kind != TokenKind.Identifier) {
+    const reserved = !isName(token.kind) && isKeyword(token.kind);
+    const renamed =
+      reserved && this.cursor.lookahead().kind == TokenKind.As;
+    if (reserved && !renamed) {
+      this.cursor.error(
+        token.start,
+        `'${token.text}' is a keyword in tz: ${keyword} it under another name, e.g. '{ ${token.text} as ${token.text}Name }'`,
+      );
+      return undefined;
+    }
+    if (!isName(token.kind) && !renamed) {
       this.cursor.error(
         token.start,
         `expected a name to ${keyword}, found ${token.kind}`,
@@ -524,7 +515,7 @@ partial class FileParser {
       this.cursor.error(alias.start, "there is no 'export default'");
       return undefined;
     }
-    if (alias.kind != TokenKind.Identifier) {
+    if (!isName(alias.kind)) {
       this.cursor.error(
         alias.start,
         `expected a name after 'as', found ${alias.kind}`,
@@ -594,7 +585,7 @@ partial class FileParser {
   }
 
   private attributeKey(): string | undefined {
-    if (this.cursor.is(TokenKind.Identifier)) {
+    if (this.cursor.atName() || isKeyword(this.cursor.peek().kind)) {
       return this.cursor.next().text;
     }
     const quoted = this.fromPath(false);
@@ -603,7 +594,7 @@ partial class FileParser {
   }
 
   private fromPath(from: boolean): PathText | undefined {
-    if (from && !this.cursor.isWord("from")) {
+    if (from && !this.cursor.is(TokenKind.From)) {
       this.cursor.error(
         this.cursor.peek().start,
         `expected 'from' and the path of the file, found ${this.cursor.peek().kind}`,

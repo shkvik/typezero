@@ -856,7 +856,8 @@ void FilePort::manual() {
       }
       continue;
     }
-    if (!t.is(Tok::Identifier)) {
+    bool isWord = t.is(Tok::Identifier) || t.is(Tok::KwImport) || t.is(Tok::KwExport);
+    if (!isWord) {
       continue;
     }
     llvm::StringRef name = t.text;

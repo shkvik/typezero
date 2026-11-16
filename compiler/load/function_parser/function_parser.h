@@ -12,6 +12,7 @@ public:
   Stmt *parseDeclaredFunction();
   FunctionDecl *parseFunction(bool expression, bool isAsync = false);
   bool asyncFunctionAhead();
+  bool isParamModifier(Tok kind) const;
   Expr *tryAsyncFunction();
   void parseParams(FunctionDecl *fn, Parser::ParamPatterns *patterns = nullptr);
   void addPrologue(FunctionDecl *fn, Parser::ParamPatterns &patterns);

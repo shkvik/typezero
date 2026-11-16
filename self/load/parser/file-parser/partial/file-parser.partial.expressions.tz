@@ -1,5 +1,5 @@
 import { FileParser } from "../file-parser.tz";
-import { Token, TokenKind, isKeyword } from "../../../../token.tz";
+import { Token, TokenKind, isKeyword, isName } from "../../../../token.tz";
 import {
   ArrayElement,
   BinaryOp,
@@ -345,7 +345,7 @@ partial class FileParser {
 
   private continuesBinary(above: Precedence): boolean {
     const token = this.cursor.peek();
-    if (token.kind == TokenKind.As || this.cursor.isWord("instanceof")) {
+    if (token.kind == TokenKind.As || token.kind == TokenKind.Instanceof) {
       return Precedence.Relational > above;
     }
     if (this.cursor.isWord("satisfies")) {
@@ -374,7 +374,7 @@ partial class FileParser {
       );
       return left;
     }
-    if (this.cursor.isWord("instanceof")) {
+    if (this.cursor.is(TokenKind.Instanceof)) {
       this.cursor.next();
       const right = this.binary(Precedence.Relational);
       return {
@@ -702,7 +702,7 @@ partial class FileParser {
     if (this.cursor.is(TokenKind.LParen)) {
       return this.newOfExpression();
     }
-    if (!this.cursor.is(TokenKind.Identifier)) {
+    if (!this.cursor.atName()) {
       this.cursor.error(
         this.cursor.peek().start,
         "expected a class name after 'new'",
@@ -712,7 +712,7 @@ partial class FileParser {
     const name = this.cursor.next();
     let member: Token | undefined = undefined;
     if (this.cursor.accept(TokenKind.Dot)) {
-      if (this.cursor.is(TokenKind.Identifier)) {
+      if (this.cursor.atName()) {
         member = this.cursor.next();
       } else {
         this.cursor.error(
@@ -912,6 +912,12 @@ partial class FileParser {
           loc,
           value: token.kind == TokenKind.True,
         };
+      case TokenKind.Import:
+        return this.importPrimary(token);
+      case TokenKind.Class:
+        return this.classPrimary(token);
+      case TokenKind.Async:
+        return this.tryAsyncFunction() ?? this.identifierPrimary(token);
       case TokenKind.Identifier:
         return this.identifierPrimary(token);
       case TokenKind.Function: {
@@ -929,6 +935,9 @@ partial class FileParser {
       case TokenKind.Less:
         return this.genericArrow(loc);
       default:
+        if (isName(token.kind)) {
+          return this.identifierPrimary(token);
+        }
         this.cursor.error(loc, `expected an expression, found ${token.kind}`);
         return invalid(loc);
     }
@@ -969,35 +978,41 @@ partial class FileParser {
     return invalid(loc);
   }
 
+  private importPrimary(token: Token): Expr {
+    const next = this.cursor.lookahead();
+    this.cursor.report(
+      token.start,
+      next.kind == TokenKind.Dot
+        ? "'import.meta' is not supported"
+        : "dynamic 'import()' is not supported",
+    );
+    this.cursor.next();
+
+    return invalid(token.start);
+  }
+
+  private classPrimary(token: Token): Expr {
+    const next = this.cursor.lookahead();
+    const isClassExpression =
+      isName(next.kind) ||
+      next.kind == TokenKind.LBrace ||
+      next.kind == TokenKind.Extends ||
+      next.kind == TokenKind.Implements;
+    if (!isClassExpression) {
+      this.cursor.error(token.start, "expected an expression, found 'class'");
+      return invalid(token.start);
+    }
+    const decl = this.classDecl(true);
+
+    return { kind: ExprKind.Class, loc: token.start, decl };
+  }
+
   private identifierPrimary(token: Token): Expr {
     const loc = token.start;
     const name = token.text;
     const next = this.cursor.lookahead();
-    if (name == "import") {
-      this.cursor.report(
-        loc,
-        next.kind == TokenKind.Dot
-          ? "'import.meta' is not supported"
-          : "dynamic 'import()' is not supported",
-      );
-      this.cursor.next();
-      return invalid(loc);
-    }
     if (next.kind == TokenKind.Arrow && !next.newline) {
       return this.arrow([], -1, false);
-    }
-    if (name == "async") {
-      const fn = this.tryAsyncFunction();
-      if (fn != undefined) {
-        return fn;
-      }
-    }
-    if (
-      name == "class" &&
-      (next.kind == TokenKind.Identifier || next.kind == TokenKind.LBrace)
-    ) {
-      const decl = this.classDecl(true);
-      return { kind: ExprKind.Class, loc, decl };
     }
     if (name == "yield" && this.inGenerator) {
       this.cursor.report(loc, "'yield' must be in parentheses here");
@@ -1119,7 +1134,7 @@ partial class FileParser {
     const next = this.cursor.lookahead();
 
     return (
-      (this.cursor.isWord("get") || this.cursor.isWord("set")) &&
+      (this.cursor.is(TokenKind.Get) || this.cursor.is(TokenKind.Set)) &&
       (next.kind == TokenKind.Identifier ||
         isKeyword(next.kind) ||
         next.kind == TokenKind.String)
@@ -1130,7 +1145,7 @@ partial class FileParser {
     const next = this.cursor.lookahead();
 
     return (
-      this.cursor.isWord("async") &&
+      this.cursor.is(TokenKind.Async) &&
       next.kind != TokenKind.Colon &&
       next.kind != TokenKind.Comma &&
       next.kind != TokenKind.RBrace &&
@@ -1151,7 +1166,7 @@ partial class FileParser {
     }
     const start = this.cursor.peek().start;
     const generator = this.cursor.accept(TokenKind.Star);
-    const identifier = this.cursor.is(TokenKind.Identifier);
+    const identifier = this.cursor.atName();
     const name = this.fieldName();
     if (name == undefined) {
       this.cursor.skipToClosingBrace();

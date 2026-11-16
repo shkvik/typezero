@@ -29,6 +29,12 @@ StmtParser::StmtParser(Parser &parser)
 
 Stmt *StmtParser::parseStatement(bool topLevel) {
   llvm::SMLoc loc = this->parser.tok.loc();
+  if (this->parser.tok.isName() && this->parser.cursor().peek().is(Tok::Colon)) {
+    llvm::StringRef label = this->parser.tok.text;
+    this->parser.cursor().advance();
+    this->parser.cursor().advance();
+    return this->parser.ctx.make<LabeledStmt>(loc, label, parseStatement());
+  }
   switch (this->parser.tok.kind) {
     case Tok::At: {
       std::vector<Decorator> decorators = this->parser.classes().parseDecorators();
@@ -81,66 +87,62 @@ Stmt *StmtParser::parseStatement(bool topLevel) {
     case Tok::Semi:
       this->parser.cursor().advance();
       return this->parser.ctx.make<EmptyStmt>(loc);
-    case Tok::Identifier:
-      if (this->parser.tok.text == "import" && !this->parser.cursor().peek().is(Tok::LParen) &&
+    case Tok::KwImport:
+      if (!this->parser.cursor().peek().is(Tok::LParen) &&
           !this->parser.cursor().peek().is(Tok::Dot)) {
         return this->parser.modules().parseImport(topLevel);
       }
-      if (this->parser.tok.text == "export") {
-        return this->parser.modules().parseExport(topLevel);
+      return parseExpressionStatement(loc);
+    case Tok::KwExport:
+      return this->parser.modules().parseExport(topLevel);
+    case Tok::KwClass:
+      if (this->parser.cursor().peek().isName() && !this->parser.cursor().peek().newlineBefore) {
+        return this->parser.classes().parseClass();
       }
-      if ((this->parser.tok.text == "namespace" || this->parser.tok.text == "module" ||
-           this->parser.tok.text == "declare") &&
-          (this->parser.cursor().peek().is(Tok::Identifier) ||
-           TokenKinds::isKeyword(this->parser.cursor().peek().kind) ||
-           this->parser.cursor().peek().is(Tok::StringLiteral)) &&
-          !this->parser.cursor().peek().newlineBefore) {
-        if (this->parser.tok.text != "declare") {
-          return skipDeclaration(loc, "'" + this->parser.tok.text +
-                                          "' is not supported: it is TypeScript's old way to group "
-                                          "code; put the code in a file of its own and import it "
-                                          "by name");
-        }
-        if (this->parser.cursor().peek().is(Tok::KwFunction)) {
-          this->parser.cursor().advance();
-          return this->parser.functions().parseDeclaredFunction();
-        }
-        llvm::StringRef what = this->parser.cursor().peek().text;
-        if (!this->parser.library_ && what == "class") {
-          this->parser.cursor().advance();
-          return this->parser.decls().parseHandleClass();
-        }
-        if (what == "module" || what == "global" || what == "namespace") {
-          return skipDeclaration(loc, "'declare " + what +
-                                          "' is not supported: every file is a module of the "
-                                          "program; import what it needs by name");
-        }
-        return skipDeclaration(loc,
-                               "'declare' is not supported: the compiler needs the code of "
-                               "every declaration; write the declaration itself, or import it");
+      return parseExpressionStatement(loc);
+    case Tok::KwNamespace:
+    case Tok::KwModule:
+      if (groupingAhead()) {
+        return skipDeclaration(loc, "'" + this->parser.tok.text +
+                                        "' is not supported: it is TypeScript's old way to group "
+                                        "code; put the code in a file of its own and import it "
+                                        "by name");
       }
-      if (this->parser.tok.text == "using" && this->parser.cursor().peek().is(Tok::Identifier) &&
-          !this->parser.cursor().peek().newlineBefore) {
-        return this->parser.vars().parseUsingDecl();
+      return parseExpressionStatement(loc);
+    case Tok::KwDeclare:
+      if (groupingAhead()) {
+        return parseDeclare(loc);
       }
-      if (this->parser.cursor().peek().is(Tok::Colon)) {
-        llvm::StringRef label = this->parser.tok.text;
-        this->parser.cursor().advance();
-        this->parser.cursor().advance();
-        return this->parser.ctx.make<LabeledStmt>(loc, label, parseStatement());
-      }
-      if (this->parser.tok.text == "type" && this->parser.cursor().peek().is(Tok::Identifier) &&
-          !this->parser.cursor().peek().newlineBefore) {
+      return parseExpressionStatement(loc);
+    case Tok::KwType:
+      if (this->parser.cursor().peek().isName() && !this->parser.cursor().peek().newlineBefore) {
         return this->parser.decls().parseTypeAlias();
       }
-      if (this->parser.tok.text == "interface" &&
-          this->parser.cursor().peek().is(Tok::Identifier) &&
-          !this->parser.cursor().peek().newlineBefore) {
+      return parseExpressionStatement(loc);
+    case Tok::KwInterface:
+      if (this->parser.cursor().peek().isName() && !this->parser.cursor().peek().newlineBefore) {
         return this->parser.decls().parseInterface();
       }
-      if (this->parser.tok.text == "class" && this->parser.cursor().peek().is(Tok::Identifier) &&
+      return parseExpressionStatement(loc);
+    case Tok::KwAbstract:
+      if (this->parser.cursor().peek().is(Tok::KwClass) &&
           !this->parser.cursor().peek().newlineBefore) {
-        return this->parser.classes().parseClass();
+        this->parser.cursor().advance();
+        ClassDecl *cls = this->parser.classes().parseClass();
+        cls->isAbstract = true;
+        return cls;
+      }
+      return parseExpressionStatement(loc);
+    case Tok::KwAsync:
+      if (this->parser.functions().asyncFunctionAhead()) {
+        this->parser.cursor().advance();
+        return this->parser.functions().parseFunctionDecl(true);
+      }
+      return parseExpressionStatement(loc);
+    case Tok::Identifier:
+      if (this->parser.tok.text == "using" && this->parser.cursor().peek().isName() &&
+          !this->parser.cursor().peek().newlineBefore) {
+        return this->parser.vars().parseUsingDecl();
       }
       if (this->parser.tok.text == "throw") {
         return parseThrow();
@@ -164,16 +166,7 @@ Stmt *StmtParser::parseStatement(bool topLevel) {
         parseBlock();
         return this->parser.ctx.make<EmptyStmt>(loc);
       }
-      if (this->parser.tok.text == "abstract" && this->parser.cursor().peek().is(Tok::Identifier) &&
-          this->parser.cursor().peek().text == "class" &&
-          !this->parser.cursor().peek().newlineBefore) {
-        this->parser.cursor().advance();
-        ClassDecl *cls = this->parser.classes().parseClass();
-        cls->isAbstract = true;
-        return cls;
-      }
-      if (this->parser.tok.text == "partial" && this->parser.cursor().peek().is(Tok::Identifier) &&
-          this->parser.cursor().peek().text == "class" &&
+      if (this->parser.tok.text == "partial" && this->parser.cursor().peek().is(Tok::KwClass) &&
           !this->parser.cursor().peek().newlineBefore) {
         if (!topLevel) {
           this->parser.cursor().report(
@@ -184,25 +177,53 @@ Stmt *StmtParser::parseStatement(bool topLevel) {
         cls->isPartial = true;
         return cls;
       }
-      if (this->parser.functions().asyncFunctionAhead()) {
-        this->parser.cursor().advance();
-        return this->parser.functions().parseFunctionDecl(true);
-      }
       [[fallthrough]];
-    default: {
-      Expr *expr = this->parser.exprs().parseSequence();
-      if (auto *assign = dyn_cast<AssignExpr>(expr); assign && !assign->op) {
-        if (isa<ArrayLitExpr>(assign->target) || isa<ObjectLitExpr>(assign->target)) {
-          Stmt *stmt = this->parser.patterns().assignPattern(
-              loc, *this->parser.patterns().patternFromLiteral(assign->target), assign->value);
-          this->parser.cursor().expectSemicolon();
-          return stmt;
-        }
-      }
+    default:
+      return parseExpressionStatement(loc);
+  }
+}
+
+bool StmtParser::groupingAhead() {
+  const Token &next = this->parser.cursor().peek();
+  bool isName =
+      next.is(Tok::Identifier) || TokenKinds::isKeyword(next.kind) || next.is(Tok::StringLiteral);
+
+  return isName && !next.newlineBefore;
+}
+
+Stmt *StmtParser::parseDeclare(llvm::SMLoc loc) {
+  const Token &next = this->parser.cursor().peek();
+  if (next.is(Tok::KwFunction)) {
+    this->parser.cursor().advance();
+    return this->parser.functions().parseDeclaredFunction();
+  }
+  if (!this->parser.library_ && next.is(Tok::KwClass)) {
+    this->parser.cursor().advance();
+    return this->parser.decls().parseHandleClass();
+  }
+  if (next.is(Tok::KwModule) || next.is(Tok::KwNamespace) || next.text == "global") {
+    return skipDeclaration(loc, "'declare " + next.text +
+                                    "' is not supported: every file is a module of the "
+                                    "program; import what it needs by name");
+  }
+
+  return skipDeclaration(loc, "'declare' is not supported: the compiler needs the code of every "
+                              "declaration; write the declaration itself, or import it");
+}
+
+Stmt *StmtParser::parseExpressionStatement(llvm::SMLoc loc) {
+  Expr *expr = this->parser.exprs().parseSequence();
+  if (auto *assign = dyn_cast<AssignExpr>(expr); assign && !assign->op) {
+    if (isa<ArrayLitExpr>(assign->target) || isa<ObjectLitExpr>(assign->target)) {
+      Stmt *stmt = this->parser.patterns().assignPattern(
+          loc, *this->parser.patterns().patternFromLiteral(assign->target), assign->value);
       this->parser.cursor().expectSemicolon();
-      return this->parser.ctx.make<ExprStmt>(loc, expr);
+      return stmt;
     }
   }
+  this->parser.cursor().expectSemicolon();
+
+  return this->parser.ctx.make<ExprStmt>(loc, expr);
 }
 
 Stmt *StmtParser::skipDeclaration(llvm::SMLoc loc, const llvm::Twine &message) {
@@ -231,7 +252,7 @@ Stmt *StmtParser::parseBreakOrContinue() {
   bool isBreak = this->parser.tok.is(Tok::KwBreak);
   this->parser.cursor().advance();
   llvm::StringRef label;
-  if (this->parser.tok.is(Tok::Identifier) && !this->parser.tok.newlineBefore) {
+  if (this->parser.tok.isName() && !this->parser.tok.newlineBefore) {
     label = this->parser.tok.text;
     this->parser.cursor().advance();
   }
@@ -274,9 +295,10 @@ Stmt *StmtParser::parseSwitch() {
                                  c.test ? "after the value of 'case'" : "after 'default'");
     while (!this->parser.tok.is(Tok::KwCase) && !this->parser.tok.is(Tok::KwDefault) &&
            !this->parser.tok.is(Tok::RBrace) && !this->parser.tok.is(Tok::Eof)) {
+      const char *start = this->parser.tok.text.data();
       c.body.push_back(parseStatement());
       if (this->parser.recovering) {
-        this->parser.cursor().synchronize();
+        this->parser.cursor().recoverStatement(start);
       }
     }
     stmt->cases.push_back(std::move(c));
@@ -290,9 +312,10 @@ BlockStmt *StmtParser::parseBlock() {
   auto *block = this->parser.ctx.make<BlockStmt>(this->parser.tok.loc());
   this->parser.cursor().expect(Tok::LBrace);
   while (!this->parser.tok.is(Tok::RBrace) && !this->parser.tok.is(Tok::Eof)) {
+    const char *start = this->parser.tok.text.data();
     block->body.push_back(parseStatement());
     if (this->parser.recovering) {
-      this->parser.cursor().synchronize();
+      this->parser.cursor().recoverStatement(start);
     }
   }
   block->end = this->parser.tok.loc();
@@ -369,7 +392,7 @@ Stmt *StmtParser::parseFor() {
       return loop;
     }
     bool forIn = this->parser.tok.is(Tok::KwIn);
-    if ((this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "of") || forIn) {
+    if (this->parser.tok.is(Tok::KwOf) || forIn) {
       if (forIn && pattern) {
         this->parser.cursor().report(
             pattern->loc,
@@ -431,8 +454,7 @@ Stmt *StmtParser::parseFor() {
     llvm::SMLoc loc = this->parser.tok.loc();
     loop->init = this->parser.ctx.make<ExprStmt>(loc, this->parser.exprs().parseSequence());
   }
-  if (this->parser.tok.is(Tok::KwIn) ||
-      (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "of")) {
+  if (this->parser.tok.is(Tok::KwIn) || this->parser.tok.is(Tok::KwOf)) {
     this->parser.cursor().error(this->parser.tok.loc(),
                                 this->parser.tok.is(Tok::KwIn)
                                     ? "'for...in' needs a new variable: 'for (const k in ...)'"

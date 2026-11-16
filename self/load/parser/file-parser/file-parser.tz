@@ -55,9 +55,10 @@ export class FileParser {
         
         continue;
       }
+      const start = this.cursor.peek().start;
       items.push(this.statement(true));
       if (this.cursor.isRecovering()) {
-        this.cursor.synchronize();
+        this.cursor.recoverStatement(start);
       }
     }
     const file: SourceFile = {

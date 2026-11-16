@@ -98,7 +98,11 @@ void VarParser::recordConstant(llvm::StringRef name, const Expr *init) {
 
 bool VarParser::parseBinding(VarDeclarator &d) {
   d.loc = this->parser.tok.loc();
-  if (!this->parser.tok.is(Tok::Identifier)) {
+  bool reserved = !this->parser.tok.isName() && TokenKinds::isKeyword(this->parser.tok.kind);
+  if (reserved) {
+    this->parser.cursor().report(this->parser.tok.loc(),
+                                 this->parser.cursor().expectedName("variable name"));
+  } else if (!this->parser.tok.isName()) {
     this->parser.cursor().error(this->parser.tok.loc(), "expected a variable name");
     return false;
   }

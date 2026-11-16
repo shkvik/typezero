@@ -157,7 +157,7 @@ Expr *CallParser::parseNew() {
     create->callee = callee;
     return create;
   }
-  if (!this->parser.tok.is(Tok::Identifier)) {
+  if (!this->parser.tok.isName()) {
     this->parser.cursor().error(this->parser.tok.loc(), "expected a class name after 'new'");
     return this->parser.ctx.make<IntLitExpr>(loc, 0);
   }
@@ -167,7 +167,7 @@ Expr *CallParser::parseNew() {
   llvm::StringRef member;
   llvm::SMLoc memberLoc;
   if (this->parser.cursor().accept(Tok::Dot)) {
-    if (this->parser.tok.is(Tok::Identifier)) {
+    if (this->parser.tok.isName()) {
       member = this->parser.tok.text;
       memberLoc = this->parser.tok.loc();
       this->parser.cursor().advance();

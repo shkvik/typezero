@@ -98,7 +98,7 @@ partial class FileParser {
         this.cursor.is(TokenKind.LBrace)
       ) {
         e.nested = this.bindingPattern();
-      } else if (this.cursor.is(TokenKind.Identifier)) {
+      } else if (this.cursor.atName()) {
         e.name = this.cursor.next().text;
       } else {
         this.cursor.error(
@@ -148,7 +148,7 @@ partial class FileParser {
       const e = element(this.cursor.peek().start);
       if (this.cursor.accept(TokenKind.Ellipsis)) {
         e.rest = true;
-        if (!this.cursor.is(TokenKind.Identifier)) {
+        if (!this.cursor.atName()) {
           this.cursor.error(
             this.cursor.peek().start,
             "expected a variable name after '...' in the destructuring pattern",
@@ -175,7 +175,7 @@ partial class FileParser {
   }
 
   private objectPatternEntry(e: PatternElement): boolean {
-    const identifier = this.cursor.is(TokenKind.Identifier);
+    const identifier = this.cursor.atName();
     if (this.cursor.accept(TokenKind.LBracket)) {
       e.keyExpr = this.expression();
       this.cursor.expect(TokenKind.RBracket, "to close the key");
@@ -193,7 +193,7 @@ partial class FileParser {
         this.cursor.is(TokenKind.LBrace)
       ) {
         e.nested = this.bindingPattern();
-      } else if (this.cursor.is(TokenKind.Identifier)) {
+      } else if (this.cursor.atName()) {
         e.name = this.cursor.next().text;
       } else {
         this.cursor.error(

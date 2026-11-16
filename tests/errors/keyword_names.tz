@@ -1,0 +1,11 @@
+// expect-error: 'public' is a keyword in tz and cannot be a variable name; choose another name
+const public = 1
+// expect-error: 'static' is a keyword in tz and cannot be a function name; choose another name
+function static(): int {
+  return 1
+}
+// expect-error: 'interface' is a keyword in tz and cannot be a parameter name; choose another name
+function size(interface: int): int {
+  return 2
+}
+console.log(size(3))

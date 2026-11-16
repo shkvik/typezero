@@ -33,7 +33,10 @@ bool FunctionTypeParser::functionTypeAhead() {
   bool ok = true;
   while (ok && !this->parser.tok.is(Tok::RParen)) {
     this->parser.cursor().accept(Tok::Ellipsis);
-    ok = this->parser.cursor().accept(Tok::Identifier);
+    ok = this->parser.tok.isName();
+    if (ok) {
+      this->parser.cursor().advance();
+    }
     this->parser.cursor().accept(Tok::Question);
     if (ok && this->parser.cursor().accept(Tok::Colon)) {
       this->parser.types().parseType();
@@ -70,7 +73,7 @@ bool FunctionTypeParser::parseSignatureParams(TypeRef &ref) {
     bool rest = this->parser.cursor().accept(Tok::Ellipsis);
     llvm::SMLoc loc = this->parser.tok.loc();
     llvm::StringRef name = this->parser.tok.text;
-    if (!this->parser.cursor().expect(Tok::Identifier, "for a parameter of the function type")) {
+    if (!this->parser.cursor().expectName("for a parameter of the function type")) {
       return false;
     }
     bool optional = this->parser.cursor().accept(Tok::Question);

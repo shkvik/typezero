@@ -50,7 +50,7 @@ Stmt *DeclParser::parseHandleClass() {
   this->parser.cursor().advance();
   llvm::SMLoc loc = this->parser.tok.loc();
   llvm::StringRef name = this->parser.tok.text;
-  if (!this->parser.cursor().expect(Tok::Identifier, "after 'declare class'")) {
+  if (!this->parser.cursor().expectName("after 'declare class'")) {
     this->parser.cursor().synchronize();
     return this->parser.ctx.make<EmptyStmt>(loc);
   }
@@ -91,7 +91,7 @@ Stmt *DeclParser::parseInterface() {
     typeParams = this->parser.functions().parseTypeParams();
   }
   std::vector<TypeRef> bases;
-  if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "extends") {
+  if (this->parser.tok.is(Tok::KwExtends)) {
     this->parser.cursor().advance();
     do {
       bases.push_back(this->parser.types().parseType());
@@ -116,7 +116,7 @@ Stmt *DeclParser::parseInterface() {
 Stmt *DeclParser::parseEnum() {
   this->parser.cursor().advance();
   llvm::SMLoc loc = this->parser.tok.loc();
-  if (!this->parser.tok.is(Tok::Identifier)) {
+  if (!this->parser.tok.isName()) {
     this->parser.cursor().error(this->parser.tok.loc(), "expected the name of the enum");
     return this->parser.ctx.make<EmptyStmt>(loc);
   }
@@ -126,7 +126,7 @@ Stmt *DeclParser::parseEnum() {
   while (!this->parser.tok.is(Tok::RBrace) && !this->parser.tok.is(Tok::Eof)) {
     EnumMember member;
     member.loc = this->parser.tok.loc();
-    if (!this->parser.tok.is(Tok::Identifier)) {
+    if (!this->parser.tok.isName()) {
       this->parser.cursor().error(this->parser.tok.loc(),
                                   llvm::Twine("expected the name of an enum member, found ") +
                                       TokenKinds::tokSpelling(this->parser.tok.kind));

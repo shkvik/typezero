@@ -17,27 +17,52 @@ enum class Tok {
   TemplateTail,
   RegexLiteral,
 
+  KwAbstract,
+  KwAccessor,
   KwAs,
+  KwAsync,
   KwBreak,
   KwCase,
+  KwClass,
   KwConst,
+  KwConstructor,
   KwContinue,
   KwDebugger,
+  KwDeclare,
   KwDefault,
   KwDelete,
   KwDo,
   KwElse,
   KwEnum,
+  KwExport,
+  KwExtends,
   KwFalse,
   KwFor,
+  KwFrom,
   KwFunction,
+  KwGet,
   KwIf,
+  KwImplements,
+  KwImport,
   KwIn,
+  KwInstanceof,
+  KwInterface,
   KwLet,
+  KwModule,
+  KwNamespace,
   KwNew,
+  KwOf,
+  KwOverride,
+  KwPrivate,
+  KwProtected,
+  KwPublic,
+  KwReadonly,
   KwReturn,
+  KwSet,
+  KwStatic,
   KwSwitch,
   KwTrue,
+  KwType,
   KwTypeof,
   KwVar,
   KwVoid,
@@ -111,12 +136,14 @@ struct Token {
   bool hash = false;
 
   bool is(Tok k) const { return kind == k; }
+  bool isName() const;
   llvm::SMLoc loc() const { return llvm::SMLoc::getFromPointer(text.data()); }
 };
 
 class TokenKinds {
 public:
   static bool isKeyword(Tok kind);
+  static bool isContextual(Tok kind);
   static const char *tokSpelling(Tok kind);
 };
 

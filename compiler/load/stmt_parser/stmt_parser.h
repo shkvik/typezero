@@ -10,6 +10,9 @@ public:
 
   Stmt *parseStatement(bool topLevel = false);
   Stmt *skipDeclaration(llvm::SMLoc loc, const llvm::Twine &message);
+  Stmt *parseExpressionStatement(llvm::SMLoc loc);
+  Stmt *parseDeclare(llvm::SMLoc loc);
+  bool groupingAhead();
   BlockStmt *parseBlock();
   Stmt *parseIf();
   Stmt *parseWhile();

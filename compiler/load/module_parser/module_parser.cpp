@@ -46,10 +46,8 @@ Stmt *ModuleParser::parseImport(bool topLevel) {
     }
     return this->parser.ctx.make<EmptyStmt>(loc);
   }
-  if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "type" &&
-      !this->parser.cursor().peek().is(Tok::Comma) &&
-      !(this->parser.cursor().peek().is(Tok::Identifier) &&
-        this->parser.cursor().peek().text == "from")) {
+  if (this->parser.tok.is(Tok::KwType) && !this->parser.cursor().peek().is(Tok::Comma) &&
+      !this->parser.cursor().peek().is(Tok::KwFrom)) {
     this->parser.cursor().report(
         this->parser.tok.loc(),
         "'import type' is not needed: types are imported like everything else; drop "
@@ -63,14 +61,12 @@ Stmt *ModuleParser::parseImport(bool topLevel) {
     form = Form::Namespace;
     this->parser.cursor().advance();
     if (this->parser.cursor().expect(Tok::KwAs, "after 'import *'")) {
-      if (this->parser.tok.is(Tok::Identifier)) {
+      if (this->parser.tok.isName()) {
         defaultName = this->parser.tok.text;
       }
-      this->parser.cursor().expect(Tok::Identifier, "after 'import * as'");
+      this->parser.cursor().expectName("after 'import * as'");
     }
-  } else if (this->parser.tok.is(Tok::Identifier) &&
-             !(this->parser.tok.text == "from" &&
-               this->parser.cursor().peek().is(Tok::StringLiteral))) {
+  } else if (this->parser.tok.isName()) {
     form = Form::Default;
     defaultName = this->parser.tok.text;
     this->parser.cursor().advance();
@@ -174,22 +170,22 @@ Stmt *ModuleParser::parseExport(bool topLevel) {
   }
   const Token &next = this->parser.cursor().peek();
   if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "partial" &&
-      next.is(Tok::Identifier) && next.text == "class" && !next.newlineBefore) {
+      next.is(Tok::KwClass) && !next.newlineBefore) {
     this->parser.cursor().report(loc, "a part of a class is not exported: 'export' goes on the "
                                       "class itself, where it is declared");
     return this->parser.stmts().parseStatement(topLevel);
   }
+  bool namesDeclaration = this->parser.tok.is(Tok::KwClass) || this->parser.tok.is(Tok::KwType) ||
+                          this->parser.tok.is(Tok::KwInterface);
+  bool abstractClass = this->parser.tok.is(Tok::KwAbstract) && next.is(Tok::KwClass);
   bool declaration =
       this->parser.tok.is(Tok::KwFunction) || this->parser.tok.is(Tok::KwConst) ||
       this->parser.tok.is(Tok::KwLet) || this->parser.tok.is(Tok::KwVar) ||
       this->parser.tok.is(Tok::KwEnum) || this->parser.functions().asyncFunctionAhead() ||
-      (this->parser.tok.is(Tok::Identifier) &&
-       (this->parser.tok.text == "type" || this->parser.tok.text == "interface" ||
-        this->parser.tok.text == "class" ||
-        (this->parser.tok.text == "abstract" && next.text == "class")) &&
-       next.is(Tok::Identifier) && !next.newlineBefore) ||
-      (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "declare" &&
-       (next.is(Tok::KwFunction) || (!this->parser.library_ && next.text == "class")));
+      (namesDeclaration && next.isName() && !next.newlineBefore) ||
+      (abstractClass && !next.newlineBefore) ||
+      (this->parser.tok.is(Tok::KwDeclare) &&
+       (next.is(Tok::KwFunction) || (!this->parser.library_ && next.is(Tok::KwClass))));
   if (declaration) {
     Stmt *stmt = this->parser.stmts().parseStatement(topLevel);
     if (topLevel) {
@@ -203,7 +199,7 @@ Stmt *ModuleParser::parseExport(bool topLevel) {
              "declaration, e.g. 'export function f() {...}', and import it with 'import { f } "
              "from ...'");
     this->parser.cursor().advance();
-    if (this->parser.tok.is(Tok::KwFunction) && this->parser.cursor().peek().is(Tok::Identifier)) {
+    if (this->parser.tok.is(Tok::KwFunction) && this->parser.cursor().peek().isName()) {
       return this->parser.stmts().parseStatement(topLevel);
     }
     llvm::SMLoc exprLoc = this->parser.tok.loc();
@@ -229,7 +225,7 @@ Stmt *ModuleParser::parseExport(bool topLevel) {
     if (this->parser.tok.is(Tok::KwAs)) {
       llvm::SMLoc asLoc = this->parser.tok.loc();
       this->parser.cursor().advance();
-      this->parser.cursor().expect(Tok::Identifier, "after 'export * as'");
+      this->parser.cursor().expectName("after 'export * as'");
       ExportSource source;
       if (!this->parser.recovering && parseFromPath(source.path, source.pathLoc)) {
         this->parser.cursor().report(
@@ -249,8 +245,7 @@ Stmt *ModuleParser::parseExport(bool topLevel) {
     }
     return this->parser.ctx.make<EmptyStmt>(loc);
   }
-  if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "type" &&
-      next.is(Tok::LBrace)) {
+  if (this->parser.tok.is(Tok::KwType) && next.is(Tok::LBrace)) {
     this->parser.cursor().report(
         this->parser.tok.loc(),
         "'export type' is not needed: types are exported like everything else; drop "
@@ -266,8 +261,7 @@ Stmt *ModuleParser::parseExport(bool topLevel) {
   }
   std::vector<ModuleName> names;
   parseModuleNames(names, false);
-  bool reExport = !this->parser.recovering && this->parser.tok.is(Tok::Identifier) &&
-                  this->parser.tok.text == "from";
+  bool reExport = !this->parser.recovering && this->parser.tok.is(Tok::KwFrom);
   ExportSource source;
   if (reExport && !parseFromPath(source.path, source.pathLoc)) {
     return this->parser.ctx.make<EmptyStmt>(loc);
@@ -289,9 +283,7 @@ void ModuleParser::parseModuleNames(std::vector<ModuleName> &names, bool import)
   this->parser.cursor().advance();
   const char *keyword = import ? "import" : "export";
   while (!this->parser.tok.is(Tok::RBrace) && !this->parser.tok.is(Tok::Eof)) {
-    if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "type" &&
-        this->parser.cursor().peek().is(Tok::Identifier) &&
-        this->parser.cursor().peek().text != "as") {
+    if (this->parser.tok.is(Tok::KwType) && this->parser.cursor().peek().isName()) {
       this->parser.cursor().report(this->parser.tok.loc(),
                                    llvm::Twine("'type' is not needed in an ") + keyword +
                                        ": types are " + keyword +
@@ -306,7 +298,16 @@ void ModuleParser::parseModuleNames(std::vector<ModuleName> &names, bool import)
           "there is no 'export default'; everything is exported and imported by name");
       return;
     }
-    if (!this->parser.tok.is(Tok::Identifier)) {
+    bool reserved = !this->parser.tok.isName() && TokenKinds::isKeyword(this->parser.tok.kind);
+    bool isRenamedKeyword = reserved && this->parser.cursor().peek().is(Tok::KwAs);
+    if (reserved && !isRenamedKeyword) {
+      this->parser.cursor().error(this->parser.tok.loc(),
+                                  "'" + this->parser.tok.text + "' is a keyword in tz: " + keyword +
+                                      " it under another name, e.g. '{ " + this->parser.tok.text +
+                                      " as " + this->parser.tok.text + "Name }'");
+      return;
+    }
+    if (!this->parser.tok.isName() && !isRenamedKeyword) {
       this->parser.cursor().error(this->parser.tok.loc(),
                                   llvm::Twine("expected a name to ") + keyword + ", found " +
                                       TokenKinds::tokSpelling(this->parser.tok.kind));
@@ -324,7 +325,7 @@ void ModuleParser::parseModuleNames(std::vector<ModuleName> &names, bool import)
             "there is no 'export default'; everything is exported and imported by name");
         return;
       }
-      if (!this->parser.tok.is(Tok::Identifier)) {
+      if (!this->parser.tok.isName()) {
         this->parser.cursor().error(this->parser.tok.loc(),
                                     llvm::Twine("expected a name after 'as', found ") +
                                         TokenKinds::tokSpelling(this->parser.tok.kind));
@@ -354,7 +355,7 @@ bool ModuleParser::parseImportAttributes(bool json) {
   while (!this->parser.tok.is(Tok::RBrace) && !this->parser.tok.is(Tok::Eof)) {
     std::string key;
     llvm::SMLoc keyLoc;
-    if (this->parser.tok.is(Tok::Identifier)) {
+    if (this->parser.tok.is(Tok::Identifier) || TokenKinds::isKeyword(this->parser.tok.kind)) {
       key = this->parser.tok.text.str();
       this->parser.cursor().advance();
     } else if (!parseFromPath(key, keyLoc, false)) {
@@ -397,7 +398,7 @@ bool ModuleParser::parseImportAttributes(bool json) {
 }
 
 bool ModuleParser::parseFromPath(std::string &path, llvm::SMLoc &loc, bool from) {
-  if (from && !(this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "from")) {
+  if (from && !this->parser.tok.is(Tok::KwFrom)) {
     this->parser.cursor().error(this->parser.tok.loc(),
                                 llvm::Twine("expected 'from' and the path of the file, e.g. 'from "
                                             "\"./math\"', found ") +

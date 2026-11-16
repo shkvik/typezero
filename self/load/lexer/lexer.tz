@@ -1,4 +1,4 @@
-import { Token, TokenKind, keywordKind } from "../../token.tz";
+import { Token, TokenKind, isContextual, keywordKind } from "../../token.tz";
 
 const kTab = 9;
 const kNewline = 10;
@@ -62,6 +62,9 @@ export function tokenize(source: Buffer): Token[] {
 }
 
 function regexMayFollow(kind: TokenKind): boolean {
+  if (isContextual(kind)) {
+    return false;
+  }
   switch (kind) {
     case TokenKind.Identifier:
     case TokenKind.Int:

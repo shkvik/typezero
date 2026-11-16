@@ -28,7 +28,7 @@ ObjectTypeParser::ObjectTypeParser(Parser &parser)
     : parser(parser) {}
 
 bool ObjectTypeParser::mappedTypeAhead() {
-  if (!this->parser.tok.is(Tok::LBracket) || !this->parser.cursor().peek().is(Tok::Identifier)) {
+  if (!this->parser.tok.is(Tok::LBracket) || !this->parser.cursor().peek().isName()) {
     return false;
   }
   Parser::Snapshot start = this->parser.cursor().snapshot();
@@ -164,13 +164,11 @@ TypeRef ObjectTypeParser::parseObjectType() {
     bool readonly = false;
     int readonlyChange = 0;
     if ((this->parser.tok.is(Tok::Minus) || this->parser.tok.is(Tok::Plus)) &&
-        this->parser.cursor().peek().is(Tok::Identifier) &&
-        this->parser.cursor().peek().text == "readonly") {
+        this->parser.cursor().peek().is(Tok::KwReadonly)) {
       readonlyChange = this->parser.tok.is(Tok::Minus) ? -1 : 1;
       this->parser.cursor().advance();
     }
-    if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "readonly" &&
-        !this->parser.cursor().peek().is(Tok::Colon) &&
+    if (this->parser.tok.is(Tok::KwReadonly) && !this->parser.cursor().peek().is(Tok::Colon) &&
         !this->parser.cursor().peek().is(Tok::Question) &&
         !this->parser.cursor().peek().is(Tok::LParen)) {
       readonly = true;
@@ -183,7 +181,7 @@ TypeRef ObjectTypeParser::parseObjectType() {
     }
     if (this->parser.tok.is(Tok::LBracket) && !this->parser.classes().symbolKeyAhead()) {
       this->parser.cursor().advance();
-      if (!this->parser.tok.is(Tok::Identifier) || !this->parser.cursor().peek().is(Tok::Colon)) {
+      if (!this->parser.tok.isName() || !this->parser.cursor().peek().is(Tok::Colon)) {
         this->parser.cursor().error(
             loc, "expected an index signature, '{ [key: string]: T }', or a mapped type, "
                  "'{ [K in Keys]: T }'");
@@ -308,7 +306,7 @@ TypeRef ObjectTypeParser::parseTupleType() {
   this->parser.cursor().advance();
   while (!this->parser.tok.is(Tok::RBracket) && !this->parser.tok.is(Tok::Eof)) {
     bool spread = this->parser.cursor().accept(Tok::Ellipsis);
-    if (this->parser.tok.is(Tok::Identifier) && this->parser.cursor().peek().is(Tok::Colon)) {
+    if (this->parser.tok.isName() && this->parser.cursor().peek().is(Tok::Colon)) {
       this->parser.cursor().advance();
       this->parser.cursor().advance();
     }

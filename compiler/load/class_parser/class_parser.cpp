@@ -33,9 +33,7 @@ ClassDecl *ClassParser::parseClass(bool expression) {
   const char *start = this->parser.tok.text.data();
   llvm::SMLoc loc = this->parser.tok.loc();
   this->parser.cursor().advance();
-  bool named = this->parser.tok.is(Tok::Identifier) &&
-               !(expression &&
-                 (this->parser.tok.text == "extends" || this->parser.tok.text == "implements"));
+  bool named = this->parser.tok.isName();
   auto *cls = this->parser.ctx.make<ClassDecl>(named ? this->parser.tok.loc() : loc,
                                                named ? this->parser.tok.text : llvm::StringRef());
   if (expression) {
@@ -50,11 +48,11 @@ ClassDecl *ClassParser::parseClass(bool expression) {
   if (!cls->typeParams.empty()) {
     cls->generics = GenericTemplate{};
   }
-  if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "extends") {
+  if (this->parser.tok.is(Tok::KwExtends)) {
     this->parser.cursor().advance();
     const Token &next = this->parser.cursor().peek();
-    bool value = !this->parser.tok.is(Tok::Identifier) || next.is(Tok::LParen) ||
-                 next.is(Tok::Dot) || next.is(Tok::LBracket);
+    bool value = !this->parser.tok.isName() || next.is(Tok::LParen) || next.is(Tok::Dot) ||
+                 next.is(Tok::LBracket);
     if (value) {
       cls->baseExpr = this->parser.calls().parseCallOrMember();
     } else {
@@ -66,7 +64,7 @@ ClassDecl *ClassParser::parseClass(bool expression) {
       }
     }
   }
-  if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "implements") {
+  if (this->parser.tok.is(Tok::KwImplements)) {
     this->parser.cursor().advance();
     do {
       cls->interfaces.push_back(this->parser.types().parsePrimaryType());
@@ -88,11 +86,26 @@ ClassDecl *ClassParser::parseClass(bool expression) {
   return cls;
 }
 
+bool ClassParser::isMemberModifier(Tok kind) const {
+  switch (kind) {
+    case Tok::KwPublic:
+    case Tok::KwPrivate:
+    case Tok::KwProtected:
+    case Tok::KwReadonly:
+    case Tok::KwStatic:
+    case Tok::KwOverride:
+    case Tok::KwAbstract:
+    case Tok::KwDeclare:
+    case Tok::KwAccessor:
+    case Tok::KwAsync:
+      return true;
+    default:
+      return false;
+  }
+}
+
 bool ClassParser::memberModifierAhead() {
-  static const char *const modifiers[] = {"public",   "private",  "protected", "readonly", "static",
-                                          "override", "abstract", "declare",   "accessor", "async"};
-  if (!this->parser.tok.is(Tok::Identifier) ||
-      !llvm::is_contained(modifiers, this->parser.tok.text)) {
+  if (!this->isMemberModifier(this->parser.tok.kind)) {
     return false;
   }
   const Token &next = this->parser.cursor().peek();
@@ -156,7 +169,7 @@ Expr *ClassParser::parseDecoratorExpr() {
     this->parser.cursor().expect(Tok::RParen, "to close the decorator");
     return expr;
   }
-  if (!this->parser.tok.is(Tok::Identifier)) {
+  if (!this->parser.tok.isName()) {
     this->parser.cursor().error(this->parser.tok.loc(),
                                 llvm::Twine("expected the name of a decorator after '@', found ") +
                                     TokenKinds::tokSpelling(this->parser.tok.kind));
@@ -238,10 +251,10 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
   bool accessor = false;
   Access access = Access::Public;
   while (memberModifierAhead()) {
-    llvm::StringRef word = this->parser.tok.text;
+    Tok word = this->parser.tok.kind;
     llvm::SMLoc at = this->parser.tok.loc();
     this->parser.cursor().advance();
-    if (word == "static") {
+    if (word == Tok::KwStatic) {
       if (this->parser.tok.is(Tok::LBrace)) {
         this->parser.cursor().report(
             at, "static blocks are not supported; give each static field its value in its "
@@ -251,36 +264,35 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
         return;
       }
       isStatic = true;
-    } else if (word == "public") {
+    } else if (word == Tok::KwPublic) {
       access = Access::Public;
-    } else if (word == "private") {
+    } else if (word == Tok::KwPrivate) {
       access = Access::Private;
-    } else if (word == "protected") {
+    } else if (word == Tok::KwProtected) {
       access = Access::Protected;
-    } else if (word == "readonly") {
+    } else if (word == Tok::KwReadonly) {
       readonly = true;
-    } else if (word == "override") {
+    } else if (word == Tok::KwOverride) {
       isOverride = true;
-    } else if (word == "abstract") {
+    } else if (word == Tok::KwAbstract) {
       isAbstract = true;
-    } else if (word == "declare") {
+    } else if (word == Tok::KwDeclare) {
       this->parser.cursor().report(
           at, "'declare' is not supported: a field gets its value in its declaration or in the "
               "constructor");
-    } else if (word == "accessor") {
+    } else if (word == Tok::KwAccessor) {
       accessor = true;
     } else {
       isAsync = true;
     }
   }
-  bool accessorAhead = this->parser.tok.is(Tok::Identifier) &&
-                       (this->parser.tok.text == "get" || this->parser.tok.text == "set") &&
+  bool accessorAhead = (this->parser.tok.is(Tok::KwGet) || this->parser.tok.is(Tok::KwSet)) &&
                        !this->parser.cursor().peek().newlineBefore &&
                        (this->parser.cursor().peek().is(Tok::Identifier) ||
                         TokenKinds::isKeyword(this->parser.cursor().peek().kind) ||
                         this->parser.cursor().peek().is(Tok::StringLiteral));
   if (accessorAhead) {
-    bool getter = this->parser.tok.text == "get";
+    bool getter = this->parser.tok.is(Tok::KwGet);
     this->parser.cursor().advance();
     std::string name = this->parser.tok.text.str();
     std::string setter =
@@ -310,7 +322,7 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
   const char *start = this->parser.tok.text.data();
   bool generator = this->parser.cursor().accept(Tok::Star);
   llvm::SMLoc nameLoc = this->parser.tok.loc();
-  bool plainName = this->parser.tok.is(Tok::Identifier);
+  bool constructorName = this->parser.tok.is(Tok::KwConstructor);
   bool hash = this->parser.tok.hash;
   llvm::StringRef name;
   if (!this->parser.objectTypes().parseFieldName(name)) {
@@ -324,7 +336,7 @@ void ClassParser::parseClassMember(ClassDecl *cls) {
 
   if (this->parser.tok.is(Tok::LParen) || this->parser.tok.is(Tok::Less)) {
     auto *fn = this->parser.ctx.make<FunctionDecl>(nameLoc, name);
-    bool constructor = plainName && name == "constructor" && !isStatic;
+    bool constructor = constructorName && !isStatic;
     bool abstractMethod = isAbstract && !constructor;
     if (accessor) {
       this->parser.cursor().report(loc, "'accessor' goes before a field, not a method");

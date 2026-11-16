@@ -38,7 +38,9 @@ private:
     return i < this->toks.size() && this->toks[i].kind == kind;
   }
   bool isName(size_t i, llvm::StringRef name) const {
-    return is(i, Tok::Identifier) && this->toks[i].text == name;
+    bool isWord = is(i, Tok::Identifier) ||
+                  (i < this->toks.size() && TokenKinds::isKeyword(this->toks[i].kind));
+    return isWord && this->toks[i].text == name;
   }
   bool afterDot(size_t i) const {
     return i > 0 && (is(i - 1, Tok::Dot) || is(i - 1, Tok::QuestionDot));

@@ -19,10 +19,12 @@ bool Scanner::regexMayFollow(const Token *prev) {
   if (!prev) {
     return true;
   }
+  if (TokenKinds::isContextual(prev->kind)) {
+    return prev->kind == Tok::KwOf;
+  }
   switch (prev->kind) {
   case Tok::Identifier:
-    return prev->text == "throw" || prev->text == "yield" || prev->text == "await" ||
-           prev->text == "of" || prev->text == "instanceof";
+    return prev->text == "throw" || prev->text == "yield" || prev->text == "await";
   case Tok::IntLiteral:
   case Tok::FloatLiteral:
   case Tok::StringLiteral:
@@ -89,13 +91,13 @@ std::vector<ImportRef> Scanner::importSpecifiers(const std::vector<Token> &token
   };
   for (size_t i = 0; i < tokens.size(); ++i) {
     const Token &tok = tokens[i];
-    if (!tok.is(Tok::Identifier) || (tok.text != "import" && tok.text != "export")) {
+    if (!tok.is(Tok::KwImport) && !tok.is(Tok::KwExport)) {
       continue;
     }
     if (i > 0 && (tokens[i - 1].is(Tok::Dot) || tokens[i - 1].is(Tok::QuestionDot))) {
       continue;
     }
-    bool isImport = tok.text == "import";
+    bool isImport = tok.is(Tok::KwImport);
     if (i + 1 < tokens.size() && isImport && tokens[i + 1].is(Tok::StringLiteral)) {
       add(tokens[i + 1]);
       continue;
@@ -109,20 +111,17 @@ std::vector<ImportRef> Scanner::importSpecifiers(const std::vector<Token> &token
         if (--depth < 0) {
           break;
         }
-        if (depth == 0 && !isImport &&
-            !(j + 1 < tokens.size() && tokens[j + 1].is(Tok::Identifier) &&
-              tokens[j + 1].text == "from")) {
+        if (depth == 0 && !isImport && !(j + 1 < tokens.size() && tokens[j + 1].is(Tok::KwFrom))) {
           break;
         }
       } else if (depth == 0 && (t.is(Tok::Semi) || t.is(Tok::Assign) || t.is(Tok::LParen))) {
         break;
-      } else if (depth == 0 && t.is(Tok::Identifier) && t.text == "from") {
+      } else if (depth == 0 && t.is(Tok::KwFrom)) {
         if (j + 1 < tokens.size() && tokens[j + 1].is(Tok::StringLiteral)) {
           add(tokens[j + 1]);
         }
         break;
-      } else if (depth == 0 && !isImport && j == i + 1 && !t.is(Tok::Star) &&
-                 !(t.is(Tok::Identifier) && t.text == "type")) {
+      } else if (depth == 0 && !isImport && j == i + 1 && !t.is(Tok::Star) && !t.is(Tok::KwType)) {
         break;
       }
     }

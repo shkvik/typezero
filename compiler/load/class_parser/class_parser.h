@@ -14,6 +14,7 @@ public:
   Expr *parseDecoratorExpr();
   void rejectDecorators(llvm::ArrayRef<Decorator> decorators);
   bool memberModifierAhead();
+  bool isMemberModifier(Tok kind) const;
   void skipClassMember();
   void parseMethodRest(FunctionDecl *fn, const char *start);
   void skipTypeParams();

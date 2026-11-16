@@ -92,7 +92,7 @@ void PortCommand::findDefaultNames(const std::vector<std::string> &files,
       std::vector<Token> toks = Scanner::tokenize(text);
       std::string name;
       for (size_t i = 0; i + 1 < toks.size() && name.empty(); ++i) {
-        if (toks[i].kind != Tok::Identifier || toks[i].text != "export") {
+        if (!toks[i].is(Tok::KwExport)) {
           continue;
         }
         if (toks[i + 1].is(Tok::KwDefault)) {

@@ -302,8 +302,7 @@ Expr *ExprParser::parseBinary(int minPrec) {
     if (this->parser.tok.is(Tok::KwIn) && this->parser.noIn) {
       return lhs;
     }
-    if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "instanceof" &&
-        kRelationalPrec >= minPrec) {
+    if (this->parser.tok.is(Tok::KwInstanceof) && kRelationalPrec >= minPrec) {
       llvm::SMLoc loc = this->parser.tok.loc();
       this->parser.cursor().advance();
       Expr *rhs = parseBinary(kRelationalPrec + 1);

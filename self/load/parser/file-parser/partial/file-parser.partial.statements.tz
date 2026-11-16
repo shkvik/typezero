@@ -1,5 +1,5 @@
 import { FileParser } from "../file-parser.tz";
-import { Token, TokenKind, isKeyword } from "../../../../token.tz";
+import { Token, TokenKind, isKeyword, isName } from "../../../../token.tz";
 import { Pattern } from "./file-parser.partial.patterns.tz";
 import {
   BindingForm,
@@ -26,6 +26,14 @@ partial class FileParser {
   private statement(topLevel: boolean): Stmt {
     const token = this.cursor.peek();
     const loc = token.start;
+    if (
+      isName(token.kind) &&
+      this.cursor.lookahead().kind == TokenKind.Colon
+    ) {
+      this.cursor.skip(2);
+      const body = this.statement(false);
+      return { kind: StmtKind.Labeled, loc, label: token.text, body };
+    }
     switch (token.kind) {
       case TokenKind.At:
         return this.decoratedStatement(topLevel);
@@ -61,6 +69,25 @@ partial class FileParser {
       case TokenKind.Semi:
         this.cursor.next();
         return marker(StmtKind.Empty, loc);
+      case TokenKind.Import:
+        return this.importStatement(loc, topLevel);
+      case TokenKind.Export:
+        return this.exportDecl(topLevel);
+      case TokenKind.Class:
+        return this.classStatement(loc);
+      case TokenKind.Namespace:
+      case TokenKind.Module:
+        return this.groupingStatement(token);
+      case TokenKind.Declare:
+        return this.declareStatement(loc);
+      case TokenKind.Type:
+        return this.typeStatement(loc);
+      case TokenKind.Interface:
+        return this.interfaceStatement(loc);
+      case TokenKind.Abstract:
+        return this.abstractStatement(loc);
+      case TokenKind.Async:
+        return this.asyncStatement(loc);
       case TokenKind.Identifier:
         return (
           this.wordStatement(token, topLevel) ?? this.expressionStatement(loc)
@@ -102,46 +129,101 @@ partial class FileParser {
     return decl;
   }
 
+  private importStatement(loc: int, topLevel: boolean): Stmt {
+    const next = this.cursor.lookahead();
+    if (next.kind == TokenKind.LParen || next.kind == TokenKind.Dot) {
+      return this.expressionStatement(loc);
+    }
+
+    return this.importDecl(topLevel);
+  }
+
+  private nameOnLine(): boolean {
+    const next = this.cursor.lookahead();
+
+    return isName(next.kind) && !next.newline;
+  }
+
+  private groupingAhead(): boolean {
+    const next = this.cursor.lookahead();
+    const named =
+      isName(next.kind) ||
+      isKeyword(next.kind) ||
+      next.kind == TokenKind.String;
+
+    return named && !next.newline;
+  }
+
+  private classStatement(loc: int): Stmt {
+    if (this.nameOnLine()) {
+      return this.classDecl(false);
+    }
+
+    return this.expressionStatement(loc);
+  }
+
+  private groupingStatement(token: Token): Stmt {
+    if (this.groupingAhead()) {
+      return this.skipDeclaration(
+        token.start,
+        `'${token.text}' is not supported`,
+      );
+    }
+
+    return this.expressionStatement(token.start);
+  }
+
+  private declareStatement(loc: int): Stmt {
+    if (this.groupingAhead()) {
+      return this.declare(loc);
+    }
+
+    return this.expressionStatement(loc);
+  }
+
+  private typeStatement(loc: int): Stmt {
+    if (this.nameOnLine()) {
+      return this.typeAlias();
+    }
+
+    return this.expressionStatement(loc);
+  }
+
+  private interfaceStatement(loc: int): Stmt {
+    if (this.nameOnLine()) {
+      return this.interfaceDecl();
+    }
+
+    return this.expressionStatement(loc);
+  }
+
+  private abstractStatement(loc: int): Stmt {
+    const next = this.cursor.lookahead();
+    if (next.kind != TokenKind.Class || next.newline) {
+      return this.expressionStatement(loc);
+    }
+    this.cursor.next();
+    const cls = this.classDecl(false);
+    cls.isAbstract = true;
+
+    return cls;
+  }
+
+  private asyncStatement(loc: int): Stmt {
+    if (!this.asyncFunctionAhead()) {
+      return this.expressionStatement(loc);
+    }
+    this.cursor.next();
+
+    return this.functionDeclaration(true);
+  }
+
   private wordStatement(token: Token, topLevel: boolean): Stmt | undefined {
     const text = token.text;
     const next = this.cursor.lookahead();
     const loc = token.start;
-    if (
-      text == "import" &&
-      next.kind != TokenKind.LParen &&
-      next.kind != TokenKind.Dot
-    ) {
-      return this.importDecl(topLevel);
-    }
-    if (text == "export") {
-      return this.exportDecl(topLevel);
-    }
-    const grouping =
-      (text == "namespace" || text == "module" || text == "declare") &&
-      (next.kind == TokenKind.Identifier ||
-        isKeyword(next.kind) ||
-        next.kind == TokenKind.String) &&
-      !next.newline;
-    if (grouping) {
-      return this.declare(loc, text);
-    }
-    const onLine = next.kind == TokenKind.Identifier && !next.newline;
-    if (text == "using" && onLine) {
+    if (text == "using" && this.nameOnLine()) {
       return this.usingDecl();
-    }
-    if (next.kind == TokenKind.Colon) {
-      this.cursor.skip(2);
-      const body = this.statement(false);
-      return { kind: StmtKind.Labeled, loc, label: text, body };
-    }
-    if (text == "type" && onLine) {
-      return this.typeAlias();
-    }
-    if (text == "interface" && onLine) {
-      return this.interfaceDecl();
-    }
-    if (text == "class" && onLine) {
-      return this.classDecl(false);
     }
     if (text == "throw") {
       return this.throwStatement();
@@ -155,18 +237,9 @@ partial class FileParser {
     ) {
       return this.strayHandler(loc, text);
     }
-    if (text == "abstract" && onLine && next.text == "class") {
-      this.cursor.next();
-      const cls = this.classDecl(false);
-      cls.isAbstract = true;
-      return cls;
-    }
-    if (text == "partial" && onLine && next.text == "class") {
+    const classOnLine = next.kind == TokenKind.Class && !next.newline;
+    if (text == "partial" && classOnLine) {
       return this.partialClass(loc, topLevel);
-    }
-    if (this.asyncFunctionAhead()) {
-      this.cursor.next();
-      return this.functionDeclaration(true);
     }
 
     return undefined;
@@ -202,23 +275,20 @@ partial class FileParser {
     return marker(StmtKind.Empty, loc);
   }
 
-  private declare(loc: int, text: string): Stmt {
-    if (text != "declare") {
-      return this.skipDeclaration(loc, `'${text}' is not supported`);
-    }
+  private declare(loc: int): Stmt {
     const next = this.cursor.lookahead();
     if (next.kind == TokenKind.Function) {
       this.cursor.next();
       return this.declaredFunction();
     }
-    if (!this.library && next.text == "class") {
+    if (!this.library && next.kind == TokenKind.Class) {
       this.cursor.next();
       return this.handleClass();
     }
     if (
-      next.text == "module" ||
-      next.text == "global" ||
-      next.text == "namespace"
+      next.kind == TokenKind.Module ||
+      next.kind == TokenKind.Namespace ||
+      next.text == "global"
     ) {
       return this.skipDeclaration(
         loc,
@@ -274,7 +344,7 @@ partial class FileParser {
   private jumpStatement(token: Token): Stmt {
     this.cursor.next();
     let label = "";
-    if (this.cursor.is(TokenKind.Identifier) && !this.cursor.peek().newline) {
+    if (this.cursor.atName() && !this.cursor.peek().newline) {
       label = this.cursor.next().text;
     }
     this.cursor.expectSemicolon();
@@ -333,9 +403,10 @@ partial class FileParser {
       !this.cursor.is(TokenKind.RBrace) &&
       !this.cursor.is(TokenKind.End)
     ) {
+      const start = this.cursor.peek().start;
       body.push(this.statement(false));
       if (this.cursor.isRecovering()) {
-        this.cursor.synchronize();
+        this.cursor.recoverStatement(start);
       }
     }
 
@@ -350,9 +421,10 @@ partial class FileParser {
       !this.cursor.is(TokenKind.RBrace) &&
       !this.cursor.is(TokenKind.End)
     ) {
+      const start = this.cursor.peek().start;
       body.push(this.statement(false));
       if (this.cursor.isRecovering()) {
-        this.cursor.synchronize();
+        this.cursor.recoverStatement(start);
       }
     }
     const end = this.cursor.peek().start;
@@ -443,7 +515,7 @@ partial class FileParser {
         first = binding;
       }
       const forIn = this.cursor.is(TokenKind.In);
-      if (this.cursor.isWord("of") || forIn) {
+      if (this.cursor.is(TokenKind.Of) || forIn) {
         return this.forOf(loc, awaitLoc, isConst, forIn, first, pattern);
       }
       const decls: VarDeclarator[] = [];
@@ -483,7 +555,7 @@ partial class FileParser {
       const expr = this.sequence();
       init = { kind: StmtKind.Expr, loc: initLoc, expr };
     }
-    if (this.cursor.is(TokenKind.In) || this.cursor.isWord("of")) {
+    if (this.cursor.is(TokenKind.In) || this.cursor.is(TokenKind.Of)) {
       this.cursor.error(
         this.cursor.peek().start,
         "'for...in' and 'for...of' need a new variable",
@@ -758,7 +830,13 @@ partial class FileParser {
 
   private binding(): Binding | undefined {
     const token = this.cursor.peek();
-    if (!this.cursor.is(TokenKind.Identifier)) {
+    const reserved = !isName(token.kind) && isKeyword(token.kind);
+    if (reserved) {
+      this.cursor.report(
+        token.start,
+        this.cursor.expectedName("variable name"),
+      );
+    } else if (!isName(token.kind)) {
       this.cursor.error(token.start, "expected a variable name");
       return undefined;
     }

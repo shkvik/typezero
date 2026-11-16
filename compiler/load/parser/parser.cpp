@@ -64,9 +64,10 @@ SourceFile Parser::parseSourceFile() {
       this->recovering = false;
       continue;
     }
+    const char *start = this->tok.text.data();
     file.items.push_back(stmts().parseStatement(true));
     if (this->recovering) {
-      cursor().synchronize();
+      cursor().recoverStatement(start);
     }
   }
   file.fieldNames = std::move(this->fieldNames);

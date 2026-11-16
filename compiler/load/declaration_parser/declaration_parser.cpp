@@ -43,11 +43,11 @@ void DeclarationParser::skipItem() {
 
 void DeclarationParser::parseItem(DeclarationFile &file) {
   llvm::SMLoc loc = this->parser.tok.loc();
-  if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "import") {
+  if (this->parser.tok.is(Tok::KwImport)) {
     this->parser.modules().parseImport(true);
     return;
   }
-  if (!this->parser.tok.is(Tok::Identifier) || this->parser.tok.text != "export") {
+  if (!this->parser.tok.is(Tok::KwExport)) {
     this->parser.cursor().report(loc,
                                  "a declaration file holds only what its module exports: 'export "
                                  "type', 'export declare function', 'export declare class' and "
@@ -61,14 +61,13 @@ void DeclarationParser::parseItem(DeclarationFile &file) {
     return;
   }
   this->parser.cursor().advance();
-  if (this->parser.tok.is(Tok::Identifier) &&
-      (this->parser.tok.text == "type" || this->parser.tok.text == "interface")) {
+  if (this->parser.tok.is(Tok::KwType) || this->parser.tok.is(Tok::KwInterface)) {
     if (Stmt *stmt = this->parser.stmts().parseStatement(true)) {
       file.items.push_back(stmt);
     }
     return;
   }
-  if (!this->parser.tok.is(Tok::Identifier) || this->parser.tok.text != "declare") {
+  if (!this->parser.tok.is(Tok::KwDeclare)) {
     this->parser.cursor().report(
         this->parser.tok.loc(),
         "a declaration file has no code: write 'export declare function' or "
@@ -87,11 +86,11 @@ void DeclarationParser::parseItem(DeclarationFile &file) {
     file.items.push_back(fn);
     return;
   }
-  bool isAbstract = this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "abstract";
+  bool isAbstract = this->parser.tok.is(Tok::KwAbstract);
   if (isAbstract) {
     this->parser.cursor().advance();
   }
-  if (this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "class") {
+  if (this->parser.tok.is(Tok::KwClass)) {
     parseClass(file, isAbstract);
     return;
   }
@@ -105,7 +104,7 @@ void DeclarationParser::parseClass(DeclarationFile &file, bool isAbstract) {
   DeclaredClass cls;
   cls.isAbstract = isAbstract;
   cls.loc = this->parser.tok.loc();
-  if (this->parser.tok.is(Tok::Identifier)) {
+  if (this->parser.tok.isName()) {
     cls.name = this->parser.tok.text;
     this->parser.cursor().advance();
   } else {
@@ -141,25 +140,27 @@ void DeclarationParser::parseMember(DeclaredClass &cls) {
   DeclaredMember member;
   DeclaredField field;
   for (;;) {
-    if (!this->parser.tok.is(Tok::Identifier) || !memberWordAhead()) {
+    Tok word = this->parser.tok.kind;
+    bool isModifier = word == Tok::KwPublic || word == Tok::KwPrivate || word == Tok::KwProtected ||
+                      word == Tok::KwStatic || word == Tok::KwReadonly || word == Tok::KwAsync ||
+                      word == Tok::KwAbstract || word == Tok::KwOverride;
+    if (!isModifier || !memberWordAhead()) {
       break;
     }
-    llvm::StringRef word = this->parser.tok.text;
-    if (word == "public" || word == "private" || word == "protected") {
-      member.access = word == "public"    ? Access::Public
-                      : word == "private" ? Access::Private
-                                          : Access::Protected;
+    if (word == Tok::KwPublic || word == Tok::KwPrivate || word == Tok::KwProtected) {
+      member.access = word == Tok::KwPublic    ? Access::Public
+                      : word == Tok::KwPrivate ? Access::Private
+                                               : Access::Protected;
       member.accessWritten = true;
-    } else if (word == "static") {
+    } else if (word == Tok::KwStatic) {
       member.isStatic = true;
-    } else if (word == "readonly") {
+    } else if (word == Tok::KwReadonly) {
       field.readonly = true;
-    } else if (word != "async" && word != "abstract" && word != "override") {
-      break;
     }
     this->parser.cursor().advance();
   }
   member.loc = this->parser.tok.loc();
+  bool constructor = this->parser.tok.is(Tok::KwConstructor);
   if (this->parser.classes().symbolKeyAhead()) {
     if (!this->parser.objectTypes().parseFieldName(member.name)) {
       skipItem();
@@ -173,7 +174,6 @@ void DeclarationParser::parseMember(DeclaredClass &cls) {
     skipItem();
     return;
   }
-  bool constructor = member.name == "constructor";
   if (this->parser.cursor().accept(Tok::Question)) {
     field.optional = true;
   }

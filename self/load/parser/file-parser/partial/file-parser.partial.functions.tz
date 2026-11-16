@@ -1,5 +1,5 @@
 import { FileParser } from "../file-parser.tz";
-import { TokenKind } from "../../../../token.tz";
+import { TokenKind, isKeyword, isName } from "../../../../token.tz";
 import { Pattern } from "./file-parser.partial.patterns.tz";
 import { Mark } from "../../cursor.tz";
 import {
@@ -28,13 +28,13 @@ import {
 
 type ParamPattern = { readonly name: string; readonly pattern: Pattern };
 
-function isParamModifier(text: string): boolean {
-  switch (text) {
-    case "public":
-    case "private":
-    case "protected":
-    case "readonly":
-    case "override":
+function isParamModifier(kind: TokenKind): boolean {
+  switch (kind) {
+    case TokenKind.Public:
+    case TokenKind.Private:
+    case TokenKind.Protected:
+    case TokenKind.Readonly:
+    case TokenKind.Override:
       return true;
     default:
       return false;
@@ -51,7 +51,7 @@ partial class FileParser {
     const loc = fn.loc;
     while (fn.body == undefined) {
       if (
-        this.cursor.isWord("export") &&
+        this.cursor.is(TokenKind.Export) &&
         this.cursor.lookahead().kind == TokenKind.Function
       ) {
         this.cursor.next();
@@ -87,7 +87,12 @@ partial class FileParser {
     const generator = this.cursor.accept(TokenKind.Star);
     let name = "";
     let loc = this.cursor.peek().start;
-    if (this.cursor.is(TokenKind.Identifier)) {
+    const reserved =
+      !this.cursor.atName() && isKeyword(this.cursor.peek().kind) && !expression;
+    if (reserved) {
+      this.cursor.report(loc, this.cursor.expectedName("function name"));
+    }
+    if (this.cursor.atName() || reserved) {
       name = this.cursor.next().text;
     } else if (expression) {
       loc = keyword.start;
@@ -204,7 +209,12 @@ partial class FileParser {
     const loc = this.cursor.peek().start;
     let name = "";
     let pattern = kNoSpan;
-    if (this.cursor.is(TokenKind.Identifier)) {
+    const reserved =
+      !this.cursor.atName() && isKeyword(this.cursor.peek().kind);
+    if (reserved) {
+      this.cursor.report(loc, this.cursor.expectedName("parameter name"));
+    }
+    if (this.cursor.atName() || reserved) {
       name = this.cursor.next().text;
     } else if (
       (this.cursor.is(TokenKind.LBrace) ||
@@ -266,9 +276,9 @@ partial class FileParser {
   private paramModifiers(constructor: boolean): ParamProperty | undefined {
     let property: ParamProperty | undefined = undefined;
     while (
-      this.cursor.is(TokenKind.Identifier) &&
-      isParamModifier(this.cursor.peek().text) &&
-      this.cursor.lookahead().kind == TokenKind.Identifier
+      isParamModifier(this.cursor.peek().kind) &&
+      (isName(this.cursor.lookahead().kind) ||
+        isKeyword(this.cursor.lookahead().kind))
     ) {
       const word = this.cursor.next();
       if (!constructor) {
@@ -279,11 +289,11 @@ partial class FileParser {
       }
       const found = property ?? { readonly: false, access: Access.Public };
       property = found;
-      if (word.text == "readonly") {
+      if (word.kind == TokenKind.Readonly) {
         found.readonly = true;
-      } else if (word.text == "private") {
+      } else if (word.kind == TokenKind.Private) {
         found.access = Access.Private;
-      } else if (word.text == "protected") {
+      } else if (word.kind == TokenKind.Protected) {
         found.access = Access.Protected;
       }
     }
@@ -318,7 +328,7 @@ partial class FileParser {
     const next = this.cursor.lookahead();
 
     return (
-      this.cursor.isWord("async") &&
+      this.cursor.is(TokenKind.Async) &&
       next.kind == TokenKind.Function &&
       !next.newline
     );
@@ -333,7 +343,7 @@ partial class FileParser {
     }
     const next = this.cursor.lookahead();
     const starts =
-      next.kind == TokenKind.Identifier ||
+      isName(next.kind) ||
       next.kind == TokenKind.LParen ||
       next.kind == TokenKind.Less;
     if (next.newline || !starts) {
@@ -345,7 +355,7 @@ partial class FileParser {
       return this.asyncGenericArrow(start);
     }
     const after = this.cursor.lookahead();
-    const isArrow = this.cursor.is(TokenKind.Identifier)
+    const isArrow = this.cursor.atName()
       ? after.kind == TokenKind.Arrow && !after.newline
       : this.arrowAhead();
     if (!isArrow) {
@@ -404,7 +414,7 @@ partial class FileParser {
     const patterns: ParamPattern[] = [];
     let params: Param[] = [];
     let returnType: TypeRef | undefined = undefined;
-    if (this.cursor.is(TokenKind.Identifier)) {
+    if (this.cursor.atName()) {
       const token = this.cursor.next();
       params = [
         {
@@ -496,7 +506,7 @@ partial class FileParser {
         this.cursor.is(TokenKind.Const) ||
         this.cursor.is(TokenKind.In) ||
         this.cursor.isWord("out");
-      if (modifier && next.kind == TokenKind.Identifier) {
+      if (modifier && isName(next.kind)) {
         this.cursor.report(
           this.cursor.peek().start,
           "a modifier before a type parameter is not supported",
@@ -504,7 +514,7 @@ partial class FileParser {
         this.cursor.next();
       }
       const token = this.cursor.peek();
-      if (token.kind != TokenKind.Identifier) {
+      if (!isName(token.kind)) {
         this.cursor.error(
           token.start,
           `expected a type parameter name, found ${token.kind}`,
@@ -513,7 +523,7 @@ partial class FileParser {
       }
       this.cursor.next();
       let constraint: TypeRef | undefined = undefined;
-      if (this.cursor.isWord("extends")) {
+      if (this.cursor.is(TokenKind.Extends)) {
         this.cursor.next();
         constraint = this.type();
       }

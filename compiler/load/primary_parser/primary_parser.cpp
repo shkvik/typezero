@@ -74,43 +74,33 @@ Expr *PrimaryParser::parsePrimary() {
       this->parser.cursor().advance();
       return this->parser.ctx.make<BoolLitExpr>(loc, value);
     }
-    case Tok::Identifier: {
-      if (this->parser.tok.text == "import") {
-        this->parser.cursor().report(
-            loc, this->parser.cursor().peek().is(Tok::Dot)
-                     ? "'import.meta' is not supported"
-                     : "dynamic 'import()' is not supported: every file the program uses is "
-                       "compiled into it; import by name at the top of the file, e.g. 'import "
-                       "{ a } from \"./x\"'");
-        this->parser.cursor().advance();
+    case Tok::KwImport:
+      this->parser.cursor().report(
+          loc, this->parser.cursor().peek().is(Tok::Dot)
+                   ? "'import.meta' is not supported"
+                   : "dynamic 'import()' is not supported: every file the program uses is "
+                     "compiled into it; import by name at the top of the file, e.g. 'import "
+                     "{ a } from \"./x\"'");
+      this->parser.cursor().advance();
+      return this->parser.ctx.make<IntLitExpr>(loc, 0);
+    case Tok::KwClass: {
+      const Token &next = this->parser.cursor().peek();
+      bool isClassExpression = next.isName() || next.is(Tok::LBrace) || next.is(Tok::KwExtends) ||
+                               next.is(Tok::KwImplements);
+      if (!isClassExpression) {
+        this->parser.cursor().error(loc, "expected an expression, found 'class'");
         return this->parser.ctx.make<IntLitExpr>(loc, 0);
       }
-      if (this->parser.cursor().peek().is(Tok::Arrow) &&
-          !this->parser.cursor().peek().newlineBefore) {
-        return this->parser.functions().parseArrow();
-      }
-      if (this->parser.tok.text == "async") {
-        if (Expr *fn = this->parser.functions().tryAsyncFunction()) {
-          return fn;
-        }
-      }
-      if (this->parser.tok.text == "class" && (this->parser.cursor().peek().is(Tok::Identifier) ||
-                                               this->parser.cursor().peek().is(Tok::LBrace))) {
-        ClassDecl *cls = this->parser.classes().parseClass(true);
-        return this->parser.ctx.make<ClassExpr>(loc, cls);
-      }
-      if (this->parser.tok.text == "yield" && this->parser.inGenerator) {
-        this->parser.cursor().report(loc,
-                                     "'yield' must be in parentheses here, e.g. '1 + (yield x)'");
-        return this->parser.exprs().parseYield();
-      }
-      llvm::StringRef name = this->parser.tok.text;
-      this->parser.cursor().advance();
-      if (name == "undefined") {
-        return this->parser.ctx.make<UndefinedExpr>(loc);
-      }
-      return this->parser.ctx.make<NameExpr>(loc, name);
+      ClassDecl *cls = this->parser.classes().parseClass(true);
+      return this->parser.ctx.make<ClassExpr>(loc, cls);
     }
+    case Tok::KwAsync:
+      if (Expr *fn = this->parser.functions().tryAsyncFunction()) {
+        return fn;
+      }
+      return parseName(loc);
+    case Tok::Identifier:
+      return parseName(loc);
     case Tok::KwFunction: {
       FunctionDecl *fn = this->parser.functions().parseFunction(true);
       return this->parser.ctx.make<FunctionExpr>(loc, fn);
@@ -148,10 +138,30 @@ Expr *PrimaryParser::parsePrimary() {
       return this->parser.ctx.make<IntLitExpr>(loc, 0);
     }
     default:
+      if (this->parser.tok.isName()) {
+        return parseName(loc);
+      }
       this->parser.cursor().error(loc, llvm::Twine("expected an expression, found ") +
                                            TokenKinds::tokSpelling(this->parser.tok.kind));
       return this->parser.ctx.make<IntLitExpr>(loc, 0);
   }
+}
+
+Expr *PrimaryParser::parseName(llvm::SMLoc loc) {
+  if (this->parser.cursor().peek().is(Tok::Arrow) && !this->parser.cursor().peek().newlineBefore) {
+    return this->parser.functions().parseArrow();
+  }
+  if (this->parser.tok.text == "yield" && this->parser.inGenerator) {
+    this->parser.cursor().report(loc, "'yield' must be in parentheses here, e.g. '1 + (yield x)'");
+    return this->parser.exprs().parseYield();
+  }
+  llvm::StringRef name = this->parser.tok.text;
+  this->parser.cursor().advance();
+  if (name == "undefined") {
+    return this->parser.ctx.make<UndefinedExpr>(loc);
+  }
+
+  return this->parser.ctx.make<NameExpr>(loc, name);
 }
 
 Expr *PrimaryParser::parseArrayLiteral() {
@@ -227,8 +237,7 @@ Expr *PrimaryParser::parseObjectLiteral() {
       }
       continue;
     }
-    bool accessor = this->parser.tok.is(Tok::Identifier) &&
-                    (this->parser.tok.text == "get" || this->parser.tok.text == "set") &&
+    bool accessor = (this->parser.tok.is(Tok::KwGet) || this->parser.tok.is(Tok::KwSet)) &&
                     (this->parser.cursor().peek().is(Tok::Identifier) ||
                      TokenKinds::isKeyword(this->parser.cursor().peek().kind) ||
                      this->parser.cursor().peek().is(Tok::StringLiteral));
@@ -239,7 +248,7 @@ Expr *PrimaryParser::parseObjectLiteral() {
       this->parser.cursor().skipToClosingBrace();
       return lit;
     }
-    bool isAsync = this->parser.tok.is(Tok::Identifier) && this->parser.tok.text == "async" &&
+    bool isAsync = this->parser.tok.is(Tok::KwAsync) &&
                    !this->parser.cursor().peek().is(Tok::Colon) &&
                    !this->parser.cursor().peek().is(Tok::Comma) &&
                    !this->parser.cursor().peek().is(Tok::RBrace) &&
@@ -250,7 +259,7 @@ Expr *PrimaryParser::parseObjectLiteral() {
     }
     const char *start = this->parser.tok.text.data();
     bool generator = this->parser.cursor().accept(Tok::Star);
-    bool identifier = this->parser.tok.is(Tok::Identifier);
+    bool identifier = this->parser.tok.isName();
     llvm::StringRef name;
     if (!this->parser.objectTypes().parseFieldName(name)) {
       this->parser.cursor().skipToClosingBrace();

@@ -1,4 +1,4 @@
-import { Token, TokenKind } from "../../token.tz";
+import { Token, TokenKind, isKeyword, isName } from "../../token.tz";
 import { Span } from "../../ast.tz";
 
 export type Mark = { readonly at: int; readonly recovering: boolean };
@@ -58,6 +58,10 @@ export class Cursor {
     return this.peek().kind == kind;
   }
 
+  public atName(): boolean {
+    return isName(this.peek().kind);
+  }
+
   public isWord(text: string): boolean {
     const token = this.peek();
 
@@ -83,6 +87,24 @@ export class Cursor {
     );
 
     return false;
+  }
+
+  public expectName(context: string): boolean {
+    if (!this.atName()) {
+      return this.expect(TokenKind.Identifier, context);
+    }
+    this.next();
+
+    return true;
+  }
+
+  public expectedName(what: string): string {
+    const token = this.peek();
+    if (isKeyword(token.kind)) {
+      return `'${token.text}' is a keyword in tz and cannot be a ${what}; choose another name`;
+    }
+
+    return `expected a ${what}`;
   }
 
   public expectSemicolon(): void {
@@ -172,6 +194,14 @@ export class Cursor {
     }
   }
 
+  public recoverStatement(start: int): void {
+    if (this.peek().start == start) {
+      this.next();
+    }
+
+    return this.synchronize();
+  }
+
   public skipToClosingBrace(): void {
     let depth = 0;
     while (!this.is(TokenKind.End)) {
@@ -212,33 +242,27 @@ export class Cursor {
       case TokenKind.Break:
       case TokenKind.Continue:
       case TokenKind.Debugger:
+      case TokenKind.Import:
+      case TokenKind.Export:
         return true;
+      case TokenKind.Class:
+      case TokenKind.Type:
+      case TokenKind.Interface:
+      case TokenKind.Namespace:
+      case TokenKind.Module:
+      case TokenKind.Declare:
+        return this.namesAhead();
       case TokenKind.Identifier:
-        return this.startsDeclaration(token.text);
+        return token.text == "throw" || token.text == "try";
       default:
         return false;
     }
   }
 
-  private startsDeclaration(text: string): boolean {
-    switch (text) {
-      case "import":
-      case "export":
-      case "throw":
-      case "try":
-        return true;
-      case "type":
-      case "interface":
-      case "namespace":
-      case "module":
-      case "declare":
-      case "class": {
-        const next = this.lookahead();
-        return next.kind == TokenKind.Identifier && !next.newline;
-      }
-      default:
-        return false;
-    }
+  private namesAhead(): boolean {
+    const next = this.lookahead();
+
+    return isName(next.kind) && !next.newline;
   }
 
   private last(): Token {

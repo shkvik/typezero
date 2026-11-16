@@ -10,27 +10,52 @@ export enum TokenKind {
   TemplateTail,
   Regex,
 
+  Abstract,
+  Accessor,
   As,
+  Async,
   Break,
   Case,
+  Class,
   Const,
+  Constructor,
   Continue,
   Debugger,
+  Declare,
   Default,
   Delete,
   Do,
   Else,
   Enum,
+  Export,
+  Extends,
   False,
   For,
+  From,
   Function,
+  Get,
   If,
+  Implements,
+  Import,
   In,
+  Instanceof,
+  Interface,
   Let,
+  Module,
+  Namespace,
   New,
+  Of,
+  Override,
+  Private,
+  Protected,
+  Public,
+  Readonly,
   Return,
+  Set,
+  Static,
   Switch,
   True,
+  Type,
   Typeof,
   Var,
   Void,
@@ -107,23 +132,61 @@ export type Token = {
 }
 
 export function isKeyword(kind: TokenKind): boolean {
-  return kind >= TokenKind.As && kind <= TokenKind.While
+  return kind >= TokenKind.Abstract && kind <= TokenKind.While
+}
+
+export function isContextual(kind: TokenKind): boolean {
+  switch (kind) {
+    case TokenKind.Abstract:
+    case TokenKind.Accessor:
+    case TokenKind.Async:
+    case TokenKind.Constructor:
+    case TokenKind.Declare:
+    case TokenKind.From:
+    case TokenKind.Get:
+    case TokenKind.Module:
+    case TokenKind.Namespace:
+    case TokenKind.Of:
+    case TokenKind.Override:
+    case TokenKind.Readonly:
+    case TokenKind.Set:
+    case TokenKind.Type:
+      return true
+    default:
+      return false
+  }
+}
+
+export function isName(kind: TokenKind): boolean {
+  return kind == TokenKind.Identifier || isContextual(kind)
 }
 
 export function keywordKind(word: string): TokenKind {
   switch (word) {
+    case "abstract":
+      return TokenKind.Abstract
+    case "accessor":
+      return TokenKind.Accessor
     case "as":
       return TokenKind.As
+    case "async":
+      return TokenKind.Async
     case "break":
       return TokenKind.Break
     case "case":
       return TokenKind.Case
+    case "class":
+      return TokenKind.Class
     case "const":
       return TokenKind.Const
+    case "constructor":
+      return TokenKind.Constructor
     case "continue":
       return TokenKind.Continue
     case "debugger":
       return TokenKind.Debugger
+    case "declare":
+      return TokenKind.Declare
     case "default":
       return TokenKind.Default
     case "delete":
@@ -134,26 +197,64 @@ export function keywordKind(word: string): TokenKind {
       return TokenKind.Else
     case "enum":
       return TokenKind.Enum
+    case "export":
+      return TokenKind.Export
+    case "extends":
+      return TokenKind.Extends
     case "false":
       return TokenKind.False
     case "for":
       return TokenKind.For
+    case "from":
+      return TokenKind.From
     case "function":
       return TokenKind.Function
+    case "get":
+      return TokenKind.Get
     case "if":
       return TokenKind.If
+    case "implements":
+      return TokenKind.Implements
+    case "import":
+      return TokenKind.Import
     case "in":
       return TokenKind.In
+    case "instanceof":
+      return TokenKind.Instanceof
+    case "interface":
+      return TokenKind.Interface
     case "let":
       return TokenKind.Let
+    case "module":
+      return TokenKind.Module
+    case "namespace":
+      return TokenKind.Namespace
     case "new":
       return TokenKind.New
+    case "of":
+      return TokenKind.Of
+    case "override":
+      return TokenKind.Override
+    case "private":
+      return TokenKind.Private
+    case "protected":
+      return TokenKind.Protected
+    case "public":
+      return TokenKind.Public
+    case "readonly":
+      return TokenKind.Readonly
     case "return":
       return TokenKind.Return
+    case "set":
+      return TokenKind.Set
+    case "static":
+      return TokenKind.Static
     case "switch":
       return TokenKind.Switch
     case "true":
       return TokenKind.True
+    case "type":
+      return TokenKind.Type
     case "typeof":
       return TokenKind.Typeof
     case "var":

@@ -55,7 +55,7 @@ std::unique_ptr<Parser::Pattern> PatternParser::parseBindingPattern() {
     e.rest = this->parser.cursor().accept(Tok::Ellipsis);
     if (this->parser.tok.is(Tok::LBracket) || this->parser.tok.is(Tok::LBrace)) {
       e.nested = parseBindingPattern();
-    } else if (this->parser.tok.is(Tok::Identifier)) {
+    } else if (this->parser.tok.isName()) {
       e.name = this->parser.tok.text;
       this->parser.cursor().advance();
     } else {
@@ -98,7 +98,7 @@ std::unique_ptr<Parser::Pattern> PatternParser::parseObjectPattern() {
     e.loc = this->parser.tok.loc();
     if (this->parser.cursor().accept(Tok::Ellipsis)) {
       e.rest = true;
-      if (!this->parser.tok.is(Tok::Identifier)) {
+      if (!this->parser.tok.isName()) {
         this->parser.cursor().error(
             this->parser.tok.loc(),
             "expected a variable name after '...' in the destructuring pattern");
@@ -107,7 +107,7 @@ std::unique_ptr<Parser::Pattern> PatternParser::parseObjectPattern() {
       e.name = this->parser.tok.text;
       this->parser.cursor().advance();
     } else {
-      bool identifier = this->parser.tok.is(Tok::Identifier);
+      bool identifier = this->parser.tok.isName();
       if (this->parser.cursor().accept(Tok::LBracket)) {
         e.keyExpr = this->parser.exprs().parseExpr();
         this->parser.cursor().expect(Tok::RBracket, "to close the key");
@@ -118,7 +118,7 @@ std::unique_ptr<Parser::Pattern> PatternParser::parseObjectPattern() {
       if (this->parser.cursor().accept(Tok::Colon)) {
         if (this->parser.tok.is(Tok::LBracket) || this->parser.tok.is(Tok::LBrace)) {
           e.nested = parseBindingPattern();
-        } else if (this->parser.tok.is(Tok::Identifier)) {
+        } else if (this->parser.tok.isName()) {
           e.name = this->parser.tok.text;
           this->parser.cursor().advance();
         } else {
