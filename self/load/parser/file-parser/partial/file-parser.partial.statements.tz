@@ -463,8 +463,8 @@ partial class FileParser {
     return { kind: StmtKind.Block, loc, body, end };
   }
 
-  private condition(keyword: string): Expr {
-    this.cursor.expect(TokenKind.LParen, `after '${keyword}'`);
+  private condition(keyword: Token): Expr {
+    this.cursor.expect(TokenKind.LParen, `after '${keyword.text}'`);
     const cond = this.sequence();
     this.cursor.expect(TokenKind.RParen, "after the condition");
 
@@ -474,7 +474,7 @@ partial class FileParser {
   private ifStatement(): Stmt {
     const keyword = this.cursor.next();
     const loc = keyword.start;
-    const cond = this.condition("if");
+    const cond = this.condition(keyword);
     const thenStmt = this.statement(false);
     const elseStmt = this.cursor.accept(TokenKind.Else)
       ? this.statement(false)
@@ -486,7 +486,7 @@ partial class FileParser {
   private whileStatement(): Stmt {
     const keyword = this.cursor.next();
     const loc = keyword.start;
-    const cond = this.condition("while");
+    const cond = this.condition(keyword);
     const body = this.statement(false);
 
     return { kind: StmtKind.While, loc, cond, body };
@@ -496,8 +496,9 @@ partial class FileParser {
     const keyword = this.cursor.next();
     const loc = keyword.start;
     const body = this.statement(false);
+    const whileKeyword = this.cursor.peek();
     this.cursor.expect(TokenKind.While, "after the body of 'do'");
-    const cond = this.condition("while");
+    const cond = this.condition(whileKeyword);
     this.cursor.accept(TokenKind.Semi);
 
     return { kind: StmtKind.DoWhile, loc, body, cond };

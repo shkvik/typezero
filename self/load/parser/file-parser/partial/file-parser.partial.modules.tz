@@ -1,5 +1,5 @@
 import { FileParser } from "../file-parser.tz";
-import { TokenKind, isKeyword, isName } from "../../../../token.tz";
+import { Token, TokenKind, isKeyword, isName } from "../../../../token.tz";
 import {
   Decorator,
   ExportForm,
@@ -161,7 +161,7 @@ partial class FileParser {
     }
     const names: ModuleName[] = [];
     if (this.cursor.is(TokenKind.LBrace)) {
-      this.moduleNames(names, true);
+      this.moduleNames(names, keyword);
     } else if (clause.kind == ImportForm.Named) {
       const token = this.cursor.peek();
       this.cursor.error(
@@ -342,7 +342,7 @@ partial class FileParser {
       return marker(StmtKind.Empty, loc);
     }
 
-    return this.exportNames(loc);
+    return this.exportNames(keyword);
   }
 
   private exportDecorated(topLevel: boolean): Stmt {
@@ -360,9 +360,10 @@ partial class FileParser {
     return stmt;
   }
 
-  private exportNames(loc: int): Stmt {
+  private exportNames(keyword: Token): Stmt {
+    const loc = keyword.start;
     const names: ModuleName[] = [];
-    this.moduleNames(names, false);
+    this.moduleNames(names, keyword);
     const reExport =
       !this.cursor.isRecovering() && this.cursor.is(TokenKind.From);
     let from: ModulePath | undefined = undefined;
@@ -431,16 +432,15 @@ partial class FileParser {
     return marker(StmtKind.Empty, loc);
   }
 
-  private moduleNames(names: ModuleName[], isImport: boolean): void {
+  private moduleNames(names: ModuleName[], keyword: Token): void {
     this.cursor.next();
-    const keyword = isImport ? "import" : "export";
     while (this.cursor.insideList(TokenKind.RBrace)) {
       const next = this.cursor.lookahead();
       if (this.cursor.is(TokenKind.Type) && isName(next.kind)) {
         const token = this.cursor.peek();
         this.cursor.report(
           token.start,
-          `'type' is not needed in an ${keyword}`,
+          `'type' is not needed in an ${keyword.text}`,
         );
         this.cursor.next();
       }
@@ -455,13 +455,11 @@ partial class FileParser {
     }
     this.cursor.expect(
       TokenKind.RBrace,
-      isImport
-        ? "to close the names to import"
-        : "to close the names to export",
+      `to close the names to ${keyword.text}`,
     );
   }
 
-  private moduleName(keyword: string): ModuleName | undefined {
+  private moduleName(keyword: Token): ModuleName | undefined {
     const token = this.cursor.peek();
     if (token.kind == TokenKind.Default) {
       this.cursor.error(token.start, "there is no 'export default'");
@@ -473,14 +471,14 @@ partial class FileParser {
     if (reserved && !renamed) {
       this.cursor.error(
         token.start,
-        `'${token.text}' is a keyword in tz: ${keyword} it under another name, e.g. '{ ${token.text} as ${token.text}Name }'`,
+        `'${token.text}' is a keyword in tz: ${keyword.text} it under another name, e.g. '{ ${token.text} as ${token.text}Name }'`,
       );
       return undefined;
     }
     if (!isName(token.kind) && !renamed) {
       this.cursor.error(
         token.start,
-        `expected a name to ${keyword}, found ${token.kind}`,
+        `expected a name to ${keyword.text}, found ${token.kind}`,
       );
       return undefined;
     }
