@@ -19,18 +19,7 @@ import {
   typeRef,
 } from "../../../../ast.tz";
 import { TypePlace } from "../types/file-parser.types.context.tz";
-
-const kExactDoubleLimit: uint64 = 9007199254740992;
-
-function integerAsDouble(whole: uint64): double {
-  if (whole <= kExactDoubleLimit) {
-    return whole.toDouble();
-  }
-  const text = `${whole}`;
-  const parsed = Number(text);
-
-  return parsed.unwrapOr(0.0);
-}
+import { kExactDoubleLimit } from "../const/file-parser.const.types.tz";
 
 partial class FileParser {
   private type(place: TypePlace = TypePlace.Plain): TypeRef {
@@ -385,7 +374,7 @@ partial class FileParser {
     let number = 0.0;
     let integer = false;
     if (lit.kind == ExprKind.IntLit) {
-      number = integerAsDouble(lit.value);
+      number = this.integerAsDouble(lit.value);
       integer = true;
     } else if (lit.kind == ExprKind.FloatLit) {
       number = lit.value;
@@ -957,5 +946,15 @@ partial class FileParser {
     );
 
     return true;
+  }
+
+  private integerAsDouble(whole: uint64): double {
+    if (whole <= kExactDoubleLimit) {
+      return whole.toDouble();
+    }
+    const text = `${whole}`;
+    const parsed = Number(text);
+
+    return parsed.unwrapOr(0.0);
   }
 }

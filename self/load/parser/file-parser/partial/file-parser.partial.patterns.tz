@@ -22,41 +22,6 @@ import {
   PatternElement,
 } from "../types/file-parser.types.patterns.tz";
 
-function emptyElement(loc: int): PatternElement {
-  return { loc, hole: false, rest: false, name: "", key: "" };
-}
-
-function formOf(pattern: Pattern): BindingForm {
-  if (pattern.object) {
-    return { kind: BindingKind.Object };
-  }
-  const last = pattern.elements[pattern.elements.length - 1];
-  const rest = last != undefined && last.rest;
-
-  return { kind: BindingKind.Array, length: pattern.elements.length, rest };
-}
-
-function isDirect(pattern: Pattern, value: Expr): boolean {
-  if (pattern.object || value.kind != ExprKind.ArrayLit) {
-    return false;
-  }
-  if (value.elements.length < pattern.elements.length) {
-    return false;
-  }
-  for (const item of value.elements) {
-    if (item.spread || item.hole) {
-      return false;
-    }
-  }
-  for (const item of pattern.elements) {
-    if (item.rest) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
 partial class FileParser {
   private bindingPattern(): Pattern {
     if (this.cursor.is(TokenKind.LBrace)) {
@@ -70,7 +35,7 @@ partial class FileParser {
     };
     while (this.cursor.insideList(TokenKind.RBracket)) {
       const current = this.cursor.peek();
-      const element = emptyElement(current.start);
+      const element = this.emptyElement(current.start);
       if (this.cursor.is(TokenKind.Comma)) {
         element.hole = true;
       } else if (!this.arrayPatternElement(element)) {
@@ -134,7 +99,7 @@ partial class FileParser {
     };
     while (this.cursor.insideList(TokenKind.RBrace)) {
       const current = this.cursor.peek();
-      const element = emptyElement(current.start);
+      const element = this.emptyElement(current.start);
       if (this.cursor.accept(TokenKind.Ellipsis)) {
         element.rest = true;
         if (!this.cursor.atName()) {
@@ -199,7 +164,7 @@ partial class FileParser {
         if (property == undefined) {
           continue;
         }
-        const element = emptyElement(property.loc);
+        const element = this.emptyElement(property.loc);
         const form = property.form;
         element.rest = form.kind == PropertyKind.Spread;
         element.key = property.name;
@@ -220,7 +185,7 @@ partial class FileParser {
       if (item == undefined) {
         continue;
       }
-      const element = emptyElement(item.expr.loc);
+      const element = this.emptyElement(item.expr.loc);
       element.hole = item.hole;
       element.rest = item.spread;
       if (element.rest && i + 1 != expr.elements.length) {
@@ -271,7 +236,7 @@ partial class FileParser {
     value: Expr,
     typeAnn: TypeRef | undefined,
   ): void {
-    const form = formOf(pattern);
+    const form = this.formOf(pattern);
     const hidden = this.hiddenDeclarator(pattern.loc, value, typeAnn, form);
     decls.push(hidden);
     this.declareElements(decls, pattern, hidden.name);
@@ -309,7 +274,7 @@ partial class FileParser {
     const body: Stmt[] = [
       { kind: StmtKind.VarDecl, loc, isConst: true, isUsing: false, decls },
     ];
-    const direct = isDirect(pattern, value);
+    const direct = this.isDirect(pattern, value);
     const values: string[] = [];
     if (direct && value.kind == ExprKind.ArrayLit) {
       for (const item of value.elements) {
@@ -323,7 +288,7 @@ partial class FileParser {
         values.push(hidden.name);
       }
     } else {
-      const form = formOf(pattern);
+      const form = this.formOf(pattern);
       const hidden = this.hiddenDeclarator(pattern.loc, value, undefined, form);
       decls.push(hidden);
     }
@@ -497,5 +462,40 @@ partial class FileParser {
         },
       ],
     };
+  }
+
+  private emptyElement(loc: int): PatternElement {
+    return { loc, hole: false, rest: false, name: "", key: "" };
+  }
+
+  private formOf(pattern: Pattern): BindingForm {
+    if (pattern.object) {
+      return { kind: BindingKind.Object };
+    }
+    const last = pattern.elements[pattern.elements.length - 1];
+    const rest = last != undefined && last.rest;
+
+    return { kind: BindingKind.Array, length: pattern.elements.length, rest };
+  }
+
+  private isDirect(pattern: Pattern, value: Expr): boolean {
+    if (pattern.object || value.kind != ExprKind.ArrayLit) {
+      return false;
+    }
+    if (value.elements.length < pattern.elements.length) {
+      return false;
+    }
+    for (const item of value.elements) {
+      if (item.spread || item.hole) {
+        return false;
+      }
+    }
+    for (const item of pattern.elements) {
+      if (item.rest) {
+        return false;
+      }
+    }
+
+    return true;
   }
 }

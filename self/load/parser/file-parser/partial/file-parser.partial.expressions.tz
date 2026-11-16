@@ -30,188 +30,6 @@ import {
   Precedence,
 } from "../types/file-parser.types.expressions.tz";
 
-function binaryPrecedence(kind: TokenKind): Precedence {
-  switch (kind) {
-    case TokenKind.PipePipe:
-    case TokenKind.QuestionQuestion:
-      return Precedence.Or;
-    case TokenKind.AmpAmp:
-      return Precedence.And;
-    case TokenKind.Pipe:
-      return Precedence.BitOr;
-    case TokenKind.Caret:
-      return Precedence.BitXor;
-    case TokenKind.Amp:
-      return Precedence.BitAnd;
-    case TokenKind.EqEq:
-    case TokenKind.EqEqEq:
-    case TokenKind.BangEq:
-    case TokenKind.BangEqEq:
-      return Precedence.Equality;
-    case TokenKind.Less:
-    case TokenKind.LessEq:
-    case TokenKind.Greater:
-    case TokenKind.GreaterEq:
-    case TokenKind.In:
-      return Precedence.Relational;
-    case TokenKind.Shl:
-    case TokenKind.Shr:
-    case TokenKind.UShr:
-      return Precedence.Shift;
-    case TokenKind.Plus:
-    case TokenKind.Minus:
-      return Precedence.Additive;
-    case TokenKind.Star:
-    case TokenKind.Slash:
-    case TokenKind.Percent:
-      return Precedence.Multiplicative;
-    case TokenKind.StarStar:
-      return Precedence.Power;
-    default:
-      return Precedence.None;
-  }
-}
-
-function binaryOpFor(kind: TokenKind): BinaryOp {
-  switch (kind) {
-    case TokenKind.PipePipe:
-      return BinaryOp.LogOr;
-    case TokenKind.QuestionQuestion:
-      return BinaryOp.Nullish;
-    case TokenKind.AmpAmp:
-      return BinaryOp.LogAnd;
-    case TokenKind.Pipe:
-      return BinaryOp.BitOr;
-    case TokenKind.Caret:
-      return BinaryOp.BitXor;
-    case TokenKind.Amp:
-      return BinaryOp.BitAnd;
-    case TokenKind.EqEq:
-    case TokenKind.EqEqEq:
-      return BinaryOp.Eq;
-    case TokenKind.BangEq:
-    case TokenKind.BangEqEq:
-      return BinaryOp.Ne;
-    case TokenKind.Less:
-      return BinaryOp.Lt;
-    case TokenKind.LessEq:
-      return BinaryOp.Le;
-    case TokenKind.Greater:
-      return BinaryOp.Gt;
-    case TokenKind.GreaterEq:
-      return BinaryOp.Ge;
-    case TokenKind.In:
-      return BinaryOp.In;
-    case TokenKind.Shl:
-      return BinaryOp.Shl;
-    case TokenKind.Shr:
-      return BinaryOp.Shr;
-    case TokenKind.UShr:
-      return BinaryOp.UShr;
-    case TokenKind.Plus:
-      return BinaryOp.Add;
-    case TokenKind.Minus:
-      return BinaryOp.Sub;
-    case TokenKind.Star:
-      return BinaryOp.Mul;
-    case TokenKind.StarStar:
-      return BinaryOp.Pow;
-    case TokenKind.Slash:
-      return BinaryOp.Div;
-    default:
-      return BinaryOp.Rem;
-  }
-}
-
-function assignmentOp(kind: TokenKind): BinaryOp | undefined {
-  switch (kind) {
-    case TokenKind.PlusAssign:
-      return BinaryOp.Add;
-    case TokenKind.MinusAssign:
-      return BinaryOp.Sub;
-    case TokenKind.StarAssign:
-      return BinaryOp.Mul;
-    case TokenKind.StarStarAssign:
-      return BinaryOp.Pow;
-    case TokenKind.SlashAssign:
-      return BinaryOp.Div;
-    case TokenKind.PercentAssign:
-      return BinaryOp.Rem;
-    case TokenKind.AmpAssign:
-      return BinaryOp.BitAnd;
-    case TokenKind.PipeAssign:
-      return BinaryOp.BitOr;
-    case TokenKind.CaretAssign:
-      return BinaryOp.BitXor;
-    case TokenKind.ShlAssign:
-      return BinaryOp.Shl;
-    case TokenKind.ShrAssign:
-      return BinaryOp.Shr;
-    case TokenKind.UShrAssign:
-      return BinaryOp.UShr;
-    case TokenKind.QuestionQuestionAssign:
-      return BinaryOp.Nullish;
-    case TokenKind.AmpAmpAssign:
-      return BinaryOp.LogAnd;
-    case TokenKind.PipePipeAssign:
-      return BinaryOp.LogOr;
-    default:
-      return undefined;
-  }
-}
-
-function isAssignment(kind: TokenKind): boolean {
-  if (kind == TokenKind.Assign) {
-    return true;
-  }
-  const compound = assignmentOp(kind);
-
-  return compound != undefined;
-}
-
-function unaryOpFor(kind: TokenKind): UnaryOp | undefined {
-  switch (kind) {
-    case TokenKind.Minus:
-      return UnaryOp.Neg;
-    case TokenKind.Plus:
-      return UnaryOp.Plus;
-    case TokenKind.Bang:
-      return UnaryOp.Not;
-    case TokenKind.Tilde:
-      return UnaryOp.BitNot;
-    case TokenKind.Typeof:
-      return UnaryOp.TypeOf;
-    case TokenKind.Void:
-      return UnaryOp.Void;
-    case TokenKind.Delete:
-      return UnaryOp.Delete;
-    default:
-      return undefined;
-  }
-}
-
-function endsYield(kind: TokenKind): boolean {
-  switch (kind) {
-    case TokenKind.RParen:
-    case TokenKind.RBracket:
-    case TokenKind.RBrace:
-    case TokenKind.Comma:
-    case TokenKind.Semi:
-    case TokenKind.Colon:
-    case TokenKind.Question:
-    case TokenKind.End:
-    case TokenKind.TemplateMiddle:
-    case TokenKind.TemplateTail:
-      return true;
-    default:
-      return false;
-  }
-}
-
-function invalid(loc: int): Expr {
-  return { kind: ExprKind.IntLit, loc, value: 0 };
-}
-
 partial class FileParser {
   private sequence(): Expr {
     const first = this.expression();
@@ -235,7 +53,7 @@ partial class FileParser {
     }
     const target = this.conditional();
     const op = this.operator();
-    if (!isAssignment(op.kind)) {
+    if (!this.isAssignment(op.kind)) {
       return target;
     }
     const operatorToken = this.cursor.peek();
@@ -246,7 +64,7 @@ partial class FileParser {
     return {
       kind: ExprKind.Assign,
       loc,
-      op: assignmentOp(op.kind),
+      op: this.assignmentOp(op.kind),
       target,
       value,
       source: this.cursor.spanFrom(start),
@@ -262,10 +80,10 @@ partial class FileParser {
     const token = this.cursor.peek();
     if (delegate) {
       value = this.expression();
-    } else if (!token.newline && !endsYield(token.kind)) {
+    } else if (!token.newline && !this.endsYield(token.kind)) {
       const kind = token.kind;
       const operand =
-        binaryPrecedence(kind) == Precedence.None ||
+        this.binaryPrecedence(kind) == Precedence.None ||
         kind == TokenKind.Plus ||
         kind == TokenKind.Minus ||
         kind == TokenKind.Less;
@@ -326,7 +144,7 @@ partial class FileParser {
   private binary(above: Precedence): Expr {
     const head = this.cursor.peek();
     const start = head.start;
-    const prefix = unaryOpFor(head.kind);
+    const prefix = this.unaryOpFor(head.kind);
     let left = this.unary();
     if (prefix != undefined && this.cursor.is(TokenKind.StarStar)) {
       const token = this.cursor.peek();
@@ -367,7 +185,7 @@ partial class FileParser {
       }
       default: {
         const op = this.operator();
-        const precedence = binaryPrecedence(op.kind);
+        const precedence = this.binaryPrecedence(op.kind);
         return { kind: op.kind, width: op.width, precedence };
       }
     }
@@ -410,7 +228,7 @@ partial class FileParser {
         return {
           kind: ExprKind.Binary,
           loc: token.start,
-          op: binaryOpFor(op.kind),
+          op: this.binaryOpFor(op.kind),
           lhs: left,
           rhs: right,
           source: this.cursor.spanFrom(start),
@@ -440,7 +258,7 @@ partial class FileParser {
         target,
       };
     }
-    const op = unaryOpFor(token.kind);
+    const op = this.unaryOpFor(token.kind);
     if (op == undefined) {
       return this.postfix();
     }
@@ -718,7 +536,7 @@ partial class FileParser {
     if (!this.cursor.atName()) {
       const token = this.cursor.peek();
       this.cursor.error(token.start, Code.ExpectedClassAfterNew);
-      return invalid(loc);
+      return this.invalid(loc);
     }
     const name = this.cursor.next();
     let member: Token | undefined = undefined;
@@ -887,7 +705,9 @@ partial class FileParser {
       case TokenKind.At: {
         const decorators = this.decorators();
         this.rejectDecorators(decorators);
-        return this.cursor.isRecovering() ? invalid(loc) : this.primaryInside();
+        return this.cursor.isRecovering()
+          ? this.invalid(loc)
+          : this.primaryInside();
       }
       case TokenKind.Int:
         return this.intLiteral();
@@ -949,7 +769,7 @@ partial class FileParser {
           return this.identifierPrimary(token);
         }
         this.cursor.error(loc, Code.ExpectedExpression, { found: token.kind });
-        return invalid(loc);
+        return this.invalid(loc);
     }
   }
 
@@ -983,7 +803,7 @@ partial class FileParser {
     this.cursor.reset(start);
     this.cursor.error(loc, Code.ExpectedExpression, { found: TokenKind.Less });
 
-    return invalid(loc);
+    return this.invalid(loc);
   }
 
   private importPrimary(token: Token): Expr {
@@ -995,7 +815,7 @@ partial class FileParser {
     this.cursor.report(token.start, code);
     this.cursor.next();
 
-    return invalid(token.start);
+    return this.invalid(token.start);
   }
 
   private classPrimary(token: Token): Expr {
@@ -1011,7 +831,7 @@ partial class FileParser {
         Code.ExpectedExpression,
         { found: TokenKind.Class },
       );
-      return invalid(token.start);
+      return this.invalid(token.start);
     }
     const decl = this.classDecl(true);
 
@@ -1273,7 +1093,7 @@ partial class FileParser {
     const number = this.literals.integer(token);
     if (!number.valid) {
       this.cursor.report(token.start, Code.InvalidIntegerLiteral);
-      return invalid(token.start);
+      return this.invalid(token.start);
     }
     const text = { start: token.start, end: token.end };
     if (number.isInt) {
@@ -1307,5 +1127,187 @@ partial class FileParser {
       value: number.doubleValue,
       text,
     };
+  }
+
+  private binaryPrecedence(kind: TokenKind): Precedence {
+    switch (kind) {
+      case TokenKind.PipePipe:
+      case TokenKind.QuestionQuestion:
+        return Precedence.Or;
+      case TokenKind.AmpAmp:
+        return Precedence.And;
+      case TokenKind.Pipe:
+        return Precedence.BitOr;
+      case TokenKind.Caret:
+        return Precedence.BitXor;
+      case TokenKind.Amp:
+        return Precedence.BitAnd;
+      case TokenKind.EqEq:
+      case TokenKind.EqEqEq:
+      case TokenKind.BangEq:
+      case TokenKind.BangEqEq:
+        return Precedence.Equality;
+      case TokenKind.Less:
+      case TokenKind.LessEq:
+      case TokenKind.Greater:
+      case TokenKind.GreaterEq:
+      case TokenKind.In:
+        return Precedence.Relational;
+      case TokenKind.Shl:
+      case TokenKind.Shr:
+      case TokenKind.UShr:
+        return Precedence.Shift;
+      case TokenKind.Plus:
+      case TokenKind.Minus:
+        return Precedence.Additive;
+      case TokenKind.Star:
+      case TokenKind.Slash:
+      case TokenKind.Percent:
+        return Precedence.Multiplicative;
+      case TokenKind.StarStar:
+        return Precedence.Power;
+      default:
+        return Precedence.None;
+    }
+  }
+
+  private binaryOpFor(kind: TokenKind): BinaryOp {
+    switch (kind) {
+      case TokenKind.PipePipe:
+        return BinaryOp.LogOr;
+      case TokenKind.QuestionQuestion:
+        return BinaryOp.Nullish;
+      case TokenKind.AmpAmp:
+        return BinaryOp.LogAnd;
+      case TokenKind.Pipe:
+        return BinaryOp.BitOr;
+      case TokenKind.Caret:
+        return BinaryOp.BitXor;
+      case TokenKind.Amp:
+        return BinaryOp.BitAnd;
+      case TokenKind.EqEq:
+      case TokenKind.EqEqEq:
+        return BinaryOp.Eq;
+      case TokenKind.BangEq:
+      case TokenKind.BangEqEq:
+        return BinaryOp.Ne;
+      case TokenKind.Less:
+        return BinaryOp.Lt;
+      case TokenKind.LessEq:
+        return BinaryOp.Le;
+      case TokenKind.Greater:
+        return BinaryOp.Gt;
+      case TokenKind.GreaterEq:
+        return BinaryOp.Ge;
+      case TokenKind.In:
+        return BinaryOp.In;
+      case TokenKind.Shl:
+        return BinaryOp.Shl;
+      case TokenKind.Shr:
+        return BinaryOp.Shr;
+      case TokenKind.UShr:
+        return BinaryOp.UShr;
+      case TokenKind.Plus:
+        return BinaryOp.Add;
+      case TokenKind.Minus:
+        return BinaryOp.Sub;
+      case TokenKind.Star:
+        return BinaryOp.Mul;
+      case TokenKind.StarStar:
+        return BinaryOp.Pow;
+      case TokenKind.Slash:
+        return BinaryOp.Div;
+      default:
+        return BinaryOp.Rem;
+    }
+  }
+
+  private assignmentOp(kind: TokenKind): BinaryOp | undefined {
+    switch (kind) {
+      case TokenKind.PlusAssign:
+        return BinaryOp.Add;
+      case TokenKind.MinusAssign:
+        return BinaryOp.Sub;
+      case TokenKind.StarAssign:
+        return BinaryOp.Mul;
+      case TokenKind.StarStarAssign:
+        return BinaryOp.Pow;
+      case TokenKind.SlashAssign:
+        return BinaryOp.Div;
+      case TokenKind.PercentAssign:
+        return BinaryOp.Rem;
+      case TokenKind.AmpAssign:
+        return BinaryOp.BitAnd;
+      case TokenKind.PipeAssign:
+        return BinaryOp.BitOr;
+      case TokenKind.CaretAssign:
+        return BinaryOp.BitXor;
+      case TokenKind.ShlAssign:
+        return BinaryOp.Shl;
+      case TokenKind.ShrAssign:
+        return BinaryOp.Shr;
+      case TokenKind.UShrAssign:
+        return BinaryOp.UShr;
+      case TokenKind.QuestionQuestionAssign:
+        return BinaryOp.Nullish;
+      case TokenKind.AmpAmpAssign:
+        return BinaryOp.LogAnd;
+      case TokenKind.PipePipeAssign:
+        return BinaryOp.LogOr;
+      default:
+        return undefined;
+    }
+  }
+
+  private isAssignment(kind: TokenKind): boolean {
+    if (kind == TokenKind.Assign) {
+      return true;
+    }
+    const compound = this.assignmentOp(kind);
+
+    return compound != undefined;
+  }
+
+  private unaryOpFor(kind: TokenKind): UnaryOp | undefined {
+    switch (kind) {
+      case TokenKind.Minus:
+        return UnaryOp.Neg;
+      case TokenKind.Plus:
+        return UnaryOp.Plus;
+      case TokenKind.Bang:
+        return UnaryOp.Not;
+      case TokenKind.Tilde:
+        return UnaryOp.BitNot;
+      case TokenKind.Typeof:
+        return UnaryOp.TypeOf;
+      case TokenKind.Void:
+        return UnaryOp.Void;
+      case TokenKind.Delete:
+        return UnaryOp.Delete;
+      default:
+        return undefined;
+    }
+  }
+
+  private endsYield(kind: TokenKind): boolean {
+    switch (kind) {
+      case TokenKind.RParen:
+      case TokenKind.RBracket:
+      case TokenKind.RBrace:
+      case TokenKind.Comma:
+      case TokenKind.Semi:
+      case TokenKind.Colon:
+      case TokenKind.Question:
+      case TokenKind.End:
+      case TokenKind.TemplateMiddle:
+      case TokenKind.TemplateTail:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private invalid(loc: int): Expr {
+    return { kind: ExprKind.IntLit, loc, value: 0 };
   }
 }

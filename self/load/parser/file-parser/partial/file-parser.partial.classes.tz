@@ -27,41 +27,6 @@ import {
 import { MemberName, Modifiers } from "../types/file-parser.types.classes.tz";
 import { Arguments } from "../types/file-parser.types.expressions.tz";
 
-function isMemberModifier(kind: TokenKind): boolean {
-  switch (kind) {
-    case TokenKind.Public:
-    case TokenKind.Private:
-    case TokenKind.Protected:
-    case TokenKind.Readonly:
-    case TokenKind.Static:
-    case TokenKind.Override:
-    case TokenKind.Abstract:
-    case TokenKind.Declare:
-    case TokenKind.Accessor:
-    case TokenKind.Async:
-      return true;
-    default:
-      return false;
-  }
-}
-
-function endsModifiers(kind: TokenKind): boolean {
-  switch (kind) {
-    case TokenKind.LParen:
-    case TokenKind.Colon:
-    case TokenKind.Assign:
-    case TokenKind.Semi:
-    case TokenKind.Question:
-    case TokenKind.Bang:
-    case TokenKind.Less:
-    case TokenKind.RBrace:
-    case TokenKind.End:
-      return true;
-    default:
-      return false;
-  }
-}
-
 partial class FileParser {
   private classDecl(expression: boolean): ClassDecl {
     const keyword = this.cursor.next();
@@ -144,7 +109,7 @@ partial class FileParser {
 
   private memberModifierAhead(): boolean {
     const token = this.cursor.peek();
-    if (!isMemberModifier(token.kind)) {
+    if (!this.isMemberModifier(token.kind)) {
       return false;
     }
     const next = this.cursor.lookahead();
@@ -152,7 +117,7 @@ partial class FileParser {
       return false;
     }
 
-    return !endsModifiers(next.kind);
+    return !this.endsModifiers(next.kind);
   }
 
   private skipClassMember(): void {
@@ -756,5 +721,40 @@ partial class FileParser {
     this.cursor.expect(TokenKind.RBrace, Code.ExpectedEnumClose);
 
     return { kind: StmtKind.Enum, loc: name.start, name: name.text, members };
+  }
+
+  private isMemberModifier(kind: TokenKind): boolean {
+    switch (kind) {
+      case TokenKind.Public:
+      case TokenKind.Private:
+      case TokenKind.Protected:
+      case TokenKind.Readonly:
+      case TokenKind.Static:
+      case TokenKind.Override:
+      case TokenKind.Abstract:
+      case TokenKind.Declare:
+      case TokenKind.Accessor:
+      case TokenKind.Async:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private endsModifiers(kind: TokenKind): boolean {
+    switch (kind) {
+      case TokenKind.LParen:
+      case TokenKind.Colon:
+      case TokenKind.Assign:
+      case TokenKind.Semi:
+      case TokenKind.Question:
+      case TokenKind.Bang:
+      case TokenKind.Less:
+      case TokenKind.RBrace:
+      case TokenKind.End:
+        return true;
+      default:
+        return false;
+    }
   }
 }

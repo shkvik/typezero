@@ -20,96 +20,10 @@ import {
   ImportForm,
   NameListCodes,
 } from "../types/file-parser.types.modules.tz";
-
-const kImportNames: NameListCodes = {
-  typeNotNeeded: Code.TypeNotNeededInImport,
-  keywordName: Code.KeywordImported,
-  expectedName: Code.ExpectedNameToImport,
-  close: Code.ExpectedImportNamesClose,
-};
-
-const kExportNames: NameListCodes = {
-  typeNotNeeded: Code.TypeNotNeededInExport,
-  keywordName: Code.KeywordExported,
-  expectedName: Code.ExpectedNameToExport,
-  close: Code.ExpectedExportNamesClose,
-};
-
-function clauseName(clause: ImportClause): string | undefined {
-  if (clause.kind == ImportForm.Named) {
-    return undefined;
-  }
-
-  return clause.name;
-}
-
-function isBareModule(path: string): boolean {
-  switch (path) {
-    case "assert":
-    case "assert/strict":
-    case "async_hooks":
-    case "buffer":
-    case "child_process":
-    case "cluster":
-    case "console":
-    case "constants":
-    case "crypto":
-    case "dgram":
-    case "diagnostics_channel":
-    case "dns":
-    case "dns/promises":
-    case "domain":
-    case "events":
-    case "fs":
-    case "fs/promises":
-    case "http":
-    case "http2":
-    case "https":
-    case "inspector":
-    case "inspector/promises":
-    case "module":
-    case "net":
-    case "os":
-    case "path":
-    case "path/posix":
-    case "path/win32":
-    case "perf_hooks":
-    case "process":
-    case "punycode":
-    case "querystring":
-    case "readline":
-    case "readline/promises":
-    case "repl":
-    case "stream":
-    case "stream/consumers":
-    case "stream/promises":
-    case "stream/web":
-    case "string_decoder":
-    case "sys":
-    case "timers":
-    case "timers/promises":
-    case "tls":
-    case "trace_events":
-    case "tty":
-    case "url":
-    case "util":
-    case "util/types":
-    case "v8":
-    case "vm":
-    case "wasi":
-    case "worker_threads":
-    case "zlib":
-      return true;
-    default:
-      return false;
-  }
-}
-
-function isBuiltinModule(path: string): boolean {
-  return (
-    path.startsWith("node:") || path.startsWith("tz:") || isBareModule(path)
-  );
-}
+import {
+  kExportNames,
+  kImportNames,
+} from "../const/file-parser.const.modules.tz";
 
 partial class FileParser {
   private importDecl(topLevel: boolean): Stmt {
@@ -226,8 +140,8 @@ partial class FileParser {
       this.addImport(loc, names, from);
       return marker(StmtKind.Empty, loc);
     }
-    const whole = clauseName(clause);
-    if (whole != undefined && isBuiltinModule(from.path)) {
+    const whole = this.clauseName(clause);
+    if (whole != undefined && this.isBuiltinModule(from.path)) {
       const wholeImport: WholeImport = {
         name: whole,
         loc: formLoc,
@@ -606,5 +520,83 @@ partial class FileParser {
       form: ExportForm.Local,
       names,
     });
+  }
+
+  private clauseName(clause: ImportClause): string | undefined {
+    if (clause.kind == ImportForm.Named) {
+      return undefined;
+    }
+
+    return clause.name;
+  }
+
+  private isBareModule(path: string): boolean {
+    switch (path) {
+      case "assert":
+      case "assert/strict":
+      case "async_hooks":
+      case "buffer":
+      case "child_process":
+      case "cluster":
+      case "console":
+      case "constants":
+      case "crypto":
+      case "dgram":
+      case "diagnostics_channel":
+      case "dns":
+      case "dns/promises":
+      case "domain":
+      case "events":
+      case "fs":
+      case "fs/promises":
+      case "http":
+      case "http2":
+      case "https":
+      case "inspector":
+      case "inspector/promises":
+      case "module":
+      case "net":
+      case "os":
+      case "path":
+      case "path/posix":
+      case "path/win32":
+      case "perf_hooks":
+      case "process":
+      case "punycode":
+      case "querystring":
+      case "readline":
+      case "readline/promises":
+      case "repl":
+      case "stream":
+      case "stream/consumers":
+      case "stream/promises":
+      case "stream/web":
+      case "string_decoder":
+      case "sys":
+      case "timers":
+      case "timers/promises":
+      case "tls":
+      case "trace_events":
+      case "tty":
+      case "url":
+      case "util":
+      case "util/types":
+      case "v8":
+      case "vm":
+      case "wasi":
+      case "worker_threads":
+      case "zlib":
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private isBuiltinModule(path: string): boolean {
+    return (
+      path.startsWith("node:") ||
+      path.startsWith("tz:") ||
+      this.isBareModule(path)
+    );
   }
 }

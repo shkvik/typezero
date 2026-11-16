@@ -1,0 +1,16 @@
+import { Code } from "../../../../diagnostic/code.tz";
+import { NameListCodes } from "../types/file-parser.types.modules.tz";
+
+export const kImportNames: NameListCodes = {
+  typeNotNeeded: Code.TypeNotNeededInImport,
+  keywordName: Code.KeywordImported,
+  expectedName: Code.ExpectedNameToImport,
+  close: Code.ExpectedImportNamesClose,
+};
+
+export const kExportNames: NameListCodes = {
+  typeNotNeeded: Code.TypeNotNeededInExport,
+  keywordName: Code.KeywordExported,
+  expectedName: Code.ExpectedNameToExport,
+  close: Code.ExpectedExportNamesClose,
+};

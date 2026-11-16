@@ -107,7 +107,8 @@ self/             компилятор на tz, пробный (порт compile
                   `partial class` — в partial/file-parser.partial.<часть>.tz (types,
                   expressions, patterns, statements, functions, classes, modules), их типы —
                   в types/file-parser.types.<часть>.tz, там же result (ParseResult) и context
-                  (вид функции, место выражения, место типа); сверка деревьев с C++ —
+                  (вид функции, место выражения, место типа), константы — в
+                  const/file-parser.const.<часть>.tz; сверка деревьев с C++ —
                   скрытая `tz syntax tree|time|hold|read`
 tests/ docs/ bench/ examples/ third_party/
 ```

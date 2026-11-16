@@ -28,19 +28,6 @@ import {
 import { FunctionKind } from "../types/file-parser.types.context.tz";
 import { ParamPattern } from "../types/file-parser.types.functions.tz";
 
-function isParamModifier(kind: TokenKind): boolean {
-  switch (kind) {
-    case TokenKind.Public:
-    case TokenKind.Private:
-    case TokenKind.Protected:
-    case TokenKind.Readonly:
-    case TokenKind.Override:
-      return true;
-    default:
-      return false;
-  }
-}
-
 partial class FileParser {
   private functionDeclaration(isAsync: boolean): Stmt {
     let fn = this.functionDecl(false, isAsync);
@@ -264,7 +251,7 @@ partial class FileParser {
     const next = this.cursor.lookahead();
     const named = isName(next.kind) || isKeyword(next.kind);
 
-    return isParamModifier(token.kind) && named;
+    return this.isParamModifier(token.kind) && named;
   }
 
   private paramModifiers(constructor: boolean): ParamProperty | undefined {
@@ -584,5 +571,18 @@ partial class FileParser {
       isAsync,
       role,
     };
+  }
+
+  private isParamModifier(kind: TokenKind): boolean {
+    switch (kind) {
+      case TokenKind.Public:
+      case TokenKind.Private:
+      case TokenKind.Protected:
+      case TokenKind.Readonly:
+      case TokenKind.Override:
+        return true;
+      default:
+        return false;
+    }
   }
 }
