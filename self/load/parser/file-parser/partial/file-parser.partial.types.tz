@@ -768,6 +768,7 @@ partial class FileParser {
     object.locs.push(loc);
     object.optional.push(optional);
     object.readonly.push(readonly);
+    object.methods.push(false);
 
     return this.endObjectTypeMember("the field");
   }
@@ -800,9 +801,6 @@ partial class FileParser {
     object.locs.push(loc);
     object.optional.push(optional);
     object.readonly.push(true);
-    while (object.methods.length < ref.args.length - 1) {
-      object.methods.push(false);
-    }
     object.methods.push(true);
 
     return this.endObjectTypeMember("the method");

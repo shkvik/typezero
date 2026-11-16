@@ -503,12 +503,7 @@ partial class FileParser {
     const spread: boolean[] = [];
     while (this.cursor.insideList(TokenKind.RParen)) {
       const spreads = this.cursor.accept(TokenKind.Ellipsis);
-      if (spreads || spread.length > 0) {
-        while (spread.length < args.length) {
-          spread.push(false);
-        }
-        spread.push(spreads);
-      }
+      spread.push(spreads);
       const arg = this.expression();
       args.push(arg);
       if (!this.cursor.accept(TokenKind.Comma)) {
@@ -517,8 +512,9 @@ partial class FileParser {
     }
     this.cursor.expect(TokenKind.RParen, "to close the argument list");
     this.context = outer;
+    const anySpread = spread.includes(true);
 
-    return { args, spread };
+    return { args, spread: anySpread ? spread : [] };
   }
 
   private indexInside(): Expr {

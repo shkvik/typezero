@@ -118,7 +118,7 @@ class Lexer {
   public run(): Token[] {
     this.skipPreamble();
     this.newline = this.skipTrivia();
-    while (this.cur < this.end) {
+    while (!this.atEnd()) {
       this.token();
       this.newline = this.skipTrivia();
     }
@@ -277,6 +277,10 @@ class Lexer {
     }
   }
 
+  private atEnd(): boolean {
+    return this.cur >= this.end;
+  }
+
   private at(offset: int): int {
     const value = this.source[this.cur + offset] ?? 0;
 
@@ -353,7 +357,7 @@ class Lexer {
 
   private skipTrivia(): boolean {
     let newline = false;
-    while (this.cur < this.end) {
+    while (!this.atEnd()) {
       const c = this.at(0);
       if (c == kNewline) {
         newline = true;
@@ -379,7 +383,7 @@ class Lexer {
   }
 
   private skipRestOfLine(): void {
-    while (this.cur < this.end && this.at(0) != kNewline) {
+    while (!this.atEnd() && this.at(0) != kNewline) {
       this.cur += 1;
     }
   }
@@ -388,7 +392,7 @@ class Lexer {
     let newline = false;
     this.cur += 2;
     while (
-      this.cur < this.end &&
+      !this.atEnd() &&
       !(this.at(0) == kStar && this.at(1) == kSlash)
     ) {
       if (this.at(0) == kNewline) {
@@ -396,7 +400,7 @@ class Lexer {
       }
       this.cur += 1;
     }
-    if (this.cur < this.end) {
+    if (!this.atEnd()) {
       this.cur += 2;
     }
 
@@ -435,11 +439,11 @@ class Lexer {
 
   private regex(): void {
     let inClass = false;
-    while (this.cur < this.end && !this.isLineBreak()) {
+    while (!this.atEnd() && !this.isLineBreak()) {
       const c = this.at(0);
       this.cur += 1;
       if (c == kBackslash) {
-        if (this.cur < this.end && !this.isLineBreak()) {
+        if (!this.atEnd() && !this.isLineBreak()) {
           this.cur += 1;
         }
       } else if (c == kLeftBracket) {
@@ -447,7 +451,7 @@ class Lexer {
       } else if (c == kRightBracket) {
         inClass = false;
       } else if (c == kSlash && !inClass) {
-        while (this.cur < this.end && this.identCharAt(0)) {
+        while (this.identCharAt(0)) {
           this.cur += 1;
         }
         return this.push(TokenKind.Regex);
@@ -555,7 +559,7 @@ class Lexer {
 
   private string(quote: int): void {
     while (
-      this.cur < this.end &&
+      !this.atEnd() &&
       this.at(0) != kNewline &&
       this.at(0) != kReturn
     ) {
@@ -564,7 +568,7 @@ class Lexer {
       if (c == quote) {
         break;
       }
-      if (c == kBackslash && this.cur < this.end) {
+      if (c == kBackslash && !this.atEnd()) {
         this.cur += 1;
       }
     }
@@ -578,7 +582,7 @@ class Lexer {
     const opened = continuation
       ? TokenKind.TemplateMiddle
       : TokenKind.TemplateHead;
-    while (this.cur < this.end) {
+    while (!this.atEnd()) {
       const c = this.at(0);
       this.cur += 1;
       if (c == kBacktick) {
@@ -589,7 +593,7 @@ class Lexer {
         this.braces.push(0);
         return this.push(opened);
       }
-      if (c == kBackslash && this.cur < this.end) {
+      if (c == kBackslash && !this.atEnd()) {
         this.cur += 1;
       }
     }

@@ -36,6 +36,15 @@ enum Quoting {
   EscapeUnicode,
 }
 
+function upToLastTrue(flags: boolean[]): boolean[] {
+  let end = flags.length;
+  while (end > 0 && flags[end - 1] == false) {
+    end -= 1;
+  }
+
+  return flags.slice(0, end);
+}
+
 function changeNumber(change: ModifierChange): int {
   switch (change) {
     case ModifierChange.Add:
@@ -874,7 +883,8 @@ export class Dumper {
         const names = this.quoteAll(form.names);
         const optional = this.flags(form.optional);
         const readonlyFlags = this.flags(form.readonly);
-        const methods = this.flags(form.methods);
+        const throughLastMethod = upToLastTrue(form.methods);
+        const methods = this.flags(throughLastMethod);
         return (
           ` names=${names} locs=[${locs}] opt=${optional} ` +
           `ro=${readonlyFlags} methods=${methods}`
