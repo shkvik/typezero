@@ -36,7 +36,7 @@ export type Pattern = {
   readonly elements: PatternElement[];
 };
 
-function element(loc: int): PatternElement {
+function emptyElement(loc: int): PatternElement {
   return { loc, hole: false, rest: false, name: "", key: "" };
 }
 
@@ -84,18 +84,18 @@ partial class FileParser {
     };
     while (this.cursor.insideList(TokenKind.RBracket)) {
       const current = this.cursor.peek();
-      const e = element(current.start);
+      const element = emptyElement(current.start);
       if (this.cursor.is(TokenKind.Comma)) {
-        e.hole = true;
-      } else if (!this.arrayPatternElement(e)) {
+        element.hole = true;
+      } else if (!this.arrayPatternElement(element)) {
         return pattern;
       }
-      pattern.elements.push(e);
+      pattern.elements.push(element);
       if (!this.cursor.accept(TokenKind.Comma)) {
         break;
       }
-      if (e.rest) {
-        this.cursor.report(e.loc, "a rest element must be the last one");
+      if (element.rest) {
+        this.cursor.report(element.loc, "a rest element must be the last one");
       }
     }
     this.cursor.expect(
@@ -106,32 +106,32 @@ partial class FileParser {
     return pattern;
   }
 
-  private arrayPatternElement(e: PatternElement): boolean {
-    e.rest = this.cursor.accept(TokenKind.Ellipsis);
-    if (!this.bindingTarget(e)) {
+  private arrayPatternElement(element: PatternElement): boolean {
+    element.rest = this.cursor.accept(TokenKind.Ellipsis);
+    if (!this.bindingTarget(element)) {
       return false;
     }
     const assign = this.cursor.peek();
     if (!this.cursor.accept(TokenKind.Assign)) {
       return true;
     }
-    if (e.rest) {
+    if (element.rest) {
       this.cursor.report(
         assign.start,
         "a rest element cannot have a default value",
       );
     }
-    e.defaultValue = this.expression();
+    element.defaultValue = this.expression();
 
     return true;
   }
 
-  private bindingTarget(e: PatternElement): boolean {
+  private bindingTarget(element: PatternElement): boolean {
     if (
       this.cursor.is(TokenKind.LBracket) ||
       this.cursor.is(TokenKind.LBrace)
     ) {
-      e.nested = this.bindingPattern();
+      element.nested = this.bindingPattern();
       return true;
     }
     if (!this.cursor.atName()) {
@@ -143,7 +143,7 @@ partial class FileParser {
       return false;
     }
     const word = this.cursor.next();
-    e.name = word.text;
+    element.name = word.text;
 
     return true;
   }
@@ -157,9 +157,9 @@ partial class FileParser {
     };
     while (this.cursor.insideList(TokenKind.RBrace)) {
       const current = this.cursor.peek();
-      const e = element(current.start);
+      const element = emptyElement(current.start);
       if (this.cursor.accept(TokenKind.Ellipsis)) {
-        e.rest = true;
+        element.rest = true;
         if (!this.cursor.atName()) {
           const token = this.cursor.peek();
           this.cursor.error(
@@ -169,16 +169,16 @@ partial class FileParser {
           return pattern;
         }
         const word = this.cursor.next();
-        e.name = word.text;
-      } else if (!this.objectPatternEntry(e)) {
+        element.name = word.text;
+      } else if (!this.objectPatternEntry(element)) {
         return pattern;
       }
-      pattern.elements.push(e);
+      pattern.elements.push(element);
       if (!this.cursor.accept(TokenKind.Comma)) {
         break;
       }
-      if (e.rest) {
-        this.cursor.report(e.loc, "a rest element must be the last one");
+      if (element.rest) {
+        this.cursor.report(element.loc, "a rest element must be the last one");
       }
     }
     this.cursor.expect(TokenKind.RBrace, "to close the destructuring pattern");
@@ -186,10 +186,10 @@ partial class FileParser {
     return pattern;
   }
 
-  private objectPatternEntry(e: PatternElement): boolean {
+  private objectPatternEntry(element: PatternElement): boolean {
     const identifier = this.cursor.atName();
     if (this.cursor.accept(TokenKind.LBracket)) {
-      e.keyExpr = this.expression();
+      element.keyExpr = this.expression();
       this.cursor.expect(TokenKind.RBracket, "to close the key");
     } else {
       const key = this.fieldName();
@@ -197,14 +197,14 @@ partial class FileParser {
         this.cursor.skipToClosingBrace();
         return false;
       }
-      e.key = key;
+      element.key = key;
     }
     if (this.cursor.accept(TokenKind.Colon)) {
-      if (!this.bindingTarget(e)) {
+      if (!this.bindingTarget(element)) {
         return false;
       }
-    } else if (identifier && e.keyExpr == undefined) {
-      e.name = e.key;
+    } else if (identifier && element.keyExpr == undefined) {
+      element.name = element.key;
     } else {
       const token = this.cursor.peek();
       this.cursor.error(
@@ -214,7 +214,7 @@ partial class FileParser {
       return false;
     }
     if (this.cursor.accept(TokenKind.Assign)) {
-      e.defaultValue = this.expression();
+      element.defaultValue = this.expression();
     }
 
     return true;
@@ -224,22 +224,25 @@ partial class FileParser {
     if (expr.kind == ExprKind.ObjectLit) {
       const pattern: Pattern = { loc: expr.loc, object: true, elements: [] };
       for (let i = 0; i < expr.props.length; i++) {
-        const prop = expr.props[i];
-        if (prop == undefined) {
+        const property = expr.props[i];
+        if (property == undefined) {
           continue;
         }
-        const e = element(prop.loc);
-        const form = prop.form;
-        e.rest = form.kind == PropertyKind.Spread;
-        e.key = prop.name;
+        const element = emptyElement(property.loc);
+        const form = property.form;
+        element.rest = form.kind == PropertyKind.Spread;
+        element.key = property.name;
         if (form.kind == PropertyKind.Computed) {
-          e.keyExpr = form.key;
+          element.keyExpr = form.key;
         }
-        if (e.rest && i + 1 != expr.props.length) {
-          this.cursor.report(e.loc, "a rest element must be the last one");
+        if (element.rest && i + 1 != expr.props.length) {
+          this.cursor.report(
+            element.loc,
+            "a rest element must be the last one",
+          );
         }
-        this.fillElement(e, prop.value, false);
-        pattern.elements.push(e);
+        this.fillElement(element, property.value, false);
+        pattern.elements.push(element);
       }
       return pattern;
     }
@@ -249,29 +252,37 @@ partial class FileParser {
       if (item == undefined) {
         continue;
       }
-      const e = element(item.expr.loc);
-      e.hole = item.hole;
-      e.rest = item.spread;
-      if (e.rest && i + 1 != expr.elements.length) {
-        this.cursor.report(e.loc, "a rest element must be the last one");
+      const element = emptyElement(item.expr.loc);
+      element.hole = item.hole;
+      element.rest = item.spread;
+      if (element.rest && i + 1 != expr.elements.length) {
+        this.cursor.report(element.loc, "a rest element must be the last one");
       }
-      this.fillElement(e, item.expr, e.hole);
-      pattern.elements.push(e);
+      this.fillElement(element, item.expr, element.hole);
+      pattern.elements.push(element);
     }
 
     return pattern;
   }
 
-  private fillElement(e: PatternElement, value: Expr, hole: boolean): void {
+  private fillElement(
+    element: PatternElement,
+    value: Expr,
+    hole: boolean,
+  ): void {
     let target = value;
-    if (value.kind == ExprKind.Assign && value.op == undefined && !e.rest) {
+    if (
+      value.kind == ExprKind.Assign &&
+      value.op == undefined &&
+      !element.rest
+    ) {
       target = value.target;
-      e.defaultValue = value.value;
+      element.defaultValue = value.value;
     }
     if (target.kind == ExprKind.ArrayLit || target.kind == ExprKind.ObjectLit) {
-      e.nested = this.patternFromLiteral(target);
+      element.nested = this.patternFromLiteral(target);
     } else if (!hole) {
-      e.target = target;
+      element.target = target;
     }
   }
 
@@ -305,20 +316,20 @@ partial class FileParser {
   ): void {
     const keyReads: IndexExpr[] = [];
     for (let i = 0; i < pattern.elements.length; i++) {
-      const e = pattern.elements[i];
-      if (e == undefined || e.hole) {
+      const element = pattern.elements[i];
+      if (element == undefined || element.hole) {
         continue;
       }
       const value = this.elementOf(base, pattern, i, keyReads);
-      const nested = e.nested;
+      const nested = element.nested;
       if (nested != undefined) {
         this.declarePattern(decls, nested, value, undefined);
         continue;
       }
       decls.push({
-        name: e.name,
+        name: element.name,
         origin: NameOrigin.Written,
-        loc: e.loc,
+        loc: element.loc,
         init: value,
         form: { kind: BindingKind.Plain },
       });
@@ -351,49 +362,49 @@ partial class FileParser {
     const base = decls[0]?.name ?? "";
     const keyReads: IndexExpr[] = [];
     for (let i = 0; i < pattern.elements.length; i++) {
-      const e = pattern.elements[i];
-      if (e == undefined || e.hole) {
+      const element = pattern.elements[i];
+      if (element == undefined || element.hole) {
         continue;
       }
       const part = direct
-        ? this.directElement(e, values[i] ?? "")
+        ? this.directElement(element, values[i] ?? "")
         : this.elementOf(base, pattern, i, keyReads);
-      const nested = e.nested;
+      const nested = element.nested;
       if (nested != undefined) {
-        const assignment = this.assignPattern(e.loc, nested, part);
+        const assignment = this.assignPattern(element.loc, nested, part);
         body.push(assignment);
         continue;
       }
-      const target = e.target ?? part;
+      const target = element.target ?? part;
       const assign: Expr = {
         kind: ExprKind.Assign,
-        loc: e.loc,
+        loc: element.loc,
         target,
         value: part,
         source: kNoSpan,
       };
-      body.push({ kind: StmtKind.Expr, loc: e.loc, expr: assign });
+      body.push({ kind: StmtKind.Expr, loc: element.loc, expr: assign });
     }
 
     return { kind: StmtKind.Block, loc, body, end: -1 };
   }
 
-  private directElement(e: PatternElement, name: string): Expr {
+  private directElement(element: PatternElement, name: string): Expr {
     const read: Expr = {
       kind: ExprKind.Name,
-      loc: e.loc,
+      loc: element.loc,
       name,
       known: KnownName.None,
       typeArgs: [],
     };
-    const fallback = e.defaultValue;
+    const fallback = element.defaultValue;
     if (fallback == undefined) {
       return read;
     }
 
     return {
       kind: ExprKind.Binary,
-      loc: e.loc,
+      loc: element.loc,
       op: BinaryOp.Nullish,
       lhs: read,
       rhs: fallback,
@@ -407,8 +418,8 @@ partial class FileParser {
     i: int,
     keyReads: IndexExpr[],
   ): Expr {
-    const e = pattern.elements[i];
-    if (e == undefined) {
+    const element = pattern.elements[i];
+    if (element == undefined) {
       return {
         kind: ExprKind.Name,
         loc: pattern.loc,
@@ -419,7 +430,7 @@ partial class FileParser {
     }
     const source: Expr = {
       kind: ExprKind.Name,
-      loc: e.loc,
+      loc: element.loc,
       name: base,
       known: KnownName.None,
       typeArgs: [],
@@ -428,14 +439,14 @@ partial class FileParser {
     if (!pattern.object) {
       const position: Expr = {
         kind: ExprKind.IntLit,
-        loc: e.loc,
+        loc: element.loc,
         value: i.toUint64(),
         text: kNoSpan,
       };
-      if (e.rest) {
+      if (element.rest) {
         const slice: Expr = {
           kind: ExprKind.Member,
-          loc: e.loc,
+          loc: element.loc,
           object: source,
           name: "slice",
           known: KnownName.None,
@@ -444,7 +455,7 @@ partial class FileParser {
         };
         return {
           kind: ExprKind.Call,
-          loc: e.loc,
+          loc: element.loc,
           callee: slice,
           args: [position],
           spread: [],
@@ -454,19 +465,19 @@ partial class FileParser {
       }
       read = {
         kind: ExprKind.Index,
-        loc: e.loc,
+        loc: element.loc,
         object: source,
         index: position,
         optional: false,
       };
-    } else if (e.rest) {
-      return this.restOf(pattern, e, source, keyReads);
-    } else if (e.keyExpr != undefined) {
+    } else if (element.rest) {
+      return this.restOf(pattern, element, source, keyReads);
+    } else if (element.keyExpr != undefined) {
       const keyed: IndexExpr = {
         kind: ExprKind.Index,
-        loc: e.loc,
+        loc: element.loc,
         object: source,
-        index: e.keyExpr,
+        index: element.keyExpr,
         optional: false,
       };
       keyReads.push(keyed);
@@ -474,22 +485,22 @@ partial class FileParser {
     } else {
       read = {
         kind: ExprKind.Member,
-        loc: e.loc,
+        loc: element.loc,
         object: source,
-        name: e.key,
+        name: element.key,
         known: KnownName.None,
         optional: false,
         typeArgs: [],
       };
     }
-    const fallback = e.defaultValue;
+    const fallback = element.defaultValue;
     if (fallback == undefined) {
       return read;
     }
 
     return {
       kind: ExprKind.Binary,
-      loc: e.loc,
+      loc: element.loc,
       op: BinaryOp.Nullish,
       lhs: read,
       rhs: fallback,
@@ -499,7 +510,7 @@ partial class FileParser {
 
   private restOf(
     pattern: Pattern,
-    e: PatternElement,
+    element: PatternElement,
     source: Expr,
     keyReads: IndexExpr[],
   ): Expr {
@@ -512,11 +523,11 @@ partial class FileParser {
 
     return {
       kind: ExprKind.ObjectLit,
-      loc: e.loc,
+      loc: element.loc,
       props: [
         {
           name: "",
-          loc: e.loc,
+          loc: element.loc,
           value: source,
           form: { kind: PropertyKind.Spread, omit, omitKeys: keyReads.slice() },
         },
