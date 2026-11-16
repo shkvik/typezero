@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import { tokenize } from "./load/lexer/lexer.tz"
-import { ParsedFile, Parser, SourceText } from "./load/parser/parser.tz"
+import { Parser } from "./load/parser/parser.tz"
+import { ParsedFile, SourceText } from "./load/parser/types/parser.types.tz"
 import { SourceFile } from "./ast.tz"
 import { Dumper } from "./dump.tz"
 

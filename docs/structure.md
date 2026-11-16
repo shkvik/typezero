@@ -101,15 +101,17 @@ self/             компилятор на tz, пробный (порт compile
                   main.tz; diagnostic/ — коды ошибок (code.tz: enum Code, значения "TZ1101") и
                   их тексты (message.tz: Record<Code, Message>, подстановка {expected}/{found});
                   load/lexer/lexer.tz (tokenize → массив токенов); load/parser/ — Parser (parser.tz:
-                  run() по списку файлов → ParsedFile[]), Cursor (позиция, откаты, ошибки),
-                  LiteralReader (literal.tz: значения литералов по токену);
-                  load/parser/file-parser/ — FileParser (file-parser.tz), части
-                  `partial class` — в partial/file-parser.partial.<часть>.tz (types,
-                  expressions, patterns, statements, functions, classes, modules), их типы —
-                  в types/file-parser.types.<часть>.tz, там же result (ParseResult) и context
-                  (вид функции, место выражения, место типа), константы — в
-                  const/file-parser.const.<часть>.tz; сверка деревьев с C++ —
-                  скрытая `tz syntax tree|time|hold|read`
+                  run() по списку файлов → ParsedFile[]; типы SourceText, ParsedFile — в
+                  types/parser.types.tz), Cursor (cursor/: позиция, откаты,
+                  ошибки), LiteralReader (literal/: значения литералов по токену), FileParser
+                  (file-parser/: грамматика; части `partial class` — в
+                  partial/file-parser.partial.<часть>.tz: types, expressions, patterns,
+                  statements, functions, classes, modules). У класса своя папка: класс — в
+                  <класс>.tz, его типы — в types/<класс>.types.tz, константы — в
+                  const/<класс>.const.tz; у класса с частями — по файлу на часть
+                  (types/file-parser.types.<часть>.tz, там же result — ParseResult и context —
+                  вид функции, место выражения, место типа); сверка деревьев с C++ — скрытая
+                  `tz syntax tree|time|hold|read`
 tests/ docs/ bench/ examples/ third_party/
 ```
 

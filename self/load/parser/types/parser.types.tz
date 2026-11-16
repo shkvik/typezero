@@ -1,0 +1,14 @@
+import { SourceFile } from "../../../ast.tz";
+import { ParseError } from "../cursor/types/cursor.types.tz";
+
+export type SourceText = {
+  readonly path: string;
+  readonly text: Buffer;
+  readonly isLibrary: boolean;
+};
+
+export type ParsedFile = {
+  readonly source: SourceText;
+  readonly file: SourceFile;
+  readonly errors: ParseError[];
+};

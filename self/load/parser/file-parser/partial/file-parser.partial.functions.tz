@@ -1,7 +1,7 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { TokenKind, isKeyword, isName } from "../../../../token.tz";
-import { Mark } from "../../cursor.tz";
+import { Mark } from "../../cursor/types/cursor.types.tz";
 import {
   Access,
   BlockStmt,

@@ -1,5 +1,5 @@
 import { SourceFile } from "../../../../ast.tz";
-import { ParseError } from "../../cursor.tz";
+import { ParseError } from "../../cursor/types/cursor.types.tz";
 
 export type ParseResult = {
   readonly file: SourceFile;

@@ -1,25 +1,9 @@
-import { KnownName, Token, TokenKind, isName } from "../../token.tz";
-import { Span } from "../../ast.tz";
-import { Code } from "../../diagnostic/code.tz";
-import { Details, kNoDetails } from "../../diagnostic/message.tz";
-
-export type Mark = { readonly at: int; readonly recovering: boolean };
-
-export type ParseError = {
-  readonly code: Code;
-  readonly loc: int;
-  readonly details: Details;
-};
-
-const kEnd: Token = {
-  kind: TokenKind.End,
-  known: KnownName.None,
-  start: 0,
-  end: 0,
-  text: "",
-  newline: false,
-  hash: false,
-};
+import { KnownName, Token, TokenKind, isName } from "../../../token.tz";
+import { Span } from "../../../ast.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import { Details, kNoDetails } from "../../../diagnostic/message.tz";
+import { Mark, ParseError } from "./types/cursor.types.tz";
+import { kEnd } from "./const/cursor.const.tz";
 
 export class Cursor {
   private readonly tokens: Token[];

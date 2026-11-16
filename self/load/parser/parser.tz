@@ -1,19 +1,6 @@
 import { tokenize } from "../lexer/lexer.tz";
 import { FileParser } from "./file-parser/file-parser.tz";
-import { SourceFile } from "../../ast.tz";
-import { ParseError } from "./cursor.tz";
-
-export type SourceText = {
-  readonly path: string;
-  readonly text: Buffer;
-  readonly isLibrary: boolean;
-};
-
-export type ParsedFile = {
-  readonly source: SourceText;
-  readonly file: SourceFile;
-  readonly errors: ParseError[];
-};
+import { ParsedFile, SourceText } from "./types/parser.types.tz";
 
 export class Parser {
   private readonly sources: SourceText[];

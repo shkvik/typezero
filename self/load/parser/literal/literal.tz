@@ -1,57 +1,44 @@
-import { Token } from "../../token.tz";
-
-const kNewline = 10;
-const kReturn = 13;
-const kQuote = 34;
-const kApostrophe = 39;
-const kZero = 48;
-const kNine = 57;
-const kUpperA = 65;
-const kUpperF = 70;
-const kBackslash = 92;
-const kBacktick = 96;
-const kLowerA = 97;
-const kLowerB = 98;
-const kLowerF = 102;
-const kLowerN = 110;
-const kLowerO = 111;
-const kLowerR = 114;
-const kLowerT = 116;
-const kLowerU = 117;
-const kLowerV = 118;
-const kLowerX = 120;
-const kUpperB = 66;
-const kUpperO = 79;
-const kUpperX = 88;
-const kDollar = 36;
-const kLeftBrace = 123;
-const kRightBrace = 125;
-const kSlash = 47;
-const kUnderscore = 95;
-const kUpperZ = 90;
-const kLowerZ = 122;
-const kHigh = 128;
-const kMaxCodePointDigits = 6;
-const kRadixPrefixLength = 2;
-
-export type DecodedText = { readonly text: string; readonly ok: boolean };
-
-export type RegexText = { readonly pattern: string; readonly flags: string };
-
-export type NumberText = {
-  readonly isInt: boolean;
-  readonly intValue: uint64;
-  readonly doubleValue: double;
-  readonly valid: boolean;
-};
-
-type Escape = { readonly text: string; readonly next: int };
-
-enum TextKind {
-  Quoted,
-  Template,
-  RawTemplate,
-}
+import { Token } from "../../../token.tz";
+import {
+  DecodedText,
+  Escape,
+  NumberText,
+  RegexText,
+  TextKind,
+} from "./types/literal.types.tz";
+import {
+  kBackslash,
+  kBacktick,
+  kDollar,
+  kHigh,
+  kLeftBrace,
+  kLowerA,
+  kLowerB,
+  kLowerF,
+  kLowerN,
+  kLowerO,
+  kLowerR,
+  kLowerT,
+  kLowerU,
+  kLowerV,
+  kLowerX,
+  kLowerZ,
+  kMaxCodePointDigits,
+  kNewline,
+  kNine,
+  kRadixPrefixLength,
+  kReturn,
+  kRightBrace,
+  kSlash,
+  kUnderscore,
+  kUpperA,
+  kUpperB,
+  kUpperF,
+  kUpperO,
+  kUpperX,
+  kUpperZ,
+  kZero,
+} from "./const/literal.const.tz";
 
 export class LiteralReader {
   private readonly source: Buffer;

@@ -1,0 +1,18 @@
+export type DecodedText = { readonly text: string; readonly ok: boolean };
+
+export type RegexText = { readonly pattern: string; readonly flags: string };
+
+export type NumberText = {
+  readonly isInt: boolean;
+  readonly intValue: uint64;
+  readonly doubleValue: double;
+  readonly valid: boolean;
+};
+
+export type Escape = { readonly text: string; readonly next: int };
+
+export enum TextKind {
+  Quoted,
+  Template,
+  RawTemplate,
+}
