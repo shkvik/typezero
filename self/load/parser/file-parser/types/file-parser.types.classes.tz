@@ -1,4 +1,6 @@
 import { Access } from "../../../../program/ast/types/ast.types.classes.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
 
 export type Modifiers = {
   isStatic: boolean;
@@ -17,4 +19,9 @@ export type MemberName = {
   readonly name: string;
   readonly generator: boolean;
   readonly constructorName: boolean;
+};
+
+export type ClassBase = {
+  readonly base?: TypeRef;
+  readonly baseExpr?: Expr;
 };

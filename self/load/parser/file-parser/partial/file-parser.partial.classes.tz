@@ -25,77 +25,33 @@ import {
   ClassField,
   ClassMember,
   Decorator,
-  EnumMember,
   FieldKind,
   FieldPresence,
   MethodKind,
 } from "../../../../program/ast/types/ast.types.classes.tz";
-import { MemberName, Modifiers } from "../types/file-parser.types.classes.tz";
+import {
+  ClassBase,
+  MemberName,
+  Modifiers,
+} from "../types/file-parser.types.classes.tz";
 import { Arguments } from "../types/file-parser.types.calls.tz";
 import { kThisName } from "../const/file-parser.const.classes.tz";
 
 partial class FileParser {
   private classDecl(expression: boolean): ClassDecl {
     const keyword = this.cursor.next();
-    const token = this.cursor.peek();
-    const named = kTokenTable.isName(token.kind);
-    if (named) {
-      this.cursor.next();
-    }
-
+    const word = this.cursor.atName() ? this.cursor.next() : undefined;
     const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
-    let base: TypeRef | undefined = undefined;
-    let baseExpr: Expr | undefined = undefined;
-
-    if (this.cursor.is(TokenKind.Extends)) {
-      this.cursor.next();
-      const next = this.cursor.lookahead();
-      const value =
-        !this.cursor.atName() ||
-        next.kind == TokenKind.LParen ||
-        next.kind == TokenKind.Dot ||
-        next.kind == TokenKind.LBracket;
-      if (value) {
-        baseExpr = this.callOrMember();
-      } else {
-        const baseToken = this.cursor.peek();
-
-        base = this.primaryType();
-        if (expression && base.form.kind == TypeKind.Name) {
-          baseExpr = {
-            kind: ExprKind.Name,
-            loc: baseToken.start,
-            name: baseToken.text,
-            known: baseToken.known,
-            typeArgs: [],
-          };
-        }
-      }
-    }
-
-    const interfaces: TypeRef[] = [];
-
-    if (this.cursor.is(TokenKind.Implements)) {
-      this.cursor.next();
-      const first = this.primaryType();
-
-      interfaces.push(first);
-
-      while (this.cursor.accept(TokenKind.Comma)) {
-        const implemented = this.primaryType();
-
-        interfaces.push(implemented);
-      }
-    }
-
+    const extended = this.classBase(expression);
+    const interfaces = this.implementedTypes();
     const declaration: ClassDecl = {
       kind: StmtKind.Class,
-      loc: named ? token.start : keyword.start,
-      name: named ? token.text : undefined,
+      loc: word == undefined ? keyword.start : word.start,
+      name: word?.text,
       isAbstract: false,
       isPartial: false,
-      base,
-      baseExpr,
+      base: extended.base,
+      baseExpr: extended.baseExpr,
       interfaces,
       fields: [],
       methods: [],
@@ -109,10 +65,7 @@ partial class FileParser {
       return declaration;
     }
 
-    while (
-      !this.cursor.is(TokenKind.RBrace) &&
-      !this.cursor.is(TokenKind.End)
-    ) {
+    while (this.cursor.insideList(TokenKind.RBrace)) {
       this.classMember(declaration);
       if (this.cursor.isRecovering()) {
         this.skipClassMember();
@@ -124,6 +77,55 @@ partial class FileParser {
     declaration.source = this.cursor.spanFrom(keyword.start);
 
     return declaration;
+  }
+
+  private classBase(expression: boolean): ClassBase {
+    if (!this.cursor.accept(TokenKind.Extends)) {
+      return {};
+    }
+
+    const next = this.cursor.lookahead();
+    const value =
+      !this.cursor.atName() ||
+      next.kind == TokenKind.LParen ||
+      next.kind == TokenKind.Dot ||
+      next.kind == TokenKind.LBracket;
+    if (value) {
+      const baseExpr = this.callOrMember();
+
+      return { baseExpr };
+    }
+
+    const word = this.cursor.peek();
+    const base = this.primaryType();
+    if (!expression || base.form.kind != TypeKind.Name) {
+      return { base };
+    }
+
+    const baseExpr: Expr = {
+      kind: ExprKind.Name,
+      loc: word.start,
+      name: word.text,
+      known: word.known,
+      typeArgs: [],
+    };
+
+    return { base, baseExpr };
+  }
+
+  private implementedTypes(): TypeRef[] {
+    const interfaces: TypeRef[] = [];
+    if (!this.cursor.accept(TokenKind.Implements)) {
+      return interfaces;
+    }
+
+    do {
+      const implemented = this.primaryType();
+
+      interfaces.push(implemented);
+    } while (this.cursor.accept(TokenKind.Comma));
+
+    return interfaces;
   }
 
   private memberModifierAhead(): boolean {
@@ -418,13 +420,7 @@ partial class FileParser {
       access: modifiers.access,
       isOverride: modifiers.isOverride && !constructor,
       decorators: constructor ? [] : decorators,
-      method: constructor
-        ? MethodKind.Constructor
-        : modifiers.isStatic
-          ? MethodKind.Static
-          : abstractMethod
-            ? MethodKind.Abstract
-            : MethodKind.Instance,
+      method: this.methodKind(modifiers, constructor),
     };
 
     this.reportMethodModifiers(modifiers, member.generator, constructor, loc);
@@ -437,23 +433,11 @@ partial class FileParser {
       FunctionPlace.Declared,
       role,
     );
-
     if (this.cursor.isRecovering()) {
       return;
     }
     if (abstractMethod) {
-      if (method.body != undefined) {
-        this.cursor.report(
-          member.loc,
-          Code.AbstractMethodBody,
-          { word: member.name },
-        );
-      }
-
-      method.body = { kind: StmtKind.Block, loc: member.loc, body: [] };
-      declaration.methods.push(method);
-
-      return;
+      return this.addAbstractMethod(declaration, method, member);
     }
 
     const body = method.body;
@@ -466,9 +450,47 @@ partial class FileParser {
       return;
     }
 
+    this.addConstructor(declaration, method, body, member.loc);
+  }
+
+  private methodKind(modifiers: Modifiers, constructor: boolean): MethodKind {
+    if (constructor) {
+      return MethodKind.Constructor;
+    }
+    if (modifiers.isStatic) {
+      return MethodKind.Static;
+    }
+    if (modifiers.isAbstract) {
+      return MethodKind.Abstract;
+    }
+
+    return MethodKind.Instance;
+  }
+
+  private addAbstractMethod(
+    declaration: ClassDecl,
+    method: FunctionDecl,
+    member: MemberName,
+  ): void {
+    if (method.body != undefined) {
+      this.cursor.report(member.loc, Code.AbstractMethodBody, {
+        word: member.name,
+      });
+    }
+
+    method.body = { kind: StmtKind.Block, loc: member.loc, body: [] };
+    declaration.methods.push(method);
+  }
+
+  private addConstructor(
+    declaration: ClassDecl,
+    method: FunctionDecl,
+    body: BlockStmt,
+    memberLoc: int,
+  ): void {
     const returnType = method.returnType;
     if (returnType != undefined) {
-      const loc = returnType.loc ?? member.loc;
+      const loc = returnType.loc ?? memberLoc;
 
       this.cursor.report(loc, Code.ConstructorReturnType);
     }
@@ -662,159 +684,6 @@ partial class FileParser {
       decorators,
       accessor: modifiers.accessor,
     });
-  }
-
-  private typeAlias(): Stmt {
-    this.cursor.next();
-    const name = this.cursor.next();
-    const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
-
-    this.cursor.expect(TokenKind.Assign, Code.ExpectedAfterTypeName);
-    const type = this.type();
-
-    this.cursor.expectSemicolon();
-
-    return {
-      kind: StmtKind.TypeAlias,
-      loc: name.start,
-      name: name.text,
-      typeParams,
-      type,
-      bases: [],
-      isHandle: false,
-    };
-  }
-
-  private handleClass(): Stmt {
-    this.cursor.next();
-    const name = this.cursor.peek();
-
-    if (!this.cursor.expectName(Code.ExpectedAfterDeclareClass)) {
-      this.cursor.synchronize();
-
-      return this.marker(StmtKind.Empty, name.start);
-    }
-
-    const alias: Stmt = {
-      kind: StmtKind.TypeAlias,
-      loc: name.start,
-      name: name.text,
-      typeParams: [],
-      type: this.typeRef(),
-      bases: [],
-      isHandle: true,
-    };
-    const next = this.cursor.lookahead();
-    const hasBody =
-      this.cursor.is(TokenKind.LBrace) && next.kind == TokenKind.RBrace;
-    if (!hasBody) {
-      const token = this.cursor.peek();
-
-      this.cursor.report(token.start, Code.HandleClass, { word: name.text });
-      this.skipHandleBody();
-
-      return alias;
-    }
-
-    this.cursor.skip(2);
-
-    return alias;
-  }
-
-  private skipHandleBody(): void {
-    this.cursor.skipTo(TokenKind.LBrace);
-    if (this.cursor.accept(TokenKind.LBrace)) {
-      this.cursor.skipToClosingBrace();
-    }
-  }
-
-  private interfaceDecl(): Stmt {
-    this.cursor.next();
-    const name = this.cursor.next();
-    const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
-    const bases: TypeRef[] = [];
-
-    if (this.cursor.is(TokenKind.Extends)) {
-      this.cursor.next();
-      const first = this.type();
-
-      bases.push(first);
-
-      while (this.cursor.accept(TokenKind.Comma)) {
-        const base = this.type();
-
-        bases.push(base);
-      }
-    }
-    if (!this.cursor.is(TokenKind.LBrace)) {
-      const token = this.cursor.peek();
-
-      this.cursor.error(
-        token.start,
-        Code.ExpectedInterfaceFields,
-        { found: token.kind },
-      );
-
-      return this.marker(StmtKind.Empty, name.start);
-    }
-
-    const type = this.objectType();
-
-    this.cursor.accept(TokenKind.Semi);
-
-    return {
-      kind: StmtKind.TypeAlias,
-      loc: name.start,
-      name: name.text,
-      typeParams,
-      type,
-      bases,
-      isHandle: false,
-    };
-  }
-
-  private enumDecl(): Stmt {
-    this.cursor.next();
-    const name = this.cursor.peek();
-    if (!kTokenTable.isName(name.kind)) {
-      this.cursor.error(name.start, Code.ExpectedEnumName);
-
-      return this.marker(StmtKind.Empty, name.start);
-    }
-
-    this.cursor.next();
-    this.cursor.expect(TokenKind.LBrace, Code.ExpectedEnumMembersStart);
-    const members: EnumMember[] = [];
-
-    while (this.cursor.insideList(TokenKind.RBrace)) {
-      const member = this.cursor.peek();
-      if (!kTokenTable.isName(member.kind)) {
-        this.cursor.error(
-          member.start,
-          Code.ExpectedEnumMember,
-          { found: member.kind },
-        );
-
-        break;
-      }
-
-      this.cursor.next();
-      let init: Expr | undefined = undefined;
-
-      if (this.cursor.accept(TokenKind.Assign)) {
-        init = this.expression();
-        this.recordConstant(`${name.text}.${member.text}`, init);
-      }
-
-      members.push({ name: member.text, loc: member.start, init });
-      if (!this.cursor.accept(TokenKind.Comma)) {
-        break;
-      }
-    }
-
-    this.cursor.expect(TokenKind.RBrace, Code.ExpectedEnumClose);
-
-    return { kind: StmtKind.Enum, loc: name.start, name: name.text, members };
   }
 
   private isMemberModifier(kind: TokenKind): boolean {

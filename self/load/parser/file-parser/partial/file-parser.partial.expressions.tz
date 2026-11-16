@@ -121,53 +121,24 @@ partial class FileParser {
 
   private primaryInside(): Expr {
     const token = this.cursor.peek();
-    const loc = token.start;
 
     switch (token.kind) {
-      case TokenKind.At: {
-        const decorators = this.decorators();
-
-        this.rejectDecorators(decorators);
-
-        return this.cursor.isRecovering()
-          ? this.invalid(loc)
-          : this.primaryInside();
-      }
+      case TokenKind.At:
+        return this.decoratedPrimary();
       case TokenKind.Int:
         return this.intLiteral();
       case TokenKind.Float:
         return this.floatLiteral();
-      case TokenKind.String: {
-        const decoded = this.literals.string(token);
-
-        this.cursor.next();
-
-        return { kind: ExprKind.StringLit, loc, value: decoded.text };
-      }
+      case TokenKind.String:
+        return this.stringLiteral();
       case TokenKind.TemplateString:
       case TokenKind.TemplateHead:
         return this.template(false);
-      case TokenKind.Regex: {
-        const text = this.literals.regex(token);
-
-        this.cursor.next();
-
-        return {
-          kind: ExprKind.RegexLit,
-          loc,
-          pattern: text.pattern,
-          flags: text.flags,
-          written: token.end - token.start,
-        };
-      }
+      case TokenKind.Regex:
+        return this.regexLiteral();
       case TokenKind.True:
       case TokenKind.False:
-        this.cursor.next();
-        return {
-          kind: ExprKind.BoolLit,
-          loc,
-          value: token.kind == TokenKind.True,
-        };
+        return this.booleanLiteral();
       case TokenKind.Import:
         return this.importPrimary(token);
       case TokenKind.Class:
@@ -178,11 +149,8 @@ partial class FileParser {
       case TokenKind.Super:
       case TokenKind.Identifier:
         return this.identifierPrimary(token);
-      case TokenKind.Function: {
-        const declaration = this.functionDecl(true, false);
-
-        return { kind: ExprKind.Function, loc, fn: declaration };
-      }
+      case TokenKind.Function:
+        return this.functionExpression();
       case TokenKind.LParen:
         return this.parenthesized();
       case TokenKind.LBracket:
@@ -192,14 +160,42 @@ partial class FileParser {
       case TokenKind.New:
         return this.newExpression();
       case TokenKind.Less:
-        return this.genericArrow(loc);
+        return this.genericArrow(token.start);
       default:
         if (kTokenTable.isName(token.kind)) {
           return this.identifierPrimary(token);
         }
-        this.cursor.error(loc, Code.ExpectedExpression, { found: token.kind });
-        return this.invalid(loc);
+        return this.missingExpression();
     }
+  }
+
+  private decoratedPrimary(): Expr {
+    const first = this.cursor.peek();
+    const decorators = this.decorators();
+
+    this.rejectDecorators(decorators);
+    if (this.cursor.isRecovering()) {
+      return this.invalid(first.start);
+    }
+
+    return this.primaryInside();
+  }
+
+  private functionExpression(): Expr {
+    const keyword = this.cursor.peek();
+    const declaration = this.functionDecl(true, false);
+
+    return { kind: ExprKind.Function, loc: keyword.start, fn: declaration };
+  }
+
+  private missingExpression(): Expr {
+    const token = this.cursor.peek();
+
+    this.cursor.error(token.start, Code.ExpectedExpression, {
+      found: token.kind,
+    });
+
+    return this.invalid(token.start);
   }
 
   private parenthesized(): Expr {

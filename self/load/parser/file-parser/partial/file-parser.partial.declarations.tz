@@ -1,0 +1,166 @@
+import { FileParser } from "../file-parser.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { TokenKind } from "../../../token/types/token.types.tz";
+import { kTokenTable } from "../../../token/const/token.const.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Stmt,
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import { EnumMember } from "../../../../program/ast/types/ast.types.classes.tz";
+
+partial class FileParser {
+  private typeAlias(): Stmt {
+    this.cursor.next();
+    const name = this.cursor.next();
+    const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
+
+    this.cursor.expect(TokenKind.Assign, Code.ExpectedAfterTypeName);
+    const type = this.type();
+
+    this.cursor.expectSemicolon();
+
+    return {
+      kind: StmtKind.TypeAlias,
+      loc: name.start,
+      name: name.text,
+      typeParams,
+      type,
+      bases: [],
+      isHandle: false,
+    };
+  }
+
+  private handleClass(): Stmt {
+    this.cursor.next();
+    const name = this.cursor.peek();
+
+    if (!this.cursor.expectName(Code.ExpectedAfterDeclareClass)) {
+      this.cursor.synchronize();
+
+      return this.marker(StmtKind.Empty, name.start);
+    }
+
+    const alias: Stmt = {
+      kind: StmtKind.TypeAlias,
+      loc: name.start,
+      name: name.text,
+      typeParams: [],
+      type: this.typeRef(),
+      bases: [],
+      isHandle: true,
+    };
+    const next = this.cursor.lookahead();
+    const hasBody =
+      this.cursor.is(TokenKind.LBrace) && next.kind == TokenKind.RBrace;
+    if (!hasBody) {
+      const token = this.cursor.peek();
+
+      this.cursor.report(token.start, Code.HandleClass, { word: name.text });
+      this.skipHandleBody();
+
+      return alias;
+    }
+
+    this.cursor.skip(2);
+
+    return alias;
+  }
+
+  private skipHandleBody(): void {
+    this.cursor.skipTo(TokenKind.LBrace);
+    if (this.cursor.accept(TokenKind.LBrace)) {
+      this.cursor.skipToClosingBrace();
+    }
+  }
+
+  private interfaceDecl(): Stmt {
+    this.cursor.next();
+    const name = this.cursor.next();
+    const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
+    const bases: TypeRef[] = [];
+
+    if (this.cursor.is(TokenKind.Extends)) {
+      this.cursor.next();
+      const first = this.type();
+
+      bases.push(first);
+
+      while (this.cursor.accept(TokenKind.Comma)) {
+        const base = this.type();
+
+        bases.push(base);
+      }
+    }
+    if (!this.cursor.is(TokenKind.LBrace)) {
+      const token = this.cursor.peek();
+
+      this.cursor.error(
+        token.start,
+        Code.ExpectedInterfaceFields,
+        { found: token.kind },
+      );
+
+      return this.marker(StmtKind.Empty, name.start);
+    }
+
+    const type = this.objectType();
+
+    this.cursor.accept(TokenKind.Semi);
+
+    return {
+      kind: StmtKind.TypeAlias,
+      loc: name.start,
+      name: name.text,
+      typeParams,
+      type,
+      bases,
+      isHandle: false,
+    };
+  }
+
+  private enumDecl(): Stmt {
+    this.cursor.next();
+    const name = this.cursor.peek();
+    if (!kTokenTable.isName(name.kind)) {
+      this.cursor.error(name.start, Code.ExpectedEnumName);
+
+      return this.marker(StmtKind.Empty, name.start);
+    }
+
+    this.cursor.next();
+    this.cursor.expect(TokenKind.LBrace, Code.ExpectedEnumMembersStart);
+    const members: EnumMember[] = [];
+
+    while (this.cursor.insideList(TokenKind.RBrace)) {
+      const member = this.cursor.peek();
+      if (!kTokenTable.isName(member.kind)) {
+        this.cursor.error(
+          member.start,
+          Code.ExpectedEnumMember,
+          { found: member.kind },
+        );
+
+        break;
+      }
+
+      this.cursor.next();
+      let init: Expr | undefined = undefined;
+
+      if (this.cursor.accept(TokenKind.Assign)) {
+        init = this.expression();
+        this.recordConstant(`${name.text}.${member.text}`, init);
+      }
+
+      members.push({ name: member.text, loc: member.start, init });
+      if (!this.cursor.accept(TokenKind.Comma)) {
+        break;
+      }
+    }
+
+    this.cursor.expect(TokenKind.RBrace, Code.ExpectedEnumClose);
+
+    return { kind: StmtKind.Enum, loc: name.start, name: name.text, members };
+  }
+}

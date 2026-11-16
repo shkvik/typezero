@@ -425,86 +425,106 @@ partial class FileParser {
     keyReads: IndexExpr[],
   ): Expr {
     const element = pattern.elements[i];
-    if (element == undefined) {
-      return {
-        kind: ExprKind.Name,
-        loc: pattern.loc,
-        name: base,
-        known: KnownName.None,
-        typeArgs: [],
-      };
-    }
-
+    const loc = element == undefined ? pattern.loc : element.loc;
     const source: Expr = {
       kind: ExprKind.Name,
-      loc: element.loc,
+      loc,
       name: base,
       known: KnownName.None,
       typeArgs: [],
     };
-    let read: Expr;
+    if (element == undefined) {
+      return source;
+    }
+    if (pattern.object) {
+      return this.objectElementOf(pattern, element, source, keyReads);
+    }
 
-    if (!pattern.object) {
-      const position: Expr = {
-        kind: ExprKind.IntLit,
-        loc: element.loc,
-        value: i.toUint64(),
-      };
+    return this.arrayElementOf(element, source, i);
+  }
 
-      if (element.rest) {
-        const slice: Expr = {
-          kind: ExprKind.Member,
-          loc: element.loc,
-          object: source,
-          name: kSliceMethodName,
-          known: KnownName.None,
-          optional: false,
-          typeArgs: [],
-        };
+  private arrayElementOf(element: PatternElement, source: Expr, i: int): Expr {
+    const position: Expr = {
+      kind: ExprKind.IntLit,
+      loc: element.loc,
+      value: i.toUint64(),
+    };
+    if (element.rest) {
+      return this.sliceFrom(element.loc, source, position);
+    }
 
-        return {
-          kind: ExprKind.Call,
-          loc: element.loc,
-          callee: slice,
-          args: [position],
-          spread: [],
-          optional: false,
-          tagged: false,
-        };
-      }
+    const read: Expr = {
+      kind: ExprKind.Index,
+      loc: element.loc,
+      object: source,
+      index: position,
+      optional: false,
+    };
 
-      read = {
-        kind: ExprKind.Index,
-        loc: element.loc,
-        object: source,
-        index: position,
-        optional: false,
-      };
-    } else if (element.rest) {
+    return this.withDefault(element, read);
+  }
+
+  private sliceFrom(loc: int, source: Expr, position: Expr): Expr {
+    const slice: Expr = {
+      kind: ExprKind.Member,
+      loc,
+      object: source,
+      name: kSliceMethodName,
+      known: KnownName.None,
+      optional: false,
+      typeArgs: [],
+    };
+
+    return {
+      kind: ExprKind.Call,
+      loc,
+      callee: slice,
+      args: [position],
+      spread: [],
+      optional: false,
+      tagged: false,
+    };
+  }
+
+  private objectElementOf(
+    pattern: Pattern,
+    element: PatternElement,
+    source: Expr,
+    keyReads: IndexExpr[],
+  ): Expr {
+    if (element.rest) {
       return this.restOf(pattern, element, source, keyReads);
-    } else if (element.keyExpr != undefined) {
+    }
+
+    const keyExpr = element.keyExpr;
+    if (keyExpr != undefined) {
       const keyed: IndexExpr = {
         kind: ExprKind.Index,
         loc: element.loc,
         object: source,
-        index: element.keyExpr,
+        index: keyExpr,
         optional: false,
       };
 
       keyReads.push(keyed);
-      read = keyed;
-    } else {
-      read = {
-        kind: ExprKind.Member,
-        loc: element.loc,
-        object: source,
-        name: element.key,
-        known: KnownName.None,
-        optional: false,
-        typeArgs: [],
-      };
+
+      return this.withDefault(element, keyed);
     }
 
+    const read: Expr = {
+      kind: ExprKind.Member,
+      loc: element.loc,
+      object: source,
+      name: element.key,
+      known: KnownName.None,
+      optional: false,
+      typeArgs: [],
+    };
+
+    return this.withDefault(element, read);
+  }
+
+  private withDefault(element: PatternElement, read: Expr): Expr {
     const fallback = element.defaultValue;
     if (fallback == undefined) {
       return read;

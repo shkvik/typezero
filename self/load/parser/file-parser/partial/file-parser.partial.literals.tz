@@ -422,4 +422,34 @@ partial class FileParser {
       text,
     };
   }
+
+  private stringLiteral(): Expr {
+    const token = this.cursor.next();
+    const decoded = this.literals.string(token);
+
+    return { kind: ExprKind.StringLit, loc: token.start, value: decoded.text };
+  }
+
+  private regexLiteral(): Expr {
+    const token = this.cursor.next();
+    const text = this.literals.regex(token);
+
+    return {
+      kind: ExprKind.RegexLit,
+      loc: token.start,
+      pattern: text.pattern,
+      flags: text.flags,
+      written: token.end - token.start,
+    };
+  }
+
+  private booleanLiteral(): Expr {
+    const token = this.cursor.next();
+
+    return {
+      kind: ExprKind.BoolLit,
+      loc: token.start,
+      value: token.kind == TokenKind.True,
+    };
+  }
 }
