@@ -24,6 +24,15 @@ type Binding = {
   readonly typeAnn?: TypeRef;
 };
 
+enum ForTargetKind {
+  Name,
+  Pattern,
+}
+
+type ForTarget =
+  | { readonly kind: ForTargetKind.Name; readonly binding: Binding }
+  | { readonly kind: ForTargetKind.Pattern; readonly pattern: Pattern };
+
 partial class FileParser {
   private statement(topLevel: boolean): Stmt {
     const token = this.cursor.peek();
@@ -506,7 +515,7 @@ partial class FileParser {
   private forInside(): Stmt {
     const keyword = this.cursor.next();
     const loc = keyword.start;
-    let awaitLoc = -1;
+    let awaitLoc: int | undefined = undefined;
     if (this.cursor.is(TokenKind.Await)) {
       const awaitKeyword = this.cursor.next();
       awaitLoc = awaitKeyword.start;
@@ -526,26 +535,16 @@ partial class FileParser {
         );
       }
       const isConst = head.kind == TokenKind.Const;
-      let pattern: Pattern | undefined = undefined;
-      let first: Binding = { name: "", loc: -1 };
-      if (
-        this.cursor.is(TokenKind.LBracket) ||
-        this.cursor.is(TokenKind.LBrace)
-      ) {
-        pattern = this.bindingPattern();
-      } else {
-        const binding = this.binding();
-        if (binding == undefined) {
-          return { kind: StmtKind.For, loc };
-        }
-        first = binding;
+      const target = this.forTarget();
+      if (target == undefined) {
+        return { kind: StmtKind.For, loc };
       }
       const forIn = this.cursor.is(TokenKind.In);
       if (this.cursor.is(TokenKind.Of) || forIn) {
-        return this.forOf(loc, awaitLoc, isConst, forIn, first, pattern);
+        return this.forOf(loc, awaitLoc, isConst, forIn, target);
       }
       const decls: VarDeclarator[] = [];
-      if (pattern != undefined) {
+      if (target.kind == ForTargetKind.Pattern) {
         if (
           !this.cursor.expect(
             TokenKind.Assign,
@@ -555,13 +554,13 @@ partial class FileParser {
           return { kind: StmtKind.For, loc };
         }
         const value = this.expression();
-        this.declarePattern(decls, pattern, value, undefined);
+        this.declarePattern(decls, target.pattern, value, undefined);
       } else {
         const value = this.cursor.accept(TokenKind.Assign)
           ? this.expression()
           : undefined;
         decls.push({
-          ...first,
+          ...target.binding,
           origin: NameOrigin.Written,
           init: value,
           form: { kind: BindingKind.Plain },
@@ -592,7 +591,7 @@ partial class FileParser {
       return { kind: StmtKind.For, loc, init };
     }
     this.context = { ...this.context, expressionPlace: ExpressionPlace.Plain };
-    if (awaitLoc >= 0) {
+    if (awaitLoc != undefined) {
       this.cursor.report(
         awaitLoc,
         "'for await' goes over the values of an iterable",
@@ -600,6 +599,22 @@ partial class FileParser {
     }
 
     return this.forRest(loc, init);
+  }
+
+  private forTarget(): ForTarget | undefined {
+    if (
+      this.cursor.is(TokenKind.LBracket) ||
+      this.cursor.is(TokenKind.LBrace)
+    ) {
+      const pattern = this.bindingPattern();
+      return { kind: ForTargetKind.Pattern, pattern };
+    }
+    const binding = this.binding();
+    if (binding == undefined) {
+      return undefined;
+    }
+
+    return { kind: ForTargetKind.Name, binding };
   }
 
   private forRest(loc: int, init: Stmt | undefined): Stmt {
@@ -615,22 +630,21 @@ partial class FileParser {
 
   private forOf(
     loc: int,
-    awaitLoc: int,
+    awaitLoc: int | undefined,
     isConst: boolean,
     keys: boolean,
-    first: Binding,
-    pattern: Pattern | undefined,
+    target: ForTarget,
   ): Stmt {
-    if (keys && pattern != undefined) {
+    if (keys && target.kind == ForTargetKind.Pattern) {
       this.cursor.report(
-        pattern.loc,
+        target.pattern.loc,
         "the variable of 'for...in' is a key, a string, and cannot be destructured",
       );
     }
     this.cursor.next();
     this.context = { ...this.context, expressionPlace: ExpressionPlace.Plain };
-    const isAwait = awaitLoc >= 0;
-    if (keys && isAwait) {
+    const isAwait = awaitLoc != undefined;
+    if (keys && awaitLoc != undefined) {
       this.cursor.report(
         awaitLoc,
         "'for await' goes over the values of an iterable, with 'of'",
@@ -639,9 +653,9 @@ partial class FileParser {
     const iterable = this.expression();
     this.cursor.expect(TokenKind.RParen, "to close the loop header");
     const body = this.statement(false);
-    if (pattern == undefined) {
+    if (target.kind == ForTargetKind.Name) {
       const binding: VarDeclarator = {
-        ...first,
+        ...target.binding,
         origin: NameOrigin.Written,
         form: { kind: BindingKind.Plain },
       };
@@ -656,6 +670,7 @@ partial class FileParser {
         body,
       };
     }
+    const pattern = target.pattern;
     const name = this.hiddenName();
     if (keys) {
       const binding: VarDeclarator = {
@@ -697,7 +712,6 @@ partial class FileParser {
       kind: StmtKind.Block,
       loc: body.loc,
       body: [elements, body],
-      end: -1,
     };
 
     return {

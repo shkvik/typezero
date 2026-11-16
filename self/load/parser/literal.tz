@@ -147,7 +147,7 @@ export class LiteralReader {
     return value.toInt();
   }
 
-  private hexValue(c: int): int {
+  private hexValue(c: int): int | undefined {
     if (c >= kZero && c <= kNine) {
       return c - kZero;
     }
@@ -158,7 +158,7 @@ export class LiteralReader {
       return c - kUpperA + 10;
     }
 
-    return -1;
+    return undefined;
   }
 
   private hexEscape(at: int, end: int, count: int): Escape | undefined {
@@ -169,7 +169,7 @@ export class LiteralReader {
       }
       const c = this.byteAt(at + n);
       const digit = this.hexValue(c);
-      if (digit < 0) {
+      if (digit == undefined) {
         return undefined;
       }
       value = value * 16 + digit;
@@ -190,7 +190,7 @@ export class LiteralReader {
     while (i < end) {
       const c = this.byteAt(i);
       const digit = this.hexValue(c);
-      if (digit < 0) {
+      if (digit == undefined) {
         break;
       }
       cp = cp * 16 + digit;

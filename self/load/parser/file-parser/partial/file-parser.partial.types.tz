@@ -55,7 +55,7 @@ partial class FileParser {
         "after the 'extends' clause of the conditional type",
       )
     ) {
-      return typeRef(-1);
+      return typeRef(start);
     }
     const whenTrue = this.type();
     ref.args.push(whenTrue);
@@ -65,7 +65,7 @@ partial class FileParser {
         "between the branches of the conditional type",
       )
     ) {
-      return typeRef(-1);
+      return typeRef(start);
     }
     const whenFalse = this.type();
     ref.args.push(whenFalse);
@@ -235,7 +235,7 @@ partial class FileParser {
       case TokenKind.LBracket:
         return this.tupleType();
       case TokenKind.Less:
-        return this.genericFunctionType(ref);
+        return this.genericFunctionType();
       case TokenKind.TemplateString:
       case TokenKind.TemplateHead:
         return this.templateType(ref);
@@ -317,14 +317,15 @@ partial class FileParser {
     return ref;
   }
 
-  private genericFunctionType(ref: TypeRef): TypeRef {
+  private genericFunctionType(): TypeRef {
+    const less = this.cursor.peek();
     this.typeParams();
     if (this.cursor.is(TokenKind.LParen)) {
       this.functionType();
     }
-    this.cursor.report(ref.loc, "a function type cannot be generic itself");
+    this.cursor.report(less.start, "a function type cannot be generic itself");
 
-    return typeRef(-1);
+    return typeRef(less.start);
   }
 
   private inferType(ref: TypeRef): TypeRef {
@@ -383,7 +384,7 @@ partial class FileParser {
           middle.start,
           "expected '}' to close the type in the template literal type",
         );
-        return typeRef(-1);
+        return typeRef(token.start);
       }
       const text = this.literals.templatePart(middle);
       parts.texts.push(text.text);
@@ -780,7 +781,7 @@ partial class FileParser {
     name: string,
     optional: boolean,
   ): boolean {
-    const fn = typeRef(-1);
+    const fn = typeRef();
     if (!this.signatureParams(fn) || this.cursor.isRecovering()) {
       this.cursor.skipToClosingBrace();
       return false;
@@ -936,7 +937,7 @@ partial class FileParser {
   }
 
   private functionType(): TypeRef {
-    const ref = typeRef(-1);
+    const ref = typeRef();
     if (!this.signatureParams(ref)) {
       return ref;
     }

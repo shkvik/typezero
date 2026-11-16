@@ -17,7 +17,6 @@ import {
   PropertyKind,
   TemplateExpr,
   UnaryOp,
-  kNoSpan,
 } from "../../../../ast.tz";
 import { ExpressionPlace, FunctionKind } from "../parse-context.tz";
 
@@ -225,7 +224,7 @@ function endsYield(kind: TokenKind): boolean {
 }
 
 function invalid(loc: int): Expr {
-  return { kind: ExprKind.IntLit, loc, value: 0, text: kNoSpan };
+  return { kind: ExprKind.IntLit, loc, value: 0 };
 }
 
 partial class FileParser {
@@ -1001,7 +1000,7 @@ partial class FileParser {
 
   private parenthesized(): Expr {
     if (this.arrowAhead()) {
-      return this.arrow([], -1, false);
+      return this.arrow([], false);
     }
     this.cursor.next();
     const inner = this.sequence();
@@ -1027,7 +1026,7 @@ partial class FileParser {
     this.cursor.stopDiscarding();
     if (isArrow) {
       this.cursor.restoreRecovering(start);
-      return this.arrow(typeParams, text, false);
+      return this.arrow(typeParams, false, text);
     }
     this.cursor.reset(start);
     this.cursor.error(loc, "expected an expression, found '<'");
@@ -1069,7 +1068,7 @@ partial class FileParser {
     const name = token.text;
     const next = this.cursor.lookahead();
     if (next.kind == TokenKind.Arrow && !next.newline) {
-      return this.arrow([], -1, false);
+      return this.arrow([], false);
     }
     const generator = this.context.functionKind == FunctionKind.Generator;
     if (token.kind == TokenKind.Yield && generator) {
@@ -1274,7 +1273,6 @@ partial class FileParser {
           typeArgs: [],
         },
         value: fallback,
-        source: kNoSpan,
       };
       return { name, loc, value, form: { kind: PropertyKind.Defaulted } };
     }

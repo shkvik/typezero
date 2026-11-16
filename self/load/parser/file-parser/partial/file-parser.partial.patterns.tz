@@ -15,7 +15,6 @@ import {
   StmtKind,
   TypeRef,
   VarDeclarator,
-  kNoSpan,
 } from "../../../../ast.tz";
 
 export type PatternElement = {
@@ -381,12 +380,11 @@ partial class FileParser {
         loc: element.loc,
         target,
         value: part,
-        source: kNoSpan,
       };
       body.push({ kind: StmtKind.Expr, loc: element.loc, expr: assign });
     }
 
-    return { kind: StmtKind.Block, loc, body, end: -1 };
+    return { kind: StmtKind.Block, loc, body };
   }
 
   private directElement(element: PatternElement, name: string): Expr {
@@ -408,7 +406,6 @@ partial class FileParser {
       op: BinaryOp.Nullish,
       lhs: read,
       rhs: fallback,
-      source: kNoSpan,
     };
   }
 
@@ -441,7 +438,6 @@ partial class FileParser {
         kind: ExprKind.IntLit,
         loc: element.loc,
         value: i.toUint64(),
-        text: kNoSpan,
       };
       if (element.rest) {
         const slice: Expr = {
@@ -504,7 +500,6 @@ partial class FileParser {
       op: BinaryOp.Nullish,
       lhs: read,
       rhs: fallback,
-      source: kNoSpan,
     };
   }
 

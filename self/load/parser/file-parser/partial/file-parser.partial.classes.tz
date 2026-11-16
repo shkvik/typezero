@@ -21,7 +21,6 @@ import {
   TypeKind,
   TypeRef,
   isConstructor,
-  kNoSpan,
   marker,
   typeRef,
 } from "../../../../ast.tz";
@@ -140,7 +139,6 @@ partial class FileParser {
       expression,
       decorators: [],
       typeParams,
-      source: kNoSpan,
     };
     if (
       !this.cursor.expect(TokenKind.LBrace, "to start the members of the class")
@@ -463,7 +461,7 @@ partial class FileParser {
           `abstract method '${member.name}' cannot have a body`,
         );
       }
-      fn.body = { kind: StmtKind.Block, loc: member.loc, body: [], end: -1 };
+      fn.body = { kind: StmtKind.Block, loc: member.loc, body: [] };
       cls.methods.push(fn);
       return;
     }
@@ -477,10 +475,8 @@ partial class FileParser {
     }
     const returnType = fn.returnType;
     if (returnType != undefined) {
-      this.cursor.report(
-        returnType.loc,
-        "a constructor cannot have a return type",
-      );
+      const loc = returnType.loc ?? member.loc;
+      this.cursor.report(loc, "a constructor cannot have a return type");
     }
     this.addParameterFields(cls, fn, body);
     cls.constructors.push(fn);
@@ -603,7 +599,6 @@ partial class FileParser {
         loc: param.loc,
         target,
         value,
-        source: kNoSpan,
       };
       sets.push({ kind: StmtKind.Expr, loc: param.loc, expr: set });
     }
@@ -693,7 +688,7 @@ partial class FileParser {
       loc: name.start,
       name: name.text,
       typeParams: [],
-      type: typeRef(-1),
+      type: typeRef(),
       bases: [],
       isHandle: true,
     };

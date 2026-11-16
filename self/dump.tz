@@ -30,6 +30,7 @@ const kQuote = 34;
 const kBackslash = 92;
 const kDelete = 127;
 const kHigh = 128;
+const kNoLocation = -1;
 
 enum Quoting {
   KeepUnicode,
@@ -209,16 +210,16 @@ export class Dumper {
     return `[${joined}]`;
   }
 
-  private span(text: Span): string {
-    if (text.end <= text.start) {
+  private span(text?: Span): string {
+    if (text == undefined || text.end <= text.start) {
       return "-";
     }
 
     return `${text.start}-${text.end}`;
   }
 
-  private spanText(text: Span): string {
-    if (text.end <= text.start) {
+  private spanText(text?: Span): string {
+    if (text == undefined || text.end <= text.start) {
       return "";
     }
 
@@ -240,21 +241,26 @@ export class Dumper {
   private dumpModules(file: SourceFile): void {
     this.line(`imports ${file.imports.length}`);
     for (const decl of file.imports) {
-      const path = this.quote(decl.path);
-      const whole = this.quote(decl.whole);
-      const wholeIsDefault = this.flag(decl.wholeIsDefault);
+      const from = decl.from;
+      const path = this.quote(from.path);
+      const whole = decl.whole;
+      const wholeName = this.quote(whole?.name ?? "");
+      const wholeLoc = whole?.loc ?? kNoLocation;
+      const wholeIsDefault = this.flag(whole?.isDefault ?? false);
       const isPartList = this.flag(decl.isPartList);
       this.line(
-        `Import ${decl.loc} ${path} ${decl.pathLoc} ${whole} ${decl.wholeLoc} ` +
+        `Import ${decl.loc} ${path} ${from.loc} ${wholeName} ${wholeLoc} ` +
           `${wholeIsDefault} ${isPartList} ${decl.names.length}`,
       );
       this.dumpModuleNames(decl.names);
     }
     this.line(`exports ${file.exports.length}`);
     for (const decl of file.exports) {
-      const path = this.quote(decl.path);
+      const from = decl.from;
+      const path = this.quote(from?.path ?? "");
+      const pathLoc = from?.loc ?? kNoLocation;
       this.line(
-        `Export ${decl.loc} ${decl.form} ${path} ${decl.pathLoc} ${decl.names.length}`,
+        `Export ${decl.loc} ${decl.form} ${path} ${pathLoc} ${decl.names.length}`,
       );
       this.dumpModuleNames(decl.names);
     }
@@ -321,9 +327,11 @@ export class Dumper {
   private dumpStmt(stmt: Stmt): void {
     const loc = stmt.loc;
     switch (stmt.kind) {
-      case StmtKind.Block:
-        this.line(`Block ${loc} end=${stmt.end} n=${stmt.body.length}`);
+      case StmtKind.Block: {
+        const end = stmt.end ?? kNoLocation;
+        this.line(`Block ${loc} end=${end} n=${stmt.body.length}`);
         return this.dumpStmts(stmt.body);
+      }
       case StmtKind.VarDecl: {
         const isConst = this.flag(stmt.isConst);
         const isUsing = this.flag(stmt.isUsing);
@@ -933,8 +941,9 @@ export class Dumper {
     const name = this.quote(ref.name);
     const source = this.span(ref.source);
     const extras = this.typeExtras(ref);
+    const loc = ref.loc ?? kNoLocation;
     this.line(
-      `Type ${ref.loc} ${kind} ${name} src=${source} ` +
+      `Type ${loc} ${kind} ${name} src=${source} ` +
         `n=${ref.args.length}${extras}`,
     );
     this.nested();

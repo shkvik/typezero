@@ -181,8 +181,6 @@ export enum StmtKind {
 
 export type Span = { readonly start: int; readonly end: int };
 
-export const kNoSpan: Span = { start: -1, end: -1 };
-
 export type PlainTypeForm = {
   readonly kind:
     | TypeKind.Name
@@ -257,18 +255,17 @@ export type TypeForm =
 export type TypeRef = {
   form: TypeForm;
   name: string;
-  loc: int;
+  loc?: int;
   args: TypeRef[];
-  source: Span;
+  source?: Span;
 };
 
-export function typeRef(loc: int): TypeRef {
+export function typeRef(loc?: int): TypeRef {
   return {
     form: { kind: TypeKind.Name },
     name: "",
     loc,
     args: [],
-    source: kNoSpan,
   };
 }
 
@@ -285,13 +282,13 @@ export type IntLitExpr = {
   readonly kind: ExprKind.IntLit;
   readonly loc: int;
   readonly value: uint64;
-  readonly text: Span;
+  readonly text?: Span;
 };
 export type FloatLitExpr = {
   readonly kind: ExprKind.FloatLit;
   readonly loc: int;
   readonly value: double;
-  readonly text: Span;
+  readonly text?: Span;
 };
 export type BoolLitExpr = {
   readonly kind: ExprKind.BoolLit;
@@ -383,7 +380,7 @@ export type BinaryExpr = {
   readonly op: BinaryOp;
   readonly lhs: Expr;
   readonly rhs: Expr;
-  readonly source: Span;
+  readonly source?: Span;
 };
 export type AssignExpr = {
   readonly kind: ExprKind.Assign;
@@ -391,7 +388,7 @@ export type AssignExpr = {
   readonly op?: BinaryOp;
   readonly target: Expr;
   readonly value: Expr;
-  readonly source: Span;
+  readonly source?: Span;
 };
 export type UpdateExpr = {
   readonly kind: ExprKind.Update;
@@ -534,7 +531,7 @@ export type BlockStmt = {
   readonly kind: StmtKind.Block;
   readonly loc: int;
   body: Stmt[];
-  readonly end: int;
+  readonly end?: int;
 };
 export type VarDeclStmt = {
   readonly kind: StmtKind.VarDecl;
@@ -652,7 +649,7 @@ export type Param = {
   readonly type?: TypeRef;
   readonly form: ParamForm;
   readonly property?: ParamProperty;
-  readonly pattern: Span;
+  readonly pattern?: Span;
   readonly decorators: Decorator[];
 };
 
@@ -671,7 +668,7 @@ export type FunctionDecl = {
   readonly params: Param[];
   readonly returnType?: TypeRef;
   body?: BlockStmt;
-  readonly source: Span;
+  readonly source?: Span;
   readonly isArrow: boolean;
   readonly concise: boolean;
   readonly ownName: string;
@@ -717,7 +714,7 @@ export type ClassDecl = {
   readonly expression: boolean;
   decorators: Decorator[];
   readonly typeParams: TypeParamDecl[];
-  source: Span;
+  source?: Span;
 };
 
 export type Stmt =
@@ -753,14 +750,19 @@ export type ModuleName = {
   readonly asLoc: int;
 };
 
+export type ModulePath = { readonly path: string; readonly loc: int };
+
+export type WholeImport = {
+  readonly name: string;
+  readonly loc: int;
+  readonly isDefault: boolean;
+};
+
 export type ImportDecl = {
   readonly loc: int;
   readonly names: ModuleName[];
-  readonly path: string;
-  readonly pathLoc: int;
-  readonly whole: string;
-  readonly wholeLoc: int;
-  readonly wholeIsDefault: boolean;
+  readonly from: ModulePath;
+  readonly whole?: WholeImport;
   readonly isPartList: boolean;
 };
 
@@ -768,8 +770,7 @@ export type ExportDecl = {
   readonly loc: int;
   readonly form: ExportForm;
   readonly names: ModuleName[];
-  readonly path: string;
-  readonly pathLoc: int;
+  readonly from?: ModulePath;
 };
 
 export type SourceFile = {

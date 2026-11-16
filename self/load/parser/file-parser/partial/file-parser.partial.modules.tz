@@ -7,9 +7,11 @@ import {
   ExprKind,
   ImportDecl,
   ModuleName,
+  ModulePath,
   NameOrigin,
   Stmt,
   StmtKind,
+  WholeImport,
   marker,
 } from "../../../../ast.tz";
 
@@ -18,8 +20,6 @@ enum ImportForm {
   Namespace,
   Default,
 }
-
-type PathText = { readonly path: string; readonly loc: int };
 
 type ImportClause =
   | { readonly kind: ImportForm.Named }
@@ -184,16 +184,7 @@ partial class FileParser {
     const from = this.fromPath(false);
     this.cursor.expectSemicolon();
     if (topLevel && from != undefined) {
-      this.imports.push({
-        loc,
-        names: [],
-        path: from.path,
-        pathLoc: from.loc,
-        whole: "",
-        wholeLoc: -1,
-        wholeIsDefault: false,
-        isPartList: true,
-      });
+      this.imports.push({ loc, names: [], from, isPartList: true });
     }
 
     return marker(StmtKind.Empty, loc);
@@ -204,7 +195,7 @@ partial class FileParser {
     clause: ImportClause,
     formLoc: int,
     names: ModuleName[],
-    from: PathText,
+    from: ModulePath,
   ): Stmt {
     const json = from.path.endsWith(".json");
     let jsonType = false;
@@ -235,19 +226,17 @@ partial class FileParser {
         as: clause.name,
         asLoc: formLoc,
       });
-      this.addImport(loc, names, from, "", -1, false);
+      this.addImport(loc, names, from);
       return marker(StmtKind.Empty, loc);
     }
     const whole = clauseName(clause);
     if (whole != undefined && isBuiltinModule(from.path)) {
-      this.addImport(
-        loc,
-        names,
-        from,
-        whole,
-        formLoc,
-        clause.kind == ImportForm.Default,
-      );
+      const wholeImport: WholeImport = {
+        name: whole,
+        loc: formLoc,
+        isDefault: clause.kind == ImportForm.Default,
+      };
+      this.addImport(loc, names, from, wholeImport);
       return marker(StmtKind.Empty, loc);
     }
     if (clause.kind == ImportForm.Namespace) {
@@ -258,7 +247,7 @@ partial class FileParser {
       this.cursor.report(loc, "an import must name what it takes");
     }
     if (names.length > 0) {
-      this.addImport(loc, names, from, "", -1, false);
+      this.addImport(loc, names, from);
     }
 
     return marker(StmtKind.Empty, loc);
@@ -267,21 +256,10 @@ partial class FileParser {
   private addImport(
     loc: int,
     names: ModuleName[],
-    from: PathText,
-    whole: string,
-    wholeLoc: int,
-    wholeIsDefault: boolean,
+    from: ModulePath,
+    whole?: WholeImport,
   ): void {
-    const decl: ImportDecl = {
-      loc,
-      names,
-      path: from.path,
-      pathLoc: from.loc,
-      whole,
-      wholeLoc,
-      wholeIsDefault,
-      isPartList: false,
-    };
+    const decl: ImportDecl = { loc, names, from, whole, isPartList: false };
     this.imports.push(decl);
   }
 
@@ -387,20 +365,17 @@ partial class FileParser {
     this.moduleNames(names, false);
     const reExport =
       !this.cursor.isRecovering() && this.cursor.is(TokenKind.From);
-    let path = "";
-    let pathLoc = -1;
+    let from: ModulePath | undefined = undefined;
     if (reExport) {
-      const from = this.fromPath(true);
+      from = this.fromPath(true);
       if (from == undefined) {
         return marker(StmtKind.Empty, loc);
       }
-      path = from.path;
-      pathLoc = from.loc;
     }
     this.cursor.expectSemicolon();
     if (!this.cursor.isRecovering()) {
       const form = reExport ? ExportForm.Re : ExportForm.Local;
-      this.exports.push({ loc, form, names, path, pathLoc });
+      this.exports.push({ loc, form, names, from });
     }
 
     return marker(StmtKind.Empty, loc);
@@ -449,8 +424,7 @@ partial class FileParser {
         loc,
         form: ExportForm.All,
         names: [],
-        path: from.path,
-        pathLoc: from.loc,
+        from,
       });
     }
 
@@ -602,7 +576,7 @@ partial class FileParser {
     return quoted == undefined ? undefined : quoted.path;
   }
 
-  private fromPath(from: boolean): PathText | undefined {
+  private fromPath(from: boolean): ModulePath | undefined {
     if (from && !this.cursor.is(TokenKind.From)) {
       const token = this.cursor.peek();
       this.cursor.error(
@@ -658,8 +632,6 @@ partial class FileParser {
       loc: stmt.loc,
       form: ExportForm.Local,
       names,
-      path: "",
-      pathLoc: -1,
     });
   }
 }

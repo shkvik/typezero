@@ -17,12 +17,12 @@ import {
   ParamForm,
   ParamKind,
   ParamProperty,
+  Span,
   Stmt,
   StmtKind,
   TypeParamDecl,
   TypeRef,
   VarDeclarator,
-  kNoSpan,
   marker,
 } from "../../../../ast.tz";
 import { FunctionKind } from "../parse-context.tz";
@@ -74,7 +74,7 @@ partial class FileParser {
       return fn;
     }
     fn.bodySource = this.library ? BodySource.External : BodySource.Foreign;
-    fn.body = { kind: StmtKind.Block, loc: fn.loc, body: [], end: -1 };
+    fn.body = { kind: StmtKind.Block, loc: fn.loc, body: [] };
 
     return fn;
   }
@@ -158,7 +158,6 @@ partial class FileParser {
       kind: StmtKind.Block,
       loc: token.start,
       body: [],
-      end: -1,
     };
   }
 
@@ -207,7 +206,7 @@ partial class FileParser {
     const token = this.cursor.peek();
     const loc = token.start;
     let name = "";
-    let pattern = kNoSpan;
+    let pattern: Span | undefined = undefined;
     const named = this.cursor.atNameOrThis();
     const reserved = !named && isKeyword(token.kind);
     if (reserved) {
@@ -370,7 +369,7 @@ partial class FileParser {
       return undefined;
     }
 
-    return this.arrow([], -1, true);
+    return this.arrow([], true);
   }
 
   private asyncGenericArrow(start: Mark): Expr | undefined {
@@ -390,7 +389,7 @@ partial class FileParser {
     }
     this.cursor.restoreRecovering(start);
 
-    return this.arrow(typeParams, text, true);
+    return this.arrow(typeParams, true, text);
   }
 
   private arrowAhead(): boolean {
@@ -412,11 +411,11 @@ partial class FileParser {
 
   private arrow(
     typeParams: TypeParamDecl[],
-    from: int,
     isAsync: boolean,
+    from?: int,
   ): FunctionExpr {
     const head = this.cursor.peek();
-    const start = from >= 0 ? from : head.start;
+    const start = from ?? head.start;
     const loc = head.start;
     const outer = this.context;
     this.context = { ...outer, functionKind: FunctionKind.Plain };
@@ -430,7 +429,6 @@ partial class FileParser {
           name: token.text,
           loc: token.start,
           form: { kind: ParamKind.Required },
-          pattern: kNoSpan,
           decorators: [],
         },
       ];
@@ -502,7 +500,6 @@ partial class FileParser {
       kind: StmtKind.Block,
       loc,
       body: [{ kind: StmtKind.Return, loc, value }],
-      end: -1,
     };
   }
 
