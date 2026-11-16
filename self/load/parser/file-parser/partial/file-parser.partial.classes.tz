@@ -2,28 +2,33 @@ import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { KnownName, TokenKind, isKeyword, isName } from "../../../../token.tz";
 import {
-  Access,
+  TypeKind,
+  TypeRef,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
   BlockStmt,
+  Stmt,
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  FunctionDecl,
+  FunctionPlace,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  Access,
   ClassDecl,
   ClassField,
   ClassMember,
   Decorator,
   EnumMember,
-  Expr,
-  ExprKind,
   FieldKind,
   FieldPresence,
-  FunctionDecl,
-  FunctionPlace,
   MethodKind,
-  Stmt,
-  StmtKind,
-  TypeKind,
-  TypeRef,
-  isConstructor,
-  marker,
-  typeRef,
-} from "../../../../ast.tz";
+} from "../../../../program/ast/types/ast.types.classes.tz";
 import { MemberName, Modifiers } from "../types/file-parser.types.classes.tz";
 import { Arguments } from "../types/file-parser.types.expressions.tz";
 
@@ -408,7 +413,7 @@ partial class FileParser {
     if (body == undefined) {
       return this.cursor.report(member.loc, Code.MethodWithoutBody);
     }
-    if (!isConstructor(fn)) {
+    if (!this.isConstructor(fn)) {
       cls.methods.push(fn);
       return;
     }
@@ -618,14 +623,14 @@ partial class FileParser {
     const name = this.cursor.peek();
     if (!this.cursor.expectName(Code.ExpectedAfterDeclareClass)) {
       this.cursor.synchronize();
-      return marker(StmtKind.Empty, name.start);
+      return this.marker(StmtKind.Empty, name.start);
     }
     const alias: Stmt = {
       kind: StmtKind.TypeAlias,
       loc: name.start,
       name: name.text,
       typeParams: [],
-      type: typeRef(),
+      type: this.typeRef(),
       bases: [],
       isHandle: true,
     };
@@ -671,7 +676,7 @@ partial class FileParser {
         Code.ExpectedInterfaceFields,
         { found: token.kind },
       );
-      return marker(StmtKind.Empty, name.start);
+      return this.marker(StmtKind.Empty, name.start);
     }
     const type = this.objectType();
     this.cursor.accept(TokenKind.Semi);
@@ -692,7 +697,7 @@ partial class FileParser {
     const name = this.cursor.peek();
     if (!isName(name.kind)) {
       this.cursor.error(name.start, Code.ExpectedEnumName);
-      return marker(StmtKind.Empty, name.start);
+      return this.marker(StmtKind.Empty, name.start);
     }
     this.cursor.next();
     this.cursor.expect(TokenKind.LBrace, Code.ExpectedEnumMembersStart);
@@ -756,5 +761,11 @@ partial class FileParser {
       default:
         return false;
     }
+  }
+
+  private isConstructor(fn: FunctionDecl): boolean {
+    const role = fn.role;
+
+    return role != undefined && role.method == MethodKind.Constructor;
   }
 }

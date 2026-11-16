@@ -7,7 +7,6 @@ import {
   isName,
 } from "../../../../token.tz";
 import {
-  ExprKind,
   FunctionTypeForm,
   MappedTypeForm,
   ModifierChange,
@@ -16,8 +15,10 @@ import {
   TupleTypeForm,
   TypeKind,
   TypeRef,
-  typeRef,
-} from "../../../../ast.tz";
+} from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
 import { TypePlace } from "../types/file-parser.types.context.tz";
 import { kExactDoubleLimit } from "../const/file-parser.const.types.tz";
 
@@ -33,7 +34,7 @@ partial class FileParser {
     if (extendsClause || !this.cursor.is(TokenKind.Extends)) {
       return check;
     }
-    const ref = typeRef(check.loc);
+    const ref = this.typeRef(check.loc);
     ref.form = { kind: TypeKind.Conditional };
     this.cursor.next();
     ref.args.push(check);
@@ -42,12 +43,12 @@ partial class FileParser {
     if (
       !this.cursor.expect(TokenKind.Question, Code.ExpectedAfterExtendsClause)
     ) {
-      return typeRef(start);
+      return this.typeRef(start);
     }
     const whenTrue = this.type();
     ref.args.push(whenTrue);
     if (!this.cursor.expect(TokenKind.Colon, Code.ExpectedBetweenBranches)) {
-      return typeRef(start);
+      return this.typeRef(start);
     }
     const whenFalse = this.type();
     ref.args.push(whenFalse);
@@ -64,7 +65,7 @@ partial class FileParser {
     if (!this.cursor.is(TokenKind.Pipe)) {
       return first;
     }
-    const ref = typeRef(loc);
+    const ref = this.typeRef(loc);
     ref.form = { kind: TypeKind.Union };
     ref.args.push(first);
     while (this.cursor.accept(TokenKind.Pipe)) {
@@ -83,7 +84,7 @@ partial class FileParser {
     if (!this.cursor.is(TokenKind.Amp)) {
       return first;
     }
-    const ref = typeRef(loc);
+    const ref = this.typeRef(loc);
     ref.form = { kind: TypeKind.Intersection };
     ref.args.push(first);
     while (this.cursor.accept(TokenKind.Amp)) {
@@ -114,7 +115,7 @@ partial class FileParser {
       return this.type();
     }
     const token = this.cursor.peek();
-    const ref = typeRef(token.start);
+    const ref = this.typeRef(token.start);
     ref.form = { kind: TypeKind.Predicate, asserts };
     if (asserts) {
       this.cursor.next();
@@ -142,7 +143,7 @@ partial class FileParser {
 
     if (keyOf) {
       const token = this.cursor.peek();
-      const ref = typeRef(token.start);
+      const ref = this.typeRef(token.start);
       ref.form = { kind: TypeKind.KeyOf };
       this.cursor.next();
       const inner = this.arrayType();
@@ -162,7 +163,7 @@ partial class FileParser {
     let ref = this.primaryType();
 
     while (this.indexAhead()) {
-      const array = typeRef(ref.loc);
+      const array = this.typeRef(ref.loc);
       this.cursor.next();
       if (this.cursor.accept(TokenKind.RBracket)) {
         array.form = { kind: TypeKind.Array };
@@ -204,7 +205,7 @@ partial class FileParser {
 
   private primaryType(): TypeRef {
     const token = this.cursor.peek();
-    const ref = typeRef(token.start);
+    const ref = this.typeRef(token.start);
     switch (token.kind) {
       case TokenKind.LBrace:
         return this.objectType();
@@ -298,7 +299,7 @@ partial class FileParser {
     }
     this.cursor.report(less.start, Code.GenericFunctionType);
 
-    return typeRef(less.start);
+    return this.typeRef(less.start);
   }
 
   private inferType(ref: TypeRef): TypeRef {
@@ -354,7 +355,7 @@ partial class FileParser {
         middle.kind != TokenKind.TemplateTail
       ) {
         this.cursor.error(middle.start, Code.ExpectedTemplateTypeClose);
-        return typeRef(token.start);
+        return this.typeRef(token.start);
       }
       const text = this.literals.templatePart(middle);
       parts.texts.push(text.text);
@@ -487,7 +488,7 @@ partial class FileParser {
     object: TypeRef,
     readonlyChange: ModifierChange,
   ): TypeRef {
-    const ref = typeRef(object.loc);
+    const ref = this.typeRef(object.loc);
     const mapped: MappedTypeForm = {
       kind: TypeKind.Mapped,
       optionalChange: ModifierChange.None,
@@ -618,7 +619,7 @@ partial class FileParser {
 
   private objectType(): TypeRef {
     const brace = this.cursor.peek();
-    const ref = typeRef(brace.start);
+    const ref = this.typeRef(brace.start);
     const object: ObjectTypeForm = {
       kind: TypeKind.Object,
       names: [],
@@ -733,7 +734,7 @@ partial class FileParser {
     name: string,
     optional: boolean,
   ): boolean {
-    const fn = typeRef();
+    const fn = this.typeRef();
     if (!this.signatureParams(fn) || this.cursor.isRecovering()) {
       this.cursor.skipToClosingBrace();
       return false;
@@ -804,7 +805,7 @@ partial class FileParser {
       return ref;
     }
     this.cursor.next();
-    const record = typeRef(ref.loc);
+    const record = this.typeRef(ref.loc);
     record.form = { kind: TypeKind.Generic };
     record.name = "Record";
     record.args.push(key);
@@ -815,7 +816,7 @@ partial class FileParser {
 
   private tupleType(): TypeRef {
     const bracket = this.cursor.peek();
-    const ref = typeRef(bracket.start);
+    const ref = this.typeRef(bracket.start);
     const tuple: TupleTypeForm = {
       kind: TypeKind.Tuple,
       readonly: [],
@@ -884,7 +885,7 @@ partial class FileParser {
   }
 
   private functionType(): TypeRef {
-    const ref = typeRef();
+    const ref = this.typeRef();
     if (!this.signatureParams(ref)) {
       return ref;
     }
@@ -919,7 +920,7 @@ partial class FileParser {
         return false;
       }
       const optional = this.cursor.accept(TokenKind.Question);
-      let param = typeRef(token.start);
+      let param = this.typeRef(token.start);
       if (this.cursor.accept(TokenKind.Colon)) {
         param = this.type();
       } else {
@@ -956,5 +957,14 @@ partial class FileParser {
     const parsed = Number(text);
 
     return parsed.unwrapOr(0.0);
+  }
+
+  private typeRef(loc?: int): TypeRef {
+    return {
+      form: { kind: TypeKind.Name },
+      name: "",
+      loc,
+      args: [],
+    };
   }
 }

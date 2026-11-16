@@ -1,4 +1,4 @@
-import { SourceFile } from "../../../../ast.tz";
+import { SourceFile } from "../../../../program/ast/types/ast.types.modules.tz";
 import { ParseError } from "../../cursor/types/cursor.types.tz";
 
 export type ParseResult = {

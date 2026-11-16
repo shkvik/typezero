@@ -2,29 +2,38 @@ import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { TokenKind, isKeyword, isName } from "../../../../token.tz";
 import { Mark } from "../../cursor/types/cursor.types.tz";
+import { Span } from "../../../../program/ast/types/ast.types.span.tz";
 import {
-  Access,
-  BlockStmt,
-  BodySource,
-  ClassMember,
+  TypeParamDecl,
+  TypeRef,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import {
   Expr,
   ExprKind,
-  FunctionDecl,
   FunctionExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  VarDeclarator,
+} from "../../../../program/ast/types/ast.types.patterns.tz";
+import {
+  BlockStmt,
+  Stmt,
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  BodySource,
+  FunctionDecl,
   FunctionPlace,
-  MethodKind,
   Param,
   ParamForm,
   ParamKind,
   ParamProperty,
-  Span,
-  Stmt,
-  StmtKind,
-  TypeParamDecl,
-  TypeRef,
-  VarDeclarator,
-  marker,
-} from "../../../../ast.tz";
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  Access,
+  ClassMember,
+  MethodKind,
+} from "../../../../program/ast/types/ast.types.classes.tz";
 import { FunctionKind } from "../types/file-parser.types.context.tz";
 import { ParamPattern } from "../types/file-parser.types.functions.tz";
 
@@ -44,7 +53,7 @@ partial class FileParser {
       const nextName = this.cursor.lookahead();
       if (!this.cursor.is(TokenKind.Function) || nextName.text != name) {
         this.cursor.report(loc, Code.FunctionWithoutBody, { word: name });
-        return marker(StmtKind.Empty, loc);
+        return this.marker(StmtKind.Empty, loc);
       }
       fn = this.functionDecl(false, isAsync);
     }

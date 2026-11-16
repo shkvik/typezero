@@ -1,0 +1,1 @@
+export type Span = { readonly start: int; readonly end: int };

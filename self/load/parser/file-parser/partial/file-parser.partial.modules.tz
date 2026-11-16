@@ -2,19 +2,24 @@ import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { TokenKind, isKeyword, isName } from "../../../../token.tz";
 import {
-  Decorator,
-  ExportForm,
   Expr,
   ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  NameOrigin,
+} from "../../../../program/ast/types/ast.types.patterns.tz";
+import {
+  Stmt,
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import { Decorator } from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  ExportForm,
   ImportDecl,
   ModuleName,
   ModulePath,
-  NameOrigin,
-  Stmt,
-  StmtKind,
   WholeImport,
-  marker,
-} from "../../../../ast.tz";
+} from "../../../../program/ast/types/ast.types.modules.tz";
 import {
   ImportClause,
   ImportForm,
@@ -65,7 +70,7 @@ partial class FileParser {
         this.cursor.error(formLoc, Code.ImportEqualsNotSupported, {
           word: alias.text,
         });
-        return marker(StmtKind.Empty, loc);
+        return this.marker(StmtKind.Empty, loc);
       }
       if (
         this.cursor.accept(TokenKind.Comma) &&
@@ -87,11 +92,11 @@ partial class FileParser {
       });
     }
     if (this.cursor.isRecovering()) {
-      return marker(StmtKind.Empty, loc);
+      return this.marker(StmtKind.Empty, loc);
     }
     const from = this.fromPath(true);
     if (from == undefined) {
-      return marker(StmtKind.Empty, loc);
+      return this.marker(StmtKind.Empty, loc);
     }
 
     return this.finishImport(loc, clause, formLoc, names, from);
@@ -104,7 +109,7 @@ partial class FileParser {
       this.imports.push({ loc, names: [], from, isPartList: true });
     }
 
-    return marker(StmtKind.Empty, loc);
+    return this.marker(StmtKind.Empty, loc);
   }
 
   private finishImport(
@@ -126,7 +131,7 @@ partial class FileParser {
     if (json) {
       if (clause.kind != ImportForm.Default) {
         this.cursor.report(formLoc, Code.JsonImportWhole);
-        return marker(StmtKind.Empty, loc);
+        return this.marker(StmtKind.Empty, loc);
       }
       if (!jsonType) {
         this.cursor.report(from.loc, Code.JsonImportAttribute);
@@ -138,7 +143,7 @@ partial class FileParser {
         asLoc: formLoc,
       });
       this.addImport(loc, names, from);
-      return marker(StmtKind.Empty, loc);
+      return this.marker(StmtKind.Empty, loc);
     }
     const whole = this.clauseName(clause);
     if (whole != undefined && this.isBuiltinModule(from.path)) {
@@ -148,7 +153,7 @@ partial class FileParser {
         isDefault: clause.kind == ImportForm.Default,
       };
       this.addImport(loc, names, from, wholeImport);
-      return marker(StmtKind.Empty, loc);
+      return this.marker(StmtKind.Empty, loc);
     }
     if (clause.kind == ImportForm.Namespace) {
       this.cursor.report(formLoc, Code.NamespaceImportNotSupported);
@@ -161,7 +166,7 @@ partial class FileParser {
       this.addImport(loc, names, from);
     }
 
-    return marker(StmtKind.Empty, loc);
+    return this.marker(StmtKind.Empty, loc);
   }
 
   private addImport(
@@ -233,7 +238,7 @@ partial class FileParser {
       this.cursor.report(loc, Code.ExportEqualsNotSupported);
       this.expression();
       this.cursor.expectSemicolon();
-      return marker(StmtKind.Empty, loc);
+      return this.marker(StmtKind.Empty, loc);
     }
     if (this.cursor.is(TokenKind.Star)) {
       return this.exportAll(loc);
@@ -249,7 +254,7 @@ partial class FileParser {
       this.cursor.error(token.start, Code.ExpectedExportDeclaration, {
         found: token.kind,
       });
-      return marker(StmtKind.Empty, loc);
+      return this.marker(StmtKind.Empty, loc);
     }
 
     return this.exportNames(loc);
@@ -279,7 +284,7 @@ partial class FileParser {
     if (reExport) {
       from = this.fromPath(true);
       if (from == undefined) {
-        return marker(StmtKind.Empty, loc);
+        return this.marker(StmtKind.Empty, loc);
       }
     }
     this.cursor.expectSemicolon();
@@ -288,7 +293,7 @@ partial class FileParser {
       this.exports.push({ loc, form, names, from });
     }
 
-    return marker(StmtKind.Empty, loc);
+    return this.marker(StmtKind.Empty, loc);
   }
 
   private exportDefault(loc: int, topLevel: boolean): Stmt {
@@ -325,7 +330,7 @@ partial class FileParser {
         this.cursor.report(asLoc, Code.ExportStarAsNotSupported);
         this.cursor.expectSemicolon();
       }
-      return marker(StmtKind.Empty, loc);
+      return this.marker(StmtKind.Empty, loc);
     }
     const from = this.fromPath(true);
     if (from != undefined) {
@@ -338,7 +343,7 @@ partial class FileParser {
       });
     }
 
-    return marker(StmtKind.Empty, loc);
+    return this.marker(StmtKind.Empty, loc);
   }
 
   private moduleNames(names: ModuleName[], codes: NameListCodes): void {

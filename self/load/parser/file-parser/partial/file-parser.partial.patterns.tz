@@ -1,22 +1,26 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { KnownName, TokenKind } from "../../../../token.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
 import {
   ArrayLitExpr,
   BinaryOp,
-  BindingForm,
-  BindingKind,
   Expr,
   ExprKind,
   IndexExpr,
-  NameOrigin,
   ObjectLitExpr,
   PropertyKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  BindingForm,
+  BindingKind,
+  NameOrigin,
+  VarDeclarator,
+} from "../../../../program/ast/types/ast.types.patterns.tz";
+import {
   Stmt,
   StmtKind,
-  TypeRef,
-  VarDeclarator,
-} from "../../../../ast.tz";
+} from "../../../../program/ast/types/ast.types.statements.tz";
 import {
   Pattern,
   PatternElement,

@@ -1,4 +1,4 @@
-import { Access } from "../../../../ast.tz";
+import { Access } from "../../../../program/ast/types/ast.types.classes.tz";
 
 export type Modifiers = {
   isStatic: boolean;

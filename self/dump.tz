@@ -1,28 +1,37 @@
+import { Span } from "./program/ast/types/ast.types.span.tz";
 import {
-  BindingKind,
-  ClassDecl,
-  ClassField,
-  Decorator,
-  Expr,
-  ExprKind,
-  FunctionDecl,
   ModifierChange,
-  ModuleName,
-  NewExpr,
-  NewKind,
-  Param,
-  ParamKind,
-  Property,
-  PropertyKind,
-  SourceFile,
-  Span,
-  Stmt,
-  StmtKind,
   TypeKind,
   TypeParamDecl,
   TypeRef,
+} from "./program/ast/types/ast.types.types.tz";
+import {
+  Expr,
+  ExprKind,
+  NewExpr,
+  NewKind,
+  Property,
+  PropertyKind,
+} from "./program/ast/types/ast.types.expressions.tz";
+import {
+  BindingKind,
   VarDeclarator,
-} from "./ast.tz";
+} from "./program/ast/types/ast.types.patterns.tz";
+import { Stmt, StmtKind } from "./program/ast/types/ast.types.statements.tz";
+import {
+  FunctionDecl,
+  Param,
+  ParamKind,
+} from "./program/ast/types/ast.types.functions.tz";
+import {
+  ClassDecl,
+  ClassField,
+  Decorator,
+} from "./program/ast/types/ast.types.classes.tz";
+import {
+  ModuleName,
+  SourceFile,
+} from "./program/ast/types/ast.types.modules.tz";
 
 const kHex = "0123456789abcdef";
 const kSpace = 32;

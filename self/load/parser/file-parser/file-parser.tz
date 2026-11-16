@@ -7,7 +7,12 @@ import "./partial/file-parser.partial.functions.tz";
 import "./partial/file-parser.partial.classes.tz";
 import "./partial/file-parser.partial.modules.tz";
 import { Token, TokenKind } from "../../../token.tz";
-import { ExportDecl, ImportDecl, SourceFile, Stmt } from "../../../ast.tz";
+import { Stmt } from "../../../program/ast/types/ast.types.statements.tz";
+import {
+  ExportDecl,
+  ImportDecl,
+  SourceFile,
+} from "../../../program/ast/types/ast.types.modules.tz";
 import { Cursor } from "../cursor/cursor.tz";
 import { LiteralReader } from "../literal/literal.tz";
 import {

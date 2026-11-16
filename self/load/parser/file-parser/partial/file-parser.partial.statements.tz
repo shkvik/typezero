@@ -4,19 +4,22 @@ import { Details } from "../../../../diagnostic/types/message.types.tz";
 import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import { Token, TokenKind, isKeyword, isName } from "../../../../token.tz";
 import {
-  BindingForm,
-  BindingKind,
-  BlockStmt,
   Expr,
   ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  BindingForm,
+  BindingKind,
   NameOrigin,
+  VarDeclarator,
+} from "../../../../program/ast/types/ast.types.patterns.tz";
+import {
+  BlockStmt,
   Stmt,
   StmtKind,
   SwitchCase,
   VarDeclStmt,
-  VarDeclarator,
-  marker,
-} from "../../../../ast.tz";
+} from "../../../../program/ast/types/ast.types.statements.tz";
 import { ExpressionPlace } from "../types/file-parser.types.context.tz";
 import { Pattern } from "../types/file-parser.types.patterns.tz";
 import {
@@ -66,10 +69,10 @@ partial class FileParser {
       case TokenKind.Debugger:
         this.cursor.next();
         this.cursor.expectSemicolon();
-        return marker(StmtKind.Debugger, loc);
+        return this.marker(StmtKind.Debugger, loc);
       case TokenKind.Semi:
         this.cursor.next();
-        return marker(StmtKind.Empty, loc);
+        return this.marker(StmtKind.Empty, loc);
       case TokenKind.Import:
         return this.importStatement(loc, topLevel);
       case TokenKind.Export:
@@ -278,7 +281,7 @@ partial class FileParser {
     }
     this.block();
 
-    return marker(StmtKind.Empty, loc);
+    return this.marker(StmtKind.Empty, loc);
   }
 
   private declare(loc: int): Stmt {
@@ -348,7 +351,7 @@ partial class FileParser {
       }
     }
 
-    return marker(StmtKind.Empty, loc);
+    return this.marker(StmtKind.Empty, loc);
   }
 
   private jumpStatement(token: Token): Stmt {
@@ -727,7 +730,7 @@ partial class FileParser {
       this.cursor.expectSemicolon();
     }
 
-    return marker(StmtKind.Empty, loc);
+    return this.marker(StmtKind.Empty, loc);
   }
 
   private strayTry(): Stmt {
@@ -869,5 +872,9 @@ partial class FileParser {
       : undefined;
 
     return { name: token.text, loc: token.start, typeAnn };
+  }
+
+  private marker(kind: StmtKind.Empty | StmtKind.Debugger, loc: int): Stmt {
+    return { kind, loc };
   }
 }

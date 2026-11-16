@@ -12,13 +12,15 @@ import {
   BinaryOp,
   Expr,
   ExprKind,
-  FunctionPlace,
   NewKind,
   Property,
   PropertyKind,
   TemplateExpr,
   UnaryOp,
-} from "../../../../ast.tz";
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionPlace,
+} from "../../../../program/ast/types/ast.types.functions.tz";
 import {
   ExpressionPlace,
   FunctionKind,

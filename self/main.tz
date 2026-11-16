@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 import { tokenize } from "./load/lexer/lexer.tz"
 import { Parser } from "./load/parser/parser.tz"
 import { ParsedFile, SourceText } from "./load/parser/types/parser.types.tz"
-import { SourceFile } from "./ast.tz"
+import { SourceFile } from "./program/ast/types/ast.types.modules.tz"
 import { Dumper } from "./dump.tz"
 
 const kDefaultRepeat = 20

@@ -1,0 +1,63 @@
+import { Span } from "./ast.types.span.tz";
+import { TypeParamDecl, TypeRef } from "./ast.types.types.tz";
+import { Expr } from "./ast.types.expressions.tz";
+import { BlockStmt, StmtKind } from "./ast.types.statements.tz";
+import { Access, ClassMember, Decorator } from "./ast.types.classes.tz";
+
+export enum FunctionPlace {
+  Declared,
+  Expression,
+  Lifted,
+}
+
+export enum BodySource {
+  Written,
+  External,
+  Intrinsic,
+  Foreign,
+}
+
+export enum ParamKind {
+  Required,
+  Optional,
+  Defaulted,
+  Rest,
+}
+
+export type ParamProperty = { readonly: boolean; access: Access };
+export type PlainParam = {
+  readonly kind: ParamKind.Required | ParamKind.Optional | ParamKind.Rest;
+};
+export type DefaultedParam = {
+  readonly kind: ParamKind.Defaulted;
+  readonly defaultValue: Expr;
+};
+export type ParamForm = PlainParam | DefaultedParam;
+export type Param = {
+  readonly name: string;
+  readonly loc: int;
+  readonly type?: TypeRef;
+  readonly form: ParamForm;
+  readonly property?: ParamProperty;
+  readonly pattern?: Span;
+  readonly decorators: Decorator[];
+};
+
+export type FunctionDecl = {
+  readonly kind: StmtKind.Function;
+  readonly loc: int;
+  readonly name: string;
+  readonly typeParams: TypeParamDecl[];
+  readonly params: Param[];
+  readonly returnType?: TypeRef;
+  body?: BlockStmt;
+  readonly source?: Span;
+  readonly isArrow: boolean;
+  readonly concise: boolean;
+  readonly ownName: string;
+  readonly place: FunctionPlace;
+  bodySource: BodySource;
+  readonly isGenerator: boolean;
+  readonly isAsync: boolean;
+  readonly role?: ClassMember;
+};

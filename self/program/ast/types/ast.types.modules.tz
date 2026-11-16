@@ -1,0 +1,45 @@
+import { Stmt } from "./ast.types.statements.tz";
+
+export enum ExportForm {
+  Local,
+  Re,
+  All,
+}
+
+export type ModuleName = {
+  readonly name: string;
+  readonly loc: int;
+  readonly as: string;
+  readonly asLoc: int;
+};
+
+export type ModulePath = { readonly path: string; readonly loc: int };
+
+export type WholeImport = {
+  readonly name: string;
+  readonly loc: int;
+  readonly isDefault: boolean;
+};
+
+export type ImportDecl = {
+  readonly loc: int;
+  readonly names: ModuleName[];
+  readonly from: ModulePath;
+  readonly whole?: WholeImport;
+  readonly isPartList: boolean;
+};
+
+export type ExportDecl = {
+  readonly loc: int;
+  readonly form: ExportForm;
+  readonly names: ModuleName[];
+  readonly from?: ModulePath;
+};
+
+export type SourceFile = {
+  readonly items: Stmt[];
+  readonly imports: ImportDecl[];
+  readonly exports: ExportDecl[];
+  readonly fieldNames: Set<string>;
+  readonly stringConstants: Map<string, string[]>;
+};

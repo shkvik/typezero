@@ -1,5 +1,5 @@
 import { KnownName, Token, TokenKind, isName } from "../../../token.tz";
-import { Span } from "../../../ast.tz";
+import { Span } from "../../../program/ast/types/ast.types.span.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import { Details } from "../../../diagnostic/types/message.types.tz";
 import { kNoDetails } from "../../../diagnostic/const/message.const.tz";

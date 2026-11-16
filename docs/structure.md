@@ -97,8 +97,11 @@ runtime/          весь C → tzrt.lib, tzrt.bc, tzcrypto.lib
   library/        C-часть тем: <тема>/<модуль>/
 library/          весь tz → bin/lib: <тема>/*.tz
 editors/          vscode/ — расширение VS Code; types/ — объявления для будущего плагина tsserver
-self/             компилятор на tz, пробный (порт compiler/load): token.tz, ast.tz, dump.tz,
-                  main.tz; diagnostic/ — коды ошибок (code.tz: enum Code, значения "TZ1101") и
+self/             компилятор на tz, пробный (порт compiler/load): token.tz, dump.tz, main.tz;
+                  program/ast/ — дерево разбора: типы узлов — в types/ast.types.<группа>.tz
+                  (span, types, expressions, patterns, statements, functions, classes — там же
+                  type alias и enum, modules — там же SourceFile; группы ссылаются друг на
+                  друга по кругу); diagnostic/ — коды ошибок (code.tz: enum Code, значения "TZ1101") и
                   их тексты (message.tz: messageText — подстановка {expected}/{found}/{word};
                   таблица kMessages: Record<Code, Message> — в const/message.const.tz, типы
                   Details, Message — в types/message.types.tz);

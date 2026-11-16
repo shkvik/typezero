@@ -1,4 +1,4 @@
-import { TypeRef } from "../../../../ast.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
 import { Pattern } from "./file-parser.types.patterns.tz";
 
 export type Binding = {

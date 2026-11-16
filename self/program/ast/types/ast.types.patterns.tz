@@ -1,0 +1,32 @@
+import { TypeRef } from "./ast.types.types.tz";
+import { Expr } from "./ast.types.expressions.tz";
+
+export enum BindingKind {
+  Plain,
+  Array,
+  Object,
+}
+
+export type PlainBinding = {
+  readonly kind: BindingKind.Plain | BindingKind.Object;
+};
+export type ArrayBinding = {
+  readonly kind: BindingKind.Array;
+  readonly length: int;
+  readonly rest: boolean;
+};
+export type BindingForm = PlainBinding | ArrayBinding;
+
+export enum NameOrigin {
+  Written,
+  Generated,
+}
+
+export type VarDeclarator = {
+  readonly name: string;
+  readonly origin: NameOrigin;
+  readonly loc: int;
+  readonly typeAnn?: TypeRef;
+  readonly init?: Expr;
+  readonly form: BindingForm;
+};
