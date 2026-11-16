@@ -1,0 +1,141 @@
+import { FileParser } from "../file-parser.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { TokenKind } from "../../../token/types/token.types.tz";
+import { kTokenTable } from "../../../token/const/token.const.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  BindingKind,
+  NameOrigin,
+  VarDeclarator,
+} from "../../../../program/ast/types/ast.types.patterns.tz";
+import {
+  StmtKind,
+  VarDeclStmt,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import { Binding } from "../types/file-parser.types.variables.tz";
+
+partial class FileParser {
+  private varDecl(): VarDeclStmt {
+    const head = this.cursor.next();
+    const isConst = head.kind == TokenKind.Const;
+    const decls: VarDeclarator[] = [];
+    this.declarators(decls, isConst);
+
+    return {
+      kind: StmtKind.VarDecl,
+      loc: head.start,
+      isConst,
+      isUsing: false,
+      decls,
+    };
+  }
+
+  private usingDecl(): VarDeclStmt {
+    const keyword = this.cursor.next();
+    const loc = keyword.start;
+    const decls: VarDeclarator[] = [];
+    this.declarators(decls, true);
+    this.cursor.expectSemicolon();
+
+    return { kind: StmtKind.VarDecl, loc, isConst: true, isUsing: true, decls };
+  }
+
+  private declarators(decls: VarDeclarator[], isConst: boolean): void {
+    do {
+      const pattern =
+        this.cursor.is(TokenKind.LBracket) || this.cursor.is(TokenKind.LBrace);
+      const declared = pattern
+        ? this.patternDeclarator(decls)
+        : this.plainDeclarator(decls, isConst);
+      if (!declared) {
+        return;
+      }
+    } while (this.cursor.accept(TokenKind.Comma));
+  }
+
+  private patternDeclarator(decls: VarDeclarator[]): boolean {
+    const pattern = this.bindingPattern();
+    const typeAnn = this.cursor.accept(TokenKind.Colon)
+      ? this.type()
+      : undefined;
+    if (!this.cursor.is(TokenKind.Assign)) {
+      this.cursor.error(pattern.loc, Code.DestructuringNeedsValue);
+      return false;
+    }
+    this.cursor.next();
+    const value = this.expression();
+    this.declarePattern(decls, pattern, value, typeAnn);
+
+    return true;
+  }
+
+  private plainDeclarator(decls: VarDeclarator[], isConst: boolean): boolean {
+    const binding = this.binding();
+    if (binding == undefined) {
+      return false;
+    }
+    const init = this.cursor.accept(TokenKind.Assign)
+      ? this.expression()
+      : undefined;
+    decls.push({
+      ...binding,
+      origin: NameOrigin.Written,
+      init,
+      form: { kind: BindingKind.Plain },
+    });
+    if (init == undefined) {
+      return true;
+    }
+    if (init.kind == ExprKind.Class && init.decl.name == undefined) {
+      init.decl.name = binding.name;
+    }
+    if (isConst) {
+      this.recordConstant(binding.name, init);
+    }
+
+    return true;
+  }
+
+  private recordConstant(name: string, init: Expr): void {
+    let values: string[] = [];
+    if (init.kind == ExprKind.StringLit) {
+      values.push(init.value);
+    } else if (init.kind == ExprKind.Template && init.exprs.length == 0) {
+      values.push(init.quasis[0] ?? "");
+    } else if (init.kind == ExprKind.Name) {
+      const known = this.stringConstants.get(init.name);
+      values = known != undefined ? known.slice() : [];
+    }
+    const all = this.stringConstants.get(name);
+    if (all == undefined) {
+      this.stringConstants.set(name, values);
+      return;
+    }
+    for (const value of values) {
+      all.push(value);
+    }
+  }
+
+  private binding(): Binding | undefined {
+    const token = this.cursor.peek();
+    const reserved =
+      !kTokenTable.isName(token.kind) && kTokenTable.isKeyword(token.kind);
+    if (reserved) {
+      this.cursor.report(token.start, Code.KeywordAsVariableName, {
+        word: token.text,
+      });
+    } else if (!kTokenTable.isName(token.kind)) {
+      this.cursor.error(token.start, Code.ExpectedVariableName);
+      return undefined;
+    }
+    this.cursor.next();
+    const typeAnn = this.cursor.accept(TokenKind.Colon)
+      ? this.type()
+      : undefined;
+
+    return { name: token.text, loc: token.start, typeAnn };
+  }
+}

@@ -1,0 +1,7 @@
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+
+export type Binding = {
+  readonly name: string;
+  readonly loc: int;
+  readonly typeAnn?: TypeRef;
+};

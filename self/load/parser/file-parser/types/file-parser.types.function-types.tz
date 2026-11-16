@@ -1,0 +1,6 @@
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+
+export type Signature = {
+  readonly type: TypeRef;
+  readonly complete: boolean;
+};

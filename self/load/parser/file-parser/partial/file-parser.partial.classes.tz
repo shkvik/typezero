@@ -31,7 +31,7 @@ import {
   MethodKind,
 } from "../../../../program/ast/types/ast.types.classes.tz";
 import { MemberName, Modifiers } from "../types/file-parser.types.classes.tz";
-import { Arguments } from "../types/file-parser.types.expressions.tz";
+import { Arguments } from "../types/file-parser.types.calls.tz";
 
 partial class FileParser {
   private classDecl(expression: boolean): ClassDecl {

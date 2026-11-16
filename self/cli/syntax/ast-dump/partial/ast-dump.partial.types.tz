@@ -1,0 +1,160 @@
+import { Dumper } from "../ast-dump.tz";
+import {
+  ModifierChange,
+  TypeKind,
+  TypeRef,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import { Quoting } from "../types/ast-dump.types.tz";
+import { kNoLocation } from "../const/ast-dump.const.tz";
+
+partial class Dumper {
+  private dumpOptionalType(ref: TypeRef | undefined): void {
+    if (ref == undefined) {
+      return this.missing();
+    }
+    this.dumpType(ref);
+  }
+
+  private dumpTypes(refs: TypeRef[]): void {
+    for (const ref of refs) {
+      this.dumpType(ref);
+    }
+  }
+
+  private typeExtras(ref: TypeRef): string {
+    const form = ref.form;
+    switch (form.kind) {
+      case TypeKind.Function: {
+        const names = this.quoteAll(form.names);
+        const optional = this.flags(form.optional);
+        const rest = this.flag(form.rest);
+        return ` names=${names} opt=${optional} rest=${rest}`;
+      }
+      case TypeKind.Object: {
+        const locTexts: string[] = [];
+        for (const loc of form.locs) {
+          locTexts.push(`${loc}`);
+        }
+        const locs = locTexts.join(",");
+        const names = this.quoteAll(form.names);
+        const optional = this.flags(form.optional);
+        const readonlyFlags = this.flags(form.readonly);
+        const throughLastMethod = this.upToLastTrue(form.methods);
+        const methods = this.flags(throughLastMethod);
+        return (
+          ` names=${names} locs=[${locs}] opt=${optional} ` +
+          `ro=${readonlyFlags} methods=${methods}`
+        );
+      }
+      case TypeKind.Tuple: {
+        const readonlyFlags = this.flags(form.readonly);
+        const spread = this.flags(form.spread);
+        return ` ro=${readonlyFlags} spread=${spread}`;
+      }
+      case TypeKind.Literal: {
+        const text = this.quote(form.text, Quoting.EscapeUnicode);
+        const numberBits = this.bits(form.number);
+        const integer = this.flag(form.integer);
+        return ` text=${text} number=${numberBits} int=${integer}`;
+      }
+      case TypeKind.Predicate: {
+        const isAsserts = this.flag(form.asserts);
+        return ` asserts=${isAsserts}`;
+      }
+      case TypeKind.TypeOf: {
+        const names = this.quoteAll(form.names);
+        return ` names=${names}`;
+      }
+      case TypeKind.Mapped: {
+        const optional = this.changeNumber(form.optionalChange);
+        const readonlyChange = this.changeNumber(form.readonlyChange);
+        return ` opt=${optional} ro=${readonlyChange}`;
+      }
+      case TypeKind.Template: {
+        const parts: string[] = [];
+        for (const text of form.texts) {
+          const part = this.quote(text, Quoting.EscapeUnicode);
+          parts.push(part);
+        }
+        const texts = parts.join(",");
+        return ` texts=[${texts}]`;
+      }
+      default:
+        return "";
+    }
+  }
+
+  private dumpType(ref: TypeRef): void {
+    const kind = this.typeKindName(ref.form.kind);
+    const name = this.quote(ref.name);
+    const source = this.span(ref.source);
+    const extras = this.typeExtras(ref);
+    const loc = ref.loc ?? kNoLocation;
+    this.line(
+      `Type ${loc} ${kind} ${name} src=${source} ` +
+        `n=${ref.args.length}${extras}`,
+    );
+    this.nested();
+    this.dumpTypes(ref.args);
+    this.back();
+  }
+
+  private upToLastTrue(flags: boolean[]): boolean[] {
+    let end = flags.length;
+    while (end > 0 && flags[end - 1] == false) {
+      end -= 1;
+    }
+
+    return flags.slice(0, end);
+  }
+
+  private changeNumber(change: ModifierChange): int {
+    switch (change) {
+      case ModifierChange.Add:
+        return 1;
+      case ModifierChange.Remove:
+        return -1;
+      default:
+        return 0;
+    }
+  }
+
+  private typeKindName(kind: TypeKind): string {
+    switch (kind) {
+      case TypeKind.Name:
+        return "Name";
+      case TypeKind.Array:
+        return "Array";
+      case TypeKind.Union:
+        return "Union";
+      case TypeKind.Generic:
+        return "Generic";
+      case TypeKind.Function:
+        return "Function";
+      case TypeKind.Object:
+        return "Object";
+      case TypeKind.Tuple:
+        return "Tuple";
+      case TypeKind.Literal:
+        return "Literal";
+      case TypeKind.Predicate:
+        return "Predicate";
+      case TypeKind.KeyOf:
+        return "KeyOf";
+      case TypeKind.Indexed:
+        return "Indexed";
+      case TypeKind.TypeOf:
+        return "TypeOf";
+      case TypeKind.Mapped:
+        return "Mapped";
+      case TypeKind.Conditional:
+        return "Conditional";
+      case TypeKind.Infer:
+        return "Infer";
+      case TypeKind.Template:
+        return "Template";
+      default:
+        return "Intersection";
+    }
+  }
+}

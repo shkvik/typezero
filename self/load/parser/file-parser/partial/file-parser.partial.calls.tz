@@ -1,0 +1,381 @@
+import { FileParser } from "../file-parser.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  KnownName,
+  Token,
+  TokenKind,
+} from "../../../token/types/token.types.tz";
+import { kTokenTable } from "../../../token/const/token.const.tz";
+import {
+  ArrayElement,
+  Expr,
+  ExprKind,
+  NewKind,
+  UnaryOp,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { ExpressionPlace } from "../types/file-parser.types.context.tz";
+import { Arguments } from "../types/file-parser.types.calls.tz";
+
+partial class FileParser {
+  private arguments(): Arguments {
+    const outer = this.context;
+    this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
+    const args: Expr[] = [];
+    const spread: boolean[] = [];
+    while (this.cursor.insideList(TokenKind.RParen)) {
+      const spreads = this.cursor.accept(TokenKind.Ellipsis);
+      spread.push(spreads);
+      const arg = this.expression();
+      args.push(arg);
+      if (!this.cursor.accept(TokenKind.Comma)) {
+        break;
+      }
+    }
+    this.cursor.expect(TokenKind.RParen, Code.ExpectedArgumentsClose);
+    this.context = outer;
+    const anySpread = spread.includes(true);
+
+    return { args, spread: anySpread ? spread : [] };
+  }
+
+  private indexInside(): Expr {
+    const outer = this.context;
+    this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
+    const index = this.sequence();
+    this.cursor.expect(TokenKind.RBracket, Code.ExpectedIndexClose);
+    this.context = outer;
+
+    return index;
+  }
+
+  private isPropertyName(): boolean {
+    const token = this.cursor.peek();
+
+    return (
+      token.kind == TokenKind.Identifier || kTokenTable.isKeyword(token.kind)
+    );
+  }
+
+  private callOrMember(): Expr {
+    let expr = this.primary();
+    let optionalChain = false;
+    while (true) {
+      const attached =
+        this.cursor.is(TokenKind.Less) &&
+        this.attachTypeArguments(expr, optionalChain);
+      if (attached) {
+        continue;
+      }
+      const optionalLink = this.cursor.accept(TokenKind.QuestionDot);
+      if (optionalLink) {
+        optionalChain = true;
+      }
+      const link = optionalLink
+        ? this.optionalLink(expr)
+        : this.plainLink(expr, optionalChain);
+      if (link == undefined) {
+        break;
+      }
+      expr = link;
+    }
+    if (!optionalChain) {
+      return expr;
+    }
+
+    return { kind: ExprKind.OptionalChain, loc: expr.loc, chain: expr };
+  }
+
+  private optionalLink(expr: Expr): Expr | undefined {
+    if (this.isPropertyName()) {
+      return this.memberLink(expr, true);
+    }
+    const token = this.cursor.peek();
+    switch (token.kind) {
+      case TokenKind.LParen:
+        return this.callLink(expr, true);
+      case TokenKind.LBracket:
+        return this.indexLink(expr, true);
+      default:
+        this.cursor.error(token.start, Code.ExpectedPropertyAfterOptionalDot);
+        return undefined;
+    }
+  }
+
+  private plainLink(expr: Expr, optionalChain: boolean): Expr | undefined {
+    const token = this.cursor.peek();
+    switch (token.kind) {
+      case TokenKind.LParen:
+        return this.callLink(expr, false);
+      case TokenKind.Dot: {
+        this.cursor.next();
+        if (!this.isPropertyName()) {
+          const current = this.cursor.peek();
+          this.cursor.error(current.start, Code.ExpectedPropertyAfterDot);
+          return undefined;
+        }
+        return this.memberLink(expr, false);
+      }
+      case TokenKind.LBracket:
+        return this.indexLink(expr, false);
+      case TokenKind.TemplateString:
+      case TokenKind.TemplateHead:
+        return this.taggedTemplate(expr, optionalChain);
+      case TokenKind.Bang:
+        if (token.newline) {
+          return undefined;
+        }
+        this.cursor.next();
+        return {
+          kind: ExprKind.Unary,
+          loc: token.start,
+          op: UnaryOp.NonNull,
+          operand: expr,
+        };
+      default:
+        return undefined;
+    }
+  }
+
+  private memberLink(object: Expr, optional: boolean): Expr {
+    const name = this.cursor.next();
+
+    return {
+      kind: ExprKind.Member,
+      loc: name.start,
+      object,
+      name: name.text,
+      known: name.known,
+      optional,
+      typeArgs: [],
+    };
+  }
+
+  private callLink(callee: Expr, optional: boolean): Expr {
+    this.cursor.next();
+    const list = this.arguments();
+
+    return {
+      kind: ExprKind.Call,
+      loc: callee.loc,
+      callee,
+      args: list.args,
+      spread: list.spread,
+      optional,
+      tagged: false,
+    };
+  }
+
+  private indexLink(object: Expr, optional: boolean): Expr {
+    const bracket = this.cursor.next();
+    const index = this.indexInside();
+
+    return {
+      kind: ExprKind.Index,
+      loc: bracket.start,
+      object,
+      index,
+      optional,
+    };
+  }
+
+  private attachTypeArguments(expr: Expr, optionalChain: boolean): boolean {
+    if (
+      expr.kind == ExprKind.Name &&
+      !optionalChain &&
+      expr.typeArgs.length == 0
+    ) {
+      const args = this.tryTypeArguments(false);
+      if (args == undefined) {
+        return false;
+      }
+      expr.typeArgs = args;
+      return true;
+    }
+    if (expr.kind == ExprKind.Member && expr.typeArgs.length == 0) {
+      const args = this.tryTypeArguments(true);
+      if (args == undefined) {
+        return false;
+      }
+      expr.typeArgs = args;
+      return true;
+    }
+
+    return false;
+  }
+
+  private taggedTemplate(tag: Expr, optional: boolean): Expr {
+    if (optional) {
+      const token = this.cursor.peek();
+      this.cursor.report(token.start, Code.TaggedTemplateInOptionalChain);
+    }
+    let raw = false;
+    if (tag.kind == ExprKind.Member && tag.known == KnownName.Raw) {
+      const object = tag.object;
+      raw = object.kind == ExprKind.Name && object.known == KnownName.String;
+    }
+    const tmpl = this.template(raw);
+    const elements: ArrayElement[] = [];
+    for (const text of tmpl.quasis) {
+      const value: Expr = {
+        kind: ExprKind.StringLit,
+        loc: tmpl.loc,
+        value: text,
+      };
+      elements.push({ expr: value, spread: false, hole: false });
+    }
+    const texts: Expr = { kind: ExprKind.ArrayLit, loc: tmpl.loc, elements };
+    const args: Expr[] = [texts];
+    for (const part of tmpl.exprs) {
+      args.push(part);
+    }
+
+    return {
+      kind: ExprKind.Call,
+      loc: tag.loc,
+      callee: tag,
+      args,
+      spread: [],
+      optional: false,
+      tagged: true,
+    };
+  }
+
+  private newArguments(): Expr[] {
+    const args: Expr[] = [];
+    if (!this.cursor.accept(TokenKind.LParen)) {
+      return args;
+    }
+    while (this.cursor.insideList(TokenKind.RParen)) {
+      const arg = this.expression();
+      args.push(arg);
+      if (!this.cursor.accept(TokenKind.Comma)) {
+        break;
+      }
+    }
+    this.cursor.expect(TokenKind.RParen, Code.ExpectedArgumentsClose);
+
+    return args;
+  }
+
+  private newExpression(): Expr {
+    const keyword = this.cursor.next();
+    const loc = keyword.start;
+    if (this.cursor.is(TokenKind.LParen)) {
+      return this.newOfExpression();
+    }
+    if (!this.cursor.atName()) {
+      const token = this.cursor.peek();
+      this.cursor.error(token.start, Code.ExpectedClassAfterNew);
+      return this.invalid(loc);
+    }
+    const name = this.cursor.next();
+    let member: Token | undefined = undefined;
+    if (this.cursor.accept(TokenKind.Dot)) {
+      if (this.cursor.atName()) {
+        member = this.cursor.next();
+      } else {
+        const token = this.cursor.peek();
+        this.cursor.error(token.start, Code.ExpectedNameAfterDot);
+      }
+    }
+    if (this.cursor.is(TokenKind.Dot) || this.cursor.is(TokenKind.LBracket)) {
+      const callee = this.newCallee(name, member);
+      const typeArgs = this.cursor.is(TokenKind.Less)
+        ? this.typeArguments()
+        : [];
+      const args = this.newArguments();
+      return {
+        kind: ExprKind.New,
+        loc: name.start,
+        form: { kind: NewKind.Callee, callee },
+        typeArgs,
+        args,
+      };
+    }
+    const typeArgs = this.cursor.is(TokenKind.Less) ? this.typeArguments() : [];
+    const args = this.newArguments();
+    const memberName = member?.text;
+
+    return {
+      kind: ExprKind.New,
+      loc: name.start,
+      form: { kind: NewKind.Named, name: name.text, member: memberName },
+      typeArgs,
+      args,
+    };
+  }
+
+  private newOfExpression(): Expr {
+    const paren = this.cursor.next();
+    const at = paren.start;
+    const outer = this.context;
+    this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
+    const callee = this.sequence();
+    this.cursor.expect(TokenKind.RParen, Code.ExpectedNewClassClose);
+    const args = this.newArguments();
+    this.context = outer;
+
+    return {
+      kind: ExprKind.New,
+      loc: at,
+      form: { kind: NewKind.Callee, callee },
+      typeArgs: [],
+      args,
+    };
+  }
+
+  private newCallee(name: Token, member: Token | undefined): Expr {
+    let path: Expr = {
+      kind: ExprKind.Name,
+      loc: name.start,
+      name: name.text,
+      known: name.known,
+      typeArgs: [],
+    };
+    if (member != undefined) {
+      path = {
+        kind: ExprKind.Member,
+        loc: member.start,
+        object: path,
+        name: member.text,
+        known: member.known,
+        optional: false,
+        typeArgs: [],
+      };
+    }
+    while (
+      this.cursor.is(TokenKind.Dot) ||
+      this.cursor.is(TokenKind.LBracket)
+    ) {
+      const token = this.cursor.next();
+      if (token.kind == TokenKind.LBracket) {
+        const index = this.indexInside();
+        path = {
+          kind: ExprKind.Index,
+          loc: token.start,
+          object: path,
+          index,
+          optional: false,
+        };
+        continue;
+      }
+      if (!this.isPropertyName()) {
+        const current = this.cursor.peek();
+        this.cursor.error(current.start, Code.ExpectedPropertyAfterDot);
+        return path;
+      }
+      const property = this.cursor.next();
+      path = {
+        kind: ExprKind.Member,
+        loc: property.start,
+        object: path,
+        name: property.text,
+        known: property.known,
+        optional: false,
+        typeArgs: [],
+      };
+    }
+
+    return path;
+  }
+}

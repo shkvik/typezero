@@ -100,7 +100,9 @@ editors/          vscode/ — расширение VS Code; types/ — объя�
 self/             компилятор на tz, пробный (порт compiler/load): main.tz — только запуск
                   SyntaxCommand; cli/syntax/ — как compiler/cli/syntax/: syntax-command/
                   (SyntaxCommand: режимы tokens|tree|time|hold|read, enum SyntaxMode) и
-                  ast-dump/ (Dumper: дерево текстом для сверки с C++);
+                  ast-dump/ (Dumper: дерево текстом для сверки с C++; части — в
+                  partial/ast-dump.partial.<часть>.tz: statements, declarations,
+                  expressions, types);
                   program/ast/ — дерево разбора: типы узлов — в types/ast.types.<группа>.tz
                   (span, types, expressions, patterns, statements, functions, classes — там же
                   type alias и enum, modules — там же SourceFile; группы ссылаются друг на
@@ -118,8 +120,10 @@ self/             компилятор на tz, пробный (порт compile
                   types/parser.types.tz), Cursor (cursor/: позиция, откаты,
                   ошибки), LiteralReader (literal/: значения литералов по токену), FileParser
                   (file-parser/: грамматика; части `partial class` — в
-                  partial/file-parser.partial.<часть>.tz: types, expressions, patterns,
-                  statements, functions, classes, modules). У класса своя папка: класс — в
+                  partial/file-parser.partial.<часть>.tz: types, object-types,
+                  function-types, expressions, operators, calls, literals, patterns,
+                  statements, loops, variables, functions, classes, modules; файл больше
+                  800 строк делится на части). У класса своя папка: класс — в
                   <класс>.tz, его типы — в types/<класс>.types.tz, константы — в
                   const/<класс>.const.tz; у класса с частями — по файлу на часть
                   (types/file-parser.types.<часть>.tz, там же result — ParseResult и context —

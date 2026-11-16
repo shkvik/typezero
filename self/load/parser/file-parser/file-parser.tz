@@ -6,6 +6,13 @@ import "./partial/file-parser.partial.statements.tz";
 import "./partial/file-parser.partial.functions.tz";
 import "./partial/file-parser.partial.classes.tz";
 import "./partial/file-parser.partial.modules.tz";
+import "./partial/file-parser.partial.operators.tz";
+import "./partial/file-parser.partial.calls.tz";
+import "./partial/file-parser.partial.literals.tz";
+import "./partial/file-parser.partial.object-types.tz";
+import "./partial/file-parser.partial.function-types.tz";
+import "./partial/file-parser.partial.loops.tz";
+import "./partial/file-parser.partial.variables.tz";
 import { Token, TokenKind } from "../../token/types/token.types.tz";
 import { Stmt } from "../../../program/ast/types/ast.types.statements.tz";
 import {

@@ -1,5 +1,4 @@
 import { TokenKind } from "../../../token/types/token.types.tz";
-import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
 
 export enum Precedence {
   None,
@@ -23,5 +22,3 @@ export type BinaryOperator = {
   readonly width: int;
   readonly precedence: Precedence;
 };
-
-export type Arguments = { readonly args: Expr[]; readonly spread: boolean[] };

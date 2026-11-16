@@ -1,0 +1,3 @@
+import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
+
+export type Arguments = { readonly args: Expr[]; readonly spread: boolean[] };

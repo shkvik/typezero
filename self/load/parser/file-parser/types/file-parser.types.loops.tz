@@ -1,11 +1,5 @@
-import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
 import { Pattern } from "./file-parser.types.patterns.tz";
-
-export type Binding = {
-  readonly name: string;
-  readonly loc: int;
-  readonly typeAnn?: TypeRef;
-};
+import { Binding } from "./file-parser.types.variables.tz";
 
 export enum ForTargetKind {
   Name,

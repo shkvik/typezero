@@ -1,0 +1,185 @@
+import { FileParser } from "../file-parser.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { Token, TokenKind } from "../../../token/types/token.types.tz";
+import { kTokenTable } from "../../../token/const/token.const.tz";
+import {
+  FunctionTypeForm,
+  TypeKind,
+  TypeRef,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import { Signature } from "../types/file-parser.types.function-types.tz";
+
+partial class FileParser {
+  private subjectAhead(): boolean {
+    const next = this.cursor.lookahead();
+    const subject =
+      kTokenTable.isName(next.kind) || next.kind == TokenKind.This;
+
+    return subject && !next.newline;
+  }
+
+  private isAhead(): boolean {
+    const next = this.cursor.lookahead();
+
+    return next.kind == TokenKind.Is && !next.newline;
+  }
+
+  private returnType(): TypeRef {
+    const asserts = this.cursor.is(TokenKind.Asserts) && this.subjectAhead();
+    const predicate = this.cursor.atNameOrThis() && this.isAhead();
+    if (!asserts && !predicate) {
+      return this.type();
+    }
+
+    const token = this.cursor.peek();
+    const ref = this.typeRef(token.start);
+    ref.form = { kind: TypeKind.Predicate, asserts };
+
+    if (asserts) {
+      this.cursor.next();
+    }
+
+    const subject = this.cursor.next();
+    ref.name = subject.text;
+
+    const following = this.cursor.peek();
+    if (following.kind == TokenKind.Is && !following.newline) {
+      this.cursor.next();
+      const type = this.type();
+      ref.args.push(type);
+    }
+
+    return ref;
+  }
+
+  private genericFunctionType(): TypeRef {
+    const less = this.cursor.peek();
+
+    this.typeParams();
+    if (this.cursor.is(TokenKind.LParen)) {
+      this.functionType();
+    }
+
+    this.cursor.report(less.start, Code.GenericFunctionType);
+
+    return this.typeRef(less.start);
+  }
+
+  private functionTypeAhead(): boolean {
+    const start = this.cursor.mark();
+
+    this.cursor.startDiscarding();
+    this.cursor.stopRecovering();
+    this.cursor.next();
+
+    const fits = this.scansAsFunctionType();
+
+    this.cursor.stopDiscarding();
+    this.cursor.reset(start);
+
+    return fits;
+  }
+
+  private scansAsFunctionType(): boolean {
+    while (!this.cursor.is(TokenKind.RParen)) {
+      this.cursor.accept(TokenKind.Ellipsis);
+      if (!this.cursor.atNameOrThis()) {
+        return false;
+      }
+
+      this.cursor.next();
+      this.cursor.accept(TokenKind.Question);
+
+      if (this.cursor.accept(TokenKind.Colon)) {
+        this.type();
+        if (this.cursor.isRecovering()) {
+          return false;
+        }
+      }
+      if (!this.cursor.accept(TokenKind.Comma)) {
+        break;
+      }
+    }
+
+    return (
+      this.cursor.accept(TokenKind.RParen) && this.cursor.is(TokenKind.Arrow)
+    );
+  }
+
+  private functionType(): TypeRef {
+    const parsed = this.signatureParams();
+    const ref = parsed.type;
+    if (!parsed.complete) {
+      return ref;
+    }
+
+    this.cursor.expect(
+      TokenKind.Arrow,
+      Code.ExpectedAfterFunctionTypeParameters,
+    );
+    const result = this.returnType();
+    ref.args.push(result);
+
+    return ref;
+  }
+
+  private signatureParams(): Signature {
+    const paren = this.cursor.next();
+    const ref = this.typeRef(paren.start);
+    const signature: FunctionTypeForm = {
+      kind: TypeKind.Function,
+      names: [],
+      optional: [],
+      rest: false,
+    };
+    ref.form = signature;
+
+    while (this.cursor.insideList(TokenKind.RParen)) {
+      const rest = this.cursor.accept(TokenKind.Ellipsis);
+      const name = this.cursor.peek();
+      const named =
+        this.cursor.accept(TokenKind.This) ||
+        this.cursor.expectName(Code.ExpectedFunctionTypeParameter);
+      if (!named) {
+        return { type: ref, complete: false };
+      }
+
+      const optional = this.cursor.accept(TokenKind.Question);
+      const type = this.signatureParamType(name);
+
+      if (signature.rest) {
+        this.cursor.report(name.start, Code.RestParameterNotLast);
+      }
+      if (rest) {
+        signature.rest = true;
+      }
+
+      ref.args.push(type);
+      signature.names.push(name.text);
+      signature.optional.push(optional);
+
+      if (!this.cursor.accept(TokenKind.Comma)) {
+        break;
+      }
+    }
+
+    this.cursor.expect(
+      TokenKind.RParen,
+      Code.ExpectedFunctionTypeParametersClose,
+    );
+
+    return { type: ref, complete: true };
+  }
+
+  private signatureParamType(name: Token): TypeRef {
+    if (this.cursor.accept(TokenKind.Colon)) {
+      return this.type();
+    }
+
+    this.cursor.report(name.start, Code.FunctionTypeParameterNeedsType, {
+      word: name.text,
+    });
+
+    return this.typeRef(name.start);
+  }
+}

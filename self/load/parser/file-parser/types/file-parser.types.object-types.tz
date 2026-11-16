@@ -8,8 +8,3 @@ export type ObjectTypeMember = {
   readonly method: boolean;
   readonly type: TypeRef;
 };
-
-export type Signature = {
-  readonly type: TypeRef;
-  readonly complete: boolean;
-};

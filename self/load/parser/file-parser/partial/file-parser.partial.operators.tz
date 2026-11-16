@@ -1,0 +1,353 @@
+import { FileParser } from "../file-parser.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { TokenKind } from "../../../token/types/token.types.tz";
+import {
+  BinaryOp,
+  Expr,
+  ExprKind,
+  UnaryOp,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { ExpressionPlace } from "../types/file-parser.types.context.tz";
+import {
+  BinaryOperator,
+  Operator,
+  Precedence,
+} from "../types/file-parser.types.operators.tz";
+
+partial class FileParser {
+  private operator(): Operator {
+    const token = this.cursor.peek();
+    if (token.kind != TokenKind.Greater) {
+      return { kind: token.kind, width: 1 };
+    }
+    if (this.glued(1, TokenKind.Greater)) {
+      if (this.glued(2, TokenKind.Greater)) {
+        return this.glued(3, TokenKind.Assign)
+          ? { kind: TokenKind.UShrAssign, width: 4 }
+          : { kind: TokenKind.UShr, width: 3 };
+      }
+      return this.glued(2, TokenKind.Assign)
+        ? { kind: TokenKind.ShrAssign, width: 3 }
+        : { kind: TokenKind.Shr, width: 2 };
+    }
+
+    return this.glued(1, TokenKind.Assign)
+      ? { kind: TokenKind.GreaterEq, width: 2 }
+      : { kind: TokenKind.Greater, width: 1 };
+  }
+
+  private glued(offset: int, kind: TokenKind): boolean {
+    const token = this.cursor.tokenAt(offset);
+    const before = this.cursor.tokenAt(offset - 1);
+
+    return token.kind == kind && token.start == before.end;
+  }
+
+  private binary(above: Precedence): Expr {
+    const head = this.cursor.peek();
+    const start = head.start;
+    const prefix = this.unaryOpFor(head.kind);
+    let left = this.unary();
+    if (prefix != undefined && this.cursor.is(TokenKind.StarStar)) {
+      const token = this.cursor.peek();
+      this.cursor.report(token.start, Code.UnaryBeforePower);
+    }
+    let lookahead = this.binaryOperator();
+    while (lookahead.precedence > above) {
+      left = this.applyOperator(left, lookahead, start);
+      lookahead = this.binaryOperator();
+    }
+
+    return left;
+  }
+
+  private binaryOperator(): BinaryOperator {
+    const token = this.cursor.peek();
+    switch (token.kind) {
+      case TokenKind.As:
+      case TokenKind.Instanceof:
+        return {
+          kind: token.kind,
+          width: 1,
+          precedence: Precedence.Relational,
+        };
+      case TokenKind.Satisfies: {
+        const precedence = token.newline
+          ? Precedence.None
+          : Precedence.Relational;
+        return { kind: token.kind, width: 1, precedence };
+      }
+      case TokenKind.In: {
+        const place = this.context.expressionPlace;
+        const precedence =
+          place == ExpressionPlace.ForHead
+            ? Precedence.None
+            : Precedence.Relational;
+        return { kind: token.kind, width: 1, precedence };
+      }
+      default: {
+        const op = this.operator();
+        const precedence = this.binaryPrecedence(op.kind);
+        return { kind: op.kind, width: op.width, precedence };
+      }
+    }
+  }
+
+  private applyOperator(left: Expr, op: BinaryOperator, start: int): Expr {
+    const token = this.cursor.peek();
+    this.cursor.skip(op.width);
+    switch (op.kind) {
+      case TokenKind.As: {
+        const target = this.type();
+        return { kind: ExprKind.Cast, loc: token.start, operand: left, target };
+      }
+      case TokenKind.Satisfies:
+        this.type();
+        this.cursor.report(token.start, Code.SatisfiesNotSupported);
+        return left;
+      case TokenKind.Instanceof: {
+        const right = this.binary(Precedence.Relational);
+        return {
+          kind: ExprKind.Binary,
+          loc: token.start,
+          op: BinaryOp.InstanceOf,
+          lhs: left,
+          rhs: right,
+          source: this.cursor.spanFrom(start),
+        };
+      }
+      default: {
+        if (op.kind == TokenKind.EqEqEq) {
+          this.cursor.report(token.start, Code.StrictEqualsNotSupported);
+        } else if (op.kind == TokenKind.BangEqEq) {
+          this.cursor.report(token.start, Code.StrictNotEqualsNotSupported);
+        }
+        const floor =
+          op.precedence == Precedence.Power
+            ? Precedence.Multiplicative
+            : op.precedence;
+        const right = this.binary(floor);
+        return {
+          kind: ExprKind.Binary,
+          loc: token.start,
+          op: this.binaryOpFor(op.kind),
+          lhs: left,
+          rhs: right,
+          source: this.cursor.spanFrom(start),
+        };
+      }
+    }
+  }
+
+  private unary(): Expr {
+    const token = this.cursor.peek();
+    if (this.cursor.is(TokenKind.Await)) {
+      this.cursor.next();
+      const value = this.unary();
+      return { kind: ExprKind.Await, loc: token.start, value };
+    }
+    if (
+      token.kind == TokenKind.PlusPlus ||
+      token.kind == TokenKind.MinusMinus
+    ) {
+      this.cursor.next();
+      const target = this.unary();
+      return {
+        kind: ExprKind.Update,
+        loc: token.start,
+        increment: token.kind == TokenKind.PlusPlus,
+        prefix: true,
+        target,
+      };
+    }
+    const op = this.unaryOpFor(token.kind);
+    if (op == undefined) {
+      return this.postfix();
+    }
+    this.cursor.next();
+    const operand = this.unary();
+
+    return { kind: ExprKind.Unary, loc: token.start, op, operand };
+  }
+
+  private postfix(): Expr {
+    const target = this.callOrMember();
+    const token = this.cursor.peek();
+    const update =
+      (token.kind == TokenKind.PlusPlus ||
+        token.kind == TokenKind.MinusMinus) &&
+      !token.newline;
+    if (!update) {
+      return target;
+    }
+    this.cursor.next();
+
+    return {
+      kind: ExprKind.Update,
+      loc: token.start,
+      increment: token.kind == TokenKind.PlusPlus,
+      prefix: false,
+      target,
+    };
+  }
+
+  private binaryPrecedence(kind: TokenKind): Precedence {
+    switch (kind) {
+      case TokenKind.PipePipe:
+      case TokenKind.QuestionQuestion:
+        return Precedence.Or;
+      case TokenKind.AmpAmp:
+        return Precedence.And;
+      case TokenKind.Pipe:
+        return Precedence.BitOr;
+      case TokenKind.Caret:
+        return Precedence.BitXor;
+      case TokenKind.Amp:
+        return Precedence.BitAnd;
+      case TokenKind.EqEq:
+      case TokenKind.EqEqEq:
+      case TokenKind.BangEq:
+      case TokenKind.BangEqEq:
+        return Precedence.Equality;
+      case TokenKind.Less:
+      case TokenKind.LessEq:
+      case TokenKind.Greater:
+      case TokenKind.GreaterEq:
+      case TokenKind.In:
+        return Precedence.Relational;
+      case TokenKind.Shl:
+      case TokenKind.Shr:
+      case TokenKind.UShr:
+        return Precedence.Shift;
+      case TokenKind.Plus:
+      case TokenKind.Minus:
+        return Precedence.Additive;
+      case TokenKind.Star:
+      case TokenKind.Slash:
+      case TokenKind.Percent:
+        return Precedence.Multiplicative;
+      case TokenKind.StarStar:
+        return Precedence.Power;
+      default:
+        return Precedence.None;
+    }
+  }
+
+  private binaryOpFor(kind: TokenKind): BinaryOp {
+    switch (kind) {
+      case TokenKind.PipePipe:
+        return BinaryOp.LogOr;
+      case TokenKind.QuestionQuestion:
+        return BinaryOp.Nullish;
+      case TokenKind.AmpAmp:
+        return BinaryOp.LogAnd;
+      case TokenKind.Pipe:
+        return BinaryOp.BitOr;
+      case TokenKind.Caret:
+        return BinaryOp.BitXor;
+      case TokenKind.Amp:
+        return BinaryOp.BitAnd;
+      case TokenKind.EqEq:
+      case TokenKind.EqEqEq:
+        return BinaryOp.Eq;
+      case TokenKind.BangEq:
+      case TokenKind.BangEqEq:
+        return BinaryOp.Ne;
+      case TokenKind.Less:
+        return BinaryOp.Lt;
+      case TokenKind.LessEq:
+        return BinaryOp.Le;
+      case TokenKind.Greater:
+        return BinaryOp.Gt;
+      case TokenKind.GreaterEq:
+        return BinaryOp.Ge;
+      case TokenKind.In:
+        return BinaryOp.In;
+      case TokenKind.Shl:
+        return BinaryOp.Shl;
+      case TokenKind.Shr:
+        return BinaryOp.Shr;
+      case TokenKind.UShr:
+        return BinaryOp.UShr;
+      case TokenKind.Plus:
+        return BinaryOp.Add;
+      case TokenKind.Minus:
+        return BinaryOp.Sub;
+      case TokenKind.Star:
+        return BinaryOp.Mul;
+      case TokenKind.StarStar:
+        return BinaryOp.Pow;
+      case TokenKind.Slash:
+        return BinaryOp.Div;
+      default:
+        return BinaryOp.Rem;
+    }
+  }
+
+  private assignmentOp(kind: TokenKind): BinaryOp | undefined {
+    switch (kind) {
+      case TokenKind.PlusAssign:
+        return BinaryOp.Add;
+      case TokenKind.MinusAssign:
+        return BinaryOp.Sub;
+      case TokenKind.StarAssign:
+        return BinaryOp.Mul;
+      case TokenKind.StarStarAssign:
+        return BinaryOp.Pow;
+      case TokenKind.SlashAssign:
+        return BinaryOp.Div;
+      case TokenKind.PercentAssign:
+        return BinaryOp.Rem;
+      case TokenKind.AmpAssign:
+        return BinaryOp.BitAnd;
+      case TokenKind.PipeAssign:
+        return BinaryOp.BitOr;
+      case TokenKind.CaretAssign:
+        return BinaryOp.BitXor;
+      case TokenKind.ShlAssign:
+        return BinaryOp.Shl;
+      case TokenKind.ShrAssign:
+        return BinaryOp.Shr;
+      case TokenKind.UShrAssign:
+        return BinaryOp.UShr;
+      case TokenKind.QuestionQuestionAssign:
+        return BinaryOp.Nullish;
+      case TokenKind.AmpAmpAssign:
+        return BinaryOp.LogAnd;
+      case TokenKind.PipePipeAssign:
+        return BinaryOp.LogOr;
+      default:
+        return undefined;
+    }
+  }
+
+  private isAssignment(kind: TokenKind): boolean {
+    if (kind == TokenKind.Assign) {
+      return true;
+    }
+    const compound = this.assignmentOp(kind);
+
+    return compound != undefined;
+  }
+
+  private unaryOpFor(kind: TokenKind): UnaryOp | undefined {
+    switch (kind) {
+      case TokenKind.Minus:
+        return UnaryOp.Neg;
+      case TokenKind.Plus:
+        return UnaryOp.Plus;
+      case TokenKind.Bang:
+        return UnaryOp.Not;
+      case TokenKind.Tilde:
+        return UnaryOp.BitNot;
+      case TokenKind.Typeof:
+        return UnaryOp.TypeOf;
+      case TokenKind.Void:
+        return UnaryOp.Void;
+      case TokenKind.Delete:
+        return UnaryOp.Delete;
+      default:
+        return undefined;
+    }
+  }
+}
