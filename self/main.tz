@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { tokenize } from "./load/lexer/lexer.tz"
+import { Lexer } from "./load/lexer/lexer.tz"
 import { Parser } from "./load/parser/parser.tz"
 import { ParsedFile, SourceText } from "./load/parser/types/parser.types.tz"
 import { SourceFile } from "./program/ast/types/ast.types.modules.tz"
@@ -34,7 +34,8 @@ function readSources(files: string[]): SourceText[] {
 
 function printTokens(source: SourceText): void {
   console.log(`== ${source.path}`)
-  for (const token of tokenize(source.text)) {
+  const lexer = new Lexer(source.text)
+  for (const token of lexer.run()) {
     const newline = token.newline ? 1 : 0
     const hash = token.hash ? 1 : 0
     console.log(`${token.kind} ${token.start} ${token.end - token.start} ${newline} ${hash}`)
@@ -55,7 +56,8 @@ function printTree(parsed: ParsedFile): void {
 function lexAll(sources: SourceText[]): int {
   let tokens = 0
   for (const source of sources) {
-    const lexed = tokenize(source.text)
+    const lexer = new Lexer(source.text)
+    const lexed = lexer.run()
     tokens += lexed.length - 1
   }
 

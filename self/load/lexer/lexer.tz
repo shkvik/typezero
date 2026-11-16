@@ -1,96 +1,64 @@
 import { KnownName, Token, TokenKind } from "../token/types/token.types.tz";
 import { kTokenTable } from "../token/const/token.const.tz";
+import {
+  kAmp,
+  kApostrophe,
+  kAt,
+  kBackslash,
+  kBacktick,
+  kBang,
+  kCaret,
+  kColon,
+  kComma,
+  kDollar,
+  kDot,
+  kEquals,
+  kFormFeed,
+  kGreater,
+  kHash,
+  kHigh,
+  kLeftBrace,
+  kLeftBracket,
+  kLeftParen,
+  kLess,
+  kLowerA,
+  kLowerB,
+  kLowerE,
+  kLowerN,
+  kLowerO,
+  kLowerX,
+  kLowerZ,
+  kMinus,
+  kNewline,
+  kNine,
+  kPercent,
+  kPipe,
+  kPlus,
+  kQuestion,
+  kQuote,
+  kRadixPrefixLength,
+  kReturn,
+  kRightBrace,
+  kRightBracket,
+  kRightParen,
+  kSemi,
+  kSlash,
+  kSpace,
+  kStar,
+  kTab,
+  kTilde,
+  kUnderscore,
+  kUpperA,
+  kUpperB,
+  kUpperE,
+  kUpperO,
+  kUpperX,
+  kUpperZ,
+  kVerticalTab,
+  kZero,
+} from "./const/lexer.const.tz";
 
-const kTab = 9;
-const kNewline = 10;
-const kVerticalTab = 11;
-const kFormFeed = 12;
-const kReturn = 13;
-const kSpace = 32;
-const kBang = 33;
-const kQuote = 34;
-const kHash = 35;
-const kDollar = 36;
-const kPercent = 37;
-const kAmp = 38;
-const kApostrophe = 39;
-const kLeftParen = 40;
-const kRightParen = 41;
-const kStar = 42;
-const kPlus = 43;
-const kComma = 44;
-const kMinus = 45;
-const kDot = 46;
-const kSlash = 47;
-const kZero = 48;
-const kNine = 57;
-const kColon = 58;
-const kSemi = 59;
-const kLess = 60;
-const kEquals = 61;
-const kGreater = 62;
-const kQuestion = 63;
-const kAt = 64;
-const kUpperA = 65;
-const kUpperB = 66;
-const kUpperE = 69;
-const kUpperO = 79;
-const kUpperX = 88;
-const kUpperZ = 90;
-const kLeftBracket = 91;
-const kBackslash = 92;
-const kRightBracket = 93;
-const kCaret = 94;
-const kUnderscore = 95;
-const kBacktick = 96;
-const kLowerA = 97;
-const kLowerB = 98;
-const kLowerE = 101;
-const kLowerN = 110;
-const kLowerO = 111;
-const kLowerX = 120;
-const kLowerZ = 122;
-const kLeftBrace = 123;
-const kPipe = 124;
-const kRightBrace = 125;
-const kTilde = 126;
-const kHigh = 128;
-const kRadixPrefixLength = 2;
-
-export function tokenize(source: Buffer): Token[] {
-  const lexer = new Lexer(source);
-
-  return lexer.run();
-}
-
-function regexMayFollow(kind: TokenKind): boolean {
-  if (kTokenTable.isContextual(kind)) {
-    return false;
-  }
-  switch (kind) {
-    case TokenKind.Identifier:
-    case TokenKind.This:
-    case TokenKind.Super:
-    case TokenKind.Int:
-    case TokenKind.Float:
-    case TokenKind.String:
-    case TokenKind.TemplateString:
-    case TokenKind.TemplateTail:
-    case TokenKind.Regex:
-    case TokenKind.True:
-    case TokenKind.False:
-    case TokenKind.RParen:
-    case TokenKind.RBracket:
-    case TokenKind.RBrace:
-    case TokenKind.PlusPlus:
-    case TokenKind.MinusMinus:
-      return false;
-    default:
-      return true;
-  }
-}
-
-class Lexer {
+export class Lexer {
   private readonly source: Buffer;
   private readonly end: int;
   private readonly tokens: Token[];
@@ -404,7 +372,7 @@ class Lexer {
   private regexAllowed(): boolean {
     const last = this.tokens[this.tokens.length - 1];
 
-    return last == undefined || regexMayFollow(last.kind);
+    return last == undefined || this.regexMayFollow(last.kind);
   }
 
   private leftBrace(): void {
@@ -611,5 +579,32 @@ class Lexer {
       newline: this.newline,
       hash,
     });
+  }
+
+  private regexMayFollow(kind: TokenKind): boolean {
+    if (kTokenTable.isContextual(kind)) {
+      return false;
+    }
+    switch (kind) {
+      case TokenKind.Identifier:
+      case TokenKind.This:
+      case TokenKind.Super:
+      case TokenKind.Int:
+      case TokenKind.Float:
+      case TokenKind.String:
+      case TokenKind.TemplateString:
+      case TokenKind.TemplateTail:
+      case TokenKind.Regex:
+      case TokenKind.True:
+      case TokenKind.False:
+      case TokenKind.RParen:
+      case TokenKind.RBracket:
+      case TokenKind.RBrace:
+      case TokenKind.PlusPlus:
+      case TokenKind.MinusMinus:
+        return false;
+      default:
+        return true;
+    }
   }
 }

@@ -1,4 +1,4 @@
-import { tokenize } from "../lexer/lexer.tz";
+import { Lexer } from "../lexer/lexer.tz";
 import { FileParser } from "./file-parser/file-parser.tz";
 import { ParsedFile, SourceText } from "./types/parser.types.tz";
 
@@ -20,7 +20,8 @@ export class Parser {
   }
 
   private parseFile(source: SourceText): ParsedFile {
-    const tokens = tokenize(source.text);
+    const lexer = new Lexer(source.text);
+    const tokens = lexer.run();
     const fileParser = new FileParser(source.text, tokens, source.isLibrary);
     const result = fileParser.run();
 

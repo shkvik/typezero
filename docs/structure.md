@@ -108,7 +108,8 @@ self/             компилятор на tz, пробный (порт compile
                   load/token/ — токены, общие для лексера и парсера (TokenKind, KnownName,
                   Token — в types/token.types.tz; в token.tz — класс TokenTable: isName,
                   isKeyword, keywordKind, knownName, spelling; общий экземпляр kTokenTable — в
-                  const/token.const.tz); load/lexer/lexer.tz (tokenize → массив токенов);
+                  const/token.const.tz); load/lexer/ — Lexer (lexer.tz: new Lexer(source).run()
+                  → массив токенов; коды символов — в const/lexer.const.tz);
                   load/parser/ — Parser (parser.tz:
                   run() по списку файлов → ParsedFile[]; типы SourceText, ParsedFile — в
                   types/parser.types.tz), Cursor (cursor/: позиция, откаты,
