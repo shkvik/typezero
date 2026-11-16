@@ -10,11 +10,13 @@ export enum BindingKind {
 export type PlainBinding = {
   readonly kind: BindingKind.Plain | BindingKind.Object;
 };
+
 export type ArrayBinding = {
   readonly kind: BindingKind.Array;
   readonly length: int;
   readonly rest: boolean;
 };
+
 export type BindingForm = PlainBinding | ArrayBinding;
 
 export enum NameOrigin {

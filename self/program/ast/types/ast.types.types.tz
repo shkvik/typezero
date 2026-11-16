@@ -32,12 +32,14 @@ export type PlainTypeForm = {
     | TypeKind.Infer
     | TypeKind.Intersection;
 };
+
 export type FunctionTypeForm = {
   readonly kind: TypeKind.Function;
   readonly names: string[];
   readonly optional: boolean[];
   rest: boolean;
 };
+
 export type ObjectTypeForm = {
   readonly kind: TypeKind.Object;
   readonly names: string[];
@@ -46,25 +48,30 @@ export type ObjectTypeForm = {
   readonly readonly: boolean[];
   readonly methods: boolean[];
 };
+
 export type TupleTypeForm = {
   readonly kind: TypeKind.Tuple;
   readonly: boolean[];
   readonly spread: boolean[];
 };
+
 export type LiteralTypeForm = {
   readonly kind: TypeKind.Literal;
   readonly text: string;
   readonly number: double;
   readonly integer: boolean;
 };
+
 export type PredicateTypeForm = {
   readonly kind: TypeKind.Predicate;
   readonly asserts: boolean;
 };
+
 export type TypeOfTypeForm = {
   readonly kind: TypeKind.TypeOf;
   readonly names: string[];
 };
+
 export enum ModifierChange {
   None,
   Add,
@@ -76,10 +83,12 @@ export type MappedTypeForm = {
   optionalChange: ModifierChange;
   readonly readonlyChange: ModifierChange;
 };
+
 export type TemplateTypeForm = {
   readonly kind: TypeKind.Template;
   readonly texts: string[];
 };
+
 export type TypeForm =
   | PlainTypeForm
   | FunctionTypeForm

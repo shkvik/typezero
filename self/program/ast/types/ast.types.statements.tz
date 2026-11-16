@@ -31,6 +31,7 @@ export type BlockStmt = {
   body: Stmt[];
   readonly end?: int;
 };
+
 export type VarDeclStmt = {
   readonly kind: StmtKind.VarDecl;
   readonly loc: int;
@@ -38,11 +39,13 @@ export type VarDeclStmt = {
   readonly isUsing: boolean;
   readonly decls: VarDeclarator[];
 };
+
 export type ExprStmt = {
   readonly kind: StmtKind.Expr;
   readonly loc: int;
   readonly expr: Expr;
 };
+
 export type IfStmt = {
   readonly kind: StmtKind.If;
   readonly loc: int;
@@ -50,18 +53,21 @@ export type IfStmt = {
   readonly thenStmt: Stmt;
   readonly elseStmt?: Stmt;
 };
+
 export type WhileStmt = {
   readonly kind: StmtKind.While;
   readonly loc: int;
   readonly cond: Expr;
   readonly body: Stmt;
 };
+
 export type DoWhileStmt = {
   readonly kind: StmtKind.DoWhile;
   readonly loc: int;
   readonly body: Stmt;
   readonly cond: Expr;
 };
+
 export type ForStmt = {
   readonly kind: StmtKind.For;
   readonly loc: int;
@@ -70,6 +76,7 @@ export type ForStmt = {
   readonly step?: Expr;
   readonly body?: Stmt;
 };
+
 export type ForOfStmt = {
   readonly kind: StmtKind.ForOf;
   readonly loc: int;
@@ -80,33 +87,39 @@ export type ForOfStmt = {
   readonly iterable: Expr;
   readonly body: Stmt;
 };
+
 export type SwitchCase = {
   readonly loc: int;
   readonly test?: Expr;
   readonly body: Stmt[];
 };
+
 export type SwitchStmt = {
   readonly kind: StmtKind.Switch;
   readonly loc: int;
   readonly discriminant: Expr;
   readonly cases: SwitchCase[];
 };
+
 export type LabeledStmt = {
   readonly kind: StmtKind.Labeled;
   readonly loc: int;
   readonly label: string;
   readonly body: Stmt;
 };
+
 export type ReturnStmt = {
   readonly kind: StmtKind.Return;
   readonly loc: int;
   readonly value?: Expr;
 };
+
 export type JumpStmt = {
   readonly kind: StmtKind.Break | StmtKind.Continue;
   readonly loc: int;
   readonly label: string;
 };
+
 export type MarkerStmt = {
   readonly kind: StmtKind.Empty | StmtKind.Debugger;
   readonly loc: int;

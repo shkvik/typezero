@@ -25,14 +25,18 @@ export enum ParamKind {
 }
 
 export type ParamProperty = { readonly: boolean; access: Access };
+
 export type PlainParam = {
   readonly kind: ParamKind.Required | ParamKind.Optional | ParamKind.Rest;
 };
+
 export type DefaultedParam = {
   readonly kind: ParamKind.Defaulted;
   readonly defaultValue: Expr;
 };
+
 export type ParamForm = PlainParam | DefaultedParam;
+
 export type Param = {
   readonly name: string;
   readonly loc: int;

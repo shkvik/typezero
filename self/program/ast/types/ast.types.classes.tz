@@ -30,7 +30,10 @@ export enum FieldPresence {
   Definite,
 }
 
-export type Decorator = { readonly loc: int; readonly expr: Expr };
+export type Decorator = {
+  readonly loc: int;
+  readonly expr: Expr;
+};
 
 export type TypeAliasDecl = {
   readonly kind: StmtKind.TypeAlias;
@@ -41,11 +44,13 @@ export type TypeAliasDecl = {
   readonly bases: TypeRef[];
   readonly isHandle: boolean;
 };
+
 export type EnumMember = {
   readonly name: string;
   readonly loc: int;
   readonly init?: Expr;
 };
+
 export type EnumDecl = {
   readonly kind: StmtKind.Enum;
   readonly loc: int;
