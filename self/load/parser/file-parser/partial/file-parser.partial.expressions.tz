@@ -19,32 +19,16 @@ import {
   TemplateExpr,
   UnaryOp,
 } from "../../../../ast.tz";
-import { ExpressionPlace, FunctionKind } from "../parse-context.tz";
-
-enum Precedence {
-  None,
-  Or,
-  And,
-  BitOr,
-  BitXor,
-  BitAnd,
-  Equality,
-  Relational,
-  Shift,
-  Additive,
-  Multiplicative,
-  Power,
-}
-
-type Operator = { readonly kind: TokenKind; readonly width: int };
-
-type BinaryOperator = {
-  readonly kind: TokenKind;
-  readonly width: int;
-  readonly precedence: Precedence;
-};
-
-export type Arguments = { readonly args: Expr[]; readonly spread: boolean[] };
+import {
+  ExpressionPlace,
+  FunctionKind,
+} from "../types/file-parser.types.context.tz";
+import {
+  Arguments,
+  BinaryOperator,
+  Operator,
+  Precedence,
+} from "../types/file-parser.types.expressions.tz";
 
 function binaryPrecedence(kind: TokenKind): Precedence {
   switch (kind) {

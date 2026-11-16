@@ -1,7 +1,6 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { TokenKind, isKeyword, isName } from "../../../../token.tz";
-import { Pattern } from "./file-parser.partial.patterns.tz";
 import { Mark } from "../../cursor.tz";
 import {
   Access,
@@ -26,9 +25,8 @@ import {
   VarDeclarator,
   marker,
 } from "../../../../ast.tz";
-import { FunctionKind } from "../parse-context.tz";
-
-type ParamPattern = { readonly name: string; readonly pattern: Pattern };
+import { FunctionKind } from "../types/file-parser.types.context.tz";
+import { ParamPattern } from "../types/file-parser.types.functions.tz";
 
 function isParamModifier(kind: TokenKind): boolean {
   switch (kind) {

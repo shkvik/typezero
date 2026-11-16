@@ -1,0 +1,19 @@
+import { Expr } from "../../../../ast.tz";
+
+export type PatternElement = {
+  readonly loc: int;
+  hole: boolean;
+  rest: boolean;
+  name: string;
+  target?: Expr;
+  nested?: Pattern;
+  defaultValue?: Expr;
+  key: string;
+  keyExpr?: Expr;
+};
+
+export type Pattern = {
+  readonly loc: int;
+  readonly object: boolean;
+  readonly elements: PatternElement[];
+};

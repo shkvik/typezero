@@ -15,24 +15,11 @@ import {
   WholeImport,
   marker,
 } from "../../../../ast.tz";
-
-enum ImportForm {
-  Named,
-  Namespace,
-  Default,
-}
-
-type ImportClause =
-  | { readonly kind: ImportForm.Named }
-  | { readonly kind: ImportForm.Default; readonly name: string }
-  | { readonly kind: ImportForm.Namespace; readonly name?: string };
-
-type NameListCodes = {
-  readonly typeNotNeeded: Code;
-  readonly keywordName: Code;
-  readonly expectedName: Code;
-  readonly close: Code;
-};
+import {
+  ImportClause,
+  ImportForm,
+  NameListCodes,
+} from "../types/file-parser.types.modules.tz";
 
 const kImportNames: NameListCodes = {
   typeNotNeeded: Code.TypeNotNeededInImport,
@@ -161,11 +148,9 @@ partial class FileParser {
       const alias = this.cursor.next();
       clause = { kind: ImportForm.Default, name: alias.text };
       if (this.cursor.is(TokenKind.Assign)) {
-        this.cursor.error(
-          formLoc,
-          Code.ImportEqualsNotSupported,
-          { word: alias.text },
-        );
+        this.cursor.error(formLoc, Code.ImportEqualsNotSupported, {
+          word: alias.text,
+        });
         return marker(StmtKind.Empty, loc);
       }
       if (
@@ -173,11 +158,9 @@ partial class FileParser {
         !this.cursor.is(TokenKind.LBrace)
       ) {
         const token = this.cursor.peek();
-        this.cursor.error(
-          token.start,
-          Code.ExpectedBraceAfterComma,
-          { found: token.kind },
-        );
+        this.cursor.error(token.start, Code.ExpectedBraceAfterComma, {
+          found: token.kind,
+        });
       }
     }
     const names: ModuleName[] = [];
@@ -185,11 +168,9 @@ partial class FileParser {
       this.moduleNames(names, kImportNames);
     } else if (clause.kind == ImportForm.Named) {
       const token = this.cursor.peek();
-      this.cursor.error(
-        token.start,
-        Code.ExpectedImportNames,
-        { found: token.kind },
-      );
+      this.cursor.error(token.start, Code.ExpectedImportNames, {
+        found: token.kind,
+      });
     }
     if (this.cursor.isRecovering()) {
       return marker(StmtKind.Empty, loc);
@@ -351,11 +332,9 @@ partial class FileParser {
     }
     if (!this.cursor.is(TokenKind.LBrace)) {
       const token = this.cursor.peek();
-      this.cursor.error(
-        token.start,
-        Code.ExpectedExportDeclaration,
-        { found: token.kind },
-      );
+      this.cursor.error(token.start, Code.ExpectedExportDeclaration, {
+        found: token.kind,
+      });
       return marker(StmtKind.Empty, loc);
     }
 
@@ -501,11 +480,9 @@ partial class FileParser {
       return undefined;
     }
     if (!isName(alias.kind)) {
-      this.cursor.error(
-        alias.start,
-        Code.ExpectedNameAfterAs,
-        { found: alias.kind },
-      );
+      this.cursor.error(alias.start, Code.ExpectedNameAfterAs, {
+        found: alias.kind,
+      });
       return undefined;
     }
     this.cursor.next();
@@ -587,11 +564,9 @@ partial class FileParser {
     }
     const token = this.cursor.peek();
     if (token.kind != TokenKind.String) {
-      this.cursor.error(
-        token.start,
-        Code.ExpectedPathString,
-        { found: token.kind },
-      );
+      this.cursor.error(token.start, Code.ExpectedPathString, {
+        found: token.kind,
+      });
       return undefined;
     }
     const decoded = this.literals.string(token);

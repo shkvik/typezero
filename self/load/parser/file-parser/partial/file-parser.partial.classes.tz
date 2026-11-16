@@ -1,7 +1,6 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { KnownName, TokenKind, isKeyword, isName } from "../../../../token.tz";
-import { Arguments } from "./file-parser.partial.expressions.tz";
 import {
   Access,
   BlockStmt,
@@ -25,25 +24,8 @@ import {
   marker,
   typeRef,
 } from "../../../../ast.tz";
-
-type Modifiers = {
-  isStatic: boolean;
-  readonly: boolean;
-  isAbstract: boolean;
-  isOverride: boolean;
-  isAsync: boolean;
-  accessor: boolean;
-  access: Access;
-  staticBlock: boolean;
-};
-
-type MemberName = {
-  readonly loc: int;
-  readonly start: int;
-  readonly name: string;
-  readonly generator: boolean;
-  readonly constructorName: boolean;
-};
+import { MemberName, Modifiers } from "../types/file-parser.types.classes.tz";
+import { Arguments } from "../types/file-parser.types.expressions.tz";
 
 function isMemberModifier(kind: TokenKind): boolean {
   switch (kind) {

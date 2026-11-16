@@ -18,7 +18,7 @@ import {
   TypeRef,
   typeRef,
 } from "../../../../ast.tz";
-import { TypePlace } from "../parse-context.tz";
+import { TypePlace } from "../types/file-parser.types.context.tz";
 
 const kExactDoubleLimit: uint64 = 9007199254740992;
 

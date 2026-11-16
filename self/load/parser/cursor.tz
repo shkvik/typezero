@@ -1,11 +1,15 @@
 import { KnownName, Token, TokenKind, isName } from "../../token.tz";
 import { Span } from "../../ast.tz";
 import { Code } from "../../diagnostic/code.tz";
-import { Details, kNoDetails, messageText } from "../../diagnostic/message.tz";
+import { Details, kNoDetails } from "../../diagnostic/message.tz";
 
 export type Mark = { readonly at: int; readonly recovering: boolean };
 
-export type ParseError = { readonly loc: int; readonly message: string };
+export type ParseError = {
+  readonly code: Code;
+  readonly loc: int;
+  readonly details: Details;
+};
 
 const kEnd: Token = {
   kind: TokenKind.End,
@@ -277,10 +281,8 @@ export class Cursor {
   }
 
   private record(loc: int, code: Code, details: Details): void {
-    if (this.discarding != 0) {
-      return;
+    if (this.discarding == 0) {
+      this.errors.push({ code, loc, details });
     }
-    const message = messageText(code, details);
-    this.errors.push({ loc, message });
   }
 }

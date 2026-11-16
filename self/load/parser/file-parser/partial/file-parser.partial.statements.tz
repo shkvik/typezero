@@ -2,7 +2,6 @@ import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { Details, kNoDetails } from "../../../../diagnostic/message.tz";
 import { Token, TokenKind, isKeyword, isName } from "../../../../token.tz";
-import { Pattern } from "./file-parser.partial.patterns.tz";
 import {
   BindingForm,
   BindingKind,
@@ -13,27 +12,17 @@ import {
   Stmt,
   StmtKind,
   SwitchCase,
-  TypeRef,
   VarDeclStmt,
   VarDeclarator,
   marker,
 } from "../../../../ast.tz";
-import { ExpressionPlace } from "../parse-context.tz";
-
-type Binding = {
-  readonly name: string;
-  readonly loc: int;
-  readonly typeAnn?: TypeRef;
-};
-
-enum ForTargetKind {
-  Name,
-  Pattern,
-}
-
-type ForTarget =
-  | { readonly kind: ForTargetKind.Name; readonly binding: Binding }
-  | { readonly kind: ForTargetKind.Pattern; readonly pattern: Pattern };
+import { ExpressionPlace } from "../types/file-parser.types.context.tz";
+import { Pattern } from "../types/file-parser.types.patterns.tz";
+import {
+  Binding,
+  ForTarget,
+  ForTargetKind,
+} from "../types/file-parser.types.statements.tz";
 
 partial class FileParser {
   private statement(topLevel: boolean): Stmt {

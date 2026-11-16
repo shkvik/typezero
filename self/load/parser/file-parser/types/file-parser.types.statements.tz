@@ -1,0 +1,17 @@
+import { TypeRef } from "../../../../ast.tz";
+import { Pattern } from "./file-parser.types.patterns.tz";
+
+export type Binding = {
+  readonly name: string;
+  readonly loc: int;
+  readonly typeAnn?: TypeRef;
+};
+
+export enum ForTargetKind {
+  Name,
+  Pattern,
+}
+
+export type ForTarget =
+  | { readonly kind: ForTargetKind.Name; readonly binding: Binding }
+  | { readonly kind: ForTargetKind.Pattern; readonly pattern: Pattern };

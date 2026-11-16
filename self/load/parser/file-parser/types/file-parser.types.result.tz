@@ -1,0 +1,7 @@
+import { SourceFile } from "../../../../ast.tz";
+import { ParseError } from "../../cursor.tz";
+
+export type ParseResult = {
+  readonly file: SourceFile;
+  readonly errors: ParseError[];
+};

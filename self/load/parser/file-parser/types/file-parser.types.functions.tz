@@ -1,0 +1,3 @@
+import { Pattern } from "./file-parser.types.patterns.tz";
+
+export type ParamPattern = { readonly name: string; readonly pattern: Pattern };

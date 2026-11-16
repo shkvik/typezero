@@ -1,0 +1,27 @@
+import { TokenKind } from "../../../../token.tz";
+import { Expr } from "../../../../ast.tz";
+
+export enum Precedence {
+  None,
+  Or,
+  And,
+  BitOr,
+  BitXor,
+  BitAnd,
+  Equality,
+  Relational,
+  Shift,
+  Additive,
+  Multiplicative,
+  Power,
+}
+
+export type Operator = { readonly kind: TokenKind; readonly width: int };
+
+export type BinaryOperator = {
+  readonly kind: TokenKind;
+  readonly width: int;
+  readonly precedence: Precedence;
+};
+
+export type Arguments = { readonly args: Expr[]; readonly spread: boolean[] };

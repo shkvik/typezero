@@ -103,11 +103,12 @@ self/             компилятор на tz, пробный (порт compile
                   load/lexer/lexer.tz (tokenize → массив токенов); load/parser/ — Parser (parser.tz:
                   run() по списку файлов → ParsedFile[]), Cursor (позиция, откаты, ошибки),
                   LiteralReader (literal.tz: значения литералов по токену);
-                  load/parser/file-parser/ — FileParser (file-parser.tz), контекст места
-                  разбора (parse-context.tz: вид функции, место выражения, место типа), части
+                  load/parser/file-parser/ — FileParser (file-parser.tz), части
                   `partial class` — в partial/file-parser.partial.<часть>.tz (types,
-                  expressions, patterns, statements, functions, classes, modules); сверка
-                  деревьев с C++ — скрытая `tz syntax tree|time|hold|read`
+                  expressions, patterns, statements, functions, classes, modules), их типы —
+                  в types/file-parser.types.<часть>.tz, там же result (ParseResult) и context
+                  (вид функции, место выражения, место типа); сверка деревьев с C++ —
+                  скрытая `tz syntax tree|time|hold|read`
 tests/ docs/ bench/ examples/ third_party/
 ```
 

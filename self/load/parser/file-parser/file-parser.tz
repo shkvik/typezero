@@ -8,19 +8,15 @@ import "./partial/file-parser.partial.classes.tz";
 import "./partial/file-parser.partial.modules.tz";
 import { Token, TokenKind } from "../../../token.tz";
 import { ExportDecl, ImportDecl, SourceFile, Stmt } from "../../../ast.tz";
-import { Cursor, ParseError } from "../cursor.tz";
+import { Cursor } from "../cursor.tz";
 import { LiteralReader } from "../literal.tz";
 import {
   ExpressionPlace,
   FunctionKind,
   ParseContext,
   TypePlace,
-} from "./parse-context.tz";
-
-export type ParseResult = {
-  readonly file: SourceFile;
-  readonly errors: ParseError[];
-};
+} from "./types/file-parser.types.context.tz";
+import { ParseResult } from "./types/file-parser.types.result.tz";
 
 export class FileParser {
   private readonly cursor: Cursor;
