@@ -1,1 +1,5 @@
 export const kExactDoubleLimit: uint64 = 9007199254740992;
+
+export const kSymbolAsyncIteratorName = "[Symbol.asyncIterator]";
+export const kSymbolDisposeName = "[Symbol.dispose]";
+export const kSymbolIteratorName = "[Symbol.iterator]";

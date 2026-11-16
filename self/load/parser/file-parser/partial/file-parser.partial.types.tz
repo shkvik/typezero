@@ -24,24 +24,33 @@ import {
   ObjectTypeMember,
   Signature,
 } from "../types/file-parser.types.types.tz";
-import { kExactDoubleLimit } from "../const/file-parser.const.types.tz";
+import {
+  kExactDoubleLimit,
+  kSymbolAsyncIteratorName,
+  kSymbolDisposeName,
+  kSymbolIteratorName,
+} from "../const/file-parser.const.types.tz";
 
 partial class FileParser {
   private type(place: TypePlace = TypePlace.Plain): TypeRef {
     const head = this.cursor.peek();
     const start = head.start;
     const outer = this.context;
+
     this.context = { ...outer, typePlace: place };
     const check = this.unionType();
     this.context = outer;
+
     const extendsClause = place == TypePlace.ExtendsClause;
     if (extendsClause || !this.cursor.is(TokenKind.Extends)) {
       return check;
     }
+
     const ref = this.typeRef(check.loc);
     ref.form = { kind: TypeKind.Conditional };
     this.cursor.next();
     ref.args.push(check);
+
     const extendsType = this.type(TypePlace.ExtendsClause);
     ref.args.push(extendsType);
     if (
@@ -49,11 +58,13 @@ partial class FileParser {
     ) {
       return this.typeRef(start);
     }
+
     const whenTrue = this.type();
     ref.args.push(whenTrue);
     if (!this.cursor.expect(TokenKind.Colon, Code.ExpectedBetweenBranches)) {
       return this.typeRef(start);
     }
+
     const whenFalse = this.type();
     ref.args.push(whenFalse);
     ref.source = this.cursor.spanFrom(start);
@@ -64,14 +75,17 @@ partial class FileParser {
   private unionType(): TypeRef {
     const head = this.cursor.peek();
     const loc = head.start;
+
     this.cursor.accept(TokenKind.Pipe);
     const first = this.intersectionType();
     if (!this.cursor.is(TokenKind.Pipe)) {
       return first;
     }
+
     const ref = this.typeRef(loc);
     ref.form = { kind: TypeKind.Union };
     ref.args.push(first);
+
     while (this.cursor.accept(TokenKind.Pipe)) {
       const next = this.intersectionType();
       ref.args.push(next);
@@ -83,14 +97,17 @@ partial class FileParser {
   private intersectionType(): TypeRef {
     const head = this.cursor.peek();
     const loc = head.start;
+
     this.cursor.accept(TokenKind.Amp);
     const first = this.prefixedType();
     if (!this.cursor.is(TokenKind.Amp)) {
       return first;
     }
+
     const ref = this.typeRef(loc);
     ref.form = { kind: TypeKind.Intersection };
     ref.args.push(first);
+
     while (this.cursor.accept(TokenKind.Amp)) {
       const next = this.prefixedType();
       ref.args.push(next);
@@ -119,14 +136,18 @@ partial class FileParser {
     if (!asserts && !predicate) {
       return this.type();
     }
+
     const token = this.cursor.peek();
     const ref = this.typeRef(token.start);
     ref.form = { kind: TypeKind.Predicate, asserts };
+
     if (asserts) {
       this.cursor.next();
     }
+
     const subject = this.cursor.next();
     ref.name = subject.text;
+
     const following = this.cursor.peek();
     if (following.kind == TokenKind.Is && !following.newline) {
       this.cursor.next();
@@ -361,10 +382,12 @@ partial class FileParser {
 
   private genericFunctionType(): TypeRef {
     const less = this.cursor.peek();
+
     this.typeParams();
     if (this.cursor.is(TokenKind.LParen)) {
       this.functionType();
     }
+
     this.cursor.report(less.start, Code.GenericFunctionType);
 
     return this.typeRef(less.start);
@@ -374,15 +397,19 @@ partial class FileParser {
     const keyword = this.cursor.peek();
     const ref = this.typeRef(keyword.start);
     ref.form = { kind: TypeKind.Infer };
+
     this.cursor.next();
     const variable = this.cursor.next();
     ref.name = variable.text;
+
     if (!this.cursor.is(TokenKind.Extends)) {
       return ref;
     }
+
     const start = this.cursor.mark();
     this.cursor.next();
     const constraint = this.type(TypePlace.ExtendsClause);
+
     const extendsClause = this.context.typePlace == TypePlace.ExtendsClause;
     if (extendsClause || !this.cursor.is(TokenKind.Question)) {
       ref.args.push(constraint);
@@ -397,7 +424,9 @@ partial class FileParser {
     const token = this.cursor.peek();
     const ref = this.typeRef(token.start);
     const first = this.literals.templatePart(token);
+
     this.cursor.next();
+
     if (token.kind == TokenKind.TemplateString) {
       ref.form = {
         kind: TypeKind.Literal,
@@ -406,13 +435,16 @@ partial class FileParser {
         integer: false,
       };
       ref.name = "string";
+
       return ref;
     }
+
     const parts: TemplateTypeForm = {
       kind: TypeKind.Template,
       texts: [first.text],
     };
     ref.form = parts;
+
     let piece = token;
     while (
       piece.kind == TokenKind.TemplateHead ||
@@ -420,14 +452,17 @@ partial class FileParser {
     ) {
       const part = this.type();
       ref.args.push(part);
+
       const middle = this.cursor.peek();
       if (
         middle.kind != TokenKind.TemplateMiddle &&
         middle.kind != TokenKind.TemplateTail
       ) {
         this.cursor.error(middle.start, Code.ExpectedTemplateTypeClose);
+
         return this.typeRef(token.start);
       }
+
       const text = this.literals.templatePart(middle);
       parts.texts.push(text.text);
       piece = this.cursor.next();
@@ -444,8 +479,10 @@ partial class FileParser {
     const lit = this.cursor.is(TokenKind.Int)
       ? this.intLiteral()
       : this.floatLiteral();
+
     let number = 0.0;
     let integer = false;
+
     if (lit.kind == ExprKind.IntLit) {
       number = this.integerAsDouble(lit.value);
       integer = true;
@@ -467,16 +504,21 @@ partial class FileParser {
     const ref = this.typeRef(keyword.start);
     const names: string[] = [];
     ref.form = { kind: TypeKind.TypeOf, names };
+
     this.cursor.next();
+
     if (!this.cursor.atNameOrThis()) {
       const token = this.cursor.peek();
       this.cursor.error(token.start, Code.ExpectedTypeofName, {
         found: token.kind,
       });
+
       return ref;
     }
+
     const first = this.cursor.next();
     names.push(first.text);
+
     while (this.qualifiedPartAhead()) {
       this.cursor.next();
       const part = this.cursor.next();
@@ -489,6 +531,7 @@ partial class FileParser {
   private typeArguments(): TypeRef[] {
     this.cursor.next();
     const args: TypeRef[] = [this.type()];
+
     while (this.cursor.accept(TokenKind.Comma)) {
       const arg = this.type();
       args.push(arg);
@@ -505,16 +548,22 @@ partial class FileParser {
 
   private tryTypeArguments(callOnly: boolean): TypeRef[] | undefined {
     const start = this.cursor.mark();
+
     this.cursor.startDiscarding();
     this.cursor.stopRecovering();
+
     const parsed = this.typeArguments();
     const fits =
       !this.cursor.isRecovering() && this.followsTypeArguments(callOnly);
+
     this.cursor.stopDiscarding();
+
     if (!fits) {
       this.cursor.reset(start);
+
       return undefined;
     }
+
     this.cursor.restoreRecovering(start);
 
     return parsed;
@@ -522,6 +571,7 @@ partial class FileParser {
 
   private followsTypeArguments(callOnly: boolean): boolean {
     const token = this.cursor.peek();
+
     switch (token.kind) {
       case TokenKind.LParen:
         return true;
@@ -624,6 +674,7 @@ partial class FileParser {
     if (next.kind != modifier) {
       return ModifierChange.None;
     }
+
     if (this.cursor.accept(TokenKind.Minus)) {
       return ModifierChange.Remove;
     }
@@ -685,24 +736,37 @@ partial class FileParser {
   private symbolName(): string | undefined {
     const bracket = this.cursor.peek();
     const loc = bracket.start;
+
     this.cursor.skip(2);
     if (!this.cursor.expect(TokenKind.Dot, Code.ExpectedAfterSymbol)) {
       return undefined;
     }
+
     const member = this.cursor.next();
     if (!this.cursor.expect(TokenKind.RBracket, Code.ExpectedSymbolNameClose)) {
       return undefined;
     }
-    switch (member.known) {
+
+    const name = this.symbolMemberName(member.known);
+    if (name == undefined) {
+      this.cursor.report(loc, Code.SymbolMemberName, { word: member.text });
+
+      return kSymbolIteratorName;
+    }
+
+    return name;
+  }
+
+  private symbolMemberName(known: KnownName): string | undefined {
+    switch (known) {
       case KnownName.AsyncIterator:
-        return "[Symbol.asyncIterator]";
+        return kSymbolAsyncIteratorName;
       case KnownName.Dispose:
-        return "[Symbol.dispose]";
+        return kSymbolDisposeName;
       case KnownName.Iterator:
-        return "[Symbol.iterator]";
+        return kSymbolIteratorName;
       default:
-        this.cursor.report(loc, Code.SymbolMemberName, { word: member.text });
-        return "[Symbol.iterator]";
+        return undefined;
     }
   }
 
@@ -721,11 +785,13 @@ partial class FileParser {
 
     while (this.cursor.insideList(TokenKind.RBrace)) {
       const first = this.cursor.peek();
+
       let readonlyChange = this.acceptSignBefore(TokenKind.Readonly);
       const readonly = this.acceptReadonlyWord();
       if (readonly && readonlyChange == ModifierChange.None) {
         readonlyChange = ModifierChange.Add;
       }
+
       const head = this.cursor.peek();
       const loc = readonly ? head.start : first.start;
 
@@ -749,6 +815,7 @@ partial class FileParser {
       if (member == undefined) {
         return ref;
       }
+
       this.addObjectTypeMember(ref, object, member);
 
       const separatorCode = member.method
@@ -758,6 +825,7 @@ partial class FileParser {
         return ref;
       }
     }
+
     this.cursor.expect(TokenKind.RBrace, Code.ExpectedObjectTypeClose);
 
     return ref;
@@ -881,6 +949,7 @@ partial class FileParser {
     ) {
       return true;
     }
+
     const token = this.cursor.peek();
     if (token.kind != TokenKind.RBrace && !token.newline) {
       this.skipObjectType(token.start, code, { found: token.kind });
@@ -1064,6 +1133,7 @@ partial class FileParser {
       if (rest) {
         signature.rest = true;
       }
+
       ref.args.push(type);
       signature.names.push(name.text);
       signature.optional.push(optional);
@@ -1072,6 +1142,7 @@ partial class FileParser {
         break;
       }
     }
+
     this.cursor.expect(
       TokenKind.RParen,
       Code.ExpectedFunctionTypeParametersClose,
@@ -1084,6 +1155,7 @@ partial class FileParser {
     if (this.cursor.accept(TokenKind.Colon)) {
       return this.type();
     }
+
     this.cursor.report(name.start, Code.FunctionTypeParameterNeedsType, {
       word: name.text,
     });

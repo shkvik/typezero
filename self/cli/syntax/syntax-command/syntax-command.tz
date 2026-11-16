@@ -1,0 +1,211 @@
+import { readFileSync } from "node:fs";
+import { Lexer } from "../../../load/lexer/lexer.tz";
+import { Parser } from "../../../load/parser/parser.tz";
+import {
+  ParsedFile,
+  SourceText,
+} from "../../../load/parser/types/parser.types.tz";
+import { SourceFile } from "../../../program/ast/types/ast.types.modules.tz";
+import { Dumper } from "../ast-dump/ast-dump.tz";
+import { SyntaxMode } from "./types/syntax-command.types.tz";
+import {
+  kDefaultModeWord,
+  kDefaultRepeat,
+  kHoldMilliseconds,
+  kMaxRepeat,
+  kUsage,
+} from "./const/syntax-command.const.tz";
+
+export class SyntaxCommand {
+  private readonly modeWord: string;
+  private readonly listPath: string;
+  private readonly repeatText: string;
+
+  public constructor(args: string[]) {
+    this.modeWord = args[2] ?? kDefaultModeWord;
+    this.listPath = args[3] ?? "";
+    this.repeatText = args[4] ?? "";
+  }
+
+  public run(): void {
+    const mode = this.modeOf(this.modeWord);
+    if (mode == undefined) {
+      console.log(kUsage);
+
+      return;
+    }
+
+    const files = this.readList(this.listPath);
+    const sources = this.readSources(files);
+
+    switch (mode) {
+      case SyntaxMode.Tokens:
+        return this.printTokens(sources);
+      case SyntaxMode.Tree:
+        return this.printTrees(sources);
+      case SyntaxMode.Time:
+        return this.timeSources(sources);
+      case SyntaxMode.Hold:
+        return this.holdSources(sources, true);
+      case SyntaxMode.Read:
+        return this.holdSources(sources, false);
+    }
+  }
+
+  private modeOf(word: string): SyntaxMode | undefined {
+    switch (word) {
+      case "tokens":
+        return SyntaxMode.Tokens;
+      case "tree":
+        return SyntaxMode.Tree;
+      case "time":
+        return SyntaxMode.Time;
+      case "hold":
+        return SyntaxMode.Hold;
+      case "read":
+        return SyntaxMode.Read;
+      default:
+        return undefined;
+    }
+  }
+
+  private readList(path: string): string[] {
+    const text = readFileSync(path, "utf8");
+    if (text.isErr()) {
+      return [];
+    }
+
+    const lines = text.value.split("\n");
+
+    return lines.map((line) => line.trim()).filter((line) => line.length > 0);
+  }
+
+  private readSources(files: string[]): SourceText[] {
+    const sources: SourceText[] = [];
+
+    for (const path of files) {
+      const text = readFileSync(path);
+      if (text.isOk()) {
+        const isLibrary = path.replaceAll("\\", "/").includes("/library/");
+        sources.push({ path, text: text.value, isLibrary });
+      }
+    }
+
+    return sources;
+  }
+
+  private printTokens(sources: SourceText[]): void {
+    for (const source of sources) {
+      console.log(`== ${source.path}`);
+
+      const lexer = new Lexer(source.text);
+      for (const token of lexer.run()) {
+        const length = token.end - token.start;
+        const newline = token.newline ? 1 : 0;
+        const hash = token.hash ? 1 : 0;
+        console.log(`${token.kind} ${token.start} ${length} ${newline} ${hash}`);
+      }
+    }
+  }
+
+  private printTrees(sources: SourceText[]): void {
+    const parser = new Parser(sources);
+
+    for (const parsed of parser.run()) {
+      this.printTree(parsed);
+    }
+  }
+
+  private printTree(parsed: ParsedFile): void {
+    const dumper = new Dumper(parsed.source.text);
+    dumper.dumpFile(parsed.file);
+
+    console.log(`== ${parsed.source.path}`);
+    const text = dumper.text();
+    console.log(text);
+
+    for (const error of parsed.errors) {
+      console.log(`!! ${error.loc}`);
+    }
+  }
+
+  private lexAll(sources: SourceText[]): int {
+    let tokens = 0;
+
+    for (const source of sources) {
+      const lexer = new Lexer(source.text);
+      const lexed = lexer.run();
+      tokens += lexed.length - 1;
+    }
+
+    return tokens;
+  }
+
+  private parseAll(sources: SourceText[]): int {
+    let items = 0;
+    const parser = new Parser(sources);
+
+    for (const parsed of parser.run()) {
+      items += parsed.file.items.length;
+    }
+
+    return items;
+  }
+
+  private timeSources(sources: SourceText[]): void {
+    const parsedRepeat = parseInt(this.repeatText);
+    const repeat = parsedRepeat.unwrapOr(kDefaultRepeat);
+    if (repeat < 1 || repeat > kMaxRepeat) {
+      return;
+    }
+
+    let tokens = 0;
+    let items = 0;
+
+    const lexStarted = performance.now();
+    for (let pass = 0; pass < repeat; pass++) {
+      tokens = this.lexAll(sources);
+    }
+
+    const parseStarted = performance.now();
+    for (let pass = 0; pass < repeat; pass++) {
+      items = this.parseAll(sources);
+    }
+
+    const parseEnded = performance.now();
+    const passes = repeat.toDouble();
+    const lexMs = (parseStarted - lexStarted) / passes;
+    const parseMs = (parseEnded - parseStarted) / passes;
+    const lexText = lexMs.toFixed(2);
+    const parseText = parseMs.toFixed(2);
+
+    console.log(`files ${sources.length}, tokens ${tokens}, nodes ${items}`);
+    console.log(`lex ${lexText} ms, lex + parse ${parseText} ms per pass`);
+  }
+
+  private holdSources(sources: SourceText[], parseThem: boolean): void {
+    const files: SourceFile[] = [];
+
+    if (parseThem) {
+      const parser = new Parser(sources);
+      for (const parsed of parser.run()) {
+        files.push(parsed.file);
+      }
+    }
+
+    let items = 0;
+    for (const file of files) {
+      items += file.items.length;
+    }
+
+    const now = performance.now();
+    const until = now + kHoldMilliseconds;
+    let spins = 0;
+    while (performance.now() < until) {
+      spins += 1;
+    }
+
+    const counts = `files ${sources.length}, items ${items}`;
+    console.log(`${counts}, held ${files.length}, spins ${spins}`);
+  }
+}

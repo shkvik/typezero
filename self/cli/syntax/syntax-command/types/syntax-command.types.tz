@@ -1,0 +1,7 @@
+export enum SyntaxMode {
+  Tokens,
+  Tree,
+  Time,
+  Hold,
+  Read,
+}

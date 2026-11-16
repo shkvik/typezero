@@ -1,0 +1,7 @@
+export const kHex = "0123456789abcdef";
+export const kSpace = 32;
+export const kQuote = 34;
+export const kBackslash = 92;
+export const kDelete = 127;
+export const kHigh = 128;
+export const kNoLocation = -1;

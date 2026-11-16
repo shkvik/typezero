@@ -97,7 +97,10 @@ runtime/          весь C → tzrt.lib, tzrt.bc, tzcrypto.lib
   library/        C-часть тем: <тема>/<модуль>/
 library/          весь tz → bin/lib: <тема>/*.tz
 editors/          vscode/ — расширение VS Code; types/ — объявления для будущего плагина tsserver
-self/             компилятор на tz, пробный (порт compiler/load): dump.tz, main.tz;
+self/             компилятор на tz, пробный (порт compiler/load): main.tz — только запуск
+                  SyntaxCommand; cli/syntax/ — как compiler/cli/syntax/: syntax-command/
+                  (SyntaxCommand: режимы tokens|tree|time|hold|read, enum SyntaxMode) и
+                  ast-dump/ (Dumper: дерево текстом для сверки с C++);
                   program/ast/ — дерево разбора: типы узлов — в types/ast.types.<группа>.tz
                   (span, types, expressions, patterns, statements, functions, classes — там же
                   type alias и enum, modules — там же SourceFile; группы ссылаются друг на
