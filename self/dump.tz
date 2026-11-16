@@ -6,6 +6,7 @@ import {
   Expr,
   ExprKind,
   FunctionDecl,
+  ModifierChange,
   ModuleName,
   NewExpr,
   NewKind,
@@ -24,6 +25,27 @@ import {
 } from "./ast.tz";
 
 const kHex = "0123456789abcdef";
+const kSpace = 32;
+const kQuote = 34;
+const kBackslash = 92;
+const kDelete = 127;
+const kHigh = 128;
+
+enum Quoting {
+  KeepUnicode,
+  EscapeUnicode,
+}
+
+function changeNumber(change: ModifierChange): int {
+  switch (change) {
+    case ModifierChange.Add:
+      return 1;
+    case ModifierChange.Remove:
+      return -1;
+    default:
+      return 0;
+  }
+}
 
 function typeKindName(kind: TypeKind): string {
   switch (kind) {
@@ -116,33 +138,21 @@ export class Dumper {
     return `\\u${hex}`;
   }
 
-  private needsEscape(c: int): boolean {
-    return c < 0x20 || c == 0x7f || c == 34 || c == 92;
-  }
-
-  private quote(text: string): string {
-    const parts: string[] = [];
-    for (let i = 0; i < text.length; i++) {
-      const c = text.charCodeAt(i);
-      if (this.needsEscape(c)) {
-        const escape = this.unicodeEscape(c);
-        parts.push(escape);
-        continue;
-      }
-      const character = text.charAt(i);
-      parts.push(character);
+  private needsEscape(c: int, quoting: Quoting): boolean {
+    const control = c < kSpace || c == kDelete;
+    const delimiter = c == kQuote || c == kBackslash;
+    if (control || delimiter) {
+      return true;
     }
-    const joined = parts.join("");
 
-    return `"${joined}"`;
+    return quoting == Quoting.EscapeUnicode && c >= kHigh;
   }
 
-  private units(text: string): string {
+  private quote(text: string, quoting: Quoting = Quoting.KeepUnicode): string {
     const parts: string[] = [];
     for (let i = 0; i < text.length; i++) {
       const c = text.charCodeAt(i);
-      const printable = c >= 0x20 && c < 0x7f && c != 34 && c != 92;
-      if (!printable) {
+      if (this.needsEscape(c, quoting)) {
         const escape = this.unicodeEscape(c);
         parts.push(escape);
         continue;
@@ -644,14 +654,14 @@ export class Dumper {
         return this.line(`BoolLit ${loc} ${value}`);
       }
       case ExprKind.StringLit: {
-        const value = this.units(expr.value);
+        const value = this.quote(expr.value, Quoting.EscapeUnicode);
         return this.line(`StringLit ${loc} ${value}`);
       }
       case ExprKind.Undefined:
         return this.line(`Undefined ${loc}`);
       case ExprKind.RegexLit: {
-        const pattern = this.units(expr.pattern);
-        const flags = this.units(expr.flags);
+        const pattern = this.quote(expr.pattern, Quoting.EscapeUnicode);
+        const flags = this.quote(expr.flags, Quoting.EscapeUnicode);
         return this.line(
           `RegexLit ${loc} ${pattern} ${flags} written=${expr.written}`,
         );
@@ -659,7 +669,7 @@ export class Dumper {
       case ExprKind.Template: {
         const parts: string[] = [];
         for (const quasi of expr.quasis) {
-          const text = this.units(quasi);
+          const text = this.quote(quasi, Quoting.EscapeUnicode);
           parts.push(` ${text}`);
         }
         const quasis = parts.join("");
@@ -876,7 +886,7 @@ export class Dumper {
         return ` ro=${readonlyFlags} spread=${spread}`;
       }
       case TypeKind.Literal: {
-        const text = this.units(form.text);
+        const text = this.quote(form.text, Quoting.EscapeUnicode);
         const numberBits = this.bits(form.number);
         const integer = this.flag(form.integer);
         return ` text=${text} number=${numberBits} int=${integer}`;
@@ -889,12 +899,15 @@ export class Dumper {
         const names = this.quoteAll(form.names);
         return ` names=${names}`;
       }
-      case TypeKind.Mapped:
-        return ` opt=${form.mappedOptional} ro=${form.mappedReadonly}`;
+      case TypeKind.Mapped: {
+        const optional = changeNumber(form.optionalChange);
+        const readonlyChange = changeNumber(form.readonlyChange);
+        return ` opt=${optional} ro=${readonlyChange}`;
+      }
       case TypeKind.Template: {
         const parts: string[] = [];
         for (const text of form.texts) {
-          const part = this.units(text);
+          const part = this.quote(text, Quoting.EscapeUnicode);
           parts.push(part);
         }
         const texts = parts.join(",");

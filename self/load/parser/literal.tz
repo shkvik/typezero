@@ -28,7 +28,11 @@ const kLeftBrace = 123;
 const kRightBrace = 125;
 const kSlash = 47;
 const kUnderscore = 95;
+const kUpperZ = 90;
+const kLowerZ = 122;
 const kHigh = 128;
+const kMaxCodePointDigits = 6;
+const kRadixPrefixLength = 2;
 
 export type DecodedText = { readonly text: string; readonly ok: boolean };
 
@@ -102,13 +106,13 @@ export class LiteralReader {
   public integer(token: Token): NumberText {
     const digits = this.digitsOf(token);
     const radix = this.radixOf(digits);
-    const from = radix == 10 ? 0 : 2;
+    const prefixLength = radix == 10 ? 0 : kRadixPrefixLength;
     const base = radix.toUint64();
     let value: uint64 = 0;
-    for (let i = from; i < digits.length; i++) {
+    for (let i = prefixLength; i < digits.length; i++) {
       const c = digits[i] ?? 0;
-      const digit = this.digitValue(c, radix);
-      if (digit >= radix) {
+      const digit = this.digitValue(c);
+      if (digit == undefined || digit >= radix) {
         return { isInt: true, intValue: 0, doubleValue: 0.0, valid: false };
       }
       const next = this.appendDigit(value, base, digit);
@@ -123,7 +127,7 @@ export class LiteralReader {
 
   public float(token: Token): NumberText {
     const digits = this.digitsOf(token);
-    const text = this.textOfDigits(digits, 0);
+    const text = this.textOfDigits(digits);
     const parsed = Number(text);
     if (parsed.isErr()) {
       return { isInt: false, intValue: 0, doubleValue: 0.0, valid: false };
@@ -192,7 +196,7 @@ export class LiteralReader {
       cp = cp * 16 + digit;
       i += 1;
       digits += 1;
-      if (digits > 6) {
+      if (digits > kMaxCodePointDigits) {
         return undefined;
       }
     }
@@ -344,8 +348,8 @@ export class LiteralReader {
   private allDigitsValid(digits: int[], from: int, radix: int): boolean {
     for (let i = from; i < digits.length; i++) {
       const c = digits[i] ?? 0;
-      const digit = this.digitValue(c, radix);
-      if (digit >= radix) {
+      const digit = this.digitValue(c);
+      if (digit == undefined || digit >= radix) {
         return false;
       }
     }
@@ -376,9 +380,7 @@ export class LiteralReader {
     if (!this.allDigitsValid(digits, from, radix)) {
       return { isInt: true, intValue: 0, doubleValue: 0.0, valid: false };
     }
-    const decimal = this.textOfDigits(digits, 0);
-    const prefixed = this.textOfDigits(digits, 1);
-    const text = radix == 10 ? decimal : `0${prefixed}`;
+    const text = this.textOfDigits(digits);
     const parsed = Number(text);
     const rounded = parsed.unwrapOr(0.0);
 
@@ -398,7 +400,7 @@ export class LiteralReader {
   }
 
   private radixOf(digits: int[]): int {
-    if (digits.length <= 2 || digits[0] != kZero) {
+    if (digits.length <= kRadixPrefixLength || digits[0] != kZero) {
       return 10;
     }
     const marker = digits[1] ?? 0;
@@ -415,22 +417,23 @@ export class LiteralReader {
     return 10;
   }
 
-  private digitValue(c: int, radix: int): int {
+  private digitValue(c: int): int | undefined {
     if (c >= kZero && c <= kNine) {
       return c - kZero;
     }
-    const lower = c | 0x20;
-    if (lower >= kLowerA && lower <= 122) {
-      return lower - kLowerA + 10;
+    if (c >= kLowerA && c <= kLowerZ) {
+      return c - kLowerA + 10;
+    }
+    if (c >= kUpperA && c <= kUpperZ) {
+      return c - kUpperA + 10;
     }
 
-    return radix;
+    return undefined;
   }
 
-  private textOfDigits(digits: int[], from: int): string {
+  private textOfDigits(digits: int[]): string {
     const chars: string[] = [];
-    for (let i = from; i < digits.length; i++) {
-      const c = digits[i] ?? 0;
+    for (const c of digits) {
       const character = String.fromCharCode(c);
       chars.push(character);
     }

@@ -61,6 +61,7 @@ const kPipe = 124;
 const kRightBrace = 125;
 const kTilde = 126;
 const kHigh = 128;
+const kRadixPrefixLength = 2;
 
 export function tokenize(source: Buffer): Token[] {
   const lexer = new Lexer(source);
@@ -101,6 +102,8 @@ class Lexer {
   private readonly tokens: Token[];
   private readonly braces: int[];
   private cur: int;
+  private start: int;
+  private newline: boolean;
 
   public constructor(source: Buffer) {
     this.source = source;
@@ -108,43 +111,159 @@ class Lexer {
     this.tokens = [];
     this.braces = [];
     this.cur = 0;
+    this.start = 0;
+    this.newline = false;
   }
 
   public run(): Token[] {
     this.skipPreamble();
-    let newline = this.skipTrivia();
+    this.newline = this.skipTrivia();
     while (this.cur < this.end) {
-      this.token(newline);
-      newline = this.skipTrivia();
+      this.token();
+      this.newline = this.skipTrivia();
     }
-    this.push(TokenKind.End, this.cur, newline);
+    this.start = this.cur;
+    this.push(TokenKind.End);
 
     return this.tokens;
   }
 
-  private token(newline: boolean): void {
-    const start = this.cur;
+  private token(): void {
+    this.start = this.cur;
     const c = this.at(0);
     this.cur += 1;
-    if (this.punctuator(c, start, newline)) {
-      return;
-    }
-    if (this.isDigit(c)) {
-      return this.number(start, newline);
-    }
-    if (this.isIdentStart(c)) {
-      return this.identifier(start, newline, false);
+    switch (c) {
+      case kLeftParen:
+        return this.push(TokenKind.LParen);
+      case kRightParen:
+        return this.push(TokenKind.RParen);
+      case kLeftBracket:
+        return this.push(TokenKind.LBracket);
+      case kRightBracket:
+        return this.push(TokenKind.RBracket);
+      case kComma:
+        return this.push(TokenKind.Comma);
+      case kSemi:
+        return this.push(TokenKind.Semi);
+      case kColon:
+        return this.push(TokenKind.Colon);
+      case kTilde:
+        return this.push(TokenKind.Tilde);
+      case kAt:
+        return this.push(TokenKind.At);
+      case kGreater:
+        return this.push(TokenKind.Greater);
+      case kLeftBrace:
+        return this.leftBrace();
+      case kRightBrace:
+        return this.rightBrace();
+      case kBacktick:
+        return this.template(false);
+      case kQuote:
+      case kApostrophe:
+        return this.string(c);
+      case kPercent:
+        return this.pushOperator(TokenKind.Percent, TokenKind.PercentAssign);
+      case kCaret:
+        return this.pushOperator(TokenKind.Caret, TokenKind.CaretAssign);
+      case kPlus:
+        if (this.match(kPlus)) {
+          return this.push(TokenKind.PlusPlus);
+        }
+        return this.pushOperator(TokenKind.Plus, TokenKind.PlusAssign);
+      case kMinus:
+        if (this.match(kMinus)) {
+          return this.push(TokenKind.MinusMinus);
+        }
+        return this.pushOperator(TokenKind.Minus, TokenKind.MinusAssign);
+      case kStar:
+        if (this.match(kStar)) {
+          return this.pushOperator(
+            TokenKind.StarStar,
+            TokenKind.StarStarAssign,
+          );
+        }
+        return this.pushOperator(TokenKind.Star, TokenKind.StarAssign);
+      case kAmp:
+        if (this.match(kAmp)) {
+          return this.pushOperator(TokenKind.AmpAmp, TokenKind.AmpAmpAssign);
+        }
+        return this.pushOperator(TokenKind.Amp, TokenKind.AmpAssign);
+      case kPipe:
+        if (this.match(kPipe)) {
+          return this.pushOperator(
+            TokenKind.PipePipe,
+            TokenKind.PipePipeAssign,
+          );
+        }
+        return this.pushOperator(TokenKind.Pipe, TokenKind.PipeAssign);
+      case kLess:
+        if (this.match(kLess)) {
+          return this.pushOperator(TokenKind.Shl, TokenKind.ShlAssign);
+        }
+        return this.pushOperator(TokenKind.Less, TokenKind.LessEq);
+      case kEquals:
+        if (this.match(kEquals)) {
+          return this.pushOperator(TokenKind.EqEq, TokenKind.EqEqEq);
+        }
+        if (this.match(kGreater)) {
+          return this.push(TokenKind.Arrow);
+        }
+        return this.push(TokenKind.Assign);
+      case kBang:
+        if (this.match(kEquals)) {
+          return this.pushOperator(TokenKind.BangEq, TokenKind.BangEqEq);
+        }
+        return this.push(TokenKind.Bang);
+      case kQuestion:
+        if (this.match(kQuestion)) {
+          return this.pushOperator(
+            TokenKind.QuestionQuestion,
+            TokenKind.QuestionQuestionAssign,
+          );
+        }
+        if (this.at(0) == kDot && !this.digitAt(1)) {
+          this.cur += 1;
+          return this.push(TokenKind.QuestionDot);
+        }
+        return this.push(TokenKind.Question);
+      case kDot:
+        if (this.digitAt(0)) {
+          return this.number();
+        }
+        if (this.at(0) == kDot && this.at(1) == kDot) {
+          this.cur += 2;
+          return this.push(TokenKind.Ellipsis);
+        }
+        return this.push(TokenKind.Dot);
+      case kSlash:
+        if (this.regexAllowed()) {
+          return this.regex();
+        }
+        return this.pushOperator(TokenKind.Slash, TokenKind.SlashAssign);
+      case kHash:
+        if (this.identStartAt(0)) {
+          this.identifier(true);
+        }
+        return;
+      default:
+        if (this.isDigit(c)) {
+          return this.number();
+        }
+        if (this.isIdentStart(c)) {
+          return this.identifier(false);
+        }
     }
   }
 
-  private push(kind: TokenKind, start: int, newline: boolean): void {
+  private push(kind: TokenKind): void {
     this.tokens.push({
       kind,
       known: KnownName.None,
-      start,
+      start: this.start,
       end: this.cur,
       text: "",
-      newline,
+      newline: this.newline,
       hash: false,
     });
   }
@@ -154,9 +273,7 @@ class Lexer {
       this.cur = 3;
     }
     if (this.at(0) == kHash && this.at(1) == kBang) {
-      while (this.cur < this.end && this.at(0) != kNewline) {
-        this.cur += 1;
-      }
+      this.skipRestOfLine();
     }
   }
 
@@ -219,15 +336,10 @@ class Lexer {
     );
   }
 
-  private pushOperator(
-    plain: TokenKind,
-    withAssign: TokenKind,
-    start: int,
-    newline: boolean,
-  ): void {
+  private pushOperator(plain: TokenKind, withAssign: TokenKind): void {
     const assign = this.match(kEquals);
     const kind = assign ? withAssign : plain;
-    this.push(kind, start, newline);
+    this.push(kind);
   }
 
   private match(c: int): boolean {
@@ -255,7 +367,7 @@ class Lexer {
       ) {
         this.cur += 1;
       } else if (c == kSlash && this.at(1) == kSlash) {
-        this.skipLineComment();
+        this.skipRestOfLine();
       } else if (c == kSlash && this.at(1) == kStar) {
         newline = this.skipBlockComment() || newline;
       } else {
@@ -266,7 +378,7 @@ class Lexer {
     return newline;
   }
 
-  private skipLineComment(): void {
+  private skipRestOfLine(): void {
     while (this.cur < this.end && this.at(0) != kNewline) {
       this.cur += 1;
     }
@@ -297,222 +409,31 @@ class Lexer {
     return last == undefined || regexMayFollow(last.kind);
   }
 
-  private punctuator(c: int, start: int, nl: boolean): boolean {
-    switch (c) {
-      case kLeftParen:
-        this.push(TokenKind.LParen, start, nl);
-        return true;
-      case kRightParen:
-        this.push(TokenKind.RParen, start, nl);
-        return true;
-      case kLeftBrace:
-        this.leftBrace(start, nl);
-        return true;
-      case kRightBrace:
-        this.rightBrace(start, nl);
-        return true;
-      case kBacktick:
-        this.template(start, false, nl);
-        return true;
-      case kLeftBracket:
-        this.push(TokenKind.LBracket, start, nl);
-        return true;
-      case kRightBracket:
-        this.push(TokenKind.RBracket, start, nl);
-        return true;
-      case kComma:
-        this.push(TokenKind.Comma, start, nl);
-        return true;
-      case kSemi:
-        this.push(TokenKind.Semi, start, nl);
-        return true;
-      case kColon:
-        this.push(TokenKind.Colon, start, nl);
-        return true;
-      case kQuestion:
-        this.question(start, nl);
-        return true;
-      case kTilde:
-        this.push(TokenKind.Tilde, start, nl);
-        return true;
-      case kDot:
-        this.dot(start, nl);
-        return true;
-      case kQuote:
-      case kApostrophe:
-        this.string(start, c, nl);
-        return true;
-      case kAt:
-        this.push(TokenKind.At, start, nl);
-        return true;
-      case kHash:
-        if (!this.identStartAt(0)) {
-          return false;
-        }
-        this.identifier(start + 1, nl, true);
-        return true;
-      default:
-        return this.operator(c, start, nl);
-    }
-  }
-
-  private operator(c: int, start: int, nl: boolean): boolean {
-    switch (c) {
-      case kPlus: {
-        const kind = this.match(kPlus)
-          ? TokenKind.PlusPlus
-          : this.match(kEquals)
-            ? TokenKind.PlusAssign
-            : TokenKind.Plus;
-        this.push(kind, start, nl);
-        return true;
-      }
-      case kMinus: {
-        const kind = this.match(kMinus)
-          ? TokenKind.MinusMinus
-          : this.match(kEquals)
-            ? TokenKind.MinusAssign
-            : TokenKind.Minus;
-        this.push(kind, start, nl);
-        return true;
-      }
-      case kStar:
-        this.star(start, nl);
-        return true;
-      case kSlash:
-        this.slash(start, nl);
-        return true;
-      case kPercent:
-        this.pushOperator(TokenKind.Percent, TokenKind.PercentAssign, start, nl);
-        return true;
-      case kAmp:
-        this.amp(start, nl);
-        return true;
-      case kPipe:
-        this.pipe(start, nl);
-        return true;
-      case kCaret:
-        this.pushOperator(TokenKind.Caret, TokenKind.CaretAssign, start, nl);
-        return true;
-      case kBang:
-        this.bang(start, nl);
-        return true;
-      case kEquals:
-        this.equals(start, nl);
-        return true;
-      case kLess:
-        this.less(start, nl);
-        return true;
-      case kGreater:
-        this.push(TokenKind.Greater, start, nl);
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  private leftBrace(start: int, nl: boolean): void {
+  private leftBrace(): void {
     const braces = this.braces;
     const last = braces.length - 1;
     if (last >= 0) {
       braces[last] = (braces[last] ?? 0) + 1;
     }
-    this.push(TokenKind.LBrace, start, nl);
+    this.push(TokenKind.LBrace);
   }
 
-  private rightBrace(start: int, nl: boolean): void {
+  private rightBrace(): void {
     const braces = this.braces;
     const last = braces.length - 1;
     if (last < 0) {
-      return this.push(TokenKind.RBrace, start, nl);
+      return this.push(TokenKind.RBrace);
     }
     const depth = braces[last] ?? 0;
     if (depth == 0) {
       braces.pop();
-      return this.template(start, true, nl);
+      return this.template(true);
     }
     braces[last] = depth - 1;
-    this.push(TokenKind.RBrace, start, nl);
+    this.push(TokenKind.RBrace);
   }
 
-  private question(start: int, nl: boolean): void {
-    if (this.match(kQuestion)) {
-      const kind = this.match(kEquals)
-        ? TokenKind.QuestionQuestionAssign
-        : TokenKind.QuestionQuestion;
-      return this.push(kind, start, nl);
-    }
-    if (this.at(0) == kDot && !this.digitAt(1)) {
-      this.cur += 1;
-      return this.push(TokenKind.QuestionDot, start, nl);
-    }
-    this.push(TokenKind.Question, start, nl);
-  }
-
-  private dot(start: int, nl: boolean): void {
-    if (this.digitAt(0)) {
-      return this.number(start, nl);
-    }
-    if (this.at(0) == kDot && this.at(1) == kDot) {
-      this.cur += 2;
-      return this.push(TokenKind.Ellipsis, start, nl);
-    }
-    this.push(TokenKind.Dot, start, nl);
-  }
-
-  private star(start: int, nl: boolean): void {
-    if (this.match(kStar)) {
-      return this.pushOperator(TokenKind.StarStar, TokenKind.StarStarAssign, start, nl);
-    }
-    this.pushOperator(TokenKind.Star, TokenKind.StarAssign, start, nl);
-  }
-
-  private slash(start: int, nl: boolean): void {
-    if (this.regexAllowed()) {
-      return this.regex(start, nl);
-    }
-    this.pushOperator(TokenKind.Slash, TokenKind.SlashAssign, start, nl);
-  }
-
-  private amp(start: int, nl: boolean): void {
-    if (this.match(kAmp)) {
-      return this.pushOperator(TokenKind.AmpAmp, TokenKind.AmpAmpAssign, start, nl);
-    }
-    this.pushOperator(TokenKind.Amp, TokenKind.AmpAssign, start, nl);
-  }
-
-  private pipe(start: int, nl: boolean): void {
-    if (this.match(kPipe)) {
-      return this.pushOperator(TokenKind.PipePipe, TokenKind.PipePipeAssign, start, nl);
-    }
-    this.pushOperator(TokenKind.Pipe, TokenKind.PipeAssign, start, nl);
-  }
-
-  private bang(start: int, nl: boolean): void {
-    if (this.match(kEquals)) {
-      return this.pushOperator(TokenKind.BangEq, TokenKind.BangEqEq, start, nl);
-    }
-    this.push(TokenKind.Bang, start, nl);
-  }
-
-  private equals(start: int, nl: boolean): void {
-    if (this.match(kEquals)) {
-      return this.pushOperator(TokenKind.EqEq, TokenKind.EqEqEq, start, nl);
-    }
-    if (this.match(kGreater)) {
-      return this.push(TokenKind.Arrow, start, nl);
-    }
-    this.push(TokenKind.Assign, start, nl);
-  }
-
-  private less(start: int, nl: boolean): void {
-    if (this.match(kLess)) {
-      return this.pushOperator(TokenKind.Shl, TokenKind.ShlAssign, start, nl);
-    }
-    this.pushOperator(TokenKind.Less, TokenKind.LessEq, start, nl);
-  }
-
-  private regex(start: int, nl: boolean): void {
+  private regex(): void {
     let inClass = false;
     while (this.cur < this.end && !this.isLineBreak()) {
       const c = this.at(0);
@@ -529,57 +450,72 @@ class Lexer {
         while (this.cur < this.end && this.identCharAt(0)) {
           this.cur += 1;
         }
-        return this.push(TokenKind.Regex, start, nl);
+        return this.push(TokenKind.Regex);
       }
     }
-    this.push(TokenKind.Regex, start, nl);
+    this.push(TokenKind.Regex);
   }
 
-  private number(start: int, nl: boolean): void {
-    const first = this.source[start] ?? 0;
+  private number(): void {
+    const byte = this.source[this.start] ?? 0;
+    const first = byte.toInt();
     const second = this.at(0);
-    const isRadix =
-      first.toInt() == kZero &&
-      (second == kLowerX ||
-        second == kUpperX ||
-        second == kLowerB ||
-        second == kUpperB ||
-        second == kLowerO ||
-        second == kUpperO);
-    if (isRadix) {
-      return this.radixNumber(start, nl);
+    if (first == kZero && this.isRadixLetter(second)) {
+      return this.radixNumber();
     }
-    let isFloat = first.toInt() == kDot;
+    const leadingDot = first == kDot;
     this.skipDigits();
-    const isMember =
-      !isFloat &&
-      this.at(0) == kDot &&
-      this.identStartAt(1) &&
-      this.at(1) != kLowerE &&
-      this.at(1) != kUpperE;
-    if (isMember) {
-      return this.push(TokenKind.Int, start, nl);
-    }
-    if (!isFloat && this.at(0) == kDot) {
-      isFloat = true;
-      this.cur += 1;
-      this.skipDigits();
-    }
-    const e = this.at(0);
-    const isExponent =
-      (e == kLowerE || e == kUpperE) &&
-      (this.digitAt(1) ||
-        ((this.at(1) == kPlus || this.at(1) == kMinus) &&
-          this.digitAt(2)));
-    if (isExponent) {
-      isFloat = true;
-      this.cur += 2;
-      this.skipDigits();
-    }
-    this.finishNumber(start, nl, isFloat);
+    const fraction = leadingDot || this.acceptFraction();
+    const exponent = this.acceptExponent();
+    const kind = fraction || exponent ? TokenKind.Float : TokenKind.Int;
+    this.finishNumber(kind);
   }
 
-  private radixNumber(start: int, nl: boolean): void {
+  private isRadixLetter(c: int): boolean {
+    return (
+      c == kLowerX ||
+      c == kUpperX ||
+      c == kLowerB ||
+      c == kUpperB ||
+      c == kLowerO ||
+      c == kUpperO
+    );
+  }
+
+  private acceptFraction(): boolean {
+    if (this.at(0) != kDot) {
+      return false;
+    }
+    const next = this.at(1);
+    const exponentLetter = next == kLowerE || next == kUpperE;
+    const member = this.isIdentStart(next) && !exponentLetter;
+    if (member) {
+      return false;
+    }
+    this.cur += 1;
+    this.skipDigits();
+
+    return true;
+  }
+
+  private acceptExponent(): boolean {
+    const letter = this.at(0);
+    if (letter != kLowerE && letter != kUpperE) {
+      return false;
+    }
+    const sign = this.at(1);
+    const signed = sign == kPlus || sign == kMinus;
+    const digits = signed ? this.digitAt(2) : this.digitAt(1);
+    if (!digits) {
+      return false;
+    }
+    this.cur += 2;
+    this.skipDigits();
+
+    return true;
+  }
+
+  private radixNumber(): void {
     this.cur += 1;
     while (
       this.alphaAt(0) ||
@@ -588,10 +524,13 @@ class Lexer {
     ) {
       this.cur += 1;
     }
-    if (this.at(-1) == kLowerN && this.cur - start > 3) {
+    const suffix = this.at(-1) == kLowerN;
+    const length = this.cur - this.start;
+    const digits = length - kRadixPrefixLength - 1;
+    if (suffix && digits > 0) {
       this.cur -= 1;
     }
-    this.finishNumber(start, nl, false);
+    this.finishNumber(TokenKind.Int);
   }
 
   private skipDigits(): void {
@@ -600,10 +539,9 @@ class Lexer {
     }
   }
 
-  private finishNumber(start: int, nl: boolean, isFloat: boolean): void {
-    const kind = isFloat ? TokenKind.Float : TokenKind.Int;
+  private finishNumber(kind: TokenKind): void {
     if (this.at(0) == kLowerN && !this.identCharAt(1)) {
-      this.push(kind, start, nl);
+      this.push(kind);
       this.cur += 1;
       return;
     }
@@ -612,10 +550,10 @@ class Lexer {
         this.cur += 1;
       }
     }
-    this.push(kind, start, nl);
+    this.push(kind);
   }
 
-  private string(start: int, quote: int, nl: boolean): void {
+  private string(quote: int): void {
     while (
       this.cur < this.end &&
       this.at(0) != kNewline &&
@@ -630,10 +568,10 @@ class Lexer {
         this.cur += 1;
       }
     }
-    this.push(TokenKind.String, start, nl);
+    this.push(TokenKind.String);
   }
 
-  private template(start: int, continuation: boolean, nl: boolean): void {
+  private template(continuation: boolean): void {
     const closed = continuation
       ? TokenKind.TemplateTail
       : TokenKind.TemplateString;
@@ -644,21 +582,22 @@ class Lexer {
       const c = this.at(0);
       this.cur += 1;
       if (c == kBacktick) {
-        return this.push(closed, start, nl);
+        return this.push(closed);
       }
       if (c == kDollar && this.at(0) == kLeftBrace) {
         this.cur += 1;
         this.braces.push(0);
-        return this.push(opened, start, nl);
+        return this.push(opened);
       }
       if (c == kBackslash && this.cur < this.end) {
         this.cur += 1;
       }
     }
-    this.push(closed, start, nl);
+    this.push(closed);
   }
 
-  private identifier(start: int, nl: boolean, hash: boolean): void {
+  private identifier(hash: boolean): void {
+    const start = hash ? this.start + 1 : this.start;
     while (this.identCharAt(0)) {
       this.cur += 1;
     }
@@ -671,7 +610,7 @@ class Lexer {
       start,
       end: this.cur,
       text,
-      newline: nl,
+      newline: this.newline,
       hash,
     });
   }

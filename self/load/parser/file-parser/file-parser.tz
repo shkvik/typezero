@@ -53,20 +53,12 @@ export class FileParser {
     while (!this.cursor.is(TokenKind.End)) {
       if (this.cursor.is(TokenKind.RBrace)) {
         const brace = this.cursor.next();
-
         this.cursor.error(brace.start, "unexpected '}'");
         this.cursor.stopRecovering();
-        
         continue;
       }
-
-      const first = this.cursor.peek();
-      const statement = this.statement(true);
+      const statement = this.statementWithRecovery(true);
       items.push(statement);
-      
-      if (this.cursor.isRecovering()) {
-        this.cursor.recoverStatement(first.start);
-      }
     }
     const file: SourceFile = {
       items,

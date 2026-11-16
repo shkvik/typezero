@@ -9,6 +9,7 @@ import {
   ExprKind,
   FunctionTypeForm,
   MappedTypeForm,
+  ModifierChange,
   ObjectTypeForm,
   TemplateTypeForm,
   TupleTypeForm,
@@ -17,6 +18,18 @@ import {
   typeRef,
 } from "../../../../ast.tz";
 import { TypePlace } from "../parse-context.tz";
+
+const kExactDoubleLimit: uint64 = 9007199254740992;
+
+function integerAsDouble(whole: uint64): double {
+  if (whole <= kExactDoubleLimit) {
+    return whole.toDouble();
+  }
+  const text = `${whole}`;
+  const parsed = Number(text);
+
+  return parsed.unwrapOr(0.0);
+}
 
 partial class FileParser {
   private type(place: TypePlace = TypePlace.Plain): TypeRef {
@@ -390,11 +403,7 @@ partial class FileParser {
     let number = 0.0;
     let integer = false;
     if (lit.kind == ExprKind.IntLit) {
-      const whole = lit.value;
-      number =
-        whole <= 9007199254740992
-          ? whole.toDouble()
-          : Number(`${whole}`).unwrapOr(0.0);
+      number = integerAsDouble(lit.value);
       integer = true;
     } else if (lit.kind == ExprKind.FloatLit) {
       number = lit.value;
@@ -501,21 +510,28 @@ partial class FileParser {
     );
   }
 
-  private mappedType(object: TypeRef, readonlyChange: int): TypeRef {
+  private mappedType(
+    object: TypeRef,
+    readonlyChange: ModifierChange,
+  ): TypeRef {
     const ref = typeRef(object.loc);
     const mapped: MappedTypeForm = {
       kind: TypeKind.Mapped,
-      mappedOptional: 0,
-      mappedReadonly: readonlyChange,
+      optionalChange: ModifierChange.None,
+      readonlyChange,
     };
+    
     ref.form = mapped;
-    this.cursor.next();
+    this.cursor.accept(TokenKind.LBracket);
     const variable = this.cursor.next();
+
     ref.name = variable.text;
-    this.cursor.next();
+    this.cursor.accept(TokenKind.In);
     const keys = this.type();
+    
     ref.args.push(keys);
     const rename = this.cursor.accept(TokenKind.As) ? this.type() : undefined;
+    
     if (
       !this.cursor.expect(
         TokenKind.RBracket,
@@ -525,16 +541,7 @@ partial class FileParser {
       this.cursor.skipToClosingBrace();
       return ref;
     }
-    const next = this.cursor.lookahead();
-    const optionalChange =
-      (this.cursor.is(TokenKind.Minus) || this.cursor.is(TokenKind.Plus)) &&
-      next.kind == TokenKind.Question;
-    if (optionalChange) {
-      mapped.mappedOptional = this.cursor.is(TokenKind.Minus) ? -1 : 1;
-      this.cursor.skip(2);
-    } else if (this.cursor.accept(TokenKind.Question)) {
-      mapped.mappedOptional = 1;
-    }
+    mapped.optionalChange = this.acceptModifier(TokenKind.Question);
     if (
       !this.cursor.expect(
         TokenKind.Colon,
@@ -544,8 +551,10 @@ partial class FileParser {
       this.cursor.skipToClosingBrace();
       return ref;
     }
+
     const values = this.type();
     ref.args.push(values);
+    
     if (rename != undefined) {
       ref.args.push(rename);
     }
@@ -558,12 +567,33 @@ partial class FileParser {
         token.start,
         "a mapped type cannot stand next to fields",
       );
+    
       this.cursor.skipToClosingBrace();
       return ref;
     }
+    
     this.cursor.next();
 
     return ref;
+  }
+
+  private acceptModifier(modifier: TokenKind): ModifierChange {
+    const next = this.cursor.lookahead();
+    const signed =
+      (this.cursor.is(TokenKind.Minus) || this.cursor.is(TokenKind.Plus)) &&
+      next.kind == modifier;
+    if (signed) {
+      const sign = this.cursor.next();
+      this.cursor.next();
+      return sign.kind == TokenKind.Minus
+        ? ModifierChange.Remove
+        : ModifierChange.Add;
+    }
+    if (this.cursor.accept(modifier)) {
+      return ModifierChange.Add;
+    }
+
+    return ModifierChange.None;
   }
 
   private fieldName(): string | undefined {
@@ -647,14 +677,17 @@ partial class FileParser {
       const first = this.cursor.peek();
       let loc = first.start;
       let readonly = false;
-      let readonlyChange = 0;
+      let readonlyChange = ModifierChange.None;
       const next = this.cursor.lookahead();
       if (
         (this.cursor.is(TokenKind.Minus) || this.cursor.is(TokenKind.Plus)) &&
         next.kind == TokenKind.Readonly
       ) {
-        readonlyChange = this.cursor.is(TokenKind.Minus) ? -1 : 1;
-        this.cursor.next();
+        const sign = this.cursor.next();
+        readonlyChange =
+          sign.kind == TokenKind.Minus
+            ? ModifierChange.Remove
+            : ModifierChange.Add;
       }
       const after = this.cursor.lookahead();
       if (
@@ -664,7 +697,9 @@ partial class FileParser {
         after.kind != TokenKind.LParen
       ) {
         readonly = true;
-        readonlyChange = readonlyChange != 0 ? readonlyChange : 1;
+        if (readonlyChange == ModifierChange.None) {
+          readonlyChange = ModifierChange.Add;
+        }
         this.cursor.next();
         const member = this.cursor.peek();
         loc = member.start;

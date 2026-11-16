@@ -210,6 +210,12 @@ export class Cursor {
     return this.synchronize();
   }
 
+  public skipTo(kind: TokenKind): void {
+    while (!this.is(kind) && !this.is(TokenKind.End)) {
+      this.next();
+    }
+  }
+
   public skipToClosingBrace(): void {
     let depth = 0;
     while (!this.is(TokenKind.End)) {

@@ -4,6 +4,10 @@ import { ParsedFile, Parser, SourceText } from "./load/parser/parser.tz"
 import { SourceFile } from "./ast.tz"
 import { Dumper } from "./dump.tz"
 
+const kDefaultRepeat = 20
+const kMaxRepeat = 1000
+const kHoldMilliseconds = 3000.0
+
 function readList(path: string): string[] {
   const text = readFileSync(path, "utf8")
   if (text.isErr()) {
@@ -68,7 +72,7 @@ function parseAll(sources: SourceText[]): int {
 }
 
 function timeSources(sources: SourceText[], repeat: int): void {
-  if (repeat < 1 || repeat > 1000) {
+  if (repeat < 1 || repeat > kMaxRepeat) {
     return
   }
   let tokens = 0
@@ -103,7 +107,8 @@ function holdSources(sources: SourceText[], parseThem: boolean): void {
   for (const file of files) {
     items += file.items.length
   }
-  const until = performance.now() + 3000.0
+  const now = performance.now()
+  const until = now + kHoldMilliseconds
   let spins = 0
   while (performance.now() < until) {
     spins += 1
@@ -113,8 +118,9 @@ function holdSources(sources: SourceText[], parseThem: boolean): void {
 
 const mode = process.argv[2] ?? "tokens"
 const listPath = process.argv[3] ?? ""
-const repeatText = process.argv[4] ?? "20"
-const repeat = parseInt(repeatText).unwrapOr(20)
+const repeatText = process.argv[4] ?? ""
+const parsedRepeat = parseInt(repeatText)
+const repeat = parsedRepeat.unwrapOr(kDefaultRepeat)
 const files = readList(listPath)
 const sources = readSources(files)
 switch (mode) {

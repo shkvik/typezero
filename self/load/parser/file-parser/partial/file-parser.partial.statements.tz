@@ -276,12 +276,8 @@ partial class FileParser {
     this.cursor.report(loc, `there is no '${text}' in tz`);
     this.cursor.next();
     if (this.cursor.accept(TokenKind.LParen)) {
-      while (
-        !this.cursor.is(TokenKind.End) &&
-        !this.cursor.accept(TokenKind.RParen)
-      ) {
-        this.cursor.next();
-      }
+      this.cursor.skipTo(TokenKind.RParen);
+      this.cursor.accept(TokenKind.RParen);
     }
     this.block();
 
@@ -414,6 +410,16 @@ partial class FileParser {
     return { kind: StmtKind.Switch, loc, discriminant, cases };
   }
 
+  private statementWithRecovery(topLevel: boolean): Stmt {
+    const first = this.cursor.peek();
+    const statement = this.statement(topLevel);
+    if (this.cursor.isRecovering()) {
+      this.cursor.recoverStatement(first.start);
+    }
+
+    return statement;
+  }
+
   private caseBody(): Stmt[] {
     const body: Stmt[] = [];
     while (
@@ -422,12 +428,8 @@ partial class FileParser {
       !this.cursor.is(TokenKind.RBrace) &&
       !this.cursor.is(TokenKind.End)
     ) {
-      const first = this.cursor.peek();
-      const statement = this.statement(false);
+      const statement = this.statementWithRecovery(false);
       body.push(statement);
-      if (this.cursor.isRecovering()) {
-        this.cursor.recoverStatement(first.start);
-      }
     }
 
     return body;
@@ -442,12 +444,8 @@ partial class FileParser {
       !this.cursor.is(TokenKind.RBrace) &&
       !this.cursor.is(TokenKind.End)
     ) {
-      const first = this.cursor.peek();
-      const statement = this.statement(false);
+      const statement = this.statementWithRecovery(false);
       body.push(statement);
-      if (this.cursor.isRecovering()) {
-        this.cursor.recoverStatement(first.start);
-      }
     }
     const closing = this.cursor.peek();
     const end = closing.start;
@@ -755,12 +753,7 @@ partial class FileParser {
     if (this.cursor.is(TokenKind.Catch)) {
       this.cursor.next();
       if (this.cursor.accept(TokenKind.LParen)) {
-        while (
-          !this.cursor.is(TokenKind.RParen) &&
-          !this.cursor.is(TokenKind.End)
-        ) {
-          this.cursor.next();
-        }
+        this.cursor.skipTo(TokenKind.RParen);
         this.cursor.expect(TokenKind.RParen, "after the variable of 'catch'");
       }
       this.block();

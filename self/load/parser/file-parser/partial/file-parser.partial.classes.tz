@@ -715,12 +715,7 @@ partial class FileParser {
   }
 
   private skipHandleBody(): void {
-    while (
-      !this.cursor.is(TokenKind.LBrace) &&
-      !this.cursor.is(TokenKind.End)
-    ) {
-      this.cursor.next();
-    }
+    this.cursor.skipTo(TokenKind.LBrace);
     if (this.cursor.accept(TokenKind.LBrace)) {
       this.cursor.skipToClosingBrace();
     }

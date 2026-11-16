@@ -139,13 +139,6 @@ function binaryOpFor(kind: TokenKind): BinaryOp {
   }
 }
 
-function isAssignment(kind: TokenKind): boolean {
-  return (
-    kind == TokenKind.Assign ||
-    (kind >= TokenKind.PlusAssign && kind <= TokenKind.PipePipeAssign)
-  );
-}
-
 function assignmentOp(kind: TokenKind): BinaryOp | undefined {
   switch (kind) {
     case TokenKind.PlusAssign:
@@ -181,6 +174,15 @@ function assignmentOp(kind: TokenKind): BinaryOp | undefined {
     default:
       return undefined;
   }
+}
+
+function isAssignment(kind: TokenKind): boolean {
+  if (kind == TokenKind.Assign) {
+    return true;
+  }
+  const compound = assignmentOp(kind);
+
+  return compound != undefined;
 }
 
 function unaryOpFor(kind: TokenKind): UnaryOp | undefined {

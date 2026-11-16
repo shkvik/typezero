@@ -228,10 +228,16 @@ export type TypeOfTypeForm = {
   readonly kind: TypeKind.TypeOf;
   readonly names: string[];
 };
+export enum ModifierChange {
+  None,
+  Add,
+  Remove,
+}
+
 export type MappedTypeForm = {
   readonly kind: TypeKind.Mapped;
-  mappedOptional: int;
-  readonly mappedReadonly: int;
+  optionalChange: ModifierChange;
+  readonly readonlyChange: ModifierChange;
 };
 export type TemplateTypeForm = {
   readonly kind: TypeKind.Template;
