@@ -269,6 +269,13 @@ class Store {
 ними имя члена; `get` и `set` — если за ними имя (и тогда это ошибка: геттеров нет);
 `declare`, `module`, `namespace`, `abstract` — в начале объявления.
 
+В парсере на tz (`self/`) видами токенов стали и остальные слова (16 ноября): контекстные
+`assert`, `asserts`, `await`, `catch`, `finally`, `global`, `infer`, `is`, `keyof`, `out`,
+`partial`, `satisfies`, `throw`, `try`, `undefined`, `using`, `with`, `yield`; запрещённые
+`this` и `super` (`this` можно как параметр, тип и в `this is T`). Имена `String`, `raw`,
+`Symbol`, `super` парсер узнаёт по второму enum токена — `KnownName`. В C++ эти слова пока
+сравниваются текстом.
+
 ## План реализации
 
 На каждом шаге: тесты `tests/run` с `// same-as-node`, ошибки в `tests/errors`, обновление

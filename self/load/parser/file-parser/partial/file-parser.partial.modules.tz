@@ -193,7 +193,7 @@ partial class FileParser {
     const json = from.path.endsWith(".json");
     let jsonType = false;
     if (
-      (this.cursor.isWord("with") || this.cursor.isWord("assert")) &&
+      (this.cursor.is(TokenKind.With) || this.cursor.is(TokenKind.Assert)) &&
       !this.cursor.peek().newline
     ) {
       jsonType = this.importAttributes(json);
@@ -312,7 +312,7 @@ partial class FileParser {
     if (this.cursor.is(TokenKind.At)) {
       return this.exportDecorated(topLevel);
     }
-    if (this.cursor.isWord("partial") && this.partialClassAhead()) {
+    if (this.cursor.is(TokenKind.Partial) && this.partialClassAhead()) {
       this.cursor.report(loc, "a part of a class is not exported");
       return this.statement(topLevel);
     }
@@ -534,7 +534,7 @@ partial class FileParser {
 
   private importAttributes(json: boolean): boolean {
     const at = this.cursor.peek().start;
-    const old = this.cursor.peek().text == "assert";
+    const old = this.cursor.is(TokenKind.Assert);
     this.cursor.next();
     if (!this.cursor.expect(TokenKind.LBrace, "after 'with'")) {
       return false;

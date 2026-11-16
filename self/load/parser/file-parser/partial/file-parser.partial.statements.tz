@@ -15,6 +15,7 @@ import {
   VarDeclarator,
   marker,
 } from "../../../../ast.tz";
+import { ExpressionPlace } from "../parse-context.tz";
 
 type Binding = {
   readonly name: string;
@@ -88,10 +89,17 @@ partial class FileParser {
         return this.abstractStatement(loc);
       case TokenKind.Async:
         return this.asyncStatement(loc);
-      case TokenKind.Identifier:
-        return (
-          this.wordStatement(token, topLevel) ?? this.expressionStatement(loc)
-        );
+      case TokenKind.Using:
+        return this.usingStatement(loc);
+      case TokenKind.Throw:
+        return this.throwStatement();
+      case TokenKind.Try:
+        return this.tryStatement(loc);
+      case TokenKind.Catch:
+      case TokenKind.Finally:
+        return this.handlerStatement(token);
+      case TokenKind.Partial:
+        return this.partialStatement(loc, topLevel);
       default:
         return this.expressionStatement(loc);
     }
@@ -218,31 +226,38 @@ partial class FileParser {
     return this.functionDeclaration(true);
   }
 
-  private wordStatement(token: Token, topLevel: boolean): Stmt | undefined {
-    const text = token.text;
-    const next = this.cursor.lookahead();
-    const loc = token.start;
-    if (text == "using" && this.nameOnLine()) {
+  private usingStatement(loc: int): Stmt {
+    if (this.nameOnLine()) {
       return this.usingDecl();
     }
-    if (text == "throw") {
-      return this.throwStatement();
+
+    return this.expressionStatement(loc);
+  }
+
+  private tryStatement(loc: int): Stmt {
+    if (this.cursor.lookahead().kind == TokenKind.LBrace) {
+      return this.strayTry();
     }
-    if (text == "try" && next.kind == TokenKind.LBrace) {
-      return this.tryStatement();
+
+    return this.expressionStatement(loc);
+  }
+
+  private handlerStatement(token: Token): Stmt {
+    const next = this.cursor.lookahead();
+    if (next.kind == TokenKind.LBrace || next.kind == TokenKind.LParen) {
+      return this.strayHandler(token.start, token.text);
     }
-    if (
-      (text == "catch" || text == "finally") &&
-      (next.kind == TokenKind.LBrace || next.kind == TokenKind.LParen)
-    ) {
-      return this.strayHandler(loc, text);
-    }
-    const classOnLine = next.kind == TokenKind.Class && !next.newline;
-    if (text == "partial" && classOnLine) {
+
+    return this.expressionStatement(token.start);
+  }
+
+  private partialStatement(loc: int, topLevel: boolean): Stmt {
+    const next = this.cursor.lookahead();
+    if (next.kind == TokenKind.Class && !next.newline) {
       return this.partialClass(loc, topLevel);
     }
 
-    return undefined;
+    return this.expressionStatement(loc);
   }
 
   private partialClass(loc: int, topLevel: boolean): Stmt {
@@ -288,7 +303,7 @@ partial class FileParser {
     if (
       next.kind == TokenKind.Module ||
       next.kind == TokenKind.Namespace ||
-      next.text == "global"
+      next.kind == TokenKind.Global
     ) {
       return this.skipDeclaration(
         loc,
@@ -471,10 +486,10 @@ partial class FileParser {
   }
 
   private forStatement(): Stmt {
-    const saved = this.noIn;
-    this.noIn = true;
+    const outer = this.context;
+    this.context = { ...outer, expressionPlace: ExpressionPlace.ForHead };
     const loop = this.forInside();
-    this.noIn = saved;
+    this.context = outer;
 
     return loop;
   }
@@ -482,7 +497,7 @@ partial class FileParser {
   private forInside(): Stmt {
     const loc = this.cursor.next().start;
     let awaitLoc = -1;
-    if (this.cursor.isWord("await")) {
+    if (this.cursor.is(TokenKind.Await)) {
       awaitLoc = this.cursor.next().start;
     }
     this.cursor.expect(TokenKind.LParen, "after 'for'");
@@ -562,7 +577,7 @@ partial class FileParser {
       );
       return { kind: StmtKind.For, loc, init };
     }
-    this.noIn = false;
+    this.context = { ...this.context, expressionPlace: ExpressionPlace.Plain };
     if (awaitLoc >= 0) {
       this.cursor.report(
         awaitLoc,
@@ -599,7 +614,7 @@ partial class FileParser {
       );
     }
     this.cursor.next();
-    this.noIn = false;
+    this.context = { ...this.context, expressionPlace: ExpressionPlace.Plain };
     const isAwait = awaitLoc >= 0;
     if (keys && isAwait) {
       this.cursor.report(
@@ -707,11 +722,11 @@ partial class FileParser {
     return marker(StmtKind.Empty, loc);
   }
 
-  private tryStatement(): Stmt {
+  private strayTry(): Stmt {
     this.cursor.report(this.cursor.peek().start, "there is no 'try' in tz");
     this.cursor.next();
     const block = this.block();
-    if (this.cursor.isWord("catch")) {
+    if (this.cursor.is(TokenKind.Catch)) {
       this.cursor.next();
       if (this.cursor.accept(TokenKind.LParen)) {
         while (
@@ -724,7 +739,7 @@ partial class FileParser {
       }
       this.block();
     }
-    if (this.cursor.isWord("finally")) {
+    if (this.cursor.is(TokenKind.Finally)) {
       this.cursor.next();
       this.block();
     }

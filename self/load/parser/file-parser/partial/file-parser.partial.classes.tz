@@ -1,5 +1,5 @@
 import { FileParser } from "../file-parser.tz";
-import { TokenKind, isKeyword, isName } from "../../../../token.tz";
+import { KnownName, TokenKind, isKeyword, isName } from "../../../../token.tz";
 import { Arguments } from "./file-parser.partial.expressions.tz";
 import {
   Access,
@@ -109,6 +109,7 @@ partial class FileParser {
             kind: ExprKind.Name,
             loc: baseToken.start,
             name: baseToken.text,
+            known: baseToken.known,
             typeArgs: [],
           };
         }
@@ -224,6 +225,7 @@ partial class FileParser {
       kind: ExprKind.Name,
       loc: head.start,
       name: head.text,
+      known: head.known,
       typeArgs: [],
     };
     while (this.cursor.accept(TokenKind.Dot)) {
@@ -243,6 +245,7 @@ partial class FileParser {
         loc: name.start,
         object: expr,
         name: name.text,
+        known: name.known,
         optional: false,
         typeArgs: [],
       };
@@ -522,7 +525,7 @@ partial class FileParser {
         continue;
       }
       const callee = call.callee;
-      if (callee.kind == ExprKind.Name && callee.name == "super") {
+      if (callee.kind == ExprKind.Name && callee.known == KnownName.Super) {
         return i + 1;
       }
     }
@@ -568,6 +571,7 @@ partial class FileParser {
         kind: ExprKind.Name,
         loc: param.loc,
         name: "this",
+        known: KnownName.None,
         typeArgs: [],
       };
       const target: Expr = {
@@ -575,6 +579,7 @@ partial class FileParser {
         loc: param.loc,
         object: self,
         name: param.name,
+        known: KnownName.None,
         optional: false,
         typeArgs: [],
       };
@@ -582,6 +587,7 @@ partial class FileParser {
         kind: ExprKind.Name,
         loc: param.loc,
         name: param.name,
+        known: KnownName.None,
         typeArgs: [],
       };
       const set: Expr = {

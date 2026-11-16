@@ -1,4 +1,4 @@
-import { Token, TokenKind, isKeyword, isName } from "../../token.tz";
+import { KnownName, Token, TokenKind, isKeyword, isName } from "../../token.tz";
 import { Span } from "../../ast.tz";
 
 export type Mark = { readonly at: int; readonly recovering: boolean };
@@ -7,6 +7,7 @@ export type ParseError = { readonly loc: int; readonly message: string };
 
 const kEnd: Token = {
   kind: TokenKind.End,
+  known: KnownName.None,
   start: 0,
   end: 0,
   text: "",
@@ -62,12 +63,6 @@ export class Cursor {
     return isName(this.peek().kind);
   }
 
-  public isWord(text: string): boolean {
-    const token = this.peek();
-
-    return token.kind == TokenKind.Identifier && token.text == text;
-  }
-
   public accept(kind: TokenKind): boolean {
     if (!this.is(kind)) {
       return false;
@@ -87,6 +82,10 @@ export class Cursor {
     );
 
     return false;
+  }
+
+  public atNameOrThis(): boolean {
+    return this.atName() || this.is(TokenKind.This);
   }
 
   public expectName(context: string): boolean {
@@ -175,9 +174,7 @@ export class Cursor {
     const next = this.lookahead();
 
     return (
-      this.is(TokenKind.LBracket) &&
-      next.kind == TokenKind.Identifier &&
-      next.text == "Symbol"
+      this.is(TokenKind.LBracket) && next.known == KnownName.Symbol
     );
   }
 
@@ -244,6 +241,8 @@ export class Cursor {
       case TokenKind.Debugger:
       case TokenKind.Import:
       case TokenKind.Export:
+      case TokenKind.Throw:
+      case TokenKind.Try:
         return true;
       case TokenKind.Class:
       case TokenKind.Type:
@@ -252,8 +251,6 @@ export class Cursor {
       case TokenKind.Module:
       case TokenKind.Declare:
         return this.namesAhead();
-      case TokenKind.Identifier:
-        return token.text == "throw" || token.text == "try";
       default:
         return false;
     }

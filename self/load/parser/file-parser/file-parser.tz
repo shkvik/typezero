@@ -9,6 +9,12 @@ import { Token, TokenKind } from "../../../token.tz";
 import { ExportDecl, ImportDecl, SourceFile, Stmt } from "../../../ast.tz";
 import { Cursor, ParseError } from "../cursor.tz";
 import { LiteralReader } from "../literal.tz";
+import {
+  ExpressionPlace,
+  FunctionKind,
+  ParseContext,
+  TypePlace,
+} from "./parse-context.tz";
 
 export type ParseResult = {
   readonly file: SourceFile;
@@ -23,10 +29,7 @@ export class FileParser {
   private readonly stringConstants: Map<string, string[]>;
   private readonly imports: ImportDecl[];
   private readonly exports: ExportDecl[];
-  private noIn: boolean;
-  private noConditional: boolean;
-  private disallowConditional: boolean;
-  private inGenerator: boolean;
+  private context: ParseContext;
   private names: int;
 
   public constructor(source: Buffer, tokens: Token[], library: boolean) {
@@ -37,10 +40,11 @@ export class FileParser {
     this.stringConstants = new Map<string, string[]>();
     this.imports = [];
     this.exports = [];
-    this.noIn = false;
-    this.noConditional = false;
-    this.disallowConditional = false;
-    this.inGenerator = false;
+    this.context = {
+      functionKind: FunctionKind.Plain,
+      expressionPlace: ExpressionPlace.Plain,
+      typePlace: TypePlace.Plain,
+    };
     this.names = 0;
   }
 
@@ -55,10 +59,13 @@ export class FileParser {
         
         continue;
       }
-      const start = this.cursor.peek().start;
-      items.push(this.statement(true));
+
+      const first = this.cursor.peek();
+      const statement = this.statement(true);
+      items.push(statement);
+      
       if (this.cursor.isRecovering()) {
-        this.cursor.recoverStatement(start);
+        this.cursor.recoverStatement(first.start);
       }
     }
     const file: SourceFile = {

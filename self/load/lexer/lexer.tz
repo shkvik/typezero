@@ -1,4 +1,11 @@
-import { Token, TokenKind, isContextual, keywordKind } from "../../token.tz";
+import {
+  KnownName,
+  Token,
+  TokenKind,
+  isContextual,
+  keywordKind,
+  knownName,
+} from "../../token.tz";
 
 const kTab = 9;
 const kNewline = 10;
@@ -67,6 +74,8 @@ function regexMayFollow(kind: TokenKind): boolean {
   }
   switch (kind) {
     case TokenKind.Identifier:
+    case TokenKind.This:
+    case TokenKind.Super:
     case TokenKind.Int:
     case TokenKind.Float:
     case TokenKind.String:
@@ -131,6 +140,7 @@ class Lexer {
   private push(kind: TokenKind, start: int, newline: boolean): void {
     this.tokens.push({
       kind,
+      known: KnownName.None,
       start,
       end: this.cur,
       text: "",
@@ -675,6 +685,15 @@ class Lexer {
     }
     const text = this.source.toString("utf8", start, this.cur);
     const kind = hash ? TokenKind.Identifier : keywordKind(text);
-    this.tokens.push({ kind, start, end: this.cur, text, newline: nl, hash });
+    const known = hash ? KnownName.None : knownName(text);
+    this.tokens.push({
+      kind,
+      known,
+      start,
+      end: this.cur,
+      text,
+      newline: nl,
+      hash,
+    });
   }
 }

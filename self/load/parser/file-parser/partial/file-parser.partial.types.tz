@@ -11,25 +11,24 @@ import {
   TypeRef,
   typeRef,
 } from "../../../../ast.tz";
+import { TypePlace } from "../parse-context.tz";
 
 partial class FileParser {
-  private type(): TypeRef {
+  private type(place: TypePlace = TypePlace.Plain): TypeRef {
     const start = this.cursor.peek().start;
-    const noConditional = this.noConditional;
-    this.noConditional = false;
-    const outer = this.disallowConditional;
-    this.disallowConditional = noConditional;
+    const outer = this.context;
+    this.context = { ...outer, typePlace: place };
     const check = this.unionType();
-    this.disallowConditional = outer;
-    if (noConditional || !this.cursor.is(TokenKind.Extends)) {
+    this.context = outer;
+    const extendsClause = place == TypePlace.ExtendsClause;
+    if (extendsClause || !this.cursor.is(TokenKind.Extends)) {
       return check;
     }
     const ref = typeRef(check.loc);
     ref.form = { kind: TypeKind.Conditional };
     this.cursor.next();
     ref.args.push(check);
-    this.noConditional = true;
-    const extendsType = this.type();
+    const extendsType = this.type(TypePlace.ExtendsClause);
     ref.args.push(extendsType);
     if (
       !this.cursor.expect(
@@ -92,20 +91,23 @@ partial class FileParser {
     return ref;
   }
 
-  private nextOnLine(text: string): boolean {
+  private subjectAhead(): boolean {
+    const next = this.cursor.lookahead();
+    const subject = isName(next.kind) || next.kind == TokenKind.This;
+
+    return subject && !next.newline;
+  }
+
+  private isAhead(): boolean {
     const next = this.cursor.lookahead();
 
-    return (
-      isName(next.kind) && !next.newline && (text == "" || next.text == text)
-    );
+    return next.kind == TokenKind.Is && !next.newline;
   }
 
   private returnType(): TypeRef {
-    const asserts = this.cursor.isWord("asserts") && this.nextOnLine("");
-    if (
-      !asserts &&
-      !(this.cursor.atName() && this.nextOnLine("is"))
-    ) {
+    const asserts = this.cursor.is(TokenKind.Asserts) && this.subjectAhead();
+    const predicate = this.cursor.atNameOrThis() && this.isAhead();
+    if (!asserts && !predicate) {
       return this.type();
     }
     const ref = typeRef(this.cursor.peek().start);
@@ -114,7 +116,7 @@ partial class FileParser {
       this.cursor.next();
     }
     ref.name = this.cursor.next().text;
-    if (this.cursor.isWord("is") && !this.cursor.peek().newline) {
+    if (this.cursor.is(TokenKind.Is) && !this.cursor.peek().newline) {
       this.cursor.next();
       const type = this.type();
       ref.args.push(type);
@@ -126,7 +128,7 @@ partial class FileParser {
   private arrayType(): TypeRef {
     const next = this.cursor.lookahead();
     const keyOf =
-      this.cursor.isWord("keyof") &&
+      this.cursor.is(TokenKind.Keyof) &&
       (isName(next.kind) ||
         next.kind == TokenKind.LParen ||
         next.kind == TokenKind.LBrace ||
@@ -242,7 +244,7 @@ partial class FileParser {
     if (this.cursor.is(TokenKind.LParen) && this.functionTypeAhead()) {
       return this.functionType();
     }
-    if (this.cursor.isWord("infer") && isName(next.kind)) {
+    if (this.cursor.is(TokenKind.Infer) && isName(next.kind)) {
       return this.inferType(ref);
     }
     const negative =
@@ -260,7 +262,7 @@ partial class FileParser {
       this.cursor.expect(TokenKind.RParen, "to close the parenthesized type");
       return inner;
     }
-    if (!this.cursor.atName() && !this.cursor.is(TokenKind.Void)) {
+    if (!this.cursor.atNameOrThis() && !this.cursor.is(TokenKind.Void)) {
       this.cursor.error(
         this.cursor.peek().start,
         `expected a type, found ${this.cursor.peek().kind}`,
@@ -303,9 +305,9 @@ partial class FileParser {
     }
     const start = this.cursor.mark();
     this.cursor.next();
-    this.noConditional = true;
-    const constraint = this.type();
-    if (this.disallowConditional || !this.cursor.is(TokenKind.Question)) {
+    const constraint = this.type(TypePlace.ExtendsClause);
+    const extendsClause = this.context.typePlace == TypePlace.ExtendsClause;
+    if (extendsClause || !this.cursor.is(TokenKind.Question)) {
       ref.args.push(constraint);
     } else {
       this.cursor.reset(start);
@@ -389,7 +391,7 @@ partial class FileParser {
     const names: string[] = [];
     ref.form = { kind: TypeKind.TypeOf, names };
     this.cursor.next();
-    if (!this.cursor.atName()) {
+    if (!this.cursor.atNameOrThis()) {
       this.cursor.error(
         this.cursor.peek().start,
         `expected the name of a value after 'typeof', found ${this.cursor.peek().kind}`,
@@ -834,7 +836,7 @@ partial class FileParser {
     let more = !this.cursor.is(TokenKind.RParen);
     while (fits && more) {
       this.cursor.accept(TokenKind.Ellipsis);
-      fits = this.cursor.atName();
+      fits = this.cursor.atNameOrThis();
       if (fits) {
         this.cursor.next();
       }
@@ -888,9 +890,10 @@ partial class FileParser {
     while (more) {
       const rest = this.cursor.accept(TokenKind.Ellipsis);
       const token = this.cursor.peek();
-      if (
-        !this.cursor.expectName("for a parameter of the function type")
-      ) {
+      const named =
+        this.cursor.accept(TokenKind.This) ||
+        this.cursor.expectName("for a parameter of the function type");
+      if (!named) {
         return false;
       }
       const optional = this.cursor.accept(TokenKind.Question);

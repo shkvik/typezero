@@ -13,9 +13,13 @@ export enum TokenKind {
   Abstract,
   Accessor,
   As,
+  Assert,
+  Asserts,
   Async,
+  Await,
   Break,
   Case,
+  Catch,
   Class,
   Const,
   Constructor,
@@ -30,36 +34,52 @@ export enum TokenKind {
   Export,
   Extends,
   False,
+  Finally,
   For,
   From,
   Function,
   Get,
+  Global,
   If,
   Implements,
   Import,
   In,
+  Infer,
   Instanceof,
   Interface,
+  Is,
+  Keyof,
   Let,
   Module,
   Namespace,
   New,
   Of,
+  Out,
   Override,
+  Partial,
   Private,
   Protected,
   Public,
   Readonly,
   Return,
+  Satisfies,
   Set,
   Static,
+  Super,
   Switch,
+  This,
+  Throw,
   True,
+  Try,
   Type,
   Typeof,
+  Undefined,
+  Using,
   Var,
   Void,
   While,
+  With,
+  Yield,
 
   LParen,
   RParen,
@@ -122,8 +142,17 @@ export enum TokenKind {
   PipePipeAssign,
 }
 
+export enum KnownName {
+  None,
+  Raw,
+  String,
+  Super,
+  Symbol,
+}
+
 export type Token = {
   readonly kind: TokenKind
+  readonly known: KnownName
   readonly start: int
   readonly end: int
   readonly text: string
@@ -132,25 +161,43 @@ export type Token = {
 }
 
 export function isKeyword(kind: TokenKind): boolean {
-  return kind >= TokenKind.Abstract && kind <= TokenKind.While
+  return kind >= TokenKind.Abstract && kind <= TokenKind.Yield
 }
 
 export function isContextual(kind: TokenKind): boolean {
   switch (kind) {
     case TokenKind.Abstract:
     case TokenKind.Accessor:
+    case TokenKind.Assert:
+    case TokenKind.Asserts:
     case TokenKind.Async:
+    case TokenKind.Await:
+    case TokenKind.Catch:
     case TokenKind.Constructor:
     case TokenKind.Declare:
+    case TokenKind.Finally:
     case TokenKind.From:
     case TokenKind.Get:
+    case TokenKind.Global:
+    case TokenKind.Infer:
+    case TokenKind.Is:
+    case TokenKind.Keyof:
     case TokenKind.Module:
     case TokenKind.Namespace:
     case TokenKind.Of:
+    case TokenKind.Out:
     case TokenKind.Override:
+    case TokenKind.Partial:
     case TokenKind.Readonly:
+    case TokenKind.Satisfies:
     case TokenKind.Set:
+    case TokenKind.Throw:
+    case TokenKind.Try:
     case TokenKind.Type:
+    case TokenKind.Undefined:
+    case TokenKind.Using:
+    case TokenKind.With:
+    case TokenKind.Yield:
       return true
     default:
       return false
@@ -169,12 +216,20 @@ export function keywordKind(word: string): TokenKind {
       return TokenKind.Accessor
     case "as":
       return TokenKind.As
+    case "assert":
+      return TokenKind.Assert
+    case "asserts":
+      return TokenKind.Asserts
     case "async":
       return TokenKind.Async
+    case "await":
+      return TokenKind.Await
     case "break":
       return TokenKind.Break
     case "case":
       return TokenKind.Case
+    case "catch":
+      return TokenKind.Catch
     case "class":
       return TokenKind.Class
     case "const":
@@ -203,6 +258,8 @@ export function keywordKind(word: string): TokenKind {
       return TokenKind.Extends
     case "false":
       return TokenKind.False
+    case "finally":
+      return TokenKind.Finally
     case "for":
       return TokenKind.For
     case "from":
@@ -211,6 +268,8 @@ export function keywordKind(word: string): TokenKind {
       return TokenKind.Function
     case "get":
       return TokenKind.Get
+    case "global":
+      return TokenKind.Global
     case "if":
       return TokenKind.If
     case "implements":
@@ -219,10 +278,16 @@ export function keywordKind(word: string): TokenKind {
       return TokenKind.Import
     case "in":
       return TokenKind.In
+    case "infer":
+      return TokenKind.Infer
     case "instanceof":
       return TokenKind.Instanceof
     case "interface":
       return TokenKind.Interface
+    case "is":
+      return TokenKind.Is
+    case "keyof":
+      return TokenKind.Keyof
     case "let":
       return TokenKind.Let
     case "module":
@@ -233,8 +298,12 @@ export function keywordKind(word: string): TokenKind {
       return TokenKind.New
     case "of":
       return TokenKind.Of
+    case "out":
+      return TokenKind.Out
     case "override":
       return TokenKind.Override
+    case "partial":
+      return TokenKind.Partial
     case "private":
       return TokenKind.Private
     case "protected":
@@ -245,25 +314,58 @@ export function keywordKind(word: string): TokenKind {
       return TokenKind.Readonly
     case "return":
       return TokenKind.Return
+    case "satisfies":
+      return TokenKind.Satisfies
     case "set":
       return TokenKind.Set
     case "static":
       return TokenKind.Static
+    case "super":
+      return TokenKind.Super
     case "switch":
       return TokenKind.Switch
+    case "this":
+      return TokenKind.This
+    case "throw":
+      return TokenKind.Throw
     case "true":
       return TokenKind.True
+    case "try":
+      return TokenKind.Try
     case "type":
       return TokenKind.Type
     case "typeof":
       return TokenKind.Typeof
+    case "undefined":
+      return TokenKind.Undefined
+    case "using":
+      return TokenKind.Using
     case "var":
       return TokenKind.Var
     case "void":
       return TokenKind.Void
     case "while":
       return TokenKind.While
+    case "with":
+      return TokenKind.With
+    case "yield":
+      return TokenKind.Yield
     default:
       return TokenKind.Identifier
+  }
+}
+
+export function knownName(word: string): KnownName {
+  switch (word) {
+    case "raw":
+      return KnownName.Raw
+    case "String":
+      return KnownName.String
+    case "super":
+      return KnownName.Super
+    case "Symbol":
+      return KnownName.Symbol
+    default:
+      return KnownName.None
   }
 }

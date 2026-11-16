@@ -1,3 +1,5 @@
+import { KnownName } from "./token.tz";
+
 export enum UnaryOp {
   Neg,
   Plus,
@@ -93,6 +95,11 @@ export enum PropertyKind {
   Defaulted,
   Computed,
   Spread,
+}
+
+export enum NewKind {
+  Named,
+  Callee,
 }
 
 export enum ExportForm {
@@ -339,6 +346,7 @@ export type NameExpr = {
   readonly kind: ExprKind.Name;
   readonly loc: int;
   readonly name: string;
+  readonly known: KnownName;
   typeArgs: TypeRef[];
 };
 export type MemberExpr = {
@@ -346,6 +354,7 @@ export type MemberExpr = {
   readonly loc: int;
   readonly object: Expr;
   readonly name: string;
+  readonly known: KnownName;
   readonly optional: boolean;
   typeArgs: TypeRef[];
 };
@@ -394,14 +403,22 @@ export type CallExpr = {
   readonly optional: boolean;
   readonly tagged: boolean;
 };
+export type NamedNew = {
+  readonly kind: NewKind.Named;
+  readonly name: string;
+  readonly member?: string;
+};
+export type CalleeNew = {
+  readonly kind: NewKind.Callee;
+  readonly callee: Expr;
+};
+export type NewForm = NamedNew | CalleeNew;
 export type NewExpr = {
   readonly kind: ExprKind.New;
   readonly loc: int;
-  readonly name: string;
-  readonly member: string;
+  readonly form: NewForm;
   readonly typeArgs: TypeRef[];
   readonly args: Expr[];
-  readonly callee?: Expr;
 };
 export type ConditionalExpr = {
   readonly kind: ExprKind.Conditional;

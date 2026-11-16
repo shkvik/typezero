@@ -1,0 +1,20 @@
+export enum FunctionKind {
+  Plain,
+  Generator,
+}
+
+export enum ExpressionPlace {
+  Plain,
+  ForHead,
+}
+
+export enum TypePlace {
+  Plain,
+  ExtendsClause,
+}
+
+export type ParseContext = {
+  readonly functionKind: FunctionKind;
+  readonly expressionPlace: ExpressionPlace;
+  readonly typePlace: TypePlace;
+};

@@ -1,17 +1,25 @@
 import { FileParser } from "../file-parser.tz";
-import { Token, TokenKind, isKeyword, isName } from "../../../../token.tz";
+import {
+  KnownName,
+  Token,
+  TokenKind,
+  isKeyword,
+  isName,
+} from "../../../../token.tz";
 import {
   ArrayElement,
   BinaryOp,
   Expr,
   ExprKind,
   FunctionPlace,
+  NewKind,
   Property,
   PropertyKind,
   TemplateExpr,
   UnaryOp,
   kNoSpan,
 } from "../../../../ast.tz";
+import { ExpressionPlace, FunctionKind } from "../parse-context.tz";
 
 enum Precedence {
   None,
@@ -231,7 +239,7 @@ partial class FileParser {
 
   private expression(): Expr {
     const start = this.cursor.peek().start;
-    if (this.cursor.isWord("yield")) {
+    if (this.cursor.is(TokenKind.Yield)) {
       return this.yieldExpression();
     }
     const target = this.conditional();
@@ -274,7 +282,7 @@ partial class FileParser {
         value = this.expression();
       }
     }
-    if (!this.inGenerator) {
+    if (this.context.functionKind != FunctionKind.Generator) {
       this.cursor.report(
         loc,
         "'yield' can only be used in a generator function",
@@ -348,10 +356,11 @@ partial class FileParser {
     if (token.kind == TokenKind.As || token.kind == TokenKind.Instanceof) {
       return Precedence.Relational > above;
     }
-    if (this.cursor.isWord("satisfies")) {
+    if (this.cursor.is(TokenKind.Satisfies)) {
       return !token.newline && Precedence.Relational > above;
     }
-    if (token.kind == TokenKind.In && this.noIn) {
+    const forHead = this.context.expressionPlace == ExpressionPlace.ForHead;
+    if (token.kind == TokenKind.In && forHead) {
       return false;
     }
 
@@ -365,7 +374,7 @@ partial class FileParser {
       const target = this.type();
       return { kind: ExprKind.Cast, loc: token.start, operand: left, target };
     }
-    if (this.cursor.isWord("satisfies")) {
+    if (this.cursor.is(TokenKind.Satisfies)) {
       this.cursor.next();
       this.type();
       this.cursor.report(
@@ -410,7 +419,7 @@ partial class FileParser {
 
   private unary(): Expr {
     const token = this.cursor.peek();
-    if (this.cursor.isWord("await")) {
+    if (this.cursor.is(TokenKind.Await)) {
       this.cursor.next();
       const value = this.unary();
       return { kind: ExprKind.Await, loc: token.start, value };
@@ -461,8 +470,8 @@ partial class FileParser {
   }
 
   private arguments(): Arguments {
-    const saved = this.noIn;
-    this.noIn = false;
+    const outer = this.context;
+    this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
     const args: Expr[] = [];
     const spread: boolean[] = [];
     let more =
@@ -483,17 +492,17 @@ partial class FileParser {
         !this.cursor.is(TokenKind.End);
     }
     this.cursor.expect(TokenKind.RParen, "to close the argument list");
-    this.noIn = saved;
+    this.context = outer;
 
     return { args, spread };
   }
 
   private indexInside(): Expr {
-    const saved = this.noIn;
-    this.noIn = false;
+    const outer = this.context;
+    this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
     const index = this.sequence();
     this.cursor.expect(TokenKind.RBracket, "to close the index");
-    this.noIn = saved;
+    this.context = outer;
 
     return index;
   }
@@ -535,6 +544,7 @@ partial class FileParser {
           loc: name.start,
           object: expr,
           name: name.text,
+          known: name.known,
           optional: true,
           typeArgs: [],
         };
@@ -580,6 +590,7 @@ partial class FileParser {
           loc: name.start,
           object: expr,
           name: name.text,
+          known: name.known,
           optional: false,
           typeArgs: [],
         };
@@ -646,9 +657,9 @@ partial class FileParser {
       );
     }
     let raw = false;
-    if (tag.kind == ExprKind.Member && tag.name == "raw") {
+    if (tag.kind == ExprKind.Member && tag.known == KnownName.Raw) {
       const object = tag.object;
-      raw = object.kind == ExprKind.Name && object.name == "String";
+      raw = object.kind == ExprKind.Name && object.known == KnownName.String;
     }
     const tmpl = this.template(raw);
     const elements: ArrayElement[] = [];
@@ -730,22 +741,19 @@ partial class FileParser {
       return {
         kind: ExprKind.New,
         loc: name.start,
-        name: "",
-        member: "",
+        form: { kind: NewKind.Callee, callee },
         typeArgs,
         args,
-        callee,
       };
     }
     const typeArgs = this.cursor.is(TokenKind.Less) ? this.typeArguments() : [];
     const args = this.newArguments();
-    const memberName = member == undefined ? "" : member.text;
+    const memberName = member?.text;
 
     return {
       kind: ExprKind.New,
       loc: name.start,
-      name: name.text,
-      member: memberName,
+      form: { kind: NewKind.Named, name: name.text, member: memberName },
       typeArgs,
       args,
     };
@@ -753,21 +761,19 @@ partial class FileParser {
 
   private newOfExpression(): Expr {
     const at = this.cursor.next().start;
-    const saved = this.noIn;
-    this.noIn = false;
+    const outer = this.context;
+    this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
     const callee = this.sequence();
     this.cursor.expect(TokenKind.RParen, "to close the class");
     const args = this.newArguments();
-    this.noIn = saved;
+    this.context = outer;
 
     return {
       kind: ExprKind.New,
       loc: at,
-      name: "",
-      member: "",
+      form: { kind: NewKind.Callee, callee },
       typeArgs: [],
       args,
-      callee,
     };
   }
 
@@ -776,6 +782,7 @@ partial class FileParser {
       kind: ExprKind.Name,
       loc: name.start,
       name: name.text,
+      known: name.known,
       typeArgs: [],
     };
     if (member != undefined) {
@@ -784,6 +791,7 @@ partial class FileParser {
         loc: member.start,
         object: path,
         name: member.text,
+        known: member.known,
         optional: false,
         typeArgs: [],
       };
@@ -817,6 +825,7 @@ partial class FileParser {
         loc: property.start,
         object: path,
         name: property.text,
+        known: property.known,
         optional: false,
         typeArgs: [],
       };
@@ -864,10 +873,10 @@ partial class FileParser {
   }
 
   private primary(): Expr {
-    const saved = this.noIn;
-    this.noIn = false;
+    const outer = this.context;
+    this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
     const expr = this.primaryInside();
-    this.noIn = saved;
+    this.context = outer;
 
     return expr;
   }
@@ -918,6 +927,8 @@ partial class FileParser {
         return this.classPrimary(token);
       case TokenKind.Async:
         return this.tryAsyncFunction() ?? this.identifierPrimary(token);
+      case TokenKind.This:
+      case TokenKind.Super:
       case TokenKind.Identifier:
         return this.identifierPrimary(token);
       case TokenKind.Function: {
@@ -1014,16 +1025,17 @@ partial class FileParser {
     if (next.kind == TokenKind.Arrow && !next.newline) {
       return this.arrow([], -1, false);
     }
-    if (name == "yield" && this.inGenerator) {
+    const generator = this.context.functionKind == FunctionKind.Generator;
+    if (token.kind == TokenKind.Yield && generator) {
       this.cursor.report(loc, "'yield' must be in parentheses here");
       return this.yieldExpression();
     }
     this.cursor.next();
-    if (name == "undefined") {
+    if (token.kind == TokenKind.Undefined) {
       return { kind: ExprKind.Undefined, loc };
     }
 
-    return { kind: ExprKind.Name, loc, name, typeArgs: [] };
+    return { kind: ExprKind.Name, loc, name, known: token.known, typeArgs: [] };
   }
 
   private arrayLiteral(): Expr {
@@ -1166,7 +1178,8 @@ partial class FileParser {
     }
     const start = this.cursor.peek().start;
     const generator = this.cursor.accept(TokenKind.Star);
-    const identifier = this.cursor.atName();
+    const token = this.cursor.peek();
+    const identifier = isName(token.kind);
     const name = this.fieldName();
     if (name == undefined) {
       this.cursor.skipToClosingBrace();
@@ -1192,9 +1205,15 @@ partial class FileParser {
       (this.cursor.is(TokenKind.Comma) || this.cursor.is(TokenKind.RBrace))
     ) {
       const value: Expr =
-        name == "undefined"
+        token.kind == TokenKind.Undefined
           ? { kind: ExprKind.Undefined, loc }
-          : { kind: ExprKind.Name, loc, name, typeArgs: [] };
+          : {
+              kind: ExprKind.Name,
+              loc,
+              name,
+              known: token.known,
+              typeArgs: [],
+            };
       return { name, loc, value, form: { kind: PropertyKind.Value } };
     }
     if (identifier && this.cursor.is(TokenKind.Assign)) {
@@ -1203,7 +1222,13 @@ partial class FileParser {
       const value: Expr = {
         kind: ExprKind.Assign,
         loc: assignLoc,
-        target: { kind: ExprKind.Name, loc, name, typeArgs: [] },
+        target: {
+          kind: ExprKind.Name,
+          loc,
+          name,
+          known: token.known,
+          typeArgs: [],
+        },
         value: fallback,
         source: kNoSpan,
       };

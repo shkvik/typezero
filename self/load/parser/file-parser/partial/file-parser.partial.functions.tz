@@ -25,6 +25,7 @@ import {
   kNoSpan,
   marker,
 } from "../../../../ast.tz";
+import { FunctionKind } from "../parse-context.tz";
 
 type ParamPattern = { readonly name: string; readonly pattern: Pattern };
 
@@ -88,7 +89,9 @@ partial class FileParser {
     let name = "";
     let loc = this.cursor.peek().start;
     const reserved =
-      !this.cursor.atName() && isKeyword(this.cursor.peek().kind) && !expression;
+      !this.cursor.atName() &&
+      isKeyword(this.cursor.peek().kind) &&
+      !expression;
     if (reserved) {
       this.cursor.report(loc, this.cursor.expectedName("function name"));
     }
@@ -100,8 +103,11 @@ partial class FileParser {
       this.cursor.error(this.cursor.peek().start, "expected a function name");
     }
     const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
-    const outerGenerator = this.inGenerator;
-    this.inGenerator = generator;
+    const outer = this.context;
+    const functionKind = generator
+      ? FunctionKind.Generator
+      : FunctionKind.Plain;
+    this.context = { ...outer, functionKind };
     const patterns: ParamPattern[] = [];
     const params = this.params(false, false, patterns);
     const returnType = this.cursor.accept(TokenKind.Colon)
@@ -114,7 +120,7 @@ partial class FileParser {
     } else {
       body = this.missingBody(expression);
     }
-    this.inGenerator = outerGenerator;
+    this.context = outer;
 
     return {
       kind: StmtKind.Function,
@@ -209,12 +215,12 @@ partial class FileParser {
     const loc = this.cursor.peek().start;
     let name = "";
     let pattern = kNoSpan;
-    const reserved =
-      !this.cursor.atName() && isKeyword(this.cursor.peek().kind);
+    const named = this.cursor.atNameOrThis();
+    const reserved = !named && isKeyword(this.cursor.peek().kind);
     if (reserved) {
       this.cursor.report(loc, this.cursor.expectedName("parameter name"));
     }
-    if (this.cursor.atName() || reserved) {
+    if (named || reserved) {
       name = this.cursor.next().text;
     } else if (
       (this.cursor.is(TokenKind.LBrace) ||
@@ -409,8 +415,8 @@ partial class FileParser {
   ): FunctionExpr {
     const start = from >= 0 ? from : this.cursor.peek().start;
     const loc = this.cursor.peek().start;
-    const outerGenerator = this.inGenerator;
-    this.inGenerator = false;
+    const outer = this.context;
+    this.context = { ...outer, functionKind: FunctionKind.Plain };
     const patterns: ParamPattern[] = [];
     let params: Param[] = [];
     let returnType: TypeRef | undefined = undefined;
@@ -461,7 +467,7 @@ partial class FileParser {
       isGenerator: false,
       isAsync,
     };
-    this.inGenerator = outerGenerator;
+    this.context = outer;
 
     return { kind: ExprKind.Function, loc, fn };
   }
@@ -505,7 +511,7 @@ partial class FileParser {
       const modifier =
         this.cursor.is(TokenKind.Const) ||
         this.cursor.is(TokenKind.In) ||
-        this.cursor.isWord("out");
+        this.cursor.is(TokenKind.Out);
       if (modifier && isName(next.kind)) {
         this.cursor.report(
           this.cursor.peek().start,
@@ -555,8 +561,11 @@ partial class FileParser {
     place: FunctionPlace,
     role: ClassMember | undefined,
   ): FunctionDecl {
-    const outerGenerator = this.inGenerator;
-    this.inGenerator = generator;
+    const outer = this.context;
+    const functionKind = generator
+      ? FunctionKind.Generator
+      : FunctionKind.Plain;
+    this.context = { ...outer, functionKind };
     const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
     const patterns: ParamPattern[] = [];
     const constructor =
@@ -581,7 +590,7 @@ partial class FileParser {
       );
     }
     const source = this.cursor.spanFrom(start);
-    this.inGenerator = outerGenerator;
+    this.context = outer;
 
     return {
       kind: StmtKind.Function,
