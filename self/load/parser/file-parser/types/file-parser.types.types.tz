@@ -1,0 +1,15 @@
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+
+export type ObjectTypeMember = {
+  readonly name: string;
+  readonly loc: int;
+  readonly optional: boolean;
+  readonly readonly: boolean;
+  readonly method: boolean;
+  readonly type: TypeRef;
+};
+
+export type Signature = {
+  readonly type: TypeRef;
+  readonly complete: boolean;
+};
