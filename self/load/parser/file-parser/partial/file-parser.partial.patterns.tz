@@ -1,4 +1,5 @@
 import { FileParser } from "../file-parser.tz";
+import { Code } from "../../../../diagnostic/code.tz";
 import { KnownName, TokenKind } from "../../../../token.tz";
 import {
   ArrayLitExpr,
@@ -94,13 +95,10 @@ partial class FileParser {
         break;
       }
       if (element.rest) {
-        this.cursor.report(element.loc, "a rest element must be the last one");
+        this.cursor.report(element.loc, Code.RestElementNotLast);
       }
     }
-    this.cursor.expect(
-      TokenKind.RBracket,
-      "to close the destructuring pattern",
-    );
+    this.cursor.expect(TokenKind.RBracket, Code.ExpectedPatternClose);
 
     return pattern;
   }
@@ -115,10 +113,7 @@ partial class FileParser {
       return true;
     }
     if (element.rest) {
-      this.cursor.report(
-        assign.start,
-        "a rest element cannot have a default value",
-      );
+      this.cursor.report(assign.start, Code.RestElementDefault);
     }
     element.defaultValue = this.expression();
 
@@ -135,10 +130,7 @@ partial class FileParser {
     }
     if (!this.cursor.atName()) {
       const token = this.cursor.peek();
-      this.cursor.error(
-        token.start,
-        "expected a variable name in the destructuring pattern",
-      );
+      this.cursor.error(token.start, Code.ExpectedPatternVariable);
       return false;
     }
     const word = this.cursor.next();
@@ -161,10 +153,7 @@ partial class FileParser {
         element.rest = true;
         if (!this.cursor.atName()) {
           const token = this.cursor.peek();
-          this.cursor.error(
-            token.start,
-            "expected a variable name after '...' in the destructuring pattern",
-          );
+          this.cursor.error(token.start, Code.ExpectedVariableAfterRest);
           return pattern;
         }
         const word = this.cursor.next();
@@ -177,10 +166,10 @@ partial class FileParser {
         break;
       }
       if (element.rest) {
-        this.cursor.report(element.loc, "a rest element must be the last one");
+        this.cursor.report(element.loc, Code.RestElementNotLast);
       }
     }
-    this.cursor.expect(TokenKind.RBrace, "to close the destructuring pattern");
+    this.cursor.expect(TokenKind.RBrace, Code.ExpectedPatternClose);
 
     return pattern;
   }
@@ -189,7 +178,7 @@ partial class FileParser {
     const identifier = this.cursor.atName();
     if (this.cursor.accept(TokenKind.LBracket)) {
       element.keyExpr = this.expression();
-      this.cursor.expect(TokenKind.RBracket, "to close the key");
+      this.cursor.expect(TokenKind.RBracket, Code.ExpectedKeyClose);
     } else {
       const key = this.fieldName();
       if (key == undefined) {
@@ -206,10 +195,7 @@ partial class FileParser {
       element.name = element.key;
     } else {
       const token = this.cursor.peek();
-      this.cursor.error(
-        token.start,
-        "a key in a destructuring pattern needs a variable",
-      );
+      this.cursor.error(token.start, Code.PatternKeyNeedsVariable);
       return false;
     }
     if (this.cursor.accept(TokenKind.Assign)) {
@@ -235,10 +221,7 @@ partial class FileParser {
           element.keyExpr = form.key;
         }
         if (element.rest && i + 1 != expr.props.length) {
-          this.cursor.report(
-            element.loc,
-            "a rest element must be the last one",
-          );
+          this.cursor.report(element.loc, Code.RestElementNotLast);
         }
         this.fillElement(element, property.value, false);
         pattern.elements.push(element);
@@ -255,7 +238,7 @@ partial class FileParser {
       element.hole = item.hole;
       element.rest = item.spread;
       if (element.rest && i + 1 != expr.elements.length) {
-        this.cursor.report(element.loc, "a rest element must be the last one");
+        this.cursor.report(element.loc, Code.RestElementNotLast);
       }
       this.fillElement(element, item.expr, element.hole);
       pattern.elements.push(element);

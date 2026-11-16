@@ -98,7 +98,9 @@ runtime/          весь C → tzrt.lib, tzrt.bc, tzcrypto.lib
 library/          весь tz → bin/lib: <тема>/*.tz
 editors/          vscode/ — расширение VS Code; types/ — объявления для будущего плагина tsserver
 self/             компилятор на tz, пробный (порт compiler/load): token.tz, ast.tz, dump.tz,
-                  main.tz; load/lexer/lexer.tz (tokenize → массив токенов); load/parser/ — Parser (parser.tz:
+                  main.tz; diagnostic/ — коды ошибок (code.tz: enum Code, значения "TZ1101") и
+                  их тексты (message.tz: Record<Code, Message>, подстановка {expected}/{found});
+                  load/lexer/lexer.tz (tokenize → массив токенов); load/parser/ — Parser (parser.tz:
                   run() по списку файлов → ParsedFile[]), Cursor (позиция, откаты, ошибки),
                   LiteralReader (literal.tz: значения литералов по токену);
                   load/parser/file-parser/ — FileParser (file-parser.tz), контекст места

@@ -1,4 +1,5 @@
 import { FileParser } from "../file-parser.tz";
+import { Code } from "../../../../diagnostic/code.tz";
 import {
   KnownName,
   Token,
@@ -289,10 +290,7 @@ partial class FileParser {
       }
     }
     if (this.context.functionKind != FunctionKind.Generator) {
-      this.cursor.report(
-        loc,
-        "'yield' can only be used in a generator function",
-      );
+      this.cursor.report(loc, Code.YieldOutsideGenerator);
       return value ?? { kind: ExprKind.Undefined, loc };
     }
 
@@ -307,7 +305,7 @@ partial class FileParser {
     const question = this.cursor.next();
     const loc = question.start;
     const thenExpr = this.expression();
-    this.cursor.expect(TokenKind.Colon, "in the conditional expression");
+    this.cursor.expect(TokenKind.Colon, Code.ExpectedInConditional);
     const elseExpr = this.expression();
 
     return { kind: ExprKind.Conditional, loc, cond, thenExpr, elseExpr };
@@ -348,10 +346,7 @@ partial class FileParser {
     let left = this.unary();
     if (prefix != undefined && this.cursor.is(TokenKind.StarStar)) {
       const token = this.cursor.peek();
-      this.cursor.report(
-        token.start,
-        "the left side of '**' cannot be a unary expression",
-      );
+      this.cursor.report(token.start, Code.UnaryBeforePower);
     }
     let lookahead = this.binaryOperator();
     while (lookahead.precedence > above) {
@@ -404,10 +399,7 @@ partial class FileParser {
       }
       case TokenKind.Satisfies:
         this.type();
-        this.cursor.report(
-          token.start,
-          "'satisfies' is not supported, just as 'as' is not",
-        );
+        this.cursor.report(token.start, Code.SatisfiesNotSupported);
         return left;
       case TokenKind.Instanceof: {
         const right = this.binary(Precedence.Relational);
@@ -422,9 +414,9 @@ partial class FileParser {
       }
       default: {
         if (op.kind == TokenKind.EqEqEq) {
-          this.cursor.report(token.start, "'===' is not supported; use '=='");
+          this.cursor.report(token.start, Code.StrictEqualsNotSupported);
         } else if (op.kind == TokenKind.BangEqEq) {
-          this.cursor.report(token.start, "'!==' is not supported; use '!='");
+          this.cursor.report(token.start, Code.StrictNotEqualsNotSupported);
         }
         const floor =
           op.precedence == Precedence.Power
@@ -509,7 +501,7 @@ partial class FileParser {
         break;
       }
     }
-    this.cursor.expect(TokenKind.RParen, "to close the argument list");
+    this.cursor.expect(TokenKind.RParen, Code.ExpectedArgumentsClose);
     this.context = outer;
     const anySpread = spread.includes(true);
 
@@ -520,7 +512,7 @@ partial class FileParser {
     const outer = this.context;
     this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
     const index = this.sequence();
-    this.cursor.expect(TokenKind.RBracket, "to close the index");
+    this.cursor.expect(TokenKind.RBracket, Code.ExpectedIndexClose);
     this.context = outer;
 
     return index;
@@ -572,10 +564,7 @@ partial class FileParser {
       case TokenKind.LBracket:
         return this.indexLink(expr, true);
       default:
-        this.cursor.error(
-          token.start,
-          "expected a property name, '[' or '(' after '?.'",
-        );
+        this.cursor.error(token.start, Code.ExpectedPropertyAfterOptionalDot);
         return undefined;
     }
   }
@@ -589,10 +578,7 @@ partial class FileParser {
         this.cursor.next();
         if (!this.isPropertyName()) {
           const current = this.cursor.peek();
-          this.cursor.error(
-            current.start,
-            "expected a property name after '.'",
-          );
+          this.cursor.error(current.start, Code.ExpectedPropertyAfterDot);
           return undefined;
         }
         return this.memberLink(expr, false);
@@ -688,10 +674,7 @@ partial class FileParser {
   private taggedTemplate(tag: Expr, optional: boolean): Expr {
     if (optional) {
       const token = this.cursor.peek();
-      this.cursor.report(
-        token.start,
-        "a tagged template cannot be part of an optional chain",
-      );
+      this.cursor.report(token.start, Code.TaggedTemplateInOptionalChain);
     }
     let raw = false;
     if (tag.kind == ExprKind.Member && tag.known == KnownName.Raw) {
@@ -737,7 +720,7 @@ partial class FileParser {
         break;
       }
     }
-    this.cursor.expect(TokenKind.RParen, "to close the argument list");
+    this.cursor.expect(TokenKind.RParen, Code.ExpectedArgumentsClose);
 
     return args;
   }
@@ -750,10 +733,7 @@ partial class FileParser {
     }
     if (!this.cursor.atName()) {
       const token = this.cursor.peek();
-      this.cursor.error(
-        token.start,
-        "expected a class name after 'new'",
-      );
+      this.cursor.error(token.start, Code.ExpectedClassAfterNew);
       return invalid(loc);
     }
     const name = this.cursor.next();
@@ -763,10 +743,7 @@ partial class FileParser {
         member = this.cursor.next();
       } else {
         const token = this.cursor.peek();
-        this.cursor.error(
-          token.start,
-          "expected a name after '.'",
-        );
+        this.cursor.error(token.start, Code.ExpectedNameAfterDot);
       }
     }
     if (this.cursor.is(TokenKind.Dot) || this.cursor.is(TokenKind.LBracket)) {
@@ -802,7 +779,7 @@ partial class FileParser {
     const outer = this.context;
     this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
     const callee = this.sequence();
-    this.cursor.expect(TokenKind.RParen, "to close the class");
+    this.cursor.expect(TokenKind.RParen, Code.ExpectedNewClassClose);
     const args = this.newArguments();
     this.context = outer;
 
@@ -852,10 +829,7 @@ partial class FileParser {
       }
       if (!this.isPropertyName()) {
         const current = this.cursor.peek();
-        this.cursor.error(
-          current.start,
-          "expected a property name after '.'",
-        );
+        this.cursor.error(current.start, Code.ExpectedPropertyAfterDot);
         return path;
       }
       const property = this.cursor.next();
@@ -891,10 +865,7 @@ partial class FileParser {
         !this.cursor.is(TokenKind.TemplateTail)
       ) {
         const token = this.cursor.peek();
-        this.cursor.error(
-          token.start,
-          "expected '}' to close the template substitution",
-        );
+        this.cursor.error(token.start, Code.ExpectedSubstitutionClose);
         quasis.push("");
         return { kind: ExprKind.Template, loc, quasis, exprs };
       }
@@ -993,7 +964,7 @@ partial class FileParser {
         if (isName(token.kind)) {
           return this.identifierPrimary(token);
         }
-        this.cursor.error(loc, `expected an expression, found ${token.kind}`);
+        this.cursor.error(loc, Code.ExpectedExpression, { found: token.kind });
         return invalid(loc);
     }
   }
@@ -1004,10 +975,7 @@ partial class FileParser {
     }
     this.cursor.next();
     const inner = this.sequence();
-    this.cursor.expect(
-      TokenKind.RParen,
-      "to close the parenthesized expression",
-    );
+    this.cursor.expect(TokenKind.RParen, Code.ExpectedParenthesizedClose);
 
     return inner;
   }
@@ -1029,19 +997,18 @@ partial class FileParser {
       return this.arrow(typeParams, false, text);
     }
     this.cursor.reset(start);
-    this.cursor.error(loc, "expected an expression, found '<'");
+    this.cursor.error(loc, Code.ExpectedExpression, { found: TokenKind.Less });
 
     return invalid(loc);
   }
 
   private importPrimary(token: Token): Expr {
     const next = this.cursor.lookahead();
-    this.cursor.report(
-      token.start,
+    const code =
       next.kind == TokenKind.Dot
-        ? "'import.meta' is not supported"
-        : "dynamic 'import()' is not supported",
-    );
+        ? Code.ImportMetaNotSupported
+        : Code.DynamicImportNotSupported;
+    this.cursor.report(token.start, code);
     this.cursor.next();
 
     return invalid(token.start);
@@ -1055,7 +1022,11 @@ partial class FileParser {
       next.kind == TokenKind.Extends ||
       next.kind == TokenKind.Implements;
     if (!isClassExpression) {
-      this.cursor.error(token.start, "expected an expression, found 'class'");
+      this.cursor.error(
+        token.start,
+        Code.ExpectedExpression,
+        { found: TokenKind.Class },
+      );
       return invalid(token.start);
     }
     const decl = this.classDecl(true);
@@ -1072,7 +1043,7 @@ partial class FileParser {
     }
     const generator = this.context.functionKind == FunctionKind.Generator;
     if (token.kind == TokenKind.Yield && generator) {
-      this.cursor.report(loc, "'yield' must be in parentheses here");
+      this.cursor.report(loc, Code.YieldNeedsParentheses);
       return this.yieldExpression();
     }
     this.cursor.next();
@@ -1104,7 +1075,7 @@ partial class FileParser {
         break;
       }
     }
-    this.cursor.expect(TokenKind.RBracket, "to close the array");
+    this.cursor.expect(TokenKind.RBracket, Code.ExpectedArrayClose);
 
     return { kind: ExprKind.ArrayLit, loc, elements };
   }
@@ -1130,7 +1101,7 @@ partial class FileParser {
         break;
       }
     }
-    this.cursor.expect(TokenKind.RBrace, "to close the object");
+    this.cursor.expect(TokenKind.RBrace, Code.ExpectedObjectClose);
 
     return { kind: ExprKind.ObjectLit, loc, props };
   }
@@ -1159,7 +1130,7 @@ partial class FileParser {
 
   private computedProperty(loc: int): Property | undefined {
     const key = this.expression();
-    this.cursor.expect(TokenKind.RBracket, "to close the key");
+    this.cursor.expect(TokenKind.RBracket, Code.ExpectedKeyClose);
     if (key.kind == ExprKind.Name) {
       const constants = this.stringConstants.get(key.name) ?? [];
       for (const text of constants) {
@@ -1169,11 +1140,11 @@ partial class FileParser {
       this.fieldNames.add(key.value);
     }
     if (this.cursor.is(TokenKind.LParen) || this.cursor.is(TokenKind.Less)) {
-      this.cursor.error(loc, "a method cannot have a key in brackets");
+      this.cursor.error(loc, Code.MethodKeyInBrackets);
       this.cursor.skipToClosingBrace();
       return undefined;
     }
-    if (!this.cursor.expect(TokenKind.Colon, "after the key in brackets")) {
+    if (!this.cursor.expect(TokenKind.Colon, Code.ExpectedAfterKey)) {
       this.cursor.skipToClosingBrace();
       return undefined;
     }
@@ -1208,7 +1179,7 @@ partial class FileParser {
 
   private namedProperty(loc: int): Property | undefined {
     if (this.accessorAhead()) {
-      this.cursor.error(loc, "getters and setters are not supported");
+      this.cursor.error(loc, Code.AccessorsNotSupported);
       this.cursor.skipToClosingBrace();
       return undefined;
     }
@@ -1231,10 +1202,7 @@ partial class FileParser {
     }
     if (generator || isAsync) {
       const current = this.cursor.peek();
-      this.cursor.error(
-        current.start,
-        "expected '(' after the name of the method",
-      );
+      this.cursor.error(current.start, Code.ExpectedParenAfterMethodName);
       this.cursor.skipToClosingBrace();
       return undefined;
     }
@@ -1279,7 +1247,8 @@ partial class FileParser {
     const current = this.cursor.peek();
     this.cursor.error(
       current.start,
-      `expected ':' after the field name, found ${current.kind}`,
+      Code.ExpectedColonAfterFieldName,
+      { found: current.kind },
     );
     this.cursor.skipToClosingBrace();
 
@@ -1305,10 +1274,7 @@ partial class FileParser {
     if (this.cursor.isRecovering() || fn.body == undefined) {
       if (fn.body == undefined) {
         const token = this.cursor.peek();
-        this.cursor.error(
-          token.start,
-          "expected '{' to start the body of the method",
-        );
+        this.cursor.error(token.start, Code.ExpectedMethodBody);
       }
       this.cursor.skipToClosingBrace();
       return undefined;
@@ -1322,7 +1288,7 @@ partial class FileParser {
     const token = this.cursor.next();
     const number = this.literals.integer(token);
     if (!number.valid) {
-      this.cursor.report(token.start, "invalid integer literal");
+      this.cursor.report(token.start, Code.InvalidIntegerLiteral);
       return invalid(token.start);
     }
     const text = { start: token.start, end: token.end };
@@ -1347,7 +1313,7 @@ partial class FileParser {
     const token = this.cursor.next();
     const number = this.literals.float(token);
     if (!number.valid) {
-      this.cursor.report(token.start, "invalid number literal");
+      this.cursor.report(token.start, Code.InvalidNumberLiteral);
     }
     const text = { start: token.start, end: token.end };
 

@@ -1,5 +1,6 @@
 import { FileParser } from "../file-parser.tz";
-import { Token, TokenKind, isKeyword, isName } from "../../../../token.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { TokenKind, isKeyword, isName } from "../../../../token.tz";
 import {
   Decorator,
   ExportForm,
@@ -25,6 +26,27 @@ type ImportClause =
   | { readonly kind: ImportForm.Named }
   | { readonly kind: ImportForm.Default; readonly name: string }
   | { readonly kind: ImportForm.Namespace; readonly name?: string };
+
+type NameListCodes = {
+  readonly typeNotNeeded: Code;
+  readonly keywordName: Code;
+  readonly expectedName: Code;
+  readonly close: Code;
+};
+
+const kImportNames: NameListCodes = {
+  typeNotNeeded: Code.TypeNotNeededInImport,
+  keywordName: Code.KeywordImported,
+  expectedName: Code.ExpectedNameToImport,
+  close: Code.ExpectedImportNamesClose,
+};
+
+const kExportNames: NameListCodes = {
+  typeNotNeeded: Code.TypeNotNeededInExport,
+  keywordName: Code.KeywordExported,
+  expectedName: Code.ExpectedNameToExport,
+  close: Code.ExpectedExportNamesClose,
+};
 
 function clauseName(clause: ImportClause): string | undefined {
   if (clause.kind == ImportForm.Named) {
@@ -107,10 +129,7 @@ partial class FileParser {
     const keyword = this.cursor.next();
     const loc = keyword.start;
     if (!topLevel) {
-      this.cursor.report(
-        loc,
-        "'import' is allowed only at the top level of a file",
-      );
+      this.cursor.report(loc, Code.ImportNotTopLevel);
     }
     if (this.cursor.is(TokenKind.String)) {
       return this.partList(loc, topLevel);
@@ -122,7 +141,7 @@ partial class FileParser {
       next.kind != TokenKind.From;
     if (typeWord) {
       const token = this.cursor.peek();
-      this.cursor.report(token.start, "'import type' is not needed");
+      this.cursor.report(token.start, Code.ImportTypeNotNeeded);
       this.cursor.next();
     }
     const head = this.cursor.peek();
@@ -130,12 +149,12 @@ partial class FileParser {
     let clause: ImportClause = { kind: ImportForm.Named };
     if (this.cursor.accept(TokenKind.Star)) {
       let name: string | undefined = undefined;
-      if (this.cursor.expect(TokenKind.As, "after 'import *'")) {
+      if (this.cursor.expect(TokenKind.As, Code.ExpectedAfterImportStar)) {
         const alias = this.cursor.peek();
         if (isName(alias.kind)) {
           name = alias.text;
         }
-        this.cursor.expectName("after 'import * as'");
+        this.cursor.expectName(Code.ExpectedAfterImportStarAs);
       }
       clause = { kind: ImportForm.Namespace, name };
     } else if (this.cursor.atName()) {
@@ -144,7 +163,8 @@ partial class FileParser {
       if (this.cursor.is(TokenKind.Assign)) {
         this.cursor.error(
           formLoc,
-          `'import ${alias.text} = ...' is not supported`,
+          Code.ImportEqualsNotSupported,
+          { word: alias.text },
         );
         return marker(StmtKind.Empty, loc);
       }
@@ -155,18 +175,20 @@ partial class FileParser {
         const token = this.cursor.peek();
         this.cursor.error(
           token.start,
-          `expected '{' after ',', found ${token.kind}`,
+          Code.ExpectedBraceAfterComma,
+          { found: token.kind },
         );
       }
     }
     const names: ModuleName[] = [];
     if (this.cursor.is(TokenKind.LBrace)) {
-      this.moduleNames(names, keyword);
+      this.moduleNames(names, kImportNames);
     } else if (clause.kind == ImportForm.Named) {
       const token = this.cursor.peek();
       this.cursor.error(
         token.start,
-        `expected '{' and the names to import, found ${token.kind}`,
+        Code.ExpectedImportNames,
+        { found: token.kind },
       );
     }
     if (this.cursor.isRecovering()) {
@@ -208,17 +230,11 @@ partial class FileParser {
     this.cursor.expectSemicolon();
     if (json) {
       if (clause.kind != ImportForm.Default) {
-        this.cursor.report(
-          formLoc,
-          "a JSON file is one value: import it whole",
-        );
+        this.cursor.report(formLoc, Code.JsonImportWhole);
         return marker(StmtKind.Empty, loc);
       }
       if (!jsonType) {
-        this.cursor.report(
-          from.loc,
-          "a JSON file is imported with 'with { type: \"json\" }'",
-        );
+        this.cursor.report(from.loc, Code.JsonImportAttribute);
       }
       names.push({
         name: "json",
@@ -240,11 +256,11 @@ partial class FileParser {
       return marker(StmtKind.Empty, loc);
     }
     if (clause.kind == ImportForm.Namespace) {
-      this.cursor.report(formLoc, "'import * as' is not supported");
+      this.cursor.report(formLoc, Code.NamespaceImportNotSupported);
     } else if (clause.kind == ImportForm.Default) {
-      this.cursor.report(formLoc, "default imports are not supported");
+      this.cursor.report(formLoc, Code.DefaultImportNotSupported);
     } else if (names.length == 0) {
-      this.cursor.report(loc, "an import must name what it takes");
+      this.cursor.report(loc, Code.ImportWithoutNames);
     }
     if (names.length > 0) {
       this.addImport(loc, names, from);
@@ -299,13 +315,13 @@ partial class FileParser {
     const keyword = this.cursor.next();
     const loc = keyword.start;
     if (!topLevel) {
-      this.cursor.report(loc, "'export' is allowed only at the top level");
+      this.cursor.report(loc, Code.ExportNotTopLevel);
     }
     if (this.cursor.is(TokenKind.At)) {
       return this.exportDecorated(topLevel);
     }
     if (this.cursor.is(TokenKind.Partial) && this.partialClassAhead()) {
-      this.cursor.report(loc, "a part of a class is not exported");
+      this.cursor.report(loc, Code.PartNotExported);
       return this.statement(topLevel);
     }
     if (this.exportedDeclarationAhead()) {
@@ -319,7 +335,7 @@ partial class FileParser {
       return this.exportDefault(loc, topLevel);
     }
     if (this.cursor.accept(TokenKind.Assign)) {
-      this.cursor.report(loc, "'export =' is not supported");
+      this.cursor.report(loc, Code.ExportEqualsNotSupported);
       this.expression();
       this.cursor.expectSemicolon();
       return marker(StmtKind.Empty, loc);
@@ -330,19 +346,20 @@ partial class FileParser {
     const next = this.cursor.lookahead();
     if (this.cursor.is(TokenKind.Type) && next.kind == TokenKind.LBrace) {
       const token = this.cursor.peek();
-      this.cursor.report(token.start, "'export type' is not needed");
+      this.cursor.report(token.start, Code.ExportTypeNotNeeded);
       this.cursor.next();
     }
     if (!this.cursor.is(TokenKind.LBrace)) {
       const token = this.cursor.peek();
       this.cursor.error(
         token.start,
-        `expected a declaration or '{' after 'export', found ${token.kind}`,
+        Code.ExpectedExportDeclaration,
+        { found: token.kind },
       );
       return marker(StmtKind.Empty, loc);
     }
 
-    return this.exportNames(keyword);
+    return this.exportNames(loc);
   }
 
   private exportDecorated(topLevel: boolean): Stmt {
@@ -360,10 +377,9 @@ partial class FileParser {
     return stmt;
   }
 
-  private exportNames(keyword: Token): Stmt {
-    const loc = keyword.start;
+  private exportNames(loc: int): Stmt {
     const names: ModuleName[] = [];
-    this.moduleNames(names, keyword);
+    this.moduleNames(names, kExportNames);
     const reExport =
       !this.cursor.isRecovering() && this.cursor.is(TokenKind.From);
     let from: ModulePath | undefined = undefined;
@@ -383,7 +399,7 @@ partial class FileParser {
   }
 
   private exportDefault(loc: int, topLevel: boolean): Stmt {
-    this.cursor.report(loc, "'export default' is not supported");
+    this.cursor.report(loc, Code.ExportDefaultNotSupported);
     this.cursor.next();
     const next = this.cursor.lookahead();
     if (this.cursor.is(TokenKind.Function) && isName(next.kind)) {
@@ -411,9 +427,9 @@ partial class FileParser {
     if (this.cursor.is(TokenKind.As)) {
       const asKeyword = this.cursor.next();
       const asLoc = asKeyword.start;
-      this.cursor.expectName("after 'export * as'");
+      this.cursor.expectName(Code.ExpectedAfterExportStarAs);
       if (!this.cursor.isRecovering() && this.fromPath(true) != undefined) {
-        this.cursor.report(asLoc, "'export * as' is not supported");
+        this.cursor.report(asLoc, Code.ExportStarAsNotSupported);
         this.cursor.expectSemicolon();
       }
       return marker(StmtKind.Empty, loc);
@@ -432,19 +448,16 @@ partial class FileParser {
     return marker(StmtKind.Empty, loc);
   }
 
-  private moduleNames(names: ModuleName[], keyword: Token): void {
+  private moduleNames(names: ModuleName[], codes: NameListCodes): void {
     this.cursor.next();
     while (this.cursor.insideList(TokenKind.RBrace)) {
       const next = this.cursor.lookahead();
       if (this.cursor.is(TokenKind.Type) && isName(next.kind)) {
         const token = this.cursor.peek();
-        this.cursor.report(
-          token.start,
-          `'type' is not needed in an ${keyword.text}`,
-        );
+        this.cursor.report(token.start, codes.typeNotNeeded);
         this.cursor.next();
       }
-      const name = this.moduleName(keyword);
+      const name = this.moduleName(codes);
       if (name == undefined) {
         return;
       }
@@ -453,33 +466,24 @@ partial class FileParser {
         break;
       }
     }
-    this.cursor.expect(
-      TokenKind.RBrace,
-      `to close the names to ${keyword.text}`,
-    );
+    this.cursor.expect(TokenKind.RBrace, codes.close);
   }
 
-  private moduleName(keyword: Token): ModuleName | undefined {
+  private moduleName(codes: NameListCodes): ModuleName | undefined {
     const token = this.cursor.peek();
     if (token.kind == TokenKind.Default) {
-      this.cursor.error(token.start, "there is no 'export default'");
+      this.cursor.error(token.start, Code.NoExportDefault);
       return undefined;
     }
     const reserved = !isName(token.kind) && isKeyword(token.kind);
     const next = this.cursor.lookahead();
     const renamed = reserved && next.kind == TokenKind.As;
     if (reserved && !renamed) {
-      this.cursor.error(
-        token.start,
-        `'${token.text}' is a keyword in tz: ${keyword.text} it under another name, e.g. '{ ${token.text} as ${token.text}Name }'`,
-      );
+      this.cursor.error(token.start, codes.keywordName, { word: token.text });
       return undefined;
     }
     if (!isName(token.kind) && !renamed) {
-      this.cursor.error(
-        token.start,
-        `expected a name to ${keyword.text}, found ${token.kind}`,
-      );
+      this.cursor.error(token.start, codes.expectedName, { found: token.kind });
       return undefined;
     }
     this.cursor.next();
@@ -493,13 +497,14 @@ partial class FileParser {
     }
     const alias = this.cursor.peek();
     if (alias.kind == TokenKind.Default) {
-      this.cursor.error(alias.start, "there is no 'export default'");
+      this.cursor.error(alias.start, Code.NoExportDefault);
       return undefined;
     }
     if (!isName(alias.kind)) {
       this.cursor.error(
         alias.start,
-        `expected a name after 'as', found ${alias.kind}`,
+        Code.ExpectedNameAfterAs,
+        { found: alias.kind },
       );
       return undefined;
     }
@@ -518,7 +523,7 @@ partial class FileParser {
     const at = keyword.start;
     const old = keyword.kind == TokenKind.Assert;
     this.cursor.next();
-    if (!this.cursor.expect(TokenKind.LBrace, "after 'with'")) {
+    if (!this.cursor.expect(TokenKind.LBrace, Code.ExpectedAfterWith)) {
       return false;
     }
     let typeJson = false;
@@ -527,10 +532,7 @@ partial class FileParser {
       const key = this.attributeKey();
       if (
         key == undefined ||
-        !this.cursor.expect(
-          TokenKind.Colon,
-          "after the name of an import attribute",
-        )
+        !this.cursor.expect(TokenKind.Colon, Code.ExpectedAfterAttributeName)
       ) {
         this.cursor.skipToClosingBrace();
         return false;
@@ -549,15 +551,15 @@ partial class FileParser {
         break;
       }
     }
-    this.cursor.expect(TokenKind.RBrace, "after the import attributes");
+    this.cursor.expect(TokenKind.RBrace, Code.ExpectedAttributesClose);
     if (!json) {
-      this.cursor.report(at, "import attributes are only for JSON files");
+      this.cursor.report(at, Code.AttributesOnlyForJson);
       return false;
     }
     if (old) {
-      this.cursor.report(at, "'assert' is the old form of import attributes");
+      this.cursor.report(at, Code.AssertAttributes);
     } else if (other) {
-      this.cursor.report(at, "a JSON file takes one import attribute");
+      this.cursor.report(at, Code.JsonOneAttribute);
     }
 
     return typeJson || old || other;
@@ -577,10 +579,7 @@ partial class FileParser {
   private fromPath(from: boolean): ModulePath | undefined {
     if (from && !this.cursor.is(TokenKind.From)) {
       const token = this.cursor.peek();
-      this.cursor.error(
-        token.start,
-        `expected 'from' and the path of the file, found ${token.kind}`,
-      );
+      this.cursor.error(token.start, Code.ExpectedFrom, { found: token.kind });
       return undefined;
     }
     if (from) {
@@ -590,7 +589,8 @@ partial class FileParser {
     if (token.kind != TokenKind.String) {
       this.cursor.error(
         token.start,
-        `expected the path of the file as a string, found ${token.kind}`,
+        Code.ExpectedPathString,
+        { found: token.kind },
       );
       return undefined;
     }

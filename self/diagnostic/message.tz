@@ -1,0 +1,633 @@
+import { TokenKind, tokenSpelling } from "../token.tz";
+import { Code } from "./code.tz";
+
+export type Details = {
+  readonly expected?: TokenKind;
+  readonly found?: TokenKind;
+  readonly word?: string;
+};
+
+export const kNoDetails: Details = {};
+
+type Message = { readonly text: string };
+
+const kMessages: Record<Code, Message> = {
+  [Code.ExpectedAfterSwitch]: {
+    text: "expected {expected} after 'switch', found {found}",
+  },
+  [Code.ExpectedAfterSwitchValue]: {
+    text: "expected {expected} after the value of 'switch', found {found}",
+  },
+  [Code.ExpectedSwitchCasesStart]: {
+    text: "expected {expected} to start the cases of 'switch', found {found}",
+  },
+  [Code.ExpectedAfterCaseValue]: {
+    text: "expected {expected} after the value of 'case', found {found}",
+  },
+  [Code.ExpectedAfterDefault]: {
+    text: "expected {expected} after 'default', found {found}",
+  },
+  [Code.ExpectedSwitchClose]: {
+    text: "expected {expected} to close 'switch', found {found}",
+  },
+  [Code.ExpectedBlockStart]: {
+    text: "expected {expected} to start the block, found {found}",
+  },
+  [Code.ExpectedBlockClose]: {
+    text: "expected {expected} to close the block, found {found}",
+  },
+  [Code.ExpectedAfterIf]: {
+    text: "expected {expected} after 'if', found {found}",
+  },
+  [Code.ExpectedAfterWhile]: {
+    text: "expected {expected} after 'while', found {found}",
+  },
+  [Code.ExpectedAfterCondition]: {
+    text: "expected {expected} after the condition, found {found}",
+  },
+  [Code.ExpectedAfterDoBody]: {
+    text: "expected {expected} after the body of 'do', found {found}",
+  },
+  [Code.ExpectedAfterFor]: {
+    text: "expected {expected} after 'for', found {found}",
+  },
+  [Code.ExpectedAfterForPattern]: {
+    text: "expected {expected} after the destructuring pattern, found {found}",
+  },
+  [Code.ExpectedAfterLoopInitializer]: {
+    text: "expected {expected} after the loop initializer, found {found}",
+  },
+  [Code.ExpectedAfterLoopCondition]: {
+    text: "expected {expected} after the loop condition, found {found}",
+  },
+  [Code.ExpectedLoopHeaderClose]: {
+    text: "expected {expected} to close the loop header, found {found}",
+  },
+  [Code.ExpectedAfterCatchVariable]: {
+    text: "expected {expected} after the variable of 'catch', found {found}",
+  },
+  [Code.ExpectedSemicolon]: {
+    text: "expected {expected}, found {found}",
+  },
+  [Code.UnexpectedClosingBrace]: {
+    text: "unexpected '}'",
+  },
+  [Code.VarNotSupported]: {
+    text: "'var' is not supported; use 'let' or 'const'",
+  },
+  [Code.PartialClassNotTopLevel]: {
+    text: "'partial class' is written only at the top level of a file",
+  },
+  [Code.NoThrow]: {
+    text: "there is no 'throw' in tz",
+  },
+  [Code.NoTry]: {
+    text: "there is no 'try' in tz",
+  },
+  [Code.NoCatch]: {
+    text: "there is no 'catch' in tz",
+  },
+  [Code.NoFinally]: {
+    text: "there is no 'finally' in tz",
+  },
+  [Code.GroupingNotSupported]: {
+    text: "'{word}' is not supported",
+  },
+  [Code.DeclareWordNotSupported]: {
+    text: "'declare {word}' is not supported",
+  },
+  [Code.DeclareNotSupported]: {
+    text: "'declare' is not supported",
+  },
+  [Code.OneDefaultInSwitch]: {
+    text: "a 'switch' can have only one 'default'",
+  },
+  [Code.ExpectedCaseOrDefault]: {
+    text: "expected 'case' or 'default'",
+  },
+  [Code.ForNeedsNewVariable]: {
+    text: "'for...in' and 'for...of' need a new variable",
+  },
+  [Code.ForAwaitNeedsIterable]: {
+    text: "'for await' goes over the values of an iterable",
+  },
+  [Code.ForInKeyPattern]: {
+    text: "the variable of 'for...in' is a key, a string, and cannot be destructured",
+  },
+  [Code.ForAwaitIn]: {
+    text: "'for await' goes over the values of an iterable, with 'of'",
+  },
+  [Code.DestructuringNeedsValue]: {
+    text: "a destructuring declaration needs a value",
+  },
+  [Code.KeywordAsVariableName]: {
+    text: "'{word}' is a keyword in tz and cannot be a variable name; choose another name",
+  },
+  [Code.ExpectedVariableName]: {
+    text: "expected a variable name",
+  },
+  [Code.ExpectedInConditional]: {
+    text: "expected {expected} in the conditional expression, found {found}",
+  },
+  [Code.ExpectedArgumentsClose]: {
+    text: "expected {expected} to close the argument list, found {found}",
+  },
+  [Code.ExpectedIndexClose]: {
+    text: "expected {expected} to close the index, found {found}",
+  },
+  [Code.ExpectedNewClassClose]: {
+    text: "expected {expected} to close the class, found {found}",
+  },
+  [Code.ExpectedParenthesizedClose]: {
+    text: "expected {expected} to close the parenthesized expression, found {found}",
+  },
+  [Code.ExpectedArrayClose]: {
+    text: "expected {expected} to close the array, found {found}",
+  },
+  [Code.ExpectedObjectClose]: {
+    text: "expected {expected} to close the object, found {found}",
+  },
+  [Code.ExpectedKeyClose]: {
+    text: "expected {expected} to close the key, found {found}",
+  },
+  [Code.ExpectedAfterKey]: {
+    text: "expected {expected} after the key in brackets, found {found}",
+  },
+  [Code.YieldOutsideGenerator]: {
+    text: "'yield' can only be used in a generator function",
+  },
+  [Code.UnaryBeforePower]: {
+    text: "the left side of '**' cannot be a unary expression",
+  },
+  [Code.SatisfiesNotSupported]: {
+    text: "'satisfies' is not supported, just as 'as' is not",
+  },
+  [Code.StrictEqualsNotSupported]: {
+    text: "'===' is not supported; use '=='",
+  },
+  [Code.StrictNotEqualsNotSupported]: {
+    text: "'!==' is not supported; use '!='",
+  },
+  [Code.ExpectedPropertyAfterOptionalDot]: {
+    text: "expected a property name, '[' or '(' after '?.'",
+  },
+  [Code.ExpectedPropertyAfterDot]: {
+    text: "expected a property name after '.'",
+  },
+  [Code.TaggedTemplateInOptionalChain]: {
+    text: "a tagged template cannot be part of an optional chain",
+  },
+  [Code.ExpectedClassAfterNew]: {
+    text: "expected a class name after 'new'",
+  },
+  [Code.ExpectedNameAfterDot]: {
+    text: "expected a name after '.'",
+  },
+  [Code.ExpectedSubstitutionClose]: {
+    text: "expected '}' to close the template substitution",
+  },
+  [Code.ExpectedExpression]: {
+    text: "expected an expression, found {found}",
+  },
+  [Code.ImportMetaNotSupported]: {
+    text: "'import.meta' is not supported",
+  },
+  [Code.DynamicImportNotSupported]: {
+    text: "dynamic 'import()' is not supported",
+  },
+  [Code.YieldNeedsParentheses]: {
+    text: "'yield' must be in parentheses here",
+  },
+  [Code.MethodKeyInBrackets]: {
+    text: "a method cannot have a key in brackets",
+  },
+  [Code.AccessorsNotSupported]: {
+    text: "getters and setters are not supported",
+  },
+  [Code.ExpectedParenAfterMethodName]: {
+    text: "expected '(' after the name of the method",
+  },
+  [Code.ExpectedColonAfterFieldName]: {
+    text: "expected ':' after the field name, found {found}",
+  },
+  [Code.ExpectedMethodBody]: {
+    text: "expected '{' to start the body of the method",
+  },
+  [Code.InvalidIntegerLiteral]: {
+    text: "invalid integer literal",
+  },
+  [Code.InvalidNumberLiteral]: {
+    text: "invalid number literal",
+  },
+  [Code.ExpectedAfterExtendsClause]: {
+    text: "expected {expected} after the 'extends' clause of the conditional type, found {found}",
+  },
+  [Code.ExpectedBetweenBranches]: {
+    text: "expected {expected} between the branches of the conditional type, found {found}",
+  },
+  [Code.ExpectedIndexedAccessClose]: {
+    text: "expected {expected} to close the indexed access type, found {found}",
+  },
+  [Code.ExpectedParenthesizedTypeClose]: {
+    text: "expected {expected} to close the parenthesized type, found {found}",
+  },
+  [Code.ExpectedAfterMappedKeys]: {
+    text: "expected {expected} after the keys of the mapped type, found {found}",
+  },
+  [Code.ExpectedBeforeMappedValues]: {
+    text: "expected {expected} before the type of the values of the mapped type, found {found}",
+  },
+  [Code.ExpectedAfterSymbol]: {
+    text: "expected {expected} after 'Symbol', found {found}",
+  },
+  [Code.ExpectedSymbolNameClose]: {
+    text: "expected {expected} to close the name, found {found}",
+  },
+  [Code.ExpectedObjectTypeClose]: {
+    text: "expected {expected} to close the object type, found {found}",
+  },
+  [Code.ExpectedAfterIndexKeys]: {
+    text: "expected {expected} after the type of the keys, found {found}",
+  },
+  [Code.ExpectedBeforeIndexValues]: {
+    text: "expected {expected} before the type of the values, found {found}",
+  },
+  [Code.ExpectedTupleClose]: {
+    text: "expected {expected} to close the tuple type, found {found}",
+  },
+  [Code.ExpectedAfterFunctionTypeParameters]: {
+    text: "expected {expected} after the parameters of the function type, found {found}",
+  },
+  [Code.ExpectedFunctionTypeParameter]: {
+    text: "expected {expected} for a parameter of the function type, found {found}",
+  },
+  [Code.ExpectedFunctionTypeParametersClose]: {
+    text: "expected {expected} to close the parameters of the function type, found {found}",
+  },
+  [Code.ReadonlyOnlyArrays]: {
+    text: "'readonly' applies only to array and tuple types",
+  },
+  [Code.ExpectedType]: {
+    text: "expected a type, found {found}",
+  },
+  [Code.GenericFunctionType]: {
+    text: "a function type cannot be generic itself",
+  },
+  [Code.ExpectedTemplateTypeClose]: {
+    text: "expected '}' to close the type in the template literal type",
+  },
+  [Code.ExpectedTypeofName]: {
+    text: "expected the name of a value after 'typeof', found {found}",
+  },
+  [Code.ExpectedTypeArgumentsClose]: {
+    text: "expected '>' to close the type arguments, found {found}",
+  },
+  [Code.MappedTypeNextToFields]: {
+    text: "a mapped type cannot stand next to fields",
+  },
+  [Code.FieldNameInBrackets]: {
+    text: "a field name in brackets is not supported yet",
+  },
+  [Code.NumberFieldName]: {
+    text: "a number cannot name a field",
+  },
+  [Code.ExpectedFieldName]: {
+    text: "expected a field name, found {found}",
+  },
+  [Code.SymbolMemberName]: {
+    text: "'Symbol.{word}' cannot name a member",
+  },
+  [Code.CallSignatures]: {
+    text: "call signatures are not supported",
+  },
+  [Code.GenericTypeMethods]: {
+    text: "generic methods in types are not supported yet",
+  },
+  [Code.FieldNeedsType]: {
+    text: "field '{word}' needs a type",
+  },
+  [Code.MethodNeedsReturnType]: {
+    text: "method '{word}' needs its return type",
+  },
+  [Code.ExpectedSemicolonAfterField]: {
+    text: "expected ';' after the field, found {found}",
+  },
+  [Code.ExpectedSemicolonAfterMethod]: {
+    text: "expected ';' after the method, found {found}",
+  },
+  [Code.ExpectedIndexSignatureOrMapped]: {
+    text: "expected an index signature or a mapped type",
+  },
+  [Code.IndexSignatureNextToFields]: {
+    text: "an index signature cannot stand next to fields",
+  },
+  [Code.OptionalTupleElements]: {
+    text: "optional elements in a tuple type are not supported",
+  },
+  [Code.FunctionTypeParameterNeedsType]: {
+    text: "parameter '{word}' of the function type needs a type",
+  },
+  [Code.RestParameterNotLast]: {
+    text: "a rest parameter must be the last parameter",
+  },
+  [Code.ExpectedPatternClose]: {
+    text: "expected {expected} to close the destructuring pattern, found {found}",
+  },
+  [Code.RestElementNotLast]: {
+    text: "a rest element must be the last one",
+  },
+  [Code.RestElementDefault]: {
+    text: "a rest element cannot have a default value",
+  },
+  [Code.ExpectedPatternVariable]: {
+    text: "expected a variable name in the destructuring pattern",
+  },
+  [Code.ExpectedVariableAfterRest]: {
+    text: "expected a variable name after '...' in the destructuring pattern",
+  },
+  [Code.PatternKeyNeedsVariable]: {
+    text: "a key in a destructuring pattern needs a variable",
+  },
+  [Code.ExpectedClassMembersStart]: {
+    text: "expected {expected} to start the members of the class, found {found}",
+  },
+  [Code.ExpectedClassClose]: {
+    text: "expected {expected} to close the class, found {found}",
+  },
+  [Code.ExpectedDecoratorClose]: {
+    text: "expected {expected} to close the decorator, found {found}",
+  },
+  [Code.ExpectedAfterTypeName]: {
+    text: "expected {expected} after the name of the type, found {found}",
+  },
+  [Code.ExpectedAfterDeclareClass]: {
+    text: "expected {expected} after 'declare class', found {found}",
+  },
+  [Code.ExpectedEnumMembersStart]: {
+    text: "expected {expected} to start the members of the enum, found {found}",
+  },
+  [Code.ExpectedEnumClose]: {
+    text: "expected {expected} to close the enum, found {found}",
+  },
+  [Code.ExpectedParametersStart]: {
+    text: "expected {expected} to start the parameters, found {found}",
+  },
+  [Code.ExpectedAfterFunctionName]: {
+    text: "expected {expected} after the function name, found {found}",
+  },
+  [Code.ExpectedParametersClose]: {
+    text: "expected {expected} to close the parameter list, found {found}",
+  },
+  [Code.ExpectedAfterArrowParameters]: {
+    text: "expected {expected} after the parameters of the arrow function, found {found}",
+  },
+  [Code.ExpectedTypeParametersClose]: {
+    text: "expected {expected} to close the type parameters, found {found}",
+  },
+  [Code.ExpectedDecoratorName]: {
+    text: "expected the name of a decorator after '@', found {found}",
+  },
+  [Code.DecoratorTarget]: {
+    text: "a decorator can decorate only a class, a member or a parameter",
+  },
+  [Code.StaticBlocks]: {
+    text: "static blocks are not supported",
+  },
+  [Code.DeclareMemberNotSupported]: {
+    text: "'declare' is not supported",
+  },
+  [Code.MemberNameInBrackets]: {
+    text: "a member name in brackets is not supported",
+  },
+  [Code.NoPrivateName]: {
+    text: "there is no '#{word}' in tz",
+  },
+  [Code.AccessorBeforeMethod]: {
+    text: "'accessor' goes before a field, not a method",
+  },
+  [Code.DecoratedConstructor]: {
+    text: "a decorator cannot decorate a constructor",
+  },
+  [Code.AbstractMethodBody]: {
+    text: "abstract method '{word}' cannot have a body",
+  },
+  [Code.MethodWithoutBody]: {
+    text: "a method has no body",
+  },
+  [Code.ConstructorReturnType]: {
+    text: "a constructor cannot have a return type",
+  },
+  [Code.GeneratorConstructor]: {
+    text: "a constructor cannot be a generator",
+  },
+  [Code.AsyncConstructor]: {
+    text: "a constructor cannot be 'async'",
+  },
+  [Code.ReadonlyMethod]: {
+    text: "a method cannot be 'readonly'",
+  },
+  [Code.OverrideConstructor]: {
+    text: "a constructor cannot be 'override' or 'abstract'",
+  },
+  [Code.AbstractStaticMethod]: {
+    text: "a static method cannot be 'abstract'",
+  },
+  [Code.AbstractFields]: {
+    text: "abstract fields are not supported",
+  },
+  [Code.HandleClass]: {
+    text: "a declared class is a handle from C: 'declare class {word} {}'",
+  },
+  [Code.ExpectedInterfaceFields]: {
+    text: "expected '{' to start the fields of the interface, found {found}",
+  },
+  [Code.ExpectedEnumName]: {
+    text: "expected the name of the enum",
+  },
+  [Code.ExpectedEnumMember]: {
+    text: "expected the name of an enum member, found {found}",
+  },
+  [Code.FunctionWithoutBody]: {
+    text: "function '{word}' has no body",
+  },
+  [Code.OverloadSignatures]: {
+    text: "overload signatures are not supported",
+  },
+  [Code.DeclaredFunctionBody]: {
+    text: "a declared function has no body",
+  },
+  [Code.KeywordAsFunctionName]: {
+    text: "'{word}' is a keyword in tz and cannot be a function name; choose another name",
+  },
+  [Code.ExpectedFunctionName]: {
+    text: "expected a function name",
+  },
+  [Code.ExpectedFunctionBody]: {
+    text: "expected '{' to start the function body",
+  },
+  [Code.KeywordAsParameterName]: {
+    text: "'{word}' is a keyword in tz and cannot be a parameter name; choose another name",
+  },
+  [Code.ExpectedParameterAfterRest]: {
+    text: "expected a parameter name after '...'",
+  },
+  [Code.ExpectedParameterName]: {
+    text: "expected a parameter name",
+  },
+  [Code.DefaultMakesOptional]: {
+    text: "a parameter with a default value is optional already",
+  },
+  [Code.RestParameterOptional]: {
+    text: "a rest parameter cannot be optional or have a default value",
+  },
+  [Code.ParameterModifierMakesField]: {
+    text: "'{word}' before a parameter makes it a field",
+  },
+  [Code.ArrowOnNewLine]: {
+    text: "'=>' must be on the same line as the parameters",
+  },
+  [Code.ArrowBodyLabel]: {
+    text: "'{' after '=>' starts the body of the function, so '{word}:' is a label",
+  },
+  [Code.TypeParameterModifier]: {
+    text: "a modifier before a type parameter is not supported",
+  },
+  [Code.ExpectedTypeParameterName]: {
+    text: "expected a type parameter name, found {found}",
+  },
+  [Code.ExpectedAfterImportStar]: {
+    text: "expected {expected} after 'import *', found {found}",
+  },
+  [Code.ExpectedAfterImportStarAs]: {
+    text: "expected {expected} after 'import * as', found {found}",
+  },
+  [Code.ExpectedAfterExportStarAs]: {
+    text: "expected {expected} after 'export * as', found {found}",
+  },
+  [Code.ExpectedImportNamesClose]: {
+    text: "expected {expected} to close the names to import, found {found}",
+  },
+  [Code.ExpectedExportNamesClose]: {
+    text: "expected {expected} to close the names to export, found {found}",
+  },
+  [Code.ExpectedAfterWith]: {
+    text: "expected {expected} after 'with', found {found}",
+  },
+  [Code.ExpectedAfterAttributeName]: {
+    text: "expected {expected} after the name of an import attribute, found {found}",
+  },
+  [Code.ExpectedAttributesClose]: {
+    text: "expected {expected} after the import attributes, found {found}",
+  },
+  [Code.ImportNotTopLevel]: {
+    text: "'import' is allowed only at the top level of a file",
+  },
+  [Code.ImportTypeNotNeeded]: {
+    text: "'import type' is not needed",
+  },
+  [Code.ImportEqualsNotSupported]: {
+    text: "'import {word} = ...' is not supported",
+  },
+  [Code.ExpectedBraceAfterComma]: {
+    text: "expected '{' after ',', found {found}",
+  },
+  [Code.ExpectedImportNames]: {
+    text: "expected '{' and the names to import, found {found}",
+  },
+  [Code.JsonImportWhole]: {
+    text: "a JSON file is one value: import it whole",
+  },
+  [Code.JsonImportAttribute]: {
+    text: "a JSON file is imported with 'with { type: \"json\" }'",
+  },
+  [Code.NamespaceImportNotSupported]: {
+    text: "'import * as' is not supported",
+  },
+  [Code.DefaultImportNotSupported]: {
+    text: "default imports are not supported",
+  },
+  [Code.ImportWithoutNames]: {
+    text: "an import must name what it takes",
+  },
+  [Code.ExportNotTopLevel]: {
+    text: "'export' is allowed only at the top level",
+  },
+  [Code.PartNotExported]: {
+    text: "a part of a class is not exported",
+  },
+  [Code.ExportEqualsNotSupported]: {
+    text: "'export =' is not supported",
+  },
+  [Code.ExportTypeNotNeeded]: {
+    text: "'export type' is not needed",
+  },
+  [Code.ExpectedExportDeclaration]: {
+    text: "expected a declaration or '{' after 'export', found {found}",
+  },
+  [Code.ExportDefaultNotSupported]: {
+    text: "'export default' is not supported",
+  },
+  [Code.ExportStarAsNotSupported]: {
+    text: "'export * as' is not supported",
+  },
+  [Code.TypeNotNeededInImport]: {
+    text: "'type' is not needed in an import",
+  },
+  [Code.TypeNotNeededInExport]: {
+    text: "'type' is not needed in an export",
+  },
+  [Code.NoExportDefault]: {
+    text: "there is no 'export default'",
+  },
+  [Code.KeywordImported]: {
+    text: "'{word}' is a keyword in tz: import it under another name, e.g. '{ {word} as {word}Name }'",
+  },
+  [Code.KeywordExported]: {
+    text: "'{word}' is a keyword in tz: export it under another name, e.g. '{ {word} as {word}Name }'",
+  },
+  [Code.ExpectedNameToImport]: {
+    text: "expected a name to import, found {found}",
+  },
+  [Code.ExpectedNameToExport]: {
+    text: "expected a name to export, found {found}",
+  },
+  [Code.ExpectedNameAfterAs]: {
+    text: "expected a name after 'as', found {found}",
+  },
+  [Code.AttributesOnlyForJson]: {
+    text: "import attributes are only for JSON files",
+  },
+  [Code.AssertAttributes]: {
+    text: "'assert' is the old form of import attributes",
+  },
+  [Code.JsonOneAttribute]: {
+    text: "a JSON file takes one import attribute",
+  },
+  [Code.ExpectedFrom]: {
+    text: "expected 'from' and the path of the file, found {found}",
+  },
+  [Code.ExpectedPathString]: {
+    text: "expected the path of the file as a string, found {found}",
+  },
+};
+
+export function messageText(code: Code, details: Details): string {
+  const message = kMessages[code];
+  let text = message.text;
+  const expected = details.expected;
+  if (expected != undefined) {
+    const spelling = tokenSpelling(expected);
+    text = text.replaceAll("{expected}", spelling);
+  }
+  const found = details.found;
+  if (found != undefined) {
+    const spelling = tokenSpelling(found);
+    text = text.replaceAll("{found}", spelling);
+  }
+  const word = details.word;
+  if (word != undefined) {
+    text = text.replaceAll("{word}", word);
+  }
+
+  return text;
+}

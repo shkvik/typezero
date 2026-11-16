@@ -1,5 +1,7 @@
-import { KnownName, Token, TokenKind, isKeyword, isName } from "../../token.tz";
+import { KnownName, Token, TokenKind, isName } from "../../token.tz";
 import { Span } from "../../ast.tz";
+import { Code } from "../../diagnostic/code.tz";
+import { Details, kNoDetails, messageText } from "../../diagnostic/message.tz";
 
 export type Mark = { readonly at: int; readonly recovering: boolean };
 
@@ -76,15 +78,12 @@ export class Cursor {
     return true;
   }
 
-  public expect(kind: TokenKind, context: string): boolean {
+  public expect(kind: TokenKind, code: Code): boolean {
     if (this.accept(kind)) {
       return true;
     }
     const token = this.peek();
-    this.error(
-      token.start,
-      `expected ${kind} ${context}, found ${token.kind}`,
-    );
+    this.error(token.start, code, { expected: kind, found: token.kind });
 
     return false;
   }
@@ -97,22 +96,13 @@ export class Cursor {
     return this.atName() || this.is(TokenKind.This);
   }
 
-  public expectName(context: string): boolean {
+  public expectName(code: Code): boolean {
     if (!this.atName()) {
-      return this.expect(TokenKind.Identifier, context);
+      return this.expect(TokenKind.Identifier, code);
     }
     this.next();
 
     return true;
-  }
-
-  public expectedName(what: string): string {
-    const token = this.peek();
-    if (isKeyword(token.kind)) {
-      return `'${token.text}' is a keyword in tz and cannot be a ${what}; choose another name`;
-    }
-
-    return `expected a ${what}`;
   }
 
   public expectSemicolon(): void {
@@ -127,7 +117,10 @@ export class Cursor {
     ) {
       return;
     }
-    this.error(token.start, `expected ';', found ${token.kind}`);
+    this.error(token.start, Code.ExpectedSemicolon, {
+      expected: TokenKind.Semi,
+      found: token.kind,
+    });
   }
 
   public spanFrom(start: int): Span {
@@ -136,17 +129,17 @@ export class Cursor {
     return { start, end: end > start ? end : start };
   }
 
-  public error(loc: int, message: string): void {
+  public error(loc: int, code: Code, details: Details = kNoDetails): void {
     if (this.recovering) {
       return;
     }
     this.recovering = true;
-    this.record(loc, message);
+    this.record(loc, code, details);
   }
 
-  public report(loc: int, message: string): void {
+  public report(loc: int, code: Code, details: Details = kNoDetails): void {
     if (!this.recovering) {
-      this.record(loc, message);
+      this.record(loc, code, details);
     }
   }
 
@@ -283,9 +276,11 @@ export class Cursor {
     return this.tokens[this.tokens.length - 1] ?? kEnd;
   }
 
-  private record(loc: int, message: string): void {
-    if (this.discarding == 0) {
-      this.errors.push({ loc, message });
+  private record(loc: int, code: Code, details: Details): void {
+    if (this.discarding != 0) {
+      return;
     }
+    const message = messageText(code, details);
+    this.errors.push({ loc, message });
   }
 }

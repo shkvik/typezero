@@ -1,4 +1,5 @@
 import "./partial/file-parser.partial.types.tz";
+import { Code } from "../../../diagnostic/code.tz";
 import "./partial/file-parser.partial.expressions.tz";
 import "./partial/file-parser.partial.patterns.tz";
 import "./partial/file-parser.partial.statements.tz";
@@ -53,7 +54,7 @@ export class FileParser {
     while (!this.cursor.is(TokenKind.End)) {
       if (this.cursor.is(TokenKind.RBrace)) {
         const brace = this.cursor.next();
-        this.cursor.error(brace.start, "unexpected '}'");
+        this.cursor.error(brace.start, Code.UnexpectedClosingBrace);
         this.cursor.stopRecovering();
         continue;
       }

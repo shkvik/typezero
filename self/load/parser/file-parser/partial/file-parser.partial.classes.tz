@@ -1,4 +1,5 @@
 import { FileParser } from "../file-parser.tz";
+import { Code } from "../../../../diagnostic/code.tz";
 import { KnownName, TokenKind, isKeyword, isName } from "../../../../token.tz";
 import { Arguments } from "./file-parser.partial.expressions.tz";
 import {
@@ -140,9 +141,7 @@ partial class FileParser {
       decorators: [],
       typeParams,
     };
-    if (
-      !this.cursor.expect(TokenKind.LBrace, "to start the members of the class")
-    ) {
+    if (!this.cursor.expect(TokenKind.LBrace, Code.ExpectedClassMembersStart)) {
       return cls;
     }
     while (
@@ -155,7 +154,7 @@ partial class FileParser {
         this.cursor.stopRecovering();
       }
     }
-    this.cursor.expect(TokenKind.RBrace, "to close the class");
+    this.cursor.expect(TokenKind.RBrace, Code.ExpectedClassClose);
     cls.source = this.cursor.spanFrom(keyword.start);
 
     return cls;
@@ -214,14 +213,15 @@ partial class FileParser {
   private decoratorExpr(): Expr | undefined {
     if (this.cursor.accept(TokenKind.LParen)) {
       const inner = this.sequence();
-      this.cursor.expect(TokenKind.RParen, "to close the decorator");
+      this.cursor.expect(TokenKind.RParen, Code.ExpectedDecoratorClose);
       return inner;
     }
     if (!this.cursor.atName()) {
       const token = this.cursor.peek();
       this.cursor.error(
         token.start,
-        `expected the name of a decorator after '@', found ${token.kind}`,
+        Code.ExpectedDecoratorName,
+        { found: token.kind },
       );
       return undefined;
     }
@@ -238,7 +238,7 @@ partial class FileParser {
       const property =
         token.kind == TokenKind.Identifier || isKeyword(token.kind);
       if (!property) {
-        this.cursor.error(token.start, "expected a property name after '.'");
+        this.cursor.error(token.start, Code.ExpectedPropertyAfterDot);
         return expr;
       }
       const name = this.cursor.next();
@@ -271,10 +271,7 @@ partial class FileParser {
   private rejectDecorators(decorators: Decorator[]): void {
     const first = decorators[0];
     if (first != undefined) {
-      this.cursor.report(
-        first.loc,
-        "a decorator can decorate only a class, a member or a parameter",
-      );
+      this.cursor.report(first.loc, Code.DecoratorTarget);
     }
   }
 
@@ -295,7 +292,7 @@ partial class FileParser {
         case TokenKind.Static:
           m.isStatic = true;
           if (this.cursor.is(TokenKind.LBrace)) {
-            this.cursor.report(word.start, "static blocks are not supported");
+            this.cursor.report(word.start, Code.StaticBlocks);
             this.cursor.next();
             this.cursor.skipToClosingBrace();
             m.staticBlock = true;
@@ -321,7 +318,7 @@ partial class FileParser {
           m.isAbstract = true;
           break;
         case TokenKind.Declare:
-          this.cursor.report(word.start, "'declare' is not supported");
+          this.cursor.report(word.start, Code.DeclareMemberNotSupported);
           break;
         case TokenKind.Accessor:
           m.accessor = true;
@@ -363,11 +360,11 @@ partial class FileParser {
     }
     if (this.memberAccessorAhead()) {
       this.cursor.next();
-      this.cursor.report(loc, "getters and setters are not supported");
+      this.cursor.report(loc, Code.AccessorsNotSupported);
       return this.skipClassMember();
     }
     if (this.cursor.is(TokenKind.LBracket) && !this.cursor.symbolKeyAhead()) {
-      this.cursor.report(loc, "a member name in brackets is not supported");
+      this.cursor.report(loc, Code.MemberNameInBrackets);
       return this.skipClassMember();
     }
     const member = this.memberName(m);
@@ -379,10 +376,7 @@ partial class FileParser {
     }
     if (member.generator || m.isAsync) {
       const token = this.cursor.peek();
-      return this.cursor.error(
-        token.start,
-        "expected '(' after the name of the method",
-      );
+      return this.cursor.error(token.start, Code.ExpectedParenAfterMethodName);
     }
     this.classField(cls, m, decorators, loc, member);
   }
@@ -397,7 +391,7 @@ partial class FileParser {
       return undefined;
     }
     if (token.hash) {
-      this.cursor.report(token.start, `there is no '#${name}' in tz`);
+      this.cursor.report(token.start, Code.NoPrivateName, { word: name });
       m.access = Access.Private;
     }
 
@@ -420,14 +414,11 @@ partial class FileParser {
     const constructor = member.constructorName && !m.isStatic;
     const abstractMethod = m.isAbstract && !constructor;
     if (m.accessor) {
-      this.cursor.report(loc, "'accessor' goes before a field, not a method");
+      this.cursor.report(loc, Code.AccessorBeforeMethod);
     }
     const first = decorators[0];
     if (first != undefined && constructor) {
-      this.cursor.report(
-        first.loc,
-        "a decorator cannot decorate a constructor",
-      );
+      this.cursor.report(first.loc, Code.DecoratedConstructor);
     }
     const role: ClassMember = {
       access: m.access,
@@ -458,7 +449,8 @@ partial class FileParser {
       if (fn.body != undefined) {
         this.cursor.report(
           member.loc,
-          `abstract method '${member.name}' cannot have a body`,
+          Code.AbstractMethodBody,
+          { word: member.name },
         );
       }
       fn.body = { kind: StmtKind.Block, loc: member.loc, body: [] };
@@ -467,7 +459,7 @@ partial class FileParser {
     }
     const body = fn.body;
     if (body == undefined) {
-      return this.cursor.report(member.loc, "a method has no body");
+      return this.cursor.report(member.loc, Code.MethodWithoutBody);
     }
     if (!isConstructor(fn)) {
       cls.methods.push(fn);
@@ -476,7 +468,7 @@ partial class FileParser {
     const returnType = fn.returnType;
     if (returnType != undefined) {
       const loc = returnType.loc ?? member.loc;
-      this.cursor.report(loc, "a constructor cannot have a return type");
+      this.cursor.report(loc, Code.ConstructorReturnType);
     }
     this.addParameterFields(cls, fn, body);
     cls.constructors.push(fn);
@@ -489,22 +481,19 @@ partial class FileParser {
     loc: int,
   ): void {
     if (generator && constructor) {
-      this.cursor.report(loc, "a constructor cannot be a generator");
+      this.cursor.report(loc, Code.GeneratorConstructor);
     }
     if (m.isAsync && constructor) {
-      this.cursor.report(loc, "a constructor cannot be 'async'");
+      this.cursor.report(loc, Code.AsyncConstructor);
     }
     if (m.readonly) {
-      this.cursor.report(loc, "a method cannot be 'readonly'");
+      this.cursor.report(loc, Code.ReadonlyMethod);
     }
     if ((m.isOverride || m.isAbstract) && constructor) {
-      this.cursor.report(
-        loc,
-        "a constructor cannot be 'override' or 'abstract'",
-      );
+      this.cursor.report(loc, Code.OverrideConstructor);
     }
     if (m.isAbstract && m.isStatic) {
-      this.cursor.report(loc, "a static method cannot be 'abstract'");
+      this.cursor.report(loc, Code.AbstractStaticMethod);
     }
   }
 
@@ -616,7 +605,7 @@ partial class FileParser {
     member: MemberName,
   ): void {
     if (m.isAbstract) {
-      this.cursor.report(loc, "abstract fields are not supported");
+      this.cursor.report(loc, Code.AbstractFields);
     }
     let presence = FieldPresence.Required;
     const suffix = this.cursor.peek();
@@ -639,7 +628,8 @@ partial class FileParser {
     if (!ended) {
       return this.cursor.error(
         after.start,
-        `expected ';' after the field, found ${after.kind}`,
+        Code.ExpectedSemicolonAfterField,
+        { found: after.kind },
       );
     }
     cls.fields.push({
@@ -661,7 +651,7 @@ partial class FileParser {
     this.cursor.next();
     const name = this.cursor.next();
     const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
-    this.cursor.expect(TokenKind.Assign, "after the name of the type");
+    this.cursor.expect(TokenKind.Assign, Code.ExpectedAfterTypeName);
     const type = this.type();
     this.cursor.expectSemicolon();
 
@@ -679,7 +669,7 @@ partial class FileParser {
   private handleClass(): Stmt {
     this.cursor.next();
     const name = this.cursor.peek();
-    if (!this.cursor.expectName("after 'declare class'")) {
+    if (!this.cursor.expectName(Code.ExpectedAfterDeclareClass)) {
       this.cursor.synchronize();
       return marker(StmtKind.Empty, name.start);
     }
@@ -697,10 +687,7 @@ partial class FileParser {
       this.cursor.is(TokenKind.LBrace) && next.kind == TokenKind.RBrace;
     if (!hasBody) {
       const token = this.cursor.peek();
-      this.cursor.report(
-        token.start,
-        `a declared class is a handle from C: 'declare class ${name.text} {}'`,
-      );
+      this.cursor.report(token.start, Code.HandleClass, { word: name.text });
       this.skipHandleBody();
       return alias;
     }
@@ -734,7 +721,8 @@ partial class FileParser {
       const token = this.cursor.peek();
       this.cursor.error(
         token.start,
-        `expected '{' to start the fields of the interface, found ${token.kind}`,
+        Code.ExpectedInterfaceFields,
+        { found: token.kind },
       );
       return marker(StmtKind.Empty, name.start);
     }
@@ -756,18 +744,19 @@ partial class FileParser {
     this.cursor.next();
     const name = this.cursor.peek();
     if (!isName(name.kind)) {
-      this.cursor.error(name.start, "expected the name of the enum");
+      this.cursor.error(name.start, Code.ExpectedEnumName);
       return marker(StmtKind.Empty, name.start);
     }
     this.cursor.next();
-    this.cursor.expect(TokenKind.LBrace, "to start the members of the enum");
+    this.cursor.expect(TokenKind.LBrace, Code.ExpectedEnumMembersStart);
     const members: EnumMember[] = [];
     while (this.cursor.insideList(TokenKind.RBrace)) {
       const member = this.cursor.peek();
       if (!isName(member.kind)) {
         this.cursor.error(
           member.start,
-          `expected the name of an enum member, found ${member.kind}`,
+          Code.ExpectedEnumMember,
+          { found: member.kind },
         );
         break;
       }
@@ -782,7 +771,7 @@ partial class FileParser {
         break;
       }
     }
-    this.cursor.expect(TokenKind.RBrace, "to close the enum");
+    this.cursor.expect(TokenKind.RBrace, Code.ExpectedEnumClose);
 
     return { kind: StmtKind.Enum, loc: name.start, name: name.text, members };
   }

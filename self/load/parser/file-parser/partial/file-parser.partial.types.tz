@@ -1,4 +1,5 @@
 import { FileParser } from "../file-parser.tz";
+import { Code } from "../../../../diagnostic/code.tz";
 import {
   KnownName,
   TokenKind,
@@ -50,21 +51,13 @@ partial class FileParser {
     const extendsType = this.type(TypePlace.ExtendsClause);
     ref.args.push(extendsType);
     if (
-      !this.cursor.expect(
-        TokenKind.Question,
-        "after the 'extends' clause of the conditional type",
-      )
+      !this.cursor.expect(TokenKind.Question, Code.ExpectedAfterExtendsClause)
     ) {
       return typeRef(start);
     }
     const whenTrue = this.type();
     ref.args.push(whenTrue);
-    if (
-      !this.cursor.expect(
-        TokenKind.Colon,
-        "between the branches of the conditional type",
-      )
-    ) {
+    if (!this.cursor.expect(TokenKind.Colon, Code.ExpectedBetweenBranches)) {
       return typeRef(start);
     }
     const whenFalse = this.type();
@@ -192,10 +185,7 @@ partial class FileParser {
       array.args.push(ref);
       const index = this.type();
       array.args.push(index);
-      this.cursor.expect(
-        TokenKind.RBracket,
-        "to close the indexed access type",
-      );
+      this.cursor.expect(TokenKind.RBracket, Code.ExpectedIndexedAccessClose);
       ref = array;
     }
 
@@ -217,10 +207,7 @@ partial class FileParser {
     if (form.kind == TypeKind.Tuple) {
       form.readonly = ref.args.map((arg) => true);
     } else if (form.kind != TypeKind.Array) {
-      this.cursor.report(
-        loc,
-        "'readonly' applies only to array and tuple types",
-      );
+      this.cursor.report(loc, Code.ReadonlyOnlyArrays);
     }
 
     return ref;
@@ -291,15 +278,12 @@ partial class FileParser {
     }
     if (this.cursor.accept(TokenKind.LParen)) {
       const inner = this.type();
-      this.cursor.expect(TokenKind.RParen, "to close the parenthesized type");
+      this.cursor.expect(TokenKind.RParen, Code.ExpectedParenthesizedTypeClose);
       return inner;
     }
     if (!this.cursor.atNameOrThis() && !this.cursor.is(TokenKind.Void)) {
       const token = this.cursor.peek();
-      this.cursor.error(
-        token.start,
-        `expected a type, found ${token.kind}`,
-      );
+      this.cursor.error(token.start, Code.ExpectedType, { found: token.kind });
       return ref;
     }
     const first = this.cursor.next();
@@ -323,7 +307,7 @@ partial class FileParser {
     if (this.cursor.is(TokenKind.LParen)) {
       this.functionType();
     }
-    this.cursor.report(less.start, "a function type cannot be generic itself");
+    this.cursor.report(less.start, Code.GenericFunctionType);
 
     return typeRef(less.start);
   }
@@ -380,10 +364,7 @@ partial class FileParser {
         middle.kind != TokenKind.TemplateMiddle &&
         middle.kind != TokenKind.TemplateTail
       ) {
-        this.cursor.error(
-          middle.start,
-          "expected '}' to close the type in the template literal type",
-        );
+        this.cursor.error(middle.start, Code.ExpectedTemplateTypeClose);
         return typeRef(token.start);
       }
       const text = this.literals.templatePart(middle);
@@ -426,7 +407,8 @@ partial class FileParser {
       const token = this.cursor.peek();
       this.cursor.error(
         token.start,
-        `expected the name of a value after 'typeof', found ${token.kind}`,
+        Code.ExpectedTypeofName,
+        { found: token.kind },
       );
       return ref;
     }
@@ -452,7 +434,8 @@ partial class FileParser {
       const token = this.cursor.peek();
       this.cursor.error(
         token.start,
-        `expected '>' to close the type arguments, found ${token.kind}`,
+        Code.ExpectedTypeArgumentsClose,
+        { found: token.kind },
       );
     }
 
@@ -534,20 +517,14 @@ partial class FileParser {
     const rename = this.cursor.accept(TokenKind.As) ? this.type() : undefined;
     
     if (
-      !this.cursor.expect(
-        TokenKind.RBracket,
-        "after the keys of the mapped type",
-      )
+      !this.cursor.expect(TokenKind.RBracket, Code.ExpectedAfterMappedKeys)
     ) {
       this.cursor.skipToClosingBrace();
       return ref;
     }
     mapped.optionalChange = this.acceptModifier(TokenKind.Question);
     if (
-      !this.cursor.expect(
-        TokenKind.Colon,
-        "before the type of the values of the mapped type",
-      )
+      !this.cursor.expect(TokenKind.Colon, Code.ExpectedBeforeMappedValues)
     ) {
       this.cursor.skipToClosingBrace();
       return ref;
@@ -564,10 +541,7 @@ partial class FileParser {
     }
     if (!this.cursor.is(TokenKind.RBrace) || object.args.length > 0) {
       const token = this.cursor.peek();
-      this.cursor.error(
-        token.start,
-        "a mapped type cannot stand next to fields",
-      );
+      this.cursor.error(token.start, Code.MappedTypeNextToFields);
     
       this.cursor.skipToClosingBrace();
       return ref;
@@ -615,16 +589,14 @@ partial class FileParser {
       return name;
     }
     if (token.kind == TokenKind.LBracket) {
-      this.cursor.error(
-        token.start,
-        "a field name in brackets is not supported yet",
-      );
+      this.cursor.error(token.start, Code.FieldNameInBrackets);
     } else if (token.kind == TokenKind.Int || token.kind == TokenKind.Float) {
-      this.cursor.error(token.start, "a number cannot name a field");
+      this.cursor.error(token.start, Code.NumberFieldName);
     } else {
       this.cursor.error(
         token.start,
-        `expected a field name, found ${token.kind}`,
+        Code.ExpectedFieldName,
+        { found: token.kind },
       );
     }
 
@@ -635,11 +607,11 @@ partial class FileParser {
     const bracket = this.cursor.peek();
     const loc = bracket.start;
     this.cursor.skip(2);
-    if (!this.cursor.expect(TokenKind.Dot, "after 'Symbol'")) {
+    if (!this.cursor.expect(TokenKind.Dot, Code.ExpectedAfterSymbol)) {
       return undefined;
     }
     const member = this.cursor.next();
-    if (!this.cursor.expect(TokenKind.RBracket, "to close the name")) {
+    if (!this.cursor.expect(TokenKind.RBracket, Code.ExpectedSymbolNameClose)) {
       return undefined;
     }
     switch (member.known) {
@@ -650,10 +622,7 @@ partial class FileParser {
       case KnownName.Iterator:
         return "[Symbol.iterator]";
       default:
-        this.cursor.report(
-          loc,
-          `'Symbol.${member.text}' cannot name a member`,
-        );
+        this.cursor.report(loc, Code.SymbolMemberName, { word: member.text });
         return "[Symbol.iterator]";
     }
   }
@@ -716,7 +685,7 @@ partial class FileParser {
         this.cursor.is(TokenKind.Less) ||
         this.cursor.is(TokenKind.New)
       ) {
-        this.cursor.error(loc, "call signatures are not supported");
+        this.cursor.error(loc, Code.CallSignatures);
         this.cursor.skipToClosingBrace();
         return ref;
       }
@@ -724,7 +693,7 @@ partial class FileParser {
         return ref;
       }
     }
-    this.cursor.expect(TokenKind.RBrace, "to close the object type");
+    this.cursor.expect(TokenKind.RBrace, Code.ExpectedObjectTypeClose);
 
     return ref;
   }
@@ -743,10 +712,7 @@ partial class FileParser {
     const optional = this.cursor.accept(TokenKind.Question);
     if (this.cursor.is(TokenKind.Less)) {
       const token = this.cursor.peek();
-      this.cursor.error(
-        token.start,
-        "generic methods in types are not supported yet",
-      );
+      this.cursor.error(token.start, Code.GenericTypeMethods);
       this.cursor.skipToClosingBrace();
       return false;
     }
@@ -755,10 +721,7 @@ partial class FileParser {
     }
     if (!this.cursor.is(TokenKind.Colon)) {
       const token = this.cursor.peek();
-      this.cursor.error(
-        token.start,
-        `field '${name}' needs a type`,
-      );
+      this.cursor.error(token.start, Code.FieldNeedsType, { word: name });
       this.cursor.skipToClosingBrace();
       return false;
     }
@@ -771,7 +734,7 @@ partial class FileParser {
     object.readonly.push(readonly);
     object.methods.push(false);
 
-    return this.endObjectTypeMember("the field");
+    return this.endObjectTypeMember(Code.ExpectedSemicolonAfterField);
   }
 
   private objectTypeMethod(
@@ -790,7 +753,8 @@ partial class FileParser {
       const token = this.cursor.peek();
       this.cursor.error(
         token.start,
-        `method '${name}' needs its return type`,
+        Code.MethodNeedsReturnType,
+        { word: name },
       );
       this.cursor.skipToClosingBrace();
       return false;
@@ -804,10 +768,10 @@ partial class FileParser {
     object.readonly.push(true);
     object.methods.push(true);
 
-    return this.endObjectTypeMember("the method");
+    return this.endObjectTypeMember(Code.ExpectedSemicolonAfterMethod);
   }
 
-  private endObjectTypeMember(what: string): boolean {
+  private endObjectTypeMember(code: Code): boolean {
     if (
       this.cursor.accept(TokenKind.Semi) ||
       this.cursor.accept(TokenKind.Comma)
@@ -816,10 +780,7 @@ partial class FileParser {
     }
     const token = this.cursor.peek();
     if (token.kind != TokenKind.RBrace && !token.newline) {
-      this.cursor.error(
-        token.start,
-        `expected ';' after ${what}, found ${token.kind}`,
-      );
+      this.cursor.error(token.start, code, { found: token.kind });
       this.cursor.skipToClosingBrace();
       return false;
     }
@@ -831,15 +792,15 @@ partial class FileParser {
     this.cursor.next();
     const next = this.cursor.lookahead();
     if (!this.cursor.atName() || next.kind != TokenKind.Colon) {
-      this.cursor.error(loc, "expected an index signature or a mapped type");
+      this.cursor.error(loc, Code.ExpectedIndexSignatureOrMapped);
       this.cursor.skipToClosingBrace();
       return ref;
     }
     this.cursor.skip(2);
     const key = this.type();
     if (
-      !this.cursor.expect(TokenKind.RBracket, "after the type of the keys") ||
-      !this.cursor.expect(TokenKind.Colon, "before the type of the values")
+      !this.cursor.expect(TokenKind.RBracket, Code.ExpectedAfterIndexKeys) ||
+      !this.cursor.expect(TokenKind.Colon, Code.ExpectedBeforeIndexValues)
     ) {
       this.cursor.skipToClosingBrace();
       return ref;
@@ -849,7 +810,7 @@ partial class FileParser {
       this.cursor.accept(TokenKind.Comma);
     }
     if (ref.args.length > 0 || !this.cursor.is(TokenKind.RBrace)) {
-      this.cursor.error(loc, "an index signature cannot stand next to fields");
+      this.cursor.error(loc, Code.IndexSignatureNextToFields);
       this.cursor.skipToClosingBrace();
       return ref;
     }
@@ -885,17 +846,14 @@ partial class FileParser {
       tuple.spread.push(spread);
       if (this.cursor.is(TokenKind.Question)) {
         const token = this.cursor.peek();
-        this.cursor.report(
-          token.start,
-          "optional elements in a tuple type are not supported",
-        );
+        this.cursor.report(token.start, Code.OptionalTupleElements);
         this.cursor.next();
       }
       if (!this.cursor.accept(TokenKind.Comma)) {
         break;
       }
     }
-    this.cursor.expect(TokenKind.RBracket, "to close the tuple type");
+    this.cursor.expect(TokenKind.RBracket, Code.ExpectedTupleClose);
 
     return ref;
   }
@@ -943,7 +901,7 @@ partial class FileParser {
     }
     this.cursor.expect(
       TokenKind.Arrow,
-      "after the parameters of the function type",
+      Code.ExpectedAfterFunctionTypeParameters,
     );
     const result = this.returnType();
     ref.args.push(result);
@@ -967,7 +925,7 @@ partial class FileParser {
       const token = this.cursor.peek();
       const named =
         this.cursor.accept(TokenKind.This) ||
-        this.cursor.expectName("for a parameter of the function type");
+        this.cursor.expectName(Code.ExpectedFunctionTypeParameter);
       if (!named) {
         return false;
       }
@@ -978,14 +936,12 @@ partial class FileParser {
       } else {
         this.cursor.report(
           token.start,
-          `parameter '${token.text}' of the function type needs a type`,
+          Code.FunctionTypeParameterNeedsType,
+          { word: token.text },
         );
       }
       if (signature.rest) {
-        this.cursor.report(
-          token.start,
-          "a rest parameter must be the last parameter",
-        );
+        this.cursor.report(token.start, Code.RestParameterNotLast);
       }
       ref.args.push(param);
       signature.optional.push(optional);
@@ -997,7 +953,7 @@ partial class FileParser {
     }
     this.cursor.expect(
       TokenKind.RParen,
-      "to close the parameters of the function type",
+      Code.ExpectedFunctionTypeParametersClose,
     );
 
     return true;

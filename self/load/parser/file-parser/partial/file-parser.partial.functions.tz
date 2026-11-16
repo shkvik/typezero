@@ -1,4 +1,5 @@
 import { FileParser } from "../file-parser.tz";
+import { Code } from "../../../../diagnostic/code.tz";
 import { TokenKind, isKeyword, isName } from "../../../../token.tz";
 import { Pattern } from "./file-parser.partial.patterns.tz";
 import { Mark } from "../../cursor.tz";
@@ -57,12 +58,12 @@ partial class FileParser {
       }
       const nextName = this.cursor.lookahead();
       if (!this.cursor.is(TokenKind.Function) || nextName.text != name) {
-        this.cursor.report(loc, `function '${name}' has no body`);
+        this.cursor.report(loc, Code.FunctionWithoutBody, { word: name });
         return marker(StmtKind.Empty, loc);
       }
       fn = this.functionDecl(false, isAsync);
     }
-    this.cursor.report(loc, "overload signatures are not supported");
+    this.cursor.report(loc, Code.OverloadSignatures);
 
     return fn;
   }
@@ -70,7 +71,7 @@ partial class FileParser {
   private declaredFunction(): Stmt {
     const fn = this.functionDecl(false, false);
     if (fn.body != undefined) {
-      this.cursor.report(fn.loc, "a declared function has no body");
+      this.cursor.report(fn.loc, Code.DeclaredFunctionBody);
       return fn;
     }
     fn.bodySource = this.library ? BodySource.External : BodySource.Foreign;
@@ -88,8 +89,7 @@ partial class FileParser {
     const named = isName(token.kind);
     const reserved = !named && isKeyword(token.kind) && !expression;
     if (reserved) {
-      const message = this.cursor.expectedName("function name");
-      this.cursor.report(loc, message);
+      this.cursor.report(loc, Code.KeywordAsFunctionName, { word: token.text });
     }
     if (named || reserved) {
       this.cursor.next();
@@ -97,7 +97,7 @@ partial class FileParser {
     } else if (expression) {
       loc = keyword.start;
     } else {
-      this.cursor.error(token.start, "expected a function name");
+      this.cursor.error(token.start, Code.ExpectedFunctionName);
     }
     const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
     const outer = this.context;
@@ -149,10 +149,7 @@ partial class FileParser {
     if (declaredOnly) {
       return undefined;
     }
-    this.cursor.error(
-      token.start,
-      "expected '{' to start the function body",
-    );
+    this.cursor.error(token.start, Code.ExpectedFunctionBody);
 
     return {
       kind: StmtKind.Block,
@@ -168,7 +165,7 @@ partial class FileParser {
   ): Param[] {
     this.cursor.expect(
       TokenKind.LParen,
-      arrow ? "to start the parameters" : "after the function name",
+      arrow ? Code.ExpectedParametersStart : Code.ExpectedAfterFunctionName,
     );
     const params: Param[] = [];
     while (this.cursor.insideList(TokenKind.RParen)) {
@@ -182,13 +179,10 @@ partial class FileParser {
       }
       const rest = param.form.kind == ParamKind.Rest;
       if (rest && !this.cursor.is(TokenKind.RParen)) {
-        this.cursor.report(
-          param.loc,
-          "a rest parameter must be the last parameter",
-        );
+        this.cursor.report(param.loc, Code.RestParameterNotLast);
       }
     }
-    this.cursor.expect(TokenKind.RParen, "to close the parameter list");
+    this.cursor.expect(TokenKind.RParen, Code.ExpectedParametersClose);
 
     return params;
   }
@@ -210,8 +204,9 @@ partial class FileParser {
     const named = this.cursor.atNameOrThis();
     const reserved = !named && isKeyword(token.kind);
     if (reserved) {
-      const message = this.cursor.expectedName("parameter name");
-      this.cursor.report(loc, message);
+      this.cursor.report(loc, Code.KeywordAsParameterName, {
+        word: token.text,
+      });
     }
     if (named || reserved) {
       this.cursor.next();
@@ -228,9 +223,7 @@ partial class FileParser {
     } else {
       this.cursor.error(
         token.start,
-        rest
-          ? "expected a parameter name after '...'"
-          : "expected a parameter name",
+        rest ? Code.ExpectedParameterAfterRest : Code.ExpectedParameterName,
       );
       return undefined;
     }
@@ -240,19 +233,13 @@ partial class FileParser {
     if (this.cursor.is(TokenKind.Assign)) {
       if (optional) {
         const assign = this.cursor.peek();
-        this.cursor.report(
-          assign.start,
-          "a parameter with a default value is optional already",
-        );
+        this.cursor.report(assign.start, Code.DefaultMakesOptional);
       }
       this.cursor.next();
       defaultValue = this.expression();
     }
     if (rest && (optional || defaultValue != undefined)) {
-      this.cursor.report(
-        loc,
-        "a rest parameter cannot be optional or have a default value",
-      );
+      this.cursor.report(loc, Code.RestParameterOptional);
     }
     const form = this.paramForm(rest, optional, defaultValue);
 
@@ -289,7 +276,8 @@ partial class FileParser {
       if (!constructor) {
         this.cursor.report(
           word.start,
-          `'${word.text}' before a parameter makes it a field`,
+          Code.ParameterModifierMakesField,
+          { word: word.text },
         );
       }
       const found = property ?? { readonly: false, access: Access.Public };
@@ -440,15 +428,9 @@ partial class FileParser {
     }
     const arrow = this.cursor.peek();
     if (arrow.kind == TokenKind.Arrow && arrow.newline) {
-      this.cursor.report(
-        arrow.start,
-        "'=>' must be on the same line as the parameters",
-      );
+      this.cursor.report(arrow.start, Code.ArrowOnNewLine);
     }
-    this.cursor.expect(
-      TokenKind.Arrow,
-      "after the parameters of the arrow function",
-    );
+    this.cursor.expect(TokenKind.Arrow, Code.ExpectedAfterArrowParameters);
     const concise = !this.cursor.is(TokenKind.LBrace);
     const body = concise ? this.conciseBody() : this.arrowBlock();
     this.addPrologue(body, patterns);
@@ -482,10 +464,7 @@ partial class FileParser {
       only.kind == StmtKind.Labeled &&
       only.body.kind == StmtKind.Expr
     ) {
-      this.cursor.report(
-        only.loc,
-        `'{' after '=>' starts the body of the function, so '${only.label}:' is a label`,
-      );
+      this.cursor.report(only.loc, Code.ArrowBodyLabel, { word: only.label });
     }
 
     return body;
@@ -514,17 +493,15 @@ partial class FileParser {
         this.cursor.is(TokenKind.Out);
       if (modifier && isName(next.kind)) {
         const token = this.cursor.peek();
-        this.cursor.report(
-          token.start,
-          "a modifier before a type parameter is not supported",
-        );
+        this.cursor.report(token.start, Code.TypeParameterModifier);
         this.cursor.next();
       }
       const token = this.cursor.peek();
       if (!isName(token.kind)) {
         this.cursor.error(
           token.start,
-          `expected a type parameter name, found ${token.kind}`,
+          Code.ExpectedTypeParameterName,
+          { found: token.kind },
         );
         return params;
       }
@@ -547,7 +524,7 @@ partial class FileParser {
         break;
       }
     }
-    this.cursor.expect(TokenKind.Greater, "to close the type parameters");
+    this.cursor.expect(TokenKind.Greater, Code.ExpectedTypeParametersClose);
 
     return params;
   }
@@ -585,10 +562,7 @@ partial class FileParser {
         token.kind == TokenKind.RBrace ||
         token.kind == TokenKind.End;
       if (!ended) {
-        this.cursor.error(
-          token.start,
-          "expected '{' to start the body of the method",
-        );
+        this.cursor.error(token.start, Code.ExpectedMethodBody);
       }
     }
     const source = this.cursor.spanFrom(start);
