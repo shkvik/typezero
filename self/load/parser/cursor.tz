@@ -56,11 +56,15 @@ export class Cursor {
   }
 
   public is(kind: TokenKind): boolean {
-    return this.peek().kind == kind;
+    const token = this.peek();
+
+    return token.kind == kind;
   }
 
   public atName(): boolean {
-    return isName(this.peek().kind);
+    const token = this.peek();
+
+    return isName(token.kind);
   }
 
   public accept(kind: TokenKind): boolean {
@@ -76,9 +80,10 @@ export class Cursor {
     if (this.accept(kind)) {
       return true;
     }
+    const token = this.peek();
     this.error(
-      this.peek().start,
-      `expected ${kind} ${context}, found ${this.peek().kind}`,
+      token.start,
+      `expected ${kind} ${context}, found ${token.kind}`,
     );
 
     return false;
@@ -184,7 +189,8 @@ export class Cursor {
       if (this.accept(TokenKind.Semi)) {
         return;
       }
-      if (this.peek().newline && this.startsStatement()) {
+      const token = this.peek();
+      if (token.newline && this.startsStatement()) {
         return;
       }
       this.next();
@@ -192,7 +198,8 @@ export class Cursor {
   }
 
   public recoverStatement(start: int): void {
-    if (this.peek().start == start) {
+    const token = this.peek();
+    if (token.start == start) {
       this.next();
     }
 

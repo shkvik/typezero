@@ -84,7 +84,8 @@ partial class FileParser {
     let more =
       !this.cursor.is(TokenKind.RBracket) && !this.cursor.is(TokenKind.End);
     while (more) {
-      const e = element(this.cursor.peek().start);
+      const current = this.cursor.peek();
+      const e = element(current.start);
       if (this.cursor.accept(TokenKind.Comma)) {
         e.hole = true;
         pattern.elements.push(e);
@@ -99,18 +100,21 @@ partial class FileParser {
       ) {
         e.nested = this.bindingPattern();
       } else if (this.cursor.atName()) {
-        e.name = this.cursor.next().text;
+        const word = this.cursor.next();
+        e.name = word.text;
       } else {
+        const token = this.cursor.peek();
         this.cursor.error(
-          this.cursor.peek().start,
+          token.start,
           "expected a variable name in the destructuring pattern",
         );
         return pattern;
       }
       if (this.cursor.is(TokenKind.Assign)) {
         if (e.rest) {
+          const token = this.cursor.peek();
           this.cursor.report(
-            this.cursor.peek().start,
+            token.start,
             "a rest element cannot have a default value",
           );
         }
@@ -145,17 +149,20 @@ partial class FileParser {
     let more =
       !this.cursor.is(TokenKind.RBrace) && !this.cursor.is(TokenKind.End);
     while (more) {
-      const e = element(this.cursor.peek().start);
+      const current = this.cursor.peek();
+      const e = element(current.start);
       if (this.cursor.accept(TokenKind.Ellipsis)) {
         e.rest = true;
         if (!this.cursor.atName()) {
+          const token = this.cursor.peek();
           this.cursor.error(
-            this.cursor.peek().start,
+            token.start,
             "expected a variable name after '...' in the destructuring pattern",
           );
           return pattern;
         }
-        e.name = this.cursor.next().text;
+        const word = this.cursor.next();
+        e.name = word.text;
       } else if (!this.objectPatternEntry(e)) {
         return pattern;
       }
@@ -194,10 +201,12 @@ partial class FileParser {
       ) {
         e.nested = this.bindingPattern();
       } else if (this.cursor.atName()) {
-        e.name = this.cursor.next().text;
+        const word = this.cursor.next();
+        e.name = word.text;
       } else {
+        const token = this.cursor.peek();
         this.cursor.error(
-          this.cursor.peek().start,
+          token.start,
           "expected a variable name in the destructuring pattern",
         );
         return false;
@@ -205,8 +214,9 @@ partial class FileParser {
     } else if (identifier && e.keyExpr == undefined) {
       e.name = e.key;
     } else {
+      const token = this.cursor.peek();
       this.cursor.error(
-        this.cursor.peek().start,
+        token.start,
         "a key in a destructuring pattern needs a variable",
       );
       return false;
@@ -290,12 +300,8 @@ partial class FileParser {
     value: Expr,
     typeAnn: TypeRef | undefined,
   ): void {
-    const hidden = this.hiddenDeclarator(
-      pattern.loc,
-      value,
-      typeAnn,
-      formOf(pattern),
-    );
+    const form = formOf(pattern);
+    const hidden = this.hiddenDeclarator(pattern.loc, value, typeAnn, form);
     decls.push(hidden);
     this.declareElements(decls, pattern, hidden.name);
   }
@@ -345,9 +351,9 @@ partial class FileParser {
         values.push(hidden.name);
       }
     } else {
-      decls.push(
-        this.hiddenDeclarator(pattern.loc, value, undefined, formOf(pattern)),
-      );
+      const form = formOf(pattern);
+      const hidden = this.hiddenDeclarator(pattern.loc, value, undefined, form);
+      decls.push(hidden);
     }
     const base = decls[0]?.name ?? "";
     const keyReads: IndexExpr[] = [];
@@ -361,7 +367,8 @@ partial class FileParser {
         : this.elementOf(base, pattern, i, keyReads);
       const nested = e.nested;
       if (nested != undefined) {
-        body.push(this.assignPattern(e.loc, nested, part));
+        const assignment = this.assignPattern(e.loc, nested, part);
+        body.push(assignment);
         continue;
       }
       const target = e.target ?? part;

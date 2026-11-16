@@ -27,10 +27,8 @@ partial class FileParser {
   private statement(topLevel: boolean): Stmt {
     const token = this.cursor.peek();
     const loc = token.start;
-    if (
-      isName(token.kind) &&
-      this.cursor.lookahead().kind == TokenKind.Colon
-    ) {
+    const next = this.cursor.lookahead();
+    if (isName(token.kind) && next.kind == TokenKind.Colon) {
       this.cursor.skip(2);
       const body = this.statement(false);
       return { kind: StmtKind.Labeled, loc, label: token.text, body };
@@ -124,10 +122,8 @@ partial class FileParser {
         "'var' is not supported; use 'let' or 'const'",
       );
     }
-    if (
-      token.kind == TokenKind.Const &&
-      this.cursor.lookahead().kind == TokenKind.Enum
-    ) {
+    const next = this.cursor.lookahead();
+    if (token.kind == TokenKind.Const && next.kind == TokenKind.Enum) {
       this.cursor.next();
       return this.enumDecl();
     }
@@ -235,7 +231,8 @@ partial class FileParser {
   }
 
   private tryStatement(loc: int): Stmt {
-    if (this.cursor.lookahead().kind == TokenKind.LBrace) {
+    const next = this.cursor.lookahead();
+    if (next.kind == TokenKind.LBrace) {
       return this.strayTry();
     }
 
@@ -349,7 +346,8 @@ partial class FileParser {
         more = false;
       } else {
         this.cursor.next();
-        more = !this.cursor.peek().newline;
+        const current = this.cursor.peek();
+        more = !current.newline;
       }
     }
 
@@ -359,8 +357,10 @@ partial class FileParser {
   private jumpStatement(token: Token): Stmt {
     this.cursor.next();
     let label = "";
-    if (this.cursor.atName() && !this.cursor.peek().newline) {
-      label = this.cursor.next().text;
+    const target = this.cursor.peek();
+    if (isName(target.kind) && !target.newline) {
+      this.cursor.next();
+      label = target.text;
     }
     this.cursor.expectSemicolon();
     const kind =
@@ -370,7 +370,8 @@ partial class FileParser {
   }
 
   private switchStatement(): Stmt {
-    const loc = this.cursor.next().start;
+    const keyword = this.cursor.next();
+    const loc = keyword.start;
     this.cursor.expect(TokenKind.LParen, "after 'switch'");
     const discriminant = this.sequence();
     this.cursor.expect(TokenKind.RParen, "after the value of 'switch'");
@@ -381,7 +382,8 @@ partial class FileParser {
       this.cursor.is(TokenKind.Case) ||
       this.cursor.is(TokenKind.Default)
     ) {
-      const caseLoc = this.cursor.peek().start;
+      const clause = this.cursor.peek();
+      const caseLoc = clause.start;
       let test: Expr | undefined = undefined;
       if (this.cursor.accept(TokenKind.Case)) {
         test = this.expression();
@@ -400,8 +402,9 @@ partial class FileParser {
       cases.push({ loc: caseLoc, test, body });
     }
     if (!this.cursor.is(TokenKind.RBrace) && !this.cursor.is(TokenKind.End)) {
+      const token = this.cursor.peek();
       this.cursor.error(
-        this.cursor.peek().start,
+        token.start,
         "expected 'case' or 'default'",
       );
     }
@@ -418,10 +421,11 @@ partial class FileParser {
       !this.cursor.is(TokenKind.RBrace) &&
       !this.cursor.is(TokenKind.End)
     ) {
-      const start = this.cursor.peek().start;
-      body.push(this.statement(false));
+      const first = this.cursor.peek();
+      const statement = this.statement(false);
+      body.push(statement);
       if (this.cursor.isRecovering()) {
-        this.cursor.recoverStatement(start);
+        this.cursor.recoverStatement(first.start);
       }
     }
 
@@ -429,20 +433,23 @@ partial class FileParser {
   }
 
   private block(): BlockStmt {
-    const loc = this.cursor.peek().start;
+    const brace = this.cursor.peek();
+    const loc = brace.start;
     this.cursor.expect(TokenKind.LBrace, "");
     const body: Stmt[] = [];
     while (
       !this.cursor.is(TokenKind.RBrace) &&
       !this.cursor.is(TokenKind.End)
     ) {
-      const start = this.cursor.peek().start;
-      body.push(this.statement(false));
+      const first = this.cursor.peek();
+      const statement = this.statement(false);
+      body.push(statement);
       if (this.cursor.isRecovering()) {
-        this.cursor.recoverStatement(start);
+        this.cursor.recoverStatement(first.start);
       }
     }
-    const end = this.cursor.peek().start;
+    const closing = this.cursor.peek();
+    const end = closing.start;
     this.cursor.expect(TokenKind.RBrace, "to close the block");
 
     return { kind: StmtKind.Block, loc, body, end };
@@ -457,7 +464,8 @@ partial class FileParser {
   }
 
   private ifStatement(): Stmt {
-    const loc = this.cursor.next().start;
+    const keyword = this.cursor.next();
+    const loc = keyword.start;
     const cond = this.condition("if");
     const thenStmt = this.statement(false);
     const elseStmt = this.cursor.accept(TokenKind.Else)
@@ -468,7 +476,8 @@ partial class FileParser {
   }
 
   private whileStatement(): Stmt {
-    const loc = this.cursor.next().start;
+    const keyword = this.cursor.next();
+    const loc = keyword.start;
     const cond = this.condition("while");
     const body = this.statement(false);
 
@@ -476,7 +485,8 @@ partial class FileParser {
   }
 
   private doWhileStatement(): Stmt {
-    const loc = this.cursor.next().start;
+    const keyword = this.cursor.next();
+    const loc = keyword.start;
     const body = this.statement(false);
     this.cursor.expect(TokenKind.While, "after the body of 'do'");
     const cond = this.condition("while");
@@ -495,10 +505,12 @@ partial class FileParser {
   }
 
   private forInside(): Stmt {
-    const loc = this.cursor.next().start;
+    const keyword = this.cursor.next();
+    const loc = keyword.start;
     let awaitLoc = -1;
     if (this.cursor.is(TokenKind.Await)) {
-      awaitLoc = this.cursor.next().start;
+      const awaitKeyword = this.cursor.next();
+      awaitLoc = awaitKeyword.start;
     }
     this.cursor.expect(TokenKind.LParen, "after 'for'");
     let init: Stmt | undefined = undefined;
@@ -566,13 +578,15 @@ partial class FileParser {
         decls,
       };
     } else if (!this.cursor.is(TokenKind.Semi)) {
-      const initLoc = this.cursor.peek().start;
+      const head = this.cursor.peek();
+      const initLoc = head.start;
       const expr = this.sequence();
       init = { kind: StmtKind.Expr, loc: initLoc, expr };
     }
     if (this.cursor.is(TokenKind.In) || this.cursor.is(TokenKind.Of)) {
+      const token = this.cursor.peek();
       this.cursor.error(
-        this.cursor.peek().start,
+        token.start,
         "'for...in' and 'for...of' need a new variable",
       );
       return { kind: StmtKind.For, loc, init };
@@ -692,7 +706,8 @@ partial class FileParser {
   }
 
   private returnStatement(): Stmt {
-    const loc = this.cursor.next().start;
+    const keyword = this.cursor.next();
+    const loc = keyword.start;
     const token = this.cursor.peek();
     const hasValue =
       token.kind != TokenKind.Semi &&
@@ -706,7 +721,8 @@ partial class FileParser {
   }
 
   private throwStatement(): Stmt {
-    const loc = this.cursor.next().start;
+    const keyword = this.cursor.next();
+    const loc = keyword.start;
     this.cursor.report(loc, "there is no 'throw' in tz");
     const token = this.cursor.peek();
     const hasValue =
@@ -723,7 +739,8 @@ partial class FileParser {
   }
 
   private strayTry(): Stmt {
-    this.cursor.report(this.cursor.peek().start, "there is no 'try' in tz");
+    const token = this.cursor.peek();
+    this.cursor.report(token.start, "there is no 'try' in tz");
     this.cursor.next();
     const block = this.block();
     if (this.cursor.is(TokenKind.Catch)) {
@@ -763,7 +780,8 @@ partial class FileParser {
   }
 
   private usingDecl(): VarDeclStmt {
-    const loc = this.cursor.next().start;
+    const keyword = this.cursor.next();
+    const loc = keyword.start;
     const decls: VarDeclarator[] = [];
     this.declarators(decls, true);
     this.cursor.expectSemicolon();
@@ -847,10 +865,8 @@ partial class FileParser {
     const token = this.cursor.peek();
     const reserved = !isName(token.kind) && isKeyword(token.kind);
     if (reserved) {
-      this.cursor.report(
-        token.start,
-        this.cursor.expectedName("variable name"),
-      );
+      const message = this.cursor.expectedName("variable name");
+      this.cursor.report(token.start, message);
     } else if (!isName(token.kind)) {
       this.cursor.error(token.start, "expected a variable name");
       return undefined;

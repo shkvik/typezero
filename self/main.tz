@@ -40,7 +40,8 @@ function printTree(parsed: ParsedFile): void {
   const dumper = new Dumper(parsed.source.text)
   dumper.dumpFile(parsed.file)
   console.log(`== ${parsed.source.path}`)
-  console.log(dumper.text())
+  const text = dumper.text()
+  console.log(text)
   for (const error of parsed.errors) {
     console.log(`!! ${error.loc}`)
   }
@@ -49,7 +50,8 @@ function printTree(parsed: ParsedFile): void {
 function lexAll(sources: SourceText[]): int {
   let tokens = 0
   for (const source of sources) {
-    tokens += tokenize(source.text).length - 1
+    const lexed = tokenize(source.text)
+    tokens += lexed.length - 1
   }
 
   return tokens
@@ -84,7 +86,9 @@ function timeSources(sources: SourceText[], repeat: int): void {
   const lexMs = (parseStarted - lexStarted) / passes
   const parseMs = (parseEnded - parseStarted) / passes
   console.log(`files ${sources.length}, tokens ${tokens}, nodes ${items}`)
-  console.log(`lex ${lexMs.toFixed(2)} ms, lex + parse ${parseMs.toFixed(2)} ms per pass`)
+  const lexText = lexMs.toFixed(2)
+  const parseText = parseMs.toFixed(2)
+  console.log(`lex ${lexText} ms, lex + parse ${parseText} ms per pass`)
 }
 
 function holdSources(sources: SourceText[], parseThem: boolean): void {
@@ -111,7 +115,8 @@ const mode = process.argv[2] ?? "tokens"
 const listPath = process.argv[3] ?? ""
 const repeatText = process.argv[4] ?? "20"
 const repeat = parseInt(repeatText).unwrapOr(20)
-const sources = readSources(readList(listPath))
+const files = readList(listPath)
+const sources = readSources(files)
 switch (mode) {
   case "tokens":
     for (const source of sources) {

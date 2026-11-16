@@ -182,6 +182,30 @@ class Lexer {
     return this.isIdentStart(c) || this.isDigit(c);
   }
 
+  private digitAt(offset: int): boolean {
+    const c = this.at(offset);
+
+    return this.isDigit(c);
+  }
+
+  private alphaAt(offset: int): boolean {
+    const c = this.at(offset);
+
+    return this.isAlpha(c);
+  }
+
+  private identStartAt(offset: int): boolean {
+    const c = this.at(offset);
+
+    return this.isIdentStart(c);
+  }
+
+  private identCharAt(offset: int): boolean {
+    const c = this.at(offset);
+
+    return this.isIdentChar(c);
+  }
+
   private isLineBreak(): boolean {
     const c = this.at(0);
     if (c == kNewline || c == kReturn) {
@@ -193,6 +217,17 @@ class Lexer {
       this.at(1) == 0x80 &&
       (this.at(2) == 0xa8 || this.at(2) == 0xa9)
     );
+  }
+
+  private pushOperator(
+    plain: TokenKind,
+    withAssign: TokenKind,
+    start: int,
+    newline: boolean,
+  ): void {
+    const assign = this.match(kEquals);
+    const kind = assign ? withAssign : plain;
+    this.push(kind, start, newline);
   }
 
   private match(c: int): boolean {
@@ -311,7 +346,7 @@ class Lexer {
         this.push(TokenKind.At, start, nl);
         return true;
       case kHash:
-        if (!this.isIdentStart(this.at(0))) {
+        if (!this.identStartAt(0)) {
           return false;
         }
         this.identifier(start + 1, nl, true);
@@ -348,11 +383,7 @@ class Lexer {
         this.slash(start, nl);
         return true;
       case kPercent:
-        this.push(
-          this.match(kEquals) ? TokenKind.PercentAssign : TokenKind.Percent,
-          start,
-          nl,
-        );
+        this.pushOperator(TokenKind.Percent, TokenKind.PercentAssign, start, nl);
         return true;
       case kAmp:
         this.amp(start, nl);
@@ -361,11 +392,7 @@ class Lexer {
         this.pipe(start, nl);
         return true;
       case kCaret:
-        this.push(
-          this.match(kEquals) ? TokenKind.CaretAssign : TokenKind.Caret,
-          start,
-          nl,
-        );
+        this.pushOperator(TokenKind.Caret, TokenKind.CaretAssign, start, nl);
         return true;
       case kBang:
         this.bang(start, nl);
@@ -415,7 +442,7 @@ class Lexer {
         : TokenKind.QuestionQuestion;
       return this.push(kind, start, nl);
     }
-    if (this.at(0) == kDot && !this.isDigit(this.at(1))) {
+    if (this.at(0) == kDot && !this.digitAt(1)) {
       this.cur += 1;
       return this.push(TokenKind.QuestionDot, start, nl);
     }
@@ -423,7 +450,7 @@ class Lexer {
   }
 
   private dot(start: int, nl: boolean): void {
-    if (this.isDigit(this.at(0))) {
+    if (this.digitAt(0)) {
       return this.number(start, nl);
     }
     if (this.at(0) == kDot && this.at(1) == kDot) {
@@ -435,78 +462,42 @@ class Lexer {
 
   private star(start: int, nl: boolean): void {
     if (this.match(kStar)) {
-      return this.push(
-        this.match(kEquals) ? TokenKind.StarStarAssign : TokenKind.StarStar,
-        start,
-        nl,
-      );
+      return this.pushOperator(TokenKind.StarStar, TokenKind.StarStarAssign, start, nl);
     }
-    this.push(
-      this.match(kEquals) ? TokenKind.StarAssign : TokenKind.Star,
-      start,
-      nl,
-    );
+    this.pushOperator(TokenKind.Star, TokenKind.StarAssign, start, nl);
   }
 
   private slash(start: int, nl: boolean): void {
     if (this.regexAllowed()) {
       return this.regex(start, nl);
     }
-    this.push(
-      this.match(kEquals) ? TokenKind.SlashAssign : TokenKind.Slash,
-      start,
-      nl,
-    );
+    this.pushOperator(TokenKind.Slash, TokenKind.SlashAssign, start, nl);
   }
 
   private amp(start: int, nl: boolean): void {
     if (this.match(kAmp)) {
-      return this.push(
-        this.match(kEquals) ? TokenKind.AmpAmpAssign : TokenKind.AmpAmp,
-        start,
-        nl,
-      );
+      return this.pushOperator(TokenKind.AmpAmp, TokenKind.AmpAmpAssign, start, nl);
     }
-    this.push(
-      this.match(kEquals) ? TokenKind.AmpAssign : TokenKind.Amp,
-      start,
-      nl,
-    );
+    this.pushOperator(TokenKind.Amp, TokenKind.AmpAssign, start, nl);
   }
 
   private pipe(start: int, nl: boolean): void {
     if (this.match(kPipe)) {
-      return this.push(
-        this.match(kEquals) ? TokenKind.PipePipeAssign : TokenKind.PipePipe,
-        start,
-        nl,
-      );
+      return this.pushOperator(TokenKind.PipePipe, TokenKind.PipePipeAssign, start, nl);
     }
-    this.push(
-      this.match(kEquals) ? TokenKind.PipeAssign : TokenKind.Pipe,
-      start,
-      nl,
-    );
+    this.pushOperator(TokenKind.Pipe, TokenKind.PipeAssign, start, nl);
   }
 
   private bang(start: int, nl: boolean): void {
     if (this.match(kEquals)) {
-      return this.push(
-        this.match(kEquals) ? TokenKind.BangEqEq : TokenKind.BangEq,
-        start,
-        nl,
-      );
+      return this.pushOperator(TokenKind.BangEq, TokenKind.BangEqEq, start, nl);
     }
     this.push(TokenKind.Bang, start, nl);
   }
 
   private equals(start: int, nl: boolean): void {
     if (this.match(kEquals)) {
-      return this.push(
-        this.match(kEquals) ? TokenKind.EqEqEq : TokenKind.EqEq,
-        start,
-        nl,
-      );
+      return this.pushOperator(TokenKind.EqEq, TokenKind.EqEqEq, start, nl);
     }
     if (this.match(kGreater)) {
       return this.push(TokenKind.Arrow, start, nl);
@@ -516,17 +507,9 @@ class Lexer {
 
   private less(start: int, nl: boolean): void {
     if (this.match(kLess)) {
-      return this.push(
-        this.match(kEquals) ? TokenKind.ShlAssign : TokenKind.Shl,
-        start,
-        nl,
-      );
+      return this.pushOperator(TokenKind.Shl, TokenKind.ShlAssign, start, nl);
     }
-    this.push(
-      this.match(kEquals) ? TokenKind.LessEq : TokenKind.Less,
-      start,
-      nl,
-    );
+    this.pushOperator(TokenKind.Less, TokenKind.LessEq, start, nl);
   }
 
   private regex(start: int, nl: boolean): void {
@@ -548,7 +531,7 @@ class Lexer {
       }
     }
     if (closed) {
-      while (this.cur < this.end && this.isIdentChar(this.at(0))) {
+      while (this.cur < this.end && this.identCharAt(0)) {
         this.cur += 1;
       }
     }
@@ -574,7 +557,7 @@ class Lexer {
     const isMember =
       !isFloat &&
       this.at(0) == kDot &&
-      this.isIdentStart(this.at(1)) &&
+      this.identStartAt(1) &&
       this.at(1) != kLowerE &&
       this.at(1) != kUpperE;
     if (isMember) {
@@ -588,9 +571,9 @@ class Lexer {
     const e = this.at(0);
     const isExponent =
       (e == kLowerE || e == kUpperE) &&
-      (this.isDigit(this.at(1)) ||
+      (this.digitAt(1) ||
         ((this.at(1) == kPlus || this.at(1) == kMinus) &&
-          this.isDigit(this.at(2))));
+          this.digitAt(2)));
     if (isExponent) {
       isFloat = true;
       this.cur += 2;
@@ -602,8 +585,8 @@ class Lexer {
   private radixNumber(start: int, nl: boolean): void {
     this.cur += 1;
     while (
-      this.isAlpha(this.at(0)) ||
-      this.isDigit(this.at(0)) ||
+      this.alphaAt(0) ||
+      this.digitAt(0) ||
       this.at(0) == kUnderscore
     ) {
       this.cur += 1;
@@ -615,20 +598,20 @@ class Lexer {
   }
 
   private skipDigits(): void {
-    while (this.isDigit(this.at(0)) || this.at(0) == kUnderscore) {
+    while (this.digitAt(0) || this.at(0) == kUnderscore) {
       this.cur += 1;
     }
   }
 
   private finishNumber(start: int, nl: boolean, isFloat: boolean): void {
     const kind = isFloat ? TokenKind.Float : TokenKind.Int;
-    if (this.at(0) == kLowerN && !this.isIdentChar(this.at(1))) {
+    if (this.at(0) == kLowerN && !this.identCharAt(1)) {
       this.push(kind, start, nl);
       this.cur += 1;
       return;
     }
-    if (this.isIdentStart(this.at(0))) {
-      while (this.isIdentChar(this.at(0))) {
+    if (this.identStartAt(0)) {
+      while (this.identCharAt(0)) {
         this.cur += 1;
       }
     }
@@ -680,7 +663,7 @@ class Lexer {
   }
 
   private identifier(start: int, nl: boolean, hash: boolean): void {
-    while (this.isIdentChar(this.at(0))) {
+    while (this.identCharAt(0)) {
       this.cur += 1;
     }
     const text = this.source.toString("utf8", start, this.cur);

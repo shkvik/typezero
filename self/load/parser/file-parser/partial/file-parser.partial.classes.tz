@@ -118,9 +118,11 @@ partial class FileParser {
     const interfaces: TypeRef[] = [];
     if (this.cursor.is(TokenKind.Implements)) {
       this.cursor.next();
-      interfaces.push(this.primaryType());
+      const first = this.primaryType();
+      interfaces.push(first);
       while (this.cursor.accept(TokenKind.Comma)) {
-        interfaces.push(this.primaryType());
+        const implemented = this.primaryType();
+        interfaces.push(implemented);
       }
     }
     const cls: ClassDecl = {
@@ -162,7 +164,8 @@ partial class FileParser {
   }
 
   private memberModifierAhead(): boolean {
-    if (!isMemberModifier(this.cursor.peek().kind)) {
+    const token = this.cursor.peek();
+    if (!isMemberModifier(token.kind)) {
       return false;
     }
     const next = this.cursor.lookahead();
@@ -177,9 +180,12 @@ partial class FileParser {
     let moved = false;
     while (
       !this.cursor.is(TokenKind.End) &&
-      !this.cursor.is(TokenKind.RBrace) &&
-      !(moved && this.cursor.peek().newline)
+      !this.cursor.is(TokenKind.RBrace)
     ) {
+      const token = this.cursor.peek();
+      if (moved && token.newline) {
+        return;
+      }
       if (this.cursor.accept(TokenKind.Semi)) {
         return;
       }
@@ -196,7 +202,8 @@ partial class FileParser {
     const decorators: Decorator[] = [];
     let more = this.cursor.is(TokenKind.At);
     while (more) {
-      const loc = this.cursor.next().start;
+      const at = this.cursor.next();
+      const loc = at.start;
       const expr = this.decoratorExpr();
       if (expr != undefined) {
         decorators.push({ loc, expr });
@@ -214,9 +221,10 @@ partial class FileParser {
       return inner;
     }
     if (!this.cursor.atName()) {
+      const token = this.cursor.peek();
       this.cursor.error(
-        this.cursor.peek().start,
-        `expected the name of a decorator after '@', found ${this.cursor.peek().kind}`,
+        token.start,
+        `expected the name of a decorator after '@', found ${token.kind}`,
       );
       return undefined;
     }
@@ -229,14 +237,11 @@ partial class FileParser {
       typeArgs: [],
     };
     while (this.cursor.accept(TokenKind.Dot)) {
-      if (
-        !this.cursor.is(TokenKind.Identifier) &&
-        !isKeyword(this.cursor.peek().kind)
-      ) {
-        this.cursor.error(
-          this.cursor.peek().start,
-          "expected a property name after '.'",
-        );
+      const token = this.cursor.peek();
+      const property =
+        token.kind == TokenKind.Identifier || isKeyword(token.kind);
+      if (!property) {
+        this.cursor.error(token.start, "expected a property name after '.'");
         return expr;
       }
       const name = this.cursor.next();
@@ -352,7 +357,8 @@ partial class FileParser {
     if (this.cursor.isRecovering()) {
       return;
     }
-    const loc = this.cursor.peek().start;
+    const head = this.cursor.peek();
+    const loc = head.start;
     const m = this.modifiers();
     if (m.staticBlock) {
       return;
@@ -374,8 +380,9 @@ partial class FileParser {
       return this.classMethod(cls, m, decorators, loc, member);
     }
     if (member.generator || m.isAsync) {
+      const token = this.cursor.peek();
       return this.cursor.error(
-        this.cursor.peek().start,
+        token.start,
         "expected '(' after the name of the method",
       );
     }
@@ -383,7 +390,8 @@ partial class FileParser {
   }
 
   private memberName(m: Modifiers): MemberName | undefined {
-    const start = this.cursor.peek().start;
+    const head = this.cursor.peek();
+    const start = head.start;
     const generator = this.cursor.accept(TokenKind.Star);
     const token = this.cursor.peek();
     const name = this.fieldName();
@@ -616,9 +624,10 @@ partial class FileParser {
       this.cursor.report(loc, "abstract fields are not supported");
     }
     let presence = FieldPresence.Required;
+    const suffix = this.cursor.peek();
     if (this.cursor.accept(TokenKind.Question)) {
       presence = FieldPresence.Optional;
-    } else if (this.cursor.is(TokenKind.Bang) && !this.cursor.peek().newline) {
+    } else if (suffix.kind == TokenKind.Bang && !suffix.newline) {
       this.cursor.next();
       presence = FieldPresence.Definite;
     }
@@ -626,15 +635,16 @@ partial class FileParser {
     const init = this.cursor.accept(TokenKind.Assign)
       ? this.expression()
       : undefined;
+    const after = this.cursor.peek();
     const ended =
       this.cursor.accept(TokenKind.Semi) ||
       this.cursor.accept(TokenKind.Comma) ||
-      this.cursor.is(TokenKind.RBrace) ||
-      this.cursor.peek().newline;
+      after.kind == TokenKind.RBrace ||
+      after.newline;
     if (!ended) {
       return this.cursor.error(
-        this.cursor.peek().start,
-        `expected ';' after the field, found ${this.cursor.peek().kind}`,
+        after.start,
+        `expected ';' after the field, found ${after.kind}`,
       );
     }
     cls.fields.push({
@@ -687,12 +697,13 @@ partial class FileParser {
       bases: [],
       isHandle: true,
     };
+    const next = this.cursor.lookahead();
     const hasBody =
-      this.cursor.is(TokenKind.LBrace) &&
-      this.cursor.lookahead().kind == TokenKind.RBrace;
+      this.cursor.is(TokenKind.LBrace) && next.kind == TokenKind.RBrace;
     if (!hasBody) {
+      const token = this.cursor.peek();
       this.cursor.report(
-        this.cursor.peek().start,
+        token.start,
         `a declared class is a handle from C: 'declare class ${name.text} {}'`,
       );
       this.skipHandleBody();
@@ -722,15 +733,18 @@ partial class FileParser {
     const bases: TypeRef[] = [];
     if (this.cursor.is(TokenKind.Extends)) {
       this.cursor.next();
-      bases.push(this.type());
+      const first = this.type();
+      bases.push(first);
       while (this.cursor.accept(TokenKind.Comma)) {
-        bases.push(this.type());
+        const base = this.type();
+        bases.push(base);
       }
     }
     if (!this.cursor.is(TokenKind.LBrace)) {
+      const token = this.cursor.peek();
       this.cursor.error(
-        this.cursor.peek().start,
-        `expected '{' to start the fields of the interface, found ${this.cursor.peek().kind}`,
+        token.start,
+        `expected '{' to start the fields of the interface, found ${token.kind}`,
       );
       return marker(StmtKind.Empty, name.start);
     }

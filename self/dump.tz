@@ -103,10 +103,17 @@ export class Dumper {
     const digits: string[] = [];
     for (let shift = 12; shift >= 0; shift -= 4) {
       const digit = (value >> shift) & 15;
-      digits.push(kHex.charAt(digit));
+      const hex = kHex.charAt(digit);
+      digits.push(hex);
     }
 
     return digits.join("");
+  }
+
+  private unicodeEscape(c: int): string {
+    const hex = this.hex4(c);
+
+    return `\\u${hex}`;
   }
 
   private needsEscape(c: int): boolean {
@@ -116,7 +123,8 @@ export class Dumper {
   private quote(text: string): string {
     let plain = true;
     for (let i = 0; i < text.length && plain; i++) {
-      plain = !this.needsEscape(text.charCodeAt(i));
+      const c = text.charCodeAt(i);
+      plain = !this.needsEscape(c);
     }
     if (plain) {
       return `"${text}"`;
@@ -124,10 +132,17 @@ export class Dumper {
     const parts: string[] = [];
     for (let i = 0; i < text.length; i++) {
       const c = text.charCodeAt(i);
-      parts.push(this.needsEscape(c) ? `\\u${this.hex4(c)}` : text.charAt(i));
+      if (this.needsEscape(c)) {
+        const escape = this.unicodeEscape(c);
+        parts.push(escape);
+        continue;
+      }
+      const character = text.charAt(i);
+      parts.push(character);
     }
+    const joined = parts.join("");
 
-    return `"${parts.join("")}"`;
+    return `"${joined}"`;
   }
 
   private units(text: string): string {
@@ -135,10 +150,17 @@ export class Dumper {
     for (let i = 0; i < text.length; i++) {
       const c = text.charCodeAt(i);
       const printable = c >= 0x20 && c < 0x7f && c != 34 && c != 92;
-      parts.push(printable ? text.charAt(i) : `\\u${this.hex4(c)}`);
+      if (!printable) {
+        const escape = this.unicodeEscape(c);
+        parts.push(escape);
+        continue;
+      }
+      const character = text.charAt(i);
+      parts.push(character);
     }
+    const joined = parts.join("");
 
-    return `"${parts.join("")}"`;
+    return `"${joined}"`;
   }
 
   private bits(value: double): string {
@@ -156,12 +178,24 @@ export class Dumper {
     if (values.length == 0) {
       return "-";
     }
+    const parts: string[] = [];
+    for (const value of values) {
+      const part = this.flag(value);
+      parts.push(part);
+    }
 
-    return values.map((value) => this.flag(value)).join("");
+    return parts.join("");
   }
 
   private quoteAll(names: string[]): string {
-    return `[${names.map((name) => this.quote(name)).join(",")}]`;
+    const parts: string[] = [];
+    for (const name of names) {
+      const part = this.quote(name);
+      parts.push(part);
+    }
+    const joined = parts.join(",");
+
+    return `[${joined}]`;
   }
 
   private span(text: Span): string {
@@ -195,18 +229,21 @@ export class Dumper {
   private dumpModules(file: SourceFile): void {
     this.line(`imports ${file.imports.length}`);
     for (const decl of file.imports) {
+      const path = this.quote(decl.path);
+      const whole = this.quote(decl.whole);
+      const wholeIsDefault = this.flag(decl.wholeIsDefault);
+      const isPartList = this.flag(decl.isPartList);
       this.line(
-        `Import ${decl.loc} ${this.quote(decl.path)} ${decl.pathLoc} ` +
-          `${this.quote(decl.whole)} ${decl.wholeLoc} ${this.flag(decl.wholeIsDefault)} ` +
-          `${this.flag(decl.isPartList)} ${decl.names.length}`,
+        `Import ${decl.loc} ${path} ${decl.pathLoc} ${whole} ${decl.wholeLoc} ` +
+          `${wholeIsDefault} ${isPartList} ${decl.names.length}`,
       );
       this.dumpModuleNames(decl.names);
     }
     this.line(`exports ${file.exports.length}`);
     for (const decl of file.exports) {
+      const path = this.quote(decl.path);
       this.line(
-        `Export ${decl.loc} ${decl.form} ${this.quote(decl.path)} ${decl.pathLoc} ` +
-          `${decl.names.length}`,
+        `Export ${decl.loc} ${decl.form} ${path} ${decl.pathLoc} ${decl.names.length}`,
       );
       this.dumpModuleNames(decl.names);
     }
@@ -215,9 +252,9 @@ export class Dumper {
   private dumpModuleNames(names: ModuleName[]): void {
     this.nested();
     for (const name of names) {
-      this.line(
-        `Name ${this.quote(name.name)} ${name.loc} ${this.quote(name.as)} ${name.asLoc}`,
-      );
+      const quotedName = this.quote(name.name);
+      const quotedAs = this.quote(name.as);
+      this.line(`Name ${quotedName} ${name.loc} ${quotedAs} ${name.asLoc}`);
     }
     this.back();
   }
@@ -228,8 +265,13 @@ export class Dumper {
       fields.push(field);
     }
     fields.sort();
-    const quoted = fields.map((field) => ` ${this.quote(field)}`).join("");
-    this.line(`fields ${fields.length}${quoted}`);
+    const quotedFields: string[] = [];
+    for (const field of fields) {
+      const quoted = this.quote(field);
+      quotedFields.push(` ${quoted}`);
+    }
+    const fieldList = quotedFields.join("");
+    this.line(`fields ${fields.length}${fieldList}`);
     const keys: string[] = [];
     for (const key of file.stringConstants.keys()) {
       keys.push(key);
@@ -237,9 +279,16 @@ export class Dumper {
     keys.sort();
     this.line(`constants ${keys.length}`);
     for (const key of keys) {
-      const values = file.stringConstants.get(key) ?? [];
-      const all = values.map((value) => ` ${this.quote(value)}`).join("");
-      this.line(`  ${this.quote(key)} ${values.length}${all}`);
+      const found = file.stringConstants.get(key);
+      const values = found ?? [];
+      const quotedValues: string[] = [];
+      for (const value of values) {
+        const quoted = this.quote(value);
+        quotedValues.push(` ${quoted}`);
+      }
+      const valueList = quotedValues.join("");
+      const quotedKey = this.quote(key);
+      this.line(`  ${quotedKey} ${values.length}${valueList}`);
     }
   }
 
@@ -264,16 +313,18 @@ export class Dumper {
       case StmtKind.Block:
         this.line(`Block ${loc} end=${stmt.end} n=${stmt.body.length}`);
         return this.dumpStmts(stmt.body);
-      case StmtKind.VarDecl:
+      case StmtKind.VarDecl: {
+        const isConst = this.flag(stmt.isConst);
+        const isUsing = this.flag(stmt.isUsing);
         this.line(
-          `VarDecl ${loc} const=${this.flag(stmt.isConst)} using=${this.flag(stmt.isUsing)} ` +
-            `n=${stmt.decls.length}`,
+          `VarDecl ${loc} const=${isConst} using=${isUsing} n=${stmt.decls.length}`,
         );
         this.nested();
         for (const d of stmt.decls) {
           this.dumpDeclarator(d);
         }
         return this.back();
+      }
       case StmtKind.Function:
         return this.dumpFunction(stmt);
       case StmtKind.Expr:
@@ -306,16 +357,19 @@ export class Dumper {
         this.dumpOptionalExpr(stmt.step);
         this.dumpOptionalStmt(stmt.body);
         return this.back();
-      case StmtKind.ForOf:
+      case StmtKind.ForOf: {
+        const isConst = this.flag(stmt.isConst);
+        const keys = this.flag(stmt.keys);
+        const isAwait = this.flag(stmt.isAwait);
         this.line(
-          `ForOf ${loc} const=${this.flag(stmt.isConst)} keys=${this.flag(stmt.keys)} ` +
-            `await=${this.flag(stmt.isAwait)}`,
+          `ForOf ${loc} const=${isConst} keys=${keys} await=${isAwait}`,
         );
         this.nested();
         this.dumpDeclarator(stmt.binding);
         this.dumpExpr(stmt.iterable);
         this.dumpStmt(stmt.body);
         return this.back();
+      }
       case StmtKind.Switch:
         this.line(`Switch ${loc} n=${stmt.cases.length}`);
         this.nested();
@@ -328,25 +382,33 @@ export class Dumper {
           this.dumpStmts(c.body);
         }
         return this.back();
-      case StmtKind.Labeled:
-        this.line(`Labeled ${loc} ${this.quote(stmt.label)}`);
+      case StmtKind.Labeled: {
+        const label = this.quote(stmt.label);
+        this.line(`Labeled ${loc} ${label}`);
         return this.dumpStmts([stmt.body]);
+      }
       case StmtKind.Return:
         this.line(`Return ${loc}`);
         this.nested();
         this.dumpOptionalExpr(stmt.value);
         return this.back();
-      case StmtKind.Break:
-        return this.line(`Break ${loc} ${this.quote(stmt.label)}`);
-      case StmtKind.Continue:
-        return this.line(`Continue ${loc} ${this.quote(stmt.label)}`);
+      case StmtKind.Break: {
+        const label = this.quote(stmt.label);
+        return this.line(`Break ${loc} ${label}`);
+      }
+      case StmtKind.Continue: {
+        const label = this.quote(stmt.label);
+        return this.line(`Continue ${loc} ${label}`);
+      }
       case StmtKind.Empty:
         return this.line(`Empty ${loc}`);
       case StmtKind.Debugger:
         return this.line(`Debugger ${loc}`);
-      case StmtKind.TypeAlias:
+      case StmtKind.TypeAlias: {
+        const name = this.quote(stmt.name);
+        const isHandle = this.flag(stmt.isHandle);
         this.line(
-          `TypeAlias ${loc} ${this.quote(stmt.name)} handle=${this.flag(stmt.isHandle)} ` +
+          `TypeAlias ${loc} ${name} handle=${isHandle} ` +
             `tp=${stmt.typeParams.length} bases=${stmt.bases.length}`,
         );
         this.nested();
@@ -354,18 +416,20 @@ export class Dumper {
         this.dumpType(stmt.type);
         this.dumpTypes(stmt.bases);
         return this.back();
-      case StmtKind.Enum:
-        this.line(
-          `Enum ${loc} ${this.quote(stmt.name)} n=${stmt.members.length}`,
-        );
+      }
+      case StmtKind.Enum: {
+        const name = this.quote(stmt.name);
+        this.line(`Enum ${loc} ${name} n=${stmt.members.length}`);
         this.nested();
         for (const member of stmt.members) {
-          this.line(`EnumMember ${member.loc} ${this.quote(member.name)}`);
+          const memberName = this.quote(member.name);
+          this.line(`EnumMember ${member.loc} ${memberName}`);
           this.nested();
           this.dumpOptionalExpr(member.init);
           this.back();
         }
         return this.back();
+      }
       case StmtKind.Class:
         return this.dumpClass(stmt);
     }
@@ -377,9 +441,11 @@ export class Dumper {
     if (form.kind == BindingKind.Object) {
       shape = "form=object";
     } else if (form.kind == BindingKind.Array) {
-      shape = `form=array ${form.length} ${this.flag(form.rest)}`;
+      const rest = this.flag(form.rest);
+      shape = `form=array ${form.length} ${rest}`;
     }
-    this.line(`Declarator ${d.loc} ${this.quote(d.name)} ${shape}`);
+    const name = this.quote(d.name);
+    this.line(`Declarator ${d.loc} ${name} ${shape}`);
     this.nested();
     this.dumpOptionalType(d.typeAnn);
     this.dumpOptionalExpr(d.init);
@@ -391,19 +457,27 @@ export class Dumper {
     if (member == undefined) {
       return "plain";
     }
+    const isOverride = this.flag(member.isOverride);
 
     return (
-      `member ${member.access} ${this.flag(member.isOverride)} ${member.method} ` +
+      `member ${member.access} ${isOverride} ${member.method} ` +
       `${member.decorators.length}`
     );
   }
 
   private dumpFunction(fn: FunctionDecl): void {
+    const name = this.quote(fn.name);
+    const isArrow = this.flag(fn.isArrow);
+    const concise = this.flag(fn.concise);
+    const ownName = this.quote(fn.ownName);
+    const isGenerator = this.flag(fn.isGenerator);
+    const isAsync = this.flag(fn.isAsync);
+    const role = this.role(fn);
+    const source = this.span(fn.source);
     this.line(
-      `Function ${fn.loc} ${this.quote(fn.name)} arrow=${this.flag(fn.isArrow)} ` +
-        `concise=${this.flag(fn.concise)} own=${this.quote(fn.ownName)} place=${fn.place} ` +
-        `body=${fn.bodySource} gen=${this.flag(fn.isGenerator)} ` +
-        `async=${this.flag(fn.isAsync)} role=${this.role(fn)} src=${this.span(fn.source)} ` +
+      `Function ${fn.loc} ${name} arrow=${isArrow} concise=${concise} ` +
+        `own=${ownName} place=${fn.place} body=${fn.bodySource} ` +
+        `gen=${isGenerator} async=${isAsync} role=${role} src=${source} ` +
         `tp=${fn.typeParams.length} params=${fn.params.length}`,
     );
     this.nested();
@@ -422,13 +496,16 @@ export class Dumper {
 
   private dumpParam(param: Param): void {
     const property = param.property;
-    const prop =
-      property == undefined
-        ? "-"
-        : `${this.flag(property.readonly)}${property.access}`;
+    let prop = "-";
+    if (property != undefined) {
+      const isReadonly = this.flag(property.readonly);
+      prop = `${isReadonly}${property.access}`;
+    }
+    const name = this.quote(param.name);
+    const pattern = this.span(param.pattern);
     this.line(
-      `Param ${param.loc} ${this.quote(param.name)} form=${param.form.kind} ` +
-        `prop=${prop} pattern=${this.span(param.pattern)} dec=${param.decorators.length}`,
+      `Param ${param.loc} ${name} form=${param.form.kind} ` +
+        `prop=${prop} pattern=${pattern} dec=${param.decorators.length}`,
     );
     this.nested();
     this.dumpDecorators(param.decorators);
@@ -442,7 +519,8 @@ export class Dumper {
 
   private dumpTypeParams(params: TypeParamDecl[]): void {
     for (const param of params) {
-      this.line(`TypeParam ${param.loc} ${this.quote(param.name)}`);
+      const name = this.quote(param.name);
+      this.line(`TypeParam ${param.loc} ${name}`);
       this.nested();
       this.dumpOptionalType(param.constraint);
       this.dumpOptionalType(param.defaultType);
@@ -458,14 +536,21 @@ export class Dumper {
   }
 
   private dumpClass(cls: ClassDecl): void {
+    const name = this.quote(cls.name);
+    const isAbstract = this.flag(cls.isAbstract);
+    const isPartial = this.flag(cls.isPartial);
+    const expression = this.flag(cls.expression);
+    const generic = this.flag(cls.typeParams.length > 0);
+    const source = this.span(cls.source);
+    const hasBase = this.flag(cls.base != undefined);
+    const hasBaseExpr = this.flag(cls.baseExpr != undefined);
     this.line(
-      `Class ${cls.loc} ${this.quote(cls.name)} abstract=${this.flag(cls.isAbstract)} ` +
-        `partial=${this.flag(cls.isPartial)} expr=${this.flag(cls.expression)} generic=${this.flag(cls.typeParams.length > 0)} ` +
-        `src=${this.span(cls.source)} tp=${cls.typeParams.length} ` +
-        `base=${this.flag(cls.base != undefined)} ` +
-        `baseExpr=${this.flag(cls.baseExpr != undefined)} ifaces=${cls.interfaces.length} ` +
-        `dec=${cls.decorators.length} fields=${cls.fields.length} ` +
-        `methods=${cls.methods.length} ctors=${cls.constructors.length}`,
+      `Class ${cls.loc} ${name} abstract=${isAbstract} partial=${isPartial} ` +
+        `expr=${expression} generic=${generic} src=${source} ` +
+        `tp=${cls.typeParams.length} base=${hasBase} baseExpr=${hasBaseExpr} ` +
+        `ifaces=${cls.interfaces.length} dec=${cls.decorators.length} ` +
+        `fields=${cls.fields.length} methods=${cls.methods.length} ` +
+        `ctors=${cls.constructors.length}`,
     );
     this.nested();
     this.dumpDecorators(cls.decorators);
@@ -492,11 +577,15 @@ export class Dumper {
   }
 
   private dumpField(field: ClassField): void {
+    const name = this.quote(field.name);
+    const isReadonly = this.flag(field.readonly);
+    const isOverride = this.flag(field.isOverride);
+    const accessor = this.flag(field.accessor);
     this.line(
-      `Field ${field.loc} ${this.quote(field.name)} form=${field.form} ` +
-        `presence=${field.presence} ro=${this.flag(field.readonly)} ` +
-        `override=${this.flag(field.isOverride)} access=${field.access} ` +
-        `accessor=${this.flag(field.accessor)} dec=${field.decorators.length}`,
+      `Field ${field.loc} ${name} form=${field.form} ` +
+        `presence=${field.presence} ro=${isReadonly} ` +
+        `override=${isOverride} access=${field.access} ` +
+        `accessor=${accessor} dec=${field.decorators.length}`,
     );
     this.nested();
     this.dumpDecorators(field.decorators);
@@ -532,8 +621,13 @@ export class Dumper {
       case PropertyKind.Computed:
         return "Computed";
       case PropertyKind.Spread: {
-        const keys = form.omitKeys.map((key) => `${key.loc}`).join(",");
-        return `Spread omit=${this.quoteAll(form.omit)} keys=[${keys}]`;
+        const locs: string[] = [];
+        for (const key of form.omitKeys) {
+          locs.push(`${key.loc}`);
+        }
+        const keys = locs.join(",");
+        const omit = this.quoteAll(form.omit);
+        return `Spread omit=${omit} keys=[${keys}]`;
       }
     }
   }
@@ -541,29 +635,41 @@ export class Dumper {
   private dumpExpr(expr: Expr): void {
     const loc = expr.loc;
     switch (expr.kind) {
-      case ExprKind.IntLit:
-        return this.line(
-          `IntLit ${loc} ${expr.value} ${this.quote(this.spanText(expr.text))}`,
-        );
-      case ExprKind.FloatLit:
-        return this.line(
-          `FloatLit ${loc} ${this.bits(expr.value)} ${this.quote(this.spanText(expr.text))}`,
-        );
-      case ExprKind.BoolLit:
-        return this.line(`BoolLit ${loc} ${this.flag(expr.value)}`);
-      case ExprKind.StringLit:
-        return this.line(`StringLit ${loc} ${this.units(expr.value)}`);
+      case ExprKind.IntLit: {
+        const text = this.spanText(expr.text);
+        const quoted = this.quote(text);
+        return this.line(`IntLit ${loc} ${expr.value} ${quoted}`);
+      }
+      case ExprKind.FloatLit: {
+        const bits = this.bits(expr.value);
+        const text = this.spanText(expr.text);
+        const quoted = this.quote(text);
+        return this.line(`FloatLit ${loc} ${bits} ${quoted}`);
+      }
+      case ExprKind.BoolLit: {
+        const value = this.flag(expr.value);
+        return this.line(`BoolLit ${loc} ${value}`);
+      }
+      case ExprKind.StringLit: {
+        const value = this.units(expr.value);
+        return this.line(`StringLit ${loc} ${value}`);
+      }
       case ExprKind.Undefined:
         return this.line(`Undefined ${loc}`);
-      case ExprKind.RegexLit:
+      case ExprKind.RegexLit: {
+        const pattern = this.units(expr.pattern);
+        const flags = this.units(expr.flags);
         return this.line(
-          `RegexLit ${loc} ${this.units(expr.pattern)} ${this.units(expr.flags)} ` +
-            `written=${expr.written}`,
+          `RegexLit ${loc} ${pattern} ${flags} written=${expr.written}`,
         );
+      }
       case ExprKind.Template: {
-        const quasis = expr.quasis
-          .map((quasi) => ` ${this.units(quasi)}`)
-          .join("");
+        const parts: string[] = [];
+        for (const quasi of expr.quasis) {
+          const text = this.units(quasi);
+          parts.push(` ${text}`);
+        }
+        const quasis = parts.join("");
         this.line(`Template ${loc} n=${expr.quasis.length}${quasis}`);
         return this.dumpChildren(expr.exprs);
       }
@@ -571,9 +677,9 @@ export class Dumper {
         this.line(`ArrayLit ${loc} n=${expr.elements.length}`);
         this.nested();
         for (const element of expr.elements) {
-          this.line(
-            `Element ${this.flag(element.spread)} ${this.flag(element.hole)}`,
-          );
+          const spread = this.flag(element.spread);
+          const hole = this.flag(element.hole);
+          this.line(`Element ${spread} ${hole}`);
           this.dumpChildren([element.expr]);
         }
         return this.back();
@@ -590,9 +696,9 @@ export class Dumper {
   }
 
   private dumpProperty(prop: Property): void {
-    this.line(
-      `Property ${prop.loc} ${this.quote(prop.name)} ${this.propertyForm(prop)}`,
-    );
+    const name = this.quote(prop.name);
+    const formText = this.propertyForm(prop);
+    this.line(`Property ${prop.loc} ${name} ${formText}`);
     this.nested();
     const form = prop.form;
     if (form.kind == PropertyKind.Computed) {
@@ -605,42 +711,50 @@ export class Dumper {
   private dumpCompound(expr: Expr): void {
     const loc = expr.loc;
     switch (expr.kind) {
-      case ExprKind.Name:
-        this.line(
-          `Name ${loc} ${this.quote(expr.name)} targs=${expr.typeArgs.length}`,
-        );
+      case ExprKind.Name: {
+        const name = this.quote(expr.name);
+        this.line(`Name ${loc} ${name} targs=${expr.typeArgs.length}`);
         this.nested();
         this.dumpTypes(expr.typeArgs);
         return this.back();
-      case ExprKind.Member:
+      }
+      case ExprKind.Member: {
+        const name = this.quote(expr.name);
+        const optional = this.flag(expr.optional);
         this.line(
-          `Member ${loc} ${this.quote(expr.name)} opt=${this.flag(expr.optional)} ` +
-            `targs=${expr.typeArgs.length}`,
+          `Member ${loc} ${name} opt=${optional} targs=${expr.typeArgs.length}`,
         );
         this.nested();
         this.dumpExpr(expr.object);
         this.dumpTypes(expr.typeArgs);
         return this.back();
-      case ExprKind.Index:
-        this.line(`Index ${loc} opt=${this.flag(expr.optional)}`);
+      }
+      case ExprKind.Index: {
+        const optional = this.flag(expr.optional);
+        this.line(`Index ${loc} opt=${optional}`);
         return this.dumpChildren([expr.object, expr.index]);
+      }
       case ExprKind.Unary:
         this.line(`Unary ${loc} ${expr.op}`);
         return this.dumpChildren([expr.operand]);
-      case ExprKind.Binary:
-        this.line(`Binary ${loc} ${expr.op} src=${this.span(expr.source)}`);
+      case ExprKind.Binary: {
+        const source = this.span(expr.source);
+        this.line(`Binary ${loc} ${expr.op} src=${source}`);
         return this.dumpChildren([expr.lhs, expr.rhs]);
+      }
       case ExprKind.Assign: {
         const op = expr.op;
         const opText = op == undefined ? "-" : `${op}`;
-        this.line(`Assign ${loc} ${opText} src=${this.span(expr.source)}`);
+        const source = this.span(expr.source);
+        this.line(`Assign ${loc} ${opText} src=${source}`);
         return this.dumpChildren([expr.target, expr.value]);
       }
-      case ExprKind.Update:
-        this.line(
-          `Update ${loc} inc=${this.flag(expr.increment)} prefix=${this.flag(expr.prefix)}`,
-        );
+      case ExprKind.Update: {
+        const increment = this.flag(expr.increment);
+        const prefix = this.flag(expr.prefix);
+        this.line(`Update ${loc} inc=${increment} prefix=${prefix}`);
         return this.dumpChildren([expr.target]);
+      }
       case ExprKind.Conditional:
         this.line(`Conditional ${loc}`);
         return this.dumpChildren([expr.cond, expr.thenExpr, expr.elseExpr]);
@@ -662,17 +776,16 @@ export class Dumper {
     const form = expr.form;
     const counts = `targs=${expr.typeArgs.length} n=${expr.args.length}`;
     if (form.kind == NewKind.Named) {
-      const member = form.member ?? "";
-      this.line(
-        `New ${expr.loc} ${this.quote(form.name)} ${this.quote(member)} ${counts} ` +
-          `callee=${this.flag(false)}`,
-      );
+      const name = this.quote(form.name);
+      const memberText = form.member ?? "";
+      const member = this.quote(memberText);
+      const callee = this.flag(false);
+      this.line(`New ${expr.loc} ${name} ${member} ${counts} callee=${callee}`);
       this.nested();
     } else {
-      this.line(
-        `New ${expr.loc} ${this.quote("")} ${this.quote("")} ${counts} ` +
-          `callee=${this.flag(true)}`,
-      );
+      const empty = this.quote("");
+      const callee = this.flag(true);
+      this.line(`New ${expr.loc} ${empty} ${empty} ${counts} callee=${callee}`);
       this.nested();
       this.dumpExpr(form.callee);
     }
@@ -686,12 +799,17 @@ export class Dumper {
   private dumpCall(expr: Expr): void {
     const loc = expr.loc;
     switch (expr.kind) {
-      case ExprKind.Call:
+      case ExprKind.Call: {
+        const optional = this.flag(expr.optional);
+        const tagged = this.flag(expr.tagged);
+        const spread = this.flags(expr.spread);
         this.line(
-          `Call ${loc} opt=${this.flag(expr.optional)} tagged=${this.flag(expr.tagged)} ` +
-            `n=${expr.args.length} spread=${this.flags(expr.spread)}`,
+          `Call ${loc} opt=${optional} tagged=${tagged} ` +
+            `n=${expr.args.length} spread=${spread}`,
         );
-        return this.dumpChildren([expr.callee].concat(expr.args));
+        const children = [expr.callee].concat(expr.args);
+        return this.dumpChildren(children);
+      }
       case ExprKind.New:
         return this.dumpNew(expr);
       case ExprKind.OptionalChain:
@@ -702,11 +820,13 @@ export class Dumper {
         this.nested();
         this.dumpFunction(expr.fn);
         return this.back();
-      case ExprKind.Yield:
-        this.line(`Yield ${loc} delegate=${this.flag(expr.delegate)}`);
+      case ExprKind.Yield: {
+        const delegate = this.flag(expr.delegate);
+        this.line(`Yield ${loc} delegate=${delegate}`);
         this.nested();
         this.dumpOptionalExpr(expr.value);
         return this.back();
+      }
       case ExprKind.Await:
         this.line(`Await ${loc}`);
         return this.dumpChildren([expr.value]);
@@ -736,33 +856,55 @@ export class Dumper {
   private typeExtras(ref: TypeRef): string {
     const form = ref.form;
     switch (form.kind) {
-      case TypeKind.Function:
-        return (
-          ` names=${this.quoteAll(form.names)} opt=${this.flags(form.optional)} ` +
-          `rest=${this.flag(form.rest)}`
-        );
+      case TypeKind.Function: {
+        const names = this.quoteAll(form.names);
+        const optional = this.flags(form.optional);
+        const rest = this.flag(form.rest);
+        return ` names=${names} opt=${optional} rest=${rest}`;
+      }
       case TypeKind.Object: {
-        const locs = form.locs.map((loc) => `${loc}`).join(",");
+        const locTexts: string[] = [];
+        for (const loc of form.locs) {
+          locTexts.push(`${loc}`);
+        }
+        const locs = locTexts.join(",");
+        const names = this.quoteAll(form.names);
+        const optional = this.flags(form.optional);
+        const readonlyFlags = this.flags(form.readonly);
+        const methods = this.flags(form.methods);
         return (
-          ` names=${this.quoteAll(form.names)} locs=[${locs}] opt=${this.flags(form.optional)} ` +
-          `ro=${this.flags(form.readonly)} methods=${this.flags(form.methods)}`
+          ` names=${names} locs=[${locs}] opt=${optional} ` +
+          `ro=${readonlyFlags} methods=${methods}`
         );
       }
-      case TypeKind.Tuple:
-        return ` ro=${this.flags(form.readonly)} spread=${this.flags(form.spread)}`;
-      case TypeKind.Literal:
-        return (
-          ` text=${this.units(form.text)} number=${this.bits(form.number)} ` +
-          `int=${this.flag(form.integer)}`
-        );
-      case TypeKind.Predicate:
-        return ` asserts=${this.flag(form.asserts)}`;
-      case TypeKind.TypeOf:
-        return ` names=${this.quoteAll(form.names)}`;
+      case TypeKind.Tuple: {
+        const readonlyFlags = this.flags(form.readonly);
+        const spread = this.flags(form.spread);
+        return ` ro=${readonlyFlags} spread=${spread}`;
+      }
+      case TypeKind.Literal: {
+        const text = this.units(form.text);
+        const numberBits = this.bits(form.number);
+        const integer = this.flag(form.integer);
+        return ` text=${text} number=${numberBits} int=${integer}`;
+      }
+      case TypeKind.Predicate: {
+        const isAsserts = this.flag(form.asserts);
+        return ` asserts=${isAsserts}`;
+      }
+      case TypeKind.TypeOf: {
+        const names = this.quoteAll(form.names);
+        return ` names=${names}`;
+      }
       case TypeKind.Mapped:
         return ` opt=${form.mappedOptional} ro=${form.mappedReadonly}`;
       case TypeKind.Template: {
-        const texts = form.texts.map((text) => this.units(text)).join(",");
+        const parts: string[] = [];
+        for (const text of form.texts) {
+          const part = this.units(text);
+          parts.push(part);
+        }
+        const texts = parts.join(",");
         return ` texts=[${texts}]`;
       }
       default:
@@ -771,9 +913,13 @@ export class Dumper {
   }
 
   private dumpType(ref: TypeRef): void {
+    const kind = typeKindName(ref.form.kind);
+    const name = this.quote(ref.name);
+    const source = this.span(ref.source);
+    const extras = this.typeExtras(ref);
     this.line(
-      `Type ${ref.loc} ${typeKindName(ref.form.kind)} ${this.quote(ref.name)} ` +
-        `src=${this.span(ref.source)} n=${ref.args.length}${this.typeExtras(ref)}`,
+      `Type ${ref.loc} ${kind} ${name} src=${source} ` +
+        `n=${ref.args.length}${extras}`,
     );
     this.nested();
     this.dumpTypes(ref.args);

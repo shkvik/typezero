@@ -238,7 +238,8 @@ partial class FileParser {
   }
 
   private expression(): Expr {
-    const start = this.cursor.peek().start;
+    const head = this.cursor.peek();
+    const start = head.start;
     if (this.cursor.is(TokenKind.Yield)) {
       return this.yieldExpression();
     }
@@ -247,7 +248,8 @@ partial class FileParser {
     if (!isAssignment(op.kind)) {
       return target;
     }
-    const loc = this.cursor.peek().start;
+    const operatorToken = this.cursor.peek();
+    const loc = operatorToken.start;
     this.cursor.skip(op.width);
     const value = this.expression();
 
@@ -262,17 +264,16 @@ partial class FileParser {
   }
 
   private yieldExpression(): Expr {
-    const loc = this.cursor.next().start;
-    const delegate =
-      !this.cursor.peek().newline && this.cursor.accept(TokenKind.Star);
+    const keyword = this.cursor.next();
+    const loc = keyword.start;
+    const star = this.cursor.peek();
+    const delegate = !star.newline && this.cursor.accept(TokenKind.Star);
     let value: Expr | undefined = undefined;
+    const token = this.cursor.peek();
     if (delegate) {
       value = this.expression();
-    } else if (
-      !this.cursor.peek().newline &&
-      !endsYield(this.cursor.peek().kind)
-    ) {
-      const kind = this.cursor.peek().kind;
+    } else if (!token.newline && !endsYield(token.kind)) {
+      const kind = token.kind;
       const operand =
         binaryPrecedence(kind) == Precedence.None ||
         kind == TokenKind.Plus ||
@@ -298,7 +299,8 @@ partial class FileParser {
     if (!this.cursor.is(TokenKind.Question)) {
       return cond;
     }
-    const loc = this.cursor.next().start;
+    const question = this.cursor.next();
+    const loc = question.start;
     const thenExpr = this.expression();
     this.cursor.expect(TokenKind.Colon, "in the conditional expression");
     const elseExpr = this.expression();
@@ -335,12 +337,15 @@ partial class FileParser {
   }
 
   private binary(above: Precedence): Expr {
-    const start = this.cursor.peek().start;
-    const unary = unaryOpFor(this.cursor.peek().kind) != undefined;
+    const head = this.cursor.peek();
+    const start = head.start;
+    const prefix = unaryOpFor(head.kind);
+    const unary = prefix != undefined;
     let left = this.unary();
     if (unary && this.cursor.is(TokenKind.StarStar)) {
+      const token = this.cursor.peek();
       this.cursor.report(
-        this.cursor.peek().start,
+        token.start,
         "the left side of '**' cannot be a unary expression",
       );
     }
@@ -364,7 +369,10 @@ partial class FileParser {
       return false;
     }
 
-    return binaryPrecedence(this.operator().kind) > above;
+    const op = this.operator();
+    const precedence = binaryPrecedence(op.kind);
+
+    return precedence > above;
   }
 
   private binaryStep(left: Expr, start: int): Expr {
@@ -508,9 +516,9 @@ partial class FileParser {
   }
 
   private isPropertyName(): boolean {
-    return (
-      this.cursor.is(TokenKind.Identifier) || isKeyword(this.cursor.peek().kind)
-    );
+    const token = this.cursor.peek();
+
+    return token.kind == TokenKind.Identifier || isKeyword(token.kind);
   }
 
   private callOrMember(): Expr {
@@ -553,8 +561,9 @@ partial class FileParser {
         !this.cursor.is(TokenKind.LParen) &&
         !this.cursor.is(TokenKind.LBracket)
       ) {
+        const token = this.cursor.peek();
         this.cursor.error(
-          this.cursor.peek().start,
+          token.start,
           "expected a property name, '[' or '(' after '?.'",
         );
         return undefined;
@@ -578,8 +587,9 @@ partial class FileParser {
       case TokenKind.Dot: {
         this.cursor.next();
         if (!this.isPropertyName()) {
+          const current = this.cursor.peek();
           this.cursor.error(
-            this.cursor.peek().start,
+            current.start,
             "expected a property name after '.'",
           );
           return undefined;
@@ -651,8 +661,9 @@ partial class FileParser {
 
   private taggedTemplate(tag: Expr, optional: boolean): Expr {
     if (optional) {
+      const token = this.cursor.peek();
       this.cursor.report(
-        this.cursor.peek().start,
+        token.start,
         "a tagged template cannot be part of an optional chain",
       );
     }
@@ -709,13 +720,15 @@ partial class FileParser {
   }
 
   private newExpression(): Expr {
-    const loc = this.cursor.next().start;
+    const keyword = this.cursor.next();
+    const loc = keyword.start;
     if (this.cursor.is(TokenKind.LParen)) {
       return this.newOfExpression();
     }
     if (!this.cursor.atName()) {
+      const token = this.cursor.peek();
       this.cursor.error(
-        this.cursor.peek().start,
+        token.start,
         "expected a class name after 'new'",
       );
       return invalid(loc);
@@ -726,8 +739,9 @@ partial class FileParser {
       if (this.cursor.atName()) {
         member = this.cursor.next();
       } else {
+        const token = this.cursor.peek();
         this.cursor.error(
-          this.cursor.peek().start,
+          token.start,
           "expected a name after '.'",
         );
       }
@@ -760,7 +774,8 @@ partial class FileParser {
   }
 
   private newOfExpression(): Expr {
-    const at = this.cursor.next().start;
+    const paren = this.cursor.next();
+    const at = paren.start;
     const outer = this.context;
     this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
     const callee = this.sequence();
@@ -813,8 +828,9 @@ partial class FileParser {
         continue;
       }
       if (!this.isPropertyName()) {
+        const current = this.cursor.peek();
         this.cursor.error(
-          this.cursor.peek().start,
+          current.start,
           "expected a property name after '.'",
         );
         return path;
@@ -835,8 +851,10 @@ partial class FileParser {
   }
 
   private template(raw: boolean): TemplateExpr {
-    const loc = this.cursor.peek().start;
-    const quasis: string[] = [this.templateText(raw)];
+    const opening = this.cursor.peek();
+    const loc = opening.start;
+    const head = this.templateText(raw);
+    const quasis: string[] = [head];
     const exprs: Expr[] = [];
     let done = this.cursor.is(TokenKind.TemplateString);
     this.cursor.next();
@@ -847,14 +865,16 @@ partial class FileParser {
         !this.cursor.is(TokenKind.TemplateMiddle) &&
         !this.cursor.is(TokenKind.TemplateTail)
       ) {
+        const token = this.cursor.peek();
         this.cursor.error(
-          this.cursor.peek().start,
+          token.start,
           "expected '}' to close the template substitution",
         );
         quasis.push("");
         return { kind: ExprKind.Template, loc, quasis, exprs };
       }
-      quasis.push(this.templateText(raw));
+      const text = this.templateText(raw);
+      quasis.push(text);
       done = this.cursor.is(TokenKind.TemplateTail);
       this.cursor.next();
     }
@@ -970,7 +990,8 @@ partial class FileParser {
 
   private genericArrow(loc: int): Expr {
     const start = this.cursor.mark();
-    const text = this.cursor.peek().start;
+    const less = this.cursor.peek();
+    const text = less.start;
     this.cursor.startDiscarding();
     this.cursor.stopRecovering();
     const typeParams = this.typeParams();
@@ -1039,7 +1060,8 @@ partial class FileParser {
   }
 
   private arrayLiteral(): Expr {
-    const loc = this.cursor.next().start;
+    const bracket = this.cursor.next();
+    const loc = bracket.start;
     const elements: ArrayElement[] = [];
     let more =
       !this.cursor.is(TokenKind.RBracket) && !this.cursor.is(TokenKind.End);
@@ -1069,7 +1091,8 @@ partial class FileParser {
   }
 
   private objectLiteral(): Expr {
-    const loc = this.cursor.next().start;
+    const brace = this.cursor.next();
+    const loc = brace.start;
     const props: Property[] = [];
     let more =
       !this.cursor.is(TokenKind.RBrace) && !this.cursor.is(TokenKind.End);
@@ -1097,7 +1120,8 @@ partial class FileParser {
   }
 
   private property(): Property | undefined {
-    const loc = this.cursor.peek().start;
+    const head = this.cursor.peek();
+    const loc = head.start;
     if (this.cursor.accept(TokenKind.Ellipsis)) {
       const value = this.expression();
       return {
@@ -1176,7 +1200,8 @@ partial class FileParser {
     if (isAsync) {
       this.cursor.next();
     }
-    const start = this.cursor.peek().start;
+    const head = this.cursor.peek();
+    const start = head.start;
     const generator = this.cursor.accept(TokenKind.Star);
     const token = this.cursor.peek();
     const identifier = isName(token.kind);
@@ -1189,8 +1214,9 @@ partial class FileParser {
       return this.methodProperty(loc, name, start, generator, isAsync);
     }
     if (generator || isAsync) {
+      const current = this.cursor.peek();
       this.cursor.error(
-        this.cursor.peek().start,
+        current.start,
         "expected '(' after the name of the method",
       );
       this.cursor.skipToClosingBrace();
@@ -1217,7 +1243,8 @@ partial class FileParser {
       return { name, loc, value, form: { kind: PropertyKind.Value } };
     }
     if (identifier && this.cursor.is(TokenKind.Assign)) {
-      const assignLoc = this.cursor.next().start;
+      const assign = this.cursor.next();
+      const assignLoc = assign.start;
       const fallback = this.expression();
       const value: Expr = {
         kind: ExprKind.Assign,
@@ -1234,9 +1261,10 @@ partial class FileParser {
       };
       return { name, loc, value, form: { kind: PropertyKind.Defaulted } };
     }
+    const current = this.cursor.peek();
     this.cursor.error(
-      this.cursor.peek().start,
-      `expected ':' after the field name, found ${this.cursor.peek().kind}`,
+      current.start,
+      `expected ':' after the field name, found ${current.kind}`,
     );
     this.cursor.skipToClosingBrace();
 
@@ -1261,8 +1289,9 @@ partial class FileParser {
     );
     if (this.cursor.isRecovering() || fn.body == undefined) {
       if (fn.body == undefined) {
+        const token = this.cursor.peek();
         this.cursor.error(
-          this.cursor.peek().start,
+          token.start,
           "expected '{' to start the body of the method",
         );
       }
