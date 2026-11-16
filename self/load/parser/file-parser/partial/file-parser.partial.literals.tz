@@ -1,6 +1,6 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { TokenKind } from "../../../token/types/token.types.tz";
+import { Token, TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
   ArrayElement,
@@ -20,22 +20,28 @@ partial class FileParser {
     const quasis: string[] = [head];
     const exprs: Expr[] = [];
     let piece = this.cursor.next();
+
     while (
       piece.kind == TokenKind.TemplateHead ||
       piece.kind == TokenKind.TemplateMiddle
     ) {
       const part = this.sequence();
+
       exprs.push(part);
       if (
         !this.cursor.is(TokenKind.TemplateMiddle) &&
         !this.cursor.is(TokenKind.TemplateTail)
       ) {
         const token = this.cursor.peek();
+
         this.cursor.error(token.start, Code.ExpectedSubstitutionClose);
         quasis.push("");
+
         return { kind: ExprKind.Template, loc, quasis, exprs };
       }
+
       const text = this.templateText(raw);
+
       quasis.push(text);
       piece = this.cursor.next();
     }
@@ -45,9 +51,11 @@ partial class FileParser {
 
   private templateText(raw: boolean): string {
     const token = this.cursor.peek();
+
     if (raw) {
       return this.literals.templateRaw(token);
     }
+
     const decoded = this.literals.templatePart(token);
 
     return decoded.text;
@@ -57,9 +65,11 @@ partial class FileParser {
     const bracket = this.cursor.next();
     const loc = bracket.start;
     const elements: ArrayElement[] = [];
+
     while (this.cursor.insideList(TokenKind.RBracket)) {
       if (this.cursor.is(TokenKind.Comma)) {
         const hole = this.cursor.peek();
+
         elements.push({
           expr: { kind: ExprKind.Undefined, loc: hole.start },
           spread: false,
@@ -68,12 +78,14 @@ partial class FileParser {
       } else {
         const spread = this.cursor.accept(TokenKind.Ellipsis);
         const value = this.expression();
+
         elements.push({ expr: value, spread, hole: false });
       }
       if (!this.cursor.accept(TokenKind.Comma)) {
         break;
       }
     }
+
     this.cursor.expect(TokenKind.RBracket, Code.ExpectedArrayClose);
 
     return { kind: ExprKind.ArrayLit, loc, elements };
@@ -83,23 +95,28 @@ partial class FileParser {
     const brace = this.cursor.next();
     const loc = brace.start;
     const props: Property[] = [];
+
     while (this.cursor.insideList(TokenKind.RBrace)) {
       if (this.cursor.is(TokenKind.At)) {
         const decorators = this.decorators();
+
         this.rejectDecorators(decorators);
         if (this.cursor.isRecovering()) {
           return { kind: ExprKind.ObjectLit, loc, props };
         }
       }
+
       const prop = this.property();
       if (prop == undefined) {
         return { kind: ExprKind.ObjectLit, loc, props };
       }
+
       props.push(prop);
       if (!this.cursor.accept(TokenKind.Comma)) {
         break;
       }
     }
+
     this.cursor.expect(TokenKind.RBrace, Code.ExpectedObjectClose);
 
     return { kind: ExprKind.ObjectLit, loc, props };
@@ -108,8 +125,10 @@ partial class FileParser {
   private property(): Property | undefined {
     const head = this.cursor.peek();
     const loc = head.start;
+
     if (this.cursor.accept(TokenKind.Ellipsis)) {
       const value = this.expression();
+
       return {
         name: "",
         loc,
@@ -129,9 +148,11 @@ partial class FileParser {
 
   private computedProperty(loc: int): Property | undefined {
     const key = this.expression();
+
     this.cursor.expect(TokenKind.RBracket, Code.ExpectedKeyClose);
     if (key.kind == ExprKind.Name) {
       const constants = this.stringConstants.get(key.name) ?? [];
+
       for (const text of constants) {
         this.fieldNames.add(text);
       }
@@ -139,17 +160,24 @@ partial class FileParser {
       this.fieldNames.add(key.value);
     }
     if (this.cursor.is(TokenKind.LParen) || this.cursor.is(TokenKind.Less)) {
-      this.cursor.error(loc, Code.MethodKeyInBrackets);
-      this.cursor.skipToClosingBrace();
+      this.skipBraced(loc, Code.MethodKeyInBrackets);
+
       return undefined;
     }
     if (!this.cursor.expect(TokenKind.Colon, Code.ExpectedAfterKey)) {
       this.cursor.skipToClosingBrace();
+
       return undefined;
     }
+
     const value = this.expression();
 
-    return { name: "", loc, value, form: { kind: PropertyKind.Computed, key } };
+    return {
+      name: "",
+      loc,
+      value,
+      form: { kind: PropertyKind.Computed, key },
+    };
   }
 
   private accessorAhead(): boolean {
@@ -178,80 +206,137 @@ partial class FileParser {
 
   private namedProperty(loc: int): Property | undefined {
     if (this.accessorAhead()) {
-      this.cursor.error(loc, Code.AccessorsNotSupported);
-      this.cursor.skipToClosingBrace();
+      this.skipBraced(loc, Code.AccessorsNotSupported);
+
       return undefined;
     }
+
     const isAsync = this.asyncMethodAhead();
     if (isAsync) {
       this.cursor.next();
     }
+
     const head = this.cursor.peek();
     const start = head.start;
     const generator = this.cursor.accept(TokenKind.Star);
-    const token = this.cursor.peek();
-    const identifier = kTokenTable.isName(token.kind);
+    const word = this.cursor.peek();
     const name = this.fieldName();
     if (name == undefined) {
       this.cursor.skipToClosingBrace();
+
       return undefined;
     }
-    if (this.cursor.is(TokenKind.LParen) || this.cursor.is(TokenKind.Less)) {
+
+    const after = this.cursor.peek();
+    if (after.kind == TokenKind.LParen || after.kind == TokenKind.Less) {
       return this.methodProperty(loc, name, start, generator, isAsync);
     }
     if (generator || isAsync) {
-      const current = this.cursor.peek();
-      this.cursor.error(current.start, Code.ExpectedParenAfterMethodName);
-      this.cursor.skipToClosingBrace();
+      this.skipBraced(after.start, Code.ExpectedParenAfterMethodName);
+
       return undefined;
     }
-    if (this.cursor.accept(TokenKind.Colon)) {
-      const value = this.expression();
-      return { name, loc, value, form: { kind: PropertyKind.Value } };
-    }
-    if (
-      identifier &&
-      (this.cursor.is(TokenKind.Comma) || this.cursor.is(TokenKind.RBrace))
-    ) {
-      const value: Expr =
-        token.kind == TokenKind.Undefined
-          ? { kind: ExprKind.Undefined, loc }
-          : {
-              kind: ExprKind.Name,
-              loc,
-              name,
-              known: token.known,
-              typeArgs: [],
-            };
-      return { name, loc, value, form: { kind: PropertyKind.Value } };
-    }
-    if (identifier && this.cursor.is(TokenKind.Assign)) {
-      const assign = this.cursor.next();
-      const assignLoc = assign.start;
-      const fallback = this.expression();
-      const value: Expr = {
-        kind: ExprKind.Assign,
-        loc: assignLoc,
-        target: {
-          kind: ExprKind.Name,
-          loc,
-          name,
-          known: token.known,
-          typeArgs: [],
-        },
-        value: fallback,
-      };
-      return { name, loc, value, form: { kind: PropertyKind.Defaulted } };
-    }
-    const current = this.cursor.peek();
-    this.cursor.error(
-      current.start,
-      Code.ExpectedColonAfterFieldName,
-      { found: current.kind },
-    );
-    this.cursor.skipToClosingBrace();
 
-    return undefined;
+    const property = this.plainProperty(loc, name, word);
+    if (property == undefined) {
+      this.skipBraced(after.start, Code.ExpectedColonAfterFieldName, {
+        found: after.kind,
+      });
+    }
+
+    return property;
+  }
+
+  private plainProperty(
+    loc: int,
+    name: string,
+    word: Token,
+  ): Property | undefined {
+    const identifier = kTokenTable.isName(word.kind);
+    const after = this.cursor.peek();
+
+    switch (after.kind) {
+      case TokenKind.Colon:
+        return this.valueProperty(loc, name);
+      case TokenKind.Comma:
+      case TokenKind.RBrace:
+        if (identifier) {
+          return this.shorthandProperty(loc, name, word);
+        }
+        return undefined;
+      case TokenKind.Assign:
+        if (identifier) {
+          return this.defaultedProperty(loc, name, word);
+        }
+        return undefined;
+      default:
+        return undefined;
+    }
+  }
+
+  private valueProperty(loc: int, name: string): Property {
+    this.cursor.next();
+    const value = this.expression();
+
+    return {
+      name,
+      loc,
+      value,
+      form: { kind: PropertyKind.Value },
+    };
+  }
+
+  private shorthandProperty(loc: int, name: string, word: Token): Property {
+    if (word.kind == TokenKind.Undefined) {
+      const value: Expr = { kind: ExprKind.Undefined, loc };
+
+      return {
+        name,
+        loc,
+        value,
+        form: { kind: PropertyKind.Value },
+      };
+    }
+
+    const value: Expr = {
+      kind: ExprKind.Name,
+      loc,
+      name,
+      known: word.known,
+      typeArgs: [],
+    };
+
+    return {
+      name,
+      loc,
+      value,
+      form: { kind: PropertyKind.Value },
+    };
+  }
+
+  private defaultedProperty(loc: int, name: string, word: Token): Property {
+    const assign = this.cursor.next();
+    const fallback = this.expression();
+    const target: Expr = {
+      kind: ExprKind.Name,
+      loc,
+      name,
+      known: word.known,
+      typeArgs: [],
+    };
+    const value: Expr = {
+      kind: ExprKind.Assign,
+      loc: assign.start,
+      target,
+      value: fallback,
+    };
+
+    return {
+      name,
+      loc,
+      value,
+      form: { kind: PropertyKind.Defaulted },
+    };
   }
 
   private methodProperty(
@@ -261,7 +346,7 @@ partial class FileParser {
     generator: boolean,
     isAsync: boolean,
   ): Property | undefined {
-    const fn = this.method(
+    const method = this.method(
       loc,
       name,
       start,
@@ -270,17 +355,27 @@ partial class FileParser {
       FunctionPlace.Expression,
       undefined,
     );
-    if (this.cursor.isRecovering() || fn.body == undefined) {
-      if (fn.body == undefined) {
-        const token = this.cursor.peek();
-        this.cursor.error(token.start, Code.ExpectedMethodBody);
-      }
-      this.cursor.skipToClosingBrace();
+    if (method.body == undefined) {
+      const token = this.cursor.peek();
+
+      this.skipBraced(token.start, Code.ExpectedMethodBody);
+
       return undefined;
     }
-    const value: Expr = { kind: ExprKind.Function, loc, fn };
+    if (this.cursor.isRecovering()) {
+      this.cursor.skipToClosingBrace();
 
-    return { name, loc, value, form: { kind: PropertyKind.Method } };
+      return undefined;
+    }
+
+    const value: Expr = { kind: ExprKind.Function, loc, fn: method };
+
+    return {
+      name,
+      loc,
+      value,
+      form: { kind: PropertyKind.Method },
+    };
   }
 
   private intLiteral(): Expr {
@@ -288,9 +383,12 @@ partial class FileParser {
     const number = this.literals.integer(token);
     if (!number.valid) {
       this.cursor.report(token.start, Code.InvalidIntegerLiteral);
+
       return this.invalid(token.start);
     }
+
     const text = { start: token.start, end: token.end };
+
     if (number.isInt) {
       return {
         kind: ExprKind.IntLit,
@@ -314,6 +412,7 @@ partial class FileParser {
     if (!number.valid) {
       this.cursor.report(token.start, Code.InvalidNumberLiteral);
     }
+
     const text = { start: token.start, end: token.end };
 
     return {

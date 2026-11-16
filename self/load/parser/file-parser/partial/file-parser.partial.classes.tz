@@ -32,6 +32,7 @@ import {
 } from "../../../../program/ast/types/ast.types.classes.tz";
 import { MemberName, Modifiers } from "../types/file-parser.types.classes.tz";
 import { Arguments } from "../types/file-parser.types.calls.tz";
+import { kThisName } from "../const/file-parser.const.classes.tz";
 
 partial class FileParser {
   private classDecl(expression: boolean): ClassDecl {
@@ -41,9 +42,11 @@ partial class FileParser {
     if (named) {
       this.cursor.next();
     }
+
     const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
     let base: TypeRef | undefined = undefined;
     let baseExpr: Expr | undefined = undefined;
+
     if (this.cursor.is(TokenKind.Extends)) {
       this.cursor.next();
       const next = this.cursor.lookahead();
@@ -56,6 +59,7 @@ partial class FileParser {
         baseExpr = this.callOrMember();
       } else {
         const baseToken = this.cursor.peek();
+
         base = this.primaryType();
         if (expression && base.form.kind == TypeKind.Name) {
           baseExpr = {
@@ -68,17 +72,23 @@ partial class FileParser {
         }
       }
     }
+
     const interfaces: TypeRef[] = [];
+
     if (this.cursor.is(TokenKind.Implements)) {
       this.cursor.next();
       const first = this.primaryType();
+
       interfaces.push(first);
+
       while (this.cursor.accept(TokenKind.Comma)) {
         const implemented = this.primaryType();
+
         interfaces.push(implemented);
       }
     }
-    const cls: ClassDecl = {
+
+    const declaration: ClassDecl = {
       kind: StmtKind.Class,
       loc: named ? token.start : keyword.start,
       name: named ? token.text : undefined,
@@ -94,23 +104,26 @@ partial class FileParser {
       decorators: [],
       typeParams,
     };
+
     if (!this.cursor.expect(TokenKind.LBrace, Code.ExpectedClassMembersStart)) {
-      return cls;
+      return declaration;
     }
+
     while (
       !this.cursor.is(TokenKind.RBrace) &&
       !this.cursor.is(TokenKind.End)
     ) {
-      this.classMember(cls);
+      this.classMember(declaration);
       if (this.cursor.isRecovering()) {
         this.skipClassMember();
         this.cursor.stopRecovering();
       }
     }
-    this.cursor.expect(TokenKind.RBrace, Code.ExpectedClassClose);
-    cls.source = this.cursor.spanFrom(keyword.start);
 
-    return cls;
+    this.cursor.expect(TokenKind.RBrace, Code.ExpectedClassClose);
+    declaration.source = this.cursor.spanFrom(keyword.start);
+
+    return declaration;
   }
 
   private memberModifierAhead(): boolean {
@@ -118,6 +131,7 @@ partial class FileParser {
     if (!this.isMemberModifier(token.kind)) {
       return false;
     }
+
     const next = this.cursor.lookahead();
     if (next.newline && next.kind != TokenKind.LBrace) {
       return false;
@@ -139,6 +153,7 @@ partial class FileParser {
       } else {
         this.cursor.next();
       }
+
       const token = this.cursor.peek();
       if (token.newline) {
         return;
@@ -148,6 +163,7 @@ partial class FileParser {
 
   private decorators(): Decorator[] {
     const decorators: Decorator[] = [];
+
     while (this.cursor.is(TokenKind.At)) {
       const at = this.cursor.next();
       const loc = at.start;
@@ -166,18 +182,23 @@ partial class FileParser {
   private decoratorExpr(): Expr | undefined {
     if (this.cursor.accept(TokenKind.LParen)) {
       const inner = this.sequence();
+
       this.cursor.expect(TokenKind.RParen, Code.ExpectedDecoratorClose);
+
       return inner;
     }
     if (!this.cursor.atName()) {
       const token = this.cursor.peek();
+
       this.cursor.error(
         token.start,
         Code.ExpectedDecoratorName,
         { found: token.kind },
       );
+
       return undefined;
     }
+
     const head = this.cursor.next();
     let expr: Expr = {
       kind: ExprKind.Name,
@@ -186,15 +207,19 @@ partial class FileParser {
       known: head.known,
       typeArgs: [],
     };
+
     while (this.cursor.accept(TokenKind.Dot)) {
       const token = this.cursor.peek();
       const property =
         token.kind == TokenKind.Identifier || kTokenTable.isKeyword(token.kind);
       if (!property) {
         this.cursor.error(token.start, Code.ExpectedPropertyAfterDot);
+
         return expr;
       }
+
       const name = this.cursor.next();
+
       expr = {
         kind: ExprKind.Member,
         loc: name.start,
@@ -205,9 +230,11 @@ partial class FileParser {
         typeArgs: [],
       };
     }
+
     if (!this.cursor.accept(TokenKind.LParen)) {
       return expr;
     }
+
     const list: Arguments = this.arguments();
 
     return {
@@ -229,7 +256,7 @@ partial class FileParser {
   }
 
   private modifiers(): Modifiers {
-    const m: Modifiers = {
+    const modifiers: Modifiers = {
       isStatic: false,
       readonly: false,
       isAbstract: false,
@@ -239,50 +266,53 @@ partial class FileParser {
       access: Access.Public,
       staticBlock: false,
     };
+
     while (this.memberModifierAhead()) {
       const word = this.cursor.next();
+
       switch (word.kind) {
         case TokenKind.Static:
-          m.isStatic = true;
+          modifiers.isStatic = true;
           if (this.cursor.is(TokenKind.LBrace)) {
             this.cursor.report(word.start, Code.StaticBlocks);
             this.cursor.next();
             this.cursor.skipToClosingBrace();
-            m.staticBlock = true;
-            return m;
+            modifiers.staticBlock = true;
+
+            return modifiers;
           }
           break;
         case TokenKind.Public:
-          m.access = Access.Public;
+          modifiers.access = Access.Public;
           break;
         case TokenKind.Private:
-          m.access = Access.Private;
+          modifiers.access = Access.Private;
           break;
         case TokenKind.Protected:
-          m.access = Access.Protected;
+          modifiers.access = Access.Protected;
           break;
         case TokenKind.Readonly:
-          m.readonly = true;
+          modifiers.readonly = true;
           break;
         case TokenKind.Override:
-          m.isOverride = true;
+          modifiers.isOverride = true;
           break;
         case TokenKind.Abstract:
-          m.isAbstract = true;
+          modifiers.isAbstract = true;
           break;
         case TokenKind.Declare:
           this.cursor.report(word.start, Code.DeclareMemberNotSupported);
           break;
         case TokenKind.Accessor:
-          m.accessor = true;
+          modifiers.accessor = true;
           break;
         default:
-          m.isAsync = true;
+          modifiers.isAsync = true;
           break;
       }
     }
 
-    return m;
+    return modifiers;
   }
 
   private memberAccessorAhead(): boolean {
@@ -297,44 +327,52 @@ partial class FileParser {
     );
   }
 
-  private classMember(cls: ClassDecl): void {
+  private classMember(declaration: ClassDecl): void {
     if (this.cursor.accept(TokenKind.Semi)) {
       return;
     }
+
     const decorators = this.decorators();
+
     if (this.cursor.isRecovering()) {
       return;
     }
+
     const head = this.cursor.peek();
     const loc = head.start;
-    const m = this.modifiers();
-    if (m.staticBlock) {
+    const modifiers = this.modifiers();
+    if (modifiers.staticBlock) {
       return;
     }
     if (this.memberAccessorAhead()) {
       this.cursor.next();
       this.cursor.report(loc, Code.AccessorsNotSupported);
+
       return this.skipClassMember();
     }
     if (this.cursor.is(TokenKind.LBracket) && !this.cursor.symbolKeyAhead()) {
       this.cursor.report(loc, Code.MemberNameInBrackets);
+
       return this.skipClassMember();
     }
-    const member = this.memberName(m);
+
+    const member = this.memberName(modifiers);
     if (member == undefined) {
       return;
     }
     if (this.cursor.is(TokenKind.LParen) || this.cursor.is(TokenKind.Less)) {
-      return this.classMethod(cls, m, decorators, loc, member);
+      return this.classMethod(declaration, modifiers, decorators, loc, member);
     }
-    if (member.generator || m.isAsync) {
+    if (member.generator || modifiers.isAsync) {
       const token = this.cursor.peek();
+
       return this.cursor.error(token.start, Code.ExpectedParenAfterMethodName);
     }
-    this.classField(cls, m, decorators, loc, member);
+
+    this.classField(declaration, modifiers, decorators, loc, member);
   }
 
-  private memberName(m: Modifiers): MemberName | undefined {
+  private memberName(modifiers: Modifiers): MemberName | undefined {
     const head = this.cursor.peek();
     const start = head.start;
     const generator = this.cursor.accept(TokenKind.Star);
@@ -345,7 +383,7 @@ partial class FileParser {
     }
     if (token.hash) {
       this.cursor.report(token.start, Code.NoPrivateName, { word: name });
-      m.access = Access.Private;
+      modifiers.access = Access.Private;
     }
 
     return {
@@ -358,77 +396,89 @@ partial class FileParser {
   }
 
   private classMethod(
-    cls: ClassDecl,
-    m: Modifiers,
+    declaration: ClassDecl,
+    modifiers: Modifiers,
     decorators: Decorator[],
     loc: int,
     member: MemberName,
   ): void {
-    const constructor = member.constructorName && !m.isStatic;
-    const abstractMethod = m.isAbstract && !constructor;
-    if (m.accessor) {
+    const constructor = member.constructorName && !modifiers.isStatic;
+    const abstractMethod = modifiers.isAbstract && !constructor;
+
+    if (modifiers.accessor) {
       this.cursor.report(loc, Code.AccessorBeforeMethod);
     }
+
     const first = decorators[0];
     if (first != undefined && constructor) {
       this.cursor.report(first.loc, Code.DecoratedConstructor);
     }
+
     const role: ClassMember = {
-      access: m.access,
-      isOverride: m.isOverride && !constructor,
+      access: modifiers.access,
+      isOverride: modifiers.isOverride && !constructor,
       decorators: constructor ? [] : decorators,
       method: constructor
         ? MethodKind.Constructor
-        : m.isStatic
+        : modifiers.isStatic
           ? MethodKind.Static
           : abstractMethod
             ? MethodKind.Abstract
             : MethodKind.Instance,
     };
-    this.reportMethodModifiers(m, member.generator, constructor, loc);
-    const fn = this.method(
+
+    this.reportMethodModifiers(modifiers, member.generator, constructor, loc);
+    const method = this.method(
       member.loc,
       member.name,
       member.start,
       member.generator && !constructor,
-      m.isAsync && !constructor,
+      modifiers.isAsync && !constructor,
       FunctionPlace.Declared,
       role,
     );
+
     if (this.cursor.isRecovering()) {
       return;
     }
     if (abstractMethod) {
-      if (fn.body != undefined) {
+      if (method.body != undefined) {
         this.cursor.report(
           member.loc,
           Code.AbstractMethodBody,
           { word: member.name },
         );
       }
-      fn.body = { kind: StmtKind.Block, loc: member.loc, body: [] };
-      cls.methods.push(fn);
+
+      method.body = { kind: StmtKind.Block, loc: member.loc, body: [] };
+      declaration.methods.push(method);
+
       return;
     }
-    const body = fn.body;
+
+    const body = method.body;
     if (body == undefined) {
       return this.cursor.report(member.loc, Code.MethodWithoutBody);
     }
-    if (!this.isConstructor(fn)) {
-      cls.methods.push(fn);
+    if (!this.isConstructor(method)) {
+      declaration.methods.push(method);
+
       return;
     }
-    const returnType = fn.returnType;
+
+    const returnType = method.returnType;
     if (returnType != undefined) {
       const loc = returnType.loc ?? member.loc;
+
       this.cursor.report(loc, Code.ConstructorReturnType);
     }
-    this.addParameterFields(cls, fn, body);
-    cls.constructors.push(fn);
+
+    this.addParameterFields(declaration, method, body);
+    declaration.constructors.push(method);
   }
 
   private reportMethodModifiers(
-    m: Modifiers,
+    modifiers: Modifiers,
     generator: boolean,
     constructor: boolean,
     loc: int,
@@ -436,22 +486,22 @@ partial class FileParser {
     if (generator && constructor) {
       this.cursor.report(loc, Code.GeneratorConstructor);
     }
-    if (m.isAsync && constructor) {
+    if (modifiers.isAsync && constructor) {
       this.cursor.report(loc, Code.AsyncConstructor);
     }
-    if (m.readonly) {
+    if (modifiers.readonly) {
       this.cursor.report(loc, Code.ReadonlyMethod);
     }
-    if ((m.isOverride || m.isAbstract) && constructor) {
+    if ((modifiers.isOverride || modifiers.isAbstract) && constructor) {
       this.cursor.report(loc, Code.OverrideConstructor);
     }
-    if (m.isAbstract && m.isStatic) {
+    if (modifiers.isAbstract && modifiers.isStatic) {
       this.cursor.report(loc, Code.AbstractStaticMethod);
     }
   }
 
-  private hasParameterField(cls: ClassDecl, name: string): boolean {
-    for (const field of cls.fields) {
+  private hasParameterField(declaration: ClassDecl, name: string): boolean {
+    for (const field of declaration.fields) {
       if (field.form == FieldKind.Parameter && field.name == name) {
         return true;
       }
@@ -466,10 +516,12 @@ partial class FileParser {
       if (stmt == undefined || stmt.kind != StmtKind.Expr) {
         continue;
       }
+
       const call = stmt.expr;
       if (call.kind != ExprKind.Call) {
         continue;
       }
+
       const callee = call.callee;
       if (callee.kind == ExprKind.Name && callee.known == KnownName.Super) {
         return i + 1;
@@ -480,24 +532,27 @@ partial class FileParser {
   }
 
   private addParameterFields(
-    cls: ClassDecl,
-    fn: FunctionDecl,
+    declaration: ClassDecl,
+    constructorDecl: FunctionDecl,
     body: BlockStmt,
   ): void {
     const sets: Stmt[] = [];
     let properties = 0;
-    for (const field of cls.fields) {
+
+    for (const field of declaration.fields) {
       if (field.form == FieldKind.Parameter) {
         properties += 1;
       }
     }
-    for (const param of fn.params) {
+
+    for (const param of constructorDecl.params) {
       const property = param.property;
       if (property == undefined) {
         continue;
       }
+
       this.fieldNames.add(param.name);
-      if (!this.hasParameterField(cls, param.name)) {
+      if (!this.hasParameterField(declaration, param.name)) {
         const field: ClassField = {
           name: param.name,
           loc: param.loc,
@@ -510,13 +565,15 @@ partial class FileParser {
           decorators: [],
           accessor: false,
         };
-        cls.fields.splice(properties, 0, field);
+
+        declaration.fields.splice(properties, 0, field);
         properties += 1;
       }
+
       const self: Expr = {
         kind: ExprKind.Name,
         loc: param.loc,
-        name: "this",
+        name: kThisName,
         known: KnownName.None,
         typeArgs: [],
       };
@@ -542,32 +599,38 @@ partial class FileParser {
         target,
         value,
       };
+
       sets.push({ kind: StmtKind.Expr, loc: param.loc, expr: set });
     }
-    const at = cls.base != undefined ? this.superCallEnd(body) : 0;
+
+    const at = declaration.base != undefined ? this.superCallEnd(body) : 0;
     const before = body.body.slice(0, at);
     const after = body.body.slice(at);
+
     body.body = before.concat(sets).concat(after);
   }
 
   private classField(
-    cls: ClassDecl,
-    m: Modifiers,
+    declaration: ClassDecl,
+    modifiers: Modifiers,
     decorators: Decorator[],
     loc: int,
     member: MemberName,
   ): void {
-    if (m.isAbstract) {
+    if (modifiers.isAbstract) {
       this.cursor.report(loc, Code.AbstractFields);
     }
+
     let presence = FieldPresence.Required;
     const suffix = this.cursor.peek();
+
     if (this.cursor.accept(TokenKind.Question)) {
       presence = FieldPresence.Optional;
     } else if (suffix.kind == TokenKind.Bang && !suffix.newline) {
       this.cursor.next();
       presence = FieldPresence.Definite;
     }
+
     const type = this.cursor.accept(TokenKind.Colon) ? this.type() : undefined;
     const init = this.cursor.accept(TokenKind.Assign)
       ? this.expression()
@@ -585,18 +648,19 @@ partial class FileParser {
         { found: after.kind },
       );
     }
-    cls.fields.push({
+
+    declaration.fields.push({
       name: member.name,
       loc: member.loc,
       type,
       init,
-      form: m.isStatic ? FieldKind.Static : FieldKind.Instance,
+      form: modifiers.isStatic ? FieldKind.Static : FieldKind.Instance,
       presence,
-      readonly: m.readonly,
-      isOverride: m.isOverride,
-      access: m.access,
+      readonly: modifiers.readonly,
+      isOverride: modifiers.isOverride,
+      access: modifiers.access,
       decorators,
-      accessor: m.accessor,
+      accessor: modifiers.accessor,
     });
   }
 
@@ -604,8 +668,10 @@ partial class FileParser {
     this.cursor.next();
     const name = this.cursor.next();
     const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
+
     this.cursor.expect(TokenKind.Assign, Code.ExpectedAfterTypeName);
     const type = this.type();
+
     this.cursor.expectSemicolon();
 
     return {
@@ -622,10 +688,13 @@ partial class FileParser {
   private handleClass(): Stmt {
     this.cursor.next();
     const name = this.cursor.peek();
+
     if (!this.cursor.expectName(Code.ExpectedAfterDeclareClass)) {
       this.cursor.synchronize();
+
       return this.marker(StmtKind.Empty, name.start);
     }
+
     const alias: Stmt = {
       kind: StmtKind.TypeAlias,
       loc: name.start,
@@ -640,10 +709,13 @@ partial class FileParser {
       this.cursor.is(TokenKind.LBrace) && next.kind == TokenKind.RBrace;
     if (!hasBody) {
       const token = this.cursor.peek();
+
       this.cursor.report(token.start, Code.HandleClass, { word: name.text });
       this.skipHandleBody();
+
       return alias;
     }
+
     this.cursor.skip(2);
 
     return alias;
@@ -661,25 +733,33 @@ partial class FileParser {
     const name = this.cursor.next();
     const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
     const bases: TypeRef[] = [];
+
     if (this.cursor.is(TokenKind.Extends)) {
       this.cursor.next();
       const first = this.type();
+
       bases.push(first);
+
       while (this.cursor.accept(TokenKind.Comma)) {
         const base = this.type();
+
         bases.push(base);
       }
     }
     if (!this.cursor.is(TokenKind.LBrace)) {
       const token = this.cursor.peek();
+
       this.cursor.error(
         token.start,
         Code.ExpectedInterfaceFields,
         { found: token.kind },
       );
+
       return this.marker(StmtKind.Empty, name.start);
     }
+
     const type = this.objectType();
+
     this.cursor.accept(TokenKind.Semi);
 
     return {
@@ -698,11 +778,14 @@ partial class FileParser {
     const name = this.cursor.peek();
     if (!kTokenTable.isName(name.kind)) {
       this.cursor.error(name.start, Code.ExpectedEnumName);
+
       return this.marker(StmtKind.Empty, name.start);
     }
+
     this.cursor.next();
     this.cursor.expect(TokenKind.LBrace, Code.ExpectedEnumMembersStart);
     const members: EnumMember[] = [];
+
     while (this.cursor.insideList(TokenKind.RBrace)) {
       const member = this.cursor.peek();
       if (!kTokenTable.isName(member.kind)) {
@@ -711,19 +794,24 @@ partial class FileParser {
           Code.ExpectedEnumMember,
           { found: member.kind },
         );
+
         break;
       }
+
       this.cursor.next();
       let init: Expr | undefined = undefined;
+
       if (this.cursor.accept(TokenKind.Assign)) {
         init = this.expression();
         this.recordConstant(`${name.text}.${member.text}`, init);
       }
+
       members.push({ name: member.text, loc: member.start, init });
       if (!this.cursor.accept(TokenKind.Comma)) {
         break;
       }
     }
+
     this.cursor.expect(TokenKind.RBrace, Code.ExpectedEnumClose);
 
     return { kind: StmtKind.Enum, loc: name.start, name: name.text, members };
@@ -764,8 +852,8 @@ partial class FileParser {
     }
   }
 
-  private isConstructor(fn: FunctionDecl): boolean {
-    const role = fn.role;
+  private isConstructor(declaration: FunctionDecl): boolean {
+    const role = declaration.role;
 
     return role != undefined && role.method == MethodKind.Constructor;
   }

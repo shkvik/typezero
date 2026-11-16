@@ -25,26 +25,27 @@ import {
   Pattern,
   PatternElement,
 } from "../types/file-parser.types.patterns.tz";
+import { kSliceMethodName } from "../const/file-parser.const.patterns.tz";
 
 partial class FileParser {
   private bindingPattern(): Pattern {
     if (this.cursor.is(TokenKind.LBrace)) {
       return this.objectPattern();
     }
+
     const bracket = this.cursor.next();
     const pattern: Pattern = {
       loc: bracket.start,
       object: false,
       elements: [],
     };
+
     while (this.cursor.insideList(TokenKind.RBracket)) {
-      const current = this.cursor.peek();
-      const element = this.emptyElement(current.start);
-      if (this.cursor.is(TokenKind.Comma)) {
-        element.hole = true;
-      } else if (!this.arrayPatternElement(element)) {
+      const element = this.arrayPatternElement();
+      if (element == undefined) {
         return pattern;
       }
+
       pattern.elements.push(element);
       if (!this.cursor.accept(TokenKind.Comma)) {
         break;
@@ -53,26 +54,38 @@ partial class FileParser {
         this.cursor.report(element.loc, Code.RestElementNotLast);
       }
     }
+
     this.cursor.expect(TokenKind.RBracket, Code.ExpectedPatternClose);
 
     return pattern;
   }
 
-  private arrayPatternElement(element: PatternElement): boolean {
+  private arrayPatternElement(): PatternElement | undefined {
+    const first = this.cursor.peek();
+    const element = this.emptyElement(first.start);
+
+    if (this.cursor.is(TokenKind.Comma)) {
+      element.hole = true;
+
+      return element;
+    }
+
     element.rest = this.cursor.accept(TokenKind.Ellipsis);
     if (!this.bindingTarget(element)) {
-      return false;
+      return undefined;
     }
+
     const assign = this.cursor.peek();
     if (!this.cursor.accept(TokenKind.Assign)) {
-      return true;
+      return element;
     }
     if (element.rest) {
       this.cursor.report(assign.start, Code.RestElementDefault);
     }
+
     element.defaultValue = this.expression();
 
-    return true;
+    return element;
   }
 
   private bindingTarget(element: PatternElement): boolean {
@@ -81,14 +94,19 @@ partial class FileParser {
       this.cursor.is(TokenKind.LBrace)
     ) {
       element.nested = this.bindingPattern();
+
       return true;
     }
     if (!this.cursor.atName()) {
       const token = this.cursor.peek();
+
       this.cursor.error(token.start, Code.ExpectedPatternVariable);
+
       return false;
     }
+
     const word = this.cursor.next();
+
     element.name = word.text;
 
     return true;
@@ -101,21 +119,13 @@ partial class FileParser {
       object: true,
       elements: [],
     };
+
     while (this.cursor.insideList(TokenKind.RBrace)) {
-      const current = this.cursor.peek();
-      const element = this.emptyElement(current.start);
-      if (this.cursor.accept(TokenKind.Ellipsis)) {
-        element.rest = true;
-        if (!this.cursor.atName()) {
-          const token = this.cursor.peek();
-          this.cursor.error(token.start, Code.ExpectedVariableAfterRest);
-          return pattern;
-        }
-        const word = this.cursor.next();
-        element.name = word.text;
-      } else if (!this.objectPatternEntry(element)) {
+      const element = this.objectPatternElement();
+      if (element == undefined) {
         return pattern;
       }
+
       pattern.elements.push(element);
       if (!this.cursor.accept(TokenKind.Comma)) {
         break;
@@ -124,13 +134,44 @@ partial class FileParser {
         this.cursor.report(element.loc, Code.RestElementNotLast);
       }
     }
+
     this.cursor.expect(TokenKind.RBrace, Code.ExpectedPatternClose);
 
     return pattern;
   }
 
-  private objectPatternEntry(element: PatternElement): boolean {
+  private objectPatternElement(): PatternElement | undefined {
+    if (this.cursor.is(TokenKind.Ellipsis)) {
+      return this.objectPatternRest();
+    }
+
+    return this.objectPatternEntry();
+  }
+
+  private objectPatternRest(): PatternElement | undefined {
+    const ellipsis = this.cursor.next();
+    const element = this.emptyElement(ellipsis.start);
+    element.rest = true;
+
+    if (!this.cursor.atName()) {
+      const token = this.cursor.peek();
+
+      this.cursor.error(token.start, Code.ExpectedVariableAfterRest);
+
+      return undefined;
+    }
+
+    const word = this.cursor.next();
+    element.name = word.text;
+
+    return element;
+  }
+
+  private objectPatternEntry(): PatternElement | undefined {
+    const first = this.cursor.peek();
+    const element = this.emptyElement(first.start);
     const identifier = this.cursor.atName();
+
     if (this.cursor.accept(TokenKind.LBracket)) {
       element.keyExpr = this.expression();
       this.cursor.expect(TokenKind.RBracket, Code.ExpectedKeyClose);
@@ -138,38 +179,45 @@ partial class FileParser {
       const key = this.fieldName();
       if (key == undefined) {
         this.cursor.skipToClosingBrace();
-        return false;
+
+        return undefined;
       }
+
       element.key = key;
     }
     if (this.cursor.accept(TokenKind.Colon)) {
       if (!this.bindingTarget(element)) {
-        return false;
+        return undefined;
       }
     } else if (identifier && element.keyExpr == undefined) {
       element.name = element.key;
     } else {
       const token = this.cursor.peek();
+
       this.cursor.error(token.start, Code.PatternKeyNeedsVariable);
-      return false;
+
+      return undefined;
     }
     if (this.cursor.accept(TokenKind.Assign)) {
       element.defaultValue = this.expression();
     }
 
-    return true;
+    return element;
   }
 
   private patternFromLiteral(expr: ArrayLitExpr | ObjectLitExpr): Pattern {
     if (expr.kind == ExprKind.ObjectLit) {
       const pattern: Pattern = { loc: expr.loc, object: true, elements: [] };
+
       for (let i = 0; i < expr.props.length; i++) {
         const property = expr.props[i];
         if (property == undefined) {
           continue;
         }
+
         const element = this.emptyElement(property.loc);
         const form = property.form;
+
         element.rest = form.kind == PropertyKind.Spread;
         element.key = property.name;
         if (form.kind == PropertyKind.Computed) {
@@ -178,23 +226,30 @@ partial class FileParser {
         if (element.rest && i + 1 != expr.props.length) {
           this.cursor.report(element.loc, Code.RestElementNotLast);
         }
+
         this.fillElement(element, property.value, false);
         pattern.elements.push(element);
       }
+
       return pattern;
     }
+
     const pattern: Pattern = { loc: expr.loc, object: false, elements: [] };
+
     for (let i = 0; i < expr.elements.length; i++) {
       const item = expr.elements[i];
       if (item == undefined) {
         continue;
       }
+
       const element = this.emptyElement(item.expr.loc);
+
       element.hole = item.hole;
       element.rest = item.spread;
       if (element.rest && i + 1 != expr.elements.length) {
         this.cursor.report(element.loc, Code.RestElementNotLast);
       }
+
       this.fillElement(element, item.expr, element.hole);
       pattern.elements.push(element);
     }
@@ -208,6 +263,7 @@ partial class FileParser {
     hole: boolean,
   ): void {
     let target = value;
+
     if (
       value.kind == ExprKind.Assign &&
       value.op == undefined &&
@@ -242,6 +298,7 @@ partial class FileParser {
   ): void {
     const form = this.formOf(pattern);
     const hidden = this.hiddenDeclarator(pattern.loc, value, typeAnn, form);
+
     decls.push(hidden);
     this.declareElements(decls, pattern, hidden.name);
   }
@@ -252,17 +309,21 @@ partial class FileParser {
     base: string,
   ): void {
     const keyReads: IndexExpr[] = [];
+
     for (let i = 0; i < pattern.elements.length; i++) {
       const element = pattern.elements[i];
       if (element == undefined || element.hole) {
         continue;
       }
+
       const value = this.elementOf(base, pattern, i, keyReads);
       const nested = element.nested;
       if (nested != undefined) {
         this.declarePattern(decls, nested, value, undefined);
+
         continue;
       }
+
       decls.push({
         name: element.name,
         origin: NameOrigin.Written,
@@ -280,6 +341,7 @@ partial class FileParser {
     ];
     const direct = this.isDirect(pattern, value);
     const values: string[] = [];
+
     if (direct && value.kind == ExprKind.ArrayLit) {
       for (const item of value.elements) {
         const hidden = this.hiddenDeclarator(
@@ -288,30 +350,38 @@ partial class FileParser {
           undefined,
           { kind: BindingKind.Plain },
         );
+
         decls.push(hidden);
         values.push(hidden.name);
       }
     } else {
       const form = this.formOf(pattern);
       const hidden = this.hiddenDeclarator(pattern.loc, value, undefined, form);
+
       decls.push(hidden);
     }
+
     const base = decls[0]?.name ?? "";
     const keyReads: IndexExpr[] = [];
+
     for (let i = 0; i < pattern.elements.length; i++) {
       const element = pattern.elements[i];
       if (element == undefined || element.hole) {
         continue;
       }
+
       const part = direct
         ? this.directElement(element, values[i] ?? "")
         : this.elementOf(base, pattern, i, keyReads);
       const nested = element.nested;
       if (nested != undefined) {
         const assignment = this.assignPattern(element.loc, nested, part);
+
         body.push(assignment);
+
         continue;
       }
+
       const target = element.target ?? part;
       const assign: Expr = {
         kind: ExprKind.Assign,
@@ -319,6 +389,7 @@ partial class FileParser {
         target,
         value: part,
       };
+
       body.push({ kind: StmtKind.Expr, loc: element.loc, expr: assign });
     }
 
@@ -363,6 +434,7 @@ partial class FileParser {
         typeArgs: [],
       };
     }
+
     const source: Expr = {
       kind: ExprKind.Name,
       loc: element.loc,
@@ -371,22 +443,25 @@ partial class FileParser {
       typeArgs: [],
     };
     let read: Expr;
+
     if (!pattern.object) {
       const position: Expr = {
         kind: ExprKind.IntLit,
         loc: element.loc,
         value: i.toUint64(),
       };
+
       if (element.rest) {
         const slice: Expr = {
           kind: ExprKind.Member,
           loc: element.loc,
           object: source,
-          name: "slice",
+          name: kSliceMethodName,
           known: KnownName.None,
           optional: false,
           typeArgs: [],
         };
+
         return {
           kind: ExprKind.Call,
           loc: element.loc,
@@ -397,6 +472,7 @@ partial class FileParser {
           tagged: false,
         };
       }
+
       read = {
         kind: ExprKind.Index,
         loc: element.loc,
@@ -414,6 +490,7 @@ partial class FileParser {
         index: element.keyExpr,
         optional: false,
       };
+
       keyReads.push(keyed);
       read = keyed;
     } else {
@@ -427,6 +504,7 @@ partial class FileParser {
         typeArgs: [],
       };
     }
+
     const fallback = element.defaultValue;
     if (fallback == undefined) {
       return read;
@@ -448,6 +526,7 @@ partial class FileParser {
     keyReads: IndexExpr[],
   ): Expr {
     const omit: string[] = [];
+
     for (const other of pattern.elements) {
       if (!other.rest && other.keyExpr == undefined) {
         omit.push(other.key);
@@ -476,6 +555,7 @@ partial class FileParser {
     if (pattern.object) {
       return { kind: BindingKind.Object };
     }
+
     const last = pattern.elements[pattern.elements.length - 1];
     const rest = last != undefined && last.rest;
 
@@ -489,11 +569,13 @@ partial class FileParser {
     if (value.elements.length < pattern.elements.length) {
       return false;
     }
+
     for (const item of value.elements) {
       if (item.spread || item.hole) {
         return false;
       }
     }
+
     for (const item of pattern.elements) {
       if (item.rest) {
         return false;

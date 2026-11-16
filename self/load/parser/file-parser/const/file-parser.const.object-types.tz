@@ -3,3 +3,5 @@ export const kSymbolAsyncIteratorName = "[Symbol.asyncIterator]";
 export const kSymbolDisposeName = "[Symbol.dispose]";
 
 export const kSymbolIteratorName = "[Symbol.iterator]";
+
+export const kRecordTypeName = "Record";

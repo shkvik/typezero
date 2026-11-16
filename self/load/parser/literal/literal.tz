@@ -76,13 +76,16 @@ export class LiteralReader {
   public regex(token: Token): RegexText {
     const from = token.start + 1;
     let slash = token.end;
+
     for (let i = token.end - 1; i >= from; i--) {
-      const c = this.byteAt(i);
-      if (c == kSlash) {
+      const code = this.byteAt(i);
+      if (code == kSlash) {
         slash = i;
+
         break;
       }
     }
+
     const pattern = this.source.toString("utf8", from, slash);
     const flagsStart = slash + 1 < token.end ? slash + 1 : token.end;
     const flags = this.source.toString("utf8", flagsStart, token.end);
@@ -96,16 +99,19 @@ export class LiteralReader {
     const prefixLength = radix == 10 ? 0 : kRadixPrefixLength;
     const base = radix.toUint64();
     let value: uint64 = 0;
+
     for (let i = prefixLength; i < digits.length; i++) {
-      const c = digits[i] ?? 0;
-      const digit = this.digitValue(c);
+      const code = digits[i] ?? 0;
+      const digit = this.digitValue(code);
       if (digit == undefined || digit >= radix) {
         return { isInt: true, intValue: 0, doubleValue: 0.0, valid: false };
       }
+
       const next = this.appendDigit(value, base, digit);
       if (next == undefined) {
         return this.largeInteger(digits, radix, i);
       }
+
       value = next;
     }
 
@@ -134,15 +140,15 @@ export class LiteralReader {
     return value.toInt();
   }
 
-  private hexValue(c: int): int | undefined {
-    if (c >= kZero && c <= kNine) {
-      return c - kZero;
+  private hexValue(code: int): int | undefined {
+    if (code >= kZero && code <= kNine) {
+      return code - kZero;
     }
-    if (c >= kLowerA && c <= kLowerF) {
-      return c - kLowerA + 10;
+    if (code >= kLowerA && code <= kLowerF) {
+      return code - kLowerA + 10;
     }
-    if (c >= kUpperA && c <= kUpperF) {
-      return c - kUpperA + 10;
+    if (code >= kUpperA && code <= kUpperF) {
+      return code - kUpperA + 10;
     }
 
     return undefined;
@@ -150,17 +156,21 @@ export class LiteralReader {
 
   private hexEscape(at: int, end: int, count: int): Escape | undefined {
     let value = 0;
-    for (let n = 0; n < count; n++) {
-      if (at + n >= end) {
+
+    for (let index = 0; index < count; index++) {
+      if (at + index >= end) {
         return undefined;
       }
-      const c = this.byteAt(at + n);
-      const digit = this.hexValue(c);
+
+      const code = this.byteAt(at + index);
+      const digit = this.hexValue(code);
       if (digit == undefined) {
         return undefined;
       }
+
       value = value * 16 + digit;
     }
+
     const text = String.fromCharCode(value);
 
     return { text, next: at + count };
@@ -171,79 +181,87 @@ export class LiteralReader {
     if (at >= end || open != kLeftBrace) {
       return this.hexEscape(at, end, 4);
     }
+
     let i = at + 1;
-    let cp = 0;
+    let codePoint = 0;
     let digits = 0;
+
     while (i < end) {
-      const c = this.byteAt(i);
-      const digit = this.hexValue(c);
+      const code = this.byteAt(i);
+      const digit = this.hexValue(code);
       if (digit == undefined) {
         break;
       }
-      cp = cp * 16 + digit;
+
+      codePoint = codePoint * 16 + digit;
       i += 1;
       digits += 1;
       if (digits > kMaxCodePointDigits) {
         return undefined;
       }
     }
+
     const close = this.byteAt(i);
     if (digits == 0 || i >= end || close != kRightBrace) {
       return undefined;
     }
-    if (cp < 0 || cp > 0x10ffff) {
+    if (codePoint < 0 || codePoint > 0x10ffff) {
       return undefined;
     }
-    const text = String.fromCodePoint(cp);
+
+    const text = String.fromCodePoint(codePoint);
 
     return { text, next: i + 1 };
   }
 
-  private simpleEscape(c: int): string | undefined {
-    if (c == kLowerN) {
-      return "\n";
+  private simpleEscape(code: int): string | undefined {
+    switch (code) {
+      case kLowerN:
+        return "\n";
+      case kLowerT:
+        return "\t";
+      case kLowerR:
+        return "\r";
+      case kLowerB:
+        return "\b";
+      case kLowerF:
+        return "\f";
+      case kLowerV:
+        return "\v";
+      case kZero:
+        return "\0";
+      default:
+        return undefined;
     }
-    if (c == kLowerT) {
-      return "\t";
-    }
-    if (c == kLowerR) {
-      return "\r";
-    }
-    if (c == kLowerB) {
-      return "\b";
-    }
-    if (c == kLowerF) {
-      return "\f";
-    }
-    if (c == kLowerV) {
-      return "\v";
-    }
-    if (c == kZero) {
-      return "\0";
-    }
-
-    return undefined;
   }
 
   private decodeText(start: int, end: int, kind: TextKind): DecodedText {
     let i = this.plainEnd(start, end, kind);
     const first = this.source.toString("utf8", start, i);
+
     if (i == end) {
       return { text: first, ok: true };
     }
+
     const parts: string[] = [first];
+
     while (i < end) {
       const decoded = this.decodeAt(i, end);
       if (decoded == undefined) {
         const partial = parts.join("");
+
         return { text: partial, ok: false };
       }
+
       parts.push(decoded.text);
       const runStart = decoded.next;
+
       i = this.plainEnd(runStart, end, kind);
       const run = this.source.toString("utf8", runStart, i);
+
       parts.push(run);
     }
+
     const text = parts.join("");
 
     return { text, ok: true };
@@ -251,6 +269,7 @@ export class LiteralReader {
 
   private plainEnd(from: int, end: int, kind: TextKind): int {
     let i = from;
+
     while (i < end && !this.needsDecodingAt(i, kind)) {
       i += 1;
     }
@@ -259,48 +278,60 @@ export class LiteralReader {
   }
 
   private needsDecodingAt(i: int, kind: TextKind): boolean {
-    const c = this.byteAt(i);
+    const code = this.byteAt(i);
+
     if (kind == TextKind.Quoted) {
-      return c == kBackslash;
+      return code == kBackslash;
     }
     if (kind == TextKind.RawTemplate) {
-      return c == kReturn;
+      return code == kReturn;
     }
 
-    return c == kBackslash || c == kReturn;
+    return code == kBackslash || code == kReturn;
   }
 
   private decodeAt(at: int, end: int): Escape | undefined {
-    const c = this.byteAt(at);
-    if (c == kReturn) {
+    const code = this.byteAt(at);
+    if (code == kReturn) {
       const next = this.skipLineFeed(at + 1, end);
+
       return { text: "\n", next };
     }
+
     const escaped = at + 1;
     if (escaped >= end) {
       return { text: "", next: end };
     }
+
     const letter = this.byteAt(escaped);
+    const after = escaped + 1;
+
+    switch (letter) {
+      case kLowerX:
+        return this.hexEscape(after, end, 2);
+      case kLowerU:
+        return this.unicodeEscape(after, end);
+      case kReturn: {
+        const next = this.skipLineFeed(after, end);
+
+        return { text: "", next };
+      }
+      case kNewline:
+        return { text: "", next: after };
+      default:
+        return this.plainEscape(letter, escaped);
+    }
+  }
+
+  private plainEscape(letter: int, escaped: int): Escape {
     const after = escaped + 1;
     const simple = this.simpleEscape(letter);
     if (simple != undefined) {
       return { text: simple, next: after };
     }
-    if (letter == kReturn) {
-      const next = this.skipLineFeed(after, end);
-      return { text: "", next };
-    }
-    if (letter == kNewline) {
-      return { text: "", next: after };
-    }
-    if (letter == kLowerX) {
-      return this.hexEscape(after, end, 2);
-    }
-    if (letter == kLowerU) {
-      return this.unicodeEscape(after, end);
-    }
     if (letter < kHigh) {
       const text = String.fromCharCode(letter);
+
       return { text, next: after };
     }
 
@@ -308,8 +339,8 @@ export class LiteralReader {
   }
 
   private skipLineFeed(at: int, end: int): int {
-    const c = this.byteAt(at);
-    if (at < end && c == kNewline) {
+    const code = this.byteAt(at);
+    if (at < end && code == kNewline) {
       return at + 1;
     }
 
@@ -334,8 +365,8 @@ export class LiteralReader {
 
   private allDigitsValid(digits: int[], from: int, radix: int): boolean {
     for (let i = from; i < digits.length; i++) {
-      const c = digits[i] ?? 0;
-      const digit = this.digitValue(c);
+      const code = digits[i] ?? 0;
+      const digit = this.digitValue(code);
       if (digit == undefined || digit >= radix) {
         return false;
       }
@@ -353,8 +384,10 @@ export class LiteralReader {
     if (product.hi != 0) {
       return undefined;
     }
+
     const step = digit.toUint64();
     let sum = Bit.Wrap64.from(product.lo);
+
     sum = sum + step;
     if (sum.value < product.lo) {
       return undefined;
@@ -367,6 +400,7 @@ export class LiteralReader {
     if (!this.allDigitsValid(digits, from, radix)) {
       return { isInt: true, intValue: 0, doubleValue: 0.0, valid: false };
     }
+
     const text = this.textOfDigits(digits);
     const parsed = Number(text);
     const rounded = parsed.unwrapOr(0.0);
@@ -376,10 +410,11 @@ export class LiteralReader {
 
   private digitsOf(token: Token): int[] {
     const digits: int[] = [];
+
     for (let i = token.start; i < token.end; i++) {
-      const c = this.byteAt(i);
-      if (c != kUnderscore) {
-        digits.push(c);
+      const code = this.byteAt(i);
+      if (code != kUnderscore) {
+        digits.push(code);
       }
     }
 
@@ -390,6 +425,7 @@ export class LiteralReader {
     if (digits.length <= kRadixPrefixLength || digits[0] != kZero) {
       return 10;
     }
+
     const marker = digits[1] ?? 0;
     if (marker == kLowerX || marker == kUpperX) {
       return 16;
@@ -404,15 +440,15 @@ export class LiteralReader {
     return 10;
   }
 
-  private digitValue(c: int): int | undefined {
-    if (c >= kZero && c <= kNine) {
-      return c - kZero;
+  private digitValue(code: int): int | undefined {
+    if (code >= kZero && code <= kNine) {
+      return code - kZero;
     }
-    if (c >= kLowerA && c <= kLowerZ) {
-      return c - kLowerA + 10;
+    if (code >= kLowerA && code <= kLowerZ) {
+      return code - kLowerA + 10;
     }
-    if (c >= kUpperA && c <= kUpperZ) {
-      return c - kUpperA + 10;
+    if (code >= kUpperA && code <= kUpperZ) {
+      return code - kUpperA + 10;
     }
 
     return undefined;
@@ -420,8 +456,10 @@ export class LiteralReader {
 
   private textOfDigits(digits: int[]): string {
     const chars: string[] = [];
-    for (const c of digits) {
-      const character = String.fromCharCode(c);
+
+    for (const code of digits) {
+      const character = String.fromCharCode(code);
+
       chars.push(character);
     }
 

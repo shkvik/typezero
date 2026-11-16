@@ -14,19 +14,23 @@ partial class Dumper {
     if (expr == undefined) {
       return this.missing();
     }
+
     this.dumpExpr(expr);
   }
 
   private dumpChildren(exprs: Expr[]): void {
     this.nested();
+
     for (const expr of exprs) {
       this.dumpExpr(expr);
     }
+
     this.back();
   }
 
   private propertyForm(prop: Property): string {
     const form = prop.form;
+
     switch (form.kind) {
       case PropertyKind.Value:
         return "Value";
@@ -38,11 +42,14 @@ partial class Dumper {
         return "Computed";
       case PropertyKind.Spread: {
         const locs: string[] = [];
+
         for (const key of form.omitKeys) {
           locs.push(`${key.loc}`);
         }
+
         const keys = locs.join(",");
         const omit = this.quoteAll(form.omit);
+
         return `Spread omit=${omit} keys=[${keys}]`;
       }
     }
@@ -50,24 +57,29 @@ partial class Dumper {
 
   private dumpExpr(expr: Expr): void {
     const loc = expr.loc;
+
     switch (expr.kind) {
       case ExprKind.IntLit: {
         const text = this.spanText(expr.text);
         const quoted = this.quote(text);
+
         return this.line(`IntLit ${loc} ${expr.value} ${quoted}`);
       }
       case ExprKind.FloatLit: {
         const bits = this.bits(expr.value);
         const text = this.spanText(expr.text);
         const quoted = this.quote(text);
+
         return this.line(`FloatLit ${loc} ${bits} ${quoted}`);
       }
       case ExprKind.BoolLit: {
         const value = this.flag(expr.value);
+
         return this.line(`BoolLit ${loc} ${value}`);
       }
       case ExprKind.StringLit: {
         const value = this.quote(expr.value, Quoting.EscapeUnicode);
+
         return this.line(`StringLit ${loc} ${value}`);
       }
       case ExprKind.Undefined:
@@ -75,18 +87,24 @@ partial class Dumper {
       case ExprKind.RegexLit: {
         const pattern = this.quote(expr.pattern, Quoting.EscapeUnicode);
         const flags = this.quote(expr.flags, Quoting.EscapeUnicode);
+
         return this.line(
           `RegexLit ${loc} ${pattern} ${flags} written=${expr.written}`,
         );
       }
       case ExprKind.Template: {
         const parts: string[] = [];
+
         for (const quasi of expr.quasis) {
           const text = this.quote(quasi, Quoting.EscapeUnicode);
+
           parts.push(` ${text}`);
         }
+
         const quasis = parts.join("");
+
         this.line(`Template ${loc} n=${expr.quasis.length}${quasis}`);
+
         return this.dumpChildren(expr.exprs);
       }
       case ExprKind.ArrayLit:
@@ -95,6 +113,7 @@ partial class Dumper {
         for (const element of expr.elements) {
           const spread = this.flag(element.spread);
           const hole = this.flag(element.hole);
+
           this.line(`Element ${spread} ${hole}`);
           this.dumpChildren([element.expr]);
         }
@@ -114,40 +133,49 @@ partial class Dumper {
   private dumpProperty(prop: Property): void {
     const name = this.quote(prop.name);
     const formText = this.propertyForm(prop);
+
     this.line(`Property ${prop.loc} ${name} ${formText}`);
     this.nested();
     const form = prop.form;
     if (form.kind == PropertyKind.Computed) {
       this.dumpExpr(form.key);
     }
+
     this.dumpExpr(prop.value);
     this.back();
   }
 
   private dumpCompound(expr: Expr): void {
     const loc = expr.loc;
+
     switch (expr.kind) {
       case ExprKind.Name: {
         const name = this.quote(expr.name);
+
         this.line(`Name ${loc} ${name} targs=${expr.typeArgs.length}`);
         this.nested();
         this.dumpTypes(expr.typeArgs);
+
         return this.back();
       }
       case ExprKind.Member: {
         const name = this.quote(expr.name);
         const optional = this.flag(expr.optional);
+
         this.line(
           `Member ${loc} ${name} opt=${optional} targs=${expr.typeArgs.length}`,
         );
         this.nested();
         this.dumpExpr(expr.object);
         this.dumpTypes(expr.typeArgs);
+
         return this.back();
       }
       case ExprKind.Index: {
         const optional = this.flag(expr.optional);
+
         this.line(`Index ${loc} opt=${optional}`);
+
         return this.dumpChildren([expr.object, expr.index]);
       }
       case ExprKind.Unary:
@@ -155,20 +183,26 @@ partial class Dumper {
         return this.dumpChildren([expr.operand]);
       case ExprKind.Binary: {
         const source = this.span(expr.source);
+
         this.line(`Binary ${loc} ${expr.op} src=${source}`);
+
         return this.dumpChildren([expr.lhs, expr.rhs]);
       }
       case ExprKind.Assign: {
         const op = expr.op;
         const opText = op == undefined ? "-" : `${op}`;
         const source = this.span(expr.source);
+
         this.line(`Assign ${loc} ${opText} src=${source}`);
+
         return this.dumpChildren([expr.target, expr.value]);
       }
       case ExprKind.Update: {
         const increment = this.flag(expr.increment);
         const prefix = this.flag(expr.prefix);
+
         this.line(`Update ${loc} inc=${increment} prefix=${prefix}`);
+
         return this.dumpChildren([expr.target]);
       }
       case ExprKind.Conditional:
@@ -191,39 +225,48 @@ partial class Dumper {
   private dumpNew(expr: NewExpr): void {
     const form = expr.form;
     const counts = `targs=${expr.typeArgs.length} n=${expr.args.length}`;
+
     if (form.kind == NewKind.Named) {
       const name = this.quote(form.name);
       const memberText = form.member ?? "";
       const member = this.quote(memberText);
       const callee = this.flag(false);
+
       this.line(`New ${expr.loc} ${name} ${member} ${counts} callee=${callee}`);
       this.nested();
     } else {
       const empty = this.quote("");
       const callee = this.flag(true);
+
       this.line(`New ${expr.loc} ${empty} ${empty} ${counts} callee=${callee}`);
       this.nested();
       this.dumpExpr(form.callee);
     }
+
     this.dumpTypes(expr.typeArgs);
+
     for (const arg of expr.args) {
       this.dumpExpr(arg);
     }
+
     this.back();
   }
 
   private dumpCall(expr: Expr): void {
     const loc = expr.loc;
+
     switch (expr.kind) {
       case ExprKind.Call: {
         const optional = this.flag(expr.optional);
         const tagged = this.flag(expr.tagged);
         const spread = this.flags(expr.spread);
+
         this.line(
           `Call ${loc} opt=${optional} tagged=${tagged} ` +
             `n=${expr.args.length} spread=${spread}`,
         );
         const children = [expr.callee].concat(expr.args);
+
         return this.dumpChildren(children);
       }
       case ExprKind.New:
@@ -238,9 +281,11 @@ partial class Dumper {
         return this.back();
       case ExprKind.Yield: {
         const delegate = this.flag(expr.delegate);
+
         this.line(`Yield ${loc} delegate=${delegate}`);
         this.nested();
         this.dumpOptionalExpr(expr.value);
+
         return this.back();
       }
       case ExprKind.Await:

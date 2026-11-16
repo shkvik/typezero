@@ -17,6 +17,7 @@ import {
 } from "../../../../program/ast/types/ast.types.types.tz";
 import { ObjectTypeMember } from "../types/file-parser.types.object-types.tz";
 import {
+  kRecordTypeName,
   kSymbolAsyncIteratorName,
   kSymbolDisposeName,
   kSymbolIteratorName,
@@ -74,7 +75,7 @@ partial class FileParser {
     }
     if (!this.cursor.is(TokenKind.RBrace) || object.args.length > 0) {
       const token = this.cursor.peek();
-      this.skipObjectType(token.start, Code.MappedTypeNextToFields);
+      this.skipBraced(token.start, Code.MappedTypeNextToFields);
 
       return ref;
     }
@@ -235,7 +236,7 @@ partial class FileParser {
         this.cursor.is(TokenKind.Less) ||
         this.cursor.is(TokenKind.New)
       ) {
-        this.skipObjectType(loc, Code.CallSignatures);
+        this.skipBraced(loc, Code.CallSignatures);
 
         return ref;
       }
@@ -275,7 +276,7 @@ partial class FileParser {
     return true;
   }
 
-  private skipObjectType(
+  private skipBraced(
     loc: int,
     code: Code,
     details: Details = kNoDetails,
@@ -317,10 +318,10 @@ partial class FileParser {
       case TokenKind.Colon:
         return this.objectTypeField(name, loc, optional, readonly);
       case TokenKind.Less:
-        this.skipObjectType(token.start, Code.GenericTypeMethods);
+        this.skipBraced(token.start, Code.GenericTypeMethods);
         return undefined;
       default:
-        this.skipObjectType(token.start, Code.FieldNeedsType, { word: name });
+        this.skipBraced(token.start, Code.FieldNeedsType, { word: name });
         return undefined;
     }
   }
@@ -350,7 +351,7 @@ partial class FileParser {
     }
     if (!this.cursor.accept(TokenKind.Colon)) {
       const token = this.cursor.peek();
-      this.skipObjectType(token.start, Code.MethodNeedsReturnType, {
+      this.skipBraced(token.start, Code.MethodNeedsReturnType, {
         word: name,
       });
 
@@ -381,7 +382,7 @@ partial class FileParser {
 
     const token = this.cursor.peek();
     if (token.kind != TokenKind.RBrace && !token.newline) {
-      this.skipObjectType(token.start, code, { found: token.kind });
+      this.skipBraced(token.start, code, { found: token.kind });
 
       return false;
     }
@@ -394,7 +395,7 @@ partial class FileParser {
     const next = this.cursor.lookahead();
 
     if (!this.cursor.atName() || next.kind != TokenKind.Colon) {
-      this.skipObjectType(loc, Code.ExpectedIndexSignatureOrMapped);
+      this.skipBraced(loc, Code.ExpectedIndexSignatureOrMapped);
 
       return ref;
     }
@@ -417,7 +418,7 @@ partial class FileParser {
       this.cursor.accept(TokenKind.Comma);
     }
     if (ref.args.length > 0 || !this.cursor.is(TokenKind.RBrace)) {
-      this.skipObjectType(loc, Code.IndexSignatureNextToFields);
+      this.skipBraced(loc, Code.IndexSignatureNextToFields);
 
       return ref;
     }
@@ -426,7 +427,7 @@ partial class FileParser {
     const record = this.typeRef(ref.loc);
 
     record.form = { kind: TypeKind.Generic };
-    record.name = "Record";
+    record.name = kRecordTypeName;
     record.args.push(key);
     record.args.push(value);
 

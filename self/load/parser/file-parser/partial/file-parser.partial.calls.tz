@@ -19,18 +19,23 @@ import { Arguments } from "../types/file-parser.types.calls.tz";
 partial class FileParser {
   private arguments(): Arguments {
     const outer = this.context;
+
     this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
     const args: Expr[] = [];
     const spread: boolean[] = [];
+
     while (this.cursor.insideList(TokenKind.RParen)) {
       const spreads = this.cursor.accept(TokenKind.Ellipsis);
+
       spread.push(spreads);
       const arg = this.expression();
+
       args.push(arg);
       if (!this.cursor.accept(TokenKind.Comma)) {
         break;
       }
     }
+
     this.cursor.expect(TokenKind.RParen, Code.ExpectedArgumentsClose);
     this.context = outer;
     const anySpread = spread.includes(true);
@@ -40,8 +45,10 @@ partial class FileParser {
 
   private indexInside(): Expr {
     const outer = this.context;
+
     this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
     const index = this.sequence();
+
     this.cursor.expect(TokenKind.RBracket, Code.ExpectedIndexClose);
     this.context = outer;
 
@@ -59,6 +66,7 @@ partial class FileParser {
   private callOrMember(): Expr {
     let expr = this.primary();
     let optionalChain = false;
+
     while (true) {
       const attached =
         this.cursor.is(TokenKind.Less) &&
@@ -66,18 +74,22 @@ partial class FileParser {
       if (attached) {
         continue;
       }
+
       const optionalLink = this.cursor.accept(TokenKind.QuestionDot);
       if (optionalLink) {
         optionalChain = true;
       }
+
       const link = optionalLink
         ? this.optionalLink(expr)
         : this.plainLink(expr, optionalChain);
       if (link == undefined) {
         break;
       }
+
       expr = link;
     }
+
     if (!optionalChain) {
       return expr;
     }
@@ -89,7 +101,9 @@ partial class FileParser {
     if (this.isPropertyName()) {
       return this.memberLink(expr, true);
     }
+
     const token = this.cursor.peek();
+
     switch (token.kind) {
       case TokenKind.LParen:
         return this.callLink(expr, true);
@@ -103,6 +117,7 @@ partial class FileParser {
 
   private plainLink(expr: Expr, optionalChain: boolean): Expr | undefined {
     const token = this.cursor.peek();
+
     switch (token.kind) {
       case TokenKind.LParen:
         return this.callLink(expr, false);
@@ -110,9 +125,12 @@ partial class FileParser {
         this.cursor.next();
         if (!this.isPropertyName()) {
           const current = this.cursor.peek();
+
           this.cursor.error(current.start, Code.ExpectedPropertyAfterDot);
+
           return undefined;
         }
+
         return this.memberLink(expr, false);
       }
       case TokenKind.LBracket:
@@ -188,7 +206,9 @@ partial class FileParser {
       if (args == undefined) {
         return false;
       }
+
       expr.typeArgs = args;
+
       return true;
     }
     if (expr.kind == ExprKind.Member && expr.typeArgs.length == 0) {
@@ -196,7 +216,9 @@ partial class FileParser {
       if (args == undefined) {
         return false;
       }
+
       expr.typeArgs = args;
+
       return true;
     }
 
@@ -206,26 +228,39 @@ partial class FileParser {
   private taggedTemplate(tag: Expr, optional: boolean): Expr {
     if (optional) {
       const token = this.cursor.peek();
+
       this.cursor.report(token.start, Code.TaggedTemplateInOptionalChain);
     }
+
     let raw = false;
+
     if (tag.kind == ExprKind.Member && tag.known == KnownName.Raw) {
       const object = tag.object;
+
       raw = object.kind == ExprKind.Name && object.known == KnownName.String;
     }
-    const tmpl = this.template(raw);
+
+    const template = this.template(raw);
     const elements: ArrayElement[] = [];
-    for (const text of tmpl.quasis) {
+
+    for (const text of template.quasis) {
       const value: Expr = {
         kind: ExprKind.StringLit,
-        loc: tmpl.loc,
+        loc: template.loc,
         value: text,
       };
+
       elements.push({ expr: value, spread: false, hole: false });
     }
-    const texts: Expr = { kind: ExprKind.ArrayLit, loc: tmpl.loc, elements };
+
+    const texts: Expr = {
+      kind: ExprKind.ArrayLit,
+      loc: template.loc,
+      elements,
+    };
     const args: Expr[] = [texts];
-    for (const part of tmpl.exprs) {
+
+    for (const part of template.exprs) {
       args.push(part);
     }
 
@@ -242,16 +277,20 @@ partial class FileParser {
 
   private newArguments(): Expr[] {
     const args: Expr[] = [];
+
     if (!this.cursor.accept(TokenKind.LParen)) {
       return args;
     }
+
     while (this.cursor.insideList(TokenKind.RParen)) {
       const arg = this.expression();
+
       args.push(arg);
       if (!this.cursor.accept(TokenKind.Comma)) {
         break;
       }
     }
+
     this.cursor.expect(TokenKind.RParen, Code.ExpectedArgumentsClose);
 
     return args;
@@ -260,21 +299,27 @@ partial class FileParser {
   private newExpression(): Expr {
     const keyword = this.cursor.next();
     const loc = keyword.start;
+
     if (this.cursor.is(TokenKind.LParen)) {
       return this.newOfExpression();
     }
     if (!this.cursor.atName()) {
       const token = this.cursor.peek();
+
       this.cursor.error(token.start, Code.ExpectedClassAfterNew);
+
       return this.invalid(loc);
     }
+
     const name = this.cursor.next();
     let member: Token | undefined = undefined;
+
     if (this.cursor.accept(TokenKind.Dot)) {
       if (this.cursor.atName()) {
         member = this.cursor.next();
       } else {
         const token = this.cursor.peek();
+
         this.cursor.error(token.start, Code.ExpectedNameAfterDot);
       }
     }
@@ -284,6 +329,7 @@ partial class FileParser {
         ? this.typeArguments()
         : [];
       const args = this.newArguments();
+
       return {
         kind: ExprKind.New,
         loc: name.start,
@@ -292,6 +338,7 @@ partial class FileParser {
         args,
       };
     }
+
     const typeArgs = this.cursor.is(TokenKind.Less) ? this.typeArguments() : [];
     const args = this.newArguments();
     const memberName = member?.text;
@@ -309,10 +356,13 @@ partial class FileParser {
     const paren = this.cursor.next();
     const at = paren.start;
     const outer = this.context;
+
     this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
     const callee = this.sequence();
+
     this.cursor.expect(TokenKind.RParen, Code.ExpectedNewClassClose);
     const args = this.newArguments();
+
     this.context = outer;
 
     return {
@@ -332,6 +382,7 @@ partial class FileParser {
       known: name.known,
       typeArgs: [],
     };
+
     if (member != undefined) {
       path = {
         kind: ExprKind.Member,
@@ -343,6 +394,7 @@ partial class FileParser {
         typeArgs: [],
       };
     }
+
     while (
       this.cursor.is(TokenKind.Dot) ||
       this.cursor.is(TokenKind.LBracket)
@@ -350,6 +402,7 @@ partial class FileParser {
       const token = this.cursor.next();
       if (token.kind == TokenKind.LBracket) {
         const index = this.indexInside();
+
         path = {
           kind: ExprKind.Index,
           loc: token.start,
@@ -357,14 +410,19 @@ partial class FileParser {
           index,
           optional: false,
         };
+
         continue;
       }
       if (!this.isPropertyName()) {
         const current = this.cursor.peek();
+
         this.cursor.error(current.start, Code.ExpectedPropertyAfterDot);
+
         return path;
       }
+
       const property = this.cursor.next();
+
       path = {
         kind: ExprKind.Member,
         loc: property.start,

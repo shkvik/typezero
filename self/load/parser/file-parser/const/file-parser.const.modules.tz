@@ -14,3 +14,10 @@ export const kExportNames: NameListCodes = {
   expectedName: Code.ExpectedNameToExport,
   close: Code.ExpectedExportNamesClose,
 };
+
+export const kJsonExtension = ".json";
+export const kJsonImportName = "json";
+export const kTypeAttributeKey = "type";
+export const kJsonAttributeValue = "json";
+export const kNodeModulePrefix = "node:";
+export const kTzModulePrefix = "tz:";

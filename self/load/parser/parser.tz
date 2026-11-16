@@ -11,8 +11,10 @@ export class Parser {
 
   public run(): ParsedFile[] {
     const parsed: ParsedFile[] = [];
+
     for (const source of this.sources) {
       const file = this.parseFile(source);
+
       parsed.push(file);
     }
 

@@ -59,16 +59,22 @@ export class FileParser {
 
   public run(): ParseResult {
     const items: Stmt[] = [];
+
     while (!this.cursor.is(TokenKind.End)) {
       if (this.cursor.is(TokenKind.RBrace)) {
         const brace = this.cursor.next();
+
         this.cursor.error(brace.start, Code.UnexpectedClosingBrace);
         this.cursor.stopRecovering();
+
         continue;
       }
+
       const statement = this.statementWithRecovery(true);
+
       items.push(statement);
     }
+
     const file: SourceFile = {
       items,
       imports: this.imports,
@@ -82,6 +88,7 @@ export class FileParser {
 
   private hiddenName(): string {
     const name = `%${this.names}`;
+
     this.names += 1;
 
     return name;

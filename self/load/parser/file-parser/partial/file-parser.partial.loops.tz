@@ -29,8 +29,10 @@ partial class FileParser {
     const keyword = this.cursor.next();
     const loc = keyword.start;
     const body = this.statement(false);
+
     this.cursor.expect(TokenKind.While, Code.ExpectedAfterDoBody);
     const cond = this.condition(Code.ExpectedAfterWhile);
+
     this.cursor.accept(TokenKind.Semi);
 
     return { kind: StmtKind.DoWhile, loc, body, cond };
@@ -38,8 +40,10 @@ partial class FileParser {
 
   private forStatement(): Stmt {
     const outer = this.context;
+
     this.context = { ...outer, expressionPlace: ExpressionPlace.ForHead };
     const loop = this.forInside();
+
     this.context = outer;
 
     return loop;
@@ -49,12 +53,16 @@ partial class FileParser {
     const keyword = this.cursor.next();
     const loc = keyword.start;
     let awaitLoc: int | undefined = undefined;
+
     if (this.cursor.is(TokenKind.Await)) {
       const awaitKeyword = this.cursor.next();
+
       awaitLoc = awaitKeyword.start;
     }
+
     this.cursor.expect(TokenKind.LParen, Code.ExpectedAfterFor);
     let init: Stmt | undefined = undefined;
+
     if (
       this.cursor.is(TokenKind.Let) ||
       this.cursor.is(TokenKind.Const) ||
@@ -64,28 +72,35 @@ partial class FileParser {
       if (head.kind == TokenKind.Var) {
         this.cursor.error(head.start, Code.VarNotSupported);
       }
+
       const isConst = head.kind == TokenKind.Const;
       const target = this.forTarget();
       if (target == undefined) {
         return { kind: StmtKind.For, loc };
       }
+
       const forIn = this.cursor.is(TokenKind.In);
       if (this.cursor.is(TokenKind.Of) || forIn) {
         return this.forOf(loc, awaitLoc, isConst, forIn, target);
       }
+
       const decls: VarDeclarator[] = [];
+
       if (target.kind == ForTargetKind.Pattern) {
         if (
           !this.cursor.expect(TokenKind.Assign, Code.ExpectedAfterForPattern)
         ) {
           return { kind: StmtKind.For, loc };
         }
+
         const value = this.expression();
+
         this.declarePattern(decls, target.pattern, value, undefined);
       } else {
         const value = this.cursor.accept(TokenKind.Assign)
           ? this.expression()
           : undefined;
+
         decls.push({
           ...target.binding,
           origin: NameOrigin.Written,
@@ -96,6 +111,7 @@ partial class FileParser {
       if (this.cursor.accept(TokenKind.Comma)) {
         this.declarators(decls, isConst);
       }
+
       init = {
         kind: StmtKind.VarDecl,
         loc: head.start,
@@ -107,13 +123,17 @@ partial class FileParser {
       const head = this.cursor.peek();
       const initLoc = head.start;
       const expr = this.sequence();
+
       init = { kind: StmtKind.Expr, loc: initLoc, expr };
     }
     if (this.cursor.is(TokenKind.In) || this.cursor.is(TokenKind.Of)) {
       const token = this.cursor.peek();
+
       this.cursor.error(token.start, Code.ForNeedsNewVariable);
+
       return { kind: StmtKind.For, loc, init };
     }
+
     this.context = { ...this.context, expressionPlace: ExpressionPlace.Plain };
     if (awaitLoc != undefined) {
       this.cursor.report(awaitLoc, Code.ForAwaitNeedsIterable);
@@ -128,8 +148,10 @@ partial class FileParser {
       this.cursor.is(TokenKind.LBrace)
     ) {
       const pattern = this.bindingPattern();
+
       return { kind: ForTargetKind.Pattern, pattern };
     }
+
     const binding = this.binding();
     if (binding == undefined) {
       return undefined;
@@ -141,8 +163,10 @@ partial class FileParser {
   private forRest(loc: int, init: Stmt | undefined): Stmt {
     this.cursor.expect(TokenKind.Semi, Code.ExpectedAfterLoopInitializer);
     const cond = this.cursor.is(TokenKind.Semi) ? undefined : this.sequence();
+
     this.cursor.expect(TokenKind.Semi, Code.ExpectedAfterLoopCondition);
     const step = this.cursor.is(TokenKind.RParen) ? undefined : this.sequence();
+
     this.cursor.expect(TokenKind.RParen, Code.ExpectedLoopHeaderClose);
     const body = this.statement(false);
 
@@ -159,21 +183,27 @@ partial class FileParser {
     if (keys && target.kind == ForTargetKind.Pattern) {
       this.cursor.report(target.pattern.loc, Code.ForInKeyPattern);
     }
+
     this.cursor.next();
     this.context = { ...this.context, expressionPlace: ExpressionPlace.Plain };
     const isAwait = awaitLoc != undefined;
+
     if (keys && awaitLoc != undefined) {
       this.cursor.report(awaitLoc, Code.ForAwaitIn);
     }
+
     const iterable = this.expression();
+
     this.cursor.expect(TokenKind.RParen, Code.ExpectedLoopHeaderClose);
     const body = this.statement(false);
+
     if (target.kind == ForTargetKind.Name) {
       const binding: VarDeclarator = {
         ...target.binding,
         origin: NameOrigin.Written,
         form: { kind: BindingKind.Plain },
       };
+
       return {
         kind: StmtKind.ForOf,
         loc,
@@ -185,8 +215,10 @@ partial class FileParser {
         body,
       };
     }
+
     const pattern = target.pattern;
     const name = this.hiddenName();
+
     if (keys) {
       const binding: VarDeclarator = {
         name,
@@ -194,6 +226,7 @@ partial class FileParser {
         loc: pattern.loc,
         form: { kind: BindingKind.Plain },
       };
+
       return {
         kind: StmtKind.ForOf,
         loc,
@@ -205,6 +238,7 @@ partial class FileParser {
         body,
       };
     }
+
     const form: BindingForm = pattern.object
       ? { kind: BindingKind.Object }
       : { kind: BindingKind.Array, length: 0, rest: false };
@@ -215,6 +249,7 @@ partial class FileParser {
       form,
     };
     const decls: VarDeclarator[] = [];
+
     this.declareElements(decls, pattern, name);
     const elements: VarDeclStmt = {
       kind: StmtKind.VarDecl,

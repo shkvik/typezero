@@ -12,6 +12,7 @@ partial class Dumper {
     if (ref == undefined) {
       return this.missing();
     }
+
     this.dumpType(ref);
   }
 
@@ -23,24 +24,29 @@ partial class Dumper {
 
   private typeExtras(ref: TypeRef): string {
     const form = ref.form;
+
     switch (form.kind) {
       case TypeKind.Function: {
         const names = this.quoteAll(form.names);
         const optional = this.flags(form.optional);
         const rest = this.flag(form.rest);
+
         return ` names=${names} opt=${optional} rest=${rest}`;
       }
       case TypeKind.Object: {
         const locTexts: string[] = [];
+
         for (const loc of form.locs) {
           locTexts.push(`${loc}`);
         }
+
         const locs = locTexts.join(",");
         const names = this.quoteAll(form.names);
         const optional = this.flags(form.optional);
         const readonlyFlags = this.flags(form.readonly);
         const throughLastMethod = this.upToLastTrue(form.methods);
         const methods = this.flags(throughLastMethod);
+
         return (
           ` names=${names} locs=[${locs}] opt=${optional} ` +
           `ro=${readonlyFlags} methods=${methods}`
@@ -49,34 +55,43 @@ partial class Dumper {
       case TypeKind.Tuple: {
         const readonlyFlags = this.flags(form.readonly);
         const spread = this.flags(form.spread);
+
         return ` ro=${readonlyFlags} spread=${spread}`;
       }
       case TypeKind.Literal: {
         const text = this.quote(form.text, Quoting.EscapeUnicode);
         const numberBits = this.bits(form.number);
         const integer = this.flag(form.integer);
+
         return ` text=${text} number=${numberBits} int=${integer}`;
       }
       case TypeKind.Predicate: {
         const isAsserts = this.flag(form.asserts);
+
         return ` asserts=${isAsserts}`;
       }
       case TypeKind.TypeOf: {
         const names = this.quoteAll(form.names);
+
         return ` names=${names}`;
       }
       case TypeKind.Mapped: {
         const optional = this.changeNumber(form.optionalChange);
         const readonlyChange = this.changeNumber(form.readonlyChange);
+
         return ` opt=${optional} ro=${readonlyChange}`;
       }
       case TypeKind.Template: {
         const parts: string[] = [];
+
         for (const text of form.texts) {
           const part = this.quote(text, Quoting.EscapeUnicode);
+
           parts.push(part);
         }
+
         const texts = parts.join(",");
+
         return ` texts=[${texts}]`;
       }
       default:
@@ -90,6 +105,7 @@ partial class Dumper {
     const source = this.span(ref.source);
     const extras = this.typeExtras(ref);
     const loc = ref.loc ?? kNoLocation;
+
     this.line(
       `Type ${loc} ${kind} ${name} src=${source} ` +
         `n=${ref.args.length}${extras}`,
@@ -101,6 +117,7 @@ partial class Dumper {
 
   private upToLastTrue(flags: boolean[]): boolean[] {
     let end = flags.length;
+
     while (end > 0 && flags[end - 1] == false) {
       end -= 1;
     }

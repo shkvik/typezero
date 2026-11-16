@@ -9,13 +9,17 @@ export function messageText(code: Code, details: Details): string {
   const expected = details.expected;
   if (expected != undefined) {
     const spelling = kTokenTable.spelling(expected);
+
     text = text.replaceAll("{expected}", spelling);
   }
+
   const found = details.found;
   if (found != undefined) {
     const spelling = kTokenTable.spelling(found);
+
     text = text.replaceAll("{found}", spelling);
   }
+
   const word = details.word;
   if (word != undefined) {
     text = text.replaceAll("{word}", word);

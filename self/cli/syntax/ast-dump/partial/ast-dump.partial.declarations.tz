@@ -12,11 +12,12 @@ import {
 } from "../../../../program/ast/types/ast.types.classes.tz";
 
 partial class Dumper {
-  private role(fn: FunctionDecl): string {
-    const member = fn.role;
+  private role(declaration: FunctionDecl): string {
+    const member = declaration.role;
     if (member == undefined) {
       return "plain";
     }
+
     const isOverride = this.flag(member.isOverride);
 
     return (
@@ -25,44 +26,52 @@ partial class Dumper {
     );
   }
 
-  private dumpFunction(fn: FunctionDecl): void {
-    const name = this.quote(fn.name);
-    const isArrow = this.flag(fn.isArrow);
-    const concise = this.flag(fn.concise);
-    const ownName = this.quote(fn.ownName);
-    const isGenerator = this.flag(fn.isGenerator);
-    const isAsync = this.flag(fn.isAsync);
-    const role = this.role(fn);
-    const source = this.span(fn.source);
+  private dumpFunction(declaration: FunctionDecl): void {
+    const name = this.quote(declaration.name);
+    const isArrow = this.flag(declaration.isArrow);
+    const concise = this.flag(declaration.concise);
+    const ownName = this.quote(declaration.ownName);
+    const isGenerator = this.flag(declaration.isGenerator);
+    const isAsync = this.flag(declaration.isAsync);
+    const role = this.role(declaration);
+    const source = this.span(declaration.source);
+
     this.line(
-      `Function ${fn.loc} ${name} arrow=${isArrow} concise=${concise} ` +
-        `own=${ownName} place=${fn.place} body=${fn.bodySource} ` +
+      `Function ${declaration.loc} ${name} arrow=${isArrow} concise=${concise} ` +
+        `own=${ownName} place=${declaration.place} body=${declaration.bodySource} ` +
         `gen=${isGenerator} async=${isAsync} role=${role} src=${source} ` +
-        `tp=${fn.typeParams.length} params=${fn.params.length}`,
+        `tp=${declaration.typeParams.length} params=${declaration.params.length}`,
     );
     this.nested();
-    const member = fn.role;
+    const member = declaration.role;
     if (member != undefined) {
       this.dumpDecorators(member.decorators);
     }
-    this.dumpTypeParams(fn.typeParams);
-    for (const param of fn.params) {
+
+    this.dumpTypeParams(declaration.typeParams);
+
+    for (const param of declaration.params) {
       this.dumpParam(param);
     }
-    this.dumpOptionalType(fn.returnType);
-    this.dumpOptionalStmt(fn.body);
+
+    this.dumpOptionalType(declaration.returnType);
+    this.dumpOptionalStmt(declaration.body);
     this.back();
   }
 
   private dumpParam(param: Param): void {
     const property = param.property;
     let prop = "-";
+
     if (property != undefined) {
       const isReadonly = this.flag(property.readonly);
+
       prop = `${isReadonly}${property.access}`;
     }
+
     const name = this.quote(param.name);
     const pattern = this.span(param.pattern);
+
     this.line(
       `Param ${param.loc} ${name} form=${param.form.kind} ` +
         `prop=${prop} pattern=${pattern} dec=${param.decorators.length}`,
@@ -74,12 +83,14 @@ partial class Dumper {
     if (form.kind == ParamKind.Defaulted) {
       this.dumpExpr(form.defaultValue);
     }
+
     this.back();
   }
 
   private dumpTypeParams(params: TypeParamDecl[]): void {
     for (const param of params) {
       const name = this.quote(param.name);
+
       this.line(`TypeParam ${param.loc} ${name}`);
       this.nested();
       this.dumpOptionalType(param.constraint);
@@ -95,45 +106,52 @@ partial class Dumper {
     }
   }
 
-  private dumpClass(cls: ClassDecl): void {
-    const written = cls.name ?? "";
+  private dumpClass(declaration: ClassDecl): void {
+    const written = declaration.name ?? "";
     const name = this.quote(written);
-    const isAbstract = this.flag(cls.isAbstract);
-    const isPartial = this.flag(cls.isPartial);
-    const expression = this.flag(cls.expression);
-    const generic = this.flag(cls.typeParams.length > 0);
-    const source = this.span(cls.source);
-    const hasBase = this.flag(cls.base != undefined);
-    const hasBaseExpr = this.flag(cls.baseExpr != undefined);
+    const isAbstract = this.flag(declaration.isAbstract);
+    const isPartial = this.flag(declaration.isPartial);
+    const expression = this.flag(declaration.expression);
+    const generic = this.flag(declaration.typeParams.length > 0);
+    const source = this.span(declaration.source);
+    const hasBase = this.flag(declaration.base != undefined);
+    const hasBaseExpr = this.flag(declaration.baseExpr != undefined);
+
     this.line(
-      `Class ${cls.loc} ${name} abstract=${isAbstract} partial=${isPartial} ` +
+      `Class ${declaration.loc} ${name} abstract=${isAbstract} partial=${isPartial} ` +
         `expr=${expression} generic=${generic} src=${source} ` +
-        `tp=${cls.typeParams.length} base=${hasBase} baseExpr=${hasBaseExpr} ` +
-        `ifaces=${cls.interfaces.length} dec=${cls.decorators.length} ` +
-        `fields=${cls.fields.length} methods=${cls.methods.length} ` +
-        `ctors=${cls.constructors.length}`,
+        `tp=${declaration.typeParams.length} base=${hasBase} baseExpr=${hasBaseExpr} ` +
+        `ifaces=${declaration.interfaces.length} dec=${declaration.decorators.length} ` +
+        `fields=${declaration.fields.length} methods=${declaration.methods.length} ` +
+        `ctors=${declaration.constructors.length}`,
     );
     this.nested();
-    this.dumpDecorators(cls.decorators);
-    this.dumpTypeParams(cls.typeParams);
-    const base = cls.base;
+    this.dumpDecorators(declaration.decorators);
+    this.dumpTypeParams(declaration.typeParams);
+    const base = declaration.base;
     if (base != undefined) {
       this.dumpType(base);
     }
-    const baseExpr = cls.baseExpr;
+
+    const baseExpr = declaration.baseExpr;
     if (baseExpr != undefined) {
       this.dumpExpr(baseExpr);
     }
-    this.dumpTypes(cls.interfaces);
-    for (const field of cls.fields) {
+
+    this.dumpTypes(declaration.interfaces);
+
+    for (const field of declaration.fields) {
       this.dumpField(field);
     }
-    for (const method of cls.methods) {
+
+    for (const method of declaration.methods) {
       this.dumpFunction(method);
     }
-    for (const ctor of cls.constructors) {
+
+    for (const ctor of declaration.constructors) {
       this.dumpFunction(ctor);
     }
+
     this.back();
   }
 
@@ -142,6 +160,7 @@ partial class Dumper {
     const isReadonly = this.flag(field.readonly);
     const isOverride = this.flag(field.isOverride);
     const accessor = this.flag(field.accessor);
+
     this.line(
       `Field ${field.loc} ${name} form=${field.form} ` +
         `presence=${field.presence} ro=${isReadonly} ` +

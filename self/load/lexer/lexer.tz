@@ -63,7 +63,7 @@ export class Lexer {
   private readonly end: int;
   private readonly tokens: Token[];
   private readonly braces: int[];
-  private cur: int;
+  private position: int;
   private start: int;
   private newline: boolean;
 
@@ -72,7 +72,7 @@ export class Lexer {
     this.end = source.length;
     this.tokens = [];
     this.braces = [];
-    this.cur = 0;
+    this.position = 0;
     this.start = 0;
     this.newline = false;
   }
@@ -80,21 +80,25 @@ export class Lexer {
   public run(): Token[] {
     this.skipPreamble();
     this.newline = this.skipTrivia();
+
     while (!this.atEnd()) {
       this.token();
       this.newline = this.skipTrivia();
     }
-    this.start = this.cur;
+
+    this.start = this.position;
     this.push(TokenKind.End);
 
     return this.tokens;
   }
 
   private token(): void {
-    this.start = this.cur;
-    const c = this.at(0);
-    this.cur += 1;
-    switch (c) {
+    this.start = this.position;
+    const code = this.at(0);
+
+    this.position += 1;
+
+    switch (code) {
       case kLeftParen:
         return this.push(TokenKind.LParen);
       case kRightParen:
@@ -123,7 +127,7 @@ export class Lexer {
         return this.template(false);
       case kQuote:
       case kApostrophe:
-        return this.string(c);
+        return this.string(code);
       case kPercent:
         return this.pushOperator(TokenKind.Percent, TokenKind.PercentAssign);
       case kCaret:
@@ -185,7 +189,8 @@ export class Lexer {
           );
         }
         if (this.at(0) == kDot && !this.digitAt(1)) {
-          this.cur += 1;
+          this.position += 1;
+
           return this.push(TokenKind.QuestionDot);
         }
         return this.push(TokenKind.Question);
@@ -194,7 +199,8 @@ export class Lexer {
           return this.number();
         }
         if (this.at(0) == kDot && this.at(1) == kDot) {
-          this.cur += 2;
+          this.position += 2;
+
           return this.push(TokenKind.Ellipsis);
         }
         return this.push(TokenKind.Dot);
@@ -209,10 +215,10 @@ export class Lexer {
         }
         return;
       default:
-        if (this.isDigit(c)) {
+        if (this.isDigit(code)) {
           return this.number();
         }
-        if (this.isIdentStart(c)) {
+        if (this.isIdentStart(code)) {
           return this.identifier(false);
         }
     }
@@ -223,7 +229,7 @@ export class Lexer {
       kind,
       known: KnownName.None,
       start: this.start,
-      end: this.cur,
+      end: this.position,
       text: "",
       newline: this.newline,
       hash: false,
@@ -232,7 +238,7 @@ export class Lexer {
 
   private skipPreamble(): void {
     if (this.at(0) == 0xef && this.at(1) == 0xbb && this.at(2) == 0xbf) {
-      this.cur = 3;
+      this.position = 3;
     }
     if (this.at(0) == kHash && this.at(1) == kBang) {
       this.skipRestOfLine();
@@ -240,63 +246,71 @@ export class Lexer {
   }
 
   private atEnd(): boolean {
-    return this.cur >= this.end;
+    return this.position >= this.end;
   }
 
   private at(offset: int): int {
-    const value = this.source[this.cur + offset] ?? 0;
+    const value = this.source[this.position + offset] ?? 0;
 
     return value.toInt();
   }
 
-  private isDigit(c: int): boolean {
-    return c >= kZero && c <= kNine;
+  private isDigit(code: int): boolean {
+    return code >= kZero && code <= kNine;
   }
 
-  private isAlpha(c: int): boolean {
-    return (c >= kLowerA && c <= kLowerZ) || (c >= kUpperA && c <= kUpperZ);
+  private isAlpha(code: int): boolean {
+    return (
+      (code >= kLowerA && code <= kLowerZ) ||
+      (code >= kUpperA && code <= kUpperZ)
+    );
   }
 
-  private isIdentStart(c: int): boolean {
-    return this.isAlpha(c) || c == kUnderscore || c == kDollar || c >= kHigh;
+  private isIdentStart(code: int): boolean {
+    return (
+      this.isAlpha(code) ||
+      code == kUnderscore ||
+      code == kDollar ||
+      code >= kHigh
+    );
   }
 
-  private isIdentChar(c: int): boolean {
-    return this.isIdentStart(c) || this.isDigit(c);
+  private isIdentChar(code: int): boolean {
+    return this.isIdentStart(code) || this.isDigit(code);
   }
 
   private digitAt(offset: int): boolean {
-    const c = this.at(offset);
+    const code = this.at(offset);
 
-    return this.isDigit(c);
+    return this.isDigit(code);
   }
 
   private alphaAt(offset: int): boolean {
-    const c = this.at(offset);
+    const code = this.at(offset);
 
-    return this.isAlpha(c);
+    return this.isAlpha(code);
   }
 
   private identStartAt(offset: int): boolean {
-    const c = this.at(offset);
+    const code = this.at(offset);
 
-    return this.isIdentStart(c);
+    return this.isIdentStart(code);
   }
 
   private identCharAt(offset: int): boolean {
-    const c = this.at(offset);
+    const code = this.at(offset);
 
-    return this.isIdentChar(c);
+    return this.isIdentChar(code);
   }
 
   private isLineBreak(): boolean {
-    const c = this.at(0);
-    if (c == kNewline || c == kReturn) {
+    const code = this.at(0);
+    if (code == kNewline || code == kReturn) {
       return true;
     }
 
     return (
-      c == 0xe2 &&
+      code == 0xe2 &&
       this.at(1) == 0x80 &&
       (this.at(2) == 0xa8 || this.at(2) == 0xa9)
     );
@@ -305,36 +319,39 @@ export class Lexer {
   private pushOperator(plain: TokenKind, withAssign: TokenKind): void {
     const assign = this.match(kEquals);
     const kind = assign ? withAssign : plain;
+
     this.push(kind);
   }
 
-  private match(c: int): boolean {
-    if (this.at(0) != c) {
+  private match(code: int): boolean {
+    if (this.at(0) != code) {
       return false;
     }
-    this.cur += 1;
+
+    this.position += 1;
 
     return true;
   }
 
   private skipTrivia(): boolean {
     let newline = false;
+
     while (!this.atEnd()) {
-      const c = this.at(0);
-      if (c == kNewline) {
+      const code = this.at(0);
+      if (code == kNewline) {
         newline = true;
-        this.cur += 1;
+        this.position += 1;
       } else if (
-        c == kSpace ||
-        c == kTab ||
-        c == kReturn ||
-        c == kFormFeed ||
-        c == kVerticalTab
+        code == kSpace ||
+        code == kTab ||
+        code == kReturn ||
+        code == kFormFeed ||
+        code == kVerticalTab
       ) {
-        this.cur += 1;
-      } else if (c == kSlash && this.at(1) == kSlash) {
+        this.position += 1;
+      } else if (code == kSlash && this.at(1) == kSlash) {
         this.skipRestOfLine();
-      } else if (c == kSlash && this.at(1) == kStar) {
+      } else if (code == kSlash && this.at(1) == kStar) {
         newline = this.skipBlockComment() || newline;
       } else {
         return newline;
@@ -346,13 +363,15 @@ export class Lexer {
 
   private skipRestOfLine(): void {
     while (!this.atEnd() && this.at(0) != kNewline) {
-      this.cur += 1;
+      this.position += 1;
     }
   }
 
   private skipBlockComment(): boolean {
     let newline = false;
-    this.cur += 2;
+
+    this.position += 2;
+
     while (
       !this.atEnd() &&
       !(this.at(0) == kStar && this.at(1) == kSlash)
@@ -360,10 +379,12 @@ export class Lexer {
       if (this.at(0) == kNewline) {
         newline = true;
       }
-      this.cur += 1;
+
+      this.position += 1;
     }
+
     if (!this.atEnd()) {
-      this.cur += 2;
+      this.position += 2;
     }
 
     return newline;
@@ -381,6 +402,7 @@ export class Lexer {
     if (last >= 0) {
       braces[last] = (braces[last] ?? 0) + 1;
     }
+
     this.push(TokenKind.LBrace);
   }
 
@@ -390,35 +412,42 @@ export class Lexer {
     if (last < 0) {
       return this.push(TokenKind.RBrace);
     }
+
     const depth = braces[last] ?? 0;
     if (depth == 0) {
       braces.pop();
+
       return this.template(true);
     }
+
     braces[last] = depth - 1;
     this.push(TokenKind.RBrace);
   }
 
   private regex(): void {
     let inClass = false;
+
     while (!this.atEnd() && !this.isLineBreak()) {
-      const c = this.at(0);
-      this.cur += 1;
-      if (c == kBackslash) {
+      const code = this.at(0);
+
+      this.position += 1;
+      if (code == kBackslash) {
         if (!this.atEnd() && !this.isLineBreak()) {
-          this.cur += 1;
+          this.position += 1;
         }
-      } else if (c == kLeftBracket) {
+      } else if (code == kLeftBracket) {
         inClass = true;
-      } else if (c == kRightBracket) {
+      } else if (code == kRightBracket) {
         inClass = false;
-      } else if (c == kSlash && !inClass) {
+      } else if (code == kSlash && !inClass) {
         while (this.identCharAt(0)) {
-          this.cur += 1;
+          this.position += 1;
         }
+
         return this.push(TokenKind.Regex);
       }
     }
+
     this.push(TokenKind.Regex);
   }
 
@@ -429,22 +458,25 @@ export class Lexer {
     if (first == kZero && this.isRadixLetter(second)) {
       return this.radixNumber();
     }
+
     const leadingDot = first == kDot;
+
     this.skipDigits();
     const fraction = leadingDot || this.acceptFraction();
     const exponent = this.acceptExponent();
     const kind = fraction || exponent ? TokenKind.Float : TokenKind.Int;
+
     this.finishNumber(kind);
   }
 
-  private isRadixLetter(c: int): boolean {
+  private isRadixLetter(code: int): boolean {
     return (
-      c == kLowerX ||
-      c == kUpperX ||
-      c == kLowerB ||
-      c == kUpperB ||
-      c == kLowerO ||
-      c == kUpperO
+      code == kLowerX ||
+      code == kUpperX ||
+      code == kLowerB ||
+      code == kUpperB ||
+      code == kLowerO ||
+      code == kUpperO
     );
   }
 
@@ -452,13 +484,15 @@ export class Lexer {
     if (this.at(0) != kDot) {
       return false;
     }
+
     const next = this.at(1);
     const exponentLetter = next == kLowerE || next == kUpperE;
     const member = this.isIdentStart(next) && !exponentLetter;
     if (member) {
       return false;
     }
-    this.cur += 1;
+
+    this.position += 1;
     this.skipDigits();
 
     return true;
@@ -469,53 +503,60 @@ export class Lexer {
     if (letter != kLowerE && letter != kUpperE) {
       return false;
     }
+
     const sign = this.at(1);
     const signed = sign == kPlus || sign == kMinus;
     const digits = signed ? this.digitAt(2) : this.digitAt(1);
     if (!digits) {
       return false;
     }
-    this.cur += 2;
+
+    this.position += 2;
     this.skipDigits();
 
     return true;
   }
 
   private radixNumber(): void {
-    this.cur += 1;
+    this.position += 1;
+
     while (
       this.alphaAt(0) ||
       this.digitAt(0) ||
       this.at(0) == kUnderscore
     ) {
-      this.cur += 1;
+      this.position += 1;
     }
+
     const suffix = this.at(-1) == kLowerN;
-    const length = this.cur - this.start;
+    const length = this.position - this.start;
     const digits = length - kRadixPrefixLength - 1;
     if (suffix && digits > 0) {
-      this.cur -= 1;
+      this.position -= 1;
     }
+
     this.finishNumber(TokenKind.Int);
   }
 
   private skipDigits(): void {
     while (this.digitAt(0) || this.at(0) == kUnderscore) {
-      this.cur += 1;
+      this.position += 1;
     }
   }
 
   private finishNumber(kind: TokenKind): void {
     if (this.at(0) == kLowerN && !this.identCharAt(1)) {
       this.push(kind);
-      this.cur += 1;
+      this.position += 1;
+
       return;
     }
     if (this.identStartAt(0)) {
       while (this.identCharAt(0)) {
-        this.cur += 1;
+        this.position += 1;
       }
     }
+
     this.push(kind);
   }
 
@@ -525,15 +566,17 @@ export class Lexer {
       this.at(0) != kNewline &&
       this.at(0) != kReturn
     ) {
-      const c = this.at(0);
-      this.cur += 1;
-      if (c == quote) {
+      const code = this.at(0);
+
+      this.position += 1;
+      if (code == quote) {
         break;
       }
-      if (c == kBackslash && !this.atEnd()) {
-        this.cur += 1;
+      if (code == kBackslash && !this.atEnd()) {
+        this.position += 1;
       }
     }
+
     this.push(TokenKind.String);
   }
 
@@ -544,37 +587,44 @@ export class Lexer {
     const opened = continuation
       ? TokenKind.TemplateMiddle
       : TokenKind.TemplateHead;
+
     while (!this.atEnd()) {
-      const c = this.at(0);
-      this.cur += 1;
-      if (c == kBacktick) {
+      const code = this.at(0);
+
+      this.position += 1;
+      if (code == kBacktick) {
         return this.push(closed);
       }
-      if (c == kDollar && this.at(0) == kLeftBrace) {
-        this.cur += 1;
+      if (code == kDollar && this.at(0) == kLeftBrace) {
+        this.position += 1;
         this.braces.push(0);
+
         return this.push(opened);
       }
-      if (c == kBackslash && !this.atEnd()) {
-        this.cur += 1;
+      if (code == kBackslash && !this.atEnd()) {
+        this.position += 1;
       }
     }
+
     this.push(closed);
   }
 
   private identifier(hash: boolean): void {
     const start = hash ? this.start + 1 : this.start;
+
     while (this.identCharAt(0)) {
-      this.cur += 1;
+      this.position += 1;
     }
-    const text = this.source.toString("utf8", start, this.cur);
+
+    const text = this.source.toString("utf8", start, this.position);
     const kind = hash ? TokenKind.Identifier : kTokenTable.keywordKind(text);
     const known = hash ? KnownName.None : kTokenTable.knownName(text);
+
     this.tokens.push({
       kind,
       known,
       start,
-      end: this.cur,
+      end: this.position,
       text,
       newline: this.newline,
       hash,
@@ -585,6 +635,7 @@ export class Lexer {
     if (kTokenTable.isContextual(kind)) {
       return false;
     }
+
     switch (kind) {
       case TokenKind.Identifier:
       case TokenKind.This:

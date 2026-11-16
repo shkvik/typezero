@@ -26,6 +26,7 @@ partial class FileParser {
           ? { kind: TokenKind.UShrAssign, width: 4 }
           : { kind: TokenKind.UShr, width: 3 };
       }
+
       return this.glued(2, TokenKind.Assign)
         ? { kind: TokenKind.ShrAssign, width: 3 }
         : { kind: TokenKind.Shr, width: 2 };
@@ -48,11 +49,15 @@ partial class FileParser {
     const start = head.start;
     const prefix = this.unaryOpFor(head.kind);
     let left = this.unary();
+
     if (prefix != undefined && this.cursor.is(TokenKind.StarStar)) {
       const token = this.cursor.peek();
+
       this.cursor.report(token.start, Code.UnaryBeforePower);
     }
+
     let lookahead = this.binaryOperator();
+
     while (lookahead.precedence > above) {
       left = this.applyOperator(left, lookahead, start);
       lookahead = this.binaryOperator();
@@ -63,6 +68,7 @@ partial class FileParser {
 
   private binaryOperator(): BinaryOperator {
     const token = this.cursor.peek();
+
     switch (token.kind) {
       case TokenKind.As:
       case TokenKind.Instanceof:
@@ -75,6 +81,7 @@ partial class FileParser {
         const precedence = token.newline
           ? Precedence.None
           : Precedence.Relational;
+
         return { kind: token.kind, width: 1, precedence };
       }
       case TokenKind.In: {
@@ -83,11 +90,13 @@ partial class FileParser {
           place == ExpressionPlace.ForHead
             ? Precedence.None
             : Precedence.Relational;
+
         return { kind: token.kind, width: 1, precedence };
       }
       default: {
         const op = this.operator();
         const precedence = this.binaryPrecedence(op.kind);
+
         return { kind: op.kind, width: op.width, precedence };
       }
     }
@@ -95,10 +104,13 @@ partial class FileParser {
 
   private applyOperator(left: Expr, op: BinaryOperator, start: int): Expr {
     const token = this.cursor.peek();
+
     this.cursor.skip(op.width);
+
     switch (op.kind) {
       case TokenKind.As: {
         const target = this.type();
+
         return { kind: ExprKind.Cast, loc: token.start, operand: left, target };
       }
       case TokenKind.Satisfies:
@@ -107,6 +119,7 @@ partial class FileParser {
         return left;
       case TokenKind.Instanceof: {
         const right = this.binary(Precedence.Relational);
+
         return {
           kind: ExprKind.Binary,
           loc: token.start,
@@ -122,11 +135,13 @@ partial class FileParser {
         } else if (op.kind == TokenKind.BangEqEq) {
           this.cursor.report(token.start, Code.StrictNotEqualsNotSupported);
         }
+
         const floor =
           op.precedence == Precedence.Power
             ? Precedence.Multiplicative
             : op.precedence;
         const right = this.binary(floor);
+
         return {
           kind: ExprKind.Binary,
           loc: token.start,
@@ -141,9 +156,11 @@ partial class FileParser {
 
   private unary(): Expr {
     const token = this.cursor.peek();
+
     if (this.cursor.is(TokenKind.Await)) {
       this.cursor.next();
       const value = this.unary();
+
       return { kind: ExprKind.Await, loc: token.start, value };
     }
     if (
@@ -152,6 +169,7 @@ partial class FileParser {
     ) {
       this.cursor.next();
       const target = this.unary();
+
       return {
         kind: ExprKind.Update,
         loc: token.start,
@@ -160,10 +178,12 @@ partial class FileParser {
         target,
       };
     }
+
     const op = this.unaryOpFor(token.kind);
     if (op == undefined) {
       return this.postfix();
     }
+
     this.cursor.next();
     const operand = this.unary();
 
@@ -180,6 +200,7 @@ partial class FileParser {
     if (!update) {
       return target;
     }
+
     this.cursor.next();
 
     return {
@@ -325,6 +346,7 @@ partial class FileParser {
     if (kind == TokenKind.Assign) {
       return true;
     }
+
     const compound = this.assignmentOp(kind);
 
     return compound != undefined;

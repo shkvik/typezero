@@ -22,6 +22,7 @@ partial class FileParser {
     const head = this.cursor.next();
     const isConst = head.kind == TokenKind.Const;
     const decls: VarDeclarator[] = [];
+
     this.declarators(decls, isConst);
 
     return {
@@ -37,6 +38,7 @@ partial class FileParser {
     const keyword = this.cursor.next();
     const loc = keyword.start;
     const decls: VarDeclarator[] = [];
+
     this.declarators(decls, true);
     this.cursor.expectSemicolon();
 
@@ -61,12 +63,16 @@ partial class FileParser {
     const typeAnn = this.cursor.accept(TokenKind.Colon)
       ? this.type()
       : undefined;
+
     if (!this.cursor.is(TokenKind.Assign)) {
       this.cursor.error(pattern.loc, Code.DestructuringNeedsValue);
+
       return false;
     }
+
     this.cursor.next();
     const value = this.expression();
+
     this.declarePattern(decls, pattern, value, typeAnn);
 
     return true;
@@ -77,9 +83,11 @@ partial class FileParser {
     if (binding == undefined) {
       return false;
     }
+
     const init = this.cursor.accept(TokenKind.Assign)
       ? this.expression()
       : undefined;
+
     decls.push({
       ...binding,
       origin: NameOrigin.Written,
@@ -101,19 +109,24 @@ partial class FileParser {
 
   private recordConstant(name: string, init: Expr): void {
     let values: string[] = [];
+
     if (init.kind == ExprKind.StringLit) {
       values.push(init.value);
     } else if (init.kind == ExprKind.Template && init.exprs.length == 0) {
       values.push(init.quasis[0] ?? "");
     } else if (init.kind == ExprKind.Name) {
       const known = this.stringConstants.get(init.name);
+
       values = known != undefined ? known.slice() : [];
     }
+
     const all = this.stringConstants.get(name);
     if (all == undefined) {
       this.stringConstants.set(name, values);
+
       return;
     }
+
     for (const value of values) {
       all.push(value);
     }
@@ -129,8 +142,10 @@ partial class FileParser {
       });
     } else if (!kTokenTable.isName(token.kind)) {
       this.cursor.error(token.start, Code.ExpectedVariableName);
+
       return undefined;
     }
+
     this.cursor.next();
     const typeAnn = this.cursor.accept(TokenKind.Colon)
       ? this.type()

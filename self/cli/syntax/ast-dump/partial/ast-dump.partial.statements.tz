@@ -14,35 +14,44 @@ partial class Dumper {
     if (stmt == undefined) {
       return this.missing();
     }
+
     this.dumpStmt(stmt);
   }
 
   private dumpStmts(stmts: Stmt[]): void {
     this.nested();
+
     for (const stmt of stmts) {
       this.dumpStmt(stmt);
     }
+
     this.back();
   }
 
   private dumpStmt(stmt: Stmt): void {
     const loc = stmt.loc;
+
     switch (stmt.kind) {
       case StmtKind.Block: {
         const end = stmt.end ?? kNoLocation;
+
         this.line(`Block ${loc} end=${end} n=${stmt.body.length}`);
+
         return this.dumpStmts(stmt.body);
       }
       case StmtKind.VarDecl: {
         const isConst = this.flag(stmt.isConst);
         const isUsing = this.flag(stmt.isUsing);
+
         this.line(
           `VarDecl ${loc} const=${isConst} using=${isUsing} n=${stmt.decls.length}`,
         );
         this.nested();
-        for (const d of stmt.decls) {
-          this.dumpDeclarator(d);
+
+        for (const declarator of stmt.decls) {
+          this.dumpDeclarator(declarator);
         }
+
         return this.back();
       }
       case StmtKind.Function:
@@ -81,6 +90,7 @@ partial class Dumper {
         const isConst = this.flag(stmt.isConst);
         const keys = this.flag(stmt.keys);
         const isAwait = this.flag(stmt.isAwait);
+
         this.line(
           `ForOf ${loc} const=${isConst} keys=${keys} await=${isAwait}`,
         );
@@ -88,23 +98,26 @@ partial class Dumper {
         this.dumpDeclarator(stmt.binding);
         this.dumpExpr(stmt.iterable);
         this.dumpStmt(stmt.body);
+
         return this.back();
       }
       case StmtKind.Switch:
         this.line(`Switch ${loc} n=${stmt.cases.length}`);
         this.nested();
         this.dumpExpr(stmt.discriminant);
-        for (const c of stmt.cases) {
-          this.line(`Case ${c.loc} n=${c.body.length}`);
+        for (const switchCase of stmt.cases) {
+          this.line(`Case ${switchCase.loc} n=${switchCase.body.length}`);
           this.nested();
-          this.dumpOptionalExpr(c.test);
+          this.dumpOptionalExpr(switchCase.test);
           this.back();
-          this.dumpStmts(c.body);
+          this.dumpStmts(switchCase.body);
         }
         return this.back();
       case StmtKind.Labeled: {
         const label = this.quote(stmt.label);
+
         this.line(`Labeled ${loc} ${label}`);
+
         return this.dumpStmts([stmt.body]);
       }
       case StmtKind.Return:
@@ -114,10 +127,12 @@ partial class Dumper {
         return this.back();
       case StmtKind.Break: {
         const label = this.quote(stmt.label);
+
         return this.line(`Break ${loc} ${label}`);
       }
       case StmtKind.Continue: {
         const label = this.quote(stmt.label);
+
         return this.line(`Continue ${loc} ${label}`);
       }
       case StmtKind.Empty:
@@ -127,6 +142,7 @@ partial class Dumper {
       case StmtKind.TypeAlias: {
         const name = this.quote(stmt.name);
         const isHandle = this.flag(stmt.isHandle);
+
         this.line(
           `TypeAlias ${loc} ${name} handle=${isHandle} ` +
             `tp=${stmt.typeParams.length} bases=${stmt.bases.length}`,
@@ -135,19 +151,24 @@ partial class Dumper {
         this.dumpTypeParams(stmt.typeParams);
         this.dumpType(stmt.type);
         this.dumpTypes(stmt.bases);
+
         return this.back();
       }
       case StmtKind.Enum: {
         const name = this.quote(stmt.name);
+
         this.line(`Enum ${loc} ${name} n=${stmt.members.length}`);
         this.nested();
+
         for (const member of stmt.members) {
           const memberName = this.quote(member.name);
+
           this.line(`EnumMember ${member.loc} ${memberName}`);
           this.nested();
           this.dumpOptionalExpr(member.init);
           this.back();
         }
+
         return this.back();
       }
       case StmtKind.Class:
@@ -155,20 +176,24 @@ partial class Dumper {
     }
   }
 
-  private dumpDeclarator(d: VarDeclarator): void {
-    const form = d.form;
+  private dumpDeclarator(declarator: VarDeclarator): void {
+    const form = declarator.form;
     let shape = "form=plain";
+
     if (form.kind == BindingKind.Object) {
       shape = "form=object";
     } else if (form.kind == BindingKind.Array) {
       const rest = this.flag(form.rest);
+
       shape = `form=array ${form.length} ${rest}`;
     }
-    const name = this.quote(d.name);
-    this.line(`Declarator ${d.loc} ${name} ${shape}`);
+
+    const name = this.quote(declarator.name);
+
+    this.line(`Declarator ${declarator.loc} ${name} ${shape}`);
     this.nested();
-    this.dumpOptionalType(d.typeAnn);
-    this.dumpOptionalExpr(d.init);
+    this.dumpOptionalType(declarator.typeAnn);
+    this.dumpOptionalExpr(declarator.init);
     this.back();
   }
 }

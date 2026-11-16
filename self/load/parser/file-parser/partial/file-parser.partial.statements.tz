@@ -23,8 +23,10 @@ partial class FileParser {
     if (kTokenTable.isName(token.kind) && next.kind == TokenKind.Colon) {
       this.cursor.skip(2);
       const body = this.statement(false);
+
       return { kind: StmtKind.Labeled, loc, label: token.text, body };
     }
+
     switch (token.kind) {
       case TokenKind.At:
         return this.decoratedStatement(topLevel);
@@ -111,12 +113,16 @@ partial class FileParser {
     if (token.kind == TokenKind.Var) {
       this.cursor.report(token.start, Code.VarNotSupported);
     }
+
     const next = this.cursor.lookahead();
     if (token.kind == TokenKind.Const && next.kind == TokenKind.Enum) {
       this.cursor.next();
+
       return this.enumDecl();
     }
+
     const decl = this.varDecl();
+
     this.cursor.expectSemicolon();
 
     return decl;
@@ -194,17 +200,20 @@ partial class FileParser {
     if (next.kind != TokenKind.Class || next.newline) {
       return this.expressionStatement(loc);
     }
-    this.cursor.next();
-    const cls = this.classDecl(false);
-    cls.isAbstract = true;
 
-    return cls;
+    this.cursor.next();
+    const declaration = this.classDecl(false);
+
+    declaration.isAbstract = true;
+
+    return declaration;
   }
 
   private asyncStatement(loc: int): Stmt {
     if (!this.asyncFunctionAhead()) {
       return this.expressionStatement(loc);
     }
+
     this.cursor.next();
 
     return this.functionDeclaration(true);
@@ -249,23 +258,27 @@ partial class FileParser {
     if (!topLevel) {
       this.cursor.report(loc, Code.PartialClassNotTopLevel);
     }
-    this.cursor.next();
-    const cls = this.classDecl(false);
-    cls.isPartial = true;
 
-    return cls;
+    this.cursor.next();
+    const declaration = this.classDecl(false);
+
+    declaration.isPartial = true;
+
+    return declaration;
   }
 
   private strayHandler(keyword: Token): Stmt {
     const loc = keyword.start;
     const code =
       keyword.kind == TokenKind.Catch ? Code.NoCatch : Code.NoFinally;
+
     this.cursor.report(loc, code);
     this.cursor.next();
     if (this.cursor.accept(TokenKind.LParen)) {
       this.cursor.skipTo(TokenKind.RParen);
       this.cursor.accept(TokenKind.RParen);
     }
+
     this.block();
 
     return this.marker(StmtKind.Empty, loc);
@@ -275,10 +288,12 @@ partial class FileParser {
     const next = this.cursor.lookahead();
     if (next.kind == TokenKind.Function) {
       this.cursor.next();
+
       return this.declaredFunction();
     }
     if (!this.library && next.kind == TokenKind.Class) {
       this.cursor.next();
+
       return this.handleClass();
     }
     if (
@@ -304,10 +319,13 @@ partial class FileParser {
       ) {
         const pattern = this.patternFromLiteral(target);
         const stmt = this.assignPattern(loc, pattern, expr.value);
+
         this.cursor.expectSemicolon();
+
         return stmt;
       }
     }
+
     this.cursor.expectSemicolon();
 
     return { kind: StmtKind.Expr, loc, expr };
@@ -320,17 +338,20 @@ partial class FileParser {
   ): Stmt {
     this.cursor.report(loc, code, details);
     this.cursor.next();
+
     while (
       !this.cursor.is(TokenKind.End) &&
       !this.cursor.is(TokenKind.RBrace)
     ) {
       if (this.cursor.accept(TokenKind.LBrace)) {
         this.cursor.skipToClosingBrace();
+
         break;
       }
       if (this.cursor.accept(TokenKind.Semi)) {
         break;
       }
+
       this.cursor.next();
       const current = this.cursor.peek();
       if (current.newline) {
@@ -349,6 +370,7 @@ partial class FileParser {
       this.cursor.next();
       label = target.text;
     }
+
     this.cursor.expectSemicolon();
     const kind =
       token.kind == TokenKind.Break ? StmtKind.Break : StmtKind.Continue;
@@ -359,12 +381,15 @@ partial class FileParser {
   private switchStatement(): Stmt {
     const keyword = this.cursor.next();
     const loc = keyword.start;
+
     this.cursor.expect(TokenKind.LParen, Code.ExpectedAfterSwitch);
     const discriminant = this.sequence();
+
     this.cursor.expect(TokenKind.RParen, Code.ExpectedAfterSwitchValue);
     this.cursor.expect(TokenKind.LBrace, Code.ExpectedSwitchCasesStart);
     const cases: SwitchCase[] = [];
     let hasDefault = false;
+
     while (
       this.cursor.is(TokenKind.Case) ||
       this.cursor.is(TokenKind.Default)
@@ -372,27 +397,35 @@ partial class FileParser {
       const clause = this.cursor.peek();
       const caseLoc = clause.start;
       let test: Expr | undefined = undefined;
+
       if (this.cursor.accept(TokenKind.Case)) {
         test = this.expression();
       } else {
         if (hasDefault) {
           this.cursor.report(caseLoc, Code.OneDefaultInSwitch);
         }
+
         hasDefault = true;
         this.cursor.next();
       }
+
       const afterLabel =
         test != undefined
           ? Code.ExpectedAfterCaseValue
           : Code.ExpectedAfterDefault;
+
       this.cursor.expect(TokenKind.Colon, afterLabel);
       const body = this.caseBody();
+
       cases.push({ loc: caseLoc, test, body });
     }
+
     if (!this.cursor.is(TokenKind.RBrace) && !this.cursor.is(TokenKind.End)) {
       const token = this.cursor.peek();
+
       this.cursor.error(token.start, Code.ExpectedCaseOrDefault);
     }
+
     this.cursor.expect(TokenKind.RBrace, Code.ExpectedSwitchClose);
 
     return { kind: StmtKind.Switch, loc, discriminant, cases };
@@ -401,6 +434,7 @@ partial class FileParser {
   private statementWithRecovery(topLevel: boolean): Stmt {
     const first = this.cursor.peek();
     const statement = this.statement(topLevel);
+
     if (this.cursor.isRecovering()) {
       this.cursor.recoverStatement(first.start);
     }
@@ -410,6 +444,7 @@ partial class FileParser {
 
   private caseBody(): Stmt[] {
     const body: Stmt[] = [];
+
     while (
       !this.cursor.is(TokenKind.Case) &&
       !this.cursor.is(TokenKind.Default) &&
@@ -417,6 +452,7 @@ partial class FileParser {
       !this.cursor.is(TokenKind.End)
     ) {
       const statement = this.statementWithRecovery(false);
+
       body.push(statement);
     }
 
@@ -426,17 +462,22 @@ partial class FileParser {
   private block(): BlockStmt {
     const brace = this.cursor.peek();
     const loc = brace.start;
+
     this.cursor.expect(TokenKind.LBrace, Code.ExpectedBlockStart);
     const body: Stmt[] = [];
+
     while (
       !this.cursor.is(TokenKind.RBrace) &&
       !this.cursor.is(TokenKind.End)
     ) {
       const statement = this.statementWithRecovery(false);
+
       body.push(statement);
     }
+
     const closing = this.cursor.peek();
     const end = closing.start;
+
     this.cursor.expect(TokenKind.RBrace, Code.ExpectedBlockClose);
 
     return { kind: StmtKind.Block, loc, body, end };
@@ -445,6 +486,7 @@ partial class FileParser {
   private condition(code: Code): Expr {
     this.cursor.expect(TokenKind.LParen, code);
     const cond = this.sequence();
+
     this.cursor.expect(TokenKind.RParen, Code.ExpectedAfterCondition);
 
     return cond;
@@ -472,6 +514,7 @@ partial class FileParser {
       token.kind != TokenKind.End &&
       !token.newline;
     const value = hasValue ? this.sequence() : undefined;
+
     this.cursor.expectSemicolon();
 
     return { kind: StmtKind.Return, loc, value };
@@ -480,6 +523,7 @@ partial class FileParser {
   private throwStatement(): Stmt {
     const keyword = this.cursor.next();
     const loc = keyword.start;
+
     this.cursor.report(loc, Code.NoThrow);
     const token = this.cursor.peek();
     const hasValue =
@@ -497,15 +541,18 @@ partial class FileParser {
 
   private strayTry(): Stmt {
     const token = this.cursor.peek();
+
     this.cursor.report(token.start, Code.NoTry);
     this.cursor.next();
     const block = this.block();
+
     if (this.cursor.is(TokenKind.Catch)) {
       this.cursor.next();
       if (this.cursor.accept(TokenKind.LParen)) {
         this.cursor.skipTo(TokenKind.RParen);
         this.cursor.expect(TokenKind.RParen, Code.ExpectedAfterCatchVariable);
       }
+
       this.block();
     }
     if (this.cursor.is(TokenKind.Finally)) {

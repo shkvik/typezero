@@ -37,9 +37,11 @@ export class Dumper {
 
   public dumpFile(file: SourceFile): void {
     this.line(`items ${file.items.length}`);
+
     for (const item of file.items) {
       this.dumpStmt(item);
     }
+
     this.dumpModules(file);
     this.dumpTables(file);
   }
@@ -47,51 +49,62 @@ export class Dumper {
   private line(text: string): void {
     while (this.indents.length <= this.depth) {
       const last = this.indents[this.indents.length - 1] ?? "";
+
       this.indents.push(`${last}  `);
     }
+
     const indent = this.indents[this.depth] ?? "";
+
     this.lines.push(`${indent}${text}`);
   }
 
   private hex4(value: int): string {
     const digits: string[] = [];
+
     for (let shift = 12; shift >= 0; shift -= 4) {
       const digit = (value >> shift) & 15;
       const hex = kHex.charAt(digit);
+
       digits.push(hex);
     }
 
     return digits.join("");
   }
 
-  private unicodeEscape(c: int): string {
-    const hex = this.hex4(c);
+  private unicodeEscape(code: int): string {
+    const hex = this.hex4(code);
 
     return `\\u${hex}`;
   }
 
-  private needsEscape(c: int, quoting: Quoting): boolean {
-    const control = c < kSpace || c == kDelete;
-    const delimiter = c == kQuote || c == kBackslash;
+  private needsEscape(code: int, quoting: Quoting): boolean {
+    const control = code < kSpace || code == kDelete;
+    const delimiter = code == kQuote || code == kBackslash;
     if (control || delimiter) {
       return true;
     }
 
-    return quoting == Quoting.EscapeUnicode && c >= kHigh;
+    return quoting == Quoting.EscapeUnicode && code >= kHigh;
   }
 
   private quote(text: string, quoting: Quoting = Quoting.KeepUnicode): string {
     const parts: string[] = [];
+
     for (let i = 0; i < text.length; i++) {
-      const c = text.charCodeAt(i);
-      if (this.needsEscape(c, quoting)) {
-        const escape = this.unicodeEscape(c);
+      const code = text.charCodeAt(i);
+      if (this.needsEscape(code, quoting)) {
+        const escape = this.unicodeEscape(code);
+
         parts.push(escape);
+
         continue;
       }
+
       const character = text.charAt(i);
+
       parts.push(character);
     }
+
     const joined = parts.join("");
 
     return `"${joined}"`;
@@ -99,6 +112,7 @@ export class Dumper {
 
   private bits(value: double): string {
     const buffer = Buffer.alloc(8);
+
     buffer.writeDoubleBE(value, 0);
 
     return buffer.toString("hex");
@@ -112,9 +126,12 @@ export class Dumper {
     if (values.length == 0) {
       return "-";
     }
+
     const parts: string[] = [];
+
     for (const value of values) {
       const part = this.flag(value);
+
       parts.push(part);
     }
 
@@ -123,10 +140,13 @@ export class Dumper {
 
   private quoteAll(names: string[]): string {
     const parts: string[] = [];
+
     for (const name of names) {
       const part = this.quote(name);
+
       parts.push(part);
     }
+
     const joined = parts.join(",");
 
     return `[${joined}]`;
@@ -162,6 +182,7 @@ export class Dumper {
 
   private dumpModules(file: SourceFile): void {
     this.line(`imports ${file.imports.length}`);
+
     for (const decl of file.imports) {
       const from = decl.from;
       const path = this.quote(from.path);
@@ -170,17 +191,21 @@ export class Dumper {
       const wholeLoc = whole?.loc ?? kNoLocation;
       const wholeIsDefault = this.flag(whole?.isDefault ?? false);
       const isPartList = this.flag(decl.isPartList);
+
       this.line(
         `Import ${decl.loc} ${path} ${from.loc} ${wholeName} ${wholeLoc} ` +
           `${wholeIsDefault} ${isPartList} ${decl.names.length}`,
       );
       this.dumpModuleNames(decl.names);
     }
+
     this.line(`exports ${file.exports.length}`);
+
     for (const decl of file.exports) {
       const from = decl.from;
       const path = this.quote(from?.path ?? "");
       const pathLoc = from?.loc ?? kNoLocation;
+
       this.line(
         `Export ${decl.loc} ${decl.form} ${path} ${pathLoc} ${decl.names.length}`,
       );
@@ -190,43 +215,59 @@ export class Dumper {
 
   private dumpModuleNames(names: ModuleName[]): void {
     this.nested();
+
     for (const name of names) {
       const quotedName = this.quote(name.name);
       const quotedAs = this.quote(name.as);
+
       this.line(`Name ${quotedName} ${name.loc} ${quotedAs} ${name.asLoc}`);
     }
+
     this.back();
   }
 
   private dumpTables(file: SourceFile): void {
     const fields: string[] = [];
+
     for (const field of file.fieldNames) {
       fields.push(field);
     }
+
     fields.sort();
     const quotedFields: string[] = [];
+
     for (const field of fields) {
       const quoted = this.quote(field);
+
       quotedFields.push(` ${quoted}`);
     }
+
     const fieldList = quotedFields.join("");
+
     this.line(`fields ${fields.length}${fieldList}`);
     const keys: string[] = [];
+
     for (const key of file.stringConstants.keys()) {
       keys.push(key);
     }
+
     keys.sort();
     this.line(`constants ${keys.length}`);
+
     for (const key of keys) {
       const found = file.stringConstants.get(key);
       const values = found ?? [];
       const quotedValues: string[] = [];
+
       for (const value of values) {
         const quoted = this.quote(value);
+
         quotedValues.push(` ${quoted}`);
       }
+
       const valueList = quotedValues.join("");
       const quotedKey = this.quote(key);
+
       this.line(`  ${quotedKey} ${values.length}${valueList}`);
     }
   }

@@ -15,12 +15,16 @@ import { Precedence } from "../types/file-parser.types.operators.tz";
 partial class FileParser {
   private sequence(): Expr {
     const first = this.expression();
+
     if (!this.cursor.is(TokenKind.Comma)) {
       return first;
     }
+
     const exprs: Expr[] = [first];
+
     while (this.cursor.accept(TokenKind.Comma)) {
       const next = this.expression();
+
       exprs.push(next);
     }
 
@@ -30,16 +34,20 @@ partial class FileParser {
   private expression(): Expr {
     const head = this.cursor.peek();
     const start = head.start;
+
     if (this.cursor.is(TokenKind.Yield)) {
       return this.yieldExpression();
     }
+
     const target = this.conditional();
     const op = this.operator();
     if (!this.isAssignment(op.kind)) {
       return target;
     }
+
     const operatorToken = this.cursor.peek();
     const loc = operatorToken.start;
+
     this.cursor.skip(op.width);
     const value = this.expression();
 
@@ -60,6 +68,7 @@ partial class FileParser {
     const delegate = !star.newline && this.cursor.accept(TokenKind.Star);
     let value: Expr | undefined = undefined;
     const token = this.cursor.peek();
+
     if (delegate) {
       value = this.expression();
     } else if (!token.newline && !this.endsYield(token.kind)) {
@@ -75,6 +84,7 @@ partial class FileParser {
     }
     if (this.context.functionKind != FunctionKind.Generator) {
       this.cursor.report(loc, Code.YieldOutsideGenerator);
+
       return value ?? { kind: ExprKind.Undefined, loc };
     }
 
@@ -83,12 +93,15 @@ partial class FileParser {
 
   private conditional(): Expr {
     const cond = this.binary(Precedence.None);
+
     if (!this.cursor.is(TokenKind.Question)) {
       return cond;
     }
+
     const question = this.cursor.next();
     const loc = question.start;
     const thenExpr = this.expression();
+
     this.cursor.expect(TokenKind.Colon, Code.ExpectedInConditional);
     const elseExpr = this.expression();
 
@@ -97,8 +110,10 @@ partial class FileParser {
 
   private primary(): Expr {
     const outer = this.context;
+
     this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
     const expr = this.primaryInside();
+
     this.context = outer;
 
     return expr;
@@ -107,10 +122,13 @@ partial class FileParser {
   private primaryInside(): Expr {
     const token = this.cursor.peek();
     const loc = token.start;
+
     switch (token.kind) {
       case TokenKind.At: {
         const decorators = this.decorators();
+
         this.rejectDecorators(decorators);
+
         return this.cursor.isRecovering()
           ? this.invalid(loc)
           : this.primaryInside();
@@ -121,7 +139,9 @@ partial class FileParser {
         return this.floatLiteral();
       case TokenKind.String: {
         const decoded = this.literals.string(token);
+
         this.cursor.next();
+
         return { kind: ExprKind.StringLit, loc, value: decoded.text };
       }
       case TokenKind.TemplateString:
@@ -129,7 +149,9 @@ partial class FileParser {
         return this.template(false);
       case TokenKind.Regex: {
         const text = this.literals.regex(token);
+
         this.cursor.next();
+
         return {
           kind: ExprKind.RegexLit,
           loc,
@@ -157,8 +179,9 @@ partial class FileParser {
       case TokenKind.Identifier:
         return this.identifierPrimary(token);
       case TokenKind.Function: {
-        const fn = this.functionDecl(true, false);
-        return { kind: ExprKind.Function, loc, fn };
+        const declaration = this.functionDecl(true, false);
+
+        return { kind: ExprKind.Function, loc, fn: declaration };
       }
       case TokenKind.LParen:
         return this.parenthesized();
@@ -183,8 +206,10 @@ partial class FileParser {
     if (this.arrowAhead()) {
       return this.arrow([], false);
     }
+
     this.cursor.next();
     const inner = this.sequence();
+
     this.cursor.expect(TokenKind.RParen, Code.ExpectedParenthesizedClose);
 
     return inner;
@@ -194,6 +219,7 @@ partial class FileParser {
     const start = this.cursor.mark();
     const less = this.cursor.peek();
     const text = less.start;
+
     this.cursor.startDiscarding();
     this.cursor.stopRecovering();
     const typeParams = this.typeParams();
@@ -201,11 +227,14 @@ partial class FileParser {
       !this.cursor.isRecovering() &&
       this.cursor.is(TokenKind.LParen) &&
       this.arrowAhead();
+
     this.cursor.stopDiscarding();
     if (isArrow) {
       this.cursor.restoreRecovering(start);
+
       return this.arrow(typeParams, false, text);
     }
+
     this.cursor.reset(start);
     this.cursor.error(loc, Code.ExpectedExpression, { found: TokenKind.Less });
 
@@ -218,6 +247,7 @@ partial class FileParser {
       next.kind == TokenKind.Dot
         ? Code.ImportMetaNotSupported
         : Code.DynamicImportNotSupported;
+
     this.cursor.report(token.start, code);
     this.cursor.next();
 
@@ -237,8 +267,10 @@ partial class FileParser {
         Code.ExpectedExpression,
         { found: TokenKind.Class },
       );
+
       return this.invalid(token.start);
     }
+
     const decl = this.classDecl(true);
 
     return { kind: ExprKind.Class, loc: token.start, decl };
@@ -251,11 +283,14 @@ partial class FileParser {
     if (next.kind == TokenKind.Arrow && !next.newline) {
       return this.arrow([], false);
     }
+
     const generator = this.context.functionKind == FunctionKind.Generator;
     if (token.kind == TokenKind.Yield && generator) {
       this.cursor.report(loc, Code.YieldNeedsParentheses);
+
       return this.yieldExpression();
     }
+
     this.cursor.next();
     if (token.kind == TokenKind.Undefined) {
       return { kind: ExprKind.Undefined, loc };

@@ -10,7 +10,12 @@ import {
 } from "../../../../program/ast/types/ast.types.types.tz";
 import { ExprKind } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { TypePlace } from "../types/file-parser.types.context.tz";
-import { kExactDoubleLimit } from "../const/file-parser.const.types.tz";
+import {
+  kBooleanTypeName,
+  kExactDoubleLimit,
+  kNumberTypeName,
+  kStringTypeName,
+} from "../const/file-parser.const.types.tz";
 
 partial class FileParser {
   private type(place: TypePlace = TypePlace.Plain): TypeRef {
@@ -298,7 +303,7 @@ partial class FileParser {
       number: 0.0,
       integer: false,
     };
-    ref.name = "string";
+    ref.name = kStringTypeName;
 
     return ref;
   }
@@ -314,7 +319,7 @@ partial class FileParser {
       number: truth,
       integer: false,
     };
-    ref.name = "boolean";
+    ref.name = kBooleanTypeName;
 
     return ref;
   }
@@ -360,7 +365,7 @@ partial class FileParser {
         number: 0.0,
         integer: false,
       };
-      ref.name = "string";
+      ref.name = kStringTypeName;
 
       return ref;
     }
@@ -402,25 +407,25 @@ partial class FileParser {
     const ref = this.typeRef(first.start);
     const negative = this.cursor.accept(TokenKind.Minus);
 
-    const lit = this.cursor.is(TokenKind.Int)
+    const literal = this.cursor.is(TokenKind.Int)
       ? this.intLiteral()
       : this.floatLiteral();
 
     let number = 0.0;
     let integer = false;
 
-    if (lit.kind == ExprKind.IntLit) {
-      number = this.integerAsDouble(lit.value);
+    if (literal.kind == ExprKind.IntLit) {
+      number = this.integerAsDouble(literal.value);
       integer = true;
-    } else if (lit.kind == ExprKind.FloatLit) {
-      number = lit.value;
+    } else if (literal.kind == ExprKind.FloatLit) {
+      number = literal.value;
     }
     if (negative) {
       number = -number;
     }
 
     ref.form = { kind: TypeKind.Literal, text: "", number, integer };
-    ref.name = "number";
+    ref.name = kNumberTypeName;
 
     return ref;
   }
