@@ -1,0 +1,9 @@
+import { TokenKind } from "../../token.tz";
+
+export type Details = {
+  readonly expected?: TokenKind;
+  readonly found?: TokenKind;
+  readonly word?: string;
+};
+
+export type Message = { readonly text: string };

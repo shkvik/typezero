@@ -1,5 +1,5 @@
 import { Code } from "../../../../diagnostic/code.tz";
-import { Details } from "../../../../diagnostic/message.tz";
+import { Details } from "../../../../diagnostic/types/message.types.tz";
 
 export type Mark = { readonly at: int; readonly recovering: boolean };
 

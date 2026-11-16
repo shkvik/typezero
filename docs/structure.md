@@ -99,7 +99,9 @@ library/          весь tz → bin/lib: <тема>/*.tz
 editors/          vscode/ — расширение VS Code; types/ — объявления для будущего плагина tsserver
 self/             компилятор на tz, пробный (порт compiler/load): token.tz, ast.tz, dump.tz,
                   main.tz; diagnostic/ — коды ошибок (code.tz: enum Code, значения "TZ1101") и
-                  их тексты (message.tz: Record<Code, Message>, подстановка {expected}/{found});
+                  их тексты (message.tz: messageText — подстановка {expected}/{found}/{word};
+                  таблица kMessages: Record<Code, Message> — в const/message.const.tz, типы
+                  Details, Message — в types/message.types.tz);
                   load/lexer/lexer.tz (tokenize → массив токенов); load/parser/ — Parser (parser.tz:
                   run() по списку файлов → ParsedFile[]; типы SourceText, ParsedFile — в
                   types/parser.types.tz), Cursor (cursor/: позиция, откаты,
