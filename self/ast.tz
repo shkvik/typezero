@@ -510,21 +510,19 @@ export type ArrayBinding = {
 };
 export type BindingForm = PlainBinding | ArrayBinding;
 
+export enum NameOrigin {
+  Written,
+  Generated,
+}
+
 export type VarDeclarator = {
   readonly name: string;
+  readonly origin: NameOrigin;
   readonly loc: int;
   readonly typeAnn?: TypeRef;
   readonly init?: Expr;
   readonly form: BindingForm;
 };
-
-export function declarator(
-  name: string,
-  loc: int,
-  init: Expr | undefined,
-): VarDeclarator {
-  return { name, loc, init, form: { kind: BindingKind.Plain } };
-}
 
 export type BlockStmt = {
   readonly kind: StmtKind.Block;
@@ -701,7 +699,7 @@ export type ClassField = {
 export type ClassDecl = {
   readonly kind: StmtKind.Class;
   readonly loc: int;
-  name: string;
+  name?: string;
   isAbstract: boolean;
   isPartial: boolean;
   readonly base?: TypeRef;

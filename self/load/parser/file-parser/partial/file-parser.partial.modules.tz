@@ -7,6 +7,7 @@ import {
   ExprKind,
   ImportDecl,
   ModuleName,
+  NameOrigin,
   Stmt,
   StmtKind,
   marker,
@@ -19,6 +20,19 @@ enum ImportForm {
 }
 
 type PathText = { readonly path: string; readonly loc: int };
+
+type ImportClause =
+  | { readonly kind: ImportForm.Named }
+  | { readonly kind: ImportForm.Default; readonly name: string }
+  | { readonly kind: ImportForm.Namespace; readonly name?: string };
+
+function clauseName(clause: ImportClause): string | undefined {
+  if (clause.kind == ImportForm.Named) {
+    return undefined;
+  }
+
+  return clause.name;
+}
 
 function isBareModule(path: string): boolean {
   switch (path) {
@@ -108,33 +122,29 @@ partial class FileParser {
       next.kind != TokenKind.From;
     if (typeWord) {
       const token = this.cursor.peek();
-      this.cursor.report(
-        token.start,
-        "'import type' is not needed",
-      );
+      this.cursor.report(token.start, "'import type' is not needed");
       this.cursor.next();
     }
-    let form = ImportForm.Named;
     const head = this.cursor.peek();
     const formLoc = head.start;
-    let defaultName = "";
+    let clause: ImportClause = { kind: ImportForm.Named };
     if (this.cursor.accept(TokenKind.Star)) {
-      form = ImportForm.Namespace;
+      let name: string | undefined = undefined;
       if (this.cursor.expect(TokenKind.As, "after 'import *'")) {
         const alias = this.cursor.peek();
         if (isName(alias.kind)) {
-          defaultName = alias.text;
+          name = alias.text;
         }
         this.cursor.expectName("after 'import * as'");
       }
+      clause = { kind: ImportForm.Namespace, name };
     } else if (this.cursor.atName()) {
-      form = ImportForm.Default;
       const alias = this.cursor.next();
-      defaultName = alias.text;
+      clause = { kind: ImportForm.Default, name: alias.text };
       if (this.cursor.is(TokenKind.Assign)) {
         this.cursor.error(
           formLoc,
-          `'import ${defaultName} = ...' is not supported`,
+          `'import ${alias.text} = ...' is not supported`,
         );
         return marker(StmtKind.Empty, loc);
       }
@@ -152,7 +162,7 @@ partial class FileParser {
     const names: ModuleName[] = [];
     if (this.cursor.is(TokenKind.LBrace)) {
       this.moduleNames(names, true);
-    } else if (form == ImportForm.Named) {
+    } else if (clause.kind == ImportForm.Named) {
       const token = this.cursor.peek();
       this.cursor.error(
         token.start,
@@ -167,7 +177,7 @@ partial class FileParser {
       return marker(StmtKind.Empty, loc);
     }
 
-    return this.finishImport(loc, form, formLoc, defaultName, names, from);
+    return this.finishImport(loc, clause, formLoc, names, from);
   }
 
   private partList(loc: int, topLevel: boolean): Stmt {
@@ -191,9 +201,8 @@ partial class FileParser {
 
   private finishImport(
     loc: int,
-    form: ImportForm,
+    clause: ImportClause,
     formLoc: int,
-    defaultName: string,
     names: ModuleName[],
     from: PathText,
   ): Stmt {
@@ -207,7 +216,7 @@ partial class FileParser {
     }
     this.cursor.expectSemicolon();
     if (json) {
-      if (form != ImportForm.Default) {
+      if (clause.kind != ImportForm.Default) {
         this.cursor.report(
           formLoc,
           "a JSON file is one value: import it whole",
@@ -223,30 +232,27 @@ partial class FileParser {
       names.push({
         name: "json",
         loc: formLoc,
-        as: defaultName,
+        as: clause.name,
         asLoc: formLoc,
       });
       this.addImport(loc, names, from, "", -1, false);
       return marker(StmtKind.Empty, loc);
     }
-    if (
-      form != ImportForm.Named &&
-      isBuiltinModule(from.path) &&
-      defaultName != ""
-    ) {
+    const whole = clauseName(clause);
+    if (whole != undefined && isBuiltinModule(from.path)) {
       this.addImport(
         loc,
         names,
         from,
-        defaultName,
+        whole,
         formLoc,
-        form == ImportForm.Default,
+        clause.kind == ImportForm.Default,
       );
       return marker(StmtKind.Empty, loc);
     }
-    if (form == ImportForm.Namespace) {
+    if (clause.kind == ImportForm.Namespace) {
       this.cursor.report(formLoc, "'import * as' is not supported");
-    } else if (form == ImportForm.Default) {
+    } else if (clause.kind == ImportForm.Default) {
       this.cursor.report(formLoc, "default imports are not supported");
     } else if (names.length == 0) {
       this.cursor.report(loc, "an import must name what it takes");
@@ -346,10 +352,7 @@ partial class FileParser {
     const next = this.cursor.lookahead();
     if (this.cursor.is(TokenKind.Type) && next.kind == TokenKind.LBrace) {
       const token = this.cursor.peek();
-      this.cursor.report(
-        token.start,
-        "'export type' is not needed",
-      );
+      this.cursor.report(token.start, "'export type' is not needed");
       this.cursor.next();
     }
     if (!this.cursor.is(TokenKind.LBrace)) {
@@ -457,9 +460,7 @@ partial class FileParser {
   private moduleNames(names: ModuleName[], isImport: boolean): void {
     this.cursor.next();
     const keyword = isImport ? "import" : "export";
-    let more =
-      !this.cursor.is(TokenKind.RBrace) && !this.cursor.is(TokenKind.End);
-    while (more) {
+    while (this.cursor.insideList(TokenKind.RBrace)) {
       const next = this.cursor.lookahead();
       if (this.cursor.is(TokenKind.Type) && isName(next.kind)) {
         const token = this.cursor.peek();
@@ -474,10 +475,9 @@ partial class FileParser {
         return;
       }
       names.push(name);
-      more =
-        this.cursor.accept(TokenKind.Comma) &&
-        !this.cursor.is(TokenKind.RBrace) &&
-        !this.cursor.is(TokenKind.End);
+      if (!this.cursor.accept(TokenKind.Comma)) {
+        break;
+      }
     }
     this.cursor.expect(
       TokenKind.RBrace,
@@ -551,9 +551,7 @@ partial class FileParser {
     }
     let typeJson = false;
     let other = false;
-    let more =
-      !this.cursor.is(TokenKind.RBrace) && !this.cursor.is(TokenKind.End);
-    while (more) {
+    while (this.cursor.insideList(TokenKind.RBrace)) {
       const key = this.attributeKey();
       if (
         key == undefined ||
@@ -575,10 +573,9 @@ partial class FileParser {
       } else {
         other = true;
       }
-      more =
-        this.cursor.accept(TokenKind.Comma) &&
-        !this.cursor.is(TokenKind.RBrace) &&
-        !this.cursor.is(TokenKind.End);
+      if (!this.cursor.accept(TokenKind.Comma)) {
+        break;
+      }
     }
     this.cursor.expect(TokenKind.RBrace, "after the import attributes");
     if (!json) {
@@ -636,8 +633,7 @@ partial class FileParser {
     if (
       stmt.kind == StmtKind.Function ||
       stmt.kind == StmtKind.TypeAlias ||
-      stmt.kind == StmtKind.Enum ||
-      stmt.kind == StmtKind.Class
+      stmt.kind == StmtKind.Enum
     ) {
       names.push({
         name: stmt.name,
@@ -645,9 +641,12 @@ partial class FileParser {
         as: stmt.name,
         asLoc: stmt.loc,
       });
+    } else if (stmt.kind == StmtKind.Class) {
+      const name = stmt.name ?? "";
+      names.push({ name, loc: stmt.loc, as: name, asLoc: stmt.loc });
     } else if (stmt.kind == StmtKind.VarDecl) {
       for (const d of stmt.decls) {
-        if (!d.name.startsWith("%")) {
+        if (d.origin == NameOrigin.Written) {
           names.push({ name: d.name, loc: d.loc, as: d.name, asLoc: d.loc });
         }
       }

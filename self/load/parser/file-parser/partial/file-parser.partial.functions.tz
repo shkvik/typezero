@@ -172,27 +172,22 @@ partial class FileParser {
       arrow ? "to start the parameters" : "after the function name",
     );
     const params: Param[] = [];
-    let more =
-      !this.cursor.is(TokenKind.RParen) && !this.cursor.is(TokenKind.End);
-    while (more) {
+    while (this.cursor.insideList(TokenKind.RParen)) {
       const param = this.param(constructor, patterns);
       if (param == undefined) {
-        more = false;
-        continue;
+        break;
       }
       params.push(param);
-      more = this.cursor.accept(TokenKind.Comma);
+      if (!this.cursor.accept(TokenKind.Comma)) {
+        break;
+      }
       const rest = param.form.kind == ParamKind.Rest;
-      if (more && rest && !this.cursor.is(TokenKind.RParen)) {
+      if (rest && !this.cursor.is(TokenKind.RParen)) {
         this.cursor.report(
           param.loc,
           "a rest parameter must be the last parameter",
         );
       }
-      more =
-        more &&
-        !this.cursor.is(TokenKind.RParen) &&
-        !this.cursor.is(TokenKind.End);
     }
     this.cursor.expect(TokenKind.RParen, "to close the parameter list");
 
@@ -514,9 +509,7 @@ partial class FileParser {
   private typeParams(): TypeParamDecl[] {
     const params: TypeParamDecl[] = [];
     this.cursor.next();
-    let more =
-      !this.cursor.is(TokenKind.Greater) && !this.cursor.is(TokenKind.End);
-    while (more) {
+    while (this.cursor.insideList(TokenKind.Greater)) {
       const next = this.cursor.lookahead();
       const modifier =
         this.cursor.is(TokenKind.Const) ||
@@ -553,10 +546,9 @@ partial class FileParser {
         constraint,
         defaultType,
       });
-      more =
-        this.cursor.accept(TokenKind.Comma) &&
-        !this.cursor.is(TokenKind.Greater) &&
-        !this.cursor.is(TokenKind.End);
+      if (!this.cursor.accept(TokenKind.Comma)) {
+        break;
+      }
     }
     this.cursor.expect(TokenKind.Greater, "to close the type parameters");
 

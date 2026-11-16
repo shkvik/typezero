@@ -7,6 +7,7 @@ import {
   BlockStmt,
   Expr,
   ExprKind,
+  NameOrigin,
   Stmt,
   StmtKind,
   SwitchCase,
@@ -333,21 +334,21 @@ partial class FileParser {
   private skipDeclaration(loc: int, message: string): Stmt {
     this.cursor.report(loc, message);
     this.cursor.next();
-    let more = true;
     while (
-      more &&
       !this.cursor.is(TokenKind.End) &&
       !this.cursor.is(TokenKind.RBrace)
     ) {
       if (this.cursor.accept(TokenKind.LBrace)) {
         this.cursor.skipToClosingBrace();
-        more = false;
-      } else if (this.cursor.accept(TokenKind.Semi)) {
-        more = false;
-      } else {
-        this.cursor.next();
-        const current = this.cursor.peek();
-        more = !current.newline;
+        break;
+      }
+      if (this.cursor.accept(TokenKind.Semi)) {
+        break;
+      }
+      this.cursor.next();
+      const current = this.cursor.peek();
+      if (current.newline) {
+        break;
       }
     }
 
@@ -563,6 +564,7 @@ partial class FileParser {
           : undefined;
         decls.push({
           ...first,
+          origin: NameOrigin.Written,
           init: value,
           form: { kind: BindingKind.Plain },
         });
@@ -642,6 +644,7 @@ partial class FileParser {
     if (pattern == undefined) {
       const binding: VarDeclarator = {
         ...first,
+        origin: NameOrigin.Written,
         form: { kind: BindingKind.Plain },
       };
       return {
@@ -659,6 +662,7 @@ partial class FileParser {
     if (keys) {
       const binding: VarDeclarator = {
         name,
+        origin: NameOrigin.Generated,
         loc: pattern.loc,
         form: { kind: BindingKind.Plain },
       };
@@ -676,7 +680,12 @@ partial class FileParser {
     const form: BindingForm = pattern.object
       ? { kind: BindingKind.Object }
       : { kind: BindingKind.Array, length: 0, rest: false };
-    const binding: VarDeclarator = { name, loc: pattern.loc, form };
+    const binding: VarDeclarator = {
+      name,
+      origin: NameOrigin.Generated,
+      loc: pattern.loc,
+      form,
+    };
     const decls: VarDeclarator[] = [];
     this.declareElements(decls, pattern, name);
     const elements: VarDeclStmt = {
@@ -790,14 +799,16 @@ partial class FileParser {
   }
 
   private declarators(decls: VarDeclarator[], isConst: boolean): void {
-    let more = true;
-    while (more) {
-      more =
-        this.cursor.is(TokenKind.LBracket) || this.cursor.is(TokenKind.LBrace)
-          ? this.patternDeclarator(decls)
-          : this.plainDeclarator(decls, isConst);
-      more = more && this.cursor.accept(TokenKind.Comma);
-    }
+    do {
+      const pattern =
+        this.cursor.is(TokenKind.LBracket) || this.cursor.is(TokenKind.LBrace);
+      const declared = pattern
+        ? this.patternDeclarator(decls)
+        : this.plainDeclarator(decls, isConst);
+      if (!declared) {
+        return;
+      }
+    } while (this.cursor.accept(TokenKind.Comma));
   }
 
   private patternDeclarator(decls: VarDeclarator[]): boolean {
@@ -827,11 +838,16 @@ partial class FileParser {
     const init = this.cursor.accept(TokenKind.Assign)
       ? this.expression()
       : undefined;
-    decls.push({ ...binding, init, form: { kind: BindingKind.Plain } });
+    decls.push({
+      ...binding,
+      origin: NameOrigin.Written,
+      init,
+      form: { kind: BindingKind.Plain },
+    });
     if (init == undefined) {
       return true;
     }
-    if (init.kind == ExprKind.Class && init.decl.name == "") {
+    if (init.kind == ExprKind.Class && init.decl.name == undefined) {
       init.decl.name = binding.name;
     }
     if (isConst) {

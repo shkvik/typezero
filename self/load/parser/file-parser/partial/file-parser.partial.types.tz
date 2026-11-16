@@ -1,5 +1,10 @@
 import { FileParser } from "../file-parser.tz";
-import { TokenKind, isKeyword, isName } from "../../../../token.tz";
+import {
+  KnownName,
+  TokenKind,
+  isKeyword,
+  isName,
+} from "../../../../token.tz";
 import {
   ExprKind,
   FunctionTypeForm,
@@ -349,8 +354,11 @@ partial class FileParser {
       texts: [first.text],
     };
     ref.form = parts;
-    let done = false;
-    while (!done) {
+    let piece = token;
+    while (
+      piece.kind == TokenKind.TemplateHead ||
+      piece.kind == TokenKind.TemplateMiddle
+    ) {
       const part = this.type();
       ref.args.push(part);
       const middle = this.cursor.peek();
@@ -366,8 +374,7 @@ partial class FileParser {
       }
       const text = this.literals.templatePart(middle);
       parts.texts.push(text.text);
-      done = middle.kind == TokenKind.TemplateTail;
-      this.cursor.next();
+      piece = this.cursor.next();
     }
 
     return ref;
@@ -601,21 +608,23 @@ partial class FileParser {
       return undefined;
     }
     const member = this.cursor.next();
-    const which = member.text;
     if (!this.cursor.expect(TokenKind.RBracket, "to close the name")) {
       return undefined;
     }
-    if (which == "asyncIterator") {
-      return "[Symbol.asyncIterator]";
+    switch (member.known) {
+      case KnownName.AsyncIterator:
+        return "[Symbol.asyncIterator]";
+      case KnownName.Dispose:
+        return "[Symbol.dispose]";
+      case KnownName.Iterator:
+        return "[Symbol.iterator]";
+      default:
+        this.cursor.report(
+          loc,
+          `'Symbol.${member.text}' cannot name a member`,
+        );
+        return "[Symbol.iterator]";
     }
-    if (which == "dispose") {
-      return "[Symbol.dispose]";
-    }
-    if (which != "iterator") {
-      this.cursor.report(loc, `'Symbol.${which}' cannot name a member`);
-    }
-
-    return "[Symbol.iterator]";
   }
 
   private objectType(): TypeRef {
@@ -830,9 +839,7 @@ partial class FileParser {
     };
     ref.form = tuple;
     this.cursor.next();
-    let more =
-      !this.cursor.is(TokenKind.RBracket) && !this.cursor.is(TokenKind.End);
-    while (more) {
+    while (this.cursor.insideList(TokenKind.RBracket)) {
       const spread = this.cursor.accept(TokenKind.Ellipsis);
       const next = this.cursor.lookahead();
       if (this.cursor.atName() && next.kind == TokenKind.Colon) {
@@ -850,10 +857,9 @@ partial class FileParser {
         );
         this.cursor.next();
       }
-      more =
-        this.cursor.accept(TokenKind.Comma) &&
-        !this.cursor.is(TokenKind.RBracket) &&
-        !this.cursor.is(TokenKind.End);
+      if (!this.cursor.accept(TokenKind.Comma)) {
+        break;
+      }
     }
     this.cursor.expect(TokenKind.RBracket, "to close the tuple type");
 
@@ -865,32 +871,35 @@ partial class FileParser {
     this.cursor.startDiscarding();
     this.cursor.stopRecovering();
     this.cursor.next();
-    let fits = true;
-    let more = !this.cursor.is(TokenKind.RParen);
-    while (fits && more) {
-      this.cursor.accept(TokenKind.Ellipsis);
-      fits = this.cursor.atNameOrThis();
-      if (fits) {
-        this.cursor.next();
-      }
-      this.cursor.accept(TokenKind.Question);
-      if (fits && this.cursor.accept(TokenKind.Colon)) {
-        this.type();
-        fits = !this.cursor.isRecovering();
-      }
-      more =
-        fits &&
-        this.cursor.accept(TokenKind.Comma) &&
-        !this.cursor.is(TokenKind.RParen);
-    }
-    fits =
-      fits &&
-      this.cursor.accept(TokenKind.RParen) &&
-      this.cursor.is(TokenKind.Arrow);
+    const fits = this.scansAsFunctionType();
     this.cursor.stopDiscarding();
     this.cursor.reset(start);
 
     return fits;
+  }
+
+  private scansAsFunctionType(): boolean {
+    while (!this.cursor.is(TokenKind.RParen)) {
+      this.cursor.accept(TokenKind.Ellipsis);
+      if (!this.cursor.atNameOrThis()) {
+        return false;
+      }
+      this.cursor.next();
+      this.cursor.accept(TokenKind.Question);
+      if (this.cursor.accept(TokenKind.Colon)) {
+        this.type();
+        if (this.cursor.isRecovering()) {
+          return false;
+        }
+      }
+      if (!this.cursor.accept(TokenKind.Comma)) {
+        break;
+      }
+    }
+
+    return (
+      this.cursor.accept(TokenKind.RParen) && this.cursor.is(TokenKind.Arrow)
+    );
   }
 
   private functionType(): TypeRef {
@@ -919,9 +928,7 @@ partial class FileParser {
     const paren = this.cursor.peek();
     ref.loc = paren.start;
     this.cursor.next();
-    let more =
-      !this.cursor.is(TokenKind.RParen) && !this.cursor.is(TokenKind.End);
-    while (more) {
+    while (this.cursor.insideList(TokenKind.RParen)) {
       const rest = this.cursor.accept(TokenKind.Ellipsis);
       const token = this.cursor.peek();
       const named =
@@ -950,10 +957,9 @@ partial class FileParser {
       signature.optional.push(optional);
       signature.names.push(token.text);
       signature.rest = signature.rest || rest;
-      more =
-        this.cursor.accept(TokenKind.Comma) &&
-        !this.cursor.is(TokenKind.RParen) &&
-        !this.cursor.is(TokenKind.End);
+      if (!this.cursor.accept(TokenKind.Comma)) {
+        break;
+      }
     }
     this.cursor.expect(
       TokenKind.RParen,

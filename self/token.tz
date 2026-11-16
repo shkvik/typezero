@@ -144,6 +144,9 @@ export enum TokenKind {
 
 export enum KnownName {
   None,
+  AsyncIterator,
+  Dispose,
+  Iterator,
   Raw,
   String,
   Super,
@@ -357,6 +360,12 @@ export function keywordKind(word: string): TokenKind {
 
 export function knownName(word: string): KnownName {
   switch (word) {
+    case "asyncIterator":
+      return KnownName.AsyncIterator
+    case "dispose":
+      return KnownName.Dispose
+    case "iterator":
+      return KnownName.Iterator
     case "raw":
       return KnownName.Raw
     case "String":

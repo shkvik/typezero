@@ -89,6 +89,10 @@ export class Cursor {
     return false;
   }
 
+  public insideList(close: TokenKind): boolean {
+    return !this.is(close) && !this.is(TokenKind.End);
+  }
+
   public atNameOrThis(): boolean {
     return this.atName() || this.is(TokenKind.This);
   }

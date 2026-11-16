@@ -38,9 +38,13 @@ enum Precedence {
 
 type Operator = { readonly kind: TokenKind; readonly width: int };
 
-export type Arguments = { readonly args: Expr[]; readonly spread: boolean[] };
+type BinaryOperator = {
+  readonly kind: TokenKind;
+  readonly width: int;
+  readonly precedence: Precedence;
+};
 
-type ChainState = { optional: boolean };
+export type Arguments = { readonly args: Expr[]; readonly spread: boolean[] };
 
 function binaryPrecedence(kind: TokenKind): Precedence {
   switch (kind) {
@@ -340,89 +344,102 @@ partial class FileParser {
     const head = this.cursor.peek();
     const start = head.start;
     const prefix = unaryOpFor(head.kind);
-    const unary = prefix != undefined;
     let left = this.unary();
-    if (unary && this.cursor.is(TokenKind.StarStar)) {
+    if (prefix != undefined && this.cursor.is(TokenKind.StarStar)) {
       const token = this.cursor.peek();
       this.cursor.report(
         token.start,
         "the left side of '**' cannot be a unary expression",
       );
     }
-    while (this.continuesBinary(above)) {
-      left = this.binaryStep(left, start);
+    let lookahead = this.binaryOperator();
+    while (lookahead.precedence > above) {
+      left = this.applyOperator(left, lookahead, start);
+      lookahead = this.binaryOperator();
     }
 
     return left;
   }
 
-  private continuesBinary(above: Precedence): boolean {
+  private binaryOperator(): BinaryOperator {
     const token = this.cursor.peek();
-    if (token.kind == TokenKind.As || token.kind == TokenKind.Instanceof) {
-      return Precedence.Relational > above;
+    switch (token.kind) {
+      case TokenKind.As:
+      case TokenKind.Instanceof:
+        return {
+          kind: token.kind,
+          width: 1,
+          precedence: Precedence.Relational,
+        };
+      case TokenKind.Satisfies: {
+        const precedence = token.newline
+          ? Precedence.None
+          : Precedence.Relational;
+        return { kind: token.kind, width: 1, precedence };
+      }
+      case TokenKind.In: {
+        const place = this.context.expressionPlace;
+        const precedence =
+          place == ExpressionPlace.ForHead
+            ? Precedence.None
+            : Precedence.Relational;
+        return { kind: token.kind, width: 1, precedence };
+      }
+      default: {
+        const op = this.operator();
+        const precedence = binaryPrecedence(op.kind);
+        return { kind: op.kind, width: op.width, precedence };
+      }
     }
-    if (this.cursor.is(TokenKind.Satisfies)) {
-      return !token.newline && Precedence.Relational > above;
-    }
-    const forHead = this.context.expressionPlace == ExpressionPlace.ForHead;
-    if (token.kind == TokenKind.In && forHead) {
-      return false;
-    }
-
-    const op = this.operator();
-    const precedence = binaryPrecedence(op.kind);
-
-    return precedence > above;
   }
 
-  private binaryStep(left: Expr, start: int): Expr {
+  private applyOperator(left: Expr, op: BinaryOperator, start: int): Expr {
     const token = this.cursor.peek();
-    if (token.kind == TokenKind.As) {
-      this.cursor.next();
-      const target = this.type();
-      return { kind: ExprKind.Cast, loc: token.start, operand: left, target };
-    }
-    if (this.cursor.is(TokenKind.Satisfies)) {
-      this.cursor.next();
-      this.type();
-      this.cursor.report(
-        token.start,
-        "'satisfies' is not supported, just as 'as' is not",
-      );
-      return left;
-    }
-    if (this.cursor.is(TokenKind.Instanceof)) {
-      this.cursor.next();
-      const right = this.binary(Precedence.Relational);
-      return {
-        kind: ExprKind.Binary,
-        loc: token.start,
-        op: BinaryOp.InstanceOf,
-        lhs: left,
-        rhs: right,
-        source: this.cursor.spanFrom(start),
-      };
-    }
-    const op = this.operator();
-    const precedence = binaryPrecedence(op.kind);
-    if (op.kind == TokenKind.EqEqEq) {
-      this.cursor.report(token.start, "'===' is not supported; use '=='");
-    } else if (op.kind == TokenKind.BangEqEq) {
-      this.cursor.report(token.start, "'!==' is not supported; use '!='");
-    }
     this.cursor.skip(op.width);
-    const floor =
-      precedence == Precedence.Power ? Precedence.Multiplicative : precedence;
-    const right = this.binary(floor);
-
-    return {
-      kind: ExprKind.Binary,
-      loc: token.start,
-      op: binaryOpFor(op.kind),
-      lhs: left,
-      rhs: right,
-      source: this.cursor.spanFrom(start),
-    };
+    switch (op.kind) {
+      case TokenKind.As: {
+        const target = this.type();
+        return { kind: ExprKind.Cast, loc: token.start, operand: left, target };
+      }
+      case TokenKind.Satisfies:
+        this.type();
+        this.cursor.report(
+          token.start,
+          "'satisfies' is not supported, just as 'as' is not",
+        );
+        return left;
+      case TokenKind.Instanceof: {
+        const right = this.binary(Precedence.Relational);
+        return {
+          kind: ExprKind.Binary,
+          loc: token.start,
+          op: BinaryOp.InstanceOf,
+          lhs: left,
+          rhs: right,
+          source: this.cursor.spanFrom(start),
+        };
+      }
+      default: {
+        if (op.kind == TokenKind.EqEqEq) {
+          this.cursor.report(token.start, "'===' is not supported; use '=='");
+        } else if (op.kind == TokenKind.BangEqEq) {
+          this.cursor.report(token.start, "'!==' is not supported; use '!='");
+        }
+        const floor =
+          op.precedence == Precedence.Power
+            ? Precedence.Multiplicative
+            : op.precedence;
+        const right = this.binary(floor);
+        return {
+          kind: ExprKind.Binary,
+          loc: token.start,
+          op: binaryOpFor(op.kind),
+          lhs: left,
+          rhs: right,
+          source: this.cursor.spanFrom(start),
+        };
+      }
+    }
   }
 
   private unary(): Expr {
@@ -482,9 +499,7 @@ partial class FileParser {
     this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
     const args: Expr[] = [];
     const spread: boolean[] = [];
-    let more =
-      !this.cursor.is(TokenKind.RParen) && !this.cursor.is(TokenKind.End);
-    while (more) {
+    while (this.cursor.insideList(TokenKind.RParen)) {
       const spreads = this.cursor.accept(TokenKind.Ellipsis);
       if (spreads || spread.length > 0) {
         while (spread.length < args.length) {
@@ -494,10 +509,9 @@ partial class FileParser {
       }
       const arg = this.expression();
       args.push(arg);
-      more =
-        this.cursor.accept(TokenKind.Comma) &&
-        !this.cursor.is(TokenKind.RParen) &&
-        !this.cursor.is(TokenKind.End);
+      if (!this.cursor.accept(TokenKind.Comma)) {
+        break;
+      }
     }
     this.cursor.expect(TokenKind.RParen, "to close the argument list");
     this.context = outer;
@@ -522,68 +536,58 @@ partial class FileParser {
   }
 
   private callOrMember(): Expr {
-    const state: ChainState = { optional: false };
     let expr = this.primary();
-    let link = this.chainLink(expr, state);
-    while (link != undefined) {
+    let optionalChain = false;
+    while (true) {
+      const attached =
+        this.cursor.is(TokenKind.Less) &&
+        this.attachTypeArguments(expr, optionalChain);
+      if (attached) {
+        continue;
+      }
+      const optionalLink = this.cursor.accept(TokenKind.QuestionDot);
+      if (optionalLink) {
+        optionalChain = true;
+      }
+      const link = optionalLink
+        ? this.optionalLink(expr)
+        : this.plainLink(expr, optionalChain);
+      if (link == undefined) {
+        break;
+      }
       expr = link;
-      link = this.chainLink(expr, state);
     }
-    if (!state.optional) {
+    if (!optionalChain) {
       return expr;
     }
 
     return { kind: ExprKind.OptionalChain, loc: expr.loc, chain: expr };
   }
 
-  private chainLink(expr: Expr, state: ChainState): Expr | undefined {
-    if (this.cursor.is(TokenKind.Less) && this.typeArgumentsFor(expr, state)) {
-      return expr;
+  private optionalLink(expr: Expr): Expr | undefined {
+    if (this.isPropertyName()) {
+      return this.memberLink(expr, true);
     }
-    let optional = false;
-    if (this.cursor.is(TokenKind.QuestionDot)) {
-      optional = true;
-      state.optional = true;
-      this.cursor.next();
-      if (this.isPropertyName()) {
-        const name = this.cursor.next();
-        return {
-          kind: ExprKind.Member,
-          loc: name.start,
-          object: expr,
-          name: name.text,
-          known: name.known,
-          optional: true,
-          typeArgs: [],
-        };
-      }
-      if (
-        !this.cursor.is(TokenKind.LParen) &&
-        !this.cursor.is(TokenKind.LBracket)
-      ) {
-        const token = this.cursor.peek();
+    const token = this.cursor.peek();
+    switch (token.kind) {
+      case TokenKind.LParen:
+        return this.callLink(expr, true);
+      case TokenKind.LBracket:
+        return this.indexLink(expr, true);
+      default:
         this.cursor.error(
           token.start,
           "expected a property name, '[' or '(' after '?.'",
         );
         return undefined;
-      }
     }
+  }
+
+  private plainLink(expr: Expr, optionalChain: boolean): Expr | undefined {
     const token = this.cursor.peek();
     switch (token.kind) {
-      case TokenKind.LParen: {
-        this.cursor.next();
-        const list = this.arguments();
-        return {
-          kind: ExprKind.Call,
-          loc: expr.loc,
-          callee: expr,
-          args: list.args,
-          spread: list.spread,
-          optional,
-          tagged: false,
-        };
-      }
+      case TokenKind.LParen:
+        return this.callLink(expr, false);
       case TokenKind.Dot: {
         this.cursor.next();
         if (!this.isPropertyName()) {
@@ -594,31 +598,13 @@ partial class FileParser {
           );
           return undefined;
         }
-        const name = this.cursor.next();
-        return {
-          kind: ExprKind.Member,
-          loc: name.start,
-          object: expr,
-          name: name.text,
-          known: name.known,
-          optional: false,
-          typeArgs: [],
-        };
+        return this.memberLink(expr, false);
       }
-      case TokenKind.LBracket: {
-        this.cursor.next();
-        const index = this.indexInside();
-        return {
-          kind: ExprKind.Index,
-          loc: token.start,
-          object: expr,
-          index,
-          optional,
-        };
-      }
+      case TokenKind.LBracket:
+        return this.indexLink(expr, false);
       case TokenKind.TemplateString:
       case TokenKind.TemplateHead:
-        return this.taggedTemplate(expr, state.optional);
+        return this.taggedTemplate(expr, optionalChain);
       case TokenKind.Bang:
         if (token.newline) {
           return undefined;
@@ -635,25 +621,68 @@ partial class FileParser {
     }
   }
 
-  private typeArgumentsFor(expr: Expr, state: ChainState): boolean {
+  private memberLink(object: Expr, optional: boolean): Expr {
+    const name = this.cursor.next();
+
+    return {
+      kind: ExprKind.Member,
+      loc: name.start,
+      object,
+      name: name.text,
+      known: name.known,
+      optional,
+      typeArgs: [],
+    };
+  }
+
+  private callLink(callee: Expr, optional: boolean): Expr {
+    this.cursor.next();
+    const list = this.arguments();
+
+    return {
+      kind: ExprKind.Call,
+      loc: callee.loc,
+      callee,
+      args: list.args,
+      spread: list.spread,
+      optional,
+      tagged: false,
+    };
+  }
+
+  private indexLink(object: Expr, optional: boolean): Expr {
+    const bracket = this.cursor.next();
+    const index = this.indexInside();
+
+    return {
+      kind: ExprKind.Index,
+      loc: bracket.start,
+      object,
+      index,
+      optional,
+    };
+  }
+
+  private attachTypeArguments(expr: Expr, optionalChain: boolean): boolean {
     if (
       expr.kind == ExprKind.Name &&
-      !state.optional &&
+      !optionalChain &&
       expr.typeArgs.length == 0
     ) {
       const args = this.tryTypeArguments(false);
-      if (args != undefined) {
-        expr.typeArgs = args;
-        return true;
+      if (args == undefined) {
+        return false;
       }
-      return false;
+      expr.typeArgs = args;
+      return true;
     }
     if (expr.kind == ExprKind.Member && expr.typeArgs.length == 0) {
       const args = this.tryTypeArguments(true);
-      if (args != undefined) {
-        expr.typeArgs = args;
-        return true;
+      if (args == undefined) {
+        return false;
       }
+      expr.typeArgs = args;
+      return true;
     }
 
     return false;
@@ -704,15 +733,12 @@ partial class FileParser {
     if (!this.cursor.accept(TokenKind.LParen)) {
       return args;
     }
-    let more =
-      !this.cursor.is(TokenKind.RParen) && !this.cursor.is(TokenKind.End);
-    while (more) {
+    while (this.cursor.insideList(TokenKind.RParen)) {
       const arg = this.expression();
       args.push(arg);
-      more =
-        this.cursor.accept(TokenKind.Comma) &&
-        !this.cursor.is(TokenKind.RParen) &&
-        !this.cursor.is(TokenKind.End);
+      if (!this.cursor.accept(TokenKind.Comma)) {
+        break;
+      }
     }
     this.cursor.expect(TokenKind.RParen, "to close the argument list");
 
@@ -856,9 +882,11 @@ partial class FileParser {
     const head = this.templateText(raw);
     const quasis: string[] = [head];
     const exprs: Expr[] = [];
-    let done = this.cursor.is(TokenKind.TemplateString);
-    this.cursor.next();
-    while (!done) {
+    let piece = this.cursor.next();
+    while (
+      piece.kind == TokenKind.TemplateHead ||
+      piece.kind == TokenKind.TemplateMiddle
+    ) {
       const part = this.sequence();
       exprs.push(part);
       if (
@@ -875,8 +903,7 @@ partial class FileParser {
       }
       const text = this.templateText(raw);
       quasis.push(text);
-      done = this.cursor.is(TokenKind.TemplateTail);
-      this.cursor.next();
+      piece = this.cursor.next();
     }
 
     return { kind: ExprKind.Template, loc, quasis, exprs };
@@ -1063,27 +1090,22 @@ partial class FileParser {
     const bracket = this.cursor.next();
     const loc = bracket.start;
     const elements: ArrayElement[] = [];
-    let more =
-      !this.cursor.is(TokenKind.RBracket) && !this.cursor.is(TokenKind.End);
-    while (more) {
+    while (this.cursor.insideList(TokenKind.RBracket)) {
       if (this.cursor.is(TokenKind.Comma)) {
-        const hole = this.cursor.next();
+        const hole = this.cursor.peek();
         elements.push({
           expr: { kind: ExprKind.Undefined, loc: hole.start },
           spread: false,
           hole: true,
         });
-        more =
-          !this.cursor.is(TokenKind.RBracket) && !this.cursor.is(TokenKind.End);
-        continue;
+      } else {
+        const spread = this.cursor.accept(TokenKind.Ellipsis);
+        const value = this.expression();
+        elements.push({ expr: value, spread, hole: false });
       }
-      const spread = this.cursor.accept(TokenKind.Ellipsis);
-      const value = this.expression();
-      elements.push({ expr: value, spread, hole: false });
-      more =
-        this.cursor.accept(TokenKind.Comma) &&
-        !this.cursor.is(TokenKind.RBracket) &&
-        !this.cursor.is(TokenKind.End);
+      if (!this.cursor.accept(TokenKind.Comma)) {
+        break;
+      }
     }
     this.cursor.expect(TokenKind.RBracket, "to close the array");
 
@@ -1094,9 +1116,7 @@ partial class FileParser {
     const brace = this.cursor.next();
     const loc = brace.start;
     const props: Property[] = [];
-    let more =
-      !this.cursor.is(TokenKind.RBrace) && !this.cursor.is(TokenKind.End);
-    while (more) {
+    while (this.cursor.insideList(TokenKind.RBrace)) {
       if (this.cursor.is(TokenKind.At)) {
         const decorators = this.decorators();
         this.rejectDecorators(decorators);
@@ -1109,10 +1129,9 @@ partial class FileParser {
         return { kind: ExprKind.ObjectLit, loc, props };
       }
       props.push(prop);
-      more =
-        this.cursor.accept(TokenKind.Comma) &&
-        !this.cursor.is(TokenKind.RBrace) &&
-        !this.cursor.is(TokenKind.End);
+      if (!this.cursor.accept(TokenKind.Comma)) {
+        break;
+      }
     }
     this.cursor.expect(TokenKind.RBrace, "to close the object");
 

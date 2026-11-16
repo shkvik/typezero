@@ -8,6 +8,7 @@ import {
   Expr,
   ExprKind,
   IndexExpr,
+  NameOrigin,
   ObjectLitExpr,
   PropertyKind,
   Stmt,
@@ -81,55 +82,21 @@ partial class FileParser {
       object: false,
       elements: [],
     };
-    let more =
-      !this.cursor.is(TokenKind.RBracket) && !this.cursor.is(TokenKind.End);
-    while (more) {
+    while (this.cursor.insideList(TokenKind.RBracket)) {
       const current = this.cursor.peek();
       const e = element(current.start);
-      if (this.cursor.accept(TokenKind.Comma)) {
+      if (this.cursor.is(TokenKind.Comma)) {
         e.hole = true;
-        pattern.elements.push(e);
-        more =
-          !this.cursor.is(TokenKind.RBracket) && !this.cursor.is(TokenKind.End);
-        continue;
-      }
-      e.rest = this.cursor.accept(TokenKind.Ellipsis);
-      if (
-        this.cursor.is(TokenKind.LBracket) ||
-        this.cursor.is(TokenKind.LBrace)
-      ) {
-        e.nested = this.bindingPattern();
-      } else if (this.cursor.atName()) {
-        const word = this.cursor.next();
-        e.name = word.text;
-      } else {
-        const token = this.cursor.peek();
-        this.cursor.error(
-          token.start,
-          "expected a variable name in the destructuring pattern",
-        );
+      } else if (!this.arrayPatternElement(e)) {
         return pattern;
       }
-      if (this.cursor.is(TokenKind.Assign)) {
-        if (e.rest) {
-          const token = this.cursor.peek();
-          this.cursor.report(
-            token.start,
-            "a rest element cannot have a default value",
-          );
-        }
-        this.cursor.next();
-        e.defaultValue = this.expression();
-      }
       pattern.elements.push(e);
-      more = this.cursor.accept(TokenKind.Comma);
-      if (more && e.rest) {
+      if (!this.cursor.accept(TokenKind.Comma)) {
+        break;
+      }
+      if (e.rest) {
         this.cursor.report(e.loc, "a rest element must be the last one");
       }
-      more =
-        more &&
-        !this.cursor.is(TokenKind.RBracket) &&
-        !this.cursor.is(TokenKind.End);
     }
     this.cursor.expect(
       TokenKind.RBracket,
@@ -139,6 +106,48 @@ partial class FileParser {
     return pattern;
   }
 
+  private arrayPatternElement(e: PatternElement): boolean {
+    e.rest = this.cursor.accept(TokenKind.Ellipsis);
+    if (!this.bindingTarget(e)) {
+      return false;
+    }
+    const assign = this.cursor.peek();
+    if (!this.cursor.accept(TokenKind.Assign)) {
+      return true;
+    }
+    if (e.rest) {
+      this.cursor.report(
+        assign.start,
+        "a rest element cannot have a default value",
+      );
+    }
+    e.defaultValue = this.expression();
+
+    return true;
+  }
+
+  private bindingTarget(e: PatternElement): boolean {
+    if (
+      this.cursor.is(TokenKind.LBracket) ||
+      this.cursor.is(TokenKind.LBrace)
+    ) {
+      e.nested = this.bindingPattern();
+      return true;
+    }
+    if (!this.cursor.atName()) {
+      const token = this.cursor.peek();
+      this.cursor.error(
+        token.start,
+        "expected a variable name in the destructuring pattern",
+      );
+      return false;
+    }
+    const word = this.cursor.next();
+    e.name = word.text;
+
+    return true;
+  }
+
   private objectPattern(): Pattern {
     const brace = this.cursor.next();
     const pattern: Pattern = {
@@ -146,9 +155,7 @@ partial class FileParser {
       object: true,
       elements: [],
     };
-    let more =
-      !this.cursor.is(TokenKind.RBrace) && !this.cursor.is(TokenKind.End);
-    while (more) {
+    while (this.cursor.insideList(TokenKind.RBrace)) {
       const current = this.cursor.peek();
       const e = element(current.start);
       if (this.cursor.accept(TokenKind.Ellipsis)) {
@@ -167,14 +174,12 @@ partial class FileParser {
         return pattern;
       }
       pattern.elements.push(e);
-      more = this.cursor.accept(TokenKind.Comma);
-      if (more && e.rest) {
+      if (!this.cursor.accept(TokenKind.Comma)) {
+        break;
+      }
+      if (e.rest) {
         this.cursor.report(e.loc, "a rest element must be the last one");
       }
-      more =
-        more &&
-        !this.cursor.is(TokenKind.RBrace) &&
-        !this.cursor.is(TokenKind.End);
     }
     this.cursor.expect(TokenKind.RBrace, "to close the destructuring pattern");
 
@@ -195,20 +200,7 @@ partial class FileParser {
       e.key = key;
     }
     if (this.cursor.accept(TokenKind.Colon)) {
-      if (
-        this.cursor.is(TokenKind.LBracket) ||
-        this.cursor.is(TokenKind.LBrace)
-      ) {
-        e.nested = this.bindingPattern();
-      } else if (this.cursor.atName()) {
-        const word = this.cursor.next();
-        e.name = word.text;
-      } else {
-        const token = this.cursor.peek();
-        this.cursor.error(
-          token.start,
-          "expected a variable name in the destructuring pattern",
-        );
+      if (!this.bindingTarget(e)) {
         return false;
       }
     } else if (identifier && e.keyExpr == undefined) {
@@ -291,7 +283,7 @@ partial class FileParser {
   ): VarDeclarator {
     const name = this.hiddenName();
 
-    return { name, loc, typeAnn, init, form };
+    return { name, origin: NameOrigin.Generated, loc, typeAnn, init, form };
   }
 
   private declarePattern(
@@ -325,6 +317,7 @@ partial class FileParser {
       }
       decls.push({
         name: e.name,
+        origin: NameOrigin.Written,
         loc: e.loc,
         init: value,
         form: { kind: BindingKind.Plain },

@@ -514,8 +514,7 @@ class Lexer {
 
   private regex(start: int, nl: boolean): void {
     let inClass = false;
-    let closed = false;
-    while (!closed && this.cur < this.end && !this.isLineBreak()) {
+    while (this.cur < this.end && !this.isLineBreak()) {
       const c = this.at(0);
       this.cur += 1;
       if (c == kBackslash) {
@@ -527,12 +526,10 @@ class Lexer {
       } else if (c == kRightBracket) {
         inClass = false;
       } else if (c == kSlash && !inClass) {
-        closed = true;
-      }
-    }
-    if (closed) {
-      while (this.cur < this.end && this.identCharAt(0)) {
-        this.cur += 1;
+        while (this.cur < this.end && this.identCharAt(0)) {
+          this.cur += 1;
+        }
+        return this.push(TokenKind.Regex, start, nl);
       }
     }
     this.push(TokenKind.Regex, start, nl);
@@ -619,9 +616,7 @@ class Lexer {
   }
 
   private string(start: int, quote: int, nl: boolean): void {
-    let closed = false;
     while (
-      !closed &&
       this.cur < this.end &&
       this.at(0) != kNewline &&
       this.at(0) != kReturn
@@ -629,8 +624,9 @@ class Lexer {
       const c = this.at(0);
       this.cur += 1;
       if (c == quote) {
-        closed = true;
-      } else if (c == kBackslash && this.cur < this.end) {
+        break;
+      }
+      if (c == kBackslash && this.cur < this.end) {
         this.cur += 1;
       }
     }

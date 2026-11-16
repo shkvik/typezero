@@ -28,6 +28,7 @@ const kLeftBrace = 123;
 const kRightBrace = 125;
 const kSlash = 47;
 const kUnderscore = 95;
+const kHigh = 128;
 
 export type DecodedText = { readonly text: string; readonly ok: boolean };
 
@@ -42,6 +43,12 @@ export type NumberText = {
 
 type Escape = { readonly text: string; readonly next: int };
 
+enum TextKind {
+  Quoted,
+  Template,
+  RawTemplate,
+}
+
 export class LiteralReader {
   private readonly source: Buffer;
 
@@ -55,38 +62,24 @@ export class LiteralReader {
     const closed = token.end > token.start + 1 && closing == quote;
     const last = closed ? token.end - 1 : token.end;
 
-    return this.decodeText(token.start + 1, last, false);
+    return this.decodeText(token.start + 1, last, TextKind.Quoted);
   }
 
   public templatePart(token: Token): DecodedText {
     const last = this.templateEnd(token);
 
-    return this.decodeText(token.start + 1, last, true);
+    return this.decodeText(token.start + 1, last, TextKind.Template);
   }
 
   public templateRaw(token: Token): string {
     const last = this.templateEnd(token);
-    const parts: string[] = [];
-    let segment = token.start + 1;
-    let i = token.start + 1;
-    while (i < last) {
-      const c = this.byteAt(i);
-      if (c != kReturn) {
-        i += 1;
-        continue;
-      }
-      const piece = this.source.toString("utf8", segment, i);
-      parts.push(piece);
-      parts.push("\n");
-      const next = this.byteAt(i + 1);
-      const crlf = i + 1 < last && next == kNewline;
-      i += crlf ? 2 : 1;
-      segment = i;
-    }
-    const tail = this.source.toString("utf8", segment, last);
-    parts.push(tail);
+    const decoded = this.decodeText(
+      token.start + 1,
+      last,
+      TextKind.RawTemplate,
+    );
 
-    return parts.join("");
+    return decoded.text;
   }
 
   public regex(token: Token): RegexText {
@@ -112,47 +105,20 @@ export class LiteralReader {
     const from = radix == 10 ? 0 : 2;
     const base = radix.toUint64();
     let value: uint64 = 0;
-    let fits = from < digits.length;
-    for (let i = from; i < digits.length && fits; i++) {
-      const digit = this.digitValue(digits[i] ?? 0, radix);
-      if (digit >= radix) {
-        fits = false;
-        break;
-      }
-      if (digit < 0 || digit > 15) {
-        fits = false;
-        break;
-      }
-      const step = digit.toUint64();
-      const product = Bit.mul64(value, base);
-      if (product.hi != 0) {
-        fits = false;
-        break;
-      }
-      let sum = Bit.Wrap64.from(product.lo);
-      sum = sum + step;
-      if (sum.value < product.lo) {
-        fits = false;
-        break;
-      }
-      value = sum.value;
-    }
-    if (fits) {
-      return { isInt: true, intValue: value, doubleValue: 0.0, valid: true };
-    }
     for (let i = from; i < digits.length; i++) {
-      const digit = this.digitValue(digits[i] ?? 0, radix);
+      const c = digits[i] ?? 0;
+      const digit = this.digitValue(c, radix);
       if (digit >= radix) {
         return { isInt: true, intValue: 0, doubleValue: 0.0, valid: false };
       }
+      const next = this.appendDigit(value, base, digit);
+      if (next == undefined) {
+        return this.largeInteger(digits, radix, i);
+      }
+      value = next;
     }
-    const decimal = this.textOfDigits(digits, 0);
-    const prefixed = this.textOfDigits(digits, 1);
-    const text = radix == 10 ? decimal : `0${prefixed}`;
-    const parsed = Number(text);
-    const rounded = parsed.unwrapOr(0.0);
 
-    return { isInt: false, intValue: 0, doubleValue: rounded, valid: true };
+    return { isInt: true, intValue: value, doubleValue: 0.0, valid: true };
   }
 
   public float(token: Token): NumberText {
@@ -268,104 +234,95 @@ export class LiteralReader {
     return undefined;
   }
 
-  private needsDecoding(start: int, end: int, isTemplate: boolean): boolean {
-    for (let i = start; i < end; i++) {
-      const c = this.byteAt(i);
-      if (c == kBackslash || (isTemplate && c == kReturn)) {
-        return true;
-      }
+  private decodeText(start: int, end: int, kind: TextKind): DecodedText {
+    let i = this.plainEnd(start, end, kind);
+    const first = this.source.toString("utf8", start, i);
+    if (i == end) {
+      return { text: first, ok: true };
     }
-
-    return false;
-  }
-
-  private decodeText(start: int, end: int, isTemplate: boolean): DecodedText {
-    const encoded = this.needsDecoding(start, end, isTemplate);
-    if (!encoded) {
-      const plain = this.source.toString("utf8", start, end);
-      return { text: plain, ok: true };
-    }
-    const parts: string[] = [];
-    let segment = start;
-    let i = start;
+    const parts: string[] = [first];
     while (i < end) {
-      const c = this.byteAt(i);
-      if (isTemplate && c == kReturn) {
-        const beforeReturn = this.source.toString("utf8", segment, i);
-
-        parts.push(beforeReturn);
-        parts.push("\n");
-
-        const next = this.byteAt(i + 1);
-        const crlf = i + 1 < end && next == kNewline;
-
-        i += crlf ? 2 : 1;
-        segment = i;
-        continue;
+      const decoded = this.decodeAt(i, end);
+      if (decoded == undefined) {
+        const partial = parts.join("");
+        return { text: partial, ok: false };
       }
-
-      if (c != kBackslash) {
-        i += 1;
-        continue;
-      }
-
-      const beforeEscape = this.source.toString("utf8", segment, i);
-      parts.push(beforeEscape);
-      i += 1;
-
-      if (i >= end) {
-        segment = i;
-        break;
-      }
-
-      const e = this.byteAt(i);
-      const simple = this.simpleEscape(e);
-
-      i += 1;
-
-      if (simple != undefined) {
-        parts.push(simple);
-        segment = i;
-        continue;
-      }
-      if (e == kReturn) {
-        const after = this.byteAt(i);
-        if (i < end && after == kNewline) {
-          i += 1;
-        }
-        segment = i;
-        continue;
-      }
-      if (e == kNewline) {
-        segment = i;
-        continue;
-      }
-      if (e == kLowerX || e == kLowerU) {
-        const escape = this.numericEscape(e, i, end);
-        if (escape == undefined) {
-          const partial = parts.join("");
-          return { text: partial, ok: false };
-        }
-        parts.push(escape.text);
-        i = escape.next;
-        segment = i;
-        continue;
-      }
-      segment = i - 1;
+      parts.push(decoded.text);
+      const runStart = decoded.next;
+      i = this.plainEnd(runStart, end, kind);
+      const run = this.source.toString("utf8", runStart, i);
+      parts.push(run);
     }
-    const tail = this.source.toString("utf8", segment, end);
-    parts.push(tail);
     const text = parts.join("");
 
     return { text, ok: true };
   }
 
-  private numericEscape(kind: int, at: int, end: int): Escape | undefined {
-    if (kind == kLowerX) {
-      return this.hexEscape(at, end, 2);
+  private plainEnd(from: int, end: int, kind: TextKind): int {
+    let i = from;
+    while (i < end && !this.needsDecodingAt(i, kind)) {
+      i += 1;
     }
 
-    return this.unicodeEscape(at, end);
+    return i;
+  }
+
+  private needsDecodingAt(i: int, kind: TextKind): boolean {
+    const c = this.byteAt(i);
+    if (kind == TextKind.Quoted) {
+      return c == kBackslash;
+    }
+    if (kind == TextKind.RawTemplate) {
+      return c == kReturn;
+    }
+
+    return c == kBackslash || c == kReturn;
+  }
+
+  private decodeAt(at: int, end: int): Escape | undefined {
+    const c = this.byteAt(at);
+    if (c == kReturn) {
+      const next = this.skipLineFeed(at + 1, end);
+      return { text: "\n", next };
+    }
+    const escaped = at + 1;
+    if (escaped >= end) {
+      return { text: "", next: end };
+    }
+    const letter = this.byteAt(escaped);
+    const after = escaped + 1;
+    const simple = this.simpleEscape(letter);
+    if (simple != undefined) {
+      return { text: simple, next: after };
+    }
+    if (letter == kReturn) {
+      const next = this.skipLineFeed(after, end);
+      return { text: "", next };
+    }
+    if (letter == kNewline) {
+      return { text: "", next: after };
+    }
+    if (letter == kLowerX) {
+      return this.hexEscape(after, end, 2);
+    }
+    if (letter == kLowerU) {
+      return this.unicodeEscape(after, end);
+    }
+    if (letter < kHigh) {
+      const text = String.fromCharCode(letter);
+      return { text, next: after };
+    }
+
+    return { text: "", next: escaped };
+  }
+
+  private skipLineFeed(at: int, end: int): int {
+    const c = this.byteAt(at);
+    if (at < end && c == kNewline) {
+      return at + 1;
+    }
+
+    return at;
   }
 
   private templateEnd(token: Token): int {
@@ -382,6 +339,50 @@ export class LiteralReader {
     }
 
     return token.end;
+  }
+
+  private allDigitsValid(digits: int[], from: int, radix: int): boolean {
+    for (let i = from; i < digits.length; i++) {
+      const c = digits[i] ?? 0;
+      const digit = this.digitValue(c, radix);
+      if (digit >= radix) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private appendDigit(
+    value: uint64,
+    base: uint64,
+    digit: int,
+  ): uint64 | undefined {
+    const product = Bit.mul64(value, base);
+    if (product.hi != 0) {
+      return undefined;
+    }
+    const step = digit.toUint64();
+    let sum = Bit.Wrap64.from(product.lo);
+    sum = sum + step;
+    if (sum.value < product.lo) {
+      return undefined;
+    }
+
+    return sum.value;
+  }
+
+  private largeInteger(digits: int[], radix: int, from: int): NumberText {
+    if (!this.allDigitsValid(digits, from, radix)) {
+      return { isInt: true, intValue: 0, doubleValue: 0.0, valid: false };
+    }
+    const decimal = this.textOfDigits(digits, 0);
+    const prefixed = this.textOfDigits(digits, 1);
+    const text = radix == 10 ? decimal : `0${prefixed}`;
+    const parsed = Number(text);
+    const rounded = parsed.unwrapOr(0.0);
+
+    return { isInt: false, intValue: 0, doubleValue: rounded, valid: true };
   }
 
   private digitsOf(token: Token): int[] {

@@ -121,14 +121,6 @@ export class Dumper {
   }
 
   private quote(text: string): string {
-    let plain = true;
-    for (let i = 0; i < text.length && plain; i++) {
-      const c = text.charCodeAt(i);
-      plain = !this.needsEscape(c);
-    }
-    if (plain) {
-      return `"${text}"`;
-    }
     const parts: string[] = [];
     for (let i = 0; i < text.length; i++) {
       const c = text.charCodeAt(i);
@@ -536,7 +528,8 @@ export class Dumper {
   }
 
   private dumpClass(cls: ClassDecl): void {
-    const name = this.quote(cls.name);
+    const written = cls.name ?? "";
+    const name = this.quote(written);
     const isAbstract = this.flag(cls.isAbstract);
     const isPartial = this.flag(cls.isPartial);
     const expression = this.flag(cls.expression);
