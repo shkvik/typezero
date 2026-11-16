@@ -6,7 +6,7 @@ import "./partial/file-parser.partial.statements.tz";
 import "./partial/file-parser.partial.functions.tz";
 import "./partial/file-parser.partial.classes.tz";
 import "./partial/file-parser.partial.modules.tz";
-import { Token, TokenKind } from "../../../token.tz";
+import { Token, TokenKind } from "../../token/types/token.types.tz";
 import { Stmt } from "../../../program/ast/types/ast.types.statements.tz";
 import {
   ExportDecl,

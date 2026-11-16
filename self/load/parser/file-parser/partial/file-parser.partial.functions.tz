@@ -1,6 +1,7 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { TokenKind, isKeyword, isName } from "../../../../token.tz";
+import { TokenKind } from "../../../token/types/token.types.tz";
+import { kTokenTable } from "../../../token/const/token.const.tz";
 import { Mark } from "../../cursor/types/cursor.types.tz";
 import { Span } from "../../../../program/ast/types/ast.types.span.tz";
 import {
@@ -80,8 +81,8 @@ partial class FileParser {
     let name = "";
     const token = this.cursor.peek();
     let loc = token.start;
-    const named = isName(token.kind);
-    const reserved = !named && isKeyword(token.kind) && !expression;
+    const named = kTokenTable.isName(token.kind);
+    const reserved = !named && kTokenTable.isKeyword(token.kind) && !expression;
     if (reserved) {
       this.cursor.report(loc, Code.KeywordAsFunctionName, { word: token.text });
     }
@@ -196,7 +197,7 @@ partial class FileParser {
     let name = "";
     let pattern: Span | undefined = undefined;
     const named = this.cursor.atNameOrThis();
-    const reserved = !named && isKeyword(token.kind);
+    const reserved = !named && kTokenTable.isKeyword(token.kind);
     if (reserved) {
       this.cursor.report(loc, Code.KeywordAsParameterName, {
         word: token.text,
@@ -258,7 +259,8 @@ partial class FileParser {
   private paramModifierAhead(): boolean {
     const token = this.cursor.peek();
     const next = this.cursor.lookahead();
-    const named = isName(next.kind) || isKeyword(next.kind);
+    const named =
+      kTokenTable.isName(next.kind) || kTokenTable.isKeyword(next.kind);
 
     return this.isParamModifier(token.kind) && named;
   }
@@ -331,7 +333,7 @@ partial class FileParser {
     }
     const next = this.cursor.lookahead();
     const starts =
-      isName(next.kind) ||
+      kTokenTable.isName(next.kind) ||
       next.kind == TokenKind.LParen ||
       next.kind == TokenKind.Less;
     if (next.newline || !starts) {
@@ -485,13 +487,13 @@ partial class FileParser {
         this.cursor.is(TokenKind.Const) ||
         this.cursor.is(TokenKind.In) ||
         this.cursor.is(TokenKind.Out);
-      if (modifier && isName(next.kind)) {
+      if (modifier && kTokenTable.isName(next.kind)) {
         const token = this.cursor.peek();
         this.cursor.report(token.start, Code.TypeParameterModifier);
         this.cursor.next();
       }
       const token = this.cursor.peek();
-      if (!isName(token.kind)) {
+      if (!kTokenTable.isName(token.kind)) {
         this.cursor.error(
           token.start,
           Code.ExpectedTypeParameterName,

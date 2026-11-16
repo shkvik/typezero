@@ -1,4 +1,5 @@
-import { KnownName, Token, TokenKind, isName } from "../../../token.tz";
+import { KnownName, Token, TokenKind } from "../../token/types/token.types.tz";
+import { kTokenTable } from "../../token/const/token.const.tz";
 import { Span } from "../../../program/ast/types/ast.types.span.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import { Details } from "../../../diagnostic/types/message.types.tz";
@@ -55,7 +56,7 @@ export class Cursor {
   public atName(): boolean {
     const token = this.peek();
 
-    return isName(token.kind);
+    return kTokenTable.isName(token.kind);
   }
 
   public accept(kind: TokenKind): boolean {
@@ -258,7 +259,7 @@ export class Cursor {
   private namesAhead(): boolean {
     const next = this.lookahead();
 
-    return isName(next.kind) && !next.newline;
+    return kTokenTable.isName(next.kind) && !next.newline;
   }
 
   private last(): Token {

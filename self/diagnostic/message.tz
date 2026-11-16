@@ -1,4 +1,4 @@
-import { tokenSpelling } from "../token.tz";
+import { kTokenTable } from "../load/token/const/token.const.tz";
 import { Code } from "./code.tz";
 import { Details } from "./types/message.types.tz";
 import { kMessages } from "./const/message.const.tz";
@@ -8,12 +8,12 @@ export function messageText(code: Code, details: Details): string {
   let text = message.text;
   const expected = details.expected;
   if (expected != undefined) {
-    const spelling = tokenSpelling(expected);
+    const spelling = kTokenTable.spelling(expected);
     text = text.replaceAll("{expected}", spelling);
   }
   const found = details.found;
   if (found != undefined) {
-    const spelling = tokenSpelling(found);
+    const spelling = kTokenTable.spelling(found);
     text = text.replaceAll("{found}", spelling);
   }
   const word = details.word;

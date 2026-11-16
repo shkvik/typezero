@@ -1,11 +1,7 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import {
-  KnownName,
-  TokenKind,
-  isKeyword,
-  isName,
-} from "../../../../token.tz";
+import { KnownName, TokenKind } from "../../../token/types/token.types.tz";
+import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
   FunctionTypeForm,
   MappedTypeForm,
@@ -97,7 +93,8 @@ partial class FileParser {
 
   private subjectAhead(): boolean {
     const next = this.cursor.lookahead();
-    const subject = isName(next.kind) || next.kind == TokenKind.This;
+    const subject =
+      kTokenTable.isName(next.kind) || next.kind == TokenKind.This;
 
     return subject && !next.newline;
   }
@@ -136,7 +133,7 @@ partial class FileParser {
     const next = this.cursor.lookahead();
     const keyOf =
       this.cursor.is(TokenKind.Keyof) &&
-      (isName(next.kind) ||
+      (kTokenTable.isName(next.kind) ||
         next.kind == TokenKind.LParen ||
         next.kind == TokenKind.LBrace ||
         next.kind == TokenKind.Typeof);
@@ -153,7 +150,7 @@ partial class FileParser {
 
     const readonly =
       this.cursor.is(TokenKind.Readonly) &&
-      (isName(next.kind) ||
+      (kTokenTable.isName(next.kind) ||
         next.kind == TokenKind.LParen ||
         next.kind == TokenKind.LBracket);
 
@@ -253,7 +250,7 @@ partial class FileParser {
     if (this.cursor.is(TokenKind.LParen) && this.functionTypeAhead()) {
       return this.functionType();
     }
-    if (this.cursor.is(TokenKind.Infer) && isName(next.kind)) {
+    if (this.cursor.is(TokenKind.Infer) && kTokenTable.isName(next.kind)) {
       return this.inferType(ref);
     }
     const negative =
@@ -470,7 +467,7 @@ partial class FileParser {
   private qualifiedPartAhead(): boolean {
     const next = this.cursor.lookahead();
 
-    return this.cursor.is(TokenKind.Dot) && isName(next.kind);
+    return this.cursor.is(TokenKind.Dot) && kTokenTable.isName(next.kind);
   }
 
   private mappedTypeAhead(): boolean {
@@ -479,7 +476,7 @@ partial class FileParser {
 
     return (
       this.cursor.is(TokenKind.LBracket) &&
-      isName(next.kind) &&
+      kTokenTable.isName(next.kind) &&
       after.kind == TokenKind.In
     );
   }
@@ -566,7 +563,9 @@ partial class FileParser {
       return this.symbolName();
     }
     const token = this.cursor.peek();
-    if (token.kind == TokenKind.Identifier || isKeyword(token.kind)) {
+    if (
+      token.kind == TokenKind.Identifier || kTokenTable.isKeyword(token.kind)
+    ) {
       this.fieldNames.add(token.text);
       this.cursor.next();
       return token.text;

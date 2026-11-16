@@ -1,0 +1,3 @@
+import { TokenTable } from "../token.tz";
+
+export const kTokenTable = new TokenTable();

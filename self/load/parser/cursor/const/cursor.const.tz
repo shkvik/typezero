@@ -1,4 +1,8 @@
-import { KnownName, Token, TokenKind } from "../../../../token.tz";
+import {
+  KnownName,
+  Token,
+  TokenKind,
+} from "../../../token/types/token.types.tz";
 
 export const kEnd: Token = {
   kind: TokenKind.End,

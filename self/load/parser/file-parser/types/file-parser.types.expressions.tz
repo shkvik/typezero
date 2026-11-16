@@ -1,4 +1,4 @@
-import { TokenKind } from "../../../../token.tz";
+import { TokenKind } from "../../../token/types/token.types.tz";
 import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
 
 export enum Precedence {

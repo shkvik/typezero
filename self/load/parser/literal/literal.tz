@@ -1,4 +1,4 @@
-import { Token } from "../../../token.tz";
+import { Token } from "../../token/types/token.types.tz";
 import {
   DecodedText,
   Escape,

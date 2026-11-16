@@ -1,6 +1,7 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { KnownName, TokenKind, isKeyword, isName } from "../../../../token.tz";
+import { KnownName, TokenKind } from "../../../token/types/token.types.tz";
+import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
   TypeKind,
   TypeRef,
@@ -36,7 +37,7 @@ partial class FileParser {
   private classDecl(expression: boolean): ClassDecl {
     const keyword = this.cursor.next();
     const token = this.cursor.peek();
-    const named = isName(token.kind);
+    const named = kTokenTable.isName(token.kind);
     if (named) {
       this.cursor.next();
     }
@@ -188,7 +189,7 @@ partial class FileParser {
     while (this.cursor.accept(TokenKind.Dot)) {
       const token = this.cursor.peek();
       const property =
-        token.kind == TokenKind.Identifier || isKeyword(token.kind);
+        token.kind == TokenKind.Identifier || kTokenTable.isKeyword(token.kind);
       if (!property) {
         this.cursor.error(token.start, Code.ExpectedPropertyAfterDot);
         return expr;
@@ -291,7 +292,7 @@ partial class FileParser {
       (this.cursor.is(TokenKind.Get) || this.cursor.is(TokenKind.Set)) &&
       !next.newline &&
       (next.kind == TokenKind.Identifier ||
-        isKeyword(next.kind) ||
+        kTokenTable.isKeyword(next.kind) ||
         next.kind == TokenKind.String)
     );
   }
@@ -695,7 +696,7 @@ partial class FileParser {
   private enumDecl(): Stmt {
     this.cursor.next();
     const name = this.cursor.peek();
-    if (!isName(name.kind)) {
+    if (!kTokenTable.isName(name.kind)) {
       this.cursor.error(name.start, Code.ExpectedEnumName);
       return this.marker(StmtKind.Empty, name.start);
     }
@@ -704,7 +705,7 @@ partial class FileParser {
     const members: EnumMember[] = [];
     while (this.cursor.insideList(TokenKind.RBrace)) {
       const member = this.cursor.peek();
-      if (!isName(member.kind)) {
+      if (!kTokenTable.isName(member.kind)) {
         this.cursor.error(
           member.start,
           Code.ExpectedEnumMember,

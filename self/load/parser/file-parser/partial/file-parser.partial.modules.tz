@@ -1,6 +1,7 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { TokenKind, isKeyword, isName } from "../../../../token.tz";
+import { TokenKind } from "../../../token/types/token.types.tz";
+import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
   Expr,
   ExprKind,
@@ -57,7 +58,7 @@ partial class FileParser {
       let name: string | undefined = undefined;
       if (this.cursor.expect(TokenKind.As, Code.ExpectedAfterImportStar)) {
         const alias = this.cursor.peek();
-        if (isName(alias.kind)) {
+        if (kTokenTable.isName(alias.kind)) {
           name = alias.text;
         }
         this.cursor.expectName(Code.ExpectedAfterImportStarAs);
@@ -198,7 +199,7 @@ partial class FileParser {
       case TokenKind.Class:
       case TokenKind.Type:
       case TokenKind.Interface:
-        return isName(next.kind) && !next.newline;
+        return kTokenTable.isName(next.kind) && !next.newline;
       case TokenKind.Abstract:
         return next.kind == TokenKind.Class && !next.newline;
       case TokenKind.Declare:
@@ -300,7 +301,7 @@ partial class FileParser {
     this.cursor.report(loc, Code.ExportDefaultNotSupported);
     this.cursor.next();
     const next = this.cursor.lookahead();
-    if (this.cursor.is(TokenKind.Function) && isName(next.kind)) {
+    if (this.cursor.is(TokenKind.Function) && kTokenTable.isName(next.kind)) {
       return this.statement(topLevel);
     }
     const head = this.cursor.peek();
@@ -350,7 +351,7 @@ partial class FileParser {
     this.cursor.next();
     while (this.cursor.insideList(TokenKind.RBrace)) {
       const next = this.cursor.lookahead();
-      if (this.cursor.is(TokenKind.Type) && isName(next.kind)) {
+      if (this.cursor.is(TokenKind.Type) && kTokenTable.isName(next.kind)) {
         const token = this.cursor.peek();
         this.cursor.report(token.start, codes.typeNotNeeded);
         this.cursor.next();
@@ -373,14 +374,15 @@ partial class FileParser {
       this.cursor.error(token.start, Code.NoExportDefault);
       return undefined;
     }
-    const reserved = !isName(token.kind) && isKeyword(token.kind);
+    const reserved =
+      !kTokenTable.isName(token.kind) && kTokenTable.isKeyword(token.kind);
     const next = this.cursor.lookahead();
     const renamed = reserved && next.kind == TokenKind.As;
     if (reserved && !renamed) {
       this.cursor.error(token.start, codes.keywordName, { word: token.text });
       return undefined;
     }
-    if (!isName(token.kind) && !renamed) {
+    if (!kTokenTable.isName(token.kind) && !renamed) {
       this.cursor.error(token.start, codes.expectedName, { found: token.kind });
       return undefined;
     }
@@ -398,7 +400,7 @@ partial class FileParser {
       this.cursor.error(alias.start, Code.NoExportDefault);
       return undefined;
     }
-    if (!isName(alias.kind)) {
+    if (!kTokenTable.isName(alias.kind)) {
       this.cursor.error(alias.start, Code.ExpectedNameAfterAs, {
         found: alias.kind,
       });
@@ -463,7 +465,7 @@ partial class FileParser {
 
   private attributeKey(): string | undefined {
     const token = this.cursor.peek();
-    if (isName(token.kind) || isKeyword(token.kind)) {
+    if (kTokenTable.isName(token.kind) || kTokenTable.isKeyword(token.kind)) {
       this.cursor.next();
       return token.text;
     }

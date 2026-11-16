@@ -1,6 +1,6 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { KnownName, TokenKind } from "../../../../token.tz";
+import { KnownName, TokenKind } from "../../../token/types/token.types.tz";
 import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
 import {
   ArrayLitExpr,

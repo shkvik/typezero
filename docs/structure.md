@@ -97,7 +97,7 @@ runtime/          весь C → tzrt.lib, tzrt.bc, tzcrypto.lib
   library/        C-часть тем: <тема>/<модуль>/
 library/          весь tz → bin/lib: <тема>/*.tz
 editors/          vscode/ — расширение VS Code; types/ — объявления для будущего плагина tsserver
-self/             компилятор на tz, пробный (порт compiler/load): token.tz, dump.tz, main.tz;
+self/             компилятор на tz, пробный (порт compiler/load): dump.tz, main.tz;
                   program/ast/ — дерево разбора: типы узлов — в types/ast.types.<группа>.tz
                   (span, types, expressions, patterns, statements, functions, classes — там же
                   type alias и enum, modules — там же SourceFile; группы ссылаются друг на
@@ -105,7 +105,11 @@ self/             компилятор на tz, пробный (порт compile
                   их тексты (message.tz: messageText — подстановка {expected}/{found}/{word};
                   таблица kMessages: Record<Code, Message> — в const/message.const.tz, типы
                   Details, Message — в types/message.types.tz);
-                  load/lexer/lexer.tz (tokenize → массив токенов); load/parser/ — Parser (parser.tz:
+                  load/token/ — токены, общие для лексера и парсера (TokenKind, KnownName,
+                  Token — в types/token.types.tz; в token.tz — класс TokenTable: isName,
+                  isKeyword, keywordKind, knownName, spelling; общий экземпляр kTokenTable — в
+                  const/token.const.tz); load/lexer/lexer.tz (tokenize → массив токенов);
+                  load/parser/ — Parser (parser.tz:
                   run() по списку файлов → ParsedFile[]; типы SourceText, ParsedFile — в
                   types/parser.types.tz), Cursor (cursor/: позиция, откаты,
                   ошибки), LiteralReader (literal/: значения литералов по токену), FileParser

@@ -1,4 +1,4 @@
-import { KnownName } from "../../../token.tz";
+import { KnownName } from "../../../load/token/types/token.types.tz";
 import { Span } from "./ast.types.span.tz";
 import { TypeRef } from "./ast.types.types.tz";
 import { FunctionDecl } from "./ast.types.functions.tz";

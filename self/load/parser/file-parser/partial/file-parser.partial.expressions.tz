@@ -4,9 +4,8 @@ import {
   KnownName,
   Token,
   TokenKind,
-  isKeyword,
-  isName,
-} from "../../../../token.tz";
+} from "../../../token/types/token.types.tz";
+import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
   ArrayElement,
   BinaryOp,
@@ -325,7 +324,9 @@ partial class FileParser {
   private isPropertyName(): boolean {
     const token = this.cursor.peek();
 
-    return token.kind == TokenKind.Identifier || isKeyword(token.kind);
+    return (
+      token.kind == TokenKind.Identifier || kTokenTable.isKeyword(token.kind)
+    );
   }
 
   private callOrMember(): Expr {
@@ -767,7 +768,7 @@ partial class FileParser {
       case TokenKind.Less:
         return this.genericArrow(loc);
       default:
-        if (isName(token.kind)) {
+        if (kTokenTable.isName(token.kind)) {
           return this.identifierPrimary(token);
         }
         this.cursor.error(loc, Code.ExpectedExpression, { found: token.kind });
@@ -823,7 +824,7 @@ partial class FileParser {
   private classPrimary(token: Token): Expr {
     const next = this.cursor.lookahead();
     const isClassExpression =
-      isName(next.kind) ||
+      kTokenTable.isName(next.kind) ||
       next.kind == TokenKind.LBrace ||
       next.kind == TokenKind.Extends ||
       next.kind == TokenKind.Implements;
@@ -965,7 +966,7 @@ partial class FileParser {
     return (
       (this.cursor.is(TokenKind.Get) || this.cursor.is(TokenKind.Set)) &&
       (next.kind == TokenKind.Identifier ||
-        isKeyword(next.kind) ||
+        kTokenTable.isKeyword(next.kind) ||
         next.kind == TokenKind.String)
     );
   }
@@ -997,7 +998,7 @@ partial class FileParser {
     const start = head.start;
     const generator = this.cursor.accept(TokenKind.Star);
     const token = this.cursor.peek();
-    const identifier = isName(token.kind);
+    const identifier = kTokenTable.isName(token.kind);
     const name = this.fieldName();
     if (name == undefined) {
       this.cursor.skipToClosingBrace();

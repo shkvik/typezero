@@ -2,7 +2,8 @@ import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { Details } from "../../../../diagnostic/types/message.types.tz";
 import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
-import { Token, TokenKind, isKeyword, isName } from "../../../../token.tz";
+import { Token, TokenKind } from "../../../token/types/token.types.tz";
+import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
   Expr,
   ExprKind,
@@ -33,7 +34,7 @@ partial class FileParser {
     const token = this.cursor.peek();
     const loc = token.start;
     const next = this.cursor.lookahead();
-    if (isName(token.kind) && next.kind == TokenKind.Colon) {
+    if (kTokenTable.isName(token.kind) && next.kind == TokenKind.Colon) {
       this.cursor.skip(2);
       const body = this.statement(false);
       return { kind: StmtKind.Labeled, loc, label: token.text, body };
@@ -147,14 +148,14 @@ partial class FileParser {
   private nameOnLine(): boolean {
     const next = this.cursor.lookahead();
 
-    return isName(next.kind) && !next.newline;
+    return kTokenTable.isName(next.kind) && !next.newline;
   }
 
   private groupingAhead(): boolean {
     const next = this.cursor.lookahead();
     const named =
-      isName(next.kind) ||
-      isKeyword(next.kind) ||
+      kTokenTable.isName(next.kind) ||
+      kTokenTable.isKeyword(next.kind) ||
       next.kind == TokenKind.String;
 
     return named && !next.newline;
@@ -358,7 +359,7 @@ partial class FileParser {
     this.cursor.next();
     let label = "";
     const target = this.cursor.peek();
-    if (isName(target.kind) && !target.newline) {
+    if (kTokenTable.isName(target.kind) && !target.newline) {
       this.cursor.next();
       label = target.text;
     }
@@ -857,12 +858,13 @@ partial class FileParser {
 
   private binding(): Binding | undefined {
     const token = this.cursor.peek();
-    const reserved = !isName(token.kind) && isKeyword(token.kind);
+    const reserved =
+      !kTokenTable.isName(token.kind) && kTokenTable.isKeyword(token.kind);
     if (reserved) {
       this.cursor.report(token.start, Code.KeywordAsVariableName, {
         word: token.text,
       });
-    } else if (!isName(token.kind)) {
+    } else if (!kTokenTable.isName(token.kind)) {
       this.cursor.error(token.start, Code.ExpectedVariableName);
       return undefined;
     }

@@ -1,4 +1,4 @@
-import { TokenKind } from "../../token.tz";
+import { TokenKind } from "../../load/token/types/token.types.tz";
 
 export type Details = {
   readonly expected?: TokenKind;
