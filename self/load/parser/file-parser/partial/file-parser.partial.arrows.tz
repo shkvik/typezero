@@ -1,0 +1,236 @@
+import { FileParser } from "../file-parser.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { TokenKind } from "../../../token/types/token.types.tz";
+import { kTokenTable } from "../../../token/const/token.const.tz";
+import { Mark } from "../../cursor/types/cursor.types.tz";
+import { TypeParamDecl } from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  Expr,
+  ExprKind,
+  FunctionExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  BlockStmt,
+  Stmt,
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  BodySource,
+  FunctionDecl,
+  FunctionPlace,
+  Param,
+  ParamKind,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import { FunctionKind } from "../types/file-parser.types.context.tz";
+import {
+  ArrowHead,
+  ParamPattern,
+} from "../types/file-parser.types.functions.tz";
+
+partial class FileParser {
+  private tryAsyncFunction(): Expr | undefined {
+    const keyword = this.cursor.peek();
+    const loc = keyword.start;
+
+    if (this.asyncFunctionAhead()) {
+      this.cursor.next();
+      const declaration = this.functionDecl(true, true);
+
+      return { kind: ExprKind.Function, loc, fn: declaration };
+    }
+
+    const next = this.cursor.lookahead();
+    const starts =
+      kTokenTable.isName(next.kind) ||
+      next.kind == TokenKind.LParen ||
+      next.kind == TokenKind.Less;
+    if (next.newline || !starts) {
+      return undefined;
+    }
+
+    const start = this.cursor.mark();
+
+    this.cursor.next();
+    if (this.cursor.is(TokenKind.Less)) {
+      return this.asyncGenericArrow(start);
+    }
+
+    if (!this.asyncArrowAhead()) {
+      this.cursor.reset(start);
+
+      return undefined;
+    }
+
+    return this.arrow([], true);
+  }
+
+  private asyncGenericArrow(start: Mark): Expr | undefined {
+    const less = this.cursor.peek();
+    const text = less.start;
+
+    this.cursor.startDiscarding();
+    this.cursor.stopRecovering();
+    const typeParams = this.typeParams();
+    const isArrow =
+      !this.cursor.isRecovering() &&
+      this.cursor.is(TokenKind.LParen) &&
+      this.arrowAhead();
+
+    this.cursor.stopDiscarding();
+    if (!isArrow) {
+      this.cursor.reset(start);
+
+      return undefined;
+    }
+
+    this.cursor.restoreRecovering(start);
+
+    return this.arrow(typeParams, true, text);
+  }
+
+  private arrowAhead(): boolean {
+    const start = this.cursor.mark();
+
+    this.cursor.startDiscarding();
+    this.cursor.stopRecovering();
+
+    const fits = this.scansAsArrow();
+
+    this.cursor.stopDiscarding();
+    this.cursor.reset(start);
+
+    return fits;
+  }
+
+  private scansAsArrow(): boolean {
+    this.params(true, false, []);
+    if (this.cursor.isRecovering()) {
+      return false;
+    }
+    if (this.cursor.accept(TokenKind.Colon)) {
+      this.type();
+      if (this.cursor.isRecovering()) {
+        return false;
+      }
+    }
+
+    return this.cursor.is(TokenKind.Arrow);
+  }
+
+  private arrow(
+    typeParams: TypeParamDecl[],
+    isAsync: boolean,
+    from?: int,
+  ): FunctionExpr {
+    const first = this.cursor.peek();
+    const start = from ?? first.start;
+    const loc = first.start;
+    const outer = this.context;
+
+    this.context = { ...outer, functionKind: FunctionKind.Plain };
+    const patterns: ParamPattern[] = [];
+    const head = this.arrowHead(patterns);
+    const arrow = this.cursor.peek();
+    if (arrow.kind == TokenKind.Arrow && arrow.newline) {
+      this.cursor.report(arrow.start, Code.ArrowOnNewLine);
+    }
+
+    this.cursor.expect(TokenKind.Arrow, Code.ExpectedAfterArrowParameters);
+    const concise = !this.cursor.is(TokenKind.LBrace);
+    const body = this.arrowBody(concise);
+
+    this.addPrologue(body, patterns);
+    const declaration: FunctionDecl = {
+      kind: StmtKind.Function,
+      loc,
+      name: "",
+      typeParams,
+      params: head.params,
+      returnType: head.returnType,
+      body,
+      source: this.cursor.spanFrom(start),
+      isArrow: true,
+      concise,
+      ownName: "",
+      place: FunctionPlace.Expression,
+      bodySource: BodySource.Written,
+      isGenerator: false,
+      isAsync,
+    };
+
+    this.context = outer;
+
+    return { kind: ExprKind.Function, loc, fn: declaration };
+  }
+
+  private arrowHead(patterns: ParamPattern[]): ArrowHead {
+    if (this.cursor.atName()) {
+      const token = this.cursor.next();
+      const param: Param = {
+        name: token.text,
+        loc: token.start,
+        form: { kind: ParamKind.Required },
+        decorators: [],
+      };
+
+      return { params: [param] };
+    }
+
+    const params = this.params(true, false, patterns);
+    const returnType = this.returnTypeAnnotation();
+
+    return { params, returnType };
+  }
+
+  private arrowBlock(): BlockStmt {
+    const body = this.block();
+    const only = this.onlyStatement(body);
+    if (
+      only != undefined &&
+      only.kind == StmtKind.Labeled &&
+      only.body.kind == StmtKind.Expr
+    ) {
+      this.cursor.report(only.loc, Code.ArrowBodyLabel, { word: only.label });
+    }
+
+    return body;
+  }
+
+  private conciseBody(): BlockStmt {
+    const head = this.cursor.peek();
+    const loc = head.start;
+    const value = this.expression();
+
+    return {
+      kind: StmtKind.Block,
+      loc,
+      body: [{ kind: StmtKind.Return, loc, value }],
+    };
+  }
+
+  private asyncArrowAhead(): boolean {
+    if (!this.cursor.atName()) {
+      return this.arrowAhead();
+    }
+
+    const after = this.cursor.lookahead();
+
+    return after.kind == TokenKind.Arrow && !after.newline;
+  }
+
+  private arrowBody(concise: boolean): BlockStmt {
+    if (concise) {
+      return this.conciseBody();
+    }
+
+    return this.arrowBlock();
+  }
+
+  private onlyStatement(body: BlockStmt): Stmt | undefined {
+    if (body.body.length != 1) {
+      return undefined;
+    }
+
+    return body.body[0];
+  }
+}

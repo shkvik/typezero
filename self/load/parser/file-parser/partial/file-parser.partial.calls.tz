@@ -39,9 +39,11 @@ partial class FileParser {
 
     this.cursor.expect(TokenKind.RParen, Code.ExpectedArgumentsClose);
     this.context = outer;
-    const anySpread = spread.includes(true);
+    if (!spread.includes(true)) {
+      return { args, spread: [] };
+    }
 
-    return { args, spread: anySpread ? spread : [] };
+    return { args, spread };
   }
 
   private indexInside(): Expr {
@@ -81,9 +83,7 @@ partial class FileParser {
         optionalChain = true;
       }
 
-      const link = optionalLink
-        ? this.optionalLink(expr)
-        : this.plainLink(expr, optionalChain);
+      const link = this.chainLink(expr, optionalLink, optionalChain);
       if (link == undefined) {
         break;
       }
@@ -331,7 +331,7 @@ partial class FileParser {
     const name = this.cursor.next();
     const member = this.newMember();
     const form = this.newForm(name, member);
-    const typeArgs = this.cursor.is(TokenKind.Less) ? this.typeArguments() : [];
+    const typeArgs = this.optionalTypeArguments();
     const args = this.newArguments();
 
     return {
@@ -415,9 +415,7 @@ partial class FileParser {
       this.cursor.is(TokenKind.Dot) ||
       this.cursor.is(TokenKind.LBracket)
     ) {
-      const link = this.cursor.is(TokenKind.LBracket)
-        ? this.indexLink(path, false)
-        : this.dotLink(path);
+      const link = this.pathLink(path);
       if (link == undefined) {
         return path;
       }
@@ -426,5 +424,25 @@ partial class FileParser {
     }
 
     return path;
+  }
+
+  private chainLink(
+    expr: Expr,
+    optionalLink: boolean,
+    optionalChain: boolean,
+  ): Expr | undefined {
+    if (optionalLink) {
+      return this.optionalLink(expr);
+    }
+
+    return this.plainLink(expr, optionalChain);
+  }
+
+  private pathLink(path: Expr): Expr | undefined {
+    if (this.cursor.is(TokenKind.LBracket)) {
+      return this.indexLink(path, false);
+    }
+
+    return this.dotLink(path);
   }
 }

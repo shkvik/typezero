@@ -128,12 +128,15 @@ partial class FileParser {
       return { kind: ImportForm.Namespace };
     }
 
-    const alias = this.cursor.peek();
-    const name = this.cursor.atName() ? alias.text : undefined;
+    if (!this.cursor.atName()) {
+      this.cursor.expectName(Code.ExpectedAfterImportStarAs);
 
-    this.cursor.expectName(Code.ExpectedAfterImportStarAs);
+      return { kind: ImportForm.Namespace };
+    }
 
-    return { kind: ImportForm.Namespace, name };
+    const alias = this.cursor.next();
+
+    return { kind: ImportForm.Namespace, name: alias.text };
   }
 
   private partList(loc: int, topLevel: boolean): Stmt {
@@ -356,7 +359,7 @@ partial class FileParser {
 
     this.cursor.expectSemicolon();
     if (!this.cursor.isRecovering()) {
-      const form = reExport ? ExportForm.Re : ExportForm.Local;
+      const form = this.exportForm(reExport);
 
       this.exports.push({ loc, form, names, from });
     }
@@ -568,7 +571,7 @@ partial class FileParser {
 
     const quoted = this.fromPath(false);
 
-    return quoted == undefined ? undefined : quoted.path;
+    return quoted?.path;
   }
 
   private fromPath(from: boolean): ModulePath | undefined {
@@ -716,5 +719,13 @@ partial class FileParser {
       path.startsWith(kTzModulePrefix) ||
       this.isBareModule(path)
     );
+  }
+
+  private exportForm(reExport: boolean): ExportForm {
+    if (reExport) {
+      return ExportForm.Re;
+    }
+
+    return ExportForm.Local;
   }
 }

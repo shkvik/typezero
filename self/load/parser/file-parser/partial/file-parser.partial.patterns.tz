@@ -370,9 +370,8 @@ partial class FileParser {
         continue;
       }
 
-      const part = direct
-        ? this.directElement(element, values[i] ?? "")
-        : this.elementOf(base, pattern, i, keyReads);
+      const name = values[i];
+      const part = this.assignedPart(element, name, base, pattern, i, keyReads);
       const nested = element.nested;
       if (nested != undefined) {
         const assignment = this.assignPattern(element.loc, nested, part);
@@ -425,7 +424,7 @@ partial class FileParser {
     keyReads: IndexExpr[],
   ): Expr {
     const element = pattern.elements[i];
-    const loc = element == undefined ? pattern.loc : element.loc;
+    const loc = element?.loc ?? pattern.loc;
     const source: Expr = {
       kind: ExprKind.Name,
       loc,
@@ -603,5 +602,20 @@ partial class FileParser {
     }
 
     return true;
+  }
+
+  private assignedPart(
+    element: PatternElement,
+    name: string | undefined,
+    base: string,
+    pattern: Pattern,
+    i: int,
+    keyReads: IndexExpr[],
+  ): Expr {
+    if (name != undefined) {
+      return this.directElement(element, name);
+    }
+
+    return this.elementOf(base, pattern, i, keyReads);
   }
 }

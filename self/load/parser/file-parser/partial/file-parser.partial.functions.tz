@@ -2,13 +2,11 @@ import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
-import { Mark } from "../../cursor/types/cursor.types.tz";
-import { TypeParamDecl } from "../../../../program/ast/types/ast.types.types.tz";
 import {
-  Expr,
-  ExprKind,
-  FunctionExpr,
-} from "../../../../program/ast/types/ast.types.expressions.tz";
+  TypeParamDecl,
+  TypeRef,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { VarDeclarator } from "../../../../program/ast/types/ast.types.patterns.tz";
 import {
   BlockStmt,
@@ -31,7 +29,6 @@ import {
 } from "../../../../program/ast/types/ast.types.classes.tz";
 import { FunctionKind } from "../types/file-parser.types.context.tz";
 import {
-  ArrowHead,
   FunctionName,
   ParamName,
   ParamPattern,
@@ -76,9 +73,7 @@ partial class FileParser {
       return declaration;
     }
 
-    declaration.bodySource = this.library
-      ? BodySource.External
-      : BodySource.Foreign;
+    declaration.bodySource = this.declaredBodySource();
     declaration.body = { kind: StmtKind.Block, loc: declaration.loc, body: [] };
 
     return declaration;
@@ -88,19 +83,17 @@ partial class FileParser {
     const keyword = this.cursor.next();
     const generator = this.cursor.accept(TokenKind.Star);
     const named = this.functionName(keyword.start, expression);
-    const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
+    const typeParams = this.optionalTypeParams();
     const outer = this.context;
-    const functionKind = generator
-      ? FunctionKind.Generator
-      : FunctionKind.Plain;
+    const functionKind = this.functionKindOf(generator);
 
     this.context = { ...outer, functionKind };
     const patterns: ParamPattern[] = [];
     const params = this.params(false, false, patterns);
-    const returnType = this.cursor.accept(TokenKind.Colon)
-      ? this.returnType()
-      : undefined;
+    const returnType = this.returnTypeAnnotation();
     const body = this.functionBody(expression, patterns);
+    const ownName = this.ownNameOf(expression, named.name);
+    const place = this.functionPlace(expression);
 
     this.context = outer;
 
@@ -115,8 +108,8 @@ partial class FileParser {
       source: this.cursor.spanFrom(keyword.start),
       isArrow: false,
       concise: false,
-      ownName: expression ? named.name : "",
-      place: expression ? FunctionPlace.Expression : FunctionPlace.Declared,
+      ownName,
+      place,
       bodySource: BodySource.Written,
       isGenerator: generator,
       isAsync,
@@ -187,10 +180,9 @@ partial class FileParser {
     constructor: boolean,
     patterns: ParamPattern[],
   ): Param[] {
-    this.cursor.expect(
-      TokenKind.LParen,
-      arrow ? Code.ExpectedParametersStart : Code.ExpectedAfterFunctionName,
-    );
+    const startCode = this.paramsStartCode(arrow);
+
+    this.cursor.expect(TokenKind.LParen, startCode);
     const params: Param[] = [];
 
     while (this.cursor.insideList(TokenKind.RParen)) {
@@ -235,7 +227,7 @@ partial class FileParser {
     }
 
     const optional = this.cursor.accept(TokenKind.Question);
-    const type = this.cursor.accept(TokenKind.Colon) ? this.type() : undefined;
+    const type = this.typeAnnotation();
     const defaultValue = this.paramDefault(optional);
     if (rest && (optional || defaultValue != undefined)) {
       this.cursor.report(loc, Code.RestParameterOptional);
@@ -284,11 +276,11 @@ partial class FileParser {
       return { name, pattern };
     }
 
-    const code = rest
-      ? Code.ExpectedParameterAfterRest
-      : Code.ExpectedParameterName;
-
-    this.cursor.error(token.start, code);
+    if (rest) {
+      this.cursor.error(token.start, Code.ExpectedParameterAfterRest);
+    } else {
+      this.cursor.error(token.start, Code.ExpectedParameterName);
+    }
 
     return undefined;
   }
@@ -319,7 +311,11 @@ partial class FileParser {
       return { kind: ParamKind.Defaulted, defaultValue };
     }
 
-    return { kind: optional ? ParamKind.Optional : ParamKind.Required };
+    if (optional) {
+      return { kind: ParamKind.Optional };
+    }
+
+    return { kind: ParamKind.Required };
   }
 
   private paramModifierAhead(): boolean {
@@ -398,192 +394,6 @@ partial class FileParser {
     );
   }
 
-  private tryAsyncFunction(): Expr | undefined {
-    const keyword = this.cursor.peek();
-    const loc = keyword.start;
-
-    if (this.asyncFunctionAhead()) {
-      this.cursor.next();
-      const declaration = this.functionDecl(true, true);
-
-      return { kind: ExprKind.Function, loc, fn: declaration };
-    }
-
-    const next = this.cursor.lookahead();
-    const starts =
-      kTokenTable.isName(next.kind) ||
-      next.kind == TokenKind.LParen ||
-      next.kind == TokenKind.Less;
-    if (next.newline || !starts) {
-      return undefined;
-    }
-
-    const start = this.cursor.mark();
-
-    this.cursor.next();
-    if (this.cursor.is(TokenKind.Less)) {
-      return this.asyncGenericArrow(start);
-    }
-
-    const after = this.cursor.lookahead();
-    const isArrow = this.cursor.atName()
-      ? after.kind == TokenKind.Arrow && !after.newline
-      : this.arrowAhead();
-    if (!isArrow) {
-      this.cursor.reset(start);
-
-      return undefined;
-    }
-
-    return this.arrow([], true);
-  }
-
-  private asyncGenericArrow(start: Mark): Expr | undefined {
-    const less = this.cursor.peek();
-    const text = less.start;
-
-    this.cursor.startDiscarding();
-    this.cursor.stopRecovering();
-    const typeParams = this.typeParams();
-    const isArrow =
-      !this.cursor.isRecovering() &&
-      this.cursor.is(TokenKind.LParen) &&
-      this.arrowAhead();
-
-    this.cursor.stopDiscarding();
-    if (!isArrow) {
-      this.cursor.reset(start);
-
-      return undefined;
-    }
-
-    this.cursor.restoreRecovering(start);
-
-    return this.arrow(typeParams, true, text);
-  }
-
-  private arrowAhead(): boolean {
-    const start = this.cursor.mark();
-
-    this.cursor.startDiscarding();
-    this.cursor.stopRecovering();
-
-    const fits = this.scansAsArrow();
-
-    this.cursor.stopDiscarding();
-    this.cursor.reset(start);
-
-    return fits;
-  }
-
-  private scansAsArrow(): boolean {
-    this.params(true, false, []);
-    if (this.cursor.isRecovering()) {
-      return false;
-    }
-    if (this.cursor.accept(TokenKind.Colon)) {
-      this.type();
-      if (this.cursor.isRecovering()) {
-        return false;
-      }
-    }
-
-    return this.cursor.is(TokenKind.Arrow);
-  }
-
-  private arrow(
-    typeParams: TypeParamDecl[],
-    isAsync: boolean,
-    from?: int,
-  ): FunctionExpr {
-    const first = this.cursor.peek();
-    const start = from ?? first.start;
-    const loc = first.start;
-    const outer = this.context;
-
-    this.context = { ...outer, functionKind: FunctionKind.Plain };
-    const patterns: ParamPattern[] = [];
-    const head = this.arrowHead(patterns);
-    const arrow = this.cursor.peek();
-    if (arrow.kind == TokenKind.Arrow && arrow.newline) {
-      this.cursor.report(arrow.start, Code.ArrowOnNewLine);
-    }
-
-    this.cursor.expect(TokenKind.Arrow, Code.ExpectedAfterArrowParameters);
-    const concise = !this.cursor.is(TokenKind.LBrace);
-    const body = concise ? this.conciseBody() : this.arrowBlock();
-
-    this.addPrologue(body, patterns);
-    const declaration: FunctionDecl = {
-      kind: StmtKind.Function,
-      loc,
-      name: "",
-      typeParams,
-      params: head.params,
-      returnType: head.returnType,
-      body,
-      source: this.cursor.spanFrom(start),
-      isArrow: true,
-      concise,
-      ownName: "",
-      place: FunctionPlace.Expression,
-      bodySource: BodySource.Written,
-      isGenerator: false,
-      isAsync,
-    };
-
-    this.context = outer;
-
-    return { kind: ExprKind.Function, loc, fn: declaration };
-  }
-
-  private arrowHead(patterns: ParamPattern[]): ArrowHead {
-    if (this.cursor.atName()) {
-      const token = this.cursor.next();
-      const param: Param = {
-        name: token.text,
-        loc: token.start,
-        form: { kind: ParamKind.Required },
-        decorators: [],
-      };
-
-      return { params: [param] };
-    }
-
-    const params = this.params(true, false, patterns);
-    const returnType = this.cursor.accept(TokenKind.Colon)
-      ? this.returnType()
-      : undefined;
-
-    return { params, returnType };
-  }
-
-  private arrowBlock(): BlockStmt {
-    const body = this.block();
-    const only = body.body.length == 1 ? body.body[0] : undefined;
-    if (
-      only != undefined &&
-      only.kind == StmtKind.Labeled &&
-      only.body.kind == StmtKind.Expr
-    ) {
-      this.cursor.report(only.loc, Code.ArrowBodyLabel, { word: only.label });
-    }
-
-    return body;
-  }
-
-  private conciseBody(): BlockStmt {
-    const head = this.cursor.peek();
-    const loc = head.start;
-    const value = this.expression();
-
-    return {
-      kind: StmtKind.Block,
-      loc,
-      body: [{ kind: StmtKind.Return, loc, value }],
-    };
-  }
-
   private typeParams(): TypeParamDecl[] {
     const params: TypeParamDecl[] = [];
 
@@ -628,12 +438,8 @@ partial class FileParser {
     }
 
     this.cursor.next();
-    const constraint = this.cursor.accept(TokenKind.Extends)
-      ? this.type()
-      : undefined;
-    const defaultType = this.cursor.accept(TokenKind.Assign)
-      ? this.type()
-      : undefined;
+    const constraint = this.typeConstraint();
+    const defaultType = this.typeDefault();
 
     return {
       name: token.text,
@@ -653,19 +459,15 @@ partial class FileParser {
     role: ClassMember | undefined,
   ): FunctionDecl {
     const outer = this.context;
-    const functionKind = generator
-      ? FunctionKind.Generator
-      : FunctionKind.Plain;
+    const functionKind = this.functionKindOf(generator);
 
     this.context = { ...outer, functionKind };
-    const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
+    const typeParams = this.optionalTypeParams();
     const patterns: ParamPattern[] = [];
     const constructor =
       role != undefined && role.method == MethodKind.Constructor;
     const params = this.params(false, constructor, patterns);
-    const returnType = this.cursor.accept(TokenKind.Colon)
-      ? this.returnType()
-      : undefined;
+    const returnType = this.returnTypeAnnotation();
     const body = this.methodBody(patterns);
     const source = this.cursor.spanFrom(start);
 
@@ -726,5 +528,69 @@ partial class FileParser {
       default:
         return false;
     }
+  }
+
+  private optionalTypeParams(): TypeParamDecl[] {
+    if (!this.cursor.is(TokenKind.Less)) {
+      return [];
+    }
+
+    return this.typeParams();
+  }
+
+  private typeConstraint(): TypeRef | undefined {
+    if (!this.cursor.accept(TokenKind.Extends)) {
+      return undefined;
+    }
+
+    return this.type();
+  }
+
+  private typeDefault(): TypeRef | undefined {
+    if (!this.cursor.accept(TokenKind.Assign)) {
+      return undefined;
+    }
+
+    return this.type();
+  }
+
+  private functionKindOf(generator: boolean): FunctionKind {
+    if (generator) {
+      return FunctionKind.Generator;
+    }
+
+    return FunctionKind.Plain;
+  }
+
+  private functionPlace(expression: boolean): FunctionPlace {
+    if (expression) {
+      return FunctionPlace.Expression;
+    }
+
+    return FunctionPlace.Declared;
+  }
+
+  private ownNameOf(expression: boolean, name: string): string {
+    if (expression) {
+      return name;
+    }
+
+    return "";
+  }
+
+  private declaredBodySource(): BodySource {
+    if (this.library) {
+      return BodySource.External;
+    }
+
+    return BodySource.Foreign;
+  }
+
+  private paramsStartCode(arrow: boolean): Code {
+    if (arrow) {
+      return Code.ExpectedParametersStart;
+    }
+
+    return Code.ExpectedAfterFunctionName;
   }
 }

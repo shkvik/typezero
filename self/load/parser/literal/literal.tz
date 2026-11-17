@@ -51,7 +51,11 @@ export class LiteralReader {
     const quote = this.byteAt(token.start);
     const closing = this.byteAt(token.end - 1);
     const closed = token.end > token.start + 1 && closing == quote;
-    const last = closed ? token.end - 1 : token.end;
+    let last = token.end;
+
+    if (closed) {
+      last -= 1;
+    }
 
     return this.decodeText(token.start + 1, last, TextKind.Quoted);
   }
@@ -87,7 +91,12 @@ export class LiteralReader {
     }
 
     const pattern = this.source.toString("utf8", from, slash);
-    const flagsStart = slash + 1 < token.end ? slash + 1 : token.end;
+    let flagsStart = token.end;
+
+    if (slash + 1 < token.end) {
+      flagsStart = slash + 1;
+    }
+
     const flags = this.source.toString("utf8", flagsStart, token.end);
 
     return { pattern, flags };
@@ -96,7 +105,12 @@ export class LiteralReader {
   public integer(token: Token): NumberText {
     const digits = this.digitsOf(token);
     const radix = this.radixOf(digits);
-    const prefixLength = radix == 10 ? 0 : kRadixPrefixLength;
+    let prefixLength = kRadixPrefixLength;
+
+    if (radix == 10) {
+      prefixLength = 0;
+    }
+
     const base = radix.toUint64();
     let value: uint64 = 0;
 

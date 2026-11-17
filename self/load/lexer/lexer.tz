@@ -317,10 +317,11 @@ export class Lexer {
   }
 
   private pushOperator(plain: TokenKind, withAssign: TokenKind): void {
-    const assign = this.match(kEquals);
-    const kind = assign ? withAssign : plain;
+    if (this.match(kEquals)) {
+      return this.push(withAssign);
+    }
 
-    this.push(kind);
+    this.push(plain);
   }
 
   private match(code: int): boolean {
@@ -464,9 +465,11 @@ export class Lexer {
     this.skipDigits();
     const fraction = leadingDot || this.acceptFraction();
     const exponent = this.acceptExponent();
-    const kind = fraction || exponent ? TokenKind.Float : TokenKind.Int;
+    if (fraction || exponent) {
+      return this.finishNumber(TokenKind.Float);
+    }
 
-    this.finishNumber(kind);
+    this.finishNumber(TokenKind.Int);
   }
 
   private isRadixLetter(code: int): boolean {
@@ -506,8 +509,10 @@ export class Lexer {
 
     const sign = this.at(1);
     const signed = sign == kPlus || sign == kMinus;
-    const digits = signed ? this.digitAt(2) : this.digitAt(1);
-    if (!digits) {
+    if (signed && !this.digitAt(2)) {
+      return false;
+    }
+    if (!signed && !this.digitAt(1)) {
       return false;
     }
 
@@ -581,12 +586,13 @@ export class Lexer {
   }
 
   private template(continuation: boolean): void {
-    const closed = continuation
-      ? TokenKind.TemplateTail
-      : TokenKind.TemplateString;
-    const opened = continuation
-      ? TokenKind.TemplateMiddle
-      : TokenKind.TemplateHead;
+    let closed: TokenKind = TokenKind.TemplateString;
+    let opened: TokenKind = TokenKind.TemplateHead;
+
+    if (continuation) {
+      closed = TokenKind.TemplateTail;
+      opened = TokenKind.TemplateMiddle;
+    }
 
     while (!this.atEnd()) {
       const code = this.at(0);
@@ -610,15 +616,24 @@ export class Lexer {
   }
 
   private identifier(hash: boolean): void {
-    const start = hash ? this.start + 1 : this.start;
+    let start = this.start;
+
+    if (hash) {
+      start += 1;
+    }
 
     while (this.identCharAt(0)) {
       this.position += 1;
     }
 
     const text = this.source.toString("utf8", start, this.position);
-    const kind = hash ? TokenKind.Identifier : kTokenTable.keywordKind(text);
-    const known = hash ? KnownName.None : kTokenTable.knownName(text);
+    let kind: TokenKind = TokenKind.Identifier;
+    let known: KnownName = KnownName.None;
+
+    if (!hash) {
+      kind = kTokenTable.keywordKind(text);
+      known = kTokenTable.knownName(text);
+    }
 
     this.tokens.push({
       kind,

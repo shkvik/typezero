@@ -1,6 +1,7 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { TokenKind } from "../../../token/types/token.types.tz";
+import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
   BindingForm,
   BindingKind,
@@ -130,9 +131,7 @@ partial class FileParser {
 
       this.declarePattern(decls, target.pattern, value, undefined);
     } else {
-      const value = this.cursor.accept(TokenKind.Assign)
-        ? this.expression()
-        : undefined;
+      const value = this.initializer();
 
       decls.push({
         ...target.binding,
@@ -185,10 +184,10 @@ partial class FileParser {
     }
 
     this.cursor.expect(TokenKind.Semi, Code.ExpectedAfterLoopInitializer);
-    const cond = this.cursor.is(TokenKind.Semi) ? undefined : this.sequence();
+    const cond = this.forCondition();
 
     this.cursor.expect(TokenKind.Semi, Code.ExpectedAfterLoopCondition);
-    const step = this.cursor.is(TokenKind.RParen) ? undefined : this.sequence();
+    const step = this.forStep();
 
     this.cursor.expect(TokenKind.RParen, Code.ExpectedLoopHeaderClose);
     const body = this.statement(false);
@@ -296,5 +295,21 @@ partial class FileParser {
       loc: statement.loc,
       body: [elements, statement],
     };
+  }
+
+  private forCondition(): Expr | undefined {
+    if (this.cursor.is(TokenKind.Semi)) {
+      return undefined;
+    }
+
+    return this.sequence();
+  }
+
+  private forStep(): Expr | undefined {
+    if (this.cursor.is(TokenKind.RParen)) {
+      return undefined;
+    }
+
+    return this.sequence();
   }
 }

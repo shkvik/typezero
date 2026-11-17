@@ -310,7 +310,7 @@ partial class FileParser {
 
   private booleanLiteralType(): TypeRef {
     const token = this.cursor.next();
-    const truth = token.kind == TokenKind.True ? 1.0 : 0.0;
+    const truth = this.truthNumber(token.kind);
     const ref = this.typeRef(token.start);
 
     ref.form = {
@@ -407,9 +407,7 @@ partial class FileParser {
     const ref = this.typeRef(first.start);
     const negative = this.cursor.accept(TokenKind.Minus);
 
-    const literal = this.cursor.is(TokenKind.Int)
-      ? this.intLiteral()
-      : this.floatLiteral();
+    const literal = this.numberLiteral();
 
     let number = 0.0;
     let integer = false;
@@ -583,5 +581,29 @@ partial class FileParser {
       loc,
       args: [],
     };
+  }
+
+  private typeAnnotation(): TypeRef | undefined {
+    if (!this.cursor.accept(TokenKind.Colon)) {
+      return undefined;
+    }
+
+    return this.type();
+  }
+
+  private optionalTypeArguments(): TypeRef[] {
+    if (!this.cursor.is(TokenKind.Less)) {
+      return [];
+    }
+
+    return this.typeArguments();
+  }
+
+  private truthNumber(kind: TokenKind): double {
+    if (kind == TokenKind.True) {
+      return 1.0;
+    }
+
+    return 0.0;
   }
 }

@@ -122,7 +122,8 @@ self/             компилятор на tz, пробный (порт compile
                   (file-parser/: грамматика; части `partial class` — в
                   partial/file-parser.partial.<часть>.tz: types, object-types,
                   function-types, expressions, operators, calls, literals, patterns,
-                  statements, loops, variables, functions, classes, declarations (type,
+                  statements, loops, variables, functions, arrows, classes, modifiers,
+                  declarations (type,
                   interface, enum), modules; файл больше
                   800 строк делится на части). У класса своя папка: класс — в
                   <класс>.tz, его типы — в types/<класс>.types.tz, константы — в

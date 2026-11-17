@@ -182,4 +182,12 @@ partial class FileParser {
 
     return this.typeRef(name.start);
   }
+
+  private returnTypeAnnotation(): TypeRef | undefined {
+    if (!this.cursor.accept(TokenKind.Colon)) {
+      return undefined;
+    }
+
+    return this.returnType();
+  }
 }

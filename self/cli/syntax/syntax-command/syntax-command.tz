@@ -103,8 +103,8 @@ export class SyntaxCommand {
 
       for (const token of lexer.run()) {
         const length = token.end - token.start;
-        const newline = token.newline ? 1 : 0;
-        const hash = token.hash ? 1 : 0;
+        const newline = this.bit(token.newline);
+        const hash = this.bit(token.hash);
 
         console.log(`${token.kind} ${token.start} ${length} ${newline} ${hash}`);
       }
@@ -219,5 +219,13 @@ export class SyntaxCommand {
     const counts = `files ${sources.length}, items ${items}`;
 
     console.log(`${counts}, held ${files.length}, spins ${spins}`);
+  }
+
+  private bit(value: boolean): int {
+    if (value) {
+      return 1;
+    }
+
+    return 0;
   }
 }

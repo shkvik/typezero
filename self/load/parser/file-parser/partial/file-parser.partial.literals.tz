@@ -452,4 +452,12 @@ partial class FileParser {
       value: token.kind == TokenKind.True,
     };
   }
+
+  private numberLiteral(): Expr {
+    if (this.cursor.is(TokenKind.Int)) {
+      return this.intLiteral();
+    }
+
+    return this.floatLiteral();
+  }
 }

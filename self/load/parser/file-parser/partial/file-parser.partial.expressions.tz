@@ -239,12 +239,12 @@ partial class FileParser {
 
   private importPrimary(token: Token): Expr {
     const next = this.cursor.lookahead();
-    const code =
-      next.kind == TokenKind.Dot
-        ? Code.ImportMetaNotSupported
-        : Code.DynamicImportNotSupported;
+    if (next.kind == TokenKind.Dot) {
+      this.cursor.report(token.start, Code.ImportMetaNotSupported);
+    } else {
+      this.cursor.report(token.start, Code.DynamicImportNotSupported);
+    }
 
-    this.cursor.report(token.start, code);
     this.cursor.next();
 
     return this.invalid(token.start);

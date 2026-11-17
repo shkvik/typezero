@@ -22,19 +22,23 @@ partial class FileParser {
     }
     if (this.glued(1, TokenKind.Greater)) {
       if (this.glued(2, TokenKind.Greater)) {
-        return this.glued(3, TokenKind.Assign)
-          ? { kind: TokenKind.UShrAssign, width: 4 }
-          : { kind: TokenKind.UShr, width: 3 };
+        if (this.glued(3, TokenKind.Assign)) {
+          return { kind: TokenKind.UShrAssign, width: 4 };
+        }
+
+        return { kind: TokenKind.UShr, width: 3 };
+      }
+      if (this.glued(2, TokenKind.Assign)) {
+        return { kind: TokenKind.ShrAssign, width: 3 };
       }
 
-      return this.glued(2, TokenKind.Assign)
-        ? { kind: TokenKind.ShrAssign, width: 3 }
-        : { kind: TokenKind.Shr, width: 2 };
+      return { kind: TokenKind.Shr, width: 2 };
+    }
+    if (this.glued(1, TokenKind.Assign)) {
+      return { kind: TokenKind.GreaterEq, width: 2 };
     }
 
-    return this.glued(1, TokenKind.Assign)
-      ? { kind: TokenKind.GreaterEq, width: 2 }
-      : { kind: TokenKind.Greater, width: 1 };
+    return { kind: TokenKind.Greater, width: 1 };
   }
 
   private glued(offset: int, kind: TokenKind): boolean {
@@ -78,18 +82,14 @@ partial class FileParser {
           precedence: Precedence.Relational,
         };
       case TokenKind.Satisfies: {
-        const precedence = token.newline
-          ? Precedence.None
-          : Precedence.Relational;
+        const precedence = this.relationalUnless(token.newline);
 
         return { kind: token.kind, width: 1, precedence };
       }
       case TokenKind.In: {
         const place = this.context.expressionPlace;
-        const precedence =
-          place == ExpressionPlace.ForHead
-            ? Precedence.None
-            : Precedence.Relational;
+        const forHead = place == ExpressionPlace.ForHead;
+        const precedence = this.relationalUnless(forHead);
 
         return { kind: token.kind, width: 1, precedence };
       }
@@ -136,10 +136,7 @@ partial class FileParser {
           this.cursor.report(token.start, Code.StrictNotEqualsNotSupported);
         }
 
-        const floor =
-          op.precedence == Precedence.Power
-            ? Precedence.Multiplicative
-            : op.precedence;
+        const floor = this.rightFloor(op.precedence);
         const right = this.binary(floor);
 
         return {
@@ -371,5 +368,21 @@ partial class FileParser {
       default:
         return undefined;
     }
+  }
+
+  private relationalUnless(blocked: boolean): Precedence {
+    if (blocked) {
+      return Precedence.None;
+    }
+
+    return Precedence.Relational;
+  }
+
+  private rightFloor(precedence: Precedence): Precedence {
+    if (precedence == Precedence.Power) {
+      return Precedence.Multiplicative;
+    }
+
+    return precedence;
   }
 }

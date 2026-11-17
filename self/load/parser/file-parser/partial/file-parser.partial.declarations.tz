@@ -14,7 +14,7 @@ partial class FileParser {
   private typeAlias(): Stmt {
     this.cursor.next();
     const name = this.cursor.next();
-    const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
+    const typeParams = this.optionalTypeParams();
 
     this.cursor.expect(TokenKind.Assign, Code.ExpectedAfterTypeName);
     const type = this.type();
@@ -78,7 +78,7 @@ partial class FileParser {
   private interfaceDecl(): Stmt {
     this.cursor.next();
     const name = this.cursor.next();
-    const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
+    const typeParams = this.optionalTypeParams();
     const bases: TypeRef[] = [];
 
     if (this.cursor.is(TokenKind.Extends)) {

@@ -47,11 +47,7 @@ partial class FileParser {
 
   private declarators(decls: VarDeclarator[], isConst: boolean): void {
     do {
-      const pattern =
-        this.cursor.is(TokenKind.LBracket) || this.cursor.is(TokenKind.LBrace);
-      const declared = pattern
-        ? this.patternDeclarator(decls)
-        : this.plainDeclarator(decls, isConst);
+      const declared = this.declarator(decls, isConst);
       if (!declared) {
         return;
       }
@@ -60,9 +56,7 @@ partial class FileParser {
 
   private patternDeclarator(decls: VarDeclarator[]): boolean {
     const pattern = this.bindingPattern();
-    const typeAnn = this.cursor.accept(TokenKind.Colon)
-      ? this.type()
-      : undefined;
+    const typeAnn = this.typeAnnotation();
 
     if (!this.cursor.is(TokenKind.Assign)) {
       this.cursor.error(pattern.loc, Code.DestructuringNeedsValue);
@@ -84,9 +78,7 @@ partial class FileParser {
       return false;
     }
 
-    const init = this.cursor.accept(TokenKind.Assign)
-      ? this.expression()
-      : undefined;
+    const init = this.initializer();
 
     decls.push({
       ...binding,
@@ -117,7 +109,9 @@ partial class FileParser {
     } else if (init.kind == ExprKind.Name) {
       const known = this.stringConstants.get(init.name);
 
-      values = known != undefined ? known.slice() : [];
+      if (known != undefined) {
+        values = known.slice();
+      }
     }
 
     const all = this.stringConstants.get(name);
@@ -147,10 +141,27 @@ partial class FileParser {
     }
 
     this.cursor.next();
-    const typeAnn = this.cursor.accept(TokenKind.Colon)
-      ? this.type()
-      : undefined;
+    const typeAnn = this.typeAnnotation();
 
     return { name: token.text, loc: token.start, typeAnn };
+  }
+
+  private declarator(decls: VarDeclarator[], isConst: boolean): boolean {
+    if (
+      this.cursor.is(TokenKind.LBracket) ||
+      this.cursor.is(TokenKind.LBrace)
+    ) {
+      return this.patternDeclarator(decls);
+    }
+
+    return this.plainDeclarator(decls, isConst);
+  }
+
+  private initializer(): Expr | undefined {
+    if (!this.cursor.accept(TokenKind.Assign)) {
+      return undefined;
+    }
+
+    return this.expression();
   }
 }

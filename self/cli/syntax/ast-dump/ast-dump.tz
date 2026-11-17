@@ -119,7 +119,11 @@ export class Dumper {
   }
 
   private flag(value: boolean): string {
-    return value ? "1" : "0";
+    if (value) {
+      return "1";
+    }
+
+    return "0";
   }
 
   private flags(values: boolean[]): string {

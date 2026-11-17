@@ -1,0 +1,156 @@
+import { FileParser } from "../file-parser.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { Details } from "../../../../diagnostic/types/message.types.tz";
+import { Token, TokenKind } from "../../../token/types/token.types.tz";
+import { Access } from "../../../../program/ast/types/ast.types.classes.tz";
+import { Modifiers } from "../types/file-parser.types.classes.tz";
+
+partial class FileParser {
+  private memberModifierAhead(): boolean {
+    const token = this.cursor.peek();
+    if (!this.isMemberModifier(token.kind)) {
+      return false;
+    }
+
+    const next = this.cursor.lookahead();
+    if (next.newline && next.kind != TokenKind.LBrace) {
+      return false;
+    }
+
+    return !this.endsModifiers(next.kind);
+  }
+
+  private modifiers(): Modifiers {
+    const modifiers: Modifiers = {
+      isStatic: false,
+      readonly: false,
+      isAbstract: false,
+      isOverride: false,
+      isAsync: false,
+      accessor: false,
+      access: Access.Public,
+      staticBlock: false,
+    };
+
+    const seen: TokenKind[] = [];
+
+    while (this.memberModifierAhead()) {
+      const word = this.cursor.next();
+
+      this.rememberModifier(seen, word);
+      const access = this.accessOf(word.kind);
+      if (access != undefined) {
+        modifiers.access = access;
+
+        continue;
+      }
+
+      switch (word.kind) {
+        case TokenKind.Static:
+          modifiers.isStatic = true;
+          if (this.cursor.is(TokenKind.LBrace)) {
+            this.cursor.report(word.start, Code.StaticBlocks);
+            this.cursor.next();
+            this.cursor.skipToClosingBrace();
+            modifiers.staticBlock = true;
+
+            return modifiers;
+          }
+          break;
+        case TokenKind.Readonly:
+          modifiers.readonly = true;
+          break;
+        case TokenKind.Override:
+          modifiers.isOverride = true;
+          break;
+        case TokenKind.Abstract:
+          modifiers.isAbstract = true;
+          break;
+        case TokenKind.Declare:
+          this.cursor.report(word.start, Code.DeclareMemberNotSupported);
+          break;
+        case TokenKind.Accessor:
+          modifiers.accessor = true;
+          break;
+        default:
+          modifiers.isAsync = true;
+          break;
+      }
+    }
+
+    return modifiers;
+  }
+
+  private rememberModifier(seen: TokenKind[], word: Token): void {
+    const details: Details = { word: word.text };
+    const repeated = seen.includes(word.kind);
+    const secondAccess =
+      this.accessOf(word.kind) != undefined && this.accessGiven(seen);
+
+    if (repeated) {
+      this.cursor.report(word.start, Code.ModifierRepeated, details);
+    } else if (secondAccess) {
+      this.cursor.report(word.start, Code.AccessAlreadyGiven, details);
+    }
+
+    seen.push(word.kind);
+  }
+
+  private accessGiven(seen: TokenKind[]): boolean {
+    for (const kind of seen) {
+      if (this.accessOf(kind) != undefined) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private accessOf(kind: TokenKind): Access | undefined {
+    switch (kind) {
+      case TokenKind.Public:
+        return Access.Public;
+      case TokenKind.Private:
+        return Access.Private;
+      case TokenKind.Protected:
+        return Access.Protected;
+      default:
+        return undefined;
+    }
+  }
+
+  private isMemberModifier(kind: TokenKind): boolean {
+    switch (kind) {
+      case TokenKind.Public:
+      case TokenKind.Private:
+      case TokenKind.Protected:
+      case TokenKind.Readonly:
+      case TokenKind.Static:
+      case TokenKind.Override:
+      case TokenKind.Abstract:
+      case TokenKind.Declare:
+      case TokenKind.Accessor:
+      case TokenKind.Async:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private endsModifiers(kind: TokenKind): boolean {
+    switch (kind) {
+      case TokenKind.LParen:
+      case TokenKind.Colon:
+      case TokenKind.Assign:
+      case TokenKind.Semi:
+      case TokenKind.Question:
+      case TokenKind.Bang:
+      case TokenKind.Less:
+      case TokenKind.RBrace:
+      case TokenKind.End:
+        return true;
+      default:
+        return false;
+    }
+  }
+}

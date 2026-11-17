@@ -52,7 +52,7 @@ partial class FileParser {
     const keys = this.type();
 
     ref.args.push(keys);
-    const rename = this.cursor.accept(TokenKind.As) ? this.type() : undefined;
+    const rename = this.mappedRename();
 
     if (!this.cursor.expect(TokenKind.RBracket, Code.ExpectedAfterMappedKeys)) {
       this.cursor.skipToClosingBrace();
@@ -222,8 +222,7 @@ partial class FileParser {
         readonlyChange = ModifierChange.Add;
       }
 
-      const head = this.cursor.peek();
-      const loc = readonly ? head.start : first.start;
+      const loc = this.memberLoc(first, readonly);
 
       if (this.mappedTypeAhead()) {
         return this.mappedType(ref, readonlyChange);
@@ -248,9 +247,7 @@ partial class FileParser {
 
       this.addObjectTypeMember(ref, object, member);
 
-      const separatorCode = member.method
-        ? Code.ExpectedSemicolonAfterMethod
-        : Code.ExpectedSemicolonAfterField;
+      const separatorCode = this.separatorCode(member);
       if (!this.endObjectTypeMember(separatorCode)) {
         return ref;
       }
@@ -432,5 +429,31 @@ partial class FileParser {
     record.args.push(value);
 
     return record;
+  }
+
+  private mappedRename(): TypeRef | undefined {
+    if (!this.cursor.accept(TokenKind.As)) {
+      return undefined;
+    }
+
+    return this.type();
+  }
+
+  private memberLoc(first: Token, readonly: boolean): int {
+    if (!readonly) {
+      return first.start;
+    }
+
+    const head = this.cursor.peek();
+
+    return head.start;
+  }
+
+  private separatorCode(member: ObjectTypeMember): Code {
+    if (member.method) {
+      return Code.ExpectedSemicolonAfterMethod;
+    }
+
+    return Code.ExpectedSemicolonAfterField;
   }
 }

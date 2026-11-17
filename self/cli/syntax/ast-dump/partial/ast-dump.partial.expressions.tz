@@ -190,7 +190,12 @@ partial class Dumper {
       }
       case ExprKind.Assign: {
         const op = expr.op;
-        const opText = op == undefined ? "-" : `${op}`;
+        let opText = "-";
+
+        if (op != undefined) {
+          opText = `${op}`;
+        }
+
         const source = this.span(expr.source);
 
         this.line(`Assign ${loc} ${opText} src=${source}`);

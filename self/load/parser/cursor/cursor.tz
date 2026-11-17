@@ -123,7 +123,11 @@ export class Cursor {
   public spanFrom(start: int): Span {
     const end = this.previousEnd();
 
-    return { start, end: end > start ? end : start };
+    if (end > start) {
+      return { start, end };
+    }
+
+    return { start, end: start };
   }
 
   public error(loc: int, code: Code, details: Details = kNoDetails): void {
@@ -230,7 +234,11 @@ export class Cursor {
   private previousEnd(): int {
     const previous = this.tokens[this.at - 1];
 
-    return previous == undefined ? 0 : previous.end;
+    if (previous == undefined) {
+      return 0;
+    }
+
+    return previous.end;
   }
 
   private startsStatement(): boolean {
