@@ -1,0 +1,200 @@
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import { SourceLines } from "../../../program/source-lines/source-lines.tz";
+import { Token, TokenKind } from "../../token/types/token.types.tz";
+import { LeftBlock } from "./types/open-blocks.types.tz";
+
+export class OpenBlocks {
+  private readonly tokens: Token[];
+  private readonly lines: SourceLines;
+
+  public constructor(source: Buffer, tokens: Token[]) {
+    this.tokens = tokens;
+    this.lines = new SourceLines(source);
+  }
+
+  public explain(errors: SourceError[]): SourceError[] {
+    const lexical = errors.some((error) => this.takesBraces(error));
+    if (errors.length == 0 || lexical) {
+      return errors;
+    }
+
+    const left = this.leftBlock();
+    const named = errors.map((error) => this.withOpeningLine(error));
+    if (left != undefined && !this.reportedInside(left, named)) {
+      return this.upToLeftBlock(left, named);
+    }
+
+    return named;
+  }
+
+  private takesBraces(error: SourceError): boolean {
+    switch (error.code) {
+      case Code.UnterminatedComment:
+      case Code.UnterminatedTemplate:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private expectsBrace(error: SourceError): boolean {
+    return error.details.expected == TokenKind.RBrace;
+  }
+
+  private reportedInside(left: LeftBlock, errors: SourceError[]): boolean {
+    const from = this.startOf(left.block);
+    const to = this.startOf(left.at);
+
+    return errors.some((error) => error.loc >= from && error.loc < to);
+  }
+
+  private upToLeftBlock(left: LeftBlock, errors: SourceError[]): SourceError[] {
+    const loc = this.startOf(left.at);
+    const line = this.lineOf(left.block);
+    const earlier = errors.filter((error) => error.loc < loc);
+    const notClosed: SourceError = {
+      code: Code.BlockNotClosed,
+      loc,
+      details: { word: `${line}` },
+    };
+
+    return earlier.concat([notClosed]);
+  }
+
+  private withOpeningLine(error: SourceError): SourceError {
+    if (!this.expectsBrace(error)) {
+      return error;
+    }
+
+    const line = this.openingLine(error.loc);
+    const details: Details = { ...error.details, word: `${line}` };
+
+    return { code: error.code, loc: error.loc, details };
+  }
+
+  private openingLine(loc: int): int {
+    const opening = this.openingBefore(loc);
+    if (opening == undefined) {
+      const place = this.lines.placeOf(loc);
+
+      return place.line;
+    }
+
+    return this.lineOf(opening);
+  }
+
+  private openingBefore(loc: int): int | undefined {
+    const tokens = this.tokens;
+    const open: int[] = [];
+
+    for (let index = 0; index < tokens.length; index++) {
+      const token = tokens[index];
+      if (token.start >= loc) {
+        break;
+      }
+
+      this.follow(open, index, token.kind);
+    }
+
+    return open[open.length - 1];
+  }
+
+  private leftBlock(): LeftBlock | undefined {
+    const tokens = this.tokens;
+    const open: int[] = [];
+    const left: LeftBlock[] = [];
+
+    for (let index = 0; index < tokens.length; index++) {
+      const token = tokens[index];
+      if (token.newline && this.leavesBlock(open, index, token.kind)) {
+        const block = open[open.length - 1] ?? 0;
+
+        left.push({ block, at: index });
+      }
+
+      this.follow(open, index, token.kind);
+    }
+
+    if (open.length == 0) {
+      return undefined;
+    }
+
+    return left[0];
+  }
+
+  private follow(open: int[], index: int, kind: TokenKind): void {
+    switch (kind) {
+      case TokenKind.LBrace:
+        open.push(index);
+        break;
+      case TokenKind.RBrace:
+        open.pop();
+        break;
+      default:
+        break;
+    }
+  }
+
+  private leavesBlock(open: int[], index: int, kind: TokenKind): boolean {
+    switch (kind) {
+      case TokenKind.End:
+        return false;
+      case TokenKind.RBrace: {
+        const parent = open[open.length - 2];
+
+        return this.columnOf(index) < this.contentColumn(parent);
+      }
+      default: {
+        const block = open[open.length - 1];
+
+        return this.columnOf(index) < this.contentColumn(block);
+      }
+    }
+  }
+
+  private contentColumn(block: int | undefined): int {
+    if (block == undefined) {
+      return 0;
+    }
+
+    const first = block + 1;
+    if (!this.startsLine(first)) {
+      return 0;
+    }
+
+    return this.columnOf(first);
+  }
+
+  private startsLine(index: int): boolean {
+    const token = this.tokens[index];
+
+    return token != undefined && token.newline;
+  }
+
+  private startOf(index: int): int {
+    const token = this.tokens[index];
+    if (token == undefined) {
+      return 0;
+    }
+
+    return token.start;
+  }
+
+  private columnOf(index: int): int {
+    const start = this.startOf(index);
+    const place = this.lines.placeOf(start);
+
+    return place.column;
+  }
+
+  private lineOf(index: int): int {
+    const start = this.startOf(index);
+    const place = this.lines.placeOf(start);
+
+    return place.line;
+  }
+}

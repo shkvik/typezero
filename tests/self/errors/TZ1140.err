@@ -1,0 +1,3 @@
+TZ1140.tz:4:1: error TZ1140: the block that starts at line 2 has no '}': this line stands to the left of the block, so the '}' is missing before it
+}
+^

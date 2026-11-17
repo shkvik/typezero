@@ -1,3 +1,3 @@
-TZ1216.tz:2:1: error TZ1216: expected a property name after '.'
-
-^
+TZ1216.tz:1:13: error TZ1216: expected a property name after '.'
+const x = a.
+            ^

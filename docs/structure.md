@@ -121,7 +121,12 @@ self/             компилятор на tz, пробный (порт compile
                   или парсера — в types/message.types.tz; коды 10xx — лексер и
                   escape-последовательности); diagnostic/error-printer/ —
                   ErrorPrinter: ошибки одного файла как `путь:строка:столбец: error TZ1221:
-                  текст`, под ним строка исходника и `^` под местом;
+                  текст`, под ним строка исходника и `^` под местом (ошибка в конце файла
+                  показывается в конце последней строки с текстом);
+                  load/parser/open-blocks/ — OpenBlocks: после разбора дополняет ошибки о
+                  фигурных скобках: в «expected '}'» ставит строку, где блок начался, а если
+                  скобок не хватает и какая-то строка стоит левее своего блока, заменяет
+                  следствия одной ошибкой TZ1140 в этом месте;
                   load/token/ — токены, общие для лексера и парсера (TokenKind, KnownName,
                   Token — в types/token.types.tz; в token.tz — класс TokenTable: isName,
                   isKeyword, keywordKind, knownName, spelling; общий экземпляр kTokenTable — в

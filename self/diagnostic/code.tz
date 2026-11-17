@@ -48,6 +48,8 @@ export enum Code {
   KeywordAsVariableName = "TZ1137",
   ExpectedVariableName = "TZ1138",
   ForInNeedsNewVariable = "TZ1139",
+  BlockNotClosed = "TZ1140",
+  ElseWithoutIf = "TZ1141",
   ExpectedInConditional = "TZ1201",
   ExpectedArgumentsClose = "TZ1202",
   ExpectedIndexClose = "TZ1203",

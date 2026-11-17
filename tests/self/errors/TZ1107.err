@@ -1,6 +1,6 @@
 TZ1107.tz:1:1: error TZ1125: there is no 'catch' in tz: an error is a value; a function that can fail gives a 'Result', checked with 'if'
 catch (e)
 ^
-TZ1107.tz:2:1: error TZ1107: expected '{' to start the block, found end of file
-
-^
+TZ1107.tz:1:10: error TZ1107: expected '{' to start the block, found end of file
+catch (e)
+         ^

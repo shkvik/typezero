@@ -1,0 +1,4 @@
+export type LeftBlock = {
+  readonly block: int;
+  readonly at: int;
+};

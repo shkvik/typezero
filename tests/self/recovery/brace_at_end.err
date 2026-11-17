@@ -1,0 +1,3 @@
+brace_at_end.tz:6:2: error TZ1108: expected '}' to close the block that starts at line 3, found end of file
+}
+ ^

@@ -1,0 +1,3 @@
+brace_of_object.tz:7:1: error TZ1140: the block that starts at line 5 has no '}': this line stands to the left of the block, so the '}' is missing before it
+};
+^

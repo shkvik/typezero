@@ -1,3 +1,3 @@
-TZ1206.tz:2:1: error TZ1206: expected ']' to close the array, found end of file
-
-^
+TZ1206.tz:1:13: error TZ1206: expected ']' to close the array, found end of file
+const x = [1
+            ^

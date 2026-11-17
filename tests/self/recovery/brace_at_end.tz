@@ -1,0 +1,6 @@
+// Nothing shows which '}' is forgotten when the lines are not indented: the
+// error stands at the end of the text and names the block that is open.
+function a() {
+if (x) {
+b();
+}

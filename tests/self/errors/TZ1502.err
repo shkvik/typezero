@@ -1,3 +1,3 @@
-TZ1502.tz:2:1: error TZ1502: expected '}' to close the class, found end of file
-
-^
+TZ1502.tz:1:18: error TZ1502: expected '}' to close the class that starts at line 1, found end of file
+class A { m() { }
+                 ^

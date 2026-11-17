@@ -1,0 +1,14 @@
+// The '}' of 'if' is forgotten. The next '}' stands under 'm', so it is the
+// one of the method: the error names the block that is left open and points
+// at that '}', and what the lost '}' breaks further down is not reported.
+class A {
+  m() {
+    if (x) {
+      y();
+  }
+
+  n() {
+    z();
+  }
+}
+const last = 1;

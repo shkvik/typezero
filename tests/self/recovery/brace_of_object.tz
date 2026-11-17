@@ -1,0 +1,8 @@
+// The '}' of the inner object is forgotten: the '}' under 'const' closes the
+// outer one, and the error is about the inner object, not about ';'.
+const x = {
+  a: 1,
+  b: {
+    c: 2,
+};
+const y = 3;

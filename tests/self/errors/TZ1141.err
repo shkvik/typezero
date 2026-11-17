@@ -1,0 +1,6 @@
+TZ1141.tz:1:15: error TZ1141: 'else' has no 'if' here: the '}' that closes the block before 'else' is probably missing
+if (a) { b(); else { c(); }
+              ^
+TZ1141.tz:1:28: error TZ1108: expected '}' to close the block that starts at line 1, found end of file
+if (a) { b(); else { c(); }
+                           ^

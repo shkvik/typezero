@@ -1,0 +1,8 @@
+function a() {
+  if (x) {
+    b();
+}
+
+function c() {
+  d();
+}

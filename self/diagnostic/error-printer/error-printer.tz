@@ -22,12 +22,13 @@ export class ErrorPrinter {
   }
 
   private describe(error: SourceError): string {
-    const place = this.lines.placeOf(error.loc);
+    const shown = this.lines.textEndBefore(error.loc);
+    const place = this.lines.placeOf(shown);
     const message = messageText(error.code, error.details);
     const where = `${this.path}:${place.line}:${place.column}`;
     const headline = `${where}: error ${error.code}: ${message}`;
-    const line = this.lines.lineTextAt(error.loc);
-    const indent = this.lines.indentTo(error.loc);
+    const line = this.lines.lineTextAt(shown);
+    const indent = this.lines.indentTo(shown);
 
     return `${headline}\n${line}\n${indent}${kPointer}`;
   }

@@ -86,6 +86,8 @@ partial class FileParser {
         return this.handlerStatement(token);
       case TokenKind.Partial:
         return this.partialStatement(loc, topLevel);
+      case TokenKind.Else:
+        return this.elseWithoutIf(loc, topLevel);
       default:
         return this.expressionStatement(loc);
     }
@@ -173,6 +175,13 @@ partial class FileParser {
       next.kind == TokenKind.String;
 
     return named && !next.newline;
+  }
+
+  private elseWithoutIf(loc: int, topLevel: boolean): Stmt {
+    this.cursor.report(loc, Code.ElseWithoutIf);
+    this.cursor.next();
+
+    return this.statement(topLevel);
   }
 
   private classStatement(loc: int): Stmt {

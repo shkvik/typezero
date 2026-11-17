@@ -1,0 +1,3 @@
+brace_of_method.tz:8:3: error TZ1140: the block that starts at line 6 has no '}': this line stands to the left of the block, so the '}' is missing before it
+  }
+  ^

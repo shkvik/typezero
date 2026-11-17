@@ -1,4 +1,5 @@
 export const kTab = 9;
+export const kSpace = 32;
 export const kLineFeed = 10;
 export const kCarriageReturn = 13;
 

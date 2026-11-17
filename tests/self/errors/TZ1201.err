@@ -1,3 +1,3 @@
-TZ1201.tz:2:1: error TZ1201: expected ':' in the conditional expression, found end of file
-
-^
+TZ1201.tz:1:15: error TZ1201: expected ':' in the conditional expression, found end of file
+const x = a?.1
+              ^

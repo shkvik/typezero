@@ -50,13 +50,13 @@ export const kMessages: Record<Code, Message> = {
     text: "expected {expected} after 'default', found {found}",
   },
   [Code.ExpectedSwitchClose]: {
-    text: "expected {expected} to close 'switch', found {found}",
+    text: "expected {expected} to close 'switch' that starts at line {word}, found {found}",
   },
   [Code.ExpectedBlockStart]: {
     text: "expected {expected} to start the block, found {found}",
   },
   [Code.ExpectedBlockClose]: {
-    text: "expected {expected} to close the block, found {found}",
+    text: "expected {expected} to close the block that starts at line {word}, found {found}",
   },
   [Code.ExpectedAfterIf]: {
     text: "expected {expected} after 'if', found {found}",
@@ -151,6 +151,12 @@ export const kMessages: Record<Code, Message> = {
   [Code.ForInNeedsNewVariable]: {
     text: "'for...in' needs a new variable: 'for (const k in ...)'",
   },
+  [Code.ElseWithoutIf]: {
+    text: "'else' has no 'if' here: the '}' that closes the block before 'else' is probably missing",
+  },
+  [Code.BlockNotClosed]: {
+    text: "the block that starts at line {word} has no '}': this line stands to the left of the block, so the '}' is missing before it",
+  },
   [Code.ExpectedInConditional]: {
     text: "expected {expected} in the conditional expression, found {found}",
   },
@@ -170,7 +176,7 @@ export const kMessages: Record<Code, Message> = {
     text: "expected {expected} to close the array, found {found}",
   },
   [Code.ExpectedObjectClose]: {
-    text: "expected {expected} to close the object, found {found}",
+    text: "expected {expected} to close the object that starts at line {word}, found {found}",
   },
   [Code.ExpectedKeyClose]: {
     text: "expected {expected} to close the key, found {found}",
@@ -278,7 +284,7 @@ export const kMessages: Record<Code, Message> = {
     text: "expected {expected} to close the name, found {found}",
   },
   [Code.ExpectedObjectTypeClose]: {
-    text: "expected {expected} to close the object type, found {found}",
+    text: "expected {expected} to close the object type that starts at line {word}, found {found}",
   },
   [Code.ExpectedAfterIndexKeys]: {
     text: "expected {expected} after the type of the keys, found {found}",
@@ -389,7 +395,7 @@ export const kMessages: Record<Code, Message> = {
     text: "expected {expected} to start the members of the class, found {found}",
   },
   [Code.ExpectedClassClose]: {
-    text: "expected {expected} to close the class, found {found}",
+    text: "expected {expected} to close the class that starts at line {word}, found {found}",
   },
   [Code.ExpectedDecoratorClose]: {
     text: "expected {expected} to close the decorator, found {found}",
@@ -404,7 +410,7 @@ export const kMessages: Record<Code, Message> = {
     text: "expected {expected} to start the members of the enum, found {found}",
   },
   [Code.ExpectedEnumClose]: {
-    text: "expected {expected} to close the enum, found {found}",
+    text: "expected {expected} to close the enum that starts at line {word}, found {found}",
   },
   [Code.ExpectedAfterFunctionName]: {
     text: "expected {expected} after the function name, found {found}",
