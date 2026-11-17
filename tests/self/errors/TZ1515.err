@@ -1,0 +1,3 @@
+TZ1515.tz:1:11: error TZ1515: static blocks are not supported
+class C { static
+          ^

@@ -1,0 +1,3 @@
+TZ1544.tz:1:15: error TZ1544: a rest parameter cannot be optional or have a default value
+function f(...b?: int[]) {}
+              ^

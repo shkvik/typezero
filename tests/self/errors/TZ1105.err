@@ -1,0 +1,3 @@
+TZ1105.tz:2:11: error TZ1105: expected ':' after 'default', found 'break'
+  default break;
+          ^

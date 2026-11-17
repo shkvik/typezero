@@ -1,0 +1,3 @@
+TZ1332.tz:1:21: error TZ1332: expected ';' after the method, found identifier
+type A = { m(): int n(): int };
+                    ^

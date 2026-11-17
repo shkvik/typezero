@@ -1,4 +1,11 @@
-export type DecodedText = { readonly text: string; readonly ok: boolean };
+import { Code } from "../../../../diagnostic/code.tz";
+
+export type InvalidEscape = { readonly loc: int; readonly code: Code };
+
+export type DecodedText = {
+  readonly text: string;
+  readonly invalid?: InvalidEscape;
+};
 
 export type RegexText = { readonly pattern: string; readonly flags: string };
 

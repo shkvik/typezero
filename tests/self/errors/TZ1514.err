@@ -1,0 +1,3 @@
+TZ1514.tz:1:13: error TZ1514: a decorator can decorate only a class, a member or a parameter
+const x = { @d a: 1 }
+            ^

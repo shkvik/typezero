@@ -1,0 +1,3 @@
+TZ1227.tz:1:15: error TZ1227: expected '(' after the name of the method
+const o = { *a: 1 };
+              ^

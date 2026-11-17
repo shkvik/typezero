@@ -1,0 +1,3 @@
+TZ1303.tz:1:13: error TZ1303: expected ']' to close the indexed access type, found ';'
+type I = T[K;
+            ^

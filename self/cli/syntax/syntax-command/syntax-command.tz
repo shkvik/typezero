@@ -127,8 +127,9 @@ export class SyntaxCommand {
       console.log(`== ${source.path}`);
 
       const lexer = new Lexer(source.text);
+      const lexed = lexer.run();
 
-      for (const token of lexer.run()) {
+      for (const token of lexed.tokens) {
         const length = token.end - token.start;
         const newline = this.bit(token.newline);
         const hash = this.bit(token.hash);
@@ -181,7 +182,7 @@ export class SyntaxCommand {
       const lexer = new Lexer(source.text);
       const lexed = lexer.run();
 
-      tokens += lexed.length - 1;
+      tokens += lexed.tokens.length - 1;
     }
 
     return tokens;

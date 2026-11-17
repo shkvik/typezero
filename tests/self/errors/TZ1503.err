@@ -1,0 +1,3 @@
+TZ1503.tz:2:1: error TZ1503: expected ')' to close the decorator, found 'class'
+class A {}
+^

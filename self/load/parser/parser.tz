@@ -1,3 +1,4 @@
+import { SourceError } from "../../diagnostic/types/message.types.tz";
 import { Lexer } from "../lexer/lexer.tz";
 import { FileParser } from "./file-parser/file-parser.tz";
 import { ParsedFile, SourceText } from "./types/parser.types.tz";
@@ -23,10 +24,45 @@ export class Parser {
 
   private parseFile(source: SourceText): ParsedFile {
     const lexer = new Lexer(source.text);
-    const tokens = lexer.run();
-    const fileParser = new FileParser(source.text, tokens, source.isLibrary);
+    const lexed = lexer.run();
+    const fileParser = new FileParser(
+      source.text,
+      lexed.tokens,
+      source.isLibrary,
+    );
     const result = fileParser.run();
+    const errors = this.mergeByPlace(lexed.errors, result.errors);
 
-    return { source, file: result.file, errors: result.errors };
+    return { source, file: result.file, errors };
+  }
+
+  private mergeByPlace(
+    lexical: SourceError[],
+    syntactic: SourceError[],
+  ): SourceError[] {
+    if (lexical.length == 0) {
+      return syntactic;
+    }
+
+    const merged: SourceError[] = [];
+    let taken = 0;
+
+    for (const error of syntactic) {
+      while (taken < lexical.length) {
+        const earlier = lexical[taken];
+        if (earlier == undefined || earlier.loc > error.loc) {
+          break;
+        }
+
+        merged.push(earlier);
+        taken += 1;
+      }
+
+      merged.push(error);
+    }
+
+    const rest = lexical.slice(taken);
+
+    return merged.concat(rest);
   }
 }

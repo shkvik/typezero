@@ -1,0 +1,3 @@
+TZ1116.tz:1:23: error TZ1116: expected ';' after the loop condition, found identifier
+for (let i = 0; i < 3 i++) {}
+                      ^

@@ -1,0 +1,3 @@
+TZ1522.tz:2:3: error TZ1522: a method has no body
+  m();
+  ^

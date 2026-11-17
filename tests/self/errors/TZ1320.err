@@ -1,0 +1,3 @@
+TZ1320.tz:1:16: error TZ1320: expected the name of a value after 'typeof', found ';'
+type T = typeof;
+               ^

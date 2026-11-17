@@ -2,9 +2,12 @@ import { KnownName, Token, TokenKind } from "../../token/types/token.types.tz";
 import { kTokenTable } from "../../token/const/token.const.tz";
 import { Span } from "../../../program/ast/types/ast.types.span.tz";
 import { Code } from "../../../diagnostic/code.tz";
-import { Details } from "../../../diagnostic/types/message.types.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
 import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
-import { Mark, ParseError } from "./types/cursor.types.tz";
+import { Mark } from "./types/cursor.types.tz";
 import { kEnd } from "./const/cursor.const.tz";
 
 export class Cursor {
@@ -12,7 +15,7 @@ export class Cursor {
   private at: int;
   private recovering: boolean;
   private discarding: int;
-  public readonly errors: ParseError[];
+  public readonly errors: SourceError[];
 
   public constructor(tokens: Token[]) {
     this.tokens = tokens;

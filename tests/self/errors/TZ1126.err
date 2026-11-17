@@ -1,0 +1,3 @@
+TZ1126.tz:1:1: error TZ1126: there is no 'finally' in tz
+finally { c() }
+^

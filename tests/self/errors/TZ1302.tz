@@ -1,0 +1,1 @@
+type Half<T> = T extends string ? int;

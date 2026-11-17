@@ -1,0 +1,3 @@
+TZ1621.tz:1:1: error TZ1621: 'export =' is not supported
+export = x;
+^

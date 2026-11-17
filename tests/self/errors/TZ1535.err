@@ -1,0 +1,3 @@
+TZ1535.tz:1:10: error TZ1535: overload signatures are not supported
+function f(a: int): int
+         ^

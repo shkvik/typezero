@@ -1,0 +1,3 @@
+TZ1115.tz:1:15: error TZ1115: expected ';' after the loop initializer, found identifier
+for (const of xs) {}
+              ^

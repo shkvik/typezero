@@ -1,0 +1,3 @@
+TZ1222.tz:1:11: error TZ1222: 'import.meta' is not supported
+const x = import.meta.url
+          ^

@@ -1,0 +1,3 @@
+TZ1204.tz:1:17: error TZ1204: expected ')' to close the class, found ';'
+const a = new (b;
+                ^

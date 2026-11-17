@@ -1,0 +1,3 @@
+TZ1324.tz:1:13: error TZ1324: a number cannot name a field
+const o = { 1: 2 };
+            ^

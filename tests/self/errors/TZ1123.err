@@ -1,0 +1,3 @@
+TZ1123.tz:1:1: error TZ1123: there is no 'throw' in tz
+throw e;
+^

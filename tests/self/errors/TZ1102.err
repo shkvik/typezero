@@ -1,0 +1,3 @@
+TZ1102.tz:1:11: error TZ1102: expected ')' after the value of 'switch', found '{'
+switch (x {
+          ^

@@ -1,0 +1,3 @@
+TZ1538.tz:1:10: error TZ1538: expected a function name
+function () {}
+         ^

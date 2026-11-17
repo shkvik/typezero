@@ -1,0 +1,3 @@
+TZ1313.tz:1:20: error TZ1313: expected '=>' after the parameters of the function type, found identifier
+type F = <T>(a: T) T;
+                   ^

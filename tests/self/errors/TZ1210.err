@@ -1,0 +1,3 @@
+TZ1210.tz:1:11: error TZ1210: 'yield' can only be used in a generator function
+const a = yield;
+          ^

@@ -1,0 +1,3 @@
+TZ1005.tz:1:12: error TZ1005: an identifier cannot directly follow a number
+const a = 1abc;
+           ^

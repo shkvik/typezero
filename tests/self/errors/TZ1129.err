@@ -1,0 +1,3 @@
+TZ1129.tz:1:1: error TZ1129: 'declare' is not supported
+declare const x: int;
+^

@@ -1,0 +1,9 @@
+TZ1114.tz:1:18: error TZ1114: expected '=' after the destructuring pattern, found ';'
+for (const [a, b]; ; ) {}
+                 ^
+TZ1114.tz:1:22: error TZ1221: expected an expression, found ')'
+for (const [a, b]; ; ) {}
+                     ^
+TZ1114.tz:1:25: error TZ1120: unexpected '}'
+for (const [a, b]; ; ) {}
+                        ^

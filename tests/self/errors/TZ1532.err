@@ -1,0 +1,6 @@
+TZ1532.tz:1:6: error TZ1532: expected the name of the enum
+enum { A }
+     ^
+TZ1532.tz:1:10: error TZ1120: unexpected '}'
+enum { A }
+         ^

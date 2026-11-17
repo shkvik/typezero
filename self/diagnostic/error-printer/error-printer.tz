@@ -1,7 +1,7 @@
-import { ParseError } from "../../load/parser/cursor/types/cursor.types.tz";
 import { SourceText } from "../../load/parser/types/parser.types.tz";
 import { SourceLines } from "../../program/source-lines/source-lines.tz";
 import { messageText } from "../message.tz";
+import { SourceError } from "../types/message.types.tz";
 import { kPointer } from "./const/error-printer.const.tz";
 
 export class ErrorPrinter {
@@ -13,7 +13,7 @@ export class ErrorPrinter {
     this.lines = new SourceLines(source.text);
   }
 
-  public print(errors: ParseError[]): void {
+  public print(errors: SourceError[]): void {
     for (const error of errors) {
       const text = this.describe(error);
 
@@ -21,7 +21,7 @@ export class ErrorPrinter {
     }
   }
 
-  private describe(error: ParseError): string {
+  private describe(error: SourceError): string {
     const place = this.lines.placeOf(error.loc);
     const message = messageText(error.code, error.details);
     const where = `${this.path}:${place.line}:${place.column}`;

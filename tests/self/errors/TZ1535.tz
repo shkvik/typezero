@@ -1,0 +1,4 @@
+function f(a: int): int
+function f(a: int): int {
+  return a;
+}

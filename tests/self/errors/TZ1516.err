@@ -1,0 +1,3 @@
+TZ1516.tz:1:11: error TZ1516: 'declare' is not supported
+class C { declare x: int }
+          ^

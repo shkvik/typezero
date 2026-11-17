@@ -1,0 +1,3 @@
+TZ1136.tz:1:5: error TZ1136: a destructuring declaration needs a value
+let [a];
+    ^

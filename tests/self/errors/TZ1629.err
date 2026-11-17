@@ -1,0 +1,9 @@
+TZ1629.tz:1:10: error TZ1629: 'class' is a keyword in tz: import it under another name, e.g. '{ class as className }'
+import { class } from "./m"
+         ^
+TZ1629.tz:1:16: error TZ1120: unexpected '}'
+import { class } from "./m"
+               ^
+TZ1629.tz:1:23: error TZ1119: expected ';', found string literal
+import { class } from "./m"
+                      ^

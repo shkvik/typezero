@@ -1,0 +1,3 @@
+abstract class A {
+  static abstract q(): void;
+}

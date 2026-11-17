@@ -1,0 +1,3 @@
+TZ1602.tz:1:13: error TZ1602: expected identifier after 'import * as', found integer literal
+import * as 1 from "./a";
+            ^

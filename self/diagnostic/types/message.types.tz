@@ -1,9 +1,17 @@
 import { TokenKind } from "../../load/token/types/token.types.tz";
+import { Code } from "../code.tz";
 
 export type Details = {
   readonly expected?: TokenKind;
   readonly found?: TokenKind;
   readonly word?: string;
+  readonly name?: string;
+};
+
+export type SourceError = {
+  readonly code: Code;
+  readonly loc: int;
+  readonly details: Details;
 };
 
 export type Message = { readonly text: string };

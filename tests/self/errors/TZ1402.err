@@ -1,0 +1,3 @@
+TZ1402.tz:1:8: error TZ1402: a rest element must be the last one
+[a, ...b, c] = x
+       ^

@@ -1,0 +1,3 @@
+TZ1612.tz:1:13: error TZ1612: expected '{' after ',', found identifier
+import def, x from "y";
+            ^

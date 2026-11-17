@@ -1,0 +1,3 @@
+TZ1638.tz:1:18: error TZ1638: expected the path of the file as a string, found ';'
+import { a } from;
+                 ^

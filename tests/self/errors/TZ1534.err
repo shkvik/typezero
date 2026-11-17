@@ -1,0 +1,3 @@
+TZ1534.tz:1:10: error TZ1534: function 'f' has no body
+function f(): int
+         ^

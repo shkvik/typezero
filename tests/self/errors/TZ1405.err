@@ -1,0 +1,9 @@
+TZ1405.tz:1:13: error TZ1405: expected a variable name after '...' in the destructuring pattern
+const { ... } = x
+            ^
+TZ1405.tz:1:13: error TZ1120: unexpected '}'
+const { ... } = x
+            ^
+TZ1405.tz:1:15: error TZ1221: expected an expression, found '='
+const { ... } = x
+              ^

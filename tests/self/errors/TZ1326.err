@@ -1,0 +1,3 @@
+TZ1326.tz:1:11: error TZ1326: 'Symbol.foo' cannot name a member
+class C { [Symbol.foo]() {} }
+          ^

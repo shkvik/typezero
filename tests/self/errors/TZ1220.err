@@ -1,0 +1,3 @@
+TZ1220.tz:1:17: error TZ1220: expected '}' to close the template substitution
+const t = `a${b c}d`
+                ^

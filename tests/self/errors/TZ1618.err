@@ -1,0 +1,3 @@
+TZ1618.tz:1:1: error TZ1618: an import must name what it takes
+import { } from "./m"
+^

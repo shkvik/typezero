@@ -1,0 +1,3 @@
+TZ1311.tz:1:26: error TZ1311: expected ':' before the type of the values, found identifier
+type A = { [key: string] int };
+                         ^

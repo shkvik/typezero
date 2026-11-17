@@ -1,0 +1,3 @@
+TZ1209.tz:1:17: error TZ1209: expected ':' after the key in brackets, found integer literal
+const o = { [k] 1 };
+                ^

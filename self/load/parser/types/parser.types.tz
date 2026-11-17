@@ -1,5 +1,5 @@
 import { SourceFile } from "../../../program/ast/types/ast.types.modules.tz";
-import { ParseError } from "../cursor/types/cursor.types.tz";
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
 
 export type SourceText = {
   readonly path: string;
@@ -10,5 +10,5 @@ export type SourceText = {
 export type ParsedFile = {
   readonly source: SourceText;
   readonly file: SourceFile;
-  readonly errors: ParseError[];
+  readonly errors: SourceError[];
 };

@@ -1,0 +1,3 @@
+TZ1613.tz:1:8: error TZ1613: expected '{' and the names to import, found '='
+import = "./a";
+       ^

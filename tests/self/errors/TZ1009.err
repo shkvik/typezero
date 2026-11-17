@@ -1,0 +1,3 @@
+TZ1009.tz:1:12: error TZ1009: invalid '\x' escape: expected two hex digits
+const a = "\x4";
+           ^

@@ -1,0 +1,3 @@
+TZ1127.tz:1:1: error TZ1127: 'namespace' is not supported
+namespace N {}
+^

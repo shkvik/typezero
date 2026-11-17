@@ -1,0 +1,9 @@
+TZ1131.tz:1:14: error TZ1131: expected 'case' or 'default'
+switch (x) { foo(); case 1: }
+             ^
+TZ1131.tz:1:21: error TZ1221: expected an expression, found 'case'
+switch (x) { foo(); case 1: }
+                    ^
+TZ1131.tz:1:29: error TZ1120: unexpected '}'
+switch (x) { foo(); case 1: }
+                            ^

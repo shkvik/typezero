@@ -1,0 +1,3 @@
+TZ1006.tz:1:11: error TZ1006: unterminated string literal
+const a = "abc
+          ^

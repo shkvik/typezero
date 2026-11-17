@@ -1,0 +1,1 @@
+import { a } from "./m.tz" with { type: "json", other: "x" };

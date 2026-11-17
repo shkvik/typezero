@@ -1,0 +1,3 @@
+TZ1525.tz:2:3: error TZ1525: a constructor cannot be 'async'
+  async constructor() {}
+  ^

@@ -1,0 +1,3 @@
+TZ1323.tz:2:4: error TZ1323: a field name in brackets is not supported yet
+  *[k]() {}
+   ^

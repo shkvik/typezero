@@ -1,0 +1,3 @@
+TZ1122.tz:2:3: error TZ1122: 'partial class' is written only at the top level of a file
+  partial class Q {}
+  ^

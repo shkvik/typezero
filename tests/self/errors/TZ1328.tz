@@ -1,0 +1,1 @@
+type A = { m<T>(): int };

@@ -1,0 +1,3 @@
+TZ1110.tz:1:7: error TZ1110: expected '(' after 'while', found identifier
+while x) {}
+      ^

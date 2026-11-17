@@ -1,0 +1,5 @@
+abstract class A {
+  abstract n(): int {
+    return 1;
+  }
+}

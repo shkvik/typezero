@@ -1,0 +1,3 @@
+TZ1002.tz:1:11: error TZ1002: unexpected character '#'
+const x = #1
+          ^

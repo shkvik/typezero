@@ -1,0 +1,3 @@
+TZ1133.tz:1:5: error TZ1133: 'for await' goes over the values of an iterable
+for await (;;) {}
+    ^

@@ -1,0 +1,3 @@
+TZ1325.tz:1:13: error TZ1325: expected a field name, found '+'
+const o = { +: 1 };
+            ^

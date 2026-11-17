@@ -1,0 +1,3 @@
+TZ1404.tz:1:11: error TZ1404: expected a variable name in the destructuring pattern
+const [a, 1] = x
+          ^

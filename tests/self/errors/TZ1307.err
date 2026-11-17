@@ -1,0 +1,3 @@
+TZ1307.tz:1:18: error TZ1307: expected '.' after 'Symbol', found number literal
+class C { [Symbol.1]() {} }
+                 ^

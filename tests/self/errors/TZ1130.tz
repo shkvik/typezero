@@ -1,0 +1,6 @@
+switch (x) {
+  default:
+    a();
+  default:
+    b();
+}

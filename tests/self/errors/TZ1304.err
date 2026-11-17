@@ -1,0 +1,3 @@
+TZ1304.tz:1:10: error TZ1304: expected ')' to close the parenthesized type, found ':'
+let f: (a: int
+         ^

@@ -1,0 +1,3 @@
+TZ1623.tz:1:7: error TZ1623: expected a declaration or '{' after 'export', found ';'
+export;
+      ^

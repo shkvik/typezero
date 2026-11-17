@@ -1,0 +1,3 @@
+TZ1331.tz:2:5: error TZ1331: expected ';' after the field, found '{'
+  m {}
+    ^

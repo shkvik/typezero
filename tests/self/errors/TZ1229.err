@@ -1,0 +1,3 @@
+TZ1229.tz:1:17: error TZ1229: expected '{' to start the body of the method
+const o = { m() };
+                ^

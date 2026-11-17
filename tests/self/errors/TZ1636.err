@@ -1,0 +1,3 @@
+TZ1636.tz:1:29: error TZ1636: a JSON file takes one import attribute
+import data from "./d.json" with { type: "json", other: "x" }
+                            ^

@@ -1,0 +1,3 @@
+TZ1111.tz:1:7: error TZ1111: expected ')' after the condition, found '{'
+if (x {
+      ^

@@ -1,0 +1,9 @@
+TZ1406.tz:1:13: error TZ1406: a key in a destructuring pattern needs a variable
+const { "a" } = o;
+            ^
+TZ1406.tz:1:13: error TZ1120: unexpected '}'
+const { "a" } = o;
+            ^
+TZ1406.tz:1:15: error TZ1221: expected an expression, found '='
+const { "a" } = o;
+              ^

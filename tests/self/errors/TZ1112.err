@@ -1,0 +1,3 @@
+TZ1112.tz:1:12: error TZ1112: expected 'while' after the body of 'do', found identifier
+do { f() } x
+           ^

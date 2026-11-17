@@ -1,0 +1,3 @@
+TZ1626.tz:1:10: error TZ1626: 'type' is not needed in an import
+import { type a } from "./m"
+         ^

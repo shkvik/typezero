@@ -1,0 +1,3 @@
+TZ1548.tz:1:12: error TZ1548: a modifier before a type parameter is not supported
+function f<const T>(a: T) {}
+           ^

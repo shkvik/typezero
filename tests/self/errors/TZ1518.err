@@ -1,0 +1,3 @@
+TZ1518.tz:1:12: error TZ1518: there is no '#p' in tz
+class C { #p = 1; m() { return this.#p } }
+           ^

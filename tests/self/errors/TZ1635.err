@@ -1,0 +1,3 @@
+TZ1635.tz:1:26: error TZ1635: 'assert' is the old form of import attributes
+import j from "./d.json" assert { type: "json" };
+                         ^

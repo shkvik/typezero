@@ -1,0 +1,3 @@
+TZ1504.tz:1:7: error TZ1504: expected '=' after the name of the type, found ';'
+type T;
+      ^

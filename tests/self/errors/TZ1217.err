@@ -1,0 +1,3 @@
+TZ1217.tz:1:15: error TZ1217: a tagged template cannot be part of an optional chain
+const t = a?.b`x`
+              ^

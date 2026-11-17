@@ -1,0 +1,3 @@
+TZ1545.tz:1:12: error TZ1545: 'private' before a parameter makes it a field
+function f(private a: int) {}
+           ^

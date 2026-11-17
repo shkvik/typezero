@@ -1,0 +1,3 @@
+TZ1403.tz:1:13: error TZ1403: a rest element cannot have a default value
+const [...a = 1] = x
+            ^

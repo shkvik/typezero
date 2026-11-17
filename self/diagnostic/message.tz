@@ -25,5 +25,10 @@ export function messageText(code: Code, details: Details): string {
     text = text.replaceAll("{word}", word);
   }
 
+  const name = details.name;
+  if (name != undefined) {
+    text = text.replaceAll("{name}", name);
+  }
+
   return text;
 }

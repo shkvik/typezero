@@ -1,0 +1,3 @@
+TZ1539.tz:1:14: error TZ1539: expected '{' to start the function body
+function f() 1
+             ^

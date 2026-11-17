@@ -1,0 +1,3 @@
+TZ1337.tz:1:15: error TZ1337: a rest parameter must be the last parameter
+function f(...a: int[], b: int) {}
+              ^

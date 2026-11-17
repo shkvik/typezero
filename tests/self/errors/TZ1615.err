@@ -1,0 +1,3 @@
+TZ1615.tz:1:18: error TZ1615: a JSON file is imported with 'with { type: "json" }'
+import data from "./d.json"
+                 ^

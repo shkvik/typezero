@@ -1,0 +1,3 @@
+TZ1529.tz:2:3: error TZ1529: abstract fields are not supported
+  abstract x: int;
+  ^

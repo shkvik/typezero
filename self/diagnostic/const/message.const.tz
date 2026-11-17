@@ -4,6 +4,36 @@ import { Details, Message } from "../types/message.types.tz";
 export const kNoDetails: Details = {};
 
 export const kMessages: Record<Code, Message> = {
+  [Code.UnterminatedComment]: {
+    text: "unterminated comment",
+  },
+  [Code.UnexpectedCharacter]: {
+    text: "unexpected character '{word}'",
+  },
+  [Code.NameAfterNumberPoint]: {
+    text: "a point right after a number belongs to the number, so a name cannot follow it; write '{word}..{name}' or '({word}).{name}'",
+  },
+  [Code.BigIntLiteral]: {
+    text: "'{word}n' is a bigint, and there is no bigint: integers up to 9.2e18 fit in 'int', longer ones in 'decimal' (e.g. 'const n: decimal = {word}')",
+  },
+  [Code.NameAfterNumber]: {
+    text: "an identifier cannot directly follow a number",
+  },
+  [Code.UnterminatedString]: {
+    text: "unterminated string literal",
+  },
+  [Code.UnterminatedTemplate]: {
+    text: "unterminated template literal",
+  },
+  [Code.UnterminatedRegex]: {
+    text: "unterminated regular expression literal",
+  },
+  [Code.InvalidHexEscape]: {
+    text: "invalid '\\x' escape: expected two hex digits",
+  },
+  [Code.InvalidUnicodeEscape]: {
+    text: "invalid '\\u' escape",
+  },
   [Code.ExpectedAfterSwitch]: {
     text: "expected {expected} after 'switch', found {found}",
   },

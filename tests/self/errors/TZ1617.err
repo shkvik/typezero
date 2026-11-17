@@ -1,0 +1,3 @@
+TZ1617.tz:1:8: error TZ1617: default imports are not supported
+import X from "./m"
+       ^

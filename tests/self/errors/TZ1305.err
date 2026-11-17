@@ -1,0 +1,3 @@
+TZ1305.tz:1:25: error TZ1305: expected ']' after the keys of the mapped type, found ':'
+type M = { [K in keyof T: T[K] }
+                        ^

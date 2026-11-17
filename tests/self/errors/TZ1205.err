@@ -1,0 +1,6 @@
+TZ1205.tz:1:13: error TZ1205: expected ')' to close the parenthesized expression, found ':'
+const f = (a: int): int {
+            ^
+TZ1205.tz:3:1: error TZ1120: unexpected '}'
+};
+^

@@ -1,0 +1,3 @@
+TZ1212.tz:1:13: error TZ1212: 'satisfies' is not supported, just as 'as' is not
+const x = a satisfies T
+            ^

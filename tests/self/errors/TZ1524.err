@@ -1,0 +1,3 @@
+TZ1524.tz:2:3: error TZ1524: a constructor cannot be a generator
+  *constructor() {}
+  ^

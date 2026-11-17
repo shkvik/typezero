@@ -1,0 +1,3 @@
+TZ1317.tz:1:15: error TZ1317: expected a type, found '}'
+type A = { a: };
+              ^

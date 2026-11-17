@@ -1,0 +1,3 @@
+TZ1506.tz:1:7: error TZ1506: expected '{' to start the members of the enum, found ';'
+enum E;
+      ^

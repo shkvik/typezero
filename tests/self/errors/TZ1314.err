@@ -1,0 +1,3 @@
+TZ1314.tz:1:14: error TZ1314: expected identifier for a parameter of the function type, found integer literal
+type A = { m(1): int };
+             ^

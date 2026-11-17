@@ -1,0 +1,3 @@
+TZ1335.tz:1:12: error TZ1335: optional elements in a tuple type are not supported
+let t: [int?];
+           ^

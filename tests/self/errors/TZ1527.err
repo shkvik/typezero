@@ -1,0 +1,3 @@
+TZ1527.tz:2:3: error TZ1527: a constructor cannot be 'override' or 'abstract'
+  override constructor() {}
+  ^

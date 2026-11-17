@@ -1,0 +1,3 @@
+TZ1225.tz:1:13: error TZ1225: a method cannot have a key in brackets
+const o = { [k]() {} };
+            ^

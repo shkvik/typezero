@@ -1,0 +1,3 @@
+TZ1551.tz:2:11: error TZ1551: 'public' comes after another access modifier; the access is given once
+  private public w: int;
+          ^

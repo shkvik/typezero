@@ -1,0 +1,3 @@
+TZ1130.tz:4:3: error TZ1130: a 'switch' can have only one 'default'
+  default:
+  ^

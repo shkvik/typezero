@@ -1,0 +1,3 @@
+TZ1308.tz:1:28: error TZ1308: expected ']' to close the name, found '}'
+class C { [Symbol.iterator }
+                           ^

@@ -1,0 +1,3 @@
+TZ1634.tz:1:28: error TZ1634: import attributes are only for JSON files
+import { a } from "./m.tz" with { type: "json", other: "x" };
+                           ^

@@ -137,9 +137,9 @@ partial class FileParser {
 
   private fieldNameOf(token: Token): string | undefined {
     if (token.kind == TokenKind.String) {
-      const decoded = this.literals.string(token);
+      const text = this.stringText(token);
 
-      return this.keepName(decoded.text);
+      return this.keepName(text);
     }
     if (
       token.kind == TokenKind.Identifier ||

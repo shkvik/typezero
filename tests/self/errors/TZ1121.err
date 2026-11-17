@@ -1,0 +1,3 @@
+TZ1121.tz:1:6: error TZ1121: 'var' is not supported; use 'let' or 'const'
+for (var x of xs) {}
+     ^

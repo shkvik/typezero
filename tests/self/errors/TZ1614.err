@@ -1,0 +1,3 @@
+TZ1614.tz:1:8: error TZ1614: a JSON file is one value: import it whole
+import { a } from "./d.json"
+       ^

@@ -1,0 +1,3 @@
+TZ1517.tz:2:3: error TZ1517: a member name in brackets is not supported
+  [k] = 1;
+  ^

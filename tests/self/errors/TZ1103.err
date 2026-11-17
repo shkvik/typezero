@@ -1,0 +1,3 @@
+TZ1103.tz:1:11: error TZ1103: expected '{' to start the cases of 'switch', found ';'
+switch (x);
+          ^

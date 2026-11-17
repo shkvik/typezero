@@ -449,11 +449,11 @@ partial class FileParser {
       return undefined;
     }
 
-    const decoded = this.literals.string(token);
+    const path = this.stringText(token);
 
     this.cursor.next();
 
-    return { path: decoded.text, loc: token.start };
+    return { path, loc: token.start };
   }
 
   private clauseName(clause: ImportClause): string | undefined {

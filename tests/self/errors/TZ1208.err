@@ -1,0 +1,3 @@
+TZ1208.tz:1:15: error TZ1208: expected ']' to close the key, found ':'
+const o = { [k: 1 };
+              ^

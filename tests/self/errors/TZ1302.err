@@ -1,0 +1,3 @@
+TZ1302.tz:1:38: error TZ1302: expected ':' between the branches of the conditional type, found ';'
+type Half<T> = T extends string ? int;
+                                     ^

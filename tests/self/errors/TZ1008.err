@@ -1,0 +1,3 @@
+TZ1008.tz:1:11: error TZ1008: unterminated regular expression literal
+const a = /abc
+          ^

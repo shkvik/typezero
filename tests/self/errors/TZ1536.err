@@ -1,0 +1,3 @@
+TZ1536.tz:1:18: error TZ1536: a declared function has no body
+declare function f() {}
+                 ^

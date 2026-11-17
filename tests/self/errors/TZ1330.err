@@ -1,0 +1,3 @@
+TZ1330.tz:1:16: error TZ1330: method 'm' needs its return type
+type A = { m() };
+               ^

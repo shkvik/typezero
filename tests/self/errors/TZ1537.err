@@ -1,0 +1,3 @@
+TZ1537.tz:1:10: error TZ1537: 'if' is a keyword in tz and cannot be a function name; choose another name
+function if() {}
+         ^

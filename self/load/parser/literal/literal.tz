@@ -1,7 +1,9 @@
+import { Code } from "../../../diagnostic/code.tz";
 import { Token } from "../../token/types/token.types.tz";
 import {
   DecodedText,
   Escape,
+  InvalidEscape,
   NumberText,
   RegexText,
   TextKind,
@@ -254,7 +256,7 @@ export class LiteralReader {
     const first = this.source.toString("utf8", start, i);
 
     if (i == end) {
-      return { text: first, ok: true };
+      return { text: first };
     }
 
     const parts: string[] = [first];
@@ -263,8 +265,9 @@ export class LiteralReader {
       const decoded = this.decodeAt(i, end);
       if (decoded == undefined) {
         const partial = parts.join("");
+        const invalid = this.invalidEscape(i);
 
-        return { text: partial, ok: false };
+        return { text: partial, invalid };
       }
 
       parts.push(decoded.text);
@@ -278,7 +281,16 @@ export class LiteralReader {
 
     const text = parts.join("");
 
-    return { text, ok: true };
+    return { text };
+  }
+
+  private invalidEscape(at: int): InvalidEscape {
+    const letter = this.byteAt(at + 1);
+    if (letter == kLowerX) {
+      return { loc: at, code: Code.InvalidHexEscape };
+    }
+
+    return { loc: at, code: Code.InvalidUnicodeEscape };
   }
 
   private plainEnd(from: int, end: int, kind: TextKind): int {

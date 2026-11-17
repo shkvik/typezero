@@ -1,0 +1,3 @@
+TZ1603.tz:1:12: error TZ1603: expected identifier after 'export * as', found ';'
+export * as;
+           ^

@@ -1,0 +1,3 @@
+TZ1550.tz:2:24: error TZ1550: 'readonly' is written twice
+  constructor(readonly readonly a: int) {}
+                       ^

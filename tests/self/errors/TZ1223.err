@@ -1,0 +1,3 @@
+TZ1223.tz:1:11: error TZ1223: dynamic 'import()' is not supported
+const a = import("x");
+          ^

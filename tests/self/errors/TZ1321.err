@@ -1,0 +1,3 @@
+TZ1321.tz:1:19: error TZ1321: expected '>' to close the type arguments, found ';'
+type T = Array<int;
+                  ^

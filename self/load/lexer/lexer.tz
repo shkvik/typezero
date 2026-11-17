@@ -1,5 +1,9 @@
 import { KnownName, Token, TokenKind } from "../token/types/token.types.tz";
 import { kTokenTable } from "../token/const/token.const.tz";
+import { Code } from "../../diagnostic/code.tz";
+import { Details, SourceError } from "../../diagnostic/types/message.types.tz";
+import { kNoDetails } from "../../diagnostic/const/message.const.tz";
+import { LexResult } from "./types/lexer.types.tz";
 import {
   kAmp,
   kApostrophe,
@@ -62,6 +66,7 @@ export class Lexer {
   private readonly source: Buffer;
   private readonly end: int;
   private readonly tokens: Token[];
+  private readonly errors: SourceError[];
   private readonly braces: int[];
   private position: int;
   private start: int;
@@ -71,13 +76,14 @@ export class Lexer {
     this.source = source;
     this.end = source.length;
     this.tokens = [];
+    this.errors = [];
     this.braces = [];
     this.position = 0;
     this.start = 0;
     this.newline = false;
   }
 
-  public run(): Token[] {
+  public run(): LexResult {
     this.skipPreamble();
     this.newline = this.skipTrivia();
 
@@ -89,7 +95,7 @@ export class Lexer {
     this.start = this.position;
     this.push(TokenKind.End);
 
-    return this.tokens;
+    return { tokens: this.tokens, errors: this.errors };
   }
 
   private token(): void {
@@ -211,9 +217,9 @@ export class Lexer {
         return this.pushOperator(TokenKind.Slash, TokenKind.SlashAssign);
       case kHash:
         if (this.identStartAt(0)) {
-          this.identifier(true);
+          return this.identifier(true);
         }
-        return;
+        return this.unexpected(code);
       default:
         if (this.isDigit(code)) {
           return this.number();
@@ -221,7 +227,18 @@ export class Lexer {
         if (this.isIdentStart(code)) {
           return this.identifier(false);
         }
+        return this.unexpected(code);
     }
+  }
+
+  private unexpected(code: int): void {
+    const word = String.fromCharCode(code);
+
+    this.error(this.start, Code.UnexpectedCharacter, { word });
+  }
+
+  private error(loc: int, code: Code, details: Details = kNoDetails): void {
+    this.errors.push({ code, loc, details });
   }
 
   private push(kind: TokenKind): void {
@@ -389,6 +406,7 @@ export class Lexer {
   }
 
   private skipBlockComment(): boolean {
+    const start = this.position;
     let newline = false;
 
     this.position += 2;
@@ -404,9 +422,13 @@ export class Lexer {
       this.position += 1;
     }
 
-    if (!this.atEnd()) {
-      this.position += 2;
+    if (this.atEnd()) {
+      this.error(start, Code.UnterminatedComment);
+
+      return newline;
     }
+
+    this.position += 2;
 
     return newline;
   }
@@ -459,11 +481,12 @@ export class Lexer {
           this.skipRegexClass();
           break;
         case kSlash:
-          this.skipRegexFlags();
+          this.skipIdentChars();
           return this.push(TokenKind.Regex);
       }
     }
 
+    this.error(this.start, Code.UnterminatedRegex);
     this.push(TokenKind.Regex);
   }
 
@@ -484,12 +507,6 @@ export class Lexer {
       if (code == kBackslash) {
         this.skipEscaped();
       }
-    }
-  }
-
-  private skipRegexFlags(): void {
-    while (this.identCharAt(0)) {
-      this.position += 1;
     }
   }
 
@@ -533,6 +550,8 @@ export class Lexer {
     const exponentLetter = next == kLowerE || next == kUpperE;
     const member = this.isIdentStart(next) && !exponentLetter;
     if (member) {
+      this.reportNameAfterPoint();
+
       return false;
     }
 
@@ -540,6 +559,21 @@ export class Lexer {
     this.skipDigits();
 
     return true;
+  }
+
+  private reportNameAfterPoint(): void {
+    let offset = 1;
+
+    while (this.identCharAt(offset)) {
+      offset += 1;
+    }
+
+    const nameStart = this.position + 1;
+    const nameEnd = this.position + offset;
+    const word = this.source.toString("utf8", this.start, this.position);
+    const name = this.source.toString("utf8", nameStart, nameEnd);
+
+    this.error(nameStart, Code.NameAfterNumberPoint, { word, name });
   }
 
   private acceptExponent(): boolean {
@@ -592,18 +626,29 @@ export class Lexer {
 
   private finishNumber(kind: TokenKind): void {
     if (this.at(0) == kLowerN && !this.identCharAt(1)) {
+      const word = this.source.toString("utf8", this.start, this.position);
+
+      this.error(this.start, Code.BigIntLiteral, { word });
       this.push(kind);
       this.position += 1;
 
       return;
     }
     if (this.identStartAt(0)) {
-      while (this.identCharAt(0)) {
-        this.position += 1;
-      }
+      this.error(this.position, Code.NameAfterNumber);
+      this.push(kind);
+      this.skipIdentChars();
+
+      return;
     }
 
     this.push(kind);
+  }
+
+  private skipIdentChars(): void {
+    while (this.identCharAt(0)) {
+      this.position += 1;
+    }
   }
 
   private string(quote: int): void {
@@ -616,13 +661,14 @@ export class Lexer {
 
       this.position += 1;
       if (code == quote) {
-        break;
+        return this.push(TokenKind.String);
       }
       if (code == kBackslash && !this.atEnd()) {
         this.position += 1;
       }
     }
 
+    this.error(this.start, Code.UnterminatedString);
     this.push(TokenKind.String);
   }
 
@@ -653,6 +699,7 @@ export class Lexer {
       }
     }
 
+    this.error(this.start, Code.UnterminatedTemplate);
     this.push(closed);
   }
 
@@ -663,9 +710,7 @@ export class Lexer {
       start += 1;
     }
 
-    while (this.identCharAt(0)) {
-      this.position += 1;
-    }
+    this.skipIdentChars();
 
     const text = this.source.toString("utf8", start, this.position);
     let kind: TokenKind = TokenKind.Identifier;

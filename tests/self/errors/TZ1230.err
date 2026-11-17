@@ -1,0 +1,3 @@
+TZ1230.tz:1:11: error TZ1230: invalid integer literal
+const n = 0x
+          ^

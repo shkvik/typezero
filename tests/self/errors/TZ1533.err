@@ -1,0 +1,6 @@
+TZ1533.tz:1:13: error TZ1533: expected the name of an enum member, found integer literal
+enum E { A, 1 }
+            ^
+TZ1533.tz:1:15: error TZ1120: unexpected '}'
+enum E { A, 1 }
+              ^

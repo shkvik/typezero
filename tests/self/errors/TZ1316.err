@@ -1,0 +1,3 @@
+TZ1316.tz:1:10: error TZ1316: 'readonly' applies only to array and tuple types
+type R = readonly keyof T;
+         ^

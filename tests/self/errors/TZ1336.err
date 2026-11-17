@@ -1,0 +1,3 @@
+TZ1336.tz:1:9: error TZ1336: parameter 'a' of the function type needs a type
+let f: (a) => int
+        ^

@@ -1,0 +1,3 @@
+TZ1606.tz:1:30: error TZ1606: expected '{' after 'with', found ';'
+import j from "./d.json" with;
+                             ^

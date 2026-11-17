@@ -10,6 +10,7 @@ import {
   PropertyKind,
   TemplateExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
+import { DecodedText } from "../../literal/types/literal.types.tz";
 import { FunctionPlace } from "../../../../program/ast/types/ast.types.functions.tz";
 
 partial class FileParser {
@@ -56,9 +57,30 @@ partial class FileParser {
       return this.literals.templateRaw(token);
     }
 
+    return this.templatePartText(token);
+  }
+
+  private templatePartText(token: Token): string {
     const decoded = this.literals.templatePart(token);
 
+    this.reportEscape(decoded);
+
     return decoded.text;
+  }
+
+  private stringText(token: Token): string {
+    const decoded = this.literals.string(token);
+
+    this.reportEscape(decoded);
+
+    return decoded.text;
+  }
+
+  private reportEscape(decoded: DecodedText): void {
+    const invalid = decoded.invalid;
+    if (invalid != undefined) {
+      this.cursor.report(invalid.loc, invalid.code);
+    }
   }
 
   private arrayLiteral(): Expr {
@@ -428,9 +450,9 @@ partial class FileParser {
 
   private stringLiteral(): Expr {
     const token = this.cursor.next();
-    const decoded = this.literals.string(token);
+    const value = this.stringText(token);
 
-    return { kind: ExprKind.StringLit, loc: token.start, value: decoded.text };
+    return { kind: ExprKind.StringLit, loc: token.start, value };
   }
 
   private regexLiteral(): Expr {

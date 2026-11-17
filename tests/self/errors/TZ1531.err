@@ -1,0 +1,3 @@
+TZ1531.tz:1:12: error TZ1531: expected '{' to start the fields of the interface, found ';'
+interface I;
+           ^

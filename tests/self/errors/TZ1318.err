@@ -1,0 +1,3 @@
+TZ1318.tz:1:10: error TZ1318: a function type cannot be generic itself
+type F = <T>(a: T) => T
+         ^

@@ -1,0 +1,3 @@
+TZ1219.tz:1:7: error TZ1219: expected a name after '.'
+new a.;
+      ^

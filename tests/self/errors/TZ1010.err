@@ -1,0 +1,3 @@
+TZ1010.tz:1:12: error TZ1010: invalid '\u' escape
+const a = "\u12";
+           ^

@@ -1,0 +1,3 @@
+TZ1601.tz:1:10: error TZ1601: expected 'as' after 'import *', found identifier
+import * ns from "x";
+         ^

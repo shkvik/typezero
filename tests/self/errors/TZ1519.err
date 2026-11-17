@@ -1,0 +1,3 @@
+TZ1519.tz:2:3: error TZ1519: 'accessor' goes before a field, not a method
+  accessor n() {}
+  ^

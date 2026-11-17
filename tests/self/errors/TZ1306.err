@@ -1,0 +1,3 @@
+TZ1306.tz:1:21: error TZ1306: expected ':' before the type of the values of the mapped type, found identifier
+type A = { [K in T] X };
+                    ^

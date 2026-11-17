@@ -1,0 +1,3 @@
+TZ1231.tz:1:11: error TZ1231: invalid number literal
+const a = 1e400
+          ^

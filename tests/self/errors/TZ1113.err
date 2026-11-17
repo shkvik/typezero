@@ -1,0 +1,3 @@
+TZ1113.tz:1:5: error TZ1113: expected '(' after 'for', found 'let'
+for let i = 0; ; {}
+    ^

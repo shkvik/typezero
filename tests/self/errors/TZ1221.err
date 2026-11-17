@@ -1,0 +1,3 @@
+TZ1221.tz:1:1: error TZ1221: expected an expression, found '=>'
+=> 1;
+^

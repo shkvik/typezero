@@ -1,0 +1,3 @@
+TZ1620.tz:1:1: error TZ1620: a part of a class is not exported
+export partial class {}
+^

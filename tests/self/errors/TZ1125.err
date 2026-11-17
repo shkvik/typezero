@@ -1,0 +1,3 @@
+TZ1125.tz:1:1: error TZ1125: there is no 'catch' in tz
+catch { b() }
+^

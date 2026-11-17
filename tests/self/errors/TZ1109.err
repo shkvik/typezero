@@ -1,0 +1,3 @@
+TZ1109.tz:1:3: error TZ1109: expected '(' after 'if', found ':'
+if: 1;
+  ^

@@ -1,0 +1,3 @@
+TZ1328.tz:1:13: error TZ1328: generic methods in types are not supported yet
+type A = { m<T>(): int };
+            ^

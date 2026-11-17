@@ -294,12 +294,12 @@ partial class FileParser {
 
   private stringLiteralType(): TypeRef {
     const token = this.cursor.next();
-    const decoded = this.literals.string(token);
+    const text = this.stringText(token);
     const ref = this.typeRef(token.start);
 
     ref.form = {
       kind: TypeKind.Literal,
-      text: decoded.text,
+      text,
       number: 0.0,
       integer: false,
     };
@@ -354,14 +354,14 @@ partial class FileParser {
   private templateType(): TypeRef {
     const token = this.cursor.peek();
     const ref = this.typeRef(token.start);
-    const first = this.literals.templatePart(token);
+    const first = this.templatePartText(token);
 
     this.cursor.next();
 
     if (token.kind == TokenKind.TemplateString) {
       ref.form = {
         kind: TypeKind.Literal,
-        text: first.text,
+        text: first,
         number: 0.0,
         integer: false,
       };
@@ -372,7 +372,7 @@ partial class FileParser {
 
     const parts: TemplateTypeForm = {
       kind: TypeKind.Template,
-      texts: [first.text],
+      texts: [first],
     };
     ref.form = parts;
 
@@ -394,8 +394,8 @@ partial class FileParser {
         return this.typeRef(token.start);
       }
 
-      const text = this.literals.templatePart(middle);
-      parts.texts.push(text.text);
+      const text = this.templatePartText(middle);
+      parts.texts.push(text);
       piece = this.cursor.next();
     }
 

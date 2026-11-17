@@ -1,0 +1,3 @@
+TZ1333.tz:1:12: error TZ1333: expected an index signature or a mapped type
+type T = { [k]: int };
+           ^

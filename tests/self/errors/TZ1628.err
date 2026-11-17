@@ -1,0 +1,9 @@
+TZ1628.tz:1:10: error TZ1628: there is no 'export default'
+import { default } from "./m"
+         ^
+TZ1628.tz:1:18: error TZ1120: unexpected '}'
+import { default } from "./m"
+                 ^
+TZ1628.tz:1:25: error TZ1119: expected ';', found string literal
+import { default } from "./m"
+                        ^

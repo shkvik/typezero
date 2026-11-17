@@ -1,0 +1,3 @@
+TZ1137.tz:1:5: error TZ1137: 'if' is a keyword in tz and cannot be a variable name; choose another name
+let if = 1;
+    ^

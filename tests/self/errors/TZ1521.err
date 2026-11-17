@@ -1,0 +1,3 @@
+TZ1521.tz:2:12: error TZ1521: abstract method 'n' cannot have a body
+  abstract n(): int {
+           ^

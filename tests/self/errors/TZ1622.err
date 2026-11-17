@@ -1,0 +1,3 @@
+TZ1622.tz:1:8: error TZ1622: 'export type' is not needed
+export type { T };
+       ^

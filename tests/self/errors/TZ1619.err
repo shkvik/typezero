@@ -1,0 +1,3 @@
+TZ1619.tz:2:3: error TZ1619: 'export' is allowed only at the top level
+  export const x = 1;
+  ^

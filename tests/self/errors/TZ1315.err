@@ -1,0 +1,3 @@
+TZ1315.tz:1:18: error TZ1315: expected ')' to close the parameters of the function type, found ';'
+type F = <T>(a: T;
+                 ^

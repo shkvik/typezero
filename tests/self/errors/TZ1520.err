@@ -1,0 +1,3 @@
+TZ1520.tz:2:3: error TZ1520: a decorator cannot decorate a constructor
+  @dec constructor() {}
+  ^

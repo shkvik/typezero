@@ -1,0 +1,3 @@
+TZ1134.tz:1:12: error TZ1134: the variable of 'for...in' is a key, a string, and cannot be destructured
+for (const [k] in o) {}
+           ^

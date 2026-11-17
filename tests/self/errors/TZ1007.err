@@ -1,0 +1,3 @@
+TZ1007.tz:1:11: error TZ1007: unterminated template literal
+const a = `abc
+          ^

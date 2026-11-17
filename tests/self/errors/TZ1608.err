@@ -1,0 +1,3 @@
+TZ1608.tz:1:46: error TZ1608: expected '}' after the import attributes, found ';'
+import j from "./d.json" with { type: "json" ;
+                                             ^

@@ -1,10 +1,1 @@
-import { Code } from "../../../../diagnostic/code.tz";
-import { Details } from "../../../../diagnostic/types/message.types.tz";
-
 export type Mark = { readonly at: int; readonly recovering: boolean };
-
-export type ParseError = {
-  readonly code: Code;
-  readonly loc: int;
-  readonly details: Details;
-};

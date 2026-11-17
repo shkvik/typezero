@@ -1,0 +1,3 @@
+TZ1541.tz:1:15: error TZ1541: expected a parameter name after '...'
+function f(...) {}
+              ^

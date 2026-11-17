@@ -1,0 +1,3 @@
+TZ1609.tz:2:3: error TZ1609: 'import' is allowed only at the top level of a file
+  import { a } from "./m.tz";
+  ^

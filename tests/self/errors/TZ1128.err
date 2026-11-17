@@ -1,0 +1,3 @@
+TZ1128.tz:1:1: error TZ1128: 'declare global' is not supported
+declare global { }
+^

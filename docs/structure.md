@@ -115,18 +115,24 @@ self/             компилятор на tz, пробный (порт compile
                   diagnostic/ — коды ошибок (code.tz: enum Code, значения "TZ1101") и
                   их тексты (message.tz: messageText — подстановка {expected}/{found}/{word};
                   таблица kMessages: Record<Code, Message> — в const/message.const.tz, типы
-                  Details, Message — в types/message.types.tz); diagnostic/error-printer/ —
+                  Details, Message и SourceError { code, loc, details } — одна ошибка лексера
+                  или парсера — в types/message.types.tz; коды 10xx — лексер и
+                  escape-последовательности); diagnostic/error-printer/ —
                   ErrorPrinter: ошибки одного файла как `путь:строка:столбец: error TZ1221:
                   текст`, под ним строка исходника и `^` под местом;
                   load/token/ — токены, общие для лексера и парсера (TokenKind, KnownName,
                   Token — в types/token.types.tz; в token.tz — класс TokenTable: isName,
                   isKeyword, keywordKind, knownName, spelling; общий экземпляр kTokenTable — в
                   const/token.const.tz); load/lexer/ — Lexer (lexer.tz: new Lexer(source).run()
-                  → массив токенов; коды символов — в const/lexer.const.tz);
+                  → LexResult { tokens, errors } из types/lexer.types.tz; ошибки лексера:
+                  незакрытые комментарий, строка, шаблон, regex, лишний символ, `10n`,
+                  `1abc`, `1.name`; коды символов — в const/lexer.const.tz);
                   load/parser/ — Parser (parser.tz:
-                  run() по списку файлов → ParsedFile[]; типы SourceText, ParsedFile — в
+                  run() по списку файлов → ParsedFile[]; ошибки лексера и парсера сливает по
+                  месту в один список; типы SourceText, ParsedFile — в
                   types/parser.types.tz), Cursor (cursor/: позиция, откаты,
-                  ошибки), LiteralReader (literal/: значения литералов по токену), FileParser
+                  ошибки), LiteralReader (literal/: значения литералов по токену; неверный
+                  `\x` или `\u` — в DecodedText.invalid, сообщает о нём парсер), FileParser
                   (file-parser/: грамматика; части `partial class` — в
                   partial/file-parser.partial.<часть>.tz: types, object-types,
                   function-types, expressions, operators, calls, literals, patterns,
@@ -138,7 +144,10 @@ self/             компилятор на tz, пробный (порт compile
                   const/<класс>.const.tz; у класса с частями — по файлу на часть
                   (types/file-parser.types.<часть>.tz, там же result — ParseResult и context —
                   вид функции, место выражения, место типа); сверка деревьев с C++ — скрытая
-                  `tz syntax tree|time|hold|read`
+                  `tz syntax tree|time|hold|read`; тесты — tests/self/errors/TZxxxx.tz (исходник
+                  с ошибкой этого кода) + TZxxxx.err (точный вывод `tzparse check`), гоняет
+                  tests/self.cmake: self/build собирает self/, self/errors/<код> сверяет
+                  вывод, self/codes следит, что у каждого кода из code.tz есть тест
 tests/ docs/ bench/ examples/ third_party/
 ```
 

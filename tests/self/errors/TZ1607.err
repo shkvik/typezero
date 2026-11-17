@@ -1,0 +1,3 @@
+TZ1607.tz:1:41: error TZ1607: expected ':' after the name of an import attribute, found '}'
+import data from "./d.json" with { type }
+                                        ^

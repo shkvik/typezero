@@ -1,0 +1,3 @@
+TZ1523.tz:1:26: error TZ1523: a constructor cannot have a return type
+class C { constructor(): int {} }
+                         ^

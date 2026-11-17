@@ -1,0 +1,3 @@
+TZ1228.tz:1:16: error TZ1228: expected ':' after the field name, found '}'
+const o = { if };
+               ^

@@ -1,0 +1,3 @@
+TZ1226.tz:1:13: error TZ1226: getters and setters are not supported
+const o = { set a(v) {} };
+            ^

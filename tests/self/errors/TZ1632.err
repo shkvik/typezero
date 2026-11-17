@@ -1,0 +1,6 @@
+TZ1632.tz:1:10: error TZ1632: expected a name to export, found integer literal
+export { 1 }
+         ^
+TZ1632.tz:1:12: error TZ1120: unexpected '}'
+export { 1 }
+           ^

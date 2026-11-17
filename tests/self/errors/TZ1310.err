@@ -1,0 +1,3 @@
+TZ1310.tz:1:24: error TZ1310: expected ']' after the type of the keys, found ':'
+type A = { [key: string: int };
+                       ^

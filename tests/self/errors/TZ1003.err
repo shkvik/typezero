@@ -1,0 +1,3 @@
+TZ1003.tz:1:13: error TZ1003: a point right after a number belongs to the number, so a name cannot follow it; write '1..toString' or '(1).toString'
+const a = 1.toString();
+            ^

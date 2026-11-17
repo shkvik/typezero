@@ -1,0 +1,3 @@
+TZ1104.tz:2:10: error TZ1104: expected ':' after the value of 'case', found identifier
+  case 1 a();
+         ^

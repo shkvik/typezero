@@ -1,0 +1,3 @@
+TZ1135.tz:1:5: error TZ1135: 'for await' goes over the values of an iterable, with 'of'
+for await (const k in o) {}
+    ^

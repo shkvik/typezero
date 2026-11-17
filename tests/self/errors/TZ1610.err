@@ -1,0 +1,3 @@
+TZ1610.tz:1:8: error TZ1610: 'import type' is not needed
+import type { T } from "./t.tz";
+       ^

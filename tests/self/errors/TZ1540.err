@@ -1,0 +1,3 @@
+TZ1540.tz:1:12: error TZ1540: 'if' is a keyword in tz and cannot be a parameter name; choose another name
+function f(if: int) {}
+           ^
