@@ -229,7 +229,7 @@ partial class FileParser {
         return this.genericFunctionType();
 
       case TokenKind.LParen:
-        if (this.parametersAhead() || this.functionTypeAhead()) {
+        if (this.signatureAhead() || this.functionTypeAhead()) {
           return this.functionType();
         }
         return this.parenthesizedType();
@@ -273,6 +273,29 @@ partial class FileParser {
     }
   }
 
+  private signatureAhead(): boolean {
+    const first = this.cursor.tokenAt(1);
+    const second = this.cursor.tokenAt(2);
+    const twoNames =
+      kTokenTable.isName(first.kind) &&
+      !this.isTypeOperator(first.kind) &&
+      kTokenTable.isName(second.kind) &&
+      !second.newline;
+
+    return twoNames || this.parametersAhead();
+  }
+
+  private isTypeOperator(kind: TokenKind): boolean {
+    switch (kind) {
+      case TokenKind.Keyof:
+      case TokenKind.Readonly:
+      case TokenKind.Infer:
+        return true;
+      default:
+        return false;
+    }
+  }
+
   private parenthesizedType(): TypeRef {
     this.cursor.next();
     const inner = this.type();
@@ -290,6 +313,11 @@ partial class FileParser {
       this.cursor.next();
       const part = this.cursor.next();
       ref.name = this.keepName(`${ref.name}.${part.text}`);
+    }
+    if (this.cursor.accept(TokenKind.Dot)) {
+      const token = this.cursor.peek();
+
+      this.cursor.error(token.start, Code.ExpectedNameAfterDot);
     }
     if (this.cursor.is(TokenKind.Less)) {
       ref.form = { kind: TypeKind.Generic };

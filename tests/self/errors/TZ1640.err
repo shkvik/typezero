@@ -1,0 +1,3 @@
+TZ1640.tz:1:17: error TZ1640: expected a declaration after 'export abstract', found identifier
+export abstract A { }
+                ^

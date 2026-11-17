@@ -219,4 +219,5 @@ export enum Code {
   ExpectedFrom = "TZ1637",
   ExpectedPathString = "TZ1638",
   ExportedClassNeedsName = "TZ1639",
+  ExpectedAfterExportWord = "TZ1640",
 }

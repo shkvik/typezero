@@ -7,9 +7,9 @@ function function f() { }
 extra_word.tz:5:12: error TZ1540: 'if' is a keyword in tz and cannot be a parameter name; choose another name
 function g(if p: int) { }
            ^
-extra_word.tz:6:13: error TZ1304: expected ')' to close the parenthesized type, found identifier
+extra_word.tz:6:11: error TZ1336: parameter 'p' of the function type needs a type, e.g. 'p: int'
 type T = (p int) => void;
-            ^
+          ^
 extra_word.tz:7:18: error TZ1501: expected '{' to start the members of the class, found ';'
 const k = (class ; A { });
                  ^

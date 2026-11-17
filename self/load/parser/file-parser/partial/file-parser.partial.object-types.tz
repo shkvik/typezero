@@ -393,12 +393,22 @@ partial class FileParser {
     return true;
   }
 
+  private wrongIndexToken(): Token {
+    if (this.cursor.atName()) {
+      return this.cursor.lookahead();
+    }
+
+    return this.cursor.peek();
+  }
+
   private indexSignature(ref: TypeRef, loc: int): TypeRef {
     this.cursor.next();
     const next = this.cursor.lookahead();
 
     if (!this.cursor.atName() || next.kind != TokenKind.Colon) {
-      this.skipBraced(loc, Code.ExpectedIndexSignatureOrMapped);
+      const wrong = this.wrongIndexToken();
+
+      this.skipBraced(wrong.start, Code.ExpectedIndexSignatureOrMapped);
 
       return ref;
     }

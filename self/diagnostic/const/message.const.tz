@@ -661,6 +661,9 @@ export const kMessages: Record<Code, Message> = {
   [Code.ExpectedPathString]: {
     text: "expected the path of the file as a string, e.g. '\"./math\"', found {found}",
   },
+  [Code.ExpectedAfterExportWord]: {
+    text: "expected a declaration after 'export {word}', found {found}",
+  },
   [Code.ExportedClassNeedsName]: {
     text: "an exported class needs a name: other files import it by that name; write 'export class Name { ... }'",
   },
