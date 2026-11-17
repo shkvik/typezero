@@ -1,0 +1,87 @@
+== arrow_type_guard.tz
+items 5
+VarDecl 96 const=1 using=0 n=1
+  Declarator 102 "a" form=plain
+    -
+    FunctionExpr 106
+      Function 106 "" arrow=1 concise=1 own="" place=1 body=0 gen=0 async=0 role=plain src=106-172 tp=0 params=1
+        Param 107 "value" form=0 prop=- pattern=- dec=0
+          Type 114 Union "" src=- n=2
+            Type 114 Name "int" src=- n=0
+            Type 120 Name "string" src=- n=0
+        Type 129 Predicate "value" src=- n=1 asserts=0
+          Type 138 Name "string" src=- n=0
+        Block 148 end=-1 n=1
+          Return 148
+            Binary 161 16 src=148-172
+              Unary 148 4
+                Name 155 "value" targs=0
+              StringLit 164 "string"
+VarDecl 174 const=1 using=0 n=1
+  Declarator 180 "b" form=plain
+    -
+    Call 190 opt=0 tagged=0 n=1 spread=-
+      Member 190 "filter" opt=0 targs=0
+        Name 184 "mixed" targs=0
+      FunctionExpr 197
+        Function 197 "" arrow=1 concise=1 own="" place=1 body=0 gen=0 async=0 role=plain src=197-249 tp=0 params=1
+          Param 198 "value" form=0 prop=- pattern=- dec=0
+            -
+          Type 206 Predicate "value" src=- n=1 asserts=0
+            Type 215 Name "string" src=- n=0
+          Block 225 end=-1 n=1
+            Return 225
+              Binary 238 16 src=225-249
+                Unary 225 4
+                  Name 232 "value" targs=0
+                StringLit 241 "string"
+VarDecl 252 const=1 using=0 n=1
+  Declarator 258 "c" form=plain
+    -
+    FunctionExpr 262
+      Function 262 "" arrow=1 concise=1 own="" place=1 body=0 gen=0 async=0 role=plain src=262-317 tp=0 params=1
+        Param 263 "value" form=0 prop=- pattern=- dec=0
+          Type 270 Name "Shape" src=- n=0
+        Type 278 Predicate "value" src=- n=1 asserts=1
+          Type 295 Name "Circle" src=- n=0
+        Block 305 end=-1 n=1
+          Return 305
+            Call 305 opt=0 tagged=0 n=1 spread=-
+              Name 305 "check" targs=0
+              Name 311 "value" targs=0
+VarDecl 319 const=1 using=0 n=1
+  Declarator 325 "d" form=plain
+    -
+    Conditional 334
+      Name 329 "flag" targs=0
+      FunctionExpr 336
+        Function 336 "" arrow=1 concise=1 own="" place=1 body=0 gen=0 async=0 role=plain src=336-368 tp=0 params=1
+          Param 337 "value" form=0 prop=- pattern=- dec=0
+            -
+          Type 345 Predicate "value" src=- n=1 asserts=0
+            Type 354 Name "string" src=- n=0
+          Block 364 end=-1 n=1
+            Return 364
+              BoolLit 364 1
+      Name 371 "other" targs=0
+VarDecl 378 const=1 using=0 n=1
+  Declarator 384 "e" form=plain
+    -
+    FunctionExpr 394
+      Function 394 "" arrow=1 concise=1 own="" place=1 body=0 gen=0 async=1 role=plain src=394-426 tp=0 params=1
+        Param 395 "value" form=0 prop=- pattern=- dec=0
+          -
+        Type 403 Predicate "value" src=- n=1 asserts=0
+          Type 412 Name "string" src=- n=0
+        Block 422 end=-1 n=1
+          Return 422
+            BoolLit 422 1
+imports 0
+exports 0
+fields 0
+constants 5
+  "a" 0
+  "b" 0
+  "c" 0
+  "d" 0
+  "e" 0

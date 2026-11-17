@@ -1,0 +1,7 @@
+// A substitution of a tagged template is a place of its own: 'in' is an
+// operator there inside the head of 'for', and an arrow function may have a
+// result type there inside the first branch of '?:'.
+for (let found = tag`${key in table}`; found; ) {
+  found = false;
+}
+const picked = flag ? tag`${(value): int => value}` : other;

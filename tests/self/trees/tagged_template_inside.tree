@@ -1,0 +1,49 @@
+== tagged_template_inside.tz
+items 2
+For 204
+  VarDecl 209 const=0 using=0 n=1
+    Declarator 213 "found" form=plain
+      -
+      Call 221 opt=0 tagged=1 n=2 spread=-
+        Name 221 "tag" targs=0
+        ArrayLit 224 n=2
+          Element 0 0
+            StringLit 224 ""
+          Element 0 0
+            StringLit 224 ""
+        Binary 231 21 src=227-239
+          Name 227 "key" targs=0
+          Name 234 "table" targs=0
+  Name 243 "found" targs=0
+  -
+  Block 252 end=271 n=1
+    ExprStmt 256
+      Assign 262 - src=256-269
+        Name 256 "found" targs=0
+        BoolLit 264 0
+VarDecl 273 const=1 using=0 n=1
+  Declarator 279 "picked" form=plain
+    -
+    Conditional 293
+      Name 288 "flag" targs=0
+      Call 295 opt=0 tagged=1 n=2 spread=-
+        Name 295 "tag" targs=0
+        ArrayLit 298 n=2
+          Element 0 0
+            StringLit 298 ""
+          Element 0 0
+            StringLit 298 ""
+        FunctionExpr 301
+          Function 301 "" arrow=1 concise=1 own="" place=1 body=0 gen=0 async=0 role=plain src=301-322 tp=0 params=1
+            Param 302 "value" form=0 prop=- pattern=- dec=0
+              -
+            Type 310 Name "int" src=- n=0
+            Block 317 end=-1 n=1
+              Return 317
+                Name 317 "value" targs=0
+      Name 327 "other" targs=0
+imports 0
+exports 0
+fields 0
+constants 1
+  "picked" 0

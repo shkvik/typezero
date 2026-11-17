@@ -1,0 +1,7 @@
+// The result type of an arrow function may be a type guard, as that of a
+// declared function.
+const a = (value: int | string): value is string => typeof value == "string";
+const b = mixed.filter((value): value is string => typeof value == "string");
+const c = (value: Shape): asserts value is Circle => check(value);
+const d = flag ? (value): value is string => true : other;
+const e = async (value): value is string => true;

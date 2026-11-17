@@ -45,6 +45,7 @@ partial class FileParser {
       return target;
     }
 
+    this.rejectOptionalTarget(target, start);
     const operatorToken = this.cursor.peek();
     const loc = operatorToken.start;
 

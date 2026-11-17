@@ -1,0 +1,3 @@
+TZ1233.tz:1:18: error TZ1233: '??' cannot be mixed with '||' or '&&' without parentheses: the two ways to read it give different results; write '(a ?? b) || c' or 'a ?? (b || c)'
+const a = x ?? y || z
+                 ^

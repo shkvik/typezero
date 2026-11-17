@@ -1,0 +1,27 @@
+nullish_and_optional.tz:4:18: error TZ1233: '??' cannot be mixed with '||' or '&&' without parentheses: the two ways to read it give different results; write '(a ?? b) || c' or 'a ?? (b || c)'
+const a = x ?? y || z;
+                 ^
+nullish_and_optional.tz:5:18: error TZ1233: '??' cannot be mixed with '||' or '&&' without parentheses: the two ways to read it give different results; write '(a && b) ?? c' or 'a && (b ?? c)'
+const b = x && y ?? z;
+                 ^
+nullish_and_optional.tz:6:18: error TZ1233: '??' cannot be mixed with '||' or '&&' without parentheses: the two ways to read it give different results; write '(a || b) ?? c' or 'a || (b ?? c)'
+const c = x || y ?? z;
+                 ^
+nullish_and_optional.tz:7:18: error TZ1233: '??' cannot be mixed with '||' or '&&' without parentheses: the two ways to read it give different results; write '(a ?? b) && c' or 'a ?? (b && c)'
+const d = x ?? y && z;
+                 ^
+nullish_and_optional.tz:8:1: error TZ1234: 'box?.size' cannot be changed: with '?.' the object may be 'undefined', and then there is nothing to change; check the object first
+box?.size = 5;
+^
+nullish_and_optional.tz:9:1: error TZ1234: 'box?.sizes[0]' cannot be changed: with '?.' the object may be 'undefined', and then there is nothing to change; check the object first
+box?.sizes[0] += 1;
+^
+nullish_and_optional.tz:10:1: error TZ1234: 'box?.size' cannot be changed: with '?.' the object may be 'undefined', and then there is nothing to change; check the object first
+box?.size++;
+^
+nullish_and_optional.tz:11:3: error TZ1234: 'box?.size' cannot be changed: with '?.' the object may be 'undefined', and then there is nothing to change; check the object first
+--box?.size;
+  ^
+nullish_and_optional.tz:12:24: error TZ1235: the class after 'new' cannot be reached through '?.': when the object is 'undefined' there is no class to create; check the object first
+const made = new shapes?.Circle();
+                       ^

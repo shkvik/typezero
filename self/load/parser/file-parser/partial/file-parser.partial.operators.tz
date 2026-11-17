@@ -1,6 +1,6 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { TokenKind } from "../../../token/types/token.types.tz";
+import { Token, TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
   BinaryOp,
@@ -67,13 +67,42 @@ partial class FileParser {
     }
 
     let lookahead = this.binaryOperator();
+    let previous = head;
 
     while (lookahead.precedence > above) {
+      const operator = this.cursor.peek();
+
+      this.checkNullishMix(previous, operator);
       left = this.applyOperator(left, lookahead, start);
+      previous = operator;
       lookahead = this.binaryOperator();
     }
 
     return left;
+  }
+
+  private checkNullishMix(previous: Token, next: Token): void {
+    const nullishFirst =
+      previous.kind == TokenKind.QuestionQuestion && this.isLogical(next.kind);
+    const nullishSecond =
+      next.kind == TokenKind.QuestionQuestion && this.isLogical(previous.kind);
+    if (!nullishFirst && !nullishSecond) {
+      return;
+    }
+
+    const first = this.written(previous.start, previous.end);
+    const second = this.written(next.start, next.end);
+    const word = `(a ${first} b) ${second} c`;
+    const other = `a ${first} (b ${second} c)`;
+
+    this.cursor.report(next.start, Code.NullishMixedWithLogical, {
+      word,
+      other,
+    });
+  }
+
+  private isLogical(kind: TokenKind): boolean {
+    return kind == TokenKind.PipePipe || kind == TokenKind.AmpAmp;
   }
 
   private binaryOperator(): BinaryOperator {
@@ -171,7 +200,7 @@ partial class FileParser {
       this.cursor.report(loc, Code.StrictNotEqualsNotSupported);
     }
 
-    const floor = this.rightFloor(op.precedence);
+    const floor = this.rightFloor(op);
     const right = this.binary(floor);
     const operation = this.binaryOpFor(op.kind);
     const source = this.cursor.spanFrom(start);
@@ -209,7 +238,10 @@ partial class FileParser {
 
   private prefixUpdate(): Expr {
     const sign = this.cursor.next();
+    const first = this.cursor.peek();
     const target = this.unary();
+
+    this.rejectOptionalTarget(target, first.start);
 
     return {
       kind: ExprKind.Update,
@@ -234,6 +266,7 @@ partial class FileParser {
   }
 
   private postfix(): Expr {
+    const first = this.cursor.peek();
     const target = this.callOrMember();
     const token = this.cursor.peek();
     const update =
@@ -244,6 +277,7 @@ partial class FileParser {
       return target;
     }
 
+    this.rejectOptionalTarget(target, first.start);
     this.cursor.next();
 
     return {
@@ -253,6 +287,17 @@ partial class FileParser {
       prefix: false,
       target,
     };
+  }
+
+  private rejectOptionalTarget(target: Expr, start: int): void {
+    if (target.kind != ExprKind.OptionalChain) {
+      return;
+    }
+
+    const span = this.cursor.spanFrom(start);
+    const word = this.written(span.start, span.end);
+
+    this.cursor.report(start, Code.OptionalChainChanged, { word });
   }
 
   private binaryPrecedence(kind: TokenKind): Precedence {
@@ -432,11 +477,14 @@ partial class FileParser {
     return Precedence.Relational;
   }
 
-  private rightFloor(precedence: Precedence): Precedence {
-    if (precedence == Precedence.Power) {
-      return Precedence.Multiplicative;
+  private rightFloor(op: BinaryOperator): Precedence {
+    switch (op.kind) {
+      case TokenKind.StarStar:
+        return Precedence.Multiplicative;
+      case TokenKind.QuestionQuestion:
+        return Precedence.And;
+      default:
+        return op.precedence;
     }
-
-    return precedence;
   }
 }

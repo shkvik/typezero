@@ -1,0 +1,3 @@
+TZ1234.tz:1:1: error TZ1234: 'box?.size' cannot be changed: with '?.' the object may be 'undefined', and then there is nothing to change; check the object first
+box?.size = 5
+^

@@ -1,0 +1,3 @@
+TZ1235.tz:1:24: error TZ1235: the class after 'new' cannot be reached through '?.': when the object is 'undefined' there is no class to create; check the object first
+const made = new shapes?.Circle()
+                       ^

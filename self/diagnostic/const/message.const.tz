@@ -244,6 +244,15 @@ export const kMessages: Record<Code, Message> = {
   [Code.ExpectedParenAfterAsyncName]: {
     text: "expected '(' after the name of the async method",
   },
+  [Code.NullishMixedWithLogical]: {
+    text: "'??' cannot be mixed with '||' or '&&' without parentheses: the two ways to read it give different results; write '{word}' or '{other}'",
+  },
+  [Code.OptionalChainChanged]: {
+    text: "'{word}' cannot be changed: with '?.' the object may be 'undefined', and then there is nothing to change; check the object first",
+  },
+  [Code.OptionalChainAfterNew]: {
+    text: "the class after 'new' cannot be reached through '?.': when the object is 'undefined' there is no class to create; check the object first",
+  },
   [Code.ExpectedAfterExtendsClause]: {
     text: "expected {expected} after the 'extends' clause of the conditional type, e.g. 'T extends string ? A : B', found {found}",
   },

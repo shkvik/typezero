@@ -243,7 +243,12 @@ partial class FileParser {
     }
 
     const raw = this.isStringRaw(tag);
+    const outer = this.context;
+
+    this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
     const template = this.template(raw);
+
+    this.context = outer;
     const elements: ArrayElement[] = [];
 
     for (const text of template.quasis) {
@@ -295,6 +300,8 @@ partial class FileParser {
     const args: Expr[] = [];
 
     if (!this.cursor.accept(TokenKind.LParen)) {
+      this.rejectOptionalAfterNew();
+
       return args;
     }
 
@@ -310,6 +317,13 @@ partial class FileParser {
     this.cursor.expect(TokenKind.RParen, Code.ExpectedArgumentsClose);
 
     return args;
+  }
+
+  private rejectOptionalAfterNew(): void {
+    const token = this.cursor.peek();
+    if (token.kind == TokenKind.QuestionDot) {
+      this.cursor.report(token.start, Code.OptionalChainAfterNew);
+    }
   }
 
   private newExpression(): Expr {

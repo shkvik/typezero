@@ -1,0 +1,15 @@
+// Every way to mix '??' with '||' or '&&', to change what '?.' reaches and
+// to put '?.' before the class of 'new' is reported once; with parentheses,
+// or with '?.' after the made object, the code is correct.
+const a = x ?? y || z;
+const b = x && y ?? z;
+const c = x || y ?? z;
+const d = x ?? y && z;
+box?.size = 5;
+box?.sizes[0] += 1;
+box?.size++;
+--box?.size;
+const made = new shapes?.Circle();
+const fine = (x ?? y) || z;
+const also = x ?? (y && z);
+const size = new Circle()?.size;
