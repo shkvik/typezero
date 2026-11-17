@@ -1,0 +1,16 @@
+// A statement may begin with a regular expression: after the header of 'if'
+// or of a loop and after a block. The value 'for...of' walks may be one too.
+// After any other ')' a '/' divides, and 'if' as the name of a member opens
+// no header.
+if (ready) /r/g.test(text);
+while (ready) /r/g.test(text);
+for (;;) /r/g.test(text);
+for (const part of /r/g.exec(text) ?? []) use(part);
+for await (const part of parts) /r/g.test(part);
+if (ready) !/r/g.test(text);
+{
+}
+/r/g.test(text);
+function check() { } /r/g.test(text);
+const ratio = total(parts) / 2 / 3;
+const share = ready.if(parts) / 2 / 3;

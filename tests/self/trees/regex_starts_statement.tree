@@ -1,0 +1,100 @@
+== regex_starts_statement.tz
+items 12
+If 246
+  Name 250 "ready" targs=0
+  ExprStmt 257
+    Call 262 opt=0 tagged=0 n=1 spread=-
+      Member 262 "test" opt=0 targs=0
+        RegexLit 257 "r" "g" written=4
+      Name 267 "text" targs=0
+  -
+While 274
+  Name 281 "ready" targs=0
+  ExprStmt 288
+    Call 293 opt=0 tagged=0 n=1 spread=-
+      Member 293 "test" opt=0 targs=0
+        RegexLit 288 "r" "g" written=4
+      Name 298 "text" targs=0
+For 305
+  -
+  -
+  -
+  ExprStmt 314
+    Call 319 opt=0 tagged=0 n=1 spread=-
+      Member 319 "test" opt=0 targs=0
+        RegexLit 314 "r" "g" written=4
+      Name 324 "text" targs=0
+ForOf 331 const=1 keys=0 await=0
+  Declarator 342 "part" form=plain
+    -
+    -
+  Binary 366 20 src=350-371
+    Call 355 opt=0 tagged=0 n=1 spread=-
+      Member 355 "exec" opt=0 targs=0
+        RegexLit 350 "r" "g" written=4
+      Name 360 "text" targs=0
+    ArrayLit 369 n=0
+  ExprStmt 373
+    Call 373 opt=0 tagged=0 n=1 spread=-
+      Name 373 "use" targs=0
+      Name 377 "part" targs=0
+ForOf 384 const=1 keys=0 await=1
+  Declarator 401 "part" form=plain
+    -
+    -
+  Name 409 "parts" targs=0
+  ExprStmt 416
+    Call 421 opt=0 tagged=0 n=1 spread=-
+      Member 421 "test" opt=0 targs=0
+        RegexLit 416 "r" "g" written=4
+      Name 426 "part" targs=0
+If 433
+  Name 437 "ready" targs=0
+  ExprStmt 444
+    Unary 444 2
+      Call 450 opt=0 tagged=0 n=1 spread=-
+        Member 450 "test" opt=0 targs=0
+          RegexLit 445 "r" "g" written=4
+        Name 455 "text" targs=0
+  -
+Block 462 end=464 n=0
+ExprStmt 466
+  Call 471 opt=0 tagged=0 n=1 spread=-
+    Member 471 "test" opt=0 targs=0
+      RegexLit 466 "r" "g" written=4
+    Name 476 "text" targs=0
+Function 492 "check" arrow=0 concise=0 own="" place=0 body=0 gen=0 async=0 role=plain src=483-503 tp=0 params=0
+  -
+  Block 500 end=502 n=0
+ExprStmt 504
+  Call 509 opt=0 tagged=0 n=1 spread=-
+    Member 509 "test" opt=0 targs=0
+      RegexLit 504 "r" "g" written=4
+    Name 514 "text" targs=0
+VarDecl 521 const=1 using=0 n=1
+  Declarator 527 "ratio" form=plain
+    -
+    Binary 552 3 src=535-555
+      Binary 548 3 src=535-551
+        Call 535 opt=0 tagged=0 n=1 spread=-
+          Name 535 "total" targs=0
+          Name 541 "parts" targs=0
+        IntLit 550 2 "2"
+      IntLit 554 3 "3"
+VarDecl 557 const=1 using=0 n=1
+  Declarator 563 "share" form=plain
+    -
+    Binary 591 3 src=571-594
+      Binary 587 3 src=571-590
+        Call 577 opt=0 tagged=0 n=1 spread=-
+          Member 577 "if" opt=0 targs=0
+            Name 571 "ready" targs=0
+          Name 580 "parts" targs=0
+        IntLit 589 2 "2"
+      IntLit 593 3 "3"
+imports 0
+exports 0
+fields 0
+constants 2
+  "ratio" 0
+  "share" 0

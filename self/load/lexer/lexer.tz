@@ -34,6 +34,7 @@ import {
   kLowerZ,
   kMinus,
   kNewline,
+  kNoToken,
   kNine,
   kPercent,
   kPipe,
@@ -68,6 +69,8 @@ export class Lexer {
   private readonly tokens: Token[];
   private readonly errors: SourceError[];
   private readonly braces: int[];
+  private readonly headers: boolean[];
+  private headerEnd: int;
   private position: int;
   private start: int;
   private newline: boolean;
@@ -78,6 +81,8 @@ export class Lexer {
     this.tokens = [];
     this.errors = [];
     this.braces = [];
+    this.headers = [];
+    this.headerEnd = kNoToken;
     this.position = 0;
     this.start = 0;
     this.newline = false;
@@ -106,9 +111,9 @@ export class Lexer {
 
     switch (code) {
       case kLeftParen:
-        return this.push(TokenKind.LParen);
+        return this.leftParen();
       case kRightParen:
-        return this.push(TokenKind.RParen);
+        return this.rightParen();
       case kLeftBracket:
         return this.push(TokenKind.LBracket);
       case kRightBracket:
@@ -440,7 +445,49 @@ export class Lexer {
       operand -= 1;
     }
 
-    return !this.endsOperand(operand);
+    return operand == this.headerEnd || !this.endsOperand(operand);
+  }
+
+  private leftParen(): void {
+    const last = this.tokens.length - 1;
+    const opens = this.isHeaderWordAt(last);
+
+    this.headers.push(opens);
+    this.push(TokenKind.LParen);
+  }
+
+  private rightParen(): void {
+    const closes = this.headers.pop() ?? false;
+    if (closes) {
+      this.headerEnd = this.tokens.length;
+    }
+
+    this.push(TokenKind.RParen);
+  }
+
+  private isHeaderWordAt(index: int): boolean {
+    const token = this.tokens[index];
+    const before = this.tokens[index - 1];
+    if (token == undefined || this.isAfterDot(before)) {
+      return false;
+    }
+
+    switch (token.kind) {
+      case TokenKind.If:
+      case TokenKind.While:
+      case TokenKind.For:
+        return true;
+      case TokenKind.Await:
+        return before?.kind == TokenKind.For;
+      default:
+        return false;
+    }
+  }
+
+  private isAfterDot(before: Token | undefined): boolean {
+    return (
+      before?.kind == TokenKind.Dot || before?.kind == TokenKind.QuestionDot
+    );
   }
 
   private isBangAt(index: int): boolean {
@@ -459,11 +506,30 @@ export class Lexer {
     }
 
     const before = this.tokens[index - 1];
-    const afterDot =
-      before?.kind == TokenKind.Dot || before?.kind == TokenKind.QuestionDot;
-    const isProperty = afterDot && kTokenTable.isKeyword(token.kind);
+    const isProperty =
+      this.isAfterDot(before) && kTokenTable.isKeyword(token.kind);
+    if (isProperty) {
+      return true;
+    }
+    if (this.isLoopOf(token, before)) {
+      return false;
+    }
 
-    return isProperty || !this.regexMayFollow(token.kind);
+    return !this.regexMayFollow(token.kind);
+  }
+
+  private isLoopOf(token: Token, before: Token | undefined): boolean {
+    if (token.kind != TokenKind.Of || token.newline || before == undefined) {
+      return false;
+    }
+
+    switch (before.kind) {
+      case TokenKind.RBracket:
+      case TokenKind.RBrace:
+        return true;
+      default:
+        return kTokenTable.isName(before.kind);
+    }
   }
 
   private leftBrace(): void {
@@ -777,7 +843,6 @@ export class Lexer {
       case TokenKind.False:
       case TokenKind.RParen:
       case TokenKind.RBracket:
-      case TokenKind.RBrace:
       case TokenKind.PlusPlus:
       case TokenKind.MinusMinus:
         return false;

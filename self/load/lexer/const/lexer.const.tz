@@ -53,3 +53,4 @@ export const kRightBrace = 125;
 export const kTilde = 126;
 export const kHigh = 128;
 export const kRadixPrefixLength = 2;
+export const kNoToken = -1;
