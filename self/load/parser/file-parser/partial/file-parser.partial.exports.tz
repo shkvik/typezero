@@ -40,9 +40,10 @@ partial class FileParser {
       case TokenKind.Var:
       case TokenKind.Enum:
         return true;
+      case TokenKind.Interface:
+        return true;
       case TokenKind.Class:
       case TokenKind.Type:
-      case TokenKind.Interface:
         return kTokenTable.isName(next.kind) && !next.newline;
       case TokenKind.Abstract:
         return next.kind == TokenKind.Class && !next.newline;
@@ -67,6 +68,13 @@ partial class FileParser {
       this.cursor.report(loc, Code.PartNotExported);
 
       return this.statement(topLevel);
+    }
+    if (this.cursor.is(TokenKind.Class) && !this.nameOnLine()) {
+      const next = this.cursor.lookahead();
+
+      this.cursor.report(next.start, Code.ExportedClassNeedsName);
+
+      return this.classDecl(false);
     }
     if (this.exportedDeclarationAhead()) {
       return this.exportedStatement(topLevel);

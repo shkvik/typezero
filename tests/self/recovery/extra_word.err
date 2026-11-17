@@ -1,0 +1,21 @@
+extra_word.tz:3:7: error TZ1137: 'const' is a keyword in tz and cannot be a variable name; choose another name
+const const v = a;
+      ^
+extra_word.tz:4:10: error TZ1537: 'function' is a keyword in tz and cannot be a function name; choose another name
+function function f() { }
+         ^
+extra_word.tz:5:12: error TZ1540: 'if' is a keyword in tz and cannot be a parameter name; choose another name
+function g(if p: int) { }
+           ^
+extra_word.tz:6:13: error TZ1304: expected ')' to close the parenthesized type, found identifier
+type T = (p int) => void;
+            ^
+extra_word.tz:7:18: error TZ1501: expected '{' to start the members of the class, found ';'
+const k = (class ; A { });
+                 ^
+extra_word.tz:8:14: error TZ1639: an exported class needs a name: other files import it by that name; write 'export class Name { ... }'
+export class class B { }
+             ^
+extra_word.tz:9:14: error TZ1512: expected '>' to close the type parameters, found identifier
+const m = <T T>(p: T) => p;
+             ^

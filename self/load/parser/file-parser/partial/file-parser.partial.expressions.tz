@@ -264,7 +264,30 @@ partial class FileParser {
     }
 
     this.cursor.reset(start);
-    this.cursor.error(loc, Code.ExpectedExpression, { found: TokenKind.Less });
+
+    return this.brokenGenericArrow(loc);
+  }
+
+  private brokenGenericArrow(loc: int): Expr {
+    const next = this.cursor.lookahead();
+    if (!kTokenTable.isName(next.kind)) {
+      this.cursor.error(loc, Code.ExpectedExpression, {
+        found: TokenKind.Less,
+      });
+
+      return this.invalid(loc);
+    }
+
+    const typeParams = this.typeParams();
+    if (this.cursor.is(TokenKind.LParen)) {
+      return this.arrow(typeParams, false, loc);
+    }
+
+    const token = this.cursor.peek();
+
+    this.cursor.error(token.start, Code.ExpectedExpression, {
+      found: token.kind,
+    });
 
     return this.invalid(loc);
   }
@@ -283,20 +306,6 @@ partial class FileParser {
   }
 
   private classPrimary(token: Token): Expr {
-    const next = this.cursor.lookahead();
-    const isClassExpression =
-      kTokenTable.isName(next.kind) ||
-      next.kind == TokenKind.LBrace ||
-      next.kind == TokenKind.Extends ||
-      next.kind == TokenKind.Implements;
-    if (!isClassExpression) {
-      this.cursor.error(token.start, Code.ExpectedExpression, {
-        found: TokenKind.Class,
-      });
-
-      return this.invalid(token.start);
-    }
-
     const decl = this.classDecl(true);
 
     return { kind: ExprKind.Class, loc: token.start, decl };

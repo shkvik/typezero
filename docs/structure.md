@@ -146,7 +146,9 @@ self/             компилятор на tz, пробный (порт compile
                   const/<класс>.const.tz; у класса с частями — по файлу на часть
                   (types/file-parser.types.<часть>.tz, там же result — ParseResult и context —
                   вид функции, место выражения, место типа); сверка деревьев с C++ — скрытая
-                  `tz syntax tree|time|hold|read`; тесты — tests/self/errors/TZxxxx.tz (исходник
+                  `tz syntax tree|time|hold|read`; `tzparse each <файл>` проверяет каждую
+                  строку как отдельный файл (для перебора испорченных программ);
+                  тесты — tests/self/errors/TZxxxx.tz (исходник
                   с ошибкой этого кода) + TZxxxx.err (точный вывод `tzparse check`), гоняет
                   tests/self.cmake: self/build собирает self/, self/errors/<код> сверяет
                   вывод, self/codes следит, что у каждого кода из code.tz есть тест;

@@ -1,0 +1,10 @@
+// One word too many gives one error: the error about the word, and not a
+// second one about what stands right after it.
+const const v = a;
+function function f() { }
+function g(if p: int) { }
+type T = (p int) => void;
+const k = (class ; A { });
+export class class B { }
+const m = <T T>(p: T) => p;
+const last = 1;

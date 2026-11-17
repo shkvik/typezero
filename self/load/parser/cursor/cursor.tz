@@ -139,7 +139,7 @@ export class Cursor {
     }
 
     this.recovering = true;
-    if (!this.reportedAt(loc)) {
+    if (!this.reportedAt(loc) && !this.followsReport()) {
       this.record(loc, code, details);
     }
   }
@@ -345,6 +345,16 @@ export class Cursor {
     const last = this.errors[this.errors.length - 1];
 
     return last != undefined && last.loc == loc;
+  }
+
+  private followsReport(): boolean {
+    const last = this.errors[this.errors.length - 1];
+    const previous = this.tokens[this.at - 1];
+    if (last == undefined || previous == undefined) {
+      return false;
+    }
+
+    return last.loc >= previous.start;
   }
 
   private previousEnd(): int {

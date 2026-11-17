@@ -1,8 +1,9 @@
 export const kDefaultRepeat = 20;
 export const kMaxRepeat = 1000;
 export const kHoldMilliseconds = 3000.0;
+export const kLineFeed = 10;
 
 export const kProgramName = "tzparse";
 export const kListPrefix = "@";
 export const kUsage =
-  "usage: tzparse tokens|tree|check|time|hold|read <file.tz | @list> [repeat]";
+  "usage: tzparse tokens|tree|check|each|time|hold|read <file.tz | @list> [repeat]";

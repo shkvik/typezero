@@ -179,6 +179,7 @@ export enum Code {
   ConstructorWithoutBody = "TZ1552",
   GettersNotSupported = "TZ1553",
   SettersNotSupported = "TZ1554",
+  ExpectedInterfaceName = "TZ1555",
   ExpectedAfterImportStar = "TZ1601",
   ExpectedAfterImportStarAs = "TZ1602",
   ExpectedAfterExportStarAs = "TZ1603",
@@ -217,4 +218,5 @@ export enum Code {
   JsonOneAttribute = "TZ1636",
   ExpectedFrom = "TZ1637",
   ExpectedPathString = "TZ1638",
+  ExportedClassNeedsName = "TZ1639",
 }

@@ -544,6 +544,9 @@ export const kMessages: Record<Code, Message> = {
   [Code.SettersNotSupported]: {
     text: "setters are not supported: writing a field never runs code; write a method instead, e.g. '{word}(value)'",
   },
+  [Code.ExpectedInterfaceName]: {
+    text: "expected the name of the interface after 'interface', found {found}",
+  },
   [Code.ExpectedAfterImportStar]: {
     text: "expected {expected} after 'import *', found {found}",
   },
@@ -657,5 +660,8 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.ExpectedPathString]: {
     text: "expected the path of the file as a string, e.g. '\"./math\"', found {found}",
+  },
+  [Code.ExportedClassNeedsName]: {
+    text: "an exported class needs a name: other files import it by that name; write 'export class Name { ... }'",
   },
 };

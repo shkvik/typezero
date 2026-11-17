@@ -1,0 +1,3 @@
+TZ1555.tz:1:11: error TZ1555: expected the name of the interface after 'interface', found '{'
+interface { a: int }
+          ^

@@ -210,11 +210,17 @@ partial class FileParser {
   }
 
   private interfaceStatement(loc: int): Stmt {
+    const next = this.cursor.lookahead();
     if (this.nameOnLine()) {
       return this.interfaceDecl();
     }
 
-    return this.expressionStatement(loc);
+    this.cursor.next();
+    this.cursor.error(next.start, Code.ExpectedInterfaceName, {
+      found: next.kind,
+    });
+
+    return this.marker(StmtKind.Empty, loc);
   }
 
   private abstractStatement(loc: int): Stmt {

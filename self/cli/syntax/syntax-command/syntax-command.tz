@@ -12,6 +12,7 @@ import { SyntaxMode } from "./types/syntax-command.types.tz";
 import {
   kDefaultRepeat,
   kHoldMilliseconds,
+  kLineFeed,
   kListPrefix,
   kMaxRepeat,
   kProgramName,
@@ -48,6 +49,8 @@ export class SyntaxCommand {
         return this.printTrees(sources);
       case SyntaxMode.Check:
         return this.checkSources(sources);
+      case SyntaxMode.Each:
+        return this.checkEachLine(sources);
       case SyntaxMode.Time:
         return this.timeSources(sources);
       case SyntaxMode.Hold:
@@ -65,6 +68,8 @@ export class SyntaxCommand {
         return SyntaxMode.Tree;
       case "check":
         return SyntaxMode.Check;
+      case "each":
+        return SyntaxMode.Each;
       case "time":
         return SyntaxMode.Time;
       case "hold":
@@ -173,6 +178,48 @@ export class SyntaxCommand {
         process.exitCode = 1;
       }
     }
+  }
+
+  private checkEachLine(sources: SourceText[]): void {
+    for (const source of sources) {
+      const lines = this.linesOf(source);
+
+      for (const line of lines) {
+        this.checkSources([line]);
+      }
+    }
+  }
+
+  private linesOf(source: SourceText): SourceText[] {
+    const text = source.text;
+    const lines: SourceText[] = [];
+    let start = 0;
+
+    for (let end = 0; end <= text.length; end++) {
+      if (!this.endsLine(text, end)) {
+        continue;
+      }
+
+      const number = lines.length + 1;
+
+      lines.push({
+        path: `${source.path}:${number}`,
+        text: text.subarray(start, end),
+        isLibrary: source.isLibrary,
+      });
+      start = end + 1;
+    }
+
+    return lines;
+  }
+
+  private endsLine(text: Buffer, at: int): boolean {
+    const byte = text[at];
+    if (byte == undefined) {
+      return true;
+    }
+
+    return byte.toInt() == kLineFeed;
   }
 
   private lexAll(sources: SourceText[]): int {

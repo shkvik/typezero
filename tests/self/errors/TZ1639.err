@@ -1,0 +1,3 @@
+TZ1639.tz:1:14: error TZ1639: an exported class needs a name: other files import it by that name; write 'export class Name { ... }'
+export class { }
+             ^
