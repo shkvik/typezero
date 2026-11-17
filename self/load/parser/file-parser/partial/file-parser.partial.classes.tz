@@ -1,6 +1,11 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { KnownName, TokenKind } from "../../../token/types/token.types.tz";
+import { Details } from "../../../../diagnostic/types/message.types.tz";
+import {
+  KnownName,
+  Token,
+  TokenKind,
+} from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
   TypeKind,
@@ -269,8 +274,18 @@ partial class FileParser {
       staticBlock: false,
     };
 
+    const seen: TokenKind[] = [];
+
     while (this.memberModifierAhead()) {
       const word = this.cursor.next();
+
+      this.rememberModifier(seen, word);
+      const access = this.accessOf(word.kind);
+      if (access != undefined) {
+        modifiers.access = access;
+
+        continue;
+      }
 
       switch (word.kind) {
         case TokenKind.Static:
@@ -283,15 +298,6 @@ partial class FileParser {
 
             return modifiers;
           }
-          break;
-        case TokenKind.Public:
-          modifiers.access = Access.Public;
-          break;
-        case TokenKind.Private:
-          modifiers.access = Access.Private;
-          break;
-        case TokenKind.Protected:
-          modifiers.access = Access.Protected;
           break;
         case TokenKind.Readonly:
           modifiers.readonly = true;
@@ -684,6 +690,44 @@ partial class FileParser {
       decorators,
       accessor: modifiers.accessor,
     });
+  }
+
+  private rememberModifier(seen: TokenKind[], word: Token): void {
+    const details: Details = { word: word.text };
+    const repeated = seen.includes(word.kind);
+    const secondAccess =
+      this.accessOf(word.kind) != undefined && this.accessGiven(seen);
+
+    if (repeated) {
+      this.cursor.report(word.start, Code.ModifierRepeated, details);
+    } else if (secondAccess) {
+      this.cursor.report(word.start, Code.AccessAlreadyGiven, details);
+    }
+
+    seen.push(word.kind);
+  }
+
+  private accessGiven(seen: TokenKind[]): boolean {
+    for (const kind of seen) {
+      if (this.accessOf(kind) != undefined) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private accessOf(kind: TokenKind): Access | undefined {
+    switch (kind) {
+      case TokenKind.Public:
+        return Access.Public;
+      case TokenKind.Private:
+        return Access.Private;
+      case TokenKind.Protected:
+        return Access.Protected;
+      default:
+        return undefined;
+    }
   }
 
   private isMemberModifier(kind: TokenKind): boolean {

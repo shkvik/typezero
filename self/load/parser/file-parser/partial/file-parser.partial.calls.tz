@@ -10,6 +10,7 @@ import {
   ArrayElement,
   Expr,
   ExprKind,
+  NewForm,
   NewKind,
   UnaryOp,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
@@ -121,37 +122,47 @@ partial class FileParser {
     switch (token.kind) {
       case TokenKind.LParen:
         return this.callLink(expr, false);
-      case TokenKind.Dot: {
-        this.cursor.next();
-        if (!this.isPropertyName()) {
-          const current = this.cursor.peek();
-
-          this.cursor.error(current.start, Code.ExpectedPropertyAfterDot);
-
-          return undefined;
-        }
-
-        return this.memberLink(expr, false);
-      }
+      case TokenKind.Dot:
+        return this.dotLink(expr);
       case TokenKind.LBracket:
         return this.indexLink(expr, false);
       case TokenKind.TemplateString:
       case TokenKind.TemplateHead:
         return this.taggedTemplate(expr, optionalChain);
       case TokenKind.Bang:
-        if (token.newline) {
-          return undefined;
-        }
-        this.cursor.next();
-        return {
-          kind: ExprKind.Unary,
-          loc: token.start,
-          op: UnaryOp.NonNull,
-          operand: expr,
-        };
+        return this.nonNullLink(expr);
       default:
         return undefined;
     }
+  }
+
+  private dotLink(object: Expr): Expr | undefined {
+    this.cursor.next();
+    if (!this.isPropertyName()) {
+      const token = this.cursor.peek();
+
+      this.cursor.error(token.start, Code.ExpectedPropertyAfterDot);
+
+      return undefined;
+    }
+
+    return this.memberLink(object, false);
+  }
+
+  private nonNullLink(operand: Expr): Expr | undefined {
+    const bang = this.cursor.peek();
+    if (bang.newline) {
+      return undefined;
+    }
+
+    this.cursor.next();
+
+    return {
+      kind: ExprKind.Unary,
+      loc: bang.start,
+      op: UnaryOp.NonNull,
+      operand,
+    };
   }
 
   private memberLink(object: Expr, optional: boolean): Expr {
@@ -232,14 +243,7 @@ partial class FileParser {
       this.cursor.report(token.start, Code.TaggedTemplateInOptionalChain);
     }
 
-    let raw = false;
-
-    if (tag.kind == ExprKind.Member && tag.known == KnownName.Raw) {
-      const object = tag.object;
-
-      raw = object.kind == ExprKind.Name && object.known == KnownName.String;
-    }
-
+    const raw = this.isStringRaw(tag);
     const template = this.template(raw);
     const elements: ArrayElement[] = [];
 
@@ -273,6 +277,19 @@ partial class FileParser {
       optional: false,
       tagged: true,
     };
+  }
+
+  private isStringRaw(tag: Expr): boolean {
+    if (tag.kind != ExprKind.Member) {
+      return false;
+    }
+    if (tag.known != KnownName.Raw) {
+      return false;
+    }
+
+    const object = tag.object;
+
+    return object.kind == ExprKind.Name && object.known == KnownName.String;
   }
 
   private newArguments(): Expr[] {
@@ -312,44 +329,43 @@ partial class FileParser {
     }
 
     const name = this.cursor.next();
-    let member: Token | undefined = undefined;
-
-    if (this.cursor.accept(TokenKind.Dot)) {
-      if (this.cursor.atName()) {
-        member = this.cursor.next();
-      } else {
-        const token = this.cursor.peek();
-
-        this.cursor.error(token.start, Code.ExpectedNameAfterDot);
-      }
-    }
-    if (this.cursor.is(TokenKind.Dot) || this.cursor.is(TokenKind.LBracket)) {
-      const callee = this.newCallee(name, member);
-      const typeArgs = this.cursor.is(TokenKind.Less)
-        ? this.typeArguments()
-        : [];
-      const args = this.newArguments();
-
-      return {
-        kind: ExprKind.New,
-        loc: name.start,
-        form: { kind: NewKind.Callee, callee },
-        typeArgs,
-        args,
-      };
-    }
-
+    const member = this.newMember();
+    const form = this.newForm(name, member);
     const typeArgs = this.cursor.is(TokenKind.Less) ? this.typeArguments() : [];
     const args = this.newArguments();
-    const memberName = member?.text;
 
     return {
       kind: ExprKind.New,
       loc: name.start,
-      form: { kind: NewKind.Named, name: name.text, member: memberName },
+      form,
       typeArgs,
       args,
     };
+  }
+
+  private newMember(): Token | undefined {
+    if (!this.cursor.accept(TokenKind.Dot)) {
+      return undefined;
+    }
+    if (this.cursor.atName()) {
+      return this.cursor.next();
+    }
+
+    const token = this.cursor.peek();
+
+    this.cursor.error(token.start, Code.ExpectedNameAfterDot);
+
+    return undefined;
+  }
+
+  private newForm(name: Token, member: Token | undefined): NewForm {
+    if (this.cursor.is(TokenKind.Dot) || this.cursor.is(TokenKind.LBracket)) {
+      const callee = this.newCallee(name, member);
+
+      return { kind: NewKind.Callee, callee };
+    }
+
+    return { kind: NewKind.Named, name: name.text, member: member?.text };
   }
 
   private newOfExpression(): Expr {
@@ -399,39 +415,14 @@ partial class FileParser {
       this.cursor.is(TokenKind.Dot) ||
       this.cursor.is(TokenKind.LBracket)
     ) {
-      const token = this.cursor.next();
-      if (token.kind == TokenKind.LBracket) {
-        const index = this.indexInside();
-
-        path = {
-          kind: ExprKind.Index,
-          loc: token.start,
-          object: path,
-          index,
-          optional: false,
-        };
-
-        continue;
-      }
-      if (!this.isPropertyName()) {
-        const current = this.cursor.peek();
-
-        this.cursor.error(current.start, Code.ExpectedPropertyAfterDot);
-
+      const link = this.cursor.is(TokenKind.LBracket)
+        ? this.indexLink(path, false)
+        : this.dotLink(path);
+      if (link == undefined) {
         return path;
       }
 
-      const property = this.cursor.next();
-
-      path = {
-        kind: ExprKind.Member,
-        loc: property.start,
-        object: path,
-        name: property.text,
-        known: property.known,
-        optional: false,
-        typeArgs: [],
-      };
+      path = link;
     }
 
     return path;

@@ -3,19 +3,13 @@ import { Code } from "../../../../diagnostic/code.tz";
 import { TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import { Mark } from "../../cursor/types/cursor.types.tz";
-import { Span } from "../../../../program/ast/types/ast.types.span.tz";
-import {
-  TypeParamDecl,
-  TypeRef,
-} from "../../../../program/ast/types/ast.types.types.tz";
+import { TypeParamDecl } from "../../../../program/ast/types/ast.types.types.tz";
 import {
   Expr,
   ExprKind,
   FunctionExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
-import {
-  VarDeclarator,
-} from "../../../../program/ast/types/ast.types.patterns.tz";
+import { VarDeclarator } from "../../../../program/ast/types/ast.types.patterns.tz";
 import {
   BlockStmt,
   Stmt,
@@ -36,7 +30,12 @@ import {
   MethodKind,
 } from "../../../../program/ast/types/ast.types.classes.tz";
 import { FunctionKind } from "../types/file-parser.types.context.tz";
-import { ParamPattern } from "../types/file-parser.types.functions.tz";
+import {
+  ArrowHead,
+  FunctionName,
+  ParamName,
+  ParamPattern,
+} from "../types/file-parser.types.functions.tz";
 
 partial class FileParser {
   private functionDeclaration(isAsync: boolean): Stmt {
@@ -88,23 +87,7 @@ partial class FileParser {
   private functionDecl(expression: boolean, isAsync: boolean): FunctionDecl {
     const keyword = this.cursor.next();
     const generator = this.cursor.accept(TokenKind.Star);
-    let name = "";
-    const token = this.cursor.peek();
-    let loc = token.start;
-    const named = kTokenTable.isName(token.kind);
-    const reserved = !named && kTokenTable.isKeyword(token.kind) && !expression;
-    if (reserved) {
-      this.cursor.report(loc, Code.KeywordAsFunctionName, { word: token.text });
-    }
-    if (named || reserved) {
-      this.cursor.next();
-      name = token.text;
-    } else if (expression) {
-      loc = keyword.start;
-    } else {
-      this.cursor.error(token.start, Code.ExpectedFunctionName);
-    }
-
+    const named = this.functionName(keyword.start, expression);
     const typeParams = this.cursor.is(TokenKind.Less) ? this.typeParams() : [];
     const outer = this.context;
     const functionKind = generator
@@ -117,21 +100,14 @@ partial class FileParser {
     const returnType = this.cursor.accept(TokenKind.Colon)
       ? this.returnType()
       : undefined;
-    let body: BlockStmt | undefined = undefined;
-
-    if (this.cursor.is(TokenKind.LBrace)) {
-      body = this.block();
-      this.addPrologue(body, patterns);
-    } else {
-      body = this.missingBody(expression);
-    }
+    const body = this.functionBody(expression, patterns);
 
     this.context = outer;
 
     return {
       kind: StmtKind.Function,
-      loc,
-      name,
+      loc: named.loc,
+      name: named.name,
       typeParams,
       params,
       returnType,
@@ -139,12 +115,50 @@ partial class FileParser {
       source: this.cursor.spanFrom(keyword.start),
       isArrow: false,
       concise: false,
-      ownName: expression ? name : "",
+      ownName: expression ? named.name : "",
       place: expression ? FunctionPlace.Expression : FunctionPlace.Declared,
       bodySource: BodySource.Written,
       isGenerator: generator,
       isAsync,
     };
+  }
+
+  private functionName(keywordLoc: int, expression: boolean): FunctionName {
+    const token = this.cursor.peek();
+    const named = kTokenTable.isName(token.kind);
+    const reserved = !named && kTokenTable.isKeyword(token.kind) && !expression;
+    if (reserved) {
+      this.cursor.report(token.start, Code.KeywordAsFunctionName, {
+        word: token.text,
+      });
+    }
+    if (named || reserved) {
+      this.cursor.next();
+
+      return { name: token.text, loc: token.start };
+    }
+    if (expression) {
+      return { name: "", loc: keywordLoc };
+    }
+
+    this.cursor.error(token.start, Code.ExpectedFunctionName);
+
+    return { name: "", loc: token.start };
+  }
+
+  private functionBody(
+    expression: boolean,
+    patterns: ParamPattern[],
+  ): BlockStmt | undefined {
+    if (!this.cursor.is(TokenKind.LBrace)) {
+      return this.missingBody(expression);
+    }
+
+    const body = this.block();
+
+    this.addPrologue(body, patterns);
+
+    return body;
   }
 
   private missingBody(expression: boolean): BlockStmt | undefined {
@@ -215,58 +229,82 @@ partial class FileParser {
     const rest = this.cursor.accept(TokenKind.Ellipsis);
     const token = this.cursor.peek();
     const loc = token.start;
-    let name = "";
-    let pattern: Span | undefined = undefined;
-    const named = this.cursor.atNameOrThis();
-    const reserved = !named && kTokenTable.isKeyword(token.kind);
-    if (reserved) {
-      this.cursor.report(loc, Code.KeywordAsParameterName, {
-        word: token.text,
-      });
-    }
-    if (named || reserved) {
-      this.cursor.next();
-      name = token.text;
-    } else if (
-      (this.cursor.is(TokenKind.LBrace) ||
-        this.cursor.is(TokenKind.LBracket)) &&
-      !rest
-    ) {
-      const bound = this.bindingPattern();
-
-      name = this.hiddenName();
-      pattern = this.cursor.spanFrom(loc);
-      patterns.push({ name, pattern: bound });
-    } else {
-      this.cursor.error(
-        token.start,
-        rest ? Code.ExpectedParameterAfterRest : Code.ExpectedParameterName,
-      );
-
+    const named = this.paramName(rest, patterns);
+    if (named == undefined) {
       return undefined;
     }
 
     const optional = this.cursor.accept(TokenKind.Question);
     const type = this.cursor.accept(TokenKind.Colon) ? this.type() : undefined;
-    let defaultValue: Expr | undefined = undefined;
-
-    if (this.cursor.is(TokenKind.Assign)) {
-      if (optional) {
-        const assign = this.cursor.peek();
-
-        this.cursor.report(assign.start, Code.DefaultMakesOptional);
-      }
-
-      this.cursor.next();
-      defaultValue = this.expression();
-    }
+    const defaultValue = this.paramDefault(optional);
     if (rest && (optional || defaultValue != undefined)) {
       this.cursor.report(loc, Code.RestParameterOptional);
     }
 
     const form = this.paramForm(rest, optional, defaultValue);
 
-    return { name, loc, type, form, property, pattern, decorators };
+    return {
+      name: named.name,
+      loc,
+      type,
+      form,
+      property,
+      pattern: named.pattern,
+      decorators,
+    };
+  }
+
+  private paramName(
+    rest: boolean,
+    patterns: ParamPattern[],
+  ): ParamName | undefined {
+    const token = this.cursor.peek();
+    const named = this.cursor.atNameOrThis();
+    const reserved = !named && kTokenTable.isKeyword(token.kind);
+    if (reserved) {
+      this.cursor.report(token.start, Code.KeywordAsParameterName, {
+        word: token.text,
+      });
+    }
+    if (named || reserved) {
+      this.cursor.next();
+
+      return { name: token.text };
+    }
+
+    const patternStarts =
+      this.cursor.is(TokenKind.LBrace) || this.cursor.is(TokenKind.LBracket);
+    if (patternStarts && !rest) {
+      const bound = this.bindingPattern();
+      const name = this.hiddenName();
+      const pattern = this.cursor.spanFrom(token.start);
+
+      patterns.push({ name, pattern: bound });
+
+      return { name, pattern };
+    }
+
+    const code = rest
+      ? Code.ExpectedParameterAfterRest
+      : Code.ExpectedParameterName;
+
+    this.cursor.error(token.start, code);
+
+    return undefined;
+  }
+
+  private paramDefault(optional: boolean): Expr | undefined {
+    const assign = this.cursor.peek();
+    if (assign.kind != TokenKind.Assign) {
+      return undefined;
+    }
+    if (optional) {
+      this.cursor.report(assign.start, Code.DefaultMakesOptional);
+    }
+
+    this.cursor.next();
+
+    return this.expression();
   }
 
   private paramForm(
@@ -295,16 +333,16 @@ partial class FileParser {
 
   private paramModifiers(constructor: boolean): ParamProperty | undefined {
     let property: ParamProperty | undefined = undefined;
+    const seen: TokenKind[] = [];
 
     while (this.paramModifierAhead()) {
       const word = this.cursor.next();
 
+      this.rememberModifier(seen, word);
       if (!constructor) {
-        this.cursor.report(
-          word.start,
-          Code.ParameterModifierMakesField,
-          { word: word.text },
-        );
+        this.cursor.report(word.start, Code.ParameterModifierMakesField, {
+          word: word.text,
+        });
       }
 
       const found = property ?? { readonly: false, access: Access.Public };
@@ -312,10 +350,11 @@ partial class FileParser {
       property = found;
       if (word.kind == TokenKind.Readonly) {
         found.readonly = true;
-      } else if (word.kind == TokenKind.Private) {
-        found.access = Access.Private;
-      } else if (word.kind == TokenKind.Protected) {
-        found.access = Access.Protected;
+      }
+
+      const access = this.accessOf(word.kind);
+      if (access != undefined) {
+        found.access = access;
       }
     }
 
@@ -428,18 +467,28 @@ partial class FileParser {
 
     this.cursor.startDiscarding();
     this.cursor.stopRecovering();
-    this.params(true, false, []);
-    let isArrow = !this.cursor.isRecovering();
-    if (isArrow && this.cursor.accept(TokenKind.Colon)) {
-      this.type();
-      isArrow = !this.cursor.isRecovering();
-    }
 
-    isArrow = isArrow && this.cursor.is(TokenKind.Arrow);
+    const fits = this.scansAsArrow();
+
     this.cursor.stopDiscarding();
     this.cursor.reset(start);
 
-    return isArrow;
+    return fits;
+  }
+
+  private scansAsArrow(): boolean {
+    this.params(true, false, []);
+    if (this.cursor.isRecovering()) {
+      return false;
+    }
+    if (this.cursor.accept(TokenKind.Colon)) {
+      this.type();
+      if (this.cursor.isRecovering()) {
+        return false;
+      }
+    }
+
+    return this.cursor.is(TokenKind.Arrow);
   }
 
   private arrow(
@@ -447,34 +496,14 @@ partial class FileParser {
     isAsync: boolean,
     from?: int,
   ): FunctionExpr {
-    const head = this.cursor.peek();
-    const start = from ?? head.start;
-    const loc = head.start;
+    const first = this.cursor.peek();
+    const start = from ?? first.start;
+    const loc = first.start;
     const outer = this.context;
 
     this.context = { ...outer, functionKind: FunctionKind.Plain };
     const patterns: ParamPattern[] = [];
-    let params: Param[] = [];
-    let returnType: TypeRef | undefined = undefined;
-
-    if (this.cursor.atName()) {
-      const token = this.cursor.next();
-
-      params = [
-        {
-          name: token.text,
-          loc: token.start,
-          form: { kind: ParamKind.Required },
-          decorators: [],
-        },
-      ];
-    } else {
-      params = this.params(true, false, patterns);
-      returnType = this.cursor.accept(TokenKind.Colon)
-        ? this.returnType()
-        : undefined;
-    }
-
+    const head = this.arrowHead(patterns);
     const arrow = this.cursor.peek();
     if (arrow.kind == TokenKind.Arrow && arrow.newline) {
       this.cursor.report(arrow.start, Code.ArrowOnNewLine);
@@ -490,8 +519,8 @@ partial class FileParser {
       loc,
       name: "",
       typeParams,
-      params,
-      returnType,
+      params: head.params,
+      returnType: head.returnType,
       body,
       source: this.cursor.spanFrom(start),
       isArrow: true,
@@ -506,6 +535,27 @@ partial class FileParser {
     this.context = outer;
 
     return { kind: ExprKind.Function, loc, fn: declaration };
+  }
+
+  private arrowHead(patterns: ParamPattern[]): ArrowHead {
+    if (this.cursor.atName()) {
+      const token = this.cursor.next();
+      const param: Param = {
+        name: token.text,
+        loc: token.start,
+        form: { kind: ParamKind.Required },
+        decorators: [],
+      };
+
+      return { params: [param] };
+    }
+
+    const params = this.params(true, false, patterns);
+    const returnType = this.cursor.accept(TokenKind.Colon)
+      ? this.returnType()
+      : undefined;
+
+    return { params, returnType };
   }
 
   private arrowBlock(): BlockStmt {
@@ -540,47 +590,12 @@ partial class FileParser {
     this.cursor.next();
 
     while (this.cursor.insideList(TokenKind.Greater)) {
-      const next = this.cursor.lookahead();
-      const modifier =
-        this.cursor.is(TokenKind.Const) ||
-        this.cursor.is(TokenKind.In) ||
-        this.cursor.is(TokenKind.Out);
-      if (modifier && kTokenTable.isName(next.kind)) {
-        const token = this.cursor.peek();
-
-        this.cursor.report(token.start, Code.TypeParameterModifier);
-        this.cursor.next();
-      }
-
-      const token = this.cursor.peek();
-      if (!kTokenTable.isName(token.kind)) {
-        this.cursor.error(
-          token.start,
-          Code.ExpectedTypeParameterName,
-          { found: token.kind },
-        );
-
+      const param = this.typeParam();
+      if (param == undefined) {
         return params;
       }
 
-      this.cursor.next();
-      let constraint: TypeRef | undefined = undefined;
-
-      if (this.cursor.is(TokenKind.Extends)) {
-        this.cursor.next();
-        constraint = this.type();
-      }
-
-      const defaultType = this.cursor.accept(TokenKind.Assign)
-        ? this.type()
-        : undefined;
-
-      params.push({
-        name: token.text,
-        loc: token.start,
-        constraint,
-        defaultType,
-      });
+      params.push(param);
       if (!this.cursor.accept(TokenKind.Comma)) {
         break;
       }
@@ -589,6 +604,43 @@ partial class FileParser {
     this.cursor.expect(TokenKind.Greater, Code.ExpectedTypeParametersClose);
 
     return params;
+  }
+
+  private typeParam(): TypeParamDecl | undefined {
+    const next = this.cursor.lookahead();
+    const modifier =
+      this.cursor.is(TokenKind.Const) ||
+      this.cursor.is(TokenKind.In) ||
+      this.cursor.is(TokenKind.Out);
+    if (modifier && kTokenTable.isName(next.kind)) {
+      const word = this.cursor.next();
+
+      this.cursor.report(word.start, Code.TypeParameterModifier);
+    }
+
+    const token = this.cursor.peek();
+    if (!kTokenTable.isName(token.kind)) {
+      this.cursor.error(token.start, Code.ExpectedTypeParameterName, {
+        found: token.kind,
+      });
+
+      return undefined;
+    }
+
+    this.cursor.next();
+    const constraint = this.cursor.accept(TokenKind.Extends)
+      ? this.type()
+      : undefined;
+    const defaultType = this.cursor.accept(TokenKind.Assign)
+      ? this.type()
+      : undefined;
+
+    return {
+      name: token.text,
+      loc: token.start,
+      constraint,
+      defaultType,
+    };
   }
 
   private method(
@@ -614,22 +666,7 @@ partial class FileParser {
     const returnType = this.cursor.accept(TokenKind.Colon)
       ? this.returnType()
       : undefined;
-    let body: BlockStmt | undefined = undefined;
-
-    if (this.cursor.is(TokenKind.LBrace)) {
-      body = this.block();
-      this.addPrologue(body, patterns);
-    } else if (!this.cursor.accept(TokenKind.Semi)) {
-      const token = this.cursor.peek();
-      const ended =
-        token.newline ||
-        token.kind == TokenKind.RBrace ||
-        token.kind == TokenKind.End;
-      if (!ended) {
-        this.cursor.error(token.start, Code.ExpectedMethodBody);
-      }
-    }
-
+    const body = this.methodBody(patterns);
     const source = this.cursor.spanFrom(start);
 
     this.context = outer;
@@ -652,6 +689,30 @@ partial class FileParser {
       isAsync,
       role,
     };
+  }
+
+  private methodBody(patterns: ParamPattern[]): BlockStmt | undefined {
+    if (this.cursor.is(TokenKind.LBrace)) {
+      const body = this.block();
+
+      this.addPrologue(body, patterns);
+
+      return body;
+    }
+    if (this.cursor.accept(TokenKind.Semi)) {
+      return undefined;
+    }
+
+    const token = this.cursor.peek();
+    const ended =
+      token.newline ||
+      token.kind == TokenKind.RBrace ||
+      token.kind == TokenKind.End;
+    if (!ended) {
+      this.cursor.error(token.start, Code.ExpectedMethodBody);
+    }
+
+    return undefined;
   }
 
   private isParamModifier(kind: TokenKind): boolean {

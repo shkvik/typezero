@@ -1,3 +1,15 @@
 import { Pattern } from "./file-parser.types.patterns.tz";
+import { Span } from "../../../../program/ast/types/ast.types.span.tz";
+import { Param } from "../../../../program/ast/types/ast.types.functions.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
 
 export type ParamPattern = { readonly name: string; readonly pattern: Pattern };
+
+export type FunctionName = { readonly name: string; readonly loc: int };
+
+export type ParamName = { readonly name: string; readonly pattern?: Span };
+
+export type ArrowHead = {
+  readonly params: Param[];
+  readonly returnType?: TypeRef;
+};

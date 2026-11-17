@@ -21,10 +21,7 @@ partial class FileParser {
     const loc = token.start;
     const next = this.cursor.lookahead();
     if (kTokenTable.isName(token.kind) && next.kind == TokenKind.Colon) {
-      this.cursor.skip(2);
-      const body = this.statement(false);
-
-      return { kind: StmtKind.Labeled, loc, label: token.text, body };
+      return this.labeledStatement();
     }
 
     switch (token.kind) {
@@ -54,14 +51,11 @@ partial class FileParser {
         return this.returnStatement();
       case TokenKind.Break:
       case TokenKind.Continue:
-        return this.jumpStatement(token);
+        return this.jumpStatement();
       case TokenKind.Debugger:
-        this.cursor.next();
-        this.cursor.expectSemicolon();
-        return this.marker(StmtKind.Debugger, loc);
+        return this.debuggerStatement();
       case TokenKind.Semi:
-        this.cursor.next();
-        return this.marker(StmtKind.Empty, loc);
+        return this.emptyStatement();
       case TokenKind.Import:
         return this.importStatement(loc, topLevel);
       case TokenKind.Export:
@@ -95,6 +89,34 @@ partial class FileParser {
       default:
         return this.expressionStatement(loc);
     }
+  }
+
+  private labeledStatement(): Stmt {
+    const label = this.cursor.next();
+
+    this.cursor.next();
+    const body = this.statement(false);
+
+    return {
+      kind: StmtKind.Labeled,
+      loc: label.start,
+      label: label.text,
+      body,
+    };
+  }
+
+  private debuggerStatement(): Stmt {
+    const keyword = this.cursor.next();
+
+    this.cursor.expectSemicolon();
+
+    return this.marker(StmtKind.Debugger, keyword.start);
+  }
+
+  private emptyStatement(): Stmt {
+    const semicolon = this.cursor.next();
+
+    return this.marker(StmtKind.Empty, semicolon.start);
   }
 
   private decoratedStatement(topLevel: boolean): Stmt {
@@ -286,49 +308,56 @@ partial class FileParser {
 
   private declare(loc: int): Stmt {
     const next = this.cursor.lookahead();
-    if (next.kind == TokenKind.Function) {
-      this.cursor.next();
 
-      return this.declaredFunction();
+    switch (next.kind) {
+      case TokenKind.Function:
+        this.cursor.next();
+        return this.declaredFunction();
+      case TokenKind.Class:
+        if (this.library) {
+          return this.skipDeclaration(loc, Code.DeclareNotSupported);
+        }
+        this.cursor.next();
+        return this.handleClass();
+      case TokenKind.Module:
+      case TokenKind.Namespace:
+      case TokenKind.Global:
+        return this.skipDeclaration(loc, Code.DeclareWordNotSupported, {
+          word: next.text,
+        });
+      default:
+        return this.skipDeclaration(loc, Code.DeclareNotSupported);
     }
-    if (!this.library && next.kind == TokenKind.Class) {
-      this.cursor.next();
-
-      return this.handleClass();
-    }
-    if (
-      next.kind == TokenKind.Module ||
-      next.kind == TokenKind.Namespace ||
-      next.kind == TokenKind.Global
-    ) {
-      return this.skipDeclaration(loc, Code.DeclareWordNotSupported, {
-        word: next.text,
-      });
-    }
-
-    return this.skipDeclaration(loc, Code.DeclareNotSupported);
   }
 
   private expressionStatement(loc: int): Stmt {
     const expr = this.sequence();
-    if (expr.kind == ExprKind.Assign && expr.op == undefined) {
-      const target = expr.target;
-      if (
-        target.kind == ExprKind.ArrayLit ||
-        target.kind == ExprKind.ObjectLit
-      ) {
-        const pattern = this.patternFromLiteral(target);
-        const stmt = this.assignPattern(loc, pattern, expr.value);
-
-        this.cursor.expectSemicolon();
-
-        return stmt;
-      }
-    }
+    const assignment = this.destructuringAssignment(loc, expr);
 
     this.cursor.expectSemicolon();
+    if (assignment != undefined) {
+      return assignment;
+    }
 
     return { kind: StmtKind.Expr, loc, expr };
+  }
+
+  private destructuringAssignment(loc: int, expr: Expr): Stmt | undefined {
+    if (expr.kind != ExprKind.Assign) {
+      return undefined;
+    }
+    if (expr.op != undefined) {
+      return undefined;
+    }
+
+    const target = expr.target;
+    if (target.kind == ExprKind.ArrayLit || target.kind == ExprKind.ObjectLit) {
+      const pattern = this.patternFromLiteral(target);
+
+      return this.assignPattern(loc, pattern, expr.value);
+    }
+
+    return undefined;
   }
 
   private skipDeclaration(
@@ -362,20 +391,26 @@ partial class FileParser {
     return this.marker(StmtKind.Empty, loc);
   }
 
-  private jumpStatement(token: Token): Stmt {
-    this.cursor.next();
-    let label = "";
-    const target = this.cursor.peek();
-    if (kTokenTable.isName(target.kind) && !target.newline) {
-      this.cursor.next();
-      label = target.text;
-    }
+  private jumpStatement(): Stmt {
+    const keyword = this.cursor.next();
+    const label = this.jumpLabel();
 
     this.cursor.expectSemicolon();
     const kind =
-      token.kind == TokenKind.Break ? StmtKind.Break : StmtKind.Continue;
+      keyword.kind == TokenKind.Break ? StmtKind.Break : StmtKind.Continue;
 
-    return { kind, loc: token.start, label };
+    return { kind, loc: keyword.start, label };
+  }
+
+  private jumpLabel(): string {
+    const target = this.cursor.peek();
+    if (!kTokenTable.isName(target.kind) || target.newline) {
+      return "";
+    }
+
+    this.cursor.next();
+
+    return target.text;
   }
 
   private switchStatement(): Stmt {
@@ -394,30 +429,18 @@ partial class FileParser {
       this.cursor.is(TokenKind.Case) ||
       this.cursor.is(TokenKind.Default)
     ) {
-      const clause = this.cursor.peek();
-      const caseLoc = clause.start;
-      let test: Expr | undefined = undefined;
-
-      if (this.cursor.accept(TokenKind.Case)) {
-        test = this.expression();
-      } else {
-        if (hasDefault) {
-          this.cursor.report(caseLoc, Code.OneDefaultInSwitch);
-        }
-
+      const label = this.cursor.peek();
+      const isDefault = label.kind == TokenKind.Default;
+      if (isDefault && hasDefault) {
+        this.cursor.report(label.start, Code.OneDefaultInSwitch);
+      }
+      if (isDefault) {
         hasDefault = true;
-        this.cursor.next();
       }
 
-      const afterLabel =
-        test != undefined
-          ? Code.ExpectedAfterCaseValue
-          : Code.ExpectedAfterDefault;
+      const clause = this.switchCase();
 
-      this.cursor.expect(TokenKind.Colon, afterLabel);
-      const body = this.caseBody();
-
-      cases.push({ loc: caseLoc, test, body });
+      cases.push(clause);
     }
 
     if (!this.cursor.is(TokenKind.RBrace) && !this.cursor.is(TokenKind.End)) {
@@ -429,6 +452,20 @@ partial class FileParser {
     this.cursor.expect(TokenKind.RBrace, Code.ExpectedSwitchClose);
 
     return { kind: StmtKind.Switch, loc, discriminant, cases };
+  }
+
+  private switchCase(): SwitchCase {
+    const label = this.cursor.next();
+    const isDefault = label.kind == TokenKind.Default;
+    const test = isDefault ? undefined : this.expression();
+    const afterLabel = isDefault
+      ? Code.ExpectedAfterDefault
+      : Code.ExpectedAfterCaseValue;
+
+    this.cursor.expect(TokenKind.Colon, afterLabel);
+    const body = this.caseBody();
+
+    return { loc: label.start, test, body };
   }
 
   private statementWithRecovery(topLevel: boolean): Stmt {
@@ -507,17 +544,21 @@ partial class FileParser {
   private returnStatement(): Stmt {
     const keyword = this.cursor.next();
     const loc = keyword.start;
-    const token = this.cursor.peek();
-    const hasValue =
-      token.kind != TokenKind.Semi &&
-      token.kind != TokenKind.RBrace &&
-      token.kind != TokenKind.End &&
-      !token.newline;
-    const value = hasValue ? this.sequence() : undefined;
+    const value = this.valueAhead() ? this.sequence() : undefined;
 
     this.cursor.expectSemicolon();
 
     return { kind: StmtKind.Return, loc, value };
+  }
+
+  private valueAhead(): boolean {
+    const token = this.cursor.peek();
+    const ends =
+      token.kind == TokenKind.Semi ||
+      token.kind == TokenKind.RBrace ||
+      token.kind == TokenKind.End;
+
+    return !ends && !token.newline;
   }
 
   private throwStatement(): Stmt {
@@ -525,13 +566,7 @@ partial class FileParser {
     const loc = keyword.start;
 
     this.cursor.report(loc, Code.NoThrow);
-    const token = this.cursor.peek();
-    const hasValue =
-      !token.newline &&
-      token.kind != TokenKind.Semi &&
-      token.kind != TokenKind.RBrace &&
-      token.kind != TokenKind.End;
-    if (hasValue) {
+    if (this.valueAhead()) {
       this.sequence();
       this.cursor.expectSemicolon();
     }

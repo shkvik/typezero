@@ -487,6 +487,12 @@ export const kMessages: Record<Code, Message> = {
   [Code.ExpectedTypeParameterName]: {
     text: "expected a type parameter name, found {found}",
   },
+  [Code.ModifierRepeated]: {
+    text: "'{word}' is written twice",
+  },
+  [Code.AccessAlreadyGiven]: {
+    text: "'{word}' comes after another access modifier; the access is given once",
+  },
   [Code.ExpectedAfterImportStar]: {
     text: "expected {expected} after 'import *', found {found}",
   },

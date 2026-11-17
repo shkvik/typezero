@@ -160,6 +160,8 @@ export enum Code {
   ArrowBodyLabel = "TZ1547",
   TypeParameterModifier = "TZ1548",
   ExpectedTypeParameterName = "TZ1549",
+  ModifierRepeated = "TZ1550",
+  AccessAlreadyGiven = "TZ1551",
   ExpectedAfterImportStar = "TZ1601",
   ExpectedAfterImportStarAs = "TZ1602",
   ExpectedAfterExportStarAs = "TZ1603",
