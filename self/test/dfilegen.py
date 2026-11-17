@@ -1,3 +1,4 @@
+feat(self): using in loop heads, unnamed class error, tests in self/test
 """Declaration files: what X.d.tz next to its module X.tz may hold.
 
     python dfilegen.py <tzparse.exe> <work dir>
