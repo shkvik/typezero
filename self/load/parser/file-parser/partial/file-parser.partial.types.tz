@@ -43,13 +43,13 @@ partial class FileParser {
     if (
       !this.cursor.expect(TokenKind.Question, Code.ExpectedAfterExtendsClause)
     ) {
-      return this.typeRef(start);
+      return this.invalidType(start);
     }
 
     const whenTrue = this.type();
     ref.args.push(whenTrue);
     if (!this.cursor.expect(TokenKind.Colon, Code.ExpectedBetweenBranches)) {
-      return this.typeRef(start);
+      return this.invalidType(start);
     }
 
     const whenFalse = this.type();
@@ -329,7 +329,7 @@ partial class FileParser {
     const token = this.cursor.peek();
     this.cursor.error(token.start, Code.ExpectedType, { found: token.kind });
 
-    return this.typeRef(token.start);
+    return this.invalidType(token.start);
   }
 
   private stringLiteralType(): TypeRef {
@@ -434,7 +434,7 @@ partial class FileParser {
       ) {
         this.cursor.error(middle.start, Code.ExpectedTemplateTypeClose);
 
-        return this.typeRef(token.start);
+        return this.invalidType(token.start);
       }
 
       const text = this.templatePartText(middle);
@@ -621,6 +621,15 @@ partial class FileParser {
     const parsed = Number(text);
 
     return parsed.unwrapOr(0.0);
+  }
+
+  private invalidType(loc: int): TypeRef {
+    return {
+      form: { kind: TypeKind.Invalid },
+      name: "",
+      loc,
+      args: [],
+    };
   }
 
   private typeRef(loc: int): TypeRef {

@@ -8,13 +8,14 @@ import {
 } from "../../../diagnostic/types/message.types.tz";
 import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 import { Mark } from "./types/cursor.types.tz";
-import { kEnd } from "./const/cursor.const.tz";
+import { kEnd, kNotResumed } from "./const/cursor.const.tz";
 
 export class Cursor {
   private readonly tokens: Token[];
   private at: int;
   private recovering: boolean;
   private discarding: int;
+  private resumedAt: int;
   public readonly errors: SourceError[];
 
   public constructor(tokens: Token[]) {
@@ -22,6 +23,7 @@ export class Cursor {
     this.at = 0;
     this.recovering = false;
     this.discarding = 0;
+    this.resumedAt = kNotResumed;
     this.errors = [];
   }
 
@@ -117,10 +119,19 @@ export class Cursor {
       return;
     }
 
-    this.error(token.start, Code.ExpectedSemicolon, {
-      expected: TokenKind.Semi,
-      found: token.kind,
-    });
+    const details: Details = { expected: TokenKind.Semi, found: token.kind };
+    if (this.startsAction()) {
+      this.resumeAfterStatement(token.start, details);
+
+      return;
+    }
+    if (this.resumedOnLine()) {
+      this.recovering = true;
+
+      return;
+    }
+
+    this.error(token.start, Code.ExpectedSemicolon, details);
   }
 
   public spanFrom(start: int): Span {
@@ -248,7 +259,8 @@ export class Cursor {
     }
 
     let unclosed = this.unclosedBraces(start.at);
-    if (unclosed == 0 && this.statementEnded()) {
+    const ended = this.statementEnded() || this.endedBySemicolon(start.at);
+    if (unclosed == 0 && ended) {
       this.recovering = false;
 
       return;
@@ -285,6 +297,49 @@ export class Cursor {
         case TokenKind.LBrace:
           this.skipToClosingBrace();
           break;
+      }
+    }
+  }
+
+  public bracesMissing(): boolean {
+    let unclosed = 0;
+
+    for (const token of this.tokens) {
+      switch (token.kind) {
+        case TokenKind.LBrace:
+          unclosed += 1;
+          break;
+        case TokenKind.RBrace:
+          unclosed -= 1;
+          break;
+      }
+    }
+
+    return unclosed > 0;
+  }
+
+  public skipBracketed(): void {
+    this.next();
+    this.skipToClosingBracket();
+  }
+
+  public skipToClosingBracket(): void {
+    let depth = 0;
+
+    while (!this.is(TokenKind.End) && !this.is(TokenKind.RBrace)) {
+      const token = this.next();
+      const after = this.peek();
+
+      switch (token.kind) {
+        case TokenKind.LBracket:
+          depth += 1;
+          break;
+        case TokenKind.RBracket:
+          depth -= 1;
+          break;
+      }
+      if (depth < 0 || after.newline) {
+        return;
       }
     }
   }
@@ -338,6 +393,35 @@ export class Cursor {
       default:
         return next.newline;
     }
+  }
+
+  private endedBySemicolon(from: int): boolean {
+    const last = this.tokens[this.at - 1];
+
+    return last?.kind == TokenKind.Semi && this.unclosedGroups(from) == 0;
+  }
+
+  private unclosedGroups(from: int): int {
+    let unclosed = 0;
+
+    for (let index = from; index < this.at; index++) {
+      const token = this.tokens[index];
+
+      switch (token?.kind) {
+        case TokenKind.LParen:
+        case TokenKind.LBracket:
+          unclosed += 1;
+          break;
+        case TokenKind.RParen:
+        case TokenKind.RBracket:
+          if (unclosed > 0) {
+            unclosed -= 1;
+          }
+          break;
+      }
+    }
+
+    return unclosed;
   }
 
   private unclosedBraces(from: int): int {
@@ -419,6 +503,52 @@ export class Cursor {
       case TokenKind.Module:
       case TokenKind.Declare:
         return this.namesAhead();
+      default:
+        return false;
+    }
+  }
+
+  private resumeAfterStatement(loc: int, details: Details): void {
+    if (this.recovering || this.followsReport()) {
+      return;
+    }
+
+    this.record(loc, Code.ExpectedSemicolon, details);
+    this.resumedAt = loc;
+  }
+
+  private resumedOnLine(): boolean {
+    const last = this.errors[this.errors.length - 1];
+    if (last == undefined || last.loc != this.resumedAt) {
+      return false;
+    }
+
+    for (let index = this.at; index >= 0; index--) {
+      const token = this.tokens[index];
+      if (token == undefined || token.start <= last.loc) {
+        return true;
+      }
+      if (token.newline) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private startsAction(): boolean {
+    const next = this.lookahead();
+    if (!this.atName() || next.newline) {
+      return false;
+    }
+
+    switch (next.kind) {
+      case TokenKind.Assign:
+      case TokenKind.LParen:
+      case TokenKind.Dot:
+      case TokenKind.PlusPlus:
+      case TokenKind.MinusMinus:
+        return true;
       default:
         return false;
     }

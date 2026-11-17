@@ -1,0 +1,3 @@
+unterminated_comment.tz:5:5: error TZ1001: unterminated comment
+    /* how many
+    ^

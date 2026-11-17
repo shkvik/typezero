@@ -45,8 +45,11 @@ NEVER_CLOSED = ("TZ1001", "TZ1006", "TZ1007", "TZ1008")
 
 # Lines where the place changes what the mistake is, so another error is the
 # right answer: '<' of the type argument and '<' of the mistake make '<<',
-# and the '>' of 'Array<int>' closes the type parameters of the function.
+# the '>' of 'Array<int>' closes the type parameters of the function, and
+# as the body of an 'if' the statement before 'else' gives that 'else' its
+# 'if'.
 KNOWN = {
+    "if (a) run(); else { stop(); };",
     "type T = A<<T>(a: T) T>;",
     "type T = A<<T>(a: T) T, B>;",
     "type T = A<<T>(a: T) => T>;",

@@ -1,0 +1,12 @@
+// A broken name in brackets is skipped up to its ']': the rest of the member
+// gives no second error.
+class Lines {
+  [;.iterator](): Iterator<int> { return walk(); }
+  [Symbol;iterator](): Iterator<int> { return walk(); }
+  [Symbol.](): Iterator<int> { return walk(); }
+  [key]: int;
+  size: int;
+}
+
+type Walked = { [Symbol;iterator](): Iterator<int>; size: int };
+const last = 1;

@@ -1,0 +1,12 @@
+unclosed_groups.tz:7:3: error TZ1202: expected ')' to close the argument list that starts at line 4, found 'const'
+  const rest = items.slice(2);
+  ^
+unclosed_groups.tz:16:1: error TZ1206: expected ']' to close the array that starts at line 12, found 'const'
+const names = ["a", "b"];
+^
+unclosed_groups.tz:21:1: error TZ1510: expected ')' to close the parameter list that starts at line 18, found '{'
+{
+^
+unclosed_groups.tz:26:15: error TZ1111: expected ')' to close the condition that starts at line 25, found '{'
+  (count > 0) {
+              ^

@@ -167,18 +167,31 @@ partial class FileParser {
     }
   }
 
+  private brokenSymbolName(): string | undefined {
+    this.cursor.skipToClosingBracket();
+
+    return undefined;
+  }
+
   private symbolName(): string | undefined {
     const bracket = this.cursor.peek();
     const loc = bracket.start;
 
     this.cursor.skip(2);
     if (!this.cursor.expect(TokenKind.Dot, Code.ExpectedAfterSymbol)) {
-      return undefined;
+      return this.brokenSymbolName();
+    }
+    if (!this.isPropertyName()) {
+      const token = this.cursor.peek();
+
+      this.cursor.error(token.start, Code.ExpectedNameAfterDot);
+
+      return this.brokenSymbolName();
     }
 
     const member = this.cursor.next();
     if (!this.cursor.expect(TokenKind.RBracket, Code.ExpectedSymbolNameClose)) {
-      return undefined;
+      return this.brokenSymbolName();
     }
 
     const name = this.symbolMemberName(member.known);

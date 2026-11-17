@@ -18,6 +18,7 @@ export enum TypeKind {
   Infer,
   Template,
   Intersection,
+  Invalid,
 }
 
 export type PlainTypeForm = {
@@ -30,7 +31,8 @@ export type PlainTypeForm = {
     | TypeKind.Indexed
     | TypeKind.Conditional
     | TypeKind.Infer
-    | TypeKind.Intersection;
+    | TypeKind.Intersection
+    | TypeKind.Invalid;
 };
 
 export type FunctionTypeParam = {

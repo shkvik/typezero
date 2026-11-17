@@ -52,6 +52,7 @@ export enum Code {
   ElseWithoutIf = "TZ1141",
   CaseValueList = "TZ1142",
   UsingInForIn = "TZ1143",
+  BlockNotClosedBeforeElse = "TZ1144",
   ExpectedInConditional = "TZ1201",
   ExpectedArgumentsClose = "TZ1202",
   ExpectedIndexClose = "TZ1203",

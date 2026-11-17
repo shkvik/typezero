@@ -13,3 +13,5 @@ export const kEnd: Token = {
   newline: false,
   hash: false,
 };
+
+export const kNotResumed = -1;

@@ -602,17 +602,14 @@ partial class FileParser {
     return body;
   }
 
-  private block(): BlockStmt {
+  private block(ofIf: boolean = false): BlockStmt {
     const brace = this.cursor.peek();
     const loc = brace.start;
 
     this.cursor.expect(TokenKind.LBrace, Code.ExpectedBlockStart);
     const body: Stmt[] = [];
 
-    while (
-      !this.cursor.is(TokenKind.RBrace) &&
-      !this.cursor.is(TokenKind.End)
-    ) {
+    while (this.insideBlock(ofIf)) {
       const statement = this.statementWithRecovery(false);
 
       body.push(statement);
@@ -620,10 +617,29 @@ partial class FileParser {
 
     const closing = this.cursor.peek();
     const end = closing.start;
+    if (ofIf && closing.kind == TokenKind.Else) {
+      this.cursor.report(end, Code.BlockNotClosedBeforeElse);
+
+      return { kind: StmtKind.Block, loc, body, end };
+    }
 
     this.cursor.expect(TokenKind.RBrace, Code.ExpectedBlockClose);
 
     return { kind: StmtKind.Block, loc, body, end };
+  }
+
+  private insideBlock(ofIf: boolean): boolean {
+    const token = this.cursor.peek();
+
+    switch (token.kind) {
+      case TokenKind.RBrace:
+      case TokenKind.End:
+        return false;
+      case TokenKind.Else:
+        return !ofIf;
+      default:
+        return true;
+    }
   }
 
   private condition(code: Code): Expr {
@@ -639,10 +655,18 @@ partial class FileParser {
     const keyword = this.cursor.next();
     const loc = keyword.start;
     const cond = this.condition(Code.ExpectedAfterIf);
-    const thenStmt = this.statement(false);
+    const thenStmt = this.ifBody();
     const elseStmt = this.elseBranch();
 
     return { kind: StmtKind.If, loc, cond, thenStmt, elseStmt };
+  }
+
+  private ifBody(): Stmt {
+    if (this.cursor.is(TokenKind.LBrace)) {
+      return this.block(this.bracesMissing);
+    }
+
+    return this.statement(false);
   }
 
   private returnStatement(): Stmt {

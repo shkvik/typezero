@@ -266,7 +266,7 @@ partial class FileParser {
   private moduleNames(names: ModuleName[], codes: NameListCodes): void {
     this.cursor.next();
 
-    while (this.cursor.insideList(TokenKind.RBrace)) {
+    while (this.cursor.insideList(TokenKind.RBrace) && !this.pathAhead()) {
       const next = this.cursor.lookahead();
       if (this.cursor.is(TokenKind.Type) && kTokenTable.isName(next.kind)) {
         const token = this.cursor.peek();
@@ -286,7 +286,26 @@ partial class FileParser {
       }
     }
 
+    if (this.pathAhead()) {
+      return this.namesNotClosed(codes);
+    }
+
     this.closeBraced(codes.close);
+  }
+
+  private pathAhead(): boolean {
+    const next = this.cursor.lookahead();
+
+    return this.cursor.is(TokenKind.From) && next.kind == TokenKind.String;
+  }
+
+  private namesNotClosed(codes: NameListCodes): void {
+    const token = this.cursor.peek();
+
+    this.cursor.report(token.start, codes.close, {
+      expected: TokenKind.RBrace,
+      found: token.kind,
+    });
   }
 
   private moduleName(codes: NameListCodes): ModuleName | undefined {

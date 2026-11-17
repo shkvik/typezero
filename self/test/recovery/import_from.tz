@@ -1,0 +1,11 @@
+// The '}' of a list of names is missing: 'from' with a path ends the list,
+// and what follows the import is read as usual.
+import {
+  read,
+  write,
+  from "./files.tz";
+import { join, split from "./paths.tz";
+export { read, write from "./files.tz";
+
+const text = read(join("a", "b"));
+const broken = ;

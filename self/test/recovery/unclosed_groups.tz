@@ -1,0 +1,30 @@
+// A ')' or a ']' that is missing: the message names the line where the list
+// starts, as it does for '}'.
+function total(items: int[]): int {
+  const sum = add(
+    items[0],
+    items[1]
+  const rest = items.slice(2);
+
+  return sum + rest.length;
+}
+
+const sizes = [
+  1,
+  2,
+  3
+const names = ["a", "b"];
+
+function show(
+  first: int,
+  second: int
+{
+  print(first, second);
+}
+
+if (ready &&
+  (count > 0) {
+  run();
+}
+
+const last = 1;

@@ -10,25 +10,60 @@ import { LeftBlock } from "./types/open-blocks.types.tz";
 export class OpenBlocks {
   private readonly tokens: Token[];
   private readonly lines: SourceLines;
+  private readonly closedBefore: int[];
 
   public constructor(source: Buffer, tokens: Token[]) {
     this.tokens = tokens;
     this.lines = new SourceLines(source);
+    this.closedBefore = [];
   }
 
   public explain(errors: SourceError[]): SourceError[] {
-    const lexical = errors.some((error) => this.takesBraces(error));
-    if (errors.length == 0 || lexical) {
+    if (errors.length == 0) {
       return errors;
     }
 
+    const placed = this.withBlocksBeforeElse(errors);
+    const named = placed.map((error) => this.withOpeningLine(error));
+    const unterminated = named.find((error) => this.takesBraces(error));
+    if (unterminated != undefined) {
+      return this.upToUnterminated(unterminated, named);
+    }
+
     const left = this.leftBlock();
-    const named = errors.map((error) => this.withOpeningLine(error));
     if (left != undefined && !this.reportedInside(left, named)) {
       return this.upToLeftBlock(left, named);
     }
 
     return named;
+  }
+
+  private upToUnterminated(
+    unterminated: SourceError,
+    errors: SourceError[],
+  ): SourceError[] {
+    const loc = unterminated.loc;
+    const earlier = errors.filter((error) => error.loc < loc);
+    const substitution = errors.find((error) => this.closesSubstitution(error));
+    const template = unterminated.code == Code.UnterminatedTemplate;
+    if (!template || substitution == undefined) {
+      return earlier.concat([unterminated]);
+    }
+    if (substitution.loc < loc) {
+      return earlier;
+    }
+
+    const moved: SourceError = {
+      code: substitution.code,
+      loc,
+      details: substitution.details,
+    };
+
+    return earlier.concat([moved]);
+  }
+
+  private closesSubstitution(error: SourceError): boolean {
+    return error.code == Code.ExpectedSubstitutionClose;
   }
 
   private takesBraces(error: SourceError): boolean {
@@ -39,10 +74,6 @@ export class OpenBlocks {
       default:
         return false;
     }
-  }
-
-  private expectsBrace(error: SourceError): boolean {
-    return error.details.expected == TokenKind.RBrace;
   }
 
   private reportedInside(left: LeftBlock, errors: SourceError[]): boolean {
@@ -65,19 +96,59 @@ export class OpenBlocks {
     return earlier.concat([notClosed]);
   }
 
-  private withOpeningLine(error: SourceError): SourceError {
-    if (!this.expectsBrace(error)) {
+  private withBlocksBeforeElse(errors: SourceError[]): SourceError[] {
+    const placed: SourceError[] = [];
+
+    for (const error of errors) {
+      const explained = this.withBlockBeforeElse(error);
+
+      placed.push(explained);
+    }
+
+    return placed;
+  }
+
+  private withBlockBeforeElse(error: SourceError): SourceError {
+    if (error.code != Code.BlockNotClosedBeforeElse) {
       return error;
     }
 
-    const line = this.openingLine(error.loc);
+    const loc = error.loc;
+    const word = this.tokens.findIndex((token) => token.start == loc);
+    const line = this.openingLine(loc, TokenKind.LBrace);
+
+    this.closedBefore.push(word);
+
+    return { code: error.code, loc, details: { word: `${line}` } };
+  }
+
+  private withOpeningLine(error: SourceError): SourceError {
+    const opener = this.openerOf(error.details.expected);
+    if (opener == undefined) {
+      return error;
+    }
+
+    const line = this.openingLine(error.loc, opener);
     const details: Details = { ...error.details, word: `${line}` };
 
     return { code: error.code, loc: error.loc, details };
   }
 
-  private openingLine(loc: int): int {
-    const opening = this.openingBefore(loc);
+  private openerOf(closer: TokenKind | undefined): TokenKind | undefined {
+    switch (closer) {
+      case TokenKind.RBrace:
+        return TokenKind.LBrace;
+      case TokenKind.RParen:
+        return TokenKind.LParen;
+      case TokenKind.RBracket:
+        return TokenKind.LBracket;
+      default:
+        return undefined;
+    }
+  }
+
+  private openingLine(loc: int, opener: TokenKind): int {
+    const opening = this.openingBefore(loc, opener);
     if (opening == undefined) {
       const place = this.lines.placeOf(loc);
 
@@ -87,7 +158,15 @@ export class OpenBlocks {
     return this.lineOf(opening);
   }
 
-  private openingBefore(loc: int): int | undefined {
+  private openingBefore(loc: int, opener: TokenKind): int | undefined {
+    if (opener == TokenKind.LBrace) {
+      return this.blockBefore(loc);
+    }
+
+    return this.groupBefore(loc, opener);
+  }
+
+  private blockBefore(loc: int): int | undefined {
     const tokens = this.tokens;
     const open: int[] = [];
 
@@ -101,6 +180,68 @@ export class OpenBlocks {
     }
 
     return open[open.length - 1];
+  }
+
+  private groupBefore(loc: int, opener: TokenKind): int | undefined {
+    const tokens = this.tokens;
+    const open: int[] = [];
+
+    for (let index = 0; index < tokens.length; index++) {
+      const token = tokens[index];
+      if (token.start >= loc) {
+        break;
+      }
+
+      this.followGroups(open, index, token.kind);
+    }
+
+    const depth = this.depthOf(open, opener);
+
+    return open[depth];
+  }
+
+  private followGroups(open: int[], index: int, kind: TokenKind): void {
+    switch (kind) {
+      case TokenKind.LBrace:
+      case TokenKind.LParen:
+      case TokenKind.LBracket:
+        open.push(index);
+        break;
+      case TokenKind.RBrace:
+      case TokenKind.RParen:
+      case TokenKind.RBracket:
+        this.closeGroup(open, kind);
+        break;
+      default:
+        break;
+    }
+  }
+
+  private closeGroup(open: int[], closer: TokenKind): void {
+    const opener = this.openerOf(closer);
+    if (opener == undefined) {
+      return;
+    }
+
+    const depth = this.depthOf(open, opener);
+    if (depth < 0) {
+      return;
+    }
+
+    while (open.length > depth) {
+      open.pop();
+    }
+  }
+
+  private depthOf(open: int[], opener: TokenKind): int {
+    for (let depth = open.length - 1; depth >= 0; depth--) {
+      const index = open[depth];
+      if (index != undefined && this.kindOf(index) == opener) {
+        return depth;
+      }
+    }
+
+    return -1;
   }
 
   private leftBlock(): LeftBlock | undefined {
@@ -127,6 +268,10 @@ export class OpenBlocks {
   }
 
   private follow(open: int[], index: int, kind: TokenKind): void {
+    if (this.closedBefore.includes(index)) {
+      open.pop();
+    }
+
     switch (kind) {
       case TokenKind.LBrace:
         open.push(index);
@@ -173,6 +318,15 @@ export class OpenBlocks {
     const token = this.tokens[index];
 
     return token != undefined && token.newline;
+  }
+
+  private kindOf(index: int): TokenKind {
+    const token = this.tokens[index];
+    if (token == undefined) {
+      return TokenKind.End;
+    }
+
+    return token.kind;
   }
 
   private startOf(index: int): int {

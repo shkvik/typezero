@@ -1,0 +1,9 @@
+// The '}' of a substitution is missing: the lexer sees the closing quote as
+// the start of another template that never ends. One error, at that quote.
+function label(name: string): string {
+  const text = `name: ${name`;
+
+  return text;
+}
+
+const last = 1;

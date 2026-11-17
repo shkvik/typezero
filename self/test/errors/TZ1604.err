@@ -1,3 +1,3 @@
-TZ1604.tz:1:11: error TZ1604: expected '}' to close the names to import, found end of file
+TZ1604.tz:1:11: error TZ1604: expected '}' to close the list of names to import that starts at line 1, found end of file
 import { a
           ^

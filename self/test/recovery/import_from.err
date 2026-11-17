@@ -1,0 +1,12 @@
+import_from.tz:6:3: error TZ1604: expected '}' to close the list of names to import that starts at line 3, found 'from'
+  from "./files.tz";
+  ^
+import_from.tz:7:22: error TZ1604: expected '}' to close the list of names to import that starts at line 7, found 'from'
+import { join, split from "./paths.tz";
+                     ^
+import_from.tz:8:22: error TZ1605: expected '}' to close the list of names to export that starts at line 8, found 'from'
+export { read, write from "./files.tz";
+                     ^
+import_from.tz:11:16: error TZ1221: expected an expression, found ';'
+const broken = ;
+               ^

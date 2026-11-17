@@ -1,1 +1,4 @@
-if (a) { b(); else { c(); }
+run();
+else {
+  stop();
+}

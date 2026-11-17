@@ -1,0 +1,36 @@
+several_on_line.tz:4:9: error TZ1221: expected an expression, found ';'
+first = ; second = ;
+        ^
+several_on_line.tz:4:20: error TZ1221: expected an expression, found ';'
+first = ; second = ;
+                   ^
+several_on_line.tz:5:18: error TZ1221: expected an expression, found ';'
+const third = 1 +; const fourth = 2 *;
+                 ^
+several_on_line.tz:5:38: error TZ1221: expected an expression, found ';'
+const third = 1 +; const fourth = 2 *;
+                                     ^
+several_on_line.tz:6:12: error TZ1317: expected a type, found '='
+let fifth: = 1; let sixth: = 2;
+           ^
+several_on_line.tz:6:28: error TZ1317: expected a type, found '='
+let fifth: = 1; let sixth: = 2;
+                           ^
+several_on_line.tz:7:13: error TZ1119: expected ';', found identifier
+seventh = 1 eighth = 2 ninth = 3;
+            ^
+several_on_line.tz:7:24: error TZ1119: expected ';', found identifier
+seventh = 1 eighth = 2 ninth = 3;
+                       ^
+several_on_line.tz:8:7: error TZ1119: expected ';', found identifier
+run() stop();
+      ^
+several_on_line.tz:11:17: error TZ1205: expected ')' to close the parenthesized expression that starts at line 11, found ';'
+const tenth = (1; 2);
+                ^
+several_on_line.tz:12:20: error TZ1206: expected ']' to close the array that starts at line 12, found ';'
+const eleventh = [1; 2];
+                   ^
+several_on_line.tz:13:9: error TZ1119: expected ';', found identifier
+twelfth thirteenth fourteenth;
+        ^

@@ -351,7 +351,6 @@ partial class FileParser {
   }
 
   private newForm(name: Token, member: Token | undefined): NewForm {
-feat(self): using in loop heads, unnamed class error, tests in self/test
     const isPath = name.kind == TokenKind.This || this.newPathAhead();
     if (isPath) {
       const callee = this.newCallee(name, member);

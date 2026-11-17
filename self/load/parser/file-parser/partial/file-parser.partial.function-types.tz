@@ -68,7 +68,7 @@ partial class FileParser {
 
     this.cursor.report(less.start, Code.GenericFunctionType, { word, other });
 
-    return this.typeRef(less.start);
+    return this.invalidType(less.start);
   }
 
   private functionTypeAhead(): boolean {
@@ -193,7 +193,7 @@ partial class FileParser {
       word: name.text,
     });
 
-    return this.typeRef(name.start);
+    return this.invalidType(name.start);
   }
 
   private returnTypeAnnotation(): TypeRef | undefined {

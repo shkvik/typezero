@@ -96,11 +96,34 @@ partial class FileParser {
 
       return this.closesStatement(afterComma.kind);
     }
-    if (closed == 0) {
-      return true;
+
+    return closed == 0 || !this.usesValue(next);
+  }
+
+  private usesValue(token: Token): boolean {
+    if (token.newline) {
+      return false;
     }
 
-    return this.closesStatement(next.kind) || next.newline;
+    switch (token.kind) {
+      case TokenKind.Dot:
+      case TokenKind.QuestionDot:
+      case TokenKind.LBracket:
+      case TokenKind.LParen:
+      case TokenKind.Question:
+      case TokenKind.Bang:
+      case TokenKind.PlusPlus:
+      case TokenKind.MinusMinus:
+      case TokenKind.TemplateString:
+      case TokenKind.TemplateHead:
+      case TokenKind.As:
+        return true;
+      default:
+        return (
+          this.binaryPrecedence(token.kind) != Precedence.None ||
+          this.isAssignment(token.kind)
+        );
+    }
   }
 
   private closesStatement(kind: TokenKind): boolean {

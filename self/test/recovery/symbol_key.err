@@ -1,0 +1,15 @@
+symbol_key.tz:4:3: error TZ1517: a member name in brackets is not supported: an object has a fixed set of fields; keep a dictionary in a field, e.g. 'items: Record<string, T> = {}' or 'items = new Map<string, T>()'
+  [;.iterator](): Iterator<int> { return walk(); }
+  ^
+symbol_key.tz:5:10: error TZ1307: expected '.' after 'Symbol', found ';'
+  [Symbol;iterator](): Iterator<int> { return walk(); }
+         ^
+symbol_key.tz:6:11: error TZ1219: expected a name after '.'
+  [Symbol.](): Iterator<int> { return walk(); }
+          ^
+symbol_key.tz:7:3: error TZ1517: a member name in brackets is not supported: an object has a fixed set of fields; keep a dictionary in a field, e.g. 'items: Record<string, T> = {}' or 'items = new Map<string, T>()'
+  [key]: int;
+  ^
+symbol_key.tz:11:24: error TZ1307: expected '.' after 'Symbol', found ';'
+type Walked = { [Symbol;iterator](): Iterator<int>; size: int };
+                       ^

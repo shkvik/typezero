@@ -206,6 +206,8 @@ partial class Dumper {
         return "Infer";
       case TypeKind.Template:
         return "Template";
+      case TypeKind.Invalid:
+        return "Invalid";
       default:
         return "Intersection";
     }

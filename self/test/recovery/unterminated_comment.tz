@@ -1,0 +1,10 @@
+// A comment that never ends takes the rest of the file: one error, and no
+// second one about the blocks it left open.
+class Lines {
+  count(): int {
+    /* how many
+    return 0;
+  }
+}
+
+const last = 1;

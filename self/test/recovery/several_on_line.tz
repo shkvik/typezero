@@ -1,0 +1,14 @@
+// Several broken statements on one line: each of them is reported. A
+// statement that ended with its ';' is over, and after a missing ';' the
+// next statement is read from the word that starts it.
+first = ; second = ;
+const third = 1 +; const fourth = 2 *;
+let fifth: = 1; let sixth: = 2;
+seventh = 1 eighth = 2 ninth = 3;
+run() stop();
+// One mistake stays one error: what is open on the line is skipped to its
+// end, and a word that starts nothing is no new statement.
+const tenth = (1; 2);
+const eleventh = [1; 2];
+twelfth thirteenth fourteenth;
+const last = 1;

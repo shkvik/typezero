@@ -1,4 +1,4 @@
-unclosed_paren.tz:2:11: error TZ1202: expected ')' to close the argument list, found ';'
+unclosed_paren.tz:2:11: error TZ1202: expected ')' to close the argument list that starts at line 2, found ';'
   foo(1, 2;
           ^
 unclosed_paren.tz:3:7: error TZ1221: expected an expression, found ';'

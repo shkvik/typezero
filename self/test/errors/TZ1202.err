@@ -1,3 +1,3 @@
-TZ1202.tz:1:5: error TZ1202: expected ')' to close the argument list, found end of file
+TZ1202.tz:1:5: error TZ1202: expected ')' to close the argument list that starts at line 1, found end of file
 f(a,
     ^

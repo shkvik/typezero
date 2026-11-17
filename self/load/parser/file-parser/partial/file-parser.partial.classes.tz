@@ -311,6 +311,7 @@ partial class FileParser {
     }
     if (this.cursor.is(TokenKind.LBracket) && !this.cursor.symbolKeyAhead()) {
       this.cursor.report(loc, Code.MemberNameInBrackets);
+      this.cursor.skipBracketed();
 
       return this.skipClassMember();
     }

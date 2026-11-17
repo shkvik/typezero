@@ -1,0 +1,12 @@
+pattern_then_word.tz:4:26: error TZ1119: expected ';', found identifier
+([first, second] = pair) extra;
+                         ^
+pattern_then_word.tz:5:24: error TZ1119: expected ';', found identifier
+[third, fourth] = pair extra;
+                       ^
+pattern_then_word.tz:6:2: error TZ1236: an assignment to a pattern is a statement of its own and gives no value: write it on a line of its own, e.g. '[a, b] = [b, a];'
+([fifth, sixth] = pair).length;
+ ^
+pattern_then_word.tz:7:2: error TZ1236: an assignment to a pattern is a statement of its own and gives no value: write it on a line of its own, e.g. '[a, b] = [b, a];'
+([seventh, eighth] = pair) + 1;
+ ^

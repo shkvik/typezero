@@ -65,7 +65,7 @@ export const kMessages: Record<Code, Message> = {
     text: "expected {expected} after 'while', found {found}",
   },
   [Code.ExpectedAfterCondition]: {
-    text: "expected {expected} after the condition, found {found}",
+    text: "expected {expected} to close the condition that starts at line {word}, found {found}",
   },
   [Code.ExpectedAfterDoBody]: {
     text: "expected {expected} after the body of 'do', found {found}",
@@ -83,7 +83,7 @@ export const kMessages: Record<Code, Message> = {
     text: "expected {expected} after the loop condition, found {found}",
   },
   [Code.ExpectedLoopHeaderClose]: {
-    text: "expected {expected} to close the loop header, found {found}",
+    text: "expected {expected} to close the loop header that starts at line {word}, found {found}",
   },
   [Code.ExpectedAfterCatchVariable]: {
     text: "expected {expected} after the variable of 'catch', found {found}",
@@ -152,13 +152,16 @@ export const kMessages: Record<Code, Message> = {
     text: "'for...in' needs a new variable: 'for (const k in ...)'",
   },
   [Code.ElseWithoutIf]: {
-    text: "'else' has no 'if' here: the '}' that closes the block before 'else' is probably missing",
+    text: "'else' has no 'if' before it: 'else' goes right after the statement or the '}' of its 'if'",
   },
   [Code.CaseValueList]: {
     text: "'case {word}, {other}:' does not mean \"{word} or {other}\": write a 'case' for each value, 'case {word}:' and 'case {other}:' one after another",
   },
   [Code.UsingInForIn]: {
     text: "'using' cannot declare the key of 'for...in': a key is a string and holds nothing to release; write 'for (const k in ...)'",
+  },
+  [Code.BlockNotClosedBeforeElse]: {
+    text: "the block that starts at line {word} has no '}' before 'else': 'else' goes right after the '}' of its 'if', as in '} else {'",
   },
   [Code.BlockNotClosed]: {
     text: "the block that starts at line {word} has no '}': this line stands to the left of the block, so the '}' is missing before it",
@@ -167,7 +170,7 @@ export const kMessages: Record<Code, Message> = {
     text: "expected {expected} in the conditional expression, found {found}",
   },
   [Code.ExpectedArgumentsClose]: {
-    text: "expected {expected} to close the argument list, found {found}",
+    text: "expected {expected} to close the argument list that starts at line {word}, found {found}",
   },
   [Code.ExpectedIndexClose]: {
     text: "expected {expected} to close the index, found {found}",
@@ -176,10 +179,10 @@ export const kMessages: Record<Code, Message> = {
     text: "expected {expected} to close the class, found {found}",
   },
   [Code.ExpectedParenthesizedClose]: {
-    text: "expected {expected} to close the parenthesized expression, found {found}",
+    text: "expected {expected} to close the parenthesized expression that starts at line {word}, found {found}",
   },
   [Code.ExpectedArrayClose]: {
-    text: "expected {expected} to close the array, found {found}",
+    text: "expected {expected} to close the array that starts at line {word}, found {found}",
   },
   [Code.ExpectedObjectClose]: {
     text: "expected {expected} to close the object that starts at line {word}, found {found}",
@@ -278,7 +281,7 @@ export const kMessages: Record<Code, Message> = {
     text: "expected {expected} to close the indexed access type, found {found}",
   },
   [Code.ExpectedParenthesizedTypeClose]: {
-    text: "expected {expected} to close the parenthesized type, found {found}",
+    text: "expected {expected} to close the parenthesized type that starts at line {word}, found {found}",
   },
   [Code.ExpectedAfterMappedKeys]: {
     text: "expected {expected} after the keys of the mapped type, found {found}",
@@ -302,7 +305,7 @@ export const kMessages: Record<Code, Message> = {
     text: "expected {expected} before the type of the values, found {found}",
   },
   [Code.ExpectedTupleClose]: {
-    text: "expected {expected} to close the tuple type, found {found}",
+    text: "expected {expected} to close the tuple type that starts at line {word}, found {found}",
   },
   [Code.ExpectedAfterFunctionTypeParameters]: {
     text: "expected {expected} after the parameters of the function type, found {found}",
@@ -311,7 +314,7 @@ export const kMessages: Record<Code, Message> = {
     text: "expected {expected} for a parameter of the function type, found {found}",
   },
   [Code.ExpectedFunctionTypeParametersClose]: {
-    text: "expected {expected} to close the parameters of the function type, found {found}",
+    text: "expected {expected} to close the parameters of the function type that starts at line {word}, found {found}",
   },
   [Code.ReadonlyOnlyArrays]: {
     text: "'readonly' applies only to array and tuple types",
@@ -380,7 +383,7 @@ export const kMessages: Record<Code, Message> = {
     text: "a rest parameter must be the last parameter",
   },
   [Code.ExpectedPatternClose]: {
-    text: "expected {expected} to close the destructuring pattern, found {found}",
+    text: "expected {expected} to close the destructuring pattern that starts at line {word}, found {found}",
   },
   [Code.RestElementNotLast]: {
     text: "a rest element must be the last one",
@@ -404,7 +407,7 @@ export const kMessages: Record<Code, Message> = {
     text: "expected {expected} to close the class that starts at line {word}, found {found}",
   },
   [Code.ExpectedDecoratorClose]: {
-    text: "expected {expected} to close the decorator, found {found}",
+    text: "expected {expected} to close the decorator that starts at line {word}, found {found}",
   },
   [Code.ExpectedAfterTypeName]: {
     text: "expected {expected} after the name of the type, found {found}",
@@ -422,7 +425,7 @@ export const kMessages: Record<Code, Message> = {
     text: "expected {expected} after the function name, found {found}",
   },
   [Code.ExpectedParametersClose]: {
-    text: "expected {expected} to close the parameter list, found {found}",
+    text: "expected {expected} to close the parameter list that starts at line {word}, found {found}",
   },
   [Code.ExpectedAfterArrowParameters]: {
     text: "expected {expected} after the parameters of the arrow function, found {found}",
@@ -578,10 +581,10 @@ export const kMessages: Record<Code, Message> = {
     text: "expected {expected} after 'export * as', found {found}",
   },
   [Code.ExpectedImportNamesClose]: {
-    text: "expected {expected} to close the names to import, found {found}",
+    text: "expected {expected} to close the list of names to import that starts at line {word}, found {found}",
   },
   [Code.ExpectedExportNamesClose]: {
-    text: "expected {expected} to close the names to export, found {found}",
+    text: "expected {expected} to close the list of names to export that starts at line {word}, found {found}",
   },
   [Code.ExpectedAfterWith]: {
     text: "expected {expected} after 'with', found {found}",

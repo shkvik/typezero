@@ -1,0 +1,9 @@
+else_without_brace.tz:6:5: error TZ1144: the block that starts at line 4 has no '}' before 'else': 'else' goes right after the '}' of its 'if', as in '} else {'
+    else if (a < 0) {
+    ^
+else_without_brace.tz:17:7: error TZ1144: the block that starts at line 15 has no '}' before 'else': 'else' goes right after the '}' of its 'if', as in '} else {'
+      else {
+      ^
+else_without_brace.tz:25:14: error TZ1221: expected an expression, found ';'
+const last = ;
+             ^

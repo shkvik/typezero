@@ -45,6 +45,7 @@ export class FileParser {
   private readonly cursor: Cursor;
   private readonly literals: LiteralReader;
   private readonly library: boolean;
+  private readonly bracesMissing: boolean;
   private readonly fieldNames: Set<string>;
   private readonly stringConstants: Map<string, string[]>;
   private readonly imports: ImportDecl[];
@@ -58,6 +59,7 @@ export class FileParser {
     this.cursor = new Cursor(tokens);
     this.literals = new LiteralReader(source);
     this.library = library;
+    this.bracesMissing = this.cursor.bracesMissing();
     this.fieldNames = new Set<string>();
     this.stringConstants = new Map<string, string[]>();
     this.imports = [];

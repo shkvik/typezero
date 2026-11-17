@@ -1,0 +1,8 @@
+// A word after an assignment to a pattern is one mistake, the word: the
+// assignment is still a statement of its own. Its value is used only when
+// what follows goes on with the expression.
+([first, second] = pair) extra;
+[third, fourth] = pair extra;
+([fifth, sixth] = pair).length;
+([seventh, eighth] = pair) + 1;
+const last = 1;
