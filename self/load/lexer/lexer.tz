@@ -434,18 +434,36 @@ export class Lexer {
   }
 
   private regexAllowed(): boolean {
-    const count = this.tokens.length;
-    const last = this.tokens[count - 1];
-    if (last == undefined) {
-      return true;
+    let operand = this.tokens.length - 1;
+
+    while (this.isBangAt(operand)) {
+      operand -= 1;
     }
 
-    const before = this.tokens[count - 2];
+    return !this.endsOperand(operand);
+  }
+
+  private isBangAt(index: int): boolean {
+    const token = this.tokens[index];
+    if (token == undefined) {
+      return false;
+    }
+
+    return token.kind == TokenKind.Bang && !token.newline;
+  }
+
+  private endsOperand(index: int): boolean {
+    const token = this.tokens[index];
+    if (token == undefined) {
+      return false;
+    }
+
+    const before = this.tokens[index - 1];
     const afterDot =
       before?.kind == TokenKind.Dot || before?.kind == TokenKind.QuestionDot;
-    const isProperty = afterDot && kTokenTable.isKeyword(last.kind);
+    const isProperty = afterDot && kTokenTable.isKeyword(token.kind);
 
-    return !isProperty && this.regexMayFollow(last.kind);
+    return isProperty || !this.regexMayFollow(token.kind);
   }
 
   private leftBrace(): void {

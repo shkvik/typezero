@@ -1,11 +1,16 @@
-// '/' starts a regular expression after 'await', after 'yield' and after
-// '?.(' or '?.[', and divides after a keyword that names a member.
+// '/' starts a regular expression after 'await', after 'yield', after a
+// '!' that negates and after '?.(' or '?.[', and divides after a keyword that
+// names a member and after a '!' that follows a value.
 const a = await /r/g.exec(text);
 const b = map.delete / 2 / 3;
 const c = map?.default / 2 / 3;
 const d = map?.[/r/g];
 const e = map?.(/r/g);
 const f = typeof /r/g;
+const g = count! / 2 / 3;
+const h = counts[0]!! / 2 / 3;
+const i = !/r/g.test(text);
+const j = !!/r/g.test(text);
 
 function* patterns() {
   yield /r/g;
