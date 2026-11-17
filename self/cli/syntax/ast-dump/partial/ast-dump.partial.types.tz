@@ -1,5 +1,6 @@
 import { Dumper } from "../ast-dump.tz";
 import {
+  FunctionTypeForm,
   ModifierChange,
   ObjectTypeField,
   TypeKind,
@@ -27,8 +28,10 @@ partial class Dumper {
 
     switch (form.kind) {
       case TypeKind.Function: {
-        const names = this.quoteAll(form.names);
-        const optional = this.flags(form.optional);
+        const paramNames = form.params.map((param) => param.name);
+        const optionalParams = form.params.map((param) => param.optional);
+        const names = this.quoteAll(paramNames);
+        const optional = this.flags(optionalParams);
         const rest = this.flag(form.rest);
 
         return ` names=${names} opt=${optional} rest=${rest}`;
@@ -36,8 +39,10 @@ partial class Dumper {
       case TypeKind.Object:
         return this.objectExtras(form.fields);
       case TypeKind.Tuple: {
-        const readonlyFlags = this.flags(form.readonly);
-        const spread = this.flags(form.spread);
+        const readonlyElements = form.elements.map(() => form.readonly);
+        const spreadElements = form.elements.map((element) => element.spread);
+        const readonlyFlags = this.flags(readonlyElements);
+        const spread = this.flags(spreadElements);
 
         return ` ro=${readonlyFlags} spread=${spread}`;
       }
@@ -107,11 +112,27 @@ partial class Dumper {
 
   private innerTypes(ref: TypeRef): TypeRef[] {
     const form = ref.form;
-    if (form.kind == TypeKind.Object) {
-      return form.fields.map((field) => field.type);
+
+    switch (form.kind) {
+      case TypeKind.Object:
+        return form.fields.map((field) => field.type);
+      case TypeKind.Tuple:
+        return form.elements.map((element) => element.type);
+      case TypeKind.Function:
+        return this.signatureTypes(form);
+      default:
+        return ref.args;
+    }
+  }
+
+  private signatureTypes(form: FunctionTypeForm): TypeRef[] {
+    const types = form.params.map((param) => param.type);
+    const result = form.result;
+    if (result != undefined) {
+      types.push(result);
     }
 
-    return ref.args;
+    return types;
   }
 
   private dumpType(ref: TypeRef): void {

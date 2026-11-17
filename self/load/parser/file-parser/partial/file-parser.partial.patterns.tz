@@ -539,8 +539,7 @@ partial class FileParser {
       kind: ExprKind.Call,
       loc,
       callee: slice,
-      args: [position],
-      spread: [],
+      args: [{ expr: position, spread: false }],
       optional: false,
       tagged: false,
     };

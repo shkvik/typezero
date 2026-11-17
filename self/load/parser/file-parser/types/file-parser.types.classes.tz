@@ -25,4 +25,5 @@ export type MemberName = {
 export type ClassBase = {
   readonly base?: TypeRef;
   readonly baseExpr?: Expr;
+  readonly baseArgs: TypeRef[];
 };

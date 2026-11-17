@@ -33,11 +33,17 @@ export type PlainTypeForm = {
     | TypeKind.Intersection;
 };
 
+export type FunctionTypeParam = {
+  readonly name: string;
+  readonly optional: boolean;
+  readonly type: TypeRef;
+};
+
 export type FunctionTypeForm = {
   readonly kind: TypeKind.Function;
-  readonly names: string[];
-  readonly optional: boolean[];
-  rest: boolean;
+  readonly params: FunctionTypeParam[];
+  readonly rest: boolean;
+  readonly result?: TypeRef;
 };
 
 export type ObjectTypeField = {
@@ -54,10 +60,15 @@ export type ObjectTypeForm = {
   readonly fields: ObjectTypeField[];
 };
 
+export type TupleElement = {
+  readonly type: TypeRef;
+  readonly spread: boolean;
+};
+
 export type TupleTypeForm = {
   readonly kind: TypeKind.Tuple;
-  readonly: boolean[];
-  readonly spread: boolean[];
+  readonly elements: TupleElement[];
+  readonly: boolean;
 };
 
 export type LiteralTypeForm = {

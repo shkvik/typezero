@@ -1,7 +1,8 @@
 // What 'new' creates: members and indexes after the parentheses still name
 // the class, a keyword may be the name of a member, '<' after a class
 // without arguments is a comparison unless type arguments close, and the
-// class may be kept in a field of 'this'.
+// class may be kept in a field of 'this'. Arguments may be spread, as in a
+// call.
 const a = new (pick(x)).Shape(1);
 const b = new (pick(x))[0](1);
 const c = new (pick(x))(1).size;
@@ -11,3 +12,5 @@ const f = new Box<int>(1);
 const g = new Box<int>;
 const h = new this.kind(1);
 const i = new this.kinds[0]<int>(1);
+const j = new Box(...sizes);
+const k = new Box(1, ...sizes, 2);

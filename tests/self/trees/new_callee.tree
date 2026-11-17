@@ -1,76 +1,88 @@
 == new_callee.tz
-items 9
-VarDecl 264 const=1 using=0 n=1
-  Declarator 270 "a" form=plain
+items 11
+VarDecl 306 const=1 using=0 n=1
+  Declarator 312 "a" form=plain
     -
-    New 278 "" "" targs=0 n=1 callee=1
-      Member 288 "Shape" opt=0 targs=0
-        Call 279 opt=0 tagged=0 n=1 spread=-
-          Name 279 "pick" targs=0
-          Name 284 "x" targs=0
-      IntLit 294 1 "1"
-VarDecl 298 const=1 using=0 n=1
-  Declarator 304 "b" form=plain
+    New 320 "" "" targs=0 n=1 callee=1 spread=-
+      Member 330 "Shape" opt=0 targs=0
+        Call 321 opt=0 tagged=0 n=1 spread=-
+          Name 321 "pick" targs=0
+          Name 326 "x" targs=0
+      IntLit 336 1 "1"
+VarDecl 340 const=1 using=0 n=1
+  Declarator 346 "b" form=plain
     -
-    New 312 "" "" targs=0 n=1 callee=1
-      Index 321 opt=0
-        Call 313 opt=0 tagged=0 n=1 spread=-
-          Name 313 "pick" targs=0
-          Name 318 "x" targs=0
-        IntLit 322 0 "0"
-      IntLit 325 1 "1"
-VarDecl 329 const=1 using=0 n=1
-  Declarator 335 "c" form=plain
+    New 354 "" "" targs=0 n=1 callee=1 spread=-
+      Index 363 opt=0
+        Call 355 opt=0 tagged=0 n=1 spread=-
+          Name 355 "pick" targs=0
+          Name 360 "x" targs=0
+        IntLit 364 0 "0"
+      IntLit 367 1 "1"
+VarDecl 371 const=1 using=0 n=1
+  Declarator 377 "c" form=plain
     -
-    Member 356 "size" opt=0 targs=0
-      New 343 "" "" targs=0 n=1 callee=1
-        Call 344 opt=0 tagged=0 n=1 spread=-
-          Name 344 "pick" targs=0
-          Name 349 "x" targs=0
-        IntLit 353 1 "1"
-VarDecl 362 const=1 using=0 n=1
-  Declarator 368 "d" form=plain
+    Member 398 "size" opt=0 targs=0
+      New 385 "" "" targs=0 n=1 callee=1 spread=-
+        Call 386 opt=0 tagged=0 n=1 spread=-
+          Name 386 "pick" targs=0
+          Name 391 "x" targs=0
+        IntLit 395 1 "1"
+VarDecl 404 const=1 using=0 n=1
+  Declarator 410 "d" form=plain
     -
-    New 376 "shapes" "default" targs=0 n=1 callee=0
-      IntLit 391 1 "1"
-VarDecl 395 const=1 using=0 n=1
-  Declarator 401 "e" form=plain
+    New 418 "shapes" "default" targs=0 n=1 callee=0 spread=-
+      IntLit 433 1 "1"
+VarDecl 437 const=1 using=0 n=1
+  Declarator 443 "e" form=plain
     -
-    Binary 413 12 src=405-420
-      New 409 "Box" "" targs=0 n=0 callee=0
-      Name 415 "limit" targs=0
-VarDecl 422 const=1 using=0 n=1
-  Declarator 428 "f" form=plain
+    Binary 455 12 src=447-462
+      New 451 "Box" "" targs=0 n=0 callee=0 spread=-
+      Name 457 "limit" targs=0
+VarDecl 464 const=1 using=0 n=1
+  Declarator 470 "f" form=plain
     -
-    New 436 "Box" "" targs=1 n=1 callee=0
-      Type 440 Name "int" src=- n=0
-      IntLit 445 1 "1"
-VarDecl 449 const=1 using=0 n=1
-  Declarator 455 "g" form=plain
+    New 478 "Box" "" targs=1 n=1 callee=0 spread=-
+      Type 482 Name "int" src=- n=0
+      IntLit 487 1 "1"
+VarDecl 491 const=1 using=0 n=1
+  Declarator 497 "g" form=plain
     -
-    New 463 "Box" "" targs=1 n=0 callee=0
-      Type 467 Name "int" src=- n=0
-VarDecl 473 const=1 using=0 n=1
-  Declarator 479 "h" form=plain
+    New 505 "Box" "" targs=1 n=0 callee=0 spread=-
+      Type 509 Name "int" src=- n=0
+VarDecl 515 const=1 using=0 n=1
+  Declarator 521 "h" form=plain
     -
-    New 487 "" "" targs=0 n=1 callee=1
-      Member 492 "kind" opt=0 targs=0
-        Name 487 "this" targs=0
-      IntLit 497 1 "1"
-VarDecl 501 const=1 using=0 n=1
-  Declarator 507 "i" form=plain
+    New 529 "" "" targs=0 n=1 callee=1 spread=-
+      Member 534 "kind" opt=0 targs=0
+        Name 529 "this" targs=0
+      IntLit 539 1 "1"
+VarDecl 543 const=1 using=0 n=1
+  Declarator 549 "i" form=plain
     -
-    New 515 "" "" targs=1 n=1 callee=1
-      Index 525 opt=0
-        Member 520 "kinds" opt=0 targs=0
-          Name 515 "this" targs=0
-        IntLit 526 0 "0"
-      Type 529 Name "int" src=- n=0
-      IntLit 534 1 "1"
+    New 557 "" "" targs=1 n=1 callee=1 spread=-
+      Index 567 opt=0
+        Member 562 "kinds" opt=0 targs=0
+          Name 557 "this" targs=0
+        IntLit 568 0 "0"
+      Type 571 Name "int" src=- n=0
+      IntLit 576 1 "1"
+VarDecl 580 const=1 using=0 n=1
+  Declarator 586 "j" form=plain
+    -
+    New 594 "Box" "" targs=0 n=1 callee=0 spread=1
+      Name 601 "sizes" targs=0
+VarDecl 609 const=1 using=0 n=1
+  Declarator 615 "k" form=plain
+    -
+    New 623 "Box" "" targs=0 n=3 callee=0 spread=010
+      IntLit 627 1 "1"
+      Name 633 "sizes" targs=0
+      IntLit 640 2 "2"
 imports 0
 exports 0
 fields 0
-constants 9
+constants 11
   "a" 0
   "b" 0
   "c" 0
@@ -80,3 +92,5 @@ constants 9
   "g" 0
   "h" 0
   "i" 0
+  "j" 0
+  "k" 0

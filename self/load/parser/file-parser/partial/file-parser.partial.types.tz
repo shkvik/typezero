@@ -4,6 +4,7 @@ import { TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
   TemplateTypeForm,
+  TupleElement,
   TupleTypeForm,
   TypeKind,
   TypeRef,
@@ -205,7 +206,7 @@ partial class FileParser {
     const form = ref.form;
 
     if (form.kind == TypeKind.Tuple) {
-      form.readonly = ref.args.map((arg) => true);
+      form.readonly = true;
     } else if (form.kind != TypeKind.Array) {
       this.cursor.report(keyword.start, Code.ReadonlyOnlyArrays);
     }
@@ -576,10 +577,11 @@ partial class FileParser {
     const bracket = this.cursor.peek();
     const ref = this.typeRef(bracket.start);
 
+    const elements: TupleElement[] = [];
     const tuple: TupleTypeForm = {
       kind: TypeKind.Tuple,
-      readonly: [],
-      spread: [],
+      elements,
+      readonly: false,
     };
 
     ref.form = tuple;
@@ -592,11 +594,9 @@ partial class FileParser {
       if (this.cursor.atName() && next.kind == TokenKind.Colon) {
         this.cursor.skip(2);
       }
-      const element = this.type();
+      const type = this.type();
 
-      ref.args.push(element);
-      tuple.readonly.push(false);
-      tuple.spread.push(spread);
+      elements.push({ type, spread });
 
       if (this.cursor.is(TokenKind.Question)) {
         const token = this.cursor.peek();

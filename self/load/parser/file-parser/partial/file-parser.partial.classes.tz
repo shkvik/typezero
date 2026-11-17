@@ -58,6 +58,7 @@ partial class FileParser {
       isPartial: false,
       base: extended.base,
       baseExpr: extended.baseExpr,
+      baseArgs: extended.baseArgs,
       interfaces,
       fields: [],
       methods: [],
@@ -87,19 +88,20 @@ partial class FileParser {
 
   private classBase(expression: boolean): ClassBase {
     if (!this.cursor.accept(TokenKind.Extends)) {
-      return {};
+      return { baseArgs: [] };
     }
 
     if (this.valueBaseAhead()) {
       const baseExpr = this.callOrMember();
+      const baseArgs = this.baseTypeArguments();
 
-      return { baseExpr };
+      return { baseExpr, baseArgs };
     }
 
     const word = this.cursor.peek();
     const base = this.primaryType();
     if (!expression || base.form.kind != TypeKind.Name) {
-      return { base };
+      return { base, baseArgs: [] };
     }
 
     const baseExpr: Expr = {
@@ -110,7 +112,15 @@ partial class FileParser {
       typeArgs: [],
     };
 
-    return { base, baseExpr };
+    return { base, baseExpr, baseArgs: [] };
+  }
+
+  private baseTypeArguments(): TypeRef[] {
+    if (!this.cursor.is(TokenKind.Less)) {
+      return [];
+    }
+
+    return this.typeArguments();
   }
 
   private valueBaseAhead(): boolean {

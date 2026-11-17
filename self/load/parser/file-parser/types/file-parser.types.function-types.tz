@@ -1,6 +1,8 @@
-import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import { FunctionTypeParam } from "../../../../program/ast/types/ast.types.types.tz";
 
 export type Signature = {
-  readonly type: TypeRef;
+  readonly loc: int;
+  readonly params: FunctionTypeParam[];
+  readonly rest: boolean;
   readonly complete: boolean;
 };

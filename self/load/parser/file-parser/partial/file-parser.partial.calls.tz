@@ -8,6 +8,7 @@ import {
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
   ArrayElement,
+  CallArgument,
   Expr,
   ExprKind,
   MemberExpr,
@@ -17,23 +18,19 @@ import {
   UnaryOp,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { ExpressionPlace } from "../types/file-parser.types.context.tz";
-import { Arguments } from "../types/file-parser.types.calls.tz";
 
 partial class FileParser {
-  private arguments(): Arguments {
+  private arguments(): CallArgument[] {
     const outer = this.context;
 
     this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
-    const args: Expr[] = [];
-    const spread: boolean[] = [];
+    const args: CallArgument[] = [];
 
     while (this.cursor.insideList(TokenKind.RParen)) {
-      const spreads = this.cursor.accept(TokenKind.Ellipsis);
+      const spread = this.cursor.accept(TokenKind.Ellipsis);
+      const expr = this.expression();
 
-      spread.push(spreads);
-      const arg = this.expression();
-
-      args.push(arg);
+      args.push({ expr, spread });
       if (!this.cursor.accept(TokenKind.Comma)) {
         break;
       }
@@ -41,11 +38,8 @@ partial class FileParser {
 
     this.cursor.expect(TokenKind.RParen, Code.ExpectedArgumentsClose);
     this.context = outer;
-    if (!spread.includes(true)) {
-      return { args, spread: [] };
-    }
 
-    return { args, spread };
+    return args;
   }
 
   private indexInside(): Expr {
@@ -183,14 +177,13 @@ partial class FileParser {
 
   private callLink(callee: Expr, optional: boolean): Expr {
     this.cursor.next();
-    const list = this.arguments();
+    const args = this.arguments();
 
     return {
       kind: ExprKind.Call,
       loc: callee.loc,
       callee,
-      args: list.args,
-      spread: list.spread,
+      args,
       optional,
       tagged: false,
     };
@@ -266,10 +259,10 @@ partial class FileParser {
       loc: template.loc,
       elements,
     };
-    const args: Expr[] = [texts];
+    const args: CallArgument[] = [{ expr: texts, spread: false }];
 
     for (const part of template.exprs) {
-      args.push(part);
+      args.push({ expr: part, spread: false });
     }
 
     return {
@@ -277,7 +270,6 @@ partial class FileParser {
       loc: tag.loc,
       callee: tag,
       args,
-      spread: [],
       optional: false,
       tagged: true,
     };
@@ -296,27 +288,14 @@ partial class FileParser {
     return object.kind == ExprKind.Name && object.known == KnownName.String;
   }
 
-  private newArguments(): Expr[] {
-    const args: Expr[] = [];
-
+  private newArguments(): CallArgument[] {
     if (!this.cursor.accept(TokenKind.LParen)) {
       this.rejectOptionalAfterNew();
 
-      return args;
+      return [];
     }
 
-    while (this.cursor.insideList(TokenKind.RParen)) {
-      const arg = this.expression();
-
-      args.push(arg);
-      if (!this.cursor.accept(TokenKind.Comma)) {
-        break;
-      }
-    }
-
-    this.cursor.expect(TokenKind.RParen, Code.ExpectedArgumentsClose);
-
-    return args;
+    return this.arguments();
   }
 
   private rejectOptionalAfterNew(): void {

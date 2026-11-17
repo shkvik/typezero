@@ -92,6 +92,7 @@ export type ClassDecl = {
   isPartial: boolean;
   readonly base?: TypeRef;
   readonly baseExpr?: Expr;
+  readonly baseArgs: TypeRef[];
   readonly interfaces: TypeRef[];
   readonly fields: ClassField[];
   readonly methods: FunctionDecl[];

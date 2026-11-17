@@ -349,18 +349,10 @@ partial class FileParser {
       return undefined;
     }
 
-    const signature = parsed.type;
     const result = this.type();
-    signature.args.push(result);
+    const type = this.functionTypeOf(parsed, result);
 
-    return {
-      name,
-      loc,
-      optional,
-      readonly: true,
-      method: true,
-      type: signature,
-    };
+    return { name, loc, optional, readonly: true, method: true, type };
   }
 
   private endObjectTypeMember(code: Code): boolean {

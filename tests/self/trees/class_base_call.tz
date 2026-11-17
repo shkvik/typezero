@@ -9,3 +9,8 @@ const Named = class extends named<string>(Base) { };
 class Plain extends Box<int> { }
 
 class Listed extends lists.of<Entry>(Base) { }
+
+// Type arguments after a base that is a value belong to the base class.
+class Mapped extends mixin(Base)<string, int> { }
+
+class Scoped extends shapes.Box<int> implements Sized { }

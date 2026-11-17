@@ -1,6 +1,7 @@
 import { Dumper } from "../ast-dump.tz";
 import {
   BinaryOp,
+  CallArgument,
   Expr,
   ExprKind,
   NewExpr,
@@ -226,6 +227,7 @@ partial class Dumper {
   private dumpNew(expr: NewExpr): void {
     const form = expr.form;
     const counts = `targs=${expr.typeArgs.length} n=${expr.args.length}`;
+    const spread = this.spreadFlags(expr.args);
 
     if (form.kind == NewKind.Named) {
       const name = this.quote(form.name);
@@ -233,24 +235,39 @@ partial class Dumper {
       const member = this.quote(memberText);
       const callee = this.flag(false);
 
-      this.line(`New ${expr.loc} ${name} ${member} ${counts} callee=${callee}`);
+      this.line(
+        `New ${expr.loc} ${name} ${member} ${counts} callee=${callee} ` +
+          `spread=${spread}`,
+      );
       this.nested();
     } else {
       const empty = this.quote("");
       const callee = this.flag(true);
 
-      this.line(`New ${expr.loc} ${empty} ${empty} ${counts} callee=${callee}`);
+      this.line(
+        `New ${expr.loc} ${empty} ${empty} ${counts} callee=${callee} ` +
+          `spread=${spread}`,
+      );
       this.nested();
       this.dumpExpr(form.callee);
     }
 
     this.dumpTypes(expr.typeArgs);
 
-    for (const arg of expr.args) {
-      this.dumpExpr(arg);
+    for (const argument of expr.args) {
+      this.dumpExpr(argument.expr);
     }
 
     this.back();
+  }
+
+  private spreadFlags(args: CallArgument[]): string {
+    const spreads = args.map((argument) => argument.spread);
+    if (!spreads.includes(true)) {
+      return "-";
+    }
+
+    return this.flags(spreads);
   }
 
   private dumpCall(expr: Expr): void {
@@ -260,13 +277,14 @@ partial class Dumper {
       case ExprKind.Call: {
         const optional = this.flag(expr.optional);
         const tagged = this.flag(expr.tagged);
-        const spread = this.flags(expr.spread);
+        const spread = this.spreadFlags(expr.args);
+        const values = expr.args.map((argument) => argument.expr);
 
         this.line(
           `Call ${loc} opt=${optional} tagged=${tagged} ` +
             `n=${expr.args.length} spread=${spread}`,
         );
-        const children = [expr.callee].concat(expr.args);
+        const children = [expr.callee].concat(values);
 
         return this.dumpChildren(children);
       }

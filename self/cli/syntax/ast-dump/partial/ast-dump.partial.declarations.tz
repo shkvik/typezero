@@ -114,7 +114,8 @@ partial class Dumper {
     this.line(
       `Class ${declaration.loc} ${name} abstract=${isAbstract} partial=${isPartial} ` +
         `expr=${expression} generic=${generic} src=${source} ` +
-        `tp=${declaration.typeParams.length} base=${hasBase} baseExpr=${hasBaseExpr} ` +
+        `tp=${declaration.typeParams.length} base=${hasBase} ` +
+        `baseExpr=${hasBaseExpr} baseArgs=${declaration.baseArgs.length} ` +
         `ifaces=${declaration.interfaces.length} dec=${declaration.decorators.length} ` +
         `fields=${declaration.fields.length} methods=${declaration.methods.length} ` +
         `ctors=${declaration.constructors.length}`,
@@ -132,6 +133,7 @@ partial class Dumper {
       this.dumpExpr(baseExpr);
     }
 
+    this.dumpTypes(declaration.baseArgs);
     this.dumpTypes(declaration.interfaces);
 
     for (const field of declaration.fields) {

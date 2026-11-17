@@ -224,12 +224,16 @@ export type UpdateExpr = {
   readonly target: Expr;
 };
 
+export type CallArgument = {
+  readonly expr: Expr;
+  readonly spread: boolean;
+};
+
 export type CallExpr = {
   readonly kind: ExprKind.Call;
   readonly loc: int;
   readonly callee: Expr;
-  readonly args: Expr[];
-  readonly spread: boolean[];
+  readonly args: CallArgument[];
   readonly optional: boolean;
   readonly tagged: boolean;
 };
@@ -252,7 +256,7 @@ export type NewExpr = {
   readonly loc: int;
   readonly form: NewForm;
   readonly typeArgs: TypeRef[];
-  readonly args: Expr[];
+  readonly args: CallArgument[];
 };
 
 export type ConditionalExpr = {
