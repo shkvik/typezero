@@ -24,7 +24,7 @@ For 305
       Member 319 "test" opt=0 targs=0
         RegexLit 314 "r" "g" written=4
       Name 324 "text" targs=0
-ForOf 331 const=1 keys=0 await=0
+ForOf 331 const=1 using=0 keys=0 await=0
   Declarator 342 "part" form=plain
     -
     -
@@ -38,7 +38,7 @@ ForOf 331 const=1 keys=0 await=0
     Call 373 opt=0 tagged=0 n=1 spread=-
       Name 373 "use" targs=0
       Name 377 "part" targs=0
-ForOf 384 const=1 keys=0 await=1
+ForOf 384 const=1 using=0 keys=0 await=1
   Declarator 401 "part" form=plain
     -
     -

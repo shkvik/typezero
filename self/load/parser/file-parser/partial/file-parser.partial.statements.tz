@@ -61,7 +61,7 @@ partial class FileParser {
       case TokenKind.Export:
         return this.exportDecl(topLevel);
       case TokenKind.Class:
-        return this.classStatement(loc);
+        return this.classDeclaration();
       case TokenKind.Namespace:
       case TokenKind.Module:
         return this.groupingStatement(token);
@@ -184,14 +184,6 @@ partial class FileParser {
     return this.statement(topLevel);
   }
 
-  private classStatement(loc: int): Stmt {
-    if (this.nameOnLine()) {
-      return this.classDecl(false);
-    }
-
-    return this.expressionStatement(loc);
-  }
-
   private groupingStatement(token: Token): Stmt {
     if (this.groupingAhead()) {
       return this.skipDeclaration(token.start, Code.GroupingNotSupported, {
@@ -239,7 +231,7 @@ partial class FileParser {
     }
 
     this.cursor.next();
-    const declaration = this.classDecl(false);
+    const declaration = this.classDeclaration();
 
     declaration.isAbstract = true;
 
@@ -297,7 +289,7 @@ partial class FileParser {
     }
 
     this.cursor.next();
-    const declaration = this.classDecl(false);
+    const declaration = this.classDeclaration();
 
     declaration.isPartial = true;
 

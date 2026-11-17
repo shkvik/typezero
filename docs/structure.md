@@ -163,13 +163,13 @@ self/             компилятор на tz, пробный (порт compile
                   вид функции, место выражения, место типа); сверка деревьев с C++ — скрытая
                   `tz syntax tree|time|hold|read`; `tzparse each <файл>` проверяет каждую
                   строку как отдельный файл (для перебора испорченных программ);
-                  тесты — tests/self/errors/TZxxxx.tz (исходник
+                  тесты — self/test/errors/TZxxxx.tz (исходник
                   с ошибкой этого кода) + TZxxxx.err (точный вывод `tzparse check`), гоняет
-                  tests/self.cmake: self/build собирает self/, self/errors/<код> сверяет
+                  self/test/check.cmake (регистрация — self/test/CMakeLists.txt): self/build собирает self/, self/errors/<код> сверяет
                   вывод, self/codes следит, что у каждого кода из code.tz есть тест;
-                  tests/self/recovery/<имя>.tz + .err — несколько ошибок или ошибка среди
+                  self/test/recovery/<имя>.tz + .err — несколько ошибок или ошибка среди
                   верного кода: каждая печатается один раз, следствий нет;
-                  tests/self/trees/<имя>.tz + .tree — верный код, в котором легко собрать
+                  self/test/trees/<имя>.tz + .tree — верный код, в котором легко собрать
                   не то дерево: точный вывод `tzparse tree`, без ошибок; тест файла
                   объявлений — <имя>.d.tz рядом с его модулем <имя>.tz: проверяется .d.tz;
                   перебор языка — self/test/*.py (тесты self/test/<скрипт>, метка

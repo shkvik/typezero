@@ -5,6 +5,6 @@ tests/**/*.html -text
 tests/**/*.json -text
 tests/**/*.bin -text
 tests/**/*.in -text
-# The sources of tests/self keep the same bytes on every system: the places
+# The sources of the tests in self/test keep the same bytes on every system: the places
 # in the messages expected for them are counted in these bytes.
-tests/self/**/*.tz -text
+self/test/**/*.tz -text

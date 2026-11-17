@@ -1,0 +1,18 @@
+class {
+  size: int;
+}
+
+abstract class {
+  abstract area(): double;
+}
+
+@sealed
+class extends Shape {
+  area(): double {
+    return 0.0;
+  }
+}
+
+export abstract class implements Sized { }
+
+const last = class { };

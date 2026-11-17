@@ -89,12 +89,12 @@ partial class Dumper {
         return this.back();
       case StmtKind.ForOf: {
         const isConst = this.flag(stmt.isConst);
+        const isUsing = this.flag(stmt.isUsing);
         const keys = this.flag(stmt.keys);
         const isAwait = this.flag(stmt.isAwait);
+        const words = `const=${isConst} using=${isUsing}`;
 
-        this.line(
-          `ForOf ${loc} const=${isConst} keys=${keys} await=${isAwait}`,
-        );
+        this.line(`ForOf ${loc} ${words} keys=${keys} await=${isAwait}`);
         this.nested();
         this.dumpDeclarator(stmt.binding);
         this.dumpExpr(stmt.iterable);

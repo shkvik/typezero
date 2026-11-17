@@ -52,3 +52,4 @@ add_subdirectory(library)
 
 enable_testing()
 add_subdirectory(tests)
+add_subdirectory(self/test)

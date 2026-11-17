@@ -157,6 +157,9 @@ export const kMessages: Record<Code, Message> = {
   [Code.CaseValueList]: {
     text: "'case {word}, {other}:' does not mean \"{word} or {other}\": write a 'case' for each value, 'case {word}:' and 'case {other}:' one after another",
   },
+  [Code.UsingInForIn]: {
+    text: "'using' cannot declare the key of 'for...in': a key is a string and holds nothing to release; write 'for (const k in ...)'",
+  },
   [Code.BlockNotClosed]: {
     text: "the block that starts at line {word} has no '}': this line stands to the left of the block, so the '}' is missing before it",
   },
@@ -555,6 +558,9 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.ExpectedInterfaceName]: {
     text: "expected the name of the interface after 'interface', found {found}",
+  },
+  [Code.ClassNeedsName]: {
+    text: "a class needs a name here: write 'class Name { ... }'; only a class used as a value, as in 'const Name = class { ... }', goes without one",
   },
   [Code.ExpectedAfterImportStar]: {
     text: "expected {expected} after 'import *', found {found}",

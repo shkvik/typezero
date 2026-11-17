@@ -14,7 +14,11 @@ import {
   VarDeclStmt,
 } from "../../../../program/ast/types/ast.types.statements.tz";
 import { ExpressionPlace } from "../types/file-parser.types.context.tz";
-import { ForTarget, ForTargetKind } from "../types/file-parser.types.loops.tz";
+import {
+  ForDeclaration,
+  ForTarget,
+  ForTargetKind,
+} from "../types/file-parser.types.loops.tz";
 import { Pattern } from "../types/file-parser.types.patterns.tz";
 
 partial class FileParser {
@@ -58,21 +62,38 @@ partial class FileParser {
 
     this.cursor.expect(TokenKind.LParen, Code.ExpectedAfterFor);
     const head = this.cursor.peek();
+    if (this.forDeclarationAhead()) {
+      return this.forDeclared(loc, awaitLoc);
+    }
+    if (head.kind == TokenKind.Semi) {
+      return this.classicFor(loc, awaitLoc, undefined);
+    }
+
+    const expr = this.sequence();
+    const init: Stmt = { kind: StmtKind.Expr, loc: head.start, expr };
+
+    return this.classicFor(loc, awaitLoc, init);
+  }
+
+  private forDeclarationAhead(): boolean {
+    const head = this.cursor.peek();
 
     switch (head.kind) {
       case TokenKind.Let:
       case TokenKind.Const:
       case TokenKind.Var:
-        return this.forDeclared(loc, awaitLoc);
-      case TokenKind.Semi:
-        return this.classicFor(loc, awaitLoc, undefined);
-      default: {
-        const expr = this.sequence();
-        const init: Stmt = { kind: StmtKind.Expr, loc: head.start, expr };
-
-        return this.classicFor(loc, awaitLoc, init);
-      }
+        return true;
+      case TokenKind.Using:
+        return this.forUsingAhead();
+      default:
+        return false;
     }
+  }
+
+  private forUsingAhead(): boolean {
+    const next = this.cursor.lookahead();
+
+    return this.nameOnLine() && next.kind != TokenKind.Of;
   }
 
   private forAwaitLoc(): int | undefined {
@@ -91,13 +112,15 @@ partial class FileParser {
       this.cursor.error(head.start, Code.VarNotSupported);
     }
 
-    const isConst = head.kind == TokenKind.Const;
+    const isUsing = head.kind == TokenKind.Using;
+    const isConst = head.kind == TokenKind.Const || isUsing;
+    const declaration: ForDeclaration = { loc: head.start, isConst, isUsing };
     const target = this.forTarget();
     if (target == undefined) {
       return this.brokenFor(loc);
     }
     if (this.cursor.is(TokenKind.Of) || this.cursor.is(TokenKind.In)) {
-      return this.forOf(loc, awaitLoc, isConst, target);
+      return this.forOf(loc, awaitLoc, declaration, target);
     }
 
     const decls = this.forDeclarators(target, isConst);
@@ -109,7 +132,7 @@ partial class FileParser {
       kind: StmtKind.VarDecl,
       loc: head.start,
       isConst,
-      isUsing: false,
+      isUsing,
       decls,
     };
 
@@ -213,13 +236,18 @@ partial class FileParser {
   private forOf(
     loc: int,
     awaitLoc: int | undefined,
-    isConst: boolean,
+    declaration: ForDeclaration,
     target: ForTarget,
   ): Stmt {
     const word = this.cursor.next();
     const keys = word.kind == TokenKind.In;
     const isAwait = awaitLoc != undefined;
+    const isConst = declaration.isConst;
+    const isUsing = declaration.isUsing;
 
+    if (keys && isUsing) {
+      this.cursor.report(declaration.loc, Code.UsingInForIn);
+    }
     if (keys && target.kind == ForTargetKind.Pattern) {
       this.cursor.report(target.pattern.loc, Code.ForInKeyPattern);
     }
@@ -239,6 +267,7 @@ partial class FileParser {
       kind: StmtKind.ForOf,
       loc,
       isConst,
+      isUsing,
       keys,
       isAwait,
       binding,

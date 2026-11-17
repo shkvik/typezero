@@ -27,8 +27,10 @@ pattern is a block inside.  When the value is an array literal with a value
 for every name and neither it nor the pattern has '...' or a hole, each of
 its values gets a hidden constant of its own ('[v, w] = [w, v]' swaps).
 
-'using' declares like 'const' and always has a value; 'for (using a of b)'
-and 'await using' are not generated: tz has neither.
+'using' declares like 'const' and always has a value.  It also declares the
+variable of a loop: 'for (using v of a)', 'for await (using v of a)' and
+'for (using i = a; b; c)'; 'for (using v in a)' is refused, a key holds
+nothing to release.  'await using' is not generated: tz does not have it.
 
 A class without a name that is the value of a variable gets the name of the
 variable in the tree ('const v = class { }' is the class "v"): that is how
@@ -361,11 +363,12 @@ def for_empty(body):
                 open_if=body.open_if)
 
 
-def for_three(declares):
+def for_three(word):
     def build(init, cond, step, body):
-        if declares:
-            head = "let i = " + without_in(init, ASSIGN)
-            first = S("VarDecl const=0 using=0 n=1",
+        if word:
+            head = "%s i = %s" % (word, without_in(init, ASSIGN))
+            first = S("VarDecl const=%d using=%d n=1" % (word == "using",
+                                                       word == "using"),
                       declarator("i", init.shape))
         else:
             head = without_in(init)
@@ -373,7 +376,7 @@ def for_three(declares):
         text = "for (%s; %s; %s) %s" % (head, written(cond), written(step),
                                         body.text)
         shape = S("For", first, cond.shape, step.shape, body.shape)
-        kind = "for(let;;)" if declares else "for(x;;)"
+        kind = "for(%s;;)" % (word or "x")
         return Stmt(text, shape, kind, inside_loop(body, init, cond, step),
                     open_if=body.open_if)
     return build
@@ -384,8 +387,8 @@ def for_of(keyword, word, is_await):
         wait = "await " if is_await else ""
         text = "for %s(%s v %s %s) %s" % (wait, keyword, word,
                                           written(iterable, ASSIGN), body.text)
-        label = "ForOf const=%d keys=%d await=%d" % (
-            keyword == "const", word == "in", is_await)
+        label = "ForOf const=%d using=%d keys=%d await=%d" % (
+            keyword != "let", keyword == "using", word == "in", is_await)
         shape = S(label, declarator("v", MISSING), iterable.shape, body.shape)
         free = inside_loop(body, iterable)
         if is_await:
@@ -400,7 +403,7 @@ def for_of_pattern(iterable, body):
                                             body.text)
     parts = S("VarDecl const=1 using=0 n=2", declarator("v", element(0)),
               declarator("w", element(1)))
-    shape = S("ForOf const=1 keys=0 await=0",
+    shape = S("ForOf const=1 using=0 keys=0 await=0",
               S('Declarator "%" form=array 0 0', MISSING, MISSING),
               iterable.shape, S("Block n=2", parts, body.shape))
     return Stmt(text, shape, "for const[] of", inside_loop(body, iterable),
@@ -545,12 +548,16 @@ def constructs():
     add("while", ["expr", "body"], while_)
     add("do", ["body", "expr"], do_while)
     add("for(;;)", ["body"], for_empty)
-    add("for(x;;)", ["expr", "expr", "expr", "body"], for_three(False))
-    add("for(let;;)", ["expr", "expr", "expr", "body"], for_three(True))
+    add("for(x;;)", ["expr", "expr", "expr", "body"], for_three(None))
+    add("for(let;;)", ["expr", "expr", "expr", "body"], for_three("let"))
+    add("for(using;;)", ["expr", "expr", "expr", "body"],
+        for_three("using"))
     add("for const of", ["expr", "body"], for_of("const", "of", False))
     add("for let of", ["expr", "body"], for_of("let", "of", False))
     add("for const in", ["expr", "body"], for_of("const", "in", False))
     add("for await", ["expr", "body"], for_of("const", "of", True))
+    add("for using of", ["expr", "body"], for_of("using", "of", False))
+    add("for await using", ["expr", "body"], for_of("using", "of", True))
     add("for const[] of", ["expr", "body"], for_of_pattern)
     add("switch{}", ["expr"], switch_empty)
     add("switch case", ["expr", "expr", "item"], switch_case)

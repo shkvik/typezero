@@ -1,0 +1,12 @@
+class_without_name.tz:1:7: error TZ1556: a class needs a name here: write 'class Name { ... }'; only a class used as a value, as in 'const Name = class { ... }', goes without one
+class {
+      ^
+class_without_name.tz:5:16: error TZ1556: a class needs a name here: write 'class Name { ... }'; only a class used as a value, as in 'const Name = class { ... }', goes without one
+abstract class {
+               ^
+class_without_name.tz:10:7: error TZ1556: a class needs a name here: write 'class Name { ... }'; only a class used as a value, as in 'const Name = class { ... }', goes without one
+class extends Shape {
+      ^
+class_without_name.tz:16:23: error TZ1556: a class needs a name here: write 'class Name { ... }'; only a class used as a value, as in 'const Name = class { ... }', goes without one
+export abstract class implements Sized { }
+                      ^

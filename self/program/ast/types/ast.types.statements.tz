@@ -87,6 +87,7 @@ export type ForOfStmt = {
   readonly kind: StmtKind.ForOf;
   readonly loc: int;
   readonly isConst: boolean;
+  readonly isUsing: boolean;
   readonly keys: boolean;
   readonly isAwait: boolean;
   readonly binding: VarDeclarator;

@@ -1,0 +1,3 @@
+TZ1143.tz:1:6: error TZ1143: 'using' cannot declare the key of 'for...in': a key is a string and holds nothing to release; write 'for (const k in ...)'
+for (using key in files) {}
+     ^

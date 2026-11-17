@@ -1,0 +1,17 @@
+for (using file of files) {
+  file.read();
+}
+
+for await (using file of opened) {
+  file.read();
+}
+
+for (using reader = open(); reader.more(); ) {
+  reader.next();
+}
+
+for (using.start(); using.busy(); ) {
+  using.step();
+}
+
+for (using = 0; using < 3; using += 1) {}

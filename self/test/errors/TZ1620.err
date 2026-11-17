@@ -1,3 +1,3 @@
 TZ1620.tz:1:1: error TZ1620: a part of a class is not exported: 'export' goes on the class itself, where it is declared
-export partial class {}
+export partial class Point {}
 ^

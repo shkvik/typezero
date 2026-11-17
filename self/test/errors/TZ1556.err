@@ -1,0 +1,3 @@
+TZ1556.tz:1:7: error TZ1556: a class needs a name here: write 'class Name { ... }'; only a class used as a value, as in 'const Name = class { ... }', goes without one
+class { }
+      ^

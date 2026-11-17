@@ -43,6 +43,22 @@ import {
 import { kThisName } from "../const/file-parser.const.classes.tz";
 
 partial class FileParser {
+  private classDeclaration(): ClassDecl {
+    if (!this.classNameAhead()) {
+      const next = this.cursor.lookahead();
+
+      this.cursor.report(next.start, Code.ClassNeedsName);
+    }
+
+    return this.classDecl(false);
+  }
+
+  private classNameAhead(): boolean {
+    const next = this.cursor.lookahead();
+
+    return kTokenTable.isName(next.kind);
+  }
+
   private classDecl(expression: boolean): ClassDecl {
     const keyword = this.cursor.next();
     const word = this.classNameWord();

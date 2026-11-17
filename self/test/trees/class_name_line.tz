@@ -1,0 +1,8 @@
+class
+  Point { }
+
+abstract class
+  Shape { }
+
+export class
+  Size { }

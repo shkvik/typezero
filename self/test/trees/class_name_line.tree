@@ -1,0 +1,11 @@
+== class_name_line.tz
+items 3
+Class 8 "Point" abstract=0 partial=0 expr=0 generic=0 src=0-17 tp=0 base=0 baseExpr=0 baseArgs=0 ifaces=0 dec=0 fields=0 methods=0 ctors=0
+Class 36 "Shape" abstract=1 partial=0 expr=0 generic=0 src=28-45 tp=0 base=0 baseExpr=0 baseArgs=0 ifaces=0 dec=0 fields=0 methods=0 ctors=0
+Class 62 "Size" abstract=0 partial=0 expr=0 generic=0 src=54-70 tp=0 base=0 baseExpr=0 baseArgs=0 ifaces=0 dec=0 fields=0 methods=0 ctors=0
+imports 0
+exports 1
+Export 62 0 "" -1 1
+  Name "Size" 62 "Size" 62
+fields 0
+constants 0

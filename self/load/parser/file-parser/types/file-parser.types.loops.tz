@@ -6,6 +6,12 @@ export enum ForTargetKind {
   Pattern,
 }
 
+export type ForDeclaration = {
+  readonly loc: int;
+  readonly isConst: boolean;
+  readonly isUsing: boolean;
+};
+
 export type ForTarget =
   | { readonly kind: ForTargetKind.Name; readonly binding: Binding }
   | { readonly kind: ForTargetKind.Pattern; readonly pattern: Pattern };

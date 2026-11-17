@@ -3,7 +3,7 @@ answers with the error of that mistake and nothing else.
 
     python wronggen.py <tzparse.exe> <work dir> [code ...]
 
-The mistakes are the sources of tests/self/errors/TZxxxx.tz, one per error
+The mistakes are the sources of errors/TZxxxx.tz here, one per error
 code.  A source is used whole as a statement; when it is a declaration of a
 variable, of a type or of a class with one member, its value, its type or
 its member is used as an expression, a type or a member too.  The places
@@ -277,7 +277,7 @@ def main():
     wanted = sys.argv[3:]
     os.makedirs(work, exist_ok=True)
     here = os.path.dirname(os.path.abspath(__file__))
-    root = os.path.join(here, "..", "..", "tests", "self", "errors")
+    root = os.path.join(here, "errors")
     mistakes = read_mistakes(root, wanted)
 
     listed = list(mistakes.items())

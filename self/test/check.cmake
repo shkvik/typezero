@@ -1,26 +1,27 @@
-# Tests of the compiler written in tz (self/).
+# Tests of the compiler written in tz (self/); CMakeLists.txt here registers
+# them.
 #
 #   MODE=build: `tz build` of self/main.tz into EXE must succeed. The other
 #     modes run that EXE.
 #
-#   MODE=error: tests/self/errors/CODE.tz is a source with a mistake, named
+#   MODE=error: self/test/errors/CODE.tz is a source with a mistake, named
 #     after the code of the error it is about (TZ1221.tz). `EXE check CODE.tz`,
 #     run in the directory of SRC, must exit with 1 and print to stderr
 #     exactly CODE.err, and one of the errors must have that code. With
 #     ACCEPT=ON what it prints is written to CODE.err instead: after a change
 #     of messages, read the difference before committing it.
 #
-#   MODE=recovery: tests/self/recovery/NAME.tz has several mistakes, or one
+#   MODE=recovery: self/test/recovery/NAME.tz has several mistakes, or one
 #     and correct code around it. `EXE check NAME.tz` must print exactly
 #     NAME.err: every mistake once, and nothing that only follows from an
 #     earlier one. ACCEPT=ON works as for MODE=error.
 #
-#   MODE=tree: tests/self/trees/NAME.tz is correct code whose tree is easy to
+#   MODE=tree: self/test/trees/NAME.tz is correct code whose tree is easy to
 #     get wrong. `EXE tree NAME.tz` must report no error and print exactly
 #     NAME.tree. ACCEPT=ON works as for MODE=error.
 #
 #   MODE=codes: every code of self/diagnostic/code.tz has its test in
-#     tests/self/errors, and every test there is named after a code. A code no
+#     self/test/errors, and every test there is named after a code. A code no
 #     source can get does not stay in code.tz.
 #
 #   A test of a declaration file: when NAME.d.tz is next to NAME.tz, the file
@@ -122,11 +123,11 @@ elseif(MODE STREQUAL "codes")
   foreach(line IN LISTS lines)
     string(REGEX MATCH "TZ[0-9]+" code "${line}")
     list(APPEND codes ${code})
-    if(NOT EXISTS ${ROOT}/tests/self/errors/${code}.tz)
-      string(APPEND problems "${code} has no test tests/self/errors/${code}.tz\n")
+    if(NOT EXISTS ${ROOT}/self/test/errors/${code}.tz)
+      string(APPEND problems "${code} has no test self/test/errors/${code}.tz\n")
     endif()
   endforeach()
-  file(GLOB tests RELATIVE ${ROOT}/tests/self/errors ${ROOT}/tests/self/errors/*)
+  file(GLOB tests RELATIVE ${ROOT}/self/test/errors ${ROOT}/self/test/errors/*)
   foreach(test IN LISTS tests)
     get_filename_component(code ${test} NAME_WE)
     list(FIND codes ${code} known)

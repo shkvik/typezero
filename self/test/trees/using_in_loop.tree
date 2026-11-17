@@ -1,0 +1,67 @@
+== using_in_loop.tz
+items 5
+ForOf 0 const=1 using=1 keys=0 await=0
+  Declarator 11 "file" form=plain
+    -
+    -
+  Name 19 "files" targs=0
+  Block 26 end=43 n=1
+    ExprStmt 30
+      Call 35 opt=0 tagged=0 n=0 spread=-
+        Member 35 "read" opt=0 targs=0
+          Name 30 "file" targs=0
+ForOf 46 const=1 using=1 keys=0 await=1
+  Declarator 63 "file" form=plain
+    -
+    -
+  Name 71 "opened" targs=0
+  Block 79 end=96 n=1
+    ExprStmt 83
+      Call 88 opt=0 tagged=0 n=0 spread=-
+        Member 88 "read" opt=0 targs=0
+          Name 83 "file" targs=0
+For 99
+  VarDecl 104 const=1 using=1 n=1
+    Declarator 110 "reader" form=plain
+      -
+      Call 119 opt=0 tagged=0 n=0 spread=-
+        Name 119 "open" targs=0
+  Call 134 opt=0 tagged=0 n=0 spread=-
+    Member 134 "more" opt=0 targs=0
+      Name 127 "reader" targs=0
+  -
+  Block 144 end=163 n=1
+    ExprStmt 148
+      Call 155 opt=0 tagged=0 n=0 spread=-
+        Member 155 "next" opt=0 targs=0
+          Name 148 "reader" targs=0
+For 166
+  ExprStmt 171
+    Call 177 opt=0 tagged=0 n=0 spread=-
+      Member 177 "start" opt=0 targs=0
+        Name 171 "using" targs=0
+  Call 192 opt=0 tagged=0 n=0 spread=-
+    Member 192 "busy" opt=0 targs=0
+      Name 186 "using" targs=0
+  -
+  Block 202 end=220 n=1
+    ExprStmt 206
+      Call 212 opt=0 tagged=0 n=0 spread=-
+        Member 212 "step" opt=0 targs=0
+          Name 206 "using" targs=0
+For 223
+  ExprStmt 228
+    Assign 234 - src=228-237
+      Name 228 "using" targs=0
+      IntLit 236 0 "0"
+  Binary 245 12 src=239-248
+    Name 239 "using" targs=0
+    IntLit 247 3 "3"
+  Assign 256 0 src=250-260
+    Name 250 "using" targs=0
+    IntLit 259 1 "1"
+  Block 262 end=263 n=0
+imports 0
+exports 0
+fields 0
+constants 0

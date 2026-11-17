@@ -43,6 +43,7 @@ partial class FileParser {
       case TokenKind.Interface:
         return true;
       case TokenKind.Class:
+        return kTokenTable.isName(next.kind);
       case TokenKind.Type:
         return kTokenTable.isName(next.kind) && !next.newline;
       case TokenKind.Abstract:
@@ -69,7 +70,7 @@ partial class FileParser {
 
       return this.statement(topLevel);
     }
-    if (this.cursor.is(TokenKind.Class) && !this.nameOnLine()) {
+    if (this.cursor.is(TokenKind.Class) && !this.classNameAhead()) {
       const next = this.cursor.lookahead();
 
       this.cursor.report(next.start, Code.ExportedClassNeedsName);
