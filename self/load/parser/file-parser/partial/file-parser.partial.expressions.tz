@@ -92,19 +92,25 @@ partial class FileParser {
 
     const next = this.cursor.tokenAt(closed);
     if (next.kind == TokenKind.Comma) {
-      return false;
+      const afterComma = this.cursor.tokenAt(closed + 1);
+
+      return this.closesStatement(afterComma.kind);
     }
     if (closed == 0) {
       return true;
     }
 
-    switch (next.kind) {
+    return this.closesStatement(next.kind) || next.newline;
+  }
+
+  private closesStatement(kind: TokenKind): boolean {
+    switch (kind) {
       case TokenKind.Semi:
       case TokenKind.RBrace:
       case TokenKind.End:
         return true;
       default:
-        return next.newline;
+        return false;
     }
   }
 
