@@ -99,17 +99,25 @@ library/          весь tz → bin/lib: <тема>/*.tz
 editors/          vscode/ — расширение VS Code; types/ — объявления для будущего плагина tsserver
 self/             компилятор на tz, пробный (порт compiler/load): main.tz — только запуск
                   SyntaxCommand; cli/syntax/ — как compiler/cli/syntax/: syntax-command/
-                  (SyntaxCommand: режимы tokens|tree|time|hold|read, enum SyntaxMode) и
+                  (SyntaxCommand: `tzparse <режим> <file.tz | @list> [repeat]`, режимы
+                  tokens|tree|check|time|hold|read, enum SyntaxMode; check — ошибки разбора
+                  для человека в stderr и код выхода 1) и
                   ast-dump/ (Dumper: дерево текстом для сверки с C++; части — в
                   partial/ast-dump.partial.<часть>.tz: statements, declarations,
                   expressions, types);
                   program/ast/ — дерево разбора: типы узлов — в types/ast.types.<группа>.tz
                   (span, types, expressions, patterns, statements, functions, classes — там же
                   type alias и enum, modules — там же SourceFile; группы ссылаются друг на
-                  друга по кругу); diagnostic/ — коды ошибок (code.tz: enum Code, значения "TZ1101") и
+                  друга по кругу); program/source-lines/ — SourceLines: строки одного текста
+                  (начала строк, двоичный поиск): placeOf(смещение) → SourcePlace { line,
+                  column } с единицы, столбец — в символах, а не в байтах; lineTextAt — текст
+                  строки; indentTo — отступ до места, табуляции строки сохранены;
+                  diagnostic/ — коды ошибок (code.tz: enum Code, значения "TZ1101") и
                   их тексты (message.tz: messageText — подстановка {expected}/{found}/{word};
                   таблица kMessages: Record<Code, Message> — в const/message.const.tz, типы
-                  Details, Message — в types/message.types.tz);
+                  Details, Message — в types/message.types.tz); diagnostic/error-printer/ —
+                  ErrorPrinter: ошибки одного файла как `путь:строка:столбец: error TZ1221:
+                  текст`, под ним строка исходника и `^` под местом;
                   load/token/ — токены, общие для лексера и парсера (TokenKind, KnownName,
                   Token — в types/token.types.tz; в token.tz — класс TokenTable: isName,
                   isKeyword, keywordKind, knownName, spelling; общий экземпляр kTokenTable — в

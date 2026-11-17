@@ -1,0 +1,125 @@
+import { SourcePlace } from "./types/source-lines.types.tz";
+import {
+  kCarriageReturn,
+  kContinuationFirst,
+  kContinuationLast,
+  kLineFeed,
+  kTab,
+} from "./const/source-lines.const.tz";
+
+export class SourceLines {
+  private readonly source: Buffer;
+  private readonly starts: int[];
+
+  public constructor(source: Buffer) {
+    this.source = source;
+    this.starts = [0];
+
+    for (let offset = 0; offset < source.length; offset++) {
+      if (this.byteAt(offset) == kLineFeed) {
+        this.starts.push(offset + 1);
+      }
+    }
+  }
+
+  public placeOf(offset: int): SourcePlace {
+    const index = this.lineIndexAt(offset);
+    const start = this.startOf(index);
+    const before = this.charactersBetween(start, offset);
+
+    return { line: index + 1, column: before + 1 };
+  }
+
+  public lineTextAt(offset: int): string {
+    const index = this.lineIndexAt(offset);
+    const start = this.startOf(index);
+    const end = this.endOf(index);
+
+    return this.source.toString("utf8", start, end);
+  }
+
+  public indentTo(offset: int): string {
+    const index = this.lineIndexAt(offset);
+    const start = this.startOf(index);
+    let indent = "";
+
+    for (let at = start; at < offset; at++) {
+      const byte = this.byteAt(at);
+
+      indent += this.indentFor(byte);
+    }
+
+    return indent;
+  }
+
+  private lineIndexAt(offset: int): int {
+    let left = 0;
+    let right = this.starts.length;
+
+    while (left < right) {
+      const middle = (left + right) / 2;
+      const start = this.startOf(middle);
+
+      if (start <= offset) {
+        left = middle + 1;
+      } else {
+        right = middle;
+      }
+    }
+
+    return left - 1;
+  }
+
+  private startOf(index: int): int {
+    return this.starts[index] ?? this.source.length;
+  }
+
+  private endOf(index: int): int {
+    const next = this.starts[index + 1];
+    if (next == undefined) {
+      return this.source.length;
+    }
+
+    const lineFeed = next - 1;
+    if (this.byteAt(lineFeed - 1) == kCarriageReturn) {
+      return lineFeed - 1;
+    }
+
+    return lineFeed;
+  }
+
+  private charactersBetween(start: int, end: int): int {
+    let count = 0;
+
+    for (let at = start; at < end; at++) {
+      const byte = this.byteAt(at);
+
+      if (!this.isContinuation(byte)) {
+        count += 1;
+      }
+    }
+
+    return count;
+  }
+
+  private indentFor(byte: int): string {
+    if (byte == kTab) {
+      return "\t";
+    }
+    if (this.isContinuation(byte)) {
+      return "";
+    }
+
+    return " ";
+  }
+
+  private isContinuation(byte: int): boolean {
+    return byte >= kContinuationFirst && byte <= kContinuationLast;
+  }
+
+  private byteAt(offset: int): int {
+    const value = this.source[offset] ?? 0;
+
+    return value.toInt();
+  }
+}

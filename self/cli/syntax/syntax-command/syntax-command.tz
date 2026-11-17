@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { ErrorPrinter } from "../../../diagnostic/error-printer/error-printer.tz";
 import { Lexer } from "../../../load/lexer/lexer.tz";
 import { Parser } from "../../../load/parser/parser.tz";
 import {
@@ -9,33 +10,35 @@ import { SourceFile } from "../../../program/ast/types/ast.types.modules.tz";
 import { Dumper } from "../ast-dump/ast-dump.tz";
 import { SyntaxMode } from "./types/syntax-command.types.tz";
 import {
-  kDefaultModeWord,
   kDefaultRepeat,
   kHoldMilliseconds,
+  kListPrefix,
   kMaxRepeat,
+  kProgramName,
   kUsage,
 } from "./const/syntax-command.const.tz";
 
 export class SyntaxCommand {
-  private readonly modeWord: string;
-  private readonly listPath: string;
+  private readonly modeWord?: string;
+  private readonly target?: string;
   private readonly repeatText: string;
 
   public constructor(args: string[]) {
-    this.modeWord = args[2] ?? kDefaultModeWord;
-    this.listPath = args[3] ?? "";
+    this.modeWord = args[2];
+    this.target = args[3];
     this.repeatText = args[4] ?? "";
   }
 
   public run(): void {
     const mode = this.modeOf(this.modeWord);
-    if (mode == undefined) {
+    const target = this.target;
+    if (mode == undefined || target == undefined) {
       console.log(kUsage);
 
       return;
     }
 
-    const files = this.readList(this.listPath);
+    const files = this.sourcePaths(target);
     const sources = this.readSources(files);
 
     switch (mode) {
@@ -43,6 +46,8 @@ export class SyntaxCommand {
         return this.printTokens(sources);
       case SyntaxMode.Tree:
         return this.printTrees(sources);
+      case SyntaxMode.Check:
+        return this.checkSources(sources);
       case SyntaxMode.Time:
         return this.timeSources(sources);
       case SyntaxMode.Hold:
@@ -52,12 +57,14 @@ export class SyntaxCommand {
     }
   }
 
-  private modeOf(word: string): SyntaxMode | undefined {
+  private modeOf(word?: string): SyntaxMode | undefined {
     switch (word) {
       case "tokens":
         return SyntaxMode.Tokens;
       case "tree":
         return SyntaxMode.Tree;
+      case "check":
+        return SyntaxMode.Check;
       case "time":
         return SyntaxMode.Time;
       case "hold":
@@ -69,9 +76,21 @@ export class SyntaxCommand {
     }
   }
 
+  private sourcePaths(target: string): string[] {
+    if (!target.startsWith(kListPrefix)) {
+      return [target];
+    }
+
+    const listPath = target.slice(kListPrefix.length);
+
+    return this.readList(listPath);
+  }
+
   private readList(path: string): string[] {
     const text = readFileSync(path, "utf8");
     if (text.isErr()) {
+      this.cannotRead(path);
+
       return [];
     }
 
@@ -85,14 +104,22 @@ export class SyntaxCommand {
 
     for (const path of files) {
       const text = readFileSync(path);
-      if (text.isOk()) {
-        const isLibrary = path.replaceAll("\\", "/").includes("/library/");
-
-        sources.push({ path, text: text.value, isLibrary });
+      if (text.isErr()) {
+        this.cannotRead(path);
+        continue;
       }
+
+      const isLibrary = path.replaceAll("\\", "/").includes("/library/");
+
+      sources.push({ path, text: text.value, isLibrary });
     }
 
     return sources;
+  }
+
+  private cannotRead(path: string): void {
+    console.error(`${kProgramName}: cannot read '${path}'`);
+    process.exitCode = 1;
   }
 
   private printTokens(sources: SourceText[]): void {
@@ -131,6 +158,19 @@ export class SyntaxCommand {
 
     for (const error of parsed.errors) {
       console.log(`!! ${error.loc}`);
+    }
+  }
+
+  private checkSources(sources: SourceText[]): void {
+    const parser = new Parser(sources);
+
+    for (const parsed of parser.run()) {
+      if (parsed.errors.length > 0) {
+        const printer = new ErrorPrinter(parsed.source);
+
+        printer.print(parsed.errors);
+        process.exitCode = 1;
+      }
     }
   }
 

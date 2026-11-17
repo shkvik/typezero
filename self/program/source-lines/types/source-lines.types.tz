@@ -1,0 +1,1 @@
+export type SourcePlace = { readonly line: int; readonly column: int };

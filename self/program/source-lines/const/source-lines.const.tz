@@ -1,0 +1,6 @@
+export const kTab = 9;
+export const kLineFeed = 10;
+export const kCarriageReturn = 13;
+
+export const kContinuationFirst = 0x80;
+export const kContinuationLast = 0xbf;

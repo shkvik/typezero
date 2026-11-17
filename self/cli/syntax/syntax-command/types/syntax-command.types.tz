@@ -1,6 +1,7 @@
 export enum SyntaxMode {
   Tokens,
   Tree,
+  Check,
   Time,
   Hold,
   Read,

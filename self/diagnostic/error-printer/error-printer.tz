@@ -1,0 +1,34 @@
+import { ParseError } from "../../load/parser/cursor/types/cursor.types.tz";
+import { SourceText } from "../../load/parser/types/parser.types.tz";
+import { SourceLines } from "../../program/source-lines/source-lines.tz";
+import { messageText } from "../message.tz";
+import { kPointer } from "./const/error-printer.const.tz";
+
+export class ErrorPrinter {
+  private readonly path: string;
+  private readonly lines: SourceLines;
+
+  public constructor(source: SourceText) {
+    this.path = source.path;
+    this.lines = new SourceLines(source.text);
+  }
+
+  public print(errors: ParseError[]): void {
+    for (const error of errors) {
+      const text = this.describe(error);
+
+      console.error(text);
+    }
+  }
+
+  private describe(error: ParseError): string {
+    const place = this.lines.placeOf(error.loc);
+    const message = messageText(error.code, error.details);
+    const where = `${this.path}:${place.line}:${place.column}`;
+    const headline = `${where}: error ${error.code}: ${message}`;
+    const line = this.lines.lineTextAt(error.loc);
+    const indent = this.lines.indentTo(error.loc);
+
+    return `${headline}\n${line}\n${indent}${kPointer}`;
+  }
+}
