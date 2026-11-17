@@ -1,6 +1,6 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { TokenKind } from "../../../token/types/token.types.tz";
+import { Token, TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
   TemplateTypeForm,
@@ -8,7 +8,10 @@ import {
   TypeKind,
   TypeRef,
 } from "../../../../program/ast/types/ast.types.types.tz";
-import { ExprKind } from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  ExprKind,
+  FloatLitExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
 import { TypePlace } from "../types/file-parser.types.context.tz";
 import {
   kBooleanTypeName,
@@ -406,7 +409,7 @@ partial class FileParser {
     const first = this.cursor.peek();
     const ref = this.typeRef(first.start);
     const negative = this.cursor.accept(TokenKind.Minus);
-
+    const written = this.cursor.peek();
     const literal = this.numberLiteral();
 
     let number = 0.0;
@@ -417,6 +420,7 @@ partial class FileParser {
       integer = true;
     } else if (literal.kind == ExprKind.FloatLit) {
       number = literal.value;
+      this.checkNumberTypeFits(literal, written);
     }
     if (negative) {
       number = -number;
@@ -426,6 +430,16 @@ partial class FileParser {
     ref.name = kNumberTypeName;
 
     return ref;
+  }
+
+  private checkNumberTypeFits(literal: FloatLitExpr, written: Token): void {
+    if (!literal.beyondDouble) {
+      return;
+    }
+
+    const word = this.written(written.start, written.end);
+
+    this.cursor.report(written.start, Code.NumberTypeBeyondDouble, { word });
   }
 
   private typeOfType(): TypeRef {

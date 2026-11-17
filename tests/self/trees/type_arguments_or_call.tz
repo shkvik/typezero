@@ -1,0 +1,12 @@
+// 'name < type > (' is a call with type arguments, with or without spaces;
+// anything else after '>' or no type between '<' and '>' makes it two
+// comparisons (docs/generics.md, section 3).
+const a = pick<Shape>(c);
+const b = pick < Shape > (c);
+const d = pick < Shape > (c == e);
+const f = pick < Shape > (c, e);
+const g = shapes.pick < Shape > (c);
+const h = x<y>z;
+const i = x < y > z;
+const j = x < y + 1 > (z);
+const k = make() < y > (z);

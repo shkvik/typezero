@@ -1,0 +1,41 @@
+== number_beyond_double.tz
+items 7
+VarDecl 132 const=1 using=0 n=1
+  Declarator 138 "a" form=plain
+    -
+    FloatLit 142 0000000000000000 "1e400" beyond=1
+VarDecl 149 const=1 using=0 n=1
+  Declarator 155 "b" form=plain
+    Type 158 Name "decimal" src=- n=0
+    FloatLit 168 0000000000000000 "1e400" beyond=1
+VarDecl 175 const=1 using=0 n=1
+  Declarator 181 "c" form=plain
+    -
+    FloatLit 185 7fefffffffffffff "1.7976931348623157e308" beyond=0
+VarDecl 209 const=1 using=0 n=1
+  Declarator 215 "d" form=plain
+    -
+    FloatLit 219 0000000000000000 "1.7976931348623159e308" beyond=1
+VarDecl 243 const=1 using=0 n=1
+  Declarator 249 "e" form=plain
+    -
+    FloatLit 253 0000000000000000 "1e-400" beyond=0
+VarDecl 261 const=1 using=0 n=1
+  Declarator 267 "f" form=plain
+    -
+    FloatLit 271 44b52d02c7e14af6 "99999999999999999999999" beyond=0
+VarDecl 296 const=1 using=0 n=1
+  Declarator 302 "g" form=plain
+    -
+    FloatLit 306 0000000000000000 "0x1ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" beyond=1
+imports 0
+exports 0
+fields 0
+constants 7
+  "a" 0
+  "b" 0
+  "c" 0
+  "d" 0
+  "e" 0
+  "f" 0
+  "g" 0

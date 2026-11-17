@@ -20,14 +20,9 @@
 #     NAME.tree. ACCEPT=ON works as for MODE=error.
 #
 #   MODE=codes: every code of self/diagnostic/code.tz has its test in
-#     tests/self/errors, and every test there is named after a code.
-#     UNREACHABLE lists the codes no source can get: the parser asks for them
-#     where an earlier look ahead has already seen the token.
+#     tests/self/errors, and every test there is named after a code. A code no
+#     source can get does not stay in code.tz.
 cmake_minimum_required(VERSION 3.20)
-
-# TZ1508: '(' of the parameters of an arrow function; TZ1511: '=>' after them.
-# An arrow function is parsed only after a scan found both.
-set(UNREACHABLE TZ1508 TZ1511)
 
 function(fail message)
   message(FATAL_ERROR "${message}")
@@ -112,12 +107,7 @@ elseif(MODE STREQUAL "codes")
   foreach(line IN LISTS lines)
     string(REGEX MATCH "TZ[0-9]+" code "${line}")
     list(APPEND codes ${code})
-    list(FIND UNREACHABLE ${code} unreachable)
-    if(EXISTS ${ROOT}/tests/self/errors/${code}.tz)
-      if(NOT unreachable EQUAL -1)
-        string(APPEND problems "${code} has a test: take it out of UNREACHABLE in tests/self.cmake\n")
-      endif()
-    elseif(unreachable EQUAL -1)
+    if(NOT EXISTS ${ROOT}/tests/self/errors/${code}.tz)
       string(APPEND problems "${code} has no test tests/self/errors/${code}.tz\n")
     endif()
   endforeach()
@@ -127,12 +117,6 @@ elseif(MODE STREQUAL "codes")
     list(FIND codes ${code} known)
     if(known EQUAL -1)
       string(APPEND problems "${test}: there is no code ${code} in self/diagnostic/code.tz\n")
-    endif()
-  endforeach()
-  foreach(code IN LISTS UNREACHABLE)
-    list(FIND codes ${code} known)
-    if(known EQUAL -1)
-      string(APPEND problems "UNREACHABLE of tests/self.cmake names ${code}, which is no code\n")
     endif()
   endforeach()
   if(problems)

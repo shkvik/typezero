@@ -1,0 +1,1 @@
+type Huge = 1e400

@@ -70,8 +70,9 @@ partial class Dumper {
         const bits = this.bits(expr.value);
         const text = this.spanText(expr.text);
         const quoted = this.quote(text);
+        const beyond = this.flag(expr.beyondDouble);
 
-        return this.line(`FloatLit ${loc} ${bits} ${quoted}`);
+        return this.line(`FloatLit ${loc} ${bits} ${quoted} beyond=${beyond}`);
       }
       case ExprKind.BoolLit: {
         const value = this.flag(expr.value);

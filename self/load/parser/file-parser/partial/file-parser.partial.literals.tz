@@ -429,6 +429,7 @@ partial class FileParser {
       kind: ExprKind.FloatLit,
       loc: token.start,
       value: number.doubleValue,
+      beyondDouble: number.beyondDouble,
       text,
     };
   }
@@ -436,16 +437,13 @@ partial class FileParser {
   private floatLiteral(): Expr {
     const token = this.cursor.next();
     const number = this.literals.float(token);
-    if (!number.valid) {
-      this.cursor.report(token.start, Code.InvalidNumberLiteral);
-    }
-
     const text = { start: token.start, end: token.end };
 
     return {
       kind: ExprKind.FloatLit,
       loc: token.start,
       value: number.doubleValue,
+      beyondDouble: number.beyondDouble,
       text,
     };
   }

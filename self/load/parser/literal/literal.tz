@@ -121,7 +121,7 @@ export class LiteralReader {
       const code = digits[i] ?? 0;
       const digit = this.digitValue(code);
       if (digit == undefined || digit >= radix) {
-        return { isInt: true, intValue: 0, doubleValue: 0.0, valid: false };
+        return this.invalidInteger();
       }
 
       const next = this.appendDigit(value, base, digit);
@@ -132,23 +132,20 @@ export class LiteralReader {
       value = next;
     }
 
-    return { isInt: true, intValue: value, doubleValue: 0.0, valid: true };
+    return {
+      isInt: true,
+      intValue: value,
+      doubleValue: 0.0,
+      beyondDouble: false,
+      valid: true,
+    };
   }
 
   public float(token: Token): NumberText {
     const digits = this.digitsOf(token);
     const text = this.textOfDigits(digits);
-    const parsed = Number(text);
-    if (parsed.isErr()) {
-      return { isInt: false, intValue: 0, doubleValue: 0.0, valid: false };
-    }
 
-    return {
-      isInt: false,
-      intValue: 0,
-      doubleValue: parsed.value,
-      valid: true,
-    };
+    return this.doubleOf(text);
   }
 
   private byteAt(i: int): int {
@@ -425,14 +422,36 @@ export class LiteralReader {
 
   private largeInteger(digits: int[], radix: int, from: int): NumberText {
     if (!this.allDigitsValid(digits, from, radix)) {
-      return { isInt: true, intValue: 0, doubleValue: 0.0, valid: false };
+      return this.invalidInteger();
     }
 
     const text = this.textOfDigits(digits);
-    const parsed = Number(text);
-    const rounded = parsed.unwrapOr(0.0);
 
-    return { isInt: false, intValue: 0, doubleValue: rounded, valid: true };
+    return this.doubleOf(text);
+  }
+
+  private invalidInteger(): NumberText {
+    return {
+      isInt: true,
+      intValue: 0,
+      doubleValue: 0.0,
+      beyondDouble: false,
+      valid: false,
+    };
+  }
+
+  private doubleOf(text: string): NumberText {
+    const parsed = Number(text);
+    const beyondDouble = parsed.isErr();
+    const doubleValue = parsed.unwrapOr(0.0);
+
+    return {
+      isInt: false,
+      intValue: 0,
+      doubleValue,
+      beyondDouble,
+      valid: true,
+    };
   }
 
   private digitsOf(token: Token): int[] {

@@ -154,12 +154,11 @@ partial class FileParser {
     this.context = { ...outer, functionKind: FunctionKind.Plain };
     const patterns: ParamPattern[] = [];
     const head = this.arrowHead(patterns);
-    const arrow = this.cursor.peek();
-    if (arrow.kind == TokenKind.Arrow && arrow.newline) {
+    const arrow = this.cursor.next();
+    if (arrow.newline) {
       this.cursor.report(arrow.start, Code.ArrowOnNewLine);
     }
 
-    this.cursor.expect(TokenKind.Arrow, Code.ExpectedAfterArrowParameters);
     const concise = !this.cursor.is(TokenKind.LBrace);
     const body = this.arrowBody(concise);
 

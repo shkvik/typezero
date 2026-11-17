@@ -1,58 +1,83 @@
 == regex_or_division.tz
-items 6
-VarDecl 127 const=1 using=0 n=1
-  Declarator 133 "a" form=plain
+items 7
+VarDecl 142 const=1 using=0 n=1
+  Declarator 148 "a" form=plain
     -
-    Await 137
-      Call 148 opt=0 tagged=0 n=1 spread=-
-        Member 148 "exec" opt=0 targs=0
-          RegexLit 143 "r" "g" written=4
-        Name 153 "text" targs=0
-VarDecl 160 const=1 using=0 n=1
-  Declarator 166 "b" form=plain
+    Await 152
+      Call 163 opt=0 tagged=0 n=1 spread=-
+        Member 163 "exec" opt=0 targs=0
+          RegexLit 158 "r" "g" written=4
+        Name 168 "text" targs=0
+VarDecl 175 const=1 using=0 n=1
+  Declarator 181 "b" form=plain
     -
-    Binary 185 3 src=170-188
-      Binary 181 3 src=170-184
-        Member 174 "delete" opt=0 targs=0
-          Name 170 "map" targs=0
-        IntLit 183 2 "2"
-      IntLit 187 3 "3"
-VarDecl 190 const=1 using=0 n=1
-  Declarator 196 "c" form=plain
+    Binary 200 3 src=185-203
+      Binary 196 3 src=185-199
+        Member 189 "delete" opt=0 targs=0
+          Name 185 "map" targs=0
+        IntLit 198 2 "2"
+      IntLit 202 3 "3"
+VarDecl 205 const=1 using=0 n=1
+  Declarator 211 "c" form=plain
     -
-    Binary 217 3 src=200-220
-      Binary 213 3 src=200-216
-        OptionalChain 205
-          Member 205 "default" opt=1 targs=0
-            Name 200 "map" targs=0
-        IntLit 215 2 "2"
-      IntLit 219 3 "3"
-VarDecl 222 const=1 using=0 n=1
-  Declarator 228 "d" form=plain
+    Binary 232 3 src=215-235
+      Binary 228 3 src=215-231
+        OptionalChain 220
+          Member 220 "default" opt=1 targs=0
+            Name 215 "map" targs=0
+        IntLit 230 2 "2"
+      IntLit 234 3 "3"
+VarDecl 237 const=1 using=0 n=1
+  Declarator 243 "d" form=plain
     -
-    OptionalChain 237
-      Index 237 opt=1
-        Name 232 "map" targs=0
-        RegexLit 238 "r" "g" written=4
-VarDecl 245 const=1 using=0 n=1
-  Declarator 251 "e" form=plain
+    OptionalChain 252
+      Index 252 opt=1
+        Name 247 "map" targs=0
+        RegexLit 253 "r" "g" written=4
+VarDecl 260 const=1 using=0 n=1
+  Declarator 266 "e" form=plain
     -
-    OptionalChain 255
-      Call 255 opt=1 tagged=0 n=1 spread=-
-        Name 255 "map" targs=0
-        RegexLit 261 "r" "g" written=4
-VarDecl 268 const=1 using=0 n=1
-  Declarator 274 "f" form=plain
+    OptionalChain 270
+      Call 270 opt=1 tagged=0 n=1 spread=-
+        Name 270 "map" targs=0
+        RegexLit 276 "r" "g" written=4
+VarDecl 283 const=1 using=0 n=1
+  Declarator 289 "f" form=plain
     -
-    Unary 278 4
-      RegexLit 285 "r" "g" written=4
+    Unary 293 4
+      RegexLit 300 "r" "g" written=4
+Function 317 "patterns" arrow=0 concise=0 own="" place=0 body=0 gen=1 async=0 role=plain src=307-419 tp=0 params=0
+  -
+  Block 328 end=418 n=3
+    ExprStmt 332
+      Yield 332 delegate=0
+        RegexLit 338 "r" "g" written=4
+    VarDecl 346 const=1 using=0 n=1
+      Declarator 352 "sent" form=plain
+        -
+        Yield 359 delegate=0
+          Call 370 opt=0 tagged=0 n=1 spread=-
+            Member 370 "exec" opt=0 targs=0
+              RegexLit 365 "r" "g" written=4
+            Name 375 "text" targs=0
+    VarDecl 384 const=1 using=0 n=1
+      Declarator 390 "half" form=plain
+        -
+        Binary 413 3 src=397-416
+          Binary 409 3 src=397-412
+            Member 403 "yield" opt=0 targs=0
+              Name 397 "steps" targs=0
+            IntLit 411 2 "2"
+          IntLit 415 3 "3"
 imports 0
 exports 0
 fields 0
-constants 6
+constants 8
   "a" 0
   "b" 0
   "c" 0
   "d" 0
   "e" 0
   "f" 0
+  "half" 0
+  "sent" 0

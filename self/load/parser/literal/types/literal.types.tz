@@ -13,6 +13,7 @@ export type NumberText = {
   readonly isInt: boolean;
   readonly intValue: uint64;
   readonly doubleValue: double;
+  readonly beyondDouble: boolean;
   readonly valid: boolean;
 };
 

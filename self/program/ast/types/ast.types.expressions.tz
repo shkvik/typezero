@@ -94,6 +94,7 @@ export type FloatLitExpr = {
   readonly kind: ExprKind.FloatLit;
   readonly loc: int;
   readonly value: double;
+  readonly beyondDouble: boolean;
   readonly text?: Span;
 };
 

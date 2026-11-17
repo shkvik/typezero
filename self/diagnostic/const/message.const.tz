@@ -241,9 +241,6 @@ export const kMessages: Record<Code, Message> = {
   [Code.InvalidIntegerLiteral]: {
     text: "invalid integer literal",
   },
-  [Code.InvalidNumberLiteral]: {
-    text: "invalid number literal",
-  },
   [Code.ExpectedParenAfterAsyncName]: {
     text: "expected '(' after the name of the async method",
   },
@@ -358,6 +355,9 @@ export const kMessages: Record<Code, Message> = {
   [Code.RestParameterNotLast]: {
     text: "a rest parameter must be the last parameter",
   },
+  [Code.NumberTypeBeyondDouble]: {
+    text: "the number type '{word}' is beyond a double, which holds at most about 1.8e308",
+  },
   [Code.ExpectedPatternClose]: {
     text: "expected {expected} to close the destructuring pattern, found {found}",
   },
@@ -397,17 +397,11 @@ export const kMessages: Record<Code, Message> = {
   [Code.ExpectedEnumClose]: {
     text: "expected {expected} to close the enum, found {found}",
   },
-  [Code.ExpectedParametersStart]: {
-    text: "expected {expected} to start the parameters, found {found}",
-  },
   [Code.ExpectedAfterFunctionName]: {
     text: "expected {expected} after the function name, found {found}",
   },
   [Code.ExpectedParametersClose]: {
     text: "expected {expected} to close the parameter list, found {found}",
-  },
-  [Code.ExpectedAfterArrowParameters]: {
-    text: "expected {expected} after the parameters of the arrow function, found {found}",
   },
   [Code.ExpectedTypeParametersClose]: {
     text: "expected {expected} to close the type parameters, found {found}",

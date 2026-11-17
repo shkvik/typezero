@@ -1,0 +1,89 @@
+== type_arguments_or_call.tz
+items 9
+VarDecl 193 const=1 using=0 n=1
+  Declarator 199 "a" form=plain
+    -
+    Call 203 opt=0 tagged=0 n=1 spread=-
+      Name 203 "pick" targs=1
+        Type 208 Name "Shape" src=- n=0
+      Name 215 "c" targs=0
+VarDecl 219 const=1 using=0 n=1
+  Declarator 225 "b" form=plain
+    -
+    Call 229 opt=0 tagged=0 n=1 spread=-
+      Name 229 "pick" targs=1
+        Type 236 Name "Shape" src=- n=0
+      Name 245 "c" targs=0
+VarDecl 249 const=1 using=0 n=1
+  Declarator 255 "d" form=plain
+    -
+    Call 259 opt=0 tagged=0 n=1 spread=-
+      Name 259 "pick" targs=1
+        Type 266 Name "Shape" src=- n=0
+      Binary 277 16 src=275-281
+        Name 275 "c" targs=0
+        Name 280 "e" targs=0
+VarDecl 284 const=1 using=0 n=1
+  Declarator 290 "f" form=plain
+    -
+    Call 294 opt=0 tagged=0 n=2 spread=-
+      Name 294 "pick" targs=1
+        Type 301 Name "Shape" src=- n=0
+      Name 310 "c" targs=0
+      Name 313 "e" targs=0
+VarDecl 317 const=1 using=0 n=1
+  Declarator 323 "g" form=plain
+    -
+    Call 334 opt=0 tagged=0 n=1 spread=-
+      Member 334 "pick" opt=0 targs=1
+        Name 327 "shapes" targs=0
+        Type 341 Name "Shape" src=- n=0
+      Name 350 "c" targs=0
+VarDecl 354 const=1 using=0 n=1
+  Declarator 360 "h" form=plain
+    -
+    Binary 367 14 src=364-369
+      Binary 365 12 src=364-367
+        Name 364 "x" targs=0
+        Name 366 "y" targs=0
+      Name 368 "z" targs=0
+VarDecl 371 const=1 using=0 n=1
+  Declarator 377 "i" form=plain
+    -
+    Binary 387 14 src=381-390
+      Binary 383 12 src=381-386
+        Name 381 "x" targs=0
+        Name 385 "y" targs=0
+      Name 389 "z" targs=0
+VarDecl 392 const=1 using=0 n=1
+  Declarator 398 "j" form=plain
+    -
+    Binary 412 14 src=402-417
+      Binary 404 12 src=402-411
+        Name 402 "x" targs=0
+        Binary 408 0 src=406-411
+          Name 406 "y" targs=0
+          IntLit 410 1 "1"
+      Name 415 "z" targs=0
+VarDecl 419 const=1 using=0 n=1
+  Declarator 425 "k" form=plain
+    -
+    Binary 440 14 src=429-445
+      Binary 436 12 src=429-439
+        Call 429 opt=0 tagged=0 n=0 spread=-
+          Name 429 "make" targs=0
+        Name 438 "y" targs=0
+      Name 443 "z" targs=0
+imports 0
+exports 0
+fields 0
+constants 9
+  "a" 0
+  "b" 0
+  "d" 0
+  "f" 0
+  "g" 0
+  "h" 0
+  "i" 0
+  "j" 0
+  "k" 0

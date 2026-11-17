@@ -180,8 +180,7 @@ partial class FileParser {
     constructor: boolean,
     patterns: ParamPattern[],
   ): Param[] {
-    const startCode = this.paramsStartCode(arrow);
-    const opened = this.cursor.expect(TokenKind.LParen, startCode);
+    const opened = this.openParams(arrow);
     const params: Param[] = [];
 
     while (this.cursor.insideList(TokenKind.RParen)) {
@@ -595,11 +594,16 @@ partial class FileParser {
     return BodySource.Foreign;
   }
 
-  private paramsStartCode(arrow: boolean): Code {
+  private openParams(arrow: boolean): boolean {
     if (arrow) {
-      return Code.ExpectedParametersStart;
+      this.cursor.next();
+
+      return true;
     }
 
-    return Code.ExpectedAfterFunctionName;
+    return this.cursor.expect(
+      TokenKind.LParen,
+      Code.ExpectedAfterFunctionName,
+    );
   }
 }

@@ -744,6 +744,7 @@ export class Lexer {
   private regexMayFollow(kind: TokenKind): boolean {
     switch (kind) {
       case TokenKind.Await:
+      case TokenKind.Yield:
         return true;
       case TokenKind.Identifier:
       case TokenKind.This:
