@@ -109,11 +109,13 @@ self/             компилятор на tz, пробный (порт compile
                   expressions, types, declaration-file);
                   program/ast/ — дерево разбора: типы узлов — в types/ast.types.<группа>.tz
                   (span, types, expressions, patterns, statements, functions, classes — там же
-                  type alias и enum, modules — там же SourceFile, declarations —
+                  type alias, enum и ручка из C (HandleDecl: `declare class X {}`),
+                  modules — там же SourceFile, declarations —
                   DeclarationFile: файл объявлений `.d.tz` (docs/modules.md, раздел 7) —
                   items (типы и функции без тел), imports, exports и classes: DeclaredClass
                   с членами DeclaredMember (поле, метод или конструктор без тела); группы
-                  ссылаются друг на друга по кругу); program/source-lines/ — SourceLines: строки одного текста
+                  ссылаются друг на друга по кругу); program/source-lines/ — SourceLines:
+                  строки одного текста
                   (начала строк, двоичный поиск): placeOf(смещение) → SourcePlace { line,
                   column } с единицы, столбец — в символах, а не в байтах; lineTextAt — текст
                   строки; indentTo — отступ до места, табуляции строки сохранены;

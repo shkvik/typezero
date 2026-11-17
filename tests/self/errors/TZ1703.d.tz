@@ -1,1 +1,1 @@
-export declare const limit: int;
+export declare type Size = int;

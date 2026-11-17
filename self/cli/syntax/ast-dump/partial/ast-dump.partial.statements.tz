@@ -142,10 +142,9 @@ partial class Dumper {
         return this.line(`Debugger ${loc}`);
       case StmtKind.TypeAlias: {
         const name = this.quote(stmt.name);
-        const isHandle = this.flag(stmt.isHandle);
 
         this.line(
-          `TypeAlias ${loc} ${name} handle=${isHandle} ` +
+          `TypeAlias ${loc} ${name} ` +
             `tp=${stmt.typeParams.length} bases=${stmt.bases.length}`,
         );
         this.nested();
@@ -154,6 +153,11 @@ partial class Dumper {
         this.dumpTypes(stmt.bases);
 
         return this.back();
+      }
+      case StmtKind.Handle: {
+        const name = this.quote(stmt.name);
+
+        return this.line(`Handle ${loc} ${name}`);
       }
       case StmtKind.Enum: {
         const name = this.quote(stmt.name);

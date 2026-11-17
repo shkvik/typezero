@@ -5,5 +5,7 @@ const b: decimal = 1e400;
 const c = 1.7976931348623157e308;
 const d = 1.7976931348623159e308;
 const e = 1e-400;
+type Huge = 1e400;
+type Fits = 1e308;
 const f = 99999999999999999999999;
 const g = 0x1ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;

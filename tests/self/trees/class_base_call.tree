@@ -1,0 +1,41 @@
+== class_base_call.tz
+items 5
+Class 135 "Timed" abstract=0 partial=0 expr=0 generic=0 src=129-173 tp=0 base=0 baseExpr=1 ifaces=0 dec=0 fields=0 methods=0 ctors=0
+  Call 149 opt=0 tagged=0 n=1 spread=-
+    Name 149 "stamped" targs=1
+      Type 157 Name "Entry" src=- n=0
+    Name 164 "Base" targs=0
+Class 181 "Counted" abstract=0 partial=0 expr=0 generic=1 src=175-245 tp=1 base=0 baseExpr=1 ifaces=1 dec=0 fields=0 methods=0 ctors=0
+  TypeParam 189 "T"
+    -
+    -
+  Call 200 opt=0 tagged=0 n=2 spread=-
+    Name 200 "counted" targs=2
+      Type 208 Name "T" src=- n=0
+      Type 211 Name "int" src=- n=0
+    Name 216 "Base" targs=0
+    IntLit 222 0 "0"
+  Type 236 Name "Sized" src=- n=0
+VarDecl 247 const=1 using=0 n=1
+  Declarator 253 "Named" form=plain
+    -
+    ClassExpr 261
+      Class 261 "Named" abstract=0 partial=0 expr=1 generic=0 src=261-298 tp=0 base=0 baseExpr=1 ifaces=0 dec=0 fields=0 methods=0 ctors=0
+        Call 275 opt=0 tagged=0 n=1 spread=-
+          Name 275 "named" targs=1
+            Type 281 Name "string" src=- n=0
+          Name 289 "Base" targs=0
+Class 307 "Plain" abstract=0 partial=0 expr=0 generic=0 src=301-333 tp=0 base=1 baseExpr=0 ifaces=0 dec=0 fields=0 methods=0 ctors=0
+  Type 321 Generic "Box" src=- n=1
+    Type 325 Name "int" src=- n=0
+Class 341 "Listed" abstract=0 partial=0 expr=0 generic=0 src=335-381 tp=0 base=0 baseExpr=1 ifaces=0 dec=0 fields=0 methods=0 ctors=0
+  Call 362 opt=0 tagged=0 n=1 spread=-
+    Member 362 "of" opt=0 targs=1
+      Name 356 "lists" targs=0
+      Type 365 Name "Entry" src=- n=0
+    Name 372 "Base" targs=0
+imports 0
+exports 0
+fields 0
+constants 1
+  "Named" 0

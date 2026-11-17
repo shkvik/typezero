@@ -31,3 +31,12 @@ export class Box {
 export function last(): Pair {
   return make(0);
 }
+
+export enum Kind {
+  Small,
+  Large,
+}
+
+export const size: int = 1;
+
+export type Width = int;

@@ -27,7 +27,6 @@ partial class FileParser {
       typeParams,
       type,
       bases: [],
-      isHandle: false,
     };
   }
 
@@ -41,14 +40,10 @@ partial class FileParser {
       return this.marker(StmtKind.Empty, name.start);
     }
 
-    const alias: Stmt = {
-      kind: StmtKind.TypeAlias,
+    const handle: Stmt = {
+      kind: StmtKind.Handle,
       loc: name.start,
       name: name.text,
-      typeParams: [],
-      type: this.typeRef(),
-      bases: [],
-      isHandle: true,
     };
     const next = this.cursor.lookahead();
     const hasBody =
@@ -59,12 +54,12 @@ partial class FileParser {
       this.cursor.report(token.start, Code.HandleClass, { word: name.text });
       this.skipHandleBody();
 
-      return alias;
+      return handle;
     }
 
     this.cursor.skip(2);
 
-    return alias;
+    return handle;
   }
 
   private skipHandleBody(): void {
@@ -117,7 +112,6 @@ partial class FileParser {
       typeParams,
       type,
       bases,
-      isHandle: false,
     };
   }
 

@@ -1,10 +1,10 @@
 == declaration_file.d.tz
 items 6
-TypeAlias 91 "Pair" handle=0 tp=0 bases=0
+TypeAlias 91 "Pair" tp=0 bases=0
   Type 98 Object "" src=- n=2 names=["first","second"] locs=[102,116] opt=01 ro=00 methods=-
     Type 109 Name "int" src=- n=0
     Type 125 Name "int" src=- n=0
-TypeAlias 151 "Named" handle=0 tp=0 bases=0
+TypeAlias 151 "Named" tp=0 bases=0
   Type 157 Object "" src=- n=1 names=["name"] locs=[161] opt=0 ro=0 methods=-
     Type 167 Name "string" src=- n=0
 Function 202 "make" arrow=0 concise=0 own="" place=0 body=0 gen=0 async=0 role=plain src=193-239 tp=0 params=2

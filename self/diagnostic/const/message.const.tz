@@ -154,6 +154,9 @@ export const kMessages: Record<Code, Message> = {
   [Code.ElseWithoutIf]: {
     text: "'else' has no 'if' here: the '}' that closes the block before 'else' is probably missing",
   },
+  [Code.CaseValueList]: {
+    text: "'case {word}, {other}:' does not mean \"{word} or {other}\": write a 'case' for each value, 'case {word}:' and 'case {other}:' one after another",
+  },
   [Code.BlockNotClosed]: {
     text: "the block that starts at line {word} has no '}': this line stands to the left of the block, so the '}' is missing before it",
   },
@@ -258,6 +261,9 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.OptionalChainAfterNew]: {
     text: "the class after 'new' cannot be reached through '?.': when the object is 'undefined' there is no class to create; check the object first",
+  },
+  [Code.PatternAssignmentNotStatement]: {
+    text: "an assignment to a pattern is a statement of its own and gives no value: write it on a line of its own, e.g. '[a, b] = [b, a];'",
   },
   [Code.ExpectedAfterExtendsClause]: {
     text: "expected {expected} after the 'extends' clause of the conditional type, e.g. 'T extends string ? A : B', found {found}",
@@ -369,9 +375,6 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.RestParameterNotLast]: {
     text: "a rest parameter must be the last parameter",
-  },
-  [Code.NumberTypeBeyondDouble]: {
-    text: "the number type '{word}' is beyond a double, which holds at most about 1.8e308",
   },
   [Code.ExpectedPatternClose]: {
     text: "expected {expected} to close the destructuring pattern, found {found}",
@@ -674,13 +677,13 @@ export const kMessages: Record<Code, Message> = {
     text: "an exported class needs a name: other files import it by that name; write 'export class Name { ... }'",
   },
   [Code.DeclarationHoldsExports]: {
-    text: "a declaration file holds only what its module exports: 'export type', 'export declare function', 'export declare class' and imports of the types they name",
+    text: "a declaration file holds only what its module exports: 'export type', 'export interface', 'export declare' of a function, class, enum, const or let, and imports of the types they name",
   },
   [Code.DeclarationHasNoCode]: {
-    text: "a declaration file has no code: write 'export declare function' or 'export declare class', with signatures and no bodies",
+    text: "a declaration file has no code: write 'export declare' before a function, class, enum, const or let, with signatures and types, no bodies and no values",
   },
   [Code.ExpectedAfterExportDeclare]: {
-    text: "expected 'function' or 'class' after 'export declare', found {found}",
+    text: "expected 'function', 'class', 'enum', 'const' or 'let' after 'export declare', found {found}",
   },
   [Code.DeclarationFunctionBody]: {
     text: "a function of a declaration file has no body: its code is in the module",
@@ -693,5 +696,11 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.DeclarationFieldValue]: {
     text: "a field of a declaration file has no value: its value is in the module",
+  },
+  [Code.DeclarationVariableValue]: {
+    text: "'{word}' has no value in a declaration file: its value is in the module; write its type only, e.g. '{word}: int'",
+  },
+  [Code.DeclarationVariableType]: {
+    text: "'{word}' needs its type in a declaration file, e.g. '{word}: int': there is no value to take the type from",
   },
 };

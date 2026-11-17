@@ -296,6 +296,7 @@ partial class FileParser {
       case StmtKind.Function:
       case StmtKind.TypeAlias:
       case StmtKind.Enum:
+      case StmtKind.Handle:
         return [
           { name: stmt.name, loc: stmt.loc, as: stmt.name, asLoc: stmt.loc },
         ];

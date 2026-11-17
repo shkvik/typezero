@@ -349,7 +349,12 @@ partial class FileParser {
   }
 
   private expressionStatement(loc: int): Stmt {
+    const outer = this.statementStart;
+
+    this.statementStart = loc;
     const expr = this.sequence();
+
+    this.statementStart = outer;
     const assignment = this.destructuringAssignment(loc, expr);
 
     this.cursor.expectSemicolon();
@@ -497,12 +502,41 @@ partial class FileParser {
       return { loc, test: undefined, body };
     }
 
+    const first = this.cursor.peek();
     const test = this.expression();
 
+    this.rejectCaseList(first.start);
     this.cursor.expect(TokenKind.Colon, Code.ExpectedAfterCaseValue);
     const body = this.caseBody();
 
     return { loc, test, body };
+  }
+
+  private rejectCaseList(start: int): void {
+    const comma = this.cursor.peek();
+    if (comma.kind != TokenKind.Comma) {
+      return;
+    }
+
+    const word = this.writtenFrom(start);
+
+    this.cursor.next();
+    const second = this.cursor.peek();
+
+    this.expression();
+    const other = this.writtenFrom(second.start);
+
+    this.cursor.report(comma.start, Code.CaseValueList, { word, other });
+
+    while (this.cursor.accept(TokenKind.Comma)) {
+      this.expression();
+    }
+  }
+
+  private writtenFrom(start: int): string {
+    const span = this.cursor.spanFrom(start);
+
+    return this.written(span.start, span.end);
   }
 
   private statementWithRecovery(topLevel: boolean): Stmt {

@@ -1,0 +1,10 @@
+// An assignment to a pattern is a statement: alone, in parentheses, as the
+// single body of a statement. A pattern with a default in the parameters of
+// an arrow function is not an assignment.
+[first, second] = pair;
+({ first, second } = record);
+[first, second] = [second, first];
+if (ready) [first, second] = pair;
+const swap = () => { [first, second] = [second, first]; };
+const head = ([only] = pair) => only;
+const size = ({ width } = box) => width;

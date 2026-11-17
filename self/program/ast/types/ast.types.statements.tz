@@ -1,7 +1,12 @@
 import { Expr } from "./ast.types.expressions.tz";
 import { VarDeclarator } from "./ast.types.patterns.tz";
 import { FunctionDecl } from "./ast.types.functions.tz";
-import { ClassDecl, EnumDecl, TypeAliasDecl } from "./ast.types.classes.tz";
+import {
+  ClassDecl,
+  EnumDecl,
+  HandleDecl,
+  TypeAliasDecl,
+} from "./ast.types.classes.tz";
 
 export enum StmtKind {
   Block,
@@ -23,6 +28,7 @@ export enum StmtKind {
   TypeAlias,
   Enum,
   Class,
+  Handle,
 }
 
 export type BlockStmt = {
@@ -142,4 +148,5 @@ export type Stmt =
   | MarkerStmt
   | TypeAliasDecl
   | EnumDecl
-  | ClassDecl;
+  | ClassDecl
+  | HandleDecl;

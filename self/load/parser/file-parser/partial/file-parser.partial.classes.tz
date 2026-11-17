@@ -90,13 +90,7 @@ partial class FileParser {
       return {};
     }
 
-    const next = this.cursor.lookahead();
-    const value =
-      !this.cursor.atName() ||
-      next.kind == TokenKind.LParen ||
-      next.kind == TokenKind.Dot ||
-      next.kind == TokenKind.LBracket;
-    if (value) {
+    if (this.valueBaseAhead()) {
       const baseExpr = this.callOrMember();
 
       return { baseExpr };
@@ -117,6 +111,36 @@ partial class FileParser {
     };
 
     return { base, baseExpr };
+  }
+
+  private valueBaseAhead(): boolean {
+    if (!this.cursor.atName()) {
+      return true;
+    }
+
+    const next = this.cursor.lookahead();
+
+    switch (next.kind) {
+      case TokenKind.LParen:
+      case TokenKind.Dot:
+      case TokenKind.LBracket:
+        return true;
+      case TokenKind.Less:
+        return this.genericCallAhead();
+      default:
+        return false;
+    }
+  }
+
+  private genericCallAhead(): boolean {
+    const start = this.cursor.mark();
+
+    this.cursor.next();
+    const typeArguments = this.tryTypeArguments(true);
+
+    this.cursor.reset(start);
+
+    return typeArguments != undefined;
   }
 
   private implementedTypes(): TypeRef[] {
@@ -392,7 +416,7 @@ partial class FileParser {
       return;
     }
 
-    this.addConstructor(declaration, method, body, member.loc);
+    this.addConstructor(declaration, method, body);
   }
 
   private methodKind(modifiers: Modifiers, constructor: boolean): MethodKind {
@@ -439,13 +463,10 @@ partial class FileParser {
     declaration: ClassDecl,
     method: FunctionDecl,
     body: BlockStmt,
-    memberLoc: int,
   ): void {
     const returnType = method.returnType;
     if (returnType != undefined) {
-      const loc = returnType.loc ?? memberLoc;
-
-      this.cursor.report(loc, Code.ConstructorReturnType);
+      this.cursor.report(returnType.loc, Code.ConstructorReturnType);
     }
 
     this.addParameterFields(declaration, method, body);

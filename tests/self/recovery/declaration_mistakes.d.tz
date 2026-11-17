@@ -32,4 +32,8 @@ export declare enum Kind {
   Large,
 }
 
+export declare const size: int = 1;
+
+export declare type Width = int;
+
 export declare function last(): Pair;

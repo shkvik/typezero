@@ -1,6 +1,8 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
+import { Details } from "../../../../diagnostic/types/message.types.tz";
 import { Token, TokenKind } from "../../../token/types/token.types.tz";
+import { VarDeclarator } from "../../../../program/ast/types/ast.types.patterns.tz";
 import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
 import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
 import {
@@ -109,6 +111,11 @@ partial class FileParser {
         return this.functionSignature(file);
       case TokenKind.Class:
         return this.declaredClass(file, isAbstract);
+      case TokenKind.Enum:
+        return this.declaredEnum(file);
+      case TokenKind.Const:
+      case TokenKind.Let:
+        return this.declaredVariables(file);
       default:
         this.cursor.report(word.start, Code.ExpectedAfterExportDeclare, {
           found: word.kind,
@@ -144,6 +151,46 @@ partial class FileParser {
     }
 
     file.items.push(declaration);
+  }
+
+  private declaredEnum(file: DeclarationFile): void {
+    const declaration = this.enumDecl();
+    if (declaration.kind == StmtKind.Enum) {
+      file.items.push(declaration);
+    }
+  }
+
+  private declaredVariables(file: DeclarationFile): void {
+    const next = this.cursor.lookahead();
+    if (next.kind == TokenKind.Enum) {
+      this.cursor.next();
+
+      return this.declaredEnum(file);
+    }
+
+    const declaration = this.varDecl();
+
+    this.cursor.expectSemicolon();
+
+    for (const declarator of declaration.decls) {
+      this.checkDeclaredVariable(declarator);
+    }
+
+    file.items.push(declaration);
+  }
+
+  private checkDeclaredVariable(declarator: VarDeclarator): void {
+    const details: Details = { word: declarator.name };
+    if (declarator.init != undefined) {
+      return this.cursor.report(
+        declarator.loc,
+        Code.DeclarationVariableValue,
+        details,
+      );
+    }
+    if (declarator.typeAnn == undefined) {
+      this.cursor.report(declarator.loc, Code.DeclarationVariableType, details);
+    }
   }
 
   private declaredClass(file: DeclarationFile, isAbstract: boolean): void {

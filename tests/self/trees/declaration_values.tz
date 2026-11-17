@@ -1,0 +1,22 @@
+export enum Kind {
+  Small,
+  Large = 5,
+}
+
+export const enum Mode {
+  On = "on",
+  Off = "off",
+}
+
+export const limit: int = 10;
+
+export let count: int = 0,
+  title: string = "";
+
+export function pick(kind: Kind, mode?: Mode): int {
+  if (kind == Kind.Large && mode != Mode.Off) {
+    return limit;
+  }
+
+  return count;
+}

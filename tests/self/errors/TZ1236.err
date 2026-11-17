@@ -1,0 +1,3 @@
+TZ1236.tz:4:15: error TZ1236: an assignment to a pattern is a statement of its own and gives no value: write it on a line of its own, e.g. '[a, b] = [b, a];'
+const copy = ([first, second] = pair);
+              ^

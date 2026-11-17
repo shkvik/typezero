@@ -54,6 +54,8 @@ partial class FileParser {
     const assignment = this.assignmentOp(op.kind);
     const source = this.cursor.spanFrom(start);
 
+    this.rejectPatternValue(target, start, assignment != undefined);
+
     return {
       kind: ExprKind.Assign,
       loc,
@@ -62,6 +64,48 @@ partial class FileParser {
       value,
       source,
     };
+  }
+
+  private rejectPatternValue(
+    target: Expr,
+    start: int,
+    compound: boolean,
+  ): void {
+    const pattern =
+      target.kind == ExprKind.ArrayLit || target.kind == ExprKind.ObjectLit;
+    if (!pattern) {
+      return;
+    }
+
+    const first = this.cursor.onlyOpenParens(this.statementStart, start);
+    if (compound || !first || !this.endsPatternStatement()) {
+      this.cursor.report(start, Code.PatternAssignmentNotStatement);
+    }
+  }
+
+  private endsPatternStatement(): boolean {
+    let closed = 0;
+
+    while (this.cursor.tokenAt(closed).kind == TokenKind.RParen) {
+      closed += 1;
+    }
+
+    const next = this.cursor.tokenAt(closed);
+    if (next.kind == TokenKind.Comma) {
+      return false;
+    }
+    if (closed == 0) {
+      return true;
+    }
+
+    switch (next.kind) {
+      case TokenKind.Semi:
+      case TokenKind.RBrace:
+      case TokenKind.End:
+        return true;
+      default:
+        return next.newline;
+    }
   }
 
   private yieldExpression(): Expr {

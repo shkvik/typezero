@@ -1,0 +1,135 @@
+== pattern_assignment.tz
+items 7
+Block 196 end=-1 n=3
+  VarDecl 196 const=1 using=0 n=1
+    Declarator 196 "%0" form=array 2 0
+      -
+      Name 214 "pair" targs=0
+  ExprStmt 197
+    Assign 197 - src=-
+      Name 197 "first" targs=0
+      Index 197 opt=0
+        Name 197 "%0" targs=0
+        IntLit 197 0 ""
+  ExprStmt 204
+    Assign 204 - src=-
+      Name 204 "second" targs=0
+      Index 204 opt=0
+        Name 204 "%0" targs=0
+        IntLit 204 1 ""
+Block 220 end=-1 n=3
+  VarDecl 220 const=1 using=0 n=1
+    Declarator 221 "%2" form=object
+      -
+      Name 241 "record" targs=0
+  ExprStmt 223
+    Assign 223 - src=-
+      Name 223 "first" targs=0
+      Member 223 "first" opt=0 targs=0
+        Name 223 "%2" targs=0
+  ExprStmt 230
+    Assign 230 - src=-
+      Name 230 "second" targs=0
+      Member 230 "second" opt=0 targs=0
+        Name 230 "%2" targs=0
+Block 250 end=-1 n=3
+  VarDecl 250 const=1 using=0 n=2
+    Declarator 269 "%3" form=plain
+      -
+      Name 269 "second" targs=0
+    Declarator 277 "%4" form=plain
+      -
+      Name 277 "first" targs=0
+  ExprStmt 251
+    Assign 251 - src=-
+      Name 251 "first" targs=0
+      Name 251 "%3" targs=0
+  ExprStmt 258
+    Assign 258 - src=-
+      Name 258 "second" targs=0
+      Name 258 "%4" targs=0
+If 285
+  Name 289 "ready" targs=0
+  Block 296 end=-1 n=3
+    VarDecl 296 const=1 using=0 n=1
+      Declarator 296 "%5" form=array 2 0
+        -
+        Name 314 "pair" targs=0
+    ExprStmt 297
+      Assign 297 - src=-
+        Name 297 "first" targs=0
+        Index 297 opt=0
+          Name 297 "%5" targs=0
+          IntLit 297 0 ""
+    ExprStmt 304
+      Assign 304 - src=-
+        Name 304 "second" targs=0
+        Index 304 opt=0
+          Name 304 "%5" targs=0
+          IntLit 304 1 ""
+  -
+VarDecl 320 const=1 using=0 n=1
+  Declarator 326 "swap" form=plain
+    -
+    FunctionExpr 333
+      Function 333 "" arrow=1 concise=0 own="" place=1 body=0 gen=0 async=0 role=plain src=333-377 tp=0 params=0
+        -
+        Block 339 end=376 n=1
+          Block 341 end=-1 n=3
+            VarDecl 341 const=1 using=0 n=2
+              Declarator 360 "%6" form=plain
+                -
+                Name 360 "second" targs=0
+              Declarator 368 "%7" form=plain
+                -
+                Name 368 "first" targs=0
+            ExprStmt 342
+              Assign 342 - src=-
+                Name 342 "first" targs=0
+                Name 342 "%6" targs=0
+            ExprStmt 349
+              Assign 349 - src=-
+                Name 349 "second" targs=0
+                Name 349 "%7" targs=0
+VarDecl 379 const=1 using=0 n=1
+  Declarator 385 "head" form=plain
+    -
+    FunctionExpr 392
+      Function 392 "" arrow=1 concise=1 own="" place=1 body=0 gen=0 async=0 role=plain src=392-415 tp=0 params=1
+        Param 393 "%9" form=2 prop=- pattern=393-399 dec=0
+          -
+          Name 402 "pair" targs=0
+        -
+        Block 411 end=-1 n=2
+          VarDecl 411 const=0 using=0 n=1
+            Declarator 394 "only" form=plain
+              -
+              Index 394 opt=0
+                Name 394 "%9" targs=0
+                IntLit 394 0 ""
+          Return 411
+            Name 411 "only" targs=0
+VarDecl 417 const=1 using=0 n=1
+  Declarator 423 "size" form=plain
+    -
+    FunctionExpr 430
+      Function 430 "" arrow=1 concise=1 own="" place=1 body=0 gen=0 async=0 role=plain src=430-456 tp=0 params=1
+        Param 431 "%11" form=2 prop=- pattern=431-440 dec=0
+          -
+          Name 443 "box" targs=0
+        -
+        Block 451 end=-1 n=2
+          VarDecl 451 const=0 using=0 n=1
+            Declarator 433 "width" form=plain
+              -
+              Member 433 "width" opt=0 targs=0
+                Name 433 "%11" targs=0
+          Return 451
+            Name 451 "width" targs=0
+imports 0
+exports 0
+fields 3 "first" "second" "width"
+constants 3
+  "head" 0
+  "size" 0
+  "swap" 0

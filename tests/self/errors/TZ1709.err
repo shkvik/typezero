@@ -1,0 +1,3 @@
+TZ1709.d.tz:1:22: error TZ1709: 'limit' needs its type in a declaration file, e.g. 'limit: int': there is no value to take the type from
+export declare const limit;
+                     ^

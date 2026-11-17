@@ -1,7 +1,7 @@
-declaration_mistakes.d.tz:1:1: error TZ1701: a declaration file holds only what its module exports: 'export type', 'export declare function', 'export declare class' and imports of the types they name
+declaration_mistakes.d.tz:1:1: error TZ1701: a declaration file holds only what its module exports: 'export type', 'export interface', 'export declare' of a function, class, enum, const or let, and imports of the types they name
 let count = 0;
 ^
-declaration_mistakes.d.tz:11:8: error TZ1702: a declaration file has no code: write 'export declare function' or 'export declare class', with signatures and no bodies
+declaration_mistakes.d.tz:11:8: error TZ1702: a declaration file has no code: write 'export declare' before a function, class, enum, const or let, with signatures and types, no bodies and no values
 export const limit = 10;
        ^
 declaration_mistakes.d.tz:16:10: error TZ1329: field 'value' needs a type, e.g. 'value: int'
@@ -16,6 +16,9 @@ declaration_mistakes.d.tz:21:23: error TZ1706: a method of a declaration file ha
 declaration_mistakes.d.tz:26:23: error TZ1707: a field of a declaration file has no value: its value is in the module
   public name: string = "box";
                       ^
-declaration_mistakes.d.tz:30:16: error TZ1703: expected 'function' or 'class' after 'export declare', found 'enum'
-export declare enum Kind {
+declaration_mistakes.d.tz:35:22: error TZ1708: 'size' has no value in a declaration file: its value is in the module; write its type only, e.g. 'size: int'
+export declare const size: int = 1;
+                     ^
+declaration_mistakes.d.tz:37:16: error TZ1703: expected 'function', 'class', 'enum', 'const' or 'let' after 'export declare', found 'type'
+export declare type Width = int;
                ^

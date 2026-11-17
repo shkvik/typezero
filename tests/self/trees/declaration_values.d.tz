@@ -1,0 +1,17 @@
+// An enum and a constant of a module are declared too: an enum with its
+// members and their values, a constant with its type and no value.
+export declare enum Kind {
+  Small,
+  Large = 5,
+}
+
+export declare const enum Mode {
+  On = "on",
+  Off = "off",
+}
+
+export declare const limit: int;
+
+export declare let count: int, title: string;
+
+export declare function pick(kind: Kind, mode?: Mode): int;

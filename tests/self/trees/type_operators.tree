@@ -1,30 +1,30 @@
 == type_operators.tz
 items 10
-TypeAlias 154 "A" handle=0 tp=0 bases=0
+TypeAlias 154 "A" tp=0 bases=0
   Type 158 KeyOf "" src=- n=1
     Type 164 Tuple "" src=- n=2 ro=00 spread=00
       Type 165 Name "int" src=- n=0
       Type 170 Name "string" src=- n=0
-TypeAlias 184 "B" handle=0 tp=0 bases=0
+TypeAlias 184 "B" tp=0 bases=0
   Type 188 KeyOf "" src=- n=1
-    Type 194 Literal "string" src=- n=0 text="text" number=0000000000000000 int=0
-TypeAlias 207 "C" handle=0 tp=0 bases=0
+    Type 194 Literal "string" src=- n=0 text="text" number=0000000000000000 int=0 beyond=0
+TypeAlias 207 "C" tp=0 bases=0
   Type 211 KeyOf "" src=- n=1
     Type 217 Tuple "" src=- n=0 ro=- spread=-
-TypeAlias 226 "D" handle=0 tp=0 bases=0
+TypeAlias 226 "D" tp=0 bases=0
   Type 239 Array "" src=- n=1
     Type 239 Object "" src=- n=1 names=["id"] locs=[241] opt=0 ro=0 methods=-
       Type 245 Name "int" src=- n=0
-TypeAlias 259 "E" handle=0 tp=0 bases=0
+TypeAlias 259 "E" tp=0 bases=0
   Type 272 Array "" src=- n=1
     Type 272 TypeOf "" src=- n=0 names=["table"]
-TypeAlias 293 "F" handle=0 tp=0 bases=0
+TypeAlias 293 "F" tp=0 bases=0
   Type 306 Array "" src=- n=1
-    Type 306 Literal "string" src=- n=0 text="a" number=0000000000000000 int=0
-TypeAlias 318 "G" handle=0 tp=0 bases=0
+    Type 306 Literal "string" src=- n=0 text="a" number=0000000000000000 int=0 beyond=0
+TypeAlias 318 "G" tp=0 bases=0
   Type 322 KeyOf "" src=- n=1
     Type 328 TypeOf "" src=- n=0 names=["table"]
-TypeAlias 347 "H" handle=0 tp=0 bases=0
+TypeAlias 347 "H" tp=0 bases=0
   Type 360 Tuple "" src=- n=2 ro=11 spread=00
     Type 361 Name "int" src=- n=0
     Type 366 Name "string" src=- n=0

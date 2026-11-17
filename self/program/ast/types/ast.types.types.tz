@@ -40,13 +40,18 @@ export type FunctionTypeForm = {
   rest: boolean;
 };
 
+export type ObjectTypeField = {
+  readonly name: string;
+  readonly loc: int;
+  readonly optional: boolean;
+  readonly readonly: boolean;
+  readonly method: boolean;
+  readonly type: TypeRef;
+};
+
 export type ObjectTypeForm = {
   readonly kind: TypeKind.Object;
-  readonly names: string[];
-  readonly locs: int[];
-  readonly optional: boolean[];
-  readonly readonly: boolean[];
-  readonly methods: boolean[];
+  readonly fields: ObjectTypeField[];
 };
 
 export type TupleTypeForm = {
@@ -60,6 +65,7 @@ export type LiteralTypeForm = {
   readonly text: string;
   readonly number: double;
   readonly integer: boolean;
+  readonly beyondDouble: boolean;
 };
 
 export type PredicateTypeForm = {
@@ -103,7 +109,7 @@ export type TypeForm =
 export type TypeRef = {
   form: TypeForm;
   name: string;
-  loc?: int;
+  loc: int;
   args: TypeRef[];
   source?: Span;
 };

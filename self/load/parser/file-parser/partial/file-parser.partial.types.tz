@@ -1,6 +1,6 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { Token, TokenKind } from "../../../token/types/token.types.tz";
+import { TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
   TemplateTypeForm,
@@ -8,10 +8,7 @@ import {
   TypeKind,
   TypeRef,
 } from "../../../../program/ast/types/ast.types.types.tz";
-import {
-  ExprKind,
-  FloatLitExpr,
-} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { ExprKind } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { TypePlace } from "../types/file-parser.types.context.tz";
 import {
   kBooleanTypeName,
@@ -344,6 +341,7 @@ partial class FileParser {
       text,
       number: 0.0,
       integer: false,
+      beyondDouble: false,
     };
     ref.name = kStringTypeName;
 
@@ -360,6 +358,7 @@ partial class FileParser {
       text: "",
       number: truth,
       integer: false,
+      beyondDouble: false,
     };
     ref.name = kBooleanTypeName;
 
@@ -406,6 +405,7 @@ partial class FileParser {
         text: first,
         number: 0.0,
         integer: false,
+        beyondDouble: false,
       };
       ref.name = kStringTypeName;
 
@@ -448,37 +448,33 @@ partial class FileParser {
     const first = this.cursor.peek();
     const ref = this.typeRef(first.start);
     const negative = this.cursor.accept(TokenKind.Minus);
-    const written = this.cursor.peek();
     const literal = this.numberLiteral();
 
     let number = 0.0;
     let integer = false;
+    let beyondDouble = false;
 
     if (literal.kind == ExprKind.IntLit) {
       number = this.integerAsDouble(literal.value);
       integer = true;
     } else if (literal.kind == ExprKind.FloatLit) {
       number = literal.value;
-      this.checkNumberTypeFits(literal, written);
+      beyondDouble = literal.beyondDouble;
     }
     if (negative) {
       number = -number;
     }
 
-    ref.form = { kind: TypeKind.Literal, text: "", number, integer };
+    ref.form = {
+      kind: TypeKind.Literal,
+      text: "",
+      number,
+      integer,
+      beyondDouble,
+    };
     ref.name = kNumberTypeName;
 
     return ref;
-  }
-
-  private checkNumberTypeFits(literal: FloatLitExpr, written: Token): void {
-    if (!literal.beyondDouble) {
-      return;
-    }
-
-    const word = this.written(written.start, written.end);
-
-    this.cursor.report(written.start, Code.NumberTypeBeyondDouble, { word });
   }
 
   private typeOfType(): TypeRef {
@@ -627,7 +623,7 @@ partial class FileParser {
     return parsed.unwrapOr(0.0);
   }
 
-  private typeRef(loc?: int): TypeRef {
+  private typeRef(loc: int): TypeRef {
     return {
       form: { kind: TypeKind.Name },
       name: "",

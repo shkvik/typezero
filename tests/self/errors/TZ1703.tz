@@ -1,1 +1,1 @@
-export const limit: int = 10;
+export type Size = int;

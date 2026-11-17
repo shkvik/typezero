@@ -1,11 +1,11 @@
 import { Dumper } from "../ast-dump.tz";
 import {
   ModifierChange,
+  ObjectTypeField,
   TypeKind,
   TypeRef,
 } from "../../../../program/ast/types/ast.types.types.tz";
 import { Quoting } from "../types/ast-dump.types.tz";
-import { kNoLocation } from "../const/ast-dump.const.tz";
 
 partial class Dumper {
   private dumpOptionalType(ref: TypeRef | undefined): void {
@@ -33,25 +33,8 @@ partial class Dumper {
 
         return ` names=${names} opt=${optional} rest=${rest}`;
       }
-      case TypeKind.Object: {
-        const locTexts: string[] = [];
-
-        for (const loc of form.locs) {
-          locTexts.push(`${loc}`);
-        }
-
-        const locs = locTexts.join(",");
-        const names = this.quoteAll(form.names);
-        const optional = this.flags(form.optional);
-        const readonlyFlags = this.flags(form.readonly);
-        const throughLastMethod = this.upToLastTrue(form.methods);
-        const methods = this.flags(throughLastMethod);
-
-        return (
-          ` names=${names} locs=[${locs}] opt=${optional} ` +
-          `ro=${readonlyFlags} methods=${methods}`
-        );
-      }
+      case TypeKind.Object:
+        return this.objectExtras(form.fields);
       case TypeKind.Tuple: {
         const readonlyFlags = this.flags(form.readonly);
         const spread = this.flags(form.spread);
@@ -62,8 +45,12 @@ partial class Dumper {
         const text = this.quote(form.text, Quoting.EscapeUnicode);
         const numberBits = this.bits(form.number);
         const integer = this.flag(form.integer);
+        const beyond = this.flag(form.beyondDouble);
 
-        return ` text=${text} number=${numberBits} int=${integer}`;
+        return (
+          ` text=${text} number=${numberBits} int=${integer} ` +
+          `beyond=${beyond}`
+        );
       }
       case TypeKind.Predicate: {
         const isAsserts = this.flag(form.asserts);
@@ -99,19 +86,47 @@ partial class Dumper {
     }
   }
 
+  private objectExtras(fields: ObjectTypeField[]): string {
+    const fieldNames = fields.map((field) => field.name);
+    const fieldLocs = fields.map((field) => `${field.loc}`);
+    const optionalFields = fields.map((field) => field.optional);
+    const readonlyFields = fields.map((field) => field.readonly);
+    const methodFields = fields.map((field) => field.method);
+    const throughLastMethod = this.upToLastTrue(methodFields);
+    const names = this.quoteAll(fieldNames);
+    const locs = fieldLocs.join(",");
+    const optional = this.flags(optionalFields);
+    const readonlyFlags = this.flags(readonlyFields);
+    const methods = this.flags(throughLastMethod);
+
+    return (
+      ` names=${names} locs=[${locs}] opt=${optional} ` +
+      `ro=${readonlyFlags} methods=${methods}`
+    );
+  }
+
+  private innerTypes(ref: TypeRef): TypeRef[] {
+    const form = ref.form;
+    if (form.kind == TypeKind.Object) {
+      return form.fields.map((field) => field.type);
+    }
+
+    return ref.args;
+  }
+
   private dumpType(ref: TypeRef): void {
     const kind = this.typeKindName(ref.form.kind);
     const name = this.quote(ref.name);
     const source = this.span(ref.source);
     const extras = this.typeExtras(ref);
-    const loc = ref.loc ?? kNoLocation;
+    const inner = this.innerTypes(ref);
 
     this.line(
-      `Type ${loc} ${kind} ${name} src=${source} ` +
-        `n=${ref.args.length}${extras}`,
+      `Type ${ref.loc} ${kind} ${name} src=${source} ` +
+        `n=${inner.length}${extras}`,
     );
     this.nested();
-    this.dumpTypes(ref.args);
+    this.dumpTypes(inner);
     this.back();
   }
 

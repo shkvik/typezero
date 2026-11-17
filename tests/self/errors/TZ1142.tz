@@ -1,0 +1,8 @@
+function size(kind: int): int {
+  switch (kind) {
+    case 1, 2:
+      return 10;
+    default:
+      return 0;
+  }
+}

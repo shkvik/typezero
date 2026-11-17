@@ -185,6 +185,26 @@ export class Cursor {
     this.recovering = mark.recovering;
   }
 
+  public onlyOpenParens(from: int, to: int): boolean {
+    if (from < 0) {
+      return false;
+    }
+
+    const tokens = this.tokens;
+
+    for (let index = this.at - 1; index >= 0; index--) {
+      const token = tokens[index];
+      if (token == undefined || token.start < from) {
+        break;
+      }
+      if (token.start < to && token.kind != TokenKind.LParen) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
   public symbolKeyAhead(): boolean {
     const next = this.lookahead();
 

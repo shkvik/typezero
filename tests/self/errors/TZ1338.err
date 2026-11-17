@@ -1,3 +1,0 @@
-TZ1338.tz:1:13: error TZ1338: the number type '1e400' is beyond a double, which holds at most about 1.8e308
-type Huge = 1e400
-            ^

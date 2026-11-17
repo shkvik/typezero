@@ -1,0 +1,11 @@
+// The base of a class may be a call with type arguments: a mixin. The type
+// arguments belong to the call, not to a base type.
+class Timed extends stamped<Entry>(Base) { }
+
+class Counted<T> extends counted<T, int>(Base, 0) implements Sized { }
+
+const Named = class extends named<string>(Base) { };
+
+class Plain extends Box<int> { }
+
+class Listed extends lists.of<Entry>(Base) { }

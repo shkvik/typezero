@@ -1,0 +1,33 @@
+== declaration_values.d.tz
+items 5
+Enum 161 "Kind" n=2
+  EnumMember 170 "Small"
+    -
+  EnumMember 179 "Large"
+    IntLit 187 5 "5"
+Enum 219 "Mode" n=2
+  EnumMember 228 "On"
+    StringLit 233 "on"
+  EnumMember 241 "Off"
+    StringLit 247 "off"
+VarDecl 272 const=1 using=0 n=1
+  Declarator 278 "limit" form=plain
+    Type 285 Name "int" src=- n=0
+    -
+VarDecl 306 const=0 using=0 n=2
+  Declarator 310 "count" form=plain
+    Type 317 Name "int" src=- n=0
+    -
+  Declarator 322 "title" form=plain
+    Type 329 Name "string" src=- n=0
+    -
+Function 362 "pick" arrow=0 concise=0 own="" place=0 body=0 gen=0 async=0 role=plain src=353-397 tp=0 params=2
+  Param 367 "kind" form=0 prop=- pattern=- dec=0
+    Type 373 Name "Kind" src=- n=0
+  Param 379 "mode" form=1 prop=- pattern=- dec=0
+    Type 386 Name "Mode" src=- n=0
+  Type 393 Name "int" src=- n=0
+  -
+classes 0
+imports 0
+exports 0

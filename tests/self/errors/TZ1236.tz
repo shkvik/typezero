@@ -1,0 +1,4 @@
+let first = 0;
+let second = 0;
+const pair: [int, int] = [1, 2];
+const copy = ([first, second] = pair);

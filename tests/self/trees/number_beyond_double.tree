@@ -1,5 +1,5 @@
 == number_beyond_double.tz
-items 7
+items 9
 VarDecl 132 const=1 using=0 n=1
   Declarator 138 "a" form=plain
     -
@@ -20,14 +20,18 @@ VarDecl 243 const=1 using=0 n=1
   Declarator 249 "e" form=plain
     -
     FloatLit 253 0000000000000000 "1e-400" beyond=0
-VarDecl 261 const=1 using=0 n=1
-  Declarator 267 "f" form=plain
+TypeAlias 266 "Huge" tp=0 bases=0
+  Type 273 Literal "number" src=- n=0 text="" number=0000000000000000 int=0 beyond=1
+TypeAlias 285 "Fits" tp=0 bases=0
+  Type 292 Literal "number" src=- n=0 text="" number=7fe1ccf385ebc8a0 int=0 beyond=0
+VarDecl 299 const=1 using=0 n=1
+  Declarator 305 "f" form=plain
     -
-    FloatLit 271 44b52d02c7e14af6 "99999999999999999999999" beyond=0
-VarDecl 296 const=1 using=0 n=1
-  Declarator 302 "g" form=plain
+    FloatLit 309 44b52d02c7e14af6 "99999999999999999999999" beyond=0
+VarDecl 334 const=1 using=0 n=1
+  Declarator 340 "g" form=plain
     -
-    FloatLit 306 0000000000000000 "0x1ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" beyond=1
+    FloatLit 344 0000000000000000 "0x1ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" beyond=1
 imports 0
 exports 0
 fields 0
