@@ -1,0 +1,58 @@
+== regex_or_division.tz
+items 6
+VarDecl 127 const=1 using=0 n=1
+  Declarator 133 "a" form=plain
+    -
+    Await 137
+      Call 148 opt=0 tagged=0 n=1 spread=-
+        Member 148 "exec" opt=0 targs=0
+          RegexLit 143 "r" "g" written=4
+        Name 153 "text" targs=0
+VarDecl 160 const=1 using=0 n=1
+  Declarator 166 "b" form=plain
+    -
+    Binary 185 3 src=170-188
+      Binary 181 3 src=170-184
+        Member 174 "delete" opt=0 targs=0
+          Name 170 "map" targs=0
+        IntLit 183 2 "2"
+      IntLit 187 3 "3"
+VarDecl 190 const=1 using=0 n=1
+  Declarator 196 "c" form=plain
+    -
+    Binary 217 3 src=200-220
+      Binary 213 3 src=200-216
+        OptionalChain 205
+          Member 205 "default" opt=1 targs=0
+            Name 200 "map" targs=0
+        IntLit 215 2 "2"
+      IntLit 219 3 "3"
+VarDecl 222 const=1 using=0 n=1
+  Declarator 228 "d" form=plain
+    -
+    OptionalChain 237
+      Index 237 opt=1
+        Name 232 "map" targs=0
+        RegexLit 238 "r" "g" written=4
+VarDecl 245 const=1 using=0 n=1
+  Declarator 251 "e" form=plain
+    -
+    OptionalChain 255
+      Call 255 opt=1 tagged=0 n=1 spread=-
+        Name 255 "map" targs=0
+        RegexLit 261 "r" "g" written=4
+VarDecl 268 const=1 using=0 n=1
+  Declarator 274 "f" form=plain
+    -
+    Unary 278 4
+      RegexLit 285 "r" "g" written=4
+imports 0
+exports 0
+fields 0
+constants 6
+  "a" 0
+  "b" 0
+  "c" 0
+  "d" 0
+  "e" 0
+  "f" 0

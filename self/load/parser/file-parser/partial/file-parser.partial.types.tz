@@ -596,7 +596,9 @@ partial class FileParser {
       return [];
     }
 
-    return this.typeArguments();
+    const args = this.tryTypeArguments(false);
+
+    return args ?? [];
   }
 
   private truthNumber(kind: TokenKind): double {

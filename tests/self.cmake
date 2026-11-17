@@ -15,6 +15,10 @@
 #     NAME.err: every mistake once, and nothing that only follows from an
 #     earlier one. ACCEPT=ON works as for MODE=error.
 #
+#   MODE=tree: tests/self/trees/NAME.tz is correct code whose tree is easy to
+#     get wrong. `EXE tree NAME.tz` must report no error and print exactly
+#     NAME.tree. ACCEPT=ON works as for MODE=error.
+#
 #   MODE=codes: every code of self/diagnostic/code.tz has its test in
 #     tests/self/errors, and every test there is named after a code.
 #     UNREACHABLE lists the codes no source can get: the parser asks for them
@@ -69,6 +73,36 @@ elseif(MODE STREQUAL "error" OR MODE STREQUAL "recovery")
   string(REPLACE "\r\n" "\n" expected "${expected}")
   if(NOT stderr STREQUAL expected)
     fail("the messages differ from ${code}.err\n--- expected:\n${expected}\n--- actual:\n${stderr}")
+  endif()
+
+elseif(MODE STREQUAL "tree")
+  get_filename_component(dir ${SRC} DIRECTORY)
+  get_filename_component(name ${SRC} NAME_WE)
+  execute_process(
+    COMMAND ${EXE} tree ${name}.tz
+    WORKING_DIRECTORY ${dir}
+    OUTPUT_VARIABLE stdout
+    ERROR_VARIABLE stderr
+    RESULT_VARIABLE exit_code)
+  string(REPLACE "\r\n" "\n" stdout "${stdout}")
+  if(NOT exit_code EQUAL 0)
+    fail("exit code ${exit_code}, expected 0\nstdout:\n${stdout}\nstderr:\n${stderr}")
+  endif()
+  string(FIND "${stdout}" "\n!! " at)
+  if(NOT at EQUAL -1)
+    fail("the parser reports an error for correct code:\n${stdout}")
+  endif()
+  if(ACCEPT)
+    file(WRITE ${dir}/${name}.tree "${stdout}")
+    return()
+  endif()
+  if(NOT EXISTS ${dir}/${name}.tree)
+    fail("there is no ${name}.tree with the expected tree; the tree is:\n${stdout}")
+  endif()
+  file(READ ${dir}/${name}.tree expected)
+  string(REPLACE "\r\n" "\n" expected "${expected}")
+  if(NOT stdout STREQUAL expected)
+    fail("the tree differs from ${name}.tree\n--- expected:\n${expected}\n--- actual:\n${stdout}")
   endif()
 
 elseif(MODE STREQUAL "codes")

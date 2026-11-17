@@ -119,7 +119,8 @@ endforeach()
 # every tests/self/errors/CODE.tz, a source with the mistake of that error
 # code, must make it print exactly CODE.err; self/codes keeps a test for
 # every code; tests/self/recovery/NAME.tz has more than the mistake itself and
-# must print exactly NAME.err too. See self.cmake.
+# must print exactly NAME.err too; tests/self/trees/NAME.tz is correct code
+# that must give exactly the tree NAME.tree. See self.cmake.
 set(TZ_SELF ${CMAKE_CURRENT_BINARY_DIR}/self/tzparse${CMAKE_EXECUTABLE_SUFFIX})
 add_test(NAME self/build
   COMMAND ${CMAKE_COMMAND} -DTZ=$<TARGET_FILE:tz> -DROOT=${PROJECT_SOURCE_DIR} -DEXE=${TZ_SELF}
@@ -144,6 +145,15 @@ foreach(src ${TZ_SELF_RECOVERY_TESTS})
     COMMAND ${CMAKE_COMMAND} -DEXE=${TZ_SELF} -DSRC=${src} -DMODE=recovery
             -P ${CMAKE_CURRENT_SOURCE_DIR}/self.cmake)
   set_tests_properties(self/recovery/${name} PROPERTIES FIXTURES_REQUIRED tz_self)
+endforeach()
+file(GLOB TZ_SELF_TREE_TESTS CONFIGURE_DEPENDS
+     ${CMAKE_CURRENT_SOURCE_DIR}/self/trees/*.tz)
+foreach(src ${TZ_SELF_TREE_TESTS})
+  get_filename_component(name ${src} NAME_WE)
+  add_test(NAME self/trees/${name}
+    COMMAND ${CMAKE_COMMAND} -DEXE=${TZ_SELF} -DSRC=${src} -DMODE=tree
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/self.cmake)
+  set_tests_properties(self/trees/${name} PROPERTIES FIXTURES_REQUIRED tz_self)
 endforeach()
 
 # Tests of tz's commands (tz init, add, remove, update, port; build and run of

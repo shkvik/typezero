@@ -113,7 +113,7 @@ partial class FileParser {
 
     const question = this.cursor.next();
     const loc = question.start;
-    const thenExpr = this.expression();
+    const thenExpr = this.thenBranch();
 
     this.cursor.expect(TokenKind.Colon, Code.ExpectedInConditional);
     const elseExpr = this.expression();
@@ -121,18 +121,33 @@ partial class FileParser {
     return { kind: ExprKind.Conditional, loc, cond, thenExpr, elseExpr };
   }
 
-  private primary(): Expr {
+  private thenBranch(): Expr {
     const outer = this.context;
 
+    this.context = {
+      ...outer,
+      expressionPlace: ExpressionPlace.ConditionalThen,
+    };
+    const branch = this.expression();
+
+    this.context = outer;
+
+    return branch;
+  }
+
+  private primary(): Expr {
+    const outer = this.context;
+    const place = outer.expressionPlace;
+
     this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
-    const expr = this.primaryInside();
+    const expr = this.primaryInside(place);
 
     this.context = outer;
 
     return expr;
   }
 
-  private primaryInside(): Expr {
+  private primaryInside(place: ExpressionPlace): Expr {
     const token = this.cursor.peek();
 
     switch (token.kind) {
@@ -165,7 +180,7 @@ partial class FileParser {
       case TokenKind.Function:
         return this.functionExpression();
       case TokenKind.LParen:
-        return this.parenthesized();
+        return this.parenthesized(place);
       case TokenKind.LBracket:
         return this.arrayLiteral();
       case TokenKind.LBrace:
@@ -191,7 +206,7 @@ partial class FileParser {
       return this.invalid(first.start);
     }
 
-    return this.primaryInside();
+    return this.primaryInside(ExpressionPlace.Plain);
   }
 
   private functionExpression(): Expr {
@@ -211,8 +226,8 @@ partial class FileParser {
     return this.invalid(token.start);
   }
 
-  private parenthesized(): Expr {
-    if (this.arrowAhead()) {
+  private parenthesized(place: ExpressionPlace): Expr {
+    if (this.arrowAhead() && this.arrowFitsPlace(place)) {
       return this.arrow([], false);
     }
 

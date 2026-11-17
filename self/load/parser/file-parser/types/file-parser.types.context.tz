@@ -6,6 +6,7 @@ export enum FunctionKind {
 export enum ExpressionPlace {
   Plain,
   ForHead,
+  ConditionalThen,
 }
 
 export enum TypePlace {

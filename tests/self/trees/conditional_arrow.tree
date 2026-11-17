@@ -1,0 +1,85 @@
+== conditional_arrow.tz
+items 5
+VarDecl 170 const=1 using=0 n=1
+  Declarator 176 "a" form=plain
+    -
+    Conditional 182
+      Name 180 "x" targs=0
+      Name 185 "y" targs=0
+      FunctionExpr 190
+        Function 190 "" arrow=1 concise=1 own="" place=1 body=0 gen=0 async=0 role=plain src=190-196 tp=0 params=1
+          Param 190 "p" form=0 prop=- pattern=- dec=0
+            -
+          -
+          Block 195 end=-1 n=1
+            Return 195
+              Name 195 "q" targs=0
+VarDecl 198 const=1 using=0 n=1
+  Declarator 204 "b" form=plain
+    -
+    Conditional 210
+      Name 208 "x" targs=0
+      Sequence 213 n=2
+        Name 213 "y" targs=0
+        Name 216 "z" targs=0
+      FunctionExpr 221
+        Function 221 "" arrow=1 concise=1 own="" place=1 body=0 gen=0 async=0 role=plain src=221-227 tp=0 params=1
+          Param 221 "p" form=0 prop=- pattern=- dec=0
+            -
+          -
+          Block 226 end=-1 n=1
+            Return 226
+              Name 226 "q" targs=0
+VarDecl 229 const=1 using=0 n=1
+  Declarator 235 "c" form=plain
+    -
+    Conditional 241
+      Name 239 "x" targs=0
+      FunctionExpr 243
+        Function 243 "" arrow=1 concise=1 own="" place=1 body=0 gen=0 async=0 role=plain src=243-256 tp=0 params=1
+          Param 244 "p" form=0 prop=- pattern=- dec=0
+            -
+          Type 248 Name "int" src=- n=0
+          Block 255 end=-1 n=1
+            Return 255
+              Name 255 "q" targs=0
+      Name 259 "r" targs=0
+VarDecl 262 const=1 using=0 n=1
+  Declarator 268 "d" form=plain
+    -
+    Conditional 274
+      Name 272 "x" targs=0
+      FunctionExpr 276
+        Function 276 "" arrow=1 concise=1 own="" place=1 body=0 gen=0 async=0 role=plain src=276-284 tp=0 params=1
+          Param 277 "p" form=0 prop=- pattern=- dec=0
+            -
+          -
+          Block 283 end=-1 n=1
+            Return 283
+              Name 283 "q" targs=0
+      Name 287 "r" targs=0
+VarDecl 290 const=1 using=0 n=1
+  Declarator 296 "e" form=plain
+    -
+    Conditional 302
+      Name 300 "x" targs=0
+      Call 304 opt=0 tagged=0 n=1 spread=-
+        Name 304 "f" targs=0
+        FunctionExpr 306
+          Function 306 "" arrow=1 concise=1 own="" place=1 body=0 gen=0 async=0 role=plain src=306-319 tp=0 params=1
+            Param 307 "p" form=0 prop=- pattern=- dec=0
+              -
+            Type 311 Name "int" src=- n=0
+            Block 318 end=-1 n=1
+              Return 318
+                Name 318 "q" targs=0
+      Name 323 "r" targs=0
+imports 0
+exports 0
+fields 0
+constants 5
+  "a" 0
+  "b" 0
+  "c" 0
+  "d" 0
+  "e" 0

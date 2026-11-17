@@ -346,7 +346,7 @@ partial class FileParser {
     if (!this.cursor.accept(TokenKind.Dot)) {
       return undefined;
     }
-    if (this.cursor.atName()) {
+    if (this.isPropertyName()) {
       return this.cursor.next();
     }
 
@@ -373,9 +373,10 @@ partial class FileParser {
     const outer = this.context;
 
     this.context = { ...outer, expressionPlace: ExpressionPlace.Plain };
-    const callee = this.sequence();
+    const inner = this.sequence();
 
     this.cursor.expect(TokenKind.RParen, Code.ExpectedNewClassClose);
+    const callee = this.newPath(inner);
     const args = this.newArguments();
 
     this.context = outer;
@@ -409,6 +410,12 @@ partial class FileParser {
         typeArgs: [],
       };
     }
+
+    return this.newPath(path);
+  }
+
+  private newPath(from: Expr): Expr {
+    let path = from;
 
     while (
       this.cursor.is(TokenKind.Dot) ||

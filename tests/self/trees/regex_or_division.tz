@@ -1,0 +1,8 @@
+// '/' starts a regular expression after 'await' and after '?.(' or '?.[',
+// and divides after a keyword that names a member.
+const a = await /r/g.exec(text);
+const b = map.delete / 2 / 3;
+const c = map?.default / 2 / 3;
+const d = map?.[/r/g];
+const e = map?.(/r/g);
+const f = typeof /r/g;

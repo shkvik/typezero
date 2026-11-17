@@ -21,7 +21,10 @@ import {
   Param,
   ParamKind,
 } from "../../../../program/ast/types/ast.types.functions.tz";
-import { FunctionKind } from "../types/file-parser.types.context.tz";
+import {
+  ExpressionPlace,
+  FunctionKind,
+} from "../types/file-parser.types.context.tz";
 import {
   ArrowHead,
   ParamPattern,
@@ -115,6 +118,27 @@ partial class FileParser {
     }
 
     return this.cursor.is(TokenKind.Arrow);
+  }
+
+  private arrowFitsPlace(place: ExpressionPlace): boolean {
+    if (place != ExpressionPlace.ConditionalThen) {
+      return true;
+    }
+
+    const start = this.cursor.mark();
+
+    this.cursor.startDiscarding();
+    this.cursor.stopRecovering();
+
+    const parsed = this.arrow([], false);
+    const typed = parsed.fn.returnType != undefined;
+    const closed =
+      !this.cursor.isRecovering() && this.cursor.is(TokenKind.Colon);
+
+    this.cursor.stopDiscarding();
+    this.cursor.reset(start);
+
+    return !typed || closed;
   }
 
   private arrow(

@@ -434,9 +434,18 @@ export class Lexer {
   }
 
   private regexAllowed(): boolean {
-    const last = this.tokens[this.tokens.length - 1];
+    const count = this.tokens.length;
+    const last = this.tokens[count - 1];
+    if (last == undefined) {
+      return true;
+    }
 
-    return last == undefined || this.regexMayFollow(last.kind);
+    const before = this.tokens[count - 2];
+    const afterDot =
+      before?.kind == TokenKind.Dot || before?.kind == TokenKind.QuestionDot;
+    const isProperty = afterDot && kTokenTable.isKeyword(last.kind);
+
+    return !isProperty && this.regexMayFollow(last.kind);
   }
 
   private leftBrace(): void {
@@ -733,11 +742,9 @@ export class Lexer {
   }
 
   private regexMayFollow(kind: TokenKind): boolean {
-    if (kTokenTable.isContextual(kind)) {
-      return false;
-    }
-
     switch (kind) {
+      case TokenKind.Await:
+        return true;
       case TokenKind.Identifier:
       case TokenKind.This:
       case TokenKind.Super:
@@ -756,7 +763,7 @@ export class Lexer {
       case TokenKind.MinusMinus:
         return false;
       default:
-        return true;
+        return !kTokenTable.isContextual(kind);
     }
   }
 }

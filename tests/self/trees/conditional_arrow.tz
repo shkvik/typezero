@@ -1,0 +1,8 @@
+// A parenthesized first branch of '?:' followed by an arrow function in the
+// second one is not an arrow function with a result type; with ':' after its
+// body it is.
+const a = x ? (y) : p => q;
+const b = x ? (y, z) : p => q;
+const c = x ? (p): int => q : r;
+const d = x ? (p) => q : r;
+const e = x ? f((p): int => q) : r;
