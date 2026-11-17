@@ -571,9 +571,9 @@ export class Lexer {
     const nameStart = this.position + 1;
     const nameEnd = this.position + offset;
     const word = this.source.toString("utf8", this.start, this.position);
-    const name = this.source.toString("utf8", nameStart, nameEnd);
+    const other = this.source.toString("utf8", nameStart, nameEnd);
 
-    this.error(nameStart, Code.NameAfterNumberPoint, { word, name });
+    this.error(nameStart, Code.NameAfterNumberPoint, { word, other });
   }
 
   private acceptExponent(): boolean {

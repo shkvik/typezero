@@ -1,4 +1,4 @@
-switch_body.tz:2:3: error TZ1131: expected 'case' or 'default'
+switch_body.tz:2:3: error TZ1131: expected 'case' or 'default', found identifier
   foo();
   ^
 switch_body.tz:6:11: error TZ1221: expected an expression, found ';'

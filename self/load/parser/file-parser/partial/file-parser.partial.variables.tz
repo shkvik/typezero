@@ -59,7 +59,9 @@ partial class FileParser {
     const typeAnn = this.typeAnnotation();
 
     if (!this.cursor.is(TokenKind.Assign)) {
-      this.cursor.error(pattern.loc, Code.DestructuringNeedsValue);
+      const word = this.patternExample(pattern);
+
+      this.cursor.error(pattern.loc, Code.DestructuringNeedsValue, { word });
 
       return false;
     }

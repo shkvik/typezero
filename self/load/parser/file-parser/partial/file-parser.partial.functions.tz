@@ -425,7 +425,9 @@ partial class FileParser {
     if (modifier && kTokenTable.isName(next.kind)) {
       const word = this.cursor.next();
 
-      this.cursor.report(word.start, Code.TypeParameterModifier);
+      this.cursor.report(word.start, Code.TypeParameterModifier, {
+        word: word.text,
+      });
     }
 
     const token = this.cursor.peek();

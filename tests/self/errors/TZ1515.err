@@ -1,3 +1,3 @@
-TZ1515.tz:1:11: error TZ1515: static blocks are not supported
+TZ1515.tz:1:11: error TZ1515: static blocks are not supported; give each static field its value in its declaration
 class C { static
           ^

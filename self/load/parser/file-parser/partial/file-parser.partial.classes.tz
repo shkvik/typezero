@@ -253,10 +253,7 @@ partial class FileParser {
       return;
     }
     if (this.memberAccessorAhead()) {
-      this.cursor.next();
-      this.cursor.report(loc, Code.AccessorsNotSupported);
-
-      return this.skipClassMember();
+      return this.memberAccessor(loc);
     }
     if (this.cursor.is(TokenKind.LBracket) && !this.cursor.symbolKeyAhead()) {
       this.cursor.report(loc, Code.MemberNameInBrackets);
@@ -273,11 +270,46 @@ partial class FileParser {
     }
     if (member.generator || modifiers.isAsync) {
       const token = this.cursor.peek();
+      const code = this.methodParenCode(member.generator);
 
-      return this.cursor.error(token.start, Code.ExpectedParenAfterMethodName);
+      return this.cursor.error(token.start, code);
     }
 
     this.classField(declaration, modifiers, decorators, loc, member);
+  }
+
+  private memberAccessor(loc: int): void {
+    const keyword = this.cursor.next();
+    const name = this.cursor.peek();
+
+    this.reportAccessor(loc, keyword.kind, name.text);
+    this.skipClassMember();
+  }
+
+  private reportAccessor(loc: int, keyword: TokenKind, name: string): void {
+    if (keyword == TokenKind.Get) {
+      return this.cursor.report(loc, Code.GettersNotSupported, { word: name });
+    }
+
+    const setter = this.setterName(name);
+
+    this.cursor.report(loc, Code.SettersNotSupported, { word: setter });
+  }
+
+  private setterName(name: string): string {
+    const first = name.slice(0, 1);
+    const rest = name.slice(1);
+    const capital = first.toUpperCase();
+
+    return `set${capital}${rest}`;
+  }
+
+  private methodParenCode(generator: boolean): Code {
+    if (generator) {
+      return Code.ExpectedParenAfterGeneratorName;
+    }
+
+    return Code.ExpectedParenAfterAsyncName;
   }
 
   private memberName(modifiers: Modifiers): MemberName | undefined {
@@ -348,7 +380,7 @@ partial class FileParser {
 
     const body = method.body;
     if (body == undefined) {
-      return this.cursor.report(member.loc, Code.MethodWithoutBody);
+      return this.reportMissingBody(method, member);
     }
     if (!this.isConstructor(method)) {
       declaration.methods.push(method);
@@ -373,6 +405,16 @@ partial class FileParser {
     return MethodKind.Instance;
   }
 
+  private reportMissingBody(method: FunctionDecl, member: MemberName): void {
+    if (this.isConstructor(method)) {
+      return this.cursor.report(member.loc, Code.ConstructorWithoutBody);
+    }
+
+    this.cursor.report(member.loc, Code.MethodWithoutBody, {
+      word: member.name,
+    });
+  }
+
   private addAbstractMethod(
     declaration: ClassDecl,
     method: FunctionDecl,
@@ -381,6 +423,7 @@ partial class FileParser {
     if (method.body != undefined) {
       this.cursor.report(member.loc, Code.AbstractMethodBody, {
         word: member.name,
+        other: declaration.name,
       });
     }
 
@@ -405,6 +448,14 @@ partial class FileParser {
     declaration.constructors.push(method);
   }
 
+  private constructorModifier(modifiers: Modifiers): TokenKind {
+    if (modifiers.isOverride) {
+      return TokenKind.Override;
+    }
+
+    return TokenKind.Abstract;
+  }
+
   private reportMethodModifiers(
     modifiers: Modifiers,
     generator: boolean,
@@ -421,7 +472,9 @@ partial class FileParser {
       this.cursor.report(loc, Code.ReadonlyMethod);
     }
     if ((modifiers.isOverride || modifiers.isAbstract) && constructor) {
-      this.cursor.report(loc, Code.OverrideConstructor);
+      const found = this.constructorModifier(modifiers);
+
+      this.cursor.report(loc, Code.ConstructorModifier, { found });
     }
     if (modifiers.isAbstract && modifiers.isStatic) {
       this.cursor.report(loc, Code.AbstractStaticMethod);

@@ -1,0 +1,3 @@
+TZ1552.tz:2:3: error TZ1552: the constructor has no body; overload signatures over one body are not supported: give each variant a body of its own
+  constructor();
+  ^

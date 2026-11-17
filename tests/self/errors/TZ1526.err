@@ -1,3 +1,3 @@
-TZ1526.tz:2:3: error TZ1526: a method cannot be 'readonly'
+TZ1526.tz:2:3: error TZ1526: a method cannot be 'readonly': a method cannot be replaced anyway
   readonly m() {}
   ^

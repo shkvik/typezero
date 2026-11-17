@@ -113,7 +113,9 @@ self/             компилятор на tz, пробный (порт compile
                   column } с единицы, столбец — в символах, а не в байтах; lineTextAt — текст
                   строки; indentTo — отступ до места, табуляции строки сохранены;
                   diagnostic/ — коды ошибок (code.tz: enum Code, значения "TZ1101") и
-                  их тексты (message.tz: messageText — подстановка {expected}/{found}/{word};
+                  их тексты (message.tz: messageText — подстановка {expected}/{found} (вид
+                  токена) и {word}/{other}/{path} (слова из исходника); текст говорит, что не
+                  так, почему и как написать, с примером из кода пользователя;
                   таблица kMessages: Record<Code, Message> — в const/message.const.tz, типы
                   Details, Message и SourceError { code, loc, details } — одна ошибка лексера
                   или парсера — в types/message.types.tz; коды 10xx — лексер и

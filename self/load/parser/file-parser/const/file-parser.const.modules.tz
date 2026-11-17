@@ -17,6 +17,7 @@ export const kExportNames: NameListCodes = {
 
 export const kJsonExtension = ".json";
 export const kJsonImportName = "json";
+export const kJsonExampleName = "data";
 export const kTypeAttributeKey = "type";
 export const kJsonAttributeValue = "json";
 export const kNodeModulePrefix = "node:";

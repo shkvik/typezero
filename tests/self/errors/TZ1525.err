@@ -1,3 +1,3 @@
-TZ1525.tz:2:3: error TZ1525: a constructor cannot be 'async'
+TZ1525.tz:2:3: error TZ1525: a constructor cannot be 'async': 'new' gives the object, not a Promise
   async constructor() {}
   ^

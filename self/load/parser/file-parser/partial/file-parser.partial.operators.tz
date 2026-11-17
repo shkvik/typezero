@@ -1,6 +1,7 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { TokenKind } from "../../../token/types/token.types.tz";
+import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
   BinaryOp,
   Expr,
@@ -56,8 +57,13 @@ partial class FileParser {
 
     if (prefix != undefined && this.cursor.is(TokenKind.StarStar)) {
       const token = this.cursor.peek();
+      const operator = this.written(head.start, head.end);
+      const example = this.unaryExample(head.kind, operator);
 
-      this.cursor.report(token.start, Code.UnaryBeforePower);
+      this.cursor.report(token.start, Code.UnaryBeforePower, {
+        word: operator,
+        other: example,
+      });
     }
 
     let lookahead = this.binaryOperator();
@@ -127,8 +133,13 @@ partial class FileParser {
   }
 
   private satisfiesCheck(operand: Expr, loc: int): Expr {
+    const first = this.cursor.peek();
+
     this.type();
-    this.cursor.report(loc, Code.SatisfiesNotSupported);
+    const type = this.cursor.spanFrom(first.start);
+    const word = this.written(type.start, type.end);
+
+    this.cursor.report(loc, Code.SatisfiesNotSupported, { word });
 
     return operand;
   }
@@ -382,6 +393,14 @@ partial class FileParser {
     const compound = this.assignmentOp(kind);
 
     return compound != undefined;
+  }
+
+  private unaryExample(kind: TokenKind, operator: string): string {
+    if (kTokenTable.isKeyword(kind)) {
+      return `${operator} x`;
+    }
+
+    return `${operator}x`;
   }
 
   private unaryOpFor(kind: TokenKind): UnaryOp | undefined {

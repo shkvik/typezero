@@ -1,3 +1,3 @@
-TZ1618.tz:1:1: error TZ1618: an import must name what it takes
+TZ1618.tz:1:1: error TZ1618: an import must name what it takes: importing a file only to run it is not supported; import the names you need, e.g. 'import { a } from "./m"'
 import { } from "./m"
 ^

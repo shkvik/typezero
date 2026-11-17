@@ -11,7 +11,7 @@ export const kMessages: Record<Code, Message> = {
     text: "unexpected character '{word}'",
   },
   [Code.NameAfterNumberPoint]: {
-    text: "a point right after a number belongs to the number, so a name cannot follow it; write '{word}..{name}' or '({word}).{name}'",
+    text: "a point right after a number belongs to the number, so a name cannot follow it; write '{word}..{other}' or '({word}).{other}'",
   },
   [Code.BigIntLiteral]: {
     text: "'{word}n' is a bigint, and there is no bigint: integers up to 9.2e18 fit in 'int', longer ones in 'decimal' (e.g. 'const n: decimal = {word}')",
@@ -101,52 +101,55 @@ export const kMessages: Record<Code, Message> = {
     text: "'partial class' is written only at the top level of a file",
   },
   [Code.NoThrow]: {
-    text: "there is no 'throw' in tz",
+    text: "there is no 'throw' in tz: an error is a value; return it, 'return err(...)', and give the function a 'Result'",
   },
   [Code.NoTry]: {
-    text: "there is no 'try' in tz",
+    text: "there is no 'try' in tz: an error is a value; a function that can fail gives a 'Result', checked with 'if'",
   },
   [Code.NoCatch]: {
-    text: "there is no 'catch' in tz",
+    text: "there is no 'catch' in tz: an error is a value; a function that can fail gives a 'Result', checked with 'if'",
   },
   [Code.NoFinally]: {
-    text: "there is no 'finally' in tz",
+    text: "there is no 'finally' in tz: an error is a value; a function that can fail gives a 'Result', checked with 'if'",
   },
   [Code.GroupingNotSupported]: {
-    text: "'{word}' is not supported",
+    text: "'{word}' is not supported: it is TypeScript's old way to group code; put the code in a file of its own and import it by name",
   },
   [Code.DeclareWordNotSupported]: {
-    text: "'declare {word}' is not supported",
+    text: "'declare {word}' is not supported: every file is a module of the program; import what it needs by name",
   },
   [Code.DeclareNotSupported]: {
-    text: "'declare' is not supported",
+    text: "'declare' is not supported: the compiler needs the code of every declaration; write the declaration itself, or import it",
   },
   [Code.OneDefaultInSwitch]: {
     text: "a 'switch' can have only one 'default'",
   },
   [Code.ExpectedCaseOrDefault]: {
-    text: "expected 'case' or 'default'",
+    text: "expected 'case' or 'default', found {found}",
   },
-  [Code.ForNeedsNewVariable]: {
-    text: "'for...in' and 'for...of' need a new variable",
+  [Code.ForOfNeedsNewVariable]: {
+    text: "'for...of' needs a new variable: 'for (const x of ...)'",
   },
   [Code.ForAwaitNeedsIterable]: {
-    text: "'for await' goes over the values of an iterable",
+    text: "'for await' goes over the values of an iterable: 'for await (const x of xs)'",
   },
   [Code.ForInKeyPattern]: {
     text: "the variable of 'for...in' is a key, a string, and cannot be destructured",
   },
   [Code.ForAwaitIn]: {
-    text: "'for await' goes over the values of an iterable, with 'of'",
+    text: "'for await' goes over the values of an iterable, with 'of': 'for await (const x of xs)'",
   },
   [Code.DestructuringNeedsValue]: {
-    text: "a destructuring declaration needs a value",
+    text: "a destructuring declaration needs a value: '{word} = ...'",
   },
   [Code.KeywordAsVariableName]: {
     text: "'{word}' is a keyword in tz and cannot be a variable name; choose another name",
   },
   [Code.ExpectedVariableName]: {
     text: "expected a variable name",
+  },
+  [Code.ForInNeedsNewVariable]: {
+    text: "'for...in' needs a new variable: 'for (const k in ...)'",
   },
   [Code.ExpectedInConditional]: {
     text: "expected {expected} in the conditional expression, found {found}",
@@ -176,19 +179,19 @@ export const kMessages: Record<Code, Message> = {
     text: "expected {expected} after the key in brackets, found {found}",
   },
   [Code.YieldOutsideGenerator]: {
-    text: "'yield' can only be used in a generator function",
+    text: "'yield' can only be used in a generator function, declared with 'function*'",
   },
   [Code.UnaryBeforePower]: {
-    text: "the left side of '**' cannot be a unary expression",
+    text: "the left side of '**' cannot be a unary '{word}' expression; add parentheses, e.g. '({other}) ** 2'",
   },
   [Code.SatisfiesNotSupported]: {
-    text: "'satisfies' is not supported, just as 'as' is not",
+    text: "'satisfies' is not supported, just as 'as' is not; declare the type of the variable instead: 'const x: {word} = ...'",
   },
   [Code.StrictEqualsNotSupported]: {
-    text: "'===' is not supported; use '=='",
+    text: "'===' is not supported; use '==', which does not convert types",
   },
   [Code.StrictNotEqualsNotSupported]: {
-    text: "'!==' is not supported; use '!='",
+    text: "'!==' is not supported; use '!=', which does not convert types",
   },
   [Code.ExpectedPropertyAfterOptionalDot]: {
     text: "expected a property name, '[' or '(' after '?.'",
@@ -197,7 +200,7 @@ export const kMessages: Record<Code, Message> = {
     text: "expected a property name after '.'",
   },
   [Code.TaggedTemplateInOptionalChain]: {
-    text: "a tagged template cannot be part of an optional chain",
+    text: "a tagged template cannot be part of an optional chain; check the tag before the template",
   },
   [Code.ExpectedClassAfterNew]: {
     text: "expected a class name after 'new'",
@@ -215,19 +218,19 @@ export const kMessages: Record<Code, Message> = {
     text: "'import.meta' is not supported",
   },
   [Code.DynamicImportNotSupported]: {
-    text: "dynamic 'import()' is not supported",
+    text: "dynamic 'import()' is not supported: every file the program uses is compiled into it; import by name at the top of the file, e.g. 'import { a } from \"./x\"'",
   },
   [Code.YieldNeedsParentheses]: {
-    text: "'yield' must be in parentheses here",
+    text: "'yield' must be in parentheses here, e.g. '1 + (yield x)'",
   },
   [Code.MethodKeyInBrackets]: {
-    text: "a method cannot have a key in brackets",
+    text: "a method cannot have a key in brackets; write its name: 'f() { ... }'",
   },
   [Code.AccessorsNotSupported]: {
-    text: "getters and setters are not supported",
+    text: "getters and setters are not supported: reading or writing a field never runs code; write a function instead",
   },
-  [Code.ExpectedParenAfterMethodName]: {
-    text: "expected '(' after the name of the method",
+  [Code.ExpectedParenAfterGeneratorName]: {
+    text: "expected '(' after the name of the generator method",
   },
   [Code.ExpectedColonAfterFieldName]: {
     text: "expected ':' after the field name, found {found}",
@@ -241,8 +244,11 @@ export const kMessages: Record<Code, Message> = {
   [Code.InvalidNumberLiteral]: {
     text: "invalid number literal",
   },
+  [Code.ExpectedParenAfterAsyncName]: {
+    text: "expected '(' after the name of the async method",
+  },
   [Code.ExpectedAfterExtendsClause]: {
-    text: "expected {expected} after the 'extends' clause of the conditional type, found {found}",
+    text: "expected {expected} after the 'extends' clause of the conditional type, e.g. 'T extends string ? A : B', found {found}",
   },
   [Code.ExpectedBetweenBranches]: {
     text: "expected {expected} between the branches of the conditional type, found {found}",
@@ -293,7 +299,7 @@ export const kMessages: Record<Code, Message> = {
     text: "expected a type, found {found}",
   },
   [Code.GenericFunctionType]: {
-    text: "a function type cannot be generic itself",
+    text: "a function type cannot be generic itself: which copy of a generic function runs is decided when compiling, so a function value has fixed types; make the function that takes it generic instead, e.g. 'function apply<{word}>(f: {other})'",
   },
   [Code.ExpectedTemplateTypeClose]: {
     text: "expected '}' to close the type in the template literal type",
@@ -305,31 +311,31 @@ export const kMessages: Record<Code, Message> = {
     text: "expected '>' to close the type arguments, found {found}",
   },
   [Code.MappedTypeNextToFields]: {
-    text: "a mapped type cannot stand next to fields",
+    text: "a mapped type cannot stand next to fields; make them an object type of their own",
   },
   [Code.FieldNameInBrackets]: {
-    text: "a field name in brackets is not supported yet",
+    text: "a field name in brackets is not supported yet; write the name itself",
   },
   [Code.NumberFieldName]: {
-    text: "a number cannot name a field",
+    text: "a number cannot name a field; an object with numbered entries is an array",
   },
   [Code.ExpectedFieldName]: {
     text: "expected a field name, found {found}",
   },
   [Code.SymbolMemberName]: {
-    text: "'Symbol.{word}' cannot name a member",
+    text: "'Symbol.{word}' cannot name a member: of the symbols of JavaScript, only 'Symbol.iterator', 'Symbol.asyncIterator' (docs/iterators.md, section 5) and 'Symbol.dispose' (docs/ffi.md, section 5) can",
   },
   [Code.CallSignatures]: {
-    text: "call signatures are not supported",
+    text: "call signatures are not supported; a field can hold a function: 'f: (x: int) => int'",
   },
   [Code.GenericTypeMethods]: {
     text: "generic methods in types are not supported yet",
   },
   [Code.FieldNeedsType]: {
-    text: "field '{word}' needs a type",
+    text: "field '{word}' needs a type, e.g. '{word}: int'",
   },
   [Code.MethodNeedsReturnType]: {
-    text: "method '{word}' needs its return type",
+    text: "method '{word}' needs its return type, e.g. '{word}(): void'",
   },
   [Code.ExpectedSemicolonAfterField]: {
     text: "expected ';' after the field, found {found}",
@@ -338,16 +344,16 @@ export const kMessages: Record<Code, Message> = {
     text: "expected ';' after the method, found {found}",
   },
   [Code.ExpectedIndexSignatureOrMapped]: {
-    text: "expected an index signature or a mapped type",
+    text: "expected an index signature, '{ [key: string]: T }', or a mapped type, '{ [K in Keys]: T }'",
   },
   [Code.IndexSignatureNextToFields]: {
-    text: "an index signature cannot stand next to fields",
+    text: "an index signature cannot stand next to fields: an object has a fixed set of fields, and a dictionary only keys; make the fields an object of their own, or a dictionary 'Record<string, T>' alone",
   },
   [Code.OptionalTupleElements]: {
-    text: "optional elements in a tuple type are not supported",
+    text: "optional elements in a tuple type are not supported: a tuple has a fixed length; give the element the type 'T | undefined'",
   },
   [Code.FunctionTypeParameterNeedsType]: {
-    text: "parameter '{word}' of the function type needs a type",
+    text: "parameter '{word}' of the function type needs a type, e.g. '{word}: int'",
   },
   [Code.RestParameterNotLast]: {
     text: "a rest parameter must be the last parameter",
@@ -362,13 +368,13 @@ export const kMessages: Record<Code, Message> = {
     text: "a rest element cannot have a default value",
   },
   [Code.ExpectedPatternVariable]: {
-    text: "expected a variable name in the destructuring pattern",
+    text: "expected a variable name in the destructuring pattern, found {found}",
   },
   [Code.ExpectedVariableAfterRest]: {
     text: "expected a variable name after '...' in the destructuring pattern",
   },
   [Code.PatternKeyNeedsVariable]: {
-    text: "a key in a destructuring pattern needs a variable",
+    text: "a key in a destructuring pattern needs a variable: '{word}: name'",
   },
   [Code.ExpectedClassMembersStart]: {
     text: "expected {expected} to start the members of the class, found {found}",
@@ -410,55 +416,55 @@ export const kMessages: Record<Code, Message> = {
     text: "expected the name of a decorator after '@', found {found}",
   },
   [Code.DecoratorTarget]: {
-    text: "a decorator can decorate only a class, a member or a parameter",
+    text: "a decorator can decorate only a class, a member of a class or a parameter of a method or a constructor",
   },
   [Code.StaticBlocks]: {
-    text: "static blocks are not supported",
+    text: "static blocks are not supported; give each static field its value in its declaration",
   },
   [Code.DeclareMemberNotSupported]: {
-    text: "'declare' is not supported",
+    text: "'declare' is not supported: a field gets its value in its declaration or in the constructor",
   },
   [Code.MemberNameInBrackets]: {
-    text: "a member name in brackets is not supported",
+    text: "a member name in brackets is not supported: an object has a fixed set of fields; keep a dictionary in a field, e.g. 'items: Record<string, T> = {}' or 'items = new Map<string, T>()'",
   },
   [Code.NoPrivateName]: {
-    text: "there is no '#{word}' in tz",
+    text: "there is no '#{word}' in tz: a private member is 'private {word}'",
   },
   [Code.AccessorBeforeMethod]: {
     text: "'accessor' goes before a field, not a method",
   },
   [Code.DecoratedConstructor]: {
-    text: "a decorator cannot decorate a constructor",
+    text: "a decorator cannot decorate a constructor; decorate the class, or a parameter of the constructor",
   },
   [Code.AbstractMethodBody]: {
-    text: "abstract method '{word}' cannot have a body",
+    text: "abstract method '{word}' cannot have a body: the classes that extend '{other}' give it one; to give it one here, drop 'abstract'",
   },
   [Code.MethodWithoutBody]: {
-    text: "a method has no body",
+    text: "method '{word}' has no body; overload signatures over one body are not supported: give each variant a body of its own",
   },
   [Code.ConstructorReturnType]: {
     text: "a constructor cannot have a return type",
   },
   [Code.GeneratorConstructor]: {
-    text: "a constructor cannot be a generator",
+    text: "a constructor cannot be a generator: 'new' gives the object",
   },
   [Code.AsyncConstructor]: {
-    text: "a constructor cannot be 'async'",
+    text: "a constructor cannot be 'async': 'new' gives the object, not a Promise",
   },
   [Code.ReadonlyMethod]: {
-    text: "a method cannot be 'readonly'",
+    text: "a method cannot be 'readonly': a method cannot be replaced anyway",
   },
-  [Code.OverrideConstructor]: {
-    text: "a constructor cannot be 'override' or 'abstract'",
+  [Code.ConstructorModifier]: {
+    text: "a constructor cannot be {found}",
   },
   [Code.AbstractStaticMethod]: {
-    text: "a static method cannot be 'abstract'",
+    text: "a static method cannot be 'abstract': it belongs to the class itself",
   },
   [Code.AbstractFields]: {
-    text: "abstract fields are not supported",
+    text: "abstract fields are not supported: declare the field in the class that sets it",
   },
   [Code.HandleClass]: {
-    text: "a declared class is a handle from C: 'declare class {word} {}'",
+    text: "a declared class is a handle from C: it is written 'declare class {word} {}', with no type parameters, base or members",
   },
   [Code.ExpectedInterfaceFields]: {
     text: "expected '{' to start the fields of the interface, found {found}",
@@ -470,13 +476,13 @@ export const kMessages: Record<Code, Message> = {
     text: "expected the name of an enum member, found {found}",
   },
   [Code.FunctionWithoutBody]: {
-    text: "function '{word}' has no body",
+    text: "function '{word}' has no body; add it after the parameters: '{ ... }'",
   },
   [Code.OverloadSignatures]: {
-    text: "overload signatures are not supported",
+    text: "overload signatures are not supported: plain functions are not overloaded; give each variant its own name and body",
   },
   [Code.DeclaredFunctionBody]: {
-    text: "a declared function has no body",
+    text: "a declared function has no body: its code is in C, in a library of 'native' in package.json",
   },
   [Code.KeywordAsFunctionName]: {
     text: "'{word}' is a keyword in tz and cannot be a function name; choose another name",
@@ -497,22 +503,22 @@ export const kMessages: Record<Code, Message> = {
     text: "expected a parameter name",
   },
   [Code.DefaultMakesOptional]: {
-    text: "a parameter with a default value is optional already",
+    text: "a parameter with a default value is optional already; remove the '?'",
   },
   [Code.RestParameterOptional]: {
     text: "a rest parameter cannot be optional or have a default value",
   },
   [Code.ParameterModifierMakesField]: {
-    text: "'{word}' before a parameter makes it a field",
+    text: "'{word}' before a parameter makes it a field, which only a constructor's parameter can be",
   },
   [Code.ArrowOnNewLine]: {
     text: "'=>' must be on the same line as the parameters",
   },
   [Code.ArrowBodyLabel]: {
-    text: "'{' after '=>' starts the body of the function, so '{word}:' is a label",
+    text: "'{' after '=>' starts the body of the function, so '{word}:' is a label, and the function returns nothing",
   },
   [Code.TypeParameterModifier]: {
-    text: "a modifier before a type parameter is not supported",
+    text: "'{word}' before a type parameter is not supported; remove it",
   },
   [Code.ExpectedTypeParameterName]: {
     text: "expected a type parameter name, found {found}",
@@ -522,6 +528,15 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.AccessAlreadyGiven]: {
     text: "'{word}' comes after another access modifier; the access is given once",
+  },
+  [Code.ConstructorWithoutBody]: {
+    text: "the constructor has no body; overload signatures over one body are not supported: give each variant a body of its own",
+  },
+  [Code.GettersNotSupported]: {
+    text: "getters are not supported: reading a field never runs code; write a method instead, e.g. '{word}()'",
+  },
+  [Code.SettersNotSupported]: {
+    text: "setters are not supported: writing a field never runs code; write a method instead, e.g. '{word}(value)'",
   },
   [Code.ExpectedAfterImportStar]: {
     text: "expected {expected} after 'import *', found {found}",
@@ -551,10 +566,10 @@ export const kMessages: Record<Code, Message> = {
     text: "'import' is allowed only at the top level of a file",
   },
   [Code.ImportTypeNotNeeded]: {
-    text: "'import type' is not needed",
+    text: "'import type' is not needed: types are imported like everything else; drop 'type'",
   },
   [Code.ImportEqualsNotSupported]: {
-    text: "'import {word} = ...' is not supported",
+    text: "'import {word} = ...' is not supported; import by name, e.g. 'import { a } from \"./x\"'",
   },
   [Code.ExpectedBraceAfterComma]: {
     text: "expected '{' after ',', found {found}",
@@ -563,49 +578,49 @@ export const kMessages: Record<Code, Message> = {
     text: "expected '{' and the names to import, found {found}",
   },
   [Code.JsonImportWhole]: {
-    text: "a JSON file is one value: import it whole",
+    text: "a JSON file is one value: import it whole, e.g. 'import {word} from \"{path}\" with { type: \"json\" }'",
   },
   [Code.JsonImportAttribute]: {
-    text: "a JSON file is imported with 'with { type: \"json\" }'",
+    text: "a JSON file is imported with 'with { type: \"json\" }', as in node and TypeScript: 'import {word} from \"{path}\" with { type: \"json\" }'",
   },
   [Code.NamespaceImportNotSupported]: {
-    text: "'import * as' is not supported",
+    text: "'import * as' is not supported; list the names you need, e.g. 'import { a, b } from \"{path}\"'",
   },
   [Code.DefaultImportNotSupported]: {
-    text: "default imports are not supported",
+    text: "default imports are not supported: there is no 'export default'; import by name, e.g. 'import { {word} } from \"{path}\"'",
   },
   [Code.ImportWithoutNames]: {
-    text: "an import must name what it takes",
+    text: "an import must name what it takes: importing a file only to run it is not supported; import the names you need, e.g. 'import { a } from \"{path}\"'",
   },
   [Code.ExportNotTopLevel]: {
     text: "'export' is allowed only at the top level",
   },
   [Code.PartNotExported]: {
-    text: "a part of a class is not exported",
+    text: "a part of a class is not exported: 'export' goes on the class itself, where it is declared",
   },
   [Code.ExportEqualsNotSupported]: {
-    text: "'export =' is not supported",
+    text: "'export =' is not supported; export by name, e.g. 'export function f() {...}'",
   },
   [Code.ExportTypeNotNeeded]: {
-    text: "'export type' is not needed",
+    text: "'export type' is not needed: types are exported like everything else; drop 'type'",
   },
   [Code.ExpectedExportDeclaration]: {
     text: "expected a declaration or '{' after 'export', found {found}",
   },
   [Code.ExportDefaultNotSupported]: {
-    text: "'export default' is not supported",
+    text: "'export default' is not supported: everything is exported by name; export a declaration, e.g. 'export function f() {...}', and import it with 'import { f } from ...'",
   },
   [Code.ExportStarAsNotSupported]: {
-    text: "'export * as' is not supported",
+    text: "'export * as' is not supported; re-export the names, e.g. 'export { a, b } from \"{path}\"', or all of them with 'export * from \"{path}\"'",
   },
   [Code.TypeNotNeededInImport]: {
-    text: "'type' is not needed in an import",
+    text: "'type' is not needed in an import: types are imported like everything else; drop it",
   },
   [Code.TypeNotNeededInExport]: {
-    text: "'type' is not needed in an export",
+    text: "'type' is not needed in an export: types are exported like everything else; drop it",
   },
   [Code.NoExportDefault]: {
-    text: "there is no 'export default'",
+    text: "there is no 'export default'; everything is exported and imported by name",
   },
   [Code.KeywordImported]: {
     text: "'{word}' is a keyword in tz: import it under another name, e.g. '{ {word} as {word}Name }'",
@@ -623,18 +638,18 @@ export const kMessages: Record<Code, Message> = {
     text: "expected a name after 'as', found {found}",
   },
   [Code.AttributesOnlyForJson]: {
-    text: "import attributes are only for JSON files",
+    text: "import attributes are only for JSON files, e.g. 'import config from \"./config.json\" with { type: \"json\" }'",
   },
   [Code.AssertAttributes]: {
-    text: "'assert' is the old form of import attributes",
+    text: "'assert' is the old form of import attributes; write 'with { type: \"json\" }'",
   },
   [Code.JsonOneAttribute]: {
-    text: "a JSON file takes one import attribute",
+    text: "a JSON file takes one import attribute: 'with { type: \"json\" }'",
   },
   [Code.ExpectedFrom]: {
-    text: "expected 'from' and the path of the file, found {found}",
+    text: "expected 'from' and the path of the file, e.g. 'from \"./math\"', found {found}",
   },
   [Code.ExpectedPathString]: {
-    text: "expected the path of the file as a string, found {found}",
+    text: "expected the path of the file as a string, e.g. '\"./math\"', found {found}",
   },
 };

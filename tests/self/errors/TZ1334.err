@@ -1,3 +1,3 @@
-TZ1334.tz:1:12: error TZ1334: an index signature cannot stand next to fields
+TZ1334.tz:1:12: error TZ1334: an index signature cannot stand next to fields: an object has a fixed set of fields, and a dictionary only keys; make the fields an object of their own, or a dictionary 'Record<string, T>' alone
 type A = { [key: string]: int, y: int };
            ^

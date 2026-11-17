@@ -1,3 +1,3 @@
-TZ1528.tz:2:3: error TZ1528: a static method cannot be 'abstract'
+TZ1528.tz:2:3: error TZ1528: a static method cannot be 'abstract': it belongs to the class itself
   static abstract q(): void;
   ^

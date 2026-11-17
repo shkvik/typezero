@@ -1,3 +1,3 @@
-TZ1628.tz:1:10: error TZ1628: there is no 'export default'
+TZ1628.tz:1:10: error TZ1628: there is no 'export default'; everything is exported and imported by name
 import { default } from "./m"
          ^

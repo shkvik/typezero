@@ -1,3 +1,3 @@
-TZ1518.tz:1:12: error TZ1518: there is no '#p' in tz
+TZ1518.tz:1:12: error TZ1518: there is no '#p' in tz: a private member is 'private p'
 class C { #p = 1; m() { return this.#p } }
            ^

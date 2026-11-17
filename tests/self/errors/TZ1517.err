@@ -1,3 +1,3 @@
-TZ1517.tz:2:3: error TZ1517: a member name in brackets is not supported
+TZ1517.tz:2:3: error TZ1517: a member name in brackets is not supported: an object has a fixed set of fields; keep a dictionary in a field, e.g. 'items: Record<string, T> = {}' or 'items = new Map<string, T>()'
   [k] = 1;
   ^

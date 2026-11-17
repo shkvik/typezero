@@ -1,3 +1,3 @@
-TZ1530.tz:1:17: error TZ1530: a declared class is a handle from C: 'declare class H {}'
+TZ1530.tz:1:17: error TZ1530: a declared class is a handle from C: it is written 'declare class H {}', with no type parameters, base or members
 declare class H extends X
                 ^

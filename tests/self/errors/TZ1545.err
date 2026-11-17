@@ -1,3 +1,3 @@
-TZ1545.tz:1:12: error TZ1545: 'private' before a parameter makes it a field
+TZ1545.tz:1:12: error TZ1545: 'private' before a parameter makes it a field, which only a constructor's parameter can be
 function f(private a: int) {}
            ^

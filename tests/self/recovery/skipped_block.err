@@ -1,4 +1,4 @@
-skipped_block.tz:1:8: error TZ1132: 'for...in' and 'for...of' need a new variable
+skipped_block.tz:1:8: error TZ1132: 'for...of' needs a new variable: 'for (const x of ...)'
 for (x of xs) {
        ^
 skipped_block.tz:4:11: error TZ1221: expected an expression, found ';'

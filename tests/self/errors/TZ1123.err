@@ -1,3 +1,3 @@
-TZ1123.tz:1:1: error TZ1123: there is no 'throw' in tz
+TZ1123.tz:1:1: error TZ1123: there is no 'throw' in tz: an error is a value; return it, 'return err(...)', and give the function a 'Result'
 throw e;
 ^

@@ -1,3 +1,3 @@
-TZ1318.tz:1:10: error TZ1318: a function type cannot be generic itself
+TZ1318.tz:1:10: error TZ1318: a function type cannot be generic itself: which copy of a generic function runs is decided when compiling, so a function value has fixed types; make the function that takes it generic instead, e.g. 'function apply<T>(f: (a: T) => T)'
 type F = <T>(a: T) => T
          ^

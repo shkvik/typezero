@@ -456,7 +456,9 @@ partial class FileParser {
     if (this.cursor.insideList(TokenKind.RBrace)) {
       const token = this.cursor.peek();
 
-      return this.skipBraced(token.start, Code.ExpectedCaseOrDefault);
+      return this.skipBraced(token.start, Code.ExpectedCaseOrDefault, {
+        found: token.kind,
+      });
     }
 
     this.cursor.expect(TokenKind.RBrace, Code.ExpectedSwitchClose);

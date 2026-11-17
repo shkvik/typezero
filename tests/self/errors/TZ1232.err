@@ -1,0 +1,3 @@
+TZ1232.tz:2:10: error TZ1232: expected '(' after the name of the async method
+  async x: int;
+         ^

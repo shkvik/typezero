@@ -1,4 +1,4 @@
-TZ1118.tz:1:1: error TZ1124: there is no 'try' in tz
+TZ1118.tz:1:1: error TZ1124: there is no 'try' in tz: an error is a value; a function that can fail gives a 'Result', checked with 'if'
 try {
 ^
 TZ1118.tz:4:1: error TZ1118: expected ')' after the variable of 'catch', found end of file

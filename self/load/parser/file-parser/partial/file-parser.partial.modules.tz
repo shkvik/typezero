@@ -21,6 +21,7 @@ import {
 import {
   kImportNames,
   kJsonAttributeValue,
+  kJsonExampleName,
   kJsonExtension,
   kJsonImportName,
   kNodeModulePrefix,
@@ -171,7 +172,7 @@ partial class FileParser {
       return this.marker(StmtKind.Empty, loc);
     }
 
-    this.reportImportForm(clause, formLoc, loc, names.length);
+    this.reportImportForm(clause, formLoc, loc, names.length, from.path);
     if (names.length > 0) {
       this.addImport(loc, names, from);
     }
@@ -199,12 +200,20 @@ partial class FileParser {
     jsonType: boolean,
   ): Stmt {
     if (clause.kind != ImportForm.Default) {
-      this.cursor.report(formLoc, Code.JsonImportWhole);
+      const word = this.clauseName(clause) ?? kJsonExampleName;
+
+      this.cursor.report(formLoc, Code.JsonImportWhole, {
+        word,
+        path: from.path,
+      });
 
       return this.marker(StmtKind.Empty, loc);
     }
     if (!jsonType) {
-      this.cursor.report(from.loc, Code.JsonImportAttribute);
+      this.cursor.report(from.loc, Code.JsonImportAttribute, {
+        word: clause.name,
+        path: from.path,
+      });
     }
 
     names.push({
@@ -223,15 +232,21 @@ partial class FileParser {
     formLoc: int,
     loc: int,
     count: int,
+    path: string,
   ): void {
     switch (clause.kind) {
       case ImportForm.Namespace:
-        return this.cursor.report(formLoc, Code.NamespaceImportNotSupported);
+        return this.cursor.report(formLoc, Code.NamespaceImportNotSupported, {
+          path,
+        });
       case ImportForm.Default:
-        return this.cursor.report(formLoc, Code.DefaultImportNotSupported);
+        return this.cursor.report(formLoc, Code.DefaultImportNotSupported, {
+          word: clause.name,
+          path,
+        });
       default:
         if (count == 0) {
-          this.cursor.report(loc, Code.ImportWithoutNames);
+          this.cursor.report(loc, Code.ImportWithoutNames, { path });
         }
         return;
     }

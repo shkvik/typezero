@@ -1,0 +1,3 @@
+TZ1553.tz:2:3: error TZ1553: getters are not supported: reading a field never runs code; write a method instead, e.g. 'a()'
+  get a() {
+  ^

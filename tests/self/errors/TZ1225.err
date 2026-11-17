@@ -1,3 +1,3 @@
-TZ1225.tz:1:13: error TZ1225: a method cannot have a key in brackets
+TZ1225.tz:1:13: error TZ1225: a method cannot have a key in brackets; write its name: 'f() { ... }'
 const o = { [k]() {} };
             ^

@@ -35,6 +35,7 @@ import {
 import { ParseResult } from "./types/file-parser.types.result.tz";
 
 export class FileParser {
+  private readonly source: Buffer;
   private readonly cursor: Cursor;
   private readonly literals: LiteralReader;
   private readonly library: boolean;
@@ -46,6 +47,7 @@ export class FileParser {
   private names: int;
 
   public constructor(source: Buffer, tokens: Token[], library: boolean) {
+    this.source = source;
     this.cursor = new Cursor(tokens);
     this.literals = new LiteralReader(source);
     this.library = library;
@@ -88,6 +90,10 @@ export class FileParser {
     };
 
     return { file, errors: this.cursor.errors };
+  }
+
+  private written(start: int, end: int): string {
+    return this.source.toString("utf8", start, end);
   }
 
   private hiddenName(): string {

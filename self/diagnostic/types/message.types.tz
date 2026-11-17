@@ -5,7 +5,8 @@ export type Details = {
   readonly expected?: TokenKind;
   readonly found?: TokenKind;
   readonly word?: string;
-  readonly name?: string;
+  readonly other?: string;
+  readonly path?: string;
 };
 
 export type SourceError = {

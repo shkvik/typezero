@@ -1,3 +1,3 @@
-TZ1625.tz:1:10: error TZ1625: 'export * as' is not supported
+TZ1625.tz:1:10: error TZ1625: 'export * as' is not supported; re-export the names, e.g. 'export { a, b } from "./m.tz"', or all of them with 'export * from "./m.tz"'
 export * as ns from "./m.tz";
          ^

@@ -1,3 +1,3 @@
-TZ1214.tz:1:3: error TZ1214: '!==' is not supported; use '!='
+TZ1214.tz:1:3: error TZ1214: '!==' is not supported; use '!=', which does not convert types
 a !== b;
   ^

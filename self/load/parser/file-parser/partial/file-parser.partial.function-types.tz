@@ -54,13 +54,19 @@ partial class FileParser {
 
   private genericFunctionType(): TypeRef {
     const less = this.cursor.peek();
+    const params = this.typeParams();
+    const first = this.cursor.peek();
 
-    this.typeParams();
     if (this.cursor.is(TokenKind.LParen)) {
       this.functionType();
     }
 
-    this.cursor.report(less.start, Code.GenericFunctionType);
+    const names = params.map((param) => param.name);
+    const word = names.join(", ");
+    const type = this.cursor.spanFrom(first.start);
+    const other = this.written(type.start, type.end);
+
+    this.cursor.report(less.start, Code.GenericFunctionType, { word, other });
 
     return this.typeRef(less.start);
   }

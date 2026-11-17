@@ -1,3 +1,3 @@
-TZ1211.tz:1:14: error TZ1211: the left side of '**' cannot be a unary expression
+TZ1211.tz:1:14: error TZ1211: the left side of '**' cannot be a unary '-' expression; add parentheses, e.g. '(-x) ** 2'
 const x = -a ** 2
              ^

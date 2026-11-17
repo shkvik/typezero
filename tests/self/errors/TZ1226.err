@@ -1,3 +1,3 @@
-TZ1226.tz:1:13: error TZ1226: getters and setters are not supported
+TZ1226.tz:1:13: error TZ1226: getters and setters are not supported: reading or writing a field never runs code; write a function instead
 const o = { set a(v) {} };
             ^

@@ -1,3 +1,3 @@
-TZ1627.tz:1:10: error TZ1627: 'type' is not needed in an export
+TZ1627.tz:1:10: error TZ1627: 'type' is not needed in an export: types are exported like everything else; drop it
 export { type a }
          ^

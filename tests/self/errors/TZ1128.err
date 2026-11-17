@@ -1,3 +1,3 @@
-TZ1128.tz:1:1: error TZ1128: 'declare global' is not supported
+TZ1128.tz:1:1: error TZ1128: 'declare global' is not supported: every file is a module of the program; import what it needs by name
 declare global { }
 ^

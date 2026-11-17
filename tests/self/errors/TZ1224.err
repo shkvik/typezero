@@ -1,3 +1,3 @@
-TZ1224.tz:2:17: error TZ1224: 'yield' must be in parentheses here
+TZ1224.tz:2:17: error TZ1224: 'yield' must be in parentheses here, e.g. '1 + (yield x)'
   const a = 1 + yield 2;
                 ^

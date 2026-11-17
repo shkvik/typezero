@@ -1,3 +1,3 @@
-TZ1333.tz:1:12: error TZ1333: expected an index signature or a mapped type
+TZ1333.tz:1:12: error TZ1333: expected an index signature, '{ [key: string]: T }', or a mapped type, '{ [K in Keys]: T }'
 type T = { [k]: int };
            ^

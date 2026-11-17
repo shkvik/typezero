@@ -257,7 +257,9 @@ partial class FileParser {
       return this.methodProperty(loc, name, start, generator, isAsync);
     }
     if (generator || isAsync) {
-      this.skipBraced(after.start, Code.ExpectedParenAfterMethodName);
+      const code = this.methodParenCode(generator);
+
+      this.skipBraced(after.start, code);
 
       return undefined;
     }

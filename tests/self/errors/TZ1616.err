@@ -1,3 +1,3 @@
-TZ1616.tz:1:8: error TZ1616: 'import * as' is not supported
+TZ1616.tz:1:8: error TZ1616: 'import * as' is not supported; list the names you need, e.g. 'import { a, b } from "./m"'
 import * as Z from "./m"
        ^

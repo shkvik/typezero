@@ -1,3 +1,3 @@
-TZ1322.tz:1:25: error TZ1322: a mapped type cannot stand next to fields
+TZ1322.tz:1:25: error TZ1322: a mapped type cannot stand next to fields; make them an object type of their own
 type A = { [K in T]: X; y: int };
                         ^

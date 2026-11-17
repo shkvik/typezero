@@ -1,3 +1,3 @@
-TZ1610.tz:1:8: error TZ1610: 'import type' is not needed
+TZ1610.tz:1:8: error TZ1610: 'import type' is not needed: types are imported like everything else; drop 'type'
 import type { T } from "./t.tz";
        ^

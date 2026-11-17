@@ -1,0 +1,3 @@
+TZ1554.tz:2:3: error TZ1554: setters are not supported: writing a field never runs code; write a method instead, e.g. 'setA(value)'
+  set a(v: int) {}
+  ^

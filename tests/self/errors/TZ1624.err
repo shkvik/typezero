@@ -1,3 +1,3 @@
-TZ1624.tz:1:1: error TZ1624: 'export default' is not supported
+TZ1624.tz:1:1: error TZ1624: 'export default' is not supported: everything is exported by name; export a declaration, e.g. 'export function f() {...}', and import it with 'import { f } from ...'
 export default 1;
 ^

@@ -1,3 +1,3 @@
-TZ1327.tz:1:12: error TZ1327: call signatures are not supported
+TZ1327.tz:1:12: error TZ1327: call signatures are not supported; a field can hold a function: 'f: (x: int) => int'
 type A = { (): int };
            ^

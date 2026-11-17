@@ -1,3 +1,3 @@
-TZ1547.tz:1:20: error TZ1547: '{' after '=>' starts the body of the function, so 'label:' is a label
+TZ1547.tz:1:20: error TZ1547: '{' after '=>' starts the body of the function, so 'label:' is a label, and the function returns nothing
 const a = (x) => { label: 1 };
                    ^

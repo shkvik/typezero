@@ -27,7 +27,12 @@ import {
   Pattern,
   PatternElement,
 } from "../types/file-parser.types.patterns.tz";
-import { kSliceMethodName } from "../const/file-parser.const.patterns.tz";
+import {
+  kArrayPatternExample,
+  kComputedKeyExample,
+  kObjectPatternExample,
+  kSliceMethodName,
+} from "../const/file-parser.const.patterns.tz";
 
 partial class FileParser {
   private bindingPattern(): Pattern {
@@ -102,7 +107,9 @@ partial class FileParser {
     if (!this.cursor.atName()) {
       const token = this.cursor.peek();
 
-      this.cursor.error(token.start, Code.ExpectedPatternVariable);
+      this.cursor.error(token.start, Code.ExpectedPatternVariable, {
+        found: token.kind,
+      });
 
       return false;
     }
@@ -169,6 +176,22 @@ partial class FileParser {
     return element;
   }
 
+  private patternExample(pattern: Pattern): string {
+    if (pattern.object) {
+      return kObjectPatternExample;
+    }
+
+    return kArrayPatternExample;
+  }
+
+  private keyExample(element: PatternElement): string {
+    if (element.keyExpr != undefined) {
+      return kComputedKeyExample;
+    }
+
+    return element.key;
+  }
+
   private objectPatternEntry(): PatternElement | undefined {
     const first = this.cursor.peek();
     const element = this.emptyElement(first.start);
@@ -195,8 +218,9 @@ partial class FileParser {
       element.name = element.key;
     } else {
       const token = this.cursor.peek();
+      const word = this.keyExample(element);
 
-      this.cursor.error(token.start, Code.PatternKeyNeedsVariable);
+      this.cursor.error(token.start, Code.PatternKeyNeedsVariable, { word });
 
       return undefined;
     }

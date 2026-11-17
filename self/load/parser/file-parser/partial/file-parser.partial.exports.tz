@@ -199,6 +199,22 @@ partial class FileParser {
     return { kind: ExprKind.Function, loc, fn: declaration };
   }
 
+  private exportAllAs(asLoc: int): void {
+    if (this.cursor.isRecovering()) {
+      return;
+    }
+
+    const from = this.fromPath(true);
+    if (from == undefined) {
+      return;
+    }
+
+    this.cursor.report(asLoc, Code.ExportStarAsNotSupported, {
+      path: from.path,
+    });
+    this.cursor.expectSemicolon();
+  }
+
   private exportAll(loc: int): Stmt {
     this.cursor.next();
     if (this.cursor.is(TokenKind.As)) {
@@ -206,10 +222,7 @@ partial class FileParser {
       const asLoc = asKeyword.start;
 
       this.cursor.expectName(Code.ExpectedAfterExportStarAs);
-      if (!this.cursor.isRecovering() && this.fromPath(true) != undefined) {
-        this.cursor.report(asLoc, Code.ExportStarAsNotSupported);
-        this.cursor.expectSemicolon();
-      }
+      this.exportAllAs(asLoc);
 
       return this.marker(StmtKind.Empty, loc);
     }

@@ -1,0 +1,3 @@
+TZ1139.tz:1:8: error TZ1139: 'for...in' needs a new variable: 'for (const k in ...)'
+for (x in obj) {}
+       ^

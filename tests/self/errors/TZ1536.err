@@ -1,3 +1,3 @@
-TZ1536.tz:1:18: error TZ1536: a declared function has no body
+TZ1536.tz:1:18: error TZ1536: a declared function has no body: its code is in C, in a library of 'native' in package.json
 declare function f() {}
                  ^

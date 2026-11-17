@@ -1,3 +1,3 @@
-TZ1301.tz:1:22: error TZ1301: expected '?' after the 'extends' clause of the conditional type, found ':'
+TZ1301.tz:1:22: error TZ1301: expected '?' after the 'extends' clause of the conditional type, e.g. 'T extends string ? A : B', found ':'
 type T = A extends B : C;
                      ^
