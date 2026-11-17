@@ -1,0 +1,12 @@
+// 'keyof' and 'readonly' are operators before any type, not only before one
+// that starts with a name; outside of a type they stay ordinary names.
+type A = keyof [int, string];
+type B = keyof "text";
+type C = keyof [];
+type D = readonly { id: int }[];
+type E = readonly typeof table[];
+type F = readonly "a"[];
+type G = keyof typeof table;
+type H = readonly [int, string];
+const keyof = 1;
+const readonly = keyof;

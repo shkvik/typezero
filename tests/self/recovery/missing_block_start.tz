@@ -1,0 +1,12 @@
+// A statement that lacks its '{' ends where it stands: the '}' after it
+// still closes the block around it, and the code below is read as usual.
+function a() {
+  switch (x);
+}
+function b() {
+  enum E;
+}
+function c() {
+  declare class H extends X;
+}
+const d = 1;

@@ -1,0 +1,44 @@
+== type_operators.tz
+items 10
+TypeAlias 154 "A" handle=0 tp=0 bases=0
+  Type 158 KeyOf "" src=- n=1
+    Type 164 Tuple "" src=- n=2 ro=00 spread=00
+      Type 165 Name "int" src=- n=0
+      Type 170 Name "string" src=- n=0
+TypeAlias 184 "B" handle=0 tp=0 bases=0
+  Type 188 KeyOf "" src=- n=1
+    Type 194 Literal "string" src=- n=0 text="text" number=0000000000000000 int=0
+TypeAlias 207 "C" handle=0 tp=0 bases=0
+  Type 211 KeyOf "" src=- n=1
+    Type 217 Tuple "" src=- n=0 ro=- spread=-
+TypeAlias 226 "D" handle=0 tp=0 bases=0
+  Type 239 Array "" src=- n=1
+    Type 239 Object "" src=- n=1 names=["id"] locs=[241] opt=0 ro=0 methods=-
+      Type 245 Name "int" src=- n=0
+TypeAlias 259 "E" handle=0 tp=0 bases=0
+  Type 272 Array "" src=- n=1
+    Type 272 TypeOf "" src=- n=0 names=["table"]
+TypeAlias 293 "F" handle=0 tp=0 bases=0
+  Type 306 Array "" src=- n=1
+    Type 306 Literal "string" src=- n=0 text="a" number=0000000000000000 int=0
+TypeAlias 318 "G" handle=0 tp=0 bases=0
+  Type 322 KeyOf "" src=- n=1
+    Type 328 TypeOf "" src=- n=0 names=["table"]
+TypeAlias 347 "H" handle=0 tp=0 bases=0
+  Type 360 Tuple "" src=- n=2 ro=11 spread=00
+    Type 361 Name "int" src=- n=0
+    Type 366 Name "string" src=- n=0
+VarDecl 375 const=1 using=0 n=1
+  Declarator 381 "keyof" form=plain
+    -
+    IntLit 389 1 "1"
+VarDecl 392 const=1 using=0 n=1
+  Declarator 398 "readonly" form=plain
+    -
+    Name 409 "keyof" targs=0
+imports 0
+exports 0
+fields 1 "id"
+constants 2
+  "keyof" 0
+  "readonly" 0

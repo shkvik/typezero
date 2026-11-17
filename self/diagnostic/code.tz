@@ -135,6 +135,7 @@ export enum Code {
   ExpectedEnumClose = "TZ1507",
   ExpectedAfterFunctionName = "TZ1509",
   ExpectedParametersClose = "TZ1510",
+  ExpectedAfterArrowParameters = "TZ1511",
   ExpectedTypeParametersClose = "TZ1512",
   ExpectedDecoratorName = "TZ1513",
   DecoratorTarget = "TZ1514",

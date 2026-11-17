@@ -1,0 +1,6 @@
+// What starts as '(name:' is a list of parameters, so a mistake in it is
+// reported where it is, not as a parenthesis that does not close.
+const a = (p: Array<int) => p;
+type B = (p: { a: }) => int;
+const c = (p: int) 1;
+const d = (...p) p;

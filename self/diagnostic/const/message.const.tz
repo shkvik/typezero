@@ -412,6 +412,9 @@ export const kMessages: Record<Code, Message> = {
   [Code.ExpectedParametersClose]: {
     text: "expected {expected} to close the parameter list, found {found}",
   },
+  [Code.ExpectedAfterArrowParameters]: {
+    text: "expected {expected} after the parameters of the arrow function, found {found}",
+  },
   [Code.ExpectedTypeParametersClose]: {
     text: "expected {expected} to close the type parameters, found {found}",
   },

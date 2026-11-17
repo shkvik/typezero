@@ -1,0 +1,12 @@
+parameter_types.tz:3:24: error TZ1321: expected '>' to close the type arguments, found ')'
+const a = (p: Array<int) => p;
+                       ^
+parameter_types.tz:4:19: error TZ1317: expected a type, found '}'
+type B = (p: { a: }) => int;
+                  ^
+parameter_types.tz:5:20: error TZ1511: expected '=>' after the parameters of the arrow function, found integer literal
+const c = (p: int) 1;
+                   ^
+parameter_types.tz:6:18: error TZ1511: expected '=>' after the parameters of the arrow function, found identifier
+const d = (...p) p;
+                 ^

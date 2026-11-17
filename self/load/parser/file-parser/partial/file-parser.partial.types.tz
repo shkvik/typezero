@@ -117,24 +117,35 @@ partial class FileParser {
   }
 
   private keyofAhead(): boolean {
-    const next = this.cursor.lookahead();
-    const operand =
-      kTokenTable.isName(next.kind) ||
-      next.kind == TokenKind.LParen ||
-      next.kind == TokenKind.LBrace ||
-      next.kind == TokenKind.Typeof;
-
-    return this.cursor.is(TokenKind.Keyof) && operand;
+    return this.cursor.is(TokenKind.Keyof) && this.typeFollows();
   }
 
   private readonlyAhead(): boolean {
-    const next = this.cursor.lookahead();
-    const operand =
-      kTokenTable.isName(next.kind) ||
-      next.kind == TokenKind.LParen ||
-      next.kind == TokenKind.LBracket;
+    return this.cursor.is(TokenKind.Readonly) && this.typeFollows();
+  }
 
-    return this.cursor.is(TokenKind.Readonly) && operand;
+  private typeFollows(): boolean {
+    const next = this.cursor.lookahead();
+
+    switch (next.kind) {
+      case TokenKind.LParen:
+      case TokenKind.LBrace:
+      case TokenKind.LBracket:
+      case TokenKind.Typeof:
+      case TokenKind.This:
+      case TokenKind.Void:
+      case TokenKind.String:
+      case TokenKind.TemplateString:
+      case TokenKind.TemplateHead:
+      case TokenKind.Int:
+      case TokenKind.Float:
+      case TokenKind.Minus:
+      case TokenKind.True:
+      case TokenKind.False:
+        return true;
+      default:
+        return kTokenTable.isName(next.kind);
+    }
   }
 
   private keyofType(): TypeRef {
@@ -218,7 +229,7 @@ partial class FileParser {
         return this.genericFunctionType();
 
       case TokenKind.LParen:
-        if (this.functionTypeAhead()) {
+        if (this.parametersAhead() || this.functionTypeAhead()) {
           return this.functionType();
         }
         return this.parenthesizedType();

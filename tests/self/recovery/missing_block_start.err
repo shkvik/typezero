@@ -1,0 +1,9 @@
+missing_block_start.tz:4:13: error TZ1103: expected '{' to start the cases of 'switch', found ';'
+  switch (x);
+            ^
+missing_block_start.tz:7:9: error TZ1506: expected '{' to start the members of the enum, found ';'
+  enum E;
+        ^
+missing_block_start.tz:10:19: error TZ1530: a declared class is a handle from C: it is written 'declare class H {}', with no type parameters, base or members
+  declare class H extends X;
+                  ^

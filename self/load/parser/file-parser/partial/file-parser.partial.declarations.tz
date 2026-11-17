@@ -68,9 +68,26 @@ partial class FileParser {
   }
 
   private skipHandleBody(): void {
-    this.cursor.skipTo(TokenKind.LBrace);
+    while (!this.endsHandleHead()) {
+      this.cursor.next();
+    }
+
     if (this.cursor.accept(TokenKind.LBrace)) {
       this.cursor.skipToClosingBrace();
+    }
+  }
+
+  private endsHandleHead(): boolean {
+    const token = this.cursor.peek();
+
+    switch (token.kind) {
+      case TokenKind.LBrace:
+      case TokenKind.RBrace:
+      case TokenKind.Semi:
+      case TokenKind.End:
+        return true;
+      default:
+        return token.newline;
     }
   }
 
@@ -129,8 +146,14 @@ partial class FileParser {
     }
 
     this.cursor.next();
-    this.cursor.expect(TokenKind.LBrace, Code.ExpectedEnumMembersStart);
     const members: EnumMember[] = [];
+    const opened = this.cursor.expect(
+      TokenKind.LBrace,
+      Code.ExpectedEnumMembersStart,
+    );
+    if (!opened) {
+      return { kind: StmtKind.Enum, loc: name.start, name: name.text, members };
+    }
 
     while (this.cursor.insideList(TokenKind.RBrace)) {
       const member = this.enumMember(name.text);

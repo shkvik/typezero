@@ -425,8 +425,15 @@ partial class FileParser {
     const discriminant = this.sequence();
 
     this.cursor.expect(TokenKind.RParen, Code.ExpectedAfterSwitchValue);
-    this.cursor.expect(TokenKind.LBrace, Code.ExpectedSwitchCasesStart);
     const cases: SwitchCase[] = [];
+    const opened = this.cursor.expect(
+      TokenKind.LBrace,
+      Code.ExpectedSwitchCasesStart,
+    );
+    if (!opened) {
+      return { kind: StmtKind.Switch, loc, discriminant, cases };
+    }
+
     let hasDefault = false;
 
     while (

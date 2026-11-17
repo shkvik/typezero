@@ -228,7 +228,10 @@ partial class FileParser {
   }
 
   private parenthesized(place: ExpressionPlace): Expr {
-    if (this.arrowAhead() && this.arrowFitsPlace(place)) {
+    const isArrow =
+      this.parametersAhead() ||
+      (this.arrowAhead() && this.arrowFitsPlace(place));
+    if (isArrow) {
       return this.arrow([], false);
     }
 

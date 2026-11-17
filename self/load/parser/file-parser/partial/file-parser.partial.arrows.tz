@@ -120,6 +120,26 @@ partial class FileParser {
     return this.cursor.is(TokenKind.Arrow);
   }
 
+  private parametersAhead(): boolean {
+    const first = this.cursor.tokenAt(1);
+    const second = this.cursor.tokenAt(2);
+    const third = this.cursor.tokenAt(3);
+    if (first.kind == TokenKind.Ellipsis) {
+      return true;
+    }
+
+    const named =
+      kTokenTable.isName(first.kind) || first.kind == TokenKind.This;
+    if (!named) {
+      return false;
+    }
+    if (second.kind == TokenKind.Colon) {
+      return true;
+    }
+
+    return second.kind == TokenKind.Question && third.kind == TokenKind.Colon;
+  }
+
   private arrowFitsPlace(place: ExpressionPlace): boolean {
     if (place != ExpressionPlace.ConditionalThen) {
       return true;
@@ -154,11 +174,12 @@ partial class FileParser {
     this.context = { ...outer, functionKind: FunctionKind.Plain };
     const patterns: ParamPattern[] = [];
     const head = this.arrowHead(patterns);
-    const arrow = this.cursor.next();
-    if (arrow.newline) {
+    const arrow = this.cursor.peek();
+    if (arrow.kind == TokenKind.Arrow && arrow.newline) {
       this.cursor.report(arrow.start, Code.ArrowOnNewLine);
     }
 
+    this.cursor.expect(TokenKind.Arrow, Code.ExpectedAfterArrowParameters);
     const concise = !this.cursor.is(TokenKind.LBrace);
     const body = this.arrowBody(concise);
 
