@@ -3,7 +3,6 @@ import { Code } from "../../../../diagnostic/code.tz";
 import { TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
-import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
   Stmt,
   StmtKind,
@@ -79,28 +78,13 @@ partial class FileParser {
     this.cursor.next();
     const name = this.cursor.next();
     const typeParams = this.optionalTypeParams();
-    const bases: TypeRef[] = [];
-
-    if (this.cursor.is(TokenKind.Extends)) {
-      this.cursor.next();
-      const first = this.type();
-
-      bases.push(first);
-
-      while (this.cursor.accept(TokenKind.Comma)) {
-        const base = this.type();
-
-        bases.push(base);
-      }
-    }
+    const bases = this.interfaceBases();
     if (!this.cursor.is(TokenKind.LBrace)) {
       const token = this.cursor.peek();
 
-      this.cursor.error(
-        token.start,
-        Code.ExpectedInterfaceFields,
-        { found: token.kind },
-      );
+      this.cursor.error(token.start, Code.ExpectedInterfaceFields, {
+        found: token.kind,
+      });
 
       return this.marker(StmtKind.Empty, name.start);
     }
@@ -120,6 +104,21 @@ partial class FileParser {
     };
   }
 
+  private interfaceBases(): TypeRef[] {
+    const bases: TypeRef[] = [];
+    if (!this.cursor.accept(TokenKind.Extends)) {
+      return bases;
+    }
+
+    do {
+      const base = this.type();
+
+      bases.push(base);
+    } while (this.cursor.accept(TokenKind.Comma));
+
+    return bases;
+  }
+
   private enumDecl(): Stmt {
     this.cursor.next();
     const name = this.cursor.peek();
@@ -134,26 +133,12 @@ partial class FileParser {
     const members: EnumMember[] = [];
 
     while (this.cursor.insideList(TokenKind.RBrace)) {
-      const member = this.cursor.peek();
-      if (!kTokenTable.isName(member.kind)) {
-        this.cursor.error(
-          member.start,
-          Code.ExpectedEnumMember,
-          { found: member.kind },
-        );
-
+      const member = this.enumMember(name.text);
+      if (member == undefined) {
         break;
       }
 
-      this.cursor.next();
-      let init: Expr | undefined = undefined;
-
-      if (this.cursor.accept(TokenKind.Assign)) {
-        init = this.expression();
-        this.recordConstant(`${name.text}.${member.text}`, init);
-      }
-
-      members.push({ name: member.text, loc: member.start, init });
+      members.push(member);
       if (!this.cursor.accept(TokenKind.Comma)) {
         break;
       }
@@ -162,5 +147,24 @@ partial class FileParser {
     this.cursor.expect(TokenKind.RBrace, Code.ExpectedEnumClose);
 
     return { kind: StmtKind.Enum, loc: name.start, name: name.text, members };
+  }
+
+  private enumMember(enumName: string): EnumMember | undefined {
+    const member = this.cursor.peek();
+    if (!kTokenTable.isName(member.kind)) {
+      this.cursor.error(member.start, Code.ExpectedEnumMember, {
+        found: member.kind,
+      });
+
+      return undefined;
+    }
+
+    this.cursor.next();
+    const init = this.initializer();
+    if (init != undefined) {
+      this.recordConstant(`${enumName}.${member.text}`, init);
+    }
+
+    return { name: member.text, loc: member.start, init };
   }
 }

@@ -100,20 +100,7 @@ partial class FileParser {
   }
 
   private recordConstant(name: string, init: Expr): void {
-    let values: string[] = [];
-
-    if (init.kind == ExprKind.StringLit) {
-      values.push(init.value);
-    } else if (init.kind == ExprKind.Template && init.exprs.length == 0) {
-      values.push(init.quasis[0] ?? "");
-    } else if (init.kind == ExprKind.Name) {
-      const known = this.stringConstants.get(init.name);
-
-      if (known != undefined) {
-        values = known.slice();
-      }
-    }
-
+    const values = this.constantTexts(init);
     const all = this.stringConstants.get(name);
     if (all == undefined) {
       this.stringConstants.set(name, values);
@@ -123,6 +110,28 @@ partial class FileParser {
 
     for (const value of values) {
       all.push(value);
+    }
+  }
+
+  private constantTexts(init: Expr): string[] {
+    switch (init.kind) {
+      case ExprKind.StringLit:
+        return [init.value];
+      case ExprKind.Template:
+        if (init.exprs.length == 0) {
+          return [init.quasis[0] ?? ""];
+        }
+        return [];
+      case ExprKind.Name: {
+        const known = this.stringConstants.get(init.name);
+        if (known == undefined) {
+          return [];
+        }
+
+        return known.slice();
+      }
+      default:
+        return [];
     }
   }
 

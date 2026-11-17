@@ -1,5 +1,6 @@
 import { Dumper } from "../ast-dump.tz";
 import {
+  BindingForm,
   BindingKind,
   VarDeclarator,
 } from "../../../../program/ast/types/ast.types.patterns.tz";
@@ -177,17 +178,7 @@ partial class Dumper {
   }
 
   private dumpDeclarator(declarator: VarDeclarator): void {
-    const form = declarator.form;
-    let shape = "form=plain";
-
-    if (form.kind == BindingKind.Object) {
-      shape = "form=object";
-    } else if (form.kind == BindingKind.Array) {
-      const rest = this.flag(form.rest);
-
-      shape = `form=array ${form.length} ${rest}`;
-    }
-
+    const shape = this.bindingShape(declarator.form);
     const name = this.quote(declarator.name);
 
     this.line(`Declarator ${declarator.loc} ${name} ${shape}`);
@@ -195,5 +186,19 @@ partial class Dumper {
     this.dumpOptionalType(declarator.typeAnn);
     this.dumpOptionalExpr(declarator.init);
     this.back();
+  }
+
+  private bindingShape(form: BindingForm): string {
+    switch (form.kind) {
+      case BindingKind.Object:
+        return "form=object";
+      case BindingKind.Array: {
+        const rest = this.flag(form.rest);
+
+        return `form=array ${form.length} ${rest}`;
+      }
+      default:
+        return "form=plain";
+    }
   }
 }

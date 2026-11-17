@@ -10,6 +10,8 @@ import {
   ArrayElement,
   Expr,
   ExprKind,
+  MemberExpr,
+  NameExpr,
   NewForm,
   NewKind,
   UnaryOp,
@@ -208,32 +210,29 @@ partial class FileParser {
   }
 
   private attachTypeArguments(expr: Expr, optionalChain: boolean): boolean {
-    if (
-      expr.kind == ExprKind.Name &&
-      !optionalChain &&
-      expr.typeArgs.length == 0
-    ) {
-      const args = this.tryTypeArguments(false);
-      if (args == undefined) {
-        return false;
-      }
-
-      expr.typeArgs = args;
-
-      return true;
+    if (expr.kind == ExprKind.Name && !optionalChain) {
+      return this.attachTo(expr, false);
     }
-    if (expr.kind == ExprKind.Member && expr.typeArgs.length == 0) {
-      const args = this.tryTypeArguments(true);
-      if (args == undefined) {
-        return false;
-      }
-
-      expr.typeArgs = args;
-
-      return true;
+    if (expr.kind == ExprKind.Member) {
+      return this.attachTo(expr, true);
     }
 
     return false;
+  }
+
+  private attachTo(expr: NameExpr | MemberExpr, callOnly: boolean): boolean {
+    if (expr.typeArgs.length > 0) {
+      return false;
+    }
+
+    const args = this.tryTypeArguments(callOnly);
+    if (args == undefined) {
+      return false;
+    }
+
+    expr.typeArgs = args;
+
+    return true;
   }
 
   private taggedTemplate(tag: Expr, optional: boolean): Expr {

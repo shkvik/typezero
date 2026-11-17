@@ -339,27 +339,47 @@ export class Lexer {
 
     while (!this.atEnd()) {
       const code = this.at(0);
-      if (code == kNewline) {
-        newline = true;
-        this.position += 1;
-      } else if (
-        code == kSpace ||
-        code == kTab ||
-        code == kReturn ||
-        code == kFormFeed ||
-        code == kVerticalTab
-      ) {
-        this.position += 1;
-      } else if (code == kSlash && this.at(1) == kSlash) {
-        this.skipRestOfLine();
-      } else if (code == kSlash && this.at(1) == kStar) {
-        newline = this.skipBlockComment() || newline;
-      } else {
-        return newline;
+
+      switch (code) {
+        case kNewline:
+          newline = true;
+          this.position += 1;
+          break;
+        case kSpace:
+        case kTab:
+        case kReturn:
+        case kFormFeed:
+        case kVerticalTab:
+          this.position += 1;
+          break;
+        case kSlash:
+          if (!this.commentAhead()) {
+            return newline;
+          }
+          newline = this.skipComment() || newline;
+          break;
+        default:
+          return newline;
       }
     }
 
     return newline;
+  }
+
+  private commentAhead(): boolean {
+    const next = this.at(1);
+
+    return next == kSlash || next == kStar;
+  }
+
+  private skipComment(): boolean {
+    if (this.at(1) == kSlash) {
+      this.skipRestOfLine();
+
+      return false;
+    }
+
+    return this.skipBlockComment();
   }
 
   private skipRestOfLine(): void {
@@ -426,30 +446,51 @@ export class Lexer {
   }
 
   private regex(): void {
-    let inClass = false;
-
     while (!this.atEnd() && !this.isLineBreak()) {
       const code = this.at(0);
 
       this.position += 1;
-      if (code == kBackslash) {
-        if (!this.atEnd() && !this.isLineBreak()) {
-          this.position += 1;
-        }
-      } else if (code == kLeftBracket) {
-        inClass = true;
-      } else if (code == kRightBracket) {
-        inClass = false;
-      } else if (code == kSlash && !inClass) {
-        while (this.identCharAt(0)) {
-          this.position += 1;
-        }
 
-        return this.push(TokenKind.Regex);
+      switch (code) {
+        case kBackslash:
+          this.skipEscaped();
+          break;
+        case kLeftBracket:
+          this.skipRegexClass();
+          break;
+        case kSlash:
+          this.skipRegexFlags();
+          return this.push(TokenKind.Regex);
       }
     }
 
     this.push(TokenKind.Regex);
+  }
+
+  private skipEscaped(): void {
+    if (!this.atEnd() && !this.isLineBreak()) {
+      this.position += 1;
+    }
+  }
+
+  private skipRegexClass(): void {
+    while (!this.atEnd() && !this.isLineBreak()) {
+      const code = this.at(0);
+
+      this.position += 1;
+      if (code == kRightBracket) {
+        return;
+      }
+      if (code == kBackslash) {
+        this.skipEscaped();
+      }
+    }
+  }
+
+  private skipRegexFlags(): void {
+    while (this.identCharAt(0)) {
+      this.position += 1;
+    }
   }
 
   private number(): void {

@@ -1,31 +1,24 @@
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { TokenKind } from "../../../token/types/token.types.tz";
+import { Token, TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
-import {
-  Expr,
-  ExprKind,
-} from "../../../../program/ast/types/ast.types.expressions.tz";
-import { NameOrigin } from "../../../../program/ast/types/ast.types.patterns.tz";
 import {
   Stmt,
   StmtKind,
 } from "../../../../program/ast/types/ast.types.statements.tz";
-import { Decorator } from "../../../../program/ast/types/ast.types.classes.tz";
 import {
-  ExportForm,
   ImportDecl,
   ModuleName,
   ModulePath,
   WholeImport,
 } from "../../../../program/ast/types/ast.types.modules.tz";
 import {
+  ImportAttribute,
   ImportClause,
   ImportForm,
   NameListCodes,
 } from "../types/file-parser.types.modules.tz";
 import {
-  kExportNames,
   kImportNames,
   kJsonAttributeValue,
   kJsonExtension,
@@ -158,34 +151,11 @@ partial class FileParser {
     from: ModulePath,
   ): Stmt {
     const json = from.path.endsWith(kJsonExtension);
-    let jsonType = false;
-    const token = this.cursor.peek();
-    const attributes =
-      token.kind == TokenKind.With || token.kind == TokenKind.Assert;
-    if (attributes && !token.newline) {
-      jsonType = this.importAttributes(json);
-    }
+    const jsonType = this.optionalImportAttributes(json);
 
     this.cursor.expectSemicolon();
     if (json) {
-      if (clause.kind != ImportForm.Default) {
-        this.cursor.report(formLoc, Code.JsonImportWhole);
-
-        return this.marker(StmtKind.Empty, loc);
-      }
-      if (!jsonType) {
-        this.cursor.report(from.loc, Code.JsonImportAttribute);
-      }
-
-      names.push({
-        name: kJsonImportName,
-        loc: formLoc,
-        as: clause.name,
-        asLoc: formLoc,
-      });
-      this.addImport(loc, names, from);
-
-      return this.marker(StmtKind.Empty, loc);
+      return this.jsonImport(loc, clause, formLoc, names, from, jsonType);
     }
 
     const whole = this.clauseName(clause);
@@ -200,18 +170,71 @@ partial class FileParser {
 
       return this.marker(StmtKind.Empty, loc);
     }
-    if (clause.kind == ImportForm.Namespace) {
-      this.cursor.report(formLoc, Code.NamespaceImportNotSupported);
-    } else if (clause.kind == ImportForm.Default) {
-      this.cursor.report(formLoc, Code.DefaultImportNotSupported);
-    } else if (names.length == 0) {
-      this.cursor.report(loc, Code.ImportWithoutNames);
-    }
+
+    this.reportImportForm(clause, formLoc, loc, names.length);
     if (names.length > 0) {
       this.addImport(loc, names, from);
     }
 
     return this.marker(StmtKind.Empty, loc);
+  }
+
+  private optionalImportAttributes(json: boolean): boolean {
+    const token = this.cursor.peek();
+    const attributes =
+      token.kind == TokenKind.With || token.kind == TokenKind.Assert;
+    if (!attributes || token.newline) {
+      return false;
+    }
+
+    return this.importAttributes(json);
+  }
+
+  private jsonImport(
+    loc: int,
+    clause: ImportClause,
+    formLoc: int,
+    names: ModuleName[],
+    from: ModulePath,
+    jsonType: boolean,
+  ): Stmt {
+    if (clause.kind != ImportForm.Default) {
+      this.cursor.report(formLoc, Code.JsonImportWhole);
+
+      return this.marker(StmtKind.Empty, loc);
+    }
+    if (!jsonType) {
+      this.cursor.report(from.loc, Code.JsonImportAttribute);
+    }
+
+    names.push({
+      name: kJsonImportName,
+      loc: formLoc,
+      as: clause.name,
+      asLoc: formLoc,
+    });
+    this.addImport(loc, names, from);
+
+    return this.marker(StmtKind.Empty, loc);
+  }
+
+  private reportImportForm(
+    clause: ImportClause,
+    formLoc: int,
+    loc: int,
+    count: int,
+  ): void {
+    switch (clause.kind) {
+      case ImportForm.Namespace:
+        return this.cursor.report(formLoc, Code.NamespaceImportNotSupported);
+      case ImportForm.Default:
+        return this.cursor.report(formLoc, Code.DefaultImportNotSupported);
+      default:
+        if (count == 0) {
+          this.cursor.report(loc, Code.ImportWithoutNames);
+        }
+        return;
+    }
   }
 
   private addImport(
@@ -223,204 +246,6 @@ partial class FileParser {
     const decl: ImportDecl = { loc, names, from, whole, isPartList: false };
 
     this.imports.push(decl);
-  }
-
-  private partialClassAhead(): boolean {
-    const next = this.cursor.lookahead();
-
-    return next.kind == TokenKind.Class && !next.newline;
-  }
-
-  private exportedDeclarationAhead(): boolean {
-    const token = this.cursor.peek();
-    const next = this.cursor.lookahead();
-
-    switch (token.kind) {
-      case TokenKind.Function:
-      case TokenKind.Const:
-      case TokenKind.Let:
-      case TokenKind.Var:
-      case TokenKind.Enum:
-        return true;
-      case TokenKind.Class:
-      case TokenKind.Type:
-      case TokenKind.Interface:
-        return kTokenTable.isName(next.kind) && !next.newline;
-      case TokenKind.Abstract:
-        return next.kind == TokenKind.Class && !next.newline;
-      case TokenKind.Declare:
-        return (
-          next.kind == TokenKind.Function ||
-          (!this.library && next.kind == TokenKind.Class)
-        );
-      default:
-        return this.asyncFunctionAhead();
-    }
-  }
-
-  private exportDecl(topLevel: boolean): Stmt {
-    const keyword = this.cursor.next();
-    const loc = keyword.start;
-
-    if (!topLevel) {
-      this.cursor.report(loc, Code.ExportNotTopLevel);
-    }
-    if (this.cursor.is(TokenKind.Partial) && this.partialClassAhead()) {
-      this.cursor.report(loc, Code.PartNotExported);
-
-      return this.statement(topLevel);
-    }
-    if (this.exportedDeclarationAhead()) {
-      return this.exportedStatement(topLevel);
-    }
-
-    this.acceptExportTypeWord();
-    const token = this.cursor.peek();
-
-    switch (token.kind) {
-      case TokenKind.At:
-        return this.exportDecorated(topLevel);
-      case TokenKind.Default:
-        return this.exportDefault(loc, topLevel);
-      case TokenKind.Assign:
-        return this.exportEquals(loc);
-      case TokenKind.Star:
-        return this.exportAll(loc);
-      case TokenKind.LBrace:
-        return this.exportNames(loc);
-      default:
-        this.cursor.error(token.start, Code.ExpectedExportDeclaration, {
-          found: token.kind,
-        });
-        return this.marker(StmtKind.Empty, loc);
-    }
-  }
-
-  private exportedStatement(topLevel: boolean): Stmt {
-    const stmt = this.statement(topLevel);
-
-    if (topLevel) {
-      this.exportDeclared(stmt);
-    }
-
-    return stmt;
-  }
-
-  private acceptExportTypeWord(): void {
-    const next = this.cursor.lookahead();
-    if (!this.cursor.is(TokenKind.Type) || next.kind != TokenKind.LBrace) {
-      return;
-    }
-
-    const word = this.cursor.next();
-
-    this.cursor.report(word.start, Code.ExportTypeNotNeeded);
-  }
-
-  private exportEquals(loc: int): Stmt {
-    this.cursor.next();
-    this.cursor.report(loc, Code.ExportEqualsNotSupported);
-    this.expression();
-    this.cursor.expectSemicolon();
-
-    return this.marker(StmtKind.Empty, loc);
-  }
-
-  private exportDecorated(topLevel: boolean): Stmt {
-    const decorators: Decorator[] = this.decorators();
-    const stmt = this.statement(topLevel);
-    if (stmt.kind == StmtKind.Class) {
-      if (topLevel) {
-        this.exportDeclared(stmt);
-      }
-
-      stmt.decorators = decorators.concat(stmt.decorators);
-    } else {
-      this.rejectDecorators(decorators);
-    }
-
-    return stmt;
-  }
-
-  private exportNames(loc: int): Stmt {
-    const names: ModuleName[] = [];
-
-    this.moduleNames(names, kExportNames);
-    const reExport =
-      !this.cursor.isRecovering() && this.cursor.is(TokenKind.From);
-    let from: ModulePath | undefined = undefined;
-
-    if (reExport) {
-      from = this.fromPath(true);
-      if (from == undefined) {
-        return this.marker(StmtKind.Empty, loc);
-      }
-    }
-
-    this.cursor.expectSemicolon();
-    if (!this.cursor.isRecovering()) {
-      const form = this.exportForm(reExport);
-
-      this.exports.push({ loc, form, names, from });
-    }
-
-    return this.marker(StmtKind.Empty, loc);
-  }
-
-  private exportDefault(loc: int, topLevel: boolean): Stmt {
-    this.cursor.report(loc, Code.ExportDefaultNotSupported);
-    this.cursor.next();
-    const next = this.cursor.lookahead();
-    if (this.cursor.is(TokenKind.Function) && kTokenTable.isName(next.kind)) {
-      return this.statement(topLevel);
-    }
-
-    const head = this.cursor.peek();
-    const exprLoc = head.start;
-    const expr = this.exprOrFunction(exprLoc);
-
-    this.cursor.expectSemicolon();
-
-    return { kind: StmtKind.Expr, loc: exprLoc, expr };
-  }
-
-  private exprOrFunction(loc: int): Expr {
-    if (!this.cursor.is(TokenKind.Function)) {
-      return this.expression();
-    }
-
-    const declaration = this.functionDecl(true, false);
-
-    return { kind: ExprKind.Function, loc, fn: declaration };
-  }
-
-  private exportAll(loc: int): Stmt {
-    this.cursor.next();
-    if (this.cursor.is(TokenKind.As)) {
-      const asKeyword = this.cursor.next();
-      const asLoc = asKeyword.start;
-
-      this.cursor.expectName(Code.ExpectedAfterExportStarAs);
-      if (!this.cursor.isRecovering() && this.fromPath(true) != undefined) {
-        this.cursor.report(asLoc, Code.ExportStarAsNotSupported);
-        this.cursor.expectSemicolon();
-      }
-
-      return this.marker(StmtKind.Empty, loc);
-    }
-
-    const from = this.fromPath(true);
-    if (from != undefined) {
-      this.cursor.expectSemicolon();
-      this.exports.push({
-        loc,
-        form: ExportForm.All,
-        names: [],
-        from,
-      });
-    }
-
-    return this.marker(StmtKind.Empty, loc);
   }
 
   private moduleNames(names: ModuleName[], codes: NameListCodes): void {
@@ -450,6 +275,33 @@ partial class FileParser {
   }
 
   private moduleName(codes: NameListCodes): ModuleName | undefined {
+    const word = this.moduleWord(codes);
+    if (word == undefined) {
+      return undefined;
+    }
+    if (!this.cursor.accept(TokenKind.As)) {
+      return {
+        name: word.text,
+        loc: word.start,
+        as: word.text,
+        asLoc: word.start,
+      };
+    }
+
+    const alias = this.moduleAlias();
+    if (alias == undefined) {
+      return undefined;
+    }
+
+    return {
+      name: word.text,
+      loc: word.start,
+      as: alias.text,
+      asLoc: alias.start,
+    };
+  }
+
+  private moduleWord(codes: NameListCodes): Token | undefined {
     const token = this.cursor.peek();
     if (token.kind == TokenKind.Default) {
       this.cursor.error(token.start, Code.NoExportDefault);
@@ -472,16 +324,10 @@ partial class FileParser {
       return undefined;
     }
 
-    this.cursor.next();
-    if (!this.cursor.accept(TokenKind.As)) {
-      return {
-        name: token.text,
-        loc: token.start,
-        as: token.text,
-        asLoc: token.start,
-      };
-    }
+    return this.cursor.next();
+  }
 
+  private moduleAlias(): Token | undefined {
     const alias = this.cursor.peek();
     if (alias.kind == TokenKind.Default) {
       this.cursor.error(alias.start, Code.NoExportDefault);
@@ -496,22 +342,14 @@ partial class FileParser {
       return undefined;
     }
 
-    this.cursor.next();
-
-    return {
-      name: token.text,
-      loc: token.start,
-      as: alias.text,
-      asLoc: alias.start,
-    };
+    return this.cursor.next();
   }
 
   private importAttributes(json: boolean): boolean {
-    const keyword = this.cursor.peek();
+    const keyword = this.cursor.next();
     const at = keyword.start;
     const old = keyword.kind == TokenKind.Assert;
 
-    this.cursor.next();
     if (!this.cursor.expect(TokenKind.LBrace, Code.ExpectedAfterWith)) {
       return false;
     }
@@ -520,23 +358,17 @@ partial class FileParser {
     let other = false;
 
     while (this.cursor.insideList(TokenKind.RBrace)) {
-      const key = this.attributeKey();
-      if (
-        key == undefined ||
-        !this.cursor.expect(TokenKind.Colon, Code.ExpectedAfterAttributeName)
-      ) {
+      const attribute = this.importAttribute();
+      if (attribute == undefined) {
         this.cursor.skipToClosingBrace();
 
         return false;
       }
 
-      const value = this.fromPath(false);
-      if (value == undefined) {
-        this.cursor.skipToClosingBrace();
-
-        return false;
-      }
-      if (key == kTypeAttributeKey && value.path == kJsonAttributeValue) {
+      const jsonKind =
+        attribute.key == kTypeAttributeKey &&
+        attribute.value == kJsonAttributeValue;
+      if (jsonKind) {
         typeJson = true;
       } else {
         other = true;
@@ -559,6 +391,28 @@ partial class FileParser {
     }
 
     return typeJson || old || other;
+  }
+
+  private importAttribute(): ImportAttribute | undefined {
+    const key = this.attributeKey();
+    if (key == undefined) {
+      return undefined;
+    }
+
+    const colon = this.cursor.expect(
+      TokenKind.Colon,
+      Code.ExpectedAfterAttributeName,
+    );
+    if (!colon) {
+      return undefined;
+    }
+
+    const value = this.fromPath(false);
+    if (value == undefined) {
+      return undefined;
+    }
+
+    return { key, value: value.path };
   }
 
   private attributeKey(): string | undefined {
@@ -600,47 +454,6 @@ partial class FileParser {
     this.cursor.next();
 
     return { path: decoded.text, loc: token.start };
-  }
-
-  private exportDeclared(stmt: Stmt): void {
-    const names: ModuleName[] = [];
-
-    if (
-      stmt.kind == StmtKind.Function ||
-      stmt.kind == StmtKind.TypeAlias ||
-      stmt.kind == StmtKind.Enum
-    ) {
-      names.push({
-        name: stmt.name,
-        loc: stmt.loc,
-        as: stmt.name,
-        asLoc: stmt.loc,
-      });
-    } else if (stmt.kind == StmtKind.Class) {
-      const name = stmt.name ?? "";
-
-      names.push({ name, loc: stmt.loc, as: name, asLoc: stmt.loc });
-    } else if (stmt.kind == StmtKind.VarDecl) {
-      for (const declarator of stmt.decls) {
-        if (declarator.origin == NameOrigin.Written) {
-          names.push({
-            name: declarator.name,
-            loc: declarator.loc,
-            as: declarator.name,
-            asLoc: declarator.loc,
-          });
-        }
-      }
-    }
-    if (names.length == 0) {
-      return;
-    }
-
-    this.exports.push({
-      loc: stmt.loc,
-      form: ExportForm.Local,
-      names,
-    });
   }
 
   private clauseName(clause: ImportClause): string | undefined {
@@ -719,13 +532,5 @@ partial class FileParser {
       path.startsWith(kTzModulePrefix) ||
       this.isBareModule(path)
     );
-  }
-
-  private exportForm(reExport: boolean): ExportForm {
-    if (reExport) {
-      return ExportForm.Re;
-    }
-
-    return ExportForm.Local;
   }
 }

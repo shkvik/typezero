@@ -22,6 +22,8 @@ import {
 import {
   FunctionDecl,
   FunctionPlace,
+  Param,
+  ParamProperty,
 } from "../../../../program/ast/types/ast.types.functions.tz";
 import {
   Access,
@@ -38,7 +40,6 @@ import {
   MemberName,
   Modifiers,
 } from "../types/file-parser.types.classes.tz";
-import { Arguments } from "../types/file-parser.types.calls.tz";
 import { kThisName } from "../const/file-parser.const.classes.tz";
 
 partial class FileParser {
@@ -183,11 +184,9 @@ partial class FileParser {
     if (!this.cursor.atName()) {
       const token = this.cursor.peek();
 
-      this.cursor.error(
-        token.start,
-        Code.ExpectedDecoratorName,
-        { found: token.kind },
-      );
+      this.cursor.error(token.start, Code.ExpectedDecoratorName, {
+        found: token.kind,
+      });
 
       return undefined;
     }
@@ -201,44 +200,20 @@ partial class FileParser {
       typeArgs: [],
     };
 
-    while (this.cursor.accept(TokenKind.Dot)) {
-      const token = this.cursor.peek();
-      const property =
-        token.kind == TokenKind.Identifier || kTokenTable.isKeyword(token.kind);
-      if (!property) {
-        this.cursor.error(token.start, Code.ExpectedPropertyAfterDot);
-
+    while (this.cursor.is(TokenKind.Dot)) {
+      const link = this.dotLink(expr);
+      if (link == undefined) {
         return expr;
       }
 
-      const name = this.cursor.next();
-
-      expr = {
-        kind: ExprKind.Member,
-        loc: name.start,
-        object: expr,
-        name: name.text,
-        known: name.known,
-        optional: false,
-        typeArgs: [],
-      };
+      expr = link;
     }
 
-    if (!this.cursor.accept(TokenKind.LParen)) {
-      return expr;
+    if (this.cursor.is(TokenKind.LParen)) {
+      return this.callLink(expr, false);
     }
 
-    const list: Arguments = this.arguments();
-
-    return {
-      kind: ExprKind.Call,
-      loc: expr.loc,
-      callee: expr,
-      args: list.args,
-      spread: list.spread,
-      optional: false,
-      tagged: false,
-    };
+    return expr;
   }
 
   private rejectDecorators(decorators: Decorator[]): void {
@@ -490,13 +465,7 @@ partial class FileParser {
     body: BlockStmt,
   ): void {
     const sets: Stmt[] = [];
-    let properties = 0;
-
-    for (const field of declaration.fields) {
-      if (field.form == FieldKind.Parameter) {
-        properties += 1;
-      }
-    }
+    let properties = this.parameterFieldCount(declaration);
 
     for (const param of constructorDecl.params) {
       const property = param.property;
@@ -506,54 +475,15 @@ partial class FileParser {
 
       this.fieldNames.add(param.name);
       if (!this.hasParameterField(declaration, param.name)) {
-        const field: ClassField = {
-          name: param.name,
-          loc: param.loc,
-          type: param.type,
-          form: FieldKind.Parameter,
-          presence: FieldPresence.Required,
-          readonly: property.readonly,
-          isOverride: false,
-          access: property.access,
-          decorators: [],
-          accessor: false,
-        };
+        const field = this.parameterField(param, property);
 
         declaration.fields.splice(properties, 0, field);
         properties += 1;
       }
 
-      const self: Expr = {
-        kind: ExprKind.Name,
-        loc: param.loc,
-        name: kThisName,
-        known: KnownName.None,
-        typeArgs: [],
-      };
-      const target: Expr = {
-        kind: ExprKind.Member,
-        loc: param.loc,
-        object: self,
-        name: param.name,
-        known: KnownName.None,
-        optional: false,
-        typeArgs: [],
-      };
-      const value: Expr = {
-        kind: ExprKind.Name,
-        loc: param.loc,
-        name: param.name,
-        known: KnownName.None,
-        typeArgs: [],
-      };
-      const set: Expr = {
-        kind: ExprKind.Assign,
-        loc: param.loc,
-        target,
-        value,
-      };
+      const set = this.parameterSet(param);
 
-      sets.push({ kind: StmtKind.Expr, loc: param.loc, expr: set });
+      sets.push(set);
     }
 
     const at = this.fieldSetsStart(declaration, body);
@@ -561,6 +491,67 @@ partial class FileParser {
     const after = body.body.slice(at);
 
     body.body = before.concat(sets).concat(after);
+  }
+
+  private parameterFieldCount(declaration: ClassDecl): int {
+    let count = 0;
+
+    for (const field of declaration.fields) {
+      if (field.form == FieldKind.Parameter) {
+        count += 1;
+      }
+    }
+
+    return count;
+  }
+
+  private parameterField(param: Param, property: ParamProperty): ClassField {
+    return {
+      name: param.name,
+      loc: param.loc,
+      type: param.type,
+      form: FieldKind.Parameter,
+      presence: FieldPresence.Required,
+      readonly: property.readonly,
+      isOverride: false,
+      access: property.access,
+      decorators: [],
+      accessor: false,
+    };
+  }
+
+  private parameterSet(param: Param): Stmt {
+    const self: Expr = {
+      kind: ExprKind.Name,
+      loc: param.loc,
+      name: kThisName,
+      known: KnownName.None,
+      typeArgs: [],
+    };
+    const target: Expr = {
+      kind: ExprKind.Member,
+      loc: param.loc,
+      object: self,
+      name: param.name,
+      known: KnownName.None,
+      optional: false,
+      typeArgs: [],
+    };
+    const value: Expr = {
+      kind: ExprKind.Name,
+      loc: param.loc,
+      name: param.name,
+      known: KnownName.None,
+      typeArgs: [],
+    };
+    const set: Expr = {
+      kind: ExprKind.Assign,
+      loc: param.loc,
+      target,
+      value,
+    };
+
+    return { kind: StmtKind.Expr, loc: param.loc, expr: set };
   }
 
   private classField(
@@ -574,16 +565,7 @@ partial class FileParser {
       this.cursor.report(loc, Code.AbstractFields);
     }
 
-    let presence = FieldPresence.Required;
-    const suffix = this.cursor.peek();
-
-    if (this.cursor.accept(TokenKind.Question)) {
-      presence = FieldPresence.Optional;
-    } else if (suffix.kind == TokenKind.Bang && !suffix.newline) {
-      this.cursor.next();
-      presence = FieldPresence.Definite;
-    }
-
+    const presence = this.fieldPresence();
     const type = this.typeAnnotation();
     const init = this.initializer();
     const after = this.cursor.peek();
@@ -593,11 +575,9 @@ partial class FileParser {
       after.kind == TokenKind.RBrace ||
       after.newline;
     if (!ended) {
-      return this.cursor.error(
-        after.start,
-        Code.ExpectedSemicolonAfterField,
-        { found: after.kind },
-      );
+      return this.cursor.error(after.start, Code.ExpectedSemicolonAfterField, {
+        found: after.kind,
+      });
     }
 
     declaration.fields.push({
@@ -613,6 +593,20 @@ partial class FileParser {
       decorators,
       accessor: modifiers.accessor,
     });
+  }
+
+  private fieldPresence(): FieldPresence {
+    const suffix = this.cursor.peek();
+    if (this.cursor.accept(TokenKind.Question)) {
+      return FieldPresence.Optional;
+    }
+    if (suffix.kind == TokenKind.Bang && !suffix.newline) {
+      this.cursor.next();
+
+      return FieldPresence.Definite;
+    }
+
+    return FieldPresence.Required;
   }
 
   private isConstructor(declaration: FunctionDecl): boolean {

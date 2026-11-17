@@ -219,14 +219,17 @@ export class Cursor {
 
     while (!this.is(TokenKind.End)) {
       const token = this.next();
-      if (token.kind == TokenKind.LBrace) {
-        depth += 1;
-      } else if (token.kind == TokenKind.RBrace) {
-        if (depth == 0) {
-          return;
-        }
 
-        depth -= 1;
+      switch (token.kind) {
+        case TokenKind.LBrace:
+          depth += 1;
+          break;
+        case TokenKind.RBrace:
+          if (depth == 0) {
+            return;
+          }
+          depth -= 1;
+          break;
       }
     }
   }

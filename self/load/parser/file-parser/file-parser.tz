@@ -16,6 +16,7 @@ import "./partial/file-parser.partial.variables.tz";
 import "./partial/file-parser.partial.declarations.tz";
 import "./partial/file-parser.partial.arrows.tz";
 import "./partial/file-parser.partial.modifiers.tz";
+import "./partial/file-parser.partial.exports.tz";
 import { Token, TokenKind } from "../../token/types/token.types.tz";
 import { Stmt } from "../../../program/ast/types/ast.types.statements.tz";
 import {

@@ -3,12 +3,14 @@ import { Code } from "../../../../diagnostic/code.tz";
 import { KnownName, TokenKind } from "../../../token/types/token.types.tz";
 import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
 import {
+  ArrayElement,
   ArrayLitExpr,
   BinaryOp,
   Expr,
   ExprKind,
   IndexExpr,
   ObjectLitExpr,
+  Property,
   PropertyKind,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
@@ -207,33 +209,52 @@ partial class FileParser {
 
   private patternFromLiteral(expr: ArrayLitExpr | ObjectLitExpr): Pattern {
     if (expr.kind == ExprKind.ObjectLit) {
-      const pattern: Pattern = { loc: expr.loc, object: true, elements: [] };
-
-      for (let i = 0; i < expr.props.length; i++) {
-        const property = expr.props[i];
-        if (property == undefined) {
-          continue;
-        }
-
-        const element = this.emptyElement(property.loc);
-        const form = property.form;
-
-        element.rest = form.kind == PropertyKind.Spread;
-        element.key = property.name;
-        if (form.kind == PropertyKind.Computed) {
-          element.keyExpr = form.key;
-        }
-        if (element.rest && i + 1 != expr.props.length) {
-          this.cursor.report(element.loc, Code.RestElementNotLast);
-        }
-
-        this.fillElement(element, property.value, false);
-        pattern.elements.push(element);
-      }
-
-      return pattern;
+      return this.objectPatternFrom(expr);
     }
 
+    return this.arrayPatternFrom(expr);
+  }
+
+  private objectPatternFrom(expr: ObjectLitExpr): Pattern {
+    const pattern: Pattern = { loc: expr.loc, object: true, elements: [] };
+
+    for (let i = 0; i < expr.props.length; i++) {
+      const property = expr.props[i];
+      if (property == undefined) {
+        continue;
+      }
+
+      const isLast = i + 1 == expr.props.length;
+      const element = this.elementFromProperty(property, isLast);
+
+      pattern.elements.push(element);
+    }
+
+    return pattern;
+  }
+
+  private elementFromProperty(
+    property: Property,
+    isLast: boolean,
+  ): PatternElement {
+    const element = this.emptyElement(property.loc);
+    const form = property.form;
+
+    element.rest = form.kind == PropertyKind.Spread;
+    element.key = property.name;
+    if (form.kind == PropertyKind.Computed) {
+      element.keyExpr = form.key;
+    }
+    if (element.rest && !isLast) {
+      this.cursor.report(element.loc, Code.RestElementNotLast);
+    }
+
+    this.fillElement(element, property.value, false);
+
+    return element;
+  }
+
+  private arrayPatternFrom(expr: ArrayLitExpr): Pattern {
     const pattern: Pattern = { loc: expr.loc, object: false, elements: [] };
 
     for (let i = 0; i < expr.elements.length; i++) {
@@ -242,19 +263,27 @@ partial class FileParser {
         continue;
       }
 
-      const element = this.emptyElement(item.expr.loc);
+      const isLast = i + 1 == expr.elements.length;
+      const element = this.elementFromItem(item, isLast);
 
-      element.hole = item.hole;
-      element.rest = item.spread;
-      if (element.rest && i + 1 != expr.elements.length) {
-        this.cursor.report(element.loc, Code.RestElementNotLast);
-      }
-
-      this.fillElement(element, item.expr, element.hole);
       pattern.elements.push(element);
     }
 
     return pattern;
+  }
+
+  private elementFromItem(item: ArrayElement, isLast: boolean): PatternElement {
+    const element = this.emptyElement(item.expr.loc);
+
+    element.hole = item.hole;
+    element.rest = item.spread;
+    if (element.rest && !isLast) {
+      this.cursor.report(element.loc, Code.RestElementNotLast);
+    }
+
+    this.fillElement(element, item.expr, element.hole);
+
+    return element;
   }
 
   private fillElement(
@@ -262,16 +291,24 @@ partial class FileParser {
     value: Expr,
     hole: boolean,
   ): void {
-    let target = value;
-
     if (
       value.kind == ExprKind.Assign &&
       value.op == undefined &&
       !element.rest
     ) {
-      target = value.target;
       element.defaultValue = value.value;
+
+      return this.fillTarget(element, value.target, hole);
     }
+
+    this.fillTarget(element, value, hole);
+  }
+
+  private fillTarget(
+    element: PatternElement,
+    target: Expr,
+    hole: boolean,
+  ): void {
     if (target.kind == ExprKind.ArrayLit || target.kind == ExprKind.ObjectLit) {
       element.nested = this.patternFromLiteral(target);
     } else if (!hole) {

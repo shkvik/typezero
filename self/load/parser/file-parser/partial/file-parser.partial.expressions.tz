@@ -50,14 +50,16 @@ partial class FileParser {
 
     this.cursor.skip(op.width);
     const value = this.expression();
+    const assignment = this.assignmentOp(op.kind);
+    const source = this.cursor.spanFrom(start);
 
     return {
       kind: ExprKind.Assign,
       loc,
-      op: this.assignmentOp(op.kind),
+      op: assignment,
       target,
       value,
-      source: this.cursor.spanFrom(start),
+      source,
     };
   }
 
@@ -66,22 +68,8 @@ partial class FileParser {
     const loc = keyword.start;
     const star = this.cursor.peek();
     const delegate = !star.newline && this.cursor.accept(TokenKind.Star);
-    let value: Expr | undefined = undefined;
-    const token = this.cursor.peek();
+    const value = this.yieldValue(delegate);
 
-    if (delegate) {
-      value = this.expression();
-    } else if (!token.newline && !this.endsYield(token.kind)) {
-      const kind = token.kind;
-      const operand =
-        this.binaryPrecedence(kind) == Precedence.None ||
-        kind == TokenKind.Plus ||
-        kind == TokenKind.Minus ||
-        kind == TokenKind.Less;
-      if (operand) {
-        value = this.expression();
-      }
-    }
     if (this.context.functionKind != FunctionKind.Generator) {
       this.cursor.report(loc, Code.YieldOutsideGenerator);
 
@@ -89,6 +77,31 @@ partial class FileParser {
     }
 
     return { kind: ExprKind.Yield, loc, value, delegate };
+  }
+
+  private yieldValue(delegate: boolean): Expr | undefined {
+    if (delegate) {
+      return this.expression();
+    }
+
+    const token = this.cursor.peek();
+    if (token.newline || this.endsYield(token.kind)) {
+      return undefined;
+    }
+    if (!this.startsYieldOperand(token.kind)) {
+      return undefined;
+    }
+
+    return this.expression();
+  }
+
+  private startsYieldOperand(kind: TokenKind): boolean {
+    return (
+      this.binaryPrecedence(kind) == Precedence.None ||
+      kind == TokenKind.Plus ||
+      kind == TokenKind.Minus ||
+      kind == TokenKind.Less
+    );
   }
 
   private conditional(): Expr {
@@ -258,11 +271,9 @@ partial class FileParser {
       next.kind == TokenKind.Extends ||
       next.kind == TokenKind.Implements;
     if (!isClassExpression) {
-      this.cursor.error(
-        token.start,
-        Code.ExpectedExpression,
-        { found: TokenKind.Class },
-      );
+      this.cursor.error(token.start, Code.ExpectedExpression, {
+        found: TokenKind.Class,
+      });
 
       return this.invalid(token.start);
     }

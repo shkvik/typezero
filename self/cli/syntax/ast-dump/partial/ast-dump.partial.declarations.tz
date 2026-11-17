@@ -4,6 +4,7 @@ import {
   FunctionDecl,
   Param,
   ParamKind,
+  ParamProperty,
 } from "../../../../program/ast/types/ast.types.functions.tz";
 import {
   ClassDecl,
@@ -60,14 +61,7 @@ partial class Dumper {
   }
 
   private dumpParam(param: Param): void {
-    const property = param.property;
-    let prop = "-";
-
-    if (property != undefined) {
-      const isReadonly = this.flag(property.readonly);
-
-      prop = `${isReadonly}${property.access}`;
-    }
+    const prop = this.propertyText(param.property);
 
     const name = this.quote(param.name);
     const pattern = this.span(param.pattern);
@@ -172,5 +166,15 @@ partial class Dumper {
     this.dumpOptionalType(field.type);
     this.dumpOptionalExpr(field.init);
     this.back();
+  }
+
+  private propertyText(property: ParamProperty | undefined): string {
+    if (property == undefined) {
+      return "-";
+    }
+
+    const isReadonly = this.flag(property.readonly);
+
+    return `${isReadonly}${property.access}`;
   }
 }

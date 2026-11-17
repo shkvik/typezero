@@ -124,7 +124,7 @@ self/             компилятор на tz, пробный (порт compile
                   function-types, expressions, operators, calls, literals, patterns,
                   statements, loops, variables, functions, arrows, classes, modifiers,
                   declarations (type,
-                  interface, enum), modules; файл больше
+                  interface, enum), modules (import), exports; файл больше
                   800 строк делится на части). У класса своя папка: класс — в
                   <класс>.tz, его типы — в types/<класс>.types.tz, константы — в
                   const/<класс>.const.tz; у класса с частями — по файлу на часть

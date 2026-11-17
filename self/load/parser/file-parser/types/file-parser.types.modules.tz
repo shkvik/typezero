@@ -11,6 +11,11 @@ export type ImportClause =
   | { readonly kind: ImportForm.Default; readonly name: string }
   | { readonly kind: ImportForm.Namespace; readonly name?: string };
 
+export type ImportAttribute = {
+  readonly key: string;
+  readonly value: string;
+};
+
 export type NameListCodes = {
   readonly typeNotNeeded: Code;
   readonly keywordName: Code;

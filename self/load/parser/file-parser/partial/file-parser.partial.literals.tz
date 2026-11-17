@@ -67,20 +67,9 @@ partial class FileParser {
     const elements: ArrayElement[] = [];
 
     while (this.cursor.insideList(TokenKind.RBracket)) {
-      if (this.cursor.is(TokenKind.Comma)) {
-        const hole = this.cursor.peek();
+      const element = this.arrayElement();
 
-        elements.push({
-          expr: { kind: ExprKind.Undefined, loc: hole.start },
-          spread: false,
-          hole: true,
-        });
-      } else {
-        const spread = this.cursor.accept(TokenKind.Ellipsis);
-        const value = this.expression();
-
-        elements.push({ expr: value, spread, hole: false });
-      }
+      elements.push(element);
       if (!this.cursor.accept(TokenKind.Comma)) {
         break;
       }
@@ -89,6 +78,20 @@ partial class FileParser {
     this.cursor.expect(TokenKind.RBracket, Code.ExpectedArrayClose);
 
     return { kind: ExprKind.ArrayLit, loc, elements };
+  }
+
+  private arrayElement(): ArrayElement {
+    if (this.cursor.is(TokenKind.Comma)) {
+      const comma = this.cursor.peek();
+      const expr: Expr = { kind: ExprKind.Undefined, loc: comma.start };
+
+      return { expr, spread: false, hole: true };
+    }
+
+    const spread = this.cursor.accept(TokenKind.Ellipsis);
+    const expr = this.expression();
+
+    return { expr, spread, hole: false };
   }
 
   private objectLiteral(): Expr {

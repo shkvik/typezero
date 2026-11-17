@@ -1,5 +1,6 @@
 import { Dumper } from "../ast-dump.tz";
 import {
+  BinaryOp,
   Expr,
   ExprKind,
   NewExpr,
@@ -189,13 +190,7 @@ partial class Dumper {
         return this.dumpChildren([expr.lhs, expr.rhs]);
       }
       case ExprKind.Assign: {
-        const op = expr.op;
-        let opText = "-";
-
-        if (op != undefined) {
-          opText = `${op}`;
-        }
-
+        const opText = this.operatorText(expr.op);
         const source = this.span(expr.source);
 
         this.line(`Assign ${loc} ${opText} src=${source}`);
@@ -304,5 +299,13 @@ partial class Dumper {
       default:
         return this.line(`Unknown ${loc}`);
     }
+  }
+
+  private operatorText(op: BinaryOp | undefined): string {
+    if (op == undefined) {
+      return "-";
+    }
+
+    return `${op}`;
   }
 }

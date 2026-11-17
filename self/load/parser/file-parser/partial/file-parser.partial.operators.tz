@@ -104,78 +104,113 @@ partial class FileParser {
 
   private applyOperator(left: Expr, op: BinaryOperator, start: int): Expr {
     const token = this.cursor.peek();
+    const loc = token.start;
 
     this.cursor.skip(op.width);
 
     switch (op.kind) {
-      case TokenKind.As: {
-        const target = this.type();
-
-        return { kind: ExprKind.Cast, loc: token.start, operand: left, target };
-      }
+      case TokenKind.As:
+        return this.castTo(left, loc);
       case TokenKind.Satisfies:
-        this.type();
-        this.cursor.report(token.start, Code.SatisfiesNotSupported);
-        return left;
-      case TokenKind.Instanceof: {
-        const right = this.binary(Precedence.Relational);
-
-        return {
-          kind: ExprKind.Binary,
-          loc: token.start,
-          op: BinaryOp.InstanceOf,
-          lhs: left,
-          rhs: right,
-          source: this.cursor.spanFrom(start),
-        };
-      }
-      default: {
-        if (op.kind == TokenKind.EqEqEq) {
-          this.cursor.report(token.start, Code.StrictEqualsNotSupported);
-        } else if (op.kind == TokenKind.BangEqEq) {
-          this.cursor.report(token.start, Code.StrictNotEqualsNotSupported);
-        }
-
-        const floor = this.rightFloor(op.precedence);
-        const right = this.binary(floor);
-
-        return {
-          kind: ExprKind.Binary,
-          loc: token.start,
-          op: this.binaryOpFor(op.kind),
-          lhs: left,
-          rhs: right,
-          source: this.cursor.spanFrom(start),
-        };
-      }
+        return this.satisfiesCheck(left, loc);
+      case TokenKind.Instanceof:
+        return this.instanceOfCheck(left, loc, start);
+      default:
+        return this.binaryOperation(left, op, loc, start);
     }
+  }
+
+  private castTo(operand: Expr, loc: int): Expr {
+    const target = this.type();
+
+    return { kind: ExprKind.Cast, loc, operand, target };
+  }
+
+  private satisfiesCheck(operand: Expr, loc: int): Expr {
+    this.type();
+    this.cursor.report(loc, Code.SatisfiesNotSupported);
+
+    return operand;
+  }
+
+  private instanceOfCheck(left: Expr, loc: int, start: int): Expr {
+    const right = this.binary(Precedence.Relational);
+    const source = this.cursor.spanFrom(start);
+
+    return {
+      kind: ExprKind.Binary,
+      loc,
+      op: BinaryOp.InstanceOf,
+      lhs: left,
+      rhs: right,
+      source,
+    };
+  }
+
+  private binaryOperation(
+    left: Expr,
+    op: BinaryOperator,
+    loc: int,
+    start: int,
+  ): Expr {
+    if (op.kind == TokenKind.EqEqEq) {
+      this.cursor.report(loc, Code.StrictEqualsNotSupported);
+    }
+    if (op.kind == TokenKind.BangEqEq) {
+      this.cursor.report(loc, Code.StrictNotEqualsNotSupported);
+    }
+
+    const floor = this.rightFloor(op.precedence);
+    const right = this.binary(floor);
+    const operation = this.binaryOpFor(op.kind);
+    const source = this.cursor.spanFrom(start);
+
+    return {
+      kind: ExprKind.Binary,
+      loc,
+      op: operation,
+      lhs: left,
+      rhs: right,
+      source,
+    };
   }
 
   private unary(): Expr {
     const token = this.cursor.peek();
 
-    if (this.cursor.is(TokenKind.Await)) {
-      this.cursor.next();
-      const value = this.unary();
-
-      return { kind: ExprKind.Await, loc: token.start, value };
+    switch (token.kind) {
+      case TokenKind.Await:
+        return this.awaitExpression();
+      case TokenKind.PlusPlus:
+      case TokenKind.MinusMinus:
+        return this.prefixUpdate();
+      default:
+        return this.prefixOperation();
     }
-    if (
-      token.kind == TokenKind.PlusPlus ||
-      token.kind == TokenKind.MinusMinus
-    ) {
-      this.cursor.next();
-      const target = this.unary();
+  }
 
-      return {
-        kind: ExprKind.Update,
-        loc: token.start,
-        increment: token.kind == TokenKind.PlusPlus,
-        prefix: true,
-        target,
-      };
-    }
+  private awaitExpression(): Expr {
+    const keyword = this.cursor.next();
+    const value = this.unary();
 
+    return { kind: ExprKind.Await, loc: keyword.start, value };
+  }
+
+  private prefixUpdate(): Expr {
+    const sign = this.cursor.next();
+    const target = this.unary();
+
+    return {
+      kind: ExprKind.Update,
+      loc: sign.start,
+      increment: sign.kind == TokenKind.PlusPlus,
+      prefix: true,
+      target,
+    };
+  }
+
+  private prefixOperation(): Expr {
+    const token = this.cursor.peek();
     const op = this.unaryOpFor(token.kind);
     if (op == undefined) {
       return this.postfix();
