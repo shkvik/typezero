@@ -62,6 +62,7 @@ partial class FileParser {
 
     this.cursor.expect(TokenKind.LParen, Code.ExpectedAfterFor);
     const head = this.cursor.peek();
+
     if (this.forDeclarationAhead()) {
       return this.forDeclared(loc, awaitLoc);
     }

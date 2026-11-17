@@ -1,0 +1,9 @@
+// The '}' of a list is missing and the lines give no hint of it: what is
+// skipped ends at the line where a statement starts, so the mistakes after
+// it are still reported.
+enum Color { Red, Green
+const first = 1;
+const second = ;
+export { first, second
+function paint(): void { }
+const third = ;

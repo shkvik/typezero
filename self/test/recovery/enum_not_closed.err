@@ -1,0 +1,12 @@
+enum_not_closed.tz:5:1: error TZ1507: expected '}' to close the enum that starts at line 4, found 'const'
+const first = 1;
+^
+enum_not_closed.tz:6:16: error TZ1221: expected an expression, found ';'
+const second = ;
+               ^
+enum_not_closed.tz:8:1: error TZ1605: expected '}' to close the list of names to export that starts at line 7, found 'function'
+function paint(): void { }
+^
+enum_not_closed.tz:9:15: error TZ1221: expected an expression, found ';'
+const third = ;
+              ^

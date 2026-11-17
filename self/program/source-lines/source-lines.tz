@@ -1,11 +1,21 @@
-import { SourcePlace } from "./types/source-lines.types.tz";
+import { CodePointRange, SourcePlace } from "./types/source-lines.types.tz";
 import {
   kCarriageReturn,
+  kCombiningRanges,
+  kContinuationBits,
   kContinuationFirst,
   kContinuationLast,
+  kContinuationShift,
+  kFourByteBits,
+  kFourByteLead,
   kLineFeed,
   kSpace,
   kTab,
+  kThreeByteBits,
+  kThreeByteLead,
+  kTwoByteBits,
+  kTwoByteLead,
+  kWideRanges,
 } from "./const/source-lines.const.tz";
 
 export class SourceLines {
@@ -59,9 +69,7 @@ export class SourceLines {
     let indent = "";
 
     for (let at = start; at < offset; at++) {
-      const byte = this.byteAt(at);
-
-      indent += this.indentFor(byte);
+      indent += this.indentAt(at);
     }
 
     return indent;
@@ -117,7 +125,8 @@ export class SourceLines {
     return count;
   }
 
-  private indentFor(byte: int): string {
+  private indentAt(offset: int): string {
+    const byte = this.byteAt(offset);
     if (byte == kTab) {
       return "\t";
     }
@@ -125,7 +134,53 @@ export class SourceLines {
       return "";
     }
 
+    const point = this.codePointAt(offset);
+    if (this.within(kCombiningRanges, point)) {
+      return "";
+    }
+    if (this.within(kWideRanges, point)) {
+      return "  ";
+    }
+
     return " ";
+  }
+
+  private codePointAt(offset: int): int {
+    const lead = this.byteAt(offset);
+    if (lead < kTwoByteLead) {
+      return lead;
+    }
+    if (lead < kThreeByteLead) {
+      return this.joined(lead & kTwoByteBits, offset, 1);
+    }
+    if (lead < kFourByteLead) {
+      return this.joined(lead & kThreeByteBits, offset, 2);
+    }
+
+    return this.joined(lead & kFourByteBits, offset, 3);
+  }
+
+  private joined(leadBits: int, offset: int, tails: int): int {
+    let point = leadBits;
+
+    for (let tail = 1; tail <= tails; tail++) {
+      const byte = this.byteAt(offset + tail);
+      const bits = byte & kContinuationBits;
+
+      point = (point << kContinuationShift) | bits;
+    }
+
+    return point;
+  }
+
+  private within(ranges: CodePointRange[], point: int): boolean {
+    for (const range of ranges) {
+      if (point >= range.first && point <= range.last) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private isBlank(offset: int): boolean {

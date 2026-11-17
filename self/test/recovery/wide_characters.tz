@@ -1,0 +1,8 @@
+// The pointer stands under the place of the error whatever is written before
+// it on the line: a wide character takes two columns of the screen, a
+// combining mark takes none, and other letters take one.
+const greeting = "こんにちは" + ;
+const mark = "😀😀" + ;
+const word = "привет" + ;
+const accent = "é" + ;
+/* 名前 */ const name = ;

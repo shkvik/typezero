@@ -7,5 +7,6 @@ export const kProgramName = "tzparse";
 export const kListPrefix = "@";
 export const kSourceSuffix = ".tz";
 export const kDeclarationSuffix = ".d.tz";
+export const kUsageExitCode = 2;
 export const kUsage =
   "usage: tzparse tokens|tree|check|each|time|hold|read <file.tz | @list> [repeat]";

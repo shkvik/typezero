@@ -18,6 +18,7 @@ import {
   kProgramName,
   kSourceSuffix,
   kUsage,
+  kUsageExitCode,
 } from "./const/syntax-command.const.tz";
 
 export class SyntaxCommand {
@@ -35,9 +36,7 @@ export class SyntaxCommand {
     const mode = this.modeOf(this.modeWord);
     const target = this.target;
     if (mode == undefined || target == undefined) {
-      console.log(kUsage);
-
-      return;
+      return this.wrongUsage();
     }
 
     const files = this.sourcePaths(target);
@@ -112,6 +111,7 @@ export class SyntaxCommand {
       const text = readFileSync(path);
       if (text.isErr()) {
         this.cannotRead(path);
+
         continue;
       }
 
@@ -142,6 +142,11 @@ export class SyntaxCommand {
     return sources.files.concat(sources.declarations);
   }
 
+  private wrongUsage(): void {
+    console.error(kUsage);
+    process.exitCode = kUsageExitCode;
+  }
+
   private cannotRead(path: string): void {
     console.error(`${kProgramName}: cannot read '${path}'`);
     process.exitCode = 1;
@@ -159,7 +164,9 @@ export class SyntaxCommand {
         const newline = this.bit(token.newline);
         const hash = this.bit(token.hash);
 
-        console.log(`${token.kind} ${token.start} ${length} ${newline} ${hash}`);
+        console.log(
+          `${token.kind} ${token.start} ${length} ${newline} ${hash}`,
+        );
       }
     }
   }
@@ -314,10 +321,7 @@ export class SyntaxCommand {
     }
   }
 
-  private itemCount(
-    files: SourceFile[],
-    declarations: DeclarationFile[],
-  ): int {
+  private itemCount(files: SourceFile[], declarations: DeclarationFile[]): int {
     let items = 0;
 
     for (const file of files) {

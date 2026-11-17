@@ -171,6 +171,7 @@ partial class FileParser {
 
   private implementedTypes(): TypeRef[] {
     const interfaces: TypeRef[] = [];
+
     if (!this.cursor.accept(TokenKind.Implements)) {
       return interfaces;
     }
@@ -426,6 +427,7 @@ partial class FileParser {
       FunctionPlace.Declared,
       role,
     );
+
     if (this.cursor.isRecovering()) {
       return;
     }
@@ -702,6 +704,7 @@ partial class FileParser {
 
   private fieldPresence(): FieldPresence {
     const suffix = this.cursor.peek();
+
     if (this.cursor.accept(TokenKind.Question)) {
       return FieldPresence.Optional;
     }

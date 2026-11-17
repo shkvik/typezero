@@ -601,9 +601,6 @@ partial class FileParser {
       return true;
     }
 
-    return this.cursor.expect(
-      TokenKind.LParen,
-      Code.ExpectedAfterFunctionName,
-    );
+    return this.cursor.expect(TokenKind.LParen, Code.ExpectedAfterFunctionName);
   }
 }

@@ -120,6 +120,7 @@ export class Cursor {
     }
 
     const details: Details = { expected: TokenKind.Semi, found: token.kind };
+
     if (this.startsAction()) {
       this.resumeAfterStatement(token.start, details);
 
@@ -219,9 +220,7 @@ export class Cursor {
   public symbolKeyAhead(): boolean {
     const next = this.lookahead();
 
-    return (
-      this.is(TokenKind.LBracket) && next.known == KnownName.Symbol
-    );
+    return this.is(TokenKind.LBracket) && next.known == KnownName.Symbol;
   }
 
   public synchronize(): void {
@@ -338,6 +337,7 @@ export class Cursor {
           depth -= 1;
           break;
       }
+
       if (depth < 0 || after.newline) {
         return;
       }
@@ -347,6 +347,32 @@ export class Cursor {
   public skipTo(kind: TokenKind): void {
     while (!this.is(kind) && !this.is(TokenKind.End)) {
       this.next();
+    }
+  }
+
+  public skipToListClose(): void {
+    let depth = 0;
+
+    while (!this.is(TokenKind.End)) {
+      const ahead = this.peek();
+      if (depth == 0 && ahead.newline && this.startsStatement()) {
+        return;
+      }
+
+      const token = this.next();
+
+      switch (token.kind) {
+        case TokenKind.LBrace:
+          depth += 1;
+          break;
+        case TokenKind.RBrace:
+          depth -= 1;
+          break;
+      }
+
+      if (depth < 0) {
+        return;
+      }
     }
   }
 

@@ -1,3 +1,5 @@
+import { CodePointRange } from "../types/source-lines.types.tz";
+
 export const kTab = 9;
 export const kSpace = 32;
 export const kLineFeed = 10;
@@ -5,3 +7,35 @@ export const kCarriageReturn = 13;
 
 export const kContinuationFirst = 0x80;
 export const kContinuationLast = 0xbf;
+export const kContinuationBits = 0x3f;
+export const kContinuationShift = 6;
+
+export const kTwoByteLead = 0xc0;
+export const kThreeByteLead = 0xe0;
+export const kFourByteLead = 0xf0;
+export const kTwoByteBits = 0x1f;
+export const kThreeByteBits = 0x0f;
+export const kFourByteBits = 0x07;
+
+export const kCombiningRanges: CodePointRange[] = [
+  { first: 0x0300, last: 0x036f },
+  { first: 0x200b, last: 0x200d },
+  { first: 0xfe00, last: 0xfe0f },
+];
+
+export const kWideRanges: CodePointRange[] = [
+  { first: 0x1100, last: 0x115f },
+  { first: 0x2e80, last: 0x303e },
+  { first: 0x3041, last: 0x33ff },
+  { first: 0x3400, last: 0x4dbf },
+  { first: 0x4e00, last: 0x9fff },
+  { first: 0xa000, last: 0xa4cf },
+  { first: 0xac00, last: 0xd7a3 },
+  { first: 0xf900, last: 0xfaff },
+  { first: 0xfe30, last: 0xfe4f },
+  { first: 0xff00, last: 0xff60 },
+  { first: 0xffe0, last: 0xffe6 },
+  { first: 0x1f300, last: 0x1f64f },
+  { first: 0x1f900, last: 0x1f9ff },
+  { first: 0x20000, last: 0x3fffd },
+];

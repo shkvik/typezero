@@ -1,0 +1,15 @@
+wide_characters.tz:4:28: error TZ1221: expected an expression, found ';'
+const greeting = "こんにちは" + ;
+                                ^
+wide_characters.tz:5:21: error TZ1221: expected an expression, found ';'
+const mark = "😀😀" + ;
+                      ^
+wide_characters.tz:6:25: error TZ1221: expected an expression, found ';'
+const word = "привет" + ;
+                        ^
+wide_characters.tz:7:23: error TZ1221: expected an expression, found ';'
+const accent = "é" + ;
+                     ^
+wide_characters.tz:8:23: error TZ1221: expected an expression, found ';'
+/* 名前 */ const name = ;
+                        ^

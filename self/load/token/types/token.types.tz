@@ -154,11 +154,11 @@ export enum KnownName {
 }
 
 export type Token = {
-  readonly kind: TokenKind
-  readonly known: KnownName
-  readonly start: int
-  readonly end: int
-  readonly text: string
-  readonly newline: boolean
-  readonly hash: boolean
-}
+  readonly kind: TokenKind;
+  readonly known: KnownName;
+  readonly start: int;
+  readonly end: int;
+  readonly text: string;
+  readonly newline: boolean;
+  readonly hash: boolean;
+};

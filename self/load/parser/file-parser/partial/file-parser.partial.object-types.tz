@@ -298,7 +298,7 @@ partial class FileParser {
 
   private closeBraced(code: Code): void {
     if (!this.cursor.expect(TokenKind.RBrace, code)) {
-      this.cursor.skipToClosingBrace();
+      this.cursor.skipToListClose();
     }
   }
 

@@ -1,8 +1,8 @@
-import { KnownName, TokenKind } from "./types/token.types.tz"
+import { KnownName, TokenKind } from "./types/token.types.tz";
 
 export class TokenTable {
   public isKeyword(kind: TokenKind): boolean {
-    return kind >= TokenKind.Abstract && kind <= TokenKind.Yield
+    return kind >= TokenKind.Abstract && kind <= TokenKind.Yield;
   }
 
   public isContextual(kind: TokenKind): boolean {
@@ -39,459 +39,459 @@ export class TokenTable {
       case TokenKind.Using:
       case TokenKind.With:
       case TokenKind.Yield:
-        return true
+        return true;
       default:
-        return false
+        return false;
     }
   }
 
   public isName(kind: TokenKind): boolean {
-    return kind == TokenKind.Identifier || this.isContextual(kind)
+    return kind == TokenKind.Identifier || this.isContextual(kind);
   }
 
   public keywordKind(word: string): TokenKind {
     switch (word) {
       case "abstract":
-        return TokenKind.Abstract
+        return TokenKind.Abstract;
       case "accessor":
-        return TokenKind.Accessor
+        return TokenKind.Accessor;
       case "as":
-        return TokenKind.As
+        return TokenKind.As;
       case "assert":
-        return TokenKind.Assert
+        return TokenKind.Assert;
       case "asserts":
-        return TokenKind.Asserts
+        return TokenKind.Asserts;
       case "async":
-        return TokenKind.Async
+        return TokenKind.Async;
       case "await":
-        return TokenKind.Await
+        return TokenKind.Await;
       case "break":
-        return TokenKind.Break
+        return TokenKind.Break;
       case "case":
-        return TokenKind.Case
+        return TokenKind.Case;
       case "catch":
-        return TokenKind.Catch
+        return TokenKind.Catch;
       case "class":
-        return TokenKind.Class
+        return TokenKind.Class;
       case "const":
-        return TokenKind.Const
+        return TokenKind.Const;
       case "constructor":
-        return TokenKind.Constructor
+        return TokenKind.Constructor;
       case "continue":
-        return TokenKind.Continue
+        return TokenKind.Continue;
       case "debugger":
-        return TokenKind.Debugger
+        return TokenKind.Debugger;
       case "declare":
-        return TokenKind.Declare
+        return TokenKind.Declare;
       case "default":
-        return TokenKind.Default
+        return TokenKind.Default;
       case "delete":
-        return TokenKind.Delete
+        return TokenKind.Delete;
       case "do":
-        return TokenKind.Do
+        return TokenKind.Do;
       case "else":
-        return TokenKind.Else
+        return TokenKind.Else;
       case "enum":
-        return TokenKind.Enum
+        return TokenKind.Enum;
       case "export":
-        return TokenKind.Export
+        return TokenKind.Export;
       case "extends":
-        return TokenKind.Extends
+        return TokenKind.Extends;
       case "false":
-        return TokenKind.False
+        return TokenKind.False;
       case "finally":
-        return TokenKind.Finally
+        return TokenKind.Finally;
       case "for":
-        return TokenKind.For
+        return TokenKind.For;
       case "from":
-        return TokenKind.From
+        return TokenKind.From;
       case "function":
-        return TokenKind.Function
+        return TokenKind.Function;
       case "get":
-        return TokenKind.Get
+        return TokenKind.Get;
       case "global":
-        return TokenKind.Global
+        return TokenKind.Global;
       case "if":
-        return TokenKind.If
+        return TokenKind.If;
       case "implements":
-        return TokenKind.Implements
+        return TokenKind.Implements;
       case "import":
-        return TokenKind.Import
+        return TokenKind.Import;
       case "in":
-        return TokenKind.In
+        return TokenKind.In;
       case "infer":
-        return TokenKind.Infer
+        return TokenKind.Infer;
       case "instanceof":
-        return TokenKind.Instanceof
+        return TokenKind.Instanceof;
       case "interface":
-        return TokenKind.Interface
+        return TokenKind.Interface;
       case "is":
-        return TokenKind.Is
+        return TokenKind.Is;
       case "keyof":
-        return TokenKind.Keyof
+        return TokenKind.Keyof;
       case "let":
-        return TokenKind.Let
+        return TokenKind.Let;
       case "module":
-        return TokenKind.Module
+        return TokenKind.Module;
       case "namespace":
-        return TokenKind.Namespace
+        return TokenKind.Namespace;
       case "new":
-        return TokenKind.New
+        return TokenKind.New;
       case "of":
-        return TokenKind.Of
+        return TokenKind.Of;
       case "out":
-        return TokenKind.Out
+        return TokenKind.Out;
       case "override":
-        return TokenKind.Override
+        return TokenKind.Override;
       case "partial":
-        return TokenKind.Partial
+        return TokenKind.Partial;
       case "private":
-        return TokenKind.Private
+        return TokenKind.Private;
       case "protected":
-        return TokenKind.Protected
+        return TokenKind.Protected;
       case "public":
-        return TokenKind.Public
+        return TokenKind.Public;
       case "readonly":
-        return TokenKind.Readonly
+        return TokenKind.Readonly;
       case "return":
-        return TokenKind.Return
+        return TokenKind.Return;
       case "satisfies":
-        return TokenKind.Satisfies
+        return TokenKind.Satisfies;
       case "set":
-        return TokenKind.Set
+        return TokenKind.Set;
       case "static":
-        return TokenKind.Static
+        return TokenKind.Static;
       case "super":
-        return TokenKind.Super
+        return TokenKind.Super;
       case "switch":
-        return TokenKind.Switch
+        return TokenKind.Switch;
       case "this":
-        return TokenKind.This
+        return TokenKind.This;
       case "throw":
-        return TokenKind.Throw
+        return TokenKind.Throw;
       case "true":
-        return TokenKind.True
+        return TokenKind.True;
       case "try":
-        return TokenKind.Try
+        return TokenKind.Try;
       case "type":
-        return TokenKind.Type
+        return TokenKind.Type;
       case "typeof":
-        return TokenKind.Typeof
+        return TokenKind.Typeof;
       case "undefined":
-        return TokenKind.Undefined
+        return TokenKind.Undefined;
       case "using":
-        return TokenKind.Using
+        return TokenKind.Using;
       case "var":
-        return TokenKind.Var
+        return TokenKind.Var;
       case "void":
-        return TokenKind.Void
+        return TokenKind.Void;
       case "while":
-        return TokenKind.While
+        return TokenKind.While;
       case "with":
-        return TokenKind.With
+        return TokenKind.With;
       case "yield":
-        return TokenKind.Yield
+        return TokenKind.Yield;
       default:
-        return TokenKind.Identifier
+        return TokenKind.Identifier;
     }
   }
 
   public knownName(word: string): KnownName {
     switch (word) {
       case "asyncIterator":
-        return KnownName.AsyncIterator
+        return KnownName.AsyncIterator;
       case "dispose":
-        return KnownName.Dispose
+        return KnownName.Dispose;
       case "iterator":
-        return KnownName.Iterator
+        return KnownName.Iterator;
       case "raw":
-        return KnownName.Raw
+        return KnownName.Raw;
       case "String":
-        return KnownName.String
+        return KnownName.String;
       case "super":
-        return KnownName.Super
+        return KnownName.Super;
       case "Symbol":
-        return KnownName.Symbol
+        return KnownName.Symbol;
       default:
-        return KnownName.None
+        return KnownName.None;
     }
   }
 
   public spelling(kind: TokenKind): string {
     switch (kind) {
       case TokenKind.End:
-        return "end of file"
+        return "end of file";
       case TokenKind.Identifier:
-        return "identifier"
+        return "identifier";
       case TokenKind.Int:
-        return "integer literal"
+        return "integer literal";
       case TokenKind.Float:
-        return "number literal"
+        return "number literal";
       case TokenKind.String:
-        return "string literal"
+        return "string literal";
       case TokenKind.TemplateString:
       case TokenKind.TemplateHead:
-        return "template literal"
+        return "template literal";
       case TokenKind.TemplateMiddle:
       case TokenKind.TemplateTail:
       case TokenKind.RBrace:
-        return "'}'"
+        return "'}'";
       case TokenKind.Regex:
-        return "regular expression"
+        return "regular expression";
       case TokenKind.Abstract:
-        return "'abstract'"
+        return "'abstract'";
       case TokenKind.Accessor:
-        return "'accessor'"
+        return "'accessor'";
       case TokenKind.As:
-        return "'as'"
+        return "'as'";
       case TokenKind.Assert:
-        return "'assert'"
+        return "'assert'";
       case TokenKind.Asserts:
-        return "'asserts'"
+        return "'asserts'";
       case TokenKind.Async:
-        return "'async'"
+        return "'async'";
       case TokenKind.Await:
-        return "'await'"
+        return "'await'";
       case TokenKind.Break:
-        return "'break'"
+        return "'break'";
       case TokenKind.Case:
-        return "'case'"
+        return "'case'";
       case TokenKind.Catch:
-        return "'catch'"
+        return "'catch'";
       case TokenKind.Class:
-        return "'class'"
+        return "'class'";
       case TokenKind.Const:
-        return "'const'"
+        return "'const'";
       case TokenKind.Constructor:
-        return "'constructor'"
+        return "'constructor'";
       case TokenKind.Continue:
-        return "'continue'"
+        return "'continue'";
       case TokenKind.Debugger:
-        return "'debugger'"
+        return "'debugger'";
       case TokenKind.Declare:
-        return "'declare'"
+        return "'declare'";
       case TokenKind.Default:
-        return "'default'"
+        return "'default'";
       case TokenKind.Delete:
-        return "'delete'"
+        return "'delete'";
       case TokenKind.Do:
-        return "'do'"
+        return "'do'";
       case TokenKind.Else:
-        return "'else'"
+        return "'else'";
       case TokenKind.Enum:
-        return "'enum'"
+        return "'enum'";
       case TokenKind.Export:
-        return "'export'"
+        return "'export'";
       case TokenKind.Extends:
-        return "'extends'"
+        return "'extends'";
       case TokenKind.False:
-        return "'false'"
+        return "'false'";
       case TokenKind.Finally:
-        return "'finally'"
+        return "'finally'";
       case TokenKind.For:
-        return "'for'"
+        return "'for'";
       case TokenKind.From:
-        return "'from'"
+        return "'from'";
       case TokenKind.Function:
-        return "'function'"
+        return "'function'";
       case TokenKind.Get:
-        return "'get'"
+        return "'get'";
       case TokenKind.Global:
-        return "'global'"
+        return "'global'";
       case TokenKind.If:
-        return "'if'"
+        return "'if'";
       case TokenKind.Implements:
-        return "'implements'"
+        return "'implements'";
       case TokenKind.Import:
-        return "'import'"
+        return "'import'";
       case TokenKind.In:
-        return "'in'"
+        return "'in'";
       case TokenKind.Infer:
-        return "'infer'"
+        return "'infer'";
       case TokenKind.Instanceof:
-        return "'instanceof'"
+        return "'instanceof'";
       case TokenKind.Interface:
-        return "'interface'"
+        return "'interface'";
       case TokenKind.Is:
-        return "'is'"
+        return "'is'";
       case TokenKind.Keyof:
-        return "'keyof'"
+        return "'keyof'";
       case TokenKind.Let:
-        return "'let'"
+        return "'let'";
       case TokenKind.Module:
-        return "'module'"
+        return "'module'";
       case TokenKind.Namespace:
-        return "'namespace'"
+        return "'namespace'";
       case TokenKind.New:
-        return "'new'"
+        return "'new'";
       case TokenKind.Of:
-        return "'of'"
+        return "'of'";
       case TokenKind.Out:
-        return "'out'"
+        return "'out'";
       case TokenKind.Override:
-        return "'override'"
+        return "'override'";
       case TokenKind.Partial:
-        return "'partial'"
+        return "'partial'";
       case TokenKind.Private:
-        return "'private'"
+        return "'private'";
       case TokenKind.Protected:
-        return "'protected'"
+        return "'protected'";
       case TokenKind.Public:
-        return "'public'"
+        return "'public'";
       case TokenKind.Readonly:
-        return "'readonly'"
+        return "'readonly'";
       case TokenKind.Return:
-        return "'return'"
+        return "'return'";
       case TokenKind.Satisfies:
-        return "'satisfies'"
+        return "'satisfies'";
       case TokenKind.Set:
-        return "'set'"
+        return "'set'";
       case TokenKind.Static:
-        return "'static'"
+        return "'static'";
       case TokenKind.Super:
-        return "'super'"
+        return "'super'";
       case TokenKind.Switch:
-        return "'switch'"
+        return "'switch'";
       case TokenKind.This:
-        return "'this'"
+        return "'this'";
       case TokenKind.Throw:
-        return "'throw'"
+        return "'throw'";
       case TokenKind.True:
-        return "'true'"
+        return "'true'";
       case TokenKind.Try:
-        return "'try'"
+        return "'try'";
       case TokenKind.Type:
-        return "'type'"
+        return "'type'";
       case TokenKind.Typeof:
-        return "'typeof'"
+        return "'typeof'";
       case TokenKind.Undefined:
-        return "'undefined'"
+        return "'undefined'";
       case TokenKind.Using:
-        return "'using'"
+        return "'using'";
       case TokenKind.Var:
-        return "'var'"
+        return "'var'";
       case TokenKind.Void:
-        return "'void'"
+        return "'void'";
       case TokenKind.While:
-        return "'while'"
+        return "'while'";
       case TokenKind.With:
-        return "'with'"
+        return "'with'";
       case TokenKind.Yield:
-        return "'yield'"
+        return "'yield'";
       case TokenKind.LParen:
-        return "'('"
+        return "'('";
       case TokenKind.RParen:
-        return "')'"
+        return "')'";
       case TokenKind.LBrace:
-        return "'{'"
+        return "'{'";
       case TokenKind.LBracket:
-        return "'['"
+        return "'['";
       case TokenKind.RBracket:
-        return "']'"
+        return "']'";
       case TokenKind.Comma:
-        return "','"
+        return "','";
       case TokenKind.Semi:
-        return "';'"
+        return "';'";
       case TokenKind.Colon:
-        return "':'"
+        return "':'";
       case TokenKind.Dot:
-        return "'.'"
+        return "'.'";
       case TokenKind.Ellipsis:
-        return "'...'"
+        return "'...'";
       case TokenKind.Question:
-        return "'?'"
+        return "'?'";
       case TokenKind.QuestionQuestion:
-        return "'??'"
+        return "'??'";
       case TokenKind.QuestionDot:
-        return "'?.'"
+        return "'?.'";
       case TokenKind.Arrow:
-        return "'=>'"
+        return "'=>'";
       case TokenKind.At:
-        return "'@'"
+        return "'@'";
       case TokenKind.Plus:
-        return "'+'"
+        return "'+'";
       case TokenKind.Minus:
-        return "'-'"
+        return "'-'";
       case TokenKind.Star:
-        return "'*'"
+        return "'*'";
       case TokenKind.StarStar:
-        return "'**'"
+        return "'**'";
       case TokenKind.Slash:
-        return "'/'"
+        return "'/'";
       case TokenKind.Percent:
-        return "'%'"
+        return "'%'";
       case TokenKind.PlusPlus:
-        return "'++'"
+        return "'++'";
       case TokenKind.MinusMinus:
-        return "'--'"
+        return "'--'";
       case TokenKind.Amp:
-        return "'&'"
+        return "'&'";
       case TokenKind.Pipe:
-        return "'|'"
+        return "'|'";
       case TokenKind.Caret:
-        return "'^'"
+        return "'^'";
       case TokenKind.Tilde:
-        return "'~'"
+        return "'~'";
       case TokenKind.Bang:
-        return "'!'"
+        return "'!'";
       case TokenKind.AmpAmp:
-        return "'&&'"
+        return "'&&'";
       case TokenKind.PipePipe:
-        return "'||'"
+        return "'||'";
       case TokenKind.Shl:
-        return "'<<'"
+        return "'<<'";
       case TokenKind.Shr:
-        return "'>>'"
+        return "'>>'";
       case TokenKind.UShr:
-        return "'>>>'"
+        return "'>>>'";
       case TokenKind.Less:
-        return "'<'"
+        return "'<'";
       case TokenKind.LessEq:
-        return "'<='"
+        return "'<='";
       case TokenKind.Greater:
-        return "'>'"
+        return "'>'";
       case TokenKind.GreaterEq:
-        return "'>='"
+        return "'>='";
       case TokenKind.EqEq:
-        return "'=='"
+        return "'=='";
       case TokenKind.EqEqEq:
-        return "'==='"
+        return "'==='";
       case TokenKind.BangEq:
-        return "'!='"
+        return "'!='";
       case TokenKind.BangEqEq:
-        return "'!=='"
+        return "'!=='";
       case TokenKind.Assign:
-        return "'='"
+        return "'='";
       case TokenKind.PlusAssign:
-        return "'+='"
+        return "'+='";
       case TokenKind.MinusAssign:
-        return "'-='"
+        return "'-='";
       case TokenKind.StarAssign:
-        return "'*='"
+        return "'*='";
       case TokenKind.StarStarAssign:
-        return "'**='"
+        return "'**='";
       case TokenKind.SlashAssign:
-        return "'/='"
+        return "'/='";
       case TokenKind.PercentAssign:
-        return "'%='"
+        return "'%='";
       case TokenKind.AmpAssign:
-        return "'&='"
+        return "'&='";
       case TokenKind.PipeAssign:
-        return "'|='"
+        return "'|='";
       case TokenKind.CaretAssign:
-        return "'^='"
+        return "'^='";
       case TokenKind.ShlAssign:
-        return "'<<='"
+        return "'<<='";
       case TokenKind.ShrAssign:
-        return "'>>='"
+        return "'>>='";
       case TokenKind.UShrAssign:
-        return "'>>>='"
+        return "'>>>='";
       case TokenKind.QuestionQuestionAssign:
-        return "'??='"
+        return "'??='";
       case TokenKind.AmpAmpAssign:
-        return "'&&='"
+        return "'&&='";
       default:
-        return "'||='"
+        return "'||='";
     }
   }
 }

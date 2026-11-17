@@ -352,6 +352,7 @@ partial class FileParser {
     }
 
     const typeParams = this.typeParams();
+
     if (this.cursor.is(TokenKind.LParen)) {
       return this.arrow(typeParams, false, loc);
     }

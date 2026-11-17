@@ -91,6 +91,7 @@ partial class FileParser {
     const name = this.cursor.next();
     const typeParams = this.optionalTypeParams();
     const bases = this.interfaceBases();
+
     if (!this.cursor.is(TokenKind.LBrace)) {
       const token = this.cursor.peek();
 
@@ -117,6 +118,7 @@ partial class FileParser {
 
   private interfaceBases(): TypeRef[] {
     const bases: TypeRef[] = [];
+
     if (!this.cursor.accept(TokenKind.Extends)) {
       return bases;
     }

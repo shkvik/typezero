@@ -416,10 +416,7 @@ export class Lexer {
 
     this.position += 2;
 
-    while (
-      !this.atEnd() &&
-      !(this.at(0) == kStar && this.at(1) == kSlash)
-    ) {
+    while (!this.atEnd() && !(this.at(0) == kStar && this.at(1) == kSlash)) {
       if (this.at(0) == kNewline) {
         newline = true;
       }
@@ -693,11 +690,7 @@ export class Lexer {
   private radixNumber(): void {
     this.position += 1;
 
-    while (
-      this.alphaAt(0) ||
-      this.digitAt(0) ||
-      this.at(0) == kUnderscore
-    ) {
+    while (this.alphaAt(0) || this.digitAt(0) || this.at(0) == kUnderscore) {
       this.position += 1;
     }
 
@@ -745,11 +738,7 @@ export class Lexer {
   }
 
   private string(quote: int): void {
-    while (
-      !this.atEnd() &&
-      this.at(0) != kNewline &&
-      this.at(0) != kReturn
-    ) {
+    while (!this.atEnd() && this.at(0) != kNewline && this.at(0) != kReturn) {
       const code = this.at(0);
 
       this.position += 1;

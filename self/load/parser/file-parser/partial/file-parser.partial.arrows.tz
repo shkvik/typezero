@@ -124,6 +124,7 @@ partial class FileParser {
     const first = this.cursor.tokenAt(1);
     const second = this.cursor.tokenAt(2);
     const third = this.cursor.tokenAt(3);
+
     if (first.kind == TokenKind.Ellipsis) {
       return true;
     }

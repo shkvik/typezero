@@ -96,6 +96,7 @@ partial class FileParser {
     }
 
     const alias = this.cursor.next();
+
     if (this.cursor.is(TokenKind.Assign)) {
       this.cursor.error(formLoc, Code.ImportEqualsNotSupported, {
         word: alias.text,

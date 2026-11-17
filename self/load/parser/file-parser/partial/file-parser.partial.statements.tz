@@ -212,6 +212,7 @@ partial class FileParser {
 
   private interfaceStatement(loc: int): Stmt {
     const next = this.cursor.lookahead();
+
     if (this.nameOnLine()) {
       return this.interfaceDecl();
     }
@@ -226,6 +227,7 @@ partial class FileParser {
 
   private abstractStatement(loc: int): Stmt {
     const next = this.cursor.lookahead();
+
     if (this.classWithoutKeywordAhead()) {
       return this.missingKeyword(loc, Code.ExpectedClassAfterAbstract);
     }
@@ -617,6 +619,7 @@ partial class FileParser {
 
     const closing = this.cursor.peek();
     const end = closing.start;
+
     if (ofIf && closing.kind == TokenKind.Else) {
       this.cursor.report(end, Code.BlockNotClosedBeforeElse);
 

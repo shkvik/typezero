@@ -611,10 +611,10 @@ export const kMessages: Record<Code, Message> = {
     text: "expected '{' and the names to import, found {found}",
   },
   [Code.JsonImportWhole]: {
-    text: "a JSON file is one value: import it whole, e.g. 'import {word} from \"{path}\" with { type: \"json\" }'",
+    text: 'a JSON file is one value: import it whole, e.g. \'import {word} from "{path}" with { type: "json" }\'',
   },
   [Code.JsonImportAttribute]: {
-    text: "a JSON file is imported with 'with { type: \"json\" }', as in node and TypeScript: 'import {word} from \"{path}\" with { type: \"json\" }'",
+    text: 'a JSON file is imported with \'with { type: "json" }\', as in node and TypeScript: \'import {word} from "{path}" with { type: "json" }\'',
   },
   [Code.NamespaceImportNotSupported]: {
     text: "'import * as' is not supported; list the names you need, e.g. 'import { a, b } from \"{path}\"'",
@@ -671,7 +671,7 @@ export const kMessages: Record<Code, Message> = {
     text: "expected a name after 'as', found {found}",
   },
   [Code.AttributesOnlyForJson]: {
-    text: "import attributes are only for JSON files, e.g. 'import config from \"./config.json\" with { type: \"json\" }'",
+    text: 'import attributes are only for JSON files, e.g. \'import config from "./config.json" with { type: "json" }\'',
   },
   [Code.AssertAttributes]: {
     text: "'assert' is the old form of import attributes; write 'with { type: \"json\" }'",

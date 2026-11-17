@@ -83,6 +83,7 @@ partial class FileParser {
     }
 
     const assign = this.cursor.peek();
+
     if (!this.cursor.accept(TokenKind.Assign)) {
       return element;
     }
@@ -160,6 +161,7 @@ partial class FileParser {
   private objectPatternRest(): PatternElement | undefined {
     const ellipsis = this.cursor.next();
     const element = this.emptyElement(ellipsis.start);
+
     element.rest = true;
 
     if (!this.cursor.atName()) {
@@ -171,6 +173,7 @@ partial class FileParser {
     }
 
     const word = this.cursor.next();
+
     element.name = word.text;
 
     return element;
@@ -493,6 +496,7 @@ partial class FileParser {
       known: KnownName.None,
       typeArgs: [],
     };
+
     if (element == undefined) {
       return source;
     }
@@ -509,6 +513,7 @@ partial class FileParser {
       loc: element.loc,
       value: i.toUint64(),
     };
+
     if (element.rest) {
       return this.sliceFrom(element.loc, source, position);
     }
