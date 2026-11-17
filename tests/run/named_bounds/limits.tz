@@ -1,0 +1,2 @@
+export const kLowestCodePoint = 0
+export const kHighestCodePoint = 0x10ffff

@@ -1,0 +1,49 @@
+// A limit with a name proves what the same limit written as a number proves:
+// a 'const' of a module with a constant value, declared before the function,
+// after it or in another file, and a 'const' made of such constants.
+import { kHighestCodePoint, kLowestCodePoint } from "./limits.tz"
+
+const kMaxRadix = 36
+const kFirstLetter = 0x41
+
+function character(codePoint: int): string {
+  if (codePoint < kLowestCodePoint || codePoint > kHighestCodePoint) {
+    return "?"
+  }
+
+  return String.fromCodePoint(codePoint)
+}
+
+function digits(value: int, radix: int): string {
+  if (radix < kMinRadix || radix > kMaxRadix) {
+    return "?"
+  }
+
+  return value.toString(radix)
+}
+
+function letter(index: int): string {
+  if (index >= 0 && index < kLetters) {
+    return String.fromCodePoint(kFirstLetter + index)
+  }
+
+  return "?"
+}
+
+function element(values: int[], index: int): int {
+  if (values.length != kSize || index < 0 || index >= kSize) {
+    return -1
+  }
+
+  return values[index]
+}
+
+const kMinRadix = 2
+const kLetters = 26
+const kFirstHalf = 2
+const kSize = kFirstHalf + kFirstHalf
+
+console.log(character(0x1f600), character(-1), character(0x110000))
+console.log(digits(255, 16), digits(255, 1), digits(255, 37))
+console.log(letter(0), letter(25), letter(26))
+console.log(element([10, 20, 30, 40], 3), element([10, 20, 30, 40], 4), element([10], 0))

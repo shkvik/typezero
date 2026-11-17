@@ -38,6 +38,7 @@ public:
   std::optional<int64_t> exactLength(const Expr *object) const;
 
 private:
+  bool isSmallConstant(int64_t value) const;
   bool isFittingInt(const Linear &sum) const;
   bool isLinearStep(const BinaryExpr *binary) const;
   bool isTwoArgumentPart(const CallExpr *call) const;

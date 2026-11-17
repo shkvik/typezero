@@ -203,8 +203,18 @@ std::optional<Linear> LinearForms::nameLinear(const NameExpr *name) const {
   if (variable == nullptr || !variable->type->isInt()) {
     return std::nullopt;
   }
+  auto constant = this->state.code.constants.findConstVar(variable);
+  if (constant.has_value() && this->isSmallConstant(*constant)) {
+    return Linear{Term::zero(), *constant};
+  }
 
   return Linear{Term::of(variable), 0};
+}
+
+bool LinearForms::isSmallConstant(int64_t value) const {
+  auto limit = static_cast<int64_t>(kMaxConstant);
+
+  return value >= -limit && value <= limit;
 }
 
 std::optional<Linear> LinearForms::measuredLinear(const Expr *expr,
