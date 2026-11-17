@@ -23,7 +23,8 @@ builds another tree.
 Where tz knowingly differs from ECMAScript the generator follows tz:
   - after 'new' comes a name or 'this', its members and indexes, or
     parentheses; 'new 1()', 'new class { }()', 'new new A()()' are not
-    generated;
+    generated.  A '!' on the way belongs to what is created, as in
+    TypeScript: 'new a!.b()' creates 'a!.b';
   - the base of a class expression is a name or what starts with a name
     and goes on with '.', '[', '(' or type arguments and '(', or any other
     primary expression, and type arguments may follow a base that is not
@@ -353,7 +354,8 @@ def chain_end(shape, continuing, optional):
 def non_null(base):
     text, wrapped, continuing, inner = chain_base(base)
     shape, chain = chain_end(S("Unary 7", inner), continuing, False)
-    return Node(text + "!", CALL, shape, "x!", chain=chain)
+    return Node(text + "!", CALL, shape, "x!", chain=chain,
+                member=not chain and (wrapped or base.member))
 
 
 def member(prop, optional=False):

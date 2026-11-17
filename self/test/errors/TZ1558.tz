@@ -1,0 +1,3 @@
+async load(path: string): Promise<string> {
+  return read(path);
+}

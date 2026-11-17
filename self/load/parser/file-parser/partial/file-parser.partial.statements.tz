@@ -226,6 +226,9 @@ partial class FileParser {
 
   private abstractStatement(loc: int): Stmt {
     const next = this.cursor.lookahead();
+    if (this.classWithoutKeywordAhead()) {
+      return this.missingKeyword(loc, Code.ExpectedClassAfterAbstract);
+    }
     if (next.kind != TokenKind.Class || next.newline) {
       return this.expressionStatement(loc);
     }
@@ -239,6 +242,9 @@ partial class FileParser {
   }
 
   private asyncStatement(loc: int): Stmt {
+    if (this.functionWithoutKeywordAhead()) {
+      return this.missingKeyword(loc, Code.ExpectedFunctionAfterAsync);
+    }
     if (!this.asyncFunctionAhead()) {
       return this.expressionStatement(loc);
     }
@@ -246,6 +252,43 @@ partial class FileParser {
     this.cursor.next();
 
     return this.functionDeclaration(true);
+  }
+
+  private classWithoutKeywordAhead(): boolean {
+    if (!this.nameOnLine()) {
+      return false;
+    }
+
+    const after = this.cursor.tokenAt(2);
+
+    switch (after.kind) {
+      case TokenKind.LBrace:
+      case TokenKind.Extends:
+      case TokenKind.Implements:
+      case TokenKind.Less:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private functionWithoutKeywordAhead(): boolean {
+    if (!this.nameOnLine()) {
+      return false;
+    }
+
+    const after = this.cursor.tokenAt(2);
+
+    return after.kind == TokenKind.LParen || after.kind == TokenKind.Less;
+  }
+
+  private missingKeyword(loc: int, code: Code): Stmt {
+    this.cursor.next();
+    const name = this.cursor.peek();
+
+    this.cursor.error(name.start, code, { found: name.kind, word: name.text });
+
+    return this.marker(StmtKind.Empty, loc);
   }
 
   private usingStatement(loc: int): Stmt {

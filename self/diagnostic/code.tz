@@ -185,6 +185,8 @@ export enum Code {
   SettersNotSupported = "TZ1554",
   ExpectedInterfaceName = "TZ1555",
   ClassNeedsName = "TZ1556",
+  ExpectedClassAfterAbstract = "TZ1557",
+  ExpectedFunctionAfterAsync = "TZ1558",
   ExpectedAfterImportStar = "TZ1601",
   ExpectedAfterImportStarAs = "TZ1602",
   ExpectedAfterExportStarAs = "TZ1603",

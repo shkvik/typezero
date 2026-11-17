@@ -351,10 +351,8 @@ partial class FileParser {
   }
 
   private newForm(name: Token, member: Token | undefined): NewForm {
-    const isPath =
-      name.kind == TokenKind.This ||
-      this.cursor.is(TokenKind.Dot) ||
-      this.cursor.is(TokenKind.LBracket);
+feat(self): using in loop heads, unnamed class error, tests in self/test
+    const isPath = name.kind == TokenKind.This || this.newPathAhead();
     if (isPath) {
       const callee = this.newCallee(name, member);
 
@@ -414,10 +412,7 @@ partial class FileParser {
   private newPath(from: Expr): Expr {
     let path = from;
 
-    while (
-      this.cursor.is(TokenKind.Dot) ||
-      this.cursor.is(TokenKind.LBracket)
-    ) {
+    while (this.newPathAhead()) {
       const link = this.pathLink(path);
       if (link == undefined) {
         return path;
@@ -441,9 +436,26 @@ partial class FileParser {
     return this.plainLink(expr, optionalChain);
   }
 
+  private newPathAhead(): boolean {
+    const token = this.cursor.peek();
+
+    switch (token.kind) {
+      case TokenKind.Dot:
+      case TokenKind.LBracket:
+        return true;
+      case TokenKind.Bang:
+        return !token.newline;
+      default:
+        return false;
+    }
+  }
+
   private pathLink(path: Expr): Expr | undefined {
     if (this.cursor.is(TokenKind.LBracket)) {
       return this.indexLink(path, false);
+    }
+    if (this.cursor.is(TokenKind.Bang)) {
+      return this.nonNullLink(path);
     }
 
     return this.dotLink(path);

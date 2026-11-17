@@ -1,0 +1,3 @@
+TZ1558.tz:1:7: error TZ1558: expected 'function' after 'async', found identifier: an async function is declared as 'async function load() { ... }'
+async load(path: string): Promise<string> {
+      ^

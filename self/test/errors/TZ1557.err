@@ -1,0 +1,3 @@
+TZ1557.tz:1:10: error TZ1557: expected 'class' after 'abstract', found identifier: an abstract class is declared as 'abstract class Shape { ... }'
+abstract Shape {
+         ^

@@ -562,6 +562,12 @@ export const kMessages: Record<Code, Message> = {
   [Code.ClassNeedsName]: {
     text: "a class needs a name here: write 'class Name { ... }'; only a class used as a value, as in 'const Name = class { ... }', goes without one",
   },
+  [Code.ExpectedClassAfterAbstract]: {
+    text: "expected 'class' after 'abstract', found {found}: an abstract class is declared as 'abstract class {word} { ... }'",
+  },
+  [Code.ExpectedFunctionAfterAsync]: {
+    text: "expected 'function' after 'async', found {found}: an async function is declared as 'async function {word}() { ... }'",
+  },
   [Code.ExpectedAfterImportStar]: {
     text: "expected {expected} after 'import *', found {found}",
   },

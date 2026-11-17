@@ -1,0 +1,3 @@
+abstract Shape {
+  abstract area(): double;
+}

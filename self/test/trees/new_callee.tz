@@ -2,7 +2,7 @@
 // the class, a keyword may be the name of a member, '<' after a class
 // without arguments is a comparison unless type arguments close, and the
 // class may be kept in a field of 'this'. Arguments may be spread, as in a
-// call.
+// call. A '!' on the way belongs to what is created, as in TypeScript.
 const a = new (pick(x)).Shape(1);
 const b = new (pick(x))[0](1);
 const c = new (pick(x))(1).size;
@@ -14,3 +14,7 @@ const h = new this.kind(1);
 const i = new this.kinds[0]<int>(1);
 const j = new Box(...sizes);
 const k = new Box(1, ...sizes, 2);
+const l = new shapes!.Circle(1);
+const m = new Box!(1);
+const n = new shapes.kinds![0](1);
+const o = new (pick(x))!.Shape(1);
