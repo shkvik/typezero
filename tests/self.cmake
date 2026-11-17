@@ -22,10 +22,23 @@
 #   MODE=codes: every code of self/diagnostic/code.tz has its test in
 #     tests/self/errors, and every test there is named after a code. A code no
 #     source can get does not stay in code.tz.
+#
+#   A test of a declaration file: when NAME.d.tz is next to NAME.tz, the file
+#     that is checked is NAME.d.tz, and NAME.tz is its module. tzparse reads
+#     X.d.tz as a declaration file only when the module X.tz is there, as the
+#     compiler does.
 cmake_minimum_required(VERSION 3.20)
 
 function(fail message)
   message(FATAL_ERROR "${message}")
+endfunction()
+
+function(checked_file dir name result)
+  if(EXISTS ${dir}/${name}.d.tz)
+    set(${result} ${name}.d.tz PARENT_SCOPE)
+  else()
+    set(${result} ${name}.tz PARENT_SCOPE)
+  endif()
 endfunction()
 
 if(MODE STREQUAL "build")
@@ -43,8 +56,9 @@ if(MODE STREQUAL "build")
 elseif(MODE STREQUAL "error" OR MODE STREQUAL "recovery")
   get_filename_component(dir ${SRC} DIRECTORY)
   get_filename_component(code ${SRC} NAME_WE)
+  checked_file(${dir} ${code} file)
   execute_process(
-    COMMAND ${EXE} check ${code}.tz
+    COMMAND ${EXE} check ${file}
     WORKING_DIRECTORY ${dir}
     OUTPUT_VARIABLE stdout
     ERROR_VARIABLE stderr
@@ -73,8 +87,9 @@ elseif(MODE STREQUAL "error" OR MODE STREQUAL "recovery")
 elseif(MODE STREQUAL "tree")
   get_filename_component(dir ${SRC} DIRECTORY)
   get_filename_component(name ${SRC} NAME_WE)
+  checked_file(${dir} ${name} file)
   execute_process(
-    COMMAND ${EXE} tree ${name}.tz
+    COMMAND ${EXE} tree ${file}
     WORKING_DIRECTORY ${dir}
     OUTPUT_VARIABLE stdout
     ERROR_VARIABLE stderr

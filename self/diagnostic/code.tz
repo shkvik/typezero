@@ -222,4 +222,11 @@ export enum Code {
   ExpectedPathString = "TZ1638",
   ExportedClassNeedsName = "TZ1639",
   ExpectedAfterExportWord = "TZ1640",
+  DeclarationHoldsExports = "TZ1701",
+  DeclarationHasNoCode = "TZ1702",
+  ExpectedAfterExportDeclare = "TZ1703",
+  DeclarationFunctionBody = "TZ1704",
+  DeclarationClassBase = "TZ1705",
+  DeclarationMethodBody = "TZ1706",
+  DeclarationFieldValue = "TZ1707",
 }

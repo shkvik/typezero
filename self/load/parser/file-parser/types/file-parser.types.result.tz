@@ -1,7 +1,13 @@
 import { SourceFile } from "../../../../program/ast/types/ast.types.modules.tz";
+import { DeclarationFile } from "../../../../program/ast/types/ast.types.declarations.tz";
 import { SourceError } from "../../../../diagnostic/types/message.types.tz";
 
 export type ParseResult = {
   readonly file: SourceFile;
+  readonly errors: SourceError[];
+};
+
+export type DeclarationResult = {
+  readonly file: DeclarationFile;
   readonly errors: SourceError[];
 };

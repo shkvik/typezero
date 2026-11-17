@@ -1,0 +1,76 @@
+import { Dumper } from "../ast-dump.tz";
+import {
+  DeclaredClass,
+  DeclaredMember,
+  DeclaredMemberForm,
+  DeclaredMemberKind,
+} from "../../../../program/ast/types/ast.types.declarations.tz";
+
+partial class Dumper {
+  private dumpDeclaredClass(declared: DeclaredClass): void {
+    const name = this.quote(declared.name);
+    const isAbstract = this.flag(declared.isAbstract);
+
+    this.line(
+      `DeclaredClass ${declared.loc} ${name} abstract=${isAbstract} ` +
+        `tp=${declared.typeParams.length} members=${declared.members.length}`,
+    );
+    this.nested();
+    this.dumpTypeParams(declared.typeParams);
+
+    for (const member of declared.members) {
+      this.dumpDeclaredMember(member);
+    }
+
+    this.back();
+  }
+
+  private dumpDeclaredMember(member: DeclaredMember): void {
+    const name = this.quote(member.name);
+    const accessWritten = this.flag(member.accessWritten);
+    const isStatic = this.flag(member.isStatic);
+    const form = this.declaredFormText(member.form);
+
+    this.line(
+      `Declared ${member.loc} ${name} access=${member.access} ` +
+        `written=${accessWritten} static=${isStatic} ${form}`,
+    );
+    this.nested();
+    this.dumpDeclaredSignature(member.form);
+    this.dumpOptionalType(member.type);
+    this.back();
+  }
+
+  private declaredFormText(form: DeclaredMemberForm): string {
+    if (form.kind == DeclaredMemberKind.Field) {
+      const isReadonly = this.flag(form.readonly);
+      const optional = this.flag(form.optional);
+
+      return `field ro=${isReadonly} optional=${optional}`;
+    }
+
+    const word = this.signatureWord(form.kind);
+
+    return `${word} tp=${form.typeParams.length} params=${form.params.length}`;
+  }
+
+  private signatureWord(kind: DeclaredMemberKind): string {
+    if (kind == DeclaredMemberKind.Constructor) {
+      return "constructor";
+    }
+
+    return "method";
+  }
+
+  private dumpDeclaredSignature(form: DeclaredMemberForm): void {
+    if (form.kind == DeclaredMemberKind.Field) {
+      return;
+    }
+
+    this.dumpTypeParams(form.typeParams);
+
+    for (const param of form.params) {
+      this.dumpParam(param);
+    }
+  }
+}

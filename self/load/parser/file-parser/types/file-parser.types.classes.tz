@@ -10,6 +10,7 @@ export type Modifiers = {
   isAsync: boolean;
   accessor: boolean;
   access: Access;
+  accessWritten: boolean;
   staticBlock: boolean;
 };
 

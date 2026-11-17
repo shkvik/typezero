@@ -101,14 +101,19 @@ self/             компилятор на tz, пробный (порт compile
                   SyntaxCommand; cli/syntax/ — как compiler/cli/syntax/: syntax-command/
                   (SyntaxCommand: `tzparse <режим> <file.tz | @list> [repeat]`, режимы
                   tokens|tree|check|time|hold|read, enum SyntaxMode; check — ошибки разбора
-                  для человека в stderr и код выхода 1) и
+                  для человека в stderr и код выхода 1; файл `X.d.tz`, рядом с которым лежит
+                  модуль `X.tz`, читается как файл объявлений, как в компиляторе; в списке
+                  такие файлы идут после остальных) и
                   ast-dump/ (Dumper: дерево текстом для сверки с C++; части — в
                   partial/ast-dump.partial.<часть>.tz: statements, declarations,
-                  expressions, types);
+                  expressions, types, declaration-file);
                   program/ast/ — дерево разбора: типы узлов — в types/ast.types.<группа>.tz
                   (span, types, expressions, patterns, statements, functions, classes — там же
-                  type alias и enum, modules — там же SourceFile; группы ссылаются друг на
-                  друга по кругу); program/source-lines/ — SourceLines: строки одного текста
+                  type alias и enum, modules — там же SourceFile, declarations —
+                  DeclarationFile: файл объявлений `.d.tz` (docs/modules.md, раздел 7) —
+                  items (типы и функции без тел), imports, exports и classes: DeclaredClass
+                  с членами DeclaredMember (поле, метод или конструктор без тела); группы
+                  ссылаются друг на друга по кругу); program/source-lines/ — SourceLines: строки одного текста
                   (начала строк, двоичный поиск): placeOf(смещение) → SourcePlace { line,
                   column } с единицы, столбец — в символах, а не в байтах; lineTextAt — текст
                   строки; indentTo — отступ до места, табуляции строки сохранены;
@@ -119,7 +124,7 @@ self/             компилятор на tz, пробный (порт compile
                   таблица kMessages: Record<Code, Message> — в const/message.const.tz, типы
                   Details, Message и SourceError { code, loc, details } — одна ошибка лексера
                   или парсера — в types/message.types.tz; коды 10xx — лексер и
-                  escape-последовательности); diagnostic/error-printer/ —
+                  escape-последовательности, 17xx — файлы объявлений); diagnostic/error-printer/ —
                   ErrorPrinter: ошибки одного файла как `путь:строка:столбец: error TZ1221:
                   текст`, под ним строка исходника и `^` под местом (ошибка в конце файла
                   показывается в конце последней строки с текстом);
@@ -135,9 +140,10 @@ self/             компилятор на tz, пробный (порт compile
                   незакрытые комментарий, строка, шаблон, regex, лишний символ, `10n`,
                   `1abc`, `1.name`; коды символов — в const/lexer.const.tz);
                   load/parser/ — Parser (parser.tz:
-                  run() по списку файлов → ParsedFile[]; ошибки лексера и парсера сливает по
-                  месту в один список; типы SourceText, ParsedFile — в
-                  types/parser.types.tz), Cursor (cursor/: позиция, откаты,
+                  run() по списку файлов → ParsedFile[], runDeclarations() по списку файлов
+                  объявлений → ParsedDeclaration[]; что из них файл объявлений, решает тот,
+                  кто зовёт; ошибки лексера и парсера сливает по месту в один список; типы
+                  SourceText, ParsedFile, ParsedDeclaration — в types/parser.types.tz), Cursor (cursor/: позиция, откаты,
                   ошибки), LiteralReader (literal/: значения литералов по токену; неверный
                   `\x` или `\u` — в DecodedText.invalid, сообщает о нём парсер), FileParser
                   (file-parser/: грамматика; части `partial class` — в
@@ -145,8 +151,10 @@ self/             компилятор на tz, пробный (порт compile
                   function-types, expressions, operators, calls, literals, patterns,
                   statements, loops, variables, functions, arrows, classes, modifiers,
                   declarations (type,
-                  interface, enum), modules (import), exports; файл больше
-                  800 строк делится на части). У класса своя папка: класс — в
+                  interface, enum), modules (import), exports, declaration-file (файл
+                  объявлений: FileParser.runDeclaration() — только import и export, после
+                  ошибки пропускает до следующего import или export в начале строки); файл
+                  больше 800 строк делится на части). У класса своя папка: класс — в
                   <класс>.tz, его типы — в types/<класс>.types.tz, константы — в
                   const/<класс>.const.tz; у класса с частями — по файлу на часть
                   (types/file-parser.types.<часть>.tz, там же result — ParseResult и context —
@@ -160,7 +168,8 @@ self/             компилятор на tz, пробный (порт compile
                   tests/self/recovery/<имя>.tz + .err — несколько ошибок или ошибка среди
                   верного кода: каждая печатается один раз, следствий нет;
                   tests/self/trees/<имя>.tz + .tree — верный код, в котором легко собрать
-                  не то дерево: точный вывод `tzparse tree`, без ошибок. Восстановление
+                  не то дерево: точный вывод `tzparse tree`, без ошибок; тест файла
+                  объявлений — <имя>.d.tz рядом с его модулем <имя>.tz: проверяется .d.tz. Восстановление
                   после ошибки — Cursor.recoverStatement: пропускает остаток инструкции до
                   `;` или новой строки с началом инструкции, блоки `{...}` — целиком, и
                   закрывает скобки `{`, которые инструкция открыла до ошибки

@@ -1,0 +1,21 @@
+declaration_mistakes.d.tz:1:1: error TZ1701: a declaration file holds only what its module exports: 'export type', 'export declare function', 'export declare class' and imports of the types they name
+let count = 0;
+^
+declaration_mistakes.d.tz:11:8: error TZ1702: a declaration file has no code: write 'export declare function' or 'export declare class', with signatures and no bodies
+export const limit = 10;
+       ^
+declaration_mistakes.d.tz:16:10: error TZ1329: field 'value' needs a type, e.g. 'value: int'
+  public value;
+         ^
+declaration_mistakes.d.tz:19:3: error TZ1553: getters are not supported: reading a field never runs code; write a method instead, e.g. 'half()'
+  get half(): int;
+  ^
+declaration_mistakes.d.tz:21:23: error TZ1706: a method of a declaration file has no body: its code is in the module
+  public twice(): int {
+                      ^
+declaration_mistakes.d.tz:26:23: error TZ1707: a field of a declaration file has no value: its value is in the module
+  public name: string = "box";
+                      ^
+declaration_mistakes.d.tz:30:16: error TZ1703: expected 'function' or 'class' after 'export declare', found 'enum'
+export declare enum Kind {
+               ^

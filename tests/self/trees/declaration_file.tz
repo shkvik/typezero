@@ -1,0 +1,79 @@
+import { Unit } from "./declaration_file/units.tz";
+
+export type Pair = {
+  first: int;
+  second?: int;
+};
+
+export interface Named {
+  name: string;
+}
+
+export function make(first: int, second?: int): Pair {
+  return { first, second };
+}
+
+export function pick<T>(items: T[], ...indexes: int[]): T[] {
+  const picked: T[] = [];
+
+  for (const index of indexes) {
+    const item = items[index];
+    if (item != undefined) {
+      picked.push(item);
+    }
+  }
+
+  return picked;
+}
+
+export function isFull(pair: Pair): boolean {
+  return pair.second != undefined;
+}
+
+export function measure(value: int, unit: Unit): string {
+  return `${value}${unit}`;
+}
+
+export abstract class Store<T extends Named> {
+  public static readonly limit: int = 100;
+  public readonly size: int;
+  protected last?: T;
+  static: boolean;
+  private readonly items: T[];
+
+  public constructor(items: T[], limit?: int) {
+    this.items = items.slice(0, limit ?? Store.limit);
+    this.size = this.items.length;
+    this.static = false;
+  }
+
+  public add(item: T): void {
+    this.items.push(item);
+    this.last = item;
+  }
+
+  public static of<U extends Named>(item: U): Store<U> {
+    return new ListStore<U>([item]);
+  }
+
+  protected abstract find(name: string): T | undefined;
+
+  public delete(name: string): boolean {
+    return this.find(name) != undefined;
+  }
+
+  public [Symbol.iterator](): Iterator<T> {
+    return this.items.values();
+  }
+}
+
+class ListStore<T extends Named> extends Store<T> {
+  protected find(name: string): T | undefined {
+    return this.last;
+  }
+}
+
+export class Empty {}
+
+export { Unit } from "./declaration_file/units.tz";
+export * from "./declaration_file/sizes.tz";

@@ -1,3 +1,5 @@
+import { SourceText } from "../../../../load/parser/types/parser.types.tz";
+
 export enum SyntaxMode {
   Tokens,
   Tree,
@@ -7,3 +9,8 @@ export enum SyntaxMode {
   Hold,
   Read,
 }
+
+export type Sources = {
+  readonly files: SourceText[];
+  readonly declarations: SourceText[];
+};

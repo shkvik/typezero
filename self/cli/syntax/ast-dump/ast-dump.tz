@@ -2,11 +2,15 @@ import "./partial/ast-dump.partial.statements.tz";
 import "./partial/ast-dump.partial.declarations.tz";
 import "./partial/ast-dump.partial.expressions.tz";
 import "./partial/ast-dump.partial.types.tz";
+import "./partial/ast-dump.partial.declaration-file.tz";
 import { Span } from "../../../program/ast/types/ast.types.span.tz";
 import {
+  ExportDecl,
+  ImportDecl,
   ModuleName,
   SourceFile,
 } from "../../../program/ast/types/ast.types.modules.tz";
+import { DeclarationFile } from "../../../program/ast/types/ast.types.declarations.tz";
 import { Quoting } from "./types/ast-dump.types.tz";
 import {
   kBackslash,
@@ -42,8 +46,24 @@ export class Dumper {
       this.dumpStmt(item);
     }
 
-    this.dumpModules(file);
+    this.dumpModules(file.imports, file.exports);
     this.dumpTables(file);
+  }
+
+  public dumpDeclarationFile(file: DeclarationFile): void {
+    this.line(`items ${file.items.length}`);
+
+    for (const item of file.items) {
+      this.dumpStmt(item);
+    }
+
+    this.line(`classes ${file.classes.length}`);
+
+    for (const declared of file.classes) {
+      this.dumpDeclaredClass(declared);
+    }
+
+    this.dumpModules(file.imports, file.exports);
   }
 
   private line(text: string): void {
@@ -184,10 +204,10 @@ export class Dumper {
     this.depth -= 1;
   }
 
-  private dumpModules(file: SourceFile): void {
-    this.line(`imports ${file.imports.length}`);
+  private dumpModules(imports: ImportDecl[], exports: ExportDecl[]): void {
+    this.line(`imports ${imports.length}`);
 
-    for (const decl of file.imports) {
+    for (const decl of imports) {
       const from = decl.from;
       const path = this.quote(from.path);
       const whole = decl.whole;
@@ -203,9 +223,9 @@ export class Dumper {
       this.dumpModuleNames(decl.names);
     }
 
-    this.line(`exports ${file.exports.length}`);
+    this.line(`exports ${exports.length}`);
 
-    for (const decl of file.exports) {
+    for (const decl of exports) {
       const from = decl.from;
       const path = this.quote(from?.path ?? "");
       const pathLoc = from?.loc ?? kNoLocation;

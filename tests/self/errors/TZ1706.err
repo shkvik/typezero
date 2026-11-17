@@ -1,0 +1,3 @@
+TZ1706.d.tz:6:23: error TZ1706: a method of a declaration file has no body: its code is in the module
+  public twice(): int {
+                      ^

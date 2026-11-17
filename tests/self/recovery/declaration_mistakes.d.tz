@@ -1,0 +1,35 @@
+let count = 0;
+
+function next(): int {
+  count += 1;
+
+  return count;
+}
+
+export type Pair = { first: int; second: int };
+
+export const limit = 10;
+
+export declare function make(first: int): Pair;
+
+export declare class Box {
+  public value;
+  public readonly size: int;
+
+  get half(): int;
+
+  public twice(): int {
+    return this.value * 2;
+  }
+
+  public grow(by: int): void
+  public name: string = "box";
+  public shrink(by: int): void;
+}
+
+export declare enum Kind {
+  Small,
+  Large,
+}
+
+export declare function last(): Pair;

@@ -1,0 +1,39 @@
+import { Unit } from "./declaration_file/units.tz";
+
+/** A pair of numbers. */
+export type Pair = {
+  first: int;
+  second?: int;
+};
+
+export interface Named {
+  name: string;
+}
+
+export declare function make(first: int, second?: int): Pair;
+
+export declare function pick<T>(items: T[], ...indexes: int[]): T[];
+
+export declare function isFull(pair: Pair): boolean;
+
+export declare function measure(value: int, unit: Unit): string;
+
+export declare abstract class Store<T extends Named> {
+  public static readonly limit: int;
+  public readonly size: int;
+  protected last?: T;
+  static: boolean;
+
+  public constructor(items: T[], limit?: int);
+
+  public add(item: T): void;
+  public static of<U extends Named>(item: U): Store<U>;
+  protected abstract find(name: string): T | undefined;
+  public delete(name: string): boolean;
+  public [Symbol.iterator](): Iterator<T>;
+}
+
+export declare class Empty {}
+
+export { Unit } from "./declaration_file/units.tz";
+export * from "./declaration_file/sizes.tz";

@@ -1,21 +1,22 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { ErrorPrinter } from "../../../diagnostic/error-printer/error-printer.tz";
 import { Lexer } from "../../../load/lexer/lexer.tz";
 import { Parser } from "../../../load/parser/parser.tz";
-import {
-  ParsedFile,
-  SourceText,
-} from "../../../load/parser/types/parser.types.tz";
+import { SourceText } from "../../../load/parser/types/parser.types.tz";
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
 import { SourceFile } from "../../../program/ast/types/ast.types.modules.tz";
+import { DeclarationFile } from "../../../program/ast/types/ast.types.declarations.tz";
 import { Dumper } from "../ast-dump/ast-dump.tz";
-import { SyntaxMode } from "./types/syntax-command.types.tz";
+import { Sources, SyntaxMode } from "./types/syntax-command.types.tz";
 import {
+  kDeclarationSuffix,
   kDefaultRepeat,
   kHoldMilliseconds,
   kLineFeed,
   kListPrefix,
   kMaxRepeat,
   kProgramName,
+  kSourceSuffix,
   kUsage,
 } from "./const/syntax-command.const.tz";
 
@@ -104,8 +105,8 @@ export class SyntaxCommand {
     return lines.map((line) => line.trim()).filter((line) => line.length > 0);
   }
 
-  private readSources(files: string[]): SourceText[] {
-    const sources: SourceText[] = [];
+  private readSources(files: string[]): Sources {
+    const sources: Sources = { files: [], declarations: [] };
 
     for (const path of files) {
       const text = readFileSync(path);
@@ -115,11 +116,30 @@ export class SyntaxCommand {
       }
 
       const isLibrary = path.replaceAll("\\", "/").includes("/library/");
+      const source: SourceText = { path, text: text.value, isLibrary };
 
-      sources.push({ path, text: text.value, isLibrary });
+      if (this.isDeclaration(path)) {
+        sources.declarations.push(source);
+      } else {
+        sources.files.push(source);
+      }
     }
 
     return sources;
+  }
+
+  private isDeclaration(path: string): boolean {
+    if (!path.endsWith(kDeclarationSuffix)) {
+      return false;
+    }
+
+    const stem = path.slice(0, path.length - kDeclarationSuffix.length);
+
+    return existsSync(`${stem}${kSourceSuffix}`);
+  }
+
+  private everySource(sources: Sources): SourceText[] {
+    return sources.files.concat(sources.declarations);
   }
 
   private cannotRead(path: string): void {
@@ -127,8 +147,8 @@ export class SyntaxCommand {
     process.exitCode = 1;
   }
 
-  private printTokens(sources: SourceText[]): void {
-    for (const source of sources) {
+  private printTokens(sources: Sources): void {
+    for (const source of this.everySource(sources)) {
       console.log(`== ${source.path}`);
 
       const lexer = new Lexer(source.text);
@@ -144,48 +164,80 @@ export class SyntaxCommand {
     }
   }
 
-  private printTrees(sources: SourceText[]): void {
-    const parser = new Parser(sources);
+  private printTrees(sources: Sources): void {
+    const parser = new Parser(sources.files);
 
     for (const parsed of parser.run()) {
-      this.printTree(parsed);
+      const dumper = new Dumper(parsed.source.text);
+
+      dumper.dumpFile(parsed.file);
+      this.printTree(parsed.source, dumper, parsed.errors);
+    }
+
+    const declarationParser = new Parser(sources.declarations);
+
+    for (const parsed of declarationParser.runDeclarations()) {
+      const dumper = new Dumper(parsed.source.text);
+
+      dumper.dumpDeclarationFile(parsed.file);
+      this.printTree(parsed.source, dumper, parsed.errors);
     }
   }
 
-  private printTree(parsed: ParsedFile): void {
-    const dumper = new Dumper(parsed.source.text);
-
-    dumper.dumpFile(parsed.file);
-
-    console.log(`== ${parsed.source.path}`);
+  private printTree(
+    source: SourceText,
+    dumper: Dumper,
+    errors: SourceError[],
+  ): void {
+    console.log(`== ${source.path}`);
     const text = dumper.text();
 
     console.log(text);
 
-    for (const error of parsed.errors) {
+    for (const error of errors) {
       console.log(`!! ${error.loc}`);
     }
   }
 
-  private checkSources(sources: SourceText[]): void {
-    const parser = new Parser(sources);
+  private checkSources(sources: Sources): void {
+    const parser = new Parser(sources.files);
 
     for (const parsed of parser.run()) {
-      if (parsed.errors.length > 0) {
-        const printer = new ErrorPrinter(parsed.source);
+      this.printErrors(parsed.source, parsed.errors);
+    }
 
-        printer.print(parsed.errors);
-        process.exitCode = 1;
-      }
+    const declarationParser = new Parser(sources.declarations);
+
+    for (const parsed of declarationParser.runDeclarations()) {
+      this.printErrors(parsed.source, parsed.errors);
     }
   }
 
-  private checkEachLine(sources: SourceText[]): void {
-    for (const source of sources) {
+  private printErrors(source: SourceText, errors: SourceError[]): void {
+    if (errors.length == 0) {
+      return;
+    }
+
+    const printer = new ErrorPrinter(source);
+
+    printer.print(errors);
+    process.exitCode = 1;
+  }
+
+  private checkEachLine(sources: Sources): void {
+    for (const source of sources.files) {
       const lines = this.linesOf(source);
 
       for (const line of lines) {
-        this.checkSources([line]);
+        this.checkSources({ files: [line], declarations: [] });
+      }
+    }
+
+    for (const source of sources.declarations) {
+      const lines = this.linesOf(source);
+
+      for (const line of lines) {
+        this.checkSources({ files: [], declarations: [line] });
       }
     }
   }
@@ -222,10 +274,10 @@ export class SyntaxCommand {
     return byte.toInt() == kLineFeed;
   }
 
-  private lexAll(sources: SourceText[]): int {
+  private lexAll(sources: Sources): int {
     let tokens = 0;
 
-    for (const source of sources) {
+    for (const source of this.everySource(sources)) {
       const lexer = new Lexer(source.text);
       const lexed = lexer.run();
 
@@ -235,18 +287,55 @@ export class SyntaxCommand {
     return tokens;
   }
 
-  private parseAll(sources: SourceText[]): int {
-    let items = 0;
-    const parser = new Parser(sources);
+  private parseAll(sources: Sources): int {
+    const files: SourceFile[] = [];
+    const declarations: DeclarationFile[] = [];
+
+    this.parseInto(sources, files, declarations);
+
+    return this.itemCount(files, declarations);
+  }
+
+  private parseInto(
+    sources: Sources,
+    files: SourceFile[],
+    declarations: DeclarationFile[],
+  ): void {
+    const parser = new Parser(sources.files);
 
     for (const parsed of parser.run()) {
-      items += parsed.file.items.length;
+      files.push(parsed.file);
+    }
+
+    const declarationParser = new Parser(sources.declarations);
+
+    for (const parsed of declarationParser.runDeclarations()) {
+      declarations.push(parsed.file);
+    }
+  }
+
+  private itemCount(
+    files: SourceFile[],
+    declarations: DeclarationFile[],
+  ): int {
+    let items = 0;
+
+    for (const file of files) {
+      items += file.items.length;
+    }
+
+    for (const file of declarations) {
+      items += file.items.length + file.classes.length;
     }
 
     return items;
   }
 
-  private timeSources(sources: SourceText[]): void {
+  private sourceCount(sources: Sources): int {
+    return sources.files.length + sources.declarations.length;
+  }
+
+  private timeSources(sources: Sources): void {
     const parsedRepeat = parseInt(this.repeatText);
     const repeat = parsedRepeat.unwrapOr(kDefaultRepeat);
     if (repeat < 1 || repeat > kMaxRepeat) {
@@ -275,27 +364,21 @@ export class SyntaxCommand {
     const lexText = lexMs.toFixed(2);
     const parseText = parseMs.toFixed(2);
 
-    console.log(`files ${sources.length}, tokens ${tokens}, nodes ${items}`);
+    const count = this.sourceCount(sources);
+
+    console.log(`files ${count}, tokens ${tokens}, nodes ${items}`);
     console.log(`lex ${lexText} ms, lex + parse ${parseText} ms per pass`);
   }
 
-  private holdSources(sources: SourceText[], parseThem: boolean): void {
+  private holdSources(sources: Sources, parseThem: boolean): void {
     const files: SourceFile[] = [];
+    const declarations: DeclarationFile[] = [];
 
     if (parseThem) {
-      const parser = new Parser(sources);
-
-      for (const parsed of parser.run()) {
-        files.push(parsed.file);
-      }
+      this.parseInto(sources, files, declarations);
     }
 
-    let items = 0;
-
-    for (const file of files) {
-      items += file.items.length;
-    }
-
+    const items = this.itemCount(files, declarations);
     const now = performance.now();
     const until = now + kHoldMilliseconds;
     let spins = 0;
@@ -304,9 +387,11 @@ export class SyntaxCommand {
       spins += 1;
     }
 
-    const counts = `files ${sources.length}, items ${items}`;
+    const count = this.sourceCount(sources);
+    const held = files.length + declarations.length;
+    const counts = `files ${count}, items ${items}`;
 
-    console.log(`${counts}, held ${files.length}, spins ${spins}`);
+    console.log(`${counts}, held ${held}, spins ${spins}`);
   }
 
   private bit(value: boolean): int {

@@ -1,0 +1,50 @@
+import { TypeParamDecl, TypeRef } from "./ast.types.types.tz";
+import { Stmt } from "./ast.types.statements.tz";
+import { Param } from "./ast.types.functions.tz";
+import { Access } from "./ast.types.classes.tz";
+import { ExportDecl, ImportDecl } from "./ast.types.modules.tz";
+
+export enum DeclaredMemberKind {
+  Field,
+  Method,
+  Constructor,
+}
+
+export type DeclaredField = {
+  readonly kind: DeclaredMemberKind.Field;
+  readonly readonly: boolean;
+  readonly optional: boolean;
+};
+
+export type DeclaredSignature = {
+  readonly kind: DeclaredMemberKind.Method | DeclaredMemberKind.Constructor;
+  readonly typeParams: TypeParamDecl[];
+  readonly params: Param[];
+};
+
+export type DeclaredMemberForm = DeclaredField | DeclaredSignature;
+
+export type DeclaredMember = {
+  readonly name: string;
+  readonly loc: int;
+  readonly access: Access;
+  readonly accessWritten: boolean;
+  readonly isStatic: boolean;
+  readonly form: DeclaredMemberForm;
+  readonly type?: TypeRef;
+};
+
+export type DeclaredClass = {
+  readonly name: string;
+  readonly loc: int;
+  readonly isAbstract: boolean;
+  readonly typeParams: TypeParamDecl[];
+  readonly members: DeclaredMember[];
+};
+
+export type DeclarationFile = {
+  readonly items: Stmt[];
+  readonly classes: DeclaredClass[];
+  readonly imports: ImportDecl[];
+  readonly exports: ExportDecl[];
+};

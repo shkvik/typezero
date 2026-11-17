@@ -673,4 +673,25 @@ export const kMessages: Record<Code, Message> = {
   [Code.ExportedClassNeedsName]: {
     text: "an exported class needs a name: other files import it by that name; write 'export class Name { ... }'",
   },
+  [Code.DeclarationHoldsExports]: {
+    text: "a declaration file holds only what its module exports: 'export type', 'export declare function', 'export declare class' and imports of the types they name",
+  },
+  [Code.DeclarationHasNoCode]: {
+    text: "a declaration file has no code: write 'export declare function' or 'export declare class', with signatures and no bodies",
+  },
+  [Code.ExpectedAfterExportDeclare]: {
+    text: "expected 'function' or 'class' after 'export declare', found {found}",
+  },
+  [Code.DeclarationFunctionBody]: {
+    text: "a function of a declaration file has no body: its code is in the module",
+  },
+  [Code.DeclarationClassBase]: {
+    text: "a class of a declaration file lists its members only; what it extends and implements is in the module",
+  },
+  [Code.DeclarationMethodBody]: {
+    text: "a method of a declaration file has no body: its code is in the module",
+  },
+  [Code.DeclarationFieldValue]: {
+    text: "a field of a declaration file has no value: its value is in the module",
+  },
 };

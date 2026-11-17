@@ -1,0 +1,11 @@
+export class Box {
+  public readonly value: int;
+
+  public constructor(value: int) {
+    this.value = value;
+  }
+
+  public twice(): int {
+    return this.value * 2;
+  }
+}

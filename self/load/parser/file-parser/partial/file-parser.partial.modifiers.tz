@@ -29,6 +29,7 @@ partial class FileParser {
       isAsync: false,
       accessor: false,
       access: Access.Public,
+      accessWritten: false,
       staticBlock: false,
     };
 
@@ -41,6 +42,7 @@ partial class FileParser {
       const access = this.accessOf(word.kind);
       if (access != undefined) {
         modifiers.access = access;
+        modifiers.accessWritten = true;
 
         continue;
       }

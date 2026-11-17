@@ -1,0 +1,331 @@
+import { FileParser } from "../file-parser.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { Token, TokenKind } from "../../../token/types/token.types.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  DeclarationFile,
+  DeclaredMember,
+  DeclaredMemberForm,
+  DeclaredMemberKind,
+} from "../../../../program/ast/types/ast.types.declarations.tz";
+import { Modifiers } from "../types/file-parser.types.classes.tz";
+import { ParamPattern } from "../types/file-parser.types.functions.tz";
+
+partial class FileParser {
+  private declarationItem(file: DeclarationFile): void {
+    this.importOrExport(file);
+    if (this.cursor.isRecovering()) {
+      this.cursor.stopRecovering();
+      this.skipToDeclaration();
+    }
+  }
+
+  private importOrExport(file: DeclarationFile): void {
+    const token = this.cursor.peek();
+
+    switch (token.kind) {
+      case TokenKind.Import:
+        this.importDecl(true);
+        break;
+      case TokenKind.Export:
+        return this.declarationExport(file);
+      default:
+        this.cursor.report(token.start, Code.DeclarationHoldsExports);
+        return this.skipToDeclaration();
+    }
+  }
+
+  private declarationExport(file: DeclarationFile): void {
+    if (this.exportListAhead()) {
+      this.exportDecl(true);
+
+      return;
+    }
+
+    const keyword = this.cursor.next();
+    const word = this.cursor.peek();
+
+    switch (word.kind) {
+      case TokenKind.Type:
+        return this.exportedType(file, keyword.start, word);
+      case TokenKind.Interface:
+        return this.exportedInterface(file, keyword.start);
+      case TokenKind.Declare:
+        this.cursor.next();
+        return this.exportedDeclare(file);
+      default:
+        this.cursor.report(word.start, Code.DeclarationHasNoCode);
+        return this.skipToDeclaration();
+    }
+  }
+
+  private exportListAhead(): boolean {
+    const next = this.cursor.lookahead();
+    const third = this.cursor.tokenAt(2);
+
+    switch (next.kind) {
+      case TokenKind.LBrace:
+      case TokenKind.Star:
+        return true;
+      case TokenKind.Type:
+        return third.kind == TokenKind.LBrace;
+      default:
+        return false;
+    }
+  }
+
+  private exportedType(file: DeclarationFile, loc: int, word: Token): void {
+    if (!this.nameOnLine()) {
+      this.unknownExport(loc, word);
+
+      return;
+    }
+
+    const alias = this.typeAlias();
+
+    file.items.push(alias);
+  }
+
+  private exportedInterface(file: DeclarationFile, loc: int): void {
+    const declaration = this.interfaceStatement(loc);
+    if (declaration.kind == StmtKind.TypeAlias) {
+      file.items.push(declaration);
+    }
+  }
+
+  private exportedDeclare(file: DeclarationFile): void {
+    const next = this.cursor.lookahead();
+    const isAbstract =
+      this.cursor.is(TokenKind.Abstract) && next.kind == TokenKind.Class;
+    if (isAbstract) {
+      this.cursor.next();
+    }
+
+    const word = this.cursor.peek();
+
+    switch (word.kind) {
+      case TokenKind.Function:
+        return this.functionSignature(file);
+      case TokenKind.Class:
+        return this.declaredClass(file, isAbstract);
+      default:
+        this.cursor.report(word.start, Code.ExpectedAfterExportDeclare, {
+          found: word.kind,
+        });
+        return this.skipToDeclaration();
+    }
+  }
+
+  private skipToDeclaration(): void {
+    while (!this.cursor.is(TokenKind.End) && !this.declarationAhead()) {
+      if (this.cursor.accept(TokenKind.LBrace)) {
+        this.cursor.skipToClosingBrace();
+      } else {
+        this.cursor.next();
+      }
+    }
+  }
+
+  private declarationAhead(): boolean {
+    const token = this.cursor.peek();
+    const starts =
+      token.kind == TokenKind.Import || token.kind == TokenKind.Export;
+
+    return starts && token.newline;
+  }
+
+  private functionSignature(file: DeclarationFile): void {
+    const known = this.cursor.errors.length;
+    const declaration = this.functionDecl(false, false);
+    const wellFormed = this.cursor.errors.length == known;
+    if (declaration.body != undefined && wellFormed) {
+      this.cursor.report(declaration.loc, Code.DeclarationFunctionBody);
+    }
+
+    file.items.push(declaration);
+  }
+
+  private declaredClass(file: DeclarationFile, isAbstract: boolean): void {
+    this.cursor.next();
+    const name = this.cursor.peek();
+    if (!this.cursor.expectName(Code.ExpectedAfterDeclareClass)) {
+      return;
+    }
+
+    const typeParams = this.optionalTypeParams();
+
+    this.rejectClassBase();
+    if (!this.cursor.expect(TokenKind.LBrace, Code.ExpectedClassMembersStart)) {
+      return;
+    }
+
+    const members: DeclaredMember[] = [];
+
+    this.cursor.stopRecovering();
+
+    while (this.cursor.insideList(TokenKind.RBrace)) {
+      this.declaredMember(members);
+      if (this.cursor.isRecovering()) {
+        this.skipClassMember();
+        this.cursor.stopRecovering();
+      }
+    }
+
+    this.cursor.expect(TokenKind.RBrace, Code.ExpectedClassClose);
+    file.classes.push({
+      name: name.text,
+      loc: name.start,
+      isAbstract,
+      typeParams,
+      members,
+    });
+  }
+
+  private rejectClassBase(): void {
+    const token = this.cursor.peek();
+    const written =
+      token.kind == TokenKind.Extends || token.kind == TokenKind.Implements;
+    if (!written) {
+      return;
+    }
+
+    this.cursor.report(token.start, Code.DeclarationClassBase);
+    this.classBase(false);
+    this.implementedTypes();
+  }
+
+  private declaredMember(members: DeclaredMember[]): void {
+    if (this.cursor.accept(TokenKind.Semi)) {
+      return;
+    }
+
+    const head = this.cursor.peek();
+    const modifiers = this.modifiers();
+    if (modifiers.staticBlock) {
+      return;
+    }
+    if (this.memberAccessorAhead()) {
+      return this.memberAccessor(head.start);
+    }
+
+    const token = this.cursor.peek();
+    const name = this.fieldName();
+    if (name == undefined) {
+      return;
+    }
+    if (token.hash) {
+      this.cursor.report(token.start, Code.NoPrivateName, { word: name });
+    }
+
+    const optional = this.cursor.accept(TokenKind.Question);
+    const form = this.declaredForm(token, modifiers, optional, head.start);
+    const type = this.declaredType(form, token, name);
+
+    this.endDeclaredMember(form);
+    members.push({
+      name,
+      loc: token.start,
+      access: modifiers.access,
+      accessWritten: modifiers.accessWritten,
+      isStatic: modifiers.isStatic,
+      form,
+      type,
+    });
+  }
+
+  private declaredForm(
+    token: Token,
+    modifiers: Modifiers,
+    optional: boolean,
+    loc: int,
+  ): DeclaredMemberForm {
+    const callable =
+      this.cursor.is(TokenKind.LParen) || this.cursor.is(TokenKind.Less);
+    if (!callable) {
+      this.reportFieldModifiers(modifiers, loc);
+
+      return {
+        kind: DeclaredMemberKind.Field,
+        readonly: modifiers.readonly,
+        optional,
+      };
+    }
+
+    const constructor = token.kind == TokenKind.Constructor;
+
+    this.reportMethodModifiers(modifiers, false, constructor, loc);
+    const typeParams = this.optionalTypeParams();
+    const patterns: ParamPattern[] = [];
+    const params = this.params(false, constructor, patterns);
+    if (constructor) {
+      return { kind: DeclaredMemberKind.Constructor, typeParams, params };
+    }
+
+    return { kind: DeclaredMemberKind.Method, typeParams, params };
+  }
+
+  private reportFieldModifiers(modifiers: Modifiers, loc: int): void {
+    const next = this.cursor.peek();
+
+    if (modifiers.isAbstract) {
+      this.cursor.report(loc, Code.AbstractFields);
+    }
+    if (modifiers.isAsync) {
+      this.cursor.error(next.start, Code.ExpectedParenAfterAsyncName);
+    }
+  }
+
+  private declaredType(
+    form: DeclaredMemberForm,
+    token: Token,
+    name: string,
+  ): TypeRef | undefined {
+    switch (form.kind) {
+      case DeclaredMemberKind.Method:
+        return this.returnTypeAnnotation();
+      case DeclaredMemberKind.Constructor:
+        return this.constructorResult(token.start);
+      case DeclaredMemberKind.Field:
+        if (!this.cursor.is(TokenKind.Colon)) {
+          this.cursor.error(token.start, Code.FieldNeedsType, { word: name });
+        }
+        return this.typeAnnotation();
+    }
+  }
+
+  private constructorResult(loc: int): TypeRef | undefined {
+    const result = this.returnTypeAnnotation();
+    if (result != undefined) {
+      this.cursor.report(loc, Code.ConstructorReturnType);
+    }
+
+    return result;
+  }
+
+  private endDeclaredMember(form: DeclaredMemberForm): void {
+    if (form.kind == DeclaredMemberKind.Field) {
+      return this.endDeclaredField();
+    }
+
+    const brace = this.cursor.peek();
+    if (brace.kind != TokenKind.LBrace) {
+      return this.cursor.expectSemicolon();
+    }
+
+    this.cursor.report(brace.start, Code.DeclarationMethodBody);
+    this.cursor.next();
+    this.cursor.skipToClosingBrace();
+  }
+
+  private endDeclaredField(): void {
+    const assign = this.cursor.peek();
+    if (assign.kind == TokenKind.Assign) {
+      this.cursor.report(assign.start, Code.DeclarationFieldValue);
+      this.cursor.next();
+      this.expression();
+    }
+
+    this.cursor.expectSemicolon();
+  }
+}

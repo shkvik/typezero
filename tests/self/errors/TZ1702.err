@@ -1,0 +1,3 @@
+TZ1702.d.tz:1:8: error TZ1702: a declaration file has no code: write 'export declare function' or 'export declare class', with signatures and no bodies
+export function twice(value: int): int {
+       ^

@@ -1,0 +1,3 @@
+TZ1707.d.tz:2:21: error TZ1707: a field of a declaration file has no value: its value is in the module
+  public value: int = 0;
+                    ^

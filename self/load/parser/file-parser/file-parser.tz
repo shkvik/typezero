@@ -17,6 +17,7 @@ import "./partial/file-parser.partial.declarations.tz";
 import "./partial/file-parser.partial.arrows.tz";
 import "./partial/file-parser.partial.modifiers.tz";
 import "./partial/file-parser.partial.exports.tz";
+import "./partial/file-parser.partial.declaration-file.tz";
 import { Token, TokenKind } from "../../token/types/token.types.tz";
 import { Stmt } from "../../../program/ast/types/ast.types.statements.tz";
 import {
@@ -24,6 +25,7 @@ import {
   ImportDecl,
   SourceFile,
 } from "../../../program/ast/types/ast.types.modules.tz";
+import { DeclarationFile } from "../../../program/ast/types/ast.types.declarations.tz";
 import { Cursor } from "../cursor/cursor.tz";
 import { LiteralReader } from "../literal/literal.tz";
 import {
@@ -32,7 +34,10 @@ import {
   ParseContext,
   TypePlace,
 } from "./types/file-parser.types.context.tz";
-import { ParseResult } from "./types/file-parser.types.result.tz";
+import {
+  DeclarationResult,
+  ParseResult,
+} from "./types/file-parser.types.result.tz";
 
 export class FileParser {
   private readonly source: Buffer;
@@ -68,10 +73,7 @@ export class FileParser {
 
     while (!this.cursor.is(TokenKind.End)) {
       if (this.cursor.is(TokenKind.RBrace)) {
-        const brace = this.cursor.next();
-
-        this.cursor.error(brace.start, Code.UnexpectedClosingBrace);
-        this.cursor.stopRecovering();
+        this.strayBrace();
 
         continue;
       }
@@ -90,6 +92,34 @@ export class FileParser {
     };
 
     return { file, errors: this.cursor.errors };
+  }
+
+  public runDeclaration(): DeclarationResult {
+    const file: DeclarationFile = {
+      items: [],
+      classes: [],
+      imports: this.imports,
+      exports: this.exports,
+    };
+
+    while (!this.cursor.is(TokenKind.End)) {
+      if (this.cursor.is(TokenKind.RBrace)) {
+        this.strayBrace();
+
+        continue;
+      }
+
+      this.declarationItem(file);
+    }
+
+    return { file, errors: this.cursor.errors };
+  }
+
+  private strayBrace(): void {
+    const brace = this.cursor.next();
+
+    this.cursor.error(brace.start, Code.UnexpectedClosingBrace);
+    this.cursor.stopRecovering();
   }
 
   private written(start: int, end: int): string {

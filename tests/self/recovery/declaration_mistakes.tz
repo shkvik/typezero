@@ -1,0 +1,33 @@
+export type Pair = { first: int; second: int };
+
+export function make(first: int): Pair {
+  return { first, second: first };
+}
+
+export class Box {
+  public value: int;
+  public readonly size: int;
+  public name: string;
+
+  public constructor() {
+    this.value = 0;
+    this.size = 1;
+    this.name = "box";
+  }
+
+  public twice(): int {
+    return this.value * 2;
+  }
+
+  public grow(by: int): void {
+    this.value += by;
+  }
+
+  public shrink(by: int): void {
+    this.value -= by;
+  }
+}
+
+export function last(): Pair {
+  return make(0);
+}

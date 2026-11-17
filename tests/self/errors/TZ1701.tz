@@ -1,0 +1,9 @@
+const limit = 10;
+
+export function twice(value: int): int {
+  if (value > limit) {
+    return limit;
+  }
+
+  return value * 2;
+}

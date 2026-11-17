@@ -120,7 +120,9 @@ endforeach()
 # code, must make it print exactly CODE.err; self/codes keeps a test for
 # every code; tests/self/recovery/NAME.tz has more than the mistake itself and
 # must print exactly NAME.err too; tests/self/trees/NAME.tz is correct code
-# that must give exactly the tree NAME.tree. See self.cmake.
+# that must give exactly the tree NAME.tree. A test of a declaration file is
+# NAME.d.tz next to its module NAME.tz: the test is registered by the module,
+# so the declaration files leave the lists here. See self.cmake.
 set(TZ_SELF ${CMAKE_CURRENT_BINARY_DIR}/self/tzparse${CMAKE_EXECUTABLE_SUFFIX})
 add_test(NAME self/build
   COMMAND ${CMAKE_COMMAND} -DTZ=$<TARGET_FILE:tz> -DROOT=${PROJECT_SOURCE_DIR} -DEXE=${TZ_SELF}
@@ -130,6 +132,7 @@ add_test(NAME self/codes
   COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DMODE=codes
           -P ${CMAKE_CURRENT_SOURCE_DIR}/self.cmake)
 file(GLOB TZ_SELF_ERROR_TESTS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/self/errors/*.tz)
+list(FILTER TZ_SELF_ERROR_TESTS EXCLUDE REGEX "\\.d\\.tz$")
 foreach(src ${TZ_SELF_ERROR_TESTS})
   get_filename_component(name ${src} NAME_WE)
   add_test(NAME self/errors/${name}
@@ -139,6 +142,7 @@ foreach(src ${TZ_SELF_ERROR_TESTS})
 endforeach()
 file(GLOB TZ_SELF_RECOVERY_TESTS CONFIGURE_DEPENDS
      ${CMAKE_CURRENT_SOURCE_DIR}/self/recovery/*.tz)
+list(FILTER TZ_SELF_RECOVERY_TESTS EXCLUDE REGEX "\\.d\\.tz$")
 foreach(src ${TZ_SELF_RECOVERY_TESTS})
   get_filename_component(name ${src} NAME_WE)
   add_test(NAME self/recovery/${name}
@@ -148,6 +152,7 @@ foreach(src ${TZ_SELF_RECOVERY_TESTS})
 endforeach()
 file(GLOB TZ_SELF_TREE_TESTS CONFIGURE_DEPENDS
      ${CMAKE_CURRENT_SOURCE_DIR}/self/trees/*.tz)
+list(FILTER TZ_SELF_TREE_TESTS EXCLUDE REGEX "\\.d\\.tz$")
 foreach(src ${TZ_SELF_TREE_TESTS})
   get_filename_component(name ${src} NAME_WE)
   add_test(NAME self/trees/${name}

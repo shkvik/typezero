@@ -5,7 +5,11 @@ import { Token } from "../token/types/token.types.tz";
 import { FileParser } from "./file-parser/file-parser.tz";
 import { OpenBlocks } from "./open-blocks/open-blocks.tz";
 import { LexResult } from "../lexer/types/lexer.types.tz";
-import { ParsedFile, SourceText } from "./types/parser.types.tz";
+import {
+  ParsedDeclaration,
+  ParsedFile,
+  SourceText,
+} from "./types/parser.types.tz";
 
 export class Parser {
   private readonly sources: SourceText[];
@@ -26,6 +30,18 @@ export class Parser {
     return parsed;
   }
 
+  public runDeclarations(): ParsedDeclaration[] {
+    const parsed: ParsedDeclaration[] = [];
+
+    for (const source of this.sources) {
+      const file = this.parseDeclaration(source);
+
+      parsed.push(file);
+    }
+
+    return parsed;
+  }
+
   private parseFile(source: SourceText): ParsedFile {
     const lexer = new Lexer(source.text);
     const lexed = lexer.run();
@@ -35,11 +51,34 @@ export class Parser {
       source.isLibrary,
     );
     const result = fileParser.run();
-    const merged = this.mergeByPlace(lexed, result.errors);
-    const blocks = new OpenBlocks(source.text, lexed.tokens);
-    const errors = blocks.explain(merged);
+    const errors = this.explained(source, lexed, result.errors);
 
     return { source, file: result.file, errors };
+  }
+
+  private parseDeclaration(source: SourceText): ParsedDeclaration {
+    const lexer = new Lexer(source.text);
+    const lexed = lexer.run();
+    const fileParser = new FileParser(
+      source.text,
+      lexed.tokens,
+      source.isLibrary,
+    );
+    const result = fileParser.runDeclaration();
+    const errors = this.explained(source, lexed, result.errors);
+
+    return { source, file: result.file, errors };
+  }
+
+  private explained(
+    source: SourceText,
+    lexed: LexResult,
+    syntactic: SourceError[],
+  ): SourceError[] {
+    const merged = this.mergeByPlace(lexed, syntactic);
+    const blocks = new OpenBlocks(source.text, lexed.tokens);
+
+    return blocks.explain(merged);
   }
 
   private mergeByPlace(

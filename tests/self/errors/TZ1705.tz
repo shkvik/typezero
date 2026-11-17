@@ -1,0 +1,16 @@
+class Shape {
+  public sides: int;
+
+  public constructor() {
+    this.sides = 0;
+  }
+}
+
+export class Circle extends Shape {
+  public radius: int;
+
+  public constructor(radius: int) {
+    super();
+    this.radius = radius;
+  }
+}

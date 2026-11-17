@@ -1,0 +1,94 @@
+== declaration_file.d.tz
+items 6
+TypeAlias 91 "Pair" handle=0 tp=0 bases=0
+  Type 98 Object "" src=- n=2 names=["first","second"] locs=[102,116] opt=01 ro=00 methods=-
+    Type 109 Name "int" src=- n=0
+    Type 125 Name "int" src=- n=0
+TypeAlias 151 "Named" handle=0 tp=0 bases=0
+  Type 157 Object "" src=- n=1 names=["name"] locs=[161] opt=0 ro=0 methods=-
+    Type 167 Name "string" src=- n=0
+Function 202 "make" arrow=0 concise=0 own="" place=0 body=0 gen=0 async=0 role=plain src=193-239 tp=0 params=2
+  Param 207 "first" form=0 prop=- pattern=- dec=0
+    Type 214 Name "int" src=- n=0
+  Param 219 "second" form=1 prop=- pattern=- dec=0
+    Type 228 Name "int" src=- n=0
+  Type 234 Name "Pair" src=- n=0
+  -
+Function 265 "pick" arrow=0 concise=0 own="" place=0 body=0 gen=0 async=0 role=plain src=256-309 tp=1 params=2
+  TypeParam 270 "T"
+    -
+    -
+  Param 273 "items" form=0 prop=- pattern=- dec=0
+    Type 280 Array "" src=- n=1
+      Type 280 Name "T" src=- n=0
+  Param 288 "indexes" form=3 prop=- pattern=- dec=0
+    Type 297 Array "" src=- n=1
+      Type 297 Name "int" src=- n=0
+  Type 305 Array "" src=- n=1
+    Type 305 Name "T" src=- n=0
+  -
+Function 335 "isFull" arrow=0 concise=0 own="" place=0 body=0 gen=0 async=0 role=plain src=326-363 tp=0 params=1
+  Param 342 "pair" form=0 prop=- pattern=- dec=0
+    Type 348 Name "Pair" src=- n=0
+  Type 355 Name "boolean" src=- n=0
+  -
+Function 389 "measure" arrow=0 concise=0 own="" place=0 body=0 gen=0 async=0 role=plain src=380-429 tp=0 params=2
+  Param 397 "value" form=0 prop=- pattern=- dec=0
+    Type 404 Name "int" src=- n=0
+  Param 409 "unit" form=0 prop=- pattern=- dec=0
+    Type 415 Name "Unit" src=- n=0
+  Type 422 Name "string" src=- n=0
+  -
+classes 2
+DeclaredClass 461 "Store" abstract=1 tp=1 members=10
+  TypeParam 467 "T"
+    Type 477 Name "Named" src=- n=0
+    -
+  Declared 511 "limit" access=0 written=1 static=1 field ro=1 optional=0
+    Type 518 Name "int" src=- n=0
+  Declared 541 "size" access=0 written=1 static=0 field ro=1 optional=0
+    Type 547 Name "int" src=- n=0
+  Declared 564 "last" access=1 written=1 static=0 field ro=0 optional=1
+    Type 571 Name "T" src=- n=0
+  Declared 576 "static" access=0 written=0 static=0 field ro=0 optional=0
+    Type 584 Name "boolean" src=- n=0
+  Declared 603 "constructor" access=0 written=1 static=0 constructor tp=0 params=2
+    Param 615 "items" form=0 prop=- pattern=- dec=0
+      Type 622 Array "" src=- n=1
+        Type 622 Name "T" src=- n=0
+    Param 627 "limit" form=1 prop=- pattern=- dec=0
+      Type 635 Name "int" src=- n=0
+    -
+  Declared 651 "add" access=0 written=1 static=0 method tp=0 params=1
+    Param 655 "item" form=0 prop=- pattern=- dec=0
+      Type 661 Name "T" src=- n=0
+    Type 665 Name "void" src=- n=0
+  Declared 687 "of" access=0 written=1 static=1 method tp=1 params=1
+    TypeParam 690 "U"
+      Type 700 Name "Named" src=- n=0
+      -
+    Param 707 "item" form=0 prop=- pattern=- dec=0
+      Type 713 Name "U" src=- n=0
+    Type 717 Generic "Store" src=- n=1
+      Type 723 Name "U" src=- n=0
+  Declared 748 "find" access=1 written=1 static=0 method tp=0 params=1
+    Param 753 "name" form=0 prop=- pattern=- dec=0
+      Type 759 Name "string" src=- n=0
+    Type 768 Union "" src=- n=2
+      Type 768 Name "T" src=- n=0
+      Type 772 Name "undefined" src=- n=0
+  Declared 792 "delete" access=0 written=1 static=0 method tp=0 params=1
+    Param 799 "name" form=0 prop=- pattern=- dec=0
+      Type 805 Name "string" src=- n=0
+    Type 814 Name "boolean" src=- n=0
+  Declared 832 "[Symbol.iterator]" access=0 written=1 static=0 method tp=0 params=0
+    Type 853 Generic "Iterator" src=- n=1
+      Type 862 Name "T" src=- n=0
+DeclaredClass 890 "Empty" abstract=0 tp=0 members=0
+imports 1
+Import 0 "./declaration_file/units.tz" 21 "" -1 0 0 1
+  Name "Unit" 9 "Unit" 9
+exports 2
+Export 900 1 "./declaration_file/units.tz" 921 1
+  Name "Unit" 909 "Unit" 909
+Export 952 2 "./declaration_file/sizes.tz" 966 0
