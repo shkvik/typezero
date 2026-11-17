@@ -161,6 +161,32 @@ foreach(src ${TZ_SELF_TREE_TESTS})
   set_tests_properties(self/trees/${name} PROPERTIES FIXTURES_REQUIRED tz_self)
 endforeach()
 
+# The enumerations of the language, self/test/*.py: a script builds programs
+# together with what the parser must answer (the tree, or the one error),
+# runs the tzparse of self/build over them and exits with 1 when an answer
+# differs; the head of every script says what it builds. Its report is left
+# in the directory of the test. They take minutes, so they have the label
+# 'enumeration': `ctest -LE enumeration` runs the tests without them.
+find_program(TZ_PYTHON NAMES python python3)
+function(tz_self_enumeration name script)
+  add_test(NAME self/test/${name}
+    COMMAND ${CMAKE_COMMAND} -E env PYTHONDONTWRITEBYTECODE=1
+            ${TZ_PYTHON} ${PROJECT_SOURCE_DIR}/self/test/${script}
+            ${TZ_SELF} ${CMAKE_CURRENT_BINARY_DIR}/self/test/${name} ${ARGN})
+  set_tests_properties(self/test/${name} PROPERTIES
+    FIXTURES_REQUIRED tz_self LABELS enumeration TIMEOUT 3000)
+endfunction()
+if(TZ_PYTHON)
+  tz_self_enumeration(exprgen exprgen.py all)
+  tz_self_enumeration(exprgen_bare exprgen.py all bare)
+  tz_self_enumeration(stmtgen stmtgen.py all)
+  tz_self_enumeration(typegen typegen.py all)
+  tz_self_enumeration(declgen declgen.py)
+  tz_self_enumeration(dfilegen dfilegen.py)
+  tz_self_enumeration(wronggen wronggen.py)
+  tz_self_enumeration(mutgen mutgen.py)
+endif()
+
 # Tests of tz's commands (tz init, add, remove, update, port; build and run of
 # a project): tests/cli/NAME.cmake runs tz in a directory of its own with the
 # helpers of cli.cmake. Packages come from local git repositories and a mirror

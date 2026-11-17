@@ -12,3 +12,5 @@ CMakeUserPresets.json
 *.ll
 !tests/**/*.ll
 tmp
+# Python scripts of the tests
+__pycache__/
