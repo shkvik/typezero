@@ -1,0 +1,9 @@
+unclosed_paren.tz:2:11: error TZ1202: expected ')' to close the argument list, found ';'
+  foo(1, 2;
+          ^
+unclosed_paren.tz:3:7: error TZ1221: expected an expression, found ';'
+  bar(;
+      ^
+unclosed_paren.tz:5:11: error TZ1221: expected an expression, found ';'
+const z = ;
+          ^

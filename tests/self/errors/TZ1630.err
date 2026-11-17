@@ -1,6 +1,3 @@
 TZ1630.tz:1:10: error TZ1630: 'class' is a keyword in tz: export it under another name, e.g. '{ class as className }'
 export { class }
          ^
-TZ1630.tz:1:16: error TZ1120: unexpected '}'
-export { class }
-               ^

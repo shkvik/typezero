@@ -147,7 +147,12 @@ self/             компилятор на tz, пробный (порт compile
                   `tz syntax tree|time|hold|read`; тесты — tests/self/errors/TZxxxx.tz (исходник
                   с ошибкой этого кода) + TZxxxx.err (точный вывод `tzparse check`), гоняет
                   tests/self.cmake: self/build собирает self/, self/errors/<код> сверяет
-                  вывод, self/codes следит, что у каждого кода из code.tz есть тест
+                  вывод, self/codes следит, что у каждого кода из code.tz есть тест;
+                  tests/self/recovery/<имя>.tz + .err — несколько ошибок или ошибка среди
+                  верного кода: каждая печатается один раз, следствий нет. Восстановление
+                  после ошибки — Cursor.recoverStatement: пропускает остаток инструкции до
+                  `;` или новой строки с началом инструкции, блоки `{...}` — целиком, и
+                  закрывает скобки `{`, которые инструкция открыла до ошибки
 tests/ docs/ bench/ examples/ third_party/
 ```
 

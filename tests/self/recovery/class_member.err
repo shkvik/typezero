@@ -1,0 +1,6 @@
+class_member.tz:2:5: error TZ1542: expected a parameter name
+  m(1) {}
+    ^
+class_member.tz:7:11: error TZ1221: expected an expression, found ';'
+const z = ;
+          ^

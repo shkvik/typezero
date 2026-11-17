@@ -1,6 +1,3 @@
 TZ1633.tz:1:15: error TZ1633: expected a name after 'as', found integer literal
 export { a as 1 };
               ^
-TZ1633.tz:1:17: error TZ1120: unexpected '}'
-export { a as 1 };
-                ^

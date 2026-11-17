@@ -1,6 +1,3 @@
 TZ1132.tz:1:8: error TZ1132: 'for...in' and 'for...of' need a new variable
 for (x of xs) {}
        ^
-TZ1132.tz:1:16: error TZ1120: unexpected '}'
-for (x of xs) {}
-               ^

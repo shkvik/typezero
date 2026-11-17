@@ -46,6 +46,7 @@ export class Parser {
 
     const merged: SourceError[] = [];
     let taken = 0;
+    let explained = -1;
 
     for (const error of syntactic) {
       while (taken < lexical.length) {
@@ -55,10 +56,13 @@ export class Parser {
         }
 
         merged.push(earlier);
+        explained = earlier.loc;
         taken += 1;
       }
 
-      merged.push(error);
+      if (error.loc != explained) {
+        merged.push(error);
+      }
     }
 
     const rest = lexical.slice(taken);

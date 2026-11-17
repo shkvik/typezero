@@ -94,7 +94,7 @@ partial class FileParser {
     const isConst = head.kind == TokenKind.Const;
     const target = this.forTarget();
     if (target == undefined) {
-      return { kind: StmtKind.For, loc };
+      return this.brokenFor(loc);
     }
     if (this.cursor.is(TokenKind.Of) || this.cursor.is(TokenKind.In)) {
       return this.forOf(loc, awaitLoc, isConst, target);
@@ -102,7 +102,7 @@ partial class FileParser {
 
     const decls = this.forDeclarators(target, isConst);
     if (decls == undefined) {
-      return { kind: StmtKind.For, loc };
+      return this.brokenFor(loc);
     }
 
     const init: Stmt = {
@@ -114,6 +114,12 @@ partial class FileParser {
     };
 
     return this.classicFor(loc, awaitLoc, init);
+  }
+
+  private brokenFor(loc: int, init?: Stmt): Stmt {
+    this.cursor.skipToClosingParen();
+
+    return { kind: StmtKind.For, loc, init };
   }
 
   private forDeclarators(
@@ -175,7 +181,7 @@ partial class FileParser {
 
       this.cursor.error(token.start, Code.ForNeedsNewVariable);
 
-      return { kind: StmtKind.For, loc, init };
+      return this.brokenFor(loc, init);
     }
 
     this.context = { ...this.context, expressionPlace: ExpressionPlace.Plain };

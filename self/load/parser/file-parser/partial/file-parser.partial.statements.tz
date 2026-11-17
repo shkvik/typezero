@@ -447,15 +447,19 @@ partial class FileParser {
       cases.push(clause);
     }
 
-    if (!this.cursor.is(TokenKind.RBrace) && !this.cursor.is(TokenKind.End)) {
+    this.closeSwitch();
+
+    return { kind: StmtKind.Switch, loc, discriminant, cases };
+  }
+
+  private closeSwitch(): void {
+    if (this.cursor.insideList(TokenKind.RBrace)) {
       const token = this.cursor.peek();
 
-      this.cursor.error(token.start, Code.ExpectedCaseOrDefault);
+      return this.skipBraced(token.start, Code.ExpectedCaseOrDefault);
     }
 
     this.cursor.expect(TokenKind.RBrace, Code.ExpectedSwitchClose);
-
-    return { kind: StmtKind.Switch, loc, discriminant, cases };
   }
 
   private switchCase(): SwitchCase {
@@ -478,11 +482,11 @@ partial class FileParser {
   }
 
   private statementWithRecovery(topLevel: boolean): Stmt {
-    const first = this.cursor.peek();
+    const start = this.cursor.mark();
     const statement = this.statement(topLevel);
 
     if (this.cursor.isRecovering()) {
-      this.cursor.recoverStatement(first.start);
+      this.cursor.recoverStatement(start);
     }
 
     return statement;

@@ -1,6 +1,3 @@
 TZ1505.tz:1:22: error TZ1505: expected identifier after 'declare class', found '{'
 export declare class {}
                      ^
-TZ1505.tz:1:23: error TZ1120: unexpected '}'
-export declare class {}
-                      ^

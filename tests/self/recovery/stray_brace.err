@@ -1,0 +1,6 @@
+stray_brace.tz:1:11: error TZ1221: expected an expression, found '}'
+const a = };
+          ^
+stray_brace.tz:2:11: error TZ1221: expected an expression, found ';'
+const z = ;
+          ^

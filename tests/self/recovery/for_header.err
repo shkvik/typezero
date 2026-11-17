@@ -1,0 +1,6 @@
+for_header.tz:1:18: error TZ1114: expected '=' after the destructuring pattern, found ';'
+for (const [a, b]; i < f(1); i++) {
+                 ^
+for_header.tz:4:11: error TZ1221: expected an expression, found ';'
+const z = ;
+          ^

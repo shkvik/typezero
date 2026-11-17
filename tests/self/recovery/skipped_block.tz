@@ -1,0 +1,4 @@
+for (x of xs) {
+  const y = 1;
+}
+const z = ;

@@ -1,0 +1,6 @@
+unclosed_brace.tz:2:24: error TZ1221: expected an expression, found ';'
+  const o = { a: 1, b: ;
+                       ^
+unclosed_brace.tz:5:11: error TZ1221: expected an expression, found ';'
+const z = ;
+          ^

@@ -1,0 +1,5 @@
+function f() {
+  const o = { a: 1, b: ;
+  return o;
+}
+const z = ;

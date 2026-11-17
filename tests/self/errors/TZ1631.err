@@ -1,9 +1,3 @@
 TZ1631.tz:1:10: error TZ1631: expected a name to import, found integer literal
 import { 1 } from "./m"
          ^
-TZ1631.tz:1:12: error TZ1120: unexpected '}'
-import { 1 } from "./m"
-           ^
-TZ1631.tz:1:19: error TZ1119: expected ';', found string literal
-import { 1 } from "./m"
-                  ^

@@ -1,0 +1,4 @@
+for (const [a, b]; i < f(1); i++) {
+  g();
+}
+const z = ;

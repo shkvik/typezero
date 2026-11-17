@@ -1,0 +1,6 @@
+next_line.tz:1:12: error TZ1542: expected a parameter name
+function f(1) {}
+           ^
+next_line.tz:2:12: error TZ1549: expected a type parameter name, found integer literal
+function g<1>() {}
+           ^

@@ -1,6 +1,3 @@
 TZ1542.tz:1:12: error TZ1542: expected a parameter name
 function f(1) {}
            ^
-TZ1542.tz:1:16: error TZ1120: unexpected '}'
-function f(1) {}
-               ^

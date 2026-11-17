@@ -1,0 +1,6 @@
+switch (x) {
+  foo();
+  case 1:
+    break;
+}
+const z = ;

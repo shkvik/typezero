@@ -10,6 +10,11 @@
 #     ACCEPT=ON what it prints is written to CODE.err instead: after a change
 #     of messages, read the difference before committing it.
 #
+#   MODE=recovery: tests/self/recovery/NAME.tz has several mistakes, or one
+#     and correct code around it. `EXE check NAME.tz` must print exactly
+#     NAME.err: every mistake once, and nothing that only follows from an
+#     earlier one. ACCEPT=ON works as for MODE=error.
+#
 #   MODE=codes: every code of self/diagnostic/code.tz has its test in
 #     tests/self/errors, and every test there is named after a code.
 #     UNREACHABLE lists the codes no source can get: the parser asks for them
@@ -36,7 +41,7 @@ if(MODE STREQUAL "build")
     fail("tz build of self/main.tz exited with ${exit_code}:\n${stdout}${stderr}")
   endif()
 
-elseif(MODE STREQUAL "error")
+elseif(MODE STREQUAL "error" OR MODE STREQUAL "recovery")
   get_filename_component(dir ${SRC} DIRECTORY)
   get_filename_component(code ${SRC} NAME_WE)
   execute_process(
@@ -50,7 +55,7 @@ elseif(MODE STREQUAL "error")
     fail("exit code ${exit_code}, expected 1\nstdout:\n${stdout}\nstderr:\n${stderr}")
   endif()
   string(FIND "${stderr}" ": error ${code}: " at)
-  if(at EQUAL -1)
+  if(MODE STREQUAL "error" AND at EQUAL -1)
     fail("no error ${code}:\n${stderr}")
   endif()
   if(ACCEPT)

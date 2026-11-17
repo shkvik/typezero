@@ -1,0 +1,6 @@
+list_then_statement.tz:3:3: error TZ1631: expected a name to import, found integer literal
+  1,
+  ^
+list_then_statement.tz:5:11: error TZ1221: expected an expression, found ';'
+const z = ;
+          ^

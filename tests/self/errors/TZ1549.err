@@ -1,6 +1,3 @@
 TZ1549.tz:1:12: error TZ1549: expected a type parameter name, found integer literal
 function f<1>() {}
            ^
-TZ1549.tz:1:18: error TZ1120: unexpected '}'
-function f<1>() {}
-                 ^

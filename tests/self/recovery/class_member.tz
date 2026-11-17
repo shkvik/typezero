@@ -1,0 +1,7 @@
+class A {
+  m(1) {}
+  n(): int {
+    return ;
+  }
+}
+const z = ;

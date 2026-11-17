@@ -139,7 +139,9 @@ export class Cursor {
     }
 
     this.recovering = true;
-    this.record(loc, code, details);
+    if (!this.reportedAt(loc)) {
+      this.record(loc, code, details);
+    }
   }
 
   public report(loc: int, code: Code, details: Details = kNoDetails): void {
@@ -198,17 +200,51 @@ export class Cursor {
         return;
       }
 
-      this.next();
+      this.skipTokenOrBlock();
     }
   }
 
-  public recoverStatement(start: int): void {
-    const token = this.peek();
-    if (token.start == start) {
+  public recoverStatement(start: Mark): void {
+    if (this.at == start.at) {
       this.next();
     }
 
-    return this.synchronize();
+    let unclosed = this.unclosedBraces(start.at);
+    if (unclosed == 0 && this.statementEnded()) {
+      this.recovering = false;
+
+      return;
+    }
+
+    this.synchronize();
+
+    while (unclosed > 0 && this.accept(TokenKind.RBrace)) {
+      unclosed -= 1;
+      this.synchronize();
+    }
+  }
+
+  public skipToClosingParen(): void {
+    let depth = 0;
+
+    while (!this.is(TokenKind.End) && !this.is(TokenKind.RBrace)) {
+      const token = this.next();
+
+      switch (token.kind) {
+        case TokenKind.LParen:
+          depth += 1;
+          break;
+        case TokenKind.RParen:
+          if (depth == 0) {
+            return;
+          }
+          depth -= 1;
+          break;
+        case TokenKind.LBrace:
+          this.skipToClosingBrace();
+          break;
+      }
+    }
   }
 
   public skipTo(kind: TokenKind): void {
@@ -235,6 +271,50 @@ export class Cursor {
           break;
       }
     }
+  }
+
+  private skipTokenOrBlock(): void {
+    if (this.accept(TokenKind.LBrace)) {
+      return this.skipToClosingBrace();
+    }
+
+    this.next();
+  }
+
+  private unclosedBraces(from: int): int {
+    let unclosed = 0;
+
+    for (let index = from; index < this.at; index++) {
+      const token = this.tokens[index];
+
+      switch (token?.kind) {
+        case TokenKind.LBrace:
+          unclosed += 1;
+          break;
+        case TokenKind.RBrace:
+          if (unclosed > 0) {
+            unclosed -= 1;
+          }
+          break;
+      }
+    }
+
+    return unclosed;
+  }
+
+  private statementEnded(): boolean {
+    const last = this.tokens[this.at - 1];
+    const next = this.peek();
+    const closed =
+      last?.kind == TokenKind.Semi || last?.kind == TokenKind.RBrace;
+
+    return closed && next.newline;
+  }
+
+  private reportedAt(loc: int): boolean {
+    const last = this.errors[this.errors.length - 1];
+
+    return last != undefined && last.loc == loc;
   }
 
   private previousEnd(): int {
