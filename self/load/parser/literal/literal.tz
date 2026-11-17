@@ -25,6 +25,7 @@ import {
   kLowerV,
   kLowerX,
   kLowerZ,
+  kMaxCodePoint,
   kMaxCodePointDigits,
   kNewline,
   kNine,
@@ -221,7 +222,7 @@ export class LiteralReader {
     if (digits == 0 || i >= end || close != kRightBrace) {
       return undefined;
     }
-    if (codePoint < 0 || codePoint > 0x10ffff) {
+    if (codePoint < 0 || codePoint > kMaxCodePoint) {
       return undefined;
     }
 

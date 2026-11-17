@@ -282,6 +282,12 @@ partial class FileParser {
     this.cursor.skipToClosingBrace();
   }
 
+  private closeBraced(code: Code): void {
+    if (!this.cursor.expect(TokenKind.RBrace, code)) {
+      this.cursor.skipToClosingBrace();
+    }
+  }
+
   private addObjectTypeMember(
     ref: TypeRef,
     object: ObjectTypeForm,

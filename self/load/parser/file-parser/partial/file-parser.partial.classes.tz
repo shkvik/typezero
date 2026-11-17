@@ -135,6 +135,10 @@ partial class FileParser {
   }
 
   private skipClassMember(): void {
+    if (this.cursor.statementEnded()) {
+      return;
+    }
+
     while (
       !this.cursor.is(TokenKind.End) &&
       !this.cursor.is(TokenKind.RBrace)

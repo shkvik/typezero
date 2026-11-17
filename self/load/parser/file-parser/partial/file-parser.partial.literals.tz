@@ -79,7 +79,7 @@ partial class FileParser {
   private reportEscape(decoded: DecodedText): void {
     const invalid = decoded.invalid;
     if (invalid != undefined) {
-      this.cursor.report(invalid.loc, invalid.code);
+      this.cursor.reportLexical(invalid.loc, invalid.code);
     }
   }
 

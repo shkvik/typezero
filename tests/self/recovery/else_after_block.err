@@ -1,0 +1,6 @@
+else_after_block.tz:1:7: error TZ1111: expected ')' after the condition, found identifier
+if (x y) {
+      ^
+else_after_block.tz:7:11: error TZ1221: expected an expression, found ';'
+const z = ;
+          ^

@@ -1,0 +1,6 @@
+stray_character.tz:1:13: error TZ1002: unexpected character '#'
+const a = 1 # 2;
+            ^
+stray_character.tz:2:11: error TZ1221: expected an expression, found ';'
+const z = ;
+          ^

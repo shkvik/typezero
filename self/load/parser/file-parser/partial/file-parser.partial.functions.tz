@@ -181,14 +181,13 @@ partial class FileParser {
     patterns: ParamPattern[],
   ): Param[] {
     const startCode = this.paramsStartCode(arrow);
-
-    this.cursor.expect(TokenKind.LParen, startCode);
+    const opened = this.cursor.expect(TokenKind.LParen, startCode);
     const params: Param[] = [];
 
     while (this.cursor.insideList(TokenKind.RParen)) {
       const param = this.param(constructor, patterns);
       if (param == undefined) {
-        break;
+        return this.brokenParams(params, opened);
       }
 
       params.push(param);
@@ -203,6 +202,14 @@ partial class FileParser {
     }
 
     this.cursor.expect(TokenKind.RParen, Code.ExpectedParametersClose);
+
+    return params;
+  }
+
+  private brokenParams(params: Param[], opened: boolean): Param[] {
+    if (opened) {
+      this.cursor.skipToClosingParen();
+    }
 
     return params;
   }

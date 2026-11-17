@@ -1,0 +1,9 @@
+escape_after_error.tz:1:15: error TZ1221: expected an expression, found ','
+const s = [1 +, "\x4"];
+              ^
+escape_after_error.tz:1:18: error TZ1009: invalid '\x' escape: expected two hex digits
+const s = [1 +, "\x4"];
+                 ^
+escape_after_error.tz:2:11: error TZ1221: expected an expression, found ';'
+const z = ;
+          ^

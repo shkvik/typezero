@@ -1,0 +1,6 @@
+line_after_block.tz:1:7: error TZ1111: expected ')' after the condition, found identifier
+if (x y) {
+      ^
+line_after_block.tz:4:5: error TZ1221: expected an expression, found ';'
+bar(;
+    ^

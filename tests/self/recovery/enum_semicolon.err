@@ -1,0 +1,6 @@
+enum_semicolon.tz:2:8: error TZ1507: expected '}' to close the enum, found ';'
+  A = 1;
+       ^
+enum_semicolon.tz:5:11: error TZ1221: expected an expression, found ';'
+const z = ;
+          ^

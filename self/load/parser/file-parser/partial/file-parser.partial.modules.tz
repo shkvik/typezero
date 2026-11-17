@@ -286,7 +286,7 @@ partial class FileParser {
       }
     }
 
-    this.cursor.expect(TokenKind.RBrace, codes.close);
+    this.closeBraced(codes.close);
   }
 
   private moduleName(codes: NameListCodes): ModuleName | undefined {

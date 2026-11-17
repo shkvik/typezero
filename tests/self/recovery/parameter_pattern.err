@@ -1,0 +1,6 @@
+parameter_pattern.tz:1:15: error TZ1541: expected a parameter name after '...'
+function f(...{ a }) {}
+              ^
+parameter_pattern.tz:2:11: error TZ1221: expected an expression, found ';'
+const z = ;
+          ^

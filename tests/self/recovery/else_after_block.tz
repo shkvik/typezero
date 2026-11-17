@@ -1,0 +1,7 @@
+if (x y) {
+  foo();
+}
+else {
+  bar();
+}
+const z = ;

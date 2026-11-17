@@ -144,7 +144,7 @@ partial class FileParser {
       }
     }
 
-    this.cursor.expect(TokenKind.RBrace, Code.ExpectedEnumClose);
+    this.closeBraced(Code.ExpectedEnumClose);
 
     return { kind: StmtKind.Enum, loc: name.start, name: name.text, members };
   }

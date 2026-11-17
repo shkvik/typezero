@@ -1,0 +1,9 @@
+two_methods.tz:2:5: error TZ1542: expected a parameter name
+  m(1) {}
+    ^
+two_methods.tz:3:5: error TZ1542: expected a parameter name
+  n(2) {}
+    ^
+two_methods.tz:5:11: error TZ1221: expected an expression, found ';'
+const z = ;
+          ^

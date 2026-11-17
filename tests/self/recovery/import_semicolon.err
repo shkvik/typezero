@@ -1,0 +1,6 @@
+import_semicolon.tz:2:4: error TZ1604: expected '}' to close the names to import, found ';'
+  a;
+   ^
+import_semicolon.tz:5:11: error TZ1221: expected an expression, found ';'
+const z = ;
+          ^

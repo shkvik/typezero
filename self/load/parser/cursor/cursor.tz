@@ -144,6 +144,12 @@ export class Cursor {
     }
   }
 
+  public reportLexical(loc: int, code: Code): void {
+    if (!this.reportedAt(loc)) {
+      this.record(loc, code, kNoDetails);
+    }
+  }
+
   public report(loc: int, code: Code, details: Details = kNoDetails): void {
     if (!this.recovering) {
       this.record(loc, code, details);
@@ -200,8 +206,20 @@ export class Cursor {
         return;
       }
 
-      this.skipTokenOrBlock();
+      const block = this.skipTokenOrBlock();
+      if (block && this.lineEnded()) {
+        return;
+      }
     }
+  }
+
+  public statementEnded(): boolean {
+    const last = this.tokens[this.at - 1];
+    const next = this.peek();
+    const closed =
+      last?.kind == TokenKind.Semi || last?.kind == TokenKind.RBrace;
+
+    return closed && next.newline;
   }
 
   public recoverStatement(start: Mark): void {
@@ -220,6 +238,10 @@ export class Cursor {
 
     while (unclosed > 0 && this.accept(TokenKind.RBrace)) {
       unclosed -= 1;
+      if (unclosed == 0 && this.lineEnded()) {
+        return;
+      }
+
       this.synchronize();
     }
   }
@@ -273,12 +295,29 @@ export class Cursor {
     }
   }
 
-  private skipTokenOrBlock(): void {
+  private skipTokenOrBlock(): boolean {
     if (this.accept(TokenKind.LBrace)) {
-      return this.skipToClosingBrace();
+      this.skipToClosingBrace();
+
+      return true;
     }
 
     this.next();
+
+    return false;
+  }
+
+  private lineEnded(): boolean {
+    const next = this.peek();
+
+    switch (next.kind) {
+      case TokenKind.Else:
+      case TokenKind.Catch:
+      case TokenKind.Finally:
+        return false;
+      default:
+        return next.newline;
+    }
   }
 
   private unclosedBraces(from: int): int {
@@ -300,15 +339,6 @@ export class Cursor {
     }
 
     return unclosed;
-  }
-
-  private statementEnded(): boolean {
-    const last = this.tokens[this.at - 1];
-    const next = this.peek();
-    const closed =
-      last?.kind == TokenKind.Semi || last?.kind == TokenKind.RBrace;
-
-    return closed && next.newline;
   }
 
   private reportedAt(loc: int): boolean {

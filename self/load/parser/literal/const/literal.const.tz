@@ -27,5 +27,6 @@ export const kUnderscore = 95;
 export const kUpperZ = 90;
 export const kLowerZ = 122;
 export const kHigh = 128;
+export const kMaxCodePoint = 0x10ffff;
 export const kMaxCodePointDigits = 6;
 export const kRadixPrefixLength = 2;

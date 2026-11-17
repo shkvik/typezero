@@ -1,6 +1,9 @@
+import { Code } from "../../diagnostic/code.tz";
 import { SourceError } from "../../diagnostic/types/message.types.tz";
 import { Lexer } from "../lexer/lexer.tz";
+import { Token } from "../token/types/token.types.tz";
 import { FileParser } from "./file-parser/file-parser.tz";
+import { LexResult } from "../lexer/types/lexer.types.tz";
 import { ParsedFile, SourceText } from "./types/parser.types.tz";
 
 export class Parser {
@@ -31,15 +34,16 @@ export class Parser {
       source.isLibrary,
     );
     const result = fileParser.run();
-    const errors = this.mergeByPlace(lexed.errors, result.errors);
+    const errors = this.mergeByPlace(lexed, result.errors);
 
     return { source, file: result.file, errors };
   }
 
   private mergeByPlace(
-    lexical: SourceError[],
+    lexed: LexResult,
     syntactic: SourceError[],
   ): SourceError[] {
+    const lexical = lexed.errors;
     if (lexical.length == 0) {
       return syntactic;
     }
@@ -56,7 +60,7 @@ export class Parser {
         }
 
         merged.push(earlier);
-        explained = earlier.loc;
+        explained = this.explainedPlace(earlier, lexed.tokens);
         taken += 1;
       }
 
@@ -68,5 +72,18 @@ export class Parser {
     const rest = lexical.slice(taken);
 
     return merged.concat(rest);
+  }
+
+  private explainedPlace(error: SourceError, tokens: Token[]): int {
+    if (error.code != Code.UnexpectedCharacter) {
+      return error.loc;
+    }
+
+    const next = tokens.find((token) => token.start > error.loc);
+    if (next == undefined) {
+      return error.loc;
+    }
+
+    return next.start;
   }
 }
