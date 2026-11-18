@@ -15,41 +15,50 @@ export type BufferJson = { type: string; data: int[] };
  * of several bytes ends in `LE`, the lowest byte first, or `BE`, the
  * highest byte first. `UInt` and `Uint` in a name are the same.
  */
-export interface Buffer<B = ArrayBuffer> extends Uint8Array {
-  fill(value: uint8, start?: int, end?: int): Buffer;
+export declare class Buffer<B = ArrayBuffer> extends Uint8Array {
+  /** There is no `new Buffer(…)`: `Buffer.from` or `Buffer.alloc` makes one. */
+  private constructor();
+
+  public fill(value: uint8, start?: int, end?: int): Buffer;
   /** Fills with a number, with the bytes of a text or with other bytes. */
-  fill(
+  public fill(
     value: int | string | Uint8Array,
     start?: int,
     end?: int,
     encoding?: BufferEncoding,
   ): Buffer;
-  copyWithin(target: int, start: int, end?: int): Buffer;
-  sort(compare?: (first: uint8, second: uint8) => int | double): Buffer;
-  reverse(): Buffer;
+  public copyWithin(target: int, start: int, end?: int): Buffer;
+  public sort(compare?: (first: uint8, second: uint8) => int | double): Buffer;
+  public reverse(): Buffer;
   /** A Buffer that looks into the same memory from `start` to `end`. */
-  subarray(start?: int, end?: int): Buffer;
-  map(change: (item: uint8, index: int, all: Buffer) => uint8): Buffer;
-  filter(keep: (item: uint8, index: int, all: Buffer) => boolean): Buffer;
+  public subarray(start?: int, end?: int): Buffer;
+  public map(change: (item: uint8, index: int, all: Buffer) => uint8): Buffer;
+  public filter(
+    keep: (item: uint8, index: int, all: Buffer) => boolean,
+  ): Buffer;
 
   /**
    * The bytes from `start` up to `end` as text in the encoding, "utf8" by
    * default.
    * @example Buffer.from("Hi").toString("hex") // "4869"
    */
-  toString(encoding?: BufferEncoding, start?: int, end?: int): string;
+  public toString(encoding?: BufferEncoding, start?: int, end?: int): string;
   /** The same as `toString`. */
-  toLocaleString(encoding?: BufferEncoding, start?: int, end?: int): string;
+  public toLocaleString(
+    encoding?: BufferEncoding,
+    start?: int,
+    end?: int,
+  ): string;
   /** An object of the bytes for JSON: `{ type: "Buffer", data: [...] }`. */
-  toJSON(): BufferJson;
+  public toJSON(): BufferJson;
 
   /** Whether the bytes are the same. */
-  equals(other: Uint8Array): boolean;
+  public equals(other: Uint8Array): boolean;
   /**
    * Compares the bytes, or the parts given of both: -1 when this one goes
    * earlier, 1 when later, 0 when they are the same.
    */
-  compare(
+  public compare(
     target: Uint8Array,
     targetStart?: int,
     targetEnd?: int,
@@ -57,7 +66,7 @@ export interface Buffer<B = ArrayBuffer> extends Uint8Array {
     sourceEnd?: int,
   ): int;
   /** Copies the bytes into the target and gives how many were copied. */
-  copy(
+  public copy(
     target: Uint8Array,
     targetStart?: int,
     sourceStart?: int,
@@ -67,8 +76,8 @@ export interface Buffer<B = ArrayBuffer> extends Uint8Array {
    * Writes the text at the offset, at most `length` bytes of it, and gives
    * how many bytes were written.
    */
-  write(text: string, encoding?: BufferEncoding): int;
-  write(
+  public write(text: string, encoding?: BufferEncoding): int;
+  public write(
     text: string,
     offset: int,
     length?: int,
@@ -80,125 +89,126 @@ export interface Buffer<B = ArrayBuffer> extends Uint8Array {
    * of other bytes, -1 when there is none. An encoding goes only with a
    * text.
    */
-  indexOf(
+  public indexOf(
     value: int | string | Uint8Array,
     byteOffset?: int,
     encoding?: BufferEncoding,
   ): int;
   /** The offset of the last occurrence, -1 when there is none. */
-  lastIndexOf(
+  public lastIndexOf(
     value: int | string | Uint8Array,
     byteOffset?: int,
     encoding?: BufferEncoding,
   ): int;
-  includes(
+  public includes(
     value: int | string | Uint8Array,
     byteOffset?: int,
     encoding?: BufferEncoding,
   ): boolean;
 
   /** Swaps the bytes of every pair in place. */
-  swap16(): Buffer;
+  public swap16(): Buffer;
   /** Reverses the bytes of every four in place. */
-  swap32(): Buffer;
+  public swap32(): Buffer;
   /** Reverses the bytes of every eight in place. */
-  swap64(): Buffer;
+  public swap64(): Buffer;
 
   /** Reads a number of one byte at the offset, 0 by default. */
-  readInt8(offset?: int): int;
-  readUInt8(offset?: int): int;
-  readUint8(offset?: int): int;
+  public readInt8(offset?: int): int;
+  public readUInt8(offset?: int): int;
+  public readUint8(offset?: int): int;
   /** Reads a number of two bytes. */
-  readInt16LE(offset?: int): int;
-  readInt16BE(offset?: int): int;
-  readUInt16LE(offset?: int): int;
-  readUInt16BE(offset?: int): int;
-  readUint16LE(offset?: int): int;
-  readUint16BE(offset?: int): int;
+  public readInt16LE(offset?: int): int;
+  public readInt16BE(offset?: int): int;
+  public readUInt16LE(offset?: int): int;
+  public readUInt16BE(offset?: int): int;
+  public readUint16LE(offset?: int): int;
+  public readUint16BE(offset?: int): int;
   /** Reads a number of four bytes. */
-  readInt32LE(offset?: int): int;
-  readInt32BE(offset?: int): int;
-  readUInt32LE(offset?: int): int;
-  readUInt32BE(offset?: int): int;
-  readUint32LE(offset?: int): int;
-  readUint32BE(offset?: int): int;
+  public readInt32LE(offset?: int): int;
+  public readInt32BE(offset?: int): int;
+  public readUInt32LE(offset?: int): int;
+  public readUInt32BE(offset?: int): int;
+  public readUint32LE(offset?: int): int;
+  public readUint32BE(offset?: int): int;
   /** Reads a number of `byteLength` bytes, from 1 to 6. */
-  readIntLE(offset: int, byteLength: int): int;
-  readIntBE(offset: int, byteLength: int): int;
-  readUIntLE(offset: int, byteLength: int): int;
-  readUIntBE(offset: int, byteLength: int): int;
-  readUintLE(offset: int, byteLength: int): int;
-  readUintBE(offset: int, byteLength: int): int;
+  public readIntLE(offset: int, byteLength: int): int;
+  public readIntBE(offset: int, byteLength: int): int;
+  public readUIntLE(offset: int, byteLength: int): int;
+  public readUIntBE(offset: int, byteLength: int): int;
+  public readUintLE(offset: int, byteLength: int): int;
+  public readUintBE(offset: int, byteLength: int): int;
   /**
    * Reads a number with a fraction of four bytes; an error when the bytes
    * hold `NaN` or an infinity.
    */
-  readFloatLE(offset?: int): Result<double, NumberError>;
-  readFloatBE(offset?: int): Result<double, NumberError>;
+  public readFloatLE(offset?: int): Result<double, NumberError>;
+  public readFloatBE(offset?: int): Result<double, NumberError>;
   /** Reads a number with a fraction of eight bytes. */
-  readDoubleLE(offset?: int): Result<double, NumberError>;
-  readDoubleBE(offset?: int): Result<double, NumberError>;
+  public readDoubleLE(offset?: int): Result<double, NumberError>;
+  public readDoubleBE(offset?: int): Result<double, NumberError>;
 
   /**
    * Writes a number of one byte at the offset, 0 by default, and gives the
    * offset after it.
    */
-  writeInt8(value: int, offset?: int): int;
-  writeUInt8(value: int, offset?: int): int;
-  writeUint8(value: int, offset?: int): int;
+  public writeInt8(value: int, offset?: int): int;
+  public writeUInt8(value: int, offset?: int): int;
+  public writeUint8(value: int, offset?: int): int;
   /** Writes a number of two bytes. */
-  writeInt16LE(value: int, offset?: int): int;
-  writeInt16BE(value: int, offset?: int): int;
-  writeUInt16LE(value: int, offset?: int): int;
-  writeUInt16BE(value: int, offset?: int): int;
-  writeUint16LE(value: int, offset?: int): int;
-  writeUint16BE(value: int, offset?: int): int;
+  public writeInt16LE(value: int, offset?: int): int;
+  public writeInt16BE(value: int, offset?: int): int;
+  public writeUInt16LE(value: int, offset?: int): int;
+  public writeUInt16BE(value: int, offset?: int): int;
+  public writeUint16LE(value: int, offset?: int): int;
+  public writeUint16BE(value: int, offset?: int): int;
   /** Writes a number of four bytes. */
-  writeInt32LE(value: int, offset?: int): int;
-  writeInt32BE(value: int, offset?: int): int;
-  writeUInt32LE(value: int, offset?: int): int;
-  writeUInt32BE(value: int, offset?: int): int;
-  writeUint32LE(value: int, offset?: int): int;
-  writeUint32BE(value: int, offset?: int): int;
+  public writeInt32LE(value: int, offset?: int): int;
+  public writeInt32BE(value: int, offset?: int): int;
+  public writeUInt32LE(value: int, offset?: int): int;
+  public writeUInt32BE(value: int, offset?: int): int;
+  public writeUint32LE(value: int, offset?: int): int;
+  public writeUint32BE(value: int, offset?: int): int;
   /** Writes a number of `byteLength` bytes, from 1 to 6. */
-  writeIntLE(value: int, offset: int, byteLength: int): int;
-  writeIntBE(value: int, offset: int, byteLength: int): int;
-  writeUIntLE(value: int, offset: int, byteLength: int): int;
-  writeUIntBE(value: int, offset: int, byteLength: int): int;
-  writeUintLE(value: int, offset: int, byteLength: int): int;
-  writeUintBE(value: int, offset: int, byteLength: int): int;
+  public writeIntLE(value: int, offset: int, byteLength: int): int;
+  public writeIntBE(value: int, offset: int, byteLength: int): int;
+  public writeUIntLE(value: int, offset: int, byteLength: int): int;
+  public writeUIntBE(value: int, offset: int, byteLength: int): int;
+  public writeUintLE(value: int, offset: int, byteLength: int): int;
+  public writeUintBE(value: int, offset: int, byteLength: int): int;
   /** Writes a number with a fraction of four bytes. */
-  writeFloatLE(value: double, offset?: int): int;
-  writeFloatBE(value: double, offset?: int): int;
+  public writeFloatLE(value: double, offset?: int): int;
+  public writeFloatBE(value: double, offset?: int): int;
   /** Writes a number with a fraction of eight bytes. */
-  writeDoubleLE(value: double, offset?: int): int;
-  writeDoubleBE(value: double, offset?: int): int;
-}
+  public writeDoubleLE(value: double, offset?: int): int;
+  public writeDoubleBE(value: double, offset?: int): int;
 
-/** What `Buffer` has; `new Buffer(…)` is not there, as node gave it up. */
-export interface BufferConstructor {
   /** How many bytes an item takes: 1. */
-  readonly BYTES_PER_ELEMENT: int;
+  public static readonly BYTES_PER_ELEMENT: int;
   /** The size of the pool node takes small Buffers from: 8192. */
-  readonly poolSize: int;
+  public static readonly poolSize: int;
 
   /**
    * A Buffer of the bytes of a text in the encoding, "utf8" by default.
    * @example Buffer.from("SGk=", "base64") // <Buffer 48 69>
    */
-  from(text: string, encoding?: BufferEncoding): Buffer;
+  public static from(text: string, encoding?: BufferEncoding): Buffer;
   /** A Buffer with a copy of the bytes of an array or of other bytes. */
-  from(items: uint8[] | Uint8Array): Buffer;
+  public static from(items: uint8[] | Uint8Array): Buffer;
   /** A Buffer that looks into the memory of an `ArrayBuffer`. */
-  from(buffer: ArrayBuffer, byteOffset?: int, length?: int): Buffer;
+  public static from(
+    buffer: ArrayBuffer,
+    byteOffset?: int,
+    length?: int,
+  ): Buffer;
   /** A Buffer of the bytes given. */
-  of(...items: uint8[]): Buffer;
+  public static of(...items: uint8[]): Buffer;
 
   /**
    * A Buffer of `size` bytes, zeros or what `fill` says: a number, the
    * bytes of a text or other bytes.
    */
-  alloc(
+  public static alloc(
     size: int,
     fill?: int | string | Uint8Array,
     encoding?: BufferEncoding,
@@ -207,22 +217,23 @@ export interface BufferConstructor {
    * A Buffer of `size` bytes that are not set to zeros: they are whatever
    * the memory held, so every byte is to be written before it is read.
    */
-  allocUnsafe(size: int): Buffer;
+  public static allocUnsafe(size: int): Buffer;
   /** The same as `allocUnsafe`. */
-  allocUnsafeSlow(size: int): Buffer;
+  public static allocUnsafeSlow(size: int): Buffer;
   /**
    * One Buffer of all the bytes in a row, cut or padded with zeros to
    * `totalLength` when given.
    */
-  concat(list: Uint8Array[], totalLength?: int): Buffer;
+  public static concat(list: Uint8Array[], totalLength?: int): Buffer;
 
   /** How many bytes a text takes in the encoding, or bytes hold. */
-  byteLength(value: string | AnyBytes, encoding?: BufferEncoding): int;
+  public static byteLength(
+    value: string | AnyBytes,
+    encoding?: BufferEncoding,
+  ): int;
   /** Compares two rows of bytes: -1, 0 or 1; fits `sort`. */
-  compare(first: Uint8Array, second: Uint8Array): int;
-  isBuffer(value: unknown): boolean;
+  public static compare(first: Uint8Array, second: Uint8Array): int;
+  public static isBuffer(value: unknown): boolean;
   /** Whether the text names an encoding Buffer knows. */
-  isEncoding(encoding: string): boolean;
+  public static isEncoding(encoding: string): boolean;
 }
-
-export declare const Buffer: BufferConstructor;

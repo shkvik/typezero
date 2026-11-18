@@ -141,6 +141,8 @@ partial class ScopeTraversal {
     this.scopes.open();
     this.scopes.enterFunction();
     this.declareTypeParams(decl.typeParams);
+    this.traverseBase(decl.base);
+    this.traverseTypes(decl.implemented);
 
     for (const member of decl.members) {
       this.traverseDeclaredMember(member);

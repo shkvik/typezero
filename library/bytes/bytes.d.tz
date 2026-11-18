@@ -4,27 +4,25 @@
  * a `DataView` over it. Its size does not change: there is no `resize` and
  * no `transfer` yet.
  */
-export interface ArrayBuffer {
+export declare class ArrayBuffer {
+  /** Memory of that many bytes, all zeros. */
+  public constructor(length: int);
+
   /** The length in bytes. */
-  readonly byteLength: int;
+  public readonly byteLength: int;
   /** The same as `byteLength`, as the size does not change. */
-  readonly maxByteLength: int;
+  public readonly maxByteLength: int;
   /** Always false. */
-  readonly resizable: boolean;
+  public readonly resizable: boolean;
   /** Always false. */
-  readonly detached: boolean;
+  public readonly detached: boolean;
 
   /** A new buffer with a copy of the bytes from `start` up to `end`. */
-  slice(start?: int, end?: int): ArrayBuffer;
-}
+  public slice(start?: int, end?: int): ArrayBuffer;
 
-/** What `ArrayBuffer` has besides `new ArrayBuffer(length)`. */
-export interface ArrayBufferConstructor {
   /** Whether the value is a typed array or a `DataView`. */
-  isView(value: unknown): boolean;
+  public static isView(value: unknown): boolean;
 }
-
-export declare const ArrayBuffer: ArrayBufferConstructor;
 
 /**
  * What every typed array has: numbers of one type `E` laid in memory one
@@ -38,207 +36,301 @@ export declare const ArrayBuffer: ArrayBufferConstructor;
  * of another typed array, or of an `ArrayBuffer` with an offset and a length
  * in items, and then it looks into the memory of that buffer.
  */
-export interface TypedArray<E, Self> {
+export declare abstract class TypedArray<E, Self> {
   /** How many items there are. */
-  readonly length: int;
+  public readonly length: int;
   /** The length in bytes. */
-  readonly byteLength: int;
+  public readonly byteLength: int;
   /** Where in `buffer` the first item is. */
-  readonly byteOffset: int;
+  public readonly byteOffset: int;
   /** The memory the items are in. */
-  readonly buffer: ArrayBuffer;
+  public readonly buffer: ArrayBuffer;
   /** How many bytes an item takes. */
-  readonly BYTES_PER_ELEMENT: int;
+  public readonly BYTES_PER_ELEMENT: int;
 
   /** The item at the index; a negative index counts from the end. */
-  at(index: int): E | undefined;
+  public at(index: int): E | undefined;
   /** Sets every item from `start` up to `end` to the value. */
-  fill(value: E, start?: int, end?: int): Self;
+  public fill(value: E, start?: int, end?: int): Self;
   /**
    * Writes the items of an array, an iterator or another typed array from
    * `offset` on; they must be proven to fit, in count and in value.
    */
-  set(items: Iterable<E> | Iterator<E>, offset?: int): void;
+  public set(items: Iterable<E> | Iterator<E>, offset?: int): void;
   /** Copies the items from `start` up to `end` to `target` inside itself. */
-  copyWithin(target: int, start: int, end?: int): Self;
+  public copyWithin(target: int, start: int, end?: int): Self;
   /**
    * Sorts the array itself, by value when there is no function.
    * @example bytes.sort()
    */
-  sort(compare?: (first: E, second: E) => int | double): Self;
+  public sort(compare?: (first: E, second: E) => int | double): Self;
   /** Reverses the array itself. */
-  reverse(): Self;
+  public reverse(): Self;
 
   /** A new typed array with a copy of the items from `start` up to `end`. */
-  slice(start?: int, end?: int): Self;
+  public slice(start?: int, end?: int): Self;
   /** A typed array that looks into the same memory from `start` to `end`. */
-  subarray(start?: int, end?: int): Self;
+  public subarray(start?: int, end?: int): Self;
   /** A reversed copy. */
-  toReversed(): Self;
+  public toReversed(): Self;
   /** A sorted copy. */
-  toSorted(compare?: (first: E, second: E) => int | double): Self;
+  public toSorted(compare?: (first: E, second: E) => int | double): Self;
   /** A copy with the item at the index replaced. */
-  with(index: int, value: E): Self;
+  public with(index: int, value: E): Self;
 
   /** The index of the first such item, -1 when there is none. */
-  indexOf(item: E | int | double, from?: int): int;
+  public indexOf(item: E | int | double, from?: int): int;
   /** The index of the last such item, -1 when there is none. */
-  lastIndexOf(item: E | int | double, from?: int): int;
-  includes(item: E | int | double, from?: int): boolean;
+  public lastIndexOf(item: E | int | double, from?: int): int;
+  public includes(item: E | int | double, from?: int): boolean;
 
   /** The items as text with the separator, a comma by default. */
-  join(separator?: string): string;
-  toString(): string;
+  public join(separator?: string): string;
+  public toString(): string;
 
-  keys(): Generator<int>;
-  values(): Generator<E>;
-  entries(): Generator<[int, E]>;
+  public keys(): Generator<int>;
+  public values(): Generator<E>;
+  public entries(): Generator<[int, E]>;
 
-  forEach(action: (item: E, index: int, all: Self) => void): void;
+  public forEach(action: (item: E, index: int, all: Self) => void): void;
   /** A new typed array of what the function gives for each item. */
-  map(change: (item: E, index: int, all: Self) => E): Self;
+  public map(change: (item: E, index: int, all: Self) => E): Self;
   /** A new typed array of the items the function says yes to. */
-  filter(keep: (item: E, index: int, all: Self) => boolean): Self;
+  public filter(keep: (item: E, index: int, all: Self) => boolean): Self;
 
   /**
    * Folds the items into one value from the left. Without a start value the
    * first item is the start, and an empty array gives `undefined`.
    */
-  reduce(join: (result: E, item: E, index: int, all: Self) => E): E | undefined;
-  reduce<U>(
+  public reduce(
+    join: (result: E, item: E, index: int, all: Self) => E,
+  ): E | undefined;
+  public reduce<U>(
     join: (result: U, item: E, index: int, all: Self) => U,
     start: U,
   ): U;
   /** As `reduce`, from the right. */
-  reduceRight(
+  public reduceRight(
     join: (result: E, item: E, index: int, all: Self) => E,
   ): E | undefined;
-  reduceRight<U>(
+  public reduceRight<U>(
     join: (result: U, item: E, index: int, all: Self) => U,
     start: U,
   ): U;
 
   /** The first item the function says yes to. */
-  find(test: (item: E, index: int, all: Self) => boolean): E | undefined;
+  public find(test: (item: E, index: int, all: Self) => boolean): E | undefined;
   /** The last item the function says yes to. */
-  findLast(test: (item: E, index: int, all: Self) => boolean): E | undefined;
+  public findLast(
+    test: (item: E, index: int, all: Self) => boolean,
+  ): E | undefined;
   /** The index of the first such item, -1 when there is none. */
-  findIndex(test: (item: E, index: int, all: Self) => boolean): int;
+  public findIndex(test: (item: E, index: int, all: Self) => boolean): int;
   /** The index of the last such item, -1 when there is none. */
-  findLastIndex(test: (item: E, index: int, all: Self) => boolean): int;
+  public findLastIndex(test: (item: E, index: int, all: Self) => boolean): int;
   /** Whether the function says yes to at least one item. */
-  some(test: (item: E, index: int, all: Self) => boolean): boolean;
+  public some(test: (item: E, index: int, all: Self) => boolean): boolean;
   /** Whether the function says yes to every item. */
-  every(test: (item: E, index: int, all: Self) => boolean): boolean;
-}
-
-/** What the name of a typed array has besides `new`. */
-export interface TypedArrayConstructor<E, Self> {
-  /** How many bytes an item takes. */
-  readonly BYTES_PER_ELEMENT: int;
-
-  /**
-   * A new typed array of the items of an array, an iterator or another typed
-   * array, each changed by the function when there is one.
-   * @example Uint8Array.from(numbers, (x) => (x & 0xff).toUint8())
-   */
-  from(items: Iterable<E> | Iterator<E>): Self;
-  from<T>(
-    items: Iterable<T> | Iterator<T>,
-    change: (item: T, index: int) => E,
-  ): Self;
-  /** A new typed array of the values given. */
-  of(...items: E[]): Self;
+  public every(test: (item: E, index: int, all: Self) => boolean): boolean;
 }
 
 /**
  * Bytes: numbers from 0 to 255. The type argument, `ArrayBuffer` or
  * `ArrayBufferLike`, is taken as TypeScript writes it and changes nothing.
  */
-export interface Uint8Array<B = ArrayBuffer> extends TypedArray<
+export declare class Uint8Array<B = ArrayBuffer> extends TypedArray<
   uint8,
   Uint8Array
-> {}
+> {
+  public constructor();
+  public constructor(length: int);
+  public constructor(items: uint8[] | Iterator<uint8> | AnyTypedArray);
+  public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
-export declare const Uint8Array: TypedArrayConstructor<uint8, Uint8Array>;
+  public static readonly BYTES_PER_ELEMENT: int;
+  public static from(items: Iterable<uint8> | Iterator<uint8>): Uint8Array;
+  public static from<T>(
+    items: Iterable<T> | Iterator<T>,
+    change: (item: T, index: int) => uint8,
+  ): Uint8Array;
+  public static of(...items: uint8[]): Uint8Array;
+}
 
 /**
  * Bytes that a write clamps to 0…255 instead of asking for a proof: less
  * than 0 becomes 0, more than 255 becomes 255.
  */
-export interface Uint8ClampedArray<B = ArrayBuffer> extends TypedArray<
+export declare class Uint8ClampedArray<B = ArrayBuffer> extends TypedArray<
   uint8,
   Uint8ClampedArray
-> {}
+> {
+  public constructor();
+  public constructor(length: int);
+  public constructor(items: uint8[] | Iterator<uint8> | AnyTypedArray);
+  public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
-export declare const Uint8ClampedArray: TypedArrayConstructor<
-  uint8,
-  Uint8ClampedArray
->;
+  public static readonly BYTES_PER_ELEMENT: int;
+  public static from(
+    items: Iterable<uint8> | Iterator<uint8>,
+  ): Uint8ClampedArray;
+  public static from<T>(
+    items: Iterable<T> | Iterator<T>,
+    change: (item: T, index: int) => uint8,
+  ): Uint8ClampedArray;
+  public static of(...items: uint8[]): Uint8ClampedArray;
+}
 
 /** Numbers from -128 to 127. */
-export interface Int8Array<B = ArrayBuffer> extends TypedArray<
+export declare class Int8Array<B = ArrayBuffer> extends TypedArray<
   int8,
   Int8Array
-> {}
+> {
+  public constructor();
+  public constructor(length: int);
+  public constructor(items: int8[] | Iterator<int8> | AnyTypedArray);
+  public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
-export declare const Int8Array: TypedArrayConstructor<int8, Int8Array>;
+  public static readonly BYTES_PER_ELEMENT: int;
+  public static from(items: Iterable<int8> | Iterator<int8>): Int8Array;
+  public static from<T>(
+    items: Iterable<T> | Iterator<T>,
+    change: (item: T, index: int) => int8,
+  ): Int8Array;
+  public static of(...items: int8[]): Int8Array;
+}
 
 /** Numbers from 0 to 65 535, two bytes each. */
-export interface Uint16Array<B = ArrayBuffer> extends TypedArray<
+export declare class Uint16Array<B = ArrayBuffer> extends TypedArray<
   uint16,
   Uint16Array
-> {}
+> {
+  public constructor();
+  public constructor(length: int);
+  public constructor(items: uint16[] | Iterator<uint16> | AnyTypedArray);
+  public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
-export declare const Uint16Array: TypedArrayConstructor<uint16, Uint16Array>;
+  public static readonly BYTES_PER_ELEMENT: int;
+  public static from(items: Iterable<uint16> | Iterator<uint16>): Uint16Array;
+  public static from<T>(
+    items: Iterable<T> | Iterator<T>,
+    change: (item: T, index: int) => uint16,
+  ): Uint16Array;
+  public static of(...items: uint16[]): Uint16Array;
+}
 
 /** Numbers from -32 768 to 32 767, two bytes each. */
-export interface Int16Array<B = ArrayBuffer> extends TypedArray<
+export declare class Int16Array<B = ArrayBuffer> extends TypedArray<
   int16,
   Int16Array
-> {}
+> {
+  public constructor();
+  public constructor(length: int);
+  public constructor(items: int16[] | Iterator<int16> | AnyTypedArray);
+  public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
-export declare const Int16Array: TypedArrayConstructor<int16, Int16Array>;
+  public static readonly BYTES_PER_ELEMENT: int;
+  public static from(items: Iterable<int16> | Iterator<int16>): Int16Array;
+  public static from<T>(
+    items: Iterable<T> | Iterator<T>,
+    change: (item: T, index: int) => int16,
+  ): Int16Array;
+  public static of(...items: int16[]): Int16Array;
+}
 
 /** Numbers from 0 to 4 294 967 295, four bytes each. */
-export interface Uint32Array<B = ArrayBuffer> extends TypedArray<
+export declare class Uint32Array<B = ArrayBuffer> extends TypedArray<
   uint32,
   Uint32Array
-> {}
+> {
+  public constructor();
+  public constructor(length: int);
+  public constructor(items: uint32[] | Iterator<uint32> | AnyTypedArray);
+  public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
-export declare const Uint32Array: TypedArrayConstructor<uint32, Uint32Array>;
+  public static readonly BYTES_PER_ELEMENT: int;
+  public static from(items: Iterable<uint32> | Iterator<uint32>): Uint32Array;
+  public static from<T>(
+    items: Iterable<T> | Iterator<T>,
+    change: (item: T, index: int) => uint32,
+  ): Uint32Array;
+  public static of(...items: uint32[]): Uint32Array;
+}
 
 /** Numbers from -2 147 483 648 to 2 147 483 647, four bytes each. */
-export interface Int32Array<B = ArrayBuffer> extends TypedArray<
+export declare class Int32Array<B = ArrayBuffer> extends TypedArray<
   int32,
   Int32Array
-> {}
+> {
+  public constructor();
+  public constructor(length: int);
+  public constructor(items: int32[] | Iterator<int32> | AnyTypedArray);
+  public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
-export declare const Int32Array: TypedArrayConstructor<int32, Int32Array>;
+  public static readonly BYTES_PER_ELEMENT: int;
+  public static from(items: Iterable<int32> | Iterator<int32>): Int32Array;
+  public static from<T>(
+    items: Iterable<T> | Iterator<T>,
+    change: (item: T, index: int) => int32,
+  ): Int32Array;
+  public static of(...items: int32[]): Int32Array;
+}
 
 /** Numbers with a fraction, two bytes each. */
-export interface Float16Array<B = ArrayBuffer> extends TypedArray<
+export declare class Float16Array<B = ArrayBuffer> extends TypedArray<
   double,
   Float16Array
-> {}
+> {
+  public constructor();
+  public constructor(length: int);
+  public constructor(items: double[] | Iterator<double> | AnyTypedArray);
+  public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
-export declare const Float16Array: TypedArrayConstructor<double, Float16Array>;
+  public static readonly BYTES_PER_ELEMENT: int;
+  public static from(items: Iterable<double> | Iterator<double>): Float16Array;
+  public static from<T>(
+    items: Iterable<T> | Iterator<T>,
+    change: (item: T, index: int) => double,
+  ): Float16Array;
+  public static of(...items: double[]): Float16Array;
+}
 
 /** Numbers with a fraction, four bytes each. */
-export interface Float32Array<B = ArrayBuffer> extends TypedArray<
+export declare class Float32Array<B = ArrayBuffer> extends TypedArray<
   double,
   Float32Array
-> {}
+> {
+  public constructor();
+  public constructor(length: int);
+  public constructor(items: double[] | Iterator<double> | AnyTypedArray);
+  public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
-export declare const Float32Array: TypedArrayConstructor<double, Float32Array>;
+  public static readonly BYTES_PER_ELEMENT: int;
+  public static from(items: Iterable<double> | Iterator<double>): Float32Array;
+  public static from<T>(
+    items: Iterable<T> | Iterator<T>,
+    change: (item: T, index: int) => double,
+  ): Float32Array;
+  public static of(...items: double[]): Float32Array;
+}
 
 /** Numbers with a fraction, eight bytes each: every double as it is. */
-export interface Float64Array<B = ArrayBuffer> extends TypedArray<
+export declare class Float64Array<B = ArrayBuffer> extends TypedArray<
   double,
   Float64Array
-> {}
+> {
+  public constructor();
+  public constructor(length: int);
+  public constructor(items: double[] | Iterator<double> | AnyTypedArray);
+  public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
-export declare const Float64Array: TypedArrayConstructor<double, Float64Array>;
+  public static readonly BYTES_PER_ELEMENT: int;
+  public static from(items: Iterable<double> | Iterator<double>): Float64Array;
+  public static from<T>(
+    items: Iterable<T> | Iterator<T>,
+    change: (item: T, index: int) => double,
+  ): Float64Array;
+  public static of(...items: double[]): Float64Array;
+}
 
 /** Any of the typed arrays. */
 export type AnyTypedArray =
@@ -274,36 +366,43 @@ export type AnyBytes = AnyTypedArray | DataView | ArrayBuffer;
  * fit. Reading a number with a fraction gives a Result: the bytes may hold
  * `NaN` or an infinity, which a double here never is.
  */
-export interface DataView {
+export declare class DataView {
+  /** A view of the whole buffer, or of `byteLength` bytes from `byteOffset`. */
+  public constructor(buffer: ArrayBuffer, byteOffset?: int, byteLength?: int);
+
   /** The memory it looks into. */
-  readonly buffer: ArrayBuffer;
+  public readonly buffer: ArrayBuffer;
   /** Its length in bytes. */
-  readonly byteLength: int;
+  public readonly byteLength: int;
   /** Where in `buffer` it starts. */
-  readonly byteOffset: int;
+  public readonly byteOffset: int;
 
-  getInt8(offset: int): int;
-  getUint8(offset: int): int;
-  getInt16(offset: int, littleEndian?: boolean): int;
-  getUint16(offset: int, littleEndian?: boolean): int;
-  getInt32(offset: int, littleEndian?: boolean): int;
-  getUint32(offset: int, littleEndian?: boolean): int;
-  getFloat16(offset: int, littleEndian?: boolean): Result<double, NumberError>;
-  getFloat32(offset: int, littleEndian?: boolean): Result<double, NumberError>;
-  getFloat64(offset: int, littleEndian?: boolean): Result<double, NumberError>;
+  public getInt8(offset: int): int;
+  public getUint8(offset: int): int;
+  public getInt16(offset: int, littleEndian?: boolean): int;
+  public getUint16(offset: int, littleEndian?: boolean): int;
+  public getInt32(offset: int, littleEndian?: boolean): int;
+  public getUint32(offset: int, littleEndian?: boolean): int;
+  public getFloat16(
+    offset: int,
+    littleEndian?: boolean,
+  ): Result<double, NumberError>;
+  public getFloat32(
+    offset: int,
+    littleEndian?: boolean,
+  ): Result<double, NumberError>;
+  public getFloat64(
+    offset: int,
+    littleEndian?: boolean,
+  ): Result<double, NumberError>;
 
-  setInt8(offset: int, value: int): void;
-  setUint8(offset: int, value: int): void;
-  setInt16(offset: int, value: int, littleEndian?: boolean): void;
-  setUint16(offset: int, value: int, littleEndian?: boolean): void;
-  setInt32(offset: int, value: int, littleEndian?: boolean): void;
-  setUint32(offset: int, value: int, littleEndian?: boolean): void;
-  setFloat16(offset: int, value: double, littleEndian?: boolean): void;
-  setFloat32(offset: int, value: double, littleEndian?: boolean): void;
-  setFloat64(offset: int, value: double, littleEndian?: boolean): void;
+  public setInt8(offset: int, value: int): void;
+  public setUint8(offset: int, value: int): void;
+  public setInt16(offset: int, value: int, littleEndian?: boolean): void;
+  public setUint16(offset: int, value: int, littleEndian?: boolean): void;
+  public setInt32(offset: int, value: int, littleEndian?: boolean): void;
+  public setUint32(offset: int, value: int, littleEndian?: boolean): void;
+  public setFloat16(offset: int, value: double, littleEndian?: boolean): void;
+  public setFloat32(offset: int, value: double, littleEndian?: boolean): void;
+  public setFloat64(offset: int, value: double, littleEndian?: boolean): void;
 }
-
-/** `DataView` has nothing besides `new DataView(buffer, offset, length)`. */
-export interface DataViewConstructor {}
-
-export declare const DataView: DataViewConstructor;

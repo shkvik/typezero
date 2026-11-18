@@ -39,6 +39,8 @@ export type DeclaredClass = {
   readonly loc: int;
   readonly isAbstract: boolean;
   readonly typeParams: TypeParamDecl[];
+  readonly base?: TypeRef;
+  readonly implemented: TypeRef[];
   readonly members: DeclaredMember[];
 };
 

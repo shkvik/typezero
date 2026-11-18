@@ -220,7 +220,11 @@ partial class FileParser {
 
     const typeParams = this.optionalTypeParams();
 
-    this.rejectClassBase();
+    this.checkClassBase();
+
+    const extended = this.classBase(false);
+    const implemented = this.implementedTypes();
+
     if (!this.cursor.expect(TokenKind.LBrace, Code.ExpectedClassMembersStart)) {
       return;
     }
@@ -243,21 +247,19 @@ partial class FileParser {
       loc: name.start,
       isAbstract,
       typeParams,
+      base: extended.base,
+      implemented,
       members,
     });
   }
 
-  private rejectClassBase(): void {
+  private checkClassBase(): void {
     const token = this.cursor.peek();
     const written =
       token.kind == TokenKind.Extends || token.kind == TokenKind.Implements;
-    if (!written) {
-      return;
+    if (written && !this.library) {
+      this.cursor.report(token.start, Code.DeclarationClassBase);
     }
-
-    this.cursor.report(token.start, Code.DeclarationClassBase);
-    this.classBase(false);
-    this.implementedTypes();
   }
 
   private declaredMember(members: DeclaredMember[]): void {

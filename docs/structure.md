@@ -195,6 +195,14 @@ self/             компилятор на tz, пробный (порт compile
                   выводе команд этих модулей нет). Пространство имён (`Bit`, `Intl`, `NodeJS`) — тоже файл объявлений (library/math/bit.d.tz, intl/intl.d.tz, timers/nodejs.d.tz): запись таблицы с полем `namespace`; типы файла зовутся с именем пространства впереди (`Intl.NumberFormat`, `Bit.Wrap32`), его значения — члены пространства (`Bit.rotateLeft32`), а тип, которого в файле нет, — TZ2302; intl.d.tz собирает tmp/selfhost/probes/intl_gen.py из данных таблиц C++. Модуль node, который отдаёт глобальное имя (`node:buffer` — `Buffer`), — файл объявлений с одним `export { Buffer } from "tz:global/buffer"` (library/buffer/node_buffer.d.tz): имя из импорта и глобальное — одно объявление; по своему имени глобальный модуль виден только коду библиотеки (программе — TZ2010), и только библиотеке разрешён `export … from` встроенного модуля. `node:process` (library/process/node_process.d.tz) отдаёт поля `process` по имени: `export declare const argv: Process["argv"]`. Потоки `process.stdin` / `stdout` / `stderr` объявлены отдельно (library/process/process_streams.d.tz, модуль `tz:process/streams`) и приходят в программу только по упоминанию — записи kLibraryMembers, как `crypto.subtle`: иначе библиотека потоков (около 4800 строк) загружалась бы в каждую программу. В интерфейсах библиотеки метод может
                   иметь свои параметры типа (`max<N extends MathNumber>(...values: N[]): N`,
                   ObjectTypeField.typeParams); в коде программы это по-прежнему TZ1328.
+                  То, что создаётся через `new` (`Map`, `Set`, `WeakRef`, `Date`, `Promise`,
+                  `RegExp`, `ArrayBuffer`, типизированные массивы, `DataView`, `TextEncoder`,
+                  `TextDecoder`, сервисы `Intl`), описано не интерфейсом, а
+                  `export declare class`: конструкторы — подписи `constructor(…)`,
+                  статическое — `static`; объявленный класс библиотеки может иметь
+                  `extends` (DeclaredClass.base; в `.d.tz` программы — TZ1705): десять
+                  типизированных массивов продолжают абстрактный `TypedArray<E, Self>`, а
+                  `Buffer` — `Uint8Array`, его конструктор `private`.
                   Объявленная без тела функция может иметь несколько подписей с одним
                   именем. Все модули, которые компилятор держит внутри себя, описаны так
                   (15: `node:fs`, `node:fs/promises`, `tz:fs`, `node:readline` с `promises`,

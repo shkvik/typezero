@@ -2,38 +2,37 @@
  * What a `Map<K, V>` has: values by keys, in the order the keys were set. It
  * is made with `new Map<K, V>()`, of pairs or of another map when given.
  */
-export interface Map<K, V> {
+export declare class Map<K, V> {
+  /** A map of nothing, or of the pairs of an array, an iterator or a map. */
+  public constructor();
+  public constructor(entries: Iterable<[K, V]> | Iterator<[K, V]>);
+
   /** How many keys there are. */
-  readonly size: int;
+  public readonly size: int;
 
   /** The value of the key. */
-  get(key: K): V | undefined;
+  public get(key: K): V | undefined;
   /** Sets the value of the key and gives the map itself. */
-  set(key: K, value: V): Map<K, V>;
-  has(key: K): boolean;
+  public set(key: K, value: V): Map<K, V>;
+  public has(key: K): boolean;
   /** Removes the key; whether it was there. */
-  delete(key: K): boolean;
-  clear(): void;
+  public delete(key: K): boolean;
+  public clear(): void;
 
-  keys(): Generator<K>;
-  values(): Generator<V>;
-  entries(): Generator<[K, V]>;
-  forEach(action: (value: V, key: K, all: Map<K, V>) => void): void;
-}
+  public keys(): Generator<K>;
+  public values(): Generator<V>;
+  public entries(): Generator<[K, V]>;
+  public forEach(action: (value: V, key: K, all: Map<K, V>) => void): void;
 
-/** What `Map` has besides `new Map<K, V>()`. */
-export interface MapConstructor {
   /**
    * A map of the items by the key the function gives for each.
    * @example Map.groupBy([1, 2, 3], (x) => x % 2) // 1 => [1, 3], 0 => [2]
    */
-  groupBy<T, K>(
+  public static groupBy<T, K>(
     items: Iterable<T>,
     key: (item: T, index: int) => K,
   ): Map<K, T[]>;
 }
-
-export declare const Map: MapConstructor;
 
 /**
  * What a `Set<T>` has: values without repeats, in the order they were added.
@@ -41,40 +40,39 @@ export declare const Map: MapConstructor;
  * when given. Where another set is taken, a map stands for the set of its
  * keys.
  */
-export interface Set<T> {
+export declare class Set<T> {
+  /** A set of nothing, or of the items of an array, an iterator or a set. */
+  public constructor();
+  public constructor(items: Iterable<T> | Iterator<T>);
+
   /** How many values there are. */
-  readonly size: int;
+  public readonly size: int;
 
   /** Adds the value and gives the set itself. */
-  add(value: T): Set<T>;
-  has(value: T): boolean;
+  public add(value: T): Set<T>;
+  public has(value: T): boolean;
   /** Removes the value; whether it was there. */
-  delete(value: T): boolean;
-  clear(): void;
+  public delete(value: T): boolean;
+  public clear(): void;
 
-  keys(): Generator<T>;
-  values(): Generator<T>;
-  entries(): Generator<[T, T]>;
-  forEach(action: (value: T, same: T, all: Set<T>) => void): void;
+  public keys(): Generator<T>;
+  public values(): Generator<T>;
+  public entries(): Generator<[T, T]>;
+  public forEach(action: (value: T, same: T, all: Set<T>) => void): void;
 
   /** The values of both sets. */
-  union(other: Set<T> | Map<T, unknown>): Set<T>;
+  public union(other: Set<T> | Map<T, unknown>): Set<T>;
   /** The values that are in both sets. */
-  intersection(other: Set<T> | Map<T, unknown>): Set<T>;
+  public intersection(other: Set<T> | Map<T, unknown>): Set<T>;
   /** The values of this set that the other does not have. */
-  difference(other: Set<T> | Map<T, unknown>): Set<T>;
+  public difference(other: Set<T> | Map<T, unknown>): Set<T>;
   /** The values that are in one of the sets only. */
-  symmetricDifference(other: Set<T> | Map<T, unknown>): Set<T>;
-  isSubsetOf(other: Set<T> | Map<T, unknown>): boolean;
-  isSupersetOf(other: Set<T> | Map<T, unknown>): boolean;
+  public symmetricDifference(other: Set<T> | Map<T, unknown>): Set<T>;
+  public isSubsetOf(other: Set<T> | Map<T, unknown>): boolean;
+  public isSupersetOf(other: Set<T> | Map<T, unknown>): boolean;
   /** Whether the sets have no value in common. */
-  isDisjointFrom(other: Set<T> | Map<T, unknown>): boolean;
+  public isDisjointFrom(other: Set<T> | Map<T, unknown>): boolean;
 }
-
-/** `Set` has nothing besides `new Set<T>()`. */
-export interface SetConstructor {}
-
-export declare const Set: SetConstructor;
 
 /** The same as `Map<K, V>`. */
 export type ReadonlyMap<K, V> = Map<K, V>;

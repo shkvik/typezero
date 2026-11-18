@@ -353,7 +353,7 @@ export const kLibraryModules: LibraryModule[] = [
     name: "tz:locale",
     file: "locale.tz",
     parts: [],
-    specs: [],
+    specs: ["tz:locale"],
     access: LibraryAccess.Implicit,
   },
   {

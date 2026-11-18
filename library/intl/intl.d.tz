@@ -1,3 +1,5 @@
+import { Locale } from "tz:locale";
+
 /**
  * A piece of formatted text: what it is ("day", "literal", "integer",
  * "currency"…) and the text itself.
@@ -143,24 +145,21 @@ export type ResolvedNumberFormatOptions = {
  * `Intl.Locale`, that of the system by default.
  * @example new Intl.NumberFormat("de", { style: "percent" }).format(0.5)
  */
-export interface NumberFormat {
-  /** The number as text. */
-  format(value: int | double | decimal): string;
-  /** The text by parts: digits, separators, the sign of the currency. */
-  formatToParts(value: int | double | decimal): NumberFormatPart[];
-  resolvedOptions(): ResolvedNumberFormatOptions;
-}
+export declare class NumberFormat {
+  public constructor(locale?: string | Locale, options?: NumberFormatOptions);
 
-/** What `Intl.NumberFormat` has besides `new`. */
-export interface NumberFormatConstructor {
+  /** The number as text. */
+  public format(value: int | double | decimal): string;
+  /** The text by parts: digits, separators, the sign of the currency. */
+  public formatToParts(value: int | double | decimal): NumberFormatPart[];
+  public resolvedOptions(): ResolvedNumberFormatOptions;
+
   /** Those of the languages asked for that there is data for. */
-  supportedLocalesOf(
+  public static supportedLocalesOf(
     locales: string | string[],
     options?: SupportedLocalesOptions,
   ): string[];
 }
-
-export declare const NumberFormat: NumberFormatConstructor;
 
 /**
  * The options of `Intl.Collator`. A value known only when the program runs is
@@ -199,25 +198,22 @@ export type ResolvedCollatorOptions = {
  * tag written in the code or an `Intl.Locale`, that of the system by default.
  * @example names.sort(new Intl.Collator("ru").compare)
  */
-export interface Collator {
+export declare class Collator {
+  public constructor(locale?: string | Locale, options?: CollatorOptions);
+
   /**
    * Negative when the first text goes earlier, positive when later, 0 when they
    * are equal. It can be passed as a function: `sort(collator.compare)`.
    */
-  compare(first: string, second: string): int;
-  resolvedOptions(): ResolvedCollatorOptions;
-}
+  public compare(first: string, second: string): int;
+  public resolvedOptions(): ResolvedCollatorOptions;
 
-/** What `Intl.Collator` has besides `new`. */
-export interface CollatorConstructor {
   /** Those of the languages asked for that there is data for. */
-  supportedLocalesOf(
+  public static supportedLocalesOf(
     locales: string | string[],
     options?: SupportedLocalesOptions,
   ): string[];
 }
-
-export declare const Collator: CollatorConstructor;
 
 /**
  * The options of `Intl.PluralRules`. A value known only when the program runs
@@ -283,22 +279,19 @@ export type ResolvedPluralRulesOptions = {
  * by default.
  * @example new Intl.PluralRules("ru").select(3) // "few"
  */
-export interface PluralRules {
-  /** The form for the number. */
-  select(value: int | double | decimal): LDMLPluralRule;
-  resolvedOptions(): ResolvedPluralRulesOptions;
-}
+export declare class PluralRules {
+  public constructor(locale?: string | Locale, options?: PluralRulesOptions);
 
-/** What `Intl.PluralRules` has besides `new`. */
-export interface PluralRulesConstructor {
+  /** The form for the number. */
+  public select(value: int | double | decimal): LDMLPluralRule;
+  public resolvedOptions(): ResolvedPluralRulesOptions;
+
   /** Those of the languages asked for that there is data for. */
-  supportedLocalesOf(
+  public static supportedLocalesOf(
     locales: string | string[],
     options?: SupportedLocalesOptions,
   ): string[];
 }
-
-export declare const PluralRules: PluralRulesConstructor;
 
 /**
  * The options of `Intl.RelativeTimeFormat`. A value known only when the program
@@ -330,31 +323,31 @@ export type ResolvedRelativeTimeFormatOptions = {
  * written in the code or an `Intl.Locale`, that of the system by default.
  * @example new Intl.RelativeTimeFormat("en").format(-1, "day") // "1 day ago"
  */
-export interface RelativeTimeFormat {
+export declare class RelativeTimeFormat {
+  public constructor(
+    locale?: string | Locale,
+    options?: RelativeTimeFormatOptions,
+  );
+
   /**
    * The text for that many units, negative for the past. The unit is "year",
    * "quarter", "month", "week", "day", "hour", "minute" or "second", also in
    * the plural; one known only when the program runs is checked first.
    */
-  format(value: int | double, unit: RelativeTimeFormatUnit): string;
+  public format(value: int | double, unit: RelativeTimeFormatUnit): string;
   /** The text by parts. */
-  formatToParts(
+  public formatToParts(
     value: int | double,
     unit: RelativeTimeFormatUnit,
   ): RelativeTimeFormatPart[];
-  resolvedOptions(): ResolvedRelativeTimeFormatOptions;
-}
+  public resolvedOptions(): ResolvedRelativeTimeFormatOptions;
 
-/** What `Intl.RelativeTimeFormat` has besides `new`. */
-export interface RelativeTimeFormatConstructor {
   /** Those of the languages asked for that there is data for. */
-  supportedLocalesOf(
+  public static supportedLocalesOf(
     locales: string | string[],
     options?: SupportedLocalesOptions,
   ): string[];
 }
-
-export declare const RelativeTimeFormat: RelativeTimeFormatConstructor;
 
 /**
  * The options of `Intl.ListFormat`. A value known only when the program runs is
@@ -384,24 +377,21 @@ export type ResolvedListFormatOptions = {
  * code or an `Intl.Locale`, that of the system by default.
  * @example new Intl.ListFormat("en").format(["a", "b"]) // "a and b"
  */
-export interface ListFormat {
-  /** The list as text. */
-  format(items: string[]): string;
-  /** The list by parts: the items and what stands between them. */
-  formatToParts(items: string[]): DateTimeFormatPart[];
-  resolvedOptions(): ResolvedListFormatOptions;
-}
+export declare class ListFormat {
+  public constructor(locale?: string | Locale, options?: ListFormatOptions);
 
-/** What `Intl.ListFormat` has besides `new`. */
-export interface ListFormatConstructor {
+  /** The list as text. */
+  public format(items: string[]): string;
+  /** The list by parts: the items and what stands between them. */
+  public formatToParts(items: string[]): DateTimeFormatPart[];
+  public resolvedOptions(): ResolvedListFormatOptions;
+
   /** Those of the languages asked for that there is data for. */
-  supportedLocalesOf(
+  public static supportedLocalesOf(
     locales: string | string[],
     options?: SupportedLocalesOptions,
   ): string[];
 }
-
-export declare const ListFormat: ListFormatConstructor;
 
 /**
  * The options of `Intl.DisplayNames`. A value known only when the program runs
@@ -443,22 +433,19 @@ export type ResolvedDisplayNamesOptions = {
  * code or an `Intl.Locale`, that of the system by default.
  * @example new Intl.DisplayNames("en", { type: "region" }).of("DE")
  */
-export interface DisplayNames {
-  /** The name for the code. */
-  of(code: string): string | undefined;
-  resolvedOptions(): ResolvedDisplayNamesOptions;
-}
+export declare class DisplayNames {
+  public constructor(locale?: string | Locale, options?: DisplayNamesOptions);
 
-/** What `Intl.DisplayNames` has besides `new`. */
-export interface DisplayNamesConstructor {
+  /** The name for the code. */
+  public of(code: string): string | undefined;
+  public resolvedOptions(): ResolvedDisplayNamesOptions;
+
   /** Those of the languages asked for that there is data for. */
-  supportedLocalesOf(
+  public static supportedLocalesOf(
     locales: string | string[],
     options?: SupportedLocalesOptions,
   ): string[];
 }
-
-export declare const DisplayNames: DisplayNamesConstructor;
 
 /**
  * The options of `Intl.Segmenter`. A value known only when the program runs is
@@ -486,22 +473,19 @@ export type ResolvedSegmenterOptions = {
  * by default.
  * @example new Intl.Segmenter("en", { granularity: "word" }).segment(text)
  */
-export interface Segmenter {
-  /** The pieces of the text; they are gone through with `for...of`. */
-  segment(text: string): Segments;
-  resolvedOptions(): ResolvedSegmenterOptions;
-}
+export declare class Segmenter {
+  public constructor(locale?: string | Locale, options?: SegmenterOptions);
 
-/** What `Intl.Segmenter` has besides `new`. */
-export interface SegmenterConstructor {
+  /** The pieces of the text; they are gone through with `for...of`. */
+  public segment(text: string): Segments;
+  public resolvedOptions(): ResolvedSegmenterOptions;
+
   /** Those of the languages asked for that there is data for. */
-  supportedLocalesOf(
+  public static supportedLocalesOf(
     locales: string | string[],
     options?: SupportedLocalesOptions,
   ): string[];
 }
-
-export declare const Segmenter: SegmenterConstructor;
 
 /**
  * The options of `Intl.DateTimeFormat`. A value known only when the program
@@ -577,27 +561,24 @@ export type ResolvedDateTimeFormatOptions = {
  * by default.
  * @example new Intl.DateTimeFormat("ru", { dateStyle: "long" }).format()
  */
-export interface DateTimeFormat {
+export declare class DateTimeFormat {
+  public constructor(locale?: string | Locale, options?: DateTimeFormatOptions);
+
   /**
    * The date as text; this moment when there is none. A number is the
    * milliseconds since the start of 1970.
    */
-  format(date?: Date | int): string;
+  public format(date?: Date | int): string;
   /** The text by parts: the day, the month, what stands between them. */
-  formatToParts(date?: Date | int): DateTimeFormatPart[];
-  resolvedOptions(): ResolvedDateTimeFormatOptions;
-}
+  public formatToParts(date?: Date | int): DateTimeFormatPart[];
+  public resolvedOptions(): ResolvedDateTimeFormatOptions;
 
-/** What `Intl.DateTimeFormat` has besides `new`. */
-export interface DateTimeFormatConstructor {
   /** Those of the languages asked for that there is data for. */
-  supportedLocalesOf(
+  public static supportedLocalesOf(
     locales: string | string[],
     options?: SupportedLocalesOptions,
   ): string[];
 }
-
-export declare const DateTimeFormat: DateTimeFormatConstructor;
 
 /**
  * The tags of languages in their usual form; a tag known only when the

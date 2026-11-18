@@ -5,44 +5,63 @@
  * the same; a text known only when the program runs is read by
  * `RegExp.parse`.
  */
-export interface RegExp {
+export declare class RegExp {
+  /**
+   * The regex of a pattern and flags written in the code, checked when the
+   * program is built; a text known only when the program runs is read by
+   * `RegExp.parse`.
+   */
+  public constructor(pattern: string, flags?: string);
+
   /**
    * Where the next search starts. It moves only with the flags `g` and `y`.
    */
-  lastIndex: int;
+  public lastIndex: int;
   /** The text between the slashes. */
-  readonly source: string;
+  public readonly source: string;
   /** The letters of the flags. */
-  readonly flags: string;
+  public readonly flags: string;
   /** The flag `d`: a match has `indices`. */
-  readonly hasIndices: boolean;
+  public readonly hasIndices: boolean;
   /** The flag `g`: all the matches, not the first one only. */
-  readonly global: boolean;
+  public readonly global: boolean;
   /** The flag `i`. */
-  readonly ignoreCase: boolean;
+  public readonly ignoreCase: boolean;
   /** The flag `m`: `^` and `$` match at every line. */
-  readonly multiline: boolean;
+  public readonly multiline: boolean;
   /** The flag `s`: `.` matches a line break too. */
-  readonly dotAll: boolean;
+  public readonly dotAll: boolean;
   /** The flag `u`. */
-  readonly unicode: boolean;
+  public readonly unicode: boolean;
   /** The flag `v`. */
-  readonly unicodeSets: boolean;
+  public readonly unicodeSets: boolean;
   /** The flag `y`: a match starts exactly at `lastIndex`. */
-  readonly sticky: boolean;
+  public readonly sticky: boolean;
 
   /**
    * Whether the text has a match. With the flag `g` it is an error: the
    * answer would depend on the call before.
    */
-  test(text: string): boolean;
+  public test(text: string): boolean;
   /**
    * The next match with its groups; with the flags `g` and `y` it goes on
    * from `lastIndex`.
    */
-  exec(text: string): RegExpMatchArray | undefined;
+  public exec(text: string): RegExpMatchArray | undefined;
   /** The regex as it is written: `/…/flags`. */
-  toString(): string;
+  public toString(): string;
+
+  /**
+   * Reads a regex of a text known only when the program runs; an error when
+   * the text is no regex.
+   * @example RegExp.parse(pattern, "i")
+   */
+  public static parse(
+    source: string,
+    flags?: string,
+  ): Result<RegExp, RegexError>;
+  /** The text with the special characters of a regex escaped. */
+  public static escape(text: string): string;
 }
 
 /**
@@ -70,19 +89,3 @@ export interface RegExpMatchArray extends Array<string | undefined> {
 
 /** The same as `RegExpMatchArray`. */
 export type RegExpExecArray = RegExpMatchArray;
-
-/**
- * What `RegExp` has besides `new RegExp("…", "flags")` of literal texts.
- */
-export interface RegExpConstructor {
-  /**
-   * Reads a regex of a text known only when the program runs; an error when
-   * the text is no regex.
-   * @example RegExp.parse(pattern, "i")
-   */
-  parse(source: string, flags?: string): Result<RegExp, RegexError>;
-  /** The text with the special characters of a regex escaped. */
-  escape(text: string): string;
-}
-
-export declare const RegExp: RegExpConstructor;
