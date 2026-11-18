@@ -24,6 +24,27 @@ export const kLibraryMembers: LibraryMember[] = [
     module: "tz:locale",
     optional: false,
   },
+  {
+    owner: "process",
+    name: "stdin",
+    alias: "%stdin",
+    module: "tz:process/streams",
+    optional: false,
+  },
+  {
+    owner: "process",
+    name: "stdout",
+    alias: "%stdout",
+    module: "tz:process/streams",
+    optional: false,
+  },
+  {
+    owner: "process",
+    name: "stderr",
+    alias: "%stderr",
+    module: "tz:process/streams",
+    optional: false,
+  },
 ];
 
 export const kLibraryModules: LibraryModule[] = [
@@ -168,6 +189,20 @@ export const kLibraryModules: LibraryModule[] = [
     access: LibraryAccess.Program,
   },
   {
+    name: "node:process",
+    file: "node_process.d.tz",
+    parts: [],
+    specs: ["node:process", "process"],
+    access: LibraryAccess.Program,
+  },
+  {
+    name: "node:timers/promises",
+    file: "timers_promises.d.tz",
+    parts: [],
+    specs: ["node:timers/promises", "timers/promises"],
+    access: LibraryAccess.Program,
+  },
+  {
     name: "tz:web",
     file: "web.tz",
     parts: [],
@@ -200,6 +235,20 @@ export const kLibraryModules: LibraryModule[] = [
     file: "websocket.tz",
     parts: [],
     specs: ["tz:websocket"],
+    access: LibraryAccess.Library,
+  },
+  {
+    name: "node:internal/fs/streams",
+    file: "fs_stream.tz",
+    parts: [],
+    specs: ["node:internal/fs/streams"],
+    access: LibraryAccess.Library,
+  },
+  {
+    name: "tz:process/streams",
+    file: "process_streams.d.tz",
+    parts: [],
+    specs: ["tz:process/streams"],
     access: LibraryAccess.Library,
   },
   {
@@ -340,6 +389,20 @@ export const kLibraryModules: LibraryModule[] = [
     file: "buffer.d.tz",
     parts: [],
     specs: ["tz:global/buffer"],
+    access: LibraryAccess.Global,
+  },
+  {
+    name: "tz:global/timers",
+    file: "timers.d.tz",
+    parts: [],
+    specs: [],
+    access: LibraryAccess.Global,
+  },
+  {
+    name: "tz:global/process",
+    file: "process.d.tz",
+    parts: [],
+    specs: [],
     access: LibraryAccess.Global,
   },
 ];

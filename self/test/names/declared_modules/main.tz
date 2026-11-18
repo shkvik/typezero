@@ -1,12 +1,16 @@
-// A module that the compiler has inside itself (node:path, node:os, tz:io) is
-// known by its declaration file in the library: its exports are what the file
-// declares, functions, constants and types, with and without 'node:'.
+// A module that the compiler has inside itself (node:path, node:os, tz:io,
+// node:timers/promises) is known by its declaration file in the library: its
+// exports are what the file declares, functions, constants and types, with
+// and without 'node:'.
 import { join, sep, ParsedPath } from "node:path";
 import { basename } from "path";
 import { cpus, EOL, CpuInfo } from "node:os";
 import { readLine } from "tz:io";
+import { scheduler, setTimeout as sleep } from "node:timers/promises";
+import { setInterval } from "timers/promises";
 
 const parts: ParsedPath = { root: "", dir: "", base: "", ext: "", name: "" };
 const first: CpuInfo | undefined = cpus()[0];
 
 console.log(join("a", "b"), basename("x"), sep, EOL, readLine(), parts, first);
+console.log(sleep, scheduler, setInterval);

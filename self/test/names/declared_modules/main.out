@@ -1,6 +1,7 @@
 node:path (library)
 node:os (library)
 tz:io (library)
+node:timers/promises (library)
 main.tz
   declared parts first
   import join -> node:path:join
@@ -11,3 +12,6 @@ main.tz
   import EOL -> node:os:EOL
   import CpuInfo -> node:os:CpuInfo
   import readLine -> tz:io:readLine
+  import scheduler -> node:timers/promises:scheduler
+  import sleep -> node:timers/promises:setTimeout
+  import setInterval -> node:timers/promises:setInterval

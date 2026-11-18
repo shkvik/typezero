@@ -1,8 +1,8 @@
 // The global objects the compiler has inside itself are declared by files of
 // the library (library/console/console.d.tz, math, json, string, array,
 // number, map, promise, date, result, iterator, regexp, object, utility,
-// bytes, encoding, embed, buffer): a name of theirs is a global name, and a
-// name they do not declare is not found.
+// bytes, encoding, embed, buffer, timers, process): a name of theirs is a
+// global name, and a name they do not declare is not found.
 const biggest = Math.max(1, 2);
 const text = JSON.stringify({ a: biggest }, null, 2);
 const parts: Array<string> = Array.from(text.split(","));
@@ -54,3 +54,12 @@ const wide: Float64Array = Float64Array.of(1.5);
 const any: AnyTypedArray | AnyBytes = wide;
 
 console.log(bytes, buffer, view, strict, logo, wide, any, Uint64Array.of(1));
+
+const timer: Timeout = setTimeout(() => process.exit(1), 10);
+const soon: Immediate = setImmediate(() => queueMicrotask(() => {}));
+const started: double = performance.now() + process.uptime();
+const signal: ProcessSignal = "SIGINT";
+
+process.on(signal, () => clearTimeout(timer));
+clearInterval(setInterval(() => clearImmediate(soon), 10));
+console.log(started, process.argv, process.stdout.isTTY, processes.pid);

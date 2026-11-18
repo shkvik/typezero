@@ -1,0 +1,15 @@
+/**
+ * What `process` has, for code that imports it by name, as code written
+ * for node does. Each name is the same thing as the field of `process`.
+ */
+export declare const argv: Process["argv"];
+export declare const env: Process["env"];
+export declare const exitCode: Process["exitCode"];
+export declare const execPath: Process["execPath"];
+export declare const platform: Process["platform"];
+export declare const pid: Process["pid"];
+export declare const exit: Process["exit"];
+export declare const cwd: Process["cwd"];
+export declare const uptime: Process["uptime"];
+
+export { stdin, stdout, stderr } from "tz:process/streams";

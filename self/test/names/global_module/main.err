@@ -1,3 +1,6 @@
-main.tz:7:10: error TZ2106: 'node:buffer' has no export named 'Blob'
+main.tz:10:10: error TZ2106: 'node:buffer' has no export named 'Blob'
 import { Blob } from "node:buffer";
+         ^
+main.tz:12:10: error TZ2106: 'process' has no export named 'nextTick'
+import { nextTick } from "process";
          ^

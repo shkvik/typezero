@@ -1,0 +1,45 @@
+/** How a wait is done: with `ref: false` the program may end before it. */
+export type TimerOptions = { ref?: boolean };
+
+/**
+ * Waits for the delay in milliseconds and gives the value, when there is
+ * one. The options are written in the call.
+ * @example await setTimeout(100)
+ */
+export declare function setTimeout(delay?: int | double): Promise<void>;
+export declare function setTimeout<T>(
+  delay: int | double | undefined,
+  value: T,
+  options?: TimerOptions,
+): Promise<T>;
+
+/** Waits for the events that have already come and gives the value. */
+export declare function setImmediate(): Promise<void>;
+export declare function setImmediate<T>(
+  value: T,
+  options?: TimerOptions,
+): Promise<T>;
+
+/**
+ * Gives the value again and again, with the delay between; it is gone
+ * through with `for await` and stopped with `break`.
+ * @example for await (const tick of setInterval(1000)) { }
+ */
+export declare function setInterval(
+  delay?: int | double,
+): AsyncGenerator<undefined>;
+export declare function setInterval<T>(
+  delay: int | double | undefined,
+  value: T,
+  options?: TimerOptions,
+): AsyncGenerator<T>;
+
+/** The functions of `scheduler`. */
+export interface Scheduler {
+  /** Waits for the delay in milliseconds. */
+  wait(delay: int | double, options?: TimerOptions): Promise<void>;
+  /** Lets the events that have already come go first. */
+  yield(): Promise<void>;
+}
+
+export declare const scheduler: Scheduler;

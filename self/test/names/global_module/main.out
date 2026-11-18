@@ -1,5 +1,16 @@
 node:buffer (library)
+tz:intrinsics (library)
+tz:web (library)
+node:events (library)
+node:string_decoder (library)
+node:stream (library)
+node:internal/fs/streams (library)
+tz:process/streams (library)
+node:process (library)
 main.tz
   declared bytes
   import NodeBuffer -> tz:global/buffer:Buffer
   import Short -> tz:global/buffer:Buffer
+  import argv -> node:process:argv
+  import stdout -> tz:process/streams:stdout
+  import %stderr -> tz:process/streams:stderr

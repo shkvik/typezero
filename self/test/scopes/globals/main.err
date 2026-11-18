@@ -7,3 +7,6 @@ console.log(pattern, found, fields, sure, failed, wait, Results.combine([]));
 main.tz:56:59: error TZ2301: cannot find name 'Uint64Array'
 console.log(bytes, buffer, view, strict, logo, wide, any, Uint64Array.of(1));
                                                           ^
+main.tz:65:58: error TZ2301: cannot find name 'processes'
+console.log(started, process.argv, process.stdout.isTTY, processes.pid);
+                                                         ^

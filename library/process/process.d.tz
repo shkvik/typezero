@@ -1,0 +1,67 @@
+/**
+ * The signals a program can listen to. On Windows "SIGINT" is Ctrl+C,
+ * "SIGBREAK" is Ctrl+Break, "SIGHUP" is the closing of the console window,
+ * and "SIGTERM" never comes.
+ */
+export type ProcessSignal = "SIGINT" | "SIGTERM" | "SIGHUP" | "SIGBREAK";
+
+/** A function that `process.on` calls: plain or async. */
+export type SignalListener = (() => void) | (() => Promise<void>);
+
+/**
+ * What `process` has: the running program and what is around it. It also
+ * has `stdin`, `stdout` and `stderr`: they are declared apart, in
+ * process_streams.d.tz, so that the streams of the library get into a
+ * program only when it names one of them.
+ */
+export interface Process {
+  /**
+   * The arguments of the command line. As in node, the first two are the
+   * path of the executable, so the arguments start at index 2.
+   * @example const [input, output] = process.argv.slice(2)
+   */
+  readonly argv: string[];
+  /**
+   * The variables of the environment. One that is not set is `undefined`;
+   * setting one changes it for this program and those it starts, and
+   * `delete` removes it.
+   */
+  readonly env: Record<string, string>;
+  /** The code the program ends with when it ends by itself. */
+  exitCode?: int;
+  /** The path of the executable. */
+  readonly execPath: string;
+  /** The system the program was built for: "win32", "linux", "darwin". */
+  readonly platform: string;
+  /** The number of the process. */
+  readonly pid: int;
+
+  /**
+   * Ends the program at once with the code, 0 by default; what is printed
+   * already is written out.
+   */
+  exit(code?: int): void;
+  /** The directory the program was started in. */
+  cwd(): string;
+  /** The seconds since the program started, with a fraction. */
+  uptime(): double;
+  /**
+   * Calls the function as soon as the code that runs now is over, before
+   * `queueMicrotask`.
+   */
+  nextTick(callback: () => void): void;
+
+  /**
+   * Calls the listener when the signal comes; the program then does not end
+   * by that signal itself, and a listener does not keep it running. Other
+   * events of node, such as "exit", are not there.
+   * @example process.on("SIGINT", () => process.exit(0))
+   */
+  on(signal: ProcessSignal, listener: SignalListener): void;
+  /** As `on`, for the first time the signal comes only. */
+  once(signal: ProcessSignal, listener: SignalListener): void;
+  /** Takes the listener away. */
+  off(signal: ProcessSignal, listener: SignalListener): void;
+}
+
+export declare const process: Process;

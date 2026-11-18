@@ -1,0 +1,72 @@
+/**
+ * A timer that `setTimeout` or `setInterval` started. The program does not
+ * end while a timer waits, unless it was told so with `unref`.
+ */
+export interface Timeout {
+  /** The program waits for this timer again; gives the timer itself. */
+  ref(): Timeout;
+  /** The program may end without waiting for this timer. */
+  unref(): Timeout;
+  /** Whether the program waits for this timer. */
+  hasRef(): boolean;
+  /** Starts the wait anew from this moment. */
+  refresh(): Timeout;
+}
+
+/** What `setImmediate` started. */
+export interface Immediate {
+  /** The program waits for it again; gives it itself. */
+  ref(): Immediate;
+  /** The program may end without waiting for it. */
+  unref(): Immediate;
+  /** Whether the program waits for it. */
+  hasRef(): boolean;
+}
+
+/**
+ * Calls the function once after the delay in milliseconds, at once when
+ * there is none. The function takes no arguments: what it needs is used
+ * inside an arrow function. A function that gives a Result is an error, as
+ * nobody would read it.
+ * @example const timer = setTimeout(() => console.log("late"), 1000)
+ */
+export declare function setTimeout(
+  callback: () => void,
+  delay?: int | double,
+): Timeout;
+
+/** Calls the function again and again, with the delay between the calls. */
+export declare function setInterval(
+  callback: () => void,
+  delay?: int | double,
+): Timeout;
+
+/** Calls the function after the events that have already come. */
+export declare function setImmediate(callback: () => void): Immediate;
+
+/** Stops a timer; nothing happens when it is over or there is none. */
+export declare function clearTimeout(timer?: Timeout | Immediate): void;
+
+/** The same as `clearTimeout`. */
+export declare function clearInterval(timer?: Timeout | Immediate): void;
+
+/** The same as `clearTimeout`. */
+export declare function clearImmediate(timer?: Timeout | Immediate): void;
+
+/**
+ * Calls the function as soon as the code that runs now is over, before any
+ * timer and any event.
+ */
+export declare function queueMicrotask(callback: () => void): void;
+
+/** The clock of `performance`. */
+export interface Performance {
+  /**
+   * The milliseconds since the program started, with a fraction: for
+   * measuring how long something takes.
+   * @example const started = performance.now()
+   */
+  now(): double;
+}
+
+export declare const performance: Performance;

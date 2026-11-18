@@ -1,11 +1,16 @@
 // A module of node that gives a global name (node:buffer gives Buffer)
 // re-exports it from the global declarations of the library, so the imported
 // name and the global one are one declaration. What the module has in node
-// and not here is an unknown export.
+// and not here is an unknown export. node:process gives the fields of
+// `process` by name; the streams of `process` are declared apart and come
+// into a program only when it names one: by an import, or as
+// `process.stderr`.
 import { Buffer as NodeBuffer } from "node:buffer";
 import { Buffer as Short } from "buffer";
 import { Blob } from "node:buffer";
+import { argv, stdout } from "node:process";
+import { nextTick } from "process";
 
 const bytes: Buffer = NodeBuffer.from("a");
 
-console.log(bytes, Short, Blob);
+console.log(bytes, Short, Blob, argv, stdout, nextTick, process.stderr);

@@ -1,0 +1,15 @@
+import { StdinError, StdoutError } from "node:internal/fs/streams";
+import { Readable, Writable } from "node:stream";
+
+/** `process.stdin`: the standard input as a stream of node:stream. */
+export declare const stdin: Readable<Buffer, StdinError>;
+
+/**
+ * `process.stdout`: the standard output as a stream of node:stream.
+ * `write(text)` writes without a line break, and `process.stdout.isTTY`
+ * says whether it is a terminal.
+ */
+export declare const stdout: Writable<Buffer, StdoutError>;
+
+/** `process.stderr`: the standard output for errors; as `stdout`. */
+export declare const stderr: Writable<Buffer, StdoutError>;

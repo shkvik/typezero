@@ -130,3 +130,25 @@ main.tz
   56:42 logo -> variable 52:7
   56:48 wide -> variable 53:7
   56:54 any -> variable 54:7
+  58:14 Timeout -> global
+  58:24 setTimeout -> global
+  58:41 process -> global
+  59:13 Immediate -> global
+  59:25 setImmediate -> global
+  59:44 queueMicrotask -> global
+  60:16 double -> global
+  60:25 performance -> global
+  60:45 process -> global
+  61:15 ProcessSignal -> global
+  63:1 process -> global
+  63:12 signal -> variable 61:7
+  63:26 clearTimeout -> global
+  63:39 timer -> variable 58:7
+  64:1 clearInterval -> global
+  64:15 setInterval -> global
+  64:33 clearImmediate -> global
+  64:48 soon -> variable 59:7
+  65:1 console -> global
+  65:13 started -> variable 60:7
+  65:22 process -> global
+  65:36 process -> global
