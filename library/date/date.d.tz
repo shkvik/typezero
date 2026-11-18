@@ -1,0 +1,97 @@
+/**
+ * A moment in time: the milliseconds since the start of 1970 in UTC. The
+ * methods without `UTC` in the name read and set it in the time zone of the
+ * system. A month counts from 0, a day of the week from Sunday as 0. A setter
+ * gives the new milliseconds. Two dates are subtracted and compared directly:
+ * `later - earlier` is the milliseconds between them.
+ */
+export interface Date {
+  /** The milliseconds since the start of 1970 in UTC. */
+  getTime(): int;
+  /** The same as `getTime`. */
+  valueOf(): int;
+
+  getFullYear(): int;
+  getMonth(): int;
+  /** The day of the month, from 1. */
+  getDate(): int;
+  /** The day of the week, Sunday is 0. */
+  getDay(): int;
+  getHours(): int;
+  getMinutes(): int;
+  getSeconds(): int;
+  getMilliseconds(): int;
+  /** The minutes from the local time to UTC: -180 for UTC+3. */
+  getTimezoneOffset(): int;
+
+  getUTCFullYear(): int;
+  getUTCMonth(): int;
+  getUTCDate(): int;
+  getUTCDay(): int;
+  getUTCHours(): int;
+  getUTCMinutes(): int;
+  getUTCSeconds(): int;
+  getUTCMilliseconds(): int;
+
+  setTime(time: int): int;
+  setMilliseconds(milliseconds: int): int;
+  setSeconds(seconds: int, milliseconds?: int): int;
+  setMinutes(minutes: int, seconds?: int, milliseconds?: int): int;
+  setHours(hours: int, minutes?: int, seconds?: int, milliseconds?: int): int;
+  setDate(day: int): int;
+  setMonth(month: int, day?: int): int;
+  setFullYear(year: int, month?: int, day?: int): int;
+
+  setUTCMilliseconds(milliseconds: int): int;
+  setUTCSeconds(seconds: int, milliseconds?: int): int;
+  setUTCMinutes(minutes: int, seconds?: int, milliseconds?: int): int;
+  setUTCHours(
+    hours: int,
+    minutes?: int,
+    seconds?: int,
+    milliseconds?: int,
+  ): int;
+  setUTCDate(day: int): int;
+  setUTCMonth(month: int, day?: int): int;
+  setUTCFullYear(year: int, month?: int, day?: int): int;
+
+  /** The date in UTC as `2026-11-19T10:00:00.000Z`. */
+  toISOString(): string;
+  /** The same as `toISOString`. */
+  toJSON(): string;
+  toUTCString(): string;
+  toString(): string;
+  toDateString(): string;
+  toTimeString(): string;
+  /** The date and time as the language writes them. */
+  toLocaleString(locale?: string | Intl.Locale, options?: object): string;
+  toLocaleDateString(locale?: string | Intl.Locale, options?: object): string;
+  toLocaleTimeString(locale?: string | Intl.Locale, options?: object): string;
+}
+
+/**
+ * What `Date` has besides `new Date()` (now), `new Date(milliseconds)`,
+ * `new Date(year, month, …)` in the local time and `new Date(date)`. A date
+ * is made of a text by `Date.parse`, since the text may be no date.
+ */
+export interface DateConstructor {
+  /** The milliseconds of this moment. */
+  now(): int;
+  /** The milliseconds of the date and time given in UTC. */
+  UTC(
+    year: int,
+    month?: int,
+    day?: int,
+    hours?: int,
+    minutes?: int,
+    seconds?: int,
+    milliseconds?: int,
+  ): int;
+  /**
+   * The milliseconds of the date written in a text.
+   * @example Date.parse("2026-11-19T10:00:00Z")
+   */
+  parse(text: string): Result<int, DateError>;
+}
+
+export declare const Date: DateConstructor;

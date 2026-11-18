@@ -1,0 +1,35 @@
+/**
+ * A value that comes later. A Promise is never rejected: an operation that
+ * may fail gives a `Promise<Result<T, E>>`, so there is no `catch` and no
+ * `finally`. It is read with `await`, or with `then`.
+ */
+export interface Promise<T> {
+  /**
+   * Calls the function with the value when it comes; a Promise the function
+   * gives is waited for too.
+   * @example Promise.resolve(2).then((x) => x * 2) // a Promise of 4
+   */
+  then<U>(next: (value: T) => U | Promise<U>): Promise<U>;
+}
+
+/**
+ * What `Promise` has besides `new Promise<T>((resolve) => …)`, whose function
+ * gets only `resolve`.
+ */
+export interface PromiseConstructor {
+  /** A Promise that has the value already; a Promise is given as it is. */
+  resolve(): Promise<void>;
+  resolve<T>(value: T | Promise<T>): Promise<T>;
+  /**
+   * Waits for all of them and gives their values in the same order. Promises
+   * of different types written in place give a tuple:
+   * `Promise.all([a, b])` is a `Promise<[A, B]>`.
+   */
+  all<T>(promises: Promise<T>[]): Promise<T[]>;
+  /** The value of the one that comes first. */
+  race<T>(promises: Promise<T>[]): Promise<T>;
+  /** A Promise together with the function that gives it its value. */
+  withResolvers<T>(): { promise: Promise<T>; resolve: (value: T) => void };
+}
+
+export declare const Promise: PromiseConstructor;

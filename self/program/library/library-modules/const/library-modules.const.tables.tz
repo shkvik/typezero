@@ -244,6 +244,34 @@ export const kLibraryModules: LibraryModule[] = [
     specs: [],
     access: LibraryAccess.Global,
   },
+  {
+    name: "tz:global/number",
+    file: "number.d.tz",
+    parts: [],
+    specs: [],
+    access: LibraryAccess.Global,
+  },
+  {
+    name: "tz:global/map",
+    file: "map.d.tz",
+    parts: [],
+    specs: [],
+    access: LibraryAccess.Global,
+  },
+  {
+    name: "tz:global/promise",
+    file: "promise.d.tz",
+    parts: [],
+    specs: [],
+    access: LibraryAccess.Global,
+  },
+  {
+    name: "tz:global/date",
+    file: "date.d.tz",
+    parts: [],
+    specs: [],
+    access: LibraryAccess.Global,
+  },
 ];
 
 export const kBuiltinSources: BuiltinSource[] = [

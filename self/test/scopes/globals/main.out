@@ -1,15 +1,41 @@
 main.tz
-  5:17 Math -> global
-  6:14 JSON -> global
-  6:34 biggest -> variable 5:7
-  7:14 Array -> global
-  7:20 string -> global
-  7:30 Array -> global
-  7:41 text -> variable 6:7
-  8:15 string -> global
-  8:24 String -> global
-  10:1 console -> global
-  10:13 text -> variable 6:7
-  10:19 Math -> global
-  10:38 parts -> variable 7:7
-  10:45 letter -> variable 8:7
+  6:17 Math -> global
+  7:14 JSON -> global
+  7:34 biggest -> variable 6:7
+  8:14 Array -> global
+  8:20 string -> global
+  8:30 Array -> global
+  8:41 text -> variable 7:7
+  9:15 string -> global
+  9:24 String -> global
+  10:15 Map -> global
+  10:19 string -> global
+  10:27 int -> global
+  10:34 Map -> global
+  10:46 parts -> variable 8:7
+  10:60 string -> global
+  10:71 part -> parameter 10:54
+  11:13 Set -> global
+  11:17 double -> global
+  11:31 Set -> global
+  11:35 double -> global
+  11:44 Number -> global
+  12:16 parseInt -> global
+  12:25 letter -> variable 9:7
+  13:14 Promise -> global
+  13:22 int -> global
+  13:29 Promise -> global
+  13:45 Date -> global
+  14:14 Date -> global
+  14:25 Date -> global
+  16:1 console -> global
+  16:13 text -> variable 7:7
+  16:19 Math -> global
+  16:38 parts -> variable 8:7
+  16:45 letter -> variable 9:7
+  16:53 counts -> variable 10:7
+  16:61 seen -> variable 11:7
+  16:67 parsed -> variable 12:7
+  17:1 console -> global
+  17:13 later -> variable 13:7
+  17:20 today -> variable 14:7

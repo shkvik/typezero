@@ -1,0 +1,100 @@
+/**
+ * What every integer type has: `int`, `int8`, `int16`, `int32`, `uint8`,
+ * `uint16`, `uint32` and `uint64`. A number changes its type only by these
+ * methods; a narrower type needs a proof that the value fits it.
+ */
+export interface IntegerMethods {
+  toInt(): int;
+  toInt8(): int8;
+  toInt16(): int16;
+  toInt32(): int32;
+  toUint8(): uint8;
+  toUint16(): uint16;
+  toUint32(): uint32;
+  toUint64(): uint64;
+  toDouble(): double;
+  /** The same number as an exact decimal. */
+  toDecimal(): decimal;
+  /**
+   * The number as text in the base, 10 by default.
+   * @example (255).toString(16) // "ff"
+   */
+  toString(radix?: int): string;
+  /** The number as text with that many digits after the point. */
+  toFixed(digits?: int): string;
+}
+
+export interface int extends IntegerMethods {}
+export interface int8 extends IntegerMethods {}
+export interface int16 extends IntegerMethods {}
+export interface int32 extends IntegerMethods {}
+export interface uint8 extends IntegerMethods {}
+export interface uint16 extends IntegerMethods {}
+export interface uint32 extends IntegerMethods {}
+export interface uint64 extends IntegerMethods {}
+
+/**
+ * What a `double` has. It becomes an integer only after rounding, so that the
+ * fraction is never dropped silently: `Math.floor(x).toInt()`. It does not
+ * become a decimal: a double is inexact already.
+ */
+export interface double {
+  toInt(): int;
+  toInt8(): int8;
+  toInt16(): int16;
+  toInt32(): int32;
+  toUint8(): uint8;
+  toUint16(): uint16;
+  toUint32(): uint32;
+  toUint64(): uint64;
+  toDouble(): double;
+  /** The number as text in the base, 10 by default. */
+  toString(radix?: int): string;
+  /**
+   * The number as text with that many digits after the point.
+   * @example (1.005).toFixed(2) // "1.00"
+   */
+  toFixed(digits?: int): string;
+}
+
+/**
+ * What `Number` has besides `Number(value)`, which makes a double of a number
+ * or a boolean, and a Result of a string.
+ */
+export interface NumberConstructor {
+  /** The largest integer a double holds exactly: 2 ** 53 - 1. */
+  readonly MAX_SAFE_INTEGER: double;
+  readonly MIN_SAFE_INTEGER: double;
+  /** The distance from 1 to the next double. */
+  readonly EPSILON: double;
+  readonly MAX_VALUE: double;
+  /** The smallest double above zero. */
+  readonly MIN_VALUE: double;
+
+  /** The same as the global `parseInt`. */
+  parseInt(text: string, radix?: int): Result<int, NumberError>;
+  /** The same as the global `parseFloat`. */
+  parseFloat(text: string): Result<double, NumberError>;
+  /** Whether the number has no fraction. */
+  isInteger(value: int | double): boolean;
+  /** Whether the number is an integer a double holds exactly. */
+  isSafeInteger(value: int | double): boolean;
+}
+
+export declare const Number: NumberConstructor;
+
+/**
+ * Reads an integer in the base, 10 by default; an error when the text is not
+ * a number.
+ * @example parseInt("ff", 16) // ok(255)
+ */
+export declare function parseInt(
+  text: string,
+  radix?: int,
+): Result<int, NumberError>;
+
+/**
+ * Reads a number with a fraction; an error when the text is not a number.
+ * @example parseFloat("2.5") // ok(2.5)
+ */
+export declare function parseFloat(text: string): Result<double, NumberError>;

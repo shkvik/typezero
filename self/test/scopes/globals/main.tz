@@ -1,10 +1,17 @@
 // The global objects the compiler has inside itself are declared by files of
-// the library (library/console/console.d.tz, math, json, string, array): a
+// the library (library/console/console.d.tz, math, json, string, array,
+// number, map, promise, date): a
 // name of theirs is a global name, and a name they do not declare is not
 // found.
 const biggest = Math.max(1, 2);
 const text = JSON.stringify({ a: biggest }, null, 2);
 const parts: Array<string> = Array.from(text.split(","));
 const letter: string = String.fromCharCode(65);
+const counts: Map<string, int> = Map.groupBy(parts, (part: string) => part);
+const seen: Set<double> = new Set<double>([Number.EPSILON]);
+const parsed = parseInt(letter, 16);
+const later: Promise<int> = Promise.resolve(Date.now());
+const today: Date = new Date();
 
-console.log(text, Math.PI, Maths.PI, parts, letter);
+console.log(text, Math.PI, Maths.PI, parts, letter, counts, seen, parsed);
+console.log(later, today);
