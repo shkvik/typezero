@@ -33,3 +33,6 @@ export interface PromiseConstructor {
 }
 
 export declare const Promise: PromiseConstructor;
+
+/** The same as `Promise<T>`. */
+export type PromiseLike<T> = Promise<T>;

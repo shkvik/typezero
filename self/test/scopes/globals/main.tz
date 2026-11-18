@@ -1,6 +1,6 @@
 // The global objects the compiler has inside itself are declared by files of
 // the library (library/console/console.d.tz, math, json, string, array,
-// number, map, promise, date): a
+// number, map, promise, date, result, iterator, regexp, object, utility): a
 // name of theirs is a global name, and a name they do not declare is not
 // found.
 const biggest = Math.max(1, 2);
@@ -15,3 +15,32 @@ const today: Date = new Date();
 
 console.log(text, Math.PI, Maths.PI, parts, letter, counts, seen, parsed);
 console.log(later, today);
+
+type Failure = { code: "empty" };
+type Known = Exclude<"a" | "b", "a"> | Extract<"a" | "b", "a">;
+type Sure = NonNullable<int | undefined>;
+type Answer = ReturnType<typeof first> | Parameters<typeof first>;
+type Same = ReadonlyArray<int> | ReadonlyMap<string, int> | ReadonlySet<int>;
+
+function first(items: Iterable<string>): Result<string, Failure> {
+  const steps: Iterator<string> = Iterator.from(items);
+  const step: IteratorResult<string> = { done: true, value: undefined };
+  const names: Generator<string> = steps.map((item: string) => item);
+
+  for (const name of names) {
+    return ok(name);
+  }
+
+  console.log(step);
+
+  return err({ code: "empty" });
+}
+
+const pattern: Result<RegExp, RegexError> = RegExp.parse("a+");
+const found: RegExpMatchArray | undefined = /a+/.exec(text);
+const fields: string[] = Object.keys({ a: 1 });
+const sure: Ok<int, Failure> = ok(1);
+const failed: Err<int, Failure> = err({ code: "empty" });
+const wait: PromiseLike<int> = later;
+
+console.log(pattern, found, fields, sure, failed, wait, Results.combine([]));

@@ -112,3 +112,6 @@ export interface ArrayConstructor {
 }
 
 export declare const Array: ArrayConstructor;
+
+/** The same as `T[]`. */
+export type ReadonlyArray<T> = T[];

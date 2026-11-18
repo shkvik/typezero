@@ -1,0 +1,88 @@
+/**
+ * A regular expression: its syntax and its flags are those of JavaScript. A
+ * literal `/…/` is checked and compiled when the program is built, and the
+ * compiler knows its groups and flags. `new RegExp("…")` of a literal text is
+ * the same; a text known only when the program runs is read by
+ * `RegExp.parse`.
+ */
+export interface RegExp {
+  /**
+   * Where the next search starts. It moves only with the flags `g` and `y`.
+   */
+  lastIndex: int;
+  /** The text between the slashes. */
+  readonly source: string;
+  /** The letters of the flags. */
+  readonly flags: string;
+  /** The flag `d`: a match has `indices`. */
+  readonly hasIndices: boolean;
+  /** The flag `g`: all the matches, not the first one only. */
+  readonly global: boolean;
+  /** The flag `i`. */
+  readonly ignoreCase: boolean;
+  /** The flag `m`: `^` and `$` match at every line. */
+  readonly multiline: boolean;
+  /** The flag `s`: `.` matches a line break too. */
+  readonly dotAll: boolean;
+  /** The flag `u`. */
+  readonly unicode: boolean;
+  /** The flag `v`. */
+  readonly unicodeSets: boolean;
+  /** The flag `y`: a match starts exactly at `lastIndex`. */
+  readonly sticky: boolean;
+
+  /**
+   * Whether the text has a match. With the flag `g` it is an error: the
+   * answer would depend on the call before.
+   */
+  test(text: string): boolean;
+  /**
+   * The next match with its groups; with the flags `g` and `y` it goes on
+   * from `lastIndex`.
+   */
+  exec(text: string): RegExpMatchArray | undefined;
+  /** The regex as it is written: `/…/flags`. */
+  toString(): string;
+}
+
+/**
+ * A match: an array of the whole match at 0, always a string, and of the
+ * groups by number, `undefined` for a group that took no part. For a regex
+ * the compiler knows, a group that is not there is an error and a group that
+ * always takes part is a string.
+ */
+export interface RegExpMatchArray extends Array<string | undefined> {
+  /** Where the match starts. */
+  readonly index: int;
+  /** The text that was searched. */
+  readonly input: string;
+  /**
+   * The named groups. For a regex the compiler knows, it is an object with a
+   * field for each name.
+   */
+  readonly groups: Record<string, string | undefined>;
+  /**
+   * The start and the end of the match and of each group; the regex needs
+   * the flag `d`.
+   */
+  readonly indices: ([int, int] | undefined)[];
+}
+
+/** The same as `RegExpMatchArray`. */
+export type RegExpExecArray = RegExpMatchArray;
+
+/**
+ * What `RegExp` has besides `new RegExp("…", "flags")` of literal texts.
+ */
+export interface RegExpConstructor {
+  /**
+   * Reads a regex of a text known only when the program runs; an error when
+   * the text is no regex.
+   * @example RegExp.parse(pattern, "i")
+   */
+  parse(source: string, flags?: string): Result<RegExp, RegexError>;
+  /** The text with the special characters of a regex escaped. */
+  escape(text: string): string;
+}
+
+export declare const RegExp: RegExpConstructor;

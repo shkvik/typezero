@@ -1,0 +1,29 @@
+/**
+ * The members of a union `T` that do not fit `U`.
+ * @example Exclude<"a" | "b" | "c", "a"> // "b" | "c"
+ */
+export type Exclude<T, U> = T extends U ? never : T;
+
+/**
+ * The members of a union `T` that fit `U`.
+ * @example Extract<"a" | "b" | "c", "a" | "z"> // "a"
+ */
+export type Extract<T, U> = T extends U ? T : never;
+
+/**
+ * `T` without `undefined`.
+ * @example NonNullable<int | undefined> // int
+ */
+export type NonNullable<T> = T extends undefined ? never : T;
+
+/**
+ * What a function type returns.
+ * @example ReturnType<typeof parseAge>
+ */
+export type ReturnType<F> = F extends (...args: never[]) => infer R ? R : never;
+
+/**
+ * The parameters of a function type as a tuple.
+ * @example Parameters<(a: int, b: string) => void> // [int, string]
+ */
+export type Parameters<F> = F extends (...args: infer P) => unknown ? P : never;

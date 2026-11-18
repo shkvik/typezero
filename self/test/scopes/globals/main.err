@@ -1,3 +1,6 @@
 main.tz:16:28: error TZ2301: cannot find name 'Maths'
 console.log(text, Math.PI, Maths.PI, parts, letter, counts, seen, parsed);
                            ^
+main.tz:46:57: error TZ2301: cannot find name 'Results'
+console.log(pattern, found, fields, sure, failed, wait, Results.combine([]));
+                                                        ^

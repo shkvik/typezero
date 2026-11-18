@@ -70,3 +70,9 @@ export interface Set<T> {
   /** Whether the sets have no value in common. */
   isDisjointFrom(other: Set<T> | Map<T, unknown>): boolean;
 }
+
+/** The same as `Map<K, V>`. */
+export type ReadonlyMap<K, V> = Map<K, V>;
+
+/** The same as `Set<T>`. */
+export type ReadonlySet<T> = Set<T>;

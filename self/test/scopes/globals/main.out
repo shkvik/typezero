@@ -39,3 +39,68 @@ main.tz
   17:1 console -> global
   17:13 later -> variable 13:7
   17:20 today -> variable 14:7
+  20:14 Exclude -> global
+  20:40 Extract -> global
+  21:13 NonNullable -> global
+  21:25 int -> global
+  21:31 undefined -> global
+  22:15 ReturnType -> global
+  22:26 first -> function 25:10
+  22:42 Parameters -> global
+  22:53 first -> function 25:10
+  23:13 ReadonlyArray -> global
+  23:27 int -> global
+  23:34 ReadonlyMap -> global
+  23:46 string -> global
+  23:54 int -> global
+  23:61 ReadonlySet -> global
+  23:73 int -> global
+  25:23 Iterable -> global
+  25:32 string -> global
+  25:42 Result -> global
+  25:49 string -> global
+  25:57 Failure -> type 19:6
+  26:16 Iterator -> global
+  26:25 string -> global
+  26:35 Iterator -> global
+  26:49 items -> parameter 25:16
+  27:15 IteratorResult -> global
+  27:30 string -> global
+  28:16 Generator -> global
+  28:26 string -> global
+  28:36 steps -> variable 26:9
+  28:53 string -> global
+  28:64 item -> parameter 28:47
+  30:22 names -> variable 28:9
+  31:12 ok -> global
+  31:15 name -> variable 30:14
+  34:3 console -> global
+  34:15 step -> variable 27:9
+  36:10 err -> global
+  39:16 Result -> global
+  39:23 RegExp -> global
+  39:31 RegexError -> global
+  39:45 RegExp -> global
+  40:14 RegExpMatchArray -> global
+  40:33 undefined -> global
+  40:55 text -> variable 7:7
+  41:15 string -> global
+  41:26 Object -> global
+  42:13 Ok -> global
+  42:16 int -> global
+  42:21 Failure -> type 19:6
+  42:32 ok -> global
+  43:15 Err -> global
+  43:19 int -> global
+  43:24 Failure -> type 19:6
+  43:35 err -> global
+  44:13 PromiseLike -> global
+  44:25 int -> global
+  44:32 later -> variable 13:7
+  46:1 console -> global
+  46:13 pattern -> variable 39:7
+  46:22 found -> variable 40:7
+  46:29 fields -> variable 41:7
+  46:37 sure -> variable 42:7
+  46:43 failed -> variable 43:7
+  46:51 wait -> variable 44:7

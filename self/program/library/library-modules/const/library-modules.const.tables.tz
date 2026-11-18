@@ -272,6 +272,41 @@ export const kLibraryModules: LibraryModule[] = [
     specs: [],
     access: LibraryAccess.Global,
   },
+  {
+    name: "tz:global/result",
+    file: "result.d.tz",
+    parts: [],
+    specs: [],
+    access: LibraryAccess.Global,
+  },
+  {
+    name: "tz:global/iterator",
+    file: "iterator.d.tz",
+    parts: [],
+    specs: [],
+    access: LibraryAccess.Global,
+  },
+  {
+    name: "tz:global/regexp",
+    file: "regexp.d.tz",
+    parts: [],
+    specs: [],
+    access: LibraryAccess.Global,
+  },
+  {
+    name: "tz:global/object",
+    file: "object.d.tz",
+    parts: [],
+    specs: [],
+    access: LibraryAccess.Global,
+  },
+  {
+    name: "tz:global/utility",
+    file: "utility.d.tz",
+    parts: [],
+    specs: [],
+    access: LibraryAccess.Global,
+  },
 ];
 
 export const kBuiltinSources: BuiltinSource[] = [
