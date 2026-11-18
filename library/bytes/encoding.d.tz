@@ -1,0 +1,86 @@
+/** Turns text into bytes of UTF-8. It is made with `new TextEncoder()`. */
+export interface TextEncoder {
+  /** Always "utf-8". */
+  readonly encoding: string;
+
+  /**
+   * The text as bytes of UTF-8.
+   * @example new TextEncoder().encode("Hi") // Uint8Array(2) [ 72, 105 ]
+   */
+  encode(text?: string): Uint8Array;
+  /**
+   * Writes the text into the bytes given, as much of it as fits: `read` is
+   * how many UTF-16 units of the text were taken, `written` how many bytes.
+   */
+  encodeInto(text: string, target: Uint8Array): { read: int; written: int };
+}
+
+/** `TextEncoder` has nothing besides `new TextEncoder()`. */
+export interface TextEncoderConstructor {}
+
+export declare const TextEncoder: TextEncoderConstructor;
+
+/** How a `TextDecoder` reads: by parts, when `stream` is true. */
+export type TextDecodeOptions = { stream?: boolean };
+
+/**
+ * How a `TextDecoder` is made: `fatal` makes broken bytes an error instead
+ * of the mark "�", `ignoreBOM` keeps the mark of the byte order in the
+ * text.
+ */
+export type TextDecoderOptions = { fatal?: boolean; ignoreBOM?: boolean };
+
+/**
+ * Turns bytes into text. It is made with `new TextDecoder(label, options)`:
+ * the label names the encoding, "utf-8" by default, and is a text written
+ * in the code, so that the table of an old encoding such as "windows-1251"
+ * gets into the program only when it is named. A label known only when the
+ * program runs is read by `TextDecoder.parse`. With `fatal: true` the
+ * decoder is a `FatalTextDecoder`.
+ */
+export interface TextDecoder {
+  /** The name of the encoding. */
+  readonly encoding: string;
+  readonly fatal: boolean;
+  readonly ignoreBOM: boolean;
+
+  /**
+   * The bytes as text; broken bytes become "�".
+   * @example new TextDecoder().decode(bytes)
+   */
+  decode(bytes?: AnyBytes, options?: TextDecodeOptions): string;
+}
+
+/**
+ * A `TextDecoder` made with `fatal: true`: broken bytes are an error, so
+ * `decode` gives a Result.
+ */
+export interface FatalTextDecoder {
+  /** The name of the encoding. */
+  readonly encoding: string;
+  readonly fatal: boolean;
+  readonly ignoreBOM: boolean;
+
+  decode(
+    bytes?: AnyBytes,
+    options?: TextDecodeOptions,
+  ): Result<string, DecodeError>;
+}
+
+/** What `TextDecoder` has besides `new TextDecoder(label, options)`. */
+export interface TextDecoderConstructor {
+  /**
+   * Makes a decoder of a label known only when the program runs; an error
+   * when the label names no encoding.
+   */
+  parse(
+    label: string,
+    options: { fatal: true; ignoreBOM?: boolean },
+  ): Result<FatalTextDecoder, EncodingError>;
+  parse(
+    label: string,
+    options?: TextDecoderOptions,
+  ): Result<TextDecoder, EncodingError>;
+}
+
+export declare const TextDecoder: TextDecoderConstructor;

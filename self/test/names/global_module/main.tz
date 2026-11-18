@@ -1,0 +1,11 @@
+// A module of node that gives a global name (node:buffer gives Buffer)
+// re-exports it from the global declarations of the library, so the imported
+// name and the global one are one declaration. What the module has in node
+// and not here is an unknown export.
+import { Buffer as NodeBuffer } from "node:buffer";
+import { Buffer as Short } from "buffer";
+import { Blob } from "node:buffer";
+
+const bytes: Buffer = NodeBuffer.from("a");
+
+console.log(bytes, Short, Blob);

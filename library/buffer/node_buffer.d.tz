@@ -1,0 +1,5 @@
+/**
+ * `Buffer` is a global name; this module gives the same one to code that
+ * imports it, as code written for node does.
+ */
+export { Buffer } from "tz:global/buffer";

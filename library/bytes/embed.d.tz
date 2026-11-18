@@ -1,0 +1,15 @@
+/**
+ * The bytes of a file put into the program when it is built. The path is a
+ * text written in the code, relative to the file with the call. Bytes the
+ * program never writes into are read right from the executable, without a
+ * copy in memory.
+ * @example const logo = embedBytes("./logo.png")
+ */
+export declare function embedBytes(path: string): Uint8Array;
+
+/**
+ * The text of a file put into the program when it is built. The path is a
+ * text written in the code, relative to the file with the call.
+ * @example const page = embedText("./page.html")
+ */
+export declare function embedText(path: string): string;

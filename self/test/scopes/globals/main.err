@@ -4,3 +4,6 @@ console.log(text, Math.PI, Maths.PI, parts, letter, counts, seen, parsed);
 main.tz:46:57: error TZ2301: cannot find name 'Results'
 console.log(pattern, found, fields, sure, failed, wait, Results.combine([]));
                                                         ^
+main.tz:56:59: error TZ2301: cannot find name 'Uint64Array'
+console.log(bytes, buffer, view, strict, logo, wide, any, Uint64Array.of(1));
+                                                          ^

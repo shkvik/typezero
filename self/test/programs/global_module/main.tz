@@ -1,0 +1,6 @@
+// The global declarations of the library are not modules a program imports:
+// a global name is used as it is, or imported from the module of node that
+// gives it.
+import { Buffer } from "tz:global/buffer";
+
+console.log(Buffer);

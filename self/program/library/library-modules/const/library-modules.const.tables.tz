@@ -161,6 +161,13 @@ export const kLibraryModules: LibraryModule[] = [
     access: LibraryAccess.Program,
   },
   {
+    name: "node:buffer",
+    file: "node_buffer.d.tz",
+    parts: [],
+    specs: ["node:buffer", "buffer"],
+    access: LibraryAccess.Program,
+  },
+  {
     name: "tz:web",
     file: "web.tz",
     parts: [],
@@ -305,6 +312,34 @@ export const kLibraryModules: LibraryModule[] = [
     file: "utility.d.tz",
     parts: [],
     specs: [],
+    access: LibraryAccess.Global,
+  },
+  {
+    name: "tz:global/bytes",
+    file: "bytes.d.tz",
+    parts: [],
+    specs: [],
+    access: LibraryAccess.Global,
+  },
+  {
+    name: "tz:global/encoding",
+    file: "encoding.d.tz",
+    parts: [],
+    specs: [],
+    access: LibraryAccess.Global,
+  },
+  {
+    name: "tz:global/embed",
+    file: "embed.d.tz",
+    parts: [],
+    specs: [],
+    access: LibraryAccess.Global,
+  },
+  {
+    name: "tz:global/buffer",
+    file: "buffer.d.tz",
+    parts: [],
+    specs: ["tz:global/buffer"],
     access: LibraryAccess.Global,
   },
 ];

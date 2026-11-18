@@ -1,0 +1,3 @@
+main.tz:4:24: error TZ2010: there is no built-in module 'tz:global/buffer'; tz has 'tz:io', 'tz:fs', 'tz:crypto', 'tz:http', 'tz:http2' and 'tz:sync'
+import { Buffer } from "tz:global/buffer";
+                       ^

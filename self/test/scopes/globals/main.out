@@ -104,3 +104,29 @@ main.tz
   46:37 sure -> variable 42:7
   46:43 failed -> variable 43:7
   46:51 wait -> variable 44:7
+  48:14 Uint8Array -> global
+  48:31 TextEncoder -> global
+  48:52 text -> variable 7:7
+  49:15 Buffer -> global
+  49:24 Buffer -> global
+  49:36 bytes -> variable 48:7
+  50:13 DataView -> global
+  50:28 DataView -> global
+  50:41 ArrayBuffer -> global
+  51:15 FatalTextDecoder -> global
+  51:38 TextDecoder -> global
+  52:13 Uint8Array -> global
+  52:26 embedBytes -> global
+  53:13 Float64Array -> global
+  53:28 Float64Array -> global
+  54:12 AnyTypedArray -> global
+  54:28 AnyBytes -> global
+  54:39 wide -> variable 53:7
+  56:1 console -> global
+  56:13 bytes -> variable 48:7
+  56:20 buffer -> variable 49:7
+  56:28 view -> variable 50:7
+  56:34 strict -> variable 51:7
+  56:42 logo -> variable 52:7
+  56:48 wide -> variable 53:7
+  56:54 any -> variable 54:7

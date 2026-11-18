@@ -29,7 +29,7 @@ export class LibraryModules {
     if (module == undefined) {
       return undefined;
     }
-    if (module.access == LibraryAccess.Library && !fromLibrary) {
+    if (module.access != LibraryAccess.Program && !fromLibrary) {
       return undefined;
     }
 
@@ -41,9 +41,7 @@ export class LibraryModules {
   }
 
   public globalModules(): LibraryModule[] {
-    return kLibraryModules.filter(
-      (one) => one.access == LibraryAccess.Global,
-    );
+    return kLibraryModules.filter((one) => one.access == LibraryAccess.Global);
   }
 
   public global(name: string): LibraryGlobal | undefined {

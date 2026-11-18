@@ -1,0 +1,5 @@
+node:buffer (library)
+main.tz
+  declared bytes
+  import NodeBuffer -> tz:global/buffer:Buffer
+  import Short -> tz:global/buffer:Buffer

@@ -1,0 +1,3 @@
+main.tz:7:10: error TZ2106: 'node:buffer' has no export named 'Blob'
+import { Blob } from "node:buffer";
+         ^

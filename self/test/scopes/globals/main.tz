@@ -1,8 +1,8 @@
 // The global objects the compiler has inside itself are declared by files of
 // the library (library/console/console.d.tz, math, json, string, array,
-// number, map, promise, date, result, iterator, regexp, object, utility): a
-// name of theirs is a global name, and a name they do not declare is not
-// found.
+// number, map, promise, date, result, iterator, regexp, object, utility,
+// bytes, encoding, embed, buffer): a name of theirs is a global name, and a
+// name they do not declare is not found.
 const biggest = Math.max(1, 2);
 const text = JSON.stringify({ a: biggest }, null, 2);
 const parts: Array<string> = Array.from(text.split(","));
@@ -44,3 +44,13 @@ const failed: Err<int, Failure> = err({ code: "empty" });
 const wait: PromiseLike<int> = later;
 
 console.log(pattern, found, fields, sure, failed, wait, Results.combine([]));
+
+const bytes: Uint8Array = new TextEncoder().encode(text);
+const buffer: Buffer = Buffer.from(bytes);
+const view: DataView = new DataView(new ArrayBuffer(8));
+const strict: FatalTextDecoder = new TextDecoder("utf-8", { fatal: true });
+const logo: Uint8Array = embedBytes("./main.tz");
+const wide: Float64Array = Float64Array.of(1.5);
+const any: AnyTypedArray | AnyBytes = wide;
+
+console.log(bytes, buffer, view, strict, logo, wide, any, Uint64Array.of(1));

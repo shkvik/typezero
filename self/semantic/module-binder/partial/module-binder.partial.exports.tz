@@ -55,7 +55,8 @@ partial class ModuleBinder {
 
   private exportNames(bound: BoundModule, decl: ExportDecl): void {
     const from = decl.from;
-    if (from != undefined && kBuiltinModules.has(from.path)) {
+    const isLibrary = bound.names.module.source.isLibrary;
+    if (from != undefined && !isLibrary && kBuiltinModules.has(from.path)) {
       this.report(bound, from.loc, Code.ExportFromBuiltin, {
         path: from.path,
       });

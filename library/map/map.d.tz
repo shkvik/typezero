@@ -71,6 +71,11 @@ export interface Set<T> {
   isDisjointFrom(other: Set<T> | Map<T, unknown>): boolean;
 }
 
+/** `Set` has nothing besides `new Set<T>()`. */
+export interface SetConstructor {}
+
+export declare const Set: SetConstructor;
+
 /** The same as `Map<K, V>`. */
 export type ReadonlyMap<K, V> = Map<K, V>;
 
