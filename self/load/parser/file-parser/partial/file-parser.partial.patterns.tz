@@ -213,18 +213,7 @@ partial class FileParser {
 
       element.key = key;
     }
-    if (this.cursor.accept(TokenKind.Colon)) {
-      if (!this.bindingTarget(element)) {
-        return undefined;
-      }
-    } else if (identifier && element.keyExpr == undefined) {
-      element.name = element.key;
-    } else {
-      const token = this.cursor.peek();
-      const word = this.keyExample(element);
-
-      this.cursor.error(token.start, Code.PatternKeyNeedsVariable, { word });
-
+    if (!this.entryVariable(element, identifier)) {
       return undefined;
     }
     if (this.cursor.accept(TokenKind.Assign)) {
@@ -232,6 +221,24 @@ partial class FileParser {
     }
 
     return element;
+  }
+
+  private entryVariable(element: PatternElement, identifier: boolean): boolean {
+    if (this.cursor.accept(TokenKind.Colon)) {
+      return this.bindingTarget(element);
+    }
+    if (identifier && element.keyExpr == undefined) {
+      element.name = element.key;
+
+      return true;
+    }
+
+    const token = this.cursor.peek();
+    const word = this.keyExample(element);
+
+    this.cursor.error(token.start, Code.PatternKeyNeedsVariable, { word });
+
+    return false;
   }
 
   private patternFromLiteral(expr: ArrayLitExpr | ObjectLitExpr): Pattern {
@@ -338,7 +345,10 @@ partial class FileParser {
   ): void {
     if (target.kind == ExprKind.ArrayLit || target.kind == ExprKind.ObjectLit) {
       element.nested = this.patternFromLiteral(target);
-    } else if (!hole) {
+
+      return;
+    }
+    if (!hole) {
       element.target = target;
     }
   }

@@ -181,7 +181,8 @@ partial class FileParser {
       for (const text of constants) {
         this.fieldNames.add(text);
       }
-    } else if (key.kind == ExprKind.StringLit) {
+    }
+    if (key.kind == ExprKind.StringLit) {
       this.fieldNames.add(key.value);
     }
     if (this.cursor.is(TokenKind.LParen) || this.cursor.is(TokenKind.Less)) {

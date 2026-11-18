@@ -139,16 +139,17 @@ partial class FileParser {
 
   private binding(): Binding | undefined {
     const token = this.cursor.peek();
-    const reserved =
-      !kTokenTable.isName(token.kind) && kTokenTable.isKeyword(token.kind);
+    const named = kTokenTable.isName(token.kind);
+    const reserved = !named && kTokenTable.isKeyword(token.kind);
+    if (!named && !reserved) {
+      this.cursor.error(token.start, Code.ExpectedVariableName);
+
+      return undefined;
+    }
     if (reserved) {
       this.cursor.report(token.start, Code.KeywordAsVariableName, {
         word: token.text,
       });
-    } else if (!kTokenTable.isName(token.kind)) {
-      this.cursor.error(token.start, Code.ExpectedVariableName);
-
-      return undefined;
     }
 
     this.cursor.next();

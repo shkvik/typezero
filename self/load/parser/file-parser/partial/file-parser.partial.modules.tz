@@ -49,17 +49,8 @@ partial class FileParser {
       return this.marker(StmtKind.Empty, loc);
     }
 
-    const names: ModuleName[] = [];
+    const names = this.importNames(clause);
 
-    if (this.cursor.is(TokenKind.LBrace)) {
-      this.moduleNames(names, kImportNames);
-    } else if (clause.kind == ImportForm.Named) {
-      const token = this.cursor.peek();
-
-      this.cursor.error(token.start, Code.ExpectedImportNames, {
-        found: token.kind,
-      });
-    }
     if (this.cursor.isRecovering()) {
       return this.marker(StmtKind.Empty, loc);
     }
@@ -70,6 +61,25 @@ partial class FileParser {
     }
 
     return this.finishImport(loc, clause, formLoc, names, from);
+  }
+
+  private importNames(clause: ImportClause): ModuleName[] {
+    const names: ModuleName[] = [];
+
+    if (this.cursor.is(TokenKind.LBrace)) {
+      this.moduleNames(names, kImportNames);
+
+      return names;
+    }
+    if (clause.kind == ImportForm.Named) {
+      const token = this.cursor.peek();
+
+      this.cursor.error(token.start, Code.ExpectedImportNames, {
+        found: token.kind,
+      });
+    }
+
+    return names;
   }
 
   private acceptImportTypeWord(): void {
@@ -421,7 +431,8 @@ partial class FileParser {
     }
     if (old) {
       this.cursor.report(at, Code.AssertAttributes);
-    } else if (other) {
+    }
+    if (other && !old) {
       this.cursor.report(at, Code.JsonOneAttribute);
     }
 

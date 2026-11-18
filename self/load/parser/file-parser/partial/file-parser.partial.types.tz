@@ -204,10 +204,12 @@ partial class FileParser {
     const keyword = this.cursor.next();
     const ref = this.prefixedType();
     const form = ref.form;
-
     if (form.kind == TypeKind.Tuple) {
       form.readonly = true;
-    } else if (form.kind != TypeKind.Array) {
+
+      return ref;
+    }
+    if (form.kind != TypeKind.Array) {
       this.cursor.report(keyword.start, Code.ReadonlyOnlyArrays);
     }
 
@@ -458,7 +460,8 @@ partial class FileParser {
     if (literal.kind == ExprKind.IntLit) {
       number = this.integerAsDouble(literal.value);
       integer = true;
-    } else if (literal.kind == ExprKind.FloatLit) {
+    }
+    if (literal.kind == ExprKind.FloatLit) {
       number = literal.value;
       beyondDouble = literal.beyondDouble;
     }

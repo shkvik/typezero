@@ -86,12 +86,13 @@ partial class FileParser {
   private rememberModifier(seen: TokenKind[], word: Token): void {
     const details: Details = { word: word.text };
     const repeated = seen.includes(word.kind);
-    const secondAccess =
-      this.accessOf(word.kind) != undefined && this.accessGiven(seen);
+    const access = this.accessOf(word.kind) != undefined;
+    const secondAccess = !repeated && access && this.accessGiven(seen);
 
     if (repeated) {
       this.cursor.report(word.start, Code.ModifierRepeated, details);
-    } else if (secondAccess) {
+    }
+    if (secondAccess) {
       this.cursor.report(word.start, Code.AccessAlreadyGiven, details);
     }
 
