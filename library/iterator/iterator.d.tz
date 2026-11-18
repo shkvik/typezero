@@ -28,12 +28,16 @@ export type IteratorResult<T, R = undefined> =
  */
 export interface Generator<T, R = void, N = void> {
   /**
-   * The next step: an item while `done` is false. It is a plain object, not
-   * an `IteratorResult`: a check of `done` does not narrow `value`, so the
-   * value is checked itself. A generator that returns nothing adds nothing
-   * to the value: it is a `T | undefined`.
+   * The next step: an item while `done` is false, and what the generator
+   * returns when it is true. A check of `done` says which of the two `value`
+   * is.
+   * @example
+   * const step = it.next();
+   * if (!step.done) {
+   *   console.log(step.value);
+   * }
    */
-  next(value?: N): { done: boolean; value: T | R | undefined };
+  next(value?: N): IteratorResult<T, R>;
 
   /**
    * An iterator of what the function gives for each item.
