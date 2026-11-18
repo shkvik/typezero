@@ -72,8 +72,6 @@ export class BuiltinModules {
       case "net":
       case "os":
       case "path":
-      case "path/posix":
-      case "path/win32":
       case "perf_hooks":
       case "process":
       case "punycode":

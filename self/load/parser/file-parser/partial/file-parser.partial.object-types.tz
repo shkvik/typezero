@@ -14,6 +14,7 @@ import {
   ObjectTypeField,
   ObjectTypeForm,
   TypeKind,
+  TypeParamDecl,
   TypeRef,
 } from "../../../../program/ast/types/ast.types.types.tz";
 import {
@@ -318,12 +319,11 @@ partial class FileParser {
 
     switch (token.kind) {
       case TokenKind.LParen:
-        return this.objectTypeMethod(name, loc, optional);
+        return this.plainTypeMethod(name, loc, optional);
       case TokenKind.Colon:
         return this.objectTypeField(name, loc, optional, readonly);
       case TokenKind.Less:
-        this.skipBraced(token.start, Code.GenericTypeMethods);
-        return undefined;
+        return this.genericTypeMethod(name, loc, optional);
       default:
         this.skipBraced(token.start, Code.FieldNeedsType, { word: name });
         return undefined;
@@ -339,13 +339,50 @@ partial class FileParser {
     this.cursor.next();
     const type = this.type();
 
-    return { name, loc, optional, readonly, method: false, type };
+    return {
+      name,
+      loc,
+      optional,
+      readonly,
+      method: false,
+      typeParams: [],
+      type,
+    };
+  }
+
+  private plainTypeMethod(
+    name: string,
+    loc: int,
+    optional: boolean,
+  ): ObjectTypeField | undefined {
+    const typeParams: TypeParamDecl[] = [];
+
+    return this.objectTypeMethod(name, loc, optional, typeParams);
+  }
+
+  private genericTypeMethod(
+    name: string,
+    loc: int,
+    optional: boolean,
+  ): ObjectTypeField | undefined {
+    if (!this.library) {
+      const token = this.cursor.peek();
+
+      this.skipBraced(token.start, Code.GenericTypeMethods);
+
+      return undefined;
+    }
+
+    const typeParams = this.typeParams();
+
+    return this.objectTypeMethod(name, loc, optional, typeParams);
   }
 
   private objectTypeMethod(
     name: string,
     loc: int,
     optional: boolean,
+    typeParams: TypeParamDecl[],
   ): ObjectTypeField | undefined {
     const parsed = this.signatureParams();
     if (!parsed.complete || this.cursor.isRecovering()) {
@@ -365,7 +402,15 @@ partial class FileParser {
     const result = this.type();
     const type = this.functionTypeOf(parsed, result);
 
-    return { name, loc, optional, readonly: true, method: true, type };
+    return {
+      name,
+      loc,
+      optional,
+      readonly: true,
+      method: true,
+      typeParams,
+      type,
+    };
   }
 
   private endObjectTypeMember(code: Code): boolean {

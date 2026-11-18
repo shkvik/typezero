@@ -103,11 +103,21 @@ partial class Dumper {
     const optional = this.flags(optionalFields);
     const readonlyFlags = this.flags(readonlyFields);
     const methods = this.flags(throughLastMethod);
+    const generic = this.genericText(fields);
 
     return (
       ` names=${names} locs=[${locs}] opt=${optional} ` +
-      `ro=${readonlyFlags} methods=${methods}`
+      `ro=${readonlyFlags} methods=${methods}${generic}`
     );
+  }
+
+  private genericText(fields: ObjectTypeField[]): string {
+    const counts = fields.map((field) => field.typeParams.length);
+    if (!counts.some((count) => count > 0)) {
+      return "";
+    }
+
+    return ` generic=${counts.join("")}`;
   }
 
   private innerTypes(ref: TypeRef): TypeRef[] {

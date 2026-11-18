@@ -1,0 +1,23 @@
+/**
+ * The methods of `console`. Each prints its values separated by spaces and
+ * ends the line; a value is shown as `String(value)` shows it, an object and
+ * an array with their contents.
+ */
+export interface Console {
+  /** Prints to the standard output. */
+  log(...values: unknown[]): void;
+  /** The same as `log`. */
+  info(...values: unknown[]): void;
+  /** The same as `log`. */
+  debug(...values: unknown[]): void;
+  /** Prints to the standard error. */
+  error(...values: unknown[]): void;
+  /** The same as `error`. */
+  warn(...values: unknown[]): void;
+}
+
+/**
+ * The output of the program for people.
+ * @example console.log("total", 3) // total 3
+ */
+export declare const console: Console;

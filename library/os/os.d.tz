@@ -1,0 +1,87 @@
+/** A logical processor, as `cpus` gives it. */
+export type CpuInfo = {
+  /** The name of the processor. */
+  model: string;
+  /** The speed in MHz. */
+  speed: double;
+  /** The milliseconds the processor spent in each mode since the start. */
+  times: {
+    user: double;
+    nice: double;
+    sys: double;
+    idle: double;
+    irq: double;
+  };
+};
+
+/** The user the program runs as, as `userInfo` gives it. */
+export type UserInfo = {
+  /** -1 on Windows. */
+  uid: int;
+  /** -1 on Windows. */
+  gid: int;
+  username: string;
+  homedir: string;
+  /** Absent on Windows. */
+  shell?: string;
+};
+
+/** The end of a line of the system: `\r\n` on Windows, `\n` elsewhere. */
+export declare const EOL: string;
+
+/** The path of the device that drops what is written: `\\.\nul` or `/dev/null`. */
+export declare const devNull: string;
+
+/** The home folder of the user. */
+export declare function homedir(): string;
+
+/** The folder for temporary files. */
+export declare function tmpdir(): string;
+
+/** The name of the computer in the network. */
+export declare function hostname(): string;
+
+/** The processor the program is built for: `x64`, `arm64`. */
+export declare function arch(): string;
+
+/** The name of the system as `uname` gives it: `Windows_NT`, `Linux`, `Darwin`. */
+export declare function type(): string;
+
+/** The release of the system. */
+export declare function release(): string;
+
+/** The version of the kernel. */
+export declare function version(): string;
+
+/** The kind of the machine: `x86_64`, `arm64`. */
+export declare function machine(): string;
+
+/** The memory of the computer in bytes. */
+export declare function totalmem(): double;
+
+/** The free memory in bytes. */
+export declare function freemem(): double;
+
+/** The seconds since the system started. */
+export declare function uptime(): double;
+
+/** The system: `win32`, `linux`, `darwin`. */
+export declare function platform(): string;
+
+/** The order of bytes of the processor: `LE` or `BE`. */
+export declare function endianness(): string;
+
+/** How many threads it makes sense to run at once. */
+export declare function availableParallelism(): int;
+
+/** The logical processors. */
+export declare function cpus(): CpuInfo[];
+
+/**
+ * The load averages of 1, 5 and 15 minutes; zeros on Windows, which has no
+ * such number.
+ */
+export declare function loadavg(): double[];
+
+/** The user the program runs as. */
+export declare function userInfo(): UserInfo;

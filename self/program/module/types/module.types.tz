@@ -1,6 +1,9 @@
 import { SourceError } from "../../../diagnostic/types/message.types.tz";
 import { ClassDecl } from "../../ast/types/ast.types.classes.tz";
-import { DeclarationFile } from "../../ast/types/ast.types.declarations.tz";
+import {
+  DeclarationFile,
+  DeclaredClass,
+} from "../../ast/types/ast.types.declarations.tz";
 import {
   ImportDecl,
   ModulePath,
@@ -58,6 +61,8 @@ export type Module = {
   readonly links: ModuleLink[];
   readonly implicit: ImportDecl[];
   readonly parts: ClassDecl[];
+  readonly isDeclarationOnly: boolean;
+  readonly declared: DeclaredClass[];
 };
 
 export enum BuiltinText {
@@ -76,5 +81,6 @@ export type BuiltinFile = {
 export type Program = {
   readonly modules: Module[];
   readonly order: Module[];
+  readonly globals: Module[];
   readonly builtins: BuiltinFile[];
 };

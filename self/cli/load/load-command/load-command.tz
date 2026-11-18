@@ -37,9 +37,12 @@ export class LoadCommand {
   }
 
   private printProgram(program: Program): void {
-    console.log(`modules ${program.order.length}`);
+    const globals = program.globals;
+    const modules = program.order.filter((one) => !globals.includes(one));
 
-    for (const module of program.order) {
+    console.log(`modules ${modules.length}`);
+
+    for (const module of modules) {
       this.printModule(program, module);
     }
   }

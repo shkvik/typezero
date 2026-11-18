@@ -6,6 +6,11 @@ import {
   MethodKind,
 } from "../../../program/ast/types/ast.types.classes.tz";
 import {
+  DeclaredClass,
+  DeclaredMember,
+  DeclaredMemberKind,
+} from "../../../program/ast/types/ast.types.declarations.tz";
+import {
   FunctionDecl,
   Param,
   ParamKind,
@@ -130,6 +135,35 @@ partial class ScopeTraversal {
 
   private isStatic(method: FunctionDecl): boolean {
     return method.role?.method == MethodKind.Static;
+  }
+
+  private traverseDeclaredClass(decl: DeclaredClass): void {
+    this.scopes.open();
+    this.scopes.enterFunction();
+    this.declareTypeParams(decl.typeParams);
+
+    for (const member of decl.members) {
+      this.traverseDeclaredMember(member);
+    }
+
+    this.scopes.leaveFunction();
+    this.scopes.close();
+  }
+
+  private traverseDeclaredMember(member: DeclaredMember): void {
+    const form = member.form;
+
+    this.scopes.open();
+    if (form.kind != DeclaredMemberKind.Field) {
+      this.declareTypeParams(form.typeParams);
+
+      for (const param of form.params) {
+        this.traverseOptionalType(param.type);
+      }
+    }
+
+    this.traverseOptionalType(member.type);
+    this.scopes.close();
   }
 
   private traverseBase(base: TypeRef | undefined): void {

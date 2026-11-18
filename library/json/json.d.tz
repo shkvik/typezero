@@ -1,0 +1,20 @@
+/** The functions of `JSON`. */
+export interface JSON {
+  /**
+   * Reads a text of JSON. The value is a `Json`: a check shows what it holds
+   * before it is used.
+   * @example JSON.parse("[1, 2]") // ok([1, 2])
+   */
+  parse(text: string): Result<Json, JsonError>;
+
+  /**
+   * Writes a value as a text of JSON. There is no replacer: build the value to
+   * write first, and pass `null` in its place. `space` is the indent: a count
+   * of spaces or the text of one step.
+   * @example JSON.stringify({ a: 1 }, null, 2)
+   */
+  stringify(value: unknown, replacer?: null, space?: int | string): string;
+}
+
+/** Reading and writing JSON. */
+export declare const JSON: JSON;

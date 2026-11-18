@@ -4,6 +4,7 @@ export enum LibraryAccess {
   Program,
   Library,
   Implicit,
+  Global,
 }
 
 export type LibraryModule = {

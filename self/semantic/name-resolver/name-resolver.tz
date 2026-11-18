@@ -45,6 +45,17 @@ export class NameResolver {
       }
     }
 
+    for (const module of this.program.globals) {
+      for (const item of module.file.items) {
+        this.addGlobal(globals, item);
+      }
+
+      for (const one of module.declared) {
+        globals.values.add(one.name);
+        globals.types.add(one.name);
+      }
+    }
+
     return globals;
   }
 

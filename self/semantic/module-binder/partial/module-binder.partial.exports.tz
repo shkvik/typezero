@@ -24,6 +24,7 @@ partial class ModuleBinder {
     }
 
     bound.state = BindState.Exporting;
+    this.exportDeclared(bound);
 
     const exports = bound.names.module.file.exports;
 
@@ -38,6 +39,18 @@ partial class ModuleBinder {
     bound.state = BindState.Exported;
 
     return bound.names.exports;
+  }
+
+  private exportDeclared(bound: BoundModule): void {
+    const names = bound.names;
+    const module = names.module;
+    if (!module.isDeclarationOnly) {
+      return;
+    }
+
+    for (const [name, loc] of names.declared) {
+      names.exports.set(name, { target: { module: module.id, name }, loc });
+    }
   }
 
   private exportNames(bound: BoundModule, decl: ExportDecl): void {

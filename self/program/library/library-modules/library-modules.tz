@@ -40,6 +40,12 @@ export class LibraryModules {
     return kLibraryModules.find((one) => one.name == name);
   }
 
+  public globalModules(): LibraryModule[] {
+    return kLibraryModules.filter(
+      (one) => one.access == LibraryAccess.Global,
+    );
+  }
+
   public global(name: string): LibraryGlobal | undefined {
     return this.globalsByName.get(name);
   }

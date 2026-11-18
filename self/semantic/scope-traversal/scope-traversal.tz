@@ -51,7 +51,12 @@ export class ScopeTraversal {
     this.scopes.open();
     this.declareImports();
     this.declareStatements(items);
+    this.declareClasses(this.module.declared);
     this.traverseStatements(items);
+
+    for (const one of this.module.declared) {
+      this.traverseDeclaredClass(one);
+    }
 
     for (const part of this.module.parts) {
       this.traverseClass(part);

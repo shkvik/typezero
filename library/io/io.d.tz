@@ -1,0 +1,6 @@
+/**
+ * Prints the question as it is and reads a line of the input, without its
+ * `\n` or `\r\n`; `undefined` at the end of the input.
+ * @example const name = readLine("Name: ") ?? "nobody"
+ */
+export declare function readLine(question?: string): string | undefined;

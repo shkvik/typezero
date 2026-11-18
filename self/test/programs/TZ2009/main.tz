@@ -1,1 +1,5 @@
+// The paths of another system, node:path/posix and node:path/win32, are
+// modules of the library only: a program has node:path.
 import { a } from "node:nothing";
+import { join } from "node:path/posix";
+import { sep } from "node:path/win32";

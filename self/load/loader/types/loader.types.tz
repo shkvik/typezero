@@ -1,5 +1,6 @@
 import { SourceError } from "../../../diagnostic/types/message.types.tz";
 import { ClassDecl } from "../../../program/ast/types/ast.types.classes.tz";
+import { DeclaredClass } from "../../../program/ast/types/ast.types.declarations.tz";
 import {
   ImportDecl,
   ModulePath,
@@ -26,6 +27,8 @@ export type OpenModule = {
   readonly links: ModuleLink[];
   readonly implicit: ImportDecl[];
   readonly parts: ClassDecl[];
+  readonly isDeclarationOnly: boolean;
+  readonly declared: DeclaredClass[];
   readonly problems: SourceError[];
   state: ModuleState;
 };

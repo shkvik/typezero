@@ -79,6 +79,8 @@ partial class Loader {
       links: [],
       implicit,
       parts: [],
+      isDeclarationOnly: false,
+      declared: [],
       problems: [],
       state: ModuleState.New,
     };

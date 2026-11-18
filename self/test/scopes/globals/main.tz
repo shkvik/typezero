@@ -1,0 +1,7 @@
+// The global objects the compiler has inside itself are declared by files of
+// the library (library/console/console.d.tz, math, json): a name of theirs is
+// a global name, and a name they do not declare is not found.
+const biggest = Math.max(1, 2);
+const text = JSON.stringify({ a: biggest }, null, 2);
+
+console.log(text, Math.PI, Maths.PI);

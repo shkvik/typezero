@@ -1,0 +1,7 @@
+main.tz
+  4:17 Math -> global
+  5:14 JSON -> global
+  5:34 biggest -> variable 4:7
+  7:1 console -> global
+  7:13 text -> variable 5:7
+  7:19 Math -> global

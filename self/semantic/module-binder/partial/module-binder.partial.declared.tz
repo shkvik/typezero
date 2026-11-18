@@ -11,8 +11,14 @@ import { BoundModule } from "../types/module-binder.types.tz";
 
 partial class ModuleBinder {
   private declareNames(bound: BoundModule): void {
-    for (const item of bound.names.module.file.items) {
+    const module = bound.names.module;
+
+    for (const item of module.file.items) {
       this.declareItem(bound, item);
+    }
+
+    for (const one of module.declared) {
+      this.declare(bound, one.name, one.loc);
     }
   }
 

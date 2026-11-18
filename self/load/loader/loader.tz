@@ -58,6 +58,7 @@ export class Loader {
       this.visit(entry);
     }
 
+    const globalIds = this.loadGlobals();
     const parts = new PartialClasses(this.order);
 
     parts.join();
@@ -67,10 +68,11 @@ export class Loader {
 
     modules.sort((first, second) => first.id - second.id);
 
+    const globals = order.filter((module) => globalIds.includes(module.id));
     const builtins = this.builtins();
 
     return {
-      program: { modules, order, builtins },
+      program: { modules, order, globals, builtins },
       unreadable: this.unreadable,
     };
   }
@@ -180,6 +182,8 @@ export class Loader {
       links: module.links,
       implicit: module.implicit,
       parts: module.parts,
+      isDeclarationOnly: module.isDeclarationOnly,
+      declared: module.declared,
     };
   }
 

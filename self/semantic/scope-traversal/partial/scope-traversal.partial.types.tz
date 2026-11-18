@@ -1,5 +1,6 @@
 import { ScopeTraversal } from "../scope-traversal.tz";
 import {
+  ObjectTypeField,
   TypeKind,
   TypeRef,
 } from "../../../program/ast/types/ast.types.types.tz";
@@ -33,8 +34,19 @@ partial class ScopeTraversal {
         return this.traverseMapped(ref);
       case TypeKind.Conditional:
         return this.traverseConditional(ref);
+      case TypeKind.Object:
+        return this.traverseObjectType(form.fields);
       default:
         return this.traverseTypes(this.childTypes(ref));
+    }
+  }
+
+  private traverseObjectType(fields: ObjectTypeField[]): void {
+    for (const field of fields) {
+      this.scopes.open();
+      this.declareTypeParams(field.typeParams);
+      this.traverseType(field.type);
+      this.scopes.close();
     }
   }
 

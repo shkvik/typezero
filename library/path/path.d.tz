@@ -1,0 +1,89 @@
+/** The parts of a path, as `parse` gives them. */
+export type ParsedPath = {
+  /** The root: `/` or `C:\`, empty for a relative path. */
+  root: string;
+  /** The folder, without the last separator. */
+  dir: string;
+  /** The last part with its ending: `file.txt`. */
+  base: string;
+  /** The ending with its dot: `.txt`, empty when there is none. */
+  ext: string;
+  /** The last part without its ending: `file`. */
+  name: string;
+};
+
+/**
+ * The parts `format` makes a path of: `dir` wins over `root`, and `base` over
+ * `name` with `ext`.
+ */
+export type FormatInputPathObject = {
+  root?: string;
+  dir?: string;
+  base?: string;
+  ext?: string;
+  name?: string;
+};
+
+/** The separator of the parts of a path: `\` on Windows, `/` elsewhere. */
+export declare const sep: string;
+
+/** The separator of paths in a list such as PATH: `;` on Windows, `:` elsewhere. */
+export declare const delimiter: string;
+
+/**
+ * Joins the parts with the separator and normalizes the result.
+ * @example join("a", "..", "b", "c.txt") // "b/c.txt"
+ */
+export declare function join(...parts: string[]): string;
+
+/**
+ * The absolute path the parts lead to, from the right until an absolute part,
+ * and from the current folder when there is none.
+ * @example resolve("a", "/b", "c") // "/b/c"
+ */
+export declare function resolve(...parts: string[]): string;
+
+/**
+ * Removes `.`, `..` and repeated separators.
+ * @example normalize("a//b/../c") // "a/c"
+ */
+export declare function normalize(path: string): string;
+
+/** Whether the path starts at a root. */
+export declare function isAbsolute(path: string): boolean;
+
+/**
+ * The folder of a path.
+ * @example dirname("a/b/c.txt") // "a/b"
+ */
+export declare function dirname(path: string): string;
+
+/**
+ * The last part of a path, without `suffix` when it ends with it.
+ * @example basename("a/b/c.txt", ".txt") // "c"
+ */
+export declare function basename(path: string, suffix?: string): string;
+
+/**
+ * The ending of the last part, from its last dot.
+ * @example extname("a/b/c.tar.gz") // ".gz"
+ */
+export declare function extname(path: string): string;
+
+/**
+ * The path that leads from `from` to `to`.
+ * @example relative("/a/b", "/a/c/d") // "../c/d"
+ */
+export declare function relative(from: string, to: string): string;
+
+/** Splits a path into its parts. */
+export declare function parse(path: string): ParsedPath;
+
+/** Makes a path of its parts, the reverse of `parse`. */
+export declare function format(parts: FormatInputPathObject): string;
+
+/**
+ * On Windows the path with the prefix `\\?\`, which lifts the limit on its
+ * length; elsewhere the path itself.
+ */
+export declare function toNamespacedPath(path: string): string;

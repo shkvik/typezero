@@ -1,3 +1,9 @@
-main.tz:1:19: error TZ2009: there is no built-in module 'node:nothing'
+main.tz:3:19: error TZ2009: there is no built-in module 'node:nothing'
 import { a } from "node:nothing";
                   ^
+main.tz:4:22: error TZ2009: there is no built-in module 'node:path/posix'
+import { join } from "node:path/posix";
+                     ^
+main.tz:5:21: error TZ2009: there is no built-in module 'node:path/win32'
+import { sep } from "node:path/win32";
+                    ^

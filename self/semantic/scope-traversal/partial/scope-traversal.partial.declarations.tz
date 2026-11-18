@@ -1,5 +1,7 @@
 import { ScopeTraversal } from "../scope-traversal.tz";
 import { Code } from "../../../diagnostic/code.tz";
+import { DeclaredClass } from "../../../program/ast/types/ast.types.declarations.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
 import { ImportDecl } from "../../../program/ast/types/ast.types.modules.tz";
 import {
   Stmt,
@@ -68,10 +70,7 @@ partial class ScopeTraversal {
         }
         break;
       case StmtKind.Function:
-        this.declareValue(
-          { name: statement.name, kind: SymbolKind.Function, loc },
-          true,
-        );
+        this.declareFunction(statement);
         break;
       case StmtKind.Class:
         this.declareBoth({
@@ -99,6 +98,29 @@ partial class ScopeTraversal {
         break;
       default:
         break;
+    }
+  }
+
+  private declareFunction(fn: FunctionDecl): void {
+    const name = fn.name;
+    const previous = this.scopes.declaredValue(name)?.symbol;
+    const anotherSignature =
+      fn.body == undefined && previous?.kind == SymbolKind.Function;
+    if (!anotherSignature) {
+      this.declareValue(
+        { name, kind: SymbolKind.Function, loc: fn.loc },
+        true,
+      );
+    }
+  }
+
+  private declareClasses(classes: DeclaredClass[]): void {
+    for (const one of classes) {
+      this.declareBoth({
+        name: one.name,
+        kind: SymbolKind.Class,
+        loc: one.loc,
+      });
     }
   }
 

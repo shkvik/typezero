@@ -51,6 +51,9 @@ export class NamesCommand {
   }
 
   private printNames(program: Program, names: ModuleNames): void {
+    if (program.globals.includes(names.module)) {
+      return;
+    }
     if (names.module.source.isLibrary) {
       console.log(`${names.module.name}${kLibraryMark}`);
 

@@ -1,0 +1,13 @@
+node:path (library)
+node:os (library)
+tz:io (library)
+main.tz
+  declared parts first
+  import join -> node:path:join
+  import sep -> node:path:sep
+  import ParsedPath -> node:path:ParsedPath
+  import basename -> node:path:basename
+  import cpus -> node:os:cpus
+  import EOL -> node:os:EOL
+  import CpuInfo -> node:os:CpuInfo
+  import readLine -> tz:io:readLine

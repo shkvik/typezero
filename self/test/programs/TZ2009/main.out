@@ -1,3 +1,5 @@
 modules 1
 main.tz
-  "node:nothing" 18 -> missing
+  "node:nothing" 148 -> missing
+  "node:path/posix" 185 -> missing
+  "node:path/win32" 224 -> missing

@@ -10,8 +10,6 @@ export const kSupportedNodeModules = [
   "readline",
   "readline/promises",
   "path",
-  "path/posix",
-  "path/win32",
   "os",
   "process",
   "buffer",
