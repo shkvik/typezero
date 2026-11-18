@@ -44,14 +44,21 @@ export declare function setInterval(
 /** Calls the function after the events that have already come. */
 export declare function setImmediate(callback: () => void): Immediate;
 
-/** Stops a timer; nothing happens when it is over or there is none. */
-export declare function clearTimeout(timer?: Timeout | Immediate): void;
+/**
+ * Stops a timer of `setTimeout` or `setInterval`; nothing happens when it is
+ * over or there is none. What `setImmediate` started is stopped by
+ * `clearImmediate`: JavaScript would leave it running here without a word.
+ */
+export declare function clearTimeout(timer?: Timeout): void;
 
-/** The same as `clearTimeout`. */
-export declare function clearInterval(timer?: Timeout | Immediate): void;
+/** The same as `clearTimeout`: it stops a timer of either. */
+export declare function clearInterval(timer?: Timeout): void;
 
-/** The same as `clearTimeout`. */
-export declare function clearImmediate(timer?: Timeout | Immediate): void;
+/**
+ * Stops what `setImmediate` started; nothing happens when it has run or
+ * there is none. A timer of `setTimeout` is stopped by `clearTimeout`.
+ */
+export declare function clearImmediate(timer?: Immediate): void;
 
 /**
  * Calls the function as soon as the code that runs now is over, before any

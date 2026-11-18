@@ -4,11 +4,15 @@ export interface boolean {
   toString(): string;
 }
 
-/**
- * `Boolean` has nothing besides `Boolean(value)`: whether the value counts
- * as true. A number and a `Json` are not conditions, so they are compared
- * as meant: `n != 0`.
- */
-export interface BooleanConstructor {}
+/** `Boolean(value)` is all that `Boolean` has. */
+export interface BooleanConstructor {
+  /**
+   * Whether the value counts as true, false when there is none. The value is
+   * what a condition takes: a number and a `Json` are not conditions, so
+   * they are compared as meant: `n != 0`.
+   * @example Boolean("") // false
+   */
+  (value?: unknown): boolean;
+}
 
 export declare const Boolean: BooleanConstructor;

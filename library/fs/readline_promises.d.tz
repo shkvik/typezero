@@ -13,6 +13,8 @@ export interface Interface {
   question(query: string): Promise<Result<string, QuestionError>>;
   /** Stops reading; the lines read so far still come. */
   close(): void;
+  /** The lines as they come: what `for await` goes through. */
+  [Symbol.asyncIterator](): AsyncGenerator<string>;
 }
 
 /** `Interface` has nothing: `createInterface` makes one. */

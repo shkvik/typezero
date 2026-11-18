@@ -58,10 +58,27 @@ export interface double {
 }
 
 /**
- * What `Number` has besides `Number(value)`, which makes a double of a number
- * or a boolean, and a Result of a string.
+ * `Number(value)` makes a number of a value; besides that `Number` has the
+ * limits of a double and the functions that read and test numbers. A value
+ * that may be `undefined` is not taken: there is no NaN to give.
  */
 export interface NumberConstructor {
+  /** Zero. */
+  (): double;
+  /**
+   * The number as a double; 1 of true and 0 of false. A value of an enum of
+   * numbers is taken too.
+   * @example Number(true) // 1
+   */
+  (value: MathNumber | Bit.Wrap32 | Bit.Wrap64 | boolean | decimal): double;
+  /**
+   * Reads a number from a text; an error when the text is not a number.
+   * @example Number("2.5") // ok(2.5)
+   */
+  (value: string): Result<double, NumberError>;
+  /** The milliseconds of the date since the start of 1970. */
+  (value: Date): int;
+
   /** The largest integer a double holds exactly: 2 ** 53 - 1. */
   readonly MAX_SAFE_INTEGER: double;
   readonly MIN_SAFE_INTEGER: double;

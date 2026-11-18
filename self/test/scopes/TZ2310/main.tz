@@ -1,0 +1,16 @@
+type Shape = { side: int };
+
+interface Face {
+  side: int;
+}
+
+function make<T>(): void {
+  console.log(T);
+}
+
+const shape = Shape;
+const face = new Face();
+const kept = Ok(1);
+const decoder = new FatalTextDecoder();
+
+console.log(shape, face, kept, decoder, make);

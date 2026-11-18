@@ -1,0 +1,4 @@
+const target = { side: 1 };
+const watched = new Proxy(target, {});
+
+console.log(watched, Proxy);

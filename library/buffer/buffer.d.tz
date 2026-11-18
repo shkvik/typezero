@@ -27,6 +27,9 @@ export declare class Buffer<B = ArrayBuffer> extends Uint8Array {
     end?: int,
     encoding?: BufferEncoding,
   ): Buffer;
+  /** The encoding in place of `start` or of `end`: to the end of the bytes. */
+  public fill(value: string, encoding: BufferEncoding): Buffer;
+  public fill(value: string, start: int, encoding: BufferEncoding): Buffer;
   public copyWithin(target: int, start: int, end?: int): Buffer;
   public sort(compare?: (first: uint8, second: uint8) => int | double): Buffer;
   public reverse(): Buffer;
@@ -77,6 +80,7 @@ export declare class Buffer<B = ArrayBuffer> extends Uint8Array {
    * how many bytes were written.
    */
   public write(text: string, encoding?: BufferEncoding): int;
+  public write(text: string, offset: int, encoding: BufferEncoding): int;
   public write(
     text: string,
     offset: int,
@@ -87,24 +91,27 @@ export declare class Buffer<B = ArrayBuffer> extends Uint8Array {
   /**
    * The offset of the first occurrence of a byte, of the bytes of a text or
    * of other bytes, -1 when there is none. An encoding goes only with a
-   * text.
+   * text, and may stand in place of the offset.
    */
   public indexOf(
     value: int | string | Uint8Array,
     byteOffset?: int,
     encoding?: BufferEncoding,
   ): int;
+  public indexOf(value: string, encoding: BufferEncoding): int;
   /** The offset of the last occurrence, -1 when there is none. */
   public lastIndexOf(
     value: int | string | Uint8Array,
     byteOffset?: int,
     encoding?: BufferEncoding,
   ): int;
+  public lastIndexOf(value: string, encoding: BufferEncoding): int;
   public includes(
     value: int | string | Uint8Array,
     byteOffset?: int,
     encoding?: BufferEncoding,
   ): boolean;
+  public includes(value: string, encoding: BufferEncoding): boolean;
 
   /** Swaps the bytes of every pair in place. */
   public swap16(): Buffer;

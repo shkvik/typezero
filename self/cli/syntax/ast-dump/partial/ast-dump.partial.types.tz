@@ -104,11 +104,23 @@ partial class Dumper {
     const readonlyFlags = this.flags(readonlyFields);
     const methods = this.flags(throughLastMethod);
     const generic = this.genericText(fields);
+    const calls = this.callsText(fields);
 
     return (
       ` names=${names} locs=[${locs}] opt=${optional} ` +
-      `ro=${readonlyFlags} methods=${methods}${generic}`
+      `ro=${readonlyFlags} methods=${methods}${generic}${calls}`
     );
+  }
+
+  private callsText(fields: ObjectTypeField[]): string {
+    const callFields = fields.map((field) => field.call);
+    if (!callFields.includes(true)) {
+      return "";
+    }
+
+    const calls = this.flags(callFields);
+
+    return ` calls=${calls}`;
   }
 
   private genericText(fields: ObjectTypeField[]): string {

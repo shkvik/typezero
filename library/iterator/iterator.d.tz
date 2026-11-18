@@ -4,7 +4,9 @@
  * of a class that has the method `[Symbol.iterator]`. It is written only as
  * the type of a parameter of a function declared at the top level or of a
  * method: the function gets a copy for each kind of iterable it is called
- * with. Elsewhere the type itself is written, or `Iterator<T>`.
+ * with. Elsewhere the type itself is written, or `Iterator<T>`. A type of
+ * the language has the method only for `for...of`, a spread and a
+ * destructuring to use: it is not called by hand, `values()` is.
  */
 export interface Iterable<T> {
   [Symbol.iterator](): Iterator<T>;
@@ -24,7 +26,9 @@ export type IteratorResult<T, R = undefined> =
  * `yield`. The methods besides `next` are lazy: nothing is gone through until
  * the items are asked for, and a chain of them compiles into one loop. They
  * are there for an iterator that is sent nothing. There is no `throw`, since
- * an error is a value.
+ * an error is a value, and no `return`: `break` stops going through, and
+ * what the generator holds is closed when it is freed. An iterator written
+ * by hand may not have a method `return` either.
  */
 export interface Generator<T, R = void, N = void> {
   /**
@@ -52,6 +56,9 @@ export interface Generator<T, R = void, N = void> {
   drop(count: int): Generator<T>;
   /** As `map`, and what the function gives is put in item by item. */
   flatMap<U>(change: (item: T, index: int) => U[] | Generator<U>): Generator<U>;
+
+  /** The iterator itself: what `for...of` goes through. */
+  [Symbol.iterator](): Generator<T, R, N>;
 
   /** Goes through the iterator and gives its items as an array. */
   toArray(): T[];
@@ -90,10 +97,13 @@ export declare const Iterator: IteratorConstructor;
 
 /**
  * An iterator whose items come later. A function with `async function*`
- * makes one, and it is gone through with `for await`: it has no methods of
- * its own.
+ * makes one, and it is gone through with `for await`: it has no methods to
+ * call.
  */
-export interface AsyncGenerator<T, R = void, N = void> {}
+export interface AsyncGenerator<T, R = void, N = void> {
+  /** The iterator itself: what `for await` goes through. */
+  [Symbol.asyncIterator](): AsyncGenerator<T, R, N>;
+}
 
 /** The same as `AsyncGenerator`. */
 export type AsyncIterator<T, R = void, N = void> = AsyncGenerator<T, R, N>;

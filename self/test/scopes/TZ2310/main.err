@@ -1,0 +1,15 @@
+main.tz:8:15: error TZ2310: 'T' is a type, not a value
+  console.log(T);
+              ^
+main.tz:11:15: error TZ2310: 'Shape' is a type, not a value
+const shape = Shape;
+              ^
+main.tz:12:18: error TZ2310: 'Face' is a type, not a value
+const face = new Face();
+                 ^
+main.tz:13:14: error TZ2310: 'Ok' is a type, not a value
+const kept = Ok(1);
+             ^
+main.tz:14:21: error TZ2310: 'FatalTextDecoder' is a type, not a value
+const decoder = new FatalTextDecoder();
+                    ^

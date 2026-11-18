@@ -1,0 +1,11 @@
+class NotFound extends Error {}
+
+function report(problem: TypeError): void {
+  console.log(problem);
+}
+
+const plain = new Error("x");
+const range = new RangeError("x");
+const called = Error("x");
+
+console.log(plain, range, called, report);

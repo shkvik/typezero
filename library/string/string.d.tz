@@ -99,6 +99,9 @@ export interface string {
   /** The Unicode normalization form, NFC by default. */
   normalize(form?: "NFC" | "NFD" | "NFKC" | "NFKD"): string;
 
+  /** The characters in order, each a string: what `for...of` goes through. */
+  [Symbol.iterator](): Iterator<string>;
+
   /**
    * The string for a function of C: its bytes in UTF-8 with a zero at the
    * end; `undefined` when the string itself has a zero inside.
@@ -107,10 +110,18 @@ export interface string {
 }
 
 /**
- * What `String` has besides `String(value)`, which makes a string of a
- * value.
+ * `String(value)` makes a string of a value; besides that `String` has the
+ * functions that build a string.
  */
 export interface StringConstructor {
+  /**
+   * The value as text, an empty string when there is none. What has no text
+   * of its own is refused: an object, a tuple, a Map, a Result, a function,
+   * and a `Json`, which may hold an object.
+   * @example String(255) // "255"
+   */
+  (value?: unknown): string;
+
   /** A template without its escapes processed: String.raw`a\n` is `a\n`. */
   raw(parts: TemplateStringsArray, ...values: unknown[]): string;
   /** A string of UTF-16 units. */

@@ -2047,7 +2047,7 @@ if (tests.isErr()) process.exit(tests.error.status ?? 1)
   `input` (текст в кодировке вызова или байты), `stdio` (`"pipe"`, `"inherit"`, `"ignore"`, номер
   дескриптора или массив из трёх), `encoding`, `timeout` и `killSignal`, `maxBuffer` (1 МБ, сверх —
   `ENOBUFS`, программа убита), `shell` (`true` или путь), `windowsHide`, `windowsVerbatimArguments`,
-  `detached`, `argv0`, `uid` и `gid` (в Windows — `ENOTSUP`, как в node). `encoding` и `stdio` пишут
+  `detached`, `argv0`, `uid` и `gid` (только Linux и macOS: при сборке под Windows — ошибка). `encoding` и `stdio` пишут
   литералами: от них зависит тип результата, а поток, который не канал, даёт `undefined`.
 - **Ошибки** ([process.md](docs/process.md), раздел 1, «Ошибки») — у каждой функции свой тип:
   `ExecTextError` / `ExecBytesError` (`execSync`), `ExecFileTextError` / `ExecFileBytesError`,
@@ -2898,7 +2898,8 @@ sum([1, 2]), sum(new Set([3])), sum(new Range(0, 4)), sum(new Countdown(4))
   которого вышли (`break`, `return`), `take`, `find`, `some` и другие, что перестают
   брать значения, и `yield*` закрываемого генератора закрывают итератор, даже если он живёт и в
   переменной, а освобождение недоделанного генератора закрывает его тоже; дальше он закончен.
-  Метода `return()` у итераторов пока нет, `throw()` нет совсем.
+  Методов `return()` и `throw()` у итераторов нет совсем ([iterators.md](docs/iterators.md),
+  поправка 19 ноября).
 - Если генератор оставили (освободили, не доведя до конца), когда он стоит на `yield` внутри
   выражения, части которого уже вычислены (`f(s + t, yield x)`), то строки и массивы из этих
   частей не освобождаются; `TZ_CHECK_LEAKS` о них сообщает.
@@ -2933,8 +2934,9 @@ for await (const v of [fetchA(), fetchB()]) console.log(v)           // масс
   параметр `AsyncIterable<T>` берёт такой объект так же, как async-генератор (и выводит из него
   `T` в обобщённой функции). Async-генераторы — и методы обобщённых классов, и с `unknown`, и под
   декораторами.
-- Пока нет: `next()`, `return()` и `throw()` у async-итератора в программе (итерируют его
-  `for await`), значения в `next(x)`, `[Symbol.asyncIterator]()`, который не async-генератор.
+- Пока нет: `next()` у async-итератора в программе (итерируют его `for await`), значения в
+  `next(x)`, `[Symbol.asyncIterator]()`, который не async-генератор. `return()` и `throw()` нет
+  совсем.
   Async-генератор, который оставили недоделанным, просто освобождается.
 
 ## Async

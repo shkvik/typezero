@@ -1,8 +1,10 @@
 import {
+  kAbsentNames,
   kGlobalTypes,
   kGlobalValues,
   kUnboundNames,
 } from "./const/global-names.const.tables.tz";
+import { AbsentName } from "./types/global-names.types.tz";
 
 export class GlobalNames {
   private readonly values: Set<string>;
@@ -23,5 +25,9 @@ export class GlobalNames {
 
   public isUnbound(name: string): boolean {
     return kUnboundNames.includes(name);
+  }
+
+  public absent(name: string): AbsentName | undefined {
+    return kAbsentNames.find((absent) => absent.name == name);
   }
 }

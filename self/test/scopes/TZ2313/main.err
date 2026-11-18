@@ -1,0 +1,6 @@
+main.tz:2:21: error TZ2313: 'Proxy' is not supported: the fields of an object are read and written straight in memory, so nothing can intercept that
+const watched = new Proxy(target, {});
+                    ^
+main.tz:4:22: error TZ2313: 'Proxy' is not supported: the fields of an object are read and written straight in memory, so nothing can intercept that
+console.log(watched, Proxy);
+                     ^

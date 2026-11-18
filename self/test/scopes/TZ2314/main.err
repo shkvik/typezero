@@ -1,0 +1,6 @@
+main.tz:1:15: error TZ2314: 'require' is not supported: files are imported by name: 'import { a } from "./x"'
+const files = require("node:fs");
+              ^
+main.tz:3:20: error TZ2314: 'require' is not supported: files are imported by name: 'import { a } from "./x"'
+console.log(files, require);
+                   ^

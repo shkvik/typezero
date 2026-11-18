@@ -67,3 +67,14 @@ export interface Reflect {
 }
 
 export declare const Reflect: Reflect;
+
+/**
+ * What a decorator of a method gets as its third argument: `A` is the types
+ * of the parameters of the method and `R` the type of its result. They are
+ * not written where the decorator is used: `@Log` over `add(a: int, b: int)`
+ * gives `A = [int, int]` by itself.
+ */
+export interface MethodDescriptor<A extends unknown[], R> {
+  /** The method itself; a decorator may put a wrapper in its place. */
+  value: (this: unknown, ...args: A) => R;
+}

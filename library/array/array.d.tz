@@ -52,6 +52,8 @@ export interface Array<T> {
   keys(): Generator<int>;
   values(): Generator<T>;
   entries(): Generator<[int, T]>;
+  /** The items in order: what `for...of` goes through. */
+  [Symbol.iterator](): Iterator<T>;
 
   forEach(action: (item: T, index: int, all: T[]) => void): void;
   /**
@@ -95,10 +97,19 @@ export interface Array<T> {
 }
 
 /**
- * What `Array` has besides `new Array<T>(length)`, which makes an array of
- * that many items.
+ * `Array<T>(length)` makes an array, with `new` or without it; besides that
+ * `Array` has the functions that test and build arrays.
  */
 export interface ArrayConstructor {
+  /**
+   * An array of that many items, each the default value of its type: 0, "",
+   * false, `undefined`; a type without one is refused. An empty array when
+   * there is no length. The type of the items is written, and the length is
+   * proven not to be negative.
+   * @example Array<int>(3) // [0, 0, 0]
+   */
+  <T>(length?: int): T[];
+
   isArray(value: unknown): boolean;
   /**
    * A new array of the items of an array, a string or an iterator, each

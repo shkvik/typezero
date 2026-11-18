@@ -1,0 +1,12 @@
+export enum AbsentReason {
+  ErrorClass,
+  CodeFromString,
+  Proxy,
+  Require,
+}
+
+export type AbsentName = {
+  readonly name: string;
+  readonly reason: AbsentReason;
+  readonly asType: boolean;
+};

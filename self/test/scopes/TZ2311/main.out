@@ -1,0 +1,9 @@
+main.tz
+  3:38 void -> global
+  4:3 console -> global
+  4:15 problem -> parameter 3:17
+  11:1 console -> global
+  11:13 plain -> variable 7:7
+  11:20 range -> variable 8:7
+  11:27 called -> variable 9:7
+  11:35 report -> function 3:10

@@ -22,6 +22,11 @@ export declare class Map<K, V> {
   public keys(): Generator<K>;
   public values(): Generator<V>;
   public entries(): Generator<[K, V]>;
+  /**
+   * The pairs of a key and its value, in the order the keys were set: what
+   * `for...of` goes through.
+   */
+  public [Symbol.iterator](): Iterator<[K, V]>;
   public forEach(action: (value: V, key: K, all: Map<K, V>) => void): void;
 
   /**
@@ -58,6 +63,8 @@ export declare class Set<T> {
   public keys(): Generator<T>;
   public values(): Generator<T>;
   public entries(): Generator<[T, T]>;
+  /** The items in the order they were added: what `for...of` goes through. */
+  public [Symbol.iterator](): Iterator<T>;
   public forEach(action: (value: T, same: T, all: Set<T>) => void): void;
 
   /** The values of both sets. */

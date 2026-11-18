@@ -1,0 +1,54 @@
+import { ScopeTraversal } from "../scope-traversal.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import { kGlobalNames } from "../../../program/library/global-names/const/global-names.const.tz";
+import { AbsentReason } from "../../../program/library/global-names/types/global-names.types.tz";
+
+partial class ScopeTraversal {
+  private reportMissingValue(name: string, loc: int, missing: Code): void {
+    const absent = kGlobalNames.absent(name);
+    if (absent != undefined) {
+      const code = this.absentCode(absent.reason);
+
+      return this.report(loc, code, { word: name });
+    }
+    if (this.isTypeName(name)) {
+      return this.report(loc, Code.TypeAsValue, { word: name });
+    }
+
+    this.report(loc, missing, { word: name });
+  }
+
+  private reportMissingType(name: string, loc: int, missing: Code): void {
+    const absent = kGlobalNames.absent(name);
+    if (absent != undefined && absent.asType) {
+      const code = this.absentCode(absent.reason);
+
+      return this.report(loc, code, { word: name });
+    }
+
+    this.report(loc, missing, { word: name });
+  }
+
+  private isTypeName(name: string): boolean {
+    const entry = this.scopes.findType(name);
+
+    return (
+      entry != undefined ||
+      this.globals.types.has(name) ||
+      kGlobalNames.hasType(name)
+    );
+  }
+
+  private absentCode(reason: AbsentReason): Code {
+    switch (reason) {
+      case AbsentReason.ErrorClass:
+        return Code.NoErrorClass;
+      case AbsentReason.CodeFromString:
+        return Code.NoCodeFromString;
+      case AbsentReason.Proxy:
+        return Code.NoProxy;
+      default:
+        return Code.NoRequire;
+    }
+  }
+}

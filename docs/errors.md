@@ -407,7 +407,7 @@ class Port {
 | `ResultAsync<T, E>` | `Promise<Result<T, E>>` |
 | `p.catch(f)`, `Promise.reject(e)` | `Result` внутри `Promise` |
 | `x!`, `r._unsafeUnwrap()` | сужение через `if`, `match`, `unwrapOr` |
-| `gen.throw(e)` у генераторов | `return()` остаётся |
+| `gen.throw(e)`, `gen.return(v)` у генераторов | `break`; уборка — сама, раздел 6 |
 | `long`, смешение типов, `x \| 0`, `NaN`, `Infinity` | [numbers.md](numbers.md), раздел 11 |
 | `stream.pipe(dest)` | `pipeline` |
 | `process.on("uncaughtException")` | ловить нечего |

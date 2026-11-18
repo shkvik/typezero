@@ -1,0 +1,4 @@
+main.tz
+  2:27 target -> variable 1:7
+  4:1 console -> global
+  4:13 watched -> variable 2:7

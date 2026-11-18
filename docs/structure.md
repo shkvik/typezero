@@ -203,6 +203,16 @@ self/             компилятор на tz, пробный (порт compile
                   `extends` (DeclaredClass.base; в `.d.tz` программы — TZ1705): десять
                   типизированных массивов продолжают абстрактный `TypedArray<E, Self>`, а
                   `Buffer` — `Uint8Array`, его конструктор `private`.
+                  Имя, которое и вызывается, и имеет члены (`decimal(x)` и `decimal.max`,
+                  `Number`, `String`, `Boolean`, `Array<T>(n)`), описано сигнатурой вызова
+                  в своём интерфейсе: `(value: string): Result<double, NumberError>;` —
+                  это поле без имени с ObjectTypeField.call; разрешено только библиотеке,
+                  в коде программы это по-прежнему TZ1327, а `new (…): T` — TZ1327 везде.
+                  То, по чему идёт `for...of`, имеет член `[Symbol.iterator]()` (массив,
+                  строка, `Map`, `Set`, `TypedArray<E, Self>`, `Intl.Segments`, итератор),
+                  а то, по чему идёт `for await`, — `[Symbol.asyncIterator]()`
+                  (`AsyncGenerator`, `Interface` из readline): тип элемента перебора
+                  берётся из объявления, как у класса программы.
                   Объявленная без тела функция может иметь несколько подписей с одним
                   именем. Все модули, которые компилятор держит внутри себя, описаны так
                   (15: `node:fs`, `node:fs/promises`, `tz:fs`, `node:readline` с `promises`,

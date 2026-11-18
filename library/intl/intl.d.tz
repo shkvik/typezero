@@ -54,6 +54,8 @@ export type SegmentData = {
 export interface Segments {
   /** The piece the position of the text is in. */
   containing(index: int): SegmentData | undefined;
+  /** The pieces in order: what `for...of` goes through. */
+  [Symbol.iterator](): Iterator<SegmentData>;
 }
 
 /**

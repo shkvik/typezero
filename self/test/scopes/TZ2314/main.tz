@@ -1,0 +1,3 @@
+const files = require("node:fs");
+
+console.log(files, require);

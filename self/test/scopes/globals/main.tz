@@ -69,7 +69,18 @@ const price: decimal = decimal.sum(decimal(1), decimal("2.5"));
 const round: RoundingMode = "half-even";
 const truthy: boolean = Boolean(price.toFixed(2, round));
 const plain: number = 1.5;
+const zeros: int[] = Array<int>(3);
+const spelled: Result<double, NumberError> = Number(String(plain));
 const made = Reflect.construct(Date, []);
+
+function Traced<A extends unknown[], R>(
+  cls: Constructor,
+  name: string,
+  method: MethodDescriptor<A, R>,
+): void {
+  console.log(cls, name, method.value);
+}
+
 const weak: WeakRef<Date> = new WeakRef<Date>(new Date());
 const id: string = crypto.randomUUID() + globalThis.crypto.randomUUID();
 const coded: string = encodeURIComponent(id) + encodeURI(id);

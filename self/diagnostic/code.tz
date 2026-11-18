@@ -283,4 +283,9 @@ export enum Code {
   UsedBeforeDeclaration = "TZ2307",
   ClassNotFound = "TZ2308",
   DefaultUsesLaterParameter = "TZ2309",
+  TypeAsValue = "TZ2310",
+  NoErrorClass = "TZ2311",
+  NoCodeFromString = "TZ2312",
+  NoProxy = "TZ2313",
+  NoRequire = "TZ2314",
 }

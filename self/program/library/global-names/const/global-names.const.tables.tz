@@ -1,4 +1,21 @@
+import { AbsentName, AbsentReason } from "../types/global-names.types.tz";
+
 export const kUnboundNames = ["this", "super", "arguments", "null"];
+
+export const kAbsentNames: AbsentName[] = [
+  { name: "AggregateError", reason: AbsentReason.ErrorClass, asType: true },
+  { name: "Error", reason: AbsentReason.ErrorClass, asType: true },
+  { name: "eval", reason: AbsentReason.CodeFromString, asType: false },
+  { name: "EvalError", reason: AbsentReason.ErrorClass, asType: true },
+  { name: "Function", reason: AbsentReason.CodeFromString, asType: false },
+  { name: "Proxy", reason: AbsentReason.Proxy, asType: false },
+  { name: "RangeError", reason: AbsentReason.ErrorClass, asType: true },
+  { name: "ReferenceError", reason: AbsentReason.ErrorClass, asType: true },
+  { name: "require", reason: AbsentReason.Require, asType: false },
+  { name: "SyntaxError", reason: AbsentReason.ErrorClass, asType: true },
+  { name: "TypeError", reason: AbsentReason.ErrorClass, asType: true },
+  { name: "URIError", reason: AbsentReason.ErrorClass, asType: true },
+];
 
 export const kGlobalValues = [
   "BigInt",
@@ -23,7 +40,6 @@ export const kGlobalTypes = [
   "Json",
   "long",
   "Lowercase",
-  "MethodDescriptor",
   "never",
   "null",
   "object",

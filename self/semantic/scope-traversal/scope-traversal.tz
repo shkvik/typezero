@@ -3,6 +3,7 @@ import "./partial/scope-traversal.partial.statements.tz";
 import "./partial/scope-traversal.partial.expressions.tz";
 import "./partial/scope-traversal.partial.types.tz";
 import "./partial/scope-traversal.partial.classes.tz";
+import "./partial/scope-traversal.partial.missing.tz";
 import { Code } from "../../diagnostic/code.tz";
 import { Details, SourceError } from "../../diagnostic/types/message.types.tz";
 import { FunctionDecl } from "../../program/ast/types/ast.types.functions.tz";
@@ -94,7 +95,7 @@ export class ScopeTraversal {
       return;
     }
 
-    this.report(loc, missing, { word: name });
+    this.reportMissingValue(name, loc, missing);
   }
 
   private reportEarlyUse(symbol: NameSymbol, loc: int): void {
@@ -141,7 +142,7 @@ export class ScopeTraversal {
       return;
     }
 
-    this.report(loc, missing, { word: name });
+    this.reportMissingType(name, loc, missing);
   }
 
   private ownsType(owner: string, member: string): boolean {

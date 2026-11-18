@@ -10,6 +10,6 @@ console.log(bytes, buffer, view, strict, logo, wide, any, Uint64Array.of(1));
 main.tz:66:58: error TZ2301: cannot find name 'processes'
 console.log(started, process.argv, process.stdout.isTTY, processes.pid);
                                                          ^
-main.tz:79:70: error TZ2301: cannot find name 'Decimal'
+main.tz:90:70: error TZ2301: cannot find name 'Decimal'
 console.log(truthy, plain, made, weak, read, texts, Json.isJson(id), Decimal.max());
                                                                      ^

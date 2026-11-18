@@ -1,0 +1,5 @@
+main.tz
+  5:1 console -> global
+  5:13 sum -> variable 1:7
+  5:18 double -> variable 2:7
+  5:26 triple -> variable 3:7

@@ -34,7 +34,11 @@ export declare class ArrayBuffer {
  *
  * It is made with `new` of a length, of an array or an iterator of numbers,
  * of another typed array, or of an `ArrayBuffer` with an offset and a length
- * in items, and then it looks into the memory of that buffer.
+ * in items, and then it looks into the memory of that buffer. `from` takes
+ * the same, with a function to change each item when there is one. An item
+ * of the type `E` fits as it is; another typed array fits when all its
+ * numbers do. A `Set`, a `Map` and a string are not taken: for the bytes of
+ * a string there is `TextEncoder` or `Buffer.from`.
  */
 export declare abstract class TypedArray<E, Self> {
   /** How many items there are. */
@@ -53,10 +57,11 @@ export declare abstract class TypedArray<E, Self> {
   /** Sets every item from `start` up to `end` to the value. */
   public fill(value: E, start?: int, end?: int): Self;
   /**
-   * Writes the items of an array, an iterator or another typed array from
-   * `offset` on; they must be proven to fit, in count and in value.
+   * Writes the items of an array or of another typed array from `offset` on;
+   * they must be proven to fit, in count and in value. An iterator is not
+   * taken: JavaScript would write nothing from it, without a word.
    */
-  public set(items: Iterable<E> | Iterator<E>, offset?: int): void;
+  public set(items: E[] | AnyTypedArray, offset?: int): void;
   /** Copies the items from `start` up to `end` to `target` inside itself. */
   public copyWithin(target: int, start: int, end?: int): Self;
   /**
@@ -91,6 +96,8 @@ export declare abstract class TypedArray<E, Self> {
   public keys(): Generator<int>;
   public values(): Generator<E>;
   public entries(): Generator<[int, E]>;
+  /** The items in order: what `for...of` goes through. */
+  public [Symbol.iterator](): Iterator<E>;
 
   public forEach(action: (item: E, index: int, all: Self) => void): void;
   /** A new typed array of what the function gives for each item. */
@@ -148,9 +155,11 @@ export declare class Uint8Array<B = ArrayBuffer> extends TypedArray<
   public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
   public static readonly BYTES_PER_ELEMENT: int;
-  public static from(items: Iterable<uint8> | Iterator<uint8>): Uint8Array;
+  public static from(
+    items: uint8[] | Iterator<uint8> | AnyTypedArray,
+  ): Uint8Array;
   public static from<T>(
-    items: Iterable<T> | Iterator<T>,
+    items: T[] | Iterator<T> | TypedArray<T, unknown>,
     change: (item: T, index: int) => uint8,
   ): Uint8Array;
   public static of(...items: uint8[]): Uint8Array;
@@ -171,10 +180,10 @@ export declare class Uint8ClampedArray<B = ArrayBuffer> extends TypedArray<
 
   public static readonly BYTES_PER_ELEMENT: int;
   public static from(
-    items: Iterable<uint8> | Iterator<uint8>,
+    items: uint8[] | Iterator<uint8> | AnyTypedArray,
   ): Uint8ClampedArray;
   public static from<T>(
-    items: Iterable<T> | Iterator<T>,
+    items: T[] | Iterator<T> | TypedArray<T, unknown>,
     change: (item: T, index: int) => uint8,
   ): Uint8ClampedArray;
   public static of(...items: uint8[]): Uint8ClampedArray;
@@ -191,9 +200,9 @@ export declare class Int8Array<B = ArrayBuffer> extends TypedArray<
   public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
   public static readonly BYTES_PER_ELEMENT: int;
-  public static from(items: Iterable<int8> | Iterator<int8>): Int8Array;
+  public static from(items: int8[] | Iterator<int8> | AnyTypedArray): Int8Array;
   public static from<T>(
-    items: Iterable<T> | Iterator<T>,
+    items: T[] | Iterator<T> | TypedArray<T, unknown>,
     change: (item: T, index: int) => int8,
   ): Int8Array;
   public static of(...items: int8[]): Int8Array;
@@ -210,9 +219,11 @@ export declare class Uint16Array<B = ArrayBuffer> extends TypedArray<
   public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
   public static readonly BYTES_PER_ELEMENT: int;
-  public static from(items: Iterable<uint16> | Iterator<uint16>): Uint16Array;
+  public static from(
+    items: uint16[] | Iterator<uint16> | AnyTypedArray,
+  ): Uint16Array;
   public static from<T>(
-    items: Iterable<T> | Iterator<T>,
+    items: T[] | Iterator<T> | TypedArray<T, unknown>,
     change: (item: T, index: int) => uint16,
   ): Uint16Array;
   public static of(...items: uint16[]): Uint16Array;
@@ -229,9 +240,11 @@ export declare class Int16Array<B = ArrayBuffer> extends TypedArray<
   public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
   public static readonly BYTES_PER_ELEMENT: int;
-  public static from(items: Iterable<int16> | Iterator<int16>): Int16Array;
+  public static from(
+    items: int16[] | Iterator<int16> | AnyTypedArray,
+  ): Int16Array;
   public static from<T>(
-    items: Iterable<T> | Iterator<T>,
+    items: T[] | Iterator<T> | TypedArray<T, unknown>,
     change: (item: T, index: int) => int16,
   ): Int16Array;
   public static of(...items: int16[]): Int16Array;
@@ -248,9 +261,11 @@ export declare class Uint32Array<B = ArrayBuffer> extends TypedArray<
   public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
   public static readonly BYTES_PER_ELEMENT: int;
-  public static from(items: Iterable<uint32> | Iterator<uint32>): Uint32Array;
+  public static from(
+    items: uint32[] | Iterator<uint32> | AnyTypedArray,
+  ): Uint32Array;
   public static from<T>(
-    items: Iterable<T> | Iterator<T>,
+    items: T[] | Iterator<T> | TypedArray<T, unknown>,
     change: (item: T, index: int) => uint32,
   ): Uint32Array;
   public static of(...items: uint32[]): Uint32Array;
@@ -267,9 +282,11 @@ export declare class Int32Array<B = ArrayBuffer> extends TypedArray<
   public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
   public static readonly BYTES_PER_ELEMENT: int;
-  public static from(items: Iterable<int32> | Iterator<int32>): Int32Array;
+  public static from(
+    items: int32[] | Iterator<int32> | AnyTypedArray,
+  ): Int32Array;
   public static from<T>(
-    items: Iterable<T> | Iterator<T>,
+    items: T[] | Iterator<T> | TypedArray<T, unknown>,
     change: (item: T, index: int) => int32,
   ): Int32Array;
   public static of(...items: int32[]): Int32Array;
@@ -286,9 +303,11 @@ export declare class Float16Array<B = ArrayBuffer> extends TypedArray<
   public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
   public static readonly BYTES_PER_ELEMENT: int;
-  public static from(items: Iterable<double> | Iterator<double>): Float16Array;
+  public static from(
+    items: double[] | Iterator<double> | AnyTypedArray,
+  ): Float16Array;
   public static from<T>(
-    items: Iterable<T> | Iterator<T>,
+    items: T[] | Iterator<T> | TypedArray<T, unknown>,
     change: (item: T, index: int) => double,
   ): Float16Array;
   public static of(...items: double[]): Float16Array;
@@ -305,9 +324,11 @@ export declare class Float32Array<B = ArrayBuffer> extends TypedArray<
   public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
   public static readonly BYTES_PER_ELEMENT: int;
-  public static from(items: Iterable<double> | Iterator<double>): Float32Array;
+  public static from(
+    items: double[] | Iterator<double> | AnyTypedArray,
+  ): Float32Array;
   public static from<T>(
-    items: Iterable<T> | Iterator<T>,
+    items: T[] | Iterator<T> | TypedArray<T, unknown>,
     change: (item: T, index: int) => double,
   ): Float32Array;
   public static of(...items: double[]): Float32Array;
@@ -324,9 +345,11 @@ export declare class Float64Array<B = ArrayBuffer> extends TypedArray<
   public constructor(buffer: ArrayBuffer, byteOffset?: int, length?: int);
 
   public static readonly BYTES_PER_ELEMENT: int;
-  public static from(items: Iterable<double> | Iterator<double>): Float64Array;
+  public static from(
+    items: double[] | Iterator<double> | AnyTypedArray,
+  ): Float64Array;
   public static from<T>(
-    items: Iterable<T> | Iterator<T>,
+    items: T[] | Iterator<T> | TypedArray<T, unknown>,
     change: (item: T, index: int) => double,
   ): Float64Array;
   public static of(...items: double[]): Float64Array;

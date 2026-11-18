@@ -60,12 +60,24 @@ export interface decimal {
 }
 
 /**
- * What `decimal` has besides `decimal(value)`, which makes a decimal of an
- * integer, of a double, or of a text: of a text written in the code it is a
- * decimal, checked when the program is built, and of a text known only when
- * the program runs a `Result<decimal, DecimalError>`.
+ * `decimal(value)` makes a decimal of a value; besides that `decimal` has
+ * the functions that take several decimals.
  */
 export interface DecimalConstructor {
+  /**
+   * A decimal of an integer or of a double; of a double it is the shortest
+   * text that writes the number. A value of an enum of numbers is taken too.
+   * @example decimal(0.1) // 0.1
+   */
+  (value: MathNumber | Bit.Wrap32 | Bit.Wrap64 | decimal): decimal;
+  /**
+   * Reads a decimal from a text; an error when the text is not a number. Of
+   * a text written in the code it is the decimal itself, not a Result: the
+   * text is checked when the program is built.
+   * @example decimal("19.99") // 19.99
+   */
+  (value: string): Result<decimal, DecimalError>;
+
   max(...values: decimal[]): decimal;
   min(...values: decimal[]): decimal;
   sum(...values: decimal[]): decimal;

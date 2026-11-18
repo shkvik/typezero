@@ -5,11 +5,26 @@ import { Readable, Writable } from "node:stream";
 export declare const stdin: Readable<Buffer, StdinError>;
 
 /**
- * `process.stdout`: the standard output as a stream of node:stream.
- * `write(text)` writes without a line break, and `process.stdout.isTTY`
- * says whether it is a terminal.
+ * What `process.stdout` and `process.stderr` are: a stream of node:stream
+ * that also says whether it goes to a terminal. It is passed wherever a
+ * `Writable` is taken.
  */
-export declare const stdout: Writable<Buffer, StdoutError>;
+export declare class StdoutStream extends Writable<Buffer, StdoutError> {
+  /** There is no `new StdoutStream()`: there are only `stdout` and `stderr`. */
+  private constructor();
+
+  /**
+   * Whether the output goes to a terminal: false when it goes to a file or
+   * to another program. Colors and lines drawn anew are for a terminal only.
+   */
+  public readonly isTTY: boolean;
+}
+
+/**
+ * `process.stdout`: the standard output. `write(text)` writes without a line
+ * break.
+ */
+export declare const stdout: StdoutStream;
 
 /** `process.stderr`: the standard output for errors; as `stdout`. */
-export declare const stderr: Writable<Buffer, StdoutError>;
+export declare const stderr: StdoutStream;

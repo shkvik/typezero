@@ -71,6 +71,21 @@ if (w.isErr()) {
   `process.exit`; 2 — переполнение стека, нехватка памяти и другие сбои рантайма
   ([errors.md](errors.md), раздел 9). Не пойманных исключений нет.
 - Ещё `process.cwd()`, `process.platform`, `process.execPath`.
+- **Выбор ОС** (решено 19 ноября; делает компилятор на tz, на шаге типов, C++ так не умеет).
+  `process.platform` и `os.platform()` — ОС, под которую собрана программа, постоянная сборки
+  типа `Platform` = `"win32" | "linux" | "darwin"`; сравнение с другим словом (`"windows"`) —
+  ошибка. Ветка под `if (process.platform == "linux")` (и `!=`, и `else`) для другой ОС не
+  проверяется и в exe не попадает. То, что на другой ОС не работает, пишут только под такой
+  проверкой, иначе — ошибка сборки с подсказкой:
+  - `uid` и `gid` у дочерних процессов — Linux и macOS;
+  - имя сигнала одной ОС в `killSignal`, написанное в коде: 24 имени только Linux и macOS
+    (`SIGUSR1`, `SIGSTOP`, `SIGCHLD`…), `SIGBREAK` — только Windows. Имя из переменной
+    проверяется при запуске, как и сейчас: чужое для ОС — `UNKNOWN_SIGNAL`.
+
+  Проверка не нужна там, где на другой ОС просто ничего не происходит (`windowsHide`,
+  `windowsVerbatimArguments`, `process.on("SIGTERM")` в Windows, `process.on("SIGBREAK")` в
+  Linux), и там, где отличается только значение (`os.EOL`, `devNull`, разделители путей,
+  оболочка `cmd.exe` или `/bin/sh`).
 - **Сигналы** (решено и сделано 29 октября): `process.on(signal, listener)`, `process.once`,
   `process.off` — только для `"SIGINT" | "SIGTERM" | "SIGHUP" | "SIGBREAK"`; слушатель —
   `() => void` или `async () => …`. Есть слушатель сигнала — процесс по нему сам не выходит
@@ -85,7 +100,9 @@ if (w.isErr()) {
 - `console.log` / `info` / `debug` пишут в stdout, `console.error` / `warn` — в stderr. Формат
   как в node.
 - `process.stdout.write(s)` и `process.stderr.write(s)` пишут без перевода строки,
-  `process.stdout.isTTY` говорит, терминал ли это.
+  `process.stdout.isTTY` говорит, терминал ли это. `isTTY` — поле типа потока (`StdoutStream`,
+  наследник `Writable`), поэтому работает и у `const out = process.stdout` (решено 19 ноября;
+  C++ компилятор знает его только в записи `process.stdout.isTTY`).
 - **Буфер.** Вывод в файл или в другую программу копится в буфере и уходит крупными кусками; в
   терминал — по строкам. Так быстрее: в Go, например, каждый `fmt.Println` — отдельный вызов
   ОС. Буфер сбрасывается при любом выходе (обычном, `process.exit`, сбое рантайма), перед
@@ -174,7 +191,14 @@ function advice(e: ReadFileError): string {
   (`ReadStreamErrorNotFound`…), поэтому поток файла идёт и туда, где ждут любой поток
   (`Readable<string>`). Тексты те же: `could not read a.log: there is no such file`.
   `flags` с `x` литералом (`{ flags: "wx" }`) — `WriteNewStream`, `Writable<Buffer,
-  WriteNewStreamError>`, с причиной `EXISTS` (31 октября).
+  WriteNewStreamError>`, с причиной `EXISTS` (31 октября). Флаг потока — из списка, как у
+  `writeFileSync` (решено 19 ноября; делает компилятор на tz, C++ флаг потока не проверяет):
+  у `createWriteStream` — `WriteFlag | AppendFlag` (`WriteStream`) или `ExclusiveWriteFlag |
+  ExclusiveAppendFlag` (`WriteNewStream`), у `createReadStream` — `ReadStreamFlag` ("r", "rs",
+  "sr", "r+", "rs+", "sr+": файл не создаётся и не меняется). Неизвестный флаг, флаг из
+  `string` и флаг типа, где есть оба вида, — ошибки: вид потока и его ошибки должны быть
+  известны при сборке. `encoding` в настройках `createReadStream` даёт `ReadStream<string>`, как
+  и кодировка вторым аргументом.
   - `kind` уникален во всей библиотеке — имя типа и причина: `READ_FILE_ERROR_NOT_FOUND`,
     `RENAME_ERROR_EXISTS`. Одна проверка `kind` говорит, какая функция сломалась и почему, и
     сужает тип: после `kind == "RENAME_ERROR_UNSUPPORTED"` есть `dest`, а `code` — только

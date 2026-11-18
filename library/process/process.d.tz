@@ -5,6 +5,14 @@
  */
 export type ProcessSignal = "SIGINT" | "SIGTERM" | "SIGHUP" | "SIGBREAK";
 
+/**
+ * The system a program is built for. It is known when the program is built:
+ * the code under `if (process.platform == "linux")` is not even checked for
+ * another system, and what one system alone has, such as the option `uid`,
+ * is written only under such a check.
+ */
+export type Platform = "win32" | "linux" | "darwin";
+
 /** A function that `process.on` calls: plain or async. */
 export type SignalListener = (() => void) | (() => Promise<void>);
 
@@ -32,7 +40,7 @@ export interface Process {
   /** The path of the executable. */
   readonly execPath: string;
   /** The system the program was built for: "win32", "linux", "darwin". */
-  readonly platform: string;
+  readonly platform: Platform;
   /** The number of the process. */
   readonly pid: int;
 

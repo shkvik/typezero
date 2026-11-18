@@ -162,33 +162,53 @@ main.tz
   70:33 price -> variable 68:7
   70:50 round -> variable 69:7
   71:14 number -> global
-  72:14 Reflect -> global
-  72:32 Date -> global
-  73:13 WeakRef -> global
-  73:21 Date -> global
-  73:33 WeakRef -> global
-  73:41 Date -> global
-  73:51 Date -> global
-  74:11 string -> global
-  74:20 crypto -> global
-  74:42 globalThis -> global
-  75:14 string -> global
-  75:23 encodeURIComponent -> global
-  75:42 id -> variable 74:7
-  75:48 encodeURI -> global
-  75:58 id -> variable 74:7
-  76:14 decodeURIComponent -> global
-  76:33 coded -> variable 75:7
-  76:50 decodeURI -> global
-  76:60 coded -> variable 75:7
-  77:14 TemplateStringsArray -> global
-  77:38 coded -> variable 75:7
-  79:1 console -> global
-  79:13 truthy -> variable 70:7
-  79:21 plain -> variable 71:7
-  79:28 made -> variable 72:7
-  79:34 weak -> variable 73:7
-  79:40 read -> variable 76:7
-  79:46 texts -> variable 77:7
-  79:53 Json -> global
-  79:65 id -> variable 74:7
+  72:14 int -> global
+  72:22 Array -> global
+  72:28 int -> global
+  73:16 Result -> global
+  73:23 double -> global
+  73:31 NumberError -> global
+  73:46 Number -> global
+  73:53 String -> global
+  73:60 plain -> variable 71:7
+  74:14 Reflect -> global
+  74:32 Date -> global
+  76:27 unknown -> global
+  77:8 Constructor -> global
+  78:9 string -> global
+  79:11 MethodDescriptor -> global
+  79:28 A -> type parameter 76:17
+  79:31 R -> type parameter 76:38
+  80:4 void -> global
+  81:3 console -> global
+  81:15 cls -> parameter 77:3
+  81:20 name -> parameter 78:3
+  81:26 method -> parameter 79:3
+  84:13 WeakRef -> global
+  84:21 Date -> global
+  84:33 WeakRef -> global
+  84:41 Date -> global
+  84:51 Date -> global
+  85:11 string -> global
+  85:20 crypto -> global
+  85:42 globalThis -> global
+  86:14 string -> global
+  86:23 encodeURIComponent -> global
+  86:42 id -> variable 85:7
+  86:48 encodeURI -> global
+  86:58 id -> variable 85:7
+  87:14 decodeURIComponent -> global
+  87:33 coded -> variable 86:7
+  87:50 decodeURI -> global
+  87:60 coded -> variable 86:7
+  88:14 TemplateStringsArray -> global
+  88:38 coded -> variable 86:7
+  90:1 console -> global
+  90:13 truthy -> variable 70:7
+  90:21 plain -> variable 71:7
+  90:28 made -> variable 74:7
+  90:34 weak -> variable 84:7
+  90:40 read -> variable 87:7
+  90:46 texts -> variable 88:7
+  90:53 Json -> global
+  90:65 id -> variable 85:7

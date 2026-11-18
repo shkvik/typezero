@@ -1,0 +1,15 @@
+main.tz:1:24: error TZ2311: there is no 'Error' in tz: an error is a value; return one with 'err(...)', e.g. 'return err({ kind: "NOT_FOUND" })'
+class NotFound extends Error {}
+                       ^
+main.tz:3:26: error TZ2311: there is no 'TypeError' in tz: an error is a value; return one with 'err(...)', e.g. 'return err({ kind: "NOT_FOUND" })'
+function report(problem: TypeError): void {
+                         ^
+main.tz:7:19: error TZ2311: there is no 'Error' in tz: an error is a value; return one with 'err(...)', e.g. 'return err({ kind: "NOT_FOUND" })'
+const plain = new Error("x");
+                  ^
+main.tz:8:19: error TZ2311: there is no 'RangeError' in tz: an error is a value; return one with 'err(...)', e.g. 'return err({ kind: "NOT_FOUND" })'
+const range = new RangeError("x");
+                  ^
+main.tz:9:16: error TZ2311: there is no 'Error' in tz: an error is a value; return one with 'err(...)', e.g. 'return err({ kind: "NOT_FOUND" })'
+const called = Error("x");
+               ^

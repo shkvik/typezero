@@ -245,11 +245,7 @@ partial class FileParser {
       if (this.cursor.is(TokenKind.LBracket) && !this.cursor.symbolKeyAhead()) {
         return this.indexSignature(ref, loc, afterFields);
       }
-      if (
-        this.cursor.is(TokenKind.LParen) ||
-        this.cursor.is(TokenKind.Less) ||
-        this.cursor.is(TokenKind.New)
-      ) {
+      if (this.cursor.is(TokenKind.New) || this.refusedCallAhead()) {
         this.skipBraced(loc, Code.CallSignatures);
 
         return ref;
@@ -271,6 +267,22 @@ partial class FileParser {
     this.cursor.expect(TokenKind.RBrace, Code.ExpectedObjectTypeClose);
 
     return ref;
+  }
+
+  private callSignatureAhead(): boolean {
+    return this.cursor.is(TokenKind.LParen) || this.cursor.is(TokenKind.Less);
+  }
+
+  private refusedCallAhead(): boolean {
+    return this.callSignatureAhead() && !this.library;
+  }
+
+  private callSignature(loc: int): ObjectTypeField | undefined {
+    const typeParams = this.optionalTypeParams();
+    const optional = false;
+    const call = true;
+
+    return this.objectTypeMethod("", loc, optional, call, typeParams);
   }
 
   private acceptReadonlyWord(): boolean {
@@ -307,6 +319,10 @@ partial class FileParser {
     loc: int,
     readonly: boolean,
   ): ObjectTypeField | undefined {
+    if (this.callSignatureAhead()) {
+      return this.callSignature(loc);
+    }
+
     const name = this.fieldName();
     if (name == undefined) {
       this.cursor.skipToClosingBrace();
@@ -345,6 +361,7 @@ partial class FileParser {
       optional,
       readonly,
       method: false,
+      call: false,
       typeParams: [],
       type,
     };
@@ -356,8 +373,9 @@ partial class FileParser {
     optional: boolean,
   ): ObjectTypeField | undefined {
     const typeParams: TypeParamDecl[] = [];
+    const call = false;
 
-    return this.objectTypeMethod(name, loc, optional, typeParams);
+    return this.objectTypeMethod(name, loc, optional, call, typeParams);
   }
 
   private genericTypeMethod(
@@ -374,14 +392,16 @@ partial class FileParser {
     }
 
     const typeParams = this.typeParams();
+    const call = false;
 
-    return this.objectTypeMethod(name, loc, optional, typeParams);
+    return this.objectTypeMethod(name, loc, optional, call, typeParams);
   }
 
   private objectTypeMethod(
     name: string,
     loc: int,
     optional: boolean,
+    call: boolean,
     typeParams: TypeParamDecl[],
   ): ObjectTypeField | undefined {
     const parsed = this.signatureParams();
@@ -408,6 +428,7 @@ partial class FileParser {
       optional,
       readonly: true,
       method: true,
+      call,
       typeParams,
       type,
     };

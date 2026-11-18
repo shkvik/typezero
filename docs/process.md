@@ -77,7 +77,8 @@ if (head.isErr()) {
   - ошибка в значениях: `ZERO_CHARACTER` (поле `argument`: `"args[1]"`, `"cwd"`, `"env.A"`),
     `EMPTY_NAME`, `OUT_OF_RANGE`, `UNKNOWN_SIGNAL`. Те же ошибки в литералах — ошибка сборки
     (`execFileSync("git", [], { timeout: -5 })`, `killSignal: "SIGFOO"`, ноль в аргументе,
-    пустое имя, `uid` в Windows); `shell` пишут литералом (`true` / `false`) или строкой: от
+    пустое имя); `uid`, `gid` и сигналы одной ОС — только под проверкой `process.platform`
+    ([io.md](io.md), «Выбор ОС»); `shell` пишут литералом (`true` / `false`) или строкой: от
     него зависит тип ошибки.
 - **Тексты** — что не вышло и почему: `could not run git: there is no such program in PATH;
   install it or give the full path`, `git rev-parse HEAD exited with code 128: fatal: not a git

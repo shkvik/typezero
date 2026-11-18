@@ -65,8 +65,8 @@ export declare function freemem(): double;
 /** The seconds since the system started. */
 export declare function uptime(): double;
 
-/** The system: `win32`, `linux`, `darwin`. */
-export declare function platform(): string;
+/** The system the program was built for, as `process.platform`. */
+export declare function platform(): Platform;
 
 /** The order of bytes of the processor: `LE` or `BE`. */
 export declare function endianness(): string;

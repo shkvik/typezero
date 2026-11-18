@@ -68,9 +68,12 @@ export interface ChildOptions {
   detached?: boolean;
   /** The name the program sees as its own. */
   argv0?: string;
-  /** The number of the user; on Linux and macOS only. */
+  /**
+   * The number of the user; on Linux and macOS only, so it is written under
+   * a check of `process.platform`.
+   */
   uid?: int;
-  /** The number of the group; on Linux and macOS only. */
+  /** The number of the group; as `uid`, on Linux and macOS only. */
   gid?: int;
 }
 

@@ -856,4 +856,19 @@ export const kMessages: Record<Code, Message> = {
   [Code.DefaultUsesLaterParameter]: {
     text: "the default value of '{word}' uses '{other}', which is not set yet: a default value can use only the parameters before it",
   },
+  [Code.TypeAsValue]: {
+    text: "'{word}' is a type, not a value",
+  },
+  [Code.NoErrorClass]: {
+    text: "there is no '{word}' in tz: an error is a value; return one with 'err(...)', e.g. 'return err({ kind: \"NOT_FOUND\" })'",
+  },
+  [Code.NoCodeFromString]: {
+    text: "'{word}' is not supported: a compiled program cannot run code from a string; write the code itself",
+  },
+  [Code.NoProxy]: {
+    text: "'{word}' is not supported: the fields of an object are read and written straight in memory, so nothing can intercept that",
+  },
+  [Code.NoRequire]: {
+    text: "'{word}' is not supported: files are imported by name: 'import { a } from \"./x\"'",
+  },
 };

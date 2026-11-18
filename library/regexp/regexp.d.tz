@@ -2,8 +2,8 @@
  * A regular expression: its syntax and its flags are those of JavaScript. A
  * literal `/…/` is checked and compiled when the program is built, and the
  * compiler knows its groups and flags. `new RegExp("…")` of a literal text is
- * the same; a text known only when the program runs is read by
- * `RegExp.parse`.
+ * the same, and so is `RegExp("…")` without `new`; a text known only when
+ * the program runs is read by `RegExp.parse`.
  */
 export declare class RegExp {
   /**

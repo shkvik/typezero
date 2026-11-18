@@ -1,31 +1,109 @@
 import {
+  AppendFlag,
+  ExclusiveAppendFlag,
+  ExclusiveWriteFlag,
+  WriteFlag,
+} from "node:fs";
+import {
   ReadStream,
-  ReadStreamOptions,
+  WriteNewStream,
   WriteStream,
-  WriteStreamOptions,
 } from "node:internal/fs/streams";
 
 /**
+ * How a stream that reads opens the file: "r", or "r+", which opens it for
+ * writing too; with "s" the reads wait for the disk. None of them makes or
+ * changes the file.
+ */
+export type ReadStreamFlag = "r" | "rs" | "sr" | "r+" | "rs+" | "sr+";
+
+/**
+ * How a file is read by a stream: `start` and `end` are the bytes to read
+ * from and up to, `highWaterMark` the size of a piece, `fd` an open file to
+ * read instead of the path.
+ */
+export type FileReadStreamOptions = {
+  flags?: ReadStreamFlag;
+  fd?: int;
+  mode?: int;
+  autoClose?: boolean;
+  emitClose?: boolean;
+  start?: double;
+  end?: double;
+  highWaterMark?: double;
+};
+
+/** `FileReadStreamOptions` with an encoding: the pieces are texts. */
+export type FileTextStreamOptions = {
+  encoding: BufferEncoding;
+  flags?: ReadStreamFlag;
+  fd?: int;
+  mode?: int;
+  autoClose?: boolean;
+  emitClose?: boolean;
+  start?: double;
+  end?: double;
+  highWaterMark?: double;
+};
+
+/**
+ * How a file is written by a stream: the flag, "w" by default, and the
+ * encoding of the texts written, "utf8" by default.
+ */
+export type FileWriteStreamOptions = {
+  flags?: WriteFlag | AppendFlag;
+  encoding?: BufferEncoding;
+  fd?: int;
+  mode?: int;
+  autoClose?: boolean;
+  emitClose?: boolean;
+  start?: double;
+  flush?: boolean;
+  highWaterMark?: double;
+};
+
+/**
+ * `FileWriteStreamOptions` with an "x" flag: the file is made new, and it is
+ * an error when it is there.
+ */
+export type FileWriteNewStreamOptions = {
+  flags: ExclusiveWriteFlag | ExclusiveAppendFlag;
+  encoding?: BufferEncoding;
+  fd?: int;
+  mode?: int;
+  autoClose?: boolean;
+  emitClose?: boolean;
+  start?: double;
+  flush?: boolean;
+  highWaterMark?: double;
+};
+
+/**
  * A stream that reads a file by pieces: Buffers, or texts when an encoding
- * is given, and then it is a `ReadStream<string>`. `start` and `end` are the
- * bytes to read from and up to, `highWaterMark` the size of a piece.
+ * is given, and then it is a `ReadStream<string>`. The flag is one of
+ * `ReadStreamFlag`, written in the code or of that type.
  * @example for await (const piece of createReadStream("big.log")) { }
  */
 export declare function createReadStream(
   path: string,
-  options?: ReadStreamOptions,
-): ReadStream;
+  options: BufferEncoding | FileTextStreamOptions,
+): ReadStream<string>;
 export declare function createReadStream(
   path: string,
-  encoding: BufferEncoding,
-): ReadStream<string>;
+  options?: FileReadStreamOptions,
+): ReadStream;
 
 /**
- * A stream that writes a file by pieces. With a flag that does not touch a
- * file that is there, such as "wx", the stream is a `WriteNewStream`, whose
- * errors say so.
+ * A stream that writes a file by pieces. With an "x" flag, such as "wx", the
+ * file is made new and the stream is a `WriteNewStream`, whose errors say
+ * when the file is there. A flag of a type that holds both kinds is not
+ * taken: the kind of the stream would not be known.
  */
 export declare function createWriteStream(
   path: string,
-  options?: BufferEncoding | WriteStreamOptions,
+  options: FileWriteNewStreamOptions,
+): WriteNewStream;
+export declare function createWriteStream(
+  path: string,
+  options?: BufferEncoding | FileWriteStreamOptions,
 ): WriteStream;

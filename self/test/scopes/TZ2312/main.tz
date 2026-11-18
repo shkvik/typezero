@@ -1,0 +1,5 @@
+const sum = eval("1 + 2");
+const double = new Function("a", "return a * 2");
+const triple = Function("a", "return a * 3");
+
+console.log(sum, double, triple);

@@ -231,8 +231,12 @@ void saveOrLog("Ann")                // ок: Promise<void>
   `allSettled`, `any`. Несколько сразу: `Promise.all` отдаёт каждый `Result` отдельно,
   `Result.combine(await Promise.all(ps))` — все значения или первая ошибка.
 - Лишний `return await x` в `async`-функции — ошибка: `async`-функция и так дождётся `Promise`.
-- Таймеры: `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval`, `setImmediate`;
-  `await setTimeout(100)` из `"node:timers/promises"` — пауза. `setInterval` подчиняется правилам
+- Таймеры: `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval`, `setImmediate`,
+  `clearImmediate`; `await setTimeout(100)` из `"node:timers/promises"` — пауза. `Timeout`
+  (`setTimeout`, `setInterval`) и `Immediate` (`setImmediate`) — разные типы: `clearTimeout` и
+  `clearInterval` берут только `Timeout`, `clearImmediate` — только `Immediate`, а отмена не
+  того вида, которую JS молча пропускает, — ошибка компиляции; `refresh()` есть только у
+  `Timeout` (решено 19 ноября; делает компилятор на tz, на шаге типов — C++ такое собирает). `setInterval` подчиняется правилам
   подписки: метод объекта или стрелка с одним объектом — интервал останавливается, когда объект
   освобождён ([events.md](events.md), раздел 7).
 - `await` на верхнем уровне модуля — как в ES-модулях. Программа завершается, когда не осталось
