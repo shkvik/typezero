@@ -1,0 +1,13 @@
+// The entry of a small program: files by a relative path with and without
+// the ending, a directory with index.tz, a built-in module, a package, a
+// JSON file, a re-export and the parts of a partial class.
+import { area } from "./a.tz";
+import { border } from "./b";
+import { readFileSync } from "node:fs";
+import { helper } from "./lib";
+import { pad } from "left-pad";
+import settings from "./settings.json" with { type: "json" };
+import { Shape } from "./shape.tz";
+export { unit } from "./shared.tz";
+
+export const size = 2;

@@ -1,0 +1,3 @@
+main.tz:1:19: error TZ2004: the files of tz end in .tz: import './missing' or './missing.tz'
+import { a } from "./missing.ts";
+                  ^

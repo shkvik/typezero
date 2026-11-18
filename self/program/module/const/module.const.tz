@@ -1,0 +1,5 @@
+export const kSourceExtension = ".tz";
+export const kDeclarationExtension = ".d.tz";
+export const kJsonExtension = ".json";
+export const kPathSeparator = "/";
+export const kWindowsSeparator = "\\";

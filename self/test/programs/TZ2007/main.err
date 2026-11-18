@@ -1,0 +1,6 @@
+main.tz:1:19: error TZ2007: cannot find './missing': there is no missing.tz or missing/index.tz
+import { a } from "./missing";
+                  ^
+main.tz:2:19: error TZ2007: cannot find '../missing.tz': there is no ../missing.tz
+export { b } from "../missing.tz";
+                  ^

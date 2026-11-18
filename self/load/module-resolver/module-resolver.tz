@@ -1,0 +1,285 @@
+import { readdirSync, statSync } from "node:fs";
+import { basename, extname, isAbsolute, join } from "node:path";
+import { Code } from "../../diagnostic/code.tz";
+import { Details } from "../../diagnostic/types/message.types.tz";
+import { kNoDetails } from "../../diagnostic/const/message.const.tz";
+import { kBuiltinModules } from "../../program/library/builtin-modules/const/builtin-modules.const.tz";
+import {
+  kJsonExtension,
+  kPathSeparator,
+  kSourceExtension,
+  kWindowsSeparator,
+} from "../../program/module/const/module.const.tz";
+import {
+  Location,
+  LocationKind,
+  Resolution,
+  ResolutionKind,
+} from "./types/module-resolver.types.tz";
+import {
+  kAbsent,
+  kCandidateJoin,
+  kForeignExtensions,
+  kHere,
+  kHerePrefix,
+  kIndexFile,
+  kJsrPrefix,
+  kNpmPrefix,
+  kParent,
+  kParentPrefix,
+  kSchemeMark,
+  kTypeScriptDeclarations,
+  kTypeScriptExtension,
+} from "./const/module-resolver.const.tz";
+
+export class ModuleResolver {
+  private readonly listings: Map<string, string[]>;
+
+  public constructor() {
+    this.listings = new Map<string, string[]>();
+  }
+
+  public resolve(directory: string, spec: string): Resolution {
+    if (kBuiltinModules.has(spec)) {
+      return { kind: ResolutionKind.Builtin };
+    }
+    if (spec.includes(kWindowsSeparator)) {
+      return this.problem(Code.ImportPathBackslash, kNoDetails);
+    }
+    if (!this.isRelative(spec)) {
+      return this.outsideProgram(spec);
+    }
+    if (this.namesDirectory(spec)) {
+      const index = this.indexOf(spec);
+
+      return this.found(directory, spec, [index]);
+    }
+
+    const foreign = this.foreignProblem(directory, spec);
+    if (foreign != undefined) {
+      return foreign;
+    }
+
+    const candidates = this.candidates(spec);
+
+    return this.found(directory, spec, candidates);
+  }
+
+  private problem(code: Code, details: Details): Resolution {
+    return { kind: ResolutionKind.Problem, code, details };
+  }
+
+  private isRelative(spec: string): boolean {
+    return (
+      spec == kHere ||
+      spec == kParent ||
+      spec.startsWith(kHerePrefix) ||
+      spec.startsWith(kParentPrefix)
+    );
+  }
+
+  private outsideProgram(spec: string): Resolution {
+    if (spec.startsWith(kJsrPrefix) || spec.startsWith(kNpmPrefix)) {
+      return { kind: ResolutionKind.Package };
+    }
+
+    const misplaced =
+      spec == "" ||
+      isAbsolute(spec) ||
+      spec.startsWith(kPathSeparator) ||
+      spec.includes(kSchemeMark);
+    if (misplaced) {
+      return this.problem(Code.ImportPathNotRelative, kNoDetails);
+    }
+
+    return { kind: ResolutionKind.Package };
+  }
+
+  private namesDirectory(spec: string): boolean {
+    const slash = spec.lastIndexOf(kPathSeparator);
+    const last = spec.slice(slash + 1);
+
+    return last == "" || last == kHere || last == kParent;
+  }
+
+  private indexOf(spec: string): string {
+    let directory = spec;
+
+    while (directory.endsWith(kPathSeparator)) {
+      directory = directory.slice(0, directory.length - 1);
+    }
+
+    return `${directory}${kPathSeparator}${kIndexFile}`;
+  }
+
+  private candidates(spec: string): string[] {
+    const extension = extname(spec);
+    if (extension == kSourceExtension || extension == kJsonExtension) {
+      return [spec];
+    }
+
+    const file = `${spec}${kSourceExtension}`;
+    const index = `${spec}${kPathSeparator}${kIndexFile}`;
+
+    return [file, index];
+  }
+
+  private foreignProblem(
+    directory: string,
+    spec: string,
+  ): Resolution | undefined {
+    const extension = extname(spec);
+    if (!kForeignExtensions.includes(extension)) {
+      return undefined;
+    }
+    if (spec.endsWith(kTypeScriptDeclarations)) {
+      return this.problem(Code.ImportTypeScriptDeclarations, kNoDetails);
+    }
+
+    const word = spec.slice(0, spec.length - extension.length);
+    const location = this.locate(directory, spec);
+    if (location.kind == LocationKind.Absent) {
+      return this.problem(Code.ImportForeignFile, { word });
+    }
+
+    const path = basename(spec);
+    const stem = basename(word);
+    const other = `${stem}${kSourceExtension}`;
+
+    return this.problem(Code.ImportForeignFileExists, { word, path, other });
+  }
+
+  private found(
+    directory: string,
+    spec: string,
+    candidates: string[],
+  ): Resolution {
+    for (const candidate of candidates) {
+      const location = this.locate(directory, candidate);
+      if (location.kind == LocationKind.Found) {
+        return { kind: ResolutionKind.File, file: location.file };
+      }
+      if (location.kind == LocationKind.OtherCase) {
+        return this.problem(Code.ImportFileNameCase, {
+          word: spec,
+          path: location.written,
+        });
+      }
+    }
+
+    return this.notFound(directory, spec, candidates);
+  }
+
+  private notFound(
+    directory: string,
+    spec: string,
+    candidates: string[],
+  ): Resolution {
+    const shown = candidates.map((candidate) => this.shownCandidate(candidate));
+    const path = shown.join(kCandidateJoin);
+    const typescript = this.typescriptNames(shown);
+    const other = typescript.find((name) => this.exists(directory, name));
+    if (other == undefined) {
+      return this.problem(Code.ImportFileNotFound, { word: spec, path });
+    }
+
+    return this.problem(Code.ImportFileNotFoundTypeScript, {
+      word: spec,
+      path,
+      other,
+    });
+  }
+
+  private shownCandidate(candidate: string): string {
+    if (candidate.startsWith(kHerePrefix)) {
+      return candidate.slice(kHerePrefix.length);
+    }
+
+    return candidate;
+  }
+
+  private typescriptNames(candidates: string[]): string[] {
+    const sources = candidates.filter((name) =>
+      name.endsWith(kSourceExtension),
+    );
+
+    return sources.map((name) => this.typescriptName(name));
+  }
+
+  private typescriptName(name: string): string {
+    const stem = name.slice(0, name.length - kSourceExtension.length);
+
+    return `${stem}${kTypeScriptExtension}`;
+  }
+
+  private exists(directory: string, name: string): boolean {
+    const location = this.locate(directory, name);
+
+    return location.kind != LocationKind.Absent;
+  }
+
+  private locate(directory: string, candidate: string): Location {
+    const parts = candidate.split(kPathSeparator);
+    const actual: string[] = [];
+    let current = directory;
+
+    for (const part of parts) {
+      const name = this.actualName(current, part);
+      if (name == undefined) {
+        return kAbsent;
+      }
+
+      actual.push(name);
+      current = join(current, name);
+    }
+
+    if (!this.isFile(current)) {
+      return kAbsent;
+    }
+
+    const written = actual.join(kPathSeparator);
+    if (written != candidate) {
+      return { kind: LocationKind.OtherCase, file: current, written };
+    }
+
+    return { kind: LocationKind.Found, file: current, written };
+  }
+
+  private actualName(directory: string, part: string): string | undefined {
+    if (part == "" || part == kHere || part == kParent) {
+      return part;
+    }
+
+    const names = this.namesIn(directory);
+    if (names.includes(part)) {
+      return part;
+    }
+
+    const lowered = part.toLowerCase();
+
+    return names.find((name) => name.toLowerCase() == lowered);
+  }
+
+  private namesIn(directory: string): string[] {
+    const known = this.listings.get(directory);
+    if (known != undefined) {
+      return known;
+    }
+
+    const listed = readdirSync(directory);
+    const names = listed.unwrapOr([]);
+
+    this.listings.set(directory, names);
+
+    return names;
+  }
+
+  private isFile(path: string): boolean {
+    const stat = statSync(path);
+    if (stat.isErr()) {
+      return false;
+    }
+
+    return stat.value.isFile();
+  }
+}

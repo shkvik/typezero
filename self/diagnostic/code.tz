@@ -237,4 +237,12 @@ export enum Code {
   DeclarationFieldValue = "TZ1707",
   DeclarationVariableValue = "TZ1708",
   DeclarationVariableType = "TZ1709",
+  ImportPathBackslash = "TZ2001",
+  ImportPathNotRelative = "TZ2002",
+  ImportTypeScriptDeclarations = "TZ2003",
+  ImportForeignFile = "TZ2004",
+  ImportForeignFileExists = "TZ2005",
+  ImportFileNameCase = "TZ2006",
+  ImportFileNotFound = "TZ2007",
+  ImportFileNotFoundTypeScript = "TZ2008",
 }

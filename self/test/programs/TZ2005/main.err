@@ -1,0 +1,3 @@
+main.tz:1:19: error TZ2005: the files of tz end in .tz: import './helper' or './helper.tz', and rename helper.ts to helper.tz
+import { a } from "./helper.ts";
+                  ^

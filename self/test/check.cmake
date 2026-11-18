@@ -20,9 +20,19 @@
 #     get wrong. `EXE tree NAME.tz` must report no error and print exactly
 #     NAME.tree. ACCEPT=ON works as for MODE=error.
 #
-#   MODE=codes: every code of self/diagnostic/code.tz has its test in
-#     self/test/errors, and every test there is named after a code. A code no
-#     source can get does not stay in code.tz.
+#   MODE=program: self/test/programs/NAME/ is a program of several files with
+#     the entry main.tz (SRC). `EXE load main.tz`, run in that directory, must
+#     print to stdout exactly main.out: the modules, a module after the ones
+#     it imports, each with where its imports lead. When main.err is there,
+#     the program has mistakes: the exit code must be 1 and stderr exactly
+#     main.err; without it the exit code is 0 and stderr is empty. A
+#     directory named after a code (TZ2007) is the test of that code: one of
+#     the errors must have it. ACCEPT=ON writes main.out and main.err.
+#
+#   MODE=codes: every code of self/diagnostic/code.tz has its test,
+#     self/test/errors/CODE.tz or self/test/programs/CODE/main.tz, and every
+#     test in self/test/errors is named after a code. A code no source can
+#     get does not stay in code.tz.
 #
 #   A test of a declaration file: when NAME.d.tz is next to NAME.tz, the file
 #     that is checked is NAME.d.tz, and NAME.tz is its module. tzparse reads
@@ -116,6 +126,54 @@ elseif(MODE STREQUAL "tree")
     fail("the tree differs from ${name}.tree\n--- expected:\n${expected}\n--- actual:\n${stdout}")
   endif()
 
+elseif(MODE STREQUAL "program")
+  get_filename_component(dir ${SRC} DIRECTORY)
+  get_filename_component(name ${dir} NAME)
+  execute_process(
+    COMMAND ${EXE} load main.tz
+    WORKING_DIRECTORY ${dir}
+    OUTPUT_VARIABLE stdout
+    ERROR_VARIABLE stderr
+    RESULT_VARIABLE exit_code)
+  string(REPLACE "\r\n" "\n" stdout "${stdout}")
+  string(REPLACE "\r\n" "\n" stderr "${stderr}")
+  if(name MATCHES "^TZ[0-9]+$")
+    string(FIND "${stderr}" ": error ${name}: " at)
+    if(at EQUAL -1)
+      fail("no error ${name}:\n${stderr}")
+    endif()
+  endif()
+  if(ACCEPT)
+    file(WRITE ${dir}/main.out "${stdout}")
+    if(stderr STREQUAL "")
+      file(REMOVE ${dir}/main.err)
+    else()
+      file(WRITE ${dir}/main.err "${stderr}")
+    endif()
+    return()
+  endif()
+  if(NOT EXISTS ${dir}/main.out)
+    fail("there is no main.out with the expected modules; the modules are:\n${stdout}")
+  endif()
+  file(READ ${dir}/main.out expected)
+  string(REPLACE "\r\n" "\n" expected "${expected}")
+  if(NOT stdout STREQUAL expected)
+    fail("the modules differ from main.out\n--- expected:\n${expected}\n--- actual:\n${stdout}")
+  endif()
+  set(expected "")
+  set(expected_exit 0)
+  if(EXISTS ${dir}/main.err)
+    file(READ ${dir}/main.err expected)
+    string(REPLACE "\r\n" "\n" expected "${expected}")
+    set(expected_exit 1)
+  endif()
+  if(NOT exit_code EQUAL expected_exit)
+    fail("exit code ${exit_code}, expected ${expected_exit}\nstderr:\n${stderr}")
+  endif()
+  if(NOT stderr STREQUAL expected)
+    fail("the messages differ from main.err\n--- expected:\n${expected}\n--- actual:\n${stderr}")
+  endif()
+
 elseif(MODE STREQUAL "codes")
   file(STRINGS ${ROOT}/self/diagnostic/code.tz lines REGEX "= \"TZ[0-9]+\"")
   set(codes "")
@@ -123,8 +181,10 @@ elseif(MODE STREQUAL "codes")
   foreach(line IN LISTS lines)
     string(REGEX MATCH "TZ[0-9]+" code "${line}")
     list(APPEND codes ${code})
-    if(NOT EXISTS ${ROOT}/self/test/errors/${code}.tz)
-      string(APPEND problems "${code} has no test self/test/errors/${code}.tz\n")
+    if(NOT EXISTS ${ROOT}/self/test/errors/${code}.tz AND
+       NOT EXISTS ${ROOT}/self/test/programs/${code}/main.tz)
+      string(APPEND problems
+        "${code} has no test self/test/errors/${code}.tz or self/test/programs/${code}/main.tz\n")
     endif()
   endforeach()
   file(GLOB tests RELATIVE ${ROOT}/self/test/errors ${ROOT}/self/test/errors/*)

@@ -1,0 +1,5 @@
+import { unit } from "../shared.tz";
+
+export function helper(): int {
+  return unit;
+}

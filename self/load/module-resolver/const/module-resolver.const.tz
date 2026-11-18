@@ -1,0 +1,26 @@
+import { Location, LocationKind } from "../types/module-resolver.types.tz";
+
+export const kIndexFile = "index.tz";
+export const kHere = ".";
+export const kParent = "..";
+export const kHerePrefix = "./";
+export const kParentPrefix = "../";
+export const kSchemeMark = ":";
+export const kJsrPrefix = "jsr:";
+export const kNpmPrefix = "npm:";
+export const kTypeScriptExtension = ".ts";
+export const kTypeScriptDeclarations = ".d.ts";
+export const kCandidateJoin = " or ";
+
+export const kForeignExtensions = [
+  ".ts",
+  ".js",
+  ".tsx",
+  ".jsx",
+  ".mts",
+  ".cts",
+  ".mjs",
+  ".cjs",
+];
+
+export const kAbsent: Location = { kind: LocationKind.Absent };

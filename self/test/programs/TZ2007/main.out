@@ -1,0 +1,4 @@
+modules 1
+main.tz
+  "./missing" 18 -> missing
+  "../missing.tz" 49 -> missing

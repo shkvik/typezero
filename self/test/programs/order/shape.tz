@@ -1,0 +1,9 @@
+import "./shape.partial.area.tz";
+
+export class Shape {
+  public readonly side: int;
+
+  public constructor(side: int) {
+    this.side = side;
+  }
+}

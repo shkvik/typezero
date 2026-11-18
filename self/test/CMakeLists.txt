@@ -5,7 +5,11 @@
 #     make it print exactly CODE.err; self/codes keeps a test for every code;
 #   recovery/NAME.tz has more than the mistake itself and must print exactly
 #     NAME.err too;
-#   trees/NAME.tz is correct code that must give exactly the tree NAME.tree.
+#   trees/NAME.tz is correct code that must give exactly the tree NAME.tree;
+#   programs/NAME/ is a program of several files, read from its main.tz: the
+#     loader must print exactly main.out (the modules in order and where each
+#     import leads) and, when the program has mistakes, main.err; a directory
+#     named after a code is the test of that code.
 #
 # A test of a declaration file is NAME.d.tz next to its module NAME.tz: the
 # test is registered by the module, so the declaration files leave the lists
@@ -35,6 +39,18 @@ endfunction()
 tz_self_tests(errors error)
 tz_self_tests(recovery recovery)
 tz_self_tests(trees tree)
+
+# A test for every program programs/NAME/main.tz: the loader reads the
+# program from that entry.
+file(GLOB programs CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/programs/*/main.tz)
+foreach(src ${programs})
+  get_filename_component(dir ${src} DIRECTORY)
+  get_filename_component(name ${dir} NAME)
+  add_test(NAME self/programs/${name}
+    COMMAND ${CMAKE_COMMAND} -DEXE=${TZ_SELF} -DSRC=${src} -DMODE=program
+            -P ${TZ_SELF_CHECK})
+  set_tests_properties(self/programs/${name} PROPERTIES FIXTURES_REQUIRED tz_self)
+endforeach()
 
 # The enumerations of the language, *.py here: a script builds programs
 # together with what the parser must answer (the tree, or the one error),

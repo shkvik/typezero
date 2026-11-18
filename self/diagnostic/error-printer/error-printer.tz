@@ -1,4 +1,4 @@
-import { SourceText } from "../../load/parser/types/parser.types.tz";
+import { SourceText } from "../../program/module/types/module.types.tz";
 import { SourceLines } from "../../program/source-lines/source-lines.tz";
 import { messageText } from "../message.tz";
 import { SourceError } from "../types/message.types.tz";

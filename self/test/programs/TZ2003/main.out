@@ -1,0 +1,3 @@
+modules 1
+main.tz
+  "./types.d.ts" 18 -> missing

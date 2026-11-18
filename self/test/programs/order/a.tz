@@ -1,0 +1,5 @@
+import { unit } from "./shared.tz";
+
+export function area(side: int): int {
+  return side * side * unit;
+}

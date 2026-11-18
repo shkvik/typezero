@@ -1,0 +1,3 @@
+main.tz:1:19: error TZ2001: write '/' in the path of an import, not '\', as on every system
+import { a } from ".\\lib\\a.tz";
+                  ^

@@ -718,4 +718,28 @@ export const kMessages: Record<Code, Message> = {
   [Code.DeclarationVariableType]: {
     text: "'{word}' needs its type in a declaration file, e.g. '{word}: int': there is no value to take the type from",
   },
+  [Code.ImportPathBackslash]: {
+    text: "write '/' in the path of an import, not '\\', as on every system",
+  },
+  [Code.ImportPathNotRelative]: {
+    text: "an import names a file by its path relative to the importing file, e.g. './math' or '../lib/math'",
+  },
+  [Code.ImportTypeScriptDeclarations]: {
+    text: "only .tz files can be imported; tz needs no declarations: it reads the code itself",
+  },
+  [Code.ImportForeignFile]: {
+    text: "the files of tz end in .tz: import '{word}' or '{word}.tz'",
+  },
+  [Code.ImportForeignFileExists]: {
+    text: "the files of tz end in .tz: import '{word}' or '{word}.tz', and rename {path} to {other}",
+  },
+  [Code.ImportFileNameCase]: {
+    text: "the file is named '{path}', but the import says '{word}'; write the name with the same capital letters, or the program will not build where names are case-sensitive",
+  },
+  [Code.ImportFileNotFound]: {
+    text: "cannot find '{word}': there is no {path}",
+  },
+  [Code.ImportFileNotFoundTypeScript]: {
+    text: "cannot find '{word}': there is no {path}; there is {other}, and the files of tz end in .tz: rename it so that it ends in .tz",
+  },
 };

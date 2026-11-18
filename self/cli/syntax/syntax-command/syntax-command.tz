@@ -2,23 +2,23 @@ import { existsSync, readFileSync } from "node:fs";
 import { ErrorPrinter } from "../../../diagnostic/error-printer/error-printer.tz";
 import { Lexer } from "../../../load/lexer/lexer.tz";
 import { Parser } from "../../../load/parser/parser.tz";
-import { SourceText } from "../../../load/parser/types/parser.types.tz";
+import { SourceText } from "../../../program/module/types/module.types.tz";
 import { SourceError } from "../../../diagnostic/types/message.types.tz";
 import { SourceFile } from "../../../program/ast/types/ast.types.modules.tz";
 import { DeclarationFile } from "../../../program/ast/types/ast.types.declarations.tz";
 import { Dumper } from "../ast-dump/ast-dump.tz";
 import { Sources, SyntaxMode } from "./types/syntax-command.types.tz";
 import {
-  kDeclarationSuffix,
+  kDeclarationExtension,
+  kSourceExtension,
+} from "../../../program/module/const/module.const.tz";
+import { kProgramName, kUsage, kUsageExitCode } from "../../const/cli.const.tz";
+import {
   kDefaultRepeat,
   kHoldMilliseconds,
   kLineFeed,
   kListPrefix,
   kMaxRepeat,
-  kProgramName,
-  kSourceSuffix,
-  kUsage,
-  kUsageExitCode,
 } from "./const/syntax-command.const.tz";
 
 export class SyntaxCommand {
@@ -129,13 +129,13 @@ export class SyntaxCommand {
   }
 
   private isDeclaration(path: string): boolean {
-    if (!path.endsWith(kDeclarationSuffix)) {
+    if (!path.endsWith(kDeclarationExtension)) {
       return false;
     }
 
-    const stem = path.slice(0, path.length - kDeclarationSuffix.length);
+    const stem = path.slice(0, path.length - kDeclarationExtension.length);
 
-    return existsSync(`${stem}${kSourceSuffix}`);
+    return existsSync(`${stem}${kSourceExtension}`);
   }
 
   private everySource(sources: Sources): SourceText[] {

@@ -98,7 +98,15 @@ runtime/          весь C → tzrt.lib, tzrt.bc, tzcrypto.lib
 library/          весь tz → bin/lib: <тема>/*.tz
 editors/          vscode/ — расширение VS Code; types/ — объявления для будущего плагина tsserver
 self/             компилятор на tz, пробный (порт compiler/load): main.tz — только запуск
-                  SyntaxCommand; cli/syntax/ — как compiler/cli/syntax/: syntax-command/
+                  команды: слово `load` — LoadCommand, иначе SyntaxCommand (имя программы,
+                  текст usage и код выхода 2 — в cli/const/cli.const.tz);
+                  cli/load/load-command/ — LoadCommand: `tzparse load <main.tz>` читает
+                  программу загрузчиком и печатает в stdout модули по порядку (модуль после
+                  тех, кого он импортирует), под каждым — его файл объявлений и куда ведёт
+                  каждый импорт (`"./a.tz" 28 -> a.tz`, builtin, package, json, missing), в
+                  stderr — ошибки всех файлов программы; вход не `.tz` и файл, который не
+                  читается, — строка `tzparse: …` и код выхода 1;
+                  cli/syntax/ — как compiler/cli/syntax/: syntax-command/
                   (SyntaxCommand: `tzparse <режим> <file.tz | @list> [repeat]`, режимы
                   tokens|tree|check|time|hold|read, enum SyntaxMode; check — ошибки разбора
                   для человека в stderr и код выхода 1; файл `X.d.tz`, рядом с которым лежит
@@ -126,7 +134,8 @@ self/             компилятор на tz, пробный (порт compile
                   таблица kMessages: Record<Code, Message> — в const/message.const.tz, типы
                   Details, Message и SourceError { code, loc, details } — одна ошибка лексера
                   или парсера — в types/message.types.tz; коды 10xx — лексер и
-                  escape-последовательности, 17xx — файлы объявлений); diagnostic/error-printer/ —
+                  escape-последовательности, 17xx — файлы объявлений, 20xx — загрузка
+                  программы: путь импорта и поиск файла); diagnostic/error-printer/ —
                   ErrorPrinter: ошибки одного файла как `путь:строка:столбец: error TZ1221:
                   текст`, под ним строка исходника и `^` под местом (ошибка в конце файла
                   показывается в конце последней строки с текстом; широкий символ — иероглиф,
@@ -137,6 +146,32 @@ self/             компилятор на tz, пробный (порт compile
                   строка стоит левее своего блока, заменяет следствия одной ошибкой TZ1140 в
                   этом месте; `else` без `}` перед ним — одна ошибка TZ1144 со строкой блока
                   `if`, без второй о несошедшихся скобках;
+                  load/loader/ — Loader: программа от главного файла (new Loader(путь).run()
+                  → LoadResult { program, unreadable }). Обход в глубину по import и
+                  `export … from` в порядке текста: файл открыт (прочитан и разобран) один
+                  раз — таблица byFile по полному пути, в Windows без учёта регистра;
+                  состояния New / Loading / Loaded, так что круг импортов не зацикливает;
+                  модуль попадает в order после всех, кого импортирует, главный — последним;
+                  рядом с `x.tz` берётся `x.d.tz`; ошибки загрузки встают в список ошибок
+                  файла по месту пути импорта; пока идёт обход, модуль — OpenModule
+                  (types/loader.types.tz), готовый — Module;
+                  load/module-resolver/ — ModuleResolver.resolve(папка, путь из импорта) →
+                  Resolution: File, Builtin, Package или Problem (код и детали ошибки). На
+                  диск ходит только он: относительный путь `./x` — кандидаты `x.tz` и
+                  `x/index.tz`, путь с `.tz` или `.json` — как написан, `./x/` —
+                  `x/index.tz`; имя сверяется со списком папки (readdirSync, список папки
+                  читается один раз), поэтому другой регистр букв — ошибка TZ2006 на любой
+                  системе; пакеты (имя без `./`) пока не ищутся, файл `.json` и модуль
+                  библиотеки не читаются — у импорта вид Package, Json, Builtin;
+                  program/module/ — программа как данные (types/module.types.tz):
+                  SourceText, ParsedFile, ParsedDeclaration, Module { id, name — путь от
+                  папки главного файла через `/`, source, file, errors, declaration, links },
+                  ModuleLink { kind: LinkKind, from, target — id модуля }, Program { modules
+                  — по id, order — по порядку загрузки }; расширения файлов и разделители
+                  пути — в const/module.const.tz;
+                  program/library/builtin-modules/ — BuiltinModules.has(путь): встроенный ли
+                  модуль (`node:…`, `tz:…` или имя модуля node без приставки); общий
+                  экземпляр kBuiltinModules — в const/, им пользуются парсер и загрузчик;
                   load/token/ — токены, общие для лексера и парсера (TokenKind, KnownName,
                   Token — в types/token.types.tz; в token.tz — класс TokenTable: isName,
                   isKeyword, keywordKind, knownName, spelling; общий экземпляр kTokenTable — в
@@ -147,8 +182,9 @@ self/             компилятор на tz, пробный (порт compile
                   load/parser/ — Parser (parser.tz:
                   run() по списку файлов → ParsedFile[], runDeclarations() по списку файлов
                   объявлений → ParsedDeclaration[]; что из них файл объявлений, решает тот,
-                  кто зовёт; ошибки лексера и парсера сливает по месту в один список; типы
-                  SourceText, ParsedFile, ParsedDeclaration — в types/parser.types.tz), Cursor (cursor/: позиция, откаты,
+                  кто зовёт; parseFile и parseDeclaration — один файл, их зовёт загрузчик;
+                  ошибки лексера и парсера сливает по месту в один список; типы
+                  SourceText, ParsedFile, ParsedDeclaration — в program/module/), Cursor (cursor/: позиция, откаты,
                   ошибки), LiteralReader (literal/: значения литералов по токену; неверный
                   `\x` или `\u` — в DecodedText.invalid, сообщает о нём парсер), FileParser
                   (file-parser/: грамматика; части `partial class` — в
@@ -175,6 +211,10 @@ self/             компилятор на tz, пробный (порт compile
                   self/test/trees/<имя>.tz + .tree — верный код, в котором легко собрать
                   не то дерево: точный вывод `tzparse tree`, без ошибок; тест файла
                   объявлений — <имя>.d.tz рядом с его модулем <имя>.tz: проверяется .d.tz;
+                  self/test/programs/<имя>/ — программа из нескольких файлов с главным
+                  main.tz: точный вывод `tzparse load main.tz` — main.out, ошибки — main.err
+                  (нет файла — ошибок быть не должно); папка с именем кода (TZ2007) — тест
+                  этого кода;
                   перебор языка — self/test/*.py (тесты self/test/<скрипт>, метка
                   enumeration, идут минуты; `ctest -LE enumeration` — без них): скрипт
                   строит программы вместе с ответом, которого ждёт от парсера, и выходит

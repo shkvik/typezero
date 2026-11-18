@@ -1,0 +1,293 @@
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { basename, dirname, join, relative, resolve } from "node:path";
+import { SourceError } from "../../diagnostic/types/message.types.tz";
+import {
+  ModulePath,
+  SourceFile,
+} from "../../program/ast/types/ast.types.modules.tz";
+import {
+  kDeclarationExtension,
+  kJsonExtension,
+  kPathSeparator,
+  kSourceExtension,
+  kWindowsSeparator,
+} from "../../program/module/const/module.const.tz";
+import {
+  LinkKind,
+  Module,
+  ModuleLink,
+  ParsedDeclaration,
+  SourceText,
+} from "../../program/module/types/module.types.tz";
+import { ModuleResolver } from "../module-resolver/module-resolver.tz";
+import { ResolutionKind } from "../module-resolver/types/module-resolver.types.tz";
+import { Parser } from "../parser/parser.tz";
+import { LoadResult, ModuleState, OpenModule } from "./types/loader.types.tz";
+import { kWindowsPlatform } from "./const/loader.const.tz";
+
+export class Loader {
+  private readonly entryPath: string;
+  private readonly entryDirectory: string;
+  private readonly parser: Parser;
+  private readonly resolver: ModuleResolver;
+  private readonly opened: OpenModule[];
+  private readonly byFile: Map<string, int>;
+  private readonly order: Module[];
+  private readonly unreadable: string[];
+
+  public constructor(entryPath: string) {
+    this.entryPath = entryPath;
+    this.entryDirectory = dirname(entryPath);
+    this.parser = new Parser([]);
+    this.resolver = new ModuleResolver();
+    this.opened = [];
+    this.byFile = new Map<string, int>();
+    this.order = [];
+    this.unreadable = [];
+  }
+
+  public run(): LoadResult {
+    const key = this.keyOf(this.entryPath);
+    const name = basename(this.entryPath);
+    const entry = this.open(this.entryPath, key, name, this.entryPath);
+    if (entry != undefined) {
+      this.visit(entry);
+    }
+
+    const modules = this.order.slice();
+
+    modules.sort((first, second) => first.id - second.id);
+
+    return {
+      program: { modules, order: this.order },
+      unreadable: this.unreadable,
+    };
+  }
+
+  private visit(module: OpenModule): void {
+    module.state = ModuleState.Loading;
+
+    const requests = this.requests(module.parsed.file);
+
+    for (const request of requests) {
+      const link = this.linked(module, request);
+
+      module.links.push(link);
+      if (link.kind != LinkKind.Module) {
+        continue;
+      }
+
+      const target = this.opened[link.target];
+      if (target != undefined && target.state == ModuleState.New) {
+        this.visit(target);
+      }
+    }
+
+    module.state = ModuleState.Loaded;
+    const finished = this.finished(module);
+
+    this.order.push(finished);
+  }
+
+  private requests(file: SourceFile): ModulePath[] {
+    const requests: ModulePath[] = [];
+
+    for (const decl of file.imports) {
+      requests.push(decl.from);
+    }
+
+    for (const decl of file.exports) {
+      const from = decl.from;
+      if (from != undefined) {
+        requests.push(from);
+      }
+    }
+
+    requests.sort((first, second) => first.loc - second.loc);
+
+    return requests;
+  }
+
+  private linked(module: OpenModule, request: ModulePath): ModuleLink {
+    const directory = dirname(module.file);
+    const resolution = this.resolver.resolve(directory, request.path);
+    if (resolution.kind == ResolutionKind.File) {
+      return this.linkedFile(request, resolution.file);
+    }
+    if (resolution.kind == ResolutionKind.Problem) {
+      module.problems.push({
+        code: resolution.code,
+        loc: request.loc,
+        details: resolution.details,
+      });
+
+      return { kind: LinkKind.Missing, from: request };
+    }
+    if (resolution.kind == ResolutionKind.Builtin) {
+      return { kind: LinkKind.Builtin, from: request };
+    }
+
+    return { kind: LinkKind.Package, from: request };
+  }
+
+  private linkedFile(request: ModulePath, file: string): ModuleLink {
+    if (file.endsWith(kJsonExtension)) {
+      return { kind: LinkKind.Json, from: request };
+    }
+
+    const key = this.keyOf(file);
+    const known = this.byFile.get(key);
+    if (known != undefined) {
+      return { kind: LinkKind.Module, from: request, target: known };
+    }
+
+    const name = this.nameOf(file);
+    const path = this.shownPath(name);
+    const module = this.open(file, key, name, path);
+    if (module == undefined) {
+      return { kind: LinkKind.Missing, from: request };
+    }
+
+    return { kind: LinkKind.Module, from: request, target: module.id };
+  }
+
+  private open(
+    file: string,
+    key: string,
+    name: string,
+    path: string,
+  ): OpenModule | undefined {
+    const text = readFileSync(file);
+    if (text.isErr()) {
+      this.unreadable.push(path);
+
+      return undefined;
+    }
+
+    const source: SourceText = { path, text: text.value, isLibrary: false };
+    const parsed = this.parser.parseFile(source);
+    const declaration = this.declarationOf(file, path);
+    const module: OpenModule = {
+      id: this.opened.length,
+      name,
+      file,
+      parsed,
+      declaration,
+      links: [],
+      problems: [],
+      state: ModuleState.New,
+    };
+
+    this.opened.push(module);
+    this.byFile.set(key, module.id);
+
+    return module;
+  }
+
+  private declarationOf(
+    file: string,
+    path: string,
+  ): ParsedDeclaration | undefined {
+    const declarationFile = this.declarationPath(file);
+    if (!existsSync(declarationFile)) {
+      return undefined;
+    }
+
+    const declarationPath = this.declarationPath(path);
+    const text = readFileSync(declarationFile);
+    if (text.isErr()) {
+      this.unreadable.push(declarationPath);
+
+      return undefined;
+    }
+
+    const source: SourceText = {
+      path: declarationPath,
+      text: text.value,
+      isLibrary: false,
+    };
+
+    return this.parser.parseDeclaration(source);
+  }
+
+  private declarationPath(path: string): string {
+    const stem = path.slice(0, path.length - kSourceExtension.length);
+
+    return `${stem}${kDeclarationExtension}`;
+  }
+
+  private finished(module: OpenModule): Module {
+    const parsed = module.parsed;
+    const errors = this.mergedByPlace(parsed.errors, module.problems);
+
+    return {
+      id: module.id,
+      name: module.name,
+      source: parsed.source,
+      file: parsed.file,
+      errors,
+      declaration: module.declaration,
+      links: module.links,
+    };
+  }
+
+  private mergedByPlace(
+    syntactic: SourceError[],
+    problems: SourceError[],
+  ): SourceError[] {
+    if (problems.length == 0) {
+      return syntactic;
+    }
+
+    const merged: SourceError[] = [];
+    let taken = 0;
+
+    for (const error of syntactic) {
+      while (taken < problems.length) {
+        const earlier = problems[taken];
+        if (earlier == undefined || earlier.loc > error.loc) {
+          break;
+        }
+
+        merged.push(earlier);
+        taken += 1;
+      }
+
+      merged.push(error);
+    }
+
+    const rest = problems.slice(taken);
+
+    return merged.concat(rest);
+  }
+
+  private keyOf(file: string): string {
+    const absolute = resolve(file);
+    const real = realpathSync(absolute);
+    const path = real.unwrapOr(absolute);
+
+    if (process.platform == kWindowsPlatform) {
+      return path.toLowerCase();
+    }
+
+    return path;
+  }
+
+  private nameOf(file: string): string {
+    const from = resolve(this.entryDirectory);
+    const to = resolve(file);
+    const name = relative(from, to);
+
+    return this.slashed(name);
+  }
+
+  private shownPath(name: string): string {
+    const path = join(this.entryDirectory, name);
+
+    return this.slashed(path);
+  }
+
+  private slashed(path: string): string {
+    return path.replaceAll(kWindowsSeparator, kPathSeparator);
+  }
+}

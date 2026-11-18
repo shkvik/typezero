@@ -1,0 +1,7 @@
+// b.tz and main.tz import each other: a cycle is allowed.
+import { unit } from "./shared.tz";
+import { size } from "./main.tz";
+
+export function border(): int {
+  return size * unit;
+}

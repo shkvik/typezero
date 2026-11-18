@@ -1,0 +1,6 @@
+// Errors of every file of the program are printed with its path, a file
+// after the files it imports; the errors of one file go in the order of the
+// text, the missing file between the two mistakes of syntax.
+import { a } from "./lib/broken.tz";
+
+const first = ;

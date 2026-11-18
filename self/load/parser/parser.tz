@@ -9,7 +9,7 @@ import {
   ParsedDeclaration,
   ParsedFile,
   SourceText,
-} from "./types/parser.types.tz";
+} from "../../program/module/types/module.types.tz";
 
 export class Parser {
   private readonly sources: SourceText[];
@@ -42,7 +42,7 @@ export class Parser {
     return parsed;
   }
 
-  private parseFile(source: SourceText): ParsedFile {
+  public parseFile(source: SourceText): ParsedFile {
     const lexer = new Lexer(source.text);
     const lexed = lexer.run();
     const fileParser = new FileParser(
@@ -56,7 +56,7 @@ export class Parser {
     return { source, file: result.file, errors };
   }
 
-  private parseDeclaration(source: SourceText): ParsedDeclaration {
+  public parseDeclaration(source: SourceText): ParsedDeclaration {
     const lexer = new Lexer(source.text);
     const lexed = lexer.run();
     const fileParser = new FileParser(

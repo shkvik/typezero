@@ -1,0 +1,3 @@
+main.tz:1:21: error TZ2008: cannot find './math': there is no math.tz or math/index.tz; there is math.ts, and the files of tz end in .tz: rename it so that it ends in .tz
+import { add } from "./math";
+                    ^

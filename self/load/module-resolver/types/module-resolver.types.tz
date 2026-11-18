@@ -1,0 +1,32 @@
+import { Code } from "../../../diagnostic/code.tz";
+import { Details } from "../../../diagnostic/types/message.types.tz";
+
+export enum ResolutionKind {
+  File,
+  Builtin,
+  Package,
+  Problem,
+}
+
+export type Resolution =
+  | { readonly kind: ResolutionKind.File; readonly file: string }
+  | { readonly kind: ResolutionKind.Builtin | ResolutionKind.Package }
+  | {
+      readonly kind: ResolutionKind.Problem;
+      readonly code: Code;
+      readonly details: Details;
+    };
+
+export enum LocationKind {
+  Found,
+  OtherCase,
+  Absent,
+}
+
+export type Location =
+  | {
+      readonly kind: LocationKind.Found | LocationKind.OtherCase;
+      readonly file: string;
+      readonly written: string;
+    }
+  | { readonly kind: LocationKind.Absent };

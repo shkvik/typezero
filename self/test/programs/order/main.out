@@ -1,0 +1,23 @@
+modules 7
+shared.tz
+  declaration shared.d.tz
+a.tz
+  "./shared.tz" 21 -> shared.tz
+b.tz
+  "./shared.tz" 80 -> shared.tz
+  "./main.tz" 116 -> main.tz
+lib/index.tz
+  "../shared.tz" 21 -> shared.tz
+shape.partial.area.tz
+  "./shape.tz" 22 -> shape.tz
+shape.tz
+  "./shape.partial.area.tz" 7 -> shape.partial.area.tz
+main.tz
+  "./a.tz" 230 -> a.tz
+  "./b" 263 -> b.tz
+  "node:fs" 299 -> builtin
+  "./lib" 333 -> lib/index.tz
+  "left-pad" 362 -> package
+  "./settings.json" 395 -> json
+  "./shape.tz" 458 -> shape.tz
+  "./shared.tz" 493 -> shared.tz

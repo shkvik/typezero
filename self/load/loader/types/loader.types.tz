@@ -1,0 +1,29 @@
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import {
+  ModuleLink,
+  ParsedDeclaration,
+  ParsedFile,
+  Program,
+} from "../../../program/module/types/module.types.tz";
+
+export enum ModuleState {
+  New,
+  Loading,
+  Loaded,
+}
+
+export type OpenModule = {
+  readonly id: int;
+  readonly name: string;
+  readonly file: string;
+  readonly parsed: ParsedFile;
+  readonly declaration?: ParsedDeclaration;
+  readonly links: ModuleLink[];
+  readonly problems: SourceError[];
+  state: ModuleState;
+};
+
+export type LoadResult = {
+  readonly program: Program;
+  readonly unreadable: string[];
+};

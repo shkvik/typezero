@@ -1,0 +1,2 @@
+export const kLoadWord = "load";
+export const kTypeScriptExtension = ".ts";

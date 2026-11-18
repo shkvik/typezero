@@ -1,0 +1,3 @@
+main.tz:1:19: error TZ2003: only .tz files can be imported; tz needs no declarations: it reads the code itself
+import { a } from "./types.d.ts";
+                  ^

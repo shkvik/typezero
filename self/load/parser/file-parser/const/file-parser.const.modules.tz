@@ -15,10 +15,7 @@ export const kExportNames: NameListCodes = {
   close: Code.ExpectedExportNamesClose,
 };
 
-export const kJsonExtension = ".json";
 export const kJsonImportName = "json";
 export const kJsonExampleName = "data";
 export const kTypeAttributeKey = "type";
 export const kJsonAttributeValue = "json";
-export const kNodeModulePrefix = "node:";
-export const kTzModulePrefix = "tz:";

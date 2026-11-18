@@ -1,0 +1,3 @@
+main.tz:1:19: error TZ2006: the file is named './helper.tz', but the import says './Helper.tz'; write the name with the same capital letters, or the program will not build where names are case-sensitive
+import { a } from "./Helper.tz";
+                  ^

@@ -1,4 +1,13 @@
+import { LoadCommand } from "./cli/load/load-command/load-command.tz";
+import { kLoadWord } from "./cli/load/load-command/const/load-command.const.tz";
 import { SyntaxCommand } from "./cli/syntax/syntax-command/syntax-command.tz";
 
-const command = new SyntaxCommand(process.argv);
-command.run();
+if (process.argv[2] == kLoadWord) {
+  const command = new LoadCommand(process.argv);
+
+  command.run();
+} else {
+  const command = new SyntaxCommand(process.argv);
+
+  command.run();
+}

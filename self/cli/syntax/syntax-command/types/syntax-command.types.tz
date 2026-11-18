@@ -1,4 +1,4 @@
-import { SourceText } from "../../../../load/parser/types/parser.types.tz";
+import { SourceText } from "../../../../program/module/types/module.types.tz";
 
 export enum SyntaxMode {
   Tokens,

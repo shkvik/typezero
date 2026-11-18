@@ -1,0 +1,56 @@
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import { DeclarationFile } from "../../ast/types/ast.types.declarations.tz";
+import { ModulePath, SourceFile } from "../../ast/types/ast.types.modules.tz";
+
+export type SourceText = {
+  readonly path: string;
+  readonly text: Buffer;
+  readonly isLibrary: boolean;
+};
+
+export type ParsedFile = {
+  readonly source: SourceText;
+  readonly file: SourceFile;
+  readonly errors: SourceError[];
+};
+
+export type ParsedDeclaration = {
+  readonly source: SourceText;
+  readonly file: DeclarationFile;
+  readonly errors: SourceError[];
+};
+
+export enum LinkKind {
+  Module,
+  Builtin,
+  Package,
+  Json,
+  Missing,
+}
+
+export type ModuleLink =
+  | {
+      readonly kind: LinkKind.Module;
+      readonly from: ModulePath;
+      readonly target: int;
+    }
+  | {
+      readonly kind:
+        LinkKind.Builtin | LinkKind.Package | LinkKind.Json | LinkKind.Missing;
+      readonly from: ModulePath;
+    };
+
+export type Module = {
+  readonly id: int;
+  readonly name: string;
+  readonly source: SourceText;
+  readonly file: SourceFile;
+  readonly errors: SourceError[];
+  readonly declaration?: ParsedDeclaration;
+  readonly links: ModuleLink[];
+};
+
+export type Program = {
+  readonly modules: Module[];
+  readonly order: Module[];
+};

@@ -1,0 +1,3 @@
+import { BuiltinModules } from "../builtin-modules.tz";
+
+export const kBuiltinModules = new BuiltinModules();

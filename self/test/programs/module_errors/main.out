@@ -1,0 +1,5 @@
+modules 2
+lib/broken.tz
+  "./gone.tz" 43 -> missing
+main.tz
+  "./lib/broken.tz" 230 -> lib/broken.tz
