@@ -1,0 +1,253 @@
+import {
+  AccessError,
+  AppendFileError,
+  AppendNewFileError,
+  ChangeModeError,
+  CopyFileError,
+  ForceRemoveError,
+  LinkStatusError,
+  LinkStatusIfExistsError,
+  MakeDirectoryError,
+  MakeTemporaryDirectoryError,
+  ReadDirectoryError,
+  ReadFileError,
+  ReadStreamError,
+  RealPathError,
+  RemoveDirectoryError,
+  RemoveError,
+  RenameError,
+  StatusError,
+  StatusIfExistsError,
+  TruncateError,
+  UnlinkError,
+  WriteFileError,
+  WriteNewFileError,
+  WriteNewStreamError,
+  WriteStreamError,
+} from "tz:fs/errors";
+import {
+  Dirent,
+  FileData,
+  FileOptions,
+  FsConstants,
+  OpenFlag,
+  Stats,
+  WriteFileOptions,
+  ExclusiveWriteFlag,
+  AppendFlag,
+  ExclusiveAppendFlag,
+  WriteFlag,
+} from "node:fs";
+
+export {
+  AccessError,
+  AppendFileError,
+  AppendNewFileError,
+  ChangeModeError,
+  CopyFileError,
+  ForceRemoveError,
+  LinkStatusError,
+  LinkStatusIfExistsError,
+  MakeDirectoryError,
+  MakeTemporaryDirectoryError,
+  ReadDirectoryError,
+  ReadFileError,
+  ReadStreamError,
+  RealPathError,
+  RemoveDirectoryError,
+  RemoveError,
+  RenameError,
+  StatusError,
+  StatusIfExistsError,
+  TruncateError,
+  UnlinkError,
+  WriteFileError,
+  WriteNewFileError,
+  WriteNewStreamError,
+  WriteStreamError,
+};
+
+/**
+ * The functions of this module: those of "node:fs" without `Sync` in the name,
+ * each giving a Promise. The module gives every one by its name, and "node:fs"
+ * gives them all as `promises`.
+ */
+export interface FsPromises {
+  /**
+   * Reads a whole file: its bytes, or its text when an encoding is given. The
+   * encoding is written in the call, as the type of what comes depends on it.
+   */
+  readFile(
+    path: string,
+    options?: { flag?: OpenFlag },
+  ): Promise<Result<Buffer, ReadFileError>>;
+  readFile(
+    path: string,
+    encoding: BufferEncoding | { encoding: BufferEncoding; flag?: OpenFlag },
+  ): Promise<Result<string, ReadFileError>>;
+  /**
+   * Writes a text or bytes as the whole file, making it or replacing what it
+   * held. The flag says otherwise, and the error follows it: an "x" flag does
+   * not touch a file that is there (WriteNewFileError), an "a" flag adds at the
+   * end (AppendFileError).
+   */
+  writeFile(
+    path: string,
+    data: FileData,
+    options: WriteFileOptions<ExclusiveWriteFlag>,
+  ): Promise<Result<void, WriteNewFileError>>;
+  writeFile(
+    path: string,
+    data: FileData,
+    options: WriteFileOptions<AppendFlag>,
+  ): Promise<Result<void, AppendFileError>>;
+  writeFile(
+    path: string,
+    data: FileData,
+    options: WriteFileOptions<ExclusiveAppendFlag>,
+  ): Promise<Result<void, AppendNewFileError>>;
+  writeFile(
+    path: string,
+    data: FileData,
+    options?: BufferEncoding | FileOptions,
+  ): Promise<Result<void, WriteFileError>>;
+  /**
+   * Adds a text or bytes at the end of a file, making it when it is not there.
+   * The flag says otherwise, and the error follows it, as in `writeFile`.
+   */
+  appendFile(
+    path: string,
+    data: FileData,
+    options: WriteFileOptions<ExclusiveAppendFlag>,
+  ): Promise<Result<void, AppendNewFileError>>;
+  appendFile(
+    path: string,
+    data: FileData,
+    options: WriteFileOptions<WriteFlag>,
+  ): Promise<Result<void, WriteFileError>>;
+  appendFile(
+    path: string,
+    data: FileData,
+    options: WriteFileOptions<ExclusiveWriteFlag>,
+  ): Promise<Result<void, WriteNewFileError>>;
+  appendFile(
+    path: string,
+    data: FileData,
+    options?: BufferEncoding | FileOptions,
+  ): Promise<Result<void, AppendFileError>>;
+  /**
+   * Checks that the program may use the path as the mode says, `constants.F_OK`
+   * (it is there) by default; an error when it may not.
+   */
+  access(path: string, mode?: int): Promise<Result<void, AccessError>>;
+  /** Sets the permissions of a file. */
+  chmod(path: string, mode: int): Promise<Result<void, ChangeModeError>>;
+  /** Cuts a file to the length, 0 by default, or pads it with zeros. */
+  truncate(path: string, length?: int): Promise<Result<void, TruncateError>>;
+  /** What is at the path: its kind, size and times; a link is followed. */
+  stat(path: string): Promise<Result<Stats, StatusError>>;
+  /** As `stat`, of a link itself. */
+  lstat(path: string): Promise<Result<Stats, LinkStatusError>>;
+  /**
+   * The names of what a folder holds, with `recursive` of what is inside its
+   * folders too; with `withFileTypes` what each is.
+   */
+  readdir(
+    path: string,
+    options: {
+      withFileTypes: true;
+      encoding?: BufferEncoding;
+      recursive?: boolean;
+    },
+  ): Promise<Result<Dirent[], ReadDirectoryError>>;
+  readdir(
+    path: string,
+    options?:
+      | BufferEncoding
+      | {
+          encoding?: BufferEncoding;
+          recursive?: boolean;
+          withFileTypes?: false;
+        },
+  ): Promise<Result<string[], ReadDirectoryError>>;
+  /**
+   * Makes a folder; with `recursive` the folders above it too, and then a
+   * folder that is there is no error. Gives the first folder it made.
+   */
+  mkdir(
+    path: string,
+    options?: int | { recursive?: boolean; mode?: int },
+  ): Promise<Result<string | undefined, MakeDirectoryError>>;
+  /**
+   * Makes a folder with a name of its own that starts with the prefix, and
+   * gives its path.
+   */
+  mkdtemp(
+    prefix: string,
+    options?: BufferEncoding | { encoding?: BufferEncoding },
+  ): Promise<Result<string, MakeTemporaryDirectoryError>>;
+  /** Removes an empty folder. */
+  rmdir(path: string): Promise<Result<void, RemoveDirectoryError>>;
+  /** Removes a file or a link. */
+  unlink(path: string): Promise<Result<void, UnlinkError>>;
+  /**
+   * Removes a file, or with `recursive` a folder with what it holds. With
+   * `force` what is not there is no error.
+   */
+  rm(
+    path: string,
+    options: {
+      force: true;
+      recursive?: boolean;
+      maxRetries?: int;
+      retryDelay?: int;
+    },
+  ): Promise<Result<void, ForceRemoveError>>;
+  rm(
+    path: string,
+    options?: {
+      force?: false;
+      recursive?: boolean;
+      maxRetries?: int;
+      retryDelay?: int;
+    },
+  ): Promise<Result<void, RemoveError>>;
+  /**
+   * Moves or renames a file or a folder. It does not replace what is at the new
+   * path; `replace` of "tz:fs" does.
+   */
+  rename(from: string, to: string): Promise<Result<void, RenameError>>;
+  /**
+   * Copies a file. It never replaces a file that is there, so it takes no mode.
+   */
+  copyFile(
+    source: string,
+    destination: string,
+  ): Promise<Result<void, CopyFileError>>;
+  /** The full path with every link followed. */
+  realpath(
+    path: string,
+    options?: BufferEncoding | { encoding?: BufferEncoding },
+  ): Promise<Result<string, RealPathError>>;
+}
+
+export declare const readFile: FsPromises["readFile"];
+export declare const writeFile: FsPromises["writeFile"];
+export declare const appendFile: FsPromises["appendFile"];
+export declare const access: FsPromises["access"];
+export declare const chmod: FsPromises["chmod"];
+export declare const truncate: FsPromises["truncate"];
+export declare const stat: FsPromises["stat"];
+export declare const lstat: FsPromises["lstat"];
+export declare const readdir: FsPromises["readdir"];
+export declare const mkdir: FsPromises["mkdir"];
+export declare const mkdtemp: FsPromises["mkdtemp"];
+export declare const rmdir: FsPromises["rmdir"];
+export declare const unlink: FsPromises["unlink"];
+export declare const rm: FsPromises["rm"];
+export declare const rename: FsPromises["rename"];
+export declare const copyFile: FsPromises["copyFile"];
+export declare const realpath: FsPromises["realpath"];
+
+/** The numbers for `access`, the same as in "node:fs". */
+export declare const constants: FsConstants;

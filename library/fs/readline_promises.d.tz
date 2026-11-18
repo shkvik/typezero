@@ -1,0 +1,24 @@
+import { InterfaceOptions } from "node:readline";
+
+/**
+ * Reads the standard input line by line: `for await (const line of rl)`
+ * gives the lines, each a string without its line break.
+ */
+export interface Interface {
+  /**
+   * Prints the query and waits for the line the user types; an error when
+   * the interface is closed already.
+   * @example const name = await rl.question("Name? ")
+   */
+  question(query: string): Promise<Result<string, QuestionError>>;
+  /** Stops reading; the lines read so far still come. */
+  close(): void;
+}
+
+/** `Interface` has nothing: `createInterface` makes one. */
+export interface InterfaceConstructor {}
+
+export declare const Interface: InterfaceConstructor;
+
+/** Starts reading the standard input by lines. */
+export declare function createInterface(options: InterfaceOptions): Interface;

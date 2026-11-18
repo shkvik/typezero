@@ -168,7 +168,8 @@ partial class ModuleBinder {
     }
 
     const from = imported.decl.from;
-    if (kBuiltinModules.has(from.path)) {
+    const isLibrary = names.module.source.isLibrary;
+    if (!isLibrary && kBuiltinModules.has(from.path)) {
       this.report(bound, name.loc, Code.ExportOfBuiltinName, { word });
 
       return undefined;

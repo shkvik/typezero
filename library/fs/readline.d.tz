@@ -1,0 +1,42 @@
+import { StdinError, StdoutError } from "node:internal/fs/streams";
+import { Readable, Writable } from "node:stream";
+
+/**
+ * What `createInterface` takes. The input is `process.stdin`, the output
+ * `process.stdout` or `process.stderr`: other streams are not read yet.
+ */
+export type InterfaceOptions = {
+  input: Readable<Buffer, StdinError>;
+  output?: Writable<Buffer, StdoutError>;
+  terminal?: boolean;
+  crlfDelay?: int | double;
+  historySize?: int;
+  removeHistoryDuplicates?: boolean;
+  tabSize?: int;
+  escapeCodeTimeout?: int;
+};
+
+/**
+ * Reads the standard input line by line: `for await (const line of rl)`
+ * gives the lines, each a string without its line break.
+ */
+export interface Interface {
+  /**
+   * Prints the query and calls the function with the line the user types.
+   * @example rl.question("Name? ", (name) => console.log(name))
+   */
+  question(query: string, callback: (answer: string) => void): void;
+  /** Stops reading; the lines read so far still come. */
+  close(): void;
+}
+
+/** `Interface` has nothing: `createInterface` makes one. */
+export interface InterfaceConstructor {}
+
+export declare const Interface: InterfaceConstructor;
+
+/**
+ * Starts reading the standard input by lines.
+ * @example const rl = createInterface({ input: process.stdin })
+ */
+export declare function createInterface(options: InterfaceOptions): Interface;

@@ -1,0 +1,33 @@
+import { CryptoBytes, KeyObject, SignKey } from "node:crypto";
+import { DiffieHellmanError, SignError, VerifyError } from "tz:crypto/errors";
+
+/**
+ * As `randomBytes` of "node:crypto", without stopping the program while the
+ * bytes are made. Node has it as a callback of `randomBytes`.
+ */
+export declare function randomBytesAsync(size: int): Promise<Buffer>;
+
+/** As `randomInt` of "node:crypto", without stopping the program. */
+export declare function randomIntAsync(max: int): Promise<int>;
+export declare function randomIntAsync(min: int, max: int): Promise<int>;
+
+/** As `sign` of "node:crypto", without stopping the program. */
+export declare function signAsync(
+  algorithm: string | undefined,
+  data: AnyTypedArray | DataView,
+  key: KeyObject | string | CryptoBytes | SignKey,
+): Promise<Result<Buffer, SignError>>;
+
+/** As `verify` of "node:crypto", without stopping the program. */
+export declare function verifyAsync(
+  algorithm: string | undefined,
+  data: AnyTypedArray | DataView,
+  key: KeyObject | string | CryptoBytes | SignKey,
+  signature: AnyTypedArray | DataView,
+): Promise<Result<boolean, VerifyError>>;
+
+/** As `diffieHellman` of "node:crypto", without stopping the program. */
+export declare function diffieHellmanAsync(options: {
+  privateKey: KeyObject;
+  publicKey: KeyObject;
+}): Promise<Result<Buffer, DiffieHellmanError>>;

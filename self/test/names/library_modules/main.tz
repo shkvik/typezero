@@ -1,0 +1,20 @@
+// Every module the compiler has inside itself is a declaration file of the
+// library, so an import from it is checked as any other: a function, a class,
+// an error type the module gives from the file of errors, and a name the
+// module does not have. Error types are no global names: they are imported.
+import { ReadFileError, Stats, readFileSync, FileHandle } from "node:fs";
+import { StatusError, readFile, open } from "node:fs/promises";
+import { ReplaceError, replaceSync } from "tz:fs";
+import { ExecTextError, execSync, spawn } from "node:child_process";
+import { HashError, KeyObject, createHash, webcrypto } from "node:crypto";
+import { randomBytesAsync } from "tz:crypto";
+import { cstring } from "tz:string";
+import { createInterface } from "node:readline";
+import { Interface } from "readline/promises";
+
+const name: cstring = "a";
+const failed: ReadFileError | StatusError | ReplaceError | undefined = undefined;
+const other: ExecTextError | HashError | WriteFileError | undefined = undefined;
+
+console.log(name, failed, other, Stats, readFileSync, readFile, replaceSync);
+console.log(execSync, createHash, randomBytesAsync, createInterface);

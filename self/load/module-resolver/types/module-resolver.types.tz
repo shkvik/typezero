@@ -5,7 +5,6 @@ import { LibraryModule } from "../../../program/library/library-modules/types/li
 export enum ResolutionKind {
   File,
   Library,
-  Builtin,
   Package,
   Problem,
 }
@@ -13,7 +12,7 @@ export enum ResolutionKind {
 export type Resolution =
   | { readonly kind: ResolutionKind.File; readonly file: string }
   | { readonly kind: ResolutionKind.Library; readonly module: LibraryModule }
-  | { readonly kind: ResolutionKind.Builtin | ResolutionKind.Package }
+  | { readonly kind: ResolutionKind.Package }
   | {
       readonly kind: ResolutionKind.Problem;
       readonly code: Code;

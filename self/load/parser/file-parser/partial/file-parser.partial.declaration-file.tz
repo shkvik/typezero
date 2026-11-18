@@ -32,10 +32,26 @@ partial class FileParser {
         break;
       case TokenKind.Export:
         return this.declarationExport(file);
+      case TokenKind.Type:
+      case TokenKind.Interface:
+        return this.libraryType(file, token);
       default:
         this.cursor.report(token.start, Code.DeclarationHoldsExports);
         return this.skipToDeclaration();
     }
+  }
+
+  private libraryType(file: DeclarationFile, word: Token): void {
+    if (!this.library) {
+      this.cursor.report(word.start, Code.DeclarationHoldsExports);
+
+      return this.skipToDeclaration();
+    }
+    if (word.kind == TokenKind.Type) {
+      return this.exportedType(file, word.start, word);
+    }
+
+    return this.exportedInterface(file, word.start);
   }
 
   private declarationExport(file: DeclarationFile): void {

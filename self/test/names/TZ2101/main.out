@@ -1,1 +1,4 @@
+tz:fs/errors (library)
+node:fs/promises (library)
+node:fs (library)
 main.tz

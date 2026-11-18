@@ -120,7 +120,7 @@ self/             компилятор на tz, пробный (порт compile
                   cli/load/load-command/ — LoadCommand: `tzparse load <main.tz>` читает
                   программу загрузчиком и печатает в stdout модули по порядку (модуль после
                   тех, кого он импортирует), под каждым — его файл объявлений и куда ведёт
-                  каждый импорт (`"./a.tz" 28 -> a.tz`, builtin, package, json, missing), в
+                  каждый импорт (`"./a.tz" 28 -> a.tz`, package, json, missing), в
                   stderr — ошибки всех файлов программы; вход не `.tz` и файл, который не
                   читается, — строка `tzparse: …` и код выхода 1;
                   cli/syntax/ — как compiler/cli/syntax/: syntax-command/
@@ -196,10 +196,27 @@ self/             компилятор на tz, пробный (порт compile
                   иметь свои параметры типа (`max<N extends MathNumber>(...values: N[]): N`,
                   ObjectTypeField.typeParams); в коде программы это по-прежнему TZ1328.
                   Объявленная без тела функция может иметь несколько подписей с одним
-                  именем. Какие встроенные модули уже описаны, печатает
-                  tmp/selfhost/probes/builtin_coverage.py. После обхода: PartialClasses.join, затем встроенные объявления
-                  (prelude.d.tz, iterate.tz, файлы ошибок fs, crypto, child_process) —
-                  в Program.builtins;
+                  именем. Все модули, которые компилятор держит внутри себя, описаны так
+                  (15: `node:fs`, `node:fs/promises`, `tz:fs`, `node:readline` с `promises`,
+                  `node:child_process`, `node:crypto`, `tz:crypto`, `tz:string` и описанные
+                  раньше); список печатает tmp/selfhost/probes/builtin_coverage.py. Файлы
+                  fs.d.tz и fs_promises.d.tz пишет tmp/selfhost/probes/fs_gen.py из одного
+                  списка функций, child_process.d.tz — child_gen.py: у функции своя подпись
+                  на каждое сочетание настроек, от которых зависит тип (`encoding`, `shell`,
+                  `stdio`, `flag`). Типы ошибок — не глобальные имена: файлы ошибок
+                  (fs_errors.d.tz, crypto_errors.d.tz, child_errors.d.tz) — модули только
+                  для библиотеки (`tz:fs/errors`…), модуль node импортирует из такого
+                  нужные типы и отдаёт их списком `export { … }`; в файле объявлений
+                  библиотеки `type` и `interface` читаются и без `export`. Реэкспорт
+                  `export { a } from "x"` в модуле-объявлении ленивый: модуль `x`
+                  загружается, только когда кто-то просит одно из этих имён (Loader:
+                  askedRequests дописывает такие запросы в список того же цикла visit) —
+                  так `node:fs` отдаёт `createReadStream` и классы потоков, а
+                  `node:process` — `stdin` / `stdout` / `stderr`, не загружая библиотеку
+                  потоков в каждую программу. После обхода: PartialClasses.join, затем
+                  встроенные объявления (prelude.d.tz, iterate.tz) — в Program.builtins;
+                  модули, до которых дошли только глобальные файлы, вместе с ними лежат в
+                  Program.ambient — в выводе команд их нет;
                   load/library-mentions/ — LibraryMentions.imports(токены, дерево): неявные
                   импорты файла программы — глобальные имена библиотеки (`URL`, `fetch`,
                   `Headers`…), которые в тексте есть не после точки и которых файл сам не
@@ -215,14 +232,14 @@ self/             компилятор на tz, пробный (порт compile
                   декоратор в части, другие параметры типа, метод с тем же именем в другом
                   файле;
                   load/module-resolver/ — ModuleResolver.resolve(папка, путь из импорта) →
-                  Resolution: File, Builtin, Package или Problem (код и детали ошибки). На
+                  Resolution: File, Library, Package или Problem (код и детали ошибки). На
                   диск ходит только он: относительный путь `./x` — кандидаты `x.tz` и
                   `x/index.tz`, путь с `.tz` или `.json` — как написан, `./x/` —
                   `x/index.tz`; имя сверяется со списком папки (readdirSync, список папки
                   читается один раз), поэтому другой регистр букв — ошибка TZ2006 на любой
-                  системе; модуль библиотеки — вид Library с его записью; встроенный
-                  модуль, который знает сам компилятор (`node:fs`, `tz:io`…), — Builtin, а
-                  которого нет или который ещё не сделан — ошибка 2009–2016; пакеты (имя без
+                  системе; модуль библиотеки, и написанный на tz, и описанный файлом
+                  объявлений (`node:fs`, `tz:io`…), — вид Library с его записью; встроенный
+                  модуль, которого нет или который ещё не сделан, — ошибка 2009–2016; пакеты (имя без
                   `./`) пока не ищутся, файл `.json` не читается — у импорта вид Package,
                   Json;
                   program/module/ — программа как данные (types/module.types.tz):
@@ -273,8 +290,8 @@ self/             компилятор на tz, пробный (порт compile
                   ModuleExport и ModuleImport ведут к NameTarget { module — id, name —
                   имя объявления в том модуле };
                   program/library/builtin-modules/ — BuiltinModules.has(путь): встроенный ли
-                  модуль (`node:…`, `tz:…` или имя модуля node без приставки), isSupported —
-                  сделан ли он в компиляторе, isNodeModule — есть ли такой в node; общий
+                  модуль (`node:…`, `tz:…` или имя модуля node без приставки),
+                  isNodeModule — есть ли такой в node; общий
                   экземпляр kBuiltinModules — в const/, им пользуются парсер и загрузчик;
                   program/library/library-modules/ — LibraryModules (общий экземпляр
                   kLibrary): таблицы библиотеки в const/library-modules.const.tables.tz —

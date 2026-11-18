@@ -1,8 +1,6 @@
 import {
   kLaterNodeModules,
   kNodeModulePrefix,
-  kSupportedNodeModules,
-  kSupportedTzModules,
   kTzModulePrefix,
 } from "./const/builtin-modules.const.prefixes.tz";
 
@@ -13,16 +11,6 @@ export class BuiltinModules {
       path.startsWith(kTzModulePrefix) ||
       this.isBare(path)
     );
-  }
-
-  public isSupported(path: string): boolean {
-    if (path.startsWith(kTzModulePrefix)) {
-      return kSupportedTzModules.includes(path);
-    }
-
-    const bare = this.withoutNodePrefix(path);
-
-    return kSupportedNodeModules.includes(bare);
   }
 
   public isNodeModule(path: string): boolean {

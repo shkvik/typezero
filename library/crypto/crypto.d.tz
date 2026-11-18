@@ -1,0 +1,741 @@
+import {
+  Argon2Error,
+  CertificateCheckPrivateKeyError,
+  CertificateVerifyError,
+  CheckPrimeError,
+  CipherFinalError,
+  CreateCipherError,
+  CreateDecipherError,
+  CreateEcdhError,
+  CreateHashError,
+  CreateHmacError,
+  CreatePrivateKeyError,
+  CreatePublicKeyError,
+  CreateSignError,
+  CreateVerifyError,
+  DecipherFinalError,
+  DiffieHellmanError,
+  EcdhComputeSecretError,
+  EcdhGetPrivateKeyError,
+  EcdhGetPublicKeyError,
+  EcdhSetPrivateKeyError,
+  GenerateKeyPairError,
+  GeneratePrimeError,
+  GetAuthTagError,
+  HashCopyError,
+  HashError,
+  HkdfError,
+  KeyExportError,
+  ParseCertificateError,
+  Pbkdf2Error,
+  ScryptError,
+  SignError,
+  SignerSignError,
+  VerifierVerifyError,
+  VerifyError,
+} from "tz:crypto/errors";
+
+export {
+  Argon2Error,
+  CertificateCheckPrivateKeyError,
+  CertificateVerifyError,
+  CheckPrimeError,
+  CipherFinalError,
+  CreateCipherError,
+  CreateDecipherError,
+  CreateEcdhError,
+  CreateHashError,
+  CreateHmacError,
+  CreatePrivateKeyError,
+  CreatePublicKeyError,
+  CreateSignError,
+  CreateVerifyError,
+  DecipherFinalError,
+  DiffieHellmanError,
+  EcdhComputeSecretError,
+  EcdhGetPrivateKeyError,
+  EcdhGetPublicKeyError,
+  EcdhSetPrivateKeyError,
+  GenerateKeyPairError,
+  GeneratePrimeError,
+  GetAuthTagError,
+  HashCopyError,
+  HashError,
+  HkdfError,
+  KeyExportError,
+  ParseCertificateError,
+  Pbkdf2Error,
+  ScryptError,
+  SignError,
+  SignerSignError,
+  VerifierVerifyError,
+  VerifyError,
+};
+
+/** Bytes as the functions of this module take them. */
+export type CryptoBytes = AnyTypedArray | DataView | ArrayBuffer;
+
+/** What is hashed, signed or encrypted: a text or bytes. */
+export type CryptoData = string | AnyTypedArray | DataView;
+
+/** A secret: a text, bytes or a key. */
+export type CryptoSecret = string | CryptoBytes | KeyObject;
+
+/**
+ * How bytes are written as text. It is written in the call, as the type of
+ * what comes depends on it.
+ */
+export type DigestEncoding =
+  "hex" | "base64" | "base64url" | "latin1" | "binary";
+
+/** The numbers of `constants`. */
+export interface CryptoConstants {
+  readonly RSA_PKCS1_PADDING: int;
+  readonly RSA_NO_PADDING: int;
+  readonly RSA_PKCS1_OAEP_PADDING: int;
+  readonly RSA_X931_PADDING: int;
+  readonly RSA_PKCS1_PSS_PADDING: int;
+  readonly RSA_PSS_SALTLEN_DIGEST: int;
+  readonly RSA_PSS_SALTLEN_MAX_SIGN: int;
+  readonly RSA_PSS_SALTLEN_AUTO: int;
+  readonly POINT_CONVERSION_COMPRESSED: int;
+  readonly POINT_CONVERSION_UNCOMPRESSED: int;
+  readonly POINT_CONVERSION_HYBRID: int;
+}
+
+export declare const constants: CryptoConstants;
+
+/**
+ * Counts a hash by pieces. It is made by `createHash`, not by `new`. The
+ * name of an algorithm written in the code is checked when the program is
+ * built, and only that algorithm gets into the program.
+ * @example createHash("sha256")
+ */
+export interface Hash {
+  /** Adds data; gives the hash itself. */
+  update(data: CryptoData): Hash;
+  update(text: string, encoding: BufferEncoding): Hash;
+  /** The hash: bytes, or a text in the encoding. */
+  digest(): Buffer;
+  digest(encoding: "buffer"): Buffer;
+  digest(encoding: DigestEncoding): string;
+  /** A hash of the same data so far, to go on in two ways. */
+  copy(options?: { outputLength?: int }): Hash;
+}
+
+/** As `Hash`, with a secret key: made by `createHmac`. */
+export interface Hmac {
+  update(data: CryptoData): Hmac;
+  update(text: string, encoding: BufferEncoding): Hmac;
+  digest(): Buffer;
+  digest(encoding: "buffer"): Buffer;
+  digest(encoding: DigestEncoding): string;
+}
+
+/** Encrypts by pieces: made by `createCipheriv`. */
+export interface Cipheriv {
+  /** Encrypts a piece: bytes, or a text when an output encoding is given. */
+  update(data: AnyTypedArray | DataView): Buffer;
+  update(text: string, inputEncoding?: BufferEncoding): Buffer;
+  update(
+    data: CryptoData,
+    inputEncoding: BufferEncoding | undefined,
+    outputEncoding: DigestEncoding,
+  ): string;
+  /** The last piece; after it nothing more is encrypted. */
+  final(): Result<Buffer, CipherFinalError>;
+  final(outputEncoding: DigestEncoding): Result<string, CipherFinalError>;
+  /** Data that is not encrypted but is covered by the tag. */
+  setAAD(data: CryptoBytes, options?: { plaintextLength?: int }): Cipheriv;
+  /** The tag of an authenticated mode such as GCM, after `final`. */
+  getAuthTag(): Result<Buffer, GetAuthTagError>;
+  setAutoPadding(autoPadding?: boolean): Cipheriv;
+}
+
+/** Decrypts by pieces: made by `createDecipheriv`. */
+export interface Decipheriv {
+  update(data: AnyTypedArray | DataView): Buffer;
+  update(text: string, inputEncoding?: BufferEncoding): Buffer;
+  update(
+    data: CryptoData,
+    inputEncoding: BufferEncoding | undefined,
+    outputEncoding: BufferEncoding,
+  ): string;
+  /** The last piece; an error when the tag does not fit the data. */
+  final(): Result<Buffer, DecipherFinalError>;
+  final(outputEncoding: BufferEncoding): Result<string, DecipherFinalError>;
+  setAAD(data: CryptoBytes, options?: { plaintextLength?: int }): Decipheriv;
+  /** The tag the data was encrypted with, before `final`. */
+  setAuthTag(tag: CryptoBytes): Decipheriv;
+  setAutoPadding(autoPadding?: boolean): Decipheriv;
+}
+
+/** How a key is written out. */
+export type KeyExportOptions = {
+  format: "pem" | "der" | "jwk";
+  type?: "pkcs1" | "spki" | "pkcs8" | "sec1";
+  /** The cipher a private key is protected with. */
+  cipher?: string;
+  passphrase?: string | CryptoBytes;
+};
+
+/** A key: secret, public or private. */
+export interface KeyObject {
+  /** "secret", "public" or "private". */
+  readonly type: string;
+  /** "rsa", "ec", "ed25519" and so on; none of a secret key. */
+  readonly asymmetricKeyType?: string;
+  /** The length of a secret key in bytes. */
+  readonly symmetricKeySize?: int;
+
+  /**
+   * The key written out: a secret key as bytes, "pem" as a text, "der" as
+   * bytes, "jwk" as a `Json`.
+   */
+  export(): Result<Buffer, KeyExportError>;
+  export(options: {
+    format: "pem";
+    type?: "pkcs1" | "spki" | "pkcs8" | "sec1";
+    cipher?: string;
+    passphrase?: string | CryptoBytes;
+  }): Result<string, KeyExportError>;
+  export(options: {
+    format: "der";
+    type?: "pkcs1" | "spki" | "pkcs8" | "sec1";
+    cipher?: string;
+    passphrase?: string | CryptoBytes;
+  }): Result<Buffer, KeyExportError>;
+  export(options: { format: "jwk" }): Result<Json, KeyExportError>;
+  equals(other: KeyObject): boolean;
+}
+
+/** A key with how it signs. */
+export type SignKey = {
+  key: KeyObject | string | CryptoBytes;
+  /** One of the `RSA_…_PADDING` numbers of `constants`. */
+  padding?: int;
+  saltLength?: int;
+  dsaEncoding?: "der" | "ieee-p1363";
+};
+
+/** Signs data added by pieces: made by `createSign`. */
+export interface Sign {
+  update(data: CryptoData): Sign;
+  update(text: string, encoding: BufferEncoding): Sign;
+  /** The signature: bytes, or a text in the encoding. */
+  sign(
+    key: KeyObject | string | CryptoBytes | SignKey,
+  ): Result<Buffer, SignerSignError>;
+  sign(
+    key: KeyObject | string | CryptoBytes | SignKey,
+    outputEncoding: DigestEncoding,
+  ): Result<string, SignerSignError>;
+}
+
+/** Checks a signature of data added by pieces: made by `createVerify`. */
+export interface Verify {
+  update(data: CryptoData): Verify;
+  update(text: string, encoding: BufferEncoding): Verify;
+  /** Whether the signature is of this data by this key. */
+  verify(
+    key: KeyObject | string | CryptoBytes | SignKey,
+    signature: AnyTypedArray | DataView,
+  ): Result<boolean, VerifierVerifyError>;
+  verify(
+    key: KeyObject | string | CryptoBytes | SignKey,
+    signature: string,
+    signatureEncoding: DigestEncoding,
+  ): Result<boolean, VerifierVerifyError>;
+}
+
+/** How a point of a curve is written. */
+export type PointFormat = "uncompressed" | "compressed" | "hybrid";
+
+/** An exchange of keys on an elliptic curve: made by `createECDH`. */
+export interface ECDH {
+  /** Makes the pair of keys and gives the public one. */
+  generateKeys(): Buffer;
+  generateKeys(encoding: DigestEncoding, format?: PointFormat): string;
+  getPublicKey(): Result<Buffer, EcdhGetPublicKeyError>;
+  getPublicKey(
+    encoding: DigestEncoding,
+    format?: PointFormat,
+  ): Result<string, EcdhGetPublicKeyError>;
+  getPrivateKey(): Result<Buffer, EcdhGetPrivateKeyError>;
+  getPrivateKey(
+    encoding: DigestEncoding,
+  ): Result<string, EcdhGetPrivateKeyError>;
+  setPrivateKey(key: CryptoBytes): Result<void, EcdhSetPrivateKeyError>;
+  setPrivateKey(
+    key: string,
+    encoding: DigestEncoding,
+  ): Result<void, EcdhSetPrivateKeyError>;
+  /** The secret both sides get: of one's own key and the other's public one. */
+  computeSecret(
+    otherPublicKey: CryptoBytes,
+  ): Result<Buffer, EcdhComputeSecretError>;
+  computeSecret(
+    otherPublicKey: string,
+    inputEncoding: DigestEncoding,
+  ): Result<Buffer, EcdhComputeSecretError>;
+  computeSecret(
+    otherPublicKey: string | CryptoBytes,
+    inputEncoding: DigestEncoding | undefined,
+    outputEncoding: DigestEncoding,
+  ): Result<string, EcdhComputeSecretError>;
+}
+
+/** How a name of a certificate is matched. */
+export type CheckHostOptions = {
+  subject?: "default" | "always" | "never";
+  wildcards?: boolean;
+  partialWildcards?: boolean;
+  multiLabelWildcards?: boolean;
+  singleLabelSubdomains?: boolean;
+};
+
+/**
+ * A certificate. It is made by `X509Certificate.parse`, not by `new`: the
+ * data may be no certificate.
+ */
+export interface X509Certificate {
+  readonly subject: string;
+  readonly issuer: string;
+  readonly validFrom: string;
+  readonly validTo: string;
+  readonly validFromDate: Date;
+  readonly validToDate: Date;
+  readonly serialNumber: string;
+  readonly fingerprint: string;
+  readonly fingerprint256: string;
+  readonly fingerprint512: string;
+  readonly subjectAltName?: string;
+  readonly infoAccess?: string;
+  readonly keyUsage?: string[];
+  /** Whether it is a certificate of an authority. */
+  readonly ca: boolean;
+  /** The certificate as bytes of DER. */
+  readonly raw: Buffer;
+  readonly publicKey: KeyObject;
+
+  /** The certificate as PEM. */
+  toString(): string;
+  toJSON(): string;
+  /** The name of the certificate the host fits, if any. */
+  checkHost(name: string, options?: CheckHostOptions): string | undefined;
+  checkEmail(
+    email: string,
+    options?: { subject?: "default" | "always" | "never" },
+  ): string | undefined;
+  checkIP(ip: string): string | undefined;
+  /** Whether the other certificate issued this one. */
+  checkIssued(other: X509Certificate): boolean;
+  checkPrivateKey(
+    privateKey: KeyObject,
+  ): Result<boolean, CertificateCheckPrivateKeyError>;
+  /** Whether the certificate is signed by the key. */
+  verify(publicKey: KeyObject): Result<boolean, CertificateVerifyError>;
+}
+
+/** What `X509Certificate` has. */
+export interface X509CertificateConstructor {
+  /** Reads a certificate of PEM or DER. */
+  parse(
+    data: string | CryptoBytes,
+  ): Result<X509Certificate, ParseCertificateError>;
+}
+
+export declare const X509Certificate: X509CertificateConstructor;
+
+/**
+ * A hash to count by pieces; an error when there is no such algorithm.
+ * @example createHash("sha256").update("abc").digest("hex")
+ */
+export declare function createHash(
+  algorithm: string,
+  options?: { outputLength?: int },
+): Result<Hash, CreateHashError>;
+
+/** As `createHash`, with a secret key. */
+export declare function createHmac(
+  algorithm: string,
+  key: CryptoSecret,
+): Result<Hmac, CreateHmacError>;
+
+/**
+ * The hash of the data in one call: a text in "hex" by default, or bytes
+ * with "buffer".
+ * @example hash("sha256", "abc")
+ */
+export declare function hash(
+  algorithm: string,
+  data: CryptoData,
+  outputEncoding?: DigestEncoding,
+): Result<string, HashError>;
+export declare function hash(
+  algorithm: string,
+  data: CryptoData,
+  outputEncoding: "buffer",
+): Result<Buffer, HashError>;
+
+/** That many random bytes, fit for secrets. */
+export declare function randomBytes(size: int): Buffer;
+
+/** A random identifier of version 4. */
+export declare function randomUUID(): string;
+
+/** A random integer from `min`, 0 by default, up to `max`, not with it. */
+export declare function randomInt(max: int): int;
+export declare function randomInt(min: int, max: int): int;
+
+/** Fills bytes with random ones and gives them back. */
+export declare function randomFillSync<A extends CryptoBytes>(
+  buffer: A,
+  offset?: int,
+  size?: int,
+): A;
+
+/** Fills an array of integers with random bits and gives it back. */
+export declare function getRandomValues<A extends IntegerTypedArray>(
+  array: A,
+): A;
+
+/**
+ * Whether two rows of bytes are the same, in a time that does not depend on
+ * where they differ: for comparing secrets.
+ */
+export declare function timingSafeEqual(
+  first: CryptoBytes,
+  second: CryptoBytes,
+): boolean;
+
+/** A key of a password by PBKDF2. */
+export declare function pbkdf2Sync(
+  password: CryptoSecret,
+  salt: string | CryptoBytes,
+  iterations: int,
+  keyLength: int,
+  digest: string,
+): Result<Buffer, Pbkdf2Error>;
+
+/** A key of a key by HKDF. */
+export declare function hkdfSync(
+  digest: string,
+  inputKey: CryptoSecret,
+  salt: string | CryptoBytes,
+  info: string | CryptoBytes,
+  keyLength: int,
+): Result<ArrayBuffer, HkdfError>;
+
+/** How hard scrypt works; `cost` is `N`, `blockSize` is `r`. */
+export type ScryptOptions = {
+  N?: int;
+  r?: int;
+  p?: int;
+  maxmem?: int;
+  cost?: int;
+  blockSize?: int;
+  parallelization?: int;
+};
+
+/**
+ * A key of a password by scrypt: for keeping passwords.
+ * @example scryptSync(password, salt, 64)
+ */
+export declare function scryptSync(
+  password: CryptoSecret,
+  salt: string | CryptoBytes,
+  keyLength: int,
+  options?: ScryptOptions,
+): Result<Buffer, ScryptError>;
+
+/** What Argon2 hashes and how hard it works. */
+export type Argon2Parameters = {
+  message: string | CryptoBytes;
+  nonce: string | CryptoBytes;
+  parallelism: int;
+  tagLength: int;
+  /** In kilobytes. */
+  memory: int;
+  passes: int;
+  secret?: string | CryptoBytes;
+  associatedData?: string | CryptoBytes;
+};
+
+/** A key of a password by Argon2. */
+export declare function argon2Sync(
+  algorithm: "argon2d" | "argon2i" | "argon2id",
+  parameters: Argon2Parameters,
+): Result<Buffer, Argon2Error>;
+
+/**
+ * Something that encrypts by pieces with the key and the start value.
+ * @example createCipheriv("aes-256-gcm", key, iv)
+ */
+export declare function createCipheriv(
+  algorithm: string,
+  key: CryptoSecret,
+  iv: string | CryptoBytes,
+  options?: { authTagLength?: int },
+): Result<Cipheriv, CreateCipherError>;
+
+/** Something that decrypts by pieces with the key and the start value. */
+export declare function createDecipheriv(
+  algorithm: string,
+  key: CryptoSecret,
+  iv: string | CryptoBytes,
+  options?: { authTagLength?: int },
+): Result<Decipheriv, CreateDecipherError>;
+
+/** The names of the hashes there are. */
+export declare function getHashes(): string[];
+
+/** The names of the ciphers there are. */
+export declare function getCiphers(): string[];
+
+/** The names of the curves there are. */
+export declare function getCurves(): string[];
+
+/** A secret key of bytes, or of a text in the encoding. */
+export declare function createSecretKey(key: CryptoBytes): KeyObject;
+export declare function createSecretKey(
+  key: string,
+  encoding: BufferEncoding,
+): KeyObject;
+
+/** A key as it is written, with how to read it. */
+export type KeyInput = {
+  key: string | CryptoBytes | Json;
+  format?: "pem" | "der" | "jwk";
+  type?: "pkcs1" | "spki" | "pkcs8" | "sec1";
+  passphrase?: string | CryptoBytes;
+  encoding?: BufferEncoding;
+};
+
+/** Reads a public key: of PEM, of DER, or the public part of a private key. */
+export declare function createPublicKey(
+  key: string | CryptoBytes | KeyObject | KeyInput,
+): Result<KeyObject, CreatePublicKeyError>;
+
+/** Reads a private key of PEM or of DER. */
+export declare function createPrivateKey(
+  key: string | CryptoBytes | KeyInput,
+): Result<KeyObject, CreatePrivateKeyError>;
+
+/** The kinds of key pairs. */
+export type KeyPairType =
+  "rsa" | "rsa-pss" | "dsa" | "ec" | "ed25519" | "ed448" | "x25519" | "x448";
+
+/** What a key pair is like. */
+export interface KeyPairOptions {
+  modulusLength?: int;
+  publicExponent?: int;
+  namedCurve?: string;
+  divisorLength?: int;
+  hashAlgorithm?: string;
+  mgf1HashAlgorithm?: string;
+  saltLength?: int;
+}
+
+/** How a key of a pair is written out: as a text of PEM or bytes of DER. */
+export type KeyFormat = "pem" | "der";
+
+/** What a key written out in a format is: "pem" a text, "der" bytes. */
+export type WrittenKey<F> = F extends "pem" ? string : Buffer;
+
+/** How the public key of a pair is written out. */
+export type PublicKeyEncoding<F> = { type: "pkcs1" | "spki"; format: F };
+
+/** How the private key of a pair is written out, and what protects it. */
+export type PrivateKeyEncoding<F> = {
+  type: "pkcs1" | "pkcs8" | "sec1";
+  format: F;
+  cipher?: string;
+  passphrase?: string | CryptoBytes;
+};
+
+export interface PublicWrittenOptions<P> extends KeyPairOptions {
+  publicKeyEncoding: PublicKeyEncoding<P>;
+}
+
+export interface PrivateWrittenOptions<Q> extends KeyPairOptions {
+  privateKeyEncoding: PrivateKeyEncoding<Q>;
+}
+
+export interface BothWrittenOptions<P, Q> extends KeyPairOptions {
+  publicKeyEncoding: PublicKeyEncoding<P>;
+  privateKeyEncoding: PrivateKeyEncoding<Q>;
+}
+
+/** A pair of keys: each a `KeyObject`, or written out as its encoding says. */
+export type KeyPair<Public, Private> = {
+  publicKey: Public;
+  privateKey: Private;
+};
+
+/**
+ * Makes a pair of keys. With an encoding a key comes written out, and the
+ * encoding is written in the call.
+ * @example generateKeyPairSync("ed25519")
+ */
+export declare function generateKeyPairSync<
+  P extends KeyFormat,
+  Q extends KeyFormat,
+>(
+  type: KeyPairType,
+  options: BothWrittenOptions<P, Q>,
+): Result<KeyPair<WrittenKey<P>, WrittenKey<Q>>, GenerateKeyPairError>;
+export declare function generateKeyPairSync<P extends KeyFormat>(
+  type: KeyPairType,
+  options: PublicWrittenOptions<P>,
+): Result<KeyPair<WrittenKey<P>, KeyObject>, GenerateKeyPairError>;
+export declare function generateKeyPairSync<Q extends KeyFormat>(
+  type: KeyPairType,
+  options: PrivateWrittenOptions<Q>,
+): Result<KeyPair<KeyObject, WrittenKey<Q>>, GenerateKeyPairError>;
+export declare function generateKeyPairSync(
+  type: KeyPairType,
+  options?: KeyPairOptions,
+): Result<KeyPair<KeyObject, KeyObject>, GenerateKeyPairError>;
+
+/** Makes a random secret key of that many bits. */
+export declare function generateKeySync(
+  type: "hmac" | "aes",
+  options: { length: int },
+): KeyObject;
+
+/**
+ * The signature of the data by a private key. The algorithm is the hash;
+ * `undefined` for keys that have their own, such as Ed25519.
+ */
+export declare function sign(
+  algorithm: string | undefined,
+  data: AnyTypedArray | DataView,
+  key: KeyObject | string | CryptoBytes | SignKey,
+): Result<Buffer, SignError>;
+
+/** Whether the signature is of this data by this key. */
+export declare function verify(
+  algorithm: string | undefined,
+  data: AnyTypedArray | DataView,
+  key: KeyObject | string | CryptoBytes | SignKey,
+  signature: AnyTypedArray | DataView,
+): Result<boolean, VerifyError>;
+
+/** Something that signs data added by pieces. */
+export declare function createSign(
+  algorithm: string,
+): Result<Sign, CreateSignError>;
+
+/** Something that checks a signature of data added by pieces. */
+export declare function createVerify(
+  algorithm: string,
+): Result<Verify, CreateVerifyError>;
+
+/** An exchange of keys on the curve. */
+export declare function createECDH(
+  curve: string,
+): Result<ECDH, CreateEcdhError>;
+
+/** The secret of one's private key and the other's public key. */
+export declare function diffieHellman(options: {
+  privateKey: KeyObject;
+  publicKey: KeyObject;
+}): Result<Buffer, DiffieHellmanError>;
+
+/** What a prime is like; there is no `bigint`, the prime comes as bytes. */
+export type PrimeOptions = {
+  add?: CryptoBytes;
+  rem?: CryptoBytes;
+  safe?: boolean;
+};
+
+/** A random prime of that many bits, as bytes. */
+export declare function generatePrimeSync(
+  size: int,
+  options?: PrimeOptions,
+): Result<ArrayBuffer, GeneratePrimeError>;
+
+/** Whether the number written as bytes is a prime. */
+export declare function checkPrimeSync(
+  candidate: CryptoBytes,
+  options?: { checks?: int },
+): Result<boolean, CheckPrimeError>;
+
+/** As `pbkdf2Sync`, without stopping the program while it is counted. */
+export declare function pbkdf2(
+  password: CryptoSecret,
+  salt: string | CryptoBytes,
+  iterations: int,
+  keyLength: int,
+  digest: string,
+): Promise<Result<Buffer, Pbkdf2Error>>;
+
+/** As `scryptSync`, without stopping the program. */
+export declare function scrypt(
+  password: CryptoSecret,
+  salt: string | CryptoBytes,
+  keyLength: int,
+  options?: ScryptOptions,
+): Promise<Result<Buffer, ScryptError>>;
+
+/** As `argon2Sync`, without stopping the program. */
+export declare function argon2(
+  algorithm: "argon2d" | "argon2i" | "argon2id",
+  parameters: Argon2Parameters,
+): Promise<Result<Buffer, Argon2Error>>;
+
+/** As `hkdfSync`, without stopping the program. */
+export declare function hkdf(
+  digest: string,
+  inputKey: CryptoSecret,
+  salt: string | CryptoBytes,
+  info: string | CryptoBytes,
+  keyLength: int,
+): Promise<Result<ArrayBuffer, HkdfError>>;
+
+/** As `randomFillSync`, without stopping the program. */
+export declare function randomFill<A extends CryptoBytes>(
+  buffer: A,
+  offset?: int,
+  size?: int,
+): Promise<A>;
+
+/** As `generateKeyPairSync`, without stopping the program. */
+export declare function generateKeyPair<
+  P extends KeyFormat,
+  Q extends KeyFormat,
+>(
+  type: KeyPairType,
+  options: BothWrittenOptions<P, Q>,
+): Promise<Result<KeyPair<WrittenKey<P>, WrittenKey<Q>>, GenerateKeyPairError>>;
+export declare function generateKeyPair<P extends KeyFormat>(
+  type: KeyPairType,
+  options: PublicWrittenOptions<P>,
+): Promise<Result<KeyPair<WrittenKey<P>, KeyObject>, GenerateKeyPairError>>;
+export declare function generateKeyPair<Q extends KeyFormat>(
+  type: KeyPairType,
+  options: PrivateWrittenOptions<Q>,
+): Promise<Result<KeyPair<KeyObject, WrittenKey<Q>>, GenerateKeyPairError>>;
+export declare function generateKeyPair(
+  type: KeyPairType,
+  options?: KeyPairOptions,
+): Promise<Result<KeyPair<KeyObject, KeyObject>, GenerateKeyPairError>>;
+
+/** As `generateKeySync`, without stopping the program. */
+export declare function generateKey(
+  type: "hmac" | "aes",
+  options: { length: int },
+): Promise<KeyObject>;
+
+/** As `generatePrimeSync`, without stopping the program. */
+export declare function generatePrime(
+  size: int,
+  options?: PrimeOptions,
+): Promise<Result<ArrayBuffer, GeneratePrimeError>>;
+
+/** As `checkPrimeSync`, without stopping the program. */
+export declare function checkPrime(
+  candidate: CryptoBytes,
+  options?: { checks?: int },
+): Promise<Result<boolean, CheckPrimeError>>;

@@ -3,6 +3,10 @@ import "./partial/loader.partial.library.tz";
 import { basename, dirname } from "node:path";
 import { SourceError } from "../../diagnostic/types/message.types.tz";
 import {
+  ModuleName,
+  ModulePath,
+} from "../../program/ast/types/ast.types.modules.tz";
+import {
   Stmt,
   StmtKind,
 } from "../../program/ast/types/ast.types.statements.tz";
@@ -58,6 +62,7 @@ export class Loader {
       this.visit(entry);
     }
 
+    const reached = this.opened.length;
     const globalIds = this.loadGlobals();
     const parts = new PartialClasses(this.order);
 
@@ -69,10 +74,13 @@ export class Loader {
     modules.sort((first, second) => first.id - second.id);
 
     const globals = order.filter((module) => globalIds.includes(module.id));
+    const ambient = order.filter(
+      (module) => module.id >= reached || globalIds.includes(module.id),
+    );
     const builtins = this.builtins();
 
     return {
-      program: { modules, order, globals, builtins },
+      program: { modules, order, globals, ambient, builtins },
       unreadable: this.unreadable,
     };
   }
@@ -82,17 +90,20 @@ export class Loader {
 
     const requests = this.requests(module);
 
-    for (const request of requests) {
-      const link = this.linked(module, request);
-
-      module.links.push(link);
-      if (link.kind != LinkKind.Module) {
+    for (let index = 0; index < requests.length; index++) {
+      const request = requests[index];
+      const target = this.linkedTarget(request);
+      if (target == undefined) {
         continue;
       }
-
-      const target = this.opened[link.target];
-      if (target != undefined && target.state == ModuleState.New) {
+      if (target.state == ModuleState.New) {
         this.visit(target);
+      }
+
+      const asked = this.askedRequests(target, request.names);
+
+      for (const one of asked) {
+        requests.push(one);
       }
     }
 
@@ -100,23 +111,50 @@ export class Loader {
     this.order.push(module);
   }
 
+  private linkedTarget(request: Request): OpenModule | undefined {
+    const link = this.linked(request);
+
+    request.owner.links.push(link);
+    if (link.kind != LinkKind.Module) {
+      return undefined;
+    }
+
+    return this.opened[link.target];
+  }
+
   private requests(module: OpenModule): Request[] {
     const file = module.parsed.file;
     const requests: Request[] = [];
 
     for (const decl of file.imports) {
-      requests.push({ from: decl.from, isImplicit: false });
+      const names = this.askedNames(decl.names);
+
+      requests.push({
+        owner: module,
+        from: decl.from,
+        names,
+        isImplicit: false,
+      });
     }
 
     for (const decl of file.exports) {
       const from = decl.from;
-      if (from != undefined) {
-        requests.push({ from, isImplicit: false });
+      if (from != undefined && !module.isDeclarationOnly) {
+        const names = this.askedNames(decl.names);
+
+        requests.push({ owner: module, from, names, isImplicit: false });
       }
     }
 
     for (const decl of module.implicit) {
-      requests.push({ from: decl.from, isImplicit: true });
+      const names = this.askedNames(decl.names);
+
+      requests.push({
+        owner: module,
+        from: decl.from,
+        names,
+        isImplicit: true,
+      });
     }
 
     requests.sort((first, second) => first.from.loc - second.from.loc);
@@ -124,7 +162,45 @@ export class Loader {
     return requests;
   }
 
-  private linked(module: OpenModule, request: Request): ModuleLink {
+  private askedRequests(module: OpenModule, names: string[]): Request[] {
+    const requests: Request[] = [];
+
+    if (!module.isDeclarationOnly) {
+      return requests;
+    }
+
+    for (const decl of module.parsed.file.exports) {
+      const from = decl.from;
+      if (from == undefined || this.isLinked(module, from)) {
+        continue;
+      }
+
+      const asked = decl.names.filter((name) => names.includes(name.as));
+      if (asked.length > 0) {
+        const theirs = this.askedNames(asked);
+
+        requests.push({
+          owner: module,
+          from,
+          names: theirs,
+          isImplicit: false,
+        });
+      }
+    }
+
+    return requests;
+  }
+
+  private askedNames(names: ModuleName[]): string[] {
+    return names.map((name) => name.name);
+  }
+
+  private isLinked(module: OpenModule, from: ModulePath): boolean {
+    return module.links.some((link) => link.from.loc == from.loc);
+  }
+
+  private linked(request: Request): ModuleLink {
+    const module = request.owner;
     const from = request.from;
 
     if (request.isImplicit) {
@@ -148,9 +224,6 @@ export class Loader {
       });
 
       return { kind: LinkKind.Missing, from };
-    }
-    if (resolution.kind == ResolutionKind.Builtin) {
-      return { kind: LinkKind.Builtin, from };
     }
 
     return { kind: LinkKind.Package, from };

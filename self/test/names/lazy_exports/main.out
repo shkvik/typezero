@@ -1,0 +1,11 @@
+node:process (library)
+tz:fs/errors (library)
+node:fs/promises (library)
+node:fs (library)
+node:buffer (library)
+main.tz
+  declared failed
+  import argv -> node:process:argv
+  import ReadFileError -> tz:fs/errors:ReadFileError
+  import readFileSync -> node:fs:readFileSync
+  import Buffer -> tz:global/buffer:Buffer

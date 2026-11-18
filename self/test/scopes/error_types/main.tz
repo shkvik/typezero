@@ -1,0 +1,15 @@
+// The error types of the built-in modules are no global names: a module gives
+// its own, and a program imports the one it names. A type that is not
+// imported is not found.
+import { ReadFileError, readFileSync } from "node:fs";
+
+function failure(path: string): ReadFileError | WriteFileError | undefined {
+  const text = readFileSync(path, "utf8");
+  if (text.isErr()) {
+    return text.error;
+  }
+
+  return undefined;
+}
+
+console.log(failure("a"));

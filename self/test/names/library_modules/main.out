@@ -1,0 +1,36 @@
+tz:fs/errors (library)
+node:fs/promises (library)
+node:fs (library)
+tz:fs (library)
+tz:child_process/errors (library)
+node:child_process (library)
+tz:crypto/errors (library)
+node:crypto (library)
+tz:crypto (library)
+tz:string (library)
+tz:intrinsics (library)
+tz:web (library)
+node:events (library)
+node:string_decoder (library)
+node:stream (library)
+node:internal/fs/streams (library)
+node:readline (library)
+node:readline/promises (library)
+main.tz
+  declared name failed other
+  import ReadFileError -> tz:fs/errors:ReadFileError
+  import Stats -> node:fs:Stats
+  import readFileSync -> node:fs:readFileSync
+  import StatusError -> tz:fs/errors:StatusError
+  import readFile -> node:fs/promises:readFile
+  import ReplaceError -> tz:fs/errors:ReplaceError
+  import replaceSync -> tz:fs:replaceSync
+  import ExecTextError -> tz:child_process/errors:ExecTextError
+  import execSync -> node:child_process:execSync
+  import HashError -> tz:crypto/errors:HashError
+  import KeyObject -> node:crypto:KeyObject
+  import createHash -> node:crypto:createHash
+  import randomBytesAsync -> tz:crypto:randomBytesAsync
+  import cstring -> tz:string:cstring
+  import createInterface -> node:readline:createInterface
+  import Interface -> node:readline/promises:Interface

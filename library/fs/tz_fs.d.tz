@@ -1,0 +1,20 @@
+import { ReplaceError } from "tz:fs/errors";
+
+export { ReplaceError };
+
+/**
+ * Moves a file over another one, replacing it in one step: a reader sees
+ * the old file or the new one, never a half. `renameSync` of "node:fs" does
+ * not replace a file that is there.
+ * @example replaceSync("config.tmp", "config.json")
+ */
+export declare function replaceSync(
+  from: string,
+  to: string,
+): Result<void, ReplaceError>;
+
+/** As `replaceSync`, without stopping the program while it is done. */
+export declare function replace(
+  from: string,
+  to: string,
+): Promise<Result<void, ReplaceError>>;

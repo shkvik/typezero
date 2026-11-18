@@ -1,0 +1,314 @@
+import {
+  ExecBytesError,
+  ExecFileBytesError,
+  ExecFileShellBytesError,
+  ExecFileShellTextError,
+  ExecFileTextError,
+  ExecTextError,
+  SpawnBytesError,
+  SpawnBytesResult,
+  SpawnShellBytesError,
+  SpawnShellTextError,
+  SpawnTextError,
+  SpawnTextResult,
+} from "tz:child_process/errors";
+
+export {
+  ExecBytesError,
+  ExecFileBytesError,
+  ExecFileShellBytesError,
+  ExecFileShellTextError,
+  ExecFileTextError,
+  ExecTextError,
+  SpawnBytesError,
+  SpawnBytesResult,
+  SpawnShellBytesError,
+  SpawnShellTextError,
+  SpawnTextError,
+  SpawnTextResult,
+};
+
+/**
+ * Where a standard stream of the program goes: "pipe" to this program (it
+ * gets the output and gives the input), "inherit" to the same place as this
+ * program's own, "ignore" to nowhere, or the number of an open file.
+ * "overlapped" is "pipe".
+ */
+export type ChildStdio = "pipe" | "overlapped" | "inherit" | "ignore" | int;
+
+/** The standard streams with the output going to this program. */
+export type PipedStdio =
+  | "pipe"
+  | "overlapped"
+  | [ChildStdio, "pipe" | "overlapped"]
+  | [ChildStdio, "pipe" | "overlapped", ChildStdio];
+
+/** The standard streams, one for all or one for each: input, output, errors. */
+export type AnyStdio = ChildStdio | ChildStdio[];
+
+/**
+ * What every function of this module takes. The options that decide a type,
+ * `encoding`, `shell` and `stdio`, are written in the call.
+ */
+export interface ChildOptions {
+  /** The folder the program runs in. */
+  cwd?: string;
+  /** The variables of the environment; those of this program by default. */
+  env?: Record<string, string>;
+  /** What the program reads from its standard input. */
+  input?: string | Uint8Array;
+  /** The milliseconds after which the program is stopped. */
+  timeout?: int | double;
+  /** The signal it is stopped with, "SIGTERM" by default. */
+  killSignal?: string | int;
+  /** How many bytes of output are kept, 1 MB by default; more is an error. */
+  maxBuffer?: int | double;
+  windowsHide?: boolean;
+  windowsVerbatimArguments?: boolean;
+  detached?: boolean;
+  /** The name the program sees as its own. */
+  argv0?: string;
+  /** The number of the user; on Linux and macOS only. */
+  uid?: int;
+  /** The number of the group; on Linux and macOS only. */
+  gid?: int;
+}
+
+export interface ExecTextOptions extends ChildOptions {
+  shell?: string;
+  encoding: BufferEncoding;
+  stdio?: PipedStdio;
+}
+
+export interface ExecTextFreeOptions extends ChildOptions {
+  shell?: string;
+  encoding: BufferEncoding;
+  stdio: AnyStdio;
+}
+
+export interface ExecBytesOptions extends ChildOptions {
+  shell?: string;
+  encoding?: "buffer";
+  stdio?: PipedStdio;
+}
+
+export interface ExecBytesFreeOptions extends ChildOptions {
+  shell?: string;
+  encoding?: "buffer";
+  stdio: AnyStdio;
+}
+
+/**
+ * Runs a command through the shell, `cmd.exe` on Windows and `/bin/sh`
+ * elsewhere, waits for it and gives what it printed: bytes, or a text when
+ * an encoding is given. An exit code other than 0 is an error. The command
+ * is one text, so data put into it is read by the shell: pass data as
+ * arguments of `execFileSync`. `shell` names another shell.
+ * @example execSync("git rev-parse HEAD", { encoding: "utf8" })
+ */
+export declare function execSync(
+  command: string,
+  options: ExecTextOptions,
+): Result<string, ExecTextError>;
+export declare function execSync(
+  command: string,
+  options?: ExecBytesOptions,
+): Result<Buffer, ExecBytesError>;
+export declare function execSync(
+  command: string,
+  options: ExecTextFreeOptions,
+): Result<string | undefined, ExecTextError>;
+export declare function execSync(
+  command: string,
+  options: ExecBytesFreeOptions,
+): Result<Buffer | undefined, ExecBytesError>;
+
+export interface ExecFileShellTextOptions extends ChildOptions {
+  shell: true | string;
+  encoding: BufferEncoding;
+  stdio?: PipedStdio;
+}
+
+export interface ExecFileShellTextFreeOptions extends ChildOptions {
+  shell: true | string;
+  encoding: BufferEncoding;
+  stdio: AnyStdio;
+}
+
+export interface ExecFileShellBytesOptions extends ChildOptions {
+  shell: true | string;
+  encoding?: "buffer";
+  stdio?: PipedStdio;
+}
+
+export interface ExecFileShellBytesFreeOptions extends ChildOptions {
+  shell: true | string;
+  encoding?: "buffer";
+  stdio: AnyStdio;
+}
+
+export interface ExecFileTextOptions extends ChildOptions {
+  shell?: false;
+  encoding: BufferEncoding;
+  stdio?: PipedStdio;
+}
+
+export interface ExecFileTextFreeOptions extends ChildOptions {
+  shell?: false;
+  encoding: BufferEncoding;
+  stdio: AnyStdio;
+}
+
+export interface ExecFileBytesOptions extends ChildOptions {
+  shell?: false;
+  encoding?: "buffer";
+  stdio?: PipedStdio;
+}
+
+export interface ExecFileBytesFreeOptions extends ChildOptions {
+  shell?: false;
+  encoding?: "buffer";
+  stdio: AnyStdio;
+}
+
+/**
+ * Runs a program with arguments, without a shell, waits for it and gives
+ * what it printed: bytes, or a text when an encoding is given. An exit code
+ * other than 0 is an error. An argument goes to the program as it is. With
+ * `shell` the program runs through a shell, and the errors say so.
+ * @example execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" })
+ */
+export declare function execFileSync(
+  file: string,
+  args: string[],
+  options: ExecFileShellTextOptions,
+): Result<string, ExecFileShellTextError>;
+export declare function execFileSync(
+  file: string,
+  options: ExecFileShellTextOptions,
+): Result<string, ExecFileShellTextError>;
+export declare function execFileSync(
+  file: string,
+  args: string[],
+  options: ExecFileShellBytesOptions,
+): Result<Buffer, ExecFileShellBytesError>;
+export declare function execFileSync(
+  file: string,
+  options: ExecFileShellBytesOptions,
+): Result<Buffer, ExecFileShellBytesError>;
+export declare function execFileSync(
+  file: string,
+  args: string[],
+  options: ExecFileTextOptions,
+): Result<string, ExecFileTextError>;
+export declare function execFileSync(
+  file: string,
+  options: ExecFileTextOptions,
+): Result<string, ExecFileTextError>;
+export declare function execFileSync(
+  file: string,
+  args: string[],
+  options?: ExecFileBytesOptions,
+): Result<Buffer, ExecFileBytesError>;
+export declare function execFileSync(
+  file: string,
+): Result<Buffer, ExecFileBytesError>;
+export declare function execFileSync(
+  file: string,
+  args: string[],
+  options: ExecFileShellTextFreeOptions,
+): Result<string | undefined, ExecFileShellTextError>;
+export declare function execFileSync(
+  file: string,
+  options: ExecFileShellTextFreeOptions,
+): Result<string | undefined, ExecFileShellTextError>;
+export declare function execFileSync(
+  file: string,
+  args: string[],
+  options: ExecFileShellBytesFreeOptions,
+): Result<Buffer | undefined, ExecFileShellBytesError>;
+export declare function execFileSync(
+  file: string,
+  options: ExecFileShellBytesFreeOptions,
+): Result<Buffer | undefined, ExecFileShellBytesError>;
+export declare function execFileSync(
+  file: string,
+  args: string[],
+  options: ExecFileTextFreeOptions,
+): Result<string | undefined, ExecFileTextError>;
+export declare function execFileSync(
+  file: string,
+  options: ExecFileTextFreeOptions,
+): Result<string | undefined, ExecFileTextError>;
+export declare function execFileSync(
+  file: string,
+  args: string[],
+  options: ExecFileBytesFreeOptions,
+): Result<Buffer | undefined, ExecFileBytesError>;
+export declare function execFileSync(
+  file: string,
+  options: ExecFileBytesFreeOptions,
+): Result<Buffer | undefined, ExecFileBytesError>;
+
+export interface SpawnShellTextOptions extends ChildOptions {
+  shell: true | string;
+  encoding: BufferEncoding;
+  stdio?: AnyStdio;
+}
+
+export interface SpawnShellBytesOptions extends ChildOptions {
+  shell: true | string;
+  encoding?: "buffer";
+  stdio?: AnyStdio;
+}
+
+export interface SpawnTextOptions extends ChildOptions {
+  shell?: false;
+  encoding: BufferEncoding;
+  stdio?: AnyStdio;
+}
+
+export interface SpawnBytesOptions extends ChildOptions {
+  shell?: false;
+  encoding?: "buffer";
+  stdio?: AnyStdio;
+}
+
+/**
+ * Runs a program with arguments and waits for it. An exit code other than 0
+ * is no error here: what comes is the code, the signal and what the program
+ * printed, bytes or texts by the encoding.
+ * @example const done = spawnSync("git", ["status"], { encoding: "utf8" })
+ */
+export declare function spawnSync(
+  command: string,
+  args: string[],
+  options: SpawnShellTextOptions,
+): Result<SpawnTextResult, SpawnShellTextError>;
+export declare function spawnSync(
+  command: string,
+  options: SpawnShellTextOptions,
+): Result<SpawnTextResult, SpawnShellTextError>;
+export declare function spawnSync(
+  command: string,
+  args: string[],
+  options: SpawnShellBytesOptions,
+): Result<SpawnBytesResult, SpawnShellBytesError>;
+export declare function spawnSync(
+  command: string,
+  options: SpawnShellBytesOptions,
+): Result<SpawnBytesResult, SpawnShellBytesError>;
+export declare function spawnSync(
+  command: string,
+  args: string[],
+  options: SpawnTextOptions,
+): Result<SpawnTextResult, SpawnTextError>;
+export declare function spawnSync(
+  command: string,
+  options: SpawnTextOptions,
+): Result<SpawnTextResult, SpawnTextError>;
+export declare function spawnSync(
+  command: string,
+  args?: string[],
+  options?: SpawnBytesOptions,
+): Result<SpawnBytesResult, SpawnBytesError>;

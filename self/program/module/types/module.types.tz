@@ -33,7 +33,6 @@ export type ParsedDeclaration = {
 
 export enum LinkKind {
   Module,
-  Builtin,
   Package,
   Json,
   Missing,
@@ -46,8 +45,7 @@ export type ModuleLink =
       readonly target: int;
     }
   | {
-      readonly kind:
-        LinkKind.Builtin | LinkKind.Package | LinkKind.Json | LinkKind.Missing;
+      readonly kind: LinkKind.Package | LinkKind.Json | LinkKind.Missing;
       readonly from: ModulePath;
     };
 
@@ -68,9 +66,6 @@ export type Module = {
 export enum BuiltinText {
   Prelude,
   Iterate,
-  FileSystemErrors,
-  CryptoErrors,
-  ChildProcessErrors,
 }
 
 export type BuiltinFile = {
@@ -82,5 +77,6 @@ export type Program = {
   readonly modules: Module[];
   readonly order: Module[];
   readonly globals: Module[];
+  readonly ambient: Module[];
   readonly builtins: BuiltinFile[];
 };

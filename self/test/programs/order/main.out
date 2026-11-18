@@ -1,4 +1,4 @@
-modules 7
+modules 10
 shared.tz
   declaration shared.d.tz
 a.tz
@@ -6,6 +6,9 @@ a.tz
 b.tz
   "./shared.tz" 80 -> shared.tz
   "./main.tz" 116 -> main.tz
+tz:fs/errors (library)
+node:fs/promises (library)
+node:fs (library)
 lib/index.tz
   "../shared.tz" 21 -> shared.tz
 shape.partial.area.tz
@@ -16,7 +19,7 @@ shape.tz
 main.tz
   "./a.tz" 230 -> a.tz
   "./b" 263 -> b.tz
-  "node:fs" 299 -> builtin
+  "node:fs" 299 -> node:fs
   "./lib" 333 -> lib/index.tz
   "left-pad" 362 -> package
   "./settings.json" 395 -> json

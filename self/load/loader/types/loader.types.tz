@@ -34,7 +34,9 @@ export type OpenModule = {
 };
 
 export type Request = {
+  readonly owner: OpenModule;
   readonly from: ModulePath;
+  readonly names: string[];
   readonly isImplicit: boolean;
 };
 

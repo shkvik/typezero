@@ -81,10 +81,6 @@ export class ModuleResolver {
   }
 
   private builtin(spec: string): Resolution {
-    if (kBuiltinModules.isSupported(spec)) {
-      return { kind: ResolutionKind.Builtin };
-    }
-
     const code = this.builtinProblem(spec);
 
     return this.problem(code, { word: spec });

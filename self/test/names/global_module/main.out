@@ -1,12 +1,15 @@
 node:buffer (library)
+node:process (library)
 tz:intrinsics (library)
 tz:web (library)
 node:events (library)
 node:string_decoder (library)
 node:stream (library)
+tz:fs/errors (library)
+node:fs/promises (library)
+node:fs (library)
 node:internal/fs/streams (library)
 tz:process/streams (library)
-node:process (library)
 main.tz
   declared bytes
   import NodeBuffer -> tz:global/buffer:Buffer

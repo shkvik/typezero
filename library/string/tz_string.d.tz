@@ -1,0 +1,11 @@
+/**
+ * A text for a function of C: bytes of UTF-8 with a zero at the end and no
+ * zero inside. A pointer to its bytes goes to C without a copy. A text
+ * written in the code becomes one where a `cstring` is expected, checked
+ * when the program is built; a `string` becomes one by `toCString()`, which
+ * gives `undefined` when it holds a zero.
+ */
+export interface cstring {
+  /** The same text as a `string`. */
+  toString(): string;
+}

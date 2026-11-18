@@ -37,8 +37,8 @@ export class LoadCommand {
   }
 
   private printProgram(program: Program): void {
-    const globals = program.globals;
-    const modules = program.order.filter((one) => !globals.includes(one));
+    const ambient = program.ambient;
+    const modules = program.order.filter((one) => !ambient.includes(one));
 
     console.log(`modules ${modules.length}`);
 
@@ -81,8 +81,6 @@ export class LoadCommand {
     switch (link.kind) {
       case LinkKind.Module:
         return this.moduleName(program, link.target);
-      case LinkKind.Builtin:
-        return "builtin";
       case LinkKind.Package:
         return "package";
       case LinkKind.Json:

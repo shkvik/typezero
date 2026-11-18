@@ -1,0 +1,12 @@
+main.tz:5:46: error TZ2106: 'node:fs' has no export named 'FileHandle'
+import { ReadFileError, Stats, readFileSync, FileHandle } from "node:fs";
+                                             ^
+main.tz:6:33: error TZ2106: 'node:fs/promises' has no export named 'open'
+import { StatusError, readFile, open } from "node:fs/promises";
+                                ^
+main.tz:8:35: error TZ2106: 'node:child_process' has no export named 'spawn'
+import { ExecTextError, execSync, spawn } from "node:child_process";
+                                  ^
+main.tz:9:44: error TZ2106: 'node:crypto' has no export named 'webcrypto'
+import { HashError, KeyObject, createHash, webcrypto } from "node:crypto";
+                                           ^

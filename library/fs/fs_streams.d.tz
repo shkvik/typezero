@@ -1,0 +1,31 @@
+import {
+  ReadStream,
+  ReadStreamOptions,
+  WriteStream,
+  WriteStreamOptions,
+} from "node:internal/fs/streams";
+
+/**
+ * A stream that reads a file by pieces: Buffers, or texts when an encoding
+ * is given, and then it is a `ReadStream<string>`. `start` and `end` are the
+ * bytes to read from and up to, `highWaterMark` the size of a piece.
+ * @example for await (const piece of createReadStream("big.log")) { }
+ */
+export declare function createReadStream(
+  path: string,
+  options?: ReadStreamOptions,
+): ReadStream;
+export declare function createReadStream(
+  path: string,
+  encoding: BufferEncoding,
+): ReadStream<string>;
+
+/**
+ * A stream that writes a file by pieces. With a flag that does not touch a
+ * file that is there, such as "wx", the stream is a `WriteNewStream`, whose
+ * errors say so.
+ */
+export declare function createWriteStream(
+  path: string,
+  options?: BufferEncoding | WriteStreamOptions,
+): WriteStream;

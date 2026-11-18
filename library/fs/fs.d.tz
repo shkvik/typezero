@@ -1,0 +1,435 @@
+import {
+  AccessError,
+  AppendFileError,
+  AppendNewFileError,
+  ChangeModeError,
+  CopyFileError,
+  ForceRemoveError,
+  LinkStatusError,
+  LinkStatusIfExistsError,
+  MakeDirectoryError,
+  MakeTemporaryDirectoryError,
+  ReadDirectoryError,
+  ReadFileError,
+  ReadStreamError,
+  ReadStreamErrorBusy,
+  ReadStreamErrorInvalidRange,
+  ReadStreamErrorNotFound,
+  ReadStreamErrorPath,
+  ReadStreamErrorPermission,
+  ReadStreamErrorSystem,
+  ReadStreamErrorWrongType,
+  RealPathError,
+  RemoveDirectoryError,
+  RemoveError,
+  RenameError,
+  StatusError,
+  StatusIfExistsError,
+  TruncateError,
+  UnlinkError,
+  WriteFileError,
+  WriteNewFileError,
+  WriteNewStreamError,
+  WriteNewStreamErrorBusy,
+  WriteNewStreamErrorExists,
+  WriteNewStreamErrorFull,
+  WriteNewStreamErrorInvalidRange,
+  WriteNewStreamErrorNotFound,
+  WriteNewStreamErrorPath,
+  WriteNewStreamErrorPermission,
+  WriteNewStreamErrorSystem,
+  WriteNewStreamErrorWrongType,
+  WriteStreamError,
+  WriteStreamErrorBusy,
+  WriteStreamErrorFull,
+  WriteStreamErrorInvalidRange,
+  WriteStreamErrorNotFound,
+  WriteStreamErrorPath,
+  WriteStreamErrorPermission,
+  WriteStreamErrorSystem,
+  WriteStreamErrorWrongType,
+} from "tz:fs/errors";
+import { FsPromises } from "node:fs/promises";
+
+export {
+  AccessError,
+  AppendFileError,
+  AppendNewFileError,
+  ChangeModeError,
+  CopyFileError,
+  ForceRemoveError,
+  LinkStatusError,
+  LinkStatusIfExistsError,
+  MakeDirectoryError,
+  MakeTemporaryDirectoryError,
+  ReadDirectoryError,
+  ReadFileError,
+  ReadStreamError,
+  ReadStreamErrorBusy,
+  ReadStreamErrorInvalidRange,
+  ReadStreamErrorNotFound,
+  ReadStreamErrorPath,
+  ReadStreamErrorPermission,
+  ReadStreamErrorSystem,
+  ReadStreamErrorWrongType,
+  RealPathError,
+  RemoveDirectoryError,
+  RemoveError,
+  RenameError,
+  StatusError,
+  StatusIfExistsError,
+  TruncateError,
+  UnlinkError,
+  WriteFileError,
+  WriteNewFileError,
+  WriteNewStreamError,
+  WriteNewStreamErrorBusy,
+  WriteNewStreamErrorExists,
+  WriteNewStreamErrorFull,
+  WriteNewStreamErrorInvalidRange,
+  WriteNewStreamErrorNotFound,
+  WriteNewStreamErrorPath,
+  WriteNewStreamErrorPermission,
+  WriteNewStreamErrorSystem,
+  WriteNewStreamErrorWrongType,
+  WriteStreamError,
+  WriteStreamErrorBusy,
+  WriteStreamErrorFull,
+  WriteStreamErrorInvalidRange,
+  WriteStreamErrorNotFound,
+  WriteStreamErrorPath,
+  WriteStreamErrorPermission,
+  WriteStreamErrorSystem,
+  WriteStreamErrorWrongType,
+};
+export { createReadStream, createWriteStream } from "tz:fs/streams";
+export {
+  ReadStream,
+  WriteNewStream,
+  WriteStream,
+} from "node:internal/fs/streams";
+
+/** A path of a file, or the number of an open file. */
+export type FilePath = string | int;
+
+/** What is written into a file: a text or bytes. */
+export type FileData = string | AnyTypedArray | DataView;
+
+/** A flag that makes a new file and fails when it is there. */
+export type ExclusiveWriteFlag = "wx" | "xw" | "wx+" | "xw+";
+
+/** A flag that adds at the end of a file. */
+export type AppendFlag = "a" | "a+" | "as" | "sa" | "as+" | "sa+";
+
+/** A flag that adds at the end of a new file and fails when it is there. */
+export type ExclusiveAppendFlag = "ax" | "xa" | "ax+" | "xa+";
+
+/** A flag that writes from the start of a file. */
+export type WriteFlag = "w" | "w+" | "r+" | "rs+" | "sr+";
+
+/**
+ * How a file is opened, as in node: "r" to read, "w" to write anew, "a" to
+ * add at the end, "+" for both reading and writing, "x" to fail when the file
+ * is there, "s" for writes that wait for the disk.
+ */
+export type OpenFlag =
+  | "r"
+  | "rs"
+  | "sr"
+  | WriteFlag
+  | ExclusiveWriteFlag
+  | AppendFlag
+  | ExclusiveAppendFlag;
+
+/** How a file is written: the encoding of a text, the permissions, the flag. */
+export type FileOptions = {
+  encoding?: BufferEncoding;
+  mode?: int;
+  flag?: OpenFlag;
+};
+
+/** `FileOptions` with a flag of one kind, which says what the error is. */
+export type WriteFileOptions<F> = {
+  flag: F;
+  encoding?: BufferEncoding;
+  mode?: int;
+};
+
+/**
+ * What is at a path. It is made only by the functions of this module. The
+ * times with `Ms` are milliseconds since the start of 1970, the others the
+ * same moments as dates.
+ */
+export interface Stats {
+  readonly dev: int;
+  /** The kind and the permissions as bits. */
+  readonly mode: int;
+  readonly nlink: int;
+  readonly uid: int;
+  readonly gid: int;
+  readonly rdev: int;
+  readonly blksize: int;
+  readonly ino: int;
+  /** The length in bytes. */
+  readonly size: int;
+  readonly blocks: int;
+  /** When it was last read. */
+  readonly atimeMs: double;
+  /** When what it holds was last changed. */
+  readonly mtimeMs: double;
+  /** When its name or permissions were last changed. */
+  readonly ctimeMs: double;
+  /** When it was made. */
+  readonly birthtimeMs: double;
+  readonly atime: Date;
+  readonly mtime: Date;
+  readonly ctime: Date;
+  readonly birthtime: Date;
+
+  isFile(): boolean;
+  isDirectory(): boolean;
+  isSymbolicLink(): boolean;
+  isFIFO(): boolean;
+  isSocket(): boolean;
+  isBlockDevice(): boolean;
+  isCharacterDevice(): boolean;
+}
+
+/** `Stats` has nothing: `new Stats()` is not possible. */
+export interface StatsConstructor {}
+
+export declare const Stats: StatsConstructor;
+
+/** An entry of a folder, as `readdir` with `withFileTypes` gives it. */
+export interface Dirent {
+  readonly name: string;
+  /** The folder it is in. */
+  readonly parentPath: string;
+
+  isFile(): boolean;
+  isDirectory(): boolean;
+  isSymbolicLink(): boolean;
+  isFIFO(): boolean;
+  isSocket(): boolean;
+  isBlockDevice(): boolean;
+  isCharacterDevice(): boolean;
+}
+
+/** `Dirent` has nothing: only the functions of this module make one. */
+export interface DirentConstructor {}
+
+export declare const Dirent: DirentConstructor;
+
+/** The numbers of `constants`. */
+export interface FsConstants {
+  /** For `access`: the path is there. */
+  readonly F_OK: int;
+  /** For `access`: it can be read. */
+  readonly R_OK: int;
+  /** For `access`: it can be written. */
+  readonly W_OK: int;
+  /** For `access`: it can be run. */
+  readonly X_OK: int;
+  readonly COPYFILE_EXCL: int;
+  readonly COPYFILE_FICLONE: int;
+  readonly COPYFILE_FICLONE_FORCE: int;
+}
+
+export declare const constants: FsConstants;
+
+/** The functions of "node:fs/promises", as `promises.readFile(path)`. */
+export declare const promises: FsPromises;
+
+/**
+ * Reads a whole file: its bytes, or its text when an encoding is given. The
+ * encoding is written in the call, as the type of what comes depends on it.
+ */
+export declare function readFileSync(
+  path: FilePath,
+  options?: { flag?: OpenFlag },
+): Result<Buffer, ReadFileError>;
+export declare function readFileSync(
+  path: FilePath,
+  encoding: BufferEncoding | { encoding: BufferEncoding; flag?: OpenFlag },
+): Result<string, ReadFileError>;
+
+/**
+ * Writes a text or bytes as the whole file, making it or replacing what it
+ * held. The flag says otherwise, and the error follows it: an "x" flag does not
+ * touch a file that is there (WriteNewFileError), an "a" flag adds at the end
+ * (AppendFileError).
+ */
+export declare function writeFileSync(
+  path: FilePath,
+  data: FileData,
+  options: WriteFileOptions<ExclusiveWriteFlag>,
+): Result<void, WriteNewFileError>;
+export declare function writeFileSync(
+  path: FilePath,
+  data: FileData,
+  options: WriteFileOptions<AppendFlag>,
+): Result<void, AppendFileError>;
+export declare function writeFileSync(
+  path: FilePath,
+  data: FileData,
+  options: WriteFileOptions<ExclusiveAppendFlag>,
+): Result<void, AppendNewFileError>;
+export declare function writeFileSync(
+  path: FilePath,
+  data: FileData,
+  options?: BufferEncoding | FileOptions,
+): Result<void, WriteFileError>;
+
+/**
+ * Adds a text or bytes at the end of a file, making it when it is not there.
+ * The flag says otherwise, and the error follows it, as in `writeFile`.
+ */
+export declare function appendFileSync(
+  path: FilePath,
+  data: FileData,
+  options: WriteFileOptions<ExclusiveAppendFlag>,
+): Result<void, AppendNewFileError>;
+export declare function appendFileSync(
+  path: FilePath,
+  data: FileData,
+  options: WriteFileOptions<WriteFlag>,
+): Result<void, WriteFileError>;
+export declare function appendFileSync(
+  path: FilePath,
+  data: FileData,
+  options: WriteFileOptions<ExclusiveWriteFlag>,
+): Result<void, WriteNewFileError>;
+export declare function appendFileSync(
+  path: FilePath,
+  data: FileData,
+  options?: BufferEncoding | FileOptions,
+): Result<void, AppendFileError>;
+
+/** Whether there is something at the path. */
+export declare function existsSync(path: string): boolean;
+
+/**
+ * Checks that the program may use the path as the mode says, `constants.F_OK`
+ * (it is there) by default; an error when it may not.
+ */
+export declare function accessSync(
+  path: string,
+  mode?: int,
+): Result<void, AccessError>;
+
+/** Sets the permissions of a file. */
+export declare function chmodSync(
+  path: string,
+  mode: int,
+): Result<void, ChangeModeError>;
+
+/** Cuts a file to the length, 0 by default, or pads it with zeros. */
+export declare function truncateSync(
+  path: string,
+  length?: int,
+): Result<void, TruncateError>;
+
+/** What is at the path: its kind, size and times; a link is followed. */
+export declare function statSync(
+  path: string,
+  options: { throwIfNoEntry: false },
+): Result<Stats | undefined, StatusIfExistsError>;
+export declare function statSync(path: string): Result<Stats, StatusError>;
+
+/** As `stat`, of a link itself. */
+export declare function lstatSync(
+  path: string,
+  options: { throwIfNoEntry: false },
+): Result<Stats | undefined, LinkStatusIfExistsError>;
+export declare function lstatSync(path: string): Result<Stats, LinkStatusError>;
+
+/**
+ * The names of what a folder holds, with `recursive` of what is inside its
+ * folders too; with `withFileTypes` what each is.
+ */
+export declare function readdirSync(
+  path: string,
+  options: {
+    withFileTypes: true;
+    encoding?: BufferEncoding;
+    recursive?: boolean;
+  },
+): Result<Dirent[], ReadDirectoryError>;
+export declare function readdirSync(
+  path: string,
+  options?:
+    | BufferEncoding
+    | { encoding?: BufferEncoding; recursive?: boolean; withFileTypes?: false },
+): Result<string[], ReadDirectoryError>;
+
+/**
+ * Makes a folder; with `recursive` the folders above it too, and then a folder
+ * that is there is no error. Gives the first folder it made.
+ */
+export declare function mkdirSync(
+  path: string,
+  options?: int | { recursive?: boolean; mode?: int },
+): Result<string | undefined, MakeDirectoryError>;
+
+/**
+ * Makes a folder with a name of its own that starts with the prefix, and gives
+ * its path.
+ */
+export declare function mkdtempSync(
+  prefix: string,
+  options?: BufferEncoding | { encoding?: BufferEncoding },
+): Result<string, MakeTemporaryDirectoryError>;
+
+/** Removes an empty folder. */
+export declare function rmdirSync(
+  path: string,
+): Result<void, RemoveDirectoryError>;
+
+/** Removes a file or a link. */
+export declare function unlinkSync(path: string): Result<void, UnlinkError>;
+
+/**
+ * Removes a file, or with `recursive` a folder with what it holds. With `force`
+ * what is not there is no error.
+ */
+export declare function rmSync(
+  path: string,
+  options: {
+    force: true;
+    recursive?: boolean;
+    maxRetries?: int;
+    retryDelay?: int;
+  },
+): Result<void, ForceRemoveError>;
+export declare function rmSync(
+  path: string,
+  options?: {
+    force?: false;
+    recursive?: boolean;
+    maxRetries?: int;
+    retryDelay?: int;
+  },
+): Result<void, RemoveError>;
+
+/**
+ * Moves or renames a file or a folder. It does not replace what is at the new
+ * path; `replace` of "tz:fs" does.
+ */
+export declare function renameSync(
+  from: string,
+  to: string,
+): Result<void, RenameError>;
+
+/**
+ * Copies a file. It never replaces a file that is there, so it takes no mode.
+ */
+export declare function copyFileSync(
+  source: string,
+  destination: string,
+): Result<void, CopyFileError>;
+
+/** The full path with every link followed. */
+export declare function realpathSync(
+  path: string,
+  options?: BufferEncoding | { encoding?: BufferEncoding },
+): Result<string, RealPathError>;

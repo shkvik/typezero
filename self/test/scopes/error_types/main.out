@@ -1,0 +1,10 @@
+main.tz
+  6:24 string -> global
+  6:33 ReadFileError -> import tz:fs/errors:ReadFileError
+  6:66 undefined -> global
+  7:16 readFileSync -> import node:fs:readFileSync
+  7:29 path -> parameter 6:18
+  8:7 text -> variable 7:9
+  9:12 text -> variable 7:9
+  15:1 console -> global
+  15:13 failure -> function 6:10

@@ -1,0 +1,12 @@
+// A declaration module of the library gives some names from another module:
+// `export { stdout } from "tz:process/streams"`. Such a module is loaded only
+// when one of those names is asked for. Here nothing asks for the streams of
+// `process` or of files, so the stream library is not loaded; the errors of
+// node:fs are, as the declarations of its functions name them.
+import { argv } from "node:process";
+import { ReadFileError, readFileSync } from "node:fs";
+import { Buffer } from "node:buffer";
+
+const failed: ReadFileError | undefined = undefined;
+
+console.log(argv, readFileSync, Buffer, failed);
