@@ -98,9 +98,15 @@ runtime/          весь C → tzrt.lib, tzrt.bc, tzcrypto.lib
 library/          весь tz → bin/lib: <тема>/*.tz
 editors/          vscode/ — расширение VS Code; types/ — объявления для будущего плагина tsserver
 self/             компилятор на tz, пробный (порт compiler/load): main.tz — только запуск
-                  команды: слово `load` — LoadCommand, `names` — NamesCommand, иначе
-                  SyntaxCommand (имя программы, текст usage и код выхода 2 — в
-                  cli/const/cli.const.tz);
+                  команды: слово `load` — LoadCommand, `names` — NamesCommand, `scopes` —
+                  ScopesCommand, иначе SyntaxCommand (имя программы, текст usage и код
+                  выхода 2 — в cli/const/cli.const.tz);
+                  cli/scopes/scopes-command/ — ScopesCommand: `tzparse scopes <main.tz>`
+                  после загрузки и связывания модулей привязывает имена в коде и печатает
+                  под каждым модулем программы каждое использование имени: место, имя и
+                  куда оно ведёт (`36:12 price -> variable 33:14`, `-> import lib.tz:unit`,
+                  `-> global`); ошибки связывания и областей — в одном списке по порядку
+                  текста;
                   cli/program-report/ — ProgramReport: общее для команд над программой —
                   неверный вызов, вход не `.tz`, файл не читается, печать ошибок файлов;
                   hasFailed() — было ли что-то из этого;
@@ -147,7 +153,8 @@ self/             компилятор на tz, пробный (порт compile
                   или парсера — в types/message.types.tz; коды 10xx — лексер и
                   escape-последовательности, 17xx — файлы объявлений, 20xx — загрузка
                   программы: путь импорта и поиск файла, встроенные модули, 21xx — имена
-                  между модулями: экспорт и импорт, 22xx — части `partial class`);
+                  между модулями: экспорт и импорт, 22xx — части `partial class`, 23xx —
+                  имена в коде: не найдено, объявлено дважды, прочитано до объявления);
                   diagnostic/error-printer/ —
                   ErrorPrinter: ошибки одного файла как `путь:строка:столбец: error TZ1221:
                   текст`, под ним строка исходника и `^` под местом (ошибка в конце файла
@@ -220,6 +227,30 @@ self/             компилятор на tz, пробный (порт compile
                   то, что уже набрал; сначала именованные экспорты, потом `export *`; части
                   класса — partial/module-binder.partial.<часть>.tz: declared, exports,
                   imports; ошибки — в списке своего модуля, по порядку текста;
+                  semantic/name-resolver/ — NameResolver: имена внутри кода
+                  (new NameResolver(program, names).run() → ModuleScopes[]): собирает
+                  глобальные имена из встроенных объявлений (Program.builtins) и для каждого
+                  модуля запускает ScopeTraversal;
+                  semantic/scope-traversal/ — ScopeTraversal: один обход дерева модуля со
+                  стеком областей; части — partial/scope-traversal.partial.<часть>.tz:
+                  declarations (объявить импорты, инструкции блока, параметры типа),
+                  statements, expressions, types, classes (классы и функции). Блок сначала
+                  объявляет все свои имена, потом обходится, поэтому функция видна до своей
+                  строки; у значений и у типов свои пространства (class и enum — в обоих);
+                  параметры и тело функции — одна область; тело цикла, ветка if, весь
+                  switch — свои; переменная читается только после своего объявления, если
+                  чтение в той же функции (TZ2307); статический метод не видит параметров
+                  типа класса; метод части класса обходится в модуле части; имя ищется в
+                  областях, потом среди встроенных объявлений и таблицы глобальных имён;
+                  semantic/scope-stack/ — ScopeStack: состояние обхода — стек областей
+                  (значения и типы) и глубина функций; меняется только своими методами;
+                  program/scopes/ — итог (types/scopes.types.tz): NameSymbol { name, kind:
+                  SymbolKind, loc, target — для импорта }, NameUse { loc, name, isType,
+                  symbol — нет у глобального имени }, ModuleScopes { module, uses, errors };
+                  program/library/global-names/ — GlobalNames (общий экземпляр kGlobalNames):
+                  таблица глобальных значений (`console`, `Map`, `setTimeout`…) и типов
+                  (`int`, `string`, `Promise`, `Record`…), которые знает сам компилятор, имена
+                  без объявления (`this`, `super`), пространства имён (`Intl`, `NodeJS`);
                   program/module-names/ — итог связывания (types/module-names.types.tz):
                   ModuleNames { module, declared: имя → место, exports, imports, errors },
                   ModuleExport и ModuleImport ведут к NameTarget { module — id, name —
@@ -277,7 +308,8 @@ self/             компилятор на tz, пробный (порт compile
                   main.tz: точный вывод `tzparse load main.tz` — main.out, ошибки — main.err
                   (нет файла — ошибок быть не должно); папка с именем кода (TZ2007) — тест
                   этого кода; self/test/names/<имя>/ — такая же программа для
-                  `tzparse names main.tz`;
+                  `tzparse names main.tz`, self/test/scopes/<имя>/ — для `tzparse scopes
+                  main.tz`;
                   перебор языка — self/test/*.py (тесты self/test/<скрипт>, метка
                   enumeration, идут минуты; `ctest -LE enumeration` — без них): скрипт
                   строит программы вместе с ответом, которого ждёт от парсера, и выходит

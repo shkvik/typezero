@@ -1,0 +1,5 @@
+main.tz
+  1:10 int -> global
+  2:10 string -> global
+  5:6 int -> global
+  9:6 int -> global

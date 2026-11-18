@@ -1,0 +1,7 @@
+function f(): int {
+  return 1;
+}
+
+function f(scale: int): int {
+  return scale;
+}

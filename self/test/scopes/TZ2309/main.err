@@ -1,0 +1,3 @@
+main.tz:1:28: error TZ2309: the default value of 'first' uses 'second', which is not set yet: a default value can use only the parameters before it
+function make(first: int = second, second: int = 1): int {
+                           ^

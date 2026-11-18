@@ -1,0 +1,3 @@
+main.tz:3:17: error TZ2301: cannot find name 'missing'
+console.log(a + missing);
+                ^

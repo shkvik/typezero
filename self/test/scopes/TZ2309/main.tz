@@ -1,0 +1,3 @@
+function make(first: int = second, second: int = 1): int {
+  return first + second;
+}

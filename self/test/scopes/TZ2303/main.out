@@ -1,0 +1,5 @@
+main.tz
+  7:15 int -> global
+  7:23 int -> global
+  7:29 int -> global
+  10:10 p -> parameter 7:12

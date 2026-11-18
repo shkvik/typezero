@@ -1,0 +1,59 @@
+lib.tz
+  4:25 int -> global
+  6:28 int -> global
+  7:17 side -> parameter 6:22
+parts/area.tz
+  5:20 int -> global
+  6:12 unit -> import lib.tz:unit
+main.tz
+  9:25 T -> type parameter 9:11
+  9:36 T -> type parameter 9:11
+  10:30 T -> type parameter 10:11
+  10:34 K -> type parameter 10:16
+  11:16 T -> type parameter 11:11
+  11:26 Array -> global
+  11:43 U -> type parameter 11:32
+  11:47 T -> type parameter 11:11
+  15:11 Red -> member 14:3
+  19:26 T -> type parameter 18:18
+  21:29 T -> type parameter 18:18
+  22:18 value -> parameter 21:22
+  25:33 T -> type parameter 18:18
+  25:39 U -> type parameter 25:14
+  25:43 Box -> class 18:14
+  25:47 U -> type parameter 25:14
+  26:16 Box -> class 18:14
+  26:20 U -> type parameter 25:14
+  26:23 change -> parameter 25:17
+  30:24 int -> global
+  30:38 int -> global
+  30:44 unit -> import lib.tz:unit
+  30:51 int -> global
+  33:23 prices -> parameter 30:16
+  36:5 sum -> variable 31:7
+  36:12 price -> variable 33:14
+  36:20 scale -> variable 34:11
+  39:10 later -> function 41:12
+  39:16 sum -> variable 31:7
+  39:23 scale -> parameter 30:31
+  41:25 int -> global
+  41:31 int -> global
+  42:12 value -> parameter 41:18
+  42:20 unit -> import lib.tz:unit
+  46:38 int -> global
+  46:44 int -> global
+  47:7 count -> parameter 46:31
+  51:10 repeat -> function 46:24
+  51:17 count -> parameter 46:31
+  54:19 Shape -> import lib.tz:Shape
+  54:25 total -> function 30:10
+  55:14 Color -> enum 13:6
+  55:22 Color -> enum 13:6
+  56:21 URL -> import tz:url:URL
+  57:13 shape -> variable 54:7
+  57:28 shape -> variable 54:7
+  59:1 console -> global
+  59:13 again -> variable 46:7
+  59:23 color -> variable 55:7
+  59:30 address -> variable 56:7
+  59:39 kind -> variable 57:7

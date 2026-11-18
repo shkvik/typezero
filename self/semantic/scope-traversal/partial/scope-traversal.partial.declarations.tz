@@ -1,0 +1,174 @@
+import { ScopeTraversal } from "../scope-traversal.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import { ImportDecl } from "../../../program/ast/types/ast.types.modules.tz";
+import {
+  Stmt,
+  StmtKind,
+} from "../../../program/ast/types/ast.types.statements.tz";
+import { TypeParamDecl } from "../../../program/ast/types/ast.types.types.tz";
+import {
+  NameSymbol,
+  SymbolKind,
+} from "../../../program/scopes/types/scopes.types.tz";
+
+partial class ScopeTraversal {
+  private declareImports(): void {
+    for (const decl of this.module.file.imports) {
+      this.declareImport(decl);
+    }
+
+    for (const decl of this.module.implicit) {
+      this.declareImport(decl);
+    }
+  }
+
+  private declareImport(decl: ImportDecl): void {
+    for (const name of decl.names) {
+      const bound = this.names.imports.get(name.as);
+
+      this.declareImported({
+        name: name.as,
+        kind: SymbolKind.Import,
+        loc: name.asLoc,
+        target: bound?.target,
+      });
+    }
+
+    const whole = decl.whole;
+    if (whole != undefined) {
+      this.declareImported({
+        name: whole.name,
+        kind: SymbolKind.Import,
+        loc: whole.loc,
+      });
+    }
+  }
+
+  private declareImported(symbol: NameSymbol): void {
+    this.scopes.declareValue(symbol, true);
+    this.scopes.declareType(symbol);
+  }
+
+  private declareStatements(statements: Stmt[]): void {
+    for (const statement of statements) {
+      this.declareStatement(statement);
+    }
+  }
+
+  private declareStatement(statement: Stmt): void {
+    const loc = statement.loc;
+
+    switch (statement.kind) {
+      case StmtKind.VarDecl:
+        for (const decl of statement.decls) {
+          this.declareValue(
+            { name: decl.name, kind: SymbolKind.Variable, loc: decl.loc },
+            false,
+          );
+        }
+        break;
+      case StmtKind.Function:
+        this.declareValue(
+          { name: statement.name, kind: SymbolKind.Function, loc },
+          true,
+        );
+        break;
+      case StmtKind.Class:
+        this.declareBoth({
+          name: statement.name ?? "",
+          kind: SymbolKind.Class,
+          loc,
+        });
+        break;
+      case StmtKind.Enum:
+        this.declareBoth({ name: statement.name, kind: SymbolKind.Enum, loc });
+        break;
+      case StmtKind.TypeAlias:
+        this.declareType({
+          name: statement.name,
+          kind: SymbolKind.TypeAlias,
+          loc,
+        });
+        break;
+      case StmtKind.Handle:
+        this.declareBoth({
+          name: statement.name,
+          kind: SymbolKind.Handle,
+          loc,
+        });
+        break;
+      default:
+        break;
+    }
+  }
+
+  private declareBoth(symbol: NameSymbol): void {
+    if (this.declareValue(symbol, true)) {
+      this.declareType(symbol);
+    }
+  }
+
+  private declareValue(symbol: NameSymbol, live: boolean): boolean {
+    const name = symbol.name;
+    if (name == "") {
+      return false;
+    }
+
+    const previous = this.scopes.declaredValue(name)?.symbol;
+    if (previous == undefined || previous.kind == SymbolKind.Import) {
+      this.scopes.declareValue(symbol, live);
+
+      return true;
+    }
+
+    const code = this.duplicateCode(symbol, previous);
+    const other = this.lineOf(previous.loc);
+
+    this.report(symbol.loc, code, { word: name, other });
+
+    return false;
+  }
+
+  private duplicateCode(symbol: NameSymbol, previous: NameSymbol): Code {
+    const functions =
+      symbol.kind == SymbolKind.Function &&
+      previous.kind == SymbolKind.Function;
+    if (functions) {
+      return Code.DuplicateFunction;
+    }
+
+    return Code.DuplicateDeclaration;
+  }
+
+  private declareType(symbol: NameSymbol): void {
+    const name = symbol.name;
+    const previous = this.scopes.declaredType(name)?.symbol;
+    if (previous == undefined || previous.kind == SymbolKind.Import) {
+      this.scopes.declareType(symbol);
+
+      return;
+    }
+
+    const other = this.lineOf(previous.loc);
+
+    this.report(symbol.loc, Code.DuplicateType, { word: name, other });
+  }
+
+  private declareTypeParams(params: TypeParamDecl[]): void {
+    for (const param of params) {
+      const name = param.name;
+      const loc = param.loc;
+
+      if (this.scopes.declaredType(name) != undefined) {
+        this.report(loc, Code.DuplicateTypeParameter, { word: name });
+      } else {
+        this.scopes.declareType({ name, kind: SymbolKind.TypeParameter, loc });
+      }
+    }
+
+    for (const param of params) {
+      this.traverseOptionalType(param.constraint);
+      this.traverseOptionalType(param.defaultType);
+    }
+  }
+}

@@ -1,0 +1,7 @@
+main.tz
+  1:22 int -> global
+  1:28 second -> parameter 1:36
+  1:44 int -> global
+  1:54 int -> global
+  2:10 first -> parameter 1:15
+  2:18 second -> parameter 1:36

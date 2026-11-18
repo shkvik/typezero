@@ -1,0 +1,91 @@
+import { FunctionDecl } from "../../program/ast/types/ast.types.functions.tz";
+import {
+  Stmt,
+  StmtKind,
+} from "../../program/ast/types/ast.types.statements.tz";
+import { ModuleNames } from "../../program/module-names/types/module-names.types.tz";
+import { Program } from "../../program/module/types/module.types.tz";
+import { ModuleScopes } from "../../program/scopes/types/scopes.types.tz";
+import { ScopeTraversal } from "../scope-traversal/scope-traversal.tz";
+import { GlobalScope } from "./types/name-resolver.types.tz";
+
+export class NameResolver {
+  private readonly program: Program;
+  private readonly names: ModuleNames[];
+
+  public constructor(program: Program, names: ModuleNames[]) {
+    this.program = program;
+    this.names = names;
+  }
+
+  public run(): ModuleScopes[] {
+    const globals = this.globalScope();
+    const partMethods = this.partMethods();
+    const resolved: ModuleScopes[] = [];
+
+    for (const names of this.names) {
+      const traversal = new ScopeTraversal(names, globals, partMethods);
+      const scopes = traversal.run();
+
+      resolved.push(scopes);
+    }
+
+    return resolved;
+  }
+
+  private globalScope(): GlobalScope {
+    const globals: GlobalScope = {
+      values: new Set<string>(),
+      types: new Set<string>(),
+    };
+
+    for (const builtin of this.program.builtins) {
+      for (const item of builtin.parsed.file.items) {
+        this.addGlobal(globals, item);
+      }
+    }
+
+    return globals;
+  }
+
+  private addGlobal(globals: GlobalScope, item: Stmt): void {
+    switch (item.kind) {
+      case StmtKind.VarDecl:
+        for (const decl of item.decls) {
+          globals.values.add(decl.name);
+        }
+        break;
+      case StmtKind.Function:
+        globals.values.add(item.name);
+        break;
+      case StmtKind.TypeAlias:
+      case StmtKind.Handle:
+        globals.types.add(item.name);
+        break;
+      case StmtKind.Enum:
+        globals.values.add(item.name);
+        globals.types.add(item.name);
+        break;
+      case StmtKind.Class:
+        globals.values.add(item.name ?? "");
+        globals.types.add(item.name ?? "");
+        break;
+      default:
+        break;
+    }
+  }
+
+  private partMethods(): FunctionDecl[] {
+    const methods: FunctionDecl[] = [];
+
+    for (const module of this.program.modules) {
+      for (const part of module.parts) {
+        for (const method of part.methods) {
+          methods.push(method);
+        }
+      }
+    }
+
+    return methods;
+  }
+}

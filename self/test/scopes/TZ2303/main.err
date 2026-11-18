@@ -1,0 +1,12 @@
+main.tz:2:7: error TZ2303: duplicate declaration of 'a': it is already declared at line 1
+const a = 2;
+      ^
+main.tz:5:7: error TZ2303: duplicate declaration of 'K': it is already declared at line 4
+const K = 3;
+      ^
+main.tz:7:20: error TZ2303: duplicate declaration of 'p': it is already declared at line 7
+function f(p: int, p: int): int {
+                   ^
+main.tz:8:9: error TZ2303: duplicate declaration of 'p': it is already declared at line 7
+  const p = 4;
+        ^

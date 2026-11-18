@@ -1,0 +1,12 @@
+// A variable is read before its declaration only in the same function: the
+// function 'later' runs after 'late' has its value.
+console.log(early);
+
+const early = 1;
+const own = own + 1;
+
+function later(): int {
+  return late;
+}
+
+const late = 2;

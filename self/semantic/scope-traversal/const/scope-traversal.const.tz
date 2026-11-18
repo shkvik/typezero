@@ -1,0 +1,2 @@
+export const kHiddenPrefix = "%";
+export const kNamePoint = ".";

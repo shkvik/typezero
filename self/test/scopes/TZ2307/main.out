@@ -1,0 +1,6 @@
+main.tz
+  3:1 console -> global
+  3:13 early -> variable 5:7
+  6:13 own -> variable 6:7
+  8:19 int -> global
+  9:10 late -> variable 12:7

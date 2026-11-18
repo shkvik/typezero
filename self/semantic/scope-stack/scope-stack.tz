@@ -1,0 +1,104 @@
+import { NameSymbol } from "../../program/scopes/types/scopes.types.tz";
+import { Scope, ScopeEntry } from "./types/scope-stack.types.tz";
+
+export class ScopeStack {
+  private readonly scopes: Scope[];
+  private depth: int;
+
+  public constructor() {
+    this.scopes = [];
+    this.depth = 0;
+  }
+
+  public open(): void {
+    this.scopes.push({
+      values: new Map<string, ScopeEntry>(),
+      types: new Map<string, ScopeEntry>(),
+    });
+  }
+
+  public close(): void {
+    this.scopes.pop();
+  }
+
+  public enterFunction(): void {
+    this.depth += 1;
+  }
+
+  public leaveFunction(): void {
+    this.depth -= 1;
+  }
+
+  public declaredValue(name: string): ScopeEntry | undefined {
+    const scope = this.current();
+
+    return scope.values.get(name);
+  }
+
+  public declaredType(name: string): ScopeEntry | undefined {
+    const scope = this.current();
+
+    return scope.types.get(name);
+  }
+
+  public declareValue(symbol: NameSymbol, live: boolean): void {
+    const scope = this.current();
+
+    scope.values.set(symbol.name, { symbol, depth: this.depth, live });
+  }
+
+  public declareType(symbol: NameSymbol): void {
+    const scope = this.current();
+
+    scope.types.set(symbol.name, { symbol, depth: this.depth, live: true });
+  }
+
+  public findValue(name: string): ScopeEntry | undefined {
+    for (let index = this.scopes.length - 1; index >= 0; index--) {
+      const entry = this.scopes[index]?.values.get(name);
+      if (entry != undefined) {
+        return entry;
+      }
+    }
+
+    return undefined;
+  }
+
+  public findType(name: string): ScopeEntry | undefined {
+    for (let index = this.scopes.length - 1; index >= 0; index--) {
+      const entry = this.scopes[index]?.types.get(name);
+      if (entry != undefined) {
+        return entry;
+      }
+    }
+
+    return undefined;
+  }
+
+  public markLive(name: string): void {
+    const entry = this.findValue(name);
+    if (entry != undefined) {
+      entry.live = true;
+    }
+  }
+
+  public isReadable(entry: ScopeEntry): boolean {
+    return entry.live || entry.depth != this.depth;
+  }
+
+  private current(): Scope {
+    const scope = this.scopes[this.scopes.length - 1];
+    if (scope != undefined) {
+      return scope;
+    }
+
+    const first: Scope = {
+      values: new Map<string, ScopeEntry>(),
+      types: new Map<string, ScopeEntry>(),
+    };
+
+    this.scopes.push(first);
+
+    return first;
+  }
+}

@@ -1,0 +1,6 @@
+main.tz:3:13: error TZ2307: 'early' is used before it is declared
+console.log(early);
+            ^
+main.tz:6:13: error TZ2307: 'own' is used before it is declared
+const own = own + 1;
+            ^

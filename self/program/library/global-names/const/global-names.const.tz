@@ -1,0 +1,3 @@
+import { GlobalNames } from "../global-names.tz";
+
+export const kGlobalNames = new GlobalNames();

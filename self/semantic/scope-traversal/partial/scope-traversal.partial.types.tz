@@ -1,0 +1,111 @@
+import { ScopeTraversal } from "../scope-traversal.tz";
+import {
+  TypeKind,
+  TypeRef,
+} from "../../../program/ast/types/ast.types.types.tz";
+import { SymbolKind } from "../../../program/scopes/types/scopes.types.tz";
+
+partial class ScopeTraversal {
+  private traverseOptionalType(ref: TypeRef | undefined): void {
+    if (ref != undefined) {
+      this.traverseType(ref);
+    }
+  }
+
+  private traverseTypes(refs: TypeRef[]): void {
+    for (const ref of refs) {
+      this.traverseType(ref);
+    }
+  }
+
+  private traverseType(ref: TypeRef): void {
+    const form = ref.form;
+
+    switch (form.kind) {
+      case TypeKind.Name:
+      case TypeKind.Generic:
+        this.useType(ref.name, ref.loc);
+
+        return this.traverseTypes(ref.args);
+      case TypeKind.TypeOf:
+        return this.useValue(form.names[0] ?? "", ref.loc);
+      case TypeKind.Mapped:
+        return this.traverseMapped(ref);
+      case TypeKind.Conditional:
+        return this.traverseConditional(ref);
+      default:
+        return this.traverseTypes(this.childTypes(ref));
+    }
+  }
+
+  private traverseMapped(ref: TypeRef): void {
+    this.scopes.open();
+    this.scopes.declareType({
+      name: ref.name,
+      kind: SymbolKind.TypeParameter,
+      loc: ref.loc,
+    });
+    this.traverseTypes(ref.args);
+    this.scopes.close();
+  }
+
+  private traverseConditional(ref: TypeRef): void {
+    this.scopes.open();
+
+    const extended = ref.args[1];
+    if (extended != undefined) {
+      this.declareInferred(extended);
+    }
+
+    this.traverseTypes(ref.args);
+    this.scopes.close();
+  }
+
+  private declareInferred(ref: TypeRef): void {
+    if (ref.form.kind == TypeKind.Infer) {
+      this.scopes.declareType({
+        name: ref.name,
+        kind: SymbolKind.TypeParameter,
+        loc: ref.loc,
+      });
+    }
+
+    for (const child of this.childTypes(ref)) {
+      this.declareInferred(child);
+    }
+  }
+
+  private childTypes(ref: TypeRef): TypeRef[] {
+    const form = ref.form;
+    const children = ref.args.slice();
+
+    switch (form.kind) {
+      case TypeKind.Function: {
+        for (const param of form.params) {
+          children.push(param.type);
+        }
+
+        const result = form.result;
+        if (result != undefined) {
+          children.push(result);
+        }
+
+        return children;
+      }
+      case TypeKind.Object:
+        for (const field of form.fields) {
+          children.push(field.type);
+        }
+
+        return children;
+      case TypeKind.Tuple:
+        for (const element of form.elements) {
+          children.push(element.type);
+        }
+
+        return children;
+      default:
+        return children;
+    }
+  }
+}

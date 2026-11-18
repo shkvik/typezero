@@ -829,4 +829,31 @@ export const kMessages: Record<Code, Message> = {
   [Code.PartMethodTwice]: {
     text: "method '{word}' of '{other}' is already declared in {path}: a method has one name in the whole class, and its overloads stay in one file",
   },
+  [Code.NameNotFound]: {
+    text: "cannot find name '{word}'",
+  },
+  [Code.TypeNotFound]: {
+    text: "cannot find type '{word}'",
+  },
+  [Code.DuplicateDeclaration]: {
+    text: "duplicate declaration of '{word}': it is already declared at line {other}",
+  },
+  [Code.DuplicateFunction]: {
+    text: "duplicate declaration of '{word}', already declared at line {other}; plain functions are not overloaded: give each variant its own name",
+  },
+  [Code.DuplicateType]: {
+    text: "duplicate declaration of type '{word}': it is already declared at line {other}",
+  },
+  [Code.DuplicateTypeParameter]: {
+    text: "duplicate type parameter '{word}'",
+  },
+  [Code.UsedBeforeDeclaration]: {
+    text: "'{word}' is used before it is declared",
+  },
+  [Code.ClassNotFound]: {
+    text: "cannot find class '{word}'",
+  },
+  [Code.DefaultUsesLaterParameter]: {
+    text: "the default value of '{word}' uses '{other}', which is not set yet: a default value can use only the parameters before it",
+  },
 };

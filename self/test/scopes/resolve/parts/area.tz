@@ -1,0 +1,8 @@
+import { Box } from "../main.tz";
+import { unit } from "../lib.tz";
+
+partial class Box<T> {
+  public scaled(): int {
+    return unit;
+  }
+}

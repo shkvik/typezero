@@ -1,0 +1,59 @@
+// Every use of a name leads to its declaration: a variable of the nearest
+// block, a parameter, a function declared later in the block, the own name of
+// a function expression, a type parameter, the variable of a mapped type and
+// of 'infer', an import, a global name, and a library name that needs no
+// import (URL).
+import { unit, Shape } from "./lib.tz";
+import "./parts/area.tz";
+
+type Pair<T> = { first: T; second: T };
+type Keys<T> = { [K in keyof T]: K };
+type Item<T> = T extends Array<infer U> ? U : T;
+
+enum Color {
+  Red,
+  Green = Red + 1,
+}
+
+export class Box<T> {
+  public readonly value: T;
+
+  public constructor(value: T) {
+    this.value = value;
+  }
+
+  public map<U>(change: (value: T) => U): Box<U> {
+    return new Box<U>(change(this.value));
+  }
+}
+
+function total(prices: int[], scale: int = unit): int {
+  let sum = 0;
+
+  for (const price of prices) {
+    const scale = 2;
+
+    sum += price * scale;
+  }
+
+  return later(sum) * scale;
+
+  function later(value: int): int {
+    return value + unit;
+  }
+}
+
+const again = function repeat(count: int): int {
+  if (count == 0) {
+    return 0;
+  }
+
+  return repeat(count - 1);
+};
+
+const shape = new Shape(total([1, 2]));
+const color: Color = Color.Green;
+const address = new URL("https://example.com");
+const kind: typeof shape = shape;
+
+console.log(again(1), color, address, kind);

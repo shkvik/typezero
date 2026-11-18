@@ -1,0 +1,176 @@
+import { ScopeTraversal } from "../scope-traversal.tz";
+import {
+  EnumDecl,
+  TypeAliasDecl,
+} from "../../../program/ast/types/ast.types.classes.tz";
+import { VarDeclarator } from "../../../program/ast/types/ast.types.patterns.tz";
+import {
+  ForOfStmt,
+  ForStmt,
+  IfStmt,
+  Stmt,
+  StmtKind,
+  SwitchStmt,
+} from "../../../program/ast/types/ast.types.statements.tz";
+import { SymbolKind } from "../../../program/scopes/types/scopes.types.tz";
+
+partial class ScopeTraversal {
+  private traverseStatements(statements: Stmt[]): void {
+    for (const statement of statements) {
+      this.traverseStatement(statement);
+    }
+  }
+
+  private traverseStatement(statement: Stmt): void {
+    switch (statement.kind) {
+      case StmtKind.Block:
+        return this.traverseBlock(statement.body);
+      case StmtKind.VarDecl:
+        return this.traverseDeclarators(statement.decls);
+      case StmtKind.Function:
+        return this.traverseFunction(statement);
+      case StmtKind.Expr:
+        return this.traverseExpr(statement.expr);
+      case StmtKind.If:
+        return this.traverseIf(statement);
+      case StmtKind.While:
+        this.traverseExpr(statement.cond);
+
+        return this.traverseScoped(statement.body);
+      case StmtKind.DoWhile:
+        this.traverseScoped(statement.body);
+
+        return this.traverseExpr(statement.cond);
+      case StmtKind.For:
+        return this.traverseFor(statement);
+      case StmtKind.ForOf:
+        return this.traverseForOf(statement);
+      case StmtKind.Switch:
+        return this.traverseSwitch(statement);
+      case StmtKind.Labeled:
+        return this.traverseStatement(statement.body);
+      case StmtKind.Return:
+        return this.traverseOptionalExpr(statement.value);
+      case StmtKind.TypeAlias:
+        return this.traverseTypeAlias(statement);
+      case StmtKind.Enum:
+        return this.traverseEnum(statement);
+      case StmtKind.Class:
+        return this.traverseClass(statement);
+      default:
+        return;
+    }
+  }
+
+  private traverseBlock(body: Stmt[]): void {
+    this.scopes.open();
+    this.declareStatements(body);
+    this.traverseStatements(body);
+    this.scopes.close();
+  }
+
+  private traverseScoped(statement: Stmt): void {
+    if (statement.kind == StmtKind.Block) {
+      return this.traverseBlock(statement.body);
+    }
+
+    this.traverseBlock([statement]);
+  }
+
+  private traverseDeclarators(decls: VarDeclarator[]): void {
+    for (const decl of decls) {
+      this.traverseDeclarator(decl);
+    }
+  }
+
+  private traverseDeclarator(decl: VarDeclarator): void {
+    this.traverseOptionalType(decl.typeAnn);
+    this.traverseOptionalExpr(decl.init);
+    this.scopes.markLive(decl.name);
+  }
+
+  private traverseIf(statement: IfStmt): void {
+    this.traverseExpr(statement.cond);
+    this.traverseScoped(statement.thenStmt);
+
+    const elseStmt = statement.elseStmt;
+    if (elseStmt != undefined) {
+      this.traverseScoped(elseStmt);
+    }
+  }
+
+  private traverseFor(statement: ForStmt): void {
+    this.scopes.open();
+
+    const init = statement.init;
+    if (init != undefined) {
+      this.declareStatement(init);
+      this.traverseStatement(init);
+    }
+
+    this.traverseOptionalExpr(statement.cond);
+    this.traverseOptionalExpr(statement.step);
+
+    const body = statement.body;
+    if (body != undefined) {
+      this.traverseScoped(body);
+    }
+
+    this.scopes.close();
+  }
+
+  private traverseForOf(statement: ForOfStmt): void {
+    const binding = statement.binding;
+
+    this.scopes.open();
+    this.traverseExpr(statement.iterable);
+    this.declareValue(
+      { name: binding.name, kind: SymbolKind.Variable, loc: binding.loc },
+      true,
+    );
+    this.traverseOptionalType(binding.typeAnn);
+    this.traverseScoped(statement.body);
+    this.scopes.close();
+  }
+
+  private traverseSwitch(statement: SwitchStmt): void {
+    this.traverseExpr(statement.discriminant);
+    this.scopes.open();
+
+    for (const one of statement.cases) {
+      this.declareStatements(one.body);
+    }
+
+    for (const one of statement.cases) {
+      this.traverseOptionalExpr(one.test);
+      this.traverseStatements(one.body);
+    }
+
+    this.scopes.close();
+  }
+
+  private traverseTypeAlias(alias: TypeAliasDecl): void {
+    this.scopes.open();
+    this.declareTypeParams(alias.typeParams);
+    this.traverseType(alias.type);
+    this.traverseTypes(alias.bases);
+    this.scopes.close();
+  }
+
+  private traverseEnum(decl: EnumDecl): void {
+    this.scopes.open();
+
+    for (const member of decl.members) {
+      this.scopes.declareValue(
+        { name: member.name, kind: SymbolKind.EnumMember, loc: member.loc },
+        true,
+      );
+    }
+
+    for (const member of decl.members) {
+      this.traverseOptionalExpr(member.init);
+    }
+
+    this.scopes.close();
+  }
+}

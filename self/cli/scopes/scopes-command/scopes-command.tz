@@ -1,0 +1,161 @@
+import { extname } from "node:path";
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import { ModuleNames } from "../../../program/module-names/types/module-names.types.tz";
+import { kSourceExtension } from "../../../program/module/const/module.const.tz";
+import { Module, Program } from "../../../program/module/types/module.types.tz";
+import {
+  ModuleScopes,
+  NameSymbol,
+  NameUse,
+  SymbolKind,
+} from "../../../program/scopes/types/scopes.types.tz";
+import { SourceLines } from "../../../program/source-lines/source-lines.tz";
+import { ModuleBinder } from "../../../semantic/module-binder/module-binder.tz";
+import { NameResolver } from "../../../semantic/name-resolver/name-resolver.tz";
+import { ProgramReport } from "../../program-report/program-report.tz";
+import { ProgramSource } from "../../program-source/program-source.tz";
+
+export class ScopesCommand {
+  private readonly entry?: string;
+  private readonly report: ProgramReport;
+
+  public constructor(args: string[]) {
+    this.entry = args[3];
+    this.report = new ProgramReport();
+  }
+
+  public run(): void {
+    const entry = this.entry;
+    if (entry == undefined) {
+      return this.report.wrongUsage();
+    }
+    if (extname(entry) != kSourceExtension) {
+      return this.report.notSource(entry);
+    }
+
+    const source = new ProgramSource();
+    const loaded = source.load(entry);
+    const program = loaded.program;
+
+    this.report.unreadable(loaded.unreadable);
+    this.report.moduleErrors(program);
+    if (this.report.hasFailed()) {
+      return;
+    }
+
+    const binder = new ModuleBinder(program);
+    const names = binder.run();
+    const resolver = new NameResolver(program, names);
+    const resolved = resolver.run();
+
+    for (const scopes of resolved) {
+      this.printUses(program, scopes);
+    }
+
+    for (let index = 0; index < resolved.length; index++) {
+      this.printErrors(names[index], resolved[index]);
+    }
+  }
+
+  private printUses(program: Program, scopes: ModuleScopes): void {
+    const module = scopes.module;
+    if (module.source.isLibrary) {
+      return;
+    }
+
+    const lines = new SourceLines(module.source.text);
+
+    console.log(module.name);
+
+    for (const use of scopes.uses) {
+      const where = this.placeText(lines, use.loc);
+      const target = this.targetText(program, lines, use);
+
+      console.log(`  ${where} ${use.name} -> ${target}`);
+    }
+  }
+
+  private targetText(
+    program: Program,
+    lines: SourceLines,
+    use: NameUse,
+  ): string {
+    const symbol = use.symbol;
+    if (symbol == undefined) {
+      return "global";
+    }
+    if (symbol.kind == SymbolKind.Import) {
+      return this.importText(program, symbol);
+    }
+
+    const kind = this.kindText(symbol.kind);
+    const where = this.placeText(lines, symbol.loc);
+
+    return `${kind} ${where}`;
+  }
+
+  private importText(program: Program, symbol: NameSymbol): string {
+    const target = symbol.target;
+    if (target == undefined) {
+      return "import";
+    }
+
+    const module = program.modules[target.module];
+    const name = this.moduleName(module);
+
+    return `import ${name}:${target.name}`;
+  }
+
+  private moduleName(module: Module | undefined): string {
+    if (module == undefined) {
+      return "";
+    }
+
+    return module.name;
+  }
+
+  private kindText(kind: SymbolKind): string {
+    switch (kind) {
+      case SymbolKind.Variable:
+        return "variable";
+      case SymbolKind.Parameter:
+        return "parameter";
+      case SymbolKind.Function:
+        return "function";
+      case SymbolKind.Class:
+        return "class";
+      case SymbolKind.Enum:
+        return "enum";
+      case SymbolKind.EnumMember:
+        return "member";
+      case SymbolKind.TypeAlias:
+        return "type";
+      case SymbolKind.Handle:
+        return "handle";
+      case SymbolKind.TypeParameter:
+        return "type parameter";
+      default:
+        return "import";
+    }
+  }
+
+  private placeText(lines: SourceLines, loc: int): string {
+    const place = lines.placeOf(loc);
+
+    return `${place.line}:${place.column}`;
+  }
+
+  private printErrors(
+    names: ModuleNames | undefined,
+    scopes: ModuleScopes | undefined,
+  ): void {
+    if (names == undefined || scopes == undefined) {
+      return;
+    }
+
+    const errors: SourceError[] = names.errors.concat(scopes.errors);
+
+    errors.sort((first, second) => first.loc - second.loc);
+    this.report.sourceErrors(scopes.module.source, errors);
+  }
+}

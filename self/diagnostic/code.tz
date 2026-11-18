@@ -274,4 +274,13 @@ export enum Code {
   PartHasDecorators = "TZ2210",
   PartTypeParams = "TZ2211",
   PartMethodTwice = "TZ2212",
+  NameNotFound = "TZ2301",
+  TypeNotFound = "TZ2302",
+  DuplicateDeclaration = "TZ2303",
+  DuplicateFunction = "TZ2304",
+  DuplicateType = "TZ2305",
+  DuplicateTypeParameter = "TZ2306",
+  UsedBeforeDeclaration = "TZ2307",
+  ClassNotFound = "TZ2308",
+  DefaultUsesLaterParameter = "TZ2309",
 }

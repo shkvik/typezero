@@ -1,0 +1,32 @@
+import {
+  kGlobalNamespaces,
+  kGlobalTypes,
+  kGlobalValues,
+  kUnboundNames,
+} from "./const/global-names.const.tables.tz";
+
+export class GlobalNames {
+  private readonly values: Set<string>;
+  private readonly types: Set<string>;
+
+  public constructor() {
+    this.values = new Set<string>(kGlobalValues);
+    this.types = new Set<string>(kGlobalTypes);
+  }
+
+  public hasValue(name: string): boolean {
+    return this.values.has(name);
+  }
+
+  public hasType(name: string): boolean {
+    return this.types.has(name);
+  }
+
+  public isNamespace(name: string): boolean {
+    return kGlobalNamespaces.includes(name);
+  }
+
+  public isUnbound(name: string): boolean {
+    return kUnboundNames.includes(name);
+  }
+}

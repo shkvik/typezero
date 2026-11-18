@@ -2,6 +2,8 @@ import { LoadCommand } from "./cli/load/load-command/load-command.tz";
 import { kLoadWord } from "./cli/load/load-command/const/load-command.const.tz";
 import { NamesCommand } from "./cli/names/names-command/names-command.tz";
 import { kNamesWord } from "./cli/names/names-command/const/names-command.const.tz";
+import { ScopesCommand } from "./cli/scopes/scopes-command/scopes-command.tz";
+import { kScopesWord } from "./cli/scopes/scopes-command/const/scopes-command.const.tz";
 import { SyntaxCommand } from "./cli/syntax/syntax-command/syntax-command.tz";
 
 switch (process.argv[2]) {
@@ -14,6 +16,13 @@ switch (process.argv[2]) {
   }
   case kNamesWord: {
     const command = new NamesCommand(process.argv);
+
+    command.run();
+
+    break;
+  }
+  case kScopesWord: {
+    const command = new ScopesCommand(process.argv);
 
     command.run();
 

@@ -1,0 +1,7 @@
+const a: Missing = 1;
+
+class Stat<T> {
+  public static make(value: T): int {
+    return 1;
+  }
+}

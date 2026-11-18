@@ -1,0 +1,10 @@
+type T = int;
+type T = string;
+
+interface I {
+  x: int;
+}
+
+interface I {
+  y: int;
+}

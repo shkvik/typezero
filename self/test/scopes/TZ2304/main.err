@@ -1,0 +1,3 @@
+main.tz:5:10: error TZ2304: duplicate declaration of 'f', already declared at line 1; plain functions are not overloaded: give each variant its own name
+function f(scale: int): int {
+         ^

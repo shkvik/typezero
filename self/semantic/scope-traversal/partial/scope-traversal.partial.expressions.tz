@@ -1,0 +1,122 @@
+import { ScopeTraversal } from "../scope-traversal.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  CallArgument,
+  Expr,
+  ExprKind,
+  NewExpr,
+  NewKind,
+  ObjectLitExpr,
+  PropertyKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+
+partial class ScopeTraversal {
+  private traverseOptionalExpr(expr: Expr | undefined): void {
+    if (expr != undefined) {
+      this.traverseExpr(expr);
+    }
+  }
+
+  private traverseExprs(exprs: Expr[]): void {
+    for (const expr of exprs) {
+      this.traverseExpr(expr);
+    }
+  }
+
+  private traverseExpr(expr: Expr): void {
+    switch (expr.kind) {
+      case ExprKind.Name:
+        this.useValue(expr.name, expr.loc);
+
+        return this.traverseTypes(expr.typeArgs);
+      case ExprKind.Member:
+        this.traverseExpr(expr.object);
+
+        return this.traverseTypes(expr.typeArgs);
+      case ExprKind.Index:
+        this.traverseExpr(expr.object);
+
+        return this.traverseExpr(expr.index);
+      case ExprKind.Unary:
+        return this.traverseExpr(expr.operand);
+      case ExprKind.Binary:
+        this.traverseExpr(expr.lhs);
+
+        return this.traverseExpr(expr.rhs);
+      case ExprKind.Assign:
+        this.traverseExpr(expr.target);
+
+        return this.traverseExpr(expr.value);
+      case ExprKind.Update:
+        return this.traverseExpr(expr.target);
+      case ExprKind.Call:
+        this.traverseExpr(expr.callee);
+
+        return this.traverseArguments(expr.args);
+      case ExprKind.New:
+        return this.traverseNew(expr);
+      case ExprKind.Conditional:
+        this.traverseExpr(expr.cond);
+        this.traverseExpr(expr.thenExpr);
+
+        return this.traverseExpr(expr.elseExpr);
+      case ExprKind.Cast:
+        this.traverseExpr(expr.operand);
+
+        return this.traverseType(expr.target);
+      case ExprKind.Sequence:
+        return this.traverseExprs(expr.exprs);
+      case ExprKind.OptionalChain:
+        return this.traverseExpr(expr.chain);
+      case ExprKind.Function:
+        return this.traverseFunction(expr.fn);
+      case ExprKind.Yield:
+        return this.traverseOptionalExpr(expr.value);
+      case ExprKind.Await:
+        return this.traverseExpr(expr.value);
+      case ExprKind.Class:
+        return this.traverseClass(expr.decl);
+      case ExprKind.Template:
+        return this.traverseExprs(expr.exprs);
+      case ExprKind.ArrayLit:
+        for (const element of expr.elements) {
+          this.traverseExpr(element.expr);
+        }
+
+        return;
+      case ExprKind.ObjectLit:
+        return this.traverseObject(expr);
+      default:
+        return;
+    }
+  }
+
+  private traverseArguments(args: CallArgument[]): void {
+    for (const argument of args) {
+      this.traverseExpr(argument.expr);
+    }
+  }
+
+  private traverseNew(expr: NewExpr): void {
+    const form = expr.form;
+    if (form.kind == NewKind.Named) {
+      this.useValue(form.name, expr.loc, Code.ClassNotFound);
+    } else {
+      this.traverseExpr(form.callee);
+    }
+
+    this.traverseTypes(expr.typeArgs);
+    this.traverseArguments(expr.args);
+  }
+
+  private traverseObject(expr: ObjectLitExpr): void {
+    for (const property of expr.props) {
+      const form = property.form;
+      if (form.kind == PropertyKind.Computed) {
+        this.traverseExpr(form.key);
+      }
+
+      this.traverseExpr(property.value);
+    }
+  }
+}

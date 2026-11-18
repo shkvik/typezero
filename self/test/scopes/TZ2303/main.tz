@@ -1,0 +1,11 @@
+const a = 1;
+const a = 2;
+
+class K {}
+const K = 3;
+
+function f(p: int, p: int): int {
+  const p = 4;
+
+  return p;
+}

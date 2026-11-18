@@ -1,0 +1,3 @@
+const made = new Missing();
+
+class Child extends Gone {}

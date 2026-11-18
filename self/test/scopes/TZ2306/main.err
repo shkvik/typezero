@@ -1,0 +1,3 @@
+main.tz:1:18: error TZ2306: duplicate type parameter 'T'
+function same<T, T>(value: T): T {
+                 ^

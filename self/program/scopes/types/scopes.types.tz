@@ -1,0 +1,36 @@
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import { NameTarget } from "../../module-names/types/module-names.types.tz";
+import { Module } from "../../module/types/module.types.tz";
+
+export enum SymbolKind {
+  Variable,
+  Parameter,
+  Function,
+  Class,
+  Enum,
+  EnumMember,
+  TypeAlias,
+  Handle,
+  TypeParameter,
+  Import,
+}
+
+export type NameSymbol = {
+  readonly name: string;
+  readonly kind: SymbolKind;
+  readonly loc: int;
+  readonly target?: NameTarget;
+};
+
+export type NameUse = {
+  readonly loc: int;
+  readonly name: string;
+  readonly isType: boolean;
+  readonly symbol?: NameSymbol;
+};
+
+export type ModuleScopes = {
+  readonly module: Module;
+  readonly uses: NameUse[];
+  readonly errors: SourceError[];
+};

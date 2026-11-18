@@ -1,0 +1,164 @@
+import { ScopeTraversal } from "../scope-traversal.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  ClassDecl,
+  Decorator,
+  MethodKind,
+} from "../../../program/ast/types/ast.types.classes.tz";
+import {
+  FunctionDecl,
+  Param,
+  ParamKind,
+} from "../../../program/ast/types/ast.types.functions.tz";
+import { TypeRef } from "../../../program/ast/types/ast.types.types.tz";
+import {
+  NameSymbol,
+  SymbolKind,
+} from "../../../program/scopes/types/scopes.types.tz";
+
+partial class ScopeTraversal {
+  private traverseFunction(fn: FunctionDecl): void {
+    this.traverseDecorators(fn.role?.decorators ?? []);
+    this.scopes.open();
+    this.scopes.enterFunction();
+    this.declareOwnName(fn);
+    this.declareTypeParams(fn.typeParams);
+
+    for (const param of fn.params) {
+      this.declareValue(
+        { name: param.name, kind: SymbolKind.Parameter, loc: param.loc },
+        false,
+      );
+    }
+
+    for (const param of fn.params) {
+      this.traverseParam(param);
+    }
+
+    this.traverseOptionalType(fn.returnType);
+
+    const body = fn.body;
+    if (body != undefined) {
+      this.declareStatements(body.body);
+      this.traverseStatements(body.body);
+    }
+
+    this.scopes.leaveFunction();
+    this.scopes.close();
+  }
+
+  private declareOwnName(fn: FunctionDecl): void {
+    const name = fn.ownName;
+    if (name != "") {
+      this.scopes.declareValue(
+        { name, kind: SymbolKind.Function, loc: fn.loc },
+        true,
+      );
+    }
+  }
+
+  private traverseParam(param: Param): void {
+    const form = param.form;
+
+    this.traverseDecorators(param.decorators);
+    this.traverseOptionalType(param.type);
+    if (form.kind == ParamKind.Defaulted) {
+      this.defaultOf = param.name;
+      this.traverseExpr(form.defaultValue);
+      this.defaultOf = "";
+    }
+
+    this.scopes.markLive(param.name);
+  }
+
+  private traverseDecorators(decorators: Decorator[]): void {
+    for (const decorator of decorators) {
+      this.traverseExpr(decorator.expr);
+    }
+  }
+
+  private traverseClass(decl: ClassDecl): void {
+    this.traverseDecorators(decl.decorators);
+    this.scopes.open();
+    this.scopes.enterFunction();
+    this.declareExpressionName(decl);
+
+    const methods = this.ownMethods(decl);
+
+    this.scopes.open();
+    this.declareTypeParams(decl.typeParams);
+    this.traverseBase(decl.base);
+    this.traverseOptionalExpr(decl.baseExpr);
+    this.traverseTypes(decl.baseArgs);
+    this.traverseTypes(decl.interfaces);
+
+    for (const field of decl.fields) {
+      this.traverseDecorators(field.decorators);
+      this.traverseOptionalType(field.type);
+      this.traverseOptionalExpr(field.init);
+    }
+
+    for (const made of decl.constructors) {
+      this.traverseFunction(made);
+    }
+
+    for (const method of methods) {
+      if (!this.isStatic(method)) {
+        this.traverseFunction(method);
+      }
+    }
+
+    this.scopes.close();
+
+    for (const method of methods) {
+      if (this.isStatic(method)) {
+        this.traverseFunction(method);
+      }
+    }
+
+    this.scopes.leaveFunction();
+    this.scopes.close();
+  }
+
+  private ownMethods(decl: ClassDecl): FunctionDecl[] {
+    if (decl.isPartial) {
+      return decl.methods;
+    }
+
+    return decl.methods.filter((method) => !this.partMethods.includes(method));
+  }
+
+  private isStatic(method: FunctionDecl): boolean {
+    return method.role?.method == MethodKind.Static;
+  }
+
+  private traverseBase(base: TypeRef | undefined): void {
+    if (base == undefined) {
+      return;
+    }
+    if (this.isValueName(base.name)) {
+      this.useValue(base.name, base.loc);
+
+      return this.traverseTypes(base.args);
+    }
+
+    this.useType(base.name, base.loc, Code.ClassNotFound);
+    this.traverseTypes(base.args);
+  }
+
+  private declareExpressionName(decl: ClassDecl): void {
+    const name = decl.name ?? "";
+    if (!decl.expression || name == "") {
+      return;
+    }
+
+    const symbol: NameSymbol = {
+      name,
+      kind: SymbolKind.Class,
+      loc: decl.loc,
+    };
+
+    this.scopes.declareValue(symbol, true);
+    this.scopes.declareType(symbol);
+  }
+}

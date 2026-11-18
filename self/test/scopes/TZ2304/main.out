@@ -1,0 +1,5 @@
+main.tz
+  1:15 int -> global
+  5:19 int -> global
+  5:25 int -> global
+  6:10 scale -> parameter 5:12

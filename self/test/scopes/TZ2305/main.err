@@ -1,0 +1,6 @@
+main.tz:2:6: error TZ2305: duplicate declaration of type 'T': it is already declared at line 1
+type T = string;
+     ^
+main.tz:8:11: error TZ2305: duplicate declaration of type 'I': it is already declared at line 4
+interface I {
+          ^

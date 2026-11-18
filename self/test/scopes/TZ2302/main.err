@@ -1,0 +1,6 @@
+main.tz:1:10: error TZ2302: cannot find type 'Missing'
+const a: Missing = 1;
+         ^
+main.tz:4:29: error TZ2302: cannot find type 'T'
+  public static make(value: T): int {
+                            ^

@@ -1,0 +1,6 @@
+main.tz:1:18: error TZ2308: cannot find class 'Missing'
+const made = new Missing();
+                 ^
+main.tz:3:21: error TZ2308: cannot find class 'Gone'
+class Child extends Gone {}
+                    ^

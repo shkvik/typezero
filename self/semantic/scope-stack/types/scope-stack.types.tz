@@ -1,0 +1,12 @@
+import { NameSymbol } from "../../../program/scopes/types/scopes.types.tz";
+
+export type ScopeEntry = {
+  readonly symbol: NameSymbol;
+  readonly depth: int;
+  live: boolean;
+};
+
+export type Scope = {
+  readonly values: Map<string, ScopeEntry>;
+  readonly types: Map<string, ScopeEntry>;
+};
