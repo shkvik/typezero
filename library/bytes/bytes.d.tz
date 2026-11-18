@@ -253,6 +253,16 @@ export type AnyTypedArray =
   | Float32Array
   | Float64Array;
 
+/** Any of the typed arrays of integers. */
+export type IntegerTypedArray =
+  | Uint8Array
+  | Uint8ClampedArray
+  | Int8Array
+  | Uint16Array
+  | Int16Array
+  | Uint32Array
+  | Int32Array;
+
 /** Anything that holds bytes: a typed array, a `DataView`, the memory. */
 export type AnyBytes = AnyTypedArray | DataView | ArrayBuffer;
 

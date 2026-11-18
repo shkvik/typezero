@@ -1,0 +1,10 @@
+import {
+  Immediate as TimerImmediate,
+  Timeout as TimerTimeout,
+} from "tz:global/timers";
+
+/** `NodeJS.Timeout`: the same as `Timeout`, as code written for node has it. */
+export type Timeout = TimerTimeout;
+
+/** `NodeJS.Immediate`: the same as `Immediate`. */
+export type Immediate = TimerImmediate;

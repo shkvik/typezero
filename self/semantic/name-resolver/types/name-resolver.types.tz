@@ -1,4 +1,5 @@
 export type GlobalScope = {
   readonly values: Set<string>;
   readonly types: Set<string>;
+  readonly namespaces: Map<string, Set<string>>;
 };

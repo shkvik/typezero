@@ -1,0 +1,13 @@
+/**
+ * A reference that does not keep its object: the object is freed when
+ * nothing else holds it. It is made with `new WeakRef<T>(object)`.
+ */
+export interface WeakRef<T> {
+  /** The object, or `undefined` when it is freed already. */
+  deref(): T | undefined;
+}
+
+/** `WeakRef` has nothing besides `new WeakRef<T>(object)`. */
+export interface WeakRefConstructor {}
+
+export declare const WeakRef: WeakRefConstructor;

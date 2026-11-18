@@ -98,3 +98,6 @@ export declare function parseInt(
  * @example parseFloat("2.5") // ok(2.5)
  */
 export declare function parseFloat(text: string): Result<double, NumberError>;
+
+/** The same as `double`: so that code from TypeScript reads as it is. */
+export type number = double;

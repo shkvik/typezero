@@ -1,5 +1,4 @@
 import {
-  kGlobalNamespaces,
   kGlobalTypes,
   kGlobalValues,
   kUnboundNames,
@@ -20,10 +19,6 @@ export class GlobalNames {
 
   public hasType(name: string): boolean {
     return this.types.has(name);
-  }
-
-  public isNamespace(name: string): boolean {
-    return kGlobalNamespaces.includes(name);
   }
 
   public isUnbound(name: string): boolean {

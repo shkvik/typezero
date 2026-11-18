@@ -1,0 +1,609 @@
+/**
+ * A piece of formatted text: what it is ("day", "literal", "integer",
+ * "currency"…) and the text itself.
+ */
+export type DateTimeFormatPart = { type: string; value: string };
+
+/** The same as `Intl.DateTimeFormatPart`. */
+export type NumberFormatPart = DateTimeFormatPart;
+
+/** A piece of a relative time; a number says which unit it counts. */
+export type RelativeTimeFormatPart = {
+  type: string;
+  value: string;
+  unit?: string;
+};
+
+/**
+ * A form of a word for a number: "zero", "one", "two", "few", "many" or
+ * "other". The same as `string`.
+ */
+export type LDMLPluralRule = string;
+
+/** A unit of time for `Intl.RelativeTimeFormat`. The same as `string`. */
+export type RelativeTimeFormatUnit = string;
+
+/** A tag of a language, e.g. "ru-RU". The same as `string`. */
+export type UnicodeBCP47LocaleIdentifier = string;
+
+/** A tag of a language. The same as `string`. */
+export type BCP47LanguageTag = string;
+
+/** How the languages asked for are matched with those there are. */
+export type SupportedLocalesOptions = {
+  localeMatcher?: "lookup" | "best fit";
+};
+
+/**
+ * A piece of a text: the piece, where it starts, the whole text, and for words
+ * whether it is a word and not what stands between words.
+ */
+export type SegmentData = {
+  segment: string;
+  index: int;
+  input: string;
+  isWordLike?: boolean;
+};
+
+/**
+ * The pieces a `Segmenter` cut a text into. They are gone through with
+ * `for...of`, each a `SegmentData`.
+ */
+export interface Segments {
+  /** The piece the position of the text is in. */
+  containing(index: int): SegmentData | undefined;
+}
+
+/**
+ * The options of `Intl.NumberFormat`. A value known only when the program runs
+ * is checked before.
+ */
+export type NumberFormatOptions = {
+  /** How the language is looked for among those there are. */
+  localeMatcher?: "lookup" | "best fit";
+  /** The digits, e.g. "arab". */
+  numberingSystem?: string;
+  style?: "decimal" | "percent" | "currency" | "unit";
+  /** The code of the currency, e.g. "USD"; needed with the style "currency". */
+  currency?: string;
+  currencyDisplay?: "code" | "symbol" | "narrowSymbol" | "name";
+  currencySign?: "standard" | "accounting";
+  /**
+   * The unit, e.g. "kilometer" or "kilometer-per-hour"; needed with the style
+   * "unit".
+   */
+  unit?: string;
+  unitDisplay?: "short" | "narrow" | "long";
+  /** Whether the thousands are set apart, and when. */
+  useGrouping?: "min2" | "auto" | "always" | "true" | "false" | boolean;
+  notation?: "standard" | "scientific" | "engineering" | "compact";
+  compactDisplay?: "short" | "long";
+  signDisplay?: "auto" | "never" | "always" | "exceptZero" | "negative";
+  /** From 1 to 21. */
+  minimumIntegerDigits?: int;
+  /** From 0 to 100. */
+  minimumFractionDigits?: int;
+  /** From 0 to 100. */
+  maximumFractionDigits?: int;
+  /** From 1 to 21. */
+  minimumSignificantDigits?: int;
+  /** From 1 to 21. */
+  maximumSignificantDigits?: int;
+  /**
+   * One of 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000;
+   * it needs the same minimumFractionDigits and maximumFractionDigits.
+   */
+  roundingIncrement?: int;
+  roundingMode?:
+    | "ceil"
+    | "floor"
+    | "expand"
+    | "trunc"
+    | "halfCeil"
+    | "halfFloor"
+    | "halfExpand"
+    | "halfTrunc"
+    | "halfEven";
+  roundingPriority?: "auto" | "morePrecision" | "lessPrecision";
+  trailingZeroDisplay?: "auto" | "stripIfInteger";
+};
+
+/**
+ * What `resolvedOptions` of an `Intl.NumberFormat` gives: the options as they
+ * were taken.
+ */
+export type ResolvedNumberFormatOptions = {
+  locale: string;
+  numberingSystem: string;
+  style: string;
+  currency?: string;
+  currencyDisplay?: string;
+  currencySign?: string;
+  unit?: string;
+  unitDisplay?: string;
+  minimumIntegerDigits: int;
+  minimumFractionDigits?: int;
+  maximumFractionDigits?: int;
+  minimumSignificantDigits?: int;
+  maximumSignificantDigits?: int;
+  useGrouping: string | boolean;
+  notation: string;
+  compactDisplay?: string;
+  signDisplay: string;
+  roundingIncrement: int;
+  roundingMode: string;
+  roundingPriority: string;
+  trailingZeroDisplay: string;
+};
+
+/**
+ * Writes numbers as a language does: digits, separators, currencies, units,
+ * percents. It is made with `new Intl.NumberFormat(locale, options)`, or the
+ * same without `new`: the language is a tag written in the code or an
+ * `Intl.Locale`, that of the system by default.
+ * @example new Intl.NumberFormat("de", { style: "percent" }).format(0.5)
+ */
+export interface NumberFormat {
+  /** The number as text. */
+  format(value: int | double | decimal): string;
+  /** The text by parts: digits, separators, the sign of the currency. */
+  formatToParts(value: int | double | decimal): NumberFormatPart[];
+  resolvedOptions(): ResolvedNumberFormatOptions;
+}
+
+/** What `Intl.NumberFormat` has besides `new`. */
+export interface NumberFormatConstructor {
+  /** Those of the languages asked for that there is data for. */
+  supportedLocalesOf(
+    locales: string | string[],
+    options?: SupportedLocalesOptions,
+  ): string[];
+}
+
+export declare const NumberFormat: NumberFormatConstructor;
+
+/**
+ * The options of `Intl.Collator`. A value known only when the program runs is
+ * checked before.
+ */
+export type CollatorOptions = {
+  /** How the language is looked for among those there are. */
+  localeMatcher?: "lookup" | "best fit";
+  usage?: "sort" | "search";
+  /** Which differences count. */
+  sensitivity?: "base" | "accent" | "case" | "variant";
+  ignorePunctuation?: boolean;
+  collation?: string;
+  /** Whether "2" goes before "10". */
+  numeric?: boolean;
+  caseFirst?: "upper" | "lower" | "false";
+};
+
+/**
+ * What `resolvedOptions` of an `Intl.Collator` gives: the options as they were
+ * taken.
+ */
+export type ResolvedCollatorOptions = {
+  locale: string;
+  usage: string;
+  sensitivity: string;
+  ignorePunctuation: boolean;
+  collation: string;
+  numeric: boolean;
+  caseFirst: string;
+};
+
+/**
+ * Compares texts as a language orders them. It is made with `new
+ * Intl.Collator(locale, options)`, or the same without `new`: the language is a
+ * tag written in the code or an `Intl.Locale`, that of the system by default.
+ * @example names.sort(new Intl.Collator("ru").compare)
+ */
+export interface Collator {
+  /**
+   * Negative when the first text goes earlier, positive when later, 0 when they
+   * are equal. It can be passed as a function: `sort(collator.compare)`.
+   */
+  compare(first: string, second: string): int;
+  resolvedOptions(): ResolvedCollatorOptions;
+}
+
+/** What `Intl.Collator` has besides `new`. */
+export interface CollatorConstructor {
+  /** Those of the languages asked for that there is data for. */
+  supportedLocalesOf(
+    locales: string | string[],
+    options?: SupportedLocalesOptions,
+  ): string[];
+}
+
+export declare const Collator: CollatorConstructor;
+
+/**
+ * The options of `Intl.PluralRules`. A value known only when the program runs
+ * is checked before.
+ */
+export type PluralRulesOptions = {
+  /** How the language is looked for among those there are. */
+  localeMatcher?: "lookup" | "best fit";
+  /** Counting (1 file) or ordering (1st file). */
+  type?: "cardinal" | "ordinal";
+  /** From 1 to 21. */
+  minimumIntegerDigits?: int;
+  /** From 0 to 100. */
+  minimumFractionDigits?: int;
+  /** From 0 to 100. */
+  maximumFractionDigits?: int;
+  /** From 1 to 21. */
+  minimumSignificantDigits?: int;
+  /** From 1 to 21. */
+  maximumSignificantDigits?: int;
+  /**
+   * One of 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000;
+   * it needs the same minimumFractionDigits and maximumFractionDigits.
+   */
+  roundingIncrement?: int;
+  roundingMode?:
+    | "ceil"
+    | "floor"
+    | "expand"
+    | "trunc"
+    | "halfCeil"
+    | "halfFloor"
+    | "halfExpand"
+    | "halfTrunc"
+    | "halfEven";
+  roundingPriority?: "auto" | "morePrecision" | "lessPrecision";
+  trailingZeroDisplay?: "auto" | "stripIfInteger";
+};
+
+/**
+ * What `resolvedOptions` of an `Intl.PluralRules` gives: the options as they
+ * were taken.
+ */
+export type ResolvedPluralRulesOptions = {
+  locale: string;
+  type: string;
+  minimumIntegerDigits: int;
+  minimumFractionDigits?: int;
+  maximumFractionDigits?: int;
+  minimumSignificantDigits?: int;
+  maximumSignificantDigits?: int;
+  pluralCategories: string[];
+  roundingIncrement: int;
+  roundingMode: string;
+  roundingPriority: string;
+  trailingZeroDisplay: string;
+};
+
+/**
+ * Says which form of a word goes with a number: "one", "few", "many", "other"
+ * and so on. It is made with `new Intl.PluralRules(locale, options)`: the
+ * language is a tag written in the code or an `Intl.Locale`, that of the system
+ * by default.
+ * @example new Intl.PluralRules("ru").select(3) // "few"
+ */
+export interface PluralRules {
+  /** The form for the number. */
+  select(value: int | double | decimal): LDMLPluralRule;
+  resolvedOptions(): ResolvedPluralRulesOptions;
+}
+
+/** What `Intl.PluralRules` has besides `new`. */
+export interface PluralRulesConstructor {
+  /** Those of the languages asked for that there is data for. */
+  supportedLocalesOf(
+    locales: string | string[],
+    options?: SupportedLocalesOptions,
+  ): string[];
+}
+
+export declare const PluralRules: PluralRulesConstructor;
+
+/**
+ * The options of `Intl.RelativeTimeFormat`. A value known only when the program
+ * runs is checked before.
+ */
+export type RelativeTimeFormatOptions = {
+  /** How the language is looked for among those there are. */
+  localeMatcher?: "lookup" | "best fit";
+  numberingSystem?: string;
+  style?: "long" | "short" | "narrow";
+  /** With "auto" words such as "yesterday" are used where there are. */
+  numeric?: "always" | "auto";
+};
+
+/**
+ * What `resolvedOptions` of an `Intl.RelativeTimeFormat` gives: the options as
+ * they were taken.
+ */
+export type ResolvedRelativeTimeFormatOptions = {
+  locale: string;
+  style: string;
+  numeric: string;
+  numberingSystem: string;
+};
+
+/**
+ * Writes how far a moment is from now: "3 days ago", "in 2 hours". It is made
+ * with `new Intl.RelativeTimeFormat(locale, options)`: the language is a tag
+ * written in the code or an `Intl.Locale`, that of the system by default.
+ * @example new Intl.RelativeTimeFormat("en").format(-1, "day") // "1 day ago"
+ */
+export interface RelativeTimeFormat {
+  /**
+   * The text for that many units, negative for the past. The unit is "year",
+   * "quarter", "month", "week", "day", "hour", "minute" or "second", also in
+   * the plural; one known only when the program runs is checked first.
+   */
+  format(value: int | double, unit: RelativeTimeFormatUnit): string;
+  /** The text by parts. */
+  formatToParts(
+    value: int | double,
+    unit: RelativeTimeFormatUnit,
+  ): RelativeTimeFormatPart[];
+  resolvedOptions(): ResolvedRelativeTimeFormatOptions;
+}
+
+/** What `Intl.RelativeTimeFormat` has besides `new`. */
+export interface RelativeTimeFormatConstructor {
+  /** Those of the languages asked for that there is data for. */
+  supportedLocalesOf(
+    locales: string | string[],
+    options?: SupportedLocalesOptions,
+  ): string[];
+}
+
+export declare const RelativeTimeFormat: RelativeTimeFormatConstructor;
+
+/**
+ * The options of `Intl.ListFormat`. A value known only when the program runs is
+ * checked before.
+ */
+export type ListFormatOptions = {
+  /** How the language is looked for among those there are. */
+  localeMatcher?: "lookup" | "best fit";
+  /** With "and", with "or", or with neither. */
+  type?: "conjunction" | "disjunction" | "unit";
+  style?: "long" | "short" | "narrow";
+};
+
+/**
+ * What `resolvedOptions` of an `Intl.ListFormat` gives: the options as they
+ * were taken.
+ */
+export type ResolvedListFormatOptions = {
+  locale: string;
+  type: string;
+  style: string;
+};
+
+/**
+ * Joins texts into a list as a language does: "a, b and c". It is made with
+ * `new Intl.ListFormat(locale, options)`: the language is a tag written in the
+ * code or an `Intl.Locale`, that of the system by default.
+ * @example new Intl.ListFormat("en").format(["a", "b"]) // "a and b"
+ */
+export interface ListFormat {
+  /** The list as text. */
+  format(items: string[]): string;
+  /** The list by parts: the items and what stands between them. */
+  formatToParts(items: string[]): DateTimeFormatPart[];
+  resolvedOptions(): ResolvedListFormatOptions;
+}
+
+/** What `Intl.ListFormat` has besides `new`. */
+export interface ListFormatConstructor {
+  /** Those of the languages asked for that there is data for. */
+  supportedLocalesOf(
+    locales: string | string[],
+    options?: SupportedLocalesOptions,
+  ): string[];
+}
+
+export declare const ListFormat: ListFormatConstructor;
+
+/**
+ * The options of `Intl.DisplayNames`. A value known only when the program runs
+ * is checked before.
+ */
+export type DisplayNamesOptions = {
+  /** How the language is looked for among those there are. */
+  localeMatcher?: "lookup" | "best fit";
+  style?: "long" | "short" | "narrow";
+  /** What the codes name. */
+  type?:
+    | "language"
+    | "region"
+    | "script"
+    | "currency"
+    | "calendar"
+    | "dateTimeField";
+  /** What an unknown code gives: itself or nothing. */
+  fallback?: "code" | "none";
+  languageDisplay?: "dialect" | "standard";
+};
+
+/**
+ * What `resolvedOptions` of an `Intl.DisplayNames` gives: the options as they
+ * were taken.
+ */
+export type ResolvedDisplayNamesOptions = {
+  locale: string;
+  style: string;
+  type: string;
+  fallback: string;
+  languageDisplay?: string;
+};
+
+/**
+ * The names of languages, regions, scripts, currencies and calendars in a
+ * language. The option `type` is needed. It is made with `new
+ * Intl.DisplayNames(locale, options)`: the language is a tag written in the
+ * code or an `Intl.Locale`, that of the system by default.
+ * @example new Intl.DisplayNames("en", { type: "region" }).of("DE")
+ */
+export interface DisplayNames {
+  /** The name for the code. */
+  of(code: string): string | undefined;
+  resolvedOptions(): ResolvedDisplayNamesOptions;
+}
+
+/** What `Intl.DisplayNames` has besides `new`. */
+export interface DisplayNamesConstructor {
+  /** Those of the languages asked for that there is data for. */
+  supportedLocalesOf(
+    locales: string | string[],
+    options?: SupportedLocalesOptions,
+  ): string[];
+}
+
+export declare const DisplayNames: DisplayNamesConstructor;
+
+/**
+ * The options of `Intl.Segmenter`. A value known only when the program runs is
+ * checked before.
+ */
+export type SegmenterOptions = {
+  /** How the language is looked for among those there are. */
+  localeMatcher?: "lookup" | "best fit";
+  granularity?: "grapheme" | "word" | "sentence";
+};
+
+/**
+ * What `resolvedOptions` of an `Intl.Segmenter` gives: the options as they were
+ * taken.
+ */
+export type ResolvedSegmenterOptions = {
+  locale: string;
+  granularity: string;
+};
+
+/**
+ * Cuts a text into what a reader sees as characters, into words or into
+ * sentences. It is made with `new Intl.Segmenter(locale, options)`: the
+ * language is a tag written in the code or an `Intl.Locale`, that of the system
+ * by default.
+ * @example new Intl.Segmenter("en", { granularity: "word" }).segment(text)
+ */
+export interface Segmenter {
+  /** The pieces of the text; they are gone through with `for...of`. */
+  segment(text: string): Segments;
+  resolvedOptions(): ResolvedSegmenterOptions;
+}
+
+/** What `Intl.Segmenter` has besides `new`. */
+export interface SegmenterConstructor {
+  /** Those of the languages asked for that there is data for. */
+  supportedLocalesOf(
+    locales: string | string[],
+    options?: SupportedLocalesOptions,
+  ): string[];
+}
+
+export declare const Segmenter: SegmenterConstructor;
+
+/**
+ * The options of `Intl.DateTimeFormat`. A value known only when the program
+ * runs is checked before.
+ */
+export type DateTimeFormatOptions = {
+  /** How the language is looked for among those there are. */
+  localeMatcher?: "lookup" | "best fit";
+  calendar?: string;
+  numberingSystem?: string;
+  hourCycle?: "h11" | "h12" | "h23" | "h24";
+  /**
+   * The name of the zone, e.g. "Europe/Berlin"; that of the system by default.
+   */
+  timeZone?: string;
+  weekday?: "narrow" | "short" | "long";
+  era?: "narrow" | "short" | "long";
+  year?: "2-digit" | "numeric";
+  month?: "2-digit" | "numeric" | "narrow" | "short" | "long";
+  day?: "2-digit" | "numeric";
+  dayPeriod?: "narrow" | "short" | "long";
+  hour?: "2-digit" | "numeric";
+  minute?: "2-digit" | "numeric";
+  second?: "2-digit" | "numeric";
+  timeZoneName?:
+    | "short"
+    | "long"
+    | "shortOffset"
+    | "longOffset"
+    | "shortGeneric"
+    | "longGeneric";
+  formatMatcher?: "basic" | "best fit";
+  /**
+   * A ready form of the date; it does not go with the options of single parts.
+   */
+  dateStyle?: "full" | "long" | "medium" | "short";
+  /** A ready form of the time. */
+  timeStyle?: "full" | "long" | "medium" | "short";
+  hour12?: boolean;
+  fractionalSecondDigits?: 1 | 2 | 3;
+};
+
+/**
+ * What `resolvedOptions` of an `Intl.DateTimeFormat` gives: the options as they
+ * were taken.
+ */
+export type ResolvedDateTimeFormatOptions = {
+  locale: string;
+  calendar: string;
+  numberingSystem: string;
+  timeZone: string;
+  hourCycle?: string;
+  hour12?: boolean;
+  weekday?: string;
+  era?: string;
+  year?: string;
+  month?: string;
+  day?: string;
+  dayPeriod?: string;
+  hour?: string;
+  minute?: string;
+  second?: string;
+  fractionalSecondDigits?: int;
+  timeZoneName?: string;
+  dateStyle?: string;
+  timeStyle?: string;
+};
+
+/**
+ * Writes dates and times as a language does, in a time zone. It is made with
+ * `new Intl.DateTimeFormat(locale, options)`, or the same without `new`: the
+ * language is a tag written in the code or an `Intl.Locale`, that of the system
+ * by default.
+ * @example new Intl.DateTimeFormat("ru", { dateStyle: "long" }).format()
+ */
+export interface DateTimeFormat {
+  /**
+   * The date as text; this moment when there is none. A number is the
+   * milliseconds since the start of 1970.
+   */
+  format(date?: Date | int): string;
+  /** The text by parts: the day, the month, what stands between them. */
+  formatToParts(date?: Date | int): DateTimeFormatPart[];
+  resolvedOptions(): ResolvedDateTimeFormatOptions;
+}
+
+/** What `Intl.DateTimeFormat` has besides `new`. */
+export interface DateTimeFormatConstructor {
+  /** Those of the languages asked for that there is data for. */
+  supportedLocalesOf(
+    locales: string | string[],
+    options?: SupportedLocalesOptions,
+  ): string[];
+}
+
+export declare const DateTimeFormat: DateTimeFormatConstructor;
+
+/**
+ * The tags of languages in their usual form; a tag known only when the
+ * program runs is parsed first with `Intl.Locale.parse`.
+ * @example Intl.getCanonicalLocales("EN-us") // ["en-US"]
+ */
+export declare function getCanonicalLocales(
+  locales: string | string[],
+): string[];

@@ -55,4 +55,10 @@ export class LibraryModules {
   public members(): LibraryMember[] {
     return kLibraryMembers;
   }
+
+  public hasMember(owner: string, name: string): boolean {
+    return kLibraryMembers.some(
+      (one) => one.owner == owner && one.name == name,
+    );
+  }
 }

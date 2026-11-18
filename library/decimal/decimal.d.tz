@@ -1,0 +1,74 @@
+/** How a decimal is rounded; "half-up" is the usual one. */
+export type RoundingMode =
+  | "up"
+  | "down"
+  | "ceil"
+  | "floor"
+  | "half-up"
+  | "half-down"
+  | "half-even"
+  | "half-ceil"
+  | "half-floor";
+
+/**
+ * What a `decimal` has: an exact number with a fraction, of any length, for
+ * money and for integers past 9.2e18. It counts with the usual operators,
+ * and only with other decimals: an integer becomes one by `toDecimal()`, a
+ * decimal becomes a double by `Number(x)`. `/` keeps 20 places after the
+ * point. A divisor must be proven not to be zero.
+ */
+export interface decimal {
+  /**
+   * Divides, keeping the places after the point and rounding as told.
+   * @example decimal(1).div(decimal(3), 2) // 0.33
+   */
+  div(divisor: decimal, places?: int, mode?: RoundingMode): decimal;
+  /**
+   * Rounds to the places after the point, to an integer by default.
+   * @example decimal("2.5").round(0, "half-even") // 2
+   */
+  round(places?: int, mode?: RoundingMode): decimal;
+
+  /** The number as text with that many places after the point. */
+  toFixed(places?: int, mode?: RoundingMode): string;
+  /**
+   * As `toFixed`, with the thousands set apart.
+   * @example decimal("1234567.891").toFormat(2) // "1,234,567.89"
+   */
+  toFormat(places?: int, mode?: RoundingMode): string;
+  /** The number as text with a power of ten. */
+  toExponential(places?: int, mode?: RoundingMode): string;
+  /** The number as text of that many significant digits. */
+  toPrecision(digits?: int, mode?: RoundingMode): string;
+  /** The number as text in the base, 10 by default. */
+  toString(base?: int): string;
+
+  /** The square root; the number must be proven not to be negative. */
+  sqrt(): decimal;
+  abs(): decimal;
+  /** Whether the number has no fraction. */
+  isInteger(): boolean;
+  /** How many places after the point the number has. */
+  decimalPlaces(): int;
+  /** The number times that power of ten. */
+  shiftedBy(power: int): decimal;
+  /**
+   * The number as a fraction, its numerator and its denominator, the
+   * denominator not above the limit when there is one.
+   */
+  toFraction(maxDenominator?: decimal): decimal[];
+}
+
+/**
+ * What `decimal` has besides `decimal(value)`, which makes a decimal of an
+ * integer, of a double, or of a text: of a text written in the code it is a
+ * decimal, checked when the program is built, and of a text known only when
+ * the program runs a `Result<decimal, DecimalError>`.
+ */
+export interface DecimalConstructor {
+  max(...values: decimal[]): decimal;
+  min(...values: decimal[]): decimal;
+  sum(...values: decimal[]): decimal;
+}
+
+export declare const decimal: DecimalConstructor;

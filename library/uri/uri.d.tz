@@ -1,0 +1,23 @@
+/**
+ * The text with what a URL cannot hold written as `%XX`; the characters
+ * that have a meaning in a URL, such as `/`, `?` and `&`, stay.
+ * @example encodeURI("a b/c") // "a%20b/c"
+ */
+export declare function encodeURI(text: string): string;
+
+/**
+ * As `encodeURI`, with the characters of a URL escaped too: for one part
+ * of a URL, such as the value of a parameter.
+ * @example encodeURIComponent("a b/c") // "a%20b%2Fc"
+ */
+export declare function encodeURIComponent(
+  value: string | boolean | int | double,
+): string;
+
+/** Reads what `encodeURI` wrote; an error when a `%XX` is broken. */
+export declare function decodeURI(text: string): Result<string, UriError>;
+
+/** Reads what `encodeURIComponent` wrote. */
+export declare function decodeURIComponent(
+  text: string,
+): Result<string, UriError>;

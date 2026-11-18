@@ -1,0 +1,14 @@
+/** What a `boolean` has. */
+export interface boolean {
+  /** "true" or "false". */
+  toString(): string;
+}
+
+/**
+ * `Boolean` has nothing besides `Boolean(value)`: whether the value counts
+ * as true. A number and a `Json` are not conditions, so they are compared
+ * as meant: `n != 0`.
+ */
+export interface BooleanConstructor {}
+
+export declare const Boolean: BooleanConstructor;

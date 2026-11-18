@@ -1,154 +1,194 @@
 main.tz
-  6:17 Math -> global
-  7:14 JSON -> global
-  7:34 biggest -> variable 6:7
-  8:14 Array -> global
-  8:20 string -> global
-  8:30 Array -> global
-  8:41 text -> variable 7:7
-  9:15 string -> global
-  9:24 String -> global
-  10:15 Map -> global
-  10:19 string -> global
-  10:27 int -> global
-  10:34 Map -> global
-  10:46 parts -> variable 8:7
-  10:60 string -> global
-  10:71 part -> parameter 10:54
-  11:13 Set -> global
-  11:17 double -> global
-  11:31 Set -> global
-  11:35 double -> global
-  11:44 Number -> global
-  12:16 parseInt -> global
-  12:25 letter -> variable 9:7
-  13:14 Promise -> global
-  13:22 int -> global
-  13:29 Promise -> global
-  13:45 Date -> global
-  14:14 Date -> global
-  14:25 Date -> global
-  16:1 console -> global
-  16:13 text -> variable 7:7
-  16:19 Math -> global
-  16:38 parts -> variable 8:7
-  16:45 letter -> variable 9:7
-  16:53 counts -> variable 10:7
-  16:61 seen -> variable 11:7
-  16:67 parsed -> variable 12:7
+  7:17 Math -> global
+  8:14 JSON -> global
+  8:34 biggest -> variable 7:7
+  9:14 Array -> global
+  9:20 string -> global
+  9:30 Array -> global
+  9:41 text -> variable 8:7
+  10:15 string -> global
+  10:24 String -> global
+  11:15 Map -> global
+  11:19 string -> global
+  11:27 int -> global
+  11:34 Map -> global
+  11:46 parts -> variable 9:7
+  11:60 string -> global
+  11:71 part -> parameter 11:54
+  12:13 Set -> global
+  12:17 double -> global
+  12:31 Set -> global
+  12:35 double -> global
+  12:44 Number -> global
+  13:16 parseInt -> global
+  13:25 letter -> variable 10:7
+  14:14 Promise -> global
+  14:22 int -> global
+  14:29 Promise -> global
+  14:45 Date -> global
+  15:14 Date -> global
+  15:25 Date -> global
   17:1 console -> global
-  17:13 later -> variable 13:7
-  17:20 today -> variable 14:7
-  20:14 Exclude -> global
-  20:40 Extract -> global
-  21:13 NonNullable -> global
-  21:25 int -> global
-  21:31 undefined -> global
-  22:15 ReturnType -> global
-  22:26 first -> function 25:10
-  22:42 Parameters -> global
-  22:53 first -> function 25:10
-  23:13 ReadonlyArray -> global
-  23:27 int -> global
-  23:34 ReadonlyMap -> global
-  23:46 string -> global
-  23:54 int -> global
-  23:61 ReadonlySet -> global
-  23:73 int -> global
-  25:23 Iterable -> global
-  25:32 string -> global
-  25:42 Result -> global
-  25:49 string -> global
-  25:57 Failure -> type 19:6
-  26:16 Iterator -> global
-  26:25 string -> global
-  26:35 Iterator -> global
-  26:49 items -> parameter 25:16
-  27:15 IteratorResult -> global
-  27:30 string -> global
-  28:16 Generator -> global
-  28:26 string -> global
-  28:36 steps -> variable 26:9
-  28:53 string -> global
-  28:64 item -> parameter 28:47
-  30:22 names -> variable 28:9
-  31:12 ok -> global
-  31:15 name -> variable 30:14
-  34:3 console -> global
-  34:15 step -> variable 27:9
-  36:10 err -> global
-  39:16 Result -> global
-  39:23 RegExp -> global
-  39:31 RegexError -> global
-  39:45 RegExp -> global
-  40:14 RegExpMatchArray -> global
-  40:33 undefined -> global
-  40:55 text -> variable 7:7
-  41:15 string -> global
-  41:26 Object -> global
-  42:13 Ok -> global
-  42:16 int -> global
-  42:21 Failure -> type 19:6
-  42:32 ok -> global
-  43:15 Err -> global
-  43:19 int -> global
-  43:24 Failure -> type 19:6
-  43:35 err -> global
-  44:13 PromiseLike -> global
-  44:25 int -> global
-  44:32 later -> variable 13:7
-  46:1 console -> global
-  46:13 pattern -> variable 39:7
-  46:22 found -> variable 40:7
-  46:29 fields -> variable 41:7
-  46:37 sure -> variable 42:7
-  46:43 failed -> variable 43:7
-  46:51 wait -> variable 44:7
-  48:14 Uint8Array -> global
-  48:31 TextEncoder -> global
-  48:52 text -> variable 7:7
-  49:15 Buffer -> global
-  49:24 Buffer -> global
-  49:36 bytes -> variable 48:7
-  50:13 DataView -> global
-  50:28 DataView -> global
-  50:41 ArrayBuffer -> global
-  51:15 FatalTextDecoder -> global
-  51:38 TextDecoder -> global
-  52:13 Uint8Array -> global
-  52:26 embedBytes -> global
-  53:13 Float64Array -> global
-  53:28 Float64Array -> global
-  54:12 AnyTypedArray -> global
-  54:28 AnyBytes -> global
-  54:39 wide -> variable 53:7
-  56:1 console -> global
-  56:13 bytes -> variable 48:7
-  56:20 buffer -> variable 49:7
-  56:28 view -> variable 50:7
-  56:34 strict -> variable 51:7
-  56:42 logo -> variable 52:7
-  56:48 wide -> variable 53:7
-  56:54 any -> variable 54:7
-  58:14 Timeout -> global
-  58:24 setTimeout -> global
-  58:41 process -> global
-  59:13 Immediate -> global
-  59:25 setImmediate -> global
-  59:44 queueMicrotask -> global
-  60:16 double -> global
-  60:25 performance -> global
-  60:45 process -> global
-  61:15 ProcessSignal -> global
-  63:1 process -> global
-  63:12 signal -> variable 61:7
-  63:26 clearTimeout -> global
-  63:39 timer -> variable 58:7
-  64:1 clearInterval -> global
-  64:15 setInterval -> global
-  64:33 clearImmediate -> global
-  64:48 soon -> variable 59:7
-  65:1 console -> global
-  65:13 started -> variable 60:7
-  65:22 process -> global
-  65:36 process -> global
+  17:13 text -> variable 8:7
+  17:19 Math -> global
+  17:38 parts -> variable 9:7
+  17:45 letter -> variable 10:7
+  17:53 counts -> variable 11:7
+  17:61 seen -> variable 12:7
+  17:67 parsed -> variable 13:7
+  18:1 console -> global
+  18:13 later -> variable 14:7
+  18:20 today -> variable 15:7
+  21:14 Exclude -> global
+  21:40 Extract -> global
+  22:13 NonNullable -> global
+  22:25 int -> global
+  22:31 undefined -> global
+  23:15 ReturnType -> global
+  23:26 first -> function 26:10
+  23:42 Parameters -> global
+  23:53 first -> function 26:10
+  24:13 ReadonlyArray -> global
+  24:27 int -> global
+  24:34 ReadonlyMap -> global
+  24:46 string -> global
+  24:54 int -> global
+  24:61 ReadonlySet -> global
+  24:73 int -> global
+  26:23 Iterable -> global
+  26:32 string -> global
+  26:42 Result -> global
+  26:49 string -> global
+  26:57 Failure -> type 20:6
+  27:16 Iterator -> global
+  27:25 string -> global
+  27:35 Iterator -> global
+  27:49 items -> parameter 26:16
+  28:15 IteratorResult -> global
+  28:30 string -> global
+  29:16 Generator -> global
+  29:26 string -> global
+  29:36 steps -> variable 27:9
+  29:53 string -> global
+  29:64 item -> parameter 29:47
+  31:22 names -> variable 29:9
+  32:12 ok -> global
+  32:15 name -> variable 31:14
+  35:3 console -> global
+  35:15 step -> variable 28:9
+  37:10 err -> global
+  40:16 Result -> global
+  40:23 RegExp -> global
+  40:31 RegexError -> global
+  40:45 RegExp -> global
+  41:14 RegExpMatchArray -> global
+  41:33 undefined -> global
+  41:55 text -> variable 8:7
+  42:15 string -> global
+  42:26 Object -> global
+  43:13 Ok -> global
+  43:16 int -> global
+  43:21 Failure -> type 20:6
+  43:32 ok -> global
+  44:15 Err -> global
+  44:19 int -> global
+  44:24 Failure -> type 20:6
+  44:35 err -> global
+  45:13 PromiseLike -> global
+  45:25 int -> global
+  45:32 later -> variable 14:7
+  47:1 console -> global
+  47:13 pattern -> variable 40:7
+  47:22 found -> variable 41:7
+  47:29 fields -> variable 42:7
+  47:37 sure -> variable 43:7
+  47:43 failed -> variable 44:7
+  47:51 wait -> variable 45:7
+  49:14 Uint8Array -> global
+  49:31 TextEncoder -> global
+  49:52 text -> variable 8:7
+  50:15 Buffer -> global
+  50:24 Buffer -> global
+  50:36 bytes -> variable 49:7
+  51:13 DataView -> global
+  51:28 DataView -> global
+  51:41 ArrayBuffer -> global
+  52:15 FatalTextDecoder -> global
+  52:38 TextDecoder -> global
+  53:13 Uint8Array -> global
+  53:26 embedBytes -> global
+  54:13 Float64Array -> global
+  54:28 Float64Array -> global
+  55:12 AnyTypedArray -> global
+  55:28 AnyBytes -> global
+  55:39 wide -> variable 54:7
+  57:1 console -> global
+  57:13 bytes -> variable 49:7
+  57:20 buffer -> variable 50:7
+  57:28 view -> variable 51:7
+  57:34 strict -> variable 52:7
+  57:42 logo -> variable 53:7
+  57:48 wide -> variable 54:7
+  57:54 any -> variable 55:7
+  59:14 Timeout -> global
+  59:24 setTimeout -> global
+  59:41 process -> global
+  60:13 Immediate -> global
+  60:25 setImmediate -> global
+  60:44 queueMicrotask -> global
+  61:16 double -> global
+  61:25 performance -> global
+  61:45 process -> global
+  62:15 ProcessSignal -> global
+  64:1 process -> global
+  64:12 signal -> variable 62:7
+  64:26 clearTimeout -> global
+  64:39 timer -> variable 59:7
+  65:1 clearInterval -> global
+  65:15 setInterval -> global
+  65:33 clearImmediate -> global
+  65:48 soon -> variable 60:7
+  66:1 console -> global
+  66:13 started -> variable 61:7
+  66:22 process -> global
+  66:36 process -> global
+  68:14 decimal -> global
+  68:24 decimal -> global
+  68:36 decimal -> global
+  68:48 decimal -> global
+  69:14 RoundingMode -> global
+  70:15 boolean -> global
+  70:25 Boolean -> global
+  70:33 price -> variable 68:7
+  70:50 round -> variable 69:7
+  71:14 number -> global
+  72:14 Reflect -> global
+  72:32 Date -> global
+  73:13 WeakRef -> global
+  73:21 Date -> global
+  73:33 WeakRef -> global
+  73:41 Date -> global
+  73:51 Date -> global
+  74:11 string -> global
+  74:20 crypto -> global
+  74:42 globalThis -> global
+  75:14 string -> global
+  75:23 encodeURIComponent -> global
+  75:42 id -> variable 74:7
+  75:48 encodeURI -> global
+  75:58 id -> variable 74:7
+  76:14 decodeURIComponent -> global
+  76:33 coded -> variable 75:7
+  76:50 decodeURI -> global
+  76:60 coded -> variable 75:7
+  77:14 TemplateStringsArray -> global
+  77:38 coded -> variable 75:7
+  79:1 console -> global
+  79:13 truthy -> variable 70:7
+  79:21 plain -> variable 71:7
+  79:28 made -> variable 72:7
+  79:34 weak -> variable 73:7
+  79:40 read -> variable 76:7
+  79:46 texts -> variable 77:7
+  79:53 Json -> global
+  79:65 id -> variable 74:7

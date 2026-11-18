@@ -1,12 +1,15 @@
-main.tz:16:28: error TZ2301: cannot find name 'Maths'
+main.tz:17:28: error TZ2301: cannot find name 'Maths'
 console.log(text, Math.PI, Maths.PI, parts, letter, counts, seen, parsed);
                            ^
-main.tz:46:57: error TZ2301: cannot find name 'Results'
+main.tz:47:57: error TZ2301: cannot find name 'Results'
 console.log(pattern, found, fields, sure, failed, wait, Results.combine([]));
                                                         ^
-main.tz:56:59: error TZ2301: cannot find name 'Uint64Array'
+main.tz:57:59: error TZ2301: cannot find name 'Uint64Array'
 console.log(bytes, buffer, view, strict, logo, wide, any, Uint64Array.of(1));
                                                           ^
-main.tz:65:58: error TZ2301: cannot find name 'processes'
+main.tz:66:58: error TZ2301: cannot find name 'processes'
 console.log(started, process.argv, process.stdout.isTTY, processes.pid);
                                                          ^
+main.tz:79:70: error TZ2301: cannot find name 'Decimal'
+console.log(truthy, plain, made, weak, read, texts, Json.isJson(id), Decimal.max());
+                                                                     ^

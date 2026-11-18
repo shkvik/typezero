@@ -1,0 +1,69 @@
+/**
+ * The functions of `Reflect`: for code that is written once and does not
+ * know the classes of a program, such as a router, a container of services
+ * or a reader of requests. The description of a class gets into a program
+ * only for the classes these functions reach.
+ */
+export interface Reflect {
+  /** The field or the method of an object by its name. */
+  get(target: object, name: string): unknown;
+  /**
+   * Calls a function with the object as `this` and the arguments of the
+   * array; an error when the arguments do not fit its parameters.
+   */
+  apply<R>(
+    callee: (...args: never[]) => R,
+    self: unknown,
+    args: unknown[],
+  ): Result<R, ReflectError>;
+  apply(
+    callee: unknown,
+    self: unknown,
+    args: unknown[],
+  ): Result<unknown, ReflectError>;
+  /** Makes an object of a class known only when the program runs. */
+  construct<T>(cls: Constructor<T>, args: unknown[]): Result<T, ReflectError>;
+  /**
+   * Makes an object of a class without a constructor and gives its fields
+   * the values by their names, each checked against the type of the field.
+   */
+  fill<T>(
+    cls: Constructor<T>,
+    values: Map<string, unknown>,
+  ): Result<T, ReflectFillError>;
+
+  /**
+   * Writes a record on a class, or on a member of it. A key is a decorator,
+   * a class or a constant, and then its records have the type of what is
+   * written; or a string, and then they are `unknown`.
+   */
+  defineMetadata(
+    key: unknown,
+    value: unknown,
+    target: object,
+    member?: string,
+  ): void;
+  /**
+   * The record by the key, of the class or of those it extends. The keys
+   * "design:type", "design:paramtypes" and "design:returntype" give the
+   * types written in the code.
+   */
+  getMetadata(key: unknown, target: object, member?: string): unknown;
+  /** As `getMetadata`, of the class itself only. */
+  getOwnMetadata(key: unknown, target: object, member?: string): unknown;
+  hasMetadata(key: unknown, target: object, member?: string): boolean;
+  hasOwnMetadata(key: unknown, target: object, member?: string): boolean;
+  /** Removes the record; whether it was there. */
+  deleteMetadata(key: unknown, target: object, member?: string): boolean;
+  /**
+   * A decorator that writes the record. It is written only as a decorator,
+   * before a class or a member.
+   * @example @Reflect.metadata("table", "users")
+   */
+  metadata(
+    key: unknown,
+    value: unknown,
+  ): (cls: Constructor, member?: string) => void;
+}
+
+export declare const Reflect: Reflect;

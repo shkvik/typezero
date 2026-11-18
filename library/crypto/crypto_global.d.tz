@@ -1,0 +1,22 @@
+/**
+ * What the global `crypto` has. It also has `subtle`, the Web Crypto of the
+ * library, which gets into a program only when it is named.
+ */
+export interface Crypto {
+  /**
+   * A random identifier of version 4.
+   * @example crypto.randomUUID() // "3b241101-e2bb-4255-8caf-4136c566a962"
+   */
+  randomUUID(): string;
+  /** Fills an array of integers with random bits and gives it back. */
+  getRandomValues<A extends IntegerTypedArray>(array: A): A;
+}
+
+export declare const crypto: Crypto;
+
+/** What `globalThis` has: only `crypto`, as code for the web writes it. */
+export interface GlobalThis {
+  readonly crypto: Crypto;
+}
+
+export declare const globalThis: GlobalThis;

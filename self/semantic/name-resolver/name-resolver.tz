@@ -3,8 +3,9 @@ import {
   Stmt,
   StmtKind,
 } from "../../program/ast/types/ast.types.statements.tz";
+import { kLibrary } from "../../program/library/library-modules/const/library-modules.const.tz";
 import { ModuleNames } from "../../program/module-names/types/module-names.types.tz";
-import { Program } from "../../program/module/types/module.types.tz";
+import { Module, Program } from "../../program/module/types/module.types.tz";
 import { ModuleScopes } from "../../program/scopes/types/scopes.types.tz";
 import { ScopeTraversal } from "../scope-traversal/scope-traversal.tz";
 import { GlobalScope } from "./types/name-resolver.types.tz";
@@ -37,6 +38,7 @@ export class NameResolver {
     const globals: GlobalScope = {
       values: new Set<string>(),
       types: new Set<string>(),
+      namespaces: new Map<string, Set<string>>(),
     };
 
     for (const builtin of this.program.builtins) {
@@ -46,17 +48,45 @@ export class NameResolver {
     }
 
     for (const module of this.program.globals) {
-      for (const item of module.file.items) {
-        this.addGlobal(globals, item);
-      }
-
-      for (const one of module.declared) {
-        globals.values.add(one.name);
-        globals.types.add(one.name);
+      const word = kLibrary.named(module.name)?.namespace;
+      if (word == undefined) {
+        this.addDeclared(globals, module);
+      } else {
+        this.addNamespace(globals, module, word);
       }
     }
 
     return globals;
+  }
+
+  private addDeclared(names: GlobalScope, module: Module): void {
+    for (const item of module.file.items) {
+      this.addGlobal(names, item);
+    }
+
+    for (const one of module.declared) {
+      names.values.add(one.name);
+      names.types.add(one.name);
+    }
+  }
+
+  private addNamespace(
+    globals: GlobalScope,
+    module: Module,
+    word: string,
+  ): void {
+    const inside: GlobalScope = {
+      values: new Set<string>(),
+      types: new Set<string>(),
+      namespaces: new Map<string, Set<string>>(),
+    };
+
+    this.addDeclared(inside, module);
+    globals.namespaces.set(word, inside.types);
+
+    if (inside.values.size > 0) {
+      globals.values.add(word);
+    }
   }
 
   private addGlobal(globals: GlobalScope, item: Stmt): void {

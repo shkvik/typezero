@@ -1,0 +1,17 @@
+// `Bit`, `Intl` and `NodeJS` are namespaces: each is a declaration file of the
+// library (library/math/bit.d.tz, intl/intl.d.tz, timers/nodejs.d.tz) whose
+// types are named with the namespace in front, `Intl.NumberFormat`, and whose
+// values are its members. A type the file does not declare is not found.
+// `Intl.Locale` is a class of the library that comes when it is named.
+// `NodeJS` has only types, so it is no value.
+let hash: Bit.Wrap32 = 0x811c9dc5;
+const wide: Bit.Wrap64 | Bit.Wrap128 = Bit.Wrap64.from(1);
+const turned = Bit.rotateLeft32(hash, 3);
+const timer: NodeJS.Timeout = setTimeout(() => {}, 1);
+const soon: NodeJS.Immediate | NodeJS.Interval = setImmediate(() => {});
+const format: Intl.NumberFormat = new Intl.NumberFormat("en");
+const options: Intl.NumberFormatOptions | Intl.Bogus = { style: "percent" };
+const locale: Intl.Locale = new Intl.Locale("en");
+const tags: string[] = Intl.getCanonicalLocales("en-us");
+
+console.log(wide, turned, timer, soon, format, options, locale, tags, NodeJS);

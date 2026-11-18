@@ -13,6 +13,7 @@ export type LibraryModule = {
   readonly parts: string[];
   readonly specs: string[];
   readonly access: LibraryAccess;
+  readonly namespace?: string;
 };
 
 export type LibraryGlobal = {

@@ -1,0 +1,12 @@
+main.tz:8:26: error TZ2302: cannot find type 'Bit.Wrap128'
+const wide: Bit.Wrap64 | Bit.Wrap128 = Bit.Wrap64.from(1);
+                         ^
+main.tz:11:32: error TZ2302: cannot find type 'NodeJS.Interval'
+const soon: NodeJS.Immediate | NodeJS.Interval = setImmediate(() => {});
+                               ^
+main.tz:13:43: error TZ2302: cannot find type 'Intl.Bogus'
+const options: Intl.NumberFormatOptions | Intl.Bogus = { style: "percent" };
+                                          ^
+main.tz:17:71: error TZ2301: cannot find name 'NodeJS'
+console.log(wide, turned, timer, soon, format, options, locale, tags, NodeJS);
+                                                                      ^

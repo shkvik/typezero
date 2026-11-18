@@ -1,0 +1,26 @@
+main.tz
+  7:11 Bit.Wrap32 -> global
+  8:13 Bit.Wrap64 -> global
+  8:40 Bit -> global
+  9:16 Bit -> global
+  9:33 hash -> variable 7:5
+  10:14 NodeJS.Timeout -> global
+  10:31 setTimeout -> global
+  11:13 NodeJS.Immediate -> global
+  11:50 setImmediate -> global
+  12:15 Intl.NumberFormat -> global
+  12:39 Intl -> global
+  13:16 Intl.NumberFormatOptions -> global
+  14:15 Intl.Locale -> global
+  14:33 Intl -> global
+  15:13 string -> global
+  15:24 Intl -> global
+  17:1 console -> global
+  17:13 wide -> variable 8:7
+  17:19 turned -> variable 9:7
+  17:27 timer -> variable 10:7
+  17:34 soon -> variable 11:7
+  17:40 format -> variable 12:7
+  17:48 options -> variable 13:7
+  17:57 locale -> variable 14:7
+  17:65 tags -> variable 15:7

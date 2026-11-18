@@ -18,3 +18,14 @@ export interface JSON {
 
 /** Reading and writing JSON. */
 export declare const JSON: JSON;
+
+/** What `Json` has; the type `Json` is any value of JSON. */
+export interface JsonConstructor {
+  /**
+   * Whether a value of an unknown type is a value of JSON; after the check
+   * it is a `Json`.
+   */
+  isJson(value: unknown): boolean;
+}
+
+export declare const Json: JsonConstructor;

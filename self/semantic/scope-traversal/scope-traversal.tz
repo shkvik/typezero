@@ -7,6 +7,7 @@ import { Code } from "../../diagnostic/code.tz";
 import { Details, SourceError } from "../../diagnostic/types/message.types.tz";
 import { FunctionDecl } from "../../program/ast/types/ast.types.functions.tz";
 import { kGlobalNames } from "../../program/library/global-names/const/global-names.const.tz";
+import { kLibrary } from "../../program/library/library-modules/const/library-modules.const.tz";
 import { ModuleNames } from "../../program/module-names/types/module-names.types.tz";
 import { Module } from "../../program/module/types/module.types.tz";
 import {
@@ -134,13 +135,22 @@ export class ScopeTraversal {
 
       return;
     }
-    if (point >= 0 && this.ownsNames(first)) {
+    if (point >= 0 && this.ownsType(first, name.slice(point + 1))) {
       this.noteUse({ loc, name, isType: true });
 
       return;
     }
 
     this.report(loc, missing, { word: name });
+  }
+
+  private ownsType(owner: string, member: string): boolean {
+    const declared = this.globals.namespaces.get(owner);
+    if (declared != undefined) {
+      return declared.has(member) || kLibrary.hasMember(owner, member);
+    }
+
+    return this.ownsNames(owner);
   }
 
   private isValueName(name: string): boolean {
@@ -160,7 +170,6 @@ export class ScopeTraversal {
 
   private ownsNames(owner: string): boolean {
     return (
-      kGlobalNames.isNamespace(owner) ||
       this.scopes.findValue(owner) != undefined ||
       this.globals.values.has(owner) ||
       kGlobalNames.hasValue(owner)
