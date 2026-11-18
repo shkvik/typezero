@@ -1,7 +1,15 @@
 main.tz
-  4:17 Math -> global
-  5:14 JSON -> global
-  5:34 biggest -> variable 4:7
-  7:1 console -> global
-  7:13 text -> variable 5:7
-  7:19 Math -> global
+  5:17 Math -> global
+  6:14 JSON -> global
+  6:34 biggest -> variable 5:7
+  7:14 Array -> global
+  7:20 string -> global
+  7:30 Array -> global
+  7:41 text -> variable 6:7
+  8:15 string -> global
+  8:24 String -> global
+  10:1 console -> global
+  10:13 text -> variable 6:7
+  10:19 Math -> global
+  10:38 parts -> variable 7:7
+  10:45 letter -> variable 8:7

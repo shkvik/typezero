@@ -188,7 +188,7 @@ self/             компилятор на tz, пробный (порт compile
                   модуль только из объявления (Module.isDeclarationOnly) — его items и
                   imports взяты из файла объявлений, классы — в Module.declared, и всё
                   объявленное экспортируется; так импорт из такого модуля проверяется как
-                  любой другой. Глобальные объекты (`console`, `Math`, `JSON`) описаны так
+                  любой другой. Глобальные объекты (`console`, `Math`, `JSON`, `String`, `Array`) и члены встроенных типов (`interface string`, `interface Array<T>` в library/string/string.d.tz и library/array/array.d.tz) описаны так
                   же — library/console/console.d.tz, math, json: интерфейс с методами и
                   константа этого типа; записи таблицы с доступом Global загружаются всегда,
                   лежат в Program.globals, и всё, что они объявляют, — глобальные имена (в

@@ -1,7 +1,6 @@
 export const kUnboundNames = ["this", "super", "arguments", "null"];
 
 export const kGlobalValues = [
-  "Array",
   "ArrayBuffer",
   "BigInt",
   "BigInt64Array",
@@ -53,7 +52,6 @@ export const kGlobalValues = [
   "setImmediate",
   "setInterval",
   "setTimeout",
-  "String",
   "Symbol",
   "TextDecoder",
   "TextEncoder",
@@ -68,7 +66,6 @@ export const kGlobalValues = [
 ];
 
 export const kGlobalTypes = [
-  "Array",
   "ArrayBuffer",
   "ArrayBufferLike",
   "AsyncGenerator",
@@ -132,7 +129,6 @@ export const kGlobalTypes = [
   "ReturnType",
   "Set",
   "SharedArrayBuffer",
-  "string",
   "TemplateStringsArray",
   "TextDecoder",
   "TextEncoder",

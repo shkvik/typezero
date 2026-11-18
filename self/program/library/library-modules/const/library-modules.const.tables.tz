@@ -230,6 +230,20 @@ export const kLibraryModules: LibraryModule[] = [
     specs: [],
     access: LibraryAccess.Global,
   },
+  {
+    name: "tz:global/string",
+    file: "string.d.tz",
+    parts: [],
+    specs: [],
+    access: LibraryAccess.Global,
+  },
+  {
+    name: "tz:global/array",
+    file: "array.d.tz",
+    parts: [],
+    specs: [],
+    access: LibraryAccess.Global,
+  },
 ];
 
 export const kBuiltinSources: BuiltinSource[] = [
