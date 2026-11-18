@@ -1,0 +1,3 @@
+part.tz:3:15: error TZ2204: 'partial class Shape': "./main.tz" does not declare a class 'Shape'; a part is written for a class declared in the file it is imported from
+partial class Shape {
+              ^

@@ -1,0 +1,3 @@
+main.tz:1:25: error TZ2015: built-in module 'node:tls' is not supported yet (docs/net.md, section 7)
+import { connect } from "node:tls";
+                        ^

@@ -2,7 +2,8 @@
 # them.
 #
 #   MODE=build: `tz build` of self/main.tz into EXE must succeed. The other
-#     modes run that EXE.
+#     modes run that EXE. The files of library/ are copied into lib/ next to
+#     EXE, where the loader looks for the modules of the library.
 #
 #   MODE=error: self/test/errors/CODE.tz is a source with a mistake, named
 #     after the code of the error it is about (TZ1221.tz). `EXE check CODE.tz`,
@@ -20,19 +21,22 @@
 #     get wrong. `EXE tree NAME.tz` must report no error and print exactly
 #     NAME.tree. ACCEPT=ON works as for MODE=error.
 #
-#   MODE=program: self/test/programs/NAME/ is a program of several files with
-#     the entry main.tz (SRC). `EXE load main.tz`, run in that directory, must
-#     print to stdout exactly main.out: the modules, a module after the ones
-#     it imports, each with where its imports lead. When main.err is there,
-#     the program has mistakes: the exit code must be 1 and stderr exactly
-#     main.err; without it the exit code is 0 and stderr is empty. A
-#     directory named after a code (TZ2007) is the test of that code: one of
-#     the errors must have it. ACCEPT=ON writes main.out and main.err.
+#   MODE=program: self/test/programs/NAME/ and self/test/names/NAME/ are
+#     programs of several files with the entry main.tz (SRC). `EXE COMMAND
+#     main.tz`, run in that directory, must print to stdout exactly main.out.
+#     COMMAND=load (programs) prints the modules, a module after the ones it
+#     imports, each with where its imports lead; COMMAND=names (names) prints
+#     what every module declares, exports and imports, each name with the
+#     declaration it leads to. When main.err is there, the program has
+#     mistakes: the exit code must be 1 and stderr exactly main.err; without
+#     it the exit code is 0 and stderr is empty. A directory named after a
+#     code (TZ2007) is the test of that code: one of the errors must have it.
+#     ACCEPT=ON writes main.out and main.err.
 #
 #   MODE=codes: every code of self/diagnostic/code.tz has its test,
-#     self/test/errors/CODE.tz or self/test/programs/CODE/main.tz, and every
-#     test in self/test/errors is named after a code. A code no source can
-#     get does not stay in code.tz.
+#     self/test/errors/CODE.tz or main.tz in self/test/programs/CODE or
+#     self/test/names/CODE, and every test in self/test/errors is named after
+#     a code. A code no source can get does not stay in code.tz.
 #
 #   A test of a declaration file: when NAME.d.tz is next to NAME.tz, the file
 #     that is checked is NAME.d.tz, and NAME.tz is its module. tzparse reads
@@ -63,6 +67,9 @@ if(MODE STREQUAL "build")
   if(NOT exit_code EQUAL 0)
     fail("tz build of self/main.tz exited with ${exit_code}:\n${stdout}${stderr}")
   endif()
+  file(GLOB_RECURSE library ${ROOT}/library/*.tz)
+  file(REMOVE_RECURSE ${dir}/lib)
+  file(COPY ${library} DESTINATION ${dir}/lib)
 
 elseif(MODE STREQUAL "error" OR MODE STREQUAL "recovery")
   get_filename_component(dir ${SRC} DIRECTORY)
@@ -130,7 +137,7 @@ elseif(MODE STREQUAL "program")
   get_filename_component(dir ${SRC} DIRECTORY)
   get_filename_component(name ${dir} NAME)
   execute_process(
-    COMMAND ${EXE} load main.tz
+    COMMAND ${EXE} ${COMMAND} main.tz
     WORKING_DIRECTORY ${dir}
     OUTPUT_VARIABLE stdout
     ERROR_VARIABLE stderr
@@ -153,12 +160,12 @@ elseif(MODE STREQUAL "program")
     return()
   endif()
   if(NOT EXISTS ${dir}/main.out)
-    fail("there is no main.out with the expected modules; the modules are:\n${stdout}")
+    fail("there is no main.out with the expected output; the output is:\n${stdout}")
   endif()
   file(READ ${dir}/main.out expected)
   string(REPLACE "\r\n" "\n" expected "${expected}")
   if(NOT stdout STREQUAL expected)
-    fail("the modules differ from main.out\n--- expected:\n${expected}\n--- actual:\n${stdout}")
+    fail("the output differs from main.out\n--- expected:\n${expected}\n--- actual:\n${stdout}")
   endif()
   set(expected "")
   set(expected_exit 0)
@@ -182,9 +189,10 @@ elseif(MODE STREQUAL "codes")
     string(REGEX MATCH "TZ[0-9]+" code "${line}")
     list(APPEND codes ${code})
     if(NOT EXISTS ${ROOT}/self/test/errors/${code}.tz AND
-       NOT EXISTS ${ROOT}/self/test/programs/${code}/main.tz)
+       NOT EXISTS ${ROOT}/self/test/programs/${code}/main.tz AND
+       NOT EXISTS ${ROOT}/self/test/names/${code}/main.tz)
       string(APPEND problems
-        "${code} has no test self/test/errors/${code}.tz or self/test/programs/${code}/main.tz\n")
+        "${code} has no test: self/test/errors/${code}.tz, or main.tz in self/test/programs/${code} or self/test/names/${code}\n")
     endif()
   endforeach()
   file(GLOB tests RELATIVE ${ROOT}/self/test/errors ${ROOT}/self/test/errors/*)

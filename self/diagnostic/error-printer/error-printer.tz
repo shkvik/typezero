@@ -1,16 +1,32 @@
-import { SourceText } from "../../program/module/types/module.types.tz";
+import {
+  SourcePiece,
+  SourceText,
+} from "../../program/module/types/module.types.tz";
 import { SourceLines } from "../../program/source-lines/source-lines.tz";
 import { messageText } from "../message.tz";
 import { SourceError } from "../types/message.types.tz";
 import { kPointer } from "./const/error-printer.const.tz";
+import { SourceView } from "./types/error-printer.types.tz";
 
 export class ErrorPrinter {
-  private readonly path: string;
-  private readonly lines: SourceLines;
+  private readonly views: SourceView[];
 
   public constructor(source: SourceText) {
-    this.path = source.path;
-    this.lines = new SourceLines(source.text);
+    this.views = [];
+
+    const whole: SourcePiece = { path: source.path, start: 0 };
+    const pieces = source.pieces ?? [whole];
+    const text = source.text;
+
+    for (let index = 0; index < pieces.length; index++) {
+      const piece = pieces[index];
+      const next = pieces[index + 1];
+      const end = next?.start ?? text.length;
+      const pieceText = text.subarray(piece.start, end);
+      const lines = new SourceLines(pieceText);
+
+      this.views.push({ path: piece.path, start: piece.start, lines });
+    }
   }
 
   public print(errors: SourceError[]): void {
@@ -22,14 +38,32 @@ export class ErrorPrinter {
   }
 
   private describe(error: SourceError): string {
-    const shown = this.lines.textEndBefore(error.loc);
-    const place = this.lines.placeOf(shown);
+    const view = this.viewAt(error.loc);
+    if (view == undefined) {
+      return "";
+    }
+
+    const lines = view.lines;
+    const shown = lines.textEndBefore(error.loc - view.start);
+    const place = lines.placeOf(shown);
     const message = messageText(error.code, error.details);
-    const where = `${this.path}:${place.line}:${place.column}`;
+    const where = `${view.path}:${place.line}:${place.column}`;
     const headline = `${where}: error ${error.code}: ${message}`;
-    const line = this.lines.lineTextAt(shown);
-    const indent = this.lines.indentTo(shown);
+    const line = lines.lineTextAt(shown);
+    const indent = lines.indentTo(shown);
 
     return `${headline}\n${line}\n${indent}${kPointer}`;
+  }
+
+  private viewAt(loc: int): SourceView | undefined {
+    let found = this.views[0];
+
+    for (const view of this.views) {
+      if (view.start <= loc) {
+        found = view;
+      }
+    }
+
+    return found;
   }
 }

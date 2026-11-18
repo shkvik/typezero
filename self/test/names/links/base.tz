@@ -1,0 +1,2 @@
+export const side = 1;
+const hidden = 2;

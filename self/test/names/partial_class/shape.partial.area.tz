@@ -1,0 +1,7 @@
+import { Shape } from "./shape.tz";
+
+partial class Shape {
+  public area(): int {
+    return this.side * this.side;
+  }
+}

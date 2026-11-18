@@ -1,0 +1,16 @@
+import { ClassDecl } from "../../../program/ast/types/ast.types.classes.tz";
+import {
+  ImportDecl,
+  ModuleName,
+} from "../../../program/ast/types/ast.types.modules.tz";
+import { OpenModule } from "../../loader/types/loader.types.tz";
+
+export type PartTarget = {
+  readonly decl: ClassDecl;
+  readonly module: OpenModule;
+};
+
+export type ImportedClass = {
+  readonly decl: ImportDecl;
+  readonly name: ModuleName;
+};

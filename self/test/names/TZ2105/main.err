@@ -1,0 +1,3 @@
+main.tz:2:1: error TZ2105: 'same' is exported both by './one.tz' and by './two.tz' through 'export *'; re-export the one you mean by name, e.g. 'export { same } from "./one.tz"'
+export * from "./two.tz";
+^

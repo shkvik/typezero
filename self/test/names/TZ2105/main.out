@@ -1,0 +1,8 @@
+one.tz
+  declared same
+  export same -> one.tz:same
+two.tz
+  declared same
+  export same -> two.tz:same
+main.tz
+  export same -> one.tz:same by * from "./one.tz"

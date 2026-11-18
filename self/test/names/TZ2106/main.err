@@ -1,0 +1,3 @@
+main.tz:1:10: error TZ2106: './lib.tz' has no export named 'missing'
+import { missing } from "./lib.tz";
+         ^

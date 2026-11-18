@@ -1,0 +1,72 @@
+import { ModuleBinder } from "../module-binder.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  ImportDecl,
+  ModuleName,
+} from "../../../program/ast/types/ast.types.modules.tz";
+import { ModuleExport } from "../../../program/module-names/types/module-names.types.tz";
+import { BoundModule } from "../types/module-binder.types.tz";
+
+partial class ModuleBinder {
+  private bindImports(bound: BoundModule): void {
+    const module = bound.names.module;
+
+    for (const decl of module.file.imports) {
+      this.bindImport(bound, decl);
+    }
+
+    for (const decl of module.implicit) {
+      this.bindImport(bound, decl);
+    }
+  }
+
+  private bindImport(bound: BoundModule, decl: ImportDecl): void {
+    const from = decl.from;
+    const source = this.linkedModule(bound, from);
+    if (source == undefined) {
+      return;
+    }
+
+    const theirs = this.exportsOf(source);
+
+    for (const name of decl.names) {
+      this.importName(bound, source, from.path, name, theirs);
+    }
+  }
+
+  private importName(
+    bound: BoundModule,
+    source: BoundModule,
+    path: string,
+    name: ModuleName,
+    theirs: Map<string, ModuleExport>,
+  ): void {
+    const target = this.exportedBy(bound, source, path, name, theirs);
+    if (target == undefined) {
+      return;
+    }
+
+    const names = bound.names;
+    const word = name.as;
+    if (names.declared.has(word)) {
+      this.report(bound, name.asLoc, Code.ImportConflictsWithDeclaration, {
+        word,
+        other: name.name,
+        path,
+      });
+
+      return;
+    }
+
+    const previous = names.imports.get(word);
+    if (previous != undefined) {
+      const other = this.lineOf(bound, previous.loc);
+
+      this.report(bound, name.asLoc, Code.DuplicateImport, { word, other });
+
+      return;
+    }
+
+    names.imports.set(word, { target, loc: name.asLoc });
+  }
+}

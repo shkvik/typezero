@@ -1,0 +1,3 @@
+import { a } from "./lib.tz";
+
+const a = 2;

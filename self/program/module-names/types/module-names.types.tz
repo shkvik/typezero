@@ -1,0 +1,24 @@
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import { ModulePath } from "../../ast/types/ast.types.modules.tz";
+import { Module } from "../../module/types/module.types.tz";
+
+export type NameTarget = { readonly module: int; readonly name: string };
+
+export type ModuleExport = {
+  readonly target: NameTarget;
+  readonly loc: int;
+  readonly star?: ModulePath;
+};
+
+export type ModuleImport = {
+  readonly target: NameTarget;
+  readonly loc: int;
+};
+
+export type ModuleNames = {
+  readonly module: Module;
+  readonly declared: Map<string, int>;
+  readonly exports: Map<string, ModuleExport>;
+  readonly imports: Map<string, ModuleImport>;
+  readonly errors: SourceError[];
+};

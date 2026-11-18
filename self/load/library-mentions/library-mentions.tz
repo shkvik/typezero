@@ -1,0 +1,192 @@
+import {
+  ImportDecl,
+  ModuleName,
+  SourceFile,
+} from "../../program/ast/types/ast.types.modules.tz";
+import {
+  Stmt,
+  StmtKind,
+} from "../../program/ast/types/ast.types.statements.tz";
+import { kLibrary } from "../../program/library/library-modules/const/library-modules.const.tz";
+import { LibraryMember } from "../../program/library/library-modules/types/library-modules.types.tz";
+import { Token, TokenKind } from "../token/types/token.types.tz";
+import { Mentions } from "./types/library-mentions.types.tz";
+
+export class LibraryMentions {
+  public imports(tokens: Token[], file: SourceFile): ImportDecl[] {
+    const mentions = this.mentioned(tokens);
+    const imports: ImportDecl[] = [];
+
+    if (mentions.globals.size == 0 && mentions.members.size == 0) {
+      return imports;
+    }
+
+    const own = this.ownNames(file);
+
+    for (const global of kLibrary.globals()) {
+      const name = global.name;
+      const loc = mentions.globals.get(name);
+      if (loc != undefined && !own.has(name)) {
+        this.addName(imports, global.module, {
+          name,
+          loc,
+          as: name,
+          asLoc: loc,
+        });
+      }
+    }
+
+    for (const member of kLibrary.members()) {
+      const loc = mentions.members.get(member.alias);
+      if (loc != undefined) {
+        this.addName(imports, member.module, {
+          name: member.name,
+          loc,
+          as: member.alias,
+          asLoc: loc,
+        });
+      }
+    }
+
+    return imports;
+  }
+
+  private mentioned(tokens: Token[]): Mentions {
+    const mentions: Mentions = {
+      globals: new Map<string, int>(),
+      members: new Map<string, int>(),
+    };
+
+    for (let index = 0; index < tokens.length; index++) {
+      const token = tokens[index];
+      if (token.kind == TokenKind.Identifier) {
+        this.noteName(mentions, tokens, index, token);
+      }
+    }
+
+    return mentions;
+  }
+
+  private noteName(
+    mentions: Mentions,
+    tokens: Token[],
+    index: int,
+    token: Token,
+  ): void {
+    const name = token.text;
+    const before = tokens[index - 1];
+    const property =
+      before?.kind == TokenKind.Dot || before?.kind == TokenKind.QuestionDot;
+    if (!property) {
+      this.noteGlobal(mentions, name, token.start);
+
+      return;
+    }
+
+    for (const member of kLibrary.members()) {
+      if (this.isMember(member, tokens, index, name)) {
+        this.noteFirst(mentions.members, member.alias, token.start);
+      }
+    }
+  }
+
+  private noteGlobal(mentions: Mentions, name: string, loc: int): void {
+    if (kLibrary.global(name) != undefined) {
+      this.noteFirst(mentions.globals, name, loc);
+    }
+  }
+
+  private noteFirst(places: Map<string, int>, name: string, loc: int): void {
+    if (!places.has(name)) {
+      places.set(name, loc);
+    }
+  }
+
+  private isMember(
+    member: LibraryMember,
+    tokens: Token[],
+    index: int,
+    name: string,
+  ): boolean {
+    const point = tokens[index - 1];
+    const owner = tokens[index - 2];
+    if (name != member.name || point == undefined || owner == undefined) {
+      return false;
+    }
+
+    const plain = point.kind == TokenKind.Dot;
+    const optional = point.kind == TokenKind.QuestionDot && member.optional;
+    const owned =
+      owner.kind == TokenKind.Identifier && owner.text == member.owner;
+
+    return owned && (plain || optional);
+  }
+
+  private ownNames(file: SourceFile): Set<string> {
+    const own = new Set<string>();
+
+    for (const item of file.items) {
+      this.addDeclared(own, item);
+    }
+
+    for (const decl of file.imports) {
+      this.addImported(own, decl);
+    }
+
+    return own;
+  }
+
+  private addDeclared(own: Set<string>, item: Stmt): void {
+    switch (item.kind) {
+      case StmtKind.VarDecl:
+        for (const decl of item.decls) {
+          own.add(decl.name);
+        }
+        break;
+      case StmtKind.Function:
+      case StmtKind.TypeAlias:
+      case StmtKind.Enum:
+      case StmtKind.Handle:
+        own.add(item.name);
+        break;
+      case StmtKind.Class:
+        own.add(item.name ?? "");
+        break;
+      default:
+        break;
+    }
+  }
+
+  private addImported(own: Set<string>, decl: ImportDecl): void {
+    for (const name of decl.names) {
+      own.add(name.as);
+    }
+
+    const whole = decl.whole;
+    if (whole != undefined) {
+      own.add(whole.name);
+    }
+  }
+
+  private addName(
+    imports: ImportDecl[],
+    module: string,
+    name: ModuleName,
+  ): void {
+    const known = imports.find((decl) => decl.from.path == module);
+    if (known != undefined) {
+      known.names.push(name);
+
+      return;
+    }
+
+    const loc = name.loc;
+
+    imports.push({
+      loc,
+      names: [name],
+      from: { path: module, loc },
+      isPartList: false,
+    });
+  }
+}

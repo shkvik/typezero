@@ -1,1 +1,2 @@
 export const kWindowsPlatform = "win32";
+export const kLineBreak = "\n";

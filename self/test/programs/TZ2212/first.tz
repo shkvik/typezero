@@ -1,0 +1,15 @@
+import { Shape } from "./main.tz";
+
+partial class Shape {
+  public area(): int {
+    return 1;
+  }
+
+  public area(scale: int): int {
+    return scale;
+  }
+
+  public side(): int {
+    return 2;
+  }
+}

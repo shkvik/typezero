@@ -1,0 +1,3 @@
+import { extra } from "./parts/area.tz";
+
+export class Shape {}

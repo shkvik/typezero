@@ -1,0 +1,17 @@
+modules 9
+tz:intrinsics (library)
+tz:web (library)
+node:events (library)
+node:string_decoder (library)
+node:stream (library)
+tz:url (library)
+tz:webcrypto (library)
+tz:fetch (library)
+main.tz
+  "node:events" 332 -> node:events
+  "events" 368 -> node:events
+  "node:stream" 403 -> node:stream
+  "node:fs" 447 -> builtin
+  "tz:url" 497 -> tz:url
+  "tz:webcrypto" 575 -> tz:webcrypto
+  "tz:fetch" 599 -> tz:fetch

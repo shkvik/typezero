@@ -1,4 +1,9 @@
 import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import { ClassDecl } from "../../../program/ast/types/ast.types.classes.tz";
+import {
+  ImportDecl,
+  ModulePath,
+} from "../../../program/ast/types/ast.types.modules.tz";
 import {
   ModuleLink,
   ParsedDeclaration,
@@ -19,8 +24,15 @@ export type OpenModule = {
   readonly parsed: ParsedFile;
   readonly declaration?: ParsedDeclaration;
   readonly links: ModuleLink[];
+  readonly implicit: ImportDecl[];
+  readonly parts: ClassDecl[];
   readonly problems: SourceError[];
   state: ModuleState;
+};
+
+export type Request = {
+  readonly from: ModulePath;
+  readonly isImplicit: boolean;
 };
 
 export type LoadResult = {

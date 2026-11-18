@@ -1,0 +1,331 @@
+import { basename, dirname, relative, resolve } from "node:path";
+import { Code } from "../../diagnostic/code.tz";
+import { Details } from "../../diagnostic/types/message.types.tz";
+import { ClassDecl } from "../../program/ast/types/ast.types.classes.tz";
+import {
+  ImportDecl,
+  ModulePath,
+} from "../../program/ast/types/ast.types.modules.tz";
+import { StmtKind } from "../../program/ast/types/ast.types.statements.tz";
+import {
+  kPathSeparator,
+  kWindowsSeparator,
+} from "../../program/module/const/module.const.tz";
+import { LinkKind } from "../../program/module/types/module.types.tz";
+import { OpenModule } from "../loader/types/loader.types.tz";
+import { ImportedClass, PartTarget } from "./types/partial-classes.types.tz";
+import {
+  kHerePrefix,
+  kParentStart,
+  kTypeParamJoin,
+} from "./const/partial-classes.const.tz";
+
+export class PartialClasses {
+  private readonly modules: OpenModule[];
+  private readonly byId: Map<int, OpenModule>;
+  private readonly homes: Map<string, OpenModule>;
+
+  public constructor(modules: OpenModule[]) {
+    this.modules = modules;
+    this.byId = new Map<int, OpenModule>();
+    this.homes = new Map<string, OpenModule>();
+  }
+
+  public join(): void {
+    for (const module of this.modules) {
+      this.byId.set(module.id, module);
+    }
+
+    for (const module of this.modules) {
+      this.checkPartLists(module);
+    }
+
+    for (const module of this.modules) {
+      this.joinModuleParts(module);
+    }
+  }
+
+  private checkPartLists(module: OpenModule): void {
+    for (const decl of module.parsed.file.imports) {
+      if (decl.isPartList) {
+        this.checkPartList(module, decl);
+      }
+    }
+  }
+
+  private checkPartList(module: OpenModule, decl: ImportDecl): void {
+    const listed = this.linkedModule(module, decl.from);
+    if (listed == undefined) {
+      return;
+    }
+
+    const parts = this.partsIn(listed);
+    const hasPart = parts.some((part) => this.isPartOf(part, listed, module));
+    if (!hasPart) {
+      this.report(module, decl.loc, Code.PartListWithoutPart, {
+        path: decl.from.path,
+      });
+    }
+  }
+
+  private partsIn(module: OpenModule): ClassDecl[] {
+    const parts: ClassDecl[] = [];
+
+    for (const item of module.parsed.file.items) {
+      if (item.kind == StmtKind.Class && item.isPartial) {
+        parts.push(item);
+      }
+    }
+
+    return parts;
+  }
+
+  private isPartOf(
+    part: ClassDecl,
+    module: OpenModule,
+    classModule: OpenModule,
+  ): boolean {
+    const imported = this.importedAs(module, part.name ?? "");
+    if (imported == undefined) {
+      return false;
+    }
+
+    const from = this.linkedModule(module, imported.decl.from);
+
+    return from == classModule;
+  }
+
+  private joinModuleParts(module: OpenModule): void {
+    for (const part of this.partsIn(module)) {
+      module.parts.push(part);
+      this.joinPart(module, part);
+    }
+  }
+
+  private joinPart(module: OpenModule, part: ClassDecl): void {
+    const word = part.name ?? "";
+    const target = this.partTarget(module, part, word);
+    if (target == undefined) {
+      return;
+    }
+
+    this.checkShape(module, part, word);
+    if (!this.hasSameTypeParams(part, target.decl)) {
+      const other = this.typeParamsText(target.decl);
+
+      this.report(module, part.loc, Code.PartTypeParams, { word, other });
+
+      return;
+    }
+
+    this.joinMethods(module, part, target, word);
+  }
+
+  private partTarget(
+    module: OpenModule,
+    part: ClassDecl,
+    word: string,
+  ): PartTarget | undefined {
+    const loc = part.loc;
+    const imported = this.importedAs(module, word);
+    if (imported == undefined) {
+      const other = word.toLowerCase();
+
+      this.report(module, loc, Code.PartClassNotImported, { word, other });
+
+      return undefined;
+    }
+
+    const from = imported.decl.from;
+    const path = from.path;
+    const classModule = this.linkedModule(module, from);
+    if (classModule == undefined) {
+      return undefined;
+    }
+    if (classModule.parsed.source.isLibrary) {
+      this.report(module, loc, Code.PartOfLibraryClass, { word, path });
+
+      return undefined;
+    }
+
+    const decl = this.declaredClass(classModule, imported.name.name);
+    if (decl == undefined) {
+      this.report(module, loc, Code.PartClassNotDeclared, { word, path });
+
+      return undefined;
+    }
+    if (!this.listsPart(classModule, module)) {
+      this.report(module, loc, Code.PartNotListed, {
+        word,
+        other: basename(classModule.file),
+        path: this.importPath(classModule, module),
+      });
+
+      return undefined;
+    }
+    if (decl.baseExpr != undefined) {
+      this.report(module, loc, Code.PartOfClassExtendingValue, { word });
+
+      return undefined;
+    }
+
+    return { decl, module: classModule };
+  }
+
+  private importedAs(
+    module: OpenModule,
+    word: string,
+  ): ImportedClass | undefined {
+    for (const decl of module.parsed.file.imports) {
+      const name = decl.names.find((one) => one.as == word);
+      if (name != undefined) {
+        return { decl, name };
+      }
+    }
+
+    return undefined;
+  }
+
+  private declaredClass(
+    module: OpenModule,
+    name: string,
+  ): ClassDecl | undefined {
+    for (const item of module.parsed.file.items) {
+      if (item.kind != StmtKind.Class) {
+        continue;
+      }
+      if (!item.isPartial && item.name == name) {
+        return item;
+      }
+    }
+
+    return undefined;
+  }
+
+  private listsPart(classModule: OpenModule, module: OpenModule): boolean {
+    const imports = classModule.parsed.file.imports;
+    const lists = imports.filter((decl) => decl.isPartList);
+
+    return lists.some(
+      (decl) => this.linkedModule(classModule, decl.from) == module,
+    );
+  }
+
+  private checkShape(module: OpenModule, part: ClassDecl, word: string): void {
+    const field = part.fields[0];
+    if (field != undefined) {
+      this.report(module, field.loc, Code.PartHasField, {
+        word,
+        other: field.name,
+      });
+    }
+
+    const made = part.constructors[0];
+    if (made != undefined) {
+      this.report(module, made.loc, Code.PartHasConstructor, { word });
+    }
+
+    const hasHeader =
+      part.base != undefined ||
+      part.baseExpr != undefined ||
+      part.interfaces.length > 0;
+    if (hasHeader) {
+      this.report(module, part.loc, Code.PartHasHeader, { word });
+    }
+
+    const decorator = part.decorators[0];
+    if (decorator != undefined) {
+      this.report(module, decorator.loc, Code.PartHasDecorators, { word });
+    }
+  }
+
+  private hasSameTypeParams(part: ClassDecl, decl: ClassDecl): boolean {
+    const written = part.typeParams;
+    const declared = decl.typeParams;
+    if (written.length != declared.length) {
+      return false;
+    }
+
+    for (let index = 0; index < written.length; index++) {
+      const param = written[index];
+      const same =
+        param.name == declared[index]?.name &&
+        param.constraint == undefined &&
+        param.defaultType == undefined;
+      if (!same) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private typeParamsText(decl: ClassDecl): string {
+    if (decl.typeParams.length == 0) {
+      return "";
+    }
+
+    const names = decl.typeParams.map((param) => param.name);
+
+    return `<${names.join(kTypeParamJoin)}>`;
+  }
+
+  private joinMethods(
+    module: OpenModule,
+    part: ClassDecl,
+    target: PartTarget,
+    word: string,
+  ): void {
+    const methods = target.decl.methods;
+
+    for (const method of part.methods) {
+      const name = method.name;
+      const key = `${target.module.id} ${word} ${name}`;
+      const declared = methods.some((one) => one.name == name);
+      const home = this.homes.get(key) ?? target.module;
+      if (declared && home != module) {
+        this.report(module, method.loc, Code.PartMethodTwice, {
+          word: name,
+          other: word,
+          path: basename(home.file),
+        });
+      } else {
+        methods.push(method);
+        this.homes.set(key, module);
+      }
+    }
+  }
+
+  private linkedModule(
+    module: OpenModule,
+    from: ModulePath,
+  ): OpenModule | undefined {
+    const link = module.links.find((one) => one.from.loc == from.loc);
+    if (link == undefined || link.kind != LinkKind.Module) {
+      return undefined;
+    }
+
+    return this.byId.get(link.target);
+  }
+
+  private importPath(from: OpenModule, to: OpenModule): string {
+    const base = dirname(resolve(from.file));
+    const target = resolve(to.file);
+    const native = relative(base, target);
+    const path = native.replaceAll(kWindowsSeparator, kPathSeparator);
+    if (path.startsWith(kParentStart)) {
+      return path;
+    }
+
+    return `${kHerePrefix}${path}`;
+  }
+
+  private report(
+    module: OpenModule,
+    loc: int,
+    code: Code,
+    details: Details,
+  ): void {
+    module.problems.push({ code, loc, details });
+  }
+}

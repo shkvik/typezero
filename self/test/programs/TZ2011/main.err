@@ -1,0 +1,3 @@
+main.tz:1:26: error TZ2011: built-in module 'node:zlib' is not supported yet
+import { gzipSync } from "node:zlib";
+                         ^

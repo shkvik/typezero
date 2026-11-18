@@ -1,0 +1,3 @@
+main.tz:1:30: error TZ2101: a built-in module is not re-exported: import what a file needs from 'node:fs' in that file
+export { readFileSync } from "node:fs";
+                             ^

@@ -1,0 +1,6 @@
+modules 2
+part.tz
+  part Box: 
+  "./main.tz" 20 -> main.tz
+main.tz
+  "./part.tz" 7 -> part.tz

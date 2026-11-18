@@ -1,0 +1,3 @@
+main.tz:3:15: error TZ2203: 'partial class EventEmitter': "node:events" is a module of the library; parts are written only for classes of the program
+partial class EventEmitter {
+              ^

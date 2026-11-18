@@ -1,0 +1,4 @@
+export type Mentions = {
+  readonly globals: Map<string, int>;
+  readonly members: Map<string, int>;
+};

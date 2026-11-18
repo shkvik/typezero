@@ -1,0 +1,100 @@
+import "./partial/module-binder.partial.declared.tz";
+import "./partial/module-binder.partial.exports.tz";
+import "./partial/module-binder.partial.imports.tz";
+import { Code } from "../../diagnostic/code.tz";
+import { Details } from "../../diagnostic/types/message.types.tz";
+import { ModulePath } from "../../program/ast/types/ast.types.modules.tz";
+import {
+  ModuleExport,
+  ModuleImport,
+  ModuleNames,
+} from "../../program/module-names/types/module-names.types.tz";
+import {
+  LinkKind,
+  Module,
+  Program,
+} from "../../program/module/types/module.types.tz";
+import { SourceLines } from "../../program/source-lines/source-lines.tz";
+import { BindState, BoundModule } from "./types/module-binder.types.tz";
+
+export class ModuleBinder {
+  private readonly program: Program;
+  private readonly ordered: BoundModule[];
+  private readonly byId: Map<int, BoundModule>;
+
+  public constructor(program: Program) {
+    this.program = program;
+    this.ordered = [];
+    this.byId = new Map<int, BoundModule>();
+  }
+
+  public run(): ModuleNames[] {
+    for (const module of this.program.order) {
+      const bound = this.boundModule(module);
+
+      this.ordered.push(bound);
+      this.byId.set(module.id, bound);
+    }
+
+    for (const bound of this.ordered) {
+      this.declareNames(bound);
+    }
+
+    for (const bound of this.ordered) {
+      this.exportsOf(bound);
+    }
+
+    for (const bound of this.ordered) {
+      this.bindImports(bound);
+    }
+
+    for (const bound of this.ordered) {
+      const errors = bound.names.errors;
+
+      errors.sort((first, second) => first.loc - second.loc);
+    }
+
+    return this.ordered.map((bound) => bound.names);
+  }
+
+  private boundModule(module: Module): BoundModule {
+    const names: ModuleNames = {
+      module,
+      declared: new Map<string, int>(),
+      exports: new Map<string, ModuleExport>(),
+      imports: new Map<string, ModuleImport>(),
+      errors: [],
+    };
+
+    return { names, state: BindState.New };
+  }
+
+  private linkedModule(
+    bound: BoundModule,
+    from: ModulePath,
+  ): BoundModule | undefined {
+    const links = bound.names.module.links;
+    const link = links.find((one) => one.from.loc == from.loc);
+    if (link == undefined || link.kind != LinkKind.Module) {
+      return undefined;
+    }
+
+    return this.byId.get(link.target);
+  }
+
+  private report(
+    bound: BoundModule,
+    loc: int,
+    code: Code,
+    details: Details,
+  ): void {
+    bound.names.errors.push({ code, loc, details });
+  }
+
+  private lineOf(bound: BoundModule, loc: int): string {
+    const lines = new SourceLines(bound.names.module.source.text);
+    const place = lines.placeOf(loc);
+
+    return `${place.line}`;
+  }
+}

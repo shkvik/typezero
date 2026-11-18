@@ -1,11 +1,19 @@
 import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import { ClassDecl } from "../../ast/types/ast.types.classes.tz";
 import { DeclarationFile } from "../../ast/types/ast.types.declarations.tz";
-import { ModulePath, SourceFile } from "../../ast/types/ast.types.modules.tz";
+import {
+  ImportDecl,
+  ModulePath,
+  SourceFile,
+} from "../../ast/types/ast.types.modules.tz";
+
+export type SourcePiece = { readonly path: string; readonly start: int };
 
 export type SourceText = {
   readonly path: string;
   readonly text: Buffer;
   readonly isLibrary: boolean;
+  readonly pieces?: SourcePiece[];
 };
 
 export type ParsedFile = {
@@ -48,9 +56,25 @@ export type Module = {
   readonly errors: SourceError[];
   readonly declaration?: ParsedDeclaration;
   readonly links: ModuleLink[];
+  readonly implicit: ImportDecl[];
+  readonly parts: ClassDecl[];
+};
+
+export enum BuiltinText {
+  Prelude,
+  Iterate,
+  FileSystemErrors,
+  CryptoErrors,
+  ChildProcessErrors,
+}
+
+export type BuiltinFile = {
+  readonly text: BuiltinText;
+  readonly parsed: ParsedFile;
 };
 
 export type Program = {
   readonly modules: Module[];
   readonly order: Module[];
+  readonly builtins: BuiltinFile[];
 };

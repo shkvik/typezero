@@ -1,0 +1,6 @@
+first.tz:12:10: error TZ2212: method 'side' of 'Shape' is already declared in main.tz: a method has one name in the whole class, and its overloads stay in one file
+  public side(): int {
+         ^
+second.tz:4:10: error TZ2212: method 'area' of 'Shape' is already declared in first.tz: a method has one name in the whole class, and its overloads stay in one file
+  public area(): int {
+         ^

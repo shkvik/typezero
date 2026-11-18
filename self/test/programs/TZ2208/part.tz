@@ -1,0 +1,5 @@
+import { Shape } from "./main.tz";
+
+partial class Shape {
+  public constructor() {}
+}

@@ -1,0 +1,52 @@
+import { ModuleBinder } from "../module-binder.tz";
+import {
+  NameOrigin,
+  VarDeclarator,
+} from "../../../program/ast/types/ast.types.patterns.tz";
+import {
+  Stmt,
+  StmtKind,
+} from "../../../program/ast/types/ast.types.statements.tz";
+import { BoundModule } from "../types/module-binder.types.tz";
+
+partial class ModuleBinder {
+  private declareNames(bound: BoundModule): void {
+    for (const item of bound.names.module.file.items) {
+      this.declareItem(bound, item);
+    }
+  }
+
+  private declareItem(bound: BoundModule, item: Stmt): void {
+    switch (item.kind) {
+      case StmtKind.VarDecl:
+        this.declareVariables(bound, item.decls);
+        break;
+      case StmtKind.Function:
+      case StmtKind.TypeAlias:
+      case StmtKind.Enum:
+      case StmtKind.Handle:
+        this.declare(bound, item.name, item.loc);
+        break;
+      case StmtKind.Class:
+        this.declare(bound, item.name ?? "", item.loc);
+        break;
+      default:
+        break;
+    }
+  }
+
+  private declareVariables(bound: BoundModule, decls: VarDeclarator[]): void {
+    for (const decl of decls) {
+      if (decl.origin == NameOrigin.Written) {
+        this.declare(bound, decl.name, decl.loc);
+      }
+    }
+  }
+
+  private declare(bound: BoundModule, name: string, loc: int): void {
+    const declared = bound.names.declared;
+    if (name != "" && !declared.has(name)) {
+      declared.set(name, loc);
+    }
+  }
+}

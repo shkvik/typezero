@@ -6,6 +6,7 @@ export const kParent = "..";
 export const kHerePrefix = "./";
 export const kParentPrefix = "../";
 export const kSchemeMark = ":";
+export const kStreamModules = "stream";
 export const kJsrPrefix = "jsr:";
 export const kNpmPrefix = "npm:";
 export const kTypeScriptExtension = ".ts";

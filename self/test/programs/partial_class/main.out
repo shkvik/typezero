@@ -1,0 +1,10 @@
+modules 3
+parts/area.tz
+  part Shape: area area
+  "../main.tz" 22 -> main.tz
+parts/border.tz
+  part Figure: border
+  "../main.tz" 32 -> main.tz
+main.tz
+  "./parts/area.tz" 140 -> parts/area.tz
+  "./parts/border.tz" 166 -> parts/border.tz

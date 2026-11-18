@@ -1,0 +1,3 @@
+main.tz
+  declared a b
+  export a -> main.tz:a

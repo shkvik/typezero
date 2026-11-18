@@ -1,0 +1,7 @@
+import { Shape as Figure } from "../main.tz";
+
+partial class Figure<T> {
+  public border(): int {
+    return this.side() * 4;
+  }
+}

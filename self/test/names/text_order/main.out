@@ -1,0 +1,6 @@
+lib.tz
+  declared a
+  export a -> lib.tz:a
+main.tz
+  export first -> lib.tz:a
+  import a -> lib.tz:a

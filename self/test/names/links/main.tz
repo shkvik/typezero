@@ -1,0 +1,11 @@
+// Where every imported and exported name leads: a re-export by name, with
+// another name and through 'export *', an export of an imported name, and two
+// files that re-export each other with 'export *'.
+import { area, side as edge, deep } from "./shapes.tz";
+import { one, two } from "./ring-a.tz";
+export { area };
+export { edge as border };
+
+export const size = 2;
+const local = 1;
+export { local as renamed };

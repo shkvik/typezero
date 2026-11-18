@@ -1,0 +1,157 @@
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
+import { Loader } from "../loader.tz";
+import { ModulePath } from "../../../program/ast/types/ast.types.modules.tz";
+import {
+  kDeclarationExtension,
+  kJsonExtension,
+  kPathSeparator,
+  kSourceExtension,
+  kWindowsSeparator,
+} from "../../../program/module/const/module.const.tz";
+import {
+  LinkKind,
+  ModuleLink,
+  ParsedDeclaration,
+  SourceText,
+} from "../../../program/module/types/module.types.tz";
+import { Lexer } from "../../lexer/lexer.tz";
+import { ModuleState, OpenModule } from "../types/loader.types.tz";
+import { kWindowsPlatform } from "../const/loader.const.tz";
+
+partial class Loader {
+  private linkedFile(from: ModulePath, file: string): ModuleLink {
+    if (file.endsWith(kJsonExtension)) {
+      return { kind: LinkKind.Json, from };
+    }
+
+    const key = this.keyOf(file);
+    const known = this.byFile.get(key);
+    if (known != undefined) {
+      return { kind: LinkKind.Module, from, target: known };
+    }
+
+    const name = this.nameOf(file);
+    const path = this.shownPath(name);
+    const module = this.open(file, key, name, path);
+    if (module == undefined) {
+      return { kind: LinkKind.Missing, from };
+    }
+
+    return { kind: LinkKind.Module, from, target: module.id };
+  }
+
+  private open(
+    file: string,
+    key: string,
+    name: string,
+    path: string,
+  ): OpenModule | undefined {
+    const text = this.read(file, path);
+    if (text == undefined) {
+      return undefined;
+    }
+
+    const source: SourceText = { path, text, isLibrary: false };
+    const module = this.openSource(source, file, name);
+
+    this.byFile.set(key, module.id);
+
+    return module;
+  }
+
+  private openSource(
+    source: SourceText,
+    file: string,
+    name: string,
+  ): OpenModule {
+    const lexer = new Lexer(source.text);
+    const lexed = lexer.run();
+    const parsed = this.parser.parseLexed(source, lexed);
+    const implicit = this.implicitImports(source, parsed.file, lexed.tokens);
+    const declaration = this.declarationOf(file, source);
+    const module: OpenModule = {
+      id: this.opened.length,
+      name,
+      file,
+      parsed,
+      declaration,
+      links: [],
+      implicit,
+      parts: [],
+      problems: [],
+      state: ModuleState.New,
+    };
+
+    this.opened.push(module);
+
+    return module;
+  }
+
+  private read(file: string, path: string): Buffer | undefined {
+    const text = readFileSync(file);
+    if (text.isErr()) {
+      this.unreadable.push(path);
+
+      return undefined;
+    }
+
+    return text.value;
+  }
+
+  private declarationOf(
+    file: string,
+    module: SourceText,
+  ): ParsedDeclaration | undefined {
+    const declarationFile = this.declarationPath(file);
+    if (!existsSync(declarationFile)) {
+      return undefined;
+    }
+
+    const path = this.declarationPath(module.path);
+    const text = this.read(declarationFile, path);
+    if (text == undefined) {
+      return undefined;
+    }
+
+    const source: SourceText = { path, text, isLibrary: module.isLibrary };
+
+    return this.parser.parseDeclaration(source);
+  }
+
+  private declarationPath(path: string): string {
+    const stem = path.slice(0, path.length - kSourceExtension.length);
+
+    return `${stem}${kDeclarationExtension}`;
+  }
+
+  private keyOf(file: string): string {
+    const absolute = resolve(file);
+    const real = realpathSync(absolute);
+    const path = real.unwrapOr(absolute);
+
+    if (process.platform == kWindowsPlatform) {
+      return path.toLowerCase();
+    }
+
+    return path;
+  }
+
+  private nameOf(file: string): string {
+    const from = resolve(this.entryDirectory);
+    const to = resolve(file);
+    const name = relative(from, to);
+
+    return this.slashed(name);
+  }
+
+  private shownPath(name: string): string {
+    const path = join(this.entryDirectory, name);
+
+    return this.slashed(path);
+  }
+
+  private slashed(path: string): string {
+    return path.replaceAll(kWindowsSeparator, kPathSeparator);
+  }
+}

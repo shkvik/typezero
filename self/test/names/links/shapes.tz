@@ -1,0 +1,6 @@
+export { side } from "./base.tz";
+export * from "./deep.tz";
+
+export function area(): int {
+  return 1;
+}

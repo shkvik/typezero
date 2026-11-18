@@ -1,0 +1,3 @@
+main.tz:1:10: error TZ2107: './lib.tz' has no export named 'hidden'; add 'export' to its declaration in lib.tz
+import { hidden } from "./lib.tz";
+         ^

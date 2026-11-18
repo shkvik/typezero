@@ -1,0 +1,86 @@
+import { basename, extname } from "node:path";
+import { ErrorPrinter } from "../../diagnostic/error-printer/error-printer.tz";
+import { SourceError } from "../../diagnostic/types/message.types.tz";
+import { kSourceExtension } from "../../program/module/const/module.const.tz";
+import {
+  Program,
+  SourceText,
+} from "../../program/module/types/module.types.tz";
+import { kProgramName, kUsage, kUsageExitCode } from "../const/cli.const.tz";
+import { kTypeScriptExtension } from "./const/program-report.const.tz";
+
+export class ProgramReport {
+  private failed: boolean;
+
+  public constructor() {
+    this.failed = false;
+  }
+
+  public hasFailed(): boolean {
+    return this.failed;
+  }
+
+  public wrongUsage(): void {
+    console.error(kUsage);
+    process.exitCode = kUsageExitCode;
+  }
+
+  public notSource(entry: string): void {
+    const advice = this.renameAdvice(entry);
+
+    console.error(
+      `${kProgramName}: '${entry}' is not a file of tz: they end in .tz${advice}`,
+    );
+    this.fail();
+  }
+
+  public unreadable(paths: string[]): void {
+    for (const path of paths) {
+      console.error(`${kProgramName}: cannot read '${path}'`);
+      this.fail();
+    }
+  }
+
+  public moduleErrors(program: Program): void {
+    for (const builtin of program.builtins) {
+      const parsed = builtin.parsed;
+
+      this.sourceErrors(parsed.source, parsed.errors);
+    }
+
+    for (const module of program.order) {
+      this.sourceErrors(module.source, module.errors);
+
+      const declaration = module.declaration;
+      if (declaration != undefined) {
+        this.sourceErrors(declaration.source, declaration.errors);
+      }
+    }
+  }
+
+  public sourceErrors(source: SourceText, errors: SourceError[]): void {
+    if (errors.length == 0) {
+      return;
+    }
+
+    const printer = new ErrorPrinter(source);
+
+    printer.print(errors);
+    this.fail();
+  }
+
+  private renameAdvice(entry: string): string {
+    if (extname(entry) != kTypeScriptExtension) {
+      return "";
+    }
+
+    const stem = basename(entry, kTypeScriptExtension);
+
+    return `; rename it to ${stem}${kSourceExtension}`;
+  }
+
+  private fail(): void {
+    this.failed = true;
+    process.exitCode = 1;
+  }
+}

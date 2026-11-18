@@ -1,0 +1,14 @@
+import { dirname, join } from "node:path";
+import { Loader } from "../../load/loader/loader.tz";
+import { LoadResult } from "../../load/loader/types/loader.types.tz";
+import { kLibraryDirectory } from "../../program/library/library-modules/const/library-modules.const.tables.tz";
+
+export class ProgramSource {
+  public load(entry: string): LoadResult {
+    const home = dirname(process.execPath);
+    const library = join(home, kLibraryDirectory);
+    const loader = new Loader(entry, library);
+
+    return loader.run();
+  }
+}

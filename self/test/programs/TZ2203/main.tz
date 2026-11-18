@@ -1,0 +1,7 @@
+import { EventEmitter } from "node:events";
+
+partial class EventEmitter {
+  public extra(): int {
+    return 1;
+  }
+}

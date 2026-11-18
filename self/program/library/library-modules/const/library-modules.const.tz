@@ -1,0 +1,3 @@
+import { LibraryModules } from "../library-modules.tz";
+
+export const kLibrary = new LibraryModules();

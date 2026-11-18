@@ -1,0 +1,10 @@
+// The parts of a class are joined to it: a part is listed by the file of the
+// class and imports the class, with another name too.
+import "./parts/area.tz";
+import "./parts/border.tz";
+
+export class Shape<T> {
+  public side(): int {
+    return 1;
+  }
+}

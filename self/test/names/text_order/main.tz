@@ -1,0 +1,7 @@
+// The errors of a file go in the order of its text, whatever the order of
+// the work was (exports are bound before imports), and each file has its
+// own list.
+import { gone } from "./lib.tz";
+export { nothing };
+import { a } from "./lib.tz";
+export { a as first, a as first };

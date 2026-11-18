@@ -1,0 +1,3 @@
+part.tz:4:10: error TZ2207: 'partial class Shape' has only methods: declare the field 'size' where 'Shape' is declared
+  public size: int;
+         ^

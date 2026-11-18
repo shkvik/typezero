@@ -1,0 +1,3 @@
+main.tz:1:10: error TZ2108: import 'a' conflicts with the declaration of 'a' in this file; import it under another name, e.g. 'import { a as a2 } from "./lib.tz"'
+import { a } from "./lib.tz";
+         ^

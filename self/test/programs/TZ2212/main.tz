@@ -1,0 +1,8 @@
+import "./first.tz";
+import "./second.tz";
+
+export class Shape {
+  public side(): int {
+    return 1;
+  }
+}

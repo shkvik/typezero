@@ -1,72 +1,39 @@
-import { basename, extname } from "node:path";
-import { ErrorPrinter } from "../../../diagnostic/error-printer/error-printer.tz";
-import { SourceError } from "../../../diagnostic/types/message.types.tz";
-import { Loader } from "../../../load/loader/loader.tz";
+import { extname } from "node:path";
 import { kSourceExtension } from "../../../program/module/const/module.const.tz";
 import {
   LinkKind,
   Module,
   ModuleLink,
   Program,
-  SourceText,
 } from "../../../program/module/types/module.types.tz";
-import { kProgramName, kUsage, kUsageExitCode } from "../../const/cli.const.tz";
-import { kTypeScriptExtension } from "./const/load-command.const.tz";
+import { ProgramReport } from "../../program-report/program-report.tz";
+import { ProgramSource } from "../../program-source/program-source.tz";
+import { kLibraryMark } from "../../const/cli.const.tz";
 
 export class LoadCommand {
   private readonly entry?: string;
+  private readonly report: ProgramReport;
 
   public constructor(args: string[]) {
     this.entry = args[3];
+    this.report = new ProgramReport();
   }
 
   public run(): void {
     const entry = this.entry;
     if (entry == undefined) {
-      return this.wrongUsage();
+      return this.report.wrongUsage();
     }
     if (extname(entry) != kSourceExtension) {
-      return this.notSource(entry);
+      return this.report.notSource(entry);
     }
 
-    const loader = new Loader(entry);
-    const loaded = loader.run();
+    const source = new ProgramSource();
+    const loaded = source.load(entry);
 
-    for (const path of loaded.unreadable) {
-      this.cannotRead(path);
-    }
-
+    this.report.unreadable(loaded.unreadable);
     this.printProgram(loaded.program);
-    this.printErrors(loaded.program);
-  }
-
-  private wrongUsage(): void {
-    console.error(kUsage);
-    process.exitCode = kUsageExitCode;
-  }
-
-  private notSource(entry: string): void {
-    const advice = this.renameAdvice(entry);
-
-    console.error(
-      `${kProgramName}: '${entry}' is not a file of tz: they end in .tz${advice}`,
-    );
-    process.exitCode = 1;
-  }
-
-  private renameAdvice(entry: string): string {
-    if (extname(entry) != kTypeScriptExtension) {
-      return "";
-    }
-
-    const stem = basename(entry, kTypeScriptExtension);
-
-    return `; rename it to ${stem}${kSourceExtension}`;
-  }
-
-  private cannotRead(path: string): void {
-    console.error(`${kProgramName}: cannot read '${path}'`);
-    process.exitCode = 1;
+    this.report.moduleErrors(loaded.program);
   }
 
   private printProgram(program: Program): void {
@@ -78,11 +45,25 @@ export class LoadCommand {
   }
 
   private printModule(program: Program, module: Module): void {
+    if (module.source.isLibrary) {
+      console.log(`${module.name}${kLibraryMark}`);
+
+      return;
+    }
+
     console.log(module.name);
 
     const declaration = module.declaration;
     if (declaration != undefined) {
       console.log(`  declaration ${declaration.source.path}`);
+    }
+
+    for (const part of module.parts) {
+      const name = part.name ?? "";
+      const names = part.methods.map((method) => method.name);
+      const methods = names.join(" ");
+
+      console.log(`  part ${name}: ${methods}`);
     }
 
     for (const link of module.links) {
@@ -115,27 +96,5 @@ export class LoadCommand {
     }
 
     return module.name;
-  }
-
-  private printErrors(program: Program): void {
-    for (const module of program.order) {
-      this.printSourceErrors(module.source, module.errors);
-
-      const declaration = module.declaration;
-      if (declaration != undefined) {
-        this.printSourceErrors(declaration.source, declaration.errors);
-      }
-    }
-  }
-
-  private printSourceErrors(source: SourceText, errors: SourceError[]): void {
-    if (errors.length == 0) {
-      return;
-    }
-
-    const printer = new ErrorPrinter(source);
-
-    printer.print(errors);
-    process.exitCode = 1;
   }
 }

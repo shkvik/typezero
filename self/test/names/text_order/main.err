@@ -1,0 +1,12 @@
+lib.tz:2:10: error TZ2106: './main.tz' has no export named 'lost'
+export { lost } from "./main.tz";
+         ^
+main.tz:4:10: error TZ2106: './lib.tz' has no export named 'gone'
+import { gone } from "./lib.tz";
+         ^
+main.tz:5:10: error TZ2103: cannot find 'nothing' to export: this file neither declares nor imports it
+export { nothing };
+         ^
+main.tz:7:27: error TZ2104: duplicate export of 'first': it is already exported at line 7
+export { a as first, a as first };
+                          ^

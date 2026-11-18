@@ -1,0 +1,16 @@
+// Modules of the library come from files next to the compiler, each read
+// once: by its name with and without 'node:', and without an import for the
+// global names of the library (URL, fetch, crypto.subtle). A name the file
+// declares itself (Headers) or a property (other.Response) brings nothing.
+import { EventEmitter } from "node:events";
+import { once } from "events";
+import { Readable } from "node:stream";
+import { readFileSync } from "node:fs";
+
+class Headers {}
+
+const address = new URL("https://example.com");
+const answer = fetch(address);
+const key = crypto.subtle;
+const other = { Response: 1 };
+const status = other.Response;

@@ -1,0 +1,6 @@
+import { Shape } from "./main.tz";
+
+function sealed(target: object): void {}
+
+@sealed
+partial class Shape {}

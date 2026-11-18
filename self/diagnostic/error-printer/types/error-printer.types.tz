@@ -1,0 +1,7 @@
+import { SourceLines } from "../../../program/source-lines/source-lines.tz";
+
+export type SourceView = {
+  readonly path: string;
+  readonly start: int;
+  readonly lines: SourceLines;
+};

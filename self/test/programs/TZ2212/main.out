@@ -1,0 +1,10 @@
+modules 3
+first.tz
+  part Shape: area area side
+  "./main.tz" 22 -> main.tz
+second.tz
+  part Shape: area
+  "./main.tz" 22 -> main.tz
+main.tz
+  "./first.tz" 7 -> first.tz
+  "./second.tz" 28 -> second.tz

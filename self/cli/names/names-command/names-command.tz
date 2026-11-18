@@ -1,0 +1,98 @@
+import { extname } from "node:path";
+import {
+  ModuleExport,
+  ModuleNames,
+  NameTarget,
+} from "../../../program/module-names/types/module-names.types.tz";
+import { kSourceExtension } from "../../../program/module/const/module.const.tz";
+import { Program } from "../../../program/module/types/module.types.tz";
+import { ModuleBinder } from "../../../semantic/module-binder/module-binder.tz";
+import { ProgramReport } from "../../program-report/program-report.tz";
+import { ProgramSource } from "../../program-source/program-source.tz";
+import { kLibraryMark } from "../../const/cli.const.tz";
+
+export class NamesCommand {
+  private readonly entry?: string;
+  private readonly report: ProgramReport;
+
+  public constructor(args: string[]) {
+    this.entry = args[3];
+    this.report = new ProgramReport();
+  }
+
+  public run(): void {
+    const entry = this.entry;
+    if (entry == undefined) {
+      return this.report.wrongUsage();
+    }
+    if (extname(entry) != kSourceExtension) {
+      return this.report.notSource(entry);
+    }
+
+    const source = new ProgramSource();
+    const loaded = source.load(entry);
+
+    this.report.unreadable(loaded.unreadable);
+    this.report.moduleErrors(loaded.program);
+    if (this.report.hasFailed()) {
+      return;
+    }
+
+    const binder = new ModuleBinder(loaded.program);
+    const bound = binder.run();
+
+    for (const names of bound) {
+      this.printNames(loaded.program, names);
+    }
+
+    for (const names of bound) {
+      this.report.sourceErrors(names.module.source, names.errors);
+    }
+  }
+
+  private printNames(program: Program, names: ModuleNames): void {
+    if (names.module.source.isLibrary) {
+      console.log(`${names.module.name}${kLibraryMark}`);
+
+      return;
+    }
+
+    console.log(names.module.name);
+
+    const declared = Array.from(names.declared.keys());
+    if (declared.length > 0) {
+      console.log(`  declared ${declared.join(" ")}`);
+    }
+
+    for (const [name, exported] of names.exports) {
+      const target = this.targetText(program, exported.target);
+      const star = this.starText(exported);
+
+      console.log(`  export ${name} -> ${target}${star}`);
+    }
+
+    for (const [name, imported] of names.imports) {
+      const target = this.targetText(program, imported.target);
+
+      console.log(`  import ${name} -> ${target}`);
+    }
+  }
+
+  private targetText(program: Program, target: NameTarget): string {
+    const module = program.modules[target.module];
+    if (module == undefined) {
+      return target.name;
+    }
+
+    return `${module.name}:${target.name}`;
+  }
+
+  private starText(exported: ModuleExport): string {
+    const star = exported.star;
+    if (star == undefined) {
+      return "";
+    }
+
+    return ` by * from "${star.path}"`;
+  }
+}

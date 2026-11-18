@@ -1,0 +1,33 @@
+import { BuiltinText } from "../../../module/types/module.types.tz";
+
+export enum LibraryAccess {
+  Program,
+  Library,
+  Implicit,
+}
+
+export type LibraryModule = {
+  readonly name: string;
+  readonly file: string;
+  readonly parts: string[];
+  readonly specs: string[];
+  readonly access: LibraryAccess;
+};
+
+export type LibraryGlobal = {
+  readonly name: string;
+  readonly module: string;
+};
+
+export type LibraryMember = {
+  readonly owner: string;
+  readonly name: string;
+  readonly alias: string;
+  readonly module: string;
+  readonly optional: boolean;
+};
+
+export type BuiltinSource = {
+  readonly text: BuiltinText;
+  readonly file: string;
+};

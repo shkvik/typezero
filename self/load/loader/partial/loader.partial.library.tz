@@ -1,0 +1,126 @@
+import { join } from "node:path";
+import { Loader } from "../loader.tz";
+import {
+  ImportDecl,
+  ModulePath,
+  SourceFile,
+} from "../../../program/ast/types/ast.types.modules.tz";
+import { kLibrary } from "../../../program/library/library-modules/const/library-modules.const.tz";
+import { kBuiltinSources } from "../../../program/library/library-modules/const/library-modules.const.tables.tz";
+import { LibraryModule } from "../../../program/library/library-modules/types/library-modules.types.tz";
+import {
+  BuiltinFile,
+  LinkKind,
+  ModuleLink,
+  SourcePiece,
+  SourceText,
+} from "../../../program/module/types/module.types.tz";
+import { Token } from "../../token/types/token.types.tz";
+import { OpenModule } from "../types/loader.types.tz";
+import { kLineBreak } from "../const/loader.const.tz";
+
+partial class Loader {
+  private linkedImplicit(from: ModulePath): ModuleLink {
+    const library = kLibrary.named(from.path);
+    if (library == undefined) {
+      return { kind: LinkKind.Missing, from };
+    }
+
+    return this.linkedLibrary(from, library);
+  }
+
+  private linkedLibrary(from: ModulePath, library: LibraryModule): ModuleLink {
+    const known = this.libraries.get(library.name);
+    if (known != undefined) {
+      return { kind: LinkKind.Module, from, target: known };
+    }
+
+    const module = this.openLibrary(library);
+    if (module == undefined) {
+      return { kind: LinkKind.Missing, from };
+    }
+
+    this.libraries.set(library.name, module.id);
+
+    return { kind: LinkKind.Module, from, target: module.id };
+  }
+
+  private openLibrary(library: LibraryModule): OpenModule | undefined {
+    const file = join(this.libraryDirectory, library.file);
+    const source = this.librarySource(library, file);
+    if (source == undefined) {
+      return undefined;
+    }
+
+    return this.openSource(source, file, library.name);
+  }
+
+  private librarySource(
+    library: LibraryModule,
+    file: string,
+  ): SourceText | undefined {
+    const path = this.slashed(file);
+    const main = this.read(file, path);
+    if (main == undefined) {
+      return undefined;
+    }
+    if (library.parts.length == 0) {
+      return { path, text: main, isLibrary: true };
+    }
+
+    const texts: Buffer[] = [main];
+    const pieces: SourcePiece[] = [{ path, start: 0 }];
+    const separator = Buffer.from(kLineBreak);
+    let length = main.length;
+
+    for (const part of library.parts) {
+      const partFile = join(this.libraryDirectory, part);
+      const partPath = this.slashed(partFile);
+      const text = this.read(partFile, partPath);
+      if (text == undefined) {
+        return undefined;
+      }
+
+      const start = length + separator.length;
+
+      texts.push(separator);
+      texts.push(text);
+      pieces.push({ path: partPath, start });
+      length = start + text.length;
+    }
+
+    const text = Buffer.concat(texts);
+
+    return { path, text, isLibrary: true, pieces };
+  }
+
+  private implicitImports(
+    source: SourceText,
+    file: SourceFile,
+    tokens: Token[],
+  ): ImportDecl[] {
+    if (source.isLibrary) {
+      return [];
+    }
+
+    return this.mentions.imports(tokens, file);
+  }
+
+  private builtins(): BuiltinFile[] {
+    const files: BuiltinFile[] = [];
+
+    for (const builtin of kBuiltinSources) {
+      const file = join(this.libraryDirectory, builtin.file);
+      const path = this.slashed(file);
+      const text = this.read(file, path);
+      if (text != undefined) {
+        const source: SourceText = { path, text, isLibrary: true };
+        const parsed = this.parser.parseFile(source);
+
+        files.push({ text: builtin.text, parsed });
+      }
+    }
+
+    return files;
+  }
+}

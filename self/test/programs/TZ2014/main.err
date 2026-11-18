@@ -1,0 +1,3 @@
+main.tz:1:25: error TZ2014: built-in module 'node:http2' is not supported yet (docs/net.md, section 7); HTTP/2 streams are in "tz:http2": 'Http2Server' and 'Http2Client'
+import { connect } from "node:http2";
+                        ^

@@ -1,0 +1,3 @@
+import { extra } from "./part.tz";
+
+export const Shape = 1;

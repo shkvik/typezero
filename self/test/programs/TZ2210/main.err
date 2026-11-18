@@ -1,0 +1,3 @@
+part.tz:5:1: error TZ2210: 'partial class Shape' takes its decorators from the class: write them where 'Shape' is declared
+@sealed
+^

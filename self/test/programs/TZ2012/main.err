@@ -1,0 +1,3 @@
+main.tz:1:28: error TZ2012: built-in module 'node:timers' is not supported yet; setTimeout and the other timers are global, as in Node: drop the import
+import { setTimeout } from "node:timers";
+                           ^

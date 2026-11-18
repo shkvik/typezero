@@ -1,0 +1,3 @@
+main.tz:1:19: error TZ2009: there is no built-in module 'node:nothing'
+import { a } from "node:nothing";
+                  ^

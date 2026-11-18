@@ -1,0 +1,4 @@
+modules 2
+other.tz
+main.tz
+  "./other.tz" 7 -> other.tz

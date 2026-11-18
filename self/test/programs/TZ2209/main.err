@@ -1,0 +1,3 @@
+part.tz:5:15: error TZ2209: 'partial class Shape' takes 'extends' and 'implements' from the class: write them where 'Shape' is declared
+partial class Shape extends Base {}
+              ^

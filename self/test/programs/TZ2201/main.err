@@ -1,0 +1,3 @@
+main.tz:1:1: error TZ2201: an import must name what it takes: 'import "./other.tz"' only lists a file with a part of a class declared here ('partial class'); import the names you need, e.g. 'import { a } from "./other.tz"'
+import "./other.tz";
+^

@@ -742,4 +742,91 @@ export const kMessages: Record<Code, Message> = {
   [Code.ImportFileNotFoundTypeScript]: {
     text: "cannot find '{word}': there is no {path}; there is {other}, and the files of tz end in .tz: rename it so that it ends in .tz",
   },
+  [Code.BuiltinModuleUnknown]: {
+    text: "there is no built-in module '{word}'",
+  },
+  [Code.TzModuleUnknown]: {
+    text: "there is no built-in module '{word}'; tz has 'tz:io', 'tz:fs', 'tz:crypto', 'tz:http', 'tz:http2' and 'tz:sync'",
+  },
+  [Code.BuiltinModuleNotYet]: {
+    text: "built-in module '{word}' is not supported yet",
+  },
+  [Code.TimersModuleNotYet]: {
+    text: "built-in module '{word}' is not supported yet; setTimeout and the other timers are global, as in Node: drop the import",
+  },
+  [Code.HttpModuleNotYet]: {
+    text: "built-in module '{word}' is not supported yet (docs/net.md, section 7); serve requests with 'Server' from \"tz:http\", and make them with the global 'fetch'",
+  },
+  [Code.Http2ModuleNotYet]: {
+    text: "built-in module '{word}' is not supported yet (docs/net.md, section 7); HTTP/2 streams are in \"tz:http2\": 'Http2Server' and 'Http2Client'",
+  },
+  [Code.NetworkModuleNotYet]: {
+    text: "built-in module '{word}' is not supported yet (docs/net.md, section 7)",
+  },
+  [Code.StreamModuleNotYet]: {
+    text: "built-in module '{word}' is not supported yet (docs/streams.md)",
+  },
+  [Code.ExportFromBuiltin]: {
+    text: "a built-in module is not re-exported: import what a file needs from '{path}' in that file",
+  },
+  [Code.ExportOfBuiltinName]: {
+    text: "'{word}' comes from a built-in module, which is not re-exported: import it from there in the file that uses it",
+  },
+  [Code.ExportNotFound]: {
+    text: "cannot find '{word}' to export: this file neither declares nor imports it",
+  },
+  [Code.DuplicateExport]: {
+    text: "duplicate export of '{word}': it is already exported at line {other}",
+  },
+  [Code.StarExportTwice]: {
+    text: "'{word}' is exported both by '{path}' and by '{other}' through 'export *'; re-export the one you mean by name, e.g. 'export { {word} } from \"{path}\"'",
+  },
+  [Code.NoExportNamed]: {
+    text: "'{path}' has no export named '{word}'",
+  },
+  [Code.NoExportNamedUnmarked]: {
+    text: "'{path}' has no export named '{word}'; add 'export' to its declaration in {other}",
+  },
+  [Code.ImportConflictsWithDeclaration]: {
+    text: "import '{word}' conflicts with the declaration of '{word}' in this file; import it under another name, e.g. 'import { {other} as {other}2 } from \"{path}\"'",
+  },
+  [Code.DuplicateImport]: {
+    text: "duplicate import of '{word}': it is already imported at line {other}",
+  },
+  [Code.PartListWithoutPart]: {
+    text: "an import must name what it takes: 'import \"{path}\"' only lists a file with a part of a class declared here ('partial class'); import the names you need, e.g. 'import { a } from \"{path}\"'",
+  },
+  [Code.PartClassNotImported]: {
+    text: "'partial class {word}' adds methods to a class of another file: import the class from the file that declares it, e.g. 'import { {word} } from \"./{other}\"'",
+  },
+  [Code.PartOfLibraryClass]: {
+    text: "'partial class {word}': \"{path}\" is a module of the library; parts are written only for classes of the program",
+  },
+  [Code.PartClassNotDeclared]: {
+    text: "'partial class {word}': \"{path}\" does not declare a class '{word}'; a part is written for a class declared in the file it is imported from",
+  },
+  [Code.PartNotListed]: {
+    text: "'partial class {word}': {other} does not list this file among the parts of '{word}'; add 'import \"{path}\"' to {other}",
+  },
+  [Code.PartOfClassExtendingValue]: {
+    text: "'partial class {word}': class '{word}' extends a value; parts are written for a class that extends a class by name",
+  },
+  [Code.PartHasField]: {
+    text: "'partial class {word}' has only methods: declare the field '{other}' where '{word}' is declared",
+  },
+  [Code.PartHasConstructor]: {
+    text: "'partial class {word}' has only methods: write the constructor where '{word}' is declared",
+  },
+  [Code.PartHasHeader]: {
+    text: "'partial class {word}' takes 'extends' and 'implements' from the class: write them where '{word}' is declared",
+  },
+  [Code.PartHasDecorators]: {
+    text: "'partial class {word}' takes its decorators from the class: write them where '{word}' is declared",
+  },
+  [Code.PartTypeParams]: {
+    text: "a part repeats the type parameters of the class by name: write 'partial class {word}{other}'",
+  },
+  [Code.PartMethodTwice]: {
+    text: "method '{word}' of '{other}' is already declared in {path}: a method has one name in the whole class, and its overloads stay in one file",
+  },
 };

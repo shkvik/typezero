@@ -1,0 +1,249 @@
+import { ModuleBinder } from "../module-binder.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  ExportDecl,
+  ExportForm,
+  ModuleName,
+  ModulePath,
+} from "../../../program/ast/types/ast.types.modules.tz";
+import { kBuiltinModules } from "../../../program/library/builtin-modules/const/builtin-modules.const.tz";
+import {
+  ModuleExport,
+  NameTarget,
+} from "../../../program/module-names/types/module-names.types.tz";
+import {
+  BindState,
+  BoundModule,
+  ImportedName,
+} from "../types/module-binder.types.tz";
+
+partial class ModuleBinder {
+  private exportsOf(bound: BoundModule): Map<string, ModuleExport> {
+    if (bound.state != BindState.New) {
+      return bound.names.exports;
+    }
+
+    bound.state = BindState.Exporting;
+
+    const exports = bound.names.module.file.exports;
+
+    for (const decl of exports) {
+      this.exportNames(bound, decl);
+    }
+
+    for (const decl of exports) {
+      this.exportAll(bound, decl);
+    }
+
+    bound.state = BindState.Exported;
+
+    return bound.names.exports;
+  }
+
+  private exportNames(bound: BoundModule, decl: ExportDecl): void {
+    const from = decl.from;
+    if (from != undefined && kBuiltinModules.has(from.path)) {
+      this.report(bound, from.loc, Code.ExportFromBuiltin, {
+        path: from.path,
+      });
+
+      return;
+    }
+
+    for (const name of decl.names) {
+      this.exportName(bound, decl, name);
+    }
+  }
+
+  private exportName(
+    bound: BoundModule,
+    decl: ExportDecl,
+    name: ModuleName,
+  ): void {
+    const target = this.exportTarget(bound, decl, name);
+    if (target == undefined) {
+      return;
+    }
+
+    const exports = bound.names.exports;
+    const previous = exports.get(name.as);
+    if (previous != undefined) {
+      const other = this.lineOf(bound, previous.loc);
+
+      this.report(bound, name.asLoc, Code.DuplicateExport, {
+        word: name.as,
+        other,
+      });
+
+      return;
+    }
+
+    exports.set(name.as, { target, loc: name.asLoc });
+  }
+
+  private exportTarget(
+    bound: BoundModule,
+    decl: ExportDecl,
+    name: ModuleName,
+  ): NameTarget | undefined {
+    const from = decl.from;
+    if (from == undefined) {
+      return this.localTarget(bound, name);
+    }
+
+    const source = this.linkedModule(bound, from);
+    if (source == undefined) {
+      return undefined;
+    }
+
+    const theirs = this.exportsOf(source);
+
+    return this.exportedBy(bound, source, from.path, name, theirs);
+  }
+
+  private exportedBy(
+    bound: BoundModule,
+    source: BoundModule,
+    path: string,
+    name: ModuleName,
+    theirs: Map<string, ModuleExport>,
+  ): NameTarget | undefined {
+    const word = name.name;
+    const found = theirs.get(word);
+    if (found != undefined) {
+      return found.target;
+    }
+
+    const theirModule = source.names.module;
+    const unmarked =
+      source.names.declared.has(word) && !theirModule.source.isLibrary;
+    if (unmarked) {
+      const other = theirModule.name;
+
+      this.report(bound, name.loc, Code.NoExportNamedUnmarked, {
+        path,
+        word,
+        other,
+      });
+
+      return undefined;
+    }
+
+    this.report(bound, name.loc, Code.NoExportNamed, { path, word });
+
+    return undefined;
+  }
+
+  private localTarget(
+    bound: BoundModule,
+    name: ModuleName,
+  ): NameTarget | undefined {
+    const names = bound.names;
+    const word = name.name;
+    if (names.declared.has(word)) {
+      return { module: names.module.id, name: word };
+    }
+
+    const imported = this.importedAs(bound, word);
+    if (imported == undefined) {
+      const code = this.unknownExportCode(bound, word);
+
+      this.report(bound, name.loc, code, { word });
+
+      return undefined;
+    }
+
+    const from = imported.decl.from;
+    if (kBuiltinModules.has(from.path)) {
+      this.report(bound, name.loc, Code.ExportOfBuiltinName, { word });
+
+      return undefined;
+    }
+
+    const source = this.linkedModule(bound, from);
+    if (source == undefined) {
+      return undefined;
+    }
+
+    const theirs = this.exportsOf(source);
+    const found = theirs.get(imported.name.name);
+    if (found == undefined) {
+      return undefined;
+    }
+
+    return found.target;
+  }
+
+  private importedAs(
+    bound: BoundModule,
+    word: string,
+  ): ImportedName | undefined {
+    for (const decl of bound.names.module.file.imports) {
+      const name = decl.names.find((one) => one.as == word);
+      if (name != undefined) {
+        return { decl, name };
+      }
+    }
+
+    return undefined;
+  }
+
+  private unknownExportCode(bound: BoundModule, word: string): Code {
+    const imports = bound.names.module.file.imports;
+    const whole = imports.some((decl) => decl.whole?.name == word);
+    if (whole) {
+      return Code.ExportOfBuiltinName;
+    }
+
+    return Code.ExportNotFound;
+  }
+
+  private exportAll(bound: BoundModule, decl: ExportDecl): void {
+    const from = decl.from;
+    if (decl.form != ExportForm.All || from == undefined) {
+      return;
+    }
+
+    const source = this.linkedModule(bound, from);
+    if (source == undefined || source == bound) {
+      return;
+    }
+
+    const theirs = this.exportsOf(source);
+
+    for (const [name, exported] of theirs) {
+      this.exportThroughStar(bound, decl, from, name, exported);
+    }
+  }
+
+  private exportThroughStar(
+    bound: BoundModule,
+    decl: ExportDecl,
+    from: ModulePath,
+    name: string,
+    exported: ModuleExport,
+  ): void {
+    const exports = bound.names.exports;
+    const ours = exports.get(name);
+    if (ours == undefined) {
+      exports.set(name, { target: exported.target, loc: decl.loc, star: from });
+
+      return;
+    }
+
+    const first = ours.star;
+    if (first == undefined || this.sameTarget(ours.target, exported.target)) {
+      return;
+    }
+
+    this.report(bound, decl.loc, Code.StarExportTwice, {
+      word: name,
+      path: first.path,
+      other: from.path,
+    });
+  }
+
+  private sameTarget(first: NameTarget, second: NameTarget): boolean {
+    return first.module == second.module && first.name == second.name;
+  }
+}

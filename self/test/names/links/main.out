@@ -1,0 +1,30 @@
+base.tz
+  declared side hidden
+  export side -> base.tz:side
+deep.tz
+  declared deep
+  export deep -> deep.tz:deep
+shapes.tz
+  declared area
+  export side -> base.tz:side
+  export area -> shapes.tz:area
+  export deep -> deep.tz:deep by * from "./deep.tz"
+ring-b.tz
+  declared two
+  export two -> ring-b.tz:two
+  export one -> ring-a.tz:one by * from "./ring-a.tz"
+ring-a.tz
+  declared one
+  export one -> ring-a.tz:one
+  export two -> ring-b.tz:two by * from "./ring-b.tz"
+main.tz
+  declared size local
+  export area -> shapes.tz:area
+  export border -> base.tz:side
+  export size -> main.tz:size
+  export renamed -> main.tz:local
+  import area -> shapes.tz:area
+  import edge -> base.tz:side
+  import deep -> deep.tz:deep
+  import one -> ring-a.tz:one
+  import two -> ring-b.tz:two

@@ -1,0 +1,3 @@
+main.tz:2:10: error TZ2102: 'readFileSync' comes from a built-in module, which is not re-exported: import it from there in the file that uses it
+export { readFileSync };
+         ^

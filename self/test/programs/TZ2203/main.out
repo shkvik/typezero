@@ -1,0 +1,7 @@
+modules 4
+tz:intrinsics (library)
+tz:web (library)
+node:events (library)
+main.tz
+  part EventEmitter: extra
+  "node:events" 29 -> node:events

@@ -1,0 +1,3 @@
+main.tz:2:15: error TZ2109: duplicate import of 'a': it is already imported at line 1
+import { b as a } from "./lib.tz";
+              ^

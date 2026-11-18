@@ -1,13 +1,29 @@
 import { LoadCommand } from "./cli/load/load-command/load-command.tz";
 import { kLoadWord } from "./cli/load/load-command/const/load-command.const.tz";
+import { NamesCommand } from "./cli/names/names-command/names-command.tz";
+import { kNamesWord } from "./cli/names/names-command/const/names-command.const.tz";
 import { SyntaxCommand } from "./cli/syntax/syntax-command/syntax-command.tz";
 
-if (process.argv[2] == kLoadWord) {
-  const command = new LoadCommand(process.argv);
+switch (process.argv[2]) {
+  case kLoadWord: {
+    const command = new LoadCommand(process.argv);
 
-  command.run();
-} else {
-  const command = new SyntaxCommand(process.argv);
+    command.run();
 
-  command.run();
+    break;
+  }
+  case kNamesWord: {
+    const command = new NamesCommand(process.argv);
+
+    command.run();
+
+    break;
+  }
+  default: {
+    const command = new SyntaxCommand(process.argv);
+
+    command.run();
+
+    break;
+  }
 }

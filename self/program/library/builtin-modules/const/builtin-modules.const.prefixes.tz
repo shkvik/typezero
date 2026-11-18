@@ -1,2 +1,22 @@
 export const kNodeModulePrefix = "node:";
 export const kTzModulePrefix = "tz:";
+
+export const kSupportedTzModules = ["tz:io", "tz:fs", "tz:crypto", "tz:string"];
+
+export const kSupportedNodeModules = [
+  "fs",
+  "fs/promises",
+  "timers/promises",
+  "readline",
+  "readline/promises",
+  "path",
+  "path/posix",
+  "path/win32",
+  "os",
+  "process",
+  "buffer",
+  "child_process",
+  "crypto",
+];
+
+export const kLaterNodeModules = ["node:sea", "node:sqlite", "node:test"];

@@ -1,0 +1,6 @@
+modules 2
+part.tz
+  part Shape: area
+  "./main.tz" 22 -> main.tz
+main.tz
+  "./part.tz" 22 -> part.tz

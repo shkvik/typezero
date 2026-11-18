@@ -45,6 +45,11 @@ export class Parser {
   public parseFile(source: SourceText): ParsedFile {
     const lexer = new Lexer(source.text);
     const lexed = lexer.run();
+
+    return this.parseLexed(source, lexed);
+  }
+
+  public parseLexed(source: SourceText, lexed: LexResult): ParsedFile {
     const fileParser = new FileParser(
       source.text,
       lexed.tokens,

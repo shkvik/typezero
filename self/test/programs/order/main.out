@@ -9,6 +9,7 @@ b.tz
 lib/index.tz
   "../shared.tz" 21 -> shared.tz
 shape.partial.area.tz
+  part Shape: area
   "./shape.tz" 22 -> shape.tz
 shape.tz
   "./shape.partial.area.tz" 7 -> shape.partial.area.tz

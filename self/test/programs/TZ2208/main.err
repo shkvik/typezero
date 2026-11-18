@@ -1,0 +1,3 @@
+part.tz:4:10: error TZ2208: 'partial class Shape' has only methods: write the constructor where 'Shape' is declared
+  public constructor() {}
+         ^

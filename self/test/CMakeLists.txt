@@ -9,7 +9,10 @@
 #   programs/NAME/ is a program of several files, read from its main.tz: the
 #     loader must print exactly main.out (the modules in order and where each
 #     import leads) and, when the program has mistakes, main.err; a directory
-#     named after a code is the test of that code.
+#     named after a code is the test of that code;
+#   names/NAME/ is such a program too: main.out is what every module
+#     declares, exports and imports, each name with the declaration it leads
+#     to.
 #
 # A test of a declaration file is NAME.d.tz next to its module NAME.tz: the
 # test is registered by the module, so the declaration files leave the lists
@@ -40,17 +43,21 @@ tz_self_tests(errors error)
 tz_self_tests(recovery recovery)
 tz_self_tests(trees tree)
 
-# A test for every program programs/NAME/main.tz: the loader reads the
-# program from that entry.
-file(GLOB programs CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/programs/*/main.tz)
-foreach(src ${programs})
-  get_filename_component(dir ${src} DIRECTORY)
-  get_filename_component(name ${dir} NAME)
-  add_test(NAME self/programs/${name}
-    COMMAND ${CMAKE_COMMAND} -DEXE=${TZ_SELF} -DSRC=${src} -DMODE=program
-            -P ${TZ_SELF_CHECK})
-  set_tests_properties(self/programs/${name} PROPERTIES FIXTURES_REQUIRED tz_self)
-endforeach()
+# Registers a test for every program DIR/NAME/main.tz, read from that entry
+# by `tzparse COMMAND main.tz`.
+function(tz_self_programs dir command)
+  file(GLOB programs CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${dir}/*/main.tz)
+  foreach(src ${programs})
+    get_filename_component(program ${src} DIRECTORY)
+    get_filename_component(name ${program} NAME)
+    add_test(NAME self/${dir}/${name}
+      COMMAND ${CMAKE_COMMAND} -DEXE=${TZ_SELF} -DSRC=${src} -DMODE=program
+              -DCOMMAND=${command} -P ${TZ_SELF_CHECK})
+    set_tests_properties(self/${dir}/${name} PROPERTIES FIXTURES_REQUIRED tz_self)
+  endforeach()
+endfunction()
+tz_self_programs(programs load)
+tz_self_programs(names names)
 
 # The enumerations of the language, *.py here: a script builds programs
 # together with what the parser must answer (the tree, or the one error),

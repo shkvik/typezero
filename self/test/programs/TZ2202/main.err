@@ -1,0 +1,3 @@
+part.tz:1:15: error TZ2202: 'partial class Shape' adds methods to a class of another file: import the class from the file that declares it, e.g. 'import { Shape } from "./shape"'
+partial class Shape {
+              ^

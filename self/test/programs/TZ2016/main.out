@@ -1,0 +1,3 @@
+modules 1
+main.tz
+  "node:stream/web" 31 -> missing

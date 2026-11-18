@@ -1,0 +1,3 @@
+import { Box } from "./main.tz";
+
+partial class Box<T> {}

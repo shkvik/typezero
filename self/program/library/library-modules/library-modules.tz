@@ -1,0 +1,54 @@
+import {
+  kLibraryGlobals,
+  kLibraryMembers,
+  kLibraryModules,
+} from "./const/library-modules.const.tables.tz";
+import {
+  LibraryAccess,
+  LibraryGlobal,
+  LibraryMember,
+  LibraryModule,
+} from "./types/library-modules.types.tz";
+
+export class LibraryModules {
+  private readonly globalsByName: Map<string, LibraryGlobal>;
+
+  public constructor() {
+    this.globalsByName = new Map<string, LibraryGlobal>();
+
+    for (const global of kLibraryGlobals) {
+      this.globalsByName.set(global.name, global);
+    }
+  }
+
+  public imported(
+    spec: string,
+    fromLibrary: boolean,
+  ): LibraryModule | undefined {
+    const module = kLibraryModules.find((one) => one.specs.includes(spec));
+    if (module == undefined) {
+      return undefined;
+    }
+    if (module.access == LibraryAccess.Library && !fromLibrary) {
+      return undefined;
+    }
+
+    return module;
+  }
+
+  public named(name: string): LibraryModule | undefined {
+    return kLibraryModules.find((one) => one.name == name);
+  }
+
+  public global(name: string): LibraryGlobal | undefined {
+    return this.globalsByName.get(name);
+  }
+
+  public globals(): LibraryGlobal[] {
+    return kLibraryGlobals;
+  }
+
+  public members(): LibraryMember[] {
+    return kLibraryMembers;
+  }
+}

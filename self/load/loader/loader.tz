@@ -1,47 +1,51 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import "./partial/loader.partial.files.tz";
+import "./partial/loader.partial.library.tz";
+import { basename, dirname } from "node:path";
 import { SourceError } from "../../diagnostic/types/message.types.tz";
 import {
-  ModulePath,
-  SourceFile,
-} from "../../program/ast/types/ast.types.modules.tz";
-import {
-  kDeclarationExtension,
-  kJsonExtension,
-  kPathSeparator,
-  kSourceExtension,
-  kWindowsSeparator,
-} from "../../program/module/const/module.const.tz";
+  Stmt,
+  StmtKind,
+} from "../../program/ast/types/ast.types.statements.tz";
 import {
   LinkKind,
   Module,
   ModuleLink,
-  ParsedDeclaration,
-  SourceText,
 } from "../../program/module/types/module.types.tz";
+import { LibraryMentions } from "../library-mentions/library-mentions.tz";
 import { ModuleResolver } from "../module-resolver/module-resolver.tz";
 import { ResolutionKind } from "../module-resolver/types/module-resolver.types.tz";
 import { Parser } from "../parser/parser.tz";
-import { LoadResult, ModuleState, OpenModule } from "./types/loader.types.tz";
-import { kWindowsPlatform } from "./const/loader.const.tz";
+import { PartialClasses } from "../partial-classes/partial-classes.tz";
+import {
+  LoadResult,
+  ModuleState,
+  OpenModule,
+  Request,
+} from "./types/loader.types.tz";
 
 export class Loader {
   private readonly entryPath: string;
   private readonly entryDirectory: string;
+  private readonly libraryDirectory: string;
   private readonly parser: Parser;
   private readonly resolver: ModuleResolver;
+  private readonly mentions: LibraryMentions;
   private readonly opened: OpenModule[];
   private readonly byFile: Map<string, int>;
-  private readonly order: Module[];
+  private readonly libraries: Map<string, int>;
+  private readonly order: OpenModule[];
   private readonly unreadable: string[];
 
-  public constructor(entryPath: string) {
+  public constructor(entryPath: string, libraryDirectory: string) {
     this.entryPath = entryPath;
     this.entryDirectory = dirname(entryPath);
+    this.libraryDirectory = libraryDirectory;
     this.parser = new Parser([]);
     this.resolver = new ModuleResolver();
+    this.mentions = new LibraryMentions();
     this.opened = [];
     this.byFile = new Map<string, int>();
+    this.libraries = new Map<string, int>();
     this.order = [];
     this.unreadable = [];
   }
@@ -54,12 +58,19 @@ export class Loader {
       this.visit(entry);
     }
 
-    const modules = this.order.slice();
+    const parts = new PartialClasses(this.order);
+
+    parts.join();
+
+    const order = this.order.map((module) => this.finished(module));
+    const modules = order.slice();
 
     modules.sort((first, second) => first.id - second.id);
 
+    const builtins = this.builtins();
+
     return {
-      program: { modules, order: this.order },
+      program: { modules, order, builtins },
       unreadable: this.unreadable,
     };
   }
@@ -67,7 +78,7 @@ export class Loader {
   private visit(module: OpenModule): void {
     module.state = ModuleState.Loading;
 
-    const requests = this.requests(module.parsed.file);
+    const requests = this.requests(module);
 
     for (const request of requests) {
       const link = this.linked(module, request);
@@ -84,151 +95,104 @@ export class Loader {
     }
 
     module.state = ModuleState.Loaded;
-    const finished = this.finished(module);
-
-    this.order.push(finished);
+    this.order.push(module);
   }
 
-  private requests(file: SourceFile): ModulePath[] {
-    const requests: ModulePath[] = [];
+  private requests(module: OpenModule): Request[] {
+    const file = module.parsed.file;
+    const requests: Request[] = [];
 
     for (const decl of file.imports) {
-      requests.push(decl.from);
+      requests.push({ from: decl.from, isImplicit: false });
     }
 
     for (const decl of file.exports) {
       const from = decl.from;
       if (from != undefined) {
-        requests.push(from);
+        requests.push({ from, isImplicit: false });
       }
     }
 
-    requests.sort((first, second) => first.loc - second.loc);
+    for (const decl of module.implicit) {
+      requests.push({ from: decl.from, isImplicit: true });
+    }
+
+    requests.sort((first, second) => first.from.loc - second.from.loc);
 
     return requests;
   }
 
-  private linked(module: OpenModule, request: ModulePath): ModuleLink {
+  private linked(module: OpenModule, request: Request): ModuleLink {
+    const from = request.from;
+
+    if (request.isImplicit) {
+      return this.linkedImplicit(from);
+    }
+
     const directory = dirname(module.file);
-    const resolution = this.resolver.resolve(directory, request.path);
+    const fromLibrary = module.parsed.source.isLibrary;
+    const resolution = this.resolver.resolve(directory, from.path, fromLibrary);
     if (resolution.kind == ResolutionKind.File) {
-      return this.linkedFile(request, resolution.file);
+      return this.linkedFile(from, resolution.file);
+    }
+    if (resolution.kind == ResolutionKind.Library) {
+      return this.linkedLibrary(from, resolution.module);
     }
     if (resolution.kind == ResolutionKind.Problem) {
       module.problems.push({
         code: resolution.code,
-        loc: request.loc,
+        loc: from.loc,
         details: resolution.details,
       });
 
-      return { kind: LinkKind.Missing, from: request };
+      return { kind: LinkKind.Missing, from };
     }
     if (resolution.kind == ResolutionKind.Builtin) {
-      return { kind: LinkKind.Builtin, from: request };
+      return { kind: LinkKind.Builtin, from };
     }
 
-    return { kind: LinkKind.Package, from: request };
-  }
-
-  private linkedFile(request: ModulePath, file: string): ModuleLink {
-    if (file.endsWith(kJsonExtension)) {
-      return { kind: LinkKind.Json, from: request };
-    }
-
-    const key = this.keyOf(file);
-    const known = this.byFile.get(key);
-    if (known != undefined) {
-      return { kind: LinkKind.Module, from: request, target: known };
-    }
-
-    const name = this.nameOf(file);
-    const path = this.shownPath(name);
-    const module = this.open(file, key, name, path);
-    if (module == undefined) {
-      return { kind: LinkKind.Missing, from: request };
-    }
-
-    return { kind: LinkKind.Module, from: request, target: module.id };
-  }
-
-  private open(
-    file: string,
-    key: string,
-    name: string,
-    path: string,
-  ): OpenModule | undefined {
-    const text = readFileSync(file);
-    if (text.isErr()) {
-      this.unreadable.push(path);
-
-      return undefined;
-    }
-
-    const source: SourceText = { path, text: text.value, isLibrary: false };
-    const parsed = this.parser.parseFile(source);
-    const declaration = this.declarationOf(file, path);
-    const module: OpenModule = {
-      id: this.opened.length,
-      name,
-      file,
-      parsed,
-      declaration,
-      links: [],
-      problems: [],
-      state: ModuleState.New,
-    };
-
-    this.opened.push(module);
-    this.byFile.set(key, module.id);
-
-    return module;
-  }
-
-  private declarationOf(
-    file: string,
-    path: string,
-  ): ParsedDeclaration | undefined {
-    const declarationFile = this.declarationPath(file);
-    if (!existsSync(declarationFile)) {
-      return undefined;
-    }
-
-    const declarationPath = this.declarationPath(path);
-    const text = readFileSync(declarationFile);
-    if (text.isErr()) {
-      this.unreadable.push(declarationPath);
-
-      return undefined;
-    }
-
-    const source: SourceText = {
-      path: declarationPath,
-      text: text.value,
-      isLibrary: false,
-    };
-
-    return this.parser.parseDeclaration(source);
-  }
-
-  private declarationPath(path: string): string {
-    const stem = path.slice(0, path.length - kSourceExtension.length);
-
-    return `${stem}${kDeclarationExtension}`;
+    return { kind: LinkKind.Package, from };
   }
 
   private finished(module: OpenModule): Module {
     const parsed = module.parsed;
-    const errors = this.mergedByPlace(parsed.errors, module.problems);
+    const file = parsed.file;
+    const problems = module.problems;
+
+    problems.sort((first, second) => first.loc - second.loc);
+
+    const errors = this.mergedByPlace(parsed.errors, problems);
+    const items = this.withoutParts(file.items);
 
     return {
       id: module.id,
       name: module.name,
       source: parsed.source,
-      file: parsed.file,
+      file: {
+        items,
+        imports: file.imports,
+        exports: file.exports,
+        fieldNames: file.fieldNames,
+        stringConstants: file.stringConstants,
+      },
       errors,
       declaration: module.declaration,
       links: module.links,
+      implicit: module.implicit,
+      parts: module.parts,
     };
+  }
+
+  private withoutParts(items: Stmt[]): Stmt[] {
+    const kept: Stmt[] = [];
+
+    for (const item of items) {
+      if (item.kind != StmtKind.Class || !item.isPartial) {
+        kept.push(item);
+      }
+    }
+
+    return kept;
   }
 
   private mergedByPlace(
@@ -259,35 +223,5 @@ export class Loader {
     const rest = problems.slice(taken);
 
     return merged.concat(rest);
-  }
-
-  private keyOf(file: string): string {
-    const absolute = resolve(file);
-    const real = realpathSync(absolute);
-    const path = real.unwrapOr(absolute);
-
-    if (process.platform == kWindowsPlatform) {
-      return path.toLowerCase();
-    }
-
-    return path;
-  }
-
-  private nameOf(file: string): string {
-    const from = resolve(this.entryDirectory);
-    const to = resolve(file);
-    const name = relative(from, to);
-
-    return this.slashed(name);
-  }
-
-  private shownPath(name: string): string {
-    const path = join(this.entryDirectory, name);
-
-    return this.slashed(path);
-  }
-
-  private slashed(path: string): string {
-    return path.replaceAll(kWindowsSeparator, kPathSeparator);
   }
 }

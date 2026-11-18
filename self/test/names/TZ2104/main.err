@@ -1,0 +1,3 @@
+main.tz:4:15: error TZ2104: duplicate export of 'a': it is already exported at line 1
+export { b as a };
+              ^

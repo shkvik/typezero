@@ -1,0 +1,7 @@
+import "./part.tz";
+
+function withName(base: int): int {
+  return base;
+}
+
+export class Shape extends withName(1) {}

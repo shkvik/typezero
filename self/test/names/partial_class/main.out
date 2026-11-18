@@ -1,0 +1,9 @@
+shape.partial.area.tz
+  import Shape -> shape.tz:Shape
+shape.tz
+  declared Shape
+  export Shape -> shape.tz:Shape
+main.tz
+  declared unit
+  export unit -> main.tz:unit
+  import Shape -> shape.tz:Shape

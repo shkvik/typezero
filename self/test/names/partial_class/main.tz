@@ -1,0 +1,5 @@
+// A part of a partial class imports the class it adds to: the part does not
+// declare the name itself, so the import is no conflict.
+import { Shape } from "./shape.tz";
+
+export const unit = new Shape(1);

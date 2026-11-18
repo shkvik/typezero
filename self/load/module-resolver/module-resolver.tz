@@ -4,6 +4,8 @@ import { Code } from "../../diagnostic/code.tz";
 import { Details } from "../../diagnostic/types/message.types.tz";
 import { kNoDetails } from "../../diagnostic/const/message.const.tz";
 import { kBuiltinModules } from "../../program/library/builtin-modules/const/builtin-modules.const.tz";
+import { kTzModulePrefix } from "../../program/library/builtin-modules/const/builtin-modules.const.prefixes.tz";
+import { kLibrary } from "../../program/library/library-modules/const/library-modules.const.tz";
 import {
   kJsonExtension,
   kPathSeparator,
@@ -28,6 +30,7 @@ import {
   kParent,
   kParentPrefix,
   kSchemeMark,
+  kStreamModules,
   kTypeScriptDeclarations,
   kTypeScriptExtension,
 } from "./const/module-resolver.const.tz";
@@ -39,9 +42,17 @@ export class ModuleResolver {
     this.listings = new Map<string, string[]>();
   }
 
-  public resolve(directory: string, spec: string): Resolution {
+  public resolve(
+    directory: string,
+    spec: string,
+    fromLibrary: boolean,
+  ): Resolution {
+    const module = kLibrary.imported(spec, fromLibrary);
+    if (module != undefined) {
+      return { kind: ResolutionKind.Library, module };
+    }
     if (kBuiltinModules.has(spec)) {
-      return { kind: ResolutionKind.Builtin };
+      return this.builtin(spec);
     }
     if (spec.includes(kWindowsSeparator)) {
       return this.problem(Code.ImportPathBackslash, kNoDetails);
@@ -67,6 +78,56 @@ export class ModuleResolver {
 
   private problem(code: Code, details: Details): Resolution {
     return { kind: ResolutionKind.Problem, code, details };
+  }
+
+  private builtin(spec: string): Resolution {
+    if (kBuiltinModules.isSupported(spec)) {
+      return { kind: ResolutionKind.Builtin };
+    }
+
+    const code = this.builtinProblem(spec);
+
+    return this.problem(code, { word: spec });
+  }
+
+  private builtinProblem(spec: string): Code {
+    if (!kBuiltinModules.isNodeModule(spec)) {
+      return this.unknownBuiltin(spec);
+    }
+
+    const bare = kBuiltinModules.withoutNodePrefix(spec);
+
+    switch (bare) {
+      case "timers":
+        return Code.TimersModuleNotYet;
+      case "http":
+      case "https":
+        return Code.HttpModuleNotYet;
+      case "http2":
+        return Code.Http2ModuleNotYet;
+      case "tls":
+      case "dns":
+      case "dns/promises":
+        return Code.NetworkModuleNotYet;
+      default:
+        return this.laterModule(bare);
+    }
+  }
+
+  private unknownBuiltin(spec: string): Code {
+    if (spec.startsWith(kTzModulePrefix)) {
+      return Code.TzModuleUnknown;
+    }
+
+    return Code.BuiltinModuleUnknown;
+  }
+
+  private laterModule(bare: string): Code {
+    if (bare.startsWith(kStreamModules)) {
+      return Code.StreamModuleNotYet;
+    }
+
+    return Code.BuiltinModuleNotYet;
   }
 
   private isRelative(spec: string): boolean {

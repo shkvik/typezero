@@ -1,0 +1,5 @@
+import { Shape } from "./main.tz";
+
+class Base {}
+
+partial class Shape extends Base {}

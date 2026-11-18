@@ -1,0 +1,3 @@
+main.tz:1:19: error TZ2010: there is no built-in module 'tz:nothing'; tz has 'tz:io', 'tz:fs', 'tz:crypto', 'tz:http', 'tz:http2' and 'tz:sync'
+import { a } from "tz:nothing";
+                  ^

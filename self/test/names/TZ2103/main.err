@@ -1,0 +1,3 @@
+main.tz:1:10: error TZ2103: cannot find 'nothing' to export: this file neither declares nor imports it
+export { nothing };
+         ^
