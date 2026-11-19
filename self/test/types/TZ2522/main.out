@@ -1,0 +1,4 @@
+main.tz
+  3:7 ratio: double
+  9:7 b1: (int | string | boolean)[]
+  10:7 b2: double[]

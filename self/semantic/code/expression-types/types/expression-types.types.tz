@@ -1,4 +1,8 @@
 import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+import {
+  Expr,
+  Property,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
 import { VarDeclarator } from "../../../../program/ast/types/ast.types.patterns.tz";
 import { NameUse } from "../../../../program/scopes/types/scopes.types.tz";
 import {
@@ -46,4 +50,29 @@ export type Bound = {
 export type Interval = {
   readonly low: Bound;
   high: Bound;
+};
+
+export type ArrayDraft = {
+  readonly types: Map<int, Type>;
+  readonly spreads: Map<int, Type>;
+  seen?: Type;
+  hasDecimal: boolean;
+};
+
+export type FieldEntry = {
+  readonly property: Property;
+  readonly name: string;
+  readonly value: Expr;
+  readonly named: boolean;
+};
+
+export type ObjectDraft = {
+  readonly entries: FieldEntry[];
+  typed: boolean;
+  deferred: boolean;
+};
+
+export type UnifyAnswer = {
+  readonly decided: boolean;
+  readonly type?: Type;
 };

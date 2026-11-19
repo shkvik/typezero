@@ -1,0 +1,6 @@
+main.tz:7:19: error TZ2515: type '{ kind: string; radius: int }' is not assignable to type '{ kind: "circle"; radius: double } | { kind: "square"; side: double }'; an object literal goes into a union as one of its members: it needs the fields of one of them, with its value of 'kind'
+const a1: Shape = { kind: "oval", radius: 1 };
+                  ^
+main.tz:8:19: error TZ2515: type '{ kind: string; side: int }' is not assignable to type '{ kind: "circle"; radius: double } | { kind: "square"; side: double }'; an object literal goes into a union as one of its members: it needs the fields of one of them, with its value of 'kind'
+const a2: Shape = { kind: "circle", side: 1 };
+                  ^

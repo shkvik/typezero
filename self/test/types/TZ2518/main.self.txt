@@ -1,0 +1,4 @@
+4:20: type 'int' is not assignable to type 'object'; only objects of the language are 'object's (instances of classes, object literals, dates, dictionaries...); for any value at all there is 'unknown'
+5:20: type 'string' is not assignable to type 'object'; only objects of the language are 'object's (instances of classes, object literals, dates, dictionaries...); for any value at all there is 'unknown'
+6:20: type 'int[]' is not assignable to type 'object'; only objects of the language are 'object's (instances of classes, object literals, dates, dictionaries...); for any value at all there is 'unknown'
+7:32: type 'int[]' is not assignable to type 'object | undefined'; only objects of the language are 'object's (instances of classes, object literals, dates, dictionaries...); for any value at all there is 'unknown'

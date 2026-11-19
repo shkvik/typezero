@@ -1,0 +1,9 @@
+main.tz:2:12: error TZ2547: 'null' is not supported: the only value for nothing is 'undefined'; write 'undefined' (null exists only in Json values)
+const a1 = null;
+           ^
+main.tz:3:17: error TZ2547: 'null' is not supported: the only value for nothing is 'undefined'; write 'undefined' (null exists only in Json values)
+const a2: int = null;
+                ^
+main.tz:4:13: error TZ2547: 'null' is not supported: the only value for nothing is 'undefined'; write 'undefined' (null exists only in Json values)
+const a3 = [null];
+            ^

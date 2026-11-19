@@ -1,0 +1,2 @@
+2:20: cannot infer the type of field 'name' from 'undefined'; declare the type of the object, e.g. 'const o: { name?: int } = ...'
+3:21: cannot infer the type of field 'name' from 'undefined'; declare the type of the object, e.g. 'const o: { name?: int } = ...'

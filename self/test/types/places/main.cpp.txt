@@ -1,0 +1,9 @@
+5:25: type 'string' is not assignable to type 'int' of field 'id'
+6:34: type 'int' is not assignable to type 'string | undefined' of field 'name'
+7:31: type 'int' is not assignable to type 'string' of element 1
+8:38: type 'string' is not assignable to type 'int' of key 'a'
+9:42: type 'string' is not assignable to type 'int' of the value
+10:38: type 'double' is not assignable to type 'int8' of field 'small'; round it first, then convert: 'Math.trunc(x).toInt8()' (or Math.round, Math.floor, Math.ceil)
+11:38: type '3' is not assignable to type '1 | 2' of element 1, which holds 1 to 2
+12:55: type 'string' is not assignable to type 'int' of field 'deep'
+13:23: type 'string' is not assignable to type 'int'

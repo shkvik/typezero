@@ -1,0 +1,7 @@
+// An object literal names each field once.
+type Point = { x: int; y: int };
+const name = "x";
+
+const a1 = { x: 1, x: 2 };
+const a2: Point = { x: 1, y: 2, x: 3 };
+const a3 = { x: 1, [name]: 2 };

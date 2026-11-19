@@ -1,0 +1,10 @@
+// What is spread must fit the array as it is: a wider array is not made
+// on the way.
+const ints: int[] = [1];
+const pair: [int, string] = [1, "a"];
+
+const a1: double[] = [...ints];
+const a2 = [...ints, "a"];
+const a3: int[] = [...pair];
+
+const b1: int[] = [...ints, 2];

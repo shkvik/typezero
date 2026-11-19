@@ -1,0 +1,13 @@
+// A value inside a literal is checked where it goes, and the message says
+// which field, element or key that is.
+type Shape = { id: int; name?: string };
+
+const a1: Shape = { id: "x" };
+const a2: Shape = { id: 1, name: 2 };
+const a3: [int, string] = [1, 2];
+const a4: Record<string, int> = { a: "x" };
+const a5: Record<string, int> = { ["b"]: "x" };
+const a6: { small: int8 } = { small: 1.5 };
+const a7: ["a" | "b", 1 | 2] = ["a", 3];
+const a8: { inner: { deep: int } } = { inner: { deep: "x" } };
+const a9: int[] = [1, "x"];

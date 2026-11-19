@@ -1,0 +1,9 @@
+main.tz:5:22: error TZ2523: array elements must have one type; found 'int' and 'double'
+const a1 = [...ints, 1.5];
+                     ^
+main.tz:6:18: error TZ2523: array elements must have one type; found 'int[]' and 'string[]'
+const a2 = [[1], ["a"], []];
+                 ^
+main.tz:6:25: error TZ2521: cannot infer the element type of an empty array; add a type, e.g. 'let a: int[] = []'
+const a2 = [[1], ["a"], []];
+                        ^

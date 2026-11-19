@@ -1,0 +1,7 @@
+main.tz
+  9:6 type Spot = { x: int }
+  10:7 spot: Spot
+  12:7 a1: Point
+  13:7 a2: Point[]
+  14:7 a3: Point | undefined
+  15:7 a4: Point

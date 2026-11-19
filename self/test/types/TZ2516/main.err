@@ -1,0 +1,3 @@
+main.tz:4:19: error TZ2516: type '[int, int]' is not assignable to type 'int[]'; a tuple is not an array, though it is written like one: copy it into an array with '[...t]'
+const a1: int[] = pair;
+                  ^

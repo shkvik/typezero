@@ -1,0 +1,5 @@
+main.tz
+  3:6 type Shape = { kind: "circle"; radius: double } | { kind: "square"; side: double }
+  7:7 a1: { kind: "circle"; radius: double } | { kind: "square"; side: double }
+  8:7 a2: { kind: "circle"; radius: double } | { kind: "square"; side: double }
+  10:7 b1: { kind: "circle"; radius: double } | { kind: "square"; side: double }

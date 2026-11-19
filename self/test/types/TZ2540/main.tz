@@ -1,0 +1,3 @@
+// `name = value` is a default of a destructuring pattern, not an entry of
+// a Record.
+const a1: Record<string, int> = { x = 1 };

@@ -1,0 +1,5 @@
+// `undefined` alone says nothing about what else a field may hold.
+const a1 = { name: undefined };
+const a2 = [{ name: undefined }];
+
+const b1: { name?: string } = { name: undefined };

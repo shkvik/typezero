@@ -1,0 +1,2 @@
+4:27: type 'Point' has no field 'z'; an object must have exactly the fields of its type
+5:30: type 'Point' has no field 'w'; an object must have exactly the fields of its type

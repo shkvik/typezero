@@ -1,0 +1,4 @@
+// A stream error with fields of its own has a type of its own.
+const a1: StreamError = { message: "x", code: 1 };
+
+const b1: StreamError = { message: "x" };

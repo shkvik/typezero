@@ -1,0 +1,2 @@
+4:17: type 'Json' is not assignable to type 'int'; a Json may hold any JSON value: check what it holds first (e.g. 'typeof x == "string"' or 'Array.isArray(x)')
+5:22: type 'Json' is not assignable to type 'string[]'; a Json may hold any JSON value: check what it holds first (e.g. 'typeof x == "string"' or 'Array.isArray(x)')

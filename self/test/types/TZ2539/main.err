@@ -1,0 +1,6 @@
+main.tz:2:20: error TZ2539: cannot infer the type of field 'name' from 'undefined'; declare the type of the object, e.g. 'const o: { name?: int } = ...'
+const a1 = { name: undefined };
+                   ^
+main.tz:3:21: error TZ2539: cannot infer the type of field 'name' from 'undefined'; declare the type of the object, e.g. 'const o: { name?: int } = ...'
+const a2 = [{ name: undefined }];
+                    ^

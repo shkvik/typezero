@@ -1,0 +1,9 @@
+main.tz:2:12: error TZ2521: cannot infer the element type of an empty array; add a type, e.g. 'let a: int[] = []'
+const a1 = [];
+           ^
+main.tz:3:13: error TZ2521: cannot infer the element type of an empty array; add a type, e.g. 'let a: int[] = []'
+const a2 = [[], [1]];
+            ^
+main.tz:4:20: error TZ2521: cannot infer the element type of an empty array; add a type, e.g. 'let a: int[] = []'
+const a3 = { list: [] };
+                   ^

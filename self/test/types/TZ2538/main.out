@@ -1,0 +1,5 @@
+main.tz
+  3:6 type Point = { x: int; y: int; z?: int; w: int | undefined }
+  5:7 a1: Point
+  6:7 a2: { x: int; y: int }[]
+  8:7 b1: Point

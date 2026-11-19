@@ -1,6 +1,10 @@
 import "./partial/expression-types.partial.literals.tz";
 import "./partial/expression-types.partial.variables.tz";
 import "./partial/expression-types.partial.mismatch.tz";
+import "./partial/expression-types.partial.arrays.tz";
+import "./partial/expression-types.partial.objects.tz";
+import "./partial/expression-types.partial.dictionaries.tz";
+import "./partial/expression-types.partial.unify.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   Details,
@@ -78,20 +82,35 @@ export class ExpressionTypes {
         return this.store.plain(TypeKind.Undefined);
       case ExprKind.Template:
         return this.templated(wanted);
+      case ExprKind.ArrayLit:
+        return this.arrayTyped(expr, wanted, module);
+      case ExprKind.ObjectLit:
+        return this.objectTyped(expr, wanted, module);
       case ExprKind.Name:
-        return this.named(expr, module);
+        return this.named(expr, wanted, module);
       default:
         return this.store.plain(TypeKind.Error);
     }
   }
 
-  private checked(expr: Expr, wanted: Type, module: int): Type {
+  private checked(expr: Expr, wanted: Type, module: int, place: string): Type {
     const given = this.typed(expr, wanted, module);
-    if (!this.relation.converts(given, wanted)) {
-      this.mismatch(expr, given, wanted, module);
-    }
+
+    this.coerce(expr, given, wanted, module, place);
 
     return given;
+  }
+
+  private coerce(
+    expr: Expr,
+    given: Type,
+    wanted: Type,
+    module: int,
+    place: string,
+  ): void {
+    if (!this.relation.converts(given, wanted)) {
+      this.mismatch(expr, given, wanted, module, place);
+    }
   }
 
   private report(module: int, loc: int, code: Code, details: Details): void {

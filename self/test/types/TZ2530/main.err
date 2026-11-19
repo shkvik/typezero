@@ -1,0 +1,9 @@
+main.tz:6:26: error TZ2530: cannot spread 'int[]' into 'double[]'
+const a1: double[] = [...ints];
+                         ^
+main.tz:7:16: error TZ2530: cannot spread 'int[]' into '(int | string)[]'
+const a2 = [...ints, "a"];
+               ^
+main.tz:8:23: error TZ2530: cannot spread '[int, string]' into 'int[]'
+const a3: int[] = [...pair];
+                      ^

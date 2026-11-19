@@ -1,0 +1,6 @@
+// The keys of a Json are strings.
+const count = 1;
+
+const a1: Json = { [count]: 1 };
+
+const b1: Json = { ["a"]: 1 };

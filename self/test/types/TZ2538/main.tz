@@ -1,0 +1,8 @@
+// A field the type requires is written; an optional one may be left out,
+// and so may one that holds `undefined`.
+type Point = { x: int; y: int; z?: int; w: int | undefined };
+
+const a1: Point = { x: 1 };
+const a2 = [{ x: 1, y: 2 }, { x: 3 }];
+
+const b1: Point = { x: 1, y: 2 };

@@ -1,0 +1,5 @@
+// `undefined` alone says nothing about what else the array may hold.
+const a1 = [undefined];
+const a2 = [undefined, undefined];
+
+const b1 = [undefined, 1];

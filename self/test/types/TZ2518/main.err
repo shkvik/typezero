@@ -1,0 +1,12 @@
+main.tz:4:20: error TZ2518: type 'int' is not assignable to type 'object'; only objects of the language are 'object's (instances of classes, object literals, dates, dictionaries...); for any value at all there is 'unknown'
+const a1: object = 1;
+                   ^
+main.tz:5:20: error TZ2518: type 'string' is not assignable to type 'object'; only objects of the language are 'object's (instances of classes, object literals, dates, dictionaries...); for any value at all there is 'unknown'
+const a2: object = "x";
+                   ^
+main.tz:6:20: error TZ2518: type 'int[]' is not assignable to type 'object'; only objects of the language are 'object's (instances of classes, object literals, dates, dictionaries...); for any value at all there is 'unknown'
+const a3: object = list;
+                   ^
+main.tz:7:32: error TZ2518: type 'int[]' is not assignable to type 'object | undefined'; only objects of the language are 'object's (instances of classes, object literals, dates, dictionaries...); for any value at all there is 'unknown'
+const a4: object | undefined = [1];
+                               ^

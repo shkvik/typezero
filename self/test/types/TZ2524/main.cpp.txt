@@ -1,0 +1,2 @@
+2:12: cannot infer the element type from 'undefined' alone; add a type, e.g. 'let a: (int | undefined)[] = ...'
+3:12: cannot infer the element type from 'undefined' alone; add a type, e.g. 'let a: (int | undefined)[] = ...'

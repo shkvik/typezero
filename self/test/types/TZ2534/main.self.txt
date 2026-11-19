@@ -1,0 +1,2 @@
+4:15: a key must be a string, found 'boolean'
+5:15: a key must be a string, found 'undefined'

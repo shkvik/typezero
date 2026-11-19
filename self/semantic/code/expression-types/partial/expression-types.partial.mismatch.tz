@@ -18,35 +18,141 @@ import { kWideBits } from "../../../types/type-relation/const/type-relation.cons
 import { Bound, Interval } from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private mismatch(expr: Expr, given: Type, wanted: Type, module: int): void {
-    const target = this.onlyPart(wanted);
-    const source = this.onlyPart(given);
-    if (!this.isPlainValue(source) && !this.isPlainValue(target)) {
+  private mismatch(
+    expr: Expr,
+    given: Type,
+    wanted: Type,
+    module: int,
+    place: string,
+  ): void {
+    const source = this.innerObject(given, wanted);
+    const target = this.innerObject(wanted, given);
+    const only = this.onlyPart(wanted);
+    const goal = this.definedType(wanted);
+    const holds = this.rangeText(given, goal);
+    const code = this.mismatchCode(given, wanted, source, target, holds);
+    if (!this.isReported(expr, given, wanted, code)) {
       return;
     }
 
     const first = this.text.of(given);
     const second = this.text.of(wanted);
-    const holds = this.rangeText(given, target);
-    const word = this.operandName(expr);
-    const other = this.conversionName(target);
-    const code = this.mismatchCode(given, target, holds);
+    const word = this.mismatchWord(expr, code, target);
+    const other = this.mismatchOther(code, holds, only);
 
-    if (code == Code.LiteralOutsideRange) {
-      return this.report(module, expr.loc, code, {
-        first,
-        second,
-        other: holds,
-      });
-    }
-
-    this.report(module, expr.loc, code, { first, second, word, other });
+    this.report(module, expr.loc, code, {
+      first,
+      second,
+      word,
+      other,
+      place,
+    });
   }
 
-  private mismatchCode(given: Type, target: Type, holds: string): Code {
+  private mismatchCode(
+    given: Type,
+    wanted: Type,
+    source: Type,
+    target: Type,
+    holds: string,
+  ): Code {
     if (holds != "") {
       return Code.LiteralOutsideRange;
     }
+
+    const isPlainObject =
+      source.kind == TypeKind.Object || source.kind == TypeKind.Tuple;
+    if (isPlainObject && target.kind == TypeKind.Instance) {
+      return Code.LiteralNotInstance;
+    }
+    if (isPlainObject && this.hasObjectMember(target)) {
+      return this.unionCode(target);
+    }
+    if (source.kind == TypeKind.Tuple && target.kind == TypeKind.Array) {
+      return Code.TupleNotArray;
+    }
+
+    const value = this.definedType(given);
+    const goal = this.definedType(wanted);
+
+    if (value.kind == TypeKind.Json) {
+      return Code.JsonUnchecked;
+    }
+    if (goal.kind == TypeKind.AnyObject) {
+      return Code.NotAnObject;
+    }
+    if (goal.kind == TypeKind.Json) {
+      return this.jsonCode(source, value);
+    }
+
+    const only = this.onlyPart(wanted);
+
+    return this.numberCode(given, only);
+  }
+
+  private hasObjectMember(target: Type): boolean {
+    if (target.kind != TypeKind.Union) {
+      return false;
+    }
+
+    return target.parts.some((part) => this.isObjectKind(part));
+  }
+
+  private unionCode(target: Type): Code {
+    if (this.sharedTag(target) == undefined) {
+      return Code.ObjectIntoUnion;
+    }
+
+    return Code.ObjectIntoTaggedUnion;
+  }
+
+  private sharedTag(target: Type): string | undefined {
+    if (target.kind != TypeKind.Union) {
+      return undefined;
+    }
+
+    const parts = target.parts;
+    const front = parts[0];
+    if (front == undefined || front.kind != TypeKind.Object) {
+      return undefined;
+    }
+
+    const tag = front.fields.find((field) =>
+      parts.every((part) => this.hasLiteralField(part, field.name)),
+    );
+
+    return tag?.name;
+  }
+
+  private hasLiteralField(part: Type, name: string): boolean {
+    if (part.kind != TypeKind.Object) {
+      return false;
+    }
+
+    const field = part.fields.find((one) => one.name == name);
+
+    return (
+      field != undefined &&
+      !field.optional &&
+      field.type.kind == TypeKind.Literal
+    );
+  }
+
+  private jsonCode(source: Type, value: Type): Code {
+    if (this.isObjectKind(source) || value.kind == TypeKind.Array) {
+      return Code.ObjectIntoJson;
+    }
+    if (value.kind == TypeKind.Dict) {
+      return this.dictionaryCode(value.value);
+    }
+    if (value.kind == TypeKind.Decimal) {
+      return Code.DecimalIntoJson;
+    }
+
+    return Code.NotAssignable;
+  }
+
+  private numberCode(given: Type, target: Type): Code {
     if (given.kind == TypeKind.Int && this.isNumber(target)) {
       return Code.ConvertExplicitly;
     }
@@ -58,12 +164,6 @@ partial class ExpressionTypes {
     }
     if (given.kind == TypeKind.Decimal && this.isNumber(target)) {
       return Code.DecimalIntoNumber;
-    }
-    if (given.kind == TypeKind.Decimal && target.kind == TypeKind.Json) {
-      return Code.DecimalIntoJson;
-    }
-    if (given.kind == TypeKind.Dict && target.kind == TypeKind.Json) {
-      return this.dictionaryCode(given.value);
     }
 
     return Code.NotAssignable;
@@ -79,6 +179,73 @@ partial class ExpressionTypes {
     }
 
     return Code.NotAssignable;
+  }
+
+  private isReported(
+    expr: Expr,
+    given: Type,
+    wanted: Type,
+    code: Code,
+  ): boolean {
+    const isFresh =
+      expr.kind == ExprKind.ArrayLit || expr.kind == ExprKind.ObjectLit;
+    if (isFresh || this.isCertain(code)) {
+      return true;
+    }
+
+    const source = this.innerObject(given, wanted);
+    const target = this.innerObject(wanted, given);
+    const from = this.onlyPart(given);
+    const to = this.onlyPart(wanted);
+
+    return (
+      this.isPlainValue(from) ||
+      this.isPlainValue(to) ||
+      this.isPlainValue(source) ||
+      this.isPlainValue(target)
+    );
+  }
+
+  private isCertain(code: Code): boolean {
+    switch (code) {
+      case Code.LiteralNotInstance:
+      case Code.TupleNotArray:
+      case Code.JsonUnchecked:
+      case Code.NotAnObject:
+      case Code.ObjectIntoJson:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private innerObject(type: Type, other: Type): Type {
+    const inner = this.definedType(type);
+    const otherInner = this.definedType(other);
+    if (inner.kind == TypeKind.Array && otherInner.kind == TypeKind.Array) {
+      return this.innerObject(inner.item, otherInner.item);
+    }
+
+    return inner;
+  }
+
+  private mismatchWord(expr: Expr, code: Code, target: Type): string {
+    switch (code) {
+      case Code.LiteralNotInstance:
+        return this.text.of(target);
+      case Code.ObjectIntoTaggedUnion:
+        return this.sharedTag(target) ?? "";
+      default:
+        return this.operandName(expr);
+    }
+  }
+
+  private mismatchOther(code: Code, holds: string, only: Type): string {
+    if (code == Code.LiteralOutsideRange) {
+      return holds;
+    }
+
+    return this.conversionName(only);
   }
 
   private isPlainValue(type: Type): boolean {

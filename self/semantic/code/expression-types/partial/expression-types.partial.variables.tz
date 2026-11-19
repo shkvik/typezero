@@ -19,6 +19,7 @@ import {
   TypeContext,
   TypePlace,
 } from "../../../types/type-resolver/types/type-resolver.types.tz";
+import { kNoPlace } from "../const/expression-types.const.tz";
 import {
   TopVariable,
   ValueRecord,
@@ -117,7 +118,7 @@ partial class ExpressionTypes {
       door.type = type;
 
       if (init != undefined && type.kind != TypeKind.Error) {
-        this.checked(init, type, module);
+        this.checked(init, type, module, kNoPlace);
       }
 
       return;

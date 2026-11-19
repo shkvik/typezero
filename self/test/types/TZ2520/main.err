@@ -1,0 +1,6 @@
+main.tz:2:16: error TZ2520: arrays cannot have holes; write the element explicitly
+const a1 = [1, , 2];
+               ^
+main.tz:3:13: error TZ2520: arrays cannot have holes; write the element explicitly
+const a2 = [, 1];
+            ^

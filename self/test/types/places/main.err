@@ -1,0 +1,27 @@
+main.tz:5:25: error TZ2501: type 'string' is not assignable to type 'int' of field 'id'
+const a1: Shape = { id: "x" };
+                        ^
+main.tz:6:34: error TZ2501: type 'int' is not assignable to type 'string | undefined' of field 'name'
+const a2: Shape = { id: 1, name: 2 };
+                                 ^
+main.tz:7:31: error TZ2501: type 'int' is not assignable to type 'string' of element 1
+const a3: [int, string] = [1, 2];
+                              ^
+main.tz:8:38: error TZ2501: type 'string' is not assignable to type 'int' of key 'a'
+const a4: Record<string, int> = { a: "x" };
+                                     ^
+main.tz:9:42: error TZ2501: type 'string' is not assignable to type 'int' of the value
+const a5: Record<string, int> = { ["b"]: "x" };
+                                         ^
+main.tz:10:38: error TZ2503: type 'double' is not assignable to type 'int8' of field 'small'; round it first, then convert: 'Math.trunc(x).toInt8()' (or Math.round, Math.floor, Math.ceil)
+const a6: { small: int8 } = { small: 1.5 };
+                                     ^
+main.tz:11:38: error TZ2505: type '3' is not assignable to type '1 | 2' of element 1, which holds 1 to 2
+const a7: ["a" | "b", 1 | 2] = ["a", 3];
+                                     ^
+main.tz:12:55: error TZ2501: type 'string' is not assignable to type 'int' of field 'deep'
+const a8: { inner: { deep: int } } = { inner: { deep: "x" } };
+                                                      ^
+main.tz:13:23: error TZ2501: type 'string' is not assignable to type 'int'
+const a9: int[] = [1, "x"];
+                      ^

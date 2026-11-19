@@ -1,0 +1,12 @@
+main.tz:12:19: error TZ2513: type 'Spot' is not assignable to type 'Point'; an object literal is never an instance of a class: create one with 'new Point(...)'
+const a1: Point = { x: 1 };
+                  ^
+main.tz:13:22: error TZ2513: type 'Spot' is not assignable to type 'Point'; an object literal is never an instance of a class: create one with 'new Point(...)'
+const a2: Point[] = [{ x: 2 }];
+                     ^
+main.tz:14:31: error TZ2513: type 'Spot' is not assignable to type 'Point | undefined'; an object literal is never an instance of a class: create one with 'new Point(...)'
+const a3: Point | undefined = { x: 3 };
+                              ^
+main.tz:15:19: error TZ2513: type 'Spot' is not assignable to type 'Point'; an object literal is never an instance of a class: create one with 'new Point(...)'
+const a4: Point = spot;
+                  ^

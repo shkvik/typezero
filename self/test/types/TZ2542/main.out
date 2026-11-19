@@ -1,0 +1,6 @@
+main.tz
+  2:7 count: int
+  3:7 flag: boolean
+  5:7 a1: Record<string, int>
+  6:7 a2: Record<string, int>
+  8:7 b1: Record<string, int>

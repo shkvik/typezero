@@ -1,0 +1,4 @@
+main.tz
+  2:6 type Point = { x: int; y: int }
+  3:7 name: string
+  6:7 a2: Point

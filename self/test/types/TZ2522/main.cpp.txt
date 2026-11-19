@@ -1,0 +1,3 @@
+5:18: array elements must have one type; found 'int[]' and 'string[]'; for a value of each type in its own place, declare a tuple, e.g. 'const t: [int[], string[]] = ...'
+6:20: array elements must have one type; found 'double' and 'int'; for a value of each type in its own place, declare a tuple, e.g. 'const t: [double, int, string] = ...'
+7:16: array elements must have one type; found 'int' and 'double'; for a value of each type in its own place, declare a tuple, e.g. 'const t: [int, double] = ...'

@@ -1,0 +1,10 @@
+// Only what can be iterated is spread into an array.
+type Point = { x: int };
+const count = 1;
+const point: Point = { x: 1 };
+
+const a1 = [...count];
+const a2 = [...point];
+const a3 = [...true];
+
+const b1 = [..."ab"];

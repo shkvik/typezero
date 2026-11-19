@@ -1,0 +1,9 @@
+// An object literal goes into a union as one of its members, so it needs
+// the fields of one of them.
+type Cell = { row: int } | { name: string };
+
+const a1: Cell = { column: 1 };
+const a2: Cell = { row: 1, name: "x" };
+
+const b1: Cell = { row: 1 };
+const b2: Cell = { name: "x" };

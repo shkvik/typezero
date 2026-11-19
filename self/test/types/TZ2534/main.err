@@ -1,0 +1,6 @@
+main.tz:4:15: error TZ2534: a key must be a string, found 'boolean'
+const a1 = { [flag]: 1 };
+              ^
+main.tz:5:15: error TZ2534: a key must be a string, found 'undefined'
+const a2 = { [undefined]: 1 };
+              ^

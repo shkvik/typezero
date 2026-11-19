@@ -1,0 +1,3 @@
+main.tz:4:16: error TZ2529: only arrays, strings, iterators, Maps and Sets can be spread here, found 'Record<string, int>'; for the entries of a Record, spread 'Object.entries(r)'
+const a1 = [...scores];
+               ^

@@ -1,0 +1,647 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  ArrayElement,
+  ArrayLitExpr,
+  BinaryOp,
+  Expr,
+  ExprKind,
+  UnaryOp,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  DictKind,
+  LiteralKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { kNoPlace, kTypeSeparator } from "../const/expression-types.const.tz";
+import { ArrayDraft } from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private arrayTyped(
+    expr: ArrayLitExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const expected = this.jsonArrayOr(wanted);
+    const array = this.wantedArray(expected);
+    const hole = expr.elements.find((element) => element.hole);
+    if (hole != undefined) {
+      this.report(module, hole.expr.loc, Code.ArrayHole, kNoDetails);
+
+      return this.looseElements(expr, module);
+    }
+
+    const plain = this.wantedPart(array);
+    if (plain != undefined && plain.kind == TypeKind.Tuple) {
+      return this.tupleTyped(expr, plain, module);
+    }
+
+    const item = this.wantedItem(plain);
+
+    return this.listTyped(expr, item, module);
+  }
+
+  private jsonArrayOr(wanted: Type | undefined): Type | undefined {
+    const target = this.wantedPart(wanted);
+    if (target == undefined || target.kind != TypeKind.Json) {
+      return wanted;
+    }
+
+    return this.store.arrayOf(target);
+  }
+
+  private wantedArray(expected: Type | undefined): Type | undefined {
+    if (expected == undefined) {
+      return undefined;
+    }
+    if (expected.kind == TypeKind.Unknown) {
+      return this.store.arrayOf(expected);
+    }
+
+    const plain = this.definedType(expected);
+    if (plain.kind != TypeKind.Union) {
+      return expected;
+    }
+
+    const array = plain.parts.find((part) => part.kind == TypeKind.Array);
+
+    return array ?? expected;
+  }
+
+  private wantedItem(plain: Type | undefined): Type | undefined {
+    if (plain == undefined || plain.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    return plain.item;
+  }
+
+  private looseElements(expr: ArrayLitExpr, module: int): Type {
+    for (const element of expr.elements) {
+      if (!element.hole) {
+        this.typed(element.expr, undefined, module);
+      }
+    }
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private tupleTyped(expr: ArrayLitExpr, tuple: Type, module: int): Type {
+    if (tuple.kind != TypeKind.Tuple) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const first = this.text.of(tuple);
+    const spread = expr.elements.find((element) => element.spread);
+    if (spread != undefined) {
+      this.report(module, spread.expr.loc, Code.TupleTakesNoSpread, {
+        first,
+      });
+
+      return this.looseElements(expr, module);
+    }
+
+    const want = tuple.items.length;
+    const got = expr.elements.length;
+    if (want != got) {
+      this.report(module, expr.loc, Code.TupleLength, {
+        first,
+        word: `${want}`,
+        other: `${got}`,
+      });
+
+      return this.looseElements(expr, module);
+    }
+
+    for (let index = 0; index < want; index++) {
+      const element = expr.elements[index];
+      const item = tuple.items[index];
+      if (element == undefined || item == undefined) {
+        continue;
+      }
+
+      const place = this.elementPlace(index);
+
+      this.checked(element.expr, item, module, place);
+    }
+
+    return tuple;
+  }
+
+  private elementPlace(index: int): string {
+    return ` of element ${index}`;
+  }
+
+  private listTyped(
+    expr: ArrayLitExpr,
+    item: Type | undefined,
+    module: int,
+  ): Type {
+    const draft: ArrayDraft = {
+      types: new Map<int, Type>(),
+      spreads: new Map<int, Type>(),
+      hasDecimal: false,
+    };
+
+    this.firstPass(expr, item, draft, module);
+
+    const hint = this.literalHint(expr, draft);
+
+    this.secondPass(expr, hint, draft, module);
+
+    const element = item ?? this.joinedElement(expr, draft, module);
+    if (element == undefined || element.kind == TypeKind.Error) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const array = this.store.arrayOf(element);
+
+    this.coerceElements(expr, element, array, draft, module);
+
+    return array;
+  }
+
+  private firstPass(
+    expr: ArrayLitExpr,
+    item: Type | undefined,
+    draft: ArrayDraft,
+    module: int,
+  ): void {
+    let index = 0;
+
+    for (const element of expr.elements) {
+      this.firstPassElement(element, index, item, draft, module);
+
+      index += 1;
+    }
+  }
+
+  private firstPassElement(
+    element: ArrayElement,
+    index: int,
+    item: Type | undefined,
+    draft: ArrayDraft,
+    module: int,
+  ): void {
+    if (element.spread) {
+      return this.spreadElement(element.expr, index, item, draft, module);
+    }
+    if (item == undefined && this.isNumberTree(element.expr)) {
+      return;
+    }
+
+    const hint = this.elementHint(element.expr, item, draft.seen);
+    const type = this.typed(element.expr, hint, module);
+
+    draft.types.set(index, type);
+    draft.hasDecimal = draft.hasDecimal || this.isDecimalLike(type);
+
+    this.seeElement(draft, type);
+  }
+
+  private elementHint(
+    expr: Expr,
+    item: Type | undefined,
+    seen: Type | undefined,
+  ): Type | undefined {
+    if (item != undefined) {
+      return item;
+    }
+    if (seen == undefined || !this.holdsObjects(seen)) {
+      return undefined;
+    }
+    if (!this.isLiteralShaped(expr)) {
+      return undefined;
+    }
+
+    return seen;
+  }
+
+  private seeElement(draft: ArrayDraft, type: Type): void {
+    const seen = draft.seen;
+    const isBroken = seen != undefined && seen.kind == TypeKind.Error;
+    if (type.kind != TypeKind.Error && !isBroken) {
+      draft.seen = this.seenJoined(seen, type);
+    }
+    if (draft.seen == undefined) {
+      draft.seen = this.store.plain(TypeKind.Error);
+    }
+  }
+
+  private seenJoined(seen: Type | undefined, type: Type): Type | undefined {
+    if (seen == undefined) {
+      return type;
+    }
+
+    return this.unify(seen, type);
+  }
+
+  private spreadElement(
+    expr: Expr,
+    index: int,
+    item: Type | undefined,
+    draft: ArrayDraft,
+    module: int,
+  ): void {
+    const hint = this.spreadHint(item);
+    const type = this.typed(expr, hint, module);
+    const element = this.spreadItem(expr, type, module);
+    const source = this.spreadSource(type);
+
+    draft.types.set(index, element);
+    draft.spreads.set(index, source);
+
+    if (type.kind == TypeKind.Array) {
+      draft.hasDecimal = draft.hasDecimal || this.isDecimalLike(element);
+    }
+  }
+
+  private spreadHint(item: Type | undefined): Type | undefined {
+    if (item == undefined) {
+      return undefined;
+    }
+
+    return this.store.arrayOf(item);
+  }
+
+  private spreadItem(expr: Expr, type: Type, module: int): Type {
+    if (this.isUnsupportedSpread(type)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    switch (type.kind) {
+      case TypeKind.Error:
+      case TypeKind.String:
+        return type;
+      case TypeKind.Array:
+        return type.item;
+      case TypeKind.Tuple:
+        return this.tupleItem(expr, type, module);
+      case TypeKind.Dict:
+        return this.refusedSpread(expr, type, Code.RecordNotSpreadable, module);
+      default:
+        return this.refusedSpread(expr, type, Code.NotSpreadable, module);
+    }
+  }
+
+  private isUnsupportedSpread(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Iterator:
+      case TypeKind.Instance:
+      case TypeKind.TypeParameter:
+      case TypeKind.Operation:
+      case TypeKind.Template:
+        return true;
+      case TypeKind.Dict:
+        return type.dict != DictKind.Record;
+      case TypeKind.Literal:
+        return type.literal == LiteralKind.String;
+      default:
+        return false;
+    }
+  }
+
+  private refusedSpread(expr: Expr, type: Type, code: Code, module: int): Type {
+    const first = this.text.of(type);
+
+    this.report(module, expr.loc, code, { first });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private spreadSource(type: Type): Type {
+    if (this.isUnsupportedSpread(type)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return type;
+  }
+
+  private tupleItem(expr: Expr, tuple: Type, module: int): Type {
+    if (tuple.kind != TypeKind.Tuple) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    let element: Type | undefined = undefined;
+
+    for (const part of tuple.items) {
+      element = this.joinedItem(element, part);
+      if (element == undefined || element.kind == TypeKind.Error) {
+        break;
+      }
+    }
+
+    if (element == undefined || element.kind == TypeKind.Error) {
+      const first = this.text.of(tuple);
+
+      this.report(module, expr.loc, Code.TupleSpreadDiffers, { first });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return element;
+  }
+
+  private joinedItem(element: Type | undefined, part: Type): Type | undefined {
+    if (element == undefined) {
+      return part;
+    }
+
+    return this.unionUnify(element, part);
+  }
+
+  private literalHint(expr: ArrayLitExpr, draft: ArrayDraft): Type | undefined {
+    if (draft.hasDecimal) {
+      return this.store.plain(TypeKind.Decimal);
+    }
+
+    const seen = draft.seen;
+    if (seen != undefined && this.isNumeric(seen)) {
+      return seen;
+    }
+
+    let index = 0;
+
+    for (const element of expr.elements) {
+      const type = draft.types.get(index);
+      if (element.spread && type != undefined && this.isNumeric(type)) {
+        return type;
+      }
+
+      index += 1;
+    }
+
+    index = 0;
+
+    for (const element of expr.elements) {
+      const isFraction =
+        !draft.types.has(index) && !this.isIntTree(element.expr);
+      if (isFraction) {
+        return this.store.plain(TypeKind.Double);
+      }
+
+      index += 1;
+    }
+
+    return undefined;
+  }
+
+  private secondPass(
+    expr: ArrayLitExpr,
+    hint: Type | undefined,
+    draft: ArrayDraft,
+    module: int,
+  ): void {
+    let index = 0;
+
+    for (const element of expr.elements) {
+      if (!draft.types.has(index)) {
+        const type = this.typed(element.expr, hint, module);
+
+        draft.types.set(index, type);
+      }
+
+      index += 1;
+    }
+  }
+
+  private joinedElement(
+    expr: ArrayLitExpr,
+    draft: ArrayDraft,
+    module: int,
+  ): Type | undefined {
+    if (expr.elements.length == 0) {
+      this.report(module, expr.loc, Code.EmptyArray, kNoDetails);
+
+      return undefined;
+    }
+
+    const types = this.elementTypes(expr, draft);
+    let element: Type | undefined = undefined;
+    let index = 0;
+
+    for (const type of types) {
+      if (type.kind == TypeKind.Error) {
+        return undefined;
+      }
+
+      const joined = this.joinedItem(element, type);
+      if (joined == undefined) {
+        this.reportElements(expr, types, element, index, module);
+
+        return undefined;
+      }
+
+      element = joined;
+      index += 1;
+    }
+
+    if (element == undefined) {
+      return undefined;
+    }
+    if (element.kind == TypeKind.Undefined || element.kind == TypeKind.Void) {
+      const first = this.text.of(element);
+
+      this.report(module, expr.loc, Code.UndefinedElement, { first });
+
+      return undefined;
+    }
+
+    return element;
+  }
+
+  private elementTypes(expr: ArrayLitExpr, draft: ArrayDraft): Type[] {
+    const types: Type[] = [];
+    let index = 0;
+
+    for (const element of expr.elements) {
+      const type = draft.types.get(index) ?? this.store.plain(TypeKind.Error);
+
+      types.push(type);
+
+      index += 1;
+    }
+
+    return types;
+  }
+
+  private reportElements(
+    expr: ArrayLitExpr,
+    types: Type[],
+    before: Type | undefined,
+    index: int,
+    module: int,
+  ): void {
+    const element = expr.elements[index];
+    const type = types[index];
+    if (element == undefined || before == undefined || type == undefined) {
+      return;
+    }
+
+    const first = this.text.of(before);
+    const second = this.text.of(type);
+    const hasSpread = expr.elements.some((one) => one.spread);
+    const hasFailed = types.some((one) => one.kind == TypeKind.Error);
+    if (hasSpread || hasFailed) {
+      return this.report(module, element.expr.loc, Code.ElementTypesDiffer, {
+        first,
+        second,
+      });
+    }
+
+    const texts = types.map((one) => this.text.of(one));
+    const other = texts.join(kTypeSeparator);
+
+    this.report(module, element.expr.loc, Code.ElementTypesNeedTuple, {
+      first,
+      second,
+      other,
+    });
+  }
+
+  private coerceElements(
+    expr: ArrayLitExpr,
+    element: Type,
+    array: Type,
+    draft: ArrayDraft,
+    module: int,
+  ): void {
+    let index = 0;
+
+    for (const item of expr.elements) {
+      const given = draft.types.get(index) ?? this.store.plain(TypeKind.Error);
+      const source = draft.spreads.get(index) ?? given;
+
+      index += 1;
+
+      if (!item.spread) {
+        this.coerce(item.expr, given, element, module, kNoPlace);
+
+        continue;
+      }
+      if (!this.spreadFits(source, element, array)) {
+        const first = this.text.of(source);
+        const second = this.text.of(array);
+
+        this.report(module, item.expr.loc, Code.SpreadMismatch, {
+          first,
+          second,
+        });
+      }
+    }
+  }
+
+  private spreadFits(type: Type, element: Type, array: Type): boolean {
+    if (type == array || type.kind == TypeKind.Error) {
+      return true;
+    }
+
+    switch (type.kind) {
+      case TypeKind.String:
+        return element.kind == TypeKind.String;
+      case TypeKind.Array:
+        return this.fitsObjectArray(type.item, element);
+      case TypeKind.Tuple:
+        return type.items.every((part) =>
+          this.relation.converts(part, element),
+        );
+      default:
+        return false;
+    }
+  }
+
+  private fitsObjectArray(inner: Type, element: Type): boolean {
+    const plainInner = this.definedType(inner);
+    const plainElement = this.definedType(element);
+    const isObjects =
+      this.isObjectReference(plainInner) && this.isObjectKind(plainElement);
+    const isOptionalFitting =
+      this.isOptional(inner) == this.isOptional(element) ||
+      this.isOptional(element);
+
+    return (
+      isObjects && isOptionalFitting && this.relation.converts(inner, element)
+    );
+  }
+
+  private holdsObjects(type: Type): boolean {
+    const held = this.definedType(type);
+    if (held.kind == TypeKind.Array) {
+      return this.holdsObjects(held.item);
+    }
+
+    return this.isObjectKind(held) || held.kind == TypeKind.Dict;
+  }
+
+  private isLiteralShaped(expr: Expr): boolean {
+    return expr.kind == ExprKind.ArrayLit || expr.kind == ExprKind.ObjectLit;
+  }
+
+  private isDecimalLike(type: Type): boolean {
+    const plain = this.definedType(type);
+
+    return plain.kind == TypeKind.Decimal;
+  }
+
+  private isNumeric(type: Type): boolean {
+    return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
+  }
+
+  private isNumberTree(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+      case ExprKind.FloatLit:
+        return true;
+      case ExprKind.Unary:
+        return this.isSign(expr.op) && this.isNumberTree(expr.operand);
+      case ExprKind.Binary:
+        return (
+          this.isArithmetic(expr.op) &&
+          this.isNumberTree(expr.lhs) &&
+          this.isNumberTree(expr.rhs)
+        );
+      default:
+        return false;
+    }
+  }
+
+  private isIntTree(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+        return true;
+      case ExprKind.Unary:
+        return this.isSign(expr.op) && this.isIntTree(expr.operand);
+      case ExprKind.Binary:
+        return (
+          this.isWholeArithmetic(expr.op) &&
+          this.isIntTree(expr.lhs) &&
+          this.isIntTree(expr.rhs)
+        );
+      default:
+        return false;
+    }
+  }
+
+  private isSign(op: UnaryOp): boolean {
+    return op == UnaryOp.Neg || op == UnaryOp.Plus;
+  }
+
+  private isArithmetic(op: BinaryOp): boolean {
+    return op == BinaryOp.Div || this.isWholeArithmetic(op);
+  }
+
+  private isWholeArithmetic(op: BinaryOp): boolean {
+    switch (op) {
+      case BinaryOp.Add:
+      case BinaryOp.Sub:
+      case BinaryOp.Mul:
+      case BinaryOp.Rem:
+      case BinaryOp.Pow:
+        return true;
+      default:
+        return false;
+    }
+  }
+}

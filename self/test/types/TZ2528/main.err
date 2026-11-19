@@ -1,0 +1,9 @@
+main.tz:6:16: error TZ2528: only arrays, strings, iterators, Maps and Sets can be spread here, found 'int'
+const a1 = [...count];
+               ^
+main.tz:7:16: error TZ2528: only arrays, strings, iterators, Maps and Sets can be spread here, found 'Point'
+const a2 = [...point];
+               ^
+main.tz:8:16: error TZ2528: only arrays, strings, iterators, Maps and Sets can be spread here, found 'boolean'
+const a3 = [...true];
+               ^

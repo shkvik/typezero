@@ -88,6 +88,9 @@ partial class TypeResolver {
 
       return this.operation(OperationKind.Conditional, operands, "");
     }
+    if (check.kind == TypeKind.Error || wanted.kind == TypeKind.Error) {
+      return this.store.plain(TypeKind.Error);
+    }
 
     const captured = this.relation.matches(check, wanted, holes);
     if (captured == undefined) {

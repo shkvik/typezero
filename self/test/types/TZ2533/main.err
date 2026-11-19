@@ -1,0 +1,3 @@
+main.tz:6:15: error TZ2533: a key in brackets must be known when compiling: a string literal, or a constant declared with one, such as 'const key = "name"'; keys computed when the program runs need a dictionary: declare it as one, e.g. 'const d: Record<string, int> = {}'
+const a1 = { [name]: 1 };
+              ^

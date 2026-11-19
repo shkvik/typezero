@@ -1,0 +1,5 @@
+main.tz
+  2:6 type Point = { x: int }
+  3:7 count: int
+  4:7 point: Point
+  10:7 b1: string[]

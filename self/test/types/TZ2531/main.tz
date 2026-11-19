@@ -1,0 +1,6 @@
+// `name = value` in braces is a default of a destructuring pattern, not a
+// field of an object literal.
+type Point = { x: int };
+
+const a1: Point = { x = 1 };
+const a2 = { y = 2 };

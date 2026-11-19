@@ -1,0 +1,6 @@
+main.tz:4:27: error TZ2536: type 'Point' has no field 'z'; an object must have exactly the fields of its type
+const a1: Point = { x: 1, z: 2 };
+                          ^
+main.tz:5:30: error TZ2536: type 'Point' has no field 'w'; an object must have exactly the fields of its type
+const a2: Point[] = [{ x: 1, w: 3 }];
+                             ^

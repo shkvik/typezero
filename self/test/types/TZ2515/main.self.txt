@@ -1,0 +1,2 @@
+7:19: type '{ kind: string; radius: int }' is not assignable to type '{ kind: "circle"; radius: double } | { kind: "square"; side: double }'; an object literal goes into a union as one of its members: it needs the fields of one of them, with its value of 'kind'
+8:19: type '{ kind: string; side: int }' is not assignable to type '{ kind: "circle"; radius: double } | { kind: "square"; side: double }'; an object literal goes into a union as one of its members: it needs the fields of one of them, with its value of 'kind'

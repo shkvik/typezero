@@ -1,0 +1,5 @@
+// A tuple literal has exactly as many elements as its type.
+const a1: [int, string] = [1];
+const a2: [int, string] = [1, "a", 2];
+
+const b1: [int, string] = [1, "a"];

@@ -45,5 +45,9 @@ export function messageText(code: Code, details: Details): string {
     text = text.replaceAll("{second}", second);
   }
 
+  const place = details.place ?? "";
+
+  text = text.replaceAll("{place}", place);
+
   return text;
 }

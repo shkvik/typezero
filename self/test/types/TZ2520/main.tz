@@ -1,0 +1,5 @@
+// An array has no holes: every element is written.
+const a1 = [1, , 2];
+const a2 = [, 1];
+
+const b1 = [1, 2,];

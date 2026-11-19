@@ -1,0 +1,9 @@
+// A key in brackets is known when compiling: a string literal or a
+// constant set by one.
+let name = "x";
+const fixed = "y";
+
+const a1 = { [name]: 1 };
+
+const b1 = { [fixed]: 1 };
+const b2 = { ["z"]: 1 };

@@ -1,0 +1,2 @@
+// `name = value` belongs to a destructuring pattern, not to a Json.
+const a1: Json = { a = 1 };

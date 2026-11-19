@@ -1,0 +1,4 @@
+main.tz
+  2:7 a1: [int, string]
+  3:7 a2: [int, string]
+  5:7 b1: [int, string]

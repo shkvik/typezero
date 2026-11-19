@@ -1,0 +1,8 @@
+// The keys of a Record are strings, and a number is not turned into one.
+const count = 1;
+const flag = true;
+
+const a1: Record<string, int> = { [count]: 1 };
+const a2: Record<string, int> = { [flag]: 1 };
+
+const b1: Record<string, int> = { ["a"]: 1 };

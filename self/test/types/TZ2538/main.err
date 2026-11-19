@@ -1,0 +1,6 @@
+main.tz:5:19: error TZ2538: field 'y' is missing; type 'Point' requires it
+const a1: Point = { x: 1 };
+                  ^
+main.tz:6:29: error TZ2538: field 'y' is missing; type '{ x: int; y: int }' requires it
+const a2 = [{ x: 1, y: 2 }, { x: 3 }];
+                            ^

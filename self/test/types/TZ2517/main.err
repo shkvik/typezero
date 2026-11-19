@@ -1,0 +1,6 @@
+main.tz:4:17: error TZ2517: type 'Json' is not assignable to type 'int'; a Json may hold any JSON value: check what it holds first (e.g. 'typeof x == "string"' or 'Array.isArray(x)')
+const a1: int = data;
+                ^
+main.tz:5:22: error TZ2517: type 'Json' is not assignable to type 'string[]'; a Json may hold any JSON value: check what it holds first (e.g. 'typeof x == "string"' or 'Array.isArray(x)')
+const a2: string[] = data;
+                     ^

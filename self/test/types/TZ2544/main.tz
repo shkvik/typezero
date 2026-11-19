@@ -1,0 +1,6 @@
+// A Json holds data, not functions.
+const a1: Json = {
+  run() {
+    return 1;
+  },
+};

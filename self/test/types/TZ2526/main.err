@@ -1,0 +1,6 @@
+main.tz:2:27: error TZ2526: type '[int, string]' has 2 elements, and this literal has 1
+const a1: [int, string] = [1];
+                          ^
+main.tz:3:27: error TZ2526: type '[int, string]' has 2 elements, and this literal has 3
+const a2: [int, string] = [1, "a", 2];
+                          ^

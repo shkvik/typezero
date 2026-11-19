@@ -1,0 +1,7 @@
+main.tz
+  3:7 ints: int[]
+  4:7 pair: [int, string]
+  6:7 a1: double[]
+  7:7 a2: (int | string)[]
+  8:7 a3: int[]
+  10:7 b1: int[]

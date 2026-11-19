@@ -1,0 +1,3 @@
+main.tz:2:20: error TZ2543: a spread is not supported in a Json literal; write the keys one by one
+const a1: Json = { ...{ a: 1 } };
+                   ^

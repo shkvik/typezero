@@ -112,11 +112,21 @@ partial class ScopeTraversal {
   private traverseObject(expr: ObjectLitExpr): void {
     for (const property of expr.props) {
       const form = property.form;
+      const value = property.value;
+
       if (form.kind == PropertyKind.Computed) {
         this.traverseExpr(form.key);
       }
+      if (
+        form.kind == PropertyKind.Defaulted &&
+        value.kind == ExprKind.Assign
+      ) {
+        this.traverseExpr(value.value);
 
-      this.traverseExpr(property.value);
+        continue;
+      }
+
+      this.traverseExpr(value);
     }
   }
 }

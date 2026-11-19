@@ -1,0 +1,1 @@
+2:41: type 'StreamError' has no field 'code'; an object must have exactly the fields of its type; an error with fields of its own has a type of its own, e.g. 'interface MyError extends StreamError { ... }', and the stream names it: 'new ReadableStream<int, MyError>(...)', 'class Lines extends Readable<string, MyError>'

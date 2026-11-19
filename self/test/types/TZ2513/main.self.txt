@@ -1,0 +1,4 @@
+12:19: type 'Spot' is not assignable to type 'Point'; an object literal is never an instance of a class: create one with 'new Point(...)'
+13:22: type 'Spot' is not assignable to type 'Point'; an object literal is never an instance of a class: create one with 'new Point(...)'
+14:31: type 'Spot' is not assignable to type 'Point | undefined'; an object literal is never an instance of a class: create one with 'new Point(...)'
+15:19: type 'Spot' is not assignable to type 'Point'; an object literal is never an instance of a class: create one with 'new Point(...)'

@@ -1,0 +1,3 @@
+2:12: cannot infer the element type of an empty array; add a type, e.g. 'let a: int[] = []'
+3:13: cannot infer the element type of an empty array; add a type, e.g. 'let a: int[] = []'
+4:20: cannot infer the element type of an empty array; add a type, e.g. 'let a: int[] = []'

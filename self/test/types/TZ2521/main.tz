@@ -1,0 +1,7 @@
+// An empty array says nothing about the type of its elements.
+const a1 = [];
+const a2 = [[], [1]];
+const a3 = { list: [] };
+
+const b1: int[] = [];
+const b2: Json = [];

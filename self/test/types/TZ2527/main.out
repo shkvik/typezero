@@ -1,0 +1,4 @@
+main.tz
+  2:7 pair: [int[], string[]]
+  3:7 mixed: [int, string]
+  7:7 b1: (int | string)[]

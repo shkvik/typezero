@@ -1,0 +1,11 @@
+main.tz
+  3:6 type Shape = { id: int; name?: string }
+  5:7 a1: Shape
+  6:7 a2: Shape
+  7:7 a3: [int, string]
+  8:7 a4: Record<string, int>
+  9:7 a5: Record<string, int>
+  10:7 a6: { small: int8 }
+  11:7 a7: ["a" | "b", 1 | 2]
+  12:7 a8: { inner: { deep: int } }
+  13:7 a9: int[]

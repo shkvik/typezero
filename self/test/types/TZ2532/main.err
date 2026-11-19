@@ -1,0 +1,6 @@
+main.tz:4:15: error TZ2532: a number cannot name a field; an object with numbered entries is an array
+const a1 = { [count]: "x" };
+              ^
+main.tz:5:15: error TZ2532: a number cannot name a field; an object with numbered entries is an array
+const a2 = { [1.5]: "x" };
+              ^

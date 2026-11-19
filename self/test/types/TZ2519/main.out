@@ -1,0 +1,9 @@
+main.tz
+  3:6 type Point = { x: int }
+  4:7 list: int[]
+  5:7 point: Point
+  7:7 a1: Json
+  8:7 a2: Json
+  10:7 b1: Json
+  11:7 b2: Json
+  12:7 b3: Json[]

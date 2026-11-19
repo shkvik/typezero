@@ -1,0 +1,2 @@
+// A Json literal writes its keys one by one.
+const a1: Json = { ...{ a: 1 } };

@@ -1,0 +1,6 @@
+main.tz:5:18: error TZ2514: type '{ column: int }' is not assignable to type '{ row: int } | { name: string }'; an object literal goes into a union as one of its members: it needs the fields of one of them
+const a1: Cell = { column: 1 };
+                 ^
+main.tz:6:18: error TZ2514: type '{ row: int; name: string }' is not assignable to type '{ row: int } | { name: string }'; an object literal goes into a union as one of its members: it needs the fields of one of them
+const a2: Cell = { row: 1, name: "x" };
+                 ^

@@ -998,28 +998,28 @@ export const kMessages: Record<Code, Message> = {
     text: "'{word}' is a built-in type and cannot name a type parameter",
   },
   [Code.NotAssignable]: {
-    text: "type '{first}' is not assignable to type '{second}'",
+    text: "type '{first}' is not assignable to type '{second}'{place}",
   },
   [Code.ConvertExplicitly]: {
-    text: "type '{first}' is not assignable to type '{second}'; convert it explicitly: '{word}.{other}()'",
+    text: "type '{first}' is not assignable to type '{second}'{place}; convert it explicitly: '{word}.{other}()'",
   },
   [Code.RoundThenConvert]: {
-    text: "type '{first}' is not assignable to type '{second}'; round it first, then convert: 'Math.trunc({word}).{other}()' (or Math.round, Math.floor, Math.ceil)",
+    text: "type '{first}' is not assignable to type '{second}'{place}; round it first, then convert: 'Math.trunc({word}).{other}()' (or Math.round, Math.floor, Math.ceil)",
   },
   [Code.DoubleIntoDecimal]: {
-    text: "type '{first}' is not assignable to type '{second}'; a double is inexact already, so it becomes a decimal only explicitly: 'decimal(x)'",
+    text: "type '{first}' is not assignable to type '{second}'{place}; a double is inexact already, so it becomes a decimal only explicitly: 'decimal(x)'",
   },
   [Code.DecimalIntoNumber]: {
-    text: "type '{first}' is not assignable to type '{second}'; a decimal becomes a number only explicitly: 'Number(x)' gives the nearest double",
+    text: "type '{first}' is not assignable to type '{second}'{place}; a decimal becomes a number only explicitly: 'Number(x)' gives the nearest double",
   },
   [Code.DecimalIntoJson]: {
-    text: "type '{first}' is not assignable to type '{second}'; JSON has no decimals: write it as text with 'String(x)', as JSON.stringify does",
+    text: "type '{first}' is not assignable to type '{second}'{place}; JSON has no decimals: write it as text with 'String(x)', as JSON.stringify does",
   },
   [Code.WideIntegersIntoJson]: {
-    text: "type '{first}' is not assignable to type '{second}'; a number in a Json is a double, which holds every integer only within ±9007199254740992 (2^53), and nothing proves the values of this dictionary are there: build a 'Record<string, Json>' and check each value as it goes in, or keep them in a narrower type such as 'int32'",
+    text: "type '{first}' is not assignable to type '{second}'{place}; a number in a Json is a double, which holds every integer only within ±9007199254740992 (2^53), and nothing proves the values of this dictionary are there: build a 'Record<string, Json>' and check each value as it goes in, or keep them in a narrower type such as 'int32'",
   },
   [Code.LiteralOutsideRange]: {
-    text: "type '{first}' is not assignable to type '{second}', which holds {other}",
+    text: "type '{first}' is not assignable to type '{second}'{place}, which holds {other}",
   },
   [Code.IntegerLiteralTooBig]: {
     text: "integer literal does not fit in type '{word}'",
@@ -1035,5 +1035,110 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.InferPlace]: {
     text: "'infer' declares a type only in the 'extends' clause of a conditional type, e.g. 'T extends Array<infer U> ? U : never'",
+  },
+  [Code.LiteralNotInstance]: {
+    text: "type '{first}' is not assignable to type '{second}'{place}; an object literal is never an instance of a class: create one with 'new {word}(...)'",
+  },
+  [Code.ObjectIntoUnion]: {
+    text: "type '{first}' is not assignable to type '{second}'{place}; an object literal goes into a union as one of its members: it needs the fields of one of them",
+  },
+  [Code.ObjectIntoTaggedUnion]: {
+    text: "type '{first}' is not assignable to type '{second}'{place}; an object literal goes into a union as one of its members: it needs the fields of one of them, with its value of '{word}'",
+  },
+  [Code.TupleNotArray]: {
+    text: "type '{first}' is not assignable to type '{second}'{place}; a tuple is not an array, though it is written like one: copy it into an array with '[...t]'",
+  },
+  [Code.JsonUnchecked]: {
+    text: "type '{first}' is not assignable to type '{second}'{place}; a Json may hold any JSON value: check what it holds first (e.g. 'typeof x == \"string\"' or 'Array.isArray(x)')",
+  },
+  [Code.NotAnObject]: {
+    text: "type '{first}' is not assignable to type '{second}'{place}; only objects of the language are 'object's (instances of classes, object literals, dates, dictionaries...); for any value at all there is 'unknown'",
+  },
+  [Code.ObjectIntoJson]: {
+    text: "type '{first}' is not assignable to type '{second}'{place}; an array or an object becomes a Json only as a literal written where a Json is expected ('[...]', '{ ... }'), or as a 'Json[]', which stays the same array",
+  },
+  [Code.ArrayHole]: {
+    text: "arrays cannot have holes; write the element explicitly",
+  },
+  [Code.EmptyArray]: {
+    text: "cannot infer the element type of an empty array; add a type, e.g. 'let a: int[] = []'",
+  },
+  [Code.ElementTypesNeedTuple]: {
+    text: "array elements must have one type; found '{first}' and '{second}'; for a value of each type in its own place, declare a tuple, e.g. 'const t: [{other}] = ...'",
+  },
+  [Code.ElementTypesDiffer]: {
+    text: "array elements must have one type; found '{first}' and '{second}'",
+  },
+  [Code.UndefinedElement]: {
+    text: "cannot infer the element type from '{first}' alone; add a type, e.g. 'let a: (int | undefined)[] = ...'",
+  },
+  [Code.TupleTakesNoSpread]: {
+    text: "a tuple cannot take spread values: type '{first}' has a fixed length; write each element",
+  },
+  [Code.TupleLength]: {
+    text: "type '{first}' has {word} elements, and this literal has {other}",
+  },
+  [Code.TupleSpreadDiffers]: {
+    text: "the elements of '{first}' have different types, and an array holds elements of one type",
+  },
+  [Code.NotSpreadable]: {
+    text: "only arrays, strings, iterators, Maps and Sets can be spread here, found '{first}'",
+  },
+  [Code.RecordNotSpreadable]: {
+    text: "only arrays, strings, iterators, Maps and Sets can be spread here, found '{first}'; for the entries of a Record, spread 'Object.entries(r)'",
+  },
+  [Code.SpreadMismatch]: {
+    text: "cannot spread '{first}' into '{second}'",
+  },
+  [Code.DefaultedProperty]: {
+    text: "'{word} = ...' gives a default value, which only a destructuring pattern such as '({ {word} = 1 } = o)' has; in an object literal write '{word}: ...'",
+  },
+  [Code.NumberKey]: {
+    text: "a number cannot name a field; an object with numbered entries is an array",
+  },
+  [Code.RuntimeKey]: {
+    text: "a key in brackets must be known when compiling: a string literal, or a constant declared with one, such as 'const key = \"name\"'; keys computed when the program runs need a dictionary: declare it as one, e.g. 'const d: Record<string, int> = {}'",
+  },
+  [Code.KeyNotString]: {
+    text: "a key must be a string, found '{first}'",
+  },
+  [Code.DuplicateLiteralField]: {
+    text: "duplicate field '{word}' in the object literal",
+  },
+  [Code.NoSuchField]: {
+    text: "type '{first}' has no field '{word}'; an object must have exactly the fields of its type",
+  },
+  [Code.NoSuchStreamField]: {
+    text: "type '{first}' has no field '{word}'; an object must have exactly the fields of its type; an error with fields of its own has a type of its own, e.g. 'interface MyError extends StreamError { ... }', and the stream names it: 'new ReadableStream<int, MyError>(...)', 'class Lines extends Readable<string, MyError>'",
+  },
+  [Code.FieldMissing]: {
+    text: "field '{word}' is missing; type '{first}' requires it",
+  },
+  [Code.UndefinedField]: {
+    text: "cannot infer the type of field '{word}' from 'undefined'; declare the type of the object, e.g. 'const o: { {word}?: int } = ...'",
+  },
+  [Code.RecordDefaulted]: {
+    text: "'{word} = ...' gives a default value, which only a destructuring pattern has; in an object literal write '{word}: ...'",
+  },
+  [Code.RecordMethod]: {
+    text: "a Record holds values, not methods; store a function, '{word}: (...) => ...'",
+  },
+  [Code.RecordNumberKey]: {
+    text: "the keys of a Record are strings, and JavaScript would turn this '{first}' into one, so 1 and \"1\" would be one key; convert it, 'String(i)', or use a Map, whose keys may be numbers",
+  },
+  [Code.JsonSpread]: {
+    text: "a spread is not supported in a Json literal; write the keys one by one",
+  },
+  [Code.JsonFunction]: {
+    text: "a Json holds no functions",
+  },
+  [Code.JsonDefaulted]: {
+    text: "'{word} = ...' belongs to a destructuring pattern; write '{word}: ...'",
+  },
+  [Code.JsonKey]: {
+    text: "a key of a Json is a string, found '{first}'",
+  },
+  [Code.NullValue]: {
+    text: "'null' is not supported: the only value for nothing is 'undefined'; write 'undefined' (null exists only in Json values)",
   },
 };

@@ -1,0 +1,12 @@
+// An array or an object becomes a Json only as a literal written where a
+// Json is expected.
+type Point = { x: int };
+const list: int[] = [1];
+const point: Point = { x: 1 };
+
+const a1: Json = list;
+const a2: Json = point;
+
+const b1: Json = [1, 2];
+const b2: Json = { x: 1 };
+const b3: Json[] = [1, "a"];

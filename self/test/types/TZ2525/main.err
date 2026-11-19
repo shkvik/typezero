@@ -1,0 +1,6 @@
+main.tz:4:28: error TZ2525: a tuple cannot take spread values: type '[int, int]' has a fixed length; write each element
+const a1: [int, int] = [...list];
+                           ^
+main.tz:5:31: error TZ2525: a tuple cannot take spread values: type '[int, int]' has a fixed length; write each element
+const a2: [int, int] = [1, ...list];
+                              ^

@@ -1,0 +1,21 @@
+main.tz
+  3:7 ints: int[]
+  4:7 doubles: double[]
+  5:7 mixed: (int | string | boolean)[]
+  6:7 nested: int[][]
+  7:7 maybe: (int | undefined)[]
+  8:7 texts: string[]
+  9:7 signed: double[]
+  12:7 point: { x: int; y: double }
+  13:7 person: { name: string; tags: string[]; home: { city: string } }
+  14:7 empty: {}
+  15:7 keyed: { key: int }
+  16:7 rows: { id: int }[]
+  19:7 ratios: double[]
+  20:7 pair: [int, string]
+  21:7 shape: { id: int; name?: string }
+  22:7 scores: Record<string, int>
+  23:7 data: Json
+  24:7 figure: { kind: "a"; x: int } | { kind: "b"; y: int }
+  28:7 rest: int[]
+  29:7 letters: string[]

@@ -1,0 +1,6 @@
+// A tuple is written like an array, but it is not one.
+const pair: [int, int] = [1, 2];
+
+const a1: int[] = pair;
+
+const b1: int[] = [...pair];

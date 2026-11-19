@@ -1,0 +1,6 @@
+main.tz
+  3:6 type Cell = { row: int } | { name: string }
+  5:7 a1: { row: int } | { name: string }
+  6:7 a2: { row: int } | { name: string }
+  8:7 b1: { row: int } | { name: string }
+  9:7 b2: { row: int } | { name: string }

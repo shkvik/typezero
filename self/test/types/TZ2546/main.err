@@ -1,0 +1,3 @@
+main.tz:4:21: error TZ2546: a key of a Json is a string, found 'int'
+const a1: Json = { [count]: 1 };
+                    ^

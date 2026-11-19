@@ -1,0 +1,9 @@
+main.tz:5:20: error TZ2535: duplicate field 'x' in the object literal
+const a1 = { x: 1, x: 2 };
+                   ^
+main.tz:6:33: error TZ2535: duplicate field 'x' in the object literal
+const a2: Point = { x: 1, y: 2, x: 3 };
+                                ^
+main.tz:7:20: error TZ2535: duplicate field 'x' in the object literal
+const a3 = { x: 1, [name]: 2 };
+                   ^

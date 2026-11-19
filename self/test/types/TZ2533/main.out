@@ -1,0 +1,5 @@
+main.tz
+  3:5 name: string
+  4:7 fixed: string
+  8:7 b1: { y: int }
+  9:7 b2: { z: int }

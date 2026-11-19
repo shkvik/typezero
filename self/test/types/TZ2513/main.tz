@@ -1,0 +1,15 @@
+// An object literal makes a plain object, never an instance of a class:
+// an instance is made with `new`.
+class Point {
+  public x: int;
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+type Spot = { x: int };
+const spot: Spot = { x: 1 };
+
+const a1: Point = { x: 1 };
+const a2: Point[] = [{ x: 2 }];
+const a3: Point | undefined = { x: 3 };
+const a4: Point = spot;

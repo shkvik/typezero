@@ -1,0 +1,3 @@
+main.tz:2:20: error TZ2545: 'a = ...' belongs to a destructuring pattern; write 'a: ...'
+const a1: Json = { a = 1 };
+                   ^

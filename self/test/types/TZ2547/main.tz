@@ -1,0 +1,7 @@
+// `undefined` is the value for nothing; `null` exists only inside a Json.
+const a1 = null;
+const a2: int = null;
+const a3 = [null];
+
+const b1: Json = null;
+const b2: Json = { a: null, b: [null] };

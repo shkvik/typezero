@@ -1,0 +1,29 @@
+// An array literal takes the type of its elements: numbers that differ
+// become doubles, other types join in a union.
+const ints = [1, 2];
+const doubles = [1, 2.5];
+const mixed = [1, "a", true];
+const nested = [[1], [2, 3]];
+const maybe = [1, undefined];
+const texts = [`a`, "b"];
+const signed = [-1.5, 2];
+
+// An object literal takes the types of its fields.
+const point = { x: 1, y: 2.5 };
+const person = { name: "Ann", tags: ["a"], home: { city: "X" } };
+const empty = {};
+const keyed = { ["key"]: 1 };
+const rows = [{ id: 1 }, { id: 2 }];
+
+// A written type guides the literal.
+const ratios: double[] = [1, 2];
+const pair: [int, string] = [1, "a"];
+const shape: { id: int; name?: string } = { id: 1 };
+const scores: Record<string, int> = { a: 1 };
+const data: Json = { a: [1, "x", null], b: { c: true } };
+const figure: { kind: "a"; x: int } | { kind: "b"; y: int } = {
+  kind: "b",
+  y: 1,
+};
+const rest = [...ints, 3];
+const letters = [..."ab"];

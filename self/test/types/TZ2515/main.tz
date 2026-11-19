@@ -1,0 +1,10 @@
+// When every member of the union has a literal field, such as `kind`, the
+// message names it: the literal matches one member by its value.
+type Shape =
+  | { kind: "circle"; radius: double }
+  | { kind: "square"; side: double };
+
+const a1: Shape = { kind: "oval", radius: 1 };
+const a2: Shape = { kind: "circle", side: 1 };
+
+const b1: Shape = { kind: "square", side: 2 };

@@ -1,0 +1,3 @@
+main.tz:3:3: error TZ2544: a Json holds no functions
+  run() {
+  ^

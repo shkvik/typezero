@@ -1,0 +1,3 @@
+main.tz:3:35: error TZ2540: 'x = ...' gives a default value, which only a destructuring pattern has; in an object literal write 'x: ...'
+const a1: Record<string, int> = { x = 1 };
+                                  ^

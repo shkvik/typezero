@@ -1,0 +1,7 @@
+// Spreading a tuple into an array needs one type for all its elements.
+const pair: [int[], string[]] = [[1], ["a"]];
+const mixed: [int, string] = [1, "a"];
+
+const a1 = [...pair];
+
+const b1 = [...mixed];

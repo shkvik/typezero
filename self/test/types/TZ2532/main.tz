@@ -1,0 +1,5 @@
+// A field is named by text; numbered entries make an array.
+const count = 1;
+
+const a1 = { [count]: "x" };
+const a2 = { [1.5]: "x" };

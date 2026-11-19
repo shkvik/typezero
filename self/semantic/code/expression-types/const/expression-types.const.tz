@@ -3,6 +3,12 @@ import { IntLimit } from "../types/expression-types.types.tz";
 export const kConversionPrefix = "to";
 export const kUnnamedOperand = "x";
 export const kManyLiterals = 64;
+export const kNoPlace = "";
+export const kValuePlace = " of the value";
+export const kKeyPlace = " of the key";
+export const kNullName = "null";
+export const kStreamErrorName = "StreamError";
+export const kTypeSeparator = ", ";
 
 export const kIntLimits: IntLimit[] = [
   { bits: 8, unsigned: false, highest: 127, lowest: 128 },

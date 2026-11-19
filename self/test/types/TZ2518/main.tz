@@ -1,0 +1,10 @@
+// `object` holds only objects of the language; `unknown` holds anything.
+const list: int[] = [1];
+
+const a1: object = 1;
+const a2: object = "x";
+const a3: object = list;
+const a4: object | undefined = [1];
+
+const b1: object = { a: 1 };
+const b2: unknown = 1;

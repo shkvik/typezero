@@ -1,0 +1,3 @@
+6:16: only arrays, strings, iterators, Maps and Sets can be spread here, found 'int'
+7:16: only arrays, strings, iterators, Maps and Sets can be spread here, found 'Point'
+8:16: only arrays, strings, iterators, Maps and Sets can be spread here, found 'boolean'

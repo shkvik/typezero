@@ -1,0 +1,5 @@
+// A key in brackets is a string.
+const flag = true;
+
+const a1 = { [flag]: 1 };
+const a2 = { [undefined]: 1 };

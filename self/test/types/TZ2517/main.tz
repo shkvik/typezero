@@ -1,0 +1,7 @@
+// A Json may hold any JSON value; what it holds is checked before use.
+const data: Json = 1;
+
+const a1: int = data;
+const a2: string[] = data;
+
+const b1: Json = data;

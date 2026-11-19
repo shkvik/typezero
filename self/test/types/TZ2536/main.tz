@@ -1,0 +1,7 @@
+// An object has exactly the fields of its type.
+type Point = { x: int; y?: int };
+
+const a1: Point = { x: 1, z: 2 };
+const a2: Point[] = [{ x: 1, w: 3 }];
+
+const b1: Point = { x: 1, y: 2 };

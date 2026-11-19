@@ -1,0 +1,8 @@
+main.tz
+  2:7 list: int[]
+  4:7 a1: object
+  5:7 a2: object
+  6:7 a3: object
+  7:7 a4: object | undefined
+  9:7 b1: object
+  10:7 b2: unknown

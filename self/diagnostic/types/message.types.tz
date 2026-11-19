@@ -9,6 +9,7 @@ export type Details = {
   readonly path?: string;
   readonly first?: string;
   readonly second?: string;
+  readonly place?: string;
 };
 
 export type SourceError = {

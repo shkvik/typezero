@@ -1,0 +1,4 @@
+// A Record is not iterated itself: its entries are.
+const scores: Record<string, int> = { a: 1 };
+
+const a1 = [...scores];

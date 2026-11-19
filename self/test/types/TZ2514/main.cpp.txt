@@ -1,0 +1,2 @@
+5:18: type '{ column: int }' is not assignable to type '{ row: int } | { name: string }'; an object literal goes into a union as one of its members: it needs the fields of one of them
+6:18: type '{ row: int; name: string }' is not assignable to type '{ row: int } | { name: string }'; an object literal goes into a union as one of its members: it needs the fields of one of them

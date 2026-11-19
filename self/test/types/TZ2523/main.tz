@@ -1,0 +1,6 @@
+// When the array has a spread, or an element already failed, the message
+// suggests no tuple.
+const ints: int[] = [1];
+
+const a1 = [...ints, 1.5];
+const a2 = [[1], ["a"], []];

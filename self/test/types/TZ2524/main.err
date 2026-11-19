@@ -1,0 +1,6 @@
+main.tz:2:12: error TZ2524: cannot infer the element type from 'undefined' alone; add a type, e.g. 'let a: (int | undefined)[] = ...'
+const a1 = [undefined];
+           ^
+main.tz:3:12: error TZ2524: cannot infer the element type from 'undefined' alone; add a type, e.g. 'let a: (int | undefined)[] = ...'
+const a2 = [undefined, undefined];
+           ^

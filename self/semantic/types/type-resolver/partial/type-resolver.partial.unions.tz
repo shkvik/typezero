@@ -18,6 +18,7 @@ import {
 import {
   SlotUse,
   TypeContext,
+  UnionProblem,
   UnionSlot,
 } from "../types/type-resolver.types.tz";
 
@@ -79,16 +80,9 @@ partial class TypeResolver {
     return true;
   }
 
-  private refusesClash(
-    ref: TypeRef,
-    joined: Type,
-    context: TypeContext,
-  ): boolean {
-    const module = context.module;
-    const record = this.record(module);
-    const native = record != undefined && record.native;
-    if (joined.kind != TypeKind.Union || native) {
-      return false;
+  public unionProblem(joined: Type): UnionProblem | undefined {
+    if (joined.kind != TypeKind.Union) {
+      return undefined;
     }
 
     const present: Type[] = [];
@@ -100,7 +94,7 @@ partial class TypeResolver {
     }
 
     if (present.length < 2) {
-      return false;
+      return undefined;
     }
 
     const word = this.text.structure(joined);
@@ -111,19 +105,12 @@ partial class TypeResolver {
       const shared = this.sharedWithJson(part);
       if (hasJson && shared != "") {
         const first = this.text.of(part);
+        const details = { word, first, other: shared };
 
-        this.report(module, ref.loc, Code.UnionWithJson, {
-          word,
-          first,
-          other: shared,
-        });
-
-        return true;
+        return { code: Code.UnionWithJson, details };
       }
       if (part.kind == TypeKind.Result) {
-        this.report(module, ref.loc, Code.UnionWithResult, { word });
-
-        return true;
+        return { code: Code.UnionWithResult, details: { word } };
       }
 
       const use = this.slotUse(part);
@@ -137,15 +124,35 @@ partial class TypeResolver {
         const second = this.text.of(use.type);
         const other = this.clashHint(before.type, use.type);
 
-        this.report(module, ref.loc, code, { word, first, second, other });
-
-        return true;
+        return { code, details: { word, first, second, other } };
       }
 
       seen.push(use);
     }
 
-    return false;
+    return undefined;
+  }
+
+  private refusesClash(
+    ref: TypeRef,
+    joined: Type,
+    context: TypeContext,
+  ): boolean {
+    const module = context.module;
+    const record = this.record(module);
+    const native = record != undefined && record.native;
+    if (native) {
+      return false;
+    }
+
+    const problem = this.unionProblem(joined);
+    if (problem == undefined) {
+      return false;
+    }
+
+    this.report(module, ref.loc, problem.code, problem.details);
+
+    return true;
   }
 
   private sharedWithJson(part: Type): string {

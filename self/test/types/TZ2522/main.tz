@@ -1,0 +1,10 @@
+// The elements of an array share one type; values of different types in
+// places of their own make a tuple.
+const ratio = 1.5;
+
+const a1 = [[1], ["a"]];
+const a2 = [ratio, 1, "x"];
+const a3 = [1, 9223372036854775808];
+
+const b1 = [1, "a", true];
+const b2 = [1, 2.5];

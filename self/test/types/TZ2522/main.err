@@ -1,0 +1,9 @@
+main.tz:5:18: error TZ2522: array elements must have one type; found 'int[]' and 'string[]'; for a value of each type in its own place, declare a tuple, e.g. 'const t: [int[], string[]] = ...'
+const a1 = [[1], ["a"]];
+                 ^
+main.tz:6:20: error TZ2522: array elements must have one type; found 'double' and 'int'; for a value of each type in its own place, declare a tuple, e.g. 'const t: [double, int, string] = ...'
+const a2 = [ratio, 1, "x"];
+                   ^
+main.tz:7:16: error TZ2522: array elements must have one type; found 'int' and 'double'; for a value of each type in its own place, declare a tuple, e.g. 'const t: [int, double] = ...'
+const a3 = [1, 9223372036854775808];
+               ^

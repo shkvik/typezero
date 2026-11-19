@@ -1,4 +1,8 @@
-import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../../diagnostic/types/message.types.tz";
 import {
   ClassDecl,
   EnumDecl,
@@ -141,6 +145,11 @@ export type SlotUse = {
   readonly slot: UnionSlot;
   readonly home: int;
   readonly type: Type;
+};
+
+export type UnionProblem = {
+  readonly code: Code;
+  readonly details: Details;
 };
 
 export enum DoorState {

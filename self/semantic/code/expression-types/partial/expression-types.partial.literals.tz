@@ -17,7 +17,8 @@ import {
   kFalseText,
   kTrueText,
 } from "../../../types/type-resolver/const/type-resolver.const.tables.tz";
-import { kIntLimits } from "../const/expression-types.const.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import { kIntLimits, kNullName } from "../const/expression-types.const.tz";
 import { LiteralValue } from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
@@ -134,7 +135,7 @@ partial class ExpressionTypes {
 
   private baseType(expr: Expr, literal: LiteralValue, module: int): Type {
     if (expr.kind == ExprKind.Name) {
-      return this.named(expr, module);
+      return this.named(expr, undefined, module);
     }
 
     const int = this.store.integer(64, false);
@@ -284,12 +285,37 @@ partial class ExpressionTypes {
     return text;
   }
 
-  private named(expr: NameExpr, module: int): Type {
+  private named(expr: NameExpr, wanted: Type | undefined, module: int): Type {
+    if (this.isNullName(expr, module)) {
+      return this.nullTyped(expr, wanted, module);
+    }
+
     const door = this.doorOfName(expr, module);
     if (door == undefined) {
       return this.store.plain(TypeKind.Error);
     }
 
     return door.type;
+  }
+
+  private isNullName(expr: NameExpr, module: int): boolean {
+    const symbol = this.record(module)?.uses.get(expr.loc)?.symbol;
+
+    return expr.name == kNullName && symbol == undefined;
+  }
+
+  private nullTyped(
+    expr: NameExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const target = this.wantedPart(wanted);
+    if (target != undefined && target.kind == TypeKind.Json) {
+      return target;
+    }
+
+    this.report(module, expr.loc, Code.NullValue, kNoDetails);
+
+    return this.store.plain(TypeKind.Error);
   }
 }

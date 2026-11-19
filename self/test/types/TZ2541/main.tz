@@ -1,0 +1,6 @@
+// A Record holds values; a function is stored as one.
+const a1: Record<string, int> = {
+  size() {
+    return 1;
+  },
+};

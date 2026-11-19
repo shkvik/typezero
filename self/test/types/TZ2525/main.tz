@@ -1,0 +1,5 @@
+// A tuple has a fixed length, so its literal writes each element.
+const list: int[] = [1, 2];
+
+const a1: [int, int] = [...list];
+const a2: [int, int] = [1, ...list];
