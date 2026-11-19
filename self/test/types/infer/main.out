@@ -1,0 +1,46 @@
+main.tz
+  4:6 type ElementOf<T> = T extends E[] ? E : never
+  5:6 type Head<T> = T extends [H, ...R] ? H : never
+  6:6 type Tail<T> = T extends [H, ...R] ? R : never
+  7:6 type Last<T> = T extends [...Rest, L] ? L : never
+  8:6 type Returned<F> = F extends (...A) => R ? R : never
+  9:6 type Args<F> = F extends (...A) => unknown ? A : never
+  10:6 type Inner<P> = P extends Promise<V> ? V : P
+  11:6 type Box<T> = { value: T }
+  12:6 type Unbox<B> = B extends Box<U> ? U : never
+  13:6 type ValueOf<M> = M extends Map<string, V> ? V : never
+  14:6 type OkOf<R> = R extends Result<T, E> ? T : never
+  15:6 type StatusOf<T> = T extends { status: S } ? S : never
+  16:6 type Reverse<T> = T extends [H, ...R] ? [...Reverse<R>, H] : []
+  17:6 type Count<T, Acc> = T extends [H, ...R] ? Count<R, [...Acc, H]> : Acc["length"]
+  20:6 type Sized<N, Acc> = Acc["length"] extends N ? Acc : Sized<N, [...Acc, int]>
+  23:6 type Split<S> = S extends `${H}-${R}` ? [H, ...Split<R>] : [S]
+  26:6 type ToInt<S> = S extends `${N}` ? N : never
+  27:6 type Chars<S> = S extends `${C}${R}` ? [C, ...Chars<R>] : []
+  37:6 type CellOf<C> = C extends Cell<U> ? U : never
+  39:6 type A01 = int
+  40:6 type A02 = int | string
+  41:6 type A03 = never
+  42:6 type A04 = int
+  43:6 type A05 = [string, boolean]
+  44:6 type A06 = boolean
+  45:6 type A07 = never
+  46:6 type A08 = boolean
+  47:6 type A09 = [int, string]
+  48:6 type A10 = int
+  49:6 type A11 = string
+  50:6 type A12 = int
+  51:6 type A13 = string
+  52:6 type A14 = int
+  53:6 type A15 = int
+  54:6 type A16 = 200
+  55:6 type A17 = [boolean, string, int]
+  56:6 type A18 = 3
+  57:6 type A19 = [int, int, int]
+  58:6 type A20 = ["a", "b", "c"]
+  59:6 type A21 = 42
+  60:6 type A22 = ["a", "b", "c"]
+  61:6 type A23 = int
+  62:6 type A24 = int
+  63:6 type A25 = [int, string?]
+  64:6 type A26 = []

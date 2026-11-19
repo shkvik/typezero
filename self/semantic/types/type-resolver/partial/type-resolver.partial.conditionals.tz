@@ -10,6 +10,7 @@ import {
   Type,
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
+import { InferHole } from "../../type-relation/types/type-relation.types.tz";
 import { Distribution, TypeContext } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
@@ -69,20 +70,99 @@ partial class TypeResolver {
       return this.store.plain(TypeKind.Error);
     }
 
+    const holes = new Map<int, InferHole>();
+
+    this.findHoles(wantedRef, context, holes);
+
     const check = this.resolve(checkRef, context);
     const wanted = this.resolve(wantedRef, context);
-    const seen = new Set<int>();
+    const seen = new Set<int>(holes.keys());
     if (this.depends(check, seen) || this.depends(wanted, seen)) {
       const branches = this.resolveAll(ref.args.slice(2), context);
       const operands = [check, wanted].concat(branches);
 
       return this.operation(OperationKind.Conditional, operands, "");
     }
-    if (this.relation.extends(check, wanted)) {
-      return this.result(yes, context);
+
+    const captured = this.relation.matches(check, wanted, holes);
+    if (captured == undefined) {
+      return this.result(no, context);
     }
 
-    return this.result(no, context);
+    const bindings = new Map<int, Type>(context.bindings);
+    const unknown = this.store.plain(TypeKind.Unknown);
+
+    for (const hole of holes.values()) {
+      const taken = captured.get(hole.loc) ?? unknown;
+
+      bindings.set(hole.loc, taken);
+    }
+
+    return this.result(yes, { module: context.module, bindings });
+  }
+
+  private findHoles(
+    ref: TypeRef,
+    context: TypeContext,
+    holes: Map<int, InferHole>,
+  ): void {
+    const form = ref.form;
+
+    switch (form.kind) {
+      case TypeRefKind.Infer: {
+        const module = context.module;
+        const hole = this.store.typeParameter(module, ref.loc, ref.name);
+        const constraint = this.holeConstraint(ref.args[0], context);
+
+        holes.set(hole.id, { loc: ref.loc, constraint });
+
+        return;
+      }
+      case TypeRefKind.Conditional:
+        return;
+      case TypeRefKind.Function: {
+        const result = form.result;
+
+        for (const param of form.params) {
+          this.findHoles(param.type, context, holes);
+        }
+
+        if (result != undefined) {
+          this.findHoles(result, context, holes);
+        }
+
+        return;
+      }
+      case TypeRefKind.Object:
+        for (const field of form.fields) {
+          this.findHoles(field.type, context, holes);
+        }
+
+        return;
+      case TypeRefKind.Tuple:
+        for (const element of form.elements) {
+          this.findHoles(element.type, context, holes);
+        }
+
+        return;
+      default:
+        for (const arg of ref.args) {
+          this.findHoles(arg, context, holes);
+        }
+
+        return;
+    }
+  }
+
+  private holeConstraint(
+    written: TypeRef | undefined,
+    context: TypeContext,
+  ): Type | undefined {
+    if (written == undefined) {
+      return undefined;
+    }
+
+    return this.resolve(written, context);
   }
 
   private depends(type: Type, seen: Set<int>): boolean {

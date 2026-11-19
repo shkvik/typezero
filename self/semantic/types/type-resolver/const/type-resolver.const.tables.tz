@@ -12,6 +12,7 @@ export const kNamePoint = ".";
 export const kEnumValueLimit: uint64 = 9223372036854775807;
 
 export const kLengthMember = "length";
+export const kAliasDepthLimit = 1000;
 export const kFalseText = "false";
 export const kTrueText = "true";
 

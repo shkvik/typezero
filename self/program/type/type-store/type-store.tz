@@ -8,6 +8,7 @@ import {
   OperationKind,
   OperationShape,
   PlainKind,
+  TupleShape,
   Type,
   TypeKind,
 } from "../types/type.types.tz";
@@ -89,18 +90,35 @@ export class TypeStore {
     return this.keep(key, made);
   }
 
-  public tupleOf(items: Type[], readonly: boolean): Type {
-    const ids = this.idsText(items);
-    const key = `tuple ${readonly} ${ids}`;
+  public tupleOf(shape: TupleShape): Type {
+    const ids = this.idsText(shape.items);
+    const head = `tuple ${shape.readonly} ${shape.required} ${shape.rest}`;
+    const key = `${head} ${ids}`;
     const known = this.byKey.get(key);
     if (known != undefined) {
       return known;
     }
 
     const id = this.nextId();
-    const made: Type = { id, kind: TypeKind.Tuple, items, readonly };
+    const made: Type = {
+      id,
+      kind: TypeKind.Tuple,
+      items: shape.items,
+      readonly: shape.readonly,
+      required: shape.required,
+      rest: shape.rest,
+    };
 
     return this.keep(key, made);
+  }
+
+  public plainTuple(items: Type[]): Type {
+    return this.tupleOf({
+      items,
+      readonly: false,
+      required: items.length,
+      rest: -1,
+    });
   }
 
   public objectOf(fields: ObjectField[]): Type {

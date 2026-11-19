@@ -23,14 +23,34 @@ import { TypeContext } from "../types/type-resolver.types.tz";
 partial class TypeResolver {
   private tuple(form: TupleTypeForm, context: TypeContext): Type {
     const items: Type[] = [];
+    let rest = -1;
 
     for (const element of form.elements) {
       const item = this.resolve(element.type, context);
 
+      if (!element.spread) {
+        items.push(item);
+
+        continue;
+      }
+      if (item.kind == TypeKind.Tuple && item.rest < 0) {
+        for (const inner of item.items) {
+          items.push(inner);
+        }
+
+        continue;
+      }
+
+      rest = items.length;
       items.push(item);
     }
 
-    return this.store.tupleOf(items, form.readonly);
+    return this.store.tupleOf({
+      items,
+      readonly: form.readonly,
+      required: items.length,
+      rest,
+    });
   }
 
   private object(form: ObjectTypeForm, context: TypeContext): Type {

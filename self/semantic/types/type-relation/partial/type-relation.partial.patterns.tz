@@ -1,0 +1,168 @@
+import { TypeRelation } from "../type-relation.tz";
+import {
+  FunctionShape,
+  LiteralKind,
+  TemplateType,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { InferHole } from "../types/type-relation.types.tz";
+
+partial class TypeRelation {
+  private capture(hole: InferHole, source: Type): boolean {
+    const value = this.fitted(hole, source);
+    if (value == undefined) {
+      return false;
+    }
+
+    const before = this.captured.get(hole.loc);
+    if (before == undefined) {
+      this.captured.set(hole.loc, value);
+
+      return true;
+    }
+
+    const both = this.store.unionOf([before, value]);
+
+    this.captured.set(hole.loc, both);
+
+    return true;
+  }
+
+  private fitted(hole: InferHole, source: Type): Type | undefined {
+    const constraint = hole.constraint;
+    if (constraint == undefined) {
+      return source;
+    }
+
+    const value = this.asNumber(source, constraint);
+    if (!this.extends(value, constraint)) {
+      return undefined;
+    }
+
+    return value;
+  }
+
+  private asNumber(source: Type, constraint: Type): Type {
+    if (source.kind != TypeKind.Literal || constraint.kind != TypeKind.Int) {
+      return source;
+    }
+
+    const text = source.text;
+    const number = parseInt(text);
+    if (source.literal != LiteralKind.String || number.isErr()) {
+      return source;
+    }
+    if (`${number.value}` != text) {
+      return source;
+    }
+
+    return this.store.literal(LiteralKind.Int, text);
+  }
+
+  private openRest(target: FunctionShape): int {
+    const last = target.params.length - 1;
+    const rest = target.params[last]?.type;
+    if (!target.rest || rest == undefined || !this.holes.has(rest.id)) {
+      return -1;
+    }
+
+    return last;
+  }
+
+  private captureArguments(
+    source: FunctionShape,
+    target: FunctionShape,
+    open: int,
+  ): boolean {
+    const wanted = target.params[open]?.type;
+    if (wanted == undefined) {
+      return false;
+    }
+
+    const params = source.params.slice(open);
+    const items = params.map((param) => param.type);
+    let required = 0;
+
+    for (const param of params) {
+      if (!param.optional) {
+        required += 1;
+      }
+    }
+
+    const given = this.store.tupleOf({
+      items,
+      readonly: false,
+      required,
+      rest: -1,
+    });
+
+    return this.extends(given, wanted);
+  }
+
+  private textFits(text: string, target: Type): boolean {
+    if (target.kind == TypeKind.Template) {
+      return this.templateFits(text, target);
+    }
+
+    return target.kind == TypeKind.String;
+  }
+
+  private templateFits(text: string, target: TemplateType): boolean {
+    const first = target.texts[0] ?? "";
+    if (!text.startsWith(first)) {
+      return false;
+    }
+
+    const last = target.parts.length - 1;
+    let rest = text.slice(first.length);
+
+    for (let index = 0; index <= last; index++) {
+      const after = target.texts[index + 1] ?? "";
+      const size = this.pieceSize(rest, after, index == last);
+      const part = target.parts[index];
+      if (size < 0 || part == undefined) {
+        return false;
+      }
+
+      const piece = rest.slice(0, size);
+      if (!this.pieceFits(piece, part)) {
+        return false;
+      }
+
+      rest = rest.slice(size + after.length);
+    }
+
+    return rest == "";
+  }
+
+  private pieceSize(rest: string, after: string, isLast: boolean): int {
+    if (isLast) {
+      if (!rest.endsWith(after)) {
+        return -1;
+      }
+
+      return rest.length - after.length;
+    }
+    if (after != "") {
+      return rest.indexOf(after);
+    }
+    if (rest.length == 0) {
+      return -1;
+    }
+
+    return 1;
+  }
+
+  private pieceFits(piece: string, part: Type): boolean {
+    if (part.kind == TypeKind.Int || part.kind == TypeKind.Double) {
+      const number = Number(piece);
+
+      return piece != "" && number.isOk();
+    }
+
+    const literal = this.store.literal(LiteralKind.String, piece);
+
+    return this.extends(literal, part);
+  }
+}

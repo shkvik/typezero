@@ -1,0 +1,6 @@
+import { Type } from "../../../../program/type/types/type.types.tz";
+
+export type InferHole = {
+  readonly loc: int;
+  readonly constraint?: Type;
+};

@@ -296,4 +296,5 @@ export enum Code {
   NoSuchMember = "TZ2406",
   MappedKeys = "TZ2407",
   IntersectionNeedsObjects = "TZ2408",
+  AliasTooDeep = "TZ2409",
 }

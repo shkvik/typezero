@@ -1,0 +1,64 @@
+// A question about a type that also takes a part of it out: `infer X` in
+// the pattern stands for whatever is at that place, and the answer may use
+// it.
+type ElementOf<T> = T extends (infer E)[] ? E : never;
+type Head<T> = T extends [infer H, ...infer R] ? H : never;
+type Tail<T> = T extends [infer H, ...infer R] ? R : never;
+type Last<T> = T extends [...infer Rest, infer L] ? L : never;
+type Returned<F> = F extends (...args: infer A) => infer R ? R : never;
+type Args<F> = F extends (...args: infer A) => unknown ? A : never;
+type Inner<P> = P extends Promise<infer V> ? V : P;
+type Box<T> = { value: T };
+type Unbox<B> = B extends Box<infer U> ? U : never;
+type ValueOf<M> = M extends Map<string, infer V> ? V : never;
+type OkOf<R> = R extends Result<infer T, infer E> ? T : never;
+type StatusOf<T> = T extends { status: infer S } ? S : never;
+type Reverse<T> = T extends [infer H, ...infer R] ? [...Reverse<R>, H] : [];
+type Count<T, Acc extends unknown[] = []> = T extends [infer H, ...infer R]
+  ? Count<R, [...Acc, H]>
+  : Acc["length"];
+type Sized<N extends int, Acc extends unknown[] = []> = Acc["length"] extends N
+  ? Acc
+  : Sized<N, [...Acc, int]>;
+type Split<S extends string> = S extends `${infer H}-${infer R}`
+  ? [H, ...Split<R>]
+  : [S];
+type ToInt<S> = S extends `${infer N extends int}` ? N : never;
+type Chars<S> = S extends `${infer C}${infer R}` ? [C, ...Chars<R>] : [];
+
+class Cell<T> {
+  public value: T;
+
+  public constructor(value: T) {
+    this.value = value;
+  }
+}
+
+type CellOf<C> = C extends Cell<infer U> ? U : never;
+
+type A01 = ElementOf<int[]>;
+type A02 = ElementOf<[int, string]>;
+type A03 = ElementOf<int>;
+type A04 = Head<[int, string, boolean]>;
+type A05 = Tail<[int, string, boolean]>;
+type A06 = Last<[int, string, boolean]>;
+type A07 = Head<[]>;
+type A08 = Returned<(a: int, b: string) => boolean>;
+type A09 = Args<(a: int, b: string) => boolean>;
+type A10 = Inner<Promise<int>>;
+type A11 = Inner<string>;
+type A12 = Awaited<Promise<Promise<int>>>;
+type A13 = Unbox<Box<string>>;
+type A14 = ValueOf<Map<string, int>>;
+type A15 = OkOf<Result<int, string>>;
+type A16 = StatusOf<{ status: 200; body: string }>;
+type A17 = Reverse<[int, string, boolean]>;
+type A18 = Count<[int, int, int]>;
+type A19 = Sized<3>;
+type A20 = Split<"a-b-c">;
+type A21 = ToInt<"42">;
+type A22 = Chars<"abc">;
+type A23 = CellOf<Cell<int>>;
+type A24 = ReturnType<() => int>;
+type A25 = Parameters<(a: int, b?: string) => void>;
+type A26 = Tail<[int]>;

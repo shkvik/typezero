@@ -94,11 +94,20 @@ export type ArrayType = {
   readonly item: Type;
 };
 
+export type TupleShape = {
+  readonly items: Type[];
+  readonly readonly: boolean;
+  readonly required: int;
+  readonly rest: int;
+};
+
 export type TupleType = {
   readonly id: int;
   readonly kind: TypeKind.Tuple;
   readonly items: Type[];
   readonly readonly: boolean;
+  readonly required: int;
+  readonly rest: int;
 };
 
 export type ObjectField = {

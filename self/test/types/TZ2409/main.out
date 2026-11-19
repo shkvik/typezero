@@ -1,0 +1,6 @@
+main.tz
+  1:6 type Deep<T> = T extends string ? Deep<[T]> : Deep<T[]>
+  2:6 type Sized<N, Acc> = Acc["length"] extends N ? Acc : Sized<N, [...Acc, int]>
+  6:6 type Endless = ?
+  7:6 type Small = [int, int, int]
+  8:6 type Large = ?

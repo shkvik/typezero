@@ -43,6 +43,8 @@ export class TypeResolver {
   private readonly scopes: Map<int, ModuleScopes>;
   private readonly records: Map<int, ModuleRecord>;
   private readonly doors: Map<string, AliasDoor>;
+  private readonly working: Map<string, int>;
+  private readonly endless: Set<string>;
   private readonly globals: Map<string, int>;
   private readonly namespaces: Map<string, int>;
   private readonly prefixes: Map<int, string>;
@@ -54,11 +56,13 @@ export class TypeResolver {
   ) {
     this.store = store;
     this.text = new TypeText(store);
-    this.relation = new TypeRelation();
+    this.relation = new TypeRelation(store);
     this.program = program;
     this.scopes = new Map<int, ModuleScopes>();
     this.records = new Map<int, ModuleRecord>();
     this.doors = new Map<string, AliasDoor>();
+    this.working = new Map<string, int>();
+    this.endless = new Set<string>();
     this.globals = new Map<string, int>();
     this.namespaces = new Map<string, int>();
     this.prefixes = new Map<int, string>();

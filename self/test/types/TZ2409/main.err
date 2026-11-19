@@ -1,0 +1,6 @@
+main.tz:1:6: error TZ2409: type alias 'Deep' calls itself more than 1000 times, so it may never end; TypeScript stops there too
+type Deep<T> = T extends string ? Deep<[T]> : Deep<T[]>;
+     ^
+main.tz:2:6: error TZ2409: type alias 'Sized' calls itself more than 1000 times, so it may never end; TypeScript stops there too
+type Sized<N extends int, Acc extends unknown[] = []> = Acc["length"] extends N
+     ^

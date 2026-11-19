@@ -246,7 +246,14 @@ export class TypeText {
   }
 
   private tupleText(type: TupleType): string {
-    const texts = type.items.map((item) => this.of(item));
+    const texts: string[] = [];
+
+    for (let index = 0; index < type.items.length; index++) {
+      const text = this.itemText(type, index);
+
+      texts.push(text);
+    }
+
     const list = `[${texts.join(", ")}]`;
 
     if (type.readonly) {
@@ -254,6 +261,24 @@ export class TypeText {
     }
 
     return list;
+  }
+
+  private itemText(type: TupleType, index: int): string {
+    const item = type.items[index];
+    if (item == undefined) {
+      return "";
+    }
+
+    const text = this.of(item);
+
+    if (index == type.rest) {
+      return `...${text}`;
+    }
+    if (index >= type.required) {
+      return `${text}?`;
+    }
+
+    return text;
   }
 
   private objectText(type: ObjectType): string {

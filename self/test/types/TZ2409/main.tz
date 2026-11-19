@@ -1,0 +1,8 @@
+type Deep<T> = T extends string ? Deep<[T]> : Deep<T[]>;
+type Sized<N extends int, Acc extends unknown[] = []> = Acc["length"] extends N
+  ? Acc
+  : Sized<N, [...Acc, int]>;
+
+type Endless = Deep<int>;
+type Small = Sized<3>;
+type Large = Sized<2000>;
