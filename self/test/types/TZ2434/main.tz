@@ -1,0 +1,60 @@
+// A type argument must fit the constraint of its parameter. The error stands
+// where the type is written and names the parameter and its constraint.
+type User = { name: string; email?: string };
+type Shape = { id: int };
+
+class Base {
+  public tag: string;
+
+  public constructor() {
+    this.tag = "base";
+  }
+}
+
+class Point {
+  public x: int;
+
+  public constructor() {
+    this.x = 1;
+  }
+}
+
+class Cell<T extends Base> {
+  public item: T;
+
+  public constructor(item: T) {
+    this.item = item;
+  }
+}
+
+type Words<T extends string> = { value: T };
+type Count<T extends int> = { value: T };
+type Ratio<T extends number> = { value: T };
+type List<T extends unknown[]> = { items: T };
+type HasId<T extends Shape> = { item: T };
+type Keyed<T, K extends keyof T> = { key: K };
+type Either<T extends string | int> = { value: T };
+type Later<T extends Promise<int>> = { value: T };
+
+type A01 = Words<int>;
+type A02 = Words<string | int>;
+type A03 = Words<string | undefined>;
+type A04 = Count<int32>;
+type A05 = Count<double>;
+type A06 = Ratio<int>;
+type A07 = List<string>;
+type A08 = HasId<{ id: 1 }>;
+type A09 = HasId<{ id?: int }>;
+type A10 = HasId<Point>;
+type A11 = Keyed<User, "phone">;
+type A12 = Either<boolean>;
+type A13 = Either<string | int>;
+type A14 = Later<Promise<1>>;
+type A15 = Cell<Point>;
+type A16<T> = Words<T>;
+type A17<T extends int> = Words<T>;
+
+// Inside a generic type the check waits for the argument.
+type Pass<T> = { inner: Words<T extends string ? T : never> };
+type Wrapped<T extends string> = Words<T>;
+type A18 = Wrapped<int>;

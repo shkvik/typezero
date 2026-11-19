@@ -1,0 +1,12 @@
+main.tz:2:31: error TZ2435: the default 'int' of 'T' does not satisfy its constraint 'string'
+type Words<T extends string = int> = { value: T };
+                              ^
+main.tz:3:32: error TZ2435: the default 'string | int' of 'T' does not satisfy its constraint 'string'
+type Either<T extends string = string | int> = { value: T };
+                               ^
+main.tz:5:30: error TZ2435: the default 'string' of 'T' does not satisfy its constraint 'int'
+class Holder<T extends int = string> {
+                             ^
+main.tz:13:34: error TZ2435: the default 'int' of 'T' does not satisfy its constraint 'string'
+function make<T extends string = int>(value: T): void {}
+                                 ^

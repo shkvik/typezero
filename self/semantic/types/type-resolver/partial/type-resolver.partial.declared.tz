@@ -11,6 +11,7 @@ import {
 } from "../../../../program/scopes/types/scopes.types.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import {
+  ClassHome,
   TypeContext,
   TypeDeclaration,
   TypePlace,
@@ -66,7 +67,12 @@ partial class TypeResolver {
       return bound;
     }
 
-    return this.store.typeParameter(context.module, symbol.loc, symbol.name);
+    return this.opened(
+      context.module,
+      symbol.loc,
+      symbol.name,
+      symbol.constraint,
+    );
   }
 
   private imported(
@@ -90,9 +96,13 @@ partial class TypeResolver {
   ): Type {
     switch (found.kind) {
       case StmtKind.TypeAlias: {
+        const name = found.name;
         const params = found.typeParams;
-        const written = this.written(ref, found.name, params, context);
-        if (written == undefined) {
+        const written = this.written(ref, name, params, context);
+        const fits =
+          written != undefined &&
+          this.argumentsFit(ref, module, name, params, written, context);
+        if (written == undefined || !fits) {
           return this.store.plain(TypeKind.Error);
         }
 
@@ -102,11 +112,17 @@ partial class TypeResolver {
         const name = found.name ?? "";
         const params = found.typeParams;
         const written = this.written(ref, name, params, context);
-        if (written == undefined) {
+        const fits =
+          written != undefined &&
+          this.argumentsFit(ref, module, name, params, written, context);
+        if (written == undefined || !fits) {
           return this.store.plain(TypeKind.Error);
         }
 
-        return this.instance(module, name, found.loc, params, written);
+        const parents = this.parentRefs(found.base, found.interfaces);
+        const home: ClassHome = { module, name, loc: found.loc };
+
+        return this.instance(home, params, written, parents);
       }
       case StmtKind.Enum: {
         const written = this.written(ref, found.name, [], context);
@@ -134,6 +150,9 @@ partial class TypeResolver {
     context: TypeContext,
   ): Type[] | undefined {
     const count = ref.args.length;
+    if (context.place == TypePlace.Base && count == 0 && params.length > 0) {
+      return undefined;
+    }
     if (params.length == 0 && count > 0) {
       this.report(context.module, ref.loc, Code.TypeNotGeneric, {
         word: name,
@@ -169,19 +188,45 @@ partial class TypeResolver {
     return needed;
   }
 
+  private parentRefs(base: TypeRef | undefined, others: TypeRef[]): TypeRef[] {
+    if (base == undefined) {
+      return others;
+    }
+
+    return [base].concat(others);
+  }
+
   private instance(
-    module: int,
-    name: string,
-    loc: int,
+    home: ClassHome,
     params: TypeParamDecl[],
     written: Type[],
+    parents: TypeRef[],
   ): Type {
+    const module = home.module;
     const bindings = this.bind(module, params, written);
     const args = Array.from(bindings.values());
-    const type = this.store.instanceOf(module, loc, name, args);
-    const label = this.labelText(module, name, written);
+    const type = this.store.instanceOf(module, home.loc, home.name, args);
+    const label = this.labelText(module, home.name, written);
 
     this.store.label(type, label);
+
+    if (this.store.hasParents(type)) {
+      return type;
+    }
+
+    this.store.inherit(type, []);
+
+    const inside: TypeContext = { module, bindings, place: TypePlace.Base };
+    const resolved: Type[] = [];
+
+    for (const parent of parents) {
+      const found = this.resolve(parent, inside);
+      if (found.kind != TypeKind.Error) {
+        resolved.push(found);
+      }
+    }
+
+    this.store.inherit(type, resolved);
 
     return type;
   }

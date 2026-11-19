@@ -6,7 +6,7 @@ import {
   kNamePoint,
   kNullTypeName,
 } from "../const/type-resolver.const.tables.tz";
-import { TypeContext } from "../types/type-resolver.types.tz";
+import { ClassHome, TypeContext } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
   private global(ref: TypeRef, context: TypeContext): Type {
@@ -92,10 +92,16 @@ partial class TypeResolver {
 
     const params = declared.typeParams;
     const written = this.written(ref, name, params, context);
-    if (written == undefined) {
+    const fits =
+      written != undefined &&
+      this.argumentsFit(ref, module, name, params, written, context);
+    if (written == undefined || !fits) {
       return this.store.plain(TypeKind.Error);
     }
 
-    return this.instance(module, name, declared.loc, params, written);
+    const parents = this.parentRefs(declared.base, declared.implemented);
+    const home: ClassHome = { module, name, loc: declared.loc };
+
+    return this.instance(home, params, written, parents);
   }
 }

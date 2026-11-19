@@ -2,7 +2,6 @@ import { TypeResolver } from "../type-resolver.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
 import {
-  LiteralKind,
   ObjectField,
   OperationKind,
   Type,
@@ -155,30 +154,13 @@ partial class TypeResolver {
   }
 
   private commonType(first: Type, second: Type): Type | undefined {
-    if (first == second || this.baseOf(first) == second) {
+    if (first == second || this.relation.baseOf(first) == second) {
       return first;
     }
-    if (this.baseOf(second) == first) {
+    if (this.relation.baseOf(second) == first) {
       return second;
     }
 
     return undefined;
-  }
-
-  private baseOf(type: Type): Type | undefined {
-    if (type.kind != TypeKind.Literal) {
-      return undefined;
-    }
-
-    switch (type.literal) {
-      case LiteralKind.String:
-        return this.store.plain(TypeKind.String);
-      case LiteralKind.Boolean:
-        return this.store.plain(TypeKind.Boolean);
-      case LiteralKind.Double:
-        return this.store.plain(TypeKind.Double);
-      default:
-        return this.store.integer(64, false);
-    }
   }
 }

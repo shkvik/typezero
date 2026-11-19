@@ -1,0 +1,54 @@
+main.tz:39:12: error TZ2434: type 'int' does not satisfy the constraint 'string' of 'T' in 'Words'
+type A01 = Words<int>;
+           ^
+main.tz:40:12: error TZ2434: type 'string | int' does not satisfy the constraint 'string' of 'T' in 'Words'
+type A02 = Words<string | int>;
+           ^
+main.tz:41:12: error TZ2434: type 'string | undefined' does not satisfy the constraint 'string' of 'T' in 'Words'
+type A03 = Words<string | undefined>;
+           ^
+main.tz:42:12: error TZ2434: type 'int32' does not satisfy the constraint 'int' of 'T' in 'Count'
+type A04 = Count<int32>;
+           ^
+main.tz:43:12: error TZ2434: type 'double' does not satisfy the constraint 'int' of 'T' in 'Count'
+type A05 = Count<double>;
+           ^
+main.tz:44:12: error TZ2434: type 'int' does not satisfy the constraint 'number' of 'T' in 'Ratio'
+type A06 = Ratio<int>;
+           ^
+main.tz:45:12: error TZ2434: type 'string' does not satisfy the constraint 'unknown[]' of 'T' in 'List'
+type A07 = List<string>;
+           ^
+main.tz:46:12: error TZ2434: type '{ id: 1 }' does not satisfy the constraint 'Shape' of 'T' in 'HasId'
+type A08 = HasId<{ id: 1 }>;
+           ^
+main.tz:47:12: error TZ2434: type '{ id?: int }' does not satisfy the constraint 'Shape' of 'T' in 'HasId'
+type A09 = HasId<{ id?: int }>;
+           ^
+main.tz:48:12: error TZ2434: type 'Point' does not satisfy the constraint 'Shape' of 'T' in 'HasId'
+type A10 = HasId<Point>;
+           ^
+main.tz:49:12: error TZ2434: type '"phone"' does not satisfy the constraint 'keyof T' of 'K' in 'Keyed'
+type A11 = Keyed<User, "phone">;
+           ^
+main.tz:50:12: error TZ2434: type 'boolean' does not satisfy the constraint 'string | int' of 'T' in 'Either'
+type A12 = Either<boolean>;
+           ^
+main.tz:51:12: error TZ2434: type 'string | int' does not satisfy the constraint 'string | int' of 'T' in 'Either'
+type A13 = Either<string | int>;
+           ^
+main.tz:52:12: error TZ2434: type 'Promise<1>' does not satisfy the constraint 'Promise<int>' of 'T' in 'Later'
+type A14 = Later<Promise<1>>;
+           ^
+main.tz:53:12: error TZ2434: type 'Point' does not satisfy the constraint 'Base' of 'T' in 'Cell'
+type A15 = Cell<Point>;
+           ^
+main.tz:54:15: error TZ2434: type 'T' does not satisfy the constraint 'string' of 'T' in 'Words'
+type A16<T> = Words<T>;
+              ^
+main.tz:55:27: error TZ2434: type 'T' does not satisfy the constraint 'string' of 'T' in 'Words'
+type A17<T extends int> = Words<T>;
+                          ^
+main.tz:60:12: error TZ2434: type 'int' does not satisfy the constraint 'string' of 'T' in 'Wrapped'
+type A18 = Wrapped<int>;
+           ^

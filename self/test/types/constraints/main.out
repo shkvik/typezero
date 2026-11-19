@@ -1,0 +1,57 @@
+main.tz
+  4:6 type Shape = { id: int }
+  5:6 type Wide = { id: int; name: string }
+  6:6 type Loose = { id: int; note?: string }
+  7:6 type Named = { name: string }
+  9:6 enum Color = "red" | "blue"
+  14:11 type Sized = { readonly size: () => int }
+  44:6 type Words<T> = T
+  45:6 type Count<T> = T
+  46:6 type Whole<T> = T
+  47:6 type Thing<T> = T
+  48:6 type Data<T> = T
+  49:6 type Either<T> = T
+  50:6 type List<T> = T
+  51:6 type Pair<T> = T
+  52:6 type HasId<T> = T
+  53:6 type HasNote<T> = T
+  54:6 type HasName<T> = T
+  55:6 type HasSize<T> = T
+  56:6 type OfBase<T> = T
+  57:6 type OfColor<T> = T
+  58:6 type Keyed<T, K> = K
+  59:6 type Under<T, U> = U
+  60:6 type Pattern<T> = T
+  61:6 type Outcome<T> = T
+  62:6 type Wrapped<T> = T
+  63:6 type Listed<A> = (...A) => void
+  65:6 type B01 = "a" | "b"
+  66:6 type B02 = "red" | "blue"
+  67:6 type B03 = `id-${string}`
+  68:6 type B04 = 3
+  69:6 type B05 = int | undefined
+  70:6 type B06 = Shape | Base
+  71:6 type B07 = Map<string, int>
+  72:6 type B08 = Record<string, string>
+  73:6 type B09 = Json[]
+  74:6 type B10 = "a"
+  75:6 type B11 = int[]
+  76:6 type B12 = [int, string]
+  77:6 type B13 = [int, string, boolean]
+  78:6 type B14 = { id: int; name: string }
+  79:6 type B15 = Base
+  80:6 type B16 = Shape | Wide
+  81:6 type B17 = { id: int }
+  82:6 type B18 = { name: "x" | "y" }
+  83:6 type B19 = Marked
+  84:6 type B20 = Child
+  85:6 type B21 = { readonly size: () => int }
+  86:6 type B22 = Child
+  87:6 type B23 = "red"
+  88:6 type B24 = "id" | "name"
+  89:6 type B25 = Child
+  90:6 type B26 = "a"
+  91:6 type B27 = "onClick"
+  92:6 type B28 = Result<1, "x">
+  93:6 type B29 = "a"
+  94:6 type B30 = (...[int, string]) => void

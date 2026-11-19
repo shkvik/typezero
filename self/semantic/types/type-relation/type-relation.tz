@@ -1,4 +1,6 @@
 import "./partial/type-relation.partial.patterns.tz";
+import "./partial/type-relation.partial.conversion.tz";
+import "./partial/type-relation.partial.references.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import {
   FunctionShape,

@@ -55,9 +55,14 @@ export class DeclarationTypes {
         }
         break;
       case StmtKind.Function:
+        this.resolver.typeParameters(this.module.id, item.typeParams);
         this.typeFunction(item);
         break;
+      case StmtKind.Class:
+        this.resolver.typeParameters(this.module.id, item.typeParams);
+        break;
       case StmtKind.TypeAlias:
+        this.resolver.typeParameters(this.module.id, item.typeParams);
         this.typeAlias(item);
         break;
       case StmtKind.Enum:

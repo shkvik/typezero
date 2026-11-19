@@ -1,0 +1,300 @@
+import { TypeResolver } from "../type-resolver.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  TypeParamDecl,
+  TypeRef,
+  TypeRefKind,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  LiteralKind,
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { kPlainTypes } from "../const/type-resolver.const.tables.tz";
+import { TypeContext, TypePlace } from "../types/type-resolver.types.tz";
+
+partial class TypeResolver {
+  public typeParameters(module: int, params: TypeParamDecl[]): void {
+    const context = this.plainContext(module);
+    let defaulted = false;
+
+    for (const param of params) {
+      const name = param.name;
+      const constraint = param.constraint;
+      const fallback = param.defaultType;
+
+      if (kPlainTypes.some((row) => row.name == name)) {
+        this.report(module, param.loc, Code.BuiltinTypeParameterName, {
+          word: name,
+        });
+      }
+      if (constraint != undefined) {
+        this.value(constraint, context);
+      }
+      if (fallback == undefined && defaulted) {
+        this.report(module, param.loc, Code.DefaultMissing, { word: name });
+      }
+      if (fallback != undefined) {
+        defaulted = true;
+        this.checkDefault(param, fallback, context);
+      }
+    }
+  }
+
+  private checkDefault(
+    param: TypeParamDecl,
+    fallback: TypeRef,
+    context: TypeContext,
+  ): void {
+    const constraint = param.constraint;
+    if (constraint == undefined) {
+      return;
+    }
+
+    const given = this.resolve(fallback, context);
+    const ways = this.constraintWays(constraint, context);
+    if (this.satisfies(given, ways)) {
+      return;
+    }
+
+    const first = this.text.of(given);
+    const other = this.constraintText(context.module, param, constraint);
+
+    this.report(context.module, fallback.loc, Code.DefaultNotSatisfying, {
+      word: param.name,
+      first,
+      other,
+    });
+  }
+
+  private plainContext(module: int): TypeContext {
+    return { module, bindings: new Map<int, Type>(), place: TypePlace.Plain };
+  }
+
+  private opened(
+    module: int,
+    loc: int,
+    name: string,
+    written: TypeRef | undefined,
+  ): Type {
+    const type = this.store.typeParameter(module, loc, name);
+    if (written == undefined || this.bounded.has(type.id)) {
+      return type;
+    }
+
+    this.bounded.add(type.id);
+
+    const context = this.plainContext(module);
+    const constraint = this.resolve(written, context);
+    const isFree =
+      constraint.kind == TypeKind.Unknown || constraint.kind == TypeKind.Error;
+    if (!isFree) {
+      this.store.constrain(type, constraint);
+    }
+
+    return type;
+  }
+
+  private constraintText(
+    module: int,
+    param: TypeParamDecl,
+    written: TypeRef,
+  ): string {
+    const open = this.opened(module, param.loc, param.name, written);
+    const declared = this.store.constraintOf(open);
+    const isName = written.form.kind == TypeRefKind.Name;
+    if (declared == undefined || isName) {
+      return written.name;
+    }
+
+    return this.text.of(declared);
+  }
+
+  private argumentsFit(
+    ref: TypeRef,
+    home: int,
+    name: string,
+    params: TypeParamDecl[],
+    written: Type[],
+    context: TypeContext,
+  ): boolean {
+    const bindings = this.bind(home, params, written);
+    const inside: TypeContext = {
+      module: home,
+      bindings,
+      place: TypePlace.Plain,
+    };
+
+    for (const param of params.slice(0, written.length)) {
+      const constraint = param.constraint;
+      const given = bindings.get(param.loc);
+      if (constraint == undefined || given == undefined) {
+        continue;
+      }
+
+      const ways = this.constraintWays(constraint, inside);
+      if (this.satisfies(given, ways)) {
+        continue;
+      }
+
+      const first = this.text.of(given);
+      const other = this.constraintText(home, param, constraint);
+
+      this.report(context.module, ref.loc, Code.ConstraintNotSatisfied, {
+        word: param.name,
+        first,
+        other,
+        second: name,
+      });
+
+      return false;
+    }
+
+    return true;
+  }
+
+  private constraintWays(written: TypeRef, context: TypeContext): Type[] {
+    if (written.form.kind != TypeRefKind.Union) {
+      return [this.resolve(written, context)];
+    }
+
+    const ways = this.resolveAll(written.args, context);
+    if (ways.some((way) => way.kind == TypeKind.Undefined)) {
+      return [this.store.unionOf(ways)];
+    }
+
+    return ways;
+  }
+
+  private satisfies(given: Type, ways: Type[]): boolean {
+    if (given.kind == TypeKind.Error || given.kind == TypeKind.Operation) {
+      return true;
+    }
+    if (this.holes.has(given.id)) {
+      return true;
+    }
+    if (ways.some((way) => this.fitsWay(given, way))) {
+      return true;
+    }
+
+    const own = this.store.constraintOf(given);
+    if (given.kind != TypeKind.TypeParameter || own == undefined) {
+      return false;
+    }
+
+    return this.partsOf(own).every((part) => this.satisfies(part, ways));
+  }
+
+  private fitsWay(given: Type, way: Type): boolean {
+    const seen = new Set<int>();
+    if (way.kind == TypeKind.Unknown || this.depends(way, seen)) {
+      return true;
+    }
+    if (this.relation.converts(given, way)) {
+      return true;
+    }
+    if (way.kind == TypeKind.Array && way.item.kind == TypeKind.Unknown) {
+      return given.kind == TypeKind.Array || given.kind == TypeKind.Tuple;
+    }
+
+    if (way.kind == TypeKind.Tuple) {
+      return this.startsWith(given, way.items);
+    }
+
+    return way.kind == TypeKind.Object && this.hasMembers(given, way.fields);
+  }
+
+  private startsWith(given: Type, wanted: Type[]): boolean {
+    if (given.kind != TypeKind.Tuple || given.items.length < wanted.length) {
+      return false;
+    }
+
+    for (let index = 0; index < wanted.length; index++) {
+      const have = given.items[index];
+      const item = wanted[index];
+      if (have == undefined || item == undefined) {
+        return false;
+      }
+
+      const isNarrower = item.kind == TypeKind.String && this.isTextual(have);
+      if (have != item && !isNarrower) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private hasMembers(given: Type, wanted: ObjectField[]): boolean {
+    for (const part of this.partsOf(given)) {
+      if (!this.partHasMembers(part, wanted)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private partHasMembers(part: Type, wanted: ObjectField[]): boolean {
+    if (part.kind != TypeKind.Object && part.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    const fields = this.fieldsOf(part);
+
+    for (const field of wanted) {
+      const have = fields.find((one) => one.name == field.name);
+      if (have != undefined && !this.isSameMember(have, field)) {
+        return false;
+      }
+      if (have == undefined && !this.isSpared(part, field)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private fieldsOf(part: Type): ObjectField[] {
+    if (part.kind == TypeKind.Object) {
+      return part.fields;
+    }
+    if (part.kind == TypeKind.Instance) {
+      return this.inheritedFields(part);
+    }
+
+    return [];
+  }
+
+  private isSameMember(have: ObjectField, wanted: ObjectField): boolean {
+    const isExact =
+      have.type == wanted.type && have.optional == wanted.optional;
+    const isNarrower =
+      wanted.type.kind == TypeKind.String && this.isTextual(have.type);
+    const mayWrite = !have.readonly || wanted.readonly;
+
+    return (isExact || isNarrower) && mayWrite;
+  }
+
+  private isTextual(type: Type): boolean {
+    return this.partsOf(type).every(
+      (part) =>
+        part.kind == TypeKind.Literal && part.literal == LiteralKind.String,
+    );
+  }
+
+  private isSpared(part: Type, wanted: ObjectField): boolean {
+    const isMethod = wanted.readonly && wanted.type.kind == TypeKind.Function;
+    if (part.kind != TypeKind.Instance || !isMethod) {
+      return wanted.optional;
+    }
+
+    const methods = this.methodTypes(part, wanted.name);
+    const found = methods.some(
+      (method) => method == wanted.type || method.kind == TypeKind.Error,
+    );
+
+    return found || wanted.optional;
+  }
+}

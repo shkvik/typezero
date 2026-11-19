@@ -181,7 +181,12 @@ partial class ScopeTraversal {
       if (this.scopes.declaredType(name) != undefined) {
         this.report(loc, Code.DuplicateTypeParameter, { word: name });
       } else {
-        this.scopes.declareType({ name, kind: SymbolKind.TypeParameter, loc });
+        this.scopes.declareType({
+          name,
+          kind: SymbolKind.TypeParameter,
+          loc,
+          constraint: param.constraint,
+        });
       }
     }
 

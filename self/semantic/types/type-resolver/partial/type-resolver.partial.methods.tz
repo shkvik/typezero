@@ -1,0 +1,156 @@
+import { TypeResolver } from "../type-resolver.tz";
+import {
+  Access,
+  ClassDecl,
+  MethodKind,
+} from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  DeclaredClass,
+  DeclaredMemberKind,
+} from "../../../../program/ast/types/ast.types.declarations.tz";
+import { Param } from "../../../../program/ast/types/ast.types.functions.tz";
+import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  InstanceType,
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { ParameterSite, TypeContext } from "../types/type-resolver.types.tz";
+
+partial class TypeResolver {
+  private inheritedFields(instance: InstanceType): ObjectField[] {
+    const fields = this.memberFields(instance).slice();
+
+    for (const parent of this.store.parentsOf(instance)) {
+      if (parent.kind != TypeKind.Instance) {
+        continue;
+      }
+
+      for (const field of this.inheritedFields(parent)) {
+        if (!fields.some((own) => own.name == field.name)) {
+          fields.push(field);
+        }
+      }
+    }
+
+    return fields;
+  }
+
+  private methodTypes(instance: InstanceType, name: string): Type[] {
+    const types = this.ownMethods(instance, name);
+
+    for (const parent of this.store.parentsOf(instance)) {
+      if (parent.kind != TypeKind.Instance) {
+        continue;
+      }
+
+      for (const type of this.methodTypes(parent, name)) {
+        types.push(type);
+      }
+    }
+
+    return types;
+  }
+
+  private ownMethods(instance: InstanceType, name: string): Type[] {
+    const record = this.record(instance.module);
+    if (record == undefined) {
+      return [];
+    }
+
+    for (const decl of record.declarations.values()) {
+      if (decl.kind == StmtKind.Class && decl.loc == instance.loc) {
+        return this.classMethods(instance, decl, name);
+      }
+    }
+
+    for (const declared of record.classes.values()) {
+      if (declared.loc == instance.loc) {
+        return this.declaredMethods(instance, declared, name);
+      }
+    }
+
+    return [];
+  }
+
+  private classMethods(
+    instance: InstanceType,
+    decl: ClassDecl,
+    name: string,
+  ): Type[] {
+    const context = this.inside(instance, decl.typeParams);
+    const types: Type[] = [];
+
+    for (const method of decl.methods) {
+      const role = method.role;
+      const open =
+        role != undefined &&
+        role.access == Access.Public &&
+        role.method != MethodKind.Static;
+      if (method.name != name || !open || method.typeParams.length > 0) {
+        continue;
+      }
+
+      const type = this.methodType(method.params, method.returnType, context);
+
+      types.push(type);
+    }
+
+    return types;
+  }
+
+  private declaredMethods(
+    instance: InstanceType,
+    declared: DeclaredClass,
+    name: string,
+  ): Type[] {
+    const context = this.inside(instance, declared.typeParams);
+    const types: Type[] = [];
+
+    for (const member of declared.members) {
+      const form = member.form;
+      const hidden = member.access != Access.Public || member.isStatic;
+
+      if (form.kind != DeclaredMemberKind.Method || member.name != name) {
+        continue;
+      }
+      if (hidden || form.typeParams.length > 0) {
+        continue;
+      }
+
+      const type = this.methodType(form.params, member.type, context);
+
+      types.push(type);
+    }
+
+    return types;
+  }
+
+  private methodType(
+    params: Param[],
+    result: TypeRef | undefined,
+    context: TypeContext,
+  ): Type {
+    const sites: ParameterSite[] = [];
+
+    for (const param of params) {
+      const type = param.type;
+      if (type != undefined) {
+        sites.push({
+          name: param.name,
+          loc: param.loc,
+          kind: param.form.kind,
+          type,
+        });
+      }
+    }
+
+    if (result == undefined || sites.length < params.length) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.signature(sites, result, context);
+  }
+}

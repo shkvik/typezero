@@ -1,4 +1,5 @@
 import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import { TypeRef } from "../../ast/types/ast.types.types.tz";
 import { NameTarget } from "../../module-names/types/module-names.types.tz";
 import { Module } from "../../module/types/module.types.tz";
 
@@ -20,6 +21,7 @@ export type NameSymbol = {
   readonly kind: SymbolKind;
   readonly loc: int;
   readonly target?: NameTarget;
+  readonly constraint?: TypeRef;
 };
 
 export type NameUse = {

@@ -1,0 +1,6 @@
+main.tz
+  2:6 type Words<T> = { value: T }
+  3:6 type Either<T> = { value: T }
+  13:10 make: (T) => void
+  15:6 type Fine<A, B> = { a: A; b: B }
+  16:6 type Used = { value: int }

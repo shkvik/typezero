@@ -5,6 +5,7 @@ import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
 import {
   DictKind,
+  ObjectField,
   Type,
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
@@ -96,6 +97,9 @@ partial class TypeResolver {
   ): Type {
     const parts = this.partsOf(key);
     const texts = parts.every((part) => this.isText(part));
+    if (parts.every((part) => part.kind == TypeKind.Literal) && texts) {
+      return this.fieldPerKey(parts, value);
+    }
     if (texts || key.kind == TypeKind.Error) {
       return this.store.dictOf(DictKind.Record, key, value);
     }
@@ -108,6 +112,20 @@ partial class TypeResolver {
     this.report(context.module, written.loc, code, { word, other });
 
     return this.store.plain(TypeKind.Error);
+  }
+
+  private fieldPerKey(keys: Type[], value: Type): Type {
+    const type = this.withoutUndefined(value);
+    const optional = type != value;
+    const fields: ObjectField[] = [];
+
+    for (const key of keys) {
+      if (key.kind == TypeKind.Literal) {
+        fields.push({ name: key.text, type, optional, readonly: false });
+      }
+    }
+
+    return this.store.objectOf(fields);
   }
 
   private keyCode(key: Type): Code {

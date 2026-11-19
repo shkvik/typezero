@@ -982,6 +982,18 @@ export const kMessages: Record<Code, Message> = {
   [Code.IntersectionFieldTypes]: {
     text: "field '{word}' has type '{first}' in one part of the intersection and '{second}' in another; a field has one type",
   },
+  [Code.ConstraintNotSatisfied]: {
+    text: "type '{first}' does not satisfy the constraint '{other}' of '{word}' in '{second}'",
+  },
+  [Code.DefaultNotSatisfying]: {
+    text: "the default '{first}' of '{word}' does not satisfy its constraint '{other}'",
+  },
+  [Code.DefaultMissing]: {
+    text: "type parameter '{word}' needs a default: it follows one that has one",
+  },
+  [Code.BuiltinTypeParameterName]: {
+    text: "'{word}' is a built-in type and cannot name a type parameter",
+  },
   [Code.InferPlace]: {
     text: "'infer' declares a type only in the 'extends' clause of a conditional type, e.g. 'T extends Array<infer U> ? U : never'",
   },

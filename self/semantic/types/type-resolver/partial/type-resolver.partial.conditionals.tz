@@ -121,6 +121,8 @@ partial class TypeResolver {
       case TypeRefKind.Infer: {
         const module = context.module;
         const hole = this.store.typeParameter(module, ref.loc, ref.name);
+
+        this.holes.add(hole.id);
         const constraint = this.holeConstraint(ref.args[0], context);
 
         holes.set(hole.id, { loc: ref.loc, constraint });

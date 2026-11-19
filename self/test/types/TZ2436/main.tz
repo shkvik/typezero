@@ -1,0 +1,4 @@
+// After a parameter with a default every next one has a default too.
+type Pair<A = int, B> = { a: A; b: B };
+
+type Fine<A, B = A> = { a: A; b: B };

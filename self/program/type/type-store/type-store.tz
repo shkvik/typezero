@@ -17,13 +17,37 @@ export class TypeStore {
   private readonly plains: Map<TypeKind, Type>;
   private readonly byKey: Map<string, Type>;
   private readonly labels: Map<Type, string>;
+  private readonly parents: Map<Type, Type[]>;
+  private readonly constraints: Map<Type, Type>;
   private count: int;
 
   public constructor() {
     this.plains = new Map<TypeKind, Type>();
     this.byKey = new Map<string, Type>();
     this.labels = new Map<Type, string>();
+    this.parents = new Map<Type, Type[]>();
+    this.constraints = new Map<Type, Type>();
     this.count = 0;
+  }
+
+  public inherit(instance: Type, parents: Type[]): void {
+    this.parents.set(instance, parents);
+  }
+
+  public hasParents(instance: Type): boolean {
+    return this.parents.has(instance);
+  }
+
+  public parentsOf(instance: Type): Type[] {
+    return this.parents.get(instance) ?? [];
+  }
+
+  public constrain(parameter: Type, constraint: Type): void {
+    this.constraints.set(parameter, constraint);
+  }
+
+  public constraintOf(parameter: Type): Type | undefined {
+    return this.constraints.get(parameter);
   }
 
   public label(type: Type, text: string): void {

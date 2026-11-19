@@ -4,3 +4,19 @@ export type InferHole = {
   readonly loc: int;
   readonly constraint?: Type;
 };
+
+export enum ValueSlot {
+  Other,
+  String,
+  Atom,
+  Int,
+  Json,
+  Double,
+  Boolean,
+  Decimal,
+  Object,
+  Array,
+  Function,
+  Iterator,
+  Parameter,
+}

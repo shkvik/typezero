@@ -63,8 +63,8 @@ partial class TypeResolver {
 
     const inner = this.placed(context, TypePlace.RestParameter);
     const type = this.resolve(site.type, inner);
-    const isList = type.kind == TypeKind.Array || type.kind == TypeKind.Tuple;
-    if (isList || this.isOpen(type) || type.kind == TypeKind.Error) {
+    const isHole = inner.place == TypePlace.Pattern && this.isOpen(type);
+    if (isHole || this.isList(type)) {
       return type;
     }
 
@@ -73,6 +73,23 @@ partial class TypeResolver {
     });
 
     return this.store.plain(TypeKind.Error);
+  }
+
+  private isList(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Array:
+      case TypeKind.Tuple:
+      case TypeKind.Operation:
+      case TypeKind.Error:
+        return true;
+      case TypeKind.TypeParameter: {
+        const constraint = this.store.constraintOf(type);
+
+        return constraint != undefined && this.isList(constraint);
+      }
+      default:
+        return false;
+    }
   }
 
   private returned(ref: TypeRef | undefined, context: TypeContext): Type {

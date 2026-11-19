@@ -6,7 +6,7 @@ main.tz
   12:6 type Generic<K> = ?
   13:6 type Never = ?
   15:6 type ByName = Record<string, int>
-  16:6 type ByWord = Record<"a" | "b", int>
-  17:6 type ByColor = Record<Color, int>
+  16:6 type ByWord = { a: int; b: int }
+  17:6 type ByColor = { red: int; blue: int }
   18:6 type ByPattern = Record<`on${string}`, int>
-  19:6 type ByField = Record<"x" | "y", int>
+  19:6 type ByField = { x: int; y: int }

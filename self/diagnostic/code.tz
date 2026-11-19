@@ -326,4 +326,8 @@ export enum Code {
   SignaturesOnlyInInterface = "TZ2431",
   InferPlace = "TZ2432",
   IntersectionFieldTypes = "TZ2433",
+  ConstraintNotSatisfied = "TZ2434",
+  DefaultNotSatisfying = "TZ2435",
+  DefaultMissing = "TZ2436",
+  BuiltinTypeParameterName = "TZ2437",
 }

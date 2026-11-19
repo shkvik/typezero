@@ -1,0 +1,7 @@
+// A type parameter cannot take the name of a built-in type.
+type Words<string> = { value: string };
+type Count<int> = { value: int };
+type Data<Json> = { value: int };
+type Thing<object> = { value: int };
+
+type Fine<Array, Map> = { a: Array; b: Map };

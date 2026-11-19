@@ -14,6 +14,8 @@ import "./partial/type-resolver.partial.conditionals.tz";
 import "./partial/type-resolver.partial.rules.tz";
 import "./partial/type-resolver.partial.unions.tz";
 import "./partial/type-resolver.partial.signatures.tz";
+import "./partial/type-resolver.partial.constraints.tz";
+import "./partial/type-resolver.partial.methods.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   Details,
@@ -49,6 +51,8 @@ export class TypeResolver {
   private readonly doors: Map<string, AliasDoor>;
   private readonly working: Map<string, int>;
   private readonly endless: Set<string>;
+  private readonly bounded: Set<int>;
+  private readonly holes: Set<int>;
   private readonly globals: Map<string, int>;
   private readonly namespaces: Map<string, int>;
   private readonly prefixes: Map<int, string>;
@@ -67,6 +71,8 @@ export class TypeResolver {
     this.doors = new Map<string, AliasDoor>();
     this.working = new Map<string, int>();
     this.endless = new Set<string>();
+    this.bounded = new Set<int>();
+    this.holes = new Set<int>();
     this.globals = new Map<string, int>();
     this.namespaces = new Map<string, int>();
     this.prefixes = new Map<int, string>();
@@ -136,7 +142,8 @@ export class TypeResolver {
     const written: Type[] = [];
 
     for (const param of decl.typeParams) {
-      const type = this.store.typeParameter(module, param.loc, param.name);
+      const name = param.name;
+      const type = this.opened(module, param.loc, name, param.constraint);
 
       written.push(type);
     }

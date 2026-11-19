@@ -1,0 +1,16 @@
+// The default of a type parameter must fit its own constraint.
+type Words<T extends string = int> = { value: T };
+type Either<T extends string = string | int> = { value: T };
+
+class Holder<T extends int = string> {
+  public item: T;
+
+  public constructor(item: T) {
+    this.item = item;
+  }
+}
+
+function make<T extends string = int>(value: T): void {}
+
+type Fine<A extends string = "x", B extends A = A> = { a: A; b: B };
+type Used = Words;

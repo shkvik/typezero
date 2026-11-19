@@ -87,6 +87,7 @@ export enum TypePlace {
   Plain,
   Pattern,
   RestParameter,
+  Base,
 }
 
 export type TypeContext = {
@@ -108,6 +109,12 @@ export type ModuleRecord = {
   readonly classes: Map<string, DeclaredClass>;
   readonly errors: SourceError[];
   readonly reported: Set<string>;
+};
+
+export type ClassHome = {
+  readonly module: int;
+  readonly name: string;
+  readonly loc: int;
 };
 
 export type ParameterSite = {

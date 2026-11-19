@@ -1,0 +1,94 @@
+// What fits a constraint: the type itself, a narrower one (a literal, a
+// member of a union, a class that extends or implements it), and for an
+// object type anything that has its members.
+type Shape = { id: int };
+type Wide = { id: int; name: string };
+type Loose = { id: int; note?: string };
+type Named = { name: string };
+
+enum Color {
+  Red = "red",
+  Blue = "blue",
+}
+
+interface Sized {
+  size(): int;
+}
+
+class Base {
+  public id: int;
+
+  public constructor() {
+    this.id = 1;
+  }
+
+  public size(): int {
+    return 1;
+  }
+}
+
+class Child extends Base {
+  public constructor() {
+    super();
+  }
+}
+
+class Marked implements Named {
+  public name: string;
+
+  public constructor() {
+    this.name = "m";
+  }
+}
+
+type Words<T extends string> = T;
+type Count<T extends int> = T;
+type Whole<T extends unknown> = T;
+type Thing<T extends object> = T;
+type Data<T extends Json> = T;
+type Either<T extends string | int> = T;
+type List<T extends unknown[]> = T;
+type Pair<T extends [int, string]> = T;
+type HasId<T extends Shape> = T;
+type HasNote<T extends Loose> = T;
+type HasName<T extends Named> = T;
+type HasSize<T extends Sized> = T;
+type OfBase<T extends Base> = T;
+type OfColor<T extends Color> = T;
+type Keyed<T, K extends keyof T> = K;
+type Under<T, U extends T> = U;
+type Pattern<T extends `on${string}`> = T;
+type Outcome<T extends Result<int, string>> = T;
+type Wrapped<T extends "a" | "b"> = Words<T>;
+type Listed<A extends unknown[]> = (...args: A) => void;
+
+type B01 = Words<"a" | "b">;
+type B02 = Words<Color>;
+type B03 = Words<`id-${string}`>;
+type B04 = Count<3>;
+type B05 = Whole<int | undefined>;
+type B06 = Thing<Shape | Base>;
+type B07 = Thing<Map<string, int>>;
+type B08 = Data<Record<string, string>>;
+type B09 = Data<Json[]>;
+type B10 = Either<"a">;
+type B11 = List<int[]>;
+type B12 = List<[int, string]>;
+type B13 = Pair<[int, string, boolean]>;
+type B14 = HasId<Wide>;
+type B15 = HasId<Base>;
+type B16 = HasId<Shape | Wide>;
+type B17 = HasNote<Shape>;
+type B18 = HasName<{ name: "x" | "y" }>;
+type B19 = HasName<Marked>;
+type B20 = HasSize<Child>;
+type B21 = HasSize<{ size(): int }>;
+type B22 = OfBase<Child>;
+type B23 = OfColor<Color.Red>;
+type B24 = Keyed<Wide, "id" | "name">;
+type B25 = Under<Base, Child>;
+type B26 = Under<string, "a">;
+type B27 = Pattern<"onClick">;
+type B28 = Outcome<Result<1, "x">>;
+type B29 = Wrapped<"a">;
+type B30 = Listed<[int, string]>;

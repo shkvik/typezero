@@ -1,0 +1,6 @@
+main.tz
+  2:6 type Words<string> = { value: string }
+  3:6 type Count<int> = { value: int }
+  4:6 type Data<Json> = { value: int }
+  5:6 type Thing<object> = { value: int }
+  7:6 type Fine<Array, Map> = { a: Array; b: Map }

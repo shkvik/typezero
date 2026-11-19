@@ -1,0 +1,12 @@
+main.tz:2:12: error TZ2437: 'string' is a built-in type and cannot name a type parameter
+type Words<string> = { value: string };
+           ^
+main.tz:3:12: error TZ2437: 'int' is a built-in type and cannot name a type parameter
+type Count<int> = { value: int };
+           ^
+main.tz:4:11: error TZ2437: 'Json' is a built-in type and cannot name a type parameter
+type Data<Json> = { value: int };
+          ^
+main.tz:5:12: error TZ2437: 'object' is a built-in type and cannot name a type parameter
+type Thing<object> = { value: int };
+           ^
