@@ -1,0 +1,12 @@
+main.tz:2:16: error TZ2413: 'null' is not supported: the only value for nothing is 'undefined'; write 'T | undefined'
+type Nothing = null;
+               ^
+main.tz:3:14: error TZ2413: 'null' is not supported: the only value for nothing is 'undefined'; write 'T | undefined'
+type Items = null[];
+             ^
+main.tz:4:27: error TZ2413: 'null' is not supported: the only value for nothing is 'undefined'; write 'T | undefined'
+type Values = Map<string, null>;
+                          ^
+main.tz:5:21: error TZ2413: 'null' is not supported: the only value for nothing is 'undefined'; write 'T | undefined'
+type Call = (value: null) => void;
+                    ^

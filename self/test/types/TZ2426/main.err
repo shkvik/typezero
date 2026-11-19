@@ -1,0 +1,3 @@
+main.tz:2:16: error TZ2426: union 'Result<int, string> | int' is not supported: a Result cannot be part of a union: what it holds is told by its halves; make a half the union instead, e.g. 'Result<int, A | B>'
+type Outcome = Result<int, string> | int;
+               ^

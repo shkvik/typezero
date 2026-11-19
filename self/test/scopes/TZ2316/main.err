@@ -1,0 +1,3 @@
+main.tz:2:10: error TZ2316: the type 'bigint' is not supported, as there is no bigint: integers up to 9.2e18 fit in 'int', longer ones in 'decimal' (e.g. 'decimal(2) ** 100')
+let big: bigint | undefined = undefined;
+         ^

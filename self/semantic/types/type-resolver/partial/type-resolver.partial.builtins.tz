@@ -64,24 +64,24 @@ partial class TypeResolver {
       return this.store.plain(TypeKind.Error);
     }
 
-    const args = this.resolveAll(ref.args, context);
+    const args = this.genericArguments(ref.args, row.values, context);
     const error = this.store.plain(TypeKind.Error);
     const first = args[0] ?? error;
     const second = args[1] ?? error;
 
     switch (row.type) {
       case GenericBuiltin.Array:
-        return this.store.arrayOf(first);
+        return this.listOf(ref, first, context);
       case GenericBuiltin.Result:
         return this.store.resultOf(first, second);
       case GenericBuiltin.Promise:
-        return this.store.promiseOf(first);
+        return this.promised(ref, first, context);
       case GenericBuiltin.Map:
         return this.store.dictOf(DictKind.Map, first, second);
       case GenericBuiltin.Set:
         return this.store.dictOf(DictKind.Set, first, first);
       case GenericBuiltin.Record:
-        return this.store.dictOf(DictKind.Record, first, second);
+        return this.keyed(ref, first, second, context);
       case GenericBuiltin.Generator:
         return this.iterator(args, false);
       default:

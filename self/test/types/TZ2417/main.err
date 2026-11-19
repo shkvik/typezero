@@ -1,0 +1,15 @@
+main.tz:9:22: error TZ2417: the keys of a Record are strings, found 'boolean'; for other keys use a Map, e.g. 'Map<boolean, int>'
+type ByFlag = Record<boolean, int>;
+                     ^
+main.tz:10:21: error TZ2417: the keys of a Record are strings, found 'string | int'; for other keys use a Map, e.g. 'Map<string | int, int>'
+type Mixed = Record<string | int, int>;
+                    ^
+main.tz:11:21: error TZ2417: the keys of a Record are strings, found '1'; for other keys use a Map, e.g. 'Map<1, int>'
+type ByOne = Record<1, int>;
+                    ^
+main.tz:12:41: error TZ2417: the keys of a Record are strings, found 'K'; for other keys use a Map, e.g. 'Map<K, int>'
+type Generic<K extends string> = Record<K, int>;
+                                        ^
+main.tz:13:21: error TZ2417: the keys of a Record are strings, found 'never'; for other keys use a Map, e.g. 'Map<never, int>'
+type Never = Record<never, int>;
+                    ^

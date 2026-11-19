@@ -250,6 +250,7 @@ export const kLibraryModules: LibraryModule[] = [
     parts: [],
     specs: ["node:crypto", "crypto"],
     access: LibraryAccess.Program,
+    untagged: true,
   },
   {
     name: "tz:crypto",
@@ -568,6 +569,7 @@ export const kLibraryModules: LibraryModule[] = [
     specs: [],
     access: LibraryAccess.Global,
     namespace: "Intl",
+    untagged: true,
   },
 ];
 

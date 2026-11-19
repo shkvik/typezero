@@ -10,7 +10,11 @@ import {
   SymbolKind,
 } from "../../../../program/scopes/types/scopes.types.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
-import { TypeContext, TypeDeclaration } from "../types/type-resolver.types.tz";
+import {
+  TypeContext,
+  TypeDeclaration,
+  TypePlace,
+} from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
   private declared(
@@ -104,10 +108,22 @@ partial class TypeResolver {
 
         return this.instance(module, name, found.loc, params, written);
       }
-      case StmtKind.Enum:
+      case StmtKind.Enum: {
+        const written = this.written(ref, found.name, [], context);
+        if (written == undefined) {
+          return this.store.plain(TypeKind.Error);
+        }
+
         return this.enumType(ref, found);
-      default:
+      }
+      default: {
+        const written = this.written(ref, found.name, [], context);
+        if (written == undefined) {
+          return this.store.plain(TypeKind.Error);
+        }
+
         return this.store.instanceOf(module, found.loc, found.name, []);
+      }
     }
   }
 
@@ -186,7 +202,11 @@ partial class TypeResolver {
         continue;
       }
 
-      const filled = this.defaultArgument(param, { module, bindings });
+      const filled = this.defaultArgument(param, {
+        module,
+        bindings,
+        place: TypePlace.Plain,
+      });
 
       bindings.set(param.loc, filled);
     }

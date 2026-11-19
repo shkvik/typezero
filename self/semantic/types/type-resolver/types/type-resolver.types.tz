@@ -6,6 +6,7 @@ import {
   TypeAliasDecl,
 } from "../../../../program/ast/types/ast.types.classes.tz";
 import { DeclaredClass } from "../../../../program/ast/types/ast.types.declarations.tz";
+import { ParamKind } from "../../../../program/ast/types/ast.types.functions.tz";
 import {
   MappedTypeForm,
   TypeRef,
@@ -14,6 +15,7 @@ import { NameUse } from "../../../../program/scopes/types/scopes.types.tz";
 import {
   ObjectField,
   Type,
+  TypeKind,
 } from "../../../../program/type/types/type.types.tz";
 
 export enum PlainBuiltin {
@@ -71,20 +73,64 @@ export type GenericTypeName = {
   readonly least: int;
   readonly most: int;
   readonly example: string;
+  readonly values: int;
+};
+
+export type JsonKind = {
+  readonly kind: TypeKind;
+  readonly name: string;
 };
 
 export type TypeDeclaration = TypeAliasDecl | ClassDecl | EnumDecl | HandleDecl;
 
+export enum TypePlace {
+  Plain,
+  Pattern,
+  RestParameter,
+}
+
 export type TypeContext = {
   readonly module: int;
   readonly bindings: Map<int, Type>;
+  readonly place: TypePlace;
+};
+
+export type ModuleOrigin = {
+  readonly library: boolean;
+  readonly native: boolean;
 };
 
 export type ModuleRecord = {
+  readonly library: boolean;
+  readonly native: boolean;
   readonly uses: Map<int, NameUse>;
   readonly declarations: Map<string, TypeDeclaration>;
   readonly classes: Map<string, DeclaredClass>;
   readonly errors: SourceError[];
+  readonly reported: Set<string>;
+};
+
+export type ParameterSite = {
+  readonly name: string;
+  readonly loc: int;
+  readonly kind: ParamKind;
+  readonly type: TypeRef;
+};
+
+export enum UnionSlot {
+  None,
+  Array,
+  Function,
+  Iterator,
+  AsyncIterator,
+  Promise,
+  Untagged,
+}
+
+export type SlotUse = {
+  readonly slot: UnionSlot;
+  readonly home: int;
+  readonly type: Type;
 };
 
 export enum DoorState {

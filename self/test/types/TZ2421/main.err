@@ -1,0 +1,3 @@
+main.tz:2:16: error TZ2421: union '(() => void) | ((int) => int)' is not supported: '() => void' and '(int) => int' cannot be told apart when the program runs: 'typeof' gives "function" for both; use one function type
+type Handler = (() => void) | ((value: int) => int);
+               ^

@@ -1,0 +1,9 @@
+main.tz:3:13: error TZ2317: 'BigInt' is not supported, as there is no bigint: integers up to 9.2e18 fit in 'int', longer ones in 'decimal' (e.g. 'decimal(2) ** 100')
+const big = BigInt(1);
+            ^
+main.tz:4:20: error TZ2317: 'BigInt64Array' is not supported, as there is no bigint: integers up to 9.2e18 fit in 'int', longer ones in 'decimal' (e.g. 'decimal(2) ** 100')
+const signed = new BigInt64Array(1);
+                   ^
+main.tz:5:15: error TZ2317: 'BigUint64Array' is not supported, as there is no bigint: integers up to 9.2e18 fit in 'int', longer ones in 'decimal' (e.g. 'decimal(2) ** 100')
+let unsigned: BigUint64Array | undefined = undefined;
+              ^

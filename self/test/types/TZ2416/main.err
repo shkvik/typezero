@@ -1,0 +1,9 @@
+main.tz:8:20: error TZ2416: the keys of a Record are strings: JavaScript would turn a number key into a string, so 'r[1]' and 'r["1"]' would be one; for numbers use a Map, e.g. 'Map<int, string>'
+type ById = Record<int, string>;
+                   ^
+main.tz:9:23: error TZ2416: the keys of a Record are strings: JavaScript would turn a number key into a string, so 'r[1]' and 'r["1"]' would be one; for numbers use a Map, e.g. 'Map<int, int>'
+type ByLevel = Record<Level, int>;
+                      ^
+main.tz:10:23: error TZ2416: the keys of a Record are strings: JavaScript would turn a number key into a string, so 'r[1]' and 'r["1"]' would be one; for numbers use a Map, e.g. 'Map<double, boolean>'
+type ByRatio = Record<double, boolean>;
+                      ^

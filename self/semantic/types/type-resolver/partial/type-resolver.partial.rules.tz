@@ -1,0 +1,146 @@
+import { TypeResolver } from "../type-resolver.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import {
+  DictKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { TypeContext, TypePlace } from "../types/type-resolver.types.tz";
+
+partial class TypeResolver {
+  public value(ref: TypeRef, context: TypeContext): Type {
+    const type = this.resolve(ref, context);
+    if (type.kind == TypeKind.Void && !this.isArgument(ref, context)) {
+      this.report(context.module, ref.loc, Code.VoidPlace, kNoDetails);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.present(ref, type, context);
+  }
+
+  private isArgument(ref: TypeRef, context: TypeContext): boolean {
+    const record = this.record(context.module);
+    const symbol = record?.uses.get(ref.loc)?.symbol;
+
+    return symbol != undefined && symbol.kind == SymbolKind.TypeParameter;
+  }
+
+  private present(ref: TypeRef, type: Type, context: TypeContext): Type {
+    if (type.kind != TypeKind.Undefined || this.isLibrary(context.module)) {
+      return type;
+    }
+
+    this.report(context.module, ref.loc, Code.UndefinedAlone, kNoDetails);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private isLibrary(module: int): boolean {
+    const record = this.record(module);
+
+    return record != undefined && record.library;
+  }
+
+  private genericArguments(
+    refs: TypeRef[],
+    values: int,
+    context: TypeContext,
+  ): Type[] {
+    const types: Type[] = [];
+
+    for (const ref of refs) {
+      const type = this.argument(ref, types.length < values, context);
+
+      types.push(type);
+    }
+
+    return types;
+  }
+
+  private argument(ref: TypeRef, isValue: boolean, context: TypeContext): Type {
+    if (isValue) {
+      return this.value(ref, context);
+    }
+
+    return this.resolve(ref, context);
+  }
+
+  private promised(ref: TypeRef, value: Type, context: TypeContext): Type {
+    const written = ref.args[0] ?? ref;
+    const present = this.present(written, value, context);
+
+    return this.store.promiseOf(present);
+  }
+
+  private listOf(ref: TypeRef, item: Type, context: TypeContext): Type {
+    if (item.kind != TypeKind.Void && item.kind != TypeKind.Undefined) {
+      return this.store.arrayOf(item);
+    }
+
+    const word = this.text.of(item);
+
+    this.report(context.module, ref.loc, Code.ArrayOfNothing, { word });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private keyed(
+    ref: TypeRef,
+    key: Type,
+    value: Type,
+    context: TypeContext,
+  ): Type {
+    const parts = this.partsOf(key);
+    const texts = parts.every((part) => this.isText(part));
+    if (texts || key.kind == TypeKind.Error) {
+      return this.store.dictOf(DictKind.Record, key, value);
+    }
+
+    const written = ref.args[0] ?? ref;
+    const code = this.keyCode(key);
+    const word = this.text.of(key);
+    const other = this.text.of(value);
+
+    this.report(context.module, written.loc, code, { word, other });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private keyCode(key: Type): Code {
+    if (key.kind == TypeKind.Int || key.kind == TypeKind.Double) {
+      return Code.RecordNumberKeys;
+    }
+
+    return Code.RecordKeys;
+  }
+
+  private inferred(ref: TypeRef, context: TypeContext): Type {
+    if (context.place == TypePlace.Pattern) {
+      return this.store.typeParameter(context.module, ref.loc, ref.name);
+    }
+
+    this.report(context.module, ref.loc, Code.InferPlace, kNoDetails);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private refusedNull(ref: TypeRef, context: TypeContext): Type {
+    if (!this.isLibrary(context.module)) {
+      this.report(context.module, ref.loc, Code.NullType, kNoDetails);
+    }
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private placed(context: TypeContext, place: TypePlace): TypeContext {
+    if (context.place == TypePlace.Pattern) {
+      return context;
+    }
+
+    return { module: context.module, bindings: context.bindings, place };
+  }
+}

@@ -1,0 +1,15 @@
+main.tz:2:15: error TZ2412: 'void' cannot be part of a union
+type Either = int | void;
+              ^
+main.tz:3:19: error TZ2412: 'void' cannot be part of a union
+type Call = () => void | undefined;
+                  ^
+main.tz:4:22: error TZ2412: 'void' cannot be part of a union
+type Later = Promise<void | undefined>;
+                     ^
+main.tz:5:14: error TZ2412: 'void' cannot be part of a union
+type Twice = void | void;
+             ^
+main.tz:6:22: error TZ2412: 'void' cannot be part of a union
+function take(value: void | undefined): void {}
+                     ^

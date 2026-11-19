@@ -1,0 +1,4 @@
+// Two promises in one union: the value decides, so the union goes inside.
+type Later = Promise<int> | Promise<string>;
+
+type One = Promise<int | string> | int;

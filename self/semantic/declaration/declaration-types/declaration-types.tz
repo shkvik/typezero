@@ -2,44 +2,40 @@ import {
   EnumDecl,
   TypeAliasDecl,
 } from "../../../program/ast/types/ast.types.classes.tz";
-import {
-  FunctionDecl,
-  Param,
-  ParamKind,
-} from "../../../program/ast/types/ast.types.functions.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
 import { VarDeclarator } from "../../../program/ast/types/ast.types.patterns.tz";
 import {
   Stmt,
   StmtKind,
 } from "../../../program/ast/types/ast.types.statements.tz";
-import { TypeRef } from "../../../program/ast/types/ast.types.types.tz";
 import {
   DeclarationForm,
   ModuleTypes,
   TypedDeclaration,
 } from "../../../program/module-types/types/module-types.types.tz";
 import { Module } from "../../../program/module/types/module.types.tz";
-import { TypeStore } from "../../../program/type/type-store/type-store.tz";
-import {
-  FunctionParameter,
-  Type,
-  TypeKind,
-} from "../../../program/type/types/type.types.tz";
+import { Type } from "../../../program/type/types/type.types.tz";
 import { TypeResolver } from "../../types/type-resolver/type-resolver.tz";
-import { TypeContext } from "../../types/type-resolver/types/type-resolver.types.tz";
+import {
+  ParameterSite,
+  TypeContext,
+  TypePlace,
+} from "../../types/type-resolver/types/type-resolver.types.tz";
 
 export class DeclarationTypes {
   private readonly module: Module;
-  private readonly store: TypeStore;
   private readonly resolver: TypeResolver;
   private readonly context: TypeContext;
   private readonly declarations: TypedDeclaration[];
 
-  public constructor(store: TypeStore, resolver: TypeResolver, module: Module) {
+  public constructor(resolver: TypeResolver, module: Module) {
     this.module = module;
-    this.store = store;
     this.resolver = resolver;
-    this.context = { module: module.id, bindings: new Map<int, Type>() };
+    this.context = {
+      module: module.id,
+      bindings: new Map<int, Type>(),
+      place: TypePlace.Plain,
+    };
     this.declarations = [];
   }
 
@@ -78,31 +74,32 @@ export class DeclarationTypes {
       return;
     }
 
-    const type = this.resolver.resolve(written, this.context);
+    const type = this.resolver.value(written, this.context);
 
     this.declare(DeclarationForm.Value, decl.name, decl.loc, type);
   }
 
   private typeFunction(fn: FunctionDecl): void {
     const written = fn.returnType;
-    const untyped = fn.params.some((param) => param.type == undefined);
-    if (written == undefined || untyped) {
+    const sites: ParameterSite[] = [];
+
+    for (const param of fn.params) {
+      const type = param.type;
+      if (type != undefined) {
+        sites.push({
+          name: param.name,
+          loc: param.loc,
+          kind: param.form.kind,
+          type,
+        });
+      }
+    }
+
+    if (written == undefined || sites.length < fn.params.length) {
       return;
     }
 
-    const params: FunctionParameter[] = [];
-
-    for (const param of fn.params) {
-      const type = this.paramType(param.type);
-      const optional = this.isOptional(param);
-
-      params.push({ type, optional });
-    }
-
-    const last = fn.params[fn.params.length - 1];
-    const rest = last != undefined && last.form.kind == ParamKind.Rest;
-    const result = this.resolver.resolve(written, this.context);
-    const type = this.store.functionOf({ params, rest, result });
+    const type = this.resolver.signature(sites, written, this.context);
 
     this.declare(DeclarationForm.Value, fn.name, fn.loc, type);
   }
@@ -136,19 +133,5 @@ export class DeclarationTypes {
     type: Type,
   ): void {
     this.declarations.push({ form, name, loc, type });
-  }
-
-  private paramType(written: TypeRef | undefined): Type {
-    if (written == undefined) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    return this.resolver.resolve(written, this.context);
-  }
-
-  private isOptional(param: Param): boolean {
-    const kind = param.form.kind;
-
-    return kind == ParamKind.Optional || kind == ParamKind.Defaulted;
   }
 }

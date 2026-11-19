@@ -871,6 +871,21 @@ export const kMessages: Record<Code, Message> = {
   [Code.NoRequire]: {
     text: "'{word}' is not supported: files are imported by name: 'import { a } from \"./x\"'",
   },
+  [Code.NoLong]: {
+    text: "there is no '{word}': 'int' is 64 bits",
+  },
+  [Code.NoBigintType]: {
+    text: "the type '{word}' is not supported, as there is no bigint: integers up to 9.2e18 fit in 'int', longer ones in 'decimal' (e.g. 'decimal(2) ** 100')",
+  },
+  [Code.NoBigint]: {
+    text: "'{word}' is not supported, as there is no bigint: integers up to 9.2e18 fit in 'int', longer ones in 'decimal' (e.g. 'decimal(2) ** 100')",
+  },
+  [Code.NoSharedBuffer]: {
+    text: "'{word}' is not supported yet: it comes with the shared memory of async (docs/bytes.md, section 7); use 'ArrayBuffer'",
+  },
+  [Code.NoWeakCollection]: {
+    text: "'{word}' is not supported yet; a '{other}' holds its keys, and frees them with itself",
+  },
   [Code.TypeArgumentsCount]: {
     text: "'{word}' is written with its type arguments, e.g. '{other}'",
   },
@@ -897,5 +912,77 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.RecursiveUnion]: {
     text: "type alias '{word}' refers to itself, and only a union of several types without undefined can: make a field optional instead, e.g. 'next?: {word}'",
+  },
+  [Code.UndefinedAlone]: {
+    text: "the type 'undefined' alone is not supported; use 'T | undefined'",
+  },
+  [Code.VoidPlace]: {
+    text: "'void' can only be used as a return type or a type argument",
+  },
+  [Code.VoidInUnion]: {
+    text: "'void' cannot be part of a union",
+  },
+  [Code.NullType]: {
+    text: "'null' is not supported: the only value for nothing is 'undefined'; write 'T | undefined'",
+  },
+  [Code.NullInUnion]: {
+    text: "'null' is not supported: the only value for nothing is 'undefined'; write 'T | undefined' (null exists only in Json values)",
+  },
+  [Code.ArrayOfNothing]: {
+    text: "arrays of '{word}' are not supported",
+  },
+  [Code.RecordNumberKeys]: {
+    text: "the keys of a Record are strings: JavaScript would turn a number key into a string, so 'r[1]' and 'r[\"1\"]' would be one; for numbers use a Map, e.g. 'Map<{word}, {other}>'",
+  },
+  [Code.RecordKeys]: {
+    text: "the keys of a Record are strings, found '{word}'; for other keys use a Map, e.g. 'Map<{word}, {other}>'",
+  },
+  [Code.TupleRest]: {
+    text: "a rest element in a tuple type is not supported: a tuple has a fixed length; use an array, e.g. 'int[]'",
+  },
+  [Code.TupleSpreadNotLast]: {
+    text: "nothing can follow the array spread into a list: it takes the arguments to the end",
+  },
+  [Code.UnionOfArrays]: {
+    text: "union '{word}' is not supported: '{first}' and '{second}' cannot be told apart when the program runs: both are arrays; use one array type, e.g. '{other}'",
+  },
+  [Code.UnionOfFunctions]: {
+    text: "union '{word}' is not supported: '{first}' and '{second}' cannot be told apart when the program runs: 'typeof' gives \"function\" for both; use one function type",
+  },
+  [Code.UnionOfIterators]: {
+    text: "union '{word}' is not supported: '{first}' and '{second}' cannot be told apart when the program runs: both are iterators; use one iterator type",
+  },
+  [Code.UnionOfPromises]: {
+    text: "union '{word}' is not supported: '{first}' and '{second}' cannot be told apart when the program runs: both are promises; use one Promise type, e.g. '{other}'",
+  },
+  [Code.UnionOfUntagged]: {
+    text: "union '{word}' is not supported: '{first}' and '{second}' cannot be told apart when the program runs: both are objects of {other}, which carry nothing a check could tell apart by; keep each in a variable of its own type",
+  },
+  [Code.UnionWithJson]: {
+    text: "union '{word}' is not supported: 'Json' and '{first}' cannot be told apart when the program runs: typeof gives \"{other}\" for both; use 'Json', which holds that value too",
+  },
+  [Code.UnionWithResult]: {
+    text: "union '{word}' is not supported: a Result cannot be part of a union: what it holds is told by its halves; make a half the union instead, e.g. 'Result<int, A | B>'",
+  },
+  [Code.RequiredAfterOptional]: {
+    text: "a required parameter cannot follow an optional one",
+  },
+  [Code.RestParameterNotArray]: {
+    text: "a rest parameter must be an array, e.g. '...{word}: int[]'",
+  },
+  [Code.DuplicateField]: {
+    text: "duplicate field '{word}'",
+  },
+  [Code.DuplicateSignature]: {
+    text: "duplicate signature '{other}' of method '{word}': the signatures must differ in their parameters",
+  },
+  [Code.SignaturesOnlyInInterface]: {
+    text: "several signatures of method '{word}' are supported only in an interface; declare one, 'interface Name { ... }'",
+  },
+  [Code.IntersectionFieldTypes]: {
+    text: "field '{word}' has type '{first}' in one part of the intersection and '{second}' in another; a field has one type",
+  },
+  [Code.InferPlace]: {
+    text: "'infer' declares a type only in the 'extends' clause of a conditional type, e.g. 'T extends Array<infer U> ? U : never'",
   },
 };

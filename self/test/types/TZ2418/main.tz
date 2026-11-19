@@ -1,0 +1,13 @@
+// A tuple has a fixed length, so `...T[]` is not an element of a written
+// tuple. The list of a rest parameter and the pattern of a conditional type
+// may have it; a spread tuple just adds its elements.
+type Row = [int, ...string[]];
+type Rows = [int, ...string[]][];
+type Open<A extends unknown[]> = [int, ...A];
+type Filled = Open<string[]>;
+
+type Fixed = Open<[string, boolean]>;
+type Call = (...args: [int, ...string[]]) => void;
+type Starts<T> = T extends [int, ...string[]] ? true : false;
+type Yes = Starts<[int, string, string]>;
+type No = Starts<[int, boolean]>;

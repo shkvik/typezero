@@ -1,0 +1,5 @@
+main.tz
+  3:31 undefined -> global
+  5:1 console -> global
+  5:13 shared -> variable 2:7
+  5:21 view -> variable 3:5

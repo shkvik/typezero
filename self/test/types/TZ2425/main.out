@@ -1,0 +1,12 @@
+main.tz
+  4:6 type Words = ?
+  5:6 type Flag = ?
+  6:6 type Ratio = ?
+  7:6 type Rows = ?
+  8:6 type Shape = ?
+  9:6 type When = ?
+  10:6 type Any<T> = ?
+  12:6 type Count = Json | int
+  13:6 type Exact = Json | decimal
+  14:6 type Call = Json | (() => void)
+  15:6 type Maybe = Json | undefined

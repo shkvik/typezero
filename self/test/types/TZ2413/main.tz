@@ -1,0 +1,5 @@
+// There is no `null`: nothing is `undefined`.
+type Nothing = null;
+type Items = null[];
+type Values = Map<string, null>;
+type Call = (value: null) => void;

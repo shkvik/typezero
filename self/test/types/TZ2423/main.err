@@ -1,0 +1,3 @@
+main.tz:2:14: error TZ2423: union 'Promise<int> | Promise<string>' is not supported: 'Promise<int>' and 'Promise<string>' cannot be told apart when the program runs: both are promises; use one Promise type, e.g. 'Promise<int | string>'
+type Later = Promise<int> | Promise<string>;
+             ^

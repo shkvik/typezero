@@ -174,7 +174,7 @@ partial class TypeResolver {
       return origin.type;
     }
 
-    const value = this.resolve(plan.value, inner);
+    const value = this.value(plan.value, inner);
 
     if (plan.form.optionalChange == ModifierChange.Remove) {
       return this.withoutUndefined(value);

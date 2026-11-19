@@ -1,0 +1,3 @@
+main.tz
+  3:11 type Reader = { readonly read: (int) => string; readonly read: () => string }
+  9:6 type Writer = { readonly write: (string) => void }

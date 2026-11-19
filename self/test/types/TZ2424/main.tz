@@ -1,0 +1,11 @@
+// The objects of Intl and of node:crypto carry nothing a check could tell
+// them apart by. The rule is kept inside each group; classes written in tz
+// (Intl.Locale) and tagged objects (Date, RegExp) are free of it.
+import { Hash, Hmac, KeyObject } from "node:crypto";
+
+type Formats = Intl.NumberFormat | Intl.Collator;
+type Digests = Hash | Hmac;
+
+type Apart = Hash | Intl.Collator;
+type Own = Intl.Locale | Intl.Collator;
+type Tagged = Date | RegExp | KeyObject;

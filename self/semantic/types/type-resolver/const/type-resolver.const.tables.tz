@@ -1,6 +1,8 @@
+import { TypeKind } from "../../../../program/type/types/type.types.tz";
 import {
   GenericBuiltin,
   GenericTypeName,
+  JsonKind,
   PlainBuiltin,
   PlainTypeName,
   TextChange,
@@ -8,6 +10,7 @@ import {
 } from "../types/type-resolver.types.tz";
 
 export const kThisParameter = "this";
+export const kNullTypeName = "null";
 export const kNamePoint = ".";
 export const kEnumValueLimit: uint64 = 9223372036854775807;
 
@@ -51,6 +54,7 @@ export const kGenericTypes: GenericTypeName[] = [
     least: 1,
     most: 1,
     example: "Array<int>",
+    values: 0,
   },
   {
     name: "Result",
@@ -58,6 +62,7 @@ export const kGenericTypes: GenericTypeName[] = [
     least: 2,
     most: 2,
     example: "Result<int, string>",
+    values: 0,
   },
   {
     name: "Promise",
@@ -65,6 +70,7 @@ export const kGenericTypes: GenericTypeName[] = [
     least: 1,
     most: 1,
     example: "Promise<int>",
+    values: 0,
   },
   {
     name: "Map",
@@ -72,6 +78,7 @@ export const kGenericTypes: GenericTypeName[] = [
     least: 2,
     most: 2,
     example: "Map<string, int>",
+    values: 2,
   },
   {
     name: "Set",
@@ -79,6 +86,7 @@ export const kGenericTypes: GenericTypeName[] = [
     least: 1,
     most: 1,
     example: "Set<int>",
+    values: 1,
   },
   {
     name: "Record",
@@ -86,6 +94,7 @@ export const kGenericTypes: GenericTypeName[] = [
     least: 2,
     most: 2,
     example: "Record<string, int>",
+    values: 2,
   },
   {
     name: "Generator",
@@ -93,6 +102,7 @@ export const kGenericTypes: GenericTypeName[] = [
     least: 1,
     most: 3,
     example: "Generator<int>",
+    values: 1,
   },
   {
     name: "AsyncGenerator",
@@ -100,5 +110,23 @@ export const kGenericTypes: GenericTypeName[] = [
     least: 1,
     most: 3,
     example: "AsyncGenerator<int>",
+    values: 1,
   },
+];
+
+export const kJsonKinds: JsonKind[] = [
+  { kind: TypeKind.TypeParameter, name: "null" },
+  { kind: TypeKind.Boolean, name: "boolean" },
+  { kind: TypeKind.Double, name: "double" },
+  { kind: TypeKind.String, name: "string" },
+  { kind: TypeKind.Template, name: "string" },
+  { kind: TypeKind.Array, name: "array" },
+  { kind: TypeKind.Tuple, name: "array" },
+  { kind: TypeKind.Object, name: "object" },
+  { kind: TypeKind.AnyObject, name: "object" },
+  { kind: TypeKind.Result, name: "object" },
+  { kind: TypeKind.Iterator, name: "object" },
+  { kind: TypeKind.Dict, name: "object" },
+  { kind: TypeKind.Promise, name: "object" },
+  { kind: TypeKind.Instance, name: "object" },
 ];

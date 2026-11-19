@@ -1,0 +1,9 @@
+main.tz:2:17: error TZ2415: arrays of 'void' are not supported
+type Nothings = void[];
+                ^
+main.tz:3:13: error TZ2415: arrays of 'undefined' are not supported
+type Gaps = undefined[];
+            ^
+main.tz:4:15: error TZ2415: arrays of 'void' are not supported
+type Listed = Array<void>;
+              ^

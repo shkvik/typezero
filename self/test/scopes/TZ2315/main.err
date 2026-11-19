@@ -1,0 +1,6 @@
+main.tz:2:23: error TZ2315: there is no 'long': 'int' is 64 bits
+function total(count: long): long {
+                      ^
+main.tz:2:30: error TZ2315: there is no 'long': 'int' is 64 bits
+function total(count: long): long {
+                             ^

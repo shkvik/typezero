@@ -1,0 +1,5 @@
+// Two iterators in one union are the same thing when the program runs.
+type Streams = Generator<int> | Generator<string>;
+type Later = AsyncGenerator<int> | AsyncGenerator<string>;
+
+type Both = Generator<int> | AsyncGenerator<int> | int[];

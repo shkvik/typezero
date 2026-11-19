@@ -14,6 +14,7 @@ export type LibraryModule = {
   readonly specs: string[];
   readonly access: LibraryAccess;
   readonly namespace?: string;
+  readonly untagged?: boolean;
 };
 
 export type LibraryGlobal = {

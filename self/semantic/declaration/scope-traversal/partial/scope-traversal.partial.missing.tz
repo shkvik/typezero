@@ -1,15 +1,16 @@
 import { ScopeTraversal } from "../scope-traversal.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { kGlobalNames } from "../../../../program/library/global-names/const/global-names.const.tz";
-import { AbsentReason } from "../../../../program/library/global-names/types/global-names.types.tz";
+import {
+  AbsentName,
+  AbsentReason,
+} from "../../../../program/library/global-names/types/global-names.types.tz";
 
 partial class ScopeTraversal {
   private reportMissingValue(name: string, loc: int, missing: Code): void {
     const absent = kGlobalNames.absent(name);
-    if (absent != undefined) {
-      const code = this.absentCode(absent.reason);
-
-      return this.report(loc, code, { word: name });
+    if (absent != undefined && absent.asValue) {
+      return this.reportAbsent(absent, loc);
     }
     if (this.isTypeName(name)) {
       return this.report(loc, Code.TypeAsValue, { word: name });
@@ -21,12 +22,16 @@ partial class ScopeTraversal {
   private reportMissingType(name: string, loc: int, missing: Code): void {
     const absent = kGlobalNames.absent(name);
     if (absent != undefined && absent.asType) {
-      const code = this.absentCode(absent.reason);
-
-      return this.report(loc, code, { word: name });
+      return this.reportAbsent(absent, loc);
     }
 
     this.report(loc, missing, { word: name });
+  }
+
+  private reportAbsent(absent: AbsentName, loc: int): void {
+    const code = this.absentCode(absent.reason);
+
+    this.report(loc, code, { word: absent.name, other: absent.instead });
   }
 
   private isTypeName(name: string): boolean {
@@ -47,8 +52,18 @@ partial class ScopeTraversal {
         return Code.NoCodeFromString;
       case AbsentReason.Proxy:
         return Code.NoProxy;
-      default:
+      case AbsentReason.Require:
         return Code.NoRequire;
+      case AbsentReason.Long:
+        return Code.NoLong;
+      case AbsentReason.BigintType:
+        return Code.NoBigintType;
+      case AbsentReason.Bigint:
+        return Code.NoBigint;
+      case AbsentReason.SharedBuffer:
+        return Code.NoSharedBuffer;
+      default:
+        return Code.NoWeakCollection;
     }
   }
 }

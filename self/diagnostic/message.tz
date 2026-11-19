@@ -35,5 +35,15 @@ export function messageText(code: Code, details: Details): string {
     text = text.replaceAll("{path}", path);
   }
 
+  const first = details.first;
+  if (first != undefined) {
+    text = text.replaceAll("{first}", first);
+  }
+
+  const second = details.second;
+  if (second != undefined) {
+    text = text.replaceAll("{second}", second);
+  }
+
   return text;
 }

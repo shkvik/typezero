@@ -1,0 +1,5 @@
+// Weak collections: the message names the collection to use instead.
+const seen = new WeakSet<string>();
+let cache: WeakMap<string, int> | undefined = undefined;
+
+console.log(seen, cache);

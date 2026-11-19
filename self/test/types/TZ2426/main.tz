@@ -1,0 +1,4 @@
+// What a Result holds is told by its halves, so the union goes into a half.
+type Outcome = Result<int, string> | int;
+
+type Whole = Result<int | string, "empty" | "broken">;

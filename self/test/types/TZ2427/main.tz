@@ -1,0 +1,7 @@
+// After a parameter with `?` every next one is optional too. A default
+// value is not `?`: it neither starts the rule nor breaks it.
+type Call = (first?: int, second: string) => void;
+function make(first?: int, second: string = "x", third: int): void {}
+
+type Fine = (first: int, second?: string, ...rest: int[]) => void;
+function keep(first: int = 1, second: string): void {}

@@ -1,0 +1,6 @@
+main.tz:2:14: error TZ2432: 'infer' declares a type only in the 'extends' clause of a conditional type, e.g. 'T extends Array<infer U> ? U : never'
+type Alone = infer U;
+             ^
+main.tz:3:37: error TZ2432: 'infer' declares a type only in the 'extends' clause of a conditional type, e.g. 'T extends Array<infer U> ? U : never'
+type Branch<T> = T extends string ? infer U : never;
+                                    ^

@@ -169,7 +169,7 @@ partial class FileParser {
         hasRest = true;
       }
 
-      params.push({ name: name.text, optional, type });
+      params.push({ name: name.text, loc: name.start, optional, type });
 
       if (!this.cursor.accept(TokenKind.Comma)) {
         break;

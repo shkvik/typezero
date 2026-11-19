@@ -1,0 +1,15 @@
+// Json already holds a string, a boolean, a double, an array and an object,
+// so a union of Json with one of them cannot be told apart; a type parameter
+// may be any of them. An int, a decimal and a function are not Json values.
+type Words = Json | string;
+type Flag = Json | true;
+type Ratio = Json | 1.5;
+type Rows = Json | int[];
+type Shape = Json | { x: int };
+type When = Json | Date;
+type Any<T> = Json | T;
+
+type Count = Json | int;
+type Exact = Json | decimal;
+type Call = Json | (() => void);
+type Maybe = Json | undefined;

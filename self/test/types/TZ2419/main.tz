@@ -1,0 +1,5 @@
+// A spread array takes everything to the end, so nothing can follow it,
+// wherever the tuple is written.
+type Ends = [...int[], string];
+type Call = (...args: [...int[], string]) => void;
+type Asks<T> = T extends [...int[], string] ? true : false;

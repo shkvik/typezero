@@ -42,6 +42,9 @@ partial class TypeResolver {
     if (operand.kind == TypeKind.Dict && operand.dict == DictKind.Record) {
       return operand.key;
     }
+    if (operand.kind == TypeKind.Error) {
+      return operand;
+    }
 
     const word = this.text.of(operand);
 
@@ -81,6 +84,9 @@ partial class TypeResolver {
   ): Type {
     if (this.isOpen(object) || this.isOpen(index)) {
       return this.operation(OperationKind.Indexed, [object, index], "");
+    }
+    if (object.kind == TypeKind.Error || index.kind == TypeKind.Error) {
+      return this.store.plain(TypeKind.Error);
     }
     if (index.kind == TypeKind.Union) {
       const members: Type[] = [];
@@ -186,67 +192,6 @@ partial class TypeResolver {
     return undefined;
   }
 
-  private intersection(ref: TypeRef, context: TypeContext): Type {
-    const parts = this.resolveAll(ref.args, context);
-    let joined = parts[0] ?? this.store.plain(TypeKind.Error);
-
-    for (let index = 1; index < parts.length; index++) {
-      const part = parts[index];
-
-      joined = this.joined(joined, part, ref.loc, context);
-    }
-
-    return joined;
-  }
-
-  private joined(
-    first: Type,
-    second: Type,
-    loc: int,
-    context: TypeContext,
-  ): Type {
-    if (first == second) {
-      return first;
-    }
-    if (this.isOpen(first) || this.isOpen(second)) {
-      return this.operation(OperationKind.Intersection, [first, second], "");
-    }
-    if (second.kind == TypeKind.String) {
-      return this.onlyTexts(first);
-    }
-    if (second.kind == TypeKind.Object && second.fields.length == 0) {
-      return this.withoutUndefined(first);
-    }
-    if (first.kind == TypeKind.Object && second.kind == TypeKind.Object) {
-      const fields = new Map<string, ObjectField>();
-
-      this.inherit(fields, first);
-      this.inherit(fields, second);
-
-      const merged = Array.from(fields.values());
-
-      return this.store.objectOf(merged);
-    }
-
-    const other = this.notObject(first, second);
-    const parts = this.partsOf(other);
-    const part = parts[0] ?? other;
-
-    this.report(context.module, loc, Code.IntersectionNeedsObjects, {
-      word: this.text.of(part),
-    });
-
-    return this.store.plain(TypeKind.Error);
-  }
-
-  private notObject(first: Type, second: Type): Type {
-    if (first.kind == TypeKind.Object) {
-      return second;
-    }
-
-    return first;
-  }
-
   private onlyTexts(type: Type): Type {
     const texts: Type[] = [];
 
@@ -308,6 +253,6 @@ partial class TypeResolver {
 
     bindings.set(loc, type);
 
-    return { module: context.module, bindings };
+    return { module: context.module, bindings, place: context.place };
   }
 }

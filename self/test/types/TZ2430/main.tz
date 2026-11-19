@@ -1,0 +1,9 @@
+// Signatures of one method must differ: the same signature twice is a
+// mistake, whatever the parameters are called.
+interface Reader {
+  read(count: int): string;
+  read(size: int): string;
+  read(): string;
+}
+
+type Writer = { write(text: string): void; write(text: string): void };

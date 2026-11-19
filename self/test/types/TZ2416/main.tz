@@ -1,0 +1,10 @@
+// The keys of a Record are strings. A number key is refused with the reason:
+// JavaScript would turn it into a string. A numeric enum is a number too.
+enum Level {
+  Low,
+  High,
+}
+
+type ById = Record<int, string>;
+type ByLevel = Record<Level, int>;
+type ByRatio = Record<double, boolean>;

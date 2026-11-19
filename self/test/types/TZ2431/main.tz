@@ -1,0 +1,10 @@
+// A method has several signatures only in a declared type: an interface or
+// the object type of an alias. An object type written in place has one.
+type Holder = { inner: { read(): string; read(count: int): string } };
+
+interface Reader {
+  read(): string;
+  read(count: int): string;
+}
+
+type Writer = { write(): void; write(text: string): void };

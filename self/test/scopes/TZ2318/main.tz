@@ -1,0 +1,5 @@
+// Shared memory comes later, with the shared memory of async.
+const shared = new SharedArrayBuffer(8);
+let view: SharedArrayBuffer | undefined = undefined;
+
+console.log(shared, view);

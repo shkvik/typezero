@@ -1,0 +1,5 @@
+main.tz
+  2:6 type Nothing = ?
+  3:6 type Items = ?[]
+  4:6 type Values = Map<string, ?>
+  5:6 type Call = (?) => void

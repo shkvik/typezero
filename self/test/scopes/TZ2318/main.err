@@ -1,0 +1,6 @@
+main.tz:2:20: error TZ2318: 'SharedArrayBuffer' is not supported yet: it comes with the shared memory of async (docs/bytes.md, section 7); use 'ArrayBuffer'
+const shared = new SharedArrayBuffer(8);
+                   ^
+main.tz:3:11: error TZ2318: 'SharedArrayBuffer' is not supported yet: it comes with the shared memory of async (docs/bytes.md, section 7); use 'ArrayBuffer'
+let view: SharedArrayBuffer | undefined = undefined;
+          ^

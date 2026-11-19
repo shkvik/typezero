@@ -1,0 +1,6 @@
+main.tz
+  6:6 type Formats = ?
+  7:6 type Digests = ?
+  9:6 type Apart = Hash | Intl.Collator
+  10:6 type Own = Intl.Locale | Intl.Collator
+  11:6 type Tagged = Date | RegExp | KeyObject

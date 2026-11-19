@@ -1,0 +1,7 @@
+// An array holds values, and `void` and `undefined` alone are not values.
+type Nothings = void[];
+type Gaps = undefined[];
+type Listed = Array<void>;
+
+type Fine = (int | undefined)[];
+type Empty = never[];

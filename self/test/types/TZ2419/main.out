@@ -1,0 +1,4 @@
+main.tz
+  3:6 type Ends = ?
+  4:6 type Call = (...?) => void
+  5:6 type Asks<T> = T extends ? ? true : false

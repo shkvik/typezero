@@ -1,0 +1,24 @@
+// `undefined` alone is not the type of a value: something or nothing is
+// written `T | undefined`. An alias may name it, and so may a type argument;
+// the place that holds a value refuses it.
+type Nothing = undefined;
+type Box<T> = { value: T };
+type Maybe<T> = T | undefined;
+
+let empty: undefined = undefined;
+let aliased: Nothing = undefined;
+function give(): undefined {
+  return undefined;
+}
+function take(value: undefined): void {}
+type Field = { value: undefined };
+type Optional = { value?: undefined };
+type Call = (value: undefined) => undefined;
+type Items = [undefined, int];
+type Later = Promise<undefined>;
+type Values = Set<undefined>;
+type Boxed = Box<undefined>;
+type Twice = { value: Maybe<undefined> };
+
+type Fine = Maybe<undefined>;
+type Halves = Result<undefined, string>;

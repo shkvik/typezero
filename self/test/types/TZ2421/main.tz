@@ -1,0 +1,4 @@
+// Two function types in one union: `typeof` gives "function" for both.
+type Handler = (() => void) | ((value: int) => int);
+
+type One = (() => void) | undefined;

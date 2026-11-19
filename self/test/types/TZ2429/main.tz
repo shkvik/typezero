@@ -1,0 +1,9 @@
+// A field is written once. A method next to a field of the same name is a
+// second field, not a second signature.
+type Twice = { side: int; side: string };
+type Mixed = { size: int; size(): int };
+interface Shape {
+  side: int;
+  name: string;
+  side: boolean;
+}

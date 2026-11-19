@@ -1,0 +1,9 @@
+main.tz:3:25: error TZ2428: a rest parameter must be an array, e.g. '...values: int[]'
+type Call = (...values: int) => void;
+                        ^
+main.tz:4:26: error TZ2428: a rest parameter must be an array, e.g. '...values: int[]'
+type Maybe = (...values: int[] | undefined) => void;
+                         ^
+main.tz:5:26: error TZ2428: a rest parameter must be an array, e.g. '...values: int[]'
+function take(...values: string): void {}
+                         ^

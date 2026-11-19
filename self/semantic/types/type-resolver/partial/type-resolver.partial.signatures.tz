@@ -1,0 +1,87 @@
+import { TypeResolver } from "../type-resolver.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import { ParamKind } from "../../../../program/ast/types/ast.types.functions.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  FunctionParameter,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { kThisParameter } from "../const/type-resolver.const.tables.tz";
+import {
+  ParameterSite,
+  TypeContext,
+  TypePlace,
+} from "../types/type-resolver.types.tz";
+
+partial class TypeResolver {
+  public signature(
+    sites: ParameterSite[],
+    result: TypeRef | undefined,
+    context: TypeContext,
+  ): Type {
+    const params: FunctionParameter[] = [];
+    let self: Type | undefined = undefined;
+    let rest = false;
+    let optionalBefore = false;
+
+    for (const site of sites) {
+      const type = this.siteType(site, context);
+
+      if (site.name == kThisParameter) {
+        self = type;
+
+        continue;
+      }
+      if (site.kind == ParamKind.Required && optionalBefore) {
+        this.report(
+          context.module,
+          site.loc,
+          Code.RequiredAfterOptional,
+          kNoDetails,
+        );
+      }
+
+      const optional =
+        site.kind == ParamKind.Optional || site.kind == ParamKind.Defaulted;
+
+      optionalBefore = optionalBefore || site.kind == ParamKind.Optional;
+      rest = rest || site.kind == ParamKind.Rest;
+      params.push({ type, optional });
+    }
+
+    const returned = this.returned(result, context);
+
+    return this.store.functionOf({ params, rest, self, result: returned });
+  }
+
+  private siteType(site: ParameterSite, context: TypeContext): Type {
+    if (site.kind != ParamKind.Rest) {
+      return this.value(site.type, context);
+    }
+
+    const inner = this.placed(context, TypePlace.RestParameter);
+    const type = this.resolve(site.type, inner);
+    const isList = type.kind == TypeKind.Array || type.kind == TypeKind.Tuple;
+    if (isList || this.isOpen(type) || type.kind == TypeKind.Error) {
+      return type;
+    }
+
+    this.report(context.module, site.type.loc, Code.RestParameterNotArray, {
+      word: site.name,
+    });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private returned(ref: TypeRef | undefined, context: TypeContext): Type {
+    if (ref == undefined) {
+      return this.store.plain(TypeKind.Void);
+    }
+
+    const type = this.resolve(ref, context);
+
+    return this.present(ref, type, context);
+  }
+}

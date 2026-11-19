@@ -1,0 +1,15 @@
+main.tz:3:14: error TZ2420: union 'string[] | int[]' is not supported: 'string[]' and 'int[]' cannot be told apart when the program runs: both are arrays; use one array type, e.g. '(string | int)[]'
+type Lists = string[] | int[];
+             ^
+main.tz:4:13: error TZ2420: union 'int[] | string | boolean[]' is not supported: 'int[]' and 'boolean[]' cannot be told apart when the program runs: both are arrays; use one array type, e.g. '(int | boolean)[]'
+type Wide = int[] | string | boolean[];
+            ^
+main.tz:5:14: error TZ2420: union 'int[] | string[] | undefined' is not supported: 'int[]' and 'string[]' cannot be told apart when the program runs: both are arrays; use one array type, e.g. '(int | string)[]'
+type Maybe = int[] | string[] | undefined;
+             ^
+main.tz:6:21: error TZ2420: union 'string[] | int[]' is not supported: 'string[]' and 'int[]' cannot be told apart when the program runs: both are arrays; use one array type, e.g. '(string | int)[]'
+type Either<A, B> = A | B;
+                    ^
+main.tz:8:16: error TZ2420: union 'T[] | int[]' is not supported: 'T[]' and 'int[]' cannot be told apart when the program runs: both are arrays; use one array type, e.g. '(T | int)[]'
+type Open<T> = T[] | int[];
+               ^

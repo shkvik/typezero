@@ -1,0 +1,8 @@
+// `null` in a union: only a Json value may be null, and `Json | null` is
+// Json itself.
+type Maybe = int | null;
+type Either = int | undefined | null;
+
+type Data = Json | null;
+type Rows = (Json | null)[];
+type Loose = Json | null | undefined;

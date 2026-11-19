@@ -1,0 +1,6 @@
+main.tz:5:3: error TZ2430: duplicate signature '(int) => string' of method 'read': the signatures must differ in their parameters
+  read(size: int): string;
+  ^
+main.tz:9:44: error TZ2430: duplicate signature '(string) => void' of method 'write': the signatures must differ in their parameters
+type Writer = { write(text: string): void; write(text: string): void };
+                                           ^

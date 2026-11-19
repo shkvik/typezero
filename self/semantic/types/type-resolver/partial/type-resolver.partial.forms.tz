@@ -1,38 +1,46 @@
 import { TypeResolver } from "../type-resolver.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
   kBooleanTypeName,
   kStringTypeName,
 } from "../../../../program/ast/const/ast.const.tz";
+import { ParamKind } from "../../../../program/ast/types/ast.types.functions.tz";
 import {
   FunctionTypeForm,
   LiteralTypeForm,
+  ObjectTypeField,
   ObjectTypeForm,
   TupleTypeForm,
   TypeRef,
 } from "../../../../program/ast/types/ast.types.types.tz";
 import {
-  FunctionParameter,
   LiteralKind,
   ObjectField,
   Type,
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
-import { kThisParameter } from "../const/type-resolver.const.tables.tz";
-import { TypeContext } from "../types/type-resolver.types.tz";
+import {
+  ParameterSite,
+  TypeContext,
+  TypePlace,
+} from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  private tuple(form: TupleTypeForm, context: TypeContext): Type {
+  private tuple(ref: TypeRef, form: TupleTypeForm, context: TypeContext): Type {
     const items: Type[] = [];
-    let rest = -1;
+    const spreads: int[] = [];
 
     for (const element of form.elements) {
-      const item = this.resolve(element.type, context);
-
       if (!element.spread) {
+        const item = this.value(element.type, context);
+
         items.push(item);
 
         continue;
       }
+
+      const item = this.resolve(element.type, context);
       if (item.kind == TypeKind.Tuple && item.rest < 0) {
         for (const inner of item.items) {
           items.push(inner);
@@ -41,19 +49,53 @@ partial class TypeResolver {
         continue;
       }
 
-      rest = items.length;
+      spreads.push(items.length);
       items.push(item);
+    }
+
+    const problem = this.spreadProblem(items, spreads, context.place);
+    if (problem != undefined) {
+      this.report(context.module, ref.loc, problem, kNoDetails);
+
+      return this.store.plain(TypeKind.Error);
     }
 
     return this.store.tupleOf({
       items,
       readonly: form.readonly,
       required: items.length,
-      rest,
+      rest: spreads[spreads.length - 1] ?? -1,
     });
   }
 
-  private object(form: ObjectTypeForm, context: TypeContext): Type {
+  private spreadProblem(
+    items: Type[],
+    spreads: int[],
+    place: TypePlace,
+  ): Code | undefined {
+    const last = items.length - 1;
+
+    for (const at of spreads) {
+      const item = items[at];
+      if (item == undefined || item.kind != TypeKind.Array) {
+        continue;
+      }
+      if (at < last) {
+        return Code.TupleSpreadNotLast;
+      }
+      if (place == TypePlace.Plain) {
+        return Code.TupleRest;
+      }
+    }
+
+    return undefined;
+  }
+
+  private object(
+    form: ObjectTypeForm,
+    context: TypeContext,
+    declared: boolean,
+  ): Type {
     const fields: ObjectField[] = [];
 
     for (const field of form.fields) {
@@ -61,7 +103,27 @@ partial class TypeResolver {
         continue;
       }
 
-      const type = this.resolve(field.type, context);
+      const type = this.value(field.type, context);
+      const overloaded = this.isOverloaded(form, field.name);
+      const problem = this.memberProblem(fields, field, type, overloaded);
+
+      if (overloaded && !declared) {
+        this.report(context.module, field.loc, Code.SignaturesOnlyInInterface, {
+          word: field.name,
+        });
+
+        continue;
+      }
+      if (problem != undefined) {
+        const other = this.text.of(type);
+
+        this.report(context.module, field.loc, problem, {
+          word: field.name,
+          other,
+        });
+
+        continue;
+      }
 
       fields.push({
         name: field.name,
@@ -74,33 +136,64 @@ partial class TypeResolver {
     return this.store.objectOf(fields);
   }
 
-  private functionType(form: FunctionTypeForm, context: TypeContext): Type {
-    const params: FunctionParameter[] = [];
-    let self: Type | undefined = undefined;
+  private isOverloaded(form: ObjectTypeForm, name: string): boolean {
+    let count = 0;
 
-    for (const param of form.params) {
-      const type = this.resolve(param.type, context);
-
-      if (param.name == kThisParameter) {
-        self = type;
-
+    for (const field of form.fields) {
+      if (field.call || field.name != name) {
         continue;
       }
+      if (!field.method) {
+        return false;
+      }
 
-      params.push({ type, optional: param.optional });
+      count += 1;
     }
 
-    const result = this.result(form.result, context);
-
-    return this.store.functionOf({ params, rest: form.rest, self, result });
+    return count > 1;
   }
 
-  private result(ref: TypeRef | undefined, context: TypeContext): Type {
-    if (ref == undefined) {
-      return this.store.plain(TypeKind.Void);
+  private memberProblem(
+    kept: ObjectField[],
+    field: ObjectTypeField,
+    type: Type,
+    overloaded: boolean,
+  ): Code | undefined {
+    const earlier = kept.filter((one) => one.name == field.name);
+
+    if (earlier.length > 0 && !overloaded) {
+      return Code.DuplicateField;
+    }
+    if (earlier.some((one) => one.type == type)) {
+      return Code.DuplicateSignature;
     }
 
-    return this.resolve(ref, context);
+    return undefined;
+  }
+
+  private functionType(form: FunctionTypeForm, context: TypeContext): Type {
+    const last = form.params.length - 1;
+    const sites: ParameterSite[] = [];
+
+    for (const param of form.params) {
+      const spread = form.rest && sites.length == last;
+      const kind = this.siteKind(param.optional, spread);
+
+      sites.push({ name: param.name, loc: param.loc, kind, type: param.type });
+    }
+
+    return this.signature(sites, form.result, context);
+  }
+
+  private siteKind(optional: boolean, spread: boolean): ParamKind {
+    if (spread) {
+      return ParamKind.Rest;
+    }
+    if (optional) {
+      return ParamKind.Optional;
+    }
+
+    return ParamKind.Required;
   }
 
   private literal(name: string, form: LiteralTypeForm): Type {

@@ -1,0 +1,39 @@
+main.tz:5:24: error TZ2410: the type 'undefined' alone is not supported; use 'T | undefined'
+type Box<T> = { value: T };
+                       ^
+main.tz:8:12: error TZ2410: the type 'undefined' alone is not supported; use 'T | undefined'
+let empty: undefined = undefined;
+           ^
+main.tz:9:14: error TZ2410: the type 'undefined' alone is not supported; use 'T | undefined'
+let aliased: Nothing = undefined;
+             ^
+main.tz:10:18: error TZ2410: the type 'undefined' alone is not supported; use 'T | undefined'
+function give(): undefined {
+                 ^
+main.tz:13:22: error TZ2410: the type 'undefined' alone is not supported; use 'T | undefined'
+function take(value: undefined): void {}
+                     ^
+main.tz:14:23: error TZ2410: the type 'undefined' alone is not supported; use 'T | undefined'
+type Field = { value: undefined };
+                      ^
+main.tz:15:27: error TZ2410: the type 'undefined' alone is not supported; use 'T | undefined'
+type Optional = { value?: undefined };
+                          ^
+main.tz:16:21: error TZ2410: the type 'undefined' alone is not supported; use 'T | undefined'
+type Call = (value: undefined) => undefined;
+                    ^
+main.tz:16:35: error TZ2410: the type 'undefined' alone is not supported; use 'T | undefined'
+type Call = (value: undefined) => undefined;
+                                  ^
+main.tz:17:15: error TZ2410: the type 'undefined' alone is not supported; use 'T | undefined'
+type Items = [undefined, int];
+              ^
+main.tz:18:22: error TZ2410: the type 'undefined' alone is not supported; use 'T | undefined'
+type Later = Promise<undefined>;
+                     ^
+main.tz:19:19: error TZ2410: the type 'undefined' alone is not supported; use 'T | undefined'
+type Values = Set<undefined>;
+                  ^
+main.tz:21:23: error TZ2410: the type 'undefined' alone is not supported; use 'T | undefined'
+type Twice = { value: Maybe<undefined> };
+                      ^

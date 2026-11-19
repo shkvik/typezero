@@ -1,0 +1,8 @@
+// A field written on both sides of `&` has one type: the same on both, or a
+// literal on one side and its type on the other. Anything else is refused.
+type Clash = { side: int } & { side: string };
+type Wider = { side: int | string } & { side: int };
+type Deep = { side: { x: int } } & { side: { y: int } };
+
+type Same = { side: int } & { side: int };
+type Exact = { side: string } & { side: "left" };

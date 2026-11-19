@@ -1,0 +1,9 @@
+main.tz:3:27: error TZ2429: duplicate field 'side'
+type Twice = { side: int; side: string };
+                          ^
+main.tz:4:27: error TZ2429: duplicate field 'size'
+type Mixed = { size: int; size(): int };
+                          ^
+main.tz:8:3: error TZ2429: duplicate field 'side'
+  side: boolean;
+  ^

@@ -7,7 +7,11 @@ import {
 import { kLibrary } from "../../../../program/library/library-modules/const/library-modules.const.tz";
 import { NameUse } from "../../../../program/scopes/types/scopes.types.tz";
 import { kNamePoint } from "../const/type-resolver.const.tables.tz";
-import { ModuleRecord, TypeDeclaration } from "../types/type-resolver.types.tz";
+import {
+  ModuleOrigin,
+  ModuleRecord,
+  TypeDeclaration,
+} from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
   private indexGlobals(): void {
@@ -70,7 +74,9 @@ partial class TypeResolver {
         return undefined;
       }
 
-      return this.recordOf(module, builtin.parsed.file.items, []);
+      const items = builtin.parsed.file.items;
+
+      return this.recordOf(items, [], { library: true, native: false });
     }
 
     const opened = this.program.modules[module];
@@ -78,24 +84,29 @@ partial class TypeResolver {
       return undefined;
     }
 
-    return this.recordOf(module, opened.file.items, opened.declared);
-  }
-
-  private recordOf(
-    module: int,
-    items: Stmt[],
-    declared: DeclaredClass[],
-  ): ModuleRecord {
-    const uses = new Map<int, NameUse>();
-    const declarations = new Map<string, TypeDeclaration>();
-    const classes = new Map<string, DeclaredClass>();
+    const record = this.recordOf(opened.file.items, opened.declared, {
+      library: opened.source.isLibrary,
+      native: opened.isDeclarationOnly,
+    });
     const scopes = this.scopes.get(module);
 
     for (const use of scopes?.uses ?? []) {
       if (use.isType) {
-        uses.set(use.loc, use);
+        record.uses.set(use.loc, use);
       }
     }
+
+    return record;
+  }
+
+  private recordOf(
+    items: Stmt[],
+    declared: DeclaredClass[],
+    origin: ModuleOrigin,
+  ): ModuleRecord {
+    const uses = new Map<int, NameUse>();
+    const declarations = new Map<string, TypeDeclaration>();
+    const classes = new Map<string, DeclaredClass>();
 
     for (const item of items) {
       switch (item.kind) {
@@ -116,6 +127,14 @@ partial class TypeResolver {
       classes.set(one.name, one);
     }
 
-    return { uses, declarations, classes, errors: [] };
+    return {
+      library: origin.library,
+      native: origin.native,
+      uses,
+      declarations,
+      classes,
+      errors: [],
+      reported: new Set<string>(),
+    };
   }
 }

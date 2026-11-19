@@ -11,7 +11,11 @@ import {
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
 import { InferHole } from "../../type-relation/types/type-relation.types.tz";
-import { Distribution, TypeContext } from "../types/type-resolver.types.tz";
+import {
+  Distribution,
+  TypeContext,
+  TypePlace,
+} from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
   private conditional(ref: TypeRef, context: TypeContext): Type {
@@ -74,8 +78,9 @@ partial class TypeResolver {
 
     this.findHoles(wantedRef, context, holes);
 
+    const pattern = this.placed(context, TypePlace.Pattern);
     const check = this.resolve(checkRef, context);
-    const wanted = this.resolve(wantedRef, context);
+    const wanted = this.resolve(wantedRef, pattern);
     const seen = new Set<int>(holes.keys());
     if (this.depends(check, seen) || this.depends(wanted, seen)) {
       const branches = this.resolveAll(ref.args.slice(2), context);
@@ -98,7 +103,11 @@ partial class TypeResolver {
       bindings.set(hole.loc, taken);
     }
 
-    return this.result(yes, { module: context.module, bindings });
+    return this.result(yes, {
+      module: context.module,
+      bindings,
+      place: context.place,
+    });
   }
 
   private findHoles(
@@ -163,6 +172,14 @@ partial class TypeResolver {
     }
 
     return this.resolve(written, context);
+  }
+
+  private result(ref: TypeRef | undefined, context: TypeContext): Type {
+    if (ref == undefined) {
+      return this.store.plain(TypeKind.Void);
+    }
+
+    return this.resolve(ref, context);
   }
 
   private depends(type: Type, seen: Set<int>): boolean {

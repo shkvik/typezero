@@ -1,0 +1,6 @@
+main.tz:2:16: error TZ2422: union 'Generator<int> | Generator<string>' is not supported: 'Generator<int>' and 'Generator<string>' cannot be told apart when the program runs: both are iterators; use one iterator type
+type Streams = Generator<int> | Generator<string>;
+               ^
+main.tz:3:14: error TZ2422: union 'AsyncGenerator<int> | AsyncGenerator<string>' is not supported: 'AsyncGenerator<int>' and 'AsyncGenerator<string>' cannot be told apart when the program runs: both are iterators; use one iterator type
+type Later = AsyncGenerator<int> | AsyncGenerator<string>;
+             ^

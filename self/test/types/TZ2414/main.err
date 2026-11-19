@@ -1,0 +1,6 @@
+main.tz:3:14: error TZ2414: 'null' is not supported: the only value for nothing is 'undefined'; write 'T | undefined' (null exists only in Json values)
+type Maybe = int | null;
+             ^
+main.tz:4:15: error TZ2414: 'null' is not supported: the only value for nothing is 'undefined'; write 'T | undefined' (null exists only in Json values)
+type Either = int | undefined | null;
+              ^

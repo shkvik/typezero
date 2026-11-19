@@ -1,0 +1,6 @@
+// `infer` names a part of a type only in the pattern after `extends`.
+type Alone = infer U;
+type Branch<T> = T extends string ? infer U : never;
+
+type Item<T> = T extends (infer U)[] ? U : never;
+type Found = Item<int[]>;

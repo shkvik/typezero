@@ -1,0 +1,11 @@
+main.tz
+  3:6 type Action = { kind: "roll"; dice: [int, int] } | { kind: "build"; vertex: int }
+  6:6 type Other = { tag: "a" } | { tag: "b" }
+  8:6 type Logged = { kind: "roll"; dice: [int, int]; seq: int } | { kind: "build"; vertex: int; seq: int }
+  9:6 type Reversed = { kind: "roll"; dice: [int, int]; seq: int } | { kind: "build"; vertex: int; seq: int }
+  10:6 type Both = { kind: "roll"; dice: [int, int]; tag: "a" } | { kind: "roll"; dice: [int, int]; tag: "b" } | { kind: "build"; vertex: int; tag: "a" } | { kind: "build"; vertex: int; tag: "b" }
+  11:6 type Three = { kind: "roll"; dice: [int, int]; seq: int; day?: string } | { kind: "build"; vertex: int; seq: int; day?: string }
+  15:6 type Narrowed = { kind: "big"; size: int }
+  16:6 type Settled = { note: string }
+  17:6 type Loose = { note?: string }
+  18:6 type Fixed = { readonly side: int }

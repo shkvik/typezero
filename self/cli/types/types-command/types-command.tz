@@ -62,7 +62,7 @@ export class TypesCommand {
         continue;
       }
 
-      const declarations = new DeclarationTypes(this.store, types, module);
+      const declarations = new DeclarationTypes(types, module);
       const typed = declarations.run();
 
       this.printTypes(typed);

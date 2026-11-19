@@ -1,0 +1,6 @@
+main.tz
+  2:6 type Either = ?
+  3:6 type Call = () => ?
+  4:6 type Later = Promise<?>
+  5:6 type Twice = ?
+  6:10 take: (?) => void

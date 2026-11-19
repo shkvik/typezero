@@ -1,0 +1,10 @@
+main.tz
+  4:6 type Row = ?
+  5:6 type Rows = ?[]
+  6:6 type Open<A> = [int, ...A]
+  7:6 type Filled = ?
+  9:6 type Fixed = [int, string, boolean]
+  10:6 type Call = (...[int, ...string[]]) => void
+  11:6 type Starts<T> = T extends [int, ...string[]] ? true : false
+  12:6 type Yes = true
+  13:6 type No = false

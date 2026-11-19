@@ -1,0 +1,4 @@
+main.tz
+  2:6 type Streams = ?
+  3:6 type Later = ?
+  5:6 type Both = Generator<int> | AsyncGenerator<int> | int[]

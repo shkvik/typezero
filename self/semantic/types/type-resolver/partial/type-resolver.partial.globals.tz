@@ -2,7 +2,10 @@ import { TypeResolver } from "../type-resolver.tz";
 import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
 import { kLibrary } from "../../../../program/library/library-modules/const/library-modules.const.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
-import { kNamePoint } from "../const/type-resolver.const.tables.tz";
+import {
+  kNamePoint,
+  kNullTypeName,
+} from "../const/type-resolver.const.tables.tz";
 import { TypeContext } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
@@ -14,6 +17,10 @@ partial class TypeResolver {
       const inside = this.memberModule(word, member);
 
       return this.fromModule(ref, inside, member, context);
+    }
+
+    if (ref.name == kNullTypeName) {
+      return this.refusedNull(ref, context);
     }
 
     const builtin = this.builtin(ref.name, ref, context);

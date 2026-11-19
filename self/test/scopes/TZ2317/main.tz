@@ -1,0 +1,7 @@
+// The values and the arrays of bigint are refused by name, as a value and as
+// a type.
+const big = BigInt(1);
+const signed = new BigInt64Array(1);
+let unsigned: BigUint64Array | undefined = undefined;
+
+console.log(big, signed, unsigned);

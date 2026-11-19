@@ -1,0 +1,4 @@
+// `bigint` as a type: integers fit in `int`, longer ones in `decimal`.
+let big: bigint | undefined = undefined;
+
+console.log(big);

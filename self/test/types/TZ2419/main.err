@@ -1,0 +1,9 @@
+main.tz:3:13: error TZ2419: nothing can follow the array spread into a list: it takes the arguments to the end
+type Ends = [...int[], string];
+            ^
+main.tz:4:23: error TZ2419: nothing can follow the array spread into a list: it takes the arguments to the end
+type Call = (...args: [...int[], string]) => void;
+                      ^
+main.tz:5:26: error TZ2419: nothing can follow the array spread into a list: it takes the arguments to the end
+type Asks<T> = T extends [...int[], string] ? true : false;
+                         ^

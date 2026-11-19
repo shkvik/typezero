@@ -1,0 +1,12 @@
+main.tz
+  4:6 enum Color = "red" | "blue"
+  9:6 type ByFlag = ?
+  10:6 type Mixed = ?
+  11:6 type ByOne = ?
+  12:6 type Generic<K> = ?
+  13:6 type Never = ?
+  15:6 type ByName = Record<string, int>
+  16:6 type ByWord = Record<"a" | "b", int>
+  17:6 type ByColor = Record<Color, int>
+  18:6 type ByPattern = Record<`on${string}`, int>
+  19:6 type ByField = Record<"x" | "y", int>

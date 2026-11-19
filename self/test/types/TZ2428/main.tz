@@ -1,0 +1,9 @@
+// A rest parameter takes a list: an array, a tuple or a type parameter that
+// stands for one.
+type Call = (...values: int) => void;
+type Maybe = (...values: int[] | undefined) => void;
+function take(...values: string): void {}
+
+type Fine = (...values: int[]) => void;
+type Listed = (...values: [int, string]) => void;
+type Open<A extends unknown[]> = (...values: A) => void;

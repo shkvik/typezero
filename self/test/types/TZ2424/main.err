@@ -1,0 +1,6 @@
+main.tz:6:16: error TZ2424: union 'Intl.NumberFormat | Intl.Collator' is not supported: 'Intl.NumberFormat' and 'Intl.Collator' cannot be told apart when the program runs: both are objects of Intl, which carry nothing a check could tell apart by; keep each in a variable of its own type
+type Formats = Intl.NumberFormat | Intl.Collator;
+               ^
+main.tz:7:16: error TZ2424: union 'Hash | Hmac' is not supported: 'Hash' and 'Hmac' cannot be told apart when the program runs: both are objects of node:crypto, which carry nothing a check could tell apart by; keep each in a variable of its own type
+type Digests = Hash | Hmac;
+               ^

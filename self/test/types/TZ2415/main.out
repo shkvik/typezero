@@ -1,0 +1,6 @@
+main.tz
+  2:6 type Nothings = ?
+  3:6 type Gaps = ?
+  4:6 type Listed = ?
+  6:6 type Fine = (int | undefined)[]
+  7:6 type Empty = never[]

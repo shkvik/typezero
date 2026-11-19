@@ -3,10 +3,17 @@ export enum AbsentReason {
   CodeFromString,
   Proxy,
   Require,
+  Long,
+  BigintType,
+  Bigint,
+  SharedBuffer,
+  WeakCollection,
 }
 
 export type AbsentName = {
   readonly name: string;
   readonly reason: AbsentReason;
+  readonly asValue: boolean;
   readonly asType: boolean;
+  readonly instead?: string;
 };

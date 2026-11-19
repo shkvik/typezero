@@ -1,0 +1,6 @@
+main.tz
+  3:6 type Maybe = ?
+  4:6 type Either = ?
+  6:6 type Data = Json
+  7:6 type Rows = Json[]
+  8:6 type Loose = Json | undefined

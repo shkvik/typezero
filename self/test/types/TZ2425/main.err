@@ -1,0 +1,21 @@
+main.tz:4:14: error TZ2425: union 'Json | string' is not supported: 'Json' and 'string' cannot be told apart when the program runs: typeof gives "string" for both; use 'Json', which holds that value too
+type Words = Json | string;
+             ^
+main.tz:5:13: error TZ2425: union 'Json | true' is not supported: 'Json' and 'true' cannot be told apart when the program runs: typeof gives "boolean" for both; use 'Json', which holds that value too
+type Flag = Json | true;
+            ^
+main.tz:6:14: error TZ2425: union 'Json | 1.5' is not supported: 'Json' and '1.5' cannot be told apart when the program runs: typeof gives "double" for both; use 'Json', which holds that value too
+type Ratio = Json | 1.5;
+             ^
+main.tz:7:13: error TZ2425: union 'Json | int[]' is not supported: 'Json' and 'int[]' cannot be told apart when the program runs: typeof gives "array" for both; use 'Json', which holds that value too
+type Rows = Json | int[];
+            ^
+main.tz:8:14: error TZ2425: union 'Json | { x: int }' is not supported: 'Json' and '{ x: int }' cannot be told apart when the program runs: typeof gives "object" for both; use 'Json', which holds that value too
+type Shape = Json | { x: int };
+             ^
+main.tz:9:13: error TZ2425: union 'Json | Date' is not supported: 'Json' and 'Date' cannot be told apart when the program runs: typeof gives "object" for both; use 'Json', which holds that value too
+type When = Json | Date;
+            ^
+main.tz:10:15: error TZ2425: union 'Json | T' is not supported: 'Json' and 'T' cannot be told apart when the program runs: typeof gives "null" for both; use 'Json', which holds that value too
+type Any<T> = Json | T;
+              ^

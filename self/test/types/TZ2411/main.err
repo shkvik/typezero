@@ -1,0 +1,27 @@
+main.tz:7:12: error TZ2411: 'void' can only be used as a return type or a type argument
+let empty: void = undefined;
+           ^
+main.tz:8:22: error TZ2411: 'void' can only be used as a return type or a type argument
+function take(value: Nothing): void {}
+                     ^
+main.tz:9:23: error TZ2411: 'void' can only be used as a return type or a type argument
+type Field = { value: void };
+                      ^
+main.tz:10:20: error TZ2411: 'void' can only be used as a return type or a type argument
+type Call = (this: void, value: void) => void;
+                   ^
+main.tz:10:33: error TZ2411: 'void' can only be used as a return type or a type argument
+type Call = (this: void, value: void) => void;
+                                ^
+main.tz:11:15: error TZ2411: 'void' can only be used as a return type or a type argument
+type Items = [void, int];
+              ^
+main.tz:12:27: error TZ2411: 'void' can only be used as a return type or a type argument
+type Values = Map<string, void>;
+                          ^
+main.tz:13:23: error TZ2411: 'void' can only be used as a return type or a type argument
+type Each = Generator<void>;
+                      ^
+main.tz:14:34: error TZ2411: 'void' can only be used as a return type or a type argument
+type Shape = { [K in "a" | "b"]: void };
+                                 ^

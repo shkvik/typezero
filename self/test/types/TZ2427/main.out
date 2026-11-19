@@ -1,0 +1,5 @@
+main.tz
+  3:6 type Call = (int?, string) => void
+  4:10 make: (int?, string?, int) => void
+  6:6 type Fine = (int, string?, ...int[]) => void
+  7:10 keep: (int?, string) => void

@@ -1,0 +1,19 @@
+// The keys of a Record are strings: `string`, string literals, a string enum,
+// a text pattern, the names of fields. Anything else is refused, a type
+// parameter too.
+enum Color {
+  Red = "red",
+  Blue = "blue",
+}
+
+type ByFlag = Record<boolean, int>;
+type Mixed = Record<string | int, int>;
+type ByOne = Record<1, int>;
+type Generic<K extends string> = Record<K, int>;
+type Never = Record<never, int>;
+
+type ByName = Record<string, int>;
+type ByWord = Record<"a" | "b", int>;
+type ByColor = Record<Color, int>;
+type ByPattern = Record<`on${string}`, int>;
+type ByField = Record<keyof { x: int; y: int }, int>;

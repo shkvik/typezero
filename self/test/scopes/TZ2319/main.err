@@ -1,0 +1,6 @@
+main.tz:2:18: error TZ2319: 'WeakSet' is not supported yet; a 'Set' holds its keys, and frees them with itself
+const seen = new WeakSet<string>();
+                 ^
+main.tz:3:12: error TZ2319: 'WeakMap' is not supported yet; a 'Map' holds its keys, and frees them with itself
+let cache: WeakMap<string, int> | undefined = undefined;
+           ^

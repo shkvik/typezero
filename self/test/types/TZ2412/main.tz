@@ -1,0 +1,6 @@
+// `void` is not a value, so it cannot be one of the parts of a union.
+type Either = int | void;
+type Call = () => void | undefined;
+type Later = Promise<void | undefined>;
+type Twice = void | void;
+function take(value: void | undefined): void {}

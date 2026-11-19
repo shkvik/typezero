@@ -7,6 +7,8 @@ export type Details = {
   readonly word?: string;
   readonly other?: string;
   readonly path?: string;
+  readonly first?: string;
+  readonly second?: string;
 };
 
 export type SourceError = {

@@ -1,0 +1,4 @@
+main.tz
+  3:6 type Holder = { inner: {} }
+  5:11 type Reader = { readonly read: () => string; readonly read: (int) => string }
+  10:6 type Writer = { readonly write: () => void; readonly write: (string) => void }

@@ -20,7 +20,7 @@ import {
   Type,
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
-import { TypeContext } from "../types/type-resolver.types.tz";
+import { TypeContext, TypePlace } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
   private memberFields(instance: InstanceType): ObjectField[] {
@@ -105,7 +105,7 @@ partial class TypeResolver {
       }
     }
 
-    return { module: instance.module, bindings };
+    return { module: instance.module, bindings, place: TypePlace.Plain };
   }
 
   private memberType(written: TypeRef | undefined, context: TypeContext): Type {

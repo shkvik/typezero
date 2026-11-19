@@ -1,0 +1,9 @@
+main.tz:3:14: error TZ2433: field 'side' has type 'int' in one part of the intersection and 'string' in another; a field has one type
+type Clash = { side: int } & { side: string };
+             ^
+main.tz:4:14: error TZ2433: field 'side' has type 'int | string' in one part of the intersection and 'int' in another; a field has one type
+type Wider = { side: int | string } & { side: int };
+             ^
+main.tz:5:13: error TZ2433: field 'side' has type '{ x: int }' in one part of the intersection and '{ y: int }' in another; a field has one type
+type Deep = { side: { x: int } } & { side: { y: int } };
+            ^

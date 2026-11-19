@@ -1,0 +1,19 @@
+// `void` says that a function gives nothing back. It is a return type or a
+// type argument; a variable, a parameter, a field or an element has no such
+// type.
+type Nothing = void;
+type Box<T> = { value: T };
+
+let empty: void = undefined;
+function take(value: Nothing): void {}
+type Field = { value: void };
+type Call = (this: void, value: void) => void;
+type Items = [void, int];
+type Values = Map<string, void>;
+type Each = Generator<void>;
+type Shape = { [K in "a" | "b"]: void };
+
+type Later = Promise<void>;
+type Halves = Result<void, string>;
+type Boxed = Box<void>;
+type Whole = Generator<int, void, void>;

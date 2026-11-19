@@ -1,0 +1,18 @@
+// `&` over a union: every member of one side joins every member of the
+// other, so the answer is a union again.
+type Action =
+  | { kind: "roll"; dice: [int, int] }
+  | { kind: "build"; vertex: int };
+type Other = { tag: "a" } | { tag: "b" };
+
+type Logged = Action & { seq: int };
+type Reversed = { seq: int } & Action;
+type Both = Action & Other;
+type Three = Action & { seq: int } & { day?: string };
+
+// A field written on both sides is one field: the narrower type stays, it is
+// optional only when both are, and readonly when either is.
+type Narrowed = { kind: string; size: int } & { kind: "big" };
+type Settled = { note?: string } & { note: string };
+type Loose = { note?: string } & { note?: string };
+type Fixed = { readonly side: int } & { side: int };

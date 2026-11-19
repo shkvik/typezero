@@ -1,0 +1,6 @@
+main.tz:3:26: error TZ2431: several signatures of method 'read' are supported only in an interface; declare one, 'interface Name { ... }'
+type Holder = { inner: { read(): string; read(count: int): string } };
+                         ^
+main.tz:3:42: error TZ2431: several signatures of method 'read' are supported only in an interface; declare one, 'interface Name { ... }'
+type Holder = { inner: { read(): string; read(count: int): string } };
+                                         ^

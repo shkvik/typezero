@@ -1,0 +1,11 @@
+// Two array types in one union cannot be told apart when the program runs.
+// The union is checked as a whole, after aliases and type arguments are in.
+type Lists = string[] | int[];
+type Wide = int[] | string | boolean[];
+type Maybe = int[] | string[] | undefined;
+type Either<A, B> = A | B;
+type Filled = Either<int[], string[]>;
+type Open<T> = T[] | int[];
+
+type One = (int | string)[] | undefined;
+type Mixed = int[] | [int, string] | string;

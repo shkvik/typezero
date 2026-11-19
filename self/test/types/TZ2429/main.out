@@ -1,0 +1,4 @@
+main.tz
+  3:6 type Twice = { side: int }
+  4:6 type Mixed = { size: int }
+  5:11 type Shape = { side: int; name: string }

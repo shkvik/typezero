@@ -1,0 +1,4 @@
+main.tz
+  2:19 undefined -> global
+  4:1 console -> global
+  4:13 big -> variable 2:5

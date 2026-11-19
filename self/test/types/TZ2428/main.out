@@ -1,0 +1,7 @@
+main.tz
+  3:6 type Call = (...?) => void
+  4:6 type Maybe = (...?) => void
+  5:10 take: (...?) => void
+  7:6 type Fine = (...int[]) => void
+  8:6 type Listed = (...[int, string]) => void
+  9:6 type Open<A> = (...A) => void

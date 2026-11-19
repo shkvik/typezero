@@ -37,6 +37,7 @@ export type PlainTypeForm = {
 
 export type FunctionTypeParam = {
   readonly name: string;
+  readonly loc: int;
   readonly optional: boolean;
   readonly type: TypeRef;
 };

@@ -1,0 +1,5 @@
+main.tz
+  3:6 enum Level = int
+  8:6 type ById = ?
+  9:6 type ByLevel = ?
+  10:6 type ByRatio = ?

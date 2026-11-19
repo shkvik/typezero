@@ -17,6 +17,7 @@ import {
   AliasDoor,
   DoorState,
   TypeContext,
+  TypePlace,
 } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
@@ -57,7 +58,11 @@ partial class TypeResolver {
     this.doors.set(key, door);
     this.working.set(home, depth + 1);
 
-    const body = this.aliasBody(decl, { module, bindings });
+    const body = this.aliasBody(decl, {
+      module,
+      bindings,
+      place: TypePlace.Plain,
+    });
     const result = this.settle(module, decl, door, body);
 
     this.working.set(home, depth);
@@ -133,7 +138,7 @@ partial class TypeResolver {
 
   private aliasBody(decl: TypeAliasDecl, context: TypeContext): Type {
     if (decl.bases.length == 0) {
-      return this.resolve(decl.type, context);
+      return this.ownBody(decl.type, context);
     }
 
     const fields = new Map<string, ObjectField>();
@@ -144,13 +149,22 @@ partial class TypeResolver {
       this.inherit(fields, parent);
     }
 
-    const own = this.resolve(decl.type, context);
+    const own = this.ownBody(decl.type, context);
 
     this.inherit(fields, own);
 
     const merged = Array.from(fields.values());
 
     return this.store.objectOf(merged);
+  }
+
+  private ownBody(ref: TypeRef, context: TypeContext): Type {
+    const form = ref.form;
+    if (form.kind == TypeRefKind.Object) {
+      return this.object(form, context, true);
+    }
+
+    return this.resolve(ref, context);
   }
 
   private inherit(fields: Map<string, ObjectField>, from: Type): void {
@@ -171,7 +185,7 @@ partial class TypeResolver {
   ): Type {
     const reserved = door.reserved;
 
-    if (!door.entered) {
+    if (!door.entered || body.kind == TypeKind.Error) {
       return body;
     }
     if (reserved == undefined) {

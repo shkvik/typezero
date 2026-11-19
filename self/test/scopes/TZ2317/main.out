@@ -1,0 +1,6 @@
+main.tz
+  5:32 undefined -> global
+  7:1 console -> global
+  7:13 big -> variable 3:7
+  7:18 signed -> variable 4:7
+  7:26 unsigned -> variable 5:5

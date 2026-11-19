@@ -1,0 +1,9 @@
+main.tz:4:12: error TZ2418: a rest element in a tuple type is not supported: a tuple has a fixed length; use an array, e.g. 'int[]'
+type Row = [int, ...string[]];
+           ^
+main.tz:5:13: error TZ2418: a rest element in a tuple type is not supported: a tuple has a fixed length; use an array, e.g. 'int[]'
+type Rows = [int, ...string[]][];
+            ^
+main.tz:6:34: error TZ2418: a rest element in a tuple type is not supported: a tuple has a fixed length; use an array, e.g. 'int[]'
+type Open<A extends unknown[]> = [int, ...A];
+                                 ^

@@ -1,0 +1,5 @@
+main.tz
+  2:6 type Alone = ?
+  3:6 type Branch<T> = T extends string ? ? : never
+  5:6 type Item<T> = T extends U[] ? U : never
+  6:6 type Found = int
