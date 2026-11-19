@@ -1,5 +1,1 @@
 export const kExactDoubleLimit: uint64 = 9007199254740992;
-
-export const kStringTypeName = "string";
-export const kBooleanTypeName = "boolean";
-export const kNumberTypeName = "number";

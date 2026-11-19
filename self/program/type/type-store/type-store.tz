@@ -1,0 +1,317 @@
+import {
+  DictKind,
+  FunctionShape,
+  IteratorShape,
+  LiteralKind,
+  ObjectField,
+  PlainKind,
+  Type,
+  TypeKind,
+} from "../types/type.types.tz";
+
+export class TypeStore {
+  private readonly plains: Map<TypeKind, Type>;
+  private readonly byKey: Map<string, Type>;
+  private count: int;
+
+  public constructor() {
+    this.plains = new Map<TypeKind, Type>();
+    this.byKey = new Map<string, Type>();
+    this.count = 0;
+  }
+
+  public plain(kind: PlainKind): Type {
+    const known = this.plains.get(kind);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind };
+
+    this.plains.set(kind, made);
+
+    return made;
+  }
+
+  public integer(bits: int, unsigned: boolean): Type {
+    const key = `int ${bits} ${unsigned}`;
+    const known = this.byKey.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind: TypeKind.Int, bits, unsigned };
+
+    return this.keep(key, made);
+  }
+
+  public literal(literal: LiteralKind, text: string): Type {
+    const word = this.literalWord(literal);
+    const key = `literal ${word} ${text}`;
+    const known = this.byKey.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind: TypeKind.Literal, literal, text };
+
+    return this.keep(key, made);
+  }
+
+  public arrayOf(item: Type): Type {
+    const key = `array ${item.id}`;
+    const known = this.byKey.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind: TypeKind.Array, item };
+
+    return this.keep(key, made);
+  }
+
+  public tupleOf(items: Type[], readonly: boolean): Type {
+    const ids = this.idsText(items);
+    const key = `tuple ${readonly} ${ids}`;
+    const known = this.byKey.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind: TypeKind.Tuple, items, readonly };
+
+    return this.keep(key, made);
+  }
+
+  public objectOf(fields: ObjectField[]): Type {
+    const sorted = fields.slice();
+
+    sorted.sort((first, second) => this.compareNames(first, second));
+
+    const parts = sorted.map((field) => this.fieldKey(field));
+    const key = `object ${parts.join(" ")}`;
+    const known = this.byKey.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind: TypeKind.Object, fields };
+
+    return this.keep(key, made);
+  }
+
+  public functionOf(shape: FunctionShape): Type {
+    const params = shape.params.map(
+      (param) => `${param.type.id}:${param.optional}`,
+    );
+    const self = shape.self?.id ?? 0;
+    const head = `function ${shape.rest} ${self} ${shape.result.id}`;
+    const key = `${head} ${params.join(" ")}`;
+    const known = this.byKey.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind: TypeKind.Function, shape };
+
+    return this.keep(key, made);
+  }
+
+  public unionOf(parts: Type[]): Type {
+    const flat = this.flatParts(parts);
+    const unknown = flat.find((part) => part.kind == TypeKind.Unknown);
+    if (unknown != undefined) {
+      return unknown;
+    }
+
+    const kept = this.orderedParts(flat);
+    const only = kept[0];
+    if (only == undefined) {
+      return this.plain(TypeKind.Never);
+    }
+    if (kept.length == 1) {
+      return only;
+    }
+
+    const sorted = kept.slice();
+
+    sorted.sort((first, second) => first.id - second.id);
+
+    const ids = this.idsText(sorted);
+    const key = `union ${ids}`;
+    const known = this.byKey.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind: TypeKind.Union, parts: kept };
+
+    return this.keep(key, made);
+  }
+
+  public resultOf(value: Type, error: Type): Type {
+    const key = `result ${value.id} ${error.id}`;
+    const known = this.byKey.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind: TypeKind.Result, value, error };
+
+    return this.keep(key, made);
+  }
+
+  public promiseOf(value: Type): Type {
+    const key = `promise ${value.id}`;
+    const known = this.byKey.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind: TypeKind.Promise, value };
+
+    return this.keep(key, made);
+  }
+
+  public iteratorOf(shape: IteratorShape): Type {
+    const ids = this.idsText([shape.yielded, shape.returned, shape.sent]);
+    const key = `iterator ${shape.async} ${ids}`;
+    const known = this.byKey.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind: TypeKind.Iterator, shape };
+
+    return this.keep(key, made);
+  }
+
+  public dictOf(dict: DictKind, key: Type, value: Type): Type {
+    const word = this.dictWord(dict);
+    const text = `dict ${word} ${key.id} ${value.id}`;
+    const known = this.byKey.get(text);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind: TypeKind.Dict, dict, key, value };
+
+    return this.keep(text, made);
+  }
+
+  private flatParts(parts: Type[]): Type[] {
+    const flat: Type[] = [];
+
+    for (const part of parts) {
+      if (part.kind == TypeKind.Union) {
+        this.addParts(flat, part.parts);
+      } else {
+        this.addParts(flat, [part]);
+      }
+    }
+
+    return flat;
+  }
+
+  private addParts(flat: Type[], parts: Type[]): void {
+    for (const part of parts) {
+      if (!flat.includes(part)) {
+        flat.push(part);
+      }
+    }
+  }
+
+  private orderedParts(flat: Type[]): Type[] {
+    const ordered: Type[] = [];
+    const absent: Type[] = [];
+
+    for (const part of flat) {
+      if (part.kind == TypeKind.Undefined) {
+        absent.push(part);
+
+        continue;
+      }
+      if (part.kind != TypeKind.Never) {
+        ordered.push(part);
+      }
+    }
+
+    for (const part of absent) {
+      ordered.push(part);
+    }
+
+    return ordered;
+  }
+
+  private compareNames(first: ObjectField, second: ObjectField): int {
+    if (first.name < second.name) {
+      return -1;
+    }
+    if (first.name > second.name) {
+      return 1;
+    }
+
+    return 0;
+  }
+
+  private fieldKey(field: ObjectField): string {
+    const name = `${field.name.length}:${field.name}`;
+    const flags = `${field.optional}:${field.readonly}`;
+
+    return `${name}:${field.type.id}:${flags}`;
+  }
+
+  private idsText(types: Type[]): string {
+    const ids = types.map((type) => `${type.id}`);
+
+    return ids.join(" ");
+  }
+
+  private literalWord(literal: LiteralKind): string {
+    switch (literal) {
+      case LiteralKind.String:
+        return "string";
+      case LiteralKind.Int:
+        return "int";
+      case LiteralKind.Double:
+        return "double";
+      default:
+        return "boolean";
+    }
+  }
+
+  private dictWord(dict: DictKind): string {
+    switch (dict) {
+      case DictKind.Record:
+        return "record";
+      case DictKind.Map:
+        return "map";
+      default:
+        return "set";
+    }
+  }
+
+  private keep(key: string, made: Type): Type {
+    this.byKey.set(key, made);
+
+    return made;
+  }
+
+  private nextId(): int {
+    this.count += 1;
+
+    return this.count;
+  }
+}

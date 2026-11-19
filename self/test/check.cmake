@@ -21,24 +21,26 @@
 #     get wrong. `EXE tree NAME.tz` must report no error and print exactly
 #     NAME.tree. ACCEPT=ON works as for MODE=error.
 #
-#   MODE=program: self/test/programs/NAME/, self/test/names/NAME/ and
-#     self/test/scopes/NAME/ are programs of several files with the entry
+#   MODE=program: self/test/programs/NAME/, self/test/names/NAME/,
+#     self/test/scopes/NAME/ and self/test/types/NAME/ are programs of
+#     several files with the entry
 #     main.tz (SRC). `EXE COMMAND main.tz`, run in that directory, must print
 #     to stdout exactly main.out. COMMAND=load (programs) prints the modules,
 #     a module after the ones it imports, each with where its imports lead;
 #     COMMAND=names (names) prints what every module declares, exports and
 #     imports, each name with the declaration it leads to; COMMAND=scopes
 #     (scopes) prints every use of a name in the code with its declaration:
-#     kind, line and column. When main.err is there, the program has
-#     mistakes: the exit code must be 1 and stderr exactly main.err; without
+#     kind, line and column; COMMAND=types (types) prints every declaration
+#     at the top of a module with its type. When main.err is there, the
+#     program has mistakes: the exit code must be 1 and stderr exactly main.err; without
 #     it the exit code is 0 and stderr is empty. A directory named after a
 #     code (TZ2007) is the test of that code: one of the errors must have it.
 #     ACCEPT=ON writes main.out and main.err.
 #
 #   MODE=codes: every code of self/diagnostic/code.tz has its test,
 #     self/test/errors/CODE.tz or main.tz in CODE/ of self/test/programs,
-#     names or scopes, and every test in self/test/errors is named after a
-#     code. A code no source can get does not stay in code.tz.
+#     names, scopes or types, and every test in self/test/errors is named
+#     after a code. A code no source can get does not stay in code.tz.
 #
 #   A test of a declaration file: when NAME.d.tz is next to NAME.tz, the file
 #     that is checked is NAME.d.tz, and NAME.tz is its module. tzparse reads
@@ -193,9 +195,10 @@ elseif(MODE STREQUAL "codes")
     if(NOT EXISTS ${ROOT}/self/test/errors/${code}.tz AND
        NOT EXISTS ${ROOT}/self/test/programs/${code}/main.tz AND
        NOT EXISTS ${ROOT}/self/test/names/${code}/main.tz AND
-       NOT EXISTS ${ROOT}/self/test/scopes/${code}/main.tz)
+       NOT EXISTS ${ROOT}/self/test/scopes/${code}/main.tz AND
+       NOT EXISTS ${ROOT}/self/test/types/${code}/main.tz)
       string(APPEND problems
-        "${code} has no test: self/test/errors/${code}.tz, or main.tz in ${code}/ of self/test/programs, names or scopes\n")
+        "${code} has no test: self/test/errors/${code}.tz, or main.tz in ${code}/ of self/test/programs, names, scopes or types\n")
     endif()
   endforeach()
   file(GLOB tests RELATIVE ${ROOT}/self/test/errors ${ROOT}/self/test/errors/*)

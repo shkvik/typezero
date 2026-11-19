@@ -1,0 +1,307 @@
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import {
+  kBooleanTypeName,
+  kStringTypeName,
+} from "../../../program/ast/const/ast.const.tz";
+import {
+  FunctionTypeForm,
+  LiteralTypeForm,
+  ObjectTypeForm,
+  TupleTypeForm,
+  TypeRef,
+  TypeRefKind,
+} from "../../../program/ast/types/ast.types.types.tz";
+import {
+  ModuleScopes,
+  NameUse,
+} from "../../../program/scopes/types/scopes.types.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import {
+  DictKind,
+  FunctionParameter,
+  LiteralKind,
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import {
+  kGenericTypes,
+  kPlainTypes,
+  kThisParameter,
+} from "./const/type-resolver.const.tables.tz";
+import {
+  GenericBuiltin,
+  GenericTypeName,
+  PlainBuiltin,
+} from "./types/type-resolver.types.tz";
+
+export class TypeResolver {
+  private readonly store: TypeStore;
+  private readonly uses: Map<int, NameUse>;
+  private readonly errors: SourceError[];
+
+  public constructor(store: TypeStore, scopes: ModuleScopes) {
+    this.store = store;
+    this.uses = new Map<int, NameUse>();
+    this.errors = [];
+
+    for (const use of scopes.uses) {
+      if (use.isType) {
+        this.uses.set(use.loc, use);
+      }
+    }
+  }
+
+  public problems(): SourceError[] {
+    return this.errors;
+  }
+
+  public resolve(ref: TypeRef): Type {
+    const form = ref.form;
+
+    switch (form.kind) {
+      case TypeRefKind.Name:
+      case TypeRefKind.Generic:
+        return this.named(ref);
+      case TypeRefKind.Array: {
+        const items = this.resolveAll(ref.args);
+        const error = this.store.plain(TypeKind.Error);
+        const item = items[0] ?? error;
+
+        return this.store.arrayOf(item);
+      }
+      case TypeRefKind.Union: {
+        const parts = this.resolveAll(ref.args);
+
+        return this.store.unionOf(parts);
+      }
+      case TypeRefKind.Tuple:
+        return this.tuple(form);
+      case TypeRefKind.Object:
+        return this.object(form);
+      case TypeRefKind.Function:
+        return this.functionType(form);
+      case TypeRefKind.Literal:
+        return this.literal(ref.name, form);
+      case TypeRefKind.Predicate:
+        return this.store.plain(TypeKind.Boolean);
+      default:
+        return this.store.plain(TypeKind.Error);
+    }
+  }
+
+  private resolveAll(refs: TypeRef[]): Type[] {
+    const types: Type[] = [];
+
+    for (const ref of refs) {
+      const type = this.resolve(ref);
+
+      types.push(type);
+    }
+
+    return types;
+  }
+
+  private named(ref: TypeRef): Type {
+    const use = this.uses.get(ref.loc);
+    if (use == undefined || use.symbol != undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const generic = kGenericTypes.find((row) => row.name == ref.name);
+    if (generic != undefined) {
+      return this.generic(ref, generic);
+    }
+
+    const plain = kPlainTypes.find((row) => row.name == ref.name);
+    if (plain == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (ref.args.length > 0) {
+      this.report(ref.loc, Code.TypeNotGeneric, { word: ref.name });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.plain(plain.type);
+  }
+
+  private generic(ref: TypeRef, row: GenericTypeName): Type {
+    const count = ref.args.length;
+    if (count < row.least || count > row.most) {
+      this.report(ref.loc, Code.TypeArgumentsCount, {
+        word: row.name,
+        other: row.example,
+      });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const args = this.resolveAll(ref.args);
+    const error = this.store.plain(TypeKind.Error);
+    const first = args[0] ?? error;
+    const second = args[1] ?? error;
+
+    switch (row.type) {
+      case GenericBuiltin.Array:
+        return this.store.arrayOf(first);
+      case GenericBuiltin.Result:
+        return this.store.resultOf(first, second);
+      case GenericBuiltin.Promise:
+        return this.store.promiseOf(first);
+      case GenericBuiltin.Map:
+        return this.store.dictOf(DictKind.Map, first, second);
+      case GenericBuiltin.Set:
+        return this.store.dictOf(DictKind.Set, first, first);
+      case GenericBuiltin.Record:
+        return this.store.dictOf(DictKind.Record, first, second);
+      case GenericBuiltin.Generator:
+        return this.iterator(args, false);
+      default:
+        return this.iterator(args, true);
+    }
+  }
+
+  private iterator(args: Type[], async: boolean): Type {
+    const nothing = this.store.plain(TypeKind.Void);
+    const yielded = args[0] ?? nothing;
+    const returned = args[1] ?? nothing;
+    const sent = args[2] ?? nothing;
+
+    return this.store.iteratorOf({ yielded, returned, sent, async });
+  }
+
+  private plain(type: PlainBuiltin): Type {
+    switch (type) {
+      case PlainBuiltin.Int:
+        return this.store.integer(64, false);
+      case PlainBuiltin.Int8:
+        return this.store.integer(8, false);
+      case PlainBuiltin.Int16:
+        return this.store.integer(16, false);
+      case PlainBuiltin.Int32:
+        return this.store.integer(32, false);
+      case PlainBuiltin.Uint8:
+        return this.store.integer(8, true);
+      case PlainBuiltin.Uint16:
+        return this.store.integer(16, true);
+      case PlainBuiltin.Uint32:
+        return this.store.integer(32, true);
+      case PlainBuiltin.Uint64:
+        return this.store.integer(64, true);
+      case PlainBuiltin.Double:
+        return this.store.plain(TypeKind.Double);
+      case PlainBuiltin.String:
+        return this.store.plain(TypeKind.String);
+      case PlainBuiltin.Boolean:
+        return this.store.plain(TypeKind.Boolean);
+      case PlainBuiltin.Decimal:
+        return this.store.plain(TypeKind.Decimal);
+      case PlainBuiltin.Json:
+        return this.store.plain(TypeKind.Json);
+      case PlainBuiltin.Unknown:
+        return this.store.plain(TypeKind.Unknown);
+      case PlainBuiltin.Never:
+        return this.store.plain(TypeKind.Never);
+      case PlainBuiltin.Void:
+        return this.store.plain(TypeKind.Void);
+      case PlainBuiltin.Undefined:
+        return this.store.plain(TypeKind.Undefined);
+      default:
+        return this.store.plain(TypeKind.AnyObject);
+    }
+  }
+
+  private tuple(form: TupleTypeForm): Type {
+    const items: Type[] = [];
+
+    for (const element of form.elements) {
+      const item = this.resolve(element.type);
+
+      items.push(item);
+    }
+
+    return this.store.tupleOf(items, form.readonly);
+  }
+
+  private object(form: ObjectTypeForm): Type {
+    const fields: ObjectField[] = [];
+
+    for (const field of form.fields) {
+      const type = this.resolve(field.type);
+
+      fields.push({
+        name: field.name,
+        type,
+        optional: field.optional,
+        readonly: field.readonly,
+      });
+    }
+
+    return this.store.objectOf(fields);
+  }
+
+  private functionType(form: FunctionTypeForm): Type {
+    const params: FunctionParameter[] = [];
+    let self: Type | undefined = undefined;
+
+    for (const param of form.params) {
+      const type = this.resolve(param.type);
+
+      if (param.name == kThisParameter) {
+        self = type;
+
+        continue;
+      }
+
+      params.push({ type, optional: param.optional });
+    }
+
+    const result = this.result(form.result);
+
+    return this.store.functionOf({ params, rest: form.rest, self, result });
+  }
+
+  private result(ref: TypeRef | undefined): Type {
+    if (ref == undefined) {
+      return this.store.plain(TypeKind.Void);
+    }
+
+    return this.resolve(ref);
+  }
+
+  private literal(name: string, form: LiteralTypeForm): Type {
+    if (name == kStringTypeName) {
+      return this.store.literal(LiteralKind.String, form.text);
+    }
+    if (name == kBooleanTypeName) {
+      const truth = this.truthText(form.number);
+
+      return this.store.literal(LiteralKind.Boolean, truth);
+    }
+
+    const text = `${form.number}`;
+
+    if (form.integer) {
+      return this.store.literal(LiteralKind.Int, text);
+    }
+
+    return this.store.literal(LiteralKind.Double, text);
+  }
+
+  private truthText(number: double): string {
+    if (number == 0.0) {
+      return "false";
+    }
+
+    return "true";
+  }
+
+  private report(loc: int, code: Code, details: Details): void {
+    this.errors.push({ code, loc, details });
+  }
+}

@@ -1,0 +1,18 @@
+main.tz:1:13: error TZ2401: 'Map' is written with its type arguments, e.g. 'Map<string, int>'
+let counts: Map<int> = new Map<int, int>();
+            ^
+main.tz:2:14: error TZ2401: 'Result' is written with its type arguments, e.g. 'Result<int, string>'
+let outcome: Result<int> = ok(1);
+             ^
+main.tz:3:14: error TZ2401: 'Promise' is written with its type arguments, e.g. 'Promise<int>'
+let pending: Promise = Promise.resolve(1);
+             ^
+main.tz:4:11: error TZ2401: 'Array' is written with its type arguments, e.g. 'Array<int>'
+let list: Array = [];
+          ^
+main.tz:5:11: error TZ2401: 'Set' is written with its type arguments, e.g. 'Set<int>'
+let seen: Set<int, int> = new Set<int>();
+          ^
+main.tz:6:12: error TZ2401: 'Generator' is written with its type arguments, e.g. 'Generator<int>'
+let steps: Generator<int, int, int, int> = [1].values();
+           ^

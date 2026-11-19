@@ -99,8 +99,11 @@ library/          весь tz → bin/lib: <тема>/*.tz
 editors/          vscode/ — расширение VS Code; types/ — объявления для будущего плагина tsserver
 self/             компилятор на tz, пробный (порт compiler/load): main.tz — только запуск
                   команды: слово `load` — LoadCommand, `names` — NamesCommand, `scopes` —
-                  ScopesCommand, иначе SyntaxCommand (имя программы, текст usage и код
-                  выхода 2 — в cli/const/cli.const.tz);
+                  ScopesCommand, `types` — TypesCommand, иначе SyntaxCommand (имя программы,
+                  текст usage и код выхода 2 — в cli/const/cli.const.tz);
+                  cli/types/types-command/ — TypesCommand: `tzparse types <main.tz>` после
+                  привязки имён печатает под каждым модулем программы объявления верхнего
+                  уровня с их типами (`3:5 list: int[]`, `60:10 add: (int, int) => int`);
                   cli/scopes/scopes-command/ — ScopesCommand: `tzparse scopes <main.tz>`
                   после загрузки и связывания модулей привязывает имена в коде и печатает
                   под каждым модулем программы каждое использование имени: место, имя и
@@ -300,6 +303,28 @@ self/             компилятор на tz, пробный (порт compile
                   `Proxy` — TZ2313, `require` — TZ2314), имя, которое есть только как тип
                   (`Ok`, интерфейс, параметр типа), — TZ2310 «is a type, not a value»,
                   остальное — TZ2301 / TZ2302 / TZ2308;
+                  шаг типов (начат 19 ноября; первый срез — написанные типы, без выражений):
+                  program/type/ — тип как данные (types/type.types.tz): TypeKind и запись
+                  своего вида на каждый (IntType, ArrayType, UnionType, ResultType,
+                  DictType…); основа — виды C++ (compiler/program/types), но встроенные
+                  классы — не особые виды, а объявления; `Result`, `Promise`, итератор и
+                  `Record` / `Map` / `Set` — свои виды; `T | undefined` — обычное
+                  объединение; program/type/type-store/ — TypeStore: единственное место,
+                  где создаётся тип; на одинаковый запрос отдаёт тот же объект, поэтому
+                  типы сравнивают `==` и кладут ключом в Map; объединение хранилище само
+                  раскладывает (вложенные — в плоское, повторы и `never` убирает,
+                  `undefined` — в конец, `unknown` поглощает всё), порядок полей объекта
+                  на тип не влияет; program/type/type-text/ — TypeText: тип текстом, как
+                  его пишет C++ в ошибках; semantic/types/type-resolver/ — TypeResolver:
+                  запись типа из дерева (TypeRef) → тип, обычной рекурсией; имя ищет среди
+                  использований имён шага областей и в таблицах встроенных видов
+                  (const/type-resolver.const.tables.tz: kPlainTypes, kGenericTypes с числом
+                  аргументов и примером для ошибки); имена, объявленные в программе и в
+                  библиотеке, операции над типами — следующие шаги, пока дают тип-ошибку
+                  («?» в выводе); semantic/declaration/declaration-types/ —
+                  DeclarationTypes: типы объявлений верхнего уровня модуля (переменная с
+                  написанным типом, функция с написанными типами) →
+                  program/module-types/ ModuleTypes { module, declarations, errors };
                   semantic/declaration/scope-stack/ — ScopeStack: состояние обхода — стек областей
                   (значения и типы) и глубина функций; меняется только своими методами;
                   program/scopes/ — итог (types/scopes.types.tz): NameSymbol { name, kind:
@@ -371,7 +396,7 @@ self/             компилятор на tz, пробный (порт compile
                   (нет файла — ошибок быть не должно); папка с именем кода (TZ2007) — тест
                   этого кода; self/test/names/<имя>/ — такая же программа для
                   `tzparse names main.tz`, self/test/scopes/<имя>/ — для `tzparse scopes
-                  main.tz`;
+                  main.tz`, self/test/types/<имя>/ — для `tzparse types main.tz`;
                   перебор языка — self/test/*.py (тесты self/test/<скрипт>, метка
                   enumeration, идут минуты; `ctest -LE enumeration` — без них): скрипт
                   строит программы вместе с ответом, которого ждёт от парсера, и выходит
@@ -388,7 +413,7 @@ self/             компилятор на tz, пробный (порт compile
                   следующая на той же строке разбирается (`a = ; b = ;` — две ошибки); после
                   пропущенной `;` разбор идёт с найденного слова, если с него начинается
                   действие (`имя =`, `имя(`, `имя.`, `имя++`), иначе остаток пропускается;
-                  после ошибки на месте типа в дереве стоит узел вида TypeKind.Invalid, а не
+                  после ошибки на месте типа в дереве стоит узел вида TypeRefKind.Invalid, а не
                   имя типа с пустым именем
 tests/ docs/ bench/ examples/ third_party/
 ```

@@ -1,6 +1,6 @@
 import { Span } from "./ast.types.span.tz";
 
-export enum TypeKind {
+export enum TypeRefKind {
   Name,
   Array,
   Union,
@@ -23,16 +23,16 @@ export enum TypeKind {
 
 export type PlainTypeForm = {
   readonly kind:
-    | TypeKind.Name
-    | TypeKind.Array
-    | TypeKind.Union
-    | TypeKind.Generic
-    | TypeKind.KeyOf
-    | TypeKind.Indexed
-    | TypeKind.Conditional
-    | TypeKind.Infer
-    | TypeKind.Intersection
-    | TypeKind.Invalid;
+    | TypeRefKind.Name
+    | TypeRefKind.Array
+    | TypeRefKind.Union
+    | TypeRefKind.Generic
+    | TypeRefKind.KeyOf
+    | TypeRefKind.Indexed
+    | TypeRefKind.Conditional
+    | TypeRefKind.Infer
+    | TypeRefKind.Intersection
+    | TypeRefKind.Invalid;
 };
 
 export type FunctionTypeParam = {
@@ -42,7 +42,7 @@ export type FunctionTypeParam = {
 };
 
 export type FunctionTypeForm = {
-  readonly kind: TypeKind.Function;
+  readonly kind: TypeRefKind.Function;
   readonly params: FunctionTypeParam[];
   readonly rest: boolean;
   readonly result?: TypeRef;
@@ -60,7 +60,7 @@ export type ObjectTypeField = {
 };
 
 export type ObjectTypeForm = {
-  readonly kind: TypeKind.Object;
+  readonly kind: TypeRefKind.Object;
   readonly fields: ObjectTypeField[];
 };
 
@@ -70,13 +70,13 @@ export type TupleElement = {
 };
 
 export type TupleTypeForm = {
-  readonly kind: TypeKind.Tuple;
+  readonly kind: TypeRefKind.Tuple;
   readonly elements: TupleElement[];
   readonly: boolean;
 };
 
 export type LiteralTypeForm = {
-  readonly kind: TypeKind.Literal;
+  readonly kind: TypeRefKind.Literal;
   readonly text: string;
   readonly number: double;
   readonly integer: boolean;
@@ -84,12 +84,12 @@ export type LiteralTypeForm = {
 };
 
 export type PredicateTypeForm = {
-  readonly kind: TypeKind.Predicate;
+  readonly kind: TypeRefKind.Predicate;
   readonly asserts: boolean;
 };
 
 export type TypeOfTypeForm = {
-  readonly kind: TypeKind.TypeOf;
+  readonly kind: TypeRefKind.TypeOf;
   readonly names: string[];
 };
 
@@ -100,13 +100,13 @@ export enum ModifierChange {
 }
 
 export type MappedTypeForm = {
-  readonly kind: TypeKind.Mapped;
+  readonly kind: TypeRefKind.Mapped;
   optionalChange: ModifierChange;
   readonly readonlyChange: ModifierChange;
 };
 
 export type TemplateTypeForm = {
-  readonly kind: TypeKind.Template;
+  readonly kind: TypeRefKind.Template;
   readonly texts: string[];
 };
 

@@ -1,7 +1,7 @@
 import { ScopeTraversal } from "../scope-traversal.tz";
 import {
   ObjectTypeField,
-  TypeKind,
+  TypeRefKind,
   TypeRef,
 } from "../../../../program/ast/types/ast.types.types.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
@@ -23,18 +23,18 @@ partial class ScopeTraversal {
     const form = ref.form;
 
     switch (form.kind) {
-      case TypeKind.Name:
-      case TypeKind.Generic:
+      case TypeRefKind.Name:
+      case TypeRefKind.Generic:
         this.useType(ref.name, ref.loc);
 
         return this.traverseTypes(ref.args);
-      case TypeKind.TypeOf:
+      case TypeRefKind.TypeOf:
         return this.useValue(form.names[0] ?? "", ref.loc);
-      case TypeKind.Mapped:
+      case TypeRefKind.Mapped:
         return this.traverseMapped(ref);
-      case TypeKind.Conditional:
+      case TypeRefKind.Conditional:
         return this.traverseConditional(ref);
-      case TypeKind.Object:
+      case TypeRefKind.Object:
         return this.traverseObjectType(form.fields);
       default:
         return this.traverseTypes(this.childTypes(ref));
@@ -74,7 +74,7 @@ partial class ScopeTraversal {
   }
 
   private declareInferred(ref: TypeRef): void {
-    if (ref.form.kind == TypeKind.Infer) {
+    if (ref.form.kind == TypeRefKind.Infer) {
       this.scopes.declareType({
         name: ref.name,
         kind: SymbolKind.TypeParameter,
@@ -92,7 +92,7 @@ partial class ScopeTraversal {
     const children = ref.args.slice();
 
     switch (form.kind) {
-      case TypeKind.Function: {
+      case TypeRefKind.Function: {
         for (const param of form.params) {
           children.push(param.type);
         }
@@ -104,13 +104,13 @@ partial class ScopeTraversal {
 
         return children;
       }
-      case TypeKind.Object:
+      case TypeRefKind.Object:
         for (const field of form.fields) {
           children.push(field.type);
         }
 
         return children;
-      case TypeKind.Tuple:
+      case TypeRefKind.Tuple:
         for (const element of form.elements) {
           children.push(element.type);
         }

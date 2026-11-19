@@ -1,0 +1,89 @@
+// Written types made of the built-in kinds: each declaration is printed
+// with its type as the compiler spells it.
+let whole: int = 1;
+let byte: uint8 = 1;
+let wide: uint64 = 1;
+let small: int16 = 1;
+let real: double = 1.5;
+let text: string = "a";
+let truth: boolean = true;
+let money: decimal = decimal(1);
+let anything: unknown = 1;
+let data: Json = 1;
+let thing: object = { a: 1 };
+
+let list: int[] = [];
+let table: int[][] = [];
+let either: (int | string)[] = [];
+let generic: Array<string> = [];
+let maybe: int | undefined = undefined;
+let early: undefined | int = undefined;
+let three: string | int | boolean = 1;
+let twice: int | int = 1;
+let nested: (int | string) | boolean = 1;
+let repeated: string | undefined | string = "a";
+let never: int | never = 1;
+let any: unknown | int = 1;
+
+let pair: [int, string] = [1, "a"];
+let fixed: readonly [int, int] = [1, 2];
+let shape: { a: int; b?: string; readonly c: boolean } = { a: 1, c: true };
+let swapped: { b: string; a: int } = { a: 1, b: "a" };
+let same: { a: int; b: string } = { a: 1, b: "a" };
+let runner: { run(x: int): void } = { run: (x: int): void => {} };
+let empty: {} = {};
+
+let call: (x: int, y?: string) => void = (x: int): void => {};
+let rest: (...values: int[]) => string = (...values: int[]): string => "";
+let later: () => Promise<int> = async (): Promise<int> => 1;
+let bound: (this: unknown, x: int) => int = (x: int): int => x;
+let calls: (() => void)[] = [];
+let choice: (() => void) | undefined = undefined;
+
+let outcome: Result<int, string> = ok(1);
+let pending: Promise<int[]> = Promise.resolve([1]);
+let counts: Map<string, int> = new Map<string, int>();
+let seen: Set<int> = new Set<int>();
+let byName: Record<string, int> = {};
+let steps: Generator<int> = [1].values();
+let talk: Generator<int, string, boolean> = talking();
+let done: Promise<void> = Promise.resolve();
+
+let letter: "a" = "a";
+let letters: "a" | "b" = "a";
+let five: 5 = 5;
+let yes: true = true;
+let half: 1.5 = 1.5;
+let below: -3 = -3;
+let mixed: int | "a" = 1;
+
+function add(first: int, second: int): int {
+  return first + second;
+}
+
+function greet(name: string, loud?: boolean, times: int = 1): void {}
+
+function sum(...values: double[]): double {
+  return 0.0;
+}
+
+function isText(value: unknown): value is string {
+  return typeof value == "string";
+}
+
+function* talking(): Generator<int, string, boolean> {
+  const more = yield 1;
+
+  return `${more}`;
+}
+
+async function load(path: string): Promise<Result<string, string>> {
+  return ok(path);
+}
+
+console.log(whole, byte, wide, small, real, text, truth, money, anything, data);
+console.log(thing, list, table, either, generic, maybe, early, three, twice);
+console.log(nested, repeated, never, any, pair, fixed, shape, swapped, same);
+console.log(runner, empty, call, rest, later, bound, calls, choice, outcome);
+console.log(pending, counts, seen, byName, steps, talk, done, letter, letters);
+console.log(five, yes, half, below, mixed, add, greet, sum, isText, load);

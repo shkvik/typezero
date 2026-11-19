@@ -4,7 +4,7 @@ import { Token, TokenKind } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
   FunctionTypeParam,
-  TypeKind,
+  TypeRefKind,
   TypeRef,
 } from "../../../../program/ast/types/ast.types.types.tz";
 import { Signature } from "../types/file-parser.types.function-types.tz";
@@ -33,7 +33,7 @@ partial class FileParser {
 
     const token = this.cursor.peek();
     const ref = this.typeRef(token.start);
-    ref.form = { kind: TypeKind.Predicate, asserts };
+    ref.form = { kind: TypeRefKind.Predicate, asserts };
 
     if (asserts) {
       this.cursor.next();
@@ -134,7 +134,7 @@ partial class FileParser {
     const ref = this.typeRef(signature.loc);
 
     ref.form = {
-      kind: TypeKind.Function,
+      kind: TypeRefKind.Function,
       params: signature.params,
       rest: signature.rest,
       result,

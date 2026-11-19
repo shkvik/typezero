@@ -1,0 +1,9 @@
+main.tz:1:12: error TZ2402: 'int' takes no type arguments
+let whole: int<string> = 1;
+           ^
+main.tz:2:11: error TZ2402: 'string' takes no type arguments
+let text: string<int> = "a";
+          ^
+main.tz:3:11: error TZ2402: 'Json' takes no type arguments
+let data: Json<int> = 1;
+          ^

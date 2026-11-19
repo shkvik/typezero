@@ -1,0 +1,103 @@
+import { extname } from "node:path";
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import { ModuleNames } from "../../../program/module-names/types/module-names.types.tz";
+import { ModuleTypes } from "../../../program/module-types/types/module-types.types.tz";
+import { kSourceExtension } from "../../../program/module/const/module.const.tz";
+import { ModuleScopes } from "../../../program/scopes/types/scopes.types.tz";
+import { SourceLines } from "../../../program/source-lines/source-lines.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { DeclarationTypes } from "../../../semantic/declaration/declaration-types/declaration-types.tz";
+import { ModuleBinder } from "../../../semantic/declaration/module-binder/module-binder.tz";
+import { NameResolver } from "../../../semantic/declaration/name-resolver/name-resolver.tz";
+import { ProgramReport } from "../../program-report/program-report.tz";
+import { ProgramSource } from "../../program-source/program-source.tz";
+
+export class TypesCommand {
+  private readonly entry?: string;
+  private readonly report: ProgramReport;
+  private readonly text: TypeText;
+
+  public constructor(args: string[]) {
+    this.entry = args[3];
+    this.report = new ProgramReport();
+    this.text = new TypeText();
+  }
+
+  public run(): void {
+    const entry = this.entry;
+    if (entry == undefined) {
+      return this.report.wrongUsage();
+    }
+    if (extname(entry) != kSourceExtension) {
+      return this.report.notSource(entry);
+    }
+
+    const source = new ProgramSource();
+    const loaded = source.load(entry);
+    const program = loaded.program;
+
+    this.report.unreadable(loaded.unreadable);
+    this.report.moduleErrors(program);
+    if (this.report.hasFailed()) {
+      return;
+    }
+
+    const binder = new ModuleBinder(program);
+    const names = binder.run();
+    const resolver = new NameResolver(program, names);
+    const resolved = resolver.run();
+    const store = new TypeStore();
+    const typed: ModuleTypes[] = [];
+
+    for (const scopes of resolved) {
+      if (scopes.module.source.isLibrary) {
+        continue;
+      }
+
+      const declarations = new DeclarationTypes(store, scopes);
+      const types = declarations.run();
+
+      typed.push(types);
+      this.printTypes(types);
+    }
+
+    for (let index = 0; index < resolved.length; index++) {
+      this.printErrors(names[index], resolved[index], typed);
+    }
+  }
+
+  private printTypes(types: ModuleTypes): void {
+    const module = types.module;
+    const lines = new SourceLines(module.source.text);
+
+    console.log(module.name);
+
+    for (const declaration of types.declarations) {
+      const place = lines.placeOf(declaration.loc);
+      const type = this.text.of(declaration.type);
+
+      console.log(
+        `  ${place.line}:${place.column} ${declaration.name}: ${type}`,
+      );
+    }
+  }
+
+  private printErrors(
+    names: ModuleNames | undefined,
+    scopes: ModuleScopes | undefined,
+    typed: ModuleTypes[],
+  ): void {
+    if (names == undefined || scopes == undefined) {
+      return;
+    }
+
+    const module = scopes.module;
+    const types = typed.find((each) => each.module.id == module.id);
+    const found = types?.errors ?? [];
+    const errors: SourceError[] = names.errors.concat(scopes.errors, found);
+
+    errors.sort((first, second) => first.loc - second.loc);
+    this.report.sourceErrors(module.source, errors);
+  }
+}

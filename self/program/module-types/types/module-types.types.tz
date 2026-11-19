@@ -1,0 +1,15 @@
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import { Module } from "../../module/types/module.types.tz";
+import { Type } from "../../type/types/type.types.tz";
+
+export type TypedDeclaration = {
+  readonly name: string;
+  readonly loc: int;
+  readonly type: Type;
+};
+
+export type ModuleTypes = {
+  readonly module: Module;
+  readonly declarations: TypedDeclaration[];
+  readonly errors: SourceError[];
+};

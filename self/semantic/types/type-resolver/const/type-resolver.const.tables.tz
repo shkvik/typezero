@@ -1,0 +1,88 @@
+import {
+  GenericBuiltin,
+  GenericTypeName,
+  PlainBuiltin,
+  PlainTypeName,
+} from "../types/type-resolver.types.tz";
+
+export const kThisParameter = "this";
+
+export const kPlainTypes: PlainTypeName[] = [
+  { name: "int", type: PlainBuiltin.Int },
+  { name: "int8", type: PlainBuiltin.Int8 },
+  { name: "int16", type: PlainBuiltin.Int16 },
+  { name: "int32", type: PlainBuiltin.Int32 },
+  { name: "uint8", type: PlainBuiltin.Uint8 },
+  { name: "uint16", type: PlainBuiltin.Uint16 },
+  { name: "uint32", type: PlainBuiltin.Uint32 },
+  { name: "uint64", type: PlainBuiltin.Uint64 },
+  { name: "double", type: PlainBuiltin.Double },
+  { name: "string", type: PlainBuiltin.String },
+  { name: "boolean", type: PlainBuiltin.Boolean },
+  { name: "decimal", type: PlainBuiltin.Decimal },
+  { name: "Json", type: PlainBuiltin.Json },
+  { name: "unknown", type: PlainBuiltin.Unknown },
+  { name: "never", type: PlainBuiltin.Never },
+  { name: "void", type: PlainBuiltin.Void },
+  { name: "undefined", type: PlainBuiltin.Undefined },
+  { name: "object", type: PlainBuiltin.AnyObject },
+];
+
+export const kGenericTypes: GenericTypeName[] = [
+  {
+    name: "Array",
+    type: GenericBuiltin.Array,
+    least: 1,
+    most: 1,
+    example: "Array<int>",
+  },
+  {
+    name: "Result",
+    type: GenericBuiltin.Result,
+    least: 2,
+    most: 2,
+    example: "Result<int, string>",
+  },
+  {
+    name: "Promise",
+    type: GenericBuiltin.Promise,
+    least: 1,
+    most: 1,
+    example: "Promise<int>",
+  },
+  {
+    name: "Map",
+    type: GenericBuiltin.Map,
+    least: 2,
+    most: 2,
+    example: "Map<string, int>",
+  },
+  {
+    name: "Set",
+    type: GenericBuiltin.Set,
+    least: 1,
+    most: 1,
+    example: "Set<int>",
+  },
+  {
+    name: "Record",
+    type: GenericBuiltin.Record,
+    least: 2,
+    most: 2,
+    example: "Record<string, int>",
+  },
+  {
+    name: "Generator",
+    type: GenericBuiltin.Generator,
+    least: 1,
+    most: 3,
+    example: "Generator<int>",
+  },
+  {
+    name: "AsyncGenerator",
+    type: GenericBuiltin.AsyncGenerator,
+    least: 1,
+    most: 3,
+    example: "AsyncGenerator<int>",
+  },
+];

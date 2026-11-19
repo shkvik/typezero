@@ -1,0 +1,58 @@
+main.tz
+  3:5 whole: int
+  4:5 byte: uint8
+  5:5 wide: uint64
+  6:5 small: int16
+  7:5 real: double
+  8:5 text: string
+  9:5 truth: boolean
+  10:5 money: decimal
+  11:5 anything: unknown
+  12:5 data: Json
+  13:5 thing: object
+  15:5 list: int[]
+  16:5 table: int[][]
+  17:5 either: (int | string)[]
+  18:5 generic: string[]
+  19:5 maybe: int | undefined
+  20:5 early: int | undefined
+  21:5 three: string | int | boolean
+  22:5 twice: int
+  23:5 nested: string | int | boolean
+  24:5 repeated: string | undefined
+  25:5 never: int
+  26:5 any: unknown
+  28:5 pair: [int, string]
+  29:5 fixed: readonly [int, int]
+  30:5 shape: { a: int; b?: string; readonly c: boolean }
+  31:5 swapped: { b: string; a: int }
+  32:5 same: { b: string; a: int }
+  33:5 runner: { readonly run: (int) => void }
+  34:5 empty: {}
+  36:5 call: (int, string?) => void
+  37:5 rest: (...int[]) => string
+  38:5 later: () => Promise<int>
+  39:5 bound: (this: unknown, int) => int
+  40:5 calls: (() => void)[]
+  41:5 choice: (() => void) | undefined
+  43:5 outcome: Result<int, string>
+  44:5 pending: Promise<int[]>
+  45:5 counts: Map<string, int>
+  46:5 seen: Set<int>
+  47:5 byName: Record<string, int>
+  48:5 steps: Generator<int>
+  49:5 talk: Generator<int, string, boolean>
+  50:5 done: Promise<void>
+  52:5 letter: "a"
+  53:5 letters: "a" | "b"
+  54:5 five: 5
+  55:5 yes: true
+  56:5 half: 1.5
+  57:5 below: -3
+  58:5 mixed: int | "a"
+  60:10 add: (int, int) => int
+  64:10 greet: (string, boolean?, int?) => void
+  66:10 sum: (...double[]) => double
+  70:10 isText: (unknown) => boolean
+  74:11 talking: () => Generator<int, string, boolean>
+  80:16 load: (string) => Promise<Result<string, string>>

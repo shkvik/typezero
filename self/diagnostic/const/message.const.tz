@@ -871,4 +871,10 @@ export const kMessages: Record<Code, Message> = {
   [Code.NoRequire]: {
     text: "'{word}' is not supported: files are imported by name: 'import { a } from \"./x\"'",
   },
+  [Code.TypeArgumentsCount]: {
+    text: "'{word}' is written with its type arguments, e.g. '{other}'",
+  },
+  [Code.TypeNotGeneric]: {
+    text: "'{word}' takes no type arguments",
+  },
 };

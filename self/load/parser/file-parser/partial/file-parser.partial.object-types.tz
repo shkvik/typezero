@@ -13,7 +13,7 @@ import {
   ModifierChange,
   ObjectTypeField,
   ObjectTypeForm,
-  TypeKind,
+  TypeRefKind,
   TypeParamDecl,
   TypeRef,
 } from "../../../../program/ast/types/ast.types.types.tz";
@@ -43,7 +43,7 @@ partial class FileParser {
   ): TypeRef {
     const ref = this.typeRef(loc);
     const mapped: MappedTypeForm = {
-      kind: TypeKind.Mapped,
+      kind: TypeRefKind.Mapped,
       optionalChange: ModifierChange.None,
       readonlyChange,
     };
@@ -222,7 +222,7 @@ partial class FileParser {
     const brace = this.cursor.next();
     const ref = this.typeRef(brace.start);
     const fields: ObjectTypeField[] = [];
-    const object: ObjectTypeForm = { kind: TypeKind.Object, fields };
+    const object: ObjectTypeForm = { kind: TypeRefKind.Object, fields };
 
     ref.form = object;
 
@@ -502,7 +502,7 @@ partial class FileParser {
     this.cursor.next();
     const record = this.typeRef(ref.loc);
 
-    record.form = { kind: TypeKind.Generic };
+    record.form = { kind: TypeRefKind.Generic };
     record.name = kRecordTypeName;
     record.args.push(key);
     record.args.push(value);

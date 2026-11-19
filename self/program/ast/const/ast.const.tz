@@ -1,0 +1,3 @@
+export const kStringTypeName = "string";
+export const kBooleanTypeName = "boolean";
+export const kNumberTypeName = "number";

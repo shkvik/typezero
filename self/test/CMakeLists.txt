@@ -14,7 +14,9 @@
 #     declares, exports and imports, each name with the declaration it leads
 #     to;
 #   scopes/NAME/ is such a program for the names inside the code: main.out is
-#     every use of a name with the declaration it leads to.
+#     every use of a name with the declaration it leads to;
+#   types/NAME/ is such a program for the types: main.out is every
+#     declaration at the top of a module with its type.
 #
 # A test of a declaration file is NAME.d.tz next to its module NAME.tz: the
 # test is registered by the module, so the declaration files leave the lists
@@ -61,6 +63,7 @@ endfunction()
 tz_self_programs(programs load)
 tz_self_programs(names names)
 tz_self_programs(scopes scopes)
+tz_self_programs(types types)
 
 # The enumerations of the language, *.py here: a script builds programs
 # together with what the parser must answer (the tree, or the one error),

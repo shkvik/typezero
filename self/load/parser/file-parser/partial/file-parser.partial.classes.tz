@@ -7,7 +7,7 @@ import {
 } from "../../../token/types/token.types.tz";
 import { kTokenTable } from "../../../token/const/token.const.tz";
 import {
-  TypeKind,
+  TypeRefKind,
   TypeRef,
 } from "../../../../program/ast/types/ast.types.types.tz";
 import {
@@ -116,7 +116,7 @@ partial class FileParser {
 
     const word = this.cursor.peek();
     const base = this.primaryType();
-    if (!expression || base.form.kind != TypeKind.Name) {
+    if (!expression || base.form.kind != TypeRefKind.Name) {
       return { base, baseArgs: [] };
     }
 

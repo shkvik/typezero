@@ -6,17 +6,17 @@ import {
   TemplateTypeForm,
   TupleElement,
   TupleTypeForm,
-  TypeKind,
+  TypeRefKind,
   TypeRef,
 } from "../../../../program/ast/types/ast.types.types.tz";
 import { ExprKind } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { TypePlace } from "../types/file-parser.types.context.tz";
 import {
   kBooleanTypeName,
-  kExactDoubleLimit,
   kNumberTypeName,
   kStringTypeName,
-} from "../const/file-parser.const.types.tz";
+} from "../../../../program/ast/const/ast.const.tz";
+import { kExactDoubleLimit } from "../const/file-parser.const.types.tz";
 
 partial class FileParser {
   private type(place: TypePlace = TypePlace.Plain): TypeRef {
@@ -34,7 +34,7 @@ partial class FileParser {
     }
 
     const ref = this.typeRef(check.loc);
-    ref.form = { kind: TypeKind.Conditional };
+    ref.form = { kind: TypeRefKind.Conditional };
     this.cursor.next();
     ref.args.push(check);
 
@@ -70,7 +70,7 @@ partial class FileParser {
     }
 
     const ref = this.typeRef(loc);
-    ref.form = { kind: TypeKind.Union };
+    ref.form = { kind: TypeRefKind.Union };
     ref.args.push(first);
 
     while (this.cursor.accept(TokenKind.Pipe)) {
@@ -92,7 +92,7 @@ partial class FileParser {
     }
 
     const ref = this.typeRef(loc);
-    ref.form = { kind: TypeKind.Intersection };
+    ref.form = { kind: TypeRefKind.Intersection };
     ref.args.push(first);
 
     while (this.cursor.accept(TokenKind.Amp)) {
@@ -151,7 +151,7 @@ partial class FileParser {
     const ref = this.typeRef(keyword.start);
     const operand = this.prefixedType();
 
-    ref.form = { kind: TypeKind.KeyOf };
+    ref.form = { kind: TypeRefKind.KeyOf };
     ref.args.push(operand);
 
     return ref;
@@ -176,7 +176,7 @@ partial class FileParser {
   private arrayOf(element: TypeRef): TypeRef {
     const ref = this.typeRef(element.loc);
 
-    ref.form = { kind: TypeKind.Array };
+    ref.form = { kind: TypeRefKind.Array };
     ref.args.push(element);
 
     return ref;
@@ -186,7 +186,7 @@ partial class FileParser {
     const ref = this.typeRef(object.loc);
     const index = this.type();
 
-    ref.form = { kind: TypeKind.Indexed };
+    ref.form = { kind: TypeRefKind.Indexed };
     ref.args.push(object);
     ref.args.push(index);
     this.cursor.expect(TokenKind.RBracket, Code.ExpectedIndexedAccessClose);
@@ -204,12 +204,12 @@ partial class FileParser {
     const keyword = this.cursor.next();
     const ref = this.prefixedType();
     const form = ref.form;
-    if (form.kind == TypeKind.Tuple) {
+    if (form.kind == TypeRefKind.Tuple) {
       form.readonly = true;
 
       return ref;
     }
-    if (form.kind != TypeKind.Array) {
+    if (form.kind != TypeRefKind.Array) {
       this.cursor.report(keyword.start, Code.ReadonlyOnlyArrays);
     }
 
@@ -320,7 +320,7 @@ partial class FileParser {
       this.cursor.error(token.start, Code.ExpectedNameAfterDot);
     }
     if (this.cursor.is(TokenKind.Less)) {
-      ref.form = { kind: TypeKind.Generic };
+      ref.form = { kind: TypeRefKind.Generic };
       ref.args = this.typeArguments();
     }
 
@@ -340,7 +340,7 @@ partial class FileParser {
     const ref = this.typeRef(token.start);
 
     ref.form = {
-      kind: TypeKind.Literal,
+      kind: TypeRefKind.Literal,
       text,
       number: 0.0,
       integer: false,
@@ -357,7 +357,7 @@ partial class FileParser {
     const ref = this.typeRef(token.start);
 
     ref.form = {
-      kind: TypeKind.Literal,
+      kind: TypeRefKind.Literal,
       text: "",
       number: truth,
       integer: false,
@@ -371,7 +371,7 @@ partial class FileParser {
   private inferType(): TypeRef {
     const keyword = this.cursor.peek();
     const ref = this.typeRef(keyword.start);
-    ref.form = { kind: TypeKind.Infer };
+    ref.form = { kind: TypeRefKind.Infer };
 
     this.cursor.next();
     const variable = this.cursor.next();
@@ -404,7 +404,7 @@ partial class FileParser {
 
     if (token.kind == TokenKind.TemplateString) {
       ref.form = {
-        kind: TypeKind.Literal,
+        kind: TypeRefKind.Literal,
         text: first,
         number: 0.0,
         integer: false,
@@ -416,7 +416,7 @@ partial class FileParser {
     }
 
     const parts: TemplateTypeForm = {
-      kind: TypeKind.Template,
+      kind: TypeRefKind.Template,
       texts: [first],
     };
     ref.form = parts;
@@ -470,7 +470,7 @@ partial class FileParser {
     }
 
     ref.form = {
-      kind: TypeKind.Literal,
+      kind: TypeRefKind.Literal,
       text: "",
       number,
       integer,
@@ -485,7 +485,7 @@ partial class FileParser {
     const keyword = this.cursor.peek();
     const ref = this.typeRef(keyword.start);
     const names: string[] = [];
-    ref.form = { kind: TypeKind.TypeOf, names };
+    ref.form = { kind: TypeRefKind.TypeOf, names };
 
     this.cursor.next();
 
@@ -582,7 +582,7 @@ partial class FileParser {
 
     const elements: TupleElement[] = [];
     const tuple: TupleTypeForm = {
-      kind: TypeKind.Tuple,
+      kind: TypeRefKind.Tuple,
       elements,
       readonly: false,
     };
@@ -628,7 +628,7 @@ partial class FileParser {
 
   private invalidType(loc: int): TypeRef {
     return {
-      form: { kind: TypeKind.Invalid },
+      form: { kind: TypeRefKind.Invalid },
       name: "",
       loc,
       args: [],
@@ -637,7 +637,7 @@ partial class FileParser {
 
   private typeRef(loc: int): TypeRef {
     return {
-      form: { kind: TypeKind.Name },
+      form: { kind: TypeRefKind.Name },
       name: "",
       loc,
       args: [],

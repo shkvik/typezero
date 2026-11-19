@@ -288,4 +288,6 @@ export enum Code {
   NoCodeFromString = "TZ2312",
   NoProxy = "TZ2313",
   NoRequire = "TZ2314",
+  TypeArgumentsCount = "TZ2401",
+  TypeNotGeneric = "TZ2402",
 }

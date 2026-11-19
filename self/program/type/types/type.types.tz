@@ -1,0 +1,167 @@
+export enum TypeKind {
+  Error,
+  Void,
+  Undefined,
+  Never,
+  Unknown,
+  Boolean,
+  Double,
+  Decimal,
+  String,
+  Json,
+  AnyObject,
+  Int,
+  Literal,
+  Array,
+  Tuple,
+  Object,
+  Function,
+  Union,
+  Result,
+  Promise,
+  Iterator,
+  Dict,
+}
+
+export enum DictKind {
+  Record,
+  Map,
+  Set,
+}
+
+export enum LiteralKind {
+  String,
+  Int,
+  Double,
+  Boolean,
+}
+
+export type PlainKind =
+  | TypeKind.Error
+  | TypeKind.Void
+  | TypeKind.Undefined
+  | TypeKind.Never
+  | TypeKind.Unknown
+  | TypeKind.Boolean
+  | TypeKind.Double
+  | TypeKind.Decimal
+  | TypeKind.String
+  | TypeKind.Json
+  | TypeKind.AnyObject;
+
+export type PlainType = {
+  readonly id: int;
+  readonly kind: PlainKind;
+};
+
+export type IntType = {
+  readonly id: int;
+  readonly kind: TypeKind.Int;
+  readonly bits: int;
+  readonly unsigned: boolean;
+};
+
+export type LiteralType = {
+  readonly id: int;
+  readonly kind: TypeKind.Literal;
+  readonly literal: LiteralKind;
+  readonly text: string;
+};
+
+export type ArrayType = {
+  readonly id: int;
+  readonly kind: TypeKind.Array;
+  readonly item: Type;
+};
+
+export type TupleType = {
+  readonly id: int;
+  readonly kind: TypeKind.Tuple;
+  readonly items: Type[];
+  readonly readonly: boolean;
+};
+
+export type ObjectField = {
+  readonly name: string;
+  readonly type: Type;
+  readonly optional: boolean;
+  readonly readonly: boolean;
+};
+
+export type ObjectType = {
+  readonly id: int;
+  readonly kind: TypeKind.Object;
+  readonly fields: ObjectField[];
+};
+
+export type FunctionParameter = {
+  readonly type: Type;
+  readonly optional: boolean;
+};
+
+export type FunctionShape = {
+  readonly params: FunctionParameter[];
+  readonly rest: boolean;
+  readonly self?: Type;
+  readonly result: Type;
+};
+
+export type FunctionType = {
+  readonly id: int;
+  readonly kind: TypeKind.Function;
+  readonly shape: FunctionShape;
+};
+
+export type UnionType = {
+  readonly id: int;
+  readonly kind: TypeKind.Union;
+  readonly parts: Type[];
+};
+
+export type ResultType = {
+  readonly id: int;
+  readonly kind: TypeKind.Result;
+  readonly value: Type;
+  readonly error: Type;
+};
+
+export type PromiseType = {
+  readonly id: int;
+  readonly kind: TypeKind.Promise;
+  readonly value: Type;
+};
+
+export type IteratorShape = {
+  readonly yielded: Type;
+  readonly returned: Type;
+  readonly sent: Type;
+  readonly async: boolean;
+};
+
+export type IteratorType = {
+  readonly id: int;
+  readonly kind: TypeKind.Iterator;
+  readonly shape: IteratorShape;
+};
+
+export type DictType = {
+  readonly id: int;
+  readonly kind: TypeKind.Dict;
+  readonly dict: DictKind;
+  readonly key: Type;
+  readonly value: Type;
+};
+
+export type Type =
+  | PlainType
+  | IntType
+  | LiteralType
+  | ArrayType
+  | TupleType
+  | ObjectType
+  | FunctionType
+  | UnionType
+  | ResultType
+  | PromiseType
+  | IteratorType
+  | DictType;

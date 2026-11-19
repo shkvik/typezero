@@ -3,7 +3,7 @@ import {
   FunctionTypeForm,
   ModifierChange,
   ObjectTypeField,
-  TypeKind,
+  TypeRefKind,
   TypeRef,
 } from "../../../../program/ast/types/ast.types.types.tz";
 import { Quoting } from "../types/ast-dump.types.tz";
@@ -27,7 +27,7 @@ partial class Dumper {
     const form = ref.form;
 
     switch (form.kind) {
-      case TypeKind.Function: {
+      case TypeRefKind.Function: {
         const paramNames = form.params.map((param) => param.name);
         const optionalParams = form.params.map((param) => param.optional);
         const names = this.quoteAll(paramNames);
@@ -36,9 +36,9 @@ partial class Dumper {
 
         return ` names=${names} opt=${optional} rest=${rest}`;
       }
-      case TypeKind.Object:
+      case TypeRefKind.Object:
         return this.objectExtras(form.fields);
-      case TypeKind.Tuple: {
+      case TypeRefKind.Tuple: {
         const readonlyElements = form.elements.map(() => form.readonly);
         const spreadElements = form.elements.map((element) => element.spread);
         const readonlyFlags = this.flags(readonlyElements);
@@ -46,7 +46,7 @@ partial class Dumper {
 
         return ` ro=${readonlyFlags} spread=${spread}`;
       }
-      case TypeKind.Literal: {
+      case TypeRefKind.Literal: {
         const text = this.quote(form.text, Quoting.EscapeUnicode);
         const numberBits = this.bits(form.number);
         const integer = this.flag(form.integer);
@@ -57,23 +57,23 @@ partial class Dumper {
           `beyond=${beyond}`
         );
       }
-      case TypeKind.Predicate: {
+      case TypeRefKind.Predicate: {
         const isAsserts = this.flag(form.asserts);
 
         return ` asserts=${isAsserts}`;
       }
-      case TypeKind.TypeOf: {
+      case TypeRefKind.TypeOf: {
         const names = this.quoteAll(form.names);
 
         return ` names=${names}`;
       }
-      case TypeKind.Mapped: {
+      case TypeRefKind.Mapped: {
         const optional = this.changeNumber(form.optionalChange);
         const readonlyChange = this.changeNumber(form.readonlyChange);
 
         return ` opt=${optional} ro=${readonlyChange}`;
       }
-      case TypeKind.Template: {
+      case TypeRefKind.Template: {
         const parts: string[] = [];
 
         for (const text of form.texts) {
@@ -136,11 +136,11 @@ partial class Dumper {
     const form = ref.form;
 
     switch (form.kind) {
-      case TypeKind.Object:
+      case TypeRefKind.Object:
         return form.fields.map((field) => field.type);
-      case TypeKind.Tuple:
+      case TypeRefKind.Tuple:
         return form.elements.map((element) => element.type);
-      case TypeKind.Function:
+      case TypeRefKind.Function:
         return this.signatureTypes(form);
       default:
         return ref.args;
@@ -158,7 +158,7 @@ partial class Dumper {
   }
 
   private dumpType(ref: TypeRef): void {
-    const kind = this.typeKindName(ref.form.kind);
+    const kind = this.typeRefKindName(ref.form.kind);
     const name = this.quote(ref.name);
     const source = this.span(ref.source);
     const extras = this.typeExtras(ref);
@@ -194,41 +194,41 @@ partial class Dumper {
     }
   }
 
-  private typeKindName(kind: TypeKind): string {
+  private typeRefKindName(kind: TypeRefKind): string {
     switch (kind) {
-      case TypeKind.Name:
+      case TypeRefKind.Name:
         return "Name";
-      case TypeKind.Array:
+      case TypeRefKind.Array:
         return "Array";
-      case TypeKind.Union:
+      case TypeRefKind.Union:
         return "Union";
-      case TypeKind.Generic:
+      case TypeRefKind.Generic:
         return "Generic";
-      case TypeKind.Function:
+      case TypeRefKind.Function:
         return "Function";
-      case TypeKind.Object:
+      case TypeRefKind.Object:
         return "Object";
-      case TypeKind.Tuple:
+      case TypeRefKind.Tuple:
         return "Tuple";
-      case TypeKind.Literal:
+      case TypeRefKind.Literal:
         return "Literal";
-      case TypeKind.Predicate:
+      case TypeRefKind.Predicate:
         return "Predicate";
-      case TypeKind.KeyOf:
+      case TypeRefKind.KeyOf:
         return "KeyOf";
-      case TypeKind.Indexed:
+      case TypeRefKind.Indexed:
         return "Indexed";
-      case TypeKind.TypeOf:
+      case TypeRefKind.TypeOf:
         return "TypeOf";
-      case TypeKind.Mapped:
+      case TypeRefKind.Mapped:
         return "Mapped";
-      case TypeKind.Conditional:
+      case TypeRefKind.Conditional:
         return "Conditional";
-      case TypeKind.Infer:
+      case TypeRefKind.Infer:
         return "Infer";
-      case TypeKind.Template:
+      case TypeRefKind.Template:
         return "Template";
-      case TypeKind.Invalid:
+      case TypeRefKind.Invalid:
         return "Invalid";
       default:
         return "Intersection";

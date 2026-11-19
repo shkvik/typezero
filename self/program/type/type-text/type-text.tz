@@ -1,0 +1,242 @@
+import {
+  ArrayType,
+  DictKind,
+  DictType,
+  FunctionShape,
+  IntType,
+  IteratorShape,
+  LiteralKind,
+  LiteralType,
+  ObjectField,
+  ObjectType,
+  PromiseType,
+  ResultType,
+  TupleType,
+  Type,
+  TypeKind,
+} from "../types/type.types.tz";
+
+export class TypeText {
+  public of(type: Type): string {
+    switch (type.kind) {
+      case TypeKind.Void:
+        return "void";
+      case TypeKind.Undefined:
+        return "undefined";
+      case TypeKind.Never:
+        return "never";
+      case TypeKind.Unknown:
+        return "unknown";
+      case TypeKind.Boolean:
+        return "boolean";
+      case TypeKind.Double:
+        return "double";
+      case TypeKind.Decimal:
+        return "decimal";
+      case TypeKind.String:
+        return "string";
+      case TypeKind.Json:
+        return "Json";
+      case TypeKind.AnyObject:
+        return "object";
+      case TypeKind.Int:
+        return this.intText(type);
+      case TypeKind.Literal:
+        return this.literalText(type);
+      case TypeKind.Array:
+        return this.arrayText(type);
+      case TypeKind.Tuple:
+        return this.tupleText(type);
+      case TypeKind.Object:
+        return this.objectText(type);
+      case TypeKind.Function:
+        return this.functionText(type.shape);
+      case TypeKind.Union:
+        return this.listText(type.parts, " | ");
+      case TypeKind.Result:
+        return this.resultText(type);
+      case TypeKind.Promise:
+        return this.promiseText(type);
+      case TypeKind.Iterator:
+        return this.iteratorText(type.shape);
+      case TypeKind.Dict:
+        return this.dictText(type);
+      default:
+        return "?";
+    }
+  }
+
+  private intText(type: IntType): string {
+    if (type.bits == 64 && !type.unsigned) {
+      return "int";
+    }
+    if (type.unsigned) {
+      return `uint${type.bits}`;
+    }
+
+    return `int${type.bits}`;
+  }
+
+  private literalText(type: LiteralType): string {
+    if (type.literal == LiteralKind.String) {
+      return `"${type.text}"`;
+    }
+
+    return type.text;
+  }
+
+  private arrayText(type: ArrayType): string {
+    const item = type.item;
+    const text = this.of(item);
+
+    if (item.kind == TypeKind.Union || item.kind == TypeKind.Function) {
+      return `(${text})[]`;
+    }
+
+    return `${text}[]`;
+  }
+
+  private resultText(type: ResultType): string {
+    const value = this.of(type.value);
+    const error = this.of(type.error);
+
+    return `Result<${value}, ${error}>`;
+  }
+
+  private promiseText(type: PromiseType): string {
+    const value = this.of(type.value);
+
+    return `Promise<${value}>`;
+  }
+
+  private listText(types: Type[], separator: string): string {
+    const texts = types.map((type) => this.partText(type));
+
+    return texts.join(separator);
+  }
+
+  private partText(part: Type): string {
+    const text = this.of(part);
+
+    if (part.kind == TypeKind.Function) {
+      return `(${text})`;
+    }
+
+    return text;
+  }
+
+  private tupleText(type: TupleType): string {
+    const texts = type.items.map((item) => this.of(item));
+    const list = `[${texts.join(", ")}]`;
+
+    if (type.readonly) {
+      return `readonly ${list}`;
+    }
+
+    return list;
+  }
+
+  private objectText(type: ObjectType): string {
+    if (type.fields.length == 0) {
+      return "{}";
+    }
+
+    const texts = type.fields.map((field) => this.fieldText(field));
+
+    return `{ ${texts.join("; ")} }`;
+  }
+
+  private fieldText(field: ObjectField): string {
+    const type = this.of(field.type);
+    const name = this.fieldName(field);
+
+    if (field.readonly) {
+      return `readonly ${name}: ${type}`;
+    }
+
+    return `${name}: ${type}`;
+  }
+
+  private fieldName(field: ObjectField): string {
+    if (field.optional) {
+      return `${field.name}?`;
+    }
+
+    return field.name;
+  }
+
+  private functionText(shape: FunctionShape): string {
+    const texts: string[] = [];
+    const self = shape.self;
+    if (self != undefined) {
+      const text = this.of(self);
+
+      texts.push(`this: ${text}`);
+    }
+
+    for (let index = 0; index < shape.params.length; index++) {
+      const text = this.paramText(shape, index);
+
+      texts.push(text);
+    }
+
+    const result = this.of(shape.result);
+
+    return `(${texts.join(", ")}) => ${result}`;
+  }
+
+  private paramText(shape: FunctionShape, index: int): string {
+    const param = shape.params[index];
+    if (param == undefined) {
+      return "";
+    }
+
+    const text = this.of(param.type);
+
+    if (shape.rest && index == shape.params.length - 1) {
+      return `...${text}`;
+    }
+    if (param.optional) {
+      return `${text}?`;
+    }
+
+    return text;
+  }
+
+  private iteratorText(shape: IteratorShape): string {
+    const name = this.iteratorName(shape.async);
+    const yielded = this.of(shape.yielded);
+    const plain =
+      shape.returned.kind == TypeKind.Void && shape.sent.kind == TypeKind.Void;
+    if (plain) {
+      return `${name}<${yielded}>`;
+    }
+
+    const returned = this.of(shape.returned);
+    const sent = this.of(shape.sent);
+
+    return `${name}<${yielded}, ${returned}, ${sent}>`;
+  }
+
+  private iteratorName(async: boolean): string {
+    if (async) {
+      return "AsyncGenerator";
+    }
+
+    return "Generator";
+  }
+
+  private dictText(type: DictType): string {
+    const key = this.of(type.key);
+    const value = this.of(type.value);
+
+    switch (type.dict) {
+      case DictKind.Record:
+        return `Record<${key}, ${value}>`;
+      case DictKind.Map:
+        return `Map<${key}, ${value}>`;
+      default:
+        return `Set<${key}>`;
+    }
+  }
+}

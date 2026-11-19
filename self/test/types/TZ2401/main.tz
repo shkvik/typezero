@@ -1,0 +1,8 @@
+let counts: Map<int> = new Map<int, int>();
+let outcome: Result<int> = ok(1);
+let pending: Promise = Promise.resolve(1);
+let list: Array = [];
+let seen: Set<int, int> = new Set<int>();
+let steps: Generator<int, int, int, int> = [1].values();
+
+console.log(counts, outcome, pending, list, seen, steps);

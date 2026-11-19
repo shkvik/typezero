@@ -1,0 +1,44 @@
+export enum PlainBuiltin {
+  Int,
+  Int8,
+  Int16,
+  Int32,
+  Uint8,
+  Uint16,
+  Uint32,
+  Uint64,
+  Double,
+  String,
+  Boolean,
+  Decimal,
+  Json,
+  Unknown,
+  Never,
+  Void,
+  Undefined,
+  AnyObject,
+}
+
+export enum GenericBuiltin {
+  Array,
+  Result,
+  Promise,
+  Map,
+  Set,
+  Record,
+  Generator,
+  AsyncGenerator,
+}
+
+export type PlainTypeName = {
+  readonly name: string;
+  readonly type: PlainBuiltin;
+};
+
+export type GenericTypeName = {
+  readonly name: string;
+  readonly type: GenericBuiltin;
+  readonly least: int;
+  readonly most: int;
+  readonly example: string;
+};
