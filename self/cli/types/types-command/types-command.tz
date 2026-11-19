@@ -54,7 +54,7 @@ export class TypesCommand {
     const names = binder.run();
     const resolver = new NameResolver(program, names);
     const resolved = resolver.run();
-    const types = new TypeResolver(this.store, resolved);
+    const types = new TypeResolver(this.store, program, resolved);
 
     for (const scopes of resolved) {
       const module = scopes.module;

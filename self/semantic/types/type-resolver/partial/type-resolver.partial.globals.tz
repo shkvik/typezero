@@ -1,0 +1,94 @@
+import { TypeResolver } from "../type-resolver.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import { kLibrary } from "../../../../program/library/library-modules/const/library-modules.const.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { kNamePoint } from "../const/type-resolver.const.tables.tz";
+import { TypeContext } from "../types/type-resolver.types.tz";
+
+partial class TypeResolver {
+  private global(ref: TypeRef, context: TypeContext): Type {
+    const point = ref.name.indexOf(kNamePoint);
+    if (point >= 0) {
+      const word = ref.name.slice(0, point);
+      const member = ref.name.slice(point + 1);
+      const inside = this.memberModule(word, member);
+
+      return this.fromModule(ref, inside, member, context);
+    }
+
+    const builtin = this.builtin(ref.name, ref, context);
+    if (builtin != undefined) {
+      return builtin;
+    }
+
+    const declaring = this.globals.get(ref.name);
+    if (declaring != undefined) {
+      return this.fromModule(ref, declaring, ref.name, context);
+    }
+
+    const mentioned = this.mentionedModule(ref.name);
+
+    return this.fromModule(ref, mentioned, ref.name, context);
+  }
+
+  private mentionedModule(name: string): int | undefined {
+    const row = kLibrary.global(name);
+    if (row == undefined) {
+      return undefined;
+    }
+
+    return this.moduleNamed(row.module);
+  }
+
+  private memberModule(word: string, member: string): int | undefined {
+    const rows = kLibrary.members();
+    const row = rows.find((one) => one.owner == word && one.name == member);
+    if (row == undefined) {
+      return this.namespaces.get(word);
+    }
+
+    return this.moduleNamed(row.module);
+  }
+
+  private moduleNamed(name: string): int | undefined {
+    const module = this.program.modules.find((one) => one.name == name);
+
+    return module?.id;
+  }
+
+  private fromModule(
+    ref: TypeRef,
+    module: int | undefined,
+    name: string,
+    context: TypeContext,
+  ): Type {
+    if (module == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.prefixes.has(module)) {
+      const builtin = this.builtin(name, ref, context);
+      if (builtin != undefined) {
+        return builtin;
+      }
+    }
+
+    const record = this.record(module);
+    const found = record?.declarations.get(name);
+    if (found != undefined) {
+      return this.ofDeclaration(ref, module, found, context);
+    }
+
+    const declared = record?.classes.get(name);
+    if (declared == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const params = declared.typeParams;
+    const written = this.written(ref, name, params, context);
+    if (written == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.instance(module, name, declared.loc, params, written);
+  }
+}

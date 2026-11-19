@@ -1,0 +1,46 @@
+// Types that the library declares: global names, names inside a namespace,
+// aliases of the library and names imported from its modules.
+import { Buffer as NodeBuffer } from "node:buffer";
+import { Hash } from "node:crypto";
+import { Stats } from "node:fs";
+import { Readable } from "node:stream";
+
+class Point {
+  public x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+let moment: Date = new Date(0);
+let pattern: RegExp = /a/;
+let bytes: Uint8Array = new Uint8Array(2);
+let wide: Float64Array = new Float64Array(2);
+let memory: ArrayBuffer = new ArrayBuffer(8);
+let view: DataView = new DataView(memory);
+let buffer: Buffer = Buffer.alloc(2);
+let node: Buffer = NodeBuffer.alloc(2);
+let weak: WeakRef<Point> = new WeakRef<Point>(new Point(1));
+let encoder: TextEncoder = new TextEncoder();
+let timer: Timeout = setTimeout((): void => {}, 1);
+let soon: Immediate = setImmediate((): void => {});
+
+let plain: number = 1.5;
+let steps: Iterator<int> = [1].values();
+let frozen: ReadonlyArray<string> = [];
+let good: Ok<int, string> = ok(1);
+let encoding: BufferEncoding = "utf8";
+let failure: NumberError | undefined = undefined;
+let found: RegExpMatchArray | undefined = pattern.exec("a");
+
+let format: Intl.NumberFormat = new Intl.NumberFormat("en");
+let locale: Intl.Locale = new Intl.Locale("en");
+let wrapped: Bit.Wrap32 = 5;
+let handle: NodeJS.Timeout = timer;
+
+function digest(hash: Hash, stats: Stats, stream: Readable<string>): void {}
+
+console.log(moment, pattern, bytes, wide, memory, view, buffer, node, weak);
+console.log(encoder, timer, soon, plain, steps, frozen, good, encoding);
+console.log(failure, found, format, locale, wrapped, handle, digest);

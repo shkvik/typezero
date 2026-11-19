@@ -28,7 +28,7 @@ partial class TypeResolver {
       return this.reenter(module, decl, open);
     }
 
-    const label = this.labelText(decl.name, written);
+    const label = this.labelText(module, decl.name, written);
     const reserved = this.reserve(decl.type, label);
     const error = this.store.plain(TypeKind.Error);
     const door: AliasDoor = {

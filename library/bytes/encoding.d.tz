@@ -74,13 +74,16 @@ export declare class TextDecoder {
  * A `TextDecoder` made with `fatal: true`: broken bytes are an error, so
  * `decode` gives a Result.
  */
-export interface FatalTextDecoder {
-  /** The name of the encoding. */
-  readonly encoding: string;
-  readonly fatal: boolean;
-  readonly ignoreBOM: boolean;
+export declare class FatalTextDecoder {
+  /** `new TextDecoder(label, { fatal: true })` makes one. */
+  private constructor();
 
-  decode(
+  /** The name of the encoding. */
+  public readonly encoding: string;
+  public readonly fatal: boolean;
+  public readonly ignoreBOM: boolean;
+
+  public decode(
     bytes?: AnyBytes,
     options?: TextDecodeOptions,
   ): Result<string, DecodeError>;

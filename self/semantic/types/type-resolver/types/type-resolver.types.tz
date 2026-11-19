@@ -5,6 +5,7 @@ import {
   HandleDecl,
   TypeAliasDecl,
 } from "../../../../program/ast/types/ast.types.classes.tz";
+import { DeclaredClass } from "../../../../program/ast/types/ast.types.declarations.tz";
 import { NameUse } from "../../../../program/scopes/types/scopes.types.tz";
 import { Type } from "../../../../program/type/types/type.types.tz";
 
@@ -63,6 +64,7 @@ export type TypeContext = {
 export type ModuleRecord = {
   readonly uses: Map<int, NameUse>;
   readonly declarations: Map<string, TypeDeclaration>;
+  readonly classes: Map<string, DeclaredClass>;
   readonly errors: SourceError[];
 };
 

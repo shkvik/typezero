@@ -37,6 +37,10 @@ partial class TypeResolver {
     const fields: ObjectField[] = [];
 
     for (const field of form.fields) {
+      if (field.call) {
+        continue;
+      }
+
       const type = this.resolve(field.type, context);
 
       fields.push({

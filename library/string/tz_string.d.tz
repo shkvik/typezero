@@ -5,7 +5,10 @@
  * when the program is built; a `string` becomes one by `toCString()`, which
  * gives `undefined` when it holds a zero.
  */
-export interface cstring {
+export declare class cstring {
+  /** A literal or `toCString()` makes one; there is no `new cstring()`. */
+  private constructor();
+
   /** The same text as a `string`. */
-  toString(): string;
+  public toString(): string;
 }

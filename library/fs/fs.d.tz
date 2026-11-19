@@ -160,65 +160,61 @@ export type WriteFileOptions<F> = {
  * times with `Ms` are milliseconds since the start of 1970, the others the
  * same moments as dates.
  */
-export interface Stats {
-  readonly dev: int;
+export declare class Stats {
+  /** There is no `new Stats()`: only the functions of this module make one. */
+  private constructor();
+
+  public readonly dev: int;
   /** The kind and the permissions as bits. */
-  readonly mode: int;
-  readonly nlink: int;
-  readonly uid: int;
-  readonly gid: int;
-  readonly rdev: int;
-  readonly blksize: int;
-  readonly ino: int;
+  public readonly mode: int;
+  public readonly nlink: int;
+  public readonly uid: int;
+  public readonly gid: int;
+  public readonly rdev: int;
+  public readonly blksize: int;
+  public readonly ino: int;
   /** The length in bytes. */
-  readonly size: int;
-  readonly blocks: int;
+  public readonly size: int;
+  public readonly blocks: int;
   /** When it was last read. */
-  readonly atimeMs: double;
+  public readonly atimeMs: double;
   /** When what it holds was last changed. */
-  readonly mtimeMs: double;
+  public readonly mtimeMs: double;
   /** When its name or permissions were last changed. */
-  readonly ctimeMs: double;
+  public readonly ctimeMs: double;
   /** When it was made. */
-  readonly birthtimeMs: double;
-  readonly atime: Date;
-  readonly mtime: Date;
-  readonly ctime: Date;
-  readonly birthtime: Date;
+  public readonly birthtimeMs: double;
+  public readonly atime: Date;
+  public readonly mtime: Date;
+  public readonly ctime: Date;
+  public readonly birthtime: Date;
 
-  isFile(): boolean;
-  isDirectory(): boolean;
-  isSymbolicLink(): boolean;
-  isFIFO(): boolean;
-  isSocket(): boolean;
-  isBlockDevice(): boolean;
-  isCharacterDevice(): boolean;
+  public isFile(): boolean;
+  public isDirectory(): boolean;
+  public isSymbolicLink(): boolean;
+  public isFIFO(): boolean;
+  public isSocket(): boolean;
+  public isBlockDevice(): boolean;
+  public isCharacterDevice(): boolean;
 }
-
-/** `Stats` has nothing: `new Stats()` is not possible. */
-export interface StatsConstructor {}
-
-export declare const Stats: StatsConstructor;
 
 /** An entry of a folder, as `readdir` with `withFileTypes` gives it. */
-export interface Dirent {
-  readonly name: string;
+export declare class Dirent {
+  /** There is no `new Dirent()`: only the functions of this module make one. */
+  private constructor();
+
+  public readonly name: string;
   /** The folder it is in. */
-  readonly parentPath: string;
+  public readonly parentPath: string;
 
-  isFile(): boolean;
-  isDirectory(): boolean;
-  isSymbolicLink(): boolean;
-  isFIFO(): boolean;
-  isSocket(): boolean;
-  isBlockDevice(): boolean;
-  isCharacterDevice(): boolean;
+  public isFile(): boolean;
+  public isDirectory(): boolean;
+  public isSymbolicLink(): boolean;
+  public isFIFO(): boolean;
+  public isSocket(): boolean;
+  public isBlockDevice(): boolean;
+  public isCharacterDevice(): boolean;
 }
-
-/** `Dirent` has nothing: only the functions of this module make one. */
-export interface DirentConstructor {}
-
-export declare const Dirent: DirentConstructor;
 
 /** The numbers of `constants`. */
 export interface FsConstants {

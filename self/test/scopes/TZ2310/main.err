@@ -10,6 +10,3 @@ const face = new Face();
 main.tz:13:14: error TZ2310: 'Ok' is a type, not a value
 const kept = Ok(1);
              ^
-main.tz:14:21: error TZ2310: 'FatalTextDecoder' is a type, not a value
-const decoder = new FatalTextDecoder();
-                    ^

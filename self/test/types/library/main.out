@@ -1,0 +1,25 @@
+main.tz
+  16:5 moment: Date
+  17:5 pattern: RegExp
+  18:5 bytes: Uint8Array
+  19:5 wide: Float64Array
+  20:5 memory: ArrayBuffer
+  21:5 view: DataView
+  22:5 buffer: Buffer
+  23:5 node: Buffer
+  24:5 weak: WeakRef<Point>
+  25:5 encoder: TextEncoder
+  26:5 timer: Timeout
+  27:5 soon: Immediate
+  29:5 plain: double
+  30:5 steps: Generator<int>
+  31:5 frozen: string[]
+  32:5 good: Result<int, never>
+  33:5 encoding: "ascii" | "utf8" | "utf-8" | "utf16le" | "utf-16le" | "ucs2" | "ucs-2" | "base64" | "base64url" | "latin1" | "binary" | "hex"
+  34:5 failure: NumberError | undefined
+  35:5 found: RegExpMatchArray | undefined
+  37:5 format: Intl.NumberFormat
+  38:5 locale: Intl.Locale
+  39:5 wrapped: Bit.Wrap32
+  40:5 handle: Timeout
+  42:10 digest: (Hash, Stats, Readable<string>) => void

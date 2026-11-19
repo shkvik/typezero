@@ -2,25 +2,31 @@
  * A timer that `setTimeout` or `setInterval` started. The program does not
  * end while a timer waits, unless it was told so with `unref`.
  */
-export interface Timeout {
+export declare class Timeout {
+  /** There is no `new Timeout()`: `setTimeout` and `setInterval` make one. */
+  private constructor();
+
   /** The program waits for this timer again; gives the timer itself. */
-  ref(): Timeout;
+  public ref(): Timeout;
   /** The program may end without waiting for this timer. */
-  unref(): Timeout;
+  public unref(): Timeout;
   /** Whether the program waits for this timer. */
-  hasRef(): boolean;
+  public hasRef(): boolean;
   /** Starts the wait anew from this moment. */
-  refresh(): Timeout;
+  public refresh(): Timeout;
 }
 
 /** What `setImmediate` started. */
-export interface Immediate {
+export declare class Immediate {
+  /** There is no `new Immediate()`: `setImmediate` makes one. */
+  private constructor();
+
   /** The program waits for it again; gives it itself. */
-  ref(): Immediate;
+  public ref(): Immediate;
   /** The program may end without waiting for it. */
-  unref(): Immediate;
+  public unref(): Immediate;
   /** Whether the program waits for it. */
-  hasRef(): boolean;
+  public hasRef(): boolean;
 }
 
 /**

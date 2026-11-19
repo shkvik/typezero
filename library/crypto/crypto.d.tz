@@ -111,63 +111,85 @@ export declare const constants: CryptoConstants;
  * built, and only that algorithm gets into the program.
  * @example createHash("sha256")
  */
-export interface Hash {
+export declare class Hash {
+  /** There is no `new Hash()`: `createHash` makes one. */
+  private constructor();
+
   /** Adds data; gives the hash itself. */
-  update(data: CryptoData): Hash;
-  update(text: string, encoding: BufferEncoding): Hash;
+  public update(data: CryptoData): Hash;
+  public update(text: string, encoding: BufferEncoding): Hash;
   /** The hash: bytes, or a text in the encoding. */
-  digest(): Buffer;
-  digest(encoding: "buffer"): Buffer;
-  digest(encoding: DigestEncoding): string;
+  public digest(): Buffer;
+  public digest(encoding: "buffer"): Buffer;
+  public digest(encoding: DigestEncoding): string;
   /** A hash of the same data so far, to go on in two ways. */
-  copy(options?: { outputLength?: int }): Hash;
+  public copy(options?: { outputLength?: int }): Hash;
 }
 
 /** As `Hash`, with a secret key: made by `createHmac`. */
-export interface Hmac {
-  update(data: CryptoData): Hmac;
-  update(text: string, encoding: BufferEncoding): Hmac;
-  digest(): Buffer;
-  digest(encoding: "buffer"): Buffer;
-  digest(encoding: DigestEncoding): string;
+export declare class Hmac {
+  /** There is no `new Hmac()`: `createHmac` makes one. */
+  private constructor();
+
+  public update(data: CryptoData): Hmac;
+  public update(text: string, encoding: BufferEncoding): Hmac;
+  public digest(): Buffer;
+  public digest(encoding: "buffer"): Buffer;
+  public digest(encoding: DigestEncoding): string;
 }
 
 /** Encrypts by pieces: made by `createCipheriv`. */
-export interface Cipheriv {
+export declare class Cipheriv {
+  /** There is no `new Cipheriv()`: `createCipheriv` makes one. */
+  private constructor();
+
   /** Encrypts a piece: bytes, or a text when an output encoding is given. */
-  update(data: AnyTypedArray | DataView): Buffer;
-  update(text: string, inputEncoding?: BufferEncoding): Buffer;
-  update(
+  public update(data: AnyTypedArray | DataView): Buffer;
+  public update(text: string, inputEncoding?: BufferEncoding): Buffer;
+  public update(
     data: CryptoData,
     inputEncoding: BufferEncoding | undefined,
     outputEncoding: DigestEncoding,
   ): string;
   /** The last piece; after it nothing more is encrypted. */
-  final(): Result<Buffer, CipherFinalError>;
-  final(outputEncoding: DigestEncoding): Result<string, CipherFinalError>;
+  public final(): Result<Buffer, CipherFinalError>;
+  public final(
+    outputEncoding: DigestEncoding,
+  ): Result<string, CipherFinalError>;
   /** Data that is not encrypted but is covered by the tag. */
-  setAAD(data: CryptoBytes, options?: { plaintextLength?: int }): Cipheriv;
+  public setAAD(
+    data: CryptoBytes,
+    options?: { plaintextLength?: int },
+  ): Cipheriv;
   /** The tag of an authenticated mode such as GCM, after `final`. */
-  getAuthTag(): Result<Buffer, GetAuthTagError>;
-  setAutoPadding(autoPadding?: boolean): Cipheriv;
+  public getAuthTag(): Result<Buffer, GetAuthTagError>;
+  public setAutoPadding(autoPadding?: boolean): Cipheriv;
 }
 
 /** Decrypts by pieces: made by `createDecipheriv`. */
-export interface Decipheriv {
-  update(data: AnyTypedArray | DataView): Buffer;
-  update(text: string, inputEncoding?: BufferEncoding): Buffer;
-  update(
+export declare class Decipheriv {
+  /** There is no `new Decipheriv()`: `createDecipheriv` makes one. */
+  private constructor();
+
+  public update(data: AnyTypedArray | DataView): Buffer;
+  public update(text: string, inputEncoding?: BufferEncoding): Buffer;
+  public update(
     data: CryptoData,
     inputEncoding: BufferEncoding | undefined,
     outputEncoding: BufferEncoding,
   ): string;
   /** The last piece; an error when the tag does not fit the data. */
-  final(): Result<Buffer, DecipherFinalError>;
-  final(outputEncoding: BufferEncoding): Result<string, DecipherFinalError>;
-  setAAD(data: CryptoBytes, options?: { plaintextLength?: int }): Decipheriv;
+  public final(): Result<Buffer, DecipherFinalError>;
+  public final(
+    outputEncoding: BufferEncoding,
+  ): Result<string, DecipherFinalError>;
+  public setAAD(
+    data: CryptoBytes,
+    options?: { plaintextLength?: int },
+  ): Decipheriv;
   /** The tag the data was encrypted with, before `final`. */
-  setAuthTag(tag: CryptoBytes): Decipheriv;
-  setAutoPadding(autoPadding?: boolean): Decipheriv;
+  public setAuthTag(tag: CryptoBytes): Decipheriv;
+  public setAutoPadding(autoPadding?: boolean): Decipheriv;
 }
 
 /** How a key is written out. */
@@ -180,33 +202,36 @@ export type KeyExportOptions = {
 };
 
 /** A key: secret, public or private. */
-export interface KeyObject {
+export declare class KeyObject {
+  /** There is no `new KeyObject()`: the functions that make keys give one. */
+  private constructor();
+
   /** "secret", "public" or "private". */
-  readonly type: string;
+  public readonly type: string;
   /** "rsa", "ec", "ed25519" and so on; none of a secret key. */
-  readonly asymmetricKeyType?: string;
+  public readonly asymmetricKeyType?: string;
   /** The length of a secret key in bytes. */
-  readonly symmetricKeySize?: int;
+  public readonly symmetricKeySize?: int;
 
   /**
    * The key written out: a secret key as bytes, "pem" as a text, "der" as
    * bytes, "jwk" as a `Json`.
    */
-  export(): Result<Buffer, KeyExportError>;
-  export(options: {
+  public export(): Result<Buffer, KeyExportError>;
+  public export(options: {
     format: "pem";
     type?: "pkcs1" | "spki" | "pkcs8" | "sec1";
     cipher?: string;
     passphrase?: string | CryptoBytes;
   }): Result<string, KeyExportError>;
-  export(options: {
+  public export(options: {
     format: "der";
     type?: "pkcs1" | "spki" | "pkcs8" | "sec1";
     cipher?: string;
     passphrase?: string | CryptoBytes;
   }): Result<Buffer, KeyExportError>;
-  export(options: { format: "jwk" }): Result<Json, KeyExportError>;
-  equals(other: KeyObject): boolean;
+  public export(options: { format: "jwk" }): Result<Json, KeyExportError>;
+  public equals(other: KeyObject): boolean;
 }
 
 /** A key with how it signs. */
@@ -219,29 +244,35 @@ export type SignKey = {
 };
 
 /** Signs data added by pieces: made by `createSign`. */
-export interface Sign {
-  update(data: CryptoData): Sign;
-  update(text: string, encoding: BufferEncoding): Sign;
+export declare class Sign {
+  /** There is no `new Sign()`: `createSign` makes one. */
+  private constructor();
+
+  public update(data: CryptoData): Sign;
+  public update(text: string, encoding: BufferEncoding): Sign;
   /** The signature: bytes, or a text in the encoding. */
-  sign(
+  public sign(
     key: KeyObject | string | CryptoBytes | SignKey,
   ): Result<Buffer, SignerSignError>;
-  sign(
+  public sign(
     key: KeyObject | string | CryptoBytes | SignKey,
     outputEncoding: DigestEncoding,
   ): Result<string, SignerSignError>;
 }
 
 /** Checks a signature of data added by pieces: made by `createVerify`. */
-export interface Verify {
-  update(data: CryptoData): Verify;
-  update(text: string, encoding: BufferEncoding): Verify;
+export declare class Verify {
+  /** There is no `new Verify()`: `createVerify` makes one. */
+  private constructor();
+
+  public update(data: CryptoData): Verify;
+  public update(text: string, encoding: BufferEncoding): Verify;
   /** Whether the signature is of this data by this key. */
-  verify(
+  public verify(
     key: KeyObject | string | CryptoBytes | SignKey,
     signature: AnyTypedArray | DataView,
   ): Result<boolean, VerifierVerifyError>;
-  verify(
+  public verify(
     key: KeyObject | string | CryptoBytes | SignKey,
     signature: string,
     signatureEncoding: DigestEncoding,
@@ -252,33 +283,36 @@ export interface Verify {
 export type PointFormat = "uncompressed" | "compressed" | "hybrid";
 
 /** An exchange of keys on an elliptic curve: made by `createECDH`. */
-export interface ECDH {
+export declare class ECDH {
+  /** There is no `new ECDH()`: `createECDH` makes one. */
+  private constructor();
+
   /** Makes the pair of keys and gives the public one. */
-  generateKeys(): Buffer;
-  generateKeys(encoding: DigestEncoding, format?: PointFormat): string;
-  getPublicKey(): Result<Buffer, EcdhGetPublicKeyError>;
-  getPublicKey(
+  public generateKeys(): Buffer;
+  public generateKeys(encoding: DigestEncoding, format?: PointFormat): string;
+  public getPublicKey(): Result<Buffer, EcdhGetPublicKeyError>;
+  public getPublicKey(
     encoding: DigestEncoding,
     format?: PointFormat,
   ): Result<string, EcdhGetPublicKeyError>;
-  getPrivateKey(): Result<Buffer, EcdhGetPrivateKeyError>;
-  getPrivateKey(
+  public getPrivateKey(): Result<Buffer, EcdhGetPrivateKeyError>;
+  public getPrivateKey(
     encoding: DigestEncoding,
   ): Result<string, EcdhGetPrivateKeyError>;
-  setPrivateKey(key: CryptoBytes): Result<void, EcdhSetPrivateKeyError>;
-  setPrivateKey(
+  public setPrivateKey(key: CryptoBytes): Result<void, EcdhSetPrivateKeyError>;
+  public setPrivateKey(
     key: string,
     encoding: DigestEncoding,
   ): Result<void, EcdhSetPrivateKeyError>;
   /** The secret both sides get: of one's own key and the other's public one. */
-  computeSecret(
+  public computeSecret(
     otherPublicKey: CryptoBytes,
   ): Result<Buffer, EcdhComputeSecretError>;
-  computeSecret(
+  public computeSecret(
     otherPublicKey: string,
     inputEncoding: DigestEncoding,
   ): Result<Buffer, EcdhComputeSecretError>;
-  computeSecret(
+  public computeSecret(
     otherPublicKey: string | CryptoBytes,
     inputEncoding: DigestEncoding | undefined,
     outputEncoding: DigestEncoding,
@@ -298,54 +332,55 @@ export type CheckHostOptions = {
  * A certificate. It is made by `X509Certificate.parse`, not by `new`: the
  * data may be no certificate.
  */
-export interface X509Certificate {
-  readonly subject: string;
-  readonly issuer: string;
-  readonly validFrom: string;
-  readonly validTo: string;
-  readonly validFromDate: Date;
-  readonly validToDate: Date;
-  readonly serialNumber: string;
-  readonly fingerprint: string;
-  readonly fingerprint256: string;
-  readonly fingerprint512: string;
-  readonly subjectAltName?: string;
-  readonly infoAccess?: string;
-  readonly keyUsage?: string[];
+export declare class X509Certificate {
+  /** There is no `new X509Certificate()`: `X509Certificate.parse` makes one. */
+  private constructor();
+
+  public readonly subject: string;
+  public readonly issuer: string;
+  public readonly validFrom: string;
+  public readonly validTo: string;
+  public readonly validFromDate: Date;
+  public readonly validToDate: Date;
+  public readonly serialNumber: string;
+  public readonly fingerprint: string;
+  public readonly fingerprint256: string;
+  public readonly fingerprint512: string;
+  public readonly subjectAltName?: string;
+  public readonly infoAccess?: string;
+  public readonly keyUsage?: string[];
   /** Whether it is a certificate of an authority. */
-  readonly ca: boolean;
+  public readonly ca: boolean;
   /** The certificate as bytes of DER. */
-  readonly raw: Buffer;
-  readonly publicKey: KeyObject;
+  public readonly raw: Buffer;
+  public readonly publicKey: KeyObject;
 
   /** The certificate as PEM. */
-  toString(): string;
-  toJSON(): string;
+  public toString(): string;
+  public toJSON(): string;
   /** The name of the certificate the host fits, if any. */
-  checkHost(name: string, options?: CheckHostOptions): string | undefined;
-  checkEmail(
+  public checkHost(
+    name: string,
+    options?: CheckHostOptions,
+  ): string | undefined;
+  public checkEmail(
     email: string,
     options?: { subject?: "default" | "always" | "never" },
   ): string | undefined;
-  checkIP(ip: string): string | undefined;
+  public checkIP(ip: string): string | undefined;
   /** Whether the other certificate issued this one. */
-  checkIssued(other: X509Certificate): boolean;
-  checkPrivateKey(
+  public checkIssued(other: X509Certificate): boolean;
+  public checkPrivateKey(
     privateKey: KeyObject,
   ): Result<boolean, CertificateCheckPrivateKeyError>;
   /** Whether the certificate is signed by the key. */
-  verify(publicKey: KeyObject): Result<boolean, CertificateVerifyError>;
-}
+  public verify(publicKey: KeyObject): Result<boolean, CertificateVerifyError>;
 
-/** What `X509Certificate` has. */
-export interface X509CertificateConstructor {
   /** Reads a certificate of PEM or DER. */
-  parse(
+  public static parse(
     data: string | CryptoBytes,
   ): Result<X509Certificate, ParseCertificateError>;
 }
-
-export declare const X509Certificate: X509CertificateConstructor;
 
 /**
  * A hash to count by pieces; an error when there is no such algorithm.

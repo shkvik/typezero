@@ -18,19 +18,23 @@ import {
 } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  private builtin(ref: TypeRef, context: TypeContext): Type {
-    const generic = kGenericTypes.find((row) => row.name == ref.name);
+  private builtin(
+    name: string,
+    ref: TypeRef,
+    context: TypeContext,
+  ): Type | undefined {
+    const generic = kGenericTypes.find((row) => row.name == name);
     if (generic != undefined) {
       return this.generic(ref, generic, context);
     }
 
-    const plain = kPlainTypes.find((row) => row.name == ref.name);
+    const plain = kPlainTypes.find((row) => row.name == name);
     if (plain == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return undefined;
     }
     if (ref.args.length > 0) {
       this.report(context.module, ref.loc, Code.TypeNotGeneric, {
-        word: ref.name,
+        word: name,
       });
 
       return this.store.plain(TypeKind.Error);

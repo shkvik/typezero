@@ -11,6 +11,5 @@ function make<T>(): void {
 const shape = Shape;
 const face = new Face();
 const kept = Ok(1);
-const decoder = new FatalTextDecoder();
 
-console.log(shape, face, kept, decoder, make);
+console.log(shape, face, kept, make);

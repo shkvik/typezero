@@ -3,6 +3,8 @@ import "./partial/type-resolver.partial.forms.tz";
 import "./partial/type-resolver.partial.declared.tz";
 import "./partial/type-resolver.partial.aliases.tz";
 import "./partial/type-resolver.partial.enums.tz";
+import "./partial/type-resolver.partial.modules.tz";
+import "./partial/type-resolver.partial.globals.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   Details,
@@ -12,15 +14,12 @@ import {
   EnumDecl,
   TypeAliasDecl,
 } from "../../../program/ast/types/ast.types.classes.tz";
-import { StmtKind } from "../../../program/ast/types/ast.types.statements.tz";
 import {
   TypeRef,
   TypeRefKind,
 } from "../../../program/ast/types/ast.types.types.tz";
-import {
-  ModuleScopes,
-  NameUse,
-} from "../../../program/scopes/types/scopes.types.tz";
+import { Program } from "../../../program/module/types/module.types.tz";
+import { ModuleScopes } from "../../../program/scopes/types/scopes.types.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { TypeText } from "../../../program/type/type-text/type-text.tz";
 import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
@@ -28,26 +27,39 @@ import {
   AliasDoor,
   ModuleRecord,
   TypeContext,
-  TypeDeclaration,
 } from "./types/type-resolver.types.tz";
 
 export class TypeResolver {
   private readonly store: TypeStore;
   private readonly text: TypeText;
+  private readonly program: Program;
   private readonly scopes: Map<int, ModuleScopes>;
   private readonly records: Map<int, ModuleRecord>;
   private readonly doors: Map<string, AliasDoor>;
+  private readonly globals: Map<string, int>;
+  private readonly namespaces: Map<string, int>;
+  private readonly prefixes: Map<int, string>;
 
-  public constructor(store: TypeStore, resolved: ModuleScopes[]) {
+  public constructor(
+    store: TypeStore,
+    program: Program,
+    resolved: ModuleScopes[],
+  ) {
     this.store = store;
     this.text = new TypeText(store);
+    this.program = program;
     this.scopes = new Map<int, ModuleScopes>();
     this.records = new Map<int, ModuleRecord>();
     this.doors = new Map<string, AliasDoor>();
+    this.globals = new Map<string, int>();
+    this.namespaces = new Map<string, int>();
+    this.prefixes = new Map<int, string>();
 
     for (const scopes of resolved) {
       this.scopes.set(scopes.module.id, scopes);
     }
+
+    this.indexGlobals();
   }
 
   public problems(module: int): SourceError[] {
@@ -126,58 +138,12 @@ export class TypeResolver {
   private named(ref: TypeRef, context: TypeContext): Type {
     const record = this.record(context.module);
     const use = record?.uses.get(ref.loc);
-    if (use == undefined) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    const symbol = use.symbol;
+    const symbol = use?.symbol;
     if (symbol == undefined) {
-      return this.builtin(ref, context);
+      return this.global(ref, context);
     }
 
     return this.declared(ref, symbol, context);
-  }
-
-  private record(module: int): ModuleRecord | undefined {
-    const known = this.records.get(module);
-    if (known != undefined) {
-      return known;
-    }
-
-    const scopes = this.scopes.get(module);
-    if (scopes == undefined) {
-      return undefined;
-    }
-
-    const uses = new Map<int, NameUse>();
-    const declarations = new Map<string, TypeDeclaration>();
-
-    for (const use of scopes.uses) {
-      if (use.isType) {
-        uses.set(use.loc, use);
-      }
-    }
-
-    for (const item of scopes.module.file.items) {
-      switch (item.kind) {
-        case StmtKind.TypeAlias:
-        case StmtKind.Enum:
-        case StmtKind.Handle:
-          declarations.set(item.name, item);
-          break;
-        case StmtKind.Class:
-          declarations.set(item.name ?? "", item);
-          break;
-        default:
-          break;
-      }
-    }
-
-    const record: ModuleRecord = { uses, declarations, errors: [] };
-
-    this.records.set(module, record);
-
-    return record;
   }
 
   private report(module: int, loc: int, code: Code, details: Details): void {

@@ -20,22 +20,20 @@ export type InterfaceOptions = {
  * Reads the standard input line by line: `for await (const line of rl)`
  * gives the lines, each a string without its line break.
  */
-export interface Interface {
+export declare class Interface {
+  /** There is no `new Interface()`: `createInterface` makes one. */
+  private constructor();
+
   /**
    * Prints the query and calls the function with the line the user types.
    * @example rl.question("Name? ", (name) => console.log(name))
    */
-  question(query: string, callback: (answer: string) => void): void;
+  public question(query: string, callback: (answer: string) => void): void;
   /** Stops reading; the lines read so far still come. */
-  close(): void;
+  public close(): void;
   /** The lines as they come: what `for await` goes through. */
-  [Symbol.asyncIterator](): AsyncGenerator<string>;
+  public [Symbol.asyncIterator](): AsyncGenerator<string>;
 }
-
-/** `Interface` has nothing: `createInterface` makes one. */
-export interface InterfaceConstructor {}
-
-export declare const Interface: InterfaceConstructor;
 
 /**
  * Starts reading the standard input by lines.

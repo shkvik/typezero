@@ -3,9 +3,8 @@ main.tz
   4:9 int -> global
   7:21 void -> global
   8:3 console -> global
-  16:1 console -> global
-  16:13 shape -> variable 11:7
-  16:20 face -> variable 12:7
-  16:26 kept -> variable 13:7
-  16:32 decoder -> variable 14:7
-  16:41 make -> function 7:10
+  15:1 console -> global
+  15:13 shape -> variable 11:7
+  15:20 face -> variable 12:7
+  15:26 kept -> variable 13:7
+  15:32 make -> function 7:10

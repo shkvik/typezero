@@ -1,6 +1,5 @@
 import { TypeResolver } from "../type-resolver.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { ClassDecl } from "../../../../program/ast/types/ast.types.classes.tz";
 import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
 import {
   TypeParamDecl,
@@ -27,8 +26,17 @@ partial class TypeResolver {
       default: {
         const record = this.record(context.module);
         const found = record?.declarations.get(symbol.name);
-        if (found == undefined || found.loc != symbol.loc) {
+        if (found == undefined) {
+          return this.fromModule(ref, context.module, symbol.name, context);
+        }
+        if (found.loc != symbol.loc) {
           return this.store.plain(TypeKind.Error);
+        }
+        if (this.prefixes.has(context.module)) {
+          const builtin = this.builtin(symbol.name, ref, context);
+          if (builtin != undefined) {
+            return builtin;
+          }
         }
 
         return this.ofDeclaration(ref, context.module, found, context);
@@ -67,13 +75,7 @@ partial class TypeResolver {
       return this.store.plain(TypeKind.Error);
     }
 
-    const record = this.record(target.module);
-    const found = record?.declarations.get(target.name);
-    if (found == undefined) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    return this.ofDeclaration(ref, target.module, found, context);
+    return this.fromModule(ref, target.module, target.name, context);
   }
 
   private ofDeclaration(
@@ -94,12 +96,13 @@ partial class TypeResolver {
       }
       case StmtKind.Class: {
         const name = found.name ?? "";
-        const written = this.written(ref, name, found.typeParams, context);
+        const params = found.typeParams;
+        const written = this.written(ref, name, params, context);
         if (written == undefined) {
           return this.store.plain(TypeKind.Error);
         }
 
-        return this.instance(module, found, written);
+        return this.instance(module, name, found.loc, params, written);
       }
       case StmtKind.Enum:
         return this.enumType(ref, found);
@@ -150,12 +153,17 @@ partial class TypeResolver {
     return needed;
   }
 
-  private instance(module: int, decl: ClassDecl, written: Type[]): Type {
-    const name = decl.name ?? "";
-    const bindings = this.bind(module, decl.typeParams, written);
+  private instance(
+    module: int,
+    name: string,
+    loc: int,
+    params: TypeParamDecl[],
+    written: Type[],
+  ): Type {
+    const bindings = this.bind(module, params, written);
     const args = Array.from(bindings.values());
-    const type = this.store.instanceOf(module, decl.loc, name, args);
-    const label = this.labelText(name, written);
+    const type = this.store.instanceOf(module, loc, name, args);
+    const label = this.labelText(module, name, written);
 
     this.store.label(type, label);
 
@@ -195,13 +203,15 @@ partial class TypeResolver {
     return this.resolve(written, context);
   }
 
-  private labelText(name: string, written: Type[]): string {
+  private labelText(module: int, name: string, written: Type[]): string {
+    const prefix = this.prefixes.get(module) ?? "";
+
     if (written.length == 0) {
-      return name;
+      return `${prefix}${name}`;
     }
 
     const texts = written.map((type) => this.text.of(type));
 
-    return `${name}<${texts.join(", ")}>`;
+    return `${prefix}${name}<${texts.join(", ")}>`;
   }
 }

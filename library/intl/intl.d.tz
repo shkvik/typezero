@@ -51,11 +51,14 @@ export type SegmentData = {
  * The pieces a `Segmenter` cut a text into. They are gone through with
  * `for...of`, each a `SegmentData`.
  */
-export interface Segments {
+export declare class Segments {
+  /** There is no `new Segments()`: `segment` of a `Segmenter` makes one. */
+  private constructor();
+
   /** The piece the position of the text is in. */
-  containing(index: int): SegmentData | undefined;
+  public containing(index: int): SegmentData | undefined;
   /** The pieces in order: what `for...of` goes through. */
-  [Symbol.iterator](): Iterator<SegmentData>;
+  public [Symbol.iterator](): Iterator<SegmentData>;
 }
 
 /**

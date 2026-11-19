@@ -1,0 +1,121 @@
+import { TypeResolver } from "../type-resolver.tz";
+import { DeclaredClass } from "../../../../program/ast/types/ast.types.declarations.tz";
+import {
+  Stmt,
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import { kLibrary } from "../../../../program/library/library-modules/const/library-modules.const.tz";
+import { NameUse } from "../../../../program/scopes/types/scopes.types.tz";
+import { kNamePoint } from "../const/type-resolver.const.tables.tz";
+import { ModuleRecord, TypeDeclaration } from "../types/type-resolver.types.tz";
+
+partial class TypeResolver {
+  private indexGlobals(): void {
+    for (let index = 0; index < this.program.builtins.length; index++) {
+      this.indexModule(-1 - index);
+    }
+
+    for (const module of this.program.globals) {
+      const word = kLibrary.named(module.name)?.namespace;
+      if (word == undefined) {
+        this.prefixes.set(module.id, "");
+        this.indexModule(module.id);
+      } else {
+        this.prefixes.set(module.id, `${word}${kNamePoint}`);
+        this.namespaces.set(word, module.id);
+      }
+    }
+
+    for (const row of kLibrary.members()) {
+      const inside = this.moduleNamed(row.module);
+      if (inside != undefined && this.namespaces.has(row.owner)) {
+        this.prefixes.set(inside, `${row.owner}${kNamePoint}`);
+      }
+    }
+  }
+
+  private indexModule(module: int): void {
+    const record = this.record(module);
+    if (record == undefined) {
+      return;
+    }
+
+    for (const name of record.declarations.keys()) {
+      this.globals.set(name, module);
+    }
+
+    for (const name of record.classes.keys()) {
+      this.globals.set(name, module);
+    }
+  }
+
+  private record(module: int): ModuleRecord | undefined {
+    const known = this.records.get(module);
+    if (known != undefined) {
+      return known;
+    }
+
+    const record = this.openRecord(module);
+    if (record != undefined) {
+      this.records.set(module, record);
+    }
+
+    return record;
+  }
+
+  private openRecord(module: int): ModuleRecord | undefined {
+    if (module < 0) {
+      const builtin = this.program.builtins[-1 - module];
+      if (builtin == undefined) {
+        return undefined;
+      }
+
+      return this.recordOf(module, builtin.parsed.file.items, []);
+    }
+
+    const opened = this.program.modules[module];
+    if (opened == undefined) {
+      return undefined;
+    }
+
+    return this.recordOf(module, opened.file.items, opened.declared);
+  }
+
+  private recordOf(
+    module: int,
+    items: Stmt[],
+    declared: DeclaredClass[],
+  ): ModuleRecord {
+    const uses = new Map<int, NameUse>();
+    const declarations = new Map<string, TypeDeclaration>();
+    const classes = new Map<string, DeclaredClass>();
+    const scopes = this.scopes.get(module);
+
+    for (const use of scopes?.uses ?? []) {
+      if (use.isType) {
+        uses.set(use.loc, use);
+      }
+    }
+
+    for (const item of items) {
+      switch (item.kind) {
+        case StmtKind.TypeAlias:
+        case StmtKind.Enum:
+        case StmtKind.Handle:
+          declarations.set(item.name, item);
+          break;
+        case StmtKind.Class:
+          declarations.set(item.name ?? "", item);
+          break;
+        default:
+          break;
+      }
+    }
+
+    for (const one of declared) {
+      classes.set(one.name, one);
+    }
+
+    return { uses, declarations, classes, errors: [] };
+  }
+}
