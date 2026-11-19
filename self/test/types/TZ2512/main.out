@@ -1,0 +1,5 @@
+main.tz
+  3:5 counts: Record<string, int>
+  4:5 small: Record<string, int32>
+  6:7 a1: Json
+  8:7 b1: Json

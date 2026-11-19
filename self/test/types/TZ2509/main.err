@@ -1,0 +1,3 @@
+main.tz:2:5: error TZ2509: variable 'later' needs a type annotation or an initializer; e.g. 'let later: int' or 'let later = 0'
+let later;
+    ^

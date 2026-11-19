@@ -1,0 +1,15 @@
+// One integer type does not become another by itself: the conversion is
+// written. A constant that is a literal still fits wherever its value fits.
+const small: int8 = 5;
+let count = 5;
+const fixed = 5;
+const wrapped: Bit.Wrap32 = 7;
+
+const a1: int = small;
+const a2: uint8 = count;
+const a3: uint32 = wrapped;
+const a4: decimal = count;
+
+const b1: int8 = fixed;
+const b2: double = fixed;
+const b3: decimal = fixed;

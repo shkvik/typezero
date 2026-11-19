@@ -1,0 +1,161 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  Expr,
+  NameExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  BindingKind,
+  NameOrigin,
+} from "../../../../program/ast/types/ast.types.patterns.tz";
+import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  NameUse,
+  SymbolKind,
+} from "../../../../program/scopes/types/scopes.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  DoorState,
+  TypeContext,
+  TypePlace,
+} from "../../../types/type-resolver/types/type-resolver.types.tz";
+import {
+  TopVariable,
+  ValueRecord,
+  VariableDoor,
+} from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private record(module: int): ValueRecord | undefined {
+    const known = this.records.get(module);
+    if (known != undefined) {
+      return known;
+    }
+
+    const opened = this.program.modules[module];
+    if (module < 0 || opened == undefined) {
+      return undefined;
+    }
+
+    const uses = new Map<int, NameUse>();
+    const variables = new Map<int, TopVariable>();
+
+    for (const use of this.scopes.get(module)?.uses ?? []) {
+      if (!use.isType) {
+        uses.set(use.loc, use);
+      }
+    }
+
+    for (const item of opened.file.items) {
+      if (item.kind != StmtKind.VarDecl) {
+        continue;
+      }
+
+      for (const decl of item.decls) {
+        variables.set(decl.loc, { decl, isConst: item.isConst });
+      }
+    }
+
+    const record: ValueRecord = { uses, variables, errors: [] };
+
+    this.records.set(module, record);
+
+    return record;
+  }
+
+  private doorOfName(expr: NameExpr, module: int): VariableDoor | undefined {
+    const record = this.record(module);
+    const symbol = record?.uses.get(expr.loc)?.symbol;
+    if (symbol == undefined || symbol.kind != SymbolKind.Variable) {
+      return undefined;
+    }
+
+    return this.door(module, symbol.loc);
+  }
+
+  private door(module: int, loc: int): VariableDoor | undefined {
+    const key = `${module} ${loc}`;
+    const known = this.doors.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const variable = this.record(module)?.variables.get(loc);
+    if (variable == undefined) {
+      return undefined;
+    }
+
+    const door: VariableDoor = {
+      state: DoorState.InWork,
+      type: this.store.plain(TypeKind.Error),
+    };
+
+    this.doors.set(key, door);
+    this.open(door, variable, module);
+    door.state = DoorState.Done;
+
+    return door;
+  }
+
+  private open(door: VariableDoor, variable: TopVariable, module: int): void {
+    const decl = variable.decl;
+    const written = decl.typeAnn;
+    const init = decl.init;
+    const isPlain =
+      decl.form.kind == BindingKind.Plain && decl.origin == NameOrigin.Written;
+    if (!isPlain) {
+      return;
+    }
+    if (written != undefined) {
+      const context: TypeContext = {
+        module,
+        bindings: new Map<int, Type>(),
+        place: TypePlace.Plain,
+      };
+      const type = this.resolver.value(written, context);
+
+      door.type = type;
+
+      if (init != undefined && type.kind != TypeKind.Error) {
+        this.checked(init, type, module);
+      }
+
+      return;
+    }
+    if (init == undefined) {
+      this.report(module, decl.loc, Code.VariableNeedsType, {
+        word: decl.name,
+      });
+
+      return;
+    }
+
+    const given = this.typed(init, undefined, module);
+    if (given.kind == TypeKind.Undefined) {
+      return this.reportUndefined(variable, init, module);
+    }
+
+    door.type = given;
+
+    if (variable.isConst) {
+      door.literal = this.literalOf(init, module);
+    }
+  }
+
+  private reportUndefined(
+    variable: TopVariable,
+    init: Expr,
+    module: int,
+  ): void {
+    const decl = variable.decl;
+    const word = decl.name;
+
+    if (variable.isConst) {
+      return this.report(module, init.loc, Code.UndefinedConstNeedsType, {
+        word,
+      });
+    }
+
+    this.report(module, decl.loc, Code.UndefinedLetNeedsType, { word });
+  }
+}

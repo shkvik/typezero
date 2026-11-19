@@ -1,0 +1,12 @@
+main.tz
+  3:7 small: int8
+  4:5 count: int
+  5:7 fixed: int
+  6:7 wrapped: Bit.Wrap32
+  8:7 a1: int
+  9:7 a2: uint8
+  10:7 a3: uint32
+  11:7 a4: decimal
+  13:7 b1: int8
+  14:7 b2: double
+  15:7 b3: decimal

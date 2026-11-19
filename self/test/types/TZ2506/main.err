@@ -1,0 +1,15 @@
+main.tz:2:18: error TZ2506: integer literal does not fit in type 'int8'
+const a1: int8 = 200;
+                 ^
+main.tz:3:20: error TZ2506: integer literal does not fit in type 'uint8'
+const a2: uint8 = -1;
+                   ^
+main.tz:4:19: error TZ2506: integer literal does not fit in type 'int32'
+const a3: int32 = 3000000000;
+                  ^
+main.tz:5:17: error TZ2506: integer literal does not fit in type 'int'
+const a4: int = 9223372036854775808;
+                ^
+main.tz:6:24: error TZ2506: integer literal does not fit in type 'Bit.Wrap32'
+const a5: Bit.Wrap32 = 4294967296;
+                       ^

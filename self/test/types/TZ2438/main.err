@@ -1,0 +1,6 @@
+main.tz:3:15: error TZ2438: union 'uint32 | Bit.Wrap32' is not supported: 'uint32' and 'Bit.Wrap32' cannot be told apart when the program runs: 'typeof' gives "uint32" for both; use one of them
+type Either = uint32 | Bit.Wrap32;
+              ^
+main.tz:4:13: error TZ2438: union 'uint64 | Bit.Wrap64 | string' is not supported: 'uint64' and 'Bit.Wrap64' cannot be told apart when the program runs: 'typeof' gives "uint64" for both; use one of them
+type Wide = uint64 | Bit.Wrap64 | string;
+            ^

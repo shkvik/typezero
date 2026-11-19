@@ -35,6 +35,8 @@ export const kPlainTypes: PlainTypeName[] = [
   { name: "uint16", type: PlainBuiltin.Uint16 },
   { name: "uint32", type: PlainBuiltin.Uint32 },
   { name: "uint64", type: PlainBuiltin.Uint64 },
+  { name: "Bit.Wrap32", type: PlainBuiltin.Wrap32 },
+  { name: "Bit.Wrap64", type: PlainBuiltin.Wrap64 },
   { name: "double", type: PlainBuiltin.Double },
   { name: "string", type: PlainBuiltin.String },
   { name: "boolean", type: PlainBuiltin.Boolean },

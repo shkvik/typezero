@@ -946,6 +946,9 @@ export const kMessages: Record<Code, Message> = {
   [Code.UnionOfArrays]: {
     text: "union '{word}' is not supported: '{first}' and '{second}' cannot be told apart when the program runs: both are arrays; use one array type, e.g. '{other}'",
   },
+  [Code.UnionOfNumbers]: {
+    text: "union '{word}' is not supported: '{first}' and '{second}' cannot be told apart when the program runs: 'typeof' gives \"{other}\" for both; use one of them",
+  },
   [Code.UnionOfFunctions]: {
     text: "union '{word}' is not supported: '{first}' and '{second}' cannot be told apart when the program runs: 'typeof' gives \"function\" for both; use one function type",
   },
@@ -993,6 +996,42 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.BuiltinTypeParameterName]: {
     text: "'{word}' is a built-in type and cannot name a type parameter",
+  },
+  [Code.NotAssignable]: {
+    text: "type '{first}' is not assignable to type '{second}'",
+  },
+  [Code.ConvertExplicitly]: {
+    text: "type '{first}' is not assignable to type '{second}'; convert it explicitly: '{word}.{other}()'",
+  },
+  [Code.RoundThenConvert]: {
+    text: "type '{first}' is not assignable to type '{second}'; round it first, then convert: 'Math.trunc({word}).{other}()' (or Math.round, Math.floor, Math.ceil)",
+  },
+  [Code.DoubleIntoDecimal]: {
+    text: "type '{first}' is not assignable to type '{second}'; a double is inexact already, so it becomes a decimal only explicitly: 'decimal(x)'",
+  },
+  [Code.DecimalIntoNumber]: {
+    text: "type '{first}' is not assignable to type '{second}'; a decimal becomes a number only explicitly: 'Number(x)' gives the nearest double",
+  },
+  [Code.DecimalIntoJson]: {
+    text: "type '{first}' is not assignable to type '{second}'; JSON has no decimals: write it as text with 'String(x)', as JSON.stringify does",
+  },
+  [Code.WideIntegersIntoJson]: {
+    text: "type '{first}' is not assignable to type '{second}'; a number in a Json is a double, which holds every integer only within ±9007199254740992 (2^53), and nothing proves the values of this dictionary are there: build a 'Record<string, Json>' and check each value as it goes in, or keep them in a narrower type such as 'int32'",
+  },
+  [Code.LiteralOutsideRange]: {
+    text: "type '{first}' is not assignable to type '{second}', which holds {other}",
+  },
+  [Code.IntegerLiteralTooBig]: {
+    text: "integer literal does not fit in type '{word}'",
+  },
+  [Code.UndefinedConstNeedsType]: {
+    text: "cannot infer a type from 'undefined'; add one, e.g. 'const {word}: int | undefined = undefined'",
+  },
+  [Code.UndefinedLetNeedsType]: {
+    text: "cannot infer a type from 'undefined'; add one, e.g. 'let {word}: int | undefined'",
+  },
+  [Code.VariableNeedsType]: {
+    text: "variable '{word}' needs a type annotation or an initializer; e.g. 'let {word}: int' or 'let {word} = 0'",
   },
   [Code.InferPlace]: {
     text: "'infer' declares a type only in the 'extends' clause of a conditional type, e.g. 'T extends Array<infer U> ? U : never'",

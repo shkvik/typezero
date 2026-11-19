@@ -1,0 +1,5 @@
+// A variable needs a type: written, or taken from its first value.
+let later;
+
+let count: int;
+let ready = false;

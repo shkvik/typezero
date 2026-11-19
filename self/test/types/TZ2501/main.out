@@ -1,0 +1,16 @@
+main.tz
+  3:6 enum Color = "red" | "blue"
+  8:7 word: string
+  9:7 count: int
+  11:7 a1: int
+  12:7 a2: string
+  13:7 a3: boolean
+  14:7 a4: "a" | "b"
+  15:7 a5: "a" | "b"
+  16:7 a6: Color
+  17:7 a7: `on${string}`
+  18:7 a8: true
+  19:7 a9: 1.5
+  20:7 b1: -1 | 1
+  21:7 b2: int | string
+  22:7 b3: string

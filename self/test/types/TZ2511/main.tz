@@ -1,0 +1,4 @@
+// JSON has no decimals.
+const price: decimal = 1.5;
+
+const a1: Json = price;

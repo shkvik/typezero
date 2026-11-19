@@ -1,0 +1,8 @@
+// A number in a Json is a double: a dictionary of 64-bit integers does not
+// go there by itself, one of narrower integers does.
+let counts: Record<string, int> = {};
+let small: Record<string, int32> = {};
+
+const a1: Json = counts;
+
+const b1: Json = small;

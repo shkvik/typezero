@@ -1,0 +1,205 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  LiteralKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  kConversionPrefix,
+  kManyLiterals,
+  kUnnamedOperand,
+} from "../const/expression-types.const.tz";
+import { kWideBits } from "../../../types/type-relation/const/type-relation.const.tz";
+import { Bound, Interval } from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private mismatch(expr: Expr, given: Type, wanted: Type, module: int): void {
+    const target = this.onlyPart(wanted);
+    const source = this.onlyPart(given);
+    if (!this.isPlainValue(source) && !this.isPlainValue(target)) {
+      return;
+    }
+
+    const first = this.text.of(given);
+    const second = this.text.of(wanted);
+    const holds = this.rangeText(given, target);
+    const word = this.operandName(expr);
+    const other = this.conversionName(target);
+    const code = this.mismatchCode(given, target, holds);
+
+    if (code == Code.LiteralOutsideRange) {
+      return this.report(module, expr.loc, code, {
+        first,
+        second,
+        other: holds,
+      });
+    }
+
+    this.report(module, expr.loc, code, { first, second, word, other });
+  }
+
+  private mismatchCode(given: Type, target: Type, holds: string): Code {
+    if (holds != "") {
+      return Code.LiteralOutsideRange;
+    }
+    if (given.kind == TypeKind.Int && this.isNumber(target)) {
+      return Code.ConvertExplicitly;
+    }
+    if (given.kind == TypeKind.Double && target.kind == TypeKind.Int) {
+      return Code.RoundThenConvert;
+    }
+    if (given.kind == TypeKind.Double && target.kind == TypeKind.Decimal) {
+      return Code.DoubleIntoDecimal;
+    }
+    if (given.kind == TypeKind.Decimal && this.isNumber(target)) {
+      return Code.DecimalIntoNumber;
+    }
+    if (given.kind == TypeKind.Decimal && target.kind == TypeKind.Json) {
+      return Code.DecimalIntoJson;
+    }
+    if (given.kind == TypeKind.Dict && target.kind == TypeKind.Json) {
+      return this.dictionaryCode(given.value);
+    }
+
+    return Code.NotAssignable;
+  }
+
+  private dictionaryCode(value: Type): Code {
+    const parts = this.definedParts(value);
+    const isWide = parts.some(
+      (part) => part.kind == TypeKind.Int && part.bits >= kWideBits,
+    );
+    if (isWide) {
+      return Code.WideIntegersIntoJson;
+    }
+
+    return Code.NotAssignable;
+  }
+
+  private isPlainValue(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.String:
+      case TypeKind.Boolean:
+      case TypeKind.Literal:
+      case TypeKind.Template:
+      case TypeKind.Undefined:
+      case TypeKind.Json:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private onlyPart(wanted: Type): Type {
+    const parts = this.definedParts(wanted);
+    const only = parts[0];
+    if (parts.length != 1 || only == undefined) {
+      return wanted;
+    }
+
+    return only;
+  }
+
+  private operandName(expr: Expr): string {
+    if (expr.kind == ExprKind.Name) {
+      return expr.name;
+    }
+
+    return kUnnamedOperand;
+  }
+
+  private conversionName(target: Type): string {
+    const name = this.text.of(target);
+    const head = name.slice(0, 1).toUpperCase();
+    const tail = name.slice(1);
+
+    return `${kConversionPrefix}${head}${tail}`;
+  }
+
+  private rangeText(given: Type, target: Type): string {
+    const isWhole =
+      given.kind == TypeKind.Literal && given.literal == LiteralKind.Int;
+    if (!isWhole || target.kind != TypeKind.Union) {
+      return "";
+    }
+
+    const values: Bound[] = [];
+
+    for (const part of target.parts) {
+      const value = this.wholeValue(part);
+      if (value == undefined) {
+        return "";
+      }
+
+      values.push(value);
+    }
+
+    const intervals = this.intervalsOf(values);
+    if (intervals.length > 1 && values.length < kManyLiterals) {
+      return "";
+    }
+
+    const texts = intervals.map((interval) => this.intervalText(interval));
+
+    return texts.join(" or ");
+  }
+
+  private wholeValue(part: Type): Bound | undefined {
+    if (part.kind != TypeKind.Literal || part.literal != LiteralKind.Int) {
+      return undefined;
+    }
+
+    const value = Number(part.text);
+    if (value.isErr()) {
+      return undefined;
+    }
+
+    return { value: value.value, text: part.text };
+  }
+
+  private intervalsOf(values: Bound[]): Interval[] {
+    const intervals: Interval[] = [];
+
+    values.sort((first, second) => this.order(first.value, second.value));
+
+    for (const bound of values) {
+      const last = intervals[intervals.length - 1];
+      if (last != undefined && last.high.value + 1.0 >= bound.value) {
+        last.high = bound;
+
+        continue;
+      }
+
+      intervals.push({ low: bound, high: bound });
+    }
+
+    return intervals;
+  }
+
+  private order(first: double, second: double): int {
+    if (first < second) {
+      return -1;
+    }
+    if (first > second) {
+      return 1;
+    }
+
+    return 0;
+  }
+
+  private intervalText(interval: Interval): string {
+    if (interval.low == interval.high) {
+      return interval.low.text;
+    }
+
+    return `${interval.low.text} to ${interval.high.text}`;
+  }
+}

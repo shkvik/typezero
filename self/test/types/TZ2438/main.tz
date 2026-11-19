@@ -1,0 +1,7 @@
+// Two number types that `typeof` names alike cannot be told apart in a
+// union: `Bit.Wrap32` is a uint32 that wraps around.
+type Either = uint32 | Bit.Wrap32;
+type Wide = uint64 | Bit.Wrap64 | string;
+
+type Fine = Bit.Wrap32 | Bit.Wrap64;
+type Counts = 1 | 2 | int;

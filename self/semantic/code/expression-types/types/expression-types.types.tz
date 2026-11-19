@@ -1,0 +1,49 @@
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+import { VarDeclarator } from "../../../../program/ast/types/ast.types.patterns.tz";
+import { NameUse } from "../../../../program/scopes/types/scopes.types.tz";
+import {
+  LiteralKind,
+  Type,
+} from "../../../../program/type/types/type.types.tz";
+import { DoorState } from "../../../types/type-resolver/types/type-resolver.types.tz";
+
+export type TopVariable = {
+  readonly decl: VarDeclarator;
+  readonly isConst: boolean;
+};
+
+export type ValueRecord = {
+  readonly uses: Map<int, NameUse>;
+  readonly variables: Map<int, TopVariable>;
+  readonly errors: SourceError[];
+};
+
+export type LiteralValue = {
+  readonly kind: LiteralKind;
+  readonly text: string;
+  readonly whole: uint64;
+  readonly negative: boolean;
+};
+
+export type VariableDoor = {
+  state: DoorState;
+  type: Type;
+  literal?: LiteralValue;
+};
+
+export type IntLimit = {
+  readonly bits: int;
+  readonly unsigned: boolean;
+  readonly highest: uint64;
+  readonly lowest: uint64;
+};
+
+export type Bound = {
+  readonly value: double;
+  readonly text: string;
+};
+
+export type Interval = {
+  readonly low: Bound;
+  high: Bound;
+};

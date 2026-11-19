@@ -1,0 +1,21 @@
+import { IntLimit } from "../types/expression-types.types.tz";
+
+export const kConversionPrefix = "to";
+export const kUnnamedOperand = "x";
+export const kManyLiterals = 64;
+
+export const kIntLimits: IntLimit[] = [
+  { bits: 8, unsigned: false, highest: 127, lowest: 128 },
+  { bits: 16, unsigned: false, highest: 32767, lowest: 32768 },
+  { bits: 32, unsigned: false, highest: 2147483647, lowest: 2147483648 },
+  {
+    bits: 64,
+    unsigned: false,
+    highest: 9223372036854775807,
+    lowest: 9223372036854775808,
+  },
+  { bits: 8, unsigned: true, highest: 255, lowest: 0 },
+  { bits: 16, unsigned: true, highest: 65535, lowest: 0 },
+  { bits: 32, unsigned: true, highest: 4294967295, lowest: 0 },
+  { bits: 64, unsigned: true, highest: 18446744073709551615, lowest: 0 },
+];

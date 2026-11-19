@@ -1,0 +1,36 @@
+main.tz:11:17: error TZ2501: type 'string' is not assignable to type 'int'
+const a1: int = "x";
+                ^
+main.tz:12:20: error TZ2501: type 'int' is not assignable to type 'string'
+const a2: string = 1;
+                   ^
+main.tz:13:21: error TZ2501: type 'int' is not assignable to type 'boolean'
+const a3: boolean = count;
+                    ^
+main.tz:14:23: error TZ2501: type '"c"' is not assignable to type '"a" | "b"'
+const a4: "a" | "b" = "c";
+                      ^
+main.tz:15:23: error TZ2501: type '"x"' is not assignable to type '"a" | "b"'
+const a5: "a" | "b" = word;
+                      ^
+main.tz:16:19: error TZ2501: type '"green"' is not assignable to type 'Color'
+const a6: Color = "green";
+                  ^
+main.tz:17:27: error TZ2501: type '"click"' is not assignable to type '`on${string}`'
+const a7: `on${string}` = "click";
+                          ^
+main.tz:18:18: error TZ2501: type 'false' is not assignable to type 'true'
+const a8: true = false;
+                 ^
+main.tz:19:17: error TZ2501: type '2.5' is not assignable to type '1.5'
+const a9: 1.5 = 2.5;
+                ^
+main.tz:20:20: error TZ2501: type '0' is not assignable to type '-1 | 1'
+const b1: -1 | 1 = 0;
+                   ^
+main.tz:21:26: error TZ2501: type 'double' is not assignable to type 'int | string'
+const b2: int | string = 1.5;
+                         ^
+main.tz:22:20: error TZ2501: type 'undefined' is not assignable to type 'string'
+const b3: string = undefined;
+                   ^

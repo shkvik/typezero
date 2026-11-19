@@ -1,0 +1,3 @@
+main.tz:2:17: error TZ2507: cannot infer a type from 'undefined'; add one, e.g. 'const nothing: int | undefined = undefined'
+const nothing = undefined;
+                ^

@@ -1,0 +1,12 @@
+main.tz:5:17: error TZ2503: type 'double' is not assignable to type 'int'; round it first, then convert: 'Math.trunc(x).toInt()' (or Math.round, Math.floor, Math.ceil)
+const a1: int = 1.5;
+                ^
+main.tz:6:17: error TZ2503: type 'double' is not assignable to type 'int'; round it first, then convert: 'Math.trunc(ratio).toInt()' (or Math.round, Math.floor, Math.ceil)
+const a2: int = ratio;
+                ^
+main.tz:7:17: error TZ2503: type 'double' is not assignable to type 'int'; round it first, then convert: 'Math.trunc(x).toInt()' (or Math.round, Math.floor, Math.ceil)
+const a3: int = -1.5;
+                ^
+main.tz:8:18: error TZ2503: type 'double' is not assignable to type 'int8'; round it first, then convert: 'Math.trunc(x).toInt8()' (or Math.round, Math.floor, Math.ceil)
+const a4: int8 = 1.0;
+                 ^

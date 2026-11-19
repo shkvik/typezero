@@ -79,6 +79,7 @@ export type IntType = {
   readonly kind: TypeKind.Int;
   readonly bits: int;
   readonly unsigned: boolean;
+  readonly wraps: boolean;
 };
 
 export type LiteralType = {

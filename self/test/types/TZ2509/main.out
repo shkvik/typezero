@@ -1,0 +1,3 @@
+main.tz
+  4:5 count: int
+  5:5 ready: boolean

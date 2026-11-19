@@ -1,0 +1,5 @@
+main.tz
+  3:6 type Either = ?
+  4:6 type Wide = ?
+  6:6 type Fine = Bit.Wrap32 | Bit.Wrap64
+  7:6 type Counts = 1 | 2 | int

@@ -1,0 +1,10 @@
+main.tz
+  2:7 a1: int8
+  3:7 a2: uint8
+  4:7 a3: int32
+  5:7 a4: int
+  6:7 a5: Bit.Wrap32
+  8:7 b1: int8
+  9:7 b2: uint64
+  10:7 b3: int
+  11:7 b4: double

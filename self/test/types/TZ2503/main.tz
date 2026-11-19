@@ -1,0 +1,8 @@
+// A double becomes an integer only after it is rounded, and the message
+// says how.
+const ratio = 1.5;
+
+const a1: int = 1.5;
+const a2: int = ratio;
+const a3: int = -1.5;
+const a4: int8 = 1.0;

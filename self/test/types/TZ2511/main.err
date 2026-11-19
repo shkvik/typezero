@@ -1,0 +1,3 @@
+main.tz:4:18: error TZ2511: type 'decimal' is not assignable to type 'Json'; JSON has no decimals: write it as text with 'String(x)', as JSON.stringify does
+const a1: Json = price;
+                 ^

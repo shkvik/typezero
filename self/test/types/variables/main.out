@@ -1,0 +1,26 @@
+main.tz
+  3:7 whole: int
+  4:5 counter: int
+  5:7 ratio: double
+  6:7 big: double
+  7:7 hex: int
+  8:7 exact: double
+  9:7 word: string
+  10:7 flag: boolean
+  11:7 below: int
+  12:7 text: string
+  13:7 again: int
+  14:5 copy: string
+  17:7 part: double
+  18:7 money: decimal
+  19:7 byte: uint8
+  20:7 maybe: int | undefined
+  21:7 either: double | string
+  22:7 choice: "a" | "b"
+  23:7 level: 1 | 2.5
+  24:7 anything: unknown
+  25:7 data: Json
+  28:7 narrow: int8
+  29:7 wide: double
+  30:7 picked: 1 | 2
+  31:7 named: "x" | "y"

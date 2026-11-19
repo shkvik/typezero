@@ -1,0 +1,22 @@
+// A value goes only where its type is expected. A literal keeps its exact
+// type in the message when the place wants particular values.
+enum Color {
+  Red = "red",
+  Blue = "blue",
+}
+
+const word = "x";
+const count = 1;
+
+const a1: int = "x";
+const a2: string = 1;
+const a3: boolean = count;
+const a4: "a" | "b" = "c";
+const a5: "a" | "b" = word;
+const a6: Color = "green";
+const a7: `on${string}` = "click";
+const a8: true = false;
+const a9: 1.5 = 2.5;
+const b1: -1 | 1 = 0;
+const b2: int | string = 1.5;
+const b3: string = undefined;

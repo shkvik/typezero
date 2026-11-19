@@ -1,0 +1,103 @@
+import "./partial/expression-types.partial.literals.tz";
+import "./partial/expression-types.partial.variables.tz";
+import "./partial/expression-types.partial.mismatch.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Program } from "../../../program/module/types/module.types.tz";
+import { ModuleScopes } from "../../../program/scopes/types/scopes.types.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { TypeRelation } from "../../types/type-relation/type-relation.tz";
+import { TypeResolver } from "../../types/type-resolver/type-resolver.tz";
+import { ValueRecord, VariableDoor } from "./types/expression-types.types.tz";
+
+export class ExpressionTypes {
+  private readonly store: TypeStore;
+  private readonly text: TypeText;
+  private readonly relation: TypeRelation;
+  private readonly resolver: TypeResolver;
+  private readonly program: Program;
+  private readonly scopes: Map<int, ModuleScopes>;
+  private readonly records: Map<int, ValueRecord>;
+  private readonly doors: Map<string, VariableDoor>;
+
+  public constructor(
+    store: TypeStore,
+    resolver: TypeResolver,
+    program: Program,
+    resolved: ModuleScopes[],
+  ) {
+    this.store = store;
+    this.text = new TypeText(store);
+    this.relation = new TypeRelation(store);
+    this.resolver = resolver;
+    this.program = program;
+    this.scopes = new Map<int, ModuleScopes>();
+    this.records = new Map<int, ValueRecord>();
+    this.doors = new Map<string, VariableDoor>();
+
+    for (const scopes of resolved) {
+      this.scopes.set(scopes.module.id, scopes);
+    }
+  }
+
+  public problems(module: int): SourceError[] {
+    const record = this.records.get(module);
+    if (record == undefined) {
+      return [];
+    }
+
+    return record.errors;
+  }
+
+  public variable(module: int, loc: int): Type {
+    const door = this.door(module, loc);
+    if (door == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return door.type;
+  }
+
+  private typed(expr: Expr, wanted: Type | undefined, module: int): Type {
+    const literal = this.literalOf(expr, module);
+    if (literal != undefined) {
+      return this.literalTyped(expr, literal, wanted, module);
+    }
+
+    switch (expr.kind) {
+      case ExprKind.Undefined:
+        return this.store.plain(TypeKind.Undefined);
+      case ExprKind.Template:
+        return this.templated(wanted);
+      case ExprKind.Name:
+        return this.named(expr, module);
+      default:
+        return this.store.plain(TypeKind.Error);
+    }
+  }
+
+  private checked(expr: Expr, wanted: Type, module: int): Type {
+    const given = this.typed(expr, wanted, module);
+    if (!this.relation.converts(given, wanted)) {
+      this.mismatch(expr, given, wanted, module);
+    }
+
+    return given;
+  }
+
+  private report(module: int, loc: int, code: Code, details: Details): void {
+    const record = this.record(module);
+    if (record != undefined) {
+      record.errors.push({ code, loc, details });
+    }
+  }
+}

@@ -130,11 +130,12 @@ partial class TypeResolver {
       const before = seen.find(
         (one) => one.slot == use.slot && one.home == use.home,
       );
-      if (use.slot != UnionSlot.None && before != undefined) {
+      const clashes = before != undefined && before.type != use.type;
+      if (use.slot != UnionSlot.None && before != undefined && clashes) {
         const code = this.clashCode(use.slot);
         const first = this.text.of(before.type);
-        const second = this.text.of(part);
-        const other = this.clashHint(before.type, part);
+        const second = this.text.of(use.type);
+        const other = this.clashHint(before.type, use.type);
 
         this.report(module, ref.loc, code, { word, first, second, other });
 
@@ -176,6 +177,13 @@ partial class TypeResolver {
       const slot = this.instanceSlot(part.module);
 
       return { slot, home: part.module, type: part };
+    }
+
+    const number = this.relation.baseOf(part) ?? part;
+    if (number.kind == TypeKind.Int) {
+      const plain = this.store.integer(number.bits, number.unsigned);
+
+      return { slot: UnionSlot.Number, home: plain.id, type: number };
     }
 
     const slot = this.slotOf(part);
@@ -239,6 +247,8 @@ partial class TypeResolver {
         return Code.UnionOfPromises;
       case UnionSlot.Untagged:
         return Code.UnionOfUntagged;
+      case UnionSlot.Number:
+        return Code.UnionOfNumbers;
       default:
         return Code.UnionOfIterators;
     }
@@ -259,6 +269,11 @@ partial class TypeResolver {
     }
     if (now.kind == TypeKind.Instance) {
       return this.untaggedGroup(now.module) ?? "";
+    }
+    if (now.kind == TypeKind.Int) {
+      const plain = this.store.integer(now.bits, now.unsigned);
+
+      return this.text.of(plain);
     }
 
     return "";

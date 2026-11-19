@@ -1,0 +1,11 @@
+// An integer literal must fit the integer type it is written for.
+const a1: int8 = 200;
+const a2: uint8 = -1;
+const a3: int32 = 3000000000;
+const a4: int = 9223372036854775808;
+const a5: Bit.Wrap32 = 4294967296;
+
+const b1: int8 = -128;
+const b2: uint64 = 18446744073709551615;
+const b3: int = -9223372036854775808;
+const b4 = 9223372036854775808;

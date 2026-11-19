@@ -14,6 +14,7 @@ import { TypeText } from "../../../program/type/type-text/type-text.tz";
 import { DeclarationTypes } from "../../../semantic/declaration/declaration-types/declaration-types.tz";
 import { ModuleBinder } from "../../../semantic/declaration/module-binder/module-binder.tz";
 import { NameResolver } from "../../../semantic/declaration/name-resolver/name-resolver.tz";
+import { ExpressionTypes } from "../../../semantic/code/expression-types/expression-types.tz";
 import { TypeResolver } from "../../../semantic/types/type-resolver/type-resolver.tz";
 import { ProgramReport } from "../../program-report/program-report.tz";
 import { ProgramSource } from "../../program-source/program-source.tz";
@@ -55,6 +56,7 @@ export class TypesCommand {
     const resolver = new NameResolver(program, names);
     const resolved = resolver.run();
     const types = new TypeResolver(this.store, program, resolved);
+    const values = new ExpressionTypes(this.store, types, program, resolved);
 
     for (const scopes of resolved) {
       const module = scopes.module;
@@ -62,14 +64,14 @@ export class TypesCommand {
         continue;
       }
 
-      const declarations = new DeclarationTypes(types, module);
+      const declarations = new DeclarationTypes(types, values, module);
       const typed = declarations.run();
 
       this.printTypes(typed);
     }
 
     for (let index = 0; index < resolved.length; index++) {
-      this.printErrors(names[index], resolved[index], types);
+      this.printErrors(names[index], resolved[index], types, values);
     }
   }
 
@@ -113,6 +115,7 @@ export class TypesCommand {
     names: ModuleNames | undefined,
     scopes: ModuleScopes | undefined,
     types: TypeResolver,
+    values: ExpressionTypes,
   ): void {
     if (names == undefined || scopes == undefined) {
       return;
@@ -120,7 +123,12 @@ export class TypesCommand {
 
     const module = scopes.module;
     const found = types.problems(module.id);
-    const errors: SourceError[] = names.errors.concat(scopes.errors, found);
+    const wrong = values.problems(module.id);
+    const errors: SourceError[] = names.errors.concat(
+      scopes.errors,
+      found,
+      wrong,
+    );
 
     errors.sort((first, second) => first.loc - second.loc);
     this.report.sourceErrors(module.source, errors);

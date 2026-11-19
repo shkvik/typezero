@@ -1,0 +1,6 @@
+main.tz:4:20: error TZ2510: type 'decimal' is not assignable to type 'double'; a decimal becomes a number only explicitly: 'Number(x)' gives the nearest double
+const a1: double = price;
+                   ^
+main.tz:5:17: error TZ2510: type 'decimal' is not assignable to type 'int'; a decimal becomes a number only explicitly: 'Number(x)' gives the nearest double
+const a2: int = price;
+                ^

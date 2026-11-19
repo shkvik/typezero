@@ -1,0 +1,3 @@
+main.tz:2:5: error TZ2508: cannot infer a type from 'undefined'; add one, e.g. 'let nothing: int | undefined'
+let nothing = undefined;
+    ^

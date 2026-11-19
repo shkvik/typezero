@@ -1,0 +1,5 @@
+// A decimal becomes a double or an integer only explicitly.
+const price: decimal = 1.5;
+
+const a1: double = price;
+const a2: int = price;

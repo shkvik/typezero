@@ -1,0 +1,6 @@
+main.tz:3:19: error TZ2505: type '3' is not assignable to type '1 | 2', which holds 1 to 2
+const a1: 1 | 2 = 3;
+                  ^
+main.tz:4:27: error TZ2505: type '-1' is not assignable to type '0 | 1 | 2 | 3', which holds 0 to 3
+const a2: 0 | 1 | 2 | 3 = -1;
+                          ^

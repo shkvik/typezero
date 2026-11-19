@@ -1,0 +1,4 @@
+// The same for a variable; the example has no value, as a variable may.
+let nothing = undefined;
+
+let known: string | undefined = undefined;

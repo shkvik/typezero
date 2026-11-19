@@ -1,0 +1,3 @@
+main.tz:6:18: error TZ2512: type 'Record<string, int>' is not assignable to type 'Json'; a number in a Json is a double, which holds every integer only within ±9007199254740992 (2^53), and nothing proves the values of this dictionary are there: build a 'Record<string, Json>' and check each value as it goes in, or keep them in a narrower type such as 'int32'
+const a1: Json = counts;
+                 ^

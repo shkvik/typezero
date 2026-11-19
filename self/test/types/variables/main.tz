@@ -1,0 +1,31 @@
+// The type of a variable without a written one comes from its value:
+// literals widen to their types, a name gives the type of its variable.
+const whole = 1;
+let counter = 1;
+const ratio = 1.5;
+const big = 1e3;
+const hex = 0x10;
+const exact = 1.0;
+const word = "x";
+const flag = true;
+const below = -1;
+const text = `count ${whole}`;
+const again = whole;
+let copy = word;
+
+// A written type guides the literal: the number takes the type of the place.
+const part: double = 1;
+const money: decimal = 1.5;
+const byte: uint8 = 255;
+const maybe: int | undefined = 1;
+const either: double | string = 1;
+const choice: "a" | "b" = "a";
+const level: 1 | 2.5 = 2.5;
+const anything: unknown = 1;
+const data: Json = 1.5;
+
+// A constant that is a literal goes wherever its value goes.
+const narrow: int8 = whole;
+const wide: double = whole;
+const picked: 1 | 2 = whole;
+const named: "x" | "y" = word;

@@ -1,0 +1,12 @@
+main.tz:8:17: error TZ2502: type 'int8' is not assignable to type 'int'; convert it explicitly: 'small.toInt()'
+const a1: int = small;
+                ^
+main.tz:9:19: error TZ2502: type 'int' is not assignable to type 'uint8'; convert it explicitly: 'count.toUint8()'
+const a2: uint8 = count;
+                  ^
+main.tz:10:20: error TZ2502: type 'Bit.Wrap32' is not assignable to type 'uint32'; convert it explicitly: 'wrapped.toUint32()'
+const a3: uint32 = wrapped;
+                   ^
+main.tz:11:21: error TZ2502: type 'int' is not assignable to type 'decimal'; convert it explicitly: 'count.toDecimal()'
+const a4: decimal = count;
+                    ^

@@ -10,15 +10,6 @@ import { ClassHome, TypeContext } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
   private global(ref: TypeRef, context: TypeContext): Type {
-    const point = ref.name.indexOf(kNamePoint);
-    if (point >= 0) {
-      const word = ref.name.slice(0, point);
-      const member = ref.name.slice(point + 1);
-      const inside = this.memberModule(word, member);
-
-      return this.fromModule(ref, inside, member, context);
-    }
-
     if (ref.name == kNullTypeName) {
       return this.refusedNull(ref, context);
     }
@@ -26,6 +17,15 @@ partial class TypeResolver {
     const builtin = this.builtin(ref.name, ref, context);
     if (builtin != undefined) {
       return builtin;
+    }
+
+    const point = ref.name.indexOf(kNamePoint);
+    if (point >= 0) {
+      const word = ref.name.slice(0, point);
+      const member = ref.name.slice(point + 1);
+      const inside = this.memberModule(word, member);
+
+      return this.fromModule(ref, inside, member, context);
     }
 
     const declaring = this.globals.get(ref.name);
@@ -72,8 +72,12 @@ partial class TypeResolver {
     if (module == undefined) {
       return this.store.plain(TypeKind.Error);
     }
-    if (this.prefixes.has(module)) {
-      const builtin = this.builtin(name, ref, context);
+
+    const prefix = this.prefixes.get(module);
+    if (prefix != undefined) {
+      const builtin =
+        this.builtin(`${prefix}${name}`, ref, context) ??
+        this.builtin(name, ref, context);
       if (builtin != undefined) {
         return builtin;
       }

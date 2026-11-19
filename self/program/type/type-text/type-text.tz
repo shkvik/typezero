@@ -187,6 +187,9 @@ export class TypeText {
   }
 
   private intText(type: IntType): string {
+    if (type.wraps) {
+      return `Bit.Wrap${type.bits}`;
+    }
     if (type.bits == 64 && !type.unsigned) {
       return "int";
     }

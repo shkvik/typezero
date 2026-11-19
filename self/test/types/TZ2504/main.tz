@@ -1,0 +1,8 @@
+// A double is inexact already, so it does not become a decimal by itself.
+// A literal with a fraction is read as a decimal right away.
+const ratio = 1.5;
+
+const a1: decimal = ratio;
+
+const b1: decimal = 1.5;
+const b2: decimal = 1;

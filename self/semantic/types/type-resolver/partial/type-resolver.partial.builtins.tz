@@ -116,6 +116,10 @@ partial class TypeResolver {
         return this.store.integer(32, true);
       case PlainBuiltin.Uint64:
         return this.store.integer(64, true);
+      case PlainBuiltin.Wrap32:
+        return this.store.wrapping(32);
+      case PlainBuiltin.Wrap64:
+        return this.store.wrapping(64);
       case PlainBuiltin.Double:
         return this.store.plain(TypeKind.Double);
       case PlainBuiltin.String:

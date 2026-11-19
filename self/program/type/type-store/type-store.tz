@@ -82,7 +82,32 @@ export class TypeStore {
     }
 
     const id = this.nextId();
-    const made: Type = { id, kind: TypeKind.Int, bits, unsigned };
+    const made: Type = {
+      id,
+      kind: TypeKind.Int,
+      bits,
+      unsigned,
+      wraps: false,
+    };
+
+    return this.keep(key, made);
+  }
+
+  public wrapping(bits: int): Type {
+    const key = `wrap ${bits}`;
+    const known = this.byKey.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = {
+      id,
+      kind: TypeKind.Int,
+      bits,
+      unsigned: true,
+      wraps: true,
+    };
 
     return this.keep(key, made);
   }

@@ -317,7 +317,9 @@ self/             компилятор на tz, пробный (порт compile
                   шаг типов (начат 19 ноября; первый срез — написанные типы, без выражений):
                   program/type/ — тип как данные (types/type.types.tz): TypeKind и запись
                   своего вида на каждый (IntType, ArrayType, UnionType, ResultType,
-                  DictType…); основа — виды C++ (compiler/program/types), но встроенные
+                  DictType…; у целого — число бит, знак и wraps: `Bit.Wrap32` и
+                  `Bit.Wrap64` — целые, которые считают по кругу); основа — виды C++
+                  (compiler/program/types), но встроенные
                   классы — не особые виды, а объявления; `Result`, `Promise`, итератор и
                   `Record` / `Map` / `Set` — свои виды; `T | undefined` — обычное
                   объединение; program/type/type-store/ — TypeStore: единственное место,
@@ -450,11 +452,33 @@ self/             компилятор на tz, пробный (порт compile
                   верхнем уровне модуля; `typeof` в типе — следующий шаг, пока даёт
                   тип-ошибку («?» в выводе);
                   semantic/declaration/declaration-types/ — DeclarationTypes:
-                  типы объявлений верхнего уровня модуля (переменная и функция с
+                  типы объявлений верхнего уровня модуля (переменная, функция с
                   написанными типами, псевдоним, интерфейс, enum) → program/module-types/
-                  ModuleTypes { module, declarations }; тип переменной берётся через
-                  value(), функции — через signature(); ошибки шага — у TypeResolver по
-                  модулю (problems);
+                  ModuleTypes { module, declarations }; тип переменной даёт
+                  ExpressionTypes.variable(), функции — signature(); ошибки шага — у
+                  TypeResolver и у ExpressionTypes по модулю (problems);
+                  шаг выражений (начат 19 ноября; первый срез — скаляры и переменные
+                  верхнего уровня): semantic/code/expression-types/ — ExpressionTypes, один
+                  на программу: typed(expr, wanted) — тип выражения там, где ждут wanted
+                  (без wanted — сам по себе), checked() — то же со сверкой
+                  TypeRelation.converts и ошибкой. Части: literals (литерал и константа,
+                  которая им задана, — LiteralValue: вид, текст, целое и знак; без
+                  ожидания литерал расширяется: `1` — `int`, `1.5` — `double`; место с
+                  литералами в типе получает точный тип, место с числовым типом — этот
+                  тип: `const d: double = 1`; целое сверяется с границами типа по таблице
+                  kIntLimits — TZ2506), variables (дверь переменной верхнего уровня
+                  VariableDoor: тип и, для `const` без написанного типа, её литерал; запись
+                  модуля ValueRecord — использования имён-значений и объявления по месту;
+                  `undefined` без типа — TZ2507 / TZ2508, ни типа, ни значения — TZ2509),
+                  mismatch (ошибка «не подходит» с причиной: TZ2501 — без причины, TZ2502
+                  — целое в другой числовой тип, с именем преобразования, TZ2503 — double
+                  в целое, TZ2504 — double в decimal, TZ2510 / TZ2511 — decimal в число и в
+                  Json, TZ2512 — словарь 64-битных целых в Json, TZ2505 — литерал вне
+                  значений объединения, с перечнем «which holds 1 to 2»; пара из двух
+                  ссылок — объект, массив, класс — пока не сверяется: там расширение при
+                  чтении). Выражение, которое срез ещё не разбирает (массив, объект,
+                  вызов, оператор), даёт тип-ошибку молча, и переменная с таким значением
+                  в выводе не показывается;
                   semantic/declaration/scope-stack/ — ScopeStack: состояние обхода — стек областей
                   (значения и типы) и глубина функций; меняется только своими методами;
                   program/scopes/ — итог (types/scopes.types.tz): NameSymbol { name, kind:

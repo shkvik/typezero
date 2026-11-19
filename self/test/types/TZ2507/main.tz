@@ -1,0 +1,4 @@
+// `undefined` alone says nothing about what the constant may hold.
+const nothing = undefined;
+
+const known: int | undefined = undefined;

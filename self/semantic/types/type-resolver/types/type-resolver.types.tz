@@ -27,6 +27,8 @@ export enum PlainBuiltin {
   Uint16,
   Uint32,
   Uint64,
+  Wrap32,
+  Wrap64,
   Double,
   String,
   Boolean,
@@ -126,6 +128,7 @@ export type ParameterSite = {
 
 export enum UnionSlot {
   None,
+  Number,
   Array,
   Function,
   Iterator,
