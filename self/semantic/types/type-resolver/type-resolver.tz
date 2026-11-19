@@ -1,17 +1,19 @@
+import "./partial/type-resolver.partial.builtins.tz";
+import "./partial/type-resolver.partial.forms.tz";
+import "./partial/type-resolver.partial.declared.tz";
+import "./partial/type-resolver.partial.aliases.tz";
+import "./partial/type-resolver.partial.enums.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   Details,
   SourceError,
 } from "../../../diagnostic/types/message.types.tz";
 import {
-  kBooleanTypeName,
-  kStringTypeName,
-} from "../../../program/ast/const/ast.const.tz";
+  EnumDecl,
+  TypeAliasDecl,
+} from "../../../program/ast/types/ast.types.classes.tz";
+import { StmtKind } from "../../../program/ast/types/ast.types.statements.tz";
 import {
-  FunctionTypeForm,
-  LiteralTypeForm,
-  ObjectTypeForm,
-  TupleTypeForm,
   TypeRef,
   TypeRefKind,
 } from "../../../program/ast/types/ast.types.types.tz";
@@ -20,71 +22,68 @@ import {
   NameUse,
 } from "../../../program/scopes/types/scopes.types.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import {
-  DictKind,
-  FunctionParameter,
-  LiteralKind,
-  ObjectField,
-  Type,
-  TypeKind,
-} from "../../../program/type/types/type.types.tz";
-import {
-  kGenericTypes,
-  kPlainTypes,
-  kThisParameter,
-} from "./const/type-resolver.const.tables.tz";
-import {
-  GenericBuiltin,
-  GenericTypeName,
-  PlainBuiltin,
+  AliasDoor,
+  ModuleRecord,
+  TypeContext,
+  TypeDeclaration,
 } from "./types/type-resolver.types.tz";
 
 export class TypeResolver {
   private readonly store: TypeStore;
-  private readonly uses: Map<int, NameUse>;
-  private readonly errors: SourceError[];
+  private readonly text: TypeText;
+  private readonly scopes: Map<int, ModuleScopes>;
+  private readonly records: Map<int, ModuleRecord>;
+  private readonly doors: Map<string, AliasDoor>;
 
-  public constructor(store: TypeStore, scopes: ModuleScopes) {
+  public constructor(store: TypeStore, resolved: ModuleScopes[]) {
     this.store = store;
-    this.uses = new Map<int, NameUse>();
-    this.errors = [];
+    this.text = new TypeText(store);
+    this.scopes = new Map<int, ModuleScopes>();
+    this.records = new Map<int, ModuleRecord>();
+    this.doors = new Map<string, AliasDoor>();
 
-    for (const use of scopes.uses) {
-      if (use.isType) {
-        this.uses.set(use.loc, use);
-      }
+    for (const scopes of resolved) {
+      this.scopes.set(scopes.module.id, scopes);
     }
   }
 
-  public problems(): SourceError[] {
-    return this.errors;
+  public problems(module: int): SourceError[] {
+    const record = this.records.get(module);
+    if (record == undefined) {
+      return [];
+    }
+
+    return record.errors;
   }
 
-  public resolve(ref: TypeRef): Type {
+  public resolve(ref: TypeRef, context: TypeContext): Type {
     const form = ref.form;
 
     switch (form.kind) {
       case TypeRefKind.Name:
       case TypeRefKind.Generic:
-        return this.named(ref);
+        return this.named(ref, context);
       case TypeRefKind.Array: {
-        const items = this.resolveAll(ref.args);
+        const items = this.resolveAll(ref.args, context);
         const error = this.store.plain(TypeKind.Error);
         const item = items[0] ?? error;
 
         return this.store.arrayOf(item);
       }
       case TypeRefKind.Union: {
-        const parts = this.resolveAll(ref.args);
+        const parts = this.resolveAll(ref.args, context);
 
         return this.store.unionOf(parts);
       }
       case TypeRefKind.Tuple:
-        return this.tuple(form);
+        return this.tuple(form, context);
       case TypeRefKind.Object:
-        return this.object(form);
+        return this.object(form, context);
       case TypeRefKind.Function:
-        return this.functionType(form);
+        return this.functionType(form, context);
       case TypeRefKind.Literal:
         return this.literal(ref.name, form);
       case TypeRefKind.Predicate:
@@ -94,11 +93,29 @@ export class TypeResolver {
     }
   }
 
-  private resolveAll(refs: TypeRef[]): Type[] {
+  public declaredAlias(module: int, decl: TypeAliasDecl): Type {
+    const written: Type[] = [];
+
+    for (const param of decl.typeParams) {
+      const type = this.store.typeParameter(module, param.loc, param.name);
+
+      written.push(type);
+    }
+
+    return this.alias(module, decl, written);
+  }
+
+  public declaredEnum(decl: EnumDecl): Type {
+    const values = this.enumValues(decl);
+
+    return this.enumWhole(decl, values);
+  }
+
+  private resolveAll(refs: TypeRef[], context: TypeContext): Type[] {
     const types: Type[] = [];
 
     for (const ref of refs) {
-      const type = this.resolve(ref);
+      const type = this.resolve(ref, context);
 
       types.push(type);
     }
@@ -106,202 +123,67 @@ export class TypeResolver {
     return types;
   }
 
-  private named(ref: TypeRef): Type {
-    const use = this.uses.get(ref.loc);
-    if (use == undefined || use.symbol != undefined) {
+  private named(ref: TypeRef, context: TypeContext): Type {
+    const record = this.record(context.module);
+    const use = record?.uses.get(ref.loc);
+    if (use == undefined) {
       return this.store.plain(TypeKind.Error);
     }
 
-    const generic = kGenericTypes.find((row) => row.name == ref.name);
-    if (generic != undefined) {
-      return this.generic(ref, generic);
+    const symbol = use.symbol;
+    if (symbol == undefined) {
+      return this.builtin(ref, context);
     }
 
-    const plain = kPlainTypes.find((row) => row.name == ref.name);
-    if (plain == undefined) {
-      return this.store.plain(TypeKind.Error);
-    }
-    if (ref.args.length > 0) {
-      this.report(ref.loc, Code.TypeNotGeneric, { word: ref.name });
-
-      return this.store.plain(TypeKind.Error);
-    }
-
-    return this.plain(plain.type);
+    return this.declared(ref, symbol, context);
   }
 
-  private generic(ref: TypeRef, row: GenericTypeName): Type {
-    const count = ref.args.length;
-    if (count < row.least || count > row.most) {
-      this.report(ref.loc, Code.TypeArgumentsCount, {
-        word: row.name,
-        other: row.example,
-      });
-
-      return this.store.plain(TypeKind.Error);
+  private record(module: int): ModuleRecord | undefined {
+    const known = this.records.get(module);
+    if (known != undefined) {
+      return known;
     }
 
-    const args = this.resolveAll(ref.args);
-    const error = this.store.plain(TypeKind.Error);
-    const first = args[0] ?? error;
-    const second = args[1] ?? error;
-
-    switch (row.type) {
-      case GenericBuiltin.Array:
-        return this.store.arrayOf(first);
-      case GenericBuiltin.Result:
-        return this.store.resultOf(first, second);
-      case GenericBuiltin.Promise:
-        return this.store.promiseOf(first);
-      case GenericBuiltin.Map:
-        return this.store.dictOf(DictKind.Map, first, second);
-      case GenericBuiltin.Set:
-        return this.store.dictOf(DictKind.Set, first, first);
-      case GenericBuiltin.Record:
-        return this.store.dictOf(DictKind.Record, first, second);
-      case GenericBuiltin.Generator:
-        return this.iterator(args, false);
-      default:
-        return this.iterator(args, true);
-    }
-  }
-
-  private iterator(args: Type[], async: boolean): Type {
-    const nothing = this.store.plain(TypeKind.Void);
-    const yielded = args[0] ?? nothing;
-    const returned = args[1] ?? nothing;
-    const sent = args[2] ?? nothing;
-
-    return this.store.iteratorOf({ yielded, returned, sent, async });
-  }
-
-  private plain(type: PlainBuiltin): Type {
-    switch (type) {
-      case PlainBuiltin.Int:
-        return this.store.integer(64, false);
-      case PlainBuiltin.Int8:
-        return this.store.integer(8, false);
-      case PlainBuiltin.Int16:
-        return this.store.integer(16, false);
-      case PlainBuiltin.Int32:
-        return this.store.integer(32, false);
-      case PlainBuiltin.Uint8:
-        return this.store.integer(8, true);
-      case PlainBuiltin.Uint16:
-        return this.store.integer(16, true);
-      case PlainBuiltin.Uint32:
-        return this.store.integer(32, true);
-      case PlainBuiltin.Uint64:
-        return this.store.integer(64, true);
-      case PlainBuiltin.Double:
-        return this.store.plain(TypeKind.Double);
-      case PlainBuiltin.String:
-        return this.store.plain(TypeKind.String);
-      case PlainBuiltin.Boolean:
-        return this.store.plain(TypeKind.Boolean);
-      case PlainBuiltin.Decimal:
-        return this.store.plain(TypeKind.Decimal);
-      case PlainBuiltin.Json:
-        return this.store.plain(TypeKind.Json);
-      case PlainBuiltin.Unknown:
-        return this.store.plain(TypeKind.Unknown);
-      case PlainBuiltin.Never:
-        return this.store.plain(TypeKind.Never);
-      case PlainBuiltin.Void:
-        return this.store.plain(TypeKind.Void);
-      case PlainBuiltin.Undefined:
-        return this.store.plain(TypeKind.Undefined);
-      default:
-        return this.store.plain(TypeKind.AnyObject);
-    }
-  }
-
-  private tuple(form: TupleTypeForm): Type {
-    const items: Type[] = [];
-
-    for (const element of form.elements) {
-      const item = this.resolve(element.type);
-
-      items.push(item);
+    const scopes = this.scopes.get(module);
+    if (scopes == undefined) {
+      return undefined;
     }
 
-    return this.store.tupleOf(items, form.readonly);
-  }
+    const uses = new Map<int, NameUse>();
+    const declarations = new Map<string, TypeDeclaration>();
 
-  private object(form: ObjectTypeForm): Type {
-    const fields: ObjectField[] = [];
-
-    for (const field of form.fields) {
-      const type = this.resolve(field.type);
-
-      fields.push({
-        name: field.name,
-        type,
-        optional: field.optional,
-        readonly: field.readonly,
-      });
-    }
-
-    return this.store.objectOf(fields);
-  }
-
-  private functionType(form: FunctionTypeForm): Type {
-    const params: FunctionParameter[] = [];
-    let self: Type | undefined = undefined;
-
-    for (const param of form.params) {
-      const type = this.resolve(param.type);
-
-      if (param.name == kThisParameter) {
-        self = type;
-
-        continue;
+    for (const use of scopes.uses) {
+      if (use.isType) {
+        uses.set(use.loc, use);
       }
-
-      params.push({ type, optional: param.optional });
     }
 
-    const result = this.result(form.result);
+    for (const item of scopes.module.file.items) {
+      switch (item.kind) {
+        case StmtKind.TypeAlias:
+        case StmtKind.Enum:
+        case StmtKind.Handle:
+          declarations.set(item.name, item);
+          break;
+        case StmtKind.Class:
+          declarations.set(item.name ?? "", item);
+          break;
+        default:
+          break;
+      }
+    }
 
-    return this.store.functionOf({ params, rest: form.rest, self, result });
+    const record: ModuleRecord = { uses, declarations, errors: [] };
+
+    this.records.set(module, record);
+
+    return record;
   }
 
-  private result(ref: TypeRef | undefined): Type {
-    if (ref == undefined) {
-      return this.store.plain(TypeKind.Void);
+  private report(module: int, loc: int, code: Code, details: Details): void {
+    const record = this.record(module);
+    if (record != undefined) {
+      record.errors.push({ code, loc, details });
     }
-
-    return this.resolve(ref);
-  }
-
-  private literal(name: string, form: LiteralTypeForm): Type {
-    if (name == kStringTypeName) {
-      return this.store.literal(LiteralKind.String, form.text);
-    }
-    if (name == kBooleanTypeName) {
-      const truth = this.truthText(form.number);
-
-      return this.store.literal(LiteralKind.Boolean, truth);
-    }
-
-    const text = `${form.number}`;
-
-    if (form.integer) {
-      return this.store.literal(LiteralKind.Int, text);
-    }
-
-    return this.store.literal(LiteralKind.Double, text);
-  }
-
-  private truthText(number: double): string {
-    if (number == 0.0) {
-      return "false";
-    }
-
-    return "true";
-  }
-
-  private report(loc: int, code: Code, details: Details): void {
-    this.errors.push({ code, loc, details });
   }
 }

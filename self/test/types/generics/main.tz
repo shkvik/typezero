@@ -1,0 +1,45 @@
+// Types with parameters: an alias is made anew for its arguments, a class
+// keeps them, and a parameter without an argument stays a parameter.
+type Box<T> = { value: T };
+type Couple<A, B> = [A, B];
+type Two<A, B = string> = { a: A; b: B };
+type List<T> = { head: T; tail: List<T> | undefined };
+type Maybe<T> = T | undefined;
+
+interface Holder<T> {
+  item: T;
+  take(): T;
+}
+
+class Cell<T, U = int> {
+  public value: T;
+
+  public constructor(value: T) {
+    this.value = value;
+  }
+}
+
+type Id = int;
+
+let box: Box<int> = { value: 1 };
+let deep: Box<Box<int>> = { value: { value: 1 } };
+let named: Box<Id> = { value: 1 };
+let couple: Couple<int, string> = [1, "a"];
+let short: Two<int> = { a: 1, b: "a" };
+let long: Two<int, boolean> = { a: 1, b: true };
+let list: List<int> = { head: 1, tail: undefined };
+let maybe: Maybe<string> = undefined;
+let holder: Holder<int> = { item: 1, take: (): int => 1 };
+let cell: Cell<string> = new Cell<string>("a");
+let cells: Cell<string, boolean>[] = [];
+
+function first<T>(items: T[]): T | undefined {
+  return items[0];
+}
+
+function wrap<T, U extends Box<T>>(value: T, box: U): Box<T> {
+  return { value };
+}
+
+console.log(box, deep, named, couple, short, long, list, maybe, holder, cell);
+console.log(cells, first([1]), wrap(1, box));

@@ -1,0 +1,17 @@
+// A type that comes from another module is the type declared there: by its
+// own name, by another name, and through a module that passes it on.
+import { Box, Color, Point as Dot, Shape } from "./shapes.tz";
+import { Figure, Point } from "./again.tz";
+
+type Local = { side: int };
+
+let shape: Shape = { side: 1 };
+let figure: Figure = { side: 1 };
+let local: Local = { side: 1 };
+let box: Box<Shape> = { value: { side: 1 } };
+let dot: Dot = new Dot(1);
+let point: Point = new Point(1);
+let color: Color = Color.Red;
+let green: Color.Green = Color.Green;
+
+console.log(shape, figure, local, box, dot, point, color, green);

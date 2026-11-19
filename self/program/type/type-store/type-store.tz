@@ -12,12 +12,24 @@ import {
 export class TypeStore {
   private readonly plains: Map<TypeKind, Type>;
   private readonly byKey: Map<string, Type>;
+  private readonly labels: Map<Type, string>;
   private count: int;
 
   public constructor() {
     this.plains = new Map<TypeKind, Type>();
     this.byKey = new Map<string, Type>();
+    this.labels = new Map<Type, string>();
     this.count = 0;
+  }
+
+  public label(type: Type, text: string): void {
+    if (!this.labels.has(type)) {
+      this.labels.set(type, text);
+    }
+  }
+
+  public labelOf(type: Type): string | undefined {
+    return this.labels.get(type);
   }
 
   public plain(kind: PlainKind): Type {
@@ -152,7 +164,71 @@ export class TypeStore {
     }
 
     const id = this.nextId();
-    const made: Type = { id, kind: TypeKind.Union, parts: kept };
+    const made: Type = {
+      id,
+      kind: TypeKind.Union,
+      parts: kept,
+      recursive: false,
+    };
+
+    return this.keep(key, made);
+  }
+
+  public reserveObject(): Type {
+    const id = this.nextId();
+
+    return { id, kind: TypeKind.Object, fields: [] };
+  }
+
+  public fillObject(reserved: Type, fields: ObjectField[]): void {
+    if (reserved.kind != TypeKind.Object) {
+      return;
+    }
+
+    for (const field of fields) {
+      reserved.fields.push(field);
+    }
+  }
+
+  public reserveUnion(): Type {
+    const id = this.nextId();
+
+    return { id, kind: TypeKind.Union, parts: [], recursive: true };
+  }
+
+  public fillUnion(reserved: Type, parts: Type[]): void {
+    if (reserved.kind != TypeKind.Union) {
+      return;
+    }
+
+    for (const part of parts) {
+      reserved.parts.push(part);
+    }
+  }
+
+  public instanceOf(module: int, loc: int, name: string, args: Type[]): Type {
+    const ids = this.idsText(args);
+    const key = `instance ${module} ${loc} ${ids}`;
+    const known = this.byKey.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind: TypeKind.Instance, module, loc, name, args };
+
+    return this.keep(key, made);
+  }
+
+  public typeParameter(module: int, loc: int, name: string): Type {
+    const key = `parameter ${module} ${loc}`;
+    const known = this.byKey.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind: TypeKind.TypeParameter, module, loc, name };
 
     return this.keep(key, made);
   }
@@ -215,7 +291,7 @@ export class TypeStore {
     const flat: Type[] = [];
 
     for (const part of parts) {
-      if (part.kind == TypeKind.Union) {
+      if (part.kind == TypeKind.Union && !part.recursive) {
         this.addParts(flat, part.parts);
       } else {
         this.addParts(flat, [part]);

@@ -1,8 +1,10 @@
+import { TypeStore } from "../type-store/type-store.tz";
 import {
   ArrayType,
   DictKind,
   DictType,
   FunctionShape,
+  InstanceType,
   IntType,
   IteratorShape,
   LiteralKind,
@@ -17,7 +19,22 @@ import {
 } from "../types/type.types.tz";
 
 export class TypeText {
+  private readonly store: TypeStore;
+
+  public constructor(store: TypeStore) {
+    this.store = store;
+  }
+
   public of(type: Type): string {
+    const label = this.store.labelOf(type);
+    if (label != undefined) {
+      return label;
+    }
+
+    return this.structure(type);
+  }
+
+  public structure(type: Type): string {
     switch (type.kind) {
       case TypeKind.Void:
         return "void";
@@ -61,9 +78,23 @@ export class TypeText {
         return this.iteratorText(type.shape);
       case TypeKind.Dict:
         return this.dictText(type);
+      case TypeKind.Instance:
+        return this.instanceText(type);
+      case TypeKind.TypeParameter:
+        return type.name;
       default:
         return "?";
     }
+  }
+
+  private instanceText(type: InstanceType): string {
+    if (type.args.length == 0) {
+      return type.name;
+    }
+
+    const args = type.args.map((arg) => this.of(arg));
+
+    return `${type.name}<${args.join(", ")}>`;
   }
 
   private intText(type: IntType): string {

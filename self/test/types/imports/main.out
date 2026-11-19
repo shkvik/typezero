@@ -1,0 +1,17 @@
+shapes.tz
+  1:13 type Shape = { side: int }
+  3:13 type Box<T> = { value: T }
+  13:13 enum Color = int
+  18:6 type Hidden = { secret: string }
+  20:14 hidden: Hidden
+again.tz
+main.tz
+  6:6 type Local = { side: int }
+  8:5 shape: Shape
+  9:5 figure: Shape
+  10:5 local: Shape
+  11:5 box: Box<Shape>
+  12:5 dot: Point
+  13:5 point: Point
+  14:5 color: int
+  15:5 green: 1

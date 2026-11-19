@@ -1,0 +1,207 @@
+import { TypeResolver } from "../type-resolver.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { ClassDecl } from "../../../../program/ast/types/ast.types.classes.tz";
+import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  TypeParamDecl,
+  TypeRef,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  NameSymbol,
+  SymbolKind,
+} from "../../../../program/scopes/types/scopes.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { TypeContext, TypeDeclaration } from "../types/type-resolver.types.tz";
+
+partial class TypeResolver {
+  private declared(
+    ref: TypeRef,
+    symbol: NameSymbol,
+    context: TypeContext,
+  ): Type {
+    switch (symbol.kind) {
+      case SymbolKind.TypeParameter:
+        return this.parameter(ref, symbol, context);
+      case SymbolKind.Import:
+        return this.imported(ref, symbol, context);
+      default: {
+        const record = this.record(context.module);
+        const found = record?.declarations.get(symbol.name);
+        if (found == undefined || found.loc != symbol.loc) {
+          return this.store.plain(TypeKind.Error);
+        }
+
+        return this.ofDeclaration(ref, context.module, found, context);
+      }
+    }
+  }
+
+  private parameter(
+    ref: TypeRef,
+    symbol: NameSymbol,
+    context: TypeContext,
+  ): Type {
+    if (ref.args.length > 0) {
+      this.report(context.module, ref.loc, Code.TypeNotGeneric, {
+        word: symbol.name,
+      });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const bound = context.bindings.get(symbol.loc);
+    if (bound != undefined) {
+      return bound;
+    }
+
+    return this.store.typeParameter(context.module, symbol.loc, symbol.name);
+  }
+
+  private imported(
+    ref: TypeRef,
+    symbol: NameSymbol,
+    context: TypeContext,
+  ): Type {
+    const target = symbol.target;
+    if (target == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const record = this.record(target.module);
+    const found = record?.declarations.get(target.name);
+    if (found == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.ofDeclaration(ref, target.module, found, context);
+  }
+
+  private ofDeclaration(
+    ref: TypeRef,
+    module: int,
+    found: TypeDeclaration,
+    context: TypeContext,
+  ): Type {
+    switch (found.kind) {
+      case StmtKind.TypeAlias: {
+        const params = found.typeParams;
+        const written = this.written(ref, found.name, params, context);
+        if (written == undefined) {
+          return this.store.plain(TypeKind.Error);
+        }
+
+        return this.alias(module, found, written);
+      }
+      case StmtKind.Class: {
+        const name = found.name ?? "";
+        const written = this.written(ref, name, found.typeParams, context);
+        if (written == undefined) {
+          return this.store.plain(TypeKind.Error);
+        }
+
+        return this.instance(module, found, written);
+      }
+      case StmtKind.Enum:
+        return this.enumType(ref, found);
+      default:
+        return this.store.instanceOf(module, found.loc, found.name, []);
+    }
+  }
+
+  private written(
+    ref: TypeRef,
+    name: string,
+    params: TypeParamDecl[],
+    context: TypeContext,
+  ): Type[] | undefined {
+    const count = ref.args.length;
+    if (params.length == 0 && count > 0) {
+      this.report(context.module, ref.loc, Code.TypeNotGeneric, {
+        word: name,
+      });
+
+      return undefined;
+    }
+
+    const needed = this.neededCount(params);
+    if (count < needed || count > params.length) {
+      const names = params.map((param) => param.name);
+
+      this.report(context.module, ref.loc, Code.TypeArgumentsCount, {
+        word: name,
+        other: `${name}<${names.join(", ")}>`,
+      });
+
+      return undefined;
+    }
+
+    return this.resolveAll(ref.args, context);
+  }
+
+  private neededCount(params: TypeParamDecl[]): int {
+    let needed = 0;
+
+    for (const param of params) {
+      if (param.defaultType == undefined) {
+        needed += 1;
+      }
+    }
+
+    return needed;
+  }
+
+  private instance(module: int, decl: ClassDecl, written: Type[]): Type {
+    const name = decl.name ?? "";
+    const bindings = this.bind(module, decl.typeParams, written);
+    const args = Array.from(bindings.values());
+    const type = this.store.instanceOf(module, decl.loc, name, args);
+    const label = this.labelText(name, written);
+
+    this.store.label(type, label);
+
+    return type;
+  }
+
+  private bind(
+    module: int,
+    params: TypeParamDecl[],
+    written: Type[],
+  ): Map<int, Type> {
+    const bindings = new Map<int, Type>();
+
+    for (let index = 0; index < params.length; index++) {
+      const param = params[index];
+      const given = written[index];
+      if (given != undefined) {
+        bindings.set(param.loc, given);
+
+        continue;
+      }
+
+      const filled = this.defaultArgument(param, { module, bindings });
+
+      bindings.set(param.loc, filled);
+    }
+
+    return bindings;
+  }
+
+  private defaultArgument(param: TypeParamDecl, context: TypeContext): Type {
+    const written = param.defaultType;
+    if (written == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.resolve(written, context);
+  }
+
+  private labelText(name: string, written: Type[]): string {
+    if (written.length == 0) {
+      return name;
+    }
+
+    const texts = written.map((type) => this.text.of(type));
+
+    return `${name}<${texts.join(", ")}>`;
+  }
+}

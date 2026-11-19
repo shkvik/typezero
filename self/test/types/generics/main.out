@@ -1,0 +1,21 @@
+main.tz
+  3:6 type Box<T> = { value: T }
+  4:6 type Couple<A, B> = [A, B]
+  5:6 type Two<A, B> = { a: A; b: B }
+  6:6 type List<T> = { head: T; tail: List<T> | undefined }
+  7:6 type Maybe<T> = T | undefined
+  9:11 type Holder<T> = { item: T; readonly take: () => T }
+  22:6 type Id = int
+  24:5 box: Box<int>
+  25:5 deep: Box<Box<int>>
+  26:5 named: Box<int>
+  27:5 couple: [int, string]
+  28:5 short: Two<int>
+  29:5 long: Two<int, boolean>
+  30:5 list: List<int>
+  31:5 maybe: string | undefined
+  32:5 holder: Holder<int>
+  33:5 cell: Cell<string>
+  34:5 cells: Cell<string, boolean>[]
+  36:10 first: (T[]) => T | undefined
+  40:10 wrap: (T, U) => Box<T>

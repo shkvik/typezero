@@ -1,0 +1,131 @@
+import { TypeResolver } from "../type-resolver.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  DictKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  kGenericTypes,
+  kPlainTypes,
+} from "../const/type-resolver.const.tables.tz";
+import {
+  GenericBuiltin,
+  GenericTypeName,
+  PlainBuiltin,
+  TypeContext,
+} from "../types/type-resolver.types.tz";
+
+partial class TypeResolver {
+  private builtin(ref: TypeRef, context: TypeContext): Type {
+    const generic = kGenericTypes.find((row) => row.name == ref.name);
+    if (generic != undefined) {
+      return this.generic(ref, generic, context);
+    }
+
+    const plain = kPlainTypes.find((row) => row.name == ref.name);
+    if (plain == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (ref.args.length > 0) {
+      this.report(context.module, ref.loc, Code.TypeNotGeneric, {
+        word: ref.name,
+      });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.plain(plain.type);
+  }
+
+  private generic(
+    ref: TypeRef,
+    row: GenericTypeName,
+    context: TypeContext,
+  ): Type {
+    const count = ref.args.length;
+    if (count < row.least || count > row.most) {
+      this.report(context.module, ref.loc, Code.TypeArgumentsCount, {
+        word: row.name,
+        other: row.example,
+      });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const args = this.resolveAll(ref.args, context);
+    const error = this.store.plain(TypeKind.Error);
+    const first = args[0] ?? error;
+    const second = args[1] ?? error;
+
+    switch (row.type) {
+      case GenericBuiltin.Array:
+        return this.store.arrayOf(first);
+      case GenericBuiltin.Result:
+        return this.store.resultOf(first, second);
+      case GenericBuiltin.Promise:
+        return this.store.promiseOf(first);
+      case GenericBuiltin.Map:
+        return this.store.dictOf(DictKind.Map, first, second);
+      case GenericBuiltin.Set:
+        return this.store.dictOf(DictKind.Set, first, first);
+      case GenericBuiltin.Record:
+        return this.store.dictOf(DictKind.Record, first, second);
+      case GenericBuiltin.Generator:
+        return this.iterator(args, false);
+      default:
+        return this.iterator(args, true);
+    }
+  }
+
+  private iterator(args: Type[], async: boolean): Type {
+    const nothing = this.store.plain(TypeKind.Void);
+    const yielded = args[0] ?? nothing;
+    const returned = args[1] ?? nothing;
+    const sent = args[2] ?? nothing;
+
+    return this.store.iteratorOf({ yielded, returned, sent, async });
+  }
+
+  private plain(type: PlainBuiltin): Type {
+    switch (type) {
+      case PlainBuiltin.Int:
+        return this.store.integer(64, false);
+      case PlainBuiltin.Int8:
+        return this.store.integer(8, false);
+      case PlainBuiltin.Int16:
+        return this.store.integer(16, false);
+      case PlainBuiltin.Int32:
+        return this.store.integer(32, false);
+      case PlainBuiltin.Uint8:
+        return this.store.integer(8, true);
+      case PlainBuiltin.Uint16:
+        return this.store.integer(16, true);
+      case PlainBuiltin.Uint32:
+        return this.store.integer(32, true);
+      case PlainBuiltin.Uint64:
+        return this.store.integer(64, true);
+      case PlainBuiltin.Double:
+        return this.store.plain(TypeKind.Double);
+      case PlainBuiltin.String:
+        return this.store.plain(TypeKind.String);
+      case PlainBuiltin.Boolean:
+        return this.store.plain(TypeKind.Boolean);
+      case PlainBuiltin.Decimal:
+        return this.store.plain(TypeKind.Decimal);
+      case PlainBuiltin.Json:
+        return this.store.plain(TypeKind.Json);
+      case PlainBuiltin.Unknown:
+        return this.store.plain(TypeKind.Unknown);
+      case PlainBuiltin.Never:
+        return this.store.plain(TypeKind.Never);
+      case PlainBuiltin.Void:
+        return this.store.plain(TypeKind.Void);
+      case PlainBuiltin.Undefined:
+        return this.store.plain(TypeKind.Undefined);
+      default:
+        return this.store.plain(TypeKind.AnyObject);
+    }
+  }
+}

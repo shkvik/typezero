@@ -1,0 +1,1 @@
+export { Shape as Figure, Point } from "./shapes.tz";

@@ -290,4 +290,6 @@ export enum Code {
   NoRequire = "TZ2314",
   TypeArgumentsCount = "TZ2401",
   TypeNotGeneric = "TZ2402",
+  AliasRefersToItself = "TZ2403",
+  RecursiveUnion = "TZ2404",
 }

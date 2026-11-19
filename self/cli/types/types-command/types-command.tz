@@ -1,7 +1,11 @@
 import { extname } from "node:path";
 import { SourceError } from "../../../diagnostic/types/message.types.tz";
 import { ModuleNames } from "../../../program/module-names/types/module-names.types.tz";
-import { ModuleTypes } from "../../../program/module-types/types/module-types.types.tz";
+import {
+  DeclarationForm,
+  ModuleTypes,
+  TypedDeclaration,
+} from "../../../program/module-types/types/module-types.types.tz";
 import { kSourceExtension } from "../../../program/module/const/module.const.tz";
 import { ModuleScopes } from "../../../program/scopes/types/scopes.types.tz";
 import { SourceLines } from "../../../program/source-lines/source-lines.tz";
@@ -10,18 +14,21 @@ import { TypeText } from "../../../program/type/type-text/type-text.tz";
 import { DeclarationTypes } from "../../../semantic/declaration/declaration-types/declaration-types.tz";
 import { ModuleBinder } from "../../../semantic/declaration/module-binder/module-binder.tz";
 import { NameResolver } from "../../../semantic/declaration/name-resolver/name-resolver.tz";
+import { TypeResolver } from "../../../semantic/types/type-resolver/type-resolver.tz";
 import { ProgramReport } from "../../program-report/program-report.tz";
 import { ProgramSource } from "../../program-source/program-source.tz";
 
 export class TypesCommand {
   private readonly entry?: string;
   private readonly report: ProgramReport;
+  private readonly store: TypeStore;
   private readonly text: TypeText;
 
   public constructor(args: string[]) {
     this.entry = args[3];
     this.report = new ProgramReport();
-    this.text = new TypeText();
+    this.store = new TypeStore();
+    this.text = new TypeText(this.store);
   }
 
   public run(): void {
@@ -47,23 +54,22 @@ export class TypesCommand {
     const names = binder.run();
     const resolver = new NameResolver(program, names);
     const resolved = resolver.run();
-    const store = new TypeStore();
-    const typed: ModuleTypes[] = [];
+    const types = new TypeResolver(this.store, resolved);
 
     for (const scopes of resolved) {
-      if (scopes.module.source.isLibrary) {
+      const module = scopes.module;
+      if (module.source.isLibrary) {
         continue;
       }
 
-      const declarations = new DeclarationTypes(store, scopes);
-      const types = declarations.run();
+      const declarations = new DeclarationTypes(this.store, types, module);
+      const typed = declarations.run();
 
-      typed.push(types);
-      this.printTypes(types);
+      this.printTypes(typed);
     }
 
     for (let index = 0; index < resolved.length; index++) {
-      this.printErrors(names[index], resolved[index], typed);
+      this.printErrors(names[index], resolved[index], types);
     }
   }
 
@@ -75,26 +81,45 @@ export class TypesCommand {
 
     for (const declaration of types.declarations) {
       const place = lines.placeOf(declaration.loc);
-      const type = this.text.of(declaration.type);
+      const text = this.declarationText(declaration);
 
-      console.log(
-        `  ${place.line}:${place.column} ${declaration.name}: ${type}`,
-      );
+      console.log(`  ${place.line}:${place.column} ${text}`);
+    }
+  }
+
+  private declarationText(declaration: TypedDeclaration): string {
+    const name = declaration.name;
+
+    switch (declaration.form) {
+      case DeclarationForm.TypeAlias: {
+        const type = this.text.structure(declaration.type);
+
+        return `type ${name} = ${type}`;
+      }
+      case DeclarationForm.Enum: {
+        const type = this.text.structure(declaration.type);
+
+        return `enum ${name} = ${type}`;
+      }
+      default: {
+        const type = this.text.of(declaration.type);
+
+        return `${name}: ${type}`;
+      }
     }
   }
 
   private printErrors(
     names: ModuleNames | undefined,
     scopes: ModuleScopes | undefined,
-    typed: ModuleTypes[],
+    types: TypeResolver,
   ): void {
     if (names == undefined || scopes == undefined) {
       return;
     }
 
     const module = scopes.module;
-    const types = typed.find((each) => each.module.id == module.id);
-    const found = types?.errors ?? [];
+    const found = types.problems(module.id);
     const errors: SourceError[] = names.errors.concat(scopes.errors, found);
 
     errors.sort((first, second) => first.loc - second.loc);

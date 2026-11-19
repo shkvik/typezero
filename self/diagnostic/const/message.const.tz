@@ -877,4 +877,10 @@ export const kMessages: Record<Code, Message> = {
   [Code.TypeNotGeneric]: {
     text: "'{word}' takes no type arguments",
   },
+  [Code.AliasRefersToItself]: {
+    text: "type alias '{word}' refers to itself",
+  },
+  [Code.RecursiveUnion]: {
+    text: "type alias '{word}' refers to itself, and only a union of several types without undefined can: make a field optional instead, e.g. 'next?: {word}'",
+  },
 };

@@ -1,0 +1,9 @@
+type Maybe = Maybe | undefined;
+type Self = Self | int;
+type Deep = int | Deep[] | undefined;
+
+let maybe: Maybe = undefined;
+let self: Self = 1;
+let deep: Deep = 1;
+
+console.log(maybe, self, deep);

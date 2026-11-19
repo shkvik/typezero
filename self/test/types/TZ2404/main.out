@@ -1,0 +1,7 @@
+main.tz
+  1:6 type Maybe = ?
+  2:6 type Self = ?
+  3:6 type Deep = ?
+  5:5 maybe: ?
+  6:5 self: ?
+  7:5 deep: ?

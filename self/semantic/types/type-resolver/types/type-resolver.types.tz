@@ -1,3 +1,13 @@
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+import {
+  ClassDecl,
+  EnumDecl,
+  HandleDecl,
+  TypeAliasDecl,
+} from "../../../../program/ast/types/ast.types.classes.tz";
+import { NameUse } from "../../../../program/scopes/types/scopes.types.tz";
+import { Type } from "../../../../program/type/types/type.types.tz";
+
 export enum PlainBuiltin {
   Int,
   Int8,
@@ -41,4 +51,34 @@ export type GenericTypeName = {
   readonly least: int;
   readonly most: int;
   readonly example: string;
+};
+
+export type TypeDeclaration = TypeAliasDecl | ClassDecl | EnumDecl | HandleDecl;
+
+export type TypeContext = {
+  readonly module: int;
+  readonly bindings: Map<int, Type>;
+};
+
+export type ModuleRecord = {
+  readonly uses: Map<int, NameUse>;
+  readonly declarations: Map<string, TypeDeclaration>;
+  readonly errors: SourceError[];
+};
+
+export enum DoorState {
+  InWork,
+  Done,
+}
+
+export type AliasDoor = {
+  state: DoorState;
+  entered: boolean;
+  result: Type;
+  readonly reserved?: Type;
+};
+
+export type EnumStep = {
+  readonly type: Type;
+  readonly number?: int;
 };

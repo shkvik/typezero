@@ -1,8 +1,14 @@
-import { SourceError } from "../../../diagnostic/types/message.types.tz";
 import { Module } from "../../module/types/module.types.tz";
 import { Type } from "../../type/types/type.types.tz";
 
+export enum DeclarationForm {
+  Value,
+  TypeAlias,
+  Enum,
+}
+
 export type TypedDeclaration = {
+  readonly form: DeclarationForm;
   readonly name: string;
   readonly loc: int;
   readonly type: Type;
@@ -11,5 +17,4 @@ export type TypedDeclaration = {
 export type ModuleTypes = {
   readonly module: Module;
   readonly declarations: TypedDeclaration[];
-  readonly errors: SourceError[];
 };

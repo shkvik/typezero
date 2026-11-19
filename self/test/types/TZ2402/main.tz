@@ -3,3 +3,19 @@ let text: string<int> = "a";
 let data: Json<int> = 1;
 
 console.log(whole, text, data);
+
+type Shape = { side: int };
+
+class Point {
+  public x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+function first<T>(item: T<int>): Shape<int> | Point<int> | undefined {
+  return undefined;
+}
+
+console.log(first);

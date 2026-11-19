@@ -1,0 +1,121 @@
+import { TypeResolver } from "../type-resolver.tz";
+import { EnumDecl } from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  Expr,
+  ExprKind,
+  UnaryOp,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  LiteralKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  kEnumValueLimit,
+  kNamePoint,
+} from "../const/type-resolver.const.tables.tz";
+import { EnumStep } from "../types/type-resolver.types.tz";
+
+partial class TypeResolver {
+  private enumType(ref: TypeRef, decl: EnumDecl): Type {
+    const values = this.enumValues(decl);
+    const point = ref.name.indexOf(kNamePoint);
+    if (point < 0) {
+      return this.enumWhole(decl, values);
+    }
+
+    const member = ref.name.slice(point + 1);
+    const index = decl.members.findIndex((each) => each.name == member);
+    const error = this.store.plain(TypeKind.Error);
+
+    if (index < 0) {
+      return error;
+    }
+
+    return values[index] ?? error;
+  }
+
+  private enumWhole(decl: EnumDecl, values: Type[]): Type {
+    const texts = values.filter(
+      (value) =>
+        value.kind == TypeKind.Literal && value.literal == LiteralKind.String,
+    );
+    if (texts.length == 0 || texts.length < values.length) {
+      return this.store.integer(64, false);
+    }
+
+    const whole = this.store.unionOf(values);
+
+    this.store.label(whole, decl.name);
+
+    return whole;
+  }
+
+  private enumValues(decl: EnumDecl): Type[] {
+    const values: Type[] = [];
+    let next: int | undefined = 0;
+
+    for (const member of decl.members) {
+      const step = this.enumStep(member.init, next);
+      const number = step.number;
+
+      values.push(step.type);
+      next = undefined;
+      if (number != undefined) {
+        next = number + 1;
+      }
+    }
+
+    return values;
+  }
+
+  private enumStep(init: Expr | undefined, next: int | undefined): EnumStep {
+    if (init == undefined) {
+      return this.enumNumber(next);
+    }
+
+    switch (init.kind) {
+      case ExprKind.StringLit: {
+        const type = this.store.literal(LiteralKind.String, init.value);
+
+        return { type };
+      }
+      case ExprKind.IntLit: {
+        const number = this.enumInt(init);
+
+        return this.enumNumber(number);
+      }
+      case ExprKind.Unary: {
+        const number = this.enumInt(init.operand);
+        if (init.op != UnaryOp.Neg || number == undefined) {
+          return this.enumNumber(undefined);
+        }
+
+        return this.enumNumber(-number);
+      }
+      default:
+        return this.enumNumber(undefined);
+    }
+  }
+
+  private enumInt(expr: Expr): int | undefined {
+    if (expr.kind != ExprKind.IntLit || expr.value > kEnumValueLimit) {
+      return undefined;
+    }
+
+    return expr.value.toInt();
+  }
+
+  private enumNumber(number: int | undefined): EnumStep {
+    if (number == undefined) {
+      const type = this.store.plain(TypeKind.Error);
+
+      return { type };
+    }
+
+    const type = this.store.literal(LiteralKind.Int, `${number}`);
+
+    return { type, number };
+  }
+}

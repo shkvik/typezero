@@ -1,0 +1,171 @@
+import { TypeResolver } from "../type-resolver.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { TypeAliasDecl } from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  ObjectField,
+  Type,
+  TypeKind,
+  UnionType,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  AliasDoor,
+  DoorState,
+  TypeContext,
+} from "../types/type-resolver.types.tz";
+
+partial class TypeResolver {
+  private alias(module: int, decl: TypeAliasDecl, written: Type[]): Type {
+    const bindings = this.bind(module, decl.typeParams, written);
+    const args = Array.from(bindings.values());
+    const ids = args.map((arg) => `${arg.id}`);
+    const key = `${module} ${decl.loc} ${ids.join(" ")}`;
+    const open = this.doors.get(key);
+    if (open != undefined) {
+      return this.reenter(module, decl, open);
+    }
+
+    const label = this.labelText(decl.name, written);
+    const reserved = this.reserve(decl.type, label);
+    const error = this.store.plain(TypeKind.Error);
+    const door: AliasDoor = {
+      state: DoorState.InWork,
+      entered: false,
+      result: error,
+      reserved,
+    };
+
+    this.doors.set(key, door);
+
+    const body = this.aliasBody(decl, { module, bindings });
+    const result = this.settle(module, decl, door, body);
+
+    door.result = result;
+    door.state = DoorState.Done;
+    this.labelAlias(result, label);
+
+    return result;
+  }
+
+  private reenter(module: int, decl: TypeAliasDecl, door: AliasDoor): Type {
+    if (door.state == DoorState.Done) {
+      return door.result;
+    }
+
+    const reserved = door.reserved;
+    if (reserved != undefined) {
+      door.entered = true;
+
+      return reserved;
+    }
+    if (!door.entered) {
+      this.report(module, decl.loc, Code.AliasRefersToItself, {
+        word: decl.name,
+      });
+    }
+
+    door.entered = true;
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private reserve(ref: TypeRef, label: string): Type | undefined {
+    switch (ref.form.kind) {
+      case TypeRefKind.Object: {
+        const reserved = this.store.reserveObject();
+
+        this.store.label(reserved, label);
+
+        return reserved;
+      }
+      case TypeRefKind.Union: {
+        const reserved = this.store.reserveUnion();
+
+        this.store.label(reserved, label);
+
+        return reserved;
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  private aliasBody(decl: TypeAliasDecl, context: TypeContext): Type {
+    if (decl.bases.length == 0) {
+      return this.resolve(decl.type, context);
+    }
+
+    const fields = new Map<string, ObjectField>();
+
+    for (const base of decl.bases) {
+      const parent = this.resolve(base, context);
+
+      this.inherit(fields, parent);
+    }
+
+    const own = this.resolve(decl.type, context);
+
+    this.inherit(fields, own);
+
+    const merged = Array.from(fields.values());
+
+    return this.store.objectOf(merged);
+  }
+
+  private inherit(fields: Map<string, ObjectField>, from: Type): void {
+    if (from.kind != TypeKind.Object) {
+      return;
+    }
+
+    for (const field of from.fields) {
+      fields.set(field.name, field);
+    }
+  }
+
+  private settle(
+    module: int,
+    decl: TypeAliasDecl,
+    door: AliasDoor,
+    body: Type,
+  ): Type {
+    const reserved = door.reserved;
+
+    if (!door.entered) {
+      return body;
+    }
+    if (reserved == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (body.kind == TypeKind.Object) {
+      this.store.fillObject(reserved, body.fields);
+
+      return reserved;
+    }
+    if (body.kind == TypeKind.Union && this.isClosed(body, reserved)) {
+      this.store.fillUnion(reserved, body.parts);
+
+      return reserved;
+    }
+
+    this.report(module, decl.loc, Code.RecursiveUnion, { word: decl.name });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private isClosed(body: UnionType, reserved: Type): boolean {
+    if (body == reserved || body.parts.includes(reserved)) {
+      return false;
+    }
+
+    return !body.parts.some((part) => part.kind == TypeKind.Undefined);
+  }
+
+  private labelAlias(result: Type, label: string): void {
+    if (result.kind == TypeKind.Object) {
+      this.store.label(result, label);
+    }
+  }
+}

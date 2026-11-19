@@ -21,6 +21,8 @@ export enum TypeKind {
   Promise,
   Iterator,
   Dict,
+  Instance,
+  TypeParameter,
 }
 
 export enum DictKind {
@@ -116,6 +118,7 @@ export type UnionType = {
   readonly id: int;
   readonly kind: TypeKind.Union;
   readonly parts: Type[];
+  readonly recursive: boolean;
 };
 
 export type ResultType = {
@@ -152,6 +155,23 @@ export type DictType = {
   readonly value: Type;
 };
 
+export type InstanceType = {
+  readonly id: int;
+  readonly kind: TypeKind.Instance;
+  readonly module: int;
+  readonly loc: int;
+  readonly name: string;
+  readonly args: Type[];
+};
+
+export type TypeParameterType = {
+  readonly id: int;
+  readonly kind: TypeKind.TypeParameter;
+  readonly module: int;
+  readonly loc: int;
+  readonly name: string;
+};
+
 export type Type =
   | PlainType
   | IntType
@@ -164,4 +184,6 @@ export type Type =
   | ResultType
   | PromiseType
   | IteratorType
-  | DictType;
+  | DictType
+  | InstanceType
+  | TypeParameterType;

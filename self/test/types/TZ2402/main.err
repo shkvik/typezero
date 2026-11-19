@@ -7,3 +7,12 @@ let text: string<int> = "a";
 main.tz:3:11: error TZ2402: 'Json' takes no type arguments
 let data: Json<int> = 1;
           ^
+main.tz:17:25: error TZ2402: 'T' takes no type arguments
+function first<T>(item: T<int>): Shape<int> | Point<int> | undefined {
+                        ^
+main.tz:17:34: error TZ2402: 'Shape' takes no type arguments
+function first<T>(item: T<int>): Shape<int> | Point<int> | undefined {
+                                 ^
+main.tz:17:47: error TZ2402: 'Point' takes no type arguments
+function first<T>(item: T<int>): Shape<int> | Point<int> | undefined {
+                                              ^

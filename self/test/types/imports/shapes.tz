@@ -1,0 +1,20 @@
+export type Shape = { side: int };
+
+export type Box<T> = { value: T };
+
+export class Point {
+  public x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+export enum Color {
+  Red,
+  Green,
+}
+
+type Hidden = { secret: string };
+
+export const hidden: Hidden = { secret: "a" };

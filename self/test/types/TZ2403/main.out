@@ -1,0 +1,10 @@
+main.tz
+  1:6 type Loop = ?
+  2:6 type First = ?
+  3:6 type Second = ?
+  4:6 type Many = ?
+  5:6 type Call = ?
+  6:6 type Both = ?
+  8:5 loop: ?
+  9:5 first: ?
+  10:5 many: ?

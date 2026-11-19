@@ -1,4 +1,8 @@
 import {
+  EnumDecl,
+  TypeAliasDecl,
+} from "../../../program/ast/types/ast.types.classes.tz";
+import {
   FunctionDecl,
   Param,
   ParamKind,
@@ -10,11 +14,11 @@ import {
 } from "../../../program/ast/types/ast.types.statements.tz";
 import { TypeRef } from "../../../program/ast/types/ast.types.types.tz";
 import {
+  DeclarationForm,
   ModuleTypes,
   TypedDeclaration,
 } from "../../../program/module-types/types/module-types.types.tz";
 import { Module } from "../../../program/module/types/module.types.tz";
-import { ModuleScopes } from "../../../program/scopes/types/scopes.types.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import {
   FunctionParameter,
@@ -22,17 +26,20 @@ import {
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
 import { TypeResolver } from "../../types/type-resolver/type-resolver.tz";
+import { TypeContext } from "../../types/type-resolver/types/type-resolver.types.tz";
 
 export class DeclarationTypes {
   private readonly module: Module;
   private readonly store: TypeStore;
   private readonly resolver: TypeResolver;
+  private readonly context: TypeContext;
   private readonly declarations: TypedDeclaration[];
 
-  public constructor(store: TypeStore, scopes: ModuleScopes) {
-    this.module = scopes.module;
+  public constructor(store: TypeStore, resolver: TypeResolver, module: Module) {
+    this.module = module;
     this.store = store;
-    this.resolver = new TypeResolver(store, scopes);
+    this.resolver = resolver;
+    this.context = { module: module.id, bindings: new Map<int, Type>() };
     this.declarations = [];
   }
 
@@ -41,9 +48,7 @@ export class DeclarationTypes {
       this.typeItem(item);
     }
 
-    const errors = this.resolver.problems();
-
-    return { module: this.module, declarations: this.declarations, errors };
+    return { module: this.module, declarations: this.declarations };
   }
 
   private typeItem(item: Stmt): void {
@@ -56,6 +61,12 @@ export class DeclarationTypes {
       case StmtKind.Function:
         this.typeFunction(item);
         break;
+      case StmtKind.TypeAlias:
+        this.typeAlias(item);
+        break;
+      case StmtKind.Enum:
+        this.typeEnum(item);
+        break;
       default:
         break;
     }
@@ -67,9 +78,9 @@ export class DeclarationTypes {
       return;
     }
 
-    const type = this.resolver.resolve(written);
+    const type = this.resolver.resolve(written, this.context);
 
-    this.declarations.push({ name: decl.name, loc: decl.loc, type });
+    this.declare(DeclarationForm.Value, decl.name, decl.loc, type);
   }
 
   private typeFunction(fn: FunctionDecl): void {
@@ -90,10 +101,41 @@ export class DeclarationTypes {
 
     const last = fn.params[fn.params.length - 1];
     const rest = last != undefined && last.form.kind == ParamKind.Rest;
-    const result = this.resolver.resolve(written);
+    const result = this.resolver.resolve(written, this.context);
     const type = this.store.functionOf({ params, rest, result });
 
-    this.declarations.push({ name: fn.name, loc: fn.loc, type });
+    this.declare(DeclarationForm.Value, fn.name, fn.loc, type);
+  }
+
+  private typeAlias(decl: TypeAliasDecl): void {
+    const type = this.resolver.declaredAlias(this.module.id, decl);
+    const params = decl.typeParams.map((param) => param.name);
+    const name = this.genericName(decl.name, params);
+
+    this.declare(DeclarationForm.TypeAlias, name, decl.loc, type);
+  }
+
+  private typeEnum(decl: EnumDecl): void {
+    const type = this.resolver.declaredEnum(decl);
+
+    this.declare(DeclarationForm.Enum, decl.name, decl.loc, type);
+  }
+
+  private genericName(name: string, params: string[]): string {
+    if (params.length == 0) {
+      return name;
+    }
+
+    return `${name}<${params.join(", ")}>`;
+  }
+
+  private declare(
+    form: DeclarationForm,
+    name: string,
+    loc: int,
+    type: Type,
+  ): void {
+    this.declarations.push({ form, name, loc, type });
   }
 
   private paramType(written: TypeRef | undefined): Type {
@@ -101,7 +143,7 @@ export class DeclarationTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    return this.resolver.resolve(written);
+    return this.resolver.resolve(written, this.context);
   }
 
   private isOptional(param: Param): boolean {

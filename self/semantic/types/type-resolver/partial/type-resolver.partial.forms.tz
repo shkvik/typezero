@@ -1,0 +1,108 @@
+import { TypeResolver } from "../type-resolver.tz";
+import {
+  kBooleanTypeName,
+  kStringTypeName,
+} from "../../../../program/ast/const/ast.const.tz";
+import {
+  FunctionTypeForm,
+  LiteralTypeForm,
+  ObjectTypeForm,
+  TupleTypeForm,
+  TypeRef,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  FunctionParameter,
+  LiteralKind,
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { kThisParameter } from "../const/type-resolver.const.tables.tz";
+import { TypeContext } from "../types/type-resolver.types.tz";
+
+partial class TypeResolver {
+  private tuple(form: TupleTypeForm, context: TypeContext): Type {
+    const items: Type[] = [];
+
+    for (const element of form.elements) {
+      const item = this.resolve(element.type, context);
+
+      items.push(item);
+    }
+
+    return this.store.tupleOf(items, form.readonly);
+  }
+
+  private object(form: ObjectTypeForm, context: TypeContext): Type {
+    const fields: ObjectField[] = [];
+
+    for (const field of form.fields) {
+      const type = this.resolve(field.type, context);
+
+      fields.push({
+        name: field.name,
+        type,
+        optional: field.optional,
+        readonly: field.readonly,
+      });
+    }
+
+    return this.store.objectOf(fields);
+  }
+
+  private functionType(form: FunctionTypeForm, context: TypeContext): Type {
+    const params: FunctionParameter[] = [];
+    let self: Type | undefined = undefined;
+
+    for (const param of form.params) {
+      const type = this.resolve(param.type, context);
+
+      if (param.name == kThisParameter) {
+        self = type;
+
+        continue;
+      }
+
+      params.push({ type, optional: param.optional });
+    }
+
+    const result = this.result(form.result, context);
+
+    return this.store.functionOf({ params, rest: form.rest, self, result });
+  }
+
+  private result(ref: TypeRef | undefined, context: TypeContext): Type {
+    if (ref == undefined) {
+      return this.store.plain(TypeKind.Void);
+    }
+
+    return this.resolve(ref, context);
+  }
+
+  private literal(name: string, form: LiteralTypeForm): Type {
+    if (name == kStringTypeName) {
+      return this.store.literal(LiteralKind.String, form.text);
+    }
+    if (name == kBooleanTypeName) {
+      const truth = this.truthText(form.number);
+
+      return this.store.literal(LiteralKind.Boolean, truth);
+    }
+
+    const text = `${form.number}`;
+
+    if (form.integer) {
+      return this.store.literal(LiteralKind.Int, text);
+    }
+
+    return this.store.literal(LiteralKind.Double, text);
+  }
+
+  private truthText(number: double): string {
+    if (number == 0.0) {
+      return "false";
+    }
+
+    return "true";
+  }
+}

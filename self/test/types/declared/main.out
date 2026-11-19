@@ -1,0 +1,50 @@
+main.tz
+  5:6 type Id = int
+  6:6 type Name = string | undefined
+  7:6 type Pair = [int, string]
+  8:6 type Callback = (int) => void
+  9:6 type Level = "low" | "high"
+  11:6 type Shape = { side: int }
+  12:6 type Same = { side: int }
+  13:6 type Wrap = { side: int }
+  15:11 type Face = { side: int }
+  19:11 type Wide = { side: int; more: string }
+  23:11 type Deep = { side: int; more: string; most: boolean }
+  28:6 type Lit = { side: int; more: string }
+  30:6 type Tree = { value: int; kids: Tree[] }
+  31:6 type Twin = { value: int; kids: Twin[] }
+  32:6 type Chain = { next: Chain | undefined }
+  33:6 type Nested = int | (Nested)[]
+  35:11 type Left = { right: Right | undefined }
+  39:11 type Right = { left: Left | undefined }
+  53:6 enum Color = int
+  59:6 enum Word = "a" | "b"
+  64:6 enum Sign = int
+  70:5 id: int
+  71:5 name: string | undefined
+  72:5 pair: [int, string]
+  73:5 callback: (int) => void
+  74:5 level: "low" | "high"
+  75:5 shape: Shape
+  76:5 same: Shape
+  77:5 wrap: Shape
+  78:5 face: Shape
+  79:5 wide: Wide
+  80:5 deep: Deep
+  81:5 lit: Wide
+  82:5 tree: Tree
+  83:5 twin: Twin
+  84:5 chain: Chain
+  85:5 nested: Nested
+  86:5 left: Left
+  87:5 point: Point
+  88:5 child: Child
+  89:5 color: int
+  90:5 blue: 6
+  91:5 word: Word
+  92:5 first: "a"
+  93:5 plus: 1
+  94:5 ids: int[]
+  95:5 shapes: Map<string, Shape>
+  96:5 maybe: Shape | undefined
+  97:5 turn: (Shape) => Shape

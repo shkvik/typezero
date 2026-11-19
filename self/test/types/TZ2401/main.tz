@@ -6,3 +6,21 @@ let seen: Set<int, int> = new Set<int>();
 let steps: Generator<int, int, int, int> = [1].values();
 
 console.log(counts, outcome, pending, list, seen, steps);
+
+type Box<T> = { value: T };
+type Two<A, B = string> = { a: A; b: B };
+
+class Cell<T> {
+  public value: T;
+
+  public constructor(value: T) {
+    this.value = value;
+  }
+}
+
+let box: Box = { value: 1 };
+let wide: Box<int, int> = { value: 1 };
+let two: Two = { a: 1, b: "a" };
+let cell: Cell = new Cell<int>(1);
+
+console.log(box, wide, two, cell);

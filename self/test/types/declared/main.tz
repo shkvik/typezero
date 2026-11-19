@@ -1,0 +1,101 @@
+// Types declared in the program. An alias of a type of object, an
+// interface and a text enum have a name that the type is printed with: the
+// name it met first. An alias of anything else is printed as what it stands
+// for. A class is a type of its own.
+type Id = int;
+type Name = string | undefined;
+type Pair = [int, string];
+type Callback = (x: int) => void;
+type Level = "low" | "high";
+
+type Shape = { side: int };
+type Same = { side: int };
+type Wrap = Shape;
+
+interface Face {
+  side: int;
+}
+
+interface Wide extends Face {
+  more: string;
+}
+
+interface Deep extends Wide {
+  most: boolean;
+  side: int;
+}
+
+type Lit = { side: int; more: string };
+
+type Tree = { value: int; kids: Tree[] };
+type Twin = { value: int; kids: Twin[] };
+type Chain = { next: Chain | undefined };
+type Nested = int | Nested[];
+
+interface Left {
+  right: Right | undefined;
+}
+
+interface Right {
+  left: Left | undefined;
+}
+
+class Point {
+  public x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+class Child extends Point {}
+
+enum Color {
+  Red,
+  Green = 5,
+  Blue,
+}
+
+enum Word {
+  A = "a",
+  B = "b",
+}
+
+enum Sign {
+  Minus = -1,
+  Zero,
+  Plus,
+}
+
+let id: Id = 1;
+let name: Name = undefined;
+let pair: Pair = [1, "a"];
+let callback: Callback = (x: int): void => {};
+let level: Level = "low";
+let shape: Shape = { side: 1 };
+let same: Same = { side: 1 };
+let wrap: Wrap = { side: 1 };
+let face: Face = { side: 1 };
+let wide: Wide = { side: 1, more: "a" };
+let deep: Deep = { side: 1, more: "a", most: true };
+let lit: Lit = { side: 1, more: "a" };
+let tree: Tree = { value: 1, kids: [] };
+let twin: Twin = { value: 1, kids: [] };
+let chain: Chain = { next: undefined };
+let nested: Nested = 1;
+let left: Left = { right: undefined };
+let point: Point = new Point(1);
+let child: Child = new Child(1);
+let color: Color = Color.Red;
+let blue: Color.Blue = Color.Blue;
+let word: Word = Word.A;
+let first: Word.A = Word.A;
+let plus: Sign.Plus = Sign.Plus;
+let ids: Id[] = [];
+let shapes: Map<string, Shape> = new Map<string, Shape>();
+let maybe: Shape | undefined = undefined;
+let turn: (shape: Shape) => Face = (shape: Shape): Face => shape;
+
+console.log(id, name, pair, callback, level, shape, same, wrap, face, wide);
+console.log(deep, lit, tree, twin, chain, nested, left, point, child, color);
+console.log(blue, word, first, plus, ids, shapes, maybe, turn);

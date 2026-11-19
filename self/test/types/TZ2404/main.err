@@ -1,0 +1,9 @@
+main.tz:1:6: error TZ2404: type alias 'Maybe' refers to itself, and only a union of several types without undefined can: make a field optional instead, e.g. 'next?: Maybe'
+type Maybe = Maybe | undefined;
+     ^
+main.tz:2:6: error TZ2404: type alias 'Self' refers to itself, and only a union of several types without undefined can: make a field optional instead, e.g. 'next?: Self'
+type Self = Self | int;
+     ^
+main.tz:3:6: error TZ2404: type alias 'Deep' refers to itself, and only a union of several types without undefined can: make a field optional instead, e.g. 'next?: Deep'
+type Deep = int | Deep[] | undefined;
+     ^

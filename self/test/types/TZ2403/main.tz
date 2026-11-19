@@ -1,0 +1,12 @@
+type Loop = Loop;
+type First = Second;
+type Second = First;
+type Many = Many[];
+type Call = (x: Call) => void;
+type Both = [Both, Both];
+
+let loop: Loop = 1;
+let first: First = 1;
+let many: Many = [];
+
+console.log(loop, first, many);

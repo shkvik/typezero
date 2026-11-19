@@ -5,3 +5,9 @@ main.tz
   4:5 list: ?
   5:5 seen: ?
   6:5 steps: ?
+  10:6 type Box<T> = { value: T }
+  11:6 type Two<A, B> = { a: A; b: B }
+  21:5 box: ?
+  22:5 wide: ?
+  23:5 two: ?
+  24:5 cell: ?

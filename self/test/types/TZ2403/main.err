@@ -1,0 +1,15 @@
+main.tz:1:6: error TZ2403: type alias 'Loop' refers to itself
+type Loop = Loop;
+     ^
+main.tz:2:6: error TZ2403: type alias 'First' refers to itself
+type First = Second;
+     ^
+main.tz:4:6: error TZ2403: type alias 'Many' refers to itself
+type Many = Many[];
+     ^
+main.tz:5:6: error TZ2403: type alias 'Call' refers to itself
+type Call = (x: Call) => void;
+     ^
+main.tz:6:6: error TZ2403: type alias 'Both' refers to itself
+type Both = [Both, Both];
+     ^
