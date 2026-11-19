@@ -1,0 +1,4 @@
+// There is no bigint.
+const count: int = 1;
+
+const a1 = typeof count == "bigint";

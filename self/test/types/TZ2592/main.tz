@@ -1,0 +1,4 @@
+// Postfix `!` is not supported, and this value is never undefined.
+const count: int = 1;
+
+const a1 = count!;

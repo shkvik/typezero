@@ -1,0 +1,12 @@
+main.tz:24:18: error TZ2548: operator '==' cannot be applied to types 'int' and 'double': a number changes its type only explicitly, e.g. 'count.toDouble() == ratio'
+const a1 = count == ratio;
+                 ^
+main.tz:25:17: error TZ2549: operator '==' cannot be applied to types 'string' and 'int'
+const a2 = word == count;
+                ^
+main.tz:26:18: error TZ2564: operator '<' cannot be applied to types 'decimal' and 'double': a double is inexact already, and a decimal would take that on silently; convert it explicitly: 'money < decimal(ratio)'
+const a3 = money < ratio;
+                 ^
+main.tz:27:18: error TZ2550: operator '<' cannot be applied to types 'int | undefined' and 'int'; a value may be undefined: check it first or give a default with '??'
+const a4 = value < 1;
+                 ^

@@ -1,0 +1,4 @@
+main.tz
+  2:10 maybe: () => int | undefined
+  6:7 value: int | undefined
+  8:7 a1: int

@@ -1,0 +1,11 @@
+// `void` would drop a Result, and its error with it.
+function parse(): Result<int, string> {
+  return ok(1);
+}
+
+const result: Result<int, string> = parse();
+const count: int = 1;
+
+const a1: int | undefined = void result;
+
+const b1: int | undefined = void count;

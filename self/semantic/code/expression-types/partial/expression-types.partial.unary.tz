@@ -2,12 +2,19 @@ import { ExpressionTypes } from "../expression-types.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
+  Expr,
   ExprKind,
   UnaryExpr,
   UnaryOp,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
-import { kUnaryTexts } from "../const/expression-types.const.tz";
+import {
+  kDot,
+  kHiddenMark,
+  kOptionalDot,
+  kUnaryTexts,
+  kUnnamedOperand,
+} from "../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
   private unaryTyped(
@@ -21,9 +28,113 @@ partial class ExpressionTypes {
         return this.signTyped(expr, wanted, module);
       case UnaryOp.BitNot:
         return this.bitNotTyped(expr, wanted, module);
+      case UnaryOp.TypeOf:
+        return this.typeofTyped(expr, module);
+      case UnaryOp.Void:
+        return this.voidTyped(expr, module);
+      case UnaryOp.NonNull:
+        return this.nonNullTyped(expr, wanted, module);
       default:
         return this.store.plain(TypeKind.Error);
     }
+  }
+
+  private voidTyped(expr: UnaryExpr, module: int): Type {
+    const type = this.typed(expr.operand, undefined, module);
+    const isPromised = type.kind == TypeKind.Promise;
+    const dropped = this.droppedValue(type);
+    if (this.holdsKind(dropped, TypeKind.Result)) {
+      const code = this.droppedCode(isPromised);
+
+      this.report(module, expr.loc, code, kNoDetails);
+    }
+
+    return this.store.plain(TypeKind.Undefined);
+  }
+
+  private droppedValue(type: Type): Type {
+    if (type.kind != TypeKind.Promise) {
+      return type;
+    }
+
+    return type.value;
+  }
+
+  private droppedCode(isPromised: boolean): Code {
+    if (isPromised) {
+      return Code.VoidDropsAsyncResult;
+    }
+
+    return Code.VoidDropsResult;
+  }
+
+  private nonNullTyped(
+    expr: UnaryExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const type = this.typed(expr.operand, wanted, module);
+    const word = this.assertedText(expr.operand) ?? kUnnamedOperand;
+
+    if (type.kind == TypeKind.Error) {
+      return type;
+    }
+    if (type.kind == TypeKind.Undefined) {
+      this.report(module, expr.loc, Code.NonNullUndefined, kNoDetails);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (!this.isOptional(type)) {
+      this.report(module, expr.loc, Code.NonNullNever, { word });
+
+      return type;
+    }
+
+    this.report(module, expr.loc, Code.NonNullCheck, { word });
+
+    return this.definedType(type);
+  }
+
+  private assertedText(expr: Expr): string | undefined {
+    switch (expr.kind) {
+      case ExprKind.Name:
+        if (expr.name.startsWith(kHiddenMark)) {
+          return undefined;
+        }
+
+        return expr.name;
+      case ExprKind.IntLit:
+        return `${expr.value}`;
+      case ExprKind.Member: {
+        const object = this.assertedText(expr.object);
+        const dot = this.memberDot(expr.optional);
+
+        if (object == undefined) {
+          return undefined;
+        }
+
+        return `${object}${dot}${expr.name}`;
+      }
+      case ExprKind.Index: {
+        const object = this.assertedText(expr.object);
+        const index = this.assertedText(expr.index);
+        if (object == undefined || index == undefined) {
+          return undefined;
+        }
+
+        return `${object}[${index}]`;
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  private memberDot(optional: boolean): string {
+    if (optional) {
+      return kOptionalDot;
+    }
+
+    return kDot;
   }
 
   private signTyped(

@@ -41,6 +41,16 @@ partial class ExpressionTypes {
       case BinaryOp.Shr:
       case BinaryOp.UShr:
         return this.shiftTyped(expr, wanted, module);
+      case BinaryOp.Eq:
+      case BinaryOp.Ne:
+        return this.equalityTyped(expr, module);
+      case BinaryOp.Lt:
+      case BinaryOp.Le:
+      case BinaryOp.Gt:
+      case BinaryOp.Ge:
+        return this.orderTyped(expr, module);
+      case BinaryOp.Nullish:
+        return this.nullishTyped(expr, wanted, module);
       default:
         return this.store.plain(TypeKind.Error);
     }

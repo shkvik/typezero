@@ -1,0 +1,3 @@
+main.tz:8:17: error TZ2593: '!' is not supported: check the value first, e.g. 'if (value == undefined) return ...', or give a default with 'value ?? ...'
+const a1 = value!;
+                ^

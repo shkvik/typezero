@@ -1,0 +1,8 @@
+main.tz
+  2:10 maybe: () => int | undefined
+  6:7 count: int
+  7:7 value: int | undefined
+  9:7 a1: boolean
+  10:7 a2: boolean
+  12:7 b1: boolean
+  13:7 b2: boolean

@@ -1,0 +1,4 @@
+// typeof gives one of a fixed list of names.
+const count: int = 1;
+
+const a1 = typeof count == "integer";

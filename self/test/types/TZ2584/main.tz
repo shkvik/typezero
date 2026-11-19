@@ -1,0 +1,4 @@
+// typeof names each number type, never "number".
+const data: unknown = 1;
+
+const a1 = typeof data == "number";

@@ -260,6 +260,8 @@ partial class ExpressionTypes {
       case TypeKind.Undefined:
       case TypeKind.Json:
         return true;
+      case TypeKind.Union:
+        return type.parts.every((part) => this.isPlainValue(part));
       default:
         return false;
     }

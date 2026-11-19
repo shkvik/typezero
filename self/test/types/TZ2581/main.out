@@ -1,0 +1,6 @@
+main.tz
+  2:7 count: int
+  3:7 data: Json
+  5:7 a1: boolean
+  6:7 a2: boolean
+  8:7 b1: boolean

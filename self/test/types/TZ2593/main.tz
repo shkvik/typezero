@@ -1,0 +1,8 @@
+// Postfix `!` is not supported: the value is checked instead.
+function maybe(): int | undefined {
+  return 1;
+}
+
+const value: int | undefined = maybe();
+
+const a1 = value!;

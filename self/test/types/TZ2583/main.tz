@@ -1,0 +1,13 @@
+// typeof of a value gives only the names its type allows.
+function maybe(): int | undefined {
+  return 1;
+}
+
+const count: int = 1;
+const value: int | undefined = maybe();
+
+const a1 = typeof count == "string";
+const a2 = "boolean" == typeof value;
+
+const b1 = typeof value == "undefined";
+const b2 = typeof count == "int";

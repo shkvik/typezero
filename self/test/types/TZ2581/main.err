@@ -1,0 +1,6 @@
+main.tz:5:21: error TZ2581: 'null' exists only in Json values, and a value of type 'int' is never null; the one value for nothing is 'undefined': '== undefined'
+const a1 = count == null;
+                    ^
+main.tz:6:12: error TZ2581: 'null' exists only in Json values, and a value of type 'int' is never null; the one value for nothing is 'undefined': '!= undefined'
+const a2 = null != count;
+           ^

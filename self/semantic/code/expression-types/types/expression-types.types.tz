@@ -137,6 +137,16 @@ export type UnaryText = {
   readonly text: string;
 };
 
+export type ComparedSide = {
+  readonly type: Type;
+  readonly tested?: Type;
+};
+
+export type ComparedPair = {
+  readonly left: ComparedSide;
+  readonly right: ComparedSide;
+};
+
 export type DictText = {
   readonly dict: DictKind;
   readonly kind: string;

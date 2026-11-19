@@ -1,0 +1,3 @@
+main.tz:4:28: error TZ2585: typeof gives no "number": each number type has its own name, "int", "double", "decimal", "int32"...; the type 'number' is 'double', and its typeof is "double"; for a value of type 'int' it is "int"
+const a1 = typeof count == "number";
+                           ^

@@ -1,0 +1,3 @@
+main.tz:4:28: error TZ2586: typeof gives no "symbol": tz has no symbols as values; the names are "undefined", "null", "boolean", "int", "int8", "int16", "int32", "uint8", "uint16", "uint32", "uint64", "double", "decimal", "string", "array", "object", "function" or "class"
+const a1 = typeof count == "symbol";
+                           ^

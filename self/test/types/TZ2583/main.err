@@ -1,0 +1,6 @@
+main.tz:9:28: error TZ2583: typeof of a value of type 'int' is "int", never "string"
+const a1 = typeof count == "string";
+                           ^
+main.tz:10:12: error TZ2583: typeof of a value of type 'int | undefined' is "int" or "undefined", never "boolean"
+const a2 = "boolean" == typeof value;
+           ^

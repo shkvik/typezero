@@ -13,6 +13,9 @@ import {
 export const kConversionPrefix = "to";
 export const kUnnamedOperand = "x";
 export const kUnnamedCount = "n";
+export const kHiddenMark = "%";
+export const kDot = ".";
+export const kOptionalDot = "?.";
 export const kManyLiterals = 64;
 export const kNoPlace = "";
 export const kValuePlace = " of the value";
@@ -51,7 +54,56 @@ export const kOperatorTexts: OperatorText[] = [
   { op: BinaryOp.Shl, text: "<<" },
   { op: BinaryOp.Shr, text: ">>" },
   { op: BinaryOp.UShr, text: ">>>" },
+  { op: BinaryOp.Eq, text: "==" },
+  { op: BinaryOp.Ne, text: "!=" },
+  { op: BinaryOp.Lt, text: "<" },
+  { op: BinaryOp.Le, text: "<=" },
+  { op: BinaryOp.Gt, text: ">" },
+  { op: BinaryOp.Ge, text: ">=" },
+  { op: BinaryOp.Nullish, text: "??" },
 ];
+
+export const kTypeOfNames = [
+  "undefined",
+  "null",
+  "boolean",
+  "int",
+  "int8",
+  "int16",
+  "int32",
+  "uint8",
+  "uint16",
+  "uint32",
+  "uint64",
+  "double",
+  "decimal",
+  "string",
+  "array",
+  "object",
+  "function",
+  "class",
+];
+
+export const kJsonTypeOfNames = [
+  "null",
+  "boolean",
+  "double",
+  "string",
+  "array",
+  "object",
+];
+
+export const kAnyObjectTypeOfNames = ["object", "class"];
+export const kNumberTypeOfNames = ["double", "decimal"];
+export const kIntegerTypeOfPrefixes = ["int", "uint"];
+export const kUndefinedTypeOf = "undefined";
+export const kNullTypeOf = "null";
+export const kBigintTypeOf = "bigint";
+export const kNumberTypeOf = "number";
+export const kSymbolTypeOf = "symbol";
+export const kMostShownNumberNames = 3;
+export const kNameSeparator = ", ";
+export const kLastNameSeparator = " or ";
 
 export const kUnaryTexts: UnaryText[] = [
   { op: UnaryOp.Neg, text: "-" },

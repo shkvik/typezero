@@ -1,0 +1,3 @@
+main.tz:4:17: error TZ2592: '!' is not supported, and 'count' is never undefined here; drop the '!'
+const a1 = count!;
+                ^

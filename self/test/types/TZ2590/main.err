@@ -1,0 +1,3 @@
+main.tz:8:29: error TZ2590: 'void' drops the Result that the Promise gives, so an error in it would go unchecked; let the task handle it, e.g. an async function that checks 'if (r.isErr()) ...'
+const a1: int | undefined = void task;
+                            ^

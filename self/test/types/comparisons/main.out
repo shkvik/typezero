@@ -1,0 +1,22 @@
+main.tz
+  3:10 maybe: () => int | undefined
+  7:7 count: int
+  8:7 small: int8
+  9:7 ratio: double
+  10:7 money: decimal
+  11:7 word: string
+  12:7 value: int | undefined
+  14:7 same: boolean
+  15:7 less: boolean
+  16:7 text: boolean
+  17:7 near: boolean
+  18:7 exact: boolean
+  19:7 kind: string
+  20:7 missing: boolean
+  21:7 fallback: int
+  22:7 either: int | string
+  24:7 a1: boolean
+  25:7 a2: boolean
+  26:7 a3: boolean
+  27:7 a4: boolean
+  28:7 a5: int | undefined

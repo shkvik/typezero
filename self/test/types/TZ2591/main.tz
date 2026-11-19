@@ -1,0 +1,2 @@
+// Postfix `!` is not supported, and here the value is always undefined.
+const a1: int | undefined = undefined!;

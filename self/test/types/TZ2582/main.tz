@@ -1,0 +1,9 @@
+// Two Results are two objects, so `==` never tells what they hold.
+function parse(): Result<int, string> {
+  return ok(1);
+}
+
+const first: Result<int, string> = parse();
+const second: Result<int, string> = parse();
+
+const a1 = first == second;

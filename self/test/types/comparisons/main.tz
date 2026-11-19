@@ -1,0 +1,28 @@
+// A comparison gives a boolean; integers of any types compare, other
+// numbers need one type.
+function maybe(): int | undefined {
+  return 1;
+}
+
+const count: int = 1;
+const small: int8 = 2;
+const ratio: double = 1.5;
+const money: decimal = 2.5;
+const word: string = "x";
+const value: int | undefined = maybe();
+
+const same = count == small;
+const less = count < 2;
+const text = word < "y";
+const near = ratio >= 1;
+const exact = money < 3;
+const kind = typeof count;
+const missing = value == undefined;
+const fallback = value ?? 0;
+const either = value ?? "none";
+
+const a1 = count == ratio;
+const a2 = word == count;
+const a3 = money < ratio;
+const a4 = value < 1;
+const a5 = value ?? undefined;

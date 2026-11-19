@@ -1,0 +1,8 @@
+// The same for a Promise of a Result.
+async function load(): Promise<Result<int, string>> {
+  return ok(1);
+}
+
+const task: Promise<Result<int, string>> = load();
+
+const a1: int | undefined = void task;

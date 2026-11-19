@@ -1,0 +1,4 @@
+// When the value has few number types, the message names them.
+const count: int = 1;
+
+const a1 = typeof count == "number";

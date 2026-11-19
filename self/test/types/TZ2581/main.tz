@@ -1,0 +1,8 @@
+// `null` is a value of a Json only; elsewhere nothing is `undefined`.
+const count: int = 1;
+const data: Json = 1;
+
+const a1 = count == null;
+const a2 = null != count;
+
+const b1 = data == null;

@@ -1240,4 +1240,43 @@ export const kMessages: Record<Code, Message> = {
   [Code.DecimalInexactPlain]: {
     text: "operator '{other}' cannot be applied to types '{first}' and '{second}': a double is inexact already, and a decimal would take that on silently; convert it explicitly with 'decimal(x)'",
   },
+  [Code.NullNeverEqual]: {
+    text: "'null' exists only in Json values, and a value of type '{first}' is never null; the one value for nothing is 'undefined': '{other} undefined'",
+  },
+  [Code.ResultsCompared]: {
+    text: "Results cannot be compared with '{other}': in JavaScript 'ok(1) == ok(1)' is false, as they are two objects; compare what they hold, with 'isOk()', 'match' or 'value'",
+  },
+  [Code.TypeOfNever]: {
+    text: "typeof of a value of type '{first}' is {other}, never \"{word}\"",
+  },
+  [Code.TypeOfNoNumber]: {
+    text: 'typeof gives no "number": each number type has its own name, "int", "double", "decimal", "int32"...; the type \'number\' is \'double\', and its typeof is "double"',
+  },
+  [Code.TypeOfNoNumberHere]: {
+    text: 'typeof gives no "number": each number type has its own name, "int", "double", "decimal", "int32"...; the type \'number\' is \'double\', and its typeof is "double"; for a value of type \'{first}\' it is {other}',
+  },
+  [Code.TypeOfNoSymbol]: {
+    text: 'typeof gives no "symbol": tz has no symbols as values; the names are {other}',
+  },
+  [Code.TypeOfNotName]: {
+    text: "'{word}' is not a name that typeof gives; the names are {other}",
+  },
+  [Code.TypeOfBigint]: {
+    text: "'typeof x == \"bigint\"' is not supported, as there is no bigint: integers up to 9.2e18 fit in 'int', longer ones in 'decimal' (e.g. 'decimal(2) ** 100')",
+  },
+  [Code.VoidDropsResult]: {
+    text: "'void' drops the Result, so an error in it would go unchecked; handle it, e.g. with '.match(...)'",
+  },
+  [Code.VoidDropsAsyncResult]: {
+    text: "'void' drops the Result that the Promise gives, so an error in it would go unchecked; let the task handle it, e.g. an async function that checks 'if (r.isErr()) ...'",
+  },
+  [Code.NonNullUndefined]: {
+    text: "'!' is not supported, and the value is always undefined",
+  },
+  [Code.NonNullNever]: {
+    text: "'!' is not supported, and '{word}' is never undefined here; drop the '!'",
+  },
+  [Code.NonNullCheck]: {
+    text: "'!' is not supported: check the value first, e.g. 'if ({word} == undefined) return ...', or give a default with '{word} ?? ...'",
+  },
 };

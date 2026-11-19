@@ -1,0 +1,3 @@
+main.tz:2:38: error TZ2591: '!' is not supported, and the value is always undefined
+const a1: int | undefined = undefined!;
+                                     ^

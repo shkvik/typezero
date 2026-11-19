@@ -1,0 +1,4 @@
+main.tz
+  2:16 load: () => Promise<Result<int, string>>
+  6:7 task: Promise<Result<int, string>>
+  8:7 a1: int | undefined
