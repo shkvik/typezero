@@ -1,9 +1,12 @@
 import {
+  Change,
   DictKind,
   FunctionShape,
   IteratorShape,
   LiteralKind,
   ObjectField,
+  OperationKind,
+  OperationShape,
   PlainKind,
   Type,
   TypeKind,
@@ -285,6 +288,69 @@ export class TypeStore {
     const made: Type = { id, kind: TypeKind.Dict, dict, key, value };
 
     return this.keep(text, made);
+  }
+
+  public templateOf(texts: string[], parts: Type[]): Type {
+    const sized = texts.map((text) => `${text.length}:${text}`);
+    const ids = this.idsText(parts);
+    const key = `template ${ids} ${sized.join("")}`;
+    const known = this.byKey.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind: TypeKind.Template, texts, parts };
+
+    return this.keep(key, made);
+  }
+
+  public operationOf(shape: OperationShape): Type {
+    const op = this.operationWord(shape.op);
+    const optional = this.changeWord(shape.optional);
+    const readonly = this.changeWord(shape.readonly);
+    const word = `${shape.word.length}:${shape.word}`;
+    const ids = this.idsText(shape.operands);
+    const key = `operation ${op} ${optional} ${readonly} ${word} ${ids}`;
+    const known = this.byKey.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind: TypeKind.Operation, shape };
+
+    return this.keep(key, made);
+  }
+
+  private operationWord(op: OperationKind): string {
+    switch (op) {
+      case OperationKind.KeyOf:
+        return "keyof";
+      case OperationKind.Indexed:
+        return "indexed";
+      case OperationKind.Mapped:
+        return "mapped";
+      case OperationKind.Conditional:
+        return "conditional";
+      case OperationKind.Intersection:
+        return "intersection";
+      case OperationKind.TextChange:
+        return "text";
+      default:
+        return "alias";
+    }
+  }
+
+  private changeWord(change: Change): string {
+    switch (change) {
+      case Change.Add:
+        return "add";
+      case Change.Remove:
+        return "remove";
+      default:
+        return "none";
+    }
   }
 
   private flatParts(parts: Type[]): Type[] {

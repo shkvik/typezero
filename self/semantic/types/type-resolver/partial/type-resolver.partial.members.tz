@@ -1,0 +1,118 @@
+import { TypeResolver } from "../type-resolver.tz";
+import {
+  Access,
+  ClassDecl,
+  FieldKind,
+  FieldPresence,
+} from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  DeclaredClass,
+  DeclaredMemberKind,
+} from "../../../../program/ast/types/ast.types.declarations.tz";
+import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  TypeParamDecl,
+  TypeRef,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  InstanceType,
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { TypeContext } from "../types/type-resolver.types.tz";
+
+partial class TypeResolver {
+  private memberFields(instance: InstanceType): ObjectField[] {
+    const record = this.record(instance.module);
+    if (record == undefined) {
+      return [];
+    }
+
+    for (const decl of record.declarations.values()) {
+      if (decl.kind == StmtKind.Class && decl.loc == instance.loc) {
+        return this.classFields(instance, decl);
+      }
+    }
+
+    for (const declared of record.classes.values()) {
+      if (declared.loc == instance.loc) {
+        return this.declaredFields(instance, declared);
+      }
+    }
+
+    return [];
+  }
+
+  private classFields(instance: InstanceType, decl: ClassDecl): ObjectField[] {
+    const context = this.inside(instance, decl.typeParams);
+    const fields: ObjectField[] = [];
+
+    for (const field of decl.fields) {
+      if (field.access != Access.Public || field.form == FieldKind.Static) {
+        continue;
+      }
+
+      const type = this.memberType(field.type, context);
+      const optional = field.presence == FieldPresence.Optional;
+
+      fields.push({
+        name: field.name,
+        type,
+        optional,
+        readonly: field.readonly,
+      });
+    }
+
+    return fields;
+  }
+
+  private declaredFields(
+    instance: InstanceType,
+    declared: DeclaredClass,
+  ): ObjectField[] {
+    const context = this.inside(instance, declared.typeParams);
+    const fields: ObjectField[] = [];
+
+    for (const member of declared.members) {
+      const form = member.form;
+      const hidden = member.access != Access.Public || member.isStatic;
+      if (form.kind != DeclaredMemberKind.Field || hidden) {
+        continue;
+      }
+
+      const type = this.memberType(member.type, context);
+
+      fields.push({
+        name: member.name,
+        type,
+        optional: form.optional,
+        readonly: form.readonly,
+      });
+    }
+
+    return fields;
+  }
+
+  private inside(instance: InstanceType, params: TypeParamDecl[]): TypeContext {
+    const bindings = new Map<int, Type>();
+
+    for (let index = 0; index < params.length; index++) {
+      const param = params[index];
+      const arg = instance.args[index];
+      if (arg != undefined) {
+        bindings.set(param.loc, arg);
+      }
+    }
+
+    return { module: instance.module, bindings };
+  }
+
+  private memberType(written: TypeRef | undefined, context: TypeContext): Type {
+    if (written == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.resolve(written, context);
+  }
+}

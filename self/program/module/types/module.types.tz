@@ -64,7 +64,6 @@ export type Module = {
 };
 
 export enum BuiltinText {
-  Prelude,
   Iterate,
 }
 

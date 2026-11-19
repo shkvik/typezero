@@ -880,6 +880,18 @@ export const kMessages: Record<Code, Message> = {
   [Code.AliasRefersToItself]: {
     text: "type alias '{word}' refers to itself",
   },
+  [Code.KeyofNeedsObject]: {
+    text: "'keyof' takes an object type, whose fields it names, not '{word}'",
+  },
+  [Code.NoSuchMember]: {
+    text: "'{word}' has no member '{other}'",
+  },
+  [Code.MappedKeys]: {
+    text: "the keys of a mapped type are names of fields, string literal types such as '\"id\" | \"name\"' or 'keyof T', not '{word}'",
+  },
+  [Code.IntersectionNeedsObjects]: {
+    text: "'&' joins object types into one with the fields of all, and '{word}' is not an object type; of TypeScript's other idioms with '&', 'K & string' (what of K is a string) and 'T & {}' (T without undefined) work too",
+  },
   [Code.RecursiveUnion]: {
     text: "type alias '{word}' refers to itself, and only a union of several types without undefined can: make a field optional instead, e.g. 'next?: {word}'",
   },

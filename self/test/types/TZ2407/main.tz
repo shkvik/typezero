@@ -1,0 +1,3 @@
+type ByNumber = { [K in int]: string };
+type ByText = { [K in string]: int };
+type ByObject = { [K in { a: int }]: int };

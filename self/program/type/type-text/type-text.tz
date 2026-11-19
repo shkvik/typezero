@@ -1,6 +1,7 @@
 import { TypeStore } from "../type-store/type-store.tz";
 import {
   ArrayType,
+  Change,
   DictKind,
   DictType,
   FunctionShape,
@@ -11,8 +12,11 @@ import {
   LiteralType,
   ObjectField,
   ObjectType,
+  OperationKind,
+  OperationShape,
   PromiseType,
   ResultType,
+  TemplateType,
   TupleType,
   Type,
   TypeKind,
@@ -82,8 +86,93 @@ export class TypeText {
         return this.instanceText(type);
       case TypeKind.TypeParameter:
         return type.name;
+      case TypeKind.Template:
+        return this.templateText(type);
+      case TypeKind.Operation:
+        return this.operationText(type.shape);
       default:
         return "?";
+    }
+  }
+
+  private templateText(type: TemplateType): string {
+    let text = type.texts[0] ?? "";
+
+    for (let index = 0; index < type.parts.length; index++) {
+      const part = this.holeText(type.parts[index]);
+      const after = type.texts[index + 1] ?? "";
+
+      text = `${text}\${${part}}${after}`;
+    }
+
+    return `\`${text}\``;
+  }
+
+  private holeText(part: Type | undefined): string {
+    if (part == undefined) {
+      return "";
+    }
+    if (part.kind == TypeKind.Double) {
+      return "number";
+    }
+
+    return this.of(part);
+  }
+
+  private operationText(shape: OperationShape): string {
+    const texts = shape.operands.map((operand) => this.of(operand));
+    const first = texts[0] ?? "";
+    const second = texts[1] ?? "";
+
+    switch (shape.op) {
+      case OperationKind.KeyOf:
+        return `keyof ${first}`;
+      case OperationKind.Indexed:
+        return `${first}[${second}]`;
+      case OperationKind.Mapped:
+        return this.mappedText(shape, texts);
+      case OperationKind.Conditional: {
+        const yes = texts[2] ?? "";
+        const no = texts[3] ?? "";
+
+        return `${first} extends ${second} ? ${yes} : ${no}`;
+      }
+      case OperationKind.Intersection:
+        return texts.join(" & ");
+      case OperationKind.TextChange:
+        return `${shape.word}<${first}>`;
+      default:
+        return shape.word;
+    }
+  }
+
+  private mappedText(shape: OperationShape, texts: string[]): string {
+    const keys = texts[0] ?? "";
+    const value = texts[1] ?? "";
+    const renamed = this.renameText(texts[2]);
+    const readonly = this.changeText(shape.readonly, "readonly ");
+    const optional = this.changeText(shape.optional, "?");
+    const head = `${readonly}[${shape.word} in ${keys}${renamed}]`;
+
+    return `{ ${head}${optional}: ${value} }`;
+  }
+
+  private renameText(renamed: string | undefined): string {
+    if (renamed == undefined) {
+      return "";
+    }
+
+    return ` as ${renamed}`;
+  }
+
+  private changeText(change: Change, mark: string): string {
+    switch (change) {
+      case Change.Add:
+        return mark;
+      case Change.Remove:
+        return `-${mark}`;
+      default:
+        return "";
     }
   }
 

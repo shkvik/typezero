@@ -292,4 +292,8 @@ export enum Code {
   TypeNotGeneric = "TZ2402",
   AliasRefersToItself = "TZ2403",
   RecursiveUnion = "TZ2404",
+  KeyofNeedsObject = "TZ2405",
+  NoSuchMember = "TZ2406",
+  MappedKeys = "TZ2407",
+  IntersectionNeedsObjects = "TZ2408",
 }

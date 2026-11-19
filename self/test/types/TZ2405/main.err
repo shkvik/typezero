@@ -1,0 +1,12 @@
+main.tz:5:16: error TZ2405: 'keyof' takes an object type, whose fields it names, not '[int, string]'
+type OfTuple = keyof Pair;
+               ^
+main.tz:6:16: error TZ2405: 'keyof' takes an object type, whose fields it names, not 'int[]'
+type OfArray = keyof int[];
+               ^
+main.tz:7:16: error TZ2405: 'keyof' takes an object type, whose fields it names, not 'User | "new" | "gone"'
+type OfUnion = keyof (User | Status);
+               ^
+main.tz:8:17: error TZ2405: 'keyof' takes an object type, whose fields it names, not 'int'
+type OfNumber = keyof int;
+                ^

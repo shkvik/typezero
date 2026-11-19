@@ -23,6 +23,24 @@ export enum TypeKind {
   Dict,
   Instance,
   TypeParameter,
+  Template,
+  Operation,
+}
+
+export enum OperationKind {
+  KeyOf,
+  Indexed,
+  Mapped,
+  Conditional,
+  Intersection,
+  TextChange,
+  Alias,
+}
+
+export enum Change {
+  None,
+  Add,
+  Remove,
 }
 
 export enum DictKind {
@@ -172,6 +190,27 @@ export type TypeParameterType = {
   readonly name: string;
 };
 
+export type TemplateType = {
+  readonly id: int;
+  readonly kind: TypeKind.Template;
+  readonly texts: string[];
+  readonly parts: Type[];
+};
+
+export type OperationShape = {
+  readonly op: OperationKind;
+  readonly operands: Type[];
+  readonly word: string;
+  readonly optional: Change;
+  readonly readonly: Change;
+};
+
+export type OperationType = {
+  readonly id: int;
+  readonly kind: TypeKind.Operation;
+  readonly shape: OperationShape;
+};
+
 export type Type =
   | PlainType
   | IntType
@@ -186,4 +225,6 @@ export type Type =
   | IteratorType
   | DictType
   | InstanceType
-  | TypeParameterType;
+  | TypeParameterType
+  | TemplateType
+  | OperationType;

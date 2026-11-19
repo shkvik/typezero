@@ -1,0 +1,30 @@
+main.tz
+  4:6 type IsString<T> = T extends string ? "yes" : "no"
+  5:6 type Whole<T> = [T] extends [string] ? "yes" : "no"
+  6:6 type Kind<T> = T extends string ? "text" : T extends int ? "number" : "other"
+  7:6 type Boxed<T> = T extends string ? { text: T } : { value: T }
+  8:6 type IsNever<T> = [T] extends [never] ? true : false
+  9:6 type Equal<A, B> = [A] extends [B] ? [B] extends [A] ? true : false : false
+  10:6 type Methods<T> = { [K in keyof T]: T[K] extends (...never[]) => unknown ? K : never }[keyof T]
+  14:6 type Circle = { kind: "circle"; radius: double }
+  15:6 type Square = { kind: "square"; side: double }
+  16:6 type Shape = Circle | Square
+  17:6 type Service = { name: string; readonly start: () => void; readonly stop: (boolean) => int }
+  19:6 type A01 = "yes"
+  20:6 type A02 = "no"
+  21:6 type A03 = "yes" | "no"
+  22:6 type A04 = "no"
+  23:6 type A05 = "yes"
+  24:6 type A06 = "text" | "number" | "other"
+  25:6 type A07 = { text: string } | { value: int }
+  26:6 type A08 = true
+  27:6 type A09 = false
+  28:6 type A10 = true
+  29:6 type A11 = false
+  30:6 type A12 = false
+  31:6 type A13 = "start" | "stop"
+  32:6 type A14 = { kind: "circle"; radius: double }
+  33:6 type A15 = { kind: "square"; side: double }
+  34:6 type A16 = string | int
+  35:6 type A17 = never
+  37:10 choose: (T, T extends string ? "text" : T extends int ? "number" : "other", T[] extends string ? { text: T[] } : { value: T[] }) => void

@@ -1,0 +1,51 @@
+main.tz
+  4:6 type User = { id: int; name: string; email?: string; readonly tag: boolean }
+  5:6 type Status = "new" | "gone" | "lost"
+  6:6 type Pair = [int, string]
+  20:6 type Getters<T> = { [K in keyof T]: () => T[K] }
+  21:6 type Checks<T> = { [K in keyof T]?: (T[K]) => boolean }
+  22:6 type Flags = { new: boolean; gone: boolean; lost: boolean }
+  23:6 type Mutable<T> = { -readonly [K in keyof T]: T[K] }
+  24:6 type Renamed<T> = { [K in keyof T as `get${Capitalize<K & string>}`]: () => T[K] }
+  25:6 type WithoutId<T> = { [K in keyof T as K extends "id" ? never : K]: T[K] }
+  26:6 type Named = { new: "new"; gone: "gone"; lost: "lost"; x: "x" }
+  28:6 type A01 = "id" | "name" | "email" | "tag"
+  29:6 type A02 = "x"
+  30:6 type A03 = string
+  31:6 type A04 = never
+  33:6 type B01 = int
+  34:6 type B02 = string | undefined
+  35:6 type B03 = int | string
+  36:6 type B04 = int | string | boolean | undefined
+  37:6 type B05 = int
+  38:6 type B06 = string
+  39:6 type B07 = int
+  40:6 type B08 = int
+  41:6 type B09 = 2
+  43:6 type C01 = { id: () => int; name: () => string; email: () => string | undefined; readonly tag: () => boolean }
+  44:6 type C02 = { id?: (int) => boolean; name?: (string) => boolean; email?: (string | undefined) => boolean; readonly tag?: (boolean) => boolean }
+  45:6 type C03 = { new: boolean; gone: boolean; lost: boolean }
+  46:6 type C04 = { id: int; name: string; email?: string; tag: boolean }
+  47:6 type C05 = { getId: () => int; getName: () => string; getEmail: () => string | undefined; readonly getTag: () => boolean }
+  48:6 type C06 = { name: string; email?: string; readonly tag: boolean }
+  50:6 type D01 = { id?: int; name?: string; email?: string; readonly tag?: boolean }
+  51:6 type D02 = { id: int; name: string; email: string; readonly tag: boolean }
+  52:6 type D03 = { readonly id: int; readonly name: string; readonly email?: string; readonly tag: boolean }
+  53:6 type D04 = { id: int; name: string }
+  54:6 type D05 = { id: int; name: string; tag: boolean }
+  56:6 type E01 = "onClick" | "onHover"
+  57:6 type E02 = "a1" | "a2" | "b1" | "b2"
+  58:6 type E03 = `${number}px`
+  59:6 type E04 = "Ab"
+  60:6 type E05 = "AB"
+  61:6 type E06 = "ab"
+  62:6 type E07 = "aB"
+  63:6 type E08 = `a${string}b${int}`
+  64:6 type E09 = "false" | "true"
+  66:6 type G01 = "new" | "lost"
+  67:6 type G02 = "gone" | "lost"
+  68:6 type G03 = string
+  70:6 type H01 = { id: int; name: string; email?: string; readonly tag: boolean; extra: boolean }
+  71:6 type H02 = string
+  72:6 type H03 = int
+  74:10 later: (K, keyof T, T[K], { [K in keyof T]: () => T[K] }, { [K in keyof T]?: T[K] }, T extends string ? int : boolean, `id-${K & string}`) => void

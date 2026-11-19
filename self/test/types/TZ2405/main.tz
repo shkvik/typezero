@@ -1,0 +1,8 @@
+type User = { id: int };
+type Status = "new" | "gone";
+
+type Pair = [int, string];
+type OfTuple = keyof Pair;
+type OfArray = keyof int[];
+type OfUnion = keyof (User | Status);
+type OfNumber = keyof int;

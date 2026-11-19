@@ -1,0 +1,12 @@
+main.tz:3:16: error TZ2406: 'User' has no member '"age"'
+type Missing = User["age"];
+               ^
+main.tz:4:17: error TZ2406: 'User' has no member 'int'
+type ByNumber = User[int];
+                ^
+main.tz:5:17: error TZ2406: 'int' has no member '"x"'
+type OfNumber = int["x"];
+                ^
+main.tz:6:16: error TZ2406: '[int, string]' has no member '2'
+type PastEnd = [int, string][2];
+               ^

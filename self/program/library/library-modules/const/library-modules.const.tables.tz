@@ -441,6 +441,13 @@ export const kLibraryModules: LibraryModule[] = [
     access: LibraryAccess.Global,
   },
   {
+    name: "tz:global/prelude",
+    file: "prelude.d.tz",
+    parts: [],
+    specs: [],
+    access: LibraryAccess.Global,
+  },
+  {
     name: "tz:global/object",
     file: "object.d.tz",
     parts: [],
@@ -565,7 +572,6 @@ export const kLibraryModules: LibraryModule[] = [
 ];
 
 export const kBuiltinSources: BuiltinSource[] = [
-  { text: BuiltinText.Prelude, file: "prelude.d.tz" },
   { text: BuiltinText.Iterate, file: "iterate.tz" },
 ];
 

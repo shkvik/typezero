@@ -1,0 +1,9 @@
+main.tz:1:25: error TZ2407: the keys of a mapped type are names of fields, string literal types such as '"id" | "name"' or 'keyof T', not 'int'
+type ByNumber = { [K in int]: string };
+                        ^
+main.tz:2:23: error TZ2407: the keys of a mapped type are names of fields, string literal types such as '"id" | "name"' or 'keyof T', not 'string'
+type ByText = { [K in string]: int };
+                      ^
+main.tz:3:25: error TZ2407: the keys of a mapped type are names of fields, string literal types such as '"id" | "name"' or 'keyof T', not '{ a: int }'
+type ByObject = { [K in { a: int }]: int };
+                        ^

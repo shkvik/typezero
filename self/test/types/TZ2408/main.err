@@ -1,0 +1,6 @@
+main.tz:4:17: error TZ2408: '&' joins object types into one with the fields of all, and '"new"' is not an object type; of TypeScript's other idioms with '&', 'K & string' (what of K is a string) and 'T & {}' (T without undefined) work too
+type Literals = Status & "new";
+                ^
+main.tz:5:14: error TZ2408: '&' joins object types into one with the fields of all, and '"new"' is not an object type; of TypeScript's other idioms with '&', 'K & string' (what of K is a string) and 'T & {}' (T without undefined) work too
+type Mixed = User & Status;
+             ^

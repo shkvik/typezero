@@ -1,0 +1,6 @@
+main.tz
+  1:6 type User = { id: int; name: string }
+  3:6 type Missing = ?
+  4:6 type ByNumber = ?
+  5:6 type OfNumber = ?
+  6:6 type PastEnd = ?

@@ -5,6 +5,11 @@ import "./partial/type-resolver.partial.aliases.tz";
 import "./partial/type-resolver.partial.enums.tz";
 import "./partial/type-resolver.partial.modules.tz";
 import "./partial/type-resolver.partial.globals.tz";
+import "./partial/type-resolver.partial.operations.tz";
+import "./partial/type-resolver.partial.members.tz";
+import "./partial/type-resolver.partial.mapped.tz";
+import "./partial/type-resolver.partial.templates.tz";
+import "./partial/type-resolver.partial.conditionals.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   Details,
@@ -23,6 +28,7 @@ import { ModuleScopes } from "../../../program/scopes/types/scopes.types.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { TypeText } from "../../../program/type/type-text/type-text.tz";
 import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { TypeRelation } from "../type-relation/type-relation.tz";
 import {
   AliasDoor,
   ModuleRecord,
@@ -32,6 +38,7 @@ import {
 export class TypeResolver {
   private readonly store: TypeStore;
   private readonly text: TypeText;
+  private readonly relation: TypeRelation;
   private readonly program: Program;
   private readonly scopes: Map<int, ModuleScopes>;
   private readonly records: Map<int, ModuleRecord>;
@@ -47,6 +54,7 @@ export class TypeResolver {
   ) {
     this.store = store;
     this.text = new TypeText(store);
+    this.relation = new TypeRelation();
     this.program = program;
     this.scopes = new Map<int, ModuleScopes>();
     this.records = new Map<int, ModuleRecord>();
@@ -100,6 +108,20 @@ export class TypeResolver {
         return this.literal(ref.name, form);
       case TypeRefKind.Predicate:
         return this.store.plain(TypeKind.Boolean);
+      case TypeRefKind.KeyOf:
+        return this.keyOf(ref, context);
+      case TypeRefKind.Indexed:
+        return this.indexed(ref, context);
+      case TypeRefKind.Mapped:
+        return this.mapped(ref, form, context);
+      case TypeRefKind.Conditional:
+        return this.conditional(ref, context);
+      case TypeRefKind.Template:
+        return this.template(ref, form, context);
+      case TypeRefKind.Intersection:
+        return this.intersection(ref, context);
+      case TypeRefKind.Infer:
+        return this.store.typeParameter(context.module, ref.loc, ref.name);
       default:
         return this.store.plain(TypeKind.Error);
     }

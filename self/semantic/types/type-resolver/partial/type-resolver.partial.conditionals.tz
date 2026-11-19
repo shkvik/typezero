@@ -1,0 +1,154 @@
+import { TypeResolver } from "../type-resolver.tz";
+import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import {
+  FunctionShape,
+  OperationKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { Distribution, TypeContext } from "../types/type-resolver.types.tz";
+
+partial class TypeResolver {
+  private conditional(ref: TypeRef, context: TypeContext): Type {
+    const spread = this.distribution(ref.args[0], context);
+    if (spread == undefined) {
+      return this.decided(ref, context);
+    }
+
+    const results: Type[] = [];
+
+    for (const part of spread.parts) {
+      const inner = this.bound(context, spread.loc, part);
+      const result = this.decided(ref, inner);
+
+      results.push(result);
+    }
+
+    return this.store.unionOf(results);
+  }
+
+  private distribution(
+    check: TypeRef | undefined,
+    context: TypeContext,
+  ): Distribution | undefined {
+    if (check == undefined || check.form.kind != TypeRefKind.Name) {
+      return undefined;
+    }
+
+    const record = this.record(context.module);
+    const symbol = record?.uses.get(check.loc)?.symbol;
+    if (symbol == undefined || symbol.kind != SymbolKind.TypeParameter) {
+      return undefined;
+    }
+
+    const bound = context.bindings.get(symbol.loc);
+    if (bound == undefined) {
+      return undefined;
+    }
+    if (bound.kind == TypeKind.Never) {
+      return { loc: symbol.loc, parts: [] };
+    }
+    if (bound.kind != TypeKind.Union) {
+      return undefined;
+    }
+
+    return { loc: symbol.loc, parts: bound.parts };
+  }
+
+  private decided(ref: TypeRef, context: TypeContext): Type {
+    const checkRef = ref.args[0];
+    const wantedRef = ref.args[1];
+    const yes = ref.args[2];
+    const no = ref.args[3];
+
+    if (checkRef == undefined || wantedRef == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const check = this.resolve(checkRef, context);
+    const wanted = this.resolve(wantedRef, context);
+    const seen = new Set<int>();
+    if (this.depends(check, seen) || this.depends(wanted, seen)) {
+      const branches = this.resolveAll(ref.args.slice(2), context);
+      const operands = [check, wanted].concat(branches);
+
+      return this.operation(OperationKind.Conditional, operands, "");
+    }
+    if (this.relation.extends(check, wanted)) {
+      return this.result(yes, context);
+    }
+
+    return this.result(no, context);
+  }
+
+  private depends(type: Type, seen: Set<int>): boolean {
+    if (seen.has(type.id)) {
+      return false;
+    }
+
+    seen.add(type.id);
+
+    switch (type.kind) {
+      case TypeKind.TypeParameter:
+      case TypeKind.Operation:
+        return true;
+      case TypeKind.Array:
+        return this.depends(type.item, seen);
+      case TypeKind.Tuple:
+        return this.anyDepends(type.items, seen);
+      case TypeKind.Union:
+        return this.anyDepends(type.parts, seen);
+      case TypeKind.Object: {
+        const types = type.fields.map((field) => field.type);
+
+        return this.anyDepends(types, seen);
+      }
+      case TypeKind.Function:
+        return this.shapeDepends(type.shape, seen);
+      case TypeKind.Promise:
+        return this.depends(type.value, seen);
+      case TypeKind.Result:
+        return this.anyDepends([type.value, type.error], seen);
+      case TypeKind.Dict:
+        return this.anyDepends([type.key, type.value], seen);
+      case TypeKind.Iterator: {
+        const shape = type.shape;
+        const types = [shape.yielded, shape.returned, shape.sent];
+
+        return this.anyDepends(types, seen);
+      }
+      case TypeKind.Instance:
+        return this.anyDepends(type.args, seen);
+      case TypeKind.Template:
+        return this.anyDepends(type.parts, seen);
+      default:
+        return false;
+    }
+  }
+
+  private shapeDepends(shape: FunctionShape, seen: Set<int>): boolean {
+    const types = shape.params.map((param) => param.type);
+    const self = shape.self;
+    if (self != undefined) {
+      types.push(self);
+    }
+
+    types.push(shape.result);
+
+    return this.anyDepends(types, seen);
+  }
+
+  private anyDepends(types: Type[], seen: Set<int>): boolean {
+    for (const type of types) {
+      if (this.depends(type, seen)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+}

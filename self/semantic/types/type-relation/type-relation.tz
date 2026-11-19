@@ -1,0 +1,200 @@
+import {
+  FunctionShape,
+  LiteralKind,
+  LiteralType,
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+
+export class TypeRelation {
+  private readonly assumed: Set<string>;
+
+  public constructor() {
+    this.assumed = new Set<string>();
+  }
+
+  public extends(source: Type, target: Type): boolean {
+    if (source == target) {
+      return true;
+    }
+    if (target.kind == TypeKind.Unknown || source.kind == TypeKind.Never) {
+      return true;
+    }
+    if (source.kind == TypeKind.Union) {
+      return source.parts.every((part) => this.extends(part, target));
+    }
+    if (target.kind == TypeKind.Union) {
+      return target.parts.some((part) => this.extends(source, part));
+    }
+
+    const pair = `${source.id} ${target.id}`;
+    if (this.assumed.has(pair)) {
+      return true;
+    }
+
+    this.assumed.add(pair);
+
+    const fits = this.fits(source, target);
+
+    this.assumed.delete(pair);
+
+    return fits;
+  }
+
+  private fits(source: Type, target: Type): boolean {
+    if (source.kind == TypeKind.Literal) {
+      return this.literalFits(source, target);
+    }
+
+    switch (target.kind) {
+      case TypeKind.Array:
+        return this.arrayFits(source, target.item);
+      case TypeKind.Tuple: {
+        const items = target.items;
+
+        return (
+          source.kind == TypeKind.Tuple && this.allFit(source.items, items)
+        );
+      }
+      case TypeKind.Object:
+        return this.objectFits(source, target.fields);
+      case TypeKind.Function:
+        return (
+          source.kind == TypeKind.Function &&
+          this.functionFits(source.shape, target.shape)
+        );
+      case TypeKind.Promise:
+        return (
+          source.kind == TypeKind.Promise &&
+          this.extends(source.value, target.value)
+        );
+      case TypeKind.Result:
+        return (
+          source.kind == TypeKind.Result &&
+          this.extends(source.value, target.value) &&
+          this.extends(source.error, target.error)
+        );
+      case TypeKind.Dict:
+        return (
+          source.kind == TypeKind.Dict &&
+          source.dict == target.dict &&
+          this.extends(source.key, target.key) &&
+          this.extends(source.value, target.value)
+        );
+      case TypeKind.Iterator:
+        return (
+          source.kind == TypeKind.Iterator &&
+          source.shape.async == target.shape.async &&
+          this.extends(source.shape.yielded, target.shape.yielded)
+        );
+      case TypeKind.Instance:
+        return (
+          source.kind == TypeKind.Instance &&
+          source.module == target.module &&
+          source.loc == target.loc &&
+          this.allFit(source.args, target.args)
+        );
+      default:
+        return false;
+    }
+  }
+
+  private literalFits(source: LiteralType, target: Type): boolean {
+    switch (source.literal) {
+      case LiteralKind.String:
+        return target.kind == TypeKind.String;
+      case LiteralKind.Int:
+        return target.kind == TypeKind.Int || target.kind == TypeKind.Double;
+      case LiteralKind.Double:
+        return target.kind == TypeKind.Double;
+      default:
+        return target.kind == TypeKind.Boolean;
+    }
+  }
+
+  private arrayFits(source: Type, item: Type): boolean {
+    if (source.kind == TypeKind.Array) {
+      return this.extends(source.item, item);
+    }
+    if (source.kind == TypeKind.Tuple) {
+      return source.items.every((each) => this.extends(each, item));
+    }
+
+    return false;
+  }
+
+  private allFit(sources: Type[], targets: Type[]): boolean {
+    if (sources.length != targets.length) {
+      return false;
+    }
+
+    for (let index = 0; index < sources.length; index++) {
+      const source = sources[index];
+      const target = targets[index];
+      if (source == undefined || target == undefined) {
+        return false;
+      }
+      if (!this.extends(source, target)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private objectFits(source: Type, wanted: ObjectField[]): boolean {
+    if (source.kind != TypeKind.Object) {
+      return false;
+    }
+
+    for (const field of wanted) {
+      const own = source.fields.find((each) => each.name == field.name);
+      if (own == undefined) {
+        if (!field.optional) {
+          return false;
+        }
+
+        continue;
+      }
+      if (!this.extends(own.type, field.type)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private functionFits(source: FunctionShape, target: FunctionShape): boolean {
+    if (!this.extends(source.result, target.result)) {
+      return false;
+    }
+
+    for (let index = 0; index < source.params.length; index++) {
+      const given = this.parameterAt(target, index);
+      const taken = source.params[index]?.type;
+      if (given == undefined || taken == undefined) {
+        continue;
+      }
+      if (!this.extends(given, taken)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private parameterAt(shape: FunctionShape, index: int): Type | undefined {
+    const last = shape.params.length - 1;
+    if (!shape.rest || index < last) {
+      return shape.params[index]?.type;
+    }
+
+    const rest = shape.params[last]?.type;
+    if (rest != undefined && rest.kind == TypeKind.Array) {
+      return rest.item;
+    }
+
+    return rest;
+  }
+}

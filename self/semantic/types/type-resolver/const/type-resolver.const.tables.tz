@@ -3,11 +3,24 @@ import {
   GenericTypeName,
   PlainBuiltin,
   PlainTypeName,
+  TextChange,
+  TextChangeName,
 } from "../types/type-resolver.types.tz";
 
 export const kThisParameter = "this";
 export const kNamePoint = ".";
 export const kEnumValueLimit: uint64 = 9223372036854775807;
+
+export const kLengthMember = "length";
+export const kFalseText = "false";
+export const kTrueText = "true";
+
+export const kTextChanges: TextChangeName[] = [
+  { name: "Capitalize", change: TextChange.Capitalize },
+  { name: "Uncapitalize", change: TextChange.Uncapitalize },
+  { name: "Uppercase", change: TextChange.Uppercase },
+  { name: "Lowercase", change: TextChange.Lowercase },
+];
 
 export const kPlainTypes: PlainTypeName[] = [
   { name: "int", type: PlainBuiltin.Int },

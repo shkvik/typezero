@@ -1,0 +1,37 @@
+// A type that is chosen by a question about another type. A question about
+// a parameter alone is asked of every part of a union apart; in brackets it
+// is asked of the union as a whole.
+type IsString<T> = T extends string ? "yes" : "no";
+type Whole<T> = [T] extends [string] ? "yes" : "no";
+type Kind<T> = T extends string ? "text" : T extends int ? "number" : "other";
+type Boxed<T> = T extends string ? { text: T } : { value: T };
+type IsNever<T> = [T] extends [never] ? true : false;
+type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Methods<T> = {
+  [K in keyof T]: T[K] extends (...args: never[]) => unknown ? K : never;
+}[keyof T];
+
+type Circle = { kind: "circle"; radius: double };
+type Square = { kind: "square"; side: double };
+type Shape = Circle | Square;
+type Service = { name: string; start(): void; stop(force: boolean): int };
+
+type A01 = IsString<"a">;
+type A02 = IsString<int>;
+type A03 = IsString<string | int>;
+type A04 = Whole<string | int>;
+type A05 = Whole<"a" | "b">;
+type A06 = Kind<"a" | 5 | true>;
+type A07 = Boxed<string | int>;
+type A08 = IsNever<never>;
+type A09 = IsNever<int>;
+type A10 = Equal<int, int>;
+type A11 = Equal<int, string>;
+type A12 = Equal<"a", string>;
+type A13 = Methods<Service>;
+type A14 = Extract<Shape, { kind: "circle" }>;
+type A15 = Exclude<Shape, { kind: "circle" }>;
+type A16 = NonNullable<int | string | undefined>;
+type A17 = IsString<never>;
+
+function choose<T>(value: T, kind: Kind<T>, boxed: Boxed<T[]>): void {}

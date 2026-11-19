@@ -7,6 +7,7 @@ import {
 } from "../../../../program/ast/types/ast.types.types.tz";
 import {
   ObjectField,
+  OperationKind,
   Type,
   TypeKind,
   UnionType,
@@ -23,12 +24,12 @@ partial class TypeResolver {
     const args = Array.from(bindings.values());
     const ids = args.map((arg) => `${arg.id}`);
     const key = `${module} ${decl.loc} ${ids.join(" ")}`;
+    const label = this.labelText(module, decl.name, written);
     const open = this.doors.get(key);
     if (open != undefined) {
-      return this.reenter(module, decl, open);
+      return this.reenter(module, decl, open, args, label);
     }
 
-    const label = this.labelText(module, decl.name, written);
     const reserved = this.reserve(decl.type, label);
     const error = this.store.plain(TypeKind.Error);
     const door: AliasDoor = {
@@ -45,12 +46,18 @@ partial class TypeResolver {
 
     door.result = result;
     door.state = DoorState.Done;
-    this.labelAlias(result, label);
+    this.labelAlias(decl, result, label);
 
     return result;
   }
 
-  private reenter(module: int, decl: TypeAliasDecl, door: AliasDoor): Type {
+  private reenter(
+    module: int,
+    decl: TypeAliasDecl,
+    door: AliasDoor,
+    args: Type[],
+    label: string,
+  ): Type {
     if (door.state == DoorState.Done) {
       return door.result;
     }
@@ -60,6 +67,11 @@ partial class TypeResolver {
       door.entered = true;
 
       return reserved;
+    }
+
+    const seen = new Set<int>();
+    if (this.anyDepends(args, seen)) {
+      return this.operation(OperationKind.Alias, args, label);
     }
     if (!door.entered) {
       this.report(module, decl.loc, Code.AliasRefersToItself, {
@@ -163,8 +175,9 @@ partial class TypeResolver {
     return !body.parts.some((part) => part.kind == TypeKind.Undefined);
   }
 
-  private labelAlias(result: Type, label: string): void {
-    if (result.kind == TypeKind.Object) {
+  private labelAlias(decl: TypeAliasDecl, result: Type, label: string): void {
+    const written = decl.type.form.kind == TypeRefKind.Object;
+    if (written && result.kind == TypeKind.Object) {
       this.store.label(result, label);
     }
   }

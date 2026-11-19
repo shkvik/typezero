@@ -1,0 +1,5 @@
+type User = { id: int };
+type Status = "new" | "gone";
+
+type Literals = Status & "new";
+type Mixed = User & Status;

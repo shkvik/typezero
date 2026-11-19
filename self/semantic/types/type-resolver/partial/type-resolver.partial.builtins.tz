@@ -9,6 +9,7 @@ import {
 import {
   kGenericTypes,
   kPlainTypes,
+  kTextChanges,
 } from "../const/type-resolver.const.tables.tz";
 import {
   GenericBuiltin,
@@ -26,6 +27,11 @@ partial class TypeResolver {
     const generic = kGenericTypes.find((row) => row.name == name);
     if (generic != undefined) {
       return this.generic(ref, generic, context);
+    }
+
+    const change = kTextChanges.find((row) => row.name == name);
+    if (change != undefined) {
+      return this.textChange(ref, change, context);
     }
 
     const plain = kPlainTypes.find((row) => row.name == name);

@@ -1,0 +1,6 @@
+type User = { id: int; name: string };
+
+type Missing = User["age"];
+type ByNumber = User[int];
+type OfNumber = int["x"];
+type PastEnd = [int, string][2];

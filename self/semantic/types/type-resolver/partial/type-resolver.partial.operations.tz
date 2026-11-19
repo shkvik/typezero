@@ -1,0 +1,313 @@
+import { TypeResolver } from "../type-resolver.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  Change,
+  DictKind,
+  LiteralKind,
+  ObjectField,
+  OperationKind,
+  TupleType,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { kLengthMember } from "../const/type-resolver.const.tables.tz";
+import { TypeContext } from "../types/type-resolver.types.tz";
+
+partial class TypeResolver {
+  private keyOf(ref: TypeRef, context: TypeContext): Type {
+    const operands = this.resolveAll(ref.args, context);
+    const operand = operands[0];
+    if (operand == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    switch (operand.kind) {
+      case TypeKind.TypeParameter:
+      case TypeKind.Operation:
+        return this.operation(OperationKind.KeyOf, [operand], "");
+      case TypeKind.Object:
+        return this.namesOf(operand.fields);
+      case TypeKind.Instance: {
+        const fields = this.memberFields(operand);
+
+        return this.namesOf(fields);
+      }
+      default:
+        return this.keysOfOther(operand, ref.loc, context);
+    }
+  }
+
+  private keysOfOther(operand: Type, loc: int, context: TypeContext): Type {
+    if (operand.kind == TypeKind.Dict && operand.dict == DictKind.Record) {
+      return operand.key;
+    }
+
+    const word = this.text.of(operand);
+
+    this.report(context.module, loc, Code.KeyofNeedsObject, { word });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private namesOf(fields: ObjectField[]): Type {
+    const names: Type[] = [];
+
+    for (const field of fields) {
+      const name = this.store.literal(LiteralKind.String, field.name);
+
+      names.push(name);
+    }
+
+    return this.store.unionOf(names);
+  }
+
+  private indexed(ref: TypeRef, context: TypeContext): Type {
+    const operands = this.resolveAll(ref.args, context);
+    const object = operands[0];
+    const index = operands[1];
+    if (object == undefined || index == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.member(object, index, ref.loc, context);
+  }
+
+  private member(
+    object: Type,
+    index: Type,
+    loc: int,
+    context: TypeContext,
+  ): Type {
+    if (this.isOpen(object) || this.isOpen(index)) {
+      return this.operation(OperationKind.Indexed, [object, index], "");
+    }
+    if (index.kind == TypeKind.Union) {
+      const members: Type[] = [];
+
+      for (const part of index.parts) {
+        const one = this.member(object, part, loc, context);
+
+        members.push(one);
+      }
+
+      return this.store.unionOf(members);
+    }
+
+    const found = this.memberOf(object, index);
+    if (found != undefined) {
+      return found;
+    }
+
+    this.report(context.module, loc, Code.NoSuchMember, {
+      word: this.text.of(object),
+      other: this.text.of(index),
+    });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private memberOf(object: Type, index: Type): Type | undefined {
+    switch (object.kind) {
+      case TypeKind.Object:
+        return this.fieldOf(object.fields, index);
+      case TypeKind.Instance: {
+        const fields = this.memberFields(object);
+
+        return this.fieldOf(fields, index);
+      }
+      case TypeKind.Tuple:
+        return this.tupleMember(object, index);
+      case TypeKind.Array:
+        return this.atNumber(index, object.item);
+      case TypeKind.Dict:
+        return this.atText(index, object.value);
+      default:
+        return undefined;
+    }
+  }
+
+  private fieldOf(fields: ObjectField[], index: Type): Type | undefined {
+    if (index.kind != TypeKind.Literal) {
+      return undefined;
+    }
+
+    const name = index.text;
+    const field = fields.find((each) => each.name == name);
+    if (field == undefined || !field.optional) {
+      return field?.type;
+    }
+
+    const nothing = this.store.plain(TypeKind.Undefined);
+
+    return this.store.unionOf([field.type, nothing]);
+  }
+
+  private tupleMember(tuple: TupleType, index: Type): Type | undefined {
+    if (index.kind == TypeKind.Int) {
+      return this.store.unionOf(tuple.items);
+    }
+    if (index.kind != TypeKind.Literal) {
+      return undefined;
+    }
+    if (index.text == kLengthMember) {
+      const count = `${tuple.items.length}`;
+
+      return this.store.literal(LiteralKind.Int, count);
+    }
+
+    const place = parseInt(index.text);
+    if (index.literal != LiteralKind.Int || place.isErr()) {
+      return undefined;
+    }
+
+    return tuple.items[place.value];
+  }
+
+  private atNumber(index: Type, item: Type): Type | undefined {
+    const isNumber =
+      index.kind == TypeKind.Int ||
+      (index.kind == TypeKind.Literal && index.literal == LiteralKind.Int);
+    if (isNumber) {
+      return item;
+    }
+
+    return undefined;
+  }
+
+  private atText(index: Type, value: Type): Type | undefined {
+    const isText =
+      index.kind == TypeKind.String ||
+      (index.kind == TypeKind.Literal && index.literal == LiteralKind.String);
+    if (isText) {
+      return value;
+    }
+
+    return undefined;
+  }
+
+  private intersection(ref: TypeRef, context: TypeContext): Type {
+    const parts = this.resolveAll(ref.args, context);
+    let joined = parts[0] ?? this.store.plain(TypeKind.Error);
+
+    for (let index = 1; index < parts.length; index++) {
+      const part = parts[index];
+
+      joined = this.joined(joined, part, ref.loc, context);
+    }
+
+    return joined;
+  }
+
+  private joined(
+    first: Type,
+    second: Type,
+    loc: int,
+    context: TypeContext,
+  ): Type {
+    if (first == second) {
+      return first;
+    }
+    if (this.isOpen(first) || this.isOpen(second)) {
+      return this.operation(OperationKind.Intersection, [first, second], "");
+    }
+    if (second.kind == TypeKind.String) {
+      return this.onlyTexts(first);
+    }
+    if (second.kind == TypeKind.Object && second.fields.length == 0) {
+      return this.withoutUndefined(first);
+    }
+    if (first.kind == TypeKind.Object && second.kind == TypeKind.Object) {
+      const fields = new Map<string, ObjectField>();
+
+      this.inherit(fields, first);
+      this.inherit(fields, second);
+
+      const merged = Array.from(fields.values());
+
+      return this.store.objectOf(merged);
+    }
+
+    const other = this.notObject(first, second);
+    const parts = this.partsOf(other);
+    const part = parts[0] ?? other;
+
+    this.report(context.module, loc, Code.IntersectionNeedsObjects, {
+      word: this.text.of(part),
+    });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private notObject(first: Type, second: Type): Type {
+    if (first.kind == TypeKind.Object) {
+      return second;
+    }
+
+    return first;
+  }
+
+  private onlyTexts(type: Type): Type {
+    const texts: Type[] = [];
+
+    for (const part of this.partsOf(type)) {
+      if (this.isText(part)) {
+        texts.push(part);
+      }
+    }
+
+    return this.store.unionOf(texts);
+  }
+
+  private isText(type: Type): boolean {
+    if (type.kind == TypeKind.String || type.kind == TypeKind.Template) {
+      return true;
+    }
+
+    return type.kind == TypeKind.Literal && type.literal == LiteralKind.String;
+  }
+
+  private withoutUndefined(type: Type): Type {
+    const kept: Type[] = [];
+
+    for (const part of this.partsOf(type)) {
+      if (part.kind != TypeKind.Undefined) {
+        kept.push(part);
+      }
+    }
+
+    return this.store.unionOf(kept);
+  }
+
+  private partsOf(type: Type): Type[] {
+    if (type.kind == TypeKind.Union) {
+      return type.parts;
+    }
+
+    return [type];
+  }
+
+  private isOpen(type: Type): boolean {
+    return (
+      type.kind == TypeKind.TypeParameter || type.kind == TypeKind.Operation
+    );
+  }
+
+  private operation(op: OperationKind, operands: Type[], word: string): Type {
+    return this.store.operationOf({
+      op,
+      operands,
+      word,
+      optional: Change.None,
+      readonly: Change.None,
+    });
+  }
+
+  private bound(context: TypeContext, loc: int, type: Type): TypeContext {
+    const bindings = new Map<int, Type>(context.bindings);
+
+    bindings.set(loc, type);
+
+    return { module: context.module, bindings };
+  }
+}

@@ -1,0 +1,82 @@
+// Operations over types: the keys of a type, a member of a type, a type made
+// of the fields of another, a text made of other texts, and what of a type
+// is a text. Each alias is printed as the type it stands for.
+type User = { id: int; name: string; email?: string; readonly tag: boolean };
+type Status = "new" | "gone" | "lost";
+type Pair = [int, string];
+
+class Point {
+  public x: int;
+  private y: int;
+
+  public constructor(x: int) {
+    this.x = x;
+    this.y = 0;
+  }
+
+  public move(): void {}
+}
+
+type Getters<T> = { [K in keyof T]: () => T[K] };
+type Checks<T> = { [K in keyof T]?: (value: T[K]) => boolean };
+type Flags = { [K in Status]: boolean };
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+type Renamed<T> = { [K in keyof T as `get${Capitalize<K & string>}`]: () => T[K] };
+type WithoutId<T> = { [K in keyof T as Exclude<K, "id">]: T[K] };
+type Named = { [K in Status | "x"]: K };
+
+type A01 = keyof User;
+type A02 = keyof Point;
+type A03 = keyof Record<string, int>;
+type A04 = keyof {};
+
+type B01 = User["id"];
+type B02 = User["email"];
+type B03 = User["id" | "name"];
+type B04 = User[keyof User];
+type B05 = Pair[0];
+type B06 = Pair[1];
+type B07 = int[][0];
+type B08 = Point["x"];
+type B09 = Pair["length"];
+
+type C01 = Getters<User>;
+type C02 = Checks<User>;
+type C03 = Flags;
+type C04 = Mutable<User>;
+type C05 = Renamed<User>;
+type C06 = WithoutId<User>;
+
+type D01 = Partial<User>;
+type D02 = Required<User>;
+type D03 = Readonly<User>;
+type D04 = Pick<User, "id" | "name">;
+type D05 = Omit<User, "email">;
+
+type E01 = `on${Capitalize<"click" | "hover">}`;
+type E02 = `${"a" | "b"}${1 | 2}`;
+type E03 = `${number}px`;
+type E04 = Capitalize<"ab">;
+type E05 = Uppercase<"ab">;
+type E06 = Lowercase<"AB">;
+type E07 = Uncapitalize<"AB">;
+type E08 = `a${string}b${int}`;
+type E09 = `${boolean}`;
+
+type G01 = Exclude<Status, "gone">;
+type G02 = Extract<Status, "gone" | "lost">;
+type G03 = NonNullable<string | undefined>;
+
+type H01 = User & { extra: boolean };
+type H02 = (string | int | undefined) & string;
+type H03 = (int | undefined) & {};
+
+function later<T, K extends keyof T>(
+  key: K,
+  keys: keyof T,
+  member: T[K],
+  getters: Getters<T>,
+  partial: Partial<T>,
+  choice: T extends string ? int : boolean,
+  name: `id-${K & string}`,
+): void {}
