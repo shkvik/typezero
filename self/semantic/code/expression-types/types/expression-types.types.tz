@@ -38,7 +38,8 @@ export type VariableDoor = {
   state: DoorState;
   type: Type;
   literal?: LiteralValue;
-  constant?: LiteralValue;
+  constant?: decimal;
+  isWhole: boolean;
   texts?: string[];
 };
 
@@ -50,7 +51,7 @@ export type IntLimit = {
 };
 
 export type Bound = {
-  readonly value: double;
+  readonly value: decimal;
   readonly text: string;
 };
 

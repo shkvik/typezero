@@ -463,4 +463,7 @@ export enum Code {
   LogicalAndNoCommon = "TZ2630",
   LogicalOrNoCommon = "TZ2631",
   BranchesIncompatible = "TZ2632",
+  ConstantOverflow = "TZ2633",
+  WideConstantOverflow = "TZ2634",
+  ValueOutsideRange = "TZ2635",
 }

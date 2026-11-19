@@ -7,3 +7,9 @@ const a2 = count % zero;
 main.tz:7:20: error TZ2551: division by zero
 const a3 = count / -0;
                    ^
+main.tz:8:23: error TZ2551: division by zero
+const a4 = count / (1 - 1);
+                      ^
+main.tz:9:26: error TZ2551: division by zero
+const a5 = count % (zero * 2);
+                         ^

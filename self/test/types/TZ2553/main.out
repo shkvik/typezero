@@ -2,4 +2,5 @@ main.tz
   2:7 one: int
   4:7 a1: int
   5:7 a2: int
-  7:7 b1: int
+  6:7 a3: int
+  8:7 b1: int

@@ -1,0 +1,17 @@
+// A constant that does not fit in its narrow type would wrap around.
+const small: int8 = 100;
+const byte: uint8 = 5;
+
+const a1: int8 = 100 + 100;
+const a2: uint8 = 1 - 2;
+const a3: int16 = 2 ** 15;
+const a4: int8 = 64 << 1;
+const a5: int8 = -(-128);
+const a6: uint32 = 65536 * 65536;
+const a7: int8 = small + 28;
+const a8 = -byte;
+const a9: int8 = (100 + 100) - 100;
+
+const b1: int8 = 100 + 27;
+const b2: uint8 = 255 >> 1;
+const b3: int8 = -64 << 1;

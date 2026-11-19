@@ -1,0 +1,17 @@
+// An int goes into a union of integer literals only when it is known to be
+// inside.
+type Shape = { size: 6 | 7 };
+
+const eight = 2 * 4;
+const six = 6;
+const count: int = 6;
+
+const a1: 6 | 7 = eight;
+const a2: 1 | 2 | 3 = six;
+const a3: 6 | 7 = -six;
+const a4: Shape = { size: eight };
+
+const b1: 6 | 7 = six;
+const b2: 6 | 7 | undefined = count;
+const b3: Shape = { size: count + 1 };
+const b4: (6 | 7)[] = [six, eight - 1];

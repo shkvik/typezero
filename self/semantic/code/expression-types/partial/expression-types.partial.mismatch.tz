@@ -11,6 +11,7 @@ import {
 } from "../../../../program/type/types/type.types.tz";
 import {
   kConversionPrefix,
+  kIntervalSeparator,
   kManyLiterals,
   kUnnamedOperand,
 } from "../const/expression-types.const.tz";
@@ -29,7 +30,8 @@ partial class ExpressionTypes {
     const target = this.innerObject(wanted, given);
     const only = this.onlyPart(wanted);
     const goal = this.definedType(wanted);
-    const holds = this.rangeText(given, goal);
+    const intervals = this.rangeIntervals(given, goal);
+    const holds = this.rangeText(intervals);
     const code = this.mismatchCode(given, wanted, source, target, holds);
     if (!this.isReported(expr, given, wanted, code)) {
       return;
@@ -37,7 +39,7 @@ partial class ExpressionTypes {
 
     const first = this.text.of(given);
     const second = this.text.of(wanted);
-    const word = this.mismatchWord(expr, code, target);
+    const word = this.mismatchWord(expr, code, target, intervals);
     const other = this.mismatchOther(code, holds, only);
 
     this.report(module, expr.loc, code, {
@@ -56,8 +58,11 @@ partial class ExpressionTypes {
     target: Type,
     holds: string,
   ): Code {
-    if (holds != "") {
+    if (holds != "" && given.kind == TypeKind.Literal) {
       return Code.LiteralOutsideRange;
+    }
+    if (holds != "") {
+      return Code.ValueOutsideRange;
     }
 
     const isPlainObject =
@@ -239,19 +244,26 @@ partial class ExpressionTypes {
     return inner;
   }
 
-  private mismatchWord(expr: Expr, code: Code, target: Type): string {
+  private mismatchWord(
+    expr: Expr,
+    code: Code,
+    target: Type,
+    intervals: Interval[],
+  ): string {
     switch (code) {
       case Code.LiteralNotInstance:
         return this.text.of(target);
       case Code.ObjectIntoTaggedUnion:
         return this.sharedTag(target) ?? "";
+      case Code.ValueOutsideRange:
+        return this.rangeCheck(expr, intervals);
       default:
         return this.operandName(expr);
     }
   }
 
   private mismatchOther(code: Code, holds: string, only: Type): string {
-    if (code == Code.LiteralOutsideRange) {
+    if (code == Code.LiteralOutsideRange || code == Code.ValueOutsideRange) {
       return holds;
     }
 
@@ -303,11 +315,27 @@ partial class ExpressionTypes {
     return `${kConversionPrefix}${head}${tail}`;
   }
 
-  private rangeText(given: Type, target: Type): string {
+  private rangeIntervals(given: Type, target: Type): Interval[] {
     const isWhole =
       given.kind == TypeKind.Literal && given.literal == LiteralKind.Int;
-    if (!isWhole || target.kind != TypeKind.Union) {
-      return "";
+    if (!isWhole && !this.isWordInt(given)) {
+      return [];
+    }
+
+    return this.wholeIntervals(target);
+  }
+
+  private isWordInt(type: Type): boolean {
+    if (type.kind != TypeKind.Int) {
+      return false;
+    }
+
+    return type.bits == 64 && !type.unsigned && !type.wraps;
+  }
+
+  private wholeIntervals(target: Type): Interval[] {
+    if (target.kind != TypeKind.Union) {
+      return [];
     }
 
     const values: Bound[] = [];
@@ -315,7 +343,7 @@ partial class ExpressionTypes {
     for (const part of target.parts) {
       const value = this.wholeValue(part);
       if (value == undefined) {
-        return "";
+        return [];
       }
 
       values.push(value);
@@ -323,12 +351,66 @@ partial class ExpressionTypes {
 
     const intervals = this.intervalsOf(values);
     if (intervals.length > 1 && values.length < kManyLiterals) {
-      return "";
+      return [];
     }
 
+    return intervals;
+  }
+
+  private rangeText(intervals: Interval[]): string {
     const texts = intervals.map((interval) => this.intervalText(interval));
 
-    return texts.join(" or ");
+    return texts.join(kIntervalSeparator);
+  }
+
+  private rangeCheck(expr: Expr, intervals: Interval[]): string {
+    const name = this.operandName(expr);
+    const widest = this.widestInterval(intervals);
+    if (widest == undefined) {
+      return name;
+    }
+
+    const low = widest.low.text;
+    const high = widest.high.text;
+
+    return `${name} >= ${low} && ${name} <= ${high}`;
+  }
+
+  private widestInterval(intervals: Interval[]): Interval | undefined {
+    let widest: Interval | undefined = undefined;
+
+    for (const interval of intervals) {
+      const size = interval.high.value - interval.low.value;
+      const isWider =
+        widest == undefined || widest.high.value - widest.low.value < size;
+      if (isWider) {
+        widest = interval;
+      }
+    }
+
+    return widest;
+  }
+
+  private isRangeProven(
+    expr: Expr,
+    given: Type,
+    wanted: Type,
+    module: int,
+  ): boolean {
+    if (!this.isWordInt(given)) {
+      return false;
+    }
+
+    const goal = this.definedType(wanted);
+    const intervals = this.wholeIntervals(goal);
+    const value = this.intConstant(expr, given, module);
+    if (value == undefined) {
+      return false;
+    }
+
+    return intervals.some(
+      (interval) => interval.low.value <= value && value <= interval.high.value,
+    );
   }
 
   private wholeValue(part: Type): Bound | undefined {
@@ -336,7 +418,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const value = Number(part.text);
+    const value = decimal(part.text);
     if (value.isErr()) {
       return undefined;
     }
@@ -351,7 +433,7 @@ partial class ExpressionTypes {
 
     for (const bound of values) {
       const last = intervals[intervals.length - 1];
-      if (last != undefined && last.high.value + 1.0 >= bound.value) {
+      if (last != undefined && last.high.value + 1 >= bound.value) {
         last.high = bound;
 
         continue;
@@ -363,7 +445,7 @@ partial class ExpressionTypes {
     return intervals;
   }
 
-  private order(first: double, second: double): int {
+  private order(first: decimal, second: decimal): int {
     if (first < second) {
       return -1;
     }

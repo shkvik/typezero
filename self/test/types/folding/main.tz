@@ -1,0 +1,16 @@
+// Integer constants are computed while checking: a constant made of literals
+// goes wherever its value fits, as a literal does.
+const six = 2 * 3;
+const seven = six + 1;
+const small: int8 = six;
+const byte: uint8 = seven * 30;
+const ratio: double = six;
+const money: decimal = seven;
+const tiny: int8 = six * 20;
+const flipped: int8 = ~small;
+const masked = 12 & 10;
+const quotient = 7 / 2;
+const remainder = -7 % 2;
+const power = 2 ** 10;
+const half = -7 >> 1;
+const listed: 6 | 7 = seven;

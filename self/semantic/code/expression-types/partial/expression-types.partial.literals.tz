@@ -184,9 +184,14 @@ partial class ExpressionTypes {
     module: int,
   ): Type {
     const exact = this.store.literal(LiteralKind.Int, literal.text);
+    const hasWholes = this.hasLiteral(parts, LiteralKind.Int);
     const hasDoubles = this.hasLiteral(parts, LiteralKind.Double);
     const isListed = parts.includes(exact) || !hasDoubles;
-    if (this.hasLiteral(parts, LiteralKind.Int) && isListed) {
+    const hasLiterals = hasWholes || hasDoubles;
+    if (expr.kind == ExprKind.Name && hasLiterals) {
+      return base;
+    }
+    if (hasWholes && isListed) {
       return exact;
     }
     if (hasDoubles) {

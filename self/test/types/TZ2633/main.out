@@ -1,0 +1,15 @@
+main.tz
+  2:7 small: int8
+  3:7 byte: uint8
+  5:7 a1: int8
+  6:7 a2: uint8
+  7:7 a3: int16
+  8:7 a4: int8
+  9:7 a5: int8
+  10:7 a6: uint32
+  11:7 a7: int8
+  12:7 a8: uint8
+  13:7 a9: int8
+  15:7 b1: int8
+  16:7 b2: uint8
+  17:7 b3: int8

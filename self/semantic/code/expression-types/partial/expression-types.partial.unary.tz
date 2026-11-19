@@ -181,6 +181,8 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
+    this.foldUnary(expr, type, module);
+
     return type;
   }
 
@@ -237,6 +239,8 @@ partial class ExpressionTypes {
 
       return this.store.plain(TypeKind.Error);
     }
+
+    this.foldUnary(expr, type, module);
 
     return type;
   }

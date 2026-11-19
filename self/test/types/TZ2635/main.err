@@ -1,0 +1,12 @@
+main.tz:9:19: error TZ2635: type 'int' is not assignable to type '6 | 7', which holds 6 to 7; the value may be outside: check it first, e.g. 'if (eight >= 6 && eight <= 7)'
+const a1: 6 | 7 = eight;
+                  ^
+main.tz:10:23: error TZ2635: type 'int' is not assignable to type '1 | 2 | 3', which holds 1 to 3; the value may be outside: check it first, e.g. 'if (six >= 1 && six <= 3)'
+const a2: 1 | 2 | 3 = six;
+                      ^
+main.tz:11:19: error TZ2635: type 'int' is not assignable to type '6 | 7', which holds 6 to 7; the value may be outside: check it first, e.g. 'if (x >= 6 && x <= 7)'
+const a3: 6 | 7 = -six;
+                  ^
+main.tz:12:27: error TZ2635: type 'int' is not assignable to type '6 | 7' of field 'size', which holds 6 to 7; the value may be outside: check it first, e.g. 'if (eight >= 6 && eight <= 7)'
+const a4: Shape = { size: eight };
+                          ^

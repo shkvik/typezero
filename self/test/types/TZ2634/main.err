@@ -1,0 +1,36 @@
+main.tz:5:32: error TZ2634: this constant is 9223372036854775808, which does not fit in 'int' and would wrap around to -9223372036854775808; compute it as a 'double', e.g. 'const x: double = ...'
+const a1 = 9223372036854775807 + 1;
+                               ^
+main.tz:6:16: error TZ2634: this constant is -9223372036854775809, which does not fit in 'int' and would wrap around to 9223372036854775807; compute it as a 'double', e.g. 'const x: double = ...'
+const a2 = min - 1;
+               ^
+main.tz:7:12: error TZ2634: this constant is 9223372036854775808, which does not fit in 'int' and would wrap around to -9223372036854775808; compute it as a 'double', e.g. 'const x: double = ...'
+const a3 = -min;
+           ^
+main.tz:8:16: error TZ2634: this constant is 9223372036854775808, which does not fit in 'int' and would wrap around to -9223372036854775808; compute it as a 'double', e.g. 'const x: double = ...'
+const a4 = min / -1;
+               ^
+main.tz:9:16: error TZ2634: this constant is 86400000000000000000, which does not fit in 'int' and would wrap around to -5833720368547758080; compute it as a 'double', e.g. 'const x: double = ...'
+const a5 = day * 1000000000000000;
+               ^
+main.tz:10:14: error TZ2634: this constant is 18446744073709551616, which does not fit in 'int' and would wrap around to 0; compute it as a 'double', e.g. 'const x: double = ...'
+const a6 = 2 ** 64;
+             ^
+main.tz:11:14: error TZ2634: this constant is 12157665459056928768, which does not fit in 'int' and would wrap around to -6289078614652622815; compute it as a 'double', e.g. 'const x: double = ...'
+const a7 = 3 ** 40;
+             ^
+main.tz:12:15: error TZ2634: this constant is 1e+30, which does not fit in 'int' and would wrap around to 5076944270305263616; compute it as a 'double', e.g. 'const x: double = ...'
+const a8 = 10 ** 30;
+              ^
+main.tz:13:18: error TZ2634: this constant is -inf, which does not fit in 'int' and would wrap around to 0; compute it as a 'double', e.g. 'const x: double = ...'
+const a9 = (-10) ** 401;
+                 ^
+main.tz:14:15: error TZ2634: this constant is 9223372036854775808, which does not fit in 'int' and would wrap around to 0; compute it as a 'double', e.g. 'const x: double = ...'
+const a10 = 1 << 63;
+              ^
+main.tz:15:42: error TZ2634: this constant is 18446744073709551616, which does not fit in 'uint64' and would wrap around to 0; compute it as a 'double', e.g. 'const x: double = ...'
+const a11: uint64 = 18446744073709551615 + 1;
+                                         ^
+main.tz:16:23: error TZ2634: this constant is -1, which does not fit in 'uint64' and would wrap around to 0; compute it as a 'double', e.g. 'const x: double = ...'
+const a12: uint64 = 0 - 1;
+                      ^

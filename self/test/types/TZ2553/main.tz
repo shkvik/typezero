@@ -3,5 +3,6 @@ const one: int = 1;
 
 const a1 = 1 << 64;
 const a2 = one << -1;
+const a3 = one << (60 + 10);
 
 const b1 = one << 3;

@@ -11,6 +11,7 @@ import "./partial/expression-types.partial.concatenation.tz";
 import "./partial/expression-types.partial.decimals.tz";
 import "./partial/expression-types.partial.unary.tz";
 import "./partial/expression-types.partial.constants.tz";
+import "./partial/expression-types.partial.folding.tz";
 import "./partial/expression-types.partial.comparisons.tz";
 import "./partial/expression-types.partial.typeof.tz";
 import "./partial/expression-types.partial.truth.tz";
@@ -42,6 +43,7 @@ export class ExpressionTypes {
   private readonly scopes: Map<int, ModuleScopes>;
   private readonly records: Map<int, ValueRecord>;
   private readonly doors: Map<string, VariableDoor>;
+  private readonly folded: Map<Expr, decimal>;
 
   public constructor(
     store: TypeStore,
@@ -57,6 +59,7 @@ export class ExpressionTypes {
     this.scopes = new Map<int, ModuleScopes>();
     this.records = new Map<int, ValueRecord>();
     this.doors = new Map<string, VariableDoor>();
+    this.folded = new Map<Expr, decimal>();
 
     for (const scopes of resolved) {
       this.scopes.set(scopes.module.id, scopes);
@@ -124,9 +127,17 @@ export class ExpressionTypes {
     module: int,
     place: string,
   ): void {
-    if (!this.relation.converts(given, wanted)) {
-      this.mismatch(expr, given, wanted, module, place);
+    if (this.relation.converts(given, wanted)) {
+      return;
     }
+    if (this.literalTarget(expr, given, wanted, module) != undefined) {
+      return;
+    }
+    if (this.isRangeProven(expr, given, wanted, module)) {
+      return;
+    }
+
+    this.mismatch(expr, given, wanted, module, place);
   }
 
   private report(module: int, loc: int, code: Code, details: Details): void {

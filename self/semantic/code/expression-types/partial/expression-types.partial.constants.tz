@@ -6,93 +6,96 @@ import {
   UnaryOp,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
-  LiteralKind,
+  IntType,
   Type,
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
-import { kIntLimits } from "../const/expression-types.const.tz";
-import { LiteralValue } from "../types/expression-types.types.tz";
+import { kIntLimits, kLargestInt } from "../const/expression-types.const.tz";
+import { IntLimit } from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private intConstant(
     expr: Expr,
     type: Type,
     module: int,
-  ): LiteralValue | undefined {
-    if (type.kind != TypeKind.Int) {
-      return undefined;
-    }
-
-    switch (expr.kind) {
-      case ExprKind.IntLit: {
-        const value: LiteralValue = {
-          kind: LiteralKind.Int,
-          text: `${expr.value}`,
-          whole: expr.value,
-          negative: false,
-        };
-
-        return this.fittingConstant(value, type);
-      }
-      case ExprKind.Unary:
-        return this.unaryConstant(expr, type, module);
-      case ExprKind.Name:
-        return this.doorOfName(expr, module)?.constant;
-      default:
-        return undefined;
-    }
-  }
-
-  private unaryConstant(
-    expr: UnaryExpr,
-    type: Type,
-    module: int,
-  ): LiteralValue | undefined {
-    const operand = expr.operand;
-
-    if (expr.op == UnaryOp.Plus) {
-      return this.intConstant(operand, type, module);
-    }
-    if (expr.op != UnaryOp.Neg || operand.kind != ExprKind.IntLit) {
-      return undefined;
-    }
-
-    const whole = operand.value;
-    const negative = whole > 0;
-    const text = this.signedText(whole, negative);
-    const value: LiteralValue = {
-      kind: LiteralKind.Int,
-      text,
-      whole,
-      negative,
-    };
-
-    return this.fittingConstant(value, type);
-  }
-
-  private fittingConstant(
-    value: LiteralValue,
-    type: Type,
-  ): LiteralValue | undefined {
-    const widest = kIntLimits.find((row) => row.bits == 64 && !row.unsigned);
-    if (type.kind != TypeKind.Int || widest == undefined) {
-      return undefined;
-    }
-
-    const limit = this.limitOf(value.negative, widest.lowest, widest.highest);
-    if (value.whole > limit || !this.fits(value, type)) {
+  ): decimal | undefined {
+    const value = this.rawConstant(expr, type, module);
+    if (value == undefined || value > kLargestInt) {
       return undefined;
     }
 
     return value;
   }
 
-  private limitOf(negative: boolean, lowest: uint64, highest: uint64): uint64 {
-    if (negative) {
-      return lowest;
+  private rawConstant(
+    expr: Expr,
+    type: Type,
+    module: int,
+  ): decimal | undefined {
+    if (type.kind != TypeKind.Int) {
+      return undefined;
     }
 
-    return highest;
+    const value = this.plainConstant(expr, module);
+    if (value == undefined || !this.isInside(value, type)) {
+      return undefined;
+    }
+
+    return value;
+  }
+
+  private plainConstant(expr: Expr, module: int): decimal | undefined {
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+        return expr.value.toDecimal();
+      case ExprKind.Name:
+        return this.doorOfName(expr, module)?.constant;
+      case ExprKind.Unary:
+        return this.unaryConstant(expr);
+      case ExprKind.Binary:
+        return this.folded.get(expr);
+      default:
+        return undefined;
+    }
+  }
+
+  private unaryConstant(expr: UnaryExpr): decimal | undefined {
+    const operand = expr.operand;
+    if (operand.kind != ExprKind.IntLit) {
+      return this.folded.get(expr);
+    }
+
+    const value = operand.value.toDecimal();
+
+    switch (expr.op) {
+      case UnaryOp.Plus:
+        return value;
+      case UnaryOp.Neg:
+        return -value;
+      default:
+        return this.folded.get(expr);
+    }
+  }
+
+  private isInside(value: decimal, type: IntType): boolean {
+    const limit = this.limitOf(type);
+    if (limit == undefined) {
+      return false;
+    }
+
+    const lowest = limit.lowest.toDecimal();
+    const highest = limit.highest.toDecimal();
+
+    return value >= -lowest && value <= highest;
+  }
+
+  private limitOf(type: IntType): IntLimit | undefined {
+    const bits = type.bits;
+    const unsigned = type.unsigned;
+
+    return kIntLimits.find(
+      (row) => row.bits == bits && row.unsigned == unsigned,
+    );
   }
 
   private isWholeTree(expr: Expr, module: int): boolean {
@@ -100,7 +103,7 @@ partial class ExpressionTypes {
       case ExprKind.IntLit:
         return true;
       case ExprKind.Name:
-        return this.doorOfName(expr, module)?.literal != undefined;
+        return this.doorOfName(expr, module)?.isWhole == true;
       case ExprKind.Unary:
         return this.isSign(expr.op) && this.isWholeTree(expr.operand, module);
       case ExprKind.Binary:
@@ -136,7 +139,7 @@ partial class ExpressionTypes {
         return target;
       case TypeKind.Int: {
         const value = this.intConstant(expr, type, module);
-        if (value == undefined || !this.fits(value, target)) {
+        if (value == undefined || !this.isInside(value, target)) {
           return undefined;
         }
 

@@ -90,6 +90,7 @@ partial class ExpressionTypes {
     const door: VariableDoor = {
       state: DoorState.InWork,
       type: this.store.plain(TypeKind.Error),
+      isWhole: false,
     };
 
     this.doors.set(key, door);
@@ -149,6 +150,8 @@ partial class ExpressionTypes {
     }
 
     this.keepConstant(door, variable, init, given, module);
+
+    door.isWhole = this.isWholeConstant(door, init, given, module);
   }
 
   private constTexts(init: Expr, module: int): string[] | undefined {
@@ -190,8 +193,24 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     if (variable.isConst) {
-      door.constant = this.intConstant(init, given, module);
+      door.constant = this.rawConstant(init, given, module);
     }
+  }
+
+  private isWholeConstant(
+    door: VariableDoor,
+    init: Expr,
+    given: Type,
+    module: int,
+  ): boolean {
+    if (given.kind != TypeKind.Int || door.constant == undefined) {
+      return false;
+    }
+    if (given.bits != 64 || given.unsigned) {
+      return false;
+    }
+
+    return this.isWholeTree(init, module);
   }
 
   private reportUndefined(

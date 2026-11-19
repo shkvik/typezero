@@ -178,9 +178,17 @@ partial class ExpressionTypes {
   }
 
   private operandTyped(expr: Expr, hint: Type | undefined, module: int): Type {
-    const type = this.typed(expr, hint, module);
+    const type = this.valueTyped(expr, hint, module);
 
     return this.apparent(type);
+  }
+
+  private valueTyped(expr: Expr, hint: Type | undefined, module: int): Type {
+    if (expr.kind == ExprKind.Name) {
+      return this.named(expr, hint, module);
+    }
+
+    return this.typed(expr, hint, module);
   }
 
   private apparent(type: Type): Type {
@@ -358,6 +366,7 @@ partial class ExpressionTypes {
     }
     if (common.kind == TypeKind.Int) {
       this.integerChecks(expr, common, written, module);
+      this.foldBinary(expr, common, module);
     }
 
     return common;
@@ -391,7 +400,7 @@ partial class ExpressionTypes {
   ): void {
     if (expr.op == BinaryOp.Pow) {
       const exponent = this.intConstant(expr.rhs, right, module);
-      const isNegative = exponent != undefined && exponent.negative;
+      const isNegative = exponent != undefined && exponent < 0;
       if (isNegative) {
         const first = this.text.of(common);
 
@@ -411,7 +420,7 @@ partial class ExpressionTypes {
     }
 
     const divisor = this.intConstant(expr.rhs, right, module);
-    if (divisor == undefined || divisor.whole != 0) {
+    if (divisor == undefined || divisor != 0) {
       return;
     }
 
@@ -481,7 +490,7 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
     if (this.isShift(expr.op)) {
-      this.shiftCountCheck(expr, pair, module);
+      this.shiftConstants(expr, pair, module);
 
       return left;
     }
@@ -493,6 +502,8 @@ partial class ExpressionTypes {
 
       return this.store.plain(TypeKind.Error);
     }
+
+    this.foldBinary(expr, left, module);
 
     return left;
   }
@@ -537,7 +548,7 @@ partial class ExpressionTypes {
     return isOrZero && isZero && this.isNumeric(left) && !this.isWrapping(left);
   }
 
-  private shiftCountCheck(
+  private shiftConstants(
     expr: BinaryExpr,
     pair: OperandPair,
     module: int,
@@ -548,23 +559,23 @@ partial class ExpressionTypes {
     }
 
     const value = this.intConstant(expr.lhs, shifted, module);
-    const count = this.intConstant(expr.rhs, pair.right, module);
+    const count = this.intConstant(expr.rhs, shifted, module);
     const isWide = shifted.unsigned && shifted.bits == 64;
     if (value == undefined || count == undefined || isWide) {
       return;
     }
 
     const width = shifted.bits;
-    const isInside = !count.negative && count.whole < width;
+    const isInside = count >= 0 && count < width.toDecimal();
     if (isInside) {
-      return;
+      return this.foldShift(expr, shifted, value, count, module);
     }
 
     const first = this.text.of(shifted);
     const last = width - 1;
 
     this.report(module, expr.rhs.loc, Code.ShiftCount, {
-      word: count.text,
+      word: `${count}`,
       other: `${last}`,
       first,
     });

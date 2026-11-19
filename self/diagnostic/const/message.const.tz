@@ -1396,4 +1396,13 @@ export const kMessages: Record<Code, Message> = {
   [Code.BranchesIncompatible]: {
     text: "the branches of '?:' have incompatible types '{first}' and '{second}'",
   },
+  [Code.ConstantOverflow]: {
+    text: "this constant is {word}, which does not fit in '{first}' and would wrap around to {other}; compute it as an 'int', e.g. 'const x: int = ...'",
+  },
+  [Code.WideConstantOverflow]: {
+    text: "this constant is {word}, which does not fit in '{first}' and would wrap around to {other}; compute it as a 'double', e.g. 'const x: double = ...'",
+  },
+  [Code.ValueOutsideRange]: {
+    text: "type '{first}' is not assignable to type '{second}'{place}, which holds {other}; the value may be outside: check it first, e.g. 'if ({word})'",
+  },
 };

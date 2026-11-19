@@ -3,5 +3,6 @@ main.tz
   3:7 small: int8
   5:7 a1: int
   6:7 a2: int8
-  8:7 b1: int
-  9:7 b2: double
+  7:7 a3: int
+  9:7 b1: int
+  10:7 b2: double

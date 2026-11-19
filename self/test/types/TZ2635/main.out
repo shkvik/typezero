@@ -1,0 +1,13 @@
+main.tz
+  3:6 type Shape = { size: 6 | 7 }
+  5:7 eight: int
+  6:7 six: int
+  7:7 count: int
+  9:7 a1: 6 | 7
+  10:7 a2: 1 | 2 | 3
+  11:7 a3: 6 | 7
+  12:7 a4: Shape
+  14:7 b1: 6 | 7
+  15:7 b2: 6 | 7 | undefined
+  16:7 b3: Shape
+  17:7 b4: (6 | 7)[]

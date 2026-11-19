@@ -1,0 +1,20 @@
+// A constant that does not fit in 64 bits would wrap around.
+const min = -9223372036854775808;
+const day = 86400;
+
+const a1 = 9223372036854775807 + 1;
+const a2 = min - 1;
+const a3 = -min;
+const a4 = min / -1;
+const a5 = day * 1000000000000000;
+const a6 = 2 ** 64;
+const a7 = 3 ** 40;
+const a8 = 10 ** 30;
+const a9 = (-10) ** 401;
+const a10 = 1 << 63;
+const a11: uint64 = 18446744073709551615 + 1;
+const a12: uint64 = 0 - 1;
+
+const b1 = min + 1;
+const b2 = 2 ** 62;
+const b3: uint64 = 18446744073709551615 - 1 + 1;

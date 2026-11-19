@@ -75,7 +75,7 @@ partial class ExpressionTypes {
     }
 
     const divisor = this.intConstant(expr.rhs, right, module);
-    const isZeroConstant = divisor != undefined && divisor.whole == 0;
+    const isZeroConstant = divisor != undefined && divisor == 0;
     if (!isZeroConstant && !this.isZeroLiteral(expr.rhs)) {
       return;
     }

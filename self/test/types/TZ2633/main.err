@@ -1,0 +1,33 @@
+main.tz:5:22: error TZ2633: this constant is 200, which does not fit in 'int8' and would wrap around to -56; compute it as an 'int', e.g. 'const x: int = ...'
+const a1: int8 = 100 + 100;
+                     ^
+main.tz:6:21: error TZ2633: this constant is -1, which does not fit in 'uint8' and would wrap around to 255; compute it as an 'int', e.g. 'const x: int = ...'
+const a2: uint8 = 1 - 2;
+                    ^
+main.tz:7:21: error TZ2633: this constant is 32768, which does not fit in 'int16' and would wrap around to -32768; compute it as an 'int', e.g. 'const x: int = ...'
+const a3: int16 = 2 ** 15;
+                    ^
+main.tz:8:21: error TZ2502: type 'int' is not assignable to type 'int8'; convert it explicitly: 'x.toInt8()'
+const a4: int8 = 64 << 1;
+                    ^
+main.tz:9:18: error TZ2633: this constant is 128, which does not fit in 'int8' and would wrap around to -128; compute it as an 'int', e.g. 'const x: int = ...'
+const a5: int8 = -(-128);
+                 ^
+main.tz:10:26: error TZ2633: this constant is 4294967296, which does not fit in 'uint32' and would wrap around to 0; compute it as an 'int', e.g. 'const x: int = ...'
+const a6: uint32 = 65536 * 65536;
+                         ^
+main.tz:11:24: error TZ2633: this constant is 128, which does not fit in 'int8' and would wrap around to -128; compute it as an 'int', e.g. 'const x: int = ...'
+const a7: int8 = small + 28;
+                       ^
+main.tz:12:12: error TZ2633: this constant is -5, which does not fit in 'uint8' and would wrap around to 251; compute it as an 'int', e.g. 'const x: int = ...'
+const a8 = -byte;
+           ^
+main.tz:13:23: error TZ2633: this constant is 200, which does not fit in 'int8' and would wrap around to -56; compute it as an 'int', e.g. 'const x: int = ...'
+const a9: int8 = (100 + 100) - 100;
+                      ^
+main.tz:16:23: error TZ2502: type 'int' is not assignable to type 'uint8'; convert it explicitly: 'x.toUint8()'
+const b2: uint8 = 255 >> 1;
+                      ^
+main.tz:17:22: error TZ2502: type 'int' is not assignable to type 'int8'; convert it explicitly: 'x.toInt8()'
+const b3: int8 = -64 << 1;
+                     ^

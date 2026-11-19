@@ -1,0 +1,15 @@
+main.tz
+  3:7 six: int
+  4:7 seven: int
+  5:7 small: int8
+  6:7 byte: uint8
+  7:7 ratio: double
+  8:7 money: decimal
+  9:7 tiny: int8
+  10:7 flipped: int8
+  11:7 masked: int
+  12:7 quotient: int
+  13:7 remainder: int
+  14:7 power: int
+  15:7 half: int
+  16:7 listed: 6 | 7
