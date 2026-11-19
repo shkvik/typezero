@@ -1,17 +1,17 @@
 import { ScopeTraversal } from "../scope-traversal.tz";
-import { Code } from "../../../diagnostic/code.tz";
-import { DeclaredClass } from "../../../program/ast/types/ast.types.declarations.tz";
-import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
-import { ImportDecl } from "../../../program/ast/types/ast.types.modules.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { DeclaredClass } from "../../../../program/ast/types/ast.types.declarations.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+import { ImportDecl } from "../../../../program/ast/types/ast.types.modules.tz";
 import {
   Stmt,
   StmtKind,
-} from "../../../program/ast/types/ast.types.statements.tz";
-import { TypeParamDecl } from "../../../program/ast/types/ast.types.types.tz";
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import { TypeParamDecl } from "../../../../program/ast/types/ast.types.types.tz";
 import {
   NameSymbol,
   SymbolKind,
-} from "../../../program/scopes/types/scopes.types.tz";
+} from "../../../../program/scopes/types/scopes.types.tz";
 
 partial class ScopeTraversal {
   private declareImports(): void {
@@ -107,10 +107,7 @@ partial class ScopeTraversal {
     const anotherSignature =
       fn.body == undefined && previous?.kind == SymbolKind.Function;
     if (!anotherSignature) {
-      this.declareValue(
-        { name, kind: SymbolKind.Function, loc: fn.loc },
-        true,
-      );
+      this.declareValue({ name, kind: SymbolKind.Function, loc: fn.loc }, true);
     }
   }
 

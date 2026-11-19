@@ -6,7 +6,7 @@ import {
 } from "../../../program/module-names/types/module-names.types.tz";
 import { kSourceExtension } from "../../../program/module/const/module.const.tz";
 import { Program } from "../../../program/module/types/module.types.tz";
-import { ModuleBinder } from "../../../semantic/module-binder/module-binder.tz";
+import { ModuleBinder } from "../../../semantic/declaration/module-binder/module-binder.tz";
 import { ProgramReport } from "../../program-report/program-report.tz";
 import { ProgramSource } from "../../program-source/program-source.tz";
 import { kLibraryMark } from "../../const/cli.const.tz";

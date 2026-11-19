@@ -1,4 +1,4 @@
-import { NameSymbol } from "../../program/scopes/types/scopes.types.tz";
+import { NameSymbol } from "../../../program/scopes/types/scopes.types.tz";
 import { Scope, ScopeEntry } from "./types/scope-stack.types.tz";
 
 export class ScopeStack {

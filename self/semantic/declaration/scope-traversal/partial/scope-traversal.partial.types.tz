@@ -3,8 +3,8 @@ import {
   ObjectTypeField,
   TypeKind,
   TypeRef,
-} from "../../../program/ast/types/ast.types.types.tz";
-import { SymbolKind } from "../../../program/scopes/types/scopes.types.tz";
+} from "../../../../program/ast/types/ast.types.types.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
 
 partial class ScopeTraversal {
   private traverseOptionalType(ref: TypeRef | undefined): void {

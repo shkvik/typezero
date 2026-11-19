@@ -266,7 +266,10 @@ self/             компилятор на tz, пробный (порт compile
                   ModuleLink { kind: LinkKind, from, target — id модуля }, Program { modules
                   — по id, order — по порядку загрузки }; расширения файлов и разделители
                   пути — в const/module.const.tz;
-                  semantic/module-binder/ — ModuleBinder: имена между модулями
+                  semantic/ делится на те же группы, что compiler/semantic (declaration,
+                  types, code, flow, generics, inference, library); папка группы появляется
+                  с первым классом, сейчас есть только declaration — имена и модули;
+                  semantic/declaration/module-binder/ — ModuleBinder: имена между модулями
                   (new ModuleBinder(program).run() → ModuleNames[] в порядке order). Три
                   прохода по модулям: declareNames — имена верхнего уровня (переменные,
                   функции, классы, типы, enum; часть `partial class` имени не объявляет),
@@ -277,11 +280,11 @@ self/             компилятор на tz, пробный (порт compile
                   то, что уже набрал; сначала именованные экспорты, потом `export *`; части
                   класса — partial/module-binder.partial.<часть>.tz: declared, exports,
                   imports; ошибки — в списке своего модуля, по порядку текста;
-                  semantic/name-resolver/ — NameResolver: имена внутри кода
+                  semantic/declaration/name-resolver/ — NameResolver: имена внутри кода
                   (new NameResolver(program, names).run() → ModuleScopes[]): собирает
                   глобальные имена из встроенных объявлений (Program.builtins) и для каждого
                   модуля запускает ScopeTraversal;
-                  semantic/scope-traversal/ — ScopeTraversal: один обход дерева модуля со
+                  semantic/declaration/scope-traversal/ — ScopeTraversal: один обход дерева модуля со
                   стеком областей; части — partial/scope-traversal.partial.<часть>.tz:
                   declarations (объявить импорты, инструкции блока, параметры типа),
                   statements, expressions, types, classes (классы и функции). Блок сначала
@@ -292,7 +295,12 @@ self/             компилятор на tz, пробный (порт compile
                   чтение в той же функции (TZ2307); статический метод не видит параметров
                   типа класса; метод части класса обходится в модуле части; имя ищется в
                   областях, потом среди встроенных объявлений и таблицы глобальных имён;
-                  semantic/scope-stack/ — ScopeStack: состояние обхода — стек областей
+                  ненайденное имя — часть missing: имя из kAbsentNames — своя ошибка с
+                  объяснением (`Error` и его виды — TZ2311, `eval` и `Function` — TZ2312,
+                  `Proxy` — TZ2313, `require` — TZ2314), имя, которое есть только как тип
+                  (`Ok`, интерфейс, параметр типа), — TZ2310 «is a type, not a value»,
+                  остальное — TZ2301 / TZ2302 / TZ2308;
+                  semantic/declaration/scope-stack/ — ScopeStack: состояние обхода — стек областей
                   (значения и типы) и глубина функций; меняется только своими методами;
                   program/scopes/ — итог (types/scopes.types.tz): NameSymbol { name, kind:
                   SymbolKind, loc, target — для импорта }, NameUse { loc, name, isType,
@@ -302,7 +310,9 @@ self/             компилятор на tz, пробный (порт compile
                   типы без членов (`void`, `never`, `unknown`, `object`, `Json`…), операции
                   над типами (`Record`, `InstanceType`, `Capitalize`…), типы декораторов
                   (`Constructor`…), имена с отказом (`bigint`, `WeakMap`, `escape`…), `Symbol`,
-                  и имена без объявления (`this`, `super`);
+                  и имена без объявления (`this`, `super`); kAbsentNames — имена JS, которых
+                  в tz нет, каждое с причиной (AbsentReason) и пометкой asType: отвечать ли
+                  так же, когда имя стоит на месте типа (только `Error` и его виды);
                   program/module-names/ — итог связывания (types/module-names.types.tz):
                   ModuleNames { module, declared: имя → место, exports, imports, errors },
                   ModuleExport и ModuleImport ведут к NameTarget { module — id, name —

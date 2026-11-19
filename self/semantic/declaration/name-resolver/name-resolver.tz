@@ -1,12 +1,12 @@
-import { FunctionDecl } from "../../program/ast/types/ast.types.functions.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
 import {
   Stmt,
   StmtKind,
-} from "../../program/ast/types/ast.types.statements.tz";
-import { kLibrary } from "../../program/library/library-modules/const/library-modules.const.tz";
-import { ModuleNames } from "../../program/module-names/types/module-names.types.tz";
-import { Module, Program } from "../../program/module/types/module.types.tz";
-import { ModuleScopes } from "../../program/scopes/types/scopes.types.tz";
+} from "../../../program/ast/types/ast.types.statements.tz";
+import { kLibrary } from "../../../program/library/library-modules/const/library-modules.const.tz";
+import { ModuleNames } from "../../../program/module-names/types/module-names.types.tz";
+import { Module, Program } from "../../../program/module/types/module.types.tz";
+import { ModuleScopes } from "../../../program/scopes/types/scopes.types.tz";
 import { ScopeTraversal } from "../scope-traversal/scope-traversal.tz";
 import { GlobalScope } from "./types/name-resolver.types.tz";
 

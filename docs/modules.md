@@ -60,7 +60,8 @@ import { area, Circle } from "./geometry"   // типы импортируютс
   - `import type { T }` и `import { type T }` → писать без `type`.
 - **`namespace` из TS** (`namespace Foo { ... }`) нет — это старая замена модулям; ошибка с
   подсказкой вынести в отдельный файл. `declare module`, `declare global`, `/// <reference>`,
-  `require` и динамического `import()` тоже нет.
+  `require` и динамического `import()` тоже нет; `require` — ошибка с подсказкой про `import`
+  (решено 19 ноября).
 
 ## 2. Файлы и пути
 

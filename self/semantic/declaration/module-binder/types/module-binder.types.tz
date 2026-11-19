@@ -1,8 +1,8 @@
 import {
   ImportDecl,
   ModuleName,
-} from "../../../program/ast/types/ast.types.modules.tz";
-import { ModuleNames } from "../../../program/module-names/types/module-names.types.tz";
+} from "../../../../program/ast/types/ast.types.modules.tz";
+import { ModuleNames } from "../../../../program/module-names/types/module-names.types.tz";
 
 export enum BindState {
   New,

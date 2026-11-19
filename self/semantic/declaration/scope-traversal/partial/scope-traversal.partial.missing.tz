@@ -1,7 +1,7 @@
 import { ScopeTraversal } from "../scope-traversal.tz";
-import { Code } from "../../../diagnostic/code.tz";
-import { kGlobalNames } from "../../../program/library/global-names/const/global-names.const.tz";
-import { AbsentReason } from "../../../program/library/global-names/types/global-names.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kGlobalNames } from "../../../../program/library/global-names/const/global-names.const.tz";
+import { AbsentReason } from "../../../../program/library/global-names/types/global-names.types.tz";
 
 partial class ScopeTraversal {
   private reportMissingValue(name: string, loc: int, missing: Code): void {

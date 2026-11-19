@@ -1,31 +1,33 @@
 import { ScopeTraversal } from "../scope-traversal.tz";
-import { Code } from "../../../diagnostic/code.tz";
+import { Code } from "../../../../diagnostic/code.tz";
 import {
   ClassDecl,
   Decorator,
   MethodKind,
-} from "../../../program/ast/types/ast.types.classes.tz";
+} from "../../../../program/ast/types/ast.types.classes.tz";
 import {
   DeclaredClass,
   DeclaredMember,
   DeclaredMemberKind,
-} from "../../../program/ast/types/ast.types.declarations.tz";
+} from "../../../../program/ast/types/ast.types.declarations.tz";
 import {
   FunctionDecl,
   Param,
   ParamKind,
-} from "../../../program/ast/types/ast.types.functions.tz";
-import { TypeRef } from "../../../program/ast/types/ast.types.types.tz";
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
 import {
   NameSymbol,
   SymbolKind,
-} from "../../../program/scopes/types/scopes.types.tz";
+} from "../../../../program/scopes/types/scopes.types.tz";
 
 partial class ScopeTraversal {
   private traverseFunction(fn: FunctionDecl): void {
     this.traverseDecorators(fn.role?.decorators ?? []);
+
     this.scopes.open();
     this.scopes.enterFunction();
+
     this.declareOwnName(fn);
     this.declareTypeParams(fn.typeParams);
 
@@ -67,6 +69,7 @@ partial class ScopeTraversal {
 
     this.traverseDecorators(param.decorators);
     this.traverseOptionalType(param.type);
+
     if (form.kind == ParamKind.Defaulted) {
       this.defaultOf = param.name;
       this.traverseExpr(form.defaultValue);
@@ -84,8 +87,10 @@ partial class ScopeTraversal {
 
   private traverseClass(decl: ClassDecl): void {
     this.traverseDecorators(decl.decorators);
+
     this.scopes.open();
     this.scopes.enterFunction();
+
     this.declareExpressionName(decl);
 
     const methods = this.ownMethods(decl);
@@ -140,6 +145,7 @@ partial class ScopeTraversal {
   private traverseDeclaredClass(decl: DeclaredClass): void {
     this.scopes.open();
     this.scopes.enterFunction();
+
     this.declareTypeParams(decl.typeParams);
     this.traverseBase(decl.base);
     this.traverseTypes(decl.implemented);

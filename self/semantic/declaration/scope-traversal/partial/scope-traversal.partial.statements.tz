@@ -2,8 +2,8 @@ import { ScopeTraversal } from "../scope-traversal.tz";
 import {
   EnumDecl,
   TypeAliasDecl,
-} from "../../../program/ast/types/ast.types.classes.tz";
-import { VarDeclarator } from "../../../program/ast/types/ast.types.patterns.tz";
+} from "../../../../program/ast/types/ast.types.classes.tz";
+import { VarDeclarator } from "../../../../program/ast/types/ast.types.patterns.tz";
 import {
   ForOfStmt,
   ForStmt,
@@ -11,8 +11,8 @@ import {
   Stmt,
   StmtKind,
   SwitchStmt,
-} from "../../../program/ast/types/ast.types.statements.tz";
-import { SymbolKind } from "../../../program/scopes/types/scopes.types.tz";
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
 
 partial class ScopeTraversal {
   private traverseStatements(statements: Stmt[]): void {

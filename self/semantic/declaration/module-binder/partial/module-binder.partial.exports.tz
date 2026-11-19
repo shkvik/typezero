@@ -1,16 +1,16 @@
 import { ModuleBinder } from "../module-binder.tz";
-import { Code } from "../../../diagnostic/code.tz";
+import { Code } from "../../../../diagnostic/code.tz";
 import {
   ExportDecl,
   ExportForm,
   ModuleName,
   ModulePath,
-} from "../../../program/ast/types/ast.types.modules.tz";
-import { kBuiltinModules } from "../../../program/library/builtin-modules/const/builtin-modules.const.tz";
+} from "../../../../program/ast/types/ast.types.modules.tz";
+import { kBuiltinModules } from "../../../../program/library/builtin-modules/const/builtin-modules.const.tz";
 import {
   ModuleExport,
   NameTarget,
-} from "../../../program/module-names/types/module-names.types.tz";
+} from "../../../../program/module-names/types/module-names.types.tz";
 import {
   BindState,
   BoundModule,

@@ -4,20 +4,23 @@ import "./partial/scope-traversal.partial.expressions.tz";
 import "./partial/scope-traversal.partial.types.tz";
 import "./partial/scope-traversal.partial.classes.tz";
 import "./partial/scope-traversal.partial.missing.tz";
-import { Code } from "../../diagnostic/code.tz";
-import { Details, SourceError } from "../../diagnostic/types/message.types.tz";
-import { FunctionDecl } from "../../program/ast/types/ast.types.functions.tz";
-import { kGlobalNames } from "../../program/library/global-names/const/global-names.const.tz";
-import { kLibrary } from "../../program/library/library-modules/const/library-modules.const.tz";
-import { ModuleNames } from "../../program/module-names/types/module-names.types.tz";
-import { Module } from "../../program/module/types/module.types.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
+import { kGlobalNames } from "../../../program/library/global-names/const/global-names.const.tz";
+import { kLibrary } from "../../../program/library/library-modules/const/library-modules.const.tz";
+import { ModuleNames } from "../../../program/module-names/types/module-names.types.tz";
+import { Module } from "../../../program/module/types/module.types.tz";
 import {
   ModuleScopes,
   NameSymbol,
   NameUse,
   SymbolKind,
-} from "../../program/scopes/types/scopes.types.tz";
-import { SourceLines } from "../../program/source-lines/source-lines.tz";
+} from "../../../program/scopes/types/scopes.types.tz";
+import { SourceLines } from "../../../program/source-lines/source-lines.tz";
 import { GlobalScope } from "../name-resolver/types/name-resolver.types.tz";
 import { ScopeStack } from "../scope-stack/scope-stack.tz";
 import { kHiddenPrefix, kNamePoint } from "./const/scope-traversal.const.tz";

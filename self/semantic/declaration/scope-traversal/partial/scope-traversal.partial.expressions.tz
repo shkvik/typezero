@@ -1,5 +1,5 @@
 import { ScopeTraversal } from "../scope-traversal.tz";
-import { Code } from "../../../diagnostic/code.tz";
+import { Code } from "../../../../diagnostic/code.tz";
 import {
   CallArgument,
   Expr,
@@ -8,7 +8,7 @@ import {
   NewKind,
   ObjectLitExpr,
   PropertyKind,
-} from "../../../program/ast/types/ast.types.expressions.tz";
+} from "../../../../program/ast/types/ast.types.expressions.tz";
 
 partial class ScopeTraversal {
   private traverseOptionalExpr(expr: Expr | undefined): void {

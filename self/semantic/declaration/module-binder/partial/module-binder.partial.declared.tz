@@ -2,11 +2,11 @@ import { ModuleBinder } from "../module-binder.tz";
 import {
   NameOrigin,
   VarDeclarator,
-} from "../../../program/ast/types/ast.types.patterns.tz";
+} from "../../../../program/ast/types/ast.types.patterns.tz";
 import {
   Stmt,
   StmtKind,
-} from "../../../program/ast/types/ast.types.statements.tz";
+} from "../../../../program/ast/types/ast.types.statements.tz";
 import { BoundModule } from "../types/module-binder.types.tz";
 
 partial class ModuleBinder {

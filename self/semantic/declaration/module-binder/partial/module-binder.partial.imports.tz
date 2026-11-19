@@ -1,10 +1,10 @@
 import { ModuleBinder } from "../module-binder.tz";
-import { Code } from "../../../diagnostic/code.tz";
+import { Code } from "../../../../diagnostic/code.tz";
 import {
   ImportDecl,
   ModuleName,
-} from "../../../program/ast/types/ast.types.modules.tz";
-import { ModuleExport } from "../../../program/module-names/types/module-names.types.tz";
+} from "../../../../program/ast/types/ast.types.modules.tz";
+import { ModuleExport } from "../../../../program/module-names/types/module-names.types.tz";
 import { BoundModule } from "../types/module-binder.types.tz";
 
 partial class ModuleBinder {

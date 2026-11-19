@@ -10,8 +10,8 @@ import {
   SymbolKind,
 } from "../../../program/scopes/types/scopes.types.tz";
 import { SourceLines } from "../../../program/source-lines/source-lines.tz";
-import { ModuleBinder } from "../../../semantic/module-binder/module-binder.tz";
-import { NameResolver } from "../../../semantic/name-resolver/name-resolver.tz";
+import { ModuleBinder } from "../../../semantic/declaration/module-binder/module-binder.tz";
+import { NameResolver } from "../../../semantic/declaration/name-resolver/name-resolver.tz";
 import { ProgramReport } from "../../program-report/program-report.tz";
 import { ProgramSource } from "../../program-source/program-source.tz";
 

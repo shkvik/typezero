@@ -1,20 +1,20 @@
 import "./partial/module-binder.partial.declared.tz";
 import "./partial/module-binder.partial.exports.tz";
 import "./partial/module-binder.partial.imports.tz";
-import { Code } from "../../diagnostic/code.tz";
-import { Details } from "../../diagnostic/types/message.types.tz";
-import { ModulePath } from "../../program/ast/types/ast.types.modules.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import { Details } from "../../../diagnostic/types/message.types.tz";
+import { ModulePath } from "../../../program/ast/types/ast.types.modules.tz";
 import {
   ModuleExport,
   ModuleImport,
   ModuleNames,
-} from "../../program/module-names/types/module-names.types.tz";
+} from "../../../program/module-names/types/module-names.types.tz";
 import {
   LinkKind,
   Module,
   Program,
-} from "../../program/module/types/module.types.tz";
-import { SourceLines } from "../../program/source-lines/source-lines.tz";
+} from "../../../program/module/types/module.types.tz";
+import { SourceLines } from "../../../program/source-lines/source-lines.tz";
 import { BindState, BoundModule } from "./types/module-binder.types.tz";
 
 export class ModuleBinder {

@@ -1,4 +1,4 @@
-import { NameSymbol } from "../../../program/scopes/types/scopes.types.tz";
+import { NameSymbol } from "../../../../program/scopes/types/scopes.types.tz";
 
 export type ScopeEntry = {
   readonly symbol: NameSymbol;
