@@ -1279,4 +1279,121 @@ export const kMessages: Record<Code, Message> = {
   [Code.NonNullCheck]: {
     text: "'!' is not supported: check the value first, e.g. 'if ({word} == undefined) return ...', or give a default with '{word} ?? ...'",
   },
+  [Code.NumberCondition]: {
+    text: "{first} cannot be a condition: 0 would count as false; compare it: '{word} != 0'",
+  },
+  [Code.NumberNot]: {
+    text: "'!' cannot test {first}: 0 would count as false; compare it: '{word} == 0'",
+  },
+  [Code.NumberAnd]: {
+    text: "'&&' cannot test {first}: 0 would count as false; compare it: '{word} != 0'",
+  },
+  [Code.NumberOr]: {
+    text: "'||' cannot test {first}: 0 would count as false; compare it: '{word} != 0 ? {word} : {other}'",
+  },
+  [Code.FractionCondition]: {
+    text: "a number cannot be a condition: 0 would count as false; compare it as you mean: '{word} != 0' or '{word} > 0'",
+  },
+  [Code.FractionNot]: {
+    text: "'!' cannot test a number: 0 would count as false; compare it as you mean: '{word} == 0' or '{word} <= 0'",
+  },
+  [Code.FractionAnd]: {
+    text: "'&&' cannot test a number: 0 would count as false; compare it as you mean: '{word} != 0' or '{word} > 0'",
+  },
+  [Code.FractionOr]: {
+    text: "'||' cannot test a number: 0 would count as false; compare it as you mean: '{word} != 0' or '{word} > 0'",
+  },
+  [Code.MaybeNumberCondition]: {
+    text: "{first} cannot be a condition: 0 would count as false too; check for undefined: '{word} != undefined'",
+  },
+  [Code.MaybeNumberNot]: {
+    text: "'!' cannot test {first}: 0 would count as false too; check for undefined: '{word} == undefined'",
+  },
+  [Code.MaybeNumberAnd]: {
+    text: "'&&' cannot test {first}: 0 would count as false too; check for undefined: '{word} != undefined'",
+  },
+  [Code.MaybeNumberOr]: {
+    text: "'||' cannot test {first}: 0 would count as false too; give a default with '??': '{word} ?? {other}'",
+  },
+  [Code.JsonCondition]: {
+    text: "a Json cannot be a condition: it may hold 0, \"\", false or null, which would count as false; compare it as you mean, e.g. '{word} != null', '{word} == true' or 'typeof {word} == \"string\"'",
+  },
+  [Code.JsonNot]: {
+    text: "'!' cannot test a Json: it may hold 0, \"\", false or null, which would count as false; compare it as you mean, e.g. '{word} == null', '{word} != true' or 'typeof {word} == \"string\"'",
+  },
+  [Code.JsonAnd]: {
+    text: "'&&' cannot test a Json: it may hold 0, \"\", false or null, which would count as false; compare it as you mean, e.g. '{word} != null', '{word} == true' or 'typeof {word} == \"string\"'",
+  },
+  [Code.JsonOr]: {
+    text: "'||' cannot test a Json: it may hold 0, \"\", false or null, which would count as false; give a default with '??', which replaces null and undefined: '{word} ?? {other}'",
+  },
+  [Code.UnknownCondition]: {
+    text: "an unknown value cannot be a condition: it may hold 0, \"\" or false, which would count as false; check what it holds, e.g. '{word} != undefined' or 'typeof {word} == \"string\"'",
+  },
+  [Code.UnknownNot]: {
+    text: "'!' cannot test an unknown value: it may hold 0, \"\" or false, which would count as false; check what it holds, e.g. '{word} == undefined' or 'typeof {word} == \"string\"'",
+  },
+  [Code.UnknownAnd]: {
+    text: "'&&' cannot test an unknown value: it may hold 0, \"\" or false, which would count as false; check what it holds, e.g. '{word} != undefined' or 'typeof {word} == \"string\"'",
+  },
+  [Code.UnknownOr]: {
+    text: "'||' cannot test an unknown value: it may hold 0, \"\" or false, which would count as false; give a default with '??': '{word} ?? {other}'",
+  },
+  [Code.ResultTruthy]: {
+    text: "a Result is always truthy, an Err too, as both are objects in JavaScript; test it: '{word}.isOk()'",
+  },
+  [Code.ResultTruthyNot]: {
+    text: "a Result is always truthy, an Err too, as both are objects in JavaScript; test it: '{word}.isErr()'",
+  },
+  [Code.ArrayCondition]: {
+    text: "an array is always truthy, even when empty, so the condition is always true; check its length: '{word}.length > 0'",
+  },
+  [Code.ArrayNot]: {
+    text: "an array is always truthy, even when empty, so '!' always gives false; check its length: '{word}.length == 0'",
+  },
+  [Code.ArrayAnd]: {
+    text: "an array is always truthy, even when empty, so '&&' always gives its right side; check its length: '{word}.length > 0'",
+  },
+  [Code.ArrayOr]: {
+    text: "an array is always truthy, even when empty, so '||' never gives its right side; drop '|| {other}'",
+  },
+  [Code.ObjectCondition]: {
+    text: "{first} is always truthy, so the condition is always true; drop the check, or give it a type that allows undefined: '{second} | undefined'",
+  },
+  [Code.ObjectNot]: {
+    text: "{first} is always truthy, so '!' always gives false; drop the check, or give it a type that allows undefined: '{second} | undefined'",
+  },
+  [Code.ObjectAnd]: {
+    text: "{first} is always truthy, so '&&' always gives its right side; drop '{word} &&'",
+  },
+  [Code.ObjectOr]: {
+    text: "{first} is always truthy, so '||' never gives its right side; drop '|| {other}'",
+  },
+  [Code.FunctionCondition]: {
+    text: "a function is always truthy, so the condition is always true; call it: '{word}'",
+  },
+  [Code.FunctionNot]: {
+    text: "a function is always truthy, so '!' always gives false; call it: '{word}'",
+  },
+  [Code.FunctionAnd]: {
+    text: "a function is always truthy, so '&&' always gives its right side; call it: '{word}'",
+  },
+  [Code.FunctionOr]: {
+    text: "a function is always truthy, so '||' never gives its right side; drop '|| {other}'",
+  },
+  [Code.UnionTruthy]: {
+    text: "a value of type '{first}' is always truthy, so the condition is always true",
+  },
+  [Code.UnionNumberTruthy]: {
+    text: "a value of type '{first}' cannot be a condition: '{second}' is a number, and 0 would count as false; check what it holds, e.g. 'typeof {word} == \"string\"'",
+  },
+  [Code.LogicalAndNoCommon]: {
+    text: "'&&' gives '{first}' when its left side is falsy and '{second}' otherwise, and no type holds both; say what each case gives with '?:'",
+  },
+  [Code.LogicalOrNoCommon]: {
+    text: "'||' gives '{first}' when its left side is truthy and '{second}' otherwise, and no type holds both; say what each case gives with '?:'",
+  },
+  [Code.BranchesIncompatible]: {
+    text: "the branches of '?:' have incompatible types '{first}' and '{second}'",
+  },
 };

@@ -1,0 +1,4 @@
+// An unknown value: it may hold 0, "" or false, so it cannot be a condition.
+const thing: unknown = 1;
+
+const a1 = thing ? 1 : 2;

@@ -1,0 +1,12 @@
+// '||' cannot test an object or a Promise: it is always truthy.
+type Shape = { id: int };
+
+async function later(): Promise<int> {
+  return 1;
+}
+
+const shape: Shape = { id: 1 };
+const task: Promise<int> = later();
+
+const a1 = shape || 1;
+const a2 = task || 1;

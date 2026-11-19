@@ -1,0 +1,6 @@
+main.tz:12:12: error TZ2605: '||' cannot test a number that may be undefined: 0 would count as false too; give a default with '??': 'count ?? 0'
+const a1 = count || 0;
+           ^
+main.tz:13:12: error TZ2605: '||' cannot test a decimal that may be undefined: 0 would count as false too; give a default with '??': 'money ?? 0'
+const a2 = money || 0;
+           ^

@@ -1,0 +1,6 @@
+main.tz:5:13: error TZ2595: '!' cannot test a number: 0 would count as false; compare it: 'count == 0'
+const a1 = !count;
+            ^
+main.tz:6:13: error TZ2595: '!' cannot test a decimal: 0 would count as false; compare it: 'money == 0'
+const a2 = !money;
+            ^

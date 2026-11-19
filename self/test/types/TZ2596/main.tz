@@ -1,0 +1,6 @@
+// '&&' cannot test a number or a decimal: 0 would count as false.
+const count: int = 1;
+const money: decimal = 2.5;
+
+const a1 = count && 1;
+const a2 = money && 1;

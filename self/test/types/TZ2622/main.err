@@ -1,0 +1,6 @@
+main.tz:11:12: error TZ2622: an object is always truthy, so '&&' always gives its right side; drop 'shape &&'
+const a1 = shape && 1;
+           ^
+main.tz:12:12: error TZ2622: a Promise is always truthy, so '&&' always gives its right side; drop 'task &&'
+const a2 = task && 1;
+           ^

@@ -1,0 +1,35 @@
+// `!` gives a boolean; `&&` and `||` give one of their sides, so the type
+// holds both; '?:' joins its branches.
+type Shape = { id: int };
+
+function pick(): boolean {
+  return true;
+}
+function find(): Shape | undefined {
+  return undefined;
+}
+function maybe(): int | undefined {
+  return 1;
+}
+
+const flag: boolean = pick();
+const word: string = "w";
+const found: Shape | undefined = find();
+const shape: Shape = { id: 1 };
+const value: int | undefined = maybe();
+
+const both = flag && flag;
+const text = word || "x";
+const kept = found || shape;
+const guarded = found && 1;
+const chosen = flag ? 1 : 2.5;
+const either = flag ? 1 : "x";
+const nothing = flag ? undefined : 1;
+const negated = !flag;
+const empty = !word;
+const nested = flag ? (flag ? 1 : 2) : 3;
+const lists = flag ? [1] : [2];
+const deep = (word && word) || "y";
+const tested = value != undefined && flag;
+const checked = !found;
+const first = (found && flag) || flag;

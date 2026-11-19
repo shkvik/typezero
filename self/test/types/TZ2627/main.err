@@ -1,0 +1,6 @@
+main.tz:8:12: error TZ2627: a function is always truthy, so '||' never gives its right side; drop '|| 1'
+const a1 = job || 1;
+           ^
+main.tz:9:12: error TZ2627: a function is always truthy, so '||' never gives its right side; drop '|| 1'
+const a2 = taking || 1;
+           ^

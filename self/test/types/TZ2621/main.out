@@ -1,0 +1,7 @@
+main.tz
+  2:6 type Shape = { id: int }
+  4:16 later: () => Promise<int>
+  8:7 shape: Shape
+  9:7 task: Promise<int>
+  11:7 a1: boolean
+  12:7 a2: boolean

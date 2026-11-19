@@ -1,0 +1,13 @@
+// '!' cannot test a number that may be undefined: 0 would count as false too.
+function maybeCount(): int | undefined {
+  return 1;
+}
+function maybeMoney(): decimal | undefined {
+  return 2.5;
+}
+
+const count: int | undefined = maybeCount();
+const money: decimal | undefined = maybeMoney();
+
+const a1 = !count;
+const a2 = !money;

@@ -1,0 +1,9 @@
+// A union with a number cannot be a condition: 0 would count as false.
+function pick(): int | string {
+  return 1;
+}
+
+const either: int | string = pick();
+
+const a1 = either ? 1 : 2;
+const a2 = either || "x";

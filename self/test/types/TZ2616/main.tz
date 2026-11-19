@@ -1,0 +1,4 @@
+// An array: it is truthy even when empty, so it cannot be a condition.
+const list: int[] = [1];
+
+const a1 = list ? 1 : 2;

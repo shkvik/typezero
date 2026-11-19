@@ -1,0 +1,6 @@
+main.tz:11:13: error TZ2621: an object is always truthy, so '!' always gives false; drop the check, or give it a type that allows undefined: 'Shape | undefined'
+const a1 = !shape;
+            ^
+main.tz:12:13: error TZ2621: a Promise is always truthy, so '!' always gives false; drop the check, or give it a type that allows undefined: 'Promise<int> | undefined'
+const a2 = !task;
+            ^

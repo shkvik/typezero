@@ -1,0 +1,9 @@
+// A function: it is always truthy, so it cannot be a condition.
+function run(): void {}
+function take(count: int): void {}
+
+const job: () => void = run;
+const taking: (count: int) => void = take;
+
+const a1 = job ? 1 : 2;
+const a2 = taking ? 1 : 2;

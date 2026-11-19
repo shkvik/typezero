@@ -1,0 +1,6 @@
+// A number or a decimal: 0 would count as false, so it cannot be a condition.
+const count: int = 1;
+const money: decimal = 2.5;
+
+const a1 = count ? 1 : 2;
+const a2 = money ? 1 : 2;

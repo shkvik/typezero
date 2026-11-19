@@ -2,6 +2,7 @@ import { ExpressionTypes } from "../expression-types.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import {
   Expr,
+  ExprKind,
   NameExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
@@ -143,8 +144,42 @@ partial class ExpressionTypes {
     if (variable.isConst) {
       door.literal = this.literalOf(init, module);
     }
+    if (variable.isConst && given.kind == TypeKind.String) {
+      door.texts = this.constTexts(init, module);
+    }
 
     this.keepConstant(door, variable, init, given, module);
+  }
+
+  private constTexts(init: Expr, module: int): string[] | undefined {
+    if (init.kind == ExprKind.Name) {
+      return this.doorOfName(init, module)?.texts;
+    }
+
+    const texts: string[] = [];
+
+    if (!this.collectTexts(init, texts)) {
+      return undefined;
+    }
+
+    return texts;
+  }
+
+  private collectTexts(expr: Expr, texts: string[]): boolean {
+    if (expr.kind == ExprKind.Conditional) {
+      return (
+        this.collectTexts(expr.thenExpr, texts) &&
+        this.collectTexts(expr.elseExpr, texts)
+      );
+    }
+    if (expr.kind != ExprKind.StringLit) {
+      return false;
+    }
+    if (!texts.includes(expr.value)) {
+      texts.push(expr.value);
+    }
+
+    return true;
   }
 
   private keepConstant(

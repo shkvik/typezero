@@ -1,0 +1,13 @@
+// `&&` gives its left side when it is falsy, so both sides need one type.
+function pick(): boolean {
+  return true;
+}
+
+const flag: boolean = pick();
+const word: string = "w";
+
+const a1 = flag && 1;
+const a2 = word && 1;
+
+const b1 = flag && flag;
+const b2 = word && "x";

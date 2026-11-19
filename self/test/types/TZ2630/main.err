@@ -1,0 +1,6 @@
+main.tz:9:17: error TZ2630: '&&' gives 'boolean' when its left side is falsy and 'int' otherwise, and no type holds both; say what each case gives with '?:'
+const a1 = flag && 1;
+                ^
+main.tz:10:17: error TZ2630: '&&' gives 'string' when its left side is falsy and 'int' otherwise, and no type holds both; say what each case gives with '?:'
+const a2 = word && 1;
+                ^

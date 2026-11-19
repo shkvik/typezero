@@ -1,0 +1,345 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { Details } from "../../../../diagnostic/types/message.types.tz";
+import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  LiteralKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  kArgumentsCall,
+  kDecimalNoun,
+  kMaybeSuffix,
+  kNegation,
+  kNumberNoun,
+  kObjectNoun,
+  kOtherPlaceholder,
+  kPlainCall,
+  kPromiseNoun,
+  kTruthCodes,
+  kUnnamedOperand,
+} from "../const/expression-types.const.tz";
+import {
+  TruthCodes,
+  TruthProblem,
+  TruthUse,
+} from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private checkTruthy(
+    expr: Expr,
+    type: Type,
+    use: TruthUse,
+    other: Expr | undefined,
+    module: int,
+  ): boolean {
+    const base = this.apparent(this.definedType(type));
+    const problem = this.truthProblem(type, base);
+    if (problem == TruthProblem.None) {
+      return true;
+    }
+
+    const codes = kTruthCodes.find((row) => row.use == use);
+    if (codes == undefined) {
+      return false;
+    }
+
+    const word = this.hintText(expr, kUnnamedOperand);
+    const otherText = this.otherHint(other);
+    const code = this.truthCode(problem, codes, type, base, use);
+    const details = this.truthDetails(code, type, base, word, otherText, use);
+
+    this.report(module, expr.loc, code, details);
+
+    return false;
+  }
+
+  private otherHint(other: Expr | undefined): string {
+    if (other == undefined) {
+      return kOtherPlaceholder;
+    }
+
+    return this.hintText(other, kOtherPlaceholder);
+  }
+
+  private truthProblem(type: Type, base: Type): TruthProblem {
+    if (this.isTestable(type, base)) {
+      return TruthProblem.None;
+    }
+
+    switch (base.kind) {
+      case TypeKind.Union:
+      case TypeKind.Literal:
+        return this.unionTruthProblem(type, base);
+      case TypeKind.Json:
+        return TruthProblem.Json;
+      case TypeKind.Unknown:
+        return TruthProblem.Unknown;
+      case TypeKind.Result:
+        return TruthProblem.Result;
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+        return TruthProblem.Number;
+      default:
+        return TruthProblem.Truthy;
+    }
+  }
+
+  private isTestable(type: Type, base: Type): boolean {
+    const isPlain =
+      type.kind == TypeKind.Undefined ||
+      type.kind == TypeKind.Error ||
+      base.kind == TypeKind.Never ||
+      base.kind == TypeKind.Boolean ||
+      base.kind == TypeKind.String ||
+      base.kind == TypeKind.Template;
+    if (isPlain) {
+      return true;
+    }
+
+    return this.isOptional(type) && this.isHolder(base);
+  }
+
+  private isHolder(base: Type): boolean {
+    switch (base.kind) {
+      case TypeKind.Array:
+      case TypeKind.Function:
+      case TypeKind.Result:
+      case TypeKind.Iterator:
+      case TypeKind.Dict:
+      case TypeKind.Promise:
+        return true;
+      default:
+        return this.isObjectKind(base);
+    }
+  }
+
+  private unionTruthProblem(type: Type, base: Type): TruthProblem {
+    const number = this.unionNumber(base);
+    const isFalsy = this.isOptional(type) || this.hasFalsyMember(base);
+
+    if (number != undefined) {
+      return TruthProblem.UnionNumber;
+    }
+    if (isFalsy) {
+      return TruthProblem.None;
+    }
+
+    return TruthProblem.UnionTruthy;
+  }
+
+  private unionMembers(base: Type): Type[] {
+    if (base.kind != TypeKind.Union) {
+      return [base];
+    }
+
+    return base.parts;
+  }
+
+  private unionNumber(base: Type): Type | undefined {
+    let number: Type | undefined = undefined;
+
+    for (const member of this.unionMembers(base)) {
+      if (this.isNumberMember(member)) {
+        number = member;
+      }
+    }
+
+    return number;
+  }
+
+  private isNumberMember(member: Type): boolean {
+    const plain = this.relation.baseOf(member) ?? member;
+    const isOpen =
+      plain.kind == TypeKind.TypeParameter || plain.kind == TypeKind.Json;
+
+    return this.isNumberLike(plain) || isOpen;
+  }
+
+  private hasFalsyMember(base: Type): boolean {
+    return this.unionMembers(base).some((member) => this.isFalsyMember(member));
+  }
+
+  private isFalsyMember(member: Type): boolean {
+    if (member.kind != TypeKind.Literal) {
+      return member.kind == TypeKind.Boolean || member.kind == TypeKind.String;
+    }
+    if (member.literal == LiteralKind.String) {
+      return member.text == "";
+    }
+
+    return member.text == "0";
+  }
+
+  private truthCode(
+    problem: TruthProblem,
+    codes: TruthCodes,
+    type: Type,
+    base: Type,
+    use: TruthUse,
+  ): Code {
+    switch (problem) {
+      case TruthProblem.UnionTruthy:
+        return Code.UnionTruthy;
+      case TruthProblem.UnionNumber:
+        return Code.UnionNumberTruthy;
+      case TruthProblem.Json:
+        return codes.json;
+      case TruthProblem.Unknown:
+        return codes.unknown;
+      case TruthProblem.Result:
+        return this.resultTruthCode(use);
+      case TruthProblem.Number:
+        return this.numberTruthCode(codes, type, base);
+      default:
+        return this.objectTruthCode(codes, base);
+    }
+  }
+
+  private resultTruthCode(use: TruthUse): Code {
+    if (use == TruthUse.Not) {
+      return Code.ResultTruthyNot;
+    }
+
+    return Code.ResultTruthy;
+  }
+
+  private numberTruthCode(codes: TruthCodes, type: Type, base: Type): Code {
+    if (this.isOptional(type)) {
+      return codes.maybe;
+    }
+    if (base.kind == TypeKind.Double) {
+      return codes.fraction;
+    }
+
+    return codes.number;
+  }
+
+  private objectTruthCode(codes: TruthCodes, base: Type): Code {
+    if (base.kind == TypeKind.Array) {
+      return codes.array;
+    }
+    if (this.isTruthyObject(base)) {
+      return codes.object;
+    }
+
+    return codes.function;
+  }
+
+  private isTruthyObject(base: Type): boolean {
+    switch (base.kind) {
+      case TypeKind.Iterator:
+      case TypeKind.Dict:
+      case TypeKind.Promise:
+        return true;
+      default:
+        return this.isObjectKind(base);
+    }
+  }
+
+  private truthDetails(
+    code: Code,
+    type: Type,
+    base: Type,
+    word: string,
+    other: string,
+    use: TruthUse,
+  ): Details {
+    if (code == Code.UnionTruthy) {
+      return { first: this.text.of(type) };
+    }
+    if (code == Code.UnionNumberTruthy) {
+      return this.unionNumberDetails(type, base, word);
+    }
+
+    const first = this.truthNoun(type, base);
+    const second = this.text.of(base);
+
+    if (base.kind != TypeKind.Function) {
+      return { first, second, word, other };
+    }
+
+    const call = this.callOf(base, word, use);
+
+    return { first, second, word: call, other };
+  }
+
+  private unionNumberDetails(type: Type, base: Type, word: string): Details {
+    const number = this.unionNumber(base);
+    const first = this.text.of(type);
+
+    if (number == undefined) {
+      return { first, word };
+    }
+
+    const second = this.text.of(number);
+
+    return { first, second, word };
+  }
+
+  private truthNoun(type: Type, base: Type): string {
+    if (base.kind == TypeKind.Promise) {
+      return kPromiseNoun;
+    }
+    if (!this.isNumberLike(base)) {
+      return kObjectNoun;
+    }
+
+    const noun = this.numberNoun(base);
+
+    if (!this.isOptional(type)) {
+      return noun;
+    }
+
+    return noun + kMaybeSuffix;
+  }
+
+  private numberNoun(base: Type): string {
+    if (base.kind == TypeKind.Decimal) {
+      return kDecimalNoun;
+    }
+
+    return kNumberNoun;
+  }
+
+  private callOf(base: Type, word: string, use: TruthUse): string {
+    const prefix = this.negationOf(use);
+
+    if (this.minArguments(base) == 0) {
+      return prefix + word + kPlainCall;
+    }
+
+    return prefix + word + kArgumentsCall;
+  }
+
+  private negationOf(use: TruthUse): string {
+    if (use == TruthUse.Not) {
+      return kNegation;
+    }
+
+    return "";
+  }
+
+  private minArguments(base: Type): int {
+    if (base.kind != TypeKind.Function) {
+      return 0;
+    }
+
+    const shape = base.shape;
+    let count = 0;
+    let index = 0;
+
+    for (const param of shape.params) {
+      const isRest = shape.rest && index == shape.params.length - 1;
+      if (!param.optional && !isRest) {
+        count += 1;
+      }
+
+      index += 1;
+    }
+
+    return count;
+  }
+}

@@ -1,0 +1,9 @@
+// '!' cannot test a function: it is always truthy.
+function run(): void {}
+function take(count: int): void {}
+
+const job: () => void = run;
+const taking: (count: int) => void = take;
+
+const a1 = !job;
+const a2 = !taking;

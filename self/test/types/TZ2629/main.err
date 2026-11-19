@@ -1,0 +1,6 @@
+main.tz:8:12: error TZ2629: a value of type 'int | string' cannot be a condition: 'int' is a number, and 0 would count as false; check what it holds, e.g. 'typeof either == "string"'
+const a1 = either ? 1 : 2;
+           ^
+main.tz:9:12: error TZ2629: a value of type 'int | string' cannot be a condition: 'int' is a number, and 0 would count as false; check what it holds, e.g. 'typeof either == "string"'
+const a2 = either || "x";
+           ^

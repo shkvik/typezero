@@ -1,0 +1,4 @@
+// '&&' cannot test an unknown value: it may hold 0, "" or false.
+const thing: unknown = 1;
+
+const a1 = thing && 1;

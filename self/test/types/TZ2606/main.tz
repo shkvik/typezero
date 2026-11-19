@@ -1,0 +1,4 @@
+// A Json: it may hold 0, "", false or null, so it cannot be a condition.
+const data: Json = 1;
+
+const a1 = data ? 1 : 2;

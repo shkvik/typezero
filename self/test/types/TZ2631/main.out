@@ -1,0 +1,7 @@
+main.tz
+  2:6 type Shape = { id: int }
+  4:10 pick: () => boolean
+  7:10 find: () => Shape | undefined
+  11:7 flag: boolean
+  12:7 found: Shape | undefined
+  17:7 b1: Shape

@@ -1,0 +1,5 @@
+main.tz
+  2:7 count: int
+  3:7 money: decimal
+  5:7 a1: int
+  6:7 a2: int

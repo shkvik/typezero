@@ -1,0 +1,3 @@
+main.tz:4:12: error TZ2598: a number cannot be a condition: 0 would count as false; compare it as you mean: 'ratio != 0' or 'ratio > 0'
+const a1 = ratio ? 1 : 2;
+           ^

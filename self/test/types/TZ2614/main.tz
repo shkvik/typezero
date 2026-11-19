@@ -1,0 +1,10 @@
+// A Result is always truthy, an Err too.
+function parse(): Result<int, string> {
+  return ok(1);
+}
+
+const result: Result<int, string> = parse();
+
+const a1 = result ? 1 : 2;
+const a2 = result && 1;
+const a3 = result || 1;

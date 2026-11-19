@@ -1,0 +1,6 @@
+main.tz
+  2:10 pick: () => boolean
+  6:7 flag: boolean
+  7:7 word: string
+  12:7 b1: boolean
+  13:7 b2: string

@@ -1,0 +1,3 @@
+main.tz:4:12: error TZ2608: '&&' cannot test a Json: it may hold 0, "", false or null, which would count as false; compare it as you mean, e.g. 'data != null', 'data == true' or 'typeof data == "string"'
+const a1 = data && 1;
+           ^

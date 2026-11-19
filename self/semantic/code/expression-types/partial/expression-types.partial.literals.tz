@@ -295,7 +295,25 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    return door.type;
+    const texts = door.texts;
+    if (wanted == undefined || texts == undefined) {
+      return door.type;
+    }
+
+    return this.textChoice(texts, wanted) ?? door.type;
+  }
+
+  private textChoice(texts: string[], wanted: Type): Type | undefined {
+    const parts = this.definedParts(wanted);
+    if (!parts.some((part) => this.isTextual(part))) {
+      return undefined;
+    }
+
+    const literals = texts.map((text) =>
+      this.store.literal(LiteralKind.String, text),
+    );
+
+    return this.store.unionOf(literals);
   }
 
   private isNullName(expr: NameExpr, module: int): boolean {

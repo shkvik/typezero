@@ -1,0 +1,6 @@
+main.tz:11:12: error TZ2620: an object is always truthy, so the condition is always true; drop the check, or give it a type that allows undefined: 'Shape | undefined'
+const a1 = shape ? 1 : 2;
+           ^
+main.tz:12:12: error TZ2620: a Promise is always truthy, so the condition is always true; drop the check, or give it a type that allows undefined: 'Promise<int> | undefined'
+const a2 = task ? 1 : 2;
+           ^

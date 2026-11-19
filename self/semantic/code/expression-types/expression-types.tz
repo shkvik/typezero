@@ -13,6 +13,8 @@ import "./partial/expression-types.partial.unary.tz";
 import "./partial/expression-types.partial.constants.tz";
 import "./partial/expression-types.partial.comparisons.tz";
 import "./partial/expression-types.partial.typeof.tz";
+import "./partial/expression-types.partial.truth.tz";
+import "./partial/expression-types.partial.logic.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   Details,
@@ -100,6 +102,8 @@ export class ExpressionTypes {
         return this.binaryTyped(expr, wanted, module);
       case ExprKind.Unary:
         return this.unaryTyped(expr, wanted, module);
+      case ExprKind.Conditional:
+        return this.conditionalTyped(expr, wanted, module);
       default:
         return this.store.plain(TypeKind.Error);
     }

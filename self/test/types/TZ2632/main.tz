@@ -1,0 +1,14 @@
+// The branches of '?:' need one type between them.
+function pick(): boolean {
+  return true;
+}
+
+const flag: boolean = pick();
+const count: int = 1;
+const ratio: double = 1.5;
+
+const a1 = flag ? count : ratio;
+const a2 = flag ? [1] : ["a"];
+
+const b1 = flag ? 1 : 2.5;
+const b2 = flag ? 1 : "x";

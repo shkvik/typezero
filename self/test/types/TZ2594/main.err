@@ -1,0 +1,6 @@
+main.tz:5:12: error TZ2594: a number cannot be a condition: 0 would count as false; compare it: 'count != 0'
+const a1 = count ? 1 : 2;
+           ^
+main.tz:6:12: error TZ2594: a decimal cannot be a condition: 0 would count as false; compare it: 'money != 0'
+const a2 = money ? 1 : 2;
+           ^

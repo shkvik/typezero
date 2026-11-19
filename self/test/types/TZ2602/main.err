@@ -1,0 +1,6 @@
+main.tz:12:12: error TZ2602: a number that may be undefined cannot be a condition: 0 would count as false too; check for undefined: 'count != undefined'
+const a1 = count ? 1 : 2;
+           ^
+main.tz:13:12: error TZ2602: a decimal that may be undefined cannot be a condition: 0 would count as false too; check for undefined: 'money != undefined'
+const a2 = money ? 1 : 2;
+           ^

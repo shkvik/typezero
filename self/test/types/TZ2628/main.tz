@@ -1,0 +1,11 @@
+// A union of objects and arrays is always truthy.
+type Shape = { id: int };
+
+function pick(): Shape | int[] {
+  return [1];
+}
+
+const holder: Shape | int[] = pick();
+
+const a1 = holder ? 1 : 2;
+const a2 = !holder;

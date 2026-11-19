@@ -28,6 +28,8 @@ partial class ExpressionTypes {
         return this.signTyped(expr, wanted, module);
       case UnaryOp.BitNot:
         return this.bitNotTyped(expr, wanted, module);
+      case UnaryOp.Not:
+        return this.notTyped(expr, module);
       case UnaryOp.TypeOf:
         return this.typeofTyped(expr, module);
       case UnaryOp.Void:

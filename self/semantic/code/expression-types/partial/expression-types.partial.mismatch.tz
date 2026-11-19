@@ -187,9 +187,7 @@ partial class ExpressionTypes {
     wanted: Type,
     code: Code,
   ): boolean {
-    const isFresh =
-      expr.kind == ExprKind.ArrayLit || expr.kind == ExprKind.ObjectLit;
-    if (isFresh || this.isCertain(code)) {
+    if (this.isFresh(expr) || this.isCertain(code)) {
       return true;
     }
 
@@ -204,6 +202,18 @@ partial class ExpressionTypes {
       this.isPlainValue(source) ||
       this.isPlainValue(target)
     );
+  }
+
+  private isFresh(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.ArrayLit:
+      case ExprKind.ObjectLit:
+        return true;
+      case ExprKind.Conditional:
+        return this.isFresh(expr.thenExpr) && this.isFresh(expr.elseExpr);
+      default:
+        return false;
+    }
   }
 
   private isCertain(code: Code): boolean {

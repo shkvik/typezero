@@ -1,0 +1,12 @@
+// An object or a Promise: it is always truthy, so it cannot be a condition.
+type Shape = { id: int };
+
+async function later(): Promise<int> {
+  return 1;
+}
+
+const shape: Shape = { id: 1 };
+const task: Promise<int> = later();
+
+const a1 = shape ? 1 : 2;
+const a2 = task ? 1 : 2;

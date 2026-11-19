@@ -1,0 +1,6 @@
+main.tz
+  2:6 type Shape = { id: int }
+  4:10 pick: () => Shape | int[]
+  8:7 holder: Shape | int[]
+  10:7 a1: int
+  11:7 a2: boolean

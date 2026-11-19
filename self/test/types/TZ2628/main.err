@@ -1,0 +1,6 @@
+main.tz:10:12: error TZ2628: a value of type 'Shape | int[]' is always truthy, so the condition is always true
+const a1 = holder ? 1 : 2;
+           ^
+main.tz:11:13: error TZ2628: a value of type 'Shape | int[]' is always truthy, so the condition is always true
+const a2 = !holder;
+            ^

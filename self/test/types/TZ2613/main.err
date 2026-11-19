@@ -1,0 +1,3 @@
+main.tz:4:12: error TZ2613: '||' cannot test an unknown value: it may hold 0, "" or false, which would count as false; give a default with '??': 'thing ?? 1'
+const a1 = thing || 1;
+           ^

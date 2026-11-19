@@ -1,0 +1,6 @@
+main.tz:8:13: error TZ2625: a function is always truthy, so '!' always gives false; call it: '!job()'
+const a1 = !job;
+            ^
+main.tz:9:13: error TZ2625: a function is always truthy, so '!' always gives false; call it: '!taking(...)'
+const a2 = !taking;
+            ^

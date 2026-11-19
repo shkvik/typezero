@@ -1,0 +1,6 @@
+main.tz:14:17: error TZ2631: '||' gives 'boolean' when its left side is truthy and 'int' otherwise, and no type holds both; say what each case gives with '?:'
+const a1 = flag || 1;
+                ^
+main.tz:15:18: error TZ2631: '||' gives 'Shape' when its left side is truthy and 'int' otherwise, and no type holds both; say what each case gives with '?:'
+const a2 = found || 1;
+                 ^

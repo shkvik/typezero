@@ -1,0 +1,4 @@
+// '&&' cannot test a double: 0 would count as false.
+const ratio: double = 1.5;
+
+const a1 = ratio && 1.5;

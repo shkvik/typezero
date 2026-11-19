@@ -1,0 +1,9 @@
+main.tz:8:12: error TZ2614: a Result is always truthy, an Err too, as both are objects in JavaScript; test it: 'result.isOk()'
+const a1 = result ? 1 : 2;
+           ^
+main.tz:9:12: error TZ2614: a Result is always truthy, an Err too, as both are objects in JavaScript; test it: 'result.isOk()'
+const a2 = result && 1;
+           ^
+main.tz:10:12: error TZ2614: a Result is always truthy, an Err too, as both are objects in JavaScript; test it: 'result.isOk()'
+const a3 = result || 1;
+           ^

@@ -1,0 +1,17 @@
+// `||` gives its left side when it is truthy, so both sides need one type.
+type Shape = { id: int };
+
+function pick(): boolean {
+  return true;
+}
+function find(): Shape | undefined {
+  return undefined;
+}
+
+const flag: boolean = pick();
+const found: Shape | undefined = find();
+
+const a1 = flag || 1;
+const a2 = found || 1;
+
+const b1 = found || { id: 2 };

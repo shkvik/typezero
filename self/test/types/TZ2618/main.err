@@ -1,0 +1,3 @@
+main.tz:4:12: error TZ2618: an array is always truthy, even when empty, so '&&' always gives its right side; check its length: 'list.length > 0'
+const a1 = list && 1;
+           ^

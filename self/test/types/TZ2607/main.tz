@@ -1,0 +1,4 @@
+// '!' cannot test a Json: it may hold 0, "", false or null.
+const data: Json = 1;
+
+const a1 = !data;

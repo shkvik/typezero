@@ -15,6 +15,7 @@ import {
 } from "../const/expression-types.const.tz";
 import {
   ConcatLink,
+  LogicSide,
   NumberConversion,
   OperandHints,
   OperandPair,
@@ -51,6 +52,9 @@ partial class ExpressionTypes {
         return this.orderTyped(expr, module);
       case BinaryOp.Nullish:
         return this.nullishTyped(expr, wanted, module);
+      case BinaryOp.LogAnd:
+      case BinaryOp.LogOr:
+        return this.logicalTyped(expr, wanted, LogicSide.Value, module);
       default:
         return this.store.plain(TypeKind.Error);
     }

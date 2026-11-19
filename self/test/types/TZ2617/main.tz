@@ -1,0 +1,4 @@
+// '!' cannot test an array: it is truthy even when empty.
+const list: int[] = [1];
+
+const a1 = !list;

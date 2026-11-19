@@ -1,0 +1,25 @@
+main.tz
+  3:6 type Shape = { id: int }
+  5:10 pick: () => boolean
+  8:10 find: () => Shape | undefined
+  11:10 maybe: () => int | undefined
+  15:7 flag: boolean
+  16:7 word: string
+  17:7 found: Shape | undefined
+  18:7 shape: Shape
+  19:7 value: int | undefined
+  21:7 both: boolean
+  22:7 text: string
+  23:7 kept: Shape
+  24:7 guarded: int | undefined
+  25:7 chosen: double
+  26:7 either: int | string
+  27:7 nothing: int | undefined
+  28:7 negated: boolean
+  29:7 empty: boolean
+  30:7 nested: int
+  31:7 lists: int[]
+  32:7 deep: string
+  33:7 tested: boolean
+  34:7 checked: boolean
+  35:7 first: boolean

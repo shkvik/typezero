@@ -1,0 +1,7 @@
+main.tz
+  2:10 run: () => void
+  3:10 take: (int) => void
+  5:7 job: () => void
+  6:7 taking: (int) => void
+  8:7 a1: boolean
+  9:7 a2: boolean

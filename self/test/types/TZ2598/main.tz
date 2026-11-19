@@ -1,0 +1,4 @@
+// A double: 0 would count as false, so it cannot be a condition.
+const ratio: double = 1.5;
+
+const a1 = ratio ? 1 : 2;

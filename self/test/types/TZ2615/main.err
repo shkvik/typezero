@@ -1,0 +1,3 @@
+main.tz:8:13: error TZ2615: a Result is always truthy, an Err too, as both are objects in JavaScript; test it: 'result.isErr()'
+const a1 = !result;
+            ^

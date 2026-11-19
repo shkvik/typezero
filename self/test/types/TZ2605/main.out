@@ -1,0 +1,5 @@
+main.tz
+  2:10 maybeCount: () => int | undefined
+  5:10 maybeMoney: () => decimal | undefined
+  9:7 count: int | undefined
+  10:7 money: decimal | undefined

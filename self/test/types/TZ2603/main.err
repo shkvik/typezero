@@ -1,0 +1,6 @@
+main.tz:12:13: error TZ2603: '!' cannot test a number that may be undefined: 0 would count as false too; check for undefined: 'count == undefined'
+const a1 = !count;
+            ^
+main.tz:13:13: error TZ2603: '!' cannot test a decimal that may be undefined: 0 would count as false too; check for undefined: 'money == undefined'
+const a2 = !money;
+            ^

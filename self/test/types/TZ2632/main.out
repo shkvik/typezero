@@ -1,0 +1,7 @@
+main.tz
+  2:10 pick: () => boolean
+  6:7 flag: boolean
+  7:7 count: int
+  8:7 ratio: double
+  13:7 b1: double
+  14:7 b2: int | string

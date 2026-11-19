@@ -1,0 +1,9 @@
+// '&&' cannot test a function: it is always truthy.
+function run(): void {}
+function take(count: int): void {}
+
+const job: () => void = run;
+const taking: (count: int) => void = take;
+
+const a1 = job && 1;
+const a2 = taking && 1;

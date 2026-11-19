@@ -1,0 +1,6 @@
+main.tz:8:12: error TZ2624: a function is always truthy, so the condition is always true; call it: 'job()'
+const a1 = job ? 1 : 2;
+           ^
+main.tz:9:12: error TZ2624: a function is always truthy, so the condition is always true; call it: 'taking(...)'
+const a2 = taking ? 1 : 2;
+           ^

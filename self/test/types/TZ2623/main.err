@@ -1,0 +1,6 @@
+main.tz:11:12: error TZ2623: an object is always truthy, so '||' never gives its right side; drop '|| 1'
+const a1 = shape || 1;
+           ^
+main.tz:12:12: error TZ2623: a Promise is always truthy, so '||' never gives its right side; drop '|| 1'
+const a2 = task || 1;
+           ^

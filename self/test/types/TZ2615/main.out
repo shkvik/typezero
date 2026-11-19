@@ -1,0 +1,4 @@
+main.tz
+  2:10 parse: () => Result<int, string>
+  6:7 result: Result<int, string>
+  8:7 a1: boolean

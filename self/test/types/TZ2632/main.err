@@ -1,0 +1,6 @@
+main.tz:10:17: error TZ2632: the branches of '?:' have incompatible types 'int' and 'double'
+const a1 = flag ? count : ratio;
+                ^
+main.tz:11:17: error TZ2632: the branches of '?:' have incompatible types 'int[]' and 'string[]'
+const a2 = flag ? [1] : ["a"];
+                ^

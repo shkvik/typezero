@@ -1,0 +1,8 @@
+// `!` of a Result is always false; the message says to test it.
+function parse(): Result<int, string> {
+  return ok(1);
+}
+
+const result: Result<int, string> = parse();
+
+const a1 = !result;

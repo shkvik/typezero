@@ -1,3 +1,4 @@
+import { Code } from "../../../../diagnostic/code.tz";
 import { SourceError } from "../../../../diagnostic/types/message.types.tz";
 import {
   BinaryExpr,
@@ -38,6 +39,7 @@ export type VariableDoor = {
   type: Type;
   literal?: LiteralValue;
   constant?: LiteralValue;
+  texts?: string[];
 };
 
 export type IntLimit = {
@@ -135,6 +137,41 @@ export type OperatorText = {
 export type UnaryText = {
   readonly op: UnaryOp;
   readonly text: string;
+};
+
+export enum TruthUse {
+  Condition,
+  Not,
+  And,
+  Or,
+}
+
+export enum TruthProblem {
+  None,
+  UnionTruthy,
+  UnionNumber,
+  Json,
+  Unknown,
+  Result,
+  Number,
+  Truthy,
+}
+
+export enum LogicSide {
+  Value,
+  Tested,
+}
+
+export type TruthCodes = {
+  readonly use: TruthUse;
+  readonly number: Code;
+  readonly fraction: Code;
+  readonly maybe: Code;
+  readonly json: Code;
+  readonly unknown: Code;
+  readonly array: Code;
+  readonly object: Code;
+  readonly function: Code;
 };
 
 export type ComparedSide = {

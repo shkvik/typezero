@@ -1,0 +1,6 @@
+main.tz:5:12: error TZ2596: '&&' cannot test a number: 0 would count as false; compare it: 'count != 0'
+const a1 = count && 1;
+           ^
+main.tz:6:12: error TZ2596: '&&' cannot test a decimal: 0 would count as false; compare it: 'money != 0'
+const a2 = money && 1;
+           ^

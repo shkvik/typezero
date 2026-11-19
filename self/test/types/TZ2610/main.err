@@ -1,0 +1,3 @@
+main.tz:4:12: error TZ2610: an unknown value cannot be a condition: it may hold 0, "" or false, which would count as false; check what it holds, e.g. 'thing != undefined' or 'typeof thing == "string"'
+const a1 = thing ? 1 : 2;
+           ^
