@@ -1,0 +1,6 @@
+main.tz:4:15: error TZ2570: operator '+' cannot be applied to types 'string' and 'int' (JavaScript would join them as text); convert it with 'String(count)'
+const a1 = "" + count;
+              ^
+main.tz:5:18: error TZ2570: operator '+' cannot be applied to types 'int' and 'string' (JavaScript would join them as text); convert it with 'String(count)'
+const a2 = count + "";
+                 ^

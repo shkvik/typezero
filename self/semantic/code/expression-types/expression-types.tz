@@ -5,6 +5,12 @@ import "./partial/expression-types.partial.arrays.tz";
 import "./partial/expression-types.partial.objects.tz";
 import "./partial/expression-types.partial.dictionaries.tz";
 import "./partial/expression-types.partial.unify.tz";
+import "./partial/expression-types.partial.arithmetic.tz";
+import "./partial/expression-types.partial.operands.tz";
+import "./partial/expression-types.partial.concatenation.tz";
+import "./partial/expression-types.partial.decimals.tz";
+import "./partial/expression-types.partial.unary.tz";
+import "./partial/expression-types.partial.constants.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   Details,
@@ -88,6 +94,10 @@ export class ExpressionTypes {
         return this.objectTyped(expr, wanted, module);
       case ExprKind.Name:
         return this.named(expr, wanted, module);
+      case ExprKind.Binary:
+        return this.binaryTyped(expr, wanted, module);
+      case ExprKind.Unary:
+        return this.unaryTyped(expr, wanted, module);
       default:
         return this.store.plain(TypeKind.Error);
     }

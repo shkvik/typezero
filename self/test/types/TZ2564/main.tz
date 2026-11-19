@@ -1,0 +1,8 @@
+// A double is inexact, so it does not join a decimal by itself.
+const money: decimal = 2.5;
+const ratio: double = 0.1;
+
+const a1 = money * ratio;
+const a2 = ratio + money;
+
+const b1 = money + 1.5;

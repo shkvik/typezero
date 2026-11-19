@@ -117,11 +117,13 @@ partial class ExpressionTypes {
 
       door.type = type;
 
-      if (init != undefined && type.kind != TypeKind.Error) {
-        this.checked(init, type, module, kNoPlace);
+      if (init == undefined || type.kind == TypeKind.Error) {
+        return;
       }
 
-      return;
+      const given = this.checked(init, type, module, kNoPlace);
+
+      return this.keepConstant(door, variable, init, given, module);
     }
     if (init == undefined) {
       this.report(module, decl.loc, Code.VariableNeedsType, {
@@ -140,6 +142,20 @@ partial class ExpressionTypes {
 
     if (variable.isConst) {
       door.literal = this.literalOf(init, module);
+    }
+
+    this.keepConstant(door, variable, init, given, module);
+  }
+
+  private keepConstant(
+    door: VariableDoor,
+    variable: TopVariable,
+    init: Expr,
+    given: Type,
+    module: int,
+  ): void {
+    if (variable.isConst) {
+      door.constant = this.intConstant(init, given, module);
     }
   }
 

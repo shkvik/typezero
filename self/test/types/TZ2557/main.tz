@@ -1,0 +1,6 @@
+// Bit operators take integers, not doubles.
+const ratio: double = 1.5;
+const count: int = 1;
+
+const a1 = ratio & 1;
+const a2 = count ^ ratio;

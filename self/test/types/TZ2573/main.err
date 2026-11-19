@@ -1,0 +1,3 @@
+main.tz:8:18: error TZ2573: a Result cannot be converted to a string: JavaScript would give '[object Object]'; print it with console.log, or make the text with 'match'
+const a1 = "x" + result;
+                 ^

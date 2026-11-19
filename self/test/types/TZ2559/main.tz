@@ -1,0 +1,5 @@
+// A sign does not turn a string into a number.
+const word: string = "1";
+
+const a1 = -word;
+const a2 = +word;

@@ -1,0 +1,9 @@
+main.tz:5:20: error TZ2551: division by zero
+const a1 = count / 0;
+                   ^
+main.tz:6:20: error TZ2551: division by zero
+const a2 = count % zero;
+                   ^
+main.tz:7:20: error TZ2551: division by zero
+const a3 = count / -0;
+                   ^

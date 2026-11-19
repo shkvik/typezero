@@ -1,1 +1,0 @@
-3:3: a Record holds values, not methods; store a function, 'size: (...) => ...'

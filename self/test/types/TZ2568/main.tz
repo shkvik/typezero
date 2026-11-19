@@ -1,0 +1,12 @@
+// `+` of a string and a number or a boolean would join them as text;
+// a template does that openly.
+const word: string = "x";
+const count: int = 1;
+const flag: boolean = true;
+
+const a1 = word + flag;
+const a2 = "a" + count;
+const a3 = word + 1 + 2;
+const a4 = `x` + count;
+
+const b1 = word + "y";

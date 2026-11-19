@@ -1,0 +1,4 @@
+// `| 0` changes nothing for an integer.
+const count: int = 5;
+
+const a1 = count | 0;

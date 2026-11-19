@@ -1,0 +1,6 @@
+main.tz:6:18: error TZ2558: '>>>' shifts in zeros, as a shift of an unsigned type does; 'int' is signed: use '>>', or convert it, e.g. 'count.toUint64() >>> 1'
+const a1 = count >>> 1;
+                 ^
+main.tz:7:18: error TZ2558: '>>>' shifts in zeros, as a shift of an unsigned type does; 'int8' is signed: use '>>', or convert it, e.g. 'small.toUint8() >>> count'
+const a2 = small >>> count;
+                 ^

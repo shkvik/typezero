@@ -1,3 +1,0 @@
-6:26: cannot spread 'int[]' into 'double[]'
-7:16: cannot spread 'int[]' into '(int | string)[]'
-8:23: cannot spread '[int, string]' into 'int[]'

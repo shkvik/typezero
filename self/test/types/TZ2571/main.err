@@ -1,0 +1,3 @@
+main.tz:6:18: error TZ2571: a function cannot be converted to a string; print it with console.log, or use its name
+const a1 = "x" + job;
+                 ^

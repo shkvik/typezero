@@ -1,0 +1,6 @@
+main.tz:5:18: error TZ2578: an object cannot be converted to a string: JavaScript would give '[object Object]'; print it with console.log, or build the text from its fields
+const a1 = "x" + point;
+                 ^
+main.tz:6:18: error TZ2578: an object cannot be converted to a string: JavaScript would give '[object Object]'; print it with console.log, or build the text from its fields
+const a2 = "x" + points;
+                 ^

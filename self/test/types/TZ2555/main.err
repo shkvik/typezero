@@ -1,0 +1,3 @@
+main.tz:4:18: error TZ2555: 'count | 0' changes nothing in tz: integers are exact, and nothing wraps around here; to make it an int32, write 'count.toInt32()', and to count modulo 2^32, use 'Bit.Wrap32'
+const a1 = count | 0;
+                 ^

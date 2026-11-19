@@ -1,0 +1,9 @@
+// A double that may be undefined does not join a decimal either.
+function maybe(): double | undefined {
+  return 1.5;
+}
+
+const money: decimal = 2.5;
+const ratio: double | undefined = maybe();
+
+const a1 = money + ratio;

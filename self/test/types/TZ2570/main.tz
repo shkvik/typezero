@@ -1,0 +1,5 @@
+// An empty string and one value: the value is converted.
+const count: int = 1;
+
+const a1 = "" + count;
+const a2 = count + "";

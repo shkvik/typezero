@@ -1,0 +1,6 @@
+main.tz:9:18: error TZ2550: operator '+' cannot be applied to types 'int' and 'undefined'; a value may be undefined: check it first or give a default with '??'
+const a1 = count + undefined;
+                 ^
+main.tz:10:18: error TZ2550: operator '*' cannot be applied to types 'int | undefined' and 'int'; a value may be undefined: check it first or give a default with '??'
+const a2 = value * 2;
+                 ^

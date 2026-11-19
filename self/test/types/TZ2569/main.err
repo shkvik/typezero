@@ -1,0 +1,12 @@
+main.tz:5:17: error TZ2569: operator '+' cannot be applied to types 'string' and 'int' (JavaScript would join them as text); to add, convert the string: 'Number(word) + count'; to join, use a template: '`${word}${count}`'
+const a1 = word + count;
+                ^
+main.tz:6:18: error TZ2569: operator '+' cannot be applied to types 'int' and 'string' (JavaScript would join them as text); to add, convert the string: 'count + Number(word)'; to join, use a template: '`${count}${word}`'
+const a2 = count + word;
+                 ^
+main.tz:7:18: error TZ2569: operator '+' cannot be applied to types 'int' and 'string' (JavaScript would join them as text); to add, convert the string: '1 + 2 + Number(word)'; to join, use a template: '`${1 + 2}${word}`'
+const a3 = 1 + 2 + word;
+                 ^
+main.tz:8:19: error TZ2569: operator '+' cannot be applied to types 'string' and 'int' (JavaScript would join them as text); to add, convert the string: 'Number((word)) + (1)'; to join, use a template: '`${word}${1}`'
+const a4 = (word) + (1);
+                  ^

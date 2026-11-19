@@ -1,0 +1,5 @@
+main.tz
+  2:7 count: int
+  3:7 small: int8
+  4:7 wide: uint32
+  9:7 b1: uint32

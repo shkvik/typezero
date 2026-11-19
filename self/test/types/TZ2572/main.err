@@ -1,0 +1,3 @@
+main.tz:4:18: error TZ2572: a tuple cannot be converted to a string; print it with console.log, or build the text from its elements
+const a1 = "x" + pair;
+                 ^

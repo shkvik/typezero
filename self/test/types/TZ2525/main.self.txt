@@ -1,2 +1,0 @@
-4:28: a tuple cannot take spread values: type '[int, int]' has a fixed length; write each element
-5:31: a tuple cannot take spread values: type '[int, int]' has a fixed length; write each element

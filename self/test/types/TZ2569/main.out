@@ -1,0 +1,7 @@
+main.tz
+  2:7 word: string
+  3:7 count: int
+  5:7 a1: string
+  6:7 a2: string
+  7:7 a3: string
+  8:7 a4: string

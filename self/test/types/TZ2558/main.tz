@@ -1,0 +1,9 @@
+// `>>>` shifts in zeros, so it takes an unsigned type.
+const count: int = 8;
+const small: int8 = 1;
+const wide: uint32 = 8;
+
+const a1 = count >>> 1;
+const a2 = small >>> count;
+
+const b1 = wide >>> 1;

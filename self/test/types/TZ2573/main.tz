@@ -1,0 +1,8 @@
+// Nor a Result.
+function parse(): Result<int, string> {
+  return ok(1);
+}
+
+const result: Result<int, string> = parse();
+
+const a1 = "x" + result;

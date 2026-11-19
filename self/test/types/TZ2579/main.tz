@@ -1,0 +1,8 @@
+// Nor a union that may hold an object.
+function pick(): int | { a: int } {
+  return 1;
+}
+
+const value: int | { a: int } = pick();
+
+const a1 = "x" + value;

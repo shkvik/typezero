@@ -1,0 +1,217 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  BinaryExpr,
+  BinaryOp,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  kCloseBracket,
+  kCloseParen,
+  kNameMarks,
+  kOpenBracket,
+  kOpenParen,
+  kQuoteMarks,
+  kSigns,
+  kUnnamedCount,
+  kUnnamedOperand,
+} from "../const/expression-types.const.tz";
+import { OperandTexts } from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private operandTexts(expr: BinaryExpr, module: int): OperandTexts {
+    const span = expr.source;
+    const text = this.program.modules[module]?.source.text;
+    if (span == undefined || text == undefined) {
+      return { left: "", right: "" };
+    }
+
+    const op = this.operatorText(expr.op);
+    const before = text.toString("utf8", span.start, expr.loc);
+    const after = text.toString("utf8", expr.loc + op.length, span.end);
+
+    return { left: before.trim(), right: after.trim() };
+  }
+
+  private shownOperand(text: string): string {
+    if (text == "") {
+      return kUnnamedOperand;
+    }
+
+    return this.operandText(text);
+  }
+
+  private operandText(text: string): string {
+    const head = text.slice(0, 1);
+    const isLiteral = head >= "0" && head <= "9";
+    const isPlain = this.isPlainOperand(text) || this.isWrapped(text);
+    if (isPlain && !isLiteral) {
+      return text;
+    }
+
+    return `${kOpenParen}${text}${kCloseParen}`;
+  }
+
+  private isPlainOperand(text: string): boolean {
+    const head = text.slice(0, 1);
+    if (text == "" || kSigns.includes(head)) {
+      return false;
+    }
+
+    let depth = 0;
+
+    for (const unit of text) {
+      const isOpening = unit == kOpenParen || unit == kOpenBracket;
+      const isClosing = unit == kCloseParen || unit == kCloseBracket;
+
+      if (isOpening) {
+        depth += 1;
+      }
+      if (isClosing) {
+        depth -= 1;
+      }
+
+      const isBracket = isOpening || isClosing;
+      if (!isBracket && depth == 0 && !this.isNameUnit(unit)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private isNameUnit(unit: string): boolean {
+    const isLetter =
+      (unit >= "a" && unit <= "z") || (unit >= "A" && unit <= "Z");
+    const isDigit = unit >= "0" && unit <= "9";
+
+    return isLetter || isDigit || kNameMarks.includes(unit);
+  }
+
+  private isWrapped(text: string): boolean {
+    const isFramed = text.startsWith(kOpenParen) && text.endsWith(kCloseParen);
+    if (text.length < 2 || !isFramed) {
+      return false;
+    }
+
+    return this.closingAt(text) == text.length - 1;
+  }
+
+  private closingAt(text: string): int {
+    let level = 0;
+    let index = 0;
+
+    for (const unit of text) {
+      if (unit == kOpenParen) {
+        level += 1;
+      }
+      if (unit == kCloseParen) {
+        level -= 1;
+      }
+      if (level == 0) {
+        return index;
+      }
+
+      index += 1;
+    }
+
+    return -1;
+  }
+
+  private withoutParens(text: string): string {
+    const hasQuote = kQuoteMarks.some((mark) => text.includes(mark));
+    const isFramed = text.startsWith(kOpenParen) && text.endsWith(kCloseParen);
+    if (text.length < 2 || !isFramed || hasQuote) {
+      return text;
+    }
+    if (this.closingAt(text) != text.length - 1) {
+      return text;
+    }
+
+    const inner = text.slice(1, text.length - 1);
+
+    return this.withoutParens(inner.trim());
+  }
+
+  private reportNothingChanged(
+    expr: BinaryExpr,
+    left: Type,
+    module: int,
+  ): void {
+    const other = this.operatorText(expr.op);
+    const texts = this.operandTexts(expr, module);
+    const word = this.namedText(texts.left);
+
+    if (left.kind == TypeKind.Double) {
+      return this.report(module, expr.loc, Code.NoOpBitsTrunc, {
+        word,
+        other,
+      });
+    }
+
+    const first = this.shownOperand(texts.left);
+
+    if (expr.op == BinaryOp.UShr) {
+      return this.report(module, expr.loc, Code.NoOpBitsWrapUnsigned, {
+        word,
+        other,
+        first,
+      });
+    }
+
+    this.report(module, expr.loc, Code.NoOpBitsWrap, { word, other, first });
+  }
+
+  private namedText(text: string): string {
+    if (text == "") {
+      return kUnnamedOperand;
+    }
+
+    return text;
+  }
+
+  private reportBitsOfDouble(expr: BinaryExpr, left: Type, module: int): void {
+    const other = this.operatorText(expr.op);
+    const texts = this.operandTexts(expr, module);
+    const fraction = this.fractionText(left, texts);
+    const word = this.shownOperand(fraction);
+
+    this.report(module, expr.loc, Code.BitsOfDouble, { other, word });
+  }
+
+  private fractionText(left: Type, texts: OperandTexts): string {
+    if (left.kind == TypeKind.Double) {
+      return texts.left;
+    }
+
+    return texts.right;
+  }
+
+  private reportSignedShift(expr: BinaryExpr, left: Type, module: int): void {
+    if (left.kind != TypeKind.Int) {
+      return;
+    }
+
+    const texts = this.operandTexts(expr, module);
+    const word = this.shownOperand(texts.left);
+    const second = this.countText(texts.right);
+    const unsigned = this.store.integer(left.bits, true);
+    const other = this.conversionName(unsigned);
+    const first = this.text.of(left);
+
+    this.report(module, expr.loc, Code.SignedShift, {
+      first,
+      word,
+      other,
+      second,
+    });
+  }
+
+  private countText(text: string): string {
+    if (text == "") {
+      return kUnnamedCount;
+    }
+
+    return text;
+  }
+}

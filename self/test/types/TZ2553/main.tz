@@ -1,0 +1,7 @@
+// A shift moves the bits of a value only within its width.
+const one: int = 1;
+
+const a1 = 1 << 64;
+const a2 = one << -1;
+
+const b1 = one << 3;

@@ -1,0 +1,6 @@
+main.tz:5:18: error TZ2574: a Record cannot be converted to a string: JavaScript would give '[object Object]'; print it with console.log, or build the text from its entries
+const a1 = "x" + scores;
+                 ^
+main.tz:6:18: error TZ2574: a Map cannot be converted to a string: JavaScript would give '[object Map]'; print it with console.log, or build the text from its entries
+const a2 = "x" + seen;
+                 ^

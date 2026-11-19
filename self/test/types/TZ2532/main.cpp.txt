@@ -1,2 +1,0 @@
-4:15: a number cannot name a field; an object with numbered entries is an array
-5:15: a number cannot name a field; an object with numbered entries is an array

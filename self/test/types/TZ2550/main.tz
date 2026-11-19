@@ -1,0 +1,10 @@
+// A value that may be undefined is checked before an operator takes it.
+function maybe(): int | undefined {
+  return 1;
+}
+
+const count: int = 1;
+const value: int | undefined = maybe();
+
+const a1 = count + undefined;
+const a2 = value * 2;

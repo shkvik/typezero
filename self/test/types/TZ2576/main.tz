@@ -1,0 +1,4 @@
+// Nor an unknown value, which may hold an object.
+const data: unknown = 1;
+
+const a1 = "x" + data;

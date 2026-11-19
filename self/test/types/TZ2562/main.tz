@@ -1,0 +1,10 @@
+// A sign and `~` take numbers.
+const data: unknown = 1;
+const list: int[] = [1];
+const word: string = "x";
+const flag: boolean = true;
+
+const a1 = -data;
+const a2 = +list;
+const a3 = ~word;
+const a4 = ~flag;

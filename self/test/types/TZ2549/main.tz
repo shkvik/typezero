@@ -1,0 +1,9 @@
+// An operator works on numbers; other types are refused.
+const flag: boolean = true;
+const count: int = 1;
+const money: decimal = 2.5;
+
+const a1 = flag + 1;
+const a2 = count - flag;
+const a3 = 2 ** money;
+const a4 = flag & count;

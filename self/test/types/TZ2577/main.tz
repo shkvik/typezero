@@ -1,0 +1,4 @@
+// Nor a Json, which may hold an object.
+const data: Json = 1;
+
+const a1 = "x" + data;

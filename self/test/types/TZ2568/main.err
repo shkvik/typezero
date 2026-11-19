@@ -1,0 +1,12 @@
+main.tz:7:17: error TZ2568: operator '+' cannot be applied to types 'string' and 'boolean' (JavaScript would join them as text); use a template: '`${word}${flag}`'
+const a1 = word + flag;
+                ^
+main.tz:8:16: error TZ2568: operator '+' cannot be applied to types 'string' and 'int' (JavaScript would join them as text); use a template: '`a${count}`'
+const a2 = "a" + count;
+               ^
+main.tz:9:17: error TZ2568: operator '+' cannot be applied to types 'string' and 'int' (JavaScript would join them as text); use a template: '`${word}${1}${2}`'
+const a3 = word + 1 + 2;
+                ^
+main.tz:10:16: error TZ2568: operator '+' cannot be applied to types 'string' and 'int' (JavaScript would join them as text); use a template: '`x${count}`'
+const a4 = `x` + count;
+               ^

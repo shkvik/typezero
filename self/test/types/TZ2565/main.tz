@@ -1,0 +1,7 @@
+// The power of a decimal is an integer.
+const money: decimal = 2;
+const flag: boolean = true;
+
+const a1 = money ** flag;
+
+const b1 = money ** 2;

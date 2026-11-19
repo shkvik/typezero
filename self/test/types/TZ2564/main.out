@@ -1,0 +1,4 @@
+main.tz
+  2:7 money: decimal
+  3:7 ratio: double
+  8:7 b1: decimal

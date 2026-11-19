@@ -1,0 +1,158 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import {
+  Expr,
+  ExprKind,
+  UnaryExpr,
+  UnaryOp,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  LiteralKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { kIntLimits } from "../const/expression-types.const.tz";
+import { LiteralValue } from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private intConstant(
+    expr: Expr,
+    type: Type,
+    module: int,
+  ): LiteralValue | undefined {
+    if (type.kind != TypeKind.Int) {
+      return undefined;
+    }
+
+    switch (expr.kind) {
+      case ExprKind.IntLit: {
+        const value: LiteralValue = {
+          kind: LiteralKind.Int,
+          text: `${expr.value}`,
+          whole: expr.value,
+          negative: false,
+        };
+
+        return this.fittingConstant(value, type);
+      }
+      case ExprKind.Unary:
+        return this.unaryConstant(expr, type, module);
+      case ExprKind.Name:
+        return this.doorOfName(expr, module)?.constant;
+      default:
+        return undefined;
+    }
+  }
+
+  private unaryConstant(
+    expr: UnaryExpr,
+    type: Type,
+    module: int,
+  ): LiteralValue | undefined {
+    const operand = expr.operand;
+
+    if (expr.op == UnaryOp.Plus) {
+      return this.intConstant(operand, type, module);
+    }
+    if (expr.op != UnaryOp.Neg || operand.kind != ExprKind.IntLit) {
+      return undefined;
+    }
+
+    const whole = operand.value;
+    const negative = whole > 0;
+    const text = this.signedText(whole, negative);
+    const value: LiteralValue = {
+      kind: LiteralKind.Int,
+      text,
+      whole,
+      negative,
+    };
+
+    return this.fittingConstant(value, type);
+  }
+
+  private fittingConstant(
+    value: LiteralValue,
+    type: Type,
+  ): LiteralValue | undefined {
+    const widest = kIntLimits.find((row) => row.bits == 64 && !row.unsigned);
+    if (type.kind != TypeKind.Int || widest == undefined) {
+      return undefined;
+    }
+
+    const limit = this.limitOf(value.negative, widest.lowest, widest.highest);
+    if (value.whole > limit || !this.fits(value, type)) {
+      return undefined;
+    }
+
+    return value;
+  }
+
+  private limitOf(negative: boolean, lowest: uint64, highest: uint64): uint64 {
+    if (negative) {
+      return lowest;
+    }
+
+    return highest;
+  }
+
+  private isWholeTree(expr: Expr, module: int): boolean {
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+        return true;
+      case ExprKind.Name:
+        return this.doorOfName(expr, module)?.literal != undefined;
+      case ExprKind.Unary:
+        return this.isSign(expr.op) && this.isWholeTree(expr.operand, module);
+      case ExprKind.Binary:
+        return (
+          this.isWholeArithmetic(expr.op) &&
+          this.isWholeTree(expr.lhs, module) &&
+          this.isWholeTree(expr.rhs, module)
+        );
+      default:
+        return false;
+    }
+  }
+
+  private literalTarget(
+    expr: Expr,
+    type: Type,
+    to: Type,
+    module: int,
+  ): Type | undefined {
+    const target = this.numberTarget(to);
+    const isLiteral =
+      target != undefined &&
+      type.kind == TypeKind.Int &&
+      type != target &&
+      this.isWholeTree(expr, module);
+    if (!isLiteral || target == undefined) {
+      return undefined;
+    }
+
+    switch (target.kind) {
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+        return target;
+      case TypeKind.Int: {
+        const value = this.intConstant(expr, type, module);
+        if (value == undefined || !this.fits(value, target)) {
+          return undefined;
+        }
+
+        return target;
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  private numberTarget(to: Type): Type | undefined {
+    const target = this.definedType(to);
+    if (target.kind != TypeKind.Union) {
+      return target;
+    }
+
+    return target.parts.find((part) => this.isNumberLike(part));
+  }
+}

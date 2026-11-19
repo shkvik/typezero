@@ -1,0 +1,4 @@
+main.tz
+  2:10 maybe: () => double | undefined
+  6:7 money: decimal
+  7:7 ratio: double | undefined

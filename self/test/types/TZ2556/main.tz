@@ -1,0 +1,4 @@
+// `>>> 0` changes nothing either, whatever JavaScript does with it.
+const count: int = 5;
+
+const a1 = count >>> 0;

@@ -1,3 +1,0 @@
-5:20: duplicate field 'x' in the object literal
-6:33: duplicate field 'x' in the object literal
-7:20: duplicate field 'x' in the object literal

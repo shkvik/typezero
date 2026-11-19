@@ -1,0 +1,3 @@
+main.tz:8:18: error TZ2579: a value of type 'int | { a: int }' cannot be converted to a string: it may hold '{ a: int }'; check what it holds first
+const a1 = "x" + value;
+                 ^

@@ -1,0 +1,6 @@
+main.tz:4:12: error TZ2559: unary '-' does not turn a string into a number in tz; write 'Number(s)', which gives a Result
+const a1 = -word;
+           ^
+main.tz:5:12: error TZ2559: unary '+' does not turn a string into a number in tz; write 'Number(s)', which gives a Result
+const a2 = +word;
+           ^

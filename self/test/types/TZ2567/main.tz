@@ -1,0 +1,7 @@
+// A decimal has no Infinity or NaN, so it is never divided by zero.
+const money: decimal = 2.5;
+
+const a1 = money / 0;
+const a2 = money % 0.0;
+
+const b1 = money / 2;

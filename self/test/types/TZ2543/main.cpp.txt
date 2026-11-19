@@ -1,1 +1,0 @@
-2:20: a spread is not supported in a Json literal; write the keys one by one

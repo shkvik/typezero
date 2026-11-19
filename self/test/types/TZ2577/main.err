@@ -1,0 +1,3 @@
+main.tz:4:18: error TZ2577: a Json cannot be converted to a string: it may hold an object; check what it holds first (e.g. 'typeof x == "string"'), or write it as JSON with 'JSON.stringify(x)'
+const a1 = "x" + data;
+                 ^

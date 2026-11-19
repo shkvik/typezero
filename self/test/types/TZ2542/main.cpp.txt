@@ -1,2 +1,0 @@
-5:36: the keys of a Record are strings, and JavaScript would turn this 'int' into one, so 1 and "1" would be one key; convert it, 'String(i)', or use a Map, whose keys may be numbers
-6:36: type 'boolean' is not assignable to type 'string' of the key

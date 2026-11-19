@@ -1,0 +1,144 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  ExprKind,
+  UnaryExpr,
+  UnaryOp,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { kUnaryTexts } from "../const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private unaryTyped(
+    expr: UnaryExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    switch (expr.op) {
+      case UnaryOp.Neg:
+      case UnaryOp.Plus:
+        return this.signTyped(expr, wanted, module);
+      case UnaryOp.BitNot:
+        return this.bitNotTyped(expr, wanted, module);
+      default:
+        return this.store.plain(TypeKind.Error);
+    }
+  }
+
+  private signTyped(
+    expr: UnaryExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const hint = this.signHint(expr, wanted);
+    const type = this.operandTyped(expr.operand, hint, module);
+    const other = this.unaryText(expr.op);
+    const isPlus = expr.op == UnaryOp.Plus;
+
+    if (type.kind == TypeKind.String) {
+      this.report(module, expr.loc, Code.SignOfText, { other });
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (type.kind == TypeKind.Boolean) {
+      this.report(module, expr.loc, Code.SignOfBoolean, { other });
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.isDate(type) && isPlus) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const isLiteral =
+      expr.operand.kind == ExprKind.IntLit ||
+      expr.operand.kind == ExprKind.FloatLit;
+    if (type.kind == TypeKind.Decimal && isPlus && !isLiteral) {
+      this.report(module, expr.loc, Code.DecimalPlus, kNoDetails);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const isNumber = this.isNumberLike(type) || type.kind == TypeKind.Error;
+    if (!isNumber) {
+      const first = this.text.of(type);
+
+      this.report(module, expr.loc, Code.UnaryOperandType, { other, first });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return type;
+  }
+
+  private signHint(
+    expr: UnaryExpr,
+    wanted: Type | undefined,
+  ): Type | undefined {
+    const plain = this.wantedPart(wanted);
+    if (plain == undefined) {
+      return undefined;
+    }
+
+    const isFraction = expr.operand.kind == ExprKind.FloatLit;
+    const member = this.numberMember(plain, isFraction);
+    const target = member ?? plain;
+    if (!this.isNumberLike(target)) {
+      return undefined;
+    }
+
+    return target;
+  }
+
+  private numberMember(type: Type, isFraction: boolean): Type | undefined {
+    if (type.kind != TypeKind.Union) {
+      return undefined;
+    }
+
+    return type.parts.find(
+      (part) =>
+        this.isNumberLike(part) && (!isFraction || part.kind != TypeKind.Int),
+    );
+  }
+
+  private bitNotTyped(
+    expr: UnaryExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const expected = this.wantedPart(wanted);
+    const hint = this.integerOf(expected);
+    const type = this.operandTyped(expr.operand, hint, module);
+    if (type.kind == TypeKind.Double) {
+      this.report(module, expr.loc, Code.BitNotOfDouble, kNoDetails);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const isInteger = type.kind == TypeKind.Int || type.kind == TypeKind.Error;
+    if (!isInteger) {
+      const other = this.unaryText(expr.op);
+      const first = this.text.of(type);
+
+      this.report(module, expr.loc, Code.UnaryOperandType, { other, first });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return type;
+  }
+
+  private integerOf(type: Type | undefined): Type | undefined {
+    if (type == undefined || type.kind != TypeKind.Int) {
+      return undefined;
+    }
+
+    return type;
+  }
+
+  private unaryText(op: UnaryOp): string {
+    const row = kUnaryTexts.find((one) => one.op == op);
+
+    return row?.text ?? "";
+  }
+}

@@ -1,0 +1,9 @@
+// An integer raised to a negative power would be a fraction.
+const base: int = 2;
+const small: int8 = 3;
+
+const a1 = base ** -1;
+const a2 = small ** -2;
+
+const b1 = base ** 2;
+const b2 = 2.0 ** -1;

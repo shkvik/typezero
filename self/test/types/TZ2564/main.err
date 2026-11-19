@@ -1,0 +1,6 @@
+main.tz:5:18: error TZ2564: operator '*' cannot be applied to types 'decimal' and 'double': a double is inexact already, and a decimal would take that on silently; convert it explicitly: 'money * decimal(ratio)'
+const a1 = money * ratio;
+                 ^
+main.tz:6:18: error TZ2564: operator '+' cannot be applied to types 'double' and 'decimal': a double is inexact already, and a decimal would take that on silently; convert it explicitly: 'decimal(ratio) + money'
+const a2 = ratio + money;
+                 ^

@@ -1,0 +1,6 @@
+// Nor a dictionary.
+const scores: Record<string, int> = { a: 1 };
+const seen: Map<string, int> = new Map<string, int>();
+
+const a1 = "x" + scores;
+const a2 = "x" + seen;

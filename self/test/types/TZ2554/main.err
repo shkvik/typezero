@@ -1,0 +1,3 @@
+main.tz:4:18: error TZ2554: 'ratio | 0' changes nothing in tz: integers are exact, and nothing wraps around here; to drop the fraction, write 'Math.trunc(ratio).toInt()'
+const a1 = ratio | 0;
+                 ^

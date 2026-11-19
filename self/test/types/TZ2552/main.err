@@ -1,0 +1,6 @@
+main.tz:5:20: error TZ2552: 'int' raised to a negative power is a fraction, which an integer cannot hold; use a double, e.g. '2.0 ** -1'
+const a1 = base ** -1;
+                   ^
+main.tz:6:21: error TZ2552: 'int8' raised to a negative power is a fraction, which an integer cannot hold; use a double, e.g. '2.0 ** -1'
+const a2 = small ** -2;
+                    ^

@@ -1,0 +1,17 @@
+// Numbers of different types do not mix: one of them is converted
+// explicitly, and the message shows which.
+const whole: int = 1;
+const small: int8 = 2;
+const ratio: double = 1.5;
+const count: uint16 = 3;
+const money: decimal = 2.5;
+
+const a1 = whole + ratio;
+const a2 = small * whole;
+const a3 = whole - count;
+const a4 = small + count;
+const a5 = money + whole;
+const a6 = small & whole;
+
+const b1 = small + 1;
+const b2 = ratio * 2;

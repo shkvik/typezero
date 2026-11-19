@@ -1,11 +1,15 @@
 import { SourceError } from "../../../../diagnostic/types/message.types.tz";
 import {
+  BinaryExpr,
+  BinaryOp,
   Expr,
   Property,
+  UnaryOp,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { VarDeclarator } from "../../../../program/ast/types/ast.types.patterns.tz";
 import { NameUse } from "../../../../program/scopes/types/scopes.types.tz";
 import {
+  DictKind,
   LiteralKind,
   Type,
 } from "../../../../program/type/types/type.types.tz";
@@ -33,6 +37,7 @@ export type VariableDoor = {
   state: DoorState;
   type: Type;
   literal?: LiteralValue;
+  constant?: LiteralValue;
 };
 
 export type IntLimit = {
@@ -75,4 +80,65 @@ export type ObjectDraft = {
 export type UnifyAnswer = {
   readonly decided: boolean;
   readonly type?: Type;
+};
+
+export type OperandPair = {
+  readonly left: Type;
+  readonly right: Type;
+};
+
+export type OperandHints = {
+  readonly left?: Type;
+  readonly right?: Type;
+  readonly isBitwise: boolean;
+  readonly canHint: boolean;
+};
+
+export type OperandTexts = {
+  readonly left: string;
+  readonly right: string;
+};
+
+export type NumberConversion = {
+  readonly target: Type;
+  readonly isLeftConverted: boolean;
+};
+
+export type ConcatLink = {
+  readonly binary: BinaryExpr;
+  readonly left: Type;
+  readonly right: Type;
+  readonly type: Type;
+};
+
+export type ConcatPart = {
+  readonly expr: Expr;
+  readonly text: string;
+  readonly type: Type;
+};
+
+export type TemplatePiece = {
+  readonly text: string;
+  readonly value?: string;
+};
+
+export type TemplateText = {
+  readonly text: string;
+  readonly only: string;
+};
+
+export type OperatorText = {
+  readonly op: BinaryOp;
+  readonly text: string;
+};
+
+export type UnaryText = {
+  readonly op: UnaryOp;
+  readonly text: string;
+};
+
+export type DictText = {
+  readonly dict: DictKind;
+  readonly kind: string;
+  readonly shown: string;
 };

@@ -1,0 +1,3 @@
+main.tz:8:18: error TZ2575: an iterator cannot be converted to a string: JavaScript would give '[object Generator]'; collect its values first, e.g. '[...it].join()'
+const a1 = "x" + values;
+                 ^

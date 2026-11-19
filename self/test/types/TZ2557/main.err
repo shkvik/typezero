@@ -1,0 +1,6 @@
+main.tz:5:18: error TZ2557: operator '&' works on the bits of integers, and this is a double; drop the fraction first, e.g. 'Math.trunc(ratio).toInt()'
+const a1 = ratio & 1;
+                 ^
+main.tz:6:18: error TZ2557: operator '^' works on the bits of integers, and this is a double; drop the fraction first, e.g. 'Math.trunc(ratio).toInt()'
+const a2 = count ^ ratio;
+                 ^

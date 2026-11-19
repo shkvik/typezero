@@ -1,0 +1,27 @@
+// An operator takes the type of its operands; a literal takes the type
+// of the other side.
+const whole: int = 7;
+const small: int8 = 2;
+const ratio: double = 1.5;
+const money: decimal = 2.5;
+const wrapped: Bit.Wrap32 = 3;
+const word: string = "x";
+const fixed = 4;
+
+const sum = whole + 1;
+const half = whole / 2;
+const rest = whole % 3;
+const power = whole ** 2;
+const scaled = ratio * 2;
+const powered = 2 ** ratio;
+const tiny = small + 1;
+const near = fixed + small;
+const exact = money * 3 + 0.01;
+const turned = wrapped + 1;
+const bits = whole & 3;
+const shifted = small << 2;
+const text = word + word;
+const negated = -whole;
+const inverted = ~small;
+const literal = 1 + 2;
+const fraction = 1.5 + 2;

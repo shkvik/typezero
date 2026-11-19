@@ -1,0 +1,4 @@
+main.tz
+  2:7 ratio: double
+  3:7 count: int
+  7:7 b1: int

@@ -1,0 +1,8 @@
+// Nor an iterator: its values are collected first.
+function* numbers(): Generator<int> {
+  yield 1;
+}
+
+const values: Generator<int> = numbers();
+
+const a1 = "x" + values;

@@ -1,0 +1,4 @@
+main.tz
+  2:10 pick: () => int | { a: int }
+  6:7 value: int | { a: int }
+  8:7 a1: string

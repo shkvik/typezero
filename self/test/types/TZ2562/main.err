@@ -1,0 +1,12 @@
+main.tz:7:12: error TZ2562: operator '-' cannot be applied to type 'unknown'
+const a1 = -data;
+           ^
+main.tz:8:12: error TZ2562: operator '+' cannot be applied to type 'int[]'
+const a2 = +list;
+           ^
+main.tz:9:12: error TZ2562: operator '~' cannot be applied to type 'string'
+const a3 = ~word;
+           ^
+main.tz:10:12: error TZ2562: operator '~' cannot be applied to type 'boolean'
+const a4 = ~flag;
+           ^

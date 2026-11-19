@@ -1,0 +1,7 @@
+main.tz
+  2:7 base: int
+  3:7 small: int8
+  5:7 a1: int
+  6:7 a2: int8
+  8:7 b1: int
+  9:7 b2: double

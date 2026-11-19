@@ -1,0 +1,7 @@
+main.tz
+  2:7 count: int
+  3:7 zero: int
+  5:7 a1: int
+  6:7 a2: int
+  7:7 a3: int
+  9:7 b1: int

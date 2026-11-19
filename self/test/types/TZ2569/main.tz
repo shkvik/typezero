@@ -1,0 +1,8 @@
+// When a number meets a string, the message shows both readings.
+const word: string = "x";
+const count: int = 1;
+
+const a1 = word + count;
+const a2 = count + word;
+const a3 = 1 + 2 + word;
+const a4 = (word) + (1);

@@ -1,0 +1,5 @@
+// Nor a boolean.
+const flag: boolean = true;
+
+const a1 = +flag;
+const a2 = -flag;

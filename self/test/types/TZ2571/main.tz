@@ -1,0 +1,6 @@
+// A function is not turned into text.
+function run(): void {}
+
+const job: () => void = run;
+
+const a1 = "x" + job;

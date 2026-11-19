@@ -1,0 +1,5 @@
+main.tz
+  2:7 data: unknown
+  3:7 list: int[]
+  4:7 word: string
+  5:7 flag: boolean

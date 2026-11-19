@@ -1,2 +1,0 @@
-5:19: field 'y' is missing; type 'Point' requires it
-6:29: field 'y' is missing; type '{ x: int; y: int }' requires it

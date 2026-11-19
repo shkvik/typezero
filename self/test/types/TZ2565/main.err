@@ -1,0 +1,3 @@
+main.tz:5:21: error TZ2565: the exponent of a decimal power must be an integer ('int'), found 'boolean'
+const a1 = money ** flag;
+                    ^

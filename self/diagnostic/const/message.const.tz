@@ -1141,4 +1141,103 @@ export const kMessages: Record<Code, Message> = {
   [Code.NullValue]: {
     text: "'null' is not supported: the only value for nothing is 'undefined'; write 'undefined' (null exists only in Json values)",
   },
+  [Code.MixedNumbers]: {
+    text: "operator '{other}' cannot be applied to types '{first}' and '{second}': a number changes its type only explicitly, e.g. '{word}'",
+  },
+  [Code.OperandTypes]: {
+    text: "operator '{other}' cannot be applied to types '{first}' and '{second}'",
+  },
+  [Code.OperandTypesUndefined]: {
+    text: "operator '{other}' cannot be applied to types '{first}' and '{second}'; a value may be undefined: check it first or give a default with '??'",
+  },
+  [Code.DivisionByZero]: {
+    text: "division by zero",
+  },
+  [Code.NegativePower]: {
+    text: "'{first}' raised to a negative power is a fraction, which an integer cannot hold; use a double, e.g. '2.0 ** -1'",
+  },
+  [Code.ShiftCount]: {
+    text: "the shift count {word} is outside 0 to {other}, the bits of '{first}'",
+  },
+  [Code.NoOpBitsTrunc]: {
+    text: "'{word} {other} 0' changes nothing in tz: integers are exact, and nothing wraps around here; to drop the fraction, write 'Math.trunc({word}).toInt()'",
+  },
+  [Code.NoOpBitsWrap]: {
+    text: "'{word} {other} 0' changes nothing in tz: integers are exact, and nothing wraps around here; to make it an int32, write '{first}.toInt32()', and to count modulo 2^32, use 'Bit.Wrap32'",
+  },
+  [Code.NoOpBitsWrapUnsigned]: {
+    text: "'{word} {other} 0' changes nothing in tz: integers are exact, and nothing wraps around here; to make it an int32, write '{first}.toInt32()', a uint32 '{first}.toUint32()', and to count modulo 2^32, use 'Bit.Wrap32'",
+  },
+  [Code.BitsOfDouble]: {
+    text: "operator '{other}' works on the bits of integers, and this is a double; drop the fraction first, e.g. 'Math.trunc({word}).toInt()'",
+  },
+  [Code.SignedShift]: {
+    text: "'>>>' shifts in zeros, as a shift of an unsigned type does; '{first}' is signed: use '>>', or convert it, e.g. '{word}.{other}() >>> {second}'",
+  },
+  [Code.SignOfText]: {
+    text: "unary '{other}' does not turn a string into a number in tz; write 'Number(s)', which gives a Result",
+  },
+  [Code.SignOfBoolean]: {
+    text: "unary '{other}' does not turn a boolean into a number in tz; write 'Number(b)'",
+  },
+  [Code.DecimalPlus]: {
+    text: "unary '+' cannot be applied to a decimal; for a double, write 'Number(x)', or drop the '+'",
+  },
+  [Code.UnaryOperandType]: {
+    text: "operator '{other}' cannot be applied to type '{first}'",
+  },
+  [Code.BitNotOfDouble]: {
+    text: "operator '~' works on the bits of integers, and this is a double; drop the fraction first, e.g. 'Math.trunc(x).toInt()'",
+  },
+  [Code.DecimalInexact]: {
+    text: "operator '{other}' cannot be applied to types '{first}' and '{second}': a double is inexact already, and a decimal would take that on silently; convert it explicitly: '{word}'",
+  },
+  [Code.DecimalExponent]: {
+    text: "the exponent of a decimal power must be an integer ('int'), found '{first}'",
+  },
+  [Code.DecimalExponentRoot]: {
+    text: "the exponent of a decimal power must be an integer ('int'), found '{first}'; for a square root, use 'x.sqrt()'",
+  },
+  [Code.DecimalDivisionByZero]: {
+    text: "decimal division by zero; a decimal has no Infinity or NaN",
+  },
+  [Code.MixedConcatTemplate]: {
+    text: "operator '+' cannot be applied to types '{first}' and '{second}' (JavaScript would join them as text); use a template: '{word}'",
+  },
+  [Code.MixedConcatSum]: {
+    text: "operator '+' cannot be applied to types '{first}' and '{second}' (JavaScript would join them as text); to add, convert the string: '{other}'; to join, use a template: '{word}'",
+  },
+  [Code.MixedConcatString]: {
+    text: "operator '+' cannot be applied to types '{first}' and '{second}' (JavaScript would join them as text); convert it with 'String({word})'",
+  },
+  [Code.FunctionToText]: {
+    text: "a function cannot be converted to a string; print it with console.log, or use its name",
+  },
+  [Code.TupleToText]: {
+    text: "a tuple cannot be converted to a string; print it with console.log, or build the text from its elements",
+  },
+  [Code.ResultToText]: {
+    text: "a Result cannot be converted to a string: JavaScript would give '[object Object]'; print it with console.log, or make the text with 'match'",
+  },
+  [Code.DictToText]: {
+    text: "a {word} cannot be converted to a string: JavaScript would give '[object {other}]'; print it with console.log, or build the text from its entries",
+  },
+  [Code.IteratorToText]: {
+    text: "an iterator cannot be converted to a string: JavaScript would give '[object Generator]'; collect its values first, e.g. '[...it].join()'",
+  },
+  [Code.UnknownToText]: {
+    text: "an unknown value cannot be converted to a string: it may hold an object or a function; check what it holds first, e.g. 'typeof x == \"string\"'",
+  },
+  [Code.JsonToText]: {
+    text: "a Json cannot be converted to a string: it may hold an object; check what it holds first (e.g. 'typeof x == \"string\"'), or write it as JSON with 'JSON.stringify(x)'",
+  },
+  [Code.ObjectToText]: {
+    text: "an object cannot be converted to a string: JavaScript would give '[object Object]'; print it with console.log, or build the text from its fields",
+  },
+  [Code.UnionToText]: {
+    text: "a value of type '{first}' cannot be converted to a string: it may hold '{second}'; check what it holds first",
+  },
+  [Code.DecimalInexactPlain]: {
+    text: "operator '{other}' cannot be applied to types '{first}' and '{second}': a double is inexact already, and a decimal would take that on silently; convert it explicitly with 'decimal(x)'",
+  },
 };

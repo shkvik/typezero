@@ -1,0 +1,12 @@
+main.tz:6:17: error TZ2549: operator '+' cannot be applied to types 'boolean' and 'int'
+const a1 = flag + 1;
+                ^
+main.tz:7:18: error TZ2549: operator '-' cannot be applied to types 'int' and 'boolean'
+const a2 = count - flag;
+                 ^
+main.tz:8:14: error TZ2549: operator '**' cannot be applied to types 'int' and 'decimal'
+const a3 = 2 ** money;
+             ^
+main.tz:9:17: error TZ2549: operator '&' cannot be applied to types 'boolean' and 'int'
+const a4 = flag & count;
+                ^

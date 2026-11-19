@@ -1,0 +1,9 @@
+// An integer is never divided by zero.
+const count: int = 10;
+const zero = 0;
+
+const a1 = count / 0;
+const a2 = count % zero;
+const a3 = count / -0;
+
+const b1 = count / 2;

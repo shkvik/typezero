@@ -1,0 +1,6 @@
+main.tz:4:17: error TZ2553: the shift count 64 is outside 0 to 63, the bits of 'int'
+const a1 = 1 << 64;
+                ^
+main.tz:5:19: error TZ2553: the shift count -1 is outside 0 to 63, the bits of 'int'
+const a2 = one << -1;
+                  ^

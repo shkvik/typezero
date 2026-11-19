@@ -1,0 +1,4 @@
+// `| 0` does not drop the fraction of a double in tz.
+const ratio: double = 1.5;
+
+const a1 = ratio | 0;

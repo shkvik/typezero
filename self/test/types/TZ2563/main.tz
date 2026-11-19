@@ -1,0 +1,7 @@
+// `~` works on the bits of integers.
+const ratio: double = 1.5;
+const count: int = 1;
+
+const a1 = ~ratio;
+
+const b1 = ~count;

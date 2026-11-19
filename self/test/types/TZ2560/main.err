@@ -1,0 +1,6 @@
+main.tz:4:12: error TZ2560: unary '+' does not turn a boolean into a number in tz; write 'Number(b)'
+const a1 = +flag;
+           ^
+main.tz:5:12: error TZ2560: unary '-' does not turn a boolean into a number in tz; write 'Number(b)'
+const a2 = -flag;
+           ^

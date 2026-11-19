@@ -1,0 +1,8 @@
+// Nor an object.
+const point = { x: 1 };
+const points = [point];
+
+const a1 = "x" + point;
+const a2 = "x" + points;
+
+const b1 = "x" + [1, 2];

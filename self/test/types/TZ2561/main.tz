@@ -1,0 +1,6 @@
+// Unary `+` would only drop the decimal into a double.
+const money: decimal = 2.5;
+
+const a1 = +money;
+
+const b1 = -money;

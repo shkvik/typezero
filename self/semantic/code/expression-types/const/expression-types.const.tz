@@ -1,7 +1,18 @@
-import { IntLimit } from "../types/expression-types.types.tz";
+import {
+  BinaryOp,
+  UnaryOp,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { DictKind } from "../../../../program/type/types/type.types.tz";
+import {
+  DictText,
+  IntLimit,
+  OperatorText,
+  UnaryText,
+} from "../types/expression-types.types.tz";
 
 export const kConversionPrefix = "to";
 export const kUnnamedOperand = "x";
+export const kUnnamedCount = "n";
 export const kManyLiterals = 64;
 export const kNoPlace = "";
 export const kValuePlace = " of the value";
@@ -9,6 +20,50 @@ export const kKeyPlace = " of the key";
 export const kNullName = "null";
 export const kStreamErrorName = "StreamError";
 export const kTypeSeparator = ", ";
+export const kDateName = "Date";
+export const kRegExpName = "RegExp";
+export const kTemplateFrame = 4;
+export const kBacktick = "`";
+export const kQuotes = ['"', "'"];
+export const kQuoteMarks = ['"', "'", "`"];
+export const kEscape = "\\";
+export const kDollar = "$";
+export const kOpenBrace = "{";
+export const kOpenValue = "${";
+export const kCloseValue = "}";
+export const kOpenParen = "(";
+export const kCloseParen = ")";
+export const kOpenBracket = "[";
+export const kCloseBracket = "]";
+export const kNameMarks = ["_", ".", "#", "$", '"', "'"];
+export const kSigns = ["-", "+"];
+
+export const kOperatorTexts: OperatorText[] = [
+  { op: BinaryOp.Add, text: "+" },
+  { op: BinaryOp.Sub, text: "-" },
+  { op: BinaryOp.Mul, text: "*" },
+  { op: BinaryOp.Div, text: "/" },
+  { op: BinaryOp.Rem, text: "%" },
+  { op: BinaryOp.Pow, text: "**" },
+  { op: BinaryOp.BitAnd, text: "&" },
+  { op: BinaryOp.BitOr, text: "|" },
+  { op: BinaryOp.BitXor, text: "^" },
+  { op: BinaryOp.Shl, text: "<<" },
+  { op: BinaryOp.Shr, text: ">>" },
+  { op: BinaryOp.UShr, text: ">>>" },
+];
+
+export const kUnaryTexts: UnaryText[] = [
+  { op: UnaryOp.Neg, text: "-" },
+  { op: UnaryOp.Plus, text: "+" },
+  { op: UnaryOp.BitNot, text: "~" },
+];
+
+export const kDictTexts: DictText[] = [
+  { dict: DictKind.Record, kind: "Record", shown: "Object" },
+  { dict: DictKind.Map, kind: "Map", shown: "Map" },
+  { dict: DictKind.Set, kind: "Set", shown: "Set" },
+];
 
 export const kIntLimits: IntLimit[] = [
   { bits: 8, unsigned: false, highest: 127, lowest: 128 },

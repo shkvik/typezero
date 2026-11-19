@@ -1,0 +1,5 @@
+// A fraction as the power of a decimal is a root.
+const money: decimal = 2;
+
+const a1 = money ** 0.5;
+const a2 = money ** money;

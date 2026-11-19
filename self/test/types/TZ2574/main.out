@@ -1,0 +1,5 @@
+main.tz
+  2:7 scores: Record<string, int>
+  3:7 seen: Map<string, int>
+  5:7 a1: string
+  6:7 a2: string

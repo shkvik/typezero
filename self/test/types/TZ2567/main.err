@@ -1,0 +1,6 @@
+main.tz:4:20: error TZ2567: decimal division by zero; a decimal has no Infinity or NaN
+const a1 = money / 0;
+                   ^
+main.tz:5:20: error TZ2567: decimal division by zero; a decimal has no Infinity or NaN
+const a2 = money % 0.0;
+                   ^

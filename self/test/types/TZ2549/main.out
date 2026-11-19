@@ -1,0 +1,4 @@
+main.tz
+  2:7 flag: boolean
+  3:7 count: int
+  4:7 money: decimal

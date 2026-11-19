@@ -1,2 +1,0 @@
-7:18: type 'int[]' is not assignable to type 'Json'; an array or an object becomes a Json only as a literal written where a Json is expected ('[...]', '{ ... }'), or as a 'Json[]', which stays the same array
-8:18: type 'Point' is not assignable to type 'Json'; an array or an object becomes a Json only as a literal written where a Json is expected ('[...]', '{ ... }'), or as a 'Json[]', which stays the same array

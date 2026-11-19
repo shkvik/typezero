@@ -1,0 +1,5 @@
+main.tz
+  2:7 money: decimal
+  4:7 a1: decimal
+  5:7 a2: decimal
+  7:7 b1: decimal

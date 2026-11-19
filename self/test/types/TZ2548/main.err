@@ -1,0 +1,18 @@
+main.tz:9:18: error TZ2548: operator '+' cannot be applied to types 'int' and 'double': a number changes its type only explicitly, e.g. 'whole.toDouble() + ratio'
+const a1 = whole + ratio;
+                 ^
+main.tz:10:18: error TZ2548: operator '*' cannot be applied to types 'int8' and 'int': a number changes its type only explicitly, e.g. 'small.toInt() * whole'
+const a2 = small * whole;
+                 ^
+main.tz:11:18: error TZ2548: operator '-' cannot be applied to types 'int' and 'uint16': a number changes its type only explicitly, e.g. 'whole - count.toInt()'
+const a3 = whole - count;
+                 ^
+main.tz:12:18: error TZ2548: operator '+' cannot be applied to types 'int8' and 'uint16': a number changes its type only explicitly, e.g. 'small.toInt() + count'
+const a4 = small + count;
+                 ^
+main.tz:13:18: error TZ2548: operator '+' cannot be applied to types 'decimal' and 'int': a number changes its type only explicitly, e.g. 'money + whole.toDecimal()'
+const a5 = money + whole;
+                 ^
+main.tz:14:18: error TZ2548: operator '&' cannot be applied to types 'int8' and 'int': a number changes its type only explicitly, e.g. 'small.toInt() & whole'
+const a6 = small & whole;
+                 ^

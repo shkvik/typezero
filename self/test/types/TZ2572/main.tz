@@ -1,0 +1,4 @@
+// Nor a tuple.
+const pair: [int, int] = [1, 2];
+
+const a1 = "x" + pair;

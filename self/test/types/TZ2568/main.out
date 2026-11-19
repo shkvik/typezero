@@ -1,0 +1,9 @@
+main.tz
+  3:7 word: string
+  4:7 count: int
+  5:7 flag: boolean
+  7:7 a1: string
+  8:7 a2: string
+  9:7 a3: string
+  10:7 a4: string
+  12:7 b1: string

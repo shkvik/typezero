@@ -1,0 +1,4 @@
+main.tz
+  2:11 numbers: () => Generator<int>
+  6:7 values: Generator<int>
+  8:7 a1: string
