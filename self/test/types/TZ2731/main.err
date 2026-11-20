@@ -1,0 +1,3 @@
+main.tz:17:5: error TZ2731: 'super(...)' is called a second time; the constructor of 'Animal' runs once
+    super("again");
+    ^

@@ -1,0 +1,18 @@
+// A method of an interface returns what the interface says.
+interface Shape {
+  area(): double;
+}
+
+interface Named {
+  name: string;
+}
+
+class Texty implements Shape {
+  public constructor() {
+    console.log("texty");
+  }
+
+  public area(): string {
+    return "x";
+  }
+}

@@ -1,0 +1,26 @@
+// 'super(...)' is a statement of the body of the constructor.
+class Animal {
+  public name: string;
+
+  public constructor(name: string) {
+    this.name = name;
+  }
+
+  public speak(): string {
+    return "...";
+  }
+}
+
+class Cat extends Animal {
+  public constructor(name: string) {
+    super(name);
+  }
+}
+
+class Kitten extends Animal {
+  public constructor(name: string) {
+    if (name == "") {
+      super("anon");
+    }
+  }
+}

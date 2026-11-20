@@ -1,0 +1,22 @@
+// 'super' only calls the methods of the class extended.
+class Animal {
+  public name: string;
+
+  public constructor(name: string) {
+    this.name = name;
+  }
+
+  public speak(): string {
+    return this.name;
+  }
+}
+
+class Dog extends Animal {
+  public constructor() {
+    super("dog");
+  }
+
+  public speak(): string {
+    return super.speak() + super.name;
+  }
+}

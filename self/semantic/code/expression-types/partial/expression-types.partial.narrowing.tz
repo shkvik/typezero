@@ -8,7 +8,12 @@ import {
   UnaryOp,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
-import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  LiteralKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { kTrueText } from "../../../types/type-resolver/const/type-resolver.const.tables.tz";
 import { kDictTexts, kTypeOfTypes } from "../const/expression-types.const.tz";
 import { NarrowSlot, ValueTarget } from "../types/expression-types.types.tz";
 
@@ -100,6 +105,12 @@ partial class ExpressionTypes {
   ): Map<string, Type> {
     const facts = new Map<string, Type>();
     const path = this.comparedPath(cond);
+    if (path.kind == ExprKind.Member) {
+      const literal = this.store.literal(LiteralKind.Boolean, kTrueText);
+
+      this.literalTagFacts(path, literal, isTrue, facts, module);
+    }
+
     const slot = this.narrowable(path, module);
     if (slot == undefined || !isTrue || !this.isOptional(slot.type)) {
       return facts;
@@ -150,15 +161,75 @@ partial class ExpressionTypes {
         }
 
         return this.bothFacts(cond, false, module);
-      case BinaryOp.Eq:
-        return this.equalityFacts(cond.lhs, cond.rhs, isTrue, module);
-      case BinaryOp.Ne:
-        return this.equalityFacts(cond.lhs, cond.rhs, !isTrue, module);
+      case BinaryOp.Eq: {
+        const facts = this.equalityFacts(cond.lhs, cond.rhs, isTrue, module);
+        const bounds = this.comparisonBounds(cond, isTrue, module);
+
+        return this.mergedFacts(facts, bounds);
+      }
+      case BinaryOp.Ne: {
+        const facts = this.equalityFacts(cond.lhs, cond.rhs, !isTrue, module);
+        const bounds = this.comparisonBounds(cond, isTrue, module);
+
+        return this.mergedFacts(facts, bounds);
+      }
+      case BinaryOp.Lt:
+      case BinaryOp.Le:
+      case BinaryOp.Gt:
+      case BinaryOp.Ge:
+        return this.comparisonBounds(cond, isTrue, module);
       case BinaryOp.InstanceOf:
         return this.instanceFacts(cond.lhs, cond.rhs, isTrue, module);
+      case BinaryOp.In:
+        return this.keyFacts(cond.lhs, cond.rhs, isTrue, module);
       default:
         return new Map<string, Type>();
     }
+  }
+
+  private keyFacts(
+    lhs: Expr,
+    rhs: Expr,
+    isTrue: boolean,
+    module: int,
+  ): Map<string, Type> {
+    const facts = new Map<string, Type>();
+    const slot = this.narrowable(rhs, module);
+    if (slot == undefined || lhs.kind != ExprKind.StringLit) {
+      return facts;
+    }
+
+    const name = lhs.value;
+    const parts = this.unionMembers(slot.type);
+    const kept = parts.filter((part) => this.isKeyKept(part, name, isTrue));
+    if (parts.length < 2 || kept.length == 0) {
+      return facts;
+    }
+
+    facts.set(slot.key, this.store.unionOf(kept));
+
+    return facts;
+  }
+
+  private isKeyKept(part: Type, name: string, isTrue: boolean): boolean {
+    if (part.kind == TypeKind.Object) {
+      const field = part.fields.find((one) => one.name == name);
+      if (field == undefined) {
+        return !isTrue;
+      }
+
+      return isTrue || field.optional;
+    }
+    if (part.kind != TypeKind.Instance) {
+      return true;
+    }
+
+    const lookup = this.classMember(part, name);
+    if (!lookup.isKnown) {
+      return true;
+    }
+
+    return (lookup.entry != undefined) == isTrue;
   }
 
   private bothFacts(
@@ -260,9 +331,23 @@ partial class ExpressionTypes {
     facts: Map<string, Type>,
     module: int,
   ): void {
-    const owner = this.narrowable(tag.object, module);
     const literal = this.comparedLiteral(other, module);
-    if (owner == undefined || literal == undefined) {
+    if (literal == undefined) {
+      return;
+    }
+
+    this.literalTagFacts(tag, literal, isEqual, facts, module);
+  }
+
+  private literalTagFacts(
+    tag: MemberExpr,
+    literal: Type,
+    isEqual: boolean,
+    facts: Map<string, Type>,
+    module: int,
+  ): void {
+    const owner = this.narrowable(tag.object, module);
+    if (owner == undefined) {
       return;
     }
 
@@ -443,8 +528,7 @@ partial class ExpressionTypes {
 
   private openPart(part: Type, name: string, isEqual: boolean): Type {
     const row = kTypeOfTypes.find((one) => one.name == name);
-    const isPlain = part.kind != TypeKind.TypeParameter;
-    if (!isEqual || row == undefined || !isPlain) {
+    if (!isEqual || row == undefined) {
       return part;
     }
 

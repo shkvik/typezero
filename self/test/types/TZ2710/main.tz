@@ -1,0 +1,6 @@
+// The value of a static field uses the class by its name.
+class Holder {
+  public static size: int = 1;
+  public static twice: int = Holder.size * 2;
+  public static wrong: int = this.size * 2;
+}

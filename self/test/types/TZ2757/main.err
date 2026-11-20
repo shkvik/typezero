@@ -1,0 +1,3 @@
+main.tz:4:19: error TZ2757: a Set has no elements by position; check one with 'seen.has(value)', or copy them into an array, '[...seen]'
+const wrong = seen[0];
+                  ^

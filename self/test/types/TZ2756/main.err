@@ -1,0 +1,3 @@
+main.tz:4:21: error TZ2756: 'scores[key]' reads a property of the Map object in JavaScript, not one of its entries; read an entry with 'scores.get(key)'
+const wrong = scores["a"];
+                    ^

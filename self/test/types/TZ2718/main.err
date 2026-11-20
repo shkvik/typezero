@@ -1,0 +1,3 @@
+main.tz:36:16: error TZ2718: a 'Point | Size' is never a 'Other': none of its members is or extends it, so this is always false
+  return value instanceof Other;
+               ^

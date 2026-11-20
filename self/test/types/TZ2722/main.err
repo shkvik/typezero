@@ -1,0 +1,6 @@
+main.tz:4:10: error TZ2722: field 'f' cannot get a value where it is declared: in a class without a constructor it can be only a literal next to a written type, e.g. 'f: int = 0'; set other values in a constructor
+  public f = "f";
+         ^
+main.tz:5:10: error TZ2722: field 'g' cannot get a value where it is declared: in a class without a constructor it can be only a literal next to a written type, e.g. 'g: int = 0'; set other values in a constructor
+  public g: int[] = [];
+         ^

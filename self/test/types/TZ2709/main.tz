@@ -1,0 +1,12 @@
+// A static method has no object; it uses the class by its name.
+class Counter {
+  public static count: int = 0;
+
+  public static next(): int {
+    return Counter.count + 1;
+  }
+
+  public static wrong(): int {
+    return this.count;
+  }
+}

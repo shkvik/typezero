@@ -1,0 +1,33 @@
+// The body of a generic function is checked once, with type parameters
+// that may be anything their constraint allows.
+interface Named {
+  name: string;
+}
+
+function twice<T>(x: T) {
+  return x * 2;
+}
+
+function twiceNumber<T extends number>(x: T): T {
+  return x;
+}
+
+function size<T>(x: T) {
+  return x.length;
+}
+
+function call<T>(x: T): void {
+  x.run();
+}
+
+function nameOf<T extends Named>(x: T): string {
+  return x.name;
+}
+
+function joined<T>(x: T): string {
+  return "a" + x;
+}
+
+function same<T>(a: T, b: T): boolean {
+  return a == b;
+}

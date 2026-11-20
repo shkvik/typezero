@@ -1,0 +1,3 @@
+main.tz:11:7: error TZ2747: a value of type 'T' cannot be a condition: 'T' may be a number, and 0 would count as false; check for undefined: 'x != undefined'
+  if (x) {
+      ^

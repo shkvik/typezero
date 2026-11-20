@@ -1,0 +1,16 @@
+// A value of a type parameter without a constraint may be a number.
+function present<T>(x: T): int {
+  if (x != undefined) {
+    return 1;
+  }
+
+  return 0;
+}
+
+function truthy<T>(x: T): int {
+  if (x) {
+    return 1;
+  }
+
+  return 0;
+}

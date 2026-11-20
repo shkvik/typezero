@@ -1,0 +1,3 @@
+main.tz:19:19: error TZ2734: 'speak' is marked 'override', but no method of 'Animal' has its parameters: there is speak(); an override takes the same parameters
+  public override speak(loud: boolean): string {
+                  ^

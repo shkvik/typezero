@@ -1,0 +1,8 @@
+// An async function returns a Promise.
+async function fine(): Promise<int> {
+  return 1;
+}
+
+async function wrong(): int {
+  return 1;
+}

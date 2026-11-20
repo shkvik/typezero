@@ -1,0 +1,6 @@
+// An object has no numbered fields.
+const mixed = { a: 1, b: "x" };
+let key = "a";
+const flag = true;
+const fine = mixed["a"];
+const wrong = mixed[0];

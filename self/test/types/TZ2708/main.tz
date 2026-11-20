@@ -1,0 +1,13 @@
+// 'this' is not a variable.
+class Box {
+  public value: int;
+
+  public constructor() {
+    this.value = 1;
+  }
+
+  public reset(): void {
+    this.value = 0;
+    this = new Box();
+  }
+}

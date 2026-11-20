@@ -1,0 +1,5 @@
+// A field gets its value in the constructor, not later.
+class Later {
+  public data!: int;
+  public kept: int = 1;
+}

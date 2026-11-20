@@ -1,0 +1,3 @@
+main.tz:12:10: error TZ2707: class 'Registry' has no static field 'total'
+Registry.total = 1;
+         ^

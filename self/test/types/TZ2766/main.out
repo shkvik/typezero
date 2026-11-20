@@ -1,0 +1,4 @@
+main.tz
+  14:7 price: Money
+  15:7 fine: string
+  16:7 wrong: string

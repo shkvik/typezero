@@ -1,0 +1,9 @@
+main.tz:8:12: error TZ2549: operator '*' cannot be applied to types 'T' and 'int'
+  return x * 2;
+           ^
+main.tz:16:12: error TZ2647: property 'length' does not exist on type 'T'
+  return x.length;
+           ^
+main.tz:20:5: error TZ2647: property 'run' does not exist on type 'T'
+  x.run();
+    ^

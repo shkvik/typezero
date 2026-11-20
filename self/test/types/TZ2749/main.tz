@@ -1,0 +1,5 @@
+// Only lists, strings, tuples, objects and dictionaries are indexed.
+const count = 5;
+const pair: [int, string] = [1, "a"];
+const fine = pair[0];
+const wrong = count[0];

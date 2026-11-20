@@ -1,0 +1,3 @@
+main.tz:21:10: error TZ2727: the constructor of 'Bird' must call 'super(...)': 'Bird' extends 'Animal', whose constructor sets the fields it declares
+  public constructor() {
+         ^

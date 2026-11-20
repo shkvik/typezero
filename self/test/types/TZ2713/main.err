@@ -1,0 +1,3 @@
+main.tz:8:12: error TZ2713: a constructor cannot return a value: 'new' gives the object
+    return 5;
+           ^

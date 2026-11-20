@@ -1,0 +1,12 @@
+main.tz:6:18: error TZ2673: type 'int | undefined' is not assignable to type 'int'; the value may be undefined: check it first (e.g. 'x != undefined') or give a default with '??'
+const b: int = xs[3];
+                 ^
+main.tz:70:23: error TZ2673: type 'int | undefined' is not assignable to type 'int'; the value may be undefined: check it first (e.g. 'x != undefined') or give a default with '??'
+  const e: int = items[i];
+                      ^
+main.tz:76:26: error TZ2673: type 'string | undefined' is not assignable to type 'string'; the value may be undefined: check it first (e.g. 'x != undefined') or give a default with '??'
+  const e: string = items[items.length - 1];
+                         ^
+main.tz:88:32: error TZ2673: type 'string | undefined' is not assignable to type 'string'; the value may be undefined: check it first (e.g. 'x != undefined') or give a default with '??'
+const three: string = shrinking[1];
+                               ^

@@ -94,6 +94,9 @@ partial class ExpressionTypes {
 
   private parameterWanted(param: FunctionParameter): Type {
     const type = param.type;
+    if (type.kind == TypeKind.Void) {
+      return this.store.plain(TypeKind.Undefined);
+    }
     if (!param.optional || type.kind == TypeKind.Error) {
       return type;
     }

@@ -46,7 +46,21 @@ partial class ExpressionTypes {
 
     this.facts = this.constFacts(before);
 
+    const place = this.functionPlace(fn, shape.self);
+
+    if (place != undefined) {
+      this.thisPlaces.push(place);
+    }
+
+    this.openFunctions.push(fn);
+
     const result = this.closureResult(fn, goal, context, module);
+
+    this.openFunctions.pop();
+
+    if (place != undefined) {
+      this.thisPlaces.pop();
+    }
 
     this.facts = before;
 

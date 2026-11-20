@@ -1,0 +1,3 @@
+main.tz:12:10: error TZ2705: cannot assign to 'Registry.limit' because it is a read-only static field
+Registry.limit = 5;
+         ^

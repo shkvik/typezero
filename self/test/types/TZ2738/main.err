@@ -1,0 +1,3 @@
+main.tz:10:24: error TZ2738: 'Thing' is a class, and a class implements only interfaces; to take its fields and methods, write 'extends Thing'
+class Other implements Thing {
+                       ^

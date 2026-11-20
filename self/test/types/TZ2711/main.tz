@@ -1,0 +1,22 @@
+// A function declared in a method has no 'this'; an arrow sees the method's.
+class Size {
+  public w: int;
+
+  public constructor() {
+    this.w = 1;
+  }
+
+  public arrow(): int {
+    const inner = (): int => this.w;
+
+    return inner();
+  }
+
+  public plain(): int {
+    function inner(): int {
+      return this.w;
+    }
+
+    return inner();
+  }
+}

@@ -53,6 +53,7 @@ partial class ExpressionTypes {
       functions: new Map<int, FunctionDecl>(),
       params: new Map<int, ParamSlot>(),
       assigned: new Set<int>(),
+      changes: [],
       enums: new Map<int, EnumDecl>(),
       classes: new Map<int, ClassDecl>(),
       destinations: new Map<int, Destination[]>(),

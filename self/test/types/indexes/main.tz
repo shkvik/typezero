@@ -1,0 +1,15 @@
+// Tuples are indexed by constants, objects by keys known when compiling,
+// a Record gives a value that may be missing.
+const pair: [string, int] = ["a", 1];
+const mixed = { a: 1, b: "x" };
+const counts: Record<string, int> = {};
+const fast = counts.length == 0;
+const direction = fast ? "a" : "b";
+const named = "a";
+
+const first = pair[0];
+const second = pair[1];
+const viaKey = mixed["a"];
+const viaConst = mixed[named];
+const chosen = mixed[direction];
+const entry = counts["x"];

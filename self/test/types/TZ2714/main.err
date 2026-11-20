@@ -1,0 +1,3 @@
+main.tz:24:21: error TZ2714: an object of type '{ x: int }' is never a 'Point': only 'new Point(...)' creates one, so this is always false
+const never = plain instanceof Point;
+                    ^

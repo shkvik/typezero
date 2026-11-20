@@ -1,0 +1,3 @@
+main.tz:5:30: error TZ2710: in a static field 'this' would be the class itself; use the class's name: 'Holder.size'
+  public static wrong: int = this.size * 2;
+                             ^

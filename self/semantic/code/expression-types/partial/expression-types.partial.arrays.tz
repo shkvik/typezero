@@ -271,7 +271,10 @@ partial class ExpressionTypes {
   }
 
   private spreadItem(expr: Expr, type: Type, module: int): Type {
-    if (this.isUnsupportedSpread(type)) {
+    const isLibrary =
+      (type.kind == TypeKind.Instance && this.isLibraryModule(type.module)) ||
+      this.resolver.isLibraryShape(type);
+    if (isLibrary || this.isUnsupportedSpread(type)) {
       return this.store.plain(TypeKind.Error);
     }
 

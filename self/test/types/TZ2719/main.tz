@@ -1,0 +1,5 @@
+// A class declares a member once.
+class Dup {
+  public a: int = 1;
+  public a: int = 2;
+}

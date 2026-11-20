@@ -1,0 +1,3 @@
+main.tz:11:10: error TZ2742: class 'Counted' implements 'Named', whose field 'name' is 'string', but in 'Counted' it is 'int'; the types must be the same, or objects of a type down the chain of the interface's, such as 'Dog' for 'Animal'
+  public name: int;
+         ^

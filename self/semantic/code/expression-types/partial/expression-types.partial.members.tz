@@ -26,6 +26,12 @@ import { LiteralValue } from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private memberTyped(expr: MemberExpr, module: int): Type {
+    const isRefused =
+      this.thisPlaceCheck(expr, module) || this.superReadCheck(expr, module);
+    if (isRefused) {
+      return this.store.plain(TypeKind.Error);
+    }
+
     const fact = this.pathFact(expr, module);
     if (fact != undefined) {
       return fact;
@@ -137,6 +143,11 @@ partial class ExpressionTypes {
   private parameterMemberOf(expr: MemberExpr, object: Type, module: int): Type {
     const constraint = this.store.constraintOf(object);
     if (constraint == undefined) {
+      const word = expr.name;
+      const first = this.text.of(object);
+
+      this.report(module, expr.loc, Code.PropertyMissing, { word, first });
+
       return this.store.plain(TypeKind.Error);
     }
 

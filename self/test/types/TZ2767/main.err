@@ -1,0 +1,12 @@
+main.tz:7:10: error TZ2769: 'return await' changes nothing: an async function waits for the Promise it returns; write 'return' without 'await'
+  return await save("a");
+         ^
+main.tz:11:3: error TZ2767: 'await' can only be used in an async function or in top-level code; make the function async: 'async function plain'
+  await save("x");
+  ^
+main.tz:14:21: error TZ2767: 'await' can only be used in an async function or in top-level code; make the function async: 'async (...) => ...'
+const arrow = () => await save("y");
+                    ^
+main.tz:18:5: error TZ2767: 'await' can only be used in an async function or in top-level code; make the function async: 'async run() { ... }'
+    await save("z");
+    ^

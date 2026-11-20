@@ -1,0 +1,9 @@
+// An async arrow waits for the Promise it gives by itself.
+async function save(name: string): Promise<int> {
+  return name.length;
+}
+
+const p = save("a");
+const fine = p.then((x) => x + 1);
+const direct = async (n: int) => save("b");
+const wrapped = async (n: int) => await save("c");

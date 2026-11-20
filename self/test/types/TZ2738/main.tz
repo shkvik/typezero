@@ -1,0 +1,16 @@
+// A class implements only interfaces.
+class Thing {
+  public x: int;
+
+  public constructor() {
+    this.x = 1;
+  }
+}
+
+class Other implements Thing {
+  public x: int;
+
+  public constructor() {
+    this.x = 2;
+  }
+}

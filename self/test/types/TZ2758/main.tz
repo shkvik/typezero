@@ -1,0 +1,9 @@
+// A field that is not there is undefined: 'in' says nothing new.
+interface Query {
+  text: string;
+  limit?: int;
+}
+
+const query: Query = { text: "cats" };
+const fine = query.limit != undefined;
+const wrong = "limit" in query;

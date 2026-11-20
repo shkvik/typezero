@@ -1,0 +1,3 @@
+main.tz:15:10: error TZ2743: 'area' returns 'string', and 'Shape', which 'Texty' implements, says it returns 'double'
+  public area(): string {
+         ^

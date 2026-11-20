@@ -1,0 +1,3 @@
+main.tz:11:5: error TZ2708: cannot assign to 'this'
+    this = new Box();
+    ^

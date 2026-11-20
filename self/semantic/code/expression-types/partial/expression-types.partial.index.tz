@@ -203,9 +203,6 @@ partial class ExpressionTypes {
   }
 
   private indexAssigned(target: Expr, record: ValueRecord): void {
-    if (target.kind == ExprKind.Member || target.kind == ExprKind.Index) {
-      return this.indexAssigned(target.object, record);
-    }
     if (target.kind != ExprKind.Name) {
       return;
     }
@@ -246,11 +243,13 @@ partial class ExpressionTypes {
 
         return this.indexExpression(expr.rhs, record);
       case ExprKind.Assign:
+        record.changes.push(expr);
         this.indexAssigned(expr.target, record);
         this.indexExpression(expr.target, record);
 
         return this.indexExpression(expr.value, record);
       case ExprKind.Update:
+        record.changes.push(expr);
         this.indexAssigned(expr.target, record);
 
         return this.indexExpression(expr.target, record);

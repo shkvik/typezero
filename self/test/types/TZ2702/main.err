@@ -1,0 +1,3 @@
+main.tz:17:21: error TZ2702: 'length' is a member of the instances of 'Point', not of the class: create one with 'new Point(...)'
+const wrong = Point.length;
+                    ^

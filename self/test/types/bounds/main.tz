@@ -1,0 +1,88 @@
+// An index of an array gives its element when the compiler proves it is
+// within the array: by a check of the length, a loop over the indices, a
+// literal of known length; otherwise the element may be undefined.
+const xs = [1, 2, 3];
+const a: int = xs[0];
+const b: int = xs[3];
+
+function f(items: int[]): int {
+  if (items.length > 0) {
+    const c: int = items[0];
+
+    return c;
+  }
+
+  return 0;
+}
+
+function g(items: int[]): int {
+  let total = 0;
+
+  for (let i = 0; i < items.length; i++) {
+    const d: int = items[i];
+
+    total += d;
+  }
+
+  return total;
+}
+
+function h(items: int[]): int {
+  const n = items.length;
+  let total = 0;
+
+  for (let i = 0; i < n; i++) {
+    const e: int = items[i];
+
+    total += e;
+  }
+
+  return total;
+}
+
+function k(items: int[]): int {
+  let total = 0;
+
+  for (let i = items.length - 1; i >= 0; i--) {
+    const e: int = items[i];
+
+    total += e;
+  }
+
+  return total;
+}
+
+function w(items: int[]): int {
+  let i = 0;
+  let total = 0;
+
+  while (i < items.length) {
+    const e: int = items[i];
+
+    total += e;
+    i++;
+  }
+
+  return total;
+}
+
+function plain(items: int[], i: int): int {
+  const e: int = items[i];
+
+  return e;
+}
+
+function last(items: string[]): string {
+  const e: string = items[items.length - 1];
+
+  return e;
+}
+
+const list: string[] = ["a", "b"];
+const one: string = list[1];
+let names: string[] | undefined;
+names = ["y"];
+const two: string = names[0];
+const shrinking = ["p", "q"];
+shrinking.pop();
+const three: string = shrinking[1];

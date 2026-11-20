@@ -38,6 +38,7 @@ import {
   FunctionFrame,
   ParameterShape,
   ReturnedValue,
+  ThisPlace,
 } from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
@@ -96,16 +97,39 @@ partial class ExpressionTypes {
 
     const shape = this.parameterShape(fn, context, module);
     const self = shape.self;
+    const place = this.functionPlace(fn, self);
 
     if (self != undefined) {
       this.selves.push(self);
     }
+    if (place != undefined) {
+      this.thisPlaces.push(place);
+    }
 
+    this.openFunctions.push(fn);
     this.openBody(door, fn, shape, context, module);
+    this.openFunctions.pop();
 
+    if (place != undefined) {
+      this.thisPlaces.pop();
+    }
     if (self != undefined) {
       this.selves.pop();
     }
+  }
+
+  private functionPlace(
+    fn: FunctionDecl,
+    self: Type | undefined,
+  ): ThisPlace | undefined {
+    if (self != undefined) {
+      return ThisPlace.Method;
+    }
+    if (fn.isArrow || fn.role != undefined) {
+      return undefined;
+    }
+
+    return ThisPlace.Function;
   }
 
   private openBody(
@@ -120,9 +144,18 @@ partial class ExpressionTypes {
     if (written != undefined) {
       const result = this.resolver.returnType(written, context);
 
+      this.asyncResultCheck(fn, written, result, module);
+
       door.type = this.signatureOf(shape, result);
 
       return this.walkWritten(fn, result, module);
+    }
+
+    const inherited = this.inheritedResult(fn, module);
+    if (inherited != undefined) {
+      door.type = this.signatureOf(shape, inherited);
+
+      return this.walkWritten(fn, inherited, module);
     }
 
     this.inferRounds(door, fn, shape, module);
@@ -371,11 +404,38 @@ partial class ExpressionTypes {
       param.form.kind != ParamKind.Defaulted &&
       fn.role != undefined &&
       this.isExtending();
-    if (isOpen) {
+    if (isOpen || this.isLibraryOverride(fn)) {
       return this.store.plain(TypeKind.Error);
     }
 
     return this.parameterOf(param, context, module);
+  }
+
+  private isLibraryOverride(fn: FunctionDecl): boolean {
+    const current = this.ownerClasses[this.ownerClasses.length - 1];
+    if (current == undefined || fn.role == undefined) {
+      return false;
+    }
+
+    const decl = current.decl;
+    if (decl.base == undefined || decl.typeParams.length > 0) {
+      return false;
+    }
+
+    const self = this.resolver.classInstance(current.module, decl, []);
+    if (self.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    const parent = this.parentOf(self, decl);
+    if (parent == undefined || !this.isLibraryModule(parent.module)) {
+      return false;
+    }
+
+    const owner = this.record(parent.module)?.classes.get(parent.loc);
+    const isOwn = owner?.methods.some((one) => one.name == fn.name) == true;
+
+    return isOwn || this.receiverMember(parent, fn.name, true) != undefined;
   }
 
   private isExtending(): boolean {
@@ -624,12 +684,9 @@ partial class ExpressionTypes {
     module: int,
   ): boolean {
     const target = this.definedType(wanted);
-    const isNamed =
-      expr.kind == ExprKind.Name &&
-      this.targetOfName(expr, module)?.kind == SymbolKind.Function;
     const isPair =
       given.kind == TypeKind.Function && target.kind == TypeKind.Function;
-    if (!isNamed || !isPair) {
+    if (expr.kind != ExprKind.Name || !isPair) {
       return false;
     }
     if (given.kind != TypeKind.Function || target.kind != TypeKind.Function) {
@@ -647,7 +704,10 @@ partial class ExpressionTypes {
     );
     const needed = mine.params.filter((param) => !param.optional).length;
     const result = theirs.result;
-    const isResult = result.kind == TypeKind.Void || result == mine.result;
+    const isPart =
+      result.kind == TypeKind.Union && result.parts.includes(mine.result);
+    const isResult =
+      result.kind == TypeKind.Void || result == mine.result || isPart;
 
     return isFitting && theirs.params.length >= needed && isResult;
   }

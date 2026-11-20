@@ -1,0 +1,22 @@
+// An abstract method has no body to call.
+abstract class Figure {
+  public abstract area(): double;
+
+  public describe(): string {
+    return "figure";
+  }
+}
+
+class Circle extends Figure {
+  public constructor() {
+    super();
+  }
+
+  public area(): double {
+    return super.area();
+  }
+
+  public describe(): string {
+    return super.describe();
+  }
+}

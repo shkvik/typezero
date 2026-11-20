@@ -1,0 +1,8 @@
+// 'Promise.all' gives every value: 'allSettled' is not needed.
+async function save(name: string): Promise<int> {
+  return name.length;
+}
+
+const p = save("a");
+const fine = p.then((x) => x + 1);
+void Promise.allSettled([p]);

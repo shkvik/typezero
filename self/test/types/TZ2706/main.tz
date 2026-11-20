@@ -1,0 +1,12 @@
+// A static method cannot be replaced.
+class Registry {
+  public static count: int = 0;
+  public static readonly limit: int = 10;
+
+  public static next(): int {
+    return Registry.count + 1;
+  }
+}
+
+Registry.count = 2;
+Registry.next = () => 0;

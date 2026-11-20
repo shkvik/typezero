@@ -1,0 +1,3 @@
+main.tz:8:14: error TZ2776: 'Promise.any' is not needed: a Promise is not rejected, so the first to settle gives the first value, 'Promise.race(ps)'
+void Promise.any([p]);
+             ^

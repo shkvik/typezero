@@ -1,0 +1,3 @@
+main.tz:8:14: error TZ2774: a Promise is not rejected in tz: an operation that may fail gives a Promise<Result<T, E>>; give the error in the value, 'Promise.resolve(err(e))'
+void Promise.reject(1);
+             ^

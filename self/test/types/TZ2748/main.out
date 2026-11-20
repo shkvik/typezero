@@ -1,0 +1,4 @@
+main.tz
+  2:7 list: int[] | undefined
+  3:7 words: string[]
+  4:7 fine: int

@@ -1,0 +1,20 @@
+// 'await' waits only in an async function or in top-level code.
+async function save(name: string): Promise<int> {
+  return name.length;
+}
+
+async function fine(): Promise<int> {
+  return await save("a");
+}
+
+function plain(): void {
+  await save("x");
+}
+
+const arrow = () => await save("y");
+
+class Box {
+  public run(): void {
+    await save("z");
+  }
+}

@@ -1,0 +1,3 @@
+main.tz:13:10: error TZ2769: 'return await' changes nothing: an async function waits for the Promise it returns; write 'return' without 'await'
+  return await save("b");
+         ^

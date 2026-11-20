@@ -6,7 +6,11 @@ import {
   StmtKind,
 } from "../../../../program/ast/types/ast.types.statements.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
-import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  DictKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
 import { ValueTarget } from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
@@ -36,6 +40,10 @@ partial class ExpressionTypes {
       case SymbolKind.Function:
         return this.usedFunction(target.module, target.loc);
       case SymbolKind.Enum:
+        if (this.isRecordWanted(wanted)) {
+          return this.store.plain(TypeKind.Error);
+        }
+
         this.report(module, expr.loc, Code.EnumAsValue, { word: expr.name });
 
         return this.store.plain(TypeKind.Error);
@@ -110,6 +118,16 @@ partial class ExpressionTypes {
     const opened = this.program.modules[target.module];
 
     return opened != undefined && opened.source.isLibrary;
+  }
+
+  private isRecordWanted(wanted: Type | undefined): boolean {
+    if (wanted == undefined) {
+      return false;
+    }
+
+    const goal = this.definedType(wanted);
+
+    return goal.kind == TypeKind.Dict && goal.dict == DictKind.Record;
   }
 
   private targetOfName(expr: NameExpr, module: int): ValueTarget | undefined {

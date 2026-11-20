@@ -1,0 +1,9 @@
+// An object keeps the fields of its type.
+interface Query {
+  text: string;
+  limit?: int;
+}
+
+const query: Query = { text: "cats" };
+query.text = "dogs";
+delete query.text;

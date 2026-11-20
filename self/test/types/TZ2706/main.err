@@ -1,0 +1,3 @@
+main.tz:12:10: error TZ2706: 'next' is a static method of 'Registry' and cannot be replaced
+Registry.next = () => 0;
+         ^

@@ -1,0 +1,398 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  ClassDecl,
+  FieldKind,
+  MethodKind,
+} from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  BinaryExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NameExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { kSuperName, kThisName } from "../const/expression-types.const.tz";
+import { StaticOwner, ThisPlace } from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private instanceofTyped(expr: BinaryExpr, module: int): Type {
+    const left = this.typed(expr.lhs, undefined, module);
+    const boolean = this.store.plain(TypeKind.Boolean);
+    const decl = this.testedClass(expr.rhs, module);
+    if (decl == undefined) {
+      return boolean;
+    }
+
+    const instance = this.testedInstance(expr.rhs, decl, module);
+    if (instance == undefined) {
+      return boolean;
+    }
+
+    this.instanceofCheck(expr, left, instance, decl, module);
+
+    return boolean;
+  }
+
+  private testedClass(rhs: Expr, module: int): ClassDecl | undefined {
+    if (rhs.kind != ExprKind.Name) {
+      this.typed(rhs, undefined, module);
+
+      return undefined;
+    }
+
+    const target = this.targetOfName(rhs, module);
+    if (target != undefined && target.kind == SymbolKind.Class) {
+      return this.record(target.module)?.classes.get(target.loc);
+    }
+
+    const type = this.typed(rhs, undefined, module);
+    if (type.kind != TypeKind.Error) {
+      this.report(module, rhs.loc, Code.InstanceOfNotClass, kNoDetails);
+    }
+
+    return undefined;
+  }
+
+  private testedInstance(
+    rhs: Expr,
+    decl: ClassDecl,
+    module: int,
+  ): Type | undefined {
+    if (rhs.kind != ExprKind.Name || decl.typeParams.length > 0) {
+      return undefined;
+    }
+
+    const target = this.targetOfName(rhs, module);
+    if (target == undefined || this.isLibraryModule(target.module)) {
+      return undefined;
+    }
+
+    return this.resolver.classInstance(target.module, decl, []);
+  }
+
+  private instanceofCheck(
+    expr: BinaryExpr,
+    left: Type,
+    instance: Type,
+    decl: ClassDecl,
+    module: int,
+  ): void {
+    const base = this.definedType(left);
+    const word = decl.name ?? "";
+    const first = this.text.of(base);
+
+    if (this.isOpenTested(base)) {
+      return;
+    }
+    if (base.kind == TypeKind.Union) {
+      if (!this.canHoldClass(base.parts, instance)) {
+        this.report(module, expr.loc, Code.InstanceOfNeverUnion, {
+          word,
+          first,
+        });
+      }
+
+      return;
+    }
+    if (!this.isObjectTested(base)) {
+      const shown = this.text.of(left);
+
+      this.report(module, expr.lhs.loc, Code.InstanceOfNotObject, {
+        first: shown,
+      });
+
+      return;
+    }
+
+    this.relatedCheck(expr, base, instance, word, module);
+  }
+
+  private isOpenTested(base: Type): boolean {
+    switch (base.kind) {
+      case TypeKind.Error:
+      case TypeKind.Unknown:
+      case TypeKind.AnyObject:
+      case TypeKind.TypeParameter:
+      case TypeKind.Operation:
+      case TypeKind.Json:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private isObjectTested(base: Type): boolean {
+    switch (base.kind) {
+      case TypeKind.Object:
+      case TypeKind.Instance:
+      case TypeKind.Tuple:
+      case TypeKind.Array:
+      case TypeKind.Dict:
+      case TypeKind.Function:
+      case TypeKind.Promise:
+      case TypeKind.Result:
+      case TypeKind.Iterator:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private canHoldClass(parts: Type[], instance: Type): boolean {
+    return parts.some((part) => {
+      const isObject =
+        part.kind == TypeKind.Object || part.kind == TypeKind.Instance;
+
+      return isObject && !this.isUnrelatedClass(part, instance);
+    });
+  }
+
+  private isUnrelatedClass(part: Type, instance: Type): boolean {
+    if (part.kind != TypeKind.Instance || this.isLibraryModule(part.module)) {
+      return false;
+    }
+
+    return !this.isSameLine(part, instance);
+  }
+
+  private isSameLine(first: Type, second: Type): boolean {
+    const up = this.ancestorsOf(first).includes(second);
+    const down = this.ancestorsOf(second).includes(first);
+
+    return up || down;
+  }
+
+  private relatedCheck(
+    expr: BinaryExpr,
+    base: Type,
+    instance: Type,
+    word: string,
+    module: int,
+  ): void {
+    const first = this.text.of(base);
+
+    if (base.kind == TypeKind.Instance) {
+      if (this.isUnrelatedClass(base, instance)) {
+        this.report(module, expr.loc, Code.InstanceOfNeverClass, {
+          word,
+          first,
+        });
+      }
+
+      return;
+    }
+
+    const isPlain =
+      base.kind == TypeKind.Object && this.store.labelOf(base) == undefined;
+    if (!isPlain || this.ancestorsOf(instance).includes(base)) {
+      return;
+    }
+
+    this.report(module, expr.loc, Code.InstanceOfNeverMade, { word, first });
+  }
+
+  private memberTargetDeclared(
+    target: MemberExpr,
+    module: int,
+  ): Type | undefined {
+    const owner = this.staticOwner(target.object, module);
+    if (owner != undefined) {
+      return this.staticTargetDeclared(target, owner, module);
+    }
+
+    const declared = this.fieldDeclared(target, module);
+
+    if (this.isMadeThis(target.object, module)) {
+      return declared;
+    }
+
+    this.quiet += 1;
+
+    const object = this.typed(target.object, undefined, module);
+
+    this.quiet -= 1;
+
+    if (object.kind == TypeKind.Instance) {
+      this.instanceTargetCheck(target, object, module);
+    }
+
+    return declared;
+  }
+
+  private isMadeThis(object: Expr, module: int): boolean {
+    const isThis = object.kind == ExprKind.Name && object.name == kThisName;
+
+    return isThis && !this.isThisName(object, module);
+  }
+
+  private instanceTargetCheck(
+    target: MemberExpr,
+    object: Type,
+    module: int,
+  ): void {
+    if (
+      object.kind != TypeKind.Instance ||
+      this.isLibraryModule(object.module)
+    ) {
+      return;
+    }
+
+    const lookup = this.classMember(object, target.name);
+    const entry = lookup.entry;
+    const word = target.name;
+
+    if (!lookup.isKnown) {
+      return;
+    }
+    if (entry == undefined) {
+      const first = this.text.of(object);
+
+      this.report(module, target.loc, Code.PropertyMissing, { word, first });
+
+      return;
+    }
+
+    const owner = entry.owner;
+    const first = owner.name ?? "";
+    const field = entry.field;
+
+    if (entry.isStatic) {
+      return;
+    }
+    if (field == undefined) {
+      this.report(module, target.loc, Code.MethodReplaced, { word, first });
+
+      return;
+    }
+    if (this.checkAccess(entry, field.access, target, module)) {
+      return;
+    }
+    if (field.readonly && !this.isConstructorOf(owner)) {
+      this.report(module, target.loc, Code.ReadOnlyField, { word, first });
+    }
+  }
+
+  private isConstructorOf(owner: ClassDecl): boolean {
+    const method = this.currentMethods[this.currentMethods.length - 1];
+    const current = this.ownerClasses[this.ownerClasses.length - 1];
+    if (method == undefined || current == undefined) {
+      return false;
+    }
+
+    const isMaker = method.role?.method == MethodKind.Constructor;
+
+    return isMaker && current.decl == owner;
+  }
+
+  private staticTargetDeclared(
+    target: MemberExpr,
+    owner: StaticOwner,
+    module: int,
+  ): Type | undefined {
+    const decl = owner.decl;
+    const name = target.name;
+    const first = decl.name ?? "";
+    const field = decl.fields.find(
+      (one) => one.name == name && one.form == FieldKind.Static,
+    );
+    const isMethod = decl.methods.some(
+      (one) => one.name == name && this.isStaticMethod(one),
+    );
+
+    if (field != undefined) {
+      this.reportAccess(decl, field.access, name, target.loc, module);
+
+      if (field.readonly) {
+        const word = `${first}.${name}`;
+
+        this.report(module, target.loc, Code.ReadOnlyStatic, { word });
+      }
+
+      return this.staticFieldType(field.type, field.presence, owner);
+    }
+    if (isMethod) {
+      this.report(module, target.loc, Code.StaticMethodReplaced, {
+        word: name,
+        first,
+      });
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (decl.base == undefined && decl.baseExpr == undefined) {
+      this.report(module, target.loc, Code.StaticFieldMissing, {
+        word: name,
+        first,
+      });
+    }
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private thisPlaceCheck(expr: MemberExpr, module: int): boolean {
+    if (!this.isThisName(expr.object, module)) {
+      return false;
+    }
+
+    const place = this.thisPlaces[this.thisPlaces.length - 1];
+    const owner = this.ownerClasses[this.ownerClasses.length - 1];
+    const isStatic =
+      place == ThisPlace.StaticMethod || place == ThisPlace.StaticField;
+    if (!isStatic || owner == undefined) {
+      return false;
+    }
+
+    const first = owner.decl.name ?? "";
+    const word = expr.name;
+    const loc = expr.object.loc;
+
+    if (place == ThisPlace.StaticField) {
+      this.report(module, loc, Code.StaticThisField, { word, first });
+    } else {
+      this.report(module, loc, Code.StaticThisMethod, { word, first });
+    }
+
+    return true;
+  }
+
+  private superReadCheck(expr: MemberExpr, module: int): boolean {
+    if (!this.isSuperName(expr.object, module)) {
+      return false;
+    }
+
+    this.report(module, expr.loc, Code.SuperRead, { word: expr.name });
+
+    return true;
+  }
+
+  private isSuperName(expr: Expr, module: int): boolean {
+    if (expr.kind != ExprKind.Name || expr.name != kSuperName) {
+      return false;
+    }
+
+    const use = this.record(module)?.uses.get(expr.loc);
+
+    return use?.symbol == undefined;
+  }
+
+  private thisInFunction(expr: NameExpr, module: int): boolean {
+    const place = this.thisPlaces[this.thisPlaces.length - 1];
+    if (place != ThisPlace.Function) {
+      return false;
+    }
+
+    const isInMethod = this.thisPlaces.some(
+      (one) => one == ThisPlace.Method || one == ThisPlace.StaticMethod,
+    );
+    if (!isInMethod) {
+      return false;
+    }
+
+    this.report(module, expr.loc, Code.ThisInFunction, kNoDetails);
+
+    return true;
+  }
+}

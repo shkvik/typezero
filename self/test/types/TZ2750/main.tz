@@ -1,0 +1,6 @@
+// A tuple is indexed by a number.
+const pair: [string, int] = ["a", 1];
+let position = 1;
+const flag = true;
+const first = pair[0];
+const wrong = pair["0"];

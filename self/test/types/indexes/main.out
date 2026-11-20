@@ -1,0 +1,12 @@
+main.tz
+  3:7 pair: [string, int]
+  4:7 mixed: { a: int; b: string }
+  5:7 counts: Record<string, int>
+  6:7 fast: boolean
+  7:7 direction: string
+  8:7 named: string
+  10:7 first: string
+  11:7 second: int
+  12:7 viaKey: int
+  13:7 viaConst: int
+  15:7 entry: int | undefined

@@ -1,0 +1,24 @@
+// Classes are told apart by their names.
+class Point {
+  public x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+class Size {
+  public w: int;
+
+  public constructor(w: int) {
+    this.w = w;
+  }
+}
+
+const point = new Point(1);
+const size = new Size(2);
+const plain = { x: 1 };
+const either: Point | Size = point;
+
+const fine = either instanceof Point;
+const never = size instanceof Point;

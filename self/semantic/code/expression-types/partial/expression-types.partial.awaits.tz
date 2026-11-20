@@ -1,0 +1,73 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { AwaitExpr } from "../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  kAsyncArrow,
+  kAsyncFunction,
+  kAsyncMethodEnd,
+  kAsyncWord,
+} from "../const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private awaitTyped(expr: AwaitExpr, module: int): Type {
+    this.awaitPlaceCheck(expr, module);
+
+    const value = this.typed(expr.value, undefined, module);
+    if (value.kind == TypeKind.Promise) {
+      return value.value;
+    }
+
+    const parts = this.partsOfType(value);
+    const hasPromise = parts.some((part) => part.kind == TypeKind.Promise);
+    if (hasPromise) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return value;
+  }
+
+  private awaitPlaceCheck(expr: AwaitExpr, module: int): void {
+    const fn = this.openFunctions[this.openFunctions.length - 1];
+    if (fn == undefined || fn.isAsync) {
+      return;
+    }
+
+    const word = this.asyncHint(fn);
+
+    this.report(module, expr.loc, Code.AwaitOutsideAsync, { word });
+  }
+
+  private asyncHint(fn: FunctionDecl): string {
+    if (fn.role != undefined) {
+      return `${kAsyncWord}${fn.name}${kAsyncMethodEnd}`;
+    }
+    if (fn.isArrow) {
+      return kAsyncArrow;
+    }
+
+    return `${kAsyncFunction}${fn.name}`;
+  }
+
+  private asyncResultCheck(
+    fn: FunctionDecl,
+    written: TypeRef,
+    result: Type,
+    module: int,
+  ): void {
+    const isOpen =
+      result.kind == TypeKind.Promise ||
+      result.kind == TypeKind.Error ||
+      result.kind == TypeKind.Void ||
+      result.kind == TypeKind.Iterator;
+    if (!fn.isAsync || isOpen || fn.isGenerator) {
+      return;
+    }
+
+    const first = this.text.of(result);
+
+    this.report(module, written.loc, Code.AsyncResultNotPromise, { first });
+  }
+}

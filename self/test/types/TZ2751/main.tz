@@ -1,0 +1,6 @@
+// A tuple is indexed by a constant: each element has its own type.
+const pair: [string, int] = ["a", 1];
+let position = 1;
+const flag = true;
+const second = pair[1];
+const wrong = pair[position];

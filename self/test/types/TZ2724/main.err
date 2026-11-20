@@ -1,0 +1,3 @@
+main.tz:4:17: error TZ2724: static field 'made' needs a type: only a literal shows it without checking the value, e.g. 'static made: int = ...'
+  public static made = new Date(0);
+                ^

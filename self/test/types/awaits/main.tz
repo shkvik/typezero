@@ -1,0 +1,19 @@
+// 'await' gives the value of a Promise, and a plain value as it is.
+async function save(name: string): Promise<int> {
+  return name.length;
+}
+
+async function label(): Promise<string> {
+  const length = await save("label");
+
+  return `${length}`;
+}
+
+async function mismatch(): Promise<string> {
+  return 1;
+}
+
+const value = await save("top");
+const text = await label();
+const plain = await 5;
+const wrong: string = await save("x");

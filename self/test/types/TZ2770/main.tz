@@ -1,0 +1,8 @@
+// A Promise is not rejected: it has no 'catch'.
+async function save(name: string): Promise<int> {
+  return name.length;
+}
+
+const p = save("a");
+const fine = p.then((x) => x + 1);
+void p.catch(() => 0);

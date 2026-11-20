@@ -1,0 +1,3 @@
+main.tz:23:19: error TZ2733: 'swim' is marked 'override', but 'Animal' has no method 'swim'
+  public override swim(): void {}
+                  ^

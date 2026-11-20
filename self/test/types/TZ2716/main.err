@@ -1,0 +1,3 @@
+main.tz:25:15: error TZ2716: 'instanceof' tests an object, found 'int', which is never an instance of a class
+const never = count instanceof Point;
+              ^

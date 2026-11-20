@@ -188,6 +188,12 @@ export type EnumStep = {
   readonly number?: int;
 };
 
+export type AliasOrigin = {
+  readonly module: int;
+  readonly decl: TypeAliasDecl;
+  readonly args: Type[];
+};
+
 export type SubstitutionWalk = {
   readonly bound: Map<int, Type>;
   readonly ids: Set<int>;

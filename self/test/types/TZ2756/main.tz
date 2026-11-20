@@ -1,0 +1,4 @@
+// A Map gives its entries through 'get'.
+const scores = new Map<string, int>();
+const fine = scores.get("a");
+const wrong = scores["a"];

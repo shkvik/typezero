@@ -1,0 +1,3 @@
+main.tz
+  2:10 present: (T) => int
+  10:10 truthy: (T) => int

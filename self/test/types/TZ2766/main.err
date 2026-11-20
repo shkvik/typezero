@@ -1,0 +1,3 @@
+main.tz:16:25: error TZ2766: an object is not converted to a string by calling its toString(): tz calls no code by itself; call it, e.g. '${price.toString()}'
+const wrong = `price: ${price}`;
+                        ^

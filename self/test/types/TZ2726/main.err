@@ -1,0 +1,3 @@
+main.tz:3:17: error TZ2726: static field 'count' cannot use the type parameters of 'Stat': every instance of the class shares it
+  public static count: T;
+                ^

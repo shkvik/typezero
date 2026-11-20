@@ -9,12 +9,20 @@ import {
 import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
 import { TypeRefKind } from "../../../../program/ast/types/ast.types.types.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
-import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
 import {
   TypeContext,
   TypePlace,
 } from "../../../types/type-resolver/types/type-resolver.types.tz";
-import { kArrayName, kIsArrayName } from "../const/expression-types.const.tz";
+import {
+  kArrayName,
+  kDot,
+  kIsArrayName,
+} from "../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
   private callFacts(
@@ -179,11 +187,11 @@ partial class ExpressionTypes {
     module: int,
   ): Map<string, Type> {
     const receiver = this.narrowable(callee.object, module);
-    if (receiver == undefined || !this.isOwnReceiver(receiver.type)) {
-      return new Map<string, Type>();
-    }
-
     const values = call.args.map((arg) => arg.expr);
+
+    if (receiver == undefined || !this.isOwnReceiver(receiver.type)) {
+      return this.unknownFacts(values, module);
+    }
 
     values.push(callee.object);
 
@@ -205,12 +213,34 @@ partial class ExpressionTypes {
 
     for (const value of values) {
       const slot = this.narrowable(value, module);
-      if (slot != undefined && this.isGuardable(slot.type)) {
+      if (slot == undefined) {
+        continue;
+      }
+      if (slot.type.kind == TypeKind.Object) {
+        this.unknownFields(slot.key, slot.type.fields, facts);
+
+        continue;
+      }
+      if (this.isGuardable(slot.type)) {
         facts.set(slot.key, unknown);
       }
     }
 
     return facts;
+  }
+
+  private unknownFields(
+    key: string,
+    fields: ObjectField[],
+    facts: Map<string, Type>,
+  ): void {
+    const unknown = this.store.plain(TypeKind.Error);
+
+    for (const field of fields) {
+      if (field.optional || this.isOptional(field.type)) {
+        facts.set(key + kDot + field.name, unknown);
+      }
+    }
   }
 
   private isGuardable(type: Type): boolean {

@@ -1,0 +1,3 @@
+main.tz
+  2:7 scores: Map<string, int>
+  3:7 fine: int | undefined

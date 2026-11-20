@@ -1,0 +1,3 @@
+main.tz:6:19: error TZ2751: a tuple can be indexed only by a constant, such as '[0]': each element has its own type; or destructure it: 'const [a, b] = t'
+const wrong = pair[position];
+                  ^

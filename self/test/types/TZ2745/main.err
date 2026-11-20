@@ -1,0 +1,3 @@
+main.tz:7:19: error TZ2745: abstract method 'volume' needs an abstract class: 'Solid' can be created with 'new', and the method would have no body; write 'abstract class Solid'
+  public abstract volume(): double;
+                  ^

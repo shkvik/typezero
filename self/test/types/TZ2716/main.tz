@@ -1,0 +1,25 @@
+// 'instanceof' tests objects.
+class Point {
+  public x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+class Size {
+  public w: int;
+
+  public constructor(w: int) {
+    this.w = w;
+  }
+}
+
+const point = new Point(1);
+const size = new Size(2);
+const plain = { x: 1 };
+const either: Point | Size = point;
+
+const count = 5;
+const fine = point instanceof Point;
+const never = count instanceof Point;

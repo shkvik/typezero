@@ -1,0 +1,3 @@
+main.tz:6:25: error TZ2768: an async function returns a Promise: declare its type as 'Promise<int>'
+async function wrong(): int {
+                        ^

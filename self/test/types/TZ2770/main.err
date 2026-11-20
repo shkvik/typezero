@@ -1,0 +1,3 @@
+main.tz:8:8: error TZ2770: a Promise is not rejected in tz, so it has no 'catch': an operation that may fail gives a Promise<Result<T, E>>; read it after 'await': 'const r = await p; if (r.isErr()) ...'
+void p.catch(() => 0);
+       ^

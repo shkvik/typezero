@@ -1,0 +1,5 @@
+// A static field without a type shows it by a literal.
+class Shared {
+  public static fine = 1;
+  public static made = new Date(0);
+}

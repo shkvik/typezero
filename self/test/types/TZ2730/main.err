@@ -1,0 +1,3 @@
+main.tz:17:7: error TZ2730: the constructor returns before 'super(...)', which makes the object (JavaScript throws a ReferenceError there)
+      return;
+      ^

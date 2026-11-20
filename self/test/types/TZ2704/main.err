@@ -1,0 +1,3 @@
+main.tz:19:7: error TZ2704: cannot assign to 'id' because it is a read-only field of 'Point'; only its constructor can set it
+point.id = 5;
+      ^

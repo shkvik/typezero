@@ -1,0 +1,3 @@
+main.tz:9:1: error TZ2761: 'delete' cannot remove field 'limit': a field that is not there is undefined; write 'query.limit = undefined'
+delete query.limit;
+^

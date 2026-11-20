@@ -1,0 +1,3 @@
+main.tz:6:20: error TZ2750: a tuple is indexed by a number, found 'string'
+const wrong = pair["0"];
+                   ^

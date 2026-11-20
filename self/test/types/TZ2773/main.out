@@ -1,0 +1,3 @@
+main.tz
+  2:16 save: (string) => Promise<int>
+  6:7 p: Promise<int>

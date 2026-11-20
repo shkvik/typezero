@@ -1,0 +1,3 @@
+main.tz
+  2:7 seen: Set<int>
+  3:7 fine: boolean

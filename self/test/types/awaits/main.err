@@ -1,0 +1,6 @@
+main.tz:13:10: error TZ2501: type 'int' is not assignable to type 'string'
+  return 1;
+         ^
+main.tz:19:23: error TZ2501: type 'int' is not assignable to type 'string'
+const wrong: string = await save("x");
+                      ^

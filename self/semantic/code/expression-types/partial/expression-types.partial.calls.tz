@@ -3,6 +3,7 @@ import { Code } from "../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
   CallExpr,
+  Expr,
   ExprKind,
   MemberExpr,
   NameExpr,
@@ -22,6 +23,7 @@ import {
   TypeKind,
   UnionType,
 } from "../../../../program/type/types/type.types.tz";
+import { kTakingMethods } from "../const/expression-types.const.tz";
 import { DoorState } from "../../../types/type-resolver/types/type-resolver.types.tz";
 import { GenericTarget, ValueTarget } from "../types/expression-types.types.tz";
 
@@ -35,6 +37,10 @@ partial class ExpressionTypes {
 
     if (expr.tagged) {
       return this.store.plain(TypeKind.Error);
+    }
+
+    if (this.isSuperName(callee, module)) {
+      return this.superCallTyped(expr, callee, module);
     }
 
     switch (callee.kind) {
@@ -143,6 +149,10 @@ partial class ExpressionTypes {
     }
 
     const isPassed = this.argumentsCheck(expr.args, call, module);
+
+    if (!isLenient) {
+      this.changedArguments(expr, module);
+    }
     if (!isPassed) {
       return this.store.plain(TypeKind.Error);
     }
@@ -170,6 +180,17 @@ partial class ExpressionTypes {
     };
   }
 
+  private takenFrom(object: Expr, module: int): void {
+    const key = this.pathKey(object, module);
+    if (key != undefined) {
+      this.forgetLength(key);
+    }
+  }
+
+  private changedArguments(expr: CallExpr, module: int): void {
+    this.forgetLengths(expr.args, module);
+  }
+
   private genericResult(
     expr: CallExpr,
     generic: GenericTarget,
@@ -181,7 +202,12 @@ partial class ExpressionTypes {
     }
 
     const result = this.genericCall(generic, expr.args, wanted, module);
-    if (generic.isLenient && result.kind == TypeKind.Unknown) {
+
+    if (!generic.isLenient) {
+      this.changedArguments(expr, module);
+    }
+
+    if (generic.isLenient && this.isOpaqueResult(result)) {
       return this.store.plain(TypeKind.Error);
     }
 
@@ -286,7 +312,7 @@ partial class ExpressionTypes {
     }
 
     const isPassed = this.argumentsCheck(expr.args, call, module);
-    const isUnknown = isLenient && shape.result.kind == TypeKind.Unknown;
+    const isUnknown = isLenient && this.isOpaqueResult(shape.result);
     if (!isPassed || isUnknown) {
       return this.store.plain(TypeKind.Error);
     }
@@ -333,6 +359,18 @@ partial class ExpressionTypes {
     if (this.enumOfObject(member.object, module) != undefined) {
       return this.store.plain(TypeKind.Error);
     }
+    if (this.thisPlaceCheck(member, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.isSuperName(member.object, module)) {
+      return this.superMethodCall(expr, member, wanted, module);
+    }
+    if (kTakingMethods.includes(member.name)) {
+      this.takenFrom(member.object, module);
+    }
+    if (this.promiseStatic(member, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
 
     const owner = this.staticOwner(member.object, module);
     if (owner != undefined) {
@@ -363,9 +401,39 @@ partial class ExpressionTypes {
         return this.instanceCall(expr, member, object, wanted, module);
       case TypeKind.Union:
         return this.variantCall(expr, member, object, wanted, module);
+      case TypeKind.TypeParameter:
+        return this.parameterCall(expr, member, object, wanted, module);
+      case TypeKind.Tuple:
+        return this.tupleCall(expr, member, object, module);
+      case TypeKind.Promise:
+        if (this.promiseMisuse(expr, member, object, module)) {
+          return this.store.plain(TypeKind.Error);
+        }
+
+        return this.otherCall(expr, member, object, wanted, module);
       default:
         return this.otherCall(expr, member, object, wanted, module);
     }
+  }
+
+  private parameterCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const constraint = this.store.constraintOf(object);
+    if (constraint != undefined) {
+      return this.receiverCall(expr, member, constraint, wanted, module);
+    }
+
+    const word = member.name;
+    const first = this.text.of(object);
+
+    this.report(module, member.loc, Code.PropertyMissing, { word, first });
+
+    return this.store.plain(TypeKind.Error);
   }
 
   private instanceCall(

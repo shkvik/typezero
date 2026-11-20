@@ -1,0 +1,19 @@
+// 'super(...)' runs once.
+class Animal {
+  public name: string;
+
+  public constructor(name: string) {
+    this.name = name;
+  }
+
+  public speak(): string {
+    return "...";
+  }
+}
+
+class Fish extends Animal {
+  public constructor() {
+    super("fish");
+    super("again");
+  }
+}

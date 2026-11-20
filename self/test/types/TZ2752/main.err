@@ -1,0 +1,3 @@
+main.tz:6:20: error TZ2752: tuple '[string, int]' has 2 elements; there is no element 2
+const wrong = pair[2];
+                   ^

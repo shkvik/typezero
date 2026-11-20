@@ -1,0 +1,3 @@
+main.tz:3:10: error TZ2725: 'data!' ("set later") is not supported: a field gets its value in the constructor; if it may have none, make it optional: 'data?: T'
+  public data!: int;
+         ^

@@ -1,0 +1,3 @@
+main.tz
+  2:11 type Shape = { readonly area: () => double }
+  6:11 type Named = { name: string }

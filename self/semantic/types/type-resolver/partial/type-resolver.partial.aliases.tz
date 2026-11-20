@@ -69,12 +69,26 @@ partial class TypeResolver {
     door.result = result;
     door.state = DoorState.Done;
     this.labelAlias(decl, result, label);
+    this.keepOrigin(module, decl, written, result);
 
     if (this.record(module)?.library == true) {
       this.libraryShapes.add(result.id);
     }
 
     return result;
+  }
+
+  private keepOrigin(
+    module: int,
+    decl: TypeAliasDecl,
+    args: Type[],
+    result: Type,
+  ): void {
+    if (decl.typeParams.length == 0 || this.aliasOrigins.has(result.id)) {
+      return;
+    }
+
+    this.aliasOrigins.set(result.id, { module, decl, args });
   }
 
   private reportDepth(module: int, decl: TypeAliasDecl, home: string): void {

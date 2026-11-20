@@ -1,0 +1,3 @@
+main.tz:8:28: error TZ2772: 'then' takes one function: a Promise is not rejected in tz
+void p.then((x: int) => x, (e: int) => 0);
+                           ^

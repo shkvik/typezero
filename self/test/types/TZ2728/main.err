@@ -1,0 +1,6 @@
+main.tz:21:10: error TZ2727: the constructor of 'Kitten' must call 'super(...)': 'Kitten' extends 'Animal', whose constructor sets the fields it declares
+  public constructor(name: string) {
+         ^
+main.tz:23:7: error TZ2728: 'super(...)' must be a statement of its own in the body of the constructor, not inside a block, a condition, a loop or another expression: the fields are set right after it
+      super("anon");
+      ^

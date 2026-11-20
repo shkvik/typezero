@@ -1,0 +1,4 @@
+main.tz
+  2:7 pair: [string, int]
+  3:7 same: [int, int]
+  4:7 found: int

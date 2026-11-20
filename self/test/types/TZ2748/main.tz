@@ -1,0 +1,5 @@
+// A list that may be undefined is checked before it is indexed.
+const list: int[] | undefined = undefined;
+const words = ["a"];
+const fine = words.length;
+const wrong = list[0];

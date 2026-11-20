@@ -240,6 +240,9 @@ partial class ExpressionTypes {
 
     seen.add(type.id);
 
+    if (this.resolver.hasAliasOrigin(type)) {
+      return false;
+    }
     if (type.kind == TypeKind.Operation || type.kind == TypeKind.Template) {
       return true;
     }
@@ -247,6 +250,42 @@ partial class ExpressionTypes {
     const parts = this.typeParts(type);
 
     return parts.some((part) => this.isOperationInside(part, seen));
+  }
+
+  private isOpaqueResult(type: Type): boolean {
+    const seen = new Set<int>();
+
+    return type.kind == TypeKind.Unknown || this.isVoidChoice(type, seen);
+  }
+
+  private isVoidChoice(type: Type, seen: Set<int>): boolean {
+    if (seen.has(type.id) || type.kind == TypeKind.Function) {
+      return false;
+    }
+
+    seen.add(type.id);
+
+    if (type.kind == TypeKind.Union) {
+      const hasVoid = type.parts.some((part) => part.kind == TypeKind.Void);
+      if (hasVoid) {
+        return true;
+      }
+    }
+    if (type.kind == TypeKind.Object) {
+      const hasVoid = type.fields.some(
+        (field) => field.type.kind == TypeKind.Void,
+      );
+      if (hasVoid) {
+        return true;
+      }
+    }
+    if (type.kind == TypeKind.Promise || type.kind == TypeKind.Result) {
+      return false;
+    }
+
+    const parts = this.typeParts(type);
+
+    return parts.some((part) => this.isVoidChoice(part, seen));
   }
 
   private isListParameter(param: Type): boolean {

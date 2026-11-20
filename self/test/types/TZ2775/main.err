@@ -1,0 +1,3 @@
+main.tz:8:14: error TZ2775: 'Promise.allSettled' is not needed: a Promise is not rejected, so 'Promise.all' gives every value; with Results inside, 'Result.combine(await Promise.all(ps))' gives all the values or the first Err
+void Promise.allSettled([p]);
+             ^

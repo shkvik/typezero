@@ -1,0 +1,18 @@
+// A method of an interface keeps its parameters in the class.
+interface Shape {
+  area(): double;
+}
+
+interface Named {
+  name: string;
+}
+
+class Wide implements Shape {
+  public constructor() {
+    console.log("wide");
+  }
+
+  public area(k: int): double {
+    return 1;
+  }
+}

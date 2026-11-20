@@ -1,0 +1,5 @@
+// A static field is shared by every instance of a generic class.
+class Stat<T> {
+  public static count: T;
+  public static total: int = 0;
+}

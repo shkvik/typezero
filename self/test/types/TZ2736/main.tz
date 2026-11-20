@@ -1,0 +1,22 @@
+// An override is as open as the method it replaces.
+class Animal {
+  public name: string;
+
+  public constructor(name: string) {
+    this.name = name;
+  }
+
+  public speak(): string {
+    return "...";
+  }
+}
+
+class Mole extends Animal {
+  public constructor() {
+    super("mole");
+  }
+
+  private speak(): string {
+    return "";
+  }
+}

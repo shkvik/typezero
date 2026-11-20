@@ -1,0 +1,11 @@
+// A tuple with elements of several types is not walked by for...of.
+const pair: [string, int] = ["a", 1];
+const same: [int, int] = [1, 2];
+
+for (const item of same) {
+  console.log(item);
+}
+
+for (const item of pair) {
+  console.log(item);
+}

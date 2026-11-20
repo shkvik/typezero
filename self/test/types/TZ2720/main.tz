@@ -1,0 +1,5 @@
+// A field and a method of a class have different names.
+class Dup {
+  public b(): void {}
+  public b: int = 1;
+}

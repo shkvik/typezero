@@ -1,0 +1,3 @@
+main.tz:24:20: error TZ2715: a 'Size' is never a 'Point': classes are told apart by their names, and neither extends the other, so this is always false
+const never = size instanceof Point;
+                   ^

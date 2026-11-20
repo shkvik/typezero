@@ -57,6 +57,7 @@ export type ValueRecord = {
   readonly functions: Map<int, FunctionDecl>;
   readonly params: Map<int, ParamSlot>;
   readonly assigned: Set<int>;
+  readonly changes: Expr[];
   readonly enums: Map<int, EnumDecl>;
   readonly classes: Map<int, ClassDecl>;
   readonly destinations: Map<int, Destination[]>;
@@ -324,6 +325,38 @@ export type DictText = {
   readonly shown: string;
 };
 
+export type SuperFrame = {
+  readonly isConstructor: boolean;
+  readonly roots: Set<Expr>;
+  readonly parent: string;
+  isBefore: boolean;
+};
+
+export type Linear = {
+  readonly term: string;
+  readonly offset: decimal;
+};
+
+export type BoundEdge = {
+  readonly upper: string;
+  readonly lower: string;
+  readonly room: decimal;
+};
+
+export enum BoundSide {
+  None,
+  Lower,
+  Upper,
+  Both,
+}
+
+export enum ThisPlace {
+  Method,
+  StaticMethod,
+  StaticField,
+  Function,
+}
+
 export type GenericTarget = {
   readonly name: string;
   readonly params: Type[];
@@ -354,6 +387,7 @@ export type InferenceSet = {
   readonly visited: Set<string>;
   isWeak: boolean;
   isIntLiteral: boolean;
+  isUnmatched: boolean;
 };
 
 export enum ArgumentForm {

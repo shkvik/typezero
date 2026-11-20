@@ -1,0 +1,17 @@
+// A member of the objects of a class is not a member of the class.
+class Point {
+  public x: double;
+  public readonly id: int;
+
+  public constructor(x: double) {
+    this.x = x;
+    this.id = 1;
+  }
+
+  public length(): double {
+    return this.x;
+  }
+}
+
+const fine = new Point(1).length();
+const wrong = Point.length;

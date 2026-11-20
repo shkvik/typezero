@@ -1,0 +1,8 @@
+// An abstract method lives in an abstract class.
+abstract class Shape {
+  public abstract area(): double;
+}
+
+class Solid {
+  public abstract volume(): double;
+}

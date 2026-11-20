@@ -1,0 +1,10 @@
+// 'super(...)' is for the constructor of a class that extends another.
+class Plain {
+  public constructor() {
+    console.log("plain");
+  }
+}
+
+function notAConstructor(): void {
+  super();
+}

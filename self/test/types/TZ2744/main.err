@@ -1,0 +1,3 @@
+main.tz:20:7: error TZ2744: class 'Blob' does not implement the abstract method area() of 'Figure'; implement it, or make 'Blob' abstract too
+class Blob extends Figure {
+      ^

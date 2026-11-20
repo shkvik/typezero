@@ -1,4 +1,6 @@
 import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
   AssignExpr,
   BinaryOp,
@@ -11,8 +13,9 @@ import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.
 import { Stmt } from "../../../../program/ast/types/ast.types.statements.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
-import { kDot, kThisName } from "../const/expression-types.const.tz";
+import { kDot, kNoPlace, kThisName } from "../const/expression-types.const.tz";
 import {
+  BoundSide,
   DeclaredVariable,
   Destination,
   ParamSlot,
@@ -63,7 +66,28 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return this.knownFact(key);
+    const fact = this.knownFact(key);
+    if (fact != undefined) {
+      return fact;
+    }
+
+    return this.unknownPrefix(key);
+  }
+
+  private unknownPrefix(key: string): Type | undefined {
+    let dot = key.lastIndexOf(kDot);
+
+    while (dot > 0) {
+      const prefix = key.slice(0, dot);
+      const fact = this.facts.get(prefix);
+      if (fact != undefined && fact.kind == TypeKind.Error) {
+        return fact;
+      }
+
+      dot = prefix.lastIndexOf(kDot);
+    }
+
+    return undefined;
   }
 
   private assignedTyped(expr: AssignExpr, module: int): Type {
@@ -81,6 +105,10 @@ partial class ExpressionTypes {
     const wanted = this.assignedWanted(expr.op, declared);
     const given = this.typed(expr.value, wanted, module);
 
+    if (wanted != undefined && !this.isLibraryTarget(target, module)) {
+      this.coerce(expr.value, given, wanted, module, kNoPlace);
+    }
+
     this.forgetPatterned(target, module);
 
     if (key == undefined) {
@@ -95,14 +123,21 @@ partial class ExpressionTypes {
       this.facts = this.withFact(this.facts, key, fact);
     }
 
+    this.assignedBounds(expr, module);
+
     return given;
   }
 
   private assignedDeclared(target: Expr, module: int): Type | undefined {
     if (target.kind == ExprKind.Member) {
-      return this.fieldDeclared(target, module);
+      return this.memberTargetDeclared(target, module);
     }
     if (target.kind != ExprKind.Name) {
+      return undefined;
+    }
+    if (this.isThisName(target, module)) {
+      this.report(module, target.loc, Code.ThisAssigned, kNoDetails);
+
       return undefined;
     }
 
@@ -131,6 +166,23 @@ partial class ExpressionTypes {
     this.facts = before;
 
     return declared;
+  }
+
+  private isLibraryTarget(target: Expr, module: int): boolean {
+    if (target.kind != ExprKind.Member) {
+      return false;
+    }
+
+    this.quiet += 1;
+
+    const object = this.typed(target.object, undefined, module);
+
+    this.quiet -= 1;
+
+    const isInstance =
+      object.kind == TypeKind.Instance && this.isLibraryModule(object.module);
+
+    return isInstance || this.resolver.isLibraryShape(object);
   }
 
   private assignedCurrent(
@@ -238,6 +290,11 @@ partial class ExpressionTypes {
   }
 
   private forgetPath(key: string): void {
+    this.forgetFacts(key);
+    this.forgetBounds(key, BoundSide.None);
+  }
+
+  private forgetFacts(key: string): void {
     const prefix = key + kDot;
     const kept = new Map<string, Type>();
 
@@ -274,6 +331,7 @@ partial class ExpressionTypes {
       functions: new Map<int, FunctionDecl>(),
       params: new Map<int, ParamSlot>(),
       assigned: new Set<int>(),
+      changes: [],
       enums: record.enums,
       classes: record.classes,
       destinations: new Map<int, Destination[]>(),
@@ -285,7 +343,38 @@ partial class ExpressionTypes {
     this.indexStatement(statement, scratch);
 
     for (const loc of scratch.assigned) {
-      this.forgetPath(`${module} ${loc}`);
+      const side = this.loopDirection(scratch.changes, loc, module);
+      const key = `${module} ${loc}`;
+
+      this.forgetFacts(key);
+      this.forgetBounds(key, side);
+    }
+
+    for (const change of scratch.changes) {
+      this.forgetChangedPart(change, module);
+    }
+  }
+
+  private forgetChangedPart(change: Expr, module: int): void {
+    const target = this.changedTarget(change);
+    if (target == undefined) {
+      return;
+    }
+    if (target.kind == ExprKind.Member) {
+      const key = this.pathKey(target, module);
+      if (key != undefined) {
+        this.forgetFacts(key);
+      }
+
+      return;
+    }
+    if (target.kind != ExprKind.Index) {
+      return;
+    }
+
+    const key = this.pathKey(target.object, module);
+    if (key != undefined) {
+      this.forgetFacts(key);
     }
   }
 

@@ -1,0 +1,5 @@
+main.tz
+  2:7 mixed: { a: int; b: string }
+  3:5 key: string
+  4:7 flag: boolean
+  5:7 fine: string

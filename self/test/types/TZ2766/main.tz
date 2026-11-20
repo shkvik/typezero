@@ -1,0 +1,16 @@
+// A template calls no code: 'toString' is called by hand.
+class Money {
+  public cents: int;
+
+  public constructor(cents: int) {
+    this.cents = cents;
+  }
+
+  public toString(): string {
+    return `${this.cents}`;
+  }
+}
+
+const price = new Money(150);
+const fine = `price: ${price.toString()}`;
+const wrong = `price: ${price}`;

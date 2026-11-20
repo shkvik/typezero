@@ -1,0 +1,3 @@
+main.tz:15:10: error TZ2741: class 'Wide' implements 'Shape', whose 'area' is '() => double', but 'Wide.area' takes other parameters: area(k: int)
+  public area(k: int): double {
+         ^

@@ -1,0 +1,8 @@
+// 'then' of a Promise takes one function.
+async function save(name: string): Promise<int> {
+  return name.length;
+}
+
+const p = save("a");
+const fine = p.then((x) => x + 1);
+void p.then((x: int) => x, (e: int) => 0);

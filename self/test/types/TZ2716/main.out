@@ -1,0 +1,8 @@
+main.tz
+  18:7 point: Point
+  19:7 size: Size
+  20:7 plain: { x: int }
+  21:7 either: Point | Size
+  23:7 count: int
+  24:7 fine: boolean
+  25:7 never: boolean

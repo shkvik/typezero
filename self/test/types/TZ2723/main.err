@@ -1,0 +1,3 @@
+main.tz:3:17: error TZ2723: static field 'd' needs a value, e.g. 'static d: int = ...', or make it optional: 'static d?: int'
+  public static d: int;
+                ^

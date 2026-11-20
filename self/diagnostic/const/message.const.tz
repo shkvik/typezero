@@ -1601,5 +1601,229 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.NotGenericMethod]: {
     text: "'{word}' is not a generic method; remove the type arguments",
+  },  [Code.InstanceMemberViaClass]: {
+    text: "'{word}' is a member of the instances of '{first}', not of the class: create one with 'new {first}(...)'",
+  },
+  [Code.MethodReplaced]: {
+    text: "'{word}' is a method of '{first}' and cannot be replaced: a method belongs to the class, not to the object; to change what it does, declare a field that holds a function: '{word}: () => void = () => { ... }'",
+  },
+  [Code.ReadOnlyField]: {
+    text: "cannot assign to '{word}' because it is a read-only field of '{first}'; only its constructor can set it",
+  },
+  [Code.ReadOnlyStatic]: {
+    text: "cannot assign to '{word}' because it is a read-only static field",
+  },
+  [Code.StaticMethodReplaced]: {
+    text: "'{word}' is a static method of '{first}' and cannot be replaced",
+  },
+  [Code.StaticFieldMissing]: {
+    text: "class '{first}' has no static field '{word}'",
+  },
+  [Code.ThisAssigned]: {
+    text: "cannot assign to 'this'",
+  },
+  [Code.StaticThisMethod]: {
+    text: "in a static method 'this' would be the class itself; use the class's name: '{first}.{word}'",
+  },
+  [Code.StaticThisField]: {
+    text: "in a static field 'this' would be the class itself; use the class's name: '{first}.{word}'",
+  },
+  [Code.ThisInFunction]: {
+    text: "a 'function' has no 'this' of its own; use an arrow function, which sees the 'this' of the method around it",
+  },
+  [Code.SuperRead]: {
+    text: "'super.{word}' can only be called, 'super.{word}(...)'; to read the field or the method, use 'this.{word}'",
+  },
+  [Code.ConstructorReturn]: {
+    text: "a constructor cannot return a value: 'new' gives the object",
+  },
+  [Code.InstanceOfNeverMade]: {
+    text: "an object of type '{first}' is never a '{word}': only 'new {word}(...)' creates one, so this is always false",
+  },
+  [Code.InstanceOfNeverClass]: {
+    text: "a '{first}' is never a '{word}': classes are told apart by their names, and neither extends the other, so this is always false",
+  },
+  [Code.InstanceOfNotObject]: {
+    text: "'instanceof' tests an object, found '{first}', which is never an instance of a class",
+  },
+  [Code.InstanceOfNotClass]: {
+    text: "the right side of 'instanceof' must be a class",
+  },
+  [Code.InstanceOfNeverUnion]: {
+    text: "a '{first}' is never a '{word}': none of its members is or extends it, so this is always false",
+  },
+  [Code.DuplicateMember]: {
+    text: "duplicate member '{word}' in class '{first}'",
+  },
+  [Code.FieldMethodClash]: {
+    text: "duplicate member '{word}' in class '{first}': a field and a method cannot share a name",
+  },
+  [Code.FieldValueWithConstructor]: {
+    text: "field '{word}' cannot get a value where it is declared: set it in the constructor, 'this.{word} = ...'",
+  },
+  [Code.FieldValueNotLiteral]: {
+    text: "field '{word}' cannot get a value where it is declared: in a class without a constructor it can be only a literal next to a written type, e.g. '{word}: int = 0'; set other values in a constructor",
+  },
+  [Code.StaticNeedsValue]: {
+    text: "static field '{word}' needs a value, e.g. 'static {word}: {first} = ...', or make it optional: 'static {word}?: {first}'",
+  },
+  [Code.StaticNeedsType]: {
+    text: "static field '{word}' needs a type: only a literal shows it without checking the value, e.g. 'static {word}: int = ...'",
+  },
+  [Code.SetLater]: {
+    text: "'{word}!' (\"set later\") is not supported: a field gets its value in the constructor; if it may have none, make it optional: '{word}?: T'",
+  },
+  [Code.StaticTypeParameters]: {
+    text: "static field '{word}' cannot use the type parameters of '{first}': every instance of the class shares it",
+  },  [Code.MustCallSuper]: {
+    text: "the constructor of '{first}' must call 'super(...)': '{first}' extends '{word}', whose constructor sets the fields it declares",
+  },
+  [Code.SuperNotStatement]: {
+    text: "'super(...)' must be a statement of its own in the body of the constructor, not inside a block, a condition, a loop or another expression: the fields are set right after it",
+  },
+  [Code.ThisBeforeSuper]: {
+    text: "'this' cannot be used before 'super(...)': the object exists once the constructor of '{word}' has run",
+  },
+  [Code.ReturnBeforeSuper]: {
+    text: "the constructor returns before 'super(...)', which makes the object (JavaScript throws a ReferenceError there)",
+  },
+  [Code.SuperTwice]: {
+    text: "'super(...)' is called a second time; the constructor of '{word}' runs once",
+  },
+  [Code.SuperOutside]: {
+    text: "'super(...)' can be called only in the constructor of a class that extends another",
+  },
+  [Code.OverrideMissing]: {
+    text: "'{word}' is marked 'override', but '{first}' has no method '{word}'",
+  },
+  [Code.OverrideParameters]: {
+    text: "'{word}' is marked 'override', but no method of '{first}' has its parameters: there is {other}; an override takes the same parameters",
+  },
+  [Code.OverrideReturns]: {
+    text: "'{word}' returns '{first}' in '{second}', and '{other}' in '{place}', which it overrides; an override returns what the method it overrides returns",
+  },
+  [Code.OverrideAccess]: {
+    text: "'{word}' is {first} in '{second}', so its override cannot be {other}",
+  },  [Code.ExtendsNotClass]: {
+    text: "'{word}' is not a class, and a class can extend only a class; to say that '{first}' has what an interface lists, write 'implements {word}'",
+  },
+  [Code.ImplementsClass]: {
+    text: "'{word}' is a class, and a class implements only interfaces; to take its fields and methods, write 'extends {word}'",
+  },
+  [Code.ImplementsClassExtended]: {
+    text: "'{word}' is a class, and a class implements only interfaces",
+  },
+  [Code.ImplementsMissing]: {
+    text: "class '{first}' implements '{second}', but has no '{word}'; declare it, e.g. '{other}'",
+  },
+  [Code.ImplementsParameters]: {
+    text: "class '{first}' implements '{second}', whose '{word}' is '{other}', but '{first}.{word}' takes other parameters: {place}",
+  },
+  [Code.ImplementsFieldType]: {
+    text: "class '{first}' implements '{second}', whose field '{word}' is '{other}', but in '{first}' it is '{place}'; the types must be the same, or objects of a type down the chain of the interface's, such as 'Dog' for 'Animal'",
+  },
+  [Code.ImplementsReturns]: {
+    text: "'{word}' returns '{first}', and '{second}', which '{other}' implements, says it returns '{place}'",
+  },
+  [Code.AbstractNotImplemented]: {
+    text: "class '{first}' does not implement the abstract method {other} of '{second}'; implement it, or make '{first}' abstract too",
+  },
+  [Code.AbstractNeedsClass]: {
+    text: "abstract method '{word}' needs an abstract class: '{first}' can be created with 'new', and the method would have no body; write 'abstract class {first}'",
+  },
+  [Code.SuperAbstract]: {
+    text: "'{word}' is abstract in '{first}': it has no body to call",
+  },  [Code.ParameterCondition]: {
+    text: "a value of type '{first}' cannot be a condition: '{first}' may be a number, and 0 would count as false; check for undefined: '{word} != undefined'",
+  },
+  [Code.IndexMaybeUndefined]: {
+    text: "the value may be undefined; check it before indexing",
+  },
+  [Code.NotIndexable]: {
+    text: "type '{first}' cannot be indexed",
+  },
+  [Code.TupleKeyNotNumber]: {
+    text: "a tuple is indexed by a number, found '{first}'",
+  },
+  [Code.TupleKeyNotConstant]: {
+    text: "a tuple can be indexed only by a constant, such as '[0]': each element has its own type; or destructure it: 'const [a, b] = t'",
+  },
+  [Code.TupleKeyRange]: {
+    text: "tuple '{first}' has {other}; there is no element {word}",
+  },
+  [Code.ObjectNumberedKey]: {
+    text: "type '{first}' has no numbered fields; read a field by its name, e.g. 'o.name'",
+  },
+  [Code.ObjectRuntimeKey]: {
+    text: "type '{first}' can be indexed only by a key known when compiling: a string literal, or a constant declared with one, such as 'const key = \"name\"'; keys computed when the program runs need a dictionary: declare it as one, e.g. 'const d: Record<string, int> = {}'",
+  },
+  [Code.ObjectKeyNotString]: {
+    text: "a key must be a string, found '{first}'",
+  },
+  [Code.MapIndex]: {
+    text: "'{word}[key]' reads a property of the Map object in JavaScript, not one of its entries; read an entry with '{word}.get(key)'",
+  },
+  [Code.SetIndex]: {
+    text: "a Set has no elements by position; check one with '{word}.has(value)', or copy them into an array, '[...{word}]'",
+  },
+  [Code.InObjectMaybe]: {
+    text: "operator 'in' is not supported for objects: a field that is not there is undefined; check it with '{word} != undefined'",
+  },
+  [Code.InObjectTrue]: {
+    text: "operator 'in' is not supported for objects: an object always has the fields of its type, so this would always be true",
+  },
+  [Code.InObjectFalse]: {
+    text: "operator 'in' is not supported for objects: type '{first}' has no field '{word}', so this would always be false",
+  },
+  [Code.DeleteOptional]: {
+    text: "'delete' cannot remove field '{word}': a field that is not there is undefined; write '{first} = undefined'",
+  },
+  [Code.DeleteRequired]: {
+    text: "'delete' cannot remove field '{word}': an object always has the fields of its type",
+  },
+  [Code.TupleResized]: {
+    text: "a tuple has a fixed length, and '{word}' would change it; to change the length, copy it into an array: '[...{first}]'",
+  },
+  [Code.TupleMethodCopy]: {
+    text: "'{word}' is not supported on tuples; copy the tuple into an array first: '[...{first}].{word}(...)'",
+  },
+  [Code.TupleIterated]: {
+    text: "cannot iterate over a tuple, whose elements have types of their own; destructure it, or copy it into an array: '[...t]'",
+  },
+  [Code.OwnToString]: {
+    text: "an object is not converted to a string by calling its toString(): tz calls no code by itself; call it, e.g. '${{word}.toString()}'",
+  },
+  [Code.AwaitOutsideAsync]: {
+    text: "'await' can only be used in an async function or in top-level code; make the function async: '{word}'",
+  },
+  [Code.AsyncResultNotPromise]: {
+    text: "an async function returns a Promise: declare its type as 'Promise<{first}>'",
+  },
+  [Code.ReturnAwait]: {
+    text: "'return await' changes nothing: an async function waits for the Promise it returns; write 'return' without 'await'",
+  },
+  [Code.PromiseNoCatch]: {
+    text: "a Promise is not rejected in tz, so it has no 'catch': an operation that may fail gives a Promise<Result<T, E>>; read it after 'await': 'const r = await p; if (r.isErr()) ...'",
+  },
+  [Code.PromiseNoFinally]: {
+    text: "a Promise is not rejected in tz, so it has no 'finally': 'then' runs every time; write the code after 'await p'",
+  },
+  [Code.PromiseThenTwo]: {
+    text: "'then' takes one function: a Promise is not rejected in tz",
+  },
+  [Code.PromiseNoMethod]: {
+    text: "property '{word}' does not exist on type '{first}'; a Promise has 'then', and its value is read with 'await'",
+  },
+  [Code.PromiseRejected]: {
+    text: "a Promise is not rejected in tz: an operation that may fail gives a Promise<Result<T, E>>; give the error in the value, 'Promise.resolve(err(e))'",
+  },
+  [Code.PromiseAllSettled]: {
+    text: "'Promise.allSettled' is not needed: a Promise is not rejected, so 'Promise.all' gives every value; with Results inside, 'Result.combine(await Promise.all(ps))' gives all the values or the first Err",
+  },
+  [Code.PromiseAny]: {
+    text: "'Promise.any' is not needed: a Promise is not rejected, so the first to settle gives the first value, 'Promise.race(ps)'",
+  },
+  [Code.ArrowAwait]: {
+    text: "'await' here changes nothing: an async function waits for the Promise it returns; leave out 'await'",
   },
 };

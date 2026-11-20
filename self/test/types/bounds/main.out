@@ -1,0 +1,33 @@
+main.tz
+  4:7 xs: int[]
+  5:7 a: int
+  6:7 b: int
+  8:10 f: (int[]) => int
+  10:11 c: int
+  18:10 g: (int[]) => int
+  19:7 total: int
+  21:12 i: int
+  22:11 d: int
+  30:10 h: (int[]) => int
+  31:9 n: int
+  32:7 total: int
+  34:12 i: int
+  35:11 e: int
+  43:10 k: (int[]) => int
+  44:7 total: int
+  46:12 i: int
+  47:11 e: int
+  55:10 w: (int[]) => int
+  56:7 i: int
+  57:7 total: int
+  60:11 e: int
+  69:10 plain: (int[], int) => int
+  70:9 e: int
+  75:10 last: (string[]) => string
+  76:9 e: string
+  81:7 list: string[]
+  82:7 one: string
+  83:5 names: string[] | undefined
+  85:7 two: string
+  86:7 shrinking: string[]
+  88:7 three: string

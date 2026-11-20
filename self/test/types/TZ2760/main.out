@@ -1,0 +1,5 @@
+main.tz
+  2:11 type Query = { text: string; limit?: int }
+  7:7 query: Query
+  8:7 fine: string
+  9:7 wrong: boolean

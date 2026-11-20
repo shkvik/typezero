@@ -36,6 +36,8 @@ partial class ExpressionTypes {
         return this.voidTyped(expr, module);
       case UnaryOp.NonNull:
         return this.nonNullTyped(expr, wanted, module);
+      case UnaryOp.Delete:
+        return this.deleteTyped(expr, module);
       default:
         return this.store.plain(TypeKind.Error);
     }

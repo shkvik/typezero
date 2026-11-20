@@ -1,0 +1,3 @@
+main.tz:3:10: error TZ2720: duplicate member 'b' in class 'Dup': a field and a method cannot share a name
+  public b(): void {}
+         ^

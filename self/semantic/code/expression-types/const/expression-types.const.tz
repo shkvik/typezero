@@ -58,11 +58,39 @@ export const kSpecialMethods = [
   "pop",
   "shift",
   "filter",
+  "match",
 ];
 export const kSpecialNews = ["TextDecoder"];
 export const kSplitName = "split";
 export const kThisName = "this";
+export const kSuperName = "super";
+export const kPublicWord = "public";
+export const kProtectedWord = "protected";
+export const kPrivateWord = "private";
+export const kOneElement = " element";
+export const kManyElements = " elements";
+export const kTuplePlaceholder = "t";
+export const kTupleJoin = "join";
+export const kToStringName = "toString";
+export const kAsyncWord = "async ";
+export const kCatchName = "catch";
+export const kFinallyName = "finally";
+export const kThenName = "then";
+export const kRejectName = "reject";
+export const kAllSettledName = "allSettled";
+export const kAnyName = "any";
+export const kAsyncFunction = "async function ";
+export const kAsyncArrow = "async (...) => ...";
+export const kAsyncMethodEnd = "() { ... }";
+export const kBoundMark = "#b";
+export const kBoundSeparator = "|";
+export const kZeroTerm = "0";
+export const kValueTerm = "v";
+export const kLengthTerm = "n";
+export const kMostBoundConstant: uint64 = 1000000;
+export const kResizingMethods = ["push", "pop", "shift", "unshift", "splice"];
 export const kPrototypeName = "prototype";
+export const kClassNameMember = "name";
 export const kTakingMethods = ["pop", "shift", "splice"];
 export const kPromisePlaceholder = "p";
 export const kMostShownStatement = 60;

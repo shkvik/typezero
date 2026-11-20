@@ -16,6 +16,7 @@ import {
 } from "../../../../program/type/types/type.types.tz";
 import { kUnionSeparator } from "../const/type-resolver.const.tables.tz";
 import {
+  AliasOrigin,
   SubstitutionWalk,
   TypeContext,
   TypePlace,
@@ -206,9 +207,34 @@ partial class TypeResolver {
 
     walk.visiting.add(type.id);
 
-    const made = this.substitutedParts(type, walk);
+    const origin = this.aliasOrigins.get(type.id);
+    const made = this.substitutedOrigin(type, origin, walk);
 
     walk.visiting.delete(type.id);
+
+    return made;
+  }
+
+  public hasAliasOrigin(type: Type): boolean {
+    return this.aliasOrigins.has(type.id);
+  }
+
+  private substitutedOrigin(
+    type: Type,
+    origin: AliasOrigin | undefined,
+    walk: SubstitutionWalk,
+  ): Type {
+    if (origin == undefined) {
+      return this.substitutedParts(type, walk);
+    }
+
+    const args = this.substitutedAll(origin.args, walk, false);
+
+    this.quiet += 1;
+
+    const made = this.alias(origin.module, origin.decl, args);
+
+    this.quiet -= 1;
 
     return made;
   }

@@ -1,0 +1,9 @@
+main.tz
+  2:16 save: (string) => Promise<int>
+  6:16 label: () => Promise<string>
+  7:9 length: int
+  12:16 mismatch: () => Promise<string>
+  16:7 value: int
+  17:7 text: string
+  18:7 plain: int
+  19:7 wrong: string

@@ -1,0 +1,4 @@
+// A Set has no positions.
+const seen = new Set<int>();
+const fine = seen.has(1);
+const wrong = seen[0];

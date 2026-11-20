@@ -1,4 +1,5 @@
 import { ExpressionTypes } from "../expression-types.tz";
+import { MethodKind } from "../../../../program/ast/types/ast.types.classes.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
@@ -16,6 +17,7 @@ import {
 } from "../../../../program/ast/types/ast.types.statements.tz";
 import {
   DictKind,
+  TupleType,
   Type,
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
@@ -75,6 +77,7 @@ partial class ExpressionTypes {
       case StmtKind.VarDecl:
         for (const decl of statement.decls) {
           this.declaredFact(module, decl.loc);
+          this.declaredBounds(decl, module);
         }
 
         return;
@@ -136,10 +139,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const isNarrower =
-      door.type.kind == TypeKind.Union &&
-      given.kind != TypeKind.Error &&
-      given != door.type;
+    const isNarrower = door.type.kind == TypeKind.Union && given != door.type;
     if (isNarrower) {
       this.facts = this.withFact(this.facts, `${module} ${loc}`, given);
     }
@@ -433,6 +433,10 @@ partial class ExpressionTypes {
   ): void {
     const value = statement.value;
     const fn = frame.fn;
+
+    this.returnBeforeSuper(statement.loc, module);
+    this.returnAwaitCheck(value, frame, module);
+
     if (fn == undefined) {
       this.report(
         module,
@@ -440,6 +444,12 @@ partial class ExpressionTypes {
         Code.ReturnOutsideFunction,
         kNoDetails,
       );
+
+      return this.valueCheck(value, module);
+    }
+
+    if (value != undefined && fn.role?.method == MethodKind.Constructor) {
+      this.report(module, value.loc, Code.ConstructorReturn, kNoDetails);
 
       return this.valueCheck(value, module);
     }
@@ -486,7 +496,8 @@ partial class ExpressionTypes {
     }
 
     const before = this.recursions.length;
-    const type = this.returnedType(value, undefined, frame, module);
+    const hint = this.returnShapeHint(value, frame, module);
+    const type = this.hintedReturn(value, hint, frame, module);
     const calls = this.recursions.slice(before);
     if (calls.length > 0 && type.kind == TypeKind.Error) {
       for (const call of calls) {
@@ -497,6 +508,101 @@ partial class ExpressionTypes {
     }
 
     frame.returns.push({ value, type });
+  }
+
+  private returnAwaitCheck(
+    value: Expr | undefined,
+    frame: FunctionFrame,
+    module: int,
+  ): void {
+    const isAsync = frame.fn?.isAsync == true;
+    if (value == undefined || !isAsync || value.kind != ExprKind.Await) {
+      return;
+    }
+    if (frame.fn?.concise == true) {
+      this.report(module, value.loc, Code.ArrowAwait, kNoDetails);
+
+      return;
+    }
+
+    this.report(module, value.loc, Code.ReturnAwait, kNoDetails);
+  }
+
+  private hintedReturn(
+    value: Expr,
+    hint: Type | undefined,
+    frame: FunctionFrame,
+    module: int,
+  ): Type {
+    const given = this.returnedType(value, hint, frame, module);
+
+    if (hint != undefined) {
+      this.coerce(value, given, hint, module, kNoPlace);
+    }
+
+    return given;
+  }
+
+  private returnShapeHint(
+    value: Expr,
+    frame: FunctionFrame,
+    module: int,
+  ): Type | undefined {
+    if (!this.isReturnShaped(value, module)) {
+      return undefined;
+    }
+
+    const earlier = frame.returns.find((one) => this.isShapedType(one.type));
+
+    return earlier?.type;
+  }
+
+  private isReturnShaped(value: Expr, module: int): boolean {
+    switch (value.kind) {
+      case ExprKind.ObjectLit:
+      case ExprKind.ArrayLit:
+        return true;
+      case ExprKind.Conditional:
+        return (
+          this.isReturnShaped(value.thenExpr, module) ||
+          this.isReturnShaped(value.elseExpr, module)
+        );
+      case ExprKind.Call: {
+        const callee = value.callee;
+        const isMaker =
+          callee.kind == ExprKind.Name && this.isResultMaker(callee, module);
+        const isSpread = value.args.some((arg) => arg.spread);
+
+        return isMaker && value.args.length <= 1 && !isSpread;
+      }
+      default:
+        return false;
+    }
+  }
+
+  private isShapedType(type: Type): boolean {
+    if (type.kind == TypeKind.Error) {
+      return false;
+    }
+    if (type.kind == TypeKind.Result) {
+      return true;
+    }
+
+    let held = this.definedType(type);
+
+    while (held.kind == TypeKind.Array) {
+      held = this.definedType(held.item);
+    }
+
+    switch (held.kind) {
+      case TypeKind.Object:
+      case TypeKind.Instance:
+      case TypeKind.Tuple:
+      case TypeKind.Dict:
+        return true;
+      default:
+        return false;
+    }
   }
 
   private voidReturn(
@@ -556,6 +662,8 @@ partial class ExpressionTypes {
     const base = this.apparent(iterable);
 
     switch (base.kind) {
+      case TypeKind.Tuple:
+        return this.tupleLoopItem(loop, base, module);
       case TypeKind.Array:
         return base.item;
       case TypeKind.String:
@@ -568,6 +676,17 @@ partial class ExpressionTypes {
       default:
         return this.store.plain(TypeKind.Error);
     }
+  }
+
+  private tupleLoopItem(loop: ForOfStmt, tuple: TupleType, module: int): Type {
+    const element = this.tupleElement(tuple);
+    if (element != undefined) {
+      return element;
+    }
+
+    this.report(module, loop.iterable.loc, Code.TupleIterated, kNoDetails);
+
+    return this.store.plain(TypeKind.Error);
   }
 
   private dictItem(dict: DictKind, key: Type, value: Type): Type {

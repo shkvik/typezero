@@ -55,9 +55,32 @@ partial class ExpressionTypes {
       case BinaryOp.LogAnd:
       case BinaryOp.LogOr:
         return this.logicalTyped(expr, wanted, LogicSide.Value, module);
+      case BinaryOp.InstanceOf:
+        return this.instanceofTyped(expr, module);
+      case BinaryOp.In:
+        return this.keyInTyped(expr, module);
       default:
-        return this.store.plain(TypeKind.Error);
+        return this.childrenTyped(expr, module);
     }
+  }
+
+  private parameterArithmetic(
+    expr: BinaryExpr,
+    pair: OperandPair,
+    module: int,
+  ): Type {
+    const left = pair.left;
+    const right = pair.right;
+    const isOpen = this.isOpenParameter(left) || this.isOpenParameter(right);
+    const isKnown = left.kind != TypeKind.Error && right.kind != TypeKind.Error;
+    const hasText =
+      left.kind == TypeKind.String || right.kind == TypeKind.String;
+    const isJoin = expr.op == BinaryOp.Add && hasText;
+    if (isOpen && isKnown && !isJoin) {
+      this.reportOperands(expr, pair, module);
+    }
+
+    return this.store.plain(TypeKind.Error);
   }
 
   private arithmeticTyped(
@@ -320,7 +343,7 @@ partial class ExpressionTypes {
       left.kind == TypeKind.TypeParameter ||
       right.kind == TypeKind.TypeParameter;
     if (isBroken) {
-      return this.store.plain(TypeKind.Error);
+      return this.parameterArithmetic(expr, pair, module);
     }
 
     const hasText =

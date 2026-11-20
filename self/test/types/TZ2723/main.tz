@@ -1,0 +1,6 @@
+// A static field has a value, or is optional.
+class Shared {
+  public static d: int;
+  public static e?: int;
+  public static f: int = 1;
+}

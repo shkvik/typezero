@@ -1,0 +1,25 @@
+// A class that extends another implements only interfaces too.
+class Thing {
+  public x: int;
+
+  public constructor() {
+    this.x = 1;
+  }
+}
+
+class Base {
+  public y: int;
+
+  public constructor() {
+    this.y = 1;
+  }
+}
+
+class Other extends Base implements Thing {
+  public x: int;
+
+  public constructor() {
+    super();
+    this.x = 2;
+  }
+}

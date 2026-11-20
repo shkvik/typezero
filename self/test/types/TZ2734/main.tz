@@ -1,0 +1,22 @@
+// An override takes the parameters of the method it replaces.
+class Animal {
+  public name: string;
+
+  public constructor(name: string) {
+    this.name = name;
+  }
+
+  public speak(): string {
+    return "...";
+  }
+}
+
+class Fish extends Animal {
+  public constructor() {
+    super("fish");
+  }
+
+  public override speak(loud: boolean): string {
+    return "blub";
+  }
+}

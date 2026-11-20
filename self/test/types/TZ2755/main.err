@@ -1,0 +1,3 @@
+main.tz:6:21: error TZ2755: a key must be a string, found 'boolean'
+const wrong = mixed[flag];
+                    ^

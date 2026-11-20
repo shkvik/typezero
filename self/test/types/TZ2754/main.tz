@@ -1,0 +1,6 @@
+// An object is indexed by keys known when compiling.
+const mixed = { a: 1, b: "x" };
+let key = "a";
+const flag = true;
+const fine = mixed["b"];
+const wrong = mixed[key];

@@ -1,0 +1,5 @@
+// A tuple keeps its length.
+const pair: [string, int] = ["a", 1];
+const text = pair.join("-");
+
+pair.push(2);

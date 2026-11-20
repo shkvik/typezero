@@ -1,0 +1,3 @@
+main.tz:19:11: error TZ2736: 'speak' is public in 'Animal', so its override cannot be private
+  private speak(): string {
+          ^

@@ -1,0 +1,3 @@
+main.tz:17:14: error TZ2711: a 'function' has no 'this' of its own; use an arrow function, which sees the 'this' of the method around it
+      return this.w;
+             ^

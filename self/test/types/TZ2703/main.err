@@ -1,0 +1,3 @@
+main.tz:19:7: error TZ2703: 'length' is a method of 'Point' and cannot be replaced: a method belongs to the class, not to the object; to change what it does, declare a field that holds a function: 'length: () => void = () => { ... }'
+point.length = () => 0;
+      ^

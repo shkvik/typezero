@@ -1,0 +1,5 @@
+main.tz
+  2:7 pair: [string, int]
+  3:5 position: int
+  4:7 flag: boolean
+  5:7 first: string

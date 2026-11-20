@@ -1,0 +1,506 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import {
+  AssignExpr,
+  BinaryExpr,
+  BinaryOp,
+  Expr,
+  CallArgument,
+  ExprKind,
+  NameExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import { VarDeclarator } from "../../../../program/ast/types/ast.types.patterns.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  kBoundMark,
+  kBoundSeparator,
+  kLengthName,
+  kLengthTerm,
+  kMostBoundConstant,
+  kValueTerm,
+  kZeroTerm,
+} from "../const/expression-types.const.tz";
+import {
+  BoundEdge,
+  BoundSide,
+  Linear,
+} from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private linearOf(expr: Expr, module: int): Linear | undefined {
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+        return this.constantLinear(expr.value);
+      case ExprKind.Name: {
+        const key = this.pathKey(expr, module);
+        const type = this.valueTypeOf(expr, module);
+        if (key == undefined || type == undefined) {
+          return undefined;
+        }
+        if (type.kind != TypeKind.Int) {
+          return undefined;
+        }
+
+        return { term: kValueTerm + key, offset: 0 };
+      }
+      case ExprKind.Member:
+        return this.lengthLinear(expr, module);
+      case ExprKind.Binary:
+        return this.shiftedLinear(expr, module);
+      default:
+        return undefined;
+    }
+  }
+
+  private valueTypeOf(expr: NameExpr, module: int): Type | undefined {
+    const target = this.targetOfName(expr, module);
+    const isValue =
+      target != undefined &&
+      (target.kind == SymbolKind.Variable ||
+        target.kind == SymbolKind.Parameter);
+    if (!isValue || target == undefined) {
+      return undefined;
+    }
+
+    return this.declaredOf(target);
+  }
+
+  private constantLinear(value: uint64): Linear | undefined {
+    if (value > kMostBoundConstant) {
+      return undefined;
+    }
+
+    return { term: kZeroTerm, offset: value.toDecimal() };
+  }
+
+  private lengthLinear(expr: Expr, module: int): Linear | undefined {
+    if (expr.kind != ExprKind.Member || expr.name != kLengthName) {
+      return undefined;
+    }
+
+    const key = this.pathKey(expr.object, module);
+    if (key == undefined) {
+      return undefined;
+    }
+
+    return { term: kLengthTerm + key, offset: 0 };
+  }
+
+  private shiftedLinear(expr: BinaryExpr, module: int): Linear | undefined {
+    const isAdd = expr.op == BinaryOp.Add;
+    if (!isAdd && expr.op != BinaryOp.Sub) {
+      return undefined;
+    }
+    if (expr.rhs.kind != ExprKind.IntLit) {
+      return undefined;
+    }
+
+    const base = this.linearOf(expr.lhs, module);
+    const step = this.constantLinear(expr.rhs.value);
+    if (base == undefined || step == undefined) {
+      return undefined;
+    }
+    if (isAdd) {
+      return { term: base.term, offset: base.offset + step.offset };
+    }
+
+    return { term: base.term, offset: base.offset - step.offset };
+  }
+
+  private boundKey(upper: string, lower: string, room: decimal): string {
+    const parts = [kBoundMark, upper, lower, `${room}`];
+
+    return parts.join(kBoundSeparator);
+  }
+
+  private addBound(
+    facts: Map<string, Type>,
+    upper: Linear,
+    lower: Linear,
+    room: decimal,
+  ): void {
+    if (upper.term == lower.term) {
+      return;
+    }
+
+    const shifted = room - upper.offset + lower.offset;
+    const key = this.boundKey(upper.term, lower.term, shifted);
+    const mark = this.store.plain(TypeKind.Void);
+
+    facts.set(key, mark);
+  }
+
+  private addEquality(
+    facts: Map<string, Type>,
+    first: Linear,
+    second: Linear,
+  ): void {
+    this.addBound(facts, first, second, 0);
+    this.addBound(facts, second, first, 0);
+  }
+
+  private canProve(lower: string, upper: string, room: decimal): boolean {
+    if (lower == upper) {
+      return room <= 0;
+    }
+
+    const distances = new Map<string, decimal>();
+    const edges = this.boundEdges();
+
+    distances.set(lower, 0);
+
+    for (let round = 0; round <= edges.length; round++) {
+      let isChanged: boolean = false;
+
+      for (const edge of edges) {
+        const start = distances.get(edge.lower);
+        if (start == undefined) {
+          continue;
+        }
+
+        const reach = start + edge.room;
+        const known = distances.get(edge.upper);
+        if (known == undefined || reach > known) {
+          distances.set(edge.upper, reach);
+          isChanged = true;
+        }
+      }
+
+      if (!isChanged) {
+        break;
+      }
+    }
+
+    const found = distances.get(upper);
+
+    return found != undefined && found >= room;
+  }
+
+  private boundEdges(): BoundEdge[] {
+    const edges: BoundEdge[] = [];
+    const lengths = new Set<string>();
+
+    for (const key of this.facts.keys()) {
+      const edge = this.edgeOf(key);
+      if (edge == undefined) {
+        continue;
+      }
+
+      edges.push(edge);
+      this.keepLength(edge.upper, lengths);
+      this.keepLength(edge.lower, lengths);
+    }
+
+    for (const length of lengths) {
+      edges.push({ upper: length, lower: kZeroTerm, room: 0 });
+    }
+
+    return edges;
+  }
+
+  private keepLength(term: string, lengths: Set<string>): void {
+    if (term.startsWith(kLengthTerm)) {
+      lengths.add(term);
+    }
+  }
+
+  private edgeOf(key: string): BoundEdge | undefined {
+    const parts = key.split(kBoundSeparator);
+    const mark = parts[0];
+    const upper = parts[1];
+    const lower = parts[2];
+    const room = parts[3];
+    const isBound = mark == kBoundMark && parts.length == 4;
+    if (!isBound || upper == undefined || lower == undefined) {
+      return undefined;
+    }
+
+    const parsed = decimal(room ?? "");
+    if (parsed.isErr()) {
+      return undefined;
+    }
+
+    return { upper, lower, room: parsed.value };
+  }
+
+  private isProvenIndex(object: Expr, index: Expr, module: int): boolean {
+    const at = this.linearOf(index, module);
+    const key = this.pathKey(object, module);
+    if (at == undefined || key == undefined) {
+      return false;
+    }
+
+    const length = kLengthTerm + key;
+    const isNatural = this.canProve(kZeroTerm, at.term, -at.offset);
+    if (!isNatural) {
+      return false;
+    }
+
+    return this.canProve(at.term, length, at.offset + 1);
+  }
+
+  private comparisonBounds(
+    cond: BinaryExpr,
+    isTrue: boolean,
+    module: int,
+  ): Map<string, Type> {
+    const facts = new Map<string, Type>();
+    const left = this.linearOf(cond.lhs, module);
+    const right = this.linearOf(cond.rhs, module);
+    if (left == undefined || right == undefined) {
+      return facts;
+    }
+
+    switch (cond.op) {
+      case BinaryOp.Lt:
+        return this.orderBounds(facts, left, right, isTrue, 1);
+      case BinaryOp.Le:
+        return this.orderBounds(facts, left, right, isTrue, 0);
+      case BinaryOp.Gt:
+        return this.orderBounds(facts, right, left, isTrue, 1);
+      case BinaryOp.Ge:
+        return this.orderBounds(facts, right, left, isTrue, 0);
+      default:
+        return this.equalBounds(facts, cond.op, left, right, isTrue);
+    }
+  }
+
+  private orderBounds(
+    facts: Map<string, Type>,
+    small: Linear,
+    large: Linear,
+    isTrue: boolean,
+    room: decimal,
+  ): Map<string, Type> {
+    if (isTrue) {
+      this.addBound(facts, large, small, room);
+
+      return facts;
+    }
+
+    this.addBound(facts, small, large, 1 - room);
+
+    return facts;
+  }
+
+  private equalBounds(
+    facts: Map<string, Type>,
+    op: BinaryOp,
+    left: Linear,
+    right: Linear,
+    isTrue: boolean,
+  ): Map<string, Type> {
+    const isEqual = op == BinaryOp.Eq && isTrue;
+    const isUnequal = op == BinaryOp.Ne && isTrue;
+
+    if (isEqual || (op == BinaryOp.Ne && !isTrue)) {
+      this.addEquality(facts, left, right);
+
+      return facts;
+    }
+
+    const isZeroRight = right.term == kZeroTerm && right.offset == 0;
+    const isLength = left.term.startsWith(kLengthTerm);
+
+    if ((isUnequal || (op == BinaryOp.Eq && !isTrue)) && isZeroRight) {
+      if (isLength) {
+        this.addBound(facts, left, right, 1);
+      }
+    }
+
+    return facts;
+  }
+
+  private declaredBounds(decl: VarDeclarator, module: int): void {
+    const init = decl.init;
+    if (init == undefined) {
+      return;
+    }
+
+    const key = `${module} ${decl.loc}`;
+
+    this.literalLength(key, init);
+
+    const value = this.linearOf(init, module);
+    if (value == undefined) {
+      return;
+    }
+
+    const own: Linear = { term: kValueTerm + key, offset: 0 };
+    const facts = new Map<string, Type>(this.facts);
+
+    this.addEquality(facts, own, value);
+    this.facts = facts;
+  }
+
+  private assignedBounds(expr: AssignExpr, module: int): void {
+    const target = expr.target;
+    if (expr.op != undefined || target.kind != ExprKind.Name) {
+      return;
+    }
+
+    const key = this.pathKey(target, module);
+    if (key == undefined) {
+      return;
+    }
+
+    this.literalLength(key, expr.value);
+
+    const value = this.linearOf(expr.value, module);
+    if (value == undefined) {
+      return;
+    }
+
+    const term = kValueTerm + key;
+    if (value.term == term) {
+      return;
+    }
+
+    const own: Linear = { term, offset: 0 };
+    const facts = new Map<string, Type>(this.facts);
+
+    this.addEquality(facts, own, value);
+    this.facts = facts;
+  }
+
+  private literalLength(key: string, value: Expr): void {
+    if (value.kind != ExprKind.ArrayLit) {
+      return;
+    }
+
+    const isPlain = value.elements.every((one) => !one.spread && !one.hole);
+    if (!isPlain) {
+      return;
+    }
+
+    const length: Linear = { term: kLengthTerm + key, offset: 0 };
+    const count = value.elements.length.toDecimal();
+    const zero: Linear = { term: kZeroTerm, offset: 0 };
+    const facts = new Map<string, Type>(this.facts);
+
+    this.addBound(facts, length, zero, count);
+    this.facts = facts;
+  }
+
+  private forgetLengths(args: CallArgument[], module: int): void {
+    for (const arg of args) {
+      const key = this.pathKey(arg.expr, module);
+      if (key != undefined) {
+        this.forgetLength(key);
+      }
+    }
+  }
+
+  private forgetLength(key: string): void {
+    const length = kLengthTerm + key;
+    const facts = new Map<string, Type>();
+
+    for (const [known, type] of this.facts) {
+      const edge = this.edgeOf(known);
+      const isLength =
+        edge != undefined && (edge.upper == length || edge.lower == length);
+      if (!isLength) {
+        facts.set(known, type);
+      }
+    }
+
+    this.facts = facts;
+  }
+
+  private forgetBounds(key: string, kept: BoundSide): void {
+    const value = kValueTerm + key;
+    const length = kLengthTerm + key;
+    const facts = new Map<string, Type>();
+
+    for (const [known, type] of this.facts) {
+      const edge = this.edgeOf(known);
+      if (edge == undefined || this.isKeptBound(edge, value, length, kept)) {
+        facts.set(known, type);
+      }
+    }
+
+    this.facts = facts;
+  }
+
+  private isKeptBound(
+    edge: BoundEdge,
+    value: string,
+    length: string,
+    kept: BoundSide,
+  ): boolean {
+    const isMentioned =
+      edge.upper == value ||
+      edge.lower == value ||
+      edge.upper == length ||
+      edge.lower == length;
+    if (!isMentioned) {
+      return true;
+    }
+    if (kept == BoundSide.Lower) {
+      return edge.upper == value;
+    }
+    if (kept == BoundSide.Upper) {
+      return edge.lower == value;
+    }
+
+    return false;
+  }
+
+  private loopDirection(changes: Expr[], loc: int, module: int): BoundSide {
+    let side: BoundSide = BoundSide.None;
+
+    for (const change of changes) {
+      const step = this.stepSide(change, loc, module);
+      if (step == BoundSide.None) {
+        continue;
+      }
+      if (step == BoundSide.Both || (side != BoundSide.None && side != step)) {
+        return BoundSide.Both;
+      }
+
+      side = step;
+    }
+
+    return side;
+  }
+
+  private stepSide(change: Expr, loc: int, module: int): BoundSide {
+    const target = this.changedTarget(change);
+    if (target == undefined || target.kind != ExprKind.Name) {
+      return BoundSide.None;
+    }
+
+    const found = this.record(module)?.uses.get(target.loc)?.symbol;
+    if (found == undefined || found.loc != loc) {
+      return BoundSide.None;
+    }
+    if (change.kind == ExprKind.Update && change.increment) {
+      return BoundSide.Lower;
+    }
+    if (change.kind == ExprKind.Update) {
+      return BoundSide.Upper;
+    }
+    if (
+      change.kind != ExprKind.Assign ||
+      change.value.kind != ExprKind.IntLit
+    ) {
+      return BoundSide.Both;
+    }
+    if (change.op == BinaryOp.Add) {
+      return BoundSide.Lower;
+    }
+    if (change.op == BinaryOp.Sub) {
+      return BoundSide.Upper;
+    }
+
+    return BoundSide.Both;
+  }
+
+  private changedTarget(change: Expr): Expr | undefined {
+    if (change.kind == ExprKind.Update || change.kind == ExprKind.Assign) {
+      return change.target;
+    }
+
+    return undefined;
+  }
+}

@@ -1,0 +1,3 @@
+main.tz:10:12: error TZ2709: in a static method 'this' would be the class itself; use the class's name: 'Counter.count'
+    return this.count;
+           ^

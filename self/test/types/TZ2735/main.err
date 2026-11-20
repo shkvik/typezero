@@ -1,0 +1,6 @@
+main.tz:20:12: error TZ2501: type 'int' is not assignable to type 'string'
+    return 5;
+           ^
+main.tz:29:10: error TZ2735: 'speak' returns 'int' in 'Worm', and 'string' in 'Animal', which it overrides; an override returns what the method it overrides returns
+  public speak(): int {
+         ^

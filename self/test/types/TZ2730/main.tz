@@ -1,0 +1,22 @@
+// A constructor does not return before 'super(...)'.
+class Animal {
+  public name: string;
+
+  public constructor(name: string) {
+    this.name = name;
+  }
+
+  public speak(): string {
+    return "...";
+  }
+}
+
+class Bat extends Animal {
+  public constructor(name: string) {
+    if (name == "") {
+      return;
+    }
+
+    super(name);
+  }
+}

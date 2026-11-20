@@ -1,0 +1,12 @@
+// A read-only static field keeps its value.
+class Registry {
+  public static count: int = 0;
+  public static readonly limit: int = 10;
+
+  public static next(): int {
+    return Registry.count + 1;
+  }
+}
+
+Registry.count = 1;
+Registry.limit = 5;

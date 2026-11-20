@@ -22,6 +22,7 @@ partial class ExpressionTypes {
       visited: new Set<string>(),
       isWeak: false,
       isIntLiteral: false,
+      isUnmatched: false,
     };
   }
 
@@ -121,6 +122,12 @@ partial class ExpressionTypes {
   }
 
   private inferInside(set: InferenceSet, pattern: Type, actual: Type): void {
+    if (!this.isSameShape(pattern, actual)) {
+      set.isUnmatched = true;
+
+      return;
+    }
+
     switch (pattern.kind) {
       case TypeKind.Union:
         return this.inferUnion(set, pattern, actual);
@@ -155,6 +162,19 @@ partial class ExpressionTypes {
         return;
       default:
         return this.inferHolder(set, pattern, actual);
+    }
+  }
+
+  private isSameShape(pattern: Type, actual: Type): boolean {
+    switch (pattern.kind) {
+      case TypeKind.Union:
+        return true;
+      case TypeKind.Instance:
+        return this.sameClassIn(actual, pattern) != undefined;
+      case TypeKind.Dict:
+        return actual.kind == TypeKind.Dict || actual.kind == TypeKind.Object;
+      default:
+        return pattern.kind == actual.kind;
     }
   }
 

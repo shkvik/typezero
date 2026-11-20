@@ -1,0 +1,3 @@
+main.tz:3:10: error TZ2721: field 'n' cannot get a value where it is declared: set it in the constructor, 'this.n = ...'
+  public n: int = 1;
+         ^

@@ -1,0 +1,28 @@
+// A class has every member of the interfaces it implements.
+interface Shape {
+  area(): double;
+}
+
+interface Named {
+  name: string;
+}
+
+class Square implements Shape {
+  public side: double;
+
+  public constructor(side: double) {
+    this.side = side;
+  }
+
+  public area(): double {
+    return this.side * this.side;
+  }
+}
+
+class NoArea implements Shape {
+  public size: int;
+
+  public constructor() {
+    this.size = 1;
+  }
+}

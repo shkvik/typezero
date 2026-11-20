@@ -1,0 +1,24 @@
+// A class extends only a class; an interface is implemented.
+interface Shape {
+  area(): double;
+}
+
+interface Named {
+  name: string;
+}
+
+class Fine implements Named {
+  public name: string;
+
+  public constructor() {
+    this.name = "fine";
+  }
+}
+
+class Wrong extends Named {
+  public name: string;
+
+  public constructor() {
+    this.name = "w";
+  }
+}

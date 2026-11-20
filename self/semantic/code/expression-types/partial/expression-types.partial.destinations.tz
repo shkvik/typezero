@@ -67,7 +67,7 @@ partial class ExpressionTypes {
   }
 
   private placedType(given: Type, destination: Type | undefined): Type {
-    if (destination == undefined) {
+    if (destination == undefined || destination.kind == TypeKind.Union) {
       return given;
     }
     if (!this.relation.converts(given, destination)) {
@@ -90,6 +90,9 @@ partial class ExpressionTypes {
   private isLiteralPlace(init: Expr, type: Type): boolean {
     if (init.kind == ExprKind.ArrayLit) {
       return type.kind == TypeKind.Array;
+    }
+    if (type.kind == TypeKind.Union) {
+      return type.parts.some((part) => part.kind == TypeKind.Object);
     }
 
     return type.kind == TypeKind.Object;

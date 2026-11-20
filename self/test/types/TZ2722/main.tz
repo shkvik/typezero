@@ -1,0 +1,6 @@
+// Without a constructor a field starts with a literal next to its type.
+class Plain {
+  public e: int = 5;
+  public f = "f";
+  public g: int[] = [];
+}

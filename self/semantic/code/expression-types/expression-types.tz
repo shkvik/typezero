@@ -40,6 +40,15 @@ import "./partial/expression-types.partial.generics.tz";
 import "./partial/expression-types.partial.bindings.tz";
 import "./partial/expression-types.partial.shapes.tz";
 import "./partial/expression-types.partial.generic-classes.tz";
+import "./partial/expression-types.partial.walks.tz";
+import "./partial/expression-types.partial.class-rules.tz";
+import "./partial/expression-types.partial.class-fields.tz";
+import "./partial/expression-types.partial.class-heritage.tz";
+import "./partial/expression-types.partial.class-contracts.tz";
+import "./partial/expression-types.partial.indexes.tz";
+import "./partial/expression-types.partial.bounds.tz";
+import "./partial/expression-types.partial.awaits.tz";
+import "./partial/expression-types.partial.promises.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   Details,
@@ -49,6 +58,7 @@ import {
   Expr,
   ExprKind,
 } from "../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
 import { Program } from "../../../program/module/types/module.types.tz";
 import { ModuleScopes } from "../../../program/scopes/types/scopes.types.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
@@ -60,6 +70,8 @@ import {
   FunctionDoor,
   StalledFunction,
   StaticOwner,
+  SuperFrame,
+  ThisPlace,
   ValueRecord,
   ValueTarget,
   VariableDoor,
@@ -96,6 +108,11 @@ export class ExpressionTypes {
   private readonly constKeys: Set<string>;
   private readonly selves: Type[];
   private readonly ownerClasses: StaticOwner[];
+  private readonly visited: Set<Expr>;
+  private readonly thisPlaces: ThisPlace[];
+  private readonly currentMethods: FunctionDecl[];
+  private readonly superFrames: SuperFrame[];
+  private readonly openFunctions: FunctionDecl[];
 
   public constructor(
     store: TypeStore,
@@ -133,6 +150,11 @@ export class ExpressionTypes {
     this.constKeys = new Set<string>();
     this.selves = [];
     this.ownerClasses = [];
+    this.visited = new Set<Expr>();
+    this.thisPlaces = [];
+    this.currentMethods = [];
+    this.superFrames = [];
+    this.openFunctions = [];
 
     for (const scopes of resolved) {
       this.scopes.set(scopes.module.id, scopes);
@@ -158,6 +180,8 @@ export class ExpressionTypes {
   }
 
   private typed(expr: Expr, wanted: Type | undefined, module: int): Type {
+    this.visited.add(expr);
+
     const literal = this.literalOf(expr, module);
     if (literal != undefined) {
       return this.literalTyped(expr, literal, wanted, module);
@@ -167,7 +191,7 @@ export class ExpressionTypes {
       case ExprKind.Undefined:
         return this.store.plain(TypeKind.Undefined);
       case ExprKind.Template:
-        return this.templated(wanted);
+        return this.templateTyped(expr, wanted, module);
       case ExprKind.ArrayLit:
         return this.arrayTyped(expr, wanted, module);
       case ExprKind.ObjectLit:
@@ -182,12 +206,26 @@ export class ExpressionTypes {
         return this.conditionalTyped(expr, wanted, module);
       case ExprKind.Member:
         return this.memberTyped(expr, module);
+      case ExprKind.Index:
+        return this.indexTyped(expr, module);
+      case ExprKind.Await:
+        return this.awaitTyped(expr, module);
       case ExprKind.OptionalChain:
         return this.chainTyped(expr, wanted, module);
-      case ExprKind.Call:
-        return this.callTyped(expr, wanted, module);
-      case ExprKind.New:
-        return this.newTyped(expr, wanted, module);
+      case ExprKind.Call: {
+        const type = this.callTyped(expr, wanted, module);
+
+        this.walkedArguments(expr.args, module);
+
+        return type;
+      }
+      case ExprKind.New: {
+        const type = this.newTyped(expr, wanted, module);
+
+        this.walkedArguments(expr.args, module);
+
+        return type;
+      }
       case ExprKind.Function:
         return this.closureTyped(expr, wanted, module);
       case ExprKind.Assign:
@@ -195,7 +233,7 @@ export class ExpressionTypes {
       case ExprKind.Update:
         return this.updatedTyped(expr.target, module);
       default:
-        return this.store.plain(TypeKind.Error);
+        return this.childrenTyped(expr, module);
     }
   }
 
@@ -227,6 +265,9 @@ export class ExpressionTypes {
       return;
     }
     if (this.isUndecided(expr, wanted)) {
+      return;
+    }
+    if (this.isIteratorFromClass(given, wanted)) {
       return;
     }
 

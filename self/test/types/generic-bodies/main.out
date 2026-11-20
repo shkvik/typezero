@@ -1,0 +1,7 @@
+main.tz
+  3:11 type Named = { name: string }
+  11:10 twiceNumber: (T) => T
+  19:10 call: (T) => void
+  23:10 nameOf: (T) => string
+  27:10 joined: (T) => string
+  31:10 same: (T, T) => boolean

@@ -9,6 +9,7 @@ import {
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import {
+  kToStringName,
   kBacktick,
   kCloseValue,
   kDictTexts,
@@ -39,9 +40,11 @@ partial class ExpressionTypes {
   private textCheck(operand: Expr, type: Type, module: int): void {
     const base = this.definedType(type);
     const isText = type.kind == TypeKind.String || type.kind == TypeKind.Error;
-    const isDeferred =
-      base.kind == TypeKind.Instance || base.kind == TypeKind.TypeParameter;
-    if (isText || isDeferred) {
+
+    if (base.kind == TypeKind.Instance) {
+      return this.instanceTextCheck(operand, base, module);
+    }
+    if (isText || base.kind == TypeKind.TypeParameter) {
       return;
     }
 
@@ -53,6 +56,28 @@ partial class ExpressionTypes {
     const details = this.textDetails(code, type, base);
 
     this.report(module, operand.loc, code, details);
+  }
+
+  private instanceTextCheck(operand: Expr, base: Type, module: int): void {
+    if (base.kind != TypeKind.Instance || this.isLibraryModule(base.module)) {
+      return;
+    }
+
+    const decl = this.classOf(base);
+    if (decl == undefined || decl.typeParams.length > 0) {
+      return;
+    }
+
+    const hasOwn = decl.methods.some((one) => one.name == kToStringName);
+    if (!hasOwn) {
+      this.report(module, operand.loc, Code.ObjectToText, kNoDetails);
+
+      return;
+    }
+
+    const word = this.tupleText(operand);
+
+    this.report(module, operand.loc, Code.OwnToString, { word });
   }
 
   private textProblem(type: Type, base: Type): Code | undefined {

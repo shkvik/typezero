@@ -251,6 +251,12 @@ partial class ExpressionTypes {
     }
   }
 
+  private isIteratorFromClass(given: Type, wanted: Type): boolean {
+    const target = this.definedType(wanted);
+
+    return given.kind == TypeKind.Instance && target.kind == TypeKind.Iterator;
+  }
+
   private isIterableTarget(wanted: Type): boolean {
     const defined = this.definedType(wanted);
     const parts = this.unionMembers(defined);

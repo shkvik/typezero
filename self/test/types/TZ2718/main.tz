@@ -1,0 +1,37 @@
+// None of the members of a union may be the class.
+class Point {
+  public x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+class Size {
+  public w: int;
+
+  public constructor(w: int) {
+    this.w = w;
+  }
+}
+
+const point = new Point(1);
+const size = new Size(2);
+const plain = { x: 1 };
+const either: Point | Size = point;
+
+class Other {
+  public y: int;
+
+  public constructor() {
+    this.y = 1;
+  }
+}
+
+function isPoint(value: Point | Size): boolean {
+  return value instanceof Point;
+}
+
+function isOther(value: Point | Size): boolean {
+  return value instanceof Other;
+}

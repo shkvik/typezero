@@ -1,0 +1,19 @@
+// A method belongs to the class and cannot be replaced.
+class Point {
+  public x: double;
+  public readonly id: int;
+
+  public constructor(x: double) {
+    this.x = x;
+    this.id = 1;
+  }
+
+  public length(): double {
+    return this.x;
+  }
+}
+
+const point = new Point(1);
+
+point.x = 2;
+point.length = () => 0;

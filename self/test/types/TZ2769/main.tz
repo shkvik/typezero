@@ -1,0 +1,14 @@
+// An async function waits for the Promise it returns by itself.
+async function save(name: string): Promise<int> {
+  return name.length;
+}
+
+async function fine(): Promise<int> {
+  const length = await save("a");
+
+  return length;
+}
+
+async function twice(): Promise<int> {
+  return await save("b");
+}

@@ -1,0 +1,10 @@
+// A constructor gives nothing: 'new' gives the object.
+class Returns {
+  public x: int;
+
+  public constructor() {
+    this.x = 1;
+
+    return 5;
+  }
+}

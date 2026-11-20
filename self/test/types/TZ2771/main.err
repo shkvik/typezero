@@ -1,0 +1,3 @@
+main.tz:8:8: error TZ2771: a Promise is not rejected in tz, so it has no 'finally': 'then' runs every time; write the code after 'await p'
+void p.finally(() => {});
+       ^

@@ -1,0 +1,3 @@
+main.tz:4:10: error TZ2719: duplicate member 'a' in class 'Dup'
+  public a: int = 2;
+         ^

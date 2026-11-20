@@ -1,0 +1,3 @@
+main.tz:18:21: error TZ2737: 'Named' is not a class, and a class can extend only a class; to say that 'Wrong' has what an interface lists, write 'implements Named'
+class Wrong extends Named {
+                    ^

@@ -1,0 +1,3 @@
+main.tz:6:20: error TZ2753: type '{ a: int; b: string }' has no numbered fields; read a field by its name, e.g. 'o.name'
+const wrong = mixed[0];
+                   ^

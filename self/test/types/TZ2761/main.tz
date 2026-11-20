@@ -1,0 +1,9 @@
+// A field that may be missing is set to undefined, not deleted.
+interface Query {
+  text: string;
+  limit?: int;
+}
+
+const query: Query = { text: "cats" };
+query.limit = undefined;
+delete query.limit;

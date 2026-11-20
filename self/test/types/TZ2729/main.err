@@ -1,0 +1,3 @@
+main.tz:18:17: error TZ2729: 'this' cannot be used before 'super(...)': the object exists once the constructor of 'Animal' has run
+    console.log(this.breed);
+                ^

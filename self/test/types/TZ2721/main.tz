@@ -1,0 +1,9 @@
+// In a class with a constructor the constructor sets the fields.
+class Built {
+  public n: int = 1;
+  public m: int;
+
+  public constructor() {
+    this.m = 2;
+  }
+}

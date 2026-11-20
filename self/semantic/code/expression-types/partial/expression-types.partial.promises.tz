@@ -1,0 +1,113 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Type } from "../../../../program/type/types/type.types.tz";
+import {
+  kAllSettledName,
+  kAnyName,
+  kCatchName,
+  kFinallyName,
+  kPromiseClass,
+  kRejectName,
+  kThenName,
+} from "../const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private promiseMisuse(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): boolean {
+    const name = member.name;
+    const loc = member.loc;
+
+    switch (name) {
+      case kCatchName:
+        this.report(module, loc, Code.PromiseNoCatch, kNoDetails);
+        this.looseArguments(expr.args, module);
+
+        return true;
+      case kFinallyName:
+        this.report(module, loc, Code.PromiseNoFinally, kNoDetails);
+        this.looseArguments(expr.args, module);
+
+        return true;
+      case kThenName:
+        return this.thenTwoCheck(expr, module);
+      default:
+        return this.promiseMissing(member, object, module);
+    }
+  }
+
+  private thenTwoCheck(expr: CallExpr, module: int): boolean {
+    const second = expr.args[1];
+    if (second == undefined) {
+      return false;
+    }
+
+    this.report(module, second.expr.loc, Code.PromiseThenTwo, kNoDetails);
+    this.looseArguments(expr.args, module);
+
+    return true;
+  }
+
+  private promiseMissing(
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): boolean {
+    const receiver = this.libraryReceiver(object);
+    if (receiver == undefined) {
+      return false;
+    }
+
+    const found = this.receiverMember(receiver, member.name, true);
+    if (found != undefined) {
+      return false;
+    }
+
+    const word = member.name;
+    const first = this.text.of(object);
+
+    this.report(module, member.loc, Code.PromiseNoMethod, { word, first });
+
+    return true;
+  }
+
+  private promiseStatic(member: MemberExpr, module: int): boolean {
+    const object = member.object;
+    if (object.kind != ExprKind.Name || object.name != kPromiseClass) {
+      return false;
+    }
+
+    const target = this.targetOfName(object, module);
+    if (target == undefined || !this.isLibraryModule(target.module)) {
+      return false;
+    }
+
+    const loc = member.loc;
+
+    switch (member.name) {
+      case kRejectName:
+        this.report(module, loc, Code.PromiseRejected, kNoDetails);
+
+        return true;
+      case kAllSettledName:
+        this.report(module, loc, Code.PromiseAllSettled, kNoDetails);
+
+        return true;
+      case kAnyName:
+        this.report(module, loc, Code.PromiseAny, kNoDetails);
+
+        return true;
+      default:
+        return false;
+    }
+  }
+}

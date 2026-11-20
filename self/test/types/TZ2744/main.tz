@@ -1,0 +1,24 @@
+// A class that can be created implements the abstract methods.
+abstract class Figure {
+  public abstract area(): double;
+
+  public describe(): string {
+    return "figure";
+  }
+}
+
+class Circle extends Figure {
+  public constructor() {
+    super();
+  }
+
+  public area(): double {
+    return 3;
+  }
+}
+
+class Blob extends Figure {
+  public constructor() {
+    super();
+  }
+}

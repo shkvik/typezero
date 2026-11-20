@@ -1,0 +1,7 @@
+main.tz
+  18:7 point: Point
+  19:7 size: Size
+  20:7 plain: { x: int }
+  21:7 either: Point | Size
+  31:10 isPoint: (Point | Size) => boolean
+  35:10 isOther: (Point | Size) => boolean

@@ -1,0 +1,9 @@
+// An object has only the fields of its type.
+interface Query {
+  text: string;
+  limit?: int;
+}
+
+const query: Query = { text: "cats" };
+const fine = query.text;
+const wrong = "other" in query;

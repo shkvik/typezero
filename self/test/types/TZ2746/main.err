@@ -1,0 +1,3 @@
+main.tz:16:18: error TZ2746: 'area' is abstract in 'Figure': it has no body to call
+    return super.area();
+                 ^

@@ -1,0 +1,5 @@
+// A tuple with elements of several types has no array methods.
+const pair: [string, int] = ["a", 1];
+const same: [int, int] = [1, 2];
+const found = same.indexOf(2);
+const wrong = pair.indexOf("a");

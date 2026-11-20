@@ -21,11 +21,17 @@ import {
   TypeContext,
   TypePlace,
 } from "../../../types/type-resolver/types/type-resolver.types.tz";
-import { kPrototypeName, kThisName } from "../const/expression-types.const.tz";
-import { StaticOwner } from "../types/expression-types.types.tz";
+import {
+  kClassNameMember,
+  kPrototypeName,
+  kThisName,
+} from "../const/expression-types.const.tz";
+import { StaticOwner, ThisPlace } from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private walkClass(decl: ClassDecl, module: int): void {
+    this.checkFields(decl, module);
+
     for (const fn of decl.constructors) {
       this.methodFunction(decl, fn, module);
     }
@@ -35,6 +41,9 @@ partial class ExpressionTypes {
         this.methodFunction(decl, fn, module);
       }
     }
+
+    this.overrideChecks(decl, module);
+    this.contractChecks(decl, module);
   }
 
   private methodFunction(decl: ClassDecl, fn: FunctionDecl, module: int): Type {
@@ -42,15 +51,33 @@ partial class ExpressionTypes {
     const home = this.partModule(part, module);
     const self = this.selfOf(decl, fn, module);
 
+    const place = this.methodPlace(fn);
+    const frame = this.superFrameOf(decl, fn, home);
+
     this.selves.push(self);
     this.ownerClasses.push({ decl, module });
+    this.thisPlaces.push(place);
+    this.currentMethods.push(fn);
+    this.superFrames.push(frame);
 
     const type = this.functionType(fn, home);
 
+    this.superCheck(decl, fn, home);
+    this.superFrames.pop();
+    this.currentMethods.pop();
+    this.thisPlaces.pop();
     this.ownerClasses.pop();
     this.selves.pop();
 
     return type;
+  }
+
+  private methodPlace(fn: FunctionDecl): ThisPlace {
+    if (this.isStaticMethod(fn)) {
+      return ThisPlace.StaticMethod;
+    }
+
+    return ThisPlace.Method;
   }
 
   private selfOf(decl: ClassDecl, fn: FunctionDecl, module: int): Type {
@@ -64,6 +91,13 @@ partial class ExpressionTypes {
 
   private thisTyped(expr: NameExpr, module: int): Type {
     const self = this.selves[this.selves.length - 1];
+
+    if (this.thisInFunction(expr, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.thisBeforeSuper(expr, module);
+
     if (self != undefined) {
       return self;
     }
@@ -174,6 +208,20 @@ partial class ExpressionTypes {
       (one) => one.name == name && this.isStaticMethod(one),
     );
     const isMissing = field == undefined && methods.length == 0;
+    if (isMissing && name == kClassNameMember) {
+      return this.store.plain(TypeKind.String);
+    }
+    if (isMissing && this.hasInstanceMember(decl, name)) {
+      const word = name;
+      const first = decl.name ?? "";
+
+      this.report(module, expr.loc, Code.InstanceMemberViaClass, {
+        word,
+        first,
+      });
+
+      return undefined;
+    }
     if (isMissing && decl.base == undefined && decl.baseExpr == undefined) {
       const word = name;
       const first = decl.name ?? "";
@@ -202,6 +250,17 @@ partial class ExpressionTypes {
     }
 
     return this.methodFunction(decl, method, owner.module);
+  }
+
+  private hasInstanceMember(decl: ClassDecl, name: string): boolean {
+    const isField = decl.fields.some(
+      (one) => one.name == name && one.form != FieldKind.Static,
+    );
+    const isMethod = decl.methods.some(
+      (one) => one.name == name && !this.isStaticMethod(one),
+    );
+
+    return isField || isMethod;
   }
 
   private staticFieldType(
