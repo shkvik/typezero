@@ -1,0 +1,3 @@
+main.tz:18:37: error TZ2647: property 'missing' does not exist on type 'int'
+const broken = numbers.map((n) => n.missing);
+                                    ^

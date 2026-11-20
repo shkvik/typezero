@@ -1,0 +1,13 @@
+main.tz
+  54:7 a: Box<int>
+  55:7 b: Box<string>
+  56:7 c: int
+  57:7 d: Box<string>
+  58:7 e: [int, boolean]
+  59:7 f: Num<double>
+  60:7 g: Stack<int>
+  61:7 h: int | undefined
+  62:7 i: Box<int[]>
+  63:7 j: string[]
+  64:7 k: string
+  68:7 m: Box<int>

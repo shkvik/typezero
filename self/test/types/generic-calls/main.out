@@ -1,0 +1,38 @@
+main.tz
+  3:10 identity: (T) => T
+  7:10 first: (T[]) => T | undefined
+  11:10 pair: (T, T) => T[]
+  15:10 wrap: (T) => { value: T }
+  19:10 keep: (T) => T[]
+  23:10 twoKinds: (A, B) => [A, B]
+  27:10 maybe: (T | undefined, T) => T
+  31:10 apply: (T, (T) => R) => R
+  35:10 sum: (T[]) => T | undefined
+  39:10 average: (T[]) => T | undefined
+  43:10 key: (T) => T
+  47:10 convert: (T, (T) => string) => string
+  51:10 pick: (T[], int) => T | undefined
+  55:7 a: int
+  56:7 b: string
+  57:7 c: int | undefined
+  58:7 d: int[]
+  59:7 e: double[]
+  60:7 f: { value: boolean }
+  61:7 g: int8
+  62:7 h: string[]
+  63:7 i: [int, string]
+  64:7 j: int
+  65:7 k: int
+  66:7 l: int
+  67:7 m: double | undefined
+  68:7 n: int[]
+  69:7 o: string | undefined
+  70:7 p: { a: int }
+  71:7 q: (int | undefined)[]
+  72:7 r: int
+  73:7 s: int[]
+  74:7 t: double | undefined
+  80:7 length: string
+  81:7 wrong: int | undefined
+  82:7 given: string
+  85:7 text: string

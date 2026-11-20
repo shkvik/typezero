@@ -344,6 +344,9 @@ partial class ExpressionTypes {
     if (decl == undefined) {
       return this.store.plain(TypeKind.Error);
     }
+    if (decl.typeParams.length > 0 && expr.typeArgs.length == 0) {
+      return this.genericNew(expr, decl, target.module, wanted, module);
+    }
 
     const written = this.newArguments(expr, decl, module);
     if (written == undefined) {

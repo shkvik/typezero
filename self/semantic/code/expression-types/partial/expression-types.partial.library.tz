@@ -13,6 +13,7 @@ import {
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
 import { ParameterSite } from "../../../types/type-resolver/types/type-resolver.types.tz";
+import { GenericTarget } from "../types/expression-types.types.tz";
 import {
   kArrayShape,
   kAsyncGeneratorShape,
@@ -154,6 +155,7 @@ partial class ExpressionTypes {
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
+    wanted: Type | undefined,
     module: int,
   ): Type | undefined {
     const receiver = this.libraryReceiver(object);
@@ -163,12 +165,57 @@ partial class ExpressionTypes {
 
     const isProved =
       kSpecialMethods.includes(member.name) || this.isRegexSplit(expr, member);
+    const generic = this.receiverMember(receiver, member.name, true);
+    const isGeneric =
+      generic != undefined &&
+      generic.kind == TypeKind.Function &&
+      this.mentionsParameter(generic);
+    const isSpecial = isProved || object.kind == TypeKind.Result;
+    if (isGeneric && isSpecial) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (isGeneric && generic != undefined) {
+      return this.libraryMethodCall(expr, member, generic, wanted, module);
+    }
+
     const method = this.libraryMemberType(receiver, member.name, true);
     if (method == undefined || isProved) {
       return this.store.plain(TypeKind.Error);
     }
 
     return this.fieldValueCall(expr, member, method, true, module);
+  }
+
+  private libraryMethodCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    type: Type,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const params = this.genericParameters(type);
+    if (type.kind != TypeKind.Function || params == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (params.length == 0) {
+      return this.fieldValueCall(expr, member, type, true, module);
+    }
+    if (expr.optional || type.shape.self != undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const generic: GenericTarget = {
+      name: member.name,
+      params,
+      decls: [],
+      home: module,
+      shape: type.shape,
+      loc: member.loc,
+      typeArgs: member.typeArgs,
+      isLenient: true,
+    };
+
+    return this.genericResult(expr, generic, wanted, module);
   }
 
   private isRegexSplit(expr: CallExpr, member: MemberExpr): boolean {
@@ -257,7 +304,10 @@ partial class ExpressionTypes {
     }
 
     const isPlain = form.kind == DeclaredMemberKind.Method;
-    if (!isPlain || members.length > 1 || form.typeParams.length > 0) {
+    if (!isPlain || members.length > 1) {
+      return undefined;
+    }
+    if (form.typeParams.length > 0 && !isCalled) {
       return undefined;
     }
 

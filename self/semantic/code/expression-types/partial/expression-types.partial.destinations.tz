@@ -21,7 +21,9 @@ partial class ExpressionTypes {
     init: Expr,
     module: int,
   ): Type | undefined {
-    if (init.kind != ExprKind.ObjectLit) {
+    const isLiteral =
+      init.kind == ExprKind.ObjectLit || init.kind == ExprKind.ArrayLit;
+    if (!isLiteral) {
       return undefined;
     }
 
@@ -30,8 +32,11 @@ partial class ExpressionTypes {
 
     for (const one of list ?? []) {
       const type = this.destinationType(one, module);
-      if (type == undefined) {
+      if (type == undefined || !this.isLiteralPlace(init, type)) {
         continue;
+      }
+      if (this.mentionsParameter(type)) {
+        return undefined;
       }
       if (chosen != undefined && chosen != type) {
         return undefined;
@@ -78,12 +83,16 @@ partial class ExpressionTypes {
       bindings: new Map<int, Type>(),
       place: TypePlace.Plain,
     };
-    const found = this.writtenDestination(one, context, module);
-    if (found == undefined || found.kind != TypeKind.Object) {
-      return undefined;
+
+    return this.writtenDestination(one, context, module);
+  }
+
+  private isLiteralPlace(init: Expr, type: Type): boolean {
+    if (init.kind == ExprKind.ArrayLit) {
+      return type.kind == TypeKind.Array;
     }
 
-    return found;
+    return type.kind == TypeKind.Object;
   }
 
   private writtenDestination(

@@ -1,0 +1,9 @@
+// A type parameter gets one type from all the arguments of a call.
+function pair<T>(a: T, b: T): T[] {
+  return [a, b];
+}
+
+const numbers = pair(1, 2.5);
+const words = pair("a", "b");
+const mixed = pair("a", 1);
+const written = pair<string>("a", "b");

@@ -23,10 +23,14 @@ import {
   UnionType,
 } from "../../../../program/type/types/type.types.tz";
 import { DoorState } from "../../../types/type-resolver/types/type-resolver.types.tz";
-import { ValueTarget } from "../types/expression-types.types.tz";
+import { GenericTarget, ValueTarget } from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private callTyped(expr: CallExpr, module: int): Type {
+  private callTyped(
+    expr: CallExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
     const callee = expr.callee;
 
     if (expr.tagged) {
@@ -35,15 +39,20 @@ partial class ExpressionTypes {
 
     switch (callee.kind) {
       case ExprKind.Name:
-        return this.namedCall(expr, callee, module);
+        return this.namedCall(expr, callee, wanted, module);
       case ExprKind.Member:
-        return this.memberCall(expr, callee, module);
+        return this.memberCall(expr, callee, wanted, module);
       default:
         return this.valueCall(expr, module);
     }
   }
 
-  private namedCall(expr: CallExpr, callee: NameExpr, module: int): Type {
+  private namedCall(
+    expr: CallExpr,
+    callee: NameExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
     const target = this.targetOfName(callee, module);
     if (target == undefined) {
       return this.store.plain(TypeKind.Error);
@@ -56,7 +65,7 @@ partial class ExpressionTypes {
 
     switch (target.kind) {
       case SymbolKind.Function:
-        return this.functionCall(expr, callee, target, module);
+        return this.functionCall(expr, callee, target, wanted, module);
       case SymbolKind.Class:
         this.report(module, callee.loc, Code.NameNotFunction, {
           word: callee.name,
@@ -73,10 +82,19 @@ partial class ExpressionTypes {
     expr: CallExpr,
     callee: NameExpr,
     target: ValueTarget,
+    wanted: Type | undefined,
     module: int,
   ): Type {
     const fn = this.record(target.module)?.functions.get(target.loc);
-    if (fn == undefined || !this.isCallable(fn, target.module)) {
+    if (fn == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (fn.typeParams.length == 0 && callee.typeArgs.length > 0) {
+      this.report(module, callee.loc, Code.NotGenericFunction, {
+        word: callee.name,
+      });
+    }
+    if (!this.isCallable(fn, target.module)) {
       return this.store.plain(TypeKind.Error);
     }
 
@@ -106,6 +124,11 @@ partial class ExpressionTypes {
     if (type.kind != TypeKind.Function) {
       return this.store.plain(TypeKind.Error);
     }
+    if (fn.typeParams.length > 0) {
+      const generic = this.genericFunction(callee, fn, type, target);
+
+      return this.genericResult(expr, generic, wanted, module);
+    }
 
     const shape = type.shape;
     const params = this.directParams(shape.params, shape.self);
@@ -127,8 +150,46 @@ partial class ExpressionTypes {
     return shape.result;
   }
 
+  private genericFunction(
+    callee: NameExpr,
+    fn: FunctionDecl,
+    type: FunctionType,
+    target: ValueTarget,
+  ): GenericTarget {
+    const home = target.module;
+
+    return {
+      name: fn.name,
+      params: this.resolver.parameterTypes(home, fn.typeParams),
+      decls: fn.typeParams,
+      home,
+      shape: type.shape,
+      loc: callee.loc,
+      typeArgs: callee.typeArgs,
+      isLenient: this.isLibraryModule(home),
+    };
+  }
+
+  private genericResult(
+    expr: CallExpr,
+    generic: GenericTarget,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    if (generic.isLenient) {
+      this.lenientCalls.add(expr);
+    }
+
+    const result = this.genericCall(generic, expr.args, wanted, module);
+    if (generic.isLenient && result.kind == TypeKind.Unknown) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return result;
+  }
+
   private isCallable(fn: FunctionDecl, module: int): boolean {
-    if (fn.typeParams.length > 0 || this.isOverloaded(fn, module)) {
+    if (this.isOverloaded(fn, module)) {
       return false;
     }
     if (fn.bodySource == BodySource.Written) {
@@ -263,7 +324,12 @@ partial class ExpressionTypes {
     }
   }
 
-  private memberCall(expr: CallExpr, member: MemberExpr, module: int): Type {
+  private memberCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
     if (this.enumOfObject(member.object, module) != undefined) {
       return this.store.plain(TypeKind.Error);
     }
@@ -280,24 +346,25 @@ partial class ExpressionTypes {
 
     const object = this.receiverOf(member.object, member.optional, module);
 
-    return this.receiverCall(expr, member, object, module);
+    return this.receiverCall(expr, member, object, wanted, module);
   }
 
   private receiverCall(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
+    wanted: Type | undefined,
     module: int,
   ): Type {
     switch (object.kind) {
       case TypeKind.Object:
-        return this.fieldCall(expr, member, object, module);
+        return this.fieldCall(expr, member, object, wanted, module);
       case TypeKind.Instance:
-        return this.instanceCall(expr, member, object, module);
+        return this.instanceCall(expr, member, object, wanted, module);
       case TypeKind.Union:
-        return this.variantCall(expr, member, object, module);
+        return this.variantCall(expr, member, object, wanted, module);
       default:
-        return this.otherCall(expr, member, object, module);
+        return this.otherCall(expr, member, object, wanted, module);
     }
   }
 
@@ -305,22 +372,24 @@ partial class ExpressionTypes {
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
+    wanted: Type | undefined,
     module: int,
   ): Type {
     if (!this.isLibraryModule(instance.module)) {
-      return this.methodCall(expr, member, instance, module);
+      return this.methodCall(expr, member, instance, wanted, module);
     }
 
-    return this.otherCall(expr, member, instance, module);
+    return this.otherCall(expr, member, instance, wanted, module);
   }
 
   private otherCall(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
+    wanted: Type | undefined,
     module: int,
   ): Type {
-    const found = this.libraryCall(expr, member, object, module);
+    const found = this.libraryCall(expr, member, object, wanted, module);
 
     return found ?? this.store.plain(TypeKind.Error);
   }
@@ -329,6 +398,7 @@ partial class ExpressionTypes {
     expr: CallExpr,
     member: MemberExpr,
     object: UnionType,
+    wanted: Type | undefined,
     module: int,
   ): Type {
     if (!this.isOptional(object)) {
@@ -337,7 +407,7 @@ partial class ExpressionTypes {
         return this.store.plain(TypeKind.Error);
       }
 
-      return this.receiverCall(expr, member, common, module);
+      return this.receiverCall(expr, member, common, wanted, module);
     }
 
     const defined = this.definedType(object);
@@ -357,6 +427,7 @@ partial class ExpressionTypes {
     expr: CallExpr,
     member: MemberExpr,
     object: ObjectType,
+    wanted: Type | undefined,
     module: int,
   ): Type {
     const fields = object.fields.filter((one) => one.name == member.name);
@@ -376,6 +447,9 @@ partial class ExpressionTypes {
     }
 
     const type = this.fieldWanted(field);
+    if (isLibrary && type.kind == TypeKind.Function) {
+      return this.libraryMethodCall(expr, member, type, wanted, module);
+    }
     if (this.mentionsParameter(type)) {
       return this.store.plain(TypeKind.Error);
     }
@@ -420,6 +494,7 @@ partial class ExpressionTypes {
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
+    wanted: Type | undefined,
     module: int,
   ): Type {
     const lookup = this.classMember(instance, member.name);
@@ -463,6 +538,22 @@ partial class ExpressionTypes {
       this.looseArguments(expr.args, module);
 
       return this.store.plain(TypeKind.Error);
+    }
+
+    if (method.typeParams.length > 0) {
+      return this.genericMethodCall(
+        expr,
+        member,
+        entry,
+        method,
+        wanted,
+        module,
+      );
+    }
+    if (member.typeArgs.length > 0) {
+      this.report(module, member.loc, Code.NotGenericMethod, {
+        word: member.name,
+      });
     }
 
     const type = this.methodTypeOf(entry, method);

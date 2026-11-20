@@ -1,0 +1,7 @@
+// Type arguments go only to generic functions.
+function plain(x: int): int {
+  return x;
+}
+
+const fine = plain(1);
+const wrong = plain<int>(1);

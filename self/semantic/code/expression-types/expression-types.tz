@@ -35,6 +35,11 @@ import "./partial/expression-types.partial.construction.tz";
 import "./partial/expression-types.partial.destinations.tz";
 import "./partial/expression-types.partial.closures.tz";
 import "./partial/expression-types.partial.classes.tz";
+import "./partial/expression-types.partial.candidates.tz";
+import "./partial/expression-types.partial.generics.tz";
+import "./partial/expression-types.partial.bindings.tz";
+import "./partial/expression-types.partial.shapes.tz";
+import "./partial/expression-types.partial.generic-classes.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   Details,
@@ -180,7 +185,7 @@ export class ExpressionTypes {
       case ExprKind.OptionalChain:
         return this.chainTyped(expr, wanted, module);
       case ExprKind.Call:
-        return this.callTyped(expr, module);
+        return this.callTyped(expr, wanted, module);
       case ExprKind.New:
         return this.newTyped(expr, wanted, module);
       case ExprKind.Function:

@@ -133,3 +133,4 @@ export const kJsonKinds: JsonKind[] = [
   { kind: TypeKind.Promise, name: "object" },
   { kind: TypeKind.Instance, name: "object" },
 ];
+export const kUnionSeparator = " | ";

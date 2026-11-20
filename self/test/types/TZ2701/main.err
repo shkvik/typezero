@@ -1,0 +1,3 @@
+main.tz:16:23: error TZ2701: 'size' is not a generic method; remove the type arguments
+const wrong = counter.size<int>();
+                      ^

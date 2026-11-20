@@ -1,0 +1,6 @@
+main.tz:16:17: error TZ2696: cannot infer type parameter 'T' of 'emptyList': nothing in the call says what it is; give it, e.g. 'emptyList<int>(...)'
+const unknown = emptyList();
+                ^
+main.tz:17:17: error TZ2696: cannot infer type parameter 'T' of 'new Bag': nothing in the call says what it is; give it, e.g. 'new Bag<int>(...)'
+const bag = new Bag();
+                ^

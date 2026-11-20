@@ -1,0 +1,30 @@
+main.tz:76:17: error TZ2668: an expression of type 'void' cannot initialize a variable
+const nothing = identity(undefined);
+                ^
+main.tz:77:15: error TZ2434: type 'int' does not satisfy the constraint 'number' of 'T' in 'sum'
+const whole = sum([1, 2]);
+              ^
+main.tz:78:15: error TZ2434: type 'string' does not satisfy the constraint 'number' of 'T' in 'average'
+const words = average(["a"]);
+              ^
+main.tz:79:14: error TZ2434: type 'boolean' does not satisfy the constraint 'string | int' of 'T' in 'key'
+const flag = key(true);
+             ^
+main.tz:80:44: error TZ2501: type 'int' is not assignable to type 'string'
+const length = convert(1, (value) => value * 2);
+                                           ^
+main.tz:81:28: error TZ2501: type 'string' is not assignable to type 'int'
+const wrong = pick([1, 2], "a");
+                           ^
+main.tz:82:32: error TZ2501: type 'int' is not assignable to type 'string'
+const given = identity<string>(1);
+                               ^
+main.tz:83:15: error TZ2655: expected 2 arguments, but got 3
+const extra = pick([1], 0, 2);
+              ^
+main.tz:84:14: error TZ2655: expected 1 argument, but got 0
+const none = identity();
+             ^
+main.tz:85:31: error TZ2501: type 'int' is not assignable to type 'string'
+const text: string = identity(1);
+                              ^

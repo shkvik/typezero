@@ -1,0 +1,3 @@
+main.tz:8:15: error TZ2697: type parameter 'T' of 'pair' gets 'string' from one argument and 'int' from another; give it, e.g. 'pair<string>(...)'
+const mixed = pair("a", 1);
+              ^

@@ -1,0 +1,3 @@
+main.tz:7:15: error TZ2700: 'plain' is not a generic function; remove the type arguments
+const wrong = plain<int>(1);
+              ^

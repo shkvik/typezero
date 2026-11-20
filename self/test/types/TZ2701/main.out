@@ -1,0 +1,4 @@
+main.tz
+  14:7 counter: Counter
+  15:7 fine: int
+  16:7 wrong: int

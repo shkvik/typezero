@@ -1,0 +1,69 @@
+// A generic class gets its type parameters from the arguments of 'new'; its
+// methods take the types of the object, and a generic method gets its own
+// from the call.
+class Box<T> {
+  public value: T;
+
+  public constructor(value: T) {
+    this.value = value;
+  }
+
+  public get(): T {
+    return this.value;
+  }
+
+  public set(value: T): void {
+    this.value = value;
+  }
+
+  public map<U>(fn: (value: T) => U): Box<U> {
+    return new Box(fn(this.value));
+  }
+
+  public both<U>(other: U): [T, U] {
+    return [this.value, other];
+  }
+}
+
+class Num<T extends number> {
+  public value: T;
+
+  public constructor(value: T) {
+    this.value = value;
+  }
+}
+
+class Stack<T> {
+  private items: T[];
+
+  public constructor(items: T[]) {
+    this.items = items;
+  }
+
+  public top(): T | undefined {
+    return this.items[this.items.length - 1];
+  }
+}
+
+class Tools {
+  public twice<T>(value: T): T[] {
+    return [value, value];
+  }
+}
+
+const a = new Box(1);
+const b = new Box<string>("x");
+const c = a.get();
+const d = a.map((v) => `${v}`);
+const e = a.both(true);
+const f = new Num(1.5);
+const g = new Stack([1, 2]);
+const h = g.top();
+const i = new Box([1, 2]);
+const j = new Tools().twice("t");
+const k = d.get();
+
+a.set("wrong");
+const l = new Num("x");
+const m = new Box<int>("y");
+const n = a.both<string, int>("x");

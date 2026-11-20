@@ -1,0 +1,14 @@
+main.tz
+  3:7 numbers: int[]
+  4:7 words: string[]
+  5:7 nested: int[][]
+  7:7 doubled: int[]
+  8:7 texts: string[]
+  9:7 lengths: int[]
+  10:7 tests: boolean[]
+  11:7 sums: int[]
+  12:7 largest: int
+  13:7 mixed: double
+  14:7 some: boolean
+  15:7 found: int | undefined
+  16:7 position: int

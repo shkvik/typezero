@@ -1,0 +1,5 @@
+main.tz
+  2:10 run: ((T) => T) => int
+  6:10 apply: (T, (T) => T) => T
+  10:7 doubled: int
+  11:7 typed: int

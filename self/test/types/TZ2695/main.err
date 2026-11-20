@@ -1,0 +1,6 @@
+main.tz:13:14: error TZ2695: 'pair' takes 1 type argument, but got 2
+const many = pair<int, string>(1, 2);
+             ^
+main.tz:16:20: error TZ2695: 'put' takes 1 type argument, but got 2
+const both = shelf.put<string, int>("x");
+                   ^

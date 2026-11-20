@@ -187,3 +187,9 @@ export type EnumStep = {
   readonly type: Type;
   readonly number?: int;
 };
+
+export type SubstitutionWalk = {
+  readonly bound: Map<int, Type>;
+  readonly ids: Set<int>;
+  readonly visiting: Set<int>;
+};

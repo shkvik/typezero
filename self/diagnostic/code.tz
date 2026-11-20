@@ -525,4 +525,11 @@ export enum Code {
   ThisOutsideMethod = "TZ2692",
   StaticMissing = "TZ2693",
   NoPrototype = "TZ2694",
+  TypeArgumentsTooMany = "TZ2695",
+  CannotInferParameter = "TZ2696",
+  CandidatesClash = "TZ2697",
+  CallbackParameterUninferred = "TZ2698",
+  CallbackParametersUninferred = "TZ2699",
+  NotGenericFunction = "TZ2700",
+  NotGenericMethod = "TZ2701",
 }

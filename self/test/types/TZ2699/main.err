@@ -1,0 +1,3 @@
+main.tz:11:19: error TZ2699: cannot infer type parameter 'T' of 'each' for the parameters of this function: nothing else in the call says what it is; give it, e.g. 'each<int>(...)', or the type of the parameter
+const open = each((index) => {});
+                  ^

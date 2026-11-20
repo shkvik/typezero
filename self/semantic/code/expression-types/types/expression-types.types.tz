@@ -3,6 +3,7 @@ import { SourceError } from "../../../../diagnostic/types/message.types.tz";
 import {
   BinaryExpr,
   BinaryOp,
+  CallArgument,
   CallExpr,
   Expr,
   Property,
@@ -18,7 +19,10 @@ import {
   Param,
 } from "../../../../program/ast/types/ast.types.functions.tz";
 import { VarDeclarator } from "../../../../program/ast/types/ast.types.patterns.tz";
-import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  TypeParamDecl,
+  TypeRef,
+} from "../../../../program/ast/types/ast.types.types.tz";
 import { ForOfStmt } from "../../../../program/ast/types/ast.types.statements.tz";
 import {
   NameUse,
@@ -27,6 +31,7 @@ import {
 import {
   DictKind,
   FunctionParameter,
+  FunctionShape,
   InstanceType,
   LiteralKind,
   PlainKind,
@@ -317,4 +322,57 @@ export type DictText = {
   readonly dict: DictKind;
   readonly kind: string;
   readonly shown: string;
+};
+
+export type GenericTarget = {
+  readonly name: string;
+  readonly params: Type[];
+  readonly decls: TypeParamDecl[];
+  readonly home: int;
+  readonly shape: FunctionShape;
+  readonly loc: int;
+  readonly typeArgs: TypeRef[];
+  readonly isLenient: boolean;
+};
+
+export enum CandidateStrength {
+  Strong,
+  Weak,
+  Literal,
+}
+
+export type Candidate = {
+  readonly index: int;
+  readonly type: Type;
+  readonly strength: CandidateStrength;
+};
+
+export type InferenceSet = {
+  readonly params: Type[];
+  readonly candidates: Candidate[];
+  readonly undefinedSeen: Set<int>;
+  readonly visited: Set<string>;
+  isWeak: boolean;
+  isIntLiteral: boolean;
+};
+
+export enum ArgumentForm {
+  Plain,
+  Inferred,
+  Shape,
+  Contextual,
+  LiteralText,
+}
+
+export type GenericDraft = {
+  readonly target: GenericTarget;
+  readonly args: CallArgument[];
+  readonly wanted?: Type;
+  readonly bound: Map<int, Type>;
+  readonly given: Map<int, Type>;
+  readonly settled: Set<int>;
+  readonly literals: int[];
+  readonly contextual: int[];
+  readonly inference: InferenceSet;
+  isInferred: boolean;
 };

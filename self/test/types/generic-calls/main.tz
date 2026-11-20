@@ -1,0 +1,85 @@
+// A generic function gets its type parameters from the arguments of a call,
+// from the type the call is expected to give, or from type arguments.
+function identity<T>(value: T): T {
+  return value;
+}
+
+function first<T>(items: T[]): T | undefined {
+  return items[0];
+}
+
+function pair<T>(a: T, b: T): T[] {
+  return [a, b];
+}
+
+function wrap<T>(value: T): { value: T } {
+  return { value };
+}
+
+function keep<T>(value: T) {
+  return [value];
+}
+
+function twoKinds<A, B>(a: A, b: B): [A, B] {
+  return [a, b];
+}
+
+function maybe<T>(value: T | undefined, fallback: T): T {
+  return value ?? fallback;
+}
+
+function apply<T, R>(value: T, fn: (item: T) => R): R {
+  return fn(value);
+}
+
+function sum<T extends number>(items: T[]): T | undefined {
+  return items[0];
+}
+
+function average<T extends number>(items: T[]): T | undefined {
+  return sum(items);
+}
+
+function key<T extends string | int>(value: T): T {
+  return value;
+}
+
+function convert<T>(value: T, fn: (item: T) => string): string {
+  return fn(value);
+}
+
+function pick<T>(items: T[], index: int): T | undefined {
+  return items[index];
+}
+
+const a = identity(1);
+const b = identity("x");
+const c = first([1, 2]);
+const d = pair(1, 2);
+const e = pair(1, 2.5);
+const f = wrap(true);
+const g = identity<int8>(1);
+const h = keep("s");
+const i = twoKinds(1, "a");
+const j = maybe(undefined, 3);
+const k = apply(2, (n) => n * 2);
+const l = apply("t", (s) => s.length);
+const m = sum([1.5, 2]);
+const n = identity([1, 2]);
+const o = first(["a"]);
+const p = identity({ a: 1 });
+const q = pair(1, undefined);
+const r = identity(2 + 3);
+const s: int[] = pair(1, 2);
+const t = average([0.5]);
+
+const nothing = identity(undefined);
+const whole = sum([1, 2]);
+const words = average(["a"]);
+const flag = key(true);
+const length = convert(1, (value) => value * 2);
+const wrong = pick([1, 2], "a");
+const given = identity<string>(1);
+const extra = pick([1], 0, 2);
+const none = identity();
+const text: string = identity(1);

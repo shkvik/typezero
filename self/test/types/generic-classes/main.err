@@ -1,0 +1,12 @@
+main.tz:66:7: error TZ2501: type 'string' is not assignable to type 'int'
+a.set("wrong");
+      ^
+main.tz:67:15: error TZ2434: type 'string' does not satisfy the constraint 'number' of 'T' in 'new Num'
+const l = new Num("x");
+              ^
+main.tz:68:24: error TZ2501: type 'string' is not assignable to type 'int'
+const m = new Box<int>("y");
+                       ^
+main.tz:69:13: error TZ2695: 'both' takes 1 type argument, but got 2
+const n = a.both<string, int>("x");
+            ^

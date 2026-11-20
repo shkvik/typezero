@@ -1,0 +1,18 @@
+// A type parameter that nothing in the call fixes is written at the call.
+function emptyList<T>(): T[] {
+  return [];
+}
+
+class Bag<T> {
+  public items: T[];
+
+  public constructor() {
+    this.items = [];
+  }
+}
+
+const numbers: int[] = emptyList();
+const given = emptyList<string>();
+const unknown = emptyList();
+const bag = new Bag();
+const typed = new Bag<int>();

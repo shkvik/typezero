@@ -1,0 +1,5 @@
+main.tz
+  2:10 emptyList: () => T[]
+  14:7 numbers: int[]
+  15:7 given: string[]
+  18:7 typed: Bag<int>

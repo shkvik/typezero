@@ -1,0 +1,12 @@
+// A function given to a generic call gets its parameter types from the call.
+function run<T>(fn: (x: T) => T): int {
+  return 1;
+}
+
+function apply<T>(value: T, fn: (x: T) => T): T {
+  return fn(value);
+}
+
+const doubled = apply(2, (x) => x * 2);
+const typed = run((x: int) => x + 1);
+const open = run((x) => x);

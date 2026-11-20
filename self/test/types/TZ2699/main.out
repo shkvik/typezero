@@ -1,0 +1,4 @@
+main.tz
+  2:10 each: ((int, T) => void) => int
+  6:10 eachOf: (T[], (int, T) => void) => int
+  10:7 known: int

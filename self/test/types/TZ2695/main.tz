@@ -1,0 +1,16 @@
+// A call gives at most as many type arguments as the function has.
+function pair<T>(a: T, b: T): T[] {
+  return [a, b];
+}
+
+class Shelf {
+  public put<T>(item: T): T[] {
+    return [item];
+  }
+}
+
+const fine = pair<int>(1, 2);
+const many = pair<int, string>(1, 2);
+const shelf = new Shelf();
+const placed = shelf.put<string>("x");
+const both = shelf.put<string, int>("x");

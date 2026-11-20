@@ -1,0 +1,445 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { TypeParamDecl } from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  OperationKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  kSampleArgument,
+  kTypeSeparator,
+} from "../const/expression-types.const.tz";
+import {
+  CandidateStrength,
+  GenericDraft,
+} from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private settleStrong(draft: GenericDraft, module: int): void {
+    const set = draft.inference;
+
+    for (let index = 0; index < draft.target.params.length; index++) {
+      const strong = this.candidatesOf(set, index, CandidateStrength.Strong);
+      if (strong.length > 0) {
+        this.settleParameter(draft, index, module);
+      }
+    }
+  }
+
+  private settleAll(draft: GenericDraft, module: int): void {
+    for (let index = 0; index < draft.target.params.length; index++) {
+      this.settleParameter(draft, index, module);
+    }
+  }
+
+  private settleParameter(draft: GenericDraft, index: int, module: int): void {
+    if (draft.bound.has(index)) {
+      return;
+    }
+
+    const joined = this.joinCandidates(draft, index, module);
+
+    if (draft.bound.has(index)) {
+      return;
+    }
+
+    const widened = this.widenedToConstraint(draft, index, joined);
+    const type = this.withUndefined(draft, index, widened);
+
+    if (type != undefined) {
+      draft.bound.set(index, type);
+    }
+  }
+
+  private joinCandidates(
+    draft: GenericDraft,
+    index: int,
+    module: int,
+  ): Type | undefined {
+    const set = draft.inference;
+    const strong = this.candidatesOf(set, index, CandidateStrength.Strong);
+    const weak = this.candidatesOf(set, index, CandidateStrength.Weak);
+    const literal = this.candidatesOf(set, index, CandidateStrength.Literal);
+    let type: Type | undefined = undefined;
+
+    for (const candidate of strong) {
+      const next = this.joinedWith(type, candidate);
+      if (next == undefined) {
+        return this.clash(draft, index, type, candidate, module);
+      }
+
+      type = next;
+    }
+
+    for (const candidate of weak) {
+      const next = this.joinedWith(type, candidate);
+      if (next == undefined && strong.length == 0) {
+        return this.clash(draft, index, type, candidate, module);
+      }
+      if (next != undefined) {
+        type = next;
+      }
+    }
+
+    for (const candidate of literal) {
+      if (this.isOtherNumber(type, candidate)) {
+        continue;
+      }
+
+      const next = this.joinedWith(type, candidate);
+      if (next == undefined) {
+        return this.clash(draft, index, type, candidate, module);
+      }
+
+      type = next;
+    }
+
+    return type;
+  }
+
+  private joinedWith(
+    type: Type | undefined,
+    candidate: Type,
+  ): Type | undefined {
+    if (type == undefined) {
+      return candidate;
+    }
+
+    return this.unify(type, candidate);
+  }
+
+  private clash(
+    draft: GenericDraft,
+    index: int,
+    type: Type | undefined,
+    candidate: Type,
+    module: int,
+  ): Type | undefined {
+    const target = draft.target;
+    const param = target.params[index];
+
+    this.failParameter(draft, index);
+
+    if (param == undefined || target.isLenient) {
+      return undefined;
+    }
+
+    const word = this.text.of(param);
+    const first = target.name;
+    const second = this.text.of(type ?? candidate);
+    const other = this.text.of(candidate);
+
+    this.report(module, target.loc, Code.CandidatesClash, {
+      word,
+      first,
+      second,
+      other,
+    });
+
+    return undefined;
+  }
+
+  private failParameter(draft: GenericDraft, index: int): void {
+    const error = this.store.plain(TypeKind.Error);
+
+    draft.bound.set(index, error);
+    draft.isInferred = false;
+  }
+
+  private isOtherNumber(type: Type | undefined, candidate: Type): boolean {
+    if (type == undefined || type == candidate) {
+      return false;
+    }
+
+    return this.isNumber(type);
+  }
+
+  private widenedToConstraint(
+    draft: GenericDraft,
+    index: int,
+    type: Type | undefined,
+  ): Type | undefined {
+    const param = draft.target.params[index];
+    if (type == undefined || param == undefined) {
+      return type;
+    }
+
+    const constraint = this.widenTarget(param);
+    const set = draft.inference;
+    const strong = this.candidatesOf(set, index, CandidateStrength.Strong);
+    const weak = this.candidatesOf(set, index, CandidateStrength.Weak);
+    const isOnlyLiterals = strong.length == 0 && weak.length == 0;
+    const isFractional =
+      constraint != undefined &&
+      (constraint.kind == TypeKind.Double ||
+        constraint.kind == TypeKind.Decimal);
+    const isWidening = type.kind == TypeKind.Int && isOnlyLiterals;
+    if (isWidening && isFractional && constraint != undefined) {
+      return constraint;
+    }
+
+    return type;
+  }
+
+  private widenTarget(param: Type): Type | undefined {
+    const constraint = this.store.constraintOf(param);
+    if (constraint == undefined || constraint.kind != TypeKind.Union) {
+      return constraint;
+    }
+
+    const parts = constraint.parts;
+    const whole = parts.find((part) => part.kind == TypeKind.Int);
+    const fraction = parts.find((part) => part.kind == TypeKind.Double);
+    const exact = parts.find((part) => part.kind == TypeKind.Decimal);
+
+    return whole ?? fraction ?? exact;
+  }
+
+  private withUndefined(
+    draft: GenericDraft,
+    index: int,
+    type: Type | undefined,
+  ): Type | undefined {
+    if (!draft.inference.undefinedSeen.has(index)) {
+      return type;
+    }
+    if (type == undefined) {
+      return this.store.plain(TypeKind.Void);
+    }
+
+    return this.optional(type);
+  }
+
+  private inferFromWanted(draft: GenericDraft): void {
+    const wanted = draft.wanted;
+    const params = draft.target.params;
+    const result = draft.target.shape.result;
+    const isOpen = draft.bound.size < params.length;
+    if (wanted == undefined || !isOpen) {
+      return;
+    }
+    if (!this.isMentioning(result, params)) {
+      return;
+    }
+
+    const set = this.inferenceSet(params);
+
+    this.inferPair(set, result, wanted);
+
+    for (let index = 0; index < params.length; index++) {
+      const strong = this.candidatesOf(set, index, CandidateStrength.Strong);
+      const type = this.wantedCandidate(strong);
+      if (!draft.bound.has(index) && type != undefined) {
+        draft.bound.set(index, type);
+      }
+    }
+  }
+
+  private wantedCandidate(candidates: Type[]): Type | undefined {
+    let type: Type | undefined = undefined;
+
+    for (const candidate of candidates) {
+      type = this.joinedWith(type, candidate);
+    }
+
+    return type;
+  }
+
+  private finishTypeArguments(draft: GenericDraft, module: int): void {
+    const isSilent = this.hasArgumentErrors(draft);
+
+    for (let index = 0; index < draft.target.params.length; index++) {
+      this.finishTypeArgument(draft, index, isSilent, module);
+    }
+  }
+
+  private finishTypeArgument(
+    draft: GenericDraft,
+    index: int,
+    isSilent: boolean,
+    module: int,
+  ): void {
+    const target = draft.target;
+    const param = target.params[index];
+    const decl = target.decls[index];
+
+    if (param == undefined) {
+      return;
+    }
+    if (!draft.bound.has(index) && decl != undefined) {
+      this.defaultArgument(draft, index, decl);
+    }
+
+    const found = draft.bound.get(index);
+    if (found == undefined) {
+      if (!isSilent) {
+        this.reportUninferred(draft, param, module);
+      }
+
+      this.failParameter(draft, index);
+
+      return;
+    }
+    if (found.kind == TypeKind.Error) {
+      draft.isInferred = false;
+
+      return;
+    }
+    if (decl == undefined || target.isLenient) {
+      return;
+    }
+
+    this.constraintCheck(draft, index, decl, found, module);
+  }
+
+  private defaultArgument(
+    draft: GenericDraft,
+    index: int,
+    decl: TypeParamDecl,
+  ): void {
+    const target = draft.target;
+    const bindings = this.boundByLoc(draft);
+    const fallback = this.resolver.defaultOf(target.home, decl, bindings);
+    if (fallback == undefined) {
+      return;
+    }
+
+    const open = this.openParameters(draft);
+    if (this.isMentioning(fallback, open)) {
+      return;
+    }
+
+    draft.bound.set(index, fallback);
+  }
+
+  private reportUninferred(
+    draft: GenericDraft,
+    param: Type,
+    module: int,
+  ): void {
+    const target = draft.target;
+    if (target.isLenient) {
+      return;
+    }
+
+    const word = this.text.of(param);
+    const first = target.name;
+    const samples = target.params.map(() => kSampleArgument);
+    const other = samples.join(kTypeSeparator);
+
+    this.report(module, target.loc, Code.CannotInferParameter, {
+      word,
+      first,
+      other,
+    });
+  }
+
+  private constraintCheck(
+    draft: GenericDraft,
+    index: int,
+    decl: TypeParamDecl,
+    found: Type,
+    module: int,
+  ): void {
+    const target = draft.target;
+    const bindings = this.boundByLoc(draft);
+    const home = target.home;
+    const miss = this.resolver.constraintMiss(home, decl, found, bindings);
+    if (miss == undefined) {
+      return;
+    }
+
+    const word = decl.name;
+    const first = this.text.of(found);
+    const second = target.name;
+
+    this.report(module, target.loc, Code.ConstraintNotSatisfied, {
+      word,
+      first,
+      other: miss,
+      second,
+    });
+
+    this.failParameter(draft, index);
+  }
+
+  private boundByLoc(draft: GenericDraft): Map<int, Type> {
+    const bindings = new Map<int, Type>();
+    const decls = draft.target.decls;
+
+    for (const [index, type] of draft.bound) {
+      const decl = decls[index];
+      if (decl != undefined) {
+        bindings.set(decl.loc, type);
+      }
+    }
+
+    return bindings;
+  }
+
+  private fillDefaults(draft: GenericDraft): boolean {
+    const decls = draft.target.decls;
+    let isDefaulted = false;
+
+    for (let index = 0; index < decls.length; index++) {
+      const decl = decls[index];
+      if (decl == undefined || draft.bound.has(index)) {
+        continue;
+      }
+
+      const fallback = this.closedDefault(draft, decl);
+      if (fallback != undefined) {
+        draft.bound.set(index, fallback);
+        isDefaulted = true;
+      }
+    }
+
+    return isDefaulted;
+  }
+
+  private closedDefault(
+    draft: GenericDraft,
+    decl: TypeParamDecl,
+  ): Type | undefined {
+    const target = draft.target;
+    const bindings = new Map<int, Type>();
+    const fallback = this.resolver.defaultOf(target.home, decl, bindings);
+    if (fallback == undefined) {
+      return undefined;
+    }
+    if (this.isMentioning(fallback, target.params)) {
+      return undefined;
+    }
+
+    return fallback;
+  }
+
+  private hasArgumentErrors(draft: GenericDraft): boolean {
+    for (const type of draft.given.values()) {
+      if (this.hasUnknownInside(type)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private isExpectingLiteral(param: Type): boolean {
+    const constraint = this.store.constraintOf(param);
+    if (constraint == undefined) {
+      return false;
+    }
+
+    const isKeys =
+      constraint.kind == TypeKind.Operation &&
+      constraint.shape.op == OperationKind.KeyOf;
+    if (isKeys) {
+      return true;
+    }
+
+    const parts = this.partsOfType(constraint);
+
+    return parts.every((part) => this.isTextual(part));
+  }
+}

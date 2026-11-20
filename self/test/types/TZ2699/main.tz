@@ -1,0 +1,11 @@
+// A function given to a generic call with fewer parameters than it gets.
+function each<T>(fn: (index: int, item: T) => void): int {
+  return 1;
+}
+
+function eachOf<T>(items: T[], fn: (index: int, item: T) => void): int {
+  return items.length;
+}
+
+const known = eachOf([1, 2], (index) => {});
+const open = each((index) => {});

@@ -1,0 +1,721 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  CallArgument,
+  Expr,
+  ExprKind,
+  FunctionExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionParameter,
+  FunctionShape,
+  FunctionType,
+  LiteralKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  TypeContext,
+  TypePlace,
+} from "../../../types/type-resolver/types/type-resolver.types.tz";
+import {
+  kManyTypeArguments,
+  kNoPlace,
+  kOneTypeArgument,
+} from "../const/expression-types.const.tz";
+import {
+  ArgumentForm,
+  CallTarget,
+  CandidateStrength,
+  GenericDraft,
+  GenericTarget,
+} from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private genericCall(
+    target: GenericTarget,
+    args: CallArgument[],
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const hasLists = target.params.some((param) => this.isListParameter(param));
+    const shape = target.shape;
+    const isOpaque = this.hasOperationParameter(shape);
+    if (hasLists || isOpaque || this.isListRest(shape)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (!this.isGenericArity(target, args, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const draft = this.genericDraft(target, args, wanted);
+
+    if (target.typeArgs.length > 0) {
+      return this.explicitCall(draft, module);
+    }
+
+    this.inferArguments(draft, module);
+    this.settleStrong(draft, module);
+    this.inferFromWanted(draft);
+    this.settleAll(draft, module);
+    this.contextualArguments(draft, module);
+
+    return this.boundCall(draft, module);
+  }
+
+  private isListRest(shape: FunctionShape): boolean {
+    const last = shape.params[shape.params.length - 1];
+
+    return shape.rest && last != undefined && last.type.kind != TypeKind.Array;
+  }
+
+  private genericCallTarget(target: GenericTarget): CallTarget {
+    const shape = target.shape;
+
+    return {
+      params: shape.params,
+      rest: shape.rest,
+      loc: target.loc,
+      isLenient: target.isLenient,
+    };
+  }
+
+  private isGenericArity(
+    target: GenericTarget,
+    args: CallArgument[],
+    module: int,
+  ): boolean {
+    const call = this.genericCallTarget(target);
+    const fixed = this.fixedCount(call);
+    const limit = this.spreadLimit(call, fixed, args.length);
+    const spread = args.find((arg, index) => arg.spread && index < limit);
+    if (spread != undefined && target.isLenient) {
+      return false;
+    }
+    if (spread != undefined) {
+      this.report(module, spread.expr.loc, Code.SpreadNotRest, kNoDetails);
+      this.looseArguments(args, module);
+
+      return false;
+    }
+
+    const least = this.leastArguments(call);
+    const most = call.params.length;
+    const count = args.length;
+    const isTooMany = !call.rest && count > most;
+    if (count >= least && !isTooMany) {
+      return true;
+    }
+    if (target.isLenient) {
+      return false;
+    }
+
+    const word = this.argumentCountText(least, most, call.rest);
+    const other = `${count}`;
+
+    this.report(module, target.loc, Code.ArgumentCount, { word, other });
+
+    return false;
+  }
+
+  private genericDraft(
+    target: GenericTarget,
+    args: CallArgument[],
+    wanted: Type | undefined,
+  ): GenericDraft {
+    return {
+      target,
+      args,
+      wanted,
+      bound: new Map<int, Type>(),
+      given: new Map<int, Type>(),
+      settled: new Set<int>(),
+      literals: [],
+      contextual: [],
+      inference: this.inferenceSet(target.params),
+      isInferred: true,
+    };
+  }
+
+  private explicitCall(draft: GenericDraft, module: int): Type {
+    const target = draft.target;
+    const written = target.typeArgs;
+    const total = target.params.length;
+    if (written.length > total) {
+      this.reportTypeArgumentCount(target, module);
+
+      draft.isInferred = false;
+    }
+
+    const context: TypeContext = {
+      module,
+      bindings: new Map<int, Type>(),
+      place: TypePlace.Plain,
+    };
+    const count = Math.min(written.length, total);
+
+    for (let index = 0; index < count; index++) {
+      const ref = written[index];
+      if (ref != undefined) {
+        const type = this.resolver.resolve(ref, context);
+
+        draft.bound.set(index, type);
+      }
+    }
+
+    this.finishTypeArguments(draft, module);
+
+    if (!draft.isInferred) {
+      this.uncheckedArguments(draft, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const shape = this.boundShape(draft);
+    const call: CallTarget = {
+      params: shape.params,
+      rest: shape.rest,
+      loc: target.loc,
+      isLenient: target.isLenient,
+    };
+
+    this.argumentsCheck(draft.args, call, module);
+
+    return shape.result;
+  }
+
+  private reportTypeArgumentCount(target: GenericTarget, module: int): void {
+    const total = target.params.length;
+    const word = target.name;
+    const other = this.typeArgumentText(total);
+    const first = `${target.typeArgs.length}`;
+
+    if (!target.isLenient) {
+      this.report(module, target.loc, Code.TypeArgumentsTooMany, {
+        word,
+        other,
+        first,
+      });
+    }
+  }
+
+  private typeArgumentText(count: int): string {
+    if (count == 1) {
+      return `${count}${kOneTypeArgument}`;
+    }
+
+    return `${count}${kManyTypeArguments}`;
+  }
+
+  private inferArguments(draft: GenericDraft, module: int): void {
+    for (let index = 0; index < draft.args.length; index++) {
+      const arg = draft.args[index];
+      if (arg != undefined) {
+        this.inferFromArgument(draft, index, arg, module);
+      }
+    }
+  }
+
+  private inferFromArgument(
+    draft: GenericDraft,
+    index: int,
+    arg: CallArgument,
+    module: int,
+  ): void {
+    const expr = arg.expr;
+    const pattern = this.patternAt(draft.target.shape, index, arg.spread);
+    const form = this.argumentForm(draft, expr, pattern, module);
+    const set = draft.inference;
+
+    switch (form) {
+      case ArgumentForm.Plain:
+        return this.plainArgument(draft, index, expr, pattern, module);
+      case ArgumentForm.LiteralText:
+        return this.literalText(draft, index, expr, pattern, module);
+      case ArgumentForm.Contextual:
+        draft.contextual.push(index);
+
+        return;
+      case ArgumentForm.Shape: {
+        const error = this.store.plain(TypeKind.Error);
+        const shape = this.literalShapeOf(expr) ?? error;
+        const isWhole = this.isWholeArgument(expr, shape, module);
+        const strength = CandidateStrength.Weak;
+
+        draft.literals.push(index);
+
+        return this.inferArgument(set, pattern, shape, strength, isWhole);
+      }
+      default: {
+        if (draft.target.isLenient && this.isSkippedNull(expr, module)) {
+          return;
+        }
+
+        const given = this.typed(expr, undefined, module);
+        const isWhole = this.isWholeArgument(expr, given, module);
+        const strength = CandidateStrength.Strong;
+
+        draft.given.set(index, given);
+
+        return this.inferArgument(set, pattern, given, strength, isWhole);
+      }
+    }
+  }
+
+  private isSkippedNull(expr: Expr, module: int): boolean {
+    return expr.kind == ExprKind.Name && this.isNullName(expr, module);
+  }
+
+  private isWholeArgument(expr: Expr, type: Type, module: int): boolean {
+    return type.kind == TypeKind.Int && this.isWholeTree(expr, module);
+  }
+
+  private plainArgument(
+    draft: GenericDraft,
+    index: int,
+    expr: Expr,
+    pattern: Type,
+    module: int,
+  ): void {
+    if (draft.target.isLenient) {
+      return this.lenientClosure(expr, pattern, module);
+    }
+
+    const given = this.checked(expr, pattern, module, kNoPlace);
+
+    draft.given.set(index, given);
+    draft.settled.add(index);
+  }
+
+  private literalText(
+    draft: GenericDraft,
+    index: int,
+    expr: Expr,
+    pattern: Type,
+    module: int,
+  ): void {
+    if (expr.kind != ExprKind.StringLit) {
+      return;
+    }
+
+    const literal = this.store.literal(LiteralKind.String, expr.value);
+    const given = this.checked(expr, literal, module, kNoPlace);
+    const set = draft.inference;
+    const strength = CandidateStrength.Strong;
+
+    draft.given.set(index, given);
+    draft.settled.add(index);
+
+    this.inferArgument(set, pattern, literal, strength, false);
+  }
+
+  private patternAt(shape: FunctionShape, index: int, spread: boolean): Type {
+    const fixed = this.shapeFixed(shape);
+    const error = this.store.plain(TypeKind.Error);
+
+    if (!shape.rest || index < fixed) {
+      return shape.params[index]?.type ?? error;
+    }
+
+    const rest = shape.params[fixed]?.type ?? error;
+    if (spread || rest.kind != TypeKind.Array) {
+      return rest;
+    }
+
+    return rest.item;
+  }
+
+  private slotAt(shape: FunctionShape, index: int, spread: boolean): Type {
+    const fixed = this.shapeFixed(shape);
+    const param = shape.params[index];
+    if (index < fixed && param != undefined) {
+      return this.parameterWanted(param);
+    }
+
+    return this.patternAt(shape, index, spread);
+  }
+
+  private shapeFixed(shape: FunctionShape): int {
+    if (shape.rest) {
+      return shape.params.length - 1;
+    }
+
+    return shape.params.length;
+  }
+
+  private argumentForm(
+    draft: GenericDraft,
+    expr: Expr,
+    pattern: Type,
+    module: int,
+  ): ArgumentForm {
+    const params = draft.target.params;
+    if (!this.isMentioning(pattern, params)) {
+      return ArgumentForm.Plain;
+    }
+    if (this.isLiteralText(expr, pattern, params)) {
+      return ArgumentForm.LiteralText;
+    }
+    if (this.isContextual(expr, module)) {
+      return ArgumentForm.Contextual;
+    }
+    if (draft.target.isLenient && expr.kind == ExprKind.Function) {
+      return ArgumentForm.Contextual;
+    }
+    if (this.literalShapeOf(expr) != undefined) {
+      return ArgumentForm.Shape;
+    }
+
+    const isLiteral =
+      expr.kind == ExprKind.ArrayLit || expr.kind == ExprKind.ObjectLit;
+    if (isLiteral) {
+      return ArgumentForm.Contextual;
+    }
+
+    return ArgumentForm.Inferred;
+  }
+
+  private isLiteralText(expr: Expr, pattern: Type, params: Type[]): boolean {
+    const isText = expr.kind == ExprKind.StringLit && params.includes(pattern);
+
+    return isText && this.isExpectingLiteral(pattern);
+  }
+
+  private contextualArguments(draft: GenericDraft, module: int): void {
+    for (const index of draft.contextual) {
+      const arg = draft.args[index];
+      if (arg != undefined) {
+        this.contextualArgument(draft, index, arg, module);
+      }
+    }
+  }
+
+  private contextualArgument(
+    draft: GenericDraft,
+    index: int,
+    arg: CallArgument,
+    module: int,
+  ): void {
+    const expr = arg.expr;
+    const pattern = this.patternAt(draft.target.shape, index, arg.spread);
+    const bound = this.boundById(draft);
+    const partial = this.resolver.substitute(pattern, bound);
+    const callback = this.definedType(partial);
+
+    if (callback.kind == TypeKind.Function) {
+      this.callbackArgument(draft, index, expr, callback, module);
+    } else {
+      this.literalArgument(draft, index, expr, pattern, module);
+    }
+
+    this.moreCandidates(draft, index, pattern, module);
+  }
+
+  private callbackArgument(
+    draft: GenericDraft,
+    index: int,
+    expr: Expr,
+    callback: FunctionType,
+    module: int,
+  ): void {
+    const signature = this.callbackSignature(draft, callback);
+
+    if (expr.kind == ExprKind.Function) {
+      this.callbackParameters(draft, expr, callback, module);
+    }
+
+    const given = this.typed(expr, signature, module);
+
+    draft.given.set(index, given);
+  }
+
+  private callbackSignature(draft: GenericDraft, callback: FunctionType): Type {
+    const open = this.openParameters(draft);
+    const error = this.store.plain(TypeKind.Error);
+    const shape = callback.shape;
+    const params: FunctionParameter[] = shape.params.map((param) => ({
+      type: this.closedOr(param.type, open, error),
+      optional: param.optional,
+    }));
+    const rest = shape.rest;
+    const result = this.closedOr(shape.result, open, error);
+    const self = shape.self;
+
+    if (self == undefined) {
+      return this.store.functionOf({ params, rest, result });
+    }
+
+    return this.store.functionOf({ params, rest, self, result });
+  }
+
+  private closedOr(type: Type, open: Type[], fallback: Type): Type {
+    if (this.isMentioning(type, open)) {
+      return fallback;
+    }
+
+    return type;
+  }
+
+  private openParameters(draft: GenericDraft): Type[] {
+    const params = draft.target.params;
+
+    return params.filter((param, index) => !draft.bound.has(index));
+  }
+
+  private callbackParameters(
+    draft: GenericDraft,
+    closure: FunctionExpr,
+    callback: FunctionType,
+    module: int,
+  ): void {
+    const written = closure.fn.params;
+    const params = callback.shape.params;
+
+    for (let position = 0; position < params.length; position++) {
+      const own = written[position];
+      const param = params[position];
+      const isWritten = own != undefined && own.type != undefined;
+      if (!isWritten && param != undefined) {
+        this.callbackParameter(draft, closure, param.type, position, module);
+      }
+    }
+  }
+
+  private callbackParameter(
+    draft: GenericDraft,
+    closure: FunctionExpr,
+    type: Type,
+    position: int,
+    module: int,
+  ): void {
+    const target = draft.target;
+
+    for (let index = 0; index < target.params.length; index++) {
+      const param = target.params[index];
+      const isOpen = param != undefined && !draft.bound.has(index);
+      if (isOpen && param != undefined && this.isMentioning(type, [param])) {
+        this.reportCallback(draft, closure, param, position, module);
+        this.failParameter(draft, index);
+      }
+    }
+  }
+
+  private reportCallback(
+    draft: GenericDraft,
+    closure: FunctionExpr,
+    param: Type,
+    position: int,
+    module: int,
+  ): void {
+    const target = draft.target;
+    if (target.isLenient || this.hasArgumentErrors(draft)) {
+      return;
+    }
+
+    const first = this.text.of(param);
+    const second = target.name;
+    const loc = closure.loc;
+    const own = closure.fn.params[position];
+    if (own == undefined) {
+      this.report(module, loc, Code.CallbackParametersUninferred, {
+        first,
+        second,
+      });
+
+      return;
+    }
+
+    const word = own.name;
+
+    this.report(module, loc, Code.CallbackParameterUninferred, {
+      word,
+      first,
+      second,
+    });
+  }
+
+  private literalArgument(
+    draft: GenericDraft,
+    index: int,
+    expr: Expr,
+    pattern: Type,
+    module: int,
+  ): void {
+    const params = draft.target.params;
+    const bound = this.boundById(draft);
+    const partial = this.resolver.substitute(pattern, bound);
+    const isOpen = this.isMentioning(partial, params);
+    const isDefaulted = isOpen && this.fillDefaults(draft);
+    const hint = this.hintAfterDefaults(draft, pattern, partial, isDefaulted);
+    const isStillOpen = this.isMentioning(hint, params);
+
+    if (isStillOpen) {
+      const given = this.typed(expr, undefined, module);
+
+      draft.given.set(index, given);
+
+      return;
+    }
+    if (draft.target.isLenient) {
+      const given = this.typed(expr, hint, module);
+
+      draft.given.set(index, given);
+
+      return;
+    }
+
+    const given = this.checked(expr, hint, module, kNoPlace);
+
+    draft.given.set(index, given);
+    draft.settled.add(index);
+  }
+
+  private hintAfterDefaults(
+    draft: GenericDraft,
+    pattern: Type,
+    partial: Type,
+    isDefaulted: boolean,
+  ): Type {
+    if (!isDefaulted) {
+      return partial;
+    }
+
+    const bound = this.boundById(draft);
+
+    return this.resolver.substitute(pattern, bound);
+  }
+
+  private moreCandidates(
+    draft: GenericDraft,
+    index: int,
+    pattern: Type,
+    module: int,
+  ): void {
+    const given = draft.given.get(index);
+    if (given == undefined) {
+      return;
+    }
+
+    const params = draft.target.params;
+    const more = this.inferenceSet(params);
+
+    this.inferPair(more, pattern, given);
+
+    for (let typeIndex = 0; typeIndex < params.length; typeIndex++) {
+      if (!draft.bound.has(typeIndex)) {
+        this.adoptCandidates(draft.inference, typeIndex, more);
+        this.settleParameter(draft, typeIndex, module);
+      }
+    }
+  }
+
+  private boundCall(draft: GenericDraft, module: int): Type {
+    this.finishTypeArguments(draft, module);
+
+    if (!draft.isInferred) {
+      this.uncheckedArguments(draft, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.literalArguments(draft, module);
+
+    const shape = this.boundShape(draft);
+
+    if (!draft.target.isLenient) {
+      this.boundArguments(draft, shape, module);
+    }
+
+    return shape.result;
+  }
+
+  private literalArguments(draft: GenericDraft, module: int): void {
+    const bound = this.boundById(draft);
+    const shape = draft.target.shape;
+
+    for (const index of draft.literals) {
+      const arg = draft.args[index];
+      if (arg == undefined) {
+        continue;
+      }
+
+      const slot = this.slotAt(shape, index, arg.spread);
+      const hint = this.resolver.substituteValue(slot, bound);
+      const given = this.literalChecked(draft, arg.expr, hint, module);
+
+      draft.given.set(index, given);
+      draft.settled.add(index);
+    }
+  }
+
+  private literalChecked(
+    draft: GenericDraft,
+    expr: Expr,
+    hint: Type,
+    module: int,
+  ): Type {
+    if (draft.target.isLenient) {
+      return this.typed(expr, hint, module);
+    }
+
+    return this.checked(expr, hint, module, kNoPlace);
+  }
+
+  private boundArguments(
+    draft: GenericDraft,
+    shape: FunctionShape,
+    module: int,
+  ): void {
+    for (let index = 0; index < draft.args.length; index++) {
+      const arg = draft.args[index];
+      const given = draft.given.get(index);
+      const isOpen = arg != undefined && !draft.settled.has(index);
+      if (isOpen && arg != undefined && given != undefined) {
+        const to = this.slotAt(shape, index, arg.spread);
+
+        this.coerce(arg.expr, given, to, module, kNoPlace);
+      }
+    }
+  }
+
+  private uncheckedArguments(draft: GenericDraft, module: int): void {
+    if (draft.target.isLenient) {
+      return;
+    }
+
+    for (let index = 0; index < draft.args.length; index++) {
+      const arg = draft.args[index];
+      if (arg != undefined && !draft.given.has(index)) {
+        this.typed(arg.expr, undefined, module);
+      }
+    }
+  }
+
+  private boundShape(draft: GenericDraft): FunctionShape {
+    const shape = draft.target.shape;
+    const bound = this.boundById(draft);
+    const params: FunctionParameter[] = shape.params.map((param) => ({
+      type: this.resolver.substituteValue(param.type, bound),
+      optional: param.optional,
+    }));
+    const rest = shape.rest;
+    const result = this.resolver.substitute(shape.result, bound);
+
+    return { params, rest, result };
+  }
+
+  private boundById(draft: GenericDraft): Map<int, Type> {
+    const bound = new Map<int, Type>();
+    const params = draft.target.params;
+
+    for (const [index, type] of draft.bound) {
+      const param = params[index];
+      if (param != undefined) {
+        bound.set(param.id, type);
+      }
+    }
+
+    return bound;
+  }
+}

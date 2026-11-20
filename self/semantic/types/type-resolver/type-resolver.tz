@@ -17,6 +17,7 @@ import "./partial/type-resolver.partial.signatures.tz";
 import "./partial/type-resolver.partial.constraints.tz";
 import "./partial/type-resolver.partial.methods.tz";
 import "./partial/type-resolver.partial.library.tz";
+import "./partial/type-resolver.partial.substitution.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   Details,

@@ -1,0 +1,315 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import {
+  ArrayLitExpr,
+  Expr,
+  ExprKind,
+  ObjectLitExpr,
+  PropertyKind,
+  UnaryExpr,
+  UnaryOp,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import {
+  FunctionShape,
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  kContextFunctions,
+  kContextObjects,
+  kResultMakers,
+} from "../const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private literalShapeOf(expr: Expr): Type | undefined {
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+        return this.store.integer(64, false);
+      case ExprKind.FloatLit:
+        return this.store.plain(TypeKind.Double);
+      case ExprKind.StringLit:
+        return this.store.plain(TypeKind.String);
+      case ExprKind.BoolLit:
+        return this.store.plain(TypeKind.Boolean);
+      case ExprKind.Undefined:
+        return this.store.plain(TypeKind.Undefined);
+      case ExprKind.Unary:
+        return this.signedShape(expr);
+      case ExprKind.ArrayLit:
+        return this.arrayShape(expr);
+      case ExprKind.ObjectLit:
+        return this.objectShape(expr);
+      default:
+        return undefined;
+    }
+  }
+
+  private signedShape(expr: UnaryExpr): Type | undefined {
+    const operand = expr.operand;
+    const isNumber =
+      operand.kind == ExprKind.IntLit || operand.kind == ExprKind.FloatLit;
+    if (expr.op != UnaryOp.Neg || !isNumber) {
+      return undefined;
+    }
+
+    return this.literalShapeOf(operand);
+  }
+
+  private arrayShape(expr: ArrayLitExpr): Type | undefined {
+    let element: Type | undefined = undefined;
+
+    for (const item of expr.elements) {
+      if (item.spread || item.hole) {
+        return undefined;
+      }
+
+      const shape = this.literalShapeOf(item.expr);
+      if (shape == undefined) {
+        return undefined;
+      }
+
+      const joined = this.joinedWith(element, shape);
+      if (joined == undefined) {
+        return undefined;
+      }
+
+      element = joined;
+    }
+
+    if (element == undefined || element.kind == TypeKind.Undefined) {
+      return undefined;
+    }
+
+    return this.store.arrayOf(element);
+  }
+
+  private objectShape(expr: ObjectLitExpr): Type | undefined {
+    const fields: ObjectField[] = [];
+
+    for (const prop of expr.props) {
+      if (prop.form.kind != PropertyKind.Value) {
+        return undefined;
+      }
+
+      const type = this.literalShapeOf(prop.value);
+      const name = prop.name;
+      const isRepeated = fields.some((field) => field.name == name);
+      if (type == undefined || type.kind == TypeKind.Undefined || isRepeated) {
+        return undefined;
+      }
+
+      fields.push({ name, type, optional: false, readonly: false });
+    }
+
+    return this.store.objectOf(fields);
+  }
+
+  private isContextual(expr: Expr, module: int): boolean {
+    if (this.isNeedingContext(expr)) {
+      return true;
+    }
+
+    return this.isResultMaker(expr, module) || this.isBareGeneric(expr, module);
+  }
+
+  private isNeedingContext(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.Function:
+        return expr.fn.params.some((param) => param.type == undefined);
+      case ExprKind.ArrayLit:
+        return expr.elements.some(
+          (element) => !element.hole && this.isNeedingContext(element.expr),
+        );
+      case ExprKind.ObjectLit:
+        return expr.props.some((prop) => this.isNeedingContext(prop.value));
+      case ExprKind.Name:
+        return (
+          expr.typeArgs.length == 0 && kContextFunctions.includes(expr.name)
+        );
+      case ExprKind.Member: {
+        const object = expr.object;
+
+        return (
+          object.kind == ExprKind.Name && kContextObjects.includes(object.name)
+        );
+      }
+      default:
+        return false;
+    }
+  }
+
+  private isResultMaker(expr: Expr, module: int): boolean {
+    if (expr.kind != ExprKind.Name || !kResultMakers.includes(expr.name)) {
+      return false;
+    }
+
+    const target = this.targetOfName(expr, module);
+
+    return target != undefined && this.isLibraryModule(target.module);
+  }
+
+  private isBareGeneric(expr: Expr, module: int): boolean {
+    if (expr.kind != ExprKind.Name || expr.typeArgs.length > 0) {
+      return false;
+    }
+
+    const target = this.targetOfName(expr, module);
+    if (target == undefined || target.kind != SymbolKind.Function) {
+      return false;
+    }
+
+    const fn = this.record(target.module)?.functions.get(target.loc);
+
+    return fn != undefined && fn.typeParams.length > 0;
+  }
+
+  private genericParameters(type: Type): Type[] | undefined {
+    const found: Type[] = [];
+    const seen = new Set<int>();
+
+    if (!this.collectParameters(type, found, seen)) {
+      return undefined;
+    }
+
+    return found;
+  }
+
+  private collectParameters(
+    type: Type,
+    found: Type[],
+    seen: Set<int>,
+  ): boolean {
+    if (seen.has(type.id)) {
+      return true;
+    }
+
+    seen.add(type.id);
+
+    switch (type.kind) {
+      case TypeKind.TypeParameter:
+        found.push(type);
+
+        return true;
+      case TypeKind.Operation:
+      case TypeKind.Error:
+      case TypeKind.Template:
+        return false;
+      default: {
+        const parts = this.typeParts(type);
+
+        return parts.every((part) => this.collectParameters(part, found, seen));
+      }
+    }
+  }
+
+  private hasUnknownInside(type: Type): boolean {
+    const seen = new Set<int>();
+
+    return this.isUnknownInside(type, seen);
+  }
+
+  private isUnknownInside(type: Type, seen: Set<int>): boolean {
+    if (seen.has(type.id)) {
+      return false;
+    }
+
+    seen.add(type.id);
+
+    if (type.kind == TypeKind.Error) {
+      return true;
+    }
+
+    const parts = this.typeParts(type);
+
+    return parts.some((part) => this.isUnknownInside(part, seen));
+  }
+
+  private hasOperationParameter(shape: FunctionShape): boolean {
+    const seen = new Set<int>();
+
+    return shape.params.some((param) =>
+      this.isOperationInside(param.type, seen),
+    );
+  }
+
+  private isOperationInside(type: Type, seen: Set<int>): boolean {
+    if (seen.has(type.id)) {
+      return false;
+    }
+
+    seen.add(type.id);
+
+    if (type.kind == TypeKind.Operation || type.kind == TypeKind.Template) {
+      return true;
+    }
+
+    const parts = this.typeParts(type);
+
+    return parts.some((part) => this.isOperationInside(part, seen));
+  }
+
+  private isListParameter(param: Type): boolean {
+    const constraint = this.store.constraintOf(param);
+    if (constraint == undefined) {
+      return false;
+    }
+
+    return (
+      constraint.kind == TypeKind.Array || constraint.kind == TypeKind.Tuple
+    );
+  }
+
+  private typeParts(type: Type): Type[] {
+    switch (type.kind) {
+      case TypeKind.Array:
+        return [type.item];
+      case TypeKind.Tuple:
+        return type.items;
+      case TypeKind.Object:
+        return type.fields.map((field) => field.type);
+      case TypeKind.Function: {
+        const shape = type.shape;
+        const params = shape.params.map((param) => param.type);
+
+        return params.concat([shape.result]);
+      }
+      case TypeKind.Union:
+        return type.parts;
+      case TypeKind.Result:
+        return [type.value, type.error];
+      case TypeKind.Promise:
+        return [type.value];
+      case TypeKind.Iterator: {
+        const shape = type.shape;
+
+        return [shape.yielded, shape.returned, shape.sent];
+      }
+      case TypeKind.Dict:
+        return [type.key, type.value];
+      case TypeKind.Instance:
+        return type.args;
+      default:
+        return [];
+    }
+  }
+
+  private lenientClosure(expr: Expr, pattern: Type, module: int): void {
+    if (expr.kind != ExprKind.Function) {
+      return;
+    }
+
+    const wanted = this.definedType(pattern);
+    if (wanted.kind != TypeKind.Function || this.mentionsParameter(wanted)) {
+      return;
+    }
+
+    const shape = wanted.shape;
+    const params = shape.params;
+    const rest = shape.rest;
+    const result = this.store.plain(TypeKind.Error);
+    const open = this.store.functionOf({ params, rest, result });
+
+    this.typed(expr, open, module);
+  }
+}

@@ -1,0 +1,18 @@
+// The generic methods of the library get their type parameters from the
+// call, as the generic functions of a program do.
+const numbers = [1, 2, 3];
+const words = ["a", "b"];
+const nested: int[][] = numbers.map(() => []);
+
+const doubled = numbers.map((n) => n * 2);
+const texts = numbers.map((n) => `${n}`);
+const lengths = words.map((w) => w.length);
+const tests = numbers.map((n) => n > 1);
+const sums = numbers.map((value, index) => value + index);
+const largest = Math.max(1, 2);
+const mixed = Math.max(1, 2.5);
+const some = numbers.some((n) => n > 1);
+const found = numbers.find((n) => n > 1);
+const position = words.indexOf("a");
+
+const broken = numbers.map((n) => n.missing);

@@ -86,25 +86,9 @@ partial class ExpressionTypes {
     for (let index = 0; index < args.length; index++) {
       const arg = args[index];
       const param = target.params[index];
-      if (arg == undefined || param == undefined || arg.spread) {
-        continue;
+      if (arg != undefined && param != undefined && !arg.spread) {
+        this.lenientClosure(arg.expr, param.type, module);
       }
-      if (arg.expr.kind != ExprKind.Function) {
-        continue;
-      }
-
-      const wanted = this.definedType(param.type);
-      if (wanted.kind != TypeKind.Function || this.mentionsParameter(wanted)) {
-        continue;
-      }
-
-      const shape = wanted.shape;
-      const params = shape.params;
-      const rest = shape.rest;
-      const result = this.store.plain(TypeKind.Error);
-      const open = this.store.functionOf({ params, rest, result });
-
-      this.typed(arg.expr, open, module);
     }
   }
 

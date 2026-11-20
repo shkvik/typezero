@@ -1,0 +1,5 @@
+main.tz
+  2:10 pair: (T, T) => T[]
+  12:7 fine: int[]
+  14:7 shelf: Shelf
+  15:7 placed: string[]

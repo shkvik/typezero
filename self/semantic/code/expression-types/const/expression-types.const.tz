@@ -79,6 +79,24 @@ export const kChainPlaceholder = "o";
 export const kIdentifierMarks = ["_", "$"];
 export const kOneArgument = " argument";
 export const kManyArguments = " arguments";
+export const kOneTypeArgument = " type argument";
+export const kManyTypeArguments = " type arguments";
+export const kSampleArgument = "int";
+export const kSampleList = "[int]";
+export const kNewWord = "new ";
+export const kContextFunctions = [
+  "String",
+  "Number",
+  "parseInt",
+  "parseFloat",
+  "Boolean",
+  "encodeURIComponent",
+  "encodeURI",
+  "decodeURIComponent",
+  "decodeURI",
+];
+export const kContextObjects = ["Math", "Number", "String", "console"];
+export const kResultMakers = ["ok", "err"];
 export const kOrMore = " or more";
 export const kRangeDash = "-";
 export const kPrototypeNames = [

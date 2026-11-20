@@ -1581,5 +1581,25 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.NoPrototype]: {
     text: "there are no prototypes in tz: the methods belong to the class itself, and a decorator gets the class; use it as it is",
+  },  [Code.TypeArgumentsTooMany]: {
+    text: "'{word}' takes {other}, but got {first}",
+  },
+  [Code.CannotInferParameter]: {
+    text: "cannot infer type parameter '{word}' of '{first}': nothing in the call says what it is; give it, e.g. '{first}<{other}>(...)'",
+  },
+  [Code.CandidatesClash]: {
+    text: "type parameter '{word}' of '{first}' gets '{second}' from one argument and '{other}' from another; give it, e.g. '{first}<{second}>(...)'",
+  },
+  [Code.CallbackParameterUninferred]: {
+    text: "cannot infer type parameter '{first}' of '{second}' for parameter '{word}' of this function: nothing else in the call says what it is; give it, e.g. '{second}<int>(...)', or the type of the parameter",
+  },
+  [Code.CallbackParametersUninferred]: {
+    text: "cannot infer type parameter '{first}' of '{second}' for the parameters of this function: nothing else in the call says what it is; give it, e.g. '{second}<int>(...)', or the type of the parameter",
+  },
+  [Code.NotGenericFunction]: {
+    text: "'{word}' is not a generic function; remove the type arguments",
+  },
+  [Code.NotGenericMethod]: {
+    text: "'{word}' is not a generic method; remove the type arguments",
   },
 };

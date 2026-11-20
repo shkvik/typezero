@@ -1,0 +1,5 @@
+main.tz
+  2:10 pair: (T, T) => T[]
+  6:7 numbers: double[]
+  7:7 words: string[]
+  9:7 written: string[]

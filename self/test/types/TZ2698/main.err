@@ -1,0 +1,3 @@
+main.tz:12:18: error TZ2698: cannot infer type parameter 'T' of 'run' for parameter 'x' of this function: nothing else in the call says what it is; give it, e.g. 'run<int>(...)', or the type of the parameter
+const open = run((x) => x);
+                 ^
