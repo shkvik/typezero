@@ -200,13 +200,30 @@ partial class ExpressionTypes {
     const target = this.innerObject(wanted, given);
     const from = this.onlyPart(given);
     const to = this.onlyPart(wanted);
-
-    return (
+    const isPlain =
       this.isPlainValue(from) ||
       this.isPlainValue(to) ||
       this.isPlainValue(source) ||
-      this.isPlainValue(target)
-    );
+      this.isPlainValue(target);
+
+    return isPlain || !this.isWidening(source, target);
+  }
+
+  private isUndecided(expr: Expr, wanted: Type): boolean {
+    const goal = this.definedType(wanted);
+    if (goal.kind == TypeKind.Operation) {
+      return true;
+    }
+
+    return goal.kind == TypeKind.Never && expr.kind == ExprKind.Name;
+  }
+
+  private isWidening(source: Type, target: Type): boolean {
+    if (!this.isObjectKind(target)) {
+      return false;
+    }
+
+    return this.isObjectKind(source) || source.kind == TypeKind.Union;
   }
 
   private isFresh(expr: Expr): boolean {
@@ -403,9 +420,13 @@ partial class ExpressionTypes {
 
     const goal = this.definedType(wanted);
     const intervals = this.wholeIntervals(goal);
+    if (intervals.length == 0) {
+      return false;
+    }
+
     const value = this.intConstant(expr, given, module);
     if (value == undefined) {
-      return false;
+      return true;
     }
 
     return intervals.some(

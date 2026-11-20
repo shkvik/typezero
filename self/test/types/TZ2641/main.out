@@ -1,0 +1,4 @@
+main.tz
+  2:10 log: () => void
+  6:16 save: () => Promise<void>
+  10:10 quiet: () => void

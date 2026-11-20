@@ -8,7 +8,10 @@ import {
   Type,
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
-import { kThisParameter } from "../const/type-resolver.const.tables.tz";
+import {
+  kRestPlaceholder,
+  kThisParameter,
+} from "../const/type-resolver.const.tables.tz";
 import {
   ParameterSite,
   TypeContext,
@@ -27,7 +30,7 @@ partial class TypeResolver {
     let optionalBefore = false;
 
     for (const site of sites) {
-      const type = this.siteType(site, context);
+      const type = this.parameterType(site, context);
 
       if (site.name == kThisParameter) {
         self = type;
@@ -51,12 +54,12 @@ partial class TypeResolver {
       params.push({ type, optional });
     }
 
-    const returned = this.returned(result, context);
+    const returned = this.returnType(result, context);
 
     return this.store.functionOf({ params, rest, self, result: returned });
   }
 
-  private siteType(site: ParameterSite, context: TypeContext): Type {
+  public parameterType(site: ParameterSite, context: TypeContext): Type {
     if (site.kind != ParamKind.Rest) {
       return this.value(site.type, context);
     }
@@ -68,8 +71,16 @@ partial class TypeResolver {
       return type;
     }
 
+    if (site.isDeclared) {
+      this.report(context.module, site.loc, Code.RestParameterNotArray, {
+        word: site.name,
+      });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
     this.report(context.module, site.type.loc, Code.RestParameterNotArray, {
-      word: site.name,
+      word: kRestPlaceholder,
     });
 
     return this.store.plain(TypeKind.Error);
@@ -92,7 +103,7 @@ partial class TypeResolver {
     }
   }
 
-  private returned(ref: TypeRef | undefined, context: TypeContext): Type {
+  public returnType(ref: TypeRef | undefined, context: TypeContext): Type {
     if (ref == undefined) {
       return this.store.plain(TypeKind.Void);
     }

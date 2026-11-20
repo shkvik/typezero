@@ -1,0 +1,32 @@
+parts.tz
+  1:14 limit: int
+  3:17 double: (int) => int
+main.tz
+  6:6 type Shape = { side: int }
+  8:10 sum: (int, int) => int
+  9:9 total: int
+  14:10 half: (int) => int
+  18:10 nothing: (int) => void
+  19:9 twice: int
+  22:10 maybe: (int) => string | undefined
+  28:10 mixed: (boolean) => string | int
+  36:10 small: (int8) => int8
+  44:16 later: (int) => Promise<int>
+  48:10 options: (int?, string?, double?, ...int[]) => int
+  49:9 first: int
+  50:9 second: string
+  51:9 third: double | undefined
+  52:9 fourth: int[]
+  57:10 outer: (int) => int
+  58:12 inner: (int) => int
+  65:10 looped: (Shape[], Map<string, int>) => int
+  66:14 item: Shape
+  67:11 kept: Shape
+  70:14 pair: [string, int]
+  71:11 kept: [string, int]
+  74:14 letter: string
+  75:11 kept: string
+  81:7 s: (int, int) => int
+  82:7 h: (int) => int
+  83:7 d: (int) => int
+  84:7 l: int

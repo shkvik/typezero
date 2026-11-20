@@ -92,6 +92,7 @@ partial class ExpressionTypes {
       type.kind == TypeKind.Undefined ||
       type.kind == TypeKind.Error ||
       base.kind == TypeKind.Never ||
+      base.kind == TypeKind.TypeParameter ||
       base.kind == TypeKind.Boolean ||
       base.kind == TypeKind.String ||
       base.kind == TypeKind.Template;

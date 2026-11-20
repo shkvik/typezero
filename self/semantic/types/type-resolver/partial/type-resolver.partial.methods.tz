@@ -143,6 +143,7 @@ partial class TypeResolver {
           loc: param.loc,
           kind: param.form.kind,
           type,
+          isDeclared: false,
         });
       }
     }

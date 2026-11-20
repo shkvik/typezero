@@ -474,12 +474,12 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const door = this.doorOfName(value, module);
-    if (door == undefined || !this.isLiteralSet(door.type)) {
+    const type = this.valueOfName(value, module);
+    if (type == undefined || !this.isLiteralSet(type)) {
       return undefined;
     }
 
-    return door.type;
+    return type;
   }
 
   private isLiteralSet(type: Type): boolean {

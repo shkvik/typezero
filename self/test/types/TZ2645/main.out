@@ -1,0 +1,5 @@
+main.tz
+  2:6 type Dir = "up" | "down" | "left" | "right"
+  4:10 step: ("up" | "down" | "left" | "right") => int
+  15:10 each: ("up" | "down" | "left" | "right") => int
+  28:10 some: ("up" | "down" | "left" | "right") => int

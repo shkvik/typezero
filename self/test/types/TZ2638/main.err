@@ -1,0 +1,3 @@
+main.tz:2:15: error TZ2638: parameter 'list' needs a type: only a literal default value (a number, a string, true or false) gives one, e.g. 'list: int = measure()'
+function take(list = [1]): int {
+              ^

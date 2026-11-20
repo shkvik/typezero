@@ -179,7 +179,13 @@ partial class TypeResolver {
       const spread = form.rest && sites.length == last;
       const kind = this.siteKind(param.optional, spread);
 
-      sites.push({ name: param.name, loc: param.loc, kind, type: param.type });
+      sites.push({
+        name: param.name,
+        loc: param.loc,
+        kind,
+        type: param.type,
+        isDeclared: false,
+      });
     }
 
     return this.signature(sites, form.result, context);

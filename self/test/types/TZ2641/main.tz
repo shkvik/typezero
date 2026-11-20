@@ -1,0 +1,12 @@
+// A function declared to return 'void' gives no value.
+function log(): void {
+  return 1;
+}
+
+async function save(): Promise<void> {
+  return "done";
+}
+
+function quiet(): void {
+  return;
+}

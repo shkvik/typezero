@@ -1,0 +1,34 @@
+// A function with a result type returns on every path.
+function sign(n: int): int {
+  if (n > 0) {
+    return 1;
+  }
+}
+
+async function load(): Promise<int> {
+  const n = 1;
+}
+
+function fine(n: int): int {
+  if (n > 0) {
+    return 1;
+  } else {
+    return 2;
+  }
+}
+
+function loop(): int {
+  while (true) {
+    return 1;
+  }
+}
+
+function maybe(n: int): int | undefined {
+  if (n > 0) {
+    return 1;
+  }
+}
+
+function stop(): int {
+  process.exit(1);
+}

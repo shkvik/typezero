@@ -84,8 +84,20 @@ partial class TypeResolver {
     if (target == undefined) {
       return this.store.plain(TypeKind.Error);
     }
+    if (!this.declaresType(target.module, target.name)) {
+      return this.global(ref, context);
+    }
 
     return this.fromModule(ref, target.module, target.name, context);
+  }
+
+  private declaresType(module: int, name: string): boolean {
+    const record = this.record(module);
+    if (record == undefined || this.prefixes.has(module)) {
+      return true;
+    }
+
+    return record.declarations.has(name) || record.classes.has(name);
   }
 
   private ofDeclaration(

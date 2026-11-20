@@ -1,0 +1,6 @@
+main.tz:7:12: error TZ2636: enum 'Color' can only be used as 'Color.Member' or 'Color[value]'
+const a1 = Color;
+           ^
+main.tz:10:14: error TZ2636: enum 'Color' can only be used as 'Color.Member' or 'Color[value]'
+  const a2 = Color;
+             ^

@@ -290,24 +290,6 @@ partial class ExpressionTypes {
     return text;
   }
 
-  private named(expr: NameExpr, wanted: Type | undefined, module: int): Type {
-    if (this.isNullName(expr, module)) {
-      return this.nullTyped(expr, wanted, module);
-    }
-
-    const door = this.doorOfName(expr, module);
-    if (door == undefined) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    const texts = door.texts;
-    if (wanted == undefined || texts == undefined) {
-      return door.type;
-    }
-
-    return this.textChoice(texts, wanted) ?? door.type;
-  }
-
   private textChoice(texts: string[], wanted: Type): Type | undefined {
     const parts = this.definedParts(wanted);
     if (!parts.some((part) => this.isTextual(part))) {

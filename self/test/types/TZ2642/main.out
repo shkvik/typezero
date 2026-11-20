@@ -1,0 +1,8 @@
+main.tz
+  2:10 sign: (int) => int
+  8:16 load: () => Promise<int>
+  9:9 n: int
+  12:10 fine: (int) => int
+  20:10 loop: () => int
+  26:10 maybe: (int) => int | undefined
+  32:10 stop: () => int

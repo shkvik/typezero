@@ -1,0 +1,13 @@
+// An enum is used through its members, not as a value of its own.
+enum Color {
+  Red,
+  Green,
+}
+
+const a1 = Color;
+
+function paint(): int {
+  const a2 = Color;
+
+  return 1;
+}

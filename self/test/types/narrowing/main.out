@@ -1,0 +1,28 @@
+main.tz
+  3:6 type Dir = "up" | "down" | "left"
+  4:6 type Shape = { side: int }
+  6:10 present: (int | undefined) => int
+  11:9 after: int
+  16:10 inside: (int | undefined) => int
+  18:11 within: int
+  26:10 literal: (string) => "up" | "down" | "left" | undefined
+  28:11 chosen: "up" | "down"
+  36:10 kinds: (string | int | boolean) => string
+  38:11 word: string
+  43:9 rest: int | boolean
+  49:9 last: boolean
+  54:10 anything: (unknown) => string
+  56:11 word: string
+  64:10 object: (Shape | undefined) => int
+  69:9 shape: Shape
+  74:10 guarded: (int | undefined, boolean) => int
+  75:9 picked: int
+  76:9 added: boolean
+  81:10 either: (int | string | undefined) => int
+  83:11 text: string | undefined
+  88:9 number: int
+  93:10 stamp: (Date | string | Map<string, int>) => string
+  98:9 rest: string | Map<string, int>
+  107:10 changed: (int | undefined) => int
+  108:7 y: int | undefined
+  116:9 still: int | undefined

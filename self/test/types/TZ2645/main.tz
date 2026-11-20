@@ -1,0 +1,37 @@
+// A switch over literals handles each of them, or says it leaves some out.
+type Dir = "up" | "down" | "left" | "right";
+
+function step(dir: Dir): int {
+  switch (dir) {
+    case "up":
+      return 1;
+    case "down":
+      return 2;
+  }
+
+  return 0;
+}
+
+function each(dir: Dir): int {
+  switch (dir) {
+    case "up":
+      return 1;
+    case "down":
+      return 2;
+    case "left":
+      return 3;
+    case "right":
+      return 4;
+  }
+}
+
+function some(dir: Dir): int {
+  switch (dir) {
+    case "up":
+      return 1;
+    default:
+      break;
+  }
+
+  return 0;
+}

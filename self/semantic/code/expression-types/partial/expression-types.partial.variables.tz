@@ -9,7 +9,7 @@ import {
   BindingKind,
   NameOrigin,
 } from "../../../../program/ast/types/ast.types.patterns.tz";
-import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
 import {
   NameUse,
   SymbolKind,
@@ -22,7 +22,8 @@ import {
 } from "../../../types/type-resolver/types/type-resolver.types.tz";
 import { kNoPlace } from "../const/expression-types.const.tz";
 import {
-  TopVariable,
+  DeclaredVariable,
+  ParamSlot,
   ValueRecord,
   VariableDoor,
 } from "../types/expression-types.types.tz";
@@ -40,7 +41,14 @@ partial class ExpressionTypes {
     }
 
     const uses = new Map<int, NameUse>();
-    const variables = new Map<int, TopVariable>();
+    const record: ValueRecord = {
+      uses,
+      variables: new Map<int, DeclaredVariable>(),
+      functions: new Map<int, FunctionDecl>(),
+      params: new Map<int, ParamSlot>(),
+      assigned: new Set<int>(),
+      errors: [],
+    };
 
     for (const use of this.scopes.get(module)?.uses ?? []) {
       if (!use.isType) {
@@ -48,34 +56,34 @@ partial class ExpressionTypes {
       }
     }
 
-    for (const item of opened.file.items) {
-      if (item.kind != StmtKind.VarDecl) {
-        continue;
-      }
-
-      for (const decl of item.decls) {
-        variables.set(decl.loc, { decl, isConst: item.isConst });
-      }
-    }
-
-    const record: ValueRecord = { uses, variables, errors: [] };
-
     this.records.set(module, record);
+    this.indexStatements(opened.file.items, record);
 
     return record;
   }
 
   private doorOfName(expr: NameExpr, module: int): VariableDoor | undefined {
-    const record = this.record(module);
-    const symbol = record?.uses.get(expr.loc)?.symbol;
-    if (symbol == undefined || symbol.kind != SymbolKind.Variable) {
+    const target = this.targetOfName(expr, module);
+    if (target == undefined || target.kind != SymbolKind.Variable) {
       return undefined;
     }
 
-    return this.door(module, symbol.loc);
+    return this.door(target.module, target.loc);
   }
 
   private door(module: int, loc: int): VariableDoor | undefined {
+    const before = this.facts;
+
+    this.facts = new Map<string, Type>();
+
+    const door = this.localDoor(module, loc);
+
+    this.facts = before;
+
+    return door;
+  }
+
+  private localDoor(module: int, loc: int): VariableDoor | undefined {
     const key = `${module} ${loc}`;
     const known = this.doors.get(key);
     if (known != undefined) {
@@ -100,10 +108,21 @@ partial class ExpressionTypes {
     return door;
   }
 
-  private open(door: VariableDoor, variable: TopVariable, module: int): void {
+  private open(
+    door: VariableDoor,
+    variable: DeclaredVariable,
+    module: int,
+  ): void {
     const decl = variable.decl;
     const written = decl.typeAnn;
     const init = decl.init;
+    const loop = variable.loop;
+    if (loop != undefined) {
+      door.type = this.loopItem(loop, module);
+
+      return;
+    }
+
     const isPlain =
       decl.form.kind == BindingKind.Plain && decl.origin == NameOrigin.Written;
     if (!isPlain) {
@@ -187,7 +206,7 @@ partial class ExpressionTypes {
 
   private keepConstant(
     door: VariableDoor,
-    variable: TopVariable,
+    variable: DeclaredVariable,
     init: Expr,
     given: Type,
     module: int,
@@ -214,7 +233,7 @@ partial class ExpressionTypes {
   }
 
   private reportUndefined(
-    variable: TopVariable,
+    variable: DeclaredVariable,
     init: Expr,
     module: int,
   ): void {

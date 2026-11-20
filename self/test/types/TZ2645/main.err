@@ -1,0 +1,3 @@
+main.tz:5:11: error TZ2645: the switch does not handle "left" and "right"; add 'case "left":', or 'default: break' if leaving it out is meant
+  switch (dir) {
+          ^

@@ -1,0 +1,3 @@
+main.tz
+  2:10 take: (??) => int
+  6:10 fine: (int?, string?, boolean?, double?, int?) => int

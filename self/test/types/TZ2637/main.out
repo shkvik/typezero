@@ -1,0 +1,4 @@
+main.tz
+  2:10 add: (?, int) => int
+  6:10 both: (?, ?) => int
+  10:10 fine: (int, int?) => int

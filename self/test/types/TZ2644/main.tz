@@ -1,0 +1,16 @@
+// A function that returns only undefined needs its result type written.
+function nothing(flag: boolean) {
+  if (flag) {
+    return undefined;
+  }
+
+  return undefined;
+}
+
+function some(flag: boolean): int | undefined {
+  if (flag) {
+    return undefined;
+  }
+
+  return undefined;
+}

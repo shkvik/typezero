@@ -1,0 +1,6 @@
+main.tz:3:10: error TZ2641: function 'log' is declared to return 'void', but returns 'int'
+  return 1;
+         ^
+main.tz:7:10: error TZ2641: function 'save' is declared to return 'void', but returns 'string'
+  return "done";
+         ^

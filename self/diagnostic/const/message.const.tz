@@ -1405,4 +1405,34 @@ export const kMessages: Record<Code, Message> = {
   [Code.ValueOutsideRange]: {
     text: "type '{first}' is not assignable to type '{second}'{place}, which holds {other}; the value may be outside: check it first, e.g. 'if ({word})'",
   },
+  [Code.EnumAsValue]: {
+    text: "enum '{word}' can only be used as '{word}.Member' or '{word}[value]'",
+  },
+  [Code.ParameterNeedsType]: {
+    text: "parameter '{word}' needs a type annotation",
+  },
+  [Code.DefaultNeedsType]: {
+    text: "parameter '{word}' needs a type: only a literal default value (a number, a string, true or false) gives one, e.g. '{word}: int = measure()'",
+  },
+  [Code.ReturnOutsideFunction]: {
+    text: "'return' can only be used inside a function",
+  },
+  [Code.ReturnValueMissing]: {
+    text: "{word} must return a value of type '{first}'",
+  },
+  [Code.VoidReturnsValue]: {
+    text: "{word} is declared to return 'void', but returns '{first}'",
+  },
+  [Code.ReturnOnEveryPath]: {
+    text: "{word} must return a value of type '{first}' on every path",
+  },
+  [Code.ReturnsDiffer]: {
+    text: "{word} returns '{first}' here and '{second}' elsewhere; a function returns values of one type",
+  },
+  [Code.ReturnsOnlyUndefined]: {
+    text: "{word} returns only undefined; declare the return type, e.g. '): int | undefined'",
+  },
+  [Code.SwitchCasesLeft]: {
+    text: "the switch does not handle {word}; add 'case {other}:', or 'default: break' if leaving it out is meant",
+  },
 };

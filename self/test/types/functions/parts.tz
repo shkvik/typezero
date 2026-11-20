@@ -1,0 +1,5 @@
+export const limit = 10;
+
+export function double(n: int) {
+  return n * 2;
+}

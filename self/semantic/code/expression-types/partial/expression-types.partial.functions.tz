@@ -1,0 +1,474 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  Expr,
+  ExprKind,
+  UnaryOp,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  BodySource,
+  FunctionDecl,
+  Param,
+  ParamKind,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  FunctionParameter,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import { kThisParameter } from "../../../types/type-resolver/const/type-resolver.const.tables.tz";
+import {
+  DoorState,
+  ParameterSite,
+  TypeContext,
+  TypePlace,
+} from "../../../types/type-resolver/types/type-resolver.types.tz";
+import {
+  kAnonymousFunction,
+  kFunctionWord,
+  kNoPlace,
+} from "../const/expression-types.const.tz";
+import {
+  FunctionDoor,
+  FunctionFrame,
+  ParameterShape,
+  ReturnedValue,
+} from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  public functionOf(module: int, loc: int): Type {
+    return this.functionAt(module, loc);
+  }
+
+  private functionAt(module: int, loc: int): Type {
+    const fn = this.record(module)?.functions.get(loc);
+    if (fn == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.functionType(fn, module);
+  }
+
+  private functionType(fn: FunctionDecl, module: int): Type {
+    const key = `${module} ${fn.loc}`;
+    const known = this.functionDoors.get(key);
+    if (known != undefined) {
+      return known.type;
+    }
+
+    const door: FunctionDoor = {
+      state: DoorState.InWork,
+      type: this.store.plain(TypeKind.Error),
+    };
+
+    const before = this.facts;
+
+    this.facts = new Map<string, Type>();
+    this.functionDoors.set(key, door);
+    this.openFunction(door, fn, module);
+    this.facts = before;
+    door.state = DoorState.Done;
+
+    return door.type;
+  }
+
+  private openFunction(
+    door: FunctionDoor,
+    fn: FunctionDecl,
+    module: int,
+  ): void {
+    const context: TypeContext = {
+      module,
+      bindings: new Map<int, Type>(),
+      place: TypePlace.Plain,
+    };
+
+    this.resolver.typeParameters(module, fn.typeParams);
+
+    const shape = this.parameterShape(fn, context, module);
+    const written = fn.returnType;
+
+    if (written != undefined) {
+      const result = this.resolver.returnType(written, context);
+
+      door.type = this.signatureOf(shape, result);
+
+      return this.walkWritten(fn, result, module);
+    }
+
+    const result = this.inferredResult(fn, module);
+
+    door.type = this.signatureOf(shape, result);
+  }
+
+  private signatureOf(shape: ParameterShape, result: Type): Type {
+    const params = shape.params;
+    const rest = shape.rest;
+    const self = shape.self;
+
+    return this.store.functionOf({ params, rest, self, result });
+  }
+
+  private usedFunction(module: int, loc: int): Type {
+    const fn = this.record(module)?.functions.get(loc);
+    const type = this.functionAt(module, loc);
+
+    if (fn == undefined || fn.typeParams.length > 0) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (type.kind != TypeKind.Function) {
+      return type;
+    }
+
+    const shape = type.shape;
+    const isBroken =
+      shape.result.kind == TypeKind.Error ||
+      shape.params.some((param) => param.type.kind == TypeKind.Error);
+    if (isBroken) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return type;
+  }
+
+  private parameterShape(
+    fn: FunctionDecl,
+    context: TypeContext,
+    module: int,
+  ): ParameterShape {
+    const params: FunctionParameter[] = [];
+    let self: Type | undefined = undefined;
+    let rest = false;
+    let isAfterOptional = false;
+
+    for (const param of fn.params) {
+      const kind = param.form.kind;
+      const type = this.parameterOf(param, context, module);
+      const inside = this.insideType(type, kind);
+
+      this.paramTypes.set(`${module} ${param.loc}`, inside);
+
+      if (param.name == kThisParameter) {
+        self = type;
+
+        continue;
+      }
+      if (kind == ParamKind.Required && isAfterOptional) {
+        this.report(module, param.loc, Code.RequiredAfterOptional, kNoDetails);
+      }
+
+      const optional =
+        kind == ParamKind.Optional || kind == ParamKind.Defaulted;
+
+      isAfterOptional = isAfterOptional || kind == ParamKind.Optional;
+      rest = rest || kind == ParamKind.Rest;
+      params.push({ type, optional });
+    }
+
+    return { params, rest, self };
+  }
+
+  private parameterOf(param: Param, context: TypeContext, module: int): Type {
+    const written = param.type;
+    const form = param.form;
+    const word = param.name;
+
+    if (written != undefined) {
+      const site: ParameterSite = {
+        name: word,
+        loc: param.loc,
+        kind: form.kind,
+        type: written,
+        isDeclared: true,
+      };
+      const type = this.resolver.parameterType(site, context);
+      if (form.kind == ParamKind.Defaulted && type.kind != TypeKind.Error) {
+        this.checked(form.defaultValue, type, module, kNoPlace);
+      }
+
+      return type;
+    }
+    if (form.kind != ParamKind.Defaulted) {
+      this.report(module, param.loc, Code.ParameterNeedsType, { word });
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (!this.isPlainLiteral(form.defaultValue)) {
+      this.report(module, param.loc, Code.DefaultNeedsType, { word });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.typed(form.defaultValue, undefined, module);
+  }
+
+  private isPlainLiteral(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+      case ExprKind.FloatLit:
+      case ExprKind.StringLit:
+      case ExprKind.BoolLit:
+        return true;
+      case ExprKind.Unary: {
+        const operand = expr.operand;
+        const isNumber =
+          operand.kind == ExprKind.IntLit || operand.kind == ExprKind.FloatLit;
+
+        return this.isSign(expr.op) && isNumber;
+      }
+      default:
+        return false;
+    }
+  }
+
+  private insideType(type: Type, kind: ParamKind): Type {
+    if (kind != ParamKind.Optional || type.kind == TypeKind.Error) {
+      return type;
+    }
+
+    return this.optional(type);
+  }
+
+  private isBodyWalked(fn: FunctionDecl, module: int): boolean {
+    const opened = this.program.modules[module];
+    if (opened == undefined || opened.source.isLibrary) {
+      return false;
+    }
+
+    return fn.body != undefined && fn.bodySource == BodySource.Written;
+  }
+
+  private walkWritten(fn: FunctionDecl, result: Type, module: int): void {
+    const body = fn.body;
+    if (body == undefined || !this.isBodyWalked(fn, module)) {
+      return;
+    }
+
+    const inner = this.innerResult(result, fn);
+    const frame = this.frameOf(fn, inner);
+
+    this.walkStatements(body.body, frame, module);
+
+    const isOpen =
+      inner.kind == TypeKind.Void ||
+      inner.kind == TypeKind.Error ||
+      inner.kind == TypeKind.Unknown ||
+      inner.kind == TypeKind.Undefined ||
+      this.isOptional(inner);
+    if (isOpen || this.isAlwaysReturning(body, module)) {
+      return;
+    }
+
+    const word = this.functionLabel(fn);
+    const first = this.text.of(inner);
+
+    this.report(module, fn.loc, Code.ReturnOnEveryPath, { word, first });
+  }
+
+  private innerResult(result: Type, fn: FunctionDecl): Type {
+    if (fn.isGenerator) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (fn.isAsync && result.kind == TypeKind.Promise) {
+      return result.value;
+    }
+
+    return result;
+  }
+
+  private frameOf(fn: FunctionDecl, result: Type | undefined): FunctionFrame {
+    return {
+      fn,
+      isAsync: fn.isAsync,
+      result,
+      returns: [],
+      hasEmptyReturn: false,
+    };
+  }
+
+  private inferredResult(fn: FunctionDecl, module: int): Type {
+    const body = fn.body;
+    if (body == undefined || !this.isBodyWalked(fn, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const frame = this.frameOf(fn, undefined);
+
+    this.walkStatements(body.body, frame, module);
+
+    if (fn.isGenerator) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const value = this.commonResult(fn, frame, module);
+    if (!fn.isAsync || value.kind == TypeKind.Error) {
+      return value;
+    }
+
+    return this.store.promiseOf(value);
+  }
+
+  private commonResult(
+    fn: FunctionDecl,
+    frame: FunctionFrame,
+    module: int,
+  ): Type {
+    const returns = frame.returns;
+    const isValued = returns.some((one) => !this.isVoided(one.value));
+    if (!isValued) {
+      return this.store.plain(TypeKind.Void);
+    }
+
+    const isUnknown = returns.some((one) => one.type.kind == TypeKind.Error);
+    if (isUnknown) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const common = this.joinedReturns(fn, returns, module);
+    if (common != undefined && common.kind == TypeKind.Error) {
+      return common;
+    }
+
+    const isFallingOff = !this.isAlwaysReturning(fn.body, module);
+    const isUndefined =
+      isFallingOff ||
+      frame.hasEmptyReturn ||
+      returns.some((one) => one.type.kind == TypeKind.Undefined);
+    if (common != undefined && isUndefined && common.kind != TypeKind.Void) {
+      return this.optional(common);
+    }
+    if (common != undefined) {
+      return common;
+    }
+
+    const word = this.functionName(fn);
+
+    this.report(module, fn.loc, Code.ReturnsOnlyUndefined, { word });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private isVoided(value: Expr): boolean {
+    return value.kind == ExprKind.Unary && value.op == UnaryOp.Void;
+  }
+
+  private joinedReturns(
+    fn: FunctionDecl,
+    returns: ReturnedValue[],
+    module: int,
+  ): Type | undefined {
+    const ordered = this.literalsLast(returns, module);
+    let common: Type | undefined = undefined;
+
+    for (const one of ordered) {
+      if (common == undefined) {
+        common = one.type;
+
+        continue;
+      }
+
+      const adapted = this.literalTarget(one.value, one.type, common, module);
+      if (one.type != common && adapted != undefined) {
+        continue;
+      }
+
+      const joined = this.unionUnify(common, one.type);
+      if (joined == undefined || joined.kind == TypeKind.Error) {
+        const word = this.functionName(fn);
+        const first = this.text.of(one.type);
+        const second = this.text.of(common);
+
+        this.report(module, one.value.loc, Code.ReturnsDiffer, {
+          word,
+          first,
+          second,
+        });
+
+        return this.store.plain(TypeKind.Error);
+      }
+
+      common = joined;
+    }
+
+    return common;
+  }
+
+  private literalsLast(returns: ReturnedValue[], module: int): ReturnedValue[] {
+    const typed = returns.filter((one) => one.type.kind != TypeKind.Undefined);
+    const plain = typed.filter((one) => !this.isWholeReturn(one, module));
+    const wholes = typed.filter((one) => this.isWholeReturn(one, module));
+
+    return plain.concat(wholes);
+  }
+
+  private isWholeReturn(one: ReturnedValue, module: int): boolean {
+    return one.type.kind == TypeKind.Int && this.isWholeTree(one.value, module);
+  }
+
+  private isFunctionAdapting(
+    expr: Expr,
+    given: Type,
+    wanted: Type,
+    module: int,
+  ): boolean {
+    const target = this.definedType(wanted);
+    const isNamed =
+      expr.kind == ExprKind.Name &&
+      this.targetOfName(expr, module)?.kind == SymbolKind.Function;
+    const isPair =
+      given.kind == TypeKind.Function && target.kind == TypeKind.Function;
+    if (!isNamed || !isPair) {
+      return false;
+    }
+    if (given.kind != TypeKind.Function || target.kind != TypeKind.Function) {
+      return false;
+    }
+
+    const mine = given.shape;
+    const theirs = target.shape;
+    if (mine.rest || theirs.rest) {
+      return false;
+    }
+
+    const isFitting = theirs.params.every((param, index) =>
+      this.isParamFitting(mine.params[index], param),
+    );
+    const needed = mine.params.filter((param) => !param.optional).length;
+    const result = theirs.result;
+    const isResult = result.kind == TypeKind.Void || result == mine.result;
+
+    return isFitting && theirs.params.length >= needed && isResult;
+  }
+
+  private isParamFitting(
+    mine: FunctionParameter | undefined,
+    wanted: FunctionParameter,
+  ): boolean {
+    if (mine == undefined) {
+      return true;
+    }
+
+    const isUnknown =
+      mine.type.kind == TypeKind.Unknown && wanted.type.kind != TypeKind.Void;
+
+    return mine.type == wanted.type || isUnknown;
+  }
+
+  private functionName(fn: FunctionDecl): string {
+    if (fn.name == "") {
+      return kAnonymousFunction;
+    }
+
+    return `'${fn.name}'`;
+  }
+
+  private functionLabel(fn: FunctionDecl): string {
+    if (fn.name == "") {
+      return kAnonymousFunction;
+    }
+
+    return `${kFunctionWord} '${fn.name}'`;
+  }
+}

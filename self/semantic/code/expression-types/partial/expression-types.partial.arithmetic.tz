@@ -315,7 +315,10 @@ partial class ExpressionTypes {
     const left = pair.left;
     const right = pair.right;
     const isBroken =
-      left.kind == TypeKind.Error || right.kind == TypeKind.Error;
+      left.kind == TypeKind.Error ||
+      right.kind == TypeKind.Error ||
+      left.kind == TypeKind.TypeParameter ||
+      right.kind == TypeKind.TypeParameter;
     if (isBroken) {
       return this.store.plain(TypeKind.Error);
     }

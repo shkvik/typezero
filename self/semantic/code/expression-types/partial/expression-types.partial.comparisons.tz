@@ -406,9 +406,13 @@ partial class ExpressionTypes {
   ): Type {
     const expected = this.wantedPart(wanted);
     const left = this.typed(expr.lhs, expected, module);
+    if (left.kind == TypeKind.Error) {
+      return left;
+    }
+
     const hint = this.nullishHint(left, expected);
     const right = this.typed(expr.rhs, hint, module);
-    const pair = { left, right };
+    const pair: OperandPair = { left, right };
 
     if (left.kind == TypeKind.Error || right.kind == TypeKind.Error) {
       return this.store.plain(TypeKind.Error);

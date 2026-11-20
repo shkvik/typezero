@@ -1,0 +1,84 @@
+// A function name gives the type of the function; without a result type
+// the result is the common type of its returns, with undefined when it can
+// end without one. Parameters and local variables have their own types.
+import { double, limit } from "./parts.tz";
+
+type Shape = { side: int };
+
+function sum(a: int, b: int): int {
+  const total = a + b;
+
+  return total;
+}
+
+function half(n: int) {
+  return n / 2;
+}
+
+function nothing(n: int) {
+  const twice = n * 2;
+}
+
+function maybe(n: int) {
+  if (n > 0) {
+    return "plus";
+  }
+}
+
+function mixed(flag: boolean) {
+  if (flag) {
+    return 1;
+  }
+
+  return "one";
+}
+
+function small(n: int8) {
+  if (n > 1) {
+    return n;
+  }
+
+  return 1;
+}
+
+async function later(n: int) {
+  return n;
+}
+
+function options(count = 1, text = "s", ratio?: double, ...rest: int[]) {
+  const first = count;
+  const second = text;
+  const third = ratio;
+  const fourth = rest;
+
+  return first;
+}
+
+function outer(n: int): int {
+  function inner(k: int) {
+    return k + n;
+  }
+
+  return inner(n);
+}
+
+function looped(items: Shape[], words: Map<string, int>): int {
+  for (const item of items) {
+    const kept = item;
+  }
+
+  for (const pair of words) {
+    const kept = pair;
+  }
+
+  for (const letter of "abc") {
+    const kept = letter;
+  }
+
+  return 0;
+}
+
+const s = sum;
+const h = half;
+const d = double;
+const l = limit;

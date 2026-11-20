@@ -1,0 +1,16 @@
+// The returns of a function without a result type join into one type.
+function pick(flag: boolean) {
+  if (flag) {
+    return [1];
+  }
+
+  return ["a"];
+}
+
+function either(flag: boolean) {
+  if (flag) {
+    return 1;
+  }
+
+  return "one";
+}

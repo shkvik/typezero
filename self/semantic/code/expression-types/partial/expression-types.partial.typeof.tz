@@ -48,8 +48,10 @@ partial class ExpressionTypes {
     }
 
     const plain = this.definedType(tested);
+    const parts = this.unionMembers(plain);
     const isOpen =
-      tested.kind == TypeKind.Error || plain.kind == TypeKind.TypeParameter;
+      parts.some((part) => part.kind == TypeKind.Error) ||
+      plain.kind == TypeKind.TypeParameter;
     if (isOpen) {
       return;
     }

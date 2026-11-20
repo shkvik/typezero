@@ -1,0 +1,12 @@
+// A parameter of a declared function needs a type.
+function add(a, b: int): int {
+  return b;
+}
+
+function both(first, second): int {
+  return 1;
+}
+
+function fine(a: int, b: int = 2): int {
+  return a + b;
+}

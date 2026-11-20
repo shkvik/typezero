@@ -1,0 +1,4 @@
+main.tz
+  2:10 count: () => int
+  6:16 later: () => Promise<string>
+  10:10 maybe: () => int | undefined

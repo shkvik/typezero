@@ -1,0 +1,8 @@
+// 'return' belongs to a function.
+const limit = 1;
+
+return;
+
+function fine(): int {
+  return limit;
+}

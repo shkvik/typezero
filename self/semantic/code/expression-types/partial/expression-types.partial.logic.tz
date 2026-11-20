@@ -32,9 +32,17 @@ partial class ExpressionTypes {
 
   private branchCheck(expr: Expr, use: TruthUse, module: int): void {
     if (this.isLogical(expr) && expr.kind == ExprKind.Binary) {
+      const isAnd = expr.op == BinaryOp.LogAnd;
+
       this.branchCheck(expr.lhs, TruthUse.Condition, module);
 
-      return this.branchCheck(expr.rhs, TruthUse.Condition, module);
+      const facts = this.factsOf(expr.lhs, isAnd, module);
+      const before = this.underFacts(facts);
+
+      this.branchCheck(expr.rhs, TruthUse.Condition, module);
+      this.facts = before;
+
+      return;
     }
     if (expr.kind == ExprKind.Unary && expr.op == UnaryOp.Not) {
       return this.branchCheck(expr.operand, TruthUse.Not, module);
@@ -74,7 +82,12 @@ partial class ExpressionTypes {
       module,
     );
     const hint = this.rightHint(isAnd, left, expected);
+    const facts = this.factsOf(expr.lhs, isAnd, module);
+    const before = this.underFacts(facts);
     const right = this.logicalRight(expr, hint, side, module);
+
+    this.facts = before;
+
     const isRightTruthy =
       side == LogicSide.Value ||
       this.checkTruthy(expr.rhs, right, TruthUse.Condition, undefined, module);
@@ -207,23 +220,39 @@ partial class ExpressionTypes {
     const isThenWaiting = this.isWaiting(expr.thenExpr);
     const isElseWaiting = this.isWaiting(expr.elseExpr);
     if (isThenWaiting && !isElseWaiting) {
-      const elseType = this.typed(expr.elseExpr, wanted, module);
+      const elseType = this.branchTyped(expr, false, wanted, module);
       const thenHint = this.branchHint(expr.thenExpr, elseType, wanted);
-      const thenType = this.typed(expr.thenExpr, thenHint, module);
+      const thenType = this.branchTyped(expr, true, thenHint, module);
 
       return this.joinedBranches(expr, thenType, elseType, module);
     }
 
-    const thenType = this.typed(expr.thenExpr, wanted, module);
+    const thenType = this.branchTyped(expr, true, wanted, module);
     const elseHint = this.elseHint(
       expr,
       thenType,
       wanted,
       isElseWaiting && !isThenWaiting,
     );
-    const elseType = this.typed(expr.elseExpr, elseHint, module);
+    const elseType = this.branchTyped(expr, false, elseHint, module);
 
     return this.joinedBranches(expr, thenType, elseType, module);
+  }
+
+  private branchTyped(
+    expr: ConditionalExpr,
+    isThen: boolean,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const branch = this.sideOf(isThen, expr.thenExpr, expr.elseExpr);
+    const facts = this.factsOf(expr.cond, isThen, module);
+    const before = this.underFacts(facts);
+    const type = this.typed(branch, wanted, module);
+
+    this.facts = before;
+
+    return type;
   }
 
   private isWaiting(branch: Expr): boolean {

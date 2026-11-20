@@ -10,6 +10,7 @@ import {
 } from "../types/type-resolver.types.tz";
 
 export const kThisParameter = "this";
+export const kRestPlaceholder = "xs";
 export const kNullTypeName = "null";
 export const kNamePoint = ".";
 export const kEnumValueLimit: uint64 = 9223372036854775807;

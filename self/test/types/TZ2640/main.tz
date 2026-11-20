@@ -1,0 +1,12 @@
+// A function with a result type gives a value at each 'return'.
+function count(): int {
+  return;
+}
+
+async function later(): Promise<string> {
+  return;
+}
+
+function maybe(): int | undefined {
+  return;
+}

@@ -1,0 +1,3 @@
+main.tz:2:10: error TZ2644: 'nothing' returns only undefined; declare the return type, e.g. '): int | undefined'
+function nothing(flag: boolean) {
+         ^

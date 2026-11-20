@@ -3,13 +3,17 @@ import {
   UnaryOp,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { DictKind } from "../../../../program/type/types/type.types.tz";
+import {
+  DictKind,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
 import {
   DictText,
   IntLimit,
   OperatorText,
   TruthCodes,
   TruthUse,
+  TypeOfType,
   UnaryText,
 } from "../types/expression-types.types.tz";
 
@@ -21,6 +25,28 @@ export const kDot = ".";
 export const kOptionalDot = "?.";
 export const kManyLiterals = 64;
 export const kIntervalSeparator = " or ";
+export const kAnonymousFunction = "the function";
+export const kFunctionWord = "function";
+export const kPanicName = "panic";
+export const kExitName = "exit";
+export const kProcessName = "process";
+export const kIteratorKey = "[Symbol.iterator]";
+
+export const kTypeOfTypes: TypeOfType[] = [
+  { name: "undefined", kind: TypeKind.Undefined, bits: 0, unsigned: false },
+  { name: "boolean", kind: TypeKind.Boolean, bits: 0, unsigned: false },
+  { name: "string", kind: TypeKind.String, bits: 0, unsigned: false },
+  { name: "double", kind: TypeKind.Double, bits: 0, unsigned: false },
+  { name: "decimal", kind: TypeKind.Decimal, bits: 0, unsigned: false },
+  { name: "int", kind: TypeKind.Int, bits: 64, unsigned: false },
+  { name: "int8", kind: TypeKind.Int, bits: 8, unsigned: false },
+  { name: "int16", kind: TypeKind.Int, bits: 16, unsigned: false },
+  { name: "int32", kind: TypeKind.Int, bits: 32, unsigned: false },
+  { name: "uint8", kind: TypeKind.Int, bits: 8, unsigned: true },
+  { name: "uint16", kind: TypeKind.Int, bits: 16, unsigned: true },
+  { name: "uint32", kind: TypeKind.Int, bits: 32, unsigned: true },
+  { name: "uint64", kind: TypeKind.Int, bits: 64, unsigned: true },
+];
 export const kNoPlace = "";
 export const kValuePlace = " of the value";
 export const kKeyPlace = " of the key";
@@ -108,6 +134,7 @@ export const kSymbolTypeOf = "symbol";
 export const kMostShownNumberNames = 3;
 export const kNameSeparator = ", ";
 export const kLastNameSeparator = " or ";
+export const kLastAndSeparator = " and ";
 export const kOtherPlaceholder = "...";
 export const kNumberNoun = "a number";
 export const kDecimalNoun = "a decimal";

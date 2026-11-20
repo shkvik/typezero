@@ -1,0 +1,6 @@
+main.tz:3:3: error TZ2640: function 'count' must return a value of type 'int'
+  return;
+  ^
+main.tz:7:3: error TZ2640: function 'later' must return a value of type 'string'
+  return;
+  ^

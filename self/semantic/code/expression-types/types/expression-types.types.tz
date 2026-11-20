@@ -7,24 +7,86 @@ import {
   Property,
   UnaryOp,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+  Param,
+} from "../../../../program/ast/types/ast.types.functions.tz";
 import { VarDeclarator } from "../../../../program/ast/types/ast.types.patterns.tz";
-import { NameUse } from "../../../../program/scopes/types/scopes.types.tz";
+import { ForOfStmt } from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  NameUse,
+  SymbolKind,
+} from "../../../../program/scopes/types/scopes.types.tz";
 import {
   DictKind,
+  FunctionParameter,
   LiteralKind,
+  PlainKind,
   Type,
+  TypeKind,
 } from "../../../../program/type/types/type.types.tz";
 import { DoorState } from "../../../types/type-resolver/types/type-resolver.types.tz";
 
-export type TopVariable = {
+export type DeclaredVariable = {
   readonly decl: VarDeclarator;
   readonly isConst: boolean;
+  readonly loop?: ForOfStmt;
+};
+
+export type ParamSlot = {
+  readonly fn: FunctionDecl;
+  readonly param: Param;
 };
 
 export type ValueRecord = {
   readonly uses: Map<int, NameUse>;
-  readonly variables: Map<int, TopVariable>;
+  readonly variables: Map<int, DeclaredVariable>;
+  readonly functions: Map<int, FunctionDecl>;
+  readonly params: Map<int, ParamSlot>;
+  readonly assigned: Set<int>;
   readonly errors: SourceError[];
+};
+
+export type NarrowSlot = {
+  readonly key: string;
+  readonly type: Type;
+};
+
+export type TypeOfType = {
+  readonly name: string;
+  readonly kind: PlainKind | TypeKind.Int;
+  readonly bits: int;
+  readonly unsigned: boolean;
+};
+
+export type ValueTarget = {
+  readonly module: int;
+  readonly kind: SymbolKind;
+  readonly loc: int;
+};
+
+export type FunctionDoor = {
+  state: DoorState;
+  type: Type;
+};
+
+export type ReturnedValue = {
+  readonly value: Expr;
+  readonly type: Type;
+};
+
+export type FunctionFrame = {
+  readonly fn?: FunctionDecl;
+  readonly isAsync: boolean;
+  readonly result?: Type;
+  readonly returns: ReturnedValue[];
+  hasEmptyReturn: boolean;
+};
+
+export type ParameterShape = {
+  readonly params: FunctionParameter[];
+  readonly rest: boolean;
+  readonly self?: Type;
 };
 
 export type LiteralValue = {

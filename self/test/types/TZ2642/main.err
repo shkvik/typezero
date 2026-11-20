@@ -1,0 +1,6 @@
+main.tz:2:10: error TZ2642: function 'sign' must return a value of type 'int' on every path
+function sign(n: int): int {
+         ^
+main.tz:8:16: error TZ2642: function 'load' must return a value of type 'int' on every path
+async function load(): Promise<int> {
+               ^

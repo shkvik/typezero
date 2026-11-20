@@ -1,0 +1,241 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { ClassDecl } from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  Expr,
+  ExprKind,
+  NewKind,
+  PropertyKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+  ParamKind,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  Stmt,
+  StmtKind,
+  VarDeclStmt,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import { ValueRecord } from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private indexStatements(statements: Stmt[], record: ValueRecord): void {
+    for (const statement of statements) {
+      this.indexStatement(statement, record);
+    }
+  }
+
+  private indexOptionalStatement(
+    statement: Stmt | undefined,
+    record: ValueRecord,
+  ): void {
+    if (statement != undefined) {
+      this.indexStatement(statement, record);
+    }
+  }
+
+  private indexStatement(statement: Stmt, record: ValueRecord): void {
+    switch (statement.kind) {
+      case StmtKind.Block:
+        return this.indexStatements(statement.body, record);
+      case StmtKind.VarDecl:
+        return this.indexVariables(statement, record);
+      case StmtKind.Function:
+        return this.indexFunction(statement, record);
+      case StmtKind.Expr:
+        return this.indexExpression(statement.expr, record);
+      case StmtKind.If:
+        this.indexExpression(statement.cond, record);
+        this.indexStatement(statement.thenStmt, record);
+
+        return this.indexOptionalStatement(statement.elseStmt, record);
+      case StmtKind.While:
+      case StmtKind.DoWhile:
+        this.indexExpression(statement.cond, record);
+
+        return this.indexStatement(statement.body, record);
+      case StmtKind.For:
+        this.indexOptionalStatement(statement.init, record);
+        this.indexOptionalExpression(statement.cond, record);
+        this.indexOptionalExpression(statement.step, record);
+
+        return this.indexOptionalStatement(statement.body, record);
+      case StmtKind.ForOf: {
+        const decl = statement.binding;
+        const isConst = statement.isConst;
+
+        record.variables.set(decl.loc, { decl, isConst, loop: statement });
+        this.indexExpression(statement.iterable, record);
+
+        return this.indexStatement(statement.body, record);
+      }
+      case StmtKind.Switch:
+        this.indexExpression(statement.discriminant, record);
+
+        for (const option of statement.cases) {
+          this.indexOptionalExpression(option.test, record);
+          this.indexStatements(option.body, record);
+        }
+
+        return;
+      case StmtKind.Labeled:
+        return this.indexStatement(statement.body, record);
+      case StmtKind.Return:
+        return this.indexOptionalExpression(statement.value, record);
+      case StmtKind.Class:
+        return this.indexClass(statement, record);
+      default:
+        return;
+    }
+  }
+
+  private indexVariables(statement: VarDeclStmt, record: ValueRecord): void {
+    const isConst = statement.isConst;
+
+    for (const decl of statement.decls) {
+      record.variables.set(decl.loc, { decl, isConst });
+      this.indexOptionalExpression(decl.init, record);
+    }
+  }
+
+  private indexFunction(fn: FunctionDecl, record: ValueRecord): void {
+    record.functions.set(fn.loc, fn);
+
+    for (const param of fn.params) {
+      const form = param.form;
+
+      record.params.set(param.loc, { fn, param });
+
+      if (form.kind == ParamKind.Defaulted) {
+        this.indexExpression(form.defaultValue, record);
+      }
+    }
+
+    const body = fn.body;
+    if (body != undefined) {
+      this.indexStatements(body.body, record);
+    }
+  }
+
+  private indexClass(decl: ClassDecl, record: ValueRecord): void {
+    for (const field of decl.fields) {
+      this.indexOptionalExpression(field.init, record);
+    }
+
+    for (const fn of decl.constructors) {
+      this.indexFunction(fn, record);
+    }
+
+    for (const fn of decl.methods) {
+      this.indexFunction(fn, record);
+    }
+  }
+
+  private indexAssigned(target: Expr, record: ValueRecord): void {
+    if (target.kind != ExprKind.Name) {
+      return;
+    }
+
+    const symbol = record.uses.get(target.loc)?.symbol;
+    if (symbol != undefined) {
+      record.assigned.add(symbol.loc);
+    }
+  }
+
+  private indexOptionalExpression(
+    expr: Expr | undefined,
+    record: ValueRecord,
+  ): void {
+    if (expr != undefined) {
+      this.indexExpression(expr, record);
+    }
+  }
+
+  private indexExpressions(exprs: Expr[], record: ValueRecord): void {
+    for (const expr of exprs) {
+      this.indexExpression(expr, record);
+    }
+  }
+
+  private indexExpression(expr: Expr, record: ValueRecord): void {
+    switch (expr.kind) {
+      case ExprKind.Member:
+        return this.indexExpression(expr.object, record);
+      case ExprKind.Index:
+        this.indexExpression(expr.object, record);
+
+        return this.indexExpression(expr.index, record);
+      case ExprKind.Unary:
+        return this.indexExpression(expr.operand, record);
+      case ExprKind.Binary:
+        this.indexExpression(expr.lhs, record);
+
+        return this.indexExpression(expr.rhs, record);
+      case ExprKind.Assign:
+        this.indexAssigned(expr.target, record);
+        this.indexExpression(expr.target, record);
+
+        return this.indexExpression(expr.value, record);
+      case ExprKind.Update:
+        this.indexAssigned(expr.target, record);
+
+        return this.indexExpression(expr.target, record);
+      case ExprKind.Call: {
+        const values = expr.args.map((argument) => argument.expr);
+
+        this.indexExpression(expr.callee, record);
+
+        return this.indexExpressions(values, record);
+      }
+      case ExprKind.New: {
+        const form = expr.form;
+        const values = expr.args.map((argument) => argument.expr);
+
+        if (form.kind != NewKind.Named) {
+          this.indexExpression(form.callee, record);
+        }
+
+        return this.indexExpressions(values, record);
+      }
+      case ExprKind.Conditional:
+        this.indexExpression(expr.cond, record);
+        this.indexExpression(expr.thenExpr, record);
+
+        return this.indexExpression(expr.elseExpr, record);
+      case ExprKind.Cast:
+        return this.indexExpression(expr.operand, record);
+      case ExprKind.Sequence:
+        return this.indexExpressions(expr.exprs, record);
+      case ExprKind.OptionalChain:
+        return this.indexExpression(expr.chain, record);
+      case ExprKind.Function:
+        return this.indexFunction(expr.fn, record);
+      case ExprKind.Yield:
+        return this.indexOptionalExpression(expr.value, record);
+      case ExprKind.Await:
+        return this.indexExpression(expr.value, record);
+      case ExprKind.Class:
+        return this.indexClass(expr.decl, record);
+      case ExprKind.Template:
+        return this.indexExpressions(expr.exprs, record);
+      case ExprKind.ArrayLit: {
+        const values = expr.elements.map((element) => element.expr);
+
+        return this.indexExpressions(values, record);
+      }
+      case ExprKind.ObjectLit:
+        for (const property of expr.props) {
+          const form = property.form;
+
+          if (form.kind == PropertyKind.Computed) {
+            this.indexExpression(form.key, record);
+          }
+
+          this.indexExpression(property.value, record);
+        }
+
+        return;
+      default:
+        return;
+    }
+  }
+}

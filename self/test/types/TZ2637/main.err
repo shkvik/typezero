@@ -1,0 +1,9 @@
+main.tz:2:14: error TZ2637: parameter 'a' needs a type annotation
+function add(a, b: int): int {
+             ^
+main.tz:6:15: error TZ2637: parameter 'first' needs a type annotation
+function both(first, second): int {
+              ^
+main.tz:6:22: error TZ2637: parameter 'second' needs a type annotation
+function both(first, second): int {
+                     ^

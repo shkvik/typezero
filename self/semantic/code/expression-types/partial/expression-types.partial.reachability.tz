@@ -1,0 +1,166 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  IfStmt,
+  Stmt,
+  StmtKind,
+  SwitchStmt,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  kExitName,
+  kPanicName,
+  kProcessName,
+} from "../const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private isAlwaysReturning(statement: Stmt | undefined, module: int): boolean {
+    if (statement == undefined) {
+      return false;
+    }
+
+    switch (statement.kind) {
+      case StmtKind.Return:
+        return true;
+      case StmtKind.Expr:
+        return this.isExit(statement.expr, module);
+      case StmtKind.Block:
+        return statement.body.some((one) =>
+          this.isAlwaysReturning(one, module),
+        );
+      case StmtKind.If:
+        return this.isIfReturning(statement, module);
+      case StmtKind.While:
+      case StmtKind.DoWhile:
+        return (
+          this.isTrueLiteral(statement.cond) && !this.hasBreak(statement.body)
+        );
+      case StmtKind.For:
+        return this.isForever(statement.cond) && !this.hasBreak(statement.body);
+      case StmtKind.Switch:
+        return this.isSwitchReturning(statement, module);
+      case StmtKind.Labeled:
+        return (
+          this.isAlwaysReturning(statement.body, module) &&
+          !this.hasBreak(statement.body)
+        );
+      default:
+        return false;
+    }
+  }
+
+  private isExit(expr: Expr, module: int): boolean {
+    if (expr.kind != ExprKind.Call) {
+      return false;
+    }
+
+    const callee = expr.callee;
+    if (callee.kind == ExprKind.Name) {
+      return callee.name == kPanicName && this.isLibraryName(callee, module);
+    }
+    if (callee.kind != ExprKind.Member || callee.name != kExitName) {
+      return false;
+    }
+
+    const owner = callee.object;
+    if (owner.kind != ExprKind.Name || owner.name != kProcessName) {
+      return false;
+    }
+
+    return this.record(module)?.uses.get(owner.loc)?.symbol == undefined;
+  }
+
+  private isIfReturning(statement: IfStmt, module: int): boolean {
+    const literal = this.literalCondition(statement.cond);
+    const elseStmt = statement.elseStmt;
+    if (literal == true && elseStmt == undefined) {
+      return this.isAlwaysReturning(statement.thenStmt, module);
+    }
+
+    const isEmptyThen = statement.thenStmt.kind == StmtKind.Empty;
+    if (literal == false && isEmptyThen) {
+      return this.isAlwaysReturning(elseStmt, module);
+    }
+    if (elseStmt == undefined) {
+      return false;
+    }
+
+    return (
+      this.isAlwaysReturning(statement.thenStmt, module) &&
+      this.isAlwaysReturning(elseStmt, module)
+    );
+  }
+
+  private literalCondition(cond: Expr): boolean | undefined {
+    if (cond.kind != ExprKind.BoolLit) {
+      return undefined;
+    }
+
+    return cond.value;
+  }
+
+  private isTrueLiteral(cond: Expr): boolean {
+    return this.literalCondition(cond) == true;
+  }
+
+  private isForever(cond: Expr | undefined): boolean {
+    return cond == undefined || this.isTrueLiteral(cond);
+  }
+
+  private isSwitchReturning(statement: SwitchStmt, module: int): boolean {
+    const cases = statement.cases;
+    const last = cases[cases.length - 1];
+    const hasDefault = cases.some((option) => option.test == undefined);
+    const isCovered = this.coveredSwitches.has(`${module} ${statement.loc}`);
+    if ((!hasDefault && !isCovered) || last == undefined) {
+      return false;
+    }
+
+    const isLeaving = cases.some((option) =>
+      option.body.some((one) => this.hasBreak(one)),
+    );
+    if (isLeaving) {
+      return false;
+    }
+
+    return last.body.some((one) => this.isAlwaysReturning(one, module));
+  }
+
+  private hasBreak(statement: Stmt | undefined): boolean {
+    return this.breaksOut(statement, false);
+  }
+
+  private breaksOut(statement: Stmt | undefined, isNested: boolean): boolean {
+    if (statement == undefined) {
+      return false;
+    }
+
+    switch (statement.kind) {
+      case StmtKind.Break:
+        return !isNested || statement.label != "";
+      case StmtKind.Block:
+        return statement.body.some((one) => this.breaksOut(one, isNested));
+      case StmtKind.If:
+        return (
+          this.breaksOut(statement.thenStmt, isNested) ||
+          this.breaksOut(statement.elseStmt, isNested)
+        );
+      case StmtKind.Labeled:
+        return this.breaksOut(statement.body, isNested);
+      case StmtKind.While:
+      case StmtKind.DoWhile:
+      case StmtKind.ForOf:
+        return this.breaksOut(statement.body, true);
+      case StmtKind.For:
+        return this.breaksOut(statement.body, true);
+      case StmtKind.Switch:
+        return statement.cases.some((option) =>
+          option.body.some((one) => this.breaksOut(one, true)),
+        );
+      default:
+        return false;
+    }
+  }
+}

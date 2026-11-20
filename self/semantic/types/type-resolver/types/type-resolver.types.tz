@@ -128,6 +128,7 @@ export type ParameterSite = {
   readonly loc: int;
   readonly kind: ParamKind;
   readonly type: TypeRef;
+  readonly isDeclared: boolean;
 };
 
 export enum UnionSlot {

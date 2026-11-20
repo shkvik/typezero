@@ -1,0 +1,8 @@
+// A default value gives its parameter a type only when it is a literal.
+function take(list = [1]): int {
+  return 1;
+}
+
+function fine(count = 1, text = "s", flag = true, ratio = 1.5, low = -1): int {
+  return count;
+}

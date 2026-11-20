@@ -15,7 +15,11 @@ import {
   Type,
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
-import { kNoPlace, kTypeSeparator } from "../const/expression-types.const.tz";
+import {
+  kIteratorKey,
+  kNoPlace,
+  kTypeSeparator,
+} from "../const/expression-types.const.tz";
 import { ArrayDraft } from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
@@ -298,6 +302,8 @@ partial class ExpressionTypes {
         return type.dict != DictKind.Record;
       case TypeKind.Literal:
         return type.literal == LiteralKind.String;
+      case TypeKind.Object:
+        return type.fields.some((field) => field.name == kIteratorKey);
       default:
         return false;
     }

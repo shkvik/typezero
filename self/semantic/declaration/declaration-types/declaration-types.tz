@@ -18,7 +18,6 @@ import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { ExpressionTypes } from "../../code/expression-types/expression-types.tz";
 import { TypeResolver } from "../../types/type-resolver/type-resolver.tz";
 import {
-  ParameterSite,
   TypeContext,
   TypePlace,
 } from "../../types/type-resolver/types/type-resolver.types.tz";
@@ -47,6 +46,8 @@ export class DeclarationTypes {
   }
 
   public run(): ModuleTypes {
+    this.expressions.checkModule(this.module.id);
+
     for (const item of this.module.file.items) {
       this.typeItem(item);
     }
@@ -62,7 +63,6 @@ export class DeclarationTypes {
         }
         break;
       case StmtKind.Function:
-        this.resolver.typeParameters(this.module.id, item.typeParams);
         this.typeFunction(item);
         break;
       case StmtKind.Class:
@@ -90,28 +90,79 @@ export class DeclarationTypes {
   }
 
   private typeFunction(fn: FunctionDecl): void {
-    const written = fn.returnType;
-    const sites: ParameterSite[] = [];
-
-    for (const param of fn.params) {
-      const type = param.type;
-      if (type != undefined) {
-        sites.push({
-          name: param.name,
-          loc: param.loc,
-          kind: param.form.kind,
-          type,
-        });
-      }
+    const type = this.expressions.functionOf(this.module.id, fn.loc);
+    if (type.kind == TypeKind.Error) {
+      return;
     }
-
-    if (written == undefined || sites.length < fn.params.length) {
+    if (fn.returnType == undefined && this.isBroken(type)) {
       return;
     }
 
-    const type = this.resolver.signature(sites, written, this.context);
-
     this.declare(DeclarationForm.Value, fn.name, fn.loc, type);
+
+    if (!this.module.source.isLibrary) {
+      this.typeLocals(fn.body?.body ?? []);
+    }
+  }
+
+  private typeLocals(statements: Stmt[]): void {
+    for (const statement of statements) {
+      this.typeLocal(statement);
+    }
+  }
+
+  private typeLocal(statement: Stmt): void {
+    switch (statement.kind) {
+      case StmtKind.VarDecl:
+        for (const decl of statement.decls) {
+          this.typeVariable(decl);
+        }
+        break;
+      case StmtKind.Function:
+        this.typeFunction(statement);
+        break;
+      case StmtKind.Block:
+        this.typeLocals(statement.body);
+        break;
+      case StmtKind.If:
+        this.typeLocal(statement.thenStmt);
+        this.typeOptionalLocal(statement.elseStmt);
+        break;
+      case StmtKind.While:
+      case StmtKind.DoWhile:
+      case StmtKind.Labeled:
+        this.typeLocal(statement.body);
+        break;
+      case StmtKind.For:
+        this.typeOptionalLocal(statement.init);
+        this.typeOptionalLocal(statement.body);
+        break;
+      case StmtKind.ForOf:
+        this.typeVariable(statement.binding);
+        this.typeLocal(statement.body);
+        break;
+      case StmtKind.Switch:
+        for (const option of statement.cases) {
+          this.typeLocals(option.body);
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  private typeOptionalLocal(statement: Stmt | undefined): void {
+    if (statement != undefined) {
+      this.typeLocal(statement);
+    }
+  }
+
+  private isBroken(type: Type): boolean {
+    if (type.kind != TypeKind.Function) {
+      return false;
+    }
+
+    return type.shape.result.kind == TypeKind.Error;
   }
 
   private typeAlias(decl: TypeAliasDecl): void {
