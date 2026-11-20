@@ -1,0 +1,6 @@
+main.tz:5:20: error TZ2648: property 'toString' does not exist on type 'Point'; objects inherit nothing from Object.prototype
+const text = point.toString;
+                   ^
+main.tz:6:21: error TZ2648: property 'valueOf' does not exist on type 'Point'; objects inherit nothing from Object.prototype
+const value = point.valueOf;
+                    ^

@@ -1,0 +1,3 @@
+main.tz:2:39: error TZ2691: parameter 'x' is declared as 'int', but the function gets 'double' here
+const widen: (x: double) => double = (x: int) => x;
+                                      ^

@@ -25,4 +25,4 @@ main.tz
   98:9 rest: string | Map<string, int>
   107:10 changed: (int | undefined) => int
   108:7 y: int | undefined
-  116:9 still: int | undefined
+  116:9 still: int

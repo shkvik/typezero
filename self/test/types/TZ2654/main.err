@@ -1,0 +1,3 @@
+main.tz:12:24: error TZ2654: 'count' is a static member of 'Registry': use it through the class, 'Registry.count'
+const count = registry.count;
+                       ^

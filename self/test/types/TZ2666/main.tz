@@ -1,0 +1,12 @@
+// A field that no member of a union has is no field of the union.
+type Circle = { kind: "circle"; radius: int };
+type Square = { kind: "square"; side: int };
+type Shape = Circle | Square;
+
+function make(): Shape {
+  return { kind: "square", side: 1 };
+}
+
+const shape = make();
+const color = shape.color;
+const kind = shape.kind;

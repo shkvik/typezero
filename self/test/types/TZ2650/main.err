@@ -1,0 +1,3 @@
+main.tz:18:14: error TZ2650: the value may be undefined; check it before reading 'side'
+const side = found.side;
+             ^

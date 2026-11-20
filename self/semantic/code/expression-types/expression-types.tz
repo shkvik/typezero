@@ -22,6 +22,19 @@ import "./partial/expression-types.partial.functions.tz";
 import "./partial/expression-types.partial.statements.tz";
 import "./partial/expression-types.partial.reachability.tz";
 import "./partial/expression-types.partial.narrowing.tz";
+import "./partial/expression-types.partial.members.tz";
+import "./partial/expression-types.partial.variants.tz";
+import "./partial/expression-types.partial.instances.tz";
+import "./partial/expression-types.partial.calls.tz";
+import "./partial/expression-types.partial.arguments.tz";
+import "./partial/expression-types.partial.flow.tz";
+import "./partial/expression-types.partial.guards.tz";
+import "./partial/expression-types.partial.library.tz";
+import "./partial/expression-types.partial.statement-values.tz";
+import "./partial/expression-types.partial.construction.tz";
+import "./partial/expression-types.partial.destinations.tz";
+import "./partial/expression-types.partial.closures.tz";
+import "./partial/expression-types.partial.classes.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   Details,
@@ -40,7 +53,10 @@ import { TypeRelation } from "../../types/type-relation/type-relation.tz";
 import { TypeResolver } from "../../types/type-resolver/type-resolver.tz";
 import {
   FunctionDoor,
+  StalledFunction,
+  StaticOwner,
   ValueRecord,
+  ValueTarget,
   VariableDoor,
 } from "./types/expression-types.types.tz";
 
@@ -58,7 +74,23 @@ export class ExpressionTypes {
   private readonly paramTypes: Map<string, Type>;
   private readonly checkedModules: Set<int>;
   private readonly coveredSwitches: Set<string>;
+  private readonly recursions: string[];
+  private readonly assumedCalls: string[];
+  private readonly doorOrder: string[];
+  private readonly functionOrder: string[];
+  private readonly walking: string[];
+  private readonly calledBack: Set<string>;
+  private readonly stalled: Map<string, StalledFunction[]>;
+  private readonly globalValues: Map<string, ValueTarget>;
+  private readonly overloadedGlobals: Set<string>;
   private facts: Map<string, Type>;
+  private shortCircuits: int;
+  private quiet: int;
+  private muted: int;
+  private readonly lenientCalls: Set<Expr>;
+  private readonly constKeys: Set<string>;
+  private readonly selves: Type[];
+  private readonly ownerClasses: StaticOwner[];
 
   public constructor(
     store: TypeStore,
@@ -79,7 +111,23 @@ export class ExpressionTypes {
     this.paramTypes = new Map<string, Type>();
     this.checkedModules = new Set<int>();
     this.coveredSwitches = new Set<string>();
+    this.recursions = [];
+    this.assumedCalls = [];
+    this.doorOrder = [];
+    this.functionOrder = [];
+    this.walking = [];
+    this.calledBack = new Set<string>();
+    this.stalled = new Map<string, StalledFunction[]>();
+    this.globalValues = new Map<string, ValueTarget>();
+    this.overloadedGlobals = new Set<string>();
     this.facts = new Map<string, Type>();
+    this.shortCircuits = 0;
+    this.quiet = 0;
+    this.muted = 0;
+    this.lenientCalls = new Set<Expr>();
+    this.constKeys = new Set<string>();
+    this.selves = [];
+    this.ownerClasses = [];
 
     for (const scopes of resolved) {
       this.scopes.set(scopes.module.id, scopes);
@@ -127,6 +175,20 @@ export class ExpressionTypes {
         return this.unaryTyped(expr, wanted, module);
       case ExprKind.Conditional:
         return this.conditionalTyped(expr, wanted, module);
+      case ExprKind.Member:
+        return this.memberTyped(expr, module);
+      case ExprKind.OptionalChain:
+        return this.chainTyped(expr, wanted, module);
+      case ExprKind.Call:
+        return this.callTyped(expr, module);
+      case ExprKind.New:
+        return this.newTyped(expr, wanted, module);
+      case ExprKind.Function:
+        return this.closureTyped(expr, wanted, module);
+      case ExprKind.Assign:
+        return this.assignedTyped(expr, module);
+      case ExprKind.Update:
+        return this.updatedTyped(expr.target, module);
       default:
         return this.store.plain(TypeKind.Error);
     }
@@ -168,8 +230,18 @@ export class ExpressionTypes {
 
   private report(module: int, loc: int, code: Code, details: Details): void {
     const record = this.record(module);
-    if (record != undefined) {
-      record.errors.push({ code, loc, details });
+    const key = `${loc} ${code}`;
+
+    if (this.quiet > 0) {
+      this.muted += 1;
+
+      return;
     }
+    if (record == undefined || record.reported.has(key)) {
+      return;
+    }
+
+    record.reported.add(key);
+    record.errors.push({ code, loc, details });
   }
 }

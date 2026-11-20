@@ -31,6 +31,66 @@ export const kPanicName = "panic";
 export const kExitName = "exit";
 export const kProcessName = "process";
 export const kIteratorKey = "[Symbol.iterator]";
+export const kInferenceRounds = 8;
+export const kArrayName = "Array";
+export const kAndText = "&&";
+export const kOrText = "||";
+export const kEquals = "==";
+export const kNotEquals = "!=";
+export const kEmptyText = '""';
+export const kZeroText = "0";
+export const kIsArrayName = "isArray";
+export const kStringShape = "string";
+export const kDoubleShape = "double";
+export const kBooleanShape = "boolean";
+export const kDecimalShape = "decimal";
+export const kArrayShape = "Array";
+export const kResultShape = "Result";
+export const kGeneratorShape = "Generator";
+export const kAsyncGeneratorShape = "AsyncGenerator";
+export const kPromiseClass = "Promise";
+export const kMapClass = "Map";
+export const kSetClass = "Set";
+export const kSpecialMethods = [
+  "at",
+  "charCodeAt",
+  "codePointAt",
+  "pop",
+  "shift",
+  "filter",
+];
+export const kSpecialNews = ["TextDecoder"];
+export const kSplitName = "split";
+export const kThisName = "this";
+export const kPrototypeName = "prototype";
+export const kTakingMethods = ["pop", "shift", "splice"];
+export const kPromisePlaceholder = "p";
+export const kMostShownStatement = 60;
+export const kStatementEnd = ";";
+export const kCommentStart = "//";
+export const kLineEnds = ["\n", "\r"];
+export const kOpeningMarks = ["(", "[", "{"];
+export const kClosingMarks = [")", "]", "}"];
+export const kLengthName = "length";
+export const kWrappedValueName = "value";
+export const kRawName = "raw";
+export const kConstructorName = "constructor";
+export const kChainPlaceholder = "o";
+export const kIdentifierMarks = ["_", "$"];
+export const kOneArgument = " argument";
+export const kManyArguments = " arguments";
+export const kOrMore = " or more";
+export const kRangeDash = "-";
+export const kPrototypeNames = [
+  "toString",
+  "valueOf",
+  "hasOwnProperty",
+  "isPrototypeOf",
+  "toLocaleString",
+  "propertyIsEnumerable",
+  "constructor",
+  "__proto__",
+];
 
 export const kTypeOfTypes: TypeOfType[] = [
   { name: "undefined", kind: TypeKind.Undefined, bits: 0, unsigned: false },

@@ -1,0 +1,13 @@
+// An abstract class is only extended.
+abstract class Animal {
+  public abstract speak(): string;
+}
+
+class Dog extends Animal {
+  public speak(): string {
+    return "woof";
+  }
+}
+
+const a = new Animal();
+const b = new Dog();

@@ -1,0 +1,8 @@
+// A function that gives nothing gives nothing to test.
+function log(): void {
+  const kept = 1;
+}
+
+if (log()) {
+  const a = 1;
+}

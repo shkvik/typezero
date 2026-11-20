@@ -1,0 +1,6 @@
+main.tz:2:14: error TZ2658: a value of type 'int' cannot be called
+const a = (1 + 2)();
+             ^
+main.tz:3:11: error TZ2658: a value of type 'int[]' cannot be called
+const b = [1, 2](0);
+          ^

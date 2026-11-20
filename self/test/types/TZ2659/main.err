@@ -1,0 +1,6 @@
+main.tz:19:17: error TZ2659: the function may be undefined; check it first, or call it with '?.()', which gives undefined then
+const a = shape.run();
+                ^
+main.tz:20:11: error TZ2659: the function may be undefined; check it first, or call it with '?.()', which gives undefined then
+const b = handler(1);
+          ^

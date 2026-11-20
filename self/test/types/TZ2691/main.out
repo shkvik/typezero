@@ -1,0 +1,3 @@
+main.tz
+  2:7 widen: (double) => double
+  3:7 same: (double) => double

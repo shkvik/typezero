@@ -1,11 +1,14 @@
 import { ExpressionTypes } from "../expression-types.tz";
 import { ClassDecl } from "../../../../program/ast/types/ast.types.classes.tz";
 import {
+  CallExpr,
   Expr,
   ExprKind,
   NewKind,
   PropertyKind,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
 import {
   FunctionDecl,
   ParamKind,
@@ -15,7 +18,11 @@ import {
   StmtKind,
   VarDeclStmt,
 } from "../../../../program/ast/types/ast.types.statements.tz";
-import { ValueRecord } from "../types/expression-types.types.tz";
+import {
+  Destination,
+  DestinationKind,
+  ValueRecord,
+} from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private indexStatements(statements: Stmt[], record: ValueRecord): void {
@@ -80,9 +87,15 @@ partial class ExpressionTypes {
       case StmtKind.Labeled:
         return this.indexStatement(statement.body, record);
       case StmtKind.Return:
+        this.keepReturned(statement.value, record);
+
         return this.indexOptionalExpression(statement.value, record);
       case StmtKind.Class:
         return this.indexClass(statement, record);
+      case StmtKind.Enum:
+        record.enums.set(statement.loc, statement);
+
+        return;
       default:
         return;
     }
@@ -93,7 +106,60 @@ partial class ExpressionTypes {
 
     for (const decl of statement.decls) {
       record.variables.set(decl.loc, { decl, isConst });
+      this.keepDeclared(decl.init, decl.typeAnn, record);
       this.indexOptionalExpression(decl.init, record);
+    }
+  }
+
+  private keepDestination(
+    value: Expr | undefined,
+    destination: Destination,
+    record: ValueRecord,
+  ): void {
+    if (value == undefined || value.kind != ExprKind.Name) {
+      return;
+    }
+
+    const symbol = record.uses.get(value.loc)?.symbol;
+    if (symbol == undefined || symbol.kind != SymbolKind.Variable) {
+      return;
+    }
+
+    const list = record.destinations.get(symbol.loc) ?? [];
+
+    list.push(destination);
+    record.destinations.set(symbol.loc, list);
+  }
+
+  private keepDeclared(
+    value: Expr | undefined,
+    written: TypeRef | undefined,
+    record: ValueRecord,
+  ): void {
+    if (written != undefined) {
+      const kind = DestinationKind.Declared;
+
+      this.keepDestination(value, { kind, index: 0, written }, record);
+    }
+  }
+
+  private keepReturned(value: Expr | undefined, record: ValueRecord): void {
+    const fn = record.owners[record.owners.length - 1];
+    if (fn != undefined && fn.returnType != undefined) {
+      const kind = DestinationKind.Returned;
+
+      this.keepDestination(value, { kind, index: 0, fn }, record);
+    }
+  }
+
+  private keepArguments(call: CallExpr, record: ValueRecord): void {
+    const kind = DestinationKind.Argument;
+
+    for (let index = 0; index < call.args.length; index++) {
+      const arg = call.args[index];
+      if (arg != undefined && !arg.spread) {
+        this.keepDestination(arg.expr, { kind, index, call }, record);
+      }
     }
   }
 
@@ -112,11 +178,15 @@ partial class ExpressionTypes {
 
     const body = fn.body;
     if (body != undefined) {
+      record.owners.push(fn);
       this.indexStatements(body.body, record);
+      record.owners.pop();
     }
   }
 
   private indexClass(decl: ClassDecl, record: ValueRecord): void {
+    record.classes.set(decl.loc, decl);
+
     for (const field of decl.fields) {
       this.indexOptionalExpression(field.init, record);
     }
@@ -126,11 +196,16 @@ partial class ExpressionTypes {
     }
 
     for (const fn of decl.methods) {
-      this.indexFunction(fn, record);
+      if (decl.isPartial || this.partOf(decl, fn) == decl) {
+        this.indexFunction(fn, record);
+      }
     }
   }
 
   private indexAssigned(target: Expr, record: ValueRecord): void {
+    if (target.kind == ExprKind.Member || target.kind == ExprKind.Index) {
+      return this.indexAssigned(target.object, record);
+    }
     if (target.kind != ExprKind.Name) {
       return;
     }
@@ -182,6 +257,7 @@ partial class ExpressionTypes {
       case ExprKind.Call: {
         const values = expr.args.map((argument) => argument.expr);
 
+        this.keepArguments(expr, record);
         this.indexExpression(expr.callee, record);
 
         return this.indexExpressions(values, record);

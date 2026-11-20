@@ -1,0 +1,375 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Type,
+  TypeKind,
+  UnionType,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  kChainPlaceholder,
+  kDot,
+  kIdentifierMarks,
+} from "../const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private variantMember(expr: MemberExpr, union: UnionType, module: int): Type {
+    const isUnknown = union.parts.some(
+      (part) => part.kind == TypeKind.Error || part.kind == TypeKind.Operation,
+    );
+    if (isUnknown) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const base = this.apparent(union);
+    if (base.kind != TypeKind.Union) {
+      return this.memberOf(expr, base, module);
+    }
+
+    const common = this.commonBaseWith(union, expr.name);
+    if (common != undefined) {
+      return this.memberOf(expr, common, module);
+    }
+    if (this.relation.isTagged(union.parts)) {
+      return this.reportValueMember(expr, union, module);
+    }
+
+    const types: Type[] = [];
+
+    for (const part of union.parts) {
+      const found = this.variantField(expr, part, union, module);
+      if (found == undefined) {
+        return this.store.plain(TypeKind.Error);
+      }
+      if (!types.includes(found)) {
+        types.push(found);
+      }
+    }
+
+    const joined = this.store.unionOf(types);
+    if (this.resolver.unionProblem(joined) != undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return joined;
+  }
+
+  private reportValueMember(
+    expr: MemberExpr,
+    union: UnionType,
+    module: int,
+  ): Type {
+    const head = union.parts[0];
+    if (head != undefined) {
+      const word = expr.name;
+      const first = this.text.of(union);
+      const other = this.typeOfName(head);
+
+      this.report(module, expr.loc, Code.UnionValueMember, {
+        word,
+        first,
+        other,
+      });
+    }
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private variantField(
+    expr: MemberExpr,
+    part: Type,
+    union: UnionType,
+    module: int,
+  ): Type | undefined {
+    if (part.kind != TypeKind.Object && part.kind != TypeKind.Instance) {
+      return undefined;
+    }
+    if (part.kind == TypeKind.Instance) {
+      const lookup = this.classMember(part, expr.name);
+      if (!lookup.isKnown) {
+        return undefined;
+      }
+
+      const entry = lookup.entry;
+      const field = entry?.field;
+      if (entry != undefined && field != undefined) {
+        this.checkAccess(entry, field.access, expr, module);
+
+        return this.fieldTypeOf(entry, field);
+      }
+    }
+
+    const found = this.partField(part, expr.name);
+    if (found != undefined) {
+      return found;
+    }
+
+    this.reportLacking(expr, part, union, module);
+
+    return undefined;
+  }
+
+  private partField(part: Type, name: string): Type | undefined {
+    if (part.kind == TypeKind.Object) {
+      const field = part.fields.find((one) => one.name == name);
+      if (field == undefined) {
+        return undefined;
+      }
+
+      return this.fieldWanted(field);
+    }
+    if (part.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const entry = this.classMember(part, name).entry;
+    const field = entry?.field;
+    if (entry == undefined || field == undefined) {
+      return undefined;
+    }
+
+    return this.fieldTypeOf(entry, field);
+  }
+
+  private reportLacking(
+    expr: MemberExpr,
+    part: Type,
+    union: UnionType,
+    module: int,
+  ): void {
+    const word = expr.name;
+    const isPlain = union.parts.every(
+      (one) =>
+        one.kind == TypeKind.Object && this.partField(one, word) == undefined,
+    );
+    if (isPlain) {
+      const first = this.text.of(union);
+
+      return this.report(module, expr.loc, Code.UnionNoField, { word, first });
+    }
+
+    const first = this.text.of(part);
+    const second = this.text.of(union);
+    const place = this.lackingHint(expr, union);
+
+    this.report(module, expr.loc, Code.UnionMayLack, {
+      word,
+      first,
+      second,
+      place,
+    });
+  }
+
+  private lackingHint(expr: MemberExpr, union: UnionType): string {
+    const first = union.parts[0];
+    let fallback = "";
+
+    if (first != undefined && first.kind == TypeKind.Object) {
+      for (const tag of first.fields) {
+        const hint = this.tagHint(expr, union, tag.name);
+        if (hint != undefined && this.isTagUnique(expr, union, tag.name)) {
+          return hint;
+        }
+        if (hint != undefined && fallback == "") {
+          fallback = hint;
+        }
+      }
+    }
+
+    if (fallback != "") {
+      return fallback;
+    }
+
+    return this.holderHint(expr, union);
+  }
+
+  private tagHint(
+    expr: MemberExpr,
+    union: UnionType,
+    tagName: string,
+  ): string | undefined {
+    if (!this.isTagField(union, tagName)) {
+      return undefined;
+    }
+
+    const tag = this.holderTag(expr, union, tagName);
+    if (tag == undefined) {
+      return undefined;
+    }
+
+    const field = this.chainField(expr.object, tagName);
+    const shown = this.text.of(tag);
+
+    return `, e.g. 'if (${field} == ${shown})'`;
+  }
+
+  private isTagField(union: UnionType, tagName: string): boolean {
+    return union.parts.every((part) => {
+      const type = this.partField(part, tagName);
+
+      return type != undefined && this.isLiteralSet(type);
+    });
+  }
+
+  private holderTag(
+    expr: MemberExpr,
+    union: UnionType,
+    tagName: string,
+  ): Type | undefined {
+    for (const part of union.parts) {
+      const tag = this.partField(part, tagName);
+      const holds = this.partField(part, expr.name) != undefined;
+      if (holds && tag != undefined && tag.kind == TypeKind.Literal) {
+        return tag;
+      }
+    }
+
+    return undefined;
+  }
+
+  private isTagUnique(
+    expr: MemberExpr,
+    union: UnionType,
+    tagName: string,
+  ): boolean {
+    const tag = this.holderTag(expr, union, tagName);
+    if (tag == undefined) {
+      return false;
+    }
+
+    for (const part of union.parts) {
+      const isLacking = this.partField(part, expr.name) == undefined;
+      const set = this.partField(part, tagName);
+      if (isLacking && set != undefined && this.holdsLiteral(set, tag)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private holdsLiteral(set: Type, literal: Type): boolean {
+    if (set == literal) {
+      return true;
+    }
+
+    return set.kind == TypeKind.Union && set.parts.includes(literal);
+  }
+
+  private holderHint(expr: MemberExpr, union: UnionType): string {
+    const holders = union.parts.filter(
+      (part) => this.partField(part, expr.name) != undefined,
+    );
+    const holder = holders[holders.length - 1];
+    if (holder == undefined) {
+      return "";
+    }
+    if (holder.kind == TypeKind.Instance) {
+      return `, e.g. 'if (x instanceof ${this.text.of(holder)})'`;
+    }
+
+    return `, e.g. 'if ("${expr.name}" in x)'`;
+  }
+
+  private chainField(object: Expr, field: string): string {
+    const chain = this.chainText(object) ?? kChainPlaceholder;
+
+    if (this.isPlainName(field)) {
+      return chain + kDot + field;
+    }
+
+    return `${chain}["${field}"]`;
+  }
+
+  private chainText(expr: Expr): string | undefined {
+    if (expr.kind == ExprKind.Name) {
+      return expr.name;
+    }
+    if (expr.kind != ExprKind.Member || expr.optional) {
+      return undefined;
+    }
+
+    const object = this.chainText(expr.object);
+    if (object == undefined) {
+      return undefined;
+    }
+
+    return object + kDot + expr.name;
+  }
+
+  private isPlainName(field: string): boolean {
+    const head = field.slice(0, 1);
+    const isDigit = head >= "0" && head <= "9";
+    if (field == "" || isDigit) {
+      return false;
+    }
+
+    for (const unit of field) {
+      const isLetter =
+        (unit >= "a" && unit <= "z") || (unit >= "A" && unit <= "Z");
+      const isDecimal = unit >= "0" && unit <= "9";
+      if (!isLetter && !isDecimal && !kIdentifierMarks.includes(unit)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private commonBaseWith(union: UnionType, name: string): Type | undefined {
+    const isAllClasses = union.parts.every(
+      (part) => part.kind == TypeKind.Instance,
+    );
+    const first = union.parts[0];
+    if (!isAllClasses || first == undefined) {
+      return undefined;
+    }
+
+    const chain: Type[] = [first];
+
+    for (let index = 0; index < chain.length; index++) {
+      const candidate = chain[index];
+      if (candidate == undefined) {
+        break;
+      }
+      if (this.isCommonBase(candidate, union, name)) {
+        return candidate;
+      }
+
+      for (const parent of this.store.parentsOf(candidate)) {
+        if (!chain.includes(parent)) {
+          chain.push(parent);
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  private isCommonBase(
+    candidate: Type,
+    union: UnionType,
+    name: string,
+  ): boolean {
+    const isShared = union.parts.every((part) =>
+      this.relation.converts(part, candidate),
+    );
+    if (!isShared) {
+      return false;
+    }
+    if (candidate.kind == TypeKind.Object) {
+      return candidate.fields.some((field) => field.name == name);
+    }
+    if (candidate.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    const entry = this.classMember(candidate, name).entry;
+
+    return entry != undefined && !entry.isStatic;
+  }
+}

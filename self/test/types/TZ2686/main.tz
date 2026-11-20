@@ -1,0 +1,10 @@
+// A Promise is awaited, or let go with 'void'.
+async function later(n: int): Promise<int> {
+  return n;
+}
+
+for (let i = 0; i < 2; later(i)) {
+  const a = 1;
+}
+
+void later(1);

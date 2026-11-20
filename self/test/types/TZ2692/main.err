@@ -1,0 +1,3 @@
+main.tz:14:17: error TZ2692: 'this' is used outside of a method; it exists in the methods of classes and object literals
+const outside = this;
+                ^

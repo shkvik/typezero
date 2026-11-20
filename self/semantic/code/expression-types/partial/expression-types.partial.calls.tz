@@ -1,0 +1,475 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  ExprKind,
+  MemberExpr,
+  NameExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  BodySource,
+  FunctionDecl,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import {
+  FunctionParameter,
+  FunctionType,
+  InstanceType,
+  ObjectType,
+  Type,
+  TypeKind,
+  UnionType,
+} from "../../../../program/type/types/type.types.tz";
+import { DoorState } from "../../../types/type-resolver/types/type-resolver.types.tz";
+import { ValueTarget } from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private callTyped(expr: CallExpr, module: int): Type {
+    const callee = expr.callee;
+
+    if (expr.tagged) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    switch (callee.kind) {
+      case ExprKind.Name:
+        return this.namedCall(expr, callee, module);
+      case ExprKind.Member:
+        return this.memberCall(expr, callee, module);
+      default:
+        return this.valueCall(expr, module);
+    }
+  }
+
+  private namedCall(expr: CallExpr, callee: NameExpr, module: int): Type {
+    const target = this.targetOfName(callee, module);
+    if (target == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const isLibrary = this.isLibraryModule(target.module);
+    if (isLibrary && target.kind != SymbolKind.Function) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    switch (target.kind) {
+      case SymbolKind.Function:
+        return this.functionCall(expr, callee, target, module);
+      case SymbolKind.Class:
+        this.report(module, callee.loc, Code.NameNotFunction, {
+          word: callee.name,
+        });
+        this.looseArguments(expr.args, module);
+
+        return this.store.plain(TypeKind.Error);
+      default:
+        return this.valueCall(expr, module);
+    }
+  }
+
+  private functionCall(
+    expr: CallExpr,
+    callee: NameExpr,
+    target: ValueTarget,
+    module: int,
+  ): Type {
+    const fn = this.record(target.module)?.functions.get(target.loc);
+    if (fn == undefined || !this.isCallable(fn, target.module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const key = `${target.module} ${target.loc}`;
+    const door = this.functionDoors.get(key);
+    const isInferring =
+      door != undefined &&
+      door.state == DoorState.InWork &&
+      fn.returnType == undefined;
+    const isAssumed = door?.isAssumed == true;
+    if (isInferring && !isAssumed) {
+      const caller = this.walking[this.walking.length - 1];
+
+      if (caller != key) {
+        this.calledBack.add(key);
+      }
+
+      this.recursions.push(key);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (isInferring) {
+      this.assumedCalls.push(key);
+    }
+
+    const type = this.functionAt(target.module, target.loc);
+    if (type.kind != TypeKind.Function) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const shape = type.shape;
+    const params = this.directParams(shape.params, shape.self);
+    const rest = shape.rest;
+
+    const loc = callee.loc;
+    const isLenient = this.isLibraryModule(target.module);
+    const call = { params, rest, loc, isLenient };
+
+    if (isLenient) {
+      this.lenientCalls.add(expr);
+    }
+
+    const isPassed = this.argumentsCheck(expr.args, call, module);
+    if (!isPassed) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return shape.result;
+  }
+
+  private isCallable(fn: FunctionDecl, module: int): boolean {
+    if (fn.typeParams.length > 0 || this.isOverloaded(fn, module)) {
+      return false;
+    }
+    if (fn.bodySource == BodySource.Written) {
+      return true;
+    }
+
+    return fn.bodySource == BodySource.External && this.isLibraryModule(module);
+  }
+
+  private isOverloaded(fn: FunctionDecl, module: int): boolean {
+    const items = this.program.modules[module]?.file.items ?? [];
+    const same = items.filter(
+      (item) => item.kind == StmtKind.Function && item.name == fn.name,
+    );
+
+    return same.length > 1;
+  }
+
+  private directParams(
+    params: FunctionParameter[],
+    self: Type | undefined,
+  ): FunctionParameter[] {
+    if (self == undefined) {
+      return params;
+    }
+
+    const first: FunctionParameter = { type: self, optional: false };
+
+    return [first].concat(params);
+  }
+
+  private valueCall(expr: CallExpr, module: int): Type {
+    const callee = expr.callee;
+    const type = this.typed(callee, undefined, module);
+    const link = this.linkOf(type, expr.optional);
+
+    return this.calledValue(expr, link, module);
+  }
+
+  private calledValue(expr: CallExpr, type: Type, module: int): Type {
+    const callee = expr.callee;
+    const loc = callee.loc;
+
+    if (type.kind == TypeKind.Function) {
+      return this.calledWith(expr, type, loc, false, module);
+    }
+    if (type.kind == TypeKind.Union && this.isOptionalFunction(type)) {
+      this.report(module, loc, Code.FunctionMayBeUndefined, kNoDetails);
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (!this.isUncallable(type)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const first = this.text.of(type);
+
+    if (callee.kind == ExprKind.Name) {
+      const word = callee.name;
+
+      this.report(module, loc, Code.NotFunction, { word, first });
+    } else {
+      this.report(module, loc, Code.NotCallable, { first });
+    }
+
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private calledWith(
+    expr: CallExpr,
+    type: FunctionType,
+    loc: int,
+    isLenient: boolean,
+    module: int,
+  ): Type {
+    const shape = type.shape;
+    if (shape.self != undefined) {
+      this.report(module, loc, Code.FunctionTakesThis, kNoDetails);
+      this.looseArguments(expr.args, module);
+
+      return shape.result;
+    }
+
+    const params = shape.params;
+    const rest = shape.rest;
+    const isOpen = this.isOpenRest(params, rest);
+    const call = { params, rest, loc, isLenient: isLenient || isOpen };
+
+    if (isLenient) {
+      this.lenientCalls.add(expr);
+    }
+
+    const isPassed = this.argumentsCheck(expr.args, call, module);
+    const isUnknown = isLenient && shape.result.kind == TypeKind.Unknown;
+    if (!isPassed || isUnknown) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return shape.result;
+  }
+
+  private isOpenRest(params: FunctionParameter[], rest: boolean): boolean {
+    const last = params[params.length - 1];
+
+    return rest && last != undefined && this.mentionsParameter(last.type);
+  }
+
+  private isOptionalFunction(type: UnionType): boolean {
+    const defined = this.definedType(type);
+
+    return this.isOptional(type) && defined.kind == TypeKind.Function;
+  }
+
+  private isUncallable(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Boolean:
+      case TypeKind.Literal:
+      case TypeKind.Array:
+      case TypeKind.Tuple:
+      case TypeKind.Object:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private memberCall(expr: CallExpr, member: MemberExpr, module: int): Type {
+    if (this.enumOfObject(member.object, module) != undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const owner = this.staticOwner(member.object, module);
+    if (owner != undefined) {
+      return this.staticCall(expr, member, owner, module);
+    }
+
+    const fact = this.pathFact(member, module);
+    if (fact != undefined) {
+      return this.fieldValueCall(expr, member, fact, false, module);
+    }
+
+    const object = this.receiverOf(member.object, member.optional, module);
+
+    return this.receiverCall(expr, member, object, module);
+  }
+
+  private receiverCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): Type {
+    switch (object.kind) {
+      case TypeKind.Object:
+        return this.fieldCall(expr, member, object, module);
+      case TypeKind.Instance:
+        return this.instanceCall(expr, member, object, module);
+      case TypeKind.Union:
+        return this.variantCall(expr, member, object, module);
+      default:
+        return this.otherCall(expr, member, object, module);
+    }
+  }
+
+  private instanceCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type {
+    if (!this.isLibraryModule(instance.module)) {
+      return this.methodCall(expr, member, instance, module);
+    }
+
+    return this.otherCall(expr, member, instance, module);
+  }
+
+  private otherCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): Type {
+    const found = this.libraryCall(expr, member, object, module);
+
+    return found ?? this.store.plain(TypeKind.Error);
+  }
+
+  private variantCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: UnionType,
+    module: int,
+  ): Type {
+    if (!this.isOptional(object)) {
+      const common = this.commonBaseWith(object, member.name);
+      if (common == undefined) {
+        return this.store.plain(TypeKind.Error);
+      }
+
+      return this.receiverCall(expr, member, common, module);
+    }
+
+    const defined = this.definedType(object);
+    if (defined.kind == TypeKind.Json || defined.kind == TypeKind.Error) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.report(module, member.object.loc, Code.CallOfUndefined, {
+      word: member.name,
+    });
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private fieldCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: ObjectType,
+    module: int,
+  ): Type {
+    const fields = object.fields.filter((one) => one.name == member.name);
+    const field = fields[0];
+    const isLibrary = this.resolver.isLibraryShape(object);
+    if (field == undefined && isLibrary) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (field == undefined) {
+      this.reportMissingField(member, object, module);
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (fields.length > 1) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const type = this.fieldWanted(field);
+    if (this.mentionsParameter(type)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.fieldValueCall(expr, member, type, isLibrary, module);
+  }
+
+  private fieldValueCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    type: Type,
+    isLenient: boolean,
+    module: int,
+  ): Type {
+    const link = this.linkOf(type, expr.optional);
+    const loc = member.loc;
+
+    if (link.kind == TypeKind.Function) {
+      return this.calledWith(expr, link, loc, isLenient, module);
+    }
+    if (link.kind == TypeKind.Error) {
+      return link;
+    }
+    if (link.kind == TypeKind.Object || isLenient) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (link.kind == TypeKind.Union && this.isOptionalFunction(link)) {
+      this.report(module, loc, Code.FunctionMayBeUndefined, kNoDetails);
+    } else {
+      const word = member.name;
+      const first = this.text.of(link);
+
+      this.report(module, loc, Code.FieldNotFunction, { word, first });
+    }
+
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private methodCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type {
+    const lookup = this.classMember(instance, member.name);
+    const entry = lookup.entry;
+
+    if (!lookup.isKnown) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (entry == undefined) {
+      const word = member.name;
+      const first = this.text.of(instance);
+
+      this.report(module, member.loc, Code.PropertyMissing, { word, first });
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (entry.isStatic) {
+      this.reportStaticCall(member, entry, module);
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const field = entry.field;
+    if (field != undefined) {
+      this.checkAccess(entry, field.access, member, module);
+
+      const type = this.fieldTypeOf(entry, field);
+
+      return this.fieldValueCall(expr, member, type, false, module);
+    }
+
+    const method = entry.methods[0];
+    if (method == undefined || entry.methods.length > 1) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const access = this.accessOf(method);
+    if (this.checkAccess(entry, access, member, module)) {
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const type = this.methodTypeOf(entry, method);
+    if (type.kind != TypeKind.Function) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.calledWith(expr, type, member.loc, false, module);
+  }
+}

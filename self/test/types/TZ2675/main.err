@@ -1,0 +1,6 @@
+main.tz:8:6: error TZ2675: the right side of '&&' returns nothing, so there is no value to give; call it with 'if': 'if (flag) log()'
+flag && log();
+     ^
+main.tz:9:6: error TZ2675: the right side of '||' returns nothing, so there is no value to give; call it with 'if': 'if (!flag) log()'
+flag || log();
+     ^

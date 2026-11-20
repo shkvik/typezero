@@ -1,0 +1,33 @@
+main.tz
+  3:7 text: string
+  4:7 list: int[]
+  5:7 words: string[]
+  6:7 map: Map<string, int>
+  7:7 set: Set<string>
+  8:7 date: Date
+  9:7 ratio: double
+  10:7 count: int
+  12:7 parts: string[]
+  13:7 found: int
+  14:7 upper: string
+  15:7 sliced: int[]
+  16:7 joined: string
+  17:7 has: boolean
+  18:7 pushed: int
+  19:7 value: int | undefined
+  20:7 known: boolean
+  21:7 size: int
+  22:7 items: int
+  23:7 floor: double
+  24:7 pi: double
+  25:7 random: double
+  26:7 shown: string
+  27:7 fixed: string
+  28:7 time: int
+  29:7 args: string[]
+  30:7 parsed: Result<Json, JsonError>
+  31:7 number: Result<int, NumberError>
+  32:7 keys: string[]
+  33:7 parsedFine: boolean
+  34:7 numberFine: boolean
+  35:7 reversed: string[]

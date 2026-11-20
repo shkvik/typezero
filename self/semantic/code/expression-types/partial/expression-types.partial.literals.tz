@@ -44,6 +44,8 @@ partial class ExpressionTypes {
         return this.signedLiteral(expr);
       case ExprKind.Name:
         return this.doorOfName(expr, module)?.literal;
+      case ExprKind.Member:
+        return this.enumLiteral(expr, module);
       default:
         return undefined;
     }
@@ -136,6 +138,9 @@ partial class ExpressionTypes {
   private baseType(expr: Expr, literal: LiteralValue, module: int): Type {
     if (expr.kind == ExprKind.Name) {
       return this.named(expr, undefined, module);
+    }
+    if (expr.kind == ExprKind.Member && literal.kind == LiteralKind.String) {
+      return this.enumWhole(expr, module);
     }
 
     const int = this.store.integer(64, false);

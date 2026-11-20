@@ -1,0 +1,20 @@
+// A field that only some members of a union have is read after narrowing.
+type Circle = { kind: "circle"; radius: int; side: int };
+type Square = { kind: "square"; side: int };
+type Shape = Circle | Square;
+
+function make(): Shape {
+  return { kind: "square", side: 1 };
+}
+
+const shape = make();
+const radius = shape.radius;
+const side = shape.side;
+
+function area(s: Shape): int {
+  if (s.kind == "circle") {
+    return s.radius;
+  }
+
+  return s.side;
+}

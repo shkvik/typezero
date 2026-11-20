@@ -1,0 +1,3 @@
+main.tz:6:24: error TZ2686: the Promise is not awaited, so nothing waits for it and an error in it would end the program later; write 'await' before it, or 'void' to let it run on its own
+for (let i = 0; i < 2; later(i)) {
+                       ^

@@ -1,0 +1,3 @@
+main.tz
+  2:7 stack: int[]
+  3:7 flag: boolean

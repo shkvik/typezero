@@ -1,0 +1,7 @@
+main.tz
+  2:10 add: (int, int) => int
+  6:10 many: (int, ...int[]) => int
+  10:7 list: int[]
+  11:7 pair: [int, int]
+  15:7 c: int
+  16:7 d: int

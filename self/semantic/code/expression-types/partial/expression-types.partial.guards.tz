@@ -1,0 +1,225 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NameExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+import { TypeRefKind } from "../../../../program/ast/types/ast.types.types.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  TypeContext,
+  TypePlace,
+} from "../../../types/type-resolver/types/type-resolver.types.tz";
+import { kArrayName, kIsArrayName } from "../const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private callFacts(
+    call: CallExpr,
+    isTrue: boolean,
+    module: int,
+  ): Map<string, Type> {
+    const callee = call.callee;
+    if (this.isArrayCheck(callee, module)) {
+      return this.arrayFacts(call, isTrue, module);
+    }
+
+    switch (callee.kind) {
+      case ExprKind.Name:
+        return this.functionGuardFacts(call, callee, isTrue, module);
+      case ExprKind.Member:
+        return this.methodGuardFacts(call, callee, module);
+      default:
+        return new Map<string, Type>();
+    }
+  }
+
+  private isArrayCheck(callee: Expr, module: int): boolean {
+    if (callee.kind != ExprKind.Member || callee.name != kIsArrayName) {
+      return false;
+    }
+
+    const object = callee.object;
+
+    return (
+      object.kind == ExprKind.Name &&
+      object.name == kArrayName &&
+      this.isLibraryName(object, module)
+    );
+  }
+
+  private arrayFacts(
+    call: CallExpr,
+    isTrue: boolean,
+    module: int,
+  ): Map<string, Type> {
+    const facts = new Map<string, Type>();
+    const arg = call.args[0];
+    if (arg == undefined) {
+      return facts;
+    }
+
+    const slot = this.narrowable(arg.expr, module);
+    if (slot == undefined) {
+      return facts;
+    }
+
+    const kept = this.unionMembers(slot.type).filter(
+      (part) => this.isListType(part) == isTrue,
+    );
+    if (kept.length > 0) {
+      const union = this.store.unionOf(kept);
+
+      facts.set(slot.key, union);
+    }
+
+    return facts;
+  }
+
+  private isListType(type: Type): boolean {
+    return type.kind == TypeKind.Array || type.kind == TypeKind.Tuple;
+  }
+
+  private functionGuardFacts(
+    call: CallExpr,
+    callee: NameExpr,
+    isTrue: boolean,
+    module: int,
+  ): Map<string, Type> {
+    const target = this.targetOfName(callee, module);
+    if (target == undefined || target.kind != SymbolKind.Function) {
+      return new Map<string, Type>();
+    }
+    if (this.isLibraryModule(target.module)) {
+      return new Map<string, Type>();
+    }
+
+    const fn = this.record(target.module)?.functions.get(target.loc);
+    if (fn == undefined) {
+      return new Map<string, Type>();
+    }
+
+    const predicate = this.predicateFacts(call, fn, target.module, isTrue);
+    if (predicate != undefined) {
+      return predicate;
+    }
+
+    return this.unknownFacts(
+      call.args.map((arg) => arg.expr),
+      module,
+    );
+  }
+
+  private predicateFacts(
+    call: CallExpr,
+    fn: FunctionDecl,
+    home: int,
+    isTrue: boolean,
+  ): Map<string, Type> | undefined {
+    const written = fn.returnType;
+    const form = written?.form;
+    if (written == undefined || form == undefined) {
+      return undefined;
+    }
+    if (form.kind != TypeRefKind.Predicate || form.asserts) {
+      return new Map<string, Type>();
+    }
+
+    const index = fn.params.findIndex((param) => param.name == written.name);
+    const arg = call.args[index];
+    const ref = written.args[0];
+    if (arg == undefined || ref == undefined || fn.typeParams.length > 0) {
+      return undefined;
+    }
+
+    const context: TypeContext = {
+      module: home,
+      bindings: new Map<int, Type>(),
+      place: TypePlace.Plain,
+    };
+    const guarded = this.resolver.resolve(ref, context);
+
+    return this.guardedFacts(arg.expr, guarded, isTrue, home);
+  }
+
+  private guardedFacts(
+    expr: Expr,
+    guarded: Type,
+    isTrue: boolean,
+    module: int,
+  ): Map<string, Type> {
+    const facts = new Map<string, Type>();
+    const slot = this.narrowable(expr, module);
+    if (slot == undefined || guarded.kind == TypeKind.Error) {
+      return facts;
+    }
+
+    const parts = this.unionMembers(slot.type);
+    const kept = parts.filter(
+      (part) => this.relation.converts(part, guarded) == isTrue,
+    );
+    if (kept.length > 0) {
+      const union = this.store.unionOf(kept);
+
+      facts.set(slot.key, union);
+    }
+    if (kept.length == 0 && isTrue) {
+      facts.set(slot.key, guarded);
+    }
+
+    return facts;
+  }
+
+  private methodGuardFacts(
+    call: CallExpr,
+    callee: MemberExpr,
+    module: int,
+  ): Map<string, Type> {
+    const receiver = this.narrowable(callee.object, module);
+    if (receiver == undefined || !this.isOwnReceiver(receiver.type)) {
+      return new Map<string, Type>();
+    }
+
+    const values = call.args.map((arg) => arg.expr);
+
+    values.push(callee.object);
+
+    return this.unknownFacts(values, module);
+  }
+
+  private isOwnReceiver(type: Type): boolean {
+    const parts = this.unionMembers(type);
+
+    return parts.some(
+      (part) =>
+        part.kind == TypeKind.Instance && !this.isLibraryModule(part.module),
+    );
+  }
+
+  private unknownFacts(values: Expr[], module: int): Map<string, Type> {
+    const facts = new Map<string, Type>();
+    const unknown = this.store.plain(TypeKind.Error);
+
+    for (const value of values) {
+      const slot = this.narrowable(value, module);
+      if (slot != undefined && this.isGuardable(slot.type)) {
+        facts.set(slot.key, unknown);
+      }
+    }
+
+    return facts;
+  }
+
+  private isGuardable(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Union:
+      case TypeKind.Instance:
+        return true;
+      default:
+        return false;
+    }
+  }
+}

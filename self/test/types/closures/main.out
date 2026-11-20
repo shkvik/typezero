@@ -1,0 +1,21 @@
+main.tz
+  4:6 type Handler = (int, string) => string
+  6:10 apply: ((int) => int, int) => int
+  10:10 run: ((int, string) => string) => string
+  14:10 each: (int[], (int) => void) => void
+  15:14 item: int
+  20:7 double: (int) => int
+  21:7 shout: (string) => string
+  22:7 nothing: () => void
+  23:7 later: (int) => Promise<int>
+  24:7 block: (int) => string
+  31:7 fixed: (int) => int
+  32:7 named: (int) => int
+  35:7 kept: int[]
+  36:7 applied: int
+  37:7 ran: string
+  38:7 short: string
+  39:7 ignored: (int) => void
+  43:10 maybe: (boolean) => int | undefined
+  51:7 found: int | undefined
+  57:7 listed: int[]

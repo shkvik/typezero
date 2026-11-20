@@ -1,0 +1,9 @@
+// A function that takes its 'this' is called through '.call' or '.apply'.
+type Shape = { side: int };
+
+function scaled(this: Shape, n: int): int {
+  return this.side * n;
+}
+
+const f = scaled;
+const r = f(2);

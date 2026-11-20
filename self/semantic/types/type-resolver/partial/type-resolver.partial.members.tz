@@ -94,6 +94,16 @@ partial class TypeResolver {
     return fields;
   }
 
+  public classContext(
+    instance: InstanceType,
+    params: TypeParamDecl[],
+    home: int,
+  ): TypeContext {
+    const inside = this.inside(instance, params);
+
+    return { module: home, bindings: inside.bindings, place: inside.place };
+  }
+
   private inside(instance: InstanceType, params: TypeParamDecl[]): TypeContext {
     const bindings = new Map<int, Type>();
 

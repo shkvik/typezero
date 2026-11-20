@@ -1,0 +1,6 @@
+main.tz
+  2:6 type Shape = { side: int; name?: string; scale: (int) => int; run?: () => int }
+  9:10 pick: (boolean) => ((int) => int) | undefined
+  17:7 shape: Shape
+  18:7 handler: ((int) => int) | undefined
+  21:7 c: int | undefined

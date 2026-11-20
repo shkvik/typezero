@@ -1,5 +1,6 @@
 import { TypeResolver } from "../type-resolver.tz";
 import { Code } from "../../../../diagnostic/code.tz";
+import { ClassDecl } from "../../../../program/ast/types/ast.types.classes.tz";
 import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
 import {
   TypeParamDecl,
@@ -198,6 +199,14 @@ partial class TypeResolver {
     }
 
     return needed;
+  }
+
+  public classInstance(module: int, decl: ClassDecl, written: Type[]): Type {
+    const name = decl.name ?? "";
+    const parents = this.parentRefs(decl.base, decl.interfaces);
+    const home: ClassHome = { module, name, loc: decl.loc };
+
+    return this.instance(home, decl.typeParams, written, parents);
   }
 
   private parentRefs(base: TypeRef | undefined, others: TypeRef[]): TypeRef[] {

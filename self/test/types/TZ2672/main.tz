@@ -1,0 +1,21 @@
+// A class instance is of an object type only when the class implements it.
+type Named = { name: string };
+
+class Person {
+  public name: string;
+
+  public constructor(name: string) {
+    this.name = name;
+  }
+}
+
+class Robot implements Named {
+  public name: string;
+
+  public constructor(name: string) {
+    this.name = name;
+  }
+}
+
+const a: Named = new Person("ann");
+const b: Named = new Robot("r2");

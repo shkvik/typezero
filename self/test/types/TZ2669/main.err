@@ -1,0 +1,3 @@
+main.tz:2:10: error TZ2669: cannot tell what 'only' returns: every value it returns comes from a call to itself; declare its return type, e.g. '): int'
+function only(n: int) {
+         ^

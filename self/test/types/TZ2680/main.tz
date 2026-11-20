@@ -1,0 +1,4 @@
+// A length on the left of '||' is compared.
+const stack = [1, 2];
+
+const a = stack.length || 1;

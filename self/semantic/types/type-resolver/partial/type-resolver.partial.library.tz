@@ -1,0 +1,79 @@
+import { TypeResolver } from "../type-resolver.tz";
+import { DeclaredClass } from "../../../../program/ast/types/ast.types.declarations.tz";
+import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
+import { Type } from "../../../../program/type/types/type.types.tz";
+import { ClassHome, LibraryClass } from "../types/type-resolver.types.tz";
+
+partial class TypeResolver {
+  public libraryShape(name: string, args: Type[]): Type | undefined {
+    const module = this.globals.get(name);
+    if (module == undefined) {
+      return undefined;
+    }
+
+    const found = this.record(module)?.declarations.get(name);
+    if (found == undefined || found.kind != StmtKind.TypeAlias) {
+      return undefined;
+    }
+    if (found.typeParams.length != args.length) {
+      return undefined;
+    }
+
+    this.quiet += 1;
+
+    const shape = this.alias(module, found, args);
+
+    this.quiet -= 1;
+
+    return shape;
+  }
+
+  public isLibraryShape(type: Type): boolean {
+    return this.libraryShapes.has(type.id);
+  }
+
+  public libraryClass(name: string): LibraryClass | undefined {
+    const module = this.globals.get(name);
+    if (module == undefined) {
+      return undefined;
+    }
+
+    const declared = this.record(module)?.classes.get(name);
+    if (declared == undefined) {
+      return undefined;
+    }
+
+    return { module, declared };
+  }
+
+  public libraryInstance(name: string, args: Type[]): Type | undefined {
+    const found = this.libraryClass(name);
+    if (found == undefined) {
+      return undefined;
+    }
+
+    return this.declaredInstance(found.module, found.declared, args);
+  }
+
+  public declaredInstance(
+    module: int,
+    declared: DeclaredClass,
+    args: Type[],
+  ): Type | undefined {
+    if (declared.typeParams.length != args.length) {
+      return undefined;
+    }
+
+    const name = declared.name;
+    const parents = this.parentRefs(declared.base, declared.implemented);
+    const home: ClassHome = { module, name, loc: declared.loc };
+
+    this.quiet += 1;
+
+    const instance = this.instance(home, declared.typeParams, args, parents);
+
+    this.quiet -= 1;
+
+    return instance;
+  }
+}

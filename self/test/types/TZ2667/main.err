@@ -1,0 +1,3 @@
+main.tz:11:22: error TZ2667: property 'radius' does not exist on 'Square', which 'Circle | Square' may be; narrow it first, e.g. 'if (shape.kind == "circle")'
+const radius = shape.radius;
+                     ^

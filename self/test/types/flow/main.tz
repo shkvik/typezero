@@ -1,0 +1,83 @@
+// A check of a field narrows the field and, for a tag, the whole union;
+// a 'switch' narrows each case; an assignment narrows the variable until
+// the next one.
+type Circle = { kind: "circle"; radius: int };
+type Square = { kind: "square"; side: int };
+type Shape = Circle | Square;
+type Query = { text: string; limit?: int };
+type Holder = { shape?: Shape };
+
+function area(s: Shape): int {
+  if (s.kind == "circle") {
+    const round = s;
+
+    return s.radius;
+  }
+
+  const square = s;
+
+  return s.side;
+}
+
+function each(s: Shape): int {
+  switch (s.kind) {
+    case "circle":
+      return s.radius;
+    case "square":
+      return s.side;
+  }
+}
+
+function limited(q: Query): int {
+  if (q.limit == undefined) {
+    return 0;
+  }
+
+  const limit = q.limit;
+
+  return limit + 1;
+}
+
+function held(h: Holder): int {
+  if (h.shape?.kind == "square") {
+    return h.shape.side;
+  }
+
+  return 0;
+}
+
+function lists(x: int[] | string): int {
+  if (Array.isArray(x)) {
+    const list = x;
+
+    return list.length;
+  }
+
+  return x.length;
+}
+
+function filled(start: int | undefined): int {
+  let value = start;
+
+  if (value == undefined) {
+    value = 0;
+  }
+
+  const after = value;
+
+  return after;
+}
+
+function walked(items: int[]): int {
+  let best: int | undefined = undefined;
+
+  for (const item of items) {
+    if (best == undefined || item > best) {
+      best = item;
+    }
+  }
+
+  const found = best;
+
+  return found ?? 0;
+}

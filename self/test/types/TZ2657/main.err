@@ -1,0 +1,6 @@
+main.tz:5:11: error TZ2657: 'count' is not a function; it has type 'int'
+const a = count();
+          ^
+main.tz:6:11: error TZ2657: 'text' is not a function; it has type 'string'
+const b = text(1);
+          ^

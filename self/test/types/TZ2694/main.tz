@@ -1,0 +1,10 @@
+// A class has no prototype: its methods belong to the class itself.
+class Point {
+  public x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+const proto = Point.prototype;

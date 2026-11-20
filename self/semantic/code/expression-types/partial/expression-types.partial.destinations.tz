@@ -1,0 +1,145 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  TypeContext,
+  TypePlace,
+} from "../../../types/type-resolver/types/type-resolver.types.tz";
+import {
+  DeclaredVariable,
+  Destination,
+  DestinationKind,
+} from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private destinationOf(
+    variable: DeclaredVariable,
+    init: Expr,
+    module: int,
+  ): Type | undefined {
+    if (init.kind != ExprKind.ObjectLit) {
+      return undefined;
+    }
+
+    const list = this.record(module)?.destinations.get(variable.decl.loc);
+    let chosen: Type | undefined = undefined;
+
+    for (const one of list ?? []) {
+      const type = this.destinationType(one, module);
+      if (type == undefined) {
+        continue;
+      }
+      if (chosen != undefined && chosen != type) {
+        return undefined;
+      }
+
+      chosen = type;
+    }
+
+    if (chosen == undefined || !this.isFitting(init, chosen, module)) {
+      return undefined;
+    }
+
+    return chosen;
+  }
+
+  private isFitting(init: Expr, wanted: Type, module: int): boolean {
+    const before = this.muted;
+
+    this.quiet += 1;
+
+    const trial = this.typed(init, wanted, module);
+
+    this.quiet -= 1;
+
+    const isClean = this.muted == before;
+
+    return isClean && this.relation.converts(trial, wanted);
+  }
+
+  private placedType(given: Type, destination: Type | undefined): Type {
+    if (destination == undefined) {
+      return given;
+    }
+    if (!this.relation.converts(given, destination)) {
+      return given;
+    }
+
+    return destination;
+  }
+
+  private destinationType(one: Destination, module: int): Type | undefined {
+    const context: TypeContext = {
+      module,
+      bindings: new Map<int, Type>(),
+      place: TypePlace.Plain,
+    };
+    const found = this.writtenDestination(one, context, module);
+    if (found == undefined || found.kind != TypeKind.Object) {
+      return undefined;
+    }
+
+    return found;
+  }
+
+  private writtenDestination(
+    one: Destination,
+    context: TypeContext,
+    module: int,
+  ): Type | undefined {
+    const written = one.written;
+    const fn = one.fn;
+
+    switch (one.kind) {
+      case DestinationKind.Declared:
+        if (written == undefined) {
+          return undefined;
+        }
+
+        return this.resolver.value(written, context);
+      case DestinationKind.Returned: {
+        const result = fn?.returnType;
+        if (fn == undefined || result == undefined) {
+          return undefined;
+        }
+
+        const type = this.resolver.returnType(result, context);
+
+        return this.innerResult(type, fn);
+      }
+      default:
+        return this.argumentDestination(one, module);
+    }
+  }
+
+  private argumentDestination(one: Destination, module: int): Type | undefined {
+    const callee = one.call?.callee;
+    if (callee == undefined || callee.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const target = this.targetOfName(callee, module);
+    if (target == undefined || target.kind != SymbolKind.Function) {
+      return undefined;
+    }
+
+    const fn = this.record(target.module)?.functions.get(target.loc);
+    if (fn == undefined || !this.isCallable(fn, target.module)) {
+      return undefined;
+    }
+
+    const type = this.functionAt(target.module, target.loc);
+    if (type.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    const shape = type.shape;
+    const params = this.directParams(shape.params, shape.self);
+
+    return params[one.index]?.type;
+  }
+}

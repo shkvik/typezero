@@ -1,7 +1,11 @@
 import { ExpressionTypes } from "../expression-types.tz";
 import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import { Details } from "../../../../diagnostic/types/message.types.tz";
-import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
   LiteralKind,
   Type,
@@ -10,6 +14,7 @@ import {
 import {
   kArgumentsCall,
   kDecimalNoun,
+  kLengthName,
   kMaybeSuffix,
   kNegation,
   kNumberNoun,
@@ -34,6 +39,12 @@ partial class ExpressionTypes {
     other: Expr | undefined,
     module: int,
   ): boolean {
+    if (type.kind == TypeKind.Void) {
+      this.report(module, expr.loc, Code.VoidTested, kNoDetails);
+
+      return false;
+    }
+
     const base = this.apparent(this.definedType(type));
     const problem = this.truthProblem(type, base);
     if (problem == TruthProblem.None) {
@@ -47,7 +58,8 @@ partial class ExpressionTypes {
 
     const word = this.hintText(expr, kUnnamedOperand);
     const otherText = this.otherHint(other);
-    const code = this.truthCode(problem, codes, type, base, use);
+    const truthCode = this.truthCode(problem, codes, type, base, use);
+    const code = this.lengthCode(expr, truthCode);
     const details = this.truthDetails(code, type, base, word, otherText, use);
 
     this.report(module, expr.loc, code, details);
@@ -91,6 +103,7 @@ partial class ExpressionTypes {
     const isPlain =
       type.kind == TypeKind.Undefined ||
       type.kind == TypeKind.Error ||
+      base.kind == TypeKind.Error ||
       base.kind == TypeKind.Never ||
       base.kind == TypeKind.TypeParameter ||
       base.kind == TypeKind.Boolean ||
@@ -197,6 +210,37 @@ partial class ExpressionTypes {
       default:
         return this.objectTruthCode(codes, base);
     }
+  }
+
+  private lengthCode(expr: Expr, code: Code): Code {
+    if (!this.isLength(expr)) {
+      return code;
+    }
+
+    switch (code) {
+      case Code.NumberCondition:
+        return Code.LengthCondition;
+      case Code.NumberAnd:
+        return Code.LengthAnd;
+      case Code.NumberOr:
+        return Code.LengthOr;
+      case Code.MaybeNumberCondition:
+        return Code.MaybeLengthCondition;
+      case Code.MaybeNumberNot:
+        return Code.MaybeLengthNot;
+      case Code.MaybeNumberAnd:
+        return Code.MaybeLengthAnd;
+      default:
+        return code;
+    }
+  }
+
+  private isLength(expr: Expr): boolean {
+    if (expr.kind == ExprKind.OptionalChain) {
+      return this.isLength(expr.chain);
+    }
+
+    return expr.kind == ExprKind.Member && expr.name == kLengthName;
   }
 
   private resultTruthCode(use: TruthUse): Code {

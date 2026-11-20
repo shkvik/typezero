@@ -1,0 +1,4 @@
+main.tz
+  2:6 type Shape = { side: int; name?: string; scale: (int) => int; run?: () => int }
+  9:7 shape: Shape
+  11:7 b: int

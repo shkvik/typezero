@@ -1,0 +1,14 @@
+// A private member is used only inside its class.
+class Account {
+  public owner: string;
+  private balance: int;
+
+  public constructor(owner: string) {
+    this.owner = owner;
+    this.balance = 0;
+  }
+}
+
+const account = new Account("ann");
+const balance = account.balance;
+const owner = account.owner;

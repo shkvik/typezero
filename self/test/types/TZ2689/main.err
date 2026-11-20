@@ -1,0 +1,6 @@
+main.tz:7:16: error TZ2689: parameter 'x' needs a type: nothing here says what the function is called with
+const loose = (x) => x;
+               ^
+main.tz:10:25: error TZ2689: parameter 'm' needs a type: nothing here says what the function is called with
+const extra = apply((n, m) => n, 3);
+                        ^

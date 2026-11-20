@@ -1,0 +1,3 @@
+main.tz:12:11: error TZ2681: a number that may be undefined cannot be a condition: 0 would count as false too; compare it: '(list?.length ?? 0) > 0'
+if (list?.length) {
+          ^

@@ -1,0 +1,11 @@
+main.tz
+  2:10 add: (int, int) => int
+  6:10 many: (int, ...string[]) => int
+  10:10 maybe: (int, string?) => int
+  22:7 a: int
+  23:7 b: int
+  24:7 c: int
+  25:7 d: int
+  26:7 e: Point
+  27:7 f: int
+  28:7 g: int

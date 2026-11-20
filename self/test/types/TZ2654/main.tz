@@ -1,0 +1,13 @@
+// A static member is used through the class.
+class Registry {
+  public static count: int = 0;
+  public name: string;
+
+  public constructor(name: string) {
+    this.name = name;
+  }
+}
+
+const registry = new Registry("main");
+const count = registry.count;
+const name = registry.name;

@@ -1,0 +1,16 @@
+// Functions that only call each other need their return types written.
+function ping(n: int) {
+  return pong(n);
+}
+
+function pong(n: int) {
+  return ping(n);
+}
+
+function isEven(n: int) {
+  return n == 0 ? true : isOdd(n - 1);
+}
+
+function isOdd(n: int) {
+  return n == 0 ? false : isEven(n - 1);
+}

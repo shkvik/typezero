@@ -1,0 +1,5 @@
+main.tz
+  3:10 apply: ((int) => int, int) => int
+  8:7 typed: (int) => int
+  9:7 placed: int
+  10:7 extra: int

@@ -1,0 +1,3 @@
+main.tz:14:1: error TZ2688: the Promise is not awaited, and the Result it gives would go unchecked; await it and handle the Result, e.g. 'const r = await checked(1)'
+checked(1);
+^

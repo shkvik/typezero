@@ -1,0 +1,3 @@
+main.tz:13:25: error TZ2652: 'balance' is private in class 'Account'
+const balance = account.balance;
+                        ^

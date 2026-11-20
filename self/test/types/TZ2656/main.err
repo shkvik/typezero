@@ -1,0 +1,6 @@
+main.tz:13:18: error TZ2656: a spread argument can only be passed to a rest parameter, Math.min, Math.max or push
+const a = add(...list);
+                 ^
+main.tz:14:19: error TZ2656: a spread argument can only be passed to a rest parameter, Math.min, Math.max or push
+const b = many(...list);
+                  ^

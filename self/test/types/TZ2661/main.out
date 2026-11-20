@@ -1,0 +1,5 @@
+main.tz
+  2:6 type Shape = { side: int }
+  4:10 scaled: (this: Shape, int) => int
+  8:7 f: (this: Shape, int) => int
+  9:7 r: int

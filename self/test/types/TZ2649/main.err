@@ -1,0 +1,6 @@
+main.tz:5:16: error TZ2649: property 'size' does not exist on type 'string'; methods must be called
+const a = text.size;
+               ^
+main.tz:6:16: error TZ2649: property 'push' does not exist on type 'int[]'; methods must be called
+const b = list.push;
+               ^

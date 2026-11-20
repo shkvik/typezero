@@ -1,0 +1,3 @@
+main.tz:6:11: error TZ2668: an expression of type 'void' cannot initialize a variable
+const a = log("x");
+          ^

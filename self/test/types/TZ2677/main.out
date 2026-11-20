@@ -1,0 +1,5 @@
+main.tz
+  2:10 next: () => string | undefined
+  6:10 count: () => int
+  10:5 line: string | undefined
+  11:5 total: int

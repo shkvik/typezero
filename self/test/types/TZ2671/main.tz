@@ -1,0 +1,21 @@
+// Classes are told apart by their names.
+class Cat {
+  public name: string;
+
+  public constructor(name: string) {
+    this.name = name;
+  }
+}
+
+class Dog {
+  public name: string;
+
+  public constructor(name: string) {
+    this.name = name;
+  }
+}
+
+class Puppy extends Dog {}
+
+const cat: Cat = new Dog("rex");
+const dog: Dog = new Puppy("bo");

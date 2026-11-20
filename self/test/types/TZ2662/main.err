@@ -1,0 +1,3 @@
+main.tz:10:11: error TZ2662: 'Point' is not a function
+const a = Point(1);
+          ^

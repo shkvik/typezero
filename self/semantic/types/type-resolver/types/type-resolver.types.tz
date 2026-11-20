@@ -117,6 +117,11 @@ export type ModuleRecord = {
   readonly reported: Set<string>;
 };
 
+export type LibraryClass = {
+  readonly module: int;
+  readonly declared: DeclaredClass;
+};
+
 export type ClassHome = {
   readonly module: int;
   readonly name: string;

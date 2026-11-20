@@ -1,0 +1,7 @@
+// A function that gives nothing does not give a value to keep.
+function log(text: string): void {
+  const kept = text;
+}
+
+const a = log("x");
+log("y");

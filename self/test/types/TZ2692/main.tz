@@ -1,0 +1,14 @@
+// 'this' is the object of a method.
+class Counter {
+  public count: int;
+
+  public constructor() {
+    this.count = 0;
+  }
+
+  public next(): int {
+    return this.count + 1;
+  }
+}
+
+const outside = this;

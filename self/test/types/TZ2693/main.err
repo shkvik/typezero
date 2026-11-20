@@ -1,0 +1,3 @@
+main.tz:12:26: error TZ2693: class 'Registry' has no static member 'total'
+const missing = Registry.total;
+                         ^

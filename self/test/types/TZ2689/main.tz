@@ -1,0 +1,10 @@
+// A parameter of an arrow gets its type from where the arrow goes, or from
+// its annotation.
+function apply(f: (n: int) => int, n: int): int {
+  return f(n);
+}
+
+const loose = (x) => x;
+const typed = (x: int) => x;
+const placed = apply((n) => n * 2, 3);
+const extra = apply((n, m) => n, 3);

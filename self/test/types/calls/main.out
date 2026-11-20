@@ -1,0 +1,25 @@
+main.tz
+  3:6 type Shape = { side: int; scale: (int) => int }
+  21:10 add: (int, int) => int
+  25:10 half: (int) => int
+  29:10 many: (string, ...int[]) => int
+  33:16 later: (int) => Promise<int>
+  37:10 fact: (int) => int
+  45:10 fib: (int) => int
+  49:7 shape: Shape
+  50:7 point: Point
+  51:7 adder: (int, int) => int
+  52:7 pair: [int, int]
+  54:7 sum: int
+  55:7 halved: int
+  56:7 counted: int
+  57:7 none: int
+  58:7 promised: Promise<int>
+  59:7 valued: int
+  60:7 scaled: int
+  61:7 moved: Point
+  62:7 norm: double
+  63:7 chained: int
+  64:7 spread: int
+  65:7 factorial: int
+  66:7 fibonacci: int

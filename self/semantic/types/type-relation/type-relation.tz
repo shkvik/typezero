@@ -4,6 +4,7 @@ import "./partial/type-relation.partial.references.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import {
   FunctionShape,
+  InstanceType,
   LiteralKind,
   LiteralType,
   ObjectField,
@@ -120,15 +121,25 @@ export class TypeRelation {
           this.extends(source.shape.yielded, target.shape.yielded)
         );
       case TypeKind.Instance:
-        return (
-          source.kind == TypeKind.Instance &&
-          source.module == target.module &&
-          source.loc == target.loc &&
-          this.allFit(source.args, target.args)
-        );
+        return this.instanceFits(source, target);
       default:
         return false;
     }
+  }
+
+  private instanceFits(source: Type, target: InstanceType): boolean {
+    if (source.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    const isSame = source.module == target.module && source.loc == target.loc;
+    if (isSame) {
+      return this.allFit(source.args, target.args);
+    }
+
+    const parents = this.store.parentsOf(source);
+
+    return parents.some((parent) => this.instanceFits(parent, target));
   }
 
   private literalFits(source: LiteralType, target: Type): boolean {

@@ -1,0 +1,3 @@
+main.tz:15:23: error TZ2684: 'make' is a static method of 'Registry': call it through the class, 'Registry.make(...)'
+const made = registry.make();
+                      ^

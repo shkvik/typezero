@@ -1,0 +1,14 @@
+// A Promise that gives a Result is awaited, and the Result is handled.
+function check(n: int): Result<int, string> {
+  if (n > 0) {
+    return ok(n);
+  }
+
+  return err("no");
+}
+
+async function checked(n: int): Promise<Result<int, string>> {
+  return check(n);
+}
+
+checked(1);

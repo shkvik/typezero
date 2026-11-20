@@ -1,0 +1,12 @@
+// A length that may be undefined is compared with a default, also by '&&'.
+function sizes(flag: boolean): int[] | undefined {
+  if (flag) {
+    return [1];
+  }
+
+  return undefined;
+}
+
+const list = sizes(true);
+const flag = true;
+const a = list?.length && flag;

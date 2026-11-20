@@ -1,0 +1,14 @@
+// An assignment is no condition; a comparison is meant.
+let level = 1;
+
+if ((level = 0)) {
+  const a = 1;
+}
+
+if (!(level = 5)) {
+  const b = 1;
+}
+
+if (level == 2) {
+  const c = 1;
+}

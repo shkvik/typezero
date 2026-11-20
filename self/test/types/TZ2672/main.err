@@ -1,0 +1,3 @@
+main.tz:20:22: error TZ2672: type 'Person' is not assignable to type 'Named'; an instance of a class is only of its class's type and of those it extends or implements: write 'implements Named' in the class
+const a: Named = new Person("ann");
+                     ^

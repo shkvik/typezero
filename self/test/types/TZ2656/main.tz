@@ -1,0 +1,16 @@
+// A spread argument goes only to a rest parameter.
+function add(a: int, b: int): int {
+  return a + b;
+}
+
+function many(a: int, ...rest: int[]): int {
+  return a;
+}
+
+const list = [1, 2];
+const pair: [int, int] = [1, 2];
+
+const a = add(...list);
+const b = many(...list);
+const c = many(1, ...list);
+const d = add(...pair);

@@ -1,0 +1,3 @@
+main.tz:4:17: error TZ2680: '||' cannot test a number: 0 would count as false; compare it: 'stack.length > 0 ? stack.length : 1'
+const a = stack.length || 1;
+                ^

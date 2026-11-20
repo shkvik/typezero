@@ -70,6 +70,10 @@ partial class TypeResolver {
     door.state = DoorState.Done;
     this.labelAlias(decl, result, label);
 
+    if (this.record(module)?.library == true) {
+      this.libraryShapes.add(result.id);
+    }
+
     return result;
   }
 

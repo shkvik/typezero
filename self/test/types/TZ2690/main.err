@@ -1,0 +1,3 @@
+main.tz:11:11: error TZ2690: type '(int, int) => int' is not assignable to type '(int) => void'; the types of functions must match exactly: wrap it in an arrow that converts what it needs
+each([1], both);
+          ^

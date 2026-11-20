@@ -1,0 +1,4 @@
+main.tz
+  12:7 account: Account
+  13:7 balance: int
+  14:7 owner: string

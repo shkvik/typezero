@@ -1,0 +1,3 @@
+main.tz
+  2:10 log: () => void
+  3:9 kept: int

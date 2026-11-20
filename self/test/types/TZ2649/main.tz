@@ -1,0 +1,8 @@
+// The methods of strings and arrays are called, not read.
+const text = "abc";
+const list = [1, 2];
+
+const a = text.size;
+const b = list.push;
+const c = text.length;
+const d = list.length;

@@ -1,0 +1,3 @@
+main.tz
+  2:10 sizes: (boolean) => int[] | undefined
+  10:7 list: int[] | undefined

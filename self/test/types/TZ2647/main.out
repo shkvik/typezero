@@ -1,0 +1,7 @@
+main.tz
+  2:6 type Point = { x: int; y: int }
+  12:7 point: Point
+  13:7 box: Box
+  14:7 pair: [string, int]
+  15:7 count: int
+  21:7 e: int

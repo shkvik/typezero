@@ -1,0 +1,8 @@
+main.tz
+  64:7 counter: Counter
+  65:7 stepped: int
+  66:7 labelled: string
+  67:7 created: Counter
+  68:7 made: int
+  69:7 zero: int
+  70:7 total: int

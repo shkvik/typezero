@@ -1,0 +1,6 @@
+main.tz:4:12: error TZ2676: an assignment cannot be a condition; to compare, use '==': 'level == 0'
+if ((level = 0)) {
+           ^
+main.tz:8:13: error TZ2676: an assignment cannot be a condition; to compare, use '!=': 'level != 5'
+if (!(level = 5)) {
+            ^

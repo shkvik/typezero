@@ -1,0 +1,70 @@
+// The bodies of methods and constructors are checked: 'this' is the object,
+// a private member is used inside its class, a method without a written
+// result returns the common type of its returns; static members are used
+// through the class.
+class Counter {
+  public count: int;
+  private step: int;
+  public static made: int = 0;
+
+  public constructor(step: int) {
+    this.count = 0;
+    this.step = step;
+  }
+
+  public next() {
+    this.count = this.count + this.step;
+
+    return this.count;
+  }
+
+  public label() {
+    return `count ${this.count}`;
+  }
+
+  public twice(): int {
+    return this.next() + this.next();
+  }
+
+  public broken(): int {
+    return this.missing;
+  }
+
+  public wrong(): string {
+    return this.count;
+  }
+
+  public static create(): Counter {
+    return new Counter(1);
+  }
+
+  public static zero() {
+    return 0;
+  }
+}
+
+class Node {
+  public value: int;
+  public next: Node | undefined;
+
+  public constructor(value: int) {
+    this.value = value;
+    this.next = undefined;
+  }
+
+  public sum(): int {
+    if (this.next != undefined) {
+      return this.value + this.next.sum();
+    }
+
+    return this.value;
+  }
+}
+
+const counter = new Counter(2);
+const stepped = counter.next();
+const labelled = counter.label();
+const created = Counter.create();
+const made = Counter.made;
+const zero = Counter.zero();
+const total = new Node(1).sum();

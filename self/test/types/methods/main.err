@@ -1,0 +1,6 @@
+main.tz:30:17: error TZ2647: property 'missing' does not exist on type 'Counter'
+    return this.missing;
+                ^
+main.tz:34:17: error TZ2501: type 'int' is not assignable to type 'string'
+    return this.count;
+                ^

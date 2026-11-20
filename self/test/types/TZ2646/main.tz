@@ -1,0 +1,8 @@
+// An enum has only the members it lists.
+enum Color {
+  Red,
+  Green,
+}
+
+const blue = Color.Blue;
+const red = Color.Red;

@@ -9,6 +9,10 @@ import {
   BindingKind,
   NameOrigin,
 } from "../../../../program/ast/types/ast.types.patterns.tz";
+import {
+  ClassDecl,
+  EnumDecl,
+} from "../../../../program/ast/types/ast.types.classes.tz";
 import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
 import {
   NameUse,
@@ -20,9 +24,11 @@ import {
   TypeContext,
   TypePlace,
 } from "../../../types/type-resolver/types/type-resolver.types.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import { kNoPlace } from "../const/expression-types.const.tz";
 import {
   DeclaredVariable,
+  Destination,
   ParamSlot,
   ValueRecord,
   VariableDoor,
@@ -47,6 +53,11 @@ partial class ExpressionTypes {
       functions: new Map<int, FunctionDecl>(),
       params: new Map<int, ParamSlot>(),
       assigned: new Set<int>(),
+      enums: new Map<int, EnumDecl>(),
+      classes: new Map<int, ClassDecl>(),
+      destinations: new Map<int, Destination[]>(),
+      owners: [],
+      reported: new Set<string>(),
       errors: [],
     };
 
@@ -58,6 +69,10 @@ partial class ExpressionTypes {
 
     this.records.set(module, record);
     this.indexStatements(opened.file.items, record);
+
+    for (const part of opened.parts) {
+      this.indexClass(part, record);
+    }
 
     return record;
   }
@@ -102,6 +117,7 @@ partial class ExpressionTypes {
     };
 
     this.doors.set(key, door);
+    this.doorOrder.push(key);
     this.open(door, variable, module);
     door.state = DoorState.Done;
 
@@ -144,6 +160,8 @@ partial class ExpressionTypes {
 
       const given = this.checked(init, type, module, kNoPlace);
 
+      door.given = given;
+
       return this.keepConstant(door, variable, init, given, module);
     }
     if (init == undefined) {
@@ -154,12 +172,18 @@ partial class ExpressionTypes {
       return;
     }
 
-    const given = this.typed(init, undefined, module);
+    const destination = this.destinationOf(variable, init, module);
+    const given = this.typed(init, destination, module);
+    if (given.kind == TypeKind.Void) {
+      this.report(module, init.loc, Code.VoidInitializer, kNoDetails);
+
+      return;
+    }
     if (given.kind == TypeKind.Undefined) {
       return this.reportUndefined(variable, init, module);
     }
 
-    door.type = given;
+    door.type = this.placedType(given, destination);
 
     if (variable.isConst) {
       door.literal = this.literalOf(init, module);

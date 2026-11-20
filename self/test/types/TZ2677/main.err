@@ -1,0 +1,6 @@
+main.tz:13:11: error TZ2677: an assignment cannot be a condition; to test the assigned value, compare it: '(line = next()) != undefined'
+if ((line = next())) {
+          ^
+main.tz:17:12: error TZ2677: an assignment cannot be a condition; to test the assigned value, compare it: '(total = count()) != 0'
+if ((total = count())) {
+           ^

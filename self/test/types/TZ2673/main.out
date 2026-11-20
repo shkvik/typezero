@@ -1,0 +1,5 @@
+main.tz
+  2:10 find: (boolean) => int | undefined
+  10:7 found: int | undefined
+  11:7 kept: int
+  12:7 safe: int

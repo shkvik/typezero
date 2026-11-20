@@ -1,0 +1,22 @@
+main.tz
+  4:6 type Circle = { kind: "circle"; radius: int }
+  5:6 type Square = { kind: "square"; side: int }
+  6:6 type Shape = Circle | Square
+  7:6 type Query = { text: string; limit?: int }
+  8:6 type Holder = { shape?: Circle | Square }
+  10:10 area: (Circle | Square) => int
+  12:11 round: Circle
+  17:9 square: Square
+  22:10 each: (Circle | Square) => int
+  31:10 limited: (Query) => int
+  36:9 limit: int
+  41:10 held: (Holder) => int
+  49:10 lists: (int[] | string) => int
+  51:11 list: int[]
+  59:10 filled: (int | undefined) => int
+  60:7 value: int | undefined
+  66:9 after: int
+  71:10 walked: (int[]) => int
+  72:7 best: int | undefined
+  74:14 item: int
+  80:9 found: int | undefined

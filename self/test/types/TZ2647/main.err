@@ -1,0 +1,12 @@
+main.tz:17:17: error TZ2647: property 'z' does not exist on type 'Point'
+const a = point.z;
+                ^
+main.tz:18:15: error TZ2647: property 'weight' does not exist on type 'Box'
+const b = box.weight;
+              ^
+main.tz:19:16: error TZ2647: property 'size' does not exist on type '[string, int]'
+const c = pair.size;
+               ^
+main.tz:20:17: error TZ2647: property 'size' does not exist on type 'int'
+const d = count.size;
+                ^

@@ -1,0 +1,7 @@
+// A class without a constructor is made without arguments.
+class Counter {
+  public count: int = 0;
+}
+
+const a = new Counter(1);
+const b = new Counter();

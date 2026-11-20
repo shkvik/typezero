@@ -1,0 +1,21 @@
+// A value has only the properties of its type.
+type Point = { x: int; y: int };
+
+class Box {
+  public size: int;
+
+  public constructor(size: int) {
+    this.size = size;
+  }
+}
+
+const point: Point = { x: 1, y: 2 };
+const box = new Box(1);
+const pair: [string, int] = ["a", 1];
+const count = 1;
+
+const a = point.z;
+const b = box.weight;
+const c = pair.size;
+const d = count.size;
+const e = point.x;

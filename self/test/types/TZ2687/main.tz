@@ -1,0 +1,9 @@
+// A Promise is awaited, or let go with 'void'; the advice shows the call.
+async function later(n: int): Promise<int> {
+  return n;
+}
+
+later(1);
+later(2); // a comment ends the shown text
+
+void later(3);

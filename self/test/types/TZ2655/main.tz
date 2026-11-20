@@ -1,0 +1,28 @@
+// A call passes as many arguments as the function takes.
+function add(a: int, b: int): int {
+  return a + b;
+}
+
+function many(a: int, ...rest: string[]): int {
+  return a;
+}
+
+function maybe(a: int, b?: string): int {
+  return a;
+}
+
+class Point {
+  public x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+const a = add(1);
+const b = add(1, 2, 3);
+const c = many();
+const d = maybe(1, "a", 3);
+const e = new Point();
+const f = add(1, 2);
+const g = many(1, "a", "b");

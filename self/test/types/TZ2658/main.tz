@@ -1,0 +1,3 @@
+// Only a function is called, also when it is not a name.
+const a = (1 + 2)();
+const b = [1, 2](0);

@@ -1,0 +1,4 @@
+main.tz
+  2:6 type Named = { name: string }
+  20:7 a: Named
+  21:7 b: Named

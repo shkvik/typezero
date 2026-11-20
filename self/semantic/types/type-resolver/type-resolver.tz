@@ -16,6 +16,7 @@ import "./partial/type-resolver.partial.unions.tz";
 import "./partial/type-resolver.partial.signatures.tz";
 import "./partial/type-resolver.partial.constraints.tz";
 import "./partial/type-resolver.partial.methods.tz";
+import "./partial/type-resolver.partial.library.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   Details,
@@ -56,6 +57,8 @@ export class TypeResolver {
   private readonly globals: Map<string, int>;
   private readonly namespaces: Map<string, int>;
   private readonly prefixes: Map<int, string>;
+  private readonly libraryShapes: Set<int>;
+  private quiet: int;
 
   public constructor(
     store: TypeStore,
@@ -76,6 +79,8 @@ export class TypeResolver {
     this.globals = new Map<string, int>();
     this.namespaces = new Map<string, int>();
     this.prefixes = new Map<int, string>();
+    this.libraryShapes = new Set<int>();
+    this.quiet = 0;
 
     for (const scopes of resolved) {
       this.scopes.set(scopes.module.id, scopes);
@@ -183,7 +188,7 @@ export class TypeResolver {
   private report(module: int, loc: int, code: Code, details: Details): void {
     const record = this.record(module);
     const key = `${loc} ${code}`;
-    if (record == undefined || record.reported.has(key)) {
+    if (record == undefined || this.quiet > 0 || record.reported.has(key)) {
       return;
     }
 

@@ -1,0 +1,3 @@
+main.tz:10:17: error TZ2660: field 'side' is not a function; it has type 'int'
+const a = shape.side();
+                ^

@@ -3,15 +3,22 @@ import { SourceError } from "../../../../diagnostic/types/message.types.tz";
 import {
   BinaryExpr,
   BinaryOp,
+  CallExpr,
   Expr,
   Property,
   UnaryOp,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
+  ClassDecl,
+  ClassField,
+  EnumDecl,
+} from "../../../../program/ast/types/ast.types.classes.tz";
+import {
   FunctionDecl,
   Param,
 } from "../../../../program/ast/types/ast.types.functions.tz";
 import { VarDeclarator } from "../../../../program/ast/types/ast.types.patterns.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
 import { ForOfStmt } from "../../../../program/ast/types/ast.types.statements.tz";
 import {
   NameUse,
@@ -20,6 +27,7 @@ import {
 import {
   DictKind,
   FunctionParameter,
+  InstanceType,
   LiteralKind,
   PlainKind,
   Type,
@@ -44,6 +52,11 @@ export type ValueRecord = {
   readonly functions: Map<int, FunctionDecl>;
   readonly params: Map<int, ParamSlot>;
   readonly assigned: Set<int>;
+  readonly enums: Map<int, EnumDecl>;
+  readonly classes: Map<int, ClassDecl>;
+  readonly destinations: Map<int, Destination[]>;
+  readonly owners: FunctionDecl[];
+  readonly reported: Set<string>;
   readonly errors: SourceError[];
 };
 
@@ -68,6 +81,12 @@ export type ValueTarget = {
 export type FunctionDoor = {
   state: DoorState;
   type: Type;
+  isAssumed: boolean;
+};
+
+export type StalledFunction = {
+  readonly fn: FunctionDecl;
+  readonly module: int;
 };
 
 export type ReturnedValue = {
@@ -80,6 +99,7 @@ export type FunctionFrame = {
   readonly isAsync: boolean;
   readonly result?: Type;
   readonly returns: ReturnedValue[];
+  readonly recursive: string[];
   hasEmptyReturn: boolean;
 };
 
@@ -87,6 +107,51 @@ export type ParameterShape = {
   readonly params: FunctionParameter[];
   readonly rest: boolean;
   readonly self?: Type;
+};
+
+export enum DestinationKind {
+  Argument,
+  Declared,
+  Returned,
+}
+
+export type Destination = {
+  readonly kind: DestinationKind;
+  readonly call?: CallExpr;
+  readonly index: int;
+  readonly written?: TypeRef;
+  readonly fn?: FunctionDecl;
+};
+
+export type StaticOwner = {
+  readonly decl: ClassDecl;
+  readonly module: int;
+};
+
+export type ClassMemberEntry = {
+  readonly owner: ClassDecl;
+  readonly instance: InstanceType;
+  readonly field?: ClassField;
+  readonly methods: FunctionDecl[];
+  readonly isStatic: boolean;
+};
+
+export type ClassLookup = {
+  readonly isKnown: boolean;
+  readonly entry?: ClassMemberEntry;
+};
+
+export type ArgumentSlot = {
+  readonly expr: Expr;
+  readonly spread: boolean;
+  readonly element?: Type;
+};
+
+export type CallTarget = {
+  readonly params: FunctionParameter[];
+  readonly rest: boolean;
+  readonly loc: int;
+  readonly isLenient: boolean;
 };
 
 export type LiteralValue = {
@@ -99,6 +164,7 @@ export type LiteralValue = {
 export type VariableDoor = {
   state: DoorState;
   type: Type;
+  given?: Type;
   literal?: LiteralValue;
   constant?: decimal;
   isWhole: boolean;

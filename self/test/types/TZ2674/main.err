@@ -1,0 +1,3 @@
+main.tz:6:5: error TZ2674: an expression of type 'void' has no value to test
+if (log()) {
+    ^

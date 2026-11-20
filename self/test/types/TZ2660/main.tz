@@ -1,0 +1,11 @@
+// Only a field that holds a function is called.
+type Shape = {
+  side: int;
+  name?: string;
+  scale: (n: int) => int;
+  run?: () => int;
+};
+
+const shape: Shape = { side: 1, scale: (n: int) => n };
+const a = shape.side();
+const b = shape.scale(2);

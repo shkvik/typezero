@@ -1,0 +1,3 @@
+main.tz:11:20: error TZ2665: property 'length' does not exist on 'string | int': check what it holds first, e.g. 'typeof x == "string"'
+const size = value.length;
+                   ^

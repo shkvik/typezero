@@ -1,0 +1,3 @@
+main.tz:10:1: error TZ2685: the Result is not used, so an error in it would go unchecked; handle it, e.g. with '.match(...)', or keep it in a variable and check it
+check(1);
+^

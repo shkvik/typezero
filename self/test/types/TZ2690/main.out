@@ -1,0 +1,5 @@
+main.tz
+  2:10 each: (int[], (int) => void) => void
+  3:14 item: int
+  8:7 both: (int, int) => int
+  9:7 one: (int) => int

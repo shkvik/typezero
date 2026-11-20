@@ -1,0 +1,24 @@
+// A protected member is used only inside its class and the classes that
+// extend it.
+class Base {
+  public id: int;
+  protected secret: int;
+
+  public constructor(id: int) {
+    this.id = id;
+    this.secret = 1;
+  }
+}
+
+class Child extends Base {
+  public extra: string;
+
+  public constructor() {
+    super(1);
+    this.extra = "x";
+  }
+}
+
+const child = new Child();
+const secret = child.secret;
+const id = child.id;

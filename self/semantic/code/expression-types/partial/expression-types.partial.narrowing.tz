@@ -4,6 +4,7 @@ import {
   BinaryOp,
   Expr,
   ExprKind,
+  MemberExpr,
   UnaryOp,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
@@ -79,9 +80,14 @@ partial class ExpressionTypes {
 
         return this.factsOf(cond.operand, !isTrue, module);
       case ExprKind.Name:
+      case ExprKind.Member:
+      case ExprKind.OptionalChain:
+      case ExprKind.Assign:
         return this.truthFacts(cond, isTrue, module);
       case ExprKind.Binary:
         return this.binaryFacts(cond, isTrue, module);
+      case ExprKind.Call:
+        return this.callFacts(cond, isTrue, module);
       default:
         return new Map<string, Type>();
     }
@@ -93,7 +99,8 @@ partial class ExpressionTypes {
     module: int,
   ): Map<string, Type> {
     const facts = new Map<string, Type>();
-    const slot = this.narrowable(cond, module);
+    const path = this.comparedPath(cond);
+    const slot = this.narrowable(path, module);
     if (slot == undefined || !isTrue || !this.isOptional(slot.type)) {
       return facts;
     }
@@ -101,8 +108,28 @@ partial class ExpressionTypes {
     const defined = this.definedType(slot.type);
 
     facts.set(slot.key, defined);
+    this.linkFacts(path, facts, module);
 
     return facts;
+  }
+
+  private linkFacts(expr: Expr, facts: Map<string, Type>, module: int): void {
+    if (expr.kind == ExprKind.OptionalChain) {
+      return this.linkFacts(expr.chain, facts, module);
+    }
+    if (expr.kind != ExprKind.Member) {
+      return;
+    }
+
+    const object = expr.object;
+    const slot = this.narrowable(object, module);
+    if (expr.optional && slot != undefined && this.isOptional(slot.type)) {
+      const defined = this.definedType(slot.type);
+
+      facts.set(slot.key, defined);
+    }
+
+    this.linkFacts(object, facts, module);
   }
 
   private binaryFacts(
@@ -176,9 +203,11 @@ partial class ExpressionTypes {
       return typeofFacts;
     }
 
-    const isNameLeft = lhs.kind == ExprKind.Name;
-    const name = this.sideOf(isNameLeft, lhs, rhs);
-    const other = this.sideOf(isNameLeft, rhs, lhs);
+    const left = this.comparedPath(lhs);
+    const right = this.comparedPath(rhs);
+    const isPathLeft = this.pathKey(left, module) != undefined;
+    const name = this.sideOf(isPathLeft, left, right);
+    const other = this.sideOf(isPathLeft, right, left);
     const slot = this.narrowable(name, module);
     if (slot == undefined) {
       return facts;
@@ -189,7 +218,85 @@ partial class ExpressionTypes {
       facts.set(slot.key, narrowed);
     }
 
+    const isDefined =
+      narrowed != undefined &&
+      narrowed.kind != TypeKind.Undefined &&
+      !this.isOptional(narrowed);
+    if (isDefined) {
+      this.linkFacts(name, facts, module);
+    }
+
+    const tag = this.tagOf(name);
+    if (tag != undefined) {
+      this.tagFacts(tag, other, isEqual, facts, module);
+    }
+
     return facts;
+  }
+
+  private comparedPath(expr: Expr): Expr {
+    if (expr.kind == ExprKind.Assign && expr.op == undefined) {
+      return expr.target;
+    }
+
+    return expr;
+  }
+
+  private tagOf(expr: Expr): MemberExpr | undefined {
+    if (expr.kind == ExprKind.OptionalChain) {
+      return this.tagOf(expr.chain);
+    }
+    if (expr.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    return expr;
+  }
+
+  private tagFacts(
+    tag: MemberExpr,
+    other: Expr,
+    isEqual: boolean,
+    facts: Map<string, Type>,
+    module: int,
+  ): void {
+    const owner = this.narrowable(tag.object, module);
+    const literal = this.comparedLiteral(other, module);
+    if (owner == undefined || literal == undefined) {
+      return;
+    }
+
+    const parts = this.unionMembers(owner.type);
+    const kept = parts.filter((part) =>
+      this.isTagKept(part, tag.name, literal, isEqual),
+    );
+    if (kept.length == 0 || kept.length == parts.length) {
+      return;
+    }
+
+    const union = this.store.unionOf(kept);
+
+    facts.set(owner.key, union);
+  }
+
+  private isTagKept(
+    part: Type,
+    name: string,
+    literal: Type,
+    isEqual: boolean,
+  ): boolean {
+    const tag = this.partField(part, name);
+    if (tag == undefined) {
+      return !isEqual;
+    }
+    if (!isEqual) {
+      return tag != literal;
+    }
+
+    const base = this.relation.baseOf(literal);
+    const isOpen = tag == base || tag.kind == TypeKind.Error;
+
+    return isOpen || this.holdsLiteral(tag, literal);
   }
 
   private sideOf(isFirst: boolean, first: Expr, second: Expr): Expr {
@@ -237,7 +344,8 @@ partial class ExpressionTypes {
       other.kind == ExprKind.StringLit ||
       other.kind == ExprKind.IntLit ||
       other.kind == ExprKind.BoolLit ||
-      other.kind == ExprKind.Unary;
+      other.kind == ExprKind.Unary ||
+      other.kind == ExprKind.Member;
     const literal = this.literalOf(other, module);
     if (!isWritten || literal == undefined) {
       return undefined;
@@ -361,9 +469,18 @@ partial class ExpressionTypes {
     }
 
     const name = rhs.name;
-    const kept = this.unionMembers(slot.type).filter(
+    const parts = this.unionMembers(slot.type);
+    const kept = parts.filter(
       (part) => this.isInstanceOf(part, name) == isTrue,
     );
+    if (kept.length == 0 && isTrue) {
+      const derived = this.derivedInstance(rhs, parts, module);
+      if (derived != undefined) {
+        facts.set(slot.key, derived);
+      }
+
+      return facts;
+    }
     if (kept.length == 0) {
       return facts;
     }
@@ -373,6 +490,36 @@ partial class ExpressionTypes {
     facts.set(slot.key, union);
 
     return facts;
+  }
+
+  private derivedInstance(
+    rhs: Expr,
+    parts: Type[],
+    module: int,
+  ): Type | undefined {
+    if (rhs.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const target = this.targetOfName(rhs, module);
+    if (target == undefined || target.kind != SymbolKind.Class) {
+      return undefined;
+    }
+
+    const decl = this.record(target.module)?.classes.get(target.loc);
+    if (decl == undefined || decl.typeParams.length > 0) {
+      return undefined;
+    }
+
+    const instance = this.resolver.classInstance(target.module, decl, []);
+    const isDerived = parts.some((part) =>
+      this.relation.converts(instance, part),
+    );
+    if (!isDerived) {
+      return undefined;
+    }
+
+    return instance;
   }
 
   private isInstanceOf(part: Type, name: string): boolean {
@@ -391,31 +538,30 @@ partial class ExpressionTypes {
   }
 
   private narrowable(expr: Expr, module: int): NarrowSlot | undefined {
-    if (expr.kind != ExprKind.Name) {
+    const key = this.pathKey(expr, module);
+    if (key == undefined) {
       return undefined;
     }
 
-    const target = this.targetOfName(expr, module);
-    const isValue =
-      target != undefined &&
-      (target.kind == SymbolKind.Variable ||
-        target.kind == SymbolKind.Parameter);
-    if (target == undefined || !isValue) {
-      return undefined;
-    }
-
-    const record = this.record(target.module);
-    if (record == undefined || record.assigned.has(target.loc)) {
-      return undefined;
-    }
-
-    const key = `${target.module} ${target.loc}`;
-    const type = this.knownFact(key) ?? this.declaredOf(target);
+    const type = this.knownFact(key) ?? this.pathDeclared(expr, module);
     if (type == undefined || type.kind == TypeKind.Error) {
       return undefined;
     }
 
     return { key, type };
+  }
+
+  private pathDeclared(expr: Expr, module: int): Type | undefined {
+    if (expr.kind != ExprKind.Name) {
+      return this.typed(expr, undefined, module);
+    }
+
+    const target = this.targetOfName(expr, module);
+    if (target == undefined) {
+      return undefined;
+    }
+
+    return this.declaredOf(target);
   }
 
   private declaredOf(target: ValueTarget): Type | undefined {

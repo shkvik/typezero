@@ -1,0 +1,6 @@
+main.tz:6:1: error TZ2687: the Promise is not awaited, so nothing waits for it and an error in it would end the program later; write 'await later(1)', or 'void later(1)' to let it run on its own
+later(1);
+^
+main.tz:7:1: error TZ2687: the Promise is not awaited, so nothing waits for it and an error in it would end the program later; write 'await later(2)', or 'void later(2)' to let it run on its own
+later(2); // a comment ends the shown text
+^

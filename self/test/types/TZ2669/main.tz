@@ -1,0 +1,12 @@
+// A function whose returns only call itself needs its return type written.
+function only(n: int) {
+  return only(n);
+}
+
+function count(n: int) {
+  if (n <= 0) {
+    return 0;
+  }
+
+  return count(n - 1) + 1;
+}

@@ -1,0 +1,13 @@
+// A Result given by a call is used: an error in it is not dropped.
+function check(n: int): Result<int, string> {
+  if (n > 0) {
+    return ok(n);
+  }
+
+  return err("no");
+}
+
+check(1);
+
+const kept = check(2);
+const fine = kept.isOk();

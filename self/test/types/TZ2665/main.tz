@@ -1,0 +1,11 @@
+// A union of plain values is narrowed before its members are used.
+function pick(flag: boolean): string | int {
+  if (flag) {
+    return "a";
+  }
+
+  return 1;
+}
+
+const value = pick(true);
+const size = value.length;

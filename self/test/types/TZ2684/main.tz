@@ -1,0 +1,15 @@
+// A static method is called through the class.
+class Registry {
+  public name: string;
+
+  public constructor(name: string) {
+    this.name = name;
+  }
+
+  public static make(): Registry {
+    return new Registry("main");
+  }
+}
+
+const registry = new Registry("main");
+const made = registry.make();

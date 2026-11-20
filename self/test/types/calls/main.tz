@@ -1,0 +1,66 @@
+// A call gives the result of the function: of a declared function, of a
+// value of a function type, of a field or a method; 'new' gives an instance.
+type Shape = { side: int; scale: (n: int) => int };
+
+class Point {
+  public x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+
+  public moved(dx: int): Point {
+    return new Point(this.x + dx);
+  }
+
+  public norm(): double {
+    return 1.5;
+  }
+}
+
+function add(a: int, b: int): int {
+  return a + b;
+}
+
+function half(n: int) {
+  return n / 2;
+}
+
+function many(first: string, ...rest: int[]): int {
+  return rest.length;
+}
+
+async function later(n: int): Promise<int> {
+  return n;
+}
+
+function fact(n: int) {
+  if (n <= 1) {
+    return 1;
+  }
+
+  return n * fact(n - 1);
+}
+
+function fib(n: int) {
+  return n < 2 ? n : fib(n - 1) + fib(n - 2);
+}
+
+const shape: Shape = { side: 2, scale: (n: int) => n * 2 };
+const point = new Point(1);
+const adder = add;
+const pair: [int, int] = [1, 2];
+
+const sum = add(1, 2);
+const halved = half(3);
+const counted = many("a", 1, 2, 3);
+const none = many("a");
+const promised = later(1);
+const valued = adder(1, 2);
+const scaled = shape.scale(3);
+const moved = point.moved(2);
+const norm = point.norm();
+const chained = point.moved(1).moved(2).x;
+const spread = add(...pair);
+const factorial = fact(5);
+const fibonacci = fib(10);

@@ -1,0 +1,36 @@
+// Values of the library have the types of its declarations: methods of
+// strings, numbers, arrays, Map and Set, global objects and functions.
+const text = "a,b";
+const list = [1, 2, 3];
+const words = ["a", "b"];
+const map = new Map<string, int>();
+const set = new Set<string>();
+const date = new Date(0);
+const ratio = 2.5;
+const count = 7;
+
+const parts = text.split(",");
+const found = text.indexOf("b");
+const upper = text.toUpperCase();
+const sliced = list.slice(1);
+const joined = list.join(",");
+const has = list.includes(1);
+const pushed = list.push(4);
+const value = map.get("a");
+const known = map.has("a");
+const size = map.size;
+const items = set.size;
+const floor = Math.floor(ratio);
+const pi = Math.PI;
+const random = Math.random();
+const shown = count.toString();
+const fixed = ratio.toFixed(1);
+const time = date.getTime();
+const args = process.argv.slice(2);
+const parsed = JSON.parse("{}");
+const number = parseInt("5");
+const keys = Object.keys({ a: 1 });
+const parsedFine = parsed.isOk();
+const numberFine = number.isErr();
+const reversed = words.concat(["c"]).reverse();
+console.log(reversed);

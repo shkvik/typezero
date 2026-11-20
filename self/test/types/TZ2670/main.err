@@ -1,0 +1,6 @@
+main.tz:2:10: error TZ2670: cannot tell what 'ping' returns: every value it returns comes from the functions that call it back; declare its return type, e.g. '): int'
+function ping(n: int) {
+         ^
+main.tz:6:10: error TZ2670: cannot tell what 'pong' returns: every value it returns comes from the functions that call it back; declare its return type, e.g. '): int'
+function pong(n: int) {
+         ^

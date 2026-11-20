@@ -1,0 +1,27 @@
+main.tz
+  4:6 type Shape = { side: int; name?: string; scale: (int) => int }
+  5:6 type Pair = [string, int]
+  7:6 enum Color = int
+  12:6 enum Word = "up" | "down"
+  40:10 find: (boolean) => Shape | undefined
+  48:7 shape: Shape
+  49:7 pair: [string, int]
+  50:7 point: Point
+  51:7 deep: Point3
+  52:7 found: Shape | undefined
+  54:7 red: int
+  55:7 up: Word
+  56:7 small: int8
+  57:7 side: int
+  58:7 name: string | undefined
+  59:7 scale: (int) => int
+  60:7 size: int
+  61:7 x: int
+  62:7 y: double
+  63:7 method: () => double
+  64:7 inherited: int
+  65:7 own: int
+  66:7 text: int
+  67:7 items: int
+  68:7 maybe: int | undefined
+  69:7 chained: int | undefined

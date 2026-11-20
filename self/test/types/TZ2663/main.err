@@ -1,0 +1,3 @@
+main.tz:6:15: error TZ2663: class 'Counter' has no constructor, so 'new Counter()' takes no arguments
+const a = new Counter(1);
+              ^

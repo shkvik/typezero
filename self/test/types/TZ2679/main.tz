@@ -1,0 +1,5 @@
+// A length on the left of '&&' is compared.
+const stack = [1, 2];
+const flag = true;
+
+const a = stack.length && flag;

@@ -7,6 +7,7 @@ import {
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
   ForOfStmt,
+  ForStmt,
   IfStmt,
   ReturnStmt,
   Stmt,
@@ -35,6 +36,7 @@ partial class ExpressionTypes {
     const frame: FunctionFrame = {
       isAsync: false,
       returns: [],
+      recursive: [],
       hasEmptyReturn: false,
     };
 
@@ -72,7 +74,7 @@ partial class ExpressionTypes {
         return this.walkStatements(statement.body, frame, module);
       case StmtKind.VarDecl:
         for (const decl of statement.decls) {
-          this.localDoor(module, decl.loc);
+          this.declaredFact(module, decl.loc);
         }
 
         return;
@@ -80,27 +82,42 @@ partial class ExpressionTypes {
         this.functionType(statement, module);
 
         return;
-      case StmtKind.Expr:
-        this.typed(statement.expr, undefined, module);
+      case StmtKind.Class:
+        return this.walkClass(statement, module);
+      case StmtKind.Expr: {
+        const type = this.typed(statement.expr, undefined, module);
 
-        return;
+        return this.usedCheck(statement.expr, type, statement.loc, module);
+      }
       case StmtKind.If:
         return this.walkIf(statement, frame, module);
       case StmtKind.While:
-      case StmtKind.DoWhile:
+        this.forgetLooped(statement, module);
         this.branchCheck(statement.cond, TruthUse.Condition, module);
 
         return this.walkLoop(statement.cond, statement.body, frame, module);
+      case StmtKind.DoWhile:
+        this.forgetLooped(statement, module);
+        this.branchCheck(statement.cond, TruthUse.Condition, module);
+
+        return this.walkLoop(undefined, statement.body, frame, module);
       case StmtKind.For:
         this.walkOptionalStatement(statement.init, frame, module);
+        this.forgetLooped(statement, module);
         this.conditionCheck(statement.cond, module);
-        this.valueCheck(statement.step, module);
 
-        return this.walkLoop(statement.cond, statement.body, frame, module);
-      case StmtKind.ForOf:
+        return this.walkFor(statement, frame, module);
+      case StmtKind.ForOf: {
         this.localDoor(module, statement.binding.loc);
+        this.forgetLooped(statement, module);
 
-        return this.walkStatement(statement.body, frame, module);
+        const before = this.facts;
+
+        this.walkStatement(statement.body, frame, module);
+        this.facts = before;
+
+        return;
+      }
       case StmtKind.Switch:
         return this.walkSwitch(statement, frame, module);
       case StmtKind.Labeled:
@@ -112,6 +129,22 @@ partial class ExpressionTypes {
     }
   }
 
+  private declaredFact(module: int, loc: int): void {
+    const door = this.localDoor(module, loc);
+    const given = door?.given;
+    if (door == undefined || given == undefined) {
+      return;
+    }
+
+    const isNarrower =
+      door.type.kind == TypeKind.Union &&
+      given.kind != TypeKind.Error &&
+      given != door.type;
+    if (isNarrower) {
+      this.facts = this.withFact(this.facts, `${module} ${loc}`, given);
+    }
+  }
+
   private walkIf(statement: IfStmt, frame: FunctionFrame, module: int): void {
     const cond = statement.cond;
 
@@ -120,21 +153,46 @@ partial class ExpressionTypes {
     const thenFacts = this.factsOf(cond, true, module);
     const elseFacts = this.factsOf(cond, false, module);
     const before = this.underFacts(thenFacts);
+    const thenStart = this.facts;
 
     this.walkStatement(statement.thenStmt, frame, module);
+
+    const thenEnd = this.facts;
+
     this.facts = before;
     this.underFacts(elseFacts);
-    this.walkOptionalStatement(statement.elseStmt, frame, module);
-    this.facts = before;
 
+    const elseStart = this.facts;
+
+    this.walkOptionalStatement(statement.elseStmt, frame, module);
+
+    const elseEnd = this.facts;
     const isThenLeaving = this.isLeaving(statement.thenStmt, module);
     const isElseLeaving = this.isLeaving(statement.elseStmt, module);
-    if (isThenLeaving && !isElseLeaving) {
-      this.underFacts(elseFacts);
+
+    this.facts = before;
+
+    if (isThenLeaving && isElseLeaving) {
+      return;
     }
-    if (isElseLeaving && !isThenLeaving) {
-      this.underFacts(thenFacts);
+    if (isThenLeaving) {
+      this.facts = elseEnd;
+
+      return;
     }
+    if (isElseLeaving) {
+      this.facts = thenEnd;
+
+      return;
+    }
+
+    this.facts = this.branchesJoined(
+      before,
+      thenStart,
+      thenEnd,
+      elseStart,
+      elseEnd,
+    );
   }
 
   private isLeaving(statement: Stmt | undefined, module: int): boolean {
@@ -167,15 +225,38 @@ partial class ExpressionTypes {
     frame: FunctionFrame,
     module: int,
   ): void {
-    if (cond == undefined) {
-      return this.walkOptionalStatement(body, frame, module);
-    }
-
-    const facts = this.factsOf(cond, true, module);
+    const facts = this.loopFacts(cond, module);
     const before = this.underFacts(facts);
 
     this.walkOptionalStatement(body, frame, module);
     this.facts = before;
+  }
+
+  private walkFor(statement: ForStmt, frame: FunctionFrame, module: int): void {
+    const facts = this.loopFacts(statement.cond, module);
+    const before = this.underFacts(facts);
+
+    this.walkOptionalStatement(statement.body, frame, module);
+    this.stepCheck(statement.step, module);
+    this.facts = before;
+  }
+
+  private stepCheck(step: Expr | undefined, module: int): void {
+    if (step == undefined) {
+      return;
+    }
+
+    const type = this.typed(step, undefined, module);
+
+    this.usedCheck(step, type, undefined, module);
+  }
+
+  private loopFacts(cond: Expr | undefined, module: int): Map<string, Type> {
+    if (cond == undefined) {
+      return new Map<string, Type>();
+    }
+
+    return this.factsOf(cond, true, module);
   }
 
   private conditionCheck(cond: Expr | undefined, module: int): void {
@@ -200,12 +281,75 @@ partial class ExpressionTypes {
 
     this.casesCheck(statement, subject, tests, module);
 
+    this.forgetLooped(statement, module);
+
     const before = this.facts;
+    const discriminant = statement.discriminant;
+    let reached: Map<string, Type> | undefined = undefined;
+    let passed = new Map<string, Type>();
 
     for (const option of statement.cases) {
+      const test = option.test;
+      const facts = this.caseFacts(discriminant, test, passed, module);
+
+      reached = this.reachedFacts(reached, facts);
+
+      if (test != undefined) {
+        passed = this.mergedFacts(
+          passed,
+          this.factsOfCase(discriminant, test, passed, false, module),
+        );
+      }
+      if (option.body.length == 0) {
+        continue;
+      }
+
+      this.facts = this.mergedFacts(before, reached);
       this.walkStatements(option.body, frame, module);
       this.facts = before;
+      reached = undefined;
     }
+  }
+
+  private caseFacts(
+    discriminant: Expr,
+    test: Expr | undefined,
+    passed: Map<string, Type>,
+    module: int,
+  ): Map<string, Type> {
+    if (test == undefined) {
+      return passed;
+    }
+
+    const facts = this.factsOfCase(discriminant, test, passed, true, module);
+
+    return this.mergedFacts(passed, facts);
+  }
+
+  private factsOfCase(
+    discriminant: Expr,
+    test: Expr,
+    passed: Map<string, Type>,
+    isEqual: boolean,
+    module: int,
+  ): Map<string, Type> {
+    const before = this.underFacts(passed);
+    const facts = this.equalityFacts(discriminant, test, isEqual, module);
+
+    this.facts = before;
+
+    return facts;
+  }
+
+  private reachedFacts(
+    reached: Map<string, Type> | undefined,
+    facts: Map<string, Type>,
+  ): Map<string, Type> {
+    if (reached == undefined) {
+      return facts;
+    }
+
+    return this.joinedFacts(reached, facts);
   }
 
   private caseTypes(statement: SwitchStmt, subject: Type, module: int): Type[] {
@@ -341,7 +485,16 @@ partial class ExpressionTypes {
       return;
     }
 
+    const before = this.recursions.length;
     const type = this.returnedType(value, undefined, frame, module);
+    const calls = this.recursions.slice(before);
+    if (calls.length > 0 && type.kind == TypeKind.Error) {
+      for (const call of calls) {
+        frame.recursive.push(call);
+      }
+
+      return;
+    }
 
     frame.returns.push({ value, type });
   }

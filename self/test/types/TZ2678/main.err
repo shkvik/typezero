@@ -1,0 +1,3 @@
+main.tz:4:11: error TZ2678: a number cannot be a condition: 0 would count as false; compare it: 'stack.length > 0'
+if (stack.length) {
+          ^

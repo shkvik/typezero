@@ -1,0 +1,11 @@
+// A class is made with 'new', not called.
+class Point {
+  public x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+const a = Point(1);
+const b = new Point(1);

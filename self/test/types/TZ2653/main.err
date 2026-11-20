@@ -1,0 +1,3 @@
+main.tz:23:22: error TZ2653: 'secret' is protected in class 'Base'; only 'Base' and the classes that extend it can use it
+const secret = child.secret;
+                     ^

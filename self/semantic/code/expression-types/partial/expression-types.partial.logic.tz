@@ -1,6 +1,7 @@
 import { ExpressionTypes } from "../expression-types.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import {
+  AssignExpr,
   BinaryExpr,
   BinaryOp,
   CallArgument,
@@ -12,14 +13,23 @@ import {
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import {
+  kAndText,
   kArgumentSeparator,
   kDoubleQuote,
   kEmptyArray,
+  kEmptyText,
+  kEquals,
   kEscape,
   kFirstPrintable,
   kHiddenMark,
   kLastPrintable,
+  kNegation,
+  kNotEquals,
+  kOrText,
+  kOtherPlaceholder,
   kUndefinedText,
+  kUnnamedOperand,
+  kZeroText,
 } from "../const/expression-types.const.tz";
 import { LogicSide, TruthUse } from "../types/expression-types.types.tz";
 
@@ -50,8 +60,86 @@ partial class ExpressionTypes {
 
     const boolean = this.store.plain(TypeKind.Boolean);
     const type = this.typed(expr, boolean, module);
+
+    if (expr.kind == ExprKind.Assign && expr.op == undefined) {
+      return this.assignmentCondition(expr, type, use, module);
+    }
     if (type.kind != TypeKind.Boolean) {
       this.checkTruthy(expr, type, use, undefined, module);
+    }
+  }
+
+  private assignmentCondition(
+    expr: AssignExpr,
+    type: Type,
+    use: TruthUse,
+    module: int,
+  ): void {
+    const isNegated = use == TruthUse.Not;
+    const first = this.hintText(expr.target, kUnnamedOperand);
+    const second = this.hintText(expr.value, kOtherPlaceholder);
+    const base = this.definedType(type);
+    const isTestable =
+      this.isOptional(type) ||
+      this.isNumberLike(base) ||
+      base.kind == TypeKind.String;
+    const isCompared =
+      this.isWrittenLiteral(expr.value) ||
+      type.kind == TypeKind.Error ||
+      !isTestable;
+    if (isCompared) {
+      const word = this.equalsText(isNegated);
+
+      return this.report(module, expr.loc, Code.AssignmentCompared, {
+        word,
+        first,
+        second,
+      });
+    }
+
+    const other = this.emptyTest(type, isNegated);
+
+    this.report(module, expr.loc, Code.AssignmentTested, {
+      first,
+      second,
+      other,
+    });
+  }
+
+  private equalsText(isNegated: boolean): string {
+    if (isNegated) {
+      return kNotEquals;
+    }
+
+    return kEquals;
+  }
+
+  private emptyTest(type: Type, isNegated: boolean): string {
+    const test = this.equalsText(!isNegated);
+    const base = this.definedType(type);
+
+    if (this.isOptional(type)) {
+      return `${test} ${kUndefinedText}`;
+    }
+    if (base.kind == TypeKind.String) {
+      return `${test} ${kEmptyText}`;
+    }
+
+    return `${test} ${kZeroText}`;
+  }
+
+  private isWrittenLiteral(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+      case ExprKind.FloatLit:
+      case ExprKind.StringLit:
+      case ExprKind.BoolLit:
+      case ExprKind.Undefined:
+        return true;
+      case ExprKind.Unary:
+        return expr.op == UnaryOp.Neg && this.isWrittenLiteral(expr.operand);
+      default:
+        return false;
     }
   }
 
@@ -169,6 +257,9 @@ partial class ExpressionTypes {
     if (isBoolean) {
       return left;
     }
+    if (right.kind == TypeKind.Void) {
+      return this.reportRightVoid(expr, isAnd, module);
+    }
 
     const kept = this.keptLeft(left, isAnd);
     const result = this.unify(kept, right);
@@ -183,6 +274,33 @@ partial class ExpressionTypes {
     this.report(module, expr.loc, code, { first, second });
 
     return this.store.plain(TypeKind.Error);
+  }
+
+  private reportRightVoid(expr: BinaryExpr, isAnd: boolean, module: int): Type {
+    const word = this.logicalText(isAnd);
+    const test = this.hintText(expr.lhs, kUnnamedOperand);
+    const first = this.negatedText(test, isAnd);
+    const second = this.hintText(expr.rhs, kOtherPlaceholder);
+
+    this.report(module, expr.loc, Code.RightSideVoid, { word, first, second });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private logicalText(isAnd: boolean): string {
+    if (isAnd) {
+      return kAndText;
+    }
+
+    return kOrText;
+  }
+
+  private negatedText(test: string, isAnd: boolean): string {
+    if (isAnd) {
+      return test;
+    }
+
+    return kNegation + test;
   }
 
   private keptLeft(left: Type, isAnd: boolean): Type {
@@ -217,6 +335,7 @@ partial class ExpressionTypes {
   ): Type {
     this.branchCheck(expr.cond, TruthUse.Condition, module);
 
+    const start = this.recursions.length;
     const isThenWaiting = this.isWaiting(expr.thenExpr);
     const isElseWaiting = this.isWaiting(expr.elseExpr);
     if (isThenWaiting && !isElseWaiting) {
@@ -224,7 +343,7 @@ partial class ExpressionTypes {
       const thenHint = this.branchHint(expr.thenExpr, elseType, wanted);
       const thenType = this.branchTyped(expr, true, thenHint, module);
 
-      return this.joinedBranches(expr, thenType, elseType, module);
+      return this.joinedBranches(expr, thenType, elseType, start, module);
     }
 
     const thenType = this.branchTyped(expr, true, wanted, module);
@@ -236,7 +355,7 @@ partial class ExpressionTypes {
     );
     const elseType = this.branchTyped(expr, false, elseHint, module);
 
-    return this.joinedBranches(expr, thenType, elseType, module);
+    return this.joinedBranches(expr, thenType, elseType, start, module);
   }
 
   private branchTyped(
@@ -320,12 +439,13 @@ partial class ExpressionTypes {
     expr: ConditionalExpr,
     thenType: Type,
     elseType: Type,
+    start: int,
     module: int,
   ): Type {
-    const isBroken =
-      thenType.kind == TypeKind.Error || elseType.kind == TypeKind.Error;
-    if (isBroken) {
-      return this.store.plain(TypeKind.Error);
+    const isThenBroken = thenType.kind == TypeKind.Error;
+    const isElseBroken = elseType.kind == TypeKind.Error;
+    if (isThenBroken || isElseBroken) {
+      return this.failedBranches(thenType, elseType, start);
     }
 
     const isDifferent = thenType != elseType;
@@ -357,6 +477,20 @@ partial class ExpressionTypes {
     });
 
     return this.store.plain(TypeKind.Error);
+  }
+
+  private failedBranches(thenType: Type, elseType: Type, start: int): Type {
+    const isPending = this.recursions.length > start;
+    const isThenBroken = thenType.kind == TypeKind.Error;
+    const isElseBroken = elseType.kind == TypeKind.Error;
+    if (!isPending || isThenBroken == isElseBroken) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (isThenBroken) {
+      return elseType;
+    }
+
+    return thenType;
   }
 
   private adaptedBranch(

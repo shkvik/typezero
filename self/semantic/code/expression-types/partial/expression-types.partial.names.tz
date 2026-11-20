@@ -14,6 +14,9 @@ partial class ExpressionTypes {
     if (this.isNullName(expr, module)) {
       return this.nullTyped(expr, wanted, module);
     }
+    if (this.isThisName(expr, module)) {
+      return this.thisTyped(expr, module);
+    }
 
     const target = this.targetOfName(expr, module);
     if (target == undefined) {
@@ -110,7 +113,19 @@ partial class ExpressionTypes {
   }
 
   private targetOfName(expr: NameExpr, module: int): ValueTarget | undefined {
-    const symbol = this.record(module)?.uses.get(expr.loc)?.symbol;
+    return this.targetOfUse(expr.loc, expr.name, module);
+  }
+
+  private targetOfUse(
+    loc: int,
+    name: string,
+    module: int,
+  ): ValueTarget | undefined {
+    const use = this.record(module)?.uses.get(loc);
+    const symbol = use?.symbol;
+    if (use != undefined && symbol == undefined) {
+      return this.globalValue(name);
+    }
     if (symbol == undefined) {
       return undefined;
     }
@@ -124,6 +139,66 @@ partial class ExpressionTypes {
     }
 
     return this.exportedValue(target.module, target.name);
+  }
+
+  private globalValue(name: string): ValueTarget | undefined {
+    if (this.globalValues.size == 0) {
+      this.indexGlobalValues();
+    }
+    if (this.overloadedGlobals.has(name)) {
+      return undefined;
+    }
+
+    return this.globalValues.get(name);
+  }
+
+  private indexGlobalValues(): void {
+    for (const opened of this.program.globals) {
+      const module = opened.id;
+
+      for (const item of opened.file.items) {
+        this.indexGlobalItem(item, module);
+      }
+
+      for (const declared of opened.declared) {
+        this.keepGlobal(declared.name, {
+          module,
+          kind: SymbolKind.Class,
+          loc: declared.loc,
+        });
+      }
+    }
+  }
+
+  private indexGlobalItem(item: Stmt, module: int): void {
+    switch (item.kind) {
+      case StmtKind.VarDecl:
+        for (const decl of item.decls) {
+          this.keepGlobal(decl.name, {
+            module,
+            kind: SymbolKind.Variable,
+            loc: decl.loc,
+          });
+        }
+
+        return;
+      case StmtKind.Function:
+        return this.keepGlobal(item.name, {
+          module,
+          kind: SymbolKind.Function,
+          loc: item.loc,
+        });
+      default:
+        return;
+    }
+  }
+
+  private keepGlobal(name: string, target: ValueTarget): void {
+    if (this.globalValues.has(name)) {
+      this.overloadedGlobals.add(name);
+    }
+
+    this.globalValues.set(name, target);
   }
 
   private exportedValue(module: int, name: string): ValueTarget | undefined {

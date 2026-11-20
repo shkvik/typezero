@@ -1,0 +1,331 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import {
+  AssignExpr,
+  BinaryOp,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  PropertyKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+import { Stmt } from "../../../../program/ast/types/ast.types.statements.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { kDot, kThisName } from "../const/expression-types.const.tz";
+import {
+  DeclaredVariable,
+  Destination,
+  ParamSlot,
+  ValueRecord,
+} from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private pathKey(expr: Expr, module: int): string | undefined {
+    if (expr.kind == ExprKind.OptionalChain) {
+      return this.pathKey(expr.chain, module);
+    }
+    if (expr.kind == ExprKind.Member) {
+      const object = this.pathKey(expr.object, module);
+      if (object == undefined) {
+        return undefined;
+      }
+
+      return object + kDot + expr.name;
+    }
+    if (expr.kind != ExprKind.Name) {
+      return undefined;
+    }
+    if (this.isThisName(expr, module)) {
+      return kThisName;
+    }
+
+    const target = this.targetOfName(expr, module);
+    const isValue =
+      target != undefined &&
+      (target.kind == SymbolKind.Variable ||
+        target.kind == SymbolKind.Parameter);
+    if (target == undefined || !isValue) {
+      return undefined;
+    }
+
+    const key = `${target.module} ${target.loc}`;
+    const variable = this.record(target.module)?.variables.get(target.loc);
+    if (variable != undefined && variable.isConst) {
+      this.constKeys.add(key);
+    }
+
+    return key;
+  }
+
+  private pathFact(expr: Expr, module: int): Type | undefined {
+    const key = this.pathKey(expr, module);
+    if (key == undefined) {
+      return undefined;
+    }
+
+    return this.knownFact(key);
+  }
+
+  private assignedTyped(expr: AssignExpr, module: int): Type {
+    const target = expr.target;
+    const key = this.pathKey(target, module);
+    const declared = this.assignedDeclared(target, module);
+    const current = this.assignedCurrent(key, declared);
+
+    if (declared == undefined || declared.kind == TypeKind.Error) {
+      this.forgetPatterned(target, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const wanted = this.assignedWanted(expr.op, declared);
+    const given = this.typed(expr.value, wanted, module);
+
+    this.forgetPatterned(target, module);
+
+    if (key == undefined) {
+      return given;
+    }
+
+    const fact = this.assignedFact(expr.op, declared, current, given);
+
+    this.forgetPath(key);
+
+    if (fact != undefined) {
+      this.facts = this.withFact(this.facts, key, fact);
+    }
+
+    return given;
+  }
+
+  private assignedDeclared(target: Expr, module: int): Type | undefined {
+    if (target.kind == ExprKind.Member) {
+      return this.fieldDeclared(target, module);
+    }
+    if (target.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const found = this.targetOfName(target, module);
+    if (found == undefined) {
+      return undefined;
+    }
+
+    return this.declaredOf(found);
+  }
+
+  private fieldDeclared(target: MemberExpr, module: int): Type | undefined {
+    const key = this.pathKey(target, module);
+    if (key == undefined) {
+      return undefined;
+    }
+
+    const before = this.facts;
+
+    this.forgetPath(key);
+    this.quiet += 1;
+
+    const declared = this.typed(target, undefined, module);
+
+    this.quiet -= 1;
+    this.facts = before;
+
+    return declared;
+  }
+
+  private assignedCurrent(
+    key: string | undefined,
+    declared: Type | undefined,
+  ): Type | undefined {
+    if (key == undefined) {
+      return declared;
+    }
+
+    return this.knownFact(key) ?? declared;
+  }
+
+  private assignedWanted(
+    op: BinaryOp | undefined,
+    declared: Type | undefined,
+  ): Type | undefined {
+    const isPlain =
+      op == undefined || op == BinaryOp.LogOr || op == BinaryOp.Nullish;
+    if (!isPlain || declared == undefined) {
+      return undefined;
+    }
+    if (declared.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return declared;
+  }
+
+  private assignedFact(
+    op: BinaryOp | undefined,
+    declared: Type,
+    current: Type | undefined,
+    given: Type,
+  ): Type | undefined {
+    const isDefaulting = op == BinaryOp.LogOr || op == BinaryOp.Nullish;
+
+    if (declared.kind != TypeKind.Union) {
+      return undefined;
+    }
+    if (isDefaulting && current != undefined) {
+      return this.defaultedFact(declared, current, given);
+    }
+    if (op != undefined || given.kind == TypeKind.Error) {
+      return undefined;
+    }
+    if (!this.relation.converts(given, declared)) {
+      return undefined;
+    }
+
+    return given;
+  }
+
+  private defaultedFact(declared: Type, current: Type, given: Type): Type {
+    const defined = this.definedType(current);
+    const isKnown =
+      given.kind != TypeKind.Error && this.relation.converts(given, declared);
+    if (!isKnown) {
+      return defined;
+    }
+
+    return this.store.unionOf([defined, given]);
+  }
+
+  private updatedTyped(target: Expr, module: int): Type {
+    const type = this.typed(target, undefined, module);
+    const key = this.pathKey(target, module);
+    if (key != undefined) {
+      this.forgetPath(key);
+    }
+
+    return type;
+  }
+
+  private forgetPatterned(target: Expr, module: int): void {
+    switch (target.kind) {
+      case ExprKind.Name:
+      case ExprKind.Member: {
+        const key = this.pathKey(target, module);
+        if (key != undefined) {
+          this.forgetPath(key);
+        }
+
+        return;
+      }
+      case ExprKind.ArrayLit:
+        for (const element of target.elements) {
+          this.forgetPatterned(element.expr, module);
+        }
+
+        return;
+      case ExprKind.ObjectLit:
+        for (const property of target.props) {
+          if (property.form.kind != PropertyKind.Computed) {
+            this.forgetPatterned(property.value, module);
+          }
+        }
+
+        return;
+      case ExprKind.Assign:
+        return this.forgetPatterned(target.target, module);
+      default:
+        return;
+    }
+  }
+
+  private forgetPath(key: string): void {
+    const prefix = key + kDot;
+    const kept = new Map<string, Type>();
+
+    for (const [known, type] of this.facts) {
+      if (known != key && !known.startsWith(prefix)) {
+        kept.set(known, type);
+      }
+    }
+
+    this.facts = kept;
+  }
+
+  private withFact(
+    facts: Map<string, Type>,
+    key: string,
+    type: Type,
+  ): Map<string, Type> {
+    const copy = new Map<string, Type>(facts);
+
+    copy.set(key, type);
+
+    return copy;
+  }
+
+  private forgetLooped(statement: Stmt, module: int): void {
+    const record = this.record(module);
+    if (record == undefined) {
+      return;
+    }
+
+    const scratch: ValueRecord = {
+      uses: record.uses,
+      variables: new Map<int, DeclaredVariable>(),
+      functions: new Map<int, FunctionDecl>(),
+      params: new Map<int, ParamSlot>(),
+      assigned: new Set<int>(),
+      enums: record.enums,
+      classes: record.classes,
+      destinations: new Map<int, Destination[]>(),
+      owners: [],
+      reported: new Set<string>(),
+      errors: [],
+    };
+
+    this.indexStatement(statement, scratch);
+
+    for (const loc of scratch.assigned) {
+      this.forgetPath(`${module} ${loc}`);
+    }
+  }
+
+  private branchesJoined(
+    before: Map<string, Type>,
+    thenStart: Map<string, Type>,
+    thenEnd: Map<string, Type>,
+    elseStart: Map<string, Type>,
+    elseEnd: Map<string, Type>,
+  ): Map<string, Type> {
+    const joined = new Map<string, Type>(before);
+    const keys = new Set<string>(thenEnd.keys());
+
+    for (const key of elseEnd.keys()) {
+      keys.add(key);
+    }
+
+    for (const key of before.keys()) {
+      keys.add(key);
+    }
+
+    for (const key of keys) {
+      const isThenChanged = thenEnd.get(key) != thenStart.get(key);
+      const isElseChanged = elseEnd.get(key) != elseStart.get(key);
+      if (!isThenChanged && !isElseChanged) {
+        continue;
+      }
+
+      const thenType = thenEnd.get(key);
+      const elseType = elseEnd.get(key);
+
+      joined.delete(key);
+
+      if (thenType != undefined && elseType != undefined) {
+        const union = this.store.unionOf([thenType, elseType]);
+
+        joined.set(key, union);
+      }
+    }
+
+    return joined;
+  }
+}

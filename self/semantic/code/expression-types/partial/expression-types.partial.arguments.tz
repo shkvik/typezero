@@ -1,0 +1,290 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  ArrayLitExpr,
+  CallArgument,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import {
+  FunctionParameter,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  kManyArguments,
+  kNoPlace,
+  kOneArgument,
+  kOrMore,
+  kRangeDash,
+} from "../const/expression-types.const.tz";
+import { ArgumentSlot, CallTarget } from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private argumentsCheck(
+    args: CallArgument[],
+    target: CallTarget,
+    module: int,
+  ): boolean {
+    if (target.isLenient) {
+      this.closureArguments(args, target, module);
+
+      return true;
+    }
+
+    const slots = this.argumentSlots(args, module);
+    const params = target.params;
+    const fixed = this.fixedCount(target);
+    const limit = this.spreadLimit(target, fixed, slots.length);
+    const spread = slots.find((slot, index) => slot.spread && index < limit);
+    if (spread != undefined) {
+      this.report(module, spread.expr.loc, Code.SpreadNotRest, kNoDetails);
+      this.looseArguments(args, module);
+
+      return false;
+    }
+
+    const least = this.leastArguments(target);
+    const count = slots.length;
+    const isTooMany = !target.rest && count > params.length;
+    if (count < least || isTooMany) {
+      const word = this.argumentCountText(least, params.length, target.rest);
+      const other = `${count}`;
+
+      this.report(module, target.loc, Code.ArgumentCount, { word, other });
+      this.looseArguments(args, module);
+
+      return true;
+    }
+
+    for (let index = 0; index < fixed; index++) {
+      const slot = slots[index];
+      const param = params[index];
+      if (slot != undefined && param != undefined) {
+        const wanted = this.parameterWanted(param);
+
+        this.argumentCheck(slot, wanted, module);
+      }
+    }
+
+    const restParam = params[fixed];
+    if (target.rest && restParam != undefined) {
+      const rest = slots.slice(fixed);
+
+      this.restCheck(rest, restParam.type, target.loc, module);
+    }
+
+    return true;
+  }
+
+  private closureArguments(
+    args: CallArgument[],
+    target: CallTarget,
+    module: int,
+  ): void {
+    for (let index = 0; index < args.length; index++) {
+      const arg = args[index];
+      const param = target.params[index];
+      if (arg == undefined || param == undefined || arg.spread) {
+        continue;
+      }
+      if (arg.expr.kind != ExprKind.Function) {
+        continue;
+      }
+
+      const wanted = this.definedType(param.type);
+      if (wanted.kind != TypeKind.Function || this.mentionsParameter(wanted)) {
+        continue;
+      }
+
+      const shape = wanted.shape;
+      const params = shape.params;
+      const rest = shape.rest;
+      const result = this.store.plain(TypeKind.Error);
+      const open = this.store.functionOf({ params, rest, result });
+
+      this.typed(arg.expr, open, module);
+    }
+  }
+
+  private parameterWanted(param: FunctionParameter): Type {
+    const type = param.type;
+    if (!param.optional || type.kind == TypeKind.Error) {
+      return type;
+    }
+
+    return this.optional(type);
+  }
+
+  private fixedCount(target: CallTarget): int {
+    if (target.rest) {
+      return target.params.length - 1;
+    }
+
+    return target.params.length;
+  }
+
+  private spreadLimit(target: CallTarget, fixed: int, count: int): int {
+    if (target.rest) {
+      return fixed;
+    }
+
+    return count;
+  }
+
+  private leastArguments(target: CallTarget): int {
+    const fixed = this.fixedCount(target);
+    let least = 0;
+
+    for (let index = 0; index < fixed; index++) {
+      const param = target.params[index];
+      if (param != undefined && !param.optional) {
+        least += 1;
+      }
+    }
+
+    return least;
+  }
+
+  private argumentCountText(least: int, most: int, rest: boolean): string {
+    const range = this.countRange(least, most, rest);
+
+    if (least == 1 && most == 1 && !rest) {
+      return range + kOneArgument;
+    }
+
+    return range + kManyArguments;
+  }
+
+  private countRange(least: int, most: int, rest: boolean): string {
+    if (rest) {
+      return `${least}${kOrMore}`;
+    }
+    if (most != least) {
+      return `${least}${kRangeDash}${most}`;
+    }
+
+    return `${least}`;
+  }
+
+  private argumentSlots(args: CallArgument[], module: int): ArgumentSlot[] {
+    const slots: ArgumentSlot[] = [];
+
+    for (const arg of args) {
+      const items = this.spreadItems(arg, module);
+      if (items == undefined) {
+        slots.push({ expr: arg.expr, spread: arg.spread });
+
+        continue;
+      }
+
+      for (const item of items) {
+        slots.push({ expr: arg.expr, spread: false, element: item });
+      }
+    }
+
+    return slots;
+  }
+
+  private spreadItems(arg: CallArgument, module: int): Type[] | undefined {
+    const expr = arg.expr;
+    if (!arg.spread || expr.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const target = this.targetOfName(expr, module);
+    const isValue =
+      target != undefined &&
+      (target.kind == SymbolKind.Variable ||
+        target.kind == SymbolKind.Parameter);
+    if (!isValue) {
+      return undefined;
+    }
+
+    const type = this.typed(expr, undefined, module);
+    const isFixed =
+      type.kind == TypeKind.Tuple &&
+      type.rest < 0 &&
+      type.required == type.items.length;
+    if (!isFixed || type.kind != TypeKind.Tuple) {
+      return undefined;
+    }
+
+    return type.items;
+  }
+
+  private argumentCheck(slot: ArgumentSlot, to: Type, module: int): void {
+    const element = slot.element;
+    if (element != undefined) {
+      return this.coerce(slot.expr, element, to, module, kNoPlace);
+    }
+    if (to.kind == TypeKind.Error) {
+      this.typed(slot.expr, undefined, module);
+
+      return;
+    }
+
+    this.checked(slot.expr, to, module, kNoPlace);
+  }
+
+  private restCheck(
+    slots: ArgumentSlot[],
+    to: Type,
+    loc: int,
+    module: int,
+  ): void {
+    if (to.kind == TypeKind.Error) {
+      for (const slot of slots) {
+        this.typed(slot.expr, undefined, module);
+      }
+
+      return;
+    }
+
+    const isExpanded = slots.some((slot) => slot.element != undefined);
+    if (isExpanded) {
+      return this.restSlotsCheck(slots, to, module);
+    }
+
+    const first = slots[0];
+    const elements = slots.map((slot) => ({
+      expr: slot.expr,
+      spread: slot.spread,
+      hole: false,
+    }));
+    const literal: ArrayLitExpr = {
+      kind: ExprKind.ArrayLit,
+      loc: first?.expr.loc ?? loc,
+      elements,
+    };
+
+    this.checked(literal, to, module, kNoPlace);
+  }
+
+  private restSlotsCheck(slots: ArgumentSlot[], to: Type, module: int): void {
+    const item = this.restItem(to);
+
+    for (const slot of slots) {
+      if (slot.spread) {
+        this.checked(slot.expr, to, module, kNoPlace);
+      } else {
+        this.argumentCheck(slot, item, module);
+      }
+    }
+  }
+
+  private restItem(to: Type): Type {
+    if (to.kind == TypeKind.Array) {
+      return to.item;
+    }
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private looseArguments(args: CallArgument[], module: int): void {
+    for (const arg of args) {
+      this.typed(arg.expr, undefined, module);
+    }
+  }
+}

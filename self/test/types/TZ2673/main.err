@@ -1,0 +1,3 @@
+main.tz:11:19: error TZ2673: type 'int | undefined' is not assignable to type 'int'; the value may be undefined: check it first (e.g. 'x != undefined') or give a default with '??'
+const kept: int = found;
+                  ^

@@ -1,0 +1,6 @@
+// Only a function is called.
+const count = 1;
+const text = "abc";
+
+const a = count();
+const b = text(1);

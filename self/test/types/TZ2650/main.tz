@@ -1,0 +1,19 @@
+// A value that may be undefined is checked before its fields are read.
+type Shape = {
+  side: int;
+  name?: string;
+  scale: (n: int) => int;
+  run?: () => int;
+};
+
+function find(flag: boolean): Shape | undefined {
+  if (flag) {
+    return { side: 1, scale: (n: int) => n };
+  }
+
+  return undefined;
+}
+
+const found = find(true);
+const side = found.side;
+const safe = found?.side;

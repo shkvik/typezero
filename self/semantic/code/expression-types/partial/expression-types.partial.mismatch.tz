@@ -12,6 +12,7 @@ import {
 import {
   kConversionPrefix,
   kIntervalSeparator,
+  kIteratorKey,
   kManyLiterals,
   kUnnamedOperand,
 } from "../const/expression-types.const.tz";
@@ -39,8 +40,8 @@ partial class ExpressionTypes {
 
     const first = this.text.of(given);
     const second = this.text.of(wanted);
-    const word = this.mismatchWord(expr, code, target, intervals);
-    const other = this.mismatchOther(code, holds, only);
+    const word = this.mismatchWord(expr, code, source, target, intervals);
+    const other = this.mismatchOther(code, holds, only, target);
 
     this.report(module, expr.loc, code, {
       first,
@@ -75,6 +76,15 @@ partial class ExpressionTypes {
     }
     if (source.kind == TypeKind.Tuple && target.kind == TypeKind.Array) {
       return Code.TupleNotArray;
+    }
+    if (this.isOtherClass(source, target)) {
+      return this.classCode(target);
+    }
+    if (this.isMaybeFitting(given, wanted)) {
+      return Code.OptionalNotAssignable;
+    }
+    if (this.isFunctionPair(given, wanted)) {
+      return Code.FunctionsMismatch;
     }
 
     const value = this.definedType(given);
@@ -192,6 +202,9 @@ partial class ExpressionTypes {
     wanted: Type,
     code: Code,
   ): boolean {
+    if (this.isIterableTarget(wanted)) {
+      return false;
+    }
     if (this.isFresh(expr) || this.isCertain(code)) {
       return true;
     }
@@ -238,6 +251,88 @@ partial class ExpressionTypes {
     }
   }
 
+  private isIterableTarget(wanted: Type): boolean {
+    const defined = this.definedType(wanted);
+    const parts = this.unionMembers(defined);
+
+    return parts.some(
+      (part) =>
+        part.kind == TypeKind.Object &&
+        part.fields.some((field) => field.name == kIteratorKey),
+    );
+  }
+
+  private isOtherClass(source: Type, target: Type): boolean {
+    if (
+      source.kind != TypeKind.Instance ||
+      this.isLibraryModule(source.module)
+    ) {
+      return false;
+    }
+
+    const chain = this.ancestorsOf(source);
+
+    if (target.kind == TypeKind.Object) {
+      return chain.every((one) => one.kind == TypeKind.Instance);
+    }
+    if (target.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    return !chain.some((one) => this.isSameClass(one, target));
+  }
+
+  private isSameClass(first: Type, second: Type): boolean {
+    if (first.kind != TypeKind.Instance || second.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    return first.module == second.module && first.loc == second.loc;
+  }
+
+  private ancestorsOf(type: Type): Type[] {
+    const chain: Type[] = [type];
+
+    for (let index = 0; index < chain.length; index++) {
+      const current = chain[index];
+      if (current == undefined) {
+        break;
+      }
+
+      for (const parent of this.store.parentsOf(current)) {
+        if (!chain.includes(parent)) {
+          chain.push(parent);
+        }
+      }
+    }
+
+    return chain;
+  }
+
+  private isFunctionPair(given: Type, wanted: Type): boolean {
+    const goal = this.definedType(wanted);
+
+    return given.kind == TypeKind.Function && goal.kind == TypeKind.Function;
+  }
+
+  private isMaybeFitting(given: Type, wanted: Type): boolean {
+    if (!this.isOptional(given) || this.isOptional(wanted)) {
+      return false;
+    }
+
+    const defined = this.definedType(given);
+
+    return this.relation.converts(defined, wanted);
+  }
+
+  private classCode(target: Type): Code {
+    if (target.kind == TypeKind.Instance) {
+      return Code.ClassNotExtended;
+    }
+
+    return Code.ClassNotImplemented;
+  }
+
   private isCertain(code: Code): boolean {
     switch (code) {
       case Code.LiteralNotInstance:
@@ -245,6 +340,10 @@ partial class ExpressionTypes {
       case Code.JsonUnchecked:
       case Code.NotAnObject:
       case Code.ObjectIntoJson:
+      case Code.ClassNotExtended:
+      case Code.ClassNotImplemented:
+      case Code.OptionalNotAssignable:
+      case Code.FunctionsMismatch:
         return true;
       default:
         return false;
@@ -264,12 +363,16 @@ partial class ExpressionTypes {
   private mismatchWord(
     expr: Expr,
     code: Code,
+    source: Type,
     target: Type,
     intervals: Interval[],
   ): string {
     switch (code) {
       case Code.LiteralNotInstance:
+      case Code.ClassNotImplemented:
         return this.text.of(target);
+      case Code.ClassNotExtended:
+        return this.text.of(source);
       case Code.ObjectIntoTaggedUnion:
         return this.sharedTag(target) ?? "";
       case Code.ValueOutsideRange:
@@ -279,9 +382,17 @@ partial class ExpressionTypes {
     }
   }
 
-  private mismatchOther(code: Code, holds: string, only: Type): string {
+  private mismatchOther(
+    code: Code,
+    holds: string,
+    only: Type,
+    target: Type,
+  ): string {
     if (code == Code.LiteralOutsideRange || code == Code.ValueOutsideRange) {
       return holds;
+    }
+    if (code == Code.ClassNotExtended) {
+      return this.text.of(target);
     }
 
     return this.conversionName(only);

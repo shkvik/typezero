@@ -1,0 +1,7 @@
+main.tz
+  2:6 type Circle = { kind: "circle"; radius: int }
+  3:6 type Square = { kind: "square"; side: int }
+  4:6 type Shape = Circle | Square
+  6:10 make: () => Circle | Square
+  10:7 shape: Circle | Square
+  12:7 kind: "circle" | "square"

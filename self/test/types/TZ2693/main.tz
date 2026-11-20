@@ -1,0 +1,12 @@
+// A class has only the static members it declares.
+class Registry {
+  public static count: int = 0;
+
+  public static make(): Registry {
+    return new Registry();
+  }
+}
+
+const count = Registry.count;
+const made = Registry.make();
+const missing = Registry.total;

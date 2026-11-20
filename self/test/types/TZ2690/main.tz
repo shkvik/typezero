@@ -1,0 +1,12 @@
+// A function goes where a function of exactly its type is expected.
+function each(items: int[], action: (n: int) => void): void {
+  for (const item of items) {
+    action(item);
+  }
+}
+
+const both = (n: int, m: int) => n + m;
+const one = (n: int) => n;
+
+each([1], both);
+each([1], (n) => one(n));

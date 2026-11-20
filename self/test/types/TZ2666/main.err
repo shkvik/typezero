@@ -1,0 +1,3 @@
+main.tz:11:21: error TZ2666: 'Circle | Square' has no field 'color'
+const color = shape.color;
+                    ^

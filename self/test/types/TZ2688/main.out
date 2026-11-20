@@ -1,0 +1,3 @@
+main.tz
+  2:10 check: (int) => Result<int, string>
+  10:16 checked: (int) => Promise<Result<int, string>>

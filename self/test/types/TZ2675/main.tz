@@ -1,0 +1,9 @@
+// The right side of '&&' and '||' gives a value.
+function log(): void {
+  const kept = 1;
+}
+
+const flag = true;
+
+flag && log();
+flag || log();

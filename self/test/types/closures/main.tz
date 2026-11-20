@@ -1,0 +1,59 @@
+// An arrow and a function expression have function types: parameters from
+// their annotations or from where they go, the result written or the common
+// type of their returns. A closure made after a check of a const sees it.
+type Handler = (n: int, label: string) => string;
+
+function apply(f: (n: int) => int, n: int): int {
+  return f(n);
+}
+
+function run(h: Handler): string {
+  return h(1, "a");
+}
+
+function each(items: int[], action: (n: int) => void): void {
+  for (const item of items) {
+    action(item);
+  }
+}
+
+const double = (n: int) => n * 2;
+const shout = (s: string): string => s.toUpperCase();
+const nothing = () => {};
+const later = async (n: int) => n;
+const block = (n: int) => {
+  if (n > 0) {
+    return "plus";
+  }
+
+  return "minus";
+};
+const fixed: (n: int) => int = (n) => n + 1;
+const named = function (n: int) {
+  return n;
+};
+const kept: int[] = [];
+const applied = apply((n) => n * 3, 2);
+const ran = run((n, label) => label);
+const short = run((n) => "x");
+const ignored: (n: int) => void = (n) => n * 2;
+
+each([1, 2], (n) => kept.push(n));
+
+function maybe(flag: boolean): int | undefined {
+  if (flag) {
+    return 1;
+  }
+
+  return undefined;
+}
+
+const found = maybe(true);
+
+if (found != undefined) {
+  const next = () => found + 1;
+}
+
+const listed = [3, 1, 2];
+
+listed.forEach((n) => kept.push(n * 2));

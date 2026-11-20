@@ -1,0 +1,3 @@
+// A written parameter type of an arrow is the one the arrow gets.
+const widen: (x: double) => double = (x: int) => x;
+const same: (x: double) => double = (x: double) => x * 2.0;

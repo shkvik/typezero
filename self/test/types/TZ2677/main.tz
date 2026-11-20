@@ -1,0 +1,19 @@
+// An assignment is no condition; to test the value, compare it.
+function next(): string | undefined {
+  return "a";
+}
+
+function count(): int {
+  return 1;
+}
+
+let line: string | undefined = undefined;
+let total = 0;
+
+if ((line = next())) {
+  const a = 1;
+}
+
+if ((total = count())) {
+  const b = 1;
+}

@@ -54,6 +54,8 @@ partial class ExpressionTypes {
         return this.unaryConstant(expr);
       case ExprKind.Binary:
         return this.folded.get(expr);
+      case ExprKind.Member:
+        return this.enumConstant(expr, module);
       default:
         return undefined;
     }
@@ -104,6 +106,8 @@ partial class ExpressionTypes {
         return true;
       case ExprKind.Name:
         return this.doorOfName(expr, module)?.isWhole == true;
+      case ExprKind.Member:
+        return this.enumConstant(expr, module) != undefined;
       case ExprKind.Unary:
         return this.isSign(expr.op) && this.isWholeTree(expr.operand, module);
       case ExprKind.Binary:

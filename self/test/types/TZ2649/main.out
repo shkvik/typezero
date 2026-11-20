@@ -1,0 +1,5 @@
+main.tz
+  2:7 text: string
+  3:7 list: int[]
+  7:7 c: int
+  8:7 d: int

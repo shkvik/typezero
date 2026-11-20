@@ -1,0 +1,5 @@
+main.tz
+  2:6 type Shape = { side: int; name?: string; scale: (int) => int; run?: () => int }
+  9:10 find: (boolean) => Shape | undefined
+  17:7 found: Shape | undefined
+  19:7 safe: int | undefined

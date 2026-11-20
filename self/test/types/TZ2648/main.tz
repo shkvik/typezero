@@ -1,0 +1,7 @@
+// An object inherits nothing from Object.prototype.
+type Point = { x: int; y: int };
+
+const point: Point = { x: 1, y: 2 };
+const text = point.toString;
+const value = point.valueOf;
+const x = point.x;

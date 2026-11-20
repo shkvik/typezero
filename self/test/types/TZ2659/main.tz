@@ -1,0 +1,21 @@
+// A function that may be undefined is checked before it is called.
+type Shape = {
+  side: int;
+  name?: string;
+  scale: (n: int) => int;
+  run?: () => int;
+};
+
+function pick(flag: boolean): ((n: int) => int) | undefined {
+  if (flag) {
+    return (n: int) => n;
+  }
+
+  return undefined;
+}
+
+const shape: Shape = { side: 1, scale: (n: int) => n };
+const handler = pick(true);
+const a = shape.run();
+const b = handler(1);
+const c = shape.run?.();

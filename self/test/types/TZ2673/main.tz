@@ -1,0 +1,12 @@
+// A value that may be undefined is checked before it goes where it may not.
+function find(flag: boolean): int | undefined {
+  if (flag) {
+    return 1;
+  }
+
+  return undefined;
+}
+
+const found = find(true);
+const kept: int = found;
+const safe: int = found ?? 0;

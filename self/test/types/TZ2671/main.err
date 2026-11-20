@@ -1,0 +1,3 @@
+main.tz:20:22: error TZ2671: type 'Dog' is not assignable to type 'Cat'; classes are told apart by their names, whatever their fields, and 'Dog' does not extend 'Cat'
+const cat: Cat = new Dog("rex");
+                     ^

@@ -1,0 +1,4 @@
+main.tz
+  2:10 check: (int) => Result<int, string>
+  12:7 kept: Result<int, string>
+  13:7 fine: boolean

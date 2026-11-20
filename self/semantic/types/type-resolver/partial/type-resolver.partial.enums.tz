@@ -52,22 +52,39 @@ partial class TypeResolver {
     return whole;
   }
 
+  public enumMember(decl: EnumDecl, name: string): EnumStep | undefined {
+    const index = decl.members.findIndex((each) => each.name == name);
+    if (index < 0) {
+      return undefined;
+    }
+
+    const steps = this.enumSteps(decl);
+
+    return steps[index];
+  }
+
   private enumValues(decl: EnumDecl): Type[] {
-    const values: Type[] = [];
+    const steps = this.enumSteps(decl);
+
+    return steps.map((step) => step.type);
+  }
+
+  private enumSteps(decl: EnumDecl): EnumStep[] {
+    const steps: EnumStep[] = [];
     let next: int | undefined = 0;
 
     for (const member of decl.members) {
       const step = this.enumStep(member.init, next);
       const number = step.number;
 
-      values.push(step.type);
+      steps.push(step);
       next = undefined;
       if (number != undefined) {
         next = number + 1;
       }
     }
 
-    return values;
+    return steps;
   }
 
   private enumStep(init: Expr | undefined, next: int | undefined): EnumStep {

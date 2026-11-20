@@ -1,0 +1,69 @@
+// A member of a value: a field of an object, a field or a method of a class
+// instance, a member of an enum, the length of a string, an array or a tuple.
+// '?.' gives undefined when the value is undefined.
+type Shape = { side: int; name?: string; scale: (n: int) => int };
+type Pair = [string, int];
+
+enum Color {
+  Red,
+  Green,
+}
+
+enum Word {
+  Up = "up",
+  Down = "down",
+}
+
+class Point {
+  public x: int;
+  public readonly y: double;
+
+  public constructor(x: int, y: double) {
+    this.x = x;
+    this.y = y;
+  }
+
+  public length(): double {
+    return this.y;
+  }
+}
+
+class Point3 extends Point {
+  public z: int;
+
+  public constructor() {
+    super(1, 2.5);
+    this.z = 3;
+  }
+}
+
+function find(flag: boolean): Shape | undefined {
+  if (flag) {
+    return { side: 1, scale: (n: int) => n };
+  }
+
+  return undefined;
+}
+
+const shape: Shape = { side: 1, scale: (n: int) => n };
+const pair: Pair = ["a", 1];
+const point = new Point(1, 2.5);
+const deep = new Point3();
+const found = find(true);
+
+const red = Color.Red;
+const up = Word.Up;
+const small: int8 = Color.Green;
+const side = shape.side;
+const name = shape.name;
+const scale = shape.scale;
+const size = pair.length;
+const x = point.x;
+const y = point.y;
+const method = point.length;
+const inherited = deep.x;
+const own = deep.z;
+const text = "abc".length;
+const items = [1, 2].length;
+const maybe = found?.side;
+const chained = found?.name?.length;
