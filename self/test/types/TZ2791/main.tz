@@ -1,0 +1,19 @@
+// A field declared again keeps the access of the parent.
+class Animal {
+  name: string;
+
+  constructor() {
+    this.name = "a";
+  }
+}
+
+class Hidden extends Animal {
+  protected name: string;
+
+  constructor() {
+    super();
+    this.name = "h";
+  }
+}
+
+const hidden = new Hidden();

@@ -1,0 +1,6 @@
+main.tz:5:1: error TZ2865: 'delete' removes a property of the Map object in JavaScript, not an entry; remove one with 'm.delete(key)'
+delete m["a"];
+^
+main.tz:6:1: error TZ2865: 'delete' removes a property of the Set object in JavaScript, not an entry; remove one with 's.delete(value)'
+delete s[0];
+^

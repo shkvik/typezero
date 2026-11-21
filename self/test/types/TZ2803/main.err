@@ -1,0 +1,3 @@
+main.tz:4:27: error TZ2803: 'int' is not an interface; an interface extends object types, such as 'interface Named { name: string }'
+interface Counted extends Count {
+                          ^

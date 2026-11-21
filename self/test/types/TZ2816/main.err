@@ -1,0 +1,3 @@
+main.tz:12:14: error TZ2816: 'check' returns a Result that 'forEach' drops, so an error in it would go unchecked; pass an arrow that handles it, e.g. with '.match(...)'
+nums.forEach(check);
+             ^

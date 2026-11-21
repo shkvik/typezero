@@ -1,0 +1,3 @@
+main.tz:8:20: error TZ2852: 'for...of' resumes each 'yield' of 'Generator<string, void, string>' without a value, but it expects 'string' from next(x); call next(x) yourself, or let the generator take 'string | undefined'
+for (const said of talk()) {
+                   ^

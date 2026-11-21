@@ -1,0 +1,4 @@
+// A Set adds values and checks them.
+const s = new Set<int>();
+
+console.log(s.get(1));

@@ -1,0 +1,3 @@
+main.tz:2:23: error TZ2799: there is no 'ReferenceError' in tz: an error is a value; make 'MyError' a type of object with a tag, e.g. 'type MyError = { code: "MyError"; message: string }'
+class MyError extends ReferenceError {}
+                      ^

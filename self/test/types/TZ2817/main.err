@@ -1,0 +1,3 @@
+main.tz:8:14: error TZ2817: 'save' returns a Promise that 'forEach' drops, so nothing waits for it to finish; loop with 'for (const x of xs) await f(x)', or wait for all with 'await Promise.all(xs.map(...))'
+nums.forEach(save);
+             ^

@@ -1,0 +1,3 @@
+main.tz:2:36: error TZ2841: an expression of type 'void' cannot be the value of field 'nothing'
+const nothing = { nothing: console.log() };
+                                   ^

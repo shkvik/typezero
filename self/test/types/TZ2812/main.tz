@@ -1,0 +1,7 @@
+// A callback takes what the method passes.
+function shout(text: string): string {
+  return text;
+}
+
+const nums = [1, 2, 3];
+const loud = nums.map(shout);

@@ -1,0 +1,3 @@
+main.tz:4:3: error TZ2864: the size of a Set cannot be assigned to; add elements with 's.add(value)'
+s.size = 3;
+  ^

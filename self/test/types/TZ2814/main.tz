@@ -1,0 +1,7 @@
+// A callback needs no more arguments than the method passes.
+function triple(n: int, i: int, all: int[], extra: int): int {
+  return n * 3 + i + all.length + extra;
+}
+
+const nums = [1, 2, 3];
+const tripled = nums.map(triple);

@@ -1,0 +1,3 @@
+main.tz:11:3: error TZ2793: 'label' is a field of 'Parent', so a class that extends it cannot have a method of that name
+  label(): string {
+  ^

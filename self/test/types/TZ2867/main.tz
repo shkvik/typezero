@@ -1,0 +1,5 @@
+// Object.keys of a Map or a Set is always empty.
+const m = new Map<string, int>();
+const s = new Set<int>();
+
+console.log(Object.keys(m), Object.entries(s));

@@ -1,0 +1,4 @@
+// A Set has no elements by position.
+const s = new Set<int>();
+
+s[0] = 1;

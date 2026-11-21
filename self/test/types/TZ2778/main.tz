@@ -1,0 +1,42 @@
+// A constructor sets every field on every path that reaches its end.
+class Branchy {
+  x: int;
+
+  constructor(flag: boolean) {
+    if (flag) {
+      this.x = 1;
+    }
+  }
+}
+
+class Returns {
+  x: int;
+
+  constructor(flag: boolean) {
+    if (flag) {
+      this.x = 1;
+
+      return;
+    }
+
+    return;
+  }
+}
+
+class Switched {
+  x: int;
+
+  constructor(k: int) {
+    switch (k) {
+      case 1:
+        this.x = 1;
+        break;
+      default:
+        this.x = 2;
+    }
+  }
+}
+
+const branchy = new Branchy(true);
+const returns = new Returns(true);
+const switched = new Switched(1);

@@ -1,0 +1,3 @@
+main.tz:3:17: error TZ2857: property 'length' does not exist on type 'Map<string, int>'; the number of entries is 'm.size'
+const count = m.length;
+                ^

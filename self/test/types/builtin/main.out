@@ -55,4 +55,5 @@ main.tz
   66:10 sum: (...double[]) => double
   70:10 isText: (unknown) => boolean
   74:11 talking: () => Generator<int, string, boolean>
+  75:9 more: boolean
   80:16 load: (string) => Promise<Result<string, string>>

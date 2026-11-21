@@ -1,0 +1,6 @@
+// A generator without a written type yields something.
+function* empty() {
+  return;
+}
+
+const none = empty();

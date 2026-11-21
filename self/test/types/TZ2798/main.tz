@@ -1,0 +1,32 @@
+// Nor through the methods it calls.
+class Widget {
+  size: int;
+
+  constructor() {
+    this.size = 1;
+    this.refresh();
+  }
+
+  refresh(): void {
+    this.layout();
+  }
+
+  layout(): void {
+    console.log(this.size);
+  }
+}
+
+class Button extends Widget {
+  label: string;
+
+  constructor() {
+    super();
+    this.label = "b";
+  }
+
+  layout(): void {
+    console.log(this.label);
+  }
+}
+
+const button = new Button();

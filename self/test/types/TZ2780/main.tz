@@ -1,0 +1,11 @@
+// A class whose parent has a constructor gets no empty values.
+class Parent {
+  constructor(public id: int) {}
+}
+
+class Child extends Parent {
+  size: int;
+  label?: string;
+}
+
+const child = new Child(1);

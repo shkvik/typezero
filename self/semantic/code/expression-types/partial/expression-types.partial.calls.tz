@@ -59,6 +59,8 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
+    this.stringCallCheck(expr, callee, module);
+
     const target = this.targetOfName(callee, module);
     if (target == undefined) {
       return this.store.plain(TypeKind.Error);
@@ -68,6 +70,8 @@ partial class ExpressionTypes {
     if (isLibrary && target.kind != SymbolKind.Function) {
       return this.store.plain(TypeKind.Error);
     }
+
+    this.earlyCallCheck(expr, callee, target, module);
 
     switch (target.kind) {
       case SymbolKind.Function:
@@ -362,6 +366,12 @@ partial class ExpressionTypes {
     if (this.thisPlaceCheck(member, module)) {
       return this.store.plain(TypeKind.Error);
     }
+    if (this.callReadEarly(member, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.noteSelfCall(member, module);
+
     if (this.isSuperName(member.object, module)) {
       return this.superMethodCall(expr, member, wanted, module);
     }
@@ -405,6 +415,8 @@ partial class ExpressionTypes {
         return this.parameterCall(expr, member, object, wanted, module);
       case TypeKind.Tuple:
         return this.tupleCall(expr, member, object, module);
+      case TypeKind.Function:
+        return this.functionMemberCall(member, object, module);
       case TypeKind.Promise:
         if (this.promiseMisuse(expr, member, object, module)) {
           return this.store.plain(TypeKind.Error);
@@ -457,7 +469,28 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
+    const plan = this.callbackPlan(expr, member, object);
+
+    if (this.iteratorCallCheck(member, object, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.dictMemberCheck(member, object, true, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (!this.tupleCalls.has(expr)) {
+      this.arrayTextCheck(member, object, module);
+      this.arraySortCheck(expr, member, object, module);
+    }
+
+    if (plan != undefined) {
+      this.callbackArgumentsCheck(expr, plan, module);
+    }
+
     const found = this.libraryCall(expr, member, object, wanted, module);
+
+    if (plan != undefined) {
+      this.callbackResultCheck(expr, plan, module);
+    }
 
     return found ?? this.store.plain(TypeKind.Error);
   }

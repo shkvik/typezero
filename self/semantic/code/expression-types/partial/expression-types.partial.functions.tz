@@ -468,7 +468,12 @@ partial class ExpressionTypes {
     const inner = this.innerResult(result, fn);
     const frame = this.frameOf(fn, inner);
 
+    this.enterGenerator(frame, result);
+    this.initStart(fn);
     this.walkStatements(body.body, frame, module);
+    this.initEnd(fn, body, module);
+    this.leaveGenerator(frame);
+    this.writtenResultCheck(fn, result, frame, module);
 
     const isOpen =
       inner.kind == TypeKind.Void ||
@@ -528,7 +533,11 @@ partial class ExpressionTypes {
     const frame = this.frameOf(fn, undefined);
 
     this.facts = new Map<string, Type>();
+    this.enterGenerator(frame, undefined);
+    this.initStart(fn);
     this.walkStatements(body.body, frame, module);
+    this.initEnd(fn, body, module);
+    this.leaveGenerator(frame);
 
     return frame;
   }
@@ -538,6 +547,10 @@ partial class ExpressionTypes {
     frame: FunctionFrame,
     module: int,
   ): Type {
+    const generator = frame.generator;
+    if (generator != undefined) {
+      return this.generatorResult(fn, frame, generator, module);
+    }
     if (fn.isGenerator) {
       return this.store.plain(TypeKind.Error);
     }
@@ -628,6 +641,7 @@ partial class ExpressionTypes {
     fn: FunctionDecl,
     returns: ReturnedValue[],
     module: int,
+    code: Code = Code.ReturnsDiffer,
   ): Type | undefined {
     const ordered = this.literalsLast(returns, module);
     let common: Type | undefined = undefined;
@@ -650,11 +664,9 @@ partial class ExpressionTypes {
         const first = this.text.of(one.type);
         const second = this.text.of(common);
 
-        this.report(module, one.value.loc, Code.ReturnsDiffer, {
-          word,
-          first,
-          second,
-        });
+        const at = this.yieldOf.get(one.value) ?? one.value.loc;
+
+        this.report(module, at, code, { word, first, second });
 
         return this.store.plain(TypeKind.Error);
       }

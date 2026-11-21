@@ -1,0 +1,9 @@
+main.tz:7:3: error TZ2779: field 'at' has no value to start with: 'Date' has no empty value, like "" or 0; set it in a constructor, or make it optional: 'at?: Date'
+  at: Date;
+  ^
+main.tz:14:3: error TZ2779: field 'either' has no value to start with: 'int | string' has no empty value, like "" or 0; set it in a constructor, or make it optional: 'either?: int | string'
+  either: int | string;
+  ^
+main.tz:15:3: error TZ2779: field 'tuple' has no value to start with: '[int, string]' has no empty value, like "" or 0; set it in a constructor, or make it optional: 'tuple?: [int, string]'
+  tuple: [int, string];
+  ^

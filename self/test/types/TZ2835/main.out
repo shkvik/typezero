@@ -1,0 +1,4 @@
+main.tz
+  2:6 type Point = { x: int; y: int }
+  4:7 points: Point[]
+  5:7 sorted: Point[]

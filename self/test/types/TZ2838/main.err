@@ -1,0 +1,6 @@
+main.tz:8:10: error TZ2838: cannot assign to 'port' because it is a read-only field of 'Settings'
+settings.port = 8080;
+         ^
+main.tz:9:10: error TZ2838: cannot assign to 'port' because it is a read-only field of 'Settings'
+settings.port++;
+         ^

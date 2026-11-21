@@ -1,0 +1,9 @@
+main.tz:4:26: error TZ2807: 'parseInt' would also get the index as its second argument: 'map' calls it with (value, index, array); pass only what it needs: 'x => parseInt(x)'
+const parsed = texts.map(parseInt);
+                         ^
+main.tz:5:31: error TZ2807: 'Math.max' would also get the index as its second argument: 'map' calls it with (value, index, array); pass only what it needs: 'x => Math.max(x)'
+const biggest = nums.map(Math.max);
+                              ^
+main.tz:6:22: error TZ2807: 'console.log' would also get the index as its second argument: 'forEach' calls it with (value, index, array); pass only what it needs: 'x => console.log(x)'
+nums.forEach(console.log);
+                     ^

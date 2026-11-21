@@ -1,0 +1,3 @@
+main.tz
+  2:11 asks: () => Generator<int>
+  8:7 asked: Generator<int>

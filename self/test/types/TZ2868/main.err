@@ -1,0 +1,3 @@
+main.tz:4:17: error TZ2868: 'for...in' walks the properties of an object, and a Map has none in JavaScript; walk its keys with 'for (const x of m.keys())'
+for (const k in m) {
+                ^

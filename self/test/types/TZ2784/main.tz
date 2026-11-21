@@ -1,0 +1,18 @@
+// A method is called once the constructor has set every field.
+class User {
+  name: string;
+  email: string;
+
+  constructor(name: string) {
+    this.name = name;
+    this.log();
+    this.email = name;
+    this.log();
+  }
+
+  log(): void {
+    console.log(this.name, this.email);
+  }
+}
+
+const user = new User("a");

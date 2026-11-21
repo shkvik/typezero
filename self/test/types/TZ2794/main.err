@@ -1,0 +1,3 @@
+main.tz:7:3: error TZ2794: 'onClick' is an arrow in a field of 'Parent', which each object holds itself in JavaScript, so a method of a class that extends it would never run; override it with a field too: 'onClick = (...) => ...'
+  onClick(): int {
+  ^

@@ -1,0 +1,7 @@
+// 'filter' takes a function that returns boolean.
+function half(n: int): double {
+  return n.toDouble() / 2.0;
+}
+
+const nums = [1, 2, 3];
+const halves = nums.filter(half);

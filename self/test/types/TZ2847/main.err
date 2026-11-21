@@ -1,0 +1,3 @@
+main.tz:4:10: error TZ2847: 'yield*' needs an array, a string or an iterator, found 'int'
+  yield* 5;
+         ^

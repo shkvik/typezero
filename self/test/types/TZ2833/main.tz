@@ -1,0 +1,3 @@
+// Sorting Json values needs a comparison function.
+const values: Json[] = [1, "a"];
+const sorted = values.sort();

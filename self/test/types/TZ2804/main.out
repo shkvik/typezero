@@ -1,0 +1,3 @@
+main.tz
+  6:11 type Owner = { pet: Animal; port: int }
+  11:11 type DogOwner = { pet: Dog; port: double }

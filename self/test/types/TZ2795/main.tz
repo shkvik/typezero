@@ -1,0 +1,2 @@
+// A class does not extend itself.
+class Loop extends Loop {}

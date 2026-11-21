@@ -1,0 +1,3 @@
+main.tz:3:23: error TZ2828: unknown values cannot be converted to strings: one may hold an object; map them to text first, e.g. 'a.map(x => typeof x == "string" ? x : "?").join()'
+const joined = values.join(", ");
+                      ^

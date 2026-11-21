@@ -1,0 +1,16 @@
+// A method of a class does not take the name of a field of its parent.
+class Parent {
+  label: string;
+
+  constructor() {
+    this.label = "p";
+  }
+}
+
+class Child extends Parent {
+  label(): string {
+    return "c";
+  }
+}
+
+const child = new Child();

@@ -1,0 +1,5 @@
+// 'call', 'apply' and 'bind' set 'this', which a function value does not need.
+const inc = (x: int) => x + 1;
+
+inc.call(undefined, 1);
+inc.bind(undefined);

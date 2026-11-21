@@ -97,7 +97,7 @@ partial class ScopeTraversal {
 
     this.scopes.open();
     this.declareTypeParams(decl.typeParams);
-    this.traverseBase(decl.base);
+    this.traverseBase(decl.base, decl.name ?? "");
     this.traverseOptionalExpr(decl.baseExpr);
     this.traverseTypes(decl.baseArgs);
     this.traverseTypes(decl.interfaces);
@@ -147,7 +147,7 @@ partial class ScopeTraversal {
     this.scopes.enterFunction();
 
     this.declareTypeParams(decl.typeParams);
-    this.traverseBase(decl.base);
+    this.traverseBase(decl.base, decl.name);
     this.traverseTypes(decl.implemented);
 
     for (const member of decl.members) {
@@ -174,9 +174,15 @@ partial class ScopeTraversal {
     this.scopes.close();
   }
 
-  private traverseBase(base: TypeRef | undefined): void {
+  private traverseBase(base: TypeRef | undefined, owner: string): void {
     if (base == undefined) {
       return;
+    }
+    if (this.isErrorClassBase(base.name)) {
+      return this.report(base.loc, Code.ErrorClassBase, {
+        word: base.name,
+        first: owner,
+      });
     }
     if (this.isValueName(base.name)) {
       this.useValue(base.name, base.loc);

@@ -1,0 +1,3 @@
+main.tz:3:22: error TZ2834: sorting dates needs a comparison function: 'sort()' without one compares the texts of toString(), 'Thu Feb 29 2024 ...', which puts them in the order of the names of the days; pass one: 'sort((a, b) => a.getTime() - b.getTime())'
+const sorted = dates.sort();
+                     ^

@@ -1,0 +1,12 @@
+// A field of a class does not take the name of a method of its parent.
+class Animal {
+  speak(): string {
+    return "...";
+  }
+}
+
+class Fish extends Animal {
+  speak: int;
+}
+
+const fish = new Fish();

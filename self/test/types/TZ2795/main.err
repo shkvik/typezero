@@ -1,0 +1,3 @@
+main.tz:2:20: error TZ2795: class 'Loop' cannot extend itself
+class Loop extends Loop {}
+                   ^

@@ -1,0 +1,3 @@
+main.tz:11:3: error TZ2790: 'secret' is private in class 'Animal', so a class that extends it cannot declare it again
+  secret: int;
+  ^

@@ -1,0 +1,3 @@
+main.tz:3:12: error TZ2789: 'override' says that 'x' is a field of the class that 'Lone' extends, and it extends none
+  override x: int;
+           ^

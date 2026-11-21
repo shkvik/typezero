@@ -235,6 +235,9 @@ partial class ExpressionTypes {
       if (!entry.named) {
         continue;
       }
+
+      this.voidFieldCheck(entry.value, type, entry.name, module);
+
       if (!this.isUsableField(entry, type, module)) {
         draft.typed = false;
       }

@@ -1,0 +1,20 @@
+// A method is taken as a value once the constructor has set every field.
+class User {
+  name: string;
+  email: string;
+
+  constructor(name: string) {
+    this.name = name;
+
+    const early = this.log;
+
+    this.email = name;
+    early();
+  }
+
+  log(): void {
+    console.log(this.name, this.email);
+  }
+}
+
+const user = new User("a");

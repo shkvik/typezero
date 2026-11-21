@@ -3,6 +3,7 @@ import {
   UnaryOp,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { Code } from "../../../../diagnostic/code.tz";
+import { ArrayCallback } from "../types/expression-types.types.tz";
 import {
   DictKind,
   TypeKind,
@@ -22,6 +23,7 @@ export const kUnnamedOperand = "x";
 export const kUnnamedCount = "n";
 export const kHiddenMark = "%";
 export const kDot = ".";
+export const kFieldSetKey = "#set|";
 export const kOptionalDot = "?.";
 export const kManyLiterals = 64;
 export const kIntervalSeparator = " or ";
@@ -344,4 +346,113 @@ export const kIntLimits: IntLimit[] = [
   { bits: 16, unsigned: true, highest: 65535, lowest: 0 },
   { bits: 32, unsigned: true, highest: 4294967295, lowest: 0 },
   { bits: 64, unsigned: true, highest: 18446744073709551615, lowest: 0 },
+];
+
+export const kCallbackMethods = new Map<string, ArrayCallback>([
+  ["forEach", ArrayCallback.ForEach],
+  ["map", ArrayCallback.Map],
+  ["flatMap", ArrayCallback.FlatMap],
+  ["filter", ArrayCallback.Filter],
+  ["reduce", ArrayCallback.Reduce],
+  ["reduceRight", ArrayCallback.Reduce],
+  ["find", ArrayCallback.Find],
+  ["findLast", ArrayCallback.Find],
+  ["findIndex", ArrayCallback.FindIndex],
+  ["findLastIndex", ArrayCallback.FindIndex],
+  ["some", ArrayCallback.Test],
+  ["every", ArrayCallback.Test],
+  ["sort", ArrayCallback.Compare],
+]);
+
+export const kFunctionValueNames = new Map<string, int>([
+  ["String", 1],
+  ["Number", 1],
+  ["parseInt", 2],
+  ["parseFloat", 1],
+  ["Boolean", 1],
+  ["encodeURIComponent", 1],
+  ["encodeURI", 1],
+  ["decodeURIComponent", 1],
+  ["decodeURI", 1],
+  ["ok", 1],
+  ["err", 1],
+]);
+
+export const kFunctionValueStatics = new Map<string, int>([
+  ["Math.pow", 2],
+  ["Math.atan2", 2],
+  ["Math.imul", 2],
+  ["Math.min", 99],
+  ["Math.max", 99],
+  ["Math.hypot", 99],
+  ["Math.clamp", 3],
+  ["Math.random", 0],
+  ["Math.floor", 1],
+  ["Math.ceil", 1],
+  ["Math.round", 1],
+  ["Math.trunc", 1],
+  ["Math.abs", 1],
+  ["Math.sign", 1],
+  ["Math.sqrt", 1],
+  ["Math.cbrt", 1],
+  ["Math.exp", 1],
+  ["Math.expm1", 1],
+  ["Math.log", 1],
+  ["Math.log1p", 1],
+  ["Math.log2", 1],
+  ["Math.log10", 1],
+  ["Math.sin", 1],
+  ["Math.cos", 1],
+  ["Math.tan", 1],
+  ["Math.asin", 1],
+  ["Math.acos", 1],
+  ["Math.atan", 1],
+  ["Math.sinh", 1],
+  ["Math.cosh", 1],
+  ["Math.tanh", 1],
+  ["Math.asinh", 1],
+  ["Math.acosh", 1],
+  ["Math.atanh", 1],
+  ["Math.fround", 1],
+  ["Math.clz32", 1],
+  ["Number.parseInt", 2],
+  ["Number.parseFloat", 1],
+  ["Number.isInteger", 1],
+  ["Number.isSafeInteger", 1],
+  ["String.fromCharCode", 99],
+  ["String.fromCodePoint", 99],
+  ["console.log", 99],
+  ["console.info", 99],
+  ["console.debug", 99],
+  ["console.error", 99],
+  ["console.warn", 99],
+]);
+
+export const kCallbackOrdinals = [
+  "first",
+  "second",
+  "third",
+  "fourth",
+  "fifth",
+];
+export const kOkValueNames = ["ok", "err"];
+export const kUriValueNames = [
+  "encodeURIComponent",
+  "encodeURI",
+  "decodeURIComponent",
+  "decodeURI",
+];
+export const kHolderNames = ["console", "Math", "String", "Number"];
+export const kArgumentsName = "arguments";
+export const kTextMethods = ["join", "toString"];
+export const kFunctionMethods = ["call", "apply", "bind"];
+export const kStringClass = "String";
+export const kArrayClass = "Array";
+export const kDictIterating = [
+  "map",
+  "filter",
+  "reduce",
+  "some",
+  "every",
+  "find",
 ];

@@ -1,0 +1,3 @@
+main.tz
+  2:7 m: Map<string, int>
+  3:7 s: Set<int>

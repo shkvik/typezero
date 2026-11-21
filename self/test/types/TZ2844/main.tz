@@ -1,0 +1,5 @@
+// 'new Array<T>(n)' needs a type with a default value.
+type Point = { x: int; y: int };
+
+const points = new Array<Point>(3);
+const counts = new Array<int>(3);

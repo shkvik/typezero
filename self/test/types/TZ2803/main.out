@@ -1,0 +1,3 @@
+main.tz
+  2:6 type Count = int
+  4:11 type Counted = { name: string }

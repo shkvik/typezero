@@ -1,0 +1,5 @@
+// 'in' asks for properties, not entries.
+const m = new Map<string, int>();
+const s = new Set<int>();
+
+console.log("a" in m, "b" in s);

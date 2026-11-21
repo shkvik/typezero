@@ -1,0 +1,8 @@
+// An iterator has no 'throw()'.
+function* numbers() {
+  yield 1;
+}
+
+const it = numbers();
+
+it.throw(1);

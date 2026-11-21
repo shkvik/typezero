@@ -1,0 +1,3 @@
+main.tz:3:18: error TZ2858: 'm.get' can only be called, e.g. 'm.get(...)'; pass an arrow that calls it where a function is expected
+const getter = m.get;
+                 ^

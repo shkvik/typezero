@@ -1,0 +1,6 @@
+// There is no 'arguments': a rest parameter takes the arguments.
+function count(): int {
+  const all = arguments;
+
+  return 0;
+}

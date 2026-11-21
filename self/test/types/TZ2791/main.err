@@ -1,0 +1,3 @@
+main.tz:11:13: error TZ2791: 'name' is public in 'Animal', so it cannot be protected in 'Hidden'
+  protected name: string;
+            ^

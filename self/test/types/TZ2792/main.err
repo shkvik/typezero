@@ -1,0 +1,6 @@
+main.tz:11:3: error TZ2792: 'name' is a field of 'Animal' already; declared again in a class without a constructor, JavaScript would set it to undefined after the constructor of 'Animal' set it: drop the declaration, or set it in a constructor
+  name: string;
+  ^
+main.tz:11:3: error TZ2780: field 'name' never gets a value: set it in a constructor, or make it optional: 'name?: string'
+  name: string;
+  ^

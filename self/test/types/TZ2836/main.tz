@@ -1,0 +1,4 @@
+// Sorting values of several kinds needs a comparison function.
+const values: (int | string)[] = [1, "a"];
+const sorted = values.sort();
+const texts = ["b", "a"].sort();

@@ -1,0 +1,4 @@
+main.tz
+  2:10 later: () => boolean
+  3:9 check: (int) => boolean
+  4:9 limit: int

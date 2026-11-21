@@ -1,0 +1,28 @@
+// A tag read through '?.' narrows a union that refers to itself.
+enum Kind {
+  Leaf,
+  Pair,
+}
+
+type Leaf = { kind: Kind.Leaf; value: int };
+type Pair = { kind: Kind.Pair; left: Node; right: Node };
+type Node = Leaf | Pair;
+type Holder = { node?: Node };
+
+function leafValue(holder: Holder): int {
+  const node = holder.node;
+  const isLeaf = node?.kind == Kind.Leaf && node.value > 0;
+  if (isLeaf) {
+    return 1;
+  }
+
+  return 0;
+}
+
+function pairLeft(node: Node | undefined): boolean {
+  return node?.kind == Kind.Pair && node.left.kind == Kind.Leaf;
+}
+
+const leaf: Node = { kind: Kind.Leaf, value: 1 };
+const first = leafValue({ node: leaf });
+const second = pairLeft(leaf);

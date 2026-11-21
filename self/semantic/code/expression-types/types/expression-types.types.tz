@@ -6,6 +6,7 @@ import {
   CallArgument,
   CallExpr,
   Expr,
+  MemberExpr,
   Property,
   UnaryOp,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
@@ -107,6 +108,15 @@ export type FunctionFrame = {
   readonly returns: ReturnedValue[];
   readonly recursive: string[];
   hasEmptyReturn: boolean;
+  generator?: GeneratorFrame;
+};
+
+export type GeneratorFrame = {
+  readonly fn: FunctionDecl;
+  readonly yields: ReturnedValue[];
+  readonly isOpen: boolean;
+  readonly yielded?: Type;
+  readonly sent?: Type;
 };
 
 export type ParameterShape = {
@@ -323,6 +333,46 @@ export type DictText = {
   readonly dict: DictKind;
   readonly kind: string;
   readonly shown: string;
+};
+
+export type InitFrame = {
+  readonly isConstructor: boolean;
+  readonly fn: FunctionDecl;
+  readonly decl: ClassDecl;
+  readonly isDerived: boolean;
+  readonly closures: boolean[];
+};
+
+export type OverriddenSite = {
+  readonly self: InstanceType;
+  readonly children: ClassDecl[];
+  readonly visited: Set<FunctionDecl>;
+  readonly module: int;
+};
+
+export enum ArrayCallback {
+  ForEach,
+  Map,
+  FlatMap,
+  Filter,
+  Reduce,
+  Find,
+  FindIndex,
+  Test,
+  Compare,
+}
+
+export type CallbackPlan = {
+  readonly kind: ArrayCallback;
+  readonly member: MemberExpr;
+  readonly array: Type;
+  readonly params: Type[];
+  isValue: boolean;
+};
+
+export type InitializingVariable = {
+  readonly key: string;
+  readonly depth: int;
 };
 
 export type SuperFrame = {

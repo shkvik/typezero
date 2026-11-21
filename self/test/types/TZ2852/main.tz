@@ -1,0 +1,10 @@
+// for...of gives nothing to a generator that expects values from next(x).
+function* talk(): Generator<string, void, string> {
+  const name = yield "who?";
+
+  console.log(name);
+}
+
+for (const said of talk()) {
+  console.log(said);
+}

@@ -379,6 +379,10 @@ partial class ExpressionTypes {
 
     this.walkedPart(expr.lhs, module);
 
+    if (this.dictInCheck(expr, object, module)) {
+      return boolean;
+    }
+
     const lhs = expr.lhs;
     const isUnion = object.kind == TypeKind.Union;
 
@@ -415,6 +419,9 @@ partial class ExpressionTypes {
     const target = expr.operand;
     const boolean = this.store.plain(TypeKind.Boolean);
 
+    if (this.dictDeleteCheck(expr, module)) {
+      return boolean;
+    }
     if (target.kind != ExprKind.Member) {
       return boolean;
     }
@@ -462,6 +469,8 @@ partial class ExpressionTypes {
     }
     if (element != undefined && !isResizing) {
       const list = this.store.arrayOf(element);
+
+      this.tupleCalls.add(expr);
 
       return this.receiverCall(expr, member, list, undefined, module);
     }

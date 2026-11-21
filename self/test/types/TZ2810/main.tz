@@ -1,0 +1,4 @@
+// A callback method gets a function, not another value.
+const nums = [1, 2, 3];
+const five = 5;
+const mapped = nums.filter(five);

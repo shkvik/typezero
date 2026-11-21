@@ -1,0 +1,3 @@
+main.tz:8:10: error TZ2784: 'this.log()' is called before every field is set: field 'email' is not set yet, and the method may read it
+    this.log();
+         ^

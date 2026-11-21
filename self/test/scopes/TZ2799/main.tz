@@ -1,0 +1,2 @@
+// An error is a value, so there is no class of errors to extend.
+class MyError extends ReferenceError {}

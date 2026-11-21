@@ -1,0 +1,3 @@
+main.tz:7:3: error TZ2780: field 'size' never gets a value: set it in a constructor, or make it optional: 'size?: int'
+  size: int;
+  ^

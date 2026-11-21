@@ -1,0 +1,3 @@
+// Results cannot be converted to strings.
+const results: Result<int, string>[] = [ok(1), err("e")];
+const joined = results.join();

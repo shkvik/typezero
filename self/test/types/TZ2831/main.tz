@@ -1,0 +1,3 @@
+// Sorting functions needs a comparison function.
+const inc = (x: int) => x + 1;
+const sorted = [inc].sort();

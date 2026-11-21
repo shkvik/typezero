@@ -1,0 +1,6 @@
+// A Map is no array: iterate it first.
+const m = new Map<string, int>();
+const s = new Set<int>();
+
+m.map(1);
+s.filter(1);

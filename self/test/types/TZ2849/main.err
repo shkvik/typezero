@@ -1,0 +1,3 @@
+main.tz:2:11: error TZ2849: cannot tell what 'empty' yields: it has no 'yield'; declare its type, e.g. ': Generator<int>'
+function* empty() {
+          ^

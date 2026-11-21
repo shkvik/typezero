@@ -1,0 +1,4 @@
+// A built-in function is a value only where a function type is expected.
+const parse = parseInt;
+const encode = encodeURIComponent;
+const typed: (s: string) => string = encodeURIComponent;

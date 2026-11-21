@@ -1,0 +1,4 @@
+// A comparison function returns a number.
+const nums = [3, 1, 2];
+const sorted = nums.sort((a, b) => a < b);
+const fine = nums.sort((a, b) => a - b);

@@ -251,6 +251,9 @@ partial class ExpressionTypes {
   ): void {
     const hint = this.spreadHint(item);
     const type = this.typed(expr, hint, module);
+
+    this.resumedCheck(expr, type, Code.SpreadResumes, module);
+
     const element = this.spreadItem(expr, type, module);
     const source = this.spreadSource(type);
 

@@ -28,7 +28,7 @@ partial class ExpressionTypes {
   private memberTyped(expr: MemberExpr, module: int): Type {
     const isRefused =
       this.thisPlaceCheck(expr, module) || this.superReadCheck(expr, module);
-    if (isRefused) {
+    if (isRefused || this.memberReadEarly(expr, module)) {
       return this.store.plain(TypeKind.Error);
     }
 
@@ -48,6 +48,9 @@ partial class ExpressionTypes {
     }
 
     const object = this.receiverOf(expr.object, expr.optional, module);
+    if (this.dictMemberCheck(expr, object, false, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
 
     return this.memberOf(expr, object, module);
   }
@@ -71,6 +74,8 @@ partial class ExpressionTypes {
   }
 
   private receiverOf(object: Expr, optional: boolean, module: int): Type {
+    this.markThisObject(object, module);
+
     const type = this.typed(object, undefined, module);
 
     return this.linkOf(type, optional);

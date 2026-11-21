@@ -1,0 +1,3 @@
+main.tz:3:33: error TZ2822: 'limit' is declared later in the block, after this function is created; move the declaration up, or declare the function with 'function', which can use it
+  const check = (x: int) => x < limit;
+                                ^

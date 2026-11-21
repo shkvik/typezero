@@ -1,0 +1,3 @@
+// Json values cannot be converted to strings.
+const values: Json[] = [1, "a"];
+const text = values.toString();

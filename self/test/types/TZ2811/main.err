@@ -1,0 +1,3 @@
+main.tz:7:25: error TZ2811: 'total' takes a rest parameter; pass an arrow that calls it instead
+const counts = nums.map(total);
+                        ^

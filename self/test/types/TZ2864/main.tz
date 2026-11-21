@@ -1,0 +1,4 @@
+// The size of a Set is not assigned.
+const s = new Set<int>();
+
+s.size = 3;

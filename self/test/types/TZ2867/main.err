@@ -1,0 +1,6 @@
+main.tz:5:25: error TZ2867: 'Object.keys' of a Map is always empty in JavaScript: its entries are no properties; use '[...m.keys()]'
+console.log(Object.keys(m), Object.entries(s));
+                        ^
+main.tz:5:44: error TZ2867: 'Object.entries' of a Set is always empty in JavaScript: its entries are no properties; use '[...s.values()]'
+console.log(Object.keys(m), Object.entries(s));
+                                           ^

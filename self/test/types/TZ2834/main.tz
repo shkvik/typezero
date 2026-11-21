@@ -1,0 +1,3 @@
+// Sorting dates needs a comparison function.
+const dates = [new Date(), new Date()];
+const sorted = dates.sort();

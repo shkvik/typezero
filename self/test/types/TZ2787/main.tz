@@ -1,0 +1,27 @@
+// A class narrows a field of its parent only down the chain of its type.
+class Animal {}
+
+class Dog extends Animal {}
+
+class Kennel {
+  pet: Animal;
+  size: int;
+
+  constructor() {
+    this.pet = new Animal();
+    this.size = 1;
+  }
+}
+
+class DogKennel extends Kennel {
+  pet: Dog;
+  size: double;
+
+  constructor() {
+    super();
+    this.pet = new Dog();
+    this.size = 2;
+  }
+}
+
+const kennel = new DogKennel();

@@ -1,0 +1,10 @@
+// '??=' needs a field that may be undefined.
+interface Node {
+  value: int;
+  next?: Node;
+}
+
+const node: Node = { value: 1 };
+
+node.value ??= 2;
+node.next ??= { value: 3 };

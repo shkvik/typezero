@@ -1,0 +1,8 @@
+// The value of 'yield' is typed by the return type of the generator.
+function* asks() {
+  const answer = yield 1;
+
+  console.log(answer);
+}
+
+const asked = asks();

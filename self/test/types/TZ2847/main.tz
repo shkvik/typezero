@@ -1,0 +1,7 @@
+// 'yield*' goes over an array, a string or an iterator.
+function* delegates() {
+  yield 1;
+  yield* 5;
+}
+
+const all = [...delegates()];

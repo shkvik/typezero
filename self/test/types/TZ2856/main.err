@@ -1,0 +1,3 @@
+main.tz:8:4: error TZ2856: property 'length' does not exist on type 'Generator<int>'; an iterator does not know how many values it gives: collect them with '[...it]'
+it.length();
+   ^

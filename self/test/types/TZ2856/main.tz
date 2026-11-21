@@ -1,0 +1,8 @@
+// An iterator does not know its length.
+function* numbers() {
+  yield 1;
+}
+
+const it = numbers();
+
+it.length();

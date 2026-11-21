@@ -1,0 +1,4 @@
+main.tz
+  2:7 values: (int | string)[]
+  3:7 sorted: (int | string)[]
+  4:7 texts: string[]

@@ -21,11 +21,22 @@ partial class ExpressionTypes {
     if (this.isThisName(expr, module)) {
       return this.thisTyped(expr, module);
     }
+    if (this.builtinValueCheck(expr, wanted, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const forwarded = this.builtinFunctionValue(expr, wanted, module);
+    if (forwarded != undefined) {
+      return forwarded;
+    }
 
     const target = this.targetOfName(expr, module);
     if (target == undefined) {
       return this.store.plain(TypeKind.Error);
     }
+
+    this.laterBlockCheck(expr, target, module);
+    this.ownInitializerCheck(expr, target, module);
 
     const fact = this.factOf(target);
     if (fact != undefined) {

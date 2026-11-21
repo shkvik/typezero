@@ -1,0 +1,3 @@
+main.tz:4:20: error TZ2844: 'new Array<T>(n)' fills the array with a default value, and 'Point' has none; start from '[]' and use push()
+const points = new Array<Point>(3);
+                   ^

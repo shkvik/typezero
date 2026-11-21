@@ -1,0 +1,5 @@
+main.tz
+  2:7 nums: int[]
+  3:7 sorted: int[]
+  4:7 maybe: (int | undefined)[]
+  5:7 either: (int | undefined)[]

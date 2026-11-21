@@ -1,0 +1,6 @@
+main.tz:5:3: error TZ2861: property 'map' does not exist on type 'Map<string, int>'; call it on an iterator, e.g. 'm.entries().map(...)', or on an array, '[...m].map(...)'
+m.map(1);
+  ^
+main.tz:6:3: error TZ2861: property 'filter' does not exist on type 'Set<int>'; call it on an iterator, e.g. 's.values().filter(...)', or on an array, '[...s].filter(...)'
+s.filter(1);
+  ^

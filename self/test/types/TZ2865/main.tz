@@ -1,0 +1,6 @@
+// 'delete' removes properties, not entries.
+const m = new Map<string, int>();
+const s = new Set<int>();
+
+delete m["a"];
+delete s[0];

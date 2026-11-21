@@ -1,0 +1,6 @@
+// A generator returns an iterator.
+function* wrongType(): int {
+  yield 1;
+}
+
+const wrong = wrongType();

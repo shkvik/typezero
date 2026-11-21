@@ -119,7 +119,7 @@ partial class ExpressionTypes {
 
     this.doors.set(key, door);
     this.doorOrder.push(key);
-    this.open(door, variable, module);
+    this.openVariable(door, variable, module);
     door.state = DoorState.Done;
 
     return door;

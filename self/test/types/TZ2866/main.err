@@ -1,0 +1,6 @@
+main.tz:5:17: error TZ2866: 'in' asks for a property of the Map object in JavaScript, not for an entry; ask with 'm.has(key)'
+console.log("a" in m, "b" in s);
+                ^
+main.tz:5:27: error TZ2866: 'in' asks for a property of the Set object in JavaScript, not for an entry; ask with 's.has(value)'
+console.log("a" in m, "b" in s);
+                          ^

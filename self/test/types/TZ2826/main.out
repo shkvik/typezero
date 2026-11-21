@@ -1,0 +1,3 @@
+main.tz
+  2:7 inc: (int) => int
+  3:7 joined: string

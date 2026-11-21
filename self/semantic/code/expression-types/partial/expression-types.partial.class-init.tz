@@ -1,0 +1,616 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  ClassDecl,
+  ClassField,
+  FieldKind,
+  FieldPresence,
+  MethodKind,
+} from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NameExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  BlockStmt,
+  ReturnStmt,
+  StmtKind,
+  SwitchCase,
+  SwitchStmt,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  DictKind,
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { kFieldSetKey } from "../const/expression-types.const.tz";
+import { InitFrame } from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private initFrameOf(decl: ClassDecl, fn: FunctionDecl): InitFrame {
+    const isConstructor = fn.role?.method == MethodKind.Constructor;
+    const isDerived = decl.base != undefined || decl.baseExpr != undefined;
+
+    return { isConstructor, fn, decl, isDerived, closures: [] };
+  }
+
+  private constructorFrame(): InitFrame | undefined {
+    const frame = this.initFrames[this.initFrames.length - 1];
+    if (frame == undefined || !frame.isConstructor) {
+      return undefined;
+    }
+
+    const parent = this.superFrames[this.superFrames.length - 1];
+    if (parent != undefined && parent.isConstructor && parent.isBefore) {
+      return undefined;
+    }
+
+    return frame;
+  }
+
+  private isInInit(frame: InitFrame): boolean {
+    return this.openFunctions[this.openFunctions.length - 1] == frame.fn;
+  }
+
+  private isInsideInitClosure(frame: InitFrame): boolean {
+    const start = this.openFunctions.lastIndexOf(frame.fn);
+    const last = this.openFunctions.length - 1;
+    if (start < 0 || start == last) {
+      return false;
+    }
+
+    const inner = this.openFunctions.slice(start + 1);
+
+    return inner.every((fn) => fn.isArrow);
+  }
+
+  private isArrowField(field: ClassField): boolean {
+    const init = field.init;
+    const isArrow = init?.kind == ExprKind.Function && init.fn.isArrow;
+
+    return isArrow || field.form == FieldKind.ArrowMethod;
+  }
+
+  private isRequiredField(field: ClassField): boolean {
+    const isValueField =
+      field.form == FieldKind.Instance || field.form == FieldKind.Parameter;
+
+    return isValueField && field.presence != FieldPresence.Optional;
+  }
+
+  private firstUnset(frame: InitFrame): string | undefined {
+    for (const field of frame.decl.fields) {
+      const key = `${kFieldSetKey}${field.name}`;
+      if (this.isRequiredField(field) && !this.facts.has(key)) {
+        return field.name;
+      }
+    }
+
+    return undefined;
+  }
+
+  private markFieldSet(name: string): void {
+    const key = `${kFieldSetKey}${name}`;
+    const mark = this.store.plain(TypeKind.Void);
+
+    this.facts = this.withFact(this.facts, key, mark);
+  }
+
+  private initStart(fn: FunctionDecl): void {
+    const frame = this.initFrames[this.initFrames.length - 1];
+    if (frame == undefined || !frame.isConstructor || frame.fn != fn) {
+      return;
+    }
+
+    for (const field of frame.decl.fields) {
+      const isOptional = field.presence == FieldPresence.Optional;
+      const isValued =
+        !frame.isDerived &&
+        field.form == FieldKind.Instance &&
+        field.init != undefined;
+      const isParameter = !frame.isDerived && field.form == FieldKind.Parameter;
+      if (isOptional || isValued || isParameter) {
+        this.markFieldSet(field.name);
+      }
+    }
+  }
+
+  private initEnd(fn: FunctionDecl, body: BlockStmt, module: int): void {
+    const frame = this.constructorFrame();
+    if (frame == undefined || frame.fn != fn) {
+      return;
+    }
+    if (this.isAlwaysReturning(body, module)) {
+      return;
+    }
+
+    this.unsetPathCheck(frame, fn.loc, module);
+  }
+
+  private returnFieldsCheck(
+    statement: ReturnStmt,
+    fn: FunctionDecl | undefined,
+    module: int,
+  ): void {
+    const frame = this.constructorFrame();
+    if (frame == undefined || frame.fn != fn || statement.value != undefined) {
+      return;
+    }
+
+    this.unsetPathCheck(frame, statement.loc, module);
+  }
+
+  private unsetPathCheck(frame: InitFrame, loc: int, module: int): void {
+    const word = this.firstUnset(frame);
+    if (word == undefined) {
+      return;
+    }
+
+    const first = frame.decl.name ?? "";
+
+    this.report(module, loc, Code.FieldsNotSet, { word, first });
+  }
+
+  private fieldSetMark(target: Expr, module: int): void {
+    if (target.kind != ExprKind.Member) {
+      return;
+    }
+    if (this.initThisMember(target, module) == undefined) {
+      return;
+    }
+
+    this.markFieldSet(target.name);
+  }
+
+  private superFieldsSet(): void {
+    const frame = this.initFrames[this.initFrames.length - 1];
+    if (frame == undefined || !frame.isConstructor) {
+      return;
+    }
+
+    for (const field of frame.decl.fields) {
+      const isValued =
+        field.form == FieldKind.Instance && field.init != undefined;
+      if (isValued || field.form == FieldKind.Parameter) {
+        this.markFieldSet(field.name);
+      }
+    }
+  }
+
+  private initThisMember(expr: MemberExpr, module: int): InitFrame | undefined {
+    const frame = this.constructorFrame();
+    if (frame == undefined || !this.isInInit(frame)) {
+      return undefined;
+    }
+    if (!this.isThisName(expr.object, module)) {
+      return undefined;
+    }
+
+    return frame;
+  }
+
+  private ownValueField(
+    frame: InitFrame,
+    name: string,
+  ): ClassField | undefined {
+    return frame.decl.fields.find(
+      (field) =>
+        field.name == name &&
+        field.form != FieldKind.Static &&
+        !this.isArrowField(field),
+    );
+  }
+
+  private fieldReadEarly(target: Expr, module: int): boolean {
+    if (target.kind != ExprKind.Member) {
+      return false;
+    }
+
+    const frame = this.initThisMember(target, module);
+    if (frame == undefined) {
+      return false;
+    }
+
+    const field = this.ownValueField(frame, target.name);
+    const key = `${kFieldSetKey}${target.name}`;
+    if (field == undefined || this.facts.has(key)) {
+      return false;
+    }
+    if (!this.isRequiredField(field)) {
+      return false;
+    }
+
+    const word = target.name;
+
+    this.report(module, target.loc, Code.FieldReadEarly, { word });
+
+    return true;
+  }
+
+  private memberReadEarly(expr: MemberExpr, module: int): boolean {
+    if (this.writtenTargets.has(expr)) {
+      return false;
+    }
+    if (this.fieldReadEarly(expr, module)) {
+      return true;
+    }
+
+    this.methodEarly(expr, Code.MethodTakenEarly, module);
+
+    return false;
+  }
+
+  private callReadEarly(member: MemberExpr, module: int): boolean {
+    if (this.fieldReadEarly(member, module)) {
+      return true;
+    }
+
+    this.methodEarly(member, Code.MethodCalledEarly, module);
+
+    return false;
+  }
+
+  private methodEarly(member: MemberExpr, code: Code, module: int): void {
+    const frame = this.initThisMember(member, module);
+    if (frame == undefined) {
+      return;
+    }
+    if (this.ownValueField(frame, member.name) != undefined) {
+      return;
+    }
+    if (!this.isInitMethod(frame, member.name)) {
+      return;
+    }
+
+    const first = this.firstUnset(frame);
+    if (first == undefined) {
+      return;
+    }
+
+    const word = member.name;
+
+    this.report(module, member.loc, code, { word, first });
+  }
+
+  private isInitMethod(frame: InitFrame, name: string): boolean {
+    const self = this.selves[this.selves.length - 1];
+    if (self == undefined || self.kind != TypeKind.Instance) {
+      return frame.decl.methods.some(
+        (method) => method.name == name && !this.isStaticMethod(method),
+      );
+    }
+
+    const entry = this.classMember(self, name).entry;
+    if (entry == undefined || entry.isStatic) {
+      return false;
+    }
+
+    const field = entry.field;
+    if (field != undefined && this.isArrowField(field)) {
+      return true;
+    }
+
+    return entry.methods.length > 0;
+  }
+
+  private thisReadyCheck(expr: NameExpr, module: int): void {
+    const frame = this.constructorFrame();
+    if (frame == undefined) {
+      return;
+    }
+    if (this.isInsideInitClosure(frame)) {
+      return this.closureThisCheck(frame, expr, module);
+    }
+    if (!this.isInInit(frame) || this.thisObjects.has(expr)) {
+      return;
+    }
+
+    const word = this.firstUnset(frame);
+    if (word == undefined) {
+      return;
+    }
+
+    this.report(module, expr.loc, Code.ThisUsedEarly, { word });
+  }
+
+  private closureThisCheck(
+    frame: InitFrame,
+    expr: NameExpr,
+    module: int,
+  ): void {
+    const isReady = frame.closures[frame.closures.length - 1] ?? true;
+    if (isReady) {
+      return;
+    }
+
+    this.report(module, expr.loc, Code.ThisInEarlyClosure, kNoDetails);
+  }
+
+  private markThisObject(object: Expr, module: int): void {
+    if (this.isThisName(object, module)) {
+      this.thisObjects.add(object);
+    }
+  }
+
+  private initClosureFrame(): InitFrame | undefined {
+    const frame = this.initFrames[this.initFrames.length - 1];
+    if (frame == undefined || !frame.isConstructor || !this.isInInit(frame)) {
+      return undefined;
+    }
+
+    return frame;
+  }
+
+  private enterInitClosure(frame: InitFrame | undefined): void {
+    if (frame == undefined) {
+      return;
+    }
+
+    const parent = this.superFrames[this.superFrames.length - 1];
+    const isBefore =
+      parent != undefined && parent.isConstructor && parent.isBefore;
+    const isSet = this.firstUnset(frame) == undefined;
+
+    frame.closures.push(isSet && !isBefore);
+  }
+
+  private leaveInitClosure(frame: InitFrame | undefined): void {
+    if (frame != undefined) {
+      frame.closures.pop();
+    }
+  }
+
+  private isSwitchExit(
+    option: SwitchCase,
+    isLast: boolean,
+    module: int,
+  ): boolean {
+    const last = option.body[option.body.length - 1];
+    if (last == undefined) {
+      return false;
+    }
+
+    const isReturning = option.body.some((statement) =>
+      this.isAlwaysReturning(statement, module),
+    );
+    if (isReturning) {
+      return false;
+    }
+    if (last.kind == StmtKind.Break) {
+      return last.label == "";
+    }
+
+    return isLast;
+  }
+
+  private switchFieldsJoined(
+    statement: SwitchStmt,
+    exits: Map<string, Type>[],
+  ): void {
+    const hasDefault = statement.cases.some((one) => one.test == undefined);
+    const first = exits[0];
+    if (!hasDefault || first == undefined) {
+      return;
+    }
+
+    for (const key of first.keys()) {
+      const isEverywhere = exits.every((facts) => facts.has(key));
+      if (key.startsWith(kFieldSetKey) && isEverywhere) {
+        this.markFieldSet(key.slice(kFieldSetKey.length));
+      }
+    }
+  }
+
+  private fieldStartChecks(decl: ClassDecl, module: int): void {
+    if (decl.constructors.length > 0) {
+      return;
+    }
+
+    const params = this.resolver.parameterTypes(module, decl.typeParams);
+    const instance = this.resolver.classInstance(module, decl, params);
+    if (instance.kind != TypeKind.Instance) {
+      return;
+    }
+
+    const isMade = this.hasMakerChain(instance);
+
+    for (const field of decl.fields) {
+      this.fieldStartCheck(instance, decl, field, isMade, module);
+    }
+  }
+
+  private fieldStartCheck(
+    instance: InstanceType,
+    decl: ClassDecl,
+    field: ClassField,
+    isMade: boolean,
+    module: int,
+  ): void {
+    const written = field.type;
+    const isRequired =
+      field.form == FieldKind.Instance &&
+      field.presence == FieldPresence.Required;
+    if (!isRequired || field.init != undefined || written == undefined) {
+      return;
+    }
+
+    const type = this.declaredFieldType(instance, decl, written);
+    if (type.kind == TypeKind.Error) {
+      return;
+    }
+
+    const word = field.name;
+    const first = this.text.of(type);
+
+    if (isMade) {
+      this.report(module, field.loc, Code.FieldNeverSet, { word, first });
+
+      return;
+    }
+
+    const visiting = new Set<ClassDecl>([decl]);
+    if (this.hasEmptyValue(type, written, visiting)) {
+      return;
+    }
+
+    this.report(module, field.loc, Code.FieldNoStart, { word, first });
+  }
+
+  private declaredFieldType(
+    instance: InstanceType,
+    decl: ClassDecl,
+    written: TypeRef,
+  ): Type {
+    const context = this.resolver.classContext(
+      instance,
+      decl.typeParams,
+      instance.module,
+    );
+
+    return this.resolver.resolve(written, context);
+  }
+
+  private hasMakerChain(instance: InstanceType): boolean {
+    const seen = new Set<ClassDecl>();
+    let current: InstanceType | undefined = instance;
+
+    while (current != undefined && !this.isLibraryModule(current.module)) {
+      const decl = this.classOf(current);
+      if (decl == undefined || seen.has(decl)) {
+        return false;
+      }
+      if (decl.constructors.length > 0) {
+        return true;
+      }
+
+      seen.add(decl);
+      current = this.parentOf(current, decl);
+    }
+
+    return false;
+  }
+
+  private hasEmptyValue(
+    type: Type,
+    written: TypeRef | undefined,
+    visiting: Set<ClassDecl>,
+  ): boolean {
+    switch (type.kind) {
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Int:
+      case TypeKind.Decimal:
+      case TypeKind.Double:
+      case TypeKind.Boolean:
+      case TypeKind.Literal:
+      case TypeKind.Array:
+        return true;
+      case TypeKind.Dict:
+        return this.hasEmptyCollection(type.dict, written);
+      case TypeKind.Union:
+        return type.parts.every((part) => part.kind == TypeKind.Literal);
+      case TypeKind.Instance:
+        return this.hasEmptyInstance(type, visiting);
+      case TypeKind.Object:
+        return type.fields.every(
+          (field) =>
+            field.optional ||
+            this.hasEmptyValue(field.type, undefined, visiting),
+        );
+      default:
+        return false;
+    }
+  }
+
+  private hasEmptyCollection(
+    dict: DictKind,
+    written: TypeRef | undefined,
+  ): boolean {
+    const isCollection = dict == DictKind.Map || dict == DictKind.Set;
+
+    return isCollection && written?.form.kind == TypeRefKind.Generic;
+  }
+
+  private hasEmptyInstance(
+    instance: InstanceType,
+    visiting: Set<ClassDecl>,
+  ): boolean {
+    if (this.isLibraryModule(instance.module)) {
+      return false;
+    }
+
+    const decl = this.classOf(instance);
+    if (decl == undefined || decl.name == undefined || decl.isAbstract) {
+      return false;
+    }
+    if (decl.typeParams.length > 0 || this.hasMakerChain(instance)) {
+      return false;
+    }
+    if (visiting.has(decl)) {
+      return false;
+    }
+
+    visiting.add(decl);
+
+    const isEmpty = this.hasEmptyFamily(instance, visiting);
+
+    visiting.delete(decl);
+
+    return isEmpty;
+  }
+
+  private hasEmptyFamily(
+    instance: InstanceType,
+    visiting: Set<ClassDecl>,
+  ): boolean {
+    const decl = this.classOf(instance);
+    if (decl == undefined) {
+      return true;
+    }
+
+    const parent = this.parentOf(instance, decl);
+    if (parent != undefined && !this.hasEmptyFamily(parent, visiting)) {
+      return false;
+    }
+
+    for (const field of decl.fields) {
+      const held = this.heldInstance(instance, decl, field);
+      if (held != undefined && !this.hasEmptyInstance(held, visiting)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private heldInstance(
+    instance: InstanceType,
+    decl: ClassDecl,
+    field: ClassField,
+  ): InstanceType | undefined {
+    const written = field.type;
+    const isDefaulted =
+      field.form == FieldKind.Instance &&
+      field.presence != FieldPresence.Optional &&
+      field.init == undefined;
+    if (!isDefaulted || written == undefined) {
+      return undefined;
+    }
+
+    const type = this.declaredFieldType(instance, decl, written);
+    if (type.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    return type;
+  }
+}

@@ -30,7 +30,11 @@ import { StaticOwner, ThisPlace } from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private walkClass(decl: ClassDecl, module: int): void {
+    this.redeclareChecks(decl, module);
+    this.extendsCycleCheck(decl, module);
     this.checkFields(decl, module);
+    this.parentMethodChecks(decl, module);
+    this.fieldStartChecks(decl, module);
 
     for (const fn of decl.constructors) {
       this.methodFunction(decl, fn, module);
@@ -44,6 +48,7 @@ partial class ExpressionTypes {
 
     this.overrideChecks(decl, module);
     this.contractChecks(decl, module);
+    this.overriddenCallChecks(decl, module);
   }
 
   private methodFunction(decl: ClassDecl, fn: FunctionDecl, module: int): Type {
@@ -53,16 +58,19 @@ partial class ExpressionTypes {
 
     const place = this.methodPlace(fn);
     const frame = this.superFrameOf(decl, fn, home);
+    const init = this.initFrameOf(decl, fn);
 
     this.selves.push(self);
     this.ownerClasses.push({ decl, module });
     this.thisPlaces.push(place);
     this.currentMethods.push(fn);
     this.superFrames.push(frame);
+    this.initFrames.push(init);
 
     const type = this.functionType(fn, home);
 
     this.superCheck(decl, fn, home);
+    this.initFrames.pop();
     this.superFrames.pop();
     this.currentMethods.pop();
     this.thisPlaces.pop();
@@ -97,6 +105,7 @@ partial class ExpressionTypes {
     }
 
     this.thisBeforeSuper(expr, module);
+    this.thisReadyCheck(expr, module);
 
     if (self != undefined) {
       return self;

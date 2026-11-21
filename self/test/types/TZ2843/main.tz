@@ -1,0 +1,6 @@
+// A Record is walked by its keys.
+const ages: Record<string, int> = { ann: 30 };
+
+for (const entry of ages) {
+  console.log(entry);
+}

@@ -1,0 +1,21 @@
+// A field is read only after the constructor sets it.
+class Order {
+  total: int;
+  price: int;
+
+  constructor(public id: int) {
+    this.total = this.price * 2;
+    this.price = 10;
+  }
+}
+
+class Counter {
+  count: int;
+
+  constructor() {
+    this.count += 1;
+  }
+}
+
+const order = new Order(1);
+const counter = new Counter();

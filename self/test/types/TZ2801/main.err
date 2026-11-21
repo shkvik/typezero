@@ -1,0 +1,3 @@
+main.tz:6:26: error TZ2801: interface 'Second' cannot extend itself through 'First'
+interface Second extends First {
+                         ^

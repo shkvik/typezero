@@ -1,0 +1,3 @@
+main.tz:8:14: error TZ2782: 'this' is used before every field is set: field 'email' is not set yet; until then 'this' can only set fields and read the ones set
+    register(this);
+             ^

@@ -1,0 +1,19 @@
+// A function made in a constructor uses 'this' once every field is set.
+class User {
+  name: string;
+  email: string;
+
+  constructor(name: string) {
+    this.name = name;
+
+    const early = () => this.name;
+
+    this.email = name;
+
+    const late = () => this.email;
+
+    console.log(early(), late());
+  }
+}
+
+const user = new User("a");

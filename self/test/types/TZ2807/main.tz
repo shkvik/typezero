@@ -1,0 +1,6 @@
+// A built-in function passed as a callback would get the index too.
+const texts = ["1", "2"];
+const nums = [1, 2];
+const parsed = texts.map(parseInt);
+const biggest = nums.map(Math.max);
+nums.forEach(console.log);

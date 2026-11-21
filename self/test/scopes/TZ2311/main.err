@@ -1,4 +1,4 @@
-main.tz:1:24: error TZ2311: there is no 'Error' in tz: an error is a value; return one with 'err(...)', e.g. 'return err({ kind: "NOT_FOUND" })'
+main.tz:1:24: error TZ2799: there is no 'Error' in tz: an error is a value; make 'NotFound' a type of object with a tag, e.g. 'type NotFound = { code: "NotFound"; message: string }'
 class NotFound extends Error {}
                        ^
 main.tz:3:26: error TZ2311: there is no 'TypeError' in tz: an error is a value; return one with 'err(...)', e.g. 'return err({ kind: "NOT_FOUND" })'

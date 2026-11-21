@@ -1,0 +1,3 @@
+main.tz:4:21: error TZ2843: a Record is not iterable, as an object is not in JavaScript; walk its keys with 'for...in', or its entries with 'for (const [k, v] of Object.entries(r))'
+for (const entry of ages) {
+                    ^

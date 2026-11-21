@@ -1,0 +1,3 @@
+main.tz:3:24: error TZ2827: Results cannot be converted to strings: JavaScript would give '[object Object]'; make the text of each first, e.g. 'a.map(r => r.match(...)).join()'
+const joined = results.join();
+                       ^

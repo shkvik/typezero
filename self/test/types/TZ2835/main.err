@@ -1,0 +1,3 @@
+main.tz:5:23: error TZ2835: sorting objects needs a comparison function: 'sort()' without one compares them all as '[object Object]'; pass one, e.g. 'sort((a, b) => a.x - b.x)'
+const sorted = points.sort();
+                      ^

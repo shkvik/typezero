@@ -1,0 +1,6 @@
+main.tz:6:17: error TZ2842: cannot iterate over a value of type 'Point'
+for (const v of point) {
+                ^
+main.tz:12:17: error TZ2842: cannot iterate over a value of type 'int'
+for (const n of count) {
+                ^

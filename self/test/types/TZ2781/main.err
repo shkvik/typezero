@@ -1,0 +1,6 @@
+main.tz:7:23: error TZ2781: field 'price' is read before it is set
+    this.total = this.price * 2;
+                      ^
+main.tz:16:10: error TZ2781: field 'count' is read before it is set
+    this.count += 1;
+         ^

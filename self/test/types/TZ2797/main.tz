@@ -1,0 +1,28 @@
+// A constructor does not call a method that a class down the chain overrides.
+class Widget {
+  size: int;
+
+  constructor() {
+    this.size = 1;
+    this.render();
+  }
+
+  render(): void {
+    console.log(this.size);
+  }
+}
+
+class Button extends Widget {
+  label: string;
+
+  constructor() {
+    super();
+    this.label = "b";
+  }
+
+  render(): void {
+    console.log(this.label);
+  }
+}
+
+const button = new Button();

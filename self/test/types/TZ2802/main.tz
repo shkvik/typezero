@@ -1,0 +1,6 @@
+// An interface extends interfaces, not classes.
+class Animal {}
+
+interface Pet extends Animal {
+  name: string;
+}

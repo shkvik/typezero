@@ -1,0 +1,3 @@
+main.tz:11:12: error TZ2788: 'y' is marked 'override', but 'Base' has no field 'y'
+  override y: int;
+           ^

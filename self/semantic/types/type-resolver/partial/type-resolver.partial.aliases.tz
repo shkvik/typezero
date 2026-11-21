@@ -160,20 +160,147 @@ partial class TypeResolver {
     }
 
     const fields = new Map<string, ObjectField>();
+    const owners = new Map<string, string>();
+    const parents: Type[] = [];
+
+    this.extending.push(decl);
 
     for (const base of decl.bases) {
-      const parent = this.resolve(base, context);
-
-      this.inherit(fields, parent);
+      this.baseFields(decl, base, owners, fields, context, parents);
     }
+
+    this.extending.pop();
 
     const own = this.ownBody(decl.type, context);
 
+    this.narrowedChecks(decl, own, owners, fields, context.module);
     this.inherit(fields, own);
 
     const merged = Array.from(fields.values());
+    const made = this.store.objectOf(merged);
 
-    return this.store.objectOf(merged);
+    this.addParents(made, parents);
+
+    return made;
+  }
+
+  private addParents(type: Type, parents: Type[]): void {
+    const known = this.store.parentsOf(type);
+    const added = parents.filter((parent) => !known.includes(parent));
+    if (added.length > 0) {
+      this.store.inherit(type, known.concat(added));
+    }
+  }
+
+  private baseFields(
+    decl: TypeAliasDecl,
+    base: TypeRef,
+    owners: Map<string, string>,
+    fields: Map<string, ObjectField>,
+    context: TypeContext,
+    parents: Type[],
+  ): void {
+    const module = context.module;
+    const first = decl.name;
+    const word = base.name;
+    if (word == first) {
+      return this.report(module, base.loc, Code.InterfaceItself, { first });
+    }
+
+    const isLooping = this.extending.some((one) => one.name == word);
+    if (isLooping) {
+      return this.report(module, base.loc, Code.InterfaceItselfThrough, {
+        first,
+        word,
+      });
+    }
+
+    const parent = this.resolve(base, context);
+    if (parent.kind == TypeKind.Instance) {
+      return this.report(module, base.loc, Code.InterfaceClassBase, { word });
+    }
+    if (parent.kind != TypeKind.Object) {
+      return this.notObjectBase(parent, base, module);
+    }
+
+    for (const field of parent.fields) {
+      fields.set(field.name, field);
+      owners.set(field.name, word);
+    }
+
+    parents.push(parent);
+  }
+
+  private notObjectBase(parent: Type, base: TypeRef, module: int): void {
+    if (parent.kind == TypeKind.Error || this.isLibrary(module)) {
+      return;
+    }
+
+    this.report(module, base.loc, Code.InterfaceNotObject, {
+      word: this.text.of(parent),
+    });
+  }
+
+  private narrowedChecks(
+    decl: TypeAliasDecl,
+    own: Type,
+    owners: Map<string, string>,
+    fields: Map<string, ObjectField>,
+    module: int,
+  ): void {
+    const form = decl.type.form;
+    if (own.kind != TypeKind.Object || form.kind != TypeRefKind.Object) {
+      return;
+    }
+
+    for (const written of form.fields) {
+      const field = own.fields.find((one) => one.name == written.name);
+      const inherited = fields.get(written.name);
+      if (field == undefined || inherited == undefined || written.method) {
+        continue;
+      }
+      if (this.isSameLayout(field.type, inherited.type)) {
+        continue;
+      }
+
+      this.report(module, written.loc, Code.InterfaceFieldLayout, {
+        word: written.name,
+        first: decl.name,
+        second: this.text.of(field.type),
+        other: owners.get(written.name) ?? "",
+        place: this.text.of(inherited.type),
+      });
+    }
+  }
+
+  private isSameLayout(own: Type, theirs: Type): boolean {
+    const isOpen = own.kind == TypeKind.Error || theirs.kind == TypeKind.Error;
+    if (own == theirs || isOpen) {
+      return true;
+    }
+    if (own.kind != TypeKind.Instance || theirs.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    const chain: Type[] = [own];
+
+    for (let index = 0; index < chain.length; index++) {
+      const current = chain[index];
+      if (current == theirs) {
+        return true;
+      }
+      if (current == undefined) {
+        break;
+      }
+
+      for (const parent of this.store.parentsOf(current)) {
+        if (!chain.includes(parent)) {
+          chain.push(parent);
+        }
+      }
+    }
+
+    return false;
   }
 
   private ownBody(ref: TypeRef, context: TypeContext): Type {
@@ -211,6 +338,7 @@ partial class TypeResolver {
     }
     if (body.kind == TypeKind.Object) {
       this.store.fillObject(reserved, body.fields);
+      this.addParents(reserved, this.store.parentsOf(body));
 
       return reserved;
     }

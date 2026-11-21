@@ -1,0 +1,6 @@
+main.tz:2:15: error TZ2818: 'parseInt' can be used as a value only where a function type is expected, e.g. 'const f: (s: string) => double = parseInt'
+const parse = parseInt;
+              ^
+main.tz:3:16: error TZ2818: 'encodeURIComponent' can be used as a value only where a function type is expected, e.g. 'const f: (s: string) => string = encodeURIComponent'
+const encode = encodeURIComponent;
+               ^

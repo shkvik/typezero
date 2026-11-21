@@ -1,0 +1,3 @@
+main.tz:7:10: error TZ2798: the constructor of 'Widget' calls 'layout' (through the methods it calls), which 'Button' overrides: it would run before the fields of 'Button' are set; call it once the object is made
+    this.refresh();
+         ^

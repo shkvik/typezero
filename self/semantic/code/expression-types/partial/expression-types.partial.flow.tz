@@ -92,24 +92,48 @@ partial class ExpressionTypes {
 
   private assignedTyped(expr: AssignExpr, module: int): Type {
     const target = expr.target;
+
+    this.writtenTargets.add(target);
+
+    if (this.dictTargetCheck(target, module)) {
+      this.typed(expr.value, undefined, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (expr.op != undefined && this.fieldReadEarly(target, module)) {
+      this.typed(expr.value, undefined, module);
+      this.fieldSetMark(target, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
     const key = this.pathKey(target, module);
     const declared = this.assignedDeclared(target, module);
     const current = this.assignedCurrent(key, declared);
 
     if (declared == undefined || declared.kind == TypeKind.Error) {
       this.forgetPatterned(target, module);
+      this.fieldSetMark(target, module);
 
       return this.store.plain(TypeKind.Error);
+    }
+
+    if (expr.op == BinaryOp.Nullish) {
+      this.nullishTargetCheck(expr, declared, module);
     }
 
     const wanted = this.assignedWanted(expr.op, declared);
     const given = this.typed(expr.value, wanted, module);
 
-    if (wanted != undefined && !this.isLibraryTarget(target, module)) {
+    const isChecked =
+      !this.isLibraryTarget(target, module) &&
+      !this.isPlacedLiteral(target, given, module);
+    if (wanted != undefined && isChecked) {
       this.coerce(expr.value, given, wanted, module, kNoPlace);
     }
 
     this.forgetPatterned(target, module);
+    this.fieldSetMark(target, module);
 
     if (key == undefined) {
       return given;
@@ -118,6 +142,7 @@ partial class ExpressionTypes {
     const fact = this.assignedFact(expr.op, declared, current, given);
 
     this.forgetPath(key);
+    this.forgetFieldsNamed(target);
 
     if (fact != undefined) {
       this.facts = this.withFact(this.facts, key, fact);
@@ -248,6 +273,12 @@ partial class ExpressionTypes {
   }
 
   private updatedTyped(target: Expr, module: int): Type {
+    if (this.dictTargetCheck(target, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.updateTargetCheck(target, module);
+
     const type = this.typed(target, undefined, module);
     const key = this.pathKey(target, module);
     if (key != undefined) {

@@ -1,0 +1,3 @@
+main.tz:8:4: error TZ2854: an iterator has no 'throw()' in tz: an error is a value, not something thrown into a generator
+it.throw(1);
+   ^

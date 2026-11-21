@@ -1,0 +1,4 @@
+main.tz
+  2:10 format: (int, int?) => string
+  6:7 nums: int[]
+  7:7 texts: string[]

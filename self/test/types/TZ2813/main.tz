@@ -1,0 +1,7 @@
+// A callback would get the index in an optional parameter.
+function format(n: int, digits?: int): string {
+  return `${n}${digits ?? 0}`;
+}
+
+const nums = [1, 2, 3];
+const texts = nums.map(format);

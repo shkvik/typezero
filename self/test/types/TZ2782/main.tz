@@ -1,0 +1,18 @@
+// Until every field is set, 'this' only sets fields and reads the set ones.
+class User {
+  name: string;
+  email: string;
+
+  constructor(name: string) {
+    this.name = name;
+    register(this);
+    this.email = name;
+    register(this);
+  }
+}
+
+function register(user: User): void {
+  console.log(user.name);
+}
+
+const user = new User("a");

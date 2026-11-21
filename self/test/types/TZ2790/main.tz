@@ -1,0 +1,19 @@
+// A private field of the parent is not declared again.
+class Animal {
+  private secret: int;
+
+  constructor() {
+    this.secret = 1;
+  }
+}
+
+class Spy extends Animal {
+  secret: int;
+
+  constructor() {
+    super();
+    this.secret = 2;
+  }
+}
+
+const spy = new Spy();

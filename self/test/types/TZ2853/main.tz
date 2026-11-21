@@ -1,0 +1,8 @@
+// Nor does a spread.
+function* talk(): Generator<string, void, string> {
+  const name = yield "who?";
+
+  console.log(name);
+}
+
+const all = [...talk()];

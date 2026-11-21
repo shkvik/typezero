@@ -1,0 +1,3 @@
+main.tz:5:16: error TZ2824: a function can be declared only directly in a block; in a 'switch', declare it before the 'switch'
+      function one(): void {}
+               ^

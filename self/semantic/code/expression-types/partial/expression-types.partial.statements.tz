@@ -88,6 +88,10 @@ partial class ExpressionTypes {
       case StmtKind.Class:
         return this.walkClass(statement, module);
       case StmtKind.Expr: {
+        if (statement.expr.kind == ExprKind.Yield) {
+          this.unusedYields.add(statement.expr);
+        }
+
         const type = this.typed(statement.expr, undefined, module);
 
         return this.usedCheck(statement.expr, type, statement.loc, module);
@@ -276,6 +280,8 @@ partial class ExpressionTypes {
     frame: FunctionFrame,
     module: int,
   ): void {
+    this.switchFunctionsCheck(statement, module);
+
     const subject = this.typed(statement.discriminant, undefined, module);
     const tests = this.caseTypes(statement, subject, module);
 
@@ -287,6 +293,8 @@ partial class ExpressionTypes {
     const discriminant = statement.discriminant;
     let reached: Map<string, Type> | undefined = undefined;
     let passed = new Map<string, Type>();
+    const exits: Map<string, Type>[] = [];
+    const lastCase = statement.cases[statement.cases.length - 1];
 
     for (const option of statement.cases) {
       const test = option.test;
@@ -306,9 +314,16 @@ partial class ExpressionTypes {
 
       this.facts = this.mergedFacts(before, reached);
       this.walkStatements(option.body, frame, module);
+
+      if (this.isSwitchExit(option, option == lastCase, module)) {
+        exits.push(this.facts);
+      }
+
       this.facts = before;
       reached = undefined;
     }
+
+    this.switchFieldsJoined(statement, exits);
   }
 
   private caseFacts(
@@ -435,6 +450,7 @@ partial class ExpressionTypes {
     const fn = frame.fn;
 
     this.returnBeforeSuper(statement.loc, module);
+    this.returnFieldsCheck(statement, fn, module);
     this.returnAwaitCheck(value, frame, module);
 
     if (fn == undefined) {
@@ -655,11 +671,16 @@ partial class ExpressionTypes {
   private loopItem(loop: ForOfStmt, module: int): Type {
     const iterable = this.typed(loop.iterable, undefined, module);
 
+    this.dictForInCheck(loop, iterable, module);
+
     if (loop.keys || loop.isAwait) {
       return this.store.plain(TypeKind.Error);
     }
 
     const base = this.apparent(iterable);
+
+    this.loopCannotCheck(loop, base, module);
+    this.resumedCheck(loop.iterable, iterable, Code.ForOfResumes, module);
 
     switch (base.kind) {
       case TypeKind.Tuple:

@@ -1,0 +1,8 @@
+// 'forEach' does not wait for a Promise.
+async function save(n: int): Promise<int> {
+  return n;
+}
+
+const nums = [1, 2, 3];
+
+nums.forEach(save);

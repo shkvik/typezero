@@ -61,6 +61,7 @@ export class TypeResolver {
   private readonly prefixes: Map<int, string>;
   private readonly libraryShapes: Set<int>;
   private readonly aliasOrigins: Map<int, AliasOrigin>;
+  private readonly extending: TypeAliasDecl[];
   private quiet: int;
 
   public constructor(
@@ -84,6 +85,7 @@ export class TypeResolver {
     this.prefixes = new Map<int, string>();
     this.libraryShapes = new Set<int>();
     this.aliasOrigins = new Map<int, AliasOrigin>();
+    this.extending = [];
     this.quiet = 0;
 
     for (const scopes of resolved) {

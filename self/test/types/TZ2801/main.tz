@@ -1,0 +1,8 @@
+// A chain of interfaces does not come back to its start.
+interface First extends Second {
+  a: int;
+}
+
+interface Second extends First {
+  b: int;
+}

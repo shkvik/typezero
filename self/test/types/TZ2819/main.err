@@ -1,0 +1,3 @@
+main.tz:2:14: error TZ2819: 'ok' can be used as a value only where a function type is expected, e.g. 'xs.map(ok)'
+const make = ok;
+             ^

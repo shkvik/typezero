@@ -1,0 +1,14 @@
+// for...of goes over iterable values only.
+type Point = { x: int; y: int };
+
+const point: Point = { x: 1, y: 2 };
+
+for (const v of point) {
+  console.log(v);
+}
+
+const count = 3;
+
+for (const n of count) {
+  console.log(n);
+}

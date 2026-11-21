@@ -1,0 +1,3 @@
+// Unknown values cannot be converted to strings.
+const values: unknown[] = [1, "a"];
+const joined = values.join(", ");

@@ -1,0 +1,9 @@
+// A field of a value that may be undefined is not written.
+interface Node {
+  value: int;
+  next?: Node;
+}
+
+const node: Node = { value: 1 };
+
+node.next.value = 2;

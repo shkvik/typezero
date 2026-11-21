@@ -1,0 +1,3 @@
+main.tz
+  2:11 type First = { b: int; a: int }
+  6:11 type Second = { b: int }

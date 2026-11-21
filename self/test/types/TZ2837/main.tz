@@ -1,0 +1,5 @@
+// Sorting numbers needs a comparison function.
+const nums = [2, 10, 1];
+const sorted = nums.sort();
+const maybe: (int | undefined)[] = [2, undefined];
+const either = maybe.sort();

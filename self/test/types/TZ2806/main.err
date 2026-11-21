@@ -1,0 +1,3 @@
+main.tz:3:33: error TZ2806: the second argument of 'map' sets 'this' for the callback, which is not supported
+const same = nums.map((x) => x, nums);
+                                ^

@@ -127,6 +127,7 @@ partial class ExpressionTypes {
     }
 
     frame.isBefore = false;
+    this.superFieldsSet();
 
     return nothing;
   }
@@ -189,6 +190,11 @@ partial class ExpressionTypes {
 
     if (!lookup.isKnown) {
       return;
+    }
+    if (entry != undefined) {
+      if (this.methodOverFieldCheck(method, entry, parent, module)) {
+        return;
+      }
     }
     if (entry == undefined && isMarked) {
       this.report(module, method.loc, Code.OverrideMissing, {
@@ -365,8 +371,10 @@ partial class ExpressionTypes {
 
     const entry = this.parentEntry(parent, fn);
     const theirs = entry?.methods[0];
-    const written = theirs?.returnType;
-    if (entry == undefined || theirs == undefined || written == undefined) {
+    if (entry == undefined || theirs == undefined) {
+      return undefined;
+    }
+    if (theirs.params.length != fn.params.length) {
       return undefined;
     }
 
@@ -375,7 +383,12 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return type.shape.result;
+    const result = type.shape.result;
+    if (result.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return result;
   }
 
   private contractResultOf(

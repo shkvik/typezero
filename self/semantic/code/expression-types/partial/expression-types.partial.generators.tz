@@ -1,0 +1,320 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  Expr,
+  MemberExpr,
+  YieldExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { kLengthName, kNoPlace } from "../const/expression-types.const.tz";
+import {
+  FunctionFrame,
+  GeneratorFrame,
+} from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private enterGenerator(frame: FunctionFrame, result: Type | undefined): void {
+    const fn = frame.fn;
+    if (fn == undefined || !fn.isGenerator) {
+      return;
+    }
+
+    const generator = this.generatorFrameOf(fn, result);
+
+    frame.generator = generator;
+    this.generatorFrames.push(generator);
+  }
+
+  private leaveGenerator(frame: FunctionFrame): void {
+    if (frame.generator != undefined) {
+      this.generatorFrames.pop();
+    }
+  }
+
+  private writtenResultCheck(
+    fn: FunctionDecl,
+    result: Type,
+    frame: FunctionFrame,
+    module: int,
+  ): void {
+    const written = fn.returnType;
+    const generator = frame.generator;
+    if (written == undefined || generator == undefined) {
+      return;
+    }
+
+    this.writtenGeneratorCheck(fn, written, result, generator, module);
+  }
+
+  private iteratorCallCheck(
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): boolean {
+    if (object.kind != TypeKind.Iterator) {
+      return false;
+    }
+
+    const word = member.name;
+
+    switch (word) {
+      case "throw":
+        this.report(module, member.loc, Code.IteratorNoThrow, kNoDetails);
+
+        return true;
+      case "return":
+        this.report(module, member.loc, Code.IteratorNoReturn, kNoDetails);
+
+        return true;
+      default:
+        return this.iteratorMissingCheck(member, object, module);
+    }
+  }
+
+  private iteratorMissingCheck(
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): boolean {
+    const word = member.name;
+    if (word != kLengthName) {
+      return false;
+    }
+
+    const first = this.text.of(object);
+
+    this.report(module, member.loc, Code.IteratorNoLength, { word, first });
+
+    return true;
+  }
+
+  private generatorFrameOf(
+    fn: FunctionDecl,
+    result: Type | undefined,
+  ): GeneratorFrame {
+    if (result == undefined || result.kind != TypeKind.Iterator) {
+      return { fn, yields: [], isOpen: result == undefined };
+    }
+
+    const shape = result.shape;
+
+    return {
+      fn,
+      yields: [],
+      isOpen: false,
+      yielded: shape.yielded,
+      sent: shape.sent,
+    };
+  }
+
+  private yieldTyped(expr: YieldExpr, module: int): Type {
+    const frame = this.generatorFrames[this.generatorFrames.length - 1];
+    const value = expr.value;
+
+    if (
+      frame == undefined ||
+      this.openFunctions[this.openFunctions.length - 1] != frame.fn
+    ) {
+      return this.childrenTyped(expr, module);
+    }
+    if (expr.delegate) {
+      return this.delegateTyped(frame, value, module);
+    }
+
+    const given = this.yieldValue(frame, value, module);
+
+    if (value != undefined) {
+      this.yieldOf.set(value, expr.loc);
+    }
+
+    if (!this.unusedYields.has(expr) && frame.sent == undefined) {
+      this.report(module, expr.loc, Code.YieldSentUnknown, {
+        word: this.text.of(this.widened(given)),
+      });
+    }
+
+    if (value != undefined) {
+      frame.yields.push({ value, type: given });
+    }
+
+    return this.sentType(frame);
+  }
+
+  private yieldValue(
+    frame: GeneratorFrame,
+    value: Expr | undefined,
+    module: int,
+  ): Type {
+    if (value == undefined) {
+      return this.store.plain(TypeKind.Undefined);
+    }
+
+    const yielded = frame.yielded;
+    if (yielded == undefined) {
+      return this.typed(value, undefined, module);
+    }
+
+    return this.checked(value, yielded, module, kNoPlace);
+  }
+
+  private sentType(frame: GeneratorFrame): Type {
+    const sent = frame.sent;
+    if (sent == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return sent;
+  }
+
+  private delegateTyped(
+    frame: GeneratorFrame,
+    value: Expr | undefined,
+    module: int,
+  ): Type {
+    const error = this.store.plain(TypeKind.Error);
+
+    if (value == undefined) {
+      return error;
+    }
+
+    const type = this.typed(value, undefined, module);
+    const item = this.delegatedItem(value, type, module);
+
+    frame.yields.push({ value, type: item });
+
+    return error;
+  }
+
+  private delegatedItem(value: Expr, type: Type, module: int): Type {
+    const base = this.apparent(type);
+
+    switch (base.kind) {
+      case TypeKind.Array:
+        return base.item;
+      case TypeKind.String:
+      case TypeKind.Template:
+        return this.store.plain(TypeKind.String);
+      case TypeKind.Iterator:
+        return base.shape.yielded;
+      case TypeKind.Error:
+      case TypeKind.Instance:
+      case TypeKind.Dict:
+      case TypeKind.TypeParameter:
+      case TypeKind.Object:
+      case TypeKind.Union:
+        return this.store.plain(TypeKind.Error);
+      default:
+        this.report(module, value.loc, Code.YieldDelegateNotIterable, {
+          word: this.text.of(type),
+        });
+
+        return this.store.plain(TypeKind.Error);
+    }
+  }
+
+  private widened(type: Type | undefined): Type {
+    if (type == undefined) {
+      return this.store.integer(64, false);
+    }
+
+    return this.relation.baseOf(type) ?? type;
+  }
+
+  private generatorResult(
+    fn: FunctionDecl,
+    frame: FunctionFrame,
+    generator: GeneratorFrame,
+    module: int,
+  ): Type {
+    const yields = generator.yields;
+    if (yields.some((one) => one.type.kind == TypeKind.Error)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (yields.length == 0) {
+      const word = this.functionName(fn);
+
+      this.report(module, fn.loc, Code.GeneratorNoYield, { word });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const yielded = this.joinedReturns(fn, yields, module, Code.YieldsDiffer);
+    if (yielded == undefined || yielded.kind == TypeKind.Error) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const returned = this.generatorReturned(fn, frame, module);
+    const nothing = this.store.plain(TypeKind.Void);
+    const shape = {
+      yielded: this.widened(yielded),
+      returned,
+      sent: nothing,
+      async: fn.isAsync,
+    };
+
+    return this.store.iteratorOf(shape);
+  }
+
+  private generatorReturned(
+    fn: FunctionDecl,
+    frame: FunctionFrame,
+    module: int,
+  ): Type {
+    const valued = frame.returns.filter((one) => !this.isVoided(one.value));
+    if (valued.length == 0) {
+      return this.store.plain(TypeKind.Void);
+    }
+
+    const joined = this.joinedReturns(fn, valued, module, Code.ReturnsDiffer);
+
+    return this.widened(joined);
+  }
+
+  private writtenGeneratorCheck(
+    fn: FunctionDecl,
+    written: TypeRef,
+    result: Type,
+    generator: GeneratorFrame,
+    module: int,
+  ): void {
+    const isOpen =
+      result.kind == TypeKind.Iterator || result.kind == TypeKind.Error;
+    if (!fn.isGenerator || isOpen) {
+      return;
+    }
+
+    const word = this.text.of(result);
+
+    this.report(module, written.loc, Code.GeneratorNotIterator, { word });
+  }
+
+  private resumedCheck(
+    iterable: Expr,
+    type: Type,
+    code: Code,
+    module: int,
+  ): void {
+    const base = this.definedType(type);
+    if (base.kind != TypeKind.Iterator) {
+      return;
+    }
+
+    const sent = base.shape.sent;
+    const isFree =
+      sent.kind == TypeKind.Void ||
+      sent.kind == TypeKind.Undefined ||
+      sent.kind == TypeKind.Error ||
+      this.isOptional(sent);
+    if (isFree) {
+      return;
+    }
+
+    this.report(module, iterable.loc, code, {
+      word: this.text.of(base),
+      first: this.text.of(sent),
+    });
+  }
+}

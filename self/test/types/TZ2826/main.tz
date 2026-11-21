@@ -1,0 +1,3 @@
+// Functions cannot be converted to strings.
+const inc = (x: int) => x + 1;
+const joined = [inc].join();

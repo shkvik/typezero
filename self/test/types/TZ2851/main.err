@@ -1,0 +1,3 @@
+main.tz:2:24: error TZ2851: a generator returns an iterator: declare its type as 'Generator<int>'
+function* wrongType(): int {
+                       ^

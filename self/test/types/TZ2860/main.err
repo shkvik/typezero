@@ -1,0 +1,3 @@
+main.tz:4:15: error TZ2860: property 'get' does not exist on type 'Set<int>'; a Set adds a value with 's.add(value)' and checks one with 's.has(value)'
+console.log(s.get(1));
+              ^

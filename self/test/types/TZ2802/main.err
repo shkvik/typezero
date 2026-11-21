@@ -1,0 +1,3 @@
+main.tz:4:23: error TZ2802: 'Animal' is a class, and an interface extends only interfaces
+interface Pet extends Animal {
+                      ^

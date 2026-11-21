@@ -1,0 +1,5 @@
+main.tz
+  2:10 early: () => int
+  3:9 first: int
+  5:12 helper: (int) => int
+  9:9 scale: int

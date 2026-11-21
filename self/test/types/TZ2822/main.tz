@@ -1,0 +1,7 @@
+// A function made before a variable it uses is declared.
+function later(): boolean {
+  const check = (x: int) => x < limit;
+  const limit = 10;
+
+  return check(5);
+}

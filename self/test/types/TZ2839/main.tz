@@ -1,0 +1,8 @@
+// '??=' needs a variable that may be undefined.
+let count = 0;
+
+count ??= 5;
+
+let maybe: int | undefined = undefined;
+
+maybe ??= 5;

@@ -1,0 +1,3 @@
+main.tz:4:17: error TZ2869: 'for...in' walks the properties of an object, and a Set has none in JavaScript; walk its values with 'for (const x of s)'
+for (const k in s) {
+                ^

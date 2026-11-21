@@ -1,0 +1,3 @@
+main.tz:4:28: error TZ2810: 'filter' needs a function, found 'int'
+const mapped = nums.filter(five);
+                           ^

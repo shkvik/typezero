@@ -1,0 +1,4 @@
+// A Map sets entries; it does not add them.
+const m = new Map<string, int>();
+
+m.add(1);

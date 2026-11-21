@@ -1,0 +1,3 @@
+main.tz
+  2:5 count: int
+  6:5 maybe: int | undefined

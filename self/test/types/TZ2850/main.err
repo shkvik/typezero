@@ -1,0 +1,3 @@
+main.tz:4:3: error TZ2850: 'mixed' yields 'string[]' here and 'int[]' elsewhere; a generator yields values of one type
+  yield ["two"];
+  ^

@@ -1,0 +1,5 @@
+// Objects cannot be converted to strings.
+type Point = { x: int; y: int };
+
+const points: Point[] = [{ x: 1, y: 2 }];
+const joined = points.join();

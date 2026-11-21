@@ -1,0 +1,3 @@
+main.tz:3:18: error TZ2848: the value of 'yield' is what next(x) sends, and nothing says its type; declare it in the return type, e.g. ': Generator<int, void, string>'
+  const answer = yield 1;
+                 ^

@@ -1,0 +1,14 @@
+// A field declared again in a class without a constructor gets no value.
+class Animal {
+  name: string;
+
+  constructor(name: string) {
+    this.name = name;
+  }
+}
+
+class Again extends Animal {
+  name: string;
+}
+
+const again = new Again("a");

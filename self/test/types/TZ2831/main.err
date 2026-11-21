@@ -1,0 +1,3 @@
+main.tz:3:22: error TZ2831: sorting functions needs a comparison function: 'sort()' without one compares their source code
+const sorted = [inc].sort();
+                     ^

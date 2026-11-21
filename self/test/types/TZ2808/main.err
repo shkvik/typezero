@@ -1,0 +1,3 @@
+main.tz:3:26: error TZ2808: the callback of 'map' must return a value
+const nothing = nums.map((x) => {
+                         ^

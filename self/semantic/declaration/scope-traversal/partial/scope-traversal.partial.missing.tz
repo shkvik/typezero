@@ -34,6 +34,15 @@ partial class ScopeTraversal {
     this.report(loc, code, { word: absent.name, other: absent.instead });
   }
 
+  private isErrorClassBase(name: string): boolean {
+    const absent = kGlobalNames.absent(name);
+    if (absent == undefined || absent.reason != AbsentReason.ErrorClass) {
+      return false;
+    }
+
+    return !this.isTypeName(name);
+  }
+
   private isTypeName(name: string): boolean {
     const entry = this.scopes.findType(name);
 

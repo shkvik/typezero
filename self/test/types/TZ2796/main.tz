@@ -1,0 +1,4 @@
+// A chain of classes does not come back to its start.
+class First extends Second {}
+
+class Second extends First {}

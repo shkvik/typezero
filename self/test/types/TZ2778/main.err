@@ -1,0 +1,6 @@
+main.tz:5:3: error TZ2778: the constructor of 'Branchy' does not set field 'x' on every path; set it on every path, or make it optional: 'x?: T'
+  constructor(flag: boolean) {
+  ^
+main.tz:22:5: error TZ2778: the constructor of 'Returns' does not set field 'x' on every path; set it on every path, or make it optional: 'x?: T'
+    return;
+    ^

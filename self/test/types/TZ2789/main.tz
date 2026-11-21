@@ -1,0 +1,6 @@
+// 'override' on a field needs a class that is extended.
+class Lone {
+  override x: int;
+}
+
+const lone = new Lone();

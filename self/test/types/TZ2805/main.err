@@ -1,0 +1,3 @@
+main.tz:3:21: error TZ2805: 'map' needs a function
+const mapped = nums.map();
+                    ^

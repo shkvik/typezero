@@ -204,6 +204,10 @@ partial class ExpressionTypes {
       return this.staticTargetDeclared(target, owner, module);
     }
 
+    if (this.undefinedTargetCheck(target, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
     const declared = this.fieldDeclared(target, module);
 
     if (this.isMadeThis(target.object, module)) {
@@ -219,6 +223,8 @@ partial class ExpressionTypes {
     if (object.kind == TypeKind.Instance) {
       this.instanceTargetCheck(target, object, module);
     }
+
+    this.objectTargetCheck(target, object, module);
 
     return declared;
   }

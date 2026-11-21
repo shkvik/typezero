@@ -201,7 +201,7 @@ partial class TypeRelation {
       return this.descends(from, to);
     }
     if (from.kind == TypeKind.Object && to.kind == TypeKind.Object) {
-      return this.sameFields(from.fields, to.fields);
+      return this.descends(from, to) || this.sameFields(from.fields, to.fields);
     }
     if (from.kind == TypeKind.Tuple && to.kind == TypeKind.Tuple) {
       return (

@@ -1,0 +1,6 @@
+main.tz:4:2: error TZ2862: 'm[key] = ...' sets a property of the Map object in JavaScript, not one of its entries; set an entry with 'm.set(key, value)'
+m["a"] = 1;
+ ^
+main.tz:5:3: error TZ2862: 'm.x = ...' sets a property of the Map object in JavaScript, not one of its entries; set an entry with 'm.set(key, value)'
+m.x = 2;
+  ^

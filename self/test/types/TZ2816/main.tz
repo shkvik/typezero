@@ -1,0 +1,12 @@
+// 'forEach' drops what its callback returns.
+function check(n: int): Result<int, string> {
+  if (n > 0) {
+    return ok(n);
+  }
+
+  return err("negative");
+}
+
+const nums = [1, 2, 3];
+
+nums.forEach(check);

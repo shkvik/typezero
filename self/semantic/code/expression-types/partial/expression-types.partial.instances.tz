@@ -332,6 +332,8 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
+    this.newArrayCheck(expr, form.name, module);
+
     const target = this.targetOfUse(expr.loc, form.name, module);
     if (target == undefined || target.kind != SymbolKind.Class) {
       return this.store.plain(TypeKind.Error);

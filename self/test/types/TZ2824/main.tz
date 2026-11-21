@@ -1,0 +1,7 @@
+// A function is declared directly in a block, not in a case of a switch.
+function inSwitch(n: int): void {
+  switch (n) {
+    case 1:
+      function one(): void {}
+  }
+}

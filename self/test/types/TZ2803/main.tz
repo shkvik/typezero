@@ -1,0 +1,6 @@
+// An interface extends object types.
+type Count = int;
+
+interface Counted extends Count {
+  name: string;
+}

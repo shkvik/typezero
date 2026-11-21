@@ -1,0 +1,14 @@
+// An interface narrows a field only down the chain of its type.
+class Animal {}
+
+class Dog extends Animal {}
+
+interface Owner {
+  pet: Animal;
+  port: int;
+}
+
+interface DogOwner extends Owner {
+  pet: Dog;
+  port: double;
+}

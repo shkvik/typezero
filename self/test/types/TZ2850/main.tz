@@ -1,0 +1,7 @@
+// A generator yields values of one type.
+function* mixed() {
+  yield [1];
+  yield ["two"];
+}
+
+const values = mixed();

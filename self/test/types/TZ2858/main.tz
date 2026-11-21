@@ -1,0 +1,3 @@
+// A method of a Map is only called.
+const m = new Map<string, int>();
+const getter = m.get;

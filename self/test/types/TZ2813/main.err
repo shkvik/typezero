@@ -1,0 +1,3 @@
+main.tz:7:24: error TZ2813: 'format' would also get the index in its optional parameter 'digits': 'map' calls it with (value, index, array); pass an arrow that gives it only what it needs
+const texts = nums.map(format);
+                       ^

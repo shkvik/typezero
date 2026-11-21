@@ -1,0 +1,9 @@
+main.tz:2:22: error TZ2821: 'Math.max' can be used as a value only where a function type is expected, e.g. as a callback
+const biggest = Math.max;
+                     ^
+main.tz:3:23: error TZ2821: 'console.log' can be used as a value only where a function type is expected, e.g. as a callback
+const print = console.log;
+                      ^
+main.tz:4:22: error TZ2821: 'Number.parseInt' can be used as a value only where a function type is expected, e.g. as a callback
+const parse = Number.parseInt;
+                     ^

@@ -1,0 +1,5 @@
+// A Map sets entries with 'set', not with properties.
+const m = new Map<string, int>();
+
+m["a"] = 1;
+m.x = 2;

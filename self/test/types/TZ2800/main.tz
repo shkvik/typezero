@@ -1,0 +1,4 @@
+// An interface does not extend itself.
+interface Loop extends Loop {
+  z: int;
+}

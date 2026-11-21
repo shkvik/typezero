@@ -1,0 +1,12 @@
+// An arrow in a field of the parent is overridden by a field.
+class Parent {
+  onClick = () => 1;
+}
+
+class Child extends Parent {
+  onClick(): int {
+    return 2;
+  }
+}
+
+const child = new Child();

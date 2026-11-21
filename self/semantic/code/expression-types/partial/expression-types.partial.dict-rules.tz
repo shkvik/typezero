@@ -1,0 +1,309 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { Details } from "../../../../diagnostic/types/message.types.tz";
+import {
+  BinaryExpr,
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  UnaryExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { ForOfStmt } from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  DictKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  kDictIterating,
+  kLengthName,
+  kThisName,
+} from "../const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private collectionOf(type: Type): DictKind | undefined {
+    const base = this.definedType(type);
+    if (base.kind != TypeKind.Dict || base.dict == DictKind.Record) {
+      return undefined;
+    }
+
+    return base.dict;
+  }
+
+  private collectionWord(dict: DictKind): string {
+    if (dict == DictKind.Map) {
+      return "Map";
+    }
+
+    return "Set";
+  }
+
+  private dictMemberCheck(
+    expr: MemberExpr,
+    object: Type,
+    isCalled: boolean,
+    module: int,
+  ): boolean {
+    const dict = this.collectionOf(object);
+    if (dict == undefined) {
+      return false;
+    }
+
+    const name = expr.name;
+    const word = this.tupleText(expr.object);
+    const first = this.text.of(object);
+
+    if (name == kLengthName) {
+      this.report(module, expr.loc, Code.DictNoLength, { word, first });
+
+      return true;
+    }
+    if (isCalled) {
+      return this.dictMissingCall(expr, dict, word, first, module);
+    }
+
+    const receiver = this.libraryReceiver(object);
+    if (receiver == undefined) {
+      return false;
+    }
+
+    const method = this.receiverMember(receiver, name, true);
+    if (method == undefined || method.kind != TypeKind.Function) {
+      return false;
+    }
+
+    this.report(module, expr.loc, Code.DictMethodValue, { word, other: name });
+
+    return true;
+  }
+
+  private dictMissingCall(
+    expr: MemberExpr,
+    dict: DictKind,
+    word: string,
+    first: string,
+    module: int,
+  ): boolean {
+    const name = expr.name;
+    const isMap = dict == DictKind.Map;
+    const details: Details = { word, first, other: name };
+
+    if (isMap && name == "add") {
+      this.report(module, expr.loc, Code.MapHasNoAdd, details);
+
+      return true;
+    }
+    if (!isMap && (name == "set" || name == "get")) {
+      this.report(module, expr.loc, Code.SetHasNoGet, details);
+
+      return true;
+    }
+    if (!kDictIterating.includes(name)) {
+      return false;
+    }
+
+    const place = this.iteratingSource(isMap);
+
+    this.report(module, expr.loc, Code.DictNotIterating, {
+      word,
+      first,
+      other: name,
+      place,
+    });
+
+    return true;
+  }
+
+  private iteratingSource(isMap: boolean): string {
+    if (isMap) {
+      return ".entries()";
+    }
+
+    return ".values()";
+  }
+
+  private dictTargetCheck(target: Expr, module: int): boolean {
+    if (target.kind != ExprKind.Member && target.kind != ExprKind.Index) {
+      return false;
+    }
+
+    const holder = target.object;
+    if (holder.kind == ExprKind.Name && holder.name == kThisName) {
+      return false;
+    }
+
+    this.quiet += 1;
+
+    const object = this.typed(target.object, undefined, module);
+
+    this.quiet -= 1;
+
+    const dict = this.collectionOf(object);
+    if (dict == undefined) {
+      return false;
+    }
+
+    const word = this.tupleText(target.object);
+
+    if (dict == DictKind.Set) {
+      return this.setTargetCheck(target, word, module);
+    }
+
+    const access = this.dictAccess(target);
+
+    this.report(module, target.loc, Code.MapPropertySet, {
+      word,
+      other: access,
+    });
+
+    return true;
+  }
+
+  private dictAccess(target: Expr): string {
+    if (target.kind == ExprKind.Member) {
+      return `.${target.name}`;
+    }
+
+    return "[key]";
+  }
+
+  private setTargetCheck(target: Expr, word: string, module: int): boolean {
+    if (target.kind == ExprKind.Index) {
+      this.report(module, target.loc, Code.SetIndexSet, { word });
+
+      return true;
+    }
+    if (target.kind == ExprKind.Member && target.name == "size") {
+      this.report(module, target.loc, Code.SetSizeSet, { word });
+
+      return true;
+    }
+
+    return false;
+  }
+
+  private dictDeleteCheck(expr: UnaryExpr, module: int): boolean {
+    const target = expr.operand;
+    if (target.kind != ExprKind.Member && target.kind != ExprKind.Index) {
+      return false;
+    }
+
+    this.quiet += 1;
+
+    const object = this.typed(target.object, undefined, module);
+
+    this.quiet -= 1;
+
+    const dict = this.collectionOf(object);
+    if (dict == undefined) {
+      return false;
+    }
+
+    const isMap = dict == DictKind.Map;
+
+    this.report(module, expr.loc, Code.DictDelete, {
+      word: this.collectionWord(dict),
+      first: this.tupleText(target.object),
+      other: this.entryPart(isMap),
+    });
+
+    return true;
+  }
+
+  private entryPart(isMap: boolean): string {
+    if (isMap) {
+      return "key";
+    }
+
+    return "value";
+  }
+
+  private dictInCheck(expr: BinaryExpr, object: Type, module: int): boolean {
+    const dict = this.collectionOf(object);
+    if (dict == undefined) {
+      return false;
+    }
+
+    const isMap = dict == DictKind.Map;
+
+    this.report(module, expr.loc, Code.DictIn, {
+      word: this.collectionWord(dict),
+      first: this.tupleText(expr.rhs),
+      other: this.entryPart(isMap),
+    });
+
+    return true;
+  }
+
+  private dictKeysCheck(expr: CallExpr, module: int): void {
+    const callee = expr.callee;
+    const arg = expr.args[0]?.expr;
+    if (callee.kind != ExprKind.Member || arg == undefined) {
+      return;
+    }
+
+    const holder = callee.object;
+    const isObject =
+      holder.kind == ExprKind.Name &&
+      holder.name == "Object" &&
+      this.isGlobalUse(holder, module);
+    const isListing =
+      callee.name == "keys" ||
+      callee.name == "values" ||
+      callee.name == "entries";
+    if (!isObject || !isListing) {
+      return;
+    }
+
+    this.quiet += 1;
+
+    const type = this.typed(arg, undefined, module);
+
+    this.quiet -= 1;
+
+    const dict = this.collectionOf(type);
+    if (dict == undefined) {
+      return;
+    }
+
+    const isSetEntries = dict == DictKind.Set && callee.name == "entries";
+    const method = this.listingMethod(callee.name, isSetEntries);
+
+    this.report(module, arg.loc, Code.DictObjectEmpty, {
+      word: callee.name,
+      first: this.collectionWord(dict),
+      second: this.tupleText(arg),
+      other: method,
+    });
+  }
+
+  private listingMethod(name: string, isSetEntries: boolean): string {
+    if (isSetEntries) {
+      return "values";
+    }
+
+    return name;
+  }
+
+  private dictForInCheck(loop: ForOfStmt, iterable: Type, module: int): void {
+    const dict = this.collectionOf(iterable);
+    if (!loop.keys || dict == undefined) {
+      return;
+    }
+
+    const isMap = dict == DictKind.Map;
+    const word = this.tupleText(loop.iterable);
+    const code = this.forInCode(isMap);
+
+    this.report(module, loop.iterable.loc, code, { word });
+  }
+
+  private forInCode(isMap: boolean): Code {
+    if (isMap) {
+      return Code.MapForIn;
+    }
+
+    return Code.SetForIn;
+  }
+}

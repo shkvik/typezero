@@ -1,0 +1,3 @@
+// 'ok' is a value only where a function type is expected.
+const make = ok;
+const fine = [1, 2].map(ok);

@@ -351,7 +351,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const parts = this.unionMembers(owner.type);
+    const parts = this.flatMembers(owner.type);
     const kept = parts.filter((part) =>
       this.isTagKept(part, tag.name, literal, isEqual),
     );
@@ -362,6 +362,22 @@ partial class ExpressionTypes {
     const union = this.store.unionOf(kept);
 
     facts.set(owner.key, union);
+  }
+
+  private flatMembers(type: Type): Type[] {
+    if (type.kind != TypeKind.Union) {
+      return [type];
+    }
+
+    const flat: Type[] = [];
+
+    for (const part of type.parts) {
+      for (const member of this.flatMembers(part)) {
+        flat.push(member);
+      }
+    }
+
+    return flat;
   }
 
   private isTagKept(

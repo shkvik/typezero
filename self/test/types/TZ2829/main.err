@@ -1,0 +1,3 @@
+main.tz:3:21: error TZ2829: Json values cannot be converted to strings: an object would be '[object Object]'; map them to text first, e.g. 'a.map(x => JSON.stringify(x)).toString()'
+const text = values.toString();
+                    ^

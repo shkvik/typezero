@@ -1,0 +1,3 @@
+main.tz:4:2: error TZ2863: a Set has no elements by position; add one with 's.add(value)'
+s[0] = 1;
+ ^

@@ -1581,7 +1581,8 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.NoPrototype]: {
     text: "there are no prototypes in tz: the methods belong to the class itself, and a decorator gets the class; use it as it is",
-  },  [Code.TypeArgumentsTooMany]: {
+  },
+  [Code.TypeArgumentsTooMany]: {
     text: "'{word}' takes {other}, but got {first}",
   },
   [Code.CannotInferParameter]: {
@@ -1601,7 +1602,8 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.NotGenericMethod]: {
     text: "'{word}' is not a generic method; remove the type arguments",
-  },  [Code.InstanceMemberViaClass]: {
+  },
+  [Code.InstanceMemberViaClass]: {
     text: "'{word}' is a member of the instances of '{first}', not of the class: create one with 'new {first}(...)'",
   },
   [Code.MethodReplaced]: {
@@ -1675,7 +1677,8 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.StaticTypeParameters]: {
     text: "static field '{word}' cannot use the type parameters of '{first}': every instance of the class shares it",
-  },  [Code.MustCallSuper]: {
+  },
+  [Code.MustCallSuper]: {
     text: "the constructor of '{first}' must call 'super(...)': '{first}' extends '{word}', whose constructor sets the fields it declares",
   },
   [Code.SuperNotStatement]: {
@@ -1704,7 +1707,8 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.OverrideAccess]: {
     text: "'{word}' is {first} in '{second}', so its override cannot be {other}",
-  },  [Code.ExtendsNotClass]: {
+  },
+  [Code.ExtendsNotClass]: {
     text: "'{word}' is not a class, and a class can extend only a class; to say that '{first}' has what an interface lists, write 'implements {word}'",
   },
   [Code.ImplementsClass]: {
@@ -1733,7 +1737,8 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.SuperAbstract]: {
     text: "'{word}' is abstract in '{first}': it has no body to call",
-  },  [Code.ParameterCondition]: {
+  },
+  [Code.ParameterCondition]: {
     text: "a value of type '{first}' cannot be a condition: '{first}' may be a number, and 0 would count as false; check for undefined: '{word} != undefined'",
   },
   [Code.IndexMaybeUndefined]: {
@@ -1825,5 +1830,281 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.ArrowAwait]: {
     text: "'await' here changes nothing: an async function waits for the Promise it returns; leave out 'await'",
+  },
+  [Code.FieldsNotSet]: {
+    text: "the constructor of '{first}' does not set field '{word}' on every path; set it on every path, or make it optional: '{word}?: T'",
+  },
+  [Code.FieldNoStart]: {
+    text: "field '{word}' has no value to start with: '{first}' has no empty value, like \"\" or 0; set it in a constructor, or make it optional: '{word}?: {first}'",
+  },
+  [Code.FieldNeverSet]: {
+    text: "field '{word}' never gets a value: set it in a constructor, or make it optional: '{word}?: {first}'",
+  },
+  [Code.FieldReadEarly]: {
+    text: "field '{word}' is read before it is set",
+  },
+  [Code.ThisUsedEarly]: {
+    text: "'this' is used before every field is set: field '{word}' is not set yet; until then 'this' can only set fields and read the ones set",
+  },
+  [Code.ThisInEarlyClosure]: {
+    text: "this function uses 'this', and it is created before every field is set; create it after the constructor sets them",
+  },
+  [Code.MethodCalledEarly]: {
+    text: "'this.{word}()' is called before every field is set: field '{first}' is not set yet, and the method may read it",
+  },
+  [Code.MethodTakenEarly]: {
+    text: "'this.{word}' is used before every field is set: field '{first}' is not set yet",
+  },
+  [Code.ParentMethodField]: {
+    text: "'{word}' is a method of '{first}', so a class that extends it cannot have a field of that name",
+  },
+  [Code.FieldLayout]: {
+    text: "field '{word}' of '{first}' is '{second}', and '{other}' declares it as '{place}'; a class can narrow a field of the class it extends only to objects of a type down the chain of its type, such as 'Dog' for 'Animal', which lie in memory as they do",
+  },
+  [Code.FieldOverrideMissing]: {
+    text: "'{word}' is marked 'override', but '{first}' has no field '{word}'",
+  },
+  [Code.FieldOverrideNoParent]: {
+    text: "'override' says that '{word}' is a field of the class that '{first}' extends, and it extends none",
+  },
+  [Code.FieldPrivateInParent]: {
+    text: "'{word}' is private in class '{first}', so a class that extends it cannot declare it again",
+  },
+  [Code.FieldAccessNarrower]: {
+    text: "'{word}' is {other} in '{first}', so it cannot be {second} in '{place}'",
+  },
+  [Code.FieldRedeclaredNoValue]: {
+    text: "'{word}' is a field of '{first}' already; declared again in a class without a constructor, JavaScript would set it to undefined after the constructor of '{first}' set it: drop the declaration, or set it in a constructor",
+  },
+  [Code.MethodOverField]: {
+    text: "'{word}' is a field of '{first}', so a class that extends it cannot have a method of that name",
+  },
+  [Code.ArrowOverride]: {
+    text: "'{word}' is an arrow in a field of '{first}', which each object holds itself in JavaScript, so a method of a class that extends it would never run; override it with a field too: '{word} = (...) => ...'",
+  },
+  [Code.ExtendsItself]: {
+    text: "class '{first}' cannot extend itself",
+  },
+  [Code.ExtendsItselfThrough]: {
+    text: "class '{first}' cannot extend itself through '{word}'",
+  },
+  [Code.ConstructorCallsOverride]: {
+    text: "the constructor of '{first}' calls '{word}', which '{other}' overrides: it would run before the fields of '{other}' are set; call it once the object is made",
+  },
+  [Code.ConstructorReachesOverride]: {
+    text: "the constructor of '{first}' calls '{word}' (through the methods it calls), which '{other}' overrides: it would run before the fields of '{other}' are set; call it once the object is made",
+  },
+  [Code.ErrorClassBase]: {
+    text: "there is no '{word}' in tz: an error is a value; make '{first}' a type of object with a tag, e.g. 'type {first} = { code: \"{first}\"; message: string }'",
+  },
+  [Code.InterfaceItself]: {
+    text: "interface '{first}' cannot extend itself",
+  },
+  [Code.InterfaceItselfThrough]: {
+    text: "interface '{first}' cannot extend itself through '{word}'",
+  },
+  [Code.InterfaceClassBase]: {
+    text: "'{word}' is a class, and an interface extends only interfaces",
+  },
+  [Code.InterfaceNotObject]: {
+    text: "'{word}' is not an interface; an interface extends object types, such as 'interface Named { name: string }'",
+  },
+  [Code.InterfaceFieldLayout]: {
+    text: "field '{word}' of '{first}' is '{second}', and '{other}' declares it as '{place}'; an interface can narrow a field of one it extends only to objects of a type down the chain of its type, such as 'Dog' for 'Animal', which lie in memory as they do",
+  },
+  [Code.CallbackMissing]: {
+    text: "'{word}' needs a function",
+  },
+  [Code.CallbackThisArg]: {
+    text: "the second argument of '{word}' sets 'this' for the callback, which is not supported",
+  },
+  [Code.CallbackValueExtra]: {
+    text: "'{word}' would also get the {other} as its {first} argument: '{second}' calls it with {place}; pass only what it needs: 'x => {word}(x)'",
+  },
+  [Code.CallbackNoValue]: {
+    text: "the callback of '{word}' must return a value",
+  },
+  [Code.CompareNotNumber]: {
+    text: "a comparison function must return a number (negative, zero or positive), found '{word}'",
+  },
+  [Code.CallbackNotFunction]: {
+    text: "'{word}' needs a function, found '{first}'",
+  },
+  [Code.CallbackRest]: {
+    text: "{word} takes a rest parameter; pass an arrow that calls it instead",
+  },
+  [Code.CallbackParamType]: {
+    text: "{word} takes '{first}' as its {second} argument, but '{other}' passes '{place}'",
+  },
+  [Code.CallbackExtraParam]: {
+    text: "{word} would also get the {other} in its optional parameter{first}: '{second}' calls it with {place}; pass an arrow that gives it only what it needs",
+  },
+  [Code.CallbackTooFew]: {
+    text: "'{word}' passes {other}, but {first} needs {second}",
+  },
+  [Code.CallbackReturn]: {
+    text: "'{word}' needs a function that returns '{first}', but {other} returns '{second}'",
+  },
+  [Code.CallbackDropsResult]: {
+    text: "{word} returns a Result that '{other}' drops, so an error in it would go unchecked; pass an arrow that handles it, e.g. with '.match(...)'",
+  },
+  [Code.CallbackDropsPromise]: {
+    text: "{word} returns a Promise that '{other}' drops, so nothing waits for it to finish; loop with 'for (const x of xs) await f(x)', or wait for all with 'await Promise.all(xs.map(...))'",
+  },
+  [Code.BuiltinAsValue]: {
+    text: "'{word}' can be used as a value only where a function type is expected, e.g. 'const f: (s: string) => {first} = {word}'",
+  },
+  [Code.OkAsValue]: {
+    text: "'{word}' can be used as a value only where a function type is expected, e.g. 'xs.map({word})'",
+  },
+  [Code.ArgumentsName]: {
+    text: "'arguments' is not supported; use a rest parameter, e.g. '...args: int[]'",
+  },
+  [Code.StaticAsValue]: {
+    text: "'{word}.{first}' can be used as a value only where a function type is expected, e.g. as a callback",
+  },
+  [Code.LaterInBlock]: {
+    text: "'{word}' is declared later in the block, after this function is created; move the declaration up, or declare the function with 'function', which can use it",
+  },
+  [Code.UsedBeforeDeclared]: {
+    text: "'{word}' uses '{first}' before it is declared: JavaScript would throw a ReferenceError when it runs here; move the declaration of '{first}' up",
+  },
+  [Code.FunctionInSwitch]: {
+    text: "a function can be declared only directly in a block; in a 'switch', declare it before the 'switch'",
+  },
+  [Code.FunctionSetsThis]: {
+    text: "'{word}' is not supported: it sets 'this', and a method taken as a value is bound to its object already; call the function directly",
+  },
+  [Code.ArrayTextFunctions]: {
+    text: "functions cannot be converted to strings",
+  },
+  [Code.ArrayTextResults]: {
+    text: "Results cannot be converted to strings: JavaScript would give '[object Object]'; make the text of each first, e.g. 'a.map(r => r.match(...)).{word}()'",
+  },
+  [Code.ArrayTextUnknown]: {
+    text: 'unknown values cannot be converted to strings: one may hold an object; map them to text first, e.g. \'a.map(x => typeof x == "string" ? x : "?").{word}()\'',
+  },
+  [Code.ArrayTextJson]: {
+    text: "Json values cannot be converted to strings: an object would be '[object Object]'; map them to text first, e.g. 'a.map(x => JSON.stringify(x)).{word}()'",
+  },
+  [Code.ArrayTextObjects]: {
+    text: "objects cannot be converted to strings: JavaScript would give '[object Object]'; map them to text first, e.g. 'a.map(o => o.name).{word}()'",
+  },
+  [Code.SortFunctions]: {
+    text: "sorting functions needs a comparison function: 'sort()' without one compares their source code",
+  },
+  [Code.SortUnknown]: {
+    text: "sorting unknown values needs a comparison function: 'sort()' without one compares them as strings, objects as '[object Object]'; pass one, e.g. 'sort((a, b) => ...)'",
+  },
+  [Code.SortJson]: {
+    text: "sorting Json values needs a comparison function: 'sort()' without one compares them as strings, objects as '[object Object]'; pass one, e.g. 'sort((a, b) => ...)'",
+  },
+  [Code.SortDates]: {
+    text: "sorting dates needs a comparison function: 'sort()' without one compares the texts of toString(), 'Thu Feb 29 2024 ...', which puts them in the order of the names of the days; pass one: 'sort((a, b) => a.getTime() - b.getTime())'",
+  },
+  [Code.SortObjects]: {
+    text: "sorting objects needs a comparison function: 'sort()' without one compares them all as '[object Object]'; pass one, e.g. 'sort((a, b) => a.x - b.x)'",
+  },
+  [Code.SortMixed]: {
+    text: "'sort()' without a comparison function compares the values of '{word}' as strings, numbers and objects among them; pass one, e.g. 'sort((a, b) => ...)'",
+  },
+  [Code.SortNumbers]: {
+    text: "'sort()' without a comparison function compares numbers as strings, as in JavaScript: [2, 10, 1] becomes [1, 10, 2]; pass one: 'sort((x, y) => {other})'",
+  },
+  [Code.ObjectReadOnlyField]: {
+    text: "cannot assign to '{word}' because it is a read-only field of '{first}'",
+  },
+  [Code.NullishNotOptionalVariable]: {
+    text: "'??=' needs a variable that may be undefined; '{word}' has type '{first}'",
+  },
+  [Code.NullishNotOptionalField]: {
+    text: "'??=' needs a field that may be undefined; '{word}' has type '{first}'",
+  },
+  [Code.VoidFieldValue]: {
+    text: "an expression of type 'void' cannot be the value of field '{word}'",
+  },
+  [Code.ForOfCannot]: {
+    text: "cannot iterate over a value of type '{word}'",
+  },
+  [Code.RecordNotIterable]: {
+    text: "a Record is not iterable, as an object is not in JavaScript; walk its keys with 'for...in', or its entries with 'for (const [k, v] of Object.entries(r))'",
+  },
+  [Code.NewArrayNoDefault]: {
+    text: "'new Array<T>(n)' fills the array with a default value, and '{word}' has none; start from '[]' and use push()",
+  },
+  [Code.AssignThroughUndefined]: {
+    text: "the value may be undefined; check it before assigning to '{word}'",
+  },
+  [Code.OwnInitializer]: {
+    text: "'{word}' is used in its own initializer, before it has a value",
+  },
+  [Code.YieldDelegateNotIterable]: {
+    text: "'yield*' needs an array, a string or an iterator, found '{word}'",
+  },
+  [Code.YieldSentUnknown]: {
+    text: "the value of 'yield' is what next(x) sends, and nothing says its type; declare it in the return type, e.g. ': Generator<{word}, void, string>'",
+  },
+  [Code.GeneratorNoYield]: {
+    text: "cannot tell what {word} yields: it has no 'yield'; declare its type, e.g. ': Generator<int>'",
+  },
+  [Code.YieldsDiffer]: {
+    text: "{word} yields '{first}' here and '{second}' elsewhere; a generator yields values of one type",
+  },
+  [Code.GeneratorNotIterator]: {
+    text: "a generator returns an iterator: declare its type as 'Generator<{word}>'",
+  },
+  [Code.ForOfResumes]: {
+    text: "'for...of' resumes each 'yield' of '{word}' without a value, but it expects '{first}' from next(x); call next(x) yourself, or let the generator take '{first} | undefined'",
+  },
+  [Code.SpreadResumes]: {
+    text: "a spread resumes each 'yield' of '{word}' without a value, but it expects '{first}' from next(x); call next(x) yourself, or let the generator take '{first} | undefined'",
+  },
+  [Code.IteratorNoThrow]: {
+    text: "an iterator has no 'throw()' in tz: an error is a value, not something thrown into a generator",
+  },
+  [Code.IteratorNoReturn]: {
+    text: "'return()' of an iterator is not supported yet; stop with 'break' in 'for of'",
+  },
+  [Code.IteratorNoLength]: {
+    text: "property '{word}' does not exist on type '{first}'; an iterator does not know how many values it gives: collect them with '[...it]'",
+  },
+  [Code.DictNoLength]: {
+    text: "property 'length' does not exist on type '{first}'; the number of entries is '{word}.size'",
+  },
+  [Code.DictMethodValue]: {
+    text: "'{word}.{other}' can only be called, e.g. '{word}.{other}(...)'; pass an arrow that calls it where a function is expected",
+  },
+  [Code.MapHasNoAdd]: {
+    text: "property '{other}' does not exist on type '{first}'; a Map sets an entry with '{word}.set(key, value)'",
+  },
+  [Code.SetHasNoGet]: {
+    text: "property '{other}' does not exist on type '{first}'; a Set adds a value with '{word}.add(value)' and checks one with '{word}.has(value)'",
+  },
+  [Code.DictNotIterating]: {
+    text: "property '{other}' does not exist on type '{first}'; call it on an iterator, e.g. '{word}{place}.{other}(...)', or on an array, '[...{word}].{other}(...)'",
+  },
+  [Code.MapPropertySet]: {
+    text: "'{word}{other} = ...' sets a property of the Map object in JavaScript, not one of its entries; set an entry with '{word}.set(key, value)'",
+  },
+  [Code.SetIndexSet]: {
+    text: "a Set has no elements by position; add one with '{word}.add(value)'",
+  },
+  [Code.SetSizeSet]: {
+    text: "the size of a Set cannot be assigned to; add elements with '{word}.add(value)'",
+  },
+  [Code.DictDelete]: {
+    text: "'delete' removes a property of the {word} object in JavaScript, not an entry; remove one with '{first}.delete({other})'",
+  },
+  [Code.DictIn]: {
+    text: "'in' asks for a property of the {word} object in JavaScript, not for an entry; ask with '{first}.has({other})'",
+  },
+  [Code.DictObjectEmpty]: {
+    text: "'Object.{word}' of a {first} is always empty in JavaScript: its entries are no properties; use '[...{second}.{other}()]'",
+  },
+  [Code.MapForIn]: {
+    text: "'for...in' walks the properties of an object, and a Map has none in JavaScript; walk its keys with 'for (const x of {word}.keys())'",
+  },
+  [Code.SetForIn]: {
+    text: "'for...in' walks the properties of an object, and a Set has none in JavaScript; walk its values with 'for (const x of {word})'",
   },
 };

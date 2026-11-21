@@ -1,0 +1,6 @@
+main.tz:3:21: error TZ2837: 'sort()' without a comparison function compares numbers as strings, as in JavaScript: [2, 10, 1] becomes [1, 10, 2]; pass one: 'sort((x, y) => x - y)'
+const sorted = nums.sort();
+                    ^
+main.tz:5:22: error TZ2837: 'sort()' without a comparison function compares numbers as strings, as in JavaScript: [2, 10, 1] becomes [1, 10, 2]; pass one: 'sort((x, y) => (x ?? 0) - (y ?? 0))'
+const either = maybe.sort();
+                     ^

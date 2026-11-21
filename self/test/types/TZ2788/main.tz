@@ -1,0 +1,19 @@
+// 'override' on a field names a field of the parent.
+class Base {
+  x: int;
+
+  constructor() {
+    this.x = 1;
+  }
+}
+
+class Child extends Base {
+  override y: int;
+
+  constructor() {
+    super();
+    this.y = 2;
+  }
+}
+
+const child = new Child();

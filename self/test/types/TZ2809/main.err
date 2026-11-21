@@ -1,0 +1,3 @@
+main.tz:3:26: error TZ2809: a comparison function must return a number (negative, zero or positive), found 'boolean'
+const sorted = nums.sort((a, b) => a < b);
+                         ^

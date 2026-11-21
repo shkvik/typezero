@@ -1,0 +1,19 @@
+// A class without a constructor starts its fields with empty values.
+class Inner {
+  n: int;
+}
+
+class Holder {
+  at: Date;
+  count: int;
+  name: string;
+  list: int[];
+  inner: Inner;
+  pair: { a: int; b: string };
+  table: Map<string, int>;
+  either: int | string;
+  tuple: [int, string];
+  maybe?: int;
+}
+
+const holder = new Holder();

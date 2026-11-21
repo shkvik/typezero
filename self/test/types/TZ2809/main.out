@@ -1,0 +1,4 @@
+main.tz
+  2:7 nums: int[]
+  3:7 sorted: int[]
+  4:7 fine: int[]

@@ -1,0 +1,5 @@
+// A function of Math or console is a value only as a callback.
+const biggest = Math.max;
+const print = console.log;
+const parse = Number.parseInt;
+const pi = Math.PI;

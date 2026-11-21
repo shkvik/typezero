@@ -1,0 +1,3 @@
+main.tz
+  2:7 results: Result<int, string>[]
+  3:7 joined: string

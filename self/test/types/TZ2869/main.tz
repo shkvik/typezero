@@ -1,0 +1,6 @@
+// for...in over a Set walks nothing.
+const s = new Set<int>();
+
+for (const k in s) {
+  console.log(k);
+}

@@ -1,0 +1,2 @@
+// A field of an object literal gets a value, not void.
+const nothing = { nothing: console.log() };

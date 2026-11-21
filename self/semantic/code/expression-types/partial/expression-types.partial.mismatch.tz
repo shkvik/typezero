@@ -34,12 +34,21 @@ partial class ExpressionTypes {
     const intervals = this.rangeIntervals(given, goal);
     const holds = this.rangeText(intervals);
     const code = this.mismatchCode(given, wanted, source, target, holds);
+    const first = this.text.of(given);
+    const second = this.text.of(wanted);
+    const detail = this.objectDetail(source, target);
+    const isPlaced = this.isPlacedLiteral(expr, wanted, module);
+    if (detail != "" && !this.isFresh(expr) && !isPlaced) {
+      return this.report(module, expr.loc, Code.NotAssignable, {
+        first,
+        second,
+        place: place + detail,
+      });
+    }
     if (!this.isReported(expr, given, wanted, code)) {
       return;
     }
 
-    const first = this.text.of(given);
-    const second = this.text.of(wanted);
     const word = this.mismatchWord(expr, code, source, target, intervals);
     const other = this.mismatchOther(code, holds, only, target);
 

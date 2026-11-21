@@ -1,0 +1,3 @@
+main.tz:2:24: error TZ2800: interface 'Loop' cannot extend itself
+interface Loop extends Loop {
+                       ^

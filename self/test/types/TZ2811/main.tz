@@ -1,0 +1,7 @@
+// A function with a rest parameter is not passed as a callback.
+function total(...xs: int[]): int {
+  return xs.length;
+}
+
+const nums = [1, 2, 3];
+const counts = nums.map(total);

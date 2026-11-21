@@ -1,0 +1,3 @@
+main.tz:4:3: error TZ2859: property 'add' does not exist on type 'Map<string, int>'; a Map sets an entry with 'm.set(key, value)'
+m.add(1);
+  ^

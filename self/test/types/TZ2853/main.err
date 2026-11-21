@@ -1,0 +1,3 @@
+main.tz:8:17: error TZ2853: a spread resumes each 'yield' of 'Generator<string, void, string>' without a value, but it expects 'string' from next(x); call next(x) yourself, or let the generator take 'string | undefined'
+const all = [...talk()];
+                ^

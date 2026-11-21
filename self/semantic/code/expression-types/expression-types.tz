@@ -49,6 +49,14 @@ import "./partial/expression-types.partial.indexes.tz";
 import "./partial/expression-types.partial.bounds.tz";
 import "./partial/expression-types.partial.awaits.tz";
 import "./partial/expression-types.partial.promises.tz";
+import "./partial/expression-types.partial.class-init.tz";
+import "./partial/expression-types.partial.class-redeclare.tz";
+import "./partial/expression-types.partial.callbacks.tz";
+import "./partial/expression-types.partial.use-order.tz";
+import "./partial/expression-types.partial.object-fit.tz";
+import "./partial/expression-types.partial.object-rules.tz";
+import "./partial/expression-types.partial.generators.tz";
+import "./partial/expression-types.partial.dict-rules.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   Details,
@@ -57,6 +65,7 @@ import {
 import {
   Expr,
   ExprKind,
+  MemberExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
 import { Program } from "../../../program/module/types/module.types.tz";
@@ -68,6 +77,9 @@ import { TypeRelation } from "../../types/type-relation/type-relation.tz";
 import { TypeResolver } from "../../types/type-resolver/type-resolver.tz";
 import {
   FunctionDoor,
+  GeneratorFrame,
+  InitFrame,
+  InitializingVariable,
   StalledFunction,
   StaticOwner,
   SuperFrame,
@@ -113,6 +125,18 @@ export class ExpressionTypes {
   private readonly currentMethods: FunctionDecl[];
   private readonly superFrames: SuperFrame[];
   private readonly openFunctions: FunctionDecl[];
+  private readonly initFrames: InitFrame[];
+  private readonly thisObjects: Set<Expr>;
+  private readonly writtenTargets: Set<Expr>;
+  private readonly selfCalls: Map<FunctionDecl, MemberExpr[]>;
+  private readonly closureTypes: Map<Expr, Type>;
+  private readonly argumentExprs: Set<Expr>;
+  private readonly tupleCalls: Set<Expr>;
+  private readonly initializing: InitializingVariable[];
+  private readonly generatorFrames: GeneratorFrame[];
+  private readonly unusedYields: Set<Expr>;
+  private readonly yieldOf: Map<Expr, int>;
+  private writtenFields?: Set<string>;
 
   public constructor(
     store: TypeStore,
@@ -155,6 +179,17 @@ export class ExpressionTypes {
     this.currentMethods = [];
     this.superFrames = [];
     this.openFunctions = [];
+    this.initFrames = [];
+    this.thisObjects = new Set<Expr>();
+    this.writtenTargets = new Set<Expr>();
+    this.selfCalls = new Map<FunctionDecl, MemberExpr[]>();
+    this.closureTypes = new Map<Expr, Type>();
+    this.argumentExprs = new Set<Expr>();
+    this.tupleCalls = new Set<Expr>();
+    this.initializing = [];
+    this.generatorFrames = [];
+    this.unusedYields = new Set<Expr>();
+    this.yieldOf = new Map<Expr, int>();
 
     for (const scopes of resolved) {
       this.scopes.set(scopes.module.id, scopes);
@@ -205,6 +240,10 @@ export class ExpressionTypes {
       case ExprKind.Conditional:
         return this.conditionalTyped(expr, wanted, module);
       case ExprKind.Member:
+        if (this.holderValueCheck(expr, wanted, module)) {
+          return this.store.plain(TypeKind.Error);
+        }
+
         return this.memberTyped(expr, module);
       case ExprKind.Index:
         return this.indexTyped(expr, module);
@@ -213,7 +252,14 @@ export class ExpressionTypes {
       case ExprKind.OptionalChain:
         return this.chainTyped(expr, wanted, module);
       case ExprKind.Call: {
+        this.noteArguments(expr.args);
+        this.dictKeysCheck(expr, module);
+
         const type = this.callTyped(expr, wanted, module);
+
+        if (this.isOwnCall(expr.callee, module)) {
+          this.forgetCalledFields();
+        }
 
         this.walkedArguments(expr.args, module);
 
@@ -232,6 +278,8 @@ export class ExpressionTypes {
         return this.assignedTyped(expr, module);
       case ExprKind.Update:
         return this.updatedTyped(expr.target, module);
+      case ExprKind.Yield:
+        return this.yieldTyped(expr, module);
       default:
         return this.childrenTyped(expr, module);
     }

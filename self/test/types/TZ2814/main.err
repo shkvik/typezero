@@ -1,0 +1,3 @@
+main.tz:7:26: error TZ2814: 'map' passes 3 arguments, but 'triple' needs 4
+const tripled = nums.map(triple);
+                         ^

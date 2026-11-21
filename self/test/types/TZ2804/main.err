@@ -1,0 +1,3 @@
+main.tz:13:3: error TZ2804: field 'port' of 'DogOwner' is 'double', and 'Owner' declares it as 'int'; an interface can narrow a field of one it extends only to objects of a type down the chain of its type, such as 'Dog' for 'Animal', which lie in memory as they do
+  port: double;
+  ^

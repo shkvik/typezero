@@ -1,0 +1,3 @@
+main.tz:3:23: error TZ2836: 'sort()' without a comparison function compares the values of 'int | string' as strings, numbers and objects among them; pass one, e.g. 'sort((a, b) => ...)'
+const sorted = values.sort();
+                      ^

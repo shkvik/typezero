@@ -1,0 +1,2 @@
+// An object cannot reach itself from its own initializer.
+const counter = { n: 0, inc: () => counter.n };

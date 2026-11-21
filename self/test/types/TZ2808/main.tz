@@ -1,0 +1,5 @@
+// The callback of 'map' returns a value.
+const nums = [1, 2, 3];
+const nothing = nums.map((x) => {
+  console.log(x);
+});

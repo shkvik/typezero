@@ -1,0 +1,12 @@
+// A function called before a variable it uses is declared.
+function early(): int {
+  const first = helper(1);
+
+  function helper(x: int): int {
+    return x * scale;
+  }
+
+  const scale = 2;
+
+  return first;
+}

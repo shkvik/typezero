@@ -1,0 +1,3 @@
+main.tz
+  2:11 talk: () => Generator<string, void, string>
+  3:9 name: string

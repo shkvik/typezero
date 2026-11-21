@@ -1,0 +1,4 @@
+main.tz
+  2:10 triple: (int, int, int[], int) => int
+  6:7 nums: int[]
+  7:7 tripled: int[]
