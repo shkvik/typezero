@@ -1,0 +1,3 @@
+main.tz:7:10: error TZ2989: 'grow' calls itself with 'T[]' for 'T', so each copy of it for some type needs another for a bigger one, without end; a generic function can call itself only with its own type parameters
+  return grow([x], n - 1);
+         ^

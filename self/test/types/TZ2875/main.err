@@ -1,0 +1,3 @@
+main.tz:2:6: error TZ2875: enum 'Mixed' cannot mix numbers and strings
+enum Mixed {
+     ^

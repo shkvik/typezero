@@ -7,6 +7,6 @@ const shape = Shape;
 main.tz:12:18: error TZ2310: 'Face' is a type, not a value
 const face = new Face();
                  ^
-main.tz:13:14: error TZ2310: 'Ok' is a type, not a value
+main.tz:13:14: error TZ3112: 'Ok' can be used only as a type; make a Result with 'ok(value)', and test one with 'isOk()'
 const kept = Ok(1);
              ^

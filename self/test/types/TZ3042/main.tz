@@ -1,0 +1,15 @@
+// Promises made by map are awaited.
+async function save(name: string): Promise<void> {
+  await undefined;
+  console.log("saved", name);
+}
+
+const names = ["a", "b"];
+
+names.map((n) => save(n));
+
+async function all(): Promise<void> {
+  await Promise.all(names.map((n) => save(n)));
+}
+
+console.log(all);

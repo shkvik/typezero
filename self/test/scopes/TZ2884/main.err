@@ -1,0 +1,3 @@
+main.tz:6:5: error TZ2884: 'continue' can only be used inside a loop
+    continue;
+    ^

@@ -1,0 +1,4 @@
+// escape is a legacy function.
+const text = escape("a b");
+
+console.log(text);

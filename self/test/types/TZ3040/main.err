@@ -1,0 +1,3 @@
+main.tz:9:21: error TZ3040: the Promise of this async function is dropped here, so nothing waits for it to finish; loop with 'for (const x of xs) await f(x)', or wait for all with 'await Promise.all(xs.map(async x => ...))'
+names.forEach(async (n) => {
+                    ^

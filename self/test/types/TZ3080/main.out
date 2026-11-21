@@ -1,0 +1,3 @@
+main.tz
+  2:7 list: int[]
+  3:7 keys: string[]

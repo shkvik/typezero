@@ -1,0 +1,3 @@
+main.tz:7:19: error TZ3154: the members of '{ n: int; get() } | { n: int; get() }' have methods 'get' of different types, '() => int' and '() => string'; narrow it first
+  console.log(one.get());
+                  ^

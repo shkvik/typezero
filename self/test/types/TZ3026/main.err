@@ -1,0 +1,3 @@
+main.tz:2:40: error TZ3026: the keys of an object are strings, and JavaScript would turn 'int' keys into them; return a string, or group into a Map: 'Map.groupBy(...)'
+const grouped = Object.groupBy([1, 2], (x) => x);
+                                       ^

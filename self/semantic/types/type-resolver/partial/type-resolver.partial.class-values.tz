@@ -1,0 +1,70 @@
+import { TypeResolver } from "../type-resolver.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { TypeContext } from "../types/type-resolver.types.tz";
+
+partial class TypeResolver {
+  private constructorType(
+    ref: TypeRef,
+    args: Type[],
+    context: TypeContext,
+  ): Type {
+    const made = args[0];
+    if (made == undefined) {
+      const any = this.store.plain(TypeKind.AnyObject);
+
+      return this.store.classOf(any, false);
+    }
+    if (made.kind == TypeKind.Error) {
+      return made;
+    }
+    if (!this.isConstructedObject(made)) {
+      const written = ref.args[0] ?? ref;
+
+      this.report(context.module, written.loc, Code.ConstructorNotObject, {
+        word: this.text.of(made),
+      });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.store.classOf(made, false);
+  }
+
+  private isConstructedObject(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Object:
+      case TypeKind.Instance:
+      case TypeKind.AnyObject:
+      case TypeKind.TypeParameter:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private typeOfClass(ref: TypeRef, context: TypeContext): Type {
+    const error = this.store.plain(TypeKind.Error);
+    const uses = this.scopes.get(context.module)?.uses ?? [];
+    const use = uses.find((one) => one.loc == ref.loc && !one.isType);
+    const symbol = use?.symbol;
+    if (symbol == undefined) {
+      return error;
+    }
+
+    const isClassName =
+      symbol.kind == SymbolKind.Class || symbol.kind == SymbolKind.Import;
+    if (!isClassName) {
+      return error;
+    }
+
+    const instance = this.declared(ref, symbol, context);
+    if (instance.kind != TypeKind.Instance || instance.args.length > 0) {
+      return error;
+    }
+
+    return this.store.classOf(instance, true);
+  }
+}

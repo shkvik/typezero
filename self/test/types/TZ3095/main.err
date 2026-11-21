@@ -1,0 +1,3 @@
+main.tz:12:20: error TZ3095: 'value' is there only when the Result is an Ok: check it first, 'if (result.isOk())', or use 'match' or 'unwrapOr'
+console.log(result.value);
+                   ^

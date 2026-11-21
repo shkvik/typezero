@@ -1,0 +1,3 @@
+main.tz:11:29: error TZ3101: the function given to 'andThen' must return a Result, 'ok(...)' or 'err(...)', found 'int'; to change the value, use 'map'
+const next = result.andThen((count) => count + 1);
+                            ^

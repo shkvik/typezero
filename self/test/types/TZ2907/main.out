@@ -1,0 +1,6 @@
+main.tz
+  2:6 type A = { kind: "a"; v: int }
+  3:6 type B = { kind: "b"; v: string }
+  4:6 type C = { kind: "c"; v: int }
+  6:10 setV: (A | B) => void
+  10:10 setW: (A | C) => void

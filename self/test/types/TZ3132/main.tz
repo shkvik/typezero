@@ -1,0 +1,4 @@
+// Only an array of decimals is spread into decimal.max.
+const values = [1.5, 2.5];
+
+console.log(decimal.max(...values));

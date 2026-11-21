@@ -1,0 +1,10 @@
+interface Tool {
+  use(): int;
+  add(value: double): string;
+  add(text: string): string;
+}
+
+// Only a class implements several signatures of a method.
+const tool: Tool = { use() { return 1; } };
+
+console.log(tool);

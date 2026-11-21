@@ -1,0 +1,8 @@
+// A continue with a label needs a loop under it.
+block: {
+  continue block;
+}
+
+outer: for (let i = 0; i < 2; i++) {
+  continue outer;
+}

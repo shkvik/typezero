@@ -1,0 +1,11 @@
+// A generic function as a value needs its types.
+function first<T>(xs: T[]): T | undefined {
+  return xs[0];
+}
+
+const fs = [first];
+let later = first;
+const named = first;
+const typed: (xs: int[]) => int | undefined = first;
+
+console.log(fs, later, named([1]), typed([1]));

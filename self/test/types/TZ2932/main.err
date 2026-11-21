@@ -1,0 +1,6 @@
+main.tz:3:21: error TZ2932: 'as' is not supported; convert it explicitly: 'count.toDouble()'
+const ratio = count as double;
+                    ^
+main.tz:4:21: error TZ2932: 'as' is not supported; convert it explicitly: 'count.toInt16()'
+const small = count as int16;
+                    ^

@@ -1,0 +1,3 @@
+main.tz:2:23: error TZ3060: '2026-02-30T10:00': February 2026 has no day 30, and JavaScript would make it March 2; write the date that is meant
+const date = new Date("2026-02-30T10:00");
+                      ^

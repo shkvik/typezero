@@ -1,0 +1,8 @@
+class User {
+  constructor(public name: string) {}
+}
+
+// A class makes objects.
+const numbers: Constructor<int> = User;
+
+console.log(numbers);

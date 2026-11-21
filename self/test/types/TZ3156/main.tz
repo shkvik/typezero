@@ -1,0 +1,11 @@
+interface Adder {
+  add(value: double): string;
+  add(text: string): string;
+}
+
+// A method with several signatures is not replaced.
+function change(adder: Adder): void {
+  adder.add = (value: double) => "";
+}
+
+console.log(change);

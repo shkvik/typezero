@@ -1,0 +1,8 @@
+class User {
+  constructor(public name: string) {}
+}
+
+// The static members of such a class are not known.
+const kind: Constructor<User> = User;
+
+kind.create();

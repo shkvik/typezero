@@ -1,0 +1,3 @@
+main.tz:4:15: error TZ3047: a double is inexact already, so it becomes a decimal through 'decimal(d)', which says so
+console.log(d.toDecimal(), decimal(d));
+              ^

@@ -41,6 +41,8 @@ partial class ExpressionTypes {
         }
 
         return;
+      case TypeKind.Instance:
+        return this.instanceLoopCheck(loop.iterable, base, module);
       case TypeKind.Object:
         if (this.isIterableTarget(base)) {
           return;
@@ -118,6 +120,9 @@ partial class ExpressionTypes {
     this.quiet -= 1;
 
     if (!this.isOptional(type) || target.optional) {
+      return false;
+    }
+    if (this.isJsonHolder(type)) {
       return false;
     }
 

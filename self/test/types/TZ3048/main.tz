@@ -1,0 +1,5 @@
+// The values of Math.min and Math.max have one type.
+const n: int = 3;
+const d: double = 2.5;
+
+console.log(Math.max(n, d), Math.min(d, n), Math.max(1, d), Math.min(n, 2));

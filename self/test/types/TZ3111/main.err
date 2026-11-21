@@ -1,0 +1,3 @@
+main.tz:12:7: error TZ3111: the Results are not used, so errors in them would go unchecked; handle them, e.g. with 'Result.combine(...)', or keep them in a variable
+names.map((name) => save(name));
+      ^

@@ -1,0 +1,6 @@
+main.tz:2:25: error TZ2938: an index or position must be an integer, found 'string'
+console.log("ab".repeat("2"), "ab".repeat(2));
+                        ^
+main.tz:2:25: error TZ2945: the count of 'repeat' must be a whole number not negative, found 'string'
+console.log("ab".repeat("2"), "ab".repeat(2));
+                        ^

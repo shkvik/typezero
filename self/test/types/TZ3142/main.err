@@ -1,0 +1,3 @@
+main.tz:3:16: error TZ3142: 'raw' is not supported: a tag gets the texts of its template as a plain 'string[]', with the escapes already applied
+  return texts.raw.length + value;
+               ^

@@ -1,0 +1,3 @@
+main.tz
+  1:11 type Tool = { readonly use: () => int; readonly add: (double) => string; readonly add: (string) => string }
+  8:7 tool: Tool

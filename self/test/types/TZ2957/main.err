@@ -1,0 +1,3 @@
+main.tz:7:9: error TZ2957: 'pending' holds a Promise of a Result that is never awaited, so an error in it would go unchecked; await it and check it, e.g. 'const r = await pending; if (r.isErr()) ...'
+  const pending = load();
+        ^

@@ -1,0 +1,3 @@
+main.tz
+  2:10 grow: (T, int) => int
+  10:10 keep: (T, int) => int

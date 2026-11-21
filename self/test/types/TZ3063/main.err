@@ -1,0 +1,3 @@
+main.tz:2:23: error TZ3063: 'new Date' takes a time in milliseconds, a string or a date, found 'boolean'
+const date = new Date(true);
+                      ^

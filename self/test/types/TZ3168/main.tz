@@ -1,0 +1,8 @@
+class User {
+  constructor(public name: string) {}
+}
+
+// A class is always truthy.
+if (User) {
+  console.log("always");
+}

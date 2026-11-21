@@ -1,0 +1,6 @@
+main.tz:3:4: error TZ3039: cannot prove that the index is within the array (0 <= index <= length); writing further would leave holes. Check the index first, e.g. 'if (i < a.length)', or use push()
+  a[i] = 5;
+   ^
+main.tz:4:4: error TZ3039: cannot prove that the index is within the array (0 <= index <= length); writing further would leave holes. Check the index first, e.g. 'if (i < a.length)', or use push()
+  a[a.length + 1] = 2;
+   ^

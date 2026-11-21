@@ -1,0 +1,3 @@
+main.tz:4:7: error TZ3019: 'names.a' may be undefined, as a key may be missing: give it a default with '??', e.g. 'names.a = (names.a ?? "") + s'
+names.a += "x";
+      ^

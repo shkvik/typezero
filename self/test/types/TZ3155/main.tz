@@ -1,0 +1,9 @@
+interface Adder {
+  add(value: double): string;
+  add(text: string): string;
+}
+
+// A function field cannot fill several signatures.
+const adder: Adder = { add: (value: double) => "" };
+
+console.log(adder);

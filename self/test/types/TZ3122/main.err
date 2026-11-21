@@ -1,0 +1,3 @@
+main.tz:2:36: error TZ3122: an expression of type 'void' has no value to write as JSON
+console.log(JSON.stringify(console.log("x")));
+                                   ^

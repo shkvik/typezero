@@ -1,0 +1,4 @@
+main.tz
+  1:11 type Face = { readonly get: () => int }
+  5:6 type Small = { readonly get: () => int; n: int }
+  14:10 read: (Small | Face) => int

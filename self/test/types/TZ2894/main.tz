@@ -1,0 +1,9 @@
+// An unknown value has no members until a check shows what it holds.
+const u: unknown = 5;
+
+console.log(u.length);
+console.log(u.toFixed(2));
+
+if (typeof u == "string") {
+  console.log(u.length);
+}

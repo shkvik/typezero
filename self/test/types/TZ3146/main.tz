@@ -1,0 +1,8 @@
+interface Named {
+  name: string;
+}
+
+// A field that is not a function cannot be a method.
+const named: Named = { name() { return "a"; } };
+
+console.log(named);

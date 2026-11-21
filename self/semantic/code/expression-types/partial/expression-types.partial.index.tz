@@ -1,6 +1,7 @@
 import { ExpressionTypes } from "../expression-types.tz";
 import { ClassDecl } from "../../../../program/ast/types/ast.types.classes.tz";
 import {
+  BinaryOp,
   CallExpr,
   Expr,
   ExprKind,
@@ -23,6 +24,7 @@ import {
   DestinationKind,
   ValueRecord,
 } from "../types/expression-types.types.tz";
+import { kHiddenMark } from "../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
   private indexStatements(statements: Stmt[], record: ValueRecord): void {
@@ -71,6 +73,7 @@ partial class ExpressionTypes {
         const isConst = statement.isConst;
 
         record.variables.set(decl.loc, { decl, isConst, loop: statement });
+        this.keepHidden(decl.name, SymbolKind.Variable, decl.loc, record);
         this.indexExpression(statement.iterable, record);
 
         return this.indexStatement(statement.body, record);
@@ -101,11 +104,23 @@ partial class ExpressionTypes {
     }
   }
 
+  private keepHidden(
+    name: string,
+    kind: SymbolKind,
+    loc: int,
+    record: ValueRecord,
+  ): void {
+    if (name.startsWith(kHiddenMark)) {
+      record.hidden.set(name, { kind, loc });
+    }
+  }
+
   private indexVariables(statement: VarDeclStmt, record: ValueRecord): void {
     const isConst = statement.isConst;
 
     for (const decl of statement.decls) {
       record.variables.set(decl.loc, { decl, isConst });
+      this.keepHidden(decl.name, SymbolKind.Variable, decl.loc, record);
       this.keepDeclared(decl.init, decl.typeAnn, record);
       this.indexOptionalExpression(decl.init, record);
     }
@@ -129,6 +144,19 @@ partial class ExpressionTypes {
 
     list.push(destination);
     record.destinations.set(symbol.loc, list);
+  }
+
+  private keepAssigned(
+    target: Expr,
+    value: Expr,
+    op: BinaryOp | undefined,
+    record: ValueRecord,
+  ): void {
+    if (op == undefined) {
+      const kind = DestinationKind.Assigned;
+
+      this.keepDestination(target, { kind, index: 0, value }, record);
+    }
   }
 
   private keepDeclared(
@@ -170,6 +198,7 @@ partial class ExpressionTypes {
       const form = param.form;
 
       record.params.set(param.loc, { fn, param });
+      this.keepHidden(param.name, SymbolKind.Parameter, param.loc, record);
 
       if (form.kind == ParamKind.Defaulted) {
         this.indexExpression(form.defaultValue, record);
@@ -244,6 +273,7 @@ partial class ExpressionTypes {
         return this.indexExpression(expr.rhs, record);
       case ExprKind.Assign:
         record.changes.push(expr);
+        this.keepAssigned(expr.target, expr.value, expr.op, record);
         this.indexAssigned(expr.target, record);
         this.indexExpression(expr.target, record);
 

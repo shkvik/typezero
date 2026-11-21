@@ -1,0 +1,3 @@
+main.tz:12:25: error TZ2940: an index or position must be an integer, found 'int | undefined'; the value may be undefined: check it first or give a default with '??'
+console.log("abc".slice(at));
+                        ^

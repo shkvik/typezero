@@ -1,0 +1,13 @@
+// An object of any class goes into a class after instanceof.
+class User {
+  public name: string;
+
+  public constructor() {
+    this.name = "Ann";
+  }
+}
+
+const o: object = new User();
+const user: User = o;
+
+console.log(user.name);

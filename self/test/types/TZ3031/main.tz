@@ -1,0 +1,12 @@
+// The values of an iterable fit the parameter.
+function total(xs: Iterable<int>): int {
+  let sum = 0;
+
+  for (const x of xs) {
+    sum += x;
+  }
+
+  return sum;
+}
+
+console.log(total(new Set(["a"])), total([1, 2]), total(new Set([3])));

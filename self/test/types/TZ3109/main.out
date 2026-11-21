@@ -1,0 +1,3 @@
+main.tz
+  2:10 first: (boolean) => Result<int, int[]>
+  10:10 second: (boolean) => Result<string, string[]>

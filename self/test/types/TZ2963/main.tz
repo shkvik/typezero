@@ -1,0 +1,4 @@
+// unescape is no value either.
+const names = ["%41"].map(unescape);
+
+console.log(names);

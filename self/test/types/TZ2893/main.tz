@@ -1,0 +1,26 @@
+// A predicate is shown by each return that may give true.
+type Circle = { kind: "circle"; r: double };
+type Square = { kind: "square"; side: double };
+type Shape = Circle | Square;
+
+function lies(s: Shape): s is Circle {
+  return s.kind == "square";
+}
+
+function partly(s: Shape): s is Circle {
+  if (s.kind == "circle") {
+    return true;
+  }
+
+  return true;
+}
+
+function honest(s: Shape): s is Circle {
+  if (s.kind == "square") {
+    return false;
+  }
+
+  return true;
+}
+
+console.log(lies, partly, honest);

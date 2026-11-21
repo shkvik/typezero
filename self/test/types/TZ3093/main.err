@@ -1,0 +1,3 @@
+main.tz:4:27: error TZ3093: '{}' has no fields, so 'Object.values' would always be empty
+console.log(Object.values(empty));
+                          ^

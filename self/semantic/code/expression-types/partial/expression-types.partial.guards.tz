@@ -22,6 +22,8 @@ import {
   kArrayName,
   kDot,
   kIsArrayName,
+  kIsJsonName,
+  kJsonName,
 } from "../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
@@ -39,6 +41,13 @@ partial class ExpressionTypes {
       case ExprKind.Name:
         return this.functionGuardFacts(call, callee, isTrue, module);
       case ExprKind.Member:
+        if (this.isJsonCheck(callee, module)) {
+          return this.jsonFacts(call, isTrue, module);
+        }
+        if (callee.name == "isOk" || callee.name == "isErr") {
+          return this.resultFacts(call, callee, isTrue, module);
+        }
+
         return this.methodGuardFacts(call, callee, module);
       default:
         return new Map<string, Type>();
@@ -78,10 +87,55 @@ partial class ExpressionTypes {
     const kept = this.unionMembers(slot.type).filter(
       (part) => this.isListType(part) == isTrue,
     );
+    const isUnknown = slot.type.kind == TypeKind.Unknown;
+    if (isUnknown && isTrue) {
+      facts.set(slot.key, this.store.arrayOf(slot.type));
+
+      return facts;
+    }
+
+    const isJson = this.definedType(slot.type).kind == TypeKind.Json;
+    if (isJson && isTrue) {
+      const json = this.store.plain(TypeKind.Json);
+
+      facts.set(slot.key, this.store.arrayOf(json));
+
+      return facts;
+    }
     if (kept.length > 0) {
       const union = this.store.unionOf(kept);
 
       facts.set(slot.key, union);
+    }
+
+    return facts;
+  }
+
+  private isJsonCheck(callee: MemberExpr, module: int): boolean {
+    const object = callee.object;
+
+    return (
+      callee.name == kIsJsonName &&
+      object.kind == ExprKind.Name &&
+      object.name == kJsonName &&
+      this.isLibraryName(object, module)
+    );
+  }
+
+  private jsonFacts(
+    call: CallExpr,
+    isTrue: boolean,
+    module: int,
+  ): Map<string, Type> {
+    const facts = new Map<string, Type>();
+    const arg = call.args[0];
+    if (arg == undefined || !isTrue) {
+      return facts;
+    }
+
+    const slot = this.narrowable(arg.expr, module);
+    if (slot != undefined && this.isUnknownValue(slot.type)) {
+      facts.set(slot.key, this.store.plain(TypeKind.Json));
     }
 
     return facts;
@@ -108,6 +162,12 @@ partial class ExpressionTypes {
     const fn = this.record(target.module)?.functions.get(target.loc);
     if (fn == undefined) {
       return new Map<string, Type>();
+    }
+
+    const isPredicate = fn.returnType?.form.kind == TypeRefKind.Predicate;
+    const summary = this.summaryFacts(call, fn, target.module, isTrue, module);
+    if (!isPredicate && summary != undefined) {
+      return summary;
     }
 
     const predicate = this.predicateFacts(call, fn, target.module, isTrue);

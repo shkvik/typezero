@@ -1,0 +1,3 @@
+main.tz:2:23: error TZ3058: '23.10.2026' is not a date JavaScript can read, and would be an Invalid Date; write it as 'YYYY-MM-DDTHH:mm' (local time) or 'YYYY-MM-DDTHH:mmZ' (UTC), e.g. '2026-10-23T10:00'
+const date = new Date("23.10.2026");
+                      ^

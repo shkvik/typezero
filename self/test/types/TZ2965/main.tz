@@ -1,0 +1,10 @@
+// Result.combine needs Results that hold values.
+function save(text: string): Result<void, string> {
+  console.log(text);
+
+  return ok();
+}
+
+const all = Result.combine([save("a"), save("b")]);
+
+console.log(all);

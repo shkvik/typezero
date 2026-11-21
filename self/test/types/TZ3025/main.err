@@ -1,0 +1,3 @@
+main.tz:3:43: error TZ3025: only objects and Records can be spread into a Record, found 'Set<int>'; in JavaScript a Map or a Set has no own properties, so this would add nothing
+const fromSet: Record<string, int> = { ...s };
+                                          ^

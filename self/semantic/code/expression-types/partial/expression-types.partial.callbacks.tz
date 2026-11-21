@@ -9,6 +9,7 @@ import {
   MemberExpr,
   NameExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
+import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
 import {
   FunctionType,
@@ -94,6 +95,7 @@ partial class ExpressionTypes {
     const first = expr.args[0]?.expr;
     if (first != undefined) {
       plan.isValue = this.functionValueCheck(first, plan, module);
+      this.booleanCallbackCheck(first, plan, module);
     }
   }
 
@@ -251,6 +253,41 @@ partial class ExpressionTypes {
     this.passedFunctionCheck(arg, type, plan, module);
   }
 
+  private droppedPromiseCheck(arg: Expr, result: Type, module: int): void {
+    if (arg.kind == ExprKind.Function && arg.fn.isAsync) {
+      this.report(module, arg.loc, Code.AsyncCallbackDropped, kNoDetails);
+
+      return;
+    }
+    const kind = this.definedType(result).kind;
+    if (kind == TypeKind.Promise) {
+      const loc = this.conciseValueLoc(arg);
+
+      this.report(module, loc, Code.CallbackPromiseDropped, kNoDetails);
+    }
+    if (kind == TypeKind.Result && arg.kind == ExprKind.Function) {
+      const loc = this.conciseValueLoc(arg);
+
+      this.report(module, loc, Code.CallbackResultDropped, kNoDetails);
+    }
+  }
+
+  private conciseValueLoc(arg: Expr): int {
+    if (arg.kind != ExprKind.Function || !arg.fn.concise) {
+      return arg.loc;
+    }
+
+    const first = arg.fn.body?.body[0];
+    if (first == undefined) {
+      return arg.loc;
+    }
+    if (first.kind != StmtKind.Return) {
+      return arg.loc;
+    }
+
+    return first.value?.loc ?? arg.loc;
+  }
+
   private literalCallbackCheck(
     arg: Expr,
     plan: CallbackPlan,
@@ -263,6 +300,11 @@ partial class ExpressionTypes {
 
     const result = type.shape.result;
     const word = plan.member.name;
+
+    if (plan.kind == ArrayCallback.ForEach) {
+      return this.droppedPromiseCheck(arg, result, module);
+    }
+
     const isMapping =
       plan.kind == ArrayCallback.Map || plan.kind == ArrayCallback.FlatMap;
     const isEmpty =

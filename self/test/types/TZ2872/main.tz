@@ -1,0 +1,10 @@
+// An enum member is a constant: numbers, strings and other members.
+let count = 5;
+
+enum Sizes {
+  Small = 1,
+  Large = Small * 4,
+  Given = count,
+}
+
+const large = Sizes.Large;

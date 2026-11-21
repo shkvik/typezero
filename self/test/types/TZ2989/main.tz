@@ -1,0 +1,18 @@
+// A generic function calls itself with its own type parameters.
+function grow<T>(x: T, n: int): int {
+  if (n == 0) {
+    return 0;
+  }
+
+  return grow([x], n - 1);
+}
+
+function keep<T>(x: T, n: int): int {
+  if (n == 0) {
+    return 0;
+  }
+
+  return keep(x, n - 1);
+}
+
+console.log(grow(1, 2), keep(1, 2));

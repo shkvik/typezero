@@ -1,0 +1,280 @@
+import {
+  kBinaryMark,
+  kDecimalDot,
+  kDigitBase,
+  kExponentLower,
+  kExponentUpper,
+  kHexMark,
+  kLowerA,
+  kLowerBit,
+  kLowerZ,
+  kMinusSign,
+  kNineDigit,
+  kNoDigit,
+  kOctalMark,
+  kPlusSign,
+  kSeparator,
+  kSpaceCodes,
+  kUpperA,
+  kUpperZ,
+  kWideSpaceFirst,
+  kWideSpaceLast,
+  kZeroDigit,
+} from "./const/decimal-text.const.tz";
+
+export class DecimalText {
+  public isNumber(text: string): boolean {
+    if (this.isPlain(text)) {
+      return true;
+    }
+
+    const start = this.trimmedStart(text);
+    const end = this.trimmedEnd(text, start);
+    const trimmed = text.slice(start, end);
+    const isNegative = this.codeAt(trimmed, 0) == kMinusSign;
+    const body = this.bodyOf(trimmed, isNegative);
+    if (body == "Infinity" || body == "NaN") {
+      return false;
+    }
+
+    const base = this.prefixBase(body);
+    if (base != undefined) {
+      return this.isBaseNumber(body.slice(2), base);
+    }
+
+    return this.isPlain(this.withoutSeparators(trimmed));
+  }
+
+  private codeAt(text: string, index: int): int {
+    if (index < 0 || index >= text.length) {
+      return 0;
+    }
+
+    return text.charCodeAt(index);
+  }
+
+  private isDigit(code: int): boolean {
+    return code >= kZeroDigit && code <= kNineDigit;
+  }
+
+  private isSpace(code: int): boolean {
+    if (kSpaceCodes.includes(code)) {
+      return true;
+    }
+
+    return code >= kWideSpaceFirst && code <= kWideSpaceLast;
+  }
+
+  private trimmedStart(text: string): int {
+    let start = 0;
+
+    while (start < text.length && this.isSpace(this.codeAt(text, start))) {
+      start += 1;
+    }
+
+    const isPlus = this.codeAt(text, start) == kPlusSign;
+    const isSigned = this.codeAt(text, start + 1) == kMinusSign;
+    if (start < text.length && isPlus && !isSigned) {
+      return start + 1;
+    }
+
+    return start;
+  }
+
+  private trimmedEnd(text: string, start: int): int {
+    let end = text.length;
+
+    while (end > start && this.isSpace(this.codeAt(text, end - 1))) {
+      end -= 1;
+    }
+
+    return end;
+  }
+
+  private bodyOf(trimmed: string, isNegative: boolean): string {
+    if (isNegative) {
+      return trimmed.slice(1);
+    }
+
+    return trimmed;
+  }
+
+  private prefixBase(body: string): int | undefined {
+    const isPrefixed =
+      body.length > 2 &&
+      this.codeAt(body, 0) == kZeroDigit &&
+      this.codeAt(body, 2) != kDecimalDot;
+    if (!isPrefixed) {
+      return undefined;
+    }
+
+    const mark = this.codeAt(body, 1) | kLowerBit;
+    if (mark == kHexMark) {
+      return 16;
+    }
+    if (mark == kBinaryMark) {
+      return 2;
+    }
+    if (mark == kOctalMark) {
+      return 8;
+    }
+
+    return undefined;
+  }
+
+  private withoutSeparators(text: string): string {
+    const kept: string[] = [];
+
+    for (let index = 0; index < text.length; index++) {
+      const isSeparator =
+        this.codeAt(text, index) == kSeparator &&
+        this.isDigit(this.codeAt(text, index - 1)) &&
+        this.isDigit(this.codeAt(text, index + 1));
+      if (!isSeparator) {
+        kept.push(text.charAt(index));
+      }
+    }
+
+    return kept.join("");
+  }
+
+  private isPlain(text: string): boolean {
+    let index = 0;
+
+    if (this.codeAt(text, index) == kMinusSign) {
+      index += 1;
+    }
+
+    const wholeStart = index;
+
+    while (this.isDigit(this.codeAt(text, index))) {
+      index += 1;
+    }
+
+    const whole = index - wholeStart;
+    const hasDot = this.codeAt(text, index) == kDecimalDot;
+    if (!hasDot && whole == 0) {
+      return false;
+    }
+    if (hasDot) {
+      index += 1;
+
+      const fractionStart = index;
+
+      while (this.isDigit(this.codeAt(text, index))) {
+        index += 1;
+      }
+
+      if (whole == 0 && index == fractionStart) {
+        return false;
+      }
+    }
+
+    const exponent = this.exponentEnd(text, index);
+    if (exponent == undefined) {
+      return false;
+    }
+
+    return exponent == text.length;
+  }
+
+  private exponentEnd(text: string, from: int): int | undefined {
+    const mark = this.codeAt(text, from);
+    if (mark != kExponentLower && mark != kExponentUpper) {
+      return from;
+    }
+
+    let index = from + 1;
+    const sign = this.codeAt(text, index);
+
+    if (sign == kPlusSign || sign == kMinusSign) {
+      index += 1;
+    }
+
+    const start = index;
+
+    while (this.isDigit(this.codeAt(text, index))) {
+      index += 1;
+    }
+
+    if (index == start) {
+      return undefined;
+    }
+
+    return index;
+  }
+
+  private baseDigit(code: int, base: int): boolean {
+    return this.digitValue(code) < base;
+  }
+
+  private digitValue(code: int): int {
+    if (this.isDigit(code)) {
+      return code - kZeroDigit;
+    }
+    if (code >= kLowerA && code <= kLowerZ) {
+      return code - kLowerA + kDigitBase;
+    }
+    if (code >= kUpperA && code <= kUpperZ) {
+      return code - kUpperA + kDigitBase;
+    }
+
+    return kNoDigit;
+  }
+
+  private isBaseNumber(text: string, base: int): boolean {
+    let hasUpper = false;
+    let hasLower = false;
+
+    for (let index = 0; index < text.length; index++) {
+      const code = this.codeAt(text, index);
+
+      hasUpper = hasUpper || (code >= kUpperA && code <= kUpperZ);
+      hasLower = hasLower || (code >= kLowerA && code <= kLowerZ);
+    }
+
+    if (hasUpper && hasLower) {
+      return false;
+    }
+
+    return this.isBaseBody(text, base);
+  }
+
+  private isBaseBody(text: string, base: int): boolean {
+    let hasDot = false;
+    let isAfterDigit = false;
+    let hasAny = false;
+
+    for (let index = 0; index < text.length; index++) {
+      const code = this.codeAt(text, index);
+      if (this.baseDigit(code, base)) {
+        isAfterDigit = true;
+        hasAny = true;
+
+        continue;
+      }
+
+      const isLast = index + 1 == text.length;
+      if (code == kSeparator && isAfterDigit && !isLast) {
+        isAfterDigit = false;
+
+        continue;
+      }
+
+      const isDotPlace = index == 0 || (!hasDot && isAfterDigit);
+      if (code == kDecimalDot && isDotPlace && isLast) {
+        break;
+      }
+      if (code == kDecimalDot && isDotPlace) {
+        hasDot = true;
+        isAfterDigit = false;
+
+        continue;
+      }
+
+      return false;
+    }
+
+    return hasAny || hasDot;
+  }
+}

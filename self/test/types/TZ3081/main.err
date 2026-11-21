@@ -1,0 +1,3 @@
+main.tz:13:26: error TZ3081: the object may be undefined; check it first
+const keys = Object.keys(point);
+                         ^

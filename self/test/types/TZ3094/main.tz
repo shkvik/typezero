@@ -1,0 +1,6 @@
+// A field keeps one type across spreads.
+const words = { a: "x" };
+const partial: { a?: int } = { a: 1 };
+const both = { ...words, ...partial };
+
+console.log(both);

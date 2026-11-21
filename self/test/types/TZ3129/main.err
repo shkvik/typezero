@@ -1,0 +1,3 @@
+main.tz:6:28: error TZ3129: a rounding mode known only when the program runs may be no mode; check it first, e.g. 'if (mode == "up" || mode == "down")'; the modes are 'up', 'down', 'ceil', 'floor', 'half-up', 'half-down', 'half-even', 'half-ceil' and 'half-floor'
+console.log(price.round(2, mode));
+                           ^

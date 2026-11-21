@@ -1,0 +1,6 @@
+main.tz:3:21: error TZ2928: 'as' is not supported
+const other = value as Missing;
+                    ^
+main.tz:3:24: error TZ2302: cannot find type 'Missing'
+const other = value as Missing;
+                       ^

@@ -1,0 +1,3 @@
+main.tz:3:21: error TZ3021: only objects can be spread into an object literal, found 'Map<string, int>'
+const spread = { ...m };
+                    ^

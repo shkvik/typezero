@@ -26,11 +26,16 @@ import {
   kPrototypeName,
   kThisName,
 } from "../const/expression-types.const.tz";
-import { StaticOwner, ThisPlace } from "../types/expression-types.types.tz";
+import {
+  CallKind,
+  StaticOwner,
+  ThisPlace,
+} from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private walkClass(decl: ClassDecl, module: int): void {
     this.redeclareChecks(decl, module);
+    this.decoratorChecks(decl, module);
     this.extendsCycleCheck(decl, module);
     this.checkFields(decl, module);
     this.parentMethodChecks(decl, module);
@@ -46,6 +51,8 @@ partial class ExpressionTypes {
       }
     }
 
+    this.genericClassRules(decl, module);
+    this.variantRules(decl, module);
     this.overrideChecks(decl, module);
     this.contractChecks(decl, module);
     this.overriddenCallChecks(decl, module);
@@ -89,12 +96,15 @@ partial class ExpressionTypes {
   }
 
   private selfOf(decl: ClassDecl, fn: FunctionDecl, module: int): Type {
-    const isPlain = decl.typeParams.length == 0 && !this.isStaticMethod(fn);
-    if (!isPlain) {
+    if (this.isStaticMethod(fn)) {
       return this.store.plain(TypeKind.Error);
     }
 
-    return this.resolver.classInstance(module, decl, []);
+    const part = this.partOf(decl, fn);
+    const home = this.partModule(part, module);
+    const params = this.resolver.parameterTypes(home, part.typeParams);
+
+    return this.resolver.classInstance(module, decl, params);
   }
 
   private thisTyped(expr: NameExpr, module: int): Type {
@@ -150,8 +160,11 @@ partial class ExpressionTypes {
     }
 
     const target = this.targetOfName(object, module);
-    if (target == undefined || target.kind != SymbolKind.Class) {
+    if (target == undefined) {
       return undefined;
+    }
+    if (target.kind != SymbolKind.Class) {
+      return this.valueOwner(target);
     }
     if (this.isLibraryModule(target.module)) {
       return undefined;
@@ -194,7 +207,7 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    return this.fieldValueCall(expr, member, found, false, module);
+    return this.fieldValueCall(expr, member, found, CallKind.Own, module);
   }
 
   private staticMember(

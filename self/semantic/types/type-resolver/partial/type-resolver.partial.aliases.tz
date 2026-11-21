@@ -69,6 +69,7 @@ partial class TypeResolver {
     door.result = result;
     door.state = DoorState.Done;
     this.labelAlias(decl, result, label);
+    this.labelLibraryUnion(module, decl, result, label);
     this.keepOrigin(module, decl, written, result);
 
     if (this.record(module)?.library == true) {
@@ -97,6 +98,17 @@ partial class TypeResolver {
     }
 
     this.endless.add(home);
+
+    const refs = this.refsOf(decl.type);
+    const isConditional = refs.some(
+      (ref) => ref.form.kind == TypeRefKind.Conditional,
+    );
+    if (!isConditional) {
+      this.report(module, decl.loc, Code.AliasEndless, { word: decl.name });
+
+      return;
+    }
+
     this.report(module, decl.loc, Code.AliasTooDeep, { word: decl.name });
   }
 
@@ -359,6 +371,20 @@ partial class TypeResolver {
     }
 
     return !body.parts.some((part) => part.kind == TypeKind.Undefined);
+  }
+
+  private labelLibraryUnion(
+    module: int,
+    decl: TypeAliasDecl,
+    result: Type,
+    label: string,
+  ): void {
+    const written = decl.type.form.kind == TypeRefKind.Union;
+    const isPlain = decl.typeParams.length == 0;
+    const isLibrary = this.record(module)?.library == true;
+    if (written && isPlain && isLibrary && result.kind == TypeKind.Union) {
+      this.store.label(result, label);
+    }
   }
 
   private labelAlias(decl: TypeAliasDecl, result: Type, label: string): void {

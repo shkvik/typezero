@@ -1,0 +1,4 @@
+// Math takes no decimals.
+const price: decimal = decimal(2);
+
+console.log(Math.sqrt(price));

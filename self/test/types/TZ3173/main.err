@@ -1,0 +1,3 @@
+main.tz:4:28: error TZ3173: a class expression cannot use 'label', a variable of the function around it: the class is made once, not at each call, and its static fields get their values the first time; pass the value to its constructor, or keep it in a global
+    static label: string = label;
+                           ^

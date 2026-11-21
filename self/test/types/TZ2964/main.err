@@ -1,0 +1,3 @@
+main.tz:4:20: error TZ2964: JSON.parse takes no type arguments
+const money = JSON.parse<Money>("1");
+                   ^

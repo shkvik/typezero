@@ -1,0 +1,3 @@
+main.tz:4:10: error TZ2887: a case of type 'string' cannot be compared with a 'switch' value of type 'int'
+    case "1":
+         ^

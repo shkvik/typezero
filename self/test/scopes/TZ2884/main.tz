@@ -1,0 +1,9 @@
+// A continue goes on with a loop.
+const n: int = 1;
+
+switch (n) {
+  case 1:
+    continue;
+  default:
+    break;
+}

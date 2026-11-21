@@ -1,0 +1,3 @@
+main.tz:14:24: error TZ3034: next() of 'Generator<int[], string[]>' gives 'int[]', or 'string[]' when it is done, and no union holds both: 'int[]' and 'string[]' cannot be told apart when the program runs: both are arrays; use one array type, e.g. '(int | string)[]'; iterate it with 'for...of', which ignores what it returns
+const r = withReturn().next();
+                       ^

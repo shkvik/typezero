@@ -1,0 +1,4 @@
+// getYear gives the year minus 1900.
+const date = new Date();
+
+console.log(date.getYear());

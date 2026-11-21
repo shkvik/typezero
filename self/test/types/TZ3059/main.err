@@ -1,0 +1,3 @@
+main.tz:2:23: error TZ3059: a date without a time is read as midnight UTC, while the same date with a time is local; write '2026-10-23T00:00' for local midnight or '2026-10-23T00:00Z' for UTC
+const date = new Date("2026-10-23");
+                      ^

@@ -1,0 +1,4 @@
+const price: decimal = 19.99;
+
+// A decimal uses operators, not the methods of BigNumber.js.
+console.log(price.plus(1));

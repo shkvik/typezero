@@ -1,0 +1,2 @@
+// JSON has parse and stringify.
+console.log(JSON.foo("x"));

@@ -1,0 +1,10 @@
+interface Clicky {
+  onClick: () => void;
+}
+
+// A field that code may replace stays a field in the class.
+class Button implements Clicky {
+  onClick() {}
+}
+
+console.log(new Button());

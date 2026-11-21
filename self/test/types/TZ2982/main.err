@@ -1,0 +1,3 @@
+main.tz:3:11: error TZ2982: '!' cannot test a value of type 'T': 'T' may be a number, and 0 would count as false; check for undefined: 'x == undefined'
+  return !x;
+          ^

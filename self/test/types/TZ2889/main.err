@@ -1,0 +1,3 @@
+main.tz:6:27: error TZ2889: a type predicate names a parameter of the function, and 'q' is none
+function wrong(s: Shape): q is Circle {
+                          ^

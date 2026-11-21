@@ -1,0 +1,4 @@
+// A date text JavaScript cannot read is an Invalid Date.
+const date = new Date("23.10.2026");
+
+console.log(date.getTime());

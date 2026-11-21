@@ -1,0 +1,3 @@
+main.tz:4:27: error TZ3153: 'Object.values' of an object with methods is not supported; read the fields by name
+console.log(Object.values(counter));
+                          ^

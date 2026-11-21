@@ -1,0 +1,18 @@
+interface Face {
+  get(): int;
+}
+
+type Small = { get(): int; n: int };
+
+class Thing implements Face {
+  get() {
+    return 1;
+  }
+}
+
+// A class may implement an interface, so a union with it is narrowed first.
+function read(value: Small | Face): int {
+  return value.get();
+}
+
+console.log(read(new Thing()));

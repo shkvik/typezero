@@ -1,0 +1,3 @@
+main.tz:21:10: error TZ3001: 'instanceof Pet' cannot tell which 'Pet' a 'Animal' would be: each list of type arguments of 'Pet' makes a class of its own; keep the value in a variable of a union of the classes it may be, e.g. 'Pet<int> | Animal'
+if (some instanceof Pet) {
+         ^

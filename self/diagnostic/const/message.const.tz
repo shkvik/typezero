@@ -863,7 +863,7 @@ export const kMessages: Record<Code, Message> = {
     text: "there is no '{word}' in tz: an error is a value; return one with 'err(...)', e.g. 'return err({ kind: \"NOT_FOUND\" })'",
   },
   [Code.NoCodeFromString]: {
-    text: "'{word}' is not supported: a compiled program cannot run code from a string; write the code itself",
+    text: "'{word}' is not supported: a compiled program cannot run code from a string{other}",
   },
   [Code.NoProxy]: {
     text: "'{word}' is not supported: the fields of an object are read and written straight in memory, so nothing can intercept that",
@@ -890,7 +890,7 @@ export const kMessages: Record<Code, Message> = {
     text: "'{word}' is written with its type arguments, e.g. '{other}'",
   },
   [Code.TypeNotGeneric]: {
-    text: "'{word}' takes no type arguments",
+    text: "type '{word}' is not generic; remove the type arguments",
   },
   [Code.AliasRefersToItself]: {
     text: "type alias '{word}' refers to itself",
@@ -1739,7 +1739,7 @@ export const kMessages: Record<Code, Message> = {
     text: "'{word}' is abstract in '{first}': it has no body to call",
   },
   [Code.ParameterCondition]: {
-    text: "a value of type '{first}' cannot be a condition: '{first}' may be a number, and 0 would count as false; check for undefined: '{word} != undefined'",
+    text: "a value of type '{first}' cannot be a condition: '{second}' may be a number, and 0 would count as false; check for undefined: '{word} != undefined'",
   },
   [Code.IndexMaybeUndefined]: {
     text: "the value may be undefined; check it before indexing",
@@ -2106,5 +2106,974 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.SetForIn]: {
     text: "'for...in' walks the properties of an object, and a Set has none in JavaScript; walk its values with 'for (const x of {word})'",
+  },
+  [Code.EnumCycle]: {
+    text: "the members of enum '{word}' depend on themselves",
+  },
+  [Code.EnumMemberDuplicate]: {
+    text: "duplicate enum member '{word}'",
+  },
+  [Code.EnumNotConstant]: {
+    text: "the value of an enum member must be a constant: a number, a string, or an expression of them and of other members",
+  },
+  [Code.EnumMemberNoValue]: {
+    text: "enum member '{word}' needs a value, since the member before it is not a number",
+  },
+  [Code.EnumMemberNotWhole]: {
+    text: "the value of enum member '{word}' must be a whole number from -2^53 to 2^53, found {other}",
+  },
+  [Code.EnumMixed]: {
+    text: "enum '{word}' cannot mix numbers and strings",
+  },
+  [Code.BuiltinTypeRedefined]: {
+    text: "'{word}' is a built-in type and cannot be redefined",
+  },
+  [Code.BuiltinNumberRedefined]: {
+    text: "'{word}' is a built-in type and cannot be redefined; only 'type {word} = number', for tsc, may declare it",
+  },
+  [Code.EnumStringIndex]: {
+    text: "enum '{word}' has string values, and only numbers map back to names",
+  },
+  [Code.EnumIndexNotInteger]: {
+    text: "the value of an enum member is an integer, found '{word}'",
+  },
+  [Code.LabelDuplicate]: {
+    text: "duplicate label '{word}'",
+  },
+  [Code.LabelOnDeclaration]: {
+    text: "a declaration cannot have a label",
+  },
+  [Code.LabelNotFound]: {
+    text: "cannot find label '{word}'",
+  },
+  [Code.BreakOutside]: {
+    text: "'break' can only be used inside a loop or a 'switch'",
+  },
+  [Code.ContinueOutside]: {
+    text: "'continue' can only be used inside a loop",
+  },
+  [Code.ContinueNotLoop]: {
+    text: "'continue {word}' needs a loop, and '{word}' does not label one",
+  },
+  [Code.OtherCaseVariable]: {
+    text: "'{word}' is declared in an earlier case of the 'switch'; declare it before the 'switch' to use it in several cases",
+  },
+  [Code.CaseNotComparable]: {
+    text: "a case of type '{word}' cannot be compared with a 'switch' value of type '{first}'",
+  },
+  [Code.CaseResultsCompared]: {
+    text: "a case of type '{word}' cannot be compared with a 'switch' value of type '{first}'; two Results are never equal, as they are two objects in JavaScript: switch on what they hold",
+  },
+  [Code.PredicateNotParameter]: {
+    text: "a type predicate names a parameter of the function, and '{word}' is none",
+  },
+  [Code.PredicateThisOutside]: {
+    text: "'this is T' can only be the return type of a method",
+  },
+  [Code.AssertsRefused]: {
+    text: "'asserts {word}' is not supported (docs/narrowing.md): there are no exceptions, so a function cannot stop its caller; write '{other}' and return whether it holds",
+  },
+  [Code.AssertsRefusedCall]: {
+    text: "'asserts {word}' is not supported (docs/narrowing.md): there are no exceptions, so a function cannot stop its caller; write '{other}' and return whether it holds, then check it at the call: 'if (!{place}) return err(...)'",
+  },
+  [Code.PredicateUnproven]: {
+    text: "{word} says '{first}', but this may give true while '{other}' is only known to be '{second}'; show it with what narrows types: a union's tag, 'typeof', 'instanceof', '!= undefined', 'Array.isArray' or a function that tests it (checks of fields alone do not make an object of a type)",
+  },
+  [Code.UnknownMember]: {
+    text: "an unknown value has no {other} until a check shows what it holds, e.g. 'if ({word} instanceof C) ...' or 'typeof {word} == \"string\"'",
+  },
+  [Code.UnknownIndexed]: {
+    text: "an unknown value cannot be indexed until a check shows what it holds, e.g. 'if (Array.isArray({word})) ...' or 'typeof {word} == \"string\"'",
+  },
+  [Code.ObjectMemberUnknown]: {
+    text: "an object has no {other} until 'instanceof' shows its class, e.g. 'if ({word} instanceof C) ...'",
+  },
+  [Code.ObjectIndexUnknown]: {
+    text: "an object cannot be indexed until 'instanceof' shows its class, e.g. 'if ({word} instanceof C) ...'",
+  },
+  [Code.ConstructorRefused]: {
+    text: "'constructor' is not supported: an object has no prototype in tz; a decorator gets the class itself, use it as it is",
+  },
+  [Code.UnknownNotAssignable]: {
+    text: "type '{first}' is not assignable to type '{second}'{place}; an unknown value may hold anything: check what it holds first, e.g. 'if ({word}) ...'",
+  },
+  [Code.ObjectNotAssignable]: {
+    text: "type '{first}' is not assignable to type '{second}'{place}; an object may be of any class: check which first, e.g. 'if ({word}) ...'",
+  },
+  [Code.KeyUnknown]: {
+    text: "an unknown cannot be a key: a key is found by its value, and what an unknown holds is known only when the program runs; use keys of one type, e.g. 'Map<string, unknown>'",
+  },
+  [Code.KeyResult]: {
+    text: "a Result cannot be a key: Results are not compared, as in JavaScript each is an object of its own, equal to no other; use what it holds",
+  },
+  [Code.VariantLacksMethod]: {
+    text: "'{word}' may be a '{first}', which has no method '{other}'; narrow it first",
+  },
+  [Code.InUnionTrue]: {
+    text: "operator 'in' is always true here: every member of '{first}' has field '{word}'",
+  },
+  [Code.InUnionFalse]: {
+    text: "operator 'in' is always false here: no member of '{first}' has field '{word}'",
+  },
+  [Code.NeverNotAssignable]: {
+    text: "type '{first}' is not assignable to type '{second}'{place}; nothing fits 'never': if it comes from a type argument left out, write it, e.g. 'new ReadableStream<int, MyError>(...)' for a stream that fails with MyError",
+  },
+  [Code.UnionFieldsDiffer]: {
+    text: "the members of '{word}' have fields '{other}' of different types, '{first}' and '{second}', so no value fits them all; narrow it first",
+  },
+  [Code.NumberOrAssign]: {
+    text: "'||=' cannot test {first}: 0 would count as false; compare it: 'if ({word} == 0) {word} = {other}'",
+  },
+  [Code.FractionOrAssign]: {
+    text: "'||=' cannot test a number: 0 would count as false; compare it as you mean: '{word} != 0' or '{word} > 0'",
+  },
+  [Code.MaybeNumberOrAssign]: {
+    text: "'||=' cannot test {first}: 0 would count as false too; give a default with '??=': '{word} ??= {other}'",
+  },
+  [Code.JsonOrAssign]: {
+    text: "'||=' cannot test a Json: it may hold 0, \"\", false or null, which would count as false; give a default with '??=': '{word} ??= {other}'",
+  },
+  [Code.UnknownOrAssign]: {
+    text: "'||=' cannot test an unknown value: it may hold 0, \"\" or false, which would count as false; give a default with '??=': '{word} ??= {other}'",
+  },
+  [Code.ArrayOrAssign]: {
+    text: "an array is always truthy, even when empty, so '||=' never assigns; check its length: 'if ({word}.length == 0) {word} = {other}'",
+  },
+  [Code.ObjectOrAssign]: {
+    text: "{first} is always truthy, so '||=' never assigns; drop the assignment",
+  },
+  [Code.FunctionOrAssign]: {
+    text: "a function is always truthy, so '||=' never assigns; drop the assignment",
+  },
+  [Code.NumberAndAssign]: {
+    text: "'&&=' cannot test {first}: 0 would count as false; compare it: 'if ({word} != 0) {word} = {other}'",
+  },
+  [Code.FractionAndAssign]: {
+    text: "'&&=' cannot test a number: 0 would count as false; compare it as you mean: '{word} != 0' or '{word} > 0'",
+  },
+  [Code.MaybeNumberAndAssign]: {
+    text: "'&&=' cannot test {first}: 0 would count as false too; check for undefined: '{word} != undefined'",
+  },
+  [Code.JsonAndAssign]: {
+    text: "'&&=' cannot test a Json: it may hold 0, \"\", false or null, which would count as false; compare it as you mean, e.g. '{word} != null', '{word} == true' or 'typeof {word} == \"string\"'",
+  },
+  [Code.UnknownAndAssign]: {
+    text: "'&&=' cannot test an unknown value: it may hold 0, \"\" or false, which would count as false; check what it holds, e.g. '{word} != undefined' or 'typeof {word} == \"string\"'",
+  },
+  [Code.ArrayAndAssign]: {
+    text: "an array is always truthy, even when empty, so '&&=' always assigns; use '='",
+  },
+  [Code.ObjectAndAssign]: {
+    text: "{first} is always truthy, so '&&=' always assigns; use '='",
+  },
+  [Code.FunctionAndAssign]: {
+    text: "a function is always truthy, so '&&=' always assigns; use '='",
+  },
+  [Code.NarrowedArrayCondition]: {
+    text: "'{word}' always holds an array at this point, so the condition is always true; drop the check, or check the length: '{word}.length > 0'",
+  },
+  [Code.NarrowedArrayNot]: {
+    text: "'{word}' always holds an array at this point, so '!' always gives false; drop the check, or check the length: '{word}.length == 0'",
+  },
+  [Code.NarrowedHolderCondition]: {
+    text: "'{word}' always holds {first} at this point, so the condition is always true; drop the check",
+  },
+  [Code.NarrowedHolderNot]: {
+    text: "'{word}' always holds {first} at this point, so '!' always gives false; drop the check",
+  },
+  [Code.CastPlain]: {
+    text: "'as' is not supported",
+  },
+  [Code.CastDeclare]: {
+    text: "'as' is not supported; declare the type of the variable instead, e.g. 'let x: {word} = ...'",
+  },
+  [Code.CastItself]: {
+    text: "'as' is not supported; the value converts to '{word}' by itself, so remove 'as'",
+  },
+  [Code.CastUndefined]: {
+    text: "'as' is not supported; the value may be undefined: check it first (e.g. 'x != undefined') or give a default with '??'",
+  },
+  [Code.CastConvert]: {
+    text: "'as' is not supported; convert it explicitly: '{word}.{other}()'",
+  },
+  [Code.CastRound]: {
+    text: "'as' is not supported; round it first, then convert: 'Math.trunc({word}).{other}()' (or Math.round, Math.floor, Math.ceil)",
+  },
+  [Code.CastToDecimal]: {
+    text: "'as' is not supported; convert the double with 'decimal(x)'",
+  },
+  [Code.CastToNumber]: {
+    text: "'as' is not supported; 'Number(x)' gives the nearest double",
+  },
+  [Code.CastJson]: {
+    text: "'as' is not supported; check what a Json holds first, e.g. 'typeof x == \"number\"', and the check narrows it",
+  },
+  [Code.CastCannot]: {
+    text: "'as' is not supported, and type '{first}' cannot become '{second}'",
+  },
+  [Code.PositionNotInteger]: {
+    text: "an index or position must be an integer, found '{word}'",
+  },
+  [Code.PositionFraction]: {
+    text: "an index or position must be an integer, found '{word}'; round it with Math.floor(x) or drop the fraction with 'x | 0'",
+  },
+  [Code.PositionMaybe]: {
+    text: "an index or position must be an integer, found '{word}'; the value may be undefined: check it first or give a default with '??'",
+  },
+  [Code.MathArgument]: {
+    text: "argument of type '{word}' is not assignable to parameter of type 'double'",
+  },
+  [Code.MathArgumentMaybe]: {
+    text: "argument of type '{word}' is not assignable to parameter of type 'double'; the value may be undefined: check it first or give a default with '??'",
+  },
+  [Code.MathArgumentDecimal]: {
+    text: "argument of type '{word}' is not assignable to parameter of type 'double'; convert it with 'Number(x)', or use what decimals have: 'x.abs()', 'x.sqrt()', 'x.round()', 'decimal.max(a, b)'...",
+  },
+  [Code.FixedDigitsNotWhole]: {
+    text: "the number of digits of 'toFixed' must be a whole number from 0 to 100, found '{word}'",
+  },
+  [Code.RepeatCountNotWhole]: {
+    text: "the count of 'repeat' must be a whole number not negative, found '{word}'",
+  },
+  [Code.MathRoundsInteger]: {
+    text: "'Math.{word}' rounds a double, and this is '{first}', which has no fraction: '/' of integers already drops it",
+  },
+  [Code.NamespaceMemberMissing]: {
+    text: "property '{word}' does not exist on '{first}'",
+  },
+  [Code.JsonMemberMissing]: {
+    text: "'JSON.{word}' does not exist; JSON has parse and stringify",
+  },
+  [Code.ObjectStaticRefused]: {
+    text: "'Object.{word}' is not supported; only Object.keys, Object.values, Object.entries, Object.fromEntries and Object.groupBy are",
+  },
+  [Code.PromiseStaticRefused]: {
+    text: "'Promise.{word}' is not supported; the functions of Promise are 'resolve', 'all', 'race' and 'withResolvers'",
+  },
+  [Code.ConsoleMemberRefused]: {
+    text: "'console.{word}' is not supported yet; only 'console.log', 'info', 'debug', 'error' and 'warn' are",
+  },
+  [Code.MathConstantCalled]: {
+    text: "'Math.{word}' is a number, not a function",
+  },
+  [Code.MathNoValues]: {
+    text: "'Math.{word}()' without values gives {first}Infinity; pass the values, e.g. 'Math.{word}(...xs)'",
+  },
+  [Code.NumberOfUndefined]: {
+    text: "Number() of a value that may be undefined would be NaN, and tz has no NaN; check it first or give a default with '??'",
+  },
+  [Code.NumberOfWrongType]: {
+    text: "Number() takes a number, a boolean, a string or a decimal, found '{word}'",
+  },
+  [Code.ResultUnchecked]: {
+    text: "the Result in '{word}' is never checked, so an error in it would go unchecked; check it, e.g. 'if ({word}.isErr()) ...'",
+  },
+  [Code.ResultPromiseUnawaited]: {
+    text: "'{word}' holds a Promise of a Result that is never awaited, so an error in it would go unchecked; await it and check it, e.g. 'const r = await {word}; if (r.isErr()) ...'",
+  },
+  [Code.EscapeLegacy]: {
+    text: "'escape' is a legacy function whose '%uXXXX' escapes nothing decodes but 'unescape'; encode with 'encodeURIComponent(s)'",
+  },
+  [Code.UnescapeLegacy]: {
+    text: "'unescape' is a legacy function that decodes the '%uXXXX' escapes of 'escape'; decode with 'decodeURIComponent(s)'",
+  },
+  [Code.UnescapeToBytes]: {
+    text: "'unescape(encodeURIComponent(s))' makes a string of the UTF-8 bytes of s, a legacy trick; get the bytes themselves with 'new TextEncoder().encode(s)'",
+  },
+  [Code.DecodeFromBytes]: {
+    text: "'decodeURIComponent(escape(s))' reads the UTF-8 bytes that s holds as characters, a legacy trick; keep the bytes in a Uint8Array and decode them with 'new TextDecoder().decode(bytes)'",
+  },
+  [Code.EscapeValueRefused]: {
+    text: "'escape' is not supported: it is a legacy function whose '%uXXXX' escapes nothing decodes but 'unescape'; encode with 'encodeURIComponent(s)'",
+  },
+  [Code.UnescapeValueRefused]: {
+    text: "'unescape' is not supported: it is a legacy function that decodes the '%uXXXX' escapes of 'escape'; decode with 'decodeURIComponent(s)'",
+  },
+  [Code.JsonParseTypes]: {
+    text: "JSON.parse takes no type arguments",
+  },
+  [Code.ResultCombineVoid]: {
+    text: "'{other}' needs Results that hold {second}, found '{word}'; check them one by one, e.g. with 'every(r => r.isOk())'",
+  },
+  [Code.ArrayNeedsElement]: {
+    text: "'Array' needs an element type, e.g. 'Array<int>' or 'int[]'",
+  },
+  [Code.ArrayTakesOne]: {
+    text: "'Array' takes one type argument",
+  },
+  [Code.ResultTakesTwo]: {
+    text: "'Result' takes two type arguments, the value and the error, e.g. 'Result<int, string>'",
+  },
+  [Code.PromiseNeedsValue]: {
+    text: "'Promise' needs the type of its value, e.g. 'Promise<int>' or 'Promise<void>'",
+  },
+  [Code.PromiseTakesOne]: {
+    text: "'Promise' takes one type argument, the type of its value, e.g. 'Promise<int>'",
+  },
+  [Code.MapNeedsTypes]: {
+    text: "'Map' needs the types of its keys and values, e.g. 'Map<string, int>'",
+  },
+  [Code.SetNeedsType]: {
+    text: "'Set' needs the type of its elements, e.g. 'Set<int>'",
+  },
+  [Code.RecordNeedsTypes]: {
+    text: "'Record' needs the types of its keys and values, e.g. 'Record<string, int>'",
+  },
+  [Code.GeneratorNeedsValues]: {
+    text: "'Generator' needs the type of the values it gives, e.g. 'Generator<int>'",
+  },
+  [Code.GeneratorTakesThree]: {
+    text: "'Generator' takes 1-3 type arguments: the values it gives, what it returns and what next() sends, e.g. 'Generator<int>'",
+  },
+  [Code.PlainTypeNotGeneric]: {
+    text: "generic type '{word}' is not supported",
+  },
+  [Code.TypeArgumentsFew]: {
+    text: "'{word}' needs {other} type argument{place}, e.g. '{word}<int>'",
+  },
+  [Code.TypeArgumentsMany]: {
+    text: "'{word}' takes {other} type argument{place}, but got {first}",
+  },
+  [Code.ClassNotGeneric]: {
+    text: "class '{word}' is not generic; remove the type arguments",
+  },
+  [Code.GenericValueNeedsArgs]: {
+    text: "'{word}' is generic, so a value of it needs its type arguments, e.g. '{word}<int>', or a function type where it goes",
+  },
+  [Code.ParameterNot]: {
+    text: "'!' cannot test a value of type '{first}': '{second}' may be a number, and 0 would count as false; check for undefined: '{word} == undefined'",
+  },
+  [Code.ParameterAnd]: {
+    text: "'&&' cannot test a value of type '{first}': '{second}' may be a number, and 0 would count as false; check for undefined: '{word} != undefined'",
+  },
+  [Code.ParameterOr]: {
+    text: "'||' cannot test a value of type '{first}': '{second}' may be a number, and 0 would count as false; give a default with '??': '{word} ?? {other}'",
+  },
+  [Code.ParameterOrAssign]: {
+    text: "'||=' cannot test a value of type '{first}': '{second}' may be a number, and 0 would count as false; give a default with '??=': '{word} ??= {other}'",
+  },
+  [Code.ParameterAndAssign]: {
+    text: "'&&=' cannot test a value of type '{first}': '{second}' may be a number, and 0 would count as false; check for undefined: 'if ({word} != undefined) {word} = {other}'",
+  },
+  [Code.GenericNotTopLevel]: {
+    text: "a generic function can be declared only at the top level for now",
+  },
+  [Code.GenericClosureNotTopLevel]: {
+    text: "a generic arrow or function expression can only be the value of a top-level constant for now, e.g. 'const f = <T>(x: T) => x'; or declare a generic function at the top level: 'function f<T>(x: T) { ... }'",
+  },
+  [Code.GenericGrowingSelf]: {
+    text: "'{word}' calls itself with '{first}' for '{other}', so each copy of it for some type needs another for a bigger one, without end; a generic function can call itself only with its own type parameters",
+  },
+  [Code.AliasEndless]: {
+    text: "type alias '{word}' refers to itself with other type arguments, so it never ends",
+  },
+  [Code.ResultNeedsTypes]: {
+    text: "'Result' needs the types of its value and its error, e.g. 'Result<int, string>'",
+  },
+  [Code.EmitterNeedsMap]: {
+    text: "'EventEmitter' needs its event map here, e.g. 'EventEmitter<{ data: [chunk: string]; end: [] }>', or the type of an emitter, e.g. 'typeof bus'",
+  },
+  [Code.WeakRefNeedsObject]: {
+    text: "'WeakRef' needs the type of its object, e.g. 'WeakRef<Node>'",
+  },
+  [Code.GenericClassGrowing]: {
+    text: "generic class '{word}' uses itself with type arguments that keep growing, so each instance of it needs another, without end; a generic class can use itself only with its own type parameters",
+  },
+  [Code.GenericOverride]: {
+    text: "a generic method cannot be an override: each call runs a copy of it made for its types",
+  },
+  [Code.GenericAbstract]: {
+    text: "a generic method cannot be abstract: each call runs a copy of it made for its types",
+  },
+  [Code.AbstractGenericReturn]: {
+    text: "abstract method '{word}' of generic class '{other}' needs a return type, e.g. '): T'",
+  },
+  [Code.LiteralGenericMethod]: {
+    text: "a method of an object literal cannot be generic; declare a class, whose methods can",
+  },
+  [Code.GenericMethodValue]: {
+    text: "'{word}' is a generic method, so it can only be called: each call runs a copy of it made for its types; wrap it in an arrow, e.g. '(x) => o.{word}(x)'",
+  },
+  [Code.InstanceOfGenericNever]: {
+    text: "a '{first}' is never a '{word}', so this is always false",
+  },
+  [Code.InstanceOfGenericUnknown]: {
+    text: "'instanceof {word}' cannot tell which '{word}' a '{first}' would be: each list of type arguments of '{word}' makes a class of its own; keep the value in a variable of a union of the classes it may be, e.g. '{word}<int> | {other}'",
+  },
+  [Code.InstanceOfGenericLibrary]: {
+    text: "'instanceof {word}' cannot tell which '{word}' a '{first}' would be: each list of type arguments of '{word}' makes a class of its own; test for a class that extends it, e.g. 'x instanceof Bus' with 'class Bus extends {word} {}'",
+  },
+  [Code.VariantDuplicate]: {
+    text: "duplicate variant {word}: variants must differ in their parameters",
+  },
+  [Code.VariantReturnOnly]: {
+    text: "variants of {word} cannot differ only in what they return: a call chooses a variant by its arguments",
+  },
+  [Code.VariantAmbiguous]: {
+    text: "variants {first} and {second} fit a call with {other} argument{place} equally well; give them parameters of different types",
+  },
+  [Code.VariantSpread]: {
+    text: "a spread argument cannot choose among the variants of {word}; pass the arguments one by one",
+  },
+  [Code.VariantCount]: {
+    text: "no variant of {word} takes {other} argument{place}: there are {first}",
+  },
+  [Code.VariantNoFit]: {
+    text: "no variant of {word} fits these arguments{first}{second}",
+  },
+  [Code.VariantTieLiteral]: {
+    text: "the call fits several variants of {word} equally well: {first}; a number literal fits each of them: write it so that it has the type of one, e.g. '2.0' for a double, or give it a type through a constant, 'const k: int32 = 2'",
+  },
+  [Code.VariantTie]: {
+    text: "the call fits several variants of {word} equally well: {first}; convert an argument to choose one",
+  },
+  [Code.VariantValue]: {
+    text: "'{word}' has several variants, {first}: say which one with the type of the place it goes, e.g. 'const f: {second} = {other}.{word}'",
+  },
+  [Code.NewMapNeedsTypes]: {
+    text: "'new Map()' needs the types of its keys and values, e.g. 'new Map<string, int>()'",
+  },
+  [Code.NewSetNeedsType]: {
+    text: "'new Set()' needs the type of its elements, e.g. 'new Set<int>()'",
+  },
+  [Code.MapKeysDiffer]: {
+    text: "the keys of a Map have one type; found '{first}' and '{second}'",
+  },
+  [Code.MapValuesDiffer]: {
+    text: "the values of a Map have one type; found '{first}' and '{second}'",
+  },
+  [Code.MapNotPairs]: {
+    text: "'new Map' takes [key, value] pairs, found '{word}'",
+  },
+  [Code.SetCombineNeedsSet]: {
+    text: "'{word}' needs a 'Set<{first}>' or a 'Map<{first}, ...>', found '{other}'; make a Set first, e.g. 'new Set(xs)'",
+  },
+  [Code.RecordKeyMissing]: {
+    text: "'{word}' may be undefined, as a key may be missing: give it a default with '??', e.g. '{word} = ({word} ?? 0) + 1'",
+  },
+  [Code.RecordTextKeyMissing]: {
+    text: "'{word}' may be undefined, as a key may be missing: give it a default with '??', e.g. '{word} = ({word} ?? \"\") + s'",
+  },
+  [Code.RecordHasOwn]: {
+    text: "a Record inherits nothing from Object.prototype, and '{word}' is a key like any other; ask for a key with 'key in {other}'",
+  },
+  [Code.SpreadNotObject]: {
+    text: "only objects can be spread into an object literal, found '{word}'",
+  },
+  [Code.SpreadArrayIndices]: {
+    text: "only objects can be spread into an object literal, found '{word}'; JavaScript would make its indices the keys",
+  },
+  [Code.SpreadMaybeUndefined]: {
+    text: "the object may be undefined; check it before spreading it",
+  },
+  [Code.RecordSpreadNotObject]: {
+    text: "only objects and Records can be spread into a Record, found '{word}'",
+  },
+  [Code.RecordSpreadCollection]: {
+    text: "only objects and Records can be spread into a Record, found '{word}'; in JavaScript a Map or a Set has no own properties, so this would add nothing",
+  },
+  [Code.GroupByKeys]: {
+    text: "the keys of an object are strings, and JavaScript would turn '{word}' keys into them; return a string, or group into a Map: 'Map.groupBy(...)'",
+  },
+  [Code.FromEntriesKeys]: {
+    text: "the keys of an object are strings, and JavaScript would turn '{word}' keys into them; convert them first, or make a Map: 'new Map(...)'",
+  },
+  [Code.IterableNotParameter]: {
+    text: "'Iterable<T>' can only be the type of a parameter of a function declared at the top level or of a method, which it makes generic: a copy for each kind of iterable; here, write the type itself, e.g. 'int[]', or 'Iterator<int>' for any iterator",
+  },
+  [Code.IterableConstructor]: {
+    text: "a constructor cannot take an 'Iterable<{word}>' yet: it would make a copy of the constructor for each kind of iterable; take an array, e.g. '{word}[]', and pass '[...xs]'",
+  },
+  [Code.IterableNested]: {
+    text: "a parameter 'Iterable<{word}>' makes the function generic, and a generic function can be declared only at the top level for now; take an array, e.g. '{word}[]'",
+  },
+  [Code.IterableElements]: {
+    text: "'{word}' gives values of type '{first}', and the parameter 'Iterable<{other}>' of '{second}' takes values of type '{other}'",
+  },
+  [Code.IterableNotIterable]: {
+    text: "'{word}' cannot be iterated, and the parameter 'Iterable<{other}>' of '{second}' takes something that can: an array, a string, a Map, a Set, an iterator, or an object with '[Symbol.iterator]()'",
+  },
+  [Code.IteratorMethodResult]: {
+    text: "'[Symbol.iterator]()' of '{word}' gives '{first}', which is not an iterator: it needs a method 'next()' that gives '{ done, value }' (IteratorResult<T>); or make it a generator, '*[Symbol.iterator]() { yield ... }'",
+  },
+  [Code.NextNoUnion]: {
+    text: "next() of '{word}' gives '{first}', or '{second}' when it is done, and no union holds both: {other}; iterate it with 'for...of', which ignores what it returns",
+  },
+  [Code.FlatMapResult]: {
+    text: "the callback of 'flatMap' must return an array or an iterator, found '{word}'",
+  },
+  [Code.IteratorFromSource]: {
+    text: "'Iterator.from' needs an array, a string or an iterator, found '{word}'",
+  },
+  [Code.ArrayStaticRefused]: {
+    text: "'Array.{word}' is not supported; of Array only 'Array.from' and 'new Array' are",
+  },
+  [Code.IndexWriteRange]: {
+    text: "cannot prove that the index is within the array; check it first, e.g. 'if (i < a.length)'",
+  },
+  [Code.IndexWriteHoles]: {
+    text: "cannot prove that the index is within the array (0 <= index <= length); writing further would leave holes. Check the index first, e.g. 'if (i < a.length)', or use push()",
+  },
+  [Code.AsyncCallbackDropped]: {
+    text: "the Promise of this async function is dropped here, so nothing waits for it to finish; loop with 'for (const x of xs) await f(x)', or wait for all with 'await Promise.all(xs.map(async x => ...))'",
+  },
+  [Code.CallbackPromiseDropped]: {
+    text: "the function returns a Promise that its caller drops, so nothing waits for it to finish; loop with 'for (const x of xs) await f(x)', or wait for all with 'await Promise.all(xs.map(...))'",
+  },
+  [Code.PromisesNotAwaited]: {
+    text: "the Promises are not awaited, so nothing waits for them and an error in one would end the program; wait for all of them with 'await Promise.all(...)', or keep them in a variable",
+  },
+  [Code.PromiseRejectParam]: {
+    text: "a Promise is not rejected in tz, so its function gets only 'resolve'; an operation that may fail gives a Promise<Result<T, E>>: 'resolve(err(e))'",
+  },
+  [Code.TimerArguments]: {
+    text: "arguments for the callback are not supported; pass an arrow that calls it with them",
+  },
+  [Code.NothingToCatch]: {
+    text: "there is nothing to catch: nothing is thrown or rejected in tz, an error is a Result that the code which gets it handles (docs/errors.md, section 4)",
+  },
+  [Code.DoubleUnrounded]: {
+    text: "a double becomes an integer only after rounding, which says what happens to the fraction: 'Math.trunc({word}).{other}()' (or Math.round, Math.floor, Math.ceil)",
+  },
+  [Code.DoubleToDecimal]: {
+    text: "a double is inexact already, so it becomes a decimal through 'decimal({word})', which says so",
+  },
+  [Code.MathOneType]: {
+    text: "the values of 'Math.min', 'Math.max' and 'Math.clamp' must have one type; found '{first}' and '{second}'{place}",
+  },
+  [Code.DateYearShort]: {
+    text: "the year {word} is {other} in JavaScript, which reads the years 0 to 99 as 1900 to 1999; write the year in full, or set a year before 100 with 'setFullYear'",
+  },
+  [Code.DateMonthNext]: {
+    text: "month 12 is January of the next year in JavaScript: months are counted from 0, so December is 11",
+  },
+  [Code.DateMonthOutside]: {
+    text: "month {word} is outside the year: months are counted from 0 (January) to 11 (December)",
+  },
+  [Code.DateDayBelow]: {
+    text: "day {word} is outside the month: days are counted from 1, and 0 is the last day of the month before",
+  },
+  [Code.DateDayAbove]: {
+    text: "no month has day {word}: days are counted from 1 to 31",
+  },
+  [Code.DateDayLast]: {
+    text: "{word}; the last day of {other} is day 0 of the month after: 'new Date({first}, {second}, 0)'",
+  },
+  [Code.DateDayFebruary]: {
+    text: "{word}; the last day of February is day 0 of March: '{other}({first}2, 0)'",
+  },
+  [Code.DateDayCount]: {
+    text: "{word}; {other} has {first} days",
+  },
+  [Code.DateTimeRange]: {
+    text: "{word} {other} are out of range: {other} are from 0 to {first} (JavaScript would carry the rest over)",
+  },
+  [Code.DateTextUnreadable]: {
+    text: "'{word}' is not a date JavaScript can read, and would be an Invalid Date; write it as 'YYYY-MM-DDTHH:mm' (local time) or 'YYYY-MM-DDTHH:mmZ' (UTC), e.g. '2026-10-23T10:00'",
+  },
+  [Code.DateTextNoTime]: {
+    text: "a date without a time is read as midnight UTC, while the same date with a time is local; write '{word}T00:00' for local midnight or '{word}T00:00Z' for UTC",
+  },
+  [Code.DateTextNoDay]: {
+    text: "'{word}': {other}; write the date that is meant",
+  },
+  [Code.DateTextOutside]: {
+    text: "'{word}' is outside the dates JavaScript has (100 million days around 1970), and would be an Invalid Date",
+  },
+  [Code.DateNewText]: {
+    text: "'new Date' of a text known only when the program runs may fail, and 'new' gives no Result; write 'Date.parse(text)', which gives a Result with the milliseconds, and 'new Date(ms)'",
+  },
+  [Code.DateNewValue]: {
+    text: "'new Date' takes a time in milliseconds, a string or a date, found '{word}'{place}",
+  },
+  [Code.DateWithoutNew]: {
+    text: "'Date()' without 'new' gives the text of the current time and ignores its arguments; write 'new Date(...)'",
+  },
+  [Code.DateStaticRead]: {
+    text: "'Date.{word}' can only be called: 'Date.{word}{other}'",
+  },
+  [Code.DateGetYear]: {
+    text: "'getYear' gives the year minus 1900 (126 for 2026); use 'getFullYear()'",
+  },
+  [Code.DateSetYear]: {
+    text: "'setYear' takes the year minus 1900, and reads 0 to 99 as 1900 to 1999; use 'setFullYear(year)'",
+  },
+  [Code.DateGmtString]: {
+    text: "'toGMTString' is the old name of 'toUTCString'; use 'toUTCString()'",
+  },
+  [Code.DateMethodRead]: {
+    text: "'{word}' of a date can only be called, e.g. 'd.{word}()'",
+  },
+  [Code.DateGetYearRead]: {
+    text: "'getYear' gives the year minus 1900; use 'getFullYear()'",
+  },
+  [Code.DatePlus]: {
+    text: "'+' with a date joins texts in JavaScript (the date as toString() writes it); to move a date by milliseconds write 'new Date(d.getTime() + ms)'",
+  },
+  [Code.DateMinus]: {
+    text: "a date minus a number is a number of milliseconds in JavaScript, not a date; write 'd.getTime() - ms', or 'new Date(d.getTime() - ms)' for a date",
+  },
+  [Code.DateCompare]: {
+    text: "a date is compared with '{word}' only with another date; compare the times: 'd.getTime() {word} ms'",
+  },
+  [Code.InstanceOfAlwaysTrue]: {
+    text: "the value is a '{first}', so 'instanceof {word}' is always true",
+  },
+  [Code.InstanceOfOrUndefined]: {
+    text: "the value is a '{first}' or undefined; test it with '!= undefined'",
+  },
+  [Code.InstanceOfNeverBuiltin]: {
+    text: "a '{first}' is never a '{word}', so 'instanceof {word}' is always false",
+  },
+  [Code.InstanceOfNoneBuiltin]: {
+    text: "a '{first}' is never a '{word}': none of its members is one, so this is always false",
+  },
+  [Code.InstanceOfAllBuiltin]: {
+    text: "every member of '{first}' is a '{word}', so 'instanceof {word}' is always true",
+  },
+  [Code.InstanceOfUntyped]: {
+    text: "'instanceof {word}' cannot tell the types of the keys and values, which tz needs to use a {word}; keep it in a variable of its type, e.g. '{other}'",
+  },
+  [Code.ObjectNeedsObject]: {
+    text: "'Object.{word}' needs an object, found '{first}'",
+  },
+  [Code.ObjectMaybeUndefined]: {
+    text: "the object may be undefined; check it first",
+  },
+  [Code.ForInIndices]: {
+    text: "'for...in' over {word} gives its indices as strings ('0', '1'...), so 'i + 1' would be '01'; walk the elements with 'for (const x of {other})', or the indices with 'for (let i = 0; i < {other}.length; i++)'{place}",
+  },
+  [Code.ForInUndefined]: {
+    text: "the object may be undefined; check it before walking its keys",
+  },
+  [Code.ForInNotObject]: {
+    text: "'for...in' walks the keys of an object, found '{word}'",
+  },
+  [Code.DestructureNotArray]: {
+    text: "only arrays can be destructured, found '{word}'",
+  },
+  [Code.DestructureMaybeUndefined]: {
+    text: "only arrays can be destructured, found '{word}'; the array may be undefined: check it first",
+  },
+  [Code.DestructureElements]: {
+    text: "only arrays can be destructured; the elements are '{word}'",
+  },
+  [Code.MathSpreadNotNumbers]: {
+    text: "only an array of numbers can be spread here, found '{word}'",
+  },
+  [Code.MathSpreadType]: {
+    text: "the values of 'Math.{word}' must have one type; found '{first}' and '{second}'",
+  },
+  [Code.LogicalAssignSimple]: {
+    text: "'{word}' needs a variable, a field or an array element at a simple index, such as 'a[i]'",
+  },
+  [Code.TupleLengthFixed]: {
+    text: "a tuple has a fixed length, which cannot be changed",
+  },
+  [Code.ObjectValuesNoUnion]: {
+    text: "'Object.{word}' puts the values of all the fields in one array, of the union of their types, and the fields of '{first}' have types that no union holds: {other}; read the fields by name",
+  },
+  [Code.ObjectNoFields]: {
+    text: "'{first}' has no fields, so 'Object.{word}' would always be empty",
+  },
+  [Code.SpreadFieldTypes]: {
+    text: "field '{word}' is '{first}' before the spread and '{second}' in '{other}'; a field has one type",
+  },
+  [Code.ResultValueUnchecked]: {
+    text: "'value' is there only when the Result is an Ok: check it first, 'if ({word}.isOk())', or use 'match' or 'unwrapOr'",
+  },
+  [Code.ResultErrorUnchecked]: {
+    text: "'error' is there only when the Result is an Err: check it first, 'if ({word}.isErr())', or use 'match'",
+  },
+  [Code.ResultMethodRead]: {
+    text: "'{word}' is a method of Result; call it: '{other}.{word}(...)'",
+  },
+  [Code.ResultUnwrapOrTypes]: {
+    text: "'unwrapOr' gives '{first}' for an Ok and '{second}' otherwise, and no type holds both; say what each gives with 'match'",
+  },
+  [Code.ResultNeedsFunction]: {
+    text: "'{word}' needs a function, found '{first}'",
+  },
+  [Code.ResultMatchTypes]: {
+    text: "the functions given to 'match' return '{first}' and '{second}', and no type holds both",
+  },
+  [Code.ResultCallbackNotResult]: {
+    text: "the function given to '{word}' must return a Result, 'ok(...)' or 'err(...)', found '{first}'{place}",
+  },
+  [Code.ResultErrorsNoUnion]: {
+    text: "the Result has errors of '{first}' and the function given to '{word}' returns errors of '{second}', which no union holds{other}; convert one with 'mapErr'",
+  },
+  [Code.ResultValuesNoUnion]: {
+    text: "the Result has values of '{first}' and the function given to 'orElse' returns values of '{second}', which no union holds{other}",
+  },
+  [Code.OkErrTypeArgs]: {
+    text: "'{word}' takes two type arguments: '{word}<T, E>(...)'",
+  },
+  [Code.OkErrVoidValue]: {
+    text: "an expression of type 'void' has no value to keep; write '{word}()'",
+  },
+  [Code.ResultStaticMissing]: {
+    text: "'{word}.{other}' does not exist; Result has 'combine' and 'combineWithAllErrors'",
+  },
+  [Code.ResultCombineNotResult]: {
+    text: "'{word}' takes Results, found '{first}'",
+  },
+  [Code.ResultCombineNotArray]: {
+    text: "'{word}' takes an array of Results, found '{first}'",
+  },
+  [Code.ResultCombineNoUnion]: {
+    text: "the Results given to '{word}' have errors that no union holds{other}; convert them with 'mapErr'",
+  },
+  [Code.CallbackResultDropped]: {
+    text: "the function returns a Result that its caller drops, so an error in it would go unchecked; handle it here, e.g. with '.match(...)'",
+  },
+  [Code.ResultsUnused]: {
+    text: "the Results are not used, so errors in them would go unchecked; handle them, e.g. with 'Result.combine(...)', or keep them in a variable",
+  },
+  [Code.ResultHalfAsValue]: {
+    text: "'{word}' can be used only as a type; make a Result with '{other}', and test one with '{first}'",
+  },
+  [Code.ArraySearchResults]: {
+    text: "'{word}' cannot compare Results: in JavaScript each Result is an object of its own, equal to no other; search with a function, e.g. 'some' or 'findIndex'",
+  },
+  [Code.ResultMethodOnPromise]: {
+    text: "'{word}' is a method of Result, not of Promise; await the Promise first: '(await {other}).{word}(...)'",
+  },
+  [Code.JsonNoMethodNamed]: {
+    text: "a Json has no method '{word}' until a check shows what it holds, e.g. 'if (Array.isArray({other})) {other}.{word}(...)' or 'if (typeof {other} == \"string\") {other}.{word}(...)'",
+  },
+  [Code.JsonNoMethod]: {
+    text: "a Json has no method '{word}' until a check shows what it holds; put it in a variable and check that, e.g. 'const items = j.items; if (Array.isArray(items)) items.{word}(...)'",
+  },
+  [Code.JsonKeyType]: {
+    text: "a key of a Json is a string or a number, found '{word}'",
+  },
+  [Code.JsonReviver]: {
+    text: "the reviver of JSON.parse is not supported",
+  },
+  [Code.JsonToJsonClass]: {
+    text: "JSON.stringify does not call the method toJSON of class '{word}': tz calls no code by itself; call it, e.g. 'JSON.stringify(x.toJSON())'",
+  },
+  [Code.JsonReplacer]: {
+    text: "a replacer is not supported: tz calls no code by itself; build the value to write first, and pass 'null' here",
+  },
+  [Code.JsonSpaceType]: {
+    text: "the space of JSON.stringify is a number of spaces or a string, found '{word}'",
+  },
+  [Code.JsonVoidValue]: {
+    text: "an expression of type 'void' has no value to write as JSON",
+  },
+  [Code.TypeArgsOnlyGeneric]: {
+    text: "type arguments can be given only to a generic function",
+  },
+  [Code.DecimalMethodMissing]: {
+    text: "property '{word}' does not exist on type 'decimal'{place}",
+  },
+  [Code.DecimalStaticMissing]: {
+    text: "property '{word}' does not exist on 'decimal'{place}",
+  },
+  [Code.DecimalPlacesOnly]: {
+    text: "decimalPlaces() only counts the places; to round, use 'x.round(places, mode)'",
+  },
+  [Code.DecimalCountType]: {
+    text: "{word} must be an integer ('int'), found '{first}'{place}",
+  },
+  [Code.RoundingModeUnknown]: {
+    text: "unknown rounding mode '{word}'; the modes are 'up', 'down', 'ceil', 'floor', 'half-up', 'half-down', 'half-even', 'half-ceil' and 'half-floor'",
+  },
+  [Code.RoundingModeRuntime]: {
+    text: "a rounding mode known only when the program runs may be no mode; check it first, e.g. 'if (mode == \"up\" || mode == \"down\")'; the modes are 'up', 'down', 'ceil', 'floor', 'half-up', 'half-down', 'half-even', 'half-ceil' and 'half-floor'",
+  },
+  [Code.DecimalOfType]: {
+    text: "decimal() takes a string, a number or a decimal, found '{word}'{place}",
+  },
+  [Code.DecimalNotNumber]: {
+    text: "'{word}' is no decimal number; write it as one, e.g. '12.50', '-1e3' or '0x1f'",
+  },
+  [Code.DecimalSpreadNotDecimals]: {
+    text: "only an array of decimals can be spread here, found '{word}'",
+  },
+  [Code.DecimalNoValue]: {
+    text: "decimal.{word}() needs at least one value",
+  },
+  [Code.DecimalFunctionRead]: {
+    text: "'decimal.{word}' can only be called, e.g. 'decimal.max(a, b)'; decimal has the functions max, min and sum",
+  },
+  [Code.DecimalNameValue]: {
+    text: "'decimal' is used as 'decimal(x)', which makes a decimal of x, or through its functions, e.g. 'decimal.max(a, b)'",
+  },
+  [Code.DecimalOutOfRange]: {
+    text: "this decimal is out of range: a decimal has at most 10000001 digits before the point",
+  },
+  [Code.ArrayIn]: {
+    text: "operator 'in' is not supported for arrays, which have no holes; compare the index with the length instead: '{word}'",
+  },
+  [Code.DeleteArrayHole]: {
+    text: "'delete' would leave a hole in the array, and arrays have none; remove the element with '{word}.splice({other}, 1)', or replace it: '{word}[{other}] = ...'",
+  },
+  [Code.DeleteCharacter]: {
+    text: "strings are immutable; a character cannot be deleted",
+  },
+  [Code.DeleteTupleHole]: {
+    text: "'delete' would leave a hole in the tuple, which has a fixed length; assign the element instead",
+  },
+  [Code.DeleteNotField]: {
+    text: "'delete' removes fields of objects, and this is not a field",
+  },
+  [Code.TemplateRaw]: {
+    text: "'raw' is not supported: a tag gets the texts of its template as a plain 'string[]', with the escapes already applied",
+  },
+  [Code.StringRawCall]: {
+    text: "String.raw can only tag a template, e.g. String.raw`C:\\dir`",
+  },
+  [Code.TaggedArgumentCount]: {
+    text: "expected {word}, but the tagged template passes {other}: the array of its texts{place}",
+  },
+  [Code.LiteralFitNoField]: {
+    text: "the object literal does not fit '{first}': it has no field '{word}'; an object must have exactly the fields of its type",
+  },
+  [Code.LiteralFitNotMethod]: {
+    text: "the object literal does not fit '{first}': '{word}' is a field of type '{second}' there, not a method",
+  },
+  [Code.LiteralFitReplaceable]: {
+    text: "the object literal does not fit '{first}': '{word}' is a field there that code may replace, which a method cannot be; write it as a field: '{word}: (...) => ...'",
+  },
+  [Code.LiteralFitOtherType]: {
+    text: "the object literal does not fit '{first}': '{word}' is '{second}' here and '{other}' there",
+  },
+  [Code.LiteralFitMissing]: {
+    text: "the object literal does not fit '{first}': it has no '{word}'",
+  },
+  [Code.LiteralFitOverloads]: {
+    text: "the object literal does not fit '{first}': its method '{word}' has several signatures, and only a class implements those, each with a variant of its own",
+  },
+  [Code.LiteralMethodsSpread]: {
+    text: "an object literal with methods cannot take the fields of another object with '...'; write them out",
+  },
+  [Code.SpreadMethods]: {
+    text: "an object with methods cannot be spread into an object literal yet; copy the fields by name",
+  },
+  [Code.ObjectListingMethods]: {
+    text: "'Object.{word}' of an object with methods is not supported; read the fields by name",
+  },
+  [Code.UnionMethodsDiffer]: {
+    text: "the members of '{first}' have methods '{word}' of different types, '{second}' and '{other}'; narrow it first",
+  },
+  [Code.LiteralOverloadsTarget]: {
+    text: "an object literal cannot be of type '{first}': its method '{word}' has several signatures, and only a class implements those, each with a variant of its own",
+  },
+  [Code.OverloadedMethodReplaced]: {
+    text: "'{word}' is a method of '{first}' with several signatures and cannot be replaced",
+  },
+  [Code.ImplementsMustField]: {
+    text: "'{word}' is a field in '{first}' that code may replace, so in '{second}', which implements it, it must be a field too: '{word} = (...) => ...'; or declare it in '{first}' as a method, '{word}(...): ...'",
+  },
+  [Code.ImplementsFieldAsMethod]: {
+    text: "'{word}' is a field of type '{other}' in '{first}', which '{second}' implements, so it cannot be a method",
+  },
+  [Code.ImplementsNoVariant]: {
+    text: "class '{first}' implements '{second}', but has no variant of '{word}' for its signature '{other}'; each signature needs a variant with these parameters",
+  },
+  [Code.UnionMethodBase]: {
+    text: "'{word}' is called on '{first}', and '{second}' is an interface that classes implement; narrow it first, or declare the members to be one type with '{word}'",
+  },
+  [Code.UnionFieldNotFunction]: {
+    text: "'{word}' may be a '{first}', whose '{other}' is not a function; narrow it first",
+  },
+  [Code.ConstructorTypeArgs]: {
+    text: "'Constructor' takes the type of the objects the class makes, e.g. 'Constructor<User>', or nothing for any class",
+  },
+  [Code.ConstructorNotObject]: {
+    text: "a class makes objects, and '{word}' is not an object type; give the type of its objects, e.g. 'Constructor<User>'",
+  },
+  [Code.ValueNewNotClass]: {
+    text: "'new' makes an object of a class, and this is a '{word}'",
+  },
+  [Code.ClassValuePrototype]: {
+    text: "there are no prototypes in tz: the methods belong to the class itself, and a decorator gets the class; use it as it is",
+  },
+  [Code.ClassValueRuntime]: {
+    text: "'{word}' is some class known only when the program runs, which has only its 'name'; make an object of it with 'new', or use reflection (docs/decorators.md, section 6)",
+  },
+  [Code.ClassValueStatics]: {
+    text: "'{word}' is some class known only when the program runs, whose static members are not known; call its methods through reflection (docs/decorators.md, section 6)",
+  },
+  [Code.ClassNameCondition]: {
+    text: "{first} is always truthy, so the condition is always true; drop the check",
+  },
+  [Code.ClassNameNot]: {
+    text: "{first} is always truthy, so '!' always gives false; drop the check",
+  },
+  [Code.ExtendsRuntimeClass]: {
+    text: "the class extended must be known when compiling: the fields of an object lie at places fixed then, and '{word}' is some class known only when the program runs (docs/decorators.md, section 5); extend a class by its name, or take it in a generic function, 'function Mixin<B extends Constructor>(Base: B)'",
+  },
+  [Code.ExtendsNotClassValue]: {
+    text: "a class can extend only a class, and this is a '{word}'",
+  },
+  [Code.ConstructorArgsSubclass]: {
+    text: "'ConstructorArgs' is the list of the parameters of the constructor of the class extended, for the constructor of a class that extends another: 'constructor(...args: ConstructorArgs) { super(...args) }'",
+  },
+  [Code.ClassExprStaticCapture]: {
+    text: "a class expression cannot use '{word}', a variable of the function around it: the class is made once, not at each call, and its static fields get their values the first time; pass the value to its constructor, or keep it in a global",
+  },
+  [Code.ClassExprLaterCapture]: {
+    text: "a class expression cannot use '{word}', a variable of the function around it: the class is made once, not at each call, and its code runs later; pass the value to its constructor, or keep it in a global",
+  },
+  [Code.DecoratorAccessor]: {
+    text: "a decorator cannot decorate an 'accessor' field: in tz it is an ordinary field, and reading or writing it never runs code",
+  },
+  [Code.DecoratorAbstract]: {
+    text: "a decorator cannot decorate an abstract method, which has no code; decorate the methods that implement it",
+  },
+  [Code.DecoratorArguments]: {
+    text: "{word} cannot decorate {first}: it takes {other} arguments, and a decorator of {first} gets {second}, {place}",
+  },
+  [Code.DecoratorDescriptorParameter]: {
+    text: "{word} takes the descriptor of a method: it decorates methods, not parameters",
+  },
+  [Code.DecoratorPositionMethod]: {
+    text: "{word} takes the position of a parameter: it decorates parameters, not methods",
+  },
+  [Code.DecoratorGenericDescriptor]: {
+    text: "a decorator that takes the descriptor of a method of a generic class is not supported yet: each instance of '{word}' has a method of its own; decorate a method of a class that is not generic, or take only the class and the name",
+  },
+  [Code.DecoratorRuntimeClass]: {
+    text: "{word} returns '{first}', some class known only when the program runs, and the class it gives in place of '{second}' must be known when compiling: make the decorator generic, '<T extends Constructor>(cls: T)', and return 'cls' or a class that extends it",
+  },
+  [Code.DecoratorClassResult]: {
+    text: "{word} returns '{first}': a class decorator gives back nothing, the class it got, or a class that extends it, which then replaces it",
+  },
+  [Code.DecoratorMethodResult]: {
+    text: "{word} returns '{first}': a decorator of a method returns nothing, or the descriptor it got",
+  },
+  [Code.DecoratorOtherResult]: {
+    text: "{word} returns '{first}', which a decorator of {second} cannot give back; return nothing",
+  },
+  [Code.DecoratedSameName]: {
+    text: "{first} of '{word}' are decorated, and {second} for both would be one: metadata is kept on the class itself, by the member's name (docs/decorators.md, section 3); give one of them another name",
+  },
+  [Code.DecoratedConstructors]: {
+    text: "two constructors of '{word}' have decorated parameters, and the record 'design:paramtypes' the compiler writes for the class would be one: metadata is kept on the class itself (docs/decorators.md, section 3); decorate the parameters of one of them",
+  },
+  [Code.DecoratorParameterPlace]: {
+    text: "a decorator of a parameter can decorate only a parameter of a method or a constructor of a class",
+  },
+  [Code.ThisBindUnsupported]: {
+    text: "'bind' is not supported: pass the 'this' with every call, 'f.call(obj, ...)'",
+  },
+  [Code.ThisFunctionProperty]: {
+    text: "a function has no property '{word}'; call it with '.call(obj, ...)' or '.apply(obj, args)'",
+  },
+  [Code.ThisArgumentFirst]: {
+    text: "'{word}' takes the 'this' of the call first, e.g. 'f.{word}(this{other}'",
+  },
+  [Code.ThisApplyArguments]: {
+    text: "'apply' takes two arguments: the 'this' of the call and the list of the arguments, e.g. 'f.apply(this, args)'",
+  },
+  [Code.ArrowThisParameter]: {
+    text: "an arrow function cannot have a 'this' parameter: it sees the 'this' of the function around it; write a 'function'",
+  },
+  [Code.MethodThisParameter]: {
+    text: "a method cannot have a 'this' parameter: its 'this' is its object",
   },
 };

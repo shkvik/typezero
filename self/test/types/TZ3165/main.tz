@@ -1,0 +1,8 @@
+class User {
+  constructor(public name: string) {}
+}
+
+// A class has no prototype.
+const kind: Constructor<User> = User;
+
+console.log(kind.prototype);

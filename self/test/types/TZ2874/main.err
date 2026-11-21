@@ -1,0 +1,6 @@
+main.tz:3:12: error TZ2874: the value of enum member 'Half' must be a whole number from -2^53 to 2^53, found 0.5
+  Half = 1 / 2,
+           ^
+main.tz:4:13: error TZ2874: the value of enum member 'Large' must be a whole number from -2^53 to 2^53, found 1.8014398509482e+16
+  Large = 2 ** 54,
+            ^

@@ -3,17 +3,21 @@ import { Code } from "../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
   CallExpr,
+  Expr,
   ExprKind,
   MemberExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
-import { Type } from "../../../../program/type/types/type.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import {
   kAllSettledName,
   kAnyName,
+  kPromiseStatics,
   kCatchName,
   kFinallyName,
   kPromiseClass,
+  kPromisePlaceholder,
   kRejectName,
+  kResultMethods,
   kThenName,
 } from "../const/expression-types.const.tz";
 
@@ -41,8 +45,48 @@ partial class ExpressionTypes {
       case kThenName:
         return this.thenTwoCheck(expr, module);
       default:
+        if (this.resultOnPromiseCheck(expr, member, object, module)) {
+          return true;
+        }
+
         return this.promiseMissing(member, object, module);
     }
+  }
+
+  private resultOnPromiseCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): boolean {
+    if (object.kind != TypeKind.Promise) {
+      return false;
+    }
+
+    const value = this.definedType(object.value);
+    const isMethod = kResultMethods.some((one) => one.name == member.name);
+    if (value.kind != TypeKind.Result || !isMethod) {
+      return false;
+    }
+
+    const holder = member.object;
+    const other = this.promiseHolderText(holder);
+
+    this.report(module, member.loc, Code.ResultMethodOnPromise, {
+      word: member.name,
+      other,
+    });
+    this.looseArguments(expr.args, module);
+
+    return true;
+  }
+
+  private promiseHolderText(holder: Expr): string {
+    if (holder.kind == ExprKind.Name) {
+      return holder.name;
+    }
+
+    return kPromisePlaceholder;
   }
 
   private thenTwoCheck(expr: CallExpr, module: int): boolean {
@@ -107,7 +151,19 @@ partial class ExpressionTypes {
 
         return true;
       default:
-        return false;
+        return this.promiseMissingCheck(member, module);
     }
+  }
+
+  private promiseMissingCheck(member: MemberExpr, module: int): boolean {
+    if (kPromiseStatics.includes(member.name)) {
+      return false;
+    }
+
+    this.report(module, member.loc, Code.PromiseStaticRefused, {
+      word: member.name,
+    });
+
+    return true;
   }
 }

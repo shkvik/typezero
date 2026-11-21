@@ -1,0 +1,14 @@
+// '&&=' of a number that may be undefined checks for undefined.
+function find(flag: boolean): int | undefined {
+  if (flag) {
+    return 1;
+  }
+
+  return undefined;
+}
+
+let found = find(true);
+
+found &&= 3;
+
+console.log(found);

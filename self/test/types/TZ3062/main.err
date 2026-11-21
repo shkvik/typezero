@@ -1,0 +1,3 @@
+main.tz:3:23: error TZ3062: 'new Date' of a text known only when the program runs may fail, and 'new' gives no Result; write 'Date.parse(text)', which gives a Result with the milliseconds, and 'new Date(ms)'
+const date = new Date(text);
+                      ^

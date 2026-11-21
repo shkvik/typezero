@@ -1,0 +1,4 @@
+// A date text with a day its month does not have.
+const date = new Date("2026-02-30T10:00");
+
+console.log(date.getTime());

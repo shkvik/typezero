@@ -1,0 +1,5 @@
+main.tz
+  2:11 withReturn: () => Generator<int[], string[]>
+  8:11 plain: () => Generator<int, string>
+  14:7 r: { done: false; value: int[] } | { done: true; value: string[] }
+  15:7 p: { done: false; value: int } | { done: true; value: string }

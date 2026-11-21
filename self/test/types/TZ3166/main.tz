@@ -1,0 +1,8 @@
+class User {
+  constructor(public name: string) {}
+}
+
+// A class known only when the program runs has only its name.
+const kind: Constructor<User> = User;
+
+console.log(kind.length);

@@ -1,0 +1,3 @@
+main.tz:7:35: error TZ3145: the object literal does not fit 'Shape': it has no field 'size'; an object must have exactly the fields of its type
+const shape: Shape = { name: "b", size: 1, area() { return 1.0; } };
+                                  ^

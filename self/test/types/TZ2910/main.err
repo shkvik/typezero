@@ -1,0 +1,3 @@
+main.tz:12:1: error TZ2910: '||=' cannot test a number that may be undefined: 0 would count as false too; give a default with '??=': 'retries ??= 3'
+retries ||= 3;
+^

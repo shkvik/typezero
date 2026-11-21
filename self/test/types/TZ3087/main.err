@@ -1,0 +1,3 @@
+main.tz:2:12: error TZ3087: only arrays can be destructured; the elements are 'int'
+for (const [first] of [1, 2]) {
+           ^

@@ -1,0 +1,5 @@
+// A character of a string cannot be deleted.
+const text = "abc";
+
+delete text[0];
+console.log(text);

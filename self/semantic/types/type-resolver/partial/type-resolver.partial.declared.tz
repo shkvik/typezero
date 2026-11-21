@@ -11,6 +11,7 @@ import {
   SymbolKind,
 } from "../../../../program/scopes/types/scopes.types.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { kFewArgumentCodes } from "../const/type-resolver.const.tables.tz";
 import {
   ClassHome,
   TypeContext,
@@ -124,7 +125,7 @@ partial class TypeResolver {
       case StmtKind.Class: {
         const name = found.name ?? "";
         const params = found.typeParams;
-        const written = this.written(ref, name, params, context);
+        const written = this.written(ref, name, params, context, true);
         const fits =
           written != undefined &&
           this.argumentsFit(ref, module, name, params, written, context);
@@ -143,7 +144,7 @@ partial class TypeResolver {
           return this.store.plain(TypeKind.Error);
         }
 
-        return this.enumType(ref, found);
+        return this.enumType(ref, found, module);
       }
       default: {
         const written = this.written(ref, found.name, [], context);
@@ -161,32 +162,60 @@ partial class TypeResolver {
     name: string,
     params: TypeParamDecl[],
     context: TypeContext,
+    isClass: boolean = false,
   ): Type[] | undefined {
     const count = ref.args.length;
     if (context.place == TypePlace.Base && count == 0 && params.length > 0) {
       return undefined;
     }
     if (params.length == 0 && count > 0) {
-      this.report(context.module, ref.loc, Code.TypeNotGeneric, {
-        word: name,
-      });
+      const code = this.notGenericCode(isClass);
+
+      this.report(context.module, ref.loc, code, { word: name });
 
       return undefined;
     }
 
     const needed = this.neededCount(params);
-    if (count < needed || count > params.length) {
-      const names = params.map((param) => param.name);
+    if (count < needed) {
+      const code = kFewArgumentCodes.get(name) ?? Code.TypeArgumentsFew;
 
-      this.report(context.module, ref.loc, Code.TypeArgumentsCount, {
+      this.report(context.module, ref.loc, code, {
         word: name,
-        other: `${name}<${names.join(", ")}>`,
+        other: `${params.length}`,
+        place: this.pluralMark(params.length),
+      });
+
+      return undefined;
+    }
+    if (count > params.length) {
+      this.report(context.module, ref.loc, Code.TypeArgumentsMany, {
+        word: name,
+        other: `${params.length}`,
+        place: this.pluralMark(params.length),
+        first: `${count}`,
       });
 
       return undefined;
     }
 
     return this.resolveAll(ref.args, context);
+  }
+
+  private notGenericCode(isClass: boolean): Code {
+    if (isClass) {
+      return Code.ClassNotGeneric;
+    }
+
+    return Code.TypeNotGeneric;
+  }
+
+  private pluralMark(count: int): string {
+    if (count == 1) {
+      return "";
+    }
+
+    return "s";
   }
 
   private neededCount(params: TypeParamDecl[]): int {
@@ -248,6 +277,10 @@ partial class TypeResolver {
     }
 
     this.store.inherit(type, resolved);
+
+    for (const parent of resolved) {
+      this.store.markBase(parent);
+    }
 
     return type;
   }

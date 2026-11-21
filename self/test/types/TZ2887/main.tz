@@ -1,0 +1,13 @@
+// A case is compared with the value of the switch.
+function choose(n: int): string {
+  switch (n) {
+    case "1":
+      return "text";
+    case 2:
+      return "two";
+    default:
+      return "other";
+  }
+}
+
+console.log(choose(1));

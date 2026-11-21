@@ -1,0 +1,3 @@
+main.tz
+  2:10 outer: () => int
+  3:12 inner: (Iterable<int>) => int

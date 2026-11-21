@@ -1,0 +1,3 @@
+main.tz:9:7: error TZ3042: the Promises are not awaited, so nothing waits for them and an error in one would end the program; wait for all of them with 'await Promise.all(...)', or keep them in a variable
+names.map((n) => save(n));
+      ^

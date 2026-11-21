@@ -1,0 +1,6 @@
+// instanceof cannot tell the type arguments of a generic class of the library.
+const some: Event = new CustomEvent<int>("tick", { detail: 1 });
+
+if (some instanceof CustomEvent) {
+  console.log("custom");
+}

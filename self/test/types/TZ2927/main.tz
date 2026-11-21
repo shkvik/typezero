@@ -1,0 +1,12 @@
+// After a check '!' of a function is always false.
+function run(report?: () => void): void {
+  if (report) {
+    if (!report) {
+      return;
+    }
+
+    report();
+  }
+}
+
+run();

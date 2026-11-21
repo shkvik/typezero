@@ -23,9 +23,22 @@ import {
   TypeKind,
   UnionType,
 } from "../../../../program/type/types/type.types.tz";
-import { kTakingMethods } from "../const/expression-types.const.tz";
+import {
+  kCountedGlobals,
+  kDateName,
+  kPushName,
+  kTextStatics,
+  kStrictGlobals,
+  kTakenMethods,
+  kTakingMethods,
+} from "../const/expression-types.const.tz";
 import { DoorState } from "../../../types/type-resolver/types/type-resolver.types.tz";
-import { GenericTarget, ValueTarget } from "../types/expression-types.types.tz";
+import {
+  CallKind,
+  CallTarget,
+  GenericTarget,
+  ValueTarget,
+} from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private callTyped(
@@ -35,7 +48,11 @@ partial class ExpressionTypes {
   ): Type {
     const callee = expr.callee;
 
-    if (expr.tagged) {
+    if (expr.tagged && !this.isOwnTag(callee, module)) {
+      if (callee.kind == ExprKind.Member) {
+        this.stringRawCheck(expr, callee, module);
+      }
+
       return this.store.plain(TypeKind.Error);
     }
 
@@ -53,6 +70,19 @@ partial class ExpressionTypes {
     }
   }
 
+  private isOwnTag(callee: Expr, module: int): boolean {
+    if (callee.kind != ExprKind.Name) {
+      return false;
+    }
+
+    const target = this.targetOfName(callee, module);
+    if (target == undefined || target.kind != SymbolKind.Function) {
+      return false;
+    }
+
+    return !this.isLibraryModule(target.module);
+  }
+
   private namedCall(
     expr: CallExpr,
     callee: NameExpr,
@@ -61,12 +91,23 @@ partial class ExpressionTypes {
   ): Type {
     this.stringCallCheck(expr, callee, module);
 
+    if (this.isResultMakerCall(callee, module)) {
+      return this.resultMakerCall(expr, callee, wanted, module);
+    }
+    if (this.isDecimalName(callee, module)) {
+      return this.decimalOfCall(expr, callee, module);
+    }
+
     const target = this.targetOfName(callee, module);
     if (target == undefined) {
       return this.store.plain(TypeKind.Error);
     }
 
     const isLibrary = this.isLibraryModule(target.module);
+    const isClass = target.kind == SymbolKind.Class;
+    if (isLibrary && isClass && callee.name == kDateName) {
+      return this.dateFunctionCall(expr, callee, module);
+    }
     if (isLibrary && target.kind != SymbolKind.Function) {
       return this.store.plain(TypeKind.Error);
     }
@@ -146,7 +187,19 @@ partial class ExpressionTypes {
 
     const loc = callee.loc;
     const isLenient = this.isLibraryModule(target.module);
-    const call = { params, rest, loc, isLenient };
+    const isListed = kStrictGlobals.includes(callee.name);
+    const isStrict = isLenient && isListed && this.isStrictShape(params);
+    const isCounted = isStrict || kCountedGlobals.includes(callee.name);
+    const call: CallTarget = {
+      params,
+      rest,
+      loc,
+      isLenient: isLenient && !isStrict,
+      kind: this.libraryKind(isLenient),
+      isCounted: isLenient && isCounted,
+      method: callee.name,
+      isTagged: expr.tagged,
+    };
 
     if (isLenient) {
       this.lenientCalls.add(expr);
@@ -154,7 +207,7 @@ partial class ExpressionTypes {
 
     const isPassed = this.argumentsCheck(expr.args, call, module);
 
-    if (!isLenient) {
+    if (!isLenient && isPassed) {
       this.changedArguments(expr, module);
     }
     if (!isPassed) {
@@ -187,12 +240,13 @@ partial class ExpressionTypes {
   private takenFrom(object: Expr, module: int): void {
     const key = this.pathKey(object, module);
     if (key != undefined) {
-      this.forgetLength(key);
+      this.forgetAllLengths();
     }
   }
 
   private changedArguments(expr: CallExpr, module: int): void {
     this.forgetLengths(expr.args, module);
+    this.forgetAllLengths();
   }
 
   private genericResult(
@@ -264,7 +318,7 @@ partial class ExpressionTypes {
     const loc = callee.loc;
 
     if (type.kind == TypeKind.Function) {
-      return this.calledWith(expr, type, loc, false, module);
+      return this.calledWith(expr, type, loc, CallKind.Own, module);
     }
     if (type.kind == TypeKind.Union && this.isOptionalFunction(type)) {
       this.report(module, loc, Code.FunctionMayBeUndefined, kNoDetails);
@@ -295,10 +349,17 @@ partial class ExpressionTypes {
     expr: CallExpr,
     type: FunctionType,
     loc: int,
-    isLenient: boolean,
+    kind: CallKind,
     module: int,
   ): Type {
+    const isLenient = kind != CallKind.Own;
+    const positions = this.positionMask;
+    const method = this.positionMethod;
     const shape = type.shape;
+
+    this.positionMask = [];
+    this.positionMethod = "";
+
     if (shape.self != undefined) {
       this.report(module, loc, Code.FunctionTakesThis, kNoDetails);
       this.looseArguments(expr.args, module);
@@ -309,10 +370,26 @@ partial class ExpressionTypes {
     const params = shape.params;
     const rest = shape.rest;
     const isOpen = this.isOpenRest(params, rest);
-    const call = { params, rest, loc, isLenient: isLenient || isOpen };
+    const isChecked = kind == CallKind.Positional || kind == CallKind.Math;
+    const isPlainRest = !rest || this.isPlainRest(params);
+    const isStrict = isChecked && isPlainRest && this.isStrictShape(params);
+    const isLoose = (isLenient && !isStrict) || isOpen;
+    const call: CallTarget = {
+      params,
+      rest,
+      loc,
+      isLenient: isLoose,
+      kind,
+      positions,
+      method,
+      isCounted: isChecked && !isOpen,
+    };
 
     if (isLenient) {
       this.lenientCalls.add(expr);
+    }
+    if (this.spreadRefused(expr, kind, method, module)) {
+      return this.store.plain(TypeKind.Error);
     }
 
     const isPassed = this.argumentsCheck(expr.args, call, module);
@@ -322,6 +399,29 @@ partial class ExpressionTypes {
     }
 
     return shape.result;
+  }
+
+  private spreadRefused(
+    expr: CallExpr,
+    kind: CallKind,
+    method: string,
+    module: int,
+  ): boolean {
+    const spread = expr.args.find((arg) => arg.spread);
+    if (spread == undefined) {
+      return false;
+    }
+
+    const isPositional = kind == CallKind.Positional && method != kPushName;
+    const isStatic = kind == CallKind.Library && kTextStatics.includes(method);
+    if (!isPositional && !isStatic) {
+      return false;
+    }
+
+    this.report(module, spread.expr.loc, Code.SpreadNotRest, kNoDetails);
+    this.looseArguments(expr.args, module);
+
+    return true;
   }
 
   private isOpenRest(params: FunctionParameter[], rest: boolean): boolean {
@@ -348,6 +448,8 @@ partial class ExpressionTypes {
       case TypeKind.Array:
       case TypeKind.Tuple:
       case TypeKind.Object:
+      case TypeKind.Unknown:
+      case TypeKind.AnyObject:
         return true;
       default:
         return false;
@@ -363,6 +465,39 @@ partial class ExpressionTypes {
     if (this.enumOfObject(member.object, module) != undefined) {
       return this.store.plain(TypeKind.Error);
     }
+    if (this.jsonParseTypesCheck(expr, member, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const decimalStatic = this.decimalStaticCall(expr, member, module);
+    if (decimalStatic != undefined) {
+      return decimalStatic;
+    }
+    if (this.stringRawCheck(expr, member, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const spread = this.mathSpreadCall(expr, module);
+    if (spread != undefined) {
+      return spread;
+    }
+    if (this.mathDecimalCheck(expr, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.jsonStaticCheck(expr, member, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    if (this.staticSourceCheck(expr, member, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    const combined = this.resultStaticCall(expr, member, module);
+    if (combined != undefined) {
+      return combined;
+    }
+    if (this.resultSearchCheck(expr, member, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
     if (this.thisPlaceCheck(member, module)) {
       return this.store.plain(TypeKind.Error);
     }
@@ -375,11 +510,17 @@ partial class ExpressionTypes {
     if (this.isSuperName(member.object, module)) {
       return this.superMethodCall(expr, member, wanted, module);
     }
-    if (kTakingMethods.includes(member.name)) {
+    const isTaken = kTakenMethods.includes(member.name);
+    if (kTakingMethods.includes(member.name) && !isTaken) {
       this.takenFrom(member.object, module);
     }
     if (this.promiseStatic(member, module)) {
       return this.store.plain(TypeKind.Error);
+    }
+
+    const dated = this.dateStaticCall(expr, member, module);
+    if (dated != undefined) {
+      return dated;
     }
 
     const owner = this.staticOwner(member.object, module);
@@ -389,7 +530,7 @@ partial class ExpressionTypes {
 
     const fact = this.pathFact(member, module);
     if (fact != undefined) {
-      return this.fieldValueCall(expr, member, fact, false, module);
+      return this.fieldValueCall(expr, member, fact, CallKind.Own, module);
     }
 
     const object = this.receiverOf(member.object, member.optional, module);
@@ -404,6 +545,26 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
+    if (this.unknownCallCheck(expr, member, object, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.isJsonHolder(object)) {
+      return this.jsonMethodCall(expr, member, module);
+    }
+    const isDecimal = this.apparent(object).kind == TypeKind.Decimal;
+    if (isDecimal && member.name != "toLocaleString") {
+      return this.decimalMethodCall(expr, member, module);
+    }
+
+    const isClassLike =
+      object.kind == TypeKind.Instance ||
+      object.kind == TypeKind.Union ||
+      object.kind == TypeKind.Error ||
+      object.kind == TypeKind.TypeParameter;
+    if (member.typeArgs.length > 0 && !isClassLike) {
+      this.report(module, member.loc, Code.TypeArgsOnlyGeneric, kNoDetails);
+    }
+
     switch (object.kind) {
       case TypeKind.Object:
         return this.fieldCall(expr, member, object, wanted, module);
@@ -415,8 +576,16 @@ partial class ExpressionTypes {
         return this.parameterCall(expr, member, object, wanted, module);
       case TypeKind.Tuple:
         return this.tupleCall(expr, member, object, module);
+      case TypeKind.Result:
+        return this.resultMethodCall(expr, member, object, wanted, module);
       case TypeKind.Function:
+        if (object.shape.self != undefined) {
+          return this.thisMethodCall(expr, member, object, module);
+        }
+
         return this.functionMemberCall(member, object, module);
+      case TypeKind.Class:
+        return this.classValueCall(expr, member, object, module);
       case TypeKind.Promise:
         if (this.promiseMisuse(expr, member, object, module)) {
           return this.store.plain(TypeKind.Error);
@@ -458,6 +627,9 @@ partial class ExpressionTypes {
     if (!this.isLibraryModule(instance.module)) {
       return this.methodCall(expr, member, instance, wanted, module);
     }
+    if (this.isDate(instance)) {
+      return this.dateMethodCall(expr, member, instance, wanted, module);
+    }
 
     return this.otherCall(expr, member, instance, wanted, module);
   }
@@ -474,7 +646,17 @@ partial class ExpressionTypes {
     if (this.iteratorCallCheck(member, object, module)) {
       return this.store.plain(TypeKind.Error);
     }
+
+    this.nextUnionCheck(member, object, module);
+    this.flatMapResultCheck(expr, member, object, module);
+
     if (this.dictMemberCheck(member, object, true, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.setCombineCheck(expr, member, object, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.recordMethodCheck(expr, member, object, module)) {
       return this.store.plain(TypeKind.Error);
     }
     if (!this.tupleCalls.has(expr)) {
@@ -504,7 +686,13 @@ partial class ExpressionTypes {
   ): Type {
     if (!this.isOptional(object)) {
       const common = this.commonBaseWith(object, member.name);
+      const shaped = this.unionShapeCall(expr, member, object, common, module);
+      if (shaped != undefined) {
+        return shaped;
+      }
       if (common == undefined) {
+        this.lackingVariantCheck(expr, member, object, module);
+
         return this.store.plain(TypeKind.Error);
       }
 
@@ -535,6 +723,11 @@ partial class ExpressionTypes {
     const field = fields[0];
     const isLibrary = this.resolver.isLibraryShape(object);
     if (field == undefined && isLibrary) {
+      this.namespaceMissingCheck(expr, member, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (isLibrary && this.mathMemberCheck(expr, member, module)) {
       return this.store.plain(TypeKind.Error);
     }
     if (field == undefined) {
@@ -542,6 +735,9 @@ partial class ExpressionTypes {
       this.looseArguments(expr.args, module);
 
       return this.store.plain(TypeKind.Error);
+    }
+    if (fields.length > 1 && !isLibrary) {
+      return this.signatureCall(expr, member, fields, module);
     }
     if (fields.length > 1) {
       return this.store.plain(TypeKind.Error);
@@ -555,21 +751,24 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    return this.fieldValueCall(expr, member, type, isLibrary, module);
+    const kind = this.libraryKind(isLibrary);
+
+    return this.fieldValueCall(expr, member, type, kind, module);
   }
 
   private fieldValueCall(
     expr: CallExpr,
     member: MemberExpr,
     type: Type,
-    isLenient: boolean,
+    kind: CallKind,
     module: int,
   ): Type {
     const link = this.linkOf(type, expr.optional);
     const loc = member.loc;
+    const isLenient = kind != CallKind.Own;
 
     if (link.kind == TypeKind.Function) {
-      return this.calledWith(expr, link, loc, isLenient, module);
+      return this.calledWith(expr, link, loc, kind, module);
     }
     if (link.kind == TypeKind.Error) {
       return link;
@@ -626,11 +825,14 @@ partial class ExpressionTypes {
 
       const type = this.fieldTypeOf(entry, field);
 
-      return this.fieldValueCall(expr, member, type, false, module);
+      return this.fieldValueCall(expr, member, type, CallKind.Own, module);
     }
 
     const method = entry.methods[0];
-    if (method == undefined || entry.methods.length > 1) {
+    if (entry.methods.length > 1) {
+      return this.overloadCall(expr, member, entry, module);
+    }
+    if (method == undefined) {
       return this.store.plain(TypeKind.Error);
     }
 
@@ -662,6 +864,55 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    return this.calledWith(expr, type, member.loc, false, module);
+    return this.calledWith(expr, type, member.loc, CallKind.Own, module);
+  }
+
+  private libraryKind(isLibrary: boolean): CallKind {
+    if (isLibrary) {
+      return CallKind.Library;
+    }
+
+    return CallKind.Own;
+  }
+
+  private isPlainRest(params: FunctionParameter[]): boolean {
+    const last = params[params.length - 1];
+    if (last == undefined || last.type.kind != TypeKind.Array) {
+      return false;
+    }
+
+    return last.type.item.kind != TypeKind.Union;
+  }
+
+  private isStrictShape(params: FunctionParameter[]): boolean {
+    return params.every((param) => this.isStrictParam(param.type));
+  }
+
+  private isStrictParam(type: Type): boolean {
+    if (this.mentionsParameter(type)) {
+      return false;
+    }
+
+    const parts = this.unionMembers(type);
+
+    return parts.every((part) => this.isPlainParam(part));
+  }
+
+  private isPlainParam(part: Type): boolean {
+    switch (part.kind) {
+      case TypeKind.Error:
+      case TypeKind.Function:
+      case TypeKind.Unknown:
+      case TypeKind.AnyObject:
+      case TypeKind.Json:
+      case TypeKind.Literal:
+      case TypeKind.Instance:
+      case TypeKind.Dict:
+        return false;
+      case TypeKind.Array:
+        return this.isPlainParam(part.item);
+      default:
+        return true;
+    }
   }
 }

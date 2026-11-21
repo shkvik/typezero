@@ -1,0 +1,3 @@
+main.tz:4:28: error TZ3128: unknown rounding mode 'nearest'; the modes are 'up', 'down', 'ceil', 'floor', 'half-up', 'half-down', 'half-even', 'half-ceil' and 'half-floor'
+console.log(price.round(2, "nearest"));
+                           ^

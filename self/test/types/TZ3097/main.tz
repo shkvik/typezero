@@ -1,0 +1,13 @@
+function parse(text: string): Result<int, string> {
+  if (text == "") {
+    return err("empty");
+  }
+
+  return ok(text.length);
+}
+
+// A method of Result is called.
+const result = parse("a");
+const change = result.map;
+
+console.log(change);

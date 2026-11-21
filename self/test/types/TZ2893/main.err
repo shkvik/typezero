@@ -1,0 +1,6 @@
+main.tz:7:17: error TZ2893: function 'lies' says 's is Circle', but this may give true while 's' is only known to be 'Square'; show it with what narrows types: a union's tag, 'typeof', 'instanceof', '!= undefined', 'Array.isArray' or a function that tests it (checks of fields alone do not make an object of a type)
+  return s.kind == "square";
+                ^
+main.tz:15:10: error TZ2893: function 'partly' says 's is Circle', but this may give true while 's' is only known to be 'Square'; show it with what narrows types: a union's tag, 'typeof', 'instanceof', '!= undefined', 'Array.isArray' or a function that tests it (checks of fields alone do not make an object of a type)
+  return true;
+         ^

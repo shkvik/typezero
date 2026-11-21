@@ -1,0 +1,6 @@
+// '&&=' cannot test a number.
+let count = 1;
+
+count &&= 2;
+
+console.log(count);

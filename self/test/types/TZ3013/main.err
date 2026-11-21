@@ -1,0 +1,3 @@
+main.tz:2:19: error TZ3013: 'new Set()' needs the type of its elements, e.g. 'new Set<int>()'
+const empty = new Set();
+                  ^

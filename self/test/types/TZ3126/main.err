@@ -1,0 +1,3 @@
+main.tz:4:19: error TZ3126: decimalPlaces() only counts the places; to round, use 'x.round(places, mode)'
+console.log(price.decimalPlaces(2));
+                  ^

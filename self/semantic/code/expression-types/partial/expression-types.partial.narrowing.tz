@@ -14,7 +14,11 @@ import {
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
 import { kTrueText } from "../../../types/type-resolver/const/type-resolver.const.tables.tz";
-import { kDictTexts, kTypeOfTypes } from "../const/expression-types.const.tz";
+import {
+  kArrayTypeOf,
+  kDictTexts,
+  kTypeOfTypes,
+} from "../const/expression-types.const.tz";
 import { NarrowSlot, ValueTarget } from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
@@ -355,6 +359,11 @@ partial class ExpressionTypes {
     const kept = parts.filter((part) =>
       this.isTagKept(part, tag.name, literal, isEqual),
     );
+    if (kept.length == 0 && !isEqual) {
+      facts.set(owner.key, this.store.plain(TypeKind.Never));
+
+      return;
+    }
     if (kept.length == 0 || kept.length == parts.length) {
       return;
     }
@@ -471,11 +480,14 @@ partial class ExpressionTypes {
 
   private withoutPart(type: Type, literal: Type): Type | undefined {
     const parts = this.unionMembers(type);
-    if (parts.length < 2 || !parts.includes(literal)) {
+    if (!parts.includes(literal)) {
       return undefined;
     }
 
     const kept = parts.filter((part) => part != literal);
+    if (kept.length == 0) {
+      return this.store.plain(TypeKind.Never);
+    }
 
     return this.store.unionOf(kept);
   }
@@ -544,6 +556,9 @@ partial class ExpressionTypes {
 
   private openPart(part: Type, name: string, isEqual: boolean): Type {
     const row = kTypeOfTypes.find((one) => one.name == name);
+    if (isEqual && name == kArrayTypeOf && part.kind == TypeKind.Unknown) {
+      return this.store.arrayOf(part);
+    }
     if (!isEqual || row == undefined) {
       return part;
     }
@@ -568,13 +583,23 @@ partial class ExpressionTypes {
       return facts;
     }
 
+    const valueClass = this.valueClassOf(rhs, module);
+    if (valueClass != undefined && isTrue) {
+      facts.set(slot.key, valueClass.instance);
+    }
+    if (valueClass != undefined) {
+      return facts;
+    }
+
     const name = rhs.name;
     const parts = this.unionMembers(slot.type);
     const kept = parts.filter(
       (part) => this.isInstanceOf(part, name) == isTrue,
     );
     if (kept.length == 0 && isTrue) {
-      const derived = this.derivedInstance(rhs, parts, module);
+      const derived =
+        this.derivedInstance(rhs, parts, module) ??
+        this.libraryNarrowed(rhs, parts, module);
       if (derived != undefined) {
         facts.set(slot.key, derived);
       }
@@ -590,6 +615,24 @@ partial class ExpressionTypes {
     facts.set(slot.key, union);
 
     return facts;
+  }
+
+  private libraryNarrowed(
+    rhs: Expr,
+    parts: Type[],
+    module: int,
+  ): Type | undefined {
+    const isOpen = parts.some((part) => this.isUnknownValue(part));
+    if (rhs.kind != ExprKind.Name || !isOpen) {
+      return undefined;
+    }
+    if (!this.isLibraryName(rhs, module)) {
+      return undefined;
+    }
+
+    const instance = this.resolver.libraryInstance(rhs.name, []);
+
+    return instance ?? this.store.plain(TypeKind.Error);
   }
 
   private derivedInstance(

@@ -56,6 +56,7 @@ export const kAbsentNames: AbsentName[] = [
     reason: AbsentReason.CodeFromString,
     asValue: true,
     asType: false,
+    instead: "; write the function itself, e.g. '(a: int) => a'",
   },
   {
     name: "long",

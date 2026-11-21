@@ -1,0 +1,3 @@
+main.tz:2:6: error TZ2876: 'string' is a built-in type and cannot be redefined
+type string = int;
+     ^

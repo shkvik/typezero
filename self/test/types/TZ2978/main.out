@@ -1,0 +1,3 @@
+main.tz
+  2:6 type Box<T> = { value: T }
+  12:5 wide: ?

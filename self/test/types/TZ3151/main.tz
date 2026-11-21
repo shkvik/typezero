@@ -1,0 +1,5 @@
+// A literal with methods takes no spread.
+const base = { a: 1 };
+const made = { ...base, get() { return 1; } };
+
+console.log(made);

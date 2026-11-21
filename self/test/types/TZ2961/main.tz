@@ -1,0 +1,4 @@
+// decodeURIComponent(escape(s)) is a legacy trick.
+const text = decodeURIComponent(escape("a b"));
+
+console.log(text);

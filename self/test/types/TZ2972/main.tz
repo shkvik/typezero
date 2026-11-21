@@ -1,0 +1,4 @@
+// A Set names its elements.
+let seen: Set<int, int> = new Set<int>();
+
+console.log(seen);

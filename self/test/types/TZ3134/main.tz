@@ -1,0 +1,4 @@
+// The functions of decimal can only be called.
+const sum = decimal.sum;
+
+console.log(sum);

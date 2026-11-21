@@ -1,0 +1,13 @@
+// No member of the union is a date.
+function pick(flag: boolean): string | int {
+  if (flag) {
+    return "x";
+  }
+
+  return 1;
+}
+
+const value = pick(true);
+const isDate = value instanceof Date;
+
+console.log(isDate);

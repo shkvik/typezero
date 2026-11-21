@@ -1,0 +1,3 @@
+main.tz:4:10: error TZ3002: 'instanceof CustomEvent' cannot tell which 'CustomEvent' a 'Event' would be: each list of type arguments of 'CustomEvent' makes a class of its own; test for a class that extends it, e.g. 'x instanceof Bus' with 'class Bus extends CustomEvent {}'
+if (some instanceof CustomEvent) {
+         ^

@@ -1,0 +1,18 @@
+// Variants differ in their parameters.
+class Shapes {
+  public k(a: int): int {
+    return 1;
+  }
+
+  public k(a: int): int {
+    return 2;
+  }
+}
+
+class Twice {
+  public constructor(a: int) {}
+
+  public constructor(b: int) {}
+}
+
+console.log(Shapes, Twice);

@@ -1,0 +1,3 @@
+main.tz
+  2:7 flags: boolean[]
+  4:10 at: () => int

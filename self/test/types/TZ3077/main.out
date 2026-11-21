@@ -1,0 +1,4 @@
+main.tz
+  2:10 pick: (boolean) => string | int
+  10:7 value: string | int
+  11:7 isDate: boolean

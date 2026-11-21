@@ -1,0 +1,11 @@
+// After a check '!' of an array is always false.
+function show(list: int[] | undefined): void {
+  if (list == undefined) {
+    return;
+  }
+  if (!list) {
+    console.log("none");
+  }
+}
+
+show([1]);

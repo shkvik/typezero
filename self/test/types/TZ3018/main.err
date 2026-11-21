@@ -1,0 +1,6 @@
+main.tz:4:8: error TZ3018: 'counts.a' may be undefined, as a key may be missing: give it a default with '??', e.g. 'counts.a = (counts.a ?? 0) + 1'
+counts.a += 1;
+       ^
+main.tz:5:7: error TZ3018: 'counts[k]' may be undefined, as a key may be missing: give it a default with '??', e.g. 'counts[k] = (counts[k] ?? 0) + 1'
+counts["b"]++;
+      ^

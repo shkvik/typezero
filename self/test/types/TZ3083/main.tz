@@ -1,0 +1,16 @@
+// The object of for...in may be undefined.
+type Point = { x: int; y: int };
+
+function find(flag: boolean): Point | undefined {
+  if (flag) {
+    return { x: 1, y: 2 };
+  }
+
+  return undefined;
+}
+
+const point = find(true);
+
+for (const key in point) {
+  console.log(key);
+}

@@ -198,10 +198,16 @@ partial class ExpressionTypes {
       return;
     }
 
+    const done = new Set<string>();
+
     for (const field of type.fields) {
       const same = type.fields.filter((one) => one.name == field.name);
       if (same.length == 1) {
         this.contractMember(decl, instance, word, field, module);
+      }
+      if (same.length > 1 && !done.has(field.name)) {
+        done.add(field.name);
+        this.contractSignatures(decl, instance, word, same, module);
       }
     }
   }
@@ -250,9 +256,29 @@ partial class ExpressionTypes {
     if (own != undefined) {
       return this.contractField(entry, iface, field, first, module);
     }
-    if (method != undefined && entry.methods.length == 1) {
-      this.contractMethod(entry, method, iface, field, first, module);
+    if (method == undefined) {
+      return;
     }
+
+    const wanted = this.fieldWanted(field);
+    const word = field.name;
+    if (wanted.kind != TypeKind.Function) {
+      return this.report(module, method.loc, Code.ImplementsFieldAsMethod, {
+        word,
+        first: iface,
+        second: first,
+        other: this.text.of(wanted),
+      });
+    }
+    if (!field.readonly) {
+      return this.report(module, method.loc, Code.ImplementsMustField, {
+        word,
+        first: iface,
+        second: first,
+      });
+    }
+
+    this.contractMethods(entry, iface, field, first, module);
   }
 
   private reportMissingMember(

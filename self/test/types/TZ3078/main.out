@@ -1,0 +1,4 @@
+main.tz
+  2:10 pick: (boolean) => Map<string, int> | Map<string, string>
+  10:7 value: Map<string, int> | Map<string, string>
+  11:7 isMap: boolean

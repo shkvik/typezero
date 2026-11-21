@@ -1,0 +1,3 @@
+main.tz:2:11: error TZ2993: 'WeakRef' needs the type of its object, e.g. 'WeakRef<Node>'
+let held: WeakRef | undefined = undefined;
+          ^

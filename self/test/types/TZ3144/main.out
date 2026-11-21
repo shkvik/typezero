@@ -1,0 +1,2 @@
+main.tz
+  2:10 tag: (string[], int) => int

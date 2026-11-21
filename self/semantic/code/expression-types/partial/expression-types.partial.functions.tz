@@ -94,9 +94,12 @@ partial class ExpressionTypes {
     };
 
     this.resolver.typeParameters(module, fn.typeParams);
+    this.iterablePlaceCheck(fn, module);
+    this.constructorArgsCheck(fn, module);
+    this.parameterPlaceCheck(fn, module);
 
     const shape = this.parameterShape(fn, context, module);
-    const self = shape.self;
+    const self = shape.self ?? this.literalOwners.get(fn);
     const place = this.functionPlace(fn, self);
 
     if (self != undefined) {
@@ -145,6 +148,7 @@ partial class ExpressionTypes {
       const result = this.resolver.returnType(written, context);
 
       this.asyncResultCheck(fn, written, result, module);
+      this.predicateDeclCheck(fn, written, module);
 
       door.type = this.signatureOf(shape, result);
 
@@ -313,6 +317,7 @@ partial class ExpressionTypes {
       this.paramTypes.set(`${module} ${param.loc}`, inside);
 
       if (param.name == kThisParameter) {
+        this.thisParameterCheck(fn, param, module);
         self = type;
 
         continue;
@@ -353,7 +358,9 @@ partial class ExpressionTypes {
       return type;
     }
     if (form.kind != ParamKind.Defaulted) {
-      this.report(module, param.loc, Code.ParameterNeedsType, { word });
+      this.report(module, param.loc, Code.ParameterNeedsType, {
+        word: this.parameterText(param, module),
+      });
 
       return this.store.plain(TypeKind.Error);
     }
@@ -473,6 +480,7 @@ partial class ExpressionTypes {
     this.walkStatements(body.body, frame, module);
     this.initEnd(fn, body, module);
     this.leaveGenerator(frame);
+    this.rememberGuard(fn, frame, module);
     this.writtenResultCheck(fn, result, frame, module);
 
     const isOpen =
@@ -518,6 +526,7 @@ partial class ExpressionTypes {
       returns: [],
       recursive: [],
       hasEmptyReturn: false,
+      guard: {},
     };
   }
 
@@ -538,6 +547,7 @@ partial class ExpressionTypes {
     this.walkStatements(body.body, frame, module);
     this.initEnd(fn, body, module);
     this.leaveGenerator(frame);
+    this.rememberGuard(fn, frame, module);
 
     return frame;
   }
@@ -752,5 +762,15 @@ partial class ExpressionTypes {
     }
 
     return `${kFunctionWord} '${fn.name}'`;
+  }
+
+  private parameterText(param: Param, module: int): string {
+    const span = param.pattern;
+    const text = this.program.modules[module]?.source.text;
+    if (span == undefined || text == undefined) {
+      return param.name;
+    }
+
+    return text.toString("utf8", span.start, span.end);
   }
 }

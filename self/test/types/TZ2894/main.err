@@ -1,0 +1,6 @@
+main.tz:4:13: error TZ2894: an unknown value has no property 'length' until a check shows what it holds, e.g. 'if (u instanceof C) ...' or 'typeof u == "string"'
+console.log(u.length);
+            ^
+main.tz:5:13: error TZ2894: an unknown value has no method 'toFixed' until a check shows what it holds, e.g. 'if (u instanceof C) ...' or 'typeof u == "string"'
+console.log(u.toFixed(2));
+            ^

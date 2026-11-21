@@ -32,7 +32,17 @@ partial class TypeResolver {
       }
     }
 
-    const parts = this.resolveAll(written, context);
+    const parts: Type[] = [];
+
+    for (const one of written) {
+      const part = this.resolve(one, context);
+      if (part.kind == TypeKind.Error) {
+        return part;
+      }
+
+      parts.push(part);
+    }
+
     const joined = this.store.unionOf(parts);
     const hasNull = written.length < ref.args.length;
     const refused =

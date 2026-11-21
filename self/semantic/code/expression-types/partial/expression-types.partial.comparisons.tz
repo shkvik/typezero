@@ -303,6 +303,7 @@ partial class ExpressionTypes {
       case TypeKind.Dict:
       case TypeKind.Unknown:
       case TypeKind.Literal:
+      case TypeKind.Class:
         return true;
       case TypeKind.Union:
         return base.parts.every((part) => part.kind != TypeKind.TypeParameter);
@@ -367,9 +368,11 @@ partial class ExpressionTypes {
       left.kind == TypeKind.Error || right.kind == TypeKind.Error;
     const isText =
       left.kind == TypeKind.String && right.kind == TypeKind.String;
-    const hasDate = this.isDate(left) || this.isDate(right);
-    if (isBroken || isText || hasDate) {
+    if (isBroken || isText) {
       return;
+    }
+    if (this.isDate(left) || this.isDate(right)) {
+      return this.dateComparison(expr, pair, module);
     }
     if (left.kind == TypeKind.Decimal || right.kind == TypeKind.Decimal) {
       return this.decimalComparison(expr, pair, module);

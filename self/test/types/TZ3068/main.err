@@ -1,0 +1,3 @@
+main.tz:4:18: error TZ3068: 'toGMTString' is the old name of 'toUTCString'; use 'toUTCString()'
+console.log(date.toGMTString());
+                 ^

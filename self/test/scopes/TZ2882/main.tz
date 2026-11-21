@@ -1,0 +1,10 @@
+// A jump names a label around it.
+for (;;) {
+  break nowhere;
+}
+
+outer: for (;;) {
+  for (;;) {
+    break outer;
+  }
+}

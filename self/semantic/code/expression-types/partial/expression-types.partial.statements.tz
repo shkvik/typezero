@@ -40,6 +40,7 @@ partial class ExpressionTypes {
       returns: [],
       recursive: [],
       hasEmptyReturn: false,
+      guard: {},
     };
 
     this.checkedModules.add(module);
@@ -76,12 +77,14 @@ partial class ExpressionTypes {
         return this.walkStatements(statement.body, frame, module);
       case StmtKind.VarDecl:
         for (const decl of statement.decls) {
+          this.iterableAnnotationCheck(decl.typeAnn, module);
           this.declaredFact(module, decl.loc);
           this.declaredBounds(decl, module);
         }
 
         return;
       case StmtKind.Function:
+        this.nestedGenericCheck(statement, frame, module);
         this.functionType(statement, module);
 
         return;
@@ -92,9 +95,7 @@ partial class ExpressionTypes {
           this.unusedYields.add(statement.expr);
         }
 
-        const type = this.typed(statement.expr, undefined, module);
-
-        return this.usedCheck(statement.expr, type, statement.loc, module);
+        return this.statementUsed(statement.expr, statement.loc, module);
       }
       case StmtKind.If:
         return this.walkIf(statement, frame, module);
@@ -246,13 +247,25 @@ partial class ExpressionTypes {
   }
 
   private stepCheck(step: Expr | undefined, module: int): void {
-    if (step == undefined) {
-      return;
+    if (step != undefined) {
+      this.statementUsed(step, undefined, module);
+    }
+  }
+
+  private statementUsed(expr: Expr, at: int | undefined, module: int): void {
+    if (expr.kind != ExprKind.Sequence) {
+      const type = this.typed(expr, undefined, module);
+
+      return this.usedCheck(expr, type, at, module);
     }
 
-    const type = this.typed(step, undefined, module);
+    let last = this.store.plain(TypeKind.Error);
 
-    this.usedCheck(step, type, undefined, module);
+    for (const part of expr.exprs) {
+      last = this.typed(part, undefined, module);
+    }
+
+    this.usedCheck(expr, last, at, module);
   }
 
   private loopFacts(cond: Expr | undefined, module: int): Map<string, Type> {
@@ -379,11 +392,45 @@ partial class ExpressionTypes {
       if (test != undefined) {
         const type = this.typed(test, subject, module);
 
+        this.caseTypeCheck(test, type, subject, module);
         tests.push(type);
       }
     }
 
     return tests;
+  }
+
+  private caseTypeCheck(
+    test: Expr,
+    type: Type,
+    subject: Type,
+    module: int,
+  ): void {
+    if (type.kind == TypeKind.Error) {
+      return;
+    }
+
+    const common = this.comparisonType(subject, type);
+    if (common != undefined) {
+      return;
+    }
+
+    const hasResult =
+      type.kind == TypeKind.Result || subject.kind == TypeKind.Result;
+    const code = this.caseCode(hasResult);
+
+    this.report(module, test.loc, code, {
+      word: this.text.of(this.widened(type)),
+      first: this.text.of(subject),
+    });
+  }
+
+  private caseCode(hasResult: boolean): Code {
+    if (hasResult) {
+      return Code.CaseResultsCompared;
+    }
+
+    return Code.CaseNotComparable;
   }
 
   private casesCheck(
@@ -446,6 +493,15 @@ partial class ExpressionTypes {
     frame: FunctionFrame,
     module: int,
   ): void {
+    this.walkReturnValue(statement, frame, module);
+    this.noteGuardExit(statement.value, frame, module);
+  }
+
+  private walkReturnValue(
+    statement: ReturnStmt,
+    frame: FunctionFrame,
+    module: int,
+  ): void {
     const value = statement.value;
     const fn = frame.fn;
 
@@ -484,6 +540,7 @@ partial class ExpressionTypes {
     const given = this.returnedType(value, result, frame, module);
 
     this.coerce(value, given, result, module, kNoPlace);
+    this.predicateReturnCheck(fn, value, module);
   }
 
   private returnedType(
@@ -670,10 +727,10 @@ partial class ExpressionTypes {
 
   private loopItem(loop: ForOfStmt, module: int): Type {
     const iterable = this.typed(loop.iterable, undefined, module);
-
-    this.dictForInCheck(loop, iterable, module);
-
-    if (loop.keys || loop.isAwait) {
+    if (loop.keys) {
+      return this.forInKeys(loop, iterable, module);
+    }
+    if (loop.isAwait) {
       return this.store.plain(TypeKind.Error);
     }
 

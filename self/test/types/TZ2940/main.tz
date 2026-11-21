@@ -1,0 +1,12 @@
+// A position that may be undefined is checked first.
+function find(flag: boolean): int | undefined {
+  if (flag) {
+    return 1;
+  }
+
+  return undefined;
+}
+
+const at = find(true);
+
+console.log("abc".slice(at));

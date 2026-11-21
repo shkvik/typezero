@@ -1,0 +1,24 @@
+// There are no exceptions, so a function cannot assert.
+type Circle = { kind: "circle"; r: double };
+type Square = { kind: "square"; side: double };
+type Shape = Circle | Square;
+
+function assertCircle(s: Shape): asserts s is Circle {
+  console.log(s.kind);
+}
+
+function check(ok: boolean, why: string): asserts ok {
+  console.log(ok, why);
+}
+
+class Shelf {
+  public items: string[];
+
+  public constructor() {
+    this.items = [];
+  }
+
+  public full(): asserts this is Shelf {}
+}
+
+console.log(assertCircle, check);

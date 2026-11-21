@@ -113,10 +113,10 @@ partial class TypeResolver {
         case StmtKind.TypeAlias:
         case StmtKind.Enum:
         case StmtKind.Handle:
-          declarations.set(item.name, item);
+          this.declareFirst(declarations, item.name, item);
           break;
         case StmtKind.Class:
-          declarations.set(item.name ?? "", item);
+          this.declareFirst(declarations, item.name ?? "", item);
           break;
         default:
           break;
@@ -136,5 +136,15 @@ partial class TypeResolver {
       errors: [],
       reported: new Set<string>(),
     };
+  }
+
+  private declareFirst(
+    declarations: Map<string, TypeDeclaration>,
+    name: string,
+    item: TypeDeclaration,
+  ): void {
+    if (!declarations.has(name)) {
+      declarations.set(name, item);
+    }
   }
 }

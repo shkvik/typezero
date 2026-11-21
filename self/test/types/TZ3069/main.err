@@ -1,0 +1,3 @@
+main.tz:3:19: error TZ3069: 'getTime' of a date can only be called, e.g. 'd.getTime()'
+const time = date.getTime;
+                  ^

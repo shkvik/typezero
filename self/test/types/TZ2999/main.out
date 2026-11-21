@@ -1,0 +1,3 @@
+main.tz
+  14:7 box: Box<int>
+  16:7 used: int

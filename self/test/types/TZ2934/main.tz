@@ -1,0 +1,5 @@
+// A double becomes a decimal through decimal().
+const ratio: double = 2.5;
+const exact = ratio as decimal;
+
+console.log(exact);

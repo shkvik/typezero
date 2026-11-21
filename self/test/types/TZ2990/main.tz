@@ -1,0 +1,7 @@
+// An alias that refers to itself with bigger type arguments never ends.
+type Endless<T> = { next?: Endless<T[]> };
+type Chain<T> = { next?: Chain<T>; value: T };
+
+const chain: Chain<int> = { value: 1 };
+
+console.log(chain);

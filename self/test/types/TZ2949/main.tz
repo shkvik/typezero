@@ -1,0 +1,2 @@
+// Object has only a few functions.
+console.log(Object.assign({}, { a: 1 }));

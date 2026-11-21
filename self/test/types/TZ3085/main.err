@@ -1,0 +1,3 @@
+main.tz:2:25: error TZ3085: only arrays can be destructured, found 'int'
+const [first, second] = 5;
+                        ^

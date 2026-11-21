@@ -1,0 +1,16 @@
+// An object of any class has no members until instanceof.
+class User {
+  public name: string;
+
+  public constructor() {
+    this.name = "Ann";
+  }
+}
+
+const o: object = new User();
+
+console.log(o.name);
+
+if (o instanceof User) {
+  console.log(o.name);
+}

@@ -1,0 +1,3 @@
+main.tz:18:42: error TZ3109: the Results given to 'Result.combine' have errors that no union holds: 'int[]' and 'string[]' cannot be told apart when the program runs: both are arrays; use one array type, e.g. '(int | string)[]'; convert them with 'mapErr'
+const all = Result.combine([first(true), second(true)]);
+                                         ^

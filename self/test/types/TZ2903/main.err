@@ -1,0 +1,3 @@
+main.tz:15:14: error TZ2903: 'Dog | Cat' may be a 'Cat', which has no method 'bark'; narrow it first
+  return pet.bark();
+             ^

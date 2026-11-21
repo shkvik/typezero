@@ -1,0 +1,3 @@
+main.tz:7:3: error TZ3158: 'name' is a field of type 'string' in 'Named', which 'Person' implements, so it cannot be a method
+  name() {
+  ^

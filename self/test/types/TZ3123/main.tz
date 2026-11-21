@@ -1,0 +1,4 @@
+// Type arguments go only to generic functions.
+const mapped = [1, 2].map<int>((value) => value);
+
+console.log(mapped);

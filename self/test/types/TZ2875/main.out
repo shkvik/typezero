@@ -1,0 +1,3 @@
+main.tz
+  2:6 enum Mixed = int
+  7:7 a: int

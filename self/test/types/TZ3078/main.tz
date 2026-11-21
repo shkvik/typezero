@@ -1,0 +1,13 @@
+// Every member of the union is a Map.
+function pick(flag: boolean): Map<string, int> | Map<string, string> {
+  if (flag) {
+    return new Map<string, int>();
+  }
+
+  return new Map<string, string>();
+}
+
+const value = pick(true);
+const isMap = value instanceof Map;
+
+console.log(isMap);

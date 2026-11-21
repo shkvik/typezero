@@ -1,0 +1,3 @@
+main.tz:3:22: error TZ3073: a date is compared with '<' only with another date; compare the times: 'd.getTime() < ms'
+const isEarly = date < 5;
+                     ^

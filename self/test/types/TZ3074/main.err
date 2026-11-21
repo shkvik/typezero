@@ -1,0 +1,3 @@
+main.tz:3:21: error TZ3074: the value is a 'Date', so 'instanceof Date' is always true
+const isDate = date instanceof Date;
+                    ^

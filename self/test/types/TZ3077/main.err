@@ -1,0 +1,3 @@
+main.tz:11:22: error TZ3077: a 'string | int' is never a 'Date': none of its members is one, so this is always false
+const isDate = value instanceof Date;
+                     ^

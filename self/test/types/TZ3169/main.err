@@ -1,0 +1,3 @@
+main.tz:6:6: error TZ3169: a class is always truthy, so '!' always gives false; drop the check
+if (!User) {
+     ^

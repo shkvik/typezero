@@ -1,3 +1,4 @@
+import { Code } from "../../../../diagnostic/code.tz";
 import { TypeKind } from "../../../../program/type/types/type.types.tz";
 import {
   GenericBuiltin,
@@ -13,7 +14,45 @@ export const kThisParameter = "this";
 export const kRestPlaceholder = "xs";
 export const kNullTypeName = "null";
 export const kNamePoint = ".";
-export const kEnumValueLimit: uint64 = 9223372036854775807;
+export const kSafeWholeLimit: decimal = 9007199254740992;
+export const kBitSpan: decimal = 4294967296;
+export const kSignBit: decimal = 2147483648;
+export const kShiftSpan: decimal = 32;
+export const kShiftLimit = 31.0;
+export const kSafeWholeSize = 9007199254740992.0;
+export const kPowerLimit: decimal = decimal(2) ** 1024;
+export const kShownPrecision = 15;
+export const kExponentDigits = 2;
+export const kExponentLimit = 10000;
+export const kEndlessText = "inf";
+export const kNotNumberText = "nan";
+export const kFloorRounding = "floor";
+export const kNumber = "number";
+export const kJsonName = "Json";
+export const kArrayName = "Array";
+export const kNumericNames = [
+  "int",
+  "int8",
+  "int16",
+  "int32",
+  "uint8",
+  "uint16",
+  "uint32",
+  "uint64",
+  "double",
+  "number",
+  "decimal",
+];
+export const kBuiltinNames = [
+  "void",
+  "undefined",
+  "boolean",
+  "string",
+  "Json",
+  "unknown",
+  "object",
+  "Array",
+];
 
 export const kLengthMember = "length";
 export const kAliasDepthLimit = 1000;
@@ -58,6 +97,8 @@ export const kGenericTypes: GenericTypeName[] = [
     most: 1,
     example: "Array<int>",
     values: 0,
+    few: Code.ArrayNeedsElement,
+    many: Code.ArrayTakesOne,
   },
   {
     name: "Result",
@@ -66,6 +107,8 @@ export const kGenericTypes: GenericTypeName[] = [
     most: 2,
     example: "Result<int, string>",
     values: 0,
+    few: Code.ResultNeedsTypes,
+    many: Code.ResultTakesTwo,
   },
   {
     name: "Promise",
@@ -74,6 +117,8 @@ export const kGenericTypes: GenericTypeName[] = [
     most: 1,
     example: "Promise<int>",
     values: 0,
+    few: Code.PromiseNeedsValue,
+    many: Code.PromiseTakesOne,
   },
   {
     name: "Map",
@@ -82,6 +127,8 @@ export const kGenericTypes: GenericTypeName[] = [
     most: 2,
     example: "Map<string, int>",
     values: 2,
+    few: Code.MapNeedsTypes,
+    many: Code.MapNeedsTypes,
   },
   {
     name: "Set",
@@ -90,6 +137,8 @@ export const kGenericTypes: GenericTypeName[] = [
     most: 1,
     example: "Set<int>",
     values: 1,
+    few: Code.SetNeedsType,
+    many: Code.SetNeedsType,
   },
   {
     name: "Record",
@@ -98,6 +147,8 @@ export const kGenericTypes: GenericTypeName[] = [
     most: 2,
     example: "Record<string, int>",
     values: 2,
+    few: Code.RecordNeedsTypes,
+    many: Code.RecordNeedsTypes,
   },
   {
     name: "Generator",
@@ -106,6 +157,8 @@ export const kGenericTypes: GenericTypeName[] = [
     most: 3,
     example: "Generator<int>",
     values: 1,
+    few: Code.GeneratorNeedsValues,
+    many: Code.GeneratorTakesThree,
   },
   {
     name: "AsyncGenerator",
@@ -114,6 +167,18 @@ export const kGenericTypes: GenericTypeName[] = [
     most: 3,
     example: "AsyncGenerator<int>",
     values: 1,
+    few: Code.TypeArgumentsCount,
+    many: Code.TypeArgumentsCount,
+  },
+  {
+    name: "Constructor",
+    type: GenericBuiltin.Constructor,
+    least: 0,
+    most: 1,
+    example: "Constructor<User>",
+    values: 0,
+    few: Code.ConstructorTypeArgs,
+    many: Code.ConstructorTypeArgs,
   },
 ];
 
@@ -134,3 +199,8 @@ export const kJsonKinds: JsonKind[] = [
   { kind: TypeKind.Instance, name: "object" },
 ];
 export const kUnionSeparator = " | ";
+
+export const kFewArgumentCodes = new Map<string, Code>([
+  ["EventEmitter", Code.EmitterNeedsMap],
+  ["WeakRef", Code.WeakRefNeedsObject],
+]);

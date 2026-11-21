@@ -1,0 +1,3 @@
+main.tz:2:18: error TZ3065: 'Date.UTC' can only be called: 'Date.UTC(y, m, d)'
+const utc = Date.UTC;
+                 ^

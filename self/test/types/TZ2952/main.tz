@@ -1,0 +1,2 @@
+// A constant of Math is no function.
+console.log(Math.PI(), Math.PI);

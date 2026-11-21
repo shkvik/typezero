@@ -1,0 +1,6 @@
+// A Map without entries names its types.
+const empty = new Map();
+const typed = new Map<string, int>();
+const wanted: Map<string, int> = new Map();
+
+console.log(empty, typed, wanted);

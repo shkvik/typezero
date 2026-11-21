@@ -1,0 +1,5 @@
+// Only objects are spread into an object literal.
+const m = new Map<string, int>();
+const spread = { ...m };
+
+console.log(spread);

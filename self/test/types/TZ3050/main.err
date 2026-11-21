@@ -1,0 +1,3 @@
+main.tz:2:29: error TZ3050: month 12 is January of the next year in JavaScript: months are counted from 0, so December is 11
+const date = new Date(2026, 12, 1);
+                            ^

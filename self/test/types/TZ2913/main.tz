@@ -1,0 +1,6 @@
+// '||=' never assigns to an array.
+let items = [1, 2];
+
+items ||= [3];
+
+console.log(items);

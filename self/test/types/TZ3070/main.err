@@ -1,0 +1,3 @@
+main.tz:3:19: error TZ3070: 'getYear' gives the year minus 1900; use 'getFullYear()'
+const year = date.getYear;
+                  ^

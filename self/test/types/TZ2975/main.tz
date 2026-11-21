@@ -1,0 +1,8 @@
+// A Generator takes one to three type arguments.
+function* count(): Generator<int, int, int, int> {
+  yield 1;
+
+  return 0;
+}
+
+console.log(count);

@@ -1,0 +1,3 @@
+main.tz:3:44: error TZ3024: only objects and Records can be spread into a Record, found 'int[]'
+const fromList: Record<string, int> = { ...list };
+                                           ^

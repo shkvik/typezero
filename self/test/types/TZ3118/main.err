@@ -1,0 +1,3 @@
+main.tz:2:32: error TZ3118: the reviver of JSON.parse is not supported
+const parsed = JSON.parse("1", (key: string, value: Json) => value);
+                               ^

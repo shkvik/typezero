@@ -1,0 +1,3 @@
+main.tz:2:19: error TZ3012: 'new Map()' needs the types of its keys and values, e.g. 'new Map<string, int>()'
+const empty = new Map();
+                  ^

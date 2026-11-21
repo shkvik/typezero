@@ -1,0 +1,3 @@
+main.tz:4:1: error TZ2919: '&&=' cannot test a Json: it may hold 0, "", false or null, which would count as false; compare it as you mean, e.g. 'value != null', 'value == true' or 'typeof value == "string"'
+value &&= 1;
+^

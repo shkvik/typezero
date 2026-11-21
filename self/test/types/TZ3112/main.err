@@ -1,0 +1,3 @@
+main.tz:2:14: error TZ3112: 'Ok' can be used only as a type; make a Result with 'ok(value)', and test one with 'isOk()'
+const made = Ok;
+             ^

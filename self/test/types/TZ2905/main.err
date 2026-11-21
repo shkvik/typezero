@@ -1,0 +1,3 @@
+main.tz:6:14: error TZ2905: operator 'in' is always false here: no member of 'Circle | Square' has field 'z'
+  return "z" in s;
+             ^

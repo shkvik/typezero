@@ -1,0 +1,3 @@
+main.tz:10:17: error TZ2886: 'inFirst' is declared in an earlier case of the 'switch'; declare it before the 'switch' to use it in several cases
+    console.log(inFirst);
+                ^

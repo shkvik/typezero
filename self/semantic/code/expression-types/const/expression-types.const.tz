@@ -9,8 +9,18 @@ import {
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
 import {
+  DateSetter,
+  DecoratorPlace,
+  DecoratorPlaceText,
+  DecimalArgument,
+  DecimalMethod,
+  DecimalReplacement,
+  DecimalResult,
+  ResultMethod,
+  DateStatic,
   DictText,
   IntLimit,
+  NarrowedCode,
   OperatorText,
   TruthCodes,
   TruthUse,
@@ -199,6 +209,7 @@ export const kOperatorTexts: OperatorText[] = [
   { op: BinaryOp.Gt, text: ">" },
   { op: BinaryOp.Ge, text: ">=" },
   { op: BinaryOp.Nullish, text: "??" },
+  { op: BinaryOp.In, text: "in" },
 ];
 
 export const kTypeOfNames = [
@@ -249,6 +260,8 @@ export const kDecimalNoun = "a decimal";
 export const kMaybeSuffix = " that may be undefined";
 export const kObjectNoun = "an object";
 export const kPromiseNoun = "a Promise";
+export const kClassNoun = "a class";
+export const kConstructorArgsName = "ConstructorArgs";
 export const kNegation = "!";
 export const kPlainCall = "()";
 export const kArgumentsCall = "(...)";
@@ -318,6 +331,37 @@ export const kTruthCodes: TruthCodes[] = [
     object: Code.ObjectOr,
     function: Code.FunctionOr,
   },
+  {
+    use: TruthUse.OrAssign,
+    number: Code.NumberOrAssign,
+    fraction: Code.FractionOrAssign,
+    maybe: Code.MaybeNumberOrAssign,
+    json: Code.JsonOrAssign,
+    unknown: Code.UnknownOrAssign,
+    array: Code.ArrayOrAssign,
+    object: Code.ObjectOrAssign,
+    function: Code.FunctionOrAssign,
+  },
+  {
+    use: TruthUse.AndAssign,
+    number: Code.NumberAndAssign,
+    fraction: Code.FractionAndAssign,
+    maybe: Code.MaybeNumberAndAssign,
+    json: Code.JsonAndAssign,
+    unknown: Code.UnknownAndAssign,
+    array: Code.ArrayAndAssign,
+    object: Code.ObjectAndAssign,
+    function: Code.FunctionAndAssign,
+  },
+];
+
+export const kNarrowedCodes: NarrowedCode[] = [
+  { code: Code.ArrayCondition, narrowed: Code.NarrowedArrayCondition },
+  { code: Code.ArrayNot, narrowed: Code.NarrowedArrayNot },
+  { code: Code.ObjectCondition, narrowed: Code.NarrowedHolderCondition },
+  { code: Code.ObjectNot, narrowed: Code.NarrowedHolderNot },
+  { code: Code.FunctionCondition, narrowed: Code.NarrowedHolderCondition },
+  { code: Code.FunctionNot, narrowed: Code.NarrowedHolderNot },
 ];
 
 export const kUnaryTexts: UnaryText[] = [
@@ -456,3 +500,440 @@ export const kDictIterating = [
   "every",
   "find",
 ];
+export const kIsJsonName = "isJson";
+export const kJsonName = "Json";
+export const kArrayTypeOf = "array";
+export const kBooleanName = "Boolean";
+export const kMathName = "Math";
+export const kToFixedName = "toFixed";
+export const kRepeatName = "repeat";
+export const kRoundingNames = ["floor", "ceil", "round", "trunc"];
+export const kMathConstants = [
+  "PI",
+  "E",
+  "LN2",
+  "LN10",
+  "LOG2E",
+  "LOG10E",
+  "SQRT2",
+  "SQRT1_2",
+];
+export const kNumberLaterMethods = ["toLocaleString", "toDecimal"];
+export const kStrictGlobals = [
+  "parseInt",
+  "parseFloat",
+  "decodeURI",
+  "decodeURIComponent",
+];
+export const kNumberName = "Number";
+export const kEscapeName = "escape";
+export const kUnescapeName = "unescape";
+export const kEncodeComponentName = "encodeURIComponent";
+export const kDecodeComponentName = "decodeURIComponent";
+export const kJsonGlobalName = "JSON";
+export const kResultName = "Result";
+export const kCountedGlobals = ["encodeURI", "encodeURIComponent"];
+export const kPromiseStatics = [
+  "resolve",
+  "all",
+  "race",
+  "withResolvers",
+  "reject",
+  "allSettled",
+  "any",
+];
+export const kParentDepth = 64;
+export const kSetCombiners = [
+  "union",
+  "intersection",
+  "difference",
+  "symmetricDifference",
+  "isSubsetOf",
+  "isSupersetOf",
+  "isDisjointFrom",
+];
+export const kIterableName = "Iterable";
+export const kNextName = "next";
+export const kFlatMapName = "flatMap";
+export const kIteratorClass = "Iterator";
+export const kUnsupportedMark = " is not supported: ";
+export const kTakenMethods = ["pop", "shift"];
+export const kCodeMethods = ["charCodeAt", "codePointAt"];
+export const kIntegerConversions = [
+  "toInt",
+  "toInt8",
+  "toInt16",
+  "toInt32",
+  "toUint8",
+  "toUint16",
+  "toUint32",
+  "toUint64",
+];
+export const kMostDateFields = 7;
+export const kFirstTimeField = 3;
+export const kDateUtcName = "UTC";
+export const kDateParseName = "parse";
+export const kToJsonName = "toJSON";
+export const kGetYearName = "getYear";
+export const kSetYearName = "setYear";
+export const kGmtStringName = "toGMTString";
+export const kSetterPrefix = "set";
+export const kUtcSetterPrefix = "setUTC";
+export const kShortYearBase = 1900;
+export const kLastShortYear = 99;
+export const kDateFieldLimit = 9007199254740991.0;
+export const kDateYearLimit = 1000000;
+export const kDateYearShift = 399999;
+export const kEpochYear = 1970;
+export const kDayMilliseconds = 86400000;
+export const kHourMilliseconds = 3600000;
+export const kMinuteMilliseconds = 60000;
+export const kSecondMilliseconds = 1000;
+export const kDateTimeLimit = 8640000000000000;
+export const kDateLocalLimit = 8640000864000000;
+export const kDaysInCycle = 146097;
+export const kYearsInCycle = 400;
+export const kUnknownYear = "y";
+export const kDateLocaleMethods = [
+  "toLocaleString",
+  "toLocaleDateString",
+  "toLocaleTimeString",
+];
+export const kDateStatics: DateStatic[] = [
+  { name: "now", example: "()" },
+  { name: "UTC", example: "(y, m, d)" },
+  { name: "parse", example: "(s)" },
+];
+export const kDateSetters: DateSetter[] = [
+  { name: "FullYear", first: 0 },
+  { name: "Month", first: 1 },
+  { name: "Date", first: 2 },
+  { name: "Hours", first: 3 },
+  { name: "Minutes", first: 4 },
+  { name: "Seconds", first: 5 },
+  { name: "Milliseconds", first: 6 },
+];
+export const kMonthNames = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+export const kMonthDays = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+export const kMonthStarts = [
+  0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334,
+];
+export const kTimeFieldNames = ["hours", "minutes", "seconds", "milliseconds"];
+export const kTimeFieldMost = [23, 59, 59, 999];
+export const kBuiltinValueClasses = ["Date", "RegExp"];
+export const kCollectionExamples: DateStatic[] = [
+  { name: "Map", example: "Map<string, int>" },
+  { name: "Set", example: "Set<string>" },
+];
+export const kMatchArrayClass = "RegExpMatchArray";
+export const kPushName = "push";
+export const kTextStatics = ["fromCharCode", "fromCodePoint"];
+export const kResultPlaceholder = "r";
+export const kResultMethods: ResultMethod[] = [
+  { name: "isOk", count: 0 },
+  { name: "isErr", count: 0 },
+  { name: "map", count: 1 },
+  { name: "mapErr", count: 1 },
+  { name: "andThen", count: 1 },
+  { name: "orElse", count: 1 },
+  { name: "match", count: 2 },
+  { name: "unwrapOr", count: 1 },
+  { name: "andTee", count: 1 },
+  { name: "orTee", count: 1 },
+  { name: "andThrough", count: 1 },
+];
+export const kDecimalName = "decimal";
+export const kDecimalError = "DecimalError";
+export const kDecimalStatics = ["max", "min", "sum"];
+export const kRoundingModes = [
+  "up",
+  "down",
+  "ceil",
+  "floor",
+  "half-up",
+  "half-down",
+  "half-even",
+  "half-ceil",
+  "half-floor",
+];
+export const kDecimalMethods: DecimalMethod[] = [
+  {
+    name: "div",
+    least: 1,
+    most: 3,
+    args: [DecimalArgument.Decimal, DecimalArgument.Places, DecimalArgument.Rounding],
+    result: DecimalResult.Number,
+  },
+  {
+    name: "round",
+    least: 0,
+    most: 2,
+    args: [DecimalArgument.Places, DecimalArgument.Rounding],
+    result: DecimalResult.Number,
+  },
+  {
+    name: "toFixed",
+    least: 0,
+    most: 2,
+    args: [DecimalArgument.Places, DecimalArgument.Rounding],
+    result: DecimalResult.Text,
+  },
+  {
+    name: "toFormat",
+    least: 0,
+    most: 2,
+    args: [DecimalArgument.Places, DecimalArgument.Rounding],
+    result: DecimalResult.Text,
+  },
+  {
+    name: "toExponential",
+    least: 0,
+    most: 2,
+    args: [DecimalArgument.Places, DecimalArgument.Rounding],
+    result: DecimalResult.Text,
+  },
+  {
+    name: "toPrecision",
+    least: 0,
+    most: 2,
+    args: [DecimalArgument.Digits, DecimalArgument.Rounding],
+    result: DecimalResult.Text,
+  },
+  {
+    name: "toString",
+    least: 0,
+    most: 1,
+    args: [DecimalArgument.Base],
+    result: DecimalResult.Text,
+  },
+  {
+    name: "sqrt",
+    least: 0,
+    most: 0,
+    args: [],
+    result: DecimalResult.Number,
+  },
+  {
+    name: "abs",
+    least: 0,
+    most: 0,
+    args: [],
+    result: DecimalResult.Number,
+  },
+  {
+    name: "isInteger",
+    least: 0,
+    most: 0,
+    args: [],
+    result: DecimalResult.Truth,
+  },
+  {
+    name: "decimalPlaces",
+    least: 0,
+    most: 0,
+    args: [],
+    result: DecimalResult.Whole,
+  },
+  {
+    name: "shiftedBy",
+    least: 1,
+    most: 1,
+    args: [DecimalArgument.Power],
+    result: DecimalResult.Number,
+  },
+  {
+    name: "toFraction",
+    least: 0,
+    most: 1,
+    args: [DecimalArgument.Decimal],
+    result: DecimalResult.List,
+  },
+];
+export const kDecimalReplacements: DecimalReplacement[] = [
+  {
+    name: "plus",
+    use: "the operator: 'a + b'",
+  },
+  {
+    name: "minus",
+    use: "the operator: 'a - b'",
+  },
+  {
+    name: "times",
+    use: "the operator: 'a * b'",
+  },
+  {
+    name: "multipliedBy",
+    use: "the operator: 'a * b'",
+  },
+  {
+    name: "dividedBy",
+    use: "the operator 'a / b', or 'a.div(b, places, mode)'",
+  },
+  {
+    name: "dividedToIntegerBy",
+    use: "'a.div(b, 0, \"down\")'",
+  },
+  {
+    name: "idiv",
+    use: "'a.div(b, 0, \"down\")'",
+  },
+  {
+    name: "modulo",
+    use: "the operator: 'a % b'",
+  },
+  {
+    name: "mod",
+    use: "the operator: 'a % b'",
+  },
+  {
+    name: "exponentiatedBy",
+    use: "the operator: 'a ** n'",
+  },
+  {
+    name: "pow",
+    use: "the operator: 'a ** n'",
+  },
+  {
+    name: "negated",
+    use: "the operator: '-a'",
+  },
+  {
+    name: "comparedTo",
+    use: "the operators: 'a < b', 'a == b', 'a > b'",
+  },
+  {
+    name: "isEqualTo",
+    use: "the operator: 'a == b'",
+  },
+  {
+    name: "eq",
+    use: "the operator: 'a == b'",
+  },
+  {
+    name: "isGreaterThan",
+    use: "the operator: 'a > b'",
+  },
+  {
+    name: "gt",
+    use: "the operator: 'a > b'",
+  },
+  {
+    name: "isGreaterThanOrEqualTo",
+    use: "the operator: 'a >= b'",
+  },
+  {
+    name: "gte",
+    use: "the operator: 'a >= b'",
+  },
+  {
+    name: "isLessThan",
+    use: "the operator: 'a < b'",
+  },
+  {
+    name: "lt",
+    use: "the operator: 'a < b'",
+  },
+  {
+    name: "isLessThanOrEqualTo",
+    use: "the operator: 'a <= b'",
+  },
+  {
+    name: "lte",
+    use: "the operator: 'a <= b'",
+  },
+  {
+    name: "isZero",
+    use: "a comparison: 'a == 0'",
+  },
+  {
+    name: "isNegative",
+    use: "a comparison: 'a < 0'",
+  },
+  {
+    name: "isPositive",
+    use: "a comparison: 'a > 0'",
+  },
+  {
+    name: "absoluteValue",
+    use: "'a.abs()'",
+  },
+  {
+    name: "squareRoot",
+    use: "'a.sqrt()'",
+  },
+  {
+    name: "integerValue",
+    use: "'a.round(0, mode)'",
+  },
+  {
+    name: "dp",
+    use: "'a.decimalPlaces()', or 'a.round(places, mode)' to round",
+  },
+  {
+    name: "precision",
+    use: "'a.toPrecision(digits)'",
+  },
+  {
+    name: "sd",
+    use: "'a.toPrecision(digits)'",
+  },
+  {
+    name: "toNumber",
+    use: "'Number(a)'",
+  },
+  {
+    name: "valueOf",
+    use: "'String(a)'",
+  },
+  {
+    name: "toJSON",
+    use: "'String(a)'",
+  },
+];
+
+export const kParameterLetters = "abcdefghijklmnopqrstuvwxyz";
+
+export const kDecoratorPlaces: DecoratorPlaceText[] = [
+  {
+    place: DecoratorPlace.Class,
+    noun: "a class",
+    given: 1,
+    args: "the class",
+  },
+  {
+    place: DecoratorPlace.Field,
+    noun: "a field",
+    given: 2,
+    args: "the class and the name of the field",
+  },
+  {
+    place: DecoratorPlace.Method,
+    noun: "a method",
+    given: 3,
+    args: "the class, the name of the method and its descriptor",
+  },
+  {
+    place: DecoratorPlace.Parameter,
+    noun: "a parameter",
+    given: 3,
+    args: "the class, the name of the method (undefined for a constructor) and the position of the parameter",
+  },
+];
+
+export const kDescriptorValueName = "value";
+export const kMetadataName = "metadata";
+export const kReflectName = "Reflect";

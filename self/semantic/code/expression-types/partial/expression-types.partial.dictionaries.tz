@@ -60,6 +60,10 @@ partial class ExpressionTypes {
 
         return true;
       case PropertyKind.Spread: {
+        if (this.recordSpreadCheck(property, module)) {
+          return true;
+        }
+
         const spread = this.typed(property.value, record, module);
 
         return spread.kind == TypeKind.Error;

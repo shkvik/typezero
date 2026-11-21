@@ -319,6 +319,8 @@ partial class ExpressionTypes {
         return [type.value, type.error];
       case TypeKind.Promise:
         return [type.value];
+      case TypeKind.Class:
+        return [type.instance];
       case TypeKind.Iterator: {
         const shape = type.shape;
 

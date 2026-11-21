@@ -1,0 +1,3 @@
+main.tz:4:1: error TZ2915: a function is always truthy, so '||=' never assigns; drop the assignment
+run ||= (): int => 2;
+^

@@ -1,0 +1,2 @@
+// String.raw only tags a template.
+console.log(String.raw("x"));

@@ -1,0 +1,3 @@
+main.tz:2:22: error TZ2950: 'Promise.foo' is not supported; the functions of Promise are 'resolve', 'all', 'race' and 'withResolvers'
+const done = Promise.foo();
+                     ^

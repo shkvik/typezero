@@ -1,0 +1,4 @@
+// toGMTString is the old name of toUTCString.
+const date = new Date();
+
+console.log(date.toGMTString());

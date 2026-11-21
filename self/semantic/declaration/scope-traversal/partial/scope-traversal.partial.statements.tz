@@ -13,6 +13,7 @@ import {
   SwitchStmt,
 } from "../../../../program/ast/types/ast.types.statements.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import { JumpKind } from "../types/scope-traversal.types.tz";
 
 partial class ScopeTraversal {
   private traverseStatements(statements: Stmt[]): void {
@@ -34,6 +35,33 @@ partial class ScopeTraversal {
       case StmtKind.If:
         return this.traverseIf(statement);
       case StmtKind.While:
+      case StmtKind.DoWhile:
+      case StmtKind.For:
+      case StmtKind.ForOf:
+        return this.traverseTarget(statement, JumpKind.Loop);
+      case StmtKind.Switch:
+        return this.traverseTarget(statement, JumpKind.Switch);
+      case StmtKind.Labeled:
+        return this.traverseLabeled(statement, []);
+      case StmtKind.Break:
+      case StmtKind.Continue:
+        return this.jumpCheck(statement);
+      case StmtKind.Return:
+        return this.traverseOptionalExpr(statement.value);
+      case StmtKind.TypeAlias:
+        return this.traverseTypeAlias(statement);
+      case StmtKind.Enum:
+        return this.traverseEnum(statement);
+      case StmtKind.Class:
+        return this.traverseClass(statement, false);
+      default:
+        return;
+    }
+  }
+
+  private traverseInTarget(statement: Stmt): void {
+    switch (statement.kind) {
+      case StmtKind.While:
         this.traverseExpr(statement.cond);
 
         return this.traverseScoped(statement.body);
@@ -47,18 +75,8 @@ partial class ScopeTraversal {
         return this.traverseForOf(statement);
       case StmtKind.Switch:
         return this.traverseSwitch(statement);
-      case StmtKind.Labeled:
-        return this.traverseStatement(statement.body);
-      case StmtKind.Return:
-        return this.traverseOptionalExpr(statement.value);
-      case StmtKind.TypeAlias:
-        return this.traverseTypeAlias(statement);
-      case StmtKind.Enum:
-        return this.traverseEnum(statement);
-      case StmtKind.Class:
-        return this.traverseClass(statement);
       default:
-        return;
+        return this.traverseStatement(statement);
     }
   }
 
@@ -141,11 +159,15 @@ partial class ScopeTraversal {
       this.declareStatements(one.body);
     }
 
+    const noted: int[] = [];
+
     for (const one of statement.cases) {
       this.traverseOptionalExpr(one.test);
       this.traverseStatements(one.body);
+      this.rememberCaseVariables(one, noted);
     }
 
+    this.forgetCaseVariables(noted);
     this.scopes.close();
   }
 

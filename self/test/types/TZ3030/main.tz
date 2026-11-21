@@ -1,0 +1,10 @@
+// An Iterable makes a function generic, and generic functions are top-level.
+function outer(): int {
+  function inner(zs: Iterable<int>): int {
+    return 1;
+  }
+
+  return inner([1]);
+}
+
+console.log(outer());

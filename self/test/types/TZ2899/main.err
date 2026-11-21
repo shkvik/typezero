@@ -1,0 +1,6 @@
+main.tz:3:19: error TZ2899: type 'unknown' is not assignable to type 'string'; an unknown value may hold anything: check what it holds first, e.g. 'if (typeof u == "string") ...'
+const s: string = u;
+                  ^
+main.tz:4:16: error TZ2899: type 'unknown' is not assignable to type 'int'; an unknown value may hold anything: check what it holds first, e.g. 'if (typeof u == "number") ...'
+const n: int = u;
+               ^

@@ -1,0 +1,3 @@
+main.tz:3:21: error TZ3022: only objects can be spread into an object literal, found 'int[]'; JavaScript would make its indices the keys
+const spread = { ...list };
+                    ^

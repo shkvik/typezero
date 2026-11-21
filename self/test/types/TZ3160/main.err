@@ -1,0 +1,3 @@
+main.tz:15:16: error TZ3160: 'get' is called on 'Small | Face', and 'Face' is an interface that classes implement; narrow it first, or declare the members to be one type with 'get'
+  return value.get();
+               ^

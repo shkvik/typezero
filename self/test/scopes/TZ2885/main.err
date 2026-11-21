@@ -1,0 +1,3 @@
+main.tz:3:3: error TZ2885: 'continue block' needs a loop, and 'block' does not label one
+  continue block;
+  ^

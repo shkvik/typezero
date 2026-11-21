@@ -1,0 +1,5 @@
+// Object.fromEntries takes text keys.
+const entries = Object.fromEntries([[1, "a"]]);
+const named = Object.fromEntries([["a", 1]]);
+
+console.log(entries, named);

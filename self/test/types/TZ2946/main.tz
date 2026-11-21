@@ -1,0 +1,4 @@
+// Math.floor rounds a double, not an integer.
+const count: int = 7;
+
+console.log(Math.floor(count / 2), Math.round(count), Math.floor(2.5));

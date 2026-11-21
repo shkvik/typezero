@@ -1,0 +1,5 @@
+// Of Array only Array.from and new Array are.
+const arr = Array.of(1, 2);
+const copy = Array.from([1, 2]);
+
+console.log(arr, copy);

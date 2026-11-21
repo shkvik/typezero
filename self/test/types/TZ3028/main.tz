@@ -1,0 +1,15 @@
+// Iterable<T> is the type of parameters of declared functions only.
+const xs: Iterable<int> = [1, 2];
+const f = (ys: Iterable<int>): int => 1;
+
+function total(zs: Iterable<int>): int {
+  let sum = 0;
+
+  for (const z of zs) {
+    sum += z;
+  }
+
+  return sum;
+}
+
+console.log(xs, f([1]), total([1, 2]));

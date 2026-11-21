@@ -1,0 +1,3 @@
+main.tz:2:29: error TZ3107: 'Result.combine' takes Results, found 'int'
+const all = Result.combine([1, 2]);
+                            ^

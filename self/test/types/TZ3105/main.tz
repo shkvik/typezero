@@ -1,0 +1,4 @@
+// ok of nothing is 'ok()'.
+const made = ok(console.log("x"));
+
+console.log(made);

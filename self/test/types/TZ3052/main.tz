@@ -1,0 +1,4 @@
+// Days count from 1; 0 is the last day of the month before.
+const date = new Date(2026, 0, -1);
+
+console.log(date.getDate());

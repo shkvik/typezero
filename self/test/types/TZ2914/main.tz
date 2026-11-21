@@ -1,0 +1,8 @@
+// '||=' never assigns to an object.
+type Point = { x: int; y: int };
+
+let point: Point = { x: 1, y: 2 };
+
+point ||= { x: 0, y: 0 };
+
+console.log(point);

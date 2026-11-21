@@ -1,0 +1,4 @@
+// The static functions of Date can only be called.
+const utc = Date.UTC;
+
+console.log(utc);

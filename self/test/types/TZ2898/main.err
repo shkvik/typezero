@@ -1,0 +1,3 @@
+main.tz:4:15: error TZ2898: 'constructor' is not supported: an object has no prototype in tz; a decorator gets the class itself, use it as it is
+console.log(o.constructor);
+              ^

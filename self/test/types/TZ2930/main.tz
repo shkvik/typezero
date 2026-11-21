@@ -1,0 +1,5 @@
+// A value that converts by itself needs no 'as'.
+const count: int = 5;
+const same = count as int;
+
+console.log(same);

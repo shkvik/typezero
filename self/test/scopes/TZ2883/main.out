@@ -1,0 +1,4 @@
+main.tz
+  2:18 void -> global
+  14:1 console -> global
+  14:13 stop -> function 2:10

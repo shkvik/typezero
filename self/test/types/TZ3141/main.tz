@@ -1,0 +1,5 @@
+// delete removes fields.
+const list = [1, 2, 3];
+
+delete list;
+console.log(list);

@@ -1,0 +1,4 @@
+main.tz
+  2:6 enum Direction = "UP" | "DOWN"
+  7:6 enum Level = int
+  13:7 level: "High"

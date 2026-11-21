@@ -13,12 +13,13 @@ import {
   TypePlace,
 } from "../../../types/type-resolver/types/type-resolver.types.tz";
 import {
+  kDateName,
   kMapClass,
   kPromiseClass,
   kSetClass,
   kSpecialNews,
 } from "../const/expression-types.const.tz";
-import { ValueTarget } from "../types/expression-types.types.tz";
+import { CallTarget, ValueTarget } from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private libraryNew(
@@ -33,13 +34,21 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
+    const isDict = name == kMapClass || name == kSetClass;
+    const key = written[0];
+    if (isDict && this.resolver.keyCheck(expr.typeArgs[0], key, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
     switch (name) {
       case kMapClass:
-        return this.dictNew(DictKind.Map, written, wanted);
+        return this.dictSourceTyped(expr, DictKind.Map, written, wanted, module);
       case kSetClass:
-        return this.dictNew(DictKind.Set, written, wanted);
+        return this.dictSourceTyped(expr, DictKind.Set, written, wanted, module);
       case kPromiseClass:
         return this.promiseNew(written, wanted);
+      case kDateName:
+        return this.dateNew(expr, module);
       default:
         return this.declaredNew(expr, target, written, module);
     }
@@ -152,7 +161,7 @@ partial class ExpressionTypes {
     const params = shape.params;
     const rest = shape.rest;
     const loc = expr.loc;
-    const call = { params, rest, loc, isLenient: true };
+    const call: CallTarget = { params, rest, loc, isLenient: true };
     const isPassed = this.argumentsCheck(expr.args, call, module);
     if (!isPassed) {
       return this.store.plain(TypeKind.Error);

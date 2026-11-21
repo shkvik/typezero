@@ -1,0 +1,3 @@
+main.tz:3:12: error TZ2987: a generic function can be declared only at the top level for now
+  function inner<T>(x: T): T {
+           ^

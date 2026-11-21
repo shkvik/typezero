@@ -1,0 +1,3 @@
+main.tz:4:26: error TZ3094: field 'a' is 'string' before the spread and 'int | undefined' in '{ a?: int }'; a field has one type
+const both = { ...words, ...partial };
+                         ^

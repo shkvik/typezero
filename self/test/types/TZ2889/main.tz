@@ -1,0 +1,14 @@
+// A type predicate names a parameter.
+type Circle = { kind: "circle"; r: double };
+type Square = { kind: "square"; side: double };
+type Shape = Circle | Square;
+
+function wrong(s: Shape): q is Circle {
+  return s.kind == "circle";
+}
+
+function right(s: Shape): s is Circle {
+  return s.kind == "circle";
+}
+
+console.log(wrong, right);

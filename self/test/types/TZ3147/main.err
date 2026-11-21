@@ -1,0 +1,3 @@
+main.tz:6:26: error TZ3147: the object literal does not fit 'Clicky': 'onClick' is a field there that code may replace, which a method cannot be; write it as a field: 'onClick: (...) => ...'
+const clicky: Clicky = { onClick() {} };
+                         ^

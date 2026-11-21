@@ -1,0 +1,4 @@
+// A decimal has at most 10000001 digits before the point.
+const huge: decimal = 1e10000001;
+
+console.log(huge);

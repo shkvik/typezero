@@ -1,0 +1,3 @@
+main.tz:2:27: error TZ2963: 'unescape' is not supported: it is a legacy function that decodes the '%uXXXX' escapes of 'escape'; decode with 'decodeURIComponent(s)'
+const names = ["%41"].map(unescape);
+                          ^

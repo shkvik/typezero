@@ -13,13 +13,20 @@ import {
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
 import {
+  kRoundingNames,
+  kRepeatName,
+  kToFixedName,
   kManyArguments,
   kNoPlace,
   kOneArgument,
   kOrMore,
   kRangeDash,
 } from "../const/expression-types.const.tz";
-import { ArgumentSlot, CallTarget } from "../types/expression-types.types.tz";
+import {
+  ArgumentSlot,
+  CallKind,
+  CallTarget,
+} from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private argumentsCheck(
@@ -27,6 +34,9 @@ partial class ExpressionTypes {
     target: CallTarget,
     module: int,
   ): boolean {
+    if (target.isLenient && this.countCheck(args, target, module)) {
+      return true;
+    }
     if (target.isLenient) {
       this.closureArguments(args, target, module);
 
@@ -52,7 +62,16 @@ partial class ExpressionTypes {
       const word = this.argumentCountText(least, params.length, target.rest);
       const other = `${count}`;
 
-      this.report(module, target.loc, Code.ArgumentCount, { word, other });
+      if (target.isTagged ?? false) {
+        this.report(module, target.loc, Code.TaggedArgumentCount, {
+          word,
+          other,
+          place: this.taggedPlace(count),
+        });
+      } else {
+        this.report(module, target.loc, Code.ArgumentCount, { word, other });
+      }
+
       this.looseArguments(args, module);
 
       return true;
@@ -62,9 +81,7 @@ partial class ExpressionTypes {
       const slot = slots[index];
       const param = params[index];
       if (slot != undefined && param != undefined) {
-        const wanted = this.parameterWanted(param);
-
-        this.argumentCheck(slot, wanted, module);
+        this.kindArgumentCheck(slot, param, index, target, module);
       }
     }
 
@@ -74,6 +91,33 @@ partial class ExpressionTypes {
 
       this.restCheck(rest, restParam.type, target.loc, module);
     }
+
+    return true;
+  }
+
+  private countCheck(
+    args: CallArgument[],
+    target: CallTarget,
+    module: int,
+  ): boolean {
+    const isSpread = args.some((arg) => arg.spread);
+    if (!(target.isCounted ?? false) || isSpread) {
+      return false;
+    }
+
+    const params = target.params;
+    const least = this.leastArguments(target);
+    const count = args.length;
+    const isTooMany = !target.rest && count > params.length;
+    if (count >= least && !isTooMany) {
+      return false;
+    }
+
+    const word = this.argumentCountText(least, params.length, target.rest);
+    const other = `${count}`;
+
+    this.report(module, target.loc, Code.ArgumentCount, { word, other });
+    this.looseArguments(args, module);
 
     return true;
   }
@@ -199,6 +243,136 @@ partial class ExpressionTypes {
     }
 
     return type.items;
+  }
+
+  private kindArgumentCheck(
+    slot: ArgumentSlot,
+    param: FunctionParameter,
+    index: int,
+    target: CallTarget,
+    module: int,
+  ): void {
+    const wanted = this.parameterWanted(param);
+    const kind = target.kind ?? CallKind.Own;
+    const isPlain = slot.element == undefined && !slot.spread;
+    if (isPlain && this.iterableArgumentCheck(slot, param.type, target, module)) {
+      return;
+    }
+    if (kind == CallKind.Own || !isPlain) {
+      return this.argumentCheck(slot, wanted, module);
+    }
+    if (slot.expr.kind == ExprKind.Undefined && param.optional) {
+      return this.argumentCheck(slot, wanted, module);
+    }
+
+    const to = param.type;
+    const base = this.definedType(to);
+    const isMarked = target.positions?.[index] ?? false;
+    const isPosition = kind == CallKind.Positional && isMarked;
+    const isMath = kind == CallKind.Math && base.kind == TypeKind.Double;
+    if (isPosition) {
+      return this.positionCheck(slot, to, target.method ?? "", module);
+    }
+    if (isMath) {
+      return this.mathArgumentCheck(slot, to, target.method ?? "", module);
+    }
+
+    this.argumentCheck(slot, to, module);
+  }
+
+  private positionCheck(
+    slot: ArgumentSlot,
+    to: Type,
+    method: string,
+    module: int,
+  ): void {
+    const given = this.typed(slot.expr, to, module);
+    const base = this.apparent(this.definedType(given));
+    if (given.kind == TypeKind.Error) {
+      return;
+    }
+    if (base.kind == TypeKind.Int && !this.isOptional(given)) {
+      return this.coerce(slot.expr, given, to, module, kNoPlace);
+    }
+
+    const code = this.positionCode(given, base);
+    const word = this.text.of(given);
+
+    this.report(module, slot.expr.loc, code, { word });
+    this.positionUseReport(slot, word, method, module);
+  }
+
+  private positionUseReport(
+    slot: ArgumentSlot,
+    word: string,
+    name: string,
+    module: int,
+  ): void {
+    if (name == kToFixedName) {
+      this.report(module, slot.expr.loc, Code.FixedDigitsNotWhole, { word });
+    }
+    if (name == kRepeatName) {
+      this.report(module, slot.expr.loc, Code.RepeatCountNotWhole, { word });
+    }
+  }
+
+  private positionCode(given: Type, base: Type): Code {
+    if (base.kind == TypeKind.Double) {
+      return Code.PositionFraction;
+    }
+    if (this.isOptional(given) && base.kind == TypeKind.Int) {
+      return Code.PositionMaybe;
+    }
+
+    return Code.PositionNotInteger;
+  }
+
+  private mathArgumentCheck(
+    slot: ArgumentSlot,
+    to: Type,
+    method: string,
+    module: int,
+  ): void {
+    const given = this.typed(slot.expr, to, module);
+    if (given.kind == TypeKind.Error) {
+      return;
+    }
+
+    const base = this.apparent(this.definedType(given));
+    const isRounding = kRoundingNames.includes(method);
+    if (base.kind == TypeKind.Int && isRounding && !this.isOptional(given)) {
+      this.report(module, slot.expr.loc, Code.MathRoundsInteger, {
+        word: method,
+        first: this.text.of(given),
+      });
+
+      return;
+    }
+    if (base.kind == TypeKind.Int && !this.isOptional(given)) {
+      return this.coerce(slot.expr, given, to, module, kNoPlace);
+    }
+    if (this.relation.converts(given, to)) {
+      return;
+    }
+    if (this.literalTarget(slot.expr, given, to, module) != undefined) {
+      return;
+    }
+
+    const code = this.mathArgumentCode(given, base);
+
+    this.report(module, slot.expr.loc, code, { word: this.text.of(given) });
+  }
+
+  private mathArgumentCode(given: Type, base: Type): Code {
+    const isNumber = base.kind == TypeKind.Int || base.kind == TypeKind.Double;
+    if (this.isOptional(given) && isNumber) {
+      return Code.MathArgumentMaybe;
+    }
+    if (base.kind == TypeKind.Decimal) {
+      return Code.MathArgumentDecimal;
+    }
+
+    return Code.MathArgument;
   }
 
   private argumentCheck(slot: ArgumentSlot, to: Type, module: int): void {

@@ -1,0 +1,4 @@
+main.tz
+  2:7 u: unknown
+  3:7 s: string
+  4:7 n: int

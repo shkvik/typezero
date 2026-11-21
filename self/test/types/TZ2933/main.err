@@ -1,0 +1,6 @@
+main.tz:3:21: error TZ2933: 'as' is not supported; round it first, then convert: 'Math.trunc(ratio).toInt()' (or Math.round, Math.floor, Math.ceil)
+const whole = ratio as int;
+                    ^
+main.tz:4:20: error TZ2933: 'as' is not supported; round it first, then convert: 'Math.trunc(ratio).toUint8()' (or Math.round, Math.floor, Math.ceil)
+const byte = ratio as uint8;
+                   ^

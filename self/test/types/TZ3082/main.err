@@ -1,0 +1,3 @@
+main.tz:4:17: error TZ3082: 'for...in' over an array gives its indices as strings ('0', '1'...), so 'i + 1' would be '01'; walk the elements with 'for (const x of xs)', or the indices with 'for (let i = 0; i < xs.length; i++)' or 'xs.forEach((x, i) => ...)'
+for (const i in xs) {
+                ^

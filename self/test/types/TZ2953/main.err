@@ -1,0 +1,6 @@
+main.tz:2:18: error TZ2953: 'Math.max()' without values gives -Infinity; pass the values, e.g. 'Math.max(...xs)'
+console.log(Math.max(), Math.min(), Math.max(1, 2));
+                 ^
+main.tz:2:30: error TZ2953: 'Math.min()' without values gives Infinity; pass the values, e.g. 'Math.min(...xs)'
+console.log(Math.max(), Math.min(), Math.max(1, 2));
+                             ^

@@ -1,0 +1,6 @@
+// A key is compared by its value, so it is never unknown.
+const byUnknown = new Map<unknown, int>();
+const seen: Set<unknown> = new Set<string>();
+const byName = new Map<string, unknown>();
+
+console.log(byUnknown, seen, byName);

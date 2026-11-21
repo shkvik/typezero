@@ -1,0 +1,10 @@
+class User {
+  constructor(public name: string) {}
+}
+
+// Constructor takes the type of the objects, or nothing.
+function make(kind: Constructor<User, User>): void {
+  console.log(kind);
+}
+
+console.log(make);

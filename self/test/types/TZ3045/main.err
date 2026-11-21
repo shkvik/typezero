@@ -1,0 +1,3 @@
+main.tz:2:12: error TZ3045: there is nothing to catch: nothing is thrown or rejected in tz, an error is a Result that the code which gets it handles (docs/errors.md, section 4)
+process.on("uncaughtException", (e) => console.log(e));
+           ^

@@ -1,0 +1,949 @@
+import {
+  kColon,
+  kDateKeywords,
+  kDateSymbols,
+  kDot,
+  kEndToken,
+  kInvalidToken,
+  kLargestSigned,
+  kLeftParen,
+  kLineTerminators,
+  kLowerBit,
+  kMinus,
+  kNine,
+  kLargestNumber,
+  kNone,
+  kPlus,
+  kPrefixLength,
+  kRightParen,
+  kSignificantDigits,
+  kUnknownToken,
+  kUnsignedRange,
+  kUpperA,
+  kWhiteSpaces,
+  kWideSpaceFirst,
+  kWideSpaceLast,
+  kZero,
+} from "./const/date-reader.const.tz";
+import {
+  DateFields,
+  DateToken,
+  DateTokenKind,
+  DayValue,
+  TimeValue,
+  ZoneValue,
+} from "./types/date-reader.types.tz";
+
+export class DateReader {
+  private readonly text: string;
+  private index: int;
+  private char: int;
+  private next: DateToken;
+  private dayParts: int[];
+  private namedMonth: int;
+  private isIso: boolean;
+  private hasNumber: boolean;
+  private timeParts: int[];
+  private hourOffset: int;
+  private zoneSign: int;
+  private zoneHour: int;
+  private zoneMinute: int;
+
+  public constructor(text: string) {
+    this.text = text;
+    this.index = 0;
+    this.char = 0;
+    this.next = kEndToken;
+    this.dayParts = [];
+    this.namedMonth = kNone;
+    this.isIso = false;
+    this.hasNumber = false;
+    this.timeParts = [];
+    this.hourOffset = kNone;
+    this.zoneSign = kNone;
+    this.zoneHour = kNone;
+    this.zoneMinute = kNone;
+  }
+
+  public read(): DateFields | undefined {
+    this.nextChar();
+    this.next = this.scan();
+
+    const first = this.parseIso();
+    if (first.kind == DateTokenKind.Invalid) {
+      return undefined;
+    }
+
+    const isDateOnly =
+      first.kind == DateTokenKind.End &&
+      this.isIso &&
+      this.timeParts.length == 0;
+
+    this.hasNumber = this.dayParts.length > 0;
+
+    let token = first;
+
+    while (token.kind != DateTokenKind.End) {
+      if (!this.legacyStep(token)) {
+        return undefined;
+      }
+
+      token = this.nextToken();
+    }
+
+    const day = this.writtenDay();
+    const time = this.writtenTime();
+    const zone = this.writtenZone();
+    if (day == undefined || time == undefined || zone == undefined) {
+      return undefined;
+    }
+
+    return { day, time, zone, isDateOnly };
+  }
+
+  private nextChar(): void {
+    const text = this.text;
+    const index = this.index;
+
+    this.char = 0;
+
+    if (index >= 0 && index < text.length) {
+      this.char = text.charCodeAt(index);
+    }
+
+    this.index = index + 1;
+  }
+
+  private isDigit(char: int): boolean {
+    return char >= kZero && char <= kNine;
+  }
+
+  private isWhiteSpace(char: int): boolean {
+    if (kWhiteSpaces.includes(char)) {
+      return true;
+    }
+
+    return char >= kWideSpaceFirst && char <= kWideSpaceLast;
+  }
+
+  private isSpace(char: int): boolean {
+    return this.isWhiteSpace(char) || kLineTerminators.includes(char);
+  }
+
+  private isLetter(char: int): boolean {
+    return char >= kUpperA && !this.isWhiteSpace(char);
+  }
+
+  private readNumber(): int {
+    while (this.char == kZero) {
+      this.nextChar();
+    }
+
+    const start = this.index - 1;
+
+    while (this.isDigit(this.char)) {
+      this.nextChar();
+    }
+
+    const end = Math.min(this.index - 1, start + kSignificantDigits);
+    const digits = this.text.slice(start, end);
+    const parsed = parseInt(digits);
+    const value = parsed.unwrapOr(0);
+    if (value < 0 || value > 999999999) {
+      return 0;
+    }
+
+    return value;
+  }
+
+  private readWord(): DateToken {
+    const prefix: int[] = [];
+    let length = 0;
+
+    while (this.isLetter(this.char)) {
+      if (length < kPrefixLength) {
+        prefix.push(this.char | kLowerBit);
+      }
+
+      length += 1;
+
+      this.nextChar();
+    }
+
+    return this.keyword(prefix, length);
+  }
+
+  private keyword(prefix: int[], length: int): DateToken {
+    for (const keyword of kDateKeywords) {
+      const isLong = length > kPrefixLength;
+      const isFitting = !isLong || keyword.kind == DateTokenKind.Month;
+      if (isFitting && this.isPrefix(prefix, keyword.prefix)) {
+        return { kind: keyword.kind, length, value: keyword.value };
+      }
+    }
+
+    return { kind: DateTokenKind.Other, length, value: 0 };
+  }
+
+  private isPrefix(prefix: int[], word: string): boolean {
+    if (prefix.length != word.length) {
+      return false;
+    }
+
+    for (let index = 0; index < word.length; index++) {
+      if (prefix[index] != word.charCodeAt(index)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private scan(): DateToken {
+    const start = this.index;
+    const char = this.char;
+    if (char == 0) {
+      return kEndToken;
+    }
+    if (this.isDigit(char)) {
+      const value = this.readNumber();
+      const length = this.index - start;
+
+      return { kind: DateTokenKind.Number, length, value };
+    }
+    if (kDateSymbols.includes(char)) {
+      this.nextChar();
+
+      return { kind: DateTokenKind.Symbol, length: 1, value: char };
+    }
+    if (this.isLetter(char)) {
+      return this.readWord();
+    }
+    if (this.isSpace(char)) {
+      this.nextChar();
+
+      const length = this.index - start;
+
+      return { kind: DateTokenKind.Space, length, value: -1 };
+    }
+    if (char == kLeftParen) {
+      this.skipComment();
+
+      return kUnknownToken;
+    }
+
+    this.nextChar();
+
+    return kUnknownToken;
+  }
+
+  private skipComment(): void {
+    let balance = 0;
+    let isOpen = true;
+
+    while (isOpen) {
+      balance += this.parenStep(this.char);
+
+      this.nextChar();
+
+      isOpen = balance > 0 && this.char != 0;
+    }
+  }
+
+  private parenStep(char: int): int {
+    if (char == kRightParen) {
+      return -1;
+    }
+    if (char == kLeftParen) {
+      return 1;
+    }
+
+    return 0;
+  }
+
+  private nextToken(): DateToken {
+    const token = this.next;
+
+    this.next = this.scan();
+
+    return token;
+  }
+
+  private isSymbol(token: DateToken, char: int): boolean {
+    return token.kind == DateTokenKind.Symbol && token.value == char;
+  }
+
+  private isSign(token: DateToken): boolean {
+    return this.isSymbol(token, kPlus) || this.isSymbol(token, kMinus);
+  }
+
+  private signOf(token: DateToken): int {
+    if (token.value == kMinus) {
+      return -1;
+    }
+
+    return 1;
+  }
+
+  private isFixedNumber(token: DateToken, length: int): boolean {
+    return token.kind == DateTokenKind.Number && token.length == length;
+  }
+
+  private isWord(token: DateToken): boolean {
+    switch (token.kind) {
+      case DateTokenKind.Other:
+      case DateTokenKind.Month:
+      case DateTokenKind.Zone:
+      case DateTokenKind.LetterT:
+      case DateTokenKind.Meridiem:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private isZ(token: DateToken): boolean {
+    return (
+      token.kind == DateTokenKind.Zone &&
+      token.length == 1 &&
+      token.value == 0
+    );
+  }
+
+  private skipSymbol(char: int): boolean {
+    if (!this.isSymbol(this.next, char)) {
+      return false;
+    }
+
+    this.next = this.scan();
+
+    return true;
+  }
+
+  private between(value: int, low: int, high: int): boolean {
+    return value >= low && value <= high;
+  }
+
+  private isMonth(value: int): boolean {
+    return this.between(value, 1, 12);
+  }
+
+  private isDay(value: int): boolean {
+    return this.between(value, 1, 31);
+  }
+
+  private isHour(value: int): boolean {
+    return this.between(value, 0, 23);
+  }
+
+  private isMinute(value: int): boolean {
+    return this.between(value, 0, 59);
+  }
+
+  private isMillisecond(value: int): boolean {
+    return this.between(value, 0, 999);
+  }
+
+  private readMilliseconds(number: DateToken): int {
+    const value = number.value;
+    const length = number.length;
+    if (length == 1) {
+      return value * 100;
+    }
+    if (length == 2) {
+      return value * 10;
+    }
+
+    let shortened = value;
+    const counted = Math.min(length, kSignificantDigits);
+
+    for (let rest = counted; rest > kPrefixLength; rest--) {
+      shortened = shortened / 10;
+    }
+
+    return shortened;
+  }
+
+  private addDay(value: int): boolean {
+    if (this.dayParts.length == 3) {
+      return false;
+    }
+
+    this.dayParts.push(value);
+
+    return true;
+  }
+
+  private addTime(value: int): boolean {
+    if (this.timeParts.length >= 4) {
+      return false;
+    }
+
+    this.timeParts.push(value);
+
+    return true;
+  }
+
+  private addLastTime(value: int): boolean {
+    if (!this.addTime(value)) {
+      return false;
+    }
+
+    while (this.timeParts.length < 4) {
+      this.timeParts.push(0);
+    }
+
+    return true;
+  }
+
+  private isTimeExpecting(value: int): boolean {
+    const count = this.timeParts.length;
+    const isMinute = count == 1 && this.isMinute(value);
+    const isSecond = count == 2 && this.isMinute(value);
+    const isMillisecond = count == 3 && this.isMillisecond(value);
+
+    return isMinute || isSecond || isMillisecond;
+  }
+
+  private setZone(hours: int): void {
+    const isNegative = hours < 0;
+
+    this.zoneSign = this.signFor(isNegative);
+    this.zoneHour = this.signed(hours, isNegative);
+    this.zoneMinute = 0;
+  }
+
+  private signFor(isNegative: boolean): int {
+    if (isNegative) {
+      return -1;
+    }
+
+    return 1;
+  }
+
+  private signed(value: int, isNegative: boolean): int {
+    if (isNegative) {
+      return -value;
+    }
+
+    return value;
+  }
+
+  private isZoneExpecting(value: int): boolean {
+    return (
+      this.zoneHour != kNone &&
+      this.zoneMinute == kNone &&
+      this.isMinute(value)
+    );
+  }
+
+  private isUtcZone(): boolean {
+    return this.zoneHour == 0 && this.zoneMinute == 0;
+  }
+
+  private parseIso(): DateToken {
+    const dateStop = this.isoDate();
+    if (dateStop != undefined) {
+      return dateStop;
+    }
+
+    const timeStop = this.isoTime();
+    if (timeStop != undefined) {
+      return timeStop;
+    }
+    if (this.zoneHour == kNone && this.timeParts.length == 0) {
+      this.setZone(0);
+    }
+
+    this.isIso = true;
+
+    return kEndToken;
+  }
+
+  private isoDate(): DateToken | undefined {
+    const yearStop = this.isoYear();
+    if (yearStop != undefined) {
+      return yearStop;
+    }
+    if (!this.skipSymbol(kMinus)) {
+      return undefined;
+    }
+
+    const isMonth =
+      this.isFixedNumber(this.next, 2) && this.isMonth(this.next.value);
+    if (!isMonth) {
+      return this.nextToken();
+    }
+
+    const month = this.nextToken();
+
+    this.addDay(month.value);
+
+    if (!this.skipSymbol(kMinus)) {
+      return undefined;
+    }
+
+    const isDay =
+      this.isFixedNumber(this.next, 2) && this.isDay(this.next.value);
+    if (!isDay) {
+      return this.nextToken();
+    }
+
+    const day = this.nextToken();
+
+    this.addDay(day.value);
+
+    return undefined;
+  }
+
+  private isoYear(): DateToken | undefined {
+    if (this.isSign(this.next)) {
+      const sign = this.nextToken();
+      if (!this.isFixedNumber(this.next, 6)) {
+        return sign;
+      }
+
+      const year = this.nextToken();
+      const direction = this.signOf(sign);
+      if (direction < 0 && year.value == 0) {
+        return sign;
+      }
+
+      this.addDay(direction * year.value);
+
+      return undefined;
+    }
+    if (this.isFixedNumber(this.next, 4)) {
+      const year = this.nextToken();
+
+      this.addDay(year.value);
+
+      return undefined;
+    }
+
+    return this.nextToken();
+  }
+
+  private isoTime(): DateToken | undefined {
+    if (this.next.kind != DateTokenKind.LetterT) {
+      if (this.next.kind != DateTokenKind.End) {
+        return this.nextToken();
+      }
+
+      return undefined;
+    }
+
+    this.nextToken();
+
+    const isHour =
+      this.isFixedNumber(this.next, 2) && this.between(this.next.value, 0, 24);
+    if (!isHour) {
+      return kInvalidToken;
+    }
+
+    const isMidnight = this.next.value == 24;
+    const hour = this.nextToken();
+
+    this.addTime(hour.value);
+
+    if (!this.skipSymbol(kColon) || !this.isClockPart(isMidnight)) {
+      return kInvalidToken;
+    }
+
+    const minute = this.nextToken();
+
+    this.addTime(minute.value);
+
+    const secondsStop = this.isoSeconds(isMidnight);
+    if (secondsStop != undefined) {
+      return secondsStop;
+    }
+
+    const zoneStop = this.isoZone();
+    if (zoneStop != undefined) {
+      return zoneStop;
+    }
+    if (this.next.kind != DateTokenKind.End) {
+      return kInvalidToken;
+    }
+
+    return undefined;
+  }
+
+  private isClockPart(isMidnight: boolean): boolean {
+    const part = this.next;
+    const isLate = isMidnight && part.value > 0;
+
+    return this.isFixedNumber(part, 2) && this.isMinute(part.value) && !isLate;
+  }
+
+  private isoSeconds(isMidnight: boolean): DateToken | undefined {
+    if (!this.skipSymbol(kColon)) {
+      return undefined;
+    }
+    if (!this.isClockPart(isMidnight)) {
+      return kInvalidToken;
+    }
+
+    const second = this.nextToken();
+
+    this.addTime(second.value);
+
+    if (!this.skipSymbol(kDot)) {
+      return undefined;
+    }
+
+    const part = this.next;
+    const isLate = isMidnight && part.value > 0;
+    if (part.kind != DateTokenKind.Number || isLate) {
+      return kInvalidToken;
+    }
+
+    const fraction = this.nextToken();
+    const milliseconds = this.readMilliseconds(fraction);
+
+    this.addTime(milliseconds);
+
+    return undefined;
+  }
+
+  private isoZone(): DateToken | undefined {
+    if (this.isZ(this.next)) {
+      this.nextToken();
+      this.setZone(0);
+
+      return undefined;
+    }
+    if (!this.isSign(this.next)) {
+      return undefined;
+    }
+
+    const sign = this.nextToken();
+
+    this.zoneSign = this.signOf(sign);
+
+    if (this.isFixedNumber(this.next, 4)) {
+      return this.joinedZone();
+    }
+
+    const isHour =
+      this.isFixedNumber(this.next, 2) && this.isHour(this.next.value);
+    if (!isHour) {
+      return kInvalidToken;
+    }
+
+    const hour = this.nextToken();
+
+    this.zoneHour = hour.value;
+
+    if (!this.skipSymbol(kColon)) {
+      return kInvalidToken;
+    }
+
+    const isMinute =
+      this.isFixedNumber(this.next, 2) && this.isMinute(this.next.value);
+    if (!isMinute) {
+      return kInvalidToken;
+    }
+
+    const minute = this.nextToken();
+
+    this.zoneMinute = minute.value;
+
+    return undefined;
+  }
+
+  private joinedZone(): DateToken | undefined {
+    const joined = this.nextToken();
+    const hour = joined.value / 100;
+    const minute = joined.value % 100;
+    if (!this.isHour(hour) || !this.isMinute(minute)) {
+      return kInvalidToken;
+    }
+
+    this.zoneHour = hour;
+    this.zoneMinute = minute;
+
+    return undefined;
+  }
+
+  private legacyStep(token: DateToken): boolean {
+    if (token.kind == DateTokenKind.Number) {
+      return this.numberStep(token.value);
+    }
+    if (this.isWord(token)) {
+      return this.wordStep(token);
+    }
+
+    const isSign = this.isSign(token);
+    const isZoned = this.isUtcZone() || this.timeParts.length != 0;
+    if (isSign && isZoned) {
+      return this.zoneSignStep(token);
+    }
+
+    const isClosing = this.isSymbol(token, kRightParen);
+
+    return !((isSign || isClosing) && this.hasNumber);
+  }
+
+  private numberStep(value: int): boolean {
+    this.hasNumber = true;
+
+    if (this.skipSymbol(kColon)) {
+      return this.clockStep(value);
+    }
+
+    const isDot = this.skipSymbol(kDot);
+    if (isDot && this.isTimeExpecting(value)) {
+      return this.fractionStep(value);
+    }
+    if (this.isZoneExpecting(value)) {
+      this.zoneMinute = value;
+
+      return true;
+    }
+    if (this.isTimeExpecting(value)) {
+      return this.lastClockStep(value);
+    }
+    if (!this.addDay(value)) {
+      return false;
+    }
+
+    this.skipSymbol(kMinus);
+
+    return true;
+  }
+
+  private clockStep(value: int): boolean {
+    if (this.skipSymbol(kColon)) {
+      if (this.timeParts.length != 0) {
+        return false;
+      }
+
+      this.addTime(value);
+      this.addTime(0);
+
+      return true;
+    }
+    if (!this.addTime(value)) {
+      return false;
+    }
+    if (this.isSymbol(this.next, kDot)) {
+      this.nextToken();
+    }
+
+    return true;
+  }
+
+  private fractionStep(value: int): boolean {
+    this.addTime(value);
+
+    if (this.next.kind != DateTokenKind.Number) {
+      return false;
+    }
+
+    const fraction = this.nextToken();
+    const milliseconds = this.readMilliseconds(fraction);
+    if (milliseconds < 0) {
+      return false;
+    }
+
+    this.addLastTime(milliseconds);
+
+    return true;
+  }
+
+  private lastClockStep(value: int): boolean {
+    this.addLastTime(value);
+
+    const peek = this.next;
+    const isOpen =
+      peek.kind == DateTokenKind.End || peek.kind == DateTokenKind.Space;
+
+    return isOpen || this.isZ(peek) || this.isSign(peek);
+  }
+
+  private wordStep(token: DateToken): boolean {
+    const hasTime = this.timeParts.length != 0;
+    if (token.kind == DateTokenKind.Meridiem && hasTime) {
+      this.hourOffset = token.value;
+
+      return true;
+    }
+    if (token.kind == DateTokenKind.Month) {
+      this.namedMonth = token.value;
+      this.skipSymbol(kMinus);
+
+      return true;
+    }
+    if (token.kind == DateTokenKind.Zone && this.hasNumber) {
+      this.setZone(token.value);
+
+      return true;
+    }
+    if (this.hasNumber) {
+      return false;
+    }
+
+    return this.next.kind != DateTokenKind.Number;
+  }
+
+  private zoneSignStep(token: DateToken): boolean {
+    this.zoneSign = this.signOf(token);
+
+    const number = this.zoneNumber();
+    const digits = number.length;
+    const value = number.value;
+
+    this.hasNumber = true;
+
+    if (this.isSymbol(this.next, kColon)) {
+      this.zoneHour = value;
+      this.zoneMinute = kNone;
+
+      return true;
+    }
+    if (digits == 1 || digits == 2) {
+      this.zoneHour = value;
+      this.zoneMinute = 0;
+
+      return true;
+    }
+    if (digits == 3 || digits == 4) {
+      this.zoneHour = value / 100;
+      this.zoneMinute = value % 100;
+
+      return true;
+    }
+
+    return false;
+  }
+
+  private zoneNumber(): DateToken {
+    if (this.next.kind == DateTokenKind.Number) {
+      return this.nextToken();
+    }
+
+    return { kind: DateTokenKind.Number, length: 0, value: 0 };
+  }
+
+  private writtenDay(): DayValue | undefined {
+    if (this.dayParts.length < 1) {
+      return undefined;
+    }
+
+    while (this.dayParts.length < 3) {
+      this.dayParts.push(1);
+    }
+
+    const parts = this.dayParts;
+    const first = parts[0] ?? 0;
+    const second = parts[1] ?? 0;
+    const third = parts[2] ?? 0;
+    const read = this.orderedDay(first, second, third);
+    const year = this.fullYear(read.year);
+    const isFitting = this.isMonth(read.month) && this.isDay(read.day);
+    if (!isFitting) {
+      return undefined;
+    }
+
+    return { year, month: read.month - 1, day: read.day };
+  }
+
+  private orderedDay(first: int, second: int, third: int): DayValue {
+    if (this.namedMonth != kNone) {
+      return this.namedDay(first, second);
+    }
+    if (this.isIso || !this.isDay(first)) {
+      return { year: first, month: second, day: third };
+    }
+
+    return { year: third, month: first, day: second };
+  }
+
+  private namedDay(first: int, second: int): DayValue {
+    const month = this.namedMonth;
+    if (!this.isDay(first)) {
+      return { year: first, month, day: second };
+    }
+
+    return { year: second, month, day: first };
+  }
+
+  private fullYear(year: int): int {
+    if (this.isIso) {
+      return year;
+    }
+    if (this.between(year, 0, 49)) {
+      return year + 2000;
+    }
+    if (this.between(year, 50, 99)) {
+      return year + 1900;
+    }
+
+    return year;
+  }
+
+  private writtenTime(): TimeValue | undefined {
+    while (this.timeParts.length < 4) {
+      this.timeParts.push(0);
+    }
+
+    const parts = this.timeParts;
+    const written = parts[0] ?? 0;
+    const minute = parts[1] ?? 0;
+    const second = parts[2] ?? 0;
+    const millisecond = parts[3] ?? 0;
+    const isHalf = this.hourOffset != kNone;
+    if (isHalf && !this.between(written, 0, 12)) {
+      return undefined;
+    }
+
+    const hour = this.dayHour(written);
+    const isFitting =
+      this.isHour(hour) &&
+      this.isMinute(minute) &&
+      this.isMinute(second) &&
+      this.isMillisecond(millisecond);
+    const isMidnight =
+      hour == 24 && minute == 0 && second == 0 && millisecond == 0;
+    if (!isFitting && !isMidnight) {
+      return undefined;
+    }
+
+    return { hour, minute, second, millisecond };
+  }
+
+  private dayHour(written: int): int {
+    if (this.hourOffset == kNone) {
+      return written;
+    }
+
+    return (written % 12) + this.hourOffset;
+  }
+
+  private writtenZone(): ZoneValue | undefined {
+    if (this.zoneSign == kNone) {
+      return { isLocal: true, offset: 0 };
+    }
+
+    const hour = this.knownPart(this.zoneHour);
+    const minute = this.knownPart(this.zoneMinute);
+    const total = (hour * 3600 + minute * 60) % kUnsignedRange;
+    if (total > kLargestSigned) {
+      return undefined;
+    }
+
+    const offset = this.signed(total, this.zoneSign < 0);
+
+    return { isLocal: false, offset };
+  }
+
+  private knownPart(value: int): int {
+    if (value == kNone) {
+      return 0;
+    }
+
+    return value;
+  }
+}

@@ -1,0 +1,3 @@
+main.tz:6:17: error TZ2904: operator 'in' is always true here: every member of 'Circle | Square' has field 'kind'
+  return "kind" in s;
+                ^

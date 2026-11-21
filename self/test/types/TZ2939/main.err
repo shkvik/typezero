@@ -1,0 +1,6 @@
+main.tz:5:24: error TZ2939: an index or position must be an integer, found 'double'; round it with Math.floor(x) or drop the fraction with 'x | 0'
+console.log(text.slice(half), [1, 2].slice(half));
+                       ^
+main.tz:5:44: error TZ2939: an index or position must be an integer, found 'double'; round it with Math.floor(x) or drop the fraction with 'x | 0'
+console.log(text.slice(half), [1, 2].slice(half));
+                                           ^

@@ -1,0 +1,4 @@
+// A Promise takes one type argument.
+let pending: Promise<int, int> = Promise.resolve(1);
+
+console.log(pending);

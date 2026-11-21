@@ -1,0 +1,3 @@
+main.tz:2:23: error TZ3061: '+275761-01-01T00:00Z' is outside the dates JavaScript has (100 million days around 1970), and would be an Invalid Date
+const date = new Date("+275761-01-01T00:00Z");
+                      ^

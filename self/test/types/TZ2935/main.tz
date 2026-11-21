@@ -1,0 +1,5 @@
+// A decimal becomes a double through Number().
+const price: decimal = decimal(2);
+const rough = price as double;
+
+console.log(rough);

@@ -1,0 +1,3 @@
+main.tz:2:14: error TZ2961: 'decodeURIComponent(escape(s))' reads the UTF-8 bytes that s holds as characters, a legacy trick; keep the bytes in a Uint8Array and decode them with 'new TextDecoder().decode(bytes)'
+const text = decodeURIComponent(escape("a b"));
+             ^

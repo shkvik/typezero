@@ -1,0 +1,4 @@
+// Object.values puts all the values in one array.
+const lists = { a: [1], b: ["x"] };
+
+console.log(Object.values(lists));

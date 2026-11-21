@@ -1,0 +1,3 @@
+main.tz:2:6: error TZ2877: 'int8' is a built-in type and cannot be redefined; only 'type int8 = number', for tsc, may declare it
+type int8 = string;
+     ^

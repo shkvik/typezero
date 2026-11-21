@@ -1,0 +1,3 @@
+main.tz:2:20: error TZ2974: 'Generator' needs the type of the values it gives, e.g. 'Generator<int>'
+function* count(): Generator {
+                   ^

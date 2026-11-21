@@ -1,0 +1,5 @@
+// A setter checks the day against the days of its month.
+const date = new Date();
+
+date.setUTCMonth(3, 31);
+console.log(date.getDate());

@@ -1,0 +1,7 @@
+main.tz
+  2:10 int -> global
+  4:9 n -> variable 2:7
+  7:5 console -> global
+  7:17 inFirst -> variable 6:9
+  10:5 console -> global
+  10:17 inFirst -> variable 6:9

@@ -1,0 +1,15 @@
+// The functions given to match return one type.
+function lists(flag: boolean): Result<int[], string[]> {
+  if (flag) {
+    return err(["none"]);
+  }
+
+  return ok([1]);
+}
+
+const shown = lists(true).match(
+  (values) => values,
+  (errors) => errors,
+);
+
+console.log(shown);

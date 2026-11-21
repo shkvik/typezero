@@ -1,0 +1,5 @@
+// Object.keys needs an object.
+const list = [1, 2];
+const keys = Object.keys(list);
+
+console.log(keys);

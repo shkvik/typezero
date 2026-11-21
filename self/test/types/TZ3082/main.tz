@@ -1,0 +1,6 @@
+// for...in over an array gives its indices as strings.
+const xs = [10, 20];
+
+for (const i in xs) {
+  console.log(i);
+}

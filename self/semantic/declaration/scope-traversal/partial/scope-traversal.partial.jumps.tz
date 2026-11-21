@@ -1,0 +1,153 @@
+import { ScopeTraversal } from "../scope-traversal.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  JumpStmt,
+  LabeledStmt,
+  Stmt,
+  StmtKind,
+  SwitchCase,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import { JumpKind, JumpTarget } from "../types/scope-traversal.types.tz";
+
+partial class ScopeTraversal {
+  private traverseTarget(statement: Stmt, kind: JumpKind): void {
+    const labels = this.pendingLabels;
+
+    this.pendingLabels = [];
+    this.jumpTargets.push({ kind, labels });
+    this.traverseInTarget(statement);
+    this.jumpTargets.pop();
+  }
+
+  private traverseLabeled(statement: LabeledStmt, labels: string[]): void {
+    const label = statement.label;
+    if (labels.includes(label) || this.hasLabel(label)) {
+      this.report(statement.loc, Code.LabelDuplicate, { word: label });
+    }
+
+    const named = labels.concat([label]);
+    const body = statement.body;
+    if (body.kind == StmtKind.Labeled) {
+      return this.traverseLabeled(body, named);
+    }
+
+    const kind = this.targetKind(body);
+    if (kind != JumpKind.Block) {
+      this.pendingLabels = named;
+
+      return this.traverseTarget(body, kind);
+    }
+    if (this.isDeclaration(body)) {
+      this.report(body.loc, Code.LabelOnDeclaration, kNoDetails);
+
+      return;
+    }
+
+    this.pendingLabels = named;
+    this.traverseTarget(body, JumpKind.Block);
+  }
+
+  private targetKind(statement: Stmt): JumpKind {
+    switch (statement.kind) {
+      case StmtKind.While:
+      case StmtKind.DoWhile:
+      case StmtKind.For:
+      case StmtKind.ForOf:
+        return JumpKind.Loop;
+      case StmtKind.Switch:
+        return JumpKind.Switch;
+      default:
+        return JumpKind.Block;
+    }
+  }
+
+  private isDeclaration(statement: Stmt): boolean {
+    switch (statement.kind) {
+      case StmtKind.VarDecl:
+      case StmtKind.Function:
+      case StmtKind.TypeAlias:
+      case StmtKind.Enum:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private hasLabel(label: string): boolean {
+    return this.jumpTargets.some((target) => target.labels.includes(label));
+  }
+
+  private jumpCheck(statement: JumpStmt): void {
+    const isBreak = statement.kind == StmtKind.Break;
+    const label = statement.label;
+    const target = this.jumpTarget(label, isBreak);
+    if (target == undefined) {
+      return this.missingTargetReport(statement, isBreak);
+    }
+    if (!isBreak && target.kind != JumpKind.Loop) {
+      this.report(statement.loc, Code.ContinueNotLoop, { word: label });
+    }
+  }
+
+  private missingTargetReport(statement: JumpStmt, isBreak: boolean): void {
+    const label = statement.label;
+    if (label != "") {
+      this.report(statement.loc, Code.LabelNotFound, { word: label });
+
+      return;
+    }
+    if (isBreak) {
+      this.report(statement.loc, Code.BreakOutside, kNoDetails);
+
+      return;
+    }
+
+    this.report(statement.loc, Code.ContinueOutside, kNoDetails);
+  }
+
+  private jumpTarget(label: string, isBreak: boolean): JumpTarget | undefined {
+    for (let index = this.jumpTargets.length - 1; index >= 0; index--) {
+      const target = this.jumpTargets[index];
+      if (target != undefined && this.isJumpingTo(target, label, isBreak)) {
+        return target;
+      }
+    }
+
+    return undefined;
+  }
+
+  private isJumpingTo(
+    target: JumpTarget,
+    label: string,
+    isBreak: boolean,
+  ): boolean {
+    if (label != "") {
+      return target.labels.includes(label);
+    }
+    if (isBreak) {
+      return target.kind != JumpKind.Block;
+    }
+
+    return target.kind == JumpKind.Loop;
+  }
+
+  private rememberCaseVariables(one: SwitchCase, noted: int[]): void {
+    for (const statement of one.body) {
+      if (statement.kind != StmtKind.VarDecl) {
+        continue;
+      }
+
+      for (const decl of statement.decls) {
+        this.otherCaseVariables.add(decl.loc);
+        noted.push(decl.loc);
+      }
+    }
+  }
+
+  private forgetCaseVariables(noted: int[]): void {
+    for (const loc of noted) {
+      this.otherCaseVariables.delete(loc);
+    }
+  }
+}

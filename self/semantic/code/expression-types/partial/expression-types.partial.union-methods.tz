@@ -1,0 +1,129 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  CallExpr,
+  MemberExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionType,
+  ObjectType,
+  Type,
+  TypeKind,
+  UnionType,
+} from "../../../../program/type/types/type.types.tz";
+import { CallKind } from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private unionShapeCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: UnionType,
+    common: Type | undefined,
+    module: int,
+  ): Type | undefined {
+    const parts = this.shapeParts(object);
+    if (common != undefined || parts == undefined) {
+      return undefined;
+    }
+
+    const shared = this.sharedMethod(member, object, parts, module);
+    if (shared == undefined) {
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.calledWith(expr, shared, member.loc, CallKind.Own, module);
+  }
+
+  private shapeParts(object: UnionType): ObjectType[] | undefined {
+    const parts: ObjectType[] = [];
+
+    for (const part of object.parts) {
+      if (part.kind != TypeKind.Object || this.resolver.isLibraryShape(part)) {
+        return undefined;
+      }
+
+      parts.push(part);
+    }
+
+    if (this.sharedTag(object) != undefined) {
+      return undefined;
+    }
+
+    return parts;
+  }
+
+  private sharedMethod(
+    member: MemberExpr,
+    object: UnionType,
+    parts: ObjectType[],
+    module: int,
+  ): FunctionType | undefined {
+    const receiver = this.text.of(object);
+    let common: FunctionType | undefined = undefined;
+
+    for (const part of parts) {
+      const type = this.partMethod(member, receiver, part, module);
+      if (type == undefined) {
+        return undefined;
+      }
+      if (common != undefined && type != common) {
+        this.report(module, member.loc, Code.UnionMethodsDiffer, {
+          first: receiver,
+          word: member.name,
+          second: this.text.of(common),
+          other: this.text.of(type),
+        });
+
+        return undefined;
+      }
+
+      common = type;
+    }
+
+    return common;
+  }
+
+  private partMethod(
+    member: MemberExpr,
+    receiver: string,
+    part: ObjectType,
+    module: int,
+  ): FunctionType | undefined {
+    const word = member.name;
+    const first = this.text.of(part);
+    const field = part.fields.find((one) => one.name == word);
+    if (field != undefined && this.store.isBase(part)) {
+      this.report(module, member.loc, Code.UnionMethodBase, {
+        word,
+        first: receiver,
+        second: first,
+      });
+
+      return undefined;
+    }
+    if (field == undefined) {
+      this.report(module, member.loc, Code.VariantLacksMethod, {
+        word: receiver,
+        first,
+        other: word,
+      });
+
+      return undefined;
+    }
+
+    const type = this.fieldWanted(field);
+    if (type.kind != TypeKind.Function) {
+      this.report(module, member.loc, Code.UnionFieldNotFunction, {
+        word: receiver,
+        first,
+        other: word,
+      });
+
+      return undefined;
+    }
+
+    return type;
+  }
+}

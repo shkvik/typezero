@@ -1,0 +1,3 @@
+main.tz:8:18: error TZ3165: there are no prototypes in tz: the methods belong to the class itself, and a decorator gets the class; use it as it is
+console.log(kind.prototype);
+                 ^

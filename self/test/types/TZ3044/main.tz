@@ -1,0 +1,7 @@
+// A timer calls its callback with nothing.
+function greet(name: string): void {
+  console.log(name);
+}
+
+setTimeout(greet, 10, "x");
+setTimeout(() => greet("y"), 10);

@@ -1,0 +1,3 @@
+main.tz:3:19: error TZ2997: abstract method 'area' of generic class 'Shape' needs a return type, e.g. '): T'
+  public abstract area();
+                  ^

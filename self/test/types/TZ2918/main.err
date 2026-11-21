@@ -1,0 +1,3 @@
+main.tz:12:1: error TZ2918: '&&=' cannot test a number that may be undefined: 0 would count as false too; check for undefined: 'found != undefined'
+found &&= 3;
+^

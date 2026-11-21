@@ -1,0 +1,6 @@
+main.tz:12:11: error TZ2978: 'Box' takes 1 type argument, but got 2
+let wide: Box<int, int> = { value: 1 };
+          ^
+main.tz:13:16: error TZ2978: 'Cell' takes 1 type argument, but got 2
+let cell = new Cell<int, int>(1);
+               ^

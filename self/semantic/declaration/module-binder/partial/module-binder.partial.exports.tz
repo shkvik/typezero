@@ -16,6 +16,7 @@ import {
   BoundModule,
   ImportedName,
 } from "../types/module-binder.types.tz";
+import { kSubmodules } from "../const/module-binder.const.tz";
 
 partial class ModuleBinder {
   private exportsOf(bound: BoundModule): Map<string, ModuleExport> {
@@ -129,6 +130,10 @@ partial class ModuleBinder {
     }
 
     const theirModule = source.names.module;
+    if (this.isSubmodule(theirModule.name, word)) {
+      return { module: theirModule.id, name: word };
+    }
+
     const unmarked =
       source.names.declared.has(word) && !theirModule.source.isLibrary;
     if (unmarked) {
@@ -146,6 +151,12 @@ partial class ModuleBinder {
     this.report(bound, name.loc, Code.NoExportNamed, { path, word });
 
     return undefined;
+  }
+
+  private isSubmodule(module: string, word: string): boolean {
+    return kSubmodules.some(
+      (one) => one.parent == module && one.name == word,
+    );
   }
 
   private localTarget(

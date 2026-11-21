@@ -1,0 +1,2 @@
+// decimal.max needs a value.
+console.log(decimal.max());

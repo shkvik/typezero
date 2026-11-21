@@ -1,0 +1,7 @@
+// After a member of text the next member needs its own value.
+enum Mixed {
+  A = "a",
+  B,
+}
+
+const a = Mixed.A;

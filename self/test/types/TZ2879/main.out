@@ -1,0 +1,3 @@
+main.tz
+  2:6 enum Level = int
+  8:7 other: "Low"

@@ -1,0 +1,6 @@
+main.tz
+  2:6 type Circle = { kind: "circle"; r: double }
+  3:6 type Square = { kind: "square"; side: double }
+  4:6 type Shape = Circle | Square
+  6:10 assertCircle: (Circle | Square) => boolean
+  10:10 check: (boolean, string) => boolean

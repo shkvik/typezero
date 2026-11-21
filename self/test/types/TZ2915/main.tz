@@ -1,0 +1,6 @@
+// '||=' never assigns to a function.
+let run = (): int => 1;
+
+run ||= (): int => 2;
+
+console.log(run());

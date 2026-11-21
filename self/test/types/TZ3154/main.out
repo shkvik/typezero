@@ -1,0 +1,4 @@
+main.tz
+  1:7 whole: { n: int; get() }
+  2:7 text: { n: int; get() }
+  3:7 both: ({ n: int; get() } | { n: int; get() })[]

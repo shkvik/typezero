@@ -1,0 +1,5 @@
+// A tuple has a fixed length.
+const pair: [string, int] = ["a", 1];
+
+delete pair[0];
+console.log(pair);

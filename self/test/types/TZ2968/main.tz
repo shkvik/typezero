@@ -1,0 +1,5 @@
+// A Result takes two type arguments.
+let outcome: Result<int> = ok(1);
+let whole: Result<int, string, int> = ok(1);
+
+console.log(outcome, whole);

@@ -1,0 +1,3 @@
+main.tz:4:18: error TZ3066: 'getYear' gives the year minus 1900 (126 for 2026); use 'getFullYear()'
+console.log(date.getYear());
+                 ^

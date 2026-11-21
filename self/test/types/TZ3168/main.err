@@ -1,0 +1,3 @@
+main.tz:6:5: error TZ3168: a class is always truthy, so the condition is always true; drop the check
+if (User) {
+    ^

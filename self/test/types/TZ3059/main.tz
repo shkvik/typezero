@@ -1,0 +1,4 @@
+// A date without a time is read as midnight UTC.
+const date = new Date("2026-10-23");
+
+console.log(date.getTime());

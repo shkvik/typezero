@@ -13,6 +13,7 @@ import {
   ObjectTypeForm,
   TupleTypeForm,
   TypeRef,
+  TypeRefKind,
 } from "../../../../program/ast/types/ast.types.types.tz";
 import {
   LiteralKind,
@@ -188,7 +189,49 @@ partial class TypeResolver {
       });
     }
 
+    this.assertsTypeCheck(form.result, context);
+
     return this.signature(sites, form.result, context);
+  }
+
+  private assertsTypeCheck(
+    result: TypeRef | undefined,
+    context: TypeContext,
+  ): void {
+    const form = result?.form;
+    if (result == undefined || form == undefined) {
+      return;
+    }
+    if (form.kind != TypeRefKind.Predicate || !form.asserts) {
+      return;
+    }
+
+    const shown = this.assertedText(result, context);
+
+    this.report(context.module, result.loc, Code.AssertsRefused, {
+      word: shown,
+      other: this.assertedAdvice(result, shown),
+    });
+  }
+
+  private assertedText(result: TypeRef, context: TypeContext): string {
+    const ref = result.args[0];
+    if (ref == undefined) {
+      return result.name;
+    }
+
+    const type = this.resolve(ref, context);
+    const shown = this.text.of(type);
+
+    return `${result.name} is ${shown}`;
+  }
+
+  private assertedAdvice(result: TypeRef, shown: string): string {
+    if (result.args.length == 0) {
+      return "boolean";
+    }
+
+    return shown;
   }
 
   private siteKind(optional: boolean, spread: boolean): ParamKind {

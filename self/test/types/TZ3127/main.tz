@@ -1,0 +1,4 @@
+const price: decimal = 19.99;
+
+// The number of places is an integer.
+console.log(price.toFixed(1.5));

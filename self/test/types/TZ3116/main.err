@@ -1,0 +1,3 @@
+main.tz:4:24: error TZ3116: a Json has no method 'map' until a check shows what it holds; put it in a variable and check that, e.g. 'const items = j.items; if (Array.isArray(items)) items.map(...)'
+console.log(data.items.map((item: Json) => item));
+                       ^

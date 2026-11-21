@@ -12,6 +12,7 @@ import {
 import {
   LiteralKind,
   ObjectField,
+  ObjectType,
   Type,
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
@@ -36,6 +37,12 @@ partial class ExpressionTypes {
 
     this.checkUnique(draft, module);
 
+    if (draft.deferred && this.hasMethods(expr)) {
+      return this.methodObject(expr, target, module);
+    }
+    if (draft.deferred && this.isSpreadOnly(expr)) {
+      return this.spreadObject(expr, target, module);
+    }
     if (draft.deferred) {
       return this.store.plain(TypeKind.Error);
     }
@@ -99,10 +106,12 @@ partial class ExpressionTypes {
     switch (form.kind) {
       case PropertyKind.Spread:
         draft.deferred = true;
+        this.spreadCheck(property, module);
 
         return { property, name, value, named: false };
       case PropertyKind.Method:
         draft.deferred = true;
+        this.literalMethodCheck(property, module);
 
         return { property, name, value, named: true };
       case PropertyKind.Defaulted: {
@@ -309,7 +318,29 @@ partial class ExpressionTypes {
       }
     }
 
+    const overloaded = this.overloadedNames(target);
+
+    for (const word of overloaded) {
+      this.report(module, expr.loc, Code.LiteralOverloadsTarget, {
+        first,
+        word,
+      });
+    }
+
     return target;
+  }
+
+  private overloadedNames(target: ObjectType): string[] {
+    const names: string[] = [];
+
+    for (const field of target.fields) {
+      const count = target.fields.filter((one) => one.name == field.name).length;
+      if (count > 1 && !names.includes(field.name)) {
+        names.push(field.name);
+      }
+    }
+
+    return names;
   }
 
   private reportNoField(entry: FieldEntry, target: Type, module: int): void {

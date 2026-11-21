@@ -15,7 +15,7 @@ main.tz
   30:5 steps: Generator<int>
   31:5 frozen: string[]
   32:5 good: Result<int, never>
-  33:5 encoding: "ascii" | "utf8" | "utf-8" | "utf16le" | "utf-16le" | "ucs2" | "ucs-2" | "base64" | "base64url" | "latin1" | "binary" | "hex"
+  33:5 encoding: BufferEncoding
   34:5 failure: NumberError | undefined
   35:5 found: RegExpMatchArray | undefined
   37:5 format: Intl.NumberFormat

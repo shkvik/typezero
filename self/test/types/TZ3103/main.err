@@ -1,0 +1,3 @@
+main.tz:10:33: error TZ3103: the Result has values of 'int[]' and the function given to 'orElse' returns values of 'string[]', which no union holds: 'int[]' and 'string[]' cannot be told apart when the program runs: both are arrays; use one array type, e.g. '(int | string)[]'
+const next = lists(true).orElse((errors) => ok(errors));
+                                ^

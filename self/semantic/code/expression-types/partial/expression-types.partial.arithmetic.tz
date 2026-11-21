@@ -332,9 +332,10 @@ partial class ExpressionTypes {
 
   private arithmeticResult(
     expr: BinaryExpr,
-    pair: OperandPair,
+    given: OperandPair,
     module: int,
   ): Type {
+    const pair = this.withoutNever(given);
     const left = pair.left;
     const right = pair.right;
     const isBroken =
@@ -352,7 +353,7 @@ partial class ExpressionTypes {
       return this.concatenated(expr, pair, module);
     }
     if (this.isDate(left) || this.isDate(right)) {
-      return this.store.plain(TypeKind.Error);
+      return this.dateArithmetic(expr, pair, module);
     }
     if (this.isBitwise(expr.op)) {
       return this.bitsResult(expr, pair, module);
@@ -737,6 +738,30 @@ partial class ExpressionTypes {
 
   private isWrapping(type: Type): boolean {
     return type.kind == TypeKind.Int && type.wraps;
+  }
+
+  private withoutNever(pair: OperandPair): OperandPair {
+    const left = pair.left;
+    const right = pair.right;
+    const isLeftNever = left.kind == TypeKind.Never;
+    const isRightNever = right.kind == TypeKind.Never;
+    if (isLeftNever && isRightNever) {
+      const double = this.store.plain(TypeKind.Double);
+
+      return { left: double, right: double };
+    }
+    if (isLeftNever && this.isNeverTarget(right)) {
+      return { left: right, right };
+    }
+    if (isRightNever && this.isNeverTarget(left)) {
+      return { left, right: left };
+    }
+
+    return pair;
+  }
+
+  private isNeverTarget(type: Type): boolean {
+    return type.kind != TypeKind.Error && type.kind != TypeKind.Void;
   }
 
   private isDate(type: Type): boolean {

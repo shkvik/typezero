@@ -1,0 +1,5 @@
+// setYear takes the year minus 1900.
+const date = new Date();
+
+date.setYear(2020);
+console.log(date.getTime());

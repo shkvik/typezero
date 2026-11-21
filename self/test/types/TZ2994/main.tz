@@ -1,0 +1,10 @@
+// A generic class uses itself only with its own type parameters.
+class Node<T> {
+  public next?: Node<T[]>;
+}
+
+class Link<T> {
+  public next?: Link<T>;
+}
+
+console.log(Node, Link);

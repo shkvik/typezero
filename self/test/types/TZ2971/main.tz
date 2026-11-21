@@ -1,0 +1,4 @@
+// A Map names its keys and values.
+let counts: Map<int> = new Map<int, int>();
+
+console.log(counts);

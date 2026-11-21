@@ -1,0 +1,11 @@
+// After a check an array is always there.
+function show(list: int[] | undefined): void {
+  if (!list) {
+    return;
+  }
+  if (list) {
+    console.log(list);
+  }
+}
+
+show([1]);

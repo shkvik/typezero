@@ -1,0 +1,10 @@
+// Math takes no undefined.
+function find(flag: boolean): double | undefined {
+  if (flag) {
+    return 1.5;
+  }
+
+  return undefined;
+}
+
+console.log(Math.sqrt(find(true)));

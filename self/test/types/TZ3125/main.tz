@@ -1,0 +1,2 @@
+// decimal has no settings.
+decimal.config(20);

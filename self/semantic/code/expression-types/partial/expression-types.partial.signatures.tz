@@ -1,0 +1,227 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { ClassDecl } from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  CallExpr,
+  MemberExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  BodySource,
+  FunctionDecl,
+  FunctionPlace,
+  Param,
+  ParamKind,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  FunctionType,
+  InstanceType,
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { kParameterLetters } from "../const/expression-types.const.tz";
+import {
+  CallKind,
+  ClassMemberEntry,
+  RankedVariant,
+} from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private signatureCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    fields: ObjectField[],
+    module: int,
+  ): Type {
+    const ranked = this.signatureVariants(member.name, fields);
+    const what = `'${member.name}'`;
+    const loc = member.loc;
+    const chosen = this.chosenVariant(expr.args, ranked, what, loc, module);
+    if (chosen == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.calledWith(expr, chosen.type, loc, CallKind.Own, module);
+  }
+
+  private signatureVariants(
+    name: string,
+    fields: ObjectField[],
+  ): RankedVariant[] {
+    const ranked: RankedVariant[] = [];
+
+    for (const field of fields) {
+      const type = field.type;
+      if (type.kind == TypeKind.Function) {
+        const fn = this.signatureDecl(name, type);
+
+        ranked.push({ fn, type, ranks: [], isAdapted: false, failed: -1 });
+      }
+    }
+
+    return ranked;
+  }
+
+  private signatureDecl(name: string, type: FunctionType): FunctionDecl {
+    const params: Param[] = [];
+
+    for (let index = 0; index < type.shape.params.length; index++) {
+      params.push(this.signatureParam(type, index));
+    }
+
+    return {
+      kind: StmtKind.Function,
+      loc: 0,
+      name,
+      typeParams: [],
+      params,
+      isArrow: false,
+      concise: false,
+      ownName: name,
+      place: FunctionPlace.Lifted,
+      bodySource: BodySource.Intrinsic,
+      isGenerator: false,
+      isAsync: false,
+    };
+  }
+
+  private signatureParam(type: FunctionType, index: int): Param {
+    const count = kParameterLetters.length;
+    const name = kParameterLetters.charAt(index % count);
+    const kind = this.signatureParamKind(type, index);
+
+    return { name, loc: 0, form: { kind }, decorators: [] };
+  }
+
+  private signatureParamKind(
+    type: FunctionType,
+    index: int,
+  ): ParamKind.Required | ParamKind.Optional | ParamKind.Rest {
+    const params = type.shape.params;
+    const isRest = type.shape.rest && index == params.length - 1;
+    if (isRest) {
+      return ParamKind.Rest;
+    }
+    if (params[index]?.optional == true) {
+      return ParamKind.Optional;
+    }
+
+    return ParamKind.Required;
+  }
+
+  private signatureValueCheck(
+    expr: MemberExpr,
+    fields: ObjectField[],
+    module: int,
+  ): void {
+    const ranked = this.signatureVariants(expr.name, fields);
+
+    this.rankedValueCheck(expr, ranked, module);
+  }
+
+  private contractSignatures(
+    decl: ClassDecl,
+    instance: InstanceType,
+    iface: string,
+    fields: ObjectField[],
+    module: int,
+  ): void {
+    const word = fields[0]?.name ?? "";
+    const lookup = this.classMember(instance, word);
+    if (!lookup.isKnown) {
+      return;
+    }
+
+    const first = decl.name ?? "";
+
+    for (const field of fields) {
+      const wanted = field.type;
+      if (wanted.kind != TypeKind.Function) {
+        continue;
+      }
+
+      const entry = lookup.entry;
+      const found = this.methodTaking(entry, wanted);
+      if (found == undefined || entry == undefined) {
+        this.report(module, decl.loc, Code.ImplementsNoVariant, {
+          word,
+          first,
+          second: iface,
+          other: this.text.of(wanted),
+        });
+
+        continue;
+      }
+
+      const type = this.methodTypeOf(entry, found);
+      if (type.kind == TypeKind.Function) {
+        this.contractResult(found, type, wanted, iface, first, module);
+      }
+    }
+  }
+
+  private methodTaking(
+    entry: ClassMemberEntry | undefined,
+    wanted: FunctionType,
+  ): FunctionDecl | undefined {
+    if (entry == undefined) {
+      return undefined;
+    }
+
+    for (const fn of entry.methods) {
+      const type = this.methodTypeOf(entry, fn);
+      if (type.kind == TypeKind.Function && this.isSameParameters(type, wanted)) {
+        return fn;
+      }
+    }
+
+    return undefined;
+  }
+
+  private contractMethods(
+    entry: ClassMemberEntry,
+    iface: string,
+    field: ObjectField,
+    first: string,
+    module: int,
+  ): void {
+    const wanted = field.type;
+    const method = entry.methods[0];
+    if (method == undefined || wanted.kind != TypeKind.Function) {
+      return;
+    }
+    if (entry.methods.length == 1) {
+      return this.contractMethod(entry, method, iface, field, first, module);
+    }
+
+    const found = this.methodTaking(entry, wanted);
+    if (found != undefined) {
+      const type = this.methodTypeOf(entry, found);
+      if (type.kind != TypeKind.Function) {
+        return;
+      }
+
+      return this.contractResult(found, type, wanted, iface, first, module);
+    }
+
+    const texts = entry.methods.map((fn) => this.methodVariantText(entry, fn));
+
+    this.report(module, method.loc, Code.ImplementsParameters, {
+      word: field.name,
+      first,
+      second: iface,
+      other: this.text.of(wanted),
+      place: this.variantList(texts),
+    });
+  }
+
+  private methodVariantText(entry: ClassMemberEntry, fn: FunctionDecl): string {
+    const type = this.methodTypeOf(entry, fn);
+    if (type.kind != TypeKind.Function) {
+      return fn.name;
+    }
+
+    return this.variantText(fn, type);
+  }
+}

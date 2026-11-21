@@ -1,0 +1,3 @@
+main.tz:2:40: error TZ3015: the values of a Map have one type; found 'int' and 'string'
+const mixed = new Map([["a", 1], ["b", "x"]]);
+                                       ^

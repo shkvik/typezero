@@ -1,0 +1,4 @@
+const price: decimal = 19.99;
+
+// decimalPlaces() only counts the places.
+console.log(price.decimalPlaces(2));

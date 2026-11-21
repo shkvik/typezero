@@ -1,0 +1,6 @@
+// A built-in number type may only be declared as number, for tsc.
+type int8 = string;
+type int = number;
+
+const small: int8 = 1;
+const whole: int = 2;

@@ -1,0 +1,12 @@
+interface Named {
+  name: string;
+}
+
+// A field that is not a function cannot be a method in the class.
+class Person implements Named {
+  name() {
+    return "a";
+  }
+}
+
+console.log(new Person());

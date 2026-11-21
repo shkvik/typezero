@@ -1,0 +1,8 @@
+const whole = { n: 1, get() { return this.n; } };
+const text = { n: 2, get() { return `${this.n}`; } };
+const both = [whole, text];
+
+// The members of a union have methods of one type.
+for (const one of both) {
+  console.log(one.get());
+}

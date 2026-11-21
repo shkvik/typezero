@@ -1,0 +1,3 @@
+main.tz:2:45: error TZ3043: a Promise is not rejected in tz, so its function gets only 'resolve'; an operation that may fail gives a Promise<Result<T, E>>: 'resolve(err(e))'
+const rejected = new Promise<int>((resolve, reject) => resolve(1));
+                                            ^

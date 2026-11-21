@@ -1,0 +1,4 @@
+const data = JSON.parse('{"items": [1]}').unwrapOr(null);
+
+// A Json has no methods until a check shows what it holds.
+console.log(data.trim());

@@ -1,0 +1,8 @@
+// A method of an object literal is not generic.
+const literal = {
+  m<T>(x: int): int {
+    return 1;
+  },
+};
+
+console.log(literal);

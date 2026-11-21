@@ -1,0 +1,4 @@
+// Ok is only a type.
+const made = Ok;
+
+console.log(made);

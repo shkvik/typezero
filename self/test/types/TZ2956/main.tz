@@ -1,0 +1,7 @@
+// A Result in a variable is checked.
+const parsed = parseInt("5");
+const used = parseInt("6");
+
+if (used.isOk()) {
+  console.log(used.value);
+}

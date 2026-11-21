@@ -1,0 +1,6 @@
+// The values spread into Math.max have one type.
+const whole = [1, 2];
+const parts = [1.5];
+const most = Math.max(...whole, ...parts);
+
+console.log(most);

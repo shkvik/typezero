@@ -1,0 +1,3 @@
+main.tz:13:17: error TZ3113: 'includes' cannot compare Results: in JavaScript each Result is an object of its own, equal to no other; search with a function, e.g. 'some' or 'findIndex'
+console.log(all.includes(result));
+                ^

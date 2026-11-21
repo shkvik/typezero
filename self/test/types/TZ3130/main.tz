@@ -1,0 +1,2 @@
+// decimal() takes a string, a number or a decimal.
+console.log(decimal(true));

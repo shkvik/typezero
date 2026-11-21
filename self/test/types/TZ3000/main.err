@@ -1,0 +1,3 @@
+main.tz:20:10: error TZ3000: a 'Free' is never a 'Base', so this is always false
+if (free instanceof Base) {
+         ^

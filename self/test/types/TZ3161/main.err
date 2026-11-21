@@ -1,0 +1,3 @@
+main.tz:6:21: error TZ3161: 'Small | Plain' may be a 'Plain', whose 'get' is not a function; narrow it first
+  console.log(value.get());
+                    ^

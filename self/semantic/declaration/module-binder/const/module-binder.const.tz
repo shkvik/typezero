@@ -1,0 +1,11 @@
+import { Submodule } from "../types/module-binder.types.tz";
+
+export const kSubmodules: Submodule[] = [
+  { parent: "node:path", name: "posix" },
+  { parent: "node:path", name: "win32" },
+  { parent: "node:path/posix", name: "posix" },
+  { parent: "node:path/posix", name: "win32" },
+  { parent: "node:path/win32", name: "posix" },
+  { parent: "node:path/win32", name: "win32" },
+  { parent: "node:fs", name: "promises" },
+];

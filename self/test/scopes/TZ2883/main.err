@@ -1,0 +1,6 @@
+main.tz:3:3: error TZ2883: 'break' can only be used inside a loop or a 'switch'
+  break;
+  ^
+main.tz:8:5: error TZ2883: 'break' can only be used inside a loop or a 'switch'
+    break;
+    ^

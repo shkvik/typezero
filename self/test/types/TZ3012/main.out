@@ -1,0 +1,3 @@
+main.tz
+  3:7 typed: Map<string, int>
+  4:7 wanted: Map<string, int>

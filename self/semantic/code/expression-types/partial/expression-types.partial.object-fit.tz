@@ -8,7 +8,11 @@ import {
   MemberExpr,
   NameExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
-import { kStringClass } from "../const/expression-types.const.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  kLengthName,
+  kStringClass,
+} from "../const/expression-types.const.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
 import {
   ObjectField,
@@ -47,6 +51,12 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): void {
+    if (object.kind == TypeKind.Tuple && target.name == kLengthName) {
+      this.report(module, target.loc, Code.TupleLengthFixed, kNoDetails);
+
+      return;
+    }
+
     const isOwn =
       object.kind == TypeKind.Object && !this.resolver.isLibraryShape(object);
     if (!isOwn || object.kind != TypeKind.Object) {
@@ -63,8 +73,22 @@ partial class ExpressionTypes {
       });
     }
 
-    const isMethod = field.type.kind == TypeKind.Function;
-    if (!field.readonly || isMethod) {
+    if (field.method ?? false) {
+      return this.report(module, target.loc, Code.MethodReplaced, {
+        word,
+        first,
+      });
+    }
+
+    const count = object.fields.filter((one) => one.name == word).length;
+    if (count > 1) {
+      return this.report(module, target.loc, Code.OverloadedMethodReplaced, {
+        word,
+        first,
+      });
+    }
+
+    if (!field.readonly) {
       return;
     }
     if (!this.isInferredName(target.object, module)) {
@@ -122,6 +146,12 @@ partial class ExpressionTypes {
 
     const first = this.text.of(declared);
     const target = expr.target;
+    const isKeyed =
+      target.kind == ExprKind.Member &&
+      this.recordValueOf(target.object, module) != undefined;
+    if (isKeyed) {
+      return;
+    }
 
     switch (target.kind) {
       case ExprKind.Name:
@@ -168,7 +198,8 @@ partial class ExpressionTypes {
     const isObject =
       base.kind == TypeKind.Object ||
       base.kind == TypeKind.Instance ||
-      base.kind == TypeKind.Dict;
+      base.kind == TypeKind.Dict ||
+      base.kind == TypeKind.Json;
     if (isObject) {
       this.textCheck(arg, type, module);
     }

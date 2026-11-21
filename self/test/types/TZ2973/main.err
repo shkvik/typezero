@@ -1,0 +1,3 @@
+main.tz:2:13: error TZ2973: 'Record' needs the types of its keys and values, e.g. 'Record<string, int>'
+let byName: Record<string> = {};
+            ^

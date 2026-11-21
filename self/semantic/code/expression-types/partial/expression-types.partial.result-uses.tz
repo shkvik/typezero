@@ -1,0 +1,71 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { ExprKind } from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { ValueRecord } from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private unreadResultsCheck(module: int): void {
+    const record = this.records.get(module);
+    if (record == undefined || this.resultsChecked.has(module)) {
+      return;
+    }
+
+    this.resultsChecked.add(module);
+
+    const reads = this.readLocs(record);
+
+    for (const [loc, variable] of record.variables) {
+      const door = this.doors.get(`${module} ${loc}`);
+      const isSkipped =
+        door == undefined || reads.has(loc) || variable.loop != undefined;
+      if (isSkipped || door == undefined) {
+        continue;
+      }
+
+      const code = this.resultHoldCode(door.type);
+      if (code != undefined) {
+        this.report(module, loc, code, { word: variable.decl.name });
+      }
+    }
+  }
+
+  private readLocs(record: ValueRecord): Set<int> {
+    const written = new Set<int>();
+
+    for (const change of record.changes) {
+      const target = this.changedTarget(change);
+      if (target != undefined && target.kind == ExprKind.Name) {
+        written.add(target.loc);
+      }
+    }
+
+    const reads = new Set<int>();
+
+    for (const use of record.uses.values()) {
+      const symbol = use.symbol;
+      if (symbol != undefined && !use.isType && !written.has(use.loc)) {
+        reads.add(symbol.loc);
+      }
+    }
+
+    return reads;
+  }
+
+  private resultHoldCode(type: Type): Code | undefined {
+    const held = this.definedType(type);
+    if (held.kind == TypeKind.Result) {
+      return Code.ResultUnchecked;
+    }
+    if (held.kind != TypeKind.Promise) {
+      return undefined;
+    }
+
+    const value = this.definedType(held.value);
+    if (value.kind == TypeKind.Result) {
+      return Code.ResultPromiseUnawaited;
+    }
+
+    return undefined;
+  }
+}

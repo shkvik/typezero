@@ -1,5 +1,7 @@
 import { ExpressionTypes } from "../expression-types.tz";
 import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import { messageText } from "../../../../diagnostic/message.tz";
 import { Details } from "../../../../diagnostic/types/message.types.tz";
 import {
   BinaryExpr,
@@ -19,6 +21,7 @@ import {
   kDictIterating,
   kLengthName,
   kThisName,
+  kUnsupportedMark,
 } from "../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
@@ -51,7 +54,7 @@ partial class ExpressionTypes {
     }
 
     const name = expr.name;
-    const word = this.tupleText(expr.object);
+    const word = this.dictText(expr.object, dict);
     const first = this.text.of(object);
 
     if (name == kLengthName) {
@@ -144,7 +147,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const word = this.tupleText(target.object);
+    const word = this.dictText(target.object, dict);
 
     if (dict == DictKind.Set) {
       return this.setTargetCheck(target, word, module);
@@ -204,7 +207,7 @@ partial class ExpressionTypes {
 
     this.report(module, expr.loc, Code.DictDelete, {
       word: this.collectionWord(dict),
-      first: this.tupleText(target.object),
+      first: this.dictText(target.object, dict),
       other: this.entryPart(isMap),
     });
 
@@ -229,7 +232,7 @@ partial class ExpressionTypes {
 
     this.report(module, expr.loc, Code.DictIn, {
       word: this.collectionWord(dict),
-      first: this.tupleText(expr.rhs),
+      first: this.dictText(expr.rhs, dict),
       other: this.entryPart(isMap),
     });
 
@@ -264,7 +267,9 @@ partial class ExpressionTypes {
 
     const dict = this.collectionOf(type);
     if (dict == undefined) {
-      return;
+      this.objectArgumentCheck(arg, type, callee.name, module);
+
+      return this.listedFieldsCheck(arg, type, callee.name, module);
     }
 
     const isSetEntries = dict == DictKind.Set && callee.name == "entries";
@@ -273,9 +278,111 @@ partial class ExpressionTypes {
     this.report(module, arg.loc, Code.DictObjectEmpty, {
       word: callee.name,
       first: this.collectionWord(dict),
-      second: this.tupleText(arg),
+      second: this.dictText(arg, dict),
       other: method,
     });
+  }
+
+  private objectArgumentCheck(
+    arg: Expr,
+    type: Type,
+    word: string,
+    module: int,
+  ): void {
+    const base = this.definedType(type);
+    const isHolder =
+      base.kind == TypeKind.Object ||
+      base.kind == TypeKind.Dict ||
+      base.kind == TypeKind.Instance;
+    if (this.isOptional(type) && isHolder) {
+      this.report(module, arg.loc, Code.ObjectMaybeUndefined, kNoDetails);
+
+      return;
+    }
+    if (!this.isNeverObject(type)) {
+      return;
+    }
+
+    this.report(module, arg.loc, Code.ObjectNeedsObject, {
+      word,
+      first: this.text.of(type),
+    });
+  }
+
+  private listedFieldsCheck(
+    arg: Expr,
+    type: Type,
+    word: string,
+    module: int,
+  ): void {
+    const base = this.apparent(type);
+    const isValues = word == "values" || word == "entries";
+    if (isValues && this.hasMethodFields(type)) {
+      this.report(module, arg.loc, Code.ObjectListingMethods, { word });
+
+      return;
+    }
+    if (!isValues || base.kind != TypeKind.Object) {
+      return;
+    }
+    if (this.resolver.isLibraryShape(base)) {
+      return;
+    }
+
+    const first = this.text.of(base);
+    let element: Type | undefined = undefined;
+
+    for (const field of base.fields) {
+      const candidate = this.definedType(field.type);
+      const both = this.listedElement(element, candidate);
+      const problem = this.resolver.unionProblem(both);
+      if (problem != undefined) {
+        const full = messageText(problem.code, problem.details);
+        const mark = full.indexOf(kUnsupportedMark);
+        const other = full.slice(mark + kUnsupportedMark.length);
+
+        this.report(module, arg.loc, Code.ObjectValuesNoUnion, {
+          word,
+          first,
+          other,
+        });
+
+        return;
+      }
+
+      element = both;
+    }
+    if (element == undefined) {
+      this.report(module, arg.loc, Code.ObjectNoFields, { word, first });
+    }
+  }
+
+  private listedElement(element: Type | undefined, candidate: Type): Type {
+    if (element == undefined) {
+      return candidate;
+    }
+
+    return this.store.unionOf([element, candidate]);
+  }
+
+  private isNeverObject(type: Type): boolean {
+    const base = this.apparent(type);
+
+    switch (base.kind) {
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.Boolean:
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Array:
+      case TypeKind.Tuple:
+        return true;
+      case TypeKind.Instance:
+        return this.isBuiltinValue(base);
+      default:
+        return false;
+    }
   }
 
   private listingMethod(name: string, isSetEntries: boolean): string {
@@ -286,24 +393,36 @@ partial class ExpressionTypes {
     return name;
   }
 
-  private dictForInCheck(loop: ForOfStmt, iterable: Type, module: int): void {
-    const dict = this.collectionOf(iterable);
-    if (!loop.keys || dict == undefined) {
-      return;
+  private dictText(expr: Expr, dict: DictKind): string {
+    if (expr.kind == ExprKind.Name) {
+      return expr.name;
     }
 
-    const isMap = dict == DictKind.Map;
-    const word = this.tupleText(loop.iterable);
-    const code = this.forInCode(isMap);
+    const holder = this.memberHolder(expr);
+    if (holder != undefined) {
+      return holder;
+    }
 
-    this.report(module, loop.iterable.loc, code, { word });
+    switch (dict) {
+      case DictKind.Map:
+        return "m";
+      case DictKind.Set:
+        return "s";
+      default:
+        return "r";
+    }
   }
 
-  private forInCode(isMap: boolean): Code {
-    if (isMap) {
-      return Code.MapForIn;
+  private memberHolder(expr: Expr): string | undefined {
+    if (expr.kind != ExprKind.Member) {
+      return undefined;
     }
 
-    return Code.SetForIn;
+    const object = expr.object;
+    if (object.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    return `${object.name}.${expr.name}`;
   }
 }

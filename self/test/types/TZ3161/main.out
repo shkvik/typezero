@@ -1,0 +1,4 @@
+main.tz
+  1:6 type Small = { readonly get: () => int }
+  2:6 type Plain = { get: int }
+  5:10 read: (Small | Plain) => void

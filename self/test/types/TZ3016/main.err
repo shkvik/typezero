@@ -1,0 +1,3 @@
+main.tz:2:26: error TZ3016: 'new Map' takes [key, value] pairs, found 'int'
+const notPairs = new Map([1, 2]);
+                         ^

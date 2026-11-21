@@ -1,0 +1,3 @@
+main.tz:4:3: error TZ2873: enum member 'B' needs a value, since the member before it is not a number
+  B,
+  ^

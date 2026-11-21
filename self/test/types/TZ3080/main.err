@@ -1,0 +1,3 @@
+main.tz:3:26: error TZ3080: 'Object.keys' needs an object, found 'int[]'
+const keys = Object.keys(list);
+                         ^

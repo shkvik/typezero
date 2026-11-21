@@ -1,0 +1,6 @@
+main.tz:4:27: error TZ2938: an index or position must be an integer, found 'string'
+console.log(value.toFixed("2"), value.toFixed(2));
+                          ^
+main.tz:4:27: error TZ2944: the number of digits of 'toFixed' must be a whole number from 0 to 100, found 'string'
+console.log(value.toFixed("2"), value.toFixed(2));
+                          ^

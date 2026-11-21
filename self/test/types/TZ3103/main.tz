@@ -1,0 +1,12 @@
+// The values of orElse make one union.
+function lists(flag: boolean): Result<int[], string[]> {
+  if (flag) {
+    return err(["none"]);
+  }
+
+  return ok([1]);
+}
+
+const next = lists(true).orElse((errors) => ok(errors));
+
+console.log(next.isOk());

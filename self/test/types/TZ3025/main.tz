@@ -1,0 +1,5 @@
+// A Map or a Set adds nothing to a Record.
+const s = new Set<int>([1]);
+const fromSet: Record<string, int> = { ...s };
+
+console.log(fromSet);

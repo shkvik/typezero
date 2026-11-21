@@ -1,0 +1,9 @@
+main.tz:13:10: error TZ2977: 'Box' needs 1 type argument, e.g. 'Box<int>'
+let box: Box = { value: 1 };
+         ^
+main.tz:14:10: error TZ2977: 'Two' needs 2 type arguments, e.g. 'Two<int>'
+let two: Two = { a: 1, b: "a" };
+         ^
+main.tz:15:11: error TZ2977: 'Cell' needs 1 type argument, e.g. 'Cell<int>'
+let cell: Cell = new Cell<int>(1);
+          ^

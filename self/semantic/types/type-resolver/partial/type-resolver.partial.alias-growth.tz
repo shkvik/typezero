@@ -1,0 +1,108 @@
+import { TypeResolver } from "../type-resolver.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { TypeAliasDecl } from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../../program/ast/types/ast.types.types.tz";
+
+partial class TypeResolver {
+  private aliasGrowthCheck(module: int, decl: TypeAliasDecl): void {
+    if (decl.typeParams.length == 0 || this.record(module)?.library != false) {
+      return;
+    }
+
+    const refs = this.refsOf(decl.type);
+    const names = decl.typeParams.map((param) => param.name);
+    const isConditional = refs.some(
+      (ref) => ref.form.kind == TypeRefKind.Conditional,
+    );
+    if (isConditional) {
+      return;
+    }
+
+    const isGrowing = refs.some(
+      (ref) => ref.name == decl.name && !this.isSameArguments(ref, names),
+    );
+    if (!isGrowing) {
+      return;
+    }
+
+    this.report(module, decl.loc, Code.AliasEndless, { word: decl.name });
+  }
+
+  public namedRefs(root: TypeRef, name: string): TypeRef[] {
+    const refs = this.refsOf(root);
+
+    return refs.filter((ref) => ref.name == name);
+  }
+
+  public isGrowingUse(root: TypeRef, name: string, names: string[]): boolean {
+    const refs = this.refsOf(root);
+
+    return refs.some(
+      (ref) => ref.name == name && !this.isSameArguments(ref, names),
+    );
+  }
+
+  private isSameArguments(ref: TypeRef, names: string[]): boolean {
+    if (ref.args.length != names.length) {
+      return true;
+    }
+
+    return ref.args.every(
+      (arg, index) =>
+        arg.form.kind == TypeRefKind.Name && arg.name == names[index],
+    );
+  }
+
+  private refsOf(root: TypeRef): TypeRef[] {
+    const found: TypeRef[] = [root];
+
+    for (let index = 0; index < found.length; index++) {
+      const ref = found[index];
+      if (ref != undefined) {
+        this.addChildRefs(ref, found);
+      }
+    }
+
+    return found;
+  }
+
+  private addChildRefs(ref: TypeRef, found: TypeRef[]): void {
+    for (const arg of ref.args) {
+      found.push(arg);
+    }
+
+    const form = ref.form;
+
+    switch (form.kind) {
+      case TypeRefKind.Function: {
+        for (const param of form.params) {
+          found.push(param.type);
+        }
+
+        const result = form.result;
+        if (result != undefined) {
+          found.push(result);
+        }
+
+        return;
+      }
+      case TypeRefKind.Object:
+        for (const field of form.fields) {
+          found.push(field.type);
+        }
+
+        return;
+      case TypeRefKind.Tuple:
+        for (const element of form.elements) {
+          found.push(element.type);
+        }
+
+        return;
+      default:
+        return;
+    }
+  }
+}

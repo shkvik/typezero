@@ -1,0 +1,3 @@
+main.tz
+  2:7 date: Date
+  3:7 isEarly: boolean

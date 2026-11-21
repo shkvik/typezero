@@ -1,0 +1,3 @@
+main.tz:2:20: error TZ2955: Number() takes a number, a boolean, a string or a decimal, found 'int[]'
+console.log(Number([1]), Number(true), Number(2));
+                   ^

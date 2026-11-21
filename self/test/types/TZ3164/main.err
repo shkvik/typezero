@@ -1,0 +1,3 @@
+main.tz:3:18: error TZ3164: 'new' makes an object of a class, and this is a 'int'
+const made = new count();
+                 ^

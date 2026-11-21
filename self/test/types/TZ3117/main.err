@@ -1,0 +1,3 @@
+main.tz:4:18: error TZ3117: a key of a Json is a string or a number, found 'boolean'
+console.log(data[true]);
+                 ^

@@ -1,0 +1,6 @@
+main.tz:2:12: error TZ2976: generic type 'int' is not supported
+let whole: int<string> = 1;
+           ^
+main.tz:3:11: error TZ2976: generic type 'string' is not supported
+let text: string<int> = "a";
+          ^

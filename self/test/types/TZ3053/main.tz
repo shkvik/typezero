@@ -1,0 +1,5 @@
+// No month has more than 31 days.
+const date = new Date();
+
+date.setDate(32);
+console.log(date.getDate());

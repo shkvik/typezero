@@ -1,0 +1,3 @@
+main.tz:3:21: error TZ2934: 'as' is not supported; convert the double with 'decimal(x)'
+const exact = ratio as decimal;
+                    ^

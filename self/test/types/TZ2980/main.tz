@@ -1,0 +1,13 @@
+// A plain class takes no type arguments.
+class Point {
+  public x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+let point: Point<int> = new Point(1);
+let other = new Point<int>(2);
+
+console.log(point, other);

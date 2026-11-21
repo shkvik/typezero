@@ -1,4 +1,6 @@
 import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
   AssignExpr,
   BinaryExpr,
@@ -6,6 +8,7 @@ import {
   Expr,
   CallArgument,
   ExprKind,
+  IndexExpr,
   NameExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
@@ -502,5 +505,106 @@ partial class ExpressionTypes {
     }
 
     return undefined;
+  }
+
+  public boundTerms(key: string): string[] {
+    const edge = this.edgeOf(key);
+    if (edge == undefined) {
+      return [];
+    }
+
+    return [edge.upper, edge.lower];
+  }
+
+  private movedBound(key: string, moves: Map<string, string>): string {
+    const edge = this.edgeOf(key);
+    if (edge == undefined) {
+      return "";
+    }
+
+    const upper = this.movedTerm(edge.upper, moves);
+    const lower = this.movedTerm(edge.lower, moves);
+    if (upper == "" || lower == "") {
+      return "";
+    }
+
+    return this.boundKey(upper, lower, edge.room);
+  }
+
+  private movedTerm(term: string, moves: Map<string, string>): string {
+    if (term == kZeroTerm) {
+      return term;
+    }
+
+    return moves.get(term) ?? "";
+  }
+
+  private forgetAllLengths(): void {
+    const facts = new Map<string, Type>();
+
+    for (const [known, type] of this.facts) {
+      const edge = this.edgeOf(known);
+      const isLength =
+        edge != undefined &&
+        (edge.upper.startsWith(kLengthTerm) ||
+          edge.lower.startsWith(kLengthTerm));
+      if (!isLength) {
+        facts.set(known, type);
+      }
+    }
+
+    this.facts = facts;
+  }
+
+  private isProvenFilled(object: Expr, module: int): boolean {
+    const key = this.pathKey(object, module);
+    if (key == undefined) {
+      return false;
+    }
+
+    return this.canProve(kZeroTerm, kLengthTerm + key, 1);
+  }
+
+  private writeIndexCheck(
+    target: IndexExpr,
+    isCompound: boolean,
+    module: int,
+  ): void {
+    const at = this.linearOf(target.index, module);
+    const key = this.pathKey(target.object, module);
+    const code = this.writeCode(isCompound);
+    if (at == undefined || key == undefined) {
+      this.report(module, target.loc, code, kNoDetails);
+
+      return;
+    }
+
+    const length = kLengthTerm + key;
+    const isLength = at.term.startsWith(kLengthTerm) && at.offset >= 0;
+    const isNatural =
+      isLength || this.canProve(kZeroTerm, at.term, -at.offset);
+    const room = this.writeRoom(isCompound, at.offset);
+    const isFirst = at.term == kZeroTerm && at.offset == 0 && !isCompound;
+    const isInside =
+      isFirst || (isNatural && this.canProve(at.term, length, room));
+    if (!isInside) {
+      this.report(module, target.loc, code, kNoDetails);
+    }
+  }
+
+  private writeCode(isCompound: boolean): Code {
+    if (isCompound) {
+      return Code.IndexWriteRange;
+    }
+
+    return Code.IndexWriteHoles;
+  }
+
+  private writeRoom(isCompound: boolean, offset: decimal): decimal {
+    if (isCompound) {
+      return offset + 1;
+    }
+
+    return offset;
   }
 }

@@ -1,0 +1,3 @@
+main.tz:4:27: error TZ3092: 'Object.values' puts the values of all the fields in one array, of the union of their types, and the fields of '{ a: int[]; b: string[] }' have types that no union holds: 'int[]' and 'string[]' cannot be told apart when the program runs: both are arrays; use one array type, e.g. '(int | string)[]'; read the fields by name
+console.log(Object.values(lists));
+                          ^

@@ -1,0 +1,9 @@
+// '&&=' needs a simple target.
+const flags = [true];
+
+function at(): int {
+  return 0;
+}
+
+flags[at()] &&= false;
+console.log(flags);

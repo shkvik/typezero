@@ -49,7 +49,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const word = this.mismatchWord(expr, code, source, target, intervals);
+    const word = this.mismatchWord(expr, code, given, wanted, intervals);
     const other = this.mismatchOther(code, holds, only, target);
 
     this.report(module, expr.loc, code, {
@@ -75,8 +75,21 @@ partial class ExpressionTypes {
       return Code.ValueOutsideRange;
     }
 
-    const isPlainObject =
+    const plain = this.definedType(given);
+    const aim = this.definedType(wanted);
+    if (aim.kind == TypeKind.Never) {
+      return Code.NeverNotAssignable;
+    }
+    if (plain.kind == TypeKind.Unknown) {
+      return Code.UnknownNotAssignable;
+    }
+    if (plain.kind == TypeKind.AnyObject) {
+      return Code.ObjectNotAssignable;
+    }
+
+    const isShape =
       source.kind == TypeKind.Object || source.kind == TypeKind.Tuple;
+    const isPlainObject = isShape && !this.hasMethodFields(source);
     if (isPlainObject && target.kind == TypeKind.Instance) {
       return Code.LiteralNotInstance;
     }
@@ -233,11 +246,8 @@ partial class ExpressionTypes {
 
   private isUndecided(expr: Expr, wanted: Type): boolean {
     const goal = this.definedType(wanted);
-    if (goal.kind == TypeKind.Operation) {
-      return true;
-    }
 
-    return goal.kind == TypeKind.Never && expr.kind == ExprKind.Name;
+    return goal.kind == TypeKind.Operation;
   }
 
   private isWidening(source: Type, target: Type): boolean {
@@ -359,6 +369,9 @@ partial class ExpressionTypes {
       case Code.ClassNotImplemented:
       case Code.OptionalNotAssignable:
       case Code.FunctionsMismatch:
+      case Code.UnknownNotAssignable:
+      case Code.ObjectNotAssignable:
+      case Code.NeverNotAssignable:
         return true;
       default:
         return false;
@@ -378,11 +391,17 @@ partial class ExpressionTypes {
   private mismatchWord(
     expr: Expr,
     code: Code,
-    source: Type,
-    target: Type,
+    given: Type,
+    wanted: Type,
     intervals: Interval[],
   ): string {
+    const source = this.innerObject(given, wanted);
+    const target = this.innerObject(wanted, given);
+
     switch (code) {
+      case Code.UnknownNotAssignable:
+      case Code.ObjectNotAssignable:
+        return this.unknownCheckText(expr, given, wanted);
       case Code.LiteralNotInstance:
       case Code.ClassNotImplemented:
         return this.text.of(target);

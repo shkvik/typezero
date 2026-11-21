@@ -1,0 +1,6 @@
+// A Json is checked, not cast.
+function read(value: Json): double {
+  return value as double;
+}
+
+console.log(read);

@@ -1,0 +1,3 @@
+main.tz:18:13: error TZ3011: 'm' has several variants, m(a: int, b: double) and m(a: double, b: int): say which one with the type of the place it goes, e.g. 'const f: (a: double, b: int) => int = s.m'
+const f = s.m;
+            ^

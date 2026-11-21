@@ -1,0 +1,3 @@
+main.tz:2:36: error TZ3027: the keys of an object are strings, and JavaScript would turn 'int' keys into them; convert them first, or make a Map: 'new Map(...)'
+const entries = Object.fromEntries([[1, "a"]]);
+                                   ^

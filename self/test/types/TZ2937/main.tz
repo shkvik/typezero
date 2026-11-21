@@ -1,0 +1,5 @@
+// Some types never become others.
+const text = "7";
+const number = text as int;
+
+console.log(number);

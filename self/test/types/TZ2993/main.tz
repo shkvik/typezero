@@ -1,0 +1,4 @@
+// A WeakRef names the type of its object.
+let held: WeakRef | undefined = undefined;
+
+console.log(held);

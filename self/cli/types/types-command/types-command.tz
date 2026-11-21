@@ -58,6 +58,8 @@ export class TypesCommand {
     const types = new TypeResolver(this.store, program, resolved);
     const values = new ExpressionTypes(this.store, types, program, resolved);
 
+    const steps: DeclarationTypes[] = [];
+
     for (const scopes of resolved) {
       const module = scopes.module;
       if (module.source.isLibrary) {
@@ -65,6 +67,12 @@ export class TypesCommand {
       }
 
       const declarations = new DeclarationTypes(types, values, module);
+
+      declarations.resolveAliases();
+      steps.push(declarations);
+    }
+
+    for (const declarations of steps) {
       const typed = declarations.run();
 
       this.printTypes(typed);

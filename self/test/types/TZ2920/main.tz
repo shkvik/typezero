@@ -1,0 +1,6 @@
+// '&&=' cannot test an unknown value.
+let value: unknown = 0;
+
+value &&= 1;
+
+console.log(value);

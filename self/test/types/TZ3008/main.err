@@ -1,0 +1,3 @@
+main.tz:18:3: error TZ3008: no variant of 'm' fits these arguments; m(a: int, b: double) takes 'int' as argument 1, which is 'string'; m(a: double, b: int) takes 'double' as argument 1, which is 'string'
+s.m("x", 1);
+  ^

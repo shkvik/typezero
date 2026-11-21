@@ -1,0 +1,17 @@
+// next() gives a value or what the generator returns, which a union must hold.
+function* withReturn(): Generator<int[], string[]> {
+  yield [1];
+
+  return ["done"];
+}
+
+function* plain(): Generator<int, string> {
+  yield 1;
+
+  return "done";
+}
+
+const r = withReturn().next();
+const p = plain().next();
+
+console.log(r, p);

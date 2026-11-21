@@ -1,0 +1,3 @@
+main.tz:4:1: error TZ2916: '&&=' cannot test a number: 0 would count as false; compare it: 'if (count != 0) count = 2'
+count &&= 2;
+^

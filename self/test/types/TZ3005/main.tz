@@ -1,0 +1,20 @@
+// Two variants cannot fit one call equally well.
+class Shapes {
+  public f(x?: int): int {
+    return 1;
+  }
+
+  public f(): int {
+    return 2;
+  }
+
+  public g(a: int, b: int = 0): int {
+    return 1;
+  }
+
+  public g(a: int): int {
+    return 2;
+  }
+}
+
+console.log(Shapes);

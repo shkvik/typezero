@@ -1,0 +1,6 @@
+// A key of a Record may be missing.
+const counts: Record<string, int> = {};
+
+counts.a += 1;
+counts["b"]++;
+counts.c = 1;

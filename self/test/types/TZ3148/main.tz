@@ -1,0 +1,9 @@
+interface Shape {
+  name: string;
+  area(): double;
+}
+
+// A method has the type of the method it fills.
+const shape: Shape = { name: "b", area(scale: double) { return scale; } };
+
+console.log(shape.name);

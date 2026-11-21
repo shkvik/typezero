@@ -1,0 +1,3 @@
+main.tz:4:13: error TZ2897: an object cannot be indexed until 'instanceof' shows its class, e.g. 'if (o instanceof C) ...'
+console.log(o[0]);
+            ^

@@ -1,0 +1,4 @@
+main.tz
+  2:10 write: (int[], int) => void
+  13:10 last: (int[]) => int
+  15:11 top: int

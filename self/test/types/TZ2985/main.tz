@@ -1,0 +1,10 @@
+// '||=' cannot test a value of type T that may be a number.
+function fill<T>(x: T, d: T): T {
+  let value = x;
+
+  value ||= d;
+
+  return value;
+}
+
+console.log(fill(1, 2));

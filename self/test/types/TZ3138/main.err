@@ -1,0 +1,3 @@
+main.tz:4:1: error TZ3138: 'delete' would leave a hole in the array, and arrays have none; remove the element with 'list.splice(0, 1)', or replace it: 'list[0] = ...'
+delete list[0];
+^

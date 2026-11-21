@@ -1,0 +1,4 @@
+// Only arrays can be destructured into elements.
+const [first, second] = 5;
+
+console.log(first, second);

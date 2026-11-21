@@ -95,7 +95,7 @@ partial class TypeResolver {
     }
 
     const params = declared.typeParams;
-    const written = this.written(ref, name, params, context);
+    const written = this.written(ref, name, params, context, true);
     const fits =
       written != undefined &&
       this.argumentsFit(ref, module, name, params, written, context);

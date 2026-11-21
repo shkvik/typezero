@@ -1,0 +1,4 @@
+// Result has only combine and combineWithAllErrors.
+const all = Result.join([ok(1)]);
+
+console.log(all);

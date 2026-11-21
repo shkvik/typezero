@@ -1,0 +1,6 @@
+main.tz:7:10: error TZ3003: duplicate variant k(a: int): variants must differ in their parameters
+  public k(a: int): int {
+         ^
+main.tz:15:10: error TZ3003: duplicate variant constructor(b: int): variants must differ in their parameters
+  public constructor(b: int) {}
+         ^

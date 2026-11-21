@@ -1,0 +1,4 @@
+// A date text outside the dates JavaScript has.
+const date = new Date("+275761-01-01T00:00Z");
+
+console.log(date.getTime());

@@ -1,0 +1,6 @@
+main.tz:4:30: error TZ2946: 'Math.floor' rounds a double, and this is 'int', which has no fraction: '/' of integers already drops it
+console.log(Math.floor(count / 2), Math.round(count), Math.floor(2.5));
+                             ^
+main.tz:4:47: error TZ2946: 'Math.round' rounds a double, and this is 'int', which has no fraction: '/' of integers already drops it
+console.log(Math.floor(count / 2), Math.round(count), Math.floor(2.5));
+                                              ^

@@ -1,0 +1,3 @@
+main.tz
+  10:10 total: (Iterable<int>) => int
+  11:7 sum: int

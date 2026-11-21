@@ -1,5 +1,6 @@
 import { ExpressionTypes } from "../expression-types.tz";
 import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import { NameExpr } from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
   Stmt,
@@ -20,6 +21,14 @@ partial class ExpressionTypes {
     }
     if (this.isThisName(expr, module)) {
       return this.thisTyped(expr, module);
+    }
+    if (this.legacyValueCheck(expr, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.isDecimalName(expr, module)) {
+      this.report(module, expr.loc, Code.DecimalNameValue, kNoDetails);
+
+      return this.store.plain(TypeKind.Error);
     }
     if (this.builtinValueCheck(expr, wanted, module)) {
       return this.store.plain(TypeKind.Error);
@@ -48,8 +57,13 @@ partial class ExpressionTypes {
         return this.variableTyped(target, wanted);
       case SymbolKind.Parameter:
         return this.parameterTyped(target);
-      case SymbolKind.Function:
-        return this.usedFunction(target.module, target.loc);
+      case SymbolKind.Function: {
+        const value = this.genericValue(expr, target, wanted, module);
+
+        return value ?? this.usedFunction(target.module, target.loc);
+      }
+      case SymbolKind.Class:
+        return this.classValue(target);
       case SymbolKind.Enum:
         if (this.isRecordWanted(wanted)) {
           return this.store.plain(TypeKind.Error);
@@ -150,7 +164,13 @@ partial class ExpressionTypes {
     name: string,
     module: int,
   ): ValueTarget | undefined {
-    const use = this.record(module)?.uses.get(loc);
+    const record = this.record(module);
+    const hidden = record?.hidden.get(name);
+    if (hidden != undefined) {
+      return { module, kind: hidden.kind, loc: hidden.loc };
+    }
+
+    const use = record?.uses.get(loc);
     const symbol = use?.symbol;
     if (use != undefined && symbol == undefined) {
       return this.globalValue(name);

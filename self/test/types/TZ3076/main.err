@@ -1,0 +1,3 @@
+main.tz:3:21: error TZ3076: a 'string' is never a 'Date', so 'instanceof Date' is always false
+const isDate = text instanceof Date;
+                    ^

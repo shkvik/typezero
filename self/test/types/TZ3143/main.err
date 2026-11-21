@@ -1,0 +1,3 @@
+main.tz:2:20: error TZ3143: String.raw can only tag a template, e.g. String.raw`C:\dir`
+console.log(String.raw("x"));
+                   ^

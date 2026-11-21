@@ -1,0 +1,4 @@
+// A double becomes a decimal through decimal().
+const d = 2.5;
+
+console.log(d.toDecimal(), decimal(d));

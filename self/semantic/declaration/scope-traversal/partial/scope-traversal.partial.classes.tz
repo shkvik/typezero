@@ -3,6 +3,7 @@ import { Code } from "../../../../diagnostic/code.tz";
 import {
   ClassDecl,
   Decorator,
+  FieldKind,
   MethodKind,
 } from "../../../../program/ast/types/ast.types.classes.tz";
 import {
@@ -20,6 +21,10 @@ import {
   NameSymbol,
   SymbolKind,
 } from "../../../../program/scopes/types/scopes.types.tz";
+import {
+  CapturePlace,
+  ClassFrame,
+} from "../types/scope-traversal.types.tz";
 
 partial class ScopeTraversal {
   private traverseFunction(fn: FunctionDecl): void {
@@ -27,6 +32,7 @@ partial class ScopeTraversal {
 
     this.scopes.open();
     this.scopes.enterFunction();
+    this.genericFunctions += this.genericMark(fn.typeParams.length);
 
     this.declareOwnName(fn);
     this.declareTypeParams(fn.typeParams);
@@ -45,13 +51,27 @@ partial class ScopeTraversal {
     this.traverseOptionalType(fn.returnType);
 
     const body = fn.body;
+    const targets = this.jumpTargets;
+
+    this.jumpTargets = [];
+
     if (body != undefined) {
       this.declareStatements(body.body);
       this.traverseStatements(body.body);
     }
 
+    this.jumpTargets = targets;
+    this.genericFunctions -= this.genericMark(fn.typeParams.length);
     this.scopes.leaveFunction();
     this.scopes.close();
+  }
+
+  private genericMark(count: int): int {
+    if (count > 0) {
+      return 1;
+    }
+
+    return 0;
   }
 
   private declareOwnName(fn: FunctionDecl): void {
@@ -85,8 +105,10 @@ partial class ScopeTraversal {
     }
   }
 
-  private traverseClass(decl: ClassDecl): void {
+  private traverseClass(decl: ClassDecl, isExpression: boolean): void {
     this.traverseDecorators(decl.decorators);
+
+    const frame = this.classFrameOf(isExpression);
 
     this.scopes.open();
     this.scopes.enterFunction();
@@ -102,11 +124,16 @@ partial class ScopeTraversal {
     this.traverseTypes(decl.baseArgs);
     this.traverseTypes(decl.interfaces);
 
+    this.classFrames.push(frame);
+
     for (const field of decl.fields) {
       this.traverseDecorators(field.decorators);
       this.traverseOptionalType(field.type);
+      frame.place = this.fieldPlace(frame, field.form);
       this.traverseOptionalExpr(field.init);
     }
+
+    frame.place = this.bodyPlace(frame);
 
     for (const made of decl.constructors) {
       this.traverseFunction(made);
@@ -126,8 +153,38 @@ partial class ScopeTraversal {
       }
     }
 
+    this.classFrames.pop();
     this.scopes.leaveFunction();
     this.scopes.close();
+  }
+
+  private classFrameOf(isExpression: boolean): ClassFrame {
+    const outer = this.scopes.currentDepth();
+    const isChecked = isExpression && outer > 0 && this.genericFunctions == 0;
+    if (!isChecked) {
+      return { outer: 0, place: CapturePlace.None };
+    }
+
+    return { outer, place: CapturePlace.None };
+  }
+
+  private fieldPlace(frame: ClassFrame, form: FieldKind): CapturePlace {
+    if (frame.outer == 0) {
+      return CapturePlace.None;
+    }
+    if (form == FieldKind.Static) {
+      return CapturePlace.StaticInit;
+    }
+
+    return CapturePlace.Later;
+  }
+
+  private bodyPlace(frame: ClassFrame): CapturePlace {
+    if (frame.outer == 0) {
+      return CapturePlace.None;
+    }
+
+    return CapturePlace.Later;
   }
 
   private ownMethods(decl: ClassDecl): FunctionDecl[] {

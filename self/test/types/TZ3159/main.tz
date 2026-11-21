@@ -1,0 +1,13 @@
+interface Adder {
+  add(value: double): string;
+  add(text: string): string;
+}
+
+// A class has a variant for each signature.
+class Half implements Adder {
+  add(value: double) {
+    return "";
+  }
+}
+
+console.log(new Half());

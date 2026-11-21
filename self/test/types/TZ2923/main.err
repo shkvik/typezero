@@ -1,0 +1,3 @@
+main.tz:4:1: error TZ2923: a function is always truthy, so '&&=' always assigns; use '='
+run &&= (): int => 2;
+^

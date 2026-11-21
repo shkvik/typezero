@@ -1,0 +1,3 @@
+main.tz:2:19: error TZ3037: 'Array.of' is not supported; of Array only 'Array.from' and 'new Array' are
+const arr = Array.of(1, 2);
+                  ^

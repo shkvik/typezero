@@ -1,0 +1,3 @@
+main.tz:5:24: error TZ3017: 'union' needs a 'Set<int>' or a 'Map<int, ...>', found 'int[]'; make a Set first, e.g. 'new Set(xs)'
+console.log(seen.union([1]), seen.union(other));
+                       ^

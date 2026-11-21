@@ -1,0 +1,6 @@
+main.tz:3:4: error TZ3038: cannot prove that the index is within the array; check it first, e.g. 'if (i < a.length)'
+  a[i] += 1;
+   ^
+main.tz:4:4: error TZ3038: cannot prove that the index is within the array; check it first, e.g. 'if (i < a.length)'
+  a[i]++;
+   ^

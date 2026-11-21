@@ -1,26 +1,8 @@
-let counts: Map<int> = new Map<int, int>();
-let outcome: Result<int> = ok(1);
-let pending: Promise = Promise.resolve(1);
-let list: Array = [];
-let seen: Set<int, int> = new Set<int>();
-let steps: Generator<int, int, int, int> = [1].values();
+// A type function and an async generator are written with their type arguments.
+type Loud = Uppercase;
 
-console.log(counts, outcome, pending, list, seen, steps);
-
-type Box<T> = { value: T };
-type Two<A, B = string> = { a: A; b: B };
-
-class Cell<T> {
-  public value: T;
-
-  public constructor(value: T) {
-    this.value = value;
-  }
+async function* ticks(): AsyncGenerator {
+  yield 1;
 }
 
-let box: Box = { value: 1 };
-let wide: Box<int, int> = { value: 1 };
-let two: Two = { a: 1, b: "a" };
-let cell: Cell = new Cell<int>(1);
-
-console.log(box, wide, two, cell);
+console.log(ticks);

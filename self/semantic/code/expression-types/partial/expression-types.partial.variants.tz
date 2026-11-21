@@ -1,6 +1,8 @@
 import { ExpressionTypes } from "../expression-types.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import {
+  BinaryExpr,
+  CallExpr,
   Expr,
   ExprKind,
   MemberExpr,
@@ -348,6 +350,119 @@ partial class ExpressionTypes {
     }
 
     return undefined;
+  }
+
+  private lackingVariantCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    union: UnionType,
+    module: int,
+  ): void {
+    const lacking = union.parts.find((part) =>
+      this.isLackingMethod(part, member.name),
+    );
+    if (lacking == undefined) {
+      return;
+    }
+
+    this.looseArguments(expr.args, module);
+    this.report(module, member.loc, Code.VariantLacksMethod, {
+      word: this.text.of(union),
+      first: this.text.of(lacking),
+      other: member.name,
+    });
+  }
+
+  private isLackingMethod(part: Type, name: string): boolean {
+    if (part.kind != TypeKind.Instance || this.isLibraryModule(part.module)) {
+      return false;
+    }
+
+    return this.classMember(part, name).entry == undefined;
+  }
+
+  private unionInCheck(
+    expr: BinaryExpr,
+    name: string,
+    union: UnionType,
+    module: int,
+  ): void {
+    const parts = union.parts;
+    const isObjects = parts.every(
+      (part) =>
+        part.kind == TypeKind.Object && !this.resolver.isLibraryShape(part),
+    );
+    if (!isObjects) {
+      return;
+    }
+
+    const having = parts.filter((part) => this.hasFieldNamed(part, name));
+    const first = this.text.of(union);
+    if (having.length == parts.length) {
+      this.report(module, expr.loc, Code.InUnionTrue, { word: name, first });
+    }
+    if (having.length == 0) {
+      this.report(module, expr.loc, Code.InUnionFalse, { word: name, first });
+    }
+  }
+
+  private hasFieldNamed(part: Type, name: string): boolean {
+    if (part.kind != TypeKind.Object) {
+      return false;
+    }
+
+    return part.fields.some((field) => field.name == name);
+  }
+
+  private unionTargetCheck(target: Expr, module: int): boolean {
+    if (target.kind != ExprKind.Member) {
+      return false;
+    }
+
+    this.quiet += 1;
+
+    const object = this.typed(target.object, undefined, module);
+
+    this.quiet -= 1;
+
+    if (object.kind != TypeKind.Union || this.isOptional(object)) {
+      return false;
+    }
+
+    const types: Type[] = [];
+
+    for (const part of object.parts) {
+      const field = this.ownFieldType(part, target.name);
+      if (field == undefined) {
+        return false;
+      }
+      if (!types.includes(field)) {
+        types.push(field);
+      }
+    }
+
+    const first = types[0];
+    const second = types[1];
+    if (first == undefined || second == undefined) {
+      return false;
+    }
+
+    this.report(module, target.loc, Code.UnionFieldsDiffer, {
+      word: this.text.of(object),
+      other: target.name,
+      first: this.text.of(first),
+      second: this.text.of(second),
+    });
+
+    return true;
+  }
+
+  private ownFieldType(part: Type, name: string): Type | undefined {
+    if (part.kind != TypeKind.Object || this.resolver.isLibraryShape(part)) {
+      return undefined;
+    }
+
+    return part.fields.find((field) => field.name == name)?.type;
   }
 
   private isCommonBase(

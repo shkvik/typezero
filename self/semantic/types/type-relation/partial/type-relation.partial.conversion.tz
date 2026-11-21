@@ -1,5 +1,6 @@
 import { TypeRelation } from "../type-relation.tz";
 import {
+  ClassType,
   DictKind,
   LiteralKind,
   ObjectField,
@@ -58,6 +59,7 @@ partial class TypeRelation {
       case TypeKind.Iterator:
       case TypeKind.Dict:
       case TypeKind.Promise:
+      case TypeKind.Class:
         return true;
       case TypeKind.Union:
         return from.parts.every((part) => this.isObjectValue(part));
@@ -200,7 +202,15 @@ partial class TypeRelation {
     if (from.kind == TypeKind.Instance) {
       return this.descends(from, to);
     }
+    if (from.kind == TypeKind.Class && to.kind == TypeKind.Class) {
+      return this.classConverts(from, to);
+    }
     if (from.kind == TypeKind.Object && to.kind == TypeKind.Object) {
+      const isClassLike = from.fields.some((field) => field.method ?? false);
+      if (isClassLike) {
+        return this.descends(from, to);
+      }
+
       return this.descends(from, to) || this.sameFields(from.fields, to.fields);
     }
     if (from.kind == TypeKind.Tuple && to.kind == TypeKind.Tuple) {
@@ -221,6 +231,17 @@ partial class TypeRelation {
     }
 
     return false;
+  }
+
+  private classConverts(from: ClassType, to: ClassType): boolean {
+    if (to.exact) {
+      return false;
+    }
+    if (to.instance.kind == TypeKind.AnyObject) {
+      return true;
+    }
+
+    return this.converts(from.instance, to.instance);
   }
 
   private descends(from: Type, to: Type): boolean {

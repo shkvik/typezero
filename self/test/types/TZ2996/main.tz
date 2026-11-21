@@ -1,0 +1,6 @@
+// A generic method cannot be abstract.
+abstract class Shape {
+  public abstract area<T>(x: T): T;
+}
+
+console.log(Shape);

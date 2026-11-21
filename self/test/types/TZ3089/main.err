@@ -1,0 +1,3 @@
+main.tz:4:36: error TZ3089: the values of 'Math.max' must have one type; found 'int' and 'double'
+const most = Math.max(...whole, ...parts);
+                                   ^

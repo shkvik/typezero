@@ -1,0 +1,3 @@
+main.tz:3:29: error TZ3029: a constructor cannot take an 'Iterable<int>' yet: it would make a copy of the constructor for each kind of iterable; take an array, e.g. 'int[]', and pass '[...xs]'
+  public constructor(items: Iterable<int>) {
+                            ^

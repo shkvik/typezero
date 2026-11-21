@@ -1,0 +1,14 @@
+// A field written through a union takes one type in every member.
+type A = { kind: "a"; v: int };
+type B = { kind: "b"; v: string };
+type C = { kind: "c"; v: int };
+
+function setV(x: A | B): void {
+  x.v = 1;
+}
+
+function setW(x: A | C): void {
+  x.v = 1;
+}
+
+console.log(setV, setW);

@@ -1,0 +1,8 @@
+// An unknown value is not indexed until a check shows what it holds.
+const u: unknown = [1, 2];
+
+console.log(u[0]);
+
+if (Array.isArray(u)) {
+  console.log(u[0]);
+}

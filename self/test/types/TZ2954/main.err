@@ -1,0 +1,3 @@
+main.tz:10:20: error TZ2954: Number() of a value that may be undefined would be NaN, and tz has no NaN; check it first or give a default with '??'
+console.log(Number(find(true)));
+                   ^

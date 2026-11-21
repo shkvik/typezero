@@ -1,0 +1,4 @@
+// A label is not repeated around a statement.
+twice: twice: for (;;) {
+  break;
+}

@@ -1,0 +1,8 @@
+// An enum member is declared once.
+enum Color {
+  Red,
+  Green,
+  Red,
+}
+
+const green = Color.Green;

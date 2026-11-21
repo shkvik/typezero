@@ -1,0 +1,9 @@
+type Small = { get(): int };
+type Plain = { get: int };
+
+// Each member of a union has the method that is called.
+function read(value: Small | Plain): void {
+  console.log(value.get());
+}
+
+console.log(read);

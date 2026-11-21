@@ -28,6 +28,7 @@ import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import { kNoPlace } from "../const/expression-types.const.tz";
 import {
   DeclaredVariable,
+  HiddenName,
   Destination,
   ParamSlot,
   ValueRecord,
@@ -49,6 +50,7 @@ partial class ExpressionTypes {
     const uses = new Map<int, NameUse>();
     const record: ValueRecord = {
       uses,
+      hidden: new Map<string, HiddenName>(),
       variables: new Map<int, DeclaredVariable>(),
       functions: new Map<int, FunctionDecl>(),
       params: new Map<int, ParamSlot>(),
@@ -134,6 +136,12 @@ partial class ExpressionTypes {
     const written = decl.typeAnn;
     const init = decl.init;
     const loop = variable.loop;
+    const isPattern =
+      decl.form.kind != BindingKind.Plain &&
+      decl.origin == NameOrigin.Generated;
+    if (isPattern) {
+      return this.patternSource(door, variable, module);
+    }
     if (loop != undefined) {
       door.type = this.loopItem(loop, module);
 
@@ -236,6 +244,11 @@ partial class ExpressionTypes {
     given: Type,
     module: int,
   ): void {
+    if (variable.isConst && given.kind == TypeKind.Decimal) {
+      door.constant = this.plainConstant(init, module);
+
+      return;
+    }
     if (variable.isConst) {
       door.constant = this.rawConstant(init, given, module);
     }

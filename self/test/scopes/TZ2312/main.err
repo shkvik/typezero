@@ -1,9 +1,9 @@
-main.tz:1:13: error TZ2312: 'eval' is not supported: a compiled program cannot run code from a string; write the code itself
+main.tz:1:13: error TZ2312: 'eval' is not supported: a compiled program cannot run code from a string
 const sum = eval("1 + 2");
             ^
-main.tz:2:20: error TZ2312: 'Function' is not supported: a compiled program cannot run code from a string; write the code itself
+main.tz:2:20: error TZ2312: 'new Function' is not supported: a compiled program cannot run code from a string; write the function itself, e.g. '(a: int) => a'
 const double = new Function("a", "return a * 2");
                    ^
-main.tz:3:16: error TZ2312: 'Function' is not supported: a compiled program cannot run code from a string; write the code itself
+main.tz:3:16: error TZ2312: 'Function' is not supported: a compiled program cannot run code from a string; write the function itself, e.g. '(a: int) => a'
 const triple = Function("a", "return a * 3");
                ^

@@ -1,0 +1,15 @@
+// Object.keys of an object that may be undefined.
+type Point = { x: int; y: int };
+
+function find(flag: boolean): Point | undefined {
+  if (flag) {
+    return { x: 1, y: 2 };
+  }
+
+  return undefined;
+}
+
+const point = find(true);
+const keys = Object.keys(point);
+
+console.log(keys);

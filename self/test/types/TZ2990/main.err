@@ -1,0 +1,3 @@
+main.tz:2:6: error TZ2990: type alias 'Endless' refers to itself with other type arguments, so it never ends
+type Endless<T> = { next?: Endless<T[]> };
+     ^

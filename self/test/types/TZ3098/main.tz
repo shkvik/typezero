@@ -1,0 +1,13 @@
+// unwrapOr gives one type for an Ok and otherwise.
+function lists(flag: boolean): Result<int[], string> {
+  if (flag) {
+    return err("none");
+  }
+
+  return ok([1]);
+}
+
+const fallback = ["none"];
+const values = lists(true).unwrapOr(fallback);
+
+console.log(values);

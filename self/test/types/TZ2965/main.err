@@ -1,0 +1,3 @@
+main.tz:8:28: error TZ2965: 'Result.combine' needs Results that hold values, found 'Result<void, string>'; check them one by one, e.g. with 'every(r => r.isOk())'
+const all = Result.combine([save("a"), save("b")]);
+                           ^

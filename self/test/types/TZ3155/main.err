@@ -1,0 +1,3 @@
+main.tz:7:22: error TZ3155: an object literal cannot be of type 'Adder': its method 'add' has several signatures, and only a class implements those, each with a variant of its own
+const adder: Adder = { add: (value: double) => "" };
+                     ^

@@ -1,0 +1,5 @@
+// A date minus a number is milliseconds, not a date.
+const date = new Date();
+const earlier = date - 1;
+
+console.log(earlier);

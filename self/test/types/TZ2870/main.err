@@ -1,0 +1,3 @@
+main.tz:2:6: error TZ2870: the members of enum 'First' depend on themselves
+enum First {
+     ^

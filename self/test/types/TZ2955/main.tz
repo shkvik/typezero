@@ -1,0 +1,2 @@
+// Number() takes numbers, booleans, strings and decimals.
+console.log(Number([1]), Number(true), Number(2));

@@ -1,0 +1,5 @@
+// delete would leave a hole in an array.
+const list = [1, 2, 3];
+
+delete list[0];
+console.log(list);

@@ -1,0 +1,5 @@
+// Only objects and Records are spread into a Record.
+const list = [1, 2];
+const fromList: Record<string, int> = { ...list };
+
+console.log(fromList);

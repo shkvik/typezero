@@ -1,0 +1,4 @@
+// ok takes two type arguments.
+const made = ok<int>(1);
+
+console.log(made.isOk());

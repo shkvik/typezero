@@ -1,0 +1,4 @@
+main.tz
+  2:10 find: (boolean) => int | undefined
+  10:7 maybe: int | undefined
+  11:7 sure: int

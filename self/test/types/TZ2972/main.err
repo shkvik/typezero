@@ -1,0 +1,3 @@
+main.tz:2:11: error TZ2972: 'Set' needs the type of its elements, e.g. 'Set<int>'
+let seen: Set<int, int> = new Set<int>();
+          ^

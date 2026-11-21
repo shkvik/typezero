@@ -1,0 +1,3 @@
+main.tz:14:19: error TZ3083: the object may be undefined; check it before walking its keys
+for (const key in point) {
+                  ^

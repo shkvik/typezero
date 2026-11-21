@@ -1,0 +1,18 @@
+// A number literal fitting several variants chooses none.
+class Shapes {
+  public m(a: int, b: double): int {
+    return 1;
+  }
+
+  public m(a: double, b: int): int {
+    return 2;
+  }
+
+  public constructor(a: int) {}
+
+  public constructor(a: string) {}
+}
+
+const s = new Shapes(1);
+
+s.m(1, 1);

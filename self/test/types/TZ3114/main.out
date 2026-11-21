@@ -1,0 +1,4 @@
+main.tz
+  1:10 parse: (string) => Result<int, string>
+  10:16 load: (string) => Promise<Result<int, string>>
+  14:7 pending: Promise<Result<int, string>>

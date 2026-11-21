@@ -1,0 +1,5 @@
+main.tz
+  2:6 type int8 = string
+  3:6 type int = double
+  5:7 small: int8
+  6:7 whole: int

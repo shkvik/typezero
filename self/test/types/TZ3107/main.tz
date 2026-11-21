@@ -1,0 +1,4 @@
+// Result.combine takes Results.
+const all = Result.combine([1, 2]);
+
+console.log(all);

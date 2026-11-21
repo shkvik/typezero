@@ -1,0 +1,3 @@
+main.tz:2:27: error TZ2962: 'escape' is not supported: it is a legacy function whose '%uXXXX' escapes nothing decodes but 'unescape'; encode with 'encodeURIComponent(s)'
+const names = ["x y"].map(escape);
+                          ^

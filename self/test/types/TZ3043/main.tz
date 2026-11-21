@@ -1,0 +1,5 @@
+// A Promise is not rejected, so its function takes only resolve.
+const rejected = new Promise<int>((resolve, reject) => resolve(1));
+const plain = new Promise<int>((resolve) => resolve(1));
+
+console.log(rejected, plain);

@@ -1,0 +1,10 @@
+// The members of an enum cannot depend on themselves through another enum.
+enum First {
+  A = Second.B,
+}
+
+enum Second {
+  B = First.A,
+}
+
+const a = First.A;

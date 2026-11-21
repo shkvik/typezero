@@ -1,0 +1,15 @@
+// A generic alias or class takes as many type arguments as it has.
+type Box<T> = { value: T };
+
+class Cell<T> {
+  public value: T;
+
+  public constructor(value: T) {
+    this.value = value;
+  }
+}
+
+let wide: Box<int, int> = { value: 1 };
+let cell = new Cell<int, int>(1);
+
+console.log(wide, cell);

@@ -1,0 +1,3 @@
+main.tz:6:13: error TZ3144: expected 2 arguments, but the tagged template passes 3: the array of its texts and 2 values
+console.log(tag`a${1}b${2}`);
+            ^

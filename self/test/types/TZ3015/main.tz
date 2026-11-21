@@ -1,0 +1,5 @@
+// The values of a Map have one type.
+const mixed = new Map([["a", 1], ["b", "x"]]);
+const same = new Map([["a", 1], ["b", 2]]);
+
+console.log(mixed, same);

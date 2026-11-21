@@ -1,0 +1,8 @@
+interface Clicky {
+  onClick: () => void;
+}
+
+// A field that code may replace cannot be a method.
+const clicky: Clicky = { onClick() {} };
+
+console.log(clicky);

@@ -1,0 +1,4 @@
+// Date() without new gives a text and ignores its arguments.
+const text = Date("2026-10-23T10:00");
+
+console.log(text);

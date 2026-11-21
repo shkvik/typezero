@@ -1,0 +1,10 @@
+// A class expression is made once: its methods use no locals.
+function counter(start: int) {
+  return class {
+    next(): int {
+      return start + 1;
+    }
+  };
+}
+
+console.log(counter(1));

@@ -1,0 +1,18 @@
+// A generic method is only called.
+class Box<T> {
+  public v: T;
+
+  public constructor(v: T) {
+    this.v = v;
+  }
+
+  public get<U>(f: (x: T) => U): U {
+    return f(this.v);
+  }
+}
+
+const box = new Box(1);
+const read = box.get;
+const used = box.get((x: int) => x + 1);
+
+console.log(read, used);

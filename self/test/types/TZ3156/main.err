@@ -1,0 +1,3 @@
+main.tz:8:9: error TZ3156: 'add' is a method of 'Adder' with several signatures and cannot be replaced
+  adder.add = (value: double) => "";
+        ^

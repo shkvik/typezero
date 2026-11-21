@@ -665,7 +665,57 @@ self/             компилятор на tz, пробный (порт compile
                   не из литерала, запись полей, `??=`, `for…of`, свой инициализатор,
                   забывание фактов о полях после записи и вызова), generators (вывод
                   `Generator<Y, R>`, значение `yield`), dict-rules (Map и Set: свойства
-                  вместо записей, `delete`, `in`, `for…in`, `Object.keys`). Присваивание
+                  вместо записей, `delete`, `in`, `for…in`, `Object.keys`), enum-uses
+                  (член enum, индекс enum, сравнение с enum), predicates и
+                  guard-summaries (`x is T` и сводки булевых функций: факты «да» и «нет»,
+                  с фактами границ, переносятся с параметров на аргументы), unknown-uses
+                  (член, вызов, индекс у `unknown`), casts (`as`), result-uses (Result,
+                  которого не проверили), legacy-calls (`escape`, `isNaN` и другие
+                  старые имена JS), generic-values и generic-rules (обобщённая функция
+                  значением, правила тел обобщённых классов), overloads (перегрузки
+                  методов и конструкторов: ранги вариантов, как в C++), dict-sources
+                  (`new Map` / `new Set` из источника, `...` в литерале объекта и Record),
+                  iterables (`Iterable<T>`, `for…of` по классу), async-calls (колбэк
+                  `forEach` с Promise, `new Promise` с `reject`, аргументы таймеров,
+                  `process.on` для исключений), number-calls (`d.toInt()` без округления,
+                  `Math.min/max/clamp` с разными типами), dates и date-fields (`new
+                  Date`, `Date()`, `Date.UTC` / `Date.parse`, методы даты, поля и сеттеры
+                  с проверкой месяца, дня в месяце и времени, текст даты в коде, `+`, `-`
+                  и сравнения с датой; текст даты разбирает semantic/library/date-reader/
+                  DateReader — порт runtime/library/date/date_parse.c: read() → поля даты,
+                  времени и зоны или undefined, если JavaScript текст не прочтёт);
+                  `instanceof Date / Map / Set` — в class-rules), key-loops (`for…in`:
+                  индексы массива и строки, не объект, Map / Set), patterns (временные `%n`
+                  деструктуризации: источник шаблона массива и объекта, элемент `%n[i]`;
+                  имена `%n` ищутся по имени — ValueRecord.hidden, их места совпадают с
+                  местами имён шаблона), object-spreads (тип литерала объекта со `...`),
+                  result-makers (`ok` / `err`: половина из места или из аргументов типа),
+                  result-methods (сужение `isOk` / `isErr`, `value` / `error`, методы
+                  Result), result-statics (`Result.combine…`, поиск Results в массиве);
+                  переменная с `ok` / `err` берёт тип и из позднейших присваиваний
+                  (DestinationKind.Assigned); json-uses (методы и ключи Json, проверки
+                  аргументов `JSON.parse` / `JSON.stringify`), decimal-calls (`decimal(x)`,
+                  `decimal.max/min/sum`, методы decimal по таблице, режимы округления;
+                  текст числа проверяет semantic/library/decimal-text/ DecimalText — порт
+                  runtime/library/decimal/decimal_text/decimal_text.h), js-forms (`in` и
+                  `delete` у массива, строки и кортежа, `raw`, `String.raw`, число
+                  аргументов помеченного шаблона), method-objects (литерал объекта с
+                  методами — тип объекта со своей меткой `{ n: int; get() }`, поле
+                  метода помечено ObjectField.method; такой объект подходит только к
+                  типу, под который написан), signatures (несколько сигнатур метода
+                  интерфейса: выбор при вызове, значение без типа места, класс, который
+                  реализует интерфейс, — по варианту на каждую), union-methods (вызов
+                  метода у объединения объектов: у каждого члена есть метод одного типа;
+                  тип, который реализует класс или литерал с методами, TypeStore
+                  отмечает как базу — markBase / isBase), class-values (классы как
+                  значения: TypeKind.Class — `typeof User` и `Constructor<T>`, `new` от
+                  значения, члены класса-значения, выражения класса и их `extends`,
+                  `ConstructorArgs`; типы `typeof X` и `Constructor<T>` строит
+                  TypeResolver в партиале class-values; захват переменных функции в
+                  выражении класса проверяет ScopeTraversal).
+                  Псевдонимы типов всех модулей разбираются до кода
+                  (DeclarationTypes.resolveAliases), чтобы имя типа в тексте ошибки было
+                  тем же, что у C++. Присваивание
                   сверяет значение с типом цели. Тела функций библиотеки пока не
                   обходятся. Выражение, которое срезы ещё не разбирают (приведение), даёт
                   тип-ошибку молча, и переменная с таким значением в выводе не

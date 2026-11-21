@@ -45,6 +45,14 @@ export class DeclarationTypes {
     this.declarations = [];
   }
 
+  public resolveAliases(): void {
+    for (const item of this.module.file.items) {
+      if (item.kind == StmtKind.TypeAlias && item.typeParams.length == 0) {
+        this.resolver.declaredAlias(this.module.id, item);
+      }
+    }
+  }
+
   public run(): ModuleTypes {
     this.expressions.checkModule(this.module.id);
 
@@ -174,7 +182,7 @@ export class DeclarationTypes {
   }
 
   private typeEnum(decl: EnumDecl): void {
-    const type = this.resolver.declaredEnum(decl);
+    const type = this.resolver.declaredEnum(this.module.id, decl);
 
     this.declare(DeclarationForm.Enum, decl.name, decl.loc, type);
   }

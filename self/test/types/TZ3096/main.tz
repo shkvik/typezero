@@ -1,0 +1,12 @@
+function parse(text: string): Result<int, string> {
+  if (text == "") {
+    return err("empty");
+  }
+
+  return ok(text.length);
+}
+
+// The error is there only in an Err.
+const result = parse("a");
+
+console.log(result.error);

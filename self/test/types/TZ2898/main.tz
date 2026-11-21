@@ -1,0 +1,4 @@
+// An object has no prototype and no constructor.
+const o: object = { a: 1 };
+
+console.log(o.constructor);

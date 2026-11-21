@@ -1,0 +1,3 @@
+main.tz:2:32: error TZ3054: February 2026 has no day 31, and JavaScript would make it March 3; the last day of February is day 0 of the month after: 'new Date(2026, 2, 0)'
+const date = new Date(2026, 1, 31);
+                               ^

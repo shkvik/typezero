@@ -1,0 +1,22 @@
+// An object of an unrelated class is never an instance of a generic class.
+class Base<T> {
+  public value: T;
+
+  public constructor(value: T) {
+    this.value = value;
+  }
+}
+
+class Free {
+  public x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+const free: Free = new Free(1);
+
+if (free instanceof Base) {
+  console.log("never");
+}

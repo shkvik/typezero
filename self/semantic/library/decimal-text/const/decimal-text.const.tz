@@ -1,0 +1,24 @@
+export const kZeroDigit = 48;
+export const kNineDigit = 57;
+export const kMinusSign = 45;
+export const kPlusSign = 43;
+export const kDecimalDot = 46;
+export const kSeparator = 95;
+export const kExponentLower = 101;
+export const kExponentUpper = 69;
+export const kLowerBit = 32;
+export const kHexMark = 120;
+export const kBinaryMark = 98;
+export const kOctalMark = 111;
+export const kLowerA = 97;
+export const kLowerZ = 122;
+export const kUpperA = 65;
+export const kUpperZ = 90;
+export const kDigitBase = 10;
+export const kNoDigit = 99;
+export const kWideSpaceFirst = 0x2000;
+export const kWideSpaceLast = 0x200a;
+export const kSpaceCodes = [
+  0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0xa0, 0x1680, 0x2028, 0x2029, 0x202f,
+  0x205f, 0x3000, 0xfeff,
+];

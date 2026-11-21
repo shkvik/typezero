@@ -1,0 +1,4 @@
+main.tz
+  2:16 save: (string) => Promise<void>
+  7:7 names: string[]
+  11:16 all: () => Promise<void>

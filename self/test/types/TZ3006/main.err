@@ -1,0 +1,3 @@
+main.tz:19:3: error TZ3006: a spread argument cannot choose among the variants of 'm'; pass the arguments one by one
+s.m(...args);
+  ^

@@ -1,0 +1,17 @@
+// A generic alias or class needs its type arguments.
+type Box<T> = { value: T };
+type Two<A, B = string> = { a: A; b: B };
+
+class Cell<T> {
+  public value: T;
+
+  public constructor(value: T) {
+    this.value = value;
+  }
+}
+
+let box: Box = { value: 1 };
+let two: Two = { a: 1, b: "a" };
+let cell: Cell = new Cell<int>(1);
+
+console.log(box, two, cell);

@@ -1,0 +1,156 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  ClassDecl,
+  MethodKind,
+} from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  BinaryExpr,
+  ExprKind,
+  MemberExpr,
+  Property,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+
+partial class ExpressionTypes {
+  private genericClassRules(decl: ClassDecl, module: int): void {
+    this.classGrowthCheck(decl, module);
+
+    for (const fn of decl.methods) {
+      this.genericMethodRules(decl, fn, module);
+    }
+  }
+
+  private classGrowthCheck(decl: ClassDecl, module: int): void {
+    const name = decl.name ?? "";
+    if (decl.typeParams.length == 0 || name == "") {
+      return;
+    }
+
+    const names = decl.typeParams.map((param) => param.name);
+    const refs: TypeRef[] = [];
+
+    for (const field of decl.fields) {
+      const type = field.type;
+      if (type != undefined) {
+        refs.push(type);
+      }
+    }
+
+    const growing = refs.some((root) =>
+      this.resolver.isGrowingUse(root, name, names),
+    );
+    if (growing) {
+      this.report(module, decl.loc, Code.GenericClassGrowing, { word: name });
+    }
+  }
+
+  private genericMethodRules(
+    decl: ClassDecl,
+    fn: FunctionDecl,
+    module: int,
+  ): void {
+    const role = fn.role;
+    const isGeneric = fn.typeParams.length > 0;
+    const isAbstract = role?.method == MethodKind.Abstract;
+    if (isGeneric && role != undefined && role.isOverride) {
+      this.report(module, fn.loc, Code.GenericOverride, kNoDetails);
+    }
+    if (isGeneric && isAbstract) {
+      this.report(module, fn.loc, Code.GenericAbstract, kNoDetails);
+    }
+
+    const isOpenClass = decl.typeParams.length > 0;
+    if (isAbstract && isOpenClass && fn.returnType == undefined) {
+      this.report(module, fn.loc, Code.AbstractGenericReturn, {
+        word: fn.name,
+        other: decl.name ?? "",
+      });
+    }
+  }
+
+  private literalMethodCheck(property: Property, module: int): void {
+    const value = property.value;
+    if (value.kind != ExprKind.Function || value.fn.typeParams.length == 0) {
+      return;
+    }
+
+    this.report(module, property.loc, Code.LiteralGenericMethod, kNoDetails);
+  }
+
+  private genericMethodValue(
+    expr: MemberExpr,
+    method: FunctionDecl,
+    module: int,
+  ): boolean {
+    if (method.typeParams.length == 0) {
+      return false;
+    }
+
+    this.report(module, expr.loc, Code.GenericMethodValue, { word: expr.name });
+
+    return true;
+  }
+
+  private genericInstanceofCheck(
+    expr: BinaryExpr,
+    left: Type,
+    decl: ClassDecl,
+    home: int,
+    module: int,
+  ): void {
+    const base = this.definedType(left);
+    if (this.isOpenTested(base) || decl.typeParams.length == 0) {
+      return;
+    }
+
+    const word = decl.name ?? "";
+    const parts = this.unionMembers(base);
+    const isMatching = parts.some((part) => this.isInstanceOfClass(part, word));
+    if (isMatching) {
+      return;
+    }
+
+    const first = this.text.of(base);
+    const open = decl.typeParams.map(() => this.store.plain(TypeKind.Error));
+    const instance = this.resolver.classInstance(home, decl, open);
+    const ancestors = this.ancestorsOf(instance);
+    const isRelated = parts.some((part) => ancestors.includes(part));
+    if (!isRelated) {
+      this.report(module, expr.loc, Code.InstanceOfGenericNever, {
+        word,
+        first,
+      });
+
+      return;
+    }
+
+    const code = this.genericTellCode(home);
+
+    this.report(module, expr.loc, code, { word, first, other: first });
+  }
+
+  private genericTellCode(home: int): Code {
+    if (this.isLibraryModule(home)) {
+      return Code.InstanceOfGenericLibrary;
+    }
+
+    return Code.InstanceOfGenericUnknown;
+  }
+
+  private isInstanceOfClass(part: Type, name: string): boolean {
+    if (part.kind != TypeKind.Instance) {
+      return false;
+    }
+    if (part.name == name) {
+      return true;
+    }
+
+    return this.ancestorsOf(part).some(
+      (one) => one.kind == TypeKind.Instance && one.name == name,
+    );
+  }
+}

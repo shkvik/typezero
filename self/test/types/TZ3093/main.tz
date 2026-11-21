@@ -1,0 +1,4 @@
+// An object without fields gives no values.
+const empty = {};
+
+console.log(Object.values(empty));

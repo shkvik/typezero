@@ -1,13 +1,27 @@
 import { TypeResolver } from "../type-resolver.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import { TypeAliasDecl } from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  NameSymbol,
+  SymbolKind,
+} from "../../../../program/scopes/types/scopes.types.tz";
 import {
   DictKind,
   Type,
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
 import {
+  kArrayName,
+  kBuiltinNames,
   kGenericTypes,
+  kJsonName,
+  kNumber,
+  kNumericNames,
   kPlainTypes,
   kTextChanges,
 } from "../const/type-resolver.const.tables.tz";
@@ -39,7 +53,7 @@ partial class TypeResolver {
       return undefined;
     }
     if (ref.args.length > 0) {
-      this.report(context.module, ref.loc, Code.TypeNotGeneric, {
+      this.report(context.module, ref.loc, Code.PlainTypeNotGeneric, {
         word: name,
       });
 
@@ -56,7 +70,9 @@ partial class TypeResolver {
   ): Type {
     const count = ref.args.length;
     if (count < row.least || count > row.most) {
-      this.report(context.module, ref.loc, Code.TypeArgumentsCount, {
+      const code = this.countCode(row, count);
+
+      this.report(context.module, ref.loc, code, {
         word: row.name,
         other: row.example,
       });
@@ -77,13 +93,15 @@ partial class TypeResolver {
       case GenericBuiltin.Promise:
         return this.promised(ref, first, context);
       case GenericBuiltin.Map:
-        return this.store.dictOf(DictKind.Map, first, second);
+        return this.keyedDict(ref, DictKind.Map, first, second, context);
       case GenericBuiltin.Set:
-        return this.store.dictOf(DictKind.Set, first, first);
+        return this.keyedDict(ref, DictKind.Set, first, first, context);
       case GenericBuiltin.Record:
         return this.keyed(ref, first, second, context);
       case GenericBuiltin.Generator:
         return this.iterator(args, false);
+      case GenericBuiltin.Constructor:
+        return this.constructorType(ref, args, context);
       default:
         return this.iterator(args, true);
     }
@@ -141,5 +159,103 @@ partial class TypeResolver {
       default:
         return this.store.plain(TypeKind.AnyObject);
     }
+  }
+
+  private countCode(row: GenericTypeName, count: int): Code {
+    if (count == 0) {
+      return row.few;
+    }
+
+    return row.many;
+  }
+
+  private builtinAliasCheck(module: int, decl: TypeAliasDecl): void {
+    const name = decl.name;
+    const isNumeric = kNumericNames.includes(name);
+    const isBuiltin = isNumeric || kBuiltinNames.includes(name);
+    if (!isBuiltin || this.record(module)?.library != false) {
+      return;
+    }
+
+    const body = decl.type;
+    const isNumberAlias =
+      isNumeric && body.form.kind == TypeRefKind.Name && body.name == kNumber;
+    const isJsonUnion = name == kJsonName && body.form.kind == TypeRefKind.Union;
+    if (isNumberAlias || isJsonUnion) {
+      return;
+    }
+    if (isNumeric) {
+      this.report(module, decl.loc, Code.BuiltinNumberRedefined, {
+        word: name,
+      });
+
+      return;
+    }
+
+    this.report(module, decl.loc, Code.BuiltinTypeRedefined, { word: name });
+  }
+
+  private isBuiltinShadow(symbol: NameSymbol): boolean {
+    if (symbol.kind != SymbolKind.TypeAlias) {
+      return false;
+    }
+
+    const name = symbol.name;
+    const isPlain = kPlainTypes.some((row) => row.name == name);
+
+    return isPlain || name == kArrayName;
+  }
+
+  private keyedDict(
+    ref: TypeRef,
+    dict: DictKind,
+    key: Type,
+    value: Type,
+    context: TypeContext,
+  ): Type {
+    const written = ref.args[0];
+    if (this.keyCheck(written, key, context.module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.store.dictOf(dict, key, value);
+  }
+
+  public keyCheck(
+    written: TypeRef | undefined,
+    key: Type | undefined,
+    module: int,
+  ): boolean {
+    if (written == undefined || key == undefined) {
+      return false;
+    }
+
+    const code = this.keyProblem(key);
+    if (code == undefined) {
+      return false;
+    }
+
+    this.report(module, written.loc, code, kNoDetails);
+
+    return true;
+  }
+
+  private keyProblem(key: Type): Code | undefined {
+    if (key.kind == TypeKind.Unknown) {
+      return Code.KeyUnknown;
+    }
+    if (key.kind == TypeKind.Result) {
+      return Code.KeyResult;
+    }
+    if (key.kind != TypeKind.Union) {
+      return undefined;
+    }
+
+    const isResult = key.parts.some((part) => part.kind == TypeKind.Result);
+    if (isResult) {
+      return Code.KeyResult;
+    }
+
+    return undefined;
   }
 }

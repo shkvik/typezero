@@ -1,0 +1,3 @@
+main.tz:6:28: error TZ3163: a class makes objects, and 'int' is not an object type; give the type of its objects, e.g. 'Constructor<User>'
+const numbers: Constructor<int> = User;
+                           ^

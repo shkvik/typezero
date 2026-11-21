@@ -1,0 +1,5 @@
+// 'new' needs a class.
+const count = 5;
+const made = new count();
+
+console.log(made);

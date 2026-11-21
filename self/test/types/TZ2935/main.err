@@ -1,0 +1,3 @@
+main.tz:3:21: error TZ2935: 'as' is not supported; 'Number(x)' gives the nearest double
+const rough = price as double;
+                    ^

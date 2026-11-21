@@ -1,0 +1,4 @@
+// new Date takes milliseconds, a string or a date.
+const date = new Date(true);
+
+console.log(date.getTime());

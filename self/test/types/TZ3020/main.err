@@ -1,0 +1,3 @@
+main.tz:4:20: error TZ3020: a Record inherits nothing from Object.prototype, and 'counts.hasOwnProperty' is a key like any other; ask for a key with 'key in counts'
+console.log(counts.hasOwnProperty("a"), "a" in counts);
+                   ^

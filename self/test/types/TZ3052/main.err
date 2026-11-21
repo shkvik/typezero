@@ -1,0 +1,3 @@
+main.tz:2:32: error TZ3052: day -1 is outside the month: days are counted from 1, and 0 is the last day of the month before
+const date = new Date(2026, 0, -1);
+                               ^

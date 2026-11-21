@@ -1,0 +1,5 @@
+// Object.groupBy groups by text keys.
+const grouped = Object.groupBy([1, 2], (x) => x);
+const byText = Object.groupBy([1, 2], (x) => `${x}`);
+
+console.log(grouped, byText);

@@ -1,0 +1,4 @@
+// A double becomes an integer after rounding.
+const d = 2.5;
+
+console.log(d.toInt(), d.toUint8(), Math.trunc(d).toInt(), Math.round(d).toInt32());

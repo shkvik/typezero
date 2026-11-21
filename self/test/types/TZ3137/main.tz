@@ -1,0 +1,4 @@
+// An array has no holes: compare the index with the length.
+const list = [1, 2, 3];
+
+console.log(1 in list);

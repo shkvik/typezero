@@ -1,0 +1,23 @@
+// instanceof cannot tell the type arguments of a generic class.
+class Animal {
+  public name: string;
+
+  public constructor(name: string) {
+    this.name = name;
+  }
+}
+
+class Pet<T> extends Animal {
+  public toy: T;
+
+  public constructor(toy: T) {
+    super("pet");
+    this.toy = toy;
+  }
+}
+
+const some: Animal = new Pet(1);
+
+if (some instanceof Pet) {
+  console.log("pet");
+}

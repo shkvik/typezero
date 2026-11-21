@@ -1,0 +1,3 @@
+main.tz:3:3: error TZ2998: a method of an object literal cannot be generic; declare a class, whose methods can
+  m<T>(x: int): int {
+  ^

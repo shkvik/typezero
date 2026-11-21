@@ -1,0 +1,8 @@
+// A class expression is made once: its static fields use no locals.
+function labeled(label: string) {
+  return class {
+    static label: string = label;
+  };
+}
+
+console.log(labeled("a"));

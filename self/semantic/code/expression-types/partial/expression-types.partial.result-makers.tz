@@ -1,0 +1,194 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  CallExpr,
+  NameExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  ResultType,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  TypeContext,
+  TypePlace,
+} from "../../../types/type-resolver/types/type-resolver.types.tz";
+import { kNoPlace } from "../const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private isResultMakerCall(callee: NameExpr, module: int): boolean {
+    const isMaker = callee.name == "ok" || callee.name == "err";
+
+    return isMaker && this.isGlobalUse(callee, module);
+  }
+
+  private resultMakerCall(
+    expr: CallExpr,
+    callee: NameExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const error = this.store.plain(TypeKind.Error);
+    if (expr.args.some((arg) => arg.spread)) {
+      this.looseArguments(expr.args, module);
+
+      return error;
+    }
+
+    const count = expr.args.length;
+    if (count > 1) {
+      this.report(module, callee.loc, Code.ArgumentCount, {
+        word: this.argumentCountText(0, 1, false),
+        other: `${count}`,
+      });
+
+      return error;
+    }
+
+    const typeArgs = callee.typeArgs;
+    if (typeArgs.length == 0) {
+      const goal = this.resultGoal(wanted);
+
+      return this.halfValueTyped(expr, callee, goal, false, module);
+    }
+    if (typeArgs.length != 2) {
+      this.report(module, callee.loc, Code.OkErrTypeArgs, {
+        word: callee.name,
+      });
+
+      return error;
+    }
+
+    const written = this.writtenResult(callee, module);
+    if (written == undefined) {
+      return error;
+    }
+
+    return this.halfValueTyped(expr, callee, written, true, module);
+  }
+
+  private resultGoal(wanted: Type | undefined): ResultType | undefined {
+    if (wanted == undefined) {
+      return undefined;
+    }
+
+    const defined = this.definedType(wanted);
+    if (defined.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    return defined;
+  }
+
+  private writtenResult(
+    callee: NameExpr,
+    module: int,
+  ): ResultType | undefined {
+    const context: TypeContext = {
+      module,
+      bindings: new Map<int, Type>(),
+      place: TypePlace.Plain,
+    };
+    const types = callee.typeArgs.map((ref) =>
+      this.resolver.resolve(ref, context),
+    );
+    const value = types[0];
+    const failure = types[1];
+    if (value == undefined || failure == undefined) {
+      return undefined;
+    }
+    if (value.kind == TypeKind.Error || failure.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    const made = this.store.resultOf(value, failure);
+    if (made.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    return made;
+  }
+
+  private halfValueTyped(
+    expr: CallExpr,
+    callee: NameExpr,
+    goal: ResultType | undefined,
+    isWritten: boolean,
+    module: int,
+  ): Type {
+    const isOk = callee.name == "ok";
+    const arg = expr.args[0]?.expr;
+    if (arg == undefined) {
+      return this.madeResult(isOk, this.store.plain(TypeKind.Void), goal);
+    }
+
+    const half = this.goalHalf(goal, isOk);
+    const isHinted =
+      half != undefined &&
+      half.kind != TypeKind.Never &&
+      half.kind != TypeKind.Void;
+    const hint = this.halfHint(isHinted, half);
+    const given = this.typed(arg, hint, module);
+    if (given.kind == TypeKind.Void) {
+      this.report(module, arg.loc, Code.OkErrVoidValue, { word: callee.name });
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (given.kind == TypeKind.Error) {
+      return given;
+    }
+    if (half != undefined && isHinted && this.relation.converts(given, half)) {
+      return this.madeResult(isOk, half, goal);
+    }
+    if (half != undefined && isWritten) {
+      this.coerce(arg, given, half, module, kNoPlace);
+
+      return this.madeResult(isOk, half, goal);
+    }
+
+    return this.madeResult(isOk, given, goal);
+  }
+
+  private goalHalf(goal: ResultType | undefined, isOk: boolean): Type | undefined {
+    if (goal == undefined) {
+      return undefined;
+    }
+    if (isOk) {
+      return goal.value;
+    }
+
+    return goal.error;
+  }
+
+  private halfHint(isHinted: boolean, half: Type | undefined): Type | undefined {
+    if (isHinted) {
+      return half;
+    }
+
+    return undefined;
+  }
+
+  private madeResult(
+    isOk: boolean,
+    given: Type,
+    goal: ResultType | undefined,
+  ): Type {
+    const other = this.otherGoalHalf(goal, isOk);
+    if (isOk) {
+      return this.store.resultOf(given, other);
+    }
+
+    return this.store.resultOf(other, given);
+  }
+
+  private otherGoalHalf(goal: ResultType | undefined, isOk: boolean): Type {
+    if (goal == undefined) {
+      return this.store.plain(TypeKind.Never);
+    }
+    if (isOk) {
+      return goal.error;
+    }
+
+    return goal.value;
+  }
+}

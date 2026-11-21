@@ -1,0 +1,14 @@
+// JSON.stringify does not call toJSON.
+class Money {
+  public cents: int;
+
+  public constructor(cents: int) {
+    this.cents = cents;
+  }
+
+  public toJSON(): int {
+    return this.cents;
+  }
+}
+
+console.log(JSON.stringify(new Money(5)));

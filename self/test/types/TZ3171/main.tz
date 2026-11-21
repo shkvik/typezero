@@ -1,0 +1,6 @@
+// Only a class is extended.
+function extend(count: int) {
+  return class extends count {};
+}
+
+console.log(extend(1));

@@ -1,0 +1,5 @@
+// A string is never a date.
+const text = "x";
+const isDate = text instanceof Date;
+
+console.log(isDate);

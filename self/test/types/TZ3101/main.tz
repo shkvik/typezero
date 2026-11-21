@@ -1,0 +1,13 @@
+function parse(text: string): Result<int, string> {
+  if (text == "") {
+    return err("empty");
+  }
+
+  return ok(text.length);
+}
+
+// The function given to andThen returns a Result.
+const result = parse("a");
+const next = result.andThen((count) => count + 1);
+
+console.log(next);

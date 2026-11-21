@@ -18,6 +18,7 @@ export class TypeStore {
   private readonly byKey: Map<string, Type>;
   private readonly labels: Map<Type, string>;
   private readonly parents: Map<Type, Type[]>;
+  private readonly bases: Set<Type>;
   private readonly constraints: Map<Type, Type>;
   private count: int;
 
@@ -26,12 +27,21 @@ export class TypeStore {
     this.byKey = new Map<string, Type>();
     this.labels = new Map<Type, string>();
     this.parents = new Map<Type, Type[]>();
+    this.bases = new Set<Type>();
     this.constraints = new Map<Type, Type>();
     this.count = 0;
   }
 
   public inherit(instance: Type, parents: Type[]): void {
     this.parents.set(instance, parents);
+  }
+
+  public markBase(base: Type): void {
+    this.bases.add(base);
+  }
+
+  public isBase(type: Type): boolean {
+    return this.bases.has(type);
   }
 
   public hasParents(instance: Type): boolean {
@@ -329,6 +339,19 @@ export class TypeStore {
     return this.keep(key, made);
   }
 
+  public classOf(instance: Type, exact: boolean): Type {
+    const key = `class ${exact} ${instance.id}`;
+    const known = this.byKey.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind: TypeKind.Class, instance, exact };
+
+    return this.keep(key, made);
+  }
+
   public iteratorOf(shape: IteratorShape): Type {
     const ids = this.idsText([shape.yielded, shape.returned, shape.sent]);
     const key = `iterator ${shape.async} ${ids}`;
@@ -477,7 +500,7 @@ export class TypeStore {
 
   private fieldKey(field: ObjectField): string {
     const name = `${field.name.length}:${field.name}`;
-    const flags = `${field.optional}:${field.readonly}`;
+    const flags = `${field.optional}:${field.readonly}:${field.method ?? false}`;
 
     return `${name}:${field.type.id}:${flags}`;
   }

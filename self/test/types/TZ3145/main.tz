@@ -1,0 +1,9 @@
+interface Shape {
+  name: string;
+  area(): double;
+}
+
+// A literal has exactly the fields of its type.
+const shape: Shape = { name: "b", size: 1, area() { return 1.0; } };
+
+console.log(shape.name);

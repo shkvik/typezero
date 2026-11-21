@@ -1,0 +1,5 @@
+// A date is compared only with another date.
+const date = new Date();
+const isEarly = date < 5;
+
+console.log(isEarly);

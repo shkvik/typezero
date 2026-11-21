@@ -1,0 +1,12 @@
+// An unknown value goes into a typed place after a check.
+const u: unknown = "a";
+const s: string = u;
+const n: int = u;
+
+if (typeof u == "string") {
+  const t: string = u;
+
+  console.log(t);
+}
+
+console.log(s, n);

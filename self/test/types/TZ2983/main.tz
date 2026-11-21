@@ -1,0 +1,6 @@
+// '&&' cannot test a value of type T that may be a number.
+function both<T>(x: T, y: T): T {
+  return x && y;
+}
+
+console.log(both(1, 2));

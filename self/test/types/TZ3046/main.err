@@ -1,0 +1,6 @@
+main.tz:4:15: error TZ3046: a double becomes an integer only after rounding, which says what happens to the fraction: 'Math.trunc(d).toInt()' (or Math.round, Math.floor, Math.ceil)
+console.log(d.toInt(), d.toUint8(), Math.trunc(d).toInt(), Math.round(d).toInt32());
+              ^
+main.tz:4:26: error TZ3046: a double becomes an integer only after rounding, which says what happens to the fraction: 'Math.trunc(d).toUint8()' (or Math.round, Math.floor, Math.ceil)
+console.log(d.toInt(), d.toUint8(), Math.trunc(d).toInt(), Math.round(d).toInt32());
+                         ^

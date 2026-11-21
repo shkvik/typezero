@@ -1,0 +1,3 @@
+main.tz:3:21: error TZ2937: 'as' is not supported, and type 'string' cannot become 'int'
+const number = text as int;
+                    ^

@@ -3,4 +3,4 @@ main.tz
   2:5 text: ?
   3:5 data: ?
   7:6 type Shape = { side: int }
-  17:10 first: (?) => ? | undefined
+  17:10 first: (?) => ?

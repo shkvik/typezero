@@ -1,0 +1,12 @@
+// The array to destructure may be undefined.
+function maybe(flag: boolean): int[] | undefined {
+  if (flag) {
+    return [1];
+  }
+
+  return undefined;
+}
+
+const [first] = maybe(true);
+
+console.log(first);

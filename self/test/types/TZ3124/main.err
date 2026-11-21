@@ -1,0 +1,3 @@
+main.tz:4:19: error TZ3124: property 'plus' does not exist on type 'decimal'; a decimal uses the operator: 'a + b'
+console.log(price.plus(1));
+                  ^

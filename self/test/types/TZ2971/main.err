@@ -1,0 +1,3 @@
+main.tz:2:13: error TZ2971: 'Map' needs the types of its keys and values, e.g. 'Map<string, int>'
+let counts: Map<int> = new Map<int, int>();
+            ^

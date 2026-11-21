@@ -1,0 +1,18 @@
+// A method is called on a union when each member has it.
+class Dog {
+  public bark(): string {
+    return "woof";
+  }
+}
+
+class Cat {
+  public meow(): string {
+    return "meow";
+  }
+}
+
+function noise(pet: Dog | Cat): string {
+  return pet.bark();
+}
+
+console.log(noise(new Dog()));

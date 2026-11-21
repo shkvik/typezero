@@ -1,0 +1,3 @@
+main.tz:4:13: error TZ2895: an unknown value cannot be indexed until a check shows what it holds, e.g. 'if (Array.isArray(u)) ...' or 'typeof u == "string"'
+console.log(u[0]);
+            ^

@@ -9,8 +9,12 @@ import {
 partial class ScopeTraversal {
   private reportMissingValue(name: string, loc: int, missing: Code): void {
     const absent = kGlobalNames.absent(name);
+    const isMade = missing == Code.ClassNotFound;
     if (absent != undefined && absent.asValue) {
-      return this.reportAbsent(absent, loc);
+      return this.reportAbsent(absent, loc, isMade);
+    }
+    if (this.isTypeName(name) && this.isResultHalfName(name)) {
+      return this.resultHalfReport(name, loc);
     }
     if (this.isTypeName(name)) {
       return this.report(loc, Code.TypeAsValue, { word: name });
@@ -19,19 +23,53 @@ partial class ScopeTraversal {
     this.report(loc, missing, { word: name });
   }
 
+  private isResultHalfName(name: string): boolean {
+    const isHalf = name == "Ok" || name == "Err";
+
+    return isHalf && this.scopes.findType(name) == undefined;
+  }
+
+  private resultHalfReport(name: string, loc: int): void {
+    if (name == "Ok") {
+      return this.report(loc, Code.ResultHalfAsValue, {
+        word: name,
+        other: "ok(value)",
+        first: "isOk()",
+      });
+    }
+
+    this.report(loc, Code.ResultHalfAsValue, {
+      word: name,
+      other: "err(error)",
+      first: "isErr()",
+    });
+  }
+
   private reportMissingType(name: string, loc: int, missing: Code): void {
     const absent = kGlobalNames.absent(name);
     if (absent != undefined && absent.asType) {
-      return this.reportAbsent(absent, loc);
+      return this.reportAbsent(absent, loc, false);
     }
 
     this.report(loc, missing, { word: name });
   }
 
-  private reportAbsent(absent: AbsentName, loc: int): void {
+  private reportAbsent(absent: AbsentName, loc: int, isMade: boolean): void {
     const code = this.absentCode(absent.reason);
+    const word = this.absentWord(absent, isMade);
 
-    this.report(loc, code, { word: absent.name, other: absent.instead });
+    this.report(loc, code, { word, other: absent.instead ?? "" });
+  }
+
+  private absentWord(absent: AbsentName, isMade: boolean): string {
+    const isCode =
+      absent.reason == AbsentReason.CodeFromString ||
+      absent.reason == AbsentReason.Proxy;
+    if (isMade && isCode) {
+      return `new ${absent.name}`;
+    }
+
+    return absent.name;
   }
 
   private isErrorClassBase(name: string): boolean {

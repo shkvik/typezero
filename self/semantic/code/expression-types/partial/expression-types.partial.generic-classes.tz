@@ -28,6 +28,18 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
+    const most = method.typeParams.length;
+    if (member.typeArgs.length > most) {
+      this.report(module, member.loc, Code.TypeArgumentsTooMany, {
+        word: member.name,
+        other: this.typeArgumentText(most),
+        first: `${member.typeArgs.length}`,
+      });
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
     const shape = this.genericMethodShape(entry, method);
     if (shape == undefined) {
       return this.store.plain(TypeKind.Error);

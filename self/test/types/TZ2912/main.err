@@ -1,0 +1,3 @@
+main.tz:4:1: error TZ2912: '||=' cannot test an unknown value: it may hold 0, "" or false, which would count as false; give a default with '??=': 'value ??= 1'
+value ||= 1;
+^

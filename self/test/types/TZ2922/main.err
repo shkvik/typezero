@@ -1,0 +1,3 @@
+main.tz:6:1: error TZ2922: an object is always truthy, so '&&=' always assigns; use '='
+point &&= { x: 0, y: 0 };
+^

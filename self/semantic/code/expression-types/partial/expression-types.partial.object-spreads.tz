@@ -1,0 +1,211 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  ObjectLitExpr,
+  Property,
+  PropertyKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  ObjectField,
+  ObjectType,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { SpreadSlot } from "../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private isSpreadOnly(expr: ObjectLitExpr): boolean {
+    const hasSpread = expr.props.some(
+      (property) => property.form.kind == PropertyKind.Spread,
+    );
+    const hasOther = expr.props.some(
+      (property) =>
+        property.form.kind == PropertyKind.Method ||
+        property.form.kind == PropertyKind.Computed,
+    );
+
+    return hasSpread && !hasOther;
+  }
+
+  private spreadObject(
+    expr: ObjectLitExpr,
+    target: Type | undefined,
+    module: int,
+  ): Type {
+    const slots: SpreadSlot[] = [];
+    let isTyped = true;
+
+    for (const property of expr.props) {
+      const isTaken = this.spreadProperty(property, target, slots, module);
+
+      isTyped = isTyped && isTaken;
+    }
+
+    if (!isTyped) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const fields: ObjectField[] = slots.map((slot) => ({
+      name: slot.name,
+      type: slot.type,
+      optional: false,
+      readonly: false,
+    }));
+    const result = this.store.objectOf(fields);
+    if (target == undefined || target.kind != TypeKind.Object) {
+      return result;
+    }
+    if (this.isSpreadFitting(slots, target)) {
+      return target;
+    }
+
+    return result;
+  }
+
+  private spreadProperty(
+    property: Property,
+    target: Type | undefined,
+    slots: SpreadSlot[],
+    module: int,
+  ): boolean {
+    if (property.form.kind == PropertyKind.Spread) {
+      return this.spreadMerged(property, slots, module);
+    }
+
+    const hint = this.spreadFieldHint(target, property.name);
+    const type = this.typed(property.value, hint, module);
+    if (type.kind == TypeKind.Error) {
+      return false;
+    }
+
+    const slot = slots.find((one) => one.name == property.name);
+    if (slot == undefined) {
+      slots.push({ name: property.name, type: type });
+
+      return true;
+    }
+    if (type.kind == TypeKind.Undefined) {
+      slot.type = this.optional(slot.type);
+
+      return true;
+    }
+
+    slot.type = type;
+
+    return true;
+  }
+
+  private spreadFieldHint(
+    target: Type | undefined,
+    name: string,
+  ): Type | undefined {
+    if (target == undefined || target.kind != TypeKind.Object) {
+      return undefined;
+    }
+
+    const field = target.fields.find((one) => one.name == name);
+    if (field == undefined) {
+      return undefined;
+    }
+
+    return this.fieldWanted(field);
+  }
+
+  private spreadMerged(
+    property: Property,
+    slots: SpreadSlot[],
+    module: int,
+  ): boolean {
+    this.quiet += 1;
+
+    const type = this.typed(property.value, undefined, module);
+
+    this.quiet -= 1;
+
+    const base = this.apparent(type);
+    if (base.kind != TypeKind.Object || this.spreadCode(type) != undefined) {
+      return false;
+    }
+
+    const form = property.form;
+    if (form.kind != PropertyKind.Spread) {
+      return false;
+    }
+
+    for (const field of base.fields) {
+      if (form.omit.includes(field.name)) {
+        continue;
+      }
+
+      const isMerged = this.mergeSpreadField(property, field, base, slots, module);
+      if (!isMerged) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private mergeSpreadField(
+    property: Property,
+    field: ObjectField,
+    spread: ObjectType,
+    slots: SpreadSlot[],
+    module: int,
+  ): boolean {
+    const type = this.fieldWanted(field);
+    const slot = slots.find((one) => one.name == field.name);
+    if (slot == undefined) {
+      slots.push({ name: field.name, type });
+
+      return true;
+    }
+    if (!this.isOptional(type)) {
+      slot.type = type;
+
+      return true;
+    }
+
+    const joined = this.unify(
+      this.definedType(slot.type),
+      this.definedType(type),
+    );
+    if (joined == undefined || joined.kind == TypeKind.Error) {
+      this.report(module, property.loc, Code.SpreadFieldTypes, {
+        word: field.name,
+        first: this.text.of(slot.type),
+        second: this.text.of(type),
+        other: this.text.of(spread),
+      });
+
+      return false;
+    }
+    if (this.isOptional(slot.type)) {
+      slot.type = this.optional(joined);
+
+      return true;
+    }
+
+    slot.type = joined;
+
+    return true;
+  }
+
+  private isSpreadFitting(slots: SpreadSlot[], target: ObjectType): boolean {
+    const isEvery = slots.every((slot) => {
+      const field = target.fields.find((one) => one.name == slot.name);
+      if (field == undefined) {
+        return false;
+      }
+
+      return this.relation.converts(slot.type, this.fieldWanted(field));
+    });
+    const isFilled = target.fields.every((field) => {
+      const isNeeded = !field.optional && !this.isOptional(field.type);
+
+      return !isNeeded || slots.some((slot) => slot.name == field.name);
+    });
+
+    return isEvery && isFilled;
+  }
+}

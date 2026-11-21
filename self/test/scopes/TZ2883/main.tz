@@ -1,0 +1,14 @@
+// A break leaves a loop or a switch.
+function stop(): void {
+  break;
+}
+
+for (;;) {
+  const run = () => {
+    break;
+  };
+
+  break;
+}
+
+console.log(stop);

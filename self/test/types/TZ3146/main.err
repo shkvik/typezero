@@ -1,0 +1,3 @@
+main.tz:6:24: error TZ3146: the object literal does not fit 'Named': 'name' is a field of type 'string' there, not a method
+const named: Named = { name() { return "a"; } };
+                       ^

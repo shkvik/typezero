@@ -1,0 +1,3 @@
+main.tz
+  2:6 enum Values = int
+  9:7 ok: int

@@ -1,0 +1,3 @@
+main.tz:14:21: error TZ3033: '[Symbol.iterator]()' of 'NotIterator' gives 'int', which is not an iterator: it needs a method 'next()' that gives '{ done, value }' (IteratorResult<T>); or make it a generator, '*[Symbol.iterator]() { yield ... }'
+for (const x of new NotIterator()) {
+                    ^

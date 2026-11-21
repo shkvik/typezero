@@ -1,0 +1,5 @@
+// A plain built-in type is not generic.
+let whole: int<string> = 1;
+let text: string<int> = "a";
+
+console.log(whole, text);

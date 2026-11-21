@@ -1,0 +1,4 @@
+main.tz
+  2:7 ratio: double
+  3:7 whole: int
+  4:7 byte: uint8

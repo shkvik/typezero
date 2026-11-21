@@ -1,5 +1,10 @@
 import { ExpressionTypes } from "../expression-types.tz";
-import { DeclaredMemberKind } from "../../../../program/ast/types/ast.types.declarations.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  DeclaredClass,
+  DeclaredMember,
+  DeclaredMemberKind,
+} from "../../../../program/ast/types/ast.types.declarations.tz";
 import {
   CallExpr,
   ExprKind,
@@ -13,7 +18,14 @@ import {
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
 import { ParameterSite } from "../../../types/type-resolver/types/type-resolver.types.tz";
-import { GenericTarget } from "../types/expression-types.types.tz";
+import {
+  kCodeMethods,
+  kMathConstants,
+  kMathName,
+  kNumberLaterMethods,
+  kTakenMethods,
+} from "../const/expression-types.const.tz";
+import { CallKind, GenericTarget } from "../types/expression-types.types.tz";
 import {
   kArrayShape,
   kAsyncGeneratorShape,
@@ -179,11 +191,29 @@ partial class ExpressionTypes {
     }
 
     const method = this.libraryMemberType(receiver, member.name, true);
+    if (generic == undefined && method == undefined) {
+      this.valueMissingCheck(expr, member, object, receiver, module);
+    }
+
+    const proved = this.provedResult(expr, member, object, module);
+    if (proved != undefined) {
+      return proved;
+    }
+    if (this.doubleConversionCheck(member, object, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
     if (method == undefined || isProved) {
       return this.store.plain(TypeKind.Error);
     }
 
-    return this.fieldValueCall(expr, member, method, true, module);
+    const kind = this.receiverKind(object);
+
+    const marked = this.positionShape(object, member.name) ?? method;
+
+    this.positionMask = this.maskOf(object, marked);
+    this.positionMethod = member.name;
+
+    return this.fieldValueCall(expr, member, method, kind, module);
   }
 
   private libraryMethodCall(
@@ -198,7 +228,11 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
     if (params.length == 0) {
-      return this.fieldValueCall(expr, member, type, true, module);
+      const kind = this.namespaceKind(member, module);
+
+      this.positionMethod = member.name;
+
+      return this.fieldValueCall(expr, member, type, kind, module);
     }
     if (expr.optional || type.shape.self != undefined) {
       return this.store.plain(TypeKind.Error);
@@ -216,6 +250,233 @@ partial class ExpressionTypes {
     };
 
     return this.genericResult(expr, generic, wanted, module);
+  }
+
+  private provedResult(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): Type | undefined {
+    const name = member.name;
+    const base = this.apparent(object);
+    if (base.kind == TypeKind.Array && kTakenMethods.includes(name)) {
+      return this.takenItem(member, base.item, module);
+    }
+
+    const isText = base.kind == TypeKind.String || base.kind == TypeKind.Template;
+    const index = expr.args[0]?.expr;
+    if (!isText || index == undefined || !kCodeMethods.includes(name)) {
+      return undefined;
+    }
+
+    const int = this.store.integer(64, false);
+
+    this.typed(index, int, module);
+
+    if (this.isProvenIndex(member.object, index, module)) {
+      return int;
+    }
+
+    return this.optional(int);
+  }
+
+  private takenItem(member: MemberExpr, item: Type, module: int): Type {
+    const isFilled = this.isProvenFilled(member.object, module);
+
+    this.takenFrom(member.object, module);
+
+    if (isFilled) {
+      return item;
+    }
+
+    return this.optional(item);
+  }
+
+  private valueMissingCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    receiver: Type,
+    module: int,
+  ): void {
+    const name = member.name;
+    if (receiver.kind != TypeKind.Object || !this.isPlainReceiver(object)) {
+      return;
+    }
+    if (kNumberLaterMethods.includes(name)) {
+      return;
+    }
+    if (receiver.fields.some((field) => field.name == name)) {
+      return;
+    }
+
+    this.looseArguments(expr.args, module);
+    this.report(module, member.loc, Code.PropertyMissing, {
+      word: name,
+      first: this.text.of(object),
+    });
+  }
+
+  private isPlainReceiver(object: Type): boolean {
+    const base = this.apparent(object);
+
+    switch (base.kind) {
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Array:
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Boolean:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private namespaceMissingCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): void {
+    const object = member.object;
+    if (object.kind != ExprKind.Name || !this.isGlobalUse(object, module)) {
+      return;
+    }
+
+    const code = this.namespaceCode(object.name);
+    if (code == undefined) {
+      return;
+    }
+
+    this.looseArguments(expr.args, module);
+    this.report(module, member.loc, code, {
+      word: member.name,
+      first: object.name,
+    });
+  }
+
+  private namespaceCode(name: string): Code | undefined {
+    switch (name) {
+      case "Math":
+      case "Number":
+        return Code.NamespaceMemberMissing;
+      case "JSON":
+        return Code.JsonMemberMissing;
+      case "Object":
+        return Code.ObjectStaticRefused;
+      case "Promise":
+        return Code.PromiseStaticRefused;
+      case "console":
+        return Code.ConsoleMemberRefused;
+      default:
+        return undefined;
+    }
+  }
+
+  private mathMemberCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): boolean {
+    const object = member.object;
+    const isMath =
+      object.kind == ExprKind.Name &&
+      object.name == kMathName &&
+      this.isGlobalUse(object, module);
+    if (!isMath) {
+      return false;
+    }
+
+    const word = member.name;
+    if (kMathConstants.includes(word)) {
+      this.looseArguments(expr.args, module);
+      this.report(module, member.loc, Code.MathConstantCalled, { word });
+
+      return true;
+    }
+
+    const isRanged = word == "max" || word == "min";
+    if (!isRanged || expr.args.length > 0) {
+      return false;
+    }
+
+    const first = this.mathEndSign(word);
+
+    this.report(module, member.loc, Code.MathNoValues, { word, first });
+
+    return true;
+  }
+
+  private mathEndSign(word: string): string {
+    if (word == "max") {
+      return "-";
+    }
+
+    return "";
+  }
+
+  private positionShape(object: Type, name: string): Type | undefined {
+    if (object.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    const open = this.store.plain(TypeKind.Unknown);
+    const receiver = this.resolver.libraryShape(kArrayShape, [open]);
+    if (receiver == undefined) {
+      return undefined;
+    }
+
+    return this.receiverMember(receiver, name, true);
+  }
+
+  private maskOf(object: Type, method: Type): boolean[] {
+    if (object.kind == TypeKind.Dict) {
+      return [];
+    }
+
+    return this.positionsOf(method);
+  }
+
+  private positionsOf(method: Type): boolean[] {
+    if (method.kind != TypeKind.Function) {
+      return [];
+    }
+
+    return method.shape.params.map((param) => {
+      const base = this.definedType(param.type);
+
+      return base.kind == TypeKind.Int && !base.wraps;
+    });
+  }
+
+  private receiverKind(object: Type): CallKind {
+    const base = this.apparent(object);
+
+    switch (base.kind) {
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Array:
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Dict:
+        return CallKind.Positional;
+      default:
+        return CallKind.Library;
+    }
+  }
+
+  private namespaceKind(member: MemberExpr, module: int): CallKind {
+    const object = member.object;
+    const isMath =
+      object.kind == ExprKind.Name &&
+      object.name == kMathName &&
+      this.isGlobalUse(object, module);
+    if (isMath) {
+      return CallKind.Math;
+    }
+
+    return CallKind.Library;
   }
 
   private isRegexSplit(expr: CallExpr, member: MemberExpr): boolean {
@@ -276,9 +537,39 @@ partial class ExpressionTypes {
     const members = declared.members.filter(
       (one) => one.name == name && !one.isStatic,
     );
+    if (members.length == 0) {
+      return this.parentMember(instance, name, isCalled);
+    }
+
+    return this.declaredForm(instance, declared, members, isCalled);
+  }
+
+  private declaredStatic(
+    instance: InstanceType,
+    name: string,
+  ): Type | undefined {
+    const opened = this.program.modules[instance.module];
+    const declared = opened?.declared.find((one) => one.loc == instance.loc);
+    if (declared == undefined) {
+      return undefined;
+    }
+
+    const members = declared.members.filter(
+      (one) => one.name == name && one.isStatic,
+    );
+
+    return this.declaredForm(instance, declared, members, true);
+  }
+
+  private declaredForm(
+    instance: InstanceType,
+    declared: DeclaredClass,
+    members: DeclaredMember[],
+    isCalled: boolean,
+  ): Type | undefined {
     const member = members[0];
     if (member == undefined) {
-      return this.parentMember(instance, name, isCalled);
+      return undefined;
     }
 
     const form = member.form;

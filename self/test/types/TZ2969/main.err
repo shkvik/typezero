@@ -1,0 +1,3 @@
+main.tz:2:14: error TZ2969: 'Promise' needs the type of its value, e.g. 'Promise<int>' or 'Promise<void>'
+let pending: Promise = Promise.resolve(1);
+             ^

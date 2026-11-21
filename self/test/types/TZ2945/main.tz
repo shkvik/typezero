@@ -1,0 +1,2 @@
+// repeat takes a whole count.
+console.log("ab".repeat("2"), "ab".repeat(2));

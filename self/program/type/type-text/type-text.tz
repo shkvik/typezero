@@ -2,6 +2,7 @@ import { TypeStore } from "../type-store/type-store.tz";
 import {
   ArrayType,
   Change,
+  ClassType,
   DictKind,
   DictType,
   FunctionShape,
@@ -90,9 +91,23 @@ export class TypeText {
         return this.templateText(type);
       case TypeKind.Operation:
         return this.operationText(type.shape);
+      case TypeKind.Class:
+        return this.classText(type);
       default:
         return "?";
     }
+  }
+
+  private classText(type: ClassType): string {
+    const instance = this.of(type.instance);
+    if (type.exact) {
+      return `typeof ${instance}`;
+    }
+    if (type.instance.kind == TypeKind.AnyObject) {
+      return "Constructor";
+    }
+
+    return `Constructor<${instance}>`;
   }
 
   private templateText(type: TemplateType): string {
@@ -295,6 +310,10 @@ export class TypeText {
   }
 
   private fieldText(field: ObjectField): string {
+    if (field.method ?? false) {
+      return `${field.name}()`;
+    }
+
     const type = this.of(field.type);
     const name = this.fieldName(field);
 
@@ -361,6 +380,10 @@ export class TypeText {
     }
 
     const returned = this.of(shape.returned);
+    if (shape.sent.kind == TypeKind.Void) {
+      return `${name}<${yielded}, ${returned}>`;
+    }
+
     const sent = this.of(shape.sent);
 
     return `${name}<${yielded}, ${returned}, ${sent}>`;

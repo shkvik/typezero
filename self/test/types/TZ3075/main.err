@@ -1,0 +1,3 @@
+main.tz:11:22: error TZ3075: the value is a 'Date' or undefined; test it with '!= undefined'
+const isDate = found instanceof Date;
+                     ^

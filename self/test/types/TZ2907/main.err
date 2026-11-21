@@ -1,0 +1,3 @@
+main.tz:7:5: error TZ2907: the members of 'A | B' have fields 'v' of different types, 'int' and 'string', so no value fits them all; narrow it first
+  x.v = 1;
+    ^

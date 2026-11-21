@@ -1,0 +1,5 @@
+// Iterator.from takes an array, a string or an iterator.
+const from = Iterator.from(5);
+const ok = Iterator.from([1, 2]);
+
+console.log(from, ok);

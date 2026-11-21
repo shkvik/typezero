@@ -1,0 +1,3 @@
+main.tz:2:21: error TZ3133: decimal.max() needs at least one value
+console.log(decimal.max());
+                    ^

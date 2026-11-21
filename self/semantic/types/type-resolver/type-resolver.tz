@@ -2,7 +2,9 @@ import "./partial/type-resolver.partial.builtins.tz";
 import "./partial/type-resolver.partial.forms.tz";
 import "./partial/type-resolver.partial.declared.tz";
 import "./partial/type-resolver.partial.aliases.tz";
+import "./partial/type-resolver.partial.alias-growth.tz";
 import "./partial/type-resolver.partial.enums.tz";
+import "./partial/type-resolver.partial.enum-values.tz";
 import "./partial/type-resolver.partial.modules.tz";
 import "./partial/type-resolver.partial.globals.tz";
 import "./partial/type-resolver.partial.operations.tz";
@@ -18,6 +20,7 @@ import "./partial/type-resolver.partial.constraints.tz";
 import "./partial/type-resolver.partial.methods.tz";
 import "./partial/type-resolver.partial.library.tz";
 import "./partial/type-resolver.partial.substitution.tz";
+import "./partial/type-resolver.partial.class-values.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   Details,
@@ -40,6 +43,7 @@ import { TypeRelation } from "../type-relation/type-relation.tz";
 import {
   AliasDoor,
   AliasOrigin,
+  EnumStep,
   ModuleRecord,
   TypeContext,
 } from "./types/type-resolver.types.tz";
@@ -62,6 +66,8 @@ export class TypeResolver {
   private readonly libraryShapes: Set<int>;
   private readonly aliasOrigins: Map<int, AliasOrigin>;
   private readonly extending: TypeAliasDecl[];
+  private readonly enumCache: Map<string, EnumStep[]>;
+  private readonly enumOpen: Set<string>;
   private quiet: int;
 
   public constructor(
@@ -86,6 +92,8 @@ export class TypeResolver {
     this.libraryShapes = new Set<int>();
     this.aliasOrigins = new Map<int, AliasOrigin>();
     this.extending = [];
+    this.enumCache = new Map<string, EnumStep[]>();
+    this.enumOpen = new Set<string>();
     this.quiet = 0;
 
     for (const scopes of resolved) {
@@ -144,6 +152,8 @@ export class TypeResolver {
         return this.intersection(ref, context);
       case TypeRefKind.Infer:
         return this.inferred(ref, context);
+      case TypeRefKind.TypeOf:
+        return this.typeOfClass(ref, context);
       default:
         return this.store.plain(TypeKind.Error);
     }
@@ -151,6 +161,9 @@ export class TypeResolver {
 
   public declaredAlias(module: int, decl: TypeAliasDecl): Type {
     const written: Type[] = [];
+
+    this.builtinAliasCheck(module, decl);
+    this.aliasGrowthCheck(module, decl);
 
     for (const param of decl.typeParams) {
       const name = param.name;
@@ -162,8 +175,8 @@ export class TypeResolver {
     return this.alias(module, decl, written);
   }
 
-  public declaredEnum(decl: EnumDecl): Type {
-    const values = this.enumValues(decl);
+  public declaredEnum(module: int, decl: EnumDecl): Type {
+    const values = this.enumValues(module, decl);
 
     return this.enumWhole(decl, values);
   }
@@ -184,7 +197,7 @@ export class TypeResolver {
     const record = this.record(context.module);
     const use = record?.uses.get(ref.loc);
     const symbol = use?.symbol;
-    if (symbol == undefined) {
+    if (symbol == undefined || this.isBuiltinShadow(symbol)) {
       return this.global(ref, context);
     }
 

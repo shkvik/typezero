@@ -1,0 +1,3 @@
+main.tz:2:21: error TZ3130: decimal() takes a string, a number or a decimal, found 'boolean'
+console.log(decimal(true));
+                    ^

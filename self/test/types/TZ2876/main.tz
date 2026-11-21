@@ -1,0 +1,5 @@
+// A built-in type keeps its name.
+type string = int;
+type Json = string | int;
+
+const text: string = "a";

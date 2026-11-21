@@ -1,0 +1,188 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  IndexExpr,
+  MemberExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { kJsonGlobalName } from "../const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private isJsonHolder(type: Type): boolean {
+    return this.definedType(type).kind == TypeKind.Json;
+  }
+
+  private jsonMethodCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): Type {
+    const holder = member.object;
+    const word = member.name;
+    const isVariable =
+      holder.kind == ExprKind.Name &&
+      this.targetOfName(holder, module)?.kind == SymbolKind.Variable;
+    if (isVariable && holder.kind == ExprKind.Name) {
+      this.report(module, member.loc, Code.JsonNoMethodNamed, {
+        word,
+        other: holder.name,
+      });
+    } else {
+      this.report(module, member.loc, Code.JsonNoMethod, { word });
+    }
+
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private jsonStaticCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): boolean {
+    const object = member.object;
+    const isJson =
+      object.kind == ExprKind.Name &&
+      object.name == kJsonGlobalName &&
+      this.isGlobalUse(object, module);
+    if (!isJson) {
+      return false;
+    }
+
+    const second = expr.args[1]?.expr;
+    if (member.name == "parse" && second != undefined) {
+      this.report(module, second.loc, Code.JsonReviver, kNoDetails);
+      this.nonNullArguments(expr, module);
+
+      return true;
+    }
+    if (member.name != "stringify") {
+      return false;
+    }
+
+    return this.stringifyCheck(expr, module);
+  }
+
+  private stringifyCheck(expr: CallExpr, module: int): boolean {
+    const value = expr.args[0]?.expr;
+    if (value == undefined || expr.args.length > 3) {
+      return false;
+    }
+
+    let isRefused = this.stringifiedValueCheck(value, module);
+    const replacer = expr.args[1]?.expr;
+    if (replacer != undefined && this.isGivenOption(replacer, module)) {
+      const type = this.typed(replacer, undefined, module);
+      if (type.kind != TypeKind.Error) {
+        this.report(module, replacer.loc, Code.JsonReplacer, kNoDetails);
+      }
+
+      isRefused = true;
+    }
+
+    const space = expr.args[2]?.expr;
+    if (space != undefined && this.isGivenOption(space, module)) {
+      const isSpace = this.spaceCheck(space, module);
+
+      isRefused = isRefused || !isSpace;
+    }
+    if (isRefused) {
+      this.nonNullArguments(expr, module);
+    }
+
+    return isRefused;
+  }
+
+  private nonNullArguments(expr: CallExpr, module: int): void {
+    for (const arg of expr.args) {
+      const value = arg.expr;
+      const isNull = value.kind == ExprKind.Name && this.isNullName(value, module);
+      if (!isNull) {
+        this.typed(value, undefined, module);
+      }
+    }
+  }
+
+  private stringifiedValueCheck(value: Expr, module: int): boolean {
+    this.quiet += 1;
+
+    const type = this.typed(value, undefined, module);
+
+    this.quiet -= 1;
+
+    if (type.kind == TypeKind.Void) {
+      this.report(module, value.loc, Code.JsonVoidValue, kNoDetails);
+
+      return true;
+    }
+
+    const base = this.definedType(type);
+    if (base.kind != TypeKind.Instance || this.isLibraryModule(base.module)) {
+      return false;
+    }
+
+    const entry = this.classMember(base, "toJSON").entry;
+    if (entry == undefined || entry.methods.length == 0) {
+      return false;
+    }
+
+    this.report(module, value.loc, Code.JsonToJsonClass, { word: base.name });
+
+    return true;
+  }
+
+  private isGivenOption(option: Expr, module: int): boolean {
+    if (option.kind == ExprKind.Undefined) {
+      return false;
+    }
+
+    return option.kind != ExprKind.Name || !this.isNullName(option, module);
+  }
+
+  private spaceCheck(space: Expr, module: int): boolean {
+    const type = this.typed(space, undefined, module);
+    const base = this.apparent(type);
+    const isFitting =
+      base.kind == TypeKind.Int ||
+      base.kind == TypeKind.Double ||
+      base.kind == TypeKind.String ||
+      base.kind == TypeKind.Template ||
+      base.kind == TypeKind.Error;
+    if (isFitting) {
+      return true;
+    }
+
+    this.report(module, space.loc, Code.JsonSpaceType, {
+      word: this.text.of(type),
+    });
+
+    return false;
+  }
+
+  private jsonIndexed(expr: IndexExpr, module: int): Type {
+    const key = this.typed(expr.index, undefined, module);
+    const base = this.apparent(key);
+    const json = this.store.plain(TypeKind.Json);
+    const isKey =
+      base.kind == TypeKind.Error ||
+      base.kind == TypeKind.String ||
+      base.kind == TypeKind.Template ||
+      base.kind == TypeKind.Int ||
+      base.kind == TypeKind.Double;
+    if (isKey) {
+      return this.optional(json);
+    }
+
+    this.report(module, expr.index.loc, Code.JsonKeyType, {
+      word: this.text.of(key),
+    });
+
+    return this.store.plain(TypeKind.Error);
+  }
+}

@@ -1,0 +1,32 @@
+// Nothing fits never.
+type Dir = "up" | "down" | "left";
+
+function partly(d: Dir): int {
+  switch (d) {
+    case "up":
+      return 1;
+    default: {
+      const rest: never = d;
+
+      return 0;
+    }
+  }
+}
+
+function fully(d: Dir): int {
+  switch (d) {
+    case "up":
+      return 1;
+    case "down":
+      return 2;
+    case "left":
+      return 3;
+    default: {
+      const rest: never = d;
+
+      return 0;
+    }
+  }
+}
+
+console.log(partly("up"), fully("up"));

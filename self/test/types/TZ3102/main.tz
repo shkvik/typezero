@@ -1,0 +1,12 @@
+// The errors of andThen make one union.
+function lists(flag: boolean): Result<int[], string[]> {
+  if (flag) {
+    return err(["none"]);
+  }
+
+  return ok([1]);
+}
+
+const next = lists(true).andThen((values) => err(values));
+
+console.log(next.isOk());

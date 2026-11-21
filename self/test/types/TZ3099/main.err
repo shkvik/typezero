@@ -1,0 +1,3 @@
+main.tz:11:28: error TZ3099: 'map' needs a function, found 'int'
+const changed = result.map(5);
+                           ^

@@ -1,0 +1,5 @@
+// A value that is a date is always an instance of Date.
+const date = new Date();
+const isDate = date instanceof Date;
+
+console.log(isDate);

@@ -1,0 +1,3 @@
+main.tz
+  2:6 enum Color = int
+  8:7 green: int

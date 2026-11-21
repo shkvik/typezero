@@ -1,0 +1,3 @@
+main.tz:4:18: error TZ3115: a Json has no method 'trim' until a check shows what it holds, e.g. 'if (Array.isArray(data)) data.trim(...)' or 'if (typeof data == "string") data.trim(...)'
+console.log(data.trim());
+                 ^

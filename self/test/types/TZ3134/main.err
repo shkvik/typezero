@@ -1,0 +1,3 @@
+main.tz:2:21: error TZ3134: 'decimal.sum' can only be called, e.g. 'decimal.max(a, b)'; decimal has the functions max, min and sum
+const sum = decimal.sum;
+                    ^

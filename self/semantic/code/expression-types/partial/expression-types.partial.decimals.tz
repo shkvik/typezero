@@ -74,13 +74,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const divisor = this.intConstant(expr.rhs, right, module);
-    const isZeroConstant = divisor != undefined && divisor == 0;
-    if (!isZeroConstant && !this.isZeroLiteral(expr.rhs)) {
-      return;
-    }
-
-    this.report(module, expr.rhs.loc, Code.DecimalDivisionByZero, kNoDetails);
+    this.decimalZeroCheck(expr.rhs, module);
   }
 
   private isZeroLiteral(expr: Expr): boolean {

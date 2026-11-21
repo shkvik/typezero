@@ -1,0 +1,3 @@
+main.tz
+  2:10 save: (string) => Result<void, string>
+  10:7 names: string[]

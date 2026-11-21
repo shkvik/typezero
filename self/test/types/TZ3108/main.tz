@@ -1,0 +1,5 @@
+// Result.combine takes an array of Results.
+const value = 5;
+const all = Result.combine(value);
+
+console.log(all);

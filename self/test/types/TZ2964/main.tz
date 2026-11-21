@@ -1,0 +1,6 @@
+// JSON.parse takes no type arguments.
+type Money = { amount: int };
+
+const money = JSON.parse<Money>("1");
+
+console.log(money);

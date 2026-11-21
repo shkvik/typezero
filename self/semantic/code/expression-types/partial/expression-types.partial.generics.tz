@@ -645,6 +645,9 @@ partial class ExpressionTypes {
 
       return this.store.plain(TypeKind.Error);
     }
+    if (this.growingCheck(draft, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
 
     this.literalArguments(draft, module);
 
@@ -730,6 +733,38 @@ partial class ExpressionTypes {
     const result = this.resolver.substitute(shape.result, bound);
 
     return { params, rest, result };
+  }
+
+  private growingCheck(draft: GenericDraft, module: int): boolean {
+    const params = draft.target.params;
+
+    for (const [index, type] of draft.bound) {
+      const param = params[index];
+      if (param == undefined || type == param) {
+        continue;
+      }
+      if (param.kind != TypeKind.TypeParameter) {
+        continue;
+      }
+
+      const probe = new Map<int, Type>();
+
+      probe.set(param.id, this.store.plain(TypeKind.Never));
+
+      if (this.resolver.substitute(type, probe) == type) {
+        continue;
+      }
+
+      this.report(module, draft.target.loc, Code.GenericGrowingSelf, {
+        word: draft.target.name,
+        first: this.text.of(type),
+        other: this.text.of(param),
+      });
+
+      return true;
+    }
+
+    return false;
   }
 
   private boundById(draft: GenericDraft): Map<int, Type> {

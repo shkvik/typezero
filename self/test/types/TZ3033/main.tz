@@ -1,0 +1,20 @@
+// '[Symbol.iterator]()' gives an iterator.
+class NotIterator {
+  public [Symbol.iterator](): int {
+    return 5;
+  }
+}
+
+class Range {
+  public *[Symbol.iterator](): Generator<int> {
+    yield 1;
+  }
+}
+
+for (const x of new NotIterator()) {
+  console.log(x);
+}
+
+for (const y of new Range()) {
+  console.log(y);
+}

@@ -1,0 +1,3 @@
+main.tz:2:20: error TZ2949: 'Object.assign' is not supported; only Object.keys, Object.values, Object.entries, Object.fromEntries and Object.groupBy are
+console.log(Object.assign({}, { a: 1 }));
+                   ^

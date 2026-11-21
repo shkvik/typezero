@@ -1,0 +1,3 @@
+main.tz:3:24: error TZ3171: a class can extend only a class, and this is a 'int'
+  return class extends count {};
+                       ^

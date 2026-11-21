@@ -1,0 +1,9 @@
+// The callback of flatMap of an iterator gives an array or an iterator.
+function* numbers(): Generator<int> {
+  yield 1;
+}
+
+const chars = numbers().flatMap((n) => `${n}`);
+const pairs = numbers().flatMap((n) => [n, n]);
+
+console.log(chars, pairs);

@@ -1,0 +1,6 @@
+// A double becomes an integer after rounding.
+const ratio: double = 2.5;
+const whole = ratio as int;
+const byte = ratio as uint8;
+
+console.log(whole, byte);

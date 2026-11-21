@@ -1,0 +1,9 @@
+// 'in' tells nothing when no member has the field.
+type Circle = { kind: "circle"; r: double };
+type Square = { kind: "square"; side: double };
+
+function never(s: Circle | Square): boolean {
+  return "z" in s;
+}
+
+console.log(never);

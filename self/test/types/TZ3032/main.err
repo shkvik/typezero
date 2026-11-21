@@ -1,0 +1,3 @@
+main.tz:20:13: error TZ3032: 'Plain' cannot be iterated, and the parameter 'Iterable<int>' of 'total' takes something that can: an array, a string, a Map, a Set, an iterator, or an object with '[Symbol.iterator]()'
+console.log(total(new Plain()));
+            ^

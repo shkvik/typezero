@@ -1,0 +1,8 @@
+// A constructor cannot take an Iterable yet.
+class Bag {
+  public constructor(items: Iterable<int>) {
+    console.log(items);
+  }
+}
+
+console.log(Bag);

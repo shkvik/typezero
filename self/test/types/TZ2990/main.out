@@ -1,0 +1,4 @@
+main.tz
+  2:6 type Endless<T> = { next?: Endless<T[]> }
+  3:6 type Chain<T> = { next?: Chain<T>; value: T }
+  5:7 chain: Chain<int>

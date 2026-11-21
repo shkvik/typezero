@@ -1,0 +1,3 @@
+main.tz:4:1: error TZ2913: an array is always truthy, even when empty, so '||=' never assigns; check its length: 'if (items.length == 0) items = ...'
+items ||= [3];
+^

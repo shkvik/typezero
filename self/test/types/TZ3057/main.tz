@@ -1,0 +1,5 @@
+// Hours are from 0 to 23.
+const date = new Date();
+
+date.setHours(24);
+console.log(date.getHours());

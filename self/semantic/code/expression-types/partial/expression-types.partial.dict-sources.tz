@@ -1,0 +1,561 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NewExpr,
+  Property,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  DictKind,
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  kBuiltinValueClasses,
+  kNoPlace,
+  kSetCombiners,
+  kUnnamedOperand,
+} from "../const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private dictSourceTyped(
+    expr: NewExpr,
+    dict: DictKind,
+    written: Type[],
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const first = written[0];
+    const second = written[1] ?? first;
+    const source = expr.args[0]?.expr;
+    if (first != undefined && second != undefined) {
+      const typed = this.store.dictOf(dict, first, second);
+
+      this.dictSourceCheck(source, dict, first, second, module);
+
+      return typed;
+    }
+
+    const goal = this.wantedDict(wanted, dict);
+    if (goal != undefined && goal.kind == TypeKind.Dict) {
+      this.dictSourceCheck(source, dict, goal.key, goal.value, module);
+
+      return goal;
+    }
+    if (source == undefined) {
+      const code = this.dictTypesCode(dict);
+
+      this.report(module, expr.loc, code, kNoDetails);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (dict == DictKind.Map) {
+      return this.mapFromPairs(source, module);
+    }
+
+    return this.setFromValues(source, module);
+  }
+
+  private wantedDict(wanted: Type | undefined, dict: DictKind): Type | undefined {
+    if (wanted == undefined) {
+      return undefined;
+    }
+
+    const parts = this.unionMembers(this.definedType(wanted));
+    const found = parts.filter(
+      (part) => part.kind == TypeKind.Dict && part.dict == dict,
+    );
+    if (found.length != 1) {
+      return undefined;
+    }
+
+    return found[0];
+  }
+
+  private dictTypesCode(dict: DictKind): Code {
+    if (dict == DictKind.Map) {
+      return Code.NewMapNeedsTypes;
+    }
+
+    return Code.NewSetNeedsType;
+  }
+
+  private dictSourceCheck(
+    source: Expr | undefined,
+    dict: DictKind,
+    key: Type,
+    value: Type,
+    module: int,
+  ): void {
+    if (source == undefined || source.kind != ExprKind.ArrayLit) {
+      return;
+    }
+
+    const element = this.dictElement(dict, key, value);
+    const list = this.store.arrayOf(element);
+
+    this.checked(source, list, module, kNoPlace);
+  }
+
+  private dictElement(dict: DictKind, key: Type, value: Type): Type {
+    if (dict == DictKind.Map) {
+      return this.store.tupleOf({
+        items: [key, value],
+        readonly: false,
+        required: 2,
+        rest: -1,
+      });
+    }
+
+    return key;
+  }
+
+  private mapFromPairs(source: Expr, module: int): Type {
+    const error = this.store.plain(TypeKind.Error);
+    if (source.kind != ExprKind.ArrayLit) {
+      this.typed(source, undefined, module);
+
+      return error;
+    }
+
+    let key: Type | undefined = undefined;
+    let value: Type | undefined = undefined;
+
+    for (const element of source.elements) {
+      const pair = element.expr;
+      if (element.spread || pair.kind != ExprKind.ArrayLit) {
+        const found = this.typed(pair, undefined, module);
+
+        this.report(module, source.loc, Code.MapNotPairs, {
+          word: this.text.of(this.widened(found)),
+        });
+
+        return error;
+      }
+
+      const parts = pair.elements;
+      const head = parts[0]?.expr;
+      const tail = parts[1]?.expr;
+      if (parts.length != 2 || head == undefined || tail == undefined) {
+        return error;
+      }
+
+      const keyType = this.widened(this.typed(head, undefined, module));
+      const valueType = this.widened(this.typed(tail, undefined, module));
+
+      if (key != undefined && key != keyType) {
+        this.pairsDifferReport(head, Code.MapKeysDiffer, key, keyType, module);
+
+        return error;
+      }
+      if (value != undefined && value != valueType) {
+        this.pairsDifferReport(tail, Code.MapValuesDiffer, value, valueType, module);
+
+        return error;
+      }
+
+      key = keyType;
+      value = valueType;
+    }
+
+    if (key == undefined || value == undefined) {
+      return error;
+    }
+
+    return this.store.dictOf(DictKind.Map, key, value);
+  }
+
+  private pairsDifferReport(
+    expr: Expr,
+    code: Code,
+    first: Type,
+    second: Type,
+    module: int,
+  ): void {
+    this.report(module, expr.loc, code, {
+      first: this.text.of(first),
+      second: this.text.of(second),
+    });
+  }
+
+  private setFromValues(source: Expr, module: int): Type {
+    const type = this.typed(source, undefined, module);
+    const base = this.apparent(type);
+    const error = this.store.plain(TypeKind.Error);
+
+    switch (base.kind) {
+      case TypeKind.Array:
+        return this.store.dictOf(DictKind.Set, base.item, base.item);
+      case TypeKind.Dict:
+        return this.store.dictOf(DictKind.Set, base.value, base.value);
+      default:
+        return error;
+    }
+  }
+
+  private setCombineCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): boolean {
+    const base = this.definedType(object);
+    const arg = expr.args[0]?.expr;
+    const isSet = base.kind == TypeKind.Dict && base.dict == DictKind.Set;
+    if (!isSet || arg == undefined || !kSetCombiners.includes(member.name)) {
+      return false;
+    }
+    if (base.kind != TypeKind.Dict) {
+      return false;
+    }
+
+    this.quiet += 1;
+
+    const given = this.typed(arg, undefined, module);
+
+    this.quiet -= 1;
+
+    const other = this.definedType(given);
+    const isDict = other.kind == TypeKind.Dict && other.dict != DictKind.Record;
+    if (isDict || other.kind == TypeKind.Error) {
+      return false;
+    }
+
+    this.report(module, arg.loc, Code.SetCombineNeedsSet, {
+      word: member.name,
+      first: this.text.of(base.value),
+      other: this.text.of(given),
+    });
+
+    return true;
+  }
+
+  private recordTargetCheck(target: Expr, module: int): boolean {
+    if (target.kind != ExprKind.Member && target.kind != ExprKind.Index) {
+      return false;
+    }
+
+    const holder = target.object;
+
+    this.quiet += 1;
+
+    const object = this.typed(holder, undefined, module);
+
+    this.quiet -= 1;
+
+    const base = this.definedType(object);
+    if (base.kind != TypeKind.Dict || base.dict != DictKind.Record) {
+      return false;
+    }
+
+    const word = this.recordKeyText(target);
+    const code = this.recordMissingCode(base.value);
+
+    this.report(module, target.loc, code, { word });
+
+    return true;
+  }
+
+  private recordKeyText(target: Expr): string {
+    if (target.kind == ExprKind.Member) {
+      const holder = this.hintText(target.object, kUnnamedOperand);
+
+      return `${holder}.${target.name}`;
+    }
+    if (target.kind == ExprKind.Index) {
+      const holder = this.hintText(target.object, kUnnamedOperand);
+
+      return `${holder}[k]`;
+    }
+
+    return "";
+  }
+
+  private recordValueOf(holder: Expr, module: int): Type | undefined {
+    this.quiet += 1;
+
+    const object = this.typed(holder, undefined, module);
+
+    this.quiet -= 1;
+
+    const base = this.definedType(object);
+    if (base.kind != TypeKind.Dict || base.dict != DictKind.Record) {
+      return undefined;
+    }
+
+    return base.value;
+  }
+
+  private recordMissingCode(value: Type): Code {
+    const base = this.apparent(value);
+    if (base.kind == TypeKind.String || base.kind == TypeKind.Template) {
+      return Code.RecordTextKeyMissing;
+    }
+
+    return Code.RecordKeyMissing;
+  }
+
+  private recordMemberTyped(expr: MemberExpr, object: Type): Type | undefined {
+    const base = this.definedType(object);
+    if (base.kind != TypeKind.Dict || base.dict != DictKind.Record) {
+      return undefined;
+    }
+
+    return this.optional(base.value);
+  }
+
+  private recordMethodCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): boolean {
+    const base = this.definedType(object);
+    if (base.kind != TypeKind.Dict || base.dict != DictKind.Record) {
+      return false;
+    }
+    if (member.name != "hasOwnProperty") {
+      return false;
+    }
+
+    const other = this.tupleText(member.object);
+
+    this.looseArguments(expr.args, module);
+    this.report(module, member.loc, Code.RecordHasOwn, {
+      word: `${other}.${member.name}`,
+      other,
+    });
+
+    return true;
+  }
+
+  private spreadCheck(property: Property, module: int): void {
+    this.quiet += 1;
+
+    const type = this.typed(property.value, undefined, module);
+
+    this.quiet -= 1;
+
+    if (this.hasMethodFields(type)) {
+      this.report(module, property.value.loc, Code.SpreadMethods, kNoDetails);
+
+      return;
+    }
+
+    const code = this.spreadCode(type);
+    if (code == undefined) {
+      return;
+    }
+
+    this.report(module, property.value.loc, code, {
+      word: this.text.of(type),
+    });
+  }
+
+  private spreadCode(type: Type): Code | undefined {
+    if (this.isOptional(type)) {
+      return this.optionalSpreadCode(type);
+    }
+
+    const base = this.apparent(type);
+
+    switch (base.kind) {
+      case TypeKind.Array:
+      case TypeKind.Tuple:
+      case TypeKind.String:
+      case TypeKind.Template:
+        return Code.SpreadArrayIndices;
+      case TypeKind.Dict:
+        if (base.dict == DictKind.Record) {
+          return undefined;
+        }
+
+        return Code.SpreadNotObject;
+      case TypeKind.Instance:
+        if (this.isBuiltinValue(base)) {
+          return Code.SpreadNotObject;
+        }
+
+        return undefined;
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.Boolean:
+        return Code.SpreadNotObject;
+      default:
+        return undefined;
+    }
+  }
+
+  private optionalSpreadCode(type: Type): Code {
+    const base = this.apparent(this.definedType(type));
+
+    switch (base.kind) {
+      case TypeKind.Array:
+      case TypeKind.Tuple:
+        return Code.SpreadArrayIndices;
+      case TypeKind.Object:
+      case TypeKind.AnyObject:
+      case TypeKind.Error:
+        return Code.SpreadMaybeUndefined;
+      case TypeKind.Dict:
+        if (base.dict == DictKind.Record) {
+          return Code.SpreadMaybeUndefined;
+        }
+
+        return Code.SpreadNotObject;
+      case TypeKind.Instance:
+        if (this.isBuiltinValue(base)) {
+          return Code.SpreadNotObject;
+        }
+
+        return Code.SpreadMaybeUndefined;
+      default:
+        return Code.SpreadNotObject;
+    }
+  }
+
+  private isBuiltinValue(type: InstanceType): boolean {
+    const isLibrary = this.isLibraryModule(type.module);
+
+    return isLibrary && kBuiltinValueClasses.includes(type.name);
+  }
+
+  private recordSpreadCheck(property: Property, module: int): boolean {
+    this.quiet += 1;
+
+    const type = this.typed(property.value, undefined, module);
+
+    this.quiet -= 1;
+
+    const base = this.apparent(type);
+    const code = this.recordSpreadCode(base);
+    if (code == undefined) {
+      return false;
+    }
+
+    this.report(module, property.value.loc, code, {
+      word: this.text.of(type),
+    });
+
+    return true;
+  }
+
+  private recordSpreadCode(base: Type): Code | undefined {
+    switch (base.kind) {
+      case TypeKind.Dict:
+        if (base.dict == DictKind.Record) {
+          return undefined;
+        }
+
+        return Code.RecordSpreadCollection;
+      case TypeKind.Array:
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.Boolean:
+      case TypeKind.String:
+      case TypeKind.Template:
+        return Code.RecordSpreadNotObject;
+      default:
+        return undefined;
+    }
+  }
+
+  private objectKeysCheck(expr: CallExpr, module: int): void {
+    const callee = expr.callee;
+    if (callee.kind != ExprKind.Member) {
+      return;
+    }
+
+    const holder = callee.object;
+    const isObject =
+      holder.kind == ExprKind.Name &&
+      holder.name == "Object" &&
+      this.isGlobalUse(holder, module);
+    if (!isObject) {
+      return;
+    }
+    if (callee.name == "groupBy") {
+      return this.groupByKeysCheck(expr, module);
+    }
+    if (callee.name == "fromEntries") {
+      this.fromEntriesKeysCheck(expr, module);
+    }
+  }
+
+  private groupByKeysCheck(expr: CallExpr, module: int): void {
+    const items = expr.args[0]?.expr;
+    const callback = expr.args[1]?.expr;
+    if (items == undefined || callback == undefined) {
+      return;
+    }
+    if (callback.kind != ExprKind.Function) {
+      return;
+    }
+
+    this.quiet += 1;
+
+    const list = this.typed(items, undefined, module);
+    const element = this.elementOf(this.apparent(list));
+    const result = this.store.plain(TypeKind.Error);
+    const params = [{ type: element, optional: false }];
+    const wanted = this.store.functionOf({ params, rest: false, result });
+    const typed = this.typed(callback, wanted, module);
+
+    this.quiet -= 1;
+
+    if (typed.kind != TypeKind.Function) {
+      return;
+    }
+
+    const key = this.apparent(typed.shape.result);
+    const isNumeric =
+      key.kind == TypeKind.Int || key.kind == TypeKind.Double;
+    if (!isNumeric) {
+      return;
+    }
+
+    this.report(module, callback.loc, Code.GroupByKeys, {
+      word: this.text.of(key),
+    });
+  }
+
+  private fromEntriesKeysCheck(expr: CallExpr, module: int): void {
+    const pairs = expr.args[0]?.expr;
+    if (pairs == undefined || pairs.kind != ExprKind.ArrayLit) {
+      return;
+    }
+
+    const first = pairs.elements[0]?.expr;
+    if (first == undefined || first.kind != ExprKind.ArrayLit) {
+      return;
+    }
+
+    const head = first.elements[0]?.expr;
+    if (head == undefined) {
+      return;
+    }
+
+    this.quiet += 1;
+
+    const key = this.apparent(this.typed(head, undefined, module));
+
+    this.quiet -= 1;
+
+    const isNumeric =
+      key.kind == TypeKind.Int || key.kind == TypeKind.Double;
+    if (!isNumeric) {
+      return;
+    }
+
+    this.report(module, pairs.loc, Code.FromEntriesKeys, {
+      word: this.text.of(key),
+    });
+  }
+}

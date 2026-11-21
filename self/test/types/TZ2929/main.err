@@ -1,0 +1,3 @@
+main.tz:2:17: error TZ2929: 'as' is not supported; declare the type of the variable instead, e.g. 'let x: int[] = ...'
+const list = [] as int[];
+                ^

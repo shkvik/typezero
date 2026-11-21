@@ -1,0 +1,2 @@
+// Math takes numbers.
+console.log(Math.sqrt("x"), Math.sqrt(2.0));

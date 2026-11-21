@@ -1,0 +1,3 @@
+main.tz:10:34: error TZ3102: the Result has errors of 'string[]' and the function given to 'andThen' returns errors of 'int[]', which no union holds: 'string[]' and 'int[]' cannot be told apart when the program runs: both are arrays; use one array type, e.g. '(string | int)[]'; convert one with 'mapErr'
+const next = lists(true).andThen((values) => err(values));
+                                 ^

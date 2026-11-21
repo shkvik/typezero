@@ -1,0 +1,3 @@
+main.tz:2:23: error TZ3136: this decimal is out of range: a decimal has at most 10000001 digits before the point
+const huge: decimal = 1e10000001;
+                      ^

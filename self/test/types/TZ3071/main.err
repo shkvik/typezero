@@ -1,0 +1,3 @@
+main.tz:3:20: error TZ3071: '+' with a date joins texts in JavaScript (the date as toString() writes it); to move a date by milliseconds write 'new Date(d.getTime() + ms)'
+const later = date + 1;
+                   ^

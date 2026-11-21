@@ -1,0 +1,3 @@
+main.tz:6:7: error TZ2926: 'report' always holds a function at this point, so the condition is always true; drop the check
+  if (report) {
+      ^

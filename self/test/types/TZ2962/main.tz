@@ -1,0 +1,4 @@
+// escape is no value either.
+const names = ["x y"].map(escape);
+
+console.log(names);

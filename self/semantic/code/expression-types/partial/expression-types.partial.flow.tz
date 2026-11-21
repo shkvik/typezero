@@ -6,6 +6,7 @@ import {
   BinaryOp,
   Expr,
   ExprKind,
+  IndexExpr,
   MemberExpr,
   PropertyKind,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
@@ -13,12 +14,18 @@ import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.
 import { Stmt } from "../../../../program/ast/types/ast.types.statements.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
-import { kDot, kNoPlace, kThisName } from "../const/expression-types.const.tz";
+import {
+  kDot,
+  kHiddenMark,
+  kNoPlace,
+  kThisName,
+} from "../const/expression-types.const.tz";
 import {
   BoundSide,
   DeclaredVariable,
   Destination,
   ParamSlot,
+  TruthUse,
   ValueRecord,
 } from "../types/expression-types.types.tz";
 
@@ -95,7 +102,18 @@ partial class ExpressionTypes {
 
     this.writtenTargets.add(target);
 
-    if (this.dictTargetCheck(target, module)) {
+    if (this.logicalTargetCheck(expr, module)) {
+      this.typed(expr.value, undefined, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const isCompound = expr.op != undefined && expr.op != BinaryOp.Nullish;
+    const isRefused =
+      this.dictTargetCheck(target, module) ||
+      this.unionTargetCheck(target, module) ||
+      (isCompound && this.recordTargetCheck(target, module));
+    if (isRefused) {
       this.typed(expr.value, undefined, module);
 
       return this.store.plain(TypeKind.Error);
@@ -105,6 +123,13 @@ partial class ExpressionTypes {
       this.fieldSetMark(target, module);
 
       return this.store.plain(TypeKind.Error);
+    }
+
+    const source = expr.value;
+    const isMade =
+      source.kind == ExprKind.Name && source.name.startsWith(kHiddenMark);
+    if (target.kind == ExprKind.Index && !isMade) {
+      this.arrayWriteCheck(target, expr.op != undefined, module);
     }
 
     const key = this.pathKey(target, module);
@@ -120,6 +145,22 @@ partial class ExpressionTypes {
 
     if (expr.op == BinaryOp.Nullish) {
       this.nullishTargetCheck(expr, declared, module);
+    }
+    const isOwnTarget = !this.isLibraryTarget(target, module);
+    const tested = current ?? declared;
+
+    this.decimalAssignCheck(expr, tested, module);
+
+    if (isOwnTarget && this.compoundUndefinedCheck(expr, tested, module)) {
+      this.typed(expr.value, undefined, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (expr.op == BinaryOp.LogOr || expr.op == BinaryOp.LogAnd) {
+      const tested = current ?? declared;
+      const use = this.assignUse(expr.op);
+
+      this.checkTruthy(target, tested, use, expr.value, module);
     }
 
     const wanted = this.assignedWanted(expr.op, declared);
@@ -151,6 +192,139 @@ partial class ExpressionTypes {
     this.assignedBounds(expr, module);
 
     return given;
+  }
+
+  private tupleWriteCheck(
+    target: IndexExpr,
+    tuple: Type,
+    module: int,
+  ): void {
+    const index = target.index;
+    if (tuple.kind != TypeKind.Tuple || !tuple.readonly) {
+      return;
+    }
+    if (index.kind != ExprKind.IntLit) {
+      return;
+    }
+
+    this.report(module, target.loc, Code.ObjectReadOnlyField, {
+      word: `${index.value}`,
+      first: this.text.of(tuple),
+    });
+  }
+
+  private compoundUndefinedCheck(
+    expr: AssignExpr,
+    tested: Type,
+    module: int,
+  ): boolean {
+    const op = expr.op;
+    const isArithmetic =
+      op != undefined &&
+      op != BinaryOp.LogOr &&
+      op != BinaryOp.LogAnd &&
+      op != BinaryOp.Nullish;
+    const isMaybe =
+      this.isOptional(tested) || tested.kind == TypeKind.Undefined;
+    if (!isArithmetic || !isMaybe || op == undefined) {
+      return false;
+    }
+
+    this.quiet += 1;
+
+    const given = this.typed(expr.value, undefined, module);
+
+    this.quiet -= 1;
+
+    this.report(module, expr.loc, Code.OperandTypesUndefined, {
+      first: this.text.of(tested),
+      second: this.text.of(given),
+      other: `${this.operatorText(op)}=`,
+    });
+
+    return true;
+  }
+
+  private logicalTargetCheck(expr: AssignExpr, module: int): boolean {
+    const op = expr.op;
+    const isLogical = op == BinaryOp.LogAnd || op == BinaryOp.LogOr;
+    if (!isLogical || this.isSimpleTarget(expr.target)) {
+      return false;
+    }
+
+    const word = this.logicalAssignWord(op == BinaryOp.LogAnd);
+
+    this.report(module, expr.target.loc, Code.LogicalAssignSimple, { word });
+
+    return true;
+  }
+
+  private logicalAssignWord(isAnd: boolean): string {
+    if (isAnd) {
+      return "&&=";
+    }
+
+    return "||=";
+  }
+
+  private isSimpleTarget(target: Expr): boolean {
+    switch (target.kind) {
+      case ExprKind.Name:
+        return true;
+      case ExprKind.Member:
+        return !target.optional && this.isSimpleChain(target.object);
+      case ExprKind.Index:
+        return (
+          !target.optional &&
+          this.isSimpleChain(target.object) &&
+          this.isSimpleChain(target.index)
+        );
+      default:
+        return false;
+    }
+  }
+
+  private isSimpleChain(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.Name:
+      case ExprKind.IntLit:
+      case ExprKind.StringLit:
+        return true;
+      case ExprKind.Member:
+        return !expr.optional && this.isSimpleChain(expr.object);
+      default:
+        return false;
+    }
+  }
+
+  private arrayWriteCheck(
+    target: IndexExpr,
+    isCompound: boolean,
+    module: int,
+  ): void {
+    this.quiet += 1;
+
+    const object = this.typed(target.object, undefined, module);
+
+    this.quiet -= 1;
+
+    const base = this.definedType(object);
+    if (base.kind == TypeKind.Tuple) {
+      return this.tupleWriteCheck(target, base, module);
+    }
+    if (base.kind != TypeKind.Array) {
+      return;
+    }
+
+    this.writeIndexCheck(target, isCompound, module);
+  }
+
+  private assignUse(op: BinaryOp | undefined): TruthUse {
+    if (op == BinaryOp.LogOr) {
+      return TruthUse.OrAssign;
+    }
+
+    return TruthUse.AndAssign;
   }
 
   private assignedDeclared(target: Expr, module: int): Type | undefined {
@@ -276,6 +450,12 @@ partial class ExpressionTypes {
     if (this.dictTargetCheck(target, module)) {
       return this.store.plain(TypeKind.Error);
     }
+    if (target.kind == ExprKind.Index) {
+      this.arrayWriteCheck(target, true, module);
+    }
+    if (this.recordTargetCheck(target, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
 
     this.updateTargetCheck(target, module);
 
@@ -358,6 +538,7 @@ partial class ExpressionTypes {
 
     const scratch: ValueRecord = {
       uses: record.uses,
+      hidden: record.hidden,
       variables: new Map<int, DeclaredVariable>(),
       functions: new Map<int, FunctionDecl>(),
       params: new Map<int, ParamSlot>(),

@@ -1,0 +1,4 @@
+// The keys of a Map have one type.
+const mixed = new Map([["a", 1], [2, 2]]);
+
+console.log(mixed);

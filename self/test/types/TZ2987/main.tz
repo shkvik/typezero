@@ -1,0 +1,10 @@
+// A generic function is declared at the top level.
+function host(): int {
+  function inner<T>(x: T): T {
+    return x;
+  }
+
+  return inner(1);
+}
+
+console.log(host());

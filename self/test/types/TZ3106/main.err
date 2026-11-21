@@ -1,0 +1,3 @@
+main.tz:2:20: error TZ3106: 'Result.join' does not exist; Result has 'combine' and 'combineWithAllErrors'
+const all = Result.join([ok(1)]);
+                   ^

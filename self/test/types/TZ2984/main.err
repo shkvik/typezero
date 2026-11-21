@@ -1,0 +1,3 @@
+main.tz:3:12: error TZ2984: '||' cannot test a value of type 'T | undefined': 'T' may be a number, and 0 would count as false; give a default with '??': 'xs[0] ?? d'
+  return xs[0] || d;
+           ^

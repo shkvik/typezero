@@ -1,0 +1,2 @@
+// A text written in the code is a decimal number.
+console.log(decimal("12abc"));

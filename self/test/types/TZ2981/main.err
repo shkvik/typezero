@@ -1,0 +1,6 @@
+main.tz:6:13: error TZ2981: 'first' is generic, so a value of it needs its type arguments, e.g. 'first<int>', or a function type where it goes
+const fs = [first];
+            ^
+main.tz:7:13: error TZ2981: 'first' is generic, so a value of it needs its type arguments, e.g. 'first<int>', or a function type where it goes
+let later = first;
+            ^

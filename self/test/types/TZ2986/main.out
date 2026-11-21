@@ -1,0 +1,3 @@
+main.tz
+  2:10 keep: (T, T) => T
+  3:7 value: T

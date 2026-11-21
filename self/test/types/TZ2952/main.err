@@ -1,0 +1,3 @@
+main.tz:2:18: error TZ2952: 'Math.PI' is a number, not a function
+console.log(Math.PI(), Math.PI);
+                 ^

@@ -1,0 +1,3 @@
+main.tz:11:37: error TZ3098: 'unwrapOr' gives 'int[]' for an Ok and 'string[]' otherwise, and no type holds both; say what each gives with 'match'
+const values = lists(true).unwrapOr(fallback);
+                                    ^

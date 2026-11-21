@@ -1,0 +1,9 @@
+interface Shape {
+  name: string;
+  area(): double;
+}
+
+// A literal gives every member of its type.
+const shape: Shape = { area() { return 1.0; } };
+
+console.log(shape.area());

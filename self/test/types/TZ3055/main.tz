@@ -1,0 +1,5 @@
+// The last day of February is day 0 of March.
+const date = new Date();
+
+date.setMonth(1, 30);
+console.log(date.getDate());

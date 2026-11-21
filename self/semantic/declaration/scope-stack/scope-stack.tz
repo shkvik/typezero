@@ -82,6 +82,10 @@ export class ScopeStack {
     }
   }
 
+  public currentDepth(): int {
+    return this.depth;
+  }
+
   public isReadable(entry: ScopeEntry): boolean {
     return entry.live || entry.depth != this.depth;
   }

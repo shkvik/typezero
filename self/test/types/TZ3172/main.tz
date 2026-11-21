@@ -1,0 +1,6 @@
+// ConstructorArgs belongs to the constructor of a class that extends.
+function plain(...args: ConstructorArgs): void {
+  console.log(args);
+}
+
+console.log(plain);

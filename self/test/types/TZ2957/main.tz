@@ -1,0 +1,13 @@
+// A Promise of a Result in a variable is awaited.
+async function load(): Promise<Result<int, string>> {
+  return ok(1);
+}
+
+async function main(): Promise<void> {
+  const pending = load();
+  const used = await load();
+
+  console.log(used);
+}
+
+console.log(main);

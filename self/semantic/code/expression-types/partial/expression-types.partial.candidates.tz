@@ -160,6 +160,12 @@ partial class ExpressionTypes {
         }
 
         return;
+      case TypeKind.Class:
+        if (actual.kind == TypeKind.Class) {
+          this.inferPair(set, pattern.instance, actual.instance);
+        }
+
+        return;
       default:
         return this.inferHolder(set, pattern, actual);
     }

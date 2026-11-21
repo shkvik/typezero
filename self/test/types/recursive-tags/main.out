@@ -1,13 +1,13 @@
 main.tz
   2:6 enum Kind = int
   7:6 type Leaf = { kind: 0; value: int }
-  8:6 type Pair = { kind: 1; left: Node; right: Node }
+  8:6 type Pair = { kind: 1; left: Leaf | Pair; right: Leaf | Pair }
   9:6 type Node = Leaf | Pair
-  10:6 type Holder = { node?: Node }
+  10:6 type Holder = { node?: Leaf | Pair }
   12:10 leafValue: (Holder) => int
-  13:9 node: Node | undefined
+  13:9 node: Leaf | Pair | undefined
   14:9 isLeaf: boolean
-  22:10 pairLeft: (Node | undefined) => boolean
-  26:7 leaf: Node
+  22:10 pairLeft: (Leaf | Pair | undefined) => boolean
+  26:7 leaf: Leaf | Pair
   27:7 first: int
   28:7 second: boolean

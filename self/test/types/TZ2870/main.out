@@ -1,0 +1,4 @@
+main.tz
+  2:6 enum First = int
+  6:6 enum Second = int
+  10:7 a: int

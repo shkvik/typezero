@@ -1,0 +1,5 @@
+// An index or position of a string or an array is an integer.
+const text = "abc";
+const list = [1, 2, 3];
+
+console.log(text.slice("1"), text.charAt("0"), list.slice(true));

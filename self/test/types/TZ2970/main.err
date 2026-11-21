@@ -1,0 +1,3 @@
+main.tz:2:14: error TZ2970: 'Promise' takes one type argument, the type of its value, e.g. 'Promise<int>'
+let pending: Promise<int, int> = Promise.resolve(1);
+             ^

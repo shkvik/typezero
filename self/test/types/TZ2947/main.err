@@ -1,0 +1,6 @@
+main.tz:2:18: error TZ2947: property 'sqrtt' does not exist on 'Math'
+console.log(Math.sqrtt(2), Number.parse("1"), Math.sqrt(4.0));
+                 ^
+main.tz:2:35: error TZ2947: property 'parse' does not exist on 'Number'
+console.log(Math.sqrtt(2), Number.parse("1"), Math.sqrt(4.0));
+                                  ^

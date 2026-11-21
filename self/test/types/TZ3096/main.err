@@ -1,0 +1,3 @@
+main.tz:12:20: error TZ3096: 'error' is there only when the Result is an Err: check it first, 'if (result.isErr())', or use 'match'
+console.log(result.error);
+                   ^

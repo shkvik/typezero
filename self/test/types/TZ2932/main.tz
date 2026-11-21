@@ -1,0 +1,6 @@
+// Integers convert explicitly.
+const count: int = 3;
+const ratio = count as double;
+const small = count as int16;
+
+console.log(ratio, small);

@@ -1,0 +1,5 @@
+// Only an array of numbers is spread into Math.max.
+const words = ["a", "b"];
+const most = Math.max(...words);
+
+console.log(most);

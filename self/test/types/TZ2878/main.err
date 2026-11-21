@@ -1,0 +1,3 @@
+main.tz:12:23: error TZ2878: enum 'Direction' has string values, and only numbers map back to names
+const name = Direction[0];
+                      ^

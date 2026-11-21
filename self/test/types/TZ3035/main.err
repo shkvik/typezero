@@ -1,0 +1,3 @@
+main.tz:6:33: error TZ3035: the callback of 'flatMap' must return an array or an iterator, found 'string'
+const chars = numbers().flatMap((n) => `${n}`);
+                                ^

@@ -1,0 +1,3 @@
+main.tz:16:21: error TZ3114: 'isOk' is a method of Result, not of Promise; await the Promise first: '(await pending).isOk(...)'
+console.log(pending.isOk());
+                    ^

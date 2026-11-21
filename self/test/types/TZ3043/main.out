@@ -1,0 +1,3 @@
+main.tz
+  2:7 rejected: Promise<int>
+  3:7 plain: Promise<int>

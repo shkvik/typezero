@@ -1,0 +1,4 @@
+// The values of an object with methods are read by name.
+const counter = { n: 1, get() { return 1; } };
+
+console.log(Object.values(counter));

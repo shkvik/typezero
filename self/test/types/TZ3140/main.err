@@ -1,0 +1,3 @@
+main.tz:4:1: error TZ3140: 'delete' would leave a hole in the tuple, which has a fixed length; assign the element instead
+delete pair[0];
+^

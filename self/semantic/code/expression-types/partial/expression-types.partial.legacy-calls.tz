@@ -1,0 +1,128 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NameExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  kDecodeComponentName,
+  kEncodeComponentName,
+  kEscapeName,
+  kJsonGlobalName,
+  kResultName,
+  kUnescapeName,
+} from "../const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private legacyCallCheck(expr: CallExpr, module: int): boolean {
+    const callee = expr.callee;
+    if (callee.kind != ExprKind.Name || !this.isGlobalUse(callee, module)) {
+      return false;
+    }
+
+    const code = this.legacyCode(callee.name, expr, module);
+    if (code == undefined) {
+      return false;
+    }
+
+    this.report(module, callee.loc, code, kNoDetails);
+
+    if (code == Code.EscapeLegacy || code == Code.UnescapeLegacy) {
+      this.looseArguments(expr.args, module);
+    }
+
+    return true;
+  }
+
+  private legacyCode(
+    name: string,
+    expr: CallExpr,
+    module: int,
+  ): Code | undefined {
+    const inner = this.soleCallName(expr, module);
+
+    if (name == kUnescapeName && inner == kEncodeComponentName) {
+      return Code.UnescapeToBytes;
+    }
+    if (name == kDecodeComponentName && inner == kEscapeName) {
+      return Code.DecodeFromBytes;
+    }
+    if (name == kEscapeName) {
+      return Code.EscapeLegacy;
+    }
+    if (name == kUnescapeName) {
+      return Code.UnescapeLegacy;
+    }
+
+    return undefined;
+  }
+
+  private soleCallName(expr: CallExpr, module: int): string {
+    const arg = expr.args[0]?.expr;
+    if (expr.args.length != 1 || arg == undefined) {
+      return "";
+    }
+    if (arg.kind != ExprKind.Call) {
+      return "";
+    }
+
+    const callee = arg.callee;
+    if (callee.kind != ExprKind.Name || !this.isGlobalUse(callee, module)) {
+      return "";
+    }
+
+    return callee.name;
+  }
+
+  private legacyValueCheck(expr: NameExpr, module: int): boolean {
+    const isEscape = expr.name == kEscapeName;
+    const isUnescape = expr.name == kUnescapeName;
+    if (!isEscape && !isUnescape) {
+      return false;
+    }
+    if (!this.isGlobalUse(expr, module)) {
+      return false;
+    }
+
+    const code = this.legacyValueCode(isEscape);
+
+    this.report(module, expr.loc, code, kNoDetails);
+
+    return true;
+  }
+
+  private legacyValueCode(isEscape: boolean): Code {
+    if (isEscape) {
+      return Code.EscapeValueRefused;
+    }
+
+    return Code.UnescapeValueRefused;
+  }
+
+  private jsonParseTypesCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): boolean {
+    const object = member.object;
+    const isParse =
+      member.name == "parse" &&
+      member.typeArgs.length > 0 &&
+      object.kind == ExprKind.Name &&
+      object.name == kJsonGlobalName &&
+      this.isGlobalUse(object, module);
+    if (!isParse) {
+      return false;
+    }
+
+    this.report(module, member.loc, Code.JsonParseTypes, kNoDetails);
+    this.looseArguments(expr.args, module);
+
+    return true;
+  }
+}

@@ -1,0 +1,4 @@
+main.tz
+  2:7 count: int
+  3:7 ratio: double
+  4:7 small: int16

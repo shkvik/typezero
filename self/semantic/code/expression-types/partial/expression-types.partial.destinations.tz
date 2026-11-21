@@ -21,9 +21,10 @@ partial class ExpressionTypes {
     init: Expr,
     module: int,
   ): Type | undefined {
+    const isResult = this.isResultLiteral(init, module);
     const isLiteral =
       init.kind == ExprKind.ObjectLit || init.kind == ExprKind.ArrayLit;
-    if (!isLiteral) {
+    if (!isLiteral && !isResult) {
       return undefined;
     }
 
@@ -32,24 +33,66 @@ partial class ExpressionTypes {
 
     for (const one of list ?? []) {
       const type = this.destinationType(one, module);
-      if (type == undefined || !this.isLiteralPlace(init, type)) {
+      if (type == undefined || !this.isLiteralPlace(init, type, module)) {
         continue;
       }
       if (this.mentionsParameter(type)) {
         return undefined;
       }
-      if (chosen != undefined && chosen != type) {
+      if (chosen != undefined && chosen != type && !isResult) {
         return undefined;
       }
 
-      chosen = type;
+      chosen = this.chosenPlace(chosen, type);
+      if (chosen == undefined) {
+        return undefined;
+      }
     }
 
-    if (chosen == undefined || !this.isFitting(init, chosen, module)) {
+    if (chosen == undefined) {
+      return undefined;
+    }
+    if (isResult) {
+      return chosen;
+    }
+    if (!this.isFitting(init, chosen, module)) {
       return undefined;
     }
 
     return chosen;
+  }
+
+  private chosenPlace(chosen: Type | undefined, type: Type): Type | undefined {
+    if (chosen == undefined || chosen == type) {
+      return type;
+    }
+    if (chosen.kind != TypeKind.Result || type.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    const value = this.resultHalfJoin(chosen.value, type.value);
+    const error = this.resultHalfJoin(chosen.error, type.error);
+    if (value == undefined || error == undefined) {
+      return undefined;
+    }
+
+    return this.store.resultOf(value, error);
+  }
+
+  private isResultLiteral(expr: Expr, module: int): boolean {
+    if (expr.kind != ExprKind.Call) {
+      return false;
+    }
+
+    const callee = expr.callee;
+    if (callee.kind != ExprKind.Name) {
+      return false;
+    }
+
+    const args = expr.args;
+    const isPlain = args.length <= 1 && args.every((arg) => !arg.spread);
+
+    return isPlain && this.isResultMakerCall(callee, module);
   }
 
   private isFitting(init: Expr, wanted: Type, module: int): boolean {
@@ -87,7 +130,10 @@ partial class ExpressionTypes {
     return this.writtenDestination(one, context, module);
   }
 
-  private isLiteralPlace(init: Expr, type: Type): boolean {
+  private isLiteralPlace(init: Expr, type: Type, module: int): boolean {
+    if (this.isResultLiteral(init, module)) {
+      return type.kind == TypeKind.Result;
+    }
     if (init.kind == ExprKind.ArrayLit) {
       return type.kind == TypeKind.Array;
     }
@@ -123,9 +169,29 @@ partial class ExpressionTypes {
 
         return this.innerResult(type, fn);
       }
+      case DestinationKind.Assigned:
+        return this.assignedDestination(one, module);
       default:
         return this.argumentDestination(one, module);
     }
+  }
+
+  private assignedDestination(
+    one: Destination,
+    module: int,
+  ): Type | undefined {
+    const value = one.value;
+    if (value == undefined || !this.isResultLiteral(value, module)) {
+      return undefined;
+    }
+
+    this.quiet += 1;
+
+    const type = this.typed(value, undefined, module);
+
+    this.quiet -= 1;
+
+    return type;
   }
 
   private argumentDestination(one: Destination, module: int): Type | undefined {

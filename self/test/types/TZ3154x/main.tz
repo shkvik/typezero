@@ -1,0 +1,7 @@
+type Small = { get(): int };
+
+// An object with methods is of a class of its own.
+const counter = { get() { return 1; } };
+const small: Small = counter;
+
+console.log(small);

@@ -1,0 +1,3 @@
+main.tz:4:19: error TZ3084: 'for...in' walks the keys of an object, found 'int'
+for (const key in count) {
+                  ^

@@ -1,0 +1,3 @@
+main.tz:4:12: error TZ2992: 'EventEmitter' needs its event map here, e.g. 'EventEmitter<{ data: [chunk: string]; end: [] }>', or the type of an emitter, e.g. 'typeof bus'
+let plain: EventEmitter | undefined = undefined;
+           ^

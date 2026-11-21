@@ -1,0 +1,4 @@
+// An array literal takes its type from the variable, not from 'as'.
+const list = [] as int[];
+
+console.log(list);

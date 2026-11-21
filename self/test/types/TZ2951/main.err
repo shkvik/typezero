@@ -1,0 +1,3 @@
+main.tz:2:9: error TZ2951: 'console.table' is not supported yet; only 'console.log', 'info', 'debug', 'error' and 'warn' are
+console.table([1]);
+        ^

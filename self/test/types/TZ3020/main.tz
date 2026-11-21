@@ -1,0 +1,4 @@
+// A Record has no methods of Object.prototype.
+const counts: Record<string, int> = {};
+
+console.log(counts.hasOwnProperty("a"), "a" in counts);

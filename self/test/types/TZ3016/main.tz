@@ -1,0 +1,4 @@
+// A Map is made of [key, value] pairs.
+const notPairs = new Map([1, 2]);
+
+console.log(notPairs);

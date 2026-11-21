@@ -1,0 +1,4 @@
+// The elements of the loop are not arrays.
+for (const [first] of [1, 2]) {
+  console.log(first);
+}

@@ -34,6 +34,9 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): Type {
+    if (this.isLibraryModule(instance.module) && this.isDate(instance)) {
+      return this.dateMemberRead(expr, instance, module);
+    }
     if (this.isLibraryModule(instance.module)) {
       return this.libraryMemberTyped(expr, instance, module);
     }
@@ -66,13 +69,22 @@ partial class ExpressionTypes {
     }
 
     const method = entry.methods[0];
-    if (method == undefined || entry.methods.length > 1) {
+    if (entry.methods.length > 1) {
+      this.variantValueCheck(expr, entry, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (method == undefined) {
       return this.store.plain(TypeKind.Error);
     }
 
     const access = this.accessOf(method);
 
     this.checkAccess(entry, access, expr, module);
+
+    if (this.genericMethodValue(expr, method, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
 
     return this.methodTypeOf(entry, method);
   }
@@ -328,15 +340,26 @@ partial class ExpressionTypes {
 
   private newTyped(expr: NewExpr, wanted: Type | undefined, module: int): Type {
     const form = expr.form;
-    if (form.kind != NewKind.Named || form.member != undefined) {
+    if (form.kind == NewKind.Callee) {
+      const callee = this.typed(form.callee, undefined, module);
+
+      return this.valueNew(expr, callee, form.callee.loc, module);
+    }
+    if (form.member != undefined) {
       return this.store.plain(TypeKind.Error);
     }
 
     this.newArrayCheck(expr, form.name, module);
+    this.executorCheck(expr, form.name, module);
 
     const target = this.targetOfUse(expr.loc, form.name, module);
-    if (target == undefined || target.kind != SymbolKind.Class) {
+    if (target == undefined) {
       return this.store.plain(TypeKind.Error);
+    }
+    if (target.kind != SymbolKind.Class) {
+      const made = this.namedValueNew(expr, target, module);
+
+      return made ?? this.store.plain(TypeKind.Error);
     }
     if (this.isLibraryModule(target.module)) {
       return this.libraryNew(expr, form.name, target, wanted, module);
@@ -375,11 +398,37 @@ partial class ExpressionTypes {
     decl: ClassDecl,
     module: int,
   ): Type[] | undefined {
-    if (expr.typeArgs.length != decl.typeParams.length) {
+    const count = expr.typeArgs.length;
+    const params = decl.typeParams.length;
+    const word = decl.name ?? "";
+    if (params == 0 && count > 0) {
+      this.report(module, expr.loc, Code.ClassNotGeneric, { word });
+
+      return undefined;
+    }
+    if (count > params) {
+      this.report(module, expr.loc, Code.TypeArgumentsMany, {
+        word,
+        other: `${params}`,
+        place: this.pluralMark(params),
+        first: `${count}`,
+      });
+
+      return undefined;
+    }
+    if (count != params) {
       return undefined;
     }
 
     return this.writtenArguments(expr.typeArgs, module);
+  }
+
+  private pluralMark(count: int): string {
+    if (count == 1) {
+      return "";
+    }
+
+    return "s";
   }
 
   private constructed(
@@ -404,7 +453,10 @@ partial class ExpressionTypes {
     }
 
     const chosen = constructors[0];
-    if (chosen == undefined || constructors.length > 1) {
+    if (constructors.length > 1) {
+      return this.variantNew(expr, instance, maker, constructors, decl, module);
+    }
+    if (chosen == undefined) {
       return instance;
     }
 
@@ -419,6 +471,46 @@ partial class ExpressionTypes {
     }
 
     const isPassed = this.argumentsCheck(expr.args, target, module);
+    if (!isPassed) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return instance;
+  }
+
+  private variantNew(
+    expr: NewExpr,
+    instance: InstanceType,
+    maker: ClassMemberEntry,
+    constructors: FunctionDecl[],
+    decl: ClassDecl,
+    module: int,
+  ): Type {
+    const targets: CallTarget[] = [];
+
+    for (const fn of constructors) {
+      const target = this.constructorTarget(maker, fn, expr.loc);
+      if (target == undefined) {
+        return instance;
+      }
+
+      targets.push(target);
+    }
+
+    const name = maker.owner.name ?? decl.name ?? "";
+    const chosen = this.constructorChoice(
+      expr,
+      expr.args,
+      targets,
+      constructors,
+      name,
+      module,
+    );
+    if (chosen == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const isPassed = this.argumentsCheck(expr.args, chosen, module);
     if (!isPassed) {
       return this.store.plain(TypeKind.Error);
     }

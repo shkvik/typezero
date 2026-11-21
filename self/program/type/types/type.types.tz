@@ -25,6 +25,7 @@ export enum TypeKind {
   TypeParameter,
   Template,
   Operation,
+  Class,
 }
 
 export enum OperationKind {
@@ -116,6 +117,7 @@ export type ObjectField = {
   readonly type: Type;
   readonly optional: boolean;
   readonly readonly: boolean;
+  readonly method?: boolean;
 };
 
 export type ObjectType = {
@@ -221,6 +223,13 @@ export type OperationType = {
   readonly shape: OperationShape;
 };
 
+export type ClassType = {
+  readonly id: int;
+  readonly kind: TypeKind.Class;
+  readonly instance: Type;
+  readonly exact: boolean;
+};
+
 export type Type =
   | PlainType
   | IntType
@@ -237,4 +246,5 @@ export type Type =
   | InstanceType
   | TypeParameterType
   | TemplateType
-  | OperationType;
+  | OperationType
+  | ClassType;

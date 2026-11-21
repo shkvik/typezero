@@ -1,0 +1,8 @@
+// An abstract method of a generic class writes its return type.
+abstract class Shape<T> {
+  public abstract area();
+
+  public abstract size(): T;
+}
+
+console.log(Shape);

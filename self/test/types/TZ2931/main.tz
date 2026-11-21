@@ -1,0 +1,13 @@
+// 'as' does not drop undefined.
+function find(flag: boolean): int | undefined {
+  if (flag) {
+    return 1;
+  }
+
+  return undefined;
+}
+
+const maybe = find(true);
+const sure = maybe as int;
+
+console.log(sure);

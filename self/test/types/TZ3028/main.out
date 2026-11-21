@@ -1,0 +1,5 @@
+main.tz
+  2:7 xs: Iterable<int>
+  3:7 f: (Iterable<int>) => int
+  5:10 total: (Iterable<int>) => int
+  6:7 sum: int

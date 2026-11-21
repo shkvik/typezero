@@ -1,0 +1,6 @@
+// '||' cannot test a value of type T that may be a number.
+function firstOr<T>(xs: T[], d: T): T {
+  return xs[0] || d;
+}
+
+console.log(firstOr([1], 2));

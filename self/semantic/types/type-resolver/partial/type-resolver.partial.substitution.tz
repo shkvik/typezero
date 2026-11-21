@@ -134,6 +134,8 @@ partial class TypeResolver {
         return [type.value, type.error];
       case TypeKind.Promise:
         return [type.value];
+      case TypeKind.Class:
+        return [type.instance];
       case TypeKind.Iterator: {
         const shape = type.shape;
 
@@ -294,6 +296,11 @@ partial class TypeResolver {
         const value = this.substituted(type.value, walk, false);
 
         return this.store.promiseOf(value);
+      }
+      case TypeKind.Class: {
+        const instance = this.substituted(type.instance, walk, false);
+
+        return this.store.classOf(instance, type.exact);
       }
       default:
         return this.substitutedHolder(type, walk);

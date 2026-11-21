@@ -1,0 +1,3 @@
+main.tz:6:44: error TZ2891: 'asserts s is Circle' is not supported (docs/narrowing.md): there are no exceptions, so a function cannot stop its caller; write 's is Circle' and return whether it holds
+function run(s: Shape, test: (s: Shape) => asserts s is Circle): void {
+                                           ^

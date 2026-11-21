@@ -1,0 +1,6 @@
+// '||=' cannot test a Json.
+let value: Json = 0;
+
+value ||= 1;
+
+console.log(value);

@@ -1,0 +1,3 @@
+main.tz:2:7: error TZ2994: generic class 'Node' uses itself with type arguments that keep growing, so each instance of it needs another, without end; a generic class can use itself only with its own type parameters
+class Node<T> {
+      ^

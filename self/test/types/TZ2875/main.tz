@@ -1,0 +1,7 @@
+// An enum holds numbers or strings, not both.
+enum Mixed {
+  A = 1,
+  B = "b",
+}
+
+const a = Mixed.A;

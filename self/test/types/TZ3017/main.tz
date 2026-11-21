@@ -1,0 +1,5 @@
+// A Set is combined with a Set or a Map.
+const seen = new Set<int>([1, 2]);
+const other = new Set<int>([2, 3]);
+
+console.log(seen.union([1]), seen.union(other));

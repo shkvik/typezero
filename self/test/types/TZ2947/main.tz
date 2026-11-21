@@ -1,0 +1,2 @@
+// Math and Number have only their members.
+console.log(Math.sqrtt(2), Number.parse("1"), Math.sqrt(4.0));

@@ -1,0 +1,6 @@
+main.tz:2:27: error TZ2901: an unknown cannot be a key: a key is found by its value, and what an unknown holds is known only when the program runs; use keys of one type, e.g. 'Map<string, unknown>'
+const byUnknown = new Map<unknown, int>();
+                          ^
+main.tz:3:17: error TZ2901: an unknown cannot be a key: a key is found by its value, and what an unknown holds is known only when the program runs; use keys of one type, e.g. 'Map<string, unknown>'
+const seen: Set<unknown> = new Set<string>();
+                ^

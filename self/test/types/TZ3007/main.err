@@ -1,0 +1,6 @@
+main.tz:18:3: error TZ3007: no variant of 'm' takes 3 arguments: there are m(a: int, b: double) and m(a: double, b: int)
+s.m(1, 2, 3);
+  ^
+main.tz:20:18: error TZ3007: no variant of the constructor of 'Shapes' takes 0 arguments: there are constructor(a: int) and constructor(a: string)
+const none = new Shapes();
+                 ^

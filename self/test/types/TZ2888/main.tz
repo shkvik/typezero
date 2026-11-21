@@ -1,0 +1,14 @@
+// Results in a switch are never equal.
+function run(): Result<int, string> {
+  return ok(1);
+}
+
+const done: Result<int, string> = ok(1);
+
+switch (run()) {
+  case done:
+    console.log("same");
+    break;
+  default:
+    break;
+}

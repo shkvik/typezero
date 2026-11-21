@@ -1,0 +1,3 @@
+main.tz:24:15: error TZ3010: the call fits several variants of 'take' equally well: take(a: Animal, b: Dog) and take(a: Dog, b: Animal); convert an argument to choose one
+new Shelter().take(dog, dog);
+              ^

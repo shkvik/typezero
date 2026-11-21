@@ -1,0 +1,12 @@
+function parse(text: string): Result<int, string> {
+  if (text == "") {
+    return err("empty");
+  }
+
+  return ok(text.length);
+}
+
+// The value is there only in an Ok.
+const result = parse("a");
+
+console.log(result.value);

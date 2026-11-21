@@ -1,0 +1,11 @@
+// An element changed in place is within the array.
+function bump(a: int[], i: int): void {
+  a[i] += 1;
+  a[i]++;
+
+  if (i >= 0 && i < a.length) {
+    a[i] += 1;
+  }
+}
+
+console.log(bump);

@@ -1,0 +1,3 @@
+main.tz:4:1: error TZ3139: strings are immutable; a character cannot be deleted
+delete text[0];
+^

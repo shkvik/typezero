@@ -1,0 +1,4 @@
+// unescape is a legacy function.
+const text = unescape("%u0041");
+
+console.log(text);

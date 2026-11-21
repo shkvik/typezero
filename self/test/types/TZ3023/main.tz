@@ -1,0 +1,15 @@
+// An object that may be undefined is checked before spreading it.
+type Point = { x: int; y: int };
+
+function find(flag: boolean): Point | undefined {
+  if (flag) {
+    return { x: 1, y: 2 };
+  }
+
+  return undefined;
+}
+
+const maybe = find(true);
+const spread = { ...maybe };
+
+console.log(spread);

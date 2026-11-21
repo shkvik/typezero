@@ -1,0 +1,3 @@
+main.tz:8:20: error TZ3150: the object literal does not fit 'Tool': its method 'add' has several signatures, and only a class implements those, each with a variant of its own
+const tool: Tool = { use() { return 1; } };
+                   ^

@@ -1,0 +1,3 @@
+main.tz
+  2:10 host: () => int
+  3:12 inner: (T) => T

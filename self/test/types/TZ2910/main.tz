@@ -1,0 +1,14 @@
+// '||=' of a number that may be undefined gives a default with '??='.
+function find(flag: boolean): int | undefined {
+  if (flag) {
+    return 1;
+  }
+
+  return undefined;
+}
+
+let retries = find(true);
+
+retries ||= 3;
+
+console.log(retries);

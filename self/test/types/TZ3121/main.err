@@ -1,0 +1,3 @@
+main.tz:4:40: error TZ3121: the space of JSON.stringify is a number of spaces or a string, found 'boolean'
+console.log(JSON.stringify(data, null, true));
+                                       ^

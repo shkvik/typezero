@@ -1,0 +1,5 @@
+// getYear read without a call.
+const date = new Date();
+const year = date.getYear;
+
+console.log(year);

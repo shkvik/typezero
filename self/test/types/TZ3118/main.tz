@@ -1,0 +1,4 @@
+// JSON.parse takes no reviver.
+const parsed = JSON.parse("1", (key: string, value: Json) => value);
+
+console.log(parsed);

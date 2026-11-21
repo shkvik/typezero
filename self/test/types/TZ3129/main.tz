@@ -1,0 +1,6 @@
+const price: decimal = 19.99;
+
+// A rounding mode known only when the program runs.
+const mode = process.argv[2] ?? "up";
+
+console.log(price.round(2, mode));

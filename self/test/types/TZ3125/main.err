@@ -1,0 +1,3 @@
+main.tz:2:9: error TZ3125: property 'config' does not exist on 'decimal': there are no settings for all decimals; division takes its places and rounding as arguments, 'a.div(b, places, mode)'
+decimal.config(20);
+        ^

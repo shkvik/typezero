@@ -1,0 +1,6 @@
+// A Set without values names its type.
+const empty = new Set();
+const typed = new Set<int>();
+const made = new Set([1, 2]);
+
+console.log(empty, typed, made);

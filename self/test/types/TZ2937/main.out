@@ -1,0 +1,3 @@
+main.tz
+  2:7 text: string
+  3:7 number: int

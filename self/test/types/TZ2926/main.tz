@@ -1,0 +1,11 @@
+// After a check a function is always there.
+function run(report?: () => void): void {
+  if (report == undefined) {
+    return;
+  }
+  if (report) {
+    report();
+  }
+}
+
+run();

@@ -1,0 +1,5 @@
+// A fraction is no position.
+const text = "abc";
+const half = 1.5;
+
+console.log(text.slice(half), [1, 2].slice(half));

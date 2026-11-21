@@ -1,0 +1,3 @@
+main.tz:12:13: error TZ2896: an object has no property 'name' until 'instanceof' shows its class, e.g. 'if (o instanceof C) ...'
+console.log(o.name);
+            ^

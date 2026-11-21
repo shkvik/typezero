@@ -1,0 +1,3 @@
+main.tz:15:18: error TZ2999: 'get' is a generic method, so it can only be called: each call runs a copy of it made for its types; wrap it in an arrow, e.g. '(x) => o.get(x)'
+const read = box.get;
+                 ^

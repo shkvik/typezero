@@ -1,0 +1,3 @@
+main.tz:2:8: error TZ2881: a declaration cannot have a label
+named: let x = 1;
+       ^

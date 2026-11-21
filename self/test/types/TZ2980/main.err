@@ -1,0 +1,6 @@
+main.tz:10:12: error TZ2980: class 'Point' is not generic; remove the type arguments
+let point: Point<int> = new Point(1);
+           ^
+main.tz:11:17: error TZ2980: class 'Point' is not generic; remove the type arguments
+let other = new Point<int>(2);
+                ^

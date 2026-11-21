@@ -1,0 +1,4 @@
+// Promise has only a few functions.
+const done = Promise.foo();
+
+console.log(done);

@@ -1,0 +1,4 @@
+// A Result names its value and its error.
+let outcome: Result = ok(1);
+
+console.log(outcome);

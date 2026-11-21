@@ -1,0 +1,3 @@
+main.tz:14:31: error TZ2890: 'this is T' can only be the return type of a method
+function notMethod(s: Shelf): this is Shelf {
+                              ^

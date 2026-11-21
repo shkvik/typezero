@@ -1,0 +1,6 @@
+// A tagged template passes its texts and its values.
+function tag(texts: TemplateStringsArray, value: int): int {
+  return texts.length + value;
+}
+
+console.log(tag`a${1}b${2}`);

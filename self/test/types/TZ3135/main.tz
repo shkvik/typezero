@@ -1,0 +1,4 @@
+// decimal is used through its call and its functions.
+const made = decimal;
+
+console.log(made);

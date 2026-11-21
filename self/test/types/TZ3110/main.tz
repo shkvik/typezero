@@ -1,0 +1,12 @@
+// A callback of forEach drops the Result it returns.
+function save(text: string): Result<void, string> {
+  if (text == "") {
+    return err("empty");
+  }
+
+  return ok();
+}
+
+const names = ["a", "b"];
+
+names.forEach((name) => save(name));

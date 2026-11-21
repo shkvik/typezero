@@ -1,0 +1,4 @@
+main.tz
+  1:10 parse: (string) => Result<int, string>
+  10:7 result: Result<int, string>
+  11:7 all: Result<int, string>[]

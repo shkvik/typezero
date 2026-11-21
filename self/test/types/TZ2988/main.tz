@@ -1,0 +1,10 @@
+// A generic arrow is the value of a top-level constant.
+const top = <T>(x: T): T => x;
+
+function host(): int {
+  const local = <T>(x: T): T => x;
+
+  return local(1);
+}
+
+console.log(top(1), host());

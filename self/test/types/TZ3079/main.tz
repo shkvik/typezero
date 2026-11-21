@@ -1,0 +1,5 @@
+// instanceof Map cannot tell the types of keys and values.
+const value: unknown = JSON.parse("{}");
+const isMap = value instanceof Map;
+
+console.log(isMap);

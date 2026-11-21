@@ -1,0 +1,12 @@
+// Variants differ in more than what they return.
+class Shapes {
+  public h(a: int): int {
+    return 1;
+  }
+
+  public h(a: int): string {
+    return "";
+  }
+}
+
+console.log(Shapes);

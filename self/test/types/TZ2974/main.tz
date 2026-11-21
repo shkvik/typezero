@@ -1,0 +1,6 @@
+// A Generator names the values it gives.
+function* count(): Generator {
+  yield 1;
+}
+
+console.log(count);

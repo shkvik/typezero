@@ -1,0 +1,3 @@
+main.tz:12:13: error TZ3031: 'Set<string>' gives values of type 'string', and the parameter 'Iterable<int>' of 'total' takes values of type 'int'
+console.log(total(new Set(["a"])), total([1, 2]), total(new Set([3])));
+            ^

@@ -1,0 +1,3 @@
+main.tz:7:24: error TZ3170: the class extended must be known when compiling: the fields of an object lie at places fixed then, and 'Constructor<User>' is some class known only when the program runs (docs/decorators.md, section 5); extend a class by its name, or take it in a generic function, 'function Mixin<B extends Constructor>(Base: B)'
+  return class extends kind {};
+                       ^

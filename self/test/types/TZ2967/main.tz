@@ -1,0 +1,4 @@
+// An Array takes one type argument.
+let list: Array<int, int> = [1];
+
+console.log(list);

@@ -224,6 +224,8 @@ partial class ExpressionTypes {
         return "object";
       case TypeKind.Function:
         return "function";
+      case TypeKind.Class:
+        return "class";
       case TypeKind.Literal:
         return this.literalTypeOfName(type);
       case TypeKind.Union:

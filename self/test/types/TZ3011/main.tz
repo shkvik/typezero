@@ -1,0 +1,21 @@
+// An overloaded method as a value needs the type of its place.
+class Shapes {
+  public m(a: int, b: double): int {
+    return 1;
+  }
+
+  public m(a: double, b: int): int {
+    return 2;
+  }
+
+  public constructor(a: int) {}
+
+  public constructor(a: string) {}
+}
+
+const s = new Shapes(1);
+
+const f = s.m;
+const g: (a: int, b: double) => int = s.m;
+
+console.log(f, g);

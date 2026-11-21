@@ -1,0 +1,3 @@
+main.tz:3:21: error TZ3079: 'instanceof Map' cannot tell the types of the keys and values, which tz needs to use a Map; keep it in a variable of its type, e.g. 'Map<string, int>'
+const isMap = value instanceof Map;
+                    ^

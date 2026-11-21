@@ -1,0 +1,13 @@
+function parse(text: string): Result<int, string> {
+  if (text == "") {
+    return err("empty");
+  }
+
+  return ok(text.length);
+}
+
+// includes cannot compare Results.
+const result = parse("a");
+const all = [result];
+
+console.log(all.includes(result));

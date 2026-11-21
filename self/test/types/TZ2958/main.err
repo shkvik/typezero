@@ -1,0 +1,3 @@
+main.tz:2:14: error TZ2958: 'escape' is a legacy function whose '%uXXXX' escapes nothing decodes but 'unescape'; encode with 'encodeURIComponent(s)'
+const text = escape("a b");
+             ^

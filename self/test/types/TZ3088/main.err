@@ -1,0 +1,3 @@
+main.tz:3:26: error TZ3088: only an array of numbers can be spread here, found 'string[]'
+const most = Math.max(...words);
+                         ^

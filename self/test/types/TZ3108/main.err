@@ -1,0 +1,3 @@
+main.tz:3:28: error TZ3108: 'Result.combine' takes an array of Results, found 'int'
+const all = Result.combine(value);
+                           ^

@@ -1,0 +1,3 @@
+main.tz:2:25: error TZ3105: an expression of type 'void' has no value to keep; write 'ok()'
+const made = ok(console.log("x"));
+                        ^

@@ -1,0 +1,3 @@
+main.tz:2:15: error TZ2960: 'unescape(encodeURIComponent(s))' makes a string of the UTF-8 bytes of s, a legacy trick; get the bytes themselves with 'new TextEncoder().encode(s)'
+const bytes = unescape(encodeURIComponent("a b"));
+              ^

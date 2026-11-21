@@ -1,30 +1,6 @@
-main.tz:1:13: error TZ2401: 'Map' is written with its type arguments, e.g. 'Map<string, int>'
-let counts: Map<int> = new Map<int, int>();
+main.tz:2:13: error TZ2401: 'Uppercase' is written with its type arguments, e.g. 'Uppercase<"text">'
+type Loud = Uppercase;
             ^
-main.tz:2:14: error TZ2401: 'Result' is written with its type arguments, e.g. 'Result<int, string>'
-let outcome: Result<int> = ok(1);
-             ^
-main.tz:3:14: error TZ2401: 'Promise' is written with its type arguments, e.g. 'Promise<int>'
-let pending: Promise = Promise.resolve(1);
-             ^
-main.tz:4:11: error TZ2401: 'Array' is written with its type arguments, e.g. 'Array<int>'
-let list: Array = [];
-          ^
-main.tz:5:11: error TZ2401: 'Set' is written with its type arguments, e.g. 'Set<int>'
-let seen: Set<int, int> = new Set<int>();
-          ^
-main.tz:6:12: error TZ2401: 'Generator' is written with its type arguments, e.g. 'Generator<int>'
-let steps: Generator<int, int, int, int> = [1].values();
-           ^
-main.tz:21:10: error TZ2401: 'Box' is written with its type arguments, e.g. 'Box<T>'
-let box: Box = { value: 1 };
-         ^
-main.tz:22:11: error TZ2401: 'Box' is written with its type arguments, e.g. 'Box<T>'
-let wide: Box<int, int> = { value: 1 };
-          ^
-main.tz:23:10: error TZ2401: 'Two' is written with its type arguments, e.g. 'Two<A, B>'
-let two: Two = { a: 1, b: "a" };
-         ^
-main.tz:24:11: error TZ2401: 'Cell' is written with its type arguments, e.g. 'Cell<T>'
-let cell: Cell = new Cell<int>(1);
-          ^
+main.tz:4:26: error TZ2401: 'AsyncGenerator' is written with its type arguments, e.g. 'AsyncGenerator<int>'
+async function* ticks(): AsyncGenerator {
+                         ^

@@ -1,0 +1,10 @@
+// Number() of undefined would be NaN.
+function find(flag: boolean): string | undefined {
+  if (flag) {
+    return "1";
+  }
+
+  return undefined;
+}
+
+console.log(Number(find(true)));

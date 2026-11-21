@@ -1,0 +1,5 @@
+// An array spread into an object literal gives its indices.
+const list = [1, 2];
+const spread = { ...list };
+
+console.log(spread);

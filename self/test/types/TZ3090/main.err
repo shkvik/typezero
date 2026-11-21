@@ -1,0 +1,3 @@
+main.tz:8:6: error TZ3090: '&&=' needs a variable, a field or an array element at a simple index, such as 'a[i]'
+flags[at()] &&= false;
+     ^

@@ -14,20 +14,40 @@ import {
   NameExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
-import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
-import { kSuperName, kThisName } from "../const/expression-types.const.tz";
+import {
+  DictKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  kCollectionExamples,
+  kDateName,
+  kMapClass,
+  kSetClass,
+  kSuperName,
+  kThisName,
+} from "../const/expression-types.const.tz";
 import { StaticOwner, ThisPlace } from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private instanceofTyped(expr: BinaryExpr, module: int): Type {
     const left = this.typed(expr.lhs, undefined, module);
     const boolean = this.store.plain(TypeKind.Boolean);
+    if (this.collectionInstanceof(expr, left, module)) {
+      return boolean;
+    }
     const decl = this.testedClass(expr.rhs, module);
     if (decl == undefined) {
       return boolean;
     }
 
     const instance = this.testedInstance(expr.rhs, decl, module);
+    const home = this.classHomeOf(expr.rhs, module);
+    if (instance == undefined && home != undefined) {
+      this.genericInstanceofCheck(expr, left, decl, home, module);
+
+      return boolean;
+    }
     if (instance == undefined) {
       return boolean;
     }
@@ -35,6 +55,113 @@ partial class ExpressionTypes {
     this.instanceofCheck(expr, left, instance, decl, module);
 
     return boolean;
+  }
+
+  private collectionInstanceof(
+    expr: BinaryExpr,
+    left: Type,
+    module: int,
+  ): boolean {
+    const rhs = expr.rhs;
+    if (rhs.kind != ExprKind.Name || !this.isGlobalUse(rhs, module)) {
+      return false;
+    }
+
+    const word = rhs.name;
+    const isCollection =
+      word == kDateName || word == kMapClass || word == kSetClass;
+    if (!isCollection) {
+      return false;
+    }
+
+    const base = this.definedType(left);
+    const isOpaque =
+      base.kind == TypeKind.Unknown || base.kind == TypeKind.AnyObject;
+    const example = kCollectionExamples.find((one) => one.name == word);
+    if (isOpaque && example != undefined) {
+      this.report(module, expr.loc, Code.InstanceOfUntyped, {
+        word,
+        other: example.example,
+      });
+
+      return true;
+    }
+    if (isOpaque || this.isOpenTested(base)) {
+      return true;
+    }
+    if (base.kind == TypeKind.Union) {
+      this.collectionUnionCheck(expr, left, base.parts, word, module);
+
+      return true;
+    }
+
+    this.collectionTypeCheck(expr, left, base, word, module);
+
+    return true;
+  }
+
+  private collectionTypeCheck(
+    expr: BinaryExpr,
+    left: Type,
+    base: Type,
+    word: string,
+    module: int,
+  ): void {
+    if (this.isCollectionOf(word, left)) {
+      return this.report(module, expr.loc, Code.InstanceOfAlwaysTrue, {
+        word,
+        first: this.text.of(left),
+      });
+    }
+    if (this.isOptional(left) && this.isCollectionOf(word, base)) {
+      return this.report(module, expr.loc, Code.InstanceOfOrUndefined, {
+        first: this.text.of(base),
+      });
+    }
+
+    this.report(module, expr.loc, Code.InstanceOfNeverBuiltin, {
+      word,
+      first: this.text.of(left),
+    });
+  }
+
+  private collectionUnionCheck(
+    expr: BinaryExpr,
+    left: Type,
+    parts: Type[],
+    word: string,
+    module: int,
+  ): void {
+    const matching = parts.filter((part) => this.isCollectionOf(word, part));
+    const first = this.text.of(this.definedType(left));
+    if (matching.length == 0) {
+      return this.report(module, expr.loc, Code.InstanceOfNoneBuiltin, {
+        word,
+        first,
+      });
+    }
+
+    const isAll = matching.length == parts.length;
+    if (isAll && !this.isOptional(left)) {
+      this.report(module, expr.loc, Code.InstanceOfAllBuiltin, {
+        word,
+        first,
+      });
+    }
+  }
+
+  private isCollectionOf(word: string, type: Type): boolean {
+    if (word == kDateName) {
+      return this.isDate(type);
+    }
+    if (type.kind != TypeKind.Dict) {
+      return false;
+    }
+    if (word == kMapClass) {
+      return type.dict == DictKind.Map;
+    }
+
+    return type.dict == DictKind.Set;
   }
 
   private testedClass(rhs: Expr, module: int): ClassDecl | undefined {
@@ -50,11 +177,20 @@ partial class ExpressionTypes {
     }
 
     const type = this.typed(rhs, undefined, module);
-    if (type.kind != TypeKind.Error) {
+    const isClass = type.kind == TypeKind.Class;
+    if (type.kind != TypeKind.Error && !isClass) {
       this.report(module, rhs.loc, Code.InstanceOfNotClass, kNoDetails);
     }
 
     return undefined;
+  }
+
+  private classHomeOf(rhs: Expr, module: int): int | undefined {
+    if (rhs.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    return this.targetOfName(rhs, module)?.module;
   }
 
   private testedInstance(
@@ -206,6 +342,11 @@ partial class ExpressionTypes {
 
     if (this.undefinedTargetCheck(target, module)) {
       return this.store.plain(TypeKind.Error);
+    }
+
+    const keyed = this.recordValueOf(target.object, module);
+    if (keyed != undefined) {
+      return keyed;
     }
 
     const declared = this.fieldDeclared(target, module);

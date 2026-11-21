@@ -49,10 +49,14 @@ partial class ExpressionTypes {
     this.enterInitClosure(initFrame);
     this.facts = this.constFacts(before);
 
-    const place = this.functionPlace(fn, shape.self);
+    const owner = shape.self ?? this.literalOwners.get(fn);
+    const place = this.functionPlace(fn, owner);
 
     if (place != undefined) {
       this.thisPlaces.push(place);
+    }
+    if (owner != undefined) {
+      this.selves.push(owner);
     }
 
     this.openFunctions.push(fn);
@@ -62,6 +66,9 @@ partial class ExpressionTypes {
     this.openFunctions.pop();
     this.leaveInitClosure(initFrame);
 
+    if (owner != undefined) {
+      this.selves.pop();
+    }
     if (place != undefined) {
       this.thisPlaces.pop();
     }
@@ -105,7 +112,36 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return goal;
+    return this.spreadListShape(goal);
+  }
+
+  private spreadListShape(goal: FunctionType): FunctionType {
+    const shape = goal.shape;
+    const last = shape.params[shape.params.length - 1];
+    const list = last?.type;
+    if (!shape.rest || list == undefined || list.kind != TypeKind.Tuple) {
+      return goal;
+    }
+    if (list.rest >= 0) {
+      return goal;
+    }
+
+    const head = shape.params.slice(0, shape.params.length - 1);
+    const items = list.items.map((type, index) => ({
+      type,
+      optional: index >= list.required,
+    }));
+    const made = this.store.functionOf({
+      params: head.concat(items),
+      rest: false,
+      self: shape.self,
+      result: shape.result,
+    });
+    if (made.kind != TypeKind.Function) {
+      return goal;
+    }
+
+    return made;
   }
 
   private closureShape(
@@ -128,6 +164,7 @@ partial class ExpressionTypes {
       this.paramTypes.set(`${module} ${param.loc}`, inside);
 
       if (param.name == kThisParameter) {
+        this.thisParameterCheck(fn, param, module);
         self = type;
 
         continue;

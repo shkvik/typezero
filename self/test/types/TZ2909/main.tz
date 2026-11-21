@@ -1,0 +1,6 @@
+// '||=' cannot test a double either.
+let ratio = 0.0;
+
+ratio ||= 0.5;
+
+console.log(ratio);

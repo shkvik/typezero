@@ -1,0 +1,18 @@
+// 'this is T' belongs to methods.
+class Shelf {
+  public items: string[];
+
+  public constructor() {
+    this.items = [];
+  }
+
+  public isShelf(): this is Shelf {
+    return true;
+  }
+}
+
+function notMethod(s: Shelf): this is Shelf {
+  return s.items.length > 0;
+}
+
+console.log(notMethod);

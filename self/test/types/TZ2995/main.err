@@ -1,0 +1,6 @@
+main.tz:9:19: error TZ2995: a generic method cannot be an override: each call runs a copy of it made for its types
+  public override f<U>(x: U): U {
+                  ^
+main.tz:9:19: error TZ2733: 'f' is marked 'override', but 'Base' has no method 'f'
+  public override f<U>(x: U): U {
+                  ^

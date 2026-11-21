@@ -1,0 +1,6 @@
+// An EventEmitter needs its event map.
+import { EventEmitter } from "node:events";
+
+let plain: EventEmitter | undefined = undefined;
+
+console.log(plain);

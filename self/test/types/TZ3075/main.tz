@@ -1,0 +1,13 @@
+// A date or undefined is told apart with '!= undefined'.
+function find(flag: boolean): Date | undefined {
+  if (flag) {
+    return new Date();
+  }
+
+  return undefined;
+}
+
+const found = find(true);
+const isDate = found instanceof Date;
+
+console.log(isDate);

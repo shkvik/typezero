@@ -1,0 +1,4 @@
+main.tz
+  2:6 type Circle = { kind: "circle"; r: double }
+  3:6 type Square = { kind: "square"; side: double }
+  5:10 never: (Circle | Square) => boolean

@@ -22,6 +22,7 @@ import {
   kRawName,
   kWrappedValueName,
 } from "../const/expression-types.const.tz";
+import { EnumHome } from "../../../types/type-resolver/types/type-resolver.types.tz";
 import { LiteralValue } from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
@@ -37,9 +38,15 @@ partial class ExpressionTypes {
       return fact;
     }
 
-    const decl = this.enumOfObject(expr.object, module);
-    if (decl != undefined) {
-      return this.enumMemberTyped(expr, decl, module);
+    const home = this.enumHomeOf(expr.object, module);
+    if (home != undefined) {
+      return this.enumMemberTyped(expr, home, module);
+    }
+    if (this.isDateName(expr.object, module)) {
+      return this.dateStaticRead(expr, module);
+    }
+    if (this.isDecimalName(expr.object, module)) {
+      return this.decimalStaticRead(expr, module);
     }
 
     const owner = this.staticOwner(expr.object, module);
@@ -49,6 +56,9 @@ partial class ExpressionTypes {
 
     const object = this.receiverOf(expr.object, expr.optional, module);
     if (this.dictMemberCheck(expr, object, false, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.rawTextsCheck(expr, object, module)) {
       return this.store.plain(TypeKind.Error);
     }
 
@@ -92,6 +102,15 @@ partial class ExpressionTypes {
   }
 
   private memberOf(expr: MemberExpr, object: Type, module: int): Type {
+    if (this.unknownMemberCheck(expr, object, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const keyed = this.recordMemberTyped(expr, object);
+    if (keyed != undefined) {
+      return keyed;
+    }
+
     switch (object.kind) {
       case TypeKind.Union:
         return this.unionMemberOf(expr, object, module);
@@ -99,10 +118,16 @@ partial class ExpressionTypes {
         return this.parameterMemberOf(expr, object, module);
       case TypeKind.Object:
         return this.objectField(expr, object, module);
+      case TypeKind.Class:
+        return this.classValueMember(expr, object, module);
       case TypeKind.Tuple:
         return this.tupleMember(expr, object, module);
       case TypeKind.Instance:
         return this.instanceMember(expr, object, module);
+      case TypeKind.Result:
+        return this.resultMemberRead(expr, object, module);
+      case TypeKind.Json:
+        return this.optional(object);
       case TypeKind.Dict:
       case TypeKind.Promise:
         return this.libraryMemberTyped(expr, object, module);
@@ -136,7 +161,10 @@ partial class ExpressionTypes {
     }
 
     const defined = this.definedType(object);
-    if (defined.kind != TypeKind.Json && defined.kind != TypeKind.Error) {
+    if (defined.kind == TypeKind.Json) {
+      return this.optional(defined);
+    }
+    if (defined.kind != TypeKind.Error) {
       this.report(module, expr.object.loc, Code.ReadOfUndefined, {
         word: expr.name,
       });
@@ -173,10 +201,13 @@ partial class ExpressionTypes {
     }
 
     const type = this.fieldWanted(field);
-    if (isLibrary && type.kind == TypeKind.Function) {
+    const isMethod = type.kind == TypeKind.Function && type.shape.self == undefined;
+    if (isLibrary && isMethod) {
       return this.store.plain(TypeKind.Error);
     }
     if (fields.length > 1) {
+      this.signatureValueCheck(expr, fields, module);
+
       return this.store.plain(TypeKind.Error);
     }
 
@@ -269,6 +300,10 @@ partial class ExpressionTypes {
   }
 
   private enumOfObject(object: Expr, module: int): EnumDecl | undefined {
+    return this.enumHomeOf(object, module)?.decl;
+  }
+
+  private enumHomeOf(object: Expr, module: int): EnumHome | undefined {
     if (object.kind != ExprKind.Name) {
       return undefined;
     }
@@ -278,15 +313,24 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return this.record(target.module)?.enums.get(target.loc);
+    const decl = this.record(target.module)?.enums.get(target.loc);
+    if (decl == undefined) {
+      return undefined;
+    }
+
+    return { module: target.module, decl };
   }
 
-  private enumMemberTyped(expr: MemberExpr, decl: EnumDecl, module: int): Type {
-    const step = this.resolver.enumMember(decl, expr.name);
+  private enumMemberTyped(
+    expr: MemberExpr,
+    home: EnumHome,
+    module: int,
+  ): Type {
+    const step = this.resolver.enumMember(home.module, home.decl, expr.name);
     if (step == undefined) {
       this.report(module, expr.loc, Code.EnumMemberMissing, {
         word: expr.name,
-        other: decl.name,
+        other: home.decl.name,
       });
     }
 
@@ -294,12 +338,12 @@ partial class ExpressionTypes {
   }
 
   private enumLiteral(expr: MemberExpr, module: int): LiteralValue | undefined {
-    const decl = this.enumOfObject(expr.object, module);
-    if (decl == undefined) {
+    const home = this.enumHomeOf(expr.object, module);
+    if (home == undefined) {
       return undefined;
     }
 
-    const step = this.resolver.enumMember(decl, expr.name);
+    const step = this.resolver.enumMember(home.module, home.decl, expr.name);
     if (step == undefined) {
       return undefined;
     }
@@ -350,11 +394,11 @@ partial class ExpressionTypes {
   }
 
   private enumWhole(expr: MemberExpr, module: int): Type {
-    const decl = this.enumOfObject(expr.object, module);
-    if (decl == undefined) {
+    const home = this.enumHomeOf(expr.object, module);
+    if (home == undefined) {
       return this.store.plain(TypeKind.String);
     }
 
-    return this.resolver.declaredEnum(decl);
+    return this.resolver.declaredEnum(home.module, home.decl);
   }
 }

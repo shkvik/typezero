@@ -1,0 +1,5 @@
+// A Result is never equal to another one, so it is no key.
+const results = new Set<Result<int, string>>();
+const values = new Map<int, Result<int, string>>();
+
+console.log(results, values);

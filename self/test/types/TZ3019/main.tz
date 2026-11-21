@@ -1,0 +1,4 @@
+// A text under a key of a Record may be missing.
+const names: Record<string, string> = {};
+
+names.a += "x";

@@ -1,0 +1,3 @@
+main.tz:3:19: error TZ3152: an object with methods cannot be spread into an object literal yet; copy the fields by name
+const copy = { ...counter };
+                  ^

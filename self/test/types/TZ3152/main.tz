@@ -1,0 +1,5 @@
+// An object with methods is not spread.
+const counter = { n: 1, get() { return 1; } };
+const copy = { ...counter };
+
+console.log(copy);

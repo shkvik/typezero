@@ -1,0 +1,3 @@
+main.tz:6:23: error TZ3044: arguments for the callback are not supported; pass an arrow that calls it with them
+setTimeout(greet, 10, "x");
+                      ^

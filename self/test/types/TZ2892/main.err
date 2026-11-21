@@ -1,0 +1,9 @@
+main.tz:6:34: error TZ2892: 'asserts s is Circle' is not supported (docs/narrowing.md): there are no exceptions, so a function cannot stop its caller; write 's is Circle' and return whether it holds, then check it at the call: 'if (!assertCircle(s)) return err(...)'
+function assertCircle(s: Shape): asserts s is Circle {
+                                 ^
+main.tz:10:43: error TZ2892: 'asserts ok' is not supported (docs/narrowing.md): there are no exceptions, so a function cannot stop its caller; write 'boolean' and return whether it holds, then check it at the call: 'if (!check(ok, why)) return err(...)'
+function check(ok: boolean, why: string): asserts ok {
+                                          ^
+main.tz:21:18: error TZ2892: 'asserts this is Shelf' is not supported (docs/narrowing.md): there are no exceptions, so a function cannot stop its caller; write 'this is Shelf' and return whether it holds, then check it at the call: 'if (!shelf.full()) return err(...)'
+  public full(): asserts this is Shelf {}
+                 ^

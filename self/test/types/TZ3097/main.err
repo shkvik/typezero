@@ -1,0 +1,3 @@
+main.tz:11:23: error TZ3097: 'map' is a method of Result; call it: 'result.map(...)'
+const change = result.map;
+                      ^

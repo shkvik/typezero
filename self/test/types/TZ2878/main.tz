@@ -1,0 +1,13 @@
+// Only an enum of numbers maps a value back to a name.
+enum Direction {
+  Up = "UP",
+  Down = "DOWN",
+}
+
+enum Level {
+  Low,
+  High,
+}
+
+const name = Direction[0];
+const level = Level[1];

@@ -1,0 +1,3 @@
+main.tz
+  1:7 price: decimal
+  4:7 mode: string

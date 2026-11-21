@@ -1,0 +1,3 @@
+main.tz
+  2:7 s: Set<int>
+  3:7 fromSet: Record<string, int>

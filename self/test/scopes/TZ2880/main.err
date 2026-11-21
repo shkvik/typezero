@@ -1,0 +1,3 @@
+main.tz:2:8: error TZ2880: duplicate label 'twice'
+twice: twice: for (;;) {
+       ^

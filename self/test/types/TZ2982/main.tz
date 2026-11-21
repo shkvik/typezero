@@ -1,0 +1,6 @@
+// '!' cannot test a value of type T that may be a number.
+function absent<T>(x: T): boolean {
+  return !x;
+}
+
+console.log(absent(1));

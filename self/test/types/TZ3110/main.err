@@ -1,0 +1,3 @@
+main.tz:12:25: error TZ3110: the function returns a Result that its caller drops, so an error in it would go unchecked; handle it here, e.g. with '.match(...)'
+names.forEach((name) => save(name));
+                        ^

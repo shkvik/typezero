@@ -1,0 +1,20 @@
+// The errors given to Result.combine make one union.
+function first(flag: boolean): Result<int, int[]> {
+  if (flag) {
+    return err([1]);
+  }
+
+  return ok(1);
+}
+
+function second(flag: boolean): Result<string, string[]> {
+  if (flag) {
+    return err(["x"]);
+  }
+
+  return ok("x");
+}
+
+const all = Result.combine([first(true), second(true)]);
+
+console.log(all.isOk());

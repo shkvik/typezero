@@ -54,6 +54,7 @@ export enum GenericBuiltin {
   Record,
   Generator,
   AsyncGenerator,
+  Constructor,
 }
 
 export enum TextChange {
@@ -80,6 +81,8 @@ export type GenericTypeName = {
   readonly most: int;
   readonly example: string;
   readonly values: int;
+  readonly few: Code;
+  readonly many: Code;
 };
 
 export type JsonKind = {
@@ -186,6 +189,31 @@ export type Distribution = {
 export type EnumStep = {
   readonly type: Type;
   readonly number?: int;
+};
+
+export type EnumConstant = {
+  readonly isText: boolean;
+  readonly number: decimal;
+  readonly text: string;
+  readonly shown?: string;
+};
+
+export type EnumCount = {
+  next: decimal;
+  isCounting: boolean;
+  hasNumbers: boolean;
+  hasStrings: boolean;
+};
+
+export type EnumFrame = {
+  readonly module: int;
+  readonly decl: EnumDecl;
+  readonly steps: EnumStep[];
+};
+
+export type EnumHome = {
+  readonly module: int;
+  readonly decl: EnumDecl;
 };
 
 export type AliasOrigin = {

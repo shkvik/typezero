@@ -1,0 +1,3 @@
+main.tz:5:3: error TZ2986: '&&=' cannot test a value of type 'T': 'T' may be a number, and 0 would count as false; check for undefined: 'if (value != undefined) value = d'
+  value &&= d;
+  ^

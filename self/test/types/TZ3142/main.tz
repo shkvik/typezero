@@ -1,0 +1,6 @@
+// A tag gets its texts as a plain array.
+function tag(texts: TemplateStringsArray, value: int): int {
+  return texts.raw.length + value;
+}
+
+console.log(tag`a${1}`);

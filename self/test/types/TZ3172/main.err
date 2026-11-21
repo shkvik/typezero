@@ -1,0 +1,3 @@
+main.tz:2:25: error TZ3172: 'ConstructorArgs' is the list of the parameters of the constructor of the class extended, for the constructor of a class that extends another: 'constructor(...args: ConstructorArgs) { super(...args) }'
+function plain(...args: ConstructorArgs): void {
+                        ^

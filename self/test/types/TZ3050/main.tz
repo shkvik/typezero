@@ -1,0 +1,4 @@
+// Months count from 0, so 12 is January of the next year.
+const date = new Date(2026, 12, 1);
+
+console.log(date.getMonth());

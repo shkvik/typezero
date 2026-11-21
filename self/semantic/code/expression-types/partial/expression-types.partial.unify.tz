@@ -139,6 +139,7 @@ partial class ExpressionTypes {
       this.commonParent(first, second) ??
       this.widerArray(first, second) ??
       this.settledPromise(first, second) ??
+      this.commonConstructor(first, second) ??
       this.commonAnyObject(first, second)
     );
   }
@@ -298,6 +299,7 @@ partial class ExpressionTypes {
       case TypeKind.Iterator:
       case TypeKind.Dict:
       case TypeKind.Promise:
+      case TypeKind.Class:
         return true;
       case TypeKind.Union:
         return this.isObjectUnion(type.parts);

@@ -1,0 +1,3 @@
+main.tz:2:20: error TZ2975: 'Generator' takes 1-3 type arguments: the values it gives, what it returns and what next() sends, e.g. 'Generator<int>'
+function* count(): Generator<int, int, int, int> {
+                   ^

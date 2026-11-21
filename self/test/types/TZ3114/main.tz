@@ -1,0 +1,16 @@
+function parse(text: string): Result<int, string> {
+  if (text == "") {
+    return err("empty");
+  }
+
+  return ok(text.length);
+}
+
+// A Promise of a Result is awaited before its methods.
+async function load(text: string): Promise<Result<int, string>> {
+  return parse(text);
+}
+
+const pending = load("a");
+
+console.log(pending.isOk());

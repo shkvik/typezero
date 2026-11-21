@@ -1,0 +1,3 @@
+main.tz:10:17: error TZ3086: only arrays can be destructured, found 'int[] | undefined'; the array may be undefined: check it first
+const [first] = maybe(true);
+                ^

@@ -1,0 +1,14 @@
+// A generic method cannot be an override.
+class Base<T> {
+  public m(x: T): T {
+    return x;
+  }
+}
+
+class Over<T> extends Base<T> {
+  public override f<U>(x: U): U {
+    return x;
+  }
+}
+
+console.log(Over);

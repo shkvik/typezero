@@ -1,0 +1,3 @@
+main.tz:3:3: error TZ2882: cannot find label 'nowhere'
+  break nowhere;
+  ^

@@ -1,0 +1,3 @@
+main.tz:2:11: error TZ2966: 'Array' needs an element type, e.g. 'Array<int>' or 'int[]'
+let list: Array = [1];
+          ^

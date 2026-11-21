@@ -1,0 +1,4 @@
+main.tz
+  1:6 type Small = { readonly get: () => int }
+  4:7 counter: Small
+  5:7 small: Small

@@ -1,0 +1,3 @@
+main.tz:4:18: error TZ3055: February has no day 30, and JavaScript would move on to March; the last day of February is day 0 of March: 'setMonth(2, 0)'
+date.setMonth(1, 30);
+                 ^

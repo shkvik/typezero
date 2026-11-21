@@ -1,0 +1,5 @@
+// A text known only when the program runs is read by Date.parse.
+const text = process.argv[2] ?? "";
+const date = new Date(text);
+
+console.log(date.getTime());

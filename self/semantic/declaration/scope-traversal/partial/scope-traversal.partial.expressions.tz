@@ -75,7 +75,7 @@ partial class ScopeTraversal {
       case ExprKind.Await:
         return this.traverseExpr(expr.value);
       case ExprKind.Class:
-        return this.traverseClass(expr.decl);
+        return this.traverseClass(expr.decl, true);
       case ExprKind.Template:
         return this.traverseExprs(expr.exprs);
       case ExprKind.ArrayLit:

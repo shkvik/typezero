@@ -1,0 +1,2 @@
+// Math.max and Math.min need values.
+console.log(Math.max(), Math.min(), Math.max(1, 2));

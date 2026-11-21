@@ -1,0 +1,3 @@
+main.tz:11:20: error TZ2900: type 'object' is not assignable to type 'User'; an object may be of any class: check which first, e.g. 'if (o instanceof User) ...'
+const user: User = o;
+                   ^

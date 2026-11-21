@@ -1,0 +1,12 @@
+// The Results made by map are not used.
+function save(text: string): Result<void, string> {
+  if (text == "") {
+    return err("empty");
+  }
+
+  return ok();
+}
+
+const names = ["a", "b"];
+
+names.map((name) => save(name));

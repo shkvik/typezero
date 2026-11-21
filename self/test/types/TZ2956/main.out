@@ -1,0 +1,3 @@
+main.tz
+  2:7 parsed: Result<int, NumberError>
+  3:7 used: Result<int, NumberError>

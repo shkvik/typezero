@@ -1,0 +1,6 @@
+// for...in walks the keys of an object.
+const count = 5;
+
+for (const key in count) {
+  console.log(key);
+}

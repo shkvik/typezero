@@ -1,0 +1,5 @@
+// '+' with a date joins texts.
+const date = new Date();
+const later = date + 1;
+
+console.log(later);

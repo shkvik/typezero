@@ -1,0 +1,6 @@
+main.tz
+  2:6 type Dir = "up" | "down" | "left"
+  4:10 partly: ("up" | "down" | "left") => int
+  9:13 rest: never
+  16:10 fully: ("up" | "down" | "left") => int
+  25:13 rest: never

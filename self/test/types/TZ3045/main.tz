@@ -1,0 +1,2 @@
+// Nothing is thrown, so there is nothing to catch.
+process.on("uncaughtException", (e) => console.log(e));

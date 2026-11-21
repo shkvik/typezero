@@ -1,0 +1,10 @@
+class User {
+  constructor(public name: string) {}
+}
+
+// The class extended is known when compiling.
+function extend(kind: Constructor<User>) {
+  return class extends kind {};
+}
+
+console.log(extend(User));

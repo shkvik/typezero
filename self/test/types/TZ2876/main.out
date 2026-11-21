@@ -1,0 +1,4 @@
+main.tz
+  2:6 type string = int
+  3:6 type Json = string | int
+  5:7 text: string

@@ -1,0 +1,4 @@
+main.tz
+  2:5 count: int
+  4:6 enum Sizes = int
+  10:7 large: int

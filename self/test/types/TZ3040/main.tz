@@ -1,0 +1,11 @@
+// An async callback of forEach is dropped.
+async function save(name: string): Promise<void> {
+  await undefined;
+  console.log("saved", name);
+}
+
+const names = ["a", "b"];
+
+names.forEach(async (n) => {
+  await save(n);
+});

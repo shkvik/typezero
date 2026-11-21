@@ -1,0 +1,3 @@
+main.tz:2:11: error TZ2967: 'Array' takes one type argument
+let list: Array<int, int> = [1];
+          ^

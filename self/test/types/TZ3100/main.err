@@ -1,0 +1,3 @@
+main.tz:10:27: error TZ3100: the functions given to 'match' return 'int[]' and 'string[]', and no type holds both
+const shown = lists(true).match(
+                          ^

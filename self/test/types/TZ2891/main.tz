@@ -1,0 +1,10 @@
+// A function type cannot assert either.
+type Circle = { kind: "circle"; r: double };
+type Square = { kind: "square"; side: double };
+type Shape = Circle | Square;
+
+function run(s: Shape, test: (s: Shape) => asserts s is Circle): void {
+  console.log(s.kind, test);
+}
+
+console.log(run);

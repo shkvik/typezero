@@ -1,0 +1,3 @@
+main.tz:3:19: error TZ2996: a generic method cannot be abstract: each call runs a copy of it made for its types
+  public abstract area<T>(x: T): T;
+                  ^

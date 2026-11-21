@@ -1,0 +1,6 @@
+main.tz:2:14: error TZ2968: 'Result' takes two type arguments, the value and the error, e.g. 'Result<int, string>'
+let outcome: Result<int> = ok(1);
+             ^
+main.tz:3:12: error TZ2968: 'Result' takes two type arguments, the value and the error, e.g. 'Result<int, string>'
+let whole: Result<int, string, int> = ok(1);
+           ^

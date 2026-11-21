@@ -19,3 +19,8 @@ export type ImportedName = {
   readonly decl: ImportDecl;
   readonly name: ModuleName;
 };
+
+export type Submodule = {
+  readonly parent: string;
+  readonly name: string;
+};

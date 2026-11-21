@@ -1,0 +1,78 @@
+import {
+  DateKeyword,
+  DateToken,
+  DateTokenKind,
+} from "../types/date-reader.types.tz";
+
+export const kNone = 2147483647;
+export const kSignificantDigits = 9;
+export const kLargestNumber = 999999999;
+export const kPrefixLength = 3;
+export const kLowerBit = 32;
+export const kUnsignedRange = 4294967296;
+export const kLargestSigned = 2147483647;
+
+export const kZero = 48;
+export const kNine = 57;
+export const kUpperA = 65;
+export const kColon = 58;
+export const kMinus = 45;
+export const kPlus = 43;
+export const kDot = 46;
+export const kLeftParen = 40;
+export const kRightParen = 41;
+
+export const kDateSymbols = [kColon, kMinus, kPlus, kDot, kRightParen];
+
+export const kWhiteSpaces = [
+  0x09, 0x0b, 0x0c, 0x20, 0xa0, 0x1680, 0x202f, 0x205f, 0x3000, 0xfeff,
+];
+export const kWideSpaceFirst = 0x2000;
+export const kWideSpaceLast = 0x200a;
+export const kLineTerminators = [0x0a, 0x0d, 0x2028, 0x2029];
+
+export const kEndToken: DateToken = {
+  kind: DateTokenKind.End,
+  length: 0,
+  value: -1,
+};
+export const kUnknownToken: DateToken = {
+  kind: DateTokenKind.Unknown,
+  length: 1,
+  value: -1,
+};
+export const kInvalidToken: DateToken = {
+  kind: DateTokenKind.Invalid,
+  length: 0,
+  value: -1,
+};
+
+export const kDateKeywords: DateKeyword[] = [
+  { prefix: "jan", kind: DateTokenKind.Month, value: 1 },
+  { prefix: "feb", kind: DateTokenKind.Month, value: 2 },
+  { prefix: "mar", kind: DateTokenKind.Month, value: 3 },
+  { prefix: "apr", kind: DateTokenKind.Month, value: 4 },
+  { prefix: "may", kind: DateTokenKind.Month, value: 5 },
+  { prefix: "jun", kind: DateTokenKind.Month, value: 6 },
+  { prefix: "jul", kind: DateTokenKind.Month, value: 7 },
+  { prefix: "aug", kind: DateTokenKind.Month, value: 8 },
+  { prefix: "sep", kind: DateTokenKind.Month, value: 9 },
+  { prefix: "oct", kind: DateTokenKind.Month, value: 10 },
+  { prefix: "nov", kind: DateTokenKind.Month, value: 11 },
+  { prefix: "dec", kind: DateTokenKind.Month, value: 12 },
+  { prefix: "am", kind: DateTokenKind.Meridiem, value: 0 },
+  { prefix: "pm", kind: DateTokenKind.Meridiem, value: 12 },
+  { prefix: "ut", kind: DateTokenKind.Zone, value: 0 },
+  { prefix: "utc", kind: DateTokenKind.Zone, value: 0 },
+  { prefix: "z", kind: DateTokenKind.Zone, value: 0 },
+  { prefix: "gmt", kind: DateTokenKind.Zone, value: 0 },
+  { prefix: "cdt", kind: DateTokenKind.Zone, value: -5 },
+  { prefix: "cst", kind: DateTokenKind.Zone, value: -6 },
+  { prefix: "edt", kind: DateTokenKind.Zone, value: -4 },
+  { prefix: "est", kind: DateTokenKind.Zone, value: -5 },
+  { prefix: "mdt", kind: DateTokenKind.Zone, value: -6 },
+  { prefix: "mst", kind: DateTokenKind.Zone, value: -7 },
+  { prefix: "pdt", kind: DateTokenKind.Zone, value: -7 },
+  { prefix: "pst", kind: DateTokenKind.Zone, value: -8 },
+  { prefix: "t", kind: DateTokenKind.LetterT, value: 0 },
+];

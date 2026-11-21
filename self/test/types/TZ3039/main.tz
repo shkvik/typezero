@@ -1,0 +1,23 @@
+// An element written is within the array or right after its end.
+function write(a: int[], i: int): void {
+  a[i] = 5;
+  a[a.length + 1] = 2;
+  a[a.length] = 7;
+  a[0] = 1;
+
+  if (i >= 0 && i < a.length) {
+    a[i] = 1;
+  }
+}
+
+function last(xs: int[]): int {
+  if (xs.length > 0) {
+    const top: int = xs.pop() ?? 0;
+
+    return top;
+  }
+
+  return 0;
+}
+
+console.log(write, last);

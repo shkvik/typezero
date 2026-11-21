@@ -1,0 +1,6 @@
+main.tz:2:11: error TZ3028: 'Iterable<T>' can only be the type of a parameter of a function declared at the top level or of a method, which it makes generic: a copy for each kind of iterable; here, write the type itself, e.g. 'int[]', or 'Iterator<int>' for any iterator
+const xs: Iterable<int> = [1, 2];
+          ^
+main.tz:3:16: error TZ3028: 'Iterable<T>' can only be the type of a parameter of a function declared at the top level or of a method, which it makes generic: a copy for each kind of iterable; here, write the type itself, e.g. 'int[]', or 'Iterator<int>' for any iterator
+const f = (ys: Iterable<int>): int => 1;
+               ^

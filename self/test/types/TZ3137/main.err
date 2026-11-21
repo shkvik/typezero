@@ -1,0 +1,3 @@
+main.tz:4:15: error TZ3137: operator 'in' is not supported for arrays, which have no holes; compare the index with the length instead: '1 < list.length'
+console.log(1 in list);
+              ^

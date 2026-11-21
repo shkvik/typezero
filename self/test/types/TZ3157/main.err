@@ -1,0 +1,3 @@
+main.tz:7:3: error TZ3157: 'onClick' is a field in 'Clicky' that code may replace, so in 'Button', which implements it, it must be a field too: 'onClick = (...) => ...'; or declare it in 'Clicky' as a method, 'onClick(...): ...'
+  onClick() {}
+  ^

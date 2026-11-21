@@ -1,0 +1,4 @@
+// unescape(encodeURIComponent(s)) is a legacy trick.
+const bytes = unescape(encodeURIComponent("a b"));
+
+console.log(bytes);

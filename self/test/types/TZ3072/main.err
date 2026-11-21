@@ -1,0 +1,3 @@
+main.tz:3:22: error TZ3072: a date minus a number is a number of milliseconds in JavaScript, not a date; write 'd.getTime() - ms', or 'new Date(d.getTime() - ms)' for a date
+const earlier = date - 1;
+                     ^

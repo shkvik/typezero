@@ -1,0 +1,3 @@
+main.tz:2:25: error TZ2902: a Result cannot be a key: Results are not compared, as in JavaScript each is an object of its own, equal to no other; use what it holds
+const results = new Set<Result<int, string>>();
+                        ^

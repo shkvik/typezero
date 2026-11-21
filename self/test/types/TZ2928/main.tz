@@ -1,0 +1,5 @@
+// There is no 'as'; with a broken type it says only that.
+const value = 5;
+const other = value as Missing;
+
+console.log(other);

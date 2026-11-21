@@ -1,0 +1,6 @@
+main.tz:5:25: error TZ3048: the values of 'Math.min', 'Math.max' and 'Math.clamp' must have one type; found 'int' and 'double'; round it first, then convert: 'Math.trunc(d).toInt()' (or Math.round, Math.floor, Math.ceil)
+console.log(Math.max(n, d), Math.min(d, n), Math.max(1, d), Math.min(n, 2));
+                        ^
+main.tz:5:41: error TZ3048: the values of 'Math.min', 'Math.max' and 'Math.clamp' must have one type; found 'double' and 'int'; convert it explicitly: 'n.toDouble()'
+console.log(Math.max(n, d), Math.min(d, n), Math.max(1, d), Math.min(n, 2));
+                                        ^

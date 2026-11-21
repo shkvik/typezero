@@ -1,0 +1,4 @@
+// A month outside 0 to 11 is outside the year.
+const date = new Date(2026, 13, 1);
+
+console.log(date.getMonth());

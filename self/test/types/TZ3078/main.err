@@ -1,0 +1,3 @@
+main.tz:11:21: error TZ3078: every member of 'Map<string, int> | Map<string, string>' is a 'Map', so 'instanceof Map' is always true
+const isMap = value instanceof Map;
+                    ^

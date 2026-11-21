@@ -1,0 +1,3 @@
+main.tz:7:10: error TZ3004: variants of 'h' cannot differ only in what they return: a call chooses a variant by its arguments
+  public h(a: int): string {
+         ^

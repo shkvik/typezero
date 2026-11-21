@@ -1,0 +1,3 @@
+main.tz:6:21: error TZ3162: 'Constructor' takes the type of the objects the class makes, e.g. 'Constructor<User>', or nothing for any class
+function make(kind: Constructor<User, User>): void {
+                    ^

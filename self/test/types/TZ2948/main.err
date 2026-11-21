@@ -1,0 +1,3 @@
+main.tz:2:18: error TZ2948: 'JSON.foo' does not exist; JSON has parse and stringify
+console.log(JSON.foo("x"));
+                 ^

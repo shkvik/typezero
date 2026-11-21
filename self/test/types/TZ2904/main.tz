@@ -1,0 +1,13 @@
+// 'in' tells nothing when every member has the field.
+type Circle = { kind: "circle"; r: double };
+type Square = { kind: "square"; side: double };
+
+function always(s: Circle | Square): boolean {
+  return "kind" in s;
+}
+
+function some(s: Circle | Square): boolean {
+  return "r" in s;
+}
+
+console.log(always, some);

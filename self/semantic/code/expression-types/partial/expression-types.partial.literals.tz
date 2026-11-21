@@ -128,8 +128,14 @@ partial class ExpressionTypes {
         }
 
         return base;
-      case LiteralKind.Double:
-        return this.fractionTyped(expr, literal, parts, base);
+      case LiteralKind.Double: {
+        const fraction = this.fractionTyped(expr, literal, parts, base);
+        if (fraction.kind == TypeKind.Decimal) {
+          this.decimalRangeCheck(expr, module);
+        }
+
+        return fraction;
+      }
       default:
         return this.wholeTyped(expr, literal, parts, base, module);
     }

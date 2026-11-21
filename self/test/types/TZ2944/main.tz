@@ -1,0 +1,4 @@
+// toFixed takes a whole number of digits.
+const value = 1.5;
+
+console.log(value.toFixed("2"), value.toFixed(2));

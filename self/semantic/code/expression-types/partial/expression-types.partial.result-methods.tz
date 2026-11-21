@@ -1,0 +1,560 @@
+import { ExpressionTypes } from "../expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { messageText } from "../../../../diagnostic/message.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  ResultType,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  kHiddenMark,
+  kResultMethods,
+  kResultPlaceholder,
+  kUnsupportedMark,
+} from "../const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private resultFacts(
+    call: CallExpr,
+    callee: MemberExpr,
+    isTrue: boolean,
+    module: int,
+  ): Map<string, Type> {
+    const facts = new Map<string, Type>();
+    const object = callee.object;
+    const isTest = callee.name == "isOk" || callee.name == "isErr";
+    if (!isTest || object.kind != ExprKind.Name) {
+      return facts;
+    }
+
+    const slot = this.narrowable(object, module);
+    if (slot == undefined) {
+      return facts;
+    }
+
+    const base = this.definedType(slot.type);
+    if (base.kind != TypeKind.Result) {
+      return facts;
+    }
+
+    const never = this.store.plain(TypeKind.Never);
+    const isOk = (callee.name == "isOk") == isTrue;
+    if (isOk) {
+      facts.set(slot.key, this.store.resultOf(base.value, never));
+
+      return facts;
+    }
+
+    facts.set(slot.key, this.store.resultOf(never, base.error));
+
+    return facts;
+  }
+
+  private resultMemberRead(
+    expr: MemberExpr,
+    result: ResultType,
+    module: int,
+  ): Type {
+    const word = this.resultReceiverText(expr.object);
+    const error = this.store.plain(TypeKind.Error);
+    if (expr.name == "value") {
+      if (result.error.kind != TypeKind.Never) {
+        this.report(module, expr.loc, Code.ResultValueUnchecked, { word });
+
+        return error;
+      }
+
+      return this.halfParam(result.value);
+    }
+    if (expr.name == "error") {
+      if (result.value.kind != TypeKind.Never) {
+        this.report(module, expr.loc, Code.ResultErrorUnchecked, { word });
+
+        return error;
+      }
+
+      return this.halfParam(result.error);
+    }
+
+    const isMethod = kResultMethods.some((one) => one.name == expr.name);
+    if (isMethod) {
+      this.report(module, expr.loc, Code.ResultMethodRead, {
+        word: expr.name,
+        other: word,
+      });
+
+      return error;
+    }
+
+    this.report(module, expr.loc, Code.PropertyMissing, {
+      word: expr.name,
+      first: this.text.of(result),
+    });
+
+    return error;
+  }
+
+  private resultReceiverText(expr: Expr): string {
+    if (expr.kind == ExprKind.Name && !expr.name.startsWith(kHiddenMark)) {
+      return expr.name;
+    }
+
+    return kResultPlaceholder;
+  }
+
+  private halfParam(half: Type): Type {
+    if (half.kind == TypeKind.Void) {
+      return this.store.plain(TypeKind.Undefined);
+    }
+
+    return half;
+  }
+
+  private resultMethodCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    result: ResultType,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const error = this.store.plain(TypeKind.Error);
+    if (expr.args.some((arg) => arg.spread)) {
+      this.looseArguments(expr.args, module);
+
+      return error;
+    }
+
+    const name = member.name;
+    const method = kResultMethods.find((one) => one.name == name);
+    if (method == undefined) {
+      this.report(module, member.loc, Code.PropertyMissing, {
+        word: name,
+        first: this.text.of(result),
+      });
+      this.looseArguments(expr.args, module);
+
+      return error;
+    }
+
+    const count = expr.args.length;
+    if (count != method.count) {
+      const word = this.argumentCountText(method.count, method.count, false);
+
+      this.report(module, member.loc, Code.ArgumentCount, {
+        word,
+        other: `${count}`,
+      });
+
+      return error;
+    }
+
+    return this.resultMethodTyped(expr, member, result, wanted, module);
+  }
+
+  private resultMethodTyped(
+    expr: CallExpr,
+    member: MemberExpr,
+    result: ResultType,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const name = member.name;
+    const first = expr.args[0]?.expr;
+    if (name == "isOk" || name == "isErr" || first == undefined) {
+      return this.store.plain(TypeKind.Boolean);
+    }
+    if (name == "unwrapOr") {
+      return this.unwrapOrTyped(first, result, module);
+    }
+    if (name == "match") {
+      return this.matchTyped(expr, member, result, wanted, module);
+    }
+
+    const isOnError = name == "mapErr" || name == "orElse" || name == "orTee";
+    const half = this.resultHalf(result, isOnError);
+    const isTee = name == "andTee" || name == "orTee";
+    const hint = this.resultCallbackHint(name, wanted, isOnError);
+    const returned = this.resultCallback(first, half, hint, isTee, name, module);
+    if (returned == undefined || returned.kind == TypeKind.Error) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.resultCallTyped(name, first, result, returned, module);
+  }
+
+  private resultHalf(result: ResultType, isOnError: boolean): Type {
+    if (isOnError) {
+      return result.error;
+    }
+
+    return result.value;
+  }
+
+  private resultCallbackHint(
+    name: string,
+    wanted: Type | undefined,
+    isOnError: boolean,
+  ): Type | undefined {
+    const goal = this.resultWanted(wanted);
+    if (goal == undefined || goal.kind != TypeKind.Result) {
+      return undefined;
+    }
+    if (name == "andThen" || name == "orElse") {
+      return goal;
+    }
+    if (name != "map" && name != "mapErr") {
+      return undefined;
+    }
+
+    const half = this.resultHalf(goal, isOnError);
+    const base = this.definedType(half);
+    const isShaped =
+      base.kind == TypeKind.Object ||
+      base.kind == TypeKind.Result ||
+      base.kind == TypeKind.Array;
+    if (!isShaped) {
+      return undefined;
+    }
+
+    return half;
+  }
+
+  private resultWanted(wanted: Type | undefined): Type | undefined {
+    if (wanted == undefined || wanted.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    const defined = this.definedType(wanted);
+    if (defined.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return defined;
+  }
+
+  private resultCallback(
+    arg: Expr,
+    half: Type,
+    hint: Type | undefined,
+    isTee: boolean,
+    name: string,
+    module: int,
+  ): Type | undefined {
+    const isFunction = arg.kind == ExprKind.Function;
+    const params = [{ type: this.halfParam(half), optional: false }];
+    const result = this.callbackResult(isFunction, hint, isTee);
+    const wanted = this.store.functionOf({ params, rest: false, result });
+    const typed = this.typed(arg, wanted, module);
+    if (typed.kind == TypeKind.Function) {
+      return typed.shape.result;
+    }
+    if (typed.kind != TypeKind.Error) {
+      this.report(module, arg.loc, Code.ResultNeedsFunction, {
+        word: name,
+        first: this.text.of(typed),
+      });
+    }
+
+    return undefined;
+  }
+
+  private callbackResult(
+    isFunction: boolean,
+    hint: Type | undefined,
+    isTee: boolean,
+  ): Type {
+    if (isTee) {
+      return this.store.plain(TypeKind.Void);
+    }
+    if (isFunction && hint != undefined) {
+      return hint;
+    }
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private resultCallTyped(
+    name: string,
+    arg: Expr,
+    result: ResultType,
+    returned: Type,
+    module: int,
+  ): Type {
+    switch (name) {
+      case "map":
+        return this.store.resultOf(returned, result.error);
+      case "mapErr":
+        return this.store.resultOf(result.value, returned);
+      case "andThen":
+      case "andThrough":
+        return this.chainedTyped(name, arg, result, returned, module);
+      case "orElse":
+        return this.orElseTyped(arg, result, returned, module);
+      default:
+        return result;
+    }
+  }
+
+  private chainedTyped(
+    name: string,
+    arg: Expr,
+    result: ResultType,
+    returned: Type,
+    module: int,
+  ): Type {
+    const next = this.definedType(returned);
+    if (next.kind != TypeKind.Result) {
+      return this.notResultReport(name, arg, returned, module);
+    }
+
+    const common = this.resultHalfJoin(result.error, next.error);
+    if (common == undefined) {
+      this.report(module, arg.loc, Code.ResultErrorsNoUnion, {
+        first: this.text.of(result.error),
+        word: name,
+        second: this.text.of(next.error),
+        other: this.resultUnionWhy(result.error, next.error),
+      });
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (name == "andThen") {
+      return this.store.resultOf(next.value, common);
+    }
+
+    return this.store.resultOf(result.value, common);
+  }
+
+  private orElseTyped(
+    arg: Expr,
+    result: ResultType,
+    returned: Type,
+    module: int,
+  ): Type {
+    const next = this.definedType(returned);
+    if (next.kind != TypeKind.Result) {
+      return this.notResultReport("orElse", arg, returned, module);
+    }
+
+    const common = this.resultHalfJoin(result.value, next.value);
+    if (common == undefined) {
+      this.report(module, arg.loc, Code.ResultValuesNoUnion, {
+        first: this.text.of(result.value),
+        second: this.text.of(next.value),
+        other: this.resultUnionWhy(result.value, next.value),
+      });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.store.resultOf(common, next.error);
+  }
+
+  private notResultReport(
+    name: string,
+    arg: Expr,
+    returned: Type,
+    module: int,
+  ): Type {
+    if (returned.kind != TypeKind.Error) {
+      this.report(module, arg.loc, Code.ResultCallbackNotResult, {
+        word: name,
+        first: this.text.of(returned),
+        place: this.mapHint(name == "andThen"),
+      });
+    }
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private mapHint(isAndThen: boolean): string {
+    if (isAndThen) {
+      return "; to change the value, use 'map'";
+    }
+
+    return "";
+  }
+
+  private resultHalfJoin(first: Type, second: Type): Type | undefined {
+    if (first == second || second.kind == TypeKind.Never) {
+      return first;
+    }
+    if (first.kind == TypeKind.Never) {
+      return second;
+    }
+    if (first.kind == TypeKind.Void || second.kind == TypeKind.Void) {
+      return undefined;
+    }
+
+    const joined = this.unionUnify(first, second);
+    if (joined == undefined || joined.kind == TypeKind.Error) {
+      return undefined;
+    }
+    if (this.resolver.unionProblem(joined) != undefined) {
+      return undefined;
+    }
+
+    return joined;
+  }
+
+  private resultUnionWhy(first: Type, second: Type): string {
+    if (first.kind == TypeKind.Void || second.kind == TypeKind.Void) {
+      return ": one of them is nothing, 'ok()'";
+    }
+
+    const both = this.store.unionOf([first, second]);
+    const problem = this.resolver.unionProblem(both);
+    if (problem == undefined) {
+      return "";
+    }
+
+    const full = messageText(problem.code, problem.details);
+    const mark = full.indexOf(kUnsupportedMark);
+
+    return `: ${full.slice(mark + kUnsupportedMark.length)}`;
+  }
+
+  private unwrapOrTyped(arg: Expr, result: ResultType, module: int): Type {
+    const value = result.value;
+    const isGiving =
+      value.kind != TypeKind.Never && value.kind != TypeKind.Void;
+    const hint = this.givingHint(isGiving, value);
+    const other = this.typed(arg, hint, module);
+    if (other.kind == TypeKind.Error) {
+      return other;
+    }
+
+    const joined = this.unwrapJoin(value, other);
+    if (joined == undefined) {
+      this.report(module, arg.loc, Code.ResultUnwrapOrTypes, {
+        first: this.text.of(value),
+        second: this.text.of(other),
+      });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return joined;
+  }
+
+  private givingHint(isGiving: boolean, value: Type): Type | undefined {
+    if (isGiving) {
+      return value;
+    }
+
+    return undefined;
+  }
+
+  private unwrapJoin(value: Type, other: Type): Type | undefined {
+    if (other.kind == TypeKind.Void) {
+      return undefined;
+    }
+    if (value.kind == TypeKind.Never) {
+      return other;
+    }
+
+    const joined = this.unionUnify(value, other);
+    if (joined == undefined || joined.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return joined;
+  }
+
+  private matchTyped(
+    expr: CallExpr,
+    member: MemberExpr,
+    result: ResultType,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const onOk = expr.args[0]?.expr;
+    const onErr = expr.args[1]?.expr;
+    if (onOk == undefined || onErr == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const goal = this.resultWanted(wanted);
+    const both = this.matchGoal(goal);
+    const first = this.resultCallback(
+      onOk,
+      result.value,
+      both,
+      false,
+      "match",
+      module,
+    );
+    const second = this.resultCallback(
+      onErr,
+      result.error,
+      both,
+      false,
+      "match",
+      module,
+    );
+    if (first == undefined || second == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (first.kind == TypeKind.Error || second.kind == TypeKind.Error) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.matchJoined(member, first, second, module);
+  }
+
+  private matchGoal(goal: Type | undefined): Type | undefined {
+    if (goal == undefined || goal.kind == TypeKind.Void) {
+      return undefined;
+    }
+
+    return goal;
+  }
+
+  private matchJoined(
+    member: MemberExpr,
+    first: Type,
+    second: Type,
+    module: int,
+  ): Type {
+    const isFirstVoid = first.kind == TypeKind.Void;
+    const isSecondVoid = second.kind == TypeKind.Void;
+    if (isFirstVoid && isSecondVoid) {
+      return first;
+    }
+
+    const joined = this.matchUnion(first, second, isFirstVoid || isSecondVoid);
+    if (joined == undefined) {
+      this.report(module, member.loc, Code.ResultMatchTypes, {
+        first: this.text.of(first),
+        second: this.text.of(second),
+      });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return joined;
+  }
+
+  private matchUnion(
+    first: Type,
+    second: Type,
+    hasVoid: boolean,
+  ): Type | undefined {
+    if (hasVoid) {
+      return undefined;
+    }
+
+    const joined = this.unionUnify(first, second);
+    if (joined == undefined || joined.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return joined;
+  }
+}

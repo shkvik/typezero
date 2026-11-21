@@ -1,0 +1,8 @@
+// The value that maps back to a name is an integer.
+enum Level {
+  Low,
+  High,
+}
+
+const name = Level["High"];
+const other = Level[0];

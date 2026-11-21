@@ -1,15 +1,26 @@
 import { ExpressionTypes } from "../expression-types.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import { messageText } from "../../../../diagnostic/message.tz";
 import {
+  CallExpr,
   Expr,
+  ExprKind,
   MemberExpr,
   YieldExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
 import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
-import { kLengthName, kNoPlace } from "../const/expression-types.const.tz";
+import {
+  kArrayClass,
+  kFlatMapName,
+  kIteratorClass,
+  kLengthName,
+  kNextName,
+  kNoPlace,
+  kUnsupportedMark,
+} from "../const/expression-types.const.tz";
 import {
   FunctionFrame,
   GeneratorFrame,
@@ -316,5 +327,144 @@ partial class ExpressionTypes {
       word: this.text.of(base),
       first: this.text.of(sent),
     });
+  }
+
+  private nextUnionCheck(
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): void {
+    if (object.kind != TypeKind.Iterator || member.name != kNextName) {
+      return;
+    }
+
+    const shape = object.shape;
+    const returned = shape.returned;
+    const isPlain =
+      returned.kind == TypeKind.Void ||
+      returned.kind == TypeKind.Undefined ||
+      returned.kind == TypeKind.Error;
+    if (isPlain) {
+      return;
+    }
+
+    const joined = this.store.unionOf([shape.yielded, returned]);
+    const problem = this.resolver.unionProblem(joined);
+    if (problem == undefined) {
+      return;
+    }
+
+    const full = messageText(problem.code, problem.details);
+    const mark = full.indexOf(kUnsupportedMark);
+    const other = full.slice(mark + kUnsupportedMark.length);
+
+    this.report(module, member.loc, Code.NextNoUnion, {
+      word: this.text.of(object),
+      first: this.text.of(shape.yielded),
+      second: this.text.of(returned),
+      other,
+    });
+  }
+
+  private flatMapResultCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): void {
+    const callback = expr.args[0]?.expr;
+    const isFlat =
+      object.kind == TypeKind.Iterator && member.name == kFlatMapName;
+    if (!isFlat || callback == undefined || callback.kind != ExprKind.Function) {
+      return;
+    }
+    if (object.kind != TypeKind.Iterator) {
+      return;
+    }
+
+    const params = [{ type: object.shape.yielded, optional: false }];
+    const result = this.store.plain(TypeKind.Error);
+    const wanted = this.store.functionOf({ params, rest: false, result });
+
+    this.quiet += 1;
+
+    const typed = this.typed(callback, wanted, module);
+
+    this.quiet -= 1;
+
+    if (typed.kind != TypeKind.Function) {
+      return;
+    }
+
+    const given = this.apparent(typed.shape.result);
+    const isFlattened =
+      given.kind == TypeKind.Array ||
+      given.kind == TypeKind.Iterator ||
+      given.kind == TypeKind.Error;
+    if (isFlattened) {
+      return;
+    }
+
+    this.report(module, callback.loc, Code.FlatMapResult, {
+      word: this.text.of(given),
+    });
+  }
+
+  private staticSourceCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): boolean {
+    const object = member.object;
+    if (object.kind != ExprKind.Name || !this.isGlobalUse(object, module)) {
+      return false;
+    }
+    if (object.name == kArrayClass && member.name == "of") {
+      this.report(module, member.loc, Code.ArrayStaticRefused, {
+        word: member.name,
+      });
+      this.looseArguments(expr.args, module);
+
+      return true;
+    }
+    if (object.name != kIteratorClass || member.name != "from") {
+      return false;
+    }
+
+    return this.iteratorSourceCheck(expr, module);
+  }
+
+  private iteratorSourceCheck(expr: CallExpr, module: int): boolean {
+    const arg = expr.args[0]?.expr;
+    if (arg == undefined) {
+      return false;
+    }
+
+    this.quiet += 1;
+
+    const type = this.typed(arg, undefined, module);
+
+    this.quiet -= 1;
+
+    const base = this.apparent(type);
+
+    switch (base.kind) {
+      case TypeKind.Array:
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Iterator:
+      case TypeKind.Error:
+      case TypeKind.Dict:
+      case TypeKind.Instance:
+      case TypeKind.Object:
+      case TypeKind.TypeParameter:
+        return false;
+      default:
+        this.report(module, arg.loc, Code.IteratorFromSource, {
+          word: this.text.of(type),
+        });
+
+        return true;
+    }
   }
 }

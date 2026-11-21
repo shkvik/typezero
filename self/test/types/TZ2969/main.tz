@@ -1,0 +1,4 @@
+// A Promise names the type of its value.
+let pending: Promise = Promise.resolve(1);
+
+console.log(pending);

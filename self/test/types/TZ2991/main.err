@@ -1,0 +1,3 @@
+main.tz:2:14: error TZ2991: 'Result' needs the types of its value and its error, e.g. 'Result<int, string>'
+let outcome: Result = ok(1);
+             ^

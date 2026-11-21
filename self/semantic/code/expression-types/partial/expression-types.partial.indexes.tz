@@ -31,11 +31,19 @@ import {
 partial class ExpressionTypes {
   private indexTyped(expr: IndexExpr, module: int): Type {
     const isMade = expr.index.loc == expr.loc;
-    if (isMade || this.enumOfObject(expr.object, module) != undefined) {
-      return this.childrenTyped(expr, module);
+    if (isMade) {
+      return this.patternElement(expr, module);
+    }
+
+    const home = this.enumHomeOf(expr.object, module);
+    if (home != undefined) {
+      return this.enumIndexed(expr, home, module);
     }
 
     const object = this.receiverOf(expr.object, expr.optional, module);
+    if (this.isJsonHolder(object)) {
+      return this.jsonIndexed(expr, module);
+    }
 
     switch (object.kind) {
       case TypeKind.Tuple:
@@ -50,6 +58,10 @@ partial class ExpressionTypes {
   }
 
   private otherIndexed(expr: IndexExpr, object: Type, module: int): Type {
+    if (this.unknownIndexCheck(expr, object, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
     if (object.kind == TypeKind.Array || object.kind == TypeKind.String) {
       return this.listIndexed(expr, object, module);
     }
@@ -382,10 +394,16 @@ partial class ExpressionTypes {
     if (this.dictInCheck(expr, object, module)) {
       return boolean;
     }
+    if (this.listInCheck(expr, object, module)) {
+      return boolean;
+    }
 
     const lhs = expr.lhs;
     const isUnion = object.kind == TypeKind.Union;
 
+    if (lhs.kind == ExprKind.StringLit && object.kind == TypeKind.Union) {
+      this.unionInCheck(expr, lhs.value, object, module);
+    }
     if (lhs.kind != ExprKind.StringLit || object.kind != TypeKind.Object) {
       return boolean;
     }
@@ -422,11 +440,22 @@ partial class ExpressionTypes {
     if (this.dictDeleteCheck(expr, module)) {
       return boolean;
     }
-    if (target.kind != ExprKind.Member) {
+    if (this.plainDeleteCheck(expr, target, module)) {
+      return boolean;
+    }
+    if (target.kind == ExprKind.Index) {
+      if (this.indexDeleteCheck(expr, target, module)) {
+        return boolean;
+      }
+    }
+
+    const name = this.deletedName(target, module);
+    const holder = this.deletedHolder(target);
+    if (name == undefined || holder == undefined) {
       return boolean;
     }
 
-    const object = this.typed(target.object, undefined, module);
+    const object = this.typed(holder, undefined, module);
     if (
       object.kind != TypeKind.Object ||
       this.resolver.isLibraryShape(object)
@@ -434,13 +463,12 @@ partial class ExpressionTypes {
       return boolean;
     }
 
-    const name = target.name;
     const field = object.fields.find((one) => one.name == name);
     if (field == undefined) {
       return boolean;
     }
     if (field.optional || this.isOptional(field.type)) {
-      const first = `${this.tupleText(target.object)}.${name}`;
+      const first = `${this.tupleText(holder)}.${name}`;
 
       this.report(module, expr.loc, Code.DeleteOptional, { word: name, first });
 
@@ -450,6 +478,25 @@ partial class ExpressionTypes {
     this.report(module, expr.loc, Code.DeleteRequired, { word: name });
 
     return boolean;
+  }
+
+  private deletedName(target: Expr, module: int): string | undefined {
+    if (target.kind == ExprKind.Member) {
+      return target.name;
+    }
+    if (target.kind == ExprKind.Index) {
+      return this.constantKey(target.index, module);
+    }
+
+    return undefined;
+  }
+
+  private deletedHolder(target: Expr): Expr | undefined {
+    if (target.kind == ExprKind.Member || target.kind == ExprKind.Index) {
+      return target.object;
+    }
+
+    return undefined;
   }
 
   private tupleCall(

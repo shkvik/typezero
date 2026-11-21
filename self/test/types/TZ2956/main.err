@@ -1,0 +1,3 @@
+main.tz:2:7: error TZ2956: the Result in 'parsed' is never checked, so an error in it would go unchecked; check it, e.g. 'if (parsed.isErr()) ...'
+const parsed = parseInt("5");
+      ^

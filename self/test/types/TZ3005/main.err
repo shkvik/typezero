@@ -1,0 +1,6 @@
+main.tz:7:10: error TZ3005: variants f(x?: int) and f() fit a call with 0 arguments equally well; give them parameters of different types
+  public f(): int {
+         ^
+main.tz:15:10: error TZ3005: variants g(a: int, b?: int) and g(a: int) fit a call with 1 argument equally well; give them parameters of different types
+  public g(a: int): int {
+         ^

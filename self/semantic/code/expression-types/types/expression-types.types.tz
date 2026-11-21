@@ -13,6 +13,7 @@ import {
 import {
   ClassDecl,
   ClassField,
+  Decorator,
   EnumDecl,
 } from "../../../../program/ast/types/ast.types.classes.tz";
 import {
@@ -33,6 +34,7 @@ import {
   DictKind,
   FunctionParameter,
   FunctionShape,
+  FunctionType,
   InstanceType,
   LiteralKind,
   PlainKind,
@@ -54,6 +56,7 @@ export type ParamSlot = {
 
 export type ValueRecord = {
   readonly uses: Map<int, NameUse>;
+  readonly hidden: Map<string, HiddenName>;
   readonly variables: Map<int, DeclaredVariable>;
   readonly functions: Map<int, FunctionDecl>;
   readonly params: Map<int, ParamSlot>;
@@ -77,6 +80,56 @@ export type TypeOfType = {
   readonly kind: PlainKind | TypeKind.Int;
   readonly bits: int;
   readonly unsigned: boolean;
+};
+
+export type HiddenName = {
+  readonly kind: SymbolKind;
+  readonly loc: int;
+};
+
+export enum DecimalArgument {
+  Decimal,
+  Places,
+  Digits,
+  Base,
+  Power,
+  Rounding,
+}
+
+export enum DecimalResult {
+  Number,
+  Text,
+  Truth,
+  Whole,
+  List,
+}
+
+export type DecimalMethod = {
+  readonly name: string;
+  readonly least: int;
+  readonly most: int;
+  readonly args: DecimalArgument[];
+  readonly result: DecimalResult;
+};
+
+export type DecimalReplacement = {
+  readonly name: string;
+  readonly use: string;
+};
+
+export type CombineDraft = {
+  readonly what: string;
+  readonly isAll: boolean;
+};
+
+export type ResultMethod = {
+  readonly name: string;
+  readonly count: int;
+};
+
+export type SpreadSlot = {
+  readonly name: string;
+  type: Type;
 };
 
 export type ValueTarget = {
@@ -109,6 +162,18 @@ export type FunctionFrame = {
   readonly recursive: string[];
   hasEmptyReturn: boolean;
   generator?: GeneratorFrame;
+  readonly guard: GuardBuild;
+};
+
+export type GuardBuild = {
+  whenTrue?: Map<string, Type>;
+  whenFalse?: Map<string, Type>;
+};
+
+export type GuardSummary = {
+  readonly params: string[];
+  readonly whenTrue?: Map<string, Type>;
+  readonly whenFalse?: Map<string, Type>;
 };
 
 export type GeneratorFrame = {
@@ -129,6 +194,7 @@ export enum DestinationKind {
   Argument,
   Declared,
   Returned,
+  Assigned,
 }
 
 export type Destination = {
@@ -137,6 +203,7 @@ export type Destination = {
   readonly index: int;
   readonly written?: TypeRef;
   readonly fn?: FunctionDecl;
+  readonly value?: Expr;
 };
 
 export type StaticOwner = {
@@ -163,12 +230,32 @@ export type ArgumentSlot = {
   readonly element?: Type;
 };
 
+export type RankedVariant = {
+  readonly fn: FunctionDecl;
+  readonly type: FunctionType;
+  ranks: int[];
+  isAdapted: boolean;
+  failed: int;
+};
+
 export type CallTarget = {
   readonly params: FunctionParameter[];
   readonly rest: boolean;
   readonly loc: int;
   readonly isLenient: boolean;
+  readonly kind?: CallKind;
+  readonly positions?: boolean[];
+  readonly method?: string;
+  readonly isCounted?: boolean;
+  readonly isTagged?: boolean;
 };
+
+export enum CallKind {
+  Own,
+  Library,
+  Positional,
+  Math,
+}
 
 export type LiteralValue = {
   readonly kind: LiteralKind;
@@ -289,6 +376,8 @@ export enum TruthUse {
   Not,
   And,
   Or,
+  OrAssign,
+  AndAssign,
 }
 
 export enum TruthProblem {
@@ -306,6 +395,11 @@ export enum LogicSide {
   Value,
   Tested,
 }
+
+export type NarrowedCode = {
+  readonly code: Code;
+  readonly narrowed: Code;
+};
 
 export type TruthCodes = {
   readonly use: TruthUse;
@@ -459,4 +553,62 @@ export type GenericDraft = {
   readonly contextual: int[];
   readonly inference: InferenceSet;
   isInferred: boolean;
+};
+
+export type DateFieldValues = {
+  readonly args: CallArgument[];
+  readonly first: int;
+  readonly setter: string;
+  readonly values: (int | undefined)[];
+};
+
+export type DateStatic = {
+  readonly name: string;
+  readonly example: string;
+};
+
+export type DateSetter = {
+  readonly name: string;
+  readonly first: int;
+};
+
+export type CarriedDay = {
+  readonly month: int;
+  readonly day: int;
+};
+
+export enum DecoratorPlace {
+  Class,
+  Field,
+  Method,
+  Parameter,
+}
+
+export type DecoratorUse = {
+  readonly decorator: Decorator;
+  readonly param: int;
+};
+
+export type DecorateRun = {
+  readonly decl: ClassDecl;
+  readonly field?: ClassField;
+  readonly method?: FunctionDecl;
+  readonly uses: DecoratorUse[];
+  readonly place: DecoratorPlace;
+  readonly isStatic: boolean;
+  readonly at: int;
+};
+
+export type DecoratedName = {
+  readonly name: string;
+  readonly loc: int;
+  readonly isStatic: boolean;
+  readonly decorators: string[];
+};
+
+export type DecoratorPlaceText = {
+  readonly place: DecoratorPlace;
+  readonly noun: string;
+  readonly given: int;
+  readonly args: string;
 };

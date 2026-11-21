@@ -1,0 +1,3 @@
+main.tz:4:1: error TZ3141: 'delete' removes fields of objects, and this is not a field
+delete list;
+^

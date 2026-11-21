@@ -1,0 +1,4 @@
+// A Record names its keys and values.
+let byName: Record<string> = {};
+
+console.log(byName);

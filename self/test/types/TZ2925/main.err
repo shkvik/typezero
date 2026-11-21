@@ -1,0 +1,3 @@
+main.tz:6:8: error TZ2925: 'list' always holds an array at this point, so '!' always gives false; drop the check, or check the length: 'list.length == 0'
+  if (!list) {
+       ^

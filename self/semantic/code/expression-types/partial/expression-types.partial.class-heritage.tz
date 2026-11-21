@@ -156,11 +156,13 @@ partial class ExpressionTypes {
   }
 
   private overrideChecks(decl: ClassDecl, module: int): void {
-    if (decl.base == undefined || decl.typeParams.length > 0) {
+    if (decl.base == undefined) {
       return;
     }
 
-    const instance = this.resolver.classInstance(module, decl, []);
+    const isOpen = decl.typeParams.length > 0;
+    const params = this.resolver.parameterTypes(module, decl.typeParams);
+    const instance = this.resolver.classInstance(module, decl, params);
     if (instance.kind != TypeKind.Instance) {
       return;
     }
@@ -172,7 +174,7 @@ partial class ExpressionTypes {
 
     for (const method of decl.methods) {
       if (!this.isStaticMethod(method)) {
-        this.overrideCheck(method, decl, parent, module);
+        this.overrideCheck(method, decl, parent, isOpen, module);
       }
     }
   }
@@ -181,6 +183,7 @@ partial class ExpressionTypes {
     method: FunctionDecl,
     decl: ClassDecl,
     parent: InstanceType,
+    isOpen: boolean,
     module: int,
   ): void {
     const word = method.name;
@@ -202,6 +205,9 @@ partial class ExpressionTypes {
         first: parent.name,
       });
 
+      return;
+    }
+    if (isOpen) {
       return;
     }
 

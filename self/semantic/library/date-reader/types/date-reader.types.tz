@@ -1,0 +1,50 @@
+export enum DateTokenKind {
+  Invalid,
+  Unknown,
+  Space,
+  Number,
+  Symbol,
+  End,
+  Other,
+  Month,
+  Zone,
+  LetterT,
+  Meridiem,
+}
+
+export type DateToken = {
+  readonly kind: DateTokenKind;
+  readonly length: int;
+  readonly value: int;
+};
+
+export type DateKeyword = {
+  readonly prefix: string;
+  readonly kind: DateTokenKind;
+  readonly value: int;
+};
+
+export type DayValue = {
+  readonly year: int;
+  readonly month: int;
+  readonly day: int;
+};
+
+export type TimeValue = {
+  readonly hour: int;
+  readonly minute: int;
+  readonly second: int;
+  readonly millisecond: int;
+};
+
+export type ZoneValue = {
+  readonly isLocal: boolean;
+  readonly offset: int;
+};
+
+export type DateFields = {
+  readonly day: DayValue;
+  readonly time: TimeValue;
+  readonly zone: ZoneValue;
+  readonly isDateOnly: boolean;
+};
