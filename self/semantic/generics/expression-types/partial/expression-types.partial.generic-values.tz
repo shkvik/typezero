@@ -30,7 +30,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const goal = this.wantedFunction(wanted);
+    const goal = this.generics.wantedFunction(wanted);
     if (goal == undefined) {
       return this.genericValueReport(expr, module);
     }
@@ -49,7 +49,7 @@ partial class ExpressionTypes {
       }
       if (
         param.kind == TypeKind.TypeParameter &&
-        !this.mentionsParameter(given)
+        !this.parts.mentionsParameter(given)
       ) {
         bound.set(param.id, given);
       }
@@ -60,22 +60,6 @@ partial class ExpressionTypes {
     }
 
     return this.resolver.substituteValue(used, bound);
-  }
-
-  private wantedFunction(wanted: Type | undefined): Type | undefined {
-    if (wanted == undefined) {
-      return undefined;
-    }
-
-    const goal = this.types.definedType(wanted);
-    if (goal.kind == TypeKind.Error) {
-      return goal;
-    }
-    if (goal.kind != TypeKind.Function) {
-      return undefined;
-    }
-
-    return goal;
   }
 
   private genericValueReport(expr: NameExpr, module: int): Type | undefined {

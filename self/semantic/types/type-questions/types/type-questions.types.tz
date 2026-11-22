@@ -1,0 +1,7 @@
+import { DictKind } from "../../../../program/type/types/type.types.tz";
+
+export type DictText = {
+  readonly dict: DictKind;
+  readonly kind: string;
+  readonly shown: string;
+};

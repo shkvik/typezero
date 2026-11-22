@@ -1,0 +1,5 @@
+export const kBoundMark = "#b";
+export const kBoundSeparator = "|";
+export const kLengthTerm = "n";
+export const kMostBoundConstant: uint64 = 1000000;
+export const kZeroTerm = "0";

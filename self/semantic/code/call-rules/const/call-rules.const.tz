@@ -1,0 +1,5 @@
+export const kManyArguments = " arguments";
+export const kOneArgument = " argument";
+export const kOrMore = " or more";
+export const kParameterLetters = "abcdefghijklmnopqrstuvwxyz";
+export const kRangeDash = "-";

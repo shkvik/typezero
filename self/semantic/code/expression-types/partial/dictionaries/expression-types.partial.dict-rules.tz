@@ -18,42 +18,25 @@ import {
 } from "../../../../../program/type/types/type.types.tz";
 import {
   kDictIterating,
-  kLengthName,
   kThisName,
   kUnsupportedMark,
 } from "../../const/expression-types.const.tz";
+import { kLengthName } from "../../../expression-shapes/const/expression-shapes.const.tz";
 
 partial class ExpressionTypes {
-  private collectionOf(type: Type): DictKind | undefined {
-    const base = this.types.definedType(type);
-    if (base.kind != TypeKind.Dict || base.dict == DictKind.Record) {
-      return undefined;
-    }
-
-    return base.dict;
-  }
-
-  private collectionWord(dict: DictKind): string {
-    if (dict == DictKind.Map) {
-      return "Map";
-    }
-
-    return "Set";
-  }
-
   private dictMemberCheck(
     expr: MemberExpr,
     object: Type,
     isCalled: boolean,
     module: int,
   ): boolean {
-    const dict = this.collectionOf(object);
+    const dict = this.dictionaries.collectionOf(object);
     if (dict == undefined) {
       return false;
     }
 
     const name = expr.name;
-    const word = this.dictText(expr.object, dict);
+    const word = this.dictionaries.dictText(expr.object, dict);
     const first = this.text.of(object);
 
     if (name == kLengthName) {
@@ -105,7 +88,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const place = this.iteratingSource(isMap);
+    const place = this.dictionaries.iteratingSource(isMap);
 
     this.report(module, expr.loc, Code.DictNotIterating, {
       word,
@@ -115,14 +98,6 @@ partial class ExpressionTypes {
     });
 
     return true;
-  }
-
-  private iteratingSource(isMap: boolean): string {
-    if (isMap) {
-      return ".entries()";
-    }
-
-    return ".values()";
   }
 
   private dictTargetCheck(target: Expr, module: int): boolean {
@@ -141,18 +116,18 @@ partial class ExpressionTypes {
 
     this.quiet -= 1;
 
-    const dict = this.collectionOf(object);
+    const dict = this.dictionaries.collectionOf(object);
     if (dict == undefined) {
       return false;
     }
 
-    const word = this.dictText(target.object, dict);
+    const word = this.dictionaries.dictText(target.object, dict);
 
     if (dict == DictKind.Set) {
       return this.setTargetCheck(target, word, module);
     }
 
-    const access = this.dictAccess(target);
+    const access = this.dictionaries.dictAccess(target);
 
     this.report(module, target.loc, Code.MapPropertySet, {
       word,
@@ -160,14 +135,6 @@ partial class ExpressionTypes {
     });
 
     return true;
-  }
-
-  private dictAccess(target: Expr): string {
-    if (target.kind == ExprKind.Member) {
-      return `.${target.name}`;
-    }
-
-    return "[key]";
   }
 
   private setTargetCheck(target: Expr, word: string, module: int): boolean {
@@ -197,7 +164,7 @@ partial class ExpressionTypes {
 
     this.quiet -= 1;
 
-    const dict = this.collectionOf(object);
+    const dict = this.dictionaries.collectionOf(object);
     if (dict == undefined) {
       return false;
     }
@@ -205,24 +172,16 @@ partial class ExpressionTypes {
     const isMap = dict == DictKind.Map;
 
     this.report(module, expr.loc, Code.DictDelete, {
-      word: this.collectionWord(dict),
-      first: this.dictText(target.object, dict),
-      other: this.entryPart(isMap),
+      word: this.dictionaries.collectionWord(dict),
+      first: this.dictionaries.dictText(target.object, dict),
+      other: this.dictionaries.entryPart(isMap),
     });
 
     return true;
   }
 
-  private entryPart(isMap: boolean): string {
-    if (isMap) {
-      return "key";
-    }
-
-    return "value";
-  }
-
   private dictInCheck(expr: BinaryExpr, object: Type, module: int): boolean {
-    const dict = this.collectionOf(object);
+    const dict = this.dictionaries.collectionOf(object);
     if (dict == undefined) {
       return false;
     }
@@ -230,9 +189,9 @@ partial class ExpressionTypes {
     const isMap = dict == DictKind.Map;
 
     this.report(module, expr.loc, Code.DictIn, {
-      word: this.collectionWord(dict),
-      first: this.dictText(expr.rhs, dict),
-      other: this.entryPart(isMap),
+      word: this.dictionaries.collectionWord(dict),
+      first: this.dictionaries.dictText(expr.rhs, dict),
+      other: this.dictionaries.entryPart(isMap),
     });
 
     return true;
@@ -264,7 +223,7 @@ partial class ExpressionTypes {
 
     this.quiet -= 1;
 
-    const dict = this.collectionOf(type);
+    const dict = this.dictionaries.collectionOf(type);
     if (dict == undefined) {
       this.objectArgumentCheck(arg, type, callee.name, module);
 
@@ -272,12 +231,12 @@ partial class ExpressionTypes {
     }
 
     const isSetEntries = dict == DictKind.Set && callee.name == "entries";
-    const method = this.listingMethod(callee.name, isSetEntries);
+    const method = this.dictionaries.listingMethod(callee.name, isSetEntries);
 
     this.report(module, arg.loc, Code.DictObjectEmpty, {
       word: callee.name,
-      first: this.collectionWord(dict),
-      second: this.dictText(arg, dict),
+      first: this.dictionaries.collectionWord(dict),
+      second: this.dictionaries.dictText(arg, dict),
       other: method,
     });
   }
@@ -298,7 +257,7 @@ partial class ExpressionTypes {
 
       return;
     }
-    if (!this.isNeverObject(type)) {
+    if (!this.dictionaries.isNeverObject(type)) {
       return;
     }
 
@@ -316,7 +275,7 @@ partial class ExpressionTypes {
   ): void {
     const base = this.types.apparent(type);
     const isValues = word == "values" || word == "entries";
-    if (isValues && this.hasMethodFields(type)) {
+    if (isValues && this.types.hasMethodFields(type)) {
       this.report(module, arg.loc, Code.ObjectListingMethods, { word });
 
       return;
@@ -333,7 +292,7 @@ partial class ExpressionTypes {
 
     for (const field of base.fields) {
       const candidate = this.types.definedType(field.type);
-      const both = this.listedElement(element, candidate);
+      const both = this.dictionaries.listedElement(element, candidate);
       const problem = this.resolver.unionProblem(both);
       if (problem != undefined) {
         const full = messageText(problem.code, problem.details);
@@ -354,74 +313,5 @@ partial class ExpressionTypes {
     if (element == undefined) {
       this.report(module, arg.loc, Code.ObjectNoFields, { word, first });
     }
-  }
-
-  private listedElement(element: Type | undefined, candidate: Type): Type {
-    if (element == undefined) {
-      return candidate;
-    }
-
-    return this.store.unionOf([element, candidate]);
-  }
-
-  private isNeverObject(type: Type): boolean {
-    const base = this.types.apparent(type);
-
-    switch (base.kind) {
-      case TypeKind.Int:
-      case TypeKind.Double:
-      case TypeKind.Decimal:
-      case TypeKind.Boolean:
-      case TypeKind.String:
-      case TypeKind.Template:
-      case TypeKind.Array:
-      case TypeKind.Tuple:
-        return true;
-      case TypeKind.Instance:
-        return this.isBuiltinValue(base);
-      default:
-        return false;
-    }
-  }
-
-  private listingMethod(name: string, isSetEntries: boolean): string {
-    if (isSetEntries) {
-      return "values";
-    }
-
-    return name;
-  }
-
-  private dictText(expr: Expr, dict: DictKind): string {
-    if (expr.kind == ExprKind.Name) {
-      return expr.name;
-    }
-
-    const holder = this.memberHolder(expr);
-    if (holder != undefined) {
-      return holder;
-    }
-
-    switch (dict) {
-      case DictKind.Map:
-        return "m";
-      case DictKind.Set:
-        return "s";
-      default:
-        return "r";
-    }
-  }
-
-  private memberHolder(expr: Expr): string | undefined {
-    if (expr.kind != ExprKind.Member) {
-      return undefined;
-    }
-
-    const object = expr.object;
-    if (object.kind != ExprKind.Name) {
-      return undefined;
-    }
-
-    return `${object.name}.${expr.name}`;
   }
 }

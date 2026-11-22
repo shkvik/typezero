@@ -80,7 +80,7 @@ partial class ExpressionTypes {
 
   private patternArray(init: Expr, given: Type, module: int): Type {
     const base = this.types.apparent(given);
-    if (this.isJsonHolder(given)) {
+    if (this.library.isJsonHolder(given)) {
       return given;
     }
 
@@ -107,7 +107,7 @@ partial class ExpressionTypes {
 
   private isMatchArray(type: Type): boolean {
     if (type.kind == TypeKind.Instance) {
-      const isLibrary = this.isLibraryModule(type.module);
+      const isLibrary = this.modules.isLibraryModule(type.module);
 
       return isLibrary && type.name == kMatchArrayClass;
     }
@@ -154,7 +154,7 @@ partial class ExpressionTypes {
   private patternElement(expr: IndexExpr, module: int): Type {
     const object = this.typed(expr.object, undefined, module);
     const base = this.types.apparent(object);
-    if (this.isJsonHolder(object)) {
+    if (this.library.isJsonHolder(object)) {
       return this.types.optional(this.store.plain(TypeKind.Json));
     }
 

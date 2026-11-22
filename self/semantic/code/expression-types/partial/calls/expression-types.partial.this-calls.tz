@@ -26,11 +26,11 @@ partial class ExpressionTypes {
   ): Type {
     const word = member.name;
     const error = this.store.plain(TypeKind.Error);
-    const code = this.thisCallProblem(expr, word);
+    const code = this.calls.thisCallProblem(expr, word);
     if (code != undefined) {
       this.report(module, member.loc, code, {
         word,
-        other: this.thisCallTail(word),
+        other: this.calls.thisCallTail(word),
       });
       this.looseArguments(expr.args, module);
 
@@ -66,34 +66,6 @@ partial class ExpressionTypes {
     }
 
     return this.calledWith(rest, plain, member.loc, CallKind.Own, module);
-  }
-
-  private thisCallProblem(expr: CallExpr, word: string): Code | undefined {
-    if (word == "bind") {
-      return Code.ThisBindUnsupported;
-    }
-    if (word != "call" && word != "apply") {
-      return Code.ThisFunctionProperty;
-    }
-    if (expr.args.length == 0) {
-      return Code.ThisArgumentFirst;
-    }
-
-    const isSpread = expr.args.some((arg) => arg.spread);
-    const isApplyShape = expr.args.length == 2 && !isSpread;
-    if (word == "apply" && !isApplyShape) {
-      return Code.ThisApplyArguments;
-    }
-
-    return undefined;
-  }
-
-  private thisCallTail(word: string): string {
-    if (word == "apply") {
-      return ", args)";
-    }
-
-    return ", ...)";
   }
 
   private thisParameterCheck(

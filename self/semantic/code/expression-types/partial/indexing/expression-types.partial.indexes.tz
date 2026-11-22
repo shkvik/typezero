@@ -1,5 +1,4 @@
 import { ExpressionTypes } from "../../expression-types.tz";
-import { KnownName } from "../../../../../load/token/types/token.types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import {
@@ -21,11 +20,8 @@ import {
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
 import {
-  kManyElements,
-  kOneElement,
   kResizingMethods,
   kTupleJoin,
-  kTuplePlaceholder,
 } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
@@ -41,7 +37,7 @@ partial class ExpressionTypes {
     }
 
     const object = this.receiverOf(expr.object, expr.optional, module);
-    if (this.isJsonHolder(object)) {
+    if (this.library.isJsonHolder(object)) {
       return this.jsonIndexed(expr, module);
     }
 
@@ -81,7 +77,7 @@ partial class ExpressionTypes {
 
       return this.store.plain(TypeKind.Error);
     }
-    if (this.isUnindexable(object)) {
+    if (this.indexes.isUnindexable(object)) {
       const first = this.text.of(object);
 
       this.report(module, expr.loc, Code.NotIndexable, { first });
@@ -93,7 +89,7 @@ partial class ExpressionTypes {
   private listIndexed(expr: IndexExpr, list: Type, module: int): Type {
     const int = this.store.integer(64, false);
     const key = this.typed(expr.index, int, module);
-    const item = this.listItem(list);
+    const item = this.indexes.listItem(list);
     if (key.kind != TypeKind.Int || item == undefined) {
       return this.store.plain(TypeKind.Error);
     }
@@ -102,29 +98,6 @@ partial class ExpressionTypes {
     }
 
     return this.types.optional(item);
-  }
-
-  private listItem(list: Type): Type | undefined {
-    if (list.kind == TypeKind.Array) {
-      return list.item;
-    }
-    if (list.kind == TypeKind.String) {
-      return list;
-    }
-
-    return undefined;
-  }
-
-  private isUnindexable(type: Type): boolean {
-    switch (type.kind) {
-      case TypeKind.Int:
-      case TypeKind.Double:
-      case TypeKind.Decimal:
-      case TypeKind.Boolean:
-        return true;
-      default:
-        return false;
-    }
   }
 
   private tupleIndexed(expr: IndexExpr, tuple: TupleType, module: int): Type {
@@ -150,7 +123,7 @@ partial class ExpressionTypes {
       return error;
     }
 
-    const position = this.positionOf(value, tuple.items.length);
+    const position = this.indexes.positionOf(value, tuple.items.length);
     const item = tuple.items[position];
     if (position < 0 || item == undefined) {
       this.reportTupleRange(expr, tuple, `${value}`, module);
@@ -164,16 +137,6 @@ partial class ExpressionTypes {
     return item;
   }
 
-  private positionOf(value: decimal, count: int): int {
-    for (let index = 0; index < count; index++) {
-      if (index.toDecimal() == value) {
-        return index;
-      }
-    }
-
-    return -1;
-  }
-
   private reportTupleRange(
     expr: IndexExpr,
     tuple: TupleType,
@@ -182,21 +145,13 @@ partial class ExpressionTypes {
   ): void {
     const count = tuple.items.length;
     const first = this.text.of(tuple);
-    const other = this.elementCountText(count);
+    const other = this.indexes.elementCountText(count);
 
     this.report(module, expr.index.loc, Code.TupleKeyRange, {
       word,
       first,
       other,
     });
-  }
-
-  private elementCountText(count: int): string {
-    if (count == 1) {
-      return `${count}${kOneElement}`;
-    }
-
-    return `${count}${kManyElements}`;
   }
 
   private objectIndexed(
@@ -213,7 +168,7 @@ partial class ExpressionTypes {
 
     const name = this.constantKeyOf(expr.index, key, module);
     if (name != undefined) {
-      const member = this.keyedMember(expr, name);
+      const member = this.indexes.keyedMember(expr, name);
 
       return this.memberOf(member, object, module);
     }
@@ -226,7 +181,7 @@ partial class ExpressionTypes {
 
     const first = this.text.of(object);
     const defined = this.types.definedType(key);
-    if (this.isNumber(defined)) {
+    if (this.types.isNumber(defined)) {
       this.report(module, expr.loc, Code.ObjectNumberedKey, { first });
 
       return error;
@@ -279,7 +234,7 @@ partial class ExpressionTypes {
   }
 
   private isTextChoice(key: Type): boolean {
-    const parts = this.partsOfType(key);
+    const parts = this.generics.partsOfType(key);
 
     return parts.every(
       (part) =>
@@ -290,7 +245,7 @@ partial class ExpressionTypes {
   private keyedFieldType(object: ObjectType, key: Type): Type | undefined {
     let common: Type | undefined = undefined;
 
-    for (const part of this.partsOfType(key)) {
+    for (const part of this.generics.partsOfType(key)) {
       if (part.kind != TypeKind.Literal) {
         return undefined;
       }
@@ -331,20 +286,8 @@ partial class ExpressionTypes {
     return literal.text;
   }
 
-  private keyedMember(expr: IndexExpr, name: string): MemberExpr {
-    return {
-      kind: ExprKind.Member,
-      loc: expr.loc,
-      object: expr.object,
-      name,
-      known: KnownName.None,
-      optional: false,
-      typeArgs: [],
-    };
-  }
-
   private dictIndexed(expr: IndexExpr, dict: DictType, module: int): Type {
-    const word = this.tupleText(expr.object);
+    const word = this.sources.tupleText(expr.object);
     const error = this.store.plain(TypeKind.Error);
 
     switch (dict.dict) {
@@ -375,14 +318,6 @@ partial class ExpressionTypes {
     }
 
     return this.types.optional(dict.value);
-  }
-
-  private tupleText(object: Expr): string {
-    if (object.kind == ExprKind.Name) {
-      return object.name;
-    }
-
-    return kTuplePlaceholder;
   }
 
   private keyInTyped(expr: BinaryExpr, module: int): Type {
@@ -421,7 +356,7 @@ partial class ExpressionTypes {
       return boolean;
     }
     if (field.optional || this.types.isOptional(field.type)) {
-      const word = `${this.tupleText(expr.rhs)}.${name}`;
+      const word = `${this.sources.tupleText(expr.rhs)}.${name}`;
 
       this.report(module, expr.loc, Code.InObjectMaybe, { word });
 
@@ -450,7 +385,7 @@ partial class ExpressionTypes {
     }
 
     const name = this.deletedName(target, module);
-    const holder = this.deletedHolder(target);
+    const holder = this.indexes.deletedHolder(target);
     if (name == undefined || holder == undefined) {
       return boolean;
     }
@@ -468,7 +403,7 @@ partial class ExpressionTypes {
       return boolean;
     }
     if (field.optional || this.types.isOptional(field.type)) {
-      const first = `${this.tupleText(holder)}.${name}`;
+      const first = `${this.sources.tupleText(holder)}.${name}`;
 
       this.report(module, expr.loc, Code.DeleteOptional, { word: name, first });
 
@@ -491,14 +426,6 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private deletedHolder(target: Expr): Expr | undefined {
-    if (target.kind == ExprKind.Member || target.kind == ExprKind.Index) {
-      return target.object;
-    }
-
-    return undefined;
-  }
-
   private tupleCall(
     expr: CallExpr,
     member: MemberExpr,
@@ -506,9 +433,9 @@ partial class ExpressionTypes {
     module: int,
   ): Type {
     const word = member.name;
-    const first = this.tupleText(member.object);
+    const first = this.sources.tupleText(member.object);
     const error = this.store.plain(TypeKind.Error);
-    const element = this.tupleElement(tuple);
+    const element = this.indexes.tupleElement(tuple);
     const isResizing = kResizingMethods.includes(word);
 
     if (word == kTupleJoin || !this.isArrayMethod(word, tuple)) {
@@ -530,16 +457,6 @@ partial class ExpressionTypes {
     this.report(module, member.loc, Code.TupleMethodCopy, { word, first });
 
     return error;
-  }
-
-  private tupleElement(tuple: TupleType): Type | undefined {
-    const first = tuple.items[0];
-    const isSame = tuple.items.every((item) => item == first);
-    if (first == undefined || !isSame) {
-      return undefined;
-    }
-
-    return first;
   }
 
   private isArrayMethod(name: string, tuple: TupleType): boolean {

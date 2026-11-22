@@ -5,9 +5,7 @@ import {
   CallArgument,
   CallExpr,
   Expr,
-  ExprKind,
   MemberExpr,
-  UnaryOp,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../../../program/ast/types/ast.types.functions.tz";
 import {
@@ -29,7 +27,7 @@ partial class ExpressionTypes {
     const seen = new Set<string>();
 
     for (const fn of decl.methods) {
-      const key = `${this.isStaticMethod(fn)} ${fn.name}`;
+      const key = `${this.classes.isStaticMethod(fn)} ${fn.name}`;
       if (seen.has(key)) {
         continue;
       }
@@ -39,7 +37,7 @@ partial class ExpressionTypes {
       const variants = decl.methods.filter(
         (one) =>
           one.name == fn.name &&
-          this.isStaticMethod(one) == this.isStaticMethod(fn),
+          this.classes.isStaticMethod(one) == this.classes.isStaticMethod(fn),
       );
 
       this.variantPairs(decl, variants, `'${fn.name}'`, module);
@@ -87,7 +85,7 @@ partial class ExpressionTypes {
     what: string,
     module: int,
   ): boolean {
-    if (this.isSameParameters(one, other)) {
+    if (this.classes.isSameParameters(one, other)) {
       const isReturnOnly = one.shape.result != other.shape.result;
       if (isReturnOnly && first.returnType != undefined) {
         this.report(module, second.loc, Code.VariantReturnOnly, { word: what });
@@ -96,122 +94,25 @@ partial class ExpressionTypes {
       }
 
       this.report(module, second.loc, Code.VariantDuplicate, {
-        word: this.overloadText(second, other),
+        word: this.overloads.overloadText(second, other),
       });
 
       return true;
     }
 
-    const count = this.sharedCount(one, other);
+    const count = this.overloads.sharedCount(one, other);
     if (count < 0) {
       return false;
     }
 
     this.report(module, second.loc, Code.VariantAmbiguous, {
-      first: this.overloadText(first, one),
-      second: this.overloadText(second, other),
+      first: this.overloads.overloadText(first, one),
+      second: this.overloads.overloadText(second, other),
       other: `${count}`,
-      place: this.pluralMark(count),
+      place: this.classes.pluralMark(count),
     });
 
     return true;
-  }
-
-  private sharedCount(one: FunctionType, other: FunctionType): int {
-    const least = Math.max(this.leastOf(one), this.leastOf(other));
-    const most = Math.min(one.shape.params.length, other.shape.params.length);
-
-    for (let count = least; count <= most; count++) {
-      if (this.isSamePrefix(one, other, count)) {
-        return count;
-      }
-    }
-
-    return -1;
-  }
-
-  private isSamePrefix(
-    one: FunctionType,
-    other: FunctionType,
-    count: int,
-  ): boolean {
-    for (let index = 0; index < count; index++) {
-      const mine = one.shape.params[index];
-      const theirs = other.shape.params[index];
-      if (
-        mine == undefined ||
-        theirs == undefined ||
-        mine.type != theirs.type
-      ) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  private leastOf(type: FunctionType): int {
-    let least = 0;
-
-    for (const param of type.shape.params) {
-      if (!param.optional) {
-        least += 1;
-      }
-    }
-
-    if (type.shape.rest && least > 0) {
-      return least - 1;
-    }
-
-    return least;
-  }
-
-  private overloadText(fn: FunctionDecl, type: FunctionType): string {
-    const parts: string[] = [];
-
-    for (let index = 0; index < fn.params.length; index++) {
-      const param = fn.params[index];
-      const shown = type.shape.params[index];
-      if (param == undefined || shown == undefined) {
-        continue;
-      }
-
-      const mark = this.optionalMark(shown.optional);
-      const written = this.text.of(shown.type);
-
-      parts.push(`${param.name}${mark}: ${written}`);
-    }
-
-    const name = this.variantName(fn);
-
-    return `${name}(${parts.join(", ")})`;
-  }
-
-  private optionalMark(isOptional: boolean): string {
-    if (isOptional) {
-      return "?";
-    }
-
-    return "";
-  }
-
-  private variantName(fn: FunctionDecl): string {
-    if (fn.name == "" || fn.name == "constructor") {
-      return "constructor";
-    }
-
-    return fn.name;
-  }
-
-  private variantList(texts: string[]): string {
-    const last = texts[texts.length - 1];
-    if (texts.length < 2 || last == undefined) {
-      return texts.join("");
-    }
-
-    const head = texts.slice(0, texts.length - 1);
-
-    return `${head.join(", ")} and ${last}`;
   }
 
   private overloadCall(
@@ -273,7 +174,7 @@ partial class ExpressionTypes {
       }
 
       const isHidden = ranked.some((one) =>
-        this.isSameParameters(one.type, type),
+        this.classes.isSameParameters(one.type, type),
       );
       if (!isHidden) {
         ranked.push({ fn, type, ranks: [], isAdapted: false, failed: -1 });
@@ -285,7 +186,7 @@ partial class ExpressionTypes {
     entry: ClassMemberEntry,
     name: string,
   ): ClassMemberEntry | undefined {
-    const parent = this.parentOf(entry.instance, entry.owner);
+    const parent = this.classes.parentOf(entry.instance, entry.owner);
     if (parent == undefined || name == "") {
       return undefined;
     }
@@ -305,8 +206,10 @@ partial class ExpressionTypes {
     loc: int,
     module: int,
   ): RankedVariant | undefined {
-    const texts = ranked.map((one) => this.overloadText(one.fn, one.type));
-    const list = this.variantList(texts);
+    const texts = ranked.map((one) =>
+      this.overloads.overloadText(one.fn, one.type),
+    );
+    const list = this.overloads.variantList(texts);
 
     if (args.some((arg) => arg.spread)) {
       this.report(module, loc, Code.VariantSpread, { word: what });
@@ -317,13 +220,13 @@ partial class ExpressionTypes {
 
     const count = args.length;
     const counted = ranked.filter((one) =>
-      this.isCountFitting(one.type, count),
+      this.overloads.isCountFitting(one.type, count),
     );
     if (counted.length == 0) {
       this.report(module, loc, Code.VariantCount, {
         word: what,
         other: `${count}`,
-        place: this.pluralMark(count),
+        place: this.classes.pluralMark(count),
         first: list,
       });
       this.looseArguments(args, module);
@@ -332,13 +235,6 @@ partial class ExpressionTypes {
     }
 
     return this.rankedChoice(args, counted, what, loc, module);
-  }
-
-  private isCountFitting(type: FunctionType, count: int): boolean {
-    const least = this.leastOf(type);
-    const most = type.shape.params.length;
-
-    return count >= least && (count <= most || type.shape.rest);
   }
 
   private rankedChoice(
@@ -361,7 +257,7 @@ partial class ExpressionTypes {
         reasons.push(reason);
       }
       if (reason != "" && hint == "") {
-        hint = this.variantHint(args, given, variant, module);
+        hint = this.overloads.variantHint(args, given, variant, module);
       }
     }
 
@@ -376,7 +272,9 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const best = applicable.find((one) => this.isBestVariant(one, applicable));
+    const best = applicable.find((one) =>
+      this.overloads.isBestVariant(one, applicable),
+    );
     if (best != undefined) {
       return best;
     }
@@ -386,25 +284,19 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const tied = applicable.map((one) => this.overloadText(one.fn, one.type));
+    const tied = applicable.map((one) =>
+      this.overloads.overloadText(one.fn, one.type),
+    );
     const isAdapted = applicable.every((one) => one.isAdapted);
-    const code = this.tieCode(isAdapted);
+    const code = this.overloads.tieCode(isAdapted);
 
     this.report(module, loc, code, {
       word: what,
-      first: this.variantList(tied),
+      first: this.overloads.variantList(tied),
     });
     this.looseArguments(args, module);
 
     return undefined;
-  }
-
-  private tieCode(isAdapted: boolean): Code {
-    if (isAdapted) {
-      return Code.VariantTieLiteral;
-    }
-
-    return Code.VariantTie;
   }
 
   private quietArguments(args: CallArgument[], module: int): Type[] {
@@ -429,7 +321,7 @@ partial class ExpressionTypes {
     for (let index = 0; index < args.length; index++) {
       const arg = args[index];
       const type = given[index];
-      const param = this.variantParam(variant.type, index);
+      const param = this.overloads.variantParam(variant.type, index);
       if (arg == undefined || type == undefined || param == undefined) {
         continue;
       }
@@ -438,7 +330,7 @@ partial class ExpressionTypes {
       if (rank < 0) {
         variant.failed = index;
 
-        const shown = this.overloadText(variant.fn, variant.type);
+        const shown = this.overloads.overloadText(variant.fn, variant.type);
         const wanted = this.text.of(param);
         const found = this.text.of(type);
 
@@ -449,21 +341,6 @@ partial class ExpressionTypes {
     }
 
     return "";
-  }
-
-  private variantParam(type: FunctionType, index: int): Type | undefined {
-    const params = type.shape.params;
-    const param = params[index] ?? params[params.length - 1];
-    if (param == undefined) {
-      return undefined;
-    }
-
-    const isRest = type.shape.rest && index >= params.length - 1;
-    if (isRest && param.type.kind == TypeKind.Array) {
-      return param.type.item;
-    }
-
-    return param.type;
   }
 
   private argumentRank(
@@ -499,7 +376,9 @@ partial class ExpressionTypes {
     const goal = this.types.definedType(param);
     const isFraction = base.kind == TypeKind.Double;
     if (isFraction && goal.kind == TypeKind.Decimal) {
-      return this.isWholeTree(expr, module) || this.isNumberLiteral(expr);
+      return (
+        this.isWholeTree(expr, module) || this.shapes.isNumberLiteral(expr)
+      );
     }
 
     this.quiet += 1;
@@ -509,81 +388,6 @@ partial class ExpressionTypes {
     this.quiet -= 1;
 
     return adapted != undefined;
-  }
-
-  private isNumberLiteral(expr: Expr): boolean {
-    if (expr.kind == ExprKind.FloatLit || expr.kind == ExprKind.IntLit) {
-      return true;
-    }
-
-    return (
-      expr.kind == ExprKind.Unary &&
-      expr.op == UnaryOp.Neg &&
-      this.isNumberLiteral(expr.operand)
-    );
-  }
-
-  private variantHint(
-    args: CallArgument[],
-    given: Type[],
-    variant: RankedVariant,
-    module: int,
-  ): string {
-    const index = variant.failed;
-    const arg = args[index];
-    const type = given[index];
-    const param = this.variantParam(variant.type, index);
-    if (arg == undefined || type == undefined || param == undefined) {
-      return "";
-    }
-
-    const code = this.numberCode(this.types.apparent(type), param);
-    const word = this.operandName(arg.expr);
-    const other = this.conversionName(param);
-    if (code == Code.ConvertExplicitly) {
-      return `; convert it explicitly: '${word}.${other}()'`;
-    }
-    if (code == Code.RoundThenConvert) {
-      return `; round it first, then convert: 'Math.trunc(${word}).${other}()' (or Math.round, Math.floor, Math.ceil)`;
-    }
-
-    return "";
-  }
-
-  private isBestVariant(
-    variant: RankedVariant,
-    applicable: RankedVariant[],
-  ): boolean {
-    return applicable.every(
-      (other) => other == variant || this.isBetterVariant(variant, other),
-    );
-  }
-
-  private isBetterVariant(
-    variant: RankedVariant,
-    other: RankedVariant,
-  ): boolean {
-    const isFuller = !this.isLeavingOut(variant) && this.isLeavingOut(other);
-    let isStrictly = isFuller;
-
-    for (let index = 0; index < variant.ranks.length; index++) {
-      const mine = variant.ranks[index] ?? 0;
-      const theirs = other.ranks[index] ?? 0;
-      if (mine > theirs) {
-        return false;
-      }
-      if (mine < theirs) {
-        isStrictly = true;
-      }
-    }
-
-    return isStrictly;
-  }
-
-  private isLeavingOut(variant: RankedVariant): boolean {
-    const shape = variant.type.shape;
-
-    return shape.rest || variant.ranks.length < shape.params.length;
   }
 
   private variantValueCheck(
@@ -610,17 +414,19 @@ partial class ExpressionTypes {
       return;
     }
 
-    const texts = ranked.map((one) => this.overloadText(one.fn, one.type));
-    const shape = this.overloadText(last.fn, last.type).slice(
-      last.fn.name.length,
+    const texts = ranked.map((one) =>
+      this.overloads.overloadText(one.fn, one.type),
     );
+    const shape = this.overloads
+      .overloadText(last.fn, last.type)
+      .slice(last.fn.name.length);
     const result = this.text.of(last.type.shape.result);
 
     this.report(module, expr.loc, Code.VariantValue, {
       word: expr.name,
-      first: this.variantList(texts),
+      first: this.overloads.variantList(texts),
       second: `${shape} => ${result}`,
-      other: this.operandName(expr.object),
+      other: this.sources.operandName(expr.object),
     });
   }
 

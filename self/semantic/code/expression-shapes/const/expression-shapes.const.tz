@@ -1,0 +1,13 @@
+export const kContextFunctions = [
+  "String",
+  "Number",
+  "parseInt",
+  "parseFloat",
+  "Boolean",
+  "encodeURIComponent",
+  "encodeURI",
+  "decodeURIComponent",
+  "decodeURI",
+];
+export const kContextObjects = ["Math", "Number", "String", "console"];
+export const kLengthName = "length";

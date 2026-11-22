@@ -3,7 +3,6 @@ import { Code } from "../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
   CallExpr,
-  Expr,
   ExprKind,
   MemberExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
@@ -15,7 +14,6 @@ import {
   kCatchName,
   kFinallyName,
   kPromiseClass,
-  kPromisePlaceholder,
   kRejectName,
   kResultMethods,
   kThenName,
@@ -70,7 +68,7 @@ partial class ExpressionTypes {
     }
 
     const holder = member.object;
-    const other = this.promiseHolderText(holder);
+    const other = this.library.promiseHolderText(holder);
 
     this.report(module, member.loc, Code.ResultMethodOnPromise, {
       word: member.name,
@@ -79,14 +77,6 @@ partial class ExpressionTypes {
     this.looseArguments(expr.args, module);
 
     return true;
-  }
-
-  private promiseHolderText(holder: Expr): string {
-    if (holder.kind == ExprKind.Name) {
-      return holder.name;
-    }
-
-    return kPromisePlaceholder;
   }
 
   private thenTwoCheck(expr: CallExpr, module: int): boolean {
@@ -131,7 +121,7 @@ partial class ExpressionTypes {
     }
 
     const target = this.targetOfName(object, module);
-    if (target == undefined || !this.isLibraryModule(target.module)) {
+    if (target == undefined || !this.modules.isLibraryModule(target.module)) {
       return false;
     }
 

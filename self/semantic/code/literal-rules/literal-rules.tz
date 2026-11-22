@@ -1,0 +1,147 @@
+import {
+  Expr,
+  ExprKind,
+  UnaryExpr,
+  UnaryOp,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  IntType,
+  LiteralKind,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { LiteralValue } from "../expression-types/types/expression-types.types.tz";
+import { kIntLimits } from "../integer-math/const/integer-math.const.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+
+export class LiteralRules {
+  private readonly store: TypeStore;
+  private readonly types: TypeQuestions;
+
+  public constructor(store: TypeStore, types: TypeQuestions) {
+    this.store = store;
+    this.types = types;
+  }
+
+  public plainLiteral(kind: LiteralKind, text: string): LiteralValue {
+    return { kind, text, whole: 0, negative: false };
+  }
+
+  public signedLiteral(expr: UnaryExpr): LiteralValue | undefined {
+    const operand = expr.operand;
+    const negative = expr.op == UnaryOp.Neg;
+    if (!negative && expr.op != UnaryOp.Plus) {
+      return undefined;
+    }
+    if (operand.kind == ExprKind.FloatLit) {
+      const value = this.signedDouble(operand.value, negative);
+
+      return this.plainLiteral(LiteralKind.Double, `${value}`);
+    }
+    if (operand.kind != ExprKind.IntLit) {
+      return undefined;
+    }
+
+    const whole = operand.value;
+    const isBelow = negative && whole > 0;
+    const text = this.signedText(whole, isBelow);
+
+    return { kind: LiteralKind.Int, text, whole, negative: isBelow };
+  }
+
+  public fractionTyped(
+    expr: Expr,
+    literal: LiteralValue,
+    parts: Type[],
+    base: Type,
+  ): Type {
+    if (this.hasLiteral(parts, LiteralKind.Double)) {
+      return this.store.literal(LiteralKind.Double, literal.text);
+    }
+    if (expr.kind == ExprKind.Name) {
+      return base;
+    }
+
+    const target = parts.find(
+      (part) => part.kind == TypeKind.Double || part.kind == TypeKind.Decimal,
+    );
+
+    return target ?? base;
+  }
+
+  public literalPlace(expr: Expr): int {
+    if (expr.kind == ExprKind.Unary) {
+      return expr.operand.loc;
+    }
+
+    return expr.loc;
+  }
+
+  public fits(literal: LiteralValue, target: IntType): boolean {
+    const limit = kIntLimits.find(
+      (row) => row.bits == target.bits && row.unsigned == target.unsigned,
+    );
+    if (limit == undefined) {
+      return false;
+    }
+    if (literal.negative) {
+      return literal.whole <= limit.lowest;
+    }
+
+    return literal.whole <= limit.highest;
+  }
+
+  public hasLiteral(parts: Type[], kind: LiteralKind): boolean {
+    return parts.some(
+      (part) => part.kind == TypeKind.Literal && part.literal == kind,
+    );
+  }
+
+  public isTextual(part: Type): boolean {
+    if (part.kind == TypeKind.Template) {
+      return true;
+    }
+
+    return part.kind == TypeKind.Literal && part.literal == LiteralKind.String;
+  }
+
+  public templated(wanted: Type | undefined): Type {
+    const text = this.store.plain(TypeKind.String);
+    const parts = this.types.definedParts(wanted ?? text);
+    if (parts.some((part) => this.isTextual(part))) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return text;
+  }
+
+  public textChoice(texts: string[], wanted: Type): Type | undefined {
+    const parts = this.types.definedParts(wanted);
+    if (!parts.some((part) => this.isTextual(part))) {
+      return undefined;
+    }
+
+    const literals = texts.map((text) =>
+      this.store.literal(LiteralKind.String, text),
+    );
+
+    return this.store.unionOf(literals);
+  }
+
+  private signedDouble(value: double, negative: boolean): double {
+    if (negative) {
+      return -value;
+    }
+
+    return value;
+  }
+
+  private signedText(whole: uint64, negative: boolean): string {
+    if (negative) {
+      return `-${whole}`;
+    }
+
+    return `${whole}`;
+  }
+}

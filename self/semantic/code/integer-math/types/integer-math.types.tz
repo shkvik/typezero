@@ -1,0 +1,6 @@
+export type IntLimit = {
+  readonly bits: int;
+  readonly unsigned: boolean;
+  readonly highest: uint64;
+  readonly lowest: uint64;
+};

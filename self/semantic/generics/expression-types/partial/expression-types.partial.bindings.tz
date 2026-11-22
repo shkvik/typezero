@@ -1,11 +1,7 @@
 import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { TypeParamDecl } from "../../../../program/ast/types/ast.types.types.tz";
-import {
-  OperationKind,
-  Type,
-  TypeKind,
-} from "../../../../program/type/types/type.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import {
   kSampleArgument,
   kTypeSeparator,
@@ -20,7 +16,11 @@ partial class ExpressionTypes {
     const set = draft.inference;
 
     for (let index = 0; index < draft.target.params.length; index++) {
-      const strong = this.candidatesOf(set, index, CandidateStrength.Strong);
+      const strong = this.generics.candidatesOf(
+        set,
+        index,
+        CandidateStrength.Strong,
+      );
       if (strong.length > 0) {
         this.settleParameter(draft, index, module);
       }
@@ -44,8 +44,8 @@ partial class ExpressionTypes {
       return;
     }
 
-    const widened = this.widenedToConstraint(draft, index, joined);
-    const type = this.withUndefined(draft, index, widened);
+    const widened = this.generics.widenedToConstraint(draft, index, joined);
+    const type = this.generics.withUndefined(draft, index, widened);
 
     if (type != undefined) {
       draft.bound.set(index, type);
@@ -58,13 +58,21 @@ partial class ExpressionTypes {
     module: int,
   ): Type | undefined {
     const set = draft.inference;
-    const strong = this.candidatesOf(set, index, CandidateStrength.Strong);
-    const weak = this.candidatesOf(set, index, CandidateStrength.Weak);
-    const literal = this.candidatesOf(set, index, CandidateStrength.Literal);
+    const strong = this.generics.candidatesOf(
+      set,
+      index,
+      CandidateStrength.Strong,
+    );
+    const weak = this.generics.candidatesOf(set, index, CandidateStrength.Weak);
+    const literal = this.generics.candidatesOf(
+      set,
+      index,
+      CandidateStrength.Literal,
+    );
     let type: Type | undefined = undefined;
 
     for (const candidate of strong) {
-      const next = this.joinedWith(type, candidate);
+      const next = this.generics.joinedWith(type, candidate);
       if (next == undefined) {
         return this.clash(draft, index, type, candidate, module);
       }
@@ -73,7 +81,7 @@ partial class ExpressionTypes {
     }
 
     for (const candidate of weak) {
-      const next = this.joinedWith(type, candidate);
+      const next = this.generics.joinedWith(type, candidate);
       if (next == undefined && strong.length == 0) {
         return this.clash(draft, index, type, candidate, module);
       }
@@ -83,11 +91,11 @@ partial class ExpressionTypes {
     }
 
     for (const candidate of literal) {
-      if (this.isOtherNumber(type, candidate)) {
+      if (this.generics.isOtherNumber(type, candidate)) {
         continue;
       }
 
-      const next = this.joinedWith(type, candidate);
+      const next = this.generics.joinedWith(type, candidate);
       if (next == undefined) {
         return this.clash(draft, index, type, candidate, module);
       }
@@ -96,17 +104,6 @@ partial class ExpressionTypes {
     }
 
     return type;
-  }
-
-  private joinedWith(
-    type: Type | undefined,
-    candidate: Type,
-  ): Type | undefined {
-    if (type == undefined) {
-      return candidate;
-    }
-
-    return this.unify(type, candidate);
   }
 
   private clash(
@@ -119,7 +116,7 @@ partial class ExpressionTypes {
     const target = draft.target;
     const param = target.params[index];
 
-    this.failParameter(draft, index);
+    this.generics.failParameter(draft, index);
 
     if (param == undefined || target.isLenient) {
       return undefined;
@@ -140,77 +137,6 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private failParameter(draft: GenericDraft, index: int): void {
-    const error = this.store.plain(TypeKind.Error);
-
-    draft.bound.set(index, error);
-    draft.isInferred = false;
-  }
-
-  private isOtherNumber(type: Type | undefined, candidate: Type): boolean {
-    if (type == undefined || type == candidate) {
-      return false;
-    }
-
-    return this.isNumber(type);
-  }
-
-  private widenedToConstraint(
-    draft: GenericDraft,
-    index: int,
-    type: Type | undefined,
-  ): Type | undefined {
-    const param = draft.target.params[index];
-    if (type == undefined || param == undefined) {
-      return type;
-    }
-
-    const constraint = this.widenTarget(param);
-    const set = draft.inference;
-    const strong = this.candidatesOf(set, index, CandidateStrength.Strong);
-    const weak = this.candidatesOf(set, index, CandidateStrength.Weak);
-    const isOnlyLiterals = strong.length == 0 && weak.length == 0;
-    const isFractional =
-      constraint != undefined &&
-      (constraint.kind == TypeKind.Double ||
-        constraint.kind == TypeKind.Decimal);
-    const isWidening = type.kind == TypeKind.Int && isOnlyLiterals;
-    if (isWidening && isFractional && constraint != undefined) {
-      return constraint;
-    }
-
-    return type;
-  }
-
-  private widenTarget(param: Type): Type | undefined {
-    const constraint = this.store.constraintOf(param);
-    if (constraint == undefined || constraint.kind != TypeKind.Union) {
-      return constraint;
-    }
-
-    const parts = constraint.parts;
-    const whole = parts.find((part) => part.kind == TypeKind.Int);
-    const fraction = parts.find((part) => part.kind == TypeKind.Double);
-    const exact = parts.find((part) => part.kind == TypeKind.Decimal);
-
-    return whole ?? fraction ?? exact;
-  }
-
-  private withUndefined(
-    draft: GenericDraft,
-    index: int,
-    type: Type | undefined,
-  ): Type | undefined {
-    if (!draft.inference.undefinedSeen.has(index)) {
-      return type;
-    }
-    if (type == undefined) {
-      return this.store.plain(TypeKind.Void);
-    }
-
-    return this.types.optional(type);
-  }
-
   private inferFromWanted(draft: GenericDraft): void {
     const wanted = draft.wanted;
     const params = draft.target.params;
@@ -223,31 +149,25 @@ partial class ExpressionTypes {
       return;
     }
 
-    const set = this.inferenceSet(params);
+    const set = this.generics.inferenceSet(params);
 
     this.inferPair(set, result, wanted);
 
     for (let index = 0; index < params.length; index++) {
-      const strong = this.candidatesOf(set, index, CandidateStrength.Strong);
-      const type = this.wantedCandidate(strong);
+      const strong = this.generics.candidatesOf(
+        set,
+        index,
+        CandidateStrength.Strong,
+      );
+      const type = this.generics.wantedCandidate(strong);
       if (!draft.bound.has(index) && type != undefined) {
         draft.bound.set(index, type);
       }
     }
   }
 
-  private wantedCandidate(candidates: Type[]): Type | undefined {
-    let type: Type | undefined = undefined;
-
-    for (const candidate of candidates) {
-      type = this.joinedWith(type, candidate);
-    }
-
-    return type;
-  }
-
   private finishTypeArguments(draft: GenericDraft, module: int): void {
-    const isSilent = this.hasArgumentErrors(draft);
+    const isSilent = this.generics.hasArgumentErrors(draft);
 
     for (let index = 0; index < draft.target.params.length; index++) {
       this.finishTypeArgument(draft, index, isSilent, module);
@@ -277,7 +197,7 @@ partial class ExpressionTypes {
         this.reportUninferred(draft, param, module);
       }
 
-      this.failParameter(draft, index);
+      this.generics.failParameter(draft, index);
 
       return;
     }
@@ -299,13 +219,13 @@ partial class ExpressionTypes {
     decl: TypeParamDecl,
   ): void {
     const target = draft.target;
-    const bindings = this.boundByLoc(draft);
+    const bindings = this.generics.boundByLoc(draft);
     const fallback = this.resolver.defaultOf(target.home, decl, bindings);
     if (fallback == undefined) {
       return;
     }
 
-    const open = this.openParameters(draft);
+    const open = this.generics.openParameters(draft);
     if (this.isMentioning(fallback, open)) {
       return;
     }
@@ -343,7 +263,7 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     const target = draft.target;
-    const bindings = this.boundByLoc(draft);
+    const bindings = this.generics.boundByLoc(draft);
     const home = target.home;
     const miss = this.resolver.constraintMiss(home, decl, found, bindings);
     if (miss == undefined) {
@@ -361,21 +281,7 @@ partial class ExpressionTypes {
       second,
     });
 
-    this.failParameter(draft, index);
-  }
-
-  private boundByLoc(draft: GenericDraft): Map<int, Type> {
-    const bindings = new Map<int, Type>();
-    const decls = draft.target.decls;
-
-    for (const [index, type] of draft.bound) {
-      const decl = decls[index];
-      if (decl != undefined) {
-        bindings.set(decl.loc, type);
-      }
-    }
-
-    return bindings;
+    this.generics.failParameter(draft, index);
   }
 
   private fillDefaults(draft: GenericDraft): boolean {
@@ -413,33 +319,5 @@ partial class ExpressionTypes {
     }
 
     return fallback;
-  }
-
-  private hasArgumentErrors(draft: GenericDraft): boolean {
-    for (const type of draft.given.values()) {
-      if (this.hasUnknownInside(type)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  private isExpectingLiteral(param: Type): boolean {
-    const constraint = this.store.constraintOf(param);
-    if (constraint == undefined) {
-      return false;
-    }
-
-    const isKeys =
-      constraint.kind == TypeKind.Operation &&
-      constraint.shape.op == OperationKind.KeyOf;
-    if (isKeys) {
-      return true;
-    }
-
-    const parts = this.partsOfType(constraint);
-
-    return parts.every((part) => this.isTextual(part));
   }
 }

@@ -1,0 +1,331 @@
+import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
+import {
+  Details,
+  Finding,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import { ExprKind } from "../../../program/ast/types/ast.types.expressions.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { kDictTexts } from "../../types/type-questions/const/type-questions.const.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { TypeRelation } from "../../types/type-relation/type-relation.tz";
+import { SourceTexts } from "../source-texts/source-texts.tz";
+import {
+  kBacktick,
+  kCloseValue,
+  kDollar,
+  kOpenBrace,
+  kOpenValue,
+  kQuotes,
+  kTemplateFrame,
+} from "./const/concatenation-rules.const.tz";
+import {
+  ConcatLink,
+  ConcatPart,
+  TemplatePiece,
+  TemplateText,
+} from "./types/concatenation-rules.types.tz";
+import { kEscape } from "../source-texts/const/source-texts.const.tz";
+
+export class ConcatenationRules {
+  private readonly text: TypeText;
+  private readonly relation: TypeRelation;
+  private readonly types: TypeQuestions;
+  private readonly sources: SourceTexts;
+
+  public constructor(
+    text: TypeText,
+    relation: TypeRelation,
+    types: TypeQuestions,
+    sources: SourceTexts,
+  ) {
+    this.text = text;
+    this.relation = relation;
+    this.types = types;
+    this.sources = sources;
+  }
+
+  public textAnswer(type: Type, base: Type): Finding | undefined {
+    const code = this.textProblem(type, base);
+    if (code == undefined) {
+      return undefined;
+    }
+
+    const details = this.textDetails(code, type, base);
+
+    return { code, details };
+  }
+
+  public mixedAnswer(
+    links: ConcatLink[],
+    module: int,
+  ): SourceError | undefined {
+    const mixed = links.find((link) => this.isMixing(link.left, link.right));
+    const root = links[links.length - 1];
+    if (mixed == undefined || root == undefined) {
+      return undefined;
+    }
+
+    const parts = this.concatParts(root, links, module);
+    const joined = this.concatTemplate(parts);
+    const first = this.text.of(mixed.left);
+    const second = this.text.of(mixed.right);
+    const loc = mixed.binary.loc;
+
+    if (joined.only != "") {
+      const details: Details = { first, second, word: joined.only };
+
+      return { code: Code.MixedConcatString, loc, details };
+    }
+
+    const other = this.sumHint(parts);
+    if (other != "") {
+      const details: Details = { first, second, other, word: joined.text };
+
+      return { code: Code.MixedConcatSum, loc, details };
+    }
+
+    const details: Details = { first, second, word: joined.text };
+
+    return { code: Code.MixedConcatTemplate, loc, details };
+  }
+
+  private textProblem(type: Type, base: Type): Code | undefined {
+    if (this.types.holdsKind(type, TypeKind.Function)) {
+      return Code.FunctionToText;
+    }
+    if (base.kind == TypeKind.Tuple) {
+      return Code.TupleToText;
+    }
+    if (this.types.holdsKind(type, TypeKind.Result)) {
+      return Code.ResultToText;
+    }
+    if (base.kind == TypeKind.Dict) {
+      return Code.DictToText;
+    }
+    if (base.kind == TypeKind.Iterator) {
+      return Code.IteratorToText;
+    }
+    if (this.types.holdsKind(type, TypeKind.Unknown)) {
+      return Code.UnknownToText;
+    }
+    if (this.types.holdsKind(type, TypeKind.Json)) {
+      return Code.JsonToText;
+    }
+    if (this.types.holdsObjects(type)) {
+      return Code.ObjectToText;
+    }
+    if (this.textMember(base) != undefined) {
+      return Code.UnionToText;
+    }
+
+    return undefined;
+  }
+
+  private textDetails(code: Code, type: Type, base: Type): Details {
+    if (code == Code.DictToText && base.kind == TypeKind.Dict) {
+      const dict = base.dict;
+      const row = kDictTexts.find((one) => one.dict == dict);
+
+      return { word: row?.kind ?? "", other: row?.shown ?? "" };
+    }
+
+    const member = this.textMember(base);
+    if (code != Code.UnionToText || member == undefined) {
+      return kNoDetails;
+    }
+
+    const first = this.text.of(type);
+    const second = this.text.of(member);
+
+    return { first, second };
+  }
+
+  private textMember(base: Type): Type | undefined {
+    if (base.kind != TypeKind.Union || !this.relation.isTagged(base.parts)) {
+      return undefined;
+    }
+
+    return base.parts.find((part) => this.isHeldMember(part));
+  }
+
+  private isHeldMember(part: Type): boolean {
+    const isSpecial = this.types.isDate(part) || this.types.isRegExp(part);
+    if (this.types.isObjectKind(part) && !isSpecial) {
+      return true;
+    }
+
+    switch (part.kind) {
+      case TypeKind.Dict:
+      case TypeKind.Function:
+      case TypeKind.Iterator:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private isMixing(left: Type, right: Type): boolean {
+    const isLeftText = left.kind == TypeKind.String && this.joinsAsText(right);
+    const isRightText = right.kind == TypeKind.String && this.joinsAsText(left);
+
+    return isLeftText || isRightText;
+  }
+
+  private joinsAsText(type: Type): boolean {
+    const base = this.types.definedType(type);
+
+    return this.types.isNumberLike(base) || base.kind == TypeKind.Boolean;
+  }
+
+  private concatParts(
+    root: ConcatLink,
+    links: ConcatLink[],
+    module: int,
+  ): ConcatPart[] {
+    const chain: ConcatLink[] = [root];
+    let below = this.linkBelow(root, links);
+
+    while (below != undefined) {
+      chain.push(below);
+      below = this.linkBelow(below, links);
+    }
+
+    const parts: ConcatPart[] = [];
+    const first = chain[chain.length - 1] ?? root;
+    const texts = this.sources.operandTexts(first.binary, module);
+
+    parts.push({ expr: first.binary.lhs, text: texts.left, type: first.left });
+
+    for (let index = chain.length - 1; index >= 0; index--) {
+      const link = chain[index];
+      if (link == undefined) {
+        continue;
+      }
+
+      const linkTexts = this.sources.operandTexts(link.binary, module);
+
+      parts.push({
+        expr: link.binary.rhs,
+        text: linkTexts.right,
+        type: link.right,
+      });
+    }
+
+    return parts;
+  }
+
+  private linkBelow(
+    link: ConcatLink,
+    links: ConcatLink[],
+  ): ConcatLink | undefined {
+    const left = link.binary.lhs;
+
+    return links.find(
+      (one) => one.binary == left && one.type.kind == TypeKind.String,
+    );
+  }
+
+  private concatTemplate(parts: ConcatPart[]): TemplateText {
+    let text = kBacktick;
+    let values = 0;
+    let only = "";
+
+    for (const part of parts) {
+      if (part.text == "") {
+        return { text: "", only: "" };
+      }
+
+      const piece = this.templatePiece(part);
+
+      text = text + piece.text;
+
+      if (piece.value != undefined) {
+        values += 1;
+        only = piece.value;
+      }
+    }
+
+    const isSingle = values == 1 && text.length == only.length + kTemplateFrame;
+    const closed = text + kBacktick;
+
+    if (!isSingle) {
+      return { text: closed, only: "" };
+    }
+
+    return { text: closed, only };
+  }
+
+  private templatePiece(part: ConcatPart): TemplatePiece {
+    const text = part.text;
+    const head = text.slice(0, 1);
+    const tail = text.slice(text.length - 1);
+    const isQuoted = text.length >= 2 && head == tail;
+    const isString = part.expr.kind == ExprKind.StringLit;
+    if (isString && isQuoted && kQuotes.includes(head)) {
+      return { text: this.escapedBody(text) };
+    }
+
+    const isTemplate = part.expr.kind == ExprKind.Template;
+    if (isTemplate && isQuoted && head == kBacktick) {
+      return { text: text.slice(1, text.length - 1) };
+    }
+
+    const value = this.sources.withoutParens(text);
+
+    return { text: kOpenValue + value + kCloseValue, value };
+  }
+
+  private escapedBody(text: string): string {
+    const body = text.slice(1, text.length - 1);
+    let escaped = "";
+    let index = 0;
+
+    while (index < body.length) {
+      const unit = body.charAt(index);
+      const next = body.charAt(index + 1);
+
+      if (unit == kEscape && index + 1 < body.length) {
+        escaped = escaped + unit + next;
+        index += 2;
+
+        continue;
+      }
+
+      const isOpening = unit == kDollar && next == kOpenBrace;
+      if (unit == kBacktick || isOpening) {
+        escaped = escaped + kEscape;
+      }
+
+      escaped = escaped + unit;
+      index += 1;
+    }
+
+    return escaped;
+  }
+
+  private sumHint(parts: ConcatPart[]): string {
+    const first = parts[0];
+    const second = parts[1];
+    if (parts.length != 2 || first == undefined || second == undefined) {
+      return "";
+    }
+    if (this.types.isNumeric(first.type) && this.isTextValue(second)) {
+      return `${first.text} + Number(${second.text})`;
+    }
+    if (this.isTextValue(first) && this.types.isNumeric(second.type)) {
+      return `Number(${first.text}) + ${second.text}`;
+    }
+
+    return "";
+  }
+
+  private isTextValue(part: ConcatPart): boolean {
+    const kind = part.expr.kind;
+    const isWritten = kind == ExprKind.StringLit || kind == ExprKind.Template;
+
+    return part.type.kind == TypeKind.String && !isWritten;
+  }
+}

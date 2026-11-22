@@ -6,12 +6,10 @@ import {
   UnaryOp,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import {
-  IntType,
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import { kIntLimits, kLargestInt } from "../../const/expression-types.const.tz";
-import { IntLimit } from "../../types/expression-types.types.tz";
+import { kLargestInt } from "../../../integer-math/const/integer-math.const.tz";
 
 partial class ExpressionTypes {
   private intConstant(
@@ -37,7 +35,7 @@ partial class ExpressionTypes {
     }
 
     const value = this.plainConstant(expr, module);
-    if (value == undefined || !this.isInside(value, type)) {
+    if (value == undefined || !this.integers.isInside(value, type)) {
       return undefined;
     }
 
@@ -79,27 +77,6 @@ partial class ExpressionTypes {
     }
   }
 
-  private isInside(value: decimal, type: IntType): boolean {
-    const limit = this.limitOf(type);
-    if (limit == undefined) {
-      return false;
-    }
-
-    const lowest = limit.lowest.toDecimal();
-    const highest = limit.highest.toDecimal();
-
-    return value >= -lowest && value <= highest;
-  }
-
-  private limitOf(type: IntType): IntLimit | undefined {
-    const bits = type.bits;
-    const unsigned = type.unsigned;
-
-    return kIntLimits.find(
-      (row) => row.bits == bits && row.unsigned == unsigned,
-    );
-  }
-
   private isWholeTree(expr: Expr, module: int): boolean {
     switch (expr.kind) {
       case ExprKind.IntLit:
@@ -109,10 +86,12 @@ partial class ExpressionTypes {
       case ExprKind.Member:
         return this.enumConstant(expr, module) != undefined;
       case ExprKind.Unary:
-        return this.isSign(expr.op) && this.isWholeTree(expr.operand, module);
+        return (
+          this.shapes.isSign(expr.op) && this.isWholeTree(expr.operand, module)
+        );
       case ExprKind.Binary:
         return (
-          this.isWholeArithmetic(expr.op) &&
+          this.shapes.isWholeArithmetic(expr.op) &&
           this.isWholeTree(expr.lhs, module) &&
           this.isWholeTree(expr.rhs, module)
         );
@@ -143,7 +122,7 @@ partial class ExpressionTypes {
         return target;
       case TypeKind.Int: {
         const value = this.intConstant(expr, type, module);
-        if (value == undefined || !this.isInside(value, target)) {
+        if (value == undefined || !this.integers.isInside(value, target)) {
           return undefined;
         }
 

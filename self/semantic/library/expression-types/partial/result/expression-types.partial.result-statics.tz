@@ -53,7 +53,7 @@ partial class ExpressionTypes {
     const arg = expr.args[0]?.expr;
     if (arg == undefined || expr.args.length != 1) {
       this.report(module, member.loc, Code.ArgumentCount, {
-        word: this.argumentCountText(1, 1, false),
+        word: this.calls.argumentCountText(1, 1, false),
         other: `${expr.args.length}`,
       });
 
@@ -64,7 +64,7 @@ partial class ExpressionTypes {
       what: `${kResultName}.${name}`,
       isAll: name == "combineWithAllErrors",
     };
-    if (arg.kind == ExprKind.ArrayLit && this.isPlainList(arg)) {
+    if (arg.kind == ExprKind.ArrayLit && this.shapes.isPlainList(arg)) {
       return this.combinedList(arg, draft, module);
     }
 
@@ -90,7 +90,7 @@ partial class ExpressionTypes {
     this.quiet -= 1;
 
     const base = this.types.definedType(object);
-    if (base.kind != TypeKind.Array || !this.holdsResults(base.item)) {
+    if (base.kind != TypeKind.Array || !this.results.holdsResults(base.item)) {
       return false;
     }
 
@@ -98,24 +98,6 @@ partial class ExpressionTypes {
     this.looseArguments(expr.args, module);
 
     return true;
-  }
-
-  private holdsResults(type: Type): boolean {
-    if (type.kind == TypeKind.Union) {
-      return type.parts.some((part) => this.holdsResults(part));
-    }
-
-    return type.kind == TypeKind.Result;
-  }
-
-  private isPlainList(literal: ArrayLitExpr): boolean {
-    if (literal.elements.length == 0) {
-      return false;
-    }
-
-    return literal.elements.every(
-      (element) => !element.spread && !element.hole,
-    );
   }
 
   private combinedList(
@@ -178,7 +160,7 @@ partial class ExpressionTypes {
     first: ResultType,
     second: ResultType,
   ): ResultType | undefined {
-    const value = this.joinedValue(first.value, second.value);
+    const value = this.results.joinedValue(first.value, second.value);
     const error = this.resultHalfJoin(first.error, second.error);
     if (value == undefined || error == undefined) {
       return undefined;
@@ -192,32 +174,13 @@ partial class ExpressionTypes {
     return made;
   }
 
-  private joinedValue(first: Type, second: Type): Type | undefined {
-    if (first == second || second.kind == TypeKind.Never) {
-      return first;
-    }
-    if (first.kind == TypeKind.Never) {
-      return second;
-    }
-    if (first.kind == TypeKind.Void || second.kind == TypeKind.Void) {
-      return undefined;
-    }
-
-    const joined = this.unify(first, second);
-    if (joined == undefined || joined.kind == TypeKind.Error) {
-      return undefined;
-    }
-
-    return joined;
-  }
-
   private sameCombined(
     literal: ArrayLitExpr,
     common: ResultType,
     draft: CombineDraft,
     module: int,
   ): Type {
-    if (!this.isHoldingValues(draft, common)) {
+    if (!this.results.isHoldingValues(draft, common)) {
       this.noValuesReport(draft, common, literal, module);
 
       return this.store.plain(TypeKind.Error);
@@ -227,7 +190,7 @@ partial class ExpressionTypes {
 
     return this.store.resultOf(
       values,
-      this.combinedErrors(draft, common.error),
+      this.results.combinedErrors(draft, common.error),
     );
   }
 
@@ -246,7 +209,7 @@ partial class ExpressionTypes {
       if (result == undefined || element == undefined) {
         return this.store.plain(TypeKind.Error);
       }
-      if (!this.isHoldingValues(draft, result)) {
+      if (!this.results.isHoldingValues(draft, result)) {
         this.noValuesReport(draft, result, element.expr, module);
 
         return this.store.plain(TypeKind.Error);
@@ -269,7 +232,10 @@ partial class ExpressionTypes {
 
     const tuple = this.store.plainTuple(values);
 
-    return this.store.resultOf(tuple, this.combinedErrors(draft, error));
+    return this.store.resultOf(
+      tuple,
+      this.results.combinedErrors(draft, error),
+    );
   }
 
   private combinedArray(arg: Expr, draft: CombineDraft, module: int): Type {
@@ -280,7 +246,7 @@ partial class ExpressionTypes {
     }
 
     const base = this.types.definedType(type);
-    const item = this.arrayResultItem(base);
+    const item = this.results.arrayResultItem(base);
     if (item == undefined) {
       this.report(module, arg.loc, Code.ResultCombineNotArray, {
         word: draft.what,
@@ -289,7 +255,7 @@ partial class ExpressionTypes {
 
       return error;
     }
-    if (!this.isHoldingValues(draft, item)) {
+    if (!this.results.isHoldingValues(draft, item)) {
       this.noValuesReport(draft, item, arg, module);
 
       return error;
@@ -297,29 +263,10 @@ partial class ExpressionTypes {
 
     const values = this.store.arrayOf(item.value);
 
-    return this.store.resultOf(values, this.combinedErrors(draft, item.error));
-  }
-
-  private arrayResultItem(base: Type): ResultType | undefined {
-    if (base.kind != TypeKind.Array) {
-      return undefined;
-    }
-
-    const item = this.types.definedType(base.item);
-    if (item.kind != TypeKind.Result) {
-      return undefined;
-    }
-
-    return item;
-  }
-
-  private isHoldingValues(draft: CombineDraft, result: ResultType): boolean {
-    const value = result.value;
-    const isGiving =
-      value.kind != TypeKind.Never && value.kind != TypeKind.Void;
-    const isLosingErrors = draft.isAll && result.error.kind == TypeKind.Void;
-
-    return isGiving && !isLosingErrors;
+    return this.store.resultOf(
+      values,
+      this.results.combinedErrors(draft, item.error),
+    );
   }
 
   private noValuesReport(
@@ -335,23 +282,7 @@ partial class ExpressionTypes {
     this.report(module, at.loc, Code.ResultCombineVoid, {
       word: this.text.of(result),
       other: draft.what,
-      second: this.heldHalfWord(hasValues),
+      second: this.results.heldHalfWord(hasValues),
     });
-  }
-
-  private heldHalfWord(hasValues: boolean): string {
-    if (hasValues) {
-      return "errors";
-    }
-
-    return "values";
-  }
-
-  private combinedErrors(draft: CombineDraft, error: Type): Type {
-    if (!draft.isAll || error.kind == TypeKind.Never) {
-      return error;
-    }
-
-    return this.store.arrayOf(error);
   }
 }

@@ -1,0 +1,240 @@
+import {
+  Expr,
+  ExprKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import {
+  DateFields,
+  DayValue,
+} from "../date-reader/types/date-reader.types.tz";
+import { DateFieldValues } from "../../code/expression-types/types/expression-types.types.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import {
+  kDateLocalLimit,
+  kDateSetters,
+  kDateTimeLimit,
+  kDateYearLimit,
+  kDateYearShift,
+  kDayMilliseconds,
+  kDaysInCycle,
+  kEpochYear,
+  kHourMilliseconds,
+  kLastShortYear,
+  kMinuteMilliseconds,
+  kMonthDays,
+  kMonthNames,
+  kMonthStarts,
+  kSecondMilliseconds,
+  kSetterPrefix,
+  kShortYearBase,
+  kUnknownYear,
+  kUtcSetterPrefix,
+  kYearsInCycle,
+} from "./const/date-rules.const.tz";
+import { CarriedDay } from "./types/date-rules.types.tz";
+
+export class DateRules {
+  private readonly types: TypeQuestions;
+
+  public constructor(types: TypeQuestions) {
+    this.types = types;
+  }
+
+  public fieldValue(fields: DateFieldValues, field: int): int | undefined {
+    return fields.values[field - fields.first];
+  }
+
+  public isShortYear(fields: DateFieldValues, year: int): boolean {
+    return fields.setter == "" && year >= 0 && year <= kLastShortYear;
+  }
+
+  public knownYear(fields: DateFieldValues): int | undefined {
+    const year = this.fieldValue(fields, 0);
+    if (year == undefined) {
+      return undefined;
+    }
+    if (this.isShortYear(fields, year)) {
+      return kShortYearBase + year;
+    }
+
+    return year;
+  }
+
+  public nextYearText(year: int | undefined, month: int): string {
+    if (year == undefined) {
+      return kUnknownYear;
+    }
+    if (month == 11) {
+      return `${year + 1}`;
+    }
+
+    return `${year}`;
+  }
+
+  public yearPart(year: int | undefined): string {
+    if (year == undefined) {
+      return "";
+    }
+
+    return `${year}, `;
+  }
+
+  public monthName(month: int): string {
+    return kMonthNames[month] ?? "";
+  }
+
+  public daysInMonth(year: int, month: int): int {
+    if (month == 1 && this.isLeapYear(year)) {
+      return 29;
+    }
+
+    return kMonthDays[month] ?? 31;
+  }
+
+  public lastDayOf(year: int | undefined, month: int): int {
+    if (year != undefined) {
+      return this.daysInMonth(year, month);
+    }
+    if (month == 1) {
+      return 29;
+    }
+
+    return this.daysInMonth(2001, month);
+  }
+
+  public missingDay(year: int | undefined, month: int, day: int): string {
+    const name = this.monthName(month);
+    if (year == undefined) {
+      const after = this.monthName((month + 1) % 12);
+      const lack = `${name} has no day ${day}`;
+
+      return `${lack}, and JavaScript would move on to ${after}`;
+    }
+
+    const carried = this.carriedDay(year, month, day);
+    const lack = `${name} ${year} has no day ${day}`;
+    const moved = `${this.monthName(carried.month)} ${carried.day}`;
+
+    return `${lack}, and JavaScript would make it ${moved}`;
+  }
+
+  public dateTextOf(expr: Expr): string | undefined {
+    if (expr.kind == ExprKind.StringLit) {
+      return expr.value;
+    }
+    if (expr.kind == ExprKind.Template && expr.exprs.length == 0) {
+      return expr.quasis[0];
+    }
+
+    return undefined;
+  }
+
+  public isDateInRange(fields: DateFields): boolean {
+    const day = fields.day;
+    if (day.year < -kDateYearLimit || day.year > kDateYearLimit) {
+      return false;
+    }
+
+    const time = fields.time;
+    const clock =
+      time.hour * kHourMilliseconds +
+      time.minute * kMinuteMilliseconds +
+      time.second * kSecondMilliseconds +
+      time.millisecond;
+    const local = this.daysFromEpoch(day) * kDayMilliseconds + clock;
+    const zone = fields.zone;
+    if (zone.isLocal) {
+      return local >= -kDateLocalLimit && local <= kDateLocalLimit;
+    }
+
+    const value = local - zone.offset * kSecondMilliseconds;
+
+    return value >= -kDateTimeLimit && value <= kDateTimeLimit;
+  }
+
+  public dateValuePlace(type: Type, base: Type): string {
+    if (this.types.isOptional(type)) {
+      return "; the value may be undefined: check it first";
+    }
+    if (base.kind == TypeKind.Decimal) {
+      return "; convert it with 'Number(x)'";
+    }
+
+    return "";
+  }
+
+  public jsonExtra(isJson: boolean): int {
+    if (isJson) {
+      return 1;
+    }
+
+    return 0;
+  }
+
+  public setterFirst(name: string): int | undefined {
+    if (!name.startsWith(kSetterPrefix)) {
+      return undefined;
+    }
+
+    const field = this.setterField(name);
+    const setter = kDateSetters.find((one) => one.name == field);
+
+    return setter?.first;
+  }
+
+  private isLeapYear(year: int): boolean {
+    const isCentury = year % 100 == 0;
+
+    return year % 4 == 0 && (!isCentury || year % 400 == 0);
+  }
+
+  private carriedDay(year: int, month: int, day: int): CarriedDay {
+    const cycles = (day - 1) / kDaysInCycle;
+    let currentYear = year + cycles * kYearsInCycle;
+    let currentMonth = month;
+    let currentDay = day - cycles * kDaysInCycle;
+
+    while (currentDay > this.daysInMonth(currentYear, currentMonth)) {
+      currentDay -= this.daysInMonth(currentYear, currentMonth);
+      currentMonth += 1;
+
+      if (currentMonth == 12) {
+        currentMonth = 0;
+        currentYear += 1;
+      }
+    }
+
+    return { month: currentMonth, day: currentDay };
+  }
+
+  private daysFromEpoch(day: DayValue): int {
+    const shifted = day.year + kDateYearShift;
+    const epoch = kEpochYear + kDateYearShift;
+    const before = this.shiftedDays(shifted) - this.shiftedDays(epoch);
+    const start = kMonthStarts[day.month] ?? 0;
+    const isLeapShift = this.isLeapYear(day.year) && day.month >= 2;
+    const leap = this.leapDay(isLeapShift);
+
+    return before + start + leap - 1 + day.day;
+  }
+
+  private shiftedDays(shifted: int): int {
+    return 365 * shifted + shifted / 4 - shifted / 100 + shifted / 400;
+  }
+
+  private leapDay(isLeap: boolean): int {
+    if (isLeap) {
+      return 1;
+    }
+
+    return 0;
+  }
+
+  private setterField(name: string): string {
+    if (name.startsWith(kUtcSetterPrefix)) {
+      return name.slice(kUtcSetterPrefix.length);
+    }
+
+    return name.slice(kSetterPrefix.length);
+  }
+}

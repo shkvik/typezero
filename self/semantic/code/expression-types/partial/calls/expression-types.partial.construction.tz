@@ -13,13 +13,13 @@ import {
   TypePlace,
 } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 import {
-  kDateName,
-  kMapClass,
   kPromiseClass,
   kSetClass,
   kSpecialNews,
 } from "../../const/expression-types.const.tz";
 import { CallTarget, ValueTarget } from "../../types/expression-types.types.tz";
+import { kDateName } from "../../../../types/type-questions/const/type-questions.const.tz";
+import { kMapClass } from "../../../class-rules/const/class-rules.const.tz";
 
 partial class ExpressionTypes {
   private libraryNew(
@@ -58,7 +58,7 @@ partial class ExpressionTypes {
           module,
         );
       case kPromiseClass:
-        return this.promiseNew(written, wanted);
+        return this.calls.promiseNew(written, wanted);
       case kDateName:
         return this.dateNew(expr, module);
       default:
@@ -78,39 +78,6 @@ partial class ExpressionTypes {
     }
 
     return written;
-  }
-
-  private dictNew(
-    dict: DictKind,
-    written: Type[],
-    wanted: Type | undefined,
-  ): Type {
-    const first = written[0];
-    const second = written[1] ?? first;
-    if (first != undefined && second != undefined) {
-      return this.store.dictOf(dict, first, second);
-    }
-
-    const goal = this.types.wantedPart(wanted);
-    if (goal == undefined || goal.kind != TypeKind.Dict || goal.dict != dict) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    return goal;
-  }
-
-  private promiseNew(written: Type[], wanted: Type | undefined): Type {
-    const value = written[0];
-    if (value != undefined) {
-      return this.store.promiseOf(value);
-    }
-
-    const goal = this.types.wantedPart(wanted);
-    if (goal == undefined || goal.kind != TypeKind.Promise) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    return goal;
   }
 
   private declaredNew(

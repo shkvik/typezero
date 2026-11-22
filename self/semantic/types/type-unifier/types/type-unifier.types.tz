@@ -1,0 +1,6 @@
+import { Type } from "../../../../program/type/types/type.types.tz";
+
+export type UnifyAnswer = {
+  readonly decided: boolean;
+  readonly type?: Type;
+};

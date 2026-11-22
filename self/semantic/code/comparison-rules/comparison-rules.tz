@@ -1,0 +1,170 @@
+import {
+  BinaryExpr,
+  Expr,
+  ExprKind,
+  UnaryOp,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { kIntLimits } from "../integer-math/const/integer-math.const.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { TypeUnifier } from "../../types/type-unifier/type-unifier.tz";
+import { ExpressionShapes } from "../expression-shapes/expression-shapes.tz";
+
+export class ComparisonRules {
+  private readonly types: TypeQuestions;
+  private readonly unifier: TypeUnifier;
+  private readonly shapes: ExpressionShapes;
+
+  public constructor(
+    types: TypeQuestions,
+    unifier: TypeUnifier,
+    shapes: ExpressionShapes,
+  ) {
+    this.types = types;
+    this.unifier = unifier;
+    this.shapes = shapes;
+  }
+
+  public literalComparisonHint(
+    isLiteral: boolean,
+    other: Type,
+    self: Expr,
+  ): Type | undefined {
+    if (!isLiteral) {
+      return undefined;
+    }
+
+    return this.comparisonHint(other, self);
+  }
+
+  public isComparedLiteral(expr: Expr): boolean {
+    const isNegated = expr.kind == ExprKind.Unary && expr.op == UnaryOp.Neg;
+    const operand = this.negatedOperand(isNegated, expr);
+    const kind = operand.kind;
+    const isWritten = kind == ExprKind.StringLit || kind == ExprKind.BoolLit;
+
+    return this.shapes.isNumberTree(operand) || isWritten;
+  }
+
+  public comparisonHint(other: Type, self: Expr): Type | undefined {
+    const type = this.types.definedType(other);
+    if (type.kind == TypeKind.Literal || type.kind == TypeKind.Union) {
+      return other;
+    }
+
+    const isFitting =
+      type.kind == TypeKind.Double || this.isFittingLiteral(self, type);
+    if (this.types.isNumeric(type) && isFitting) {
+      return type;
+    }
+    if (type.kind == TypeKind.Decimal) {
+      return type;
+    }
+
+    return undefined;
+  }
+
+  public nullOperand(isLeftNull: boolean, expr: BinaryExpr): Expr {
+    if (isLeftNull) {
+      return expr.lhs;
+    }
+
+    return expr.rhs;
+  }
+
+  public comparisonType(left: Type, right: Type): Type | undefined {
+    if (left.kind == TypeKind.Void || right.kind == TypeKind.Void) {
+      return undefined;
+    }
+
+    const common = this.unifier.unify(left, right);
+    if (common == undefined || common.kind == TypeKind.Error) {
+      return common;
+    }
+
+    const base = this.types.definedType(common);
+    if (!this.isComparable(base)) {
+      return undefined;
+    }
+
+    return common;
+  }
+
+  public nullishHint(left: Type, expected: Type | undefined): Type | undefined {
+    if (left.kind == TypeKind.Undefined || left.kind == TypeKind.Error) {
+      return expected;
+    }
+
+    return this.types.definedType(left);
+  }
+
+  public nullishBase(left: Type, right: Type): Type | undefined {
+    const plainLeft = this.types.definedType(left);
+
+    if (right.kind == TypeKind.Undefined) {
+      return plainLeft;
+    }
+
+    const plainRight = this.types.definedType(right);
+
+    return this.unifier.unionUnify(plainLeft, plainRight);
+  }
+
+  private negatedOperand(isNegated: boolean, expr: Expr): Expr {
+    if (!isNegated || expr.kind != ExprKind.Unary) {
+      return expr;
+    }
+
+    return expr.operand;
+  }
+
+  private isFittingLiteral(expr: Expr, type: Type): boolean {
+    if (type.kind != TypeKind.Int) {
+      return false;
+    }
+
+    const bits = type.bits;
+    const unsigned = type.unsigned;
+    const limit = kIntLimits.find(
+      (row) => row.bits == bits && row.unsigned == unsigned,
+    );
+    const isNegated = expr.kind == ExprKind.Unary && expr.op == UnaryOp.Neg;
+    const operand = this.negatedOperand(isNegated, expr);
+    if (limit == undefined || operand.kind != ExprKind.IntLit) {
+      return false;
+    }
+    if (!isNegated) {
+      return operand.value <= limit.highest;
+    }
+
+    return operand.value == 0 || (!unsigned && operand.value <= limit.lowest);
+  }
+
+  private isComparable(base: Type): boolean {
+    switch (base.kind) {
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.Boolean:
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Array:
+      case TypeKind.Function:
+      case TypeKind.Object:
+      case TypeKind.Instance:
+      case TypeKind.Tuple:
+      case TypeKind.AnyObject:
+      case TypeKind.Iterator:
+      case TypeKind.Json:
+      case TypeKind.Dict:
+      case TypeKind.Unknown:
+      case TypeKind.Literal:
+      case TypeKind.Class:
+        return true;
+      case TypeKind.Union:
+        return base.parts.every((part) => part.kind != TypeKind.TypeParameter);
+      default:
+        return false;
+    }
+  }
+}

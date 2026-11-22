@@ -1,0 +1,178 @@
+import {
+  ClassDecl,
+  Decorator,
+} from "../../../program/ast/types/ast.types.classes.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
+import {
+  FunctionType,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import {
+  DecoratedName,
+  DecorateRun,
+  DecoratorPlace,
+  DecoratorUse,
+} from "../expression-types/types/expression-types.types.tz";
+import { kHiddenMark } from "../source-texts/const/source-texts.const.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { kDescriptorValueName } from "./const/decorator-rules.const.tz";
+
+export class DecoratorRules {
+  private readonly types: TypeQuestions;
+
+  public constructor(types: TypeQuestions) {
+    this.types = types;
+  }
+
+  public isDecoratedClass(decl: ClassDecl): boolean {
+    const isMethod = decl.methods.some((fn) => this.isDecoratedFunction(fn));
+    const isMade = decl.constructors.some((fn) => this.hasDecoratedParams(fn));
+    const isField = decl.fields.some((field) => field.decorators.length > 0);
+
+    return decl.decorators.length > 0 || isMethod || isMade || isField;
+  }
+
+  public hasDecoratedParams(fn: FunctionDecl): boolean {
+    return fn.params.some((param) => param.decorators.length > 0);
+  }
+
+  public decoratorNames(decorators: Decorator[]): string[] {
+    return decorators.map((decorator) => this.decoratorName(decorator.expr));
+  }
+
+  public methodDecoratorNames(fn: FunctionDecl): string[] {
+    const names = this.decoratorNames(fn.role?.decorators ?? []);
+
+    for (const param of fn.params) {
+      const more = this.decoratorNames(param.decorators);
+
+      names.push(...more);
+    }
+
+    return names;
+  }
+
+  public clashWhat(earlier: DecoratedName, later: DecoratedName): string {
+    const name = later.name;
+    if (earlier.isStatic != later.isStatic) {
+      return `both the static member '${name}' and the member '${name}'`;
+    }
+
+    return `two variants of '${name}'`;
+  }
+
+  public clashRecords(earlier: DecoratedName, later: DecoratedName): string {
+    const names = later.decorators.slice().reverse();
+    const shared = names.find(
+      (name) => name != "" && earlier.decorators.includes(name),
+    );
+    if (shared == undefined) {
+      return "the records 'design:*' the compiler writes";
+    }
+
+    return `the records of '@${shared}'`;
+  }
+
+  public ownUses(decorators: Decorator[]): DecoratorUse[] {
+    return decorators.map((decorator) => ({ decorator, param: -1 }));
+  }
+
+  public addParamUses(uses: DecoratorUse[], fn: FunctionDecl): void {
+    for (let index = 0; index < fn.params.length; index++) {
+      const param = fn.params[index];
+
+      for (const decorator of param?.decorators ?? []) {
+        uses.push({ decorator, param: index });
+      }
+    }
+  }
+
+  public classUses(decl: ClassDecl): DecoratorUse[] {
+    const uses = this.ownUses(decl.decorators);
+
+    for (const fn of decl.constructors) {
+      this.addParamUses(uses, fn);
+    }
+
+    return uses;
+  }
+
+  public isDescriptorUse(place: DecoratorPlace, count: int): boolean {
+    return place == DecoratorPlace.Method && count >= 3;
+  }
+
+  public usePlace(run: DecorateRun, use: DecoratorUse): DecoratorPlace {
+    if (use.param >= 0) {
+      return DecoratorPlace.Parameter;
+    }
+
+    return run.place;
+  }
+
+  public thirdParameter(type: FunctionType): Type | undefined {
+    const third = type.shape.params[2];
+    if (third == undefined) {
+      return undefined;
+    }
+
+    return this.types.definedType(third.type);
+  }
+
+  public isDescriptorType(type: Type): boolean {
+    if (type.kind != TypeKind.Object) {
+      return false;
+    }
+
+    return type.fields.some((field) => field.name == kDescriptorValueName);
+  }
+
+  public isPositionType(type: Type): boolean {
+    return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
+  }
+
+  public decoratorLabel(expr: Expr): string {
+    const name = this.decoratorName(expr);
+    if (name == "") {
+      return "the decorator";
+    }
+
+    return `'${name}'`;
+  }
+
+  private isDecoratedFunction(fn: FunctionDecl): boolean {
+    const own = fn.role?.decorators ?? [];
+
+    return own.length > 0 || this.hasDecoratedParams(fn);
+  }
+
+  private decoratorName(expr: Expr): string {
+    const names: string[] = [];
+    let link = this.withoutCalls(expr);
+
+    while (link.kind == ExprKind.Member) {
+      names.push(link.name);
+      link = this.withoutCalls(link.object);
+    }
+
+    if (link.kind != ExprKind.Name || link.name.startsWith(kHiddenMark)) {
+      return "";
+    }
+
+    return [link.name].concat(names.reverse()).join(".");
+  }
+
+  private withoutCalls(expr: Expr): Expr {
+    let callee = expr;
+
+    while (callee.kind == ExprKind.Call) {
+      callee = callee.callee;
+    }
+
+    return callee;
+  }
+}

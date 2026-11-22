@@ -8,7 +8,6 @@ import {
 } from "../../../../../program/ast/types/ast.types.statements.tz";
 import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
 import {
-  DictKind,
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
@@ -65,7 +64,7 @@ partial class ExpressionTypes {
       case SymbolKind.Class:
         return this.classValue(target);
       case SymbolKind.Enum:
-        if (this.isRecordWanted(wanted)) {
+        if (this.statements.isRecordWanted(wanted)) {
           return this.store.plain(TypeKind.Error);
         }
 
@@ -109,7 +108,7 @@ partial class ExpressionTypes {
       return door.type;
     }
 
-    return this.textChoice(texts, wanted) ?? door.type;
+    return this.literals.textChoice(texts, wanted) ?? door.type;
   }
 
   private parameterTyped(target: ValueTarget): Type {
@@ -143,16 +142,6 @@ partial class ExpressionTypes {
     const opened = this.program.modules[target.module];
 
     return opened != undefined && opened.source.isLibrary;
-  }
-
-  private isRecordWanted(wanted: Type | undefined): boolean {
-    if (wanted == undefined) {
-      return false;
-    }
-
-    const goal = this.types.definedType(wanted);
-
-    return goal.kind == TypeKind.Dict && goal.dict == DictKind.Record;
   }
 
   private targetOfName(expr: NameExpr, module: int): ValueTarget | undefined {
@@ -257,61 +246,12 @@ partial class ExpressionTypes {
     }
 
     for (const item of opened.file.items) {
-      const found = this.itemTarget(item, module, name);
+      const found = this.statements.itemTarget(item, module, name);
       if (found != undefined) {
         return found;
       }
     }
 
     return undefined;
-  }
-
-  private itemTarget(
-    item: Stmt,
-    module: int,
-    name: string,
-  ): ValueTarget | undefined {
-    switch (item.kind) {
-      case StmtKind.VarDecl: {
-        const decl = item.decls.find((one) => one.name == name);
-        if (decl == undefined) {
-          return undefined;
-        }
-
-        return { module, kind: SymbolKind.Variable, loc: decl.loc };
-      }
-      case StmtKind.Function:
-        return this.namedTarget(item.name, name, {
-          module,
-          kind: SymbolKind.Function,
-          loc: item.loc,
-        });
-      case StmtKind.Class:
-        return this.namedTarget(item.name ?? "", name, {
-          module,
-          kind: SymbolKind.Class,
-          loc: item.loc,
-        });
-      case StmtKind.Enum:
-        return this.namedTarget(item.name, name, {
-          module,
-          kind: SymbolKind.Enum,
-          loc: item.loc,
-        });
-      default:
-        return undefined;
-    }
-  }
-
-  private namedTarget(
-    declared: string,
-    name: string,
-    target: ValueTarget,
-  ): ValueTarget | undefined {
-    if (declared != name) {
-      return undefined;
-    }
-
-    return target;
   }
 }

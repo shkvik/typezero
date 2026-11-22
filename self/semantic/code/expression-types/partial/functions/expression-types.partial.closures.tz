@@ -17,8 +17,8 @@ import {
   TypeContext,
   TypePlace,
 } from "../../../../types/type-resolver/types/type-resolver.types.tz";
-import { kDot } from "../../const/expression-types.const.tz";
 import { ParameterShape } from "../../types/expression-types.types.tz";
+import { kDot } from "../../../source-texts/const/source-texts.const.tz";
 
 partial class ExpressionTypes {
   private closureTyped(
@@ -32,7 +32,7 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    const goal = this.contextualFunction(wanted);
+    const goal = this.functions.contextualFunction(wanted);
     const context: TypeContext = {
       module,
       bindings: new Map<int, Type>(),
@@ -40,7 +40,7 @@ partial class ExpressionTypes {
     };
     const before = this.facts;
     const shape = this.closureShape(fn, goal, context, module);
-    if (this.isParameterClash(shape, goal)) {
+    if (this.functions.isParameterClash(shape, goal)) {
       return this.store.plain(TypeKind.Error);
     }
 
@@ -50,7 +50,7 @@ partial class ExpressionTypes {
     this.facts = this.constFacts(before);
 
     const owner = shape.self ?? this.literalOwners.get(fn);
-    const place = this.functionPlace(fn, owner);
+    const place = this.functions.functionPlace(fn, owner);
 
     if (place != undefined) {
       this.thisPlaces.push(place);
@@ -64,7 +64,7 @@ partial class ExpressionTypes {
     const result = this.closureResult(fn, goal, context, module);
 
     this.openFunctions.pop();
-    this.leaveInitClosure(initFrame);
+    this.classes.leaveInitClosure(initFrame);
 
     if (owner != undefined) {
       this.selves.pop();
@@ -75,7 +75,7 @@ partial class ExpressionTypes {
 
     this.facts = before;
 
-    const params = this.adaptedParams(shape.params, goal);
+    const params = this.functions.adaptedParams(shape.params, goal);
     const rest = shape.rest;
     const self = shape.self ?? goal?.shape.self;
     const isBroken = params.some((param) => param.type.kind == TypeKind.Error);
@@ -86,65 +86,6 @@ partial class ExpressionTypes {
     const made = this.store.functionOf({ params, rest, self, result });
 
     this.closureTypes.set(expr, made);
-
-    return made;
-  }
-
-  private adaptedParams(
-    params: FunctionParameter[],
-    goal: FunctionType | undefined,
-  ): FunctionParameter[] {
-    const given = goal?.shape.params ?? [];
-    if (goal == undefined || goal.shape.rest || params.length >= given.length) {
-      return params;
-    }
-
-    const missing = given.slice(params.length);
-
-    return params.concat(missing);
-  }
-
-  private contextualFunction(
-    wanted: Type | undefined,
-  ): FunctionType | undefined {
-    const goal = this.types.wantedPart(wanted);
-    if (goal == undefined || goal.kind != TypeKind.Function) {
-      return undefined;
-    }
-
-    return this.spreadListShape(goal);
-  }
-
-  private spreadListShape(goal: FunctionType): FunctionType {
-    const shape = goal.shape;
-    const last = shape.params[shape.params.length - 1];
-    const list = last?.type;
-    if (!shape.rest || list == undefined || list.kind != TypeKind.Tuple) {
-      return goal;
-    }
-    if (list.rest >= 0) {
-      return goal;
-    }
-
-    const fixed = shape.params.length - 1;
-    const params: FunctionParameter[] = shape.params.slice(0, fixed);
-
-    for (let index = 0; index < list.items.length; index++) {
-      const type = list.items[index];
-      if (type != undefined) {
-        params.push({ type, optional: index >= list.required });
-      }
-    }
-
-    const made = this.store.functionOf({
-      params,
-      rest: false,
-      self: shape.self,
-      result: shape.result,
-    });
-    if (made.kind != TypeKind.Function) {
-      return goal;
-    }
 
     return made;
   }
@@ -164,7 +105,7 @@ partial class ExpressionTypes {
       const kind = param.form.kind;
       const given = goal?.shape.params[index];
       const type = this.closureParameter(param, given, context, module);
-      const inside = this.insideType(type, kind);
+      const inside = this.functions.insideType(type, kind);
 
       this.paramTypes.set(`${module} ${param.loc}`, inside);
 
@@ -238,28 +179,6 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private isParameterClash(
-    shape: ParameterShape,
-    goal: FunctionType | undefined,
-  ): boolean {
-    if (goal == undefined) {
-      return false;
-    }
-
-    const given = goal.shape.params;
-
-    return shape.params.some((param, index) => {
-      const other = given[index];
-
-      return (
-        other != undefined &&
-        param.type.kind != TypeKind.Error &&
-        other.type.kind != TypeKind.Error &&
-        !this.relation.converts(other.type, param.type)
-      );
-    });
-  }
-
   private closureResult(
     fn: FunctionDecl,
     goal: FunctionType | undefined,
@@ -299,7 +218,7 @@ partial class ExpressionTypes {
     isQuiet: boolean,
     module: int,
   ): Type {
-    const frame = this.frameOf(fn, undefined);
+    const frame = this.functions.frameOf(fn, undefined);
     const body = fn.body?.body ?? [];
 
     this.walkStatements(body, frame, module);
@@ -325,16 +244,8 @@ partial class ExpressionTypes {
 
   private isConstPath(key: string): boolean {
     const dot = key.indexOf(kDot);
-    const root = this.rootOf(key, dot);
+    const root = this.functions.rootOf(key, dot);
 
     return this.constKeys.has(root);
-  }
-
-  private rootOf(key: string, dot: int): string {
-    if (dot < 0) {
-      return key;
-    }
-
-    return key.slice(0, dot);
   }
 }

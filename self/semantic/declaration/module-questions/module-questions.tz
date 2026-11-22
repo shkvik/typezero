@@ -1,0 +1,18 @@
+import { Program } from "../../../program/module/types/module.types.tz";
+
+export class ModuleQuestions {
+  private readonly program: Program;
+
+  public constructor(program: Program) {
+    this.program = program;
+  }
+
+  public isLibraryModule(module: int): boolean {
+    const opened = this.program.modules[module];
+    if (module < 0 || opened == undefined) {
+      return true;
+    }
+
+    return opened.source.isLibrary;
+  }
+}

@@ -1,0 +1,370 @@
+import {
+  BinaryExpr,
+  BinaryOp,
+  CallArgument,
+  Expr,
+  ExprKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  kArgumentSeparator,
+  kCloseBracket,
+  kCloseParen,
+  kClosingMarks,
+  kCommentStart,
+  kDot,
+  kDoubleQuote,
+  kEmptyArray,
+  kEscape,
+  kFirstPrintable,
+  kHiddenMark,
+  kLastPrintable,
+  kLineEnds,
+  kMostShownStatement,
+  kNameMarks,
+  kOpenBracket,
+  kOpenParen,
+  kOpeningMarks,
+  kOperatorTexts,
+  kOptionalDot,
+  kQuoteMarks,
+  kSigns,
+  kStatementEnd,
+  kTuplePlaceholder,
+  kUndefinedText,
+  kUnnamedCount,
+  kUnnamedOperand,
+} from "./const/source-texts.const.tz";
+import {
+  kFalseText,
+  kTrueText,
+} from "../../types/type-resolver/const/type-resolver.const.tables.tz";
+import { Param } from "../../../program/ast/types/ast.types.functions.tz";
+import { Program } from "../../../program/module/types/module.types.tz";
+import { OperandTexts } from "./types/source-texts.types.tz";
+
+export class SourceTexts {
+  private readonly program: Program;
+
+  public constructor(program: Program) {
+    this.program = program;
+  }
+
+  public operandTexts(expr: BinaryExpr, module: int): OperandTexts {
+    const span = expr.source;
+    const text = this.program.modules[module]?.source.text;
+    if (span == undefined || text == undefined) {
+      return { left: "", right: "" };
+    }
+
+    const op = this.operatorText(expr.op);
+    const before = text.toString("utf8", span.start, expr.loc);
+    const after = text.toString("utf8", expr.loc + op.length, span.end);
+
+    return { left: before.trim(), right: after.trim() };
+  }
+
+  public operatorText(op: BinaryOp): string {
+    const row = kOperatorTexts.find((one) => one.op == op);
+
+    return row?.text ?? "";
+  }
+
+  public shownOperand(text: string): string {
+    if (text == "") {
+      return kUnnamedOperand;
+    }
+
+    return this.operandText(text);
+  }
+
+  public operandText(text: string): string {
+    const head = text.slice(0, 1);
+    const isLiteral = head >= "0" && head <= "9";
+    const isPlain = this.isPlainOperand(text) || this.isWrapped(text);
+    if (isPlain && !isLiteral) {
+      return text;
+    }
+
+    return `${kOpenParen}${text}${kCloseParen}`;
+  }
+
+  public withoutParens(text: string): string {
+    const hasQuote = kQuoteMarks.some((mark) => text.includes(mark));
+    const isFramed = text.startsWith(kOpenParen) && text.endsWith(kCloseParen);
+    if (text.length < 2 || !isFramed || hasQuote) {
+      return text;
+    }
+    if (this.closingAt(text) != text.length - 1) {
+      return text;
+    }
+
+    const inner = text.slice(1, text.length - 1);
+
+    return this.withoutParens(inner.trim());
+  }
+
+  public namedText(text: string): string {
+    if (text == "") {
+      return kUnnamedOperand;
+    }
+
+    return text;
+  }
+
+  public countText(text: string): string {
+    if (text == "") {
+      return kUnnamedCount;
+    }
+
+    return text;
+  }
+
+  public parameterText(param: Param, module: int): string {
+    const span = param.pattern;
+    const text = this.program.modules[module]?.source.text;
+    if (span == undefined || text == undefined) {
+      return param.name;
+    }
+
+    return text.toString("utf8", span.start, span.end);
+  }
+
+  public statementText(at: int | undefined, module: int): string {
+    const source = this.program.modules[module]?.source.text;
+    if (at == undefined || source == undefined) {
+      return "";
+    }
+
+    const end = Math.min(source.length, at + kMostShownStatement * 4);
+    const line = source.toString("utf8", at, end);
+    let depth = 0;
+    let taken = "";
+
+    for (const unit of line) {
+      const rest = line.slice(taken.length);
+      const isEnd =
+        kLineEnds.includes(unit) ||
+        (depth == 0 &&
+          (unit == kStatementEnd || rest.startsWith(kCommentStart)));
+      if (isEnd) {
+        break;
+      }
+      if (kOpeningMarks.includes(unit)) {
+        depth += 1;
+      }
+      if (kClosingMarks.includes(unit)) {
+        depth -= 1;
+      }
+
+      taken += unit;
+    }
+
+    const text = taken.trimEnd();
+    if (depth != 0 || text.length > kMostShownStatement) {
+      return "";
+    }
+
+    return text;
+  }
+
+  public hintText(expr: Expr, placeholder: string): string {
+    const text = this.sourceText(expr);
+    if (text == "") {
+      return placeholder;
+    }
+
+    return text;
+  }
+
+  public sourceText(expr: Expr): string {
+    switch (expr.kind) {
+      case ExprKind.Name:
+        if (expr.name.startsWith(kHiddenMark)) {
+          return "";
+        }
+
+        return expr.name;
+      case ExprKind.IntLit:
+        return `${expr.value}`;
+      case ExprKind.BoolLit:
+        return this.truthText(expr.value);
+      case ExprKind.Undefined:
+        return kUndefinedText;
+      case ExprKind.StringLit:
+        return this.stringSource(expr.value);
+      case ExprKind.ArrayLit:
+        return this.arraySource(expr.elements.length);
+      case ExprKind.Member: {
+        const object = this.sourceText(expr.object);
+        if (object == "") {
+          return "";
+        }
+
+        return `${object}${this.memberDot(expr.optional)}${expr.name}`;
+      }
+      case ExprKind.Index:
+        return this.indexSource(expr.object, expr.index, expr.optional);
+      case ExprKind.Call:
+        return this.callSource(expr.callee, expr.args, expr.optional);
+      case ExprKind.OptionalChain:
+        return this.sourceText(expr.chain);
+      default:
+        return "";
+    }
+  }
+
+  public memberDot(optional: boolean): string {
+    if (optional) {
+      return kOptionalDot;
+    }
+
+    return kDot;
+  }
+
+  public truthText(value: boolean): string {
+    if (value) {
+      return kTrueText;
+    }
+
+    return kFalseText;
+  }
+
+  public operandName(expr: Expr): string {
+    if (expr.kind == ExprKind.Name) {
+      return expr.name;
+    }
+
+    return kUnnamedOperand;
+  }
+
+  public tupleText(object: Expr): string {
+    if (object.kind == ExprKind.Name) {
+      return object.name;
+    }
+
+    return kTuplePlaceholder;
+  }
+
+  private isPlainOperand(text: string): boolean {
+    const head = text.slice(0, 1);
+    if (text == "" || kSigns.includes(head)) {
+      return false;
+    }
+
+    let depth = 0;
+
+    for (const unit of text) {
+      const isOpening = unit == kOpenParen || unit == kOpenBracket;
+      const isClosing = unit == kCloseParen || unit == kCloseBracket;
+
+      if (isOpening) {
+        depth += 1;
+      }
+      if (isClosing) {
+        depth -= 1;
+      }
+
+      const isBracket = isOpening || isClosing;
+      if (!isBracket && depth == 0 && !this.isNameUnit(unit)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private isNameUnit(unit: string): boolean {
+    const isLetter =
+      (unit >= "a" && unit <= "z") || (unit >= "A" && unit <= "Z");
+    const isDigit = unit >= "0" && unit <= "9";
+
+    return isLetter || isDigit || kNameMarks.includes(unit);
+  }
+
+  private isWrapped(text: string): boolean {
+    const isFramed = text.startsWith(kOpenParen) && text.endsWith(kCloseParen);
+    if (text.length < 2 || !isFramed) {
+      return false;
+    }
+
+    return this.closingAt(text) == text.length - 1;
+  }
+
+  private closingAt(text: string): int {
+    let level = 0;
+    let index = 0;
+
+    for (const unit of text) {
+      if (unit == kOpenParen) {
+        level += 1;
+      }
+      if (unit == kCloseParen) {
+        level -= 1;
+      }
+      if (level == 0) {
+        return index;
+      }
+
+      index += 1;
+    }
+
+    return -1;
+  }
+
+  private stringSource(value: string): string {
+    for (const unit of value) {
+      const isPrintable = unit >= kFirstPrintable && unit <= kLastPrintable;
+      const isSpecial = unit == kDoubleQuote || unit == kEscape;
+      if (!isPrintable || isSpecial) {
+        return "";
+      }
+    }
+
+    return `${kDoubleQuote}${value}${kDoubleQuote}`;
+  }
+
+  private arraySource(count: int): string {
+    if (count > 0) {
+      return "";
+    }
+
+    return kEmptyArray;
+  }
+
+  private indexSource(object: Expr, index: Expr, optional: boolean): string {
+    const objectText = this.sourceText(object);
+    const indexText = this.sourceText(index);
+    if (objectText == "" || indexText == "") {
+      return "";
+    }
+    if (optional) {
+      return `${objectText}?.[${indexText}]`;
+    }
+
+    return `${objectText}[${indexText}]`;
+  }
+
+  private callSource(
+    callee: Expr,
+    args: CallArgument[],
+    optional: boolean,
+  ): string {
+    if (args.some((argument) => argument.spread)) {
+      return "";
+    }
+
+    const calleeText = this.sourceText(callee);
+    const texts = args.map((argument) => this.sourceText(argument.expr));
+    if (calleeText == "" || texts.includes("")) {
+      return "";
+    }
+
+    const joined = texts.join(kArgumentSeparator);
+
+    if (optional) {
+      return `${calleeText}?.(${joined})`;
+    }
+
+    return `${calleeText}(${joined})`;
+  }
+}

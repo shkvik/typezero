@@ -19,11 +19,7 @@ import {
   TypeContext,
   TypePlace,
 } from "../../../../types/type-resolver/types/type-resolver.types.tz";
-import {
-  kArrayClass,
-  kDot,
-  kThisName,
-} from "../../const/expression-types.const.tz";
+import { kArrayClass, kThisName } from "../../const/expression-types.const.tz";
 import {
   DeclaredVariable,
   ValueTarget,
@@ -44,7 +40,7 @@ partial class ExpressionTypes {
       case TypeKind.Instance:
         return this.instanceLoopCheck(loop.iterable, base, module);
       case TypeKind.Object:
-        if (this.isIterableTarget(base)) {
+        if (this.types.isIterableTarget(base)) {
           return;
         }
 
@@ -83,28 +79,13 @@ partial class ExpressionTypes {
       place: TypePlace.Plain,
     };
     const element = this.resolver.value(written, context);
-    if (this.hasZeroValue(element)) {
+    if (this.objects.hasZeroValue(element)) {
       return;
     }
 
     this.report(module, expr.loc, Code.NewArrayNoDefault, {
       word: this.text.of(element),
     });
-  }
-
-  private hasZeroValue(type: Type): boolean {
-    switch (type.kind) {
-      case TypeKind.Int:
-      case TypeKind.Double:
-      case TypeKind.Decimal:
-      case TypeKind.Boolean:
-      case TypeKind.String:
-      case TypeKind.Error:
-      case TypeKind.TypeParameter:
-        return true;
-      default:
-        return this.types.isOptional(type);
-    }
   }
 
   private undefinedTargetCheck(target: MemberExpr, module: int): boolean {
@@ -122,7 +103,7 @@ partial class ExpressionTypes {
     if (!this.types.isOptional(type) || target.optional) {
       return false;
     }
-    if (this.isJsonHolder(type)) {
+    if (this.library.isJsonHolder(type)) {
       return false;
     }
 
@@ -170,7 +151,7 @@ partial class ExpressionTypes {
     }
 
     const inner = this.openFunctions.slice(frame.depth);
-    if (!inner.every((fn) => this.isClosure(fn))) {
+    if (!inner.every((fn) => this.shapes.isClosure(fn))) {
       return;
     }
 
@@ -203,7 +184,7 @@ partial class ExpressionTypes {
     }
 
     for (const change of record.changes) {
-      const target = this.changedTarget(change);
+      const target = this.bounds.changedTarget(change);
       if (target != undefined && target.kind == ExprKind.Member) {
         names.add(target.name);
       }
@@ -219,7 +200,7 @@ partial class ExpressionTypes {
     const kept = new Map<string, Type>();
 
     for (const [key, type] of this.facts) {
-      if (!this.isCalledPath(key, names)) {
+      if (!this.objects.isCalledPath(key, names)) {
         kept.set(key, type);
       }
     }
@@ -232,7 +213,7 @@ partial class ExpressionTypes {
     const kept = new Map<string, Type>();
 
     for (const [key, type] of this.facts) {
-      if (!this.isCalledPath(key, names)) {
+      if (!this.objects.isCalledPath(key, names)) {
         kept.set(key, type);
       }
     }
@@ -240,21 +221,13 @@ partial class ExpressionTypes {
     this.facts = kept;
   }
 
-  private isCalledPath(key: string, names: Set<string>): boolean {
-    if (key.startsWith("#")) {
-      return false;
-    }
-
-    const parts = key.split(kDot).slice(1);
-
-    return parts.some((part) => names.has(part));
-  }
-
   private isOwnCall(callee: Expr, module: int): boolean {
     if (callee.kind == ExprKind.Name) {
       const target = this.targetOfName(callee, module);
 
-      return target != undefined && !this.isLibraryModule(target.module);
+      return (
+        target != undefined && !this.modules.isLibraryModule(target.module)
+      );
     }
     if (callee.kind != ExprKind.Member) {
       return false;
@@ -267,7 +240,8 @@ partial class ExpressionTypes {
     this.quiet -= 1;
 
     return (
-      object.kind == TypeKind.Instance && !this.isLibraryModule(object.module)
+      object.kind == TypeKind.Instance &&
+      !this.modules.isLibraryModule(object.module)
     );
   }
 }

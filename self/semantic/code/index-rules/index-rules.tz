@@ -1,0 +1,153 @@
+import { KnownName } from "../../../load/token/types/token.types.tz";
+import {
+  Expr,
+  ExprKind,
+  IndexExpr,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  DictKind,
+  TupleType,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { kIteratorKey } from "../../types/type-questions/const/type-questions.const.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import {
+  kIterableName,
+  kManyElements,
+  kNextName,
+  kOneElement,
+} from "./const/index-rules.const.tz";
+
+export class IndexRules {
+  private readonly store: TypeStore;
+
+  public constructor(store: TypeStore) {
+    this.store = store;
+  }
+
+  public listItem(list: Type): Type | undefined {
+    if (list.kind == TypeKind.Array) {
+      return list.item;
+    }
+    if (list.kind == TypeKind.String) {
+      return list;
+    }
+
+    return undefined;
+  }
+
+  public isUnindexable(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.Boolean:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public positionOf(value: decimal, count: int): int {
+    for (let index = 0; index < count; index++) {
+      if (index.toDecimal() == value) {
+        return index;
+      }
+    }
+
+    return -1;
+  }
+
+  public elementCountText(count: int): string {
+    if (count == 1) {
+      return `${count}${kOneElement}`;
+    }
+
+    return `${count}${kManyElements}`;
+  }
+
+  public keyedMember(expr: IndexExpr, name: string): MemberExpr {
+    return {
+      kind: ExprKind.Member,
+      loc: expr.loc,
+      object: expr.object,
+      name,
+      known: KnownName.None,
+      optional: false,
+      typeArgs: [],
+    };
+  }
+
+  public deletedHolder(target: Expr): Expr | undefined {
+    if (target.kind == ExprKind.Member || target.kind == ExprKind.Index) {
+      return target.object;
+    }
+
+    return undefined;
+  }
+
+  public tupleElement(tuple: TupleType): Type | undefined {
+    const first = tuple.items[0];
+    const isSame = tuple.items.every((item) => item == first);
+    if (first == undefined || !isSame) {
+      return undefined;
+    }
+
+    return first;
+  }
+
+  public iterableItem(to: Type): Type | undefined {
+    const label = this.store.labelOf(to);
+    if (label == undefined || !label.startsWith(kIterableName + "<")) {
+      return undefined;
+    }
+    if (to.kind != TypeKind.Object) {
+      return undefined;
+    }
+
+    const field = to.fields.find((one) => one.name == kIteratorKey);
+    const method = field?.type;
+    if (method == undefined || method.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    const iterator = method.shape.result;
+    if (iterator.kind != TypeKind.Iterator) {
+      return undefined;
+    }
+
+    return iterator.shape.yielded;
+  }
+
+  public iteratedDictItem(
+    dict: DictKind,
+    key: Type,
+    value: Type,
+  ): Type | undefined {
+    if (dict == DictKind.Set) {
+      return value;
+    }
+    if (dict == DictKind.Map) {
+      return this.store.tupleOf({
+        items: [key, value],
+        readonly: false,
+        required: 2,
+        rest: -1,
+      });
+    }
+
+    return undefined;
+  }
+
+  public hasNextMethod(result: Type): boolean {
+    if (result.kind != TypeKind.Object) {
+      return false;
+    }
+
+    const next = result.fields.find((field) => field.name == kNextName);
+
+    return next != undefined && next.type.kind == TypeKind.Function;
+  }
+}

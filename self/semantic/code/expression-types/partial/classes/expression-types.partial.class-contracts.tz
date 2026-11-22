@@ -17,10 +17,7 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import {
-  TypeContext,
-  TypePlace,
-} from "../../../../types/type-resolver/types/type-resolver.types.tz";
+import { TypePlace } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 import { ClassMemberEntry } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
@@ -43,17 +40,13 @@ partial class ExpressionTypes {
     }
   }
 
-  private contextOf(module: int, place: TypePlace): TypeContext {
-    return { module, bindings: new Map<int, Type>(), place };
-  }
-
   private extendsCheck(decl: ClassDecl, module: int): void {
     const base = decl.base;
     if (base == undefined) {
       return;
     }
 
-    const context = this.contextOf(module, TypePlace.Base);
+    const context = this.classes.contextOf(module, TypePlace.Base);
     const type = this.resolver.resolve(base, context);
     if (type.kind != TypeKind.Object) {
       return;
@@ -101,7 +94,10 @@ partial class ExpressionTypes {
     const seen = new Set<ClassDecl>();
 
     seen.add(decl);
-    let current: InstanceType | undefined = this.parentOf(instance, decl);
+    let current: InstanceType | undefined = this.classes.parentOf(
+      instance,
+      decl,
+    );
     let owner: ClassDecl | undefined = this.parentDeclOf(current);
 
     while (owner != undefined && current != undefined) {
@@ -112,7 +108,7 @@ partial class ExpressionTypes {
       seen.add(owner);
       this.abstractOwnerCheck(decl, owner, current, done, module);
 
-      const parent = this.parentOf(current, owner);
+      const parent = this.classes.parentOf(current, owner);
 
       current = parent;
       owner = this.parentDeclOf(parent);
@@ -138,7 +134,7 @@ partial class ExpressionTypes {
   ): void {
     for (const method of owner.methods) {
       const isAbstract = method.role?.method == MethodKind.Abstract;
-      if (!isAbstract && !this.isStaticMethod(method)) {
+      if (!isAbstract && !this.classes.isStaticMethod(method)) {
         done.add(method.name);
       }
     }
@@ -172,7 +168,7 @@ partial class ExpressionTypes {
 
     const first = decl.name ?? "";
     const second = owner.name ?? "";
-    const other = this.variantText(method, type);
+    const other = this.classes.variantText(method, type);
 
     this.report(module, decl.loc, Code.AbstractNotImplemented, {
       first,
@@ -187,11 +183,14 @@ partial class ExpressionTypes {
     ref: TypeRef,
     module: int,
   ): void {
-    const context = this.contextOf(module, TypePlace.Base);
+    const context = this.classes.contextOf(module, TypePlace.Base);
     const type = this.resolver.resolve(ref, context);
     const word = ref.name;
 
-    if (type.kind == TypeKind.Instance && !this.isLibraryModule(type.module)) {
+    if (
+      type.kind == TypeKind.Instance &&
+      !this.modules.isLibraryModule(type.module)
+    ) {
       return this.reportImplementsClass(decl, ref, module);
     }
     if (type.kind != TypeKind.Object) {
@@ -260,7 +259,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const wanted = this.fieldWanted(field);
+    const wanted = this.objects.fieldWanted(field);
     const word = field.name;
     if (wanted.kind != TypeKind.Function) {
       return this.report(module, method.loc, Code.ImplementsFieldAsMethod, {
@@ -313,7 +312,9 @@ partial class ExpressionTypes {
     }
 
     const type = this.fieldTypeOf(entry, own);
-    const isPlain = this.isScalarField(type) && this.isScalarField(field.type);
+    const isPlain =
+      this.classes.isScalarField(type) &&
+      this.classes.isScalarField(field.type);
     if (type == field.type || !isPlain) {
       return;
     }
@@ -325,19 +326,6 @@ partial class ExpressionTypes {
       other: this.text.of(field.type),
       place: this.text.of(type),
     });
-  }
-
-  private isScalarField(type: Type): boolean {
-    switch (type.kind) {
-      case TypeKind.Int:
-      case TypeKind.Double:
-      case TypeKind.Decimal:
-      case TypeKind.String:
-      case TypeKind.Boolean:
-        return true;
-      default:
-        return false;
-    }
   }
 
   private contractMethod(
@@ -353,13 +341,13 @@ partial class ExpressionTypes {
     if (wanted.kind != TypeKind.Function || type.kind != TypeKind.Function) {
       return;
     }
-    if (!this.isSameParameters(type, wanted)) {
+    if (!this.classes.isSameParameters(type, wanted)) {
       this.report(module, method.loc, Code.ImplementsParameters, {
         word: field.name,
         first,
         second: iface,
         other: this.text.of(wanted),
-        place: this.variantText(method, type),
+        place: this.classes.variantText(method, type),
       });
 
       return;
@@ -418,7 +406,7 @@ partial class ExpressionTypes {
       return error;
     }
 
-    const parent = this.parentOf(self, owner.decl);
+    const parent = this.classes.parentOf(self, owner.decl);
     if (parent == undefined) {
       return error;
     }

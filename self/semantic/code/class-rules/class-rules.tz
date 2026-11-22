@@ -1,0 +1,425 @@
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  Access,
+  ClassDecl,
+  ClassField,
+  FieldKind,
+  FieldPresence,
+  MethodKind,
+} from "../../../program/ast/types/ast.types.classes.tz";
+import {
+  ExprKind,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
+import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../program/ast/types/ast.types.types.tz";
+import {
+  DictKind,
+  FunctionType,
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import {
+  ParameterSite,
+  TypeContext,
+  TypePlace,
+} from "../../types/type-resolver/types/type-resolver.types.tz";
+import {
+  ClassMemberEntry,
+  InitFrame,
+  ThisPlace,
+} from "../expression-types/types/expression-types.types.tz";
+import { kDateName } from "../../types/type-questions/const/type-questions.const.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { ModuleQuestions } from "../../declaration/module-questions/module-questions.tz";
+import {
+  kMapClass,
+  kPrivateWord,
+  kProtectedWord,
+  kPublicWord,
+} from "./const/class-rules.const.tz";
+
+export class ClassRules {
+  private readonly text: TypeText;
+  private readonly types: TypeQuestions;
+  private readonly modules: ModuleQuestions;
+
+  public constructor(
+    text: TypeText,
+    types: TypeQuestions,
+    modules: ModuleQuestions,
+  ) {
+    this.text = text;
+    this.types = types;
+    this.modules = modules;
+  }
+
+  public contextOf(module: int, place: TypePlace): TypeContext {
+    return { module, bindings: new Map<int, Type>(), place };
+  }
+
+  public isScalarField(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.String:
+      case TypeKind.Boolean:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public isSameParameters(own: FunctionType, theirs: FunctionType): boolean {
+    const mine = own.shape.params;
+    const other = theirs.shape.params;
+    if (mine.length != other.length || own.shape.rest != theirs.shape.rest) {
+      return false;
+    }
+
+    return mine.every((param, index) => {
+      const that = other[index];
+
+      return (
+        that != undefined &&
+        (param.type == that.type || param.type.kind == TypeKind.Error) &&
+        param.optional == that.optional
+      );
+    });
+  }
+
+  public accessRank(access: Access): int {
+    switch (access) {
+      case Access.Public:
+        return 0;
+      case Access.Protected:
+        return 1;
+      default:
+        return 2;
+    }
+  }
+
+  public accessWord(access: Access): string {
+    switch (access) {
+      case Access.Public:
+        return kPublicWord;
+      case Access.Protected:
+        return kProtectedWord;
+      default:
+        return kPrivateWord;
+    }
+  }
+
+  public variantText(fn: FunctionDecl, type: FunctionType): string {
+    const params = type.shape.params;
+    const parts: string[] = [];
+
+    for (let index = 0; index < fn.params.length; index++) {
+      const param = fn.params[index];
+      const typed = params[index];
+      if (param != undefined && typed != undefined) {
+        const text = this.text.of(typed.type);
+
+        parts.push(`${param.name}: ${text}`);
+      }
+    }
+
+    return `${fn.name}(${parts.join(", ")})`;
+  }
+
+  public contractFieldResult(type: Type): Type | undefined {
+    if (type.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    return type.shape.result;
+  }
+
+  public initFrameOf(decl: ClassDecl, fn: FunctionDecl): InitFrame {
+    const isConstructor = fn.role?.method == MethodKind.Constructor;
+    const isDerived = decl.base != undefined || decl.baseExpr != undefined;
+
+    return { isConstructor, fn, decl, isDerived, closures: [] };
+  }
+
+  public isArrowField(field: ClassField): boolean {
+    const init = field.init;
+    const isArrow = init?.kind == ExprKind.Function && init.fn.isArrow;
+
+    return isArrow || field.form == FieldKind.ArrowMethod;
+  }
+
+  public isRequiredField(field: ClassField): boolean {
+    const isValueField =
+      field.form == FieldKind.Instance || field.form == FieldKind.Parameter;
+
+    return isValueField && field.presence != FieldPresence.Optional;
+  }
+
+  public ownValueField(frame: InitFrame, name: string): ClassField | undefined {
+    return frame.decl.fields.find(
+      (field) =>
+        field.name == name &&
+        field.form != FieldKind.Static &&
+        !this.isArrowField(field),
+    );
+  }
+
+  public leaveInitClosure(frame: InitFrame | undefined): void {
+    if (frame != undefined) {
+      frame.closures.pop();
+    }
+  }
+
+  public hasEmptyCollection(
+    dict: DictKind,
+    written: TypeRef | undefined,
+  ): boolean {
+    const isCollection = dict == DictKind.Map || dict == DictKind.Set;
+
+    return isCollection && written?.form.kind == TypeRefKind.Generic;
+  }
+
+  public isSameLayout(own: Type, theirs: Type): boolean {
+    if (own == theirs) {
+      return true;
+    }
+    if (own.kind == TypeKind.Array && theirs.kind == TypeKind.Array) {
+      return this.isSameLayout(own.item, theirs.item);
+    }
+    if (own.kind != TypeKind.Instance || theirs.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    return this.types.ancestorsOf(own).includes(theirs);
+  }
+
+  public previousInCycle(
+    cycle: InstanceType[],
+    member: InstanceType,
+  ): InstanceType | undefined {
+    const at = cycle.indexOf(member);
+    if (at == 0) {
+      return cycle[cycle.length - 1];
+    }
+
+    return cycle[at - 1];
+  }
+
+  public earliestOf(cycle: InstanceType[]): InstanceType | undefined {
+    let earliest: InstanceType | undefined = undefined;
+
+    for (const one of cycle) {
+      if (earliest == undefined || this.isDeclaredBefore(one, earliest)) {
+        earliest = one;
+      }
+    }
+
+    return earliest;
+  }
+
+  public overriddenCode(site: MemberExpr, call: MemberExpr): Code {
+    if (site == call) {
+      return Code.ConstructorCallsOverride;
+    }
+
+    return Code.ConstructorReachesOverride;
+  }
+
+  public overridingChild(
+    children: ClassDecl[],
+    name: string,
+  ): ClassDecl | undefined {
+    return children.find((child) =>
+      child.methods.some(
+        (method) => method.name == name && !this.isStaticMethod(method),
+      ),
+    );
+  }
+
+  public isCollectionOf(word: string, type: Type): boolean {
+    if (word == kDateName) {
+      return this.types.isDate(type);
+    }
+    if (type.kind != TypeKind.Dict) {
+      return false;
+    }
+    if (word == kMapClass) {
+      return type.dict == DictKind.Map;
+    }
+
+    return type.dict == DictKind.Set;
+  }
+
+  public isOpenTested(base: Type): boolean {
+    switch (base.kind) {
+      case TypeKind.Error:
+      case TypeKind.Unknown:
+      case TypeKind.AnyObject:
+      case TypeKind.TypeParameter:
+      case TypeKind.Operation:
+      case TypeKind.Json:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public isObjectTested(base: Type): boolean {
+    switch (base.kind) {
+      case TypeKind.Object:
+      case TypeKind.Instance:
+      case TypeKind.Tuple:
+      case TypeKind.Array:
+      case TypeKind.Dict:
+      case TypeKind.Function:
+      case TypeKind.Promise:
+      case TypeKind.Result:
+      case TypeKind.Iterator:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public canHoldClass(parts: Type[], instance: Type): boolean {
+    return parts.some((part) => {
+      const isObject =
+        part.kind == TypeKind.Object || part.kind == TypeKind.Instance;
+
+      return isObject && !this.isUnrelatedClass(part, instance);
+    });
+  }
+
+  public isUnrelatedClass(part: Type, instance: Type): boolean {
+    if (
+      part.kind != TypeKind.Instance ||
+      this.modules.isLibraryModule(part.module)
+    ) {
+      return false;
+    }
+
+    return !this.isSameLine(part, instance);
+  }
+
+  public methodPlace(fn: FunctionDecl): ThisPlace {
+    if (this.isStaticMethod(fn)) {
+      return ThisPlace.StaticMethod;
+    }
+
+    return ThisPlace.Method;
+  }
+
+  public hasInstanceMember(decl: ClassDecl, name: string): boolean {
+    const isField = decl.fields.some(
+      (one) => one.name == name && one.form != FieldKind.Static,
+    );
+    const isMethod = decl.methods.some(
+      (one) => one.name == name && !this.isStaticMethod(one),
+    );
+
+    return isField || isMethod;
+  }
+
+  public accessOf(method: FunctionDecl): Access {
+    return method.role?.access ?? Access.Public;
+  }
+
+  public parentOf(
+    instance: InstanceType,
+    decl: ClassDecl,
+  ): InstanceType | undefined {
+    if (decl.base == undefined) {
+      return undefined;
+    }
+
+    const parent = this.types.baseClassOf(instance);
+    if (parent == undefined || parent.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    return parent;
+  }
+
+  public ownMember(
+    instance: InstanceType,
+    owner: ClassDecl,
+    name: string,
+  ): ClassMemberEntry | undefined {
+    const field = owner.fields.find(
+      (one) => one.name == name && one.form != FieldKind.Static,
+    );
+    const methods = owner.methods.filter(
+      (one) => one.name == name && !this.isStaticMethod(one),
+    );
+    if (field != undefined || methods.length > 0) {
+      return { owner, instance, field, methods, isStatic: false };
+    }
+
+    const hasStaticField = owner.fields.some(
+      (one) => one.name == name && one.form == FieldKind.Static,
+    );
+    const hasStaticMethod = owner.methods.some(
+      (one) => one.name == name && this.isStaticMethod(one),
+    );
+    if (hasStaticField || hasStaticMethod) {
+      return { owner, instance, methods: [], isStatic: true };
+    }
+
+    return undefined;
+  }
+
+  public isStaticMethod(method: FunctionDecl): boolean {
+    return method.role?.method == MethodKind.Static;
+  }
+
+  public parameterSites(fn: FunctionDecl): ParameterSite[] | undefined {
+    const sites: ParameterSite[] = [];
+
+    for (const param of fn.params) {
+      const type = param.type;
+      if (type == undefined) {
+        return undefined;
+      }
+
+      sites.push({
+        name: param.name,
+        loc: param.loc,
+        kind: param.form.kind,
+        type,
+        isDeclared: false,
+      });
+    }
+
+    return sites;
+  }
+
+  public pluralMark(count: int): string {
+    if (count == 1) {
+      return "";
+    }
+
+    return "s";
+  }
+
+  private isDeclaredBefore(one: InstanceType, other: InstanceType): boolean {
+    if (one.module != other.module) {
+      return one.module < other.module;
+    }
+
+    return one.loc < other.loc;
+  }
+
+  private isSameLine(first: Type, second: Type): boolean {
+    const up = this.types.ancestorsOf(first).includes(second);
+    const down = this.types.ancestorsOf(second).includes(first);
+
+    return up || down;
+  }
+}

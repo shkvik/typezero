@@ -21,17 +21,12 @@ import {
   kDecimalError,
   kDecimalMethods,
   kDecimalName,
-  kDecimalReplacements,
   kDecimalStatics,
   kMathName,
   kNoPlace,
   kRoundingModes,
 } from "../../../../code/expression-types/const/expression-types.const.tz";
-import {
-  DecimalArgument,
-  DecimalMethod,
-  DecimalResult,
-} from "../../../../code/expression-types/types/expression-types.types.tz";
+import { DecimalArgument } from "../../../../code/expression-types/types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private isDecimalName(expr: Expr, module: int): boolean {
@@ -42,29 +37,25 @@ partial class ExpressionTypes {
     return this.isGlobalUse(expr, module);
   }
 
-  private decimalType(): Type {
-    return this.store.plain(TypeKind.Decimal);
-  }
-
   private decimalOfCall(expr: CallExpr, callee: NameExpr, module: int): Type {
     const error = this.store.plain(TypeKind.Error);
     const arg = expr.args[0]?.expr;
     if (arg == undefined || expr.args.length != 1) {
       this.report(module, callee.loc, Code.ArgumentCount, {
-        word: this.argumentCountText(1, 1, false),
+        word: this.calls.argumentCountText(1, 1, false),
         other: `${expr.args.length}`,
       });
 
       return error;
     }
 
-    const hint = this.decimalOfHint(arg);
+    const hint = this.decimals.decimalOfHint(arg);
     const type = this.typed(arg, hint, module);
     const base = this.types.apparent(this.types.definedType(type));
     if (type.kind == TypeKind.Error) {
       return error;
     }
-    if (this.isTextType(type)) {
+    if (this.decimals.isTextType(type)) {
       return this.decimalOfText(arg, type, module);
     }
 
@@ -73,52 +64,15 @@ partial class ExpressionTypes {
       base.kind == TypeKind.Double ||
       base.kind == TypeKind.Decimal;
     if (isNumber && !this.types.isOptional(type)) {
-      return this.decimalType();
+      return this.decimals.decimalType();
     }
 
     this.report(module, arg.loc, Code.DecimalOfType, {
       word: this.text.of(type),
-      place: this.maybePlace(this.types.isOptional(type)),
+      place: this.decimals.maybePlace(this.types.isOptional(type)),
     });
 
     return error;
-  }
-
-  private decimalOfHint(arg: Expr): Type | undefined {
-    const isLiteral =
-      arg.kind == ExprKind.IntLit || arg.kind == ExprKind.FloatLit;
-    if (isLiteral) {
-      return this.decimalType();
-    }
-
-    return undefined;
-  }
-
-  private maybePlace(isOptional: boolean): string {
-    if (isOptional) {
-      return "; the value may be undefined: check it first or give a default with '??'";
-    }
-
-    return "";
-  }
-
-  private isTextType(type: Type): boolean {
-    if (this.types.isOptional(type)) {
-      return false;
-    }
-
-    const base = this.types.apparent(type);
-    if (base.kind == TypeKind.String || base.kind == TypeKind.Template) {
-      return true;
-    }
-    if (type.kind != TypeKind.Union) {
-      return false;
-    }
-
-    return type.parts.every(
-      (part) =>
-        part.kind == TypeKind.Literal && part.literal == LiteralKind.String,
-    );
   }
 
   private decimalOfText(arg: Expr, type: Type, module: int): Type {
@@ -129,7 +83,7 @@ partial class ExpressionTypes {
         return this.store.plain(TypeKind.Error);
       }
 
-      return this.store.resultOf(this.decimalType(), failure);
+      return this.store.resultOf(this.decimals.decimalType(), failure);
     }
 
     const reader = new DecimalText();
@@ -140,7 +94,7 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    return this.decimalType();
+    return this.decimals.decimalType();
   }
 
   private knownTextsOf(
@@ -157,8 +111,8 @@ partial class ExpressionTypes {
     if (type.kind == TypeKind.Literal && type.literal == LiteralKind.String) {
       return [type.text];
     }
-    if (type.kind == TypeKind.Union && this.isTextType(type)) {
-      return type.parts.map((part) => this.literalPartText(part));
+    if (type.kind == TypeKind.Union && this.decimals.isTextType(type)) {
+      return type.parts.map((part) => this.decimals.literalPartText(part));
     }
     if (arg.kind == ExprKind.Name) {
       return this.doorOfName(arg, module)?.texts;
@@ -195,14 +149,6 @@ partial class ExpressionTypes {
     return texts;
   }
 
-  private literalPartText(part: Type): string {
-    if (part.kind == TypeKind.Literal) {
-      return part.text;
-    }
-
-    return "";
-  }
-
   private decimalStaticCall(
     expr: CallExpr,
     member: MemberExpr,
@@ -226,7 +172,7 @@ partial class ExpressionTypes {
 
     for (const arg of expr.args) {
       if (!arg.spread) {
-        this.checked(arg.expr, this.decimalType(), module, kNoPlace);
+        this.checked(arg.expr, this.decimals.decimalType(), module, kNoPlace);
 
         hasValue = true;
 
@@ -250,14 +196,14 @@ partial class ExpressionTypes {
       return error;
     }
     if (hasValue || isSum) {
-      return this.decimalType();
+      return this.decimals.decimalType();
     }
 
-    return this.types.optional(this.decimalType());
+    return this.types.optional(this.decimals.decimalType());
   }
 
   private decimalSpreadCheck(arg: CallArgument, module: int): boolean {
-    const list = this.store.arrayOf(this.decimalType());
+    const list = this.store.arrayOf(this.decimals.decimalType());
     const type = this.typed(arg.expr, list, module);
     if (type == list || type.kind == TypeKind.Error) {
       return true;
@@ -275,19 +221,8 @@ partial class ExpressionTypes {
 
     this.report(module, member.loc, Code.DecimalStaticMissing, {
       word: name,
-      place: this.decimalStaticHint(name),
+      place: this.decimals.decimalStaticHint(name),
     });
-  }
-
-  private decimalStaticHint(name: string): string {
-    if (name == "maximum" || name == "minimum") {
-      return `; use 'decimal.${name.slice(0, 3)}'`;
-    }
-    if (name == "config" || name == "set") {
-      return ": there are no settings for all decimals; division takes its places and rounding as arguments, 'a.div(b, places, mode)'";
-    }
-
-    return "";
   }
 
   private decimalStaticRead(expr: MemberExpr, module: int): Type {
@@ -313,7 +248,7 @@ partial class ExpressionTypes {
     if (method == undefined) {
       this.report(module, member.loc, Code.DecimalMethodMissing, {
         word: name,
-        place: this.decimalMissingHint(name),
+        place: this.decimals.decimalMissingHint(name),
       });
       this.looseArguments(expr.args, module);
 
@@ -329,7 +264,7 @@ partial class ExpressionTypes {
     }
     if (count < method.least || count > method.most) {
       this.report(module, member.loc, Code.ArgumentCount, {
-        word: this.argumentCountText(method.least, method.most, false),
+        word: this.calls.argumentCountText(method.least, method.most, false),
         other: `${count}`,
       });
 
@@ -349,27 +284,13 @@ partial class ExpressionTypes {
       this.decimalZeroCheck(divisor, module);
     }
 
-    return this.decimalMethodResult(method);
-  }
-
-  private decimalMissingHint(name: string): string {
-    const replacement = kDecimalReplacements.find((one) => one.name == name);
-    let hint = "";
-
-    if (replacement != undefined) {
-      hint = `; a decimal uses ${replacement.use}`;
-    }
-    if (name == "isNaN" || name == "isFinite") {
-      hint = `${hint}; a decimal is never NaN or infinite`;
-    }
-
-    return hint;
+    return this.decimals.decimalMethodResult(method);
   }
 
   private decimalArgument(arg: Expr, kind: DecimalArgument, module: int): void {
     switch (kind) {
       case DecimalArgument.Decimal:
-        this.checked(arg, this.decimalType(), module, kNoPlace);
+        this.checked(arg, this.decimals.decimalType(), module, kNoPlace);
 
         return;
       case DecimalArgument.Places:
@@ -403,7 +324,7 @@ partial class ExpressionTypes {
     this.report(module, arg.loc, Code.DecimalCountType, {
       word: what,
       first: this.text.of(type),
-      place: this.maybePlace(this.types.isOptional(type)),
+      place: this.decimals.maybePlace(this.types.isOptional(type)),
     });
   }
 
@@ -429,21 +350,6 @@ partial class ExpressionTypes {
     }
   }
 
-  private decimalMethodResult(method: DecimalMethod): Type {
-    switch (method.result) {
-      case DecimalResult.Text:
-        return this.store.plain(TypeKind.String);
-      case DecimalResult.Truth:
-        return this.store.plain(TypeKind.Boolean);
-      case DecimalResult.Whole:
-        return this.store.integer(64, false);
-      case DecimalResult.List:
-        return this.store.arrayOf(this.decimalType());
-      default:
-        return this.decimalType();
-    }
-  }
-
   private decimalRangeCheck(expr: Expr, module: int): void {
     if (expr.kind != ExprKind.FloatLit) {
       return;
@@ -456,79 +362,10 @@ partial class ExpressionTypes {
     }
 
     const text = source.toString("utf8", span.start, span.end);
-    const top = this.decimalTop(text);
+    const top = this.decimals.decimalTop(text);
     if (top != undefined && top > 10000000) {
       this.report(module, expr.loc, Code.DecimalOutOfRange, kNoDetails);
     }
-  }
-
-  private decimalTop(text: string): int | undefined {
-    const clean = text.replaceAll("_", "").toLowerCase();
-    const mark = clean.indexOf("e");
-    const mantissa = this.mantissaOf(clean, mark);
-    const exponent = this.exponentOf(clean, mark);
-    const dot = mantissa.indexOf(".");
-    const whole = this.wholeDigits(mantissa, dot);
-    if (whole.length > 0) {
-      return whole.length - 1 + exponent;
-    }
-
-    const fraction = mantissa.slice(dot + 1);
-    const zeros = this.leadingZeros(fraction);
-    if (zeros == fraction.length) {
-      return undefined;
-    }
-
-    return exponent - zeros - 1;
-  }
-
-  private mantissaOf(clean: string, mark: int): string {
-    if (mark < 0) {
-      return clean;
-    }
-
-    return clean.slice(0, mark);
-  }
-
-  private exponentOf(clean: string, mark: int): int {
-    if (mark < 0) {
-      return 0;
-    }
-
-    const parsed = parseInt(clean.slice(mark + 1));
-    const value = parsed.unwrapOr(0);
-    if (value > 1000000000000) {
-      return 1000000000000;
-    }
-    if (value < -1000000000000) {
-      return -1000000000000;
-    }
-
-    return value;
-  }
-
-  private wholeDigits(mantissa: string, dot: int): string {
-    const whole = this.wholePart(mantissa, dot);
-
-    return whole.slice(this.leadingZeros(whole));
-  }
-
-  private leadingZeros(text: string): int {
-    let count = 0;
-
-    while (count < text.length && text.charAt(count) == "0") {
-      count += 1;
-    }
-
-    return count;
-  }
-
-  private wholePart(mantissa: string, dot: int): string {
-    if (dot < 0) {
-      return mantissa;
-    }
-
-    return mantissa.slice(0, dot);
   }
 
   private mathDecimalCheck(expr: CallExpr, module: int): boolean {
@@ -580,7 +417,7 @@ partial class ExpressionTypes {
   private decimalZeroCheck(divisor: Expr, module: int): void {
     const value = this.plainConstant(divisor, module);
     const isZero = value != undefined && value == 0;
-    if (isZero || this.isZeroLiteral(divisor)) {
+    if (isZero || this.shapes.isZeroLiteral(divisor)) {
       this.report(module, divisor.loc, Code.DecimalDivisionByZero, kNoDetails);
     }
   }

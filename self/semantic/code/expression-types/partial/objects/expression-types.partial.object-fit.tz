@@ -9,16 +9,13 @@ import {
   NameExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
-import {
-  kLengthName,
-  kStringClass,
-} from "../../const/expression-types.const.tz";
+import { kStringClass } from "../../const/expression-types.const.tz";
 import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
 import {
-  ObjectField,
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
+import { kLengthName } from "../../../expression-shapes/const/expression-shapes.const.tz";
 
 partial class ExpressionTypes {
   private isPlacedLiteral(expr: Expr, wanted: Type, module: int): boolean {
@@ -203,84 +200,5 @@ partial class ExpressionTypes {
     if (isObject) {
       this.textCheck(arg, type, module);
     }
-  }
-
-  private objectDetail(source: Type, target: Type): string {
-    if (source.kind != TypeKind.Object || target.kind != TypeKind.Object) {
-      return "";
-    }
-
-    for (const field of source.fields) {
-      const other = target.fields.find((one) => one.name == field.name);
-      if (other == undefined) {
-        return `; an object must have exactly the fields of its type, and this one has the extra field '${field.name}'`;
-      }
-    }
-
-    for (const field of target.fields) {
-      const other = source.fields.find((one) => one.name == field.name);
-      if (other == undefined) {
-        return `; it has no field '${field.name}'`;
-      }
-    }
-
-    for (const field of source.fields) {
-      const other = target.fields.find((one) => one.name == field.name);
-      if (other != undefined) {
-        const detail = this.fieldDetail(field, other, target);
-        if (detail != "") {
-          return detail;
-        }
-      }
-    }
-
-    return "";
-  }
-
-  private fieldDetail(
-    field: ObjectField,
-    other: ObjectField,
-    target: Type,
-  ): string {
-    const own = this.objectFieldType(field);
-    const theirs = this.objectFieldType(other);
-    const name = field.name;
-    const to = this.text.of(target);
-
-    if (own != theirs) {
-      const here = this.text.of(own);
-      const there = this.text.of(theirs);
-      const text = `; field '${name}' is '${here}' here and '${there}' in '${to}'`;
-
-      return text + this.objectTypeHint(own, theirs, to);
-    }
-    if (field.readonly && !other.readonly) {
-      return `; field '${name}' is read-only here, and '${to}' would let it be changed`;
-    }
-
-    return "";
-  }
-
-  private objectFieldType(field: ObjectField): Type {
-    if (field.optional) {
-      return this.types.optional(field.type);
-    }
-
-    return field.type;
-  }
-
-  private objectTypeHint(own: Type, theirs: Type, to: string): string {
-    const isNumberPair =
-      this.isNumberKind(this.types.definedType(own)) &&
-      this.isNumberKind(this.types.definedType(theirs));
-    if (!isNumberPair) {
-      return "";
-    }
-
-    return `: give the object its type where it is created, e.g. 'const p: ${to} = { ... }'`;
-  }
-
-  private isNumberKind(type: Type): boolean {
-    return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
   }
 }

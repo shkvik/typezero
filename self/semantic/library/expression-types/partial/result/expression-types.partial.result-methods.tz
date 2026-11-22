@@ -13,9 +13,7 @@ import {
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
 import {
-  kHiddenMark,
   kResultMethods,
-  kResultPlaceholder,
   kUnsupportedMark,
 } from "../../../../code/expression-types/const/expression-types.const.tz";
 
@@ -61,7 +59,7 @@ partial class ExpressionTypes {
     result: ResultType,
     module: int,
   ): Type {
-    const word = this.resultReceiverText(expr.object);
+    const word = this.results.resultReceiverText(expr.object);
     const error = this.store.plain(TypeKind.Error);
     if (expr.name == "value") {
       if (result.error.kind != TypeKind.Never) {
@@ -70,7 +68,7 @@ partial class ExpressionTypes {
         return error;
       }
 
-      return this.halfParam(result.value);
+      return this.results.halfParam(result.value);
     }
     if (expr.name == "error") {
       if (result.value.kind != TypeKind.Never) {
@@ -79,7 +77,7 @@ partial class ExpressionTypes {
         return error;
       }
 
-      return this.halfParam(result.error);
+      return this.results.halfParam(result.error);
     }
 
     const isMethod = kResultMethods.some((one) => one.name == expr.name);
@@ -98,22 +96,6 @@ partial class ExpressionTypes {
     });
 
     return error;
-  }
-
-  private resultReceiverText(expr: Expr): string {
-    if (expr.kind == ExprKind.Name && !expr.name.startsWith(kHiddenMark)) {
-      return expr.name;
-    }
-
-    return kResultPlaceholder;
-  }
-
-  private halfParam(half: Type): Type {
-    if (half.kind == TypeKind.Void) {
-      return this.store.plain(TypeKind.Undefined);
-    }
-
-    return half;
   }
 
   private resultMethodCall(
@@ -144,7 +126,11 @@ partial class ExpressionTypes {
 
     const count = expr.args.length;
     if (count != method.count) {
-      const word = this.argumentCountText(method.count, method.count, false);
+      const word = this.calls.argumentCountText(
+        method.count,
+        method.count,
+        false,
+      );
 
       this.report(module, member.loc, Code.ArgumentCount, {
         word,
@@ -177,9 +163,9 @@ partial class ExpressionTypes {
     }
 
     const isOnError = name == "mapErr" || name == "orElse" || name == "orTee";
-    const half = this.resultHalf(result, isOnError);
+    const half = this.results.resultHalf(result, isOnError);
     const isTee = name == "andTee" || name == "orTee";
-    const hint = this.resultCallbackHint(name, wanted, isOnError);
+    const hint = this.results.resultCallbackHint(name, wanted, isOnError);
     const returned = this.resultCallback(
       first,
       half,
@@ -195,56 +181,6 @@ partial class ExpressionTypes {
     return this.resultCallTyped(name, first, result, returned, module);
   }
 
-  private resultHalf(result: ResultType, isOnError: boolean): Type {
-    if (isOnError) {
-      return result.error;
-    }
-
-    return result.value;
-  }
-
-  private resultCallbackHint(
-    name: string,
-    wanted: Type | undefined,
-    isOnError: boolean,
-  ): Type | undefined {
-    const goal = this.resultWanted(wanted);
-    if (goal == undefined || goal.kind != TypeKind.Result) {
-      return undefined;
-    }
-    if (name == "andThen" || name == "orElse") {
-      return goal;
-    }
-    if (name != "map" && name != "mapErr") {
-      return undefined;
-    }
-
-    const half = this.resultHalf(goal, isOnError);
-    const base = this.types.definedType(half);
-    const isShaped =
-      base.kind == TypeKind.Object ||
-      base.kind == TypeKind.Result ||
-      base.kind == TypeKind.Array;
-    if (!isShaped) {
-      return undefined;
-    }
-
-    return half;
-  }
-
-  private resultWanted(wanted: Type | undefined): Type | undefined {
-    if (wanted == undefined || wanted.kind == TypeKind.Error) {
-      return undefined;
-    }
-
-    const defined = this.types.definedType(wanted);
-    if (defined.kind == TypeKind.Error) {
-      return undefined;
-    }
-
-    return defined;
-  }
-
   private resultCallback(
     arg: Expr,
     half: Type,
@@ -254,8 +190,8 @@ partial class ExpressionTypes {
     module: int,
   ): Type | undefined {
     const isFunction = arg.kind == ExprKind.Function;
-    const params = [{ type: this.halfParam(half), optional: false }];
-    const result = this.callbackResult(isFunction, hint, isTee);
+    const params = [{ type: this.results.halfParam(half), optional: false }];
+    const result = this.results.callbackResult(isFunction, hint, isTee);
     const wanted = this.store.functionOf({ params, rest: false, result });
     const typed = this.typed(arg, wanted, module);
     if (typed.kind == TypeKind.Function) {
@@ -269,21 +205,6 @@ partial class ExpressionTypes {
     }
 
     return undefined;
-  }
-
-  private callbackResult(
-    isFunction: boolean,
-    hint: Type | undefined,
-    isTee: boolean,
-  ): Type {
-    if (isTee) {
-      return this.store.plain(TypeKind.Void);
-    }
-    if (isFunction && hint != undefined) {
-      return hint;
-    }
-
-    return this.store.plain(TypeKind.Error);
   }
 
   private resultCallTyped(
@@ -373,19 +294,11 @@ partial class ExpressionTypes {
       this.report(module, arg.loc, Code.ResultCallbackNotResult, {
         word: name,
         first: this.text.of(returned),
-        place: this.mapHint(name == "andThen"),
+        place: this.results.mapHint(name == "andThen"),
       });
     }
 
     return this.store.plain(TypeKind.Error);
-  }
-
-  private mapHint(isAndThen: boolean): string {
-    if (isAndThen) {
-      return "; to change the value, use 'map'";
-    }
-
-    return "";
   }
 
   private resultHalfJoin(first: Type, second: Type): Type | undefined {
@@ -399,7 +312,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const joined = this.unionUnify(first, second);
+    const joined = this.unifier.unionUnify(first, second);
     if (joined == undefined || joined.kind == TypeKind.Error) {
       return undefined;
     }
@@ -431,13 +344,13 @@ partial class ExpressionTypes {
     const value = result.value;
     const isGiving =
       value.kind != TypeKind.Never && value.kind != TypeKind.Void;
-    const hint = this.givingHint(isGiving, value);
+    const hint = this.results.givingHint(isGiving, value);
     const other = this.typed(arg, hint, module);
     if (other.kind == TypeKind.Error) {
       return other;
     }
 
-    const joined = this.unwrapJoin(value, other);
+    const joined = this.results.unwrapJoin(value, other);
     if (joined == undefined) {
       this.report(module, arg.loc, Code.ResultUnwrapOrTypes, {
         first: this.text.of(value),
@@ -445,30 +358,6 @@ partial class ExpressionTypes {
       });
 
       return this.store.plain(TypeKind.Error);
-    }
-
-    return joined;
-  }
-
-  private givingHint(isGiving: boolean, value: Type): Type | undefined {
-    if (isGiving) {
-      return value;
-    }
-
-    return undefined;
-  }
-
-  private unwrapJoin(value: Type, other: Type): Type | undefined {
-    if (other.kind == TypeKind.Void) {
-      return undefined;
-    }
-    if (value.kind == TypeKind.Never) {
-      return other;
-    }
-
-    const joined = this.unionUnify(value, other);
-    if (joined == undefined || joined.kind == TypeKind.Error) {
-      return undefined;
     }
 
     return joined;
@@ -487,8 +376,8 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    const goal = this.resultWanted(wanted);
-    const both = this.matchGoal(goal);
+    const goal = this.results.resultWanted(wanted);
+    const both = this.results.matchGoal(goal);
     const first = this.resultCallback(
       onOk,
       result.value,
@@ -515,14 +404,6 @@ partial class ExpressionTypes {
     return this.matchJoined(member, first, second, module);
   }
 
-  private matchGoal(goal: Type | undefined): Type | undefined {
-    if (goal == undefined || goal.kind == TypeKind.Void) {
-      return undefined;
-    }
-
-    return goal;
-  }
-
   private matchJoined(
     member: MemberExpr,
     first: Type,
@@ -535,7 +416,11 @@ partial class ExpressionTypes {
       return first;
     }
 
-    const joined = this.matchUnion(first, second, isFirstVoid || isSecondVoid);
+    const joined = this.results.matchUnion(
+      first,
+      second,
+      isFirstVoid || isSecondVoid,
+    );
     if (joined == undefined) {
       this.report(module, member.loc, Code.ResultMatchTypes, {
         first: this.text.of(first),
@@ -543,23 +428,6 @@ partial class ExpressionTypes {
       });
 
       return this.store.plain(TypeKind.Error);
-    }
-
-    return joined;
-  }
-
-  private matchUnion(
-    first: Type,
-    second: Type,
-    hasVoid: boolean,
-  ): Type | undefined {
-    if (hasVoid) {
-      return undefined;
-    }
-
-    const joined = this.unionUnify(first, second);
-    if (joined == undefined || joined.kind == TypeKind.Error) {
-      return undefined;
     }
 
     return joined;

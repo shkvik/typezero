@@ -38,7 +38,7 @@ partial class ExpressionTypes {
     const count = expr.args.length;
     if (count > 1) {
       this.report(module, callee.loc, Code.ArgumentCount, {
-        word: this.argumentCountText(0, 1, false),
+        word: this.calls.argumentCountText(0, 1, false),
         other: `${count}`,
       });
 
@@ -47,7 +47,7 @@ partial class ExpressionTypes {
 
     const typeArgs = callee.typeArgs;
     if (typeArgs.length == 0) {
-      const goal = this.resultGoal(wanted);
+      const goal = this.results.resultGoal(wanted);
 
       return this.halfValueTyped(expr, callee, goal, false, module);
     }
@@ -65,19 +65,6 @@ partial class ExpressionTypes {
     }
 
     return this.halfValueTyped(expr, callee, written, true, module);
-  }
-
-  private resultGoal(wanted: Type | undefined): ResultType | undefined {
-    if (wanted == undefined) {
-      return undefined;
-    }
-
-    const defined = this.types.definedType(wanted);
-    if (defined.kind != TypeKind.Result) {
-      return undefined;
-    }
-
-    return defined;
   }
 
   private writtenResult(callee: NameExpr, module: int): ResultType | undefined {
@@ -116,15 +103,19 @@ partial class ExpressionTypes {
     const isOk = callee.name == "ok";
     const arg = expr.args[0]?.expr;
     if (arg == undefined) {
-      return this.madeResult(isOk, this.store.plain(TypeKind.Void), goal);
+      return this.results.madeResult(
+        isOk,
+        this.store.plain(TypeKind.Void),
+        goal,
+      );
     }
 
-    const half = this.goalHalf(goal, isOk);
+    const half = this.results.goalHalf(goal, isOk);
     const isHinted =
       half != undefined &&
       half.kind != TypeKind.Never &&
       half.kind != TypeKind.Void;
-    const hint = this.halfHint(isHinted, half);
+    const hint = this.results.halfHint(isHinted, half);
     const given = this.typed(arg, hint, module);
     if (given.kind == TypeKind.Void) {
       this.report(module, arg.loc, Code.OkErrVoidValue, { word: callee.name });
@@ -135,63 +126,14 @@ partial class ExpressionTypes {
       return given;
     }
     if (half != undefined && isHinted && this.relation.converts(given, half)) {
-      return this.madeResult(isOk, half, goal);
+      return this.results.madeResult(isOk, half, goal);
     }
     if (half != undefined && isWritten) {
       this.coerce(arg, given, half, module, kNoPlace);
 
-      return this.madeResult(isOk, half, goal);
+      return this.results.madeResult(isOk, half, goal);
     }
 
-    return this.madeResult(isOk, given, goal);
-  }
-
-  private goalHalf(
-    goal: ResultType | undefined,
-    isOk: boolean,
-  ): Type | undefined {
-    if (goal == undefined) {
-      return undefined;
-    }
-    if (isOk) {
-      return goal.value;
-    }
-
-    return goal.error;
-  }
-
-  private halfHint(
-    isHinted: boolean,
-    half: Type | undefined,
-  ): Type | undefined {
-    if (isHinted) {
-      return half;
-    }
-
-    return undefined;
-  }
-
-  private madeResult(
-    isOk: boolean,
-    given: Type,
-    goal: ResultType | undefined,
-  ): Type {
-    const other = this.otherGoalHalf(goal, isOk);
-    if (isOk) {
-      return this.store.resultOf(given, other);
-    }
-
-    return this.store.resultOf(other, given);
-  }
-
-  private otherGoalHalf(goal: ResultType | undefined, isOk: boolean): Type {
-    if (goal == undefined) {
-      return this.store.plain(TypeKind.Never);
-    }
-    if (isOk) {
-      return goal.error;
-    }
-
-    return goal.value;
+    return this.results.madeResult(isOk, given, goal);
   }
 }

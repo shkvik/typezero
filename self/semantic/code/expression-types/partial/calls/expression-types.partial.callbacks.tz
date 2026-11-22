@@ -9,7 +9,6 @@ import {
   MemberExpr,
   NameExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
-import { StmtKind } from "../../../../../program/ast/types/ast.types.statements.tz";
 import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
 import {
   FunctionType,
@@ -18,13 +17,11 @@ import {
 } from "../../../../../program/type/types/type.types.tz";
 import {
   kArgumentsName,
-  kCallbackMethods,
   kCallbackOrdinals,
   kFunctionValueNames,
   kFunctionValueStatics,
   kHolderNames,
   kOkValueNames,
-  kUriValueNames,
 } from "../../const/expression-types.const.tz";
 import {
   ArrayCallback,
@@ -32,50 +29,6 @@ import {
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private callbackPlan(
-    expr: CallExpr,
-    member: MemberExpr,
-    object: Type,
-  ): CallbackPlan | undefined {
-    if (object.kind != TypeKind.Array) {
-      return undefined;
-    }
-
-    const kind = kCallbackMethods.get(member.name);
-    if (kind == undefined) {
-      return undefined;
-    }
-    if (kind == ArrayCallback.Compare && expr.args.length == 0) {
-      return undefined;
-    }
-
-    const params = this.callbackParams(kind, object);
-
-    return { kind, member, array: object, params, isValue: false };
-  }
-
-  private callbackParams(kind: ArrayCallback, array: Type): Type[] {
-    const item = this.elementOf(array);
-    const index = this.store.integer(64, false);
-
-    switch (kind) {
-      case ArrayCallback.Compare:
-        return [item, item];
-      case ArrayCallback.Reduce:
-        return [];
-      default:
-        return [item, index, array];
-    }
-  }
-
-  private elementOf(array: Type): Type {
-    if (array.kind != TypeKind.Array) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    return array.item;
-  }
-
   private callbackArgumentsCheck(
     expr: CallExpr,
     plan: CallbackPlan,
@@ -108,7 +61,7 @@ partial class ExpressionTypes {
     const word = member.name;
     const count = expr.args.length;
     const isReduce = plan.kind == ArrayCallback.Reduce;
-    const most = this.callbackArgumentLimit(isReduce);
+    const most = this.callbacks.callbackArgumentLimit(isReduce);
     const second = expr.args[1]?.expr;
     if (count == 2 && !isReduce && second != undefined) {
       return this.report(module, second.loc, Code.CallbackThisArg, { word });
@@ -117,20 +70,12 @@ partial class ExpressionTypes {
       return;
     }
 
-    const wanted = this.argumentCountText(1, most, false);
+    const wanted = this.calls.argumentCountText(1, most, false);
 
     this.report(module, member.loc, Code.ArgumentCount, {
       word: wanted,
       other: `${count}`,
     });
-  }
-
-  private callbackArgumentLimit(isReduce: boolean): int {
-    if (isReduce) {
-      return 2;
-    }
-
-    return 1;
   }
 
   private functionValueCheck(
@@ -144,8 +89,8 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const offered = Math.min(most, this.offeredCount(plan.kind));
-    const primary = this.primaryCount(plan.kind);
+    const offered = Math.min(most, this.callbacks.offeredCount(plan.kind));
+    const primary = this.callbacks.primaryCount(plan.kind);
     if (offered <= primary) {
       return true;
     }
@@ -154,10 +99,10 @@ partial class ExpressionTypes {
 
     this.report(module, arg.loc, Code.CallbackValueExtra, {
       word: name,
-      other: this.callbackArgumentName(plan.kind, primary),
+      other: this.callbacks.callbackArgumentName(plan.kind, primary),
       first: kCallbackOrdinals[primary] ?? "",
       second: method,
-      place: this.callbackShapeText(plan.kind),
+      place: this.callbacks.callbackShapeText(plan.kind),
     });
 
     return true;
@@ -194,47 +139,6 @@ partial class ExpressionTypes {
     return use != undefined && use.symbol == undefined;
   }
 
-  private offeredCount(kind: ArrayCallback): int {
-    switch (kind) {
-      case ArrayCallback.Compare:
-        return 2;
-      case ArrayCallback.Reduce:
-        return 4;
-      default:
-        return 3;
-    }
-  }
-
-  private primaryCount(kind: ArrayCallback): int {
-    if (kind == ArrayCallback.Compare || kind == ArrayCallback.Reduce) {
-      return 2;
-    }
-
-    return 1;
-  }
-
-  private callbackArgumentName(kind: ArrayCallback, index: int): string {
-    const reduceNames = ["accumulator", "value", "index", "array"];
-    const names = ["value", "index", "array"];
-
-    if (kind == ArrayCallback.Reduce) {
-      return reduceNames[index] ?? "array";
-    }
-
-    return names[index] ?? "array";
-  }
-
-  private callbackShapeText(kind: ArrayCallback): string {
-    switch (kind) {
-      case ArrayCallback.Reduce:
-        return "(accumulator, value, index, array)";
-      case ArrayCallback.Compare:
-        return "(a, b)";
-      default:
-        return "(value, index, array)";
-    }
-  }
-
   private callbackResultCheck(
     expr: CallExpr,
     plan: CallbackPlan,
@@ -261,31 +165,15 @@ partial class ExpressionTypes {
     }
     const kind = this.types.definedType(result).kind;
     if (kind == TypeKind.Promise) {
-      const loc = this.conciseValueLoc(arg);
+      const loc = this.callbacks.conciseValueLoc(arg);
 
       this.report(module, loc, Code.CallbackPromiseDropped, kNoDetails);
     }
     if (kind == TypeKind.Result && arg.kind == ExprKind.Function) {
-      const loc = this.conciseValueLoc(arg);
+      const loc = this.callbacks.conciseValueLoc(arg);
 
       this.report(module, loc, Code.CallbackResultDropped, kNoDetails);
     }
-  }
-
-  private conciseValueLoc(arg: Expr): int {
-    if (arg.kind != ExprKind.Function || !arg.fn.concise) {
-      return arg.loc;
-    }
-
-    const first = arg.fn.body?.body[0];
-    if (first == undefined) {
-      return arg.loc;
-    }
-    if (first.kind != StmtKind.Return) {
-      return arg.loc;
-    }
-
-    return first.value?.loc ?? arg.loc;
   }
 
   private literalCallbackCheck(
@@ -312,27 +200,16 @@ partial class ExpressionTypes {
     if (isMapping && isEmpty) {
       return this.report(module, arg.loc, Code.CallbackNoValue, { word });
     }
-    if (plan.kind != ArrayCallback.Compare || this.isNumberResult(result)) {
+    if (
+      plan.kind != ArrayCallback.Compare ||
+      this.callbacks.isNumberResult(result)
+    ) {
       return;
     }
 
     const found = this.text.of(result);
 
     this.report(module, arg.loc, Code.CompareNotNumber, { word: found });
-  }
-
-  private isNumberResult(result: Type): boolean {
-    switch (result.kind) {
-      case TypeKind.Int:
-      case TypeKind.Double:
-      case TypeKind.Decimal:
-      case TypeKind.Error:
-        return true;
-      case TypeKind.Literal:
-        return this.truth.isNumberMember(result);
-      default:
-        return false;
-    }
   }
 
   private passedFunctionCheck(
@@ -367,9 +244,9 @@ partial class ExpressionTypes {
       return;
     }
 
-    const least = this.requiredCallbackParams(type);
+    const least = this.callbacks.requiredCallbackParams(type);
     if (least > plan.params.length) {
-      const passes = this.argumentCountText(
+      const passes = this.calls.argumentCountText(
         plan.params.length,
         plan.params.length,
         false,
@@ -420,8 +297,8 @@ partial class ExpressionTypes {
     const method = plan.member.name;
     const params = type.shape.params;
     const passed = Math.min(params.length, plan.params.length);
-    const primary = this.primaryCount(plan.kind);
-    const least = this.requiredCallbackParams(type);
+    const primary = this.callbacks.primaryCount(plan.kind);
+    const least = this.callbacks.requiredCallbackParams(type);
 
     for (let index = 0; index < passed; index++) {
       const param = params[index];
@@ -447,10 +324,10 @@ partial class ExpressionTypes {
       if (index >= primary && index >= least) {
         this.report(module, arg.loc, Code.CallbackExtraParam, {
           word: name,
-          other: this.callbackArgumentName(plan.kind, index),
+          other: this.callbacks.callbackArgumentName(plan.kind, index),
           first: this.optionalParamName(arg, index, module),
           second: method,
-          place: this.callbackShapeText(plan.kind),
+          place: this.callbacks.callbackShapeText(plan.kind),
         });
 
         return true;
@@ -479,24 +356,6 @@ partial class ExpressionTypes {
     return ` '${param.name}'`;
   }
 
-  private requiredCallbackParams(type: FunctionType): int {
-    let least = 0;
-
-    for (const param of type.shape.params) {
-      if (param.optional) {
-        break;
-      }
-
-      least += 1;
-    }
-
-    if (type.shape.rest && least > 0) {
-      return least - 1;
-    }
-
-    return least;
-  }
-
   private passedResultCheck(
     arg: Expr,
     type: FunctionType,
@@ -511,7 +370,7 @@ partial class ExpressionTypes {
       return this.droppedResultCheck(arg, result, name, method, module);
     }
 
-    const wanted = this.callbackWanted(plan.kind);
+    const wanted = this.callbacks.callbackWanted(plan.kind);
     if (wanted == undefined || result == wanted) {
       return;
     }
@@ -525,18 +384,6 @@ partial class ExpressionTypes {
       other: name,
       second: this.text.of(result),
     });
-  }
-
-  private callbackWanted(kind: ArrayCallback): Type | undefined {
-    switch (kind) {
-      case ArrayCallback.Filter:
-      case ArrayCallback.Find:
-      case ArrayCallback.FindIndex:
-      case ArrayCallback.Test:
-        return this.store.plain(TypeKind.Boolean);
-      default:
-        return undefined;
-    }
   }
 
   private droppedResultCheck(
@@ -567,7 +414,9 @@ partial class ExpressionTypes {
   }
 
   private isLooseValue(expr: Expr, wanted: Type | undefined): boolean {
-    return !this.isFunctionWanted(wanted) && !this.argumentExprs.has(expr);
+    return (
+      !this.callbacks.isFunctionWanted(wanted) && !this.argumentExprs.has(expr)
+    );
   }
 
   private builtinValueCheck(
@@ -591,11 +440,14 @@ partial class ExpressionTypes {
 
       return true;
     }
-    if (!kFunctionValueNames.has(word) || !this.isLooseBuiltin(word)) {
+    if (
+      !kFunctionValueNames.has(word) ||
+      !this.callbacks.isLooseBuiltin(word)
+    ) {
       return false;
     }
 
-    const first = this.builtinResultText(word);
+    const first = this.callbacks.builtinResultText(word);
 
     this.report(module, expr.loc, Code.BuiltinAsValue, { word, first });
 
@@ -660,18 +512,6 @@ partial class ExpressionTypes {
     });
   }
 
-  private isLooseBuiltin(name: string): boolean {
-    return name.startsWith("parse") || kUriValueNames.includes(name);
-  }
-
-  private builtinResultText(name: string): string {
-    if (kUriValueNames.includes(name)) {
-      return "string";
-    }
-
-    return "double";
-  }
-
   private isHolderFunction(
     expr: MemberExpr,
     holder: string,
@@ -688,14 +528,6 @@ partial class ExpressionTypes {
     this.quiet -= 1;
 
     return type.kind == TypeKind.Function;
-  }
-
-  private isFunctionWanted(wanted: Type | undefined): boolean {
-    if (wanted == undefined) {
-      return false;
-    }
-
-    return this.types.definedType(wanted).kind == TypeKind.Function;
   }
 
   private holderValueCheck(

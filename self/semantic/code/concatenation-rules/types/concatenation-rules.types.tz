@@ -1,0 +1,28 @@
+import {
+  BinaryExpr,
+  Expr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Type } from "../../../../program/type/types/type.types.tz";
+
+export type ConcatLink = {
+  readonly binary: BinaryExpr;
+  readonly left: Type;
+  readonly right: Type;
+  readonly type: Type;
+};
+
+export type ConcatPart = {
+  readonly expr: Expr;
+  readonly text: string;
+  readonly type: Type;
+};
+
+export type TemplatePiece = {
+  readonly text: string;
+  readonly value?: string;
+};
+
+export type TemplateText = {
+  readonly text: string;
+  readonly only: string;
+};

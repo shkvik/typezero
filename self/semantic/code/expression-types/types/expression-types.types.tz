@@ -1,8 +1,6 @@
 import { Code } from "../../../../diagnostic/code.tz";
 import { SourceError } from "../../../../diagnostic/types/message.types.tz";
 import {
-  BinaryExpr,
-  BinaryOp,
   CallArgument,
   CallExpr,
   Expr,
@@ -31,7 +29,6 @@ import {
   SymbolKind,
 } from "../../../../program/scopes/types/scopes.types.tz";
 import {
-  DictKind,
   FunctionParameter,
   FunctionShape,
   FunctionType,
@@ -274,23 +271,6 @@ export type VariableDoor = {
   texts?: string[];
 };
 
-export type IntLimit = {
-  readonly bits: int;
-  readonly unsigned: boolean;
-  readonly highest: uint64;
-  readonly lowest: uint64;
-};
-
-export type Bound = {
-  readonly value: decimal;
-  readonly text: string;
-};
-
-export type Interval = {
-  readonly low: Bound;
-  high: Bound;
-};
-
 export type ArrayDraft = {
   readonly types: Map<int, Type>;
   readonly spreads: Map<int, Type>;
@@ -311,11 +291,6 @@ export type ObjectDraft = {
   deferred: boolean;
 };
 
-export type UnifyAnswer = {
-  readonly decided: boolean;
-  readonly type?: Type;
-};
-
 export type OperandPair = {
   readonly left: Type;
   readonly right: Type;
@@ -326,44 +301,6 @@ export type OperandHints = {
   readonly right?: Type;
   readonly isBitwise: boolean;
   readonly canHint: boolean;
-};
-
-export type OperandTexts = {
-  readonly left: string;
-  readonly right: string;
-};
-
-export type NumberConversion = {
-  readonly target: Type;
-  readonly isLeftConverted: boolean;
-};
-
-export type ConcatLink = {
-  readonly binary: BinaryExpr;
-  readonly left: Type;
-  readonly right: Type;
-  readonly type: Type;
-};
-
-export type ConcatPart = {
-  readonly expr: Expr;
-  readonly text: string;
-  readonly type: Type;
-};
-
-export type TemplatePiece = {
-  readonly text: string;
-  readonly value?: string;
-};
-
-export type TemplateText = {
-  readonly text: string;
-  readonly only: string;
-};
-
-export type OperatorText = {
-  readonly op: BinaryOp;
-  readonly text: string;
 };
 
 export type UnaryText = {
@@ -389,12 +326,6 @@ export type ComparedSide = {
 export type ComparedPair = {
   readonly left: ComparedSide;
   readonly right: ComparedSide;
-};
-
-export type DictText = {
-  readonly dict: DictKind;
-  readonly kind: string;
-  readonly shown: string;
 };
 
 export type InitFrame = {
@@ -538,11 +469,6 @@ export type DateStatic = {
 export type DateSetter = {
   readonly name: string;
   readonly first: int;
-};
-
-export type CarriedDay = {
-  readonly month: int;
-  readonly day: int;
 };
 
 export enum DecoratorPlace {

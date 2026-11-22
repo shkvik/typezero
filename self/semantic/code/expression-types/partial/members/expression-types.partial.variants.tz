@@ -12,11 +12,6 @@ import {
   TypeKind,
   UnionType,
 } from "../../../../../program/type/types/type.types.tz";
-import {
-  kChainPlaceholder,
-  kDot,
-  kIdentifierMarks,
-} from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
   private variantMember(expr: MemberExpr, union: UnionType, module: int): Type {
@@ -69,7 +64,7 @@ partial class ExpressionTypes {
     if (head != undefined) {
       const word = expr.name;
       const first = this.text.of(union);
-      const other = this.typeOfName(head);
+      const other = this.typeOfs.typeOfName(head);
 
       this.report(module, expr.loc, Code.UnionValueMember, {
         word,
@@ -122,7 +117,7 @@ partial class ExpressionTypes {
         return undefined;
       }
 
-      return this.fieldWanted(field);
+      return this.objects.fieldWanted(field);
     }
     if (part.kind != TypeKind.Instance) {
       return undefined;
@@ -203,7 +198,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const field = this.chainField(expr.object, tagName);
+    const field = this.objects.chainField(expr.object, tagName);
     const shown = this.text.of(tag);
 
     return `, e.g. 'if (${field} == ${shown})'`;
@@ -213,7 +208,7 @@ partial class ExpressionTypes {
     return union.parts.every((part) => {
       const type = this.partField(part, tagName);
 
-      return type != undefined && this.isLiteralSet(type);
+      return type != undefined && this.objects.isLiteralSet(type);
     });
   }
 
@@ -246,20 +241,16 @@ partial class ExpressionTypes {
     for (const part of union.parts) {
       const isLacking = this.partField(part, expr.name) == undefined;
       const set = this.partField(part, tagName);
-      if (isLacking && set != undefined && this.holdsLiteral(set, tag)) {
+      if (
+        isLacking &&
+        set != undefined &&
+        this.objects.holdsLiteral(set, tag)
+      ) {
         return false;
       }
     }
 
     return true;
-  }
-
-  private holdsLiteral(set: Type, literal: Type): boolean {
-    if (set == literal) {
-      return true;
-    }
-
-    return set.kind == TypeKind.Union && set.parts.includes(literal);
   }
 
   private holderHint(expr: MemberExpr, union: UnionType): string {
@@ -275,51 +266,6 @@ partial class ExpressionTypes {
     }
 
     return `, e.g. 'if ("${expr.name}" in x)'`;
-  }
-
-  private chainField(object: Expr, field: string): string {
-    const chain = this.chainText(object) ?? kChainPlaceholder;
-
-    if (this.isPlainName(field)) {
-      return chain + kDot + field;
-    }
-
-    return `${chain}["${field}"]`;
-  }
-
-  private chainText(expr: Expr): string | undefined {
-    if (expr.kind == ExprKind.Name) {
-      return expr.name;
-    }
-    if (expr.kind != ExprKind.Member || expr.optional) {
-      return undefined;
-    }
-
-    const object = this.chainText(expr.object);
-    if (object == undefined) {
-      return undefined;
-    }
-
-    return object + kDot + expr.name;
-  }
-
-  private isPlainName(field: string): boolean {
-    const head = field.slice(0, 1);
-    const isDigit = head >= "0" && head <= "9";
-    if (field == "" || isDigit) {
-      return false;
-    }
-
-    for (const unit of field) {
-      const isLetter =
-        (unit >= "a" && unit <= "z") || (unit >= "A" && unit <= "Z");
-      const isDecimal = unit >= "0" && unit <= "9";
-      if (!isLetter && !isDecimal && !kIdentifierMarks.includes(unit)) {
-        return false;
-      }
-    }
-
-    return true;
   }
 
   private commonBaseWith(union: UnionType, name: string): Type | undefined {
@@ -374,7 +320,10 @@ partial class ExpressionTypes {
   }
 
   private isLackingMethod(part: Type, name: string): boolean {
-    if (part.kind != TypeKind.Instance || this.isLibraryModule(part.module)) {
+    if (
+      part.kind != TypeKind.Instance ||
+      this.modules.isLibraryModule(part.module)
+    ) {
       return false;
     }
 
@@ -396,7 +345,9 @@ partial class ExpressionTypes {
       return;
     }
 
-    const having = parts.filter((part) => this.hasFieldNamed(part, name));
+    const having = parts.filter((part) =>
+      this.objects.hasFieldNamed(part, name),
+    );
     const first = this.text.of(union);
     if (having.length == parts.length) {
       this.report(module, expr.loc, Code.InUnionTrue, { word: name, first });
@@ -404,14 +355,6 @@ partial class ExpressionTypes {
     if (having.length == 0) {
       this.report(module, expr.loc, Code.InUnionFalse, { word: name, first });
     }
-  }
-
-  private hasFieldNamed(part: Type, name: string): boolean {
-    if (part.kind != TypeKind.Object) {
-      return false;
-    }
-
-    return part.fields.some((field) => field.name == name);
   }
 
   private unionTargetCheck(target: Expr, module: int): boolean {

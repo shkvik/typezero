@@ -47,7 +47,7 @@ partial class ExpressionTypes {
       parts.push(part);
     }
 
-    if (this.sharedTag(object) != undefined) {
+    if (this.mismatches.sharedTag(object) != undefined) {
       return undefined;
     }
 
@@ -113,7 +113,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const type = this.fieldWanted(field);
+    const type = this.objects.fieldWanted(field);
     if (type.kind != TypeKind.Function) {
       this.report(module, member.loc, Code.UnionFieldNotFunction, {
         word: receiver,

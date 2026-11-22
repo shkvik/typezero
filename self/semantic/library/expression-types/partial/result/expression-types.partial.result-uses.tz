@@ -1,11 +1,4 @@
 import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
-import { Code } from "../../../../../diagnostic/code.tz";
-import { ExprKind } from "../../../../../program/ast/types/ast.types.expressions.tz";
-import {
-  Type,
-  TypeKind,
-} from "../../../../../program/type/types/type.types.tz";
-import { ValueRecord } from "../../../../code/expression-types/types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private unreadResultsCheck(module: int): void {
@@ -16,7 +9,7 @@ partial class ExpressionTypes {
 
     this.resultsChecked.add(module);
 
-    const reads = this.readLocs(record);
+    const reads = this.results.readLocs(record);
 
     for (const [loc, variable] of record.variables) {
       const door = this.doors.get(`${module} ${loc}`);
@@ -26,49 +19,10 @@ partial class ExpressionTypes {
         continue;
       }
 
-      const code = this.resultHoldCode(door.type);
+      const code = this.results.resultHoldCode(door.type);
       if (code != undefined) {
         this.report(module, loc, code, { word: variable.decl.name });
       }
     }
-  }
-
-  private readLocs(record: ValueRecord): Set<int> {
-    const written = new Set<int>();
-
-    for (const change of record.changes) {
-      const target = this.changedTarget(change);
-      if (target != undefined && target.kind == ExprKind.Name) {
-        written.add(target.loc);
-      }
-    }
-
-    const reads = new Set<int>();
-
-    for (const use of record.uses.values()) {
-      const symbol = use.symbol;
-      if (symbol != undefined && !use.isType && !written.has(use.loc)) {
-        reads.add(symbol.loc);
-      }
-    }
-
-    return reads;
-  }
-
-  private resultHoldCode(type: Type): Code | undefined {
-    const held = this.types.definedType(type);
-    if (held.kind == TypeKind.Result) {
-      return Code.ResultUnchecked;
-    }
-    if (held.kind != TypeKind.Promise) {
-      return undefined;
-    }
-
-    const value = this.types.definedType(held.value);
-    if (value.kind == TypeKind.Result) {
-      return Code.ResultPromiseUnawaited;
-    }
-
-    return undefined;
   }
 }

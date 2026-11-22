@@ -1,0 +1,164 @@
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { CallKind } from "../../code/expression-types/types/expression-types.types.tz";
+import { kPromisePlaceholder } from "../../code/statement-rules/const/statement-rules.const.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { ModuleQuestions } from "../../declaration/module-questions/module-questions.tz";
+import { SourceTexts } from "../../code/source-texts/source-texts.tz";
+import { MismatchRules } from "../../types/mismatch-rules/mismatch-rules.tz";
+import { kSplitName } from "./const/library-rules.const.tz";
+
+export class LibraryRules {
+  private readonly types: TypeQuestions;
+  private readonly modules: ModuleQuestions;
+  private readonly sources: SourceTexts;
+  private readonly mismatches: MismatchRules;
+
+  public constructor(
+    types: TypeQuestions,
+    modules: ModuleQuestions,
+    sources: SourceTexts,
+    mismatches: MismatchRules,
+  ) {
+    this.types = types;
+    this.modules = modules;
+    this.sources = sources;
+    this.mismatches = mismatches;
+  }
+
+  public isJsonHolder(type: Type): boolean {
+    return this.types.definedType(type).kind == TypeKind.Json;
+  }
+
+  public instanceReceiver(type: InstanceType): Type | undefined {
+    if (!this.modules.isLibraryModule(type.module)) {
+      return undefined;
+    }
+
+    return type;
+  }
+
+  public isPlainReceiver(object: Type): boolean {
+    const base = this.types.apparent(object);
+
+    switch (base.kind) {
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Array:
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Boolean:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public namespaceCode(name: string): Code | undefined {
+    switch (name) {
+      case "Math":
+      case "Number":
+        return Code.NamespaceMemberMissing;
+      case "JSON":
+        return Code.JsonMemberMissing;
+      case "Object":
+        return Code.ObjectStaticRefused;
+      case "Promise":
+        return Code.PromiseStaticRefused;
+      case "console":
+        return Code.ConsoleMemberRefused;
+      default:
+        return undefined;
+    }
+  }
+
+  public mathEndSign(word: string): string {
+    if (word == "max") {
+      return "-";
+    }
+
+    return "";
+  }
+
+  public maskOf(object: Type, method: Type): boolean[] {
+    if (object.kind == TypeKind.Dict) {
+      return [];
+    }
+
+    return this.positionsOf(method);
+  }
+
+  public receiverKind(object: Type): CallKind {
+    const base = this.types.apparent(object);
+
+    switch (base.kind) {
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Array:
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Dict:
+        return CallKind.Positional;
+      default:
+        return CallKind.Library;
+    }
+  }
+
+  public isRegexSplit(expr: CallExpr, member: MemberExpr): boolean {
+    const first = expr.args[0]?.expr;
+
+    return (
+      member.name == kSplitName &&
+      first != undefined &&
+      first.kind == ExprKind.RegexLit
+    );
+  }
+
+  public isMathNumber(type: Type): boolean {
+    return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
+  }
+
+  public mathOneHint(arg: Expr, type: Type, common: Type): string {
+    const code = this.mismatches.numberCode(type, common);
+    const word = this.sources.operandName(arg);
+    const other = this.mismatches.conversionName(common);
+    if (code == Code.ConvertExplicitly) {
+      return `; convert it explicitly: '${word}.${other}()'`;
+    }
+    if (code == Code.RoundThenConvert) {
+      return `; round it first, then convert: 'Math.trunc(${word}).${other}()' (or Math.round, Math.floor, Math.ceil)`;
+    }
+
+    return "";
+  }
+
+  public promiseHolderText(holder: Expr): string {
+    if (holder.kind == ExprKind.Name) {
+      return holder.name;
+    }
+
+    return kPromisePlaceholder;
+  }
+
+  private positionsOf(method: Type): boolean[] {
+    if (method.kind != TypeKind.Function) {
+      return [];
+    }
+
+    return method.shape.params.map((param) => {
+      const base = this.types.definedType(param.type);
+
+      return base.kind == TypeKind.Int && !base.wraps;
+    });
+  }
+}

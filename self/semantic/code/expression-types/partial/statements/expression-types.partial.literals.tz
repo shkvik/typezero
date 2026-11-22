@@ -4,21 +4,14 @@ import {
   Expr,
   ExprKind,
   NameExpr,
-  UnaryExpr,
-  UnaryOp,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import {
-  IntType,
   LiteralKind,
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import {
-  kFalseText,
-  kTrueText,
-} from "../../../../types/type-resolver/const/type-resolver.const.tables.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
-import { kIntLimits, kNullName } from "../../const/expression-types.const.tz";
+import { kNullName } from "../../const/expression-types.const.tz";
 import { LiteralValue } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
@@ -32,16 +25,16 @@ partial class ExpressionTypes {
           negative: false,
         };
       case ExprKind.FloatLit:
-        return this.plainLiteral(LiteralKind.Double, `${expr.value}`);
+        return this.literals.plainLiteral(LiteralKind.Double, `${expr.value}`);
       case ExprKind.BoolLit: {
-        const text = this.truthText(expr.value);
+        const text = this.sources.truthText(expr.value);
 
-        return this.plainLiteral(LiteralKind.Boolean, text);
+        return this.literals.plainLiteral(LiteralKind.Boolean, text);
       }
       case ExprKind.StringLit:
-        return this.plainLiteral(LiteralKind.String, expr.value);
+        return this.literals.plainLiteral(LiteralKind.String, expr.value);
       case ExprKind.Unary:
-        return this.signedLiteral(expr);
+        return this.literals.signedLiteral(expr);
       case ExprKind.Name:
         return this.doorOfName(expr, module)?.literal;
       case ExprKind.Member:
@@ -49,56 +42,6 @@ partial class ExpressionTypes {
       default:
         return undefined;
     }
-  }
-
-  private plainLiteral(kind: LiteralKind, text: string): LiteralValue {
-    return { kind, text, whole: 0, negative: false };
-  }
-
-  private truthText(value: boolean): string {
-    if (value) {
-      return kTrueText;
-    }
-
-    return kFalseText;
-  }
-
-  private signedLiteral(expr: UnaryExpr): LiteralValue | undefined {
-    const operand = expr.operand;
-    const negative = expr.op == UnaryOp.Neg;
-    if (!negative && expr.op != UnaryOp.Plus) {
-      return undefined;
-    }
-    if (operand.kind == ExprKind.FloatLit) {
-      const value = this.signedDouble(operand.value, negative);
-
-      return this.plainLiteral(LiteralKind.Double, `${value}`);
-    }
-    if (operand.kind != ExprKind.IntLit) {
-      return undefined;
-    }
-
-    const whole = operand.value;
-    const isBelow = negative && whole > 0;
-    const text = this.signedText(whole, isBelow);
-
-    return { kind: LiteralKind.Int, text, whole, negative: isBelow };
-  }
-
-  private signedDouble(value: double, negative: boolean): double {
-    if (negative) {
-      return -value;
-    }
-
-    return value;
-  }
-
-  private signedText(whole: uint64, negative: boolean): string {
-    if (negative) {
-      return `-${whole}`;
-    }
-
-    return `${whole}`;
   }
 
   private literalTyped(
@@ -117,19 +60,24 @@ partial class ExpressionTypes {
 
     switch (literal.kind) {
       case LiteralKind.String:
-        if (parts.some((part) => this.isTextual(part))) {
+        if (parts.some((part) => this.literals.isTextual(part))) {
           return this.store.literal(LiteralKind.String, literal.text);
         }
 
         return base;
       case LiteralKind.Boolean:
-        if (this.hasLiteral(parts, LiteralKind.Boolean)) {
+        if (this.literals.hasLiteral(parts, LiteralKind.Boolean)) {
           return this.store.literal(LiteralKind.Boolean, literal.text);
         }
 
         return base;
       case LiteralKind.Double: {
-        const fraction = this.fractionTyped(expr, literal, parts, base);
+        const fraction = this.literals.fractionTyped(
+          expr,
+          literal,
+          parts,
+          base,
+        );
         if (fraction.kind == TypeKind.Decimal) {
           this.decimalRangeCheck(expr, module);
         }
@@ -159,32 +107,12 @@ partial class ExpressionTypes {
       case LiteralKind.Double:
         return this.store.plain(TypeKind.Double);
       default:
-        if (int.kind == TypeKind.Int && this.fits(literal, int)) {
+        if (int.kind == TypeKind.Int && this.literals.fits(literal, int)) {
           return int;
         }
 
         return this.store.plain(TypeKind.Double);
     }
-  }
-
-  private fractionTyped(
-    expr: Expr,
-    literal: LiteralValue,
-    parts: Type[],
-    base: Type,
-  ): Type {
-    if (this.hasLiteral(parts, LiteralKind.Double)) {
-      return this.store.literal(LiteralKind.Double, literal.text);
-    }
-    if (expr.kind == ExprKind.Name) {
-      return base;
-    }
-
-    const target = parts.find(
-      (part) => part.kind == TypeKind.Double || part.kind == TypeKind.Decimal,
-    );
-
-    return target ?? base;
   }
 
   private wholeTyped(
@@ -195,8 +123,8 @@ partial class ExpressionTypes {
     module: int,
   ): Type {
     const exact = this.store.literal(LiteralKind.Int, literal.text);
-    const hasWholes = this.hasLiteral(parts, LiteralKind.Int);
-    const hasDoubles = this.hasLiteral(parts, LiteralKind.Double);
+    const hasWholes = this.literals.hasLiteral(parts, LiteralKind.Int);
+    const hasDoubles = this.literals.hasLiteral(parts, LiteralKind.Double);
     const isListed = parts.includes(exact) || !hasDoubles;
     const hasLiterals = hasWholes || hasDoubles;
     if (expr.kind == ExprKind.Name && hasLiterals) {
@@ -209,11 +137,11 @@ partial class ExpressionTypes {
       return this.store.literal(LiteralKind.Double, literal.text);
     }
 
-    const target = parts.find((part) => this.isNumber(part));
+    const target = parts.find((part) => this.types.isNumber(part));
     if (target == undefined) {
       return base;
     }
-    if (target.kind != TypeKind.Int || this.fits(literal, target)) {
+    if (target.kind != TypeKind.Int || this.literals.fits(literal, target)) {
       return target;
     }
     if (expr.kind == ExprKind.Name) {
@@ -221,81 +149,11 @@ partial class ExpressionTypes {
     }
 
     const word = this.text.of(target);
-    const loc = this.literalPlace(expr);
+    const loc = this.literals.literalPlace(expr);
 
     this.report(module, loc, Code.IntegerLiteralTooBig, { word });
 
     return target;
-  }
-
-  private literalPlace(expr: Expr): int {
-    if (expr.kind == ExprKind.Unary) {
-      return expr.operand.loc;
-    }
-
-    return expr.loc;
-  }
-
-  private fits(literal: LiteralValue, target: IntType): boolean {
-    const limit = kIntLimits.find(
-      (row) => row.bits == target.bits && row.unsigned == target.unsigned,
-    );
-    if (limit == undefined) {
-      return false;
-    }
-    if (literal.negative) {
-      return literal.whole <= limit.lowest;
-    }
-
-    return literal.whole <= limit.highest;
-  }
-
-  private isNumber(type: Type): boolean {
-    switch (type.kind) {
-      case TypeKind.Int:
-      case TypeKind.Double:
-      case TypeKind.Decimal:
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  private hasLiteral(parts: Type[], kind: LiteralKind): boolean {
-    return parts.some(
-      (part) => part.kind == TypeKind.Literal && part.literal == kind,
-    );
-  }
-
-  private isTextual(part: Type): boolean {
-    if (part.kind == TypeKind.Template) {
-      return true;
-    }
-
-    return part.kind == TypeKind.Literal && part.literal == LiteralKind.String;
-  }
-
-  private templated(wanted: Type | undefined): Type {
-    const text = this.store.plain(TypeKind.String);
-    const parts = this.types.definedParts(wanted ?? text);
-    if (parts.some((part) => this.isTextual(part))) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    return text;
-  }
-
-  private textChoice(texts: string[], wanted: Type): Type | undefined {
-    const parts = this.types.definedParts(wanted);
-    if (!parts.some((part) => this.isTextual(part))) {
-      return undefined;
-    }
-
-    const literals = texts.map((text) =>
-      this.store.literal(LiteralKind.String, text),
-    );
-
-    return this.store.unionOf(literals);
   }
 
   private isNullName(expr: NameExpr, module: int): boolean {

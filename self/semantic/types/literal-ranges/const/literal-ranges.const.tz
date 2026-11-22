@@ -1,0 +1,2 @@
+export const kManyLiterals = 64;
+export const kIntervalSeparator = " or ";

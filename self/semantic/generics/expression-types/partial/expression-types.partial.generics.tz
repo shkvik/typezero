@@ -19,11 +19,7 @@ import {
   TypeContext,
   TypePlace,
 } from "../../../types/type-resolver/types/type-resolver.types.tz";
-import {
-  kManyTypeArguments,
-  kNoPlace,
-  kOneTypeArgument,
-} from "../../../code/expression-types/const/expression-types.const.tz";
+import { kNoPlace } from "../../../code/expression-types/const/expression-types.const.tz";
 import {
   ArgumentForm,
   CallTarget,
@@ -39,17 +35,19 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const hasLists = target.params.some((param) => this.isListParameter(param));
+    const hasLists = target.params.some((param) =>
+      this.parts.isListParameter(param),
+    );
     const shape = target.shape;
     const isOpaque = this.hasOperationParameter(shape);
-    if (hasLists || isOpaque || this.isListRest(shape)) {
+    if (hasLists || isOpaque || this.generics.isListRest(shape)) {
       return this.store.plain(TypeKind.Error);
     }
     if (!this.isGenericArity(target, args, module)) {
       return this.store.plain(TypeKind.Error);
     }
 
-    const draft = this.genericDraft(target, args, wanted);
+    const draft = this.generics.genericDraft(target, args, wanted);
 
     if (target.typeArgs.length > 0) {
       return this.explicitCall(draft, module);
@@ -64,31 +62,14 @@ partial class ExpressionTypes {
     return this.boundCall(draft, module);
   }
 
-  private isListRest(shape: FunctionShape): boolean {
-    const last = shape.params[shape.params.length - 1];
-
-    return shape.rest && last != undefined && last.type.kind != TypeKind.Array;
-  }
-
-  private genericCallTarget(target: GenericTarget): CallTarget {
-    const shape = target.shape;
-
-    return {
-      params: shape.params,
-      rest: shape.rest,
-      loc: target.loc,
-      isLenient: target.isLenient,
-    };
-  }
-
   private isGenericArity(
     target: GenericTarget,
     args: CallArgument[],
     module: int,
   ): boolean {
-    const call = this.genericCallTarget(target);
-    const fixed = this.fixedCount(call);
-    const limit = this.spreadLimit(call, fixed, args.length);
+    const call = this.generics.genericCallTarget(target);
+    const fixed = this.calls.fixedCount(call);
+    const limit = this.calls.spreadLimit(call, fixed, args.length);
     const spread = args.find((arg, index) => arg.spread && index < limit);
     if (spread != undefined && !this.isArraySpread(spread, module)) {
       return false;
@@ -103,7 +84,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const least = this.leastArguments(call);
+    const least = this.calls.leastArguments(call);
     const most = call.params.length;
     const count = args.length;
     const isTooMany = !call.rest && count > most;
@@ -114,7 +95,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const word = this.argumentCountText(least, most, call.rest);
+    const word = this.calls.argumentCountText(least, most, call.rest);
     const other = `${count}`;
 
     this.report(module, target.loc, Code.ArgumentCount, { word, other });
@@ -126,25 +107,6 @@ partial class ExpressionTypes {
     const type = this.typed(spread.expr, undefined, module);
 
     return type.kind == TypeKind.Array;
-  }
-
-  private genericDraft(
-    target: GenericTarget,
-    args: CallArgument[],
-    wanted: Type | undefined,
-  ): GenericDraft {
-    return {
-      target,
-      args,
-      wanted,
-      bound: new Map<int, Type>(),
-      given: new Map<int, Type>(),
-      settled: new Set<int>(),
-      literals: [],
-      contextual: [],
-      inference: this.inferenceSet(target.params),
-      isInferred: true,
-    };
   }
 
   private explicitCall(draft: GenericDraft, module: int): Type {
@@ -197,7 +159,7 @@ partial class ExpressionTypes {
   private reportTypeArgumentCount(target: GenericTarget, module: int): void {
     const total = target.params.length;
     const word = target.name;
-    const other = this.typeArgumentText(total);
+    const other = this.generics.typeArgumentText(total);
     const first = `${target.typeArgs.length}`;
 
     if (!target.isLenient) {
@@ -207,14 +169,6 @@ partial class ExpressionTypes {
         first,
       });
     }
-  }
-
-  private typeArgumentText(count: int): string {
-    if (count == 1) {
-      return `${count}${kOneTypeArgument}`;
-    }
-
-    return `${count}${kManyTypeArguments}`;
   }
 
   private inferArguments(draft: GenericDraft, module: int): void {
@@ -233,7 +187,11 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     const expr = arg.expr;
-    const pattern = this.patternAt(draft.target.shape, index, arg.spread);
+    const pattern = this.generics.patternAt(
+      draft.target.shape,
+      index,
+      arg.spread,
+    );
     const form = this.argumentForm(draft, expr, pattern, module);
     const set = draft.inference;
 
@@ -324,40 +282,6 @@ partial class ExpressionTypes {
     this.inferArgument(set, pattern, literal, strength, false);
   }
 
-  private patternAt(shape: FunctionShape, index: int, spread: boolean): Type {
-    const fixed = this.shapeFixed(shape);
-    const error = this.store.plain(TypeKind.Error);
-
-    if (!shape.rest || index < fixed) {
-      return shape.params[index]?.type ?? error;
-    }
-
-    const rest = shape.params[fixed]?.type ?? error;
-    if (spread || rest.kind != TypeKind.Array) {
-      return rest;
-    }
-
-    return rest.item;
-  }
-
-  private slotAt(shape: FunctionShape, index: int, spread: boolean): Type {
-    const fixed = this.shapeFixed(shape);
-    const param = shape.params[index];
-    if (index < fixed && param != undefined) {
-      return this.parameterWanted(param);
-    }
-
-    return this.patternAt(shape, index, spread);
-  }
-
-  private shapeFixed(shape: FunctionShape): int {
-    if (shape.rest) {
-      return shape.params.length - 1;
-    }
-
-    return shape.params.length;
-  }
-
   private argumentForm(
     draft: GenericDraft,
     expr: Expr,
@@ -368,7 +292,7 @@ partial class ExpressionTypes {
     if (!this.isMentioning(pattern, params)) {
       return ArgumentForm.Plain;
     }
-    if (this.isLiteralText(expr, pattern, params)) {
+    if (this.generics.isLiteralText(expr, pattern, params)) {
       return ArgumentForm.LiteralText;
     }
     if (this.isContextual(expr, module)) {
@@ -390,12 +314,6 @@ partial class ExpressionTypes {
     return ArgumentForm.Inferred;
   }
 
-  private isLiteralText(expr: Expr, pattern: Type, params: Type[]): boolean {
-    const isText = expr.kind == ExprKind.StringLit && params.includes(pattern);
-
-    return isText && this.isExpectingLiteral(pattern);
-  }
-
   private contextualArguments(draft: GenericDraft, module: int): void {
     for (const index of draft.contextual) {
       const arg = draft.args[index];
@@ -412,8 +330,12 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     const expr = arg.expr;
-    const pattern = this.patternAt(draft.target.shape, index, arg.spread);
-    const bound = this.boundById(draft);
+    const pattern = this.generics.patternAt(
+      draft.target.shape,
+      index,
+      arg.spread,
+    );
+    const bound = this.generics.boundById(draft);
     const partial = this.resolver.substitute(pattern, bound);
     const callback = this.types.definedType(partial);
 
@@ -445,7 +367,7 @@ partial class ExpressionTypes {
   }
 
   private callbackSignature(draft: GenericDraft, callback: FunctionType): Type {
-    const open = this.openParameters(draft);
+    const open = this.generics.openParameters(draft);
     const error = this.store.plain(TypeKind.Error);
     const shape = callback.shape;
     const params: FunctionParameter[] = shape.params.map((param) => ({
@@ -469,12 +391,6 @@ partial class ExpressionTypes {
     }
 
     return type;
-  }
-
-  private openParameters(draft: GenericDraft): Type[] {
-    const params = draft.target.params;
-
-    return params.filter((param, index) => !draft.bound.has(index));
   }
 
   private callbackParameters(
@@ -510,7 +426,7 @@ partial class ExpressionTypes {
       const isOpen = param != undefined && !draft.bound.has(index);
       if (isOpen && param != undefined && this.isMentioning(type, [param])) {
         this.reportCallback(draft, closure, param, position, module);
-        this.failParameter(draft, index);
+        this.generics.failParameter(draft, index);
       }
     }
   }
@@ -523,7 +439,7 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     const target = draft.target;
-    if (target.isLenient || this.hasArgumentErrors(draft)) {
+    if (target.isLenient || this.generics.hasArgumentErrors(draft)) {
       return;
     }
 
@@ -557,7 +473,7 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     const params = draft.target.params;
-    const bound = this.boundById(draft);
+    const bound = this.generics.boundById(draft);
     const partial = this.resolver.substitute(pattern, bound);
     const isOpen = this.isMentioning(partial, params);
     const isDefaulted = isOpen && this.fillDefaults(draft);
@@ -598,7 +514,7 @@ partial class ExpressionTypes {
       return partial;
     }
 
-    const bound = this.boundById(draft);
+    const bound = this.generics.boundById(draft);
 
     return this.resolver.substitute(pattern, bound);
   }
@@ -615,7 +531,7 @@ partial class ExpressionTypes {
     }
 
     const params = draft.target.params;
-    const more = this.inferenceSet(params);
+    const more = this.generics.inferenceSet(params);
 
     this.inferPair(more, pattern, given);
 
@@ -625,7 +541,7 @@ partial class ExpressionTypes {
 
     for (let typeIndex = 0; typeIndex < params.length; typeIndex++) {
       if (!draft.bound.has(typeIndex)) {
-        this.adoptCandidates(draft.inference, typeIndex, more);
+        this.generics.adoptCandidates(draft.inference, typeIndex, more);
         this.settleParameter(draft, typeIndex, module);
       }
     }
@@ -661,7 +577,7 @@ partial class ExpressionTypes {
   }
 
   private literalArguments(draft: GenericDraft, module: int): void {
-    const bound = this.boundById(draft);
+    const bound = this.generics.boundById(draft);
     const shape = draft.target.shape;
 
     for (const index of draft.literals) {
@@ -670,7 +586,7 @@ partial class ExpressionTypes {
         continue;
       }
 
-      const slot = this.slotAt(shape, index, arg.spread);
+      const slot = this.generics.slotAt(shape, index, arg.spread);
       const hint = this.resolver.substituteValue(slot, bound);
       const given = this.literalChecked(draft, arg.expr, hint, module);
 
@@ -702,7 +618,7 @@ partial class ExpressionTypes {
       const given = draft.given.get(index);
       const isOpen = arg != undefined && !draft.settled.has(index);
       if (isOpen && arg != undefined && given != undefined) {
-        const to = this.slotAt(shape, index, arg.spread);
+        const to = this.generics.slotAt(shape, index, arg.spread);
 
         this.coerce(arg.expr, given, to, module, kNoPlace);
       }
@@ -724,7 +640,7 @@ partial class ExpressionTypes {
 
   private boundShape(draft: GenericDraft): FunctionShape {
     const shape = draft.target.shape;
-    const bound = this.boundById(draft);
+    const bound = this.generics.boundById(draft);
     const params: FunctionParameter[] = shape.params.map((param) => ({
       type: this.resolver.substituteValue(param.type, bound),
       optional: param.optional,
@@ -765,19 +681,5 @@ partial class ExpressionTypes {
     }
 
     return false;
-  }
-
-  private boundById(draft: GenericDraft): Map<int, Type> {
-    const bound = new Map<int, Type>();
-    const params = draft.target.params;
-
-    for (const [index, type] of draft.bound) {
-      const param = params[index];
-      if (param != undefined) {
-        bound.set(param.id, type);
-      }
-    }
-
-    return bound;
   }
 }

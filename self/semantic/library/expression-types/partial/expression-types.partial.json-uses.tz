@@ -13,10 +13,6 @@ import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import { kJsonGlobalName } from "../../../code/expression-types/const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private isJsonHolder(type: Type): boolean {
-    return this.types.definedType(type).kind == TypeKind.Json;
-  }
-
   private jsonMethodCall(
     expr: CallExpr,
     member: MemberExpr,
@@ -124,7 +120,10 @@ partial class ExpressionTypes {
     }
 
     const base = this.types.definedType(type);
-    if (base.kind != TypeKind.Instance || this.isLibraryModule(base.module)) {
+    if (
+      base.kind != TypeKind.Instance ||
+      this.modules.isLibraryModule(base.module)
+    ) {
       return false;
     }
 

@@ -1,0 +1,2 @@
+export const kAnonymousFunction = "the function";
+export const kFunctionWord = "function";

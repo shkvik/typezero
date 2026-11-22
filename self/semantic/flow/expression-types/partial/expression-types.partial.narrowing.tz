@@ -15,11 +15,6 @@ import {
 } from "../../../../program/type/types/type.types.tz";
 import { kTrueText } from "../../../types/type-resolver/const/type-resolver.const.tables.tz";
 import {
-  kArrayTypeOf,
-  kDictTexts,
-  kTypeOfTypes,
-} from "../../../code/expression-types/const/expression-types.const.tz";
-import {
   NarrowSlot,
   ValueTarget,
 } from "../../../code/expression-types/types/expression-types.types.tz";
@@ -43,44 +38,9 @@ partial class ExpressionTypes {
   private underFacts(facts: Map<string, Type>): Map<string, Type> {
     const before = this.facts;
 
-    this.facts = this.mergedFacts(before, facts);
+    this.facts = this.narrowings.mergedFacts(before, facts);
 
     return before;
-  }
-
-  private mergedFacts(
-    first: Map<string, Type>,
-    second: Map<string, Type>,
-  ): Map<string, Type> {
-    const merged = new Map<string, Type>();
-
-    for (const [key, type] of first) {
-      merged.set(key, type);
-    }
-
-    for (const [key, type] of second) {
-      merged.set(key, type);
-    }
-
-    return merged;
-  }
-
-  private joinedFacts(
-    first: Map<string, Type>,
-    second: Map<string, Type>,
-  ): Map<string, Type> {
-    const joined = new Map<string, Type>();
-
-    for (const [key, type] of first) {
-      const other = second.get(key);
-      if (other != undefined) {
-        const union = this.store.unionOf([type, other]);
-
-        joined.set(key, union);
-      }
-    }
-
-    return joined;
   }
 
   private factsOf(cond: Expr, isTrue: boolean, module: int): Map<string, Type> {
@@ -111,7 +71,7 @@ partial class ExpressionTypes {
     module: int,
   ): Map<string, Type> {
     const facts = new Map<string, Type>();
-    const path = this.comparedPath(cond);
+    const path = this.narrowings.comparedPath(cond);
     if (path.kind == ExprKind.Member) {
       const literal = this.store.literal(LiteralKind.Boolean, kTrueText);
 
@@ -176,13 +136,13 @@ partial class ExpressionTypes {
         const facts = this.equalityFacts(cond.lhs, cond.rhs, isTrue, module);
         const bounds = this.comparisonBounds(cond, isTrue, module);
 
-        return this.mergedFacts(facts, bounds);
+        return this.narrowings.mergedFacts(facts, bounds);
       }
       case BinaryOp.Ne: {
         const facts = this.equalityFacts(cond.lhs, cond.rhs, !isTrue, module);
         const bounds = this.comparisonBounds(cond, isTrue, module);
 
-        return this.mergedFacts(facts, bounds);
+        return this.narrowings.mergedFacts(facts, bounds);
       }
       case BinaryOp.Lt:
       case BinaryOp.Le:
@@ -254,7 +214,7 @@ partial class ExpressionTypes {
 
     this.facts = before;
 
-    return this.mergedFacts(left, right);
+    return this.narrowings.mergedFacts(left, right);
   }
 
   private eitherFacts(
@@ -270,7 +230,7 @@ partial class ExpressionTypes {
 
     this.facts = before;
 
-    return this.joinedFacts(left, right);
+    return this.narrowings.joinedFacts(left, right);
   }
 
   private equalityFacts(
@@ -285,11 +245,11 @@ partial class ExpressionTypes {
       return typeofFacts;
     }
 
-    const left = this.comparedPath(lhs);
-    const right = this.comparedPath(rhs);
+    const left = this.narrowings.comparedPath(lhs);
+    const right = this.narrowings.comparedPath(rhs);
     const isPathLeft = this.pathKey(left, module) != undefined;
-    const name = this.sideOf(isPathLeft, left, right);
-    const other = this.sideOf(isPathLeft, right, left);
+    const name = this.narrowings.sideOf(isPathLeft, left, right);
+    const other = this.narrowings.sideOf(isPathLeft, right, left);
     const slot = this.narrowable(name, module);
     if (slot == undefined) {
       return facts;
@@ -308,31 +268,12 @@ partial class ExpressionTypes {
       this.linkFacts(name, facts, module);
     }
 
-    const tag = this.tagOf(name);
+    const tag = this.narrowings.tagOf(name);
     if (tag != undefined) {
       this.tagFacts(tag, other, isEqual, facts, module);
     }
 
     return facts;
-  }
-
-  private comparedPath(expr: Expr): Expr {
-    if (expr.kind == ExprKind.Assign && expr.op == undefined) {
-      return expr.target;
-    }
-
-    return expr;
-  }
-
-  private tagOf(expr: Expr): MemberExpr | undefined {
-    if (expr.kind == ExprKind.OptionalChain) {
-      return this.tagOf(expr.chain);
-    }
-    if (expr.kind != ExprKind.Member) {
-      return undefined;
-    }
-
-    return expr;
   }
 
   private tagFacts(
@@ -362,7 +303,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const parts = this.flatMembers(owner.type);
+    const parts = this.narrowings.flatMembers(owner.type);
     const kept = parts.filter((part) =>
       this.isTagKept(part, tag.name, literal, isEqual),
     );
@@ -378,22 +319,6 @@ partial class ExpressionTypes {
     const union = this.store.unionOf(kept);
 
     facts.set(owner.key, union);
-  }
-
-  private flatMembers(type: Type): Type[] {
-    if (type.kind != TypeKind.Union) {
-      return [type];
-    }
-
-    const flat: Type[] = [];
-
-    for (const part of type.parts) {
-      for (const member of this.flatMembers(part)) {
-        flat.push(member);
-      }
-    }
-
-    return flat;
   }
 
   private isTagKept(
@@ -413,15 +338,7 @@ partial class ExpressionTypes {
     const base = this.relation.baseOf(literal);
     const isOpen = tag == base || tag.kind == TypeKind.Error;
 
-    return isOpen || this.holdsLiteral(tag, literal);
-  }
-
-  private sideOf(isFirst: boolean, first: Expr, second: Expr): Expr {
-    if (isFirst) {
-      return first;
-    }
-
-    return second;
+    return isOpen || this.objects.holdsLiteral(tag, literal);
   }
 
   private comparedType(
@@ -431,7 +348,7 @@ partial class ExpressionTypes {
     module: int,
   ): Type | undefined {
     if (other.kind == ExprKind.Undefined) {
-      return this.undefinedCompared(type, isEqual);
+      return this.narrowings.undefinedCompared(type, isEqual);
     }
 
     const literal = this.comparedLiteral(other, module);
@@ -439,21 +356,10 @@ partial class ExpressionTypes {
       return undefined;
     }
     if (isEqual) {
-      return this.literalPart(type, literal);
+      return this.narrowings.literalPart(type, literal);
     }
 
-    return this.withoutPart(type, literal);
-  }
-
-  private undefinedCompared(type: Type, isEqual: boolean): Type | undefined {
-    if (!this.types.isOptional(type)) {
-      return undefined;
-    }
-    if (isEqual) {
-      return this.store.plain(TypeKind.Undefined);
-    }
-
-    return this.types.definedType(type);
+    return this.narrowings.withoutPart(type, literal);
   }
 
   private comparedLiteral(other: Expr, module: int): Type | undefined {
@@ -471,34 +377,6 @@ partial class ExpressionTypes {
     return this.store.literal(literal.kind, literal.text);
   }
 
-  private literalPart(type: Type, literal: Type): Type | undefined {
-    const parts = this.types.unionMembers(type);
-    if (parts.includes(literal)) {
-      return literal;
-    }
-
-    const base = this.relation.baseOf(literal);
-    if (base != undefined && parts.includes(base)) {
-      return literal;
-    }
-
-    return undefined;
-  }
-
-  private withoutPart(type: Type, literal: Type): Type | undefined {
-    const parts = this.types.unionMembers(type);
-    if (!parts.includes(literal)) {
-      return undefined;
-    }
-
-    const kept = parts.filter((part) => part != literal);
-    if (kept.length == 0) {
-      return this.store.plain(TypeKind.Never);
-    }
-
-    return this.store.unionOf(kept);
-  }
-
   private typeofFacts(
     lhs: Expr,
     rhs: Expr,
@@ -506,8 +384,8 @@ partial class ExpressionTypes {
     module: int,
   ): Map<string, Type> | undefined {
     const isTypeofLeft = lhs.kind == ExprKind.Unary && lhs.op == UnaryOp.TypeOf;
-    const tested = this.sideOf(isTypeofLeft, lhs, rhs);
-    const other = this.sideOf(isTypeofLeft, rhs, lhs);
+    const tested = this.narrowings.sideOf(isTypeofLeft, lhs, rhs);
+    const other = this.narrowings.sideOf(isTypeofLeft, rhs, lhs);
     const isTypeof =
       tested.kind == ExprKind.Unary && tested.op == UnaryOp.TypeOf;
     if (!isTypeof || tested.kind != ExprKind.Unary) {
@@ -520,62 +398,16 @@ partial class ExpressionTypes {
       return facts;
     }
 
-    const narrowed = this.typeofType(slot.type, other.value, isEqual);
+    const narrowed = this.narrowings.typeofType(
+      slot.type,
+      other.value,
+      isEqual,
+    );
     if (narrowed != undefined) {
       facts.set(slot.key, narrowed);
     }
 
     return facts;
-  }
-
-  private typeofType(
-    type: Type,
-    name: string,
-    isEqual: boolean,
-  ): Type | undefined {
-    const kept: Type[] = [];
-
-    for (const part of this.types.unionMembers(type)) {
-      const isOpen =
-        part.kind == TypeKind.Unknown ||
-        part.kind == TypeKind.Json ||
-        part.kind == TypeKind.TypeParameter;
-      if (isOpen) {
-        const open = this.openPart(part, name, isEqual);
-
-        kept.push(open);
-
-        continue;
-      }
-
-      const isNamed = this.typeOfNames(part).includes(name);
-      if (isNamed == isEqual) {
-        kept.push(part);
-      }
-    }
-
-    if (kept.length == 0) {
-      return undefined;
-    }
-
-    return this.store.unionOf(kept);
-  }
-
-  private openPart(part: Type, name: string, isEqual: boolean): Type {
-    const row = kTypeOfTypes.find((one) => one.name == name);
-    if (isEqual && name == kArrayTypeOf && part.kind == TypeKind.Unknown) {
-      return this.store.arrayOf(part);
-    }
-    if (!isEqual || row == undefined) {
-      return part;
-    }
-
-    const kind = row.kind;
-    if (kind != TypeKind.Int) {
-      return this.store.plain(kind);
-    }
-
-    return this.store.integer(row.bits, row.unsigned);
   }
 
   private instanceFacts(
@@ -601,7 +433,7 @@ partial class ExpressionTypes {
     const name = rhs.name;
     const parts = this.types.unionMembers(slot.type);
     const kept = parts.filter(
-      (part) => this.isInstanceOf(part, name) == isTrue,
+      (part) => this.narrowings.isInstanceOf(part, name) == isTrue,
     );
     if (kept.length == 0 && isTrue) {
       const derived =
@@ -670,21 +502,6 @@ partial class ExpressionTypes {
     }
 
     return instance;
-  }
-
-  private isInstanceOf(part: Type, name: string): boolean {
-    switch (part.kind) {
-      case TypeKind.Instance:
-        return part.name == name;
-      case TypeKind.Dict: {
-        const dict = part.dict;
-        const row = kDictTexts.find((one) => one.dict == dict);
-
-        return row != undefined && row.kind == name;
-      }
-      default:
-        return false;
-    }
   }
 
   private narrowable(expr: Expr, module: int): NarrowSlot | undefined {

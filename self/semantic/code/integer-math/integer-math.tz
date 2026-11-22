@@ -1,0 +1,258 @@
+import { Code } from "../../../diagnostic/code.tz";
+import { BinaryOp } from "../../../program/ast/types/ast.types.expressions.tz";
+import { IntType } from "../../../program/type/types/type.types.tz";
+import {
+  kDoubleBits,
+  kDoubleLimit,
+  kExponentMark,
+  kFractionDot,
+  kInfinityText,
+  kLargestInt,
+  kMinus,
+  kPlainDoubleLimit,
+  kRoundHalfEven,
+  kShownDigits,
+  kSmallestInt,
+  kZeroDigit,
+  kIntLimits,
+} from "./const/integer-math.const.tz";
+import { IntLimit } from "./types/integer-math.types.tz";
+
+export class IntegerMath {
+  public isInside(value: decimal, type: IntType): boolean {
+    const limit = this.limitOf(type);
+    if (limit == undefined) {
+      return false;
+    }
+
+    const lowest = limit.lowest.toDecimal();
+    const highest = limit.highest.toDecimal();
+
+    return value >= -lowest && value <= highest;
+  }
+
+  public wrapTo(value: decimal, type: IntType): decimal {
+    const span = this.spanOf(type);
+    const pattern = this.patternOf(value, span);
+    const half = span / 2;
+    const isUnsigned = type.unsigned && type.bits < 64;
+    if (isUnsigned || pattern < half) {
+      return pattern;
+    }
+
+    return pattern - span;
+  }
+
+  public patternOf(value: decimal, span: decimal): decimal {
+    if (span <= 0) {
+      return value;
+    }
+
+    const rest = value % span;
+
+    return (rest + span) % span;
+  }
+
+  public spanOf(type: IntType): decimal {
+    const bits = type.bits.toDecimal();
+
+    return this.twoPower(bits);
+  }
+
+  public twoPower(count: decimal): decimal {
+    let power: decimal = 1;
+    let rest: decimal = count;
+
+    while (rest > 0) {
+      power *= 2;
+      rest -= 1;
+    }
+
+    return power;
+  }
+
+  public unsignedValue(
+    op: BinaryOp,
+    left: decimal,
+    right: decimal,
+  ): decimal | undefined {
+    switch (op) {
+      case BinaryOp.Add:
+        return left + right;
+      case BinaryOp.Sub:
+        return left - right;
+      case BinaryOp.Mul:
+        return left * right;
+      default:
+        return undefined;
+    }
+  }
+
+  public bitOf(op: BinaryOp, one: decimal, other: decimal): decimal {
+    switch (op) {
+      case BinaryOp.BitAnd:
+        return one * other;
+      case BinaryOp.BitOr:
+        return one + other - one * other;
+      default:
+        return (one + other) % 2;
+    }
+  }
+
+  public exactPower(base: decimal, exponent: decimal): decimal | undefined {
+    const size = base.abs();
+    if (size <= 1) {
+      return this.unitPower(base, exponent);
+    }
+
+    let product: decimal = 1;
+    let rest: decimal = exponent;
+
+    while (rest > 0) {
+      product *= base;
+      rest -= 1;
+
+      if (product > kLargestInt || product < kSmallestInt) {
+        return undefined;
+      }
+    }
+
+    return product;
+  }
+
+  public wrappedPower(
+    base: decimal,
+    exponent: decimal,
+    type: IntType,
+  ): decimal {
+    const span = this.spanOf(type);
+    let result: decimal = 1;
+    let factor = this.patternOf(base, span);
+    let rest: decimal = exponent;
+
+    while (rest > 0) {
+      const bit = rest % 2;
+      if (bit == 1) {
+        result = this.patternOf(result * factor, span);
+      }
+
+      factor = this.patternOf(factor * factor, span);
+      rest = (rest - bit) / 2;
+    }
+
+    return this.wrapTo(result, type);
+  }
+
+  public powerShown(
+    exact: decimal | undefined,
+    base: decimal,
+    exponent: decimal,
+  ): string {
+    if (exact != undefined) {
+      return `${exact}`;
+    }
+
+    const isNegative = base < 0 && exponent % 2 == 1;
+    const digits = this.powerDigits(base.abs(), exponent);
+
+    if (isNegative) {
+      return kMinus + digits;
+    }
+
+    return digits;
+  }
+
+  public overflowCode(type: IntType): Code {
+    if (type.bits < 64) {
+      return Code.ConstantOverflow;
+    }
+
+    return Code.WideConstantOverflow;
+  }
+
+  private limitOf(type: IntType): IntLimit | undefined {
+    const bits = type.bits;
+    const unsigned = type.unsigned;
+
+    return kIntLimits.find(
+      (row) => row.bits == bits && row.unsigned == unsigned,
+    );
+  }
+
+  private unitPower(base: decimal, exponent: decimal): decimal {
+    if (base == 1 || exponent == 0) {
+      return 1;
+    }
+    if (base == 0) {
+      return 0;
+    }
+    if (exponent % 2 == 0) {
+      return 1;
+    }
+
+    return -1;
+  }
+
+  private powerDigits(size: decimal, exponent: decimal): string {
+    let product: decimal = 1;
+    let rest: decimal = exponent;
+
+    while (rest > 0 && product < kDoubleLimit) {
+      product *= size;
+      rest -= 1;
+    }
+
+    const nearest = this.nearestDouble(product);
+    if (nearest >= kDoubleLimit) {
+      return kInfinityText;
+    }
+    if (nearest >= kPlainDoubleLimit) {
+      return this.exponentText(nearest);
+    }
+
+    return `${nearest}`;
+  }
+
+  private nearestDouble(size: decimal): decimal {
+    let top: decimal = 1;
+    let bits = 0;
+
+    while (top <= size) {
+      top *= 2;
+      bits += 1;
+    }
+
+    let unit: decimal = 1;
+
+    for (let index = kDoubleBits; index < bits; index += 1) {
+      unit *= 2;
+    }
+
+    const steps = size.div(unit, 0, kRoundHalfEven);
+
+    return steps * unit;
+  }
+
+  private exponentText(value: decimal): string {
+    const text = value.toExponential(kShownDigits - 1);
+    const mark = text.indexOf(kExponentMark);
+    if (mark < 0) {
+      return text;
+    }
+
+    let end = mark;
+
+    while (end > 0 && text.charAt(end - 1) == kZeroDigit) {
+      end -= 1;
+    }
+
+    if (end > 0 && text.charAt(end - 1) == kFractionDot) {
+      end -= 1;
+    }
+
+    const mantissa = text.slice(0, end);
+    const power = text.slice(mark);
+
+    return mantissa + power;
+  }
+}

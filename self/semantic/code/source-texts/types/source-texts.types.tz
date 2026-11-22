@@ -1,0 +1,11 @@
+import { BinaryOp } from "../../../../program/ast/types/ast.types.expressions.tz";
+
+export type OperandTexts = {
+  readonly left: string;
+  readonly right: string;
+};
+
+export type OperatorText = {
+  readonly op: BinaryOp;
+  readonly text: string;
+};

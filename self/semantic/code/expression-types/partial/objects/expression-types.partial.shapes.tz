@@ -15,11 +15,7 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import {
-  kContextFunctions,
-  kContextObjects,
-  kResultMakers,
-} from "../../const/expression-types.const.tz";
+import { kResultMakers } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
   private literalShapeOf(expr: Expr): Type | undefined {
@@ -69,7 +65,7 @@ partial class ExpressionTypes {
         return undefined;
       }
 
-      const joined = this.joinedWith(element, shape);
+      const joined = this.generics.joinedWith(element, shape);
       if (joined == undefined) {
         return undefined;
       }
@@ -106,37 +102,11 @@ partial class ExpressionTypes {
   }
 
   private isContextual(expr: Expr, module: int): boolean {
-    if (this.isNeedingContext(expr)) {
+    if (this.shapes.isNeedingContext(expr)) {
       return true;
     }
 
     return this.isResultMaker(expr, module) || this.isBareGeneric(expr, module);
-  }
-
-  private isNeedingContext(expr: Expr): boolean {
-    switch (expr.kind) {
-      case ExprKind.Function:
-        return expr.fn.params.some((param) => param.type == undefined);
-      case ExprKind.ArrayLit:
-        return expr.elements.some(
-          (element) => !element.hole && this.isNeedingContext(element.expr),
-        );
-      case ExprKind.ObjectLit:
-        return expr.props.some((prop) => this.isNeedingContext(prop.value));
-      case ExprKind.Name:
-        return (
-          expr.typeArgs.length == 0 && kContextFunctions.includes(expr.name)
-        );
-      case ExprKind.Member: {
-        const object = expr.object;
-
-        return (
-          object.kind == ExprKind.Name && kContextObjects.includes(object.name)
-        );
-      }
-      default:
-        return false;
-    }
   }
 
   private isResultMaker(expr: Expr, module: int): boolean {
@@ -146,7 +116,7 @@ partial class ExpressionTypes {
 
     const target = this.targetOfName(expr, module);
 
-    return target != undefined && this.isLibraryModule(target.module);
+    return target != undefined && this.modules.isLibraryModule(target.module);
   }
 
   private isBareGeneric(expr: Expr, module: int): boolean {
@@ -162,67 +132,6 @@ partial class ExpressionTypes {
     const fn = this.record(target.module)?.functions.get(target.loc);
 
     return fn != undefined && fn.typeParams.length > 0;
-  }
-
-  private genericParameters(type: Type): Type[] | undefined {
-    const found: Type[] = [];
-    const seen = new Set<int>();
-
-    if (!this.collectParameters(type, found, seen)) {
-      return undefined;
-    }
-
-    return found;
-  }
-
-  private collectParameters(
-    type: Type,
-    found: Type[],
-    seen: Set<int>,
-  ): boolean {
-    if (seen.has(type.id)) {
-      return true;
-    }
-
-    seen.add(type.id);
-
-    switch (type.kind) {
-      case TypeKind.TypeParameter:
-        found.push(type);
-
-        return true;
-      case TypeKind.Operation:
-      case TypeKind.Error:
-      case TypeKind.Template:
-        return false;
-      default: {
-        const parts = this.typeParts(type);
-
-        return parts.every((part) => this.collectParameters(part, found, seen));
-      }
-    }
-  }
-
-  private hasUnknownInside(type: Type): boolean {
-    const seen = new Set<int>();
-
-    return this.isUnknownInside(type, seen);
-  }
-
-  private isUnknownInside(type: Type, seen: Set<int>): boolean {
-    if (seen.has(type.id)) {
-      return false;
-    }
-
-    seen.add(type.id);
-
-    if (type.kind == TypeKind.Error) {
-      return true;
-    }
-
-    const parts = this.typeParts(type);
-
-    return parts.some((part) => this.isUnknownInside(part, seen));
   }
 
   private hasOperationParameter(shape: FunctionShape): boolean {
@@ -247,92 +156,9 @@ partial class ExpressionTypes {
       return true;
     }
 
-    const parts = this.typeParts(type);
+    const parts = this.parts.typeParts(type);
 
     return parts.some((part) => this.isOperationInside(part, seen));
-  }
-
-  private isOpaqueResult(type: Type): boolean {
-    const seen = new Set<int>();
-
-    return type.kind == TypeKind.Unknown || this.isVoidChoice(type, seen);
-  }
-
-  private isVoidChoice(type: Type, seen: Set<int>): boolean {
-    if (seen.has(type.id) || type.kind == TypeKind.Function) {
-      return false;
-    }
-
-    seen.add(type.id);
-
-    if (type.kind == TypeKind.Union) {
-      const hasVoid = type.parts.some((part) => part.kind == TypeKind.Void);
-      if (hasVoid) {
-        return true;
-      }
-    }
-    if (type.kind == TypeKind.Object) {
-      const hasVoid = type.fields.some(
-        (field) => field.type.kind == TypeKind.Void,
-      );
-      if (hasVoid) {
-        return true;
-      }
-    }
-    if (type.kind == TypeKind.Promise || type.kind == TypeKind.Result) {
-      return false;
-    }
-
-    const parts = this.typeParts(type);
-
-    return parts.some((part) => this.isVoidChoice(part, seen));
-  }
-
-  private isListParameter(param: Type): boolean {
-    const constraint = this.store.constraintOf(param);
-    if (constraint == undefined) {
-      return false;
-    }
-
-    return (
-      constraint.kind == TypeKind.Array || constraint.kind == TypeKind.Tuple
-    );
-  }
-
-  private typeParts(type: Type): Type[] {
-    switch (type.kind) {
-      case TypeKind.Array:
-        return [type.item];
-      case TypeKind.Tuple:
-        return type.items;
-      case TypeKind.Object:
-        return type.fields.map((field) => field.type);
-      case TypeKind.Function: {
-        const shape = type.shape;
-        const params = shape.params.map((param) => param.type);
-
-        return params.concat([shape.result]);
-      }
-      case TypeKind.Union:
-        return type.parts;
-      case TypeKind.Result:
-        return [type.value, type.error];
-      case TypeKind.Promise:
-        return [type.value];
-      case TypeKind.Class:
-        return [type.instance];
-      case TypeKind.Iterator: {
-        const shape = type.shape;
-
-        return [shape.yielded, shape.returned, shape.sent];
-      }
-      case TypeKind.Dict:
-        return [type.key, type.value];
-      case TypeKind.Instance:
-        return type.args;
-      default:
-        return [];
-    }
   }
 
   private lenientClosure(expr: Expr, pattern: Type, module: int): void {
@@ -341,7 +167,10 @@ partial class ExpressionTypes {
     }
 
     const wanted = this.types.definedType(pattern);
-    if (wanted.kind != TypeKind.Function || this.mentionsParameter(wanted)) {
+    if (
+      wanted.kind != TypeKind.Function ||
+      this.parts.mentionsParameter(wanted)
+    ) {
       return;
     }
 

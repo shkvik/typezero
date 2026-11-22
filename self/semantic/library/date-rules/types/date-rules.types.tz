@@ -1,0 +1,4 @@
+export type CarriedDay = {
+  readonly month: int;
+  readonly day: int;
+};

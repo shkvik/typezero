@@ -1,0 +1,8 @@
+import { UnaryText } from "../../expression-types/types/expression-types.types.tz";
+import { UnaryOp } from "../../../../program/ast/types/ast.types.expressions.tz";
+
+export const kUnaryTexts: UnaryText[] = [
+  { op: UnaryOp.Neg, text: "-" },
+  { op: UnaryOp.Plus, text: "+" },
+  { op: UnaryOp.BitNot, text: "~" },
+];

@@ -1,0 +1,360 @@
+import { Code } from "../../../diagnostic/code.tz";
+import { CallExpr } from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  DictKind,
+  FunctionParameter,
+  FunctionType,
+  ObjectField,
+  Type,
+  TypeKind,
+  UnionType,
+} from "../../../program/type/types/type.types.tz";
+import {
+  CallKind,
+  CallTarget,
+  RankedVariant,
+} from "../expression-types/types/expression-types.types.tz";
+import {
+  BodySource,
+  FunctionDecl,
+  FunctionPlace,
+  Param,
+  ParamKind,
+} from "../../../program/ast/types/ast.types.functions.tz";
+import { StmtKind } from "../../../program/ast/types/ast.types.statements.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { TypeParts } from "../../types/type-parts/type-parts.tz";
+import {
+  kManyArguments,
+  kOneArgument,
+  kOrMore,
+  kParameterLetters,
+  kRangeDash,
+} from "./const/call-rules.const.tz";
+
+export class CallRules {
+  private readonly store: TypeStore;
+  private readonly types: TypeQuestions;
+  private readonly parts: TypeParts;
+
+  public constructor(store: TypeStore, types: TypeQuestions, parts: TypeParts) {
+    this.store = store;
+    this.types = types;
+    this.parts = parts;
+  }
+
+  public parameterWanted(param: FunctionParameter): Type {
+    const type = param.type;
+    if (type.kind == TypeKind.Void) {
+      return this.store.plain(TypeKind.Undefined);
+    }
+    if (!param.optional || type.kind == TypeKind.Error) {
+      return type;
+    }
+
+    return this.types.optional(type);
+  }
+
+  public fixedCount(target: CallTarget): int {
+    if (target.rest) {
+      return target.params.length - 1;
+    }
+
+    return target.params.length;
+  }
+
+  public spreadLimit(target: CallTarget, fixed: int, count: int): int {
+    if (target.rest) {
+      return fixed;
+    }
+
+    return count;
+  }
+
+  public leastArguments(target: CallTarget): int {
+    const fixed = this.fixedCount(target);
+    let least = 0;
+
+    for (let index = 0; index < fixed; index++) {
+      const param = target.params[index];
+      if (param != undefined && !param.optional) {
+        least += 1;
+      }
+    }
+
+    return least;
+  }
+
+  public argumentCountText(least: int, most: int, rest: boolean): string {
+    const range = this.countRange(least, most, rest);
+
+    if (least == 1 && most == 1 && !rest) {
+      return range + kOneArgument;
+    }
+
+    return range + kManyArguments;
+  }
+
+  public positionCode(given: Type, base: Type): Code {
+    if (base.kind == TypeKind.Double) {
+      return Code.PositionFraction;
+    }
+    if (this.types.isOptional(given) && base.kind == TypeKind.Int) {
+      return Code.PositionMaybe;
+    }
+
+    return Code.PositionNotInteger;
+  }
+
+  public mathArgumentCode(given: Type, base: Type): Code {
+    const isNumber = base.kind == TypeKind.Int || base.kind == TypeKind.Double;
+    if (this.types.isOptional(given) && isNumber) {
+      return Code.MathArgumentMaybe;
+    }
+    if (base.kind == TypeKind.Decimal) {
+      return Code.MathArgumentDecimal;
+    }
+
+    return Code.MathArgument;
+  }
+
+  public restItem(to: Type): Type {
+    if (to.kind == TypeKind.Array) {
+      return to.item;
+    }
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  public directParams(
+    params: FunctionParameter[],
+    self: Type | undefined,
+  ): FunctionParameter[] {
+    if (self == undefined) {
+      return params;
+    }
+
+    const first: FunctionParameter = { type: self, optional: false };
+
+    return [first].concat(params);
+  }
+
+  public isOpenRest(params: FunctionParameter[], rest: boolean): boolean {
+    const last = params[params.length - 1];
+
+    return rest && last != undefined && this.parts.mentionsParameter(last.type);
+  }
+
+  public isOptionalFunction(type: UnionType): boolean {
+    const defined = this.types.definedType(type);
+
+    return this.types.isOptional(type) && defined.kind == TypeKind.Function;
+  }
+
+  public isUncallable(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Boolean:
+      case TypeKind.Literal:
+      case TypeKind.Array:
+      case TypeKind.Tuple:
+      case TypeKind.Object:
+      case TypeKind.Unknown:
+      case TypeKind.AnyObject:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public libraryKind(isLibrary: boolean): CallKind {
+    if (isLibrary) {
+      return CallKind.Library;
+    }
+
+    return CallKind.Own;
+  }
+
+  public isPlainRest(params: FunctionParameter[]): boolean {
+    const last = params[params.length - 1];
+    if (last == undefined || last.type.kind != TypeKind.Array) {
+      return false;
+    }
+
+    return last.type.item.kind != TypeKind.Union;
+  }
+
+  public isStrictShape(params: FunctionParameter[]): boolean {
+    return params.every((param) => this.isStrictParam(param.type));
+  }
+
+  public promiseNew(written: Type[], wanted: Type | undefined): Type {
+    const value = written[0];
+    if (value != undefined) {
+      return this.store.promiseOf(value);
+    }
+
+    const goal = this.types.wantedPart(wanted);
+    if (goal == undefined || goal.kind != TypeKind.Promise) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return goal;
+  }
+
+  public signatureVariants(
+    name: string,
+    fields: ObjectField[],
+  ): RankedVariant[] {
+    const ranked: RankedVariant[] = [];
+
+    for (const field of fields) {
+      const type = field.type;
+      if (type.kind == TypeKind.Function) {
+        const fn = this.signatureDecl(name, type);
+
+        ranked.push({ fn, type, ranks: [], isAdapted: false, failed: -1 });
+      }
+    }
+
+    return ranked;
+  }
+
+  public thisCallProblem(expr: CallExpr, word: string): Code | undefined {
+    if (word == "bind") {
+      return Code.ThisBindUnsupported;
+    }
+    if (word != "call" && word != "apply") {
+      return Code.ThisFunctionProperty;
+    }
+    if (expr.args.length == 0) {
+      return Code.ThisArgumentFirst;
+    }
+
+    const isSpread = expr.args.some((arg) => arg.spread);
+    const isApplyShape = expr.args.length == 2 && !isSpread;
+    if (word == "apply" && !isApplyShape) {
+      return Code.ThisApplyArguments;
+    }
+
+    return undefined;
+  }
+
+  public thisCallTail(word: string): string {
+    if (word == "apply") {
+      return ", args)";
+    }
+
+    return ", ...)";
+  }
+
+  private countRange(least: int, most: int, rest: boolean): string {
+    if (rest) {
+      return `${least}${kOrMore}`;
+    }
+    if (most != least) {
+      return `${least}${kRangeDash}${most}`;
+    }
+
+    return `${least}`;
+  }
+
+  private isStrictParam(type: Type): boolean {
+    if (this.parts.mentionsParameter(type)) {
+      return false;
+    }
+
+    const parts = this.types.unionMembers(type);
+
+    return parts.every((part) => this.isPlainParam(part));
+  }
+
+  private isPlainParam(part: Type): boolean {
+    switch (part.kind) {
+      case TypeKind.Error:
+      case TypeKind.Function:
+      case TypeKind.Unknown:
+      case TypeKind.AnyObject:
+      case TypeKind.Json:
+      case TypeKind.Literal:
+      case TypeKind.Instance:
+      case TypeKind.Dict:
+        return false;
+      case TypeKind.Array:
+        return this.isPlainParam(part.item);
+      default:
+        return true;
+    }
+  }
+
+  private dictNew(
+    dict: DictKind,
+    written: Type[],
+    wanted: Type | undefined,
+  ): Type {
+    const first = written[0];
+    const second = written[1] ?? first;
+    if (first != undefined && second != undefined) {
+      return this.store.dictOf(dict, first, second);
+    }
+
+    const goal = this.types.wantedPart(wanted);
+    if (goal == undefined || goal.kind != TypeKind.Dict || goal.dict != dict) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return goal;
+  }
+
+  private signatureDecl(name: string, type: FunctionType): FunctionDecl {
+    const params: Param[] = [];
+
+    for (let index = 0; index < type.shape.params.length; index++) {
+      params.push(this.signatureParam(type, index));
+    }
+
+    return {
+      kind: StmtKind.Function,
+      loc: 0,
+      name,
+      typeParams: [],
+      params,
+      isArrow: false,
+      concise: false,
+      ownName: name,
+      place: FunctionPlace.Lifted,
+      bodySource: BodySource.Intrinsic,
+      isGenerator: false,
+      isAsync: false,
+    };
+  }
+
+  private signatureParam(type: FunctionType, index: int): Param {
+    const count = kParameterLetters.length;
+    const name = kParameterLetters.charAt(index % count);
+    const kind = this.signatureParamKind(type, index);
+
+    return { name, loc: 0, form: { kind }, decorators: [] };
+  }
+
+  private signatureParamKind(
+    type: FunctionType,
+    index: int,
+  ): ParamKind.Required | ParamKind.Optional | ParamKind.Rest {
+    const params = type.shape.params;
+    const isRest = type.shape.rest && index == params.length - 1;
+    if (isRest) {
+      return ParamKind.Rest;
+    }
+    if (params[index]?.optional == true) {
+      return ParamKind.Optional;
+    }
+
+    return ParamKind.Required;
+  }
+}

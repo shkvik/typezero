@@ -4,7 +4,6 @@ import {
   AssignExpr,
   BinaryExpr,
   BinaryOp,
-  CallArgument,
   ConditionalExpr,
   Expr,
   ExprKind,
@@ -15,27 +14,10 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import {
-  kAndText,
-  kArgumentSeparator,
-  kDoubleQuote,
-  kEmptyArray,
-  kEmptyText,
-  kEquals,
-  kEscape,
-  kFirstPrintable,
-  kHiddenMark,
-  kLastPrintable,
-  kNotEquals,
-  kOrText,
-  kOtherPlaceholder,
-  kUndefinedText,
-  kUnnamedOperand,
-  kZeroText,
-} from "../../const/expression-types.const.tz";
+import { kOtherPlaceholder } from "../../const/expression-types.const.tz";
 import { LogicSide } from "../../types/expression-types.types.tz";
 import { TruthUse } from "../../../../flow/truth-rules/types/truth-rules.types.tz";
-import { kNegation } from "../../../../flow/truth-rules/const/truth-rules.const.tz";
+import { kUnnamedOperand } from "../../../source-texts/const/source-texts.const.tz";
 
 partial class ExpressionTypes {
   private notTyped(expr: UnaryExpr, module: int): Type {
@@ -45,7 +27,7 @@ partial class ExpressionTypes {
   }
 
   private branchCheck(expr: Expr, use: TruthUse, module: int): void {
-    if (this.isLogical(expr) && expr.kind == ExprKind.Binary) {
+    if (this.shapes.isLogical(expr) && expr.kind == ExprKind.Binary) {
       const isAnd = expr.op == BinaryOp.LogAnd;
 
       this.branchCheck(expr.lhs, TruthUse.Condition, module);
@@ -80,19 +62,19 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     const isNegated = use == TruthUse.Not;
-    const first = this.hintText(expr.target, kUnnamedOperand);
-    const second = this.hintText(expr.value, kOtherPlaceholder);
+    const first = this.sources.hintText(expr.target, kUnnamedOperand);
+    const second = this.sources.hintText(expr.value, kOtherPlaceholder);
     const base = this.types.definedType(type);
     const isTestable =
       this.types.isOptional(type) ||
       this.types.isNumberLike(base) ||
       base.kind == TypeKind.String;
     const isCompared =
-      this.isWrittenLiteral(expr.value) ||
+      this.shapes.isWrittenLiteral(expr.value) ||
       type.kind == TypeKind.Error ||
       !isTestable;
     if (isCompared) {
-      const word = this.equalsText(isNegated);
+      const word = this.logic.equalsText(isNegated);
 
       return this.report(module, expr.loc, Code.AssignmentCompared, {
         word,
@@ -101,58 +83,13 @@ partial class ExpressionTypes {
       });
     }
 
-    const other = this.emptyTest(type, isNegated);
+    const other = this.logic.emptyTest(type, isNegated);
 
     this.report(module, expr.loc, Code.AssignmentTested, {
       first,
       second,
       other,
     });
-  }
-
-  private equalsText(isNegated: boolean): string {
-    if (isNegated) {
-      return kNotEquals;
-    }
-
-    return kEquals;
-  }
-
-  private emptyTest(type: Type, isNegated: boolean): string {
-    const test = this.equalsText(!isNegated);
-    const base = this.types.definedType(type);
-
-    if (this.types.isOptional(type)) {
-      return `${test} ${kUndefinedText}`;
-    }
-    if (base.kind == TypeKind.String) {
-      return `${test} ${kEmptyText}`;
-    }
-
-    return `${test} ${kZeroText}`;
-  }
-
-  private isWrittenLiteral(expr: Expr): boolean {
-    switch (expr.kind) {
-      case ExprKind.IntLit:
-      case ExprKind.FloatLit:
-      case ExprKind.StringLit:
-      case ExprKind.BoolLit:
-      case ExprKind.Undefined:
-        return true;
-      case ExprKind.Unary:
-        return expr.op == UnaryOp.Neg && this.isWrittenLiteral(expr.operand);
-      default:
-        return false;
-    }
-  }
-
-  private isLogical(expr: Expr): boolean {
-    if (expr.kind != ExprKind.Binary) {
-      return false;
-    }
-
-    return expr.op == BinaryOp.LogAnd || expr.op == BinaryOp.LogOr;
   }
 
   private logicalTyped(
@@ -162,7 +99,7 @@ partial class ExpressionTypes {
     module: int,
   ): Type {
     const isAnd = expr.op == BinaryOp.LogAnd;
-    const use = this.logicalUse(isAnd);
+    const use = this.logic.logicalUse(isAnd);
     const expected = this.types.wantedPart(wanted);
     const written = this.testedValue(expr.lhs, expected, use, module);
     const left = this.types.apparent(written);
@@ -173,7 +110,7 @@ partial class ExpressionTypes {
       expr.rhs,
       module,
     );
-    const hint = this.rightHint(isAnd, left, expected);
+    const hint = this.logic.rightHint(isAnd, left, expected);
     const facts = this.factsOf(expr.lhs, isAnd, module);
     const before = this.underFacts(facts);
     const right = this.logicalRight(expr, hint, side, module);
@@ -190,21 +127,13 @@ partial class ExpressionTypes {
     return this.logicalResult(expr, left, right, isAnd, module);
   }
 
-  private logicalUse(isAnd: boolean): TruthUse {
-    if (isAnd) {
-      return TruthUse.And;
-    }
-
-    return TruthUse.Or;
-  }
-
   private testedValue(
     expr: Expr,
     expected: Type | undefined,
     use: TruthUse,
     module: int,
   ): Type {
-    if (this.isLogical(expr) && expr.kind == ExprKind.Binary) {
+    if (this.shapes.isLogical(expr) && expr.kind == ExprKind.Binary) {
       return this.logicalTyped(expr, expected, LogicSide.Tested, module);
     }
     if (expr.kind == ExprKind.Unary && expr.op == UnaryOp.Not) {
@@ -214,20 +143,6 @@ partial class ExpressionTypes {
     }
 
     return this.typed(expr, expected, module);
-  }
-
-  private rightHint(
-    isAnd: boolean,
-    left: Type,
-    expected: Type | undefined,
-  ): Type | undefined {
-    const isPlain =
-      isAnd || left.kind == TypeKind.Error || left.kind == TypeKind.Undefined;
-    if (isPlain) {
-      return expected;
-    }
-
-    return this.types.definedType(left);
   }
 
   private logicalRight(
@@ -265,15 +180,15 @@ partial class ExpressionTypes {
       return this.reportRightVoid(expr, isAnd, module);
     }
 
-    const kept = this.keptLeft(left, isAnd);
-    const result = this.unify(kept, right);
+    const kept = this.logic.keptLeft(left, isAnd);
+    const result = this.unifier.unify(kept, right);
     if (result != undefined) {
       return result;
     }
 
     const first = this.text.of(kept);
     const second = this.text.of(right);
-    const code = this.noCommonCode(isAnd);
+    const code = this.logic.noCommonCode(isAnd);
 
     this.report(module, expr.loc, code, { first, second });
 
@@ -281,55 +196,14 @@ partial class ExpressionTypes {
   }
 
   private reportRightVoid(expr: BinaryExpr, isAnd: boolean, module: int): Type {
-    const word = this.logicalText(isAnd);
-    const test = this.hintText(expr.lhs, kUnnamedOperand);
-    const first = this.negatedText(test, isAnd);
-    const second = this.hintText(expr.rhs, kOtherPlaceholder);
+    const word = this.logic.logicalText(isAnd);
+    const test = this.sources.hintText(expr.lhs, kUnnamedOperand);
+    const first = this.logic.negatedText(test, isAnd);
+    const second = this.sources.hintText(expr.rhs, kOtherPlaceholder);
 
     this.report(module, expr.loc, Code.RightSideVoid, { word, first, second });
 
     return this.store.plain(TypeKind.Error);
-  }
-
-  private logicalText(isAnd: boolean): string {
-    if (isAnd) {
-      return kAndText;
-    }
-
-    return kOrText;
-  }
-
-  private negatedText(test: string, isAnd: boolean): string {
-    if (isAnd) {
-      return test;
-    }
-
-    return kNegation + test;
-  }
-
-  private keptLeft(left: Type, isAnd: boolean): Type {
-    if (!isAnd) {
-      return this.types.definedType(left);
-    }
-
-    const base = this.types.definedType(left);
-    const isAlwaysTruthy =
-      base.kind == TypeKind.Array ||
-      base.kind == TypeKind.Function ||
-      this.truth.isTruthyObject(base);
-    if (isAlwaysTruthy) {
-      return this.store.plain(TypeKind.Undefined);
-    }
-
-    return left;
-  }
-
-  private noCommonCode(isAnd: boolean): Code {
-    if (isAnd) {
-      return Code.LogicalAndNoCommon;
-    }
-
-    return Code.LogicalOrNoCommon;
   }
 
   private conditionalTyped(
@@ -340,18 +214,18 @@ partial class ExpressionTypes {
     this.branchCheck(expr.cond, TruthUse.Condition, module);
 
     const start = this.recursions.length;
-    const isThenWaiting = this.isWaiting(expr.thenExpr);
-    const isElseWaiting = this.isWaiting(expr.elseExpr);
+    const isThenWaiting = this.shapes.isWaiting(expr.thenExpr);
+    const isElseWaiting = this.shapes.isWaiting(expr.elseExpr);
     if (isThenWaiting && !isElseWaiting) {
       const elseType = this.branchTyped(expr, false, wanted, module);
-      const thenHint = this.branchHint(expr.thenExpr, elseType, wanted);
+      const thenHint = this.logic.branchHint(expr.thenExpr, elseType, wanted);
       const thenType = this.branchTyped(expr, true, thenHint, module);
 
       return this.joinedBranches(expr, thenType, elseType, start, module);
     }
 
     const thenType = this.branchTyped(expr, true, wanted, module);
-    const elseHint = this.elseHint(
+    const elseHint = this.logic.elseHint(
       expr,
       thenType,
       wanted,
@@ -368,7 +242,7 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const branch = this.sideOf(isThen, expr.thenExpr, expr.elseExpr);
+    const branch = this.narrowings.sideOf(isThen, expr.thenExpr, expr.elseExpr);
     const facts = this.factsOf(expr.cond, isThen, module);
     const before = this.underFacts(facts);
     const type = this.typed(branch, wanted, module);
@@ -376,67 +250,6 @@ partial class ExpressionTypes {
     this.facts = before;
 
     return type;
-  }
-
-  private isWaiting(branch: Expr): boolean {
-    return this.isShapedBranch(branch) || this.isNumberTree(branch);
-  }
-
-  private isShapedBranch(branch: Expr): boolean {
-    if (this.isLiteralShaped(branch)) {
-      return true;
-    }
-    if (branch.kind != ExprKind.Conditional) {
-      return false;
-    }
-
-    return (
-      this.isShapedBranch(branch.thenExpr) ||
-      this.isShapedBranch(branch.elseExpr)
-    );
-  }
-
-  private branchHint(
-    literal: Expr,
-    other: Type,
-    wanted: Type | undefined,
-  ): Type | undefined {
-    if (this.isNumberTree(literal)) {
-      return this.decimalHint(other, wanted);
-    }
-    if (wanted != undefined) {
-      return wanted;
-    }
-    if (other.kind == TypeKind.Error) {
-      return undefined;
-    }
-
-    return other;
-  }
-
-  private decimalHint(other: Type, hint: Type | undefined): Type | undefined {
-    const plain = this.types.definedType(other);
-    if (plain.kind == TypeKind.Decimal) {
-      return plain;
-    }
-
-    return hint;
-  }
-
-  private elseHint(
-    expr: ConditionalExpr,
-    thenType: Type,
-    wanted: Type | undefined,
-    isElseWaitingOnly: boolean,
-  ): Type | undefined {
-    if (isElseWaitingOnly) {
-      return this.branchHint(expr.elseExpr, thenType, wanted);
-    }
-    if (this.isNumberTree(expr.elseExpr)) {
-      return this.decimalHint(thenType, wanted);
-    }
-
-    return wanted;
   }
 
   private joinedBranches(
@@ -467,7 +280,7 @@ partial class ExpressionTypes {
       thenType,
       module,
     );
-    const common = this.unionUnify(thenTarget, elseTarget);
+    const common = this.unifier.unionUnify(thenTarget, elseTarget);
     if (common != undefined) {
       return common;
     }
@@ -514,108 +327,5 @@ partial class ExpressionTypes {
     }
 
     return other;
-  }
-
-  private hintText(expr: Expr, placeholder: string): string {
-    const text = this.sourceText(expr);
-    if (text == "") {
-      return placeholder;
-    }
-
-    return text;
-  }
-
-  private sourceText(expr: Expr): string {
-    switch (expr.kind) {
-      case ExprKind.Name:
-        if (expr.name.startsWith(kHiddenMark)) {
-          return "";
-        }
-
-        return expr.name;
-      case ExprKind.IntLit:
-        return `${expr.value}`;
-      case ExprKind.BoolLit:
-        return this.truthText(expr.value);
-      case ExprKind.Undefined:
-        return kUndefinedText;
-      case ExprKind.StringLit:
-        return this.stringSource(expr.value);
-      case ExprKind.ArrayLit:
-        return this.arraySource(expr.elements.length);
-      case ExprKind.Member: {
-        const object = this.sourceText(expr.object);
-        if (object == "") {
-          return "";
-        }
-
-        return `${object}${this.memberDot(expr.optional)}${expr.name}`;
-      }
-      case ExprKind.Index:
-        return this.indexSource(expr.object, expr.index, expr.optional);
-      case ExprKind.Call:
-        return this.callSource(expr.callee, expr.args, expr.optional);
-      case ExprKind.OptionalChain:
-        return this.sourceText(expr.chain);
-      default:
-        return "";
-    }
-  }
-
-  private stringSource(value: string): string {
-    for (const unit of value) {
-      const isPrintable = unit >= kFirstPrintable && unit <= kLastPrintable;
-      const isSpecial = unit == kDoubleQuote || unit == kEscape;
-      if (!isPrintable || isSpecial) {
-        return "";
-      }
-    }
-
-    return `${kDoubleQuote}${value}${kDoubleQuote}`;
-  }
-
-  private arraySource(count: int): string {
-    if (count > 0) {
-      return "";
-    }
-
-    return kEmptyArray;
-  }
-
-  private indexSource(object: Expr, index: Expr, optional: boolean): string {
-    const objectText = this.sourceText(object);
-    const indexText = this.sourceText(index);
-    if (objectText == "" || indexText == "") {
-      return "";
-    }
-    if (optional) {
-      return `${objectText}?.[${indexText}]`;
-    }
-
-    return `${objectText}[${indexText}]`;
-  }
-
-  private callSource(
-    callee: Expr,
-    args: CallArgument[],
-    optional: boolean,
-  ): string {
-    if (args.some((argument) => argument.spread)) {
-      return "";
-    }
-
-    const calleeText = this.sourceText(callee);
-    const texts = args.map((argument) => this.sourceText(argument.expr));
-    if (calleeText == "" || texts.includes("")) {
-      return "";
-    }
-
-    const joined = texts.join(kArgumentSeparator);
-
-    if (optional) {
-      return `${calleeText}?.(${joined})`;
-    }
-
-    return `${calleeText}(${joined})`;
   }
 }

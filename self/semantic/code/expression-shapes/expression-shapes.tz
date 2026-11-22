@@ -1,0 +1,376 @@
+import {
+  ArrayLitExpr,
+  BinaryOp,
+  Expr,
+  ExprKind,
+  ObjectLitExpr,
+  PropertyKind,
+  UnaryOp,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+  FunctionPlace,
+} from "../../../program/ast/types/ast.types.functions.tz";
+import {
+  Stmt,
+  StmtKind,
+} from "../../../program/ast/types/ast.types.statements.tz";
+import {
+  kContextFunctions,
+  kContextObjects,
+  kLengthName,
+} from "./const/expression-shapes.const.tz";
+
+export class ExpressionShapes {
+  public isNumberLiteral(expr: Expr): boolean {
+    if (expr.kind == ExprKind.FloatLit || expr.kind == ExprKind.IntLit) {
+      return true;
+    }
+
+    return (
+      expr.kind == ExprKind.Unary &&
+      expr.op == UnaryOp.Neg &&
+      this.isNumberLiteral(expr.operand)
+    );
+  }
+
+  public isFieldLiteral(init: Expr): boolean {
+    if (init.kind == ExprKind.Unary && init.op == UnaryOp.Neg) {
+      return this.isFieldLiteral(init.operand);
+    }
+
+    switch (init.kind) {
+      case ExprKind.IntLit:
+      case ExprKind.FloatLit:
+      case ExprKind.StringLit:
+      case ExprKind.Template:
+      case ExprKind.BoolLit:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public isPlainLiteral(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+      case ExprKind.FloatLit:
+      case ExprKind.StringLit:
+      case ExprKind.BoolLit:
+        return true;
+      case ExprKind.Unary: {
+        const operand = expr.operand;
+        const isNumber =
+          operand.kind == ExprKind.IntLit || operand.kind == ExprKind.FloatLit;
+
+        return this.isSign(expr.op) && isNumber;
+      }
+      default:
+        return false;
+    }
+  }
+
+  public isLiteralShaped(expr: Expr): boolean {
+    return expr.kind == ExprKind.ArrayLit || expr.kind == ExprKind.ObjectLit;
+  }
+
+  public isNumberTree(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+      case ExprKind.FloatLit:
+        return true;
+      case ExprKind.Unary:
+        return this.isSign(expr.op) && this.isNumberTree(expr.operand);
+      case ExprKind.Binary:
+        return (
+          this.isArithmetic(expr.op) &&
+          this.isNumberTree(expr.lhs) &&
+          this.isNumberTree(expr.rhs)
+        );
+      default:
+        return false;
+    }
+  }
+
+  public isIntTree(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+        return true;
+      case ExprKind.Unary:
+        return this.isSign(expr.op) && this.isIntTree(expr.operand);
+      case ExprKind.Binary:
+        return (
+          this.isWholeArithmetic(expr.op) &&
+          this.isIntTree(expr.lhs) &&
+          this.isIntTree(expr.rhs)
+        );
+      default:
+        return false;
+    }
+  }
+
+  public isSign(op: UnaryOp): boolean {
+    return op == UnaryOp.Neg || op == UnaryOp.Plus;
+  }
+
+  public isWholeArithmetic(op: BinaryOp): boolean {
+    switch (op) {
+      case BinaryOp.Add:
+      case BinaryOp.Sub:
+      case BinaryOp.Mul:
+      case BinaryOp.Rem:
+      case BinaryOp.Pow:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public isSpreadOnly(expr: ObjectLitExpr): boolean {
+    const hasSpread = expr.props.some(
+      (property) => property.form.kind == PropertyKind.Spread,
+    );
+    const hasOther = expr.props.some(
+      (property) =>
+        property.form.kind == PropertyKind.Method ||
+        property.form.kind == PropertyKind.Computed,
+    );
+
+    return hasSpread && !hasOther;
+  }
+
+  public isNeedingContext(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.Function:
+        return expr.fn.params.some((param) => param.type == undefined);
+      case ExprKind.ArrayLit:
+        return expr.elements.some(
+          (element) => !element.hole && this.isNeedingContext(element.expr),
+        );
+      case ExprKind.ObjectLit:
+        return expr.props.some((prop) => this.isNeedingContext(prop.value));
+      case ExprKind.Name:
+        return (
+          expr.typeArgs.length == 0 && kContextFunctions.includes(expr.name)
+        );
+      case ExprKind.Member: {
+        const object = expr.object;
+
+        return (
+          object.kind == ExprKind.Name && kContextObjects.includes(object.name)
+        );
+      }
+      default:
+        return false;
+    }
+  }
+
+  public isWrittenLiteral(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+      case ExprKind.FloatLit:
+      case ExprKind.StringLit:
+      case ExprKind.BoolLit:
+      case ExprKind.Undefined:
+        return true;
+      case ExprKind.Unary:
+        return expr.op == UnaryOp.Neg && this.isWrittenLiteral(expr.operand);
+      default:
+        return false;
+    }
+  }
+
+  public isLogical(expr: Expr): boolean {
+    if (expr.kind != ExprKind.Binary) {
+      return false;
+    }
+
+    return expr.op == BinaryOp.LogAnd || expr.op == BinaryOp.LogOr;
+  }
+
+  public isWaiting(branch: Expr): boolean {
+    return this.isShapedBranch(branch) || this.isNumberTree(branch);
+  }
+
+  public isClosure(fn: FunctionDecl): boolean {
+    return fn.isArrow || fn.place == FunctionPlace.Expression;
+  }
+
+  public childrenOf(expr: Expr): Expr[] {
+    switch (expr.kind) {
+      case ExprKind.Index:
+        return [expr.object, expr.index];
+      case ExprKind.Binary:
+        return [expr.lhs, expr.rhs];
+      case ExprKind.Await:
+        return [expr.value];
+      case ExprKind.Cast:
+        return [expr.operand];
+      case ExprKind.Sequence:
+        return expr.exprs;
+      case ExprKind.Yield: {
+        const value = expr.value;
+        if (value == undefined) {
+          return [];
+        }
+
+        return [value];
+      }
+      default:
+        return [];
+    }
+  }
+
+  public isLogicOp(op: BinaryOp): boolean {
+    return (
+      op == BinaryOp.Nullish || op == BinaryOp.LogOr || op == BinaryOp.LogAnd
+    );
+  }
+
+  public isSimpleTarget(target: Expr): boolean {
+    switch (target.kind) {
+      case ExprKind.Name:
+        return true;
+      case ExprKind.Member:
+        return !target.optional && this.isSimpleChain(target.object);
+      case ExprKind.Index:
+        return (
+          !target.optional &&
+          this.isSimpleChain(target.object) &&
+          this.isSimpleChain(target.index)
+        );
+      default:
+        return false;
+    }
+  }
+
+  public isLiteralTruth(value: Expr, truth: boolean): boolean {
+    return value.kind == ExprKind.BoolLit && value.value == truth;
+  }
+
+  public literalCondition(cond: Expr): boolean | undefined {
+    if (cond.kind != ExprKind.BoolLit) {
+      return undefined;
+    }
+
+    return cond.value;
+  }
+
+  public isTrueLiteral(cond: Expr): boolean {
+    return this.literalCondition(cond) == true;
+  }
+
+  public isForever(cond: Expr | undefined): boolean {
+    return cond == undefined || this.isTrueLiteral(cond);
+  }
+
+  public hasBreak(statement: Stmt | undefined): boolean {
+    return this.breaksOut(statement, false);
+  }
+
+  public isLength(expr: Expr): boolean {
+    if (expr.kind == ExprKind.OptionalChain) {
+      return this.isLength(expr.chain);
+    }
+
+    return expr.kind == ExprKind.Member && expr.name == kLengthName;
+  }
+
+  public isZeroLiteral(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+        return expr.value == 0;
+      case ExprKind.FloatLit:
+        return expr.value == 0.0;
+      case ExprKind.Unary:
+        return expr.op == UnaryOp.Neg && this.isZeroLiteral(expr.operand);
+      default:
+        return false;
+    }
+  }
+
+  public isPlainList(literal: ArrayLitExpr): boolean {
+    if (literal.elements.length == 0) {
+      return false;
+    }
+
+    return literal.elements.every(
+      (element) => !element.spread && !element.hole,
+    );
+  }
+
+  public isFresh(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.ArrayLit:
+      case ExprKind.ObjectLit:
+        return true;
+      case ExprKind.Conditional:
+        return this.isFresh(expr.thenExpr) && this.isFresh(expr.elseExpr);
+      default:
+        return false;
+    }
+  }
+
+  private isArithmetic(op: BinaryOp): boolean {
+    return op == BinaryOp.Div || this.isWholeArithmetic(op);
+  }
+
+  private isShapedBranch(branch: Expr): boolean {
+    if (this.isLiteralShaped(branch)) {
+      return true;
+    }
+    if (branch.kind != ExprKind.Conditional) {
+      return false;
+    }
+
+    return (
+      this.isShapedBranch(branch.thenExpr) ||
+      this.isShapedBranch(branch.elseExpr)
+    );
+  }
+
+  private isSimpleChain(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.Name:
+      case ExprKind.IntLit:
+      case ExprKind.StringLit:
+        return true;
+      case ExprKind.Member:
+        return !expr.optional && this.isSimpleChain(expr.object);
+      default:
+        return false;
+    }
+  }
+
+  private breaksOut(statement: Stmt | undefined, isNested: boolean): boolean {
+    if (statement == undefined) {
+      return false;
+    }
+
+    switch (statement.kind) {
+      case StmtKind.Break:
+        return !isNested || statement.label != "";
+      case StmtKind.Block:
+        return statement.body.some((one) => this.breaksOut(one, isNested));
+      case StmtKind.If:
+        return (
+          this.breaksOut(statement.thenStmt, isNested) ||
+          this.breaksOut(statement.elseStmt, isNested)
+        );
+      case StmtKind.Labeled:
+        return this.breaksOut(statement.body, isNested);
+      case StmtKind.While:
+      case StmtKind.DoWhile:
+      case StmtKind.ForOf:
+        return this.breaksOut(statement.body, true);
+      case StmtKind.For:
+        return this.breaksOut(statement.body, true);
+      case StmtKind.Switch:
+        return statement.cases.some((option) =>
+          option.body.some((one) => this.breaksOut(one, true)),
+        );
+      default:
+        return false;
+    }
+  }
+}

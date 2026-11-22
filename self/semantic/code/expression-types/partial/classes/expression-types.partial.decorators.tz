@@ -3,7 +3,6 @@ import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import {
   ClassDecl,
-  Decorator,
   FieldKind,
   MethodKind,
 } from "../../../../../program/ast/types/ast.types.classes.tz";
@@ -14,14 +13,11 @@ import {
 import { FunctionDecl } from "../../../../../program/ast/types/ast.types.functions.tz";
 import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
 import {
-  FunctionType,
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
 import {
   kDecoratorPlaces,
-  kDescriptorValueName,
-  kHiddenMark,
   kMetadataName,
   kReflectName,
 } from "../../const/expression-types.const.tz";
@@ -34,7 +30,7 @@ import {
 
 partial class ExpressionTypes {
   private decoratorChecks(decl: ClassDecl, module: int): void {
-    if (!this.isDecoratedClass(decl)) {
+    if (!this.decorators.isDecoratedClass(decl)) {
       return;
     }
 
@@ -45,7 +41,7 @@ partial class ExpressionTypes {
       this.decorate(run, module);
     }
 
-    const uses = this.classUses(decl);
+    const uses = this.decorators.classUses(decl);
     const at = uses[0]?.decorator.loc;
     if (at == undefined) {
       return;
@@ -63,24 +59,6 @@ partial class ExpressionTypes {
     );
   }
 
-  private isDecoratedClass(decl: ClassDecl): boolean {
-    const isMethod = decl.methods.some((fn) => this.isDecoratedFunction(fn));
-    const isMade = decl.constructors.some((fn) => this.hasDecoratedParams(fn));
-    const isField = decl.fields.some((field) => field.decorators.length > 0);
-
-    return decl.decorators.length > 0 || isMethod || isMade || isField;
-  }
-
-  private isDecoratedFunction(fn: FunctionDecl): boolean {
-    const own = fn.role?.decorators ?? [];
-
-    return own.length > 0 || this.hasDecoratedParams(fn);
-  }
-
-  private hasDecoratedParams(fn: FunctionDecl): boolean {
-    return fn.params.some((param) => param.decorators.length > 0);
-  }
-
   private decoratedNamesCheck(decl: ClassDecl, module: int): void {
     const members = this.decoratedNames(decl);
 
@@ -96,7 +74,7 @@ partial class ExpressionTypes {
     const members: DecoratedName[] = [];
 
     for (const field of decl.fields) {
-      const decorators = this.decoratorNames(field.decorators);
+      const decorators = this.decorators.decoratorNames(field.decorators);
       if (decorators.length > 0) {
         members.push({
           name: field.name,
@@ -108,34 +86,18 @@ partial class ExpressionTypes {
     }
 
     for (const fn of decl.methods) {
-      const decorators = this.methodDecoratorNames(fn);
+      const decorators = this.decorators.methodDecoratorNames(fn);
       if (decorators.length > 0) {
         members.push({
           name: fn.name,
           loc: fn.loc,
-          isStatic: this.isStaticMethod(fn),
+          isStatic: this.classes.isStaticMethod(fn),
           decorators,
         });
       }
     }
 
     return members;
-  }
-
-  private decoratorNames(decorators: Decorator[]): string[] {
-    return decorators.map((decorator) => this.decoratorName(decorator.expr));
-  }
-
-  private methodDecoratorNames(fn: FunctionDecl): string[] {
-    const names = this.decoratorNames(fn.role?.decorators ?? []);
-
-    for (const param of fn.params) {
-      const more = this.decoratorNames(param.decorators);
-
-      names.push(...more);
-    }
-
-    return names;
   }
 
   private nameClashCheck(
@@ -149,8 +111,8 @@ partial class ExpressionTypes {
       return;
     }
 
-    const first = this.clashWhat(other, later);
-    const second = this.clashRecords(other, later);
+    const first = this.decorators.clashWhat(other, later);
+    const second = this.decorators.clashRecords(other, later);
 
     this.report(module, later.loc, Code.DecoratedSameName, {
       word: decl.name ?? "",
@@ -159,30 +121,9 @@ partial class ExpressionTypes {
     });
   }
 
-  private clashWhat(earlier: DecoratedName, later: DecoratedName): string {
-    const name = later.name;
-    if (earlier.isStatic != later.isStatic) {
-      return `both the static member '${name}' and the member '${name}'`;
-    }
-
-    return `two variants of '${name}'`;
-  }
-
-  private clashRecords(earlier: DecoratedName, later: DecoratedName): string {
-    const names = later.decorators.slice().reverse();
-    const shared = names.find(
-      (name) => name != "" && earlier.decorators.includes(name),
-    );
-    if (shared == undefined) {
-      return "the records 'design:*' the compiler writes";
-    }
-
-    return `the records of '@${shared}'`;
-  }
-
   private decoratedConstructorsCheck(decl: ClassDecl, module: int): void {
     const decorated = decl.constructors.filter((fn) =>
-      this.hasDecoratedParams(fn),
+      this.decorators.hasDecoratedParams(fn),
     );
     const second = decorated[1];
     if (second == undefined) {
@@ -198,7 +139,7 @@ partial class ExpressionTypes {
     const runs: DecorateRun[] = [];
 
     for (const field of decl.fields) {
-      const uses = this.ownUses(field.decorators);
+      const uses = this.decorators.ownUses(field.decorators);
       const first = uses[0];
       if (first != undefined) {
         runs.push({
@@ -213,9 +154,9 @@ partial class ExpressionTypes {
     }
 
     for (const fn of decl.methods) {
-      const uses = this.ownUses(fn.role?.decorators ?? []);
+      const uses = this.decorators.ownUses(fn.role?.decorators ?? []);
 
-      this.addParamUses(uses, fn);
+      this.decorators.addParamUses(uses, fn);
 
       const first = uses[0];
       if (first != undefined) {
@@ -224,7 +165,7 @@ partial class ExpressionTypes {
           method: fn,
           uses,
           place: DecoratorPlace.Method,
-          isStatic: this.isStaticMethod(fn),
+          isStatic: this.classes.isStaticMethod(fn),
           at: first.decorator.loc,
         });
       }
@@ -234,30 +175,6 @@ partial class ExpressionTypes {
     const statics = runs.filter((run) => run.isStatic);
 
     return instance.concat(statics);
-  }
-
-  private ownUses(decorators: Decorator[]): DecoratorUse[] {
-    return decorators.map((decorator) => ({ decorator, param: -1 }));
-  }
-
-  private addParamUses(uses: DecoratorUse[], fn: FunctionDecl): void {
-    for (let index = 0; index < fn.params.length; index++) {
-      const param = fn.params[index];
-
-      for (const decorator of param?.decorators ?? []) {
-        uses.push({ decorator, param: index });
-      }
-    }
-  }
-
-  private classUses(decl: ClassDecl): DecoratorUse[] {
-    const uses = this.ownUses(decl.decorators);
-
-    for (const fn of decl.constructors) {
-      this.addParamUses(uses, fn);
-    }
-
-    return uses;
   }
 
   private decorate(run: DecorateRun, module: int): void {
@@ -273,13 +190,14 @@ partial class ExpressionTypes {
     let hasDescriptor = false;
 
     for (const use of run.uses) {
-      const place = this.usePlace(run, use);
+      const place = this.decorators.usePlace(run, use);
       const type = this.decoratorType(use.decorator.expr, module);
       const count = this.decoratorFit(use, place, type, module);
 
       types.push(type);
       isFitting = isFitting && count >= 0;
-      hasDescriptor = hasDescriptor || this.isDescriptorUse(place, count);
+      hasDescriptor =
+        hasDescriptor || this.decorators.isDescriptorUse(place, count);
     }
 
     if (!isFitting) {
@@ -298,18 +216,6 @@ partial class ExpressionTypes {
         this.decoratorResultCheck(run, use, type, hasDescriptor, module);
       }
     }
-  }
-
-  private isDescriptorUse(place: DecoratorPlace, count: int): boolean {
-    return place == DecoratorPlace.Method && count >= 3;
-  }
-
-  private usePlace(run: DecorateRun, use: DecoratorUse): DecoratorPlace {
-    if (use.param >= 0) {
-      return DecoratorPlace.Parameter;
-    }
-
-    return run.place;
   }
 
   private decoratorType(expr: Expr, module: int): Type {
@@ -365,8 +271,8 @@ partial class ExpressionTypes {
     }
 
     const count = params.length;
-    const needs = Math.min(this.leastOf(type), count);
-    const word = this.decoratorLabel(use.decorator.expr);
+    const needs = Math.min(this.overloads.leastOf(type), count);
+    const word = this.decorators.decoratorLabel(use.decorator.expr);
     const loc = use.decorator.loc;
     if (needs > given) {
       this.report(module, loc, Code.DecoratorArguments, {
@@ -380,15 +286,17 @@ partial class ExpressionTypes {
       return -1;
     }
 
-    const third = this.thirdParameter(type);
-    const isDescriptor = third != undefined && this.isDescriptorType(third);
+    const third = this.decorators.thirdParameter(type);
+    const isDescriptor =
+      third != undefined && this.decorators.isDescriptorType(third);
     if (isDescriptor && place == DecoratorPlace.Parameter) {
       this.report(module, loc, Code.DecoratorDescriptorParameter, { word });
 
       return -1;
     }
 
-    const isPosition = third != undefined && this.isPositionType(third);
+    const isPosition =
+      third != undefined && this.decorators.isPositionType(third);
     if (isPosition && place == DecoratorPlace.Method) {
       this.report(module, loc, Code.DecoratorPositionMethod, { word });
 
@@ -396,62 +304,6 @@ partial class ExpressionTypes {
     }
 
     return count;
-  }
-
-  private thirdParameter(type: FunctionType): Type | undefined {
-    const third = type.shape.params[2];
-    if (third == undefined) {
-      return undefined;
-    }
-
-    return this.types.definedType(third.type);
-  }
-
-  private isDescriptorType(type: Type): boolean {
-    if (type.kind != TypeKind.Object) {
-      return false;
-    }
-
-    return type.fields.some((field) => field.name == kDescriptorValueName);
-  }
-
-  private isPositionType(type: Type): boolean {
-    return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
-  }
-
-  private decoratorName(expr: Expr): string {
-    const names: string[] = [];
-    let link = this.withoutCalls(expr);
-
-    while (link.kind == ExprKind.Member) {
-      names.push(link.name);
-      link = this.withoutCalls(link.object);
-    }
-
-    if (link.kind != ExprKind.Name || link.name.startsWith(kHiddenMark)) {
-      return "";
-    }
-
-    return [link.name].concat(names.reverse()).join(".");
-  }
-
-  private withoutCalls(expr: Expr): Expr {
-    let callee = expr;
-
-    while (callee.kind == ExprKind.Call) {
-      callee = callee.callee;
-    }
-
-    return callee;
-  }
-
-  private decoratorLabel(expr: Expr): string {
-    const name = this.decoratorName(expr);
-    if (name == "") {
-      return "the decorator";
-    }
-
-    return `'${name}'`;
   }
 
   private decoratorResultCheck(
@@ -466,12 +318,12 @@ partial class ExpressionTypes {
     }
 
     const result = type.shape.result;
-    const place = this.usePlace(run, use);
+    const place = this.decorators.usePlace(run, use);
     const isNothing =
       result.kind == TypeKind.Void ||
       result.kind == TypeKind.Undefined ||
       result.kind == TypeKind.Error;
-    if (isNothing || this.mentionsParameter(result)) {
+    if (isNothing || this.parts.mentionsParameter(result)) {
       return;
     }
 
@@ -485,7 +337,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const word = this.decoratorLabel(use.decorator.expr);
+    const word = this.decorators.decoratorLabel(use.decorator.expr);
     const first = this.text.of(result);
     const loc = use.decorator.loc;
     if (isClassPlace && result.kind == TypeKind.Class && !result.exact) {

@@ -24,7 +24,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const word = this.operandName(member.object);
+    const word = this.sources.operandName(member.object);
     if (member.name == "toDecimal") {
       this.report(module, member.loc, Code.DoubleToDecimal, { word });
 
@@ -90,9 +90,11 @@ partial class ExpressionTypes {
 
     this.quiet -= 1;
 
-    const first = expr.args.findIndex((arg) => !this.isNumberLiteral(arg.expr));
+    const first = expr.args.findIndex(
+      (arg) => !this.shapes.isNumberLiteral(arg.expr),
+    );
     const common = types[first];
-    if (common == undefined || !this.isMathNumber(common)) {
+    if (common == undefined || !this.library.isMathNumber(common)) {
       return;
     }
 
@@ -102,11 +104,14 @@ partial class ExpressionTypes {
       if (arg == undefined || type == undefined || type == common) {
         continue;
       }
-      if (!this.isMathNumber(type) || this.isNumberLiteral(arg)) {
+      if (
+        !this.library.isMathNumber(type) ||
+        this.shapes.isNumberLiteral(arg)
+      ) {
         continue;
       }
 
-      const place = this.mathOneHint(arg, type, common);
+      const place = this.library.mathOneHint(arg, type, common);
 
       this.report(module, arg.loc, Code.MathOneType, {
         first: this.text.of(common),
@@ -116,24 +121,6 @@ partial class ExpressionTypes {
 
       return;
     }
-  }
-
-  private isMathNumber(type: Type): boolean {
-    return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
-  }
-
-  private mathOneHint(arg: Expr, type: Type, common: Type): string {
-    const code = this.numberCode(type, common);
-    const word = this.operandName(arg);
-    const other = this.conversionName(common);
-    if (code == Code.ConvertExplicitly) {
-      return `; convert it explicitly: '${word}.${other}()'`;
-    }
-    if (code == Code.RoundThenConvert) {
-      return `; round it first, then convert: 'Math.trunc(${word}).${other}()' (or Math.round, Math.floor, Math.ceil)`;
-    }
-
-    return "";
   }
 
   private mathSpreadCall(expr: CallExpr, module: int): Type | undefined {
@@ -164,7 +151,7 @@ partial class ExpressionTypes {
         );
 
         hasValue = true;
-        isNumeric = isNumeric && this.isMathNumber(type);
+        isNumeric = isNumeric && this.library.isMathNumber(type);
 
         continue;
       }
@@ -212,7 +199,7 @@ partial class ExpressionTypes {
     if (item != undefined && item.kind == TypeKind.Error) {
       return undefined;
     }
-    if (item != undefined && this.isMathNumber(item)) {
+    if (item != undefined && this.library.isMathNumber(item)) {
       return item;
     }
 

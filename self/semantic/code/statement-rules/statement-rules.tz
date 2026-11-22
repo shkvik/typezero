@@ -1,0 +1,334 @@
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  DictKind,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { ValueTarget } from "../expression-types/types/expression-types.types.tz";
+import {
+  Stmt,
+  StmtKind,
+} from "../../../program/ast/types/ast.types.statements.tz";
+import { SymbolKind } from "../../../program/scopes/types/scopes.types.tz";
+import { kNameSeparator } from "../../types/type-of-rules/const/type-of-rules.const.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { TypeRelation } from "../../types/type-relation/type-relation.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { ModuleQuestions } from "../../declaration/module-questions/module-questions.tz";
+import {
+  kLastAndSeparator,
+  kPromisePlaceholder,
+  kTakingMethods,
+} from "./const/statement-rules.const.tz";
+
+export class StatementRules {
+  private readonly store: TypeStore;
+  private readonly relation: TypeRelation;
+  private readonly types: TypeQuestions;
+  private readonly modules: ModuleQuestions;
+
+  public constructor(
+    store: TypeStore,
+    relation: TypeRelation,
+    types: TypeQuestions,
+    modules: ModuleQuestions,
+  ) {
+    this.store = store;
+    this.relation = relation;
+    this.types = types;
+    this.modules = modules;
+  }
+
+  public boundsText(isLiteral: boolean, index: string, below: string): string {
+    if (isLiteral) {
+      return below;
+    }
+
+    return `${index} >= 0 && ${below}`;
+  }
+
+  public simpleText(expr: Expr): string {
+    if (expr.kind == ExprKind.Name) {
+      return expr.name;
+    }
+    if (expr.kind == ExprKind.IntLit) {
+      return `${expr.value}`;
+    }
+
+    return "";
+  }
+
+  public simpleOr(expr: Expr, fallback: string): string {
+    const text = this.simpleText(expr);
+    if (text == "") {
+      return fallback;
+    }
+
+    return text;
+  }
+
+  public knownOr(isKnown: boolean, text: string, fallback: string): string {
+    if (isKnown) {
+      return text;
+    }
+
+    return fallback;
+  }
+
+  public taggedPlace(count: int): string {
+    if (count == 2) {
+      return " and 1 value";
+    }
+    if (count != 1) {
+      return ` and ${count - 1} values`;
+    }
+
+    return "";
+  }
+
+  public isRecordWanted(wanted: Type | undefined): boolean {
+    if (wanted == undefined) {
+      return false;
+    }
+
+    const goal = this.types.definedType(wanted);
+
+    return goal.kind == TypeKind.Dict && goal.dict == DictKind.Record;
+  }
+
+  public itemTarget(
+    item: Stmt,
+    module: int,
+    name: string,
+  ): ValueTarget | undefined {
+    switch (item.kind) {
+      case StmtKind.VarDecl: {
+        const decl = item.decls.find((one) => one.name == name);
+        if (decl == undefined) {
+          return undefined;
+        }
+
+        return { module, kind: SymbolKind.Variable, loc: decl.loc };
+      }
+      case StmtKind.Function:
+        return this.namedTarget(item.name, name, {
+          module,
+          kind: SymbolKind.Function,
+          loc: item.loc,
+        });
+      case StmtKind.Class:
+        return this.namedTarget(item.name ?? "", name, {
+          module,
+          kind: SymbolKind.Class,
+          loc: item.loc,
+        });
+      case StmtKind.Enum:
+        return this.namedTarget(item.name, name, {
+          module,
+          kind: SymbolKind.Enum,
+          loc: item.loc,
+        });
+      default:
+        return undefined;
+    }
+  }
+
+  public isMappingCall(expr: Expr): boolean {
+    if (expr.kind != ExprKind.Call) {
+      return false;
+    }
+
+    const callee = expr.callee;
+    if (callee.kind != ExprKind.Member) {
+      return false;
+    }
+
+    return callee.name == "map" || callee.name == "flatMap";
+  }
+
+  public calleeLoc(expr: Expr): int {
+    if (expr.kind == ExprKind.Call && expr.callee.kind == ExprKind.Member) {
+      return expr.callee.loc;
+    }
+
+    return expr.loc;
+  }
+
+  public shownText(text: string): string {
+    if (text == "") {
+      return kPromisePlaceholder;
+    }
+
+    return text;
+  }
+
+  public heldType(type: Type): Type {
+    const defined = this.types.definedType(type);
+    if (defined.kind == TypeKind.Array) {
+      return this.heldType(defined.item);
+    }
+
+    return defined;
+  }
+
+  public isTakingElement(expr: Expr): boolean {
+    if (expr.kind != ExprKind.Call) {
+      return false;
+    }
+
+    const callee = expr.callee;
+
+    return (
+      callee.kind == ExprKind.Member && kTakingMethods.includes(callee.name)
+    );
+  }
+
+  public caseCode(hasResult: boolean): Code {
+    if (hasResult) {
+      return Code.CaseResultsCompared;
+    }
+
+    return Code.CaseNotComparable;
+  }
+
+  public listedNames(names: string[]): string {
+    const last = names[names.length - 1];
+    if (names.length < 2 || last == undefined) {
+      return names.join("");
+    }
+
+    const front = names.slice(0, names.length - 1);
+
+    return `${front.join(kNameSeparator)}${kLastAndSeparator}${last}`;
+  }
+
+  public isShapedType(type: Type): boolean {
+    if (type.kind == TypeKind.Error) {
+      return false;
+    }
+    if (type.kind == TypeKind.Result) {
+      return true;
+    }
+
+    let held = this.types.definedType(type);
+
+    while (held.kind == TypeKind.Array) {
+      held = this.types.definedType(held.item);
+    }
+
+    switch (held.kind) {
+      case TypeKind.Object:
+      case TypeKind.Instance:
+      case TypeKind.Tuple:
+      case TypeKind.Dict:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public dictItem(dict: DictKind, key: Type, value: Type): Type {
+    switch (dict) {
+      case DictKind.Map:
+        return this.store.plainTuple([key, value]);
+      case DictKind.Set:
+        return key;
+      default:
+        return this.store.plain(TypeKind.Error);
+    }
+  }
+
+  public isInsideFunction(fn: FunctionDecl, loc: int): boolean {
+    const span = fn.source;
+    if (span == undefined) {
+      return false;
+    }
+
+    return loc >= span.start && loc < span.end;
+  }
+
+  public heldValue(type: Type): Type {
+    let held = this.types.definedType(type);
+
+    while (held.kind == TypeKind.Array) {
+      held = this.types.definedType(held.item);
+    }
+
+    return held;
+  }
+
+  public instanceTextCode(held: Type): Code | undefined {
+    if (held.kind != TypeKind.Instance || this.isDateType(held)) {
+      return undefined;
+    }
+
+    return Code.ArrayTextObjects;
+  }
+
+  public instanceSortCode(held: Type): Code {
+    if (this.isDateType(held)) {
+      return Code.SortDates;
+    }
+
+    return Code.SortObjects;
+  }
+
+  public plainSortProblem(element: Type): Code | undefined {
+    const base = this.types.definedType(element);
+    if (base.kind == TypeKind.Union && !this.isTextualUnion(base.parts)) {
+      return Code.SortMixed;
+    }
+
+    const apparent = this.relation.baseOf(base) ?? base;
+    const isNumber =
+      apparent.kind == TypeKind.Int ||
+      apparent.kind == TypeKind.Double ||
+      apparent.kind == TypeKind.Decimal;
+    if (isNumber) {
+      return Code.SortNumbers;
+    }
+
+    return undefined;
+  }
+
+  public sortExample(element: Type): string {
+    if (this.types.isOptional(element)) {
+      return "(x ?? 0) - (y ?? 0)";
+    }
+
+    return "x - y";
+  }
+
+  private namedTarget(
+    declared: string,
+    name: string,
+    target: ValueTarget,
+  ): ValueTarget | undefined {
+    if (declared != name) {
+      return undefined;
+    }
+
+    return target;
+  }
+
+  private isDateType(type: Type): boolean {
+    return (
+      type.kind == TypeKind.Instance &&
+      type.name == "Date" &&
+      this.modules.isLibraryModule(type.module)
+    );
+  }
+
+  private isTextualUnion(parts: Type[]): boolean {
+    return parts.every((part) => {
+      const base = this.relation.baseOf(part) ?? part;
+
+      return base.kind == TypeKind.String || base.kind == TypeKind.Boolean;
+    });
+  }
+}

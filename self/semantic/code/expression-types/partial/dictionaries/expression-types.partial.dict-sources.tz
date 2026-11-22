@@ -11,16 +11,10 @@ import {
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import {
   DictKind,
-  InstanceType,
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import {
-  kBuiltinValueClasses,
-  kNoPlace,
-  kSetCombiners,
-  kUnnamedOperand,
-} from "../../const/expression-types.const.tz";
+import { kNoPlace, kSetCombiners } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
   private dictSourceTyped(
@@ -41,14 +35,14 @@ partial class ExpressionTypes {
       return typed;
     }
 
-    const goal = this.wantedDict(wanted, dict);
+    const goal = this.dictionaries.wantedDict(wanted, dict);
     if (goal != undefined && goal.kind == TypeKind.Dict) {
       this.dictSourceCheck(source, dict, goal.key, goal.value, module);
 
       return goal;
     }
     if (source == undefined) {
-      const code = this.dictTypesCode(dict);
+      const code = this.dictionaries.dictTypesCode(dict);
 
       this.report(module, expr.loc, code, kNoDetails);
 
@@ -59,33 +53,6 @@ partial class ExpressionTypes {
     }
 
     return this.setFromValues(source, module);
-  }
-
-  private wantedDict(
-    wanted: Type | undefined,
-    dict: DictKind,
-  ): Type | undefined {
-    if (wanted == undefined) {
-      return undefined;
-    }
-
-    const parts = this.types.unionMembers(this.types.definedType(wanted));
-    const found = parts.filter(
-      (part) => part.kind == TypeKind.Dict && part.dict == dict,
-    );
-    if (found.length != 1) {
-      return undefined;
-    }
-
-    return found[0];
-  }
-
-  private dictTypesCode(dict: DictKind): Code {
-    if (dict == DictKind.Map) {
-      return Code.NewMapNeedsTypes;
-    }
-
-    return Code.NewSetNeedsType;
   }
 
   private dictSourceCheck(
@@ -99,23 +66,10 @@ partial class ExpressionTypes {
       return;
     }
 
-    const element = this.dictElement(dict, key, value);
+    const element = this.dictionaries.dictElement(dict, key, value);
     const list = this.store.arrayOf(element);
 
     this.checked(source, list, module, kNoPlace);
-  }
-
-  private dictElement(dict: DictKind, key: Type, value: Type): Type {
-    if (dict == DictKind.Map) {
-      return this.store.tupleOf({
-        items: [key, value],
-        readonly: false,
-        required: 2,
-        rest: -1,
-      });
-    }
-
-    return key;
   }
 
   private mapFromPairs(source: Expr, module: int): Type {
@@ -135,7 +89,7 @@ partial class ExpressionTypes {
         const found = this.typed(pair, undefined, module);
 
         this.report(module, source.loc, Code.MapNotPairs, {
-          word: this.text.of(this.widened(found)),
+          word: this.text.of(this.functions.widened(found)),
         });
 
         return error;
@@ -148,8 +102,12 @@ partial class ExpressionTypes {
         return error;
       }
 
-      const keyType = this.widened(this.typed(head, undefined, module));
-      const valueType = this.widened(this.typed(tail, undefined, module));
+      const keyType = this.functions.widened(
+        this.typed(head, undefined, module),
+      );
+      const valueType = this.functions.widened(
+        this.typed(tail, undefined, module),
+      );
 
       if (key != undefined && key != keyType) {
         this.pairsDifferReport(head, Code.MapKeysDiffer, key, keyType, module);
@@ -262,27 +220,12 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const word = this.recordKeyText(target);
-    const code = this.recordMissingCode(base.value);
+    const word = this.dictionaries.recordKeyText(target);
+    const code = this.dictionaries.recordMissingCode(base.value);
 
     this.report(module, target.loc, code, { word });
 
     return true;
-  }
-
-  private recordKeyText(target: Expr): string {
-    if (target.kind == ExprKind.Member) {
-      const holder = this.hintText(target.object, kUnnamedOperand);
-
-      return `${holder}.${target.name}`;
-    }
-    if (target.kind == ExprKind.Index) {
-      const holder = this.hintText(target.object, kUnnamedOperand);
-
-      return `${holder}[k]`;
-    }
-
-    return "";
   }
 
   private recordValueOf(holder: Expr, module: int): Type | undefined {
@@ -300,24 +243,6 @@ partial class ExpressionTypes {
     return base.value;
   }
 
-  private recordMissingCode(value: Type): Code {
-    const base = this.types.apparent(value);
-    if (base.kind == TypeKind.String || base.kind == TypeKind.Template) {
-      return Code.RecordTextKeyMissing;
-    }
-
-    return Code.RecordKeyMissing;
-  }
-
-  private recordMemberTyped(expr: MemberExpr, object: Type): Type | undefined {
-    const base = this.types.definedType(object);
-    if (base.kind != TypeKind.Dict || base.dict != DictKind.Record) {
-      return undefined;
-    }
-
-    return this.types.optional(base.value);
-  }
-
   private recordMethodCheck(
     expr: CallExpr,
     member: MemberExpr,
@@ -332,7 +257,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const other = this.tupleText(member.object);
+    const other = this.sources.tupleText(member.object);
 
     this.looseArguments(expr.args, module);
     this.report(module, member.loc, Code.RecordHasOwn, {
@@ -350,13 +275,13 @@ partial class ExpressionTypes {
 
     this.quiet -= 1;
 
-    if (this.hasMethodFields(type)) {
+    if (this.types.hasMethodFields(type)) {
       this.report(module, property.value.loc, Code.SpreadMethods, kNoDetails);
 
       return;
     }
 
-    const code = this.spreadCode(type);
+    const code = this.dictionaries.spreadCode(type);
     if (code == undefined) {
       return;
     }
@@ -364,75 +289,6 @@ partial class ExpressionTypes {
     this.report(module, property.value.loc, code, {
       word: this.text.of(type),
     });
-  }
-
-  private spreadCode(type: Type): Code | undefined {
-    if (this.types.isOptional(type)) {
-      return this.optionalSpreadCode(type);
-    }
-
-    const base = this.types.apparent(type);
-
-    switch (base.kind) {
-      case TypeKind.Array:
-      case TypeKind.Tuple:
-      case TypeKind.String:
-      case TypeKind.Template:
-        return Code.SpreadArrayIndices;
-      case TypeKind.Dict:
-        if (base.dict == DictKind.Record) {
-          return undefined;
-        }
-
-        return Code.SpreadNotObject;
-      case TypeKind.Instance:
-        if (this.isBuiltinValue(base)) {
-          return Code.SpreadNotObject;
-        }
-
-        return undefined;
-      case TypeKind.Int:
-      case TypeKind.Double:
-      case TypeKind.Decimal:
-      case TypeKind.Boolean:
-        return Code.SpreadNotObject;
-      default:
-        return undefined;
-    }
-  }
-
-  private optionalSpreadCode(type: Type): Code {
-    const base = this.types.apparent(this.types.definedType(type));
-
-    switch (base.kind) {
-      case TypeKind.Array:
-      case TypeKind.Tuple:
-        return Code.SpreadArrayIndices;
-      case TypeKind.Object:
-      case TypeKind.AnyObject:
-      case TypeKind.Error:
-        return Code.SpreadMaybeUndefined;
-      case TypeKind.Dict:
-        if (base.dict == DictKind.Record) {
-          return Code.SpreadMaybeUndefined;
-        }
-
-        return Code.SpreadNotObject;
-      case TypeKind.Instance:
-        if (this.isBuiltinValue(base)) {
-          return Code.SpreadNotObject;
-        }
-
-        return Code.SpreadMaybeUndefined;
-      default:
-        return Code.SpreadNotObject;
-    }
-  }
-
-  private isBuiltinValue(type: InstanceType): boolean {
-    const isLibrary = this.isLibraryModule(type.module);
-
-    return isLibrary && kBuiltinValueClasses.includes(type.name);
   }
 
   private recordSpreadCheck(property: Property, module: int): boolean {
@@ -443,7 +299,7 @@ partial class ExpressionTypes {
     this.quiet -= 1;
 
     const base = this.types.apparent(type);
-    const code = this.recordSpreadCode(base);
+    const code = this.dictionaries.recordSpreadCode(base);
     if (code == undefined) {
       return false;
     }
@@ -453,27 +309,6 @@ partial class ExpressionTypes {
     });
 
     return true;
-  }
-
-  private recordSpreadCode(base: Type): Code | undefined {
-    switch (base.kind) {
-      case TypeKind.Dict:
-        if (base.dict == DictKind.Record) {
-          return undefined;
-        }
-
-        return Code.RecordSpreadCollection;
-      case TypeKind.Array:
-      case TypeKind.Int:
-      case TypeKind.Double:
-      case TypeKind.Decimal:
-      case TypeKind.Boolean:
-      case TypeKind.String:
-      case TypeKind.Template:
-        return Code.RecordSpreadNotObject;
-      default:
-        return undefined;
-    }
   }
 
   private objectKeysCheck(expr: CallExpr, module: int): void {
@@ -511,7 +346,7 @@ partial class ExpressionTypes {
     this.quiet += 1;
 
     const list = this.typed(items, undefined, module);
-    const element = this.elementOf(this.types.apparent(list));
+    const element = this.callbacks.elementOf(this.types.apparent(list));
     const result = this.store.plain(TypeKind.Error);
     const params = [{ type: element, optional: false }];
     const wanted = this.store.functionOf({ params, rest: false, result });

@@ -1,0 +1,4 @@
+export const kMapClass = "Map";
+export const kPrivateWord = "private";
+export const kProtectedWord = "protected";
+export const kPublicWord = "public";

@@ -9,7 +9,6 @@ import {
 import {
   Expr,
   ExprKind,
-  UnaryOp,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import {
   Type,
@@ -50,7 +49,7 @@ partial class ExpressionTypes {
 
     for (const method of decl.methods) {
       const isSame =
-        method.name == word && this.isStaticMethod(method) == isStatic;
+        method.name == word && this.classes.isStaticMethod(method) == isStatic;
       if (isSame) {
         this.report(module, method.loc, Code.FieldMethodClash, {
           word,
@@ -78,7 +77,7 @@ partial class ExpressionTypes {
 
     const init = field.init;
     const isStatic = field.form == FieldKind.Static;
-    const isShown = init == undefined || this.isFieldLiteral(init);
+    const isShown = init == undefined || this.shapes.isFieldLiteral(init);
     if (isStatic && field.type == undefined && !isShown) {
       this.report(module, field.loc, Code.StaticNeedsType, { word });
 
@@ -109,7 +108,7 @@ partial class ExpressionTypes {
 
       return;
     }
-    if (field.type == undefined || !this.isFieldLiteral(init)) {
+    if (field.type == undefined || !this.shapes.isFieldLiteral(init)) {
       this.report(module, field.loc, Code.FieldValueNotLiteral, { word });
 
       return;
@@ -121,29 +120,12 @@ partial class ExpressionTypes {
     this.checked(init, type, module, kNoPlace);
   }
 
-  private isFieldLiteral(init: Expr): boolean {
-    if (init.kind == ExprKind.Unary && init.op == UnaryOp.Neg) {
-      return this.isFieldLiteral(init.operand);
-    }
-
-    switch (init.kind) {
-      case ExprKind.IntLit:
-      case ExprKind.FloatLit:
-      case ExprKind.StringLit:
-      case ExprKind.Template:
-      case ExprKind.BoolLit:
-        return true;
-      default:
-        return false;
-    }
-  }
-
   private staticValue(decl: ClassDecl, field: ClassField, module: int): void {
     const owner: StaticOwner = { decl, module };
     const init = field.init;
     const word = field.name;
     const type = this.staticFieldType(field.type, field.presence, owner);
-    const params = this.genericParameters(type) ?? [];
+    const params = this.parts.genericParameters(type) ?? [];
     if (params.length > 0) {
       const first = decl.name ?? "";
 

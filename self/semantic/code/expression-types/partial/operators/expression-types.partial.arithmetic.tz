@@ -12,17 +12,11 @@ import {
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
 import {
-  kDateName,
-  kIntLimits,
-  kOperatorTexts,
-} from "../../const/expression-types.const.tz";
-import {
-  ConcatLink,
   LogicSide,
-  NumberConversion,
   OperandHints,
   OperandPair,
 } from "../../types/expression-types.types.tz";
+import { ConcatLink } from "../../../concatenation-rules/types/concatenation-rules.types.tz";
 
 partial class ExpressionTypes {
   private binaryTyped(
@@ -122,18 +116,22 @@ partial class ExpressionTypes {
     links: ConcatLink[],
   ): OperandPair {
     const expected = this.types.wantedPart(wanted);
-    const hints = this.operandHints(expr.op, expected);
+    const hints = this.operators.operandHints(expr.op, expected);
     const isLiteralLeft =
-      this.isNumberTree(expr.lhs) &&
-      !this.isNumberTree(expr.rhs) &&
-      (hints.canHint || this.isIntTree(expr.lhs));
+      this.shapes.isNumberTree(expr.lhs) &&
+      !this.shapes.isNumberTree(expr.rhs) &&
+      (hints.canHint || this.shapes.isIntTree(expr.lhs));
     if (isLiteralLeft) {
       return this.literalLeftOperands(expr, hints, module, links);
     }
 
     const left = this.leftTyped(expr, hints.left, module, links);
-    const isLiteralRight = hints.canHint && this.isNumberTree(expr.rhs);
-    const literalHint = this.literalSideHint(isLiteralRight, left, hints.right);
+    const isLiteralRight = hints.canHint && this.shapes.isNumberTree(expr.rhs);
+    const literalHint = this.operators.literalSideHint(
+      isLiteralRight,
+      left,
+      hints.right,
+    );
     const rightHint = this.integerHint(
       expr.rhs,
       expr.lhs,
@@ -154,7 +152,11 @@ partial class ExpressionTypes {
     links: ConcatLink[],
   ): OperandPair {
     const right = this.operandTyped(expr.rhs, hints.right, module);
-    const literalHint = this.literalSideHint(hints.canHint, right, hints.left);
+    const literalHint = this.operators.literalSideHint(
+      hints.canHint,
+      right,
+      hints.left,
+    );
     const leftHint = this.integerHint(
       expr.lhs,
       expr.rhs,
@@ -166,23 +168,6 @@ partial class ExpressionTypes {
     const left = this.leftTyped(expr, leftHint, module, links);
 
     return this.adapted(expr, { left, right }, module);
-  }
-
-  private literalSideHint(
-    isLiteral: boolean,
-    other: Type,
-    hint: Type | undefined,
-  ): Type | undefined {
-    if (!isLiteral) {
-      return hint;
-    }
-
-    const plain = this.types.definedType(other);
-    if (plain.kind == TypeKind.Decimal) {
-      return plain;
-    }
-
-    return hint;
   }
 
   private leftTyped(
@@ -218,35 +203,6 @@ partial class ExpressionTypes {
     return this.typed(expr, hint, module);
   }
 
-  private operandHints(op: BinaryOp, expected: Type | undefined): OperandHints {
-    const isBitwise = this.isBitwise(op);
-    const isPower = op == BinaryOp.Pow;
-    const hint = this.numberHint(expected, isBitwise);
-    const isDecimalPower =
-      isPower && hint != undefined && hint.kind == TypeKind.Decimal;
-    const canHint = !isBitwise && !isPower;
-
-    if (isDecimalPower) {
-      return { left: hint, isBitwise, canHint };
-    }
-
-    return { left: hint, right: hint, isBitwise, canHint };
-  }
-
-  private numberHint(
-    expected: Type | undefined,
-    isBitwise: boolean,
-  ): Type | undefined {
-    if (expected == undefined || isBitwise) {
-      return undefined;
-    }
-    if (this.isNumeric(expected) || expected.kind == TypeKind.Decimal) {
-      return expected;
-    }
-
-    return undefined;
-  }
-
   private integerHint(
     literal: Expr,
     other: Expr,
@@ -258,7 +214,7 @@ partial class ExpressionTypes {
     const type = this.types.definedType(otherType);
     const isFraction = type.kind == TypeKind.Double && !isBitwise;
     const isOtherNumber = type.kind == TypeKind.Int || isFraction;
-    if (!isOtherNumber || !this.isIntTree(literal)) {
+    if (!isOtherNumber || !this.shapes.isIntTree(literal)) {
       return hint;
     }
     if (this.isWholeTree(other, module)) {
@@ -281,7 +237,8 @@ partial class ExpressionTypes {
       return pair;
     }
 
-    const isBitwise = this.isBitwise(expr.op) || this.isShift(expr.op);
+    const isBitwise =
+      this.operators.isBitwise(expr.op) || this.operators.isShift(expr.op);
     const hasNumbers =
       this.types.isNumberLike(left) && this.types.isNumberLike(right);
     const hasIntegers = left.kind == TypeKind.Int && right.kind == TypeKind.Int;
@@ -311,7 +268,7 @@ partial class ExpressionTypes {
     given: OperandPair,
     module: int,
   ): Type {
-    const pair = this.withoutNever(given);
+    const pair = this.operators.withoutNever(given);
     const left = pair.left;
     const right = pair.right;
     const isBroken =
@@ -328,17 +285,18 @@ partial class ExpressionTypes {
     if (expr.op == BinaryOp.Add && hasText) {
       return this.concatenated(expr, pair, module);
     }
-    if (this.isDate(left) || this.isDate(right)) {
+    if (this.types.isDate(left) || this.types.isDate(right)) {
       return this.dateArithmetic(expr, pair, module);
     }
-    if (this.isBitwise(expr.op)) {
+    if (this.operators.isBitwise(expr.op)) {
       return this.bitsResult(expr, pair, module);
     }
     if (left.kind == TypeKind.Decimal || right.kind == TypeKind.Decimal) {
       return this.decimalResult(expr, pair, module);
     }
 
-    const isWrapping = this.isWrapping(left) || this.isWrapping(right);
+    const isWrapping =
+      this.operators.isWrapping(left) || this.operators.isWrapping(right);
     const hasIntegers = left.kind == TypeKind.Int && right.kind == TypeKind.Int;
     if (isWrapping && hasIntegers) {
       return this.wrappingResult(expr, pair, module);
@@ -354,9 +312,10 @@ partial class ExpressionTypes {
       expr.op == BinaryOp.Pow &&
       left.kind == TypeKind.Double &&
       written.kind == TypeKind.Int;
-    const right = this.powerSide(isFloatPower, left, written);
-    const hasNumbers = this.isNumeric(left) && this.isNumeric(right);
-    const common = this.commonNumber(hasNumbers, left, right);
+    const right = this.operators.powerSide(isFloatPower, left, written);
+    const hasNumbers =
+      this.types.isNumeric(left) && this.types.isNumeric(right);
+    const common = this.operators.commonNumber(hasNumbers, left, right);
     if (hasNumbers && common == undefined) {
       this.reportMixed(expr, pair, module);
 
@@ -373,26 +332,6 @@ partial class ExpressionTypes {
     }
 
     return common;
-  }
-
-  private powerSide(isFloatPower: boolean, left: Type, right: Type): Type {
-    if (isFloatPower) {
-      return left;
-    }
-
-    return right;
-  }
-
-  private commonNumber(
-    hasNumbers: boolean,
-    left: Type,
-    right: Type,
-  ): Type | undefined {
-    if (!hasNumbers) {
-      return undefined;
-    }
-
-    return this.commonType(left, right);
   }
 
   private integerChecks(
@@ -437,7 +376,8 @@ partial class ExpressionTypes {
   ): Type {
     const left = pair.left;
     const right = pair.right;
-    const isBoth = this.isWrapping(left) && this.isWrapping(right);
+    const isBoth =
+      this.operators.isWrapping(left) && this.operators.isWrapping(right);
     if (isBoth && left != right) {
       this.reportMixed(expr, pair, module);
 
@@ -446,7 +386,7 @@ partial class ExpressionTypes {
 
     this.divisorCheck(expr, right, module);
 
-    if (this.isWrapping(left)) {
+    if (this.operators.isWrapping(left)) {
       return left;
     }
 
@@ -460,7 +400,7 @@ partial class ExpressionTypes {
   ): Type {
     const expected = this.types.wantedPart(wanted);
     const isInteger = expected != undefined && expected.kind == TypeKind.Int;
-    const hint = this.shiftHint(expr, isInteger, expected);
+    const hint = this.operators.shiftHint(expr, isInteger, expected);
     const left = this.operandTyped(expr.lhs, hint, module);
     const right = this.operandTyped(expr.rhs, undefined, module);
     const pair = this.adapted(expr, { left, right }, module);
@@ -473,18 +413,6 @@ partial class ExpressionTypes {
     return this.bitsResult(expr, pair, module);
   }
 
-  private shiftHint(
-    expr: BinaryExpr,
-    isInteger: boolean,
-    expected: Type | undefined,
-  ): Type | undefined {
-    if (!isInteger || !this.isIntTree(expr.lhs)) {
-      return undefined;
-    }
-
-    return expected;
-  }
-
   private bitsResult(expr: BinaryExpr, pair: OperandPair, module: int): Type {
     const left = pair.left;
     const right = pair.right;
@@ -492,12 +420,12 @@ partial class ExpressionTypes {
     if (this.reportsBits(expr, pair, module)) {
       return this.store.plain(TypeKind.Error);
     }
-    if (this.isShift(expr.op)) {
+    if (this.operators.isShift(expr.op)) {
       this.shiftConstants(expr, pair, module);
 
       return left;
     }
-    if (this.isWrapping(left) || this.isWrapping(right)) {
+    if (this.operators.isWrapping(left) || this.operators.isWrapping(right)) {
       return this.wrappingResult(expr, pair, module);
     }
     if (left != right) {
@@ -519,7 +447,7 @@ partial class ExpressionTypes {
     const left = pair.left;
     const right = pair.right;
 
-    if (this.isNothingChanged(expr, left)) {
+    if (this.operators.isNothingChanged(expr, left)) {
       this.reportNothingChanged(expr, left, module);
 
       return true;
@@ -541,14 +469,6 @@ partial class ExpressionTypes {
     }
 
     return false;
-  }
-
-  private isNothingChanged(expr: BinaryExpr, left: Type): boolean {
-    const isOrZero = expr.op == BinaryOp.BitOr || expr.op == BinaryOp.UShr;
-    const zero = expr.rhs;
-    const isZero = zero.kind == ExprKind.IntLit && zero.value == 0;
-
-    return isOrZero && isZero && this.isNumeric(left) && !this.isWrapping(left);
   }
 
   private shiftConstants(
@@ -587,15 +507,15 @@ partial class ExpressionTypes {
   private reportMixed(expr: BinaryExpr, pair: OperandPair, module: int): void {
     const left = pair.left;
     const right = pair.right;
-    const op = this.operatorText(expr.op);
-    const conversion = this.mixedConversion(left, right);
-    const texts = this.operandTexts(expr, module);
-    const method = this.conversionName(conversion.target);
+    const op = this.sources.operatorText(expr.op);
+    const conversion = this.operators.mixedConversion(left, right);
+    const texts = this.sources.operandTexts(expr, module);
+    const method = this.mismatches.conversionName(conversion.target);
     const first = this.text.of(left);
     const second = this.text.of(right);
 
     if (conversion.isLeftConverted) {
-      const shown = this.operandText(texts.left);
+      const shown = this.sources.operandText(texts.left);
       const word = `${shown}.${method}() ${op} ${texts.right}`;
 
       return this.report(module, expr.loc, Code.MixedNumbers, {
@@ -606,7 +526,7 @@ partial class ExpressionTypes {
       });
     }
 
-    const shown = this.operandText(texts.right);
+    const shown = this.sources.operandText(texts.right);
     const word = `${texts.left} ${op} ${shown}.${method}()`;
 
     this.report(module, expr.loc, Code.MixedNumbers, {
@@ -617,47 +537,6 @@ partial class ExpressionTypes {
     });
   }
 
-  private mixedConversion(left: Type, right: Type): NumberConversion {
-    if (left.kind == TypeKind.Double || right.kind == TypeKind.Double) {
-      const target = this.store.plain(TypeKind.Double);
-      const isLeftConverted = left.kind != TypeKind.Double;
-
-      return { target, isLeftConverted };
-    }
-    if (this.holds(left, right)) {
-      return { target: left, isLeftConverted: false };
-    }
-    if (this.holds(right, left)) {
-      return { target: right, isLeftConverted: true };
-    }
-
-    const int = this.store.integer(64, false);
-
-    return { target: int, isLeftConverted: left != int };
-  }
-
-  private holds(wide: Type, narrow: Type): boolean {
-    if (wide.kind != TypeKind.Int || narrow.kind != TypeKind.Int) {
-      return false;
-    }
-
-    const wideBits = wide.bits;
-    const wideUnsigned = wide.unsigned;
-    const narrowBits = narrow.bits;
-    const narrowUnsigned = narrow.unsigned;
-    const big = kIntLimits.find(
-      (row) => row.bits == wideBits && row.unsigned == wideUnsigned,
-    );
-    const small = kIntLimits.find(
-      (row) => row.bits == narrowBits && row.unsigned == narrowUnsigned,
-    );
-    if (big == undefined || small == undefined) {
-      return false;
-    }
-
-    return small.lowest <= big.lowest && small.highest <= big.highest;
-  }
-
   private reportOperands(
     expr: BinaryExpr,
     pair: OperandPair,
@@ -665,7 +544,7 @@ partial class ExpressionTypes {
   ): void {
     const left = pair.left;
     const right = pair.right;
-    const other = this.operatorText(expr.op);
+    const other = this.sources.operatorText(expr.op);
     const first = this.text.of(left);
     const second = this.text.of(right);
     const isUndefined =
@@ -682,65 +561,5 @@ partial class ExpressionTypes {
     }
 
     this.report(module, expr.loc, Code.OperandTypes, { first, second, other });
-  }
-
-  private operatorText(op: BinaryOp): string {
-    const row = kOperatorTexts.find((one) => one.op == op);
-
-    return row?.text ?? "";
-  }
-
-  private isBitwise(op: BinaryOp): boolean {
-    switch (op) {
-      case BinaryOp.BitAnd:
-      case BinaryOp.BitOr:
-      case BinaryOp.BitXor:
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  private isShift(op: BinaryOp): boolean {
-    switch (op) {
-      case BinaryOp.Shl:
-      case BinaryOp.Shr:
-      case BinaryOp.UShr:
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  private isWrapping(type: Type): boolean {
-    return type.kind == TypeKind.Int && type.wraps;
-  }
-
-  private withoutNever(pair: OperandPair): OperandPair {
-    const left = pair.left;
-    const right = pair.right;
-    const isLeftNever = left.kind == TypeKind.Never;
-    const isRightNever = right.kind == TypeKind.Never;
-    if (isLeftNever && isRightNever) {
-      const double = this.store.plain(TypeKind.Double);
-
-      return { left: double, right: double };
-    }
-    if (isLeftNever && this.isNeverTarget(right)) {
-      return { left: right, right };
-    }
-    if (isRightNever && this.isNeverTarget(left)) {
-      return { left, right: left };
-    }
-
-    return pair;
-  }
-
-  private isNeverTarget(type: Type): boolean {
-    return type.kind != TypeKind.Error && type.kind != TypeKind.Void;
-  }
-
-  private isDate(type: Type): boolean {
-    return type.kind == TypeKind.Instance && type.name == kDateName;
   }
 }

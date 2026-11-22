@@ -1,0 +1,144 @@
+import { DecimalReplacement } from "../../../code/expression-types/types/expression-types.types.tz";
+
+export const kDecimalReplacements: DecimalReplacement[] = [
+  {
+    name: "plus",
+    use: "the operator: 'a + b'",
+  },
+  {
+    name: "minus",
+    use: "the operator: 'a - b'",
+  },
+  {
+    name: "times",
+    use: "the operator: 'a * b'",
+  },
+  {
+    name: "multipliedBy",
+    use: "the operator: 'a * b'",
+  },
+  {
+    name: "dividedBy",
+    use: "the operator 'a / b', or 'a.div(b, places, mode)'",
+  },
+  {
+    name: "dividedToIntegerBy",
+    use: "'a.div(b, 0, \"down\")'",
+  },
+  {
+    name: "idiv",
+    use: "'a.div(b, 0, \"down\")'",
+  },
+  {
+    name: "modulo",
+    use: "the operator: 'a % b'",
+  },
+  {
+    name: "mod",
+    use: "the operator: 'a % b'",
+  },
+  {
+    name: "exponentiatedBy",
+    use: "the operator: 'a ** n'",
+  },
+  {
+    name: "pow",
+    use: "the operator: 'a ** n'",
+  },
+  {
+    name: "negated",
+    use: "the operator: '-a'",
+  },
+  {
+    name: "comparedTo",
+    use: "the operators: 'a < b', 'a == b', 'a > b'",
+  },
+  {
+    name: "isEqualTo",
+    use: "the operator: 'a == b'",
+  },
+  {
+    name: "eq",
+    use: "the operator: 'a == b'",
+  },
+  {
+    name: "isGreaterThan",
+    use: "the operator: 'a > b'",
+  },
+  {
+    name: "gt",
+    use: "the operator: 'a > b'",
+  },
+  {
+    name: "isGreaterThanOrEqualTo",
+    use: "the operator: 'a >= b'",
+  },
+  {
+    name: "gte",
+    use: "the operator: 'a >= b'",
+  },
+  {
+    name: "isLessThan",
+    use: "the operator: 'a < b'",
+  },
+  {
+    name: "lt",
+    use: "the operator: 'a < b'",
+  },
+  {
+    name: "isLessThanOrEqualTo",
+    use: "the operator: 'a <= b'",
+  },
+  {
+    name: "lte",
+    use: "the operator: 'a <= b'",
+  },
+  {
+    name: "isZero",
+    use: "a comparison: 'a == 0'",
+  },
+  {
+    name: "isNegative",
+    use: "a comparison: 'a < 0'",
+  },
+  {
+    name: "isPositive",
+    use: "a comparison: 'a > 0'",
+  },
+  {
+    name: "absoluteValue",
+    use: "'a.abs()'",
+  },
+  {
+    name: "squareRoot",
+    use: "'a.sqrt()'",
+  },
+  {
+    name: "integerValue",
+    use: "'a.round(0, mode)'",
+  },
+  {
+    name: "dp",
+    use: "'a.decimalPlaces()', or 'a.round(places, mode)' to round",
+  },
+  {
+    name: "precision",
+    use: "'a.toPrecision(digits)'",
+  },
+  {
+    name: "sd",
+    use: "'a.toPrecision(digits)'",
+  },
+  {
+    name: "toNumber",
+    use: "'Number(a)'",
+  },
+  {
+    name: "valueOf",
+    use: "'String(a)'",
+  },
+  {
+    name: "toJSON",
+    use: "'String(a)'",
+  },
+];

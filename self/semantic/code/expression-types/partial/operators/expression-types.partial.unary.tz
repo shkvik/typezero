@@ -2,7 +2,6 @@ import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import {
-  Expr,
   ExprKind,
   UnaryExpr,
   UnaryOp,
@@ -11,13 +10,7 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import {
-  kDot,
-  kHiddenMark,
-  kOptionalDot,
-  kUnaryTexts,
-  kUnnamedOperand,
-} from "../../const/expression-types.const.tz";
+import { kUnnamedOperand } from "../../../source-texts/const/source-texts.const.tz";
 
 partial class ExpressionTypes {
   private unaryTyped(
@@ -49,30 +42,14 @@ partial class ExpressionTypes {
   private voidTyped(expr: UnaryExpr, module: int): Type {
     const type = this.typed(expr.operand, undefined, module);
     const isPromised = type.kind == TypeKind.Promise;
-    const dropped = this.droppedValue(type);
-    if (this.holdsKind(dropped, TypeKind.Result)) {
-      const code = this.droppedCode(isPromised);
+    const dropped = this.operators.droppedValue(type);
+    if (this.types.holdsKind(dropped, TypeKind.Result)) {
+      const code = this.operators.droppedCode(isPromised);
 
       this.report(module, expr.loc, code, kNoDetails);
     }
 
     return this.store.plain(TypeKind.Undefined);
-  }
-
-  private droppedValue(type: Type): Type {
-    if (type.kind != TypeKind.Promise) {
-      return type;
-    }
-
-    return type.value;
-  }
-
-  private droppedCode(isPromised: boolean): Code {
-    if (isPromised) {
-      return Code.VoidDropsAsyncResult;
-    }
-
-    return Code.VoidDropsResult;
   }
 
   private nonNullTyped(
@@ -81,7 +58,7 @@ partial class ExpressionTypes {
     module: int,
   ): Type {
     const type = this.typed(expr.operand, wanted, module);
-    const word = this.assertedText(expr.operand) ?? kUnnamedOperand;
+    const word = this.operators.assertedText(expr.operand) ?? kUnnamedOperand;
 
     if (type.kind == TypeKind.Error) {
       return type;
@@ -102,56 +79,14 @@ partial class ExpressionTypes {
     return this.types.definedType(type);
   }
 
-  private assertedText(expr: Expr): string | undefined {
-    switch (expr.kind) {
-      case ExprKind.Name:
-        if (expr.name.startsWith(kHiddenMark)) {
-          return undefined;
-        }
-
-        return expr.name;
-      case ExprKind.IntLit:
-        return `${expr.value}`;
-      case ExprKind.Member: {
-        const object = this.assertedText(expr.object);
-        const dot = this.memberDot(expr.optional);
-
-        if (object == undefined) {
-          return undefined;
-        }
-
-        return `${object}${dot}${expr.name}`;
-      }
-      case ExprKind.Index: {
-        const object = this.assertedText(expr.object);
-        const index = this.assertedText(expr.index);
-        if (object == undefined || index == undefined) {
-          return undefined;
-        }
-
-        return `${object}[${index}]`;
-      }
-      default:
-        return undefined;
-    }
-  }
-
-  private memberDot(optional: boolean): string {
-    if (optional) {
-      return kOptionalDot;
-    }
-
-    return kDot;
-  }
-
   private signTyped(
     expr: UnaryExpr,
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const hint = this.signHint(expr, wanted);
+    const hint = this.operators.signHint(expr, wanted);
     const type = this.operandTyped(expr.operand, hint, module);
-    const other = this.unaryText(expr.op);
+    const other = this.operators.unaryText(expr.op);
     const isPlus = expr.op == UnaryOp.Plus;
 
     if (type.kind == TypeKind.String) {
@@ -164,7 +99,7 @@ partial class ExpressionTypes {
 
       return this.store.plain(TypeKind.Error);
     }
-    if (this.isDate(type) && isPlus) {
+    if (this.types.isDate(type) && isPlus) {
       return this.store.plain(TypeKind.Error);
     }
 
@@ -192,44 +127,13 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private signHint(
-    expr: UnaryExpr,
-    wanted: Type | undefined,
-  ): Type | undefined {
-    const plain = this.types.wantedPart(wanted);
-    if (plain == undefined) {
-      return undefined;
-    }
-
-    const isFraction = expr.operand.kind == ExprKind.FloatLit;
-    const member = this.numberMember(plain, isFraction);
-    const target = member ?? plain;
-    if (!this.types.isNumberLike(target)) {
-      return undefined;
-    }
-
-    return target;
-  }
-
-  private numberMember(type: Type, isFraction: boolean): Type | undefined {
-    if (type.kind != TypeKind.Union) {
-      return undefined;
-    }
-
-    return type.parts.find(
-      (part) =>
-        this.types.isNumberLike(part) &&
-        (!isFraction || part.kind != TypeKind.Int),
-    );
-  }
-
   private bitNotTyped(
     expr: UnaryExpr,
     wanted: Type | undefined,
     module: int,
   ): Type {
     const expected = this.types.wantedPart(wanted);
-    const hint = this.integerOf(expected);
+    const hint = this.operators.integerOf(expected);
     const type = this.operandTyped(expr.operand, hint, module);
     if (type.kind == TypeKind.Double) {
       this.report(module, expr.loc, Code.BitNotOfDouble, kNoDetails);
@@ -239,7 +143,7 @@ partial class ExpressionTypes {
 
     const isInteger = type.kind == TypeKind.Int || type.kind == TypeKind.Error;
     if (!isInteger) {
-      const other = this.unaryText(expr.op);
+      const other = this.operators.unaryText(expr.op);
       const first = this.text.of(type);
 
       this.report(module, expr.loc, Code.UnaryOperandType, { other, first });
@@ -250,19 +154,5 @@ partial class ExpressionTypes {
     this.foldUnary(expr, type, module);
 
     return type;
-  }
-
-  private integerOf(type: Type | undefined): Type | undefined {
-    if (type == undefined || type.kind != TypeKind.Int) {
-      return undefined;
-    }
-
-    return type;
-  }
-
-  private unaryText(op: UnaryOp): string {
-    const row = kUnaryTexts.find((one) => one.op == op);
-
-    return row?.text ?? "";
   }
 }

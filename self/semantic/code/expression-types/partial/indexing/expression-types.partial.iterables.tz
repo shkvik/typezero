@@ -9,7 +9,6 @@ import {
 } from "../../../../../program/ast/types/ast.types.functions.tz";
 import { TypeRef } from "../../../../../program/ast/types/ast.types.types.tz";
 import {
-  DictKind,
   InstanceType,
   Type,
   TypeKind,
@@ -19,14 +18,11 @@ import {
   TypePlace,
 } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 import {
-  kIterableName,
-  kIteratorKey,
-  kNextName,
-} from "../../const/expression-types.const.tz";
-import {
   ArgumentSlot,
   CallTarget,
 } from "../../types/expression-types.types.tz";
+import { kIteratorKey } from "../../../../types/type-questions/const/type-questions.const.tz";
+import { kIterableName } from "../../../index-rules/const/index-rules.const.tz";
 
 partial class ExpressionTypes {
   private iterablePlaceCheck(fn: FunctionDecl, module: int): void {
@@ -107,7 +103,7 @@ partial class ExpressionTypes {
     target: CallTarget,
     module: int,
   ): boolean {
-    const wanted = this.iterableItem(to);
+    const wanted = this.indexes.iterableItem(to);
     if (wanted == undefined) {
       return false;
     }
@@ -144,29 +140,6 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private iterableItem(to: Type): Type | undefined {
-    const label = this.store.labelOf(to);
-    if (label == undefined || !label.startsWith(kIterableName + "<")) {
-      return undefined;
-    }
-    if (to.kind != TypeKind.Object) {
-      return undefined;
-    }
-
-    const field = to.fields.find((one) => one.name == kIteratorKey);
-    const method = field?.type;
-    if (method == undefined || method.kind != TypeKind.Function) {
-      return undefined;
-    }
-
-    const iterator = method.shape.result;
-    if (iterator.kind != TypeKind.Iterator) {
-      return undefined;
-    }
-
-    return iterator.shape.yielded;
-  }
-
   private iteratedItem(given: Type): Type | undefined {
     const base = this.types.apparent(given);
 
@@ -179,7 +152,7 @@ partial class ExpressionTypes {
       case TypeKind.Iterator:
         return base.shape.yielded;
       case TypeKind.Dict:
-        return this.iteratedDictItem(base.dict, base.key, base.value);
+        return this.indexes.iteratedDictItem(base.dict, base.key, base.value);
       case TypeKind.Instance:
         return this.instanceItem(base);
       case TypeKind.Error:
@@ -189,28 +162,8 @@ partial class ExpressionTypes {
     }
   }
 
-  private iteratedDictItem(
-    dict: DictKind,
-    key: Type,
-    value: Type,
-  ): Type | undefined {
-    if (dict == DictKind.Set) {
-      return value;
-    }
-    if (dict == DictKind.Map) {
-      return this.store.tupleOf({
-        items: [key, value],
-        readonly: false,
-        required: 2,
-        rest: -1,
-      });
-    }
-
-    return undefined;
-  }
-
   private instanceItem(instance: InstanceType): Type | undefined {
-    if (this.isLibraryModule(instance.module)) {
+    if (this.modules.isLibraryModule(instance.module)) {
       return this.store.plain(TypeKind.Error);
     }
 
@@ -233,22 +186,12 @@ partial class ExpressionTypes {
     return result.shape.yielded;
   }
 
-  private hasNextMethod(result: Type): boolean {
-    if (result.kind != TypeKind.Object) {
-      return false;
-    }
-
-    const next = result.fields.find((field) => field.name == kNextName);
-
-    return next != undefined && next.type.kind == TypeKind.Function;
-  }
-
   private instanceLoopCheck(
     loop: Expr,
     instance: InstanceType,
     module: int,
   ): void {
-    if (this.isLibraryModule(instance.module)) {
+    if (this.modules.isLibraryModule(instance.module)) {
       return;
     }
 
@@ -278,7 +221,7 @@ partial class ExpressionTypes {
     const isOpen =
       result.kind == TypeKind.Iterator ||
       result.kind == TypeKind.Error ||
-      this.hasNextMethod(result);
+      this.indexes.hasNextMethod(result);
     if (isOpen) {
       return;
     }

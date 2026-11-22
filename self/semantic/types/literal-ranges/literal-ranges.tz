@@ -1,0 +1,138 @@
+import {
+  LiteralKind,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import {
+  kIntervalSeparator,
+  kManyLiterals,
+} from "./const/literal-ranges.const.tz";
+import { Bound, Interval } from "./types/literal-ranges.types.tz";
+
+export class LiteralRanges {
+  public rangeIntervals(given: Type, target: Type): Interval[] {
+    const isWhole =
+      given.kind == TypeKind.Literal && given.literal == LiteralKind.Int;
+    if (!isWhole && !this.isWordInt(given)) {
+      return [];
+    }
+
+    return this.wholeIntervals(target);
+  }
+
+  public isWordInt(type: Type): boolean {
+    if (type.kind != TypeKind.Int) {
+      return false;
+    }
+
+    return type.bits == 64 && !type.unsigned && !type.wraps;
+  }
+
+  public wholeIntervals(target: Type): Interval[] {
+    if (target.kind != TypeKind.Union) {
+      return [];
+    }
+
+    const values: Bound[] = [];
+
+    for (const part of target.parts) {
+      const value = this.wholeValue(part);
+      if (value == undefined) {
+        return [];
+      }
+
+      values.push(value);
+    }
+
+    const intervals = this.intervalsOf(values);
+    if (intervals.length > 1 && values.length < kManyLiterals) {
+      return [];
+    }
+
+    return intervals;
+  }
+
+  public rangeText(intervals: Interval[]): string {
+    const texts = intervals.map((interval) => this.intervalText(interval));
+
+    return texts.join(kIntervalSeparator);
+  }
+
+  public rangeCheck(name: string, intervals: Interval[]): string {
+    const widest = this.widestInterval(intervals);
+    if (widest == undefined) {
+      return name;
+    }
+
+    const low = widest.low.text;
+    const high = widest.high.text;
+
+    return `${name} >= ${low} && ${name} <= ${high}`;
+  }
+
+  private widestInterval(intervals: Interval[]): Interval | undefined {
+    let widest: Interval | undefined = undefined;
+
+    for (const interval of intervals) {
+      const size = interval.high.value - interval.low.value;
+      const isWider =
+        widest == undefined || widest.high.value - widest.low.value < size;
+      if (isWider) {
+        widest = interval;
+      }
+    }
+
+    return widest;
+  }
+
+  private wholeValue(part: Type): Bound | undefined {
+    if (part.kind != TypeKind.Literal || part.literal != LiteralKind.Int) {
+      return undefined;
+    }
+
+    const value = decimal(part.text);
+    if (value.isErr()) {
+      return undefined;
+    }
+
+    return { value: value.value, text: part.text };
+  }
+
+  private intervalsOf(values: Bound[]): Interval[] {
+    const intervals: Interval[] = [];
+
+    values.sort((first, second) => this.order(first.value, second.value));
+
+    for (const bound of values) {
+      const last = intervals[intervals.length - 1];
+      if (last != undefined && last.high.value + 1 >= bound.value) {
+        last.high = bound;
+
+        continue;
+      }
+
+      intervals.push({ low: bound, high: bound });
+    }
+
+    return intervals;
+  }
+
+  private order(first: decimal, second: decimal): int {
+    if (first < second) {
+      return -1;
+    }
+    if (first > second) {
+      return 1;
+    }
+
+    return 0;
+  }
+
+  private intervalText(interval: Interval): string {
+    if (interval.low == interval.high) {
+      return interval.low.text;
+    }
+
+    return `${interval.low.text} to ${interval.high.text}`;
+  }
+}

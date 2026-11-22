@@ -24,7 +24,7 @@ import {
   DestinationKind,
   ValueRecord,
 } from "../../../code/expression-types/types/expression-types.types.tz";
-import { kHiddenMark } from "../../../code/expression-types/const/expression-types.const.tz";
+import { kHiddenMark } from "../../../code/source-texts/const/source-texts.const.tz";
 
 partial class ExpressionTypes {
   private indexStatements(statements: Stmt[], record: ValueRecord): void {

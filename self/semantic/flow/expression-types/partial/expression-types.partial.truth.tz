@@ -8,12 +8,9 @@ import {
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import {
   kBooleanName,
-  kDateName,
-  kLengthName,
   kNarrowedCodes,
   kNumberName,
   kOtherPlaceholder,
-  kUnnamedOperand,
 } from "../../../code/expression-types/const/expression-types.const.tz";
 import { CallbackPlan } from "../../../code/expression-types/types/expression-types.types.tz";
 import {
@@ -21,6 +18,8 @@ import {
   TruthTexts,
   TruthUse,
 } from "../../truth-rules/types/truth-rules.types.tz";
+import { kUnnamedOperand } from "../../../code/source-texts/const/source-texts.const.tz";
+import { kDateName } from "../../../types/type-questions/const/type-questions.const.tz";
 
 partial class ExpressionTypes {
   private checkTruthy(
@@ -38,7 +37,7 @@ partial class ExpressionTypes {
     const texts: TruthTexts = {
       word: this.shownWord(expr, shown),
       other: this.otherHint(other),
-      isLength: this.isLength(expr),
+      isLength: this.shapes.isLength(expr),
     };
     const answer = this.truth.answerOf(type, use, texts);
     const narrowed = this.narrowedCode(expr, answer.code, module);
@@ -64,7 +63,7 @@ partial class ExpressionTypes {
       return shown;
     }
 
-    return this.hintText(expr, kUnnamedOperand);
+    return this.sources.hintText(expr, kUnnamedOperand);
   }
 
   private booleanCallCheck(expr: CallExpr, module: int): void {
@@ -187,14 +186,6 @@ partial class ExpressionTypes {
       return kOtherPlaceholder;
     }
 
-    return this.hintText(other, kOtherPlaceholder);
-  }
-
-  private isLength(expr: Expr): boolean {
-    if (expr.kind == ExprKind.OptionalChain) {
-      return this.isLength(expr.chain);
-    }
-
-    return expr.kind == ExprKind.Member && expr.name == kLengthName;
+    return this.sources.hintText(other, kOtherPlaceholder);
   }
 }

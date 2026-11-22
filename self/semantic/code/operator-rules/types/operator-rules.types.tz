@@ -1,0 +1,6 @@
+import { Type } from "../../../../program/type/types/type.types.tz";
+
+export type NumberConversion = {
+  readonly target: Type;
+  readonly isLeftConverted: boolean;
+};

@@ -1,0 +1,353 @@
+import {
+  Expr,
+  ExprKind,
+  ObjectLitExpr,
+  PropertyKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  LiteralKind,
+  ObjectField,
+  ObjectType,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import {
+  LiteralValue,
+  ObjectDraft,
+  SpreadSlot,
+} from "../expression-types/types/expression-types.types.tz";
+import { kDot } from "../source-texts/const/source-texts.const.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { TypeRelation } from "../../types/type-relation/type-relation.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import {
+  kChainPlaceholder,
+  kIdentifierMarks,
+  kWrappedValueName,
+} from "./const/object-rules.const.tz";
+
+export class ObjectRules {
+  private readonly store: TypeStore;
+  private readonly text: TypeText;
+  private readonly relation: TypeRelation;
+  private readonly types: TypeQuestions;
+
+  public constructor(
+    store: TypeStore,
+    text: TypeText,
+    relation: TypeRelation,
+    types: TypeQuestions,
+  ) {
+    this.store = store;
+    this.text = text;
+    this.relation = relation;
+    this.types = types;
+  }
+
+  public isSized(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Array:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public isWrappedValue(type: Type, name: string): boolean {
+    return type.kind == TypeKind.Int && type.wraps && name == kWrappedValueName;
+  }
+
+  public unsignedOf(type: Type): Type {
+    if (type.kind != TypeKind.Int) {
+      return type;
+    }
+
+    return this.store.integer(type.bits, true);
+  }
+
+  public isTextList(type: Type): boolean {
+    return type.kind == TypeKind.Array && type.item.kind == TypeKind.String;
+  }
+
+  public wholeLiteral(number: int): LiteralValue {
+    const text = `${number}`;
+
+    if (number >= 0) {
+      const whole = number.toUint64();
+
+      return { kind: LiteralKind.Int, text, whole, negative: false };
+    }
+
+    const below = -(number + 1);
+    const whole = below.toUint64() + 1;
+
+    return { kind: LiteralKind.Int, text, whole, negative: true };
+  }
+
+  public holdsLiteral(set: Type, literal: Type): boolean {
+    if (set == literal) {
+      return true;
+    }
+
+    return set.kind == TypeKind.Union && set.parts.includes(literal);
+  }
+
+  public chainField(object: Expr, field: string): string {
+    const chain = this.chainText(object) ?? kChainPlaceholder;
+
+    if (this.isPlainName(field)) {
+      return chain + kDot + field;
+    }
+
+    return `${chain}["${field}"]`;
+  }
+
+  public hasFieldNamed(part: Type, name: string): boolean {
+    if (part.kind != TypeKind.Object) {
+      return false;
+    }
+
+    return part.fields.some((field) => field.name == name);
+  }
+
+  public hasMethods(expr: ObjectLitExpr): boolean {
+    return expr.props.some(
+      (property) => property.form.kind == PropertyKind.Method,
+    );
+  }
+
+  public methodGoal(target: Type | undefined): ObjectType | undefined {
+    if (target == undefined || target.kind != TypeKind.Object) {
+      return undefined;
+    }
+
+    return target;
+  }
+
+  public goalField(
+    goal: ObjectType | undefined,
+    name: string,
+  ): Type | undefined {
+    const field = goal?.fields.find((one) => one.name == name);
+    if (field == undefined) {
+      return undefined;
+    }
+
+    return this.fieldWanted(field);
+  }
+
+  public methodObjectName(expr: ObjectLitExpr, fields: ObjectField[]): string {
+    const calls = expr.props
+      .filter((property) => property.form.kind == PropertyKind.Method)
+      .map((property) => `${property.name}()`)
+      .join("; ");
+    if (fields.length == 0) {
+      return `{ ${calls} }`;
+    }
+
+    const plain = this.text.of(this.store.objectOf(fields));
+
+    return `${plain.slice(0, plain.length - 2)}; ${calls} }`;
+  }
+
+  public plainMember(
+    goal: ObjectType | undefined,
+    name: string,
+  ): ObjectField | undefined {
+    const same = goal?.fields.filter((one) => one.name == name) ?? [];
+    if (same.length != 1) {
+      return undefined;
+    }
+
+    return same[0];
+  }
+
+  public hasZeroValue(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.Boolean:
+      case TypeKind.String:
+      case TypeKind.Error:
+      case TypeKind.TypeParameter:
+        return true;
+      default:
+        return this.types.isOptional(type);
+    }
+  }
+
+  public isCalledPath(key: string, names: Set<string>): boolean {
+    if (key.startsWith("#")) {
+      return false;
+    }
+
+    const parts = key.split(kDot).slice(1);
+
+    return parts.some((part) => names.has(part));
+  }
+
+  public spreadFieldHint(
+    target: Type | undefined,
+    name: string,
+  ): Type | undefined {
+    if (target == undefined || target.kind != TypeKind.Object) {
+      return undefined;
+    }
+
+    const field = target.fields.find((one) => one.name == name);
+    if (field == undefined) {
+      return undefined;
+    }
+
+    return this.fieldWanted(field);
+  }
+
+  public isSpreadFitting(slots: SpreadSlot[], target: ObjectType): boolean {
+    const isEvery = slots.every((slot) => {
+      const field = target.fields.find((one) => one.name == slot.name);
+      if (field == undefined) {
+        return false;
+      }
+
+      return this.relation.converts(slot.type, this.fieldWanted(field));
+    });
+    const isFilled = target.fields.every((field) => {
+      const isNeeded = !field.optional && !this.types.isOptional(field.type);
+
+      return !isNeeded || slots.some((slot) => slot.name == field.name);
+    });
+
+    return isEvery && isFilled;
+  }
+
+  public fallbackOf(value: Expr): Expr {
+    if (value.kind != ExprKind.Assign) {
+      return value;
+    }
+
+    return value.value;
+  }
+
+  public isLiteralKeys(type: Type): boolean {
+    if (type.kind == TypeKind.Union) {
+      return type.parts.every((part) => this.isTextLiteral(part));
+    }
+
+    return this.isTextLiteral(type);
+  }
+
+  public overloadedNames(target: ObjectType): string[] {
+    const names: string[] = [];
+
+    for (const field of target.fields) {
+      const count = target.fields.filter(
+        (one) => one.name == field.name,
+      ).length;
+      if (count > 1 && !names.includes(field.name)) {
+        names.push(field.name);
+      }
+    }
+
+    return names;
+  }
+
+  public fieldWanted(field: ObjectField): Type {
+    if (!field.optional) {
+      return field.type;
+    }
+
+    return this.types.optional(field.type);
+  }
+
+  public isOptionalField(field: ObjectField): boolean {
+    return field.optional || this.types.isOptional(field.type);
+  }
+
+  public fieldPlace(name: string): string {
+    return ` of field '${name}'`;
+  }
+
+  public hasFittingNames(draft: ObjectDraft, member: Type): boolean {
+    if (member.kind != TypeKind.Object) {
+      return false;
+    }
+
+    for (const entry of draft.entries) {
+      if (!member.fields.some((field) => field.name == entry.name)) {
+        return false;
+      }
+    }
+
+    for (const field of member.fields) {
+      const isGiven = draft.entries.some((entry) => entry.name == field.name);
+      if (!isGiven && !this.isOptionalField(field)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  public isLiteralSet(type: Type): boolean {
+    if (type.kind == TypeKind.Union) {
+      return type.parts.every((part) => part.kind == TypeKind.Literal);
+    }
+
+    return type.kind == TypeKind.Literal;
+  }
+
+  public isTagConvertible(tag: Type, fieldType: Type): boolean {
+    if (this.relation.converts(tag, fieldType)) {
+      return true;
+    }
+
+    const isWhole =
+      tag.kind == TypeKind.Literal && tag.literal == LiteralKind.Int;
+    const int = this.store.integer(64, false);
+
+    return isWhole && this.relation.converts(int, fieldType);
+  }
+
+  private chainText(expr: Expr): string | undefined {
+    if (expr.kind == ExprKind.Name) {
+      return expr.name;
+    }
+    if (expr.kind != ExprKind.Member || expr.optional) {
+      return undefined;
+    }
+
+    const object = this.chainText(expr.object);
+    if (object == undefined) {
+      return undefined;
+    }
+
+    return object + kDot + expr.name;
+  }
+
+  private isPlainName(field: string): boolean {
+    const head = field.slice(0, 1);
+    const isDigit = head >= "0" && head <= "9";
+    if (field == "" || isDigit) {
+      return false;
+    }
+
+    for (const unit of field) {
+      const isLetter =
+        (unit >= "a" && unit <= "z") || (unit >= "A" && unit <= "Z");
+      const isDecimal = unit >= "0" && unit <= "9";
+      if (!isLetter && !isDecimal && !kIdentifierMarks.includes(unit)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private isTextLiteral(type: Type): boolean {
+    return type.kind == TypeKind.Literal && type.literal == LiteralKind.String;
+  }
+}

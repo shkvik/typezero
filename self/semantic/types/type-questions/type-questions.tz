@@ -1,6 +1,8 @@
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { TypeRelation } from "../type-relation/type-relation.tz";
+import { kIteratorKey } from "./const/type-questions.const.tz";
+import { kDateName, kRegExpName } from "./const/type-questions.const.tz";
 
 export class TypeQuestions {
   private readonly store: TypeStore;
@@ -128,6 +130,110 @@ export class TypeQuestions {
     const isParameter = type.kind == TypeKind.TypeParameter;
 
     return isParameter && this.store.constraintOf(type) == undefined;
+  }
+
+  public baseClassOf(type: Type): Type | undefined {
+    const parents = this.store.parentsOf(type);
+
+    return parents.find((parent) => parent.kind == TypeKind.Instance);
+  }
+
+  public isNumber(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public isSameClass(first: Type, second: Type): boolean {
+    if (first.kind != TypeKind.Instance || second.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    return first.module == second.module && first.loc == second.loc;
+  }
+
+  public ancestorsOf(type: Type): Type[] {
+    const chain: Type[] = [type];
+
+    for (let index = 0; index < chain.length; index++) {
+      const current = chain[index];
+      if (current == undefined) {
+        break;
+      }
+
+      for (const parent of this.store.parentsOf(current)) {
+        if (!chain.includes(parent)) {
+          chain.push(parent);
+        }
+      }
+    }
+
+    return chain;
+  }
+
+  public onlyPart(wanted: Type): Type {
+    const parts = this.definedParts(wanted);
+    const only = parts[0];
+    if (parts.length != 1 || only == undefined) {
+      return wanted;
+    }
+
+    return only;
+  }
+
+  public hasMethodFields(type: Type): boolean {
+    const base = this.definedType(type);
+    if (base.kind != TypeKind.Object) {
+      return false;
+    }
+
+    return base.fields.some((field) => field.method ?? false);
+  }
+
+  public isIterableTarget(wanted: Type): boolean {
+    const defined = this.definedType(wanted);
+    const parts = this.unionMembers(defined);
+
+    return parts.some(
+      (part) =>
+        part.kind == TypeKind.Object &&
+        part.fields.some((field) => field.name == kIteratorKey),
+    );
+  }
+
+  public isDate(type: Type): boolean {
+    return type.kind == TypeKind.Instance && type.name == kDateName;
+  }
+
+  public isRegExp(type: Type): boolean {
+    return type.kind == TypeKind.Instance && type.name == kRegExpName;
+  }
+
+  public isNumeric(type: Type): boolean {
+    return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
+  }
+
+  public holdsKind(type: Type, kind: TypeKind): boolean {
+    const held = this.definedType(type);
+    if (held.kind == TypeKind.Array) {
+      return this.holdsKind(held.item, kind);
+    }
+
+    return held.kind == kind;
+  }
+
+  public holdsObjects(type: Type): boolean {
+    const held = this.definedType(type);
+    if (held.kind == TypeKind.Array) {
+      return this.holdsObjects(held.item);
+    }
+
+    return this.isObjectKind(held) || held.kind == TypeKind.Dict;
   }
 
   private optionalBase(type: Type | undefined): Type | undefined {

@@ -6,7 +6,6 @@ import {
   ClassField,
   FieldKind,
   FieldPresence,
-  MethodKind,
 } from "../../../../../program/ast/types/ast.types.classes.tz";
 import {
   MemberExpr,
@@ -20,7 +19,6 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import { ParameterSite } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 import { kConstructorName } from "../../const/expression-types.const.tz";
 import {
   CallTarget,
@@ -34,10 +32,13 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): Type {
-    if (this.isLibraryModule(instance.module) && this.isDate(instance)) {
+    if (
+      this.modules.isLibraryModule(instance.module) &&
+      this.types.isDate(instance)
+    ) {
       return this.dateMemberRead(expr, instance, module);
     }
-    if (this.isLibraryModule(instance.module)) {
+    if (this.modules.isLibraryModule(instance.module)) {
       return this.libraryMemberTyped(expr, instance, module);
     }
 
@@ -78,7 +79,7 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    const access = this.accessOf(method);
+    const access = this.classes.accessOf(method);
 
     this.checkAccess(entry, access, expr, module);
 
@@ -107,7 +108,7 @@ partial class ExpressionTypes {
   ): void {
     const owner = entry.owner;
     const isMethod = owner.methods.some(
-      (one) => one.name == expr.name && this.isStaticMethod(one),
+      (one) => one.name == expr.name && this.classes.isStaticMethod(one),
     );
     if (!isMethod) {
       return this.reportStatic(expr, entry, module);
@@ -154,25 +155,12 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private accessOf(method: FunctionDecl): Access {
-    return method.role?.access ?? Access.Public;
-  }
-
   private classOf(instance: InstanceType): ClassDecl | undefined {
-    if (this.isLibraryModule(instance.module)) {
+    if (this.modules.isLibraryModule(instance.module)) {
       return undefined;
     }
 
     return this.record(instance.module)?.classes.get(instance.loc);
-  }
-
-  private isLibraryModule(module: int): boolean {
-    const opened = this.program.modules[module];
-    if (module < 0 || opened == undefined) {
-      return true;
-    }
-
-    return opened.source.isLibrary;
   }
 
   private classMember(instance: InstanceType, name: string): ClassLookup {
@@ -181,12 +169,12 @@ partial class ExpressionTypes {
       return { isKnown: false };
     }
 
-    const own = this.ownMember(instance, decl, name);
+    const own = this.classes.ownMember(instance, decl, name);
     if (own != undefined) {
       return { isKnown: true, entry: own };
     }
 
-    const parent = this.parentOf(instance, decl);
+    const parent = this.classes.parentOf(instance, decl);
     if (parent == undefined) {
       const isKnown = decl.base == undefined && decl.baseExpr == undefined;
 
@@ -194,54 +182,6 @@ partial class ExpressionTypes {
     }
 
     return this.classMember(parent, name);
-  }
-
-  private parentOf(
-    instance: InstanceType,
-    decl: ClassDecl,
-  ): InstanceType | undefined {
-    if (decl.base == undefined) {
-      return undefined;
-    }
-
-    const parent = this.baseClassOf(instance);
-    if (parent == undefined || parent.kind != TypeKind.Instance) {
-      return undefined;
-    }
-
-    return parent;
-  }
-
-  private ownMember(
-    instance: InstanceType,
-    owner: ClassDecl,
-    name: string,
-  ): ClassMemberEntry | undefined {
-    const field = owner.fields.find(
-      (one) => one.name == name && one.form != FieldKind.Static,
-    );
-    const methods = owner.methods.filter(
-      (one) => one.name == name && !this.isStaticMethod(one),
-    );
-    if (field != undefined || methods.length > 0) {
-      return { owner, instance, field, methods, isStatic: false };
-    }
-
-    const hasStaticField = owner.fields.some(
-      (one) => one.name == name && one.form == FieldKind.Static,
-    );
-    const hasStaticMethod = owner.methods.some(
-      (one) => one.name == name && this.isStaticMethod(one),
-    );
-    if (hasStaticField || hasStaticMethod) {
-      return { owner, instance, methods: [], isStatic: true };
-    }
-
-    return undefined;
-  }
-
-  private isStaticMethod(method: FunctionDecl): boolean {
-    return method.role?.method == MethodKind.Static;
   }
 
   private fieldTypeOf(entry: ClassMemberEntry, field: ClassField): Type {
@@ -280,7 +220,7 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    const sites = this.parameterSites(method);
+    const sites = this.classes.parameterSites(method);
     if (sites == undefined) {
       return this.store.plain(TypeKind.Error);
     }
@@ -294,27 +234,6 @@ partial class ExpressionTypes {
     );
 
     return this.resolver.signature(sites, written, context);
-  }
-
-  private parameterSites(fn: FunctionDecl): ParameterSite[] | undefined {
-    const sites: ParameterSite[] = [];
-
-    for (const param of fn.params) {
-      const type = param.type;
-      if (type == undefined) {
-        return undefined;
-      }
-
-      sites.push({
-        name: param.name,
-        loc: param.loc,
-        kind: param.form.kind,
-        type,
-        isDeclared: false,
-      });
-    }
-
-    return sites;
   }
 
   private partOf(owner: ClassDecl, method: FunctionDecl): ClassDecl {
@@ -361,7 +280,7 @@ partial class ExpressionTypes {
 
       return made ?? this.store.plain(TypeKind.Error);
     }
-    if (this.isLibraryModule(target.module)) {
+    if (this.modules.isLibraryModule(target.module)) {
       return this.libraryNew(expr, form.name, target, wanted, module);
     }
 
@@ -410,7 +329,7 @@ partial class ExpressionTypes {
       this.report(module, expr.loc, Code.TypeArgumentsMany, {
         word,
         other: `${params}`,
-        place: this.pluralMark(params),
+        place: this.classes.pluralMark(params),
         first: `${count}`,
       });
 
@@ -421,14 +340,6 @@ partial class ExpressionTypes {
     }
 
     return this.writtenArguments(expr.typeArgs, module);
-  }
-
-  private pluralMark(count: int): string {
-    if (count == 1) {
-      return "";
-    }
-
-    return "s";
   }
 
   private constructed(
@@ -461,7 +372,7 @@ partial class ExpressionTypes {
     }
 
     const word = kConstructorName;
-    const access = this.accessOf(chosen);
+    const access = this.classes.accessOf(chosen);
 
     this.reportAccess(maker.owner, access, word, expr.loc, module);
 
@@ -533,7 +444,7 @@ partial class ExpressionTypes {
       return entry;
     }
 
-    const parent = this.parentOf(instance, decl);
+    const parent = this.classes.parentOf(instance, decl);
     if (parent == undefined) {
       const isRoot = decl.base == undefined && decl.baseExpr == undefined;
       if (!isRoot) {
@@ -556,7 +467,7 @@ partial class ExpressionTypes {
     chosen: FunctionDecl,
     loc: int,
   ): CallTarget | undefined {
-    const sites = this.parameterSites(chosen);
+    const sites = this.classes.parameterSites(chosen);
     if (sites == undefined) {
       return undefined;
     }

@@ -1,54 +1,21 @@
-import {
-  BinaryOp,
-  UnaryOp,
-} from "../../../../program/ast/types/ast.types.expressions.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { ArrayCallback } from "../types/expression-types.types.tz";
 import {
-  DictKind,
-  TypeKind,
-} from "../../../../program/type/types/type.types.tz";
-import {
-  DateSetter,
-  DecoratorPlace,
-  DecoratorPlaceText,
+  DateStatic,
   DecimalArgument,
   DecimalMethod,
-  DecimalReplacement,
   DecimalResult,
-  ResultMethod,
-  DateStatic,
-  DictText,
-  IntLimit,
+  DecoratorPlace,
+  DecoratorPlaceText,
   NarrowedCode,
-  OperatorText,
-  TypeOfType,
-  UnaryText,
+  ResultMethod,
 } from "../types/expression-types.types.tz";
 
-export const kConversionPrefix = "to";
-export const kUnnamedOperand = "x";
-export const kUnnamedCount = "n";
-export const kHiddenMark = "%";
-export const kDot = ".";
 export const kFieldSetKey = "#set|";
-export const kOptionalDot = "?.";
-export const kManyLiterals = 64;
-export const kIntervalSeparator = " or ";
-export const kAnonymousFunction = "the function";
-export const kFunctionWord = "function";
 export const kPanicName = "panic";
 export const kExitName = "exit";
 export const kProcessName = "process";
-export const kIteratorKey = "[Symbol.iterator]";
 export const kInferenceRounds = 8;
 export const kArrayName = "Array";
-export const kAndText = "&&";
-export const kOrText = "||";
-export const kEquals = "==";
-export const kNotEquals = "!=";
-export const kEmptyText = '""';
-export const kZeroText = "0";
 export const kIsArrayName = "isArray";
 export const kStringShape = "string";
 export const kDoubleShape = "double";
@@ -59,7 +26,6 @@ export const kResultShape = "Result";
 export const kGeneratorShape = "Generator";
 export const kAsyncGeneratorShape = "AsyncGenerator";
 export const kPromiseClass = "Promise";
-export const kMapClass = "Map";
 export const kSetClass = "Set";
 export const kSpecialMethods = [
   "at",
@@ -71,15 +37,8 @@ export const kSpecialMethods = [
   "match",
 ];
 export const kSpecialNews = ["TextDecoder"];
-export const kSplitName = "split";
 export const kThisName = "this";
 export const kSuperName = "super";
-export const kPublicWord = "public";
-export const kProtectedWord = "protected";
-export const kPrivateWord = "private";
-export const kOneElement = " element";
-export const kManyElements = " elements";
-export const kTuplePlaceholder = "t";
 export const kTupleJoin = "join";
 export const kToStringName = "toString";
 export const kAsyncWord = "async ";
@@ -92,51 +51,16 @@ export const kAnyName = "any";
 export const kAsyncFunction = "async function ";
 export const kAsyncArrow = "async (...) => ...";
 export const kAsyncMethodEnd = "() { ... }";
-export const kBoundMark = "#b";
-export const kBoundSeparator = "|";
-export const kZeroTerm = "0";
 export const kValueTerm = "v";
-export const kLengthTerm = "n";
-export const kMostBoundConstant: uint64 = 1000000;
 export const kResizingMethods = ["push", "pop", "shift", "unshift", "splice"];
 export const kPrototypeName = "prototype";
 export const kClassNameMember = "name";
-export const kTakingMethods = ["pop", "shift", "splice"];
-export const kPromisePlaceholder = "p";
-export const kMostShownStatement = 60;
-export const kStatementEnd = ";";
-export const kCommentStart = "//";
-export const kLineEnds = ["\n", "\r"];
-export const kOpeningMarks = ["(", "[", "{"];
-export const kClosingMarks = [")", "]", "}"];
-export const kLengthName = "length";
-export const kWrappedValueName = "value";
 export const kRawName = "raw";
 export const kConstructorName = "constructor";
-export const kChainPlaceholder = "o";
-export const kIdentifierMarks = ["_", "$"];
-export const kOneArgument = " argument";
-export const kManyArguments = " arguments";
-export const kOneTypeArgument = " type argument";
-export const kManyTypeArguments = " type arguments";
 export const kSampleArgument = "int";
 export const kSampleList = "[int]";
 export const kNewWord = "new ";
-export const kContextFunctions = [
-  "String",
-  "Number",
-  "parseInt",
-  "parseFloat",
-  "Boolean",
-  "encodeURIComponent",
-  "encodeURI",
-  "decodeURIComponent",
-  "decodeURI",
-];
-export const kContextObjects = ["Math", "Number", "String", "console"];
 export const kResultMakers = ["ok", "err"];
-export const kOrMore = " or more";
-export const kRangeDash = "-";
 export const kPrototypeNames = [
   "toString",
   "valueOf",
@@ -148,133 +72,15 @@ export const kPrototypeNames = [
   "__proto__",
 ];
 
-export const kTypeOfTypes: TypeOfType[] = [
-  { name: "undefined", kind: TypeKind.Undefined, bits: 0, unsigned: false },
-  { name: "boolean", kind: TypeKind.Boolean, bits: 0, unsigned: false },
-  { name: "string", kind: TypeKind.String, bits: 0, unsigned: false },
-  { name: "double", kind: TypeKind.Double, bits: 0, unsigned: false },
-  { name: "decimal", kind: TypeKind.Decimal, bits: 0, unsigned: false },
-  { name: "int", kind: TypeKind.Int, bits: 64, unsigned: false },
-  { name: "int8", kind: TypeKind.Int, bits: 8, unsigned: false },
-  { name: "int16", kind: TypeKind.Int, bits: 16, unsigned: false },
-  { name: "int32", kind: TypeKind.Int, bits: 32, unsigned: false },
-  { name: "uint8", kind: TypeKind.Int, bits: 8, unsigned: true },
-  { name: "uint16", kind: TypeKind.Int, bits: 16, unsigned: true },
-  { name: "uint32", kind: TypeKind.Int, bits: 32, unsigned: true },
-  { name: "uint64", kind: TypeKind.Int, bits: 64, unsigned: true },
-];
 export const kNoPlace = "";
 export const kValuePlace = " of the value";
 export const kKeyPlace = " of the key";
 export const kNullName = "null";
 export const kStreamErrorName = "StreamError";
 export const kTypeSeparator = ", ";
-export const kDateName = "Date";
-export const kRegExpName = "RegExp";
-export const kTemplateFrame = 4;
-export const kBacktick = "`";
-export const kQuotes = ['"', "'"];
-export const kQuoteMarks = ['"', "'", "`"];
-export const kEscape = "\\";
-export const kDollar = "$";
-export const kOpenBrace = "{";
-export const kOpenValue = "${";
-export const kCloseValue = "}";
-export const kOpenParen = "(";
-export const kCloseParen = ")";
-export const kOpenBracket = "[";
-export const kCloseBracket = "]";
-export const kNameMarks = ["_", ".", "#", "$", '"', "'"];
-export const kSigns = ["-", "+"];
-
-export const kOperatorTexts: OperatorText[] = [
-  { op: BinaryOp.Add, text: "+" },
-  { op: BinaryOp.Sub, text: "-" },
-  { op: BinaryOp.Mul, text: "*" },
-  { op: BinaryOp.Div, text: "/" },
-  { op: BinaryOp.Rem, text: "%" },
-  { op: BinaryOp.Pow, text: "**" },
-  { op: BinaryOp.BitAnd, text: "&" },
-  { op: BinaryOp.BitOr, text: "|" },
-  { op: BinaryOp.BitXor, text: "^" },
-  { op: BinaryOp.Shl, text: "<<" },
-  { op: BinaryOp.Shr, text: ">>" },
-  { op: BinaryOp.UShr, text: ">>>" },
-  { op: BinaryOp.Eq, text: "==" },
-  { op: BinaryOp.Ne, text: "!=" },
-  { op: BinaryOp.Lt, text: "<" },
-  { op: BinaryOp.Le, text: "<=" },
-  { op: BinaryOp.Gt, text: ">" },
-  { op: BinaryOp.Ge, text: ">=" },
-  { op: BinaryOp.Nullish, text: "??" },
-  { op: BinaryOp.In, text: "in" },
-];
-
-export const kTypeOfNames = [
-  "undefined",
-  "null",
-  "boolean",
-  "int",
-  "int8",
-  "int16",
-  "int32",
-  "uint8",
-  "uint16",
-  "uint32",
-  "uint64",
-  "double",
-  "decimal",
-  "string",
-  "array",
-  "object",
-  "function",
-  "class",
-];
-
-export const kJsonTypeOfNames = [
-  "null",
-  "boolean",
-  "double",
-  "string",
-  "array",
-  "object",
-];
-
-export const kAnyObjectTypeOfNames = ["object", "class"];
-export const kNumberTypeOfNames = ["double", "decimal"];
-export const kIntegerTypeOfPrefixes = ["int", "uint"];
-export const kUndefinedTypeOf = "undefined";
-export const kNullTypeOf = "null";
-export const kBigintTypeOf = "bigint";
-export const kNumberTypeOf = "number";
-export const kSymbolTypeOf = "symbol";
-export const kMostShownNumberNames = 3;
-export const kNameSeparator = ", ";
-export const kLastNameSeparator = " or ";
-export const kLastAndSeparator = " and ";
 export const kOtherPlaceholder = "...";
 export const kConstructorArgsName = "ConstructorArgs";
-export const kEmptyArray = "[]";
-export const kUndefinedText = "undefined";
-export const kArgumentSeparator = ", ";
-export const kFirstPrintable = " ";
-export const kLastPrintable = "~";
-export const kDoubleQuote = '"';
-export const kLargestInt: decimal = 9223372036854775807;
-export const kSmallestInt: decimal = -9223372036854775808;
-export const kDoubleBits = 53;
-export const kDoubleTopBit = 1024;
-export const kDoubleLimit: decimal = decimal(2) ** kDoubleTopBit;
-export const kPlainDoubleLimit: decimal = 1000000000000000000000;
-export const kShownDigits = 15;
-export const kExponentMark = "e";
-export const kFractionDot = ".";
-export const kZeroDigit = "0";
-export const kMinus = "-";
-export const kInfinityText = "inf";
 export const kRoundDown = "down";
-export const kRoundHalfEven = "half-even";
-
 export const kNarrowedCodes: NarrowedCode[] = [
   { code: Code.ArrayCondition, narrowed: Code.NarrowedArrayCondition },
   { code: Code.ArrayNot, narrowed: Code.NarrowedArrayNot },
@@ -283,50 +89,6 @@ export const kNarrowedCodes: NarrowedCode[] = [
   { code: Code.FunctionCondition, narrowed: Code.NarrowedHolderCondition },
   { code: Code.FunctionNot, narrowed: Code.NarrowedHolderNot },
 ];
-
-export const kUnaryTexts: UnaryText[] = [
-  { op: UnaryOp.Neg, text: "-" },
-  { op: UnaryOp.Plus, text: "+" },
-  { op: UnaryOp.BitNot, text: "~" },
-];
-
-export const kDictTexts: DictText[] = [
-  { dict: DictKind.Record, kind: "Record", shown: "Object" },
-  { dict: DictKind.Map, kind: "Map", shown: "Map" },
-  { dict: DictKind.Set, kind: "Set", shown: "Set" },
-];
-
-export const kIntLimits: IntLimit[] = [
-  { bits: 8, unsigned: false, highest: 127, lowest: 128 },
-  { bits: 16, unsigned: false, highest: 32767, lowest: 32768 },
-  { bits: 32, unsigned: false, highest: 2147483647, lowest: 2147483648 },
-  {
-    bits: 64,
-    unsigned: false,
-    highest: 9223372036854775807,
-    lowest: 9223372036854775808,
-  },
-  { bits: 8, unsigned: true, highest: 255, lowest: 0 },
-  { bits: 16, unsigned: true, highest: 65535, lowest: 0 },
-  { bits: 32, unsigned: true, highest: 4294967295, lowest: 0 },
-  { bits: 64, unsigned: true, highest: 18446744073709551615, lowest: 0 },
-];
-
-export const kCallbackMethods = new Map<string, ArrayCallback>([
-  ["forEach", ArrayCallback.ForEach],
-  ["map", ArrayCallback.Map],
-  ["flatMap", ArrayCallback.FlatMap],
-  ["filter", ArrayCallback.Filter],
-  ["reduce", ArrayCallback.Reduce],
-  ["reduceRight", ArrayCallback.Reduce],
-  ["find", ArrayCallback.Find],
-  ["findLast", ArrayCallback.Find],
-  ["findIndex", ArrayCallback.FindIndex],
-  ["findLastIndex", ArrayCallback.FindIndex],
-  ["some", ArrayCallback.Test],
-  ["every", ArrayCallback.Test],
-  ["sort", ArrayCallback.Compare],
-]);
 
 export const kFunctionValueNames = new Map<string, int>([
   ["String", 1],
@@ -400,12 +162,6 @@ export const kCallbackOrdinals = [
   "fifth",
 ];
 export const kOkValueNames = ["ok", "err"];
-export const kUriValueNames = [
-  "encodeURIComponent",
-  "encodeURI",
-  "decodeURIComponent",
-  "decodeURI",
-];
 export const kHolderNames = ["console", "Math", "String", "Number"];
 export const kArgumentsName = "arguments";
 export const kTextMethods = ["join", "toString"];
@@ -422,7 +178,6 @@ export const kDictIterating = [
 ];
 export const kIsJsonName = "isJson";
 export const kJsonName = "Json";
-export const kArrayTypeOf = "array";
 export const kBooleanName = "Boolean";
 export const kMathName = "Math";
 export const kToFixedName = "toFixed";
@@ -472,8 +227,6 @@ export const kSetCombiners = [
   "isSupersetOf",
   "isDisjointFrom",
 ];
-export const kIterableName = "Iterable";
-export const kNextName = "next";
 export const kFlatMapName = "flatMap";
 export const kIteratorClass = "Iterator";
 export const kUnsupportedMark = " is not supported: ";
@@ -497,23 +250,7 @@ export const kToJsonName = "toJSON";
 export const kGetYearName = "getYear";
 export const kSetYearName = "setYear";
 export const kGmtStringName = "toGMTString";
-export const kSetterPrefix = "set";
-export const kUtcSetterPrefix = "setUTC";
-export const kShortYearBase = 1900;
-export const kLastShortYear = 99;
 export const kDateFieldLimit = 9007199254740991.0;
-export const kDateYearLimit = 1000000;
-export const kDateYearShift = 399999;
-export const kEpochYear = 1970;
-export const kDayMilliseconds = 86400000;
-export const kHourMilliseconds = 3600000;
-export const kMinuteMilliseconds = 60000;
-export const kSecondMilliseconds = 1000;
-export const kDateTimeLimit = 8640000000000000;
-export const kDateLocalLimit = 8640000864000000;
-export const kDaysInCycle = 146097;
-export const kYearsInCycle = 400;
-export const kUnknownYear = "y";
 export const kDateLocaleMethods = [
   "toLocaleString",
   "toLocaleDateString",
@@ -524,36 +261,8 @@ export const kDateStatics: DateStatic[] = [
   { name: "UTC", example: "(y, m, d)" },
   { name: "parse", example: "(s)" },
 ];
-export const kDateSetters: DateSetter[] = [
-  { name: "FullYear", first: 0 },
-  { name: "Month", first: 1 },
-  { name: "Date", first: 2 },
-  { name: "Hours", first: 3 },
-  { name: "Minutes", first: 4 },
-  { name: "Seconds", first: 5 },
-  { name: "Milliseconds", first: 6 },
-];
-export const kMonthNames = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
-export const kMonthDays = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-export const kMonthStarts = [
-  0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334,
-];
 export const kTimeFieldNames = ["hours", "minutes", "seconds", "milliseconds"];
 export const kTimeFieldMost = [23, 59, 59, 999];
-export const kBuiltinValueClasses = ["Date", "RegExp"];
 export const kCollectionExamples: DateStatic[] = [
   { name: "Map", example: "Map<string, int>" },
   { name: "Set", example: "Set<string>" },
@@ -561,7 +270,6 @@ export const kCollectionExamples: DateStatic[] = [
 export const kMatchArrayClass = "RegExpMatchArray";
 export const kPushName = "push";
 export const kTextStatics = ["fromCharCode", "fromCodePoint"];
-export const kResultPlaceholder = "r";
 export const kResultMethods: ResultMethod[] = [
   { name: "isOk", count: 0 },
   { name: "isErr", count: 0 },
@@ -686,151 +394,6 @@ export const kDecimalMethods: DecimalMethod[] = [
     result: DecimalResult.List,
   },
 ];
-export const kDecimalReplacements: DecimalReplacement[] = [
-  {
-    name: "plus",
-    use: "the operator: 'a + b'",
-  },
-  {
-    name: "minus",
-    use: "the operator: 'a - b'",
-  },
-  {
-    name: "times",
-    use: "the operator: 'a * b'",
-  },
-  {
-    name: "multipliedBy",
-    use: "the operator: 'a * b'",
-  },
-  {
-    name: "dividedBy",
-    use: "the operator 'a / b', or 'a.div(b, places, mode)'",
-  },
-  {
-    name: "dividedToIntegerBy",
-    use: "'a.div(b, 0, \"down\")'",
-  },
-  {
-    name: "idiv",
-    use: "'a.div(b, 0, \"down\")'",
-  },
-  {
-    name: "modulo",
-    use: "the operator: 'a % b'",
-  },
-  {
-    name: "mod",
-    use: "the operator: 'a % b'",
-  },
-  {
-    name: "exponentiatedBy",
-    use: "the operator: 'a ** n'",
-  },
-  {
-    name: "pow",
-    use: "the operator: 'a ** n'",
-  },
-  {
-    name: "negated",
-    use: "the operator: '-a'",
-  },
-  {
-    name: "comparedTo",
-    use: "the operators: 'a < b', 'a == b', 'a > b'",
-  },
-  {
-    name: "isEqualTo",
-    use: "the operator: 'a == b'",
-  },
-  {
-    name: "eq",
-    use: "the operator: 'a == b'",
-  },
-  {
-    name: "isGreaterThan",
-    use: "the operator: 'a > b'",
-  },
-  {
-    name: "gt",
-    use: "the operator: 'a > b'",
-  },
-  {
-    name: "isGreaterThanOrEqualTo",
-    use: "the operator: 'a >= b'",
-  },
-  {
-    name: "gte",
-    use: "the operator: 'a >= b'",
-  },
-  {
-    name: "isLessThan",
-    use: "the operator: 'a < b'",
-  },
-  {
-    name: "lt",
-    use: "the operator: 'a < b'",
-  },
-  {
-    name: "isLessThanOrEqualTo",
-    use: "the operator: 'a <= b'",
-  },
-  {
-    name: "lte",
-    use: "the operator: 'a <= b'",
-  },
-  {
-    name: "isZero",
-    use: "a comparison: 'a == 0'",
-  },
-  {
-    name: "isNegative",
-    use: "a comparison: 'a < 0'",
-  },
-  {
-    name: "isPositive",
-    use: "a comparison: 'a > 0'",
-  },
-  {
-    name: "absoluteValue",
-    use: "'a.abs()'",
-  },
-  {
-    name: "squareRoot",
-    use: "'a.sqrt()'",
-  },
-  {
-    name: "integerValue",
-    use: "'a.round(0, mode)'",
-  },
-  {
-    name: "dp",
-    use: "'a.decimalPlaces()', or 'a.round(places, mode)' to round",
-  },
-  {
-    name: "precision",
-    use: "'a.toPrecision(digits)'",
-  },
-  {
-    name: "sd",
-    use: "'a.toPrecision(digits)'",
-  },
-  {
-    name: "toNumber",
-    use: "'Number(a)'",
-  },
-  {
-    name: "valueOf",
-    use: "'String(a)'",
-  },
-  {
-    name: "toJSON",
-    use: "'String(a)'",
-  },
-];
-
-export const kParameterLetters = "abcdefghijklmnopqrstuvwxyz";
-
 export const kDecoratorPlaces: DecoratorPlaceText[] = [
   {
     place: DecoratorPlace.Class,
@@ -858,6 +421,5 @@ export const kDecoratorPlaces: DecoratorPlaceText[] = [
   },
 ];
 
-export const kDescriptorValueName = "value";
 export const kMetadataName = "metadata";
 export const kReflectName = "Reflect";

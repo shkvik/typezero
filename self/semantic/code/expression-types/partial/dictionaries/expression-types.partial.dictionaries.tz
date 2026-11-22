@@ -8,17 +8,12 @@ import {
   PropertyKind,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import {
-  DictKind,
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
 import { kKeyPlace, kValuePlace } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private isRecord(type: Type): boolean {
-    return type.kind == TypeKind.Dict && type.dict == DictKind.Record;
-  }
-
   private recordObject(expr: ObjectLitExpr, record: Type, module: int): Type {
     if (record.kind != TypeKind.Dict) {
       return this.store.plain(TypeKind.Error);
@@ -51,7 +46,7 @@ partial class ExpressionTypes {
     const name = property.name;
     const value = record.value;
     const form = property.form;
-    const place = this.keyPlace(name);
+    const place = this.dictionaries.keyPlace(name);
 
     switch (form.kind) {
       case PropertyKind.Method:
@@ -69,7 +64,7 @@ partial class ExpressionTypes {
         return spread.kind == TypeKind.Error;
       }
       case PropertyKind.Defaulted: {
-        const fallback = this.fallbackOf(property.value);
+        const fallback = this.objects.fallbackOf(property.value);
 
         this.report(module, property.loc, Code.RecordDefaulted, { word: name });
         this.checked(fallback, value, module, place);
@@ -92,17 +87,13 @@ partial class ExpressionTypes {
     const text = this.store.plain(TypeKind.String);
     const keyType = this.typed(key, text, module);
     const plain = this.types.definedType(keyType);
-    if (this.isNumeric(plain)) {
+    if (this.types.isNumeric(plain)) {
       const first = this.text.of(keyType);
 
       return this.report(module, key.loc, Code.RecordNumberKey, { first });
     }
 
     this.coerce(key, keyType, text, module, kKeyPlace);
-  }
-
-  private keyPlace(name: string): string {
-    return ` of key '${name}'`;
   }
 
   private jsonObject(expr: ObjectLitExpr, json: Type, module: int): Type {
@@ -131,7 +122,7 @@ partial class ExpressionTypes {
       return;
     }
     if (form.kind == PropertyKind.Defaulted) {
-      const fallback = this.fallbackOf(property.value);
+      const fallback = this.objects.fallbackOf(property.value);
 
       this.report(module, loc, Code.JsonDefaulted, { word });
       this.typed(fallback, undefined, module);
@@ -143,8 +134,8 @@ partial class ExpressionTypes {
     }
 
     const given = this.typed(property.value, json, module);
-    const target = this.jsonTarget(json, given);
-    const place = this.keyPlace(word);
+    const target = this.dictionaries.jsonTarget(json, given);
+    const place = this.dictionaries.keyPlace(word);
 
     this.coerce(property.value, given, target, module, place);
   }
@@ -159,13 +150,5 @@ partial class ExpressionTypes {
     const first = this.text.of(keyType);
 
     this.report(module, key.loc, Code.JsonKey, { first });
-  }
-
-  private jsonTarget(json: Type, given: Type): Type {
-    if (this.types.isOptional(given) || given.kind == TypeKind.Undefined) {
-      return this.types.optional(json);
-    }
-
-    return json;
   }
 }

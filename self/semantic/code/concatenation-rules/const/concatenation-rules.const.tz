@@ -1,0 +1,7 @@
+export const kBacktick = "`";
+export const kDollar = "$";
+export const kOpenBrace = "{";
+export const kOpenValue = "${";
+export const kCloseValue = "}";
+export const kQuotes = ['"', "'"];
+export const kTemplateFrame = 4;

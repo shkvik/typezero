@@ -1,0 +1,357 @@
+import {
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+  Param,
+} from "../../../program/ast/types/ast.types.functions.tz";
+import {
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import {
+  GuardBuild,
+  GuardSummary,
+} from "../../code/expression-types/types/expression-types.types.tz";
+import { kDot } from "../../code/source-texts/const/source-texts.const.tz";
+import { TypeRef } from "../../../program/ast/types/ast.types.types.tz";
+import { kDictTexts } from "../../types/type-questions/const/type-questions.const.tz";
+import { MethodKind } from "../../../program/ast/types/ast.types.classes.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { TypeRelation } from "../../types/type-relation/type-relation.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { ModuleQuestions } from "../../declaration/module-questions/module-questions.tz";
+import { TypeOfRules } from "../../types/type-of-rules/type-of-rules.tz";
+import { kArrayTypeOf, kTypeOfTypes } from "./const/narrowing-rules.const.tz";
+
+export class NarrowingRules {
+  private readonly store: TypeStore;
+  private readonly text: TypeText;
+  private readonly relation: TypeRelation;
+  private readonly types: TypeQuestions;
+  private readonly modules: ModuleQuestions;
+  private readonly typeOfs: TypeOfRules;
+
+  public constructor(
+    store: TypeStore,
+    text: TypeText,
+    relation: TypeRelation,
+    types: TypeQuestions,
+    modules: ModuleQuestions,
+    typeOfs: TypeOfRules,
+  ) {
+    this.store = store;
+    this.text = text;
+    this.relation = relation;
+    this.types = types;
+    this.modules = modules;
+    this.typeOfs = typeOfs;
+  }
+
+  public joinedSide(
+    side: Map<string, Type> | undefined,
+    facts: Map<string, Type>,
+  ): Map<string, Type> {
+    if (side == undefined) {
+      return facts;
+    }
+
+    return this.joinedFacts(side, facts);
+  }
+
+  public guardSide(
+    guard: GuardBuild,
+    isTrue: boolean,
+  ): Map<string, Type> | undefined {
+    if (isTrue) {
+      return guard.whenTrue;
+    }
+
+    return guard.whenFalse;
+  }
+
+  public isParamPath(key: string, param: string): boolean {
+    return key == param || key.startsWith(param + kDot);
+  }
+
+  public summarySide(
+    summary: GuardSummary,
+    isTrue: boolean,
+  ): Map<string, Type> | undefined {
+    if (isTrue) {
+      return summary.whenTrue;
+    }
+
+    return summary.whenFalse;
+  }
+
+  public isBooleanFunction(type: Type): boolean {
+    if (type.kind != TypeKind.Function) {
+      return false;
+    }
+
+    const result = this.types.apparent(type.shape.result);
+
+    return result.kind == TypeKind.Boolean;
+  }
+
+  public isListType(type: Type): boolean {
+    return type.kind == TypeKind.Array || type.kind == TypeKind.Tuple;
+  }
+
+  public isOwnReceiver(type: Type): boolean {
+    const parts = this.types.unionMembers(type);
+
+    return parts.some(
+      (part) =>
+        part.kind == TypeKind.Instance &&
+        !this.modules.isLibraryModule(part.module),
+    );
+  }
+
+  public unknownFields(
+    key: string,
+    fields: ObjectField[],
+    facts: Map<string, Type>,
+  ): void {
+    const unknown = this.store.plain(TypeKind.Error);
+
+    for (const field of fields) {
+      if (field.optional || this.types.isOptional(field.type)) {
+        facts.set(key + kDot + field.name, unknown);
+      }
+    }
+  }
+
+  public isGuardable(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Union:
+      case TypeKind.Instance:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public mergedFacts(
+    first: Map<string, Type>,
+    second: Map<string, Type>,
+  ): Map<string, Type> {
+    const merged = new Map<string, Type>();
+
+    for (const [key, type] of first) {
+      merged.set(key, type);
+    }
+
+    for (const [key, type] of second) {
+      merged.set(key, type);
+    }
+
+    return merged;
+  }
+
+  public joinedFacts(
+    first: Map<string, Type>,
+    second: Map<string, Type>,
+  ): Map<string, Type> {
+    const joined = new Map<string, Type>();
+
+    for (const [key, type] of first) {
+      const other = second.get(key);
+      if (other != undefined) {
+        const union = this.store.unionOf([type, other]);
+
+        joined.set(key, union);
+      }
+    }
+
+    return joined;
+  }
+
+  public comparedPath(expr: Expr): Expr {
+    if (expr.kind == ExprKind.Assign && expr.op == undefined) {
+      return expr.target;
+    }
+
+    return expr;
+  }
+
+  public tagOf(expr: Expr): MemberExpr | undefined {
+    if (expr.kind == ExprKind.OptionalChain) {
+      return this.tagOf(expr.chain);
+    }
+    if (expr.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    return expr;
+  }
+
+  public flatMembers(type: Type): Type[] {
+    if (type.kind != TypeKind.Union) {
+      return [type];
+    }
+
+    const flat: Type[] = [];
+
+    for (const part of type.parts) {
+      for (const member of this.flatMembers(part)) {
+        flat.push(member);
+      }
+    }
+
+    return flat;
+  }
+
+  public sideOf(isFirst: boolean, first: Expr, second: Expr): Expr {
+    if (isFirst) {
+      return first;
+    }
+
+    return second;
+  }
+
+  public undefinedCompared(type: Type, isEqual: boolean): Type | undefined {
+    if (!this.types.isOptional(type)) {
+      return undefined;
+    }
+    if (isEqual) {
+      return this.store.plain(TypeKind.Undefined);
+    }
+
+    return this.types.definedType(type);
+  }
+
+  public literalPart(type: Type, literal: Type): Type | undefined {
+    const parts = this.types.unionMembers(type);
+    if (parts.includes(literal)) {
+      return literal;
+    }
+
+    const base = this.relation.baseOf(literal);
+    if (base != undefined && parts.includes(base)) {
+      return literal;
+    }
+
+    return undefined;
+  }
+
+  public withoutPart(type: Type, literal: Type): Type | undefined {
+    const parts = this.types.unionMembers(type);
+    if (!parts.includes(literal)) {
+      return undefined;
+    }
+
+    const kept = parts.filter((part) => part != literal);
+    if (kept.length == 0) {
+      return this.store.plain(TypeKind.Never);
+    }
+
+    return this.store.unionOf(kept);
+  }
+
+  public typeofType(
+    type: Type,
+    name: string,
+    isEqual: boolean,
+  ): Type | undefined {
+    const kept: Type[] = [];
+
+    for (const part of this.types.unionMembers(type)) {
+      const isOpen =
+        part.kind == TypeKind.Unknown ||
+        part.kind == TypeKind.Json ||
+        part.kind == TypeKind.TypeParameter;
+      if (isOpen) {
+        const open = this.openPart(part, name, isEqual);
+
+        kept.push(open);
+
+        continue;
+      }
+
+      const isNamed = this.typeOfs.typeOfNames(part).includes(name);
+      if (isNamed == isEqual) {
+        kept.push(part);
+      }
+    }
+
+    if (kept.length == 0) {
+      return undefined;
+    }
+
+    return this.store.unionOf(kept);
+  }
+
+  public isInstanceOf(part: Type, name: string): boolean {
+    switch (part.kind) {
+      case TypeKind.Instance:
+        return part.name == name;
+      case TypeKind.Dict: {
+        const dict = part.dict;
+        const row = kDictTexts.find((one) => one.dict == dict);
+
+        return row != undefined && row.kind == name;
+      }
+      default:
+        return false;
+    }
+  }
+
+  public isInstanceMethod(fn: FunctionDecl): boolean {
+    const method = fn.role?.method;
+
+    return method == MethodKind.Instance || method == MethodKind.Abstract;
+  }
+
+  public predicateParam(fn: FunctionDecl, name: string): Param | undefined {
+    let found: Param | undefined = undefined;
+
+    for (const param of fn.params) {
+      if (param.name == name) {
+        found = param;
+      }
+    }
+
+    return found;
+  }
+
+  public shownPredicate(written: TypeRef, guarded: Type | undefined): string {
+    if (guarded == undefined) {
+      return written.name;
+    }
+
+    const type = this.text.of(guarded);
+
+    return `${written.name} is ${type}`;
+  }
+
+  public assertsAdvice(shown: string, guarded: Type | undefined): string {
+    if (guarded == undefined) {
+      return "boolean";
+    }
+
+    return shown;
+  }
+
+  private openPart(part: Type, name: string, isEqual: boolean): Type {
+    const row = kTypeOfTypes.find((one) => one.name == name);
+    if (isEqual && name == kArrayTypeOf && part.kind == TypeKind.Unknown) {
+      return this.store.arrayOf(part);
+    }
+    if (!isEqual || row == undefined) {
+      return part;
+    }
+
+    const kind = row.kind;
+    if (kind != TypeKind.Int) {
+      return this.store.plain(kind);
+    }
+
+    return this.store.integer(row.bits, row.unsigned);
+  }
+}

@@ -1,0 +1,228 @@
+import {
+  Expr,
+  ExprKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  LiteralKind,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import {
+  DecimalMethod,
+  DecimalResult,
+} from "../../code/expression-types/types/expression-types.types.tz";
+import { OperandTexts } from "../../code/source-texts/types/source-texts.types.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { SourceTexts } from "../../code/source-texts/source-texts.tz";
+import { kDecimalReplacements } from "./const/decimal-rules.const.tz";
+
+export class DecimalRules {
+  private readonly store: TypeStore;
+  private readonly types: TypeQuestions;
+  private readonly sources: SourceTexts;
+
+  public constructor(
+    store: TypeStore,
+    types: TypeQuestions,
+    sources: SourceTexts,
+  ) {
+    this.store = store;
+    this.types = types;
+    this.sources = sources;
+  }
+
+  public decimalType(): Type {
+    return this.store.plain(TypeKind.Decimal);
+  }
+
+  public decimalOfHint(arg: Expr): Type | undefined {
+    const isLiteral =
+      arg.kind == ExprKind.IntLit || arg.kind == ExprKind.FloatLit;
+    if (isLiteral) {
+      return this.decimalType();
+    }
+
+    return undefined;
+  }
+
+  public maybePlace(isOptional: boolean): string {
+    if (isOptional) {
+      return "; the value may be undefined: check it first or give a default with '??'";
+    }
+
+    return "";
+  }
+
+  public isTextType(type: Type): boolean {
+    if (this.types.isOptional(type)) {
+      return false;
+    }
+
+    const base = this.types.apparent(type);
+    if (base.kind == TypeKind.String || base.kind == TypeKind.Template) {
+      return true;
+    }
+    if (type.kind != TypeKind.Union) {
+      return false;
+    }
+
+    return type.parts.every(
+      (part) =>
+        part.kind == TypeKind.Literal && part.literal == LiteralKind.String,
+    );
+  }
+
+  public literalPartText(part: Type): string {
+    if (part.kind == TypeKind.Literal) {
+      return part.text;
+    }
+
+    return "";
+  }
+
+  public decimalStaticHint(name: string): string {
+    if (name == "maximum" || name == "minimum") {
+      return `; use 'decimal.${name.slice(0, 3)}'`;
+    }
+    if (name == "config" || name == "set") {
+      return ": there are no settings for all decimals; division takes its places and rounding as arguments, 'a.div(b, places, mode)'";
+    }
+
+    return "";
+  }
+
+  public decimalMissingHint(name: string): string {
+    const replacement = kDecimalReplacements.find((one) => one.name == name);
+    let hint = "";
+
+    if (replacement != undefined) {
+      hint = `; a decimal uses ${replacement.use}`;
+    }
+    if (name == "isNaN" || name == "isFinite") {
+      hint = `${hint}; a decimal is never NaN or infinite`;
+    }
+
+    return hint;
+  }
+
+  public decimalMethodResult(method: DecimalMethod): Type {
+    switch (method.result) {
+      case DecimalResult.Text:
+        return this.store.plain(TypeKind.String);
+      case DecimalResult.Truth:
+        return this.store.plain(TypeKind.Boolean);
+      case DecimalResult.Whole:
+        return this.store.integer(64, false);
+      case DecimalResult.List:
+        return this.store.arrayOf(this.decimalType());
+      default:
+        return this.decimalType();
+    }
+  }
+
+  public decimalTop(text: string): int | undefined {
+    const clean = text.replaceAll("_", "").toLowerCase();
+    const mark = clean.indexOf("e");
+    const mantissa = this.mantissaOf(clean, mark);
+    const exponent = this.exponentOf(clean, mark);
+    const dot = mantissa.indexOf(".");
+    const whole = this.wholeDigits(mantissa, dot);
+    if (whole.length > 0) {
+      return whole.length - 1 + exponent;
+    }
+
+    const fraction = mantissa.slice(dot + 1);
+    const zeros = this.leadingZeros(fraction);
+    if (zeros == fraction.length) {
+      return undefined;
+    }
+
+    return exponent - zeros - 1;
+  }
+
+  public otherSide(isLeftDecimal: boolean, left: Type, right: Type): Type {
+    if (isLeftDecimal) {
+      return right;
+    }
+
+    return left;
+  }
+
+  public integerMixText(
+    isLeftDecimal: boolean,
+    op: string,
+    texts: OperandTexts,
+  ): string {
+    if (isLeftDecimal) {
+      const converted = this.sources.operandText(texts.right);
+
+      return `${texts.left} ${op} ${converted}.toDecimal()`;
+    }
+
+    const converted = this.sources.operandText(texts.left);
+
+    return `${converted}.toDecimal() ${op} ${texts.right}`;
+  }
+
+  public inexactText(
+    isLeftDecimal: boolean,
+    op: string,
+    texts: OperandTexts,
+  ): string {
+    if (isLeftDecimal) {
+      return `${texts.left} ${op} decimal(${texts.right})`;
+    }
+
+    return `decimal(${texts.left}) ${op} ${texts.right}`;
+  }
+
+  private mantissaOf(clean: string, mark: int): string {
+    if (mark < 0) {
+      return clean;
+    }
+
+    return clean.slice(0, mark);
+  }
+
+  private exponentOf(clean: string, mark: int): int {
+    if (mark < 0) {
+      return 0;
+    }
+
+    const parsed = parseInt(clean.slice(mark + 1));
+    const value = parsed.unwrapOr(0);
+    if (value > 1000000000000) {
+      return 1000000000000;
+    }
+    if (value < -1000000000000) {
+      return -1000000000000;
+    }
+
+    return value;
+  }
+
+  private wholeDigits(mantissa: string, dot: int): string {
+    const whole = this.wholePart(mantissa, dot);
+
+    return whole.slice(this.leadingZeros(whole));
+  }
+
+  private leadingZeros(text: string): int {
+    let count = 0;
+
+    while (count < text.length && text.charAt(count) == "0") {
+      count += 1;
+    }
+
+    return count;
+  }
+
+  private wholePart(mantissa: string, dot: int): string {
+    if (dot < 0) {
+      return mantissa;
+    }
+
+    return mantissa.slice(0, dot);
+  }
+}

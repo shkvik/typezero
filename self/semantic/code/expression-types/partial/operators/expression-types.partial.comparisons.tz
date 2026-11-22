@@ -10,7 +10,6 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import { kIntLimits } from "../../const/expression-types.const.tz";
 import {
   ComparedPair,
   ComparedSide,
@@ -69,7 +68,7 @@ partial class ExpressionTypes {
     const hasResult =
       plainLeft.kind == TypeKind.Result || plainRight.kind == TypeKind.Result;
     if (hasResult) {
-      const other = this.operatorText(expr.op);
+      const other = this.sources.operatorText(expr.op);
 
       return this.report(module, expr.loc, Code.ResultsCompared, { other });
     }
@@ -88,25 +87,25 @@ partial class ExpressionTypes {
       return;
     }
 
-    const common = this.comparisonType(adapted.left, adapted.right);
+    const common = this.comparisons.comparisonType(adapted.left, adapted.right);
     if (common == undefined) {
       this.reportIncomparable(expr, adapted, module);
     }
   }
 
   private comparedOperands(expr: BinaryExpr, module: int): ComparedPair {
-    const isLiteralLeft = this.isComparedLiteral(expr.lhs);
-    const isLiteralRight = this.isComparedLiteral(expr.rhs);
+    const isLiteralLeft = this.comparisons.isComparedLiteral(expr.lhs);
+    const isLiteralRight = this.comparisons.isComparedLiteral(expr.rhs);
     if (isLiteralLeft && !isLiteralRight) {
       const right = this.comparedSide(expr.rhs, undefined, module);
-      const leftHint = this.comparisonHint(right.type, expr.lhs);
+      const leftHint = this.comparisons.comparisonHint(right.type, expr.lhs);
       const left = this.comparedSide(expr.lhs, leftHint, module);
 
       return { left, right };
     }
 
     const left = this.comparedSide(expr.lhs, undefined, module);
-    const rightHint = this.literalComparisonHint(
+    const rightHint = this.comparisons.literalComparisonHint(
       isLiteralRight,
       left.type,
       expr.rhs,
@@ -114,18 +113,6 @@ partial class ExpressionTypes {
     const right = this.comparedSide(expr.rhs, rightHint, module);
 
     return { left, right };
-  }
-
-  private literalComparisonHint(
-    isLiteral: boolean,
-    other: Type,
-    self: Expr,
-  ): Type | undefined {
-    if (!isLiteral) {
-      return undefined;
-    }
-
-    return this.comparisonHint(other, self);
   }
 
   private comparedSide(
@@ -143,63 +130,6 @@ partial class ExpressionTypes {
     return { type, tested };
   }
 
-  private isComparedLiteral(expr: Expr): boolean {
-    const isNegated = expr.kind == ExprKind.Unary && expr.op == UnaryOp.Neg;
-    const operand = this.negatedOperand(isNegated, expr);
-    const kind = operand.kind;
-    const isWritten = kind == ExprKind.StringLit || kind == ExprKind.BoolLit;
-
-    return this.isNumberTree(operand) || isWritten;
-  }
-
-  private negatedOperand(isNegated: boolean, expr: Expr): Expr {
-    if (!isNegated || expr.kind != ExprKind.Unary) {
-      return expr;
-    }
-
-    return expr.operand;
-  }
-
-  private comparisonHint(other: Type, self: Expr): Type | undefined {
-    const type = this.types.definedType(other);
-    if (type.kind == TypeKind.Literal || type.kind == TypeKind.Union) {
-      return other;
-    }
-
-    const isFitting =
-      type.kind == TypeKind.Double || this.isFittingLiteral(self, type);
-    if (this.isNumeric(type) && isFitting) {
-      return type;
-    }
-    if (type.kind == TypeKind.Decimal) {
-      return type;
-    }
-
-    return undefined;
-  }
-
-  private isFittingLiteral(expr: Expr, type: Type): boolean {
-    if (type.kind != TypeKind.Int) {
-      return false;
-    }
-
-    const bits = type.bits;
-    const unsigned = type.unsigned;
-    const limit = kIntLimits.find(
-      (row) => row.bits == bits && row.unsigned == unsigned,
-    );
-    const isNegated = expr.kind == ExprKind.Unary && expr.op == UnaryOp.Neg;
-    const operand = this.negatedOperand(isNegated, expr);
-    if (limit == undefined || operand.kind != ExprKind.IntLit) {
-      return false;
-    }
-    if (!isNegated) {
-      return operand.value <= limit.highest;
-    }
-
-    return operand.value == 0 || (!unsigned && operand.value <= limit.lowest);
-  }
-
   private isNullSide(expr: Expr, module: int): boolean {
     return expr.kind == ExprKind.Name && this.isNullName(expr, module);
   }
@@ -207,7 +137,7 @@ partial class ExpressionTypes {
   private nullEquality(expr: BinaryExpr, module: int): void {
     const isLeftNull = this.isNullSide(expr.lhs, module);
     const isRightNull = this.isNullSide(expr.rhs, module);
-    const nullSide = this.nullOperand(isLeftNull, expr);
+    const nullSide = this.comparisons.nullOperand(isLeftNull, expr);
     const type = this.nullOther(isLeftNull, isRightNull, expr, module);
     const plain = this.types.definedType(type);
     if (type.kind == TypeKind.Error || plain.kind == TypeKind.Json) {
@@ -215,17 +145,9 @@ partial class ExpressionTypes {
     }
 
     const first = this.text.of(type);
-    const other = this.operatorText(expr.op);
+    const other = this.sources.operatorText(expr.op);
 
     this.report(module, nullSide.loc, Code.NullNeverEqual, { first, other });
-  }
-
-  private nullOperand(isLeftNull: boolean, expr: BinaryExpr): Expr {
-    if (isLeftNull) {
-      return expr.lhs;
-    }
-
-    return expr.rhs;
   }
 
   private nullOther(
@@ -249,7 +171,7 @@ partial class ExpressionTypes {
     const right = pair.right;
     const isLeftJson = this.types.definedType(left).kind == TypeKind.Json;
     const isRightJson = this.types.definedType(right).kind == TypeKind.Json;
-    const type = this.otherSide(isLeftJson, left, right);
+    const type = this.decimals.otherSide(isLeftJson, left, right);
     const json = this.store.plain(TypeKind.Json);
     const plain = this.types.definedType(type);
     const isOptionalJson =
@@ -261,58 +183,12 @@ partial class ExpressionTypes {
     const isPlain =
       type.kind == TypeKind.String ||
       type.kind == TypeKind.Boolean ||
-      this.isNumeric(type);
+      this.types.isNumeric(type);
     if (isPlain) {
       return;
     }
 
     this.reportOperands(expr, pair, module);
-  }
-
-  private comparisonType(left: Type, right: Type): Type | undefined {
-    if (left.kind == TypeKind.Void || right.kind == TypeKind.Void) {
-      return undefined;
-    }
-
-    const common = this.unify(left, right);
-    if (common == undefined || common.kind == TypeKind.Error) {
-      return common;
-    }
-
-    const base = this.types.definedType(common);
-    if (!this.isComparable(base)) {
-      return undefined;
-    }
-
-    return common;
-  }
-
-  private isComparable(base: Type): boolean {
-    switch (base.kind) {
-      case TypeKind.Int:
-      case TypeKind.Double:
-      case TypeKind.Decimal:
-      case TypeKind.Boolean:
-      case TypeKind.String:
-      case TypeKind.Template:
-      case TypeKind.Array:
-      case TypeKind.Function:
-      case TypeKind.Object:
-      case TypeKind.Instance:
-      case TypeKind.Tuple:
-      case TypeKind.AnyObject:
-      case TypeKind.Iterator:
-      case TypeKind.Json:
-      case TypeKind.Dict:
-      case TypeKind.Unknown:
-      case TypeKind.Literal:
-      case TypeKind.Class:
-        return true;
-      case TypeKind.Union:
-        return base.parts.every((part) => part.kind != TypeKind.TypeParameter);
-      default:
-        return false;
-    }
   }
 
   private reportIncomparable(
@@ -331,8 +207,8 @@ partial class ExpressionTypes {
     }
 
     const hasNumbers =
-      this.isNumeric(plainLeft) &&
-      this.isNumeric(plainRight) &&
+      this.types.isNumeric(plainLeft) &&
+      this.types.isNumeric(plainRight) &&
       !this.types.isOptional(left) &&
       !this.types.isOptional(right);
     if (hasNumbers) {
@@ -374,13 +250,13 @@ partial class ExpressionTypes {
     if (isBroken || isText) {
       return;
     }
-    if (this.isDate(left) || this.isDate(right)) {
+    if (this.types.isDate(left) || this.types.isDate(right)) {
       return this.dateComparison(expr, pair, module);
     }
     if (left.kind == TypeKind.Decimal || right.kind == TypeKind.Decimal) {
       return this.decimalComparison(expr, pair, module);
     }
-    if (!this.isNumeric(left) || !this.isNumeric(right)) {
+    if (!this.types.isNumeric(left) || !this.types.isNumeric(right)) {
       return this.reportOperands(expr, pair, module);
     }
 
@@ -416,7 +292,7 @@ partial class ExpressionTypes {
       return left;
     }
 
-    const hint = this.nullishHint(left, expected);
+    const hint = this.comparisons.nullishHint(left, expected);
     const right = this.typed(expr.rhs, hint, module);
     const pair: OperandPair = { left, right };
 
@@ -432,7 +308,7 @@ partial class ExpressionTypes {
       return right;
     }
 
-    const base = this.nullishBase(left, right);
+    const base = this.comparisons.nullishBase(left, right);
     if (base == undefined || base.kind == TypeKind.Error) {
       this.reportOperands(expr, pair, module);
 
@@ -443,28 +319,5 @@ partial class ExpressionTypes {
     }
 
     return base;
-  }
-
-  private nullishHint(
-    left: Type,
-    expected: Type | undefined,
-  ): Type | undefined {
-    if (left.kind == TypeKind.Undefined || left.kind == TypeKind.Error) {
-      return expected;
-    }
-
-    return this.types.definedType(left);
-  }
-
-  private nullishBase(left: Type, right: Type): Type | undefined {
-    const plainLeft = this.types.definedType(left);
-
-    if (right.kind == TypeKind.Undefined) {
-      return plainLeft;
-    }
-
-    const plainRight = this.types.definedType(right);
-
-    return this.unionUnify(plainLeft, plainRight);
   }
 }

@@ -8,24 +8,11 @@ import {
   UnionType,
 } from "../../../../../program/type/types/type.types.tz";
 import {
-  Candidate,
   CandidateStrength,
   InferenceSet,
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private inferenceSet(params: Type[]): InferenceSet {
-    return {
-      params,
-      candidates: [],
-      undefinedSeen: new Set<int>(),
-      visited: new Set<string>(),
-      isWeak: false,
-      isIntLiteral: false,
-      isUnmatched: false,
-    };
-  }
-
   private inferArgument(
     set: InferenceSet,
     pattern: Type,
@@ -50,10 +37,10 @@ partial class ExpressionTypes {
     const index = set.params.indexOf(pattern);
 
     if (actual.kind == TypeKind.Void) {
-      return this.addVoid(set, index, CandidateStrength.Strong);
+      return this.generics.addVoid(set, index, CandidateStrength.Strong);
     }
     if (index >= 0) {
-      return this.inferParameter(set, index, actual);
+      return this.generics.inferParameter(set, index, actual);
     }
     if (!this.isMentioning(pattern, set.params)) {
       return;
@@ -62,67 +49,19 @@ partial class ExpressionTypes {
     this.inferInside(set, pattern, actual);
   }
 
-  private addVoid(
-    set: InferenceSet,
-    index: int,
-    strength: CandidateStrength,
-  ): void {
-    if (index < 0) {
-      return;
-    }
-
-    const type = this.store.plain(TypeKind.Void);
-
-    set.candidates.push({ index, type, strength });
-  }
-
-  private inferParameter(set: InferenceSet, index: int, actual: Type): void {
-    if (actual.kind == TypeKind.Undefined) {
-      set.undefinedSeen.add(index);
-
-      return;
-    }
-    if (this.hasUnknownInside(actual)) {
-      return;
-    }
-
-    const strength = this.currentStrength(set);
-
-    set.candidates.push({ index, type: actual, strength });
-  }
-
-  private currentStrength(set: InferenceSet): CandidateStrength {
-    if (set.isIntLiteral) {
-      return CandidateStrength.Literal;
-    }
-    if (set.isWeak) {
-      return CandidateStrength.Weak;
-    }
-
-    return CandidateStrength.Strong;
-  }
-
-  private heldStrength(set: InferenceSet): CandidateStrength {
-    if (set.isWeak) {
-      return CandidateStrength.Weak;
-    }
-
-    return CandidateStrength.Strong;
-  }
-
   private inferHeld(set: InferenceSet, pattern: Type, actual: Type): void {
     const index = set.params.indexOf(pattern);
     if (index >= 0 && actual.kind == TypeKind.Void) {
-      const strength = this.heldStrength(set);
+      const strength = this.generics.heldStrength(set);
 
-      return this.addVoid(set, index, strength);
+      return this.generics.addVoid(set, index, strength);
     }
 
     this.inferPair(set, pattern, actual);
   }
 
   private inferInside(set: InferenceSet, pattern: Type, actual: Type): void {
-    if (!this.isSameShape(pattern, actual)) {
+    if (!this.generics.isSameShape(pattern, actual)) {
       set.isUnmatched = true;
 
       return;
@@ -168,19 +107,6 @@ partial class ExpressionTypes {
         return;
       default:
         return this.inferHolder(set, pattern, actual);
-    }
-  }
-
-  private isSameShape(pattern: Type, actual: Type): boolean {
-    switch (pattern.kind) {
-      case TypeKind.Union:
-        return true;
-      case TypeKind.Instance:
-        return this.sameClassIn(actual, pattern) != undefined;
-      case TypeKind.Dict:
-        return actual.kind == TypeKind.Dict || actual.kind == TypeKind.Object;
-      default:
-        return pattern.kind == actual.kind;
     }
   }
 
@@ -253,7 +179,7 @@ partial class ExpressionTypes {
     }
 
     const value = this.types.definedType(actual);
-    const members = this.partsOfType(value);
+    const members = this.generics.partsOfType(value);
     const rest = members.filter((member) => !fixed.includes(member));
     if (rest.length == 0) {
       return;
@@ -264,45 +190,14 @@ partial class ExpressionTypes {
     this.inferPair(set, first, joined);
   }
 
-  private partsOfType(type: Type): Type[] {
-    if (type.kind == TypeKind.Union) {
-      return type.parts;
-    }
-
-    return [type];
-  }
-
   private inferMember(set: InferenceSet, open: Type[], actual: Type): void {
     const value = this.types.definedType(actual);
 
     for (const member of open) {
-      if (this.isInstanceOfMember(value, member)) {
+      if (this.generics.isInstanceOfMember(value, member)) {
         return this.inferPair(set, member, value);
       }
     }
-  }
-
-  private isInstanceOfMember(value: Type, member: Type): boolean {
-    if (member.kind != TypeKind.Instance || member.args.length == 0) {
-      return false;
-    }
-
-    return this.sameClassIn(value, member) != undefined;
-  }
-
-  private sameClassIn(value: Type, member: Type): Type | undefined {
-    if (member.kind != TypeKind.Instance) {
-      return undefined;
-    }
-
-    const home = member.module;
-    const loc = member.loc;
-    const chain = this.ancestorsOf(value);
-
-    return chain.find(
-      (one) =>
-        one.kind == TypeKind.Instance && one.module == home && one.loc == loc,
-    );
   }
 
   private inferInstance(set: InferenceSet, pattern: Type, actual: Type): void {
@@ -310,7 +205,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const found = this.sameClassIn(actual, pattern);
+    const found = this.generics.sameClassIn(actual, pattern);
     if (found == undefined || found.kind != TypeKind.Instance) {
       return;
     }
@@ -360,7 +255,7 @@ partial class ExpressionTypes {
 
     const returned = set.params.indexOf(want.result);
     if (returned >= 0 && have.result.kind == TypeKind.Void) {
-      return this.addVoid(set, returned, CandidateStrength.Strong);
+      return this.generics.addVoid(set, returned, CandidateStrength.Strong);
     }
     if (want.result.kind != TypeKind.Void) {
       this.inferPair(set, want.result, have.result);
@@ -396,41 +291,5 @@ partial class ExpressionTypes {
     }
 
     return this.resolver.mentions(type, ids);
-  }
-
-  private candidatesOf(
-    set: InferenceSet,
-    index: int,
-    strength: CandidateStrength,
-  ): Type[] {
-    const found = set.candidates.filter(
-      (one) => one.index == index && one.strength == strength,
-    );
-
-    return found.map((one) => one.type);
-  }
-
-  private adoptCandidates(
-    set: InferenceSet,
-    index: int,
-    other: InferenceSet,
-  ): void {
-    const kept = set.candidates.filter((one) => one.index != index);
-    const taken = other.candidates.filter(
-      (one) => one.index == index && one.strength == CandidateStrength.Strong,
-    );
-    const next: Candidate[] = kept.concat(taken);
-
-    set.candidates.splice(0, set.candidates.length);
-
-    for (const one of next) {
-      set.candidates.push(one);
-    }
-
-    set.undefinedSeen.delete(index);
-
-    if (other.undefinedSeen.has(index)) {
-      set.undefinedSeen.add(index);
-    }
   }
 }

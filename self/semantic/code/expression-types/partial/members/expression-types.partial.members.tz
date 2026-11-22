@@ -17,13 +17,12 @@ import {
   UnionType,
 } from "../../../../../program/type/types/type.types.tz";
 import {
-  kLengthName,
   kPrototypeNames,
   kRawName,
-  kWrappedValueName,
 } from "../../const/expression-types.const.tz";
 import { EnumHome } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 import { LiteralValue } from "../../types/expression-types.types.tz";
+import { kLengthName } from "../../../expression-shapes/const/expression-shapes.const.tz";
 
 partial class ExpressionTypes {
   private memberTyped(expr: MemberExpr, module: int): Type {
@@ -106,7 +105,7 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    const keyed = this.recordMemberTyped(expr, object);
+    const keyed = this.dictionaries.recordMemberTyped(expr, object);
     if (keyed != undefined) {
       return keyed;
     }
@@ -200,7 +199,7 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    const type = this.fieldWanted(field);
+    const type = this.objects.fieldWanted(field);
     const isMethod =
       type.kind == TypeKind.Function && type.shape.self == undefined;
     if (isLibrary && isMethod) {
@@ -248,14 +247,14 @@ partial class ExpressionTypes {
 
   private valueMember(expr: MemberExpr, object: Type, module: int): Type {
     const name = expr.name;
-    const isSized = this.isSized(object);
+    const isSized = this.objects.isSized(object);
     if (isSized && name == kLengthName) {
       return this.store.integer(64, false);
     }
-    if (this.isWrappedValue(object, name)) {
-      return this.unsignedOf(object);
+    if (this.objects.isWrappedValue(object, name)) {
+      return this.objects.unsignedOf(object);
     }
-    if (this.isTextList(object) && name == kRawName) {
+    if (this.objects.isTextList(object) && name == kRawName) {
       return this.store.plain(TypeKind.Error);
     }
 
@@ -271,33 +270,6 @@ partial class ExpressionTypes {
     this.report(module, expr.loc, Code.PropertyMissing, { word, first });
 
     return this.store.plain(TypeKind.Error);
-  }
-
-  private isSized(type: Type): boolean {
-    switch (type.kind) {
-      case TypeKind.String:
-      case TypeKind.Template:
-      case TypeKind.Array:
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  private isWrappedValue(type: Type, name: string): boolean {
-    return type.kind == TypeKind.Int && type.wraps && name == kWrappedValueName;
-  }
-
-  private unsignedOf(type: Type): Type {
-    if (type.kind != TypeKind.Int) {
-      return type;
-    }
-
-    return this.store.integer(type.bits, true);
-  }
-
-  private isTextList(type: Type): boolean {
-    return type.kind == TypeKind.Array && type.item.kind == TypeKind.String;
   }
 
   private enumOfObject(object: Expr, module: int): EnumDecl | undefined {
@@ -350,7 +322,7 @@ partial class ExpressionTypes {
       return undefined;
     }
     if (type.literal == LiteralKind.String) {
-      return this.plainLiteral(LiteralKind.String, type.text);
+      return this.literals.plainLiteral(LiteralKind.String, type.text);
     }
 
     const number = step.number;
@@ -358,22 +330,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return this.wholeLiteral(number);
-  }
-
-  private wholeLiteral(number: int): LiteralValue {
-    const text = `${number}`;
-
-    if (number >= 0) {
-      const whole = number.toUint64();
-
-      return { kind: LiteralKind.Int, text, whole, negative: false };
-    }
-
-    const below = -(number + 1);
-    const whole = below.toUint64() + 1;
-
-    return { kind: LiteralKind.Int, text, whole, negative: true };
+    return this.objects.wholeLiteral(number);
   }
 
   private enumConstant(expr: MemberExpr, module: int): decimal | undefined {

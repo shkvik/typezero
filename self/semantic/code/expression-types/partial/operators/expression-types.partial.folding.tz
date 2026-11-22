@@ -1,5 +1,4 @@
 import { ExpressionTypes } from "../../expression-types.tz";
-import { Code } from "../../../../../diagnostic/code.tz";
 import {
   BinaryExpr,
   BinaryOp,
@@ -12,21 +11,7 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import {
-  kDoubleBits,
-  kDoubleLimit,
-  kExponentMark,
-  kFractionDot,
-  kInfinityText,
-  kLargestInt,
-  kMinus,
-  kPlainDoubleLimit,
-  kRoundDown,
-  kRoundHalfEven,
-  kShownDigits,
-  kSmallestInt,
-  kZeroDigit,
-} from "../../const/expression-types.const.tz";
+import { kRoundDown } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
   private foldBinary(expr: BinaryExpr, type: Type, module: int): void {
@@ -71,34 +56,17 @@ partial class ExpressionTypes {
       return;
     }
 
-    const value = this.unsignedValue(expr.op, left, right);
+    const value = this.integers.unsignedValue(expr.op, left, right);
     if (value == undefined) {
       return;
     }
-    if (this.isInside(value, type)) {
+    if (this.integers.isInside(value, type)) {
       this.folded.set(expr, value);
 
       return;
     }
 
     this.reportOverflow(expr, type, `${value}`, 0, module);
-  }
-
-  private unsignedValue(
-    op: BinaryOp,
-    left: decimal,
-    right: decimal,
-  ): decimal | undefined {
-    switch (op) {
-      case BinaryOp.Add:
-        return left + right;
-      case BinaryOp.Sub:
-        return left - right;
-      case BinaryOp.Mul:
-        return left * right;
-      default:
-        return undefined;
-    }
   }
 
   private foldUnary(expr: UnaryExpr, type: Type, module: int): void {
@@ -119,8 +87,8 @@ partial class ExpressionTypes {
       case UnaryOp.Neg:
         return this.settle(expr, type, -value, module);
       case UnaryOp.BitNot: {
-        const pattern = this.wrapTo(value, type);
-        const inverted = this.wrapTo(-pattern - 1, type);
+        const pattern = this.integers.wrapTo(value, type);
+        const inverted = this.integers.wrapTo(-pattern - 1, type);
 
         this.folded.set(expr, inverted);
 
@@ -132,13 +100,13 @@ partial class ExpressionTypes {
   }
 
   private settle(expr: Expr, type: IntType, value: decimal, module: int): void {
-    if (this.isInside(value, type)) {
+    if (this.integers.isInside(value, type)) {
       this.folded.set(expr, value);
 
       return;
     }
 
-    const wrapped = this.wrapTo(value, type);
+    const wrapped = this.integers.wrapTo(value, type);
 
     this.reportOverflow(expr, type, `${value}`, wrapped, module);
   }
@@ -150,59 +118,11 @@ partial class ExpressionTypes {
     wrapped: decimal,
     module: int,
   ): void {
-    const code = this.overflowCode(type);
+    const code = this.integers.overflowCode(type);
     const first = this.text.of(type);
     const other = `${wrapped}`;
 
     this.report(module, expr.loc, code, { word: shown, first, other });
-  }
-
-  private overflowCode(type: IntType): Code {
-    if (type.bits < 64) {
-      return Code.ConstantOverflow;
-    }
-
-    return Code.WideConstantOverflow;
-  }
-
-  private wrapTo(value: decimal, type: IntType): decimal {
-    const span = this.spanOf(type);
-    const pattern = this.patternOf(value, span);
-    const half = span / 2;
-    const isUnsigned = type.unsigned && type.bits < 64;
-    if (isUnsigned || pattern < half) {
-      return pattern;
-    }
-
-    return pattern - span;
-  }
-
-  private patternOf(value: decimal, span: decimal): decimal {
-    if (span <= 0) {
-      return value;
-    }
-
-    const rest = value % span;
-
-    return (rest + span) % span;
-  }
-
-  private spanOf(type: IntType): decimal {
-    const bits = type.bits.toDecimal();
-
-    return this.twoPower(bits);
-  }
-
-  private twoPower(count: decimal): decimal {
-    let power: decimal = 1;
-    let rest: decimal = count;
-
-    while (rest > 0) {
-      power *= 2;
-      rest -= 1;
-    }
-
-    return power;
   }
 
   private foldDivision(
@@ -235,157 +155,17 @@ partial class ExpressionTypes {
       return;
     }
 
-    const exact = this.exactPower(base, exponent);
-    if (exact != undefined && this.isInside(exact, type)) {
+    const exact = this.integers.exactPower(base, exponent);
+    if (exact != undefined && this.integers.isInside(exact, type)) {
       this.folded.set(expr, exact);
 
       return;
     }
 
-    const shown = this.powerShown(exact, base, exponent);
-    const wrapped = this.wrappedPower(base, exponent, type);
+    const shown = this.integers.powerShown(exact, base, exponent);
+    const wrapped = this.integers.wrappedPower(base, exponent, type);
 
     this.reportOverflow(expr, type, shown, wrapped, module);
-  }
-
-  private exactPower(base: decimal, exponent: decimal): decimal | undefined {
-    const size = base.abs();
-    if (size <= 1) {
-      return this.unitPower(base, exponent);
-    }
-
-    let product: decimal = 1;
-    let rest: decimal = exponent;
-
-    while (rest > 0) {
-      product *= base;
-      rest -= 1;
-
-      if (product > kLargestInt || product < kSmallestInt) {
-        return undefined;
-      }
-    }
-
-    return product;
-  }
-
-  private unitPower(base: decimal, exponent: decimal): decimal {
-    if (base == 1 || exponent == 0) {
-      return 1;
-    }
-    if (base == 0) {
-      return 0;
-    }
-    if (exponent % 2 == 0) {
-      return 1;
-    }
-
-    return -1;
-  }
-
-  private powerShown(
-    exact: decimal | undefined,
-    base: decimal,
-    exponent: decimal,
-  ): string {
-    if (exact != undefined) {
-      return `${exact}`;
-    }
-
-    const isNegative = base < 0 && exponent % 2 == 1;
-    const digits = this.powerDigits(base.abs(), exponent);
-
-    if (isNegative) {
-      return kMinus + digits;
-    }
-
-    return digits;
-  }
-
-  private powerDigits(size: decimal, exponent: decimal): string {
-    let product: decimal = 1;
-    let rest: decimal = exponent;
-
-    while (rest > 0 && product < kDoubleLimit) {
-      product *= size;
-      rest -= 1;
-    }
-
-    const nearest = this.nearestDouble(product);
-    if (nearest >= kDoubleLimit) {
-      return kInfinityText;
-    }
-    if (nearest >= kPlainDoubleLimit) {
-      return this.exponentText(nearest);
-    }
-
-    return `${nearest}`;
-  }
-
-  private nearestDouble(size: decimal): decimal {
-    let top: decimal = 1;
-    let bits = 0;
-
-    while (top <= size) {
-      top *= 2;
-      bits += 1;
-    }
-
-    let unit: decimal = 1;
-
-    for (let index = kDoubleBits; index < bits; index += 1) {
-      unit *= 2;
-    }
-
-    const steps = size.div(unit, 0, kRoundHalfEven);
-
-    return steps * unit;
-  }
-
-  private exponentText(value: decimal): string {
-    const text = value.toExponential(kShownDigits - 1);
-    const mark = text.indexOf(kExponentMark);
-    if (mark < 0) {
-      return text;
-    }
-
-    let end = mark;
-
-    while (end > 0 && text.charAt(end - 1) == kZeroDigit) {
-      end -= 1;
-    }
-
-    if (end > 0 && text.charAt(end - 1) == kFractionDot) {
-      end -= 1;
-    }
-
-    const mantissa = text.slice(0, end);
-    const power = text.slice(mark);
-
-    return mantissa + power;
-  }
-
-  private wrappedPower(
-    base: decimal,
-    exponent: decimal,
-    type: IntType,
-  ): decimal {
-    const span = this.spanOf(type);
-    let result: decimal = 1;
-    let factor = this.patternOf(base, span);
-    let rest: decimal = exponent;
-
-    while (rest > 0) {
-      const bit = rest % 2;
-      if (bit == 1) {
-        result = this.patternOf(result * factor, span);
-      }
-
-      factor = this.patternOf(factor * factor, span);
-      rest = (rest - bit) / 2;
-    }
-
-    return this.wrapTo(result, type);
   }
 
   private foldBits(
@@ -394,16 +174,16 @@ partial class ExpressionTypes {
     left: decimal,
     right: decimal,
   ): void {
-    const span = this.spanOf(type);
-    let first = this.patternOf(left, span);
-    let second = this.patternOf(right, span);
+    const span = this.integers.spanOf(type);
+    let first = this.integers.patternOf(left, span);
+    let second = this.integers.patternOf(right, span);
     let result: decimal = 0;
     let place: decimal = 1;
 
     for (let index = 0; index < type.bits; index += 1) {
       const one = first % 2;
       const other = second % 2;
-      const bit = this.bitOf(expr.op, one, other);
+      const bit = this.integers.bitOf(expr.op, one, other);
 
       result += bit * place;
       first = (first - one) / 2;
@@ -411,20 +191,9 @@ partial class ExpressionTypes {
       place *= 2;
     }
 
-    const value = this.wrapTo(result, type);
+    const value = this.integers.wrapTo(result, type);
 
     this.folded.set(expr, value);
-  }
-
-  private bitOf(op: BinaryOp, one: decimal, other: decimal): decimal {
-    switch (op) {
-      case BinaryOp.BitAnd:
-        return one * other;
-      case BinaryOp.BitOr:
-        return one + other - one * other;
-      default:
-        return (one + other) % 2;
-    }
   }
 
   private foldShift(
@@ -434,10 +203,10 @@ partial class ExpressionTypes {
     count: decimal,
     module: int,
   ): void {
-    const factor = this.twoPower(count);
+    const factor = this.integers.twoPower(count);
 
     if (expr.op != BinaryOp.Shl) {
-      const dropped = this.patternOf(value, factor);
+      const dropped = this.integers.patternOf(value, factor);
       const moved = (value - dropped).div(factor, 0, kRoundDown);
 
       this.folded.set(expr, moved);
@@ -446,7 +215,7 @@ partial class ExpressionTypes {
     }
 
     const exact = value * factor;
-    if (this.isInside(exact, shifted)) {
+    if (this.integers.isInside(exact, shifted)) {
       this.folded.set(expr, exact);
 
       return;

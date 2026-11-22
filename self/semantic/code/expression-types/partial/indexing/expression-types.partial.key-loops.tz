@@ -1,10 +1,6 @@
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
-import {
-  Expr,
-  ExprKind,
-} from "../../../../../program/ast/types/ast.types.expressions.tz";
 import { ForOfStmt } from "../../../../../program/ast/types/ast.types.statements.tz";
 import {
   DictKind,
@@ -16,33 +12,36 @@ partial class ExpressionTypes {
   private forInKeys(loop: ForOfStmt, iterable: Type, module: int): Type {
     const error = this.store.plain(TypeKind.Error);
     const object = loop.iterable;
-    const text = this.forInText(object, iterable);
+    const text = this.dictionaries.forInText(object, iterable);
     const base = this.types.apparent(iterable);
-    const indexed = this.indexedWord(base);
+    const indexed = this.dictionaries.indexedWord(base);
     if (indexed != undefined) {
       this.report(module, object.loc, Code.ForInIndices, {
         word: indexed,
         other: text,
-        place: this.forEachPlace(base, text),
+        place: this.dictionaries.forEachPlace(base, text),
       });
 
       return error;
     }
 
     const defined = this.types.apparent(this.types.definedType(iterable));
-    if (this.types.isOptional(iterable) && this.isKeyHolder(defined)) {
+    if (
+      this.types.isOptional(iterable) &&
+      this.dictionaries.isKeyHolder(defined)
+    ) {
       this.report(module, object.loc, Code.ForInUndefined, kNoDetails);
 
       return error;
     }
     if (defined.kind == TypeKind.Dict && defined.dict != DictKind.Record) {
-      const code = this.forInCode(defined.dict == DictKind.Map);
+      const code = this.dictionaries.forInCode(defined.dict == DictKind.Map);
 
       this.report(module, object.loc, code, { word: text });
 
       return error;
     }
-    if (this.isKeyless(base)) {
+    if (this.dictionaries.isKeyless(base)) {
       this.report(module, object.loc, Code.ForInNotObject, {
         word: this.text.of(iterable),
       });
@@ -54,74 +53,5 @@ partial class ExpressionTypes {
     }
 
     return this.store.plain(TypeKind.String);
-  }
-
-  private forInText(object: Expr, type: Type): string {
-    if (object.kind == ExprKind.Name) {
-      return object.name;
-    }
-
-    const base = this.types.apparent(type);
-    if (base.kind == TypeKind.String || base.kind == TypeKind.Template) {
-      return "s";
-    }
-
-    return "a";
-  }
-
-  private indexedWord(base: Type): string | undefined {
-    switch (base.kind) {
-      case TypeKind.Array:
-        return "an array";
-      case TypeKind.String:
-      case TypeKind.Template:
-        return "a string";
-      case TypeKind.Tuple:
-        return "a tuple";
-      default:
-        return undefined;
-    }
-  }
-
-  private forEachPlace(base: Type, text: string): string {
-    if (base.kind != TypeKind.Array) {
-      return "";
-    }
-
-    return ` or '${text}.forEach((x, i) => ...)'`;
-  }
-
-  private isKeyHolder(type: Type): boolean {
-    switch (type.kind) {
-      case TypeKind.Object:
-      case TypeKind.Instance:
-        return true;
-      case TypeKind.Dict:
-        return type.dict == DictKind.Record;
-      default:
-        return false;
-    }
-  }
-
-  private isKeyless(base: Type): boolean {
-    switch (base.kind) {
-      case TypeKind.Int:
-      case TypeKind.Double:
-      case TypeKind.Decimal:
-      case TypeKind.Boolean:
-        return true;
-      case TypeKind.Instance:
-        return this.isBuiltinValue(base);
-      default:
-        return false;
-    }
-  }
-
-  private forInCode(isMap: boolean): Code {
-    if (isMap) {
-      return Code.MapForIn;
-    }
-
-    return Code.SetForIn;
   }
 }

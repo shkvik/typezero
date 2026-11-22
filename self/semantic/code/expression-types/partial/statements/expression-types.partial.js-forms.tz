@@ -40,12 +40,12 @@ partial class ExpressionTypes {
       return true;
     }
 
-    const key = this.simpleText(expr.lhs);
+    const key = this.statements.simpleText(expr.lhs);
     const isKnown = this.types.apparent(left).kind == TypeKind.Int && key != "";
-    const index = this.knownOr(isKnown, key, "i");
-    const array = this.simpleOr(expr.rhs, "a");
+    const index = this.statements.knownOr(isKnown, key, "i");
+    const array = this.statements.simpleOr(expr.rhs, "a");
     const below = `${index} < ${array}.length`;
-    const word = this.boundsText(
+    const word = this.statements.boundsText(
       expr.lhs.kind == ExprKind.IntLit,
       index,
       below,
@@ -54,42 +54,6 @@ partial class ExpressionTypes {
     this.report(module, expr.loc, Code.ArrayIn, { word });
 
     return true;
-  }
-
-  private boundsText(isLiteral: boolean, index: string, below: string): string {
-    if (isLiteral) {
-      return below;
-    }
-
-    return `${index} >= 0 && ${below}`;
-  }
-
-  private simpleText(expr: Expr): string {
-    if (expr.kind == ExprKind.Name) {
-      return expr.name;
-    }
-    if (expr.kind == ExprKind.IntLit) {
-      return `${expr.value}`;
-    }
-
-    return "";
-  }
-
-  private simpleOr(expr: Expr, fallback: string): string {
-    const text = this.simpleText(expr);
-    if (text == "") {
-      return fallback;
-    }
-
-    return text;
-  }
-
-  private knownOr(isKnown: boolean, text: string, fallback: string): string {
-    if (isKnown) {
-      return text;
-    }
-
-    return fallback;
   }
 
   private indexDeleteCheck(
@@ -104,8 +68,8 @@ partial class ExpressionTypes {
       case TypeKind.Array:
         this.typed(target.index, undefined, module);
         this.report(module, expr.loc, Code.DeleteArrayHole, {
-          word: this.simpleOr(target.object, "a"),
-          other: this.simpleOr(target.index, "i"),
+          word: this.statements.simpleOr(target.object, "a"),
+          other: this.statements.simpleOr(target.index, "i"),
         });
 
         return true;
@@ -174,16 +138,5 @@ partial class ExpressionTypes {
     this.looseArguments(expr.args, module);
 
     return true;
-  }
-
-  private taggedPlace(count: int): string {
-    if (count == 2) {
-      return " and 1 value";
-    }
-    if (count != 1) {
-      return ` and ${count - 1} values`;
-    }
-
-    return "";
   }
 }

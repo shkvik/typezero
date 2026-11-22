@@ -23,7 +23,7 @@ partial class ExpressionTypes {
       return value.value;
     }
 
-    const parts = this.partsOfType(value);
+    const parts = this.generics.partsOfType(value);
     const hasPromise = parts.some((part) => part.kind == TypeKind.Promise);
     if (hasPromise) {
       return this.store.plain(TypeKind.Error);

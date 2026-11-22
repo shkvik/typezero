@@ -26,7 +26,7 @@ import {
 partial class ExpressionTypes {
   private classValue(target: ValueTarget): Type {
     const error = this.store.plain(TypeKind.Error);
-    if (this.isLibraryModule(target.module)) {
+    if (this.modules.isLibraryModule(target.module)) {
       return error;
     }
 
@@ -82,7 +82,7 @@ partial class ExpressionTypes {
   ): Type | undefined {
     const isValue =
       target.kind == SymbolKind.Variable || target.kind == SymbolKind.Parameter;
-    if (!isValue || this.isLibraryModule(target.module)) {
+    if (!isValue || this.modules.isLibraryModule(target.module)) {
       return undefined;
     }
 
@@ -143,21 +143,6 @@ partial class ExpressionTypes {
     this.looseArguments(expr.args, module);
 
     return this.store.plain(TypeKind.Error);
-  }
-
-  private commonConstructor(first: Type, second: Type): Type | undefined {
-    if (first.kind != TypeKind.Class || second.kind != TypeKind.Class) {
-      return undefined;
-    }
-
-    const made = this.commonParent(first.instance, second.instance);
-    if (made == undefined) {
-      const any = this.store.plain(TypeKind.AnyObject);
-
-      return this.store.classOf(any, false);
-    }
-
-    return this.store.classOf(made, false);
   }
 
   private valueOwner(target: ValueTarget): StaticOwner | undefined {

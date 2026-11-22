@@ -15,8 +15,6 @@ import { Stmt } from "../../../../program/ast/types/ast.types.statements.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import {
-  kDot,
-  kHiddenMark,
   kNoPlace,
   kThisName,
 } from "../../../code/expression-types/const/expression-types.const.tz";
@@ -27,7 +25,10 @@ import {
   ParamSlot,
   ValueRecord,
 } from "../../../code/expression-types/types/expression-types.types.tz";
-import { TruthUse } from "../../truth-rules/types/truth-rules.types.tz";
+import {
+  kDot,
+  kHiddenMark,
+} from "../../../code/source-texts/const/source-texts.const.tz";
 
 partial class ExpressionTypes {
   private pathKey(expr: Expr, module: int): string | undefined {
@@ -158,12 +159,12 @@ partial class ExpressionTypes {
     }
     if (expr.op == BinaryOp.LogOr || expr.op == BinaryOp.LogAnd) {
       const tested = current ?? declared;
-      const use = this.assignUse(expr.op);
+      const use = this.flows.assignUse(expr.op);
 
       this.checkTruthy(target, tested, use, expr.value, module);
     }
 
-    const wanted = this.assignedWanted(expr.op, declared);
+    const wanted = this.flows.assignedWanted(expr.op, declared);
     const given = this.typed(expr.value, wanted, module);
 
     const isChecked =
@@ -180,13 +181,13 @@ partial class ExpressionTypes {
       return given;
     }
 
-    const fact = this.assignedFact(expr.op, declared, current, given);
+    const fact = this.flows.assignedFact(expr.op, declared, current, given);
 
     this.forgetPath(key);
     this.forgetFieldsNamed(target);
 
     if (fact != undefined) {
-      this.facts = this.withFact(this.facts, key, fact);
+      this.facts = this.flows.withFact(this.facts, key, fact);
     }
 
     this.assignedBounds(expr, module);
@@ -235,7 +236,7 @@ partial class ExpressionTypes {
     this.report(module, expr.loc, Code.OperandTypesUndefined, {
       first: this.text.of(tested),
       second: this.text.of(given),
-      other: `${this.operatorText(op)}=`,
+      other: `${this.sources.operatorText(op)}=`,
     });
 
     return true;
@@ -244,53 +245,15 @@ partial class ExpressionTypes {
   private logicalTargetCheck(expr: AssignExpr, module: int): boolean {
     const op = expr.op;
     const isLogical = op == BinaryOp.LogAnd || op == BinaryOp.LogOr;
-    if (!isLogical || this.isSimpleTarget(expr.target)) {
+    if (!isLogical || this.shapes.isSimpleTarget(expr.target)) {
       return false;
     }
 
-    const word = this.logicalAssignWord(op == BinaryOp.LogAnd);
+    const word = this.flows.logicalAssignWord(op == BinaryOp.LogAnd);
 
     this.report(module, expr.target.loc, Code.LogicalAssignSimple, { word });
 
     return true;
-  }
-
-  private logicalAssignWord(isAnd: boolean): string {
-    if (isAnd) {
-      return "&&=";
-    }
-
-    return "||=";
-  }
-
-  private isSimpleTarget(target: Expr): boolean {
-    switch (target.kind) {
-      case ExprKind.Name:
-        return true;
-      case ExprKind.Member:
-        return !target.optional && this.isSimpleChain(target.object);
-      case ExprKind.Index:
-        return (
-          !target.optional &&
-          this.isSimpleChain(target.object) &&
-          this.isSimpleChain(target.index)
-        );
-      default:
-        return false;
-    }
-  }
-
-  private isSimpleChain(expr: Expr): boolean {
-    switch (expr.kind) {
-      case ExprKind.Name:
-      case ExprKind.IntLit:
-      case ExprKind.StringLit:
-        return true;
-      case ExprKind.Member:
-        return !expr.optional && this.isSimpleChain(expr.object);
-      default:
-        return false;
-    }
   }
 
   private arrayWriteCheck(
@@ -313,14 +276,6 @@ partial class ExpressionTypes {
     }
 
     this.writeIndexCheck(target, isCompound, module);
-  }
-
-  private assignUse(op: BinaryOp | undefined): TruthUse {
-    if (op == BinaryOp.LogOr) {
-      return TruthUse.OrAssign;
-    }
-
-    return TruthUse.AndAssign;
   }
 
   private assignedDeclared(target: Expr, module: int): Type | undefined {
@@ -375,7 +330,8 @@ partial class ExpressionTypes {
     this.quiet -= 1;
 
     const isInstance =
-      object.kind == TypeKind.Instance && this.isLibraryModule(object.module);
+      object.kind == TypeKind.Instance &&
+      this.modules.isLibraryModule(object.module);
 
     return isInstance || this.resolver.isLibraryShape(object);
   }
@@ -389,57 +345,6 @@ partial class ExpressionTypes {
     }
 
     return this.knownFact(key) ?? declared;
-  }
-
-  private assignedWanted(
-    op: BinaryOp | undefined,
-    declared: Type | undefined,
-  ): Type | undefined {
-    const isPlain =
-      op == undefined || op == BinaryOp.LogOr || op == BinaryOp.Nullish;
-    if (!isPlain || declared == undefined) {
-      return undefined;
-    }
-    if (declared.kind == TypeKind.Error) {
-      return undefined;
-    }
-
-    return declared;
-  }
-
-  private assignedFact(
-    op: BinaryOp | undefined,
-    declared: Type,
-    current: Type | undefined,
-    given: Type,
-  ): Type | undefined {
-    const isDefaulting = op == BinaryOp.LogOr || op == BinaryOp.Nullish;
-
-    if (declared.kind != TypeKind.Union) {
-      return undefined;
-    }
-    if (isDefaulting && current != undefined) {
-      return this.defaultedFact(declared, current, given);
-    }
-    if (op != undefined || given.kind == TypeKind.Error) {
-      return undefined;
-    }
-    if (!this.relation.converts(given, declared)) {
-      return undefined;
-    }
-
-    return given;
-  }
-
-  private defaultedFact(declared: Type, current: Type, given: Type): Type {
-    const defined = this.types.definedType(current);
-    const isKnown =
-      given.kind != TypeKind.Error && this.relation.converts(given, declared);
-    if (!isKnown) {
-      return defined;
-    }
-
-    return this.store.unionOf([defined, given]);
   }
 
   private updatedTyped(target: Expr, module: int): Type {
@@ -514,18 +419,6 @@ partial class ExpressionTypes {
     this.facts = kept;
   }
 
-  private withFact(
-    facts: Map<string, Type>,
-    key: string,
-    type: Type,
-  ): Map<string, Type> {
-    const copy = new Map<string, Type>(facts);
-
-    copy.set(key, type);
-
-    return copy;
-  }
-
   private forgetLooped(statement: Stmt, module: int): void {
     const record = this.record(module);
     if (record == undefined) {
@@ -564,7 +457,7 @@ partial class ExpressionTypes {
   }
 
   private forgetChangedPart(change: Expr, module: int): void {
-    const target = this.changedTarget(change);
+    const target = this.bounds.changedTarget(change);
     if (target == undefined) {
       return;
     }
@@ -584,45 +477,5 @@ partial class ExpressionTypes {
     if (key != undefined) {
       this.forgetFacts(key);
     }
-  }
-
-  private branchesJoined(
-    before: Map<string, Type>,
-    thenStart: Map<string, Type>,
-    thenEnd: Map<string, Type>,
-    elseStart: Map<string, Type>,
-    elseEnd: Map<string, Type>,
-  ): Map<string, Type> {
-    const joined = new Map<string, Type>(before);
-    const keys = new Set<string>(thenEnd.keys());
-
-    for (const key of elseEnd.keys()) {
-      keys.add(key);
-    }
-
-    for (const key of before.keys()) {
-      keys.add(key);
-    }
-
-    for (const key of keys) {
-      const isThenChanged = thenEnd.get(key) != thenStart.get(key);
-      const isElseChanged = elseEnd.get(key) != elseStart.get(key);
-      if (!isThenChanged && !isElseChanged) {
-        continue;
-      }
-
-      const thenType = thenEnd.get(key);
-      const elseType = elseEnd.get(key);
-
-      joined.delete(key);
-
-      if (thenType != undefined && elseType != undefined) {
-        const union = this.store.unionOf([thenType, elseType]);
-
-        joined.set(key, union);
-      }
-    }
-
-    return joined;
   }
 }

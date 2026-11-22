@@ -6,7 +6,6 @@ import {
   TypePlace,
 } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 import {
-  Access,
   ClassDecl,
   MethodKind,
 } from "../../../../../program/ast/types/ast.types.classes.tz";
@@ -27,11 +26,6 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import {
-  kPrivateWord,
-  kProtectedWord,
-  kPublicWord,
-} from "../../const/expression-types.const.tz";
 import {
   ClassMemberEntry,
   SuperFrame,
@@ -87,7 +81,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const parent = this.parentOf(instance, decl);
+    const parent = this.classes.parentOf(instance, decl);
 
     return parent?.name;
   }
@@ -167,13 +161,13 @@ partial class ExpressionTypes {
       return;
     }
 
-    const parent = this.parentOf(instance, decl);
+    const parent = this.classes.parentOf(instance, decl);
     if (parent == undefined || this.classOf(parent) == undefined) {
       return;
     }
 
     for (const method of decl.methods) {
-      if (!this.isStaticMethod(method)) {
+      if (!this.classes.isStaticMethod(method)) {
         this.overrideCheck(method, decl, parent, isOpen, module);
       }
     }
@@ -222,9 +216,9 @@ partial class ExpressionTypes {
     if (theirType.kind != TypeKind.Function || ownType == undefined) {
       return;
     }
-    if (!this.isSameParameters(ownType, theirType)) {
+    if (!this.classes.isSameParameters(ownType, theirType)) {
       if (isMarked) {
-        const other = this.variantText(theirs, theirType);
+        const other = this.classes.variantText(theirs, theirType);
 
         this.report(module, method.loc, Code.OverrideParameters, {
           word,
@@ -251,24 +245,6 @@ partial class ExpressionTypes {
     }
 
     return type;
-  }
-
-  private isSameParameters(own: FunctionType, theirs: FunctionType): boolean {
-    const mine = own.shape.params;
-    const other = theirs.shape.params;
-    if (mine.length != other.length || own.shape.rest != theirs.shape.rest) {
-      return false;
-    }
-
-    return mine.every((param, index) => {
-      const that = other[index];
-
-      return (
-        that != undefined &&
-        (param.type == that.type || param.type.kind == TypeKind.Error) &&
-        param.optional == that.optional
-      );
-    });
   }
 
   private overrideResultCheck(
@@ -301,62 +277,23 @@ partial class ExpressionTypes {
     parent: InstanceType,
     module: int,
   ): void {
-    const own = this.accessOf(method);
-    const their = this.accessOf(theirs);
-    if (this.accessRank(own) <= this.accessRank(their)) {
+    const own = this.classes.accessOf(method);
+    const their = this.classes.accessOf(theirs);
+    if (this.classes.accessRank(own) <= this.classes.accessRank(their)) {
       return;
     }
 
     this.report(module, method.loc, Code.OverrideAccess, {
       word: method.name,
-      first: this.accessWord(their),
+      first: this.classes.accessWord(their),
       second: parent.name,
-      other: this.accessWord(own),
+      other: this.classes.accessWord(own),
     });
-  }
-
-  private accessRank(access: Access): int {
-    switch (access) {
-      case Access.Public:
-        return 0;
-      case Access.Protected:
-        return 1;
-      default:
-        return 2;
-    }
-  }
-
-  private accessWord(access: Access): string {
-    switch (access) {
-      case Access.Public:
-        return kPublicWord;
-      case Access.Protected:
-        return kProtectedWord;
-      default:
-        return kPrivateWord;
-    }
-  }
-
-  private variantText(fn: FunctionDecl, type: FunctionType): string {
-    const params = type.shape.params;
-    const parts: string[] = [];
-
-    for (let index = 0; index < fn.params.length; index++) {
-      const param = fn.params[index];
-      const typed = params[index];
-      if (param != undefined && typed != undefined) {
-        const text = this.text.of(typed.type);
-
-        parts.push(`${param.name}: ${text}`);
-      }
-    }
-
-    return `${fn.name}(${parts.join(", ")})`;
   }
 
   private inheritedResult(fn: FunctionDecl, module: int): Type | undefined {
     const owner = this.ownerClasses[this.ownerClasses.length - 1];
-    const isMethod = fn.role != undefined && !this.isStaticMethod(fn);
+    const isMethod = fn.role != undefined && !this.classes.isStaticMethod(fn);
     if (owner == undefined || !isMethod || owner.decl.typeParams.length > 0) {
       return undefined;
     }
@@ -370,7 +307,7 @@ partial class ExpressionTypes {
       return this.contractResultOf(decl, fn, owner.module);
     }
 
-    const parent = this.parentOf(instance, decl);
+    const parent = this.classes.parentOf(instance, decl);
     if (parent == undefined) {
       return this.contractResultOf(decl, fn, owner.module);
     }
@@ -417,19 +354,11 @@ partial class ExpressionTypes {
       const same = type.fields.filter((one) => one.name == fn.name);
       const field = same[0];
       if (field != undefined && same.length == 1) {
-        return this.contractFieldResult(field.type);
+        return this.classes.contractFieldResult(field.type);
       }
     }
 
     return undefined;
-  }
-
-  private contractFieldResult(type: Type): Type | undefined {
-    if (type.kind != TypeKind.Function) {
-      return undefined;
-    }
-
-    return type.shape.result;
   }
 
   private parentEntry(

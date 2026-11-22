@@ -78,7 +78,7 @@ partial class ExpressionTypes {
     what: string,
     module: int,
   ): void {
-    const word = this.operandName(value);
+    const word = this.sources.operandName(value);
     const isObject = object.kind == TypeKind.AnyObject;
     const code = this.unknownUseCode(isObject, what == "");
 
@@ -100,8 +100,8 @@ partial class ExpressionTypes {
   }
 
   private unknownCheckText(expr: Expr, given: Type, wanted: Type): string {
-    const shown = this.operandName(expr);
-    const only = this.onlyPart(wanted);
+    const shown = this.sources.operandName(expr);
+    const only = this.types.onlyPart(wanted);
     const target = this.types.definedType(only);
     if (target.kind == TypeKind.Instance) {
       return `${shown} instanceof ${this.text.of(target)}`;

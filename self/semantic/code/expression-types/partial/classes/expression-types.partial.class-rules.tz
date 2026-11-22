@@ -15,19 +15,18 @@ import {
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
 import {
-  DictKind,
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
 import {
   kCollectionExamples,
-  kDateName,
-  kMapClass,
   kSetClass,
   kSuperName,
   kThisName,
 } from "../../const/expression-types.const.tz";
 import { StaticOwner, ThisPlace } from "../../types/expression-types.types.tz";
+import { kDateName } from "../../../../types/type-questions/const/type-questions.const.tz";
+import { kMapClass } from "../../../class-rules/const/class-rules.const.tz";
 
 partial class ExpressionTypes {
   private instanceofTyped(expr: BinaryExpr, module: int): Type {
@@ -86,7 +85,7 @@ partial class ExpressionTypes {
 
       return true;
     }
-    if (isOpaque || this.isOpenTested(base)) {
+    if (isOpaque || this.classes.isOpenTested(base)) {
       return true;
     }
     if (base.kind == TypeKind.Union) {
@@ -107,13 +106,16 @@ partial class ExpressionTypes {
     word: string,
     module: int,
   ): void {
-    if (this.isCollectionOf(word, left)) {
+    if (this.classes.isCollectionOf(word, left)) {
       return this.report(module, expr.loc, Code.InstanceOfAlwaysTrue, {
         word,
         first: this.text.of(left),
       });
     }
-    if (this.types.isOptional(left) && this.isCollectionOf(word, base)) {
+    if (
+      this.types.isOptional(left) &&
+      this.classes.isCollectionOf(word, base)
+    ) {
       return this.report(module, expr.loc, Code.InstanceOfOrUndefined, {
         first: this.text.of(base),
       });
@@ -132,7 +134,9 @@ partial class ExpressionTypes {
     word: string,
     module: int,
   ): void {
-    const matching = parts.filter((part) => this.isCollectionOf(word, part));
+    const matching = parts.filter((part) =>
+      this.classes.isCollectionOf(word, part),
+    );
     const first = this.text.of(this.types.definedType(left));
     if (matching.length == 0) {
       return this.report(module, expr.loc, Code.InstanceOfNoneBuiltin, {
@@ -148,20 +152,6 @@ partial class ExpressionTypes {
         first,
       });
     }
-  }
-
-  private isCollectionOf(word: string, type: Type): boolean {
-    if (word == kDateName) {
-      return this.isDate(type);
-    }
-    if (type.kind != TypeKind.Dict) {
-      return false;
-    }
-    if (word == kMapClass) {
-      return type.dict == DictKind.Map;
-    }
-
-    return type.dict == DictKind.Set;
   }
 
   private testedClass(rhs: Expr, module: int): ClassDecl | undefined {
@@ -203,7 +193,7 @@ partial class ExpressionTypes {
     }
 
     const target = this.targetOfName(rhs, module);
-    if (target == undefined || this.isLibraryModule(target.module)) {
+    if (target == undefined || this.modules.isLibraryModule(target.module)) {
       return undefined;
     }
 
@@ -221,11 +211,11 @@ partial class ExpressionTypes {
     const word = decl.name ?? "";
     const first = this.text.of(base);
 
-    if (this.isOpenTested(base)) {
+    if (this.classes.isOpenTested(base)) {
       return;
     }
     if (base.kind == TypeKind.Union) {
-      if (!this.canHoldClass(base.parts, instance)) {
+      if (!this.classes.canHoldClass(base.parts, instance)) {
         this.report(module, expr.loc, Code.InstanceOfNeverUnion, {
           word,
           first,
@@ -234,7 +224,7 @@ partial class ExpressionTypes {
 
       return;
     }
-    if (!this.isObjectTested(base)) {
+    if (!this.classes.isObjectTested(base)) {
       const shown = this.text.of(left);
 
       this.report(module, expr.lhs.loc, Code.InstanceOfNotObject, {
@@ -247,61 +237,6 @@ partial class ExpressionTypes {
     this.relatedCheck(expr, base, instance, word, module);
   }
 
-  private isOpenTested(base: Type): boolean {
-    switch (base.kind) {
-      case TypeKind.Error:
-      case TypeKind.Unknown:
-      case TypeKind.AnyObject:
-      case TypeKind.TypeParameter:
-      case TypeKind.Operation:
-      case TypeKind.Json:
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  private isObjectTested(base: Type): boolean {
-    switch (base.kind) {
-      case TypeKind.Object:
-      case TypeKind.Instance:
-      case TypeKind.Tuple:
-      case TypeKind.Array:
-      case TypeKind.Dict:
-      case TypeKind.Function:
-      case TypeKind.Promise:
-      case TypeKind.Result:
-      case TypeKind.Iterator:
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  private canHoldClass(parts: Type[], instance: Type): boolean {
-    return parts.some((part) => {
-      const isObject =
-        part.kind == TypeKind.Object || part.kind == TypeKind.Instance;
-
-      return isObject && !this.isUnrelatedClass(part, instance);
-    });
-  }
-
-  private isUnrelatedClass(part: Type, instance: Type): boolean {
-    if (part.kind != TypeKind.Instance || this.isLibraryModule(part.module)) {
-      return false;
-    }
-
-    return !this.isSameLine(part, instance);
-  }
-
-  private isSameLine(first: Type, second: Type): boolean {
-    const up = this.ancestorsOf(first).includes(second);
-    const down = this.ancestorsOf(second).includes(first);
-
-    return up || down;
-  }
-
   private relatedCheck(
     expr: BinaryExpr,
     base: Type,
@@ -312,7 +247,7 @@ partial class ExpressionTypes {
     const first = this.text.of(base);
 
     if (base.kind == TypeKind.Instance) {
-      if (this.isUnrelatedClass(base, instance)) {
+      if (this.classes.isUnrelatedClass(base, instance)) {
         this.report(module, expr.loc, Code.InstanceOfNeverClass, {
           word,
           first,
@@ -324,7 +259,7 @@ partial class ExpressionTypes {
 
     const isPlain =
       base.kind == TypeKind.Object && this.store.labelOf(base) == undefined;
-    if (!isPlain || this.ancestorsOf(instance).includes(base)) {
+    if (!isPlain || this.types.ancestorsOf(instance).includes(base)) {
       return;
     }
 
@@ -383,7 +318,7 @@ partial class ExpressionTypes {
   ): void {
     if (
       object.kind != TypeKind.Instance ||
-      this.isLibraryModule(object.module)
+      this.modules.isLibraryModule(object.module)
     ) {
       return;
     }
@@ -447,7 +382,7 @@ partial class ExpressionTypes {
       (one) => one.name == name && one.form == FieldKind.Static,
     );
     const isMethod = decl.methods.some(
-      (one) => one.name == name && this.isStaticMethod(one),
+      (one) => one.name == name && this.classes.isStaticMethod(one),
     );
 
     if (field != undefined) {

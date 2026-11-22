@@ -734,6 +734,40 @@ self/             компилятор на tz, пробный (порт compile
                   semantic/types/type-questions/ — TypeQuestions: вопросы об одном типе
                   (isOptional, definedType, apparent, unionMembers, isObjectKind…), поле
                   types у обхода и у классов правил;
+                  semantic/types/type-unifier/ — TypeUnifier: общий тип двух типов (unify,
+                  unionUnify — с запасным объединением, commonType — более широкий из двух),
+                  поле unifier;
+                  semantic/types/literal-ranges/ — LiteralRanges: отрезки целых литералов
+                  объединения (rangeIntervals, rangeText «1 to 5 or 9»), поле ranges;
+                  semantic/types/mismatch-rules/ — MismatchRules: чем ответить, когда
+                  значение не подходит месту: answerOf(given, wanted, texts) — код и детали
+                  или ничего; обход собирает тексты выражения (имя, свежесть литерала) и
+                  пишет ошибку; поле mismatches;
+                  semantic/declaration/module-questions/ — ModuleQuestions: вопросы о модулях
+                  программы (isLibraryModule), поле modules;
+                  semantic/types/type-of-rules/ — TypeOfRules: имена typeof для типа и ответ на
+                  сравнение с именем (answerOf), поле typeOfs; semantic/types/type-parts/ —
+                  TypeParts: вопросы о частях типа (параметры внутри, unknown внутри), поле parts;
+                  semantic/code/source-texts/ — SourceTexts: тексты для сообщений из исходника и
+                  из дерева (operandTexts, sourceText, hintText, statementText), поле sources;
+                  semantic/code/expression-shapes/ — ExpressionShapes: вопросы о виде выражения
+                  без типов (isNumberTree, isFresh, isNeedingContext), поле shapes;
+                  semantic/code/integer-math/ — IntegerMath: целая арифметика констант (wrapTo,
+                  isInside, exactPower), поле integers; semantic/code/concatenation-rules/ —
+                  ConcatenationRules: что нельзя склеить в текст (textAnswer, mixedAnswer), поле
+                  concatenations.
+                  Ответ класса правил — Finding { code, details } (diagnostic/types) или
+                  SourceError, когда место ошибки выбирает правило.
+                  Остальные классы собраны механически: методы части, которые трогают только
+                  хранилище типов и другие классы правил, перенесены как есть, а те, что зовёт
+                  обход, стали public. По группам: code — array-rules, overload-rules,
+                  operator-rules, comparison-rules, logic-rules, callback-rules, call-rules,
+                  dictionary-rules, function-rules, literal-rules, index-rules, object-rules,
+                  decorator-rules, class-rules, statement-rules; flow — narrowing-rules,
+                  bound-rules, flow-rules; generics — generic-rules; library — date-rules,
+                  decimal-rules, result-rules, library-rules. Поле обхода называется по теме
+                  (arrays, overloads, …, library). Все классы правил создаёт конструктор
+                  ExpressionTypes;
                   semantic/flow/truth-rules/ — TruthRules: можно ли проверять значение
                   типа как условие (problemOf) и какой ошибкой ответить (answerOf);
                   semantic/declaration/scope-stack/ — ScopeStack: состояние обхода — стек областей

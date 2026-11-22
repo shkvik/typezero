@@ -1,0 +1,315 @@
+import {
+  Expr,
+  ExprKind,
+  UnaryOp,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+  ParamKind,
+} from "../../../program/ast/types/ast.types.functions.tz";
+import {
+  FunctionParameter,
+  FunctionType,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import {
+  FunctionFrame,
+  GeneratorFrame,
+  ParameterShape,
+  ThisPlace,
+} from "../expression-types/types/expression-types.types.tz";
+import { TypeRefKind } from "../../../program/ast/types/ast.types.types.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { TypeRelation } from "../../types/type-relation/type-relation.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { TypeUnifier } from "../../types/type-unifier/type-unifier.tz";
+import {
+  kAnonymousFunction,
+  kFunctionWord,
+} from "./const/function-rules.const.tz";
+
+export class FunctionRules {
+  private readonly store: TypeStore;
+  private readonly relation: TypeRelation;
+  private readonly types: TypeQuestions;
+  private readonly unifier: TypeUnifier;
+
+  public constructor(
+    store: TypeStore,
+    relation: TypeRelation,
+    types: TypeQuestions,
+    unifier: TypeUnifier,
+  ) {
+    this.store = store;
+    this.relation = relation;
+    this.types = types;
+    this.unifier = unifier;
+  }
+
+  public adaptedParams(
+    params: FunctionParameter[],
+    goal: FunctionType | undefined,
+  ): FunctionParameter[] {
+    const given = goal?.shape.params ?? [];
+    if (goal == undefined || goal.shape.rest || params.length >= given.length) {
+      return params;
+    }
+
+    const missing = given.slice(params.length);
+
+    return params.concat(missing);
+  }
+
+  public contextualFunction(
+    wanted: Type | undefined,
+  ): FunctionType | undefined {
+    const goal = this.types.wantedPart(wanted);
+    if (goal == undefined || goal.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    return this.spreadListShape(goal);
+  }
+
+  public isParameterClash(
+    shape: ParameterShape,
+    goal: FunctionType | undefined,
+  ): boolean {
+    if (goal == undefined) {
+      return false;
+    }
+
+    const given = goal.shape.params;
+
+    return shape.params.some((param, index) => {
+      const other = given[index];
+
+      return (
+        other != undefined &&
+        param.type.kind != TypeKind.Error &&
+        other.type.kind != TypeKind.Error &&
+        !this.relation.converts(other.type, param.type)
+      );
+    });
+  }
+
+  public rootOf(key: string, dot: int): string {
+    if (dot < 0) {
+      return key;
+    }
+
+    return key.slice(0, dot);
+  }
+
+  public functionPlace(
+    fn: FunctionDecl,
+    self: Type | undefined,
+  ): ThisPlace | undefined {
+    if (self != undefined) {
+      return ThisPlace.Method;
+    }
+    if (fn.isArrow || fn.role != undefined) {
+      return undefined;
+    }
+
+    return ThisPlace.Function;
+  }
+
+  public widenedResult(assumed: Type | undefined, found: Type): Type {
+    if (assumed == undefined || found.kind == TypeKind.Error) {
+      return found;
+    }
+
+    return (
+      this.unifier.unionUnify(assumed, found) ??
+      this.store.plain(TypeKind.Error)
+    );
+  }
+
+  public signatureOf(shape: ParameterShape, result: Type): Type {
+    const params = shape.params;
+    const rest = shape.rest;
+    const self = shape.self;
+
+    return this.store.functionOf({ params, rest, self, result });
+  }
+
+  public insideType(type: Type, kind: ParamKind): Type {
+    if (kind != ParamKind.Optional || type.kind == TypeKind.Error) {
+      return type;
+    }
+
+    return this.types.optional(type);
+  }
+
+  public isAssertion(fn: FunctionDecl): boolean {
+    const form = fn.returnType?.form;
+
+    return (
+      form != undefined && form.kind == TypeRefKind.Predicate && form.asserts
+    );
+  }
+
+  public innerResult(result: Type, fn: FunctionDecl): Type {
+    if (fn.isGenerator) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (fn.isAsync && result.kind == TypeKind.Promise) {
+      return result.value;
+    }
+
+    return result;
+  }
+
+  public frameOf(fn: FunctionDecl, result: Type | undefined): FunctionFrame {
+    return {
+      fn,
+      isAsync: fn.isAsync,
+      result,
+      returns: [],
+      recursive: [],
+      hasEmptyReturn: false,
+      guard: {},
+    };
+  }
+
+  public isVoided(value: Expr): boolean {
+    return value.kind == ExprKind.Unary && value.op == UnaryOp.Void;
+  }
+
+  public isFunctionAdapting(
+    expr: Expr,
+    given: Type,
+    wanted: Type,
+    module: int,
+  ): boolean {
+    const target = this.types.definedType(wanted);
+    const isPair =
+      given.kind == TypeKind.Function && target.kind == TypeKind.Function;
+    if (expr.kind != ExprKind.Name || !isPair) {
+      return false;
+    }
+    if (given.kind != TypeKind.Function || target.kind != TypeKind.Function) {
+      return false;
+    }
+
+    const mine = given.shape;
+    const theirs = target.shape;
+    if (mine.rest || theirs.rest) {
+      return false;
+    }
+
+    const isFitting = theirs.params.every((param, index) =>
+      this.isParamFitting(mine.params[index], param),
+    );
+    const needed = mine.params.filter((param) => !param.optional).length;
+    const result = theirs.result;
+    const isPart =
+      result.kind == TypeKind.Union && result.parts.includes(mine.result);
+    const isResult =
+      result.kind == TypeKind.Void || result == mine.result || isPart;
+
+    return isFitting && theirs.params.length >= needed && isResult;
+  }
+
+  public functionName(fn: FunctionDecl): string {
+    if (fn.name == "") {
+      return kAnonymousFunction;
+    }
+
+    return `'${fn.name}'`;
+  }
+
+  public functionLabel(fn: FunctionDecl): string {
+    if (fn.name == "") {
+      return kAnonymousFunction;
+    }
+
+    return `${kFunctionWord} '${fn.name}'`;
+  }
+
+  public generatorFrameOf(
+    fn: FunctionDecl,
+    result: Type | undefined,
+  ): GeneratorFrame {
+    if (result == undefined || result.kind != TypeKind.Iterator) {
+      return { fn, yields: [], isOpen: result == undefined };
+    }
+
+    const shape = result.shape;
+
+    return {
+      fn,
+      yields: [],
+      isOpen: false,
+      yielded: shape.yielded,
+      sent: shape.sent,
+    };
+  }
+
+  public sentType(frame: GeneratorFrame): Type {
+    const sent = frame.sent;
+    if (sent == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return sent;
+  }
+
+  public widened(type: Type | undefined): Type {
+    if (type == undefined) {
+      return this.store.integer(64, false);
+    }
+
+    return this.relation.baseOf(type) ?? type;
+  }
+
+  private spreadListShape(goal: FunctionType): FunctionType {
+    const shape = goal.shape;
+    const last = shape.params[shape.params.length - 1];
+    const list = last?.type;
+    if (!shape.rest || list == undefined || list.kind != TypeKind.Tuple) {
+      return goal;
+    }
+    if (list.rest >= 0) {
+      return goal;
+    }
+
+    const fixed = shape.params.length - 1;
+    const params: FunctionParameter[] = shape.params.slice(0, fixed);
+
+    for (let index = 0; index < list.items.length; index++) {
+      const type = list.items[index];
+      if (type != undefined) {
+        params.push({ type, optional: index >= list.required });
+      }
+    }
+
+    const made = this.store.functionOf({
+      params,
+      rest: false,
+      self: shape.self,
+      result: shape.result,
+    });
+    if (made.kind != TypeKind.Function) {
+      return goal;
+    }
+
+    return made;
+  }
+
+  private isParamFitting(
+    mine: FunctionParameter | undefined,
+    wanted: FunctionParameter,
+  ): boolean {
+    if (mine == undefined) {
+      return true;
+    }
+
+    const isUnknown =
+      mine.type.kind == TypeKind.Unknown && wanted.type.kind != TypeKind.Void;
+
+    return mine.type == wanted.type || isUnknown;
+  }
+}

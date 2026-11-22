@@ -1,0 +1,340 @@
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  ResultType,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { kHiddenMark } from "../../code/source-texts/const/source-texts.const.tz";
+import {
+  CombineDraft,
+  ValueRecord,
+} from "../../code/expression-types/types/expression-types.types.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { TypeUnifier } from "../../types/type-unifier/type-unifier.tz";
+import { BoundRules } from "../../flow/bound-rules/bound-rules.tz";
+import { kResultPlaceholder } from "./const/result-rules.const.tz";
+
+export class ResultRules {
+  private readonly store: TypeStore;
+  private readonly types: TypeQuestions;
+  private readonly unifier: TypeUnifier;
+  private readonly bounds: BoundRules;
+
+  public constructor(
+    store: TypeStore,
+    types: TypeQuestions,
+    unifier: TypeUnifier,
+    bounds: BoundRules,
+  ) {
+    this.store = store;
+    this.types = types;
+    this.unifier = unifier;
+    this.bounds = bounds;
+  }
+
+  public resultGoal(wanted: Type | undefined): ResultType | undefined {
+    if (wanted == undefined) {
+      return undefined;
+    }
+
+    const defined = this.types.definedType(wanted);
+    if (defined.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    return defined;
+  }
+
+  public goalHalf(
+    goal: ResultType | undefined,
+    isOk: boolean,
+  ): Type | undefined {
+    if (goal == undefined) {
+      return undefined;
+    }
+    if (isOk) {
+      return goal.value;
+    }
+
+    return goal.error;
+  }
+
+  public halfHint(isHinted: boolean, half: Type | undefined): Type | undefined {
+    if (isHinted) {
+      return half;
+    }
+
+    return undefined;
+  }
+
+  public madeResult(
+    isOk: boolean,
+    given: Type,
+    goal: ResultType | undefined,
+  ): Type {
+    const other = this.otherGoalHalf(goal, isOk);
+    if (isOk) {
+      return this.store.resultOf(given, other);
+    }
+
+    return this.store.resultOf(other, given);
+  }
+
+  public resultReceiverText(expr: Expr): string {
+    if (expr.kind == ExprKind.Name && !expr.name.startsWith(kHiddenMark)) {
+      return expr.name;
+    }
+
+    return kResultPlaceholder;
+  }
+
+  public halfParam(half: Type): Type {
+    if (half.kind == TypeKind.Void) {
+      return this.store.plain(TypeKind.Undefined);
+    }
+
+    return half;
+  }
+
+  public resultHalf(result: ResultType, isOnError: boolean): Type {
+    if (isOnError) {
+      return result.error;
+    }
+
+    return result.value;
+  }
+
+  public resultCallbackHint(
+    name: string,
+    wanted: Type | undefined,
+    isOnError: boolean,
+  ): Type | undefined {
+    const goal = this.resultWanted(wanted);
+    if (goal == undefined || goal.kind != TypeKind.Result) {
+      return undefined;
+    }
+    if (name == "andThen" || name == "orElse") {
+      return goal;
+    }
+    if (name != "map" && name != "mapErr") {
+      return undefined;
+    }
+
+    const half = this.resultHalf(goal, isOnError);
+    const base = this.types.definedType(half);
+    const isShaped =
+      base.kind == TypeKind.Object ||
+      base.kind == TypeKind.Result ||
+      base.kind == TypeKind.Array;
+    if (!isShaped) {
+      return undefined;
+    }
+
+    return half;
+  }
+
+  public resultWanted(wanted: Type | undefined): Type | undefined {
+    if (wanted == undefined || wanted.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    const defined = this.types.definedType(wanted);
+    if (defined.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return defined;
+  }
+
+  public callbackResult(
+    isFunction: boolean,
+    hint: Type | undefined,
+    isTee: boolean,
+  ): Type {
+    if (isTee) {
+      return this.store.plain(TypeKind.Void);
+    }
+    if (isFunction && hint != undefined) {
+      return hint;
+    }
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  public mapHint(isAndThen: boolean): string {
+    if (isAndThen) {
+      return "; to change the value, use 'map'";
+    }
+
+    return "";
+  }
+
+  public givingHint(isGiving: boolean, value: Type): Type | undefined {
+    if (isGiving) {
+      return value;
+    }
+
+    return undefined;
+  }
+
+  public unwrapJoin(value: Type, other: Type): Type | undefined {
+    if (other.kind == TypeKind.Void) {
+      return undefined;
+    }
+    if (value.kind == TypeKind.Never) {
+      return other;
+    }
+
+    const joined = this.unifier.unionUnify(value, other);
+    if (joined == undefined || joined.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return joined;
+  }
+
+  public matchGoal(goal: Type | undefined): Type | undefined {
+    if (goal == undefined || goal.kind == TypeKind.Void) {
+      return undefined;
+    }
+
+    return goal;
+  }
+
+  public matchUnion(
+    first: Type,
+    second: Type,
+    hasVoid: boolean,
+  ): Type | undefined {
+    if (hasVoid) {
+      return undefined;
+    }
+
+    const joined = this.unifier.unionUnify(first, second);
+    if (joined == undefined || joined.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return joined;
+  }
+
+  public holdsResults(type: Type): boolean {
+    if (type.kind == TypeKind.Union) {
+      return type.parts.some((part) => this.holdsResults(part));
+    }
+
+    return type.kind == TypeKind.Result;
+  }
+
+  public joinedValue(first: Type, second: Type): Type | undefined {
+    if (first == second || second.kind == TypeKind.Never) {
+      return first;
+    }
+    if (first.kind == TypeKind.Never) {
+      return second;
+    }
+    if (first.kind == TypeKind.Void || second.kind == TypeKind.Void) {
+      return undefined;
+    }
+
+    const joined = this.unifier.unify(first, second);
+    if (joined == undefined || joined.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return joined;
+  }
+
+  public arrayResultItem(base: Type): ResultType | undefined {
+    if (base.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    const item = this.types.definedType(base.item);
+    if (item.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    return item;
+  }
+
+  public isHoldingValues(draft: CombineDraft, result: ResultType): boolean {
+    const value = result.value;
+    const isGiving =
+      value.kind != TypeKind.Never && value.kind != TypeKind.Void;
+    const isLosingErrors = draft.isAll && result.error.kind == TypeKind.Void;
+
+    return isGiving && !isLosingErrors;
+  }
+
+  public heldHalfWord(hasValues: boolean): string {
+    if (hasValues) {
+      return "errors";
+    }
+
+    return "values";
+  }
+
+  public combinedErrors(draft: CombineDraft, error: Type): Type {
+    if (!draft.isAll || error.kind == TypeKind.Never) {
+      return error;
+    }
+
+    return this.store.arrayOf(error);
+  }
+
+  public readLocs(record: ValueRecord): Set<int> {
+    const written = new Set<int>();
+
+    for (const change of record.changes) {
+      const target = this.bounds.changedTarget(change);
+      if (target != undefined && target.kind == ExprKind.Name) {
+        written.add(target.loc);
+      }
+    }
+
+    const reads = new Set<int>();
+
+    for (const use of record.uses.values()) {
+      const symbol = use.symbol;
+      if (symbol != undefined && !use.isType && !written.has(use.loc)) {
+        reads.add(symbol.loc);
+      }
+    }
+
+    return reads;
+  }
+
+  public resultHoldCode(type: Type): Code | undefined {
+    const held = this.types.definedType(type);
+    if (held.kind == TypeKind.Result) {
+      return Code.ResultUnchecked;
+    }
+    if (held.kind != TypeKind.Promise) {
+      return undefined;
+    }
+
+    const value = this.types.definedType(held.value);
+    if (value.kind == TypeKind.Result) {
+      return Code.ResultPromiseUnawaited;
+    }
+
+    return undefined;
+  }
+
+  private otherGoalHalf(goal: ResultType | undefined, isOk: boolean): Type {
+    if (goal == undefined) {
+      return this.store.plain(TypeKind.Never);
+    }
+    if (isOk) {
+      return goal.error;
+    }
+
+    return goal.value;
+  }
+}

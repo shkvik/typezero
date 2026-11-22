@@ -18,4 +18,9 @@ export type SourceError = {
   readonly details: Details;
 };
 
+export type Finding = {
+  readonly code: Code;
+  readonly details: Details;
+};
+
 export type Message = { readonly text: string };

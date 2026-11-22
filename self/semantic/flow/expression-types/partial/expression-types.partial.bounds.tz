@@ -1,5 +1,4 @@
 import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
-import { Code } from "../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
   AssignExpr,
@@ -14,26 +13,23 @@ import {
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
 import { VarDeclarator } from "../../../../program/ast/types/ast.types.patterns.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
-import {
-  kBoundMark,
-  kBoundSeparator,
-  kLengthName,
-  kLengthTerm,
-  kMostBoundConstant,
-  kValueTerm,
-  kZeroTerm,
-} from "../../../code/expression-types/const/expression-types.const.tz";
+import { kValueTerm } from "../../../code/expression-types/const/expression-types.const.tz";
 import {
   BoundEdge,
   BoundSide,
   Linear,
 } from "../../../code/expression-types/types/expression-types.types.tz";
+import { kLengthName } from "../../../code/expression-shapes/const/expression-shapes.const.tz";
+import {
+  kLengthTerm,
+  kZeroTerm,
+} from "../../bound-rules/const/bound-rules.const.tz";
 
 partial class ExpressionTypes {
   private linearOf(expr: Expr, module: int): Linear | undefined {
     switch (expr.kind) {
       case ExprKind.IntLit:
-        return this.constantLinear(expr.value);
+        return this.bounds.constantLinear(expr.value);
       case ExprKind.Name: {
         const key = this.pathKey(expr, module);
         const type = this.valueTypeOf(expr, module);
@@ -68,14 +64,6 @@ partial class ExpressionTypes {
     return this.declaredOf(target);
   }
 
-  private constantLinear(value: uint64): Linear | undefined {
-    if (value > kMostBoundConstant) {
-      return undefined;
-    }
-
-    return { term: kZeroTerm, offset: value.toDecimal() };
-  }
-
   private lengthLinear(expr: Expr, module: int): Linear | undefined {
     if (expr.kind != ExprKind.Member || expr.name != kLengthName) {
       return undefined;
@@ -99,7 +87,7 @@ partial class ExpressionTypes {
     }
 
     const base = this.linearOf(expr.lhs, module);
-    const step = this.constantLinear(expr.rhs.value);
+    const step = this.bounds.constantLinear(expr.rhs.value);
     if (base == undefined || step == undefined) {
       return undefined;
     }
@@ -108,38 +96,6 @@ partial class ExpressionTypes {
     }
 
     return { term: base.term, offset: base.offset - step.offset };
-  }
-
-  private boundKey(upper: string, lower: string, room: decimal): string {
-    const parts = [kBoundMark, upper, lower, `${room}`];
-
-    return parts.join(kBoundSeparator);
-  }
-
-  private addBound(
-    facts: Map<string, Type>,
-    upper: Linear,
-    lower: Linear,
-    room: decimal,
-  ): void {
-    if (upper.term == lower.term) {
-      return;
-    }
-
-    const shifted = room - upper.offset + lower.offset;
-    const key = this.boundKey(upper.term, lower.term, shifted);
-    const mark = this.store.plain(TypeKind.Void);
-
-    facts.set(key, mark);
-  }
-
-  private addEquality(
-    facts: Map<string, Type>,
-    first: Linear,
-    second: Linear,
-  ): void {
-    this.addBound(facts, first, second, 0);
-    this.addBound(facts, second, first, 0);
   }
 
   private canProve(lower: string, upper: string, room: decimal): boolean {
@@ -184,14 +140,14 @@ partial class ExpressionTypes {
     const lengths = new Set<string>();
 
     for (const key of this.facts.keys()) {
-      const edge = this.edgeOf(key);
+      const edge = this.bounds.edgeOf(key);
       if (edge == undefined) {
         continue;
       }
 
       edges.push(edge);
-      this.keepLength(edge.upper, lengths);
-      this.keepLength(edge.lower, lengths);
+      this.bounds.keepLength(edge.upper, lengths);
+      this.bounds.keepLength(edge.lower, lengths);
     }
 
     for (const length of lengths) {
@@ -199,31 +155,6 @@ partial class ExpressionTypes {
     }
 
     return edges;
-  }
-
-  private keepLength(term: string, lengths: Set<string>): void {
-    if (term.startsWith(kLengthTerm)) {
-      lengths.add(term);
-    }
-  }
-
-  private edgeOf(key: string): BoundEdge | undefined {
-    const parts = key.split(kBoundSeparator);
-    const mark = parts[0];
-    const upper = parts[1];
-    const lower = parts[2];
-    const room = parts[3];
-    const isBound = mark == kBoundMark && parts.length == 4;
-    if (!isBound || upper == undefined || lower == undefined) {
-      return undefined;
-    }
-
-    const parsed = decimal(room ?? "");
-    if (parsed.isErr()) {
-      return undefined;
-    }
-
-    return { upper, lower, room: parsed.value };
   }
 
   private isProvenIndex(object: Expr, index: Expr, module: int): boolean {
@@ -256,62 +187,16 @@ partial class ExpressionTypes {
 
     switch (cond.op) {
       case BinaryOp.Lt:
-        return this.orderBounds(facts, left, right, isTrue, 1);
+        return this.bounds.orderBounds(facts, left, right, isTrue, 1);
       case BinaryOp.Le:
-        return this.orderBounds(facts, left, right, isTrue, 0);
+        return this.bounds.orderBounds(facts, left, right, isTrue, 0);
       case BinaryOp.Gt:
-        return this.orderBounds(facts, right, left, isTrue, 1);
+        return this.bounds.orderBounds(facts, right, left, isTrue, 1);
       case BinaryOp.Ge:
-        return this.orderBounds(facts, right, left, isTrue, 0);
+        return this.bounds.orderBounds(facts, right, left, isTrue, 0);
       default:
-        return this.equalBounds(facts, cond.op, left, right, isTrue);
+        return this.bounds.equalBounds(facts, cond.op, left, right, isTrue);
     }
-  }
-
-  private orderBounds(
-    facts: Map<string, Type>,
-    small: Linear,
-    large: Linear,
-    isTrue: boolean,
-    room: decimal,
-  ): Map<string, Type> {
-    if (isTrue) {
-      this.addBound(facts, large, small, room);
-
-      return facts;
-    }
-
-    this.addBound(facts, small, large, 1 - room);
-
-    return facts;
-  }
-
-  private equalBounds(
-    facts: Map<string, Type>,
-    op: BinaryOp,
-    left: Linear,
-    right: Linear,
-    isTrue: boolean,
-  ): Map<string, Type> {
-    const isEqual = op == BinaryOp.Eq && isTrue;
-    const isUnequal = op == BinaryOp.Ne && isTrue;
-
-    if (isEqual || (op == BinaryOp.Ne && !isTrue)) {
-      this.addEquality(facts, left, right);
-
-      return facts;
-    }
-
-    const isZeroRight = right.term == kZeroTerm && right.offset == 0;
-    const isLength = left.term.startsWith(kLengthTerm);
-
-    if ((isUnequal || (op == BinaryOp.Eq && !isTrue)) && isZeroRight) {
-      if (isLength) {
-        this.addBound(facts, left, right, 1);
-      }
-    }
-
-    return facts;
   }
 
   private declaredBounds(decl: VarDeclarator, module: int): void {
@@ -332,7 +217,7 @@ partial class ExpressionTypes {
     const own: Linear = { term: kValueTerm + key, offset: 0 };
     const facts = new Map<string, Type>(this.facts);
 
-    this.addEquality(facts, own, value);
+    this.bounds.addEquality(facts, own, value);
     this.facts = facts;
   }
 
@@ -362,7 +247,7 @@ partial class ExpressionTypes {
     const own: Linear = { term, offset: 0 };
     const facts = new Map<string, Type>(this.facts);
 
-    this.addEquality(facts, own, value);
+    this.bounds.addEquality(facts, own, value);
     this.facts = facts;
   }
 
@@ -381,7 +266,7 @@ partial class ExpressionTypes {
     const zero: Linear = { term: kZeroTerm, offset: 0 };
     const facts = new Map<string, Type>(this.facts);
 
-    this.addBound(facts, length, zero, count);
+    this.bounds.addBound(facts, length, zero, count);
     this.facts = facts;
   }
 
@@ -399,7 +284,7 @@ partial class ExpressionTypes {
     const facts = new Map<string, Type>();
 
     for (const [known, type] of this.facts) {
-      const edge = this.edgeOf(known);
+      const edge = this.bounds.edgeOf(known);
       const isLength =
         edge != undefined && (edge.upper == length || edge.lower == length);
       if (!isLength) {
@@ -416,37 +301,16 @@ partial class ExpressionTypes {
     const facts = new Map<string, Type>();
 
     for (const [known, type] of this.facts) {
-      const edge = this.edgeOf(known);
-      if (edge == undefined || this.isKeptBound(edge, value, length, kept)) {
+      const edge = this.bounds.edgeOf(known);
+      if (
+        edge == undefined ||
+        this.bounds.isKeptBound(edge, value, length, kept)
+      ) {
         facts.set(known, type);
       }
     }
 
     this.facts = facts;
-  }
-
-  private isKeptBound(
-    edge: BoundEdge,
-    value: string,
-    length: string,
-    kept: BoundSide,
-  ): boolean {
-    const isMentioned =
-      edge.upper == value ||
-      edge.lower == value ||
-      edge.upper == length ||
-      edge.lower == length;
-    if (!isMentioned) {
-      return true;
-    }
-    if (kept == BoundSide.Lower) {
-      return edge.upper == value;
-    }
-    if (kept == BoundSide.Upper) {
-      return edge.lower == value;
-    }
-
-    return false;
   }
 
   private loopDirection(changes: Expr[], loc: int, module: int): BoundSide {
@@ -468,7 +332,7 @@ partial class ExpressionTypes {
   }
 
   private stepSide(change: Expr, loc: int, module: int): BoundSide {
-    const target = this.changedTarget(change);
+    const target = this.bounds.changedTarget(change);
     if (target == undefined || target.kind != ExprKind.Name) {
       return BoundSide.None;
     }
@@ -499,51 +363,11 @@ partial class ExpressionTypes {
     return BoundSide.Both;
   }
 
-  private changedTarget(change: Expr): Expr | undefined {
-    if (change.kind == ExprKind.Update || change.kind == ExprKind.Assign) {
-      return change.target;
-    }
-
-    return undefined;
-  }
-
-  public boundTerms(key: string): string[] {
-    const edge = this.edgeOf(key);
-    if (edge == undefined) {
-      return [];
-    }
-
-    return [edge.upper, edge.lower];
-  }
-
-  private movedBound(key: string, moves: Map<string, string>): string {
-    const edge = this.edgeOf(key);
-    if (edge == undefined) {
-      return "";
-    }
-
-    const upper = this.movedTerm(edge.upper, moves);
-    const lower = this.movedTerm(edge.lower, moves);
-    if (upper == "" || lower == "") {
-      return "";
-    }
-
-    return this.boundKey(upper, lower, edge.room);
-  }
-
-  private movedTerm(term: string, moves: Map<string, string>): string {
-    if (term == kZeroTerm) {
-      return term;
-    }
-
-    return moves.get(term) ?? "";
-  }
-
   private forgetAllLengths(): void {
     const facts = new Map<string, Type>();
 
     for (const [known, type] of this.facts) {
-      const edge = this.edgeOf(known);
+      const edge = this.bounds.edgeOf(known);
       const isLength =
         edge != undefined &&
         (edge.upper.startsWith(kLengthTerm) ||
@@ -572,7 +396,7 @@ partial class ExpressionTypes {
   ): void {
     const at = this.linearOf(target.index, module);
     const key = this.pathKey(target.object, module);
-    const code = this.writeCode(isCompound);
+    const code = this.bounds.writeCode(isCompound);
     if (at == undefined || key == undefined) {
       this.report(module, target.loc, code, kNoDetails);
 
@@ -582,28 +406,12 @@ partial class ExpressionTypes {
     const length = kLengthTerm + key;
     const isLength = at.term.startsWith(kLengthTerm) && at.offset >= 0;
     const isNatural = isLength || this.canProve(kZeroTerm, at.term, -at.offset);
-    const room = this.writeRoom(isCompound, at.offset);
+    const room = this.bounds.writeRoom(isCompound, at.offset);
     const isFirst = at.term == kZeroTerm && at.offset == 0 && !isCompound;
     const isInside =
       isFirst || (isNatural && this.canProve(at.term, length, room));
     if (!isInside) {
       this.report(module, target.loc, code, kNoDetails);
     }
-  }
-
-  private writeCode(isCompound: boolean): Code {
-    if (isCompound) {
-      return Code.IndexWriteRange;
-    }
-
-    return Code.IndexWriteHoles;
-  }
-
-  private writeRoom(isCompound: boolean, offset: decimal): decimal {
-    if (isCompound) {
-      return offset + 1;
-    }
-
-    return offset;
   }
 }

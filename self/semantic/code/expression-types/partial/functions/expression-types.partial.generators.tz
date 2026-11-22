@@ -19,8 +19,6 @@ import {
   kArrayClass,
   kFlatMapName,
   kIteratorClass,
-  kLengthName,
-  kNextName,
   kNoPlace,
   kUnsupportedMark,
 } from "../../const/expression-types.const.tz";
@@ -28,6 +26,8 @@ import {
   FunctionFrame,
   GeneratorFrame,
 } from "../../types/expression-types.types.tz";
+import { kLengthName } from "../../../expression-shapes/const/expression-shapes.const.tz";
+import { kNextName } from "../../../index-rules/const/index-rules.const.tz";
 
 partial class ExpressionTypes {
   private enterGenerator(frame: FunctionFrame, result: Type | undefined): void {
@@ -36,7 +36,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const generator = this.generatorFrameOf(fn, result);
+    const generator = this.functions.generatorFrameOf(fn, result);
 
     frame.generator = generator;
     this.generatorFrames.push(generator);
@@ -105,25 +105,6 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private generatorFrameOf(
-    fn: FunctionDecl,
-    result: Type | undefined,
-  ): GeneratorFrame {
-    if (result == undefined || result.kind != TypeKind.Iterator) {
-      return { fn, yields: [], isOpen: result == undefined };
-    }
-
-    const shape = result.shape;
-
-    return {
-      fn,
-      yields: [],
-      isOpen: false,
-      yielded: shape.yielded,
-      sent: shape.sent,
-    };
-  }
-
   private yieldTyped(expr: YieldExpr, module: int): Type {
     const frame = this.generatorFrames[this.generatorFrames.length - 1];
     const value = expr.value;
@@ -146,7 +127,7 @@ partial class ExpressionTypes {
 
     if (!this.unusedYields.has(expr) && frame.sent == undefined) {
       this.report(module, expr.loc, Code.YieldSentUnknown, {
-        word: this.text.of(this.widened(given)),
+        word: this.text.of(this.functions.widened(given)),
       });
     }
 
@@ -154,7 +135,7 @@ partial class ExpressionTypes {
       frame.yields.push({ value, type: given });
     }
 
-    return this.sentType(frame);
+    return this.functions.sentType(frame);
   }
 
   private yieldValue(
@@ -172,15 +153,6 @@ partial class ExpressionTypes {
     }
 
     return this.checked(value, yielded, module, kNoPlace);
-  }
-
-  private sentType(frame: GeneratorFrame): Type {
-    const sent = frame.sent;
-    if (sent == undefined) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    return sent;
   }
 
   private delegateTyped(
@@ -229,14 +201,6 @@ partial class ExpressionTypes {
     }
   }
 
-  private widened(type: Type | undefined): Type {
-    if (type == undefined) {
-      return this.store.integer(64, false);
-    }
-
-    return this.relation.baseOf(type) ?? type;
-  }
-
   private generatorResult(
     fn: FunctionDecl,
     frame: FunctionFrame,
@@ -248,7 +212,7 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
     if (yields.length == 0) {
-      const word = this.functionName(fn);
+      const word = this.functions.functionName(fn);
 
       this.report(module, fn.loc, Code.GeneratorNoYield, { word });
 
@@ -263,7 +227,7 @@ partial class ExpressionTypes {
     const returned = this.generatorReturned(fn, frame, module);
     const nothing = this.store.plain(TypeKind.Void);
     const shape = {
-      yielded: this.widened(yielded),
+      yielded: this.functions.widened(yielded),
       returned,
       sent: nothing,
       async: fn.isAsync,
@@ -277,14 +241,16 @@ partial class ExpressionTypes {
     frame: FunctionFrame,
     module: int,
   ): Type {
-    const valued = frame.returns.filter((one) => !this.isVoided(one.value));
+    const valued = frame.returns.filter(
+      (one) => !this.functions.isVoided(one.value),
+    );
     if (valued.length == 0) {
       return this.store.plain(TypeKind.Void);
     }
 
     const joined = this.joinedReturns(fn, valued, module, Code.ReturnsDiffer);
 
-    return this.widened(joined);
+    return this.functions.widened(joined);
   }
 
   private writtenGeneratorCheck(

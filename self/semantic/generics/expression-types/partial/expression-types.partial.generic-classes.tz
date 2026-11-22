@@ -35,7 +35,7 @@ partial class ExpressionTypes {
     if (member.typeArgs.length > most) {
       this.report(module, member.loc, Code.TypeArgumentsTooMany, {
         word: member.name,
-        other: this.typeArgumentText(most),
+        other: this.generics.typeArgumentText(most),
         first: `${member.typeArgs.length}`,
       });
       this.looseArguments(expr.args, module);
@@ -81,7 +81,7 @@ partial class ExpressionTypes {
     }
 
     const written = method.returnType;
-    const sites = this.parameterSites(method);
+    const sites = this.classes.parameterSites(method);
     if (written == undefined || sites == undefined) {
       return undefined;
     }
@@ -138,7 +138,7 @@ partial class ExpressionTypes {
     const loc = expr.loc;
 
     if (chosen != undefined) {
-      const access = this.accessOf(chosen);
+      const access = this.classes.accessOf(chosen);
 
       this.reportAccess(maker.owner, access, kConstructorName, loc, module);
     }

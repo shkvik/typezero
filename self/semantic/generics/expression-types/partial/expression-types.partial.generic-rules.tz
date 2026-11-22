@@ -103,13 +103,15 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     const base = this.types.definedType(left);
-    if (this.isOpenTested(base) || decl.typeParams.length == 0) {
+    if (this.classes.isOpenTested(base) || decl.typeParams.length == 0) {
       return;
     }
 
     const word = decl.name ?? "";
     const parts = this.types.unionMembers(base);
-    const isMatching = parts.some((part) => this.isInstanceOfClass(part, word));
+    const isMatching = parts.some((part) =>
+      this.generics.isInstanceOfClass(part, word),
+    );
     if (isMatching) {
       return;
     }
@@ -117,7 +119,7 @@ partial class ExpressionTypes {
     const first = this.text.of(base);
     const open = decl.typeParams.map(() => this.store.plain(TypeKind.Error));
     const instance = this.resolver.classInstance(home, decl, open);
-    const ancestors = this.ancestorsOf(instance);
+    const ancestors = this.types.ancestorsOf(instance);
     const isRelated = parts.some((part) => ancestors.includes(part));
     if (!isRelated) {
       this.report(module, expr.loc, Code.InstanceOfGenericNever, {
@@ -128,29 +130,8 @@ partial class ExpressionTypes {
       return;
     }
 
-    const code = this.genericTellCode(home);
+    const code = this.generics.genericTellCode(home);
 
     this.report(module, expr.loc, code, { word, first, other: first });
-  }
-
-  private genericTellCode(home: int): Code {
-    if (this.isLibraryModule(home)) {
-      return Code.InstanceOfGenericLibrary;
-    }
-
-    return Code.InstanceOfGenericUnknown;
-  }
-
-  private isInstanceOfClass(part: Type, name: string): boolean {
-    if (part.kind != TypeKind.Instance) {
-      return false;
-    }
-    if (part.name == name) {
-      return true;
-    }
-
-    return this.ancestorsOf(part).some(
-      (one) => one.kind == TypeKind.Instance && one.name == name,
-    );
   }
 }

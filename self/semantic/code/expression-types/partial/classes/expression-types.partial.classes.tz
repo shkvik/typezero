@@ -29,11 +29,7 @@ import {
   kPrototypeName,
   kThisName,
 } from "../../const/expression-types.const.tz";
-import {
-  CallKind,
-  StaticOwner,
-  ThisPlace,
-} from "../../types/expression-types.types.tz";
+import { CallKind, StaticOwner } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private walkClass(decl: ClassDecl, module: int): void {
@@ -66,9 +62,9 @@ partial class ExpressionTypes {
     const home = this.partModule(part, module);
     const self = this.selfOf(decl, fn, module);
 
-    const place = this.methodPlace(fn);
+    const place = this.classes.methodPlace(fn);
     const frame = this.superFrameOf(decl, fn, home);
-    const init = this.initFrameOf(decl, fn);
+    const init = this.classes.initFrameOf(decl, fn);
 
     this.selves.push(self);
     this.ownerClasses.push({ decl, module });
@@ -90,16 +86,8 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private methodPlace(fn: FunctionDecl): ThisPlace {
-    if (this.isStaticMethod(fn)) {
-      return ThisPlace.StaticMethod;
-    }
-
-    return ThisPlace.Method;
-  }
-
   private selfOf(decl: ClassDecl, fn: FunctionDecl, module: int): Type {
-    if (this.isStaticMethod(fn)) {
+    if (this.classes.isStaticMethod(fn)) {
       return this.store.plain(TypeKind.Error);
     }
 
@@ -150,7 +138,7 @@ partial class ExpressionTypes {
     }
 
     const self = this.resolver.classInstance(current.module, current.decl, []);
-    const chain = this.ancestorsOf(self);
+    const chain = this.types.ancestorsOf(self);
 
     return chain.some(
       (one) => one.kind == TypeKind.Instance && one.loc == owner.loc,
@@ -169,7 +157,7 @@ partial class ExpressionTypes {
     if (target.kind != SymbolKind.Class) {
       return this.valueOwner(target);
     }
-    if (this.isLibraryModule(target.module)) {
+    if (this.modules.isLibraryModule(target.module)) {
       return undefined;
     }
 
@@ -230,13 +218,13 @@ partial class ExpressionTypes {
       (one) => one.name == name && one.form == FieldKind.Static,
     );
     const methods = decl.methods.filter(
-      (one) => one.name == name && this.isStaticMethod(one),
+      (one) => one.name == name && this.classes.isStaticMethod(one),
     );
     const isMissing = field == undefined && methods.length == 0;
     if (isMissing && name == kClassNameMember) {
       return this.store.plain(TypeKind.String);
     }
-    if (isMissing && this.hasInstanceMember(decl, name)) {
+    if (isMissing && this.classes.hasInstanceMember(decl, name)) {
       const word = name;
       const first = decl.name ?? "";
 
@@ -266,7 +254,7 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    const access = this.accessOf(method);
+    const access = this.classes.accessOf(method);
 
     this.reportAccess(decl, access, name, expr.loc, module);
 
@@ -275,17 +263,6 @@ partial class ExpressionTypes {
     }
 
     return this.methodFunction(decl, method, owner.module);
-  }
-
-  private hasInstanceMember(decl: ClassDecl, name: string): boolean {
-    const isField = decl.fields.some(
-      (one) => one.name == name && one.form != FieldKind.Static,
-    );
-    const isMethod = decl.methods.some(
-      (one) => one.name == name && !this.isStaticMethod(one),
-    );
-
-    return isField || isMethod;
   }
 
   private staticFieldType(

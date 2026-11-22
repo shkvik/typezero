@@ -1,0 +1,19 @@
+import { TypeOfType } from "../../../code/expression-types/types/expression-types.types.tz";
+import { TypeKind } from "../../../../program/type/types/type.types.tz";
+
+export const kArrayTypeOf = "array";
+export const kTypeOfTypes: TypeOfType[] = [
+  { name: "undefined", kind: TypeKind.Undefined, bits: 0, unsigned: false },
+  { name: "boolean", kind: TypeKind.Boolean, bits: 0, unsigned: false },
+  { name: "string", kind: TypeKind.String, bits: 0, unsigned: false },
+  { name: "double", kind: TypeKind.Double, bits: 0, unsigned: false },
+  { name: "decimal", kind: TypeKind.Decimal, bits: 0, unsigned: false },
+  { name: "int", kind: TypeKind.Int, bits: 64, unsigned: false },
+  { name: "int8", kind: TypeKind.Int, bits: 8, unsigned: false },
+  { name: "int16", kind: TypeKind.Int, bits: 16, unsigned: false },
+  { name: "int32", kind: TypeKind.Int, bits: 32, unsigned: false },
+  { name: "uint8", kind: TypeKind.Int, bits: 8, unsigned: true },
+  { name: "uint16", kind: TypeKind.Int, bits: 16, unsigned: true },
+  { name: "uint32", kind: TypeKind.Int, bits: 32, unsigned: true },
+  { name: "uint64", kind: TypeKind.Int, bits: 64, unsigned: true },
+];

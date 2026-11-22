@@ -19,21 +19,18 @@ import {
 } from "../../../../../program/type/types/type.types.tz";
 import {
   kDateLocaleMethods,
-  kDateName,
   kDateParseName,
-  kDateSetters,
   kDateStatics,
   kDateUtcName,
   kGetYearName,
   kGmtStringName,
   kMostDateFields,
   kNoPlace,
-  kSetterPrefix,
   kSetYearName,
   kToJsonName,
-  kUtcSetterPrefix,
 } from "../../../../code/expression-types/const/expression-types.const.tz";
 import { OperandPair } from "../../../../code/expression-types/types/expression-types.types.tz";
+import { kDateName } from "../../../../types/type-questions/const/type-questions.const.tz";
 
 partial class ExpressionTypes {
   private isDateName(expr: Expr, module: int): boolean {
@@ -72,7 +69,7 @@ partial class ExpressionTypes {
     const args = expr.args;
     const count = args.length;
     if (count > kMostDateFields) {
-      const word = this.argumentCountText(0, kMostDateFields, false);
+      const word = this.calls.argumentCountText(0, kMostDateFields, false);
 
       this.report(module, expr.loc, Code.ArgumentCount, {
         word,
@@ -104,13 +101,13 @@ partial class ExpressionTypes {
     if (base.kind == TypeKind.Error) {
       return base;
     }
-    if (this.isDate(base)) {
+    if (this.types.isDate(base)) {
       return this.dateType();
     }
 
     const isText =
       base.kind == TypeKind.String || base.kind == TypeKind.Template;
-    if (isText && this.dateTextOf(given) == undefined) {
+    if (isText && this.dates.dateTextOf(given) == undefined) {
       this.report(module, given.loc, Code.DateNewText, kNoDetails);
 
       return this.store.plain(TypeKind.Error);
@@ -124,7 +121,7 @@ partial class ExpressionTypes {
       return this.dateType();
     }
 
-    const place = this.dateValuePlace(type, base);
+    const place = this.dates.dateValuePlace(type, base);
 
     this.report(module, given.loc, Code.DateNewValue, {
       word: this.text.of(type),
@@ -132,17 +129,6 @@ partial class ExpressionTypes {
     });
 
     return this.store.plain(TypeKind.Error);
-  }
-
-  private dateValuePlace(type: Type, base: Type): string {
-    if (this.types.isOptional(type)) {
-      return "; the value may be undefined: check it first";
-    }
-    if (base.kind == TypeKind.Decimal) {
-      return "; convert it with 'Number(x)'";
-    }
-
-    return "";
   }
 
   private dateFunctionCall(
@@ -228,7 +214,7 @@ partial class ExpressionTypes {
       return true;
     }
 
-    const word = this.argumentCountText(least, most, false);
+    const word = this.calls.argumentCountText(least, most, false);
 
     this.report(module, member.loc, Code.ArgumentCount, {
       word,
@@ -284,7 +270,7 @@ partial class ExpressionTypes {
     }
 
     const isJson = name == kToJsonName;
-    const extra = this.jsonExtra(isJson);
+    const extra = this.dates.jsonExtra(isJson);
     if (!this.dateCountCheck(expr, member, method, extra, module)) {
       return this.store.plain(TypeKind.Error);
     }
@@ -297,7 +283,7 @@ partial class ExpressionTypes {
       return result;
     }
 
-    const first = this.setterFirst(name);
+    const first = this.dates.setterFirst(name);
     if (first != undefined) {
       this.dateFieldsCheck(expr.args, first, name, module);
 
@@ -309,33 +295,6 @@ partial class ExpressionTypes {
     }
 
     return result;
-  }
-
-  private jsonExtra(isJson: boolean): int {
-    if (isJson) {
-      return 1;
-    }
-
-    return 0;
-  }
-
-  private setterFirst(name: string): int | undefined {
-    if (!name.startsWith(kSetterPrefix)) {
-      return undefined;
-    }
-
-    const field = this.setterField(name);
-    const setter = kDateSetters.find((one) => one.name == field);
-
-    return setter?.first;
-  }
-
-  private setterField(name: string): string {
-    if (name.startsWith(kUtcSetterPrefix)) {
-      return name.slice(kUtcSetterPrefix.length);
-    }
-
-    return name.slice(kSetterPrefix.length);
   }
 
   private dateMissingReport(
@@ -413,7 +372,8 @@ partial class ExpressionTypes {
     pair: OperandPair,
     module: int,
   ): Type {
-    const isBoth = this.isDate(pair.left) && this.isDate(pair.right);
+    const isBoth =
+      this.types.isDate(pair.left) && this.types.isDate(pair.right);
     if (isBoth && expr.op == BinaryOp.Sub) {
       return this.store.integer(64, false);
     }
@@ -428,7 +388,8 @@ partial class ExpressionTypes {
     pair: OperandPair,
     module: int,
   ): void {
-    const isBoth = this.isDate(pair.left) && this.isDate(pair.right);
+    const isBoth =
+      this.types.isDate(pair.left) && this.types.isDate(pair.right);
     if (!isBoth) {
       this.dateOperatorReport(expr, pair, module);
     }
@@ -449,7 +410,7 @@ partial class ExpressionTypes {
       case BinaryOp.Gt:
       case BinaryOp.Ge:
         return this.report(module, expr.loc, Code.DateCompare, {
-          word: this.operatorText(expr.op),
+          word: this.sources.operatorText(expr.op),
         });
       default:
         return this.reportOperands(expr, pair, module);

@@ -1,0 +1,45 @@
+import { DateSetter } from "../../../code/expression-types/types/expression-types.types.tz";
+
+export const kDateLocalLimit = 8640000864000000;
+export const kDateSetters: DateSetter[] = [
+  { name: "FullYear", first: 0 },
+  { name: "Month", first: 1 },
+  { name: "Date", first: 2 },
+  { name: "Hours", first: 3 },
+  { name: "Minutes", first: 4 },
+  { name: "Seconds", first: 5 },
+  { name: "Milliseconds", first: 6 },
+];
+export const kDateTimeLimit = 8640000000000000;
+export const kDateYearLimit = 1000000;
+export const kDateYearShift = 399999;
+export const kDayMilliseconds = 86400000;
+export const kDaysInCycle = 146097;
+export const kEpochYear = 1970;
+export const kHourMilliseconds = 3600000;
+export const kLastShortYear = 99;
+export const kMinuteMilliseconds = 60000;
+export const kMonthDays = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+export const kMonthNames = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+export const kMonthStarts = [
+  0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334,
+];
+export const kSecondMilliseconds = 1000;
+export const kSetterPrefix = "set";
+export const kShortYearBase = 1900;
+export const kUnknownYear = "y";
+export const kUtcSetterPrefix = "setUTC";
+export const kYearsInCycle = 400;

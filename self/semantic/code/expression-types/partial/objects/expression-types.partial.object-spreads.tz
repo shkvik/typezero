@@ -14,19 +14,6 @@ import {
 import { SpreadSlot } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private isSpreadOnly(expr: ObjectLitExpr): boolean {
-    const hasSpread = expr.props.some(
-      (property) => property.form.kind == PropertyKind.Spread,
-    );
-    const hasOther = expr.props.some(
-      (property) =>
-        property.form.kind == PropertyKind.Method ||
-        property.form.kind == PropertyKind.Computed,
-    );
-
-    return hasSpread && !hasOther;
-  }
-
   private spreadObject(
     expr: ObjectLitExpr,
     target: Type | undefined,
@@ -55,7 +42,7 @@ partial class ExpressionTypes {
     if (target == undefined || target.kind != TypeKind.Object) {
       return result;
     }
-    if (this.isSpreadFitting(slots, target)) {
+    if (this.objects.isSpreadFitting(slots, target)) {
       return target;
     }
 
@@ -72,7 +59,7 @@ partial class ExpressionTypes {
       return this.spreadMerged(property, slots, module);
     }
 
-    const hint = this.spreadFieldHint(target, property.name);
+    const hint = this.objects.spreadFieldHint(target, property.name);
     const type = this.typed(property.value, hint, module);
     if (type.kind == TypeKind.Error) {
       return false;
@@ -95,22 +82,6 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private spreadFieldHint(
-    target: Type | undefined,
-    name: string,
-  ): Type | undefined {
-    if (target == undefined || target.kind != TypeKind.Object) {
-      return undefined;
-    }
-
-    const field = target.fields.find((one) => one.name == name);
-    if (field == undefined) {
-      return undefined;
-    }
-
-    return this.fieldWanted(field);
-  }
-
   private spreadMerged(
     property: Property,
     slots: SpreadSlot[],
@@ -123,7 +94,10 @@ partial class ExpressionTypes {
     this.quiet -= 1;
 
     const base = this.types.apparent(type);
-    if (base.kind != TypeKind.Object || this.spreadCode(type) != undefined) {
+    if (
+      base.kind != TypeKind.Object ||
+      this.dictionaries.spreadCode(type) != undefined
+    ) {
       return false;
     }
 
@@ -159,7 +133,7 @@ partial class ExpressionTypes {
     slots: SpreadSlot[],
     module: int,
   ): boolean {
-    const type = this.fieldWanted(field);
+    const type = this.objects.fieldWanted(field);
     const slot = slots.find((one) => one.name == field.name);
     if (slot == undefined) {
       slots.push({ name: field.name, type });
@@ -172,7 +146,7 @@ partial class ExpressionTypes {
       return true;
     }
 
-    const joined = this.unify(
+    const joined = this.unifier.unify(
       this.types.definedType(slot.type),
       this.types.definedType(type),
     );
@@ -195,23 +169,5 @@ partial class ExpressionTypes {
     slot.type = joined;
 
     return true;
-  }
-
-  private isSpreadFitting(slots: SpreadSlot[], target: ObjectType): boolean {
-    const isEvery = slots.every((slot) => {
-      const field = target.fields.find((one) => one.name == slot.name);
-      if (field == undefined) {
-        return false;
-      }
-
-      return this.relation.converts(slot.type, this.fieldWanted(field));
-    });
-    const isFilled = target.fields.every((field) => {
-      const isNeeded = !field.optional && !this.types.isOptional(field.type);
-
-      return !isNeeded || slots.some((slot) => slot.name == field.name);
-    });
-
-    return isEvery && isFilled;
   }
 }

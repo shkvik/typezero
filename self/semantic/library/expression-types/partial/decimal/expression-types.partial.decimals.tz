@@ -4,17 +4,12 @@ import {
   BinaryExpr,
   BinaryOp,
   Expr,
-  ExprKind,
-  UnaryOp,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import {
-  OperandPair,
-  OperandTexts,
-} from "../../../../code/expression-types/types/expression-types.types.tz";
+import { OperandPair } from "../../../../code/expression-types/types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private decimalResult(
@@ -82,19 +77,6 @@ partial class ExpressionTypes {
     this.decimalZeroCheck(expr.rhs, module);
   }
 
-  private isZeroLiteral(expr: Expr): boolean {
-    switch (expr.kind) {
-      case ExprKind.IntLit:
-        return expr.value == 0;
-      case ExprKind.FloatLit:
-        return expr.value == 0.0;
-      case ExprKind.Unary:
-        return expr.op == UnaryOp.Neg && this.isZeroLiteral(expr.operand);
-      default:
-        return false;
-    }
-  }
-
   private reportDecimalMix(
     expr: BinaryExpr,
     pair: OperandPair,
@@ -103,14 +85,14 @@ partial class ExpressionTypes {
     const left = pair.left;
     const right = pair.right;
     const isLeftDecimal = this.types.definedType(left).kind == TypeKind.Decimal;
-    const other = this.otherSide(isLeftDecimal, left, right);
-    const op = this.operatorText(expr.op);
-    const texts = this.operandTexts(expr, module);
+    const other = this.decimals.otherSide(isLeftDecimal, left, right);
+    const op = this.sources.operatorText(expr.op);
+    const texts = this.sources.operandTexts(expr, module);
     const first = this.text.of(left);
     const second = this.text.of(right);
 
     if (other.kind == TypeKind.Int) {
-      const word = this.integerMixText(isLeftDecimal, op, texts);
+      const word = this.decimals.integerMixText(isLeftDecimal, op, texts);
 
       return this.report(module, expr.loc, Code.MixedNumbers, {
         first,
@@ -130,7 +112,7 @@ partial class ExpressionTypes {
       });
     }
 
-    const word = this.inexactText(isLeftDecimal, op, texts);
+    const word = this.decimals.inexactText(isLeftDecimal, op, texts);
 
     this.report(module, expr.loc, Code.DecimalInexact, {
       first,
@@ -138,41 +120,5 @@ partial class ExpressionTypes {
       other: op,
       word,
     });
-  }
-
-  private otherSide(isLeftDecimal: boolean, left: Type, right: Type): Type {
-    if (isLeftDecimal) {
-      return right;
-    }
-
-    return left;
-  }
-
-  private integerMixText(
-    isLeftDecimal: boolean,
-    op: string,
-    texts: OperandTexts,
-  ): string {
-    if (isLeftDecimal) {
-      const converted = this.operandText(texts.right);
-
-      return `${texts.left} ${op} ${converted}.toDecimal()`;
-    }
-
-    const converted = this.operandText(texts.left);
-
-    return `${converted}.toDecimal() ${op} ${texts.right}`;
-  }
-
-  private inexactText(
-    isLeftDecimal: boolean,
-    op: string,
-    texts: OperandTexts,
-  ): string {
-    if (isLeftDecimal) {
-      return `${texts.left} ${op} decimal(${texts.right})`;
-    }
-
-    return `decimal(${texts.left}) ${op} ${texts.right}`;
   }
 }

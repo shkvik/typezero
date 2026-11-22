@@ -10,7 +10,6 @@ import { MemberExpr } from "../../../../../program/ast/types/ast.types.expressio
 import { FunctionDecl } from "../../../../../program/ast/types/ast.types.functions.tz";
 import {
   InstanceType,
-  Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
 import {
@@ -26,7 +25,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const parent = this.parentOf(self, decl);
+    const parent = this.classes.parentOf(self, decl);
 
     for (const field of decl.fields) {
       if (field.form == FieldKind.Static) {
@@ -90,7 +89,7 @@ partial class ExpressionTypes {
     }
 
     const inherited = entry?.field;
-    if (inherited != undefined && this.isArrowField(inherited)) {
+    if (inherited != undefined && this.classes.isArrowField(inherited)) {
       return;
     }
     if (entry == undefined || inherited == undefined) {
@@ -143,7 +142,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const parent = this.parentOf(self, decl);
+    const parent = this.classes.parentOf(self, decl);
     if (parent == undefined) {
       return;
     }
@@ -181,17 +180,17 @@ partial class ExpressionTypes {
     owner: string,
     module: int,
   ): void {
-    const ownRank = this.accessRank(field.access);
-    const theirRank = this.accessRank(inherited.access);
+    const ownRank = this.classes.accessRank(field.access);
+    const theirRank = this.classes.accessRank(inherited.access);
     if (ownRank <= theirRank) {
       return;
     }
 
     this.report(module, field.loc, Code.FieldAccessNarrower, {
       word: field.name,
-      other: this.accessWord(inherited.access),
+      other: this.classes.accessWord(inherited.access),
       first: owner,
-      second: this.accessWord(field.access),
+      second: this.classes.accessWord(field.access),
       place: decl.name ?? "",
     });
   }
@@ -230,7 +229,7 @@ partial class ExpressionTypes {
     const theirType = this.fieldTypeOf(theirs, inherited);
     const isOpen =
       ownType.kind == TypeKind.Error || theirType.kind == TypeKind.Error;
-    if (isOpen || this.isSameLayout(ownType, theirType)) {
+    if (isOpen || this.classes.isSameLayout(ownType, theirType)) {
       return;
     }
 
@@ -241,20 +240,6 @@ partial class ExpressionTypes {
       other: theirs.owner.name ?? "",
       place: this.text.of(theirType),
     });
-  }
-
-  private isSameLayout(own: Type, theirs: Type): boolean {
-    if (own == theirs) {
-      return true;
-    }
-    if (own.kind == TypeKind.Array && theirs.kind == TypeKind.Array) {
-      return this.isSameLayout(own.item, theirs.item);
-    }
-    if (own.kind != TypeKind.Instance || theirs.kind != TypeKind.Instance) {
-      return false;
-    }
-
-    return this.ancestorsOf(own).includes(theirs);
   }
 
   private methodOverFieldCheck(
@@ -271,7 +256,7 @@ partial class ExpressionTypes {
     const word = method.name;
     const first = entry.owner.name ?? parent.name;
 
-    if (this.isArrowField(field)) {
+    if (this.classes.isArrowField(field)) {
       this.report(module, method.loc, Code.ArrowOverride, { word, first });
 
       return true;
@@ -290,12 +275,12 @@ partial class ExpressionTypes {
     }
 
     const cycle = this.cycleThrough(self, decl);
-    const earliest = this.earliestOf(cycle);
+    const earliest = this.classes.earliestOf(cycle);
     if (earliest == undefined) {
       return;
     }
 
-    const before = this.previousInCycle(cycle, earliest);
+    const before = this.classes.previousInCycle(cycle, earliest);
     if (before != self) {
       return;
     }
@@ -313,59 +298,27 @@ partial class ExpressionTypes {
     });
   }
 
-  private previousInCycle(
-    cycle: InstanceType[],
-    member: InstanceType,
-  ): InstanceType | undefined {
-    const at = cycle.indexOf(member);
-    if (at == 0) {
-      return cycle[cycle.length - 1];
-    }
-
-    return cycle[at - 1];
-  }
-
   private cycleThrough(self: InstanceType, decl: ClassDecl): InstanceType[] {
     const chain: InstanceType[] = [self];
-    let current = this.parentOf(self, decl);
+    let current = this.classes.parentOf(self, decl);
 
     while (current != undefined) {
       const step = current;
-      if (this.isSameClass(step, self)) {
+      if (this.types.isSameClass(step, self)) {
         return chain;
       }
 
-      const known = chain.some((one) => this.isSameClass(one, step));
+      const known = chain.some((one) => this.types.isSameClass(one, step));
       const stepDecl = this.classOf(step);
       if (known || stepDecl == undefined) {
         return [];
       }
 
       chain.push(step);
-      current = this.parentOf(step, stepDecl);
+      current = this.classes.parentOf(step, stepDecl);
     }
 
     return [];
-  }
-
-  private earliestOf(cycle: InstanceType[]): InstanceType | undefined {
-    let earliest: InstanceType | undefined = undefined;
-
-    for (const one of cycle) {
-      if (earliest == undefined || this.isDeclaredBefore(one, earliest)) {
-        earliest = one;
-      }
-    }
-
-    return earliest;
-  }
-
-  private isDeclaredBefore(one: InstanceType, other: InstanceType): boolean {
-    if (one.module != other.module) {
-      return one.module < other.module;
-    }
-
-    return one.loc < other.loc;
   }
 
   private noteSelfCall(member: MemberExpr, module: int): void {
@@ -414,11 +367,11 @@ partial class ExpressionTypes {
     decl: ClassDecl,
   ): boolean {
     const word = call.name;
-    const overrider = this.overridingChild(found.children, word);
+    const overrider = this.classes.overridingChild(found.children, word);
     if (overrider != undefined) {
       const first = decl.name ?? "";
       const other = overrider.name ?? "";
-      const code = this.overriddenCode(site, call);
+      const code = this.classes.overriddenCode(site, call);
 
       this.report(found.module, site.loc, code, { first, word, other });
 
@@ -439,25 +392,6 @@ partial class ExpressionTypes {
     }
 
     return false;
-  }
-
-  private overriddenCode(site: MemberExpr, call: MemberExpr): Code {
-    if (site == call) {
-      return Code.ConstructorCallsOverride;
-    }
-
-    return Code.ConstructorReachesOverride;
-  }
-
-  private overridingChild(
-    children: ClassDecl[],
-    name: string,
-  ): ClassDecl | undefined {
-    return children.find((child) =>
-      child.methods.some(
-        (method) => method.name == name && !this.isStaticMethod(method),
-      ),
-    );
   }
 
   private childClassesOf(self: InstanceType): ClassDecl[] {
@@ -484,13 +418,13 @@ partial class ExpressionTypes {
     }
 
     const own = this.declaredInstance(decl, module);
-    if (own == undefined || this.isSameClass(own, ancestor)) {
+    if (own == undefined || this.types.isSameClass(own, ancestor)) {
       return false;
     }
 
     const chain = this.cycleFreeParents(own, decl);
 
-    return chain.some((one) => this.isSameClass(one, ancestor));
+    return chain.some((one) => this.types.isSameClass(one, ancestor));
   }
 
   private cycleFreeParents(
@@ -498,18 +432,18 @@ partial class ExpressionTypes {
     decl: ClassDecl,
   ): InstanceType[] {
     const chain: InstanceType[] = [];
-    let current = this.parentOf(self, decl);
+    let current = this.classes.parentOf(self, decl);
 
     while (current != undefined) {
       const step = current;
-      const known = chain.some((one) => this.isSameClass(one, step));
+      const known = chain.some((one) => this.types.isSameClass(one, step));
       const stepDecl = this.classOf(step);
       if (known || stepDecl == undefined) {
         return chain;
       }
 
       chain.push(step);
-      current = this.parentOf(step, stepDecl);
+      current = this.classes.parentOf(step, stepDecl);
     }
 
     return chain;

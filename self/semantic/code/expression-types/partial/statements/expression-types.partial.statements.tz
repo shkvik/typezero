@@ -16,16 +16,11 @@ import {
   SwitchStmt,
 } from "../../../../../program/ast/types/ast.types.statements.tz";
 import {
-  DictKind,
   TupleType,
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import {
-  kLastAndSeparator,
-  kNameSeparator,
-  kNoPlace,
-} from "../../const/expression-types.const.tz";
+import { kNoPlace } from "../../const/expression-types.const.tz";
 import { FunctionFrame } from "../../types/expression-types.types.tz";
 import { TruthUse } from "../../../../flow/truth-rules/types/truth-rules.types.tz";
 
@@ -147,7 +142,7 @@ partial class ExpressionTypes {
 
     const isNarrower = door.type.kind == TypeKind.Union && given != door.type;
     if (isNarrower) {
-      this.facts = this.withFact(this.facts, `${module} ${loc}`, given);
+      this.facts = this.flows.withFact(this.facts, `${module} ${loc}`, given);
     }
   }
 
@@ -192,7 +187,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.facts = this.branchesJoined(
+    this.facts = this.flows.branchesJoined(
       before,
       thenStart,
       thenEnd,
@@ -317,7 +312,7 @@ partial class ExpressionTypes {
       reached = this.reachedFacts(reached, facts);
 
       if (test != undefined) {
-        passed = this.mergedFacts(
+        passed = this.narrowings.mergedFacts(
           passed,
           this.factsOfCase(discriminant, test, passed, false, module),
         );
@@ -326,7 +321,7 @@ partial class ExpressionTypes {
         continue;
       }
 
-      this.facts = this.mergedFacts(before, reached);
+      this.facts = this.narrowings.mergedFacts(before, reached);
       this.walkStatements(option.body, frame, module);
 
       if (this.isSwitchExit(option, option == lastCase, module)) {
@@ -352,7 +347,7 @@ partial class ExpressionTypes {
 
     const facts = this.factsOfCase(discriminant, test, passed, true, module);
 
-    return this.mergedFacts(passed, facts);
+    return this.narrowings.mergedFacts(passed, facts);
   }
 
   private factsOfCase(
@@ -378,7 +373,7 @@ partial class ExpressionTypes {
       return facts;
     }
 
-    return this.joinedFacts(reached, facts);
+    return this.narrowings.joinedFacts(reached, facts);
   }
 
   private caseTypes(statement: SwitchStmt, subject: Type, module: int): Type[] {
@@ -411,27 +406,19 @@ partial class ExpressionTypes {
       return;
     }
 
-    const common = this.comparisonType(subject, type);
+    const common = this.comparisons.comparisonType(subject, type);
     if (common != undefined) {
       return;
     }
 
     const hasResult =
       type.kind == TypeKind.Result || subject.kind == TypeKind.Result;
-    const code = this.caseCode(hasResult);
+    const code = this.statements.caseCode(hasResult);
 
     this.report(module, test.loc, code, {
-      word: this.text.of(this.widened(type)),
+      word: this.text.of(this.functions.widened(type)),
       first: this.text.of(subject),
     });
-  }
-
-  private caseCode(hasResult: boolean): Code {
-    if (hasResult) {
-      return Code.CaseResultsCompared;
-    }
-
-    return Code.CaseNotComparable;
   }
 
   private casesCheck(
@@ -454,7 +441,7 @@ partial class ExpressionTypes {
       (option) => option.test == undefined,
     );
     const isListed =
-      !this.types.isOptional(subject) && this.isLiteralSet(subject);
+      !this.types.isOptional(subject) && this.objects.isLiteralSet(subject);
     if (hasDefault || !isListed) {
       return;
     }
@@ -470,24 +457,13 @@ partial class ExpressionTypes {
     }
 
     const names = left.map((part) => this.text.of(part));
-    const word = this.listedNames(names);
+    const word = this.statements.listedNames(names);
     const other = this.text.of(first);
 
     this.report(module, statement.discriminant.loc, Code.SwitchCasesLeft, {
       word,
       other,
     });
-  }
-
-  private listedNames(names: string[]): string {
-    const last = names[names.length - 1];
-    if (names.length < 2 || last == undefined) {
-      return names.join("");
-    }
-
-    const front = names.slice(0, names.length - 1);
-
-    return `${front.join(kNameSeparator)}${kLastAndSeparator}${last}`;
   }
 
   private walkReturn(
@@ -627,7 +603,9 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const earlier = frame.returns.find((one) => this.isShapedType(one.type));
+    const earlier = frame.returns.find((one) =>
+      this.statements.isShapedType(one.type),
+    );
 
     return earlier?.type;
   }
@@ -655,31 +633,6 @@ partial class ExpressionTypes {
     }
   }
 
-  private isShapedType(type: Type): boolean {
-    if (type.kind == TypeKind.Error) {
-      return false;
-    }
-    if (type.kind == TypeKind.Result) {
-      return true;
-    }
-
-    let held = this.types.definedType(type);
-
-    while (held.kind == TypeKind.Array) {
-      held = this.types.definedType(held.item);
-    }
-
-    switch (held.kind) {
-      case TypeKind.Object:
-      case TypeKind.Instance:
-      case TypeKind.Tuple:
-      case TypeKind.Dict:
-        return true;
-      default:
-        return false;
-    }
-  }
-
   private voidReturn(
     value: Expr | undefined,
     frame: FunctionFrame,
@@ -698,7 +651,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const word = this.functionLabel(frame.fn);
+    const word = this.functions.functionLabel(frame.fn);
     const first = this.text.of(given);
 
     this.report(module, value.loc, Code.VoidReturnsValue, { word, first });
@@ -718,7 +671,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const word = this.functionLabel(frame.fn);
+    const word = this.functions.functionLabel(frame.fn);
     const first = this.text.of(result);
 
     this.report(module, statement.loc, Code.ReturnValueMissing, {
@@ -752,14 +705,14 @@ partial class ExpressionTypes {
       case TypeKind.Iterator:
         return base.shape.yielded;
       case TypeKind.Dict:
-        return this.dictItem(base.dict, base.key, base.value);
+        return this.statements.dictItem(base.dict, base.key, base.value);
       default:
         return this.store.plain(TypeKind.Error);
     }
   }
 
   private tupleLoopItem(loop: ForOfStmt, tuple: TupleType, module: int): Type {
-    const element = this.tupleElement(tuple);
+    const element = this.indexes.tupleElement(tuple);
     if (element != undefined) {
       return element;
     }
@@ -767,16 +720,5 @@ partial class ExpressionTypes {
     this.report(module, loop.iterable.loc, Code.TupleIterated, kNoDetails);
 
     return this.store.plain(TypeKind.Error);
-  }
-
-  private dictItem(dict: DictKind, key: Type, value: Type): Type {
-    switch (dict) {
-      case DictKind.Map:
-        return this.store.plainTuple([key, value]);
-      case DictKind.Set:
-        return key;
-      default:
-        return this.store.plain(TypeKind.Error);
-    }
   }
 }

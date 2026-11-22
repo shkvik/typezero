@@ -1,0 +1,23 @@
+import { ArrayCallback } from "../../expression-types/types/expression-types.types.tz";
+
+export const kCallbackMethods = new Map<string, ArrayCallback>([
+  ["forEach", ArrayCallback.ForEach],
+  ["map", ArrayCallback.Map],
+  ["flatMap", ArrayCallback.FlatMap],
+  ["filter", ArrayCallback.Filter],
+  ["reduce", ArrayCallback.Reduce],
+  ["reduceRight", ArrayCallback.Reduce],
+  ["find", ArrayCallback.Find],
+  ["findLast", ArrayCallback.Find],
+  ["findIndex", ArrayCallback.FindIndex],
+  ["findLastIndex", ArrayCallback.FindIndex],
+  ["some", ArrayCallback.Test],
+  ["every", ArrayCallback.Test],
+  ["sort", ArrayCallback.Compare],
+]);
+export const kUriValueNames = [
+  "encodeURIComponent",
+  "encodeURI",
+  "decodeURIComponent",
+  "decodeURI",
+];

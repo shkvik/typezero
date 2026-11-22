@@ -1,0 +1,52 @@
+import { BinaryOp } from "../../../../program/ast/types/ast.types.expressions.tz";
+import { OperatorText } from "../types/source-texts.types.tz";
+
+export const kUnnamedOperand = "x";
+export const kUnnamedCount = "n";
+export const kMostShownStatement = 60;
+export const kStatementEnd = ";";
+export const kCommentStart = "//";
+export const kLineEnds = ["\n", "\r"];
+export const kOpeningMarks = ["(", "[", "{"];
+export const kClosingMarks = [")", "]", "}"];
+export const kQuoteMarks = ['"', "'", "`"];
+export const kOpenParen = "(";
+export const kCloseParen = ")";
+export const kOpenBracket = "[";
+export const kCloseBracket = "]";
+export const kNameMarks = ["_", ".", "#", "$", '"', "'"];
+export const kSigns = ["-", "+"];
+
+export const kOperatorTexts: OperatorText[] = [
+  { op: BinaryOp.Add, text: "+" },
+  { op: BinaryOp.Sub, text: "-" },
+  { op: BinaryOp.Mul, text: "*" },
+  { op: BinaryOp.Div, text: "/" },
+  { op: BinaryOp.Rem, text: "%" },
+  { op: BinaryOp.Pow, text: "**" },
+  { op: BinaryOp.BitAnd, text: "&" },
+  { op: BinaryOp.BitOr, text: "|" },
+  { op: BinaryOp.BitXor, text: "^" },
+  { op: BinaryOp.Shl, text: "<<" },
+  { op: BinaryOp.Shr, text: ">>" },
+  { op: BinaryOp.UShr, text: ">>>" },
+  { op: BinaryOp.Eq, text: "==" },
+  { op: BinaryOp.Ne, text: "!=" },
+  { op: BinaryOp.Lt, text: "<" },
+  { op: BinaryOp.Le, text: "<=" },
+  { op: BinaryOp.Gt, text: ">" },
+  { op: BinaryOp.Ge, text: ">=" },
+  { op: BinaryOp.Nullish, text: "??" },
+  { op: BinaryOp.In, text: "in" },
+];
+export const kEscape = "\\";
+export const kArgumentSeparator = ", ";
+export const kDot = ".";
+export const kDoubleQuote = '"';
+export const kEmptyArray = "[]";
+export const kFirstPrintable = " ";
+export const kHiddenMark = "%";
+export const kLastPrintable = "~";
+export const kOptionalDot = "?.";
+export const kTuplePlaceholder = "t";
+export const kUndefinedText = "undefined";

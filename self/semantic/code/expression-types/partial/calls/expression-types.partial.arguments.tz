@@ -16,11 +16,7 @@ import {
   kRoundingNames,
   kRepeatName,
   kToFixedName,
-  kManyArguments,
   kNoPlace,
-  kOneArgument,
-  kOrMore,
-  kRangeDash,
 } from "../../const/expression-types.const.tz";
 import {
   ArgumentSlot,
@@ -45,8 +41,8 @@ partial class ExpressionTypes {
 
     const slots = this.argumentSlots(args, module);
     const params = target.params;
-    const fixed = this.fixedCount(target);
-    const limit = this.spreadLimit(target, fixed, slots.length);
+    const fixed = this.calls.fixedCount(target);
+    const limit = this.calls.spreadLimit(target, fixed, slots.length);
     const spread = slots.find((slot, index) => slot.spread && index < limit);
     if (spread != undefined) {
       this.report(module, spread.expr.loc, Code.SpreadNotRest, kNoDetails);
@@ -55,18 +51,22 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const least = this.leastArguments(target);
+    const least = this.calls.leastArguments(target);
     const count = slots.length;
     const isTooMany = !target.rest && count > params.length;
     if (count < least || isTooMany) {
-      const word = this.argumentCountText(least, params.length, target.rest);
+      const word = this.calls.argumentCountText(
+        least,
+        params.length,
+        target.rest,
+      );
       const other = `${count}`;
 
       if (target.isTagged ?? false) {
         this.report(module, target.loc, Code.TaggedArgumentCount, {
           word,
           other,
-          place: this.taggedPlace(count),
+          place: this.statements.taggedPlace(count),
         });
       } else {
         this.report(module, target.loc, Code.ArgumentCount, { word, other });
@@ -106,14 +106,18 @@ partial class ExpressionTypes {
     }
 
     const params = target.params;
-    const least = this.leastArguments(target);
+    const least = this.calls.leastArguments(target);
     const count = args.length;
     const isTooMany = !target.rest && count > params.length;
     if (count >= least && !isTooMany) {
       return false;
     }
 
-    const word = this.argumentCountText(least, params.length, target.rest);
+    const word = this.calls.argumentCountText(
+      least,
+      params.length,
+      target.rest,
+    );
     const other = `${count}`;
 
     this.report(module, target.loc, Code.ArgumentCount, { word, other });
@@ -134,69 +138,6 @@ partial class ExpressionTypes {
         this.lenientClosure(arg.expr, param.type, module);
       }
     }
-  }
-
-  private parameterWanted(param: FunctionParameter): Type {
-    const type = param.type;
-    if (type.kind == TypeKind.Void) {
-      return this.store.plain(TypeKind.Undefined);
-    }
-    if (!param.optional || type.kind == TypeKind.Error) {
-      return type;
-    }
-
-    return this.types.optional(type);
-  }
-
-  private fixedCount(target: CallTarget): int {
-    if (target.rest) {
-      return target.params.length - 1;
-    }
-
-    return target.params.length;
-  }
-
-  private spreadLimit(target: CallTarget, fixed: int, count: int): int {
-    if (target.rest) {
-      return fixed;
-    }
-
-    return count;
-  }
-
-  private leastArguments(target: CallTarget): int {
-    const fixed = this.fixedCount(target);
-    let least = 0;
-
-    for (let index = 0; index < fixed; index++) {
-      const param = target.params[index];
-      if (param != undefined && !param.optional) {
-        least += 1;
-      }
-    }
-
-    return least;
-  }
-
-  private argumentCountText(least: int, most: int, rest: boolean): string {
-    const range = this.countRange(least, most, rest);
-
-    if (least == 1 && most == 1 && !rest) {
-      return range + kOneArgument;
-    }
-
-    return range + kManyArguments;
-  }
-
-  private countRange(least: int, most: int, rest: boolean): string {
-    if (rest) {
-      return `${least}${kOrMore}`;
-    }
-    if (most != least) {
-      return `${least}${kRangeDash}${most}`;
-    }
-
-    return `${least}`;
   }
 
   private argumentSlots(args: CallArgument[], module: int): ArgumentSlot[] {
@@ -252,7 +193,7 @@ partial class ExpressionTypes {
     target: CallTarget,
     module: int,
   ): void {
-    const wanted = this.parameterWanted(param);
+    const wanted = this.calls.parameterWanted(param);
     const kind = target.kind ?? CallKind.Own;
     const isPlain = slot.element == undefined && !slot.spread;
     if (
@@ -298,7 +239,7 @@ partial class ExpressionTypes {
       return this.coerce(slot.expr, given, to, module, kNoPlace);
     }
 
-    const code = this.positionCode(given, base);
+    const code = this.calls.positionCode(given, base);
     const word = this.text.of(given);
 
     this.report(module, slot.expr.loc, code, { word });
@@ -317,17 +258,6 @@ partial class ExpressionTypes {
     if (name == kRepeatName) {
       this.report(module, slot.expr.loc, Code.RepeatCountNotWhole, { word });
     }
-  }
-
-  private positionCode(given: Type, base: Type): Code {
-    if (base.kind == TypeKind.Double) {
-      return Code.PositionFraction;
-    }
-    if (this.types.isOptional(given) && base.kind == TypeKind.Int) {
-      return Code.PositionMaybe;
-    }
-
-    return Code.PositionNotInteger;
   }
 
   private mathArgumentCheck(
@@ -365,21 +295,9 @@ partial class ExpressionTypes {
       return;
     }
 
-    const code = this.mathArgumentCode(given, base);
+    const code = this.calls.mathArgumentCode(given, base);
 
     this.report(module, slot.expr.loc, code, { word: this.text.of(given) });
-  }
-
-  private mathArgumentCode(given: Type, base: Type): Code {
-    const isNumber = base.kind == TypeKind.Int || base.kind == TypeKind.Double;
-    if (this.types.isOptional(given) && isNumber) {
-      return Code.MathArgumentMaybe;
-    }
-    if (base.kind == TypeKind.Decimal) {
-      return Code.MathArgumentDecimal;
-    }
-
-    return Code.MathArgument;
   }
 
   private argumentCheck(slot: ArgumentSlot, to: Type, module: int): void {
@@ -431,7 +349,7 @@ partial class ExpressionTypes {
   }
 
   private restSlotsCheck(slots: ArgumentSlot[], to: Type, module: int): void {
-    const item = this.restItem(to);
+    const item = this.calls.restItem(to);
 
     for (const slot of slots) {
       if (slot.spread) {
@@ -440,14 +358,6 @@ partial class ExpressionTypes {
         this.argumentCheck(slot, item, module);
       }
     }
-  }
-
-  private restItem(to: Type): Type {
-    if (to.kind == TypeKind.Array) {
-      return to.item;
-    }
-
-    return this.store.plain(TypeKind.Error);
   }
 
   private looseArguments(args: CallArgument[], module: int): void {

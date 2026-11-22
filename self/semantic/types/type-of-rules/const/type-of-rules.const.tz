@@ -1,0 +1,41 @@
+export const kTypeOfNames = [
+  "undefined",
+  "null",
+  "boolean",
+  "int",
+  "int8",
+  "int16",
+  "int32",
+  "uint8",
+  "uint16",
+  "uint32",
+  "uint64",
+  "double",
+  "decimal",
+  "string",
+  "array",
+  "object",
+  "function",
+  "class",
+];
+
+export const kJsonTypeOfNames = [
+  "null",
+  "boolean",
+  "double",
+  "string",
+  "array",
+  "object",
+];
+
+export const kAnyObjectTypeOfNames = ["object", "class"];
+export const kNumberTypeOfNames = ["double", "decimal"];
+export const kIntegerTypeOfPrefixes = ["int", "uint"];
+export const kUndefinedTypeOf = "undefined";
+export const kNullTypeOf = "null";
+export const kBigintTypeOf = "bigint";
+export const kNumberTypeOf = "number";
+export const kSymbolTypeOf = "symbol";
+export const kMostShownNumberNames = 3;
+export const kNameSeparator = ", ";
+export const kLastNameSeparator = " or ";

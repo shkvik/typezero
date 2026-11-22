@@ -9,16 +9,6 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import {
-  kClosingMarks,
-  kCommentStart,
-  kLineEnds,
-  kMostShownStatement,
-  kOpeningMarks,
-  kPromisePlaceholder,
-  kStatementEnd,
-  kTakingMethods,
-} from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
   private usedCheck(
@@ -31,13 +21,14 @@ partial class ExpressionTypes {
       return this.libraryUsedCheck(expr, type, at, module);
     }
 
-    const isKept = expr.kind == ExprKind.Assign || this.isTakingElement(expr);
+    const isKept =
+      expr.kind == ExprKind.Assign || this.statements.isTakingElement(expr);
     if (isKept) {
       return;
     }
 
     const defined = this.types.definedType(type);
-    const held = this.heldType(type);
+    const held = this.statements.heldType(type);
     if (held.kind != defined.kind) {
       return;
     }
@@ -56,7 +47,7 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     const defined = this.types.definedType(type);
-    const loc = this.calleeLoc(expr);
+    const loc = this.statements.calleeLoc(expr);
     if (!this.isValueMethodCall(expr, module)) {
       return;
     }
@@ -65,7 +56,7 @@ partial class ExpressionTypes {
       if (item.kind == TypeKind.Promise) {
         this.report(module, loc, Code.PromisesNotAwaited, kNoDetails);
       }
-      if (item.kind == TypeKind.Result && this.isMappingCall(expr)) {
+      if (item.kind == TypeKind.Result && this.statements.isMappingCall(expr)) {
         this.report(module, loc, Code.ResultsUnused, kNoDetails);
       }
 
@@ -75,30 +66,17 @@ partial class ExpressionTypes {
       return;
     }
 
-    const held = this.heldType(defined.value);
+    const held = this.statements.heldType(defined.value);
     if (held.kind == TypeKind.Result) {
       return;
     }
 
-    const text = this.statementText(at, module);
+    const text = this.sources.statementText(at, module);
     if (text == "") {
       return this.report(module, loc, Code.PromiseNotAwaited, kNoDetails);
     }
 
     this.report(module, loc, Code.PromiseNotAwaitedHere, { word: text });
-  }
-
-  private isMappingCall(expr: Expr): boolean {
-    if (expr.kind != ExprKind.Call) {
-      return false;
-    }
-
-    const callee = expr.callee;
-    if (callee.kind != ExprKind.Member) {
-      return false;
-    }
-
-    return callee.name == "map" || callee.name == "flatMap";
   }
 
   private isValueMethodCall(expr: Expr, module: int): boolean {
@@ -122,24 +100,16 @@ partial class ExpressionTypes {
     return base.kind == TypeKind.Array || base.kind == TypeKind.Promise;
   }
 
-  private calleeLoc(expr: Expr): int {
-    if (expr.kind == ExprKind.Call && expr.callee.kind == ExprKind.Member) {
-      return expr.callee.loc;
-    }
-
-    return expr.loc;
-  }
-
   private promiseUsed(
     expr: Expr,
     value: Type,
     at: int | undefined,
     module: int,
   ): void {
-    const text = this.statementText(at, module);
-    const held = this.heldType(value);
+    const text = this.sources.statementText(at, module);
+    const held = this.statements.heldType(value);
     if (held.kind == TypeKind.Result) {
-      const word = this.shownText(text);
+      const word = this.statements.shownText(text);
 
       return this.report(module, expr.loc, Code.PromiseResultUnchecked, {
         word,
@@ -150,72 +120,5 @@ partial class ExpressionTypes {
     }
 
     this.report(module, expr.loc, Code.PromiseNotAwaitedHere, { word: text });
-  }
-
-  private shownText(text: string): string {
-    if (text == "") {
-      return kPromisePlaceholder;
-    }
-
-    return text;
-  }
-
-  private heldType(type: Type): Type {
-    const defined = this.types.definedType(type);
-    if (defined.kind == TypeKind.Array) {
-      return this.heldType(defined.item);
-    }
-
-    return defined;
-  }
-
-  private isTakingElement(expr: Expr): boolean {
-    if (expr.kind != ExprKind.Call) {
-      return false;
-    }
-
-    const callee = expr.callee;
-
-    return (
-      callee.kind == ExprKind.Member && kTakingMethods.includes(callee.name)
-    );
-  }
-
-  private statementText(at: int | undefined, module: int): string {
-    const source = this.program.modules[module]?.source.text;
-    if (at == undefined || source == undefined) {
-      return "";
-    }
-
-    const end = Math.min(source.length, at + kMostShownStatement * 4);
-    const line = source.toString("utf8", at, end);
-    let depth = 0;
-    let taken = "";
-
-    for (const unit of line) {
-      const rest = line.slice(taken.length);
-      const isEnd =
-        kLineEnds.includes(unit) ||
-        (depth == 0 &&
-          (unit == kStatementEnd || rest.startsWith(kCommentStart)));
-      if (isEnd) {
-        break;
-      }
-      if (kOpeningMarks.includes(unit)) {
-        depth += 1;
-      }
-      if (kClosingMarks.includes(unit)) {
-        depth -= 1;
-      }
-
-      taken += unit;
-    }
-
-    const text = taken.trimEnd();
-    if (depth != 0 || text.length > kMostShownStatement) {
-      return "";
-    }
-
-    return text;
   }
 }

@@ -19,31 +19,28 @@ import {
 } from "../../../../program/type/types/type.types.tz";
 import { ParameterSite } from "../../../types/type-resolver/types/type-resolver.types.tz";
 import {
+  kArrayShape,
+  kAsyncGeneratorShape,
+  kBooleanShape,
   kCodeMethods,
+  kDecimalShape,
+  kDoubleShape,
+  kGeneratorShape,
   kMathConstants,
   kMathName,
   kNumberLaterMethods,
+  kPromiseClass,
+  kResultShape,
+  kSetClass,
+  kSpecialMethods,
+  kStringShape,
   kTakenMethods,
 } from "../../../code/expression-types/const/expression-types.const.tz";
 import {
   CallKind,
   GenericTarget,
 } from "../../../code/expression-types/types/expression-types.types.tz";
-import {
-  kArrayShape,
-  kAsyncGeneratorShape,
-  kBooleanShape,
-  kDecimalShape,
-  kDoubleShape,
-  kGeneratorShape,
-  kMapClass,
-  kPromiseClass,
-  kSpecialMethods,
-  kSplitName,
-  kResultShape,
-  kSetClass,
-  kStringShape,
-} from "../../../code/expression-types/const/expression-types.const.tz";
+import { kMapClass } from "../../../code/class-rules/const/class-rules.const.tz";
 
 partial class ExpressionTypes {
   private libraryReceiver(type: Type): Type | undefined {
@@ -75,7 +72,7 @@ partial class ExpressionTypes {
       case TypeKind.Promise:
         return this.resolver.libraryInstance(kPromiseClass, [type.value]);
       case TypeKind.Instance:
-        return this.instanceReceiver(type);
+        return this.library.instanceReceiver(type);
       default:
         return undefined;
     }
@@ -140,14 +137,6 @@ partial class ExpressionTypes {
     }
   }
 
-  private instanceReceiver(type: InstanceType): Type | undefined {
-    if (!this.isLibraryModule(type.module)) {
-      return undefined;
-    }
-
-    return type;
-  }
-
   private libraryMemberTyped(
     expr: MemberExpr,
     object: Type,
@@ -179,12 +168,13 @@ partial class ExpressionTypes {
     }
 
     const isProved =
-      kSpecialMethods.includes(member.name) || this.isRegexSplit(expr, member);
+      kSpecialMethods.includes(member.name) ||
+      this.library.isRegexSplit(expr, member);
     const generic = this.receiverMember(receiver, member.name, true);
     const isGeneric =
       generic != undefined &&
       generic.kind == TypeKind.Function &&
-      this.mentionsParameter(generic);
+      this.parts.mentionsParameter(generic);
     const isSpecial = isProved || object.kind == TypeKind.Result;
     if (isGeneric && isSpecial) {
       return this.store.plain(TypeKind.Error);
@@ -209,11 +199,11 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    const kind = this.receiverKind(object);
+    const kind = this.library.receiverKind(object);
 
     const marked = this.positionShape(object, member.name) ?? method;
 
-    this.positionMask = this.maskOf(object, marked);
+    this.positionMask = this.library.maskOf(object, marked);
     this.positionMethod = member.name;
 
     return this.fieldValueCall(expr, member, method, kind, module);
@@ -226,7 +216,7 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const params = this.genericParameters(type);
+    const params = this.parts.genericParameters(type);
     if (type.kind != TypeKind.Function || params == undefined) {
       return this.store.plain(TypeKind.Error);
     }
@@ -305,7 +295,10 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     const name = member.name;
-    if (receiver.kind != TypeKind.Object || !this.isPlainReceiver(object)) {
+    if (
+      receiver.kind != TypeKind.Object ||
+      !this.library.isPlainReceiver(object)
+    ) {
       return;
     }
     if (kNumberLaterMethods.includes(name)) {
@@ -322,22 +315,6 @@ partial class ExpressionTypes {
     });
   }
 
-  private isPlainReceiver(object: Type): boolean {
-    const base = this.types.apparent(object);
-
-    switch (base.kind) {
-      case TypeKind.String:
-      case TypeKind.Template:
-      case TypeKind.Array:
-      case TypeKind.Int:
-      case TypeKind.Double:
-      case TypeKind.Boolean:
-        return true;
-      default:
-        return false;
-    }
-  }
-
   private namespaceMissingCheck(
     expr: CallExpr,
     member: MemberExpr,
@@ -348,7 +325,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const code = this.namespaceCode(object.name);
+    const code = this.library.namespaceCode(object.name);
     if (code == undefined) {
       return;
     }
@@ -358,24 +335,6 @@ partial class ExpressionTypes {
       word: member.name,
       first: object.name,
     });
-  }
-
-  private namespaceCode(name: string): Code | undefined {
-    switch (name) {
-      case "Math":
-      case "Number":
-        return Code.NamespaceMemberMissing;
-      case "JSON":
-        return Code.JsonMemberMissing;
-      case "Object":
-        return Code.ObjectStaticRefused;
-      case "Promise":
-        return Code.PromiseStaticRefused;
-      case "console":
-        return Code.ConsoleMemberRefused;
-      default:
-        return undefined;
-    }
   }
 
   private mathMemberCheck(
@@ -405,19 +364,11 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const first = this.mathEndSign(word);
+    const first = this.library.mathEndSign(word);
 
     this.report(module, member.loc, Code.MathNoValues, { word, first });
 
     return true;
-  }
-
-  private mathEndSign(word: string): string {
-    if (word == "max") {
-      return "-";
-    }
-
-    return "";
   }
 
   private positionShape(object: Type, name: string): Type | undefined {
@@ -434,42 +385,6 @@ partial class ExpressionTypes {
     return this.receiverMember(receiver, name, true);
   }
 
-  private maskOf(object: Type, method: Type): boolean[] {
-    if (object.kind == TypeKind.Dict) {
-      return [];
-    }
-
-    return this.positionsOf(method);
-  }
-
-  private positionsOf(method: Type): boolean[] {
-    if (method.kind != TypeKind.Function) {
-      return [];
-    }
-
-    return method.shape.params.map((param) => {
-      const base = this.types.definedType(param.type);
-
-      return base.kind == TypeKind.Int && !base.wraps;
-    });
-  }
-
-  private receiverKind(object: Type): CallKind {
-    const base = this.types.apparent(object);
-
-    switch (base.kind) {
-      case TypeKind.String:
-      case TypeKind.Template:
-      case TypeKind.Array:
-      case TypeKind.Int:
-      case TypeKind.Double:
-      case TypeKind.Dict:
-        return CallKind.Positional;
-      default:
-        return CallKind.Library;
-    }
-  }
-
   private namespaceKind(member: MemberExpr, module: int): CallKind {
     const object = member.object;
     const isMath =
@@ -483,23 +398,13 @@ partial class ExpressionTypes {
     return CallKind.Library;
   }
 
-  private isRegexSplit(expr: CallExpr, member: MemberExpr): boolean {
-    const first = expr.args[0]?.expr;
-
-    return (
-      member.name == kSplitName &&
-      first != undefined &&
-      first.kind == ExprKind.RegexLit
-    );
-  }
-
   private libraryMemberType(
     receiver: Type,
     name: string,
     isCalled: boolean,
   ): Type | undefined {
     const found = this.receiverMember(receiver, name, isCalled);
-    if (found == undefined || this.mentionsParameter(found)) {
+    if (found == undefined || this.parts.mentionsParameter(found)) {
       return undefined;
     }
 
@@ -518,7 +423,7 @@ partial class ExpressionTypes {
         return undefined;
       }
 
-      return this.fieldWanted(field);
+      return this.objects.fieldWanted(field);
     }
     if (receiver.kind != TypeKind.Instance) {
       return undefined;
@@ -631,50 +536,11 @@ partial class ExpressionTypes {
     name: string,
     isCalled: boolean,
   ): Type | undefined {
-    const parent = this.baseClassOf(instance);
+    const parent = this.types.baseClassOf(instance);
     if (parent == undefined || parent.kind != TypeKind.Instance) {
       return undefined;
     }
 
     return this.declaredMember(parent, name, isCalled);
-  }
-
-  private mentionsParameter(type: Type): boolean {
-    switch (type.kind) {
-      case TypeKind.TypeParameter:
-      case TypeKind.Operation:
-      case TypeKind.Error:
-        return true;
-      case TypeKind.Array:
-        return this.mentionsParameter(type.item);
-      case TypeKind.Tuple:
-        return type.items.some((item) => this.mentionsParameter(item));
-      case TypeKind.Union:
-        return type.parts.some((part) => this.mentionsParameter(part));
-      case TypeKind.Function: {
-        const shape = type.shape;
-        const params = shape.params.map((param) => param.type);
-
-        return (
-          this.mentionsParameter(shape.result) ||
-          params.some((param) => this.mentionsParameter(param))
-        );
-      }
-      case TypeKind.Result:
-        return (
-          this.mentionsParameter(type.value) ||
-          this.mentionsParameter(type.error)
-        );
-      case TypeKind.Promise:
-        return this.mentionsParameter(type.value);
-      case TypeKind.Dict:
-        return (
-          this.mentionsParameter(type.key) || this.mentionsParameter(type.value)
-        );
-      case TypeKind.Instance:
-        return type.args.some((arg) => this.mentionsParameter(arg));
-      default:
-        return false;
-    }
   }
 }

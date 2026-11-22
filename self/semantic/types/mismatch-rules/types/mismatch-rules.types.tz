@@ -1,0 +1,7 @@
+export type MismatchTexts = {
+  readonly name: string;
+  readonly unknownCheck: string;
+  readonly isFresh: boolean;
+  readonly isPlaced: boolean;
+  readonly place: string;
+};

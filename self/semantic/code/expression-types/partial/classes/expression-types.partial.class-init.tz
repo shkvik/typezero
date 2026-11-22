@@ -6,7 +6,6 @@ import {
   ClassField,
   FieldKind,
   FieldPresence,
-  MethodKind,
 } from "../../../../../program/ast/types/ast.types.classes.tz";
 import {
   Expr,
@@ -22,12 +21,8 @@ import {
   SwitchCase,
   SwitchStmt,
 } from "../../../../../program/ast/types/ast.types.statements.tz";
+import { TypeRef } from "../../../../../program/ast/types/ast.types.types.tz";
 import {
-  TypeRef,
-  TypeRefKind,
-} from "../../../../../program/ast/types/ast.types.types.tz";
-import {
-  DictKind,
   InstanceType,
   Type,
   TypeKind,
@@ -36,13 +31,6 @@ import { kFieldSetKey } from "../../const/expression-types.const.tz";
 import { InitFrame } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private initFrameOf(decl: ClassDecl, fn: FunctionDecl): InitFrame {
-    const isConstructor = fn.role?.method == MethodKind.Constructor;
-    const isDerived = decl.base != undefined || decl.baseExpr != undefined;
-
-    return { isConstructor, fn, decl, isDerived, closures: [] };
-  }
-
   private constructorFrame(): InitFrame | undefined {
     const frame = this.initFrames[this.initFrames.length - 1];
     if (frame == undefined || !frame.isConstructor) {
@@ -73,24 +61,10 @@ partial class ExpressionTypes {
     return inner.every((fn) => fn.isArrow);
   }
 
-  private isArrowField(field: ClassField): boolean {
-    const init = field.init;
-    const isArrow = init?.kind == ExprKind.Function && init.fn.isArrow;
-
-    return isArrow || field.form == FieldKind.ArrowMethod;
-  }
-
-  private isRequiredField(field: ClassField): boolean {
-    const isValueField =
-      field.form == FieldKind.Instance || field.form == FieldKind.Parameter;
-
-    return isValueField && field.presence != FieldPresence.Optional;
-  }
-
   private firstUnset(frame: InitFrame): string | undefined {
     for (const field of frame.decl.fields) {
       const key = `${kFieldSetKey}${field.name}`;
-      if (this.isRequiredField(field) && !this.facts.has(key)) {
+      if (this.classes.isRequiredField(field) && !this.facts.has(key)) {
         return field.name;
       }
     }
@@ -102,7 +76,7 @@ partial class ExpressionTypes {
     const key = `${kFieldSetKey}${name}`;
     const mark = this.store.plain(TypeKind.Void);
 
-    this.facts = this.withFact(this.facts, key, mark);
+    this.facts = this.flows.withFact(this.facts, key, mark);
   }
 
   private initStart(fn: FunctionDecl): void {
@@ -198,18 +172,6 @@ partial class ExpressionTypes {
     return frame;
   }
 
-  private ownValueField(
-    frame: InitFrame,
-    name: string,
-  ): ClassField | undefined {
-    return frame.decl.fields.find(
-      (field) =>
-        field.name == name &&
-        field.form != FieldKind.Static &&
-        !this.isArrowField(field),
-    );
-  }
-
   private fieldReadEarly(target: Expr, module: int): boolean {
     if (target.kind != ExprKind.Member) {
       return false;
@@ -220,12 +182,12 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const field = this.ownValueField(frame, target.name);
+    const field = this.classes.ownValueField(frame, target.name);
     const key = `${kFieldSetKey}${target.name}`;
     if (field == undefined || this.facts.has(key)) {
       return false;
     }
-    if (!this.isRequiredField(field)) {
+    if (!this.classes.isRequiredField(field)) {
       return false;
     }
 
@@ -264,7 +226,7 @@ partial class ExpressionTypes {
     if (frame == undefined) {
       return;
     }
-    if (this.ownValueField(frame, member.name) != undefined) {
+    if (this.classes.ownValueField(frame, member.name) != undefined) {
       return;
     }
     if (!this.isInitMethod(frame, member.name)) {
@@ -285,7 +247,7 @@ partial class ExpressionTypes {
     const self = this.selves[this.selves.length - 1];
     if (self == undefined || self.kind != TypeKind.Instance) {
       return frame.decl.methods.some(
-        (method) => method.name == name && !this.isStaticMethod(method),
+        (method) => method.name == name && !this.classes.isStaticMethod(method),
       );
     }
 
@@ -295,7 +257,7 @@ partial class ExpressionTypes {
     }
 
     const field = entry.field;
-    if (field != undefined && this.isArrowField(field)) {
+    if (field != undefined && this.classes.isArrowField(field)) {
       return true;
     }
 
@@ -361,12 +323,6 @@ partial class ExpressionTypes {
     const isSet = this.firstUnset(frame) == undefined;
 
     frame.closures.push(isSet && !isBefore);
-  }
-
-  private leaveInitClosure(frame: InitFrame | undefined): void {
-    if (frame != undefined) {
-      frame.closures.pop();
-    }
   }
 
   private isSwitchExit(
@@ -483,7 +439,10 @@ partial class ExpressionTypes {
     const seen = new Set<ClassDecl>();
     let current: InstanceType | undefined = instance;
 
-    while (current != undefined && !this.isLibraryModule(current.module)) {
+    while (
+      current != undefined &&
+      !this.modules.isLibraryModule(current.module)
+    ) {
       const decl = this.classOf(current);
       if (decl == undefined || seen.has(decl)) {
         return false;
@@ -493,7 +452,7 @@ partial class ExpressionTypes {
       }
 
       seen.add(decl);
-      current = this.parentOf(current, decl);
+      current = this.classes.parentOf(current, decl);
     }
 
     return false;
@@ -515,7 +474,7 @@ partial class ExpressionTypes {
       case TypeKind.Array:
         return true;
       case TypeKind.Dict:
-        return this.hasEmptyCollection(type.dict, written);
+        return this.classes.hasEmptyCollection(type.dict, written);
       case TypeKind.Union:
         return type.parts.every((part) => part.kind == TypeKind.Literal);
       case TypeKind.Instance:
@@ -531,20 +490,11 @@ partial class ExpressionTypes {
     }
   }
 
-  private hasEmptyCollection(
-    dict: DictKind,
-    written: TypeRef | undefined,
-  ): boolean {
-    const isCollection = dict == DictKind.Map || dict == DictKind.Set;
-
-    return isCollection && written?.form.kind == TypeRefKind.Generic;
-  }
-
   private hasEmptyInstance(
     instance: InstanceType,
     visiting: Set<ClassDecl>,
   ): boolean {
-    if (this.isLibraryModule(instance.module)) {
+    if (this.modules.isLibraryModule(instance.module)) {
       return false;
     }
 
@@ -577,7 +527,7 @@ partial class ExpressionTypes {
       return true;
     }
 
-    const parent = this.parentOf(instance, decl);
+    const parent = this.classes.parentOf(instance, decl);
     if (parent != undefined && !this.hasEmptyFamily(parent, visiting)) {
       return false;
     }

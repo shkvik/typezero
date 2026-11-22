@@ -4,7 +4,6 @@ import "../../types/expression-types/partial/expression-types.partial.mismatch.t
 import "./partial/indexing/expression-types.partial.arrays.tz";
 import "./partial/objects/expression-types.partial.objects.tz";
 import "./partial/dictionaries/expression-types.partial.dictionaries.tz";
-import "../../types/expression-types/partial/expression-types.partial.unify.tz";
 import "./partial/operators/expression-types.partial.arithmetic.tz";
 import "./partial/operators/expression-types.partial.operands.tz";
 import "./partial/operators/expression-types.partial.concatenation.tz";
@@ -122,13 +121,79 @@ import {
 } from "./types/expression-types.types.tz";
 import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
 import { TruthRules } from "../../flow/truth-rules/truth-rules.tz";
+import { TypeUnifier } from "../../types/type-unifier/type-unifier.tz";
+import { ModuleQuestions } from "../../declaration/module-questions/module-questions.tz";
+import { LiteralRanges } from "../../types/literal-ranges/literal-ranges.tz";
+import { MismatchRules } from "../../types/mismatch-rules/mismatch-rules.tz";
+import { TypeOfRules } from "../../types/type-of-rules/type-of-rules.tz";
+import { SourceTexts } from "../source-texts/source-texts.tz";
+import { ConcatenationRules } from "../concatenation-rules/concatenation-rules.tz";
+import { IntegerMath } from "../integer-math/integer-math.tz";
+import { TypeParts } from "../../types/type-parts/type-parts.tz";
+import { ExpressionShapes } from "../expression-shapes/expression-shapes.tz";
+import { ArrayRules } from "../array-rules/array-rules.tz";
+import { OverloadRules } from "../overload-rules/overload-rules.tz";
+import { OperatorRules } from "../operator-rules/operator-rules.tz";
+import { ComparisonRules } from "../comparison-rules/comparison-rules.tz";
+import { LogicRules } from "../logic-rules/logic-rules.tz";
+import { CallbackRules } from "../callback-rules/callback-rules.tz";
+import { CallRules } from "../call-rules/call-rules.tz";
+import { DictionaryRules } from "../dictionary-rules/dictionary-rules.tz";
+import { FunctionRules } from "../function-rules/function-rules.tz";
+import { LiteralRules } from "../literal-rules/literal-rules.tz";
+import { IndexRules } from "../index-rules/index-rules.tz";
+import { ObjectRules } from "../object-rules/object-rules.tz";
+import { DecoratorRules } from "../decorator-rules/decorator-rules.tz";
+import { ClassRules } from "../class-rules/class-rules.tz";
+import { StatementRules } from "../statement-rules/statement-rules.tz";
+import { NarrowingRules } from "../../flow/narrowing-rules/narrowing-rules.tz";
+import { BoundRules } from "../../flow/bound-rules/bound-rules.tz";
+import { FlowRules } from "../../flow/flow-rules/flow-rules.tz";
+import { GenericRules } from "../../generics/generic-rules/generic-rules.tz";
+import { DateRules } from "../../library/date-rules/date-rules.tz";
+import { DecimalRules } from "../../library/decimal-rules/decimal-rules.tz";
+import { ResultRules } from "../../library/result-rules/result-rules.tz";
+import { LibraryRules } from "../../library/library-rules/library-rules.tz";
 
 export class ExpressionTypes {
   private readonly store: TypeStore;
   private readonly text: TypeText;
   private readonly relation: TypeRelation;
   private readonly types: TypeQuestions;
+  private readonly modules: ModuleQuestions;
+  private readonly ranges: LiteralRanges;
+  private readonly sources: SourceTexts;
+  private readonly integers: IntegerMath;
+  private readonly unifier: TypeUnifier;
   private readonly truth: TruthRules;
+  private readonly mismatches: MismatchRules;
+  private readonly typeOfs: TypeOfRules;
+  private readonly concatenations: ConcatenationRules;
+  private readonly parts: TypeParts;
+  private readonly shapes: ExpressionShapes;
+  private readonly arrays: ArrayRules;
+  private readonly overloads: OverloadRules;
+  private readonly operators: OperatorRules;
+  private readonly comparisons: ComparisonRules;
+  private readonly logic: LogicRules;
+  private readonly callbacks: CallbackRules;
+  private readonly calls: CallRules;
+  private readonly dictionaries: DictionaryRules;
+  private readonly functions: FunctionRules;
+  private readonly literals: LiteralRules;
+  private readonly indexes: IndexRules;
+  private readonly objects: ObjectRules;
+  private readonly decorators: DecoratorRules;
+  private readonly classes: ClassRules;
+  private readonly statements: StatementRules;
+  private readonly narrowings: NarrowingRules;
+  private readonly bounds: BoundRules;
+  private readonly flows: FlowRules;
+  private readonly generics: GenericRules;
+  private readonly dates: DateRules;
+  private readonly decimals: DecimalRules;
+  private readonly results: ResultRules;
+  private readonly library: LibraryRules;
   private readonly resolver: TypeResolver;
   private readonly program: Program;
   private readonly scopes: Map<int, ModuleScopes>;
@@ -188,12 +253,114 @@ export class ExpressionTypes {
     const relation = new TypeRelation(store);
     const text = new TypeText(store);
     const types = new TypeQuestions(store, relation);
+    const modules = new ModuleQuestions(program);
+    const ranges = new LiteralRanges();
+    const sources = new SourceTexts(program);
+    const integers = new IntegerMath();
+    const unifier = new TypeUnifier(store, relation, types, resolver);
+    const truth = new TruthRules(store, text, relation, types);
+    const mismatches = new MismatchRules(
+      text,
+      relation,
+      types,
+      modules,
+      ranges,
+    );
+    const typeOfs = new TypeOfRules(store, text, relation, types);
+    const concatenations = new ConcatenationRules(
+      text,
+      relation,
+      types,
+      sources,
+    );
+    const parts = new TypeParts(store);
+    const shapes = new ExpressionShapes();
+    const arrays = new ArrayRules(store, relation, types, unifier, shapes);
+    const overloads = new OverloadRules(text, types, sources, mismatches);
+    const operators = new OperatorRules(
+      store,
+      text,
+      relation,
+      types,
+      sources,
+      unifier,
+      mismatches,
+      shapes,
+    );
+    const comparisons = new ComparisonRules(types, unifier, shapes);
+    const logic = new LogicRules(store, types, truth, shapes);
+    const callbacks = new CallbackRules(store, types, truth);
+    const calls = new CallRules(store, types, parts);
+    const dictionaries = new DictionaryRules(store, types, modules, sources);
+    const functions = new FunctionRules(store, relation, types, unifier);
+    const literals = new LiteralRules(store, types);
+    const indexes = new IndexRules(store);
+    const objects = new ObjectRules(store, text, relation, types);
+    const decorators = new DecoratorRules(types);
+    const classes = new ClassRules(text, types, modules);
+    const statements = new StatementRules(store, relation, types, modules);
+    const narrowings = new NarrowingRules(
+      store,
+      text,
+      relation,
+      types,
+      modules,
+      typeOfs,
+    );
+    const bounds = new BoundRules(store);
+    const flows = new FlowRules(store, relation, types);
+    const generics = new GenericRules(
+      store,
+      types,
+      modules,
+      unifier,
+      parts,
+      calls,
+      literals,
+    );
+    const dates = new DateRules(types);
+    const decimals = new DecimalRules(store, types, sources);
+    const results = new ResultRules(store, types, unifier, bounds);
+    const library = new LibraryRules(types, modules, sources, mismatches);
 
     this.store = store;
     this.text = text;
     this.relation = relation;
     this.types = types;
-    this.truth = new TruthRules(store, text, relation, types);
+    this.modules = modules;
+    this.ranges = ranges;
+    this.sources = sources;
+    this.integers = integers;
+    this.unifier = unifier;
+    this.truth = truth;
+    this.mismatches = mismatches;
+    this.typeOfs = typeOfs;
+    this.concatenations = concatenations;
+    this.parts = parts;
+    this.shapes = shapes;
+    this.arrays = arrays;
+    this.overloads = overloads;
+    this.operators = operators;
+    this.comparisons = comparisons;
+    this.logic = logic;
+    this.callbacks = callbacks;
+    this.calls = calls;
+    this.dictionaries = dictionaries;
+    this.functions = functions;
+    this.literals = literals;
+    this.indexes = indexes;
+    this.objects = objects;
+    this.decorators = decorators;
+    this.classes = classes;
+    this.statements = statements;
+    this.narrowings = narrowings;
+    this.bounds = bounds;
+    this.flows = flows;
+    this.generics = generics;
+    this.dates = dates;
+    this.decimals = decimals;
+    this.results = results;
+    this.library = library;
     this.resolver = resolver;
     this.program = program;
     this.scopes = new Map<int, ModuleScopes>();
@@ -380,13 +547,13 @@ export class ExpressionTypes {
     if (this.isRangeProven(expr, given, wanted, module)) {
       return;
     }
-    if (this.isFunctionAdapting(expr, given, wanted, module)) {
+    if (this.functions.isFunctionAdapting(expr, given, wanted, module)) {
       return;
     }
-    if (this.isUndecided(expr, wanted)) {
+    if (this.mismatches.isUndecided(wanted)) {
       return;
     }
-    if (this.isIteratorFromClass(given, wanted)) {
+    if (this.mismatches.isIteratorFromClass(given, wanted)) {
       return;
     }
 

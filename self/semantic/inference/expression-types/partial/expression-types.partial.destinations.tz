@@ -36,7 +36,7 @@ partial class ExpressionTypes {
       if (type == undefined || !this.isLiteralPlace(init, type, module)) {
         continue;
       }
-      if (this.mentionsParameter(type)) {
+      if (this.parts.mentionsParameter(type)) {
         return undefined;
       }
       if (chosen != undefined && chosen != type && !isResult) {
@@ -167,7 +167,7 @@ partial class ExpressionTypes {
 
         const type = this.resolver.returnType(result, context);
 
-        return this.innerResult(type, fn);
+        return this.functions.innerResult(type, fn);
       }
       case DestinationKind.Assigned:
         return this.assignedDestination(one, module);
@@ -213,7 +213,7 @@ partial class ExpressionTypes {
     }
 
     const shape = type.shape;
-    const params = this.directParams(shape.params, shape.self);
+    const params = this.calls.directParams(shape.params, shape.self);
 
     return params[one.index]?.type;
   }

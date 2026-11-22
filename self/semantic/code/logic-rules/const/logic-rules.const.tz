@@ -1,0 +1,6 @@
+export const kAndText = "&&";
+export const kEmptyText = '""';
+export const kEquals = "==";
+export const kNotEquals = "!=";
+export const kOrText = "||";
+export const kZeroText = "0";

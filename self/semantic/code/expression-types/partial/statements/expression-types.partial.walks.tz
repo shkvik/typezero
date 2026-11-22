@@ -1,6 +1,5 @@
 import { ExpressionTypes } from "../../expression-types.tz";
 import {
-  BinaryOp,
   CallArgument,
   Expr,
   ExprKind,
@@ -21,7 +20,7 @@ partial class ExpressionTypes {
       this.templatePart(part, module);
     }
 
-    return this.templated(wanted);
+    return this.literals.templated(wanted);
   }
 
   private templatePart(part: Expr, module: int): void {
@@ -35,36 +34,11 @@ partial class ExpressionTypes {
   }
 
   private childrenTyped(expr: Expr, module: int): Type {
-    for (const part of this.childrenOf(expr)) {
+    for (const part of this.shapes.childrenOf(expr)) {
       this.walkedPart(part, module);
     }
 
     return this.store.plain(TypeKind.Error);
-  }
-
-  private childrenOf(expr: Expr): Expr[] {
-    switch (expr.kind) {
-      case ExprKind.Index:
-        return [expr.object, expr.index];
-      case ExprKind.Binary:
-        return [expr.lhs, expr.rhs];
-      case ExprKind.Await:
-        return [expr.value];
-      case ExprKind.Cast:
-        return [expr.operand];
-      case ExprKind.Sequence:
-        return expr.exprs;
-      case ExprKind.Yield: {
-        const value = expr.value;
-        if (value == undefined) {
-          return [];
-        }
-
-        return [value];
-      }
-      default:
-        return [];
-    }
   }
 
   private walkedArguments(args: CallArgument[], module: int): void {
@@ -102,17 +76,13 @@ partial class ExpressionTypes {
           this.isHintNeeded(expr.elseExpr, module)
         );
       case ExprKind.Binary:
-        return this.isLogicOp(expr.op) && this.isHintNeeded(expr.rhs, module);
+        return (
+          this.shapes.isLogicOp(expr.op) && this.isHintNeeded(expr.rhs, module)
+        );
       case ExprKind.New:
         return expr.typeArgs.length == 0 && expr.args.length == 0;
       default:
         return false;
     }
-  }
-
-  private isLogicOp(op: BinaryOp): boolean {
-    return (
-      op == BinaryOp.Nullish || op == BinaryOp.LogOr || op == BinaryOp.LogAnd
-    );
   }
 }

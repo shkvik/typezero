@@ -16,12 +16,6 @@ import {
 import { ThisPlace } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private hasMethods(expr: ObjectLitExpr): boolean {
-    return expr.props.some(
-      (property) => property.form.kind == PropertyKind.Method,
-    );
-  }
-
   private methodObject(
     expr: ObjectLitExpr,
     target: Type | undefined,
@@ -37,7 +31,7 @@ partial class ExpressionTypes {
       return error;
     }
 
-    const goal = this.methodGoal(target);
+    const goal = this.objects.methodGoal(target);
     const reserved = this.store.reserveObject();
     const fields = this.literalValueFields(expr, goal, module);
     if (fields == undefined) {
@@ -45,7 +39,7 @@ partial class ExpressionTypes {
     }
 
     this.store.fillObject(reserved, fields);
-    this.store.label(reserved, this.methodObjectName(expr, fields));
+    this.store.label(reserved, this.objects.methodObjectName(expr, fields));
 
     const methods = this.literalMethods(expr, reserved, goal, module);
 
@@ -64,14 +58,6 @@ partial class ExpressionTypes {
     return reserved;
   }
 
-  private methodGoal(target: Type | undefined): ObjectType | undefined {
-    if (target == undefined || target.kind != TypeKind.Object) {
-      return undefined;
-    }
-
-    return target;
-  }
-
   private literalValueFields(
     expr: ObjectLitExpr,
     goal: ObjectType | undefined,
@@ -88,7 +74,7 @@ partial class ExpressionTypes {
         return undefined;
       }
 
-      const wanted = this.goalField(goal, property.name);
+      const wanted = this.objects.goalField(goal, property.name);
       const type = this.typed(property.value, wanted, module);
 
       isTyped = isTyped && type.kind != TypeKind.Error;
@@ -105,32 +91,6 @@ partial class ExpressionTypes {
     }
 
     return fields;
-  }
-
-  private goalField(
-    goal: ObjectType | undefined,
-    name: string,
-  ): Type | undefined {
-    const field = goal?.fields.find((one) => one.name == name);
-    if (field == undefined) {
-      return undefined;
-    }
-
-    return this.fieldWanted(field);
-  }
-
-  private methodObjectName(expr: ObjectLitExpr, fields: ObjectField[]): string {
-    const calls = expr.props
-      .filter((property) => property.form.kind == PropertyKind.Method)
-      .map((property) => `${property.name}()`)
-      .join("; ");
-    if (fields.length == 0) {
-      return `{ ${calls} }`;
-    }
-
-    const plain = this.text.of(this.store.objectOf(fields));
-
-    return `${plain.slice(0, plain.length - 2)}; ${calls} }`;
   }
 
   private literalMethods(
@@ -184,7 +144,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const member = this.plainMember(goal, property.name);
+    const member = this.objects.plainMember(goal, property.name);
     const isTyped =
       member != undefined &&
       member.readonly &&
@@ -221,7 +181,7 @@ partial class ExpressionTypes {
       const isGiven = expr.props.some(
         (property) => property.name == member.name,
       );
-      const isPlain = this.plainMember(goal, member.name) != undefined;
+      const isPlain = this.objects.plainMember(goal, member.name) != undefined;
       if (!isGiven && isPlain) {
         this.report(module, expr.loc, Code.LiteralFitMissing, {
           first,
@@ -256,7 +216,7 @@ partial class ExpressionTypes {
     module: int,
   ): boolean {
     const word = property.name;
-    const member = this.plainMember(goal, word);
+    const member = this.objects.plainMember(goal, word);
     if (member == undefined) {
       this.report(module, property.loc, Code.LiteralFitNoField, {
         first,
@@ -302,26 +262,5 @@ partial class ExpressionTypes {
     });
 
     return false;
-  }
-
-  private plainMember(
-    goal: ObjectType | undefined,
-    name: string,
-  ): ObjectField | undefined {
-    const same = goal?.fields.filter((one) => one.name == name) ?? [];
-    if (same.length != 1) {
-      return undefined;
-    }
-
-    return same[0];
-  }
-
-  private hasMethodFields(type: Type): boolean {
-    const base = this.types.definedType(type);
-    if (base.kind != TypeKind.Object) {
-      return false;
-    }
-
-    return base.fields.some((field) => field.method ?? false);
   }
 }

@@ -1,0 +1,471 @@
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  FunctionShape,
+  OperationKind,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import {
+  CallTarget,
+  Candidate,
+  CandidateStrength,
+  GenericDraft,
+  GenericTarget,
+  InferenceSet,
+} from "../../code/expression-types/types/expression-types.types.tz";
+import {
+  CallArgument,
+  Expr,
+  ExprKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { ModuleQuestions } from "../../declaration/module-questions/module-questions.tz";
+import { TypeUnifier } from "../../types/type-unifier/type-unifier.tz";
+import { TypeParts } from "../../types/type-parts/type-parts.tz";
+import { CallRules } from "../../code/call-rules/call-rules.tz";
+import { LiteralRules } from "../../code/literal-rules/literal-rules.tz";
+import {
+  kManyTypeArguments,
+  kOneTypeArgument,
+} from "./const/generic-rules.const.tz";
+
+export class GenericRules {
+  private readonly store: TypeStore;
+  private readonly types: TypeQuestions;
+  private readonly modules: ModuleQuestions;
+  private readonly unifier: TypeUnifier;
+  private readonly parts: TypeParts;
+  private readonly calls: CallRules;
+  private readonly literals: LiteralRules;
+
+  public constructor(
+    store: TypeStore,
+    types: TypeQuestions,
+    modules: ModuleQuestions,
+    unifier: TypeUnifier,
+    parts: TypeParts,
+    calls: CallRules,
+    literals: LiteralRules,
+  ) {
+    this.store = store;
+    this.types = types;
+    this.modules = modules;
+    this.unifier = unifier;
+    this.parts = parts;
+    this.calls = calls;
+    this.literals = literals;
+  }
+
+  public inferenceSet(params: Type[]): InferenceSet {
+    return {
+      params,
+      candidates: [],
+      undefinedSeen: new Set<int>(),
+      visited: new Set<string>(),
+      isWeak: false,
+      isIntLiteral: false,
+      isUnmatched: false,
+    };
+  }
+
+  public addVoid(
+    set: InferenceSet,
+    index: int,
+    strength: CandidateStrength,
+  ): void {
+    if (index < 0) {
+      return;
+    }
+
+    const type = this.store.plain(TypeKind.Void);
+
+    set.candidates.push({ index, type, strength });
+  }
+
+  public inferParameter(set: InferenceSet, index: int, actual: Type): void {
+    if (actual.kind == TypeKind.Undefined) {
+      set.undefinedSeen.add(index);
+
+      return;
+    }
+    if (this.parts.hasUnknownInside(actual)) {
+      return;
+    }
+
+    const strength = this.currentStrength(set);
+
+    set.candidates.push({ index, type: actual, strength });
+  }
+
+  public heldStrength(set: InferenceSet): CandidateStrength {
+    if (set.isWeak) {
+      return CandidateStrength.Weak;
+    }
+
+    return CandidateStrength.Strong;
+  }
+
+  public isSameShape(pattern: Type, actual: Type): boolean {
+    switch (pattern.kind) {
+      case TypeKind.Union:
+        return true;
+      case TypeKind.Instance:
+        return this.sameClassIn(actual, pattern) != undefined;
+      case TypeKind.Dict:
+        return actual.kind == TypeKind.Dict || actual.kind == TypeKind.Object;
+      default:
+        return pattern.kind == actual.kind;
+    }
+  }
+
+  public partsOfType(type: Type): Type[] {
+    if (type.kind == TypeKind.Union) {
+      return type.parts;
+    }
+
+    return [type];
+  }
+
+  public isInstanceOfMember(value: Type, member: Type): boolean {
+    if (member.kind != TypeKind.Instance || member.args.length == 0) {
+      return false;
+    }
+
+    return this.sameClassIn(value, member) != undefined;
+  }
+
+  public sameClassIn(value: Type, member: Type): Type | undefined {
+    if (member.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const home = member.module;
+    const loc = member.loc;
+    const chain = this.types.ancestorsOf(value);
+
+    return chain.find(
+      (one) =>
+        one.kind == TypeKind.Instance && one.module == home && one.loc == loc,
+    );
+  }
+
+  public candidatesOf(
+    set: InferenceSet,
+    index: int,
+    strength: CandidateStrength,
+  ): Type[] {
+    const found = set.candidates.filter(
+      (one) => one.index == index && one.strength == strength,
+    );
+
+    return found.map((one) => one.type);
+  }
+
+  public adoptCandidates(
+    set: InferenceSet,
+    index: int,
+    other: InferenceSet,
+  ): void {
+    const kept = set.candidates.filter((one) => one.index != index);
+    const taken = other.candidates.filter(
+      (one) => one.index == index && one.strength == CandidateStrength.Strong,
+    );
+    const next: Candidate[] = kept.concat(taken);
+
+    set.candidates.splice(0, set.candidates.length);
+
+    for (const one of next) {
+      set.candidates.push(one);
+    }
+
+    set.undefinedSeen.delete(index);
+
+    if (other.undefinedSeen.has(index)) {
+      set.undefinedSeen.add(index);
+    }
+  }
+
+  public joinedWith(type: Type | undefined, candidate: Type): Type | undefined {
+    if (type == undefined) {
+      return candidate;
+    }
+
+    return this.unifier.unify(type, candidate);
+  }
+
+  public failParameter(draft: GenericDraft, index: int): void {
+    const error = this.store.plain(TypeKind.Error);
+
+    draft.bound.set(index, error);
+    draft.isInferred = false;
+  }
+
+  public isOtherNumber(type: Type | undefined, candidate: Type): boolean {
+    if (type == undefined || type == candidate) {
+      return false;
+    }
+
+    return this.types.isNumber(type);
+  }
+
+  public widenedToConstraint(
+    draft: GenericDraft,
+    index: int,
+    type: Type | undefined,
+  ): Type | undefined {
+    const param = draft.target.params[index];
+    if (type == undefined || param == undefined) {
+      return type;
+    }
+
+    const constraint = this.widenTarget(param);
+    const set = draft.inference;
+    const strong = this.candidatesOf(set, index, CandidateStrength.Strong);
+    const weak = this.candidatesOf(set, index, CandidateStrength.Weak);
+    const isOnlyLiterals = strong.length == 0 && weak.length == 0;
+    const isFractional =
+      constraint != undefined &&
+      (constraint.kind == TypeKind.Double ||
+        constraint.kind == TypeKind.Decimal);
+    const isWidening = type.kind == TypeKind.Int && isOnlyLiterals;
+    if (isWidening && isFractional && constraint != undefined) {
+      return constraint;
+    }
+
+    return type;
+  }
+
+  public withUndefined(
+    draft: GenericDraft,
+    index: int,
+    type: Type | undefined,
+  ): Type | undefined {
+    if (!draft.inference.undefinedSeen.has(index)) {
+      return type;
+    }
+    if (type == undefined) {
+      return this.store.plain(TypeKind.Void);
+    }
+
+    return this.types.optional(type);
+  }
+
+  public wantedCandidate(candidates: Type[]): Type | undefined {
+    let type: Type | undefined = undefined;
+
+    for (const candidate of candidates) {
+      type = this.joinedWith(type, candidate);
+    }
+
+    return type;
+  }
+
+  public boundByLoc(draft: GenericDraft): Map<int, Type> {
+    const bindings = new Map<int, Type>();
+    const decls = draft.target.decls;
+
+    for (const [index, type] of draft.bound) {
+      const decl = decls[index];
+      if (decl != undefined) {
+        bindings.set(decl.loc, type);
+      }
+    }
+
+    return bindings;
+  }
+
+  public hasArgumentErrors(draft: GenericDraft): boolean {
+    for (const type of draft.given.values()) {
+      if (this.parts.hasUnknownInside(type)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  public genericTellCode(home: int): Code {
+    if (this.modules.isLibraryModule(home)) {
+      return Code.InstanceOfGenericLibrary;
+    }
+
+    return Code.InstanceOfGenericUnknown;
+  }
+
+  public isInstanceOfClass(part: Type, name: string): boolean {
+    if (part.kind != TypeKind.Instance) {
+      return false;
+    }
+    if (part.name == name) {
+      return true;
+    }
+
+    return this.types
+      .ancestorsOf(part)
+      .some((one) => one.kind == TypeKind.Instance && one.name == name);
+  }
+
+  public wantedFunction(wanted: Type | undefined): Type | undefined {
+    if (wanted == undefined) {
+      return undefined;
+    }
+
+    const goal = this.types.definedType(wanted);
+    if (goal.kind == TypeKind.Error) {
+      return goal;
+    }
+    if (goal.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    return goal;
+  }
+
+  public isListRest(shape: FunctionShape): boolean {
+    const last = shape.params[shape.params.length - 1];
+
+    return shape.rest && last != undefined && last.type.kind != TypeKind.Array;
+  }
+
+  public genericCallTarget(target: GenericTarget): CallTarget {
+    const shape = target.shape;
+
+    return {
+      params: shape.params,
+      rest: shape.rest,
+      loc: target.loc,
+      isLenient: target.isLenient,
+    };
+  }
+
+  public genericDraft(
+    target: GenericTarget,
+    args: CallArgument[],
+    wanted: Type | undefined,
+  ): GenericDraft {
+    return {
+      target,
+      args,
+      wanted,
+      bound: new Map<int, Type>(),
+      given: new Map<int, Type>(),
+      settled: new Set<int>(),
+      literals: [],
+      contextual: [],
+      inference: this.inferenceSet(target.params),
+      isInferred: true,
+    };
+  }
+
+  public typeArgumentText(count: int): string {
+    if (count == 1) {
+      return `${count}${kOneTypeArgument}`;
+    }
+
+    return `${count}${kManyTypeArguments}`;
+  }
+
+  public patternAt(shape: FunctionShape, index: int, spread: boolean): Type {
+    const fixed = this.shapeFixed(shape);
+    const error = this.store.plain(TypeKind.Error);
+
+    if (!shape.rest || index < fixed) {
+      return shape.params[index]?.type ?? error;
+    }
+
+    const rest = shape.params[fixed]?.type ?? error;
+    if (spread || rest.kind != TypeKind.Array) {
+      return rest;
+    }
+
+    return rest.item;
+  }
+
+  public slotAt(shape: FunctionShape, index: int, spread: boolean): Type {
+    const fixed = this.shapeFixed(shape);
+    const param = shape.params[index];
+    if (index < fixed && param != undefined) {
+      return this.calls.parameterWanted(param);
+    }
+
+    return this.patternAt(shape, index, spread);
+  }
+
+  public isLiteralText(expr: Expr, pattern: Type, params: Type[]): boolean {
+    const isText = expr.kind == ExprKind.StringLit && params.includes(pattern);
+
+    return isText && this.isExpectingLiteral(pattern);
+  }
+
+  public openParameters(draft: GenericDraft): Type[] {
+    const params = draft.target.params;
+
+    return params.filter((param, index) => !draft.bound.has(index));
+  }
+
+  public boundById(draft: GenericDraft): Map<int, Type> {
+    const bound = new Map<int, Type>();
+    const params = draft.target.params;
+
+    for (const [index, type] of draft.bound) {
+      const param = params[index];
+      if (param != undefined) {
+        bound.set(param.id, type);
+      }
+    }
+
+    return bound;
+  }
+
+  private currentStrength(set: InferenceSet): CandidateStrength {
+    if (set.isIntLiteral) {
+      return CandidateStrength.Literal;
+    }
+    if (set.isWeak) {
+      return CandidateStrength.Weak;
+    }
+
+    return CandidateStrength.Strong;
+  }
+
+  private widenTarget(param: Type): Type | undefined {
+    const constraint = this.store.constraintOf(param);
+    if (constraint == undefined || constraint.kind != TypeKind.Union) {
+      return constraint;
+    }
+
+    const parts = constraint.parts;
+    const whole = parts.find((part) => part.kind == TypeKind.Int);
+    const fraction = parts.find((part) => part.kind == TypeKind.Double);
+    const exact = parts.find((part) => part.kind == TypeKind.Decimal);
+
+    return whole ?? fraction ?? exact;
+  }
+
+  private isExpectingLiteral(param: Type): boolean {
+    const constraint = this.store.constraintOf(param);
+    if (constraint == undefined) {
+      return false;
+    }
+
+    const isKeys =
+      constraint.kind == TypeKind.Operation &&
+      constraint.shape.op == OperationKind.KeyOf;
+    if (isKeys) {
+      return true;
+    }
+
+    const parts = this.partsOfType(constraint);
+
+    return parts.every((part) => this.literals.isTextual(part));
+  }
+
+  private shapeFixed(shape: FunctionShape): int {
+    if (shape.rest) {
+      return shape.params.length - 1;
+    }
+
+    return shape.params.length;
+  }
+}

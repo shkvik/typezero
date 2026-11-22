@@ -1,0 +1,168 @@
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  ConditionalExpr,
+  Expr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { TruthUse } from "../../flow/truth-rules/types/truth-rules.types.tz";
+import { kNegation } from "../../flow/truth-rules/const/truth-rules.const.tz";
+import { kUndefinedText } from "../source-texts/const/source-texts.const.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { TruthRules } from "../../flow/truth-rules/truth-rules.tz";
+import { ExpressionShapes } from "../expression-shapes/expression-shapes.tz";
+import {
+  kAndText,
+  kEmptyText,
+  kEquals,
+  kNotEquals,
+  kOrText,
+  kZeroText,
+} from "./const/logic-rules.const.tz";
+
+export class LogicRules {
+  private readonly store: TypeStore;
+  private readonly types: TypeQuestions;
+  private readonly truth: TruthRules;
+  private readonly shapes: ExpressionShapes;
+
+  public constructor(
+    store: TypeStore,
+    types: TypeQuestions,
+    truth: TruthRules,
+    shapes: ExpressionShapes,
+  ) {
+    this.store = store;
+    this.types = types;
+    this.truth = truth;
+    this.shapes = shapes;
+  }
+
+  public equalsText(isNegated: boolean): string {
+    if (isNegated) {
+      return kNotEquals;
+    }
+
+    return kEquals;
+  }
+
+  public emptyTest(type: Type, isNegated: boolean): string {
+    const test = this.equalsText(!isNegated);
+    const base = this.types.definedType(type);
+
+    if (this.types.isOptional(type)) {
+      return `${test} ${kUndefinedText}`;
+    }
+    if (base.kind == TypeKind.String) {
+      return `${test} ${kEmptyText}`;
+    }
+
+    return `${test} ${kZeroText}`;
+  }
+
+  public logicalUse(isAnd: boolean): TruthUse {
+    if (isAnd) {
+      return TruthUse.And;
+    }
+
+    return TruthUse.Or;
+  }
+
+  public rightHint(
+    isAnd: boolean,
+    left: Type,
+    expected: Type | undefined,
+  ): Type | undefined {
+    const isPlain =
+      isAnd || left.kind == TypeKind.Error || left.kind == TypeKind.Undefined;
+    if (isPlain) {
+      return expected;
+    }
+
+    return this.types.definedType(left);
+  }
+
+  public logicalText(isAnd: boolean): string {
+    if (isAnd) {
+      return kAndText;
+    }
+
+    return kOrText;
+  }
+
+  public negatedText(test: string, isAnd: boolean): string {
+    if (isAnd) {
+      return test;
+    }
+
+    return kNegation + test;
+  }
+
+  public keptLeft(left: Type, isAnd: boolean): Type {
+    if (!isAnd) {
+      return this.types.definedType(left);
+    }
+
+    const base = this.types.definedType(left);
+    const isAlwaysTruthy =
+      base.kind == TypeKind.Array ||
+      base.kind == TypeKind.Function ||
+      this.truth.isTruthyObject(base);
+    if (isAlwaysTruthy) {
+      return this.store.plain(TypeKind.Undefined);
+    }
+
+    return left;
+  }
+
+  public noCommonCode(isAnd: boolean): Code {
+    if (isAnd) {
+      return Code.LogicalAndNoCommon;
+    }
+
+    return Code.LogicalOrNoCommon;
+  }
+
+  public branchHint(
+    literal: Expr,
+    other: Type,
+    wanted: Type | undefined,
+  ): Type | undefined {
+    if (this.shapes.isNumberTree(literal)) {
+      return this.decimalHint(other, wanted);
+    }
+    if (wanted != undefined) {
+      return wanted;
+    }
+    if (other.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return other;
+  }
+
+  public elseHint(
+    expr: ConditionalExpr,
+    thenType: Type,
+    wanted: Type | undefined,
+    isElseWaitingOnly: boolean,
+  ): Type | undefined {
+    if (isElseWaitingOnly) {
+      return this.branchHint(expr.elseExpr, thenType, wanted);
+    }
+    if (this.shapes.isNumberTree(expr.elseExpr)) {
+      return this.decimalHint(thenType, wanted);
+    }
+
+    return wanted;
+  }
+
+  private decimalHint(other: Type, hint: Type | undefined): Type | undefined {
+    const plain = this.types.definedType(other);
+    if (plain.kind == TypeKind.Decimal) {
+      return plain;
+    }
+
+    return hint;
+  }
+}

@@ -9,18 +9,13 @@ import {
 import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
 import { TypeRefKind } from "../../../../program/ast/types/ast.types.types.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
-import {
-  ObjectField,
-  Type,
-  TypeKind,
-} from "../../../../program/type/types/type.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import {
   TypeContext,
   TypePlace,
 } from "../../../types/type-resolver/types/type-resolver.types.tz";
 import {
   kArrayName,
-  kDot,
   kIsArrayName,
   kIsJsonName,
   kJsonName,
@@ -86,7 +81,7 @@ partial class ExpressionTypes {
 
     const kept = this.types
       .unionMembers(slot.type)
-      .filter((part) => this.isListType(part) == isTrue);
+      .filter((part) => this.narrowings.isListType(part) == isTrue);
     const isUnknown = slot.type.kind == TypeKind.Unknown;
     if (isUnknown && isTrue) {
       facts.set(slot.key, this.store.arrayOf(slot.type));
@@ -141,10 +136,6 @@ partial class ExpressionTypes {
     return facts;
   }
 
-  private isListType(type: Type): boolean {
-    return type.kind == TypeKind.Array || type.kind == TypeKind.Tuple;
-  }
-
   private functionGuardFacts(
     call: CallExpr,
     callee: NameExpr,
@@ -155,7 +146,7 @@ partial class ExpressionTypes {
     if (target == undefined || target.kind != SymbolKind.Function) {
       return new Map<string, Type>();
     }
-    if (this.isLibraryModule(target.module)) {
+    if (this.modules.isLibraryModule(target.module)) {
       return new Map<string, Type>();
     }
 
@@ -249,22 +240,16 @@ partial class ExpressionTypes {
     const receiver = this.narrowable(callee.object, module);
     const values = call.args.map((arg) => arg.expr);
 
-    if (receiver == undefined || !this.isOwnReceiver(receiver.type)) {
+    if (
+      receiver == undefined ||
+      !this.narrowings.isOwnReceiver(receiver.type)
+    ) {
       return this.unknownFacts(values, module);
     }
 
     values.push(callee.object);
 
     return this.unknownFacts(values, module);
-  }
-
-  private isOwnReceiver(type: Type): boolean {
-    const parts = this.types.unionMembers(type);
-
-    return parts.some(
-      (part) =>
-        part.kind == TypeKind.Instance && !this.isLibraryModule(part.module),
-    );
   }
 
   private unknownFacts(values: Expr[], module: int): Map<string, Type> {
@@ -277,39 +262,15 @@ partial class ExpressionTypes {
         continue;
       }
       if (slot.type.kind == TypeKind.Object) {
-        this.unknownFields(slot.key, slot.type.fields, facts);
+        this.narrowings.unknownFields(slot.key, slot.type.fields, facts);
 
         continue;
       }
-      if (this.isGuardable(slot.type)) {
+      if (this.narrowings.isGuardable(slot.type)) {
         facts.set(slot.key, unknown);
       }
     }
 
     return facts;
-  }
-
-  private unknownFields(
-    key: string,
-    fields: ObjectField[],
-    facts: Map<string, Type>,
-  ): void {
-    const unknown = this.store.plain(TypeKind.Error);
-
-    for (const field of fields) {
-      if (field.optional || this.types.isOptional(field.type)) {
-        facts.set(key + kDot + field.name, unknown);
-      }
-    }
-  }
-
-  private isGuardable(type: Type): boolean {
-    switch (type.kind) {
-      case TypeKind.Union:
-      case TypeKind.Instance:
-        return true;
-      default:
-        return false;
-    }
   }
 }
