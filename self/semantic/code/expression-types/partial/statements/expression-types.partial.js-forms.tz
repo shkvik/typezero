@@ -23,11 +23,11 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const left = this.typed(expr.lhs, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     if (left.kind == TypeKind.Error || object.kind == TypeKind.Error) {
       return true;

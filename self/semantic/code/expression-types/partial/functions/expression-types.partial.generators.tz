@@ -255,11 +255,11 @@ partial class ExpressionTypes {
     const result = this.store.plain(TypeKind.Error);
     const wanted = this.store.functionOf({ params, rest: false, result });
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const typed = this.typed(callback, wanted, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     if (typed.kind != TypeKind.Function) {
       return;
@@ -309,11 +309,11 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const type = this.typed(arg, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     const base = this.types.apparent(type);
 

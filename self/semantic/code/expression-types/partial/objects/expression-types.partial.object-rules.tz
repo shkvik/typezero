@@ -94,11 +94,11 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const type = this.typed(object, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     if (!this.types.isOptional(type) || target.optional) {
       return false;
@@ -233,11 +233,11 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const object = this.typed(callee.object, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     return (
       object.kind == TypeKind.Instance &&

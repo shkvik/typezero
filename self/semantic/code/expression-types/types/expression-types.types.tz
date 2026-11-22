@@ -1,5 +1,4 @@
 import { Code } from "../../../../diagnostic/code.tz";
-import { SourceError } from "../../../../diagnostic/types/message.types.tz";
 import {
   CallArgument,
   CallExpr,
@@ -63,8 +62,6 @@ export type ValueRecord = {
   readonly classes: Map<int, ClassDecl>;
   readonly destinations: Map<int, Destination[]>;
   readonly owners: FunctionDecl[];
-  readonly reported: Set<string>;
-  readonly errors: SourceError[];
 };
 
 export type NarrowSlot = {

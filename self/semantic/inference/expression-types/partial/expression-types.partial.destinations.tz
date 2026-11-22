@@ -96,15 +96,10 @@ partial class ExpressionTypes {
   }
 
   private isFitting(init: Expr, wanted: Type, module: int): boolean {
-    const before = this.muted;
-
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const trial = this.typed(init, wanted, module);
-
-    this.quiet -= 1;
-
-    const isClean = this.muted == before;
+    const isClean = this.errors.endTrial();
 
     return isClean && this.relation.converts(trial, wanted);
   }
@@ -182,11 +177,11 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const type = this.typed(value, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     return type;
   }

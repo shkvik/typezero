@@ -1,0 +1,124 @@
+import { Code } from "../code.tz";
+import { Details, SourceError } from "../types/message.types.tz";
+import { TrialMark, WrittenError } from "./types/error-log.types.tz";
+
+export class ErrorLog {
+  private readonly lists: Map<int, SourceError[]>;
+  private readonly reported: Set<string>;
+  private readonly kept: Set<string>;
+  private readonly written: WrittenError[];
+  private readonly trials: TrialMark[];
+  private asked: int;
+
+  public constructor() {
+    this.lists = new Map<int, SourceError[]>();
+    this.reported = new Set<string>();
+    this.kept = new Set<string>();
+    this.written = [];
+    this.trials = [];
+    this.asked = 0;
+  }
+
+  public of(module: int): SourceError[] {
+    return this.lists.get(module) ?? [];
+  }
+
+  public write(module: int, loc: int, code: Code, details: Details): void {
+    const key = this.keyOf(module, loc, code);
+
+    this.asked += 1;
+
+    if (this.reported.has(key)) {
+      return;
+    }
+
+    this.reported.add(key);
+    this.listOf(module).push({ code, loc, details });
+
+    if (this.trials.length > 0) {
+      this.written.push({ module, loc, code });
+    }
+  }
+
+  public beginTrial(): void {
+    this.trials.push({ written: this.written.length, asked: this.asked });
+  }
+
+  public endTrial(): boolean {
+    const mark = this.trials.pop();
+    if (mark == undefined) {
+      return true;
+    }
+
+    const count = this.written.length - mark.written;
+    const tail = this.written.splice(mark.written, count);
+
+    for (const entry of tail) {
+      this.drop(entry);
+    }
+
+    return this.asked == mark.asked;
+  }
+
+  public mark(): int {
+    return this.written.length;
+  }
+
+  public keepSince(mark: int): void {
+    for (let index = mark; index < this.written.length; index++) {
+      const entry = this.written[index];
+      if (entry != undefined) {
+        const key = this.keyOf(entry.module, entry.loc, entry.code);
+
+        this.kept.add(key);
+      }
+    }
+  }
+
+  private listOf(module: int): SourceError[] {
+    const known = this.lists.get(module);
+    if (known != undefined) {
+      return known;
+    }
+
+    const list: SourceError[] = [];
+
+    this.lists.set(module, list);
+
+    return list;
+  }
+
+  private drop(entry: WrittenError): void {
+    const key = this.keyOf(entry.module, entry.loc, entry.code);
+    const list = this.lists.get(entry.module);
+    if (list == undefined || this.kept.has(key)) {
+      return;
+    }
+
+    const place = this.lastPlace(list, entry);
+    if (place >= 0) {
+      list.splice(place, 1);
+    }
+
+    this.reported.delete(key);
+  }
+
+  private lastPlace(list: SourceError[], entry: WrittenError): int {
+    for (let index = list.length - 1; index >= 0; index--) {
+      const error = list[index];
+      const isSame =
+        error != undefined &&
+        error.loc == entry.loc &&
+        error.code == entry.code;
+      if (isSame) {
+        return index;
+      }
+    }
+
+    return -1;
+  }
+
+  private keyOf(module: int, loc: int, code: Code): string {
+    return `${module} ${loc} ${code}`;
+  }
+}

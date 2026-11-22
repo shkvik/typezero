@@ -190,11 +190,11 @@ partial class ExpressionTypes {
       return declared;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const object = this.typed(target.object, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     if (object.kind == TypeKind.Instance) {
       this.instanceTargetCheck(target, object, module);

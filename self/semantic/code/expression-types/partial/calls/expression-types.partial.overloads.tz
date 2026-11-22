@@ -283,11 +283,11 @@ partial class ExpressionTypes {
   }
 
   private quietArguments(args: CallArgument[], module: int): Type[] {
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const types = args.map((arg) => this.typed(arg.expr, undefined, module));
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     return types;
   }
@@ -364,11 +364,11 @@ partial class ExpressionTypes {
       );
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const adapted = this.literalTarget(expr, base, param, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     return adapted != undefined;
   }

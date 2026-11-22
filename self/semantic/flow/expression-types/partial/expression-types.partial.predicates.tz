@@ -140,11 +140,11 @@ partial class ExpressionTypes {
   private knownWhenTrue(value: Expr, target: ValueTarget, module: int): Type {
     const before = this.facts;
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const truthy = this.factsOf(value, true, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
     this.facts = this.narrowings.mergedFacts(before, truthy);
 
     const known = this.factOf(target) ?? this.parameterTyped(target);

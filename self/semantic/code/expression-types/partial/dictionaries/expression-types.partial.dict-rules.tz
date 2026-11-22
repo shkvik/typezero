@@ -84,11 +84,11 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const object = this.typed(target.object, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     const dict = this.dictionaries.collectionOf(object);
     if (dict == undefined) {
@@ -125,11 +125,11 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const object = this.typed(target.object, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     const dict = this.dictionaries.collectionOf(object);
     if (dict == undefined) {
@@ -175,11 +175,11 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const type = this.typed(arg, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     const dict = this.dictionaries.collectionOf(type);
     if (dict == undefined) {

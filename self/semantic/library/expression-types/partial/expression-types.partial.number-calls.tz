@@ -82,13 +82,13 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const types = expr.args.map((arg) =>
       this.types.apparent(this.typed(arg.expr, undefined, module)),
     );
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     const first = expr.args.findIndex(
       (arg) => !this.shapes.isNumberLiteral(arg.expr),

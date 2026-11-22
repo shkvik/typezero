@@ -1,0 +1,12 @@
+import { Code } from "../../code.tz";
+
+export type WrittenError = {
+  readonly module: int;
+  readonly loc: int;
+  readonly code: Code;
+};
+
+export type TrialMark = {
+  readonly written: int;
+  readonly asked: int;
+};

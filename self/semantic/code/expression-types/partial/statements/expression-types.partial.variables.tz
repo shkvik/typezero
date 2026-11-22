@@ -63,8 +63,6 @@ partial class ExpressionTypes {
       classes: new Map<int, ClassDecl>(),
       destinations: new Map<int, Destination[]>(),
       owners: [],
-      reported: new Set<string>(),
-      errors: [],
     };
 
     for (const use of this.scopes.get(module)?.uses ?? []) {
@@ -122,9 +120,12 @@ partial class ExpressionTypes {
       isWhole: false,
     };
 
+    const owned = this.errors.mark();
+
     this.doors.set(key, door);
     this.doorOrder.push(key);
     this.openVariable(door, variable, module);
+    this.errors.keepSince(owned);
     door.state = DoorState.Done;
 
     return door;

@@ -19,11 +19,11 @@ partial class TypeResolver {
       return undefined;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const shape = this.alias(module, found, args);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     return shape;
   }
@@ -68,11 +68,11 @@ partial class TypeResolver {
     const parents = this.parentRefs(declared.base, declared.implemented);
     const home: ClassHome = { module, name, loc: declared.loc };
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const instance = this.instance(home, declared.typeParams, args, parents);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     return instance;
   }

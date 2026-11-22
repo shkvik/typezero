@@ -119,11 +119,11 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const object = this.typed(target.object, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     if (object.kind == TypeKind.Instance) {
       return this.instanceTargetCheck(target, object, module);
@@ -174,11 +174,11 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const type = this.typed(arg, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     const base = this.types.definedType(type);
     const isObject =

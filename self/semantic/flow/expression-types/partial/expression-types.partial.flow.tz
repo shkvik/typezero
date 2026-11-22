@@ -212,11 +212,11 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const given = this.typed(expr.value, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     this.report(module, expr.loc, Code.OperandTypesUndefined, {
       first: this.text.of(tested),
@@ -240,11 +240,11 @@ partial class ExpressionTypes {
     isCompound: boolean,
     module: int,
   ): void {
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const object = this.typed(target.object, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     const base = this.types.definedType(object);
     if (base.kind == TypeKind.Tuple) {
@@ -289,11 +289,11 @@ partial class ExpressionTypes {
     const before = this.facts;
 
     this.forgetPath(key);
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const declared = this.typed(target, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
     this.facts = before;
 
     return declared;
@@ -304,11 +304,11 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const object = this.typed(target.object, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     const isInstance =
       object.kind == TypeKind.Instance &&
@@ -418,8 +418,6 @@ partial class ExpressionTypes {
       classes: record.classes,
       destinations: new Map<int, Destination[]>(),
       owners: [],
-      reported: new Set<string>(),
-      errors: [],
     };
 
     this.indexStatement(statement, scratch);

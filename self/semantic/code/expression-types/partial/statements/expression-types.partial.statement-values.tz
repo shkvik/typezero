@@ -96,11 +96,11 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const object = this.typed(callee.object, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     const base = this.types.definedType(object);
 

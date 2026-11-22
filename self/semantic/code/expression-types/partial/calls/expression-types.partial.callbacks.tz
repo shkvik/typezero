@@ -420,11 +420,11 @@ partial class ExpressionTypes {
       return true;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const type = this.memberTyped(expr, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     return type.kind == TypeKind.Function;
   }

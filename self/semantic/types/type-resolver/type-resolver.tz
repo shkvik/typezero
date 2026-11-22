@@ -47,6 +47,7 @@ import {
   ModuleRecord,
   TypeContext,
 } from "./types/type-resolver.types.tz";
+import { ErrorLog } from "../../../diagnostic/error-log/error-log.tz";
 
 export class TypeResolver {
   private readonly store: TypeStore;
@@ -68,7 +69,7 @@ export class TypeResolver {
   private readonly extending: TypeAliasDecl[];
   private readonly enumCache: Map<string, EnumStep[]>;
   private readonly enumOpen: Set<string>;
-  private quiet: int;
+  private readonly errors: ErrorLog;
 
   public constructor(
     store: TypeStore,
@@ -94,7 +95,7 @@ export class TypeResolver {
     this.extending = [];
     this.enumCache = new Map<string, EnumStep[]>();
     this.enumOpen = new Set<string>();
-    this.quiet = 0;
+    this.errors = new ErrorLog();
 
     for (const scopes of resolved) {
       this.scopes.set(scopes.module.id, scopes);
@@ -104,12 +105,7 @@ export class TypeResolver {
   }
 
   public problems(module: int): SourceError[] {
-    const record = this.records.get(module);
-    if (record == undefined) {
-      return [];
-    }
-
-    return record.errors;
+    return this.errors.of(module);
   }
 
   public resolve(ref: TypeRef, context: TypeContext): Type {
@@ -206,12 +202,10 @@ export class TypeResolver {
 
   private report(module: int, loc: int, code: Code, details: Details): void {
     const record = this.record(module);
-    const key = `${loc} ${code}`;
-    if (record == undefined || this.quiet > 0 || record.reported.has(key)) {
+    if (record == undefined) {
       return;
     }
 
-    record.reported.add(key);
-    record.errors.push({ code, loc, details });
+    this.errors.write(module, loc, code, details);
   }
 }

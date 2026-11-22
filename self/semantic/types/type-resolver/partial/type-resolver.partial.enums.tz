@@ -90,16 +90,15 @@ partial class TypeResolver {
       return known;
     }
 
-    const quiet = this.quiet;
+    const owned = this.errors.mark();
 
-    this.quiet = 0;
     this.enumOpen.add(key);
 
     const steps = this.countedSteps(module, decl);
 
     this.enumOpen.delete(key);
     this.enumCache.set(key, steps);
-    this.quiet = quiet;
+    this.errors.keepSince(owned);
 
     return steps;
   }

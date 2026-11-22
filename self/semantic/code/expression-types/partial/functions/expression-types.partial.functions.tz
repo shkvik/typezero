@@ -59,12 +59,14 @@ partial class ExpressionTypes {
     };
 
     const before = this.facts;
+    const owned = this.errors.mark();
 
     this.facts = new Map<string, Type>();
     this.functionDoors.set(key, door);
     this.functionOrder.push(key);
     this.walking.push(key);
     this.openFunction(door, fn, module);
+    this.errors.keepSince(owned);
     this.walking.pop();
     this.facts = before;
     door.state = DoorState.Done;
@@ -238,11 +240,11 @@ partial class ExpressionTypes {
     frame: FunctionFrame,
     module: int,
   ): Type {
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const result = this.frameResult(fn, frame, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     return result;
   }

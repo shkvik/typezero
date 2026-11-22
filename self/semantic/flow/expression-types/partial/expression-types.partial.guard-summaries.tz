@@ -47,11 +47,11 @@ partial class ExpressionTypes {
     isTrue: boolean,
     module: int,
   ): Map<string, Type> {
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const facts = this.factsOf(value, isTrue, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     return this.narrowings.mergedFacts(this.facts, facts);
   }

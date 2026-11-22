@@ -1,8 +1,5 @@
 import { Code } from "../../../../diagnostic/code.tz";
-import {
-  Details,
-  SourceError,
-} from "../../../../diagnostic/types/message.types.tz";
+import { Details } from "../../../../diagnostic/types/message.types.tz";
 import {
   ClassDecl,
   EnumDecl,
@@ -116,8 +113,6 @@ export type ModuleRecord = {
   readonly uses: Map<int, NameUse>;
   readonly declarations: Map<string, TypeDeclaration>;
   readonly classes: Map<string, DeclaredClass>;
-  readonly errors: SourceError[];
-  readonly reported: Set<string>;
 };
 
 export type LibraryClass = {

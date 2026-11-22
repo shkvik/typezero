@@ -232,11 +232,11 @@ partial class TypeResolver {
 
     const args = this.substitutedAll(origin.args, walk, false);
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const made = this.alias(origin.module, origin.decl, args);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     return made;
   }

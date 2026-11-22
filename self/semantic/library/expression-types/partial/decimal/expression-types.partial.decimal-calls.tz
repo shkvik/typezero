@@ -136,7 +136,7 @@ partial class ExpressionTypes {
     isTrue: boolean,
     module: int,
   ): string[] | undefined {
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const facts = this.factsOf(cond, isTrue, module);
     const before = this.underFacts(facts);
@@ -144,7 +144,7 @@ partial class ExpressionTypes {
     const texts = this.knownTextsOf(branch, type, module);
 
     this.facts = before;
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     return texts;
   }
@@ -374,11 +374,11 @@ partial class ExpressionTypes {
     }
 
     for (const arg of expr.args) {
-      this.quiet += 1;
+      this.errors.beginTrial();
 
       const type = this.typed(arg.expr, undefined, module);
 
-      this.quiet -= 1;
+      this.errors.endTrial();
 
       if (!arg.spread && this.types.apparent(type).kind == TypeKind.Decimal) {
         this.report(module, arg.expr.loc, Code.MathArgumentDecimal, {

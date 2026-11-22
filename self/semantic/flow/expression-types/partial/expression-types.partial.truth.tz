@@ -77,11 +77,11 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const type = this.typed(arg.expr, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
     this.checkTruthy(arg.expr, type, TruthUse.Condition, undefined, module);
   }
 
@@ -96,11 +96,11 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const type = this.typed(arg.expr, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     const code = this.numberSourceCode(type);
     if (code != undefined) {

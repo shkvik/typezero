@@ -353,11 +353,11 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.quiet += 1;
+    this.errors.beginTrial();
 
     const object = this.typed(target.object, undefined, module);
 
-    this.quiet -= 1;
+    this.errors.endTrial();
 
     if (object.kind != TypeKind.Union || this.types.isOptional(object)) {
       return false;
