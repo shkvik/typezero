@@ -1,5 +1,4 @@
 import { ExpressionTypes } from "../../expression-types.tz";
-import { Code } from "../../../../../diagnostic/code.tz";
 import {
   ObjectLitExpr,
   Property,
@@ -133,41 +132,15 @@ partial class ExpressionTypes {
     slots: SpreadSlot[],
     module: int,
   ): boolean {
-    const type = this.objects.fieldWanted(field);
-    const slot = slots.find((one) => one.name == field.name);
-    if (slot == undefined) {
-      slots.push({ name: field.name, type });
-
-      return true;
-    }
-    if (!this.types.isOptional(type)) {
-      slot.type = type;
-
-      return true;
-    }
-
-    const joined = this.unifier.unify(
-      this.types.definedType(slot.type),
-      this.types.definedType(type),
+    const checked = this.objects.mergeSpreadField(
+      property,
+      field,
+      spread,
+      slots,
     );
-    if (joined == undefined || joined.kind == TypeKind.Error) {
-      this.report(module, property.loc, Code.SpreadFieldTypes, {
-        word: field.name,
-        first: this.text.of(slot.type),
-        second: this.text.of(type),
-        other: this.text.of(spread),
-      });
 
-      return false;
-    }
-    if (this.types.isOptional(slot.type)) {
-      slot.type = this.types.optional(joined);
+    this.reportFound(module, checked.error);
 
-      return true;
-    }
-
-    slot.type = joined;
-
-    return true;
+    return checked.value;
   }
 }

@@ -768,6 +768,11 @@ self/             компилятор на tz, пробный (порт compile
                   decimal-rules, result-rules, library-rules. Поле обхода называется по теме
                   (arrays, overloads, …, library). Все классы правил создаёт конструктор
                   ExpressionTypes;
+                  Методы, которые только писали ошибку, стали правилами с ответом: одна находка
+                  или ничего (SourceError | undefined; обход зовёт reportFound), список находок
+                  (SourceError[]; reportAll), значение вместе с находкой (Checked<T> из
+                  diagnostic/types: value и error; в обходе остался короткий метод, который
+                  пишет находку и отдаёт значение). Имена: reportX → xError, xCheck остаётся;
                   semantic/flow/truth-rules/ — TruthRules: можно ли проверять значение
                   типа как условие (problemOf) и какой ошибкой ответить (answerOf);
                   semantic/declaration/scope-stack/ — ScopeStack: состояние обхода — стек областей

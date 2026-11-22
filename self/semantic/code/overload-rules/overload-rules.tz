@@ -1,3 +1,4 @@
+import { Checked } from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import { CallArgument } from "../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
@@ -7,6 +8,7 @@ import {
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
 import { RankedVariant } from "../expression-types/types/expression-types.types.tz";
+import { ClassRules } from "../class-rules/class-rules.tz";
 import { TypeText } from "../../../program/type/type-text/type-text.tz";
 import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
 import { SourceTexts } from "../source-texts/source-texts.tz";
@@ -17,17 +19,20 @@ export class OverloadRules {
   private readonly types: TypeQuestions;
   private readonly sources: SourceTexts;
   private readonly mismatches: MismatchRules;
+  private readonly classes: ClassRules;
 
   public constructor(
     text: TypeText,
     types: TypeQuestions,
     sources: SourceTexts,
     mismatches: MismatchRules,
+    classes: ClassRules,
   ) {
     this.text = text;
     this.types = types;
     this.sources = sources;
     this.mismatches = mismatches;
+    this.classes = classes;
   }
 
   public sharedCount(one: FunctionType, other: FunctionType): int {
@@ -155,6 +160,58 @@ export class OverloadRules {
     return applicable.every(
       (other) => other == variant || this.isBetterVariant(variant, other),
     );
+  }
+
+  public variantPairCheck(
+    first: FunctionDecl,
+    second: FunctionDecl,
+    one: FunctionType,
+    other: FunctionType,
+    what: string,
+  ): Checked<boolean> {
+    if (this.classes.isSameParameters(one, other)) {
+      const isReturnOnly = one.shape.result != other.shape.result;
+      if (isReturnOnly && first.returnType != undefined) {
+        return {
+          value: true,
+          error: {
+            code: Code.VariantReturnOnly,
+            loc: second.loc,
+            details: { word: what },
+          },
+        };
+      }
+
+      return {
+        value: true,
+        error: {
+          code: Code.VariantDuplicate,
+          loc: second.loc,
+          details: {
+            word: this.overloadText(second, other),
+          },
+        },
+      };
+    }
+
+    const count = this.sharedCount(one, other);
+    if (count < 0) {
+      return { value: false };
+    }
+
+    return {
+      value: true,
+      error: {
+        code: Code.VariantAmbiguous,
+        loc: second.loc,
+        details: {
+          first: this.overloadText(first, one),
+          second: this.overloadText(second, other),
+          other: `${count}`,
+          place: this.classes.pluralMark(count),
+        },
+      },
+    };
   }
 
   private isSamePrefix(

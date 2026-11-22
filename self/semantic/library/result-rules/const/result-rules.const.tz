@@ -1,1 +1,16 @@
+import { ResultMethod } from "../../../code/expression-types/types/expression-types.types.tz";
+
 export const kResultPlaceholder = "r";
+export const kResultMethods: ResultMethod[] = [
+  { name: "isOk", count: 0 },
+  { name: "isErr", count: 0 },
+  { name: "map", count: 1 },
+  { name: "mapErr", count: 1 },
+  { name: "andThen", count: 1 },
+  { name: "orElse", count: 1 },
+  { name: "match", count: 2 },
+  { name: "unwrapOr", count: 1 },
+  { name: "andTee", count: 1 },
+  { name: "orTee", count: 1 },
+  { name: "andThrough", count: 1 },
+];

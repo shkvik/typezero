@@ -33,7 +33,14 @@ partial class ExpressionTypes {
       return;
     }
     if (defined.kind == TypeKind.Promise) {
-      return this.promiseUsed(expr, defined.value, at, module);
+      const promiseUsedError = this.statements.promiseUsedError(
+        expr,
+        defined.value,
+        at,
+        module,
+      );
+
+      return this.reportFound(module, promiseUsedError);
     }
     if (defined.kind == TypeKind.Result) {
       this.report(module, expr.loc, Code.ResultUnused, kNoDetails);
@@ -98,27 +105,5 @@ partial class ExpressionTypes {
     const base = this.types.definedType(object);
 
     return base.kind == TypeKind.Array || base.kind == TypeKind.Promise;
-  }
-
-  private promiseUsed(
-    expr: Expr,
-    value: Type,
-    at: int | undefined,
-    module: int,
-  ): void {
-    const text = this.sources.statementText(at, module);
-    const held = this.statements.heldType(value);
-    if (held.kind == TypeKind.Result) {
-      const word = this.statements.shownText(text);
-
-      return this.report(module, expr.loc, Code.PromiseResultUnchecked, {
-        word,
-      });
-    }
-    if (text == "") {
-      return this.report(module, expr.loc, Code.PromiseNotAwaited, kNoDetails);
-    }
-
-    this.report(module, expr.loc, Code.PromiseNotAwaitedHere, { word: text });
   }
 }

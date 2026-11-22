@@ -29,7 +29,6 @@ import {
   kMathConstants,
   kMathName,
   kNumberLaterMethods,
-  kPromiseClass,
   kResultShape,
   kSetClass,
   kSpecialMethods,
@@ -41,6 +40,7 @@ import {
   GenericTarget,
 } from "../../../code/expression-types/types/expression-types.types.tz";
 import { kMapClass } from "../../../code/class-rules/const/class-rules.const.tz";
+import { kPromiseClass } from "../../library-rules/const/library-rules.const.tz";
 
 partial class ExpressionTypes {
   private libraryReceiver(type: Type): Type | undefined {

@@ -689,7 +689,9 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
     if (field == undefined) {
-      this.reportMissingField(member, object, module);
+      const missingFieldError = this.objects.missingFieldError(member, object);
+
+      this.reportFound(module, missingFieldError);
       this.looseArguments(expr.args, module);
 
       return this.store.plain(TypeKind.Error);

@@ -1,3 +1,7 @@
+import {
+  Checked,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   FunctionShape,
@@ -9,15 +13,27 @@ import {
   CallTarget,
   Candidate,
   CandidateStrength,
+  FunctionFrame,
   GenericDraft,
   GenericTarget,
   InferenceSet,
 } from "../../code/expression-types/types/expression-types.types.tz";
 import {
+  ClassDecl,
+  MethodKind,
+} from "../../../program/ast/types/ast.types.classes.tz";
+import {
   CallArgument,
   Expr,
   ExprKind,
+  FunctionExpr,
+  MemberExpr,
+  Property,
 } from "../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
+import { kTypeSeparator } from "../../code/array-rules/const/array-rules.const.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
 import { ModuleQuestions } from "../../declaration/module-questions/module-questions.tz";
@@ -28,6 +44,7 @@ import { LiteralRules } from "../../code/literal-rules/literal-rules.tz";
 import {
   kManyTypeArguments,
   kOneTypeArgument,
+  kSampleArgument,
 } from "./const/generic-rules.const.tz";
 
 export class GenericRules {
@@ -38,6 +55,7 @@ export class GenericRules {
   private readonly parts: TypeParts;
   private readonly calls: CallRules;
   private readonly literals: LiteralRules;
+  private readonly text: TypeText;
 
   public constructor(
     store: TypeStore,
@@ -47,6 +65,7 @@ export class GenericRules {
     parts: TypeParts,
     calls: CallRules,
     literals: LiteralRules,
+    text: TypeText,
   ) {
     this.store = store;
     this.types = types;
@@ -55,6 +74,7 @@ export class GenericRules {
     this.parts = parts;
     this.calls = calls;
     this.literals = literals;
+    this.text = text;
   }
 
   public inferenceSet(params: Type[]): InferenceSet {
@@ -416,6 +436,206 @@ export class GenericRules {
     }
 
     return bound;
+  }
+
+  public genericMethodErrors(decl: ClassDecl, fn: FunctionDecl): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const role = fn.role;
+    const isGeneric = fn.typeParams.length > 0;
+    const isAbstract = role?.method == MethodKind.Abstract;
+    if (isGeneric && role != undefined && role.isOverride) {
+      errors.push({
+        code: Code.GenericOverride,
+        loc: fn.loc,
+        details: kNoDetails,
+      });
+    }
+    if (isGeneric && isAbstract) {
+      errors.push({
+        code: Code.GenericAbstract,
+        loc: fn.loc,
+        details: kNoDetails,
+      });
+    }
+
+    const isOpenClass = decl.typeParams.length > 0;
+    if (isAbstract && isOpenClass && fn.returnType == undefined) {
+      errors.push({
+        code: Code.AbstractGenericReturn,
+        loc: fn.loc,
+        details: {
+          word: fn.name,
+          other: decl.name ?? "",
+        },
+      });
+    }
+
+    return errors;
+  }
+
+  public literalMethodCheck(property: Property): SourceError | undefined {
+    const value = property.value;
+    if (value.kind != ExprKind.Function || value.fn.typeParams.length == 0) {
+      return undefined;
+    }
+
+    return {
+      code: Code.LiteralGenericMethod,
+      loc: property.loc,
+      details: kNoDetails,
+    };
+  }
+
+  public nestedGenericCheck(
+    fn: FunctionDecl,
+    frame: FunctionFrame,
+  ): SourceError | undefined {
+    if (frame.fn == undefined || fn.typeParams.length == 0) {
+      return undefined;
+    }
+
+    return { code: Code.GenericNotTopLevel, loc: fn.loc, details: kNoDetails };
+  }
+
+  public callbackError(
+    draft: GenericDraft,
+    closure: FunctionExpr,
+    param: Type,
+    position: int,
+  ): SourceError | undefined {
+    const target = draft.target;
+    if (target.isLenient || this.hasArgumentErrors(draft)) {
+      return undefined;
+    }
+
+    const first = this.text.of(param);
+    const second = target.name;
+    const loc = closure.loc;
+    const own = closure.fn.params[position];
+    if (own == undefined) {
+      return {
+        code: Code.CallbackParametersUninferred,
+        loc: loc,
+        details: {
+          first,
+          second,
+        },
+      };
+    }
+
+    const word = own.name;
+
+    return {
+      code: Code.CallbackParameterUninferred,
+      loc: loc,
+      details: {
+        word,
+        first,
+        second,
+      },
+    };
+  }
+
+  public typeArgumentCountErrors(target: GenericTarget): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const total = target.params.length;
+    const word = target.name;
+    const other = this.typeArgumentText(total);
+    const first = `${target.typeArgs.length}`;
+
+    if (!target.isLenient) {
+      errors.push({
+        code: Code.TypeArgumentsTooMany,
+        loc: target.loc,
+        details: {
+          word,
+          other,
+          first,
+        },
+      });
+    }
+
+    return errors;
+  }
+
+  public uninferredError(
+    draft: GenericDraft,
+    param: Type,
+  ): SourceError | undefined {
+    const target = draft.target;
+    if (target.isLenient) {
+      return undefined;
+    }
+
+    const word = this.text.of(param);
+    const first = target.name;
+    const samples = target.params.map(() => kSampleArgument);
+    const other = samples.join(kTypeSeparator);
+
+    return {
+      code: Code.CannotInferParameter,
+      loc: target.loc,
+      details: {
+        word,
+        first,
+        other,
+      },
+    };
+  }
+
+  public clash(
+    draft: GenericDraft,
+    index: int,
+    type: Type | undefined,
+    candidate: Type,
+  ): Checked<Type | undefined> {
+    const target = draft.target;
+    const param = target.params[index];
+
+    this.failParameter(draft, index);
+
+    if (param == undefined || target.isLenient) {
+      return { value: undefined };
+    }
+
+    const word = this.text.of(param);
+    const first = target.name;
+    const second = this.text.of(type ?? candidate);
+    const other = this.text.of(candidate);
+
+    return {
+      value: undefined,
+      error: {
+        code: Code.CandidatesClash,
+        loc: target.loc,
+        details: {
+          word,
+          first,
+          second,
+          other,
+        },
+      },
+    };
+  }
+
+  public genericMethodValue(
+    expr: MemberExpr,
+    method: FunctionDecl,
+  ): Checked<boolean> {
+    if (method.typeParams.length == 0) {
+      return { value: false };
+    }
+
+    return {
+      value: true,
+      error: {
+        code: Code.GenericMethodValue,
+        loc: expr.loc,
+        details: { word: expr.name },
+      },
+    };
   }
 
   private currentStrength(set: InferenceSet): CandidateStrength {

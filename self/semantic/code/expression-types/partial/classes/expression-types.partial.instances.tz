@@ -57,7 +57,9 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
     if (entry.isStatic) {
-      this.reportStatic(expr, entry, module);
+      const staticError = this.classes.staticError(expr, entry);
+
+      this.reportFound(module, staticError);
 
       return this.store.plain(TypeKind.Error);
     }
@@ -90,17 +92,6 @@ partial class ExpressionTypes {
     return this.methodTypeOf(entry, method);
   }
 
-  private reportStatic(
-    expr: MemberExpr,
-    entry: ClassMemberEntry,
-    module: int,
-  ): void {
-    this.report(module, expr.loc, Code.StaticViaInstance, {
-      word: expr.name,
-      first: entry.owner.name ?? "",
-    });
-  }
-
   private reportStaticCall(
     expr: MemberExpr,
     entry: ClassMemberEntry,
@@ -111,7 +102,9 @@ partial class ExpressionTypes {
       (one) => one.name == expr.name && this.classes.isStaticMethod(one),
     );
     if (!isMethod) {
-      return this.reportStatic(expr, entry, module);
+      const staticError = this.classes.staticError(expr, entry);
+
+      return this.reportFound(module, staticError);
     }
 
     this.report(module, expr.loc, Code.StaticMethodViaInstance, {
@@ -269,7 +262,9 @@ partial class ExpressionTypes {
     }
 
     this.newArrayCheck(expr, form.name, module);
-    this.executorCheck(expr, form.name, module);
+    const executorErrors = this.library.executorCheck(expr, form.name);
+
+    this.reportAll(module, executorErrors);
 
     const target = this.targetOfUse(expr.loc, form.name, module);
     if (target == undefined) {

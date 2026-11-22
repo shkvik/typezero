@@ -215,52 +215,15 @@ partial class ExpressionTypes {
     first: string,
     module: int,
   ): boolean {
-    const word = property.name;
-    const member = this.objects.plainMember(goal, word);
-    if (member == undefined) {
-      this.report(module, property.loc, Code.LiteralFitNoField, {
-        first,
-        word,
-      });
-
-      return false;
-    }
-    if (property.form.kind != PropertyKind.Method) {
-      return true;
-    }
-    if (member.type.kind != TypeKind.Function) {
-      this.report(module, property.loc, Code.LiteralFitNotMethod, {
-        first,
-        word,
-        second: this.text.of(member.type),
-      });
-
-      return false;
-    }
-    if (!member.readonly) {
-      this.report(module, property.loc, Code.LiteralFitReplaceable, {
-        first,
-        word,
-      });
-
-      return false;
-    }
-
-    const mine = methods.find((one) => one.name == word)?.type;
-    if (mine == undefined || mine.kind == TypeKind.Error) {
-      return true;
-    }
-    if (this.relation.converts(mine, member.type)) {
-      return true;
-    }
-
-    this.report(module, property.loc, Code.LiteralFitOtherType, {
+    const checked = this.objects.methodPropertyFits(
+      property,
+      goal,
+      methods,
       first,
-      word,
-      second: this.text.of(mine),
-      other: this.text.of(member.type),
-    });
+    );
 
-    return false;
+    this.reportFound(module, checked.error);
+
+    return checked.value;
   }
 }

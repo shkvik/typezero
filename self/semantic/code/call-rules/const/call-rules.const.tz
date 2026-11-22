@@ -3,3 +3,5 @@ export const kOneArgument = " argument";
 export const kOrMore = " or more";
 export const kParameterLetters = "abcdefghijklmnopqrstuvwxyz";
 export const kRangeDash = "-";
+export const kRepeatName = "repeat";
+export const kToFixedName = "toFixed";

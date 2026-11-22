@@ -1,5 +1,11 @@
+import {
+  Checked,
+  Details,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
+  BinaryExpr,
   Expr,
   ExprKind,
   MemberExpr,
@@ -10,29 +16,38 @@ import {
   Type,
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
+import { ForOfStmt } from "../../../program/ast/types/ast.types.statements.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
 import { kUnnamedOperand } from "../source-texts/const/source-texts.const.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
 import { ModuleQuestions } from "../../declaration/module-questions/module-questions.tz";
 import { SourceTexts } from "../source-texts/source-texts.tz";
-import { kBuiltinValueClasses } from "./const/dictionary-rules.const.tz";
+import {
+  kBuiltinValueClasses,
+  kDictIterating,
+} from "./const/dictionary-rules.const.tz";
 
 export class DictionaryRules {
   private readonly store: TypeStore;
   private readonly types: TypeQuestions;
   private readonly modules: ModuleQuestions;
   private readonly sources: SourceTexts;
+  private readonly text: TypeText;
 
   public constructor(
     store: TypeStore,
     types: TypeQuestions,
     modules: ModuleQuestions,
     sources: SourceTexts,
+    text: TypeText,
   ) {
     this.store = store;
     this.types = types;
     this.modules = modules;
     this.sources = sources;
+    this.text = text;
   }
 
   public collectionOf(type: Type): DictKind | undefined {
@@ -344,6 +359,194 @@ export class DictionaryRules {
     }
 
     return Code.SetForIn;
+  }
+
+  public objectArgumentCheck(
+    arg: Expr,
+    type: Type,
+    word: string,
+  ): SourceError | undefined {
+    const base = this.types.definedType(type);
+    const isHolder =
+      base.kind == TypeKind.Object ||
+      base.kind == TypeKind.Dict ||
+      base.kind == TypeKind.Instance;
+    if (this.types.isOptional(type) && isHolder) {
+      return {
+        code: Code.ObjectMaybeUndefined,
+        loc: arg.loc,
+        details: kNoDetails,
+      };
+    }
+    if (!this.isNeverObject(type)) {
+      return undefined;
+    }
+
+    return {
+      code: Code.ObjectNeedsObject,
+      loc: arg.loc,
+      details: {
+        word,
+        first: this.text.of(type),
+      },
+    };
+  }
+
+  public pairsDifferError(
+    expr: Expr,
+    code: Code,
+    first: Type,
+    second: Type,
+  ): SourceError | undefined {
+    return {
+      code: code,
+      loc: expr.loc,
+      details: {
+        first: this.text.of(first),
+        second: this.text.of(second),
+      },
+    };
+  }
+
+  public dictInCheck(expr: BinaryExpr, object: Type): Checked<boolean> {
+    const dict = this.collectionOf(object);
+    if (dict == undefined) {
+      return { value: false };
+    }
+
+    const isMap = dict == DictKind.Map;
+
+    return {
+      value: true,
+      error: {
+        code: Code.DictIn,
+        loc: expr.loc,
+        details: {
+          word: this.collectionWord(dict),
+          first: this.dictText(expr.rhs, dict),
+          other: this.entryPart(isMap),
+        },
+      },
+    };
+  }
+
+  public dictMissingCall(
+    expr: MemberExpr,
+    dict: DictKind,
+    word: string,
+    first: string,
+  ): Checked<boolean> {
+    const name = expr.name;
+    const isMap = dict == DictKind.Map;
+    const details: Details = { word, first, other: name };
+
+    if (isMap && name == "add") {
+      return {
+        value: true,
+        error: { code: Code.MapHasNoAdd, loc: expr.loc, details: details },
+      };
+    }
+    if (!isMap && (name == "set" || name == "get")) {
+      return {
+        value: true,
+        error: { code: Code.SetHasNoGet, loc: expr.loc, details: details },
+      };
+    }
+    if (!kDictIterating.includes(name)) {
+      return { value: false };
+    }
+
+    const place = this.iteratingSource(isMap);
+
+    return {
+      value: true,
+      error: {
+        code: Code.DictNotIterating,
+        loc: expr.loc,
+        details: {
+          word,
+          first,
+          other: name,
+          place,
+        },
+      },
+    };
+  }
+
+  public forInKeys(loop: ForOfStmt, iterable: Type): Checked<Type> {
+    const error = this.store.plain(TypeKind.Error);
+    const object = loop.iterable;
+    const text = this.forInText(object, iterable);
+    const base = this.types.apparent(iterable);
+    const indexed = this.indexedWord(base);
+    if (indexed != undefined) {
+      return {
+        value: error,
+        error: {
+          code: Code.ForInIndices,
+          loc: object.loc,
+          details: {
+            word: indexed,
+            other: text,
+            place: this.forEachPlace(base, text),
+          },
+        },
+      };
+    }
+
+    const defined = this.types.apparent(this.types.definedType(iterable));
+    if (this.types.isOptional(iterable) && this.isKeyHolder(defined)) {
+      return {
+        value: error,
+        error: {
+          code: Code.ForInUndefined,
+          loc: object.loc,
+          details: kNoDetails,
+        },
+      };
+    }
+    if (defined.kind == TypeKind.Dict && defined.dict != DictKind.Record) {
+      const code = this.forInCode(defined.dict == DictKind.Map);
+
+      return {
+        value: error,
+        error: { code: code, loc: object.loc, details: { word: text } },
+      };
+    }
+    if (this.isKeyless(base)) {
+      return {
+        value: error,
+        error: {
+          code: Code.ForInNotObject,
+          loc: object.loc,
+          details: {
+            word: this.text.of(iterable),
+          },
+        },
+      };
+    }
+    if (base.kind == TypeKind.Error) {
+      return { value: error };
+    }
+
+    return { value: this.store.plain(TypeKind.String) };
+  }
+
+  public setTargetCheck(target: Expr, word: string): Checked<boolean> {
+    if (target.kind == ExprKind.Index) {
+      return {
+        value: true,
+        error: { code: Code.SetIndexSet, loc: target.loc, details: { word } },
+      };
+    }
+    if (target.kind == ExprKind.Member && target.name == "size") {
+      return {
+        value: true,
+        error: { code: Code.SetSizeSet, loc: target.loc, details: { word } },
+      };
+    }
+
+    return { value: false };
   }
 
   private memberHolder(expr: Expr): string | undefined {

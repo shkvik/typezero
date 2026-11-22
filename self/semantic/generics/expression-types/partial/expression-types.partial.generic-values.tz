@@ -5,13 +5,9 @@ import {
   FunctionExpr,
   NameExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
-import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
 import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
-import {
-  FunctionFrame,
-  ValueTarget,
-} from "../../../code/expression-types/types/expression-types.types.tz";
+import { ValueTarget } from "../../../code/expression-types/types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private genericValue(
@@ -87,18 +83,6 @@ partial class ExpressionTypes {
     }
 
     return false;
-  }
-
-  private nestedGenericCheck(
-    fn: FunctionDecl,
-    frame: FunctionFrame,
-    module: int,
-  ): void {
-    if (frame.fn == undefined || fn.typeParams.length == 0) {
-      return;
-    }
-
-    this.report(module, fn.loc, Code.GenericNotTopLevel, kNoDetails);
   }
 
   private genericClosureCheck(expr: FunctionExpr, module: int): void {

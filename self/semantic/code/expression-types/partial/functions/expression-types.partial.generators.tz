@@ -10,7 +10,6 @@ import {
   YieldExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../../../program/ast/types/ast.types.functions.tz";
-import { TypeRef } from "../../../../../program/ast/types/ast.types.types.tz";
 import {
   Type,
   TypeKind,
@@ -26,7 +25,6 @@ import {
   FunctionFrame,
   GeneratorFrame,
 } from "../../types/expression-types.types.tz";
-import { kLengthName } from "../../../expression-shapes/const/expression-shapes.const.tz";
 import { kNextName } from "../../../index-rules/const/index-rules.const.tz";
 
 partial class ExpressionTypes {
@@ -60,7 +58,14 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.writtenGeneratorCheck(fn, written, result, generator, module);
+    const writtenGeneratorError = this.functions.writtenGeneratorCheck(
+      fn,
+      written,
+      result,
+      generator,
+    );
+
+    this.reportFound(module, writtenGeneratorError);
   }
 
   private iteratorCallCheck(
@@ -93,16 +98,11 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): boolean {
-    const word = member.name;
-    if (word != kLengthName) {
-      return false;
-    }
+    const checked = this.functions.iteratorMissingCheck(member, object);
 
-    const first = this.text.of(object);
+    this.reportFound(module, checked.error);
 
-    this.report(module, member.loc, Code.IteratorNoLength, { word, first });
-
-    return true;
+    return checked.value;
   }
 
   private yieldTyped(expr: YieldExpr, module: int): Type {
@@ -175,30 +175,11 @@ partial class ExpressionTypes {
   }
 
   private delegatedItem(value: Expr, type: Type, module: int): Type {
-    const base = this.types.apparent(type);
+    const checked = this.functions.delegatedItem(value, type);
 
-    switch (base.kind) {
-      case TypeKind.Array:
-        return base.item;
-      case TypeKind.String:
-      case TypeKind.Template:
-        return this.store.plain(TypeKind.String);
-      case TypeKind.Iterator:
-        return base.shape.yielded;
-      case TypeKind.Error:
-      case TypeKind.Instance:
-      case TypeKind.Dict:
-      case TypeKind.TypeParameter:
-      case TypeKind.Object:
-      case TypeKind.Union:
-        return this.store.plain(TypeKind.Error);
-      default:
-        this.report(module, value.loc, Code.YieldDelegateNotIterable, {
-          word: this.text.of(type),
-        });
+    this.reportFound(module, checked.error);
 
-        return this.store.plain(TypeKind.Error);
-    }
+    return checked.value;
   }
 
   private generatorResult(
@@ -251,51 +232,6 @@ partial class ExpressionTypes {
     const joined = this.joinedReturns(fn, valued, module, Code.ReturnsDiffer);
 
     return this.functions.widened(joined);
-  }
-
-  private writtenGeneratorCheck(
-    fn: FunctionDecl,
-    written: TypeRef,
-    result: Type,
-    generator: GeneratorFrame,
-    module: int,
-  ): void {
-    const isOpen =
-      result.kind == TypeKind.Iterator || result.kind == TypeKind.Error;
-    if (!fn.isGenerator || isOpen) {
-      return;
-    }
-
-    const word = this.text.of(result);
-
-    this.report(module, written.loc, Code.GeneratorNotIterator, { word });
-  }
-
-  private resumedCheck(
-    iterable: Expr,
-    type: Type,
-    code: Code,
-    module: int,
-  ): void {
-    const base = this.types.definedType(type);
-    if (base.kind != TypeKind.Iterator) {
-      return;
-    }
-
-    const sent = base.shape.sent;
-    const isFree =
-      sent.kind == TypeKind.Void ||
-      sent.kind == TypeKind.Undefined ||
-      sent.kind == TypeKind.Error ||
-      this.types.isOptional(sent);
-    if (isFree) {
-      return;
-    }
-
-    this.report(module, iterable.loc, code, {
-      word: this.text.of(base),
-      first: this.text.of(sent),
-    });
   }
 
   private nextUnionCheck(member: MemberExpr, object: Type, module: int): void {

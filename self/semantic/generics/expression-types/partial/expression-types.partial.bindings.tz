@@ -3,10 +3,6 @@ import { Code } from "../../../../diagnostic/code.tz";
 import { TypeParamDecl } from "../../../../program/ast/types/ast.types.types.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import {
-  kSampleArgument,
-  kTypeSeparator,
-} from "../../../code/expression-types/const/expression-types.const.tz";
-import {
   CandidateStrength,
   GenericDraft,
 } from "../../../code/expression-types/types/expression-types.types.tz";
@@ -113,28 +109,11 @@ partial class ExpressionTypes {
     candidate: Type,
     module: int,
   ): Type | undefined {
-    const target = draft.target;
-    const param = target.params[index];
+    const checked = this.generics.clash(draft, index, type, candidate);
 
-    this.generics.failParameter(draft, index);
+    this.reportFound(module, checked.error);
 
-    if (param == undefined || target.isLenient) {
-      return undefined;
-    }
-
-    const word = this.text.of(param);
-    const first = target.name;
-    const second = this.text.of(type ?? candidate);
-    const other = this.text.of(candidate);
-
-    this.report(module, target.loc, Code.CandidatesClash, {
-      word,
-      first,
-      second,
-      other,
-    });
-
-    return undefined;
+    return checked.value;
   }
 
   private inferFromWanted(draft: GenericDraft): void {
@@ -194,7 +173,9 @@ partial class ExpressionTypes {
     const found = draft.bound.get(index);
     if (found == undefined) {
       if (!isSilent) {
-        this.reportUninferred(draft, param, module);
+        const uninferredError = this.generics.uninferredError(draft, param);
+
+        this.reportFound(module, uninferredError);
       }
 
       this.generics.failParameter(draft, index);
@@ -231,28 +212,6 @@ partial class ExpressionTypes {
     }
 
     draft.bound.set(index, fallback);
-  }
-
-  private reportUninferred(
-    draft: GenericDraft,
-    param: Type,
-    module: int,
-  ): void {
-    const target = draft.target;
-    if (target.isLenient) {
-      return;
-    }
-
-    const word = this.text.of(param);
-    const first = target.name;
-    const samples = target.params.map(() => kSampleArgument);
-    const other = samples.join(kTypeSeparator);
-
-    this.report(module, target.loc, Code.CannotInferParameter, {
-      word,
-      first,
-      other,
-    });
   }
 
   private constraintCheck(

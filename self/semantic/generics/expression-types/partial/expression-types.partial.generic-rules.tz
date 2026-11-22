@@ -1,15 +1,9 @@
 import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
-import {
-  ClassDecl,
-  MethodKind,
-} from "../../../../program/ast/types/ast.types.classes.tz";
+import { ClassDecl } from "../../../../program/ast/types/ast.types.classes.tz";
 import {
   BinaryExpr,
-  ExprKind,
   MemberExpr,
-  Property,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
 import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
@@ -20,7 +14,9 @@ partial class ExpressionTypes {
     this.classGrowthCheck(decl, module);
 
     for (const fn of decl.methods) {
-      this.genericMethodRules(decl, fn, module);
+      const genericMethodErrors = this.generics.genericMethodErrors(decl, fn);
+
+      this.reportAll(module, genericMethodErrors);
     }
   }
 
@@ -48,51 +44,16 @@ partial class ExpressionTypes {
     }
   }
 
-  private genericMethodRules(
-    decl: ClassDecl,
-    fn: FunctionDecl,
-    module: int,
-  ): void {
-    const role = fn.role;
-    const isGeneric = fn.typeParams.length > 0;
-    const isAbstract = role?.method == MethodKind.Abstract;
-    if (isGeneric && role != undefined && role.isOverride) {
-      this.report(module, fn.loc, Code.GenericOverride, kNoDetails);
-    }
-    if (isGeneric && isAbstract) {
-      this.report(module, fn.loc, Code.GenericAbstract, kNoDetails);
-    }
-
-    const isOpenClass = decl.typeParams.length > 0;
-    if (isAbstract && isOpenClass && fn.returnType == undefined) {
-      this.report(module, fn.loc, Code.AbstractGenericReturn, {
-        word: fn.name,
-        other: decl.name ?? "",
-      });
-    }
-  }
-
-  private literalMethodCheck(property: Property, module: int): void {
-    const value = property.value;
-    if (value.kind != ExprKind.Function || value.fn.typeParams.length == 0) {
-      return;
-    }
-
-    this.report(module, property.loc, Code.LiteralGenericMethod, kNoDetails);
-  }
-
   private genericMethodValue(
     expr: MemberExpr,
     method: FunctionDecl,
     module: int,
   ): boolean {
-    if (method.typeParams.length == 0) {
-      return false;
-    }
+    const checked = this.generics.genericMethodValue(expr, method);
 
-    this.report(module, expr.loc, Code.GenericMethodValue, { word: expr.name });
+    this.reportFound(module, checked.error);
 
-    return true;
+    return checked.value;
   }
 
   private genericInstanceofCheck(

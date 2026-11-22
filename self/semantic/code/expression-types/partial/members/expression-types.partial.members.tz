@@ -16,13 +16,8 @@ import {
   TypeKind,
   UnionType,
 } from "../../../../../program/type/types/type.types.tz";
-import {
-  kPrototypeNames,
-  kRawName,
-} from "../../const/expression-types.const.tz";
 import { EnumHome } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 import { LiteralValue } from "../../types/expression-types.types.tz";
-import { kLengthName } from "../../../expression-shapes/const/expression-shapes.const.tz";
 
 partial class ExpressionTypes {
   private memberTyped(expr: MemberExpr, module: int): Type {
@@ -194,7 +189,9 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
     if (field == undefined) {
-      this.reportMissingField(expr, object, module);
+      const missingFieldError = this.objects.missingFieldError(expr, object);
+
+      this.reportFound(module, missingFieldError);
 
       return this.store.plain(TypeKind.Error);
     }
@@ -214,62 +211,20 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private reportMissingField(
-    expr: MemberExpr,
-    object: Type,
-    module: int,
-  ): void {
-    const word = expr.name;
-    const first = this.text.of(object);
-
-    if (kPrototypeNames.includes(word)) {
-      return this.report(module, expr.loc, Code.PrototypeMember, {
-        word,
-        first,
-      });
-    }
-
-    this.report(module, expr.loc, Code.PropertyMissing, { word, first });
-  }
-
   private tupleMember(expr: MemberExpr, tuple: TupleType, module: int): Type {
-    if (expr.name == kLengthName) {
-      return this.store.integer(64, false);
-    }
+    const checked = this.objects.tupleMember(expr, tuple);
 
-    const word = expr.name;
-    const first = this.text.of(tuple);
+    this.reportFound(module, checked.error);
 
-    this.report(module, expr.loc, Code.PropertyMissing, { word, first });
-
-    return this.store.plain(TypeKind.Error);
+    return checked.value;
   }
 
   private valueMember(expr: MemberExpr, object: Type, module: int): Type {
-    const name = expr.name;
-    const isSized = this.objects.isSized(object);
-    if (isSized && name == kLengthName) {
-      return this.store.integer(64, false);
-    }
-    if (this.objects.isWrappedValue(object, name)) {
-      return this.objects.unsignedOf(object);
-    }
-    if (this.objects.isTextList(object) && name == kRawName) {
-      return this.store.plain(TypeKind.Error);
-    }
+    const checked = this.objects.valueMember(expr, object);
 
-    const word = name;
-    const first = this.text.of(object);
+    this.reportFound(module, checked.error);
 
-    if (isSized || object.kind == TypeKind.Iterator) {
-      this.report(module, expr.loc, Code.MethodNotCalled, { word, first });
-
-      return this.store.plain(TypeKind.Error);
-    }
-
-    this.report(module, expr.loc, Code.PropertyMissing, { word, first });
-
-    return this.store.plain(TypeKind.Error);
+    return checked.value;
   }
 
   private enumOfObject(object: Expr, module: int): EnumDecl | undefined {

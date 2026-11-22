@@ -161,7 +161,10 @@ partial class ExpressionTypes {
     const error = this.store.plain(TypeKind.Error);
     const name = member.name;
     if (!kDecimalStatics.includes(name)) {
-      this.decimalStaticMissing(member, module);
+      const decimalStaticMissingError =
+        this.decimals.decimalStaticMissingError(member);
+
+      this.reportFound(module, decimalStaticMissingError);
       this.looseArguments(expr.args, module);
 
       return error;
@@ -216,22 +219,16 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private decimalStaticMissing(member: MemberExpr, module: int): void {
-    const name = member.name;
-
-    this.report(module, member.loc, Code.DecimalStaticMissing, {
-      word: name,
-      place: this.decimals.decimalStaticHint(name),
-    });
-  }
-
   private decimalStaticRead(expr: MemberExpr, module: int): Type {
     if (kDecimalStatics.includes(expr.name)) {
       this.report(module, expr.loc, Code.DecimalFunctionRead, {
         word: expr.name,
       });
     } else {
-      this.decimalStaticMissing(expr, module);
+      const decimalStaticMissingError =
+        this.decimals.decimalStaticMissingError(expr);
+
+      this.reportFound(module, decimalStaticMissingError);
     }
 
     return this.store.plain(TypeKind.Error);

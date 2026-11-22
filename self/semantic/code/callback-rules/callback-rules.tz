@@ -1,10 +1,12 @@
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 import {
   CallExpr,
   Expr,
   ExprKind,
   MemberExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
-import { StmtKind } from "../../../program/ast/types/ast.types.statements.tz";
 import {
   FunctionType,
   Type,
@@ -14,6 +16,10 @@ import {
   ArrayCallback,
   CallbackPlan,
 } from "../expression-types/types/expression-types.types.tz";
+import { TypeRelation } from "../../types/type-relation/type-relation.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { CallRules } from "../call-rules/call-rules.tz";
+import { StmtKind } from "../../../program/ast/types/ast.types.statements.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
 import { TruthRules } from "../../flow/truth-rules/truth-rules.tz";
@@ -26,15 +32,24 @@ export class CallbackRules {
   private readonly store: TypeStore;
   private readonly types: TypeQuestions;
   private readonly truth: TruthRules;
+  private readonly calls: CallRules;
+  private readonly text: TypeText;
+  private readonly relation: TypeRelation;
 
   public constructor(
     store: TypeStore,
     types: TypeQuestions,
     truth: TruthRules,
+    calls: CallRules,
+    text: TypeText,
+    relation: TypeRelation,
   ) {
     this.store = store;
     this.types = types;
     this.truth = truth;
+    this.calls = calls;
+    this.text = text;
+    this.relation = relation;
   }
 
   public callbackPlan(
@@ -194,6 +209,128 @@ export class CallbackRules {
     }
 
     return this.types.definedType(wanted).kind == TypeKind.Function;
+  }
+
+  public droppedPromiseCheck(arg: Expr, result: Type): SourceError[] {
+    const errors: SourceError[] = [];
+
+    if (arg.kind == ExprKind.Function && arg.fn.isAsync) {
+      errors.push({
+        code: Code.AsyncCallbackDropped,
+        loc: arg.loc,
+        details: kNoDetails,
+      });
+
+      return errors;
+    }
+    const kind = this.types.definedType(result).kind;
+    if (kind == TypeKind.Promise) {
+      const loc = this.conciseValueLoc(arg);
+
+      errors.push({
+        code: Code.CallbackPromiseDropped,
+        loc: loc,
+        details: kNoDetails,
+      });
+    }
+    if (kind == TypeKind.Result && arg.kind == ExprKind.Function) {
+      const loc = this.conciseValueLoc(arg);
+
+      errors.push({
+        code: Code.CallbackResultDropped,
+        loc: loc,
+        details: kNoDetails,
+      });
+    }
+
+    return errors;
+  }
+
+  public droppedResultCheck(
+    arg: Expr,
+    result: Type,
+    name: string,
+    method: string,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    if (result.kind == TypeKind.Result) {
+      errors.push({
+        code: Code.CallbackDropsResult,
+        loc: arg.loc,
+        details: {
+          word: name,
+          other: method,
+        },
+      });
+
+      return errors;
+    }
+    if (result.kind == TypeKind.Promise) {
+      errors.push({
+        code: Code.CallbackDropsPromise,
+        loc: arg.loc,
+        details: {
+          word: name,
+          other: method,
+        },
+      });
+    }
+
+    return errors;
+  }
+
+  public extraCallbackArgumentsError(
+    expr: CallExpr,
+    plan: CallbackPlan,
+  ): SourceError | undefined {
+    const member = plan.member;
+    const word = member.name;
+    const count = expr.args.length;
+    const isReduce = plan.kind == ArrayCallback.Reduce;
+    const most = this.callbackArgumentLimit(isReduce);
+    const second = expr.args[1]?.expr;
+    if (count == 2 && !isReduce && second != undefined) {
+      return { code: Code.CallbackThisArg, loc: second.loc, details: { word } };
+    }
+    if (count <= most) {
+      return undefined;
+    }
+
+    const wanted = this.calls.argumentCountText(1, most, false);
+
+    return {
+      code: Code.ArgumentCount,
+      loc: member.loc,
+      details: {
+        word: wanted,
+        other: `${count}`,
+      },
+    };
+  }
+
+  public forwardedResultCheck(
+    expr: Expr,
+    result: Type,
+    wanted: Type,
+  ): SourceError | undefined {
+    const isOpen =
+      wanted.kind == TypeKind.Void ||
+      wanted.kind == TypeKind.Error ||
+      result.kind == TypeKind.Error;
+    if (isOpen || this.relation.converts(result, wanted)) {
+      return undefined;
+    }
+
+    return {
+      code: Code.NotAssignable,
+      loc: expr.loc,
+      details: {
+        first: this.text.of(result),
+        second: this.text.of(wanted),
+        place: "",
+      },
+    };
   }
 
   private callbackParams(kind: ArrayCallback, array: Type): Type[] {

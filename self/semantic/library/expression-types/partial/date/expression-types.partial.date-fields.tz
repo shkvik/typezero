@@ -1,13 +1,11 @@
 import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
-import { Details } from "../../../../../diagnostic/types/message.types.tz";
 import {
   CallArgument,
   Expr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import { Type } from "../../../../../program/type/types/type.types.tz";
-import { DateReader } from "../../../date-reader/date-reader.tz";
 import {
   kDateFieldLimit,
   kFirstTimeField,
@@ -58,29 +56,18 @@ partial class ExpressionTypes {
     return Math.trunc(double).toInt();
   }
 
-  private reportField(
-    fields: DateFieldValues,
-    field: int,
-    code: Code,
-    module: int,
-    details: Details,
-  ): void {
-    const arg = fields.args[field - fields.first]?.expr;
-    if (arg != undefined) {
-      this.report(module, arg.loc, code, details);
-    }
-  }
-
   private yearFieldCheck(fields: DateFieldValues, module: int): void {
     const year = this.dates.fieldValue(fields, 0);
     if (year == undefined || !this.dates.isShortYear(fields, year)) {
       return;
     }
 
-    this.reportField(fields, 0, Code.DateYearShort, module, {
+    const fieldErrors = this.dates.fieldErrors(fields, 0, Code.DateYearShort, {
       word: `${year}`,
       other: `${kShortYearBase + year}`,
     });
+
+    this.reportAll(module, fieldErrors);
   }
 
   private validMonth(fields: DateFieldValues, module: int): int | undefined {
@@ -89,14 +76,28 @@ partial class ExpressionTypes {
       return month;
     }
     if (month == 12) {
-      this.reportField(fields, 1, Code.DateMonthNext, module, kNoDetails);
+      const fieldErrors = this.dates.fieldErrors(
+        fields,
+        1,
+        Code.DateMonthNext,
+        kNoDetails,
+      );
+
+      this.reportAll(module, fieldErrors);
 
       return undefined;
     }
 
-    this.reportField(fields, 1, Code.DateMonthOutside, module, {
-      word: `${month}`,
-    });
+    const fieldErrors2 = this.dates.fieldErrors(
+      fields,
+      1,
+      Code.DateMonthOutside,
+      {
+        word: `${month}`,
+      },
+    );
+
+    this.reportAll(module, fieldErrors2);
 
     return undefined;
   }
@@ -111,17 +112,26 @@ partial class ExpressionTypes {
       return;
     }
     if (day < 0) {
-      return this.reportField(fields, 2, Code.DateDayBelow, module, {
+      const fieldErrors = this.dates.fieldErrors(fields, 2, Code.DateDayBelow, {
         word: `${day}`,
       });
+
+      return this.reportAll(module, fieldErrors);
     }
     if (month != undefined) {
       return this.dayInMonthCheck(fields, day, month, module);
     }
     if (day > 31) {
-      this.reportField(fields, 2, Code.DateDayAbove, module, {
-        word: `${day}`,
-      });
+      const fieldErrors2 = this.dates.fieldErrors(
+        fields,
+        2,
+        Code.DateDayAbove,
+        {
+          word: `${day}`,
+        },
+      );
+
+      this.reportAll(module, fieldErrors2);
     }
   }
 
@@ -141,26 +151,37 @@ partial class ExpressionTypes {
     const other = this.dates.monthName(month);
 
     if (fields.setter == "") {
-      return this.reportField(fields, 2, Code.DateDayLast, module, {
+      const fieldErrors = this.dates.fieldErrors(fields, 2, Code.DateDayLast, {
         word: missing,
         other,
         first: this.dates.nextYearText(year, month),
         second: `${(month + 1) % 12}`,
       });
+
+      return this.reportAll(module, fieldErrors);
     }
     if (month == 1) {
-      return this.reportField(fields, 2, Code.DateDayFebruary, module, {
-        word: missing,
-        other: fields.setter,
-        first: this.dates.yearPart(year),
-      });
+      const fieldErrors2 = this.dates.fieldErrors(
+        fields,
+        2,
+        Code.DateDayFebruary,
+        {
+          word: missing,
+          other: fields.setter,
+          first: this.dates.yearPart(year),
+        },
+      );
+
+      return this.reportAll(module, fieldErrors2);
     }
 
-    this.reportField(fields, 2, Code.DateDayCount, module, {
+    const fieldErrors3 = this.dates.fieldErrors(fields, 2, Code.DateDayCount, {
       word: missing,
       other,
       first: `${last}`,
     });
+
+    this.reportAll(module, fieldErrors3);
   }
 
   private timeFieldsCheck(fields: DateFieldValues, module: int): void {
@@ -178,41 +199,18 @@ partial class ExpressionTypes {
         continue;
       }
 
-      this.reportField(fields, field, Code.DateTimeRange, module, {
-        word: `${value}`,
-        other,
-        first: `${most}`,
-      });
-    }
-  }
+      const fieldErrors = this.dates.fieldErrors(
+        fields,
+        field,
+        Code.DateTimeRange,
+        {
+          word: `${value}`,
+          other,
+          first: `${most}`,
+        },
+      );
 
-  private dateTextCheck(expr: Expr, module: int): void {
-    const text = this.dates.dateTextOf(expr);
-    if (text == undefined) {
-      return;
-    }
-
-    const reader = new DateReader(text);
-    const fields = reader.read();
-    const loc = expr.loc;
-    if (fields == undefined) {
-      return this.report(module, loc, Code.DateTextUnreadable, { word: text });
-    }
-    if (fields.isDateOnly) {
-      return this.report(module, loc, Code.DateTextNoTime, { word: text });
-    }
-
-    const day = fields.day;
-    if (day.day > this.dates.daysInMonth(day.year, day.month)) {
-      const other = this.dates.missingDay(day.year, day.month, day.day);
-
-      return this.report(module, loc, Code.DateTextNoDay, {
-        word: text,
-        other,
-      });
-    }
-    if (!this.dates.isDateInRange(fields)) {
-      this.report(module, loc, Code.DateTextOutside, { word: text });
+      this.reportAll(module, fieldErrors);
     }
   }
 }

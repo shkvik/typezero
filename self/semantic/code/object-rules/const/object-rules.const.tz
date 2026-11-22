@@ -1,3 +1,15 @@
 export const kChainPlaceholder = "o";
 export const kIdentifierMarks = ["_", "$"];
 export const kWrappedValueName = "value";
+export const kPrototypeNames = [
+  "toString",
+  "valueOf",
+  "hasOwnProperty",
+  "isPrototypeOf",
+  "toLocaleString",
+  "propertyIsEnumerable",
+  "constructor",
+  "__proto__",
+];
+export const kStreamErrorName = "StreamError";
+export const kRawName = "raw";

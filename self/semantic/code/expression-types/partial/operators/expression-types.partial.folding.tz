@@ -66,7 +66,14 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.reportOverflow(expr, type, `${value}`, 0, module);
+    const overflowError = this.operators.overflowError(
+      expr,
+      type,
+      `${value}`,
+      0,
+    );
+
+    this.reportFound(module, overflowError);
   }
 
   private foldUnary(expr: UnaryExpr, type: Type, module: int): void {
@@ -108,21 +115,14 @@ partial class ExpressionTypes {
 
     const wrapped = this.integers.wrapTo(value, type);
 
-    this.reportOverflow(expr, type, `${value}`, wrapped, module);
-  }
+    const overflowError = this.operators.overflowError(
+      expr,
+      type,
+      `${value}`,
+      wrapped,
+    );
 
-  private reportOverflow(
-    expr: Expr,
-    type: IntType,
-    shown: string,
-    wrapped: decimal,
-    module: int,
-  ): void {
-    const code = this.integers.overflowCode(type);
-    const first = this.text.of(type);
-    const other = `${wrapped}`;
-
-    this.report(module, expr.loc, code, { word: shown, first, other });
+    this.reportFound(module, overflowError);
   }
 
   private foldDivision(
@@ -165,7 +165,14 @@ partial class ExpressionTypes {
     const shown = this.integers.powerShown(exact, base, exponent);
     const wrapped = this.integers.wrappedPower(base, exponent, type);
 
-    this.reportOverflow(expr, type, shown, wrapped, module);
+    const overflowError = this.operators.overflowError(
+      expr,
+      type,
+      shown,
+      wrapped,
+    );
+
+    this.reportFound(module, overflowError);
   }
 
   private foldBits(
@@ -221,6 +228,13 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.reportOverflow(expr, shifted, `${exact}`, 0, module);
+    const overflowError = this.operators.overflowError(
+      expr,
+      shifted,
+      `${exact}`,
+      0,
+    );
+
+    this.reportFound(module, overflowError);
   }
 }

@@ -1,5 +1,17 @@
-import { BinaryOp } from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Checked,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  AssignExpr,
+  BinaryOp,
+  ExprKind,
+  IndexExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
 import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { ExpressionShapes } from "../../code/expression-shapes/expression-shapes.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
 import { TruthUse } from "../truth-rules/types/truth-rules.types.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { TypeRelation } from "../../types/type-relation/type-relation.tz";
@@ -9,15 +21,21 @@ export class FlowRules {
   private readonly store: TypeStore;
   private readonly relation: TypeRelation;
   private readonly types: TypeQuestions;
+  private readonly text: TypeText;
+  private readonly shapes: ExpressionShapes;
 
   public constructor(
     store: TypeStore,
     relation: TypeRelation,
     types: TypeQuestions,
+    text: TypeText,
+    shapes: ExpressionShapes,
   ) {
     this.store = store;
     this.relation = relation;
     this.types = types;
+    this.text = text;
+    this.shapes = shapes;
   }
 
   public logicalAssignWord(isAnd: boolean): string {
@@ -126,6 +144,47 @@ export class FlowRules {
     }
 
     return joined;
+  }
+
+  public tupleWriteCheck(
+    target: IndexExpr,
+    tuple: Type,
+  ): SourceError | undefined {
+    const index = target.index;
+    if (tuple.kind != TypeKind.Tuple || !tuple.readonly) {
+      return undefined;
+    }
+    if (index.kind != ExprKind.IntLit) {
+      return undefined;
+    }
+
+    return {
+      code: Code.ObjectReadOnlyField,
+      loc: target.loc,
+      details: {
+        word: `${index.value}`,
+        first: this.text.of(tuple),
+      },
+    };
+  }
+
+  public logicalTargetCheck(expr: AssignExpr): Checked<boolean> {
+    const op = expr.op;
+    const isLogical = op == BinaryOp.LogAnd || op == BinaryOp.LogOr;
+    if (!isLogical || this.shapes.isSimpleTarget(expr.target)) {
+      return { value: false };
+    }
+
+    const word = this.logicalAssignWord(op == BinaryOp.LogAnd);
+
+    return {
+      value: true,
+      error: {
+        code: Code.LogicalAssignSimple,
+        loc: expr.target.loc,
+        details: { word },
+      },
+    };
   }
 
   private defaultedFact(declared: Type, current: Type, given: Type): Type {

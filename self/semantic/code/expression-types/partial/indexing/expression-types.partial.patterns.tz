@@ -118,20 +118,11 @@ partial class ExpressionTypes {
   }
 
   private notPatternArray(init: Expr, given: Type, module: int): Type {
-    const defined = this.types.definedType(given);
-    const isMaybe =
-      this.types.isOptional(given) && defined.kind == TypeKind.Array;
-    const word = this.text.of(given);
-    const error = this.store.plain(TypeKind.Error);
-    if (isMaybe) {
-      this.report(module, init.loc, Code.DestructureMaybeUndefined, { word });
+    const checked = this.indexes.notPatternArray(init, given);
 
-      return error;
-    }
+    this.reportFound(module, checked.error);
 
-    this.report(module, init.loc, Code.DestructureNotArray, { word });
-
-    return error;
+    return checked.value;
   }
 
   private loopShapeCheck(decl: VarDeclarator, item: Type, module: int): void {

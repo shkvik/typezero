@@ -12,10 +12,8 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import {
-  kResultMethods,
-  kUnsupportedMark,
-} from "../../../../code/expression-types/const/expression-types.const.tz";
+import { kUnsupportedMark } from "../../../../code/expression-types/const/expression-types.const.tz";
+import { kResultMethods } from "../../../result-rules/const/result-rules.const.tz";
 
 partial class ExpressionTypes {
   private resultFacts(
@@ -59,43 +57,11 @@ partial class ExpressionTypes {
     result: ResultType,
     module: int,
   ): Type {
-    const word = this.results.resultReceiverText(expr.object);
-    const error = this.store.plain(TypeKind.Error);
-    if (expr.name == "value") {
-      if (result.error.kind != TypeKind.Never) {
-        this.report(module, expr.loc, Code.ResultValueUnchecked, { word });
+    const checked = this.results.resultMemberRead(expr, result);
 
-        return error;
-      }
+    this.reportFound(module, checked.error);
 
-      return this.results.halfParam(result.value);
-    }
-    if (expr.name == "error") {
-      if (result.value.kind != TypeKind.Never) {
-        this.report(module, expr.loc, Code.ResultErrorUnchecked, { word });
-
-        return error;
-      }
-
-      return this.results.halfParam(result.error);
-    }
-
-    const isMethod = kResultMethods.some((one) => one.name == expr.name);
-    if (isMethod) {
-      this.report(module, expr.loc, Code.ResultMethodRead, {
-        word: expr.name,
-        other: word,
-      });
-
-      return error;
-    }
-
-    this.report(module, expr.loc, Code.PropertyMissing, {
-      word: expr.name,
-      first: this.text.of(result),
-    });
-
-    return error;
+    return checked.value;
   }
 
   private resultMethodCall(
@@ -410,26 +376,10 @@ partial class ExpressionTypes {
     second: Type,
     module: int,
   ): Type {
-    const isFirstVoid = first.kind == TypeKind.Void;
-    const isSecondVoid = second.kind == TypeKind.Void;
-    if (isFirstVoid && isSecondVoid) {
-      return first;
-    }
+    const checked = this.results.matchJoined(member, first, second);
 
-    const joined = this.results.matchUnion(
-      first,
-      second,
-      isFirstVoid || isSecondVoid,
-    );
-    if (joined == undefined) {
-      this.report(module, member.loc, Code.ResultMatchTypes, {
-        first: this.text.of(first),
-        second: this.text.of(second),
-      });
+    this.reportFound(module, checked.error);
 
-      return this.store.plain(TypeKind.Error);
-    }
-
-    return joined;
+    return checked.value;
   }
 }

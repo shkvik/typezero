@@ -1,3 +1,6 @@
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 import {
   Expr,
   ExprKind,
@@ -7,6 +10,7 @@ import {
   FunctionDecl,
   Param,
 } from "../../../program/ast/types/ast.types.functions.tz";
+import { TypeRef } from "../../../program/ast/types/ast.types.types.tz";
 import {
   ObjectField,
   Type,
@@ -17,7 +21,6 @@ import {
   GuardSummary,
 } from "../../code/expression-types/types/expression-types.types.tz";
 import { kDot } from "../../code/source-texts/const/source-texts.const.tz";
-import { TypeRef } from "../../../program/ast/types/ast.types.types.tz";
 import { kDictTexts } from "../../types/type-questions/const/type-questions.const.tz";
 import { MethodKind } from "../../../program/ast/types/ast.types.classes.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
@@ -336,6 +339,21 @@ export class NarrowingRules {
     }
 
     return shown;
+  }
+
+  public thisPredicateCheck(
+    fn: FunctionDecl,
+    written: TypeRef,
+  ): SourceError | undefined {
+    if (this.isInstanceMethod(fn)) {
+      return undefined;
+    }
+
+    return {
+      code: Code.PredicateThisOutside,
+      loc: written.loc,
+      details: kNoDetails,
+    };
   }
 
   private openPart(part: Type, name: string, isEqual: boolean): Type {

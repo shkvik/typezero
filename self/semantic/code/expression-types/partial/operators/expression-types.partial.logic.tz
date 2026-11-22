@@ -1,7 +1,6 @@
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import {
-  AssignExpr,
   BinaryExpr,
   BinaryOp,
   ConditionalExpr,
@@ -14,10 +13,8 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import { kOtherPlaceholder } from "../../const/expression-types.const.tz";
 import { LogicSide } from "../../types/expression-types.types.tz";
 import { TruthUse } from "../../../../flow/truth-rules/types/truth-rules.types.tz";
-import { kUnnamedOperand } from "../../../source-texts/const/source-texts.const.tz";
 
 partial class ExpressionTypes {
   private notTyped(expr: UnaryExpr, module: int): Type {
@@ -48,48 +45,17 @@ partial class ExpressionTypes {
     const type = this.typed(expr, boolean, module);
 
     if (expr.kind == ExprKind.Assign && expr.op == undefined) {
-      return this.assignmentCondition(expr, type, use, module);
+      const assignmentConditionError = this.logic.assignmentConditionError(
+        expr,
+        type,
+        use,
+      );
+
+      return this.reportFound(module, assignmentConditionError);
     }
     if (type.kind != TypeKind.Boolean) {
       this.checkTruthy(expr, type, use, undefined, module);
     }
-  }
-
-  private assignmentCondition(
-    expr: AssignExpr,
-    type: Type,
-    use: TruthUse,
-    module: int,
-  ): void {
-    const isNegated = use == TruthUse.Not;
-    const first = this.sources.hintText(expr.target, kUnnamedOperand);
-    const second = this.sources.hintText(expr.value, kOtherPlaceholder);
-    const base = this.types.definedType(type);
-    const isTestable =
-      this.types.isOptional(type) ||
-      this.types.isNumberLike(base) ||
-      base.kind == TypeKind.String;
-    const isCompared =
-      this.shapes.isWrittenLiteral(expr.value) ||
-      type.kind == TypeKind.Error ||
-      !isTestable;
-    if (isCompared) {
-      const word = this.logic.equalsText(isNegated);
-
-      return this.report(module, expr.loc, Code.AssignmentCompared, {
-        word,
-        first,
-        second,
-      });
-    }
-
-    const other = this.logic.emptyTest(type, isNegated);
-
-    this.report(module, expr.loc, Code.AssignmentTested, {
-      first,
-      second,
-      other,
-    });
   }
 
   private logicalTyped(
@@ -196,14 +162,11 @@ partial class ExpressionTypes {
   }
 
   private reportRightVoid(expr: BinaryExpr, isAnd: boolean, module: int): Type {
-    const word = this.logic.logicalText(isAnd);
-    const test = this.sources.hintText(expr.lhs, kUnnamedOperand);
-    const first = this.logic.negatedText(test, isAnd);
-    const second = this.sources.hintText(expr.rhs, kOtherPlaceholder);
+    const checked = this.logic.rightVoid(expr, isAnd);
 
-    this.report(module, expr.loc, Code.RightSideVoid, { word, first, second });
+    this.reportFound(module, checked.error);
 
-    return this.store.plain(TypeKind.Error);
+    return checked.value;
   }
 
   private conditionalTyped(

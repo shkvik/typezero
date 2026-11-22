@@ -1,5 +1,4 @@
 import { ExpressionTypes } from "../../expression-types.tz";
-import { Code } from "../../../../../diagnostic/code.tz";
 import {
   Expr,
   ExprKind,
@@ -10,7 +9,6 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import { kNullName } from "../../const/expression-types.const.tz";
 import { LiteralValue } from "../../types/expression-types.types.tz";
 
@@ -122,38 +120,11 @@ partial class ExpressionTypes {
     base: Type,
     module: int,
   ): Type {
-    const exact = this.store.literal(LiteralKind.Int, literal.text);
-    const hasWholes = this.literals.hasLiteral(parts, LiteralKind.Int);
-    const hasDoubles = this.literals.hasLiteral(parts, LiteralKind.Double);
-    const isListed = parts.includes(exact) || !hasDoubles;
-    const hasLiterals = hasWholes || hasDoubles;
-    if (expr.kind == ExprKind.Name && hasLiterals) {
-      return base;
-    }
-    if (hasWholes && isListed) {
-      return exact;
-    }
-    if (hasDoubles) {
-      return this.store.literal(LiteralKind.Double, literal.text);
-    }
+    const checked = this.literals.wholeTyped(expr, literal, parts, base);
 
-    const target = parts.find((part) => this.types.isNumber(part));
-    if (target == undefined) {
-      return base;
-    }
-    if (target.kind != TypeKind.Int || this.literals.fits(literal, target)) {
-      return target;
-    }
-    if (expr.kind == ExprKind.Name) {
-      return base;
-    }
+    this.reportFound(module, checked.error);
 
-    const word = this.text.of(target);
-    const loc = this.literals.literalPlace(expr);
-
-    this.report(module, loc, Code.IntegerLiteralTooBig, { word });
-
-    return target;
+    return checked.value;
   }
 
   private isNullName(expr: NameExpr, module: int): boolean {
@@ -167,13 +138,10 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const target = this.types.wantedPart(wanted);
-    if (target != undefined && target.kind == TypeKind.Json) {
-      return target;
-    }
+    const checked = this.literals.nullTyped(expr, wanted);
 
-    this.report(module, expr.loc, Code.NullValue, kNoDetails);
+    this.reportFound(module, checked.error);
 
-    return this.store.plain(TypeKind.Error);
+    return checked.value;
   }
 }

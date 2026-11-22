@@ -1,1 +1,32 @@
+import {
+  DecoratorPlace,
+  DecoratorPlaceText,
+} from "../../expression-types/types/expression-types.types.tz";
+
 export const kDescriptorValueName = "value";
+export const kDecoratorPlaces: DecoratorPlaceText[] = [
+  {
+    place: DecoratorPlace.Class,
+    noun: "a class",
+    given: 1,
+    args: "the class",
+  },
+  {
+    place: DecoratorPlace.Field,
+    noun: "a field",
+    given: 2,
+    args: "the class and the name of the field",
+  },
+  {
+    place: DecoratorPlace.Method,
+    noun: "a method",
+    given: 3,
+    args: "the class, the name of the method and its descriptor",
+  },
+  {
+    place: DecoratorPlace.Parameter,
+    noun: "a parameter",
+    given: 3,
+    args: "the class, the name of the method (undefined for a constructor) and the position of the parameter",
+  },
+];

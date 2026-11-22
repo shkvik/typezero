@@ -1,2 +1,3 @@
 export const kManyTypeArguments = " type arguments";
 export const kOneTypeArgument = " type argument";
+export const kSampleArgument = "int";

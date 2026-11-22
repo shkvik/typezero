@@ -46,7 +46,9 @@ partial class ExpressionTypes {
     const right = pair.right;
 
     if (pair.left.kind != TypeKind.Decimal) {
-      this.reportOperands(expr, pair, module);
+      const operandsError = this.operators.operandsError(expr, pair);
+
+      this.reportFound(module, operandsError);
 
       return this.store.plain(TypeKind.Error);
     }
@@ -102,7 +104,9 @@ partial class ExpressionTypes {
       });
     }
     if (this.types.definedType(other).kind != TypeKind.Double) {
-      return this.reportOperands(expr, pair, module);
+      const operandsError = this.operators.operandsError(expr, pair);
+
+      return this.reportFound(module, operandsError);
     }
     if (other.kind != TypeKind.Double) {
       return this.report(module, expr.loc, Code.DecimalInexactPlain, {

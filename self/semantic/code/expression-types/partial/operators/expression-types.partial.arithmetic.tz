@@ -75,7 +75,9 @@ partial class ExpressionTypes {
       left.kind == TypeKind.String || right.kind == TypeKind.String;
     const isJoin = expr.op == BinaryOp.Add && hasText;
     if (isOpen && isKnown && !isJoin) {
-      this.reportOperands(expr, pair, module);
+      const operandsError = this.operators.operandsError(expr, pair);
+
+      this.reportFound(module, operandsError);
     }
 
     return this.store.plain(TypeKind.Error);
@@ -317,12 +319,16 @@ partial class ExpressionTypes {
       this.types.isNumeric(left) && this.types.isNumeric(right);
     const common = this.operators.commonNumber(hasNumbers, left, right);
     if (hasNumbers && common == undefined) {
-      this.reportMixed(expr, pair, module);
+      const mixedError = this.operators.mixedError(expr, pair, module);
+
+      this.reportFound(module, mixedError);
 
       return this.store.plain(TypeKind.Error);
     }
     if (common == undefined) {
-      this.reportOperands(expr, pair, module);
+      const operandsError = this.operators.operandsError(expr, pair);
+
+      this.reportFound(module, operandsError);
 
       return this.store.plain(TypeKind.Error);
     }
@@ -379,7 +385,9 @@ partial class ExpressionTypes {
     const isBoth =
       this.operators.isWrapping(left) && this.operators.isWrapping(right);
     if (isBoth && left != right) {
-      this.reportMixed(expr, pair, module);
+      const mixedError = this.operators.mixedError(expr, pair, module);
+
+      this.reportFound(module, mixedError);
 
       return this.store.plain(TypeKind.Error);
     }
@@ -429,7 +437,9 @@ partial class ExpressionTypes {
       return this.wrappingResult(expr, pair, module);
     }
     if (left != right) {
-      this.reportMixed(expr, pair, module);
+      const mixedError = this.operators.mixedError(expr, pair, module);
+
+      this.reportFound(module, mixedError);
 
       return this.store.plain(TypeKind.Error);
     }
@@ -448,22 +458,42 @@ partial class ExpressionTypes {
     const right = pair.right;
 
     if (this.operators.isNothingChanged(expr, left)) {
-      this.reportNothingChanged(expr, left, module);
+      const nothingChangedError = this.operators.nothingChangedError(
+        expr,
+        left,
+        module,
+      );
+
+      this.reportFound(module, nothingChangedError);
 
       return true;
     }
     if (left.kind == TypeKind.Double || right.kind == TypeKind.Double) {
-      this.reportBitsOfDouble(expr, left, module);
+      const bitsOfDoubleError = this.operators.bitsOfDoubleError(
+        expr,
+        left,
+        module,
+      );
+
+      this.reportFound(module, bitsOfDoubleError);
 
       return true;
     }
     if (left.kind != TypeKind.Int || right.kind != TypeKind.Int) {
-      this.reportOperands(expr, pair, module);
+      const operandsError = this.operators.operandsError(expr, pair);
+
+      this.reportFound(module, operandsError);
 
       return true;
     }
     if (expr.op == BinaryOp.UShr && !left.unsigned) {
-      this.reportSignedShift(expr, left, module);
+      const signedShiftError = this.operators.signedShiftError(
+        expr,
+        left,
+        module,
+      );
+
+      this.reportFound(module, signedShiftError);
 
       return true;
     }
@@ -502,64 +532,5 @@ partial class ExpressionTypes {
       other: `${last}`,
       first,
     });
-  }
-
-  private reportMixed(expr: BinaryExpr, pair: OperandPair, module: int): void {
-    const left = pair.left;
-    const right = pair.right;
-    const op = this.sources.operatorText(expr.op);
-    const conversion = this.operators.mixedConversion(left, right);
-    const texts = this.sources.operandTexts(expr, module);
-    const method = this.mismatches.conversionName(conversion.target);
-    const first = this.text.of(left);
-    const second = this.text.of(right);
-
-    if (conversion.isLeftConverted) {
-      const shown = this.sources.operandText(texts.left);
-      const word = `${shown}.${method}() ${op} ${texts.right}`;
-
-      return this.report(module, expr.loc, Code.MixedNumbers, {
-        first,
-        second,
-        other: op,
-        word,
-      });
-    }
-
-    const shown = this.sources.operandText(texts.right);
-    const word = `${texts.left} ${op} ${shown}.${method}()`;
-
-    this.report(module, expr.loc, Code.MixedNumbers, {
-      first,
-      second,
-      other: op,
-      word,
-    });
-  }
-
-  private reportOperands(
-    expr: BinaryExpr,
-    pair: OperandPair,
-    module: int,
-  ): void {
-    const left = pair.left;
-    const right = pair.right;
-    const other = this.sources.operatorText(expr.op);
-    const first = this.text.of(left);
-    const second = this.text.of(right);
-    const isUndefined =
-      this.types.isOptional(left) ||
-      this.types.isOptional(right) ||
-      left.kind == TypeKind.Undefined ||
-      right.kind == TypeKind.Undefined;
-    if (isUndefined) {
-      return this.report(module, expr.loc, Code.OperandTypesUndefined, {
-        first,
-        second,
-        other,
-      });
-    }
-
-    this.report(module, expr.loc, Code.OperandTypes, { first, second, other });
   }
 }

@@ -1,4 +1,7 @@
-import { DateSetter } from "../../../code/expression-types/types/expression-types.types.tz";
+import {
+  DateSetter,
+  DateStatic,
+} from "../../../code/expression-types/types/expression-types.types.tz";
 
 export const kDateLocalLimit = 8640000864000000;
 export const kDateSetters: DateSetter[] = [
@@ -43,3 +46,11 @@ export const kShortYearBase = 1900;
 export const kUnknownYear = "y";
 export const kUtcSetterPrefix = "setUTC";
 export const kYearsInCycle = 400;
+export const kDateStatics: DateStatic[] = [
+  { name: "now", example: "()" },
+  { name: "UTC", example: "(y, m, d)" },
+  { name: "parse", example: "(s)" },
+];
+export const kGetYearName = "getYear";
+export const kGmtStringName = "toGMTString";
+export const kSetYearName = "setYear";

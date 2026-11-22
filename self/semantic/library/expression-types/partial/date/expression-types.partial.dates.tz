@@ -20,17 +20,14 @@ import {
 import {
   kDateLocaleMethods,
   kDateParseName,
-  kDateStatics,
   kDateUtcName,
-  kGetYearName,
-  kGmtStringName,
   kMostDateFields,
   kNoPlace,
-  kSetYearName,
   kToJsonName,
 } from "../../../../code/expression-types/const/expression-types.const.tz";
 import { OperandPair } from "../../../../code/expression-types/types/expression-types.types.tz";
 import { kDateName } from "../../../../types/type-questions/const/type-questions.const.tz";
+import { kGetYearName } from "../../../date-rules/const/date-rules.const.tz";
 
 partial class ExpressionTypes {
   private isDateName(expr: Expr, module: int): boolean {
@@ -90,7 +87,9 @@ partial class ExpressionTypes {
       return this.dateType();
     }
 
-    this.dateTextCheck(given, module);
+    const dateTextErrors = this.dates.dateTextCheck(given);
+
+    this.reportAll(module, dateTextErrors);
 
     return this.dateOfValue(given, module);
   }
@@ -164,7 +163,9 @@ partial class ExpressionTypes {
 
     const found = this.declaredStatic(instance, name);
     if (found == undefined || found.kind != TypeKind.Function) {
-      this.dateStaticReport(member, module);
+      const dateStaticError = this.dates.dateStaticError(member);
+
+      this.reportFound(module, dateStaticError);
       this.looseArguments(expr.args, module);
 
       return this.store.plain(TypeKind.Error);
@@ -182,7 +183,9 @@ partial class ExpressionTypes {
 
     const text = expr.args[0]?.expr;
     if (name == kDateParseName && text != undefined) {
-      this.dateTextCheck(text, module);
+      const dateTextErrors = this.dates.dateTextCheck(text);
+
+      this.reportAll(module, dateTextErrors);
       this.textArgument(text, module);
     }
 
@@ -206,46 +209,19 @@ partial class ExpressionTypes {
     extra: int,
     module: int,
   ): boolean {
-    const params = method.shape.params;
-    const least = params.filter((param) => !param.optional).length;
-    const most = params.length + extra;
-    const count = expr.args.length;
-    if (count >= least && count <= most) {
-      return true;
-    }
+    const checked = this.dates.dateCountCheck(expr, member, method, extra);
 
-    const word = this.calls.argumentCountText(least, most, false);
+    this.reportFound(module, checked.error);
 
-    this.report(module, member.loc, Code.ArgumentCount, {
-      word,
-      other: `${count}`,
-    });
-
-    return false;
+    return checked.value;
   }
 
   private dateStaticRead(expr: MemberExpr, module: int): Type {
-    this.dateStaticReport(expr, module);
+    const dateStaticError = this.dates.dateStaticError(expr);
+
+    this.reportFound(module, dateStaticError);
 
     return this.store.plain(TypeKind.Error);
-  }
-
-  private dateStaticReport(member: MemberExpr, module: int): void {
-    const word = member.name;
-    const known = kDateStatics.find((one) => one.name == word);
-    if (known == undefined) {
-      this.report(module, member.loc, Code.NamespaceMemberMissing, {
-        word,
-        first: kDateName,
-      });
-
-      return;
-    }
-
-    this.report(module, member.loc, Code.DateStaticRead, {
-      word,
-      other: known.example,
-    });
   }
 
   private dateMethodCall(
@@ -263,7 +239,9 @@ partial class ExpressionTypes {
 
     const method = this.libraryMemberType(instance, name, true);
     if (method == undefined || method.kind != TypeKind.Function) {
-      this.dateMissingReport(member, instance, module);
+      const dateMissingError = this.dates.dateMissingError(member, instance);
+
+      this.reportFound(module, dateMissingError);
       this.looseArguments(expr.args, module);
 
       return this.store.plain(TypeKind.Error);
@@ -295,29 +273,6 @@ partial class ExpressionTypes {
     }
 
     return result;
-  }
-
-  private dateMissingReport(
-    member: MemberExpr,
-    instance: InstanceType,
-    module: int,
-  ): void {
-    const word = member.name;
-    const loc = member.loc;
-
-    switch (word) {
-      case kGetYearName:
-        return this.report(module, loc, Code.DateGetYear, kNoDetails);
-      case kSetYearName:
-        return this.report(module, loc, Code.DateSetYear, kNoDetails);
-      case kGmtStringName:
-        return this.report(module, loc, Code.DateGmtString, kNoDetails);
-      default:
-        return this.report(module, loc, Code.PropertyMissing, {
-          word,
-          first: this.text.of(instance),
-        });
-    }
   }
 
   private dateMemberRead(
@@ -413,7 +368,9 @@ partial class ExpressionTypes {
           word: this.sources.operatorText(expr.op),
         });
       default:
-        return this.reportOperands(expr, pair, module);
+        const operandsError = this.operators.operandsError(expr, pair);
+
+        return this.reportFound(module, operandsError);
     }
   }
 }

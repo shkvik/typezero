@@ -1,22 +1,32 @@
+import {
+  Checked,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 import {
   CallExpr,
   Expr,
   ExprKind,
   MemberExpr,
+  NewExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import {
   InstanceType,
   Type,
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
+import {
+  kPromiseClass,
+  kPromiseStatics,
+  kSplitName,
+} from "./const/library-rules.const.tz";
 import { CallKind } from "../../code/expression-types/types/expression-types.types.tz";
 import { kPromisePlaceholder } from "../../code/statement-rules/const/statement-rules.const.tz";
 import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
 import { ModuleQuestions } from "../../declaration/module-questions/module-questions.tz";
 import { SourceTexts } from "../../code/source-texts/source-texts.tz";
 import { MismatchRules } from "../../types/mismatch-rules/mismatch-rules.tz";
-import { kSplitName } from "./const/library-rules.const.tz";
 
 export class LibraryRules {
   private readonly types: TypeQuestions;
@@ -148,6 +158,46 @@ export class LibraryRules {
     }
 
     return kPromisePlaceholder;
+  }
+
+  public executorCheck(expr: NewExpr, name: string): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const executor = expr.args[0]?.expr;
+    if (name != kPromiseClass || executor == undefined) {
+      return errors;
+    }
+    if (executor.kind != ExprKind.Function) {
+      return errors;
+    }
+
+    const second = executor.fn.params[1];
+    if (second != undefined) {
+      errors.push({
+        code: Code.PromiseRejectParam,
+        loc: second.loc,
+        details: kNoDetails,
+      });
+    }
+
+    return errors;
+  }
+
+  public promiseMissingCheck(member: MemberExpr): Checked<boolean> {
+    if (kPromiseStatics.includes(member.name)) {
+      return { value: false };
+    }
+
+    return {
+      value: true,
+      error: {
+        code: Code.PromiseStaticRefused,
+        loc: member.loc,
+        details: {
+          word: member.name,
+        },
+      },
+    };
   }
 
   private positionsOf(method: Type): boolean[] {

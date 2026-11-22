@@ -166,17 +166,6 @@ partial class ExpressionTypes {
     }
   }
 
-  private voidFieldCheck(
-    value: Expr,
-    type: Type,
-    name: string,
-    module: int,
-  ): void {
-    if (type.kind == TypeKind.Void) {
-      this.report(module, value.loc, Code.VoidFieldValue, { word: name });
-    }
-  }
-
   private stringCallCheck(expr: CallExpr, callee: NameExpr, module: int): void {
     const arg = expr.args[0]?.expr;
     const isString =

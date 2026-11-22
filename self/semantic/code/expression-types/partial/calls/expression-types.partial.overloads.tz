@@ -85,34 +85,17 @@ partial class ExpressionTypes {
     what: string,
     module: int,
   ): boolean {
-    if (this.classes.isSameParameters(one, other)) {
-      const isReturnOnly = one.shape.result != other.shape.result;
-      if (isReturnOnly && first.returnType != undefined) {
-        this.report(module, second.loc, Code.VariantReturnOnly, { word: what });
+    const checked = this.overloads.variantPairCheck(
+      first,
+      second,
+      one,
+      other,
+      what,
+    );
 
-        return true;
-      }
+    this.reportFound(module, checked.error);
 
-      this.report(module, second.loc, Code.VariantDuplicate, {
-        word: this.overloads.overloadText(second, other),
-      });
-
-      return true;
-    }
-
-    const count = this.overloads.sharedCount(one, other);
-    if (count < 0) {
-      return false;
-    }
-
-    this.report(module, second.loc, Code.VariantAmbiguous, {
-      first: this.overloads.overloadText(first, one),
-      second: this.overloads.overloadText(second, other),
-      other: `${count}`,
-      place: this.classes.pluralMark(count),
-    });
-
-    return true;
+    return checked.value;
   }
 
   private overloadCall(

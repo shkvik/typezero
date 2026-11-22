@@ -1,6 +1,5 @@
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
-import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import {
   Expr,
   ExprKind,
@@ -15,7 +14,6 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import { kStreamErrorName } from "../../const/expression-types.const.tz";
 import { FieldEntry, ObjectDraft } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
@@ -34,7 +32,9 @@ partial class ExpressionTypes {
 
     const draft = this.objectKeys(expr, module);
 
-    this.checkUnique(draft, module);
+    const uniqueErrors = this.objects.uniqueErrors(draft);
+
+    this.reportAll(module, uniqueErrors);
 
     if (draft.deferred && this.objects.hasMethods(expr)) {
       return this.methodObject(expr, target, module);
@@ -112,7 +112,9 @@ partial class ExpressionTypes {
         return { property, name, value, named: false };
       case PropertyKind.Method:
         draft.deferred = true;
-        this.literalMethodCheck(property, module);
+        const literalMethodError = this.generics.literalMethodCheck(property);
+
+        this.reportFound(module, literalMethodError);
 
         return { property, name, value, named: true };
       case PropertyKind.Defaulted: {
@@ -155,7 +157,9 @@ partial class ExpressionTypes {
 
     draft.typed = false;
 
-    this.reportKey(key, keyType, module);
+    const keyError = this.objects.keyError(key, keyType);
+
+    this.reportFound(module, keyError);
 
     return entry;
   }
@@ -183,39 +187,6 @@ partial class ExpressionTypes {
     }
   }
 
-  private reportKey(key: Expr, keyType: Type, module: int): void {
-    const plain = this.types.definedType(keyType);
-    if (this.types.isNumeric(plain)) {
-      return this.report(module, key.loc, Code.NumberKey, kNoDetails);
-    }
-    if (keyType.kind == TypeKind.String) {
-      return this.report(module, key.loc, Code.RuntimeKey, kNoDetails);
-    }
-
-    const first = this.text.of(keyType);
-
-    this.report(module, key.loc, Code.KeyNotString, { first });
-  }
-
-  private checkUnique(draft: ObjectDraft, module: int): void {
-    let index = 0;
-
-    for (const entry of draft.entries) {
-      const first = draft.entries.findIndex(
-        (one) => one.named && one.name == entry.name,
-      );
-
-      if (entry.named && first < index) {
-        this.report(module, entry.property.loc, Code.DuplicateLiteralField, {
-          word: entry.name,
-        });
-        draft.typed = false;
-      }
-
-      index += 1;
-    }
-  }
-
   private inferredObject(draft: ObjectDraft, module: int): Type {
     const fields: ObjectField[] = [];
 
@@ -226,7 +197,13 @@ partial class ExpressionTypes {
         continue;
       }
 
-      this.voidFieldCheck(entry.value, type, entry.name, module);
+      const voidFieldErrors = this.objects.voidFieldCheck(
+        entry.value,
+        type,
+        entry.name,
+      );
+
+      this.reportAll(module, voidFieldErrors);
 
       if (!this.isUsableField(entry, type, module)) {
         draft.typed = false;
@@ -248,18 +225,11 @@ partial class ExpressionTypes {
   }
 
   private isUsableField(entry: FieldEntry, type: Type, module: int): boolean {
-    if (type.kind == TypeKind.Error) {
-      return false;
-    }
-    if (type.kind != TypeKind.Undefined) {
-      return true;
-    }
+    const checked = this.objects.isUsableField(entry, type);
 
-    this.report(module, entry.value.loc, Code.UndefinedField, {
-      word: entry.name,
-    });
+    this.reportFound(module, checked.error);
 
-    return false;
+    return checked.value;
   }
 
   private targetedObject(
@@ -275,7 +245,9 @@ partial class ExpressionTypes {
     for (const entry of draft.entries) {
       const field = target.fields.find((one) => one.name == entry.name);
       if (!entry.named || field == undefined) {
-        this.reportNoField(entry, target, module);
+        const noFieldError = this.objects.noFieldError(entry, target);
+
+        this.reportFound(module, noFieldError);
         this.typed(entry.value, undefined, module);
 
         continue;
@@ -309,22 +281,6 @@ partial class ExpressionTypes {
     }
 
     return target;
-  }
-
-  private reportNoField(entry: FieldEntry, target: Type, module: int): void {
-    if (!entry.named) {
-      return;
-    }
-
-    const first = this.text.of(target);
-    const word = entry.name;
-    const loc = entry.property.loc;
-
-    if (first == kStreamErrorName) {
-      return this.report(module, loc, Code.NoSuchStreamField, { first, word });
-    }
-
-    this.report(module, loc, Code.NoSuchField, { first, word });
   }
 
   private literalMember(

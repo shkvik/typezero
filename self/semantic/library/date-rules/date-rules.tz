@@ -1,23 +1,36 @@
 import {
+  Checked,
+  Details,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
   Expr,
   ExprKind,
+  MemberExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
-import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import {
-  DateFields,
-  DayValue,
-} from "../date-reader/types/date-reader.types.tz";
+  FunctionType,
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
 import { DateFieldValues } from "../../code/expression-types/types/expression-types.types.tz";
-import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { kDateName } from "../../types/type-questions/const/type-questions.const.tz";
 import {
   kDateLocalLimit,
   kDateSetters,
+  kDateStatics,
   kDateTimeLimit,
   kDateYearLimit,
   kDateYearShift,
   kDayMilliseconds,
   kDaysInCycle,
   kEpochYear,
+  kGetYearName,
+  kGmtStringName,
   kHourMilliseconds,
   kLastShortYear,
   kMinuteMilliseconds,
@@ -25,19 +38,32 @@ import {
   kMonthNames,
   kMonthStarts,
   kSecondMilliseconds,
+  kSetYearName,
   kSetterPrefix,
   kShortYearBase,
   kUnknownYear,
   kUtcSetterPrefix,
   kYearsInCycle,
 } from "./const/date-rules.const.tz";
+import { CallRules } from "../../code/call-rules/call-rules.tz";
+import { DateReader } from "../date-reader/date-reader.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import {
+  DateFields,
+  DayValue,
+} from "../date-reader/types/date-reader.types.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
 import { CarriedDay } from "./types/date-rules.types.tz";
 
 export class DateRules {
   private readonly types: TypeQuestions;
+  private readonly text: TypeText;
+  private readonly calls: CallRules;
 
-  public constructor(types: TypeQuestions) {
+  public constructor(types: TypeQuestions, text: TypeText, calls: CallRules) {
     this.types = types;
+    this.text = text;
+    this.calls = calls;
   }
 
   public fieldValue(fields: DateFieldValues, field: int): int | undefined {
@@ -180,6 +206,159 @@ export class DateRules {
     const setter = kDateSetters.find((one) => one.name == field);
 
     return setter?.first;
+  }
+
+  public dateMissingError(
+    member: MemberExpr,
+    instance: InstanceType,
+  ): SourceError | undefined {
+    const word = member.name;
+    const loc = member.loc;
+
+    switch (word) {
+      case kGetYearName:
+        return { code: Code.DateGetYear, loc: loc, details: kNoDetails };
+      case kSetYearName:
+        return { code: Code.DateSetYear, loc: loc, details: kNoDetails };
+      case kGmtStringName:
+        return { code: Code.DateGmtString, loc: loc, details: kNoDetails };
+      default:
+        return {
+          code: Code.PropertyMissing,
+          loc: loc,
+          details: {
+            word,
+            first: this.text.of(instance),
+          },
+        };
+    }
+
+    return undefined;
+  }
+
+  public dateStaticError(member: MemberExpr): SourceError | undefined {
+    const word = member.name;
+    const known = kDateStatics.find((one) => one.name == word);
+    if (known == undefined) {
+      return {
+        code: Code.NamespaceMemberMissing,
+        loc: member.loc,
+        details: {
+          word,
+          first: kDateName,
+        },
+      };
+    }
+
+    return {
+      code: Code.DateStaticRead,
+      loc: member.loc,
+      details: {
+        word,
+        other: known.example,
+      },
+    };
+  }
+
+  public dateTextCheck(expr: Expr): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const text = this.dateTextOf(expr);
+    if (text == undefined) {
+      return errors;
+    }
+
+    const reader = new DateReader(text);
+    const fields = reader.read();
+    const loc = expr.loc;
+    if (fields == undefined) {
+      errors.push({
+        code: Code.DateTextUnreadable,
+        loc: loc,
+        details: { word: text },
+      });
+
+      return errors;
+    }
+    if (fields.isDateOnly) {
+      errors.push({
+        code: Code.DateTextNoTime,
+        loc: loc,
+        details: { word: text },
+      });
+
+      return errors;
+    }
+
+    const day = fields.day;
+    if (day.day > this.daysInMonth(day.year, day.month)) {
+      const other = this.missingDay(day.year, day.month, day.day);
+
+      errors.push({
+        code: Code.DateTextNoDay,
+        loc: loc,
+        details: {
+          word: text,
+          other,
+        },
+      });
+
+      return errors;
+    }
+    if (!this.isDateInRange(fields)) {
+      errors.push({
+        code: Code.DateTextOutside,
+        loc: loc,
+        details: { word: text },
+      });
+    }
+
+    return errors;
+  }
+
+  public fieldErrors(
+    fields: DateFieldValues,
+    field: int,
+    code: Code,
+    details: Details,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const arg = fields.args[field - fields.first]?.expr;
+    if (arg != undefined) {
+      errors.push({ code: code, loc: arg.loc, details: details });
+    }
+
+    return errors;
+  }
+
+  public dateCountCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    method: FunctionType,
+    extra: int,
+  ): Checked<boolean> {
+    const params = method.shape.params;
+    const least = params.filter((param) => !param.optional).length;
+    const most = params.length + extra;
+    const count = expr.args.length;
+    if (count >= least && count <= most) {
+      return { value: true };
+    }
+
+    const word = this.calls.argumentCountText(least, most, false);
+
+    return {
+      value: false,
+      error: {
+        code: Code.ArgumentCount,
+        loc: member.loc,
+        details: {
+          word,
+          other: `${count}`,
+        },
+      },
+    };
   }
 
   private isLeapYear(year: int): boolean {

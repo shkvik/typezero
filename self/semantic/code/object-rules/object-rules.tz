@@ -1,21 +1,34 @@
 import {
+  Checked,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import {
   Expr,
   ExprKind,
+  MemberExpr,
   ObjectLitExpr,
+  Property,
   PropertyKind,
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import {
   LiteralKind,
   ObjectField,
   ObjectType,
+  TupleType,
   Type,
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
 import {
+  FieldEntry,
   LiteralValue,
   ObjectDraft,
   SpreadSlot,
 } from "../expression-types/types/expression-types.types.tz";
+import { kLengthName } from "../expression-shapes/const/expression-shapes.const.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
+import { TypeUnifier } from "../../types/type-unifier/type-unifier.tz";
+import { SourceTexts } from "../source-texts/source-texts.tz";
 import { kDot } from "../source-texts/const/source-texts.const.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { TypeText } from "../../../program/type/type-text/type-text.tz";
@@ -24,6 +37,9 @@ import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
 import {
   kChainPlaceholder,
   kIdentifierMarks,
+  kPrototypeNames,
+  kRawName,
+  kStreamErrorName,
   kWrappedValueName,
 } from "./const/object-rules.const.tz";
 
@@ -32,17 +48,23 @@ export class ObjectRules {
   private readonly text: TypeText;
   private readonly relation: TypeRelation;
   private readonly types: TypeQuestions;
+  private readonly sources: SourceTexts;
+  private readonly unifier: TypeUnifier;
 
   public constructor(
     store: TypeStore,
     text: TypeText,
     relation: TypeRelation,
     types: TypeQuestions,
+    sources: SourceTexts,
+    unifier: TypeUnifier,
   ) {
     this.store = store;
     this.text = text;
     this.relation = relation;
     this.types = types;
+    this.sources = sources;
+    this.unifier = unifier;
   }
 
   public isSized(type: Type): boolean {
@@ -310,6 +332,334 @@ export class ObjectRules {
     const int = this.store.integer(64, false);
 
     return isWhole && this.relation.converts(int, fieldType);
+  }
+
+  public uniqueErrors(draft: ObjectDraft): SourceError[] {
+    const errors: SourceError[] = [];
+
+    let index = 0;
+
+    for (const entry of draft.entries) {
+      const first = draft.entries.findIndex(
+        (one) => one.named && one.name == entry.name,
+      );
+
+      if (entry.named && first < index) {
+        errors.push({
+          code: Code.DuplicateLiteralField,
+          loc: entry.property.loc,
+          details: {
+            word: entry.name,
+          },
+        });
+        draft.typed = false;
+      }
+
+      index += 1;
+    }
+
+    return errors;
+  }
+
+  public keyError(key: Expr, keyType: Type): SourceError | undefined {
+    const plain = this.types.definedType(keyType);
+    if (this.types.isNumeric(plain)) {
+      return { code: Code.NumberKey, loc: key.loc, details: kNoDetails };
+    }
+    if (keyType.kind == TypeKind.String) {
+      return { code: Code.RuntimeKey, loc: key.loc, details: kNoDetails };
+    }
+
+    const first = this.text.of(keyType);
+
+    return { code: Code.KeyNotString, loc: key.loc, details: { first } };
+  }
+
+  public missingFieldError(
+    expr: MemberExpr,
+    object: Type,
+  ): SourceError | undefined {
+    const word = expr.name;
+    const first = this.text.of(object);
+
+    if (kPrototypeNames.includes(word)) {
+      return {
+        code: Code.PrototypeMember,
+        loc: expr.loc,
+        details: {
+          word,
+          first,
+        },
+      };
+    }
+
+    return {
+      code: Code.PropertyMissing,
+      loc: expr.loc,
+      details: { word, first },
+    };
+  }
+
+  public noFieldError(
+    entry: FieldEntry,
+    target: Type,
+  ): SourceError | undefined {
+    if (!entry.named) {
+      return undefined;
+    }
+
+    const first = this.text.of(target);
+    const word = entry.name;
+    const loc = entry.property.loc;
+
+    if (first == kStreamErrorName) {
+      return {
+        code: Code.NoSuchStreamField,
+        loc: loc,
+        details: { first, word },
+      };
+    }
+
+    return { code: Code.NoSuchField, loc: loc, details: { first, word } };
+  }
+
+  public unknownUseError(
+    value: Expr,
+    object: Type,
+    what: string,
+  ): SourceError | undefined {
+    const word = this.sources.operandName(value);
+    const isObject = object.kind == TypeKind.AnyObject;
+    const code = this.unknownUseCode(isObject, what == "");
+
+    return { code: code, loc: value.loc, details: { word, other: what } };
+  }
+
+  public voidFieldCheck(value: Expr, type: Type, name: string): SourceError[] {
+    const errors: SourceError[] = [];
+
+    if (type.kind == TypeKind.Void) {
+      errors.push({
+        code: Code.VoidFieldValue,
+        loc: value.loc,
+        details: { word: name },
+      });
+    }
+
+    return errors;
+  }
+
+  public unknownUseCode(isObject: boolean, isIndex: boolean): Code {
+    if (isObject && isIndex) {
+      return Code.ObjectIndexUnknown;
+    }
+    if (isObject) {
+      return Code.ObjectMemberUnknown;
+    }
+    if (isIndex) {
+      return Code.UnknownIndexed;
+    }
+
+    return Code.UnknownMember;
+  }
+
+  public isUsableField(entry: FieldEntry, type: Type): Checked<boolean> {
+    if (type.kind == TypeKind.Error) {
+      return { value: false };
+    }
+    if (type.kind != TypeKind.Undefined) {
+      return { value: true };
+    }
+
+    return {
+      value: false,
+      error: {
+        code: Code.UndefinedField,
+        loc: entry.value.loc,
+        details: {
+          word: entry.name,
+        },
+      },
+    };
+  }
+
+  public mergeSpreadField(
+    property: Property,
+    field: ObjectField,
+    spread: ObjectType,
+    slots: SpreadSlot[],
+  ): Checked<boolean> {
+    const type = this.fieldWanted(field);
+    const slot = slots.find((one) => one.name == field.name);
+    if (slot == undefined) {
+      slots.push({ name: field.name, type });
+
+      return { value: true };
+    }
+    if (!this.types.isOptional(type)) {
+      slot.type = type;
+
+      return { value: true };
+    }
+
+    const joined = this.unifier.unify(
+      this.types.definedType(slot.type),
+      this.types.definedType(type),
+    );
+    if (joined == undefined || joined.kind == TypeKind.Error) {
+      return {
+        value: false,
+        error: {
+          code: Code.SpreadFieldTypes,
+          loc: property.loc,
+          details: {
+            word: field.name,
+            first: this.text.of(slot.type),
+            second: this.text.of(type),
+            other: this.text.of(spread),
+          },
+        },
+      };
+    }
+    if (this.types.isOptional(slot.type)) {
+      slot.type = this.types.optional(joined);
+
+      return { value: true };
+    }
+
+    slot.type = joined;
+
+    return { value: true };
+  }
+
+  public methodPropertyFits(
+    property: Property,
+    goal: ObjectType,
+    methods: ObjectField[],
+    first: string,
+  ): Checked<boolean> {
+    const word = property.name;
+    const member = this.plainMember(goal, word);
+    if (member == undefined) {
+      return {
+        value: false,
+        error: {
+          code: Code.LiteralFitNoField,
+          loc: property.loc,
+          details: {
+            first,
+            word,
+          },
+        },
+      };
+    }
+    if (property.form.kind != PropertyKind.Method) {
+      return { value: true };
+    }
+    if (member.type.kind != TypeKind.Function) {
+      return {
+        value: false,
+        error: {
+          code: Code.LiteralFitNotMethod,
+          loc: property.loc,
+          details: {
+            first,
+            word,
+            second: this.text.of(member.type),
+          },
+        },
+      };
+    }
+    if (!member.readonly) {
+      return {
+        value: false,
+        error: {
+          code: Code.LiteralFitReplaceable,
+          loc: property.loc,
+          details: {
+            first,
+            word,
+          },
+        },
+      };
+    }
+
+    const mine = methods.find((one) => one.name == word)?.type;
+    if (mine == undefined || mine.kind == TypeKind.Error) {
+      return { value: true };
+    }
+    if (this.relation.converts(mine, member.type)) {
+      return { value: true };
+    }
+
+    return {
+      value: false,
+      error: {
+        code: Code.LiteralFitOtherType,
+        loc: property.loc,
+        details: {
+          first,
+          word,
+          second: this.text.of(mine),
+          other: this.text.of(member.type),
+        },
+      },
+    };
+  }
+
+  public tupleMember(expr: MemberExpr, tuple: TupleType): Checked<Type> {
+    if (expr.name == kLengthName) {
+      return { value: this.store.integer(64, false) };
+    }
+
+    const word = expr.name;
+    const first = this.text.of(tuple);
+
+    return {
+      value: this.store.plain(TypeKind.Error),
+      error: {
+        code: Code.PropertyMissing,
+        loc: expr.loc,
+        details: { word, first },
+      },
+    };
+  }
+
+  public valueMember(expr: MemberExpr, object: Type): Checked<Type> {
+    const name = expr.name;
+    const isSized = this.isSized(object);
+    if (isSized && name == kLengthName) {
+      return { value: this.store.integer(64, false) };
+    }
+    if (this.isWrappedValue(object, name)) {
+      return { value: this.unsignedOf(object) };
+    }
+    if (this.isTextList(object) && name == kRawName) {
+      return { value: this.store.plain(TypeKind.Error) };
+    }
+
+    const word = name;
+    const first = this.text.of(object);
+
+    if (isSized || object.kind == TypeKind.Iterator) {
+      return {
+        value: this.store.plain(TypeKind.Error),
+        error: {
+          code: Code.MethodNotCalled,
+          loc: expr.loc,
+          details: { word, first },
+        },
+      };
+    }
+
+    return {
+      value: this.store.plain(TypeKind.Error),
+      error: {
+        code: Code.PropertyMissing,
+        loc: expr.loc,
+        details: { word, first },
+      },
+    };
   }
 
   private chainText(expr: Expr): string | undefined {

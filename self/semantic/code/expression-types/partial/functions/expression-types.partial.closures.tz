@@ -110,7 +110,9 @@ partial class ExpressionTypes {
       this.paramTypes.set(`${module} ${param.loc}`, inside);
 
       if (param.name == kThisParameter) {
-        this.thisParameterCheck(fn, param, module);
+        const thisParameterErrors = this.calls.thisParameterCheck(fn, param);
+
+        this.reportAll(module, thisParameterErrors);
         self = type;
 
         continue;
@@ -157,26 +159,11 @@ partial class ExpressionTypes {
     given: FunctionParameter | undefined,
     module: int,
   ): Type {
-    const isClash =
-      given != undefined &&
-      type.kind != TypeKind.Error &&
-      given.type.kind != TypeKind.Error &&
-      !this.relation.converts(given.type, type);
-    if (!isClash || given == undefined) {
-      return type;
-    }
+    const checked = this.functions.checkedParameter(param, type, given);
 
-    const word = param.name;
-    const first = this.text.of(type);
-    const second = this.text.of(given.type);
+    this.reportFound(module, checked.error);
 
-    this.report(module, param.loc, Code.ClosureParameterDiffers, {
-      word,
-      first,
-      second,
-    });
-
-    return type;
+    return checked.value;
   }
 
   private closureResult(

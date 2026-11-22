@@ -1,6 +1,9 @@
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../diagnostic/code.tz";
 import {
   Expr,
   ExprKind,
+  MemberExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import {
   LiteralKind,
@@ -175,6 +178,21 @@ export class DecimalRules {
     }
 
     return `decimal(${texts.left}) ${op} ${texts.right}`;
+  }
+
+  public decimalStaticMissingError(
+    member: MemberExpr,
+  ): SourceError | undefined {
+    const name = member.name;
+
+    return {
+      code: Code.DecimalStaticMissing,
+      loc: member.loc,
+      details: {
+        word: name,
+        place: this.decimalStaticHint(name),
+      },
+    };
   }
 
   private mantissaOf(clean: string, mark: int): string {

@@ -1,4 +1,10 @@
 import {
+  Checked,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
+import {
   ClassDecl,
   Decorator,
 } from "../../../program/ast/types/ast.types.classes.tz";
@@ -6,27 +12,33 @@ import {
   Expr,
   ExprKind,
 } from "../../../program/ast/types/ast.types.expressions.tz";
-import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
 import {
   FunctionType,
   Type,
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
 import {
-  DecoratedName,
   DecorateRun,
+  DecoratedName,
   DecoratorPlace,
   DecoratorUse,
 } from "../expression-types/types/expression-types.types.tz";
+import { OverloadRules } from "../overload-rules/overload-rules.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
 import { kHiddenMark } from "../source-texts/const/source-texts.const.tz";
 import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
-import { kDescriptorValueName } from "./const/decorator-rules.const.tz";
+import {
+  kDecoratorPlaces,
+  kDescriptorValueName,
+} from "./const/decorator-rules.const.tz";
 
 export class DecoratorRules {
   private readonly types: TypeQuestions;
+  private readonly overloads: OverloadRules;
 
-  public constructor(types: TypeQuestions) {
+  public constructor(types: TypeQuestions, overloads: OverloadRules) {
     this.types = types;
+    this.overloads = overloads;
   }
 
   public isDecoratedClass(decl: ClassDecl): boolean {
@@ -142,6 +154,135 @@ export class DecoratorRules {
     }
 
     return `'${name}'`;
+  }
+
+  public decoratedConstructorsCheck(decl: ClassDecl): SourceError | undefined {
+    const decorated = decl.constructors.filter((fn) =>
+      this.hasDecoratedParams(fn),
+    );
+    const second = decorated[1];
+    if (second == undefined) {
+      return undefined;
+    }
+
+    return {
+      code: Code.DecoratedConstructors,
+      loc: second.loc,
+      details: {
+        word: decl.name ?? "",
+      },
+    };
+  }
+
+  public nameClashCheck(
+    decl: ClassDecl,
+    earlier: DecoratedName[],
+    later: DecoratedName,
+  ): SourceError | undefined {
+    const other = earlier.find((one) => one.name == later.name);
+    if (other == undefined) {
+      return undefined;
+    }
+
+    const first = this.clashWhat(other, later);
+    const second = this.clashRecords(other, later);
+
+    return {
+      code: Code.DecoratedSameName,
+      loc: later.loc,
+      details: {
+        word: decl.name ?? "",
+        first,
+        second,
+      },
+    };
+  }
+
+  public parameterPlaceCheck(fn: FunctionDecl): SourceError[] {
+    const errors: SourceError[] = [];
+
+    if (fn.role != undefined) {
+      return errors;
+    }
+
+    for (const param of fn.params) {
+      const first = param.decorators[0];
+      if (first != undefined) {
+        errors.push({
+          code: Code.DecoratorParameterPlace,
+          loc: first.loc,
+          details: kNoDetails,
+        });
+      }
+    }
+
+    return errors;
+  }
+
+  public decoratorFit(
+    use: DecoratorUse,
+    place: DecoratorPlace,
+    type: Type,
+  ): Checked<int> {
+    const row = kDecoratorPlaces.find((one) => one.place == place);
+    const given = row?.given ?? 3;
+    if (row == undefined || type.kind != TypeKind.Function || type.shape.rest) {
+      return { value: given };
+    }
+
+    const params = type.shape.params;
+    const isUnknown = params.some((param) => param.type.kind == TypeKind.Error);
+    if (isUnknown) {
+      return { value: given };
+    }
+
+    const count = params.length;
+    const needs = Math.min(this.overloads.leastOf(type), count);
+    const word = this.decoratorLabel(use.decorator.expr);
+    const loc = use.decorator.loc;
+    if (needs > given) {
+      return {
+        value: -1,
+        error: {
+          code: Code.DecoratorArguments,
+          loc: loc,
+          details: {
+            word,
+            first: row.noun,
+            other: `${needs}`,
+            second: `${given}`,
+            place: row.args,
+          },
+        },
+      };
+    }
+
+    const third = this.thirdParameter(type);
+    const isDescriptor = third != undefined && this.isDescriptorType(third);
+    if (isDescriptor && place == DecoratorPlace.Parameter) {
+      return {
+        value: -1,
+        error: {
+          code: Code.DecoratorDescriptorParameter,
+          loc: loc,
+          details: { word },
+        },
+      };
+    }
+
+    const isPosition = third != undefined && this.isPositionType(third);
+    if (isPosition && place == DecoratorPlace.Method) {
+      return {
+        value: -1,
+        error: {
+          code: Code.DecoratorPositionMethod,
+          loc: loc,
+          details: { word },
+        },
+      };
+    }
+
+    return { value: count };
   }
 
   private isDecoratedFunction(fn: FunctionDecl): boolean {

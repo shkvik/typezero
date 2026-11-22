@@ -1,6 +1,5 @@
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
-import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import {
   ClassDecl,
   ClassField,
@@ -270,7 +269,9 @@ partial class ExpressionTypes {
       return;
     }
     if (this.isInsideInitClosure(frame)) {
-      return this.closureThisCheck(frame, expr, module);
+      const closureThisError = this.classes.closureThisCheck(frame, expr);
+
+      return this.reportFound(module, closureThisError);
     }
     if (!this.isInInit(frame) || this.thisObjects.has(expr)) {
       return;
@@ -282,19 +283,6 @@ partial class ExpressionTypes {
     }
 
     this.report(module, expr.loc, Code.ThisUsedEarly, { word });
-  }
-
-  private closureThisCheck(
-    frame: InitFrame,
-    expr: NameExpr,
-    module: int,
-  ): void {
-    const isReady = frame.closures[frame.closures.length - 1] ?? true;
-    if (isReady) {
-      return;
-    }
-
-    this.report(module, expr.loc, Code.ThisInEarlyClosure, kNoDetails);
   }
 
   private markThisObject(object: Expr, module: int): void {

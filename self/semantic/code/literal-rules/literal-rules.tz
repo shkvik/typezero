@@ -1,6 +1,9 @@
+import { Checked } from "../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../diagnostic/code.tz";
 import {
   Expr,
   ExprKind,
+  NameExpr,
   UnaryExpr,
   UnaryOp,
 } from "../../../program/ast/types/ast.types.expressions.tz";
@@ -10,7 +13,9 @@ import {
   Type,
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 import { LiteralValue } from "../expression-types/types/expression-types.types.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
 import { kIntLimits } from "../integer-math/const/integer-math.const.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
@@ -18,10 +23,12 @@ import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
 export class LiteralRules {
   private readonly store: TypeStore;
   private readonly types: TypeQuestions;
+  private readonly text: TypeText;
 
-  public constructor(store: TypeStore, types: TypeQuestions) {
+  public constructor(store: TypeStore, types: TypeQuestions, text: TypeText) {
     this.store = store;
     this.types = types;
+    this.text = text;
   }
 
   public plainLiteral(kind: LiteralKind, text: string): LiteralValue {
@@ -127,6 +134,59 @@ export class LiteralRules {
     );
 
     return this.store.unionOf(literals);
+  }
+
+  public nullTyped(expr: NameExpr, wanted: Type | undefined): Checked<Type> {
+    const target = this.types.wantedPart(wanted);
+    if (target != undefined && target.kind == TypeKind.Json) {
+      return { value: target };
+    }
+
+    return {
+      value: this.store.plain(TypeKind.Error),
+      error: { code: Code.NullValue, loc: expr.loc, details: kNoDetails },
+    };
+  }
+
+  public wholeTyped(
+    expr: Expr,
+    literal: LiteralValue,
+    parts: Type[],
+    base: Type,
+  ): Checked<Type> {
+    const exact = this.store.literal(LiteralKind.Int, literal.text);
+    const hasWholes = this.hasLiteral(parts, LiteralKind.Int);
+    const hasDoubles = this.hasLiteral(parts, LiteralKind.Double);
+    const isListed = parts.includes(exact) || !hasDoubles;
+    const hasLiterals = hasWholes || hasDoubles;
+    if (expr.kind == ExprKind.Name && hasLiterals) {
+      return { value: base };
+    }
+    if (hasWholes && isListed) {
+      return { value: exact };
+    }
+    if (hasDoubles) {
+      return { value: this.store.literal(LiteralKind.Double, literal.text) };
+    }
+
+    const target = parts.find((part) => this.types.isNumber(part));
+    if (target == undefined) {
+      return { value: base };
+    }
+    if (target.kind != TypeKind.Int || this.fits(literal, target)) {
+      return { value: target };
+    }
+    if (expr.kind == ExprKind.Name) {
+      return { value: base };
+    }
+
+    const word = this.text.of(target);
+    const loc = this.literalPlace(expr);
+
+    return {
+      value: target,
+      error: { code: Code.IntegerLiteralTooBig, loc: loc, details: { word } },
+    };
   }
 
   private signedDouble(value: double, negative: boolean): double {

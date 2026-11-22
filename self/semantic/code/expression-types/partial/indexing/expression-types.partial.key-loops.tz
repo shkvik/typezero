@@ -1,57 +1,13 @@
 import { ExpressionTypes } from "../../expression-types.tz";
-import { Code } from "../../../../../diagnostic/code.tz";
-import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import { ForOfStmt } from "../../../../../program/ast/types/ast.types.statements.tz";
-import {
-  DictKind,
-  Type,
-  TypeKind,
-} from "../../../../../program/type/types/type.types.tz";
+import { Type } from "../../../../../program/type/types/type.types.tz";
 
 partial class ExpressionTypes {
   private forInKeys(loop: ForOfStmt, iterable: Type, module: int): Type {
-    const error = this.store.plain(TypeKind.Error);
-    const object = loop.iterable;
-    const text = this.dictionaries.forInText(object, iterable);
-    const base = this.types.apparent(iterable);
-    const indexed = this.dictionaries.indexedWord(base);
-    if (indexed != undefined) {
-      this.report(module, object.loc, Code.ForInIndices, {
-        word: indexed,
-        other: text,
-        place: this.dictionaries.forEachPlace(base, text),
-      });
+    const checked = this.dictionaries.forInKeys(loop, iterable);
 
-      return error;
-    }
+    this.reportFound(module, checked.error);
 
-    const defined = this.types.apparent(this.types.definedType(iterable));
-    if (
-      this.types.isOptional(iterable) &&
-      this.dictionaries.isKeyHolder(defined)
-    ) {
-      this.report(module, object.loc, Code.ForInUndefined, kNoDetails);
-
-      return error;
-    }
-    if (defined.kind == TypeKind.Dict && defined.dict != DictKind.Record) {
-      const code = this.dictionaries.forInCode(defined.dict == DictKind.Map);
-
-      this.report(module, object.loc, code, { word: text });
-
-      return error;
-    }
-    if (this.dictionaries.isKeyless(base)) {
-      this.report(module, object.loc, Code.ForInNotObject, {
-        word: this.text.of(iterable),
-      });
-
-      return error;
-    }
-    if (base.kind == TypeKind.Error) {
-      return error;
-    }
-
-    return this.store.plain(TypeKind.String);
+    return checked.value;
   }
 }

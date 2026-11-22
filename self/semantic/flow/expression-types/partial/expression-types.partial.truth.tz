@@ -10,7 +10,6 @@ import {
   kBooleanName,
   kNarrowedCodes,
   kNumberName,
-  kOtherPlaceholder,
 } from "../../../code/expression-types/const/expression-types.const.tz";
 import { CallbackPlan } from "../../../code/expression-types/types/expression-types.types.tz";
 import {
@@ -20,6 +19,7 @@ import {
 } from "../../truth-rules/types/truth-rules.types.tz";
 import { kUnnamedOperand } from "../../../code/source-texts/const/source-texts.const.tz";
 import { kDateName } from "../../../types/type-questions/const/type-questions.const.tz";
+import { kOtherPlaceholder } from "../../../code/logic-rules/const/logic-rules.const.tz";
 
 partial class ExpressionTypes {
   private checkTruthy(

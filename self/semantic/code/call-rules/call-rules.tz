@@ -1,19 +1,31 @@
+import {
+  Checked,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
-import { CallExpr } from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  CallExpr,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
 import {
   DictKind,
   FunctionParameter,
   FunctionType,
   ObjectField,
+  ObjectType,
   Type,
   TypeKind,
   UnionType,
 } from "../../../program/type/types/type.types.tz";
 import {
+  ArgumentSlot,
   CallKind,
   CallTarget,
   RankedVariant,
 } from "../expression-types/types/expression-types.types.tz";
+import { ObjectRules } from "../object-rules/object-rules.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 import {
   BodySource,
   FunctionDecl,
@@ -31,17 +43,29 @@ import {
   kOrMore,
   kParameterLetters,
   kRangeDash,
+  kRepeatName,
+  kToFixedName,
 } from "./const/call-rules.const.tz";
 
 export class CallRules {
   private readonly store: TypeStore;
   private readonly types: TypeQuestions;
   private readonly parts: TypeParts;
+  private readonly text: TypeText;
+  private readonly objects: ObjectRules;
 
-  public constructor(store: TypeStore, types: TypeQuestions, parts: TypeParts) {
+  public constructor(
+    store: TypeStore,
+    types: TypeQuestions,
+    parts: TypeParts,
+    text: TypeText,
+    objects: ObjectRules,
+  ) {
     this.store = store;
     this.types = types;
     this.parts = parts;
+    this.text = text;
+    this.objects = objects;
   }
 
   public parameterWanted(param: FunctionParameter): Type {
@@ -251,6 +275,110 @@ export class CallRules {
     }
 
     return ", ...)";
+  }
+
+  public positionUseErrors(
+    slot: ArgumentSlot,
+    word: string,
+    name: string,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    if (name == kToFixedName) {
+      errors.push({
+        code: Code.FixedDigitsNotWhole,
+        loc: slot.expr.loc,
+        details: { word },
+      });
+    }
+    if (name == kRepeatName) {
+      errors.push({
+        code: Code.RepeatCountNotWhole,
+        loc: slot.expr.loc,
+        details: { word },
+      });
+    }
+
+    return errors;
+  }
+
+  public thisParameterCheck(fn: FunctionDecl, param: Param): SourceError[] {
+    const errors: SourceError[] = [];
+
+    if (fn.isArrow) {
+      errors.push({
+        code: Code.ArrowThisParameter,
+        loc: param.loc,
+        details: kNoDetails,
+      });
+
+      return errors;
+    }
+    if (fn.role != undefined) {
+      errors.push({
+        code: Code.MethodThisParameter,
+        loc: param.loc,
+        details: kNoDetails,
+      });
+    }
+
+    return errors;
+  }
+
+  public partMethod(
+    member: MemberExpr,
+    receiver: string,
+    part: ObjectType,
+  ): Checked<FunctionType | undefined> {
+    const word = member.name;
+    const first = this.text.of(part);
+    const field = part.fields.find((one) => one.name == word);
+    if (field != undefined && this.store.isBase(part)) {
+      return {
+        value: undefined,
+        error: {
+          code: Code.UnionMethodBase,
+          loc: member.loc,
+          details: {
+            word,
+            first: receiver,
+            second: first,
+          },
+        },
+      };
+    }
+    if (field == undefined) {
+      return {
+        value: undefined,
+        error: {
+          code: Code.VariantLacksMethod,
+          loc: member.loc,
+          details: {
+            word: receiver,
+            first,
+            other: word,
+          },
+        },
+      };
+    }
+
+    const type = this.objects.fieldWanted(field);
+    if (type.kind != TypeKind.Function) {
+      return {
+        value: undefined,
+        error: {
+          code: Code.UnionFieldNotFunction,
+          loc: member.loc,
+          details: {
+            word: receiver,
+            first,
+            other: word,
+          },
+        },
+      };
+    }
+
+    return { value: type };
   }
 
   private countRange(least: int, most: int, rest: boolean): string {

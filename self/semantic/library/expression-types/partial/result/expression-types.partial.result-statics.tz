@@ -181,7 +181,9 @@ partial class ExpressionTypes {
     module: int,
   ): Type {
     if (!this.results.isHoldingValues(draft, common)) {
-      this.noValuesReport(draft, common, literal, module);
+      const noValuesError = this.results.noValuesError(draft, common, literal);
+
+      this.reportFound(module, noValuesError);
 
       return this.store.plain(TypeKind.Error);
     }
@@ -210,7 +212,13 @@ partial class ExpressionTypes {
         return this.store.plain(TypeKind.Error);
       }
       if (!this.results.isHoldingValues(draft, result)) {
-        this.noValuesReport(draft, result, element.expr, module);
+        const noValuesError = this.results.noValuesError(
+          draft,
+          result,
+          element.expr,
+        );
+
+        this.reportFound(module, noValuesError);
 
         return this.store.plain(TypeKind.Error);
       }
@@ -256,7 +264,9 @@ partial class ExpressionTypes {
       return error;
     }
     if (!this.results.isHoldingValues(draft, item)) {
-      this.noValuesReport(draft, item, arg, module);
+      const noValuesError = this.results.noValuesError(draft, item, arg);
+
+      this.reportFound(module, noValuesError);
 
       return error;
     }
@@ -267,22 +277,5 @@ partial class ExpressionTypes {
       values,
       this.results.combinedErrors(draft, item.error),
     );
-  }
-
-  private noValuesReport(
-    draft: CombineDraft,
-    result: ResultType,
-    at: Expr,
-    module: int,
-  ): void {
-    const value = result.value;
-    const hasValues =
-      value.kind != TypeKind.Never && value.kind != TypeKind.Void;
-
-    this.report(module, at.loc, Code.ResultCombineVoid, {
-      word: this.text.of(result),
-      other: draft.what,
-      second: this.results.heldHalfWord(hasValues),
-    });
   }
 }

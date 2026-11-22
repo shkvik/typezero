@@ -1,4 +1,8 @@
-import { KnownName } from "../../../load/token/types/token.types.tz";
+import {
+  Checked,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../diagnostic/code.tz";
 import {
   Expr,
   ExprKind,
@@ -11,6 +15,9 @@ import {
   Type,
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { KnownName } from "../../../load/token/types/token.types.tz";
 import { kIteratorKey } from "../../types/type-questions/const/type-questions.const.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import {
@@ -22,9 +29,13 @@ import {
 
 export class IndexRules {
   private readonly store: TypeStore;
+  private readonly text: TypeText;
+  private readonly types: TypeQuestions;
 
-  public constructor(store: TypeStore) {
+  public constructor(store: TypeStore, text: TypeText, types: TypeQuestions) {
     this.store = store;
+    this.text = text;
+    this.types = types;
   }
 
   public listItem(list: Type): Type | undefined {
@@ -149,5 +160,52 @@ export class IndexRules {
     const next = result.fields.find((field) => field.name == kNextName);
 
     return next != undefined && next.type.kind == TypeKind.Function;
+  }
+
+  public tupleRangeError(
+    expr: IndexExpr,
+    tuple: TupleType,
+    word: string,
+  ): SourceError | undefined {
+    const count = tuple.items.length;
+    const first = this.text.of(tuple);
+    const other = this.elementCountText(count);
+
+    return {
+      code: Code.TupleKeyRange,
+      loc: expr.index.loc,
+      details: {
+        word,
+        first,
+        other,
+      },
+    };
+  }
+
+  public notPatternArray(init: Expr, given: Type): Checked<Type> {
+    const defined = this.types.definedType(given);
+    const isMaybe =
+      this.types.isOptional(given) && defined.kind == TypeKind.Array;
+    const word = this.text.of(given);
+    const error = this.store.plain(TypeKind.Error);
+    if (isMaybe) {
+      return {
+        value: error,
+        error: {
+          code: Code.DestructureMaybeUndefined,
+          loc: init.loc,
+          details: { word },
+        },
+      };
+    }
+
+    return {
+      value: error,
+      error: {
+        code: Code.DestructureNotArray,
+        loc: init.loc,
+        details: { word },
+      },
+    };
   }
 }

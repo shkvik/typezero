@@ -89,69 +89,28 @@ partial class ExpressionTypes {
       return true;
     }
     if (base.kind == TypeKind.Union) {
-      this.collectionUnionCheck(expr, left, base.parts, word, module);
+      const collectionUnionErrors = this.classes.collectionUnionCheck(
+        expr,
+        left,
+        base.parts,
+        word,
+      );
+
+      this.reportAll(module, collectionUnionErrors);
 
       return true;
     }
 
-    this.collectionTypeCheck(expr, left, base, word, module);
+    const collectionTypeError = this.classes.collectionTypeCheck(
+      expr,
+      left,
+      base,
+      word,
+    );
+
+    this.reportFound(module, collectionTypeError);
 
     return true;
-  }
-
-  private collectionTypeCheck(
-    expr: BinaryExpr,
-    left: Type,
-    base: Type,
-    word: string,
-    module: int,
-  ): void {
-    if (this.classes.isCollectionOf(word, left)) {
-      return this.report(module, expr.loc, Code.InstanceOfAlwaysTrue, {
-        word,
-        first: this.text.of(left),
-      });
-    }
-    if (
-      this.types.isOptional(left) &&
-      this.classes.isCollectionOf(word, base)
-    ) {
-      return this.report(module, expr.loc, Code.InstanceOfOrUndefined, {
-        first: this.text.of(base),
-      });
-    }
-
-    this.report(module, expr.loc, Code.InstanceOfNeverBuiltin, {
-      word,
-      first: this.text.of(left),
-    });
-  }
-
-  private collectionUnionCheck(
-    expr: BinaryExpr,
-    left: Type,
-    parts: Type[],
-    word: string,
-    module: int,
-  ): void {
-    const matching = parts.filter((part) =>
-      this.classes.isCollectionOf(word, part),
-    );
-    const first = this.text.of(this.types.definedType(left));
-    if (matching.length == 0) {
-      return this.report(module, expr.loc, Code.InstanceOfNoneBuiltin, {
-        word,
-        first,
-      });
-    }
-
-    const isAll = matching.length == parts.length;
-    if (isAll && !this.types.isOptional(left)) {
-      this.report(module, expr.loc, Code.InstanceOfAllBuiltin, {
-        word,
-        first,
-      });
-    }
   }
 
   private testedClass(rhs: Expr, module: int): ClassDecl | undefined {
@@ -234,36 +193,9 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.relatedCheck(expr, base, instance, word, module);
-  }
+    const relatedErrors = this.classes.relatedCheck(expr, base, instance, word);
 
-  private relatedCheck(
-    expr: BinaryExpr,
-    base: Type,
-    instance: Type,
-    word: string,
-    module: int,
-  ): void {
-    const first = this.text.of(base);
-
-    if (base.kind == TypeKind.Instance) {
-      if (this.classes.isUnrelatedClass(base, instance)) {
-        this.report(module, expr.loc, Code.InstanceOfNeverClass, {
-          word,
-          first,
-        });
-      }
-
-      return;
-    }
-
-    const isPlain =
-      base.kind == TypeKind.Object && this.store.labelOf(base) == undefined;
-    if (!isPlain || this.types.ancestorsOf(instance).includes(base)) {
-      return;
-    }
-
-    this.report(module, expr.loc, Code.InstanceOfNeverMade, { word, first });
+    this.reportAll(module, relatedErrors);
   }
 
   private memberTargetDeclared(

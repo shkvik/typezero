@@ -91,39 +91,10 @@ partial class ExpressionTypes {
     part: ObjectType,
     module: int,
   ): FunctionType | undefined {
-    const word = member.name;
-    const first = this.text.of(part);
-    const field = part.fields.find((one) => one.name == word);
-    if (field != undefined && this.store.isBase(part)) {
-      this.report(module, member.loc, Code.UnionMethodBase, {
-        word,
-        first: receiver,
-        second: first,
-      });
+    const checked = this.calls.partMethod(member, receiver, part);
 
-      return undefined;
-    }
-    if (field == undefined) {
-      this.report(module, member.loc, Code.VariantLacksMethod, {
-        word: receiver,
-        first,
-        other: word,
-      });
+    this.reportFound(module, checked.error);
 
-      return undefined;
-    }
-
-    const type = this.objects.fieldWanted(field);
-    if (type.kind != TypeKind.Function) {
-      this.report(module, member.loc, Code.UnionFieldNotFunction, {
-        word: receiver,
-        first,
-        other: word,
-      });
-
-      return undefined;
-    }
-
-    return type;
+    return checked.value;
   }
 }

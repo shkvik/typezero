@@ -4,26 +4,9 @@ import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
   CallExpr,
   ExprKind,
-  NewExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
-import { kPromiseClass } from "../../../code/expression-types/const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private executorCheck(expr: NewExpr, name: string, module: int): void {
-    const executor = expr.args[0]?.expr;
-    if (name != kPromiseClass || executor == undefined) {
-      return;
-    }
-    if (executor.kind != ExprKind.Function) {
-      return;
-    }
-
-    const second = executor.fn.params[1];
-    if (second != undefined) {
-      this.report(module, second.loc, Code.PromiseRejectParam, kNoDetails);
-    }
-  }
-
   private timerArgumentsCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     const isTimer =

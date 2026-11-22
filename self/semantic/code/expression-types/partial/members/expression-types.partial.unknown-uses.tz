@@ -34,7 +34,13 @@ partial class ExpressionTypes {
 
     const what = `property '${expr.name}'`;
 
-    this.unknownUseReport(expr.object, object, what, module);
+    const unknownUseError = this.objects.unknownUseError(
+      expr.object,
+      object,
+      what,
+    );
+
+    this.reportFound(module, unknownUseError);
 
     return true;
   }
@@ -52,7 +58,13 @@ partial class ExpressionTypes {
     const what = `method '${member.name}'`;
 
     this.looseArguments(expr.args, module);
-    this.unknownUseReport(member.object, object, what, module);
+    const unknownUseError = this.objects.unknownUseError(
+      member.object,
+      object,
+      what,
+    );
+
+    this.reportFound(module, unknownUseError);
 
     return true;
   }
@@ -67,36 +79,15 @@ partial class ExpressionTypes {
     }
 
     this.walkedPart(expr.index, module);
-    this.unknownUseReport(expr.object, object, "", module);
+    const unknownUseError = this.objects.unknownUseError(
+      expr.object,
+      object,
+      "",
+    );
+
+    this.reportFound(module, unknownUseError);
 
     return true;
-  }
-
-  private unknownUseReport(
-    value: Expr,
-    object: Type,
-    what: string,
-    module: int,
-  ): void {
-    const word = this.sources.operandName(value);
-    const isObject = object.kind == TypeKind.AnyObject;
-    const code = this.unknownUseCode(isObject, what == "");
-
-    this.report(module, value.loc, code, { word, other: what });
-  }
-
-  private unknownUseCode(isObject: boolean, isIndex: boolean): Code {
-    if (isObject && isIndex) {
-      return Code.ObjectIndexUnknown;
-    }
-    if (isObject) {
-      return Code.ObjectMemberUnknown;
-    }
-    if (isIndex) {
-      return Code.UnknownIndexed;
-    }
-
-    return Code.UnknownMember;
   }
 
   private unknownCheckText(expr: Expr, given: Type, wanted: Type): string {

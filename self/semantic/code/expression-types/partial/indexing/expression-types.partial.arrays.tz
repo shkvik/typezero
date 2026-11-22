@@ -10,10 +10,7 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import {
-  kNoPlace,
-  kTypeSeparator,
-} from "../../const/expression-types.const.tz";
+import { kNoPlace } from "../../const/expression-types.const.tz";
 import { ArrayDraft } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
@@ -170,7 +167,13 @@ partial class ExpressionTypes {
     const hint = this.arrays.spreadHint(item);
     const type = this.typed(expr, hint, module);
 
-    this.resumedCheck(expr, type, Code.SpreadResumes, module);
+    const resumedError = this.functions.resumedCheck(
+      expr,
+      type,
+      Code.SpreadResumes,
+    );
+
+    this.reportFound(module, resumedError);
 
     const element = this.spreadItem(expr, type, module);
     const source = this.arrays.spreadSource(type);
@@ -208,36 +211,19 @@ partial class ExpressionTypes {
   }
 
   private refusedSpread(expr: Expr, type: Type, code: Code, module: int): Type {
-    const first = this.text.of(type);
+    const checked = this.arrays.refusedSpread(expr, type, code);
 
-    this.report(module, expr.loc, code, { first });
+    this.reportFound(module, checked.error);
 
-    return this.store.plain(TypeKind.Error);
+    return checked.value;
   }
 
   private tupleItem(expr: Expr, tuple: Type, module: int): Type {
-    if (tuple.kind != TypeKind.Tuple) {
-      return this.store.plain(TypeKind.Error);
-    }
+    const checked = this.arrays.tupleItem(expr, tuple);
 
-    let element: Type | undefined = undefined;
+    this.reportFound(module, checked.error);
 
-    for (const part of tuple.items) {
-      element = this.arrays.joinedItem(element, part);
-      if (element == undefined || element.kind == TypeKind.Error) {
-        break;
-      }
-    }
-
-    if (element == undefined || element.kind == TypeKind.Error) {
-      const first = this.text.of(tuple);
-
-      this.report(module, expr.loc, Code.TupleSpreadDiffers, { first });
-
-      return this.store.plain(TypeKind.Error);
-    }
-
-    return element;
+    return checked.value;
   }
 
   private secondPass(
@@ -281,7 +267,14 @@ partial class ExpressionTypes {
 
       const joined = this.arrays.joinedItem(element, type);
       if (joined == undefined) {
-        this.reportElements(expr, types, element, index, module);
+        const elementsError = this.arrays.elementsError(
+          expr,
+          types,
+          element,
+          index,
+        );
+
+        this.reportFound(module, elementsError);
 
         return undefined;
       }
@@ -302,40 +295,6 @@ partial class ExpressionTypes {
     }
 
     return element;
-  }
-
-  private reportElements(
-    expr: ArrayLitExpr,
-    types: Type[],
-    before: Type | undefined,
-    index: int,
-    module: int,
-  ): void {
-    const element = expr.elements[index];
-    const type = types[index];
-    if (element == undefined || before == undefined || type == undefined) {
-      return;
-    }
-
-    const first = this.text.of(before);
-    const second = this.text.of(type);
-    const hasSpread = expr.elements.some((one) => one.spread);
-    const hasFailed = types.some((one) => one.kind == TypeKind.Error);
-    if (hasSpread || hasFailed) {
-      return this.report(module, element.expr.loc, Code.ElementTypesDiffer, {
-        first,
-        second,
-      });
-    }
-
-    const texts = types.map((one) => this.text.of(one));
-    const other = texts.join(kTypeSeparator);
-
-    this.report(module, element.expr.loc, Code.ElementTypesNeedTuple, {
-      first,
-      second,
-      other,
-    });
   }
 
   private coerceElements(

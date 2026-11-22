@@ -14,8 +14,6 @@ import {
 } from "../../../../../program/type/types/type.types.tz";
 import {
   kRoundingNames,
-  kRepeatName,
-  kToFixedName,
   kNoPlace,
 } from "../../const/expression-types.const.tz";
 import {
@@ -243,21 +241,9 @@ partial class ExpressionTypes {
     const word = this.text.of(given);
 
     this.report(module, slot.expr.loc, code, { word });
-    this.positionUseReport(slot, word, method, module);
-  }
+    const positionUseErrors = this.calls.positionUseErrors(slot, word, method);
 
-  private positionUseReport(
-    slot: ArgumentSlot,
-    word: string,
-    name: string,
-    module: int,
-  ): void {
-    if (name == kToFixedName) {
-      this.report(module, slot.expr.loc, Code.FixedDigitsNotWhole, { word });
-    }
-    if (name == kRepeatName) {
-      this.report(module, slot.expr.loc, Code.RepeatCountNotWhole, { word });
-    }
+    this.reportAll(module, positionUseErrors);
   }
 
   private mathArgumentCheck(

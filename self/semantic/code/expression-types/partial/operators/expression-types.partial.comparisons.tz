@@ -53,7 +53,9 @@ partial class ExpressionTypes {
       return;
     }
     if (left.kind == TypeKind.Void || right.kind == TypeKind.Void) {
-      return this.reportOperands(expr, pair, module);
+      const operandsError = this.operators.operandsError(expr, pair);
+
+      return this.reportFound(module, operandsError);
     }
     if (left.kind == TypeKind.Undefined || right.kind == TypeKind.Undefined) {
       return;
@@ -188,7 +190,9 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.reportOperands(expr, pair, module);
+    const operandsError = this.operators.operandsError(expr, pair);
+
+    this.reportFound(module, operandsError);
   }
 
   private reportIncomparable(
@@ -212,10 +216,14 @@ partial class ExpressionTypes {
       !this.types.isOptional(left) &&
       !this.types.isOptional(right);
     if (hasNumbers) {
-      return this.reportMixed(expr, pair, module);
+      const mixedError = this.operators.mixedError(expr, pair, module);
+
+      return this.reportFound(module, mixedError);
     }
 
-    this.reportOperands(expr, pair, module);
+    const operandsError = this.operators.operandsError(expr, pair);
+
+    this.reportFound(module, operandsError);
   }
 
   private orderTyped(expr: BinaryExpr, module: int): Type {
@@ -257,7 +265,9 @@ partial class ExpressionTypes {
       return this.decimalComparison(expr, pair, module);
     }
     if (!this.types.isNumeric(left) || !this.types.isNumeric(right)) {
-      return this.reportOperands(expr, pair, module);
+      const operandsError = this.operators.operandsError(expr, pair);
+
+      return this.reportFound(module, operandsError);
     }
 
     const adapted = this.adapted(expr, pair, module);
@@ -265,7 +275,9 @@ partial class ExpressionTypes {
     const hasIntegers =
       adapted.left.kind == TypeKind.Int && adapted.right.kind == TypeKind.Int;
     if (!isSame && !hasIntegers) {
-      this.reportMixed(expr, adapted, module);
+      const mixedError = this.operators.mixedError(expr, adapted, module);
+
+      this.reportFound(module, mixedError);
     }
   }
 
@@ -300,7 +312,9 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
     if (left.kind == TypeKind.Void || right.kind == TypeKind.Void) {
-      this.reportOperands(expr, pair, module);
+      const operandsError = this.operators.operandsError(expr, pair);
+
+      this.reportFound(module, operandsError);
 
       return this.store.plain(TypeKind.Error);
     }
@@ -310,7 +324,9 @@ partial class ExpressionTypes {
 
     const base = this.comparisons.nullishBase(left, right);
     if (base == undefined || base.kind == TypeKind.Error) {
-      this.reportOperands(expr, pair, module);
+      const operandsError2 = this.operators.operandsError(expr, pair);
+
+      this.reportFound(module, operandsError2);
 
       return this.store.plain(TypeKind.Error);
     }

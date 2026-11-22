@@ -195,21 +195,6 @@ partial class ExpressionTypes {
     return given;
   }
 
-  private tupleWriteCheck(target: IndexExpr, tuple: Type, module: int): void {
-    const index = target.index;
-    if (tuple.kind != TypeKind.Tuple || !tuple.readonly) {
-      return;
-    }
-    if (index.kind != ExprKind.IntLit) {
-      return;
-    }
-
-    this.report(module, target.loc, Code.ObjectReadOnlyField, {
-      word: `${index.value}`,
-      first: this.text.of(tuple),
-    });
-  }
-
   private compoundUndefinedCheck(
     expr: AssignExpr,
     tested: Type,
@@ -243,17 +228,11 @@ partial class ExpressionTypes {
   }
 
   private logicalTargetCheck(expr: AssignExpr, module: int): boolean {
-    const op = expr.op;
-    const isLogical = op == BinaryOp.LogAnd || op == BinaryOp.LogOr;
-    if (!isLogical || this.shapes.isSimpleTarget(expr.target)) {
-      return false;
-    }
+    const checked = this.flows.logicalTargetCheck(expr);
 
-    const word = this.flows.logicalAssignWord(op == BinaryOp.LogAnd);
+    this.reportFound(module, checked.error);
 
-    this.report(module, expr.target.loc, Code.LogicalAssignSimple, { word });
-
-    return true;
+    return checked.value;
   }
 
   private arrayWriteCheck(
@@ -269,7 +248,9 @@ partial class ExpressionTypes {
 
     const base = this.types.definedType(object);
     if (base.kind == TypeKind.Tuple) {
-      return this.tupleWriteCheck(target, base, module);
+      const tupleWriteError = this.flows.tupleWriteCheck(target, base);
+
+      return this.reportFound(module, tupleWriteError);
     }
     if (base.kind != TypeKind.Array) {
       return;

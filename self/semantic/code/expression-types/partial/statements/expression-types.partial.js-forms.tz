@@ -35,7 +35,9 @@ partial class ExpressionTypes {
     if (right.kind == TypeKind.String) {
       const pair: OperandPair = { left, right: object };
 
-      this.reportOperands(expr, pair, module);
+      const operandsError = this.operators.operandsError(expr, pair);
+
+      this.reportFound(module, operandsError);
 
       return true;
     }
@@ -105,16 +107,11 @@ partial class ExpressionTypes {
   }
 
   private rawTextsCheck(expr: MemberExpr, object: Type, module: int): boolean {
-    if (expr.name != "raw" || object.kind != TypeKind.Array) {
-      return false;
-    }
-    if (this.types.definedType(object.item).kind != TypeKind.String) {
-      return false;
-    }
+    const checked = this.statements.rawTextsCheck(expr, object);
 
-    this.report(module, expr.loc, Code.TemplateRaw, kNoDetails);
+    this.reportFound(module, checked.error);
 
-    return true;
+    return checked.value;
   }
 
   private stringRawCheck(

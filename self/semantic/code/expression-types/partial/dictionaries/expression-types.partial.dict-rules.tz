@@ -1,8 +1,6 @@
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
-import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import { messageText } from "../../../../../diagnostic/message.tz";
-import { Details } from "../../../../../diagnostic/types/message.types.tz";
 import {
   BinaryExpr,
   CallExpr,
@@ -17,7 +15,6 @@ import {
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
 import {
-  kDictIterating,
   kThisName,
   kUnsupportedMark,
 } from "../../const/expression-types.const.tz";
@@ -70,34 +67,11 @@ partial class ExpressionTypes {
     first: string,
     module: int,
   ): boolean {
-    const name = expr.name;
-    const isMap = dict == DictKind.Map;
-    const details: Details = { word, first, other: name };
+    const checked = this.dictionaries.dictMissingCall(expr, dict, word, first);
 
-    if (isMap && name == "add") {
-      this.report(module, expr.loc, Code.MapHasNoAdd, details);
+    this.reportFound(module, checked.error);
 
-      return true;
-    }
-    if (!isMap && (name == "set" || name == "get")) {
-      this.report(module, expr.loc, Code.SetHasNoGet, details);
-
-      return true;
-    }
-    if (!kDictIterating.includes(name)) {
-      return false;
-    }
-
-    const place = this.dictionaries.iteratingSource(isMap);
-
-    this.report(module, expr.loc, Code.DictNotIterating, {
-      word,
-      first,
-      other: name,
-      place,
-    });
-
-    return true;
+    return checked.value;
   }
 
   private dictTargetCheck(target: Expr, module: int): boolean {
@@ -138,18 +112,11 @@ partial class ExpressionTypes {
   }
 
   private setTargetCheck(target: Expr, word: string, module: int): boolean {
-    if (target.kind == ExprKind.Index) {
-      this.report(module, target.loc, Code.SetIndexSet, { word });
+    const checked = this.dictionaries.setTargetCheck(target, word);
 
-      return true;
-    }
-    if (target.kind == ExprKind.Member && target.name == "size") {
-      this.report(module, target.loc, Code.SetSizeSet, { word });
+    this.reportFound(module, checked.error);
 
-      return true;
-    }
-
-    return false;
+    return checked.value;
   }
 
   private dictDeleteCheck(expr: UnaryExpr, module: int): boolean {
@@ -181,20 +148,11 @@ partial class ExpressionTypes {
   }
 
   private dictInCheck(expr: BinaryExpr, object: Type, module: int): boolean {
-    const dict = this.dictionaries.collectionOf(object);
-    if (dict == undefined) {
-      return false;
-    }
+    const checked = this.dictionaries.dictInCheck(expr, object);
 
-    const isMap = dict == DictKind.Map;
+    this.reportFound(module, checked.error);
 
-    this.report(module, expr.loc, Code.DictIn, {
-      word: this.dictionaries.collectionWord(dict),
-      first: this.dictionaries.dictText(expr.rhs, dict),
-      other: this.dictionaries.entryPart(isMap),
-    });
-
-    return true;
+    return checked.value;
   }
 
   private dictKeysCheck(expr: CallExpr, module: int): void {
@@ -225,7 +183,13 @@ partial class ExpressionTypes {
 
     const dict = this.dictionaries.collectionOf(type);
     if (dict == undefined) {
-      this.objectArgumentCheck(arg, type, callee.name, module);
+      const objectArgumentError = this.dictionaries.objectArgumentCheck(
+        arg,
+        type,
+        callee.name,
+      );
+
+      this.reportFound(module, objectArgumentError);
 
       return this.listedFieldsCheck(arg, type, callee.name, module);
     }
@@ -238,32 +202,6 @@ partial class ExpressionTypes {
       first: this.dictionaries.collectionWord(dict),
       second: this.dictionaries.dictText(arg, dict),
       other: method,
-    });
-  }
-
-  private objectArgumentCheck(
-    arg: Expr,
-    type: Type,
-    word: string,
-    module: int,
-  ): void {
-    const base = this.types.definedType(type);
-    const isHolder =
-      base.kind == TypeKind.Object ||
-      base.kind == TypeKind.Dict ||
-      base.kind == TypeKind.Instance;
-    if (this.types.isOptional(type) && isHolder) {
-      this.report(module, arg.loc, Code.ObjectMaybeUndefined, kNoDetails);
-
-      return;
-    }
-    if (!this.dictionaries.isNeverObject(type)) {
-      return;
-    }
-
-    this.report(module, arg.loc, Code.ObjectNeedsObject, {
-      word,
-      first: this.text.of(type),
     });
   }
 

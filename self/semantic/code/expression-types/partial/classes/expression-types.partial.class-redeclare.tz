@@ -32,7 +32,13 @@ partial class ExpressionTypes {
         continue;
       }
       if (parent == undefined) {
-        this.lonelyOverrideCheck(decl, field, hasParent, module);
+        const lonelyOverrideError = this.classes.lonelyOverrideCheck(
+          decl,
+          field,
+          hasParent,
+        );
+
+        this.reportFound(module, lonelyOverrideError);
 
         continue;
       }
@@ -52,25 +58,6 @@ partial class ExpressionTypes {
     }
 
     return instance;
-  }
-
-  private lonelyOverrideCheck(
-    decl: ClassDecl,
-    field: ClassField,
-    hasParent: boolean,
-    module: int,
-  ): void {
-    if (!field.isOverride || hasParent) {
-      return;
-    }
-
-    const word = field.name;
-    const first = decl.name ?? "";
-
-    this.report(module, field.loc, Code.FieldOverrideNoParent, {
-      word,
-      first,
-    });
   }
 
   private redeclareCheck(
@@ -93,7 +80,9 @@ partial class ExpressionTypes {
       return;
     }
     if (entry == undefined || inherited == undefined) {
-      return this.newFieldCheck(field, parent, module);
+      const newFieldError = this.classes.newFieldCheck(field, parent);
+
+      return this.reportFound(module, newFieldError);
     }
 
     const owner = entry.owner.name ?? "";
@@ -107,8 +96,21 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.fieldAccessCheck(decl, field, inherited, owner, module);
-    this.redeclaredValueCheck(decl, field, owner, module);
+    const fieldAccessError = this.classes.fieldAccessCheck(
+      decl,
+      field,
+      inherited,
+      owner,
+    );
+
+    this.reportFound(module, fieldAccessError);
+    const redeclaredValueError = this.classes.redeclaredValueCheck(
+      decl,
+      field,
+      owner,
+    );
+
+    this.reportFound(module, redeclaredValueError);
 
     const own: ClassMemberEntry = {
       owner: decl,
@@ -119,21 +121,6 @@ partial class ExpressionTypes {
     };
 
     this.fieldLayoutCheck(decl, own, entry, module);
-  }
-
-  private newFieldCheck(
-    field: ClassField,
-    parent: InstanceType,
-    module: int,
-  ): void {
-    if (!field.isOverride) {
-      return;
-    }
-
-    const word = field.name;
-    const first = parent.name;
-
-    this.report(module, field.loc, Code.FieldOverrideMissing, { word, first });
   }
 
   private parentMethodChecks(decl: ClassDecl, module: int): void {
@@ -173,46 +160,6 @@ partial class ExpressionTypes {
     this.report(module, field.loc, Code.ParentMethodField, { word, first });
   }
 
-  private fieldAccessCheck(
-    decl: ClassDecl,
-    field: ClassField,
-    inherited: ClassField,
-    owner: string,
-    module: int,
-  ): void {
-    const ownRank = this.classes.accessRank(field.access);
-    const theirRank = this.classes.accessRank(inherited.access);
-    if (ownRank <= theirRank) {
-      return;
-    }
-
-    this.report(module, field.loc, Code.FieldAccessNarrower, {
-      word: field.name,
-      other: this.classes.accessWord(inherited.access),
-      first: owner,
-      second: this.classes.accessWord(field.access),
-      place: decl.name ?? "",
-    });
-  }
-
-  private redeclaredValueCheck(
-    decl: ClassDecl,
-    field: ClassField,
-    owner: string,
-    module: int,
-  ): void {
-    const isGiven =
-      field.init != undefined || field.form == FieldKind.Parameter;
-    if (isGiven || decl.constructors.length > 0) {
-      return;
-    }
-
-    this.report(module, field.loc, Code.FieldRedeclaredNoValue, {
-      word: field.name,
-      first: owner,
-    });
-  }
-
   private fieldLayoutCheck(
     decl: ClassDecl,
     own: ClassMemberEntry,
@@ -248,23 +195,11 @@ partial class ExpressionTypes {
     parent: InstanceType,
     module: int,
   ): boolean {
-    const field = entry.field;
-    if (field == undefined || entry.isStatic) {
-      return false;
-    }
+    const checked = this.classes.methodOverFieldCheck(method, entry, parent);
 
-    const word = method.name;
-    const first = entry.owner.name ?? parent.name;
+    this.reportFound(module, checked.error);
 
-    if (this.classes.isArrowField(field)) {
-      this.report(module, method.loc, Code.ArrowOverride, { word, first });
-
-      return true;
-    }
-
-    this.report(module, method.loc, Code.MethodOverField, { word, first });
-
-    return true;
+    return checked.value;
   }
 
   private extendsCycleCheck(decl: ClassDecl, module: int): void {

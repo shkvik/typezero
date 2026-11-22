@@ -1,21 +1,39 @@
+import {
+  Checked,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 import {
   Expr,
   ExprKind,
+  MemberExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import {
   DictKind,
+  TupleType,
   Type,
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
-import { ValueTarget } from "../expression-types/types/expression-types.types.tz";
 import {
+  DeclaredVariable,
+  FunctionFrame,
+  ValueTarget,
+} from "../expression-types/types/expression-types.types.tz";
+import {
+  ForOfStmt,
+  ReturnStmt,
   Stmt,
   StmtKind,
 } from "../../../program/ast/types/ast.types.statements.tz";
-import { SymbolKind } from "../../../program/scopes/types/scopes.types.tz";
-import { kNameSeparator } from "../../types/type-of-rules/const/type-of-rules.const.tz";
+import { IndexRules } from "../index-rules/index-rules.tz";
 import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
+import { SymbolKind } from "../../../program/scopes/types/scopes.types.tz";
+import { SourceTexts } from "../source-texts/source-texts.tz";
+import { FunctionRules } from "../function-rules/function-rules.tz";
+import { ComparisonRules } from "../comparison-rules/comparison-rules.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { kNameSeparator } from "../../types/type-of-rules/const/type-of-rules.const.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { TypeRelation } from "../../types/type-relation/type-relation.tz";
 import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
@@ -31,17 +49,32 @@ export class StatementRules {
   private readonly relation: TypeRelation;
   private readonly types: TypeQuestions;
   private readonly modules: ModuleQuestions;
+  private readonly text: TypeText;
+  private readonly comparisons: ComparisonRules;
+  private readonly functions: FunctionRules;
+  private readonly sources: SourceTexts;
+  private readonly indexes: IndexRules;
 
   public constructor(
     store: TypeStore,
     relation: TypeRelation,
     types: TypeQuestions,
     modules: ModuleQuestions,
+    text: TypeText,
+    comparisons: ComparisonRules,
+    functions: FunctionRules,
+    sources: SourceTexts,
+    indexes: IndexRules,
   ) {
     this.store = store;
     this.relation = relation;
     this.types = types;
     this.modules = modules;
+    this.text = text;
+    this.comparisons = comparisons;
+    this.functions = functions;
+    this.sources = sources;
+    this.indexes = indexes;
   }
 
   public boundsText(isLiteral: boolean, index: string, below: string): string {
@@ -302,6 +335,177 @@ export class StatementRules {
     }
 
     return "x - y";
+  }
+
+  public caseTypeCheck(
+    test: Expr,
+    type: Type,
+    subject: Type,
+  ): SourceError | undefined {
+    if (type.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    const common = this.comparisons.comparisonType(subject, type);
+    if (common != undefined) {
+      return undefined;
+    }
+
+    const hasResult =
+      type.kind == TypeKind.Result || subject.kind == TypeKind.Result;
+    const code = this.caseCode(hasResult);
+
+    return {
+      code: code,
+      loc: test.loc,
+      details: {
+        word: this.text.of(this.functions.widened(type)),
+        first: this.text.of(subject),
+      },
+    };
+  }
+
+  public emptyReturnError(
+    statement: ReturnStmt,
+    result: Type,
+    frame: FunctionFrame,
+  ): SourceError | undefined {
+    const isOpen =
+      result.kind == TypeKind.Error ||
+      result.kind == TypeKind.Undefined ||
+      this.types.isOptional(result);
+    if (isOpen || frame.fn == undefined) {
+      return undefined;
+    }
+
+    const word = this.functions.functionLabel(frame.fn);
+    const first = this.text.of(result);
+
+    return {
+      code: Code.ReturnValueMissing,
+      loc: statement.loc,
+      details: {
+        word,
+        first,
+      },
+    };
+  }
+
+  public promiseUsedError(
+    expr: Expr,
+    value: Type,
+    at: int | undefined,
+    module: int,
+  ): SourceError | undefined {
+    const text = this.sources.statementText(at, module);
+    const held = this.heldType(value);
+    if (held.kind == TypeKind.Result) {
+      const word = this.shownText(text);
+
+      return {
+        code: Code.PromiseResultUnchecked,
+        loc: expr.loc,
+        details: {
+          word,
+        },
+      };
+    }
+    if (text == "") {
+      return {
+        code: Code.PromiseNotAwaited,
+        loc: expr.loc,
+        details: kNoDetails,
+      };
+    }
+
+    return {
+      code: Code.PromiseNotAwaitedHere,
+      loc: expr.loc,
+      details: { word: text },
+    };
+  }
+
+  public undefinedError(
+    variable: DeclaredVariable,
+    init: Expr,
+  ): SourceError | undefined {
+    const decl = variable.decl;
+    const word = decl.name;
+
+    if (variable.isConst) {
+      return {
+        code: Code.UndefinedConstNeedsType,
+        loc: init.loc,
+        details: {
+          word,
+        },
+      };
+    }
+
+    return {
+      code: Code.UndefinedLetNeedsType,
+      loc: decl.loc,
+      details: { word },
+    };
+  }
+
+  public returnAwaitCheck(
+    value: Expr | undefined,
+    frame: FunctionFrame,
+  ): SourceError | undefined {
+    const isAsync = frame.fn?.isAsync == true;
+    if (value == undefined || !isAsync || value.kind != ExprKind.Await) {
+      return undefined;
+    }
+    if (frame.fn?.concise == true) {
+      return { code: Code.ArrowAwait, loc: value.loc, details: kNoDetails };
+    }
+
+    return { code: Code.ReturnAwait, loc: value.loc, details: kNoDetails };
+  }
+
+  public switchFunctionCheck(statement: Stmt): SourceError[] {
+    const errors: SourceError[] = [];
+
+    if (statement.kind == StmtKind.Function) {
+      errors.push({
+        code: Code.FunctionInSwitch,
+        loc: statement.loc,
+        details: kNoDetails,
+      });
+    }
+
+    return errors;
+  }
+
+  public rawTextsCheck(expr: MemberExpr, object: Type): Checked<boolean> {
+    if (expr.name != "raw" || object.kind != TypeKind.Array) {
+      return { value: false };
+    }
+    if (this.types.definedType(object.item).kind != TypeKind.String) {
+      return { value: false };
+    }
+
+    return {
+      value: true,
+      error: { code: Code.TemplateRaw, loc: expr.loc, details: kNoDetails },
+    };
+  }
+
+  public tupleLoopItem(loop: ForOfStmt, tuple: TupleType): Checked<Type> {
+    const element = this.indexes.tupleElement(tuple);
+    if (element != undefined) {
+      return { value: element };
+    }
+
+    return {
+      value: this.store.plain(TypeKind.Error),
+      error: {
+        code: Code.TupleIterated,
+        loc: loop.iterable.loc,
+        details: kNoDetails,
+      },
+    };
   }
 
   private namedTarget(

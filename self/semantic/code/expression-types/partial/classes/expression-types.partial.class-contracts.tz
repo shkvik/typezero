@@ -11,7 +11,6 @@ import {
 import { FunctionDecl } from "../../../../../program/ast/types/ast.types.functions.tz";
 import { TypeRef } from "../../../../../program/ast/types/ast.types.types.tz";
 import {
-  FunctionType,
   InstanceType,
   ObjectField,
   Type,
@@ -32,7 +31,9 @@ partial class ExpressionTypes {
     }
 
     this.extendsCheck(decl, module);
-    this.abstractMethodsCheck(decl, module);
+    const abstractMethodsErrors = this.classes.abstractMethodsCheck(decl);
+
+    this.reportAll(module, abstractMethodsErrors);
     this.abstractParentsCheck(decl, instance, module);
 
     for (const ref of decl.interfaces) {
@@ -56,24 +57,6 @@ partial class ExpressionTypes {
     const first = decl.name ?? "";
 
     this.report(module, base.loc, Code.ExtendsNotClass, { word, first });
-  }
-
-  private abstractMethodsCheck(decl: ClassDecl, module: int): void {
-    if (decl.isAbstract) {
-      return;
-    }
-
-    for (const method of decl.methods) {
-      if (method.role?.method == MethodKind.Abstract) {
-        const word = method.name;
-        const first = decl.name ?? "";
-
-        this.report(module, method.loc, Code.AbstractNeedsClass, {
-          word,
-          first,
-        });
-      }
-    }
   }
 
   private abstractParentsCheck(
@@ -191,7 +174,9 @@ partial class ExpressionTypes {
       type.kind == TypeKind.Instance &&
       !this.modules.isLibraryModule(type.module)
     ) {
-      return this.reportImplementsClass(decl, ref, module);
+      const implementsClassError = this.classes.implementsClassError(decl, ref);
+
+      return this.reportFound(module, implementsClassError);
     }
     if (type.kind != TypeKind.Object) {
       return;
@@ -211,22 +196,6 @@ partial class ExpressionTypes {
     }
   }
 
-  private reportImplementsClass(
-    decl: ClassDecl,
-    ref: TypeRef,
-    module: int,
-  ): void {
-    const word = ref.name;
-
-    if (decl.base != undefined || decl.baseExpr != undefined) {
-      this.report(module, ref.loc, Code.ImplementsClassExtended, { word });
-
-      return;
-    }
-
-    this.report(module, ref.loc, Code.ImplementsClass, { word });
-  }
-
   private contractMember(
     decl: ClassDecl,
     instance: InstanceType,
@@ -243,7 +212,13 @@ partial class ExpressionTypes {
     }
     if (entry == undefined) {
       if (!field.optional) {
-        this.reportMissingMember(decl, iface, field, module);
+        const missingMemberError = this.classes.missingMemberError(
+          decl,
+          iface,
+          field,
+        );
+
+        this.reportFound(module, missingMemberError);
       }
 
       return;
@@ -278,25 +253,6 @@ partial class ExpressionTypes {
     }
 
     this.contractMethods(entry, iface, field, first, module);
-  }
-
-  private reportMissingMember(
-    decl: ClassDecl,
-    iface: string,
-    field: ObjectField,
-    module: int,
-  ): void {
-    const word = field.name;
-    const first = decl.name ?? "";
-    const text = this.text.of(field.type);
-    const other = `${word}: ${text}`;
-
-    this.report(module, decl.loc, Code.ImplementsMissing, {
-      word,
-      first,
-      second: iface,
-      other,
-    });
   }
 
   private contractField(
@@ -353,39 +309,15 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.contractResult(method, type, wanted, iface, first, module);
-  }
+    const contractResultError = this.classes.contractResultError(
+      method,
+      type,
+      wanted,
+      iface,
+      first,
+    );
 
-  private contractResult(
-    method: FunctionDecl,
-    type: FunctionType,
-    wanted: FunctionType,
-    iface: string,
-    first: string,
-    module: int,
-  ): void {
-    const mine = type.shape.result;
-    const theirs = wanted.shape.result;
-
-    if (method.returnType == undefined) {
-      return;
-    }
-
-    const isFitting =
-      mine == theirs ||
-      mine.kind == TypeKind.Error ||
-      this.relation.converts(mine, theirs);
-    if (isFitting) {
-      return;
-    }
-
-    this.report(module, method.loc, Code.ImplementsReturns, {
-      word: method.name,
-      first: this.text.of(mine),
-      second: iface,
-      other: first,
-      place: this.text.of(theirs),
-    });
+    this.reportFound(module, contractResultError);
   }
 
   private superMethodCall(

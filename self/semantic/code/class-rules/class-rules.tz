@@ -1,3 +1,7 @@
+import {
+  Checked,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   Access,
@@ -8,55 +12,67 @@ import {
   MethodKind,
 } from "../../../program/ast/types/ast.types.classes.tz";
 import {
+  BinaryExpr,
   ExprKind,
   MemberExpr,
+  NameExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
-import {
-  TypeRef,
-  TypeRefKind,
-} from "../../../program/ast/types/ast.types.types.tz";
 import {
   DictKind,
   FunctionType,
   InstanceType,
+  ObjectField,
   Type,
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
-import {
-  ParameterSite,
-  TypeContext,
-  TypePlace,
-} from "../../types/type-resolver/types/type-resolver.types.tz";
 import {
   ClassMemberEntry,
   InitFrame,
   ThisPlace,
 } from "../expression-types/types/expression-types.types.tz";
+import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../program/ast/types/ast.types.types.tz";
+import {
+  ParameterSite,
+  TypeContext,
+  TypePlace,
+} from "../../types/type-resolver/types/type-resolver.types.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 import { kDateName } from "../../types/type-questions/const/type-questions.const.tz";
-import { TypeText } from "../../../program/type/type-text/type-text.tz";
-import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
-import { ModuleQuestions } from "../../declaration/module-questions/module-questions.tz";
 import {
   kMapClass,
   kPrivateWord,
   kProtectedWord,
   kPublicWord,
 } from "./const/class-rules.const.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { TypeRelation } from "../../types/type-relation/type-relation.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { ModuleQuestions } from "../../declaration/module-questions/module-questions.tz";
 
 export class ClassRules {
   private readonly text: TypeText;
   private readonly types: TypeQuestions;
   private readonly modules: ModuleQuestions;
+  private readonly relation: TypeRelation;
+  private readonly store: TypeStore;
 
   public constructor(
     text: TypeText,
     types: TypeQuestions,
     modules: ModuleQuestions,
+    relation: TypeRelation,
+    store: TypeStore,
   ) {
     this.text = text;
     this.types = types;
     this.modules = modules;
+    this.relation = relation;
+    this.store = store;
   }
 
   public contextOf(module: int, place: TypePlace): TypeContext {
@@ -406,6 +422,463 @@ export class ClassRules {
     }
 
     return "s";
+  }
+
+  public abstractMethodsCheck(decl: ClassDecl): SourceError[] {
+    const errors: SourceError[] = [];
+
+    if (decl.isAbstract) {
+      return errors;
+    }
+
+    for (const method of decl.methods) {
+      if (method.role?.method == MethodKind.Abstract) {
+        const word = method.name;
+        const first = decl.name ?? "";
+
+        errors.push({
+          code: Code.AbstractNeedsClass,
+          loc: method.loc,
+          details: {
+            word,
+            first,
+          },
+        });
+      }
+    }
+
+    return errors;
+  }
+
+  public memberNameErrors(decl: ClassDecl, index: int): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const field = decl.fields[index];
+    if (field == undefined) {
+      return errors;
+    }
+
+    const word = field.name;
+    const first = decl.name ?? "";
+    const isStatic = field.form == FieldKind.Static;
+    const earlier = decl.fields
+      .slice(0, index)
+      .find(
+        (one) => one.name == word && (one.form == FieldKind.Static) == isStatic,
+      );
+
+    if (earlier != undefined) {
+      errors.push({
+        code: Code.DuplicateMember,
+        loc: field.loc,
+        details: { word, first },
+      });
+    }
+
+    for (const method of decl.methods) {
+      const isSame =
+        method.name == word && this.isStaticMethod(method) == isStatic;
+      if (isSame) {
+        errors.push({
+          code: Code.FieldMethodClash,
+          loc: method.loc,
+          details: {
+            word,
+            first,
+          },
+        });
+      }
+    }
+
+    return errors;
+  }
+
+  public closureThisCheck(
+    frame: InitFrame,
+    expr: NameExpr,
+  ): SourceError | undefined {
+    const isReady = frame.closures[frame.closures.length - 1] ?? true;
+    if (isReady) {
+      return undefined;
+    }
+
+    return {
+      code: Code.ThisInEarlyClosure,
+      loc: expr.loc,
+      details: kNoDetails,
+    };
+  }
+
+  public collectionTypeCheck(
+    expr: BinaryExpr,
+    left: Type,
+    base: Type,
+    word: string,
+  ): SourceError | undefined {
+    if (this.isCollectionOf(word, left)) {
+      return {
+        code: Code.InstanceOfAlwaysTrue,
+        loc: expr.loc,
+        details: {
+          word,
+          first: this.text.of(left),
+        },
+      };
+    }
+    if (this.types.isOptional(left) && this.isCollectionOf(word, base)) {
+      return {
+        code: Code.InstanceOfOrUndefined,
+        loc: expr.loc,
+        details: {
+          first: this.text.of(base),
+        },
+      };
+    }
+
+    return {
+      code: Code.InstanceOfNeverBuiltin,
+      loc: expr.loc,
+      details: {
+        word,
+        first: this.text.of(left),
+      },
+    };
+  }
+
+  public collectionUnionCheck(
+    expr: BinaryExpr,
+    left: Type,
+    parts: Type[],
+    word: string,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const matching = parts.filter((part) => this.isCollectionOf(word, part));
+    const first = this.text.of(this.types.definedType(left));
+    if (matching.length == 0) {
+      errors.push({
+        code: Code.InstanceOfNoneBuiltin,
+        loc: expr.loc,
+        details: {
+          word,
+          first,
+        },
+      });
+
+      return errors;
+    }
+
+    const isAll = matching.length == parts.length;
+    if (isAll && !this.types.isOptional(left)) {
+      errors.push({
+        code: Code.InstanceOfAllBuiltin,
+        loc: expr.loc,
+        details: {
+          word,
+          first,
+        },
+      });
+    }
+
+    return errors;
+  }
+
+  public contractResultError(
+    method: FunctionDecl,
+    type: FunctionType,
+    wanted: FunctionType,
+    iface: string,
+    first: string,
+  ): SourceError | undefined {
+    const mine = type.shape.result;
+    const theirs = wanted.shape.result;
+
+    if (method.returnType == undefined) {
+      return undefined;
+    }
+
+    const isFitting =
+      mine == theirs ||
+      mine.kind == TypeKind.Error ||
+      this.relation.converts(mine, theirs);
+    if (isFitting) {
+      return undefined;
+    }
+
+    return {
+      code: Code.ImplementsReturns,
+      loc: method.loc,
+      details: {
+        word: method.name,
+        first: this.text.of(mine),
+        second: iface,
+        other: first,
+        place: this.text.of(theirs),
+      },
+    };
+  }
+
+  public fieldAccessCheck(
+    decl: ClassDecl,
+    field: ClassField,
+    inherited: ClassField,
+    owner: string,
+  ): SourceError | undefined {
+    const ownRank = this.accessRank(field.access);
+    const theirRank = this.accessRank(inherited.access);
+    if (ownRank <= theirRank) {
+      return undefined;
+    }
+
+    return {
+      code: Code.FieldAccessNarrower,
+      loc: field.loc,
+      details: {
+        word: field.name,
+        other: this.accessWord(inherited.access),
+        first: owner,
+        second: this.accessWord(field.access),
+        place: decl.name ?? "",
+      },
+    };
+  }
+
+  public lonelyOverrideCheck(
+    decl: ClassDecl,
+    field: ClassField,
+    hasParent: boolean,
+  ): SourceError | undefined {
+    if (!field.isOverride || hasParent) {
+      return undefined;
+    }
+
+    const word = field.name;
+    const first = decl.name ?? "";
+
+    return {
+      code: Code.FieldOverrideNoParent,
+      loc: field.loc,
+      details: {
+        word,
+        first,
+      },
+    };
+  }
+
+  public newFieldCheck(
+    field: ClassField,
+    parent: InstanceType,
+  ): SourceError | undefined {
+    if (!field.isOverride) {
+      return undefined;
+    }
+
+    const word = field.name;
+    const first = parent.name;
+
+    return {
+      code: Code.FieldOverrideMissing,
+      loc: field.loc,
+      details: { word, first },
+    };
+  }
+
+  public overrideAccessCheck(
+    method: FunctionDecl,
+    theirs: FunctionDecl,
+    parent: InstanceType,
+  ): SourceError | undefined {
+    const own = this.accessOf(method);
+    const their = this.accessOf(theirs);
+    if (this.accessRank(own) <= this.accessRank(their)) {
+      return undefined;
+    }
+
+    return {
+      code: Code.OverrideAccess,
+      loc: method.loc,
+      details: {
+        word: method.name,
+        first: this.accessWord(their),
+        second: parent.name,
+        other: this.accessWord(own),
+      },
+    };
+  }
+
+  public overrideResultCheck(
+    method: FunctionDecl,
+    decl: ClassDecl,
+    own: FunctionType,
+    theirs: FunctionType,
+    parent: InstanceType,
+  ): SourceError | undefined {
+    const mine = own.shape.result;
+    const other = theirs.shape.result;
+    const isSame = mine == other || mine.kind == TypeKind.Error;
+    if (isSame || method.returnType == undefined) {
+      return undefined;
+    }
+
+    return {
+      code: Code.OverrideReturns,
+      loc: method.loc,
+      details: {
+        word: method.name,
+        first: this.text.of(mine),
+        second: decl.name ?? "",
+        other: this.text.of(other),
+        place: parent.name,
+      },
+    };
+  }
+
+  public redeclaredValueCheck(
+    decl: ClassDecl,
+    field: ClassField,
+    owner: string,
+  ): SourceError | undefined {
+    const isGiven =
+      field.init != undefined || field.form == FieldKind.Parameter;
+    if (isGiven || decl.constructors.length > 0) {
+      return undefined;
+    }
+
+    return {
+      code: Code.FieldRedeclaredNoValue,
+      loc: field.loc,
+      details: {
+        word: field.name,
+        first: owner,
+      },
+    };
+  }
+
+  public relatedCheck(
+    expr: BinaryExpr,
+    base: Type,
+    instance: Type,
+    word: string,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const first = this.text.of(base);
+
+    if (base.kind == TypeKind.Instance) {
+      if (this.isUnrelatedClass(base, instance)) {
+        errors.push({
+          code: Code.InstanceOfNeverClass,
+          loc: expr.loc,
+          details: {
+            word,
+            first,
+          },
+        });
+      }
+
+      return errors;
+    }
+
+    const isPlain =
+      base.kind == TypeKind.Object && this.store.labelOf(base) == undefined;
+    if (!isPlain || this.types.ancestorsOf(instance).includes(base)) {
+      return errors;
+    }
+
+    errors.push({
+      code: Code.InstanceOfNeverMade,
+      loc: expr.loc,
+      details: { word, first },
+    });
+
+    return errors;
+  }
+
+  public implementsClassError(
+    decl: ClassDecl,
+    ref: TypeRef,
+  ): SourceError | undefined {
+    const word = ref.name;
+
+    if (decl.base != undefined || decl.baseExpr != undefined) {
+      return {
+        code: Code.ImplementsClassExtended,
+        loc: ref.loc,
+        details: { word },
+      };
+    }
+
+    return { code: Code.ImplementsClass, loc: ref.loc, details: { word } };
+  }
+
+  public missingMemberError(
+    decl: ClassDecl,
+    iface: string,
+    field: ObjectField,
+  ): SourceError | undefined {
+    const word = field.name;
+    const first = decl.name ?? "";
+    const text = this.text.of(field.type);
+    const other = `${word}: ${text}`;
+
+    return {
+      code: Code.ImplementsMissing,
+      loc: decl.loc,
+      details: {
+        word,
+        first,
+        second: iface,
+        other,
+      },
+    };
+  }
+
+  public staticError(
+    expr: MemberExpr,
+    entry: ClassMemberEntry,
+  ): SourceError | undefined {
+    return {
+      code: Code.StaticViaInstance,
+      loc: expr.loc,
+      details: {
+        word: expr.name,
+        first: entry.owner.name ?? "",
+      },
+    };
+  }
+
+  public methodOverFieldCheck(
+    method: FunctionDecl,
+    entry: ClassMemberEntry,
+    parent: InstanceType,
+  ): Checked<boolean> {
+    const field = entry.field;
+    if (field == undefined || entry.isStatic) {
+      return { value: false };
+    }
+
+    const word = method.name;
+    const first = entry.owner.name ?? parent.name;
+
+    if (this.isArrowField(field)) {
+      return {
+        value: true,
+        error: {
+          code: Code.ArrowOverride,
+          loc: method.loc,
+          details: { word, first },
+        },
+      };
+    }
+
+    return {
+      value: true,
+      error: {
+        code: Code.MethodOverField,
+        loc: method.loc,
+        details: { word, first },
+      },
+    };
   }
 
   private isDeclaredBefore(one: InstanceType, other: InstanceType): boolean {

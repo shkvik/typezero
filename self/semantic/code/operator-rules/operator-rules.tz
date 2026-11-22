@@ -1,3 +1,4 @@
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   BinaryExpr,
@@ -8,11 +9,16 @@ import {
   UnaryExpr,
   UnaryOp,
 } from "../../../program/ast/types/ast.types.expressions.tz";
-import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import {
+  IntType,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
 import {
   OperandHints,
   OperandPair,
 } from "../expression-types/types/expression-types.types.tz";
+import { IntegerMath } from "../integer-math/integer-math.tz";
 import { kIntLimits } from "../integer-math/const/integer-math.const.tz";
 import { OperandTexts } from "../source-texts/types/source-texts.types.tz";
 import { kHiddenMark } from "../source-texts/const/source-texts.const.tz";
@@ -36,6 +42,7 @@ export class OperatorRules {
   private readonly unifier: TypeUnifier;
   private readonly mismatches: MismatchRules;
   private readonly shapes: ExpressionShapes;
+  private readonly integers: IntegerMath;
 
   public constructor(
     store: TypeStore,
@@ -46,6 +53,7 @@ export class OperatorRules {
     unifier: TypeUnifier,
     mismatches: MismatchRules,
     shapes: ExpressionShapes,
+    integers: IntegerMath,
   ) {
     this.store = store;
     this.text = text;
@@ -55,6 +63,7 @@ export class OperatorRules {
     this.unifier = unifier;
     this.mismatches = mismatches;
     this.shapes = shapes;
+    this.integers = integers;
   }
 
   public literalSideHint(
@@ -317,6 +326,183 @@ export class OperatorRules {
     const row = kUnaryTexts.find((one) => one.op == op);
 
     return row?.text ?? "";
+  }
+
+  public bitsOfDoubleError(
+    expr: BinaryExpr,
+    left: Type,
+    module: int,
+  ): SourceError | undefined {
+    const other = this.sources.operatorText(expr.op);
+    const texts = this.sources.operandTexts(expr, module);
+    const fraction = this.fractionText(left, texts);
+    const word = this.sources.shownOperand(fraction);
+
+    return { code: Code.BitsOfDouble, loc: expr.loc, details: { other, word } };
+  }
+
+  public mixedError(
+    expr: BinaryExpr,
+    pair: OperandPair,
+    module: int,
+  ): SourceError | undefined {
+    const left = pair.left;
+    const right = pair.right;
+    const op = this.sources.operatorText(expr.op);
+    const conversion = this.mixedConversion(left, right);
+    const texts = this.sources.operandTexts(expr, module);
+    const method = this.mismatches.conversionName(conversion.target);
+    const first = this.text.of(left);
+    const second = this.text.of(right);
+
+    if (conversion.isLeftConverted) {
+      const shown = this.sources.operandText(texts.left);
+      const word = `${shown}.${method}() ${op} ${texts.right}`;
+
+      return {
+        code: Code.MixedNumbers,
+        loc: expr.loc,
+        details: {
+          first,
+          second,
+          other: op,
+          word,
+        },
+      };
+    }
+
+    const shown = this.sources.operandText(texts.right);
+    const word = `${texts.left} ${op} ${shown}.${method}()`;
+
+    return {
+      code: Code.MixedNumbers,
+      loc: expr.loc,
+      details: {
+        first,
+        second,
+        other: op,
+        word,
+      },
+    };
+  }
+
+  public nothingChangedError(
+    expr: BinaryExpr,
+    left: Type,
+    module: int,
+  ): SourceError | undefined {
+    const other = this.sources.operatorText(expr.op);
+    const texts = this.sources.operandTexts(expr, module);
+    const word = this.sources.namedText(texts.left);
+
+    if (left.kind == TypeKind.Double) {
+      return {
+        code: Code.NoOpBitsTrunc,
+        loc: expr.loc,
+        details: {
+          word,
+          other,
+        },
+      };
+    }
+
+    const first = this.sources.shownOperand(texts.left);
+
+    if (expr.op == BinaryOp.UShr) {
+      return {
+        code: Code.NoOpBitsWrapUnsigned,
+        loc: expr.loc,
+        details: {
+          word,
+          other,
+          first,
+        },
+      };
+    }
+
+    return {
+      code: Code.NoOpBitsWrap,
+      loc: expr.loc,
+      details: { word, other, first },
+    };
+  }
+
+  public operandsError(
+    expr: BinaryExpr,
+    pair: OperandPair,
+  ): SourceError | undefined {
+    const left = pair.left;
+    const right = pair.right;
+    const other = this.sources.operatorText(expr.op);
+    const first = this.text.of(left);
+    const second = this.text.of(right);
+    const isUndefined =
+      this.types.isOptional(left) ||
+      this.types.isOptional(right) ||
+      left.kind == TypeKind.Undefined ||
+      right.kind == TypeKind.Undefined;
+    if (isUndefined) {
+      return {
+        code: Code.OperandTypesUndefined,
+        loc: expr.loc,
+        details: {
+          first,
+          second,
+          other,
+        },
+      };
+    }
+
+    return {
+      code: Code.OperandTypes,
+      loc: expr.loc,
+      details: { first, second, other },
+    };
+  }
+
+  public overflowError(
+    expr: Expr,
+    type: IntType,
+    shown: string,
+    wrapped: decimal,
+  ): SourceError | undefined {
+    const code = this.integers.overflowCode(type);
+    const first = this.text.of(type);
+    const other = `${wrapped}`;
+
+    return {
+      code: code,
+      loc: expr.loc,
+      details: { word: shown, first, other },
+    };
+  }
+
+  public signedShiftError(
+    expr: BinaryExpr,
+    left: Type,
+    module: int,
+  ): SourceError | undefined {
+    if (left.kind != TypeKind.Int) {
+      return undefined;
+    }
+
+    const texts = this.sources.operandTexts(expr, module);
+    const word = this.sources.shownOperand(texts.left);
+    const second = this.sources.countText(texts.right);
+    const unsigned = this.store.integer(left.bits, true);
+    const other = this.mismatches.conversionName(unsigned);
+    const first = this.text.of(left);
+
+    return {
+      code: Code.SignedShift,
+      loc: expr.loc,
+      details: {
+        first,
+        word,
+        other,
+        second,
+      },
+    };
   }
 
   private numberHint(

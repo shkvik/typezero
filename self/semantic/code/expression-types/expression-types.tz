@@ -172,19 +172,19 @@ export class ExpressionTypes {
   private readonly parts: TypeParts;
   private readonly shapes: ExpressionShapes;
   private readonly arrays: ArrayRules;
-  private readonly overloads: OverloadRules;
   private readonly operators: OperatorRules;
   private readonly comparisons: ComparisonRules;
   private readonly logic: LogicRules;
-  private readonly callbacks: CallbackRules;
-  private readonly calls: CallRules;
   private readonly dictionaries: DictionaryRules;
   private readonly functions: FunctionRules;
   private readonly literals: LiteralRules;
   private readonly indexes: IndexRules;
   private readonly objects: ObjectRules;
-  private readonly decorators: DecoratorRules;
+  private readonly calls: CallRules;
+  private readonly callbacks: CallbackRules;
   private readonly classes: ClassRules;
+  private readonly overloads: OverloadRules;
+  private readonly decorators: DecoratorRules;
   private readonly statements: StatementRules;
   private readonly narrowings: NarrowingRules;
   private readonly bounds: BoundRules;
@@ -275,8 +275,14 @@ export class ExpressionTypes {
     );
     const parts = new TypeParts(store);
     const shapes = new ExpressionShapes();
-    const arrays = new ArrayRules(store, relation, types, unifier, shapes);
-    const overloads = new OverloadRules(text, types, sources, mismatches);
+    const arrays = new ArrayRules(
+      store,
+      relation,
+      types,
+      unifier,
+      shapes,
+      text,
+    );
     const operators = new OperatorRules(
       store,
       text,
@@ -286,19 +292,57 @@ export class ExpressionTypes {
       unifier,
       mismatches,
       shapes,
+      integers,
     );
     const comparisons = new ComparisonRules(types, unifier, shapes);
-    const logic = new LogicRules(store, types, truth, shapes);
-    const callbacks = new CallbackRules(store, types, truth);
-    const calls = new CallRules(store, types, parts);
-    const dictionaries = new DictionaryRules(store, types, modules, sources);
-    const functions = new FunctionRules(store, relation, types, unifier);
-    const literals = new LiteralRules(store, types);
-    const indexes = new IndexRules(store);
-    const objects = new ObjectRules(store, text, relation, types);
-    const decorators = new DecoratorRules(types);
-    const classes = new ClassRules(text, types, modules);
-    const statements = new StatementRules(store, relation, types, modules);
+    const logic = new LogicRules(store, types, truth, shapes, sources);
+    const dictionaries = new DictionaryRules(
+      store,
+      types,
+      modules,
+      sources,
+      text,
+    );
+    const functions = new FunctionRules(store, relation, types, unifier, text);
+    const literals = new LiteralRules(store, types, text);
+    const indexes = new IndexRules(store, text, types);
+    const objects = new ObjectRules(
+      store,
+      text,
+      relation,
+      types,
+      sources,
+      unifier,
+    );
+    const calls = new CallRules(store, types, parts, text, objects);
+    const callbacks = new CallbackRules(
+      store,
+      types,
+      truth,
+      calls,
+      text,
+      relation,
+    );
+    const classes = new ClassRules(text, types, modules, relation, store);
+    const overloads = new OverloadRules(
+      text,
+      types,
+      sources,
+      mismatches,
+      classes,
+    );
+    const decorators = new DecoratorRules(types, overloads);
+    const statements = new StatementRules(
+      store,
+      relation,
+      types,
+      modules,
+      text,
+      comparisons,
+      functions,
+      sources,
+      indexes,
+    );
     const narrowings = new NarrowingRules(
       store,
       text,
@@ -308,7 +352,7 @@ export class ExpressionTypes {
       typeOfs,
     );
     const bounds = new BoundRules(store);
-    const flows = new FlowRules(store, relation, types);
+    const flows = new FlowRules(store, relation, types, text, shapes);
     const generics = new GenericRules(
       store,
       types,
@@ -317,10 +361,11 @@ export class ExpressionTypes {
       parts,
       calls,
       literals,
+      text,
     );
-    const dates = new DateRules(types);
+    const dates = new DateRules(types, text, calls);
     const decimals = new DecimalRules(store, types, sources);
-    const results = new ResultRules(store, types, unifier, bounds);
+    const results = new ResultRules(store, types, unifier, bounds, text);
     const library = new LibraryRules(types, modules, sources, mismatches);
 
     this.store = store;
@@ -339,19 +384,19 @@ export class ExpressionTypes {
     this.parts = parts;
     this.shapes = shapes;
     this.arrays = arrays;
-    this.overloads = overloads;
     this.operators = operators;
     this.comparisons = comparisons;
     this.logic = logic;
-    this.callbacks = callbacks;
-    this.calls = calls;
     this.dictionaries = dictionaries;
     this.functions = functions;
     this.literals = literals;
     this.indexes = indexes;
     this.objects = objects;
-    this.decorators = decorators;
+    this.calls = calls;
+    this.callbacks = callbacks;
     this.classes = classes;
+    this.overloads = overloads;
+    this.decorators = decorators;
     this.statements = statements;
     this.narrowings = narrowings;
     this.bounds = bounds;
@@ -558,6 +603,18 @@ export class ExpressionTypes {
     }
 
     this.mismatch(expr, given, wanted, module, place);
+  }
+
+  private reportFound(module: int, error: SourceError | undefined): void {
+    if (error != undefined) {
+      this.report(module, error.loc, error.code, error.details);
+    }
+  }
+
+  private reportAll(module: int, errors: SourceError[]): void {
+    for (const error of errors) {
+      this.report(module, error.loc, error.code, error.details);
+    }
   }
 
   private report(module: int, loc: int, code: Code, details: Details): void {

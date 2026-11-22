@@ -86,7 +86,9 @@ partial class ExpressionTypes {
     this.resolver.typeParameters(module, fn.typeParams);
     this.iterablePlaceCheck(fn, module);
     this.constructorArgsCheck(fn, module);
-    this.parameterPlaceCheck(fn, module);
+    const parameterPlaceErrors = this.decorators.parameterPlaceCheck(fn);
+
+    this.reportAll(module, parameterPlaceErrors);
 
     const shape = this.parameterShape(fn, context, module);
     const self = shape.self ?? this.literalOwners.get(fn);
@@ -123,7 +125,13 @@ partial class ExpressionTypes {
     if (written != undefined) {
       const result = this.resolver.returnType(written, context);
 
-      this.asyncResultCheck(fn, written, result, module);
+      const asyncResultError = this.functions.asyncResultCheck(
+        fn,
+        written,
+        result,
+      );
+
+      this.reportFound(module, asyncResultError);
       this.predicateDeclCheck(fn, written, module);
 
       door.type = this.functions.signatureOf(shape, result);
@@ -279,7 +287,9 @@ partial class ExpressionTypes {
       this.paramTypes.set(`${module} ${param.loc}`, inside);
 
       if (param.name == kThisParameter) {
-        this.thisParameterCheck(fn, param, module);
+        const thisParameterErrors = this.calls.thisParameterCheck(fn, param);
+
+        this.reportAll(module, thisParameterErrors);
         self = type;
 
         continue;

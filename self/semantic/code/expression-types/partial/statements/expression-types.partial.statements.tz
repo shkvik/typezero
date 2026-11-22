@@ -80,7 +80,12 @@ partial class ExpressionTypes {
 
         return;
       case StmtKind.Function:
-        this.nestedGenericCheck(statement, frame, module);
+        const nestedGenericError = this.generics.nestedGenericCheck(
+          statement,
+          frame,
+        );
+
+        this.reportFound(module, nestedGenericError);
         this.functionType(statement, module);
 
         return;
@@ -388,37 +393,18 @@ partial class ExpressionTypes {
       if (test != undefined) {
         const type = this.typed(test, subject, module);
 
-        this.caseTypeCheck(test, type, subject, module);
+        const caseTypeError = this.statements.caseTypeCheck(
+          test,
+          type,
+          subject,
+        );
+
+        this.reportFound(module, caseTypeError);
         tests.push(type);
       }
     }
 
     return tests;
-  }
-
-  private caseTypeCheck(
-    test: Expr,
-    type: Type,
-    subject: Type,
-    module: int,
-  ): void {
-    if (type.kind == TypeKind.Error) {
-      return;
-    }
-
-    const common = this.comparisons.comparisonType(subject, type);
-    if (common != undefined) {
-      return;
-    }
-
-    const hasResult =
-      type.kind == TypeKind.Result || subject.kind == TypeKind.Result;
-    const code = this.statements.caseCode(hasResult);
-
-    this.report(module, test.loc, code, {
-      word: this.text.of(this.functions.widened(type)),
-      first: this.text.of(subject),
-    });
   }
 
   private casesCheck(
@@ -485,7 +471,9 @@ partial class ExpressionTypes {
 
     this.returnBeforeSuper(statement.loc, module);
     this.returnFieldsCheck(statement, fn, module);
-    this.returnAwaitCheck(value, frame, module);
+    const returnAwaitError = this.statements.returnAwaitCheck(value, frame);
+
+    this.reportFound(module, returnAwaitError);
 
     if (fn == undefined) {
       this.report(
@@ -512,7 +500,13 @@ partial class ExpressionTypes {
       return this.voidReturn(value, frame, module);
     }
     if (value == undefined) {
-      return this.emptyReturn(statement, result, frame, module);
+      const emptyReturnError = this.statements.emptyReturnError(
+        statement,
+        result,
+        frame,
+      );
+
+      return this.reportFound(module, emptyReturnError);
     }
 
     const given = this.returnedType(value, result, frame, module);
@@ -559,24 +553,6 @@ partial class ExpressionTypes {
     }
 
     frame.returns.push({ value, type });
-  }
-
-  private returnAwaitCheck(
-    value: Expr | undefined,
-    frame: FunctionFrame,
-    module: int,
-  ): void {
-    const isAsync = frame.fn?.isAsync == true;
-    if (value == undefined || !isAsync || value.kind != ExprKind.Await) {
-      return;
-    }
-    if (frame.fn?.concise == true) {
-      this.report(module, value.loc, Code.ArrowAwait, kNoDetails);
-
-      return;
-    }
-
-    this.report(module, value.loc, Code.ReturnAwait, kNoDetails);
   }
 
   private hintedReturn(
@@ -657,29 +633,6 @@ partial class ExpressionTypes {
     this.report(module, value.loc, Code.VoidReturnsValue, { word, first });
   }
 
-  private emptyReturn(
-    statement: ReturnStmt,
-    result: Type,
-    frame: FunctionFrame,
-    module: int,
-  ): void {
-    const isOpen =
-      result.kind == TypeKind.Error ||
-      result.kind == TypeKind.Undefined ||
-      this.types.isOptional(result);
-    if (isOpen || frame.fn == undefined) {
-      return;
-    }
-
-    const word = this.functions.functionLabel(frame.fn);
-    const first = this.text.of(result);
-
-    this.report(module, statement.loc, Code.ReturnValueMissing, {
-      word,
-      first,
-    });
-  }
-
   private loopItem(loop: ForOfStmt, module: int): Type {
     const iterable = this.typed(loop.iterable, undefined, module);
     if (loop.keys) {
@@ -692,7 +645,13 @@ partial class ExpressionTypes {
     const base = this.types.apparent(iterable);
 
     this.loopCannotCheck(loop, base, module);
-    this.resumedCheck(loop.iterable, iterable, Code.ForOfResumes, module);
+    const resumedError = this.functions.resumedCheck(
+      loop.iterable,
+      iterable,
+      Code.ForOfResumes,
+    );
+
+    this.reportFound(module, resumedError);
 
     switch (base.kind) {
       case TypeKind.Tuple:
@@ -712,13 +671,10 @@ partial class ExpressionTypes {
   }
 
   private tupleLoopItem(loop: ForOfStmt, tuple: TupleType, module: int): Type {
-    const element = this.indexes.tupleElement(tuple);
-    if (element != undefined) {
-      return element;
-    }
+    const checked = this.statements.tupleLoopItem(loop, tuple);
 
-    this.report(module, loop.iterable.loc, Code.TupleIterated, kNoDetails);
+    this.reportFound(module, checked.error);
 
-    return this.store.plain(TypeKind.Error);
+    return checked.value;
   }
 }

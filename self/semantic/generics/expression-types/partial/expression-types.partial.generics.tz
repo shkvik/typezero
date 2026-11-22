@@ -114,7 +114,10 @@ partial class ExpressionTypes {
     const written = target.typeArgs;
     const total = target.params.length;
     if (written.length > total) {
-      this.reportTypeArgumentCount(target, module);
+      const typeArgumentCountErrors =
+        this.generics.typeArgumentCountErrors(target);
+
+      this.reportAll(module, typeArgumentCountErrors);
 
       draft.isInferred = false;
     }
@@ -154,21 +157,6 @@ partial class ExpressionTypes {
     this.argumentsCheck(draft.args, call, module);
 
     return shape.result;
-  }
-
-  private reportTypeArgumentCount(target: GenericTarget, module: int): void {
-    const total = target.params.length;
-    const word = target.name;
-    const other = this.generics.typeArgumentText(total);
-    const first = `${target.typeArgs.length}`;
-
-    if (!target.isLenient) {
-      this.report(module, target.loc, Code.TypeArgumentsTooMany, {
-        word,
-        other,
-        first,
-      });
-    }
   }
 
   private inferArguments(draft: GenericDraft, module: int): void {
@@ -425,44 +413,17 @@ partial class ExpressionTypes {
       const param = target.params[index];
       const isOpen = param != undefined && !draft.bound.has(index);
       if (isOpen && param != undefined && this.isMentioning(type, [param])) {
-        this.reportCallback(draft, closure, param, position, module);
+        const callbackError = this.generics.callbackError(
+          draft,
+          closure,
+          param,
+          position,
+        );
+
+        this.reportFound(module, callbackError);
         this.generics.failParameter(draft, index);
       }
     }
-  }
-
-  private reportCallback(
-    draft: GenericDraft,
-    closure: FunctionExpr,
-    param: Type,
-    position: int,
-    module: int,
-  ): void {
-    const target = draft.target;
-    if (target.isLenient || this.generics.hasArgumentErrors(draft)) {
-      return;
-    }
-
-    const first = this.text.of(param);
-    const second = target.name;
-    const loc = closure.loc;
-    const own = closure.fn.params[position];
-    if (own == undefined) {
-      this.report(module, loc, Code.CallbackParametersUninferred, {
-        first,
-        second,
-      });
-
-      return;
-    }
-
-    const word = own.name;
-
-    this.report(module, loc, Code.CallbackParameterUninferred, {
-      word,
-      first,
-      second,
-    });
   }
 
   private literalArgument(

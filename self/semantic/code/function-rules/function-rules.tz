@@ -1,10 +1,17 @@
 import {
+  Checked,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import {
   Expr,
   ExprKind,
+  MemberExpr,
   UnaryOp,
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import {
   FunctionDecl,
+  Param,
   ParamKind,
 } from "../../../program/ast/types/ast.types.functions.tz";
 import {
@@ -19,7 +26,12 @@ import {
   ParameterShape,
   ThisPlace,
 } from "../expression-types/types/expression-types.types.tz";
-import { TypeRefKind } from "../../../program/ast/types/ast.types.types.tz";
+import { kLengthName } from "../expression-shapes/const/expression-shapes.const.tz";
+import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../program/ast/types/ast.types.types.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { TypeRelation } from "../../types/type-relation/type-relation.tz";
 import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
@@ -34,17 +46,20 @@ export class FunctionRules {
   private readonly relation: TypeRelation;
   private readonly types: TypeQuestions;
   private readonly unifier: TypeUnifier;
+  private readonly text: TypeText;
 
   public constructor(
     store: TypeStore,
     relation: TypeRelation,
     types: TypeQuestions,
     unifier: TypeUnifier,
+    text: TypeText,
   ) {
     this.store = store;
     this.relation = relation;
     this.types = types;
     this.unifier = unifier;
+    this.text = text;
   }
 
   public adaptedParams(
@@ -263,6 +278,165 @@ export class FunctionRules {
     }
 
     return this.relation.baseOf(type) ?? type;
+  }
+
+  public asyncResultCheck(
+    fn: FunctionDecl,
+    written: TypeRef,
+    result: Type,
+  ): SourceError | undefined {
+    const isOpen =
+      result.kind == TypeKind.Promise ||
+      result.kind == TypeKind.Error ||
+      result.kind == TypeKind.Void ||
+      result.kind == TypeKind.Iterator;
+    if (!fn.isAsync || isOpen || fn.isGenerator) {
+      return undefined;
+    }
+
+    const first = this.text.of(result);
+
+    return {
+      code: Code.AsyncResultNotPromise,
+      loc: written.loc,
+      details: { first },
+    };
+  }
+
+  public resumedCheck(
+    iterable: Expr,
+    type: Type,
+    code: Code,
+  ): SourceError | undefined {
+    const base = this.types.definedType(type);
+    if (base.kind != TypeKind.Iterator) {
+      return undefined;
+    }
+
+    const sent = base.shape.sent;
+    const isFree =
+      sent.kind == TypeKind.Void ||
+      sent.kind == TypeKind.Undefined ||
+      sent.kind == TypeKind.Error ||
+      this.types.isOptional(sent);
+    if (isFree) {
+      return undefined;
+    }
+
+    return {
+      code: code,
+      loc: iterable.loc,
+      details: {
+        word: this.text.of(base),
+        first: this.text.of(sent),
+      },
+    };
+  }
+
+  public writtenGeneratorCheck(
+    fn: FunctionDecl,
+    written: TypeRef,
+    result: Type,
+    generator: GeneratorFrame,
+  ): SourceError | undefined {
+    const isOpen =
+      result.kind == TypeKind.Iterator || result.kind == TypeKind.Error;
+    if (!fn.isGenerator || isOpen) {
+      return undefined;
+    }
+
+    const word = this.text.of(result);
+
+    return {
+      code: Code.GeneratorNotIterator,
+      loc: written.loc,
+      details: { word },
+    };
+  }
+
+  public checkedParameter(
+    param: Param,
+    type: Type,
+    given: FunctionParameter | undefined,
+  ): Checked<Type> {
+    const isClash =
+      given != undefined &&
+      type.kind != TypeKind.Error &&
+      given.type.kind != TypeKind.Error &&
+      !this.relation.converts(given.type, type);
+    if (!isClash || given == undefined) {
+      return { value: type };
+    }
+
+    const word = param.name;
+    const first = this.text.of(type);
+    const second = this.text.of(given.type);
+
+    return {
+      value: type,
+      error: {
+        code: Code.ClosureParameterDiffers,
+        loc: param.loc,
+        details: {
+          word,
+          first,
+          second,
+        },
+      },
+    };
+  }
+
+  public delegatedItem(value: Expr, type: Type): Checked<Type> {
+    const base = this.types.apparent(type);
+
+    switch (base.kind) {
+      case TypeKind.Array:
+        return { value: base.item };
+      case TypeKind.String:
+      case TypeKind.Template:
+        return { value: this.store.plain(TypeKind.String) };
+      case TypeKind.Iterator:
+        return { value: base.shape.yielded };
+      case TypeKind.Error:
+      case TypeKind.Instance:
+      case TypeKind.Dict:
+      case TypeKind.TypeParameter:
+      case TypeKind.Object:
+      case TypeKind.Union:
+        return { value: this.store.plain(TypeKind.Error) };
+      default:
+        return {
+          value: this.store.plain(TypeKind.Error),
+          error: {
+            code: Code.YieldDelegateNotIterable,
+            loc: value.loc,
+            details: {
+              word: this.text.of(type),
+            },
+          },
+        };
+    }
+  }
+
+  public iteratorMissingCheck(
+    member: MemberExpr,
+    object: Type,
+  ): Checked<boolean> {
+    const word = member.name;
+    if (word != kLengthName) {
+      return { value: false };
+    }
+
+    const first = this.text.of(object);
+
+    return {
+      value: true,
+      error: {
+        code: Code.IteratorNoLength,
+        loc: member.loc,
+        details: { word, first },
+      },
+    };
   }
 
   private spreadListShape(goal: FunctionType): FunctionType {

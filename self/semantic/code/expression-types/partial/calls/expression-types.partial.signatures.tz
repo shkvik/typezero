@@ -82,7 +82,15 @@ partial class ExpressionTypes {
 
       const type = this.methodTypeOf(entry, found);
       if (type.kind == TypeKind.Function) {
-        this.contractResult(found, type, wanted, iface, first, module);
+        const contractResultError = this.classes.contractResultError(
+          found,
+          type,
+          wanted,
+          iface,
+          first,
+        );
+
+        this.reportFound(module, contractResultError);
       }
     }
   }
@@ -131,7 +139,15 @@ partial class ExpressionTypes {
         return;
       }
 
-      return this.contractResult(found, type, wanted, iface, first, module);
+      const contractResultError = this.classes.contractResultError(
+        found,
+        type,
+        wanted,
+        iface,
+        first,
+      );
+
+      return this.reportFound(module, contractResultError);
     }
 
     const texts = entry.methods.map((fn) => this.methodVariantText(entry, fn));

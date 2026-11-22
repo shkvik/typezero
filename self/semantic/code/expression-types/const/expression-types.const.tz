@@ -4,10 +4,7 @@ import {
   DecimalArgument,
   DecimalMethod,
   DecimalResult,
-  DecoratorPlace,
-  DecoratorPlaceText,
   NarrowedCode,
-  ResultMethod,
 } from "../types/expression-types.types.tz";
 
 export const kFieldSetKey = "#set|";
@@ -25,7 +22,6 @@ export const kArrayShape = "Array";
 export const kResultShape = "Result";
 export const kGeneratorShape = "Generator";
 export const kAsyncGeneratorShape = "AsyncGenerator";
-export const kPromiseClass = "Promise";
 export const kSetClass = "Set";
 export const kSpecialMethods = [
   "at",
@@ -55,30 +51,14 @@ export const kValueTerm = "v";
 export const kResizingMethods = ["push", "pop", "shift", "unshift", "splice"];
 export const kPrototypeName = "prototype";
 export const kClassNameMember = "name";
-export const kRawName = "raw";
 export const kConstructorName = "constructor";
-export const kSampleArgument = "int";
 export const kSampleList = "[int]";
 export const kNewWord = "new ";
 export const kResultMakers = ["ok", "err"];
-export const kPrototypeNames = [
-  "toString",
-  "valueOf",
-  "hasOwnProperty",
-  "isPrototypeOf",
-  "toLocaleString",
-  "propertyIsEnumerable",
-  "constructor",
-  "__proto__",
-];
-
 export const kNoPlace = "";
 export const kValuePlace = " of the value";
 export const kKeyPlace = " of the key";
 export const kNullName = "null";
-export const kStreamErrorName = "StreamError";
-export const kTypeSeparator = ", ";
-export const kOtherPlaceholder = "...";
 export const kConstructorArgsName = "ConstructorArgs";
 export const kRoundDown = "down";
 export const kNarrowedCodes: NarrowedCode[] = [
@@ -168,20 +148,10 @@ export const kTextMethods = ["join", "toString"];
 export const kFunctionMethods = ["call", "apply", "bind"];
 export const kStringClass = "String";
 export const kArrayClass = "Array";
-export const kDictIterating = [
-  "map",
-  "filter",
-  "reduce",
-  "some",
-  "every",
-  "find",
-];
 export const kIsJsonName = "isJson";
 export const kJsonName = "Json";
 export const kBooleanName = "Boolean";
 export const kMathName = "Math";
-export const kToFixedName = "toFixed";
-export const kRepeatName = "repeat";
 export const kRoundingNames = ["floor", "ceil", "round", "trunc"];
 export const kMathConstants = [
   "PI",
@@ -208,15 +178,6 @@ export const kDecodeComponentName = "decodeURIComponent";
 export const kJsonGlobalName = "JSON";
 export const kResultName = "Result";
 export const kCountedGlobals = ["encodeURI", "encodeURIComponent"];
-export const kPromiseStatics = [
-  "resolve",
-  "all",
-  "race",
-  "withResolvers",
-  "reject",
-  "allSettled",
-  "any",
-];
 export const kParentDepth = 64;
 export const kSetCombiners = [
   "union",
@@ -247,19 +208,11 @@ export const kFirstTimeField = 3;
 export const kDateUtcName = "UTC";
 export const kDateParseName = "parse";
 export const kToJsonName = "toJSON";
-export const kGetYearName = "getYear";
-export const kSetYearName = "setYear";
-export const kGmtStringName = "toGMTString";
 export const kDateFieldLimit = 9007199254740991.0;
 export const kDateLocaleMethods = [
   "toLocaleString",
   "toLocaleDateString",
   "toLocaleTimeString",
-];
-export const kDateStatics: DateStatic[] = [
-  { name: "now", example: "()" },
-  { name: "UTC", example: "(y, m, d)" },
-  { name: "parse", example: "(s)" },
 ];
 export const kTimeFieldNames = ["hours", "minutes", "seconds", "milliseconds"];
 export const kTimeFieldMost = [23, 59, 59, 999];
@@ -270,19 +223,6 @@ export const kCollectionExamples: DateStatic[] = [
 export const kMatchArrayClass = "RegExpMatchArray";
 export const kPushName = "push";
 export const kTextStatics = ["fromCharCode", "fromCodePoint"];
-export const kResultMethods: ResultMethod[] = [
-  { name: "isOk", count: 0 },
-  { name: "isErr", count: 0 },
-  { name: "map", count: 1 },
-  { name: "mapErr", count: 1 },
-  { name: "andThen", count: 1 },
-  { name: "orElse", count: 1 },
-  { name: "match", count: 2 },
-  { name: "unwrapOr", count: 1 },
-  { name: "andTee", count: 1 },
-  { name: "orTee", count: 1 },
-  { name: "andThrough", count: 1 },
-];
 export const kDecimalName = "decimal";
 export const kDecimalError = "DecimalError";
 export const kDecimalStatics = ["max", "min", "sum"];
@@ -394,32 +334,5 @@ export const kDecimalMethods: DecimalMethod[] = [
     result: DecimalResult.List,
   },
 ];
-export const kDecoratorPlaces: DecoratorPlaceText[] = [
-  {
-    place: DecoratorPlace.Class,
-    noun: "a class",
-    given: 1,
-    args: "the class",
-  },
-  {
-    place: DecoratorPlace.Field,
-    noun: "a field",
-    given: 2,
-    args: "the class and the name of the field",
-  },
-  {
-    place: DecoratorPlace.Method,
-    noun: "a method",
-    given: 3,
-    args: "the class, the name of the method and its descriptor",
-  },
-  {
-    place: DecoratorPlace.Parameter,
-    noun: "a parameter",
-    given: 3,
-    args: "the class, the name of the method (undefined for a constructor) and the position of the parameter",
-  },
-];
-
 export const kMetadataName = "metadata";
 export const kReflectName = "Reflect";

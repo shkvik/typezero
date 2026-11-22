@@ -10,14 +10,13 @@ import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import {
   kAllSettledName,
   kAnyName,
-  kPromiseStatics,
   kCatchName,
   kFinallyName,
-  kPromiseClass,
   kRejectName,
-  kResultMethods,
   kThenName,
 } from "../../../code/expression-types/const/expression-types.const.tz";
+import { kPromiseClass } from "../../library-rules/const/library-rules.const.tz";
+import { kResultMethods } from "../../result-rules/const/result-rules.const.tz";
 
 partial class ExpressionTypes {
   private promiseMisuse(
@@ -146,14 +145,10 @@ partial class ExpressionTypes {
   }
 
   private promiseMissingCheck(member: MemberExpr, module: int): boolean {
-    if (kPromiseStatics.includes(member.name)) {
-      return false;
-    }
+    const checked = this.library.promiseMissingCheck(member);
 
-    this.report(module, member.loc, Code.PromiseStaticRefused, {
-      word: member.name,
-    });
+    this.reportFound(module, checked.error);
 
-    return true;
+    return checked.value;
   }
 }

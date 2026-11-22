@@ -2,7 +2,6 @@ import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import { AwaitExpr } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../../../program/ast/types/ast.types.functions.tz";
-import { TypeRef } from "../../../../../program/ast/types/ast.types.types.tz";
 import {
   Type,
   TypeKind,
@@ -52,25 +51,5 @@ partial class ExpressionTypes {
     }
 
     return `${kAsyncFunction}${fn.name}`;
-  }
-
-  private asyncResultCheck(
-    fn: FunctionDecl,
-    written: TypeRef,
-    result: Type,
-    module: int,
-  ): void {
-    const isOpen =
-      result.kind == TypeKind.Promise ||
-      result.kind == TypeKind.Error ||
-      result.kind == TypeKind.Void ||
-      result.kind == TypeKind.Iterator;
-    if (!fn.isAsync || isOpen || fn.isGenerator) {
-      return;
-    }
-
-    const first = this.text.of(result);
-
-    this.report(module, written.loc, Code.AsyncResultNotPromise, { first });
   }
 }

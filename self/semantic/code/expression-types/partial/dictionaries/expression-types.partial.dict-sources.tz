@@ -110,18 +110,26 @@ partial class ExpressionTypes {
       );
 
       if (key != undefined && key != keyType) {
-        this.pairsDifferReport(head, Code.MapKeysDiffer, key, keyType, module);
+        const pairsDifferError = this.dictionaries.pairsDifferError(
+          head,
+          Code.MapKeysDiffer,
+          key,
+          keyType,
+        );
+
+        this.reportFound(module, pairsDifferError);
 
         return error;
       }
       if (value != undefined && value != valueType) {
-        this.pairsDifferReport(
+        const pairsDifferError2 = this.dictionaries.pairsDifferError(
           tail,
           Code.MapValuesDiffer,
           value,
           valueType,
-          module,
         );
+
+        this.reportFound(module, pairsDifferError2);
 
         return error;
       }
@@ -135,19 +143,6 @@ partial class ExpressionTypes {
     }
 
     return this.store.dictOf(DictKind.Map, key, value);
-  }
-
-  private pairsDifferReport(
-    expr: Expr,
-    code: Code,
-    first: Type,
-    second: Type,
-    module: int,
-  ): void {
-    this.report(module, expr.loc, code, {
-      first: this.text.of(first),
-      second: this.text.of(second),
-    });
   }
 
   private setFromValues(source: Expr, module: int): Type {

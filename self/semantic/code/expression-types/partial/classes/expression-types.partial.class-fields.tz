@@ -20,42 +20,13 @@ import { StaticOwner, ThisPlace } from "../../types/expression-types.types.tz";
 partial class ExpressionTypes {
   private checkFields(decl: ClassDecl, module: int): void {
     for (let index = 0; index < decl.fields.length; index++) {
-      this.checkMemberName(decl, index, module);
+      const memberNameErrors = this.classes.memberNameErrors(decl, index);
+
+      this.reportAll(module, memberNameErrors);
     }
 
     for (const field of decl.fields) {
       this.checkField(decl, field, module);
-    }
-  }
-
-  private checkMemberName(decl: ClassDecl, index: int, module: int): void {
-    const field = decl.fields[index];
-    if (field == undefined) {
-      return;
-    }
-
-    const word = field.name;
-    const first = decl.name ?? "";
-    const isStatic = field.form == FieldKind.Static;
-    const earlier = decl.fields
-      .slice(0, index)
-      .find(
-        (one) => one.name == word && (one.form == FieldKind.Static) == isStatic,
-      );
-
-    if (earlier != undefined) {
-      this.report(module, field.loc, Code.DuplicateMember, { word, first });
-    }
-
-    for (const method of decl.methods) {
-      const isSame =
-        method.name == word && this.classes.isStaticMethod(method) == isStatic;
-      if (isSame) {
-        this.report(module, method.loc, Code.FieldMethodClash, {
-          word,
-          first,
-        });
-      }
     }
   }
 

@@ -43,39 +43,16 @@ partial class ExpressionTypes {
       return this.report(module, member.loc, Code.CallbackMissing, { word });
     }
 
-    this.extraCallbackArguments(expr, plan, module);
+    const extraCallbackArgumentsError =
+      this.callbacks.extraCallbackArgumentsError(expr, plan);
+
+    this.reportFound(module, extraCallbackArgumentsError);
 
     const first = expr.args[0]?.expr;
     if (first != undefined) {
       plan.isValue = this.functionValueCheck(first, plan, module);
       this.booleanCallbackCheck(first, plan, module);
     }
-  }
-
-  private extraCallbackArguments(
-    expr: CallExpr,
-    plan: CallbackPlan,
-    module: int,
-  ): void {
-    const member = plan.member;
-    const word = member.name;
-    const count = expr.args.length;
-    const isReduce = plan.kind == ArrayCallback.Reduce;
-    const most = this.callbacks.callbackArgumentLimit(isReduce);
-    const second = expr.args[1]?.expr;
-    if (count == 2 && !isReduce && second != undefined) {
-      return this.report(module, second.loc, Code.CallbackThisArg, { word });
-    }
-    if (count <= most) {
-      return;
-    }
-
-    const wanted = this.calls.argumentCountText(1, most, false);
-
-    this.report(module, member.loc, Code.ArgumentCount, {
-      word: wanted,
-      other: `${count}`,
-    });
   }
 
   private functionValueCheck(
@@ -157,25 +134,6 @@ partial class ExpressionTypes {
     this.passedFunctionCheck(arg, type, plan, module);
   }
 
-  private droppedPromiseCheck(arg: Expr, result: Type, module: int): void {
-    if (arg.kind == ExprKind.Function && arg.fn.isAsync) {
-      this.report(module, arg.loc, Code.AsyncCallbackDropped, kNoDetails);
-
-      return;
-    }
-    const kind = this.types.definedType(result).kind;
-    if (kind == TypeKind.Promise) {
-      const loc = this.callbacks.conciseValueLoc(arg);
-
-      this.report(module, loc, Code.CallbackPromiseDropped, kNoDetails);
-    }
-    if (kind == TypeKind.Result && arg.kind == ExprKind.Function) {
-      const loc = this.callbacks.conciseValueLoc(arg);
-
-      this.report(module, loc, Code.CallbackResultDropped, kNoDetails);
-    }
-  }
-
   private literalCallbackCheck(
     arg: Expr,
     plan: CallbackPlan,
@@ -190,7 +148,12 @@ partial class ExpressionTypes {
     const word = plan.member.name;
 
     if (plan.kind == ArrayCallback.ForEach) {
-      return this.droppedPromiseCheck(arg, result, module);
+      const droppedPromiseErrors = this.callbacks.droppedPromiseCheck(
+        arg,
+        result,
+      );
+
+      return this.reportAll(module, droppedPromiseErrors);
     }
 
     const isMapping =
@@ -367,7 +330,14 @@ partial class ExpressionTypes {
     const result = type.shape.result;
 
     if (plan.kind == ArrayCallback.ForEach) {
-      return this.droppedResultCheck(arg, result, name, method, module);
+      const droppedResultErrors = this.callbacks.droppedResultCheck(
+        arg,
+        result,
+        name,
+        method,
+      );
+
+      return this.reportAll(module, droppedResultErrors);
     }
 
     const wanted = this.callbacks.callbackWanted(plan.kind);
@@ -384,27 +354,6 @@ partial class ExpressionTypes {
       other: name,
       second: this.text.of(result),
     });
-  }
-
-  private droppedResultCheck(
-    arg: Expr,
-    result: Type,
-    name: string,
-    method: string,
-    module: int,
-  ): void {
-    if (result.kind == TypeKind.Result) {
-      return this.report(module, arg.loc, Code.CallbackDropsResult, {
-        word: name,
-        other: method,
-      });
-    }
-    if (result.kind == TypeKind.Promise) {
-      this.report(module, arg.loc, Code.CallbackDropsPromise, {
-        word: name,
-        other: method,
-      });
-    }
   }
 
   private noteArguments(args: CallArgument[]): void {
@@ -481,35 +430,15 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    this.forwardedResultCheck(
+    const forwardedResultError = this.callbacks.forwardedResultCheck(
       expr,
       own.shape.result,
       goal.shape.result,
-      module,
     );
 
+    this.reportFound(module, forwardedResultError);
+
     return goal;
-  }
-
-  private forwardedResultCheck(
-    expr: Expr,
-    result: Type,
-    wanted: Type,
-    module: int,
-  ): void {
-    const isOpen =
-      wanted.kind == TypeKind.Void ||
-      wanted.kind == TypeKind.Error ||
-      result.kind == TypeKind.Error;
-    if (isOpen || this.relation.converts(result, wanted)) {
-      return;
-    }
-
-    this.report(module, expr.loc, Code.NotAssignable, {
-      first: this.text.of(result),
-      second: this.text.of(wanted),
-      place: "",
-    });
   }
 
   private isHolderFunction(

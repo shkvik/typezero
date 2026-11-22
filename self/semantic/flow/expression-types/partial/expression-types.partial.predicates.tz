@@ -1,6 +1,5 @@
 import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
   Expr,
   ExprKind,
@@ -33,7 +32,12 @@ partial class ExpressionTypes {
       return this.assertsReport(fn, written, module);
     }
     if (written.name == kThisName) {
-      return this.thisPredicateCheck(fn, written, module);
+      const thisPredicateError = this.narrowings.thisPredicateCheck(
+        fn,
+        written,
+      );
+
+      return this.reportFound(module, thisPredicateError);
     }
     if (this.narrowings.predicateParam(fn, written.name) != undefined) {
       return;
@@ -42,18 +46,6 @@ partial class ExpressionTypes {
     this.report(module, written.loc, Code.PredicateNotParameter, {
       word: written.name,
     });
-  }
-
-  private thisPredicateCheck(
-    fn: FunctionDecl,
-    written: TypeRef,
-    module: int,
-  ): void {
-    if (this.narrowings.isInstanceMethod(fn)) {
-      return;
-    }
-
-    this.report(module, written.loc, Code.PredicateThisOutside, kNoDetails);
   }
 
   private assertsReport(fn: FunctionDecl, written: TypeRef, module: int): void {

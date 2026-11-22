@@ -192,7 +192,9 @@ partial class ExpressionTypes {
       return;
     }
     if (given.kind == TypeKind.Undefined) {
-      return this.reportUndefined(variable, init, module);
+      const undefinedError = this.statements.undefinedError(variable, init);
+
+      return this.reportFound(module, undefinedError);
     }
 
     door.type = this.placedType(given, destination);
@@ -271,22 +273,5 @@ partial class ExpressionTypes {
     }
 
     return this.isWholeTree(init, module);
-  }
-
-  private reportUndefined(
-    variable: DeclaredVariable,
-    init: Expr,
-    module: int,
-  ): void {
-    const decl = variable.decl;
-    const word = decl.name;
-
-    if (variable.isConst) {
-      return this.report(module, init.loc, Code.UndefinedConstNeedsType, {
-        word,
-      });
-    }
-
-    this.report(module, decl.loc, Code.UndefinedLetNeedsType, { word });
   }
 }

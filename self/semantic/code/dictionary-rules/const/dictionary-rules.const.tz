@@ -1,1 +1,9 @@
 export const kBuiltinValueClasses = ["Date", "RegExp"];
+export const kDictIterating = [
+  "map",
+  "filter",
+  "reduce",
+  "some",
+  "every",
+  "find",
+];

@@ -23,4 +23,9 @@ export type Finding = {
   readonly details: Details;
 };
 
+export type Checked<T> = {
+  readonly value: T;
+  readonly error?: SourceError;
+};
+
 export type Message = { readonly text: string };

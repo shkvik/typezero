@@ -1,6 +1,5 @@
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
-import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import {
   CallExpr,
   Expr,
@@ -9,11 +8,7 @@ import {
   NameExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../../../program/ast/types/ast.types.functions.tz";
-import {
-  Stmt,
-  StmtKind,
-  SwitchStmt,
-} from "../../../../../program/ast/types/ast.types.statements.tz";
+import { SwitchStmt } from "../../../../../program/ast/types/ast.types.statements.tz";
 import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
 import {
   Type,
@@ -117,14 +112,10 @@ partial class ExpressionTypes {
   private switchFunctionsCheck(statement: SwitchStmt, module: int): void {
     for (const option of statement.cases) {
       for (const one of option.body) {
-        this.switchFunctionCheck(one, module);
-      }
-    }
-  }
+        const switchFunctionErrors = this.statements.switchFunctionCheck(one);
 
-  private switchFunctionCheck(statement: Stmt, module: int): void {
-    if (statement.kind == StmtKind.Function) {
-      this.report(module, statement.loc, Code.FunctionInSwitch, kNoDetails);
+        this.reportAll(module, switchFunctionErrors);
+      }
     }
   }
 

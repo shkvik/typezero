@@ -1,41 +1,55 @@
+import {
+  Checked,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
+  AssignExpr,
+  BinaryExpr,
   ConditionalExpr,
   Expr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { TruthUse } from "../../flow/truth-rules/types/truth-rules.types.tz";
-import { kNegation } from "../../flow/truth-rules/const/truth-rules.const.tz";
-import { kUndefinedText } from "../source-texts/const/source-texts.const.tz";
-import { TypeStore } from "../../../program/type/type-store/type-store.tz";
-import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
-import { TruthRules } from "../../flow/truth-rules/truth-rules.tz";
-import { ExpressionShapes } from "../expression-shapes/expression-shapes.tz";
+import {
+  kUndefinedText,
+  kUnnamedOperand,
+} from "../source-texts/const/source-texts.const.tz";
 import {
   kAndText,
   kEmptyText,
   kEquals,
   kNotEquals,
   kOrText,
+  kOtherPlaceholder,
   kZeroText,
 } from "./const/logic-rules.const.tz";
+import { SourceTexts } from "../source-texts/source-texts.tz";
+import { kNegation } from "../../flow/truth-rules/const/truth-rules.const.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { TruthRules } from "../../flow/truth-rules/truth-rules.tz";
+import { ExpressionShapes } from "../expression-shapes/expression-shapes.tz";
 
 export class LogicRules {
   private readonly store: TypeStore;
   private readonly types: TypeQuestions;
   private readonly truth: TruthRules;
   private readonly shapes: ExpressionShapes;
+  private readonly sources: SourceTexts;
 
   public constructor(
     store: TypeStore,
     types: TypeQuestions,
     truth: TruthRules,
     shapes: ExpressionShapes,
+    sources: SourceTexts,
   ) {
     this.store = store;
     this.types = types;
     this.truth = truth;
     this.shapes = shapes;
+    this.sources = sources;
   }
 
   public equalsText(isNegated: boolean): string {
@@ -155,6 +169,66 @@ export class LogicRules {
     }
 
     return wanted;
+  }
+
+  public assignmentConditionError(
+    expr: AssignExpr,
+    type: Type,
+    use: TruthUse,
+  ): SourceError | undefined {
+    const isNegated = use == TruthUse.Not;
+    const first = this.sources.hintText(expr.target, kUnnamedOperand);
+    const second = this.sources.hintText(expr.value, kOtherPlaceholder);
+    const base = this.types.definedType(type);
+    const isTestable =
+      this.types.isOptional(type) ||
+      this.types.isNumberLike(base) ||
+      base.kind == TypeKind.String;
+    const isCompared =
+      this.shapes.isWrittenLiteral(expr.value) ||
+      type.kind == TypeKind.Error ||
+      !isTestable;
+    if (isCompared) {
+      const word = this.equalsText(isNegated);
+
+      return {
+        code: Code.AssignmentCompared,
+        loc: expr.loc,
+        details: {
+          word,
+          first,
+          second,
+        },
+      };
+    }
+
+    const other = this.emptyTest(type, isNegated);
+
+    return {
+      code: Code.AssignmentTested,
+      loc: expr.loc,
+      details: {
+        first,
+        second,
+        other,
+      },
+    };
+  }
+
+  public rightVoid(expr: BinaryExpr, isAnd: boolean): Checked<Type> {
+    const word = this.logicalText(isAnd);
+    const test = this.sources.hintText(expr.lhs, kUnnamedOperand);
+    const first = this.negatedText(test, isAnd);
+    const second = this.sources.hintText(expr.rhs, kOtherPlaceholder);
+
+    return {
+      value: this.store.plain(TypeKind.Error),
+      error: {
+        code: Code.RightSideVoid,
+        loc: expr.loc,
+        details: { word, first, second },
+      },
+    };
   }
 
   private decimalHint(other: Type, hint: Type | undefined): Type | undefined {

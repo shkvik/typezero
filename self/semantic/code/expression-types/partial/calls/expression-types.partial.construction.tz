@@ -12,14 +12,11 @@ import {
   TypeContext,
   TypePlace,
 } from "../../../../types/type-resolver/types/type-resolver.types.tz";
-import {
-  kPromiseClass,
-  kSetClass,
-  kSpecialNews,
-} from "../../const/expression-types.const.tz";
+import { kSetClass, kSpecialNews } from "../../const/expression-types.const.tz";
 import { CallTarget, ValueTarget } from "../../types/expression-types.types.tz";
 import { kDateName } from "../../../../types/type-questions/const/type-questions.const.tz";
 import { kMapClass } from "../../../class-rules/const/class-rules.const.tz";
+import { kPromiseClass } from "../../../../library/library-rules/const/library-rules.const.tz";
 
 partial class ExpressionTypes {
   private libraryNew(

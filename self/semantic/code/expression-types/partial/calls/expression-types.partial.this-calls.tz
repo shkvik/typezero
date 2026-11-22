@@ -1,15 +1,9 @@
 import { ExpressionTypes } from "../../expression-types.tz";
-import { Code } from "../../../../../diagnostic/code.tz";
-import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import {
   CallExpr,
   ExprKind,
   MemberExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
-import {
-  FunctionDecl,
-  Param,
-} from "../../../../../program/ast/types/ast.types.functions.tz";
 import {
   FunctionType,
   Type,
@@ -66,23 +60,5 @@ partial class ExpressionTypes {
     }
 
     return this.calledWith(rest, plain, member.loc, CallKind.Own, module);
-  }
-
-  private thisParameterCheck(
-    fn: FunctionDecl,
-    param: Param,
-    module: int,
-  ): void {
-    if (fn.isArrow) {
-      return this.report(
-        module,
-        param.loc,
-        Code.ArrowThisParameter,
-        kNoDetails,
-      );
-    }
-    if (fn.role != undefined) {
-      this.report(module, param.loc, Code.MethodThisParameter, kNoDetails);
-    }
   }
 }
