@@ -1,0 +1,746 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  BinaryExpr,
+  BinaryOp,
+  Expr,
+  ExprKind,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  kDateName,
+  kIntLimits,
+  kOperatorTexts,
+} from "../../const/expression-types.const.tz";
+import {
+  ConcatLink,
+  LogicSide,
+  NumberConversion,
+  OperandHints,
+  OperandPair,
+} from "../../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private binaryTyped(
+    expr: BinaryExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    switch (expr.op) {
+      case BinaryOp.Add:
+      case BinaryOp.Sub:
+      case BinaryOp.Mul:
+      case BinaryOp.Div:
+      case BinaryOp.Rem:
+      case BinaryOp.Pow:
+      case BinaryOp.BitAnd:
+      case BinaryOp.BitOr:
+      case BinaryOp.BitXor:
+        return this.arithmeticTyped(expr, wanted, module, undefined);
+      case BinaryOp.Shl:
+      case BinaryOp.Shr:
+      case BinaryOp.UShr:
+        return this.shiftTyped(expr, wanted, module);
+      case BinaryOp.Eq:
+      case BinaryOp.Ne:
+        return this.equalityTyped(expr, module);
+      case BinaryOp.Lt:
+      case BinaryOp.Le:
+      case BinaryOp.Gt:
+      case BinaryOp.Ge:
+        return this.orderTyped(expr, module);
+      case BinaryOp.Nullish:
+        return this.nullishTyped(expr, wanted, module);
+      case BinaryOp.LogAnd:
+      case BinaryOp.LogOr:
+        return this.logicalTyped(expr, wanted, LogicSide.Value, module);
+      case BinaryOp.InstanceOf:
+        return this.instanceofTyped(expr, module);
+      case BinaryOp.In:
+        return this.keyInTyped(expr, module);
+      default:
+        return this.childrenTyped(expr, module);
+    }
+  }
+
+  private parameterArithmetic(
+    expr: BinaryExpr,
+    pair: OperandPair,
+    module: int,
+  ): Type {
+    const left = pair.left;
+    const right = pair.right;
+    const isOpen =
+      this.types.isOpenParameter(left) || this.types.isOpenParameter(right);
+    const isKnown = left.kind != TypeKind.Error && right.kind != TypeKind.Error;
+    const hasText =
+      left.kind == TypeKind.String || right.kind == TypeKind.String;
+    const isJoin = expr.op == BinaryOp.Add && hasText;
+    if (isOpen && isKnown && !isJoin) {
+      this.reportOperands(expr, pair, module);
+    }
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private arithmeticTyped(
+    expr: BinaryExpr,
+    wanted: Type | undefined,
+    module: int,
+    chain: ConcatLink[] | undefined,
+  ): Type {
+    const links = chain ?? [];
+    const operands = this.arithmeticOperands(expr, wanted, module, links);
+    const type = this.arithmeticResult(expr, operands, module);
+
+    if (expr.op != BinaryOp.Add) {
+      return type;
+    }
+
+    links.push({
+      binary: expr,
+      left: operands.left,
+      right: operands.right,
+      type,
+    });
+
+    if (chain == undefined) {
+      this.checkMixedConcat(links, module);
+    }
+
+    return type;
+  }
+
+  private arithmeticOperands(
+    expr: BinaryExpr,
+    wanted: Type | undefined,
+    module: int,
+    links: ConcatLink[],
+  ): OperandPair {
+    const expected = this.types.wantedPart(wanted);
+    const hints = this.operandHints(expr.op, expected);
+    const isLiteralLeft =
+      this.isNumberTree(expr.lhs) &&
+      !this.isNumberTree(expr.rhs) &&
+      (hints.canHint || this.isIntTree(expr.lhs));
+    if (isLiteralLeft) {
+      return this.literalLeftOperands(expr, hints, module, links);
+    }
+
+    const left = this.leftTyped(expr, hints.left, module, links);
+    const isLiteralRight = hints.canHint && this.isNumberTree(expr.rhs);
+    const literalHint = this.literalSideHint(isLiteralRight, left, hints.right);
+    const rightHint = this.integerHint(
+      expr.rhs,
+      expr.lhs,
+      left,
+      literalHint,
+      hints.isBitwise,
+      module,
+    );
+    const right = this.operandTyped(expr.rhs, rightHint, module);
+
+    return this.adapted(expr, { left, right }, module);
+  }
+
+  private literalLeftOperands(
+    expr: BinaryExpr,
+    hints: OperandHints,
+    module: int,
+    links: ConcatLink[],
+  ): OperandPair {
+    const right = this.operandTyped(expr.rhs, hints.right, module);
+    const literalHint = this.literalSideHint(hints.canHint, right, hints.left);
+    const leftHint = this.integerHint(
+      expr.lhs,
+      expr.rhs,
+      right,
+      literalHint,
+      hints.isBitwise,
+      module,
+    );
+    const left = this.leftTyped(expr, leftHint, module, links);
+
+    return this.adapted(expr, { left, right }, module);
+  }
+
+  private literalSideHint(
+    isLiteral: boolean,
+    other: Type,
+    hint: Type | undefined,
+  ): Type | undefined {
+    if (!isLiteral) {
+      return hint;
+    }
+
+    const plain = this.types.definedType(other);
+    if (plain.kind == TypeKind.Decimal) {
+      return plain;
+    }
+
+    return hint;
+  }
+
+  private leftTyped(
+    expr: BinaryExpr,
+    hint: Type | undefined,
+    module: int,
+    links: ConcatLink[],
+  ): Type {
+    const left = expr.lhs;
+    if (expr.op != BinaryOp.Add || left.kind != ExprKind.Binary) {
+      return this.operandTyped(left, hint, module);
+    }
+    if (left.op != BinaryOp.Add) {
+      return this.operandTyped(left, hint, module);
+    }
+
+    const type = this.arithmeticTyped(left, hint, module, links);
+
+    return this.types.apparent(type);
+  }
+
+  private operandTyped(expr: Expr, hint: Type | undefined, module: int): Type {
+    const type = this.valueTyped(expr, hint, module);
+
+    return this.types.apparent(type);
+  }
+
+  private valueTyped(expr: Expr, hint: Type | undefined, module: int): Type {
+    if (expr.kind == ExprKind.Name) {
+      return this.named(expr, hint, module);
+    }
+
+    return this.typed(expr, hint, module);
+  }
+
+  private operandHints(op: BinaryOp, expected: Type | undefined): OperandHints {
+    const isBitwise = this.isBitwise(op);
+    const isPower = op == BinaryOp.Pow;
+    const hint = this.numberHint(expected, isBitwise);
+    const isDecimalPower =
+      isPower && hint != undefined && hint.kind == TypeKind.Decimal;
+    const canHint = !isBitwise && !isPower;
+
+    if (isDecimalPower) {
+      return { left: hint, isBitwise, canHint };
+    }
+
+    return { left: hint, right: hint, isBitwise, canHint };
+  }
+
+  private numberHint(
+    expected: Type | undefined,
+    isBitwise: boolean,
+  ): Type | undefined {
+    if (expected == undefined || isBitwise) {
+      return undefined;
+    }
+    if (this.isNumeric(expected) || expected.kind == TypeKind.Decimal) {
+      return expected;
+    }
+
+    return undefined;
+  }
+
+  private integerHint(
+    literal: Expr,
+    other: Expr,
+    otherType: Type,
+    hint: Type | undefined,
+    isBitwise: boolean,
+    module: int,
+  ): Type | undefined {
+    const type = this.types.definedType(otherType);
+    const isFraction = type.kind == TypeKind.Double && !isBitwise;
+    const isOtherNumber = type.kind == TypeKind.Int || isFraction;
+    if (!isOtherNumber || !this.isIntTree(literal)) {
+      return hint;
+    }
+    if (this.isWholeTree(other, module)) {
+      return hint;
+    }
+
+    return type;
+  }
+
+  private adapted(
+    expr: BinaryExpr,
+    pair: OperandPair,
+    module: int,
+  ): OperandPair {
+    const left = pair.left;
+    const right = pair.right;
+    const isBroken =
+      left.kind == TypeKind.Error || right.kind == TypeKind.Error;
+    if (left == right || isBroken) {
+      return pair;
+    }
+
+    const isBitwise = this.isBitwise(expr.op) || this.isShift(expr.op);
+    const hasNumbers =
+      this.types.isNumberLike(left) && this.types.isNumberLike(right);
+    const hasIntegers = left.kind == TypeKind.Int && right.kind == TypeKind.Int;
+    if (!hasNumbers || (isBitwise && !hasIntegers)) {
+      return pair;
+    }
+
+    const isPower = expr.op == BinaryOp.Pow;
+    const toRight = this.literalTarget(expr.lhs, left, right, module);
+    const isRightDecimal = right.kind == TypeKind.Decimal;
+    if (toRight != undefined && !(isPower && isRightDecimal)) {
+      return { left: toRight, right };
+    }
+
+    const toLeft = this.literalTarget(expr.rhs, right, left, module);
+    const isLeftFraction =
+      left.kind == TypeKind.Decimal || left.kind == TypeKind.Double;
+    if (toLeft != undefined && !(isPower && isLeftFraction)) {
+      return { left, right: toLeft };
+    }
+
+    return pair;
+  }
+
+  private arithmeticResult(
+    expr: BinaryExpr,
+    given: OperandPair,
+    module: int,
+  ): Type {
+    const pair = this.withoutNever(given);
+    const left = pair.left;
+    const right = pair.right;
+    const isBroken =
+      left.kind == TypeKind.Error ||
+      right.kind == TypeKind.Error ||
+      left.kind == TypeKind.TypeParameter ||
+      right.kind == TypeKind.TypeParameter;
+    if (isBroken) {
+      return this.parameterArithmetic(expr, pair, module);
+    }
+
+    const hasText =
+      left.kind == TypeKind.String || right.kind == TypeKind.String;
+    if (expr.op == BinaryOp.Add && hasText) {
+      return this.concatenated(expr, pair, module);
+    }
+    if (this.isDate(left) || this.isDate(right)) {
+      return this.dateArithmetic(expr, pair, module);
+    }
+    if (this.isBitwise(expr.op)) {
+      return this.bitsResult(expr, pair, module);
+    }
+    if (left.kind == TypeKind.Decimal || right.kind == TypeKind.Decimal) {
+      return this.decimalResult(expr, pair, module);
+    }
+
+    const isWrapping = this.isWrapping(left) || this.isWrapping(right);
+    const hasIntegers = left.kind == TypeKind.Int && right.kind == TypeKind.Int;
+    if (isWrapping && hasIntegers) {
+      return this.wrappingResult(expr, pair, module);
+    }
+
+    return this.numberResult(expr, pair, module);
+  }
+
+  private numberResult(expr: BinaryExpr, pair: OperandPair, module: int): Type {
+    const left = pair.left;
+    const written = pair.right;
+    const isFloatPower =
+      expr.op == BinaryOp.Pow &&
+      left.kind == TypeKind.Double &&
+      written.kind == TypeKind.Int;
+    const right = this.powerSide(isFloatPower, left, written);
+    const hasNumbers = this.isNumeric(left) && this.isNumeric(right);
+    const common = this.commonNumber(hasNumbers, left, right);
+    if (hasNumbers && common == undefined) {
+      this.reportMixed(expr, pair, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (common == undefined) {
+      this.reportOperands(expr, pair, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (common.kind == TypeKind.Int) {
+      this.integerChecks(expr, common, written, module);
+      this.foldBinary(expr, common, module);
+    }
+
+    return common;
+  }
+
+  private powerSide(isFloatPower: boolean, left: Type, right: Type): Type {
+    if (isFloatPower) {
+      return left;
+    }
+
+    return right;
+  }
+
+  private commonNumber(
+    hasNumbers: boolean,
+    left: Type,
+    right: Type,
+  ): Type | undefined {
+    if (!hasNumbers) {
+      return undefined;
+    }
+
+    return this.commonType(left, right);
+  }
+
+  private integerChecks(
+    expr: BinaryExpr,
+    common: Type,
+    right: Type,
+    module: int,
+  ): void {
+    if (expr.op == BinaryOp.Pow) {
+      const exponent = this.intConstant(expr.rhs, right, module);
+      const isNegative = exponent != undefined && exponent < 0;
+      if (isNegative) {
+        const first = this.text.of(common);
+
+        this.report(module, expr.rhs.loc, Code.NegativePower, { first });
+      }
+
+      return;
+    }
+
+    this.divisorCheck(expr, right, module);
+  }
+
+  private divisorCheck(expr: BinaryExpr, right: Type, module: int): void {
+    const isDividing = expr.op == BinaryOp.Div || expr.op == BinaryOp.Rem;
+    if (!isDividing) {
+      return;
+    }
+
+    const divisor = this.intConstant(expr.rhs, right, module);
+    if (divisor == undefined || divisor != 0) {
+      return;
+    }
+
+    this.report(module, expr.rhs.loc, Code.DivisionByZero, kNoDetails);
+  }
+
+  private wrappingResult(
+    expr: BinaryExpr,
+    pair: OperandPair,
+    module: int,
+  ): Type {
+    const left = pair.left;
+    const right = pair.right;
+    const isBoth = this.isWrapping(left) && this.isWrapping(right);
+    if (isBoth && left != right) {
+      this.reportMixed(expr, pair, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.divisorCheck(expr, right, module);
+
+    if (this.isWrapping(left)) {
+      return left;
+    }
+
+    return right;
+  }
+
+  private shiftTyped(
+    expr: BinaryExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const expected = this.types.wantedPart(wanted);
+    const isInteger = expected != undefined && expected.kind == TypeKind.Int;
+    const hint = this.shiftHint(expr, isInteger, expected);
+    const left = this.operandTyped(expr.lhs, hint, module);
+    const right = this.operandTyped(expr.rhs, undefined, module);
+    const pair = this.adapted(expr, { left, right }, module);
+    const isBroken =
+      pair.left.kind == TypeKind.Error || pair.right.kind == TypeKind.Error;
+    if (isBroken) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.bitsResult(expr, pair, module);
+  }
+
+  private shiftHint(
+    expr: BinaryExpr,
+    isInteger: boolean,
+    expected: Type | undefined,
+  ): Type | undefined {
+    if (!isInteger || !this.isIntTree(expr.lhs)) {
+      return undefined;
+    }
+
+    return expected;
+  }
+
+  private bitsResult(expr: BinaryExpr, pair: OperandPair, module: int): Type {
+    const left = pair.left;
+    const right = pair.right;
+
+    if (this.reportsBits(expr, pair, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.isShift(expr.op)) {
+      this.shiftConstants(expr, pair, module);
+
+      return left;
+    }
+    if (this.isWrapping(left) || this.isWrapping(right)) {
+      return this.wrappingResult(expr, pair, module);
+    }
+    if (left != right) {
+      this.reportMixed(expr, pair, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.foldBinary(expr, left, module);
+
+    return left;
+  }
+
+  private reportsBits(
+    expr: BinaryExpr,
+    pair: OperandPair,
+    module: int,
+  ): boolean {
+    const left = pair.left;
+    const right = pair.right;
+
+    if (this.isNothingChanged(expr, left)) {
+      this.reportNothingChanged(expr, left, module);
+
+      return true;
+    }
+    if (left.kind == TypeKind.Double || right.kind == TypeKind.Double) {
+      this.reportBitsOfDouble(expr, left, module);
+
+      return true;
+    }
+    if (left.kind != TypeKind.Int || right.kind != TypeKind.Int) {
+      this.reportOperands(expr, pair, module);
+
+      return true;
+    }
+    if (expr.op == BinaryOp.UShr && !left.unsigned) {
+      this.reportSignedShift(expr, left, module);
+
+      return true;
+    }
+
+    return false;
+  }
+
+  private isNothingChanged(expr: BinaryExpr, left: Type): boolean {
+    const isOrZero = expr.op == BinaryOp.BitOr || expr.op == BinaryOp.UShr;
+    const zero = expr.rhs;
+    const isZero = zero.kind == ExprKind.IntLit && zero.value == 0;
+
+    return isOrZero && isZero && this.isNumeric(left) && !this.isWrapping(left);
+  }
+
+  private shiftConstants(
+    expr: BinaryExpr,
+    pair: OperandPair,
+    module: int,
+  ): void {
+    const shifted = pair.left;
+    if (shifted.kind != TypeKind.Int || shifted.wraps) {
+      return;
+    }
+
+    const value = this.intConstant(expr.lhs, shifted, module);
+    const count = this.intConstant(expr.rhs, shifted, module);
+    const isWide = shifted.unsigned && shifted.bits == 64;
+    if (value == undefined || count == undefined || isWide) {
+      return;
+    }
+
+    const width = shifted.bits;
+    const isInside = count >= 0 && count < width.toDecimal();
+    if (isInside) {
+      return this.foldShift(expr, shifted, value, count, module);
+    }
+
+    const first = this.text.of(shifted);
+    const last = width - 1;
+
+    this.report(module, expr.rhs.loc, Code.ShiftCount, {
+      word: `${count}`,
+      other: `${last}`,
+      first,
+    });
+  }
+
+  private reportMixed(expr: BinaryExpr, pair: OperandPair, module: int): void {
+    const left = pair.left;
+    const right = pair.right;
+    const op = this.operatorText(expr.op);
+    const conversion = this.mixedConversion(left, right);
+    const texts = this.operandTexts(expr, module);
+    const method = this.conversionName(conversion.target);
+    const first = this.text.of(left);
+    const second = this.text.of(right);
+
+    if (conversion.isLeftConverted) {
+      const shown = this.operandText(texts.left);
+      const word = `${shown}.${method}() ${op} ${texts.right}`;
+
+      return this.report(module, expr.loc, Code.MixedNumbers, {
+        first,
+        second,
+        other: op,
+        word,
+      });
+    }
+
+    const shown = this.operandText(texts.right);
+    const word = `${texts.left} ${op} ${shown}.${method}()`;
+
+    this.report(module, expr.loc, Code.MixedNumbers, {
+      first,
+      second,
+      other: op,
+      word,
+    });
+  }
+
+  private mixedConversion(left: Type, right: Type): NumberConversion {
+    if (left.kind == TypeKind.Double || right.kind == TypeKind.Double) {
+      const target = this.store.plain(TypeKind.Double);
+      const isLeftConverted = left.kind != TypeKind.Double;
+
+      return { target, isLeftConverted };
+    }
+    if (this.holds(left, right)) {
+      return { target: left, isLeftConverted: false };
+    }
+    if (this.holds(right, left)) {
+      return { target: right, isLeftConverted: true };
+    }
+
+    const int = this.store.integer(64, false);
+
+    return { target: int, isLeftConverted: left != int };
+  }
+
+  private holds(wide: Type, narrow: Type): boolean {
+    if (wide.kind != TypeKind.Int || narrow.kind != TypeKind.Int) {
+      return false;
+    }
+
+    const wideBits = wide.bits;
+    const wideUnsigned = wide.unsigned;
+    const narrowBits = narrow.bits;
+    const narrowUnsigned = narrow.unsigned;
+    const big = kIntLimits.find(
+      (row) => row.bits == wideBits && row.unsigned == wideUnsigned,
+    );
+    const small = kIntLimits.find(
+      (row) => row.bits == narrowBits && row.unsigned == narrowUnsigned,
+    );
+    if (big == undefined || small == undefined) {
+      return false;
+    }
+
+    return small.lowest <= big.lowest && small.highest <= big.highest;
+  }
+
+  private reportOperands(
+    expr: BinaryExpr,
+    pair: OperandPair,
+    module: int,
+  ): void {
+    const left = pair.left;
+    const right = pair.right;
+    const other = this.operatorText(expr.op);
+    const first = this.text.of(left);
+    const second = this.text.of(right);
+    const isUndefined =
+      this.types.isOptional(left) ||
+      this.types.isOptional(right) ||
+      left.kind == TypeKind.Undefined ||
+      right.kind == TypeKind.Undefined;
+    if (isUndefined) {
+      return this.report(module, expr.loc, Code.OperandTypesUndefined, {
+        first,
+        second,
+        other,
+      });
+    }
+
+    this.report(module, expr.loc, Code.OperandTypes, { first, second, other });
+  }
+
+  private operatorText(op: BinaryOp): string {
+    const row = kOperatorTexts.find((one) => one.op == op);
+
+    return row?.text ?? "";
+  }
+
+  private isBitwise(op: BinaryOp): boolean {
+    switch (op) {
+      case BinaryOp.BitAnd:
+      case BinaryOp.BitOr:
+      case BinaryOp.BitXor:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private isShift(op: BinaryOp): boolean {
+    switch (op) {
+      case BinaryOp.Shl:
+      case BinaryOp.Shr:
+      case BinaryOp.UShr:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private isWrapping(type: Type): boolean {
+    return type.kind == TypeKind.Int && type.wraps;
+  }
+
+  private withoutNever(pair: OperandPair): OperandPair {
+    const left = pair.left;
+    const right = pair.right;
+    const isLeftNever = left.kind == TypeKind.Never;
+    const isRightNever = right.kind == TypeKind.Never;
+    if (isLeftNever && isRightNever) {
+      const double = this.store.plain(TypeKind.Double);
+
+      return { left: double, right: double };
+    }
+    if (isLeftNever && this.isNeverTarget(right)) {
+      return { left: right, right };
+    }
+    if (isRightNever && this.isNeverTarget(left)) {
+      return { left, right: left };
+    }
+
+    return pair;
+  }
+
+  private isNeverTarget(type: Type): boolean {
+    return type.kind != TypeKind.Error && type.kind != TypeKind.Void;
+  }
+
+  private isDate(type: Type): boolean {
+    return type.kind == TypeKind.Instance && type.name == kDateName;
+  }
+}

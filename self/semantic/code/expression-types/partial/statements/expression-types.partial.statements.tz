@@ -1,0 +1,782 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { MethodKind } from "../../../../../program/ast/types/ast.types.classes.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  ForOfStmt,
+  ForStmt,
+  IfStmt,
+  ReturnStmt,
+  Stmt,
+  StmtKind,
+  SwitchStmt,
+} from "../../../../../program/ast/types/ast.types.statements.tz";
+import {
+  DictKind,
+  TupleType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  kLastAndSeparator,
+  kNameSeparator,
+  kNoPlace,
+} from "../../const/expression-types.const.tz";
+import { FunctionFrame } from "../../types/expression-types.types.tz";
+import { TruthUse } from "../../../../flow/truth-rules/types/truth-rules.types.tz";
+
+partial class ExpressionTypes {
+  public checkModule(module: int): void {
+    const opened = this.program.modules[module];
+    if (opened == undefined || this.checkedModules.has(module)) {
+      return;
+    }
+
+    const frame: FunctionFrame = {
+      isAsync: false,
+      returns: [],
+      recursive: [],
+      hasEmptyReturn: false,
+      guard: {},
+    };
+
+    this.checkedModules.add(module);
+    this.walkStatements(opened.file.items, frame, module);
+  }
+
+  private walkStatements(
+    statements: Stmt[],
+    frame: FunctionFrame,
+    module: int,
+  ): void {
+    for (const statement of statements) {
+      this.walkStatement(statement, frame, module);
+    }
+  }
+
+  private walkOptionalStatement(
+    statement: Stmt | undefined,
+    frame: FunctionFrame,
+    module: int,
+  ): void {
+    if (statement != undefined) {
+      this.walkStatement(statement, frame, module);
+    }
+  }
+
+  private walkStatement(
+    statement: Stmt,
+    frame: FunctionFrame,
+    module: int,
+  ): void {
+    switch (statement.kind) {
+      case StmtKind.Block:
+        return this.walkStatements(statement.body, frame, module);
+      case StmtKind.VarDecl:
+        for (const decl of statement.decls) {
+          this.iterableAnnotationCheck(decl.typeAnn, module);
+          this.declaredFact(module, decl.loc);
+          this.declaredBounds(decl, module);
+        }
+
+        return;
+      case StmtKind.Function:
+        this.nestedGenericCheck(statement, frame, module);
+        this.functionType(statement, module);
+
+        return;
+      case StmtKind.Class:
+        return this.walkClass(statement, module);
+      case StmtKind.Expr: {
+        if (statement.expr.kind == ExprKind.Yield) {
+          this.unusedYields.add(statement.expr);
+        }
+
+        return this.statementUsed(statement.expr, statement.loc, module);
+      }
+      case StmtKind.If:
+        return this.walkIf(statement, frame, module);
+      case StmtKind.While:
+        this.forgetLooped(statement, module);
+        this.branchCheck(statement.cond, TruthUse.Condition, module);
+
+        return this.walkLoop(statement.cond, statement.body, frame, module);
+      case StmtKind.DoWhile:
+        this.forgetLooped(statement, module);
+        this.branchCheck(statement.cond, TruthUse.Condition, module);
+
+        return this.walkLoop(undefined, statement.body, frame, module);
+      case StmtKind.For:
+        this.walkOptionalStatement(statement.init, frame, module);
+        this.forgetLooped(statement, module);
+        this.conditionCheck(statement.cond, module);
+
+        return this.walkFor(statement, frame, module);
+      case StmtKind.ForOf: {
+        this.localDoor(module, statement.binding.loc);
+        this.forgetLooped(statement, module);
+
+        const before = this.facts;
+
+        this.walkStatement(statement.body, frame, module);
+        this.facts = before;
+
+        return;
+      }
+      case StmtKind.Switch:
+        return this.walkSwitch(statement, frame, module);
+      case StmtKind.Labeled:
+        return this.walkStatement(statement.body, frame, module);
+      case StmtKind.Return:
+        return this.walkReturn(statement, frame, module);
+      default:
+        return;
+    }
+  }
+
+  private declaredFact(module: int, loc: int): void {
+    const door = this.localDoor(module, loc);
+    const given = door?.given;
+    if (door == undefined || given == undefined) {
+      return;
+    }
+
+    const isNarrower = door.type.kind == TypeKind.Union && given != door.type;
+    if (isNarrower) {
+      this.facts = this.withFact(this.facts, `${module} ${loc}`, given);
+    }
+  }
+
+  private walkIf(statement: IfStmt, frame: FunctionFrame, module: int): void {
+    const cond = statement.cond;
+
+    this.branchCheck(cond, TruthUse.Condition, module);
+
+    const thenFacts = this.factsOf(cond, true, module);
+    const elseFacts = this.factsOf(cond, false, module);
+    const before = this.underFacts(thenFacts);
+    const thenStart = this.facts;
+
+    this.walkStatement(statement.thenStmt, frame, module);
+
+    const thenEnd = this.facts;
+
+    this.facts = before;
+    this.underFacts(elseFacts);
+
+    const elseStart = this.facts;
+
+    this.walkOptionalStatement(statement.elseStmt, frame, module);
+
+    const elseEnd = this.facts;
+    const isThenLeaving = this.isLeaving(statement.thenStmt, module);
+    const isElseLeaving = this.isLeaving(statement.elseStmt, module);
+
+    this.facts = before;
+
+    if (isThenLeaving && isElseLeaving) {
+      return;
+    }
+    if (isThenLeaving) {
+      this.facts = elseEnd;
+
+      return;
+    }
+    if (isElseLeaving) {
+      this.facts = thenEnd;
+
+      return;
+    }
+
+    this.facts = this.branchesJoined(
+      before,
+      thenStart,
+      thenEnd,
+      elseStart,
+      elseEnd,
+    );
+  }
+
+  private isLeaving(statement: Stmt | undefined, module: int): boolean {
+    if (statement == undefined) {
+      return false;
+    }
+    if (this.isAlwaysReturning(statement, module)) {
+      return true;
+    }
+
+    switch (statement.kind) {
+      case StmtKind.Break:
+      case StmtKind.Continue:
+        return true;
+      case StmtKind.Block:
+        return statement.body.some((one) => this.isLeaving(one, module));
+      case StmtKind.If:
+        return (
+          this.isLeaving(statement.thenStmt, module) &&
+          this.isLeaving(statement.elseStmt, module)
+        );
+      default:
+        return false;
+    }
+  }
+
+  private walkLoop(
+    cond: Expr | undefined,
+    body: Stmt | undefined,
+    frame: FunctionFrame,
+    module: int,
+  ): void {
+    const facts = this.loopFacts(cond, module);
+    const before = this.underFacts(facts);
+
+    this.walkOptionalStatement(body, frame, module);
+    this.facts = before;
+  }
+
+  private walkFor(statement: ForStmt, frame: FunctionFrame, module: int): void {
+    const facts = this.loopFacts(statement.cond, module);
+    const before = this.underFacts(facts);
+
+    this.walkOptionalStatement(statement.body, frame, module);
+    this.stepCheck(statement.step, module);
+    this.facts = before;
+  }
+
+  private stepCheck(step: Expr | undefined, module: int): void {
+    if (step != undefined) {
+      this.statementUsed(step, undefined, module);
+    }
+  }
+
+  private statementUsed(expr: Expr, at: int | undefined, module: int): void {
+    if (expr.kind != ExprKind.Sequence) {
+      const type = this.typed(expr, undefined, module);
+
+      return this.usedCheck(expr, type, at, module);
+    }
+
+    let last = this.store.plain(TypeKind.Error);
+
+    for (const part of expr.exprs) {
+      last = this.typed(part, undefined, module);
+    }
+
+    this.usedCheck(expr, last, at, module);
+  }
+
+  private loopFacts(cond: Expr | undefined, module: int): Map<string, Type> {
+    if (cond == undefined) {
+      return new Map<string, Type>();
+    }
+
+    return this.factsOf(cond, true, module);
+  }
+
+  private conditionCheck(cond: Expr | undefined, module: int): void {
+    if (cond != undefined) {
+      this.branchCheck(cond, TruthUse.Condition, module);
+    }
+  }
+
+  private valueCheck(value: Expr | undefined, module: int): void {
+    if (value != undefined) {
+      this.typed(value, undefined, module);
+    }
+  }
+
+  private walkSwitch(
+    statement: SwitchStmt,
+    frame: FunctionFrame,
+    module: int,
+  ): void {
+    this.switchFunctionsCheck(statement, module);
+
+    const subject = this.typed(statement.discriminant, undefined, module);
+    const tests = this.caseTypes(statement, subject, module);
+
+    this.casesCheck(statement, subject, tests, module);
+
+    this.forgetLooped(statement, module);
+
+    const before = this.facts;
+    const discriminant = statement.discriminant;
+    let reached: Map<string, Type> | undefined = undefined;
+    let passed = new Map<string, Type>();
+    const exits: Map<string, Type>[] = [];
+    const lastCase = statement.cases[statement.cases.length - 1];
+
+    for (const option of statement.cases) {
+      const test = option.test;
+      const facts = this.caseFacts(discriminant, test, passed, module);
+
+      reached = this.reachedFacts(reached, facts);
+
+      if (test != undefined) {
+        passed = this.mergedFacts(
+          passed,
+          this.factsOfCase(discriminant, test, passed, false, module),
+        );
+      }
+      if (option.body.length == 0) {
+        continue;
+      }
+
+      this.facts = this.mergedFacts(before, reached);
+      this.walkStatements(option.body, frame, module);
+
+      if (this.isSwitchExit(option, option == lastCase, module)) {
+        exits.push(this.facts);
+      }
+
+      this.facts = before;
+      reached = undefined;
+    }
+
+    this.switchFieldsJoined(statement, exits);
+  }
+
+  private caseFacts(
+    discriminant: Expr,
+    test: Expr | undefined,
+    passed: Map<string, Type>,
+    module: int,
+  ): Map<string, Type> {
+    if (test == undefined) {
+      return passed;
+    }
+
+    const facts = this.factsOfCase(discriminant, test, passed, true, module);
+
+    return this.mergedFacts(passed, facts);
+  }
+
+  private factsOfCase(
+    discriminant: Expr,
+    test: Expr,
+    passed: Map<string, Type>,
+    isEqual: boolean,
+    module: int,
+  ): Map<string, Type> {
+    const before = this.underFacts(passed);
+    const facts = this.equalityFacts(discriminant, test, isEqual, module);
+
+    this.facts = before;
+
+    return facts;
+  }
+
+  private reachedFacts(
+    reached: Map<string, Type> | undefined,
+    facts: Map<string, Type>,
+  ): Map<string, Type> {
+    if (reached == undefined) {
+      return facts;
+    }
+
+    return this.joinedFacts(reached, facts);
+  }
+
+  private caseTypes(statement: SwitchStmt, subject: Type, module: int): Type[] {
+    const tests: Type[] = [];
+
+    if (subject.kind == TypeKind.Error) {
+      return tests;
+    }
+
+    for (const option of statement.cases) {
+      const test = option.test;
+      if (test != undefined) {
+        const type = this.typed(test, subject, module);
+
+        this.caseTypeCheck(test, type, subject, module);
+        tests.push(type);
+      }
+    }
+
+    return tests;
+  }
+
+  private caseTypeCheck(
+    test: Expr,
+    type: Type,
+    subject: Type,
+    module: int,
+  ): void {
+    if (type.kind == TypeKind.Error) {
+      return;
+    }
+
+    const common = this.comparisonType(subject, type);
+    if (common != undefined) {
+      return;
+    }
+
+    const hasResult =
+      type.kind == TypeKind.Result || subject.kind == TypeKind.Result;
+    const code = this.caseCode(hasResult);
+
+    this.report(module, test.loc, code, {
+      word: this.text.of(this.widened(type)),
+      first: this.text.of(subject),
+    });
+  }
+
+  private caseCode(hasResult: boolean): Code {
+    if (hasResult) {
+      return Code.CaseResultsCompared;
+    }
+
+    return Code.CaseNotComparable;
+  }
+
+  private casesCheck(
+    statement: SwitchStmt,
+    subject: Type,
+    tests: Type[],
+    module: int,
+  ): void {
+    const key = `${module} ${statement.loc}`;
+    const isUnknown =
+      subject.kind == TypeKind.Error ||
+      tests.some((test) => test.kind == TypeKind.Error);
+    if (isUnknown) {
+      this.coveredSwitches.add(key);
+
+      return;
+    }
+
+    const hasDefault = statement.cases.some(
+      (option) => option.test == undefined,
+    );
+    const isListed =
+      !this.types.isOptional(subject) && this.isLiteralSet(subject);
+    if (hasDefault || !isListed) {
+      return;
+    }
+
+    const left = this.types
+      .unionMembers(subject)
+      .filter((part) => !tests.includes(part));
+    const first = left[0];
+    if (first == undefined) {
+      this.coveredSwitches.add(key);
+
+      return;
+    }
+
+    const names = left.map((part) => this.text.of(part));
+    const word = this.listedNames(names);
+    const other = this.text.of(first);
+
+    this.report(module, statement.discriminant.loc, Code.SwitchCasesLeft, {
+      word,
+      other,
+    });
+  }
+
+  private listedNames(names: string[]): string {
+    const last = names[names.length - 1];
+    if (names.length < 2 || last == undefined) {
+      return names.join("");
+    }
+
+    const front = names.slice(0, names.length - 1);
+
+    return `${front.join(kNameSeparator)}${kLastAndSeparator}${last}`;
+  }
+
+  private walkReturn(
+    statement: ReturnStmt,
+    frame: FunctionFrame,
+    module: int,
+  ): void {
+    this.walkReturnValue(statement, frame, module);
+    this.noteGuardExit(statement.value, frame, module);
+  }
+
+  private walkReturnValue(
+    statement: ReturnStmt,
+    frame: FunctionFrame,
+    module: int,
+  ): void {
+    const value = statement.value;
+    const fn = frame.fn;
+
+    this.returnBeforeSuper(statement.loc, module);
+    this.returnFieldsCheck(statement, fn, module);
+    this.returnAwaitCheck(value, frame, module);
+
+    if (fn == undefined) {
+      this.report(
+        module,
+        statement.loc,
+        Code.ReturnOutsideFunction,
+        kNoDetails,
+      );
+
+      return this.valueCheck(value, module);
+    }
+
+    if (value != undefined && fn.role?.method == MethodKind.Constructor) {
+      this.report(module, value.loc, Code.ConstructorReturn, kNoDetails);
+
+      return this.valueCheck(value, module);
+    }
+
+    const result = frame.result;
+    if (result == undefined) {
+      return this.collectReturn(value, frame, module);
+    }
+    if (result.kind == TypeKind.Void) {
+      return this.voidReturn(value, frame, module);
+    }
+    if (value == undefined) {
+      return this.emptyReturn(statement, result, frame, module);
+    }
+
+    const given = this.returnedType(value, result, frame, module);
+
+    this.coerce(value, given, result, module, kNoPlace);
+    this.predicateReturnCheck(fn, value, module);
+  }
+
+  private returnedType(
+    value: Expr,
+    wanted: Type | undefined,
+    frame: FunctionFrame,
+    module: int,
+  ): Type {
+    const given = this.typed(value, wanted, module);
+    if (frame.isAsync && given.kind == TypeKind.Promise) {
+      return given.value;
+    }
+
+    return given;
+  }
+
+  private collectReturn(
+    value: Expr | undefined,
+    frame: FunctionFrame,
+    module: int,
+  ): void {
+    if (value == undefined) {
+      frame.hasEmptyReturn = true;
+
+      return;
+    }
+
+    const before = this.recursions.length;
+    const hint = this.returnShapeHint(value, frame, module);
+    const type = this.hintedReturn(value, hint, frame, module);
+    const calls = this.recursions.slice(before);
+    if (calls.length > 0 && type.kind == TypeKind.Error) {
+      for (const call of calls) {
+        frame.recursive.push(call);
+      }
+
+      return;
+    }
+
+    frame.returns.push({ value, type });
+  }
+
+  private returnAwaitCheck(
+    value: Expr | undefined,
+    frame: FunctionFrame,
+    module: int,
+  ): void {
+    const isAsync = frame.fn?.isAsync == true;
+    if (value == undefined || !isAsync || value.kind != ExprKind.Await) {
+      return;
+    }
+    if (frame.fn?.concise == true) {
+      this.report(module, value.loc, Code.ArrowAwait, kNoDetails);
+
+      return;
+    }
+
+    this.report(module, value.loc, Code.ReturnAwait, kNoDetails);
+  }
+
+  private hintedReturn(
+    value: Expr,
+    hint: Type | undefined,
+    frame: FunctionFrame,
+    module: int,
+  ): Type {
+    const given = this.returnedType(value, hint, frame, module);
+
+    if (hint != undefined) {
+      this.coerce(value, given, hint, module, kNoPlace);
+    }
+
+    return given;
+  }
+
+  private returnShapeHint(
+    value: Expr,
+    frame: FunctionFrame,
+    module: int,
+  ): Type | undefined {
+    if (!this.isReturnShaped(value, module)) {
+      return undefined;
+    }
+
+    const earlier = frame.returns.find((one) => this.isShapedType(one.type));
+
+    return earlier?.type;
+  }
+
+  private isReturnShaped(value: Expr, module: int): boolean {
+    switch (value.kind) {
+      case ExprKind.ObjectLit:
+      case ExprKind.ArrayLit:
+        return true;
+      case ExprKind.Conditional:
+        return (
+          this.isReturnShaped(value.thenExpr, module) ||
+          this.isReturnShaped(value.elseExpr, module)
+        );
+      case ExprKind.Call: {
+        const callee = value.callee;
+        const isMaker =
+          callee.kind == ExprKind.Name && this.isResultMaker(callee, module);
+        const isSpread = value.args.some((arg) => arg.spread);
+
+        return isMaker && value.args.length <= 1 && !isSpread;
+      }
+      default:
+        return false;
+    }
+  }
+
+  private isShapedType(type: Type): boolean {
+    if (type.kind == TypeKind.Error) {
+      return false;
+    }
+    if (type.kind == TypeKind.Result) {
+      return true;
+    }
+
+    let held = this.types.definedType(type);
+
+    while (held.kind == TypeKind.Array) {
+      held = this.types.definedType(held.item);
+    }
+
+    switch (held.kind) {
+      case TypeKind.Object:
+      case TypeKind.Instance:
+      case TypeKind.Tuple:
+      case TypeKind.Dict:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private voidReturn(
+    value: Expr | undefined,
+    frame: FunctionFrame,
+    module: int,
+  ): void {
+    if (value == undefined) {
+      return;
+    }
+
+    const given = this.returnedType(value, undefined, frame, module);
+    const isNothing =
+      given.kind == TypeKind.Void ||
+      given.kind == TypeKind.Undefined ||
+      given.kind == TypeKind.Error;
+    if (isNothing || frame.fn == undefined) {
+      return;
+    }
+
+    const word = this.functionLabel(frame.fn);
+    const first = this.text.of(given);
+
+    this.report(module, value.loc, Code.VoidReturnsValue, { word, first });
+  }
+
+  private emptyReturn(
+    statement: ReturnStmt,
+    result: Type,
+    frame: FunctionFrame,
+    module: int,
+  ): void {
+    const isOpen =
+      result.kind == TypeKind.Error ||
+      result.kind == TypeKind.Undefined ||
+      this.types.isOptional(result);
+    if (isOpen || frame.fn == undefined) {
+      return;
+    }
+
+    const word = this.functionLabel(frame.fn);
+    const first = this.text.of(result);
+
+    this.report(module, statement.loc, Code.ReturnValueMissing, {
+      word,
+      first,
+    });
+  }
+
+  private loopItem(loop: ForOfStmt, module: int): Type {
+    const iterable = this.typed(loop.iterable, undefined, module);
+    if (loop.keys) {
+      return this.forInKeys(loop, iterable, module);
+    }
+    if (loop.isAwait) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const base = this.types.apparent(iterable);
+
+    this.loopCannotCheck(loop, base, module);
+    this.resumedCheck(loop.iterable, iterable, Code.ForOfResumes, module);
+
+    switch (base.kind) {
+      case TypeKind.Tuple:
+        return this.tupleLoopItem(loop, base, module);
+      case TypeKind.Array:
+        return base.item;
+      case TypeKind.String:
+      case TypeKind.Template:
+        return this.store.plain(TypeKind.String);
+      case TypeKind.Iterator:
+        return base.shape.yielded;
+      case TypeKind.Dict:
+        return this.dictItem(base.dict, base.key, base.value);
+      default:
+        return this.store.plain(TypeKind.Error);
+    }
+  }
+
+  private tupleLoopItem(loop: ForOfStmt, tuple: TupleType, module: int): Type {
+    const element = this.tupleElement(tuple);
+    if (element != undefined) {
+      return element;
+    }
+
+    this.report(module, loop.iterable.loc, Code.TupleIterated, kNoDetails);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private dictItem(dict: DictKind, key: Type, value: Type): Type {
+    switch (dict) {
+      case DictKind.Map:
+        return this.store.plainTuple([key, value]);
+      case DictKind.Set:
+        return key;
+      default:
+        return this.store.plain(TypeKind.Error);
+    }
+  }
+}

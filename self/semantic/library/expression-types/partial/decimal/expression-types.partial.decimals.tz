@@ -1,0 +1,178 @@
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  BinaryExpr,
+  BinaryOp,
+  Expr,
+  ExprKind,
+  UnaryOp,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  OperandPair,
+  OperandTexts,
+} from "../../../../code/expression-types/types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private decimalResult(
+    expr: BinaryExpr,
+    pair: OperandPair,
+    module: int,
+  ): Type {
+    if (expr.op == BinaryOp.Pow) {
+      return this.decimalPower(expr, pair, module);
+    }
+
+    const isLeftFitting = this.isDecimalSide(expr.lhs, pair.left, module);
+    const isRightFitting = this.isDecimalSide(expr.rhs, pair.right, module);
+    if (!isLeftFitting || !isRightFitting) {
+      this.reportDecimalMix(expr, pair, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.decimalDivisor(expr, pair.right, module);
+
+    return this.store.plain(TypeKind.Decimal);
+  }
+
+  private isDecimalSide(side: Expr, type: Type, module: int): boolean {
+    if (type.kind == TypeKind.Decimal) {
+      return true;
+    }
+
+    return type.kind == TypeKind.Int && this.isWholeTree(side, module);
+  }
+
+  private decimalPower(expr: BinaryExpr, pair: OperandPair, module: int): Type {
+    const right = pair.right;
+
+    if (pair.left.kind != TypeKind.Decimal) {
+      this.reportOperands(expr, pair, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (right.kind == TypeKind.Int) {
+      return this.store.plain(TypeKind.Decimal);
+    }
+
+    const first = this.text.of(right);
+    const isFraction =
+      right.kind == TypeKind.Double || right.kind == TypeKind.Decimal;
+    if (isFraction) {
+      this.report(module, expr.rhs.loc, Code.DecimalExponentRoot, { first });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.report(module, expr.rhs.loc, Code.DecimalExponent, { first });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private decimalDivisor(expr: BinaryExpr, right: Type, module: int): void {
+    const isDividing = expr.op == BinaryOp.Div || expr.op == BinaryOp.Rem;
+    if (!isDividing) {
+      return;
+    }
+
+    this.decimalZeroCheck(expr.rhs, module);
+  }
+
+  private isZeroLiteral(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+        return expr.value == 0;
+      case ExprKind.FloatLit:
+        return expr.value == 0.0;
+      case ExprKind.Unary:
+        return expr.op == UnaryOp.Neg && this.isZeroLiteral(expr.operand);
+      default:
+        return false;
+    }
+  }
+
+  private reportDecimalMix(
+    expr: BinaryExpr,
+    pair: OperandPair,
+    module: int,
+  ): void {
+    const left = pair.left;
+    const right = pair.right;
+    const isLeftDecimal = this.types.definedType(left).kind == TypeKind.Decimal;
+    const other = this.otherSide(isLeftDecimal, left, right);
+    const op = this.operatorText(expr.op);
+    const texts = this.operandTexts(expr, module);
+    const first = this.text.of(left);
+    const second = this.text.of(right);
+
+    if (other.kind == TypeKind.Int) {
+      const word = this.integerMixText(isLeftDecimal, op, texts);
+
+      return this.report(module, expr.loc, Code.MixedNumbers, {
+        first,
+        second,
+        other: op,
+        word,
+      });
+    }
+    if (this.types.definedType(other).kind != TypeKind.Double) {
+      return this.reportOperands(expr, pair, module);
+    }
+    if (other.kind != TypeKind.Double) {
+      return this.report(module, expr.loc, Code.DecimalInexactPlain, {
+        first,
+        second,
+        other: op,
+      });
+    }
+
+    const word = this.inexactText(isLeftDecimal, op, texts);
+
+    this.report(module, expr.loc, Code.DecimalInexact, {
+      first,
+      second,
+      other: op,
+      word,
+    });
+  }
+
+  private otherSide(isLeftDecimal: boolean, left: Type, right: Type): Type {
+    if (isLeftDecimal) {
+      return right;
+    }
+
+    return left;
+  }
+
+  private integerMixText(
+    isLeftDecimal: boolean,
+    op: string,
+    texts: OperandTexts,
+  ): string {
+    if (isLeftDecimal) {
+      const converted = this.operandText(texts.right);
+
+      return `${texts.left} ${op} ${converted}.toDecimal()`;
+    }
+
+    const converted = this.operandText(texts.left);
+
+    return `${converted}.toDecimal() ${op} ${texts.right}`;
+  }
+
+  private inexactText(
+    isLeftDecimal: boolean,
+    op: string,
+    texts: OperandTexts,
+  ): string {
+    if (isLeftDecimal) {
+      return `${texts.left} ${op} decimal(${texts.right})`;
+    }
+
+    return `decimal(${texts.left}) ${op} ${texts.right}`;
+  }
+}

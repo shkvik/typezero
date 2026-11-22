@@ -1,0 +1,271 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  Expr,
+  ExprKind,
+  UnaryExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  kAnyObjectTypeOfNames,
+  kBigintTypeOf,
+  kIntegerTypeOfPrefixes,
+  kJsonTypeOfNames,
+  kLastNameSeparator,
+  kMostShownNumberNames,
+  kNameSeparator,
+  kNullTypeOf,
+  kNumberTypeOf,
+  kNumberTypeOfNames,
+  kSymbolTypeOf,
+  kTypeOfNames,
+  kUndefinedTypeOf,
+} from "../../const/expression-types.const.tz";
+import { ComparedSide } from "../../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private typeofTyped(expr: UnaryExpr, module: int): Type {
+    this.typed(expr.operand, undefined, module);
+
+    return this.store.plain(TypeKind.String);
+  }
+
+  private typeOfCheck(side: ComparedSide, other: Expr, module: int): void {
+    const tested = side.tested;
+    if (tested == undefined || other.kind != ExprKind.StringLit) {
+      return;
+    }
+
+    const name = other.value;
+    const loc = other.loc;
+
+    if (name == kBigintTypeOf) {
+      return this.report(module, loc, Code.TypeOfBigint, kNoDetails);
+    }
+    if (!kTypeOfNames.includes(name)) {
+      return this.reportTypeOfName(tested, name, loc, module);
+    }
+
+    const plain = this.types.definedType(tested);
+    const parts = this.types.unionMembers(plain);
+    const isOpen =
+      parts.some((part) => part.kind == TypeKind.Error) ||
+      plain.kind == TypeKind.TypeParameter;
+    if (isOpen) {
+      return;
+    }
+
+    const names = this.typeOfNames(tested);
+    if (names.length == 0 || names.includes(name)) {
+      return;
+    }
+
+    const first = this.text.of(tested);
+    const listed = this.quotedNames(names);
+
+    this.report(module, loc, Code.TypeOfNever, {
+      first,
+      other: listed,
+      word: name,
+    });
+  }
+
+  private reportTypeOfName(
+    tested: Type,
+    name: string,
+    loc: int,
+    module: int,
+  ): void {
+    const all = this.quotedNames(kTypeOfNames);
+
+    if (name == kSymbolTypeOf) {
+      return this.report(module, loc, Code.TypeOfNoSymbol, { other: all });
+    }
+    if (name != kNumberTypeOf) {
+      return this.report(module, loc, Code.TypeOfNotName, {
+        word: name,
+        other: all,
+      });
+    }
+
+    const numbers = this.numberTypeOfNames(tested);
+    const isShown =
+      numbers.length > 0 && numbers.length <= kMostShownNumberNames;
+    if (!isShown) {
+      return this.report(module, loc, Code.TypeOfNoNumber, kNoDetails);
+    }
+
+    const first = this.text.of(tested);
+    const other = this.quotedNames(numbers);
+
+    this.report(module, loc, Code.TypeOfNoNumberHere, { first, other });
+  }
+
+  private numberTypeOfNames(type: Type): string[] {
+    if (type.kind == TypeKind.Error) {
+      return [];
+    }
+
+    const names = this.typeOfNames(type);
+
+    return names.filter((name) => this.isNumberTypeOfName(name));
+  }
+
+  private isNumberTypeOfName(name: string): boolean {
+    const isInteger = kIntegerTypeOfPrefixes.some((prefix) =>
+      name.startsWith(prefix),
+    );
+
+    return isInteger || kNumberTypeOfNames.includes(name);
+  }
+
+  private quotedNames(names: string[]): string {
+    let list = "";
+    let index = 0;
+
+    for (const name of names) {
+      list = list + this.nameSeparator(index, names.length) + `"${name}"`;
+      index += 1;
+    }
+
+    return list;
+  }
+
+  private nameSeparator(index: int, count: int): string {
+    if (index == 0) {
+      return "";
+    }
+    if (index + 1 == count) {
+      return kLastNameSeparator;
+    }
+
+    return kNameSeparator;
+  }
+
+  private typeOfNames(type: Type): string[] {
+    const names: string[] = [];
+
+    this.addTypeOfNames(type, names);
+
+    return names;
+  }
+
+  private addTypeOfNames(type: Type, names: string[]): void {
+    if (this.types.isOptional(type)) {
+      const plain = this.types.definedType(type);
+
+      this.addTypeOfNames(plain, names);
+      this.addName(kUndefinedTypeOf, names);
+
+      return;
+    }
+
+    switch (type.kind) {
+      case TypeKind.Json:
+        return this.addNames(kJsonTypeOfNames, names);
+      case TypeKind.Unknown: {
+        const known = kTypeOfNames.filter((name) => name != kNullTypeOf);
+
+        return this.addNames(known, names);
+      }
+      case TypeKind.TypeParameter:
+        return this.addNames(kTypeOfNames, names);
+      case TypeKind.AnyObject:
+        return this.addNames(kAnyObjectTypeOfNames, names);
+      case TypeKind.Union:
+        for (const part of type.parts) {
+          this.addTypeOfNames(part, names);
+        }
+
+        return;
+      default:
+        return this.addName(this.typeOfName(type), names);
+    }
+  }
+
+  private addNames(added: string[], names: string[]): void {
+    for (const name of added) {
+      this.addName(name, names);
+    }
+  }
+
+  private addName(name: string, names: string[]): void {
+    if (name != "" && !names.includes(name)) {
+      names.push(name);
+    }
+  }
+
+  private typeOfName(type: Type): string {
+    switch (type.kind) {
+      case TypeKind.Int: {
+        const plain = this.store.integer(type.bits, type.unsigned);
+
+        return this.text.of(plain);
+      }
+      case TypeKind.Double:
+        return "double";
+      case TypeKind.Decimal:
+        return "decimal";
+      case TypeKind.String:
+      case TypeKind.Template:
+        return "string";
+      case TypeKind.Boolean:
+        return "boolean";
+      case TypeKind.Array:
+      case TypeKind.Tuple:
+        return "array";
+      case TypeKind.Object:
+      case TypeKind.Instance:
+      case TypeKind.Result:
+      case TypeKind.Iterator:
+      case TypeKind.Dict:
+      case TypeKind.Promise:
+        return "object";
+      case TypeKind.Function:
+        return "function";
+      case TypeKind.Class:
+        return "class";
+      case TypeKind.Literal:
+        return this.literalTypeOfName(type);
+      case TypeKind.Union:
+        return this.unionTypeOfName(type.parts);
+      case TypeKind.TypeParameter:
+      case TypeKind.Json:
+      case TypeKind.Unknown:
+      case TypeKind.AnyObject:
+      case TypeKind.Operation:
+      case TypeKind.Error:
+        return "";
+      default:
+        return kUndefinedTypeOf;
+    }
+  }
+
+  private literalTypeOfName(type: Type): string {
+    const base = this.relation.baseOf(type);
+    if (base == undefined) {
+      return "";
+    }
+
+    return this.typeOfName(base);
+  }
+
+  private unionTypeOfName(parts: Type[]): string {
+    const first = parts[0];
+    if (first == undefined) {
+      return "";
+    }
+
+    const name = this.typeOfName(first);
+    const isSame = parts.every((part) => this.typeOfName(part) == name);
+    if (!isSame) {
+      return "";
+    }
+
+    return name;
+  }
+}

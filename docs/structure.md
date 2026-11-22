@@ -723,14 +723,19 @@ self/             компилятор на tz, пробный (порт compile
                   С 22.11 ExpressionTypes режется: то, что не разбирает выражений и не
                   пишет ошибок, уходит в обычные классы вопросов по группам — класс
                   отвечает находкой (код и детали), пишет её тот, кто спросил; сам обход
-                  остаётся одним классом из частей, части раскладываются по папкам групп
-                  (semantic/<группа>/expression-types/). Уже вынесено:
+                  остаётся одним классом из частей, части разложены по группам и темам:
+                  semantic/<группа>/expression-types/partial/[<тема>/]expression-types.partial.<часть>.tz.
+                  Сам класс, его types/ и const/ — в semantic/code/expression-types/. Темы
+                  есть там, где частей много: code — calls, classes, dictionaries,
+                  functions, indexing, members, objects, operators, statements; library —
+                  date, decimal, result и пять частей без темы; flow, generics, inference,
+                  types — без тем. Имена тем — как у подпапок compiler/semantic. Уже
+                  вынесено:
                   semantic/types/type-questions/ — TypeQuestions: вопросы об одном типе
                   (isOptional, definedType, apparent, unionMembers, isObjectKind…), поле
                   types у обхода и у классов правил;
                   semantic/flow/truth-rules/ — TruthRules: можно ли проверять значение
                   типа как условие (problemOf) и какой ошибкой ответить (answerOf);
-                  semantic/flow/expression-types/ — части обхода группы flow (truth);
                   semantic/declaration/scope-stack/ — ScopeStack: состояние обхода — стек областей
                   (значения и типы) и глубина функций; меняется только своими методами;
                   program/scopes/ — итог (types/scopes.types.tz): NameSymbol { name, kind:

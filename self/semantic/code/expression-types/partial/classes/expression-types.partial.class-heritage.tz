@@ -1,0 +1,447 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  TypeContext,
+  TypePlace,
+} from "../../../../types/type-resolver/types/type-resolver.types.tz";
+import {
+  Access,
+  ClassDecl,
+  MethodKind,
+} from "../../../../../program/ast/types/ast.types.classes.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  NameExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../../program/ast/types/ast.types.functions.tz";
+import {
+  Stmt,
+  StmtKind,
+} from "../../../../../program/ast/types/ast.types.statements.tz";
+import {
+  FunctionType,
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  kPrivateWord,
+  kProtectedWord,
+  kPublicWord,
+} from "../../const/expression-types.const.tz";
+import {
+  ClassMemberEntry,
+  SuperFrame,
+  ThisPlace,
+} from "../../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private superFrameOf(
+    decl: ClassDecl,
+    fn: FunctionDecl,
+    module: int,
+  ): SuperFrame {
+    const roots = new Set<Expr>();
+    const parent = this.parentClassName(decl, module);
+    const isMaker = fn.role?.method == MethodKind.Constructor;
+    const isDerived = decl.base != undefined || decl.baseExpr != undefined;
+    const isConstructor = isMaker && isDerived;
+
+    for (const statement of fn.body?.body ?? []) {
+      const call = this.rootSuperOf(statement, module);
+      if (call != undefined && isConstructor) {
+        roots.add(call);
+      }
+    }
+
+    return { isConstructor, roots, parent: parent ?? "", isBefore: true };
+  }
+
+  private rootSuperOf(statement: Stmt, module: int): Expr | undefined {
+    if (statement.kind != StmtKind.Expr) {
+      return undefined;
+    }
+
+    const expr = statement.expr;
+    if (expr.kind != ExprKind.Call) {
+      return undefined;
+    }
+    if (!this.isSuperName(expr.callee, module)) {
+      return undefined;
+    }
+
+    return expr;
+  }
+
+  private parentClassName(decl: ClassDecl, module: int): string | undefined {
+    if (decl.base == undefined) {
+      return undefined;
+    }
+
+    const params = this.resolver.parameterTypes(module, decl.typeParams);
+    const instance = this.resolver.classInstance(module, decl, params);
+    if (instance.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const parent = this.parentOf(instance, decl);
+
+    return parent?.name;
+  }
+
+  private superCheck(decl: ClassDecl, fn: FunctionDecl, module: int): void {
+    const frame = this.superFrames[this.superFrames.length - 1];
+    if (frame == undefined || !frame.isConstructor || frame.roots.size > 0) {
+      return;
+    }
+    if (frame.parent == "") {
+      return;
+    }
+
+    const first = decl.name ?? "";
+    const word = frame.parent;
+
+    this.report(module, fn.loc, Code.MustCallSuper, { word, first });
+  }
+
+  private superCallTyped(expr: CallExpr, callee: Expr, module: int): Type {
+    const frame = this.superFrames[this.superFrames.length - 1];
+    const nothing = this.store.plain(TypeKind.Void);
+    const place = this.thisPlaces[this.thisPlaces.length - 1];
+    const isInside = frame != undefined && place != ThisPlace.Function;
+    if (frame == undefined || !frame.isConstructor || !isInside) {
+      this.report(module, callee.loc, Code.SuperOutside, kNoDetails);
+
+      return nothing;
+    }
+    if (!frame.roots.has(expr)) {
+      this.report(module, callee.loc, Code.SuperNotStatement, kNoDetails);
+
+      return nothing;
+    }
+    if (!frame.isBefore && frame.parent != "") {
+      this.report(module, callee.loc, Code.SuperTwice, { word: frame.parent });
+    }
+
+    frame.isBefore = false;
+    this.superFieldsSet();
+
+    return nothing;
+  }
+
+  private thisBeforeSuper(expr: NameExpr, module: int): void {
+    const frame = this.superFrames[this.superFrames.length - 1];
+    if (frame == undefined || !frame.isConstructor || !frame.isBefore) {
+      return;
+    }
+    if (frame.parent == "") {
+      return;
+    }
+
+    this.report(module, expr.loc, Code.ThisBeforeSuper, {
+      word: frame.parent,
+    });
+  }
+
+  private returnBeforeSuper(loc: int, module: int): void {
+    const frame = this.superFrames[this.superFrames.length - 1];
+    if (frame == undefined || !frame.isConstructor || !frame.isBefore) {
+      return;
+    }
+
+    this.report(module, loc, Code.ReturnBeforeSuper, kNoDetails);
+  }
+
+  private overrideChecks(decl: ClassDecl, module: int): void {
+    if (decl.base == undefined) {
+      return;
+    }
+
+    const isOpen = decl.typeParams.length > 0;
+    const params = this.resolver.parameterTypes(module, decl.typeParams);
+    const instance = this.resolver.classInstance(module, decl, params);
+    if (instance.kind != TypeKind.Instance) {
+      return;
+    }
+
+    const parent = this.parentOf(instance, decl);
+    if (parent == undefined || this.classOf(parent) == undefined) {
+      return;
+    }
+
+    for (const method of decl.methods) {
+      if (!this.isStaticMethod(method)) {
+        this.overrideCheck(method, decl, parent, isOpen, module);
+      }
+    }
+  }
+
+  private overrideCheck(
+    method: FunctionDecl,
+    decl: ClassDecl,
+    parent: InstanceType,
+    isOpen: boolean,
+    module: int,
+  ): void {
+    const word = method.name;
+    const lookup = this.classMember(parent, word);
+    const entry = lookup.entry;
+    const isMarked = method.role?.isOverride == true;
+
+    if (!lookup.isKnown) {
+      return;
+    }
+    if (entry != undefined) {
+      if (this.methodOverFieldCheck(method, entry, parent, module)) {
+        return;
+      }
+    }
+    if (entry == undefined && isMarked) {
+      this.report(module, method.loc, Code.OverrideMissing, {
+        word,
+        first: parent.name,
+      });
+
+      return;
+    }
+    if (isOpen) {
+      return;
+    }
+
+    const theirs = entry?.methods[0];
+    const isSingle = entry != undefined && entry.methods.length == 1;
+    if (entry == undefined || theirs == undefined || !isSingle) {
+      return;
+    }
+
+    const theirType = this.methodTypeOf(entry, theirs);
+    const ownType = this.ownMethodType(decl, method, module);
+    if (theirType.kind != TypeKind.Function || ownType == undefined) {
+      return;
+    }
+    if (!this.isSameParameters(ownType, theirType)) {
+      if (isMarked) {
+        const other = this.variantText(theirs, theirType);
+
+        this.report(module, method.loc, Code.OverrideParameters, {
+          word,
+          first: parent.name,
+          other,
+        });
+      }
+
+      return;
+    }
+
+    this.overrideResultCheck(method, decl, ownType, theirType, parent, module);
+    this.overrideAccessCheck(method, theirs, parent, module);
+  }
+
+  private ownMethodType(
+    decl: ClassDecl,
+    method: FunctionDecl,
+    module: int,
+  ): FunctionType | undefined {
+    const type = this.methodFunction(decl, method, module);
+    if (type.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    return type;
+  }
+
+  private isSameParameters(own: FunctionType, theirs: FunctionType): boolean {
+    const mine = own.shape.params;
+    const other = theirs.shape.params;
+    if (mine.length != other.length || own.shape.rest != theirs.shape.rest) {
+      return false;
+    }
+
+    return mine.every((param, index) => {
+      const that = other[index];
+
+      return (
+        that != undefined &&
+        (param.type == that.type || param.type.kind == TypeKind.Error) &&
+        param.optional == that.optional
+      );
+    });
+  }
+
+  private overrideResultCheck(
+    method: FunctionDecl,
+    decl: ClassDecl,
+    own: FunctionType,
+    theirs: FunctionType,
+    parent: InstanceType,
+    module: int,
+  ): void {
+    const mine = own.shape.result;
+    const other = theirs.shape.result;
+    const isSame = mine == other || mine.kind == TypeKind.Error;
+    if (isSame || method.returnType == undefined) {
+      return;
+    }
+
+    this.report(module, method.loc, Code.OverrideReturns, {
+      word: method.name,
+      first: this.text.of(mine),
+      second: decl.name ?? "",
+      other: this.text.of(other),
+      place: parent.name,
+    });
+  }
+
+  private overrideAccessCheck(
+    method: FunctionDecl,
+    theirs: FunctionDecl,
+    parent: InstanceType,
+    module: int,
+  ): void {
+    const own = this.accessOf(method);
+    const their = this.accessOf(theirs);
+    if (this.accessRank(own) <= this.accessRank(their)) {
+      return;
+    }
+
+    this.report(module, method.loc, Code.OverrideAccess, {
+      word: method.name,
+      first: this.accessWord(their),
+      second: parent.name,
+      other: this.accessWord(own),
+    });
+  }
+
+  private accessRank(access: Access): int {
+    switch (access) {
+      case Access.Public:
+        return 0;
+      case Access.Protected:
+        return 1;
+      default:
+        return 2;
+    }
+  }
+
+  private accessWord(access: Access): string {
+    switch (access) {
+      case Access.Public:
+        return kPublicWord;
+      case Access.Protected:
+        return kProtectedWord;
+      default:
+        return kPrivateWord;
+    }
+  }
+
+  private variantText(fn: FunctionDecl, type: FunctionType): string {
+    const params = type.shape.params;
+    const parts: string[] = [];
+
+    for (let index = 0; index < fn.params.length; index++) {
+      const param = fn.params[index];
+      const typed = params[index];
+      if (param != undefined && typed != undefined) {
+        const text = this.text.of(typed.type);
+
+        parts.push(`${param.name}: ${text}`);
+      }
+    }
+
+    return `${fn.name}(${parts.join(", ")})`;
+  }
+
+  private inheritedResult(fn: FunctionDecl, module: int): Type | undefined {
+    const owner = this.ownerClasses[this.ownerClasses.length - 1];
+    const isMethod = fn.role != undefined && !this.isStaticMethod(fn);
+    if (owner == undefined || !isMethod || owner.decl.typeParams.length > 0) {
+      return undefined;
+    }
+
+    const decl = owner.decl;
+    const instance = this.resolver.classInstance(owner.module, decl, []);
+    if (instance.kind != TypeKind.Instance) {
+      return undefined;
+    }
+    if (decl.base == undefined) {
+      return this.contractResultOf(decl, fn, owner.module);
+    }
+
+    const parent = this.parentOf(instance, decl);
+    if (parent == undefined) {
+      return this.contractResultOf(decl, fn, owner.module);
+    }
+
+    const entry = this.parentEntry(parent, fn);
+    const theirs = entry?.methods[0];
+    if (entry == undefined || theirs == undefined) {
+      return undefined;
+    }
+    if (theirs.params.length != fn.params.length) {
+      return undefined;
+    }
+
+    const type = this.methodTypeOf(entry, theirs);
+    if (type.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    const result = type.shape.result;
+    if (result.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return result;
+  }
+
+  private contractResultOf(
+    decl: ClassDecl,
+    fn: FunctionDecl,
+    module: int,
+  ): Type | undefined {
+    const context: TypeContext = {
+      module,
+      bindings: new Map<int, Type>(),
+      place: TypePlace.Base,
+    };
+
+    for (const ref of decl.interfaces) {
+      const type = this.resolver.resolve(ref, context);
+      if (type.kind != TypeKind.Object) {
+        continue;
+      }
+
+      const same = type.fields.filter((one) => one.name == fn.name);
+      const field = same[0];
+      if (field != undefined && same.length == 1) {
+        return this.contractFieldResult(field.type);
+      }
+    }
+
+    return undefined;
+  }
+
+  private contractFieldResult(type: Type): Type | undefined {
+    if (type.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    return type.shape.result;
+  }
+
+  private parentEntry(
+    parent: InstanceType,
+    fn: FunctionDecl,
+  ): ClassMemberEntry | undefined {
+    const lookup = this.classMember(parent, fn.name);
+    const entry = lookup.entry;
+    if (entry == undefined || entry.methods.length != 1) {
+      return undefined;
+    }
+
+    return entry;
+  }
+}

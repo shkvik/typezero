@@ -1,0 +1,621 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  AssignExpr,
+  BinaryExpr,
+  BinaryOp,
+  CallArgument,
+  ConditionalExpr,
+  Expr,
+  ExprKind,
+  UnaryExpr,
+  UnaryOp,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  kAndText,
+  kArgumentSeparator,
+  kDoubleQuote,
+  kEmptyArray,
+  kEmptyText,
+  kEquals,
+  kEscape,
+  kFirstPrintable,
+  kHiddenMark,
+  kLastPrintable,
+  kNotEquals,
+  kOrText,
+  kOtherPlaceholder,
+  kUndefinedText,
+  kUnnamedOperand,
+  kZeroText,
+} from "../../const/expression-types.const.tz";
+import { LogicSide } from "../../types/expression-types.types.tz";
+import { TruthUse } from "../../../../flow/truth-rules/types/truth-rules.types.tz";
+import { kNegation } from "../../../../flow/truth-rules/const/truth-rules.const.tz";
+
+partial class ExpressionTypes {
+  private notTyped(expr: UnaryExpr, module: int): Type {
+    this.branchCheck(expr.operand, TruthUse.Not, module);
+
+    return this.store.plain(TypeKind.Boolean);
+  }
+
+  private branchCheck(expr: Expr, use: TruthUse, module: int): void {
+    if (this.isLogical(expr) && expr.kind == ExprKind.Binary) {
+      const isAnd = expr.op == BinaryOp.LogAnd;
+
+      this.branchCheck(expr.lhs, TruthUse.Condition, module);
+
+      const facts = this.factsOf(expr.lhs, isAnd, module);
+      const before = this.underFacts(facts);
+
+      this.branchCheck(expr.rhs, TruthUse.Condition, module);
+      this.facts = before;
+
+      return;
+    }
+    if (expr.kind == ExprKind.Unary && expr.op == UnaryOp.Not) {
+      return this.branchCheck(expr.operand, TruthUse.Not, module);
+    }
+
+    const boolean = this.store.plain(TypeKind.Boolean);
+    const type = this.typed(expr, boolean, module);
+
+    if (expr.kind == ExprKind.Assign && expr.op == undefined) {
+      return this.assignmentCondition(expr, type, use, module);
+    }
+    if (type.kind != TypeKind.Boolean) {
+      this.checkTruthy(expr, type, use, undefined, module);
+    }
+  }
+
+  private assignmentCondition(
+    expr: AssignExpr,
+    type: Type,
+    use: TruthUse,
+    module: int,
+  ): void {
+    const isNegated = use == TruthUse.Not;
+    const first = this.hintText(expr.target, kUnnamedOperand);
+    const second = this.hintText(expr.value, kOtherPlaceholder);
+    const base = this.types.definedType(type);
+    const isTestable =
+      this.types.isOptional(type) ||
+      this.types.isNumberLike(base) ||
+      base.kind == TypeKind.String;
+    const isCompared =
+      this.isWrittenLiteral(expr.value) ||
+      type.kind == TypeKind.Error ||
+      !isTestable;
+    if (isCompared) {
+      const word = this.equalsText(isNegated);
+
+      return this.report(module, expr.loc, Code.AssignmentCompared, {
+        word,
+        first,
+        second,
+      });
+    }
+
+    const other = this.emptyTest(type, isNegated);
+
+    this.report(module, expr.loc, Code.AssignmentTested, {
+      first,
+      second,
+      other,
+    });
+  }
+
+  private equalsText(isNegated: boolean): string {
+    if (isNegated) {
+      return kNotEquals;
+    }
+
+    return kEquals;
+  }
+
+  private emptyTest(type: Type, isNegated: boolean): string {
+    const test = this.equalsText(!isNegated);
+    const base = this.types.definedType(type);
+
+    if (this.types.isOptional(type)) {
+      return `${test} ${kUndefinedText}`;
+    }
+    if (base.kind == TypeKind.String) {
+      return `${test} ${kEmptyText}`;
+    }
+
+    return `${test} ${kZeroText}`;
+  }
+
+  private isWrittenLiteral(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+      case ExprKind.FloatLit:
+      case ExprKind.StringLit:
+      case ExprKind.BoolLit:
+      case ExprKind.Undefined:
+        return true;
+      case ExprKind.Unary:
+        return expr.op == UnaryOp.Neg && this.isWrittenLiteral(expr.operand);
+      default:
+        return false;
+    }
+  }
+
+  private isLogical(expr: Expr): boolean {
+    if (expr.kind != ExprKind.Binary) {
+      return false;
+    }
+
+    return expr.op == BinaryOp.LogAnd || expr.op == BinaryOp.LogOr;
+  }
+
+  private logicalTyped(
+    expr: BinaryExpr,
+    wanted: Type | undefined,
+    side: LogicSide,
+    module: int,
+  ): Type {
+    const isAnd = expr.op == BinaryOp.LogAnd;
+    const use = this.logicalUse(isAnd);
+    const expected = this.types.wantedPart(wanted);
+    const written = this.testedValue(expr.lhs, expected, use, module);
+    const left = this.types.apparent(written);
+    const isLeftTruthy = this.checkTruthy(
+      expr.lhs,
+      left,
+      use,
+      expr.rhs,
+      module,
+    );
+    const hint = this.rightHint(isAnd, left, expected);
+    const facts = this.factsOf(expr.lhs, isAnd, module);
+    const before = this.underFacts(facts);
+    const right = this.logicalRight(expr, hint, side, module);
+
+    this.facts = before;
+
+    const isRightTruthy =
+      side == LogicSide.Value ||
+      this.checkTruthy(expr.rhs, right, TruthUse.Condition, undefined, module);
+    if (!isLeftTruthy || !isRightTruthy) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.logicalResult(expr, left, right, isAnd, module);
+  }
+
+  private logicalUse(isAnd: boolean): TruthUse {
+    if (isAnd) {
+      return TruthUse.And;
+    }
+
+    return TruthUse.Or;
+  }
+
+  private testedValue(
+    expr: Expr,
+    expected: Type | undefined,
+    use: TruthUse,
+    module: int,
+  ): Type {
+    if (this.isLogical(expr) && expr.kind == ExprKind.Binary) {
+      return this.logicalTyped(expr, expected, LogicSide.Tested, module);
+    }
+    if (expr.kind == ExprKind.Unary && expr.op == UnaryOp.Not) {
+      this.branchCheck(expr.operand, TruthUse.Not, module);
+
+      return this.store.plain(TypeKind.Boolean);
+    }
+
+    return this.typed(expr, expected, module);
+  }
+
+  private rightHint(
+    isAnd: boolean,
+    left: Type,
+    expected: Type | undefined,
+  ): Type | undefined {
+    const isPlain =
+      isAnd || left.kind == TypeKind.Error || left.kind == TypeKind.Undefined;
+    if (isPlain) {
+      return expected;
+    }
+
+    return this.types.definedType(left);
+  }
+
+  private logicalRight(
+    expr: BinaryExpr,
+    hint: Type | undefined,
+    side: LogicSide,
+    module: int,
+  ): Type {
+    if (side == LogicSide.Value) {
+      return this.typed(expr.rhs, hint, module);
+    }
+
+    return this.testedValue(expr.rhs, hint, TruthUse.Condition, module);
+  }
+
+  private logicalResult(
+    expr: BinaryExpr,
+    left: Type,
+    right: Type,
+    isAnd: boolean,
+    module: int,
+  ): Type {
+    const isBroken =
+      left.kind == TypeKind.Error || right.kind == TypeKind.Error;
+    if (isBroken) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const isBoolean =
+      left.kind == TypeKind.Boolean && right.kind == TypeKind.Boolean;
+    if (isBoolean) {
+      return left;
+    }
+    if (right.kind == TypeKind.Void) {
+      return this.reportRightVoid(expr, isAnd, module);
+    }
+
+    const kept = this.keptLeft(left, isAnd);
+    const result = this.unify(kept, right);
+    if (result != undefined) {
+      return result;
+    }
+
+    const first = this.text.of(kept);
+    const second = this.text.of(right);
+    const code = this.noCommonCode(isAnd);
+
+    this.report(module, expr.loc, code, { first, second });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private reportRightVoid(expr: BinaryExpr, isAnd: boolean, module: int): Type {
+    const word = this.logicalText(isAnd);
+    const test = this.hintText(expr.lhs, kUnnamedOperand);
+    const first = this.negatedText(test, isAnd);
+    const second = this.hintText(expr.rhs, kOtherPlaceholder);
+
+    this.report(module, expr.loc, Code.RightSideVoid, { word, first, second });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private logicalText(isAnd: boolean): string {
+    if (isAnd) {
+      return kAndText;
+    }
+
+    return kOrText;
+  }
+
+  private negatedText(test: string, isAnd: boolean): string {
+    if (isAnd) {
+      return test;
+    }
+
+    return kNegation + test;
+  }
+
+  private keptLeft(left: Type, isAnd: boolean): Type {
+    if (!isAnd) {
+      return this.types.definedType(left);
+    }
+
+    const base = this.types.definedType(left);
+    const isAlwaysTruthy =
+      base.kind == TypeKind.Array ||
+      base.kind == TypeKind.Function ||
+      this.truth.isTruthyObject(base);
+    if (isAlwaysTruthy) {
+      return this.store.plain(TypeKind.Undefined);
+    }
+
+    return left;
+  }
+
+  private noCommonCode(isAnd: boolean): Code {
+    if (isAnd) {
+      return Code.LogicalAndNoCommon;
+    }
+
+    return Code.LogicalOrNoCommon;
+  }
+
+  private conditionalTyped(
+    expr: ConditionalExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    this.branchCheck(expr.cond, TruthUse.Condition, module);
+
+    const start = this.recursions.length;
+    const isThenWaiting = this.isWaiting(expr.thenExpr);
+    const isElseWaiting = this.isWaiting(expr.elseExpr);
+    if (isThenWaiting && !isElseWaiting) {
+      const elseType = this.branchTyped(expr, false, wanted, module);
+      const thenHint = this.branchHint(expr.thenExpr, elseType, wanted);
+      const thenType = this.branchTyped(expr, true, thenHint, module);
+
+      return this.joinedBranches(expr, thenType, elseType, start, module);
+    }
+
+    const thenType = this.branchTyped(expr, true, wanted, module);
+    const elseHint = this.elseHint(
+      expr,
+      thenType,
+      wanted,
+      isElseWaiting && !isThenWaiting,
+    );
+    const elseType = this.branchTyped(expr, false, elseHint, module);
+
+    return this.joinedBranches(expr, thenType, elseType, start, module);
+  }
+
+  private branchTyped(
+    expr: ConditionalExpr,
+    isThen: boolean,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const branch = this.sideOf(isThen, expr.thenExpr, expr.elseExpr);
+    const facts = this.factsOf(expr.cond, isThen, module);
+    const before = this.underFacts(facts);
+    const type = this.typed(branch, wanted, module);
+
+    this.facts = before;
+
+    return type;
+  }
+
+  private isWaiting(branch: Expr): boolean {
+    return this.isShapedBranch(branch) || this.isNumberTree(branch);
+  }
+
+  private isShapedBranch(branch: Expr): boolean {
+    if (this.isLiteralShaped(branch)) {
+      return true;
+    }
+    if (branch.kind != ExprKind.Conditional) {
+      return false;
+    }
+
+    return (
+      this.isShapedBranch(branch.thenExpr) ||
+      this.isShapedBranch(branch.elseExpr)
+    );
+  }
+
+  private branchHint(
+    literal: Expr,
+    other: Type,
+    wanted: Type | undefined,
+  ): Type | undefined {
+    if (this.isNumberTree(literal)) {
+      return this.decimalHint(other, wanted);
+    }
+    if (wanted != undefined) {
+      return wanted;
+    }
+    if (other.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return other;
+  }
+
+  private decimalHint(other: Type, hint: Type | undefined): Type | undefined {
+    const plain = this.types.definedType(other);
+    if (plain.kind == TypeKind.Decimal) {
+      return plain;
+    }
+
+    return hint;
+  }
+
+  private elseHint(
+    expr: ConditionalExpr,
+    thenType: Type,
+    wanted: Type | undefined,
+    isElseWaitingOnly: boolean,
+  ): Type | undefined {
+    if (isElseWaitingOnly) {
+      return this.branchHint(expr.elseExpr, thenType, wanted);
+    }
+    if (this.isNumberTree(expr.elseExpr)) {
+      return this.decimalHint(thenType, wanted);
+    }
+
+    return wanted;
+  }
+
+  private joinedBranches(
+    expr: ConditionalExpr,
+    thenType: Type,
+    elseType: Type,
+    start: int,
+    module: int,
+  ): Type {
+    const isThenBroken = thenType.kind == TypeKind.Error;
+    const isElseBroken = elseType.kind == TypeKind.Error;
+    if (isThenBroken || isElseBroken) {
+      return this.failedBranches(thenType, elseType, start);
+    }
+
+    const isDifferent = thenType != elseType;
+    const thenTarget = this.adaptedBranch(
+      isDifferent,
+      expr.thenExpr,
+      thenType,
+      elseType,
+      module,
+    );
+    const elseTarget = this.adaptedBranch(
+      isDifferent && thenTarget == thenType,
+      expr.elseExpr,
+      elseType,
+      thenType,
+      module,
+    );
+    const common = this.unionUnify(thenTarget, elseTarget);
+    if (common != undefined) {
+      return common;
+    }
+
+    const first = this.text.of(thenTarget);
+    const second = this.text.of(elseTarget);
+
+    this.report(module, expr.loc, Code.BranchesIncompatible, {
+      first,
+      second,
+    });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private failedBranches(thenType: Type, elseType: Type, start: int): Type {
+    const isPending = this.recursions.length > start;
+    const isThenBroken = thenType.kind == TypeKind.Error;
+    const isElseBroken = elseType.kind == TypeKind.Error;
+    if (!isPending || isThenBroken == isElseBroken) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (isThenBroken) {
+      return elseType;
+    }
+
+    return thenType;
+  }
+
+  private adaptedBranch(
+    isAdapting: boolean,
+    branch: Expr,
+    type: Type,
+    other: Type,
+    module: int,
+  ): Type {
+    if (!isAdapting) {
+      return type;
+    }
+
+    const target = this.literalTarget(branch, type, other, module);
+    if (target == undefined) {
+      return type;
+    }
+
+    return other;
+  }
+
+  private hintText(expr: Expr, placeholder: string): string {
+    const text = this.sourceText(expr);
+    if (text == "") {
+      return placeholder;
+    }
+
+    return text;
+  }
+
+  private sourceText(expr: Expr): string {
+    switch (expr.kind) {
+      case ExprKind.Name:
+        if (expr.name.startsWith(kHiddenMark)) {
+          return "";
+        }
+
+        return expr.name;
+      case ExprKind.IntLit:
+        return `${expr.value}`;
+      case ExprKind.BoolLit:
+        return this.truthText(expr.value);
+      case ExprKind.Undefined:
+        return kUndefinedText;
+      case ExprKind.StringLit:
+        return this.stringSource(expr.value);
+      case ExprKind.ArrayLit:
+        return this.arraySource(expr.elements.length);
+      case ExprKind.Member: {
+        const object = this.sourceText(expr.object);
+        if (object == "") {
+          return "";
+        }
+
+        return `${object}${this.memberDot(expr.optional)}${expr.name}`;
+      }
+      case ExprKind.Index:
+        return this.indexSource(expr.object, expr.index, expr.optional);
+      case ExprKind.Call:
+        return this.callSource(expr.callee, expr.args, expr.optional);
+      case ExprKind.OptionalChain:
+        return this.sourceText(expr.chain);
+      default:
+        return "";
+    }
+  }
+
+  private stringSource(value: string): string {
+    for (const unit of value) {
+      const isPrintable = unit >= kFirstPrintable && unit <= kLastPrintable;
+      const isSpecial = unit == kDoubleQuote || unit == kEscape;
+      if (!isPrintable || isSpecial) {
+        return "";
+      }
+    }
+
+    return `${kDoubleQuote}${value}${kDoubleQuote}`;
+  }
+
+  private arraySource(count: int): string {
+    if (count > 0) {
+      return "";
+    }
+
+    return kEmptyArray;
+  }
+
+  private indexSource(object: Expr, index: Expr, optional: boolean): string {
+    const objectText = this.sourceText(object);
+    const indexText = this.sourceText(index);
+    if (objectText == "" || indexText == "") {
+      return "";
+    }
+    if (optional) {
+      return `${objectText}?.[${indexText}]`;
+    }
+
+    return `${objectText}[${indexText}]`;
+  }
+
+  private callSource(
+    callee: Expr,
+    args: CallArgument[],
+    optional: boolean,
+  ): string {
+    if (args.some((argument) => argument.spread)) {
+      return "";
+    }
+
+    const calleeText = this.sourceText(callee);
+    const texts = args.map((argument) => this.sourceText(argument.expr));
+    if (calleeText == "" || texts.includes("")) {
+      return "";
+    }
+
+    const joined = texts.join(kArgumentSeparator);
+
+    if (optional) {
+      return `${calleeText}?.(${joined})`;
+    }
+
+    return `${calleeText}(${joined})`;
+  }
+}

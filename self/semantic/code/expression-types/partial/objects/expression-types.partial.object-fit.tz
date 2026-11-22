@@ -1,0 +1,286 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  AssignExpr,
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NameExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  kLengthName,
+  kStringClass,
+} from "../../const/expression-types.const.tz";
+import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
+import {
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+
+partial class ExpressionTypes {
+  private isPlacedLiteral(expr: Expr, wanted: Type, module: int): boolean {
+    if (expr.kind != ExprKind.Name) {
+      return false;
+    }
+
+    const target = this.targetOfName(expr, module);
+    if (target == undefined || target.kind != SymbolKind.Variable) {
+      return false;
+    }
+
+    const variable = this.record(target.module)?.variables.get(target.loc);
+    const init = variable?.decl.init;
+    if (variable == undefined || init == undefined) {
+      return false;
+    }
+    if (variable.decl.typeAnn != undefined) {
+      return false;
+    }
+
+    const isLiteral =
+      init.kind == ExprKind.ObjectLit || init.kind == ExprKind.ArrayLit;
+
+    return isLiteral && this.isFitting(init, wanted, target.module);
+  }
+
+  private objectTargetCheck(
+    target: MemberExpr,
+    object: Type,
+    module: int,
+  ): void {
+    if (object.kind == TypeKind.Tuple && target.name == kLengthName) {
+      this.report(module, target.loc, Code.TupleLengthFixed, kNoDetails);
+
+      return;
+    }
+
+    const isOwn =
+      object.kind == TypeKind.Object && !this.resolver.isLibraryShape(object);
+    if (!isOwn || object.kind != TypeKind.Object) {
+      return;
+    }
+
+    const word = target.name;
+    const first = this.text.of(object);
+    const field = object.fields.find((one) => one.name == word);
+    if (field == undefined) {
+      return this.report(module, target.loc, Code.PropertyMissing, {
+        word,
+        first,
+      });
+    }
+
+    if (field.method ?? false) {
+      return this.report(module, target.loc, Code.MethodReplaced, {
+        word,
+        first,
+      });
+    }
+
+    const count = object.fields.filter((one) => one.name == word).length;
+    if (count > 1) {
+      return this.report(module, target.loc, Code.OverloadedMethodReplaced, {
+        word,
+        first,
+      });
+    }
+
+    if (!field.readonly) {
+      return;
+    }
+    if (!this.isInferredName(target.object, module)) {
+      this.report(module, target.loc, Code.ObjectReadOnlyField, {
+        word,
+        first,
+      });
+    }
+  }
+
+  private isInferredName(expr: Expr, module: int): boolean {
+    if (expr.kind != ExprKind.Name) {
+      return false;
+    }
+
+    const target = this.targetOfName(expr, module);
+    if (target == undefined || target.kind != SymbolKind.Variable) {
+      return false;
+    }
+
+    const variable = this.record(target.module)?.variables.get(target.loc);
+    const init = variable?.decl.init;
+
+    return (
+      variable?.decl.typeAnn == undefined && init?.kind == ExprKind.ObjectLit
+    );
+  }
+
+  private updateTargetCheck(target: Expr, module: int): void {
+    if (target.kind != ExprKind.Member) {
+      return;
+    }
+
+    this.quiet += 1;
+
+    const object = this.typed(target.object, undefined, module);
+
+    this.quiet -= 1;
+
+    if (object.kind == TypeKind.Instance) {
+      return this.instanceTargetCheck(target, object, module);
+    }
+
+    this.objectTargetCheck(target, object, module);
+  }
+
+  private nullishTargetCheck(
+    expr: AssignExpr,
+    declared: Type,
+    module: int,
+  ): void {
+    if (declared.kind == TypeKind.Error || this.types.isOptional(declared)) {
+      return;
+    }
+
+    const first = this.text.of(declared);
+    const target = expr.target;
+    const isKeyed =
+      target.kind == ExprKind.Member &&
+      this.recordValueOf(target.object, module) != undefined;
+    if (isKeyed) {
+      return;
+    }
+
+    switch (target.kind) {
+      case ExprKind.Name:
+        return this.report(module, expr.loc, Code.NullishNotOptionalVariable, {
+          word: target.name,
+          first,
+        });
+      case ExprKind.Member:
+        return this.report(module, expr.loc, Code.NullishNotOptionalField, {
+          word: target.name,
+          first,
+        });
+      default:
+        return;
+    }
+  }
+
+  private voidFieldCheck(
+    value: Expr,
+    type: Type,
+    name: string,
+    module: int,
+  ): void {
+    if (type.kind == TypeKind.Void) {
+      this.report(module, value.loc, Code.VoidFieldValue, { word: name });
+    }
+  }
+
+  private stringCallCheck(expr: CallExpr, callee: NameExpr, module: int): void {
+    const arg = expr.args[0]?.expr;
+    const isString =
+      callee.name == kStringClass && this.isGlobalUse(callee, module);
+    if (!isString || arg == undefined || expr.args.length != 1) {
+      return;
+    }
+
+    this.quiet += 1;
+
+    const type = this.typed(arg, undefined, module);
+
+    this.quiet -= 1;
+
+    const base = this.types.definedType(type);
+    const isObject =
+      base.kind == TypeKind.Object ||
+      base.kind == TypeKind.Instance ||
+      base.kind == TypeKind.Dict ||
+      base.kind == TypeKind.Json;
+    if (isObject) {
+      this.textCheck(arg, type, module);
+    }
+  }
+
+  private objectDetail(source: Type, target: Type): string {
+    if (source.kind != TypeKind.Object || target.kind != TypeKind.Object) {
+      return "";
+    }
+
+    for (const field of source.fields) {
+      const other = target.fields.find((one) => one.name == field.name);
+      if (other == undefined) {
+        return `; an object must have exactly the fields of its type, and this one has the extra field '${field.name}'`;
+      }
+    }
+
+    for (const field of target.fields) {
+      const other = source.fields.find((one) => one.name == field.name);
+      if (other == undefined) {
+        return `; it has no field '${field.name}'`;
+      }
+    }
+
+    for (const field of source.fields) {
+      const other = target.fields.find((one) => one.name == field.name);
+      if (other != undefined) {
+        const detail = this.fieldDetail(field, other, target);
+        if (detail != "") {
+          return detail;
+        }
+      }
+    }
+
+    return "";
+  }
+
+  private fieldDetail(
+    field: ObjectField,
+    other: ObjectField,
+    target: Type,
+  ): string {
+    const own = this.objectFieldType(field);
+    const theirs = this.objectFieldType(other);
+    const name = field.name;
+    const to = this.text.of(target);
+
+    if (own != theirs) {
+      const here = this.text.of(own);
+      const there = this.text.of(theirs);
+      const text = `; field '${name}' is '${here}' here and '${there}' in '${to}'`;
+
+      return text + this.objectTypeHint(own, theirs, to);
+    }
+    if (field.readonly && !other.readonly) {
+      return `; field '${name}' is read-only here, and '${to}' would let it be changed`;
+    }
+
+    return "";
+  }
+
+  private objectFieldType(field: ObjectField): Type {
+    if (field.optional) {
+      return this.types.optional(field.type);
+    }
+
+    return field.type;
+  }
+
+  private objectTypeHint(own: Type, theirs: Type, to: string): string {
+    const isNumberPair =
+      this.isNumberKind(this.types.definedType(own)) &&
+      this.isNumberKind(this.types.definedType(theirs));
+    if (!isNumberPair) {
+      return "";
+    }
+
+    return `: give the object its type where it is created, e.g. 'const p: ${to} = { ... }'`;
+  }
+
+  private isNumberKind(type: Type): boolean {
+    return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
+  }
+}

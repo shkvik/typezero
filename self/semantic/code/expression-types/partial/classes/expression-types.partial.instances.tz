@@ -1,0 +1,583 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  Access,
+  ClassDecl,
+  ClassField,
+  FieldKind,
+  FieldPresence,
+  MethodKind,
+} from "../../../../../program/ast/types/ast.types.classes.tz";
+import {
+  MemberExpr,
+  NewExpr,
+  NewKind,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../../program/ast/types/ast.types.functions.tz";
+import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
+import {
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ParameterSite } from "../../../../types/type-resolver/types/type-resolver.types.tz";
+import { kConstructorName } from "../../const/expression-types.const.tz";
+import {
+  CallTarget,
+  ClassLookup,
+  ClassMemberEntry,
+} from "../../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private instanceMember(
+    expr: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type {
+    if (this.isLibraryModule(instance.module) && this.isDate(instance)) {
+      return this.dateMemberRead(expr, instance, module);
+    }
+    if (this.isLibraryModule(instance.module)) {
+      return this.libraryMemberTyped(expr, instance, module);
+    }
+
+    const lookup = this.classMember(instance, expr.name);
+    const entry = lookup.entry;
+
+    if (!lookup.isKnown) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (entry == undefined) {
+      const word = expr.name;
+      const first = this.text.of(instance);
+
+      this.report(module, expr.loc, Code.PropertyMissing, { word, first });
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (entry.isStatic) {
+      this.reportStatic(expr, entry, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const field = entry.field;
+    if (field != undefined) {
+      this.checkAccess(entry, field.access, expr, module);
+
+      return this.fieldTypeOf(entry, field);
+    }
+
+    const method = entry.methods[0];
+    if (entry.methods.length > 1) {
+      this.variantValueCheck(expr, entry, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (method == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const access = this.accessOf(method);
+
+    this.checkAccess(entry, access, expr, module);
+
+    if (this.genericMethodValue(expr, method, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.methodTypeOf(entry, method);
+  }
+
+  private reportStatic(
+    expr: MemberExpr,
+    entry: ClassMemberEntry,
+    module: int,
+  ): void {
+    this.report(module, expr.loc, Code.StaticViaInstance, {
+      word: expr.name,
+      first: entry.owner.name ?? "",
+    });
+  }
+
+  private reportStaticCall(
+    expr: MemberExpr,
+    entry: ClassMemberEntry,
+    module: int,
+  ): void {
+    const owner = entry.owner;
+    const isMethod = owner.methods.some(
+      (one) => one.name == expr.name && this.isStaticMethod(one),
+    );
+    if (!isMethod) {
+      return this.reportStatic(expr, entry, module);
+    }
+
+    this.report(module, expr.loc, Code.StaticMethodViaInstance, {
+      word: expr.name,
+      first: owner.name ?? "",
+    });
+  }
+
+  private checkAccess(
+    entry: ClassMemberEntry,
+    access: Access,
+    expr: MemberExpr,
+    module: int,
+  ): boolean {
+    return this.reportAccess(entry.owner, access, expr.name, expr.loc, module);
+  }
+
+  private reportAccess(
+    owner: ClassDecl,
+    access: Access,
+    word: string,
+    loc: int,
+    module: int,
+  ): boolean {
+    const first = owner.name ?? "";
+
+    if (access == Access.Public || this.isInsideClass(owner)) {
+      return false;
+    }
+    if (access == Access.Protected && this.isDerivedInside(owner)) {
+      return false;
+    }
+    if (access == Access.Protected) {
+      this.report(module, loc, Code.ProtectedMember, { word, first });
+
+      return true;
+    }
+
+    this.report(module, loc, Code.PrivateMember, { word, first });
+
+    return true;
+  }
+
+  private accessOf(method: FunctionDecl): Access {
+    return method.role?.access ?? Access.Public;
+  }
+
+  private classOf(instance: InstanceType): ClassDecl | undefined {
+    if (this.isLibraryModule(instance.module)) {
+      return undefined;
+    }
+
+    return this.record(instance.module)?.classes.get(instance.loc);
+  }
+
+  private isLibraryModule(module: int): boolean {
+    const opened = this.program.modules[module];
+    if (module < 0 || opened == undefined) {
+      return true;
+    }
+
+    return opened.source.isLibrary;
+  }
+
+  private classMember(instance: InstanceType, name: string): ClassLookup {
+    const decl = this.classOf(instance);
+    if (decl == undefined || decl.decorators.length > 0) {
+      return { isKnown: false };
+    }
+
+    const own = this.ownMember(instance, decl, name);
+    if (own != undefined) {
+      return { isKnown: true, entry: own };
+    }
+
+    const parent = this.parentOf(instance, decl);
+    if (parent == undefined) {
+      const isKnown = decl.base == undefined && decl.baseExpr == undefined;
+
+      return { isKnown };
+    }
+
+    return this.classMember(parent, name);
+  }
+
+  private parentOf(
+    instance: InstanceType,
+    decl: ClassDecl,
+  ): InstanceType | undefined {
+    if (decl.base == undefined) {
+      return undefined;
+    }
+
+    const parent = this.baseClassOf(instance);
+    if (parent == undefined || parent.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    return parent;
+  }
+
+  private ownMember(
+    instance: InstanceType,
+    owner: ClassDecl,
+    name: string,
+  ): ClassMemberEntry | undefined {
+    const field = owner.fields.find(
+      (one) => one.name == name && one.form != FieldKind.Static,
+    );
+    const methods = owner.methods.filter(
+      (one) => one.name == name && !this.isStaticMethod(one),
+    );
+    if (field != undefined || methods.length > 0) {
+      return { owner, instance, field, methods, isStatic: false };
+    }
+
+    const hasStaticField = owner.fields.some(
+      (one) => one.name == name && one.form == FieldKind.Static,
+    );
+    const hasStaticMethod = owner.methods.some(
+      (one) => one.name == name && this.isStaticMethod(one),
+    );
+    if (hasStaticField || hasStaticMethod) {
+      return { owner, instance, methods: [], isStatic: true };
+    }
+
+    return undefined;
+  }
+
+  private isStaticMethod(method: FunctionDecl): boolean {
+    return method.role?.method == MethodKind.Static;
+  }
+
+  private fieldTypeOf(entry: ClassMemberEntry, field: ClassField): Type {
+    const written = field.type;
+    if (written == undefined || field.form == FieldKind.ArrowMethod) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const owner = entry.owner;
+    const instance = entry.instance;
+    const context = this.resolver.classContext(
+      instance,
+      owner.typeParams,
+      instance.module,
+    );
+    const type = this.resolver.resolve(written, context);
+
+    if (field.presence == FieldPresence.Optional) {
+      return this.types.optional(type);
+    }
+
+    return type;
+  }
+
+  private methodTypeOf(entry: ClassMemberEntry, method: FunctionDecl): Type {
+    const written = method.returnType;
+    const owner = entry.owner;
+
+    if (method.typeParams.length > 0) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (owner.typeParams.length == 0) {
+      return this.methodFunction(owner, method, entry.instance.module);
+    }
+    if (written == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const sites = this.parameterSites(method);
+    if (sites == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const instance = entry.instance;
+    const part = this.partOf(entry.owner, method);
+    const context = this.resolver.classContext(
+      instance,
+      part.typeParams,
+      this.partModule(part, instance.module),
+    );
+
+    return this.resolver.signature(sites, written, context);
+  }
+
+  private parameterSites(fn: FunctionDecl): ParameterSite[] | undefined {
+    const sites: ParameterSite[] = [];
+
+    for (const param of fn.params) {
+      const type = param.type;
+      if (type == undefined) {
+        return undefined;
+      }
+
+      sites.push({
+        name: param.name,
+        loc: param.loc,
+        kind: param.form.kind,
+        type,
+        isDeclared: false,
+      });
+    }
+
+    return sites;
+  }
+
+  private partOf(owner: ClassDecl, method: FunctionDecl): ClassDecl {
+    for (const opened of this.program.modules) {
+      const part = opened.parts.find(
+        (one) => one.name == owner.name && one.methods.includes(method),
+      );
+      if (part != undefined) {
+        return part;
+      }
+    }
+
+    return owner;
+  }
+
+  private partModule(part: ClassDecl, module: int): int {
+    const home = this.program.modules.find((opened) =>
+      opened.parts.includes(part),
+    );
+
+    return home?.id ?? module;
+  }
+
+  private newTyped(expr: NewExpr, wanted: Type | undefined, module: int): Type {
+    const form = expr.form;
+    if (form.kind == NewKind.Callee) {
+      const callee = this.typed(form.callee, undefined, module);
+
+      return this.valueNew(expr, callee, form.callee.loc, module);
+    }
+    if (form.member != undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.newArrayCheck(expr, form.name, module);
+    this.executorCheck(expr, form.name, module);
+
+    const target = this.targetOfUse(expr.loc, form.name, module);
+    if (target == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (target.kind != SymbolKind.Class) {
+      const made = this.namedValueNew(expr, target, module);
+
+      return made ?? this.store.plain(TypeKind.Error);
+    }
+    if (this.isLibraryModule(target.module)) {
+      return this.libraryNew(expr, form.name, target, wanted, module);
+    }
+
+    const decl = this.record(target.module)?.classes.get(target.loc);
+    if (decl == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (decl.typeParams.length > 0 && expr.typeArgs.length == 0) {
+      return this.genericNew(expr, decl, target.module, wanted, module);
+    }
+
+    const written = this.newArguments(expr, decl, module);
+    if (written == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const instance = this.resolver.classInstance(target.module, decl, written);
+    if (instance.kind != TypeKind.Instance) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (decl.isAbstract) {
+      this.report(module, expr.loc, Code.AbstractNew, {
+        word: decl.name ?? "",
+      });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.constructed(expr, instance, decl, module);
+  }
+
+  private newArguments(
+    expr: NewExpr,
+    decl: ClassDecl,
+    module: int,
+  ): Type[] | undefined {
+    const count = expr.typeArgs.length;
+    const params = decl.typeParams.length;
+    const word = decl.name ?? "";
+    if (params == 0 && count > 0) {
+      this.report(module, expr.loc, Code.ClassNotGeneric, { word });
+
+      return undefined;
+    }
+    if (count > params) {
+      this.report(module, expr.loc, Code.TypeArgumentsMany, {
+        word,
+        other: `${params}`,
+        place: this.pluralMark(params),
+        first: `${count}`,
+      });
+
+      return undefined;
+    }
+    if (count != params) {
+      return undefined;
+    }
+
+    return this.writtenArguments(expr.typeArgs, module);
+  }
+
+  private pluralMark(count: int): string {
+    if (count == 1) {
+      return "";
+    }
+
+    return "s";
+  }
+
+  private constructed(
+    expr: NewExpr,
+    instance: InstanceType,
+    decl: ClassDecl,
+    module: int,
+  ): Type {
+    const maker = this.makerOf(instance, decl);
+    if (maker == undefined) {
+      return instance;
+    }
+
+    const constructors = maker.owner.constructors;
+    if (constructors.length == 0 && expr.args.length > 0) {
+      this.report(module, expr.loc, Code.NoConstructor, {
+        word: decl.name ?? "",
+      });
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const chosen = constructors[0];
+    if (constructors.length > 1) {
+      return this.variantNew(expr, instance, maker, constructors, decl, module);
+    }
+    if (chosen == undefined) {
+      return instance;
+    }
+
+    const word = kConstructorName;
+    const access = this.accessOf(chosen);
+
+    this.reportAccess(maker.owner, access, word, expr.loc, module);
+
+    const target = this.constructorTarget(maker, chosen, expr.loc);
+    if (target == undefined) {
+      return instance;
+    }
+
+    const isPassed = this.argumentsCheck(expr.args, target, module);
+    if (!isPassed) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return instance;
+  }
+
+  private variantNew(
+    expr: NewExpr,
+    instance: InstanceType,
+    maker: ClassMemberEntry,
+    constructors: FunctionDecl[],
+    decl: ClassDecl,
+    module: int,
+  ): Type {
+    const targets: CallTarget[] = [];
+
+    for (const fn of constructors) {
+      const target = this.constructorTarget(maker, fn, expr.loc);
+      if (target == undefined) {
+        return instance;
+      }
+
+      targets.push(target);
+    }
+
+    const name = maker.owner.name ?? decl.name ?? "";
+    const chosen = this.constructorChoice(
+      expr,
+      expr.args,
+      targets,
+      constructors,
+      name,
+      module,
+    );
+    if (chosen == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const isPassed = this.argumentsCheck(expr.args, chosen, module);
+    if (!isPassed) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return instance;
+  }
+
+  private makerOf(
+    instance: InstanceType,
+    decl: ClassDecl,
+  ): ClassMemberEntry | undefined {
+    const entry: ClassMemberEntry = {
+      owner: decl,
+      instance,
+      methods: [],
+      isStatic: false,
+    };
+
+    if (decl.constructors.length > 0) {
+      return entry;
+    }
+
+    const parent = this.parentOf(instance, decl);
+    if (parent == undefined) {
+      const isRoot = decl.base == undefined && decl.baseExpr == undefined;
+      if (!isRoot) {
+        return undefined;
+      }
+
+      return entry;
+    }
+
+    const parentDecl = this.classOf(parent);
+    if (parentDecl == undefined) {
+      return undefined;
+    }
+
+    return this.makerOf(parent, parentDecl);
+  }
+
+  private constructorTarget(
+    maker: ClassMemberEntry,
+    chosen: FunctionDecl,
+    loc: int,
+  ): CallTarget | undefined {
+    const sites = this.parameterSites(chosen);
+    if (sites == undefined) {
+      return undefined;
+    }
+
+    const owner = maker.owner;
+    const instance = maker.instance;
+    const context = this.resolver.classContext(
+      instance,
+      owner.typeParams,
+      instance.module,
+    );
+    const signature = this.resolver.signature(sites, undefined, context);
+    if (signature.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    const shape = signature.shape;
+
+    const params = shape.params;
+    const rest = shape.rest;
+
+    return { params, rest, loc, isLenient: false };
+  }
+}

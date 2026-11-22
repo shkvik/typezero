@@ -1,0 +1,555 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { KnownName } from "../../../../../load/token/types/token.types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  BinaryExpr,
+  CallExpr,
+  Expr,
+  ExprKind,
+  IndexExpr,
+  MemberExpr,
+  UnaryExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  DictKind,
+  DictType,
+  LiteralKind,
+  ObjectType,
+  TupleType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  kManyElements,
+  kOneElement,
+  kResizingMethods,
+  kTupleJoin,
+  kTuplePlaceholder,
+} from "../../const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private indexTyped(expr: IndexExpr, module: int): Type {
+    const isMade = expr.index.loc == expr.loc;
+    if (isMade) {
+      return this.patternElement(expr, module);
+    }
+
+    const home = this.enumHomeOf(expr.object, module);
+    if (home != undefined) {
+      return this.enumIndexed(expr, home, module);
+    }
+
+    const object = this.receiverOf(expr.object, expr.optional, module);
+    if (this.isJsonHolder(object)) {
+      return this.jsonIndexed(expr, module);
+    }
+
+    switch (object.kind) {
+      case TypeKind.Tuple:
+        return this.tupleIndexed(expr, object, module);
+      case TypeKind.Object:
+        return this.objectIndexed(expr, object, module);
+      case TypeKind.Dict:
+        return this.dictIndexed(expr, object, module);
+      default:
+        return this.otherIndexed(expr, object, module);
+    }
+  }
+
+  private otherIndexed(expr: IndexExpr, object: Type, module: int): Type {
+    if (this.unknownIndexCheck(expr, object, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    if (object.kind == TypeKind.Array || object.kind == TypeKind.String) {
+      return this.listIndexed(expr, object, module);
+    }
+
+    this.walkedPart(expr.index, module);
+
+    const defined = this.types.definedType(object);
+    const isList =
+      defined.kind == TypeKind.Array || defined.kind == TypeKind.String;
+    if (this.types.isOptional(object) && isList) {
+      this.report(
+        module,
+        expr.object.loc,
+        Code.IndexMaybeUndefined,
+        kNoDetails,
+      );
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.isUnindexable(object)) {
+      const first = this.text.of(object);
+
+      this.report(module, expr.loc, Code.NotIndexable, { first });
+    }
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private listIndexed(expr: IndexExpr, list: Type, module: int): Type {
+    const int = this.store.integer(64, false);
+    const key = this.typed(expr.index, int, module);
+    const item = this.listItem(list);
+    if (key.kind != TypeKind.Int || item == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.isProvenIndex(expr.object, expr.index, module)) {
+      return item;
+    }
+
+    return this.types.optional(item);
+  }
+
+  private listItem(list: Type): Type | undefined {
+    if (list.kind == TypeKind.Array) {
+      return list.item;
+    }
+    if (list.kind == TypeKind.String) {
+      return list;
+    }
+
+    return undefined;
+  }
+
+  private isUnindexable(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.Boolean:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private tupleIndexed(expr: IndexExpr, tuple: TupleType, module: int): Type {
+    const int = this.store.integer(64, false);
+    const key = this.typed(expr.index, int, module);
+    const error = this.store.plain(TypeKind.Error);
+
+    if (key.kind == TypeKind.Error) {
+      return error;
+    }
+    if (key.kind != TypeKind.Int && key.kind != TypeKind.Literal) {
+      const first = this.text.of(key);
+
+      this.report(module, expr.index.loc, Code.TupleKeyNotNumber, { first });
+
+      return error;
+    }
+
+    const value = this.intConstant(expr.index, key, module);
+    if (value == undefined) {
+      this.report(module, expr.loc, Code.TupleKeyNotConstant, kNoDetails);
+
+      return error;
+    }
+
+    const position = this.positionOf(value, tuple.items.length);
+    const item = tuple.items[position];
+    if (position < 0 || item == undefined) {
+      this.reportTupleRange(expr, tuple, `${value}`, module);
+
+      return error;
+    }
+    if (position >= tuple.required) {
+      return this.types.optional(item);
+    }
+
+    return item;
+  }
+
+  private positionOf(value: decimal, count: int): int {
+    for (let index = 0; index < count; index++) {
+      if (index.toDecimal() == value) {
+        return index;
+      }
+    }
+
+    return -1;
+  }
+
+  private reportTupleRange(
+    expr: IndexExpr,
+    tuple: TupleType,
+    word: string,
+    module: int,
+  ): void {
+    const count = tuple.items.length;
+    const first = this.text.of(tuple);
+    const other = this.elementCountText(count);
+
+    this.report(module, expr.index.loc, Code.TupleKeyRange, {
+      word,
+      first,
+      other,
+    });
+  }
+
+  private elementCountText(count: int): string {
+    if (count == 1) {
+      return `${count}${kOneElement}`;
+    }
+
+    return `${count}${kManyElements}`;
+  }
+
+  private objectIndexed(
+    expr: IndexExpr,
+    object: ObjectType,
+    module: int,
+  ): Type {
+    const key = this.typed(expr.index, undefined, module);
+    const error = this.store.plain(TypeKind.Error);
+
+    if (key.kind == TypeKind.Error || this.resolver.isLibraryShape(object)) {
+      return error;
+    }
+
+    const name = this.constantKeyOf(expr.index, key, module);
+    if (name != undefined) {
+      const member = this.keyedMember(expr, name);
+
+      return this.memberOf(member, object, module);
+    }
+
+    const choices = this.keyChoices(expr.index, key, module);
+    const chosen = this.chosenField(object, choices);
+    if (chosen != undefined) {
+      return chosen;
+    }
+
+    const first = this.text.of(object);
+    const defined = this.types.definedType(key);
+    if (this.isNumber(defined)) {
+      this.report(module, expr.loc, Code.ObjectNumberedKey, { first });
+
+      return error;
+    }
+    if (defined.kind == TypeKind.String || defined.kind == TypeKind.Template) {
+      this.report(module, expr.loc, Code.ObjectRuntimeKey, { first });
+
+      return error;
+    }
+    if (defined.kind == TypeKind.Boolean) {
+      const shown = this.text.of(key);
+
+      this.report(module, expr.index.loc, Code.ObjectKeyNotString, {
+        first: shown,
+      });
+    }
+
+    return error;
+  }
+
+  private chosenField(
+    object: ObjectType,
+    choices: Type | undefined,
+  ): Type | undefined {
+    if (choices == undefined) {
+      return undefined;
+    }
+
+    return this.keyedFieldType(object, choices);
+  }
+
+  private keyChoices(index: Expr, key: Type, module: int): Type | undefined {
+    if (this.isTextChoice(key)) {
+      return key;
+    }
+    if (index.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const texts = this.doorOfName(index, module)?.texts;
+    if (texts == undefined) {
+      return undefined;
+    }
+
+    const literals = texts.map((text) =>
+      this.store.literal(LiteralKind.String, text),
+    );
+
+    return this.store.unionOf(literals);
+  }
+
+  private isTextChoice(key: Type): boolean {
+    const parts = this.partsOfType(key);
+
+    return parts.every(
+      (part) =>
+        part.kind == TypeKind.Literal && part.literal == LiteralKind.String,
+    );
+  }
+
+  private keyedFieldType(object: ObjectType, key: Type): Type | undefined {
+    let common: Type | undefined = undefined;
+
+    for (const part of this.partsOfType(key)) {
+      if (part.kind != TypeKind.Literal) {
+        return undefined;
+      }
+
+      const name = part.text;
+      const field = object.fields.find((one) => one.name == name);
+      if (field == undefined || (common != undefined && field.type != common)) {
+        return undefined;
+      }
+
+      common = field.type;
+    }
+
+    return common;
+  }
+
+  private constantKeyOf(
+    index: Expr,
+    key: Type,
+    module: int,
+  ): string | undefined {
+    if (index.kind == ExprKind.StringLit) {
+      return index.value;
+    }
+    if (key.kind == TypeKind.Literal && key.literal == LiteralKind.String) {
+      return key.text;
+    }
+    if (index.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const door = this.doorOfName(index, module);
+    const literal = door?.literal;
+    if (literal == undefined || literal.kind != LiteralKind.String) {
+      return undefined;
+    }
+
+    return literal.text;
+  }
+
+  private keyedMember(expr: IndexExpr, name: string): MemberExpr {
+    return {
+      kind: ExprKind.Member,
+      loc: expr.loc,
+      object: expr.object,
+      name,
+      known: KnownName.None,
+      optional: false,
+      typeArgs: [],
+    };
+  }
+
+  private dictIndexed(expr: IndexExpr, dict: DictType, module: int): Type {
+    const word = this.tupleText(expr.object);
+    const error = this.store.plain(TypeKind.Error);
+
+    switch (dict.dict) {
+      case DictKind.Map:
+        this.walkedPart(expr.index, module);
+        this.report(module, expr.loc, Code.MapIndex, { word });
+
+        return error;
+      case DictKind.Set:
+        this.walkedPart(expr.index, module);
+        this.report(module, expr.loc, Code.SetIndex, { word });
+
+        return error;
+      default:
+        return this.recordIndexed(expr, dict, module);
+    }
+  }
+
+  private recordIndexed(expr: IndexExpr, dict: DictType, module: int): Type {
+    const key = this.typed(expr.index, dict.key, module);
+    const defined = this.types.definedType(key);
+    if (defined.kind == TypeKind.Int || defined.kind == TypeKind.Double) {
+      const first = this.text.of(key);
+
+      this.report(module, expr.index.loc, Code.RecordNumberKey, { first });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.types.optional(dict.value);
+  }
+
+  private tupleText(object: Expr): string {
+    if (object.kind == ExprKind.Name) {
+      return object.name;
+    }
+
+    return kTuplePlaceholder;
+  }
+
+  private keyInTyped(expr: BinaryExpr, module: int): Type {
+    const boolean = this.store.plain(TypeKind.Boolean);
+    const object = this.typed(expr.rhs, undefined, module);
+
+    this.walkedPart(expr.lhs, module);
+
+    if (this.dictInCheck(expr, object, module)) {
+      return boolean;
+    }
+    if (this.listInCheck(expr, object, module)) {
+      return boolean;
+    }
+
+    const lhs = expr.lhs;
+    const isUnion = object.kind == TypeKind.Union;
+
+    if (lhs.kind == ExprKind.StringLit && object.kind == TypeKind.Union) {
+      this.unionInCheck(expr, lhs.value, object, module);
+    }
+    if (lhs.kind != ExprKind.StringLit || object.kind != TypeKind.Object) {
+      return boolean;
+    }
+    if (isUnion || this.resolver.isLibraryShape(object)) {
+      return boolean;
+    }
+
+    const name = lhs.value;
+    const field = object.fields.find((one) => one.name == name);
+    if (field == undefined) {
+      const first = this.text.of(object);
+
+      this.report(module, expr.loc, Code.InObjectFalse, { word: name, first });
+
+      return boolean;
+    }
+    if (field.optional || this.types.isOptional(field.type)) {
+      const word = `${this.tupleText(expr.rhs)}.${name}`;
+
+      this.report(module, expr.loc, Code.InObjectMaybe, { word });
+
+      return boolean;
+    }
+
+    this.report(module, expr.loc, Code.InObjectTrue, kNoDetails);
+
+    return boolean;
+  }
+
+  private deleteTyped(expr: UnaryExpr, module: int): Type {
+    const target = expr.operand;
+    const boolean = this.store.plain(TypeKind.Boolean);
+
+    if (this.dictDeleteCheck(expr, module)) {
+      return boolean;
+    }
+    if (this.plainDeleteCheck(expr, target, module)) {
+      return boolean;
+    }
+    if (target.kind == ExprKind.Index) {
+      if (this.indexDeleteCheck(expr, target, module)) {
+        return boolean;
+      }
+    }
+
+    const name = this.deletedName(target, module);
+    const holder = this.deletedHolder(target);
+    if (name == undefined || holder == undefined) {
+      return boolean;
+    }
+
+    const object = this.typed(holder, undefined, module);
+    if (
+      object.kind != TypeKind.Object ||
+      this.resolver.isLibraryShape(object)
+    ) {
+      return boolean;
+    }
+
+    const field = object.fields.find((one) => one.name == name);
+    if (field == undefined) {
+      return boolean;
+    }
+    if (field.optional || this.types.isOptional(field.type)) {
+      const first = `${this.tupleText(holder)}.${name}`;
+
+      this.report(module, expr.loc, Code.DeleteOptional, { word: name, first });
+
+      return boolean;
+    }
+
+    this.report(module, expr.loc, Code.DeleteRequired, { word: name });
+
+    return boolean;
+  }
+
+  private deletedName(target: Expr, module: int): string | undefined {
+    if (target.kind == ExprKind.Member) {
+      return target.name;
+    }
+    if (target.kind == ExprKind.Index) {
+      return this.constantKey(target.index, module);
+    }
+
+    return undefined;
+  }
+
+  private deletedHolder(target: Expr): Expr | undefined {
+    if (target.kind == ExprKind.Member || target.kind == ExprKind.Index) {
+      return target.object;
+    }
+
+    return undefined;
+  }
+
+  private tupleCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    tuple: TupleType,
+    module: int,
+  ): Type {
+    const word = member.name;
+    const first = this.tupleText(member.object);
+    const error = this.store.plain(TypeKind.Error);
+    const element = this.tupleElement(tuple);
+    const isResizing = kResizingMethods.includes(word);
+
+    if (word == kTupleJoin || !this.isArrayMethod(word, tuple)) {
+      return error;
+    }
+    if (element != undefined && !isResizing) {
+      const list = this.store.arrayOf(element);
+
+      this.tupleCalls.add(expr);
+
+      return this.receiverCall(expr, member, list, undefined, module);
+    }
+    if (isResizing) {
+      this.report(module, member.loc, Code.TupleResized, { word, first });
+
+      return error;
+    }
+
+    this.report(module, member.loc, Code.TupleMethodCopy, { word, first });
+
+    return error;
+  }
+
+  private tupleElement(tuple: TupleType): Type | undefined {
+    const first = tuple.items[0];
+    const isSame = tuple.items.every((item) => item == first);
+    if (first == undefined || !isSame) {
+      return undefined;
+    }
+
+    return first;
+  }
+
+  private isArrayMethod(name: string, tuple: TupleType): boolean {
+    const item = tuple.items[0] ?? this.store.plain(TypeKind.Error);
+    const list = this.store.arrayOf(item);
+    const receiver = this.libraryReceiver(list);
+    if (receiver == undefined) {
+      return false;
+    }
+
+    return this.receiverMember(receiver, name, true) != undefined;
+  }
+}

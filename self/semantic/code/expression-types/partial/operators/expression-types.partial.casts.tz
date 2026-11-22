@@ -1,0 +1,100 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  CastExpr,
+  ExprKind,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  TypeContext,
+  TypePlace,
+} from "../../../../types/type-resolver/types/type-resolver.types.tz";
+
+partial class ExpressionTypes {
+  private castTyped(expr: CastExpr, module: int): Type {
+    const context: TypeContext = {
+      module,
+      bindings: new Map<int, Type>(),
+      place: TypePlace.Plain,
+    };
+    const to = this.resolver.resolve(expr.target, context);
+    const isArray = expr.operand.kind == ExprKind.ArrayLit;
+    const hint = this.castHint(isArray, to);
+    const from = this.typed(expr.operand, hint, module);
+    if (from.kind == TypeKind.Error) {
+      return to;
+    }
+
+    const code = this.castCode(from, to, isArray);
+    const word = this.castWord(expr, code, to);
+    const other = this.conversionName(to);
+
+    this.report(module, expr.loc, code, {
+      word,
+      other,
+      first: this.text.of(from),
+      second: this.text.of(to),
+    });
+
+    return to;
+  }
+
+  private castHint(isArray: boolean, to: Type): Type | undefined {
+    if (!isArray || to.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return to;
+  }
+
+  private castCode(from: Type, to: Type, isArray: boolean): Code {
+    if (from.kind == TypeKind.Error || to.kind == TypeKind.Error) {
+      return Code.CastPlain;
+    }
+    if (isArray) {
+      return Code.CastDeclare;
+    }
+    if (this.relation.converts(from, to)) {
+      return Code.CastItself;
+    }
+
+    const defined = this.types.definedType(from);
+    if (this.types.isOptional(from) && this.relation.converts(defined, to)) {
+      return Code.CastUndefined;
+    }
+
+    return this.castConversion(this.types.apparent(from), to);
+  }
+
+  private castConversion(from: Type, to: Type): Code {
+    const number = this.numberCode(from, to);
+    if (number == Code.ConvertExplicitly) {
+      return Code.CastConvert;
+    }
+    if (number == Code.RoundThenConvert) {
+      return Code.CastRound;
+    }
+    if (from.kind == TypeKind.Double && to.kind == TypeKind.Decimal) {
+      return Code.CastToDecimal;
+    }
+    if (from.kind == TypeKind.Decimal && this.isNumber(to)) {
+      return Code.CastToNumber;
+    }
+    if (from.kind == TypeKind.Json) {
+      return Code.CastJson;
+    }
+
+    return Code.CastCannot;
+  }
+
+  private castWord(expr: CastExpr, code: Code, to: Type): string {
+    if (code == Code.CastDeclare || code == Code.CastItself) {
+      return this.text.of(to);
+    }
+
+    return this.operandName(expr.operand);
+  }
+}

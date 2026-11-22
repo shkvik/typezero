@@ -1,0 +1,357 @@
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  ArrayLitExpr,
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  ResultType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { kResultName } from "../../../../code/expression-types/const/expression-types.const.tz";
+import { CombineDraft } from "../../../../code/expression-types/types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private resultStaticCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): Type | undefined {
+    const object = member.object;
+    const isResult =
+      object.kind == ExprKind.Name &&
+      object.name == kResultName &&
+      !expr.optional &&
+      !member.optional &&
+      this.isGlobalUse(object, module);
+    if (!isResult) {
+      return undefined;
+    }
+
+    const error = this.store.plain(TypeKind.Error);
+    const name = member.name;
+    const isCombine = name == "combine" || name == "combineWithAllErrors";
+    if (!isCombine) {
+      this.report(module, member.loc, Code.ResultStaticMissing, {
+        word: kResultName,
+        other: name,
+      });
+      this.looseArguments(expr.args, module);
+
+      return error;
+    }
+    if (expr.args.some((arg) => arg.spread)) {
+      this.looseArguments(expr.args, module);
+
+      return error;
+    }
+
+    const arg = expr.args[0]?.expr;
+    if (arg == undefined || expr.args.length != 1) {
+      this.report(module, member.loc, Code.ArgumentCount, {
+        word: this.argumentCountText(1, 1, false),
+        other: `${expr.args.length}`,
+      });
+
+      return error;
+    }
+
+    const draft: CombineDraft = {
+      what: `${kResultName}.${name}`,
+      isAll: name == "combineWithAllErrors",
+    };
+    if (arg.kind == ExprKind.ArrayLit && this.isPlainList(arg)) {
+      return this.combinedList(arg, draft, module);
+    }
+
+    return this.combinedArray(arg, draft, module);
+  }
+
+  private resultSearchCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): boolean {
+    const name = member.name;
+    const isSearch =
+      name == "includes" || name == "indexOf" || name == "lastIndexOf";
+    if (!isSearch) {
+      return false;
+    }
+
+    this.quiet += 1;
+
+    const object = this.typed(member.object, undefined, module);
+
+    this.quiet -= 1;
+
+    const base = this.types.definedType(object);
+    if (base.kind != TypeKind.Array || !this.holdsResults(base.item)) {
+      return false;
+    }
+
+    this.report(module, member.loc, Code.ArraySearchResults, { word: name });
+    this.looseArguments(expr.args, module);
+
+    return true;
+  }
+
+  private holdsResults(type: Type): boolean {
+    if (type.kind == TypeKind.Union) {
+      return type.parts.some((part) => this.holdsResults(part));
+    }
+
+    return type.kind == TypeKind.Result;
+  }
+
+  private isPlainList(literal: ArrayLitExpr): boolean {
+    if (literal.elements.length == 0) {
+      return false;
+    }
+
+    return literal.elements.every(
+      (element) => !element.spread && !element.hole,
+    );
+  }
+
+  private combinedList(
+    literal: ArrayLitExpr,
+    draft: CombineDraft,
+    module: int,
+  ): Type {
+    const error = this.store.plain(TypeKind.Error);
+    const results: ResultType[] = [];
+    const types = literal.elements.map((element) =>
+      this.typed(element.expr, undefined, module),
+    );
+    if (types.some((type) => type.kind == TypeKind.Error)) {
+      return error;
+    }
+
+    for (let index = 0; index < types.length; index++) {
+      const type = types[index];
+      const element = literal.elements[index];
+      if (type == undefined || element == undefined) {
+        return error;
+      }
+
+      const defined = this.types.definedType(type);
+      if (defined.kind != TypeKind.Result) {
+        this.report(module, element.expr.loc, Code.ResultCombineNotResult, {
+          word: draft.what,
+          first: this.text.of(type),
+        });
+
+        return error;
+      }
+
+      results.push(defined);
+    }
+
+    const common = this.combinedCommon(results);
+    if (common != undefined) {
+      return this.sameCombined(literal, common, draft, module);
+    }
+
+    return this.tupleCombined(literal, results, draft, module);
+  }
+
+  private combinedCommon(results: ResultType[]): ResultType | undefined {
+    let common = results[0];
+
+    for (const result of results) {
+      if (common == undefined) {
+        return undefined;
+      }
+
+      common = this.sameValues(common, result);
+    }
+
+    return common;
+  }
+
+  private sameValues(
+    first: ResultType,
+    second: ResultType,
+  ): ResultType | undefined {
+    const value = this.joinedValue(first.value, second.value);
+    const error = this.resultHalfJoin(first.error, second.error);
+    if (value == undefined || error == undefined) {
+      return undefined;
+    }
+
+    const made = this.store.resultOf(value, error);
+    if (made.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    return made;
+  }
+
+  private joinedValue(first: Type, second: Type): Type | undefined {
+    if (first == second || second.kind == TypeKind.Never) {
+      return first;
+    }
+    if (first.kind == TypeKind.Never) {
+      return second;
+    }
+    if (first.kind == TypeKind.Void || second.kind == TypeKind.Void) {
+      return undefined;
+    }
+
+    const joined = this.unify(first, second);
+    if (joined == undefined || joined.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return joined;
+  }
+
+  private sameCombined(
+    literal: ArrayLitExpr,
+    common: ResultType,
+    draft: CombineDraft,
+    module: int,
+  ): Type {
+    if (!this.isHoldingValues(draft, common)) {
+      this.noValuesReport(draft, common, literal, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const values = this.store.arrayOf(common.value);
+
+    return this.store.resultOf(
+      values,
+      this.combinedErrors(draft, common.error),
+    );
+  }
+
+  private tupleCombined(
+    literal: ArrayLitExpr,
+    results: ResultType[],
+    draft: CombineDraft,
+    module: int,
+  ): Type {
+    const values: Type[] = [];
+    let error: Type = this.store.plain(TypeKind.Never);
+
+    for (let index = 0; index < results.length; index++) {
+      const result = results[index];
+      const element = literal.elements[index];
+      if (result == undefined || element == undefined) {
+        return this.store.plain(TypeKind.Error);
+      }
+      if (!this.isHoldingValues(draft, result)) {
+        this.noValuesReport(draft, result, element.expr, module);
+
+        return this.store.plain(TypeKind.Error);
+      }
+
+      values.push(result.value);
+
+      const joined = this.resultHalfJoin(error, result.error);
+      if (joined == undefined) {
+        this.report(module, element.expr.loc, Code.ResultCombineNoUnion, {
+          word: draft.what,
+          other: this.resultUnionWhy(error, result.error),
+        });
+
+        return this.store.plain(TypeKind.Error);
+      }
+
+      error = joined;
+    }
+
+    const tuple = this.store.plainTuple(values);
+
+    return this.store.resultOf(tuple, this.combinedErrors(draft, error));
+  }
+
+  private combinedArray(arg: Expr, draft: CombineDraft, module: int): Type {
+    const error = this.store.plain(TypeKind.Error);
+    const type = this.typed(arg, undefined, module);
+    if (type.kind == TypeKind.Error) {
+      return type;
+    }
+
+    const base = this.types.definedType(type);
+    const item = this.arrayResultItem(base);
+    if (item == undefined) {
+      this.report(module, arg.loc, Code.ResultCombineNotArray, {
+        word: draft.what,
+        first: this.text.of(type),
+      });
+
+      return error;
+    }
+    if (!this.isHoldingValues(draft, item)) {
+      this.noValuesReport(draft, item, arg, module);
+
+      return error;
+    }
+
+    const values = this.store.arrayOf(item.value);
+
+    return this.store.resultOf(values, this.combinedErrors(draft, item.error));
+  }
+
+  private arrayResultItem(base: Type): ResultType | undefined {
+    if (base.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    const item = this.types.definedType(base.item);
+    if (item.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    return item;
+  }
+
+  private isHoldingValues(draft: CombineDraft, result: ResultType): boolean {
+    const value = result.value;
+    const isGiving =
+      value.kind != TypeKind.Never && value.kind != TypeKind.Void;
+    const isLosingErrors = draft.isAll && result.error.kind == TypeKind.Void;
+
+    return isGiving && !isLosingErrors;
+  }
+
+  private noValuesReport(
+    draft: CombineDraft,
+    result: ResultType,
+    at: Expr,
+    module: int,
+  ): void {
+    const value = result.value;
+    const hasValues =
+      value.kind != TypeKind.Never && value.kind != TypeKind.Void;
+
+    this.report(module, at.loc, Code.ResultCombineVoid, {
+      word: this.text.of(result),
+      other: draft.what,
+      second: this.heldHalfWord(hasValues),
+    });
+  }
+
+  private heldHalfWord(hasValues: boolean): string {
+    if (hasValues) {
+      return "errors";
+    }
+
+    return "values";
+  }
+
+  private combinedErrors(draft: CombineDraft, error: Type): Type {
+    if (!draft.isAll || error.kind == TypeKind.Never) {
+      return error;
+    }
+
+    return this.store.arrayOf(error);
+  }
+}

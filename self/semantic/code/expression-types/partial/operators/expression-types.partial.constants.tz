@@ -1,0 +1,165 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import {
+  Expr,
+  ExprKind,
+  UnaryExpr,
+  UnaryOp,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  IntType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { kIntLimits, kLargestInt } from "../../const/expression-types.const.tz";
+import { IntLimit } from "../../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private intConstant(
+    expr: Expr,
+    type: Type,
+    module: int,
+  ): decimal | undefined {
+    const value = this.rawConstant(expr, type, module);
+    if (value == undefined || value > kLargestInt) {
+      return undefined;
+    }
+
+    return value;
+  }
+
+  private rawConstant(
+    expr: Expr,
+    type: Type,
+    module: int,
+  ): decimal | undefined {
+    if (type.kind != TypeKind.Int) {
+      return undefined;
+    }
+
+    const value = this.plainConstant(expr, module);
+    if (value == undefined || !this.isInside(value, type)) {
+      return undefined;
+    }
+
+    return value;
+  }
+
+  private plainConstant(expr: Expr, module: int): decimal | undefined {
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+        return expr.value.toDecimal();
+      case ExprKind.Name:
+        return this.doorOfName(expr, module)?.constant;
+      case ExprKind.Unary:
+        return this.unaryConstant(expr);
+      case ExprKind.Binary:
+        return this.folded.get(expr);
+      case ExprKind.Member:
+        return this.enumConstant(expr, module);
+      default:
+        return undefined;
+    }
+  }
+
+  private unaryConstant(expr: UnaryExpr): decimal | undefined {
+    const operand = expr.operand;
+    if (operand.kind != ExprKind.IntLit) {
+      return this.folded.get(expr);
+    }
+
+    const value = operand.value.toDecimal();
+
+    switch (expr.op) {
+      case UnaryOp.Plus:
+        return value;
+      case UnaryOp.Neg:
+        return -value;
+      default:
+        return this.folded.get(expr);
+    }
+  }
+
+  private isInside(value: decimal, type: IntType): boolean {
+    const limit = this.limitOf(type);
+    if (limit == undefined) {
+      return false;
+    }
+
+    const lowest = limit.lowest.toDecimal();
+    const highest = limit.highest.toDecimal();
+
+    return value >= -lowest && value <= highest;
+  }
+
+  private limitOf(type: IntType): IntLimit | undefined {
+    const bits = type.bits;
+    const unsigned = type.unsigned;
+
+    return kIntLimits.find(
+      (row) => row.bits == bits && row.unsigned == unsigned,
+    );
+  }
+
+  private isWholeTree(expr: Expr, module: int): boolean {
+    switch (expr.kind) {
+      case ExprKind.IntLit:
+        return true;
+      case ExprKind.Name:
+        return this.doorOfName(expr, module)?.isWhole == true;
+      case ExprKind.Member:
+        return this.enumConstant(expr, module) != undefined;
+      case ExprKind.Unary:
+        return this.isSign(expr.op) && this.isWholeTree(expr.operand, module);
+      case ExprKind.Binary:
+        return (
+          this.isWholeArithmetic(expr.op) &&
+          this.isWholeTree(expr.lhs, module) &&
+          this.isWholeTree(expr.rhs, module)
+        );
+      default:
+        return false;
+    }
+  }
+
+  private literalTarget(
+    expr: Expr,
+    type: Type,
+    to: Type,
+    module: int,
+  ): Type | undefined {
+    const target = this.numberTarget(to);
+    const isLiteral =
+      target != undefined &&
+      type.kind == TypeKind.Int &&
+      type != target &&
+      this.isWholeTree(expr, module);
+    if (!isLiteral || target == undefined) {
+      return undefined;
+    }
+
+    switch (target.kind) {
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+        return target;
+      case TypeKind.Int: {
+        const value = this.intConstant(expr, type, module);
+        if (value == undefined || !this.isInside(value, target)) {
+          return undefined;
+        }
+
+        return target;
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  private numberTarget(to: Type): Type | undefined {
+    const target = this.types.definedType(to);
+    if (target.kind != TypeKind.Union) {
+      return target;
+    }
+
+    return target.parts.find((part) => this.types.isNumberLike(part));
+  }
+}

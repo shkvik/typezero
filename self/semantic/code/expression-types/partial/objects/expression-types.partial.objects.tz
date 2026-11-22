@@ -1,0 +1,540 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  Expr,
+  ExprKind,
+  ObjectLitExpr,
+  Property,
+  PropertyKind,
+  UnaryOp,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  LiteralKind,
+  ObjectField,
+  ObjectType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { kStreamErrorName } from "../../const/expression-types.const.tz";
+import { FieldEntry, ObjectDraft } from "../../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private objectTyped(
+    expr: ObjectLitExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const target = this.types.wantedPart(wanted);
+    if (target != undefined && target.kind == TypeKind.Json) {
+      return this.jsonObject(expr, target, module);
+    }
+    if (target != undefined && this.isRecord(target)) {
+      return this.recordObject(expr, target, module);
+    }
+
+    const draft = this.objectKeys(expr, module);
+
+    this.checkUnique(draft, module);
+
+    if (draft.deferred && this.hasMethods(expr)) {
+      return this.methodObject(expr, target, module);
+    }
+    if (draft.deferred && this.isSpreadOnly(expr)) {
+      return this.spreadObject(expr, target, module);
+    }
+    if (draft.deferred) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (target == undefined) {
+      return this.inferredObject(draft, module);
+    }
+    if (target.kind == TypeKind.Union) {
+      return this.unionObject(expr, draft, target, module);
+    }
+    if (target.kind == TypeKind.Object) {
+      return this.targetedObject(expr, draft, target, module);
+    }
+
+    return this.inferredObject(draft, module);
+  }
+
+  private unionObject(
+    expr: ObjectLitExpr,
+    draft: ObjectDraft,
+    target: Type,
+    module: int,
+  ): Type {
+    if (target.kind != TypeKind.Union) {
+      return this.inferredObject(draft, module);
+    }
+
+    const member = this.literalMember(draft, target.parts, module);
+    if (member != undefined) {
+      return this.targetedObject(expr, draft, member, module);
+    }
+
+    const record = target.parts.find((part) => this.isRecord(part));
+    if (record != undefined) {
+      return this.recordObject(expr, record, module);
+    }
+
+    return this.inferredObject(draft, module);
+  }
+
+  private objectKeys(expr: ObjectLitExpr, module: int): ObjectDraft {
+    const draft: ObjectDraft = { entries: [], typed: true, deferred: false };
+
+    for (const property of expr.props) {
+      const entry = this.keyEntry(property, draft, module);
+
+      draft.entries.push(entry);
+    }
+
+    return draft;
+  }
+
+  private keyEntry(
+    property: Property,
+    draft: ObjectDraft,
+    module: int,
+  ): FieldEntry {
+    const name = property.name;
+    const value = property.value;
+    const form = property.form;
+
+    switch (form.kind) {
+      case PropertyKind.Spread:
+        draft.deferred = true;
+        this.spreadCheck(property, module);
+
+        return { property, name, value, named: false };
+      case PropertyKind.Method:
+        draft.deferred = true;
+        this.literalMethodCheck(property, module);
+
+        return { property, name, value, named: true };
+      case PropertyKind.Defaulted: {
+        const fallback = this.fallbackOf(value);
+
+        this.report(module, property.loc, Code.DefaultedProperty, {
+          word: name,
+        });
+        draft.typed = false;
+
+        return { property, name, value: fallback, named: true };
+      }
+      case PropertyKind.Computed:
+        return this.computedEntry(property, form.key, draft, module);
+      default:
+        return { property, name, value, named: true };
+    }
+  }
+
+  private fallbackOf(value: Expr): Expr {
+    if (value.kind != ExprKind.Assign) {
+      return value;
+    }
+
+    return value.value;
+  }
+
+  private computedEntry(
+    property: Property,
+    key: Expr,
+    draft: ObjectDraft,
+    module: int,
+  ): FieldEntry {
+    const value = property.value;
+    const keyType = this.typed(key, undefined, module);
+    const constant = this.constantKey(key, module);
+    if (constant != undefined) {
+      return { property, name: constant, value, named: true };
+    }
+
+    const entry: FieldEntry = { property, name: "", value, named: false };
+    const isUnknown = keyType.kind == TypeKind.Error;
+    if (isUnknown || this.isLiteralKeys(keyType)) {
+      draft.deferred = true;
+
+      return entry;
+    }
+
+    draft.typed = false;
+
+    this.reportKey(key, keyType, module);
+
+    return entry;
+  }
+
+  private constantKey(key: Expr, module: int): string | undefined {
+    switch (key.kind) {
+      case ExprKind.StringLit:
+        return key.value;
+      case ExprKind.Template:
+        if (key.exprs.length > 0) {
+          return undefined;
+        }
+
+        return key.quasis[0];
+      case ExprKind.Name: {
+        const literal = this.doorOfName(key, module)?.literal;
+        if (literal == undefined || literal.kind != LiteralKind.String) {
+          return undefined;
+        }
+
+        return literal.text;
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  private isLiteralKeys(type: Type): boolean {
+    if (type.kind == TypeKind.Union) {
+      return type.parts.every((part) => this.isTextLiteral(part));
+    }
+
+    return this.isTextLiteral(type);
+  }
+
+  private isTextLiteral(type: Type): boolean {
+    return type.kind == TypeKind.Literal && type.literal == LiteralKind.String;
+  }
+
+  private reportKey(key: Expr, keyType: Type, module: int): void {
+    const plain = this.types.definedType(keyType);
+    if (this.isNumeric(plain)) {
+      return this.report(module, key.loc, Code.NumberKey, kNoDetails);
+    }
+    if (keyType.kind == TypeKind.String) {
+      return this.report(module, key.loc, Code.RuntimeKey, kNoDetails);
+    }
+
+    const first = this.text.of(keyType);
+
+    this.report(module, key.loc, Code.KeyNotString, { first });
+  }
+
+  private checkUnique(draft: ObjectDraft, module: int): void {
+    let index = 0;
+
+    for (const entry of draft.entries) {
+      const first = draft.entries.findIndex(
+        (one) => one.named && one.name == entry.name,
+      );
+
+      if (entry.named && first < index) {
+        this.report(module, entry.property.loc, Code.DuplicateLiteralField, {
+          word: entry.name,
+        });
+        draft.typed = false;
+      }
+
+      index += 1;
+    }
+  }
+
+  private inferredObject(draft: ObjectDraft, module: int): Type {
+    const fields: ObjectField[] = [];
+
+    for (const entry of draft.entries) {
+      const type = this.typed(entry.value, undefined, module);
+
+      if (!entry.named) {
+        continue;
+      }
+
+      this.voidFieldCheck(entry.value, type, entry.name, module);
+
+      if (!this.isUsableField(entry, type, module)) {
+        draft.typed = false;
+      }
+
+      fields.push({
+        name: entry.name,
+        type,
+        optional: false,
+        readonly: false,
+      });
+    }
+
+    if (!draft.typed) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.store.objectOf(fields);
+  }
+
+  private isUsableField(entry: FieldEntry, type: Type, module: int): boolean {
+    if (type.kind == TypeKind.Error) {
+      return false;
+    }
+    if (type.kind != TypeKind.Undefined) {
+      return true;
+    }
+
+    this.report(module, entry.value.loc, Code.UndefinedField, {
+      word: entry.name,
+    });
+
+    return false;
+  }
+
+  private targetedObject(
+    expr: ObjectLitExpr,
+    draft: ObjectDraft,
+    target: Type,
+    module: int,
+  ): Type {
+    if (target.kind != TypeKind.Object) {
+      return this.inferredObject(draft, module);
+    }
+
+    for (const entry of draft.entries) {
+      const field = target.fields.find((one) => one.name == entry.name);
+      if (!entry.named || field == undefined) {
+        this.reportNoField(entry, target, module);
+        this.typed(entry.value, undefined, module);
+
+        continue;
+      }
+
+      const wanted = this.fieldWanted(field);
+      const place = this.fieldPlace(entry.name);
+
+      this.checked(entry.value, wanted, module, place);
+    }
+
+    const first = this.text.of(target);
+
+    for (const field of target.fields) {
+      const isGiven = draft.entries.some((entry) => entry.name == field.name);
+      if (!isGiven && !this.isOptionalField(field)) {
+        this.report(module, expr.loc, Code.FieldMissing, {
+          word: field.name,
+          first,
+        });
+      }
+    }
+
+    const overloaded = this.overloadedNames(target);
+
+    for (const word of overloaded) {
+      this.report(module, expr.loc, Code.LiteralOverloadsTarget, {
+        first,
+        word,
+      });
+    }
+
+    return target;
+  }
+
+  private overloadedNames(target: ObjectType): string[] {
+    const names: string[] = [];
+
+    for (const field of target.fields) {
+      const count = target.fields.filter(
+        (one) => one.name == field.name,
+      ).length;
+      if (count > 1 && !names.includes(field.name)) {
+        names.push(field.name);
+      }
+    }
+
+    return names;
+  }
+
+  private reportNoField(entry: FieldEntry, target: Type, module: int): void {
+    if (!entry.named) {
+      return;
+    }
+
+    const first = this.text.of(target);
+    const word = entry.name;
+    const loc = entry.property.loc;
+
+    if (first == kStreamErrorName) {
+      return this.report(module, loc, Code.NoSuchStreamField, { first, word });
+    }
+
+    this.report(module, loc, Code.NoSuchField, { first, word });
+  }
+
+  private fieldWanted(field: ObjectField): Type {
+    if (!field.optional) {
+      return field.type;
+    }
+
+    return this.types.optional(field.type);
+  }
+
+  private isOptionalField(field: ObjectField): boolean {
+    return field.optional || this.types.isOptional(field.type);
+  }
+
+  private fieldPlace(name: string): string {
+    return ` of field '${name}'`;
+  }
+
+  private literalMember(
+    draft: ObjectDraft,
+    members: Type[],
+    module: int,
+  ): Type | undefined {
+    let best: Type | undefined = undefined;
+    let bestScore = -1;
+    let isAmbiguous = false;
+
+    for (const member of members) {
+      const score = this.candidateScore(draft, member, module);
+      if (score == undefined) {
+        continue;
+      }
+      if (score > bestScore) {
+        best = member;
+        bestScore = score;
+        isAmbiguous = false;
+
+        continue;
+      }
+      if (score == bestScore) {
+        isAmbiguous = true;
+      }
+    }
+
+    if (isAmbiguous) {
+      return undefined;
+    }
+
+    return best;
+  }
+
+  private candidateScore(
+    draft: ObjectDraft,
+    member: Type,
+    module: int,
+  ): int | undefined {
+    if (!this.hasFittingNames(draft, member)) {
+      return undefined;
+    }
+
+    let score = 0;
+
+    for (const entry of draft.entries) {
+      const gained = this.propertyScore(entry, member, module);
+      if (gained == undefined) {
+        return undefined;
+      }
+
+      score += gained;
+    }
+
+    return score;
+  }
+
+  private hasFittingNames(draft: ObjectDraft, member: Type): boolean {
+    if (member.kind != TypeKind.Object) {
+      return false;
+    }
+
+    for (const entry of draft.entries) {
+      if (!member.fields.some((field) => field.name == entry.name)) {
+        return false;
+      }
+    }
+
+    for (const field of member.fields) {
+      const isGiven = draft.entries.some((entry) => entry.name == field.name);
+      if (!isGiven && !this.isOptionalField(field)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private propertyScore(
+    entry: FieldEntry,
+    member: Type,
+    module: int,
+  ): int | undefined {
+    if (member.kind != TypeKind.Object) {
+      return 0;
+    }
+
+    const field = member.fields.find((one) => one.name == entry.name);
+    const tag = this.propertyTag(entry.value, module);
+    if (field == undefined || tag == undefined) {
+      return 0;
+    }
+
+    const fieldType = this.types.definedType(field.type);
+    const isChoice =
+      this.isLiteralSet(fieldType) || fieldType.kind == TypeKind.Union;
+    const isConvertible = this.isTagConvertible(tag, fieldType);
+    if (!isConvertible && isChoice) {
+      return undefined;
+    }
+    if (!isConvertible) {
+      return 0;
+    }
+
+    const hasAtoms =
+      fieldType.kind == TypeKind.Union &&
+      fieldType.parts.some((part) => part.kind == TypeKind.Literal);
+    if (this.isLiteralSet(fieldType) || hasAtoms) {
+      return 1;
+    }
+
+    return 0;
+  }
+
+  private propertyTag(value: Expr, module: int): Type | undefined {
+    const isPlus = value.kind == ExprKind.Unary && value.op == UnaryOp.Plus;
+
+    if (value.kind == ExprKind.Name) {
+      return this.knownLiteralSet(value, module);
+    }
+
+    const literal = this.literalOf(value, module);
+    if (literal == undefined || isPlus) {
+      return undefined;
+    }
+
+    return this.store.literal(literal.kind, literal.text);
+  }
+
+  private knownLiteralSet(value: Expr, module: int): Type | undefined {
+    if (value.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const type = this.valueOfName(value, module);
+    if (type == undefined || !this.isLiteralSet(type)) {
+      return undefined;
+    }
+
+    return type;
+  }
+
+  private isLiteralSet(type: Type): boolean {
+    if (type.kind == TypeKind.Union) {
+      return type.parts.every((part) => part.kind == TypeKind.Literal);
+    }
+
+    return type.kind == TypeKind.Literal;
+  }
+
+  private isTagConvertible(tag: Type, fieldType: Type): boolean {
+    if (this.relation.converts(tag, fieldType)) {
+      return true;
+    }
+
+    const isWhole =
+      tag.kind == TypeKind.Literal && tag.literal == LiteralKind.Int;
+    const int = this.store.integer(64, false);
+
+    return isWhole && this.relation.converts(int, fieldType);
+  }
+}

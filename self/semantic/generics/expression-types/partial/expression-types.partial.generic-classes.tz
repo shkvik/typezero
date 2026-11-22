@@ -1,0 +1,181 @@
+import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { ClassDecl } from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  CallExpr,
+  MemberExpr,
+  NewExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  FunctionShape,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  kConstructorName,
+  kNewWord,
+} from "../../../code/expression-types/const/expression-types.const.tz";
+import {
+  CallTarget,
+  ClassMemberEntry,
+  GenericTarget,
+} from "../../../code/expression-types/types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private genericMethodCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    entry: ClassMemberEntry,
+    method: FunctionDecl,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const most = method.typeParams.length;
+    if (member.typeArgs.length > most) {
+      this.report(module, member.loc, Code.TypeArgumentsTooMany, {
+        word: member.name,
+        other: this.typeArgumentText(most),
+        first: `${member.typeArgs.length}`,
+      });
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const shape = this.genericMethodShape(entry, method);
+    if (shape == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const part = this.partOf(entry.owner, method);
+    const home = this.partModule(part, entry.instance.module);
+    const generic: GenericTarget = {
+      name: member.name,
+      params: this.resolver.parameterTypes(home, method.typeParams),
+      decls: method.typeParams,
+      home,
+      shape,
+      loc: member.loc,
+      typeArgs: member.typeArgs,
+      isLenient: false,
+    };
+
+    return this.genericCall(generic, expr.args, wanted, module);
+  }
+
+  private genericMethodShape(
+    entry: ClassMemberEntry,
+    method: FunctionDecl,
+  ): FunctionShape | undefined {
+    const owner = entry.owner;
+    const instance = entry.instance;
+
+    if (owner.typeParams.length == 0) {
+      const type = this.methodFunction(owner, method, instance.module);
+      if (type.kind != TypeKind.Function) {
+        return undefined;
+      }
+
+      return type.shape;
+    }
+
+    const written = method.returnType;
+    const sites = this.parameterSites(method);
+    if (written == undefined || sites == undefined) {
+      return undefined;
+    }
+
+    const part = this.partOf(owner, method);
+    const home = this.partModule(part, instance.module);
+    const context = this.resolver.classContext(instance, part.typeParams, home);
+    const type = this.resolver.signature(sites, written, context);
+    if (type.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    return type.shape;
+  }
+
+  private genericNew(
+    expr: NewExpr,
+    decl: ClassDecl,
+    home: int,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const params = this.resolver.parameterTypes(home, decl.typeParams);
+    const instance = this.resolver.classInstance(home, decl, params);
+    const word = decl.name ?? "";
+
+    if (instance.kind != TypeKind.Instance) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (decl.isAbstract) {
+      this.report(module, expr.loc, Code.AbstractNew, { word });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const maker = this.makerOf(instance, decl);
+    if (maker == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const constructors = maker.owner.constructors;
+    const chosen = constructors[0];
+
+    if (constructors.length > 1) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (chosen == undefined && expr.args.length > 0) {
+      this.report(module, expr.loc, Code.NoConstructor, { word });
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const loc = expr.loc;
+
+    if (chosen != undefined) {
+      const access = this.accessOf(chosen);
+
+      this.reportAccess(maker.owner, access, kConstructorName, loc, module);
+    }
+
+    const made = this.makerTarget(maker, chosen, loc);
+    if (made == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const shape: FunctionShape = {
+      params: made.params,
+      rest: made.rest,
+      result: instance,
+    };
+    const generic: GenericTarget = {
+      name: `${kNewWord}${word}`,
+      params,
+      decls: decl.typeParams,
+      home,
+      shape,
+      loc,
+      typeArgs: [],
+      isLenient: false,
+    };
+
+    return this.genericCall(generic, expr.args, wanted, module);
+  }
+
+  private makerTarget(
+    maker: ClassMemberEntry,
+    chosen: FunctionDecl | undefined,
+    loc: int,
+  ): CallTarget | undefined {
+    if (chosen == undefined) {
+      return { params: [], rest: false, loc, isLenient: false };
+    }
+
+    return this.constructorTarget(maker, chosen, loc);
+  }
+}

@@ -1,0 +1,220 @@
+import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  TypeContext,
+  TypePlace,
+} from "../../../types/type-resolver/types/type-resolver.types.tz";
+import {
+  DeclaredVariable,
+  Destination,
+  DestinationKind,
+} from "../../../code/expression-types/types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private destinationOf(
+    variable: DeclaredVariable,
+    init: Expr,
+    module: int,
+  ): Type | undefined {
+    const isResult = this.isResultLiteral(init, module);
+    const isLiteral =
+      init.kind == ExprKind.ObjectLit || init.kind == ExprKind.ArrayLit;
+    if (!isLiteral && !isResult) {
+      return undefined;
+    }
+
+    const list = this.record(module)?.destinations.get(variable.decl.loc);
+    let chosen: Type | undefined = undefined;
+
+    for (const one of list ?? []) {
+      const type = this.destinationType(one, module);
+      if (type == undefined || !this.isLiteralPlace(init, type, module)) {
+        continue;
+      }
+      if (this.mentionsParameter(type)) {
+        return undefined;
+      }
+      if (chosen != undefined && chosen != type && !isResult) {
+        return undefined;
+      }
+
+      chosen = this.chosenPlace(chosen, type);
+      if (chosen == undefined) {
+        return undefined;
+      }
+    }
+
+    if (chosen == undefined) {
+      return undefined;
+    }
+    if (isResult) {
+      return chosen;
+    }
+    if (!this.isFitting(init, chosen, module)) {
+      return undefined;
+    }
+
+    return chosen;
+  }
+
+  private chosenPlace(chosen: Type | undefined, type: Type): Type | undefined {
+    if (chosen == undefined || chosen == type) {
+      return type;
+    }
+    if (chosen.kind != TypeKind.Result || type.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    const value = this.resultHalfJoin(chosen.value, type.value);
+    const error = this.resultHalfJoin(chosen.error, type.error);
+    if (value == undefined || error == undefined) {
+      return undefined;
+    }
+
+    return this.store.resultOf(value, error);
+  }
+
+  private isResultLiteral(expr: Expr, module: int): boolean {
+    if (expr.kind != ExprKind.Call) {
+      return false;
+    }
+
+    const callee = expr.callee;
+    if (callee.kind != ExprKind.Name) {
+      return false;
+    }
+
+    const args = expr.args;
+    const isPlain = args.length <= 1 && args.every((arg) => !arg.spread);
+
+    return isPlain && this.isResultMakerCall(callee, module);
+  }
+
+  private isFitting(init: Expr, wanted: Type, module: int): boolean {
+    const before = this.muted;
+
+    this.quiet += 1;
+
+    const trial = this.typed(init, wanted, module);
+
+    this.quiet -= 1;
+
+    const isClean = this.muted == before;
+
+    return isClean && this.relation.converts(trial, wanted);
+  }
+
+  private placedType(given: Type, destination: Type | undefined): Type {
+    if (destination == undefined || destination.kind == TypeKind.Union) {
+      return given;
+    }
+    if (!this.relation.converts(given, destination)) {
+      return given;
+    }
+
+    return destination;
+  }
+
+  private destinationType(one: Destination, module: int): Type | undefined {
+    const context: TypeContext = {
+      module,
+      bindings: new Map<int, Type>(),
+      place: TypePlace.Plain,
+    };
+
+    return this.writtenDestination(one, context, module);
+  }
+
+  private isLiteralPlace(init: Expr, type: Type, module: int): boolean {
+    if (this.isResultLiteral(init, module)) {
+      return type.kind == TypeKind.Result;
+    }
+    if (init.kind == ExprKind.ArrayLit) {
+      return type.kind == TypeKind.Array;
+    }
+    if (type.kind == TypeKind.Union) {
+      return type.parts.some((part) => part.kind == TypeKind.Object);
+    }
+
+    return type.kind == TypeKind.Object;
+  }
+
+  private writtenDestination(
+    one: Destination,
+    context: TypeContext,
+    module: int,
+  ): Type | undefined {
+    const written = one.written;
+    const fn = one.fn;
+
+    switch (one.kind) {
+      case DestinationKind.Declared:
+        if (written == undefined) {
+          return undefined;
+        }
+
+        return this.resolver.value(written, context);
+      case DestinationKind.Returned: {
+        const result = fn?.returnType;
+        if (fn == undefined || result == undefined) {
+          return undefined;
+        }
+
+        const type = this.resolver.returnType(result, context);
+
+        return this.innerResult(type, fn);
+      }
+      case DestinationKind.Assigned:
+        return this.assignedDestination(one, module);
+      default:
+        return this.argumentDestination(one, module);
+    }
+  }
+
+  private assignedDestination(one: Destination, module: int): Type | undefined {
+    const value = one.value;
+    if (value == undefined || !this.isResultLiteral(value, module)) {
+      return undefined;
+    }
+
+    this.quiet += 1;
+
+    const type = this.typed(value, undefined, module);
+
+    this.quiet -= 1;
+
+    return type;
+  }
+
+  private argumentDestination(one: Destination, module: int): Type | undefined {
+    const callee = one.call?.callee;
+    if (callee == undefined || callee.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const target = this.targetOfName(callee, module);
+    if (target == undefined || target.kind != SymbolKind.Function) {
+      return undefined;
+    }
+
+    const fn = this.record(target.module)?.functions.get(target.loc);
+    if (fn == undefined || !this.isCallable(fn, target.module)) {
+      return undefined;
+    }
+
+    const type = this.functionAt(target.module, target.loc);
+    if (type.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    const shape = type.shape;
+    const params = this.directParams(shape.params, shape.self);
+
+    return params[one.index]?.type;
+  }
+}

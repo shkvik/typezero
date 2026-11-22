@@ -1,0 +1,118 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import {
+  BinaryOp,
+  CallArgument,
+  Expr,
+  ExprKind,
+  TemplateExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+
+partial class ExpressionTypes {
+  private templateTyped(
+    expr: TemplateExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    for (const part of expr.exprs) {
+      this.templatePart(part, module);
+    }
+
+    return this.templated(wanted);
+  }
+
+  private templatePart(part: Expr, module: int): void {
+    if (this.isHintNeeded(part, module)) {
+      return;
+    }
+
+    const type = this.typed(part, undefined, module);
+
+    this.textCheck(part, type, module);
+  }
+
+  private childrenTyped(expr: Expr, module: int): Type {
+    for (const part of this.childrenOf(expr)) {
+      this.walkedPart(part, module);
+    }
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private childrenOf(expr: Expr): Expr[] {
+    switch (expr.kind) {
+      case ExprKind.Index:
+        return [expr.object, expr.index];
+      case ExprKind.Binary:
+        return [expr.lhs, expr.rhs];
+      case ExprKind.Await:
+        return [expr.value];
+      case ExprKind.Cast:
+        return [expr.operand];
+      case ExprKind.Sequence:
+        return expr.exprs;
+      case ExprKind.Yield: {
+        const value = expr.value;
+        if (value == undefined) {
+          return [];
+        }
+
+        return [value];
+      }
+      default:
+        return [];
+    }
+  }
+
+  private walkedArguments(args: CallArgument[], module: int): void {
+    for (const arg of args) {
+      if (!this.visited.has(arg.expr)) {
+        this.walkedPart(arg.expr, module);
+      }
+    }
+  }
+
+  private walkedPart(expr: Expr, module: int): void {
+    if (this.isHintNeeded(expr, module)) {
+      return;
+    }
+
+    this.typed(expr, undefined, module);
+  }
+
+  private isHintNeeded(expr: Expr, module: int): boolean {
+    switch (expr.kind) {
+      case ExprKind.ArrayLit:
+      case ExprKind.ObjectLit:
+      case ExprKind.Undefined:
+        return true;
+      case ExprKind.Function:
+        return expr.fn.params.some((param) => param.type == undefined);
+      case ExprKind.Name:
+        return (
+          this.isNullName(expr, module) ||
+          this.enumOfObject(expr, module) != undefined
+        );
+      case ExprKind.Conditional:
+        return (
+          this.isHintNeeded(expr.thenExpr, module) ||
+          this.isHintNeeded(expr.elseExpr, module)
+        );
+      case ExprKind.Binary:
+        return this.isLogicOp(expr.op) && this.isHintNeeded(expr.rhs, module);
+      case ExprKind.New:
+        return expr.typeArgs.length == 0 && expr.args.length == 0;
+      default:
+        return false;
+    }
+  }
+
+  private isLogicOp(op: BinaryOp): boolean {
+    return (
+      op == BinaryOp.Nullish || op == BinaryOp.LogOr || op == BinaryOp.LogAnd
+    );
+  }
+}

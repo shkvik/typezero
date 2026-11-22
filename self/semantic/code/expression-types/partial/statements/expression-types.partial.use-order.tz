@@ -1,0 +1,338 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NameExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+  FunctionPlace,
+} from "../../../../../program/ast/types/ast.types.functions.tz";
+import {
+  Stmt,
+  StmtKind,
+  SwitchStmt,
+} from "../../../../../program/ast/types/ast.types.statements.tz";
+import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  kFunctionMethods,
+  kTextMethods,
+} from "../../const/expression-types.const.tz";
+import { ValueTarget } from "../../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private laterBlockCheck(
+    expr: NameExpr,
+    target: ValueTarget,
+    module: int,
+  ): void {
+    const isLater =
+      target.kind == SymbolKind.Variable &&
+      target.module == module &&
+      target.loc > expr.loc;
+    const closure = this.openFunctions[this.openFunctions.length - 1];
+    if (!isLater || closure == undefined || !this.isClosure(closure)) {
+      return;
+    }
+    if (this.isInsideFunction(closure, target.loc)) {
+      return;
+    }
+
+    const outer = this.openFunctions.slice(0, this.openFunctions.length - 1);
+    const isLocal = outer.some((fn) => this.isInsideFunction(fn, target.loc));
+    if (!isLocal) {
+      return;
+    }
+
+    this.report(module, expr.loc, Code.LaterInBlock, { word: expr.name });
+  }
+
+  private isClosure(fn: FunctionDecl): boolean {
+    return fn.isArrow || fn.place == FunctionPlace.Expression;
+  }
+
+  private isInsideFunction(fn: FunctionDecl, loc: int): boolean {
+    const span = fn.source;
+    if (span == undefined) {
+      return false;
+    }
+
+    return loc >= span.start && loc < span.end;
+  }
+
+  private earlyCallCheck(
+    expr: CallExpr,
+    callee: NameExpr,
+    target: ValueTarget,
+    module: int,
+  ): void {
+    if (target.kind != SymbolKind.Function || target.module != module) {
+      return;
+    }
+
+    const owner = this.openFunctions[this.openFunctions.length - 1];
+    const fn = this.record(module)?.functions.get(target.loc);
+    if (
+      owner == undefined ||
+      fn == undefined ||
+      !this.isInsideFunction(owner, fn.loc)
+    ) {
+      return;
+    }
+
+    const later = this.laterCapture(fn, owner, expr.loc, module);
+    if (later == undefined) {
+      return;
+    }
+
+    this.report(module, callee.loc, Code.UsedBeforeDeclared, {
+      word: fn.name,
+      first: later,
+    });
+  }
+
+  private laterCapture(
+    fn: FunctionDecl,
+    owner: FunctionDecl,
+    at: int,
+    module: int,
+  ): string | undefined {
+    const record = this.record(module);
+    if (record == undefined) {
+      return undefined;
+    }
+
+    for (const [loc, use] of record.uses) {
+      const symbol = use.symbol;
+      if (symbol == undefined || !this.isInsideFunction(fn, loc)) {
+        continue;
+      }
+
+      const isOuterLocal =
+        symbol.kind == SymbolKind.Variable &&
+        !this.isInsideFunction(fn, symbol.loc) &&
+        this.isInsideFunction(owner, symbol.loc);
+      if (isOuterLocal && symbol.loc > at) {
+        return use.name;
+      }
+    }
+
+    return undefined;
+  }
+
+  private switchFunctionsCheck(statement: SwitchStmt, module: int): void {
+    for (const option of statement.cases) {
+      for (const one of option.body) {
+        this.switchFunctionCheck(one, module);
+      }
+    }
+  }
+
+  private switchFunctionCheck(statement: Stmt, module: int): void {
+    if (statement.kind == StmtKind.Function) {
+      this.report(module, statement.loc, Code.FunctionInSwitch, kNoDetails);
+    }
+  }
+
+  private functionMemberCall(
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): Type {
+    const word = member.name;
+
+    if (this.isLibraryFunctionName(member.object, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (kFunctionMethods.includes(word)) {
+      this.report(module, member.loc, Code.FunctionSetsThis, { word });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const first = this.text.of(object);
+
+    this.report(module, member.loc, Code.PropertyMissing, { word, first });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private isLibraryFunctionName(expr: Expr, module: int): boolean {
+    if (expr.kind != ExprKind.Name) {
+      return false;
+    }
+
+    const target = this.targetOfName(expr, module);
+    if (target == undefined || target.kind != SymbolKind.Function) {
+      return false;
+    }
+
+    return this.isLibraryModule(target.module);
+  }
+
+  private arrayTextCheck(member: MemberExpr, object: Type, module: int): void {
+    if (object.kind != TypeKind.Array || !kTextMethods.includes(member.name)) {
+      return;
+    }
+
+    const held = this.heldValue(object.item);
+    const word = member.name;
+    const code = this.textElementsCode(held);
+    if (code != undefined) {
+      this.report(module, member.loc, code, { word });
+    }
+  }
+
+  private heldValue(type: Type): Type {
+    let held = this.types.definedType(type);
+
+    while (held.kind == TypeKind.Array) {
+      held = this.types.definedType(held.item);
+    }
+
+    return held;
+  }
+
+  private textElementsCode(held: Type): Code | undefined {
+    switch (held.kind) {
+      case TypeKind.Function:
+        return Code.ArrayTextFunctions;
+      case TypeKind.Result:
+        return Code.ArrayTextResults;
+      case TypeKind.Unknown:
+        return this.unknownCode(Code.ArrayTextUnknown);
+      case TypeKind.Json:
+        return Code.ArrayTextJson;
+      case TypeKind.Object:
+      case TypeKind.Dict:
+      case TypeKind.Tuple:
+      case TypeKind.AnyObject:
+        return Code.ArrayTextObjects;
+      case TypeKind.Instance:
+        return this.instanceTextCode(held);
+      default:
+        return undefined;
+    }
+  }
+
+  private unknownCode(code: Code): Code | undefined {
+    const isGeneric = this.openFunctions.some((fn) => fn.typeParams.length > 0);
+    if (isGeneric) {
+      return undefined;
+    }
+
+    return code;
+  }
+
+  private instanceTextCode(held: Type): Code | undefined {
+    if (held.kind != TypeKind.Instance || this.isDateType(held)) {
+      return undefined;
+    }
+
+    return Code.ArrayTextObjects;
+  }
+
+  private isDateType(type: Type): boolean {
+    return (
+      type.kind == TypeKind.Instance &&
+      type.name == "Date" &&
+      this.isLibraryModule(type.module)
+    );
+  }
+
+  private arraySortCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): void {
+    const isPlainSort = member.name == "sort" && expr.args.length == 0;
+    if (object.kind != TypeKind.Array || !isPlainSort) {
+      return;
+    }
+
+    const element = object.item;
+    const code = this.sortProblem(element);
+    if (code == undefined) {
+      return;
+    }
+
+    const word = this.text.of(this.types.definedType(element));
+    const other = this.sortExample(element);
+
+    this.report(module, member.loc, code, { word, other });
+  }
+
+  private sortProblem(element: Type): Code | undefined {
+    const held = this.heldValue(element);
+
+    switch (held.kind) {
+      case TypeKind.Function:
+        return Code.SortFunctions;
+      case TypeKind.Unknown:
+        return this.unknownCode(Code.SortUnknown);
+      case TypeKind.Json:
+        return Code.SortJson;
+      case TypeKind.Object:
+      case TypeKind.Dict:
+      case TypeKind.Tuple:
+      case TypeKind.AnyObject:
+      case TypeKind.Result:
+        return Code.SortObjects;
+      case TypeKind.Instance:
+        return this.instanceSortCode(held);
+      default:
+        return this.plainSortProblem(element);
+    }
+  }
+
+  private instanceSortCode(held: Type): Code {
+    if (this.isDateType(held)) {
+      return Code.SortDates;
+    }
+
+    return Code.SortObjects;
+  }
+
+  private plainSortProblem(element: Type): Code | undefined {
+    const base = this.types.definedType(element);
+    if (base.kind == TypeKind.Union && !this.isTextualUnion(base.parts)) {
+      return Code.SortMixed;
+    }
+
+    const apparent = this.relation.baseOf(base) ?? base;
+    const isNumber =
+      apparent.kind == TypeKind.Int ||
+      apparent.kind == TypeKind.Double ||
+      apparent.kind == TypeKind.Decimal;
+    if (isNumber) {
+      return Code.SortNumbers;
+    }
+
+    return undefined;
+  }
+
+  private isTextualUnion(parts: Type[]): boolean {
+    return parts.every((part) => {
+      const base = this.relation.baseOf(part) ?? part;
+
+      return base.kind == TypeKind.String || base.kind == TypeKind.Boolean;
+    });
+  }
+
+  private sortExample(element: Type): string {
+    if (this.types.isOptional(element)) {
+      return "(x ?? 0) - (y ?? 0)";
+    }
+
+    return "x - y";
+  }
+}

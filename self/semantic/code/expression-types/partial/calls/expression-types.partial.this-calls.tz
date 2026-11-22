@@ -1,0 +1,116 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+  Param,
+} from "../../../../../program/ast/types/ast.types.functions.tz";
+import {
+  FunctionType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { CallKind } from "../../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private thisMethodCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    type: FunctionType,
+    module: int,
+  ): Type {
+    const word = member.name;
+    const error = this.store.plain(TypeKind.Error);
+    const code = this.thisCallProblem(expr, word);
+    if (code != undefined) {
+      this.report(module, member.loc, code, {
+        word,
+        other: this.thisCallTail(word),
+      });
+      this.looseArguments(expr.args, module);
+
+      return error;
+    }
+    if (word == "apply") {
+      this.looseArguments(expr.args, module);
+
+      return type.shape.result;
+    }
+
+    const first = expr.args[0];
+    if (first != undefined) {
+      this.typed(first.expr, type.shape.self, module);
+    }
+
+    const rest: CallExpr = {
+      kind: ExprKind.Call,
+      loc: expr.loc,
+      callee: expr.callee,
+      args: expr.args.slice(1),
+      optional: expr.optional,
+      tagged: false,
+    };
+    const shape = type.shape;
+    const plain = this.store.functionOf({
+      params: shape.params,
+      rest: shape.rest,
+      result: shape.result,
+    });
+    if (plain.kind != TypeKind.Function) {
+      return error;
+    }
+
+    return this.calledWith(rest, plain, member.loc, CallKind.Own, module);
+  }
+
+  private thisCallProblem(expr: CallExpr, word: string): Code | undefined {
+    if (word == "bind") {
+      return Code.ThisBindUnsupported;
+    }
+    if (word != "call" && word != "apply") {
+      return Code.ThisFunctionProperty;
+    }
+    if (expr.args.length == 0) {
+      return Code.ThisArgumentFirst;
+    }
+
+    const isSpread = expr.args.some((arg) => arg.spread);
+    const isApplyShape = expr.args.length == 2 && !isSpread;
+    if (word == "apply" && !isApplyShape) {
+      return Code.ThisApplyArguments;
+    }
+
+    return undefined;
+  }
+
+  private thisCallTail(word: string): string {
+    if (word == "apply") {
+      return ", args)";
+    }
+
+    return ", ...)";
+  }
+
+  private thisParameterCheck(
+    fn: FunctionDecl,
+    param: Param,
+    module: int,
+  ): void {
+    if (fn.isArrow) {
+      return this.report(
+        module,
+        param.loc,
+        Code.ArrowThisParameter,
+        kNoDetails,
+      );
+    }
+    if (fn.role != undefined) {
+      this.report(module, param.loc, Code.MethodThisParameter, kNoDetails);
+    }
+  }
+}

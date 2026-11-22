@@ -1,0 +1,134 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  Expr,
+  IndexExpr,
+  MemberExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { kConstructorName } from "../../const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private isUnknownValue(type: Type): boolean {
+    return type.kind == TypeKind.Unknown || type.kind == TypeKind.AnyObject;
+  }
+
+  private unknownMemberCheck(
+    expr: MemberExpr,
+    object: Type,
+    module: int,
+  ): boolean {
+    if (!this.isUnknownValue(object)) {
+      return false;
+    }
+    if (expr.name == kConstructorName) {
+      this.report(module, expr.loc, Code.ConstructorRefused, kNoDetails);
+
+      return true;
+    }
+
+    const what = `property '${expr.name}'`;
+
+    this.unknownUseReport(expr.object, object, what, module);
+
+    return true;
+  }
+
+  private unknownCallCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): boolean {
+    if (!this.isUnknownValue(object)) {
+      return false;
+    }
+
+    const what = `method '${member.name}'`;
+
+    this.looseArguments(expr.args, module);
+    this.unknownUseReport(member.object, object, what, module);
+
+    return true;
+  }
+
+  private unknownIndexCheck(
+    expr: IndexExpr,
+    object: Type,
+    module: int,
+  ): boolean {
+    if (!this.isUnknownValue(object)) {
+      return false;
+    }
+
+    this.walkedPart(expr.index, module);
+    this.unknownUseReport(expr.object, object, "", module);
+
+    return true;
+  }
+
+  private unknownUseReport(
+    value: Expr,
+    object: Type,
+    what: string,
+    module: int,
+  ): void {
+    const word = this.operandName(value);
+    const isObject = object.kind == TypeKind.AnyObject;
+    const code = this.unknownUseCode(isObject, what == "");
+
+    this.report(module, value.loc, code, { word, other: what });
+  }
+
+  private unknownUseCode(isObject: boolean, isIndex: boolean): Code {
+    if (isObject && isIndex) {
+      return Code.ObjectIndexUnknown;
+    }
+    if (isObject) {
+      return Code.ObjectMemberUnknown;
+    }
+    if (isIndex) {
+      return Code.UnknownIndexed;
+    }
+
+    return Code.UnknownMember;
+  }
+
+  private unknownCheckText(expr: Expr, given: Type, wanted: Type): string {
+    const shown = this.operandName(expr);
+    const only = this.onlyPart(wanted);
+    const target = this.types.definedType(only);
+    if (target.kind == TypeKind.Instance) {
+      return `${shown} instanceof ${this.text.of(target)}`;
+    }
+    if (given.kind == TypeKind.AnyObject) {
+      return `${shown} instanceof C`;
+    }
+
+    return this.typeofCheckText(shown, target);
+  }
+
+  private typeofCheckText(shown: string, target: Type): string {
+    const base = this.types.apparent(target);
+
+    switch (base.kind) {
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+        return `typeof ${shown} == "number"`;
+      case TypeKind.Boolean:
+        return `typeof ${shown} == "boolean"`;
+      case TypeKind.Array:
+        return `Array.isArray(${shown})`;
+      case TypeKind.AnyObject:
+        return `typeof ${shown} == "object"`;
+      default:
+        return `typeof ${shown} == "string"`;
+    }
+  }
+}

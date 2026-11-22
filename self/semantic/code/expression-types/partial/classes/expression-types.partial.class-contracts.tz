@@ -1,0 +1,442 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  ClassDecl,
+  MethodKind,
+} from "../../../../../program/ast/types/ast.types.classes.tz";
+import {
+  CallExpr,
+  MemberExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../../program/ast/types/ast.types.functions.tz";
+import { TypeRef } from "../../../../../program/ast/types/ast.types.types.tz";
+import {
+  FunctionType,
+  InstanceType,
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  TypeContext,
+  TypePlace,
+} from "../../../../types/type-resolver/types/type-resolver.types.tz";
+import { ClassMemberEntry } from "../../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private contractChecks(decl: ClassDecl, module: int): void {
+    if (decl.typeParams.length > 0) {
+      return;
+    }
+
+    const instance = this.resolver.classInstance(module, decl, []);
+    if (instance.kind != TypeKind.Instance) {
+      return;
+    }
+
+    this.extendsCheck(decl, module);
+    this.abstractMethodsCheck(decl, module);
+    this.abstractParentsCheck(decl, instance, module);
+
+    for (const ref of decl.interfaces) {
+      this.implementsCheck(decl, instance, ref, module);
+    }
+  }
+
+  private contextOf(module: int, place: TypePlace): TypeContext {
+    return { module, bindings: new Map<int, Type>(), place };
+  }
+
+  private extendsCheck(decl: ClassDecl, module: int): void {
+    const base = decl.base;
+    if (base == undefined) {
+      return;
+    }
+
+    const context = this.contextOf(module, TypePlace.Base);
+    const type = this.resolver.resolve(base, context);
+    if (type.kind != TypeKind.Object) {
+      return;
+    }
+
+    const word = base.name;
+    const first = decl.name ?? "";
+
+    this.report(module, base.loc, Code.ExtendsNotClass, { word, first });
+  }
+
+  private abstractMethodsCheck(decl: ClassDecl, module: int): void {
+    if (decl.isAbstract) {
+      return;
+    }
+
+    for (const method of decl.methods) {
+      if (method.role?.method == MethodKind.Abstract) {
+        const word = method.name;
+        const first = decl.name ?? "";
+
+        this.report(module, method.loc, Code.AbstractNeedsClass, {
+          word,
+          first,
+        });
+      }
+    }
+  }
+
+  private abstractParentsCheck(
+    decl: ClassDecl,
+    instance: InstanceType,
+    module: int,
+  ): void {
+    if (decl.isAbstract) {
+      return;
+    }
+
+    const done = new Set<string>();
+
+    for (const method of decl.methods) {
+      done.add(method.name);
+    }
+
+    const seen = new Set<ClassDecl>();
+
+    seen.add(decl);
+    let current: InstanceType | undefined = this.parentOf(instance, decl);
+    let owner: ClassDecl | undefined = this.parentDeclOf(current);
+
+    while (owner != undefined && current != undefined) {
+      if (seen.has(owner)) {
+        return;
+      }
+
+      seen.add(owner);
+      this.abstractOwnerCheck(decl, owner, current, done, module);
+
+      const parent = this.parentOf(current, owner);
+
+      current = parent;
+      owner = this.parentDeclOf(parent);
+    }
+  }
+
+  private parentDeclOf(
+    parent: InstanceType | undefined,
+  ): ClassDecl | undefined {
+    if (parent == undefined) {
+      return undefined;
+    }
+
+    return this.classOf(parent);
+  }
+
+  private abstractOwnerCheck(
+    decl: ClassDecl,
+    owner: ClassDecl,
+    instance: InstanceType,
+    done: Set<string>,
+    module: int,
+  ): void {
+    for (const method of owner.methods) {
+      const isAbstract = method.role?.method == MethodKind.Abstract;
+      if (!isAbstract && !this.isStaticMethod(method)) {
+        done.add(method.name);
+      }
+    }
+
+    for (const method of owner.methods) {
+      const isAbstract = method.role?.method == MethodKind.Abstract;
+      if (isAbstract && !done.has(method.name)) {
+        this.reportAbstract(decl, owner, instance, method, module);
+        done.add(method.name);
+      }
+    }
+  }
+
+  private reportAbstract(
+    decl: ClassDecl,
+    owner: ClassDecl,
+    instance: InstanceType,
+    method: FunctionDecl,
+    module: int,
+  ): void {
+    const entry: ClassMemberEntry = {
+      owner,
+      instance,
+      methods: [method],
+      isStatic: false,
+    };
+    const type = this.methodTypeOf(entry, method);
+    if (type.kind != TypeKind.Function) {
+      return;
+    }
+
+    const first = decl.name ?? "";
+    const second = owner.name ?? "";
+    const other = this.variantText(method, type);
+
+    this.report(module, decl.loc, Code.AbstractNotImplemented, {
+      first,
+      second,
+      other,
+    });
+  }
+
+  private implementsCheck(
+    decl: ClassDecl,
+    instance: InstanceType,
+    ref: TypeRef,
+    module: int,
+  ): void {
+    const context = this.contextOf(module, TypePlace.Base);
+    const type = this.resolver.resolve(ref, context);
+    const word = ref.name;
+
+    if (type.kind == TypeKind.Instance && !this.isLibraryModule(type.module)) {
+      return this.reportImplementsClass(decl, ref, module);
+    }
+    if (type.kind != TypeKind.Object) {
+      return;
+    }
+
+    const done = new Set<string>();
+
+    for (const field of type.fields) {
+      const same = type.fields.filter((one) => one.name == field.name);
+      if (same.length == 1) {
+        this.contractMember(decl, instance, word, field, module);
+      }
+      if (same.length > 1 && !done.has(field.name)) {
+        done.add(field.name);
+        this.contractSignatures(decl, instance, word, same, module);
+      }
+    }
+  }
+
+  private reportImplementsClass(
+    decl: ClassDecl,
+    ref: TypeRef,
+    module: int,
+  ): void {
+    const word = ref.name;
+
+    if (decl.base != undefined || decl.baseExpr != undefined) {
+      this.report(module, ref.loc, Code.ImplementsClassExtended, { word });
+
+      return;
+    }
+
+    this.report(module, ref.loc, Code.ImplementsClass, { word });
+  }
+
+  private contractMember(
+    decl: ClassDecl,
+    instance: InstanceType,
+    iface: string,
+    field: ObjectField,
+    module: int,
+  ): void {
+    const lookup = this.classMember(instance, field.name);
+    const entry = lookup.entry;
+    const first = decl.name ?? "";
+
+    if (!lookup.isKnown) {
+      return;
+    }
+    if (entry == undefined) {
+      if (!field.optional) {
+        this.reportMissingMember(decl, iface, field, module);
+      }
+
+      return;
+    }
+
+    const own = entry.field;
+    const method = entry.methods[0];
+
+    if (own != undefined) {
+      return this.contractField(entry, iface, field, first, module);
+    }
+    if (method == undefined) {
+      return;
+    }
+
+    const wanted = this.fieldWanted(field);
+    const word = field.name;
+    if (wanted.kind != TypeKind.Function) {
+      return this.report(module, method.loc, Code.ImplementsFieldAsMethod, {
+        word,
+        first: iface,
+        second: first,
+        other: this.text.of(wanted),
+      });
+    }
+    if (!field.readonly) {
+      return this.report(module, method.loc, Code.ImplementsMustField, {
+        word,
+        first: iface,
+        second: first,
+      });
+    }
+
+    this.contractMethods(entry, iface, field, first, module);
+  }
+
+  private reportMissingMember(
+    decl: ClassDecl,
+    iface: string,
+    field: ObjectField,
+    module: int,
+  ): void {
+    const word = field.name;
+    const first = decl.name ?? "";
+    const text = this.text.of(field.type);
+    const other = `${word}: ${text}`;
+
+    this.report(module, decl.loc, Code.ImplementsMissing, {
+      word,
+      first,
+      second: iface,
+      other,
+    });
+  }
+
+  private contractField(
+    entry: ClassMemberEntry,
+    iface: string,
+    field: ObjectField,
+    first: string,
+    module: int,
+  ): void {
+    const own = entry.field;
+    if (own == undefined || field.type.kind == TypeKind.Function) {
+      return;
+    }
+
+    const type = this.fieldTypeOf(entry, own);
+    const isPlain = this.isScalarField(type) && this.isScalarField(field.type);
+    if (type == field.type || !isPlain) {
+      return;
+    }
+
+    this.report(module, own.loc, Code.ImplementsFieldType, {
+      word: field.name,
+      first,
+      second: iface,
+      other: this.text.of(field.type),
+      place: this.text.of(type),
+    });
+  }
+
+  private isScalarField(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.String:
+      case TypeKind.Boolean:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private contractMethod(
+    entry: ClassMemberEntry,
+    method: FunctionDecl,
+    iface: string,
+    field: ObjectField,
+    first: string,
+    module: int,
+  ): void {
+    const wanted = field.type;
+    const type = this.methodTypeOf(entry, method);
+    if (wanted.kind != TypeKind.Function || type.kind != TypeKind.Function) {
+      return;
+    }
+    if (!this.isSameParameters(type, wanted)) {
+      this.report(module, method.loc, Code.ImplementsParameters, {
+        word: field.name,
+        first,
+        second: iface,
+        other: this.text.of(wanted),
+        place: this.variantText(method, type),
+      });
+
+      return;
+    }
+
+    this.contractResult(method, type, wanted, iface, first, module);
+  }
+
+  private contractResult(
+    method: FunctionDecl,
+    type: FunctionType,
+    wanted: FunctionType,
+    iface: string,
+    first: string,
+    module: int,
+  ): void {
+    const mine = type.shape.result;
+    const theirs = wanted.shape.result;
+
+    if (method.returnType == undefined) {
+      return;
+    }
+
+    const isFitting =
+      mine == theirs ||
+      mine.kind == TypeKind.Error ||
+      this.relation.converts(mine, theirs);
+    if (isFitting) {
+      return;
+    }
+
+    this.report(module, method.loc, Code.ImplementsReturns, {
+      word: method.name,
+      first: this.text.of(mine),
+      second: iface,
+      other: first,
+      place: this.text.of(theirs),
+    });
+  }
+
+  private superMethodCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const owner = this.ownerClasses[this.ownerClasses.length - 1];
+    const error = this.store.plain(TypeKind.Error);
+
+    if (owner == undefined || owner.decl.typeParams.length > 0) {
+      return error;
+    }
+
+    const self = this.resolver.classInstance(owner.module, owner.decl, []);
+    if (self.kind != TypeKind.Instance) {
+      return error;
+    }
+
+    const parent = this.parentOf(self, owner.decl);
+    if (parent == undefined) {
+      return error;
+    }
+
+    const lookup = this.classMember(parent, member.name);
+    const method = lookup.entry?.methods[0];
+    const isAbstract = method?.role?.method == MethodKind.Abstract;
+    if (isAbstract && lookup.entry != undefined) {
+      const first = lookup.entry.owner.name ?? "";
+
+      this.report(module, member.loc, Code.SuperAbstract, {
+        word: member.name,
+        first,
+      });
+
+      return error;
+    }
+
+    return this.methodCall(expr, member, parent, wanted, module);
+  }
+}

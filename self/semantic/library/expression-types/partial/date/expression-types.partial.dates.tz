@@ -1,0 +1,458 @@
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  BinaryExpr,
+  BinaryOp,
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NameExpr,
+  NewExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionType,
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  kDateLocaleMethods,
+  kDateName,
+  kDateParseName,
+  kDateSetters,
+  kDateStatics,
+  kDateUtcName,
+  kGetYearName,
+  kGmtStringName,
+  kMostDateFields,
+  kNoPlace,
+  kSetterPrefix,
+  kSetYearName,
+  kToJsonName,
+  kUtcSetterPrefix,
+} from "../../../../code/expression-types/const/expression-types.const.tz";
+import { OperandPair } from "../../../../code/expression-types/types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private isDateName(expr: Expr, module: int): boolean {
+    if (expr.kind != ExprKind.Name || expr.name != kDateName) {
+      return false;
+    }
+
+    return this.isGlobalUse(expr, module);
+  }
+
+  private dateInstance(): InstanceType | undefined {
+    const target = this.globalValue(kDateName);
+    if (target == undefined) {
+      return undefined;
+    }
+
+    const opened = this.program.modules[target.module];
+    const declared = opened?.declared.find((one) => one.loc == target.loc);
+    if (declared == undefined) {
+      return undefined;
+    }
+
+    const made = this.resolver.declaredInstance(target.module, declared, []);
+    if (made == undefined || made.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    return made;
+  }
+
+  private dateType(): Type {
+    return this.dateInstance() ?? this.store.plain(TypeKind.Error);
+  }
+
+  private dateNew(expr: NewExpr, module: int): Type {
+    const args = expr.args;
+    const count = args.length;
+    if (count > kMostDateFields) {
+      const word = this.argumentCountText(0, kMostDateFields, false);
+
+      this.report(module, expr.loc, Code.ArgumentCount, {
+        word,
+        other: `${count}`,
+      });
+      this.looseArguments(args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const given = args[0]?.expr;
+    if (given == undefined) {
+      return this.dateType();
+    }
+    if (count > 1) {
+      this.dateFieldsCheck(args, 0, "", module);
+
+      return this.dateType();
+    }
+
+    this.dateTextCheck(given, module);
+
+    return this.dateOfValue(given, module);
+  }
+
+  private dateOfValue(given: Expr, module: int): Type {
+    const type = this.typed(given, undefined, module);
+    const base = this.types.apparent(type);
+    if (base.kind == TypeKind.Error) {
+      return base;
+    }
+    if (this.isDate(base)) {
+      return this.dateType();
+    }
+
+    const isText =
+      base.kind == TypeKind.String || base.kind == TypeKind.Template;
+    if (isText && this.dateTextOf(given) == undefined) {
+      this.report(module, given.loc, Code.DateNewText, kNoDetails);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (isText) {
+      return this.dateType();
+    }
+    if (base.kind == TypeKind.Int || base.kind == TypeKind.Double) {
+      this.timeCoerce(given, type, module);
+
+      return this.dateType();
+    }
+
+    const place = this.dateValuePlace(type, base);
+
+    this.report(module, given.loc, Code.DateNewValue, {
+      word: this.text.of(type),
+      place,
+    });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private dateValuePlace(type: Type, base: Type): string {
+    if (this.types.isOptional(type)) {
+      return "; the value may be undefined: check it first";
+    }
+    if (base.kind == TypeKind.Decimal) {
+      return "; convert it with 'Number(x)'";
+    }
+
+    return "";
+  }
+
+  private dateFunctionCall(
+    expr: CallExpr,
+    callee: NameExpr,
+    module: int,
+  ): Type {
+    if (expr.args.length > 0) {
+      this.report(module, callee.loc, Code.DateWithoutNew, kNoDetails);
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.store.plain(TypeKind.String);
+  }
+
+  private dateStaticCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): Type | undefined {
+    const isSpread = expr.args.some((arg) => arg.spread);
+    if (!this.isDateName(member.object, module) || isSpread) {
+      return undefined;
+    }
+
+    const instance = this.dateInstance();
+    const name = member.name;
+    if (instance == undefined) {
+      return undefined;
+    }
+
+    const found = this.declaredStatic(instance, name);
+    if (found == undefined || found.kind != TypeKind.Function) {
+      this.dateStaticReport(member, module);
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (!this.dateCountCheck(expr, member, found, 0, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const result = found.shape.result;
+    if (name == kDateUtcName) {
+      this.dateFieldsCheck(expr.args, 0, "", module);
+
+      return result;
+    }
+
+    const text = expr.args[0]?.expr;
+    if (name == kDateParseName && text != undefined) {
+      this.dateTextCheck(text, module);
+      this.textArgument(text, module);
+    }
+
+    return result;
+  }
+
+  private textArgument(arg: Expr, module: int): void {
+    const string = this.store.plain(TypeKind.String);
+    const type = this.typed(arg, string, module);
+    if (type.kind == TypeKind.Error) {
+      return;
+    }
+
+    this.coerce(arg, type, string, module, kNoPlace);
+  }
+
+  private dateCountCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    method: FunctionType,
+    extra: int,
+    module: int,
+  ): boolean {
+    const params = method.shape.params;
+    const least = params.filter((param) => !param.optional).length;
+    const most = params.length + extra;
+    const count = expr.args.length;
+    if (count >= least && count <= most) {
+      return true;
+    }
+
+    const word = this.argumentCountText(least, most, false);
+
+    this.report(module, member.loc, Code.ArgumentCount, {
+      word,
+      other: `${count}`,
+    });
+
+    return false;
+  }
+
+  private dateStaticRead(expr: MemberExpr, module: int): Type {
+    this.dateStaticReport(expr, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private dateStaticReport(member: MemberExpr, module: int): void {
+    const word = member.name;
+    const known = kDateStatics.find((one) => one.name == word);
+    if (known == undefined) {
+      this.report(module, member.loc, Code.NamespaceMemberMissing, {
+        word,
+        first: kDateName,
+      });
+
+      return;
+    }
+
+    this.report(module, member.loc, Code.DateStaticRead, {
+      word,
+      other: known.example,
+    });
+  }
+
+  private dateMethodCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const name = member.name;
+    const isSpread = expr.args.some((arg) => arg.spread);
+    if (isSpread || kDateLocaleMethods.includes(name)) {
+      return this.otherCall(expr, member, instance, wanted, module);
+    }
+
+    const method = this.libraryMemberType(instance, name, true);
+    if (method == undefined || method.kind != TypeKind.Function) {
+      this.dateMissingReport(member, instance, module);
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const isJson = name == kToJsonName;
+    const extra = this.jsonExtra(isJson);
+    if (!this.dateCountCheck(expr, member, method, extra, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const result = method.shape.result;
+    const key = expr.args[0]?.expr;
+    if (isJson && key != undefined) {
+      this.textArgument(key, module);
+
+      return result;
+    }
+
+    const first = this.setterFirst(name);
+    if (first != undefined) {
+      this.dateFieldsCheck(expr.args, first, name, module);
+
+      return result;
+    }
+
+    for (const arg of expr.args) {
+      this.timeArgument(arg.expr, module);
+    }
+
+    return result;
+  }
+
+  private jsonExtra(isJson: boolean): int {
+    if (isJson) {
+      return 1;
+    }
+
+    return 0;
+  }
+
+  private setterFirst(name: string): int | undefined {
+    if (!name.startsWith(kSetterPrefix)) {
+      return undefined;
+    }
+
+    const field = this.setterField(name);
+    const setter = kDateSetters.find((one) => one.name == field);
+
+    return setter?.first;
+  }
+
+  private setterField(name: string): string {
+    if (name.startsWith(kUtcSetterPrefix)) {
+      return name.slice(kUtcSetterPrefix.length);
+    }
+
+    return name.slice(kSetterPrefix.length);
+  }
+
+  private dateMissingReport(
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): void {
+    const word = member.name;
+    const loc = member.loc;
+
+    switch (word) {
+      case kGetYearName:
+        return this.report(module, loc, Code.DateGetYear, kNoDetails);
+      case kSetYearName:
+        return this.report(module, loc, Code.DateSetYear, kNoDetails);
+      case kGmtStringName:
+        return this.report(module, loc, Code.DateGmtString, kNoDetails);
+      default:
+        return this.report(module, loc, Code.PropertyMissing, {
+          word,
+          first: this.text.of(instance),
+        });
+    }
+  }
+
+  private dateMemberRead(
+    expr: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type {
+    const word = expr.name;
+    const method = this.libraryMemberType(instance, word, true);
+    const error = this.store.plain(TypeKind.Error);
+    if (method != undefined) {
+      this.report(module, expr.loc, Code.DateMethodRead, { word });
+
+      return error;
+    }
+    if (word == kGetYearName) {
+      this.report(module, expr.loc, Code.DateGetYearRead, kNoDetails);
+
+      return error;
+    }
+
+    this.report(module, expr.loc, Code.PropertyMissing, {
+      word,
+      first: this.text.of(instance),
+    });
+
+    return error;
+  }
+
+  private timeArgument(arg: Expr, module: int): Type {
+    const int = this.store.integer(64, false);
+    const type = this.typed(arg, int, module);
+
+    this.timeCoerce(arg, type, module);
+
+    return type;
+  }
+
+  private timeCoerce(arg: Expr, type: Type, module: int): void {
+    const base = this.types.apparent(type);
+    if (base.kind == TypeKind.Error || base.kind == TypeKind.Int) {
+      return;
+    }
+
+    const int = this.store.integer(64, false);
+
+    this.coerce(arg, type, int, module, kNoPlace);
+  }
+
+  private dateArithmetic(
+    expr: BinaryExpr,
+    pair: OperandPair,
+    module: int,
+  ): Type {
+    const isBoth = this.isDate(pair.left) && this.isDate(pair.right);
+    if (isBoth && expr.op == BinaryOp.Sub) {
+      return this.store.integer(64, false);
+    }
+
+    this.dateOperatorReport(expr, pair, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private dateComparison(
+    expr: BinaryExpr,
+    pair: OperandPair,
+    module: int,
+  ): void {
+    const isBoth = this.isDate(pair.left) && this.isDate(pair.right);
+    if (!isBoth) {
+      this.dateOperatorReport(expr, pair, module);
+    }
+  }
+
+  private dateOperatorReport(
+    expr: BinaryExpr,
+    pair: OperandPair,
+    module: int,
+  ): void {
+    switch (expr.op) {
+      case BinaryOp.Add:
+        return this.report(module, expr.loc, Code.DatePlus, kNoDetails);
+      case BinaryOp.Sub:
+        return this.report(module, expr.loc, Code.DateMinus, kNoDetails);
+      case BinaryOp.Lt:
+      case BinaryOp.Le:
+      case BinaryOp.Gt:
+      case BinaryOp.Ge:
+        return this.report(module, expr.loc, Code.DateCompare, {
+          word: this.operatorText(expr.op),
+        });
+      default:
+        return this.reportOperands(expr, pair, module);
+    }
+  }
+}

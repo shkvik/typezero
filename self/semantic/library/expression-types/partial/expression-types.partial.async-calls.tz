@@ -1,0 +1,64 @@
+import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  ExprKind,
+  NewExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { kPromiseClass } from "../../../code/expression-types/const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private executorCheck(expr: NewExpr, name: string, module: int): void {
+    const executor = expr.args[0]?.expr;
+    if (name != kPromiseClass || executor == undefined) {
+      return;
+    }
+    if (executor.kind != ExprKind.Function) {
+      return;
+    }
+
+    const second = executor.fn.params[1];
+    if (second != undefined) {
+      this.report(module, second.loc, Code.PromiseRejectParam, kNoDetails);
+    }
+  }
+
+  private timerArgumentsCheck(expr: CallExpr, module: int): void {
+    const callee = expr.callee;
+    const isTimer =
+      callee.kind == ExprKind.Name &&
+      (callee.name == "setTimeout" || callee.name == "setInterval") &&
+      this.isGlobalUse(callee, module);
+    const extra = expr.args[2]?.expr;
+    if (!isTimer || extra == undefined) {
+      return;
+    }
+
+    this.report(module, extra.loc, Code.TimerArguments, kNoDetails);
+  }
+
+  private uncaughtCheck(expr: CallExpr, module: int): void {
+    const callee = expr.callee;
+    const event = expr.args[0]?.expr;
+    if (callee.kind != ExprKind.Member || event == undefined) {
+      return;
+    }
+
+    const holder = callee.object;
+    const isProcess =
+      holder.kind == ExprKind.Name &&
+      holder.name == "process" &&
+      this.isGlobalUse(holder, module);
+    const isListen = callee.name == "on" || callee.name == "once";
+    const isUncaught =
+      event.kind == ExprKind.StringLit &&
+      (event.value == "uncaughtException" ||
+        event.value == "unhandledRejection");
+    if (!isProcess || !isListen || !isUncaught) {
+      return;
+    }
+
+    this.report(module, event.loc, Code.NothingToCatch, kNoDetails);
+  }
+}

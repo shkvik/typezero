@@ -1,0 +1,291 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import { MethodKind } from "../../../../../program/ast/types/ast.types.classes.tz";
+import { Expr } from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+  FunctionPlace,
+} from "../../../../../program/ast/types/ast.types.functions.tz";
+import { TypeRef } from "../../../../../program/ast/types/ast.types.types.tz";
+import {
+  DictKind,
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  TypeContext,
+  TypePlace,
+} from "../../../../types/type-resolver/types/type-resolver.types.tz";
+import {
+  kIterableName,
+  kIteratorKey,
+  kNextName,
+} from "../../const/expression-types.const.tz";
+import {
+  ArgumentSlot,
+  CallTarget,
+} from "../../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private iterablePlaceCheck(fn: FunctionDecl, module: int): void {
+    for (const param of fn.params) {
+      const ref = this.iterableRef(param.type);
+      if (ref != undefined) {
+        this.iterableParamCheck(fn, ref, module);
+      }
+    }
+
+    const result = this.iterableRef(fn.returnType);
+    if (result != undefined) {
+      this.report(module, result.loc, Code.IterableNotParameter, kNoDetails);
+    }
+  }
+
+  private iterableParamCheck(
+    fn: FunctionDecl,
+    ref: TypeRef,
+    module: int,
+  ): void {
+    const word = this.iterableElementText(ref, module);
+    if (fn.place == FunctionPlace.Expression || fn.isArrow) {
+      this.report(module, ref.loc, Code.IterableNotParameter, kNoDetails);
+
+      return;
+    }
+    if (fn.role?.method == MethodKind.Constructor) {
+      this.report(module, ref.loc, Code.IterableConstructor, { word });
+
+      return;
+    }
+    if (fn.role == undefined && !this.isTopFunction(fn, module)) {
+      this.report(module, ref.loc, Code.IterableNested, { word });
+    }
+  }
+
+  private isTopFunction(fn: FunctionDecl, module: int): boolean {
+    const items = this.program.modules[module]?.file.items ?? [];
+
+    return items.includes(fn);
+  }
+
+  private iterableRef(root: TypeRef | undefined): TypeRef | undefined {
+    if (root == undefined) {
+      return undefined;
+    }
+
+    return this.resolver.namedRefs(root, kIterableName)[0];
+  }
+
+  private iterableElementText(ref: TypeRef, module: int): string {
+    const arg = ref.args[0];
+    if (arg == undefined) {
+      return "T";
+    }
+
+    const context: TypeContext = {
+      module,
+      bindings: new Map<int, Type>(),
+      place: TypePlace.Plain,
+    };
+    const type = this.resolver.resolve(arg, context);
+
+    return this.text.of(type);
+  }
+
+  private iterableAnnotationCheck(ref: TypeRef | undefined, module: int): void {
+    const found = this.iterableRef(ref);
+    if (found != undefined) {
+      this.report(module, found.loc, Code.IterableNotParameter, kNoDetails);
+    }
+  }
+
+  private iterableArgumentCheck(
+    slot: ArgumentSlot,
+    to: Type,
+    target: CallTarget,
+    module: int,
+  ): boolean {
+    const wanted = this.iterableItem(to);
+    if (wanted == undefined) {
+      return false;
+    }
+
+    const given = this.typed(slot.expr, undefined, module);
+    if (given.kind == TypeKind.Error) {
+      return true;
+    }
+
+    const item = this.iteratedItem(given);
+    const second = target.method ?? "";
+    const word = this.text.of(given);
+    const other = this.text.of(wanted);
+    if (item == undefined) {
+      this.report(module, target.loc, Code.IterableNotIterable, {
+        word,
+        other,
+        second,
+      });
+
+      return true;
+    }
+    if (item.kind == TypeKind.Error || this.relation.converts(item, wanted)) {
+      return true;
+    }
+
+    this.report(module, target.loc, Code.IterableElements, {
+      word,
+      first: this.text.of(item),
+      other,
+      second,
+    });
+
+    return true;
+  }
+
+  private iterableItem(to: Type): Type | undefined {
+    const label = this.store.labelOf(to);
+    if (label == undefined || !label.startsWith(kIterableName + "<")) {
+      return undefined;
+    }
+    if (to.kind != TypeKind.Object) {
+      return undefined;
+    }
+
+    const field = to.fields.find((one) => one.name == kIteratorKey);
+    const method = field?.type;
+    if (method == undefined || method.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    const iterator = method.shape.result;
+    if (iterator.kind != TypeKind.Iterator) {
+      return undefined;
+    }
+
+    return iterator.shape.yielded;
+  }
+
+  private iteratedItem(given: Type): Type | undefined {
+    const base = this.types.apparent(given);
+
+    switch (base.kind) {
+      case TypeKind.Array:
+        return base.item;
+      case TypeKind.String:
+      case TypeKind.Template:
+        return this.store.plain(TypeKind.String);
+      case TypeKind.Iterator:
+        return base.shape.yielded;
+      case TypeKind.Dict:
+        return this.iteratedDictItem(base.dict, base.key, base.value);
+      case TypeKind.Instance:
+        return this.instanceItem(base);
+      case TypeKind.Error:
+        return base;
+      default:
+        return undefined;
+    }
+  }
+
+  private iteratedDictItem(
+    dict: DictKind,
+    key: Type,
+    value: Type,
+  ): Type | undefined {
+    if (dict == DictKind.Set) {
+      return value;
+    }
+    if (dict == DictKind.Map) {
+      return this.store.tupleOf({
+        items: [key, value],
+        readonly: false,
+        required: 2,
+        rest: -1,
+      });
+    }
+
+    return undefined;
+  }
+
+  private instanceItem(instance: InstanceType): Type | undefined {
+    if (this.isLibraryModule(instance.module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const entry = this.classMember(instance, kIteratorKey).entry;
+    const method = entry?.methods[0];
+    if (entry == undefined || method == undefined) {
+      return undefined;
+    }
+
+    const type = this.methodTypeOf(entry, method);
+    if (type.kind != TypeKind.Function) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const result = type.shape.result;
+    if (result.kind != TypeKind.Iterator) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return result.shape.yielded;
+  }
+
+  private hasNextMethod(result: Type): boolean {
+    if (result.kind != TypeKind.Object) {
+      return false;
+    }
+
+    const next = result.fields.find((field) => field.name == kNextName);
+
+    return next != undefined && next.type.kind == TypeKind.Function;
+  }
+
+  private instanceLoopCheck(
+    loop: Expr,
+    instance: InstanceType,
+    module: int,
+  ): void {
+    if (this.isLibraryModule(instance.module)) {
+      return;
+    }
+
+    const lookup = this.classMember(instance, kIteratorKey);
+    const entry = lookup.entry;
+    const word = this.text.of(instance);
+    if (!lookup.isKnown) {
+      return;
+    }
+    if (entry == undefined) {
+      this.report(module, loop.loc, Code.ForOfCannot, { word });
+
+      return;
+    }
+
+    const method = entry.methods[0];
+    if (method == undefined) {
+      return;
+    }
+
+    const type = this.methodTypeOf(entry, method);
+    if (type.kind != TypeKind.Function) {
+      return;
+    }
+
+    const result = type.shape.result;
+    const isOpen =
+      result.kind == TypeKind.Iterator ||
+      result.kind == TypeKind.Error ||
+      this.hasNextMethod(result);
+    if (isOpen) {
+      return;
+    }
+
+    this.report(module, loop.loc, Code.IteratorMethodResult, {
+      word,
+      first: this.text.of(result),
+    });
+  }
+}

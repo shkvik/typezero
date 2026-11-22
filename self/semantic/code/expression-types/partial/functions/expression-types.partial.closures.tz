@@ -1,0 +1,340 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { FunctionExpr } from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+  Param,
+  ParamKind,
+} from "../../../../../program/ast/types/ast.types.functions.tz";
+import {
+  FunctionParameter,
+  FunctionType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { kThisParameter } from "../../../../types/type-resolver/const/type-resolver.const.tables.tz";
+import {
+  TypeContext,
+  TypePlace,
+} from "../../../../types/type-resolver/types/type-resolver.types.tz";
+import { kDot } from "../../const/expression-types.const.tz";
+import { ParameterShape } from "../../types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private closureTyped(
+    expr: FunctionExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const fn = expr.fn;
+    const isPlain = fn.typeParams.length == 0 && !fn.isGenerator;
+    if (!isPlain || fn.body == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const goal = this.contextualFunction(wanted);
+    const context: TypeContext = {
+      module,
+      bindings: new Map<int, Type>(),
+      place: TypePlace.Plain,
+    };
+    const before = this.facts;
+    const shape = this.closureShape(fn, goal, context, module);
+    if (this.isParameterClash(shape, goal)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const initFrame = this.initClosureFrame();
+
+    this.enterInitClosure(initFrame);
+    this.facts = this.constFacts(before);
+
+    const owner = shape.self ?? this.literalOwners.get(fn);
+    const place = this.functionPlace(fn, owner);
+
+    if (place != undefined) {
+      this.thisPlaces.push(place);
+    }
+    if (owner != undefined) {
+      this.selves.push(owner);
+    }
+
+    this.openFunctions.push(fn);
+
+    const result = this.closureResult(fn, goal, context, module);
+
+    this.openFunctions.pop();
+    this.leaveInitClosure(initFrame);
+
+    if (owner != undefined) {
+      this.selves.pop();
+    }
+    if (place != undefined) {
+      this.thisPlaces.pop();
+    }
+
+    this.facts = before;
+
+    const params = this.adaptedParams(shape.params, goal);
+    const rest = shape.rest;
+    const self = shape.self ?? goal?.shape.self;
+    const isBroken = params.some((param) => param.type.kind == TypeKind.Error);
+    if (isBroken) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const made = this.store.functionOf({ params, rest, self, result });
+
+    this.closureTypes.set(expr, made);
+
+    return made;
+  }
+
+  private adaptedParams(
+    params: FunctionParameter[],
+    goal: FunctionType | undefined,
+  ): FunctionParameter[] {
+    const given = goal?.shape.params ?? [];
+    if (goal == undefined || goal.shape.rest || params.length >= given.length) {
+      return params;
+    }
+
+    const missing = given.slice(params.length);
+
+    return params.concat(missing);
+  }
+
+  private contextualFunction(
+    wanted: Type | undefined,
+  ): FunctionType | undefined {
+    const goal = this.types.wantedPart(wanted);
+    if (goal == undefined || goal.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    return this.spreadListShape(goal);
+  }
+
+  private spreadListShape(goal: FunctionType): FunctionType {
+    const shape = goal.shape;
+    const last = shape.params[shape.params.length - 1];
+    const list = last?.type;
+    if (!shape.rest || list == undefined || list.kind != TypeKind.Tuple) {
+      return goal;
+    }
+    if (list.rest >= 0) {
+      return goal;
+    }
+
+    const fixed = shape.params.length - 1;
+    const params: FunctionParameter[] = shape.params.slice(0, fixed);
+
+    for (let index = 0; index < list.items.length; index++) {
+      const type = list.items[index];
+      if (type != undefined) {
+        params.push({ type, optional: index >= list.required });
+      }
+    }
+
+    const made = this.store.functionOf({
+      params,
+      rest: false,
+      self: shape.self,
+      result: shape.result,
+    });
+    if (made.kind != TypeKind.Function) {
+      return goal;
+    }
+
+    return made;
+  }
+
+  private closureShape(
+    fn: FunctionDecl,
+    goal: FunctionType | undefined,
+    context: TypeContext,
+    module: int,
+  ): ParameterShape {
+    const params: FunctionParameter[] = [];
+    let self: Type | undefined = undefined;
+    let rest = false;
+    let index = 0;
+
+    for (const param of fn.params) {
+      const kind = param.form.kind;
+      const given = goal?.shape.params[index];
+      const type = this.closureParameter(param, given, context, module);
+      const inside = this.insideType(type, kind);
+
+      this.paramTypes.set(`${module} ${param.loc}`, inside);
+
+      if (param.name == kThisParameter) {
+        this.thisParameterCheck(fn, param, module);
+        self = type;
+
+        continue;
+      }
+
+      const optional =
+        kind == ParamKind.Optional || kind == ParamKind.Defaulted;
+
+      rest = rest || kind == ParamKind.Rest;
+      params.push({ type, optional });
+      index += 1;
+    }
+
+    return { params, rest, self };
+  }
+
+  private closureParameter(
+    param: Param,
+    given: FunctionParameter | undefined,
+    context: TypeContext,
+    module: int,
+  ): Type {
+    const isWritten =
+      param.type != undefined || param.form.kind == ParamKind.Defaulted;
+    if (isWritten) {
+      const type = this.parameterOf(param, context, module);
+
+      return this.checkedParameter(param, type, given, module);
+    }
+    if (given != undefined) {
+      return given.type;
+    }
+
+    this.report(module, param.loc, Code.ClosureParameterNeedsType, {
+      word: param.name,
+    });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private checkedParameter(
+    param: Param,
+    type: Type,
+    given: FunctionParameter | undefined,
+    module: int,
+  ): Type {
+    const isClash =
+      given != undefined &&
+      type.kind != TypeKind.Error &&
+      given.type.kind != TypeKind.Error &&
+      !this.relation.converts(given.type, type);
+    if (!isClash || given == undefined) {
+      return type;
+    }
+
+    const word = param.name;
+    const first = this.text.of(type);
+    const second = this.text.of(given.type);
+
+    this.report(module, param.loc, Code.ClosureParameterDiffers, {
+      word,
+      first,
+      second,
+    });
+
+    return type;
+  }
+
+  private isParameterClash(
+    shape: ParameterShape,
+    goal: FunctionType | undefined,
+  ): boolean {
+    if (goal == undefined) {
+      return false;
+    }
+
+    const given = goal.shape.params;
+
+    return shape.params.some((param, index) => {
+      const other = given[index];
+
+      return (
+        other != undefined &&
+        param.type.kind != TypeKind.Error &&
+        other.type.kind != TypeKind.Error &&
+        !this.relation.converts(other.type, param.type)
+      );
+    });
+  }
+
+  private closureResult(
+    fn: FunctionDecl,
+    goal: FunctionType | undefined,
+    context: TypeContext,
+    module: int,
+  ): Type {
+    const written = fn.returnType;
+    if (written != undefined) {
+      const result = this.resolver.returnType(written, context);
+
+      this.walkWritten(fn, result, module);
+
+      return result;
+    }
+
+    if (goal == undefined) {
+      return this.inferredClosure(fn, false, module);
+    }
+
+    const expected = goal.shape.result;
+    if (expected.kind == TypeKind.Void) {
+      this.inferredClosure(fn, true, module);
+
+      return expected;
+    }
+    if (expected.kind == TypeKind.Error) {
+      return this.inferredClosure(fn, false, module);
+    }
+
+    this.walkWritten(fn, expected, module);
+
+    return expected;
+  }
+
+  private inferredClosure(
+    fn: FunctionDecl,
+    isQuiet: boolean,
+    module: int,
+  ): Type {
+    const frame = this.frameOf(fn, undefined);
+    const body = fn.body?.body ?? [];
+
+    this.walkStatements(body, frame, module);
+
+    if (isQuiet) {
+      return this.quietResult(fn, frame, module);
+    }
+
+    return this.frameResult(fn, frame, module);
+  }
+
+  private constFacts(facts: Map<string, Type>): Map<string, Type> {
+    const kept = new Map<string, Type>();
+
+    for (const [key, type] of facts) {
+      if (this.isConstPath(key)) {
+        kept.set(key, type);
+      }
+    }
+
+    return kept;
+  }
+
+  private isConstPath(key: string): boolean {
+    const dot = key.indexOf(kDot);
+    const root = this.rootOf(key, dot);
+
+    return this.constKeys.has(root);
+  }
+
+  private rootOf(key: string, dot: int): string {
+    if (dot < 0) {
+      return key;
+    }
+
+    return key.slice(0, dot);
+  }
+}

@@ -1,0 +1,680 @@
+import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  DeclaredClass,
+  DeclaredMember,
+  DeclaredMemberKind,
+} from "../../../../program/ast/types/ast.types.declarations.tz";
+import {
+  CallExpr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  DictKind,
+  InstanceType,
+  LiteralKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { ParameterSite } from "../../../types/type-resolver/types/type-resolver.types.tz";
+import {
+  kCodeMethods,
+  kMathConstants,
+  kMathName,
+  kNumberLaterMethods,
+  kTakenMethods,
+} from "../../../code/expression-types/const/expression-types.const.tz";
+import {
+  CallKind,
+  GenericTarget,
+} from "../../../code/expression-types/types/expression-types.types.tz";
+import {
+  kArrayShape,
+  kAsyncGeneratorShape,
+  kBooleanShape,
+  kDecimalShape,
+  kDoubleShape,
+  kGeneratorShape,
+  kMapClass,
+  kPromiseClass,
+  kSpecialMethods,
+  kSplitName,
+  kResultShape,
+  kSetClass,
+  kStringShape,
+} from "../../../code/expression-types/const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private libraryReceiver(type: Type): Type | undefined {
+    switch (type.kind) {
+      case TypeKind.String:
+      case TypeKind.Template:
+        return this.resolver.libraryShape(kStringShape, []);
+      case TypeKind.Literal:
+        return this.literalReceiver(type.literal);
+      case TypeKind.Int:
+        return this.integerReceiver(type);
+      case TypeKind.Double:
+        return this.resolver.libraryShape(kDoubleShape, []);
+      case TypeKind.Boolean:
+        return this.resolver.libraryShape(kBooleanShape, []);
+      case TypeKind.Decimal:
+        return this.resolver.libraryShape(kDecimalShape, []);
+      case TypeKind.Array:
+        return this.resolver.libraryShape(kArrayShape, [type.item]);
+      case TypeKind.Result: {
+        const args = [type.value, type.error];
+
+        return this.resolver.libraryShape(kResultShape, args);
+      }
+      case TypeKind.Iterator:
+        return this.iteratorReceiver(type);
+      case TypeKind.Dict:
+        return this.dictReceiver(type);
+      case TypeKind.Promise:
+        return this.resolver.libraryInstance(kPromiseClass, [type.value]);
+      case TypeKind.Instance:
+        return this.instanceReceiver(type);
+      default:
+        return undefined;
+    }
+  }
+
+  private literalReceiver(literal: LiteralKind): Type | undefined {
+    switch (literal) {
+      case LiteralKind.String:
+        return this.resolver.libraryShape(kStringShape, []);
+      case LiteralKind.Int: {
+        const int = this.store.integer(64, false);
+
+        return this.libraryReceiver(int);
+      }
+      case LiteralKind.Double:
+        return this.resolver.libraryShape(kDoubleShape, []);
+      default:
+        return this.resolver.libraryShape(kBooleanShape, []);
+    }
+  }
+
+  private integerReceiver(type: Type): Type | undefined {
+    if (type.kind != TypeKind.Int || type.wraps) {
+      return undefined;
+    }
+
+    const name = this.text.of(type);
+
+    return this.resolver.libraryShape(name, []);
+  }
+
+  private iteratorReceiver(type: Type): Type | undefined {
+    if (type.kind != TypeKind.Iterator) {
+      return undefined;
+    }
+
+    const shape = type.shape;
+    const args = [shape.yielded, shape.returned, shape.sent];
+
+    if (shape.async) {
+      return this.resolver.libraryShape(kAsyncGeneratorShape, args);
+    }
+
+    return this.resolver.libraryShape(kGeneratorShape, args);
+  }
+
+  private dictReceiver(type: Type): Type | undefined {
+    if (type.kind != TypeKind.Dict) {
+      return undefined;
+    }
+
+    switch (type.dict) {
+      case DictKind.Map: {
+        const args = [type.key, type.value];
+
+        return this.resolver.libraryInstance(kMapClass, args);
+      }
+      case DictKind.Set:
+        return this.resolver.libraryInstance(kSetClass, [type.key]);
+      default:
+        return undefined;
+    }
+  }
+
+  private instanceReceiver(type: InstanceType): Type | undefined {
+    if (!this.isLibraryModule(type.module)) {
+      return undefined;
+    }
+
+    return type;
+  }
+
+  private libraryMemberTyped(
+    expr: MemberExpr,
+    object: Type,
+    module: int,
+  ): Type {
+    const receiver = this.libraryReceiver(object);
+    if (receiver == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const member = this.libraryMemberType(receiver, expr.name, false);
+    if (member == undefined || member.kind == TypeKind.Function) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return member;
+  }
+
+  private libraryCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    wanted: Type | undefined,
+    module: int,
+  ): Type | undefined {
+    const receiver = this.libraryReceiver(object);
+    if (receiver == undefined) {
+      return undefined;
+    }
+
+    const isProved =
+      kSpecialMethods.includes(member.name) || this.isRegexSplit(expr, member);
+    const generic = this.receiverMember(receiver, member.name, true);
+    const isGeneric =
+      generic != undefined &&
+      generic.kind == TypeKind.Function &&
+      this.mentionsParameter(generic);
+    const isSpecial = isProved || object.kind == TypeKind.Result;
+    if (isGeneric && isSpecial) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (isGeneric && generic != undefined) {
+      return this.libraryMethodCall(expr, member, generic, wanted, module);
+    }
+
+    const method = this.libraryMemberType(receiver, member.name, true);
+    if (generic == undefined && method == undefined) {
+      this.valueMissingCheck(expr, member, object, receiver, module);
+    }
+
+    const proved = this.provedResult(expr, member, object, module);
+    if (proved != undefined) {
+      return proved;
+    }
+    if (this.doubleConversionCheck(member, object, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (method == undefined || isProved) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const kind = this.receiverKind(object);
+
+    const marked = this.positionShape(object, member.name) ?? method;
+
+    this.positionMask = this.maskOf(object, marked);
+    this.positionMethod = member.name;
+
+    return this.fieldValueCall(expr, member, method, kind, module);
+  }
+
+  private libraryMethodCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    type: Type,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const params = this.genericParameters(type);
+    if (type.kind != TypeKind.Function || params == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (params.length == 0) {
+      const kind = this.namespaceKind(member, module);
+
+      this.positionMethod = member.name;
+
+      return this.fieldValueCall(expr, member, type, kind, module);
+    }
+    if (expr.optional || type.shape.self != undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const generic: GenericTarget = {
+      name: member.name,
+      params,
+      decls: [],
+      home: module,
+      shape: type.shape,
+      loc: member.loc,
+      typeArgs: member.typeArgs,
+      isLenient: true,
+    };
+
+    return this.genericResult(expr, generic, wanted, module);
+  }
+
+  private provedResult(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): Type | undefined {
+    const name = member.name;
+    const base = this.types.apparent(object);
+    if (base.kind == TypeKind.Array && kTakenMethods.includes(name)) {
+      return this.takenItem(member, base.item, module);
+    }
+
+    const isText =
+      base.kind == TypeKind.String || base.kind == TypeKind.Template;
+    const index = expr.args[0]?.expr;
+    if (!isText || index == undefined || !kCodeMethods.includes(name)) {
+      return undefined;
+    }
+
+    const int = this.store.integer(64, false);
+
+    this.typed(index, int, module);
+
+    if (this.isProvenIndex(member.object, index, module)) {
+      return int;
+    }
+
+    return this.types.optional(int);
+  }
+
+  private takenItem(member: MemberExpr, item: Type, module: int): Type {
+    const isFilled = this.isProvenFilled(member.object, module);
+
+    this.takenFrom(member.object, module);
+
+    if (isFilled) {
+      return item;
+    }
+
+    return this.types.optional(item);
+  }
+
+  private valueMissingCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    receiver: Type,
+    module: int,
+  ): void {
+    const name = member.name;
+    if (receiver.kind != TypeKind.Object || !this.isPlainReceiver(object)) {
+      return;
+    }
+    if (kNumberLaterMethods.includes(name)) {
+      return;
+    }
+    if (receiver.fields.some((field) => field.name == name)) {
+      return;
+    }
+
+    this.looseArguments(expr.args, module);
+    this.report(module, member.loc, Code.PropertyMissing, {
+      word: name,
+      first: this.text.of(object),
+    });
+  }
+
+  private isPlainReceiver(object: Type): boolean {
+    const base = this.types.apparent(object);
+
+    switch (base.kind) {
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Array:
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Boolean:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private namespaceMissingCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): void {
+    const object = member.object;
+    if (object.kind != ExprKind.Name || !this.isGlobalUse(object, module)) {
+      return;
+    }
+
+    const code = this.namespaceCode(object.name);
+    if (code == undefined) {
+      return;
+    }
+
+    this.looseArguments(expr.args, module);
+    this.report(module, member.loc, code, {
+      word: member.name,
+      first: object.name,
+    });
+  }
+
+  private namespaceCode(name: string): Code | undefined {
+    switch (name) {
+      case "Math":
+      case "Number":
+        return Code.NamespaceMemberMissing;
+      case "JSON":
+        return Code.JsonMemberMissing;
+      case "Object":
+        return Code.ObjectStaticRefused;
+      case "Promise":
+        return Code.PromiseStaticRefused;
+      case "console":
+        return Code.ConsoleMemberRefused;
+      default:
+        return undefined;
+    }
+  }
+
+  private mathMemberCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): boolean {
+    const object = member.object;
+    const isMath =
+      object.kind == ExprKind.Name &&
+      object.name == kMathName &&
+      this.isGlobalUse(object, module);
+    if (!isMath) {
+      return false;
+    }
+
+    const word = member.name;
+    if (kMathConstants.includes(word)) {
+      this.looseArguments(expr.args, module);
+      this.report(module, member.loc, Code.MathConstantCalled, { word });
+
+      return true;
+    }
+
+    const isRanged = word == "max" || word == "min";
+    if (!isRanged || expr.args.length > 0) {
+      return false;
+    }
+
+    const first = this.mathEndSign(word);
+
+    this.report(module, member.loc, Code.MathNoValues, { word, first });
+
+    return true;
+  }
+
+  private mathEndSign(word: string): string {
+    if (word == "max") {
+      return "-";
+    }
+
+    return "";
+  }
+
+  private positionShape(object: Type, name: string): Type | undefined {
+    if (object.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    const open = this.store.plain(TypeKind.Unknown);
+    const receiver = this.resolver.libraryShape(kArrayShape, [open]);
+    if (receiver == undefined) {
+      return undefined;
+    }
+
+    return this.receiverMember(receiver, name, true);
+  }
+
+  private maskOf(object: Type, method: Type): boolean[] {
+    if (object.kind == TypeKind.Dict) {
+      return [];
+    }
+
+    return this.positionsOf(method);
+  }
+
+  private positionsOf(method: Type): boolean[] {
+    if (method.kind != TypeKind.Function) {
+      return [];
+    }
+
+    return method.shape.params.map((param) => {
+      const base = this.types.definedType(param.type);
+
+      return base.kind == TypeKind.Int && !base.wraps;
+    });
+  }
+
+  private receiverKind(object: Type): CallKind {
+    const base = this.types.apparent(object);
+
+    switch (base.kind) {
+      case TypeKind.String:
+      case TypeKind.Template:
+      case TypeKind.Array:
+      case TypeKind.Int:
+      case TypeKind.Double:
+      case TypeKind.Dict:
+        return CallKind.Positional;
+      default:
+        return CallKind.Library;
+    }
+  }
+
+  private namespaceKind(member: MemberExpr, module: int): CallKind {
+    const object = member.object;
+    const isMath =
+      object.kind == ExprKind.Name &&
+      object.name == kMathName &&
+      this.isGlobalUse(object, module);
+    if (isMath) {
+      return CallKind.Math;
+    }
+
+    return CallKind.Library;
+  }
+
+  private isRegexSplit(expr: CallExpr, member: MemberExpr): boolean {
+    const first = expr.args[0]?.expr;
+
+    return (
+      member.name == kSplitName &&
+      first != undefined &&
+      first.kind == ExprKind.RegexLit
+    );
+  }
+
+  private libraryMemberType(
+    receiver: Type,
+    name: string,
+    isCalled: boolean,
+  ): Type | undefined {
+    const found = this.receiverMember(receiver, name, isCalled);
+    if (found == undefined || this.mentionsParameter(found)) {
+      return undefined;
+    }
+
+    return found;
+  }
+
+  private receiverMember(
+    receiver: Type,
+    name: string,
+    isCalled: boolean,
+  ): Type | undefined {
+    if (receiver.kind == TypeKind.Object) {
+      const fields = receiver.fields.filter((field) => field.name == name);
+      const field = fields[0];
+      if (field == undefined || fields.length > 1) {
+        return undefined;
+      }
+
+      return this.fieldWanted(field);
+    }
+    if (receiver.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    return this.declaredMember(receiver, name, isCalled);
+  }
+
+  private declaredMember(
+    instance: InstanceType,
+    name: string,
+    isCalled: boolean,
+  ): Type | undefined {
+    const opened = this.program.modules[instance.module];
+    const declared = opened?.declared.find((one) => one.loc == instance.loc);
+    if (declared == undefined) {
+      return undefined;
+    }
+
+    const members = declared.members.filter(
+      (one) => one.name == name && !one.isStatic,
+    );
+    if (members.length == 0) {
+      return this.parentMember(instance, name, isCalled);
+    }
+
+    return this.declaredForm(instance, declared, members, isCalled);
+  }
+
+  private declaredStatic(
+    instance: InstanceType,
+    name: string,
+  ): Type | undefined {
+    const opened = this.program.modules[instance.module];
+    const declared = opened?.declared.find((one) => one.loc == instance.loc);
+    if (declared == undefined) {
+      return undefined;
+    }
+
+    const members = declared.members.filter(
+      (one) => one.name == name && one.isStatic,
+    );
+
+    return this.declaredForm(instance, declared, members, true);
+  }
+
+  private declaredForm(
+    instance: InstanceType,
+    declared: DeclaredClass,
+    members: DeclaredMember[],
+    isCalled: boolean,
+  ): Type | undefined {
+    const member = members[0];
+    if (member == undefined) {
+      return undefined;
+    }
+
+    const form = member.form;
+    const context = this.resolver.classContext(
+      instance,
+      declared.typeParams,
+      instance.module,
+    );
+
+    if (form.kind == DeclaredMemberKind.Field) {
+      const written = member.type;
+      if (written == undefined || isCalled) {
+        return undefined;
+      }
+
+      const type = this.resolver.resolve(written, context);
+
+      if (form.optional) {
+        return this.types.optional(type);
+      }
+
+      return type;
+    }
+
+    const isPlain = form.kind == DeclaredMemberKind.Method;
+    if (!isPlain || members.length > 1) {
+      return undefined;
+    }
+    if (form.typeParams.length > 0 && !isCalled) {
+      return undefined;
+    }
+
+    const sites: ParameterSite[] = [];
+
+    for (const param of form.params) {
+      const type = param.type;
+      if (type == undefined) {
+        return undefined;
+      }
+
+      sites.push({
+        name: param.name,
+        loc: param.loc,
+        kind: param.form.kind,
+        type,
+        isDeclared: false,
+      });
+    }
+
+    return this.resolver.signature(sites, member.type, context);
+  }
+
+  private parentMember(
+    instance: InstanceType,
+    name: string,
+    isCalled: boolean,
+  ): Type | undefined {
+    const parent = this.baseClassOf(instance);
+    if (parent == undefined || parent.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    return this.declaredMember(parent, name, isCalled);
+  }
+
+  private mentionsParameter(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.TypeParameter:
+      case TypeKind.Operation:
+      case TypeKind.Error:
+        return true;
+      case TypeKind.Array:
+        return this.mentionsParameter(type.item);
+      case TypeKind.Tuple:
+        return type.items.some((item) => this.mentionsParameter(item));
+      case TypeKind.Union:
+        return type.parts.some((part) => this.mentionsParameter(part));
+      case TypeKind.Function: {
+        const shape = type.shape;
+        const params = shape.params.map((param) => param.type);
+
+        return (
+          this.mentionsParameter(shape.result) ||
+          params.some((param) => this.mentionsParameter(param))
+        );
+      }
+      case TypeKind.Result:
+        return (
+          this.mentionsParameter(type.value) ||
+          this.mentionsParameter(type.error)
+        );
+      case TypeKind.Promise:
+        return this.mentionsParameter(type.value);
+      case TypeKind.Dict:
+        return (
+          this.mentionsParameter(type.key) || this.mentionsParameter(type.value)
+        );
+      case TypeKind.Instance:
+        return type.args.some((arg) => this.mentionsParameter(arg));
+      default:
+        return false;
+    }
+  }
+}
