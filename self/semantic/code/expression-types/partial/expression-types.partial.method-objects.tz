@@ -107,7 +107,10 @@ partial class ExpressionTypes {
     return fields;
   }
 
-  private goalField(goal: ObjectType | undefined, name: string): Type | undefined {
+  private goalField(
+    goal: ObjectType | undefined,
+    name: string,
+  ): Type | undefined {
     const field = goal?.fields.find((one) => one.name == name);
     if (field == undefined) {
       return undefined;
@@ -215,7 +218,9 @@ partial class ExpressionTypes {
     }
 
     for (const member of goal.fields) {
-      const isGiven = expr.props.some((property) => property.name == member.name);
+      const isGiven = expr.props.some(
+        (property) => property.name == member.name,
+      );
       const isPlain = this.plainMember(goal, member.name) != undefined;
       if (!isGiven && isPlain) {
         this.report(module, expr.loc, Code.LiteralFitMissing, {
@@ -312,7 +317,7 @@ partial class ExpressionTypes {
   }
 
   private hasMethodFields(type: Type): boolean {
-    const base = this.definedType(type);
+    const base = this.types.definedType(type);
     if (base.kind != TypeKind.Object) {
       return false;
     }

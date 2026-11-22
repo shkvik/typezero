@@ -155,11 +155,11 @@ partial class ExpressionTypes {
   }
 
   private numberTarget(to: Type): Type | undefined {
-    const target = this.definedType(to);
+    const target = this.types.definedType(to);
     if (target.kind != TypeKind.Union) {
       return target;
     }
 
-    return target.parts.find((part) => this.isNumberLike(part));
+    return target.parts.find((part) => this.types.isNumberLike(part));
   }
 }

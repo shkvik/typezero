@@ -9,10 +9,7 @@ import {
   NameExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
-import {
-  kLengthName,
-  kStringClass,
-} from "../const/expression-types.const.tz";
+import { kLengthName, kStringClass } from "../const/expression-types.const.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
 import {
   ObjectField,
@@ -140,7 +137,7 @@ partial class ExpressionTypes {
     declared: Type,
     module: int,
   ): void {
-    if (declared.kind == TypeKind.Error || this.isOptional(declared)) {
+    if (declared.kind == TypeKind.Error || this.types.isOptional(declared)) {
       return;
     }
 
@@ -194,7 +191,7 @@ partial class ExpressionTypes {
 
     this.quiet -= 1;
 
-    const base = this.definedType(type);
+    const base = this.types.definedType(type);
     const isObject =
       base.kind == TypeKind.Object ||
       base.kind == TypeKind.Instance ||
@@ -263,7 +260,7 @@ partial class ExpressionTypes {
 
   private objectFieldType(field: ObjectField): Type {
     if (field.optional) {
-      return this.optional(field.type);
+      return this.types.optional(field.type);
     }
 
     return field.type;
@@ -271,8 +268,8 @@ partial class ExpressionTypes {
 
   private objectTypeHint(own: Type, theirs: Type, to: string): string {
     const isNumberPair =
-      this.isNumberKind(this.definedType(own)) &&
-      this.isNumberKind(this.definedType(theirs));
+      this.isNumberKind(this.types.definedType(own)) &&
+      this.isNumberKind(this.types.definedType(theirs));
     if (!isNumberPair) {
       return "";
     }

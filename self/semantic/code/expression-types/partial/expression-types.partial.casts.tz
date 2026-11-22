@@ -58,12 +58,12 @@ partial class ExpressionTypes {
       return Code.CastItself;
     }
 
-    const defined = this.definedType(from);
-    if (this.isOptional(from) && this.relation.converts(defined, to)) {
+    const defined = this.types.definedType(from);
+    if (this.types.isOptional(from) && this.relation.converts(defined, to)) {
       return Code.CastUndefined;
     }
 
-    return this.castConversion(this.apparent(from), to);
+    return this.castConversion(this.types.apparent(from), to);
   }
 
   private castConversion(from: Type, to: Type): Code {

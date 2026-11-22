@@ -136,8 +136,7 @@ partial class ExpressionTypes {
       (term) =>
         term == kZeroTerm ||
         params.some(
-          (param) =>
-            term == kValueTerm + param || term == kLengthTerm + param,
+          (param) => term == kValueTerm + param || term == kLengthTerm + param,
         ),
     );
   }
@@ -223,7 +222,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const result = this.apparent(type.shape.result);
+    const result = this.types.apparent(type.shape.result);
 
     return result.kind == TypeKind.Boolean;
   }

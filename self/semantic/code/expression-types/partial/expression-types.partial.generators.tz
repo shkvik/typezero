@@ -200,7 +200,7 @@ partial class ExpressionTypes {
   }
 
   private delegatedItem(value: Expr, type: Type, module: int): Type {
-    const base = this.apparent(type);
+    const base = this.types.apparent(type);
 
     switch (base.kind) {
       case TypeKind.Array:
@@ -308,7 +308,7 @@ partial class ExpressionTypes {
     code: Code,
     module: int,
   ): void {
-    const base = this.definedType(type);
+    const base = this.types.definedType(type);
     if (base.kind != TypeKind.Iterator) {
       return;
     }
@@ -318,7 +318,7 @@ partial class ExpressionTypes {
       sent.kind == TypeKind.Void ||
       sent.kind == TypeKind.Undefined ||
       sent.kind == TypeKind.Error ||
-      this.isOptional(sent);
+      this.types.isOptional(sent);
     if (isFree) {
       return;
     }
@@ -329,11 +329,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private nextUnionCheck(
-    member: MemberExpr,
-    object: Type,
-    module: int,
-  ): void {
+  private nextUnionCheck(member: MemberExpr, object: Type, module: int): void {
     if (object.kind != TypeKind.Iterator || member.name != kNextName) {
       return;
     }
@@ -375,7 +371,11 @@ partial class ExpressionTypes {
     const callback = expr.args[0]?.expr;
     const isFlat =
       object.kind == TypeKind.Iterator && member.name == kFlatMapName;
-    if (!isFlat || callback == undefined || callback.kind != ExprKind.Function) {
+    if (
+      !isFlat ||
+      callback == undefined ||
+      callback.kind != ExprKind.Function
+    ) {
       return;
     }
     if (object.kind != TypeKind.Iterator) {
@@ -396,7 +396,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const given = this.apparent(typed.shape.result);
+    const given = this.types.apparent(typed.shape.result);
     const isFlattened =
       given.kind == TypeKind.Array ||
       given.kind == TypeKind.Iterator ||
@@ -446,7 +446,7 @@ partial class ExpressionTypes {
 
     this.quiet -= 1;
 
-    const base = this.apparent(type);
+    const base = this.types.apparent(type);
 
     switch (base.kind) {
       case TypeKind.Array:

@@ -113,7 +113,7 @@ partial class ExpressionTypes {
       return base;
     }
 
-    const parts = this.definedParts(wanted);
+    const parts = this.types.definedParts(wanted);
 
     switch (literal.kind) {
       case LiteralKind.String:
@@ -275,25 +275,9 @@ partial class ExpressionTypes {
     return part.kind == TypeKind.Literal && part.literal == LiteralKind.String;
   }
 
-  private definedParts(type: Type): Type[] {
-    if (type.kind != TypeKind.Union) {
-      return [type];
-    }
-
-    const parts: Type[] = [];
-
-    for (const part of type.parts) {
-      if (part.kind != TypeKind.Undefined) {
-        parts.push(part);
-      }
-    }
-
-    return parts;
-  }
-
   private templated(wanted: Type | undefined): Type {
     const text = this.store.plain(TypeKind.String);
-    const parts = this.definedParts(wanted ?? text);
+    const parts = this.types.definedParts(wanted ?? text);
     if (parts.some((part) => this.isTextual(part))) {
       return this.store.plain(TypeKind.Error);
     }
@@ -302,7 +286,7 @@ partial class ExpressionTypes {
   }
 
   private textChoice(texts: string[], wanted: Type): Type | undefined {
-    const parts = this.definedParts(wanted);
+    const parts = this.types.definedParts(wanted);
     if (!parts.some((part) => this.isTextual(part))) {
       return undefined;
     }
@@ -325,7 +309,7 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const target = this.wantedPart(wanted);
+    const target = this.types.wantedPart(wanted);
     if (target != undefined && target.kind == TypeKind.Json) {
       return target;
     }

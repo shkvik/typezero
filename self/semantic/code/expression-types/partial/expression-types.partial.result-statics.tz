@@ -89,7 +89,7 @@ partial class ExpressionTypes {
 
     this.quiet -= 1;
 
-    const base = this.definedType(object);
+    const base = this.types.definedType(object);
     if (base.kind != TypeKind.Array || !this.holdsResults(base.item)) {
       return false;
     }
@@ -113,7 +113,9 @@ partial class ExpressionTypes {
       return false;
     }
 
-    return literal.elements.every((element) => !element.spread && !element.hole);
+    return literal.elements.every(
+      (element) => !element.spread && !element.hole,
+    );
   }
 
   private combinedList(
@@ -137,7 +139,7 @@ partial class ExpressionTypes {
         return error;
       }
 
-      const defined = this.definedType(type);
+      const defined = this.types.definedType(type);
       if (defined.kind != TypeKind.Result) {
         this.report(module, element.expr.loc, Code.ResultCombineNotResult, {
           word: draft.what,
@@ -223,7 +225,10 @@ partial class ExpressionTypes {
 
     const values = this.store.arrayOf(common.value);
 
-    return this.store.resultOf(values, this.combinedErrors(draft, common.error));
+    return this.store.resultOf(
+      values,
+      this.combinedErrors(draft, common.error),
+    );
   }
 
   private tupleCombined(
@@ -274,7 +279,7 @@ partial class ExpressionTypes {
       return type;
     }
 
-    const base = this.definedType(type);
+    const base = this.types.definedType(type);
     const item = this.arrayResultItem(base);
     if (item == undefined) {
       this.report(module, arg.loc, Code.ResultCombineNotArray, {
@@ -300,7 +305,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const item = this.definedType(base.item);
+    const item = this.types.definedType(base.item);
     if (item.kind != TypeKind.Result) {
       return undefined;
     }

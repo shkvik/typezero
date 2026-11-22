@@ -71,7 +71,8 @@ partial class ExpressionTypes {
   ): Type {
     const left = pair.left;
     const right = pair.right;
-    const isOpen = this.isOpenParameter(left) || this.isOpenParameter(right);
+    const isOpen =
+      this.types.isOpenParameter(left) || this.types.isOpenParameter(right);
     const isKnown = left.kind != TypeKind.Error && right.kind != TypeKind.Error;
     const hasText =
       left.kind == TypeKind.String || right.kind == TypeKind.String;
@@ -117,7 +118,7 @@ partial class ExpressionTypes {
     module: int,
     links: ConcatLink[],
   ): OperandPair {
-    const expected = this.wantedPart(wanted);
+    const expected = this.types.wantedPart(wanted);
     const hints = this.operandHints(expr.op, expected);
     const isLiteralLeft =
       this.isNumberTree(expr.lhs) &&
@@ -173,7 +174,7 @@ partial class ExpressionTypes {
       return hint;
     }
 
-    const plain = this.definedType(other);
+    const plain = this.types.definedType(other);
     if (plain.kind == TypeKind.Decimal) {
       return plain;
     }
@@ -197,13 +198,13 @@ partial class ExpressionTypes {
 
     const type = this.arithmeticTyped(left, hint, module, links);
 
-    return this.apparent(type);
+    return this.types.apparent(type);
   }
 
   private operandTyped(expr: Expr, hint: Type | undefined, module: int): Type {
     const type = this.valueTyped(expr, hint, module);
 
-    return this.apparent(type);
+    return this.types.apparent(type);
   }
 
   private valueTyped(expr: Expr, hint: Type | undefined, module: int): Type {
@@ -212,35 +213,6 @@ partial class ExpressionTypes {
     }
 
     return this.typed(expr, hint, module);
-  }
-
-  private apparent(type: Type): Type {
-    const base = this.relation.baseOf(type);
-    if (base != undefined) {
-      return base;
-    }
-    if (type.kind != TypeKind.Union) {
-      return type;
-    }
-
-    const first = type.parts[0];
-    const firstBase = this.optionalBase(first);
-    const isOneBase = type.parts.every(
-      (part) => this.optionalBase(part) == firstBase,
-    );
-    if (firstBase == undefined || !isOneBase) {
-      return type;
-    }
-
-    return firstBase;
-  }
-
-  private optionalBase(type: Type | undefined): Type | undefined {
-    if (type == undefined) {
-      return undefined;
-    }
-
-    return this.relation.baseOf(type);
   }
 
   private operandHints(op: BinaryOp, expected: Type | undefined): OperandHints {
@@ -280,7 +252,7 @@ partial class ExpressionTypes {
     isBitwise: boolean,
     module: int,
   ): Type | undefined {
-    const type = this.definedType(otherType);
+    const type = this.types.definedType(otherType);
     const isFraction = type.kind == TypeKind.Double && !isBitwise;
     const isOtherNumber = type.kind == TypeKind.Int || isFraction;
     if (!isOtherNumber || !this.isIntTree(literal)) {
@@ -307,7 +279,8 @@ partial class ExpressionTypes {
     }
 
     const isBitwise = this.isBitwise(expr.op) || this.isShift(expr.op);
-    const hasNumbers = this.isNumberLike(left) && this.isNumberLike(right);
+    const hasNumbers =
+      this.types.isNumberLike(left) && this.types.isNumberLike(right);
     const hasIntegers = left.kind == TypeKind.Int && right.kind == TypeKind.Int;
     if (!hasNumbers || (isBitwise && !hasIntegers)) {
       return pair;
@@ -482,7 +455,7 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const expected = this.wantedPart(wanted);
+    const expected = this.types.wantedPart(wanted);
     const isInteger = expected != undefined && expected.kind == TypeKind.Int;
     const hint = this.shiftHint(expr, isInteger, expected);
     const left = this.operandTyped(expr.lhs, hint, module);
@@ -693,8 +666,8 @@ partial class ExpressionTypes {
     const first = this.text.of(left);
     const second = this.text.of(right);
     const isUndefined =
-      this.isOptional(left) ||
-      this.isOptional(right) ||
+      this.types.isOptional(left) ||
+      this.types.isOptional(right) ||
       left.kind == TypeKind.Undefined ||
       right.kind == TypeKind.Undefined;
     if (isUndefined) {

@@ -85,7 +85,7 @@ partial class ExpressionTypes {
       return true;
     }
     if (type.kind == TypeKind.Undefined) {
-      slot.type = this.optional(slot.type);
+      slot.type = this.types.optional(slot.type);
 
       return true;
     }
@@ -122,7 +122,7 @@ partial class ExpressionTypes {
 
     this.quiet -= 1;
 
-    const base = this.apparent(type);
+    const base = this.types.apparent(type);
     if (base.kind != TypeKind.Object || this.spreadCode(type) != undefined) {
       return false;
     }
@@ -137,7 +137,13 @@ partial class ExpressionTypes {
         continue;
       }
 
-      const isMerged = this.mergeSpreadField(property, field, base, slots, module);
+      const isMerged = this.mergeSpreadField(
+        property,
+        field,
+        base,
+        slots,
+        module,
+      );
       if (!isMerged) {
         return false;
       }
@@ -160,15 +166,15 @@ partial class ExpressionTypes {
 
       return true;
     }
-    if (!this.isOptional(type)) {
+    if (!this.types.isOptional(type)) {
       slot.type = type;
 
       return true;
     }
 
     const joined = this.unify(
-      this.definedType(slot.type),
-      this.definedType(type),
+      this.types.definedType(slot.type),
+      this.types.definedType(type),
     );
     if (joined == undefined || joined.kind == TypeKind.Error) {
       this.report(module, property.loc, Code.SpreadFieldTypes, {
@@ -180,8 +186,8 @@ partial class ExpressionTypes {
 
       return false;
     }
-    if (this.isOptional(slot.type)) {
-      slot.type = this.optional(joined);
+    if (this.types.isOptional(slot.type)) {
+      slot.type = this.types.optional(joined);
 
       return true;
     }
@@ -201,7 +207,7 @@ partial class ExpressionTypes {
       return this.relation.converts(slot.type, this.fieldWanted(field));
     });
     const isFilled = target.fields.every((field) => {
-      const isNeeded = !field.optional && !this.isOptional(field.type);
+      const isNeeded = !field.optional && !this.types.isOptional(field.type);
 
       return !isNeeded || slots.some((slot) => slot.name == field.name);
     });

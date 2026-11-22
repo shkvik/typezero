@@ -260,7 +260,7 @@ partial class ExpressionTypes {
     const type = this.resolver.resolve(written, context);
 
     if (field.presence == FieldPresence.Optional) {
-      return this.optional(type);
+      return this.types.optional(type);
     }
 
     return type;

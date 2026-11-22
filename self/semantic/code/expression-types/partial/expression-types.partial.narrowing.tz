@@ -116,11 +116,11 @@ partial class ExpressionTypes {
     }
 
     const slot = this.narrowable(path, module);
-    if (slot == undefined || !isTrue || !this.isOptional(slot.type)) {
+    if (slot == undefined || !isTrue || !this.types.isOptional(slot.type)) {
       return facts;
     }
 
-    const defined = this.definedType(slot.type);
+    const defined = this.types.definedType(slot.type);
 
     facts.set(slot.key, defined);
     this.linkFacts(path, facts, module);
@@ -138,8 +138,12 @@ partial class ExpressionTypes {
 
     const object = expr.object;
     const slot = this.narrowable(object, module);
-    if (expr.optional && slot != undefined && this.isOptional(slot.type)) {
-      const defined = this.definedType(slot.type);
+    if (
+      expr.optional &&
+      slot != undefined &&
+      this.types.isOptional(slot.type)
+    ) {
+      const defined = this.types.definedType(slot.type);
 
       facts.set(slot.key, defined);
     }
@@ -204,7 +208,7 @@ partial class ExpressionTypes {
     }
 
     const name = lhs.value;
-    const parts = this.unionMembers(slot.type);
+    const parts = this.types.unionMembers(slot.type);
     const kept = parts.filter((part) => this.isKeyKept(part, name, isTrue));
     if (parts.length < 2 || kept.length == 0) {
       return facts;
@@ -296,7 +300,7 @@ partial class ExpressionTypes {
     const isDefined =
       narrowed != undefined &&
       narrowed.kind != TypeKind.Undefined &&
-      !this.isOptional(narrowed);
+      !this.types.isOptional(narrowed);
     if (isDefined) {
       this.linkFacts(name, facts, module);
     }
@@ -439,14 +443,14 @@ partial class ExpressionTypes {
   }
 
   private undefinedCompared(type: Type, isEqual: boolean): Type | undefined {
-    if (!this.isOptional(type)) {
+    if (!this.types.isOptional(type)) {
       return undefined;
     }
     if (isEqual) {
       return this.store.plain(TypeKind.Undefined);
     }
 
-    return this.definedType(type);
+    return this.types.definedType(type);
   }
 
   private comparedLiteral(other: Expr, module: int): Type | undefined {
@@ -465,7 +469,7 @@ partial class ExpressionTypes {
   }
 
   private literalPart(type: Type, literal: Type): Type | undefined {
-    const parts = this.unionMembers(type);
+    const parts = this.types.unionMembers(type);
     if (parts.includes(literal)) {
       return literal;
     }
@@ -479,7 +483,7 @@ partial class ExpressionTypes {
   }
 
   private withoutPart(type: Type, literal: Type): Type | undefined {
-    const parts = this.unionMembers(type);
+    const parts = this.types.unionMembers(type);
     if (!parts.includes(literal)) {
       return undefined;
     }
@@ -528,7 +532,7 @@ partial class ExpressionTypes {
   ): Type | undefined {
     const kept: Type[] = [];
 
-    for (const part of this.unionMembers(type)) {
+    for (const part of this.types.unionMembers(type)) {
       const isOpen =
         part.kind == TypeKind.Unknown ||
         part.kind == TypeKind.Json ||
@@ -592,7 +596,7 @@ partial class ExpressionTypes {
     }
 
     const name = rhs.name;
-    const parts = this.unionMembers(slot.type);
+    const parts = this.types.unionMembers(slot.type);
     const kept = parts.filter(
       (part) => this.isInstanceOf(part, name) == isTrue,
     );

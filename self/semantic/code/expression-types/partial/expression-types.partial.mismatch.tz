@@ -30,7 +30,7 @@ partial class ExpressionTypes {
     const source = this.innerObject(given, wanted);
     const target = this.innerObject(wanted, given);
     const only = this.onlyPart(wanted);
-    const goal = this.definedType(wanted);
+    const goal = this.types.definedType(wanted);
     const intervals = this.rangeIntervals(given, goal);
     const holds = this.rangeText(intervals);
     const code = this.mismatchCode(given, wanted, source, target, holds);
@@ -75,8 +75,8 @@ partial class ExpressionTypes {
       return Code.ValueOutsideRange;
     }
 
-    const plain = this.definedType(given);
-    const aim = this.definedType(wanted);
+    const plain = this.types.definedType(given);
+    const aim = this.types.definedType(wanted);
     if (aim.kind == TypeKind.Never) {
       return Code.NeverNotAssignable;
     }
@@ -109,8 +109,8 @@ partial class ExpressionTypes {
       return Code.FunctionsMismatch;
     }
 
-    const value = this.definedType(given);
-    const goal = this.definedType(wanted);
+    const value = this.types.definedType(given);
+    const goal = this.types.definedType(wanted);
 
     if (value.kind == TypeKind.Json) {
       return Code.JsonUnchecked;
@@ -132,7 +132,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    return target.parts.some((part) => this.isObjectKind(part));
+    return target.parts.some((part) => this.types.isObjectKind(part));
   }
 
   private unionCode(target: Type): Code {
@@ -176,7 +176,7 @@ partial class ExpressionTypes {
   }
 
   private jsonCode(source: Type, value: Type): Code {
-    if (this.isObjectKind(source) || value.kind == TypeKind.Array) {
+    if (this.types.isObjectKind(source) || value.kind == TypeKind.Array) {
       return Code.ObjectIntoJson;
     }
     if (value.kind == TypeKind.Dict) {
@@ -207,7 +207,7 @@ partial class ExpressionTypes {
   }
 
   private dictionaryCode(value: Type): Code {
-    const parts = this.definedParts(value);
+    const parts = this.types.definedParts(value);
     const isWide = parts.some(
       (part) => part.kind == TypeKind.Int && part.bits >= kWideBits,
     );
@@ -245,17 +245,17 @@ partial class ExpressionTypes {
   }
 
   private isUndecided(expr: Expr, wanted: Type): boolean {
-    const goal = this.definedType(wanted);
+    const goal = this.types.definedType(wanted);
 
     return goal.kind == TypeKind.Operation;
   }
 
   private isWidening(source: Type, target: Type): boolean {
-    if (!this.isObjectKind(target)) {
+    if (!this.types.isObjectKind(target)) {
       return false;
     }
 
-    return this.isObjectKind(source) || source.kind == TypeKind.Union;
+    return this.types.isObjectKind(source) || source.kind == TypeKind.Union;
   }
 
   private isFresh(expr: Expr): boolean {
@@ -271,14 +271,14 @@ partial class ExpressionTypes {
   }
 
   private isIteratorFromClass(given: Type, wanted: Type): boolean {
-    const target = this.definedType(wanted);
+    const target = this.types.definedType(wanted);
 
     return given.kind == TypeKind.Instance && target.kind == TypeKind.Iterator;
   }
 
   private isIterableTarget(wanted: Type): boolean {
-    const defined = this.definedType(wanted);
-    const parts = this.unionMembers(defined);
+    const defined = this.types.definedType(wanted);
+    const parts = this.types.unionMembers(defined);
 
     return parts.some(
       (part) =>
@@ -335,17 +335,17 @@ partial class ExpressionTypes {
   }
 
   private isFunctionPair(given: Type, wanted: Type): boolean {
-    const goal = this.definedType(wanted);
+    const goal = this.types.definedType(wanted);
 
     return given.kind == TypeKind.Function && goal.kind == TypeKind.Function;
   }
 
   private isMaybeFitting(given: Type, wanted: Type): boolean {
-    if (!this.isOptional(given) || this.isOptional(wanted)) {
+    if (!this.types.isOptional(given) || this.types.isOptional(wanted)) {
       return false;
     }
 
-    const defined = this.definedType(given);
+    const defined = this.types.definedType(given);
 
     return this.relation.converts(defined, wanted);
   }
@@ -379,8 +379,8 @@ partial class ExpressionTypes {
   }
 
   private innerObject(type: Type, other: Type): Type {
-    const inner = this.definedType(type);
-    const otherInner = this.definedType(other);
+    const inner = this.types.definedType(type);
+    const otherInner = this.types.definedType(other);
     if (inner.kind == TypeKind.Array && otherInner.kind == TypeKind.Array) {
       return this.innerObject(inner.item, otherInner.item);
     }
@@ -452,7 +452,7 @@ partial class ExpressionTypes {
   }
 
   private onlyPart(wanted: Type): Type {
-    const parts = this.definedParts(wanted);
+    const parts = this.types.definedParts(wanted);
     const only = parts[0];
     if (parts.length != 1 || only == undefined) {
       return wanted;
@@ -563,7 +563,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const goal = this.definedType(wanted);
+    const goal = this.types.definedType(wanted);
     const intervals = this.wholeIntervals(goal);
     if (intervals.length == 0) {
       return false;

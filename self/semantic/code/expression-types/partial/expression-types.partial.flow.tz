@@ -25,9 +25,9 @@ import {
   DeclaredVariable,
   Destination,
   ParamSlot,
-  TruthUse,
   ValueRecord,
 } from "../types/expression-types.types.tz";
+import { TruthUse } from "../../../flow/truth-rules/types/truth-rules.types.tz";
 
 partial class ExpressionTypes {
   private pathKey(expr: Expr, module: int): string | undefined {
@@ -194,11 +194,7 @@ partial class ExpressionTypes {
     return given;
   }
 
-  private tupleWriteCheck(
-    target: IndexExpr,
-    tuple: Type,
-    module: int,
-  ): void {
+  private tupleWriteCheck(target: IndexExpr, tuple: Type, module: int): void {
     const index = target.index;
     if (tuple.kind != TypeKind.Tuple || !tuple.readonly) {
       return;
@@ -225,7 +221,7 @@ partial class ExpressionTypes {
       op != BinaryOp.LogAnd &&
       op != BinaryOp.Nullish;
     const isMaybe =
-      this.isOptional(tested) || tested.kind == TypeKind.Undefined;
+      this.types.isOptional(tested) || tested.kind == TypeKind.Undefined;
     if (!isArithmetic || !isMaybe || op == undefined) {
       return false;
     }
@@ -308,7 +304,7 @@ partial class ExpressionTypes {
 
     this.quiet -= 1;
 
-    const base = this.definedType(object);
+    const base = this.types.definedType(object);
     if (base.kind == TypeKind.Tuple) {
       return this.tupleWriteCheck(target, base, module);
     }
@@ -436,7 +432,7 @@ partial class ExpressionTypes {
   }
 
   private defaultedFact(declared: Type, current: Type, given: Type): Type {
-    const defined = this.definedType(current);
+    const defined = this.types.definedType(current);
     const isKnown =
       given.kind != TypeKind.Error && this.relation.converts(given, declared);
     if (!isKnown) {

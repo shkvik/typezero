@@ -25,7 +25,7 @@ partial class ExpressionTypes {
       return error;
     }
 
-    const base = this.apparent(index);
+    const base = this.types.apparent(index);
     if (base.kind != TypeKind.Int) {
       this.report(module, expr.index.loc, Code.EnumIndexNotInteger, {
         word: this.text.of(index),
@@ -63,7 +63,11 @@ partial class ExpressionTypes {
     let found: string | undefined = undefined;
 
     for (const member of home.decl.members) {
-      const step = this.resolver.enumMember(home.module, home.decl, member.name);
+      const step = this.resolver.enumMember(
+        home.module,
+        home.decl,
+        member.name,
+      );
       const number = step?.number;
       if (number != undefined && decimal(number) == value) {
         found = member.name;

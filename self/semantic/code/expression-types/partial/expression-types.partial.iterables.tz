@@ -165,7 +165,7 @@ partial class ExpressionTypes {
   }
 
   private iteratedItem(given: Type): Type | undefined {
-    const base = this.apparent(given);
+    const base = this.types.apparent(given);
 
     switch (base.kind) {
       case TypeKind.Array:

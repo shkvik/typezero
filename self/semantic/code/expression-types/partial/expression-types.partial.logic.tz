@@ -23,7 +23,6 @@ import {
   kFirstPrintable,
   kHiddenMark,
   kLastPrintable,
-  kNegation,
   kNotEquals,
   kOrText,
   kOtherPlaceholder,
@@ -31,7 +30,9 @@ import {
   kUnnamedOperand,
   kZeroText,
 } from "../const/expression-types.const.tz";
-import { LogicSide, TruthUse } from "../types/expression-types.types.tz";
+import { LogicSide } from "../types/expression-types.types.tz";
+import { TruthUse } from "../../../flow/truth-rules/types/truth-rules.types.tz";
+import { kNegation } from "../../../flow/truth-rules/const/truth-rules.const.tz";
 
 partial class ExpressionTypes {
   private notTyped(expr: UnaryExpr, module: int): Type {
@@ -78,10 +79,10 @@ partial class ExpressionTypes {
     const isNegated = use == TruthUse.Not;
     const first = this.hintText(expr.target, kUnnamedOperand);
     const second = this.hintText(expr.value, kOtherPlaceholder);
-    const base = this.definedType(type);
+    const base = this.types.definedType(type);
     const isTestable =
-      this.isOptional(type) ||
-      this.isNumberLike(base) ||
+      this.types.isOptional(type) ||
+      this.types.isNumberLike(base) ||
       base.kind == TypeKind.String;
     const isCompared =
       this.isWrittenLiteral(expr.value) ||
@@ -116,9 +117,9 @@ partial class ExpressionTypes {
 
   private emptyTest(type: Type, isNegated: boolean): string {
     const test = this.equalsText(!isNegated);
-    const base = this.definedType(type);
+    const base = this.types.definedType(type);
 
-    if (this.isOptional(type)) {
+    if (this.types.isOptional(type)) {
       return `${test} ${kUndefinedText}`;
     }
     if (base.kind == TypeKind.String) {
@@ -159,9 +160,9 @@ partial class ExpressionTypes {
   ): Type {
     const isAnd = expr.op == BinaryOp.LogAnd;
     const use = this.logicalUse(isAnd);
-    const expected = this.wantedPart(wanted);
+    const expected = this.types.wantedPart(wanted);
     const written = this.testedValue(expr.lhs, expected, use, module);
-    const left = this.apparent(written);
+    const left = this.types.apparent(written);
     const isLeftTruthy = this.checkTruthy(
       expr.lhs,
       left,
@@ -223,7 +224,7 @@ partial class ExpressionTypes {
       return expected;
     }
 
-    return this.definedType(left);
+    return this.types.definedType(left);
   }
 
   private logicalRight(
@@ -305,14 +306,14 @@ partial class ExpressionTypes {
 
   private keptLeft(left: Type, isAnd: boolean): Type {
     if (!isAnd) {
-      return this.definedType(left);
+      return this.types.definedType(left);
     }
 
-    const base = this.definedType(left);
+    const base = this.types.definedType(left);
     const isAlwaysTruthy =
       base.kind == TypeKind.Array ||
       base.kind == TypeKind.Function ||
-      this.isTruthyObject(base);
+      this.truth.isTruthyObject(base);
     if (isAlwaysTruthy) {
       return this.store.plain(TypeKind.Undefined);
     }
@@ -411,7 +412,7 @@ partial class ExpressionTypes {
   }
 
   private decimalHint(other: Type, hint: Type | undefined): Type | undefined {
-    const plain = this.definedType(other);
+    const plain = this.types.definedType(other);
     if (plain.kind == TypeKind.Decimal) {
       return plain;
     }

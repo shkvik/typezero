@@ -37,7 +37,7 @@ partial class ExpressionTypes {
       return this.looseElements(expr, module);
     }
 
-    const plain = this.wantedPart(array);
+    const plain = this.types.wantedPart(array);
     if (plain != undefined && plain.kind == TypeKind.Tuple) {
       return this.tupleTyped(expr, plain, module);
     }
@@ -48,7 +48,7 @@ partial class ExpressionTypes {
   }
 
   private jsonArrayOr(wanted: Type | undefined): Type | undefined {
-    const target = this.wantedPart(wanted);
+    const target = this.types.wantedPart(wanted);
     if (target == undefined || target.kind != TypeKind.Json) {
       return wanted;
     }
@@ -64,7 +64,7 @@ partial class ExpressionTypes {
       return this.store.arrayOf(expected);
     }
 
-    const plain = this.definedType(expected);
+    const plain = this.types.definedType(expected);
     if (plain.kind != TypeKind.Union) {
       return expected;
     }
@@ -565,13 +565,14 @@ partial class ExpressionTypes {
   }
 
   private fitsObjectArray(inner: Type, element: Type): boolean {
-    const plainInner = this.definedType(inner);
-    const plainElement = this.definedType(element);
+    const plainInner = this.types.definedType(inner);
+    const plainElement = this.types.definedType(element);
     const isObjects =
-      this.isObjectReference(plainInner) && this.isObjectKind(plainElement);
+      this.types.isObjectReference(plainInner) &&
+      this.types.isObjectKind(plainElement);
     const isOptionalFitting =
-      this.isOptional(inner) == this.isOptional(element) ||
-      this.isOptional(element);
+      this.types.isOptional(inner) == this.types.isOptional(element) ||
+      this.types.isOptional(element);
 
     return (
       isObjects && isOptionalFitting && this.relation.converts(inner, element)
@@ -579,12 +580,12 @@ partial class ExpressionTypes {
   }
 
   private holdsObjects(type: Type): boolean {
-    const held = this.definedType(type);
+    const held = this.types.definedType(type);
     if (held.kind == TypeKind.Array) {
       return this.holdsObjects(held.item);
     }
 
-    return this.isObjectKind(held) || held.kind == TypeKind.Dict;
+    return this.types.isObjectKind(held) || held.kind == TypeKind.Dict;
   }
 
   private isLiteralShaped(expr: Expr): boolean {
@@ -592,7 +593,7 @@ partial class ExpressionTypes {
   }
 
   private isDecimalLike(type: Type): boolean {
-    const plain = this.definedType(type);
+    const plain = this.types.definedType(type);
 
     return plain.kind == TypeKind.Decimal;
   }

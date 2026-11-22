@@ -145,7 +145,7 @@ partial class ExpressionTypes {
       return type;
     }
 
-    return this.optional(type);
+    return this.types.optional(type);
   }
 
   private fixedCount(target: CallTarget): int {
@@ -255,7 +255,10 @@ partial class ExpressionTypes {
     const wanted = this.parameterWanted(param);
     const kind = target.kind ?? CallKind.Own;
     const isPlain = slot.element == undefined && !slot.spread;
-    if (isPlain && this.iterableArgumentCheck(slot, param.type, target, module)) {
+    if (
+      isPlain &&
+      this.iterableArgumentCheck(slot, param.type, target, module)
+    ) {
       return;
     }
     if (kind == CallKind.Own || !isPlain) {
@@ -266,7 +269,7 @@ partial class ExpressionTypes {
     }
 
     const to = param.type;
-    const base = this.definedType(to);
+    const base = this.types.definedType(to);
     const isMarked = target.positions?.[index] ?? false;
     const isPosition = kind == CallKind.Positional && isMarked;
     const isMath = kind == CallKind.Math && base.kind == TypeKind.Double;
@@ -287,11 +290,11 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     const given = this.typed(slot.expr, to, module);
-    const base = this.apparent(this.definedType(given));
+    const base = this.types.apparent(this.types.definedType(given));
     if (given.kind == TypeKind.Error) {
       return;
     }
-    if (base.kind == TypeKind.Int && !this.isOptional(given)) {
+    if (base.kind == TypeKind.Int && !this.types.isOptional(given)) {
       return this.coerce(slot.expr, given, to, module, kNoPlace);
     }
 
@@ -320,7 +323,7 @@ partial class ExpressionTypes {
     if (base.kind == TypeKind.Double) {
       return Code.PositionFraction;
     }
-    if (this.isOptional(given) && base.kind == TypeKind.Int) {
+    if (this.types.isOptional(given) && base.kind == TypeKind.Int) {
       return Code.PositionMaybe;
     }
 
@@ -338,9 +341,13 @@ partial class ExpressionTypes {
       return;
     }
 
-    const base = this.apparent(this.definedType(given));
+    const base = this.types.apparent(this.types.definedType(given));
     const isRounding = kRoundingNames.includes(method);
-    if (base.kind == TypeKind.Int && isRounding && !this.isOptional(given)) {
+    if (
+      base.kind == TypeKind.Int &&
+      isRounding &&
+      !this.types.isOptional(given)
+    ) {
       this.report(module, slot.expr.loc, Code.MathRoundsInteger, {
         word: method,
         first: this.text.of(given),
@@ -348,7 +355,7 @@ partial class ExpressionTypes {
 
       return;
     }
-    if (base.kind == TypeKind.Int && !this.isOptional(given)) {
+    if (base.kind == TypeKind.Int && !this.types.isOptional(given)) {
       return this.coerce(slot.expr, given, to, module, kNoPlace);
     }
     if (this.relation.converts(given, to)) {
@@ -365,7 +372,7 @@ partial class ExpressionTypes {
 
   private mathArgumentCode(given: Type, base: Type): Code {
     const isNumber = base.kind == TypeKind.Int || base.kind == TypeKind.Double;
-    if (this.isOptional(given) && isNumber) {
+    if (this.types.isOptional(given) && isNumber) {
       return Code.MathArgumentMaybe;
     }
     if (base.kind == TypeKind.Decimal) {

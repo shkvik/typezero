@@ -88,7 +88,7 @@ partial class ExpressionTypes {
 
       return this.store.plain(TypeKind.Error);
     }
-    if (!this.isOptional(type)) {
+    if (!this.types.isOptional(type)) {
       this.report(module, expr.loc, Code.NonNullNever, { word });
 
       return type;
@@ -96,7 +96,7 @@ partial class ExpressionTypes {
 
     this.report(module, expr.loc, Code.NonNullCheck, { word });
 
-    return this.definedType(type);
+    return this.types.definedType(type);
   }
 
   private assertedText(expr: Expr): string | undefined {
@@ -174,7 +174,8 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    const isNumber = this.isNumberLike(type) || type.kind == TypeKind.Error;
+    const isNumber =
+      this.types.isNumberLike(type) || type.kind == TypeKind.Error;
     if (!isNumber) {
       const first = this.text.of(type);
 
@@ -192,7 +193,7 @@ partial class ExpressionTypes {
     expr: UnaryExpr,
     wanted: Type | undefined,
   ): Type | undefined {
-    const plain = this.wantedPart(wanted);
+    const plain = this.types.wantedPart(wanted);
     if (plain == undefined) {
       return undefined;
     }
@@ -200,7 +201,7 @@ partial class ExpressionTypes {
     const isFraction = expr.operand.kind == ExprKind.FloatLit;
     const member = this.numberMember(plain, isFraction);
     const target = member ?? plain;
-    if (!this.isNumberLike(target)) {
+    if (!this.types.isNumberLike(target)) {
       return undefined;
     }
 
@@ -214,7 +215,8 @@ partial class ExpressionTypes {
 
     return type.parts.find(
       (part) =>
-        this.isNumberLike(part) && (!isFraction || part.kind != TypeKind.Int),
+        this.types.isNumberLike(part) &&
+        (!isFraction || part.kind != TypeKind.Int),
     );
   }
 
@@ -223,7 +225,7 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const expected = this.wantedPart(wanted);
+    const expected = this.types.wantedPart(wanted);
     const hint = this.integerOf(expected);
     const type = this.operandTyped(expr.operand, hint, module);
     if (type.kind == TypeKind.Double) {

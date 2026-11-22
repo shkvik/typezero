@@ -53,7 +53,7 @@ partial class ExpressionTypes {
   }
 
   private resultHoldCode(type: Type): Code | undefined {
-    const held = this.definedType(type);
+    const held = this.types.definedType(type);
     if (held.kind == TypeKind.Result) {
       return Code.ResultUnchecked;
     }
@@ -61,7 +61,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const value = this.definedType(held.value);
+    const value = this.types.definedType(held.value);
     if (value.kind == TypeKind.Result) {
       return Code.ResultPromiseUnawaited;
     }

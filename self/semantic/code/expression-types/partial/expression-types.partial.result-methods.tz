@@ -38,7 +38,7 @@ partial class ExpressionTypes {
       return facts;
     }
 
-    const base = this.definedType(slot.type);
+    const base = this.types.definedType(slot.type);
     if (base.kind != TypeKind.Result) {
       return facts;
     }
@@ -180,7 +180,14 @@ partial class ExpressionTypes {
     const half = this.resultHalf(result, isOnError);
     const isTee = name == "andTee" || name == "orTee";
     const hint = this.resultCallbackHint(name, wanted, isOnError);
-    const returned = this.resultCallback(first, half, hint, isTee, name, module);
+    const returned = this.resultCallback(
+      first,
+      half,
+      hint,
+      isTee,
+      name,
+      module,
+    );
     if (returned == undefined || returned.kind == TypeKind.Error) {
       return this.store.plain(TypeKind.Error);
     }
@@ -213,7 +220,7 @@ partial class ExpressionTypes {
     }
 
     const half = this.resultHalf(goal, isOnError);
-    const base = this.definedType(half);
+    const base = this.types.definedType(half);
     const isShaped =
       base.kind == TypeKind.Object ||
       base.kind == TypeKind.Result ||
@@ -230,7 +237,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const defined = this.definedType(wanted);
+    const defined = this.types.definedType(wanted);
     if (defined.kind == TypeKind.Error) {
       return undefined;
     }
@@ -308,7 +315,7 @@ partial class ExpressionTypes {
     returned: Type,
     module: int,
   ): Type {
-    const next = this.definedType(returned);
+    const next = this.types.definedType(returned);
     if (next.kind != TypeKind.Result) {
       return this.notResultReport(name, arg, returned, module);
     }
@@ -337,7 +344,7 @@ partial class ExpressionTypes {
     returned: Type,
     module: int,
   ): Type {
-    const next = this.definedType(returned);
+    const next = this.types.definedType(returned);
     if (next.kind != TypeKind.Result) {
       return this.notResultReport("orElse", arg, returned, module);
     }

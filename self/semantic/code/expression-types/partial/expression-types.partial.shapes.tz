@@ -340,7 +340,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const wanted = this.definedType(pattern);
+    const wanted = this.types.definedType(pattern);
     if (wanted.kind != TypeKind.Function || this.mentionsParameter(wanted)) {
       return;
     }

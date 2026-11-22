@@ -27,7 +27,7 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    const base = this.apparent(union);
+    const base = this.types.apparent(union);
     if (base.kind != TypeKind.Union) {
       return this.memberOf(expr, base, module);
     }
@@ -425,7 +425,7 @@ partial class ExpressionTypes {
 
     this.quiet -= 1;
 
-    if (object.kind != TypeKind.Union || this.isOptional(object)) {
+    if (object.kind != TypeKind.Union || this.types.isOptional(object)) {
       return false;
     }
 

@@ -84,9 +84,9 @@ partial class ExpressionTypes {
       return facts;
     }
 
-    const kept = this.unionMembers(slot.type).filter(
-      (part) => this.isListType(part) == isTrue,
-    );
+    const kept = this.types
+      .unionMembers(slot.type)
+      .filter((part) => this.isListType(part) == isTrue);
     const isUnknown = slot.type.kind == TypeKind.Unknown;
     if (isUnknown && isTrue) {
       facts.set(slot.key, this.store.arrayOf(slot.type));
@@ -94,7 +94,7 @@ partial class ExpressionTypes {
       return facts;
     }
 
-    const isJson = this.definedType(slot.type).kind == TypeKind.Json;
+    const isJson = this.types.definedType(slot.type).kind == TypeKind.Json;
     if (isJson && isTrue) {
       const json = this.store.plain(TypeKind.Json);
 
@@ -225,7 +225,7 @@ partial class ExpressionTypes {
       return facts;
     }
 
-    const parts = this.unionMembers(slot.type);
+    const parts = this.types.unionMembers(slot.type);
     const kept = parts.filter(
       (part) => this.relation.converts(part, guarded) == isTrue,
     );
@@ -259,7 +259,7 @@ partial class ExpressionTypes {
   }
 
   private isOwnReceiver(type: Type): boolean {
-    const parts = this.unionMembers(type);
+    const parts = this.types.unionMembers(type);
 
     return parts.some(
       (part) =>
@@ -297,7 +297,7 @@ partial class ExpressionTypes {
     const unknown = this.store.plain(TypeKind.Error);
 
     for (const field of fields) {
-      if (field.optional || this.isOptional(field.type)) {
+      if (field.optional || this.types.isOptional(field.type)) {
         facts.set(key + kDot + field.name, unknown);
       }
     }

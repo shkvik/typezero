@@ -415,7 +415,7 @@ partial class ExpressionTypes {
     const pattern = this.patternAt(draft.target.shape, index, arg.spread);
     const bound = this.boundById(draft);
     const partial = this.resolver.substitute(pattern, bound);
-    const callback = this.definedType(partial);
+    const callback = this.types.definedType(partial);
 
     if (callback.kind == TypeKind.Function) {
       this.callbackArgument(draft, index, expr, callback, module);

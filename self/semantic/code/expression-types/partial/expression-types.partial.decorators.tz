@@ -404,7 +404,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return this.definedType(third.type);
+    return this.types.definedType(third.type);
   }
 
   private isDescriptorType(type: Type): boolean {
@@ -538,7 +538,12 @@ partial class ExpressionTypes {
     for (const param of fn.params) {
       const first = param.decorators[0];
       if (first != undefined) {
-        this.report(module, first.loc, Code.DecoratorParameterPlace, kNoDetails);
+        this.report(
+          module,
+          first.loc,
+          Code.DecoratorParameterPlace,
+          kNoDetails,
+        );
       }
     }
   }

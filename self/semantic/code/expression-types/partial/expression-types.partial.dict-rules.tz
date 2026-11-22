@@ -11,7 +11,6 @@ import {
   MemberExpr,
   UnaryExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
-import { ForOfStmt } from "../../../../program/ast/types/ast.types.statements.tz";
 import {
   DictKind,
   Type,
@@ -26,7 +25,7 @@ import {
 
 partial class ExpressionTypes {
   private collectionOf(type: Type): DictKind | undefined {
-    const base = this.definedType(type);
+    const base = this.types.definedType(type);
     if (base.kind != TypeKind.Dict || base.dict == DictKind.Record) {
       return undefined;
     }
@@ -289,12 +288,12 @@ partial class ExpressionTypes {
     word: string,
     module: int,
   ): void {
-    const base = this.definedType(type);
+    const base = this.types.definedType(type);
     const isHolder =
       base.kind == TypeKind.Object ||
       base.kind == TypeKind.Dict ||
       base.kind == TypeKind.Instance;
-    if (this.isOptional(type) && isHolder) {
+    if (this.types.isOptional(type) && isHolder) {
       this.report(module, arg.loc, Code.ObjectMaybeUndefined, kNoDetails);
 
       return;
@@ -315,7 +314,7 @@ partial class ExpressionTypes {
     word: string,
     module: int,
   ): void {
-    const base = this.apparent(type);
+    const base = this.types.apparent(type);
     const isValues = word == "values" || word == "entries";
     if (isValues && this.hasMethodFields(type)) {
       this.report(module, arg.loc, Code.ObjectListingMethods, { word });
@@ -333,7 +332,7 @@ partial class ExpressionTypes {
     let element: Type | undefined = undefined;
 
     for (const field of base.fields) {
-      const candidate = this.definedType(field.type);
+      const candidate = this.types.definedType(field.type);
       const both = this.listedElement(element, candidate);
       const problem = this.resolver.unionProblem(both);
       if (problem != undefined) {
@@ -366,7 +365,7 @@ partial class ExpressionTypes {
   }
 
   private isNeverObject(type: Type): boolean {
-    const base = this.apparent(type);
+    const base = this.types.apparent(type);
 
     switch (base.kind) {
       case TypeKind.Int:

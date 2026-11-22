@@ -130,11 +130,19 @@ partial class ExpressionTypes {
     return -1;
   }
 
-  private isSamePrefix(one: FunctionType, other: FunctionType, count: int): boolean {
+  private isSamePrefix(
+    one: FunctionType,
+    other: FunctionType,
+    count: int,
+  ): boolean {
     for (let index = 0; index < count; index++) {
       const mine = one.shape.params[index];
       const theirs = other.shape.params[index];
-      if (mine == undefined || theirs == undefined || mine.type != theirs.type) {
+      if (
+        mine == undefined ||
+        theirs == undefined ||
+        mine.type != theirs.type
+      ) {
         return false;
       }
     }
@@ -222,7 +230,13 @@ partial class ExpressionTypes {
     }
 
     const what = `'${member.name}'`;
-    const chosen = this.chosenVariant(expr.args, ranked, what, member.loc, module);
+    const chosen = this.chosenVariant(
+      expr.args,
+      ranked,
+      what,
+      member.loc,
+      module,
+    );
     if (chosen == undefined) {
       return error;
     }
@@ -258,7 +272,9 @@ partial class ExpressionTypes {
         continue;
       }
 
-      const isHidden = ranked.some((one) => this.isSameParameters(one.type, type));
+      const isHidden = ranked.some((one) =>
+        this.isSameParameters(one.type, type),
+      );
       if (!isHidden) {
         ranked.push({ fn, type, ranks: [], isAdapted: false, failed: -1 });
       }
@@ -300,7 +316,9 @@ partial class ExpressionTypes {
     }
 
     const count = args.length;
-    const counted = ranked.filter((one) => this.isCountFitting(one.type, count));
+    const counted = ranked.filter((one) =>
+      this.isCountFitting(one.type, count),
+    );
     if (counted.length == 0) {
       this.report(module, loc, Code.VariantCount, {
         word: what,
@@ -372,7 +390,10 @@ partial class ExpressionTypes {
     const isAdapted = applicable.every((one) => one.isAdapted);
     const code = this.tieCode(isAdapted);
 
-    this.report(module, loc, code, { word: what, first: this.variantList(tied) });
+    this.report(module, loc, code, {
+      word: what,
+      first: this.variantList(tied),
+    });
     this.looseArguments(args, module);
 
     return undefined;
@@ -452,7 +473,7 @@ partial class ExpressionTypes {
     variant: RankedVariant,
     module: int,
   ): int {
-    if (type.kind == TypeKind.Error || this.apparent(type) == param) {
+    if (type.kind == TypeKind.Error || this.types.apparent(type) == param) {
       return 0;
     }
     if (this.relation.converts(type, param)) {
@@ -474,8 +495,8 @@ partial class ExpressionTypes {
     param: Type,
     module: int,
   ): boolean {
-    const base = this.apparent(type);
-    const goal = this.definedType(param);
+    const base = this.types.apparent(type);
+    const goal = this.types.definedType(param);
     const isFraction = base.kind == TypeKind.Double;
     if (isFraction && goal.kind == TypeKind.Decimal) {
       return this.isWholeTree(expr, module) || this.isNumberLiteral(expr);
@@ -516,7 +537,7 @@ partial class ExpressionTypes {
       return "";
     }
 
-    const code = this.numberCode(this.apparent(type), param);
+    const code = this.numberCode(this.types.apparent(type), param);
     const word = this.operandName(arg.expr);
     const other = this.conversionName(param);
     if (code == Code.ConvertExplicitly) {
@@ -538,7 +559,10 @@ partial class ExpressionTypes {
     );
   }
 
-  private isBetterVariant(variant: RankedVariant, other: RankedVariant): boolean {
+  private isBetterVariant(
+    variant: RankedVariant,
+    other: RankedVariant,
+  ): boolean {
     const isFuller = !this.isLeavingOut(variant) && this.isLeavingOut(other);
     let isStrictly = isFuller;
 
@@ -587,7 +611,9 @@ partial class ExpressionTypes {
     }
 
     const texts = ranked.map((one) => this.overloadText(one.fn, one.type));
-    const shape = this.overloadText(last.fn, last.type).slice(last.fn.name.length);
+    const shape = this.overloadText(last.fn, last.type).slice(
+      last.fn.name.length,
+    );
     const result = this.text.of(last.type.shape.result);
 
     this.report(module, expr.loc, Code.VariantValue, {

@@ -80,7 +80,7 @@ partial class ExpressionTypes {
       return inner;
     }
 
-    return this.optional(inner);
+    return this.types.optional(inner);
   }
 
   private receiverOf(object: Expr, optional: boolean, module: int): Type {
@@ -92,13 +92,13 @@ partial class ExpressionTypes {
   }
 
   private linkOf(type: Type, optional: boolean): Type {
-    if (!optional || !this.isOptional(type)) {
+    if (!optional || !this.types.isOptional(type)) {
       return type;
     }
 
     this.shortCircuits += 1;
 
-    return this.definedType(type);
+    return this.types.definedType(type);
   }
 
   private memberOf(expr: MemberExpr, object: Type, module: int): Type {
@@ -127,12 +127,12 @@ partial class ExpressionTypes {
       case TypeKind.Result:
         return this.resultMemberRead(expr, object, module);
       case TypeKind.Json:
-        return this.optional(object);
+        return this.types.optional(object);
       case TypeKind.Dict:
       case TypeKind.Promise:
         return this.libraryMemberTyped(expr, object, module);
       case TypeKind.Literal: {
-        const base = this.apparent(object);
+        const base = this.types.apparent(object);
 
         return this.valueMember(expr, base, module);
       }
@@ -156,13 +156,13 @@ partial class ExpressionTypes {
     object: UnionType,
     module: int,
   ): Type {
-    if (!this.isOptional(object)) {
+    if (!this.types.isOptional(object)) {
       return this.variantMember(expr, object, module);
     }
 
-    const defined = this.definedType(object);
+    const defined = this.types.definedType(object);
     if (defined.kind == TypeKind.Json) {
-      return this.optional(defined);
+      return this.types.optional(defined);
     }
     if (defined.kind != TypeKind.Error) {
       this.report(module, expr.object.loc, Code.ReadOfUndefined, {
@@ -201,7 +201,8 @@ partial class ExpressionTypes {
     }
 
     const type = this.fieldWanted(field);
-    const isMethod = type.kind == TypeKind.Function && type.shape.self == undefined;
+    const isMethod =
+      type.kind == TypeKind.Function && type.shape.self == undefined;
     if (isLibrary && isMethod) {
       return this.store.plain(TypeKind.Error);
     }
@@ -321,11 +322,7 @@ partial class ExpressionTypes {
     return { module: target.module, decl };
   }
 
-  private enumMemberTyped(
-    expr: MemberExpr,
-    home: EnumHome,
-    module: int,
-  ): Type {
+  private enumMemberTyped(expr: MemberExpr, home: EnumHome, module: int): Type {
     const step = this.resolver.enumMember(home.module, home.decl, expr.name);
     if (step == undefined) {
       this.report(module, expr.loc, Code.EnumMemberMissing, {

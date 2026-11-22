@@ -9,8 +9,8 @@ partial class ExpressionTypes {
       return known.type;
     }
 
-    const plainFirst = this.definedType(first);
-    const plainSecond = this.definedType(second);
+    const plainFirst = this.types.definedType(first);
+    const plainSecond = this.types.definedType(second);
     const isResults =
       plainFirst.kind == TypeKind.Result && plainSecond.kind == TypeKind.Result;
     if (isResults && plainFirst != plainSecond) {
@@ -52,12 +52,12 @@ partial class ExpressionTypes {
       return this.decided(undefined);
     }
     if (first.kind == TypeKind.Undefined) {
-      const optional = this.optional(second);
+      const optional = this.types.optional(second);
 
       return this.decided(optional);
     }
     if (second.kind == TypeKind.Undefined) {
-      const optional = this.optional(first);
+      const optional = this.types.optional(first);
 
       return this.decided(optional);
     }
@@ -67,8 +67,8 @@ partial class ExpressionTypes {
       return this.decided(unknown);
     }
 
-    const plainFirst = this.definedType(first);
-    const plainSecond = this.definedType(second);
+    const plainFirst = this.types.definedType(first);
+    const plainSecond = this.types.definedType(second);
     if (this.isChoice(plainFirst) || this.isChoice(plainSecond)) {
       const wider = this.commonType(plainFirst, plainSecond);
       const unified = this.optionalLike(first, second, wider);
@@ -145,8 +145,10 @@ partial class ExpressionTypes {
   }
 
   private widerOfRelated(first: Type, second: Type): Type | undefined {
-    const isNumbers = this.isNumberLike(first) && this.isNumberLike(second);
-    const isObjects = this.isObjectKind(first) && this.isObjectKind(second);
+    const isNumbers =
+      this.types.isNumberLike(first) && this.types.isNumberLike(second);
+    const isObjects =
+      this.types.isObjectKind(first) && this.types.isObjectKind(second);
     const isIterators =
       first.kind == TypeKind.Iterator && second.kind == TypeKind.Iterator;
     if (!isNumbers && !isObjects && !isIterators) {
@@ -214,7 +216,8 @@ partial class ExpressionTypes {
     const hasAnyObject =
       first.kind == TypeKind.AnyObject || second.kind == TypeKind.AnyObject;
     const isReferences =
-      this.isObjectReference(first) && this.isObjectReference(second);
+      this.types.isObjectReference(first) &&
+      this.types.isObjectReference(second);
     if (!hasAnyObject || !isReferences) {
       return undefined;
     }
@@ -230,9 +233,12 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const plainFirst = this.definedType(first);
-    const plainSecond = this.definedType(second);
-    if (this.isNumberLike(plainFirst) && this.isNumberLike(plainSecond)) {
+    const plainFirst = this.types.definedType(first);
+    const plainSecond = this.types.definedType(second);
+    if (
+      this.types.isNumberLike(plainFirst) &&
+      this.types.isNumberLike(plainSecond)
+    ) {
       return undefined;
     }
 
@@ -264,90 +270,10 @@ partial class ExpressionTypes {
     if (base == undefined) {
       return undefined;
     }
-    if (this.isOptional(first) || this.isOptional(second)) {
-      return this.optional(base);
+    if (this.types.isOptional(first) || this.types.isOptional(second)) {
+      return this.types.optional(base);
     }
 
     return base;
-  }
-
-  private isNumberLike(type: Type): boolean {
-    switch (type.kind) {
-      case TypeKind.Int:
-      case TypeKind.Double:
-      case TypeKind.Decimal:
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  private isObjectKind(type: Type): boolean {
-    switch (type.kind) {
-      case TypeKind.Object:
-      case TypeKind.Instance:
-      case TypeKind.Tuple:
-      case TypeKind.AnyObject:
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  private isObjectReference(type: Type): boolean {
-    switch (type.kind) {
-      case TypeKind.Iterator:
-      case TypeKind.Dict:
-      case TypeKind.Promise:
-      case TypeKind.Class:
-        return true;
-      case TypeKind.Union:
-        return this.isObjectUnion(type.parts);
-      default:
-        return this.isObjectKind(type);
-    }
-  }
-
-  private isObjectUnion(parts: Type[]): boolean {
-    const first = parts[0];
-    if (first == undefined || this.relation.isTagged(parts)) {
-      return false;
-    }
-
-    const isHolder =
-      first.kind == TypeKind.Dict || first.kind == TypeKind.Promise;
-
-    return isHolder || this.isObjectKind(first);
-  }
-
-  private isOptional(type: Type): boolean {
-    if (type.kind != TypeKind.Union) {
-      return false;
-    }
-
-    return type.parts.some((part) => part.kind == TypeKind.Undefined);
-  }
-
-  private optional(type: Type): Type {
-    const nothing = this.store.plain(TypeKind.Undefined);
-
-    return this.store.unionOf([type, nothing]);
-  }
-
-  private definedType(type: Type): Type {
-    const parts = this.definedParts(type);
-    if (parts.length == 0) {
-      return type;
-    }
-
-    return this.store.unionOf(parts);
-  }
-
-  private wantedPart(wanted: Type | undefined): Type | undefined {
-    if (wanted == undefined) {
-      return undefined;
-    }
-
-    return this.definedType(wanted);
   }
 }

@@ -100,7 +100,7 @@ partial class ExpressionTypes {
 
   private dateOfValue(given: Expr, module: int): Type {
     const type = this.typed(given, undefined, module);
-    const base = this.apparent(type);
+    const base = this.types.apparent(type);
     if (base.kind == TypeKind.Error) {
       return base;
     }
@@ -135,7 +135,7 @@ partial class ExpressionTypes {
   }
 
   private dateValuePlace(type: Type, base: Type): string {
-    if (this.isOptional(type)) {
+    if (this.types.isOptional(type)) {
       return "; the value may be undefined: check it first";
     }
     if (base.kind == TypeKind.Decimal) {
@@ -398,7 +398,7 @@ partial class ExpressionTypes {
   }
 
   private timeCoerce(arg: Expr, type: Type, module: int): void {
-    const base = this.apparent(type);
+    const base = this.types.apparent(type);
     if (base.kind == TypeKind.Error || base.kind == TypeKind.Int) {
       return;
     }

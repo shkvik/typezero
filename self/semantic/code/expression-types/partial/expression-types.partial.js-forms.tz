@@ -3,7 +3,6 @@ import { Code } from "../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
   BinaryExpr,
-  BinaryOp,
   CallExpr,
   Expr,
   ExprKind,
@@ -16,7 +15,7 @@ import { OperandPair } from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private listInCheck(expr: BinaryExpr, object: Type, module: int): boolean {
-    const right = this.definedType(object);
+    const right = this.types.definedType(object);
     if (right.kind != TypeKind.Array && right.kind != TypeKind.String) {
       return false;
     }
@@ -39,11 +38,15 @@ partial class ExpressionTypes {
     }
 
     const key = this.simpleText(expr.lhs);
-    const isKnown = this.apparent(left).kind == TypeKind.Int && key != "";
+    const isKnown = this.types.apparent(left).kind == TypeKind.Int && key != "";
     const index = this.knownOr(isKnown, key, "i");
     const array = this.simpleOr(expr.rhs, "a");
     const below = `${index} < ${array}.length`;
-    const word = this.boundsText(expr.lhs.kind == ExprKind.IntLit, index, below);
+    const word = this.boundsText(
+      expr.lhs.kind == ExprKind.IntLit,
+      index,
+      below,
+    );
 
     this.report(module, expr.loc, Code.ArrayIn, { word });
 
@@ -92,7 +95,7 @@ partial class ExpressionTypes {
     module: int,
   ): boolean {
     const object = this.typed(target.object, undefined, module);
-    const base = this.definedType(object);
+    const base = this.types.definedType(object);
 
     switch (base.kind) {
       case TypeKind.Array:
@@ -138,7 +141,7 @@ partial class ExpressionTypes {
     if (expr.name != "raw" || object.kind != TypeKind.Array) {
       return false;
     }
-    if (this.definedType(object.item).kind != TypeKind.String) {
+    if (this.types.definedType(object.item).kind != TypeKind.String) {
       return false;
     }
 

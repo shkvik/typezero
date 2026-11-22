@@ -61,12 +61,15 @@ partial class ExpressionTypes {
     return this.setFromValues(source, module);
   }
 
-  private wantedDict(wanted: Type | undefined, dict: DictKind): Type | undefined {
+  private wantedDict(
+    wanted: Type | undefined,
+    dict: DictKind,
+  ): Type | undefined {
     if (wanted == undefined) {
       return undefined;
     }
 
-    const parts = this.unionMembers(this.definedType(wanted));
+    const parts = this.types.unionMembers(this.types.definedType(wanted));
     const found = parts.filter(
       (part) => part.kind == TypeKind.Dict && part.dict == dict,
     );
@@ -154,7 +157,13 @@ partial class ExpressionTypes {
         return error;
       }
       if (value != undefined && value != valueType) {
-        this.pairsDifferReport(tail, Code.MapValuesDiffer, value, valueType, module);
+        this.pairsDifferReport(
+          tail,
+          Code.MapValuesDiffer,
+          value,
+          valueType,
+          module,
+        );
 
         return error;
       }
@@ -185,7 +194,7 @@ partial class ExpressionTypes {
 
   private setFromValues(source: Expr, module: int): Type {
     const type = this.typed(source, undefined, module);
-    const base = this.apparent(type);
+    const base = this.types.apparent(type);
     const error = this.store.plain(TypeKind.Error);
 
     switch (base.kind) {
@@ -204,7 +213,7 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): boolean {
-    const base = this.definedType(object);
+    const base = this.types.definedType(object);
     const arg = expr.args[0]?.expr;
     const isSet = base.kind == TypeKind.Dict && base.dict == DictKind.Set;
     if (!isSet || arg == undefined || !kSetCombiners.includes(member.name)) {
@@ -220,7 +229,7 @@ partial class ExpressionTypes {
 
     this.quiet -= 1;
 
-    const other = this.definedType(given);
+    const other = this.types.definedType(given);
     const isDict = other.kind == TypeKind.Dict && other.dict != DictKind.Record;
     if (isDict || other.kind == TypeKind.Error) {
       return false;
@@ -248,7 +257,7 @@ partial class ExpressionTypes {
 
     this.quiet -= 1;
 
-    const base = this.definedType(object);
+    const base = this.types.definedType(object);
     if (base.kind != TypeKind.Dict || base.dict != DictKind.Record) {
       return false;
     }
@@ -283,7 +292,7 @@ partial class ExpressionTypes {
 
     this.quiet -= 1;
 
-    const base = this.definedType(object);
+    const base = this.types.definedType(object);
     if (base.kind != TypeKind.Dict || base.dict != DictKind.Record) {
       return undefined;
     }
@@ -292,7 +301,7 @@ partial class ExpressionTypes {
   }
 
   private recordMissingCode(value: Type): Code {
-    const base = this.apparent(value);
+    const base = this.types.apparent(value);
     if (base.kind == TypeKind.String || base.kind == TypeKind.Template) {
       return Code.RecordTextKeyMissing;
     }
@@ -301,12 +310,12 @@ partial class ExpressionTypes {
   }
 
   private recordMemberTyped(expr: MemberExpr, object: Type): Type | undefined {
-    const base = this.definedType(object);
+    const base = this.types.definedType(object);
     if (base.kind != TypeKind.Dict || base.dict != DictKind.Record) {
       return undefined;
     }
 
-    return this.optional(base.value);
+    return this.types.optional(base.value);
   }
 
   private recordMethodCheck(
@@ -315,7 +324,7 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): boolean {
-    const base = this.definedType(object);
+    const base = this.types.definedType(object);
     if (base.kind != TypeKind.Dict || base.dict != DictKind.Record) {
       return false;
     }
@@ -358,11 +367,11 @@ partial class ExpressionTypes {
   }
 
   private spreadCode(type: Type): Code | undefined {
-    if (this.isOptional(type)) {
+    if (this.types.isOptional(type)) {
       return this.optionalSpreadCode(type);
     }
 
-    const base = this.apparent(type);
+    const base = this.types.apparent(type);
 
     switch (base.kind) {
       case TypeKind.Array:
@@ -393,7 +402,7 @@ partial class ExpressionTypes {
   }
 
   private optionalSpreadCode(type: Type): Code {
-    const base = this.apparent(this.definedType(type));
+    const base = this.types.apparent(this.types.definedType(type));
 
     switch (base.kind) {
       case TypeKind.Array:
@@ -433,7 +442,7 @@ partial class ExpressionTypes {
 
     this.quiet -= 1;
 
-    const base = this.apparent(type);
+    const base = this.types.apparent(type);
     const code = this.recordSpreadCode(base);
     if (code == undefined) {
       return false;
@@ -502,7 +511,7 @@ partial class ExpressionTypes {
     this.quiet += 1;
 
     const list = this.typed(items, undefined, module);
-    const element = this.elementOf(this.apparent(list));
+    const element = this.elementOf(this.types.apparent(list));
     const result = this.store.plain(TypeKind.Error);
     const params = [{ type: element, optional: false }];
     const wanted = this.store.functionOf({ params, rest: false, result });
@@ -514,9 +523,8 @@ partial class ExpressionTypes {
       return;
     }
 
-    const key = this.apparent(typed.shape.result);
-    const isNumeric =
-      key.kind == TypeKind.Int || key.kind == TypeKind.Double;
+    const key = this.types.apparent(typed.shape.result);
+    const isNumeric = key.kind == TypeKind.Int || key.kind == TypeKind.Double;
     if (!isNumeric) {
       return;
     }
@@ -544,12 +552,11 @@ partial class ExpressionTypes {
 
     this.quiet += 1;
 
-    const key = this.apparent(this.typed(head, undefined, module));
+    const key = this.types.apparent(this.typed(head, undefined, module));
 
     this.quiet -= 1;
 
-    const isNumeric =
-      key.kind == TypeKind.Int || key.kind == TypeKind.Double;
+    const isNumeric = key.kind == TypeKind.Int || key.kind == TypeKind.Double;
     if (!isNumeric) {
       return;
     }

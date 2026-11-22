@@ -68,10 +68,10 @@ partial class ExpressionTypes {
 
     this.walkedPart(expr.index, module);
 
-    const defined = this.definedType(object);
+    const defined = this.types.definedType(object);
     const isList =
       defined.kind == TypeKind.Array || defined.kind == TypeKind.String;
-    if (this.isOptional(object) && isList) {
+    if (this.types.isOptional(object) && isList) {
       this.report(
         module,
         expr.object.loc,
@@ -101,7 +101,7 @@ partial class ExpressionTypes {
       return item;
     }
 
-    return this.optional(item);
+    return this.types.optional(item);
   }
 
   private listItem(list: Type): Type | undefined {
@@ -158,7 +158,7 @@ partial class ExpressionTypes {
       return error;
     }
     if (position >= tuple.required) {
-      return this.optional(item);
+      return this.types.optional(item);
     }
 
     return item;
@@ -225,7 +225,7 @@ partial class ExpressionTypes {
     }
 
     const first = this.text.of(object);
-    const defined = this.definedType(key);
+    const defined = this.types.definedType(key);
     if (this.isNumber(defined)) {
       this.report(module, expr.loc, Code.ObjectNumberedKey, { first });
 
@@ -365,7 +365,7 @@ partial class ExpressionTypes {
 
   private recordIndexed(expr: IndexExpr, dict: DictType, module: int): Type {
     const key = this.typed(expr.index, dict.key, module);
-    const defined = this.definedType(key);
+    const defined = this.types.definedType(key);
     if (defined.kind == TypeKind.Int || defined.kind == TypeKind.Double) {
       const first = this.text.of(key);
 
@@ -374,7 +374,7 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    return this.optional(dict.value);
+    return this.types.optional(dict.value);
   }
 
   private tupleText(object: Expr): string {
@@ -420,7 +420,7 @@ partial class ExpressionTypes {
 
       return boolean;
     }
-    if (field.optional || this.isOptional(field.type)) {
+    if (field.optional || this.types.isOptional(field.type)) {
       const word = `${this.tupleText(expr.rhs)}.${name}`;
 
       this.report(module, expr.loc, Code.InObjectMaybe, { word });
@@ -467,7 +467,7 @@ partial class ExpressionTypes {
     if (field == undefined) {
       return boolean;
     }
-    if (field.optional || this.isOptional(field.type)) {
+    if (field.optional || this.types.isOptional(field.type)) {
       const first = `${this.tupleText(holder)}.${name}`;
 
       this.report(module, expr.loc, Code.DeleteOptional, { word: name, first });

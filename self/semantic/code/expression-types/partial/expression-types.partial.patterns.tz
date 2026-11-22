@@ -9,18 +9,12 @@ import {
   VarDeclarator,
 } from "../../../../program/ast/types/ast.types.patterns.tz";
 import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
-import {
-  Type,
-  TypeKind,
-} from "../../../../program/type/types/type.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import {
   TypeContext,
   TypePlace,
 } from "../../../types/type-resolver/types/type-resolver.types.tz";
-import {
-  kMatchArrayClass,
-  kNoPlace,
-} from "../const/expression-types.const.tz";
+import { kMatchArrayClass, kNoPlace } from "../const/expression-types.const.tz";
 import {
   DeclaredVariable,
   VariableDoor,
@@ -79,7 +73,7 @@ partial class ExpressionTypes {
   }
 
   private patternArray(init: Expr, given: Type, module: int): Type {
-    const base = this.apparent(given);
+    const base = this.types.apparent(given);
     if (this.isJsonHolder(given)) {
       return given;
     }
@@ -118,8 +112,9 @@ partial class ExpressionTypes {
   }
 
   private notPatternArray(init: Expr, given: Type, module: int): Type {
-    const defined = this.definedType(given);
-    const isMaybe = this.isOptional(given) && defined.kind == TypeKind.Array;
+    const defined = this.types.definedType(given);
+    const isMaybe =
+      this.types.isOptional(given) && defined.kind == TypeKind.Array;
     const word = this.text.of(given);
     const error = this.store.plain(TypeKind.Error);
     if (isMaybe) {
@@ -138,7 +133,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const base = this.apparent(item);
+    const base = this.types.apparent(item);
     const isList =
       base.kind == TypeKind.Array ||
       base.kind == TypeKind.Tuple ||
@@ -152,9 +147,9 @@ partial class ExpressionTypes {
 
   private patternElement(expr: IndexExpr, module: int): Type {
     const object = this.typed(expr.object, undefined, module);
-    const base = this.apparent(object);
+    const base = this.types.apparent(object);
     if (this.isJsonHolder(object)) {
-      return this.optional(this.store.plain(TypeKind.Json));
+      return this.types.optional(this.store.plain(TypeKind.Json));
     }
 
     switch (base.kind) {

@@ -1,0 +1,83 @@
+import { Code } from "../../../../diagnostic/code.tz";
+import { TruthCodes, TruthUse } from "../types/truth-rules.types.tz";
+
+export const kNumberNoun = "a number";
+export const kDecimalNoun = "a decimal";
+export const kMaybeSuffix = " that may be undefined";
+export const kObjectNoun = "an object";
+export const kPromiseNoun = "a Promise";
+export const kClassNoun = "a class";
+export const kNegation = "!";
+export const kPlainCall = "()";
+export const kArgumentsCall = "(...)";
+
+export const kConditionCodes: TruthCodes = {
+  use: TruthUse.Condition,
+  number: Code.NumberCondition,
+  fraction: Code.FractionCondition,
+  maybe: Code.MaybeNumberCondition,
+  json: Code.JsonCondition,
+  unknown: Code.UnknownCondition,
+  array: Code.ArrayCondition,
+  object: Code.ObjectCondition,
+  function: Code.FunctionCondition,
+};
+
+export const kTruthCodes: TruthCodes[] = [
+  kConditionCodes,
+  {
+    use: TruthUse.Not,
+    number: Code.NumberNot,
+    fraction: Code.FractionNot,
+    maybe: Code.MaybeNumberNot,
+    json: Code.JsonNot,
+    unknown: Code.UnknownNot,
+    array: Code.ArrayNot,
+    object: Code.ObjectNot,
+    function: Code.FunctionNot,
+  },
+  {
+    use: TruthUse.And,
+    number: Code.NumberAnd,
+    fraction: Code.FractionAnd,
+    maybe: Code.MaybeNumberAnd,
+    json: Code.JsonAnd,
+    unknown: Code.UnknownAnd,
+    array: Code.ArrayAnd,
+    object: Code.ObjectAnd,
+    function: Code.FunctionAnd,
+  },
+  {
+    use: TruthUse.Or,
+    number: Code.NumberOr,
+    fraction: Code.FractionOr,
+    maybe: Code.MaybeNumberOr,
+    json: Code.JsonOr,
+    unknown: Code.UnknownOr,
+    array: Code.ArrayOr,
+    object: Code.ObjectOr,
+    function: Code.FunctionOr,
+  },
+  {
+    use: TruthUse.OrAssign,
+    number: Code.NumberOrAssign,
+    fraction: Code.FractionOrAssign,
+    maybe: Code.MaybeNumberOrAssign,
+    json: Code.JsonOrAssign,
+    unknown: Code.UnknownOrAssign,
+    array: Code.ArrayOrAssign,
+    object: Code.ObjectOrAssign,
+    function: Code.FunctionOrAssign,
+  },
+  {
+    use: TruthUse.AndAssign,
+    number: Code.NumberAndAssign,
+    fraction: Code.FractionAndAssign,
+    maybe: Code.MaybeNumberAndAssign,
+    json: Code.JsonAndAssign,
+    unknown: Code.UnknownAndAssign,
+    array: Code.ArrayAndAssign,
+    object: Code.ObjectAndAssign,
+    function: Code.FunctionAndAssign,
+  },
+];

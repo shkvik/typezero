@@ -431,9 +431,9 @@ partial class ExpressionTypes {
   }
 
   private isOptionalFunction(type: UnionType): boolean {
-    const defined = this.definedType(type);
+    const defined = this.types.definedType(type);
 
-    return this.isOptional(type) && defined.kind == TypeKind.Function;
+    return this.types.isOptional(type) && defined.kind == TypeKind.Function;
   }
 
   private isUncallable(type: Type): boolean {
@@ -551,7 +551,7 @@ partial class ExpressionTypes {
     if (this.isJsonHolder(object)) {
       return this.jsonMethodCall(expr, member, module);
     }
-    const isDecimal = this.apparent(object).kind == TypeKind.Decimal;
+    const isDecimal = this.types.apparent(object).kind == TypeKind.Decimal;
     if (isDecimal && member.name != "toLocaleString") {
       return this.decimalMethodCall(expr, member, module);
     }
@@ -684,7 +684,7 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    if (!this.isOptional(object)) {
+    if (!this.types.isOptional(object)) {
       const common = this.commonBaseWith(object, member.name);
       const shaped = this.unionShapeCall(expr, member, object, common, module);
       if (shaped != undefined) {
@@ -699,7 +699,7 @@ partial class ExpressionTypes {
       return this.receiverCall(expr, member, common, wanted, module);
     }
 
-    const defined = this.definedType(object);
+    const defined = this.types.definedType(object);
     if (defined.kind == TypeKind.Json || defined.kind == TypeKind.Error) {
       return this.store.plain(TypeKind.Error);
     }
@@ -893,7 +893,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const parts = this.unionMembers(type);
+    const parts = this.types.unionMembers(type);
 
     return parts.every((part) => this.isPlainParam(part));
   }

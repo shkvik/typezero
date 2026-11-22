@@ -60,7 +60,7 @@ partial class ExpressionTypes {
 
     const hint = this.decimalOfHint(arg);
     const type = this.typed(arg, hint, module);
-    const base = this.apparent(this.definedType(type));
+    const base = this.types.apparent(this.types.definedType(type));
     if (type.kind == TypeKind.Error) {
       return error;
     }
@@ -72,13 +72,13 @@ partial class ExpressionTypes {
       base.kind == TypeKind.Int ||
       base.kind == TypeKind.Double ||
       base.kind == TypeKind.Decimal;
-    if (isNumber && !this.isOptional(type)) {
+    if (isNumber && !this.types.isOptional(type)) {
       return this.decimalType();
     }
 
     this.report(module, arg.loc, Code.DecimalOfType, {
       word: this.text.of(type),
-      place: this.maybePlace(this.isOptional(type)),
+      place: this.maybePlace(this.types.isOptional(type)),
     });
 
     return error;
@@ -103,11 +103,11 @@ partial class ExpressionTypes {
   }
 
   private isTextType(type: Type): boolean {
-    if (this.isOptional(type)) {
+    if (this.types.isOptional(type)) {
       return false;
     }
 
-    const base = this.apparent(type);
+    const base = this.types.apparent(type);
     if (base.kind == TypeKind.String || base.kind == TypeKind.Template) {
       return true;
     }
@@ -253,7 +253,7 @@ partial class ExpressionTypes {
       return this.decimalType();
     }
 
-    return this.optional(this.decimalType());
+    return this.types.optional(this.decimalType());
   }
 
   private decimalSpreadCheck(arg: CallArgument, module: int): boolean {
@@ -366,11 +366,7 @@ partial class ExpressionTypes {
     return hint;
   }
 
-  private decimalArgument(
-    arg: Expr,
-    kind: DecimalArgument,
-    module: int,
-  ): void {
+  private decimalArgument(arg: Expr, kind: DecimalArgument, module: int): void {
     switch (kind) {
       case DecimalArgument.Decimal:
         this.checked(arg, this.decimalType(), module, kNoPlace);
@@ -396,18 +392,18 @@ partial class ExpressionTypes {
   private decimalCount(arg: Expr, what: string, module: int): void {
     const int = this.store.integer(64, false);
     const type = this.typed(arg, int, module);
-    const base = this.apparent(type);
+    const base = this.types.apparent(type);
     if (type.kind == TypeKind.Error) {
       return;
     }
-    if (base.kind == TypeKind.Int && !this.isOptional(type)) {
+    if (base.kind == TypeKind.Int && !this.types.isOptional(type)) {
       return;
     }
 
     this.report(module, arg.loc, Code.DecimalCountType, {
       word: what,
       first: this.text.of(type),
-      place: this.maybePlace(this.isOptional(type)),
+      place: this.maybePlace(this.types.isOptional(type)),
     });
   }
 
@@ -557,7 +553,7 @@ partial class ExpressionTypes {
 
       this.quiet -= 1;
 
-      if (!arg.spread && this.apparent(type).kind == TypeKind.Decimal) {
+      if (!arg.spread && this.types.apparent(type).kind == TypeKind.Decimal) {
         this.report(module, arg.expr.loc, Code.MathArgumentDecimal, {
           word: this.text.of(type),
         });
@@ -576,7 +572,7 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     const isDividing = expr.op == BinaryOp.Div || expr.op == BinaryOp.Rem;
-    if (isDividing && this.apparent(tested).kind == TypeKind.Decimal) {
+    if (isDividing && this.types.apparent(tested).kind == TypeKind.Decimal) {
       this.decimalZeroCheck(expr.value, module);
     }
   }

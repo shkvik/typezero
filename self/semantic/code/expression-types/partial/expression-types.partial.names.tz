@@ -150,7 +150,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const goal = this.definedType(wanted);
+    const goal = this.types.definedType(wanted);
 
     return goal.kind == TypeKind.Dict && goal.dict == DictKind.Record;
   }

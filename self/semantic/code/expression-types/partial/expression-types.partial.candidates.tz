@@ -226,13 +226,13 @@ partial class ExpressionTypes {
     pattern: UnionType,
     actual: Type,
   ): void {
-    if (this.isOptional(pattern)) {
+    if (this.types.isOptional(pattern)) {
       if (actual.kind == TypeKind.Undefined) {
         return;
       }
 
-      const inner = this.definedType(pattern);
-      const value = this.definedType(actual);
+      const inner = this.types.definedType(pattern);
+      const value = this.types.definedType(actual);
 
       return this.inferPair(set, inner, value);
     }
@@ -252,7 +252,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const value = this.definedType(actual);
+    const value = this.types.definedType(actual);
     const members = this.partsOfType(value);
     const rest = members.filter((member) => !fixed.includes(member));
     if (rest.length == 0) {
@@ -273,7 +273,7 @@ partial class ExpressionTypes {
   }
 
   private inferMember(set: InferenceSet, open: Type[], actual: Type): void {
-    const value = this.definedType(actual);
+    const value = this.types.definedType(actual);
 
     for (const member of open) {
       if (this.isInstanceOfMember(value, member)) {

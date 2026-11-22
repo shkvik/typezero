@@ -68,7 +68,7 @@ partial class ExpressionTypes {
   }
 
   private dateConstant(arg: Expr, type: Type, module: int): int | undefined {
-    const base = this.apparent(type);
+    const base = this.types.apparent(type);
     const value = this.intConstant(arg, base, module);
     if (value == undefined) {
       return undefined;

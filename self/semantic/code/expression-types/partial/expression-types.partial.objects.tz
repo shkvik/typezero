@@ -25,7 +25,7 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const target = this.wantedPart(wanted);
+    const target = this.types.wantedPart(wanted);
     if (target != undefined && target.kind == TypeKind.Json) {
       return this.jsonObject(expr, target, module);
     }
@@ -203,7 +203,7 @@ partial class ExpressionTypes {
   }
 
   private reportKey(key: Expr, keyType: Type, module: int): void {
-    const plain = this.definedType(keyType);
+    const plain = this.types.definedType(keyType);
     if (this.isNumeric(plain)) {
       return this.report(module, key.loc, Code.NumberKey, kNoDetails);
     }
@@ -334,7 +334,9 @@ partial class ExpressionTypes {
     const names: string[] = [];
 
     for (const field of target.fields) {
-      const count = target.fields.filter((one) => one.name == field.name).length;
+      const count = target.fields.filter(
+        (one) => one.name == field.name,
+      ).length;
       if (count > 1 && !names.includes(field.name)) {
         names.push(field.name);
       }
@@ -364,11 +366,11 @@ partial class ExpressionTypes {
       return field.type;
     }
 
-    return this.optional(field.type);
+    return this.types.optional(field.type);
   }
 
   private isOptionalField(field: ObjectField): boolean {
-    return field.optional || this.isOptional(field.type);
+    return field.optional || this.types.isOptional(field.type);
   }
 
   private fieldPlace(name: string): string {
@@ -467,7 +469,7 @@ partial class ExpressionTypes {
       return 0;
     }
 
-    const fieldType = this.definedType(field.type);
+    const fieldType = this.types.definedType(field.type);
     const isChoice =
       this.isLiteralSet(fieldType) || fieldType.kind == TypeKind.Union;
     const isConvertible = this.isTagConvertible(tag, fieldType);

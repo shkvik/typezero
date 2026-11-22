@@ -63,7 +63,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const value = this.definedType(object.value);
+    const value = this.types.definedType(object.value);
     const isMethod = kResultMethods.some((one) => one.name == member.name);
     if (value.kind != TypeKind.Result || !isMethod) {
       return false;

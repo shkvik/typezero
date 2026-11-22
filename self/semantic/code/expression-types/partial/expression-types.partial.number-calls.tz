@@ -19,7 +19,7 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): boolean {
-    const base = this.apparent(object);
+    const base = this.types.apparent(object);
     if (base.kind != TypeKind.Double) {
       return false;
     }
@@ -85,7 +85,7 @@ partial class ExpressionTypes {
     this.quiet += 1;
 
     const types = expr.args.map((arg) =>
-      this.apparent(this.typed(arg.expr, undefined, module)),
+      this.types.apparent(this.typed(arg.expr, undefined, module)),
     );
 
     this.quiet -= 1;
@@ -159,7 +159,9 @@ partial class ExpressionTypes {
 
     for (const arg of expr.args) {
       if (!arg.spread) {
-        const type = this.apparent(this.typed(arg.expr, undefined, module));
+        const type = this.types.apparent(
+          this.typed(arg.expr, undefined, module),
+        );
 
         hasValue = true;
         isNumeric = isNumeric && this.isMathNumber(type);
@@ -196,12 +198,12 @@ partial class ExpressionTypes {
       return common;
     }
 
-    return this.optional(common);
+    return this.types.optional(common);
   }
 
   private spreadNumbers(arg: Expr, module: int): Type | undefined {
     const type = this.typed(arg, undefined, module);
-    const base = this.apparent(type);
+    const base = this.types.apparent(type);
     if (base.kind == TypeKind.Error) {
       return undefined;
     }
@@ -231,7 +233,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return this.apparent(item);
+    return this.types.apparent(item);
   }
 
   private isFilledSource(arg: Expr, module: int): boolean {

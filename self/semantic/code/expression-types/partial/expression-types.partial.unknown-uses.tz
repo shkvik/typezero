@@ -99,7 +99,7 @@ partial class ExpressionTypes {
   private unknownCheckText(expr: Expr, given: Type, wanted: Type): string {
     const shown = this.operandName(expr);
     const only = this.onlyPart(wanted);
-    const target = this.definedType(only);
+    const target = this.types.definedType(only);
     if (target.kind == TypeKind.Instance) {
       return `${shown} instanceof ${this.text.of(target)}`;
     }
@@ -111,7 +111,7 @@ partial class ExpressionTypes {
   }
 
   private typeofCheckText(shown: string, target: Type): string {
-    const base = this.apparent(target);
+    const base = this.types.apparent(target);
 
     switch (base.kind) {
       case TypeKind.Int:

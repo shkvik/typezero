@@ -17,7 +17,7 @@ partial class ExpressionTypes {
     const error = this.store.plain(TypeKind.Error);
     const object = loop.iterable;
     const text = this.forInText(object, iterable);
-    const base = this.apparent(iterable);
+    const base = this.types.apparent(iterable);
     const indexed = this.indexedWord(base);
     if (indexed != undefined) {
       this.report(module, object.loc, Code.ForInIndices, {
@@ -29,8 +29,8 @@ partial class ExpressionTypes {
       return error;
     }
 
-    const defined = this.apparent(this.definedType(iterable));
-    if (this.isOptional(iterable) && this.isKeyHolder(defined)) {
+    const defined = this.types.apparent(this.types.definedType(iterable));
+    if (this.types.isOptional(iterable) && this.isKeyHolder(defined)) {
       this.report(module, object.loc, Code.ForInUndefined, kNoDetails);
 
       return error;
@@ -61,7 +61,7 @@ partial class ExpressionTypes {
       return object.name;
     }
 
-    const base = this.apparent(type);
+    const base = this.types.apparent(type);
     if (base.kind == TypeKind.String || base.kind == TypeKind.Template) {
       return "s";
     }

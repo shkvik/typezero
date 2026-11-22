@@ -19,7 +19,6 @@ import {
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
 import { TypeRefKind } from "../../../../program/ast/types/ast.types.types.tz";
-import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
 import { kThisParameter } from "../../../types/type-resolver/const/type-resolver.const.tables.tz";
 import {
   DoorState,
@@ -397,7 +396,7 @@ partial class ExpressionTypes {
       return type;
     }
 
-    return this.optional(type);
+    return this.types.optional(type);
   }
 
   private methodParameter(
@@ -488,7 +487,7 @@ partial class ExpressionTypes {
       inner.kind == TypeKind.Error ||
       inner.kind == TypeKind.Unknown ||
       inner.kind == TypeKind.Undefined ||
-      this.isOptional(inner);
+      this.types.isOptional(inner);
     if (isOpen || this.isAlwaysReturning(body, module)) {
       return;
     }
@@ -603,7 +602,7 @@ partial class ExpressionTypes {
       frame.hasEmptyReturn ||
       returns.some((one) => one.type.kind == TypeKind.Undefined);
     if (common != undefined && isUndefined && common.kind != TypeKind.Void) {
-      return this.optional(common);
+      return this.types.optional(common);
     }
     if (common != undefined) {
       return common;
@@ -705,7 +704,7 @@ partial class ExpressionTypes {
     wanted: Type,
     module: int,
   ): boolean {
-    const target = this.definedType(wanted);
+    const target = this.types.definedType(wanted);
     const isPair =
       given.kind == TypeKind.Function && target.kind == TypeKind.Function;
     if (expr.kind != ExprKind.Name || !isPair) {

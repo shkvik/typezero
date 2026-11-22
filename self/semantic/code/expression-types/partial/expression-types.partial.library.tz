@@ -259,12 +259,13 @@ partial class ExpressionTypes {
     module: int,
   ): Type | undefined {
     const name = member.name;
-    const base = this.apparent(object);
+    const base = this.types.apparent(object);
     if (base.kind == TypeKind.Array && kTakenMethods.includes(name)) {
       return this.takenItem(member, base.item, module);
     }
 
-    const isText = base.kind == TypeKind.String || base.kind == TypeKind.Template;
+    const isText =
+      base.kind == TypeKind.String || base.kind == TypeKind.Template;
     const index = expr.args[0]?.expr;
     if (!isText || index == undefined || !kCodeMethods.includes(name)) {
       return undefined;
@@ -278,7 +279,7 @@ partial class ExpressionTypes {
       return int;
     }
 
-    return this.optional(int);
+    return this.types.optional(int);
   }
 
   private takenItem(member: MemberExpr, item: Type, module: int): Type {
@@ -290,7 +291,7 @@ partial class ExpressionTypes {
       return item;
     }
 
-    return this.optional(item);
+    return this.types.optional(item);
   }
 
   private valueMissingCheck(
@@ -319,7 +320,7 @@ partial class ExpressionTypes {
   }
 
   private isPlainReceiver(object: Type): boolean {
-    const base = this.apparent(object);
+    const base = this.types.apparent(object);
 
     switch (base.kind) {
       case TypeKind.String:
@@ -444,14 +445,14 @@ partial class ExpressionTypes {
     }
 
     return method.shape.params.map((param) => {
-      const base = this.definedType(param.type);
+      const base = this.types.definedType(param.type);
 
       return base.kind == TypeKind.Int && !base.wraps;
     });
   }
 
   private receiverKind(object: Type): CallKind {
-    const base = this.apparent(object);
+    const base = this.types.apparent(object);
 
     switch (base.kind) {
       case TypeKind.String:
@@ -588,7 +589,7 @@ partial class ExpressionTypes {
       const type = this.resolver.resolve(written, context);
 
       if (form.optional) {
-        return this.optional(type);
+        return this.types.optional(type);
       }
 
       return type;

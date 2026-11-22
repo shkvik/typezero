@@ -44,8 +44,8 @@ partial class ExpressionTypes {
   ): void {
     const left = pair.left;
     const right = pair.right;
-    const plainLeft = this.definedType(left);
-    const plainRight = this.definedType(right);
+    const plainLeft = this.types.definedType(left);
+    const plainRight = this.types.definedType(right);
 
     if (left.kind == TypeKind.Error || right.kind == TypeKind.Error) {
       return;
@@ -158,7 +158,7 @@ partial class ExpressionTypes {
   }
 
   private comparisonHint(other: Type, self: Expr): Type | undefined {
-    const type = this.definedType(other);
+    const type = this.types.definedType(other);
     if (type.kind == TypeKind.Literal || type.kind == TypeKind.Union) {
       return other;
     }
@@ -206,7 +206,7 @@ partial class ExpressionTypes {
     const isRightNull = this.isNullSide(expr.rhs, module);
     const nullSide = this.nullOperand(isLeftNull, expr);
     const type = this.nullOther(isLeftNull, isRightNull, expr, module);
-    const plain = this.definedType(type);
+    const plain = this.types.definedType(type);
     if (type.kind == TypeKind.Error || plain.kind == TypeKind.Json) {
       return;
     }
@@ -244,13 +244,13 @@ partial class ExpressionTypes {
   private jsonEquality(expr: BinaryExpr, pair: OperandPair, module: int): void {
     const left = pair.left;
     const right = pair.right;
-    const isLeftJson = this.definedType(left).kind == TypeKind.Json;
-    const isRightJson = this.definedType(right).kind == TypeKind.Json;
+    const isLeftJson = this.types.definedType(left).kind == TypeKind.Json;
+    const isRightJson = this.types.definedType(right).kind == TypeKind.Json;
     const type = this.otherSide(isLeftJson, left, right);
     const json = this.store.plain(TypeKind.Json);
-    const plain = this.definedType(type);
+    const plain = this.types.definedType(type);
     const isOptionalJson =
-      this.isOptional(type) && this.relation.converts(plain, json);
+      this.types.isOptional(type) && this.relation.converts(plain, json);
     if ((isLeftJson && isRightJson) || isOptionalJson) {
       return;
     }
@@ -276,7 +276,7 @@ partial class ExpressionTypes {
       return common;
     }
 
-    const base = this.definedType(common);
+    const base = this.types.definedType(common);
     if (!this.isComparable(base)) {
       return undefined;
     }
@@ -319,8 +319,8 @@ partial class ExpressionTypes {
   ): void {
     const left = pair.left;
     const right = pair.right;
-    const plainLeft = this.definedType(left);
-    const plainRight = this.definedType(right);
+    const plainLeft = this.types.definedType(left);
+    const plainRight = this.types.definedType(right);
     const hasDecimal =
       plainLeft.kind == TypeKind.Decimal || plainRight.kind == TypeKind.Decimal;
     if (hasDecimal) {
@@ -330,8 +330,8 @@ partial class ExpressionTypes {
     const hasNumbers =
       this.isNumeric(plainLeft) &&
       this.isNumeric(plainRight) &&
-      !this.isOptional(left) &&
-      !this.isOptional(right);
+      !this.types.isOptional(left) &&
+      !this.types.isOptional(right);
     if (hasNumbers) {
       return this.reportMixed(expr, pair, module);
     }
@@ -349,8 +349,8 @@ partial class ExpressionTypes {
       return boolean;
     }
 
-    const left = this.apparent(written);
-    const right = this.apparent(sides.right.type);
+    const left = this.types.apparent(written);
+    const right = this.types.apparent(sides.right.type);
 
     this.orderOperands(expr, { left, right }, module);
 
@@ -407,7 +407,7 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    const expected = this.wantedPart(wanted);
+    const expected = this.types.wantedPart(wanted);
     const left = this.typed(expr.lhs, expected, module);
     if (left.kind == TypeKind.Error) {
       return left;
@@ -435,8 +435,8 @@ partial class ExpressionTypes {
 
       return this.store.plain(TypeKind.Error);
     }
-    if (this.isOptional(right) || right.kind == TypeKind.Undefined) {
-      return this.optional(base);
+    if (this.types.isOptional(right) || right.kind == TypeKind.Undefined) {
+      return this.types.optional(base);
     }
 
     return base;
@@ -450,17 +450,17 @@ partial class ExpressionTypes {
       return expected;
     }
 
-    return this.definedType(left);
+    return this.types.definedType(left);
   }
 
   private nullishBase(left: Type, right: Type): Type | undefined {
-    const plainLeft = this.definedType(left);
+    const plainLeft = this.types.definedType(left);
 
     if (right.kind == TypeKind.Undefined) {
       return plainLeft;
     }
 
-    const plainRight = this.definedType(right);
+    const plainRight = this.types.definedType(right);
 
     return this.unionUnify(plainLeft, plainRight);
   }

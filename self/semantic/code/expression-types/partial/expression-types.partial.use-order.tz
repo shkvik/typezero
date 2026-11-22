@@ -189,10 +189,10 @@ partial class ExpressionTypes {
   }
 
   private heldValue(type: Type): Type {
-    let held = this.definedType(type);
+    let held = this.types.definedType(type);
 
     while (held.kind == TypeKind.Array) {
-      held = this.definedType(held.item);
+      held = this.types.definedType(held.item);
     }
 
     return held;
@@ -262,7 +262,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const word = this.text.of(this.definedType(element));
+    const word = this.text.of(this.types.definedType(element));
     const other = this.sortExample(element);
 
     this.report(module, member.loc, code, { word, other });
@@ -300,7 +300,7 @@ partial class ExpressionTypes {
   }
 
   private plainSortProblem(element: Type): Code | undefined {
-    const base = this.definedType(element);
+    const base = this.types.definedType(element);
     if (base.kind == TypeKind.Union && !this.isTextualUnion(base.parts)) {
       return Code.SortMixed;
     }
@@ -326,7 +326,7 @@ partial class ExpressionTypes {
   }
 
   private sortExample(element: Type): string {
-    if (this.isOptional(element)) {
+    if (this.types.isOptional(element)) {
       return "(x ?? 0) - (y ?? 0)";
     }
 

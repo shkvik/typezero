@@ -103,7 +103,7 @@ partial class ExpressionTypes {
       case TypeKind.TypeParameter:
         return true;
       default:
-        return this.isOptional(type);
+        return this.types.isOptional(type);
     }
   }
 
@@ -119,7 +119,7 @@ partial class ExpressionTypes {
 
     this.quiet -= 1;
 
-    if (!this.isOptional(type) || target.optional) {
+    if (!this.types.isOptional(type) || target.optional) {
       return false;
     }
     if (this.isJsonHolder(type)) {

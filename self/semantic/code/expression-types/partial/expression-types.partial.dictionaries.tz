@@ -91,7 +91,7 @@ partial class ExpressionTypes {
   private recordKey(key: Expr, module: int): void {
     const text = this.store.plain(TypeKind.String);
     const keyType = this.typed(key, text, module);
-    const plain = this.definedType(keyType);
+    const plain = this.types.definedType(keyType);
     if (this.isNumeric(plain)) {
       const first = this.text.of(keyType);
 
@@ -162,8 +162,8 @@ partial class ExpressionTypes {
   }
 
   private jsonTarget(json: Type, given: Type): Type {
-    if (this.isOptional(given) || given.kind == TypeKind.Undefined) {
-      return this.optional(json);
+    if (this.types.isOptional(given) || given.kind == TypeKind.Undefined) {
+      return this.types.optional(json);
     }
 
     return json;

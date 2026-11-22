@@ -1,0 +1,49 @@
+import { Code } from "../../../../diagnostic/code.tz";
+import { Details } from "../../../../diagnostic/types/message.types.tz";
+import { Type } from "../../../../program/type/types/type.types.tz";
+
+export enum TruthUse {
+  Condition,
+  Not,
+  And,
+  Or,
+  OrAssign,
+  AndAssign,
+}
+
+export enum TruthProblem {
+  None,
+  Void,
+  Parameter,
+  UnionTruthy,
+  UnionNumber,
+  Json,
+  Unknown,
+  Result,
+  Number,
+  Truthy,
+}
+
+export type TruthCodes = {
+  readonly use: TruthUse;
+  readonly number: Code;
+  readonly fraction: Code;
+  readonly maybe: Code;
+  readonly json: Code;
+  readonly unknown: Code;
+  readonly array: Code;
+  readonly object: Code;
+  readonly function: Code;
+};
+
+export type TruthTexts = {
+  readonly word: string;
+  readonly other: string;
+  readonly isLength: boolean;
+};
+
+export type TruthAnswer = {
+  readonly code: Code;
+  readonly details: Details;
+  readonly base: Type;
+};

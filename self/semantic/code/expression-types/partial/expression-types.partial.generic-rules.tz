@@ -102,13 +102,13 @@ partial class ExpressionTypes {
     home: int,
     module: int,
   ): void {
-    const base = this.definedType(left);
+    const base = this.types.definedType(left);
     if (this.isOpenTested(base) || decl.typeParams.length == 0) {
       return;
     }
 
     const word = decl.name ?? "";
-    const parts = this.unionMembers(base);
+    const parts = this.types.unionMembers(base);
     const isMatching = parts.some((part) => this.isInstanceOfClass(part, word));
     if (isMatching) {
       return;

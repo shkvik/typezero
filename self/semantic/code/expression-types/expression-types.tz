@@ -14,7 +14,7 @@ import "./partial/expression-types.partial.constants.tz";
 import "./partial/expression-types.partial.folding.tz";
 import "./partial/expression-types.partial.comparisons.tz";
 import "./partial/expression-types.partial.typeof.tz";
-import "./partial/expression-types.partial.truth.tz";
+import "../../flow/expression-types/expression-types.partial.truth.tz";
 import "./partial/expression-types.partial.logic.tz";
 import "./partial/expression-types.partial.index.tz";
 import "./partial/expression-types.partial.names.tz";
@@ -120,11 +120,15 @@ import {
   ValueTarget,
   VariableDoor,
 } from "./types/expression-types.types.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { TruthRules } from "../../flow/truth-rules/truth-rules.tz";
 
 export class ExpressionTypes {
   private readonly store: TypeStore;
   private readonly text: TypeText;
   private readonly relation: TypeRelation;
+  private readonly types: TypeQuestions;
+  private readonly truth: TruthRules;
   private readonly resolver: TypeResolver;
   private readonly program: Program;
   private readonly scopes: Map<int, ModuleScopes>;
@@ -181,9 +185,15 @@ export class ExpressionTypes {
     program: Program,
     resolved: ModuleScopes[],
   ) {
+    const relation = new TypeRelation(store);
+    const text = new TypeText(store);
+    const types = new TypeQuestions(store, relation);
+
     this.store = store;
-    this.text = new TypeText(store);
-    this.relation = new TypeRelation(store);
+    this.text = text;
+    this.relation = relation;
+    this.types = types;
+    this.truth = new TruthRules(store, text, relation, types);
     this.resolver = resolver;
     this.program = program;
     this.scopes = new Map<int, ModuleScopes>();

@@ -1,6 +1,5 @@
 import { ExpressionTypes } from "../expression-types.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
   BinaryExpr,
   BinaryOp,
@@ -97,7 +96,7 @@ partial class ExpressionTypes {
   ): void {
     const left = pair.left;
     const right = pair.right;
-    const isLeftDecimal = this.definedType(left).kind == TypeKind.Decimal;
+    const isLeftDecimal = this.types.definedType(left).kind == TypeKind.Decimal;
     const other = this.otherSide(isLeftDecimal, left, right);
     const op = this.operatorText(expr.op);
     const texts = this.operandTexts(expr, module);
@@ -114,7 +113,7 @@ partial class ExpressionTypes {
         word,
       });
     }
-    if (this.definedType(other).kind != TypeKind.Double) {
+    if (this.types.definedType(other).kind != TypeKind.Double) {
       return this.reportOperands(expr, pair, module);
     }
     if (other.kind != TypeKind.Double) {

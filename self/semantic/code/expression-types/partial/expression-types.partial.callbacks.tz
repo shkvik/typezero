@@ -259,7 +259,7 @@ partial class ExpressionTypes {
 
       return;
     }
-    const kind = this.definedType(result).kind;
+    const kind = this.types.definedType(result).kind;
     if (kind == TypeKind.Promise) {
       const loc = this.conciseValueLoc(arg);
 
@@ -329,7 +329,7 @@ partial class ExpressionTypes {
       case TypeKind.Error:
         return true;
       case TypeKind.Literal:
-        return this.isNumberMember(result);
+        return this.truth.isNumberMember(result);
       default:
         return false;
     }
@@ -432,7 +432,7 @@ partial class ExpressionTypes {
 
       const isFitting =
         param.type == given ||
-        (param.optional && this.definedType(param.type) == given);
+        (param.optional && this.types.definedType(param.type) == given);
       if (!isFitting) {
         this.report(module, arg.loc, Code.CallbackParamType, {
           word: name,
@@ -614,7 +614,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const goal = this.definedType(wanted);
+    const goal = this.types.definedType(wanted);
     if (goal.kind != TypeKind.Function || !this.isGlobalUse(expr, module)) {
       return undefined;
     }
@@ -695,7 +695,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    return this.definedType(wanted).kind == TypeKind.Function;
+    return this.types.definedType(wanted).kind == TypeKind.Function;
   }
 
   private holderValueCheck(

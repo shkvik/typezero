@@ -74,7 +74,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const base = this.definedType(left);
+    const base = this.types.definedType(left);
     const isOpaque =
       base.kind == TypeKind.Unknown || base.kind == TypeKind.AnyObject;
     const example = kCollectionExamples.find((one) => one.name == word);
@@ -113,7 +113,7 @@ partial class ExpressionTypes {
         first: this.text.of(left),
       });
     }
-    if (this.isOptional(left) && this.isCollectionOf(word, base)) {
+    if (this.types.isOptional(left) && this.isCollectionOf(word, base)) {
       return this.report(module, expr.loc, Code.InstanceOfOrUndefined, {
         first: this.text.of(base),
       });
@@ -133,7 +133,7 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     const matching = parts.filter((part) => this.isCollectionOf(word, part));
-    const first = this.text.of(this.definedType(left));
+    const first = this.text.of(this.types.definedType(left));
     if (matching.length == 0) {
       return this.report(module, expr.loc, Code.InstanceOfNoneBuiltin, {
         word,
@@ -142,7 +142,7 @@ partial class ExpressionTypes {
     }
 
     const isAll = matching.length == parts.length;
-    if (isAll && !this.isOptional(left)) {
+    if (isAll && !this.types.isOptional(left)) {
       this.report(module, expr.loc, Code.InstanceOfAllBuiltin, {
         word,
         first,
@@ -217,7 +217,7 @@ partial class ExpressionTypes {
     decl: ClassDecl,
     module: int,
   ): void {
-    const base = this.definedType(left);
+    const base = this.types.definedType(left);
     const word = decl.name ?? "";
     const first = this.text.of(base);
 

@@ -1,233 +1,110 @@
-import { ExpressionTypes } from "../expression-types.tz";
-import { Code } from "../../../../diagnostic/code.tz";
-import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
-import { Details } from "../../../../diagnostic/types/message.types.tz";
-import {
-  CallExpr,
-  Expr,
-  ExprKind,
-} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
+import { Details } from "../../../diagnostic/types/message.types.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
 import {
   LiteralKind,
   Type,
   TypeKind,
-} from "../../../../program/type/types/type.types.tz";
+} from "../../../program/type/types/type.types.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { TypeRelation } from "../../types/type-relation/type-relation.tz";
 import {
   kArgumentsCall,
-  kBooleanName,
   kClassNoun,
-  kDateName,
-  kNumberName,
+  kConditionCodes,
   kDecimalNoun,
-  kLengthName,
   kMaybeSuffix,
-  kNarrowedCodes,
   kNegation,
   kNumberNoun,
   kObjectNoun,
-  kOtherPlaceholder,
   kPlainCall,
   kPromiseNoun,
   kTruthCodes,
-  kUnnamedOperand,
-} from "../const/expression-types.const.tz";
+} from "./const/truth-rules.const.tz";
 import {
-  CallbackPlan,
+  TruthAnswer,
   TruthCodes,
   TruthProblem,
+  TruthTexts,
   TruthUse,
-} from "../types/expression-types.types.tz";
+} from "./types/truth-rules.types.tz";
 
-partial class ExpressionTypes {
-  private checkTruthy(
-    expr: Expr,
-    type: Type,
-    use: TruthUse,
-    other: Expr | undefined,
-    module: int,
-    shown: string = "",
-  ): boolean {
+export class TruthRules {
+  private readonly store: TypeStore;
+  private readonly text: TypeText;
+  private readonly relation: TypeRelation;
+  private readonly types: TypeQuestions;
+
+  public constructor(
+    store: TypeStore,
+    text: TypeText,
+    relation: TypeRelation,
+    types: TypeQuestions,
+  ) {
+    this.store = store;
+    this.text = text;
+    this.relation = relation;
+    this.types = types;
+  }
+
+  public problemOf(type: Type): TruthProblem {
     if (type.kind == TypeKind.Void) {
-      this.report(module, expr.loc, Code.VoidTested, kNoDetails);
-
-      return false;
+      return TruthProblem.Void;
+    }
+    if (this.openParameterOf(type) != undefined) {
+      return TruthProblem.Parameter;
     }
 
-    const base = this.apparent(this.definedType(type));
+    const base = this.baseOf(type);
+
+    return this.typeProblem(type, base);
+  }
+
+  public answerOf(type: Type, use: TruthUse, texts: TruthTexts): TruthAnswer {
+    const base = this.baseOf(type);
+    if (type.kind == TypeKind.Void) {
+      return { code: Code.VoidTested, details: kNoDetails, base };
+    }
 
     const parameter = this.openParameterOf(type);
     if (parameter != undefined) {
-      const word = this.shownWord(expr, shown);
-      const first = this.text.of(type);
-      const second = this.text.of(parameter);
-      const tail = this.otherHint(other);
-      const code = this.parameterTruthCode(use);
-
-      this.report(module, expr.loc, code, {
-        word,
-        first,
-        second,
-        other: tail,
-      });
-
-      return false;
+      return this.parameterAnswer(type, parameter, use, texts);
     }
 
-    const problem = this.truthProblem(type, base);
-    if (problem == TruthProblem.None) {
-      return true;
-    }
-
-    const codes = kTruthCodes.find((row) => row.use == use);
-    if (codes == undefined) {
-      return false;
-    }
-
-    const word = this.shownWord(expr, shown);
-    const otherText = this.otherHint(other);
+    const problem = this.typeProblem(type, base);
+    const codes = this.codesOf(use);
     const truthCode = this.truthCode(problem, codes, type, base, use);
-    const code = this.lengthCode(expr, truthCode);
-    const narrowed = this.narrowedCode(expr, code, module);
-    if (narrowed != undefined) {
-      const first = this.holderNoun(base);
+    const code = this.lengthCode(texts.isLength, truthCode);
+    const word = texts.word;
+    const other = texts.other;
+    const details = this.truthDetails(code, type, base, word, other, use);
 
-      this.report(module, expr.loc, narrowed, { word, first });
-
-      return false;
-    }
-
-    const details = this.truthDetails(code, type, base, word, otherText, use);
-    const shownCode = this.classNameCode(expr, code, base, module);
-
-    this.report(module, expr.loc, shownCode, details);
-
-    return false;
+    return { code, details, base };
   }
 
-  private shownWord(expr: Expr, shown: string): string {
-    if (shown != "") {
-      return shown;
-    }
+  public isNumberMember(member: Type): boolean {
+    const plain = this.relation.baseOf(member) ?? member;
+    const isOpen =
+      plain.kind == TypeKind.TypeParameter || plain.kind == TypeKind.Json;
 
-    return this.hintText(expr, kUnnamedOperand);
+    return this.types.isNumberLike(plain) || isOpen;
   }
 
-  private booleanCallCheck(expr: CallExpr, module: int): void {
-    const callee = expr.callee;
-    const arg = expr.args[0];
-    const isBoolean =
-      callee.kind == ExprKind.Name &&
-      callee.name == kBooleanName &&
-      this.isGlobalUse(callee, module);
-    if (!isBoolean || arg == undefined || expr.args.length != 1) {
-      return;
-    }
-
-    this.quiet += 1;
-
-    const type = this.typed(arg.expr, undefined, module);
-
-    this.quiet -= 1;
-    this.checkTruthy(arg.expr, type, TruthUse.Condition, undefined, module);
-  }
-
-  private numberCallCheck(expr: CallExpr, module: int): void {
-    const callee = expr.callee;
-    const arg = expr.args[0];
-    const isNumber =
-      callee.kind == ExprKind.Name &&
-      callee.name == kNumberName &&
-      this.isGlobalUse(callee, module);
-    if (!isNumber || arg == undefined || expr.args.length != 1) {
-      return;
-    }
-
-    this.quiet += 1;
-
-    const type = this.typed(arg.expr, undefined, module);
-
-    this.quiet -= 1;
-
-    const code = this.numberSourceCode(type);
-    if (code != undefined) {
-      this.report(module, arg.expr.loc, code, { word: this.text.of(type) });
-    }
-  }
-
-  private numberSourceCode(type: Type): Code | undefined {
-    if (type.kind == TypeKind.Error) {
-      return undefined;
-    }
-    if (this.isOptional(type) || type.kind == TypeKind.Undefined) {
-      return Code.NumberOfUndefined;
-    }
-
-    const base = this.apparent(type);
-
+  public isTruthyObject(base: Type): boolean {
     switch (base.kind) {
-      case TypeKind.Int:
-      case TypeKind.Double:
-      case TypeKind.Decimal:
-      case TypeKind.Boolean:
-      case TypeKind.String:
-      case TypeKind.Template:
-      case TypeKind.Error:
-      case TypeKind.TypeParameter:
-        return undefined;
-      case TypeKind.Instance:
-        return this.dateSourceCode(base.name);
+      case TypeKind.Iterator:
+      case TypeKind.Dict:
+      case TypeKind.Promise:
+      case TypeKind.Class:
+        return true;
       default:
-        return Code.NumberOfWrongType;
+        return this.types.isObjectKind(base);
     }
   }
 
-  private dateSourceCode(name: string): Code | undefined {
-    if (name == kDateName) {
-      return undefined;
-    }
-
-    return Code.NumberOfWrongType;
-  }
-
-  private booleanCallbackCheck(
-    arg: Expr,
-    plan: CallbackPlan,
-    module: int,
-  ): void {
-    const isBoolean =
-      arg.kind == ExprKind.Name &&
-      arg.name == kBooleanName &&
-      this.isGlobalUse(arg, module);
-    const item = plan.params[0];
-    if (!isBoolean || item == undefined) {
-      return;
-    }
-
-    const use = TruthUse.Condition;
-
-    this.checkTruthy(arg, item, use, undefined, module, kUnnamedOperand);
-  }
-
-  private narrowedCode(expr: Expr, code: Code, module: int): Code | undefined {
-    const row = kNarrowedCodes.find((one) => one.code == code);
-    if (row == undefined || expr.kind != ExprKind.Name) {
-      return undefined;
-    }
-
-    const target = this.targetOfName(expr, module);
-    if (target == undefined || this.factOf(target) == undefined) {
-      return undefined;
-    }
-
-    const declared = this.declaredOf(target);
-    if (declared == undefined || !this.isOptional(declared)) {
-      return undefined;
-    }
-
-    return row.narrowed;
-  }
-
-  private holderNoun(base: Type): string {
+  public holderNoun(base: Type): string {
     switch (base.kind) {
       case TypeKind.Array:
         return "an array";
@@ -242,14 +119,39 @@ partial class ExpressionTypes {
     }
   }
 
-  private isOpenParameter(type: Type): boolean {
-    const isParameter = type.kind == TypeKind.TypeParameter;
+  private baseOf(type: Type): Type {
+    const plain = this.types.definedType(type);
 
-    return isParameter && this.store.constraintOf(type) == undefined;
+    return this.types.apparent(plain);
+  }
+
+  private parameterAnswer(
+    type: Type,
+    parameter: Type,
+    use: TruthUse,
+    texts: TruthTexts,
+  ): TruthAnswer {
+    const code = this.parameterTruthCode(use);
+    const first = this.text.of(type);
+    const second = this.text.of(parameter);
+    const details: Details = {
+      word: texts.word,
+      first,
+      second,
+      other: texts.other,
+    };
+
+    return { code, details, base: parameter };
+  }
+
+  private codesOf(use: TruthUse): TruthCodes {
+    const codes = kTruthCodes.find((row) => row.use == use);
+
+    return codes ?? kConditionCodes;
   }
 
   private openParameterOf(type: Type): Type | undefined {
-    const base = this.definedType(type);
+    const base = this.types.definedType(type);
     const isParameter = base.kind == TypeKind.TypeParameter;
     if (!isParameter || this.store.constraintOf(base) != undefined) {
       return undefined;
@@ -275,15 +177,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private otherHint(other: Expr | undefined): string {
-    if (other == undefined) {
-      return kOtherPlaceholder;
-    }
-
-    return this.hintText(other, kOtherPlaceholder);
-  }
-
-  private truthProblem(type: Type, base: Type): TruthProblem {
+  private typeProblem(type: Type, base: Type): TruthProblem {
     if (this.isTestable(type, base)) {
       return TruthProblem.None;
     }
@@ -321,7 +215,7 @@ partial class ExpressionTypes {
       return true;
     }
 
-    return this.isOptional(type) && this.isHolder(base);
+    return this.types.isOptional(type) && this.isHolder(base);
   }
 
   private isHolder(base: Type): boolean {
@@ -335,13 +229,13 @@ partial class ExpressionTypes {
       case TypeKind.Promise:
         return true;
       default:
-        return this.isObjectKind(base);
+        return this.types.isObjectKind(base);
     }
   }
 
   private unionTruthProblem(type: Type, base: Type): TruthProblem {
     const number = this.unionNumber(base);
-    const isFalsy = this.isOptional(type) || this.hasFalsyMember(base);
+    const isFalsy = this.types.isOptional(type) || this.hasFalsyMember(base);
 
     if (number != undefined) {
       return TruthProblem.UnionNumber;
@@ -353,18 +247,10 @@ partial class ExpressionTypes {
     return TruthProblem.UnionTruthy;
   }
 
-  private unionMembers(base: Type): Type[] {
-    if (base.kind != TypeKind.Union) {
-      return [base];
-    }
-
-    return base.parts;
-  }
-
   private unionNumber(base: Type): Type | undefined {
     let number: Type | undefined = undefined;
 
-    for (const member of this.unionMembers(base)) {
+    for (const member of this.types.unionMembers(base)) {
       if (this.isNumberMember(member)) {
         number = member;
       }
@@ -373,16 +259,10 @@ partial class ExpressionTypes {
     return number;
   }
 
-  private isNumberMember(member: Type): boolean {
-    const plain = this.relation.baseOf(member) ?? member;
-    const isOpen =
-      plain.kind == TypeKind.TypeParameter || plain.kind == TypeKind.Json;
-
-    return this.isNumberLike(plain) || isOpen;
-  }
-
   private hasFalsyMember(base: Type): boolean {
-    return this.unionMembers(base).some((member) => this.isFalsyMember(member));
+    return this.types
+      .unionMembers(base)
+      .some((member) => this.isFalsyMember(member));
   }
 
   private isFalsyMember(member: Type): boolean {
@@ -421,8 +301,8 @@ partial class ExpressionTypes {
     }
   }
 
-  private lengthCode(expr: Expr, code: Code): Code {
-    if (!this.isLength(expr)) {
+  private lengthCode(isLength: boolean, code: Code): Code {
+    if (!isLength) {
       return code;
     }
 
@@ -444,14 +324,6 @@ partial class ExpressionTypes {
     }
   }
 
-  private isLength(expr: Expr): boolean {
-    if (expr.kind == ExprKind.OptionalChain) {
-      return this.isLength(expr.chain);
-    }
-
-    return expr.kind == ExprKind.Member && expr.name == kLengthName;
-  }
-
   private resultTruthCode(use: TruthUse): Code {
     if (use == TruthUse.Not) {
       return Code.ResultTruthyNot;
@@ -461,7 +333,7 @@ partial class ExpressionTypes {
   }
 
   private numberTruthCode(codes: TruthCodes, type: Type, base: Type): Code {
-    if (this.isOptional(type)) {
+    if (this.types.isOptional(type)) {
       return codes.maybe;
     }
     if (base.kind == TypeKind.Double) {
@@ -480,18 +352,6 @@ partial class ExpressionTypes {
     }
 
     return codes.function;
-  }
-
-  private isTruthyObject(base: Type): boolean {
-    switch (base.kind) {
-      case TypeKind.Iterator:
-      case TypeKind.Dict:
-      case TypeKind.Promise:
-      case TypeKind.Class:
-        return true;
-      default:
-        return this.isObjectKind(base);
-    }
   }
 
   private truthDetails(
@@ -541,13 +401,13 @@ partial class ExpressionTypes {
     if (base.kind == TypeKind.Class) {
       return kClassNoun;
     }
-    if (!this.isNumberLike(base)) {
+    if (!this.types.isNumberLike(base)) {
       return kObjectNoun;
     }
 
     const noun = this.numberNoun(base);
 
-    if (!this.isOptional(type)) {
+    if (!this.types.isOptional(type)) {
       return noun;
     }
 

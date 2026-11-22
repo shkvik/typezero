@@ -38,7 +38,7 @@ partial class ExpressionTypes {
   }
 
   private textCheck(operand: Expr, type: Type, module: int): void {
-    const base = this.definedType(type);
+    const base = this.types.definedType(type);
     const isText = type.kind == TypeKind.String || type.kind == TypeKind.Error;
 
     if (base.kind == TypeKind.Instance) {
@@ -132,7 +132,7 @@ partial class ExpressionTypes {
   }
 
   private holdsKind(type: Type, kind: TypeKind): boolean {
-    const held = this.definedType(type);
+    const held = this.types.definedType(type);
     if (held.kind == TypeKind.Array) {
       return this.holdsKind(held.item, kind);
     }
@@ -150,7 +150,7 @@ partial class ExpressionTypes {
 
   private isHeldMember(part: Type): boolean {
     const isSpecial = this.isDate(part) || this.isRegExp(part);
-    if (this.isObjectKind(part) && !isSpecial) {
+    if (this.types.isObjectKind(part) && !isSpecial) {
       return true;
     }
 
@@ -214,9 +214,9 @@ partial class ExpressionTypes {
   }
 
   private joinsAsText(type: Type): boolean {
-    const base = this.definedType(type);
+    const base = this.types.definedType(type);
 
-    return this.isNumberLike(base) || base.kind == TypeKind.Boolean;
+    return this.types.isNumberLike(base) || base.kind == TypeKind.Boolean;
   }
 
   private concatParts(

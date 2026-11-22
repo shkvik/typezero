@@ -28,13 +28,12 @@ partial class ExpressionTypes {
       return this.libraryUsedCheck(expr, type, at, module);
     }
 
-    const isKept =
-      expr.kind == ExprKind.Assign || this.isTakingElement(expr);
+    const isKept = expr.kind == ExprKind.Assign || this.isTakingElement(expr);
     if (isKept) {
       return;
     }
 
-    const defined = this.definedType(type);
+    const defined = this.types.definedType(type);
     const held = this.heldType(type);
     if (held.kind != defined.kind) {
       return;
@@ -53,13 +52,13 @@ partial class ExpressionTypes {
     at: int | undefined,
     module: int,
   ): void {
-    const defined = this.definedType(type);
+    const defined = this.types.definedType(type);
     const loc = this.calleeLoc(expr);
     if (!this.isValueMethodCall(expr, module)) {
       return;
     }
     if (defined.kind == TypeKind.Array) {
-      const item = this.definedType(defined.item);
+      const item = this.types.definedType(defined.item);
       if (item.kind == TypeKind.Promise) {
         this.report(module, loc, Code.PromisesNotAwaited, kNoDetails);
       }
@@ -115,7 +114,7 @@ partial class ExpressionTypes {
 
     this.quiet -= 1;
 
-    const base = this.definedType(object);
+    const base = this.types.definedType(object);
 
     return base.kind == TypeKind.Array || base.kind == TypeKind.Promise;
   }
@@ -159,7 +158,7 @@ partial class ExpressionTypes {
   }
 
   private heldType(type: Type): Type {
-    const defined = this.definedType(type);
+    const defined = this.types.definedType(type);
     if (defined.kind == TypeKind.Array) {
       return this.heldType(defined.item);
     }

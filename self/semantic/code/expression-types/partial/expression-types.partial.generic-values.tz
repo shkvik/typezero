@@ -8,10 +8,7 @@ import {
 import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
 import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
-import {
-  FunctionFrame,
-  ValueTarget,
-} from "../types/expression-types.types.tz";
+import { FunctionFrame, ValueTarget } from "../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private genericValue(
@@ -47,7 +44,10 @@ partial class ExpressionTypes {
       if (param == undefined || given == undefined) {
         continue;
       }
-      if (param.kind == TypeKind.TypeParameter && !this.mentionsParameter(given)) {
+      if (
+        param.kind == TypeKind.TypeParameter &&
+        !this.mentionsParameter(given)
+      ) {
         bound.set(param.id, given);
       }
     }
@@ -64,7 +64,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const goal = this.definedType(wanted);
+    const goal = this.types.definedType(wanted);
     if (goal.kind == TypeKind.Error) {
       return goal;
     }

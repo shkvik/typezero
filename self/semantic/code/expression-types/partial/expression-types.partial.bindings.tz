@@ -208,7 +208,7 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Void);
     }
 
-    return this.optional(type);
+    return this.types.optional(type);
   }
 
   private inferFromWanted(draft: GenericDraft): void {

@@ -47,8 +47,8 @@ partial class ExpressionTypes {
       return this.reportTypeOfName(tested, name, loc, module);
     }
 
-    const plain = this.definedType(tested);
-    const parts = this.unionMembers(plain);
+    const plain = this.types.definedType(tested);
+    const parts = this.types.unionMembers(plain);
     const isOpen =
       parts.some((part) => part.kind == TypeKind.Error) ||
       plain.kind == TypeKind.TypeParameter;
@@ -152,8 +152,8 @@ partial class ExpressionTypes {
   }
 
   private addTypeOfNames(type: Type, names: string[]): void {
-    if (this.isOptional(type)) {
-      const plain = this.definedType(type);
+    if (this.types.isOptional(type)) {
+      const plain = this.types.definedType(type);
 
       this.addTypeOfNames(plain, names);
       this.addName(kUndefinedTypeOf, names);

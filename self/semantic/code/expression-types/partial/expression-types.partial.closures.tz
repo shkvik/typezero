@@ -107,7 +107,7 @@ partial class ExpressionTypes {
   private contextualFunction(
     wanted: Type | undefined,
   ): FunctionType | undefined {
-    const goal = this.wantedPart(wanted);
+    const goal = this.types.wantedPart(wanted);
     if (goal == undefined || goal.kind != TypeKind.Function) {
       return undefined;
     }
@@ -126,13 +126,18 @@ partial class ExpressionTypes {
       return goal;
     }
 
-    const head = shape.params.slice(0, shape.params.length - 1);
-    const items = list.items.map((type, index) => ({
-      type,
-      optional: index >= list.required,
-    }));
+    const fixed = shape.params.length - 1;
+    const params: FunctionParameter[] = shape.params.slice(0, fixed);
+
+    for (let index = 0; index < list.items.length; index++) {
+      const type = list.items[index];
+      if (type != undefined) {
+        params.push({ type, optional: index >= list.required });
+      }
+    }
+
     const made = this.store.functionOf({
-      params: head.concat(items),
+      params,
       rest: false,
       self: shape.self,
       result: shape.result,
