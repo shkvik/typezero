@@ -4,6 +4,7 @@ import {
 } from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
+  ArrayLitExpr,
   Expr,
   ExprKind,
   MemberExpr,
@@ -14,6 +15,10 @@ import {
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
 import {
+  kResultMethods,
+  kResultPlaceholder,
+} from "./const/result-rules.const.tz";
+import {
   CombineDraft,
   ValueRecord,
 } from "../../code/expression-types/types/expression-types.types.tz";
@@ -23,10 +28,6 @@ import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
 import { TypeUnifier } from "../../types/type-unifier/type-unifier.tz";
 import { BoundRules } from "../../flow/bound-rules/bound-rules.tz";
-import {
-  kResultMethods,
-  kResultPlaceholder,
-} from "./const/result-rules.const.tz";
 
 export class ResultRules {
   private readonly store: TypeStore;
@@ -445,6 +446,50 @@ export class ResultRules {
           first: this.text.of(result),
         },
       },
+    };
+  }
+
+  public notResultReport(
+    name: string,
+    arg: Expr,
+    returned: Type,
+  ): Checked<Type> {
+    if (returned.kind != TypeKind.Error) {
+      return {
+        value: this.store.plain(TypeKind.Error),
+        error: {
+          code: Code.ResultCallbackNotResult,
+          loc: arg.loc,
+          details: {
+            word: name,
+            first: this.text.of(returned),
+            place: this.mapHint(name == "andThen"),
+          },
+        },
+      };
+    }
+
+    return { value: this.store.plain(TypeKind.Error) };
+  }
+
+  public sameCombined(
+    literal: ArrayLitExpr,
+    common: ResultType,
+    draft: CombineDraft,
+  ): Checked<Type> {
+    if (!this.isHoldingValues(draft, common)) {
+      const noValuesError = this.noValuesError(draft, common, literal);
+
+      return { value: this.store.plain(TypeKind.Error), error: noValuesError };
+    }
+
+    const values = this.store.arrayOf(common.value);
+
+    return {
+      value: this.store.resultOf(
+        values,
+        this.combinedErrors(draft, common.error),
+      ),
     };
   }
 

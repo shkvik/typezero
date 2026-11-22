@@ -13,3 +13,4 @@ export const kPrototypeNames = [
 ];
 export const kStreamErrorName = "StreamError";
 export const kRawName = "raw";
+export const kConstructorName = "constructor";

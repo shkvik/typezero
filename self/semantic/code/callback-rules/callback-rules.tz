@@ -229,7 +229,7 @@ export class CallbackRules {
 
       errors.push({
         code: Code.CallbackPromiseDropped,
-        loc: loc,
+        loc,
         details: kNoDetails,
       });
     }
@@ -238,7 +238,7 @@ export class CallbackRules {
 
       errors.push({
         code: Code.CallbackResultDropped,
-        loc: loc,
+        loc,
         details: kNoDetails,
       });
     }
@@ -331,6 +331,54 @@ export class CallbackRules {
         place: "",
       },
     };
+  }
+
+  public passedResultCheck(
+    arg: Expr,
+    type: FunctionType,
+    plan: CallbackPlan,
+    name: string,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const method = plan.member.name;
+    const result = type.shape.result;
+
+    if (plan.kind == ArrayCallback.ForEach) {
+      const droppedResultErrors = this.droppedResultCheck(
+        arg,
+        result,
+        name,
+        method,
+      );
+
+      for (const found of droppedResultErrors) {
+        errors.push(found);
+      }
+
+      return errors;
+    }
+
+    const wanted = this.callbackWanted(plan.kind);
+    if (wanted == undefined || result == wanted) {
+      return errors;
+    }
+    if (result.kind == TypeKind.Error) {
+      return errors;
+    }
+
+    errors.push({
+      code: Code.CallbackReturn,
+      loc: arg.loc,
+      details: {
+        word: method,
+        first: this.text.of(wanted),
+        other: name,
+        second: this.text.of(result),
+      },
+    });
+
+    return errors;
   }
 
   private callbackParams(kind: ArrayCallback, array: Type): Type[] {

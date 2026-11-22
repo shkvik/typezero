@@ -12,15 +12,13 @@ import {
   Type,
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
-import {
-  kConstructorName,
-  kNewWord,
-} from "../../../code/expression-types/const/expression-types.const.tz";
+import { kNewWord } from "../../../code/expression-types/const/expression-types.const.tz";
 import {
   CallTarget,
   ClassMemberEntry,
   GenericTarget,
 } from "../../../code/expression-types/types/expression-types.types.tz";
+import { kConstructorName } from "../../../code/object-rules/const/object-rules.const.tz";
 
 partial class ExpressionTypes {
   private genericMethodCall(

@@ -180,20 +180,11 @@ partial class ExpressionTypes {
     draft: CombineDraft,
     module: int,
   ): Type {
-    if (!this.results.isHoldingValues(draft, common)) {
-      const noValuesError = this.results.noValuesError(draft, common, literal);
+    const checked = this.results.sameCombined(literal, common, draft);
 
-      this.reportFound(module, noValuesError);
+    this.reportFound(module, checked.error);
 
-      return this.store.plain(TypeKind.Error);
-    }
-
-    const values = this.store.arrayOf(common.value);
-
-    return this.store.resultOf(
-      values,
-      this.results.combinedErrors(draft, common.error),
-    );
+    return checked.value;
   }
 
   private tupleCombined(

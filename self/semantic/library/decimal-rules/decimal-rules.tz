@@ -1,6 +1,10 @@
-import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import {
+  Checked,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
+  BinaryExpr,
   Expr,
   ExprKind,
   MemberExpr,
@@ -13,26 +17,38 @@ import {
 import {
   DecimalMethod,
   DecimalResult,
+  OperandPair,
 } from "../../code/expression-types/types/expression-types.types.tz";
+import { OperatorRules } from "../../code/operator-rules/operator-rules.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
 import { OperandTexts } from "../../code/source-texts/types/source-texts.types.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
 import { SourceTexts } from "../../code/source-texts/source-texts.tz";
-import { kDecimalReplacements } from "./const/decimal-rules.const.tz";
+import {
+  kDecimalReplacements,
+  kDecimalStatics,
+} from "./const/decimal-rules.const.tz";
 
 export class DecimalRules {
   private readonly store: TypeStore;
   private readonly types: TypeQuestions;
   private readonly sources: SourceTexts;
+  private readonly text: TypeText;
+  private readonly operators: OperatorRules;
 
   public constructor(
     store: TypeStore,
     types: TypeQuestions,
     sources: SourceTexts,
+    text: TypeText,
+    operators: OperatorRules,
   ) {
     this.store = store;
     this.types = types;
     this.sources = sources;
+    this.text = text;
+    this.operators = operators;
   }
 
   public decimalType(): Type {
@@ -193,6 +209,120 @@ export class DecimalRules {
         place: this.decimalStaticHint(name),
       },
     };
+  }
+
+  public decimalMixError(
+    expr: BinaryExpr,
+    pair: OperandPair,
+    module: int,
+  ): SourceError | undefined {
+    const left = pair.left;
+    const right = pair.right;
+    const isLeftDecimal = this.types.definedType(left).kind == TypeKind.Decimal;
+    const other = this.otherSide(isLeftDecimal, left, right);
+    const op = this.sources.operatorText(expr.op);
+    const texts = this.sources.operandTexts(expr, module);
+    const first = this.text.of(left);
+    const second = this.text.of(right);
+
+    if (other.kind == TypeKind.Int) {
+      const word = this.integerMixText(isLeftDecimal, op, texts);
+
+      return {
+        code: Code.MixedNumbers,
+        loc: expr.loc,
+        details: {
+          first,
+          second,
+          other: op,
+          word,
+        },
+      };
+    }
+    if (this.types.definedType(other).kind != TypeKind.Double) {
+      const operandsError = this.operators.operandsError(expr, pair);
+
+      return operandsError;
+    }
+    if (other.kind != TypeKind.Double) {
+      return {
+        code: Code.DecimalInexactPlain,
+        loc: expr.loc,
+        details: {
+          first,
+          second,
+          other: op,
+        },
+      };
+    }
+
+    const word = this.inexactText(isLeftDecimal, op, texts);
+
+    return {
+      code: Code.DecimalInexact,
+      loc: expr.loc,
+      details: {
+        first,
+        second,
+        other: op,
+        word,
+      },
+    };
+  }
+
+  public decimalPower(expr: BinaryExpr, pair: OperandPair): Checked<Type> {
+    const right = pair.right;
+
+    if (pair.left.kind != TypeKind.Decimal) {
+      const operandsError = this.operators.operandsError(expr, pair);
+
+      return { value: this.store.plain(TypeKind.Error), error: operandsError };
+    }
+    if (right.kind == TypeKind.Int) {
+      return { value: this.store.plain(TypeKind.Decimal) };
+    }
+
+    const first = this.text.of(right);
+    const isFraction =
+      right.kind == TypeKind.Double || right.kind == TypeKind.Decimal;
+    if (isFraction) {
+      return {
+        value: this.store.plain(TypeKind.Error),
+        error: {
+          code: Code.DecimalExponentRoot,
+          loc: expr.rhs.loc,
+          details: { first },
+        },
+      };
+    }
+
+    return {
+      value: this.store.plain(TypeKind.Error),
+      error: {
+        code: Code.DecimalExponent,
+        loc: expr.rhs.loc,
+        details: { first },
+      },
+    };
+  }
+
+  public decimalStaticRead(expr: MemberExpr): Checked<Type> {
+    if (kDecimalStatics.includes(expr.name)) {
+      return {
+        value: this.store.plain(TypeKind.Error),
+        error: {
+          code: Code.DecimalFunctionRead,
+          loc: expr.loc,
+          details: {
+            word: expr.name,
+          },
+        },
+      };
+    }
+
+    const error = this.decimalStaticMissingError(expr);
+
+    return { value: this.store.plain(TypeKind.Error), error };
   }
 
   private mantissaOf(clean: string, mark: int): string {

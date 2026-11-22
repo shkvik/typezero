@@ -66,21 +66,11 @@ partial class ExpressionTypes {
     pair: OperandPair,
     module: int,
   ): Type {
-    const left = pair.left;
-    const right = pair.right;
-    const isOpen =
-      this.types.isOpenParameter(left) || this.types.isOpenParameter(right);
-    const isKnown = left.kind != TypeKind.Error && right.kind != TypeKind.Error;
-    const hasText =
-      left.kind == TypeKind.String || right.kind == TypeKind.String;
-    const isJoin = expr.op == BinaryOp.Add && hasText;
-    if (isOpen && isKnown && !isJoin) {
-      const operandsError = this.operators.operandsError(expr, pair);
+    const checked = this.operators.parameterArithmetic(expr, pair);
 
-      this.reportFound(module, operandsError);
-    }
+    this.reportFound(module, checked.error);
 
-    return this.store.plain(TypeKind.Error);
+    return checked.value;
   }
 
   private arithmeticTyped(
@@ -454,51 +444,11 @@ partial class ExpressionTypes {
     pair: OperandPair,
     module: int,
   ): boolean {
-    const left = pair.left;
-    const right = pair.right;
+    const checked = this.operators.reportsBits(expr, pair, module);
 
-    if (this.operators.isNothingChanged(expr, left)) {
-      const nothingChangedError = this.operators.nothingChangedError(
-        expr,
-        left,
-        module,
-      );
+    this.reportFound(module, checked.error);
 
-      this.reportFound(module, nothingChangedError);
-
-      return true;
-    }
-    if (left.kind == TypeKind.Double || right.kind == TypeKind.Double) {
-      const bitsOfDoubleError = this.operators.bitsOfDoubleError(
-        expr,
-        left,
-        module,
-      );
-
-      this.reportFound(module, bitsOfDoubleError);
-
-      return true;
-    }
-    if (left.kind != TypeKind.Int || right.kind != TypeKind.Int) {
-      const operandsError = this.operators.operandsError(expr, pair);
-
-      this.reportFound(module, operandsError);
-
-      return true;
-    }
-    if (expr.op == BinaryOp.UShr && !left.unsigned) {
-      const signedShiftError = this.operators.signedShiftError(
-        expr,
-        left,
-        module,
-      );
-
-      this.reportFound(module, signedShiftError);
-
-      return true;
-    }
-
-    return false;
+    return checked.value;
   }
 
   private shiftConstants(

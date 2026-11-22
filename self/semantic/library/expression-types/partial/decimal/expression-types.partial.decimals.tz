@@ -1,5 +1,4 @@
 import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
-import { Code } from "../../../../../diagnostic/code.tz";
 import {
   BinaryExpr,
   BinaryOp,
@@ -24,7 +23,9 @@ partial class ExpressionTypes {
     const isLeftFitting = this.isDecimalSide(expr.lhs, pair.left, module);
     const isRightFitting = this.isDecimalSide(expr.rhs, pair.right, module);
     if (!isLeftFitting || !isRightFitting) {
-      this.reportDecimalMix(expr, pair, module);
+      const decimalMixError = this.decimals.decimalMixError(expr, pair, module);
+
+      this.reportFound(module, decimalMixError);
 
       return this.store.plain(TypeKind.Error);
     }
@@ -43,31 +44,11 @@ partial class ExpressionTypes {
   }
 
   private decimalPower(expr: BinaryExpr, pair: OperandPair, module: int): Type {
-    const right = pair.right;
+    const checked = this.decimals.decimalPower(expr, pair);
 
-    if (pair.left.kind != TypeKind.Decimal) {
-      const operandsError = this.operators.operandsError(expr, pair);
+    this.reportFound(module, checked.error);
 
-      this.reportFound(module, operandsError);
-
-      return this.store.plain(TypeKind.Error);
-    }
-    if (right.kind == TypeKind.Int) {
-      return this.store.plain(TypeKind.Decimal);
-    }
-
-    const first = this.text.of(right);
-    const isFraction =
-      right.kind == TypeKind.Double || right.kind == TypeKind.Decimal;
-    if (isFraction) {
-      this.report(module, expr.rhs.loc, Code.DecimalExponentRoot, { first });
-
-      return this.store.plain(TypeKind.Error);
-    }
-
-    this.report(module, expr.rhs.loc, Code.DecimalExponent, { first });
-
-    return this.store.plain(TypeKind.Error);
+    return checked.value;
   }
 
   private decimalDivisor(expr: BinaryExpr, right: Type, module: int): void {
@@ -77,52 +58,5 @@ partial class ExpressionTypes {
     }
 
     this.decimalZeroCheck(expr.rhs, module);
-  }
-
-  private reportDecimalMix(
-    expr: BinaryExpr,
-    pair: OperandPair,
-    module: int,
-  ): void {
-    const left = pair.left;
-    const right = pair.right;
-    const isLeftDecimal = this.types.definedType(left).kind == TypeKind.Decimal;
-    const other = this.decimals.otherSide(isLeftDecimal, left, right);
-    const op = this.sources.operatorText(expr.op);
-    const texts = this.sources.operandTexts(expr, module);
-    const first = this.text.of(left);
-    const second = this.text.of(right);
-
-    if (other.kind == TypeKind.Int) {
-      const word = this.decimals.integerMixText(isLeftDecimal, op, texts);
-
-      return this.report(module, expr.loc, Code.MixedNumbers, {
-        first,
-        second,
-        other: op,
-        word,
-      });
-    }
-    if (this.types.definedType(other).kind != TypeKind.Double) {
-      const operandsError = this.operators.operandsError(expr, pair);
-
-      return this.reportFound(module, operandsError);
-    }
-    if (other.kind != TypeKind.Double) {
-      return this.report(module, expr.loc, Code.DecimalInexactPlain, {
-        first,
-        second,
-        other: op,
-      });
-    }
-
-    const word = this.decimals.inexactText(isLeftDecimal, op, texts);
-
-    this.report(module, expr.loc, Code.DecimalInexact, {
-      first,
-      second,
-      other: op,
-      word,
-    });
   }
 }

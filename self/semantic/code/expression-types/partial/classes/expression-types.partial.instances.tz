@@ -19,12 +19,12 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import { kConstructorName } from "../../const/expression-types.const.tz";
 import {
   CallTarget,
   ClassLookup,
   ClassMemberEntry,
 } from "../../types/expression-types.types.tz";
+import { kConstructorName } from "../../../object-rules/const/object-rules.const.tz";
 
 partial class ExpressionTypes {
   private instanceMember(
@@ -90,27 +90,6 @@ partial class ExpressionTypes {
     }
 
     return this.methodTypeOf(entry, method);
-  }
-
-  private reportStaticCall(
-    expr: MemberExpr,
-    entry: ClassMemberEntry,
-    module: int,
-  ): void {
-    const owner = entry.owner;
-    const isMethod = owner.methods.some(
-      (one) => one.name == expr.name && this.classes.isStaticMethod(one),
-    );
-    if (!isMethod) {
-      const staticError = this.classes.staticError(expr, entry);
-
-      return this.reportFound(module, staticError);
-    }
-
-    this.report(module, expr.loc, Code.StaticMethodViaInstance, {
-      word: expr.name,
-      first: owner.name ?? "",
-    });
   }
 
   private checkAccess(

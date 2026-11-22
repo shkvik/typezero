@@ -1,3 +1,4 @@
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
 import {
   BinaryExpr,
   Expr,
@@ -5,6 +6,11 @@ import {
   UnaryOp,
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { OperandPair } from "../expression-types/types/expression-types.types.tz";
+import { DecimalRules } from "../../library/decimal-rules/decimal-rules.tz";
+import { OperatorRules } from "../operator-rules/operator-rules.tz";
+import { TypeRelation } from "../../types/type-relation/type-relation.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { kIntLimits } from "../integer-math/const/integer-math.const.tz";
 import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
 import { TypeUnifier } from "../../types/type-unifier/type-unifier.tz";
@@ -14,15 +20,27 @@ export class ComparisonRules {
   private readonly types: TypeQuestions;
   private readonly unifier: TypeUnifier;
   private readonly shapes: ExpressionShapes;
+  private readonly store: TypeStore;
+  private readonly relation: TypeRelation;
+  private readonly operators: OperatorRules;
+  private readonly decimals: DecimalRules;
 
   public constructor(
     types: TypeQuestions,
     unifier: TypeUnifier,
     shapes: ExpressionShapes,
+    store: TypeStore,
+    relation: TypeRelation,
+    operators: OperatorRules,
+    decimals: DecimalRules,
   ) {
     this.types = types;
     this.unifier = unifier;
     this.shapes = shapes;
+    this.store = store;
+    this.relation = relation;
+    this.operators = operators;
+    this.decimals = decimals;
   }
 
   public literalComparisonHint(
@@ -108,6 +126,69 @@ export class ComparisonRules {
     const plainRight = this.types.definedType(right);
 
     return this.unifier.unionUnify(plainLeft, plainRight);
+  }
+
+  public jsonEqualityError(
+    expr: BinaryExpr,
+    pair: OperandPair,
+  ): SourceError | undefined {
+    const left = pair.left;
+    const right = pair.right;
+    const isLeftJson = this.types.definedType(left).kind == TypeKind.Json;
+    const isRightJson = this.types.definedType(right).kind == TypeKind.Json;
+    const type = this.decimals.otherSide(isLeftJson, left, right);
+    const json = this.store.plain(TypeKind.Json);
+    const plain = this.types.definedType(type);
+    const isOptionalJson =
+      this.types.isOptional(type) && this.relation.converts(plain, json);
+    if ((isLeftJson && isRightJson) || isOptionalJson) {
+      return undefined;
+    }
+
+    const isPlain =
+      type.kind == TypeKind.String ||
+      type.kind == TypeKind.Boolean ||
+      this.types.isNumeric(type);
+    if (isPlain) {
+      return undefined;
+    }
+
+    const operandsError = this.operators.operandsError(expr, pair);
+
+    return operandsError;
+  }
+
+  public incomparableError(
+    expr: BinaryExpr,
+    pair: OperandPair,
+    module: int,
+  ): SourceError | undefined {
+    const left = pair.left;
+    const right = pair.right;
+    const plainLeft = this.types.definedType(left);
+    const plainRight = this.types.definedType(right);
+    const hasDecimal =
+      plainLeft.kind == TypeKind.Decimal || plainRight.kind == TypeKind.Decimal;
+    if (hasDecimal) {
+      const decimalMixError = this.decimals.decimalMixError(expr, pair, module);
+
+      return decimalMixError;
+    }
+
+    const hasNumbers =
+      this.types.isNumeric(plainLeft) &&
+      this.types.isNumeric(plainRight) &&
+      !this.types.isOptional(left) &&
+      !this.types.isOptional(right);
+    if (hasNumbers) {
+      const mixedError = this.operators.mixedError(expr, pair, module);
+
+      return mixedError;
+    }
+
+    const operandsError = this.operators.operandsError(expr, pair);
+
+    return operandsError;
   }
 
   private negatedOperand(isNegated: boolean, expr: Expr): Expr {

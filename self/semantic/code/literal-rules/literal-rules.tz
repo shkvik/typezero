@@ -185,7 +185,7 @@ export class LiteralRules {
 
     return {
       value: target,
-      error: { code: Code.IntegerLiteralTooBig, loc: loc, details: { word } },
+      error: { code: Code.IntegerLiteralTooBig, loc, details: { word } },
     };
   }
 

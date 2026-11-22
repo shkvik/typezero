@@ -223,7 +223,14 @@ partial class ExpressionTypes {
       });
     }
 
-    this.passedResultCheck(arg, type, plan, name, module);
+    const passedResultErrors = this.callbacks.passedResultCheck(
+      arg,
+      type,
+      plan,
+      name,
+    );
+
+    this.reportAll(module, passedResultErrors);
   }
 
   private callbackName(arg: Expr, module: int): string {
@@ -317,43 +324,6 @@ partial class ExpressionTypes {
     }
 
     return ` '${param.name}'`;
-  }
-
-  private passedResultCheck(
-    arg: Expr,
-    type: FunctionType,
-    plan: CallbackPlan,
-    name: string,
-    module: int,
-  ): void {
-    const method = plan.member.name;
-    const result = type.shape.result;
-
-    if (plan.kind == ArrayCallback.ForEach) {
-      const droppedResultErrors = this.callbacks.droppedResultCheck(
-        arg,
-        result,
-        name,
-        method,
-      );
-
-      return this.reportAll(module, droppedResultErrors);
-    }
-
-    const wanted = this.callbacks.callbackWanted(plan.kind);
-    if (wanted == undefined || result == wanted) {
-      return;
-    }
-    if (result.kind == TypeKind.Error) {
-      return;
-    }
-
-    this.report(module, arg.loc, Code.CallbackReturn, {
-      word: method,
-      first: this.text.of(wanted),
-      other: name,
-      second: this.text.of(result),
-    });
   }
 
   private noteArguments(args: CallArgument[]): void {

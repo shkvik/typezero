@@ -426,7 +426,13 @@ partial class ExpressionTypes {
     this.initEnd(fn, body, module);
     this.leaveGenerator(frame);
     this.rememberGuard(fn, frame, module);
-    this.writtenResultCheck(fn, result, frame, module);
+    const writtenResultError = this.functions.writtenResultCheck(
+      fn,
+      result,
+      frame,
+    );
+
+    this.reportFound(module, writtenResultError);
 
     const isOpen =
       inner.kind == TypeKind.Void ||

@@ -3,7 +3,6 @@ import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import {
   ClassDecl,
-  FieldKind,
   MethodKind,
 } from "../../../../../program/ast/types/ast.types.classes.tz";
 import {
@@ -20,7 +19,6 @@ import {
   kReflectName,
 } from "../../const/expression-types.const.tz";
 import {
-  DecoratedName,
   DecorateRun,
   DecoratorPlace,
   DecoratorUse,
@@ -33,13 +31,15 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.decoratedNamesCheck(decl, module);
+    const decoratedNamesErrors = this.decorators.decoratedNamesCheck(decl);
+
+    this.reportAll(module, decoratedNamesErrors);
     const decoratedConstructorsError =
       this.decorators.decoratedConstructorsCheck(decl);
 
     this.reportFound(module, decoratedConstructorsError);
 
-    for (const run of this.memberRuns(decl)) {
+    for (const run of this.decorators.memberRuns(decl)) {
       this.decorate(run, module);
     }
 
@@ -59,95 +59,6 @@ partial class ExpressionTypes {
       },
       module,
     );
-  }
-
-  private decoratedNamesCheck(decl: ClassDecl, module: int): void {
-    const members = this.decoratedNames(decl);
-
-    for (let index = 1; index < members.length; index++) {
-      const later = members[index];
-      if (later != undefined) {
-        const nameClashError = this.decorators.nameClashCheck(
-          decl,
-          members.slice(0, index),
-          later,
-        );
-
-        this.reportFound(module, nameClashError);
-      }
-    }
-  }
-
-  private decoratedNames(decl: ClassDecl): DecoratedName[] {
-    const members: DecoratedName[] = [];
-
-    for (const field of decl.fields) {
-      const decorators = this.decorators.decoratorNames(field.decorators);
-      if (decorators.length > 0) {
-        members.push({
-          name: field.name,
-          loc: field.loc,
-          isStatic: field.form == FieldKind.Static,
-          decorators,
-        });
-      }
-    }
-
-    for (const fn of decl.methods) {
-      const decorators = this.decorators.methodDecoratorNames(fn);
-      if (decorators.length > 0) {
-        members.push({
-          name: fn.name,
-          loc: fn.loc,
-          isStatic: this.classes.isStaticMethod(fn),
-          decorators,
-        });
-      }
-    }
-
-    return members;
-  }
-
-  private memberRuns(decl: ClassDecl): DecorateRun[] {
-    const runs: DecorateRun[] = [];
-
-    for (const field of decl.fields) {
-      const uses = this.decorators.ownUses(field.decorators);
-      const first = uses[0];
-      if (first != undefined) {
-        runs.push({
-          decl,
-          field,
-          uses,
-          place: DecoratorPlace.Field,
-          isStatic: field.form == FieldKind.Static,
-          at: first.decorator.loc,
-        });
-      }
-    }
-
-    for (const fn of decl.methods) {
-      const uses = this.decorators.ownUses(fn.role?.decorators ?? []);
-
-      this.decorators.addParamUses(uses, fn);
-
-      const first = uses[0];
-      if (first != undefined) {
-        runs.push({
-          decl,
-          method: fn,
-          uses,
-          place: DecoratorPlace.Method,
-          isStatic: this.classes.isStaticMethod(fn),
-          at: first.decorator.loc,
-        });
-      }
-    }
-
-    const instance = runs.filter((run) => !run.isStatic);
-    const statics = runs.filter((run) => run.isStatic);
-
-    return instance.concat(statics);
   }
 
   private decorate(run: DecorateRun, module: int): void {

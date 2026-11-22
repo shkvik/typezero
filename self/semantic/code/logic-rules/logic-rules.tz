@@ -11,6 +11,8 @@ import {
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { TruthUse } from "../../flow/truth-rules/types/truth-rules.types.tz";
+import { TypeUnifier } from "../../types/type-unifier/type-unifier.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
 import {
   kUndefinedText,
   kUnnamedOperand,
@@ -37,6 +39,8 @@ export class LogicRules {
   private readonly truth: TruthRules;
   private readonly shapes: ExpressionShapes;
   private readonly sources: SourceTexts;
+  private readonly text: TypeText;
+  private readonly unifier: TypeUnifier;
 
   public constructor(
     store: TypeStore,
@@ -44,12 +48,16 @@ export class LogicRules {
     truth: TruthRules,
     shapes: ExpressionShapes,
     sources: SourceTexts,
+    text: TypeText,
+    unifier: TypeUnifier,
   ) {
     this.store = store;
     this.types = types;
     this.truth = truth;
     this.shapes = shapes;
     this.sources = sources;
+    this.text = text;
+    this.unifier = unifier;
   }
 
   public equalsText(isNegated: boolean): string {
@@ -228,6 +236,43 @@ export class LogicRules {
         loc: expr.loc,
         details: { word, first, second },
       },
+    };
+  }
+
+  public logicalResult(
+    expr: BinaryExpr,
+    left: Type,
+    right: Type,
+    isAnd: boolean,
+  ): Checked<Type> {
+    const isBroken =
+      left.kind == TypeKind.Error || right.kind == TypeKind.Error;
+    if (isBroken) {
+      return { value: this.store.plain(TypeKind.Error) };
+    }
+
+    const isBoolean =
+      left.kind == TypeKind.Boolean && right.kind == TypeKind.Boolean;
+    if (isBoolean) {
+      return { value: left };
+    }
+    if (right.kind == TypeKind.Void) {
+      return this.rightVoid(expr, isAnd);
+    }
+
+    const kept = this.keptLeft(left, isAnd);
+    const result = this.unifier.unify(kept, right);
+    if (result != undefined) {
+      return { value: result };
+    }
+
+    const first = this.text.of(kept);
+    const second = this.text.of(right);
+    const code = this.noCommonCode(isAnd);
+
+    return {
+      value: this.store.plain(TypeKind.Error),
+      error: { code, loc: expr.loc, details: { first, second } },
     };
   }
 

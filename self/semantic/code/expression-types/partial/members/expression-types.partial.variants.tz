@@ -60,20 +60,11 @@ partial class ExpressionTypes {
     union: UnionType,
     module: int,
   ): Type {
-    const head = union.parts[0];
-    if (head != undefined) {
-      const word = expr.name;
-      const first = this.text.of(union);
-      const other = this.typeOfs.typeOfName(head);
+    const checked = this.objects.reportValueMember(expr, union);
 
-      this.report(module, expr.loc, Code.UnionValueMember, {
-        word,
-        first,
-        other,
-      });
-    }
+    this.reportFound(module, checked.error);
 
-    return this.store.plain(TypeKind.Error);
+    return checked.value;
   }
 
   private variantField(

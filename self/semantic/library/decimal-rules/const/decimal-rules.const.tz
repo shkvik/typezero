@@ -142,3 +142,4 @@ export const kDecimalReplacements: DecimalReplacement[] = [
     use: "'String(a)'",
   },
 ];
+export const kDecimalStatics = ["max", "min", "sum"];

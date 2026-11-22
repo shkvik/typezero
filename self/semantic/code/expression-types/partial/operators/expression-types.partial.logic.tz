@@ -131,34 +131,11 @@ partial class ExpressionTypes {
     isAnd: boolean,
     module: int,
   ): Type {
-    const isBroken =
-      left.kind == TypeKind.Error || right.kind == TypeKind.Error;
-    if (isBroken) {
-      return this.store.plain(TypeKind.Error);
-    }
+    const checked = this.logic.logicalResult(expr, left, right, isAnd);
 
-    const isBoolean =
-      left.kind == TypeKind.Boolean && right.kind == TypeKind.Boolean;
-    if (isBoolean) {
-      return left;
-    }
-    if (right.kind == TypeKind.Void) {
-      return this.reportRightVoid(expr, isAnd, module);
-    }
+    this.reportFound(module, checked.error);
 
-    const kept = this.logic.keptLeft(left, isAnd);
-    const result = this.unifier.unify(kept, right);
-    if (result != undefined) {
-      return result;
-    }
-
-    const first = this.text.of(kept);
-    const second = this.text.of(right);
-    const code = this.logic.noCommonCode(isAnd);
-
-    this.report(module, expr.loc, code, { first, second });
-
-    return this.store.plain(TypeKind.Error);
+    return checked.value;
   }
 
   private reportRightVoid(expr: BinaryExpr, isAnd: boolean, module: int): Type {

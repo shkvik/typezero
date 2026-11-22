@@ -54,3 +54,6 @@ export const kDateStatics: DateStatic[] = [
 export const kGetYearName = "getYear";
 export const kGmtStringName = "toGMTString";
 export const kSetYearName = "setYear";
+export const kFirstTimeField = 3;
+export const kTimeFieldMost = [23, 59, 59, 999];
+export const kTimeFieldNames = ["hours", "minutes", "seconds", "milliseconds"];

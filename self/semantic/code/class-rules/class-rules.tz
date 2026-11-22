@@ -3,14 +3,7 @@ import {
   SourceError,
 } from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
-import {
-  Access,
-  ClassDecl,
-  ClassField,
-  FieldKind,
-  FieldPresence,
-  MethodKind,
-} from "../../../program/ast/types/ast.types.classes.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 import {
   BinaryExpr,
   ExprKind,
@@ -19,6 +12,11 @@ import {
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
 import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../program/ast/types/ast.types.types.tz";
+import {
+  ClassType,
   DictKind,
   FunctionType,
   InstanceType,
@@ -32,15 +30,13 @@ import {
   ThisPlace,
 } from "../expression-types/types/expression-types.types.tz";
 import {
-  TypeRef,
-  TypeRefKind,
-} from "../../../program/ast/types/ast.types.types.tz";
-import {
-  ParameterSite,
-  TypeContext,
-  TypePlace,
-} from "../../types/type-resolver/types/type-resolver.types.tz";
-import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
+  Access,
+  ClassDecl,
+  ClassField,
+  FieldKind,
+  FieldPresence,
+  MethodKind,
+} from "../../../program/ast/types/ast.types.classes.tz";
 import { kDateName } from "../../types/type-questions/const/type-questions.const.tz";
 import {
   kMapClass,
@@ -48,6 +44,11 @@ import {
   kProtectedWord,
   kPublicWord,
 } from "./const/class-rules.const.tz";
+import {
+  ParameterSite,
+  TypeContext,
+  TypePlace,
+} from "../../types/type-resolver/types/type-resolver.types.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { TypeRelation } from "../../types/type-relation/type-relation.tz";
 import { TypeText } from "../../../program/type/type-text/type-text.tz";
@@ -879,6 +880,113 @@ export class ClassRules {
         details: { word, first },
       },
     };
+  }
+
+  public instanceofCheck(
+    expr: BinaryExpr,
+    left: Type,
+    instance: Type,
+    decl: ClassDecl,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const base = this.types.definedType(left);
+    const word = decl.name ?? "";
+    const first = this.text.of(base);
+
+    if (this.isOpenTested(base)) {
+      return errors;
+    }
+    if (base.kind == TypeKind.Union) {
+      if (!this.canHoldClass(base.parts, instance)) {
+        errors.push({
+          code: Code.InstanceOfNeverUnion,
+          loc: expr.loc,
+          details: {
+            word,
+            first,
+          },
+        });
+      }
+
+      return errors;
+    }
+    if (!this.isObjectTested(base)) {
+      const shown = this.text.of(left);
+
+      errors.push({
+        code: Code.InstanceOfNotObject,
+        loc: expr.lhs.loc,
+        details: {
+          first: shown,
+        },
+      });
+
+      return errors;
+    }
+
+    const relatedErrors = this.relatedCheck(expr, base, instance, word);
+
+    for (const found of relatedErrors) {
+      errors.push(found);
+    }
+
+    return errors;
+  }
+
+  public staticCallError(
+    expr: MemberExpr,
+    entry: ClassMemberEntry,
+  ): SourceError | undefined {
+    const owner = entry.owner;
+    const isMethod = owner.methods.some(
+      (one) => one.name == expr.name && this.isStaticMethod(one),
+    );
+    if (!isMethod) {
+      const staticError = this.staticError(expr, entry);
+
+      return staticError;
+    }
+
+    return {
+      code: Code.StaticMethodViaInstance,
+      loc: expr.loc,
+      details: {
+        word: expr.name,
+        first: owner.name ?? "",
+      },
+    };
+  }
+
+  public classValueMember(expr: MemberExpr, object: ClassType): Checked<Type> {
+    const error = this.store.plain(TypeKind.Error);
+    if (expr.name == "prototype") {
+      return {
+        value: error,
+        error: {
+          code: Code.ClassValuePrototype,
+          loc: expr.loc,
+          details: kNoDetails,
+        },
+      };
+    }
+    if (expr.name == "name") {
+      return { value: this.store.plain(TypeKind.String) };
+    }
+    if (!object.exact) {
+      return {
+        value: error,
+        error: {
+          code: Code.ClassValueRuntime,
+          loc: expr.loc,
+          details: {
+            word: this.text.of(object),
+          },
+        },
+      };
+    }
+
+    return { value: error };
   }
 
   private isDeclaredBefore(one: InstanceType, other: InstanceType): boolean {

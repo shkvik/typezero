@@ -1,12 +1,9 @@
-import {
-  Checked,
-  SourceError,
-} from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 import {
   ClassDecl,
   Decorator,
+  FieldKind,
 } from "../../../program/ast/types/ast.types.classes.tz";
 import {
   Expr,
@@ -23,22 +20,33 @@ import {
   DecoratorPlace,
   DecoratorUse,
 } from "../expression-types/types/expression-types.types.tz";
-import { OverloadRules } from "../overload-rules/overload-rules.tz";
-import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
-import { kHiddenMark } from "../source-texts/const/source-texts.const.tz";
-import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
 import {
   kDecoratorPlaces,
   kDescriptorValueName,
 } from "./const/decorator-rules.const.tz";
+import { ClassRules } from "../class-rules/class-rules.tz";
+import {
+  Checked,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import { OverloadRules } from "../overload-rules/overload-rules.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
+import { kHiddenMark } from "../source-texts/const/source-texts.const.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
 
 export class DecoratorRules {
   private readonly types: TypeQuestions;
   private readonly overloads: OverloadRules;
+  private readonly classes: ClassRules;
 
-  public constructor(types: TypeQuestions, overloads: OverloadRules) {
+  public constructor(
+    types: TypeQuestions,
+    overloads: OverloadRules,
+    classes: ClassRules,
+  ) {
     this.types = types;
     this.overloads = overloads;
+    this.classes = classes;
   }
 
   public isDecoratedClass(decl: ClassDecl): boolean {
@@ -245,7 +253,7 @@ export class DecoratorRules {
         value: -1,
         error: {
           code: Code.DecoratorArguments,
-          loc: loc,
+          loc,
           details: {
             word,
             first: row.noun,
@@ -264,7 +272,7 @@ export class DecoratorRules {
         value: -1,
         error: {
           code: Code.DecoratorDescriptorParameter,
-          loc: loc,
+          loc,
           details: { word },
         },
       };
@@ -276,13 +284,108 @@ export class DecoratorRules {
         value: -1,
         error: {
           code: Code.DecoratorPositionMethod,
-          loc: loc,
+          loc,
           details: { word },
         },
       };
     }
 
     return { value: count };
+  }
+
+  public decoratedNamesCheck(decl: ClassDecl): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const members = this.decoratedNames(decl);
+
+    for (let index = 1; index < members.length; index++) {
+      const later = members[index];
+      if (later != undefined) {
+        const nameClashError = this.nameClashCheck(
+          decl,
+          members.slice(0, index),
+          later,
+        );
+
+        if (nameClashError != undefined) {
+          errors.push(nameClashError);
+        }
+      }
+    }
+
+    return errors;
+  }
+
+  public decoratedNames(decl: ClassDecl): DecoratedName[] {
+    const members: DecoratedName[] = [];
+
+    for (const field of decl.fields) {
+      const decorators = this.decoratorNames(field.decorators);
+      if (decorators.length > 0) {
+        members.push({
+          name: field.name,
+          loc: field.loc,
+          isStatic: field.form == FieldKind.Static,
+          decorators,
+        });
+      }
+    }
+
+    for (const fn of decl.methods) {
+      const decorators = this.methodDecoratorNames(fn);
+      if (decorators.length > 0) {
+        members.push({
+          name: fn.name,
+          loc: fn.loc,
+          isStatic: this.classes.isStaticMethod(fn),
+          decorators,
+        });
+      }
+    }
+
+    return members;
+  }
+
+  public memberRuns(decl: ClassDecl): DecorateRun[] {
+    const runs: DecorateRun[] = [];
+
+    for (const field of decl.fields) {
+      const uses = this.ownUses(field.decorators);
+      const first = uses[0];
+      if (first != undefined) {
+        runs.push({
+          decl,
+          field,
+          uses,
+          place: DecoratorPlace.Field,
+          isStatic: field.form == FieldKind.Static,
+          at: first.decorator.loc,
+        });
+      }
+    }
+
+    for (const fn of decl.methods) {
+      const uses = this.ownUses(fn.role?.decorators ?? []);
+
+      this.addParamUses(uses, fn);
+
+      const first = uses[0];
+      if (first != undefined) {
+        runs.push({
+          decl,
+          method: fn,
+          uses,
+          place: DecoratorPlace.Method,
+          isStatic: this.classes.isStaticMethod(fn),
+          at: first.decorator.loc,
+        });
+      }
+    }
+
+    const instance = runs.filter((run) => !run.isStatic);
+    const statics = runs.filter((run) => run.isStatic);
+
+    return instance.concat(statics);
   }
 
   private isDecoratedFunction(fn: FunctionDecl): boolean {

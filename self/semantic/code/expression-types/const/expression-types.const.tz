@@ -51,7 +51,6 @@ export const kValueTerm = "v";
 export const kResizingMethods = ["push", "pop", "shift", "unshift", "splice"];
 export const kPrototypeName = "prototype";
 export const kClassNameMember = "name";
-export const kConstructorName = "constructor";
 export const kSampleList = "[int]";
 export const kNewWord = "new ";
 export const kResultMakers = ["ok", "err"];
@@ -204,7 +203,6 @@ export const kIntegerConversions = [
   "toUint64",
 ];
 export const kMostDateFields = 7;
-export const kFirstTimeField = 3;
 export const kDateUtcName = "UTC";
 export const kDateParseName = "parse";
 export const kToJsonName = "toJSON";
@@ -214,8 +212,6 @@ export const kDateLocaleMethods = [
   "toLocaleDateString",
   "toLocaleTimeString",
 ];
-export const kTimeFieldNames = ["hours", "minutes", "seconds", "milliseconds"];
-export const kTimeFieldMost = [23, 59, 59, 999];
 export const kCollectionExamples: DateStatic[] = [
   { name: "Map", example: "Map<string, int>" },
   { name: "Set", example: "Set<string>" },
@@ -225,7 +221,6 @@ export const kPushName = "push";
 export const kTextStatics = ["fromCharCode", "fromCodePoint"];
 export const kDecimalName = "decimal";
 export const kDecimalError = "DecimalError";
-export const kDecimalStatics = ["max", "min", "sum"];
 export const kRoundingModes = [
   "up",
   "down",

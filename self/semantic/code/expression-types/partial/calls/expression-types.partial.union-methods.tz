@@ -1,5 +1,4 @@
 import { ExpressionTypes } from "../../expression-types.tz";
-import { Code } from "../../../../../diagnostic/code.tz";
 import {
   CallExpr,
   MemberExpr,
@@ -60,38 +59,7 @@ partial class ExpressionTypes {
     parts: ObjectType[],
     module: int,
   ): FunctionType | undefined {
-    const receiver = this.text.of(object);
-    let common: FunctionType | undefined = undefined;
-
-    for (const part of parts) {
-      const type = this.partMethod(member, receiver, part, module);
-      if (type == undefined) {
-        return undefined;
-      }
-      if (common != undefined && type != common) {
-        this.report(module, member.loc, Code.UnionMethodsDiffer, {
-          first: receiver,
-          word: member.name,
-          second: this.text.of(common),
-          other: this.text.of(type),
-        });
-
-        return undefined;
-      }
-
-      common = type;
-    }
-
-    return common;
-  }
-
-  private partMethod(
-    member: MemberExpr,
-    receiver: string,
-    part: ObjectType,
-    module: int,
-  ): FunctionType | undefined {
-    const checked = this.calls.partMethod(member, receiver, part);
+    const checked = this.calls.sharedMethod(member, object, parts);
 
     this.reportFound(module, checked.error);
 

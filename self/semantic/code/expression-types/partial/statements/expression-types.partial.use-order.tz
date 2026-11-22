@@ -8,7 +8,6 @@ import {
   NameExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../../../program/ast/types/ast.types.functions.tz";
-import { SwitchStmt } from "../../../../../program/ast/types/ast.types.statements.tz";
 import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
 import {
   Type,
@@ -107,16 +106,6 @@ partial class ExpressionTypes {
     }
 
     return undefined;
-  }
-
-  private switchFunctionsCheck(statement: SwitchStmt, module: int): void {
-    for (const option of statement.cases) {
-      for (const one of option.body) {
-        const switchFunctionErrors = this.statements.switchFunctionCheck(one);
-
-        this.reportAll(module, switchFunctionErrors);
-      }
-    }
   }
 
   private functionMemberCall(

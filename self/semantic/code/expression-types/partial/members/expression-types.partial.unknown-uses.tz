@@ -1,6 +1,4 @@
 import { ExpressionTypes } from "../../expression-types.tz";
-import { Code } from "../../../../../diagnostic/code.tz";
-import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import {
   CallExpr,
   Expr,
@@ -11,38 +9,18 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import { kConstructorName } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private isUnknownValue(type: Type): boolean {
-    return type.kind == TypeKind.Unknown || type.kind == TypeKind.AnyObject;
-  }
-
   private unknownMemberCheck(
     expr: MemberExpr,
     object: Type,
     module: int,
   ): boolean {
-    if (!this.isUnknownValue(object)) {
-      return false;
-    }
-    if (expr.name == kConstructorName) {
-      this.report(module, expr.loc, Code.ConstructorRefused, kNoDetails);
+    const checked = this.objects.unknownMemberCheck(expr, object);
 
-      return true;
-    }
+    this.reportFound(module, checked.error);
 
-    const what = `property '${expr.name}'`;
-
-    const unknownUseError = this.objects.unknownUseError(
-      expr.object,
-      object,
-      what,
-    );
-
-    this.reportFound(module, unknownUseError);
-
-    return true;
+    return checked.value;
   }
 
   private unknownCallCheck(
@@ -51,7 +29,7 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): boolean {
-    if (!this.isUnknownValue(object)) {
+    if (!this.objects.isUnknownValue(object)) {
       return false;
     }
 
@@ -74,7 +52,7 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): boolean {
-    if (!this.isUnknownValue(object)) {
+    if (!this.objects.isUnknownValue(object)) {
       return false;
     }
 

@@ -516,7 +516,7 @@ export class GenericRules {
     if (own == undefined) {
       return {
         code: Code.CallbackParametersUninferred,
-        loc: loc,
+        loc,
         details: {
           first,
           second,
@@ -528,7 +528,7 @@ export class GenericRules {
 
     return {
       code: Code.CallbackParameterUninferred,
-      loc: loc,
+      loc,
       details: {
         word,
         first,

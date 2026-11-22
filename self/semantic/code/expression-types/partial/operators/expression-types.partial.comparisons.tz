@@ -64,7 +64,9 @@ partial class ExpressionTypes {
     const hasJson =
       plainLeft.kind == TypeKind.Json || plainRight.kind == TypeKind.Json;
     if (hasJson) {
-      return this.jsonEquality(expr, pair, module);
+      const jsonEqualityError = this.comparisons.jsonEqualityError(expr, pair);
+
+      return this.reportFound(module, jsonEqualityError);
     }
 
     const hasResult =
@@ -91,7 +93,13 @@ partial class ExpressionTypes {
 
     const common = this.comparisons.comparisonType(adapted.left, adapted.right);
     if (common == undefined) {
-      this.reportIncomparable(expr, adapted, module);
+      const incomparableError = this.comparisons.incomparableError(
+        expr,
+        adapted,
+        module,
+      );
+
+      this.reportFound(module, incomparableError);
     }
   }
 
@@ -168,64 +176,6 @@ partial class ExpressionTypes {
     return this.typed(expr.lhs, undefined, module);
   }
 
-  private jsonEquality(expr: BinaryExpr, pair: OperandPair, module: int): void {
-    const left = pair.left;
-    const right = pair.right;
-    const isLeftJson = this.types.definedType(left).kind == TypeKind.Json;
-    const isRightJson = this.types.definedType(right).kind == TypeKind.Json;
-    const type = this.decimals.otherSide(isLeftJson, left, right);
-    const json = this.store.plain(TypeKind.Json);
-    const plain = this.types.definedType(type);
-    const isOptionalJson =
-      this.types.isOptional(type) && this.relation.converts(plain, json);
-    if ((isLeftJson && isRightJson) || isOptionalJson) {
-      return;
-    }
-
-    const isPlain =
-      type.kind == TypeKind.String ||
-      type.kind == TypeKind.Boolean ||
-      this.types.isNumeric(type);
-    if (isPlain) {
-      return;
-    }
-
-    const operandsError = this.operators.operandsError(expr, pair);
-
-    this.reportFound(module, operandsError);
-  }
-
-  private reportIncomparable(
-    expr: BinaryExpr,
-    pair: OperandPair,
-    module: int,
-  ): void {
-    const left = pair.left;
-    const right = pair.right;
-    const plainLeft = this.types.definedType(left);
-    const plainRight = this.types.definedType(right);
-    const hasDecimal =
-      plainLeft.kind == TypeKind.Decimal || plainRight.kind == TypeKind.Decimal;
-    if (hasDecimal) {
-      return this.reportDecimalMix(expr, pair, module);
-    }
-
-    const hasNumbers =
-      this.types.isNumeric(plainLeft) &&
-      this.types.isNumeric(plainRight) &&
-      !this.types.isOptional(left) &&
-      !this.types.isOptional(right);
-    if (hasNumbers) {
-      const mixedError = this.operators.mixedError(expr, pair, module);
-
-      return this.reportFound(module, mixedError);
-    }
-
-    const operandsError = this.operators.operandsError(expr, pair);
-
-    this.reportFound(module, operandsError);
-  }
-
   private orderTyped(expr: BinaryExpr, module: int): Type {
     const boolean = this.store.plain(TypeKind.Boolean);
     const sides = this.comparedOperands(expr, module);
@@ -259,7 +209,9 @@ partial class ExpressionTypes {
       return;
     }
     if (this.types.isDate(left) || this.types.isDate(right)) {
-      return this.dateComparison(expr, pair, module);
+      const dateComparisonErrors = this.dates.dateComparisonErrors(expr, pair);
+
+      return this.reportAll(module, dateComparisonErrors);
     }
     if (left.kind == TypeKind.Decimal || right.kind == TypeKind.Decimal) {
       return this.decimalComparison(expr, pair, module);
@@ -289,7 +241,9 @@ partial class ExpressionTypes {
     const isLeftFitting = this.isDecimalSide(expr.lhs, pair.left, module);
     const isRightFitting = this.isDecimalSide(expr.rhs, pair.right, module);
     if (!isLeftFitting || !isRightFitting) {
-      this.reportDecimalMix(expr, pair, module);
+      const decimalMixError = this.decimals.decimalMixError(expr, pair, module);
+
+      this.reportFound(module, decimalMixError);
     }
   }
 

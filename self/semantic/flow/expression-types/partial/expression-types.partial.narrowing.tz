@@ -461,7 +461,7 @@ partial class ExpressionTypes {
     parts: Type[],
     module: int,
   ): Type | undefined {
-    const isOpen = parts.some((part) => this.isUnknownValue(part));
+    const isOpen = parts.some((part) => this.objects.isUnknownValue(part));
     if (rhs.kind != ExprKind.Name || !isOpen) {
       return undefined;
     }

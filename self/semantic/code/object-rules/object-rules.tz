@@ -3,6 +3,7 @@ import {
   SourceError,
 } from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 import {
   Expr,
   ExprKind,
@@ -18,6 +19,7 @@ import {
   TupleType,
   Type,
   TypeKind,
+  UnionType,
 } from "../../../program/type/types/type.types.tz";
 import {
   FieldEntry,
@@ -25,8 +27,8 @@ import {
   ObjectDraft,
   SpreadSlot,
 } from "../expression-types/types/expression-types.types.tz";
+import { TypeOfRules } from "../../types/type-of-rules/type-of-rules.tz";
 import { kLengthName } from "../expression-shapes/const/expression-shapes.const.tz";
-import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 import { TypeUnifier } from "../../types/type-unifier/type-unifier.tz";
 import { SourceTexts } from "../source-texts/source-texts.tz";
 import { kDot } from "../source-texts/const/source-texts.const.tz";
@@ -36,6 +38,7 @@ import { TypeRelation } from "../../types/type-relation/type-relation.tz";
 import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
 import {
   kChainPlaceholder,
+  kConstructorName,
   kIdentifierMarks,
   kPrototypeNames,
   kRawName,
@@ -50,6 +53,7 @@ export class ObjectRules {
   private readonly types: TypeQuestions;
   private readonly sources: SourceTexts;
   private readonly unifier: TypeUnifier;
+  private readonly typeOfs: TypeOfRules;
 
   public constructor(
     store: TypeStore,
@@ -58,6 +62,7 @@ export class ObjectRules {
     types: TypeQuestions,
     sources: SourceTexts,
     unifier: TypeUnifier,
+    typeOfs: TypeOfRules,
   ) {
     this.store = store;
     this.text = text;
@@ -65,6 +70,7 @@ export class ObjectRules {
     this.types = types;
     this.sources = sources;
     this.unifier = unifier;
+    this.typeOfs = typeOfs;
   }
 
   public isSized(type: Type): boolean {
@@ -415,12 +421,12 @@ export class ObjectRules {
     if (first == kStreamErrorName) {
       return {
         code: Code.NoSuchStreamField,
-        loc: loc,
+        loc,
         details: { first, word },
       };
     }
 
-    return { code: Code.NoSuchField, loc: loc, details: { first, word } };
+    return { code: Code.NoSuchField, loc, details: { first, word } };
   }
 
   public unknownUseError(
@@ -432,7 +438,7 @@ export class ObjectRules {
     const isObject = object.kind == TypeKind.AnyObject;
     const code = this.unknownUseCode(isObject, what == "");
 
-    return { code: code, loc: value.loc, details: { word, other: what } };
+    return { code, loc: value.loc, details: { word, other: what } };
   }
 
   public voidFieldCheck(value: Expr, type: Type, name: string): SourceError[] {
@@ -660,6 +666,105 @@ export class ObjectRules {
         details: { word, first },
       },
     };
+  }
+
+  public reportValueMember(expr: MemberExpr, union: UnionType): Checked<Type> {
+    const head = union.parts[0];
+    if (head != undefined) {
+      const word = expr.name;
+      const first = this.text.of(union);
+      const other = this.typeOfs.typeOfName(head);
+
+      return {
+        value: this.store.plain(TypeKind.Error),
+        error: {
+          code: Code.UnionValueMember,
+          loc: expr.loc,
+          details: {
+            word,
+            first,
+            other,
+          },
+        },
+      };
+    }
+
+    return { value: this.store.plain(TypeKind.Error) };
+  }
+
+  public unknownMemberCheck(expr: MemberExpr, object: Type): Checked<boolean> {
+    if (!this.isUnknownValue(object)) {
+      return { value: false };
+    }
+    if (expr.name == kConstructorName) {
+      return {
+        value: true,
+        error: {
+          code: Code.ConstructorRefused,
+          loc: expr.loc,
+          details: kNoDetails,
+        },
+      };
+    }
+
+    const what = `property '${expr.name}'`;
+
+    const unknownUseError = this.unknownUseError(expr.object, object, what);
+
+    return { value: true, error: unknownUseError };
+  }
+
+  public isUnknownValue(type: Type): boolean {
+    return type.kind == TypeKind.Unknown || type.kind == TypeKind.AnyObject;
+  }
+
+  public methodTargetCheck(
+    expr: ObjectLitExpr,
+    goal: ObjectType,
+    methods: ObjectField[],
+  ): Checked<boolean> {
+    const first = this.text.of(goal);
+
+    for (const property of expr.props) {
+      const fitting = this.methodPropertyFits(property, goal, methods, first);
+      if (!fitting.value) {
+        return fitting;
+      }
+    }
+
+    for (const member of goal.fields) {
+      const isGiven = expr.props.some(
+        (property) => property.name == member.name,
+      );
+      const isPlain = this.plainMember(goal, member.name) != undefined;
+      if (!isGiven && isPlain) {
+        return {
+          value: false,
+          error: {
+            code: Code.LiteralFitMissing,
+            loc: expr.loc,
+            details: { first, word: member.name },
+          },
+        };
+      }
+    }
+
+    const overloaded = goal.fields.find(
+      (member) =>
+        goal.fields.filter((other) => other.name == member.name).length > 1,
+    );
+    if (overloaded != undefined) {
+      return {
+        value: false,
+        error: {
+          code: Code.LiteralFitOverloads,
+          loc: expr.loc,
+          details: { first, word: overloaded.name },
+        },
+      };
+    }
+
+    return { value: true };
   }
 
   private chainText(expr: Expr): string | undefined {

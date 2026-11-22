@@ -3,12 +3,20 @@ import {
   SourceError,
 } from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
-import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 import {
   Expr,
   ExprKind,
   MemberExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
+import {
+  ForOfStmt,
+  ReturnStmt,
+  Stmt,
+  StmtKind,
+  SwitchStmt,
+} from "../../../program/ast/types/ast.types.statements.tz";
+import { SymbolKind } from "../../../program/scopes/types/scopes.types.tz";
 import {
   DictKind,
   TupleType,
@@ -20,15 +28,8 @@ import {
   FunctionFrame,
   ValueTarget,
 } from "../expression-types/types/expression-types.types.tz";
-import {
-  ForOfStmt,
-  ReturnStmt,
-  Stmt,
-  StmtKind,
-} from "../../../program/ast/types/ast.types.statements.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 import { IndexRules } from "../index-rules/index-rules.tz";
-import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
-import { SymbolKind } from "../../../program/scopes/types/scopes.types.tz";
 import { SourceTexts } from "../source-texts/source-texts.tz";
 import { FunctionRules } from "../function-rules/function-rules.tz";
 import { ComparisonRules } from "../comparison-rules/comparison-rules.tz";
@@ -356,7 +357,7 @@ export class StatementRules {
     const code = this.caseCode(hasResult);
 
     return {
-      code: code,
+      code,
       loc: test.loc,
       details: {
         word: this.text.of(this.functions.widened(type)),
@@ -506,6 +507,22 @@ export class StatementRules {
         details: kNoDetails,
       },
     };
+  }
+
+  public switchFunctionsCheck(statement: SwitchStmt): SourceError[] {
+    const errors: SourceError[] = [];
+
+    for (const option of statement.cases) {
+      for (const one of option.body) {
+        const switchFunctionErrors = this.switchFunctionCheck(one);
+
+        for (const found of switchFunctionErrors) {
+          errors.push(found);
+        }
+      }
+    }
+
+    return errors;
   }
 
   private namedTarget(

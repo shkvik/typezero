@@ -1,6 +1,5 @@
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
-import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import { messageText } from "../../../../../diagnostic/message.tz";
 import {
   CallExpr,
@@ -46,51 +45,16 @@ partial class ExpressionTypes {
     }
   }
 
-  private writtenResultCheck(
-    fn: FunctionDecl,
-    result: Type,
-    frame: FunctionFrame,
-    module: int,
-  ): void {
-    const written = fn.returnType;
-    const generator = frame.generator;
-    if (written == undefined || generator == undefined) {
-      return;
-    }
-
-    const writtenGeneratorError = this.functions.writtenGeneratorCheck(
-      fn,
-      written,
-      result,
-      generator,
-    );
-
-    this.reportFound(module, writtenGeneratorError);
-  }
-
   private iteratorCallCheck(
     member: MemberExpr,
     object: Type,
     module: int,
   ): boolean {
-    if (object.kind != TypeKind.Iterator) {
-      return false;
-    }
+    const checked = this.functions.iteratorCallCheck(member, object);
 
-    const word = member.name;
+    this.reportFound(module, checked.error);
 
-    switch (word) {
-      case "throw":
-        this.report(module, member.loc, Code.IteratorNoThrow, kNoDetails);
-
-        return true;
-      case "return":
-        this.report(module, member.loc, Code.IteratorNoReturn, kNoDetails);
-
-        return true;
-      default:
-        return this.iteratorMissingCheck(member, object, module);
-    }
+    return checked.value;
   }
 
   private iteratorMissingCheck(

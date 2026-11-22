@@ -51,7 +51,14 @@ partial class ExpressionTypes {
       return boolean;
     }
 
-    this.instanceofCheck(expr, left, instance, decl, module);
+    const instanceofErrors = this.classes.instanceofCheck(
+      expr,
+      left,
+      instance,
+      decl,
+    );
+
+    this.reportAll(module, instanceofErrors);
 
     return boolean;
   }
@@ -157,45 +164,6 @@ partial class ExpressionTypes {
     }
 
     return this.resolver.classInstance(target.module, decl, []);
-  }
-
-  private instanceofCheck(
-    expr: BinaryExpr,
-    left: Type,
-    instance: Type,
-    decl: ClassDecl,
-    module: int,
-  ): void {
-    const base = this.types.definedType(left);
-    const word = decl.name ?? "";
-    const first = this.text.of(base);
-
-    if (this.classes.isOpenTested(base)) {
-      return;
-    }
-    if (base.kind == TypeKind.Union) {
-      if (!this.classes.canHoldClass(base.parts, instance)) {
-        this.report(module, expr.loc, Code.InstanceOfNeverUnion, {
-          word,
-          first,
-        });
-      }
-
-      return;
-    }
-    if (!this.classes.isObjectTested(base)) {
-      const shown = this.text.of(left);
-
-      this.report(module, expr.lhs.loc, Code.InstanceOfNotObject, {
-        first: shown,
-      });
-
-      return;
-    }
-
-    const relatedErrors = this.classes.relatedCheck(expr, base, instance, word);
-
-    this.reportAll(module, relatedErrors);
   }
 
   private memberTargetDeclared(

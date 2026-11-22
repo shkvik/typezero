@@ -773,7 +773,9 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
     if (entry.isStatic) {
-      this.reportStaticCall(member, entry, module);
+      const staticCallError = this.classes.staticCallError(member, entry);
+
+      this.reportFound(module, staticCallError);
       this.looseArguments(expr.args, module);
 
       return this.store.plain(TypeKind.Error);

@@ -3,7 +3,6 @@ import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import {
   BinaryExpr,
-  BinaryOp,
   CallExpr,
   Expr,
   ExprKind,
@@ -217,11 +216,11 @@ partial class ExpressionTypes {
   }
 
   private dateStaticRead(expr: MemberExpr, module: int): Type {
-    const dateStaticError = this.dates.dateStaticError(expr);
+    const checked = this.dates.dateStaticRead(expr);
 
-    this.reportFound(module, dateStaticError);
+    this.reportFound(module, checked.error);
 
-    return this.store.plain(TypeKind.Error);
+    return checked.value;
   }
 
   private dateMethodCall(
@@ -327,50 +326,10 @@ partial class ExpressionTypes {
     pair: OperandPair,
     module: int,
   ): Type {
-    const isBoth =
-      this.types.isDate(pair.left) && this.types.isDate(pair.right);
-    if (isBoth && expr.op == BinaryOp.Sub) {
-      return this.store.integer(64, false);
-    }
+    const checked = this.dates.dateArithmetic(expr, pair);
 
-    this.dateOperatorReport(expr, pair, module);
+    this.reportFound(module, checked.error);
 
-    return this.store.plain(TypeKind.Error);
-  }
-
-  private dateComparison(
-    expr: BinaryExpr,
-    pair: OperandPair,
-    module: int,
-  ): void {
-    const isBoth =
-      this.types.isDate(pair.left) && this.types.isDate(pair.right);
-    if (!isBoth) {
-      this.dateOperatorReport(expr, pair, module);
-    }
-  }
-
-  private dateOperatorReport(
-    expr: BinaryExpr,
-    pair: OperandPair,
-    module: int,
-  ): void {
-    switch (expr.op) {
-      case BinaryOp.Add:
-        return this.report(module, expr.loc, Code.DatePlus, kNoDetails);
-      case BinaryOp.Sub:
-        return this.report(module, expr.loc, Code.DateMinus, kNoDetails);
-      case BinaryOp.Lt:
-      case BinaryOp.Le:
-      case BinaryOp.Gt:
-      case BinaryOp.Ge:
-        return this.report(module, expr.loc, Code.DateCompare, {
-          word: this.sources.operatorText(expr.op),
-        });
-      default:
-        const operandsError = this.operators.operandsError(expr, pair);
-
-        return this.reportFound(module, operandsError);
-    }
+    return checked.value;
   }
 }

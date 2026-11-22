@@ -381,6 +381,42 @@ export class CallRules {
     return { value: type };
   }
 
+  public sharedMethod(
+    member: MemberExpr,
+    object: UnionType,
+    parts: ObjectType[],
+  ): Checked<FunctionType | undefined> {
+    const receiver = this.text.of(object);
+    let common: FunctionType | undefined = undefined;
+
+    for (const part of parts) {
+      const checked = this.partMethod(member, receiver, part);
+      const type = checked.value;
+      if (type == undefined) {
+        return checked;
+      }
+      if (common != undefined && type != common) {
+        return {
+          value: undefined,
+          error: {
+            code: Code.UnionMethodsDiffer,
+            loc: member.loc,
+            details: {
+              first: receiver,
+              word: member.name,
+              second: this.text.of(common),
+              other: this.text.of(type),
+            },
+          },
+        };
+      }
+
+      common = type;
+    }
+
+    return { value: common };
+  }
+
   private countRange(least: int, most: int, rest: boolean): string {
     if (rest) {
       return `${least}${kOrMore}`;

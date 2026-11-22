@@ -6,6 +6,8 @@ import {
 import { Code } from "../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 import {
+  BinaryExpr,
+  BinaryOp,
   CallExpr,
   Expr,
   ExprKind,
@@ -17,7 +19,10 @@ import {
   Type,
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
-import { DateFieldValues } from "../../code/expression-types/types/expression-types.types.tz";
+import {
+  DateFieldValues,
+  OperandPair,
+} from "../../code/expression-types/types/expression-types.types.tz";
 import { kDateName } from "../../types/type-questions/const/type-questions.const.tz";
 import {
   kDateLocalLimit,
@@ -29,6 +34,7 @@ import {
   kDayMilliseconds,
   kDaysInCycle,
   kEpochYear,
+  kFirstTimeField,
   kGetYearName,
   kGmtStringName,
   kHourMilliseconds,
@@ -41,10 +47,15 @@ import {
   kSetYearName,
   kSetterPrefix,
   kShortYearBase,
+  kTimeFieldMost,
+  kTimeFieldNames,
   kUnknownYear,
   kUtcSetterPrefix,
   kYearsInCycle,
 } from "./const/date-rules.const.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { OperatorRules } from "../../code/operator-rules/operator-rules.tz";
+import { SourceTexts } from "../../code/source-texts/source-texts.tz";
 import { CallRules } from "../../code/call-rules/call-rules.tz";
 import { DateReader } from "../date-reader/date-reader.tz";
 import { TypeText } from "../../../program/type/type-text/type-text.tz";
@@ -59,11 +70,24 @@ export class DateRules {
   private readonly types: TypeQuestions;
   private readonly text: TypeText;
   private readonly calls: CallRules;
+  private readonly sources: SourceTexts;
+  private readonly operators: OperatorRules;
+  private readonly store: TypeStore;
 
-  public constructor(types: TypeQuestions, text: TypeText, calls: CallRules) {
+  public constructor(
+    types: TypeQuestions,
+    text: TypeText,
+    calls: CallRules,
+    sources: SourceTexts,
+    operators: OperatorRules,
+    store: TypeStore,
+  ) {
     this.types = types;
     this.text = text;
     this.calls = calls;
+    this.sources = sources;
+    this.operators = operators;
+    this.store = store;
   }
 
   public fieldValue(fields: DateFieldValues, field: int): int | undefined {
@@ -217,15 +241,15 @@ export class DateRules {
 
     switch (word) {
       case kGetYearName:
-        return { code: Code.DateGetYear, loc: loc, details: kNoDetails };
+        return { code: Code.DateGetYear, loc, details: kNoDetails };
       case kSetYearName:
-        return { code: Code.DateSetYear, loc: loc, details: kNoDetails };
+        return { code: Code.DateSetYear, loc, details: kNoDetails };
       case kGmtStringName:
-        return { code: Code.DateGmtString, loc: loc, details: kNoDetails };
+        return { code: Code.DateGmtString, loc, details: kNoDetails };
       default:
         return {
           code: Code.PropertyMissing,
-          loc: loc,
+          loc,
           details: {
             word,
             first: this.text.of(instance),
@@ -274,7 +298,7 @@ export class DateRules {
     if (fields == undefined) {
       errors.push({
         code: Code.DateTextUnreadable,
-        loc: loc,
+        loc,
         details: { word: text },
       });
 
@@ -283,7 +307,7 @@ export class DateRules {
     if (fields.isDateOnly) {
       errors.push({
         code: Code.DateTextNoTime,
-        loc: loc,
+        loc,
         details: { word: text },
       });
 
@@ -296,7 +320,7 @@ export class DateRules {
 
       errors.push({
         code: Code.DateTextNoDay,
-        loc: loc,
+        loc,
         details: {
           word: text,
           other,
@@ -308,7 +332,7 @@ export class DateRules {
     if (!this.isDateInRange(fields)) {
       errors.push({
         code: Code.DateTextOutside,
-        loc: loc,
+        loc,
         details: { word: text },
       });
     }
@@ -326,7 +350,7 @@ export class DateRules {
 
     const arg = fields.args[field - fields.first]?.expr;
     if (arg != undefined) {
-      errors.push({ code: code, loc: arg.loc, details: details });
+      errors.push({ code, loc: arg.loc, details });
     }
 
     return errors;
@@ -359,6 +383,242 @@ export class DateRules {
         },
       },
     };
+  }
+
+  public dateOperatorError(
+    expr: BinaryExpr,
+    pair: OperandPair,
+  ): SourceError | undefined {
+    switch (expr.op) {
+      case BinaryOp.Add:
+        return { code: Code.DatePlus, loc: expr.loc, details: kNoDetails };
+      case BinaryOp.Sub:
+        return { code: Code.DateMinus, loc: expr.loc, details: kNoDetails };
+      case BinaryOp.Lt:
+      case BinaryOp.Le:
+      case BinaryOp.Gt:
+      case BinaryOp.Ge:
+        return {
+          code: Code.DateCompare,
+          loc: expr.loc,
+          details: {
+            word: this.sources.operatorText(expr.op),
+          },
+        };
+      default:
+        const operandsError = this.operators.operandsError(expr, pair);
+
+        return operandsError;
+    }
+  }
+
+  public dayInMonthCheck(
+    fields: DateFieldValues,
+    day: int,
+    month: int,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const year = this.knownYear(fields);
+    const last = this.lastDayOf(year, month);
+    if (day <= last) {
+      return errors;
+    }
+
+    const missing = this.missingDay(year, month, day);
+    const other = this.monthName(month);
+
+    if (fields.setter == "") {
+      const fieldErrors = this.fieldErrors(fields, 2, Code.DateDayLast, {
+        word: missing,
+        other,
+        first: this.nextYearText(year, month),
+        second: `${(month + 1) % 12}`,
+      });
+
+      for (const found of fieldErrors) {
+        errors.push(found);
+      }
+
+      return errors;
+    }
+    if (month == 1) {
+      const fieldErrors2 = this.fieldErrors(fields, 2, Code.DateDayFebruary, {
+        word: missing,
+        other: fields.setter,
+        first: this.yearPart(year),
+      });
+
+      for (const found of fieldErrors2) {
+        errors.push(found);
+      }
+
+      return errors;
+    }
+
+    const fieldErrors3 = this.fieldErrors(fields, 2, Code.DateDayCount, {
+      word: missing,
+      other,
+      first: `${last}`,
+    });
+
+    for (const found of fieldErrors3) {
+      errors.push(found);
+    }
+
+    return errors;
+  }
+
+  public timeFieldsCheck(fields: DateFieldValues): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const end = fields.first + fields.args.length;
+    const start = Math.max(fields.first, kFirstTimeField);
+
+    for (let field = start; field < end; field++) {
+      const value = this.fieldValue(fields, field);
+      const most = kTimeFieldMost[field - kFirstTimeField];
+      const other = kTimeFieldNames[field - kFirstTimeField];
+      if (value == undefined || most == undefined || other == undefined) {
+        continue;
+      }
+      if (value >= 0 && value <= most) {
+        continue;
+      }
+
+      const fieldErrors = this.fieldErrors(fields, field, Code.DateTimeRange, {
+        word: `${value}`,
+        other,
+        first: `${most}`,
+      });
+
+      for (const found of fieldErrors) {
+        errors.push(found);
+      }
+    }
+
+    return errors;
+  }
+
+  public yearFieldCheck(fields: DateFieldValues): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const year = this.fieldValue(fields, 0);
+    if (year == undefined || !this.isShortYear(fields, year)) {
+      return errors;
+    }
+
+    const fieldErrors = this.fieldErrors(fields, 0, Code.DateYearShort, {
+      word: `${year}`,
+      other: `${kShortYearBase + year}`,
+    });
+
+    for (const found of fieldErrors) {
+      errors.push(found);
+    }
+
+    return errors;
+  }
+
+  public dateComparisonErrors(
+    expr: BinaryExpr,
+    pair: OperandPair,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const isBoth =
+      this.types.isDate(pair.left) && this.types.isDate(pair.right);
+    if (!isBoth) {
+      const dateOperatorError = this.dateOperatorError(expr, pair);
+
+      if (dateOperatorError != undefined) {
+        errors.push(dateOperatorError);
+      }
+    }
+
+    return errors;
+  }
+
+  public dayFieldCheck(
+    fields: DateFieldValues,
+    month: int | undefined,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const day = this.fieldValue(fields, 2);
+    if (day == undefined) {
+      return errors;
+    }
+    if (day < 0) {
+      const fieldErrors = this.fieldErrors(fields, 2, Code.DateDayBelow, {
+        word: `${day}`,
+      });
+
+      for (const found of fieldErrors) {
+        errors.push(found);
+      }
+
+      return errors;
+    }
+    if (month != undefined) {
+      const dayInMonthErrors = this.dayInMonthCheck(fields, day, month);
+
+      for (const found of dayInMonthErrors) {
+        errors.push(found);
+      }
+
+      return errors;
+    }
+    if (day > 31) {
+      const fieldErrors2 = this.fieldErrors(fields, 2, Code.DateDayAbove, {
+        word: `${day}`,
+      });
+
+      for (const found of fieldErrors2) {
+        errors.push(found);
+      }
+    }
+
+    return errors;
+  }
+
+  public dateArithmetic(expr: BinaryExpr, pair: OperandPair): Checked<Type> {
+    const isBoth =
+      this.types.isDate(pair.left) && this.types.isDate(pair.right);
+    if (isBoth && expr.op == BinaryOp.Sub) {
+      return { value: this.store.integer(64, false) };
+    }
+
+    const dateOperatorError = this.dateOperatorError(expr, pair);
+
+    return {
+      value: this.store.plain(TypeKind.Error),
+      error: dateOperatorError,
+    };
+  }
+
+  public dateStaticRead(expr: MemberExpr): Checked<Type> {
+    const dateStaticError = this.dateStaticError(expr);
+
+    return { value: this.store.plain(TypeKind.Error), error: dateStaticError };
+  }
+
+  public validMonth(fields: DateFieldValues): Checked<int | undefined> {
+    const month = this.fieldValue(fields, 1);
+    if (month == undefined || (month >= 0 && month <= 11)) {
+      return { value: month };
+    }
+    if (month == 12) {
+      const next = this.fieldErrors(fields, 1, Code.DateMonthNext, kNoDetails);
+
+      return { value: undefined, error: next[0] };
+    }
+
+    const outside = this.fieldErrors(fields, 1, Code.DateMonthOutside, {
+      word: `${month}`,
+    });
+
+    return { value: undefined, error: outside[0] };
   }
 
   private isLeapYear(year: int): boolean {

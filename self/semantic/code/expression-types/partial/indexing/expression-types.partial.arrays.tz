@@ -250,51 +250,11 @@ partial class ExpressionTypes {
     draft: ArrayDraft,
     module: int,
   ): Type | undefined {
-    if (expr.elements.length == 0) {
-      this.report(module, expr.loc, Code.EmptyArray, kNoDetails);
+    const checked = this.arrays.joinedElement(expr, draft);
 
-      return undefined;
-    }
+    this.reportFound(module, checked.error);
 
-    const types = this.arrays.elementTypes(expr, draft);
-    let element: Type | undefined = undefined;
-    let index = 0;
-
-    for (const type of types) {
-      if (type.kind == TypeKind.Error) {
-        return undefined;
-      }
-
-      const joined = this.arrays.joinedItem(element, type);
-      if (joined == undefined) {
-        const elementsError = this.arrays.elementsError(
-          expr,
-          types,
-          element,
-          index,
-        );
-
-        this.reportFound(module, elementsError);
-
-        return undefined;
-      }
-
-      element = joined;
-      index += 1;
-    }
-
-    if (element == undefined) {
-      return undefined;
-    }
-    if (element.kind == TypeKind.Undefined || element.kind == TypeKind.Void) {
-      const first = this.text.of(element);
-
-      this.report(module, expr.loc, Code.UndefinedElement, { first });
-
-      return undefined;
-    }
-
-    return element;
+    return checked.value;
   }
 
   private coerceElements(

@@ -3,6 +3,7 @@ import {
   SourceError,
 } from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 import {
   Expr,
   ExprKind,
@@ -324,7 +325,7 @@ export class FunctionRules {
     }
 
     return {
-      code: code,
+      code,
       loc: iterable.loc,
       details: {
         word: this.text.of(base),
@@ -437,6 +438,58 @@ export class FunctionRules {
         details: { word, first },
       },
     };
+  }
+
+  public writtenResultCheck(
+    fn: FunctionDecl,
+    result: Type,
+    frame: FunctionFrame,
+  ): SourceError | undefined {
+    const written = fn.returnType;
+    const generator = frame.generator;
+    if (written == undefined || generator == undefined) {
+      return undefined;
+    }
+
+    const writtenGeneratorError = this.writtenGeneratorCheck(
+      fn,
+      written,
+      result,
+      generator,
+    );
+
+    return writtenGeneratorError;
+  }
+
+  public iteratorCallCheck(member: MemberExpr, object: Type): Checked<boolean> {
+    if (object.kind != TypeKind.Iterator) {
+      return { value: false };
+    }
+
+    const word = member.name;
+
+    switch (word) {
+      case "throw":
+        return {
+          value: true,
+          error: {
+            code: Code.IteratorNoThrow,
+            loc: member.loc,
+            details: kNoDetails,
+          },
+        };
+      case "return":
+        return {
+          value: true,
+          error: {
+            code: Code.IteratorNoReturn,
+            loc: member.loc,
+            details: kNoDetails,
+          },
+        };
+      default:
+        return this.iteratorMissingCheck(member, object);
+    }
   }
 
   private spreadListShape(goal: FunctionType): FunctionType {

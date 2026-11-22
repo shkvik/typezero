@@ -256,15 +256,11 @@ partial class ExpressionTypes {
     returned: Type,
     module: int,
   ): Type {
-    if (returned.kind != TypeKind.Error) {
-      this.report(module, arg.loc, Code.ResultCallbackNotResult, {
-        word: name,
-        first: this.text.of(returned),
-        place: this.results.mapHint(name == "andThen"),
-      });
-    }
+    const checked = this.results.notResultReport(name, arg, returned);
 
-    return this.store.plain(TypeKind.Error);
+    this.reportFound(module, checked.error);
+
+    return checked.value;
   }
 
   private resultHalfJoin(first: Type, second: Type): Type | undefined {

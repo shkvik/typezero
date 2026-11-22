@@ -173,7 +173,6 @@ export class ExpressionTypes {
   private readonly shapes: ExpressionShapes;
   private readonly arrays: ArrayRules;
   private readonly operators: OperatorRules;
-  private readonly comparisons: ComparisonRules;
   private readonly logic: LogicRules;
   private readonly dictionaries: DictionaryRules;
   private readonly functions: FunctionRules;
@@ -185,13 +184,14 @@ export class ExpressionTypes {
   private readonly classes: ClassRules;
   private readonly overloads: OverloadRules;
   private readonly decorators: DecoratorRules;
-  private readonly statements: StatementRules;
   private readonly narrowings: NarrowingRules;
   private readonly bounds: BoundRules;
   private readonly flows: FlowRules;
   private readonly generics: GenericRules;
   private readonly dates: DateRules;
   private readonly decimals: DecimalRules;
+  private readonly comparisons: ComparisonRules;
+  private readonly statements: StatementRules;
   private readonly results: ResultRules;
   private readonly library: LibraryRules;
   private readonly resolver: TypeResolver;
@@ -294,8 +294,15 @@ export class ExpressionTypes {
       shapes,
       integers,
     );
-    const comparisons = new ComparisonRules(types, unifier, shapes);
-    const logic = new LogicRules(store, types, truth, shapes, sources);
+    const logic = new LogicRules(
+      store,
+      types,
+      truth,
+      shapes,
+      sources,
+      text,
+      unifier,
+    );
     const dictionaries = new DictionaryRules(
       store,
       types,
@@ -313,6 +320,7 @@ export class ExpressionTypes {
       types,
       sources,
       unifier,
+      typeOfs,
     );
     const calls = new CallRules(store, types, parts, text, objects);
     const callbacks = new CallbackRules(
@@ -331,18 +339,7 @@ export class ExpressionTypes {
       mismatches,
       classes,
     );
-    const decorators = new DecoratorRules(types, overloads);
-    const statements = new StatementRules(
-      store,
-      relation,
-      types,
-      modules,
-      text,
-      comparisons,
-      functions,
-      sources,
-      indexes,
-    );
+    const decorators = new DecoratorRules(types, overloads, classes);
     const narrowings = new NarrowingRules(
       store,
       text,
@@ -363,8 +360,28 @@ export class ExpressionTypes {
       literals,
       text,
     );
-    const dates = new DateRules(types, text, calls);
-    const decimals = new DecimalRules(store, types, sources);
+    const dates = new DateRules(types, text, calls, sources, operators, store);
+    const decimals = new DecimalRules(store, types, sources, text, operators);
+    const comparisons = new ComparisonRules(
+      types,
+      unifier,
+      shapes,
+      store,
+      relation,
+      operators,
+      decimals,
+    );
+    const statements = new StatementRules(
+      store,
+      relation,
+      types,
+      modules,
+      text,
+      comparisons,
+      functions,
+      sources,
+      indexes,
+    );
     const results = new ResultRules(store, types, unifier, bounds, text);
     const library = new LibraryRules(types, modules, sources, mismatches);
 
@@ -385,7 +402,6 @@ export class ExpressionTypes {
     this.shapes = shapes;
     this.arrays = arrays;
     this.operators = operators;
-    this.comparisons = comparisons;
     this.logic = logic;
     this.dictionaries = dictionaries;
     this.functions = functions;
@@ -397,13 +413,14 @@ export class ExpressionTypes {
     this.classes = classes;
     this.overloads = overloads;
     this.decorators = decorators;
-    this.statements = statements;
     this.narrowings = narrowings;
     this.bounds = bounds;
     this.flows = flows;
     this.generics = generics;
     this.dates = dates;
     this.decimals = decimals;
+    this.comparisons = comparisons;
+    this.statements = statements;
     this.results = results;
     this.library = library;
     this.resolver = resolver;

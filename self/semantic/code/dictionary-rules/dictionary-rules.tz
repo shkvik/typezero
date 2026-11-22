@@ -399,7 +399,7 @@ export class DictionaryRules {
     second: Type,
   ): SourceError | undefined {
     return {
-      code: code,
+      code,
       loc: expr.loc,
       details: {
         first: this.text.of(first),
@@ -443,13 +443,13 @@ export class DictionaryRules {
     if (isMap && name == "add") {
       return {
         value: true,
-        error: { code: Code.MapHasNoAdd, loc: expr.loc, details: details },
+        error: { code: Code.MapHasNoAdd, loc: expr.loc, details },
       };
     }
     if (!isMap && (name == "set" || name == "get")) {
       return {
         value: true,
-        error: { code: Code.SetHasNoGet, loc: expr.loc, details: details },
+        error: { code: Code.SetHasNoGet, loc: expr.loc, details },
       };
     }
     if (!kDictIterating.includes(name)) {
@@ -510,7 +510,7 @@ export class DictionaryRules {
 
       return {
         value: error,
-        error: { code: code, loc: object.loc, details: { word: text } },
+        error: { code, loc: object.loc, details: { word: text } },
       };
     }
     if (this.isKeyless(base)) {

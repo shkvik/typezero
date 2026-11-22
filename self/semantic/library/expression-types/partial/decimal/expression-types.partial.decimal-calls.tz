@@ -21,12 +21,12 @@ import {
   kDecimalError,
   kDecimalMethods,
   kDecimalName,
-  kDecimalStatics,
   kMathName,
   kNoPlace,
   kRoundingModes,
 } from "../../../../code/expression-types/const/expression-types.const.tz";
 import { DecimalArgument } from "../../../../code/expression-types/types/expression-types.types.tz";
+import { kDecimalStatics } from "../../../decimal-rules/const/decimal-rules.const.tz";
 
 partial class ExpressionTypes {
   private isDecimalName(expr: Expr, module: int): boolean {
@@ -220,18 +220,11 @@ partial class ExpressionTypes {
   }
 
   private decimalStaticRead(expr: MemberExpr, module: int): Type {
-    if (kDecimalStatics.includes(expr.name)) {
-      this.report(module, expr.loc, Code.DecimalFunctionRead, {
-        word: expr.name,
-      });
-    } else {
-      const decimalStaticMissingError =
-        this.decimals.decimalStaticMissingError(expr);
+    const checked = this.decimals.decimalStaticRead(expr);
 
-      this.reportFound(module, decimalStaticMissingError);
-    }
+    this.reportFound(module, checked.error);
 
-    return this.store.plain(TypeKind.Error);
+    return checked.value;
   }
 
   private decimalMethodCall(

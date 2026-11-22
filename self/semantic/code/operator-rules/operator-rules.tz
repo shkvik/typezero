@@ -1,4 +1,7 @@
-import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import {
+  Checked,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   BinaryExpr,
@@ -471,7 +474,7 @@ export class OperatorRules {
     const other = `${wrapped}`;
 
     return {
-      code: code,
+      code,
       loc: expr.loc,
       details: { word: shown, first, other },
     };
@@ -503,6 +506,59 @@ export class OperatorRules {
         second,
       },
     };
+  }
+
+  public parameterArithmetic(
+    expr: BinaryExpr,
+    pair: OperandPair,
+  ): Checked<Type> {
+    const left = pair.left;
+    const right = pair.right;
+    const isOpen =
+      this.types.isOpenParameter(left) || this.types.isOpenParameter(right);
+    const isKnown = left.kind != TypeKind.Error && right.kind != TypeKind.Error;
+    const hasText =
+      left.kind == TypeKind.String || right.kind == TypeKind.String;
+    const isJoin = expr.op == BinaryOp.Add && hasText;
+    if (isOpen && isKnown && !isJoin) {
+      const operandsError = this.operandsError(expr, pair);
+
+      return { value: this.store.plain(TypeKind.Error), error: operandsError };
+    }
+
+    return { value: this.store.plain(TypeKind.Error) };
+  }
+
+  public reportsBits(
+    expr: BinaryExpr,
+    pair: OperandPair,
+    module: int,
+  ): Checked<boolean> {
+    const left = pair.left;
+    const right = pair.right;
+
+    if (this.isNothingChanged(expr, left)) {
+      const nothingChangedError = this.nothingChangedError(expr, left, module);
+
+      return { value: true, error: nothingChangedError };
+    }
+    if (left.kind == TypeKind.Double || right.kind == TypeKind.Double) {
+      const bitsOfDoubleError = this.bitsOfDoubleError(expr, left, module);
+
+      return { value: true, error: bitsOfDoubleError };
+    }
+    if (left.kind != TypeKind.Int || right.kind != TypeKind.Int) {
+      const operandsError = this.operandsError(expr, pair);
+
+      return { value: true, error: operandsError };
+    }
+    if (expr.op == BinaryOp.UShr && !left.unsigned) {
+      const signedShiftError = this.signedShiftError(expr, left, module);
+
+      return { value: true, error: signedShiftError };
+    }
+
+    return { value: false };
   }
 
   private numberHint(

@@ -162,65 +162,7 @@ partial class ExpressionTypes {
     methods: ObjectField[],
     module: int,
   ): boolean {
-    const first = this.text.of(goal);
-
-    for (const property of expr.props) {
-      const isFitting = this.methodPropertyFits(
-        property,
-        goal,
-        methods,
-        first,
-        module,
-      );
-      if (!isFitting) {
-        return false;
-      }
-    }
-
-    for (const member of goal.fields) {
-      const isGiven = expr.props.some(
-        (property) => property.name == member.name,
-      );
-      const isPlain = this.objects.plainMember(goal, member.name) != undefined;
-      if (!isGiven && isPlain) {
-        this.report(module, expr.loc, Code.LiteralFitMissing, {
-          first,
-          word: member.name,
-        });
-
-        return false;
-      }
-    }
-
-    const overloaded = goal.fields.find(
-      (member) =>
-        goal.fields.filter((other) => other.name == member.name).length > 1,
-    );
-    if (overloaded != undefined) {
-      this.report(module, expr.loc, Code.LiteralFitOverloads, {
-        first,
-        word: overloaded.name,
-      });
-
-      return false;
-    }
-
-    return true;
-  }
-
-  private methodPropertyFits(
-    property: Property,
-    goal: ObjectType,
-    methods: ObjectField[],
-    first: string,
-    module: int,
-  ): boolean {
-    const checked = this.objects.methodPropertyFits(
-      property,
-      goal,
-      methods,
-      first,
-    );
+    const checked = this.objects.methodTargetCheck(expr, goal, methods);
 
     this.reportFound(module, checked.error);
 

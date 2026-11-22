@@ -110,22 +110,11 @@ partial class ExpressionTypes {
     object: ClassType,
     module: int,
   ): Type {
-    const error = this.store.plain(TypeKind.Error);
-    if (expr.name == "prototype") {
-      this.report(module, expr.loc, Code.ClassValuePrototype, kNoDetails);
+    const checked = this.classes.classValueMember(expr, object);
 
-      return error;
-    }
-    if (expr.name == "name") {
-      return this.store.plain(TypeKind.String);
-    }
-    if (!object.exact) {
-      this.report(module, expr.loc, Code.ClassValueRuntime, {
-        word: this.text.of(object),
-      });
-    }
+    this.reportFound(module, checked.error);
 
-    return error;
+    return checked.value;
   }
 
   private classValueCall(

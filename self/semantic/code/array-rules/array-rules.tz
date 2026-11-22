@@ -3,6 +3,7 @@ import {
   SourceError,
 } from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 import {
   ArrayLitExpr,
   Expr,
@@ -280,7 +281,7 @@ export class ArrayRules {
 
     return {
       value: this.store.plain(TypeKind.Error),
-      error: { code: code, loc: expr.loc, details: { first } },
+      error: { code, loc: expr.loc, details: { first } },
     };
   }
 
@@ -305,6 +306,56 @@ export class ArrayRules {
         value: this.store.plain(TypeKind.Error),
         error: {
           code: Code.TupleSpreadDiffers,
+          loc: expr.loc,
+          details: { first },
+        },
+      };
+    }
+
+    return { value: element };
+  }
+
+  public joinedElement(
+    expr: ArrayLitExpr,
+    draft: ArrayDraft,
+  ): Checked<Type | undefined> {
+    if (expr.elements.length == 0) {
+      return {
+        value: undefined,
+        error: { code: Code.EmptyArray, loc: expr.loc, details: kNoDetails },
+      };
+    }
+
+    const types = this.elementTypes(expr, draft);
+    let element: Type | undefined = undefined;
+    let index = 0;
+
+    for (const type of types) {
+      if (type.kind == TypeKind.Error) {
+        return { value: undefined };
+      }
+
+      const joined = this.joinedItem(element, type);
+      if (joined == undefined) {
+        const elementsError = this.elementsError(expr, types, element, index);
+
+        return { value: undefined, error: elementsError };
+      }
+
+      element = joined;
+      index += 1;
+    }
+
+    if (element == undefined) {
+      return { value: undefined };
+    }
+    if (element.kind == TypeKind.Undefined || element.kind == TypeKind.Void) {
+      const first = this.text.of(element);
+
+      return {
+        value: undefined,
+        error: {
+          code: Code.UndefinedElement,
           loc: expr.loc,
           details: { first },
         },

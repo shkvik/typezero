@@ -294,7 +294,10 @@ partial class ExpressionTypes {
     frame: FunctionFrame,
     module: int,
   ): void {
-    this.switchFunctionsCheck(statement, module);
+    const switchFunctionsErrors =
+      this.statements.switchFunctionsCheck(statement);
+
+    this.reportAll(module, switchFunctionsErrors);
 
     const subject = this.typed(statement.discriminant, undefined, module);
     const tests = this.caseTypes(statement, subject, module);
