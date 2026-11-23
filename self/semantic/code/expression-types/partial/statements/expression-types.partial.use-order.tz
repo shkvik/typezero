@@ -18,9 +18,14 @@ import {
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
 import {
+  kAlreadyStarted,
+  kChainArrow,
   kFunctionMethods,
+  kNotLoadedYet,
   kTextMethods,
 } from "../../const/expression-types.const.tz";
+import { LinkKind } from "../../../../../program/module/types/module.types.tz";
+import { DoorState } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 
 partial class ExpressionTypes {
   private laterBlockCheck(
@@ -49,6 +54,113 @@ partial class ExpressionTypes {
     }
 
     this.report(module, expr.loc, Code.LaterInBlock, { word: expr.name });
+  }
+
+  private notLoadedCheck(expr: NameExpr, module: int): boolean {
+    const symbol = this.record(module)?.uses.get(expr.loc)?.symbol;
+    const source = symbol?.target;
+    if (this.openFunctions.length > 0 || source == undefined) {
+      return false;
+    }
+    if (symbol?.kind != SymbolKind.Import) {
+      return false;
+    }
+
+    const target = this.exportedValue(source.module, source.name);
+    const isValue =
+      target?.kind == SymbolKind.Variable || target?.kind == SymbolKind.Class;
+    if (!isValue || this.modules.isLibraryModule(source.module)) {
+      return false;
+    }
+
+    const reader = this.loadIndex(module);
+    const later = this.loadIndex(source.module);
+    if (reader < 0 || later <= reader) {
+      return false;
+    }
+
+    this.report(module, expr.loc, Code.ReadWhileLoading, {
+      word: this.moduleName(module),
+      first: this.loadLabel(expr.name, source.name, source.module),
+      second: this.moduleName(source.module),
+      other: this.loadChain(module, source.module),
+      place: source.name,
+    });
+
+    return true;
+  }
+
+  private importBackCheck(target: ValueTarget, module: int): void {
+    if (target.kind != SymbolKind.Variable || target.module == module) {
+      return;
+    }
+
+    const door = this.doors.get(`${target.module} ${target.loc}`);
+    if (door == undefined || door.state != DoorState.InWork) {
+      return;
+    }
+
+    const variable = this.record(target.module)?.variables.get(target.loc);
+    const init = variable?.decl.init;
+    if (variable == undefined || init == undefined) {
+      return;
+    }
+    if (init.kind != ExprKind.Function || init.fn.returnType != undefined) {
+      return;
+    }
+
+    this.report(target.module, init.loc, Code.ImportBackReturn, {
+      word: `'${variable.decl.name}'`,
+    });
+  }
+
+  private loadIndex(module: int): int {
+    return this.program.order.findIndex((one) => one.id == module);
+  }
+
+  private moduleName(module: int): string {
+    return this.program.modules[module]?.name ?? "";
+  }
+
+  private loadLabel(name: string, declared: string, source: int): string {
+    const file = this.moduleName(source);
+    if (name != declared) {
+      return `'${name}' ('${declared}' of ${file})`;
+    }
+
+    return `'${name}' of ${file}`;
+  }
+
+  private loadChain(reader: int, source: int): string {
+    const paths = new Map<int, int[]>();
+
+    this.walkLoads(0, [], paths);
+
+    const path = paths.get(reader) ?? [reader];
+    const names = path.map((one) => this.moduleName(one));
+    const state = this.loadState(path.includes(source));
+
+    return `${names.join(kChainArrow)}${kChainArrow}(${this.moduleName(source)}${state})`;
+  }
+
+  private loadState(isStarted: boolean): string {
+    if (isStarted) {
+      return kAlreadyStarted;
+    }
+
+    return kNotLoadedYet;
+  }
+
+  private walkLoads(id: int, path: int[], paths: Map<int, int[]>): void {
+    const own = path.concat([id]);
+
+    paths.set(id, own);
+
+    for (const link of this.program.modules[id]?.links ?? []) {
+      if (link.kind == LinkKind.Module && !paths.has(link.target)) {
+        this.walkLoads(link.target, own, paths);
+      }
+    }
   }
 
   private earlyCallCheck(

@@ -1,0 +1,251 @@
+import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { ClassDecl } from "../../../../program/ast/types/ast.types.classes.tz";
+import { NewExpr } from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  CallTarget,
+  ReflectedNew,
+} from "../../../code/expression-types/types/expression-types.types.tz";
+import {
+  kAbstractReason,
+  kNoArgumentsReason,
+  kSeveralReason,
+  kTakesReason,
+} from "../../library-rules/const/library-rules.const.tz";
+
+partial class ExpressionTypes {
+  private constructorCastNote(given: Type, wanted: Type): void {
+    const goal = this.types.definedType(wanted);
+    if (given.kind != TypeKind.Class || goal.kind != TypeKind.Class) {
+      return;
+    }
+    if (goal.exact) {
+      return;
+    }
+    if (!given.exact) {
+      return this.constructorWideningNote(given.instance, goal.instance);
+    }
+
+    const instance = given.instance;
+    if (instance.kind != TypeKind.Instance) {
+      return;
+    }
+
+    const decl = this.classOf(instance);
+    const target = goal.instance;
+    const isKnown = this.constructorCasts.some(
+      (one) => one.decl == decl && one.target == target,
+    );
+    if (decl == undefined || isKnown) {
+      return;
+    }
+
+    this.constructorCasts.push({ decl, instance, target });
+  }
+
+  private constructorWideningNote(from: Type, to: Type): void {
+    if (from == to) {
+      return;
+    }
+
+    const list = this.constructorWidenings.get(from.id) ?? [];
+    if (list.includes(to)) {
+      return;
+    }
+
+    list.push(to);
+    this.constructorWidenings.set(from.id, list);
+  }
+
+  private reflectedNewNote(expr: NewExpr, made: Type, module: int): void {
+    const exprs = expr.args.map((arg) => arg.expr);
+    const args = exprs.map((one) => this.peekType(one, module));
+    const loc = expr.loc;
+
+    this.reflectedNews.push({ loc, made, exprs, args, module });
+  }
+
+  private reflectedNewsCheck(module: int): void {
+    for (const reflected of this.reflectedNews) {
+      if (reflected.module == module) {
+        this.reflectedNewCheck(reflected);
+      }
+    }
+  }
+
+  private reflectedNewCheck(reflected: ReflectedNew): void {
+    const reached = this.reachedConstructors(reflected.made);
+
+    for (const cast of this.constructorCasts) {
+      if (!reached.includes(cast.target)) {
+        continue;
+      }
+
+      const reason = this.constructibleReason(
+        cast.decl,
+        cast.instance,
+        reflected,
+      );
+      if (reason != "") {
+        this.report(reflected.module, reflected.loc, Code.ReflectNewMayFail, {
+          word: cast.decl.name ?? "",
+          other: reason,
+        });
+
+        return;
+      }
+    }
+  }
+
+  private reachedConstructors(made: Type): Type[] {
+    const reached: Type[] = [];
+    const waiting: Type[] = [];
+
+    for (const cast of this.constructorCasts) {
+      if (!reached.includes(cast.target)) {
+        reached.push(cast.target);
+        waiting.push(cast.target);
+      }
+    }
+
+    const reaching: Type[] = [];
+
+    for (const start of waiting) {
+      if (this.isReaching(start, made)) {
+        reaching.push(start);
+      }
+    }
+
+    return reaching;
+  }
+
+  private isReaching(start: Type, made: Type): boolean {
+    const seen: Type[] = [start];
+    const waiting: Type[] = [start];
+
+    while (waiting.length > 0) {
+      const current = waiting.pop();
+      if (current == undefined) {
+        continue;
+      }
+      if (current == made) {
+        return true;
+      }
+
+      for (const next of this.constructorWidenings.get(current.id) ?? []) {
+        if (!seen.includes(next)) {
+          seen.push(next);
+          waiting.push(next);
+        }
+      }
+    }
+
+    return false;
+  }
+
+  private constructibleReason(
+    decl: ClassDecl,
+    instance: InstanceType,
+    reflected: ReflectedNew,
+  ): string {
+    if (decl.isAbstract) {
+      return kAbstractReason;
+    }
+
+    const maker = this.makerOf(instance, decl);
+    if (maker == undefined || decl.typeParams.length > 0) {
+      return "";
+    }
+
+    const constructors = maker.owner.constructors;
+    if (constructors.length == 0) {
+      return this.noConstructorReason(reflected.args.length);
+    }
+
+    const targets: CallTarget[] = [];
+
+    for (const made of constructors) {
+      const target = this.constructorTarget(maker, made, decl.loc);
+      if (target == undefined) {
+        return "";
+      }
+
+      targets.push(target);
+    }
+
+    const fitting = targets.filter((target) =>
+      this.isConstructing(target, reflected),
+    );
+    const exact = fitting.filter((target) =>
+      this.isExactConstructor(target, reflected.args),
+    );
+    if (fitting.length == 1 || exact.length == 1) {
+      return "";
+    }
+    if (fitting.length > 1) {
+      return kSeveralReason;
+    }
+
+    return `${kTakesReason}${this.takesText(targets)}`;
+  }
+
+  private noConstructorReason(count: int): string {
+    if (count == 0) {
+      return "";
+    }
+
+    return kNoArgumentsReason;
+  }
+
+  private isConstructing(target: CallTarget, reflected: ReflectedNew): boolean {
+    const args = reflected.args;
+    const least = this.calls.leastArguments(target);
+    const isTooMany = !target.rest && args.length > target.params.length;
+    if (args.length < least || isTooMany) {
+      return false;
+    }
+
+    return args.every((arg, index) => {
+      const param = this.constructorParam(target, index);
+      const expr = reflected.exprs[index];
+      if (param == undefined || expr == undefined) {
+        return false;
+      }
+      if (this.relation.converts(arg, param)) {
+        return true;
+      }
+
+      return this.isAdaptingLiteral(expr, arg, param, reflected.module);
+    });
+  }
+
+  private isExactConstructor(target: CallTarget, args: Type[]): boolean {
+    return args.every((arg, index) => {
+      const param = this.constructorParam(target, index);
+
+      return param != undefined && this.types.apparent(arg) == param;
+    });
+  }
+
+  private constructorParam(target: CallTarget, index: int): Type | undefined {
+    const last = target.params[target.params.length - 1];
+    const param = target.params[index] ?? last;
+
+    return param?.type;
+  }
+
+  private takesText(targets: CallTarget[]): string {
+    const shown = targets.map((target) => {
+      const params = target.params.map((param) => this.text.of(param.type));
+
+      return `(${params.join(", ")})`;
+    });
+
+    return shown.join(" or ");
+  }
+}

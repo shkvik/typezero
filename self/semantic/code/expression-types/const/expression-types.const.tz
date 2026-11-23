@@ -354,3 +354,6 @@ export const kExampleEnd = " {}";
 export const kJoinName = "join";
 export const kBothStart = "; the same object also goes where '";
 export const kBothEnd = "' is expected, and one object cannot be both";
+export const kChainArrow = " -> ";
+export const kAlreadyStarted = " already started";
+export const kNotLoadedYet = " not loaded yet";

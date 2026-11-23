@@ -4180,4 +4180,13 @@ export const kMessages: Record<Code, Message> = {
   [Code.MetadataNoRecord]: {
     text: "the records of '{word}' have the type of the first one written, 'Reflect.defineMetadata({word}, value, target)', and none is written before this; write one first, give the type where this one goes (e.g. 'const x: string[] = ...'), or use a string key, whose records are 'unknown'",
   },
+  [Code.ReflectNewMayFail]: {
+    text: "'new' of a class known only when the program runs may fail: '{word}' can be here, and {other}; write 'Reflect.construct(cls, [...])', which gives a Result",
+  },
+  [Code.ReadWhileLoading]: {
+    text: "{word} reads {first} while it loads, but {second} is not loaded yet: {other}; compute the value inside a function, or move '{place}' to a file outside the cycle",
+  },
+  [Code.ImportBackReturn]: {
+    text: "cannot tell what {word} returns: it uses a file that imports it back and calls it while loading; declare its return type, e.g. '): int'",
+  },
 };

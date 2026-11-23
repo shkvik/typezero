@@ -13,6 +13,7 @@ partial class ExpressionTypes {
   public problems(module: int): SourceError[] {
     this.unreadResultsCheck(module);
     this.pendingCallsCheck(module);
+    this.reflectedNewsCheck(module);
 
     return this.errors.of(module);
   }

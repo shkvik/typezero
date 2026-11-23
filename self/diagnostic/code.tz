@@ -1391,4 +1391,7 @@ export enum Code {
   MetadataRecordType = "TZ3561",
   MetadataUndefinedRecord = "TZ3562",
   MetadataNoRecord = "TZ3563",
+  ReflectNewMayFail = "TZ3564",
+  ReadWhileLoading = "TZ3565",
+  ImportBackReturn = "TZ3566",
 }

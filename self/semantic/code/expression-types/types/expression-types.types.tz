@@ -547,3 +547,17 @@ export type JsonTest = {
   readonly tested: Expr;
   readonly isNullTest: boolean;
 };
+
+export type ConstructorCast = {
+  readonly decl: ClassDecl;
+  readonly instance: InstanceType;
+  readonly target: Type;
+};
+
+export type ReflectedNew = {
+  readonly loc: int;
+  readonly made: Type;
+  readonly exprs: Expr[];
+  readonly args: Type[];
+  readonly module: int;
+};

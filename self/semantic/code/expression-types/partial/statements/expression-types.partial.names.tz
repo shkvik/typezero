@@ -44,6 +44,9 @@ partial class ExpressionTypes {
     if (forwarded != undefined) {
       return forwarded;
     }
+    if (this.notLoadedCheck(expr, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
 
     const target = this.targetOfName(expr, module);
     if (target == undefined) {
@@ -52,6 +55,7 @@ partial class ExpressionTypes {
 
     this.laterBlockCheck(expr, target, module);
     this.ownInitializerCheck(expr, target, module);
+    this.importBackCheck(target, module);
 
     const fact = this.factOf(target);
     if (fact != undefined) {

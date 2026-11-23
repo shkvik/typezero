@@ -148,6 +148,8 @@ partial class ExpressionTypes {
     module: int,
     place: string,
   ): void {
+    this.constructorCastNote(given, wanted);
+
     if (this.relation.converts(given, wanted)) {
       return;
     }

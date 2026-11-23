@@ -1,10 +1,12 @@
 import {
+  ConstructorCast,
   FunctionDoor,
   GeneratorFrame,
   GuardSummary,
   InitFrame,
   InitializingVariable,
   PendingCall,
+  ReflectedNew,
   Requirement,
   StalledFunction,
   StaticOwner,
@@ -92,6 +94,7 @@ import "../../library/expression-types/partial/expression-types.partial.promise-
 import "../../library/expression-types/partial/expression-types.partial.embeds.tz";
 import "./partial/statements/expression-types.partial.for-await.tz";
 import "../../library/expression-types/partial/expression-types.partial.reflect-calls.tz";
+import "../../library/expression-types/partial/expression-types.partial.reflected-news.tz";
 import "../../library/expression-types/partial/expression-types.partial.console-calls.tz";
 import "./partial/statements/expression-types.partial.statement-values.tz";
 import "./partial/calls/expression-types.partial.construction.tz";
@@ -351,6 +354,9 @@ export class ExpressionTypes {
   private readonly requirements: Map<int, Requirement[]>;
   private readonly pendingCalls: PendingCall[];
   private readonly metadataRecords: Map<string, Type>;
+  private readonly constructorCasts: ConstructorCast[];
+  private readonly constructorWidenings: Map<int, Type[]>;
+  private readonly reflectedNews: ReflectedNew[];
   private readonly ownedCalls: Map<string, PendingCall[]>;
   private writtenFields?: Set<string>;
 
@@ -656,6 +662,9 @@ export class ExpressionTypes {
     this.requirements = new Map<int, Requirement[]>();
     this.pendingCalls = [];
     this.metadataRecords = new Map<string, Type>();
+    this.constructorCasts = [];
+    this.constructorWidenings = new Map<int, Type[]>();
+    this.reflectedNews = [];
     this.ownedCalls = new Map<string, PendingCall[]>();
 
     for (const scopes of resolved) {

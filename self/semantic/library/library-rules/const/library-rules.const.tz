@@ -53,3 +53,8 @@ export const kIsArrayName = "isArray";
 export const kEqualText = "==";
 export const kNotEqualText = "!=";
 export const kValuePlaceholder = "value";
+export const kAbstractReason = "it is abstract";
+export const kNoArgumentsReason = "its constructor takes no arguments";
+export const kSeveralReason =
+  "the arguments may fit several of its constructors";
+export const kTakesReason = "its constructor takes ";

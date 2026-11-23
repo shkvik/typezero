@@ -109,6 +109,9 @@ partial class ExpressionTypes {
     if (!isSpread) {
       this.requireConstruct(instance, expr.args.length);
     }
+    if (!callee.exact && !isSpread) {
+      this.reflectedNewNote(expr, instance, module);
+    }
     if (!callee.exact || instance.kind != TypeKind.Instance) {
       return instance;
     }

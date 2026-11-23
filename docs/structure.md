@@ -836,6 +836,28 @@ self/             компилятор на tz, пробный (порт compile
                   code/…/partial/expressions/…reports (problems, variable, report*);
                   declaration/scope-traversal/partial/…imports — импорт по умолчанию и
                   `import * as` встроенных модулей, 'neverthrow';
+                  добавлено 23–24.11: library/node-value-rules/ — NodeValueRules (имена
+                  модулей node как значения, вызовы и члены, File-классы; часть обхода
+                  library/…/partial/dispatch/…node-values), library/json-text/ — JsonText
+                  (ошибка в тексте JSON и её место, перенос checkJsonText; части
+                  …json-uses, …json-stringify, …json-tests), library/intl-date-rules/ —
+                  IntlDateRules (опции дат Intl, отделены от IntlRules; части
+                  intl/…intl, intl-options, intl-calls, date-options),
+                  code/dispose-rules/ — DisposeRules (`using`, Symbol.dispose; часть
+                  classes/…disposal); части обхода: library/…library-variants (перегрузки
+                  библиотеки), crypto/…crypto-signs, objects/…keyed-objects,
+                  library/…reflected-news (`new` класса из Constructor: какие классы туда
+                  доходят — приведения в coerce, проверка в problems()),
+                  generics/…requirements (требования к параметрам типа: текст, сравнение,
+                  сортировка, неиспользованный Result, число аргументов конструктора,
+                  захваты выражений класса, цепочки копий обобщённых функций);
+                  load/json-module/ — JsonModule: импорт JSON — модуль
+                  `export const json: <тип> = <литерал>` (перенос compiler/load/json_module,
+                  разбор JSON свой: число без точки и `e` — int); TypeStore хранит
+                  ParamWriter — какой член класса пишет параметр типа (вариантность,
+                  считает TypeResolver.classInstance); NameUse.capture (CapturePlace в
+                  program/scopes) — захват переменной выражением класса внутри обобщённой
+                  функции: о нём сообщает вызов с конкретным типом;
                   semantic/flow/truth-rules/ — TruthRules: можно ли проверять значение
                   типа как условие (problemOf) и какой ошибкой ответить (answerOf);
                   semantic/declaration/scope-stack/ — ScopeStack: состояние обхода — стек областей
