@@ -97,10 +97,14 @@ partial class ExpressionTypes {
     if (this.processAssignCheck(expr, module)) {
       return this.store.plain(TypeKind.Error);
     }
+    if (this.statsDateCheck(expr, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
 
     const isCompound = expr.op != undefined && expr.op != BinaryOp.Nullish;
     const isRefused =
       this.dictTargetCheck(target, module) ||
+      this.keyedWriteCheck(target, module) ||
       this.unionTargetCheck(target, module) ||
       (isCompound && this.recordTargetCheck(target, module));
     if (isRefused) {

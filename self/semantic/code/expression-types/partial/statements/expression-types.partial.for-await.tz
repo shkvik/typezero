@@ -2,13 +2,16 @@ import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import { ForOfStmt } from "../../../../../program/ast/types/ast.types.statements.tz";
 import {
+  InstanceType,
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
 import {
   CallExpr,
+  Expr,
   MemberExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { kAsyncIteratorKey } from "../../../../types/type-questions/const/type-questions.const.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 
 partial class ExpressionTypes {
@@ -41,6 +44,10 @@ partial class ExpressionTypes {
       return;
     }
 
+    if (statement.isAwait && base.kind == TypeKind.Instance) {
+      return this.asyncMethodCheck(iterable, base, module);
+    }
+
     const isPlainValue =
       base.kind == TypeKind.Int ||
       base.kind == TypeKind.Double ||
@@ -71,5 +78,37 @@ partial class ExpressionTypes {
     this.looseArguments(expr.args, module);
 
     return this.store.plain(TypeKind.Error);
+  }
+
+  private asyncMethodCheck(
+    iterable: Expr,
+    instance: InstanceType,
+    module: int,
+  ): void {
+    if (this.modules.isLibraryModule(instance.module)) {
+      return;
+    }
+
+    const entry = this.classMember(instance, kAsyncIteratorKey).entry;
+    const method = entry?.methods[0];
+    if (entry == undefined || method == undefined) {
+      return;
+    }
+
+    const type = this.methodTypeOf(entry, method);
+    if (type.kind != TypeKind.Function) {
+      return;
+    }
+
+    const result = type.shape.result;
+    const isAsync = result.kind == TypeKind.Iterator && result.shape.async;
+    if (isAsync || result.kind == TypeKind.Error) {
+      return;
+    }
+
+    this.report(module, iterable.loc, Code.AsyncIteratorMethodResult, {
+      word: this.text.of(instance),
+      first: this.text.of(result),
+    });
   }
 }

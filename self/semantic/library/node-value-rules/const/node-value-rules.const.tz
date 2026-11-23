@@ -1,0 +1,16 @@
+export const kAliasModules = ["node:process", "node:buffer"];
+export const kPathModules = ["node:path", "node:path/posix", "node:path/win32"];
+export const kPathStrings = ["sep", "delimiter"];
+export const kOsModule = "node:os";
+export const kOsStrings = ["EOL", "devNull"];
+export const kFsModules = ["node:fs", "node:fs/promises"];
+export const kCryptoModule = "node:crypto";
+export const kTimersPromisesModule = "node:timers/promises";
+export const kConstantsName = "constants";
+export const kSchedulerName = "scheduler";
+export const kPathExample = "posix.join(a, b)";
+export const kCallExample = "(...)";
+export const kFileClasses = ["Stats", "Dirent"];
+export const kFsModule = "node:fs";
+export const kFsPromisesModule = "node:fs/promises";
+export const kOpenName = "open";

@@ -84,6 +84,9 @@ partial class ExpressionTypes {
   ): Type {
     this.stringCallCheck(expr, callee, module);
 
+    if (this.nodeCallCheck(expr, callee, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
     if (this.isResultMakerCall(callee, module)) {
       return this.resultMakerCall(expr, callee, wanted, module);
     }
@@ -137,6 +140,11 @@ partial class ExpressionTypes {
       this.report(module, callee.loc, Code.NotGenericFunction, {
         word: callee.name,
       });
+    }
+    const home = target.module;
+    const isLibraryHome = this.modules.isLibraryModule(home);
+    if (isLibraryHome && this.isOverloaded(fn, home)) {
+      return this.overloadedLibraryCall(expr, callee, fn, home, module);
     }
     if (!this.isCallable(fn, target.module)) {
       return this.store.plain(TypeKind.Error);

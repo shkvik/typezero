@@ -327,6 +327,9 @@ partial class ExpressionTypes {
       this.integerChecks(expr, common, written, module);
       this.foldBinary(expr, common, module);
     }
+    if (common.kind == TypeKind.Double) {
+      this.doubleDivisorCheck(expr, module);
+    }
 
     return common;
   }
@@ -350,6 +353,19 @@ partial class ExpressionTypes {
     }
 
     this.divisorCheck(expr, right, module);
+  }
+
+  private doubleDivisorCheck(expr: BinaryExpr, module: int): void {
+    const isDividing = expr.op == BinaryOp.Div || expr.op == BinaryOp.Rem;
+    const divisor = expr.rhs;
+    if (!isDividing || divisor.kind != ExprKind.IntLit) {
+      return;
+    }
+    const value = divisor.value;
+    const loc = divisor.loc;
+    if (value == 0) {
+      this.report(module, loc, Code.DivisionByZero, kNoDetails);
+    }
   }
 
   private divisorCheck(expr: BinaryExpr, right: Type, module: int): void {

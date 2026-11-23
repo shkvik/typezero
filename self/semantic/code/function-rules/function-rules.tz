@@ -40,6 +40,7 @@ import { TypeUnifier } from "../../types/type-unifier/type-unifier.tz";
 import {
   kAnonymousFunction,
   kFunctionWord,
+  kIntName,
 } from "./const/function-rules.const.tz";
 
 export class FunctionRules {
@@ -340,9 +341,13 @@ export class FunctionRules {
     result: Type,
     generator: GeneratorFrame,
   ): SourceError | undefined {
-    const isOpen =
-      result.kind == TypeKind.Iterator || result.kind == TypeKind.Error;
-    if (!fn.isGenerator || isOpen) {
+    if (!fn.isGenerator || result.kind == TypeKind.Error) {
+      return undefined;
+    }
+    if (fn.isAsync) {
+      return this.asyncGeneratorError(written, result);
+    }
+    if (result.kind == TypeKind.Iterator) {
       return undefined;
     }
 
@@ -353,6 +358,40 @@ export class FunctionRules {
       loc: written.loc,
       details: { word },
     };
+  }
+
+  private asyncGeneratorError(
+    written: TypeRef,
+    result: Type,
+  ): SourceError | undefined {
+    if (result.kind == TypeKind.Iterator && result.shape.async) {
+      return undefined;
+    }
+
+    const yielded = this.yieldedOf(result);
+    const word = this.shownElement(yielded);
+
+    return {
+      code: Code.GeneratorNotAsync,
+      loc: written.loc,
+      details: { word },
+    };
+  }
+
+  private yieldedOf(result: Type): Type {
+    if (result.kind == TypeKind.Iterator) {
+      return result.shape.yielded;
+    }
+
+    return result;
+  }
+
+  private shownElement(element: Type): string {
+    if (element.kind == TypeKind.Void) {
+      return kIntName;
+    }
+
+    return this.text.of(element);
   }
 
   public checkedParameter(

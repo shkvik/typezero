@@ -26,6 +26,19 @@ partial class ExpressionTypes {
     if (this.enumOfObject(member.object, module) != undefined) {
       return this.store.plain(TypeKind.Error);
     }
+    if (this.nodeMemberCallCheck(expr, member, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const filled = this.reflectFillCall(expr, member, module);
+    if (filled != undefined) {
+      return filled;
+    }
+
+    const recorded = this.reflectStringRead(expr, member, module);
+    if (recorded != undefined) {
+      return recorded;
+    }
 
     const intlCall = this.intlNamespaceCall(expr, member, module);
     if (intlCall != undefined) {
@@ -123,6 +136,11 @@ partial class ExpressionTypes {
   ): Type {
     if (this.unknownCallCheck(expr, member, object, module)) {
       return this.store.plain(TypeKind.Error);
+    }
+
+    const readlineCall = this.readlineMethodCall(expr, member, object, module);
+    if (readlineCall != undefined) {
+      return readlineCall;
     }
     if (this.library.isJsonHolder(object)) {
       return this.jsonMethodCall(expr, member, module);
@@ -308,6 +326,11 @@ partial class ExpressionTypes {
       const shaped = this.unionShapeCall(expr, member, object, common, module);
       if (shaped != undefined) {
         return shaped;
+      }
+      if (common == undefined && this.relation.isTagged(object.parts)) {
+        this.looseArguments(expr.args, module);
+
+        return this.reportValueMember(member, object, module);
       }
       if (common == undefined) {
         this.lackingVariantCheck(expr, member, object, module);

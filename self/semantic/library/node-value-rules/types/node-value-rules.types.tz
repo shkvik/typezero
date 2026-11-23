@@ -1,0 +1,4 @@
+export type NodeName = {
+  readonly module: string;
+  readonly name: string;
+};

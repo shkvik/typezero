@@ -40,6 +40,11 @@ partial class ExpressionTypes {
     this.checkFieldValue(decl, field, module);
 
     const isParameter = field.form == FieldKind.Parameter;
+    if (isParameter && field.type == undefined) {
+      this.report(module, field.loc, Code.ParamFieldNeedsType, { word });
+
+      return;
+    }
     if (!isParameter && field.type == undefined && field.init == undefined) {
       this.report(module, field.loc, Code.FieldNeedsType, { word });
 

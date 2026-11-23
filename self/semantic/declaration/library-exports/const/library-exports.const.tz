@@ -24,3 +24,4 @@ export const kTimersHint =
   "; it has setTimeout, setImmediate, setInterval and scheduler";
 export const kTzFsHint = "; it has replaceSync, replace and ReplaceError";
 export const kTzIoHint = "; it has readLine";
+export const kPendingCalls = [{ module: "node:fs/promises", name: "open" }];

@@ -341,6 +341,16 @@ export class StatementRules {
     return "x - y";
   }
 
+  private caseShown(type: Type, subject: Type): Type {
+    const parts = this.types.unionMembers(subject);
+    const hasLiterals = parts.some((part) => part.kind == TypeKind.Literal);
+    if (hasLiterals && type.kind == TypeKind.Literal) {
+      return type;
+    }
+
+    return this.functions.widened(type);
+  }
+
   public caseTypeCheck(
     test: Expr,
     type: Type,
@@ -363,7 +373,7 @@ export class StatementRules {
       code,
       loc: test.loc,
       details: {
-        word: this.text.of(this.functions.widened(type)),
+        word: this.text.of(this.caseShown(type, subject)),
         first: this.text.of(subject),
       },
     };

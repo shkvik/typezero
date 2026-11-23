@@ -338,6 +338,23 @@ partial class ExpressionTypes {
     });
   }
 
+  private namespaceReadCheck(expr: MemberExpr, module: int): void {
+    const object = expr.object;
+    if (object.kind != ExprKind.Name || !this.isGlobalUse(object, module)) {
+      return;
+    }
+
+    const code = this.library.namespaceCode(object.name);
+    if (code != Code.NamespaceMemberMissing) {
+      return;
+    }
+
+    this.report(module, expr.loc, code, {
+      word: expr.name,
+      first: object.name,
+    });
+  }
+
   private namespaceMissingCheck(
     expr: CallExpr,
     member: MemberExpr,

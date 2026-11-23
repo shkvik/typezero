@@ -133,6 +133,9 @@ partial class ModuleBinder {
     if (this.isSubmodule(theirModule.name, word)) {
       return { module: theirModule.id, name: word };
     }
+    if (this.exports.isPendingCall(theirModule.name, word)) {
+      return { module: theirModule.id, name: word };
+    }
 
     const unmarked =
       source.names.declared.has(word) && !theirModule.source.isLibrary;
@@ -162,9 +165,7 @@ partial class ModuleBinder {
   }
 
   private isSubmodule(module: string, word: string): boolean {
-    return kSubmodules.some(
-      (one) => one.parent == module && one.name == word,
-    );
+    return kSubmodules.some((one) => one.parent == module && one.name == word);
   }
 
   private localTarget(

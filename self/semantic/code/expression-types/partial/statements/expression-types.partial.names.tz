@@ -36,6 +36,9 @@ partial class ExpressionTypes {
     if (this.objectValueCheck(expr, module)) {
       return this.store.plain(TypeKind.Error);
     }
+    if (this.nodeValueCheck(expr, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
 
     const forwarded = this.builtinFunctionValue(expr, wanted, module);
     if (forwarded != undefined) {
@@ -66,6 +69,10 @@ partial class ExpressionTypes {
         return value ?? this.usedFunction(target.module, target.loc);
       }
       case SymbolKind.Class:
+        if (this.genericClassValueCheck(expr, target, wanted, module)) {
+          return this.store.plain(TypeKind.Error);
+        }
+
         return this.classValue(target);
       case SymbolKind.Enum:
         if (this.statements.isRecordWanted(wanted)) {

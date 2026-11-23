@@ -80,6 +80,8 @@ import "../../library/expression-types/partial/crypto/expression-types.partial.c
 import "../../library/expression-types/partial/timers/expression-types.partial.timer-promises.tz";
 import "../../library/expression-types/partial/fs/expression-types.partial.readline.tz";
 import "../../library/expression-types/partial/ffi/expression-types.partial.foreign.tz";
+import "../../library/expression-types/partial/crypto/expression-types.partial.crypto-signs.tz";
+import "../../library/expression-types/partial/dispatch/expression-types.partial.node-values.tz";
 import "../../library/expression-types/partial/expression-types.partial.promise-lists.tz";
 import "../../library/expression-types/partial/expression-types.partial.embeds.tz";
 import "./partial/statements/expression-types.partial.for-await.tz";
@@ -213,6 +215,7 @@ import { RegexRules } from "../../library/regex-rules/regex-rules.tz";
 import { CryptoRules } from "../../library/crypto-rules/crypto-rules.tz";
 import { SubtleRules } from "../../library/subtle-rules/subtle-rules.tz";
 import { ForeignRules } from "../../library/foreign-rules/foreign-rules.tz";
+import { NodeValueRules } from "../../library/node-value-rules/node-value-rules.tz";
 
 export class ExpressionTypes {
   private readonly store: TypeStore;
@@ -275,6 +278,7 @@ export class ExpressionTypes {
   private readonly crypto: CryptoRules;
   private readonly subtle: SubtleRules;
   private readonly foreign: ForeignRules;
+  private readonly nodeValues: NodeValueRules;
   private readonly resolver: TypeResolver;
   private readonly errors: ErrorLog;
   private readonly memberObjects: Set<Expr>;
@@ -507,6 +511,7 @@ export class ExpressionTypes {
       modules,
       byteSources,
     );
+    const nodeValues = new NodeValueRules();
 
     this.store = store;
     this.text = text;
@@ -568,6 +573,7 @@ export class ExpressionTypes {
     this.crypto = crypto;
     this.subtle = subtle;
     this.foreign = foreign;
+    this.nodeValues = nodeValues;
     this.resolver = resolver;
     this.errors = new ErrorLog();
     this.memberObjects = new Set<Expr>();

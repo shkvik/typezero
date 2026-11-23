@@ -1,0 +1,188 @@
+import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import { kSubmodules } from "../../declaration/module-binder/const/module-binder.const.tz";
+import {
+  kKnownModules,
+  kNodePrefix,
+} from "../../declaration/scope-traversal/const/scope-traversal.const.modules.tz";
+import { KnownModuleRow } from "../../declaration/scope-traversal/types/scope-traversal.types.tz";
+import { kCryptoClasses } from "../crypto-rules/const/crypto-rules.const.tz";
+import {
+  kAliasModules,
+  kCallExample,
+  kConstantsName,
+  kCryptoModule,
+  kFileClasses,
+  kFsModule,
+  kFsModules,
+  kFsPromisesModule,
+  kOpenName,
+  kOsModule,
+  kOsStrings,
+  kPathExample,
+  kPathModules,
+  kPathStrings,
+  kSchedulerName,
+  kTimersPromisesModule,
+} from "./const/node-value-rules.const.tz";
+import { NodeName } from "./types/node-value-rules.types.tz";
+
+export class NodeValueRules {
+  public isKnown(module: string): boolean {
+    return this.knownRow(module) != undefined;
+  }
+
+  public nodeName(module: string, name: string): NodeName {
+    const submodule = kSubmodules.find(
+      (one) => one.parent == module && one.name == name,
+    );
+    if (submodule != undefined) {
+      return { module: submodule.module, name: "" };
+    }
+
+    return { module, name };
+  }
+
+  public valueError(
+    node: NodeName,
+    isMemberObject: boolean,
+    loc: int,
+  ): SourceError | undefined {
+    if (this.isQuietValue(node, isMemberObject)) {
+      return undefined;
+    }
+    if (node.name == "") {
+      return this.moduleValueError(node.module, loc);
+    }
+
+    const constantsCode = this.constantsCode(node);
+    if (constantsCode != undefined) {
+      return { code: constantsCode, loc, details: kNoDetails };
+    }
+
+    const word = node.name;
+    if (node.module == kCryptoModule && kCryptoClasses.includes(word)) {
+      return { code: Code.NodeCryptoType, loc, details: { word } };
+    }
+
+    const other = node.module;
+
+    return { code: Code.NodeOnlyCalled, loc, details: { word, other } };
+  }
+
+  public callError(
+    node: NodeName,
+    word: string,
+    loc: int,
+  ): SourceError | undefined {
+    if (kAliasModules.includes(node.module)) {
+      return undefined;
+    }
+    if (node.name == "") {
+      const other = node.module;
+
+      return { code: Code.NodeNotFunction, loc, details: { word, other } };
+    }
+    if (this.isStringValue(node)) {
+      return { code: Code.NodeStringCalled, loc, details: { word: node.name } };
+    }
+    if (node.module == kFsPromisesModule && node.name == kOpenName) {
+      return { code: Code.FsPromisesOpen, loc, details: kNoDetails };
+    }
+
+    return undefined;
+  }
+
+  public memberCallError(
+    node: NodeName,
+    name: string,
+    loc: int,
+  ): SourceError | undefined {
+    const inner = this.nodeName(node.module, name);
+    const isPath = kPathModules.includes(node.module);
+    if (inner.name == "" && isPath) {
+      return { code: Code.NodeSubmoduleCalled, loc, details: { word: name } };
+    }
+    if (this.isStringValue(inner)) {
+      return { code: Code.NodeStringCalled, loc, details: { word: name } };
+    }
+
+    return undefined;
+  }
+
+  public isFileClass(module: string, name: string): boolean {
+    return module == kFsModule && kFileClasses.includes(name);
+  }
+
+  private isQuietValue(node: NodeName, isMemberObject: boolean): boolean {
+    if (kAliasModules.includes(node.module) || this.isStringValue(node)) {
+      return true;
+    }
+    if (!isMemberObject) {
+      return false;
+    }
+
+    const isScheduler =
+      node.module == kTimersPromisesModule && node.name == kSchedulerName;
+
+    return node.name == "" || node.name == kConstantsName || isScheduler;
+  }
+
+  private isStringValue(node: NodeName): boolean {
+    if (kPathModules.includes(node.module)) {
+      return kPathStrings.includes(node.name);
+    }
+    if (node.module == kOsModule) {
+      return kOsStrings.includes(node.name);
+    }
+
+    return false;
+  }
+
+  private constantsCode(node: NodeName): Code | undefined {
+    if (node.name != kConstantsName) {
+      return undefined;
+    }
+    if (kFsModules.includes(node.module)) {
+      return Code.FsConstantsValue;
+    }
+    if (node.module == kCryptoModule) {
+      return Code.CryptoConstantsValue;
+    }
+
+    return undefined;
+  }
+
+  private moduleValueError(module: string, loc: int): SourceError {
+    const other = this.moduleExample(module);
+
+    return {
+      code: Code.NodeModuleValue,
+      loc,
+      details: { word: module, other },
+    };
+  }
+
+  private moduleExample(module: string): string {
+    if (kPathModules.includes(module)) {
+      return kPathExample;
+    }
+
+    const typical = this.knownRow(module)?.typicalName ?? "";
+
+    return `${typical}${kCallExample}`;
+  }
+
+  private knownRow(module: string): KnownModuleRow | undefined {
+    return kKnownModules.find((row) => this.labelOf(row) == module);
+  }
+
+  private labelOf(row: KnownModuleRow): string {
+    if (row.isNode) {
+      return `${kNodePrefix}${row.path}`;
+    }
+
+    return row.path;
+  }
+}

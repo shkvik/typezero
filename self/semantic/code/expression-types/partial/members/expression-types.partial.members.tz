@@ -26,6 +26,9 @@ partial class ExpressionTypes {
     if (isRefused || this.memberReadEarly(expr, module)) {
       return this.store.plain(TypeKind.Error);
     }
+    if (this.nodeMemberReadCheck(expr, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
 
     const fact = this.pathFact(expr, module);
     if (fact != undefined) {
@@ -116,6 +119,9 @@ partial class ExpressionTypes {
 
   private memberOf(expr: MemberExpr, object: Type, module: int): Type {
     if (this.unknownMemberCheck(expr, object, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.readlineMemberRead(expr, object, module)) {
       return this.store.plain(TypeKind.Error);
     }
     if (this.fsConstantCheck(expr, module)) {
@@ -211,6 +217,8 @@ partial class ExpressionTypes {
     const field = fields[0];
     const isLibrary = this.resolver.isLibraryShape(object);
     if (field == undefined && isLibrary) {
+      this.namespaceReadCheck(expr, module);
+
       return this.store.plain(TypeKind.Error);
     }
     if (field == undefined) {

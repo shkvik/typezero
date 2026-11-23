@@ -111,12 +111,69 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Undefined);
     }
 
+    const promised = this.asyncYieldValue(frame, value, module);
+    if (promised != undefined) {
+      return promised;
+    }
+
     const yielded = frame.yielded;
     if (yielded == undefined) {
       return this.typed(value, undefined, module);
     }
 
     return this.checked(value, yielded, module, kNoPlace);
+  }
+
+  private asyncYieldValue(
+    frame: GeneratorFrame,
+    value: Expr,
+    module: int,
+  ): Type | undefined {
+    const fn = frame.fn;
+    if (fn == undefined || !fn.isAsync) {
+      return undefined;
+    }
+
+    const peeked = this.peekType(value, module);
+    const parts = this.generics.partsOfType(peeked);
+    if (!parts.some((part) => part.kind == TypeKind.Promise)) {
+      return undefined;
+    }
+
+    const given = this.typed(value, undefined, module);
+    const awaited = this.awaitedType(given);
+    if (awaited == undefined) {
+      const word = this.text.of(given);
+
+      this.report(module, value.loc, Code.YieldPromiseMixed, { word });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.yieldPromiseCheck(fn, value, awaited, frame.yielded, module);
+
+    return awaited;
+  }
+
+  private yieldPromiseCheck(
+    fn: FunctionDecl,
+    value: Expr,
+    awaited: Type,
+    yielded: Type | undefined,
+    module: int,
+  ): void {
+    if (yielded == undefined || awaited.kind == TypeKind.Error) {
+      return;
+    }
+    if (this.relation.converts(awaited, yielded)) {
+      return;
+    }
+
+    this.report(module, value.loc, Code.YieldPromiseOther, {
+      word: this.text.of(awaited),
+      first: this.functions.functionName(fn),
+      other: this.text.of(yielded),
+    });
   }
 
   private delegateTyped(

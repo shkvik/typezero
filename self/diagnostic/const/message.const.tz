@@ -1496,7 +1496,7 @@ export const kMessages: Record<Code, Message> = {
     text: "property '{word}' does not exist on '{first}': check what it holds first, e.g. 'typeof x == \"{other}\"'",
   },
   [Code.UnionNoField]: {
-    text: "'{first}' has no field '{word}'",
+    text: "'{first}' has no field '{word}'{place}",
   },
   [Code.UnionMayLack]: {
     text: "property '{word}' does not exist on '{first}', which '{second}' may be; narrow it first{place}",
@@ -3999,5 +3999,86 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.FsZeroPath]: {
     text: "the path has a zero character in it, which no file name can have",
+  },
+  [Code.NodeOnlyCalled]: {
+    text: "'{word}' of '{other}' can only be called; where a function is expected, pass an arrow that calls it, e.g. 'x => {word}(x)'",
+  },
+  [Code.NodeModuleValue]: {
+    text: "this is not a value: the functions of '{word}' are used by their names, e.g. '{other}'",
+  },
+  [Code.NodeNotFunction]: {
+    text: "'{word}' is not a function: call the functions of '{other}' by their names",
+  },
+  [Code.NodeStringCalled]: {
+    text: "'{word}' is a string, not a function",
+  },
+  [Code.NodeSubmoduleCalled]: {
+    text: "'{word}' is not a function: call its functions, e.g. '{word}.join(a, b)'",
+  },
+  [Code.FsConstantsValue]: {
+    text: "'constants' of 'node:fs' is used as 'constants.F_OK' and the like",
+  },
+  [Code.CryptoConstantsValue]: {
+    text: "'constants' of 'node:crypto' is used as 'constants.RSA_PKCS1_PSS_PADDING' and the like",
+  },
+  [Code.NodeCryptoType]: {
+    text: "'{word}' of 'node:crypto' is a type: its objects come from the functions of 'node:crypto'",
+  },
+  [Code.FsClassNew]: {
+    text: "'new {word}' is not possible: only the functions of node:fs make {word}",
+  },
+  [Code.CryptoNeeds]: {
+    text: "the parameters of '{word}' need '{other}'",
+  },
+  [Code.CryptoNeedsKey]: {
+    text: "the options of '{word}' need 'key'",
+  },
+  [Code.CryptoPrimeBigint]: {
+    text: "'bigint' is not supported: tz has no bigint (docs/numbers.md); the prime comes as an ArrayBuffer",
+  },
+  [Code.GeneratorNotAsync]: {
+    text: "an async generator returns an async iterator: declare its type as 'AsyncGenerator<{word}>'",
+  },
+  [Code.YieldPromiseOther]: {
+    text: "the Promise gives '{word}', but {first} yields '{other}'",
+  },
+  [Code.YieldPromiseMixed]: {
+    text: "'yield' of '{word}' gives the value of the Promise or the value itself, which make no one type; check what it holds first",
+  },
+  [Code.AsyncIteratorMethodResult]: {
+    text: "'[Symbol.asyncIterator]()' of '{word}' gives '{first}', which is not an async iterator; make it an async generator, 'async *[Symbol.asyncIterator]() { yield ... }'",
+  },
+  [Code.ReadlineNoMember]: {
+    text: "property '{word}' does not exist on type '{first}'; it has 'question()' and 'close()', and 'for await (const line of rl)' gives the lines",
+  },
+  [Code.ReadlineEvents]: {
+    text: "'{word}' of readline is not supported yet: its Interface is no EventEmitter yet (docs/events.md); read the lines with 'for await (const line of rl)' or ask with 'question()'",
+  },
+  [Code.FsPromisesOpen]: {
+    text: "'open' of 'node:fs/promises' is not supported yet: there is no FileHandle; use 'readFile', 'writeFile' or 'appendFile', which read and write Buffers too",
+  },
+  [Code.ReflectFillCannot]: {
+    text: "Reflect.fill cannot fill '{word}': {other} (Reflect.fill gives the fields of a class without a constructor their values)",
+  },
+  [Code.ReflectFillNotClass]: {
+    text: "Reflect.fill makes an object of a class, and this is a '{word}'",
+  },
+  [Code.GenericClassConstructor]: {
+    text: "type 'typeof {word}' is not assignable to type '{first}'; each list of type arguments of '{word}' makes a class of its own, and 'new' of this value could make none of them: give a class that extends it, e.g. '{other}', or take the class as an 'object'",
+  },
+  [Code.StatsDateAssign]: {
+    text: "'{word}' cannot be assigned: it is made from '{word}Ms' when it is read; keep the date in a variable of its own",
+  },
+  [Code.KeyedReadonly]: {
+    text: "a readonly field cannot be assigned through a key",
+  },
+  [Code.KeyedByName]: {
+    text: "fields of type '{word}' are assigned by name, as in 'o.name = v'; through a key of literals only fields of a plain type are, or fields named by the members of a string enum",
+  },
+  [Code.BodyDeclared]: {
+    text: "a declaration cannot be the whole body here; wrap it in '{ }'",
+  },
+  [Code.ParamFieldNeedsType]: {
+    text: "parameter '{word}' declares a field and needs a type, e.g. 'public {word}: int'",
   },
 };

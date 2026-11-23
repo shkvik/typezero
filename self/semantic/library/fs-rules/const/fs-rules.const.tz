@@ -135,3 +135,23 @@ export const kReadlineOptions = [
   "history",
 ];
 export const kReadlineUnsupported = ["prompt", "completer", "history"];
+export const kInterfaceName = "Interface";
+export const kReadlineMethods = ["close", "question"];
+export const kReadlineEvents = [
+  "on",
+  "once",
+  "addListener",
+  "off",
+  "removeListener",
+  "removeAllListeners",
+  "emit",
+  "prependListener",
+  "prependOnceListener",
+  "listeners",
+  "listenerCount",
+  "addEventListener",
+  "removeEventListener",
+  "dispatchEvent",
+];
+export const kStatsClass = "Stats";
+export const kStatsDates = ["atime", "mtime", "ctime", "birthtime"];

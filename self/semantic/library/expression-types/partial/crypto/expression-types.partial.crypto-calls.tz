@@ -23,6 +23,7 @@ import {
   kIntHint,
   kIterationsName,
   kKeylenName,
+  kPrivateKeyLabel,
   kSignHint,
   kTagLengthName,
   kTextOrBuffers,
@@ -176,9 +177,17 @@ partial class ExpressionTypes {
       case "generateKeySync":
         return this.secretKeyCheck(expr, call.shown, module);
       case "sign":
-        return this.callbackAt(call, 3, kSignHint, count == 4, module);
+        this.callbackAt(call, 3, kSignHint, count == 4, module);
+
+        return this.signOnceCheck(call, kPrivateKeyLabel, count == 3, module);
       case "verify":
-        return this.callbackAt(call, 4, kVerifyHint, count == 5, module);
+        this.callbackAt(call, 4, kVerifyHint, count == 5, module);
+
+        return this.verifyOnceCheck(call, count == 4, module);
+      case "argon2Sync":
+        return this.argonCheck(call, module);
+      case "generatePrimeSync":
+        return this.primeCheck(call, module);
       case "generateKeyPairSync":
         return this.keyPairCheck(expr, call.shown, call.loc, module);
       case "createECDH":
@@ -208,6 +217,8 @@ partial class ExpressionTypes {
     if (!isCounted) {
       return;
     }
+
+    this.cryptoIntAt(call.expr, 2, module);
 
     const isDataFine = this.cryptoDataFine(
       call.expr,
@@ -399,6 +410,9 @@ partial class ExpressionTypes {
       return;
     }
 
+    this.cryptoIntAt(expr, 2, module);
+    this.cryptoIntAt(expr, 3, module);
+
     const isDataFine = this.cryptoDataFine(
       expr,
       [
@@ -422,6 +436,8 @@ partial class ExpressionTypes {
     if (expr.args.length != 5) {
       return;
     }
+
+    this.cryptoIntAt(expr, 4, module);
 
     const isHashFine = this.cryptoHashFine(expr, 0, DigestUse.Hmac, module);
     const isDataFine = this.cryptoDataFine(

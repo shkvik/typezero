@@ -7,6 +7,7 @@ import {
   Expr,
   ExprKind,
   MemberExpr,
+  NameExpr,
   NewExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../../../program/ast/types/ast.types.functions.tz";
@@ -17,13 +18,54 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import { kConstructorArgsName } from "../../const/expression-types.const.tz";
+import {
+  kBusExample,
+  kConstructorArgsName,
+  kExampleEnd,
+  kIntExample,
+} from "../../const/expression-types.const.tz";
 import {
   StaticOwner,
   ValueTarget,
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
+  private genericClassValueCheck(
+    expr: NameExpr,
+    target: ValueTarget,
+    wanted: Type | undefined,
+    module: int,
+  ): boolean {
+    const decl = this.record(target.module)?.classes.get(target.loc);
+    if (wanted == undefined || decl == undefined) {
+      return false;
+    }
+
+    const goal = this.types.definedType(wanted);
+    if (decl.typeParams.length == 0 || goal.kind != TypeKind.Class) {
+      return false;
+    }
+
+    const word = decl.name ?? expr.name;
+    const other = this.genericClassExample(word, target.module);
+
+    this.report(module, expr.loc, Code.GenericClassConstructor, {
+      word,
+      first: this.text.of(wanted),
+      other,
+    });
+
+    return true;
+  }
+
+  private genericClassExample(word: string, home: int): string {
+    if (this.modules.isLibraryModule(home)) {
+      return `${kBusExample}${word}${kExampleEnd}`;
+    }
+
+    return `${kIntExample}${word} extends ${word}<int>${kExampleEnd}`;
+  }
+
   private classValue(target: ValueTarget): Type {
     const error = this.store.plain(TypeKind.Error);
     if (this.modules.isLibraryModule(target.module)) {

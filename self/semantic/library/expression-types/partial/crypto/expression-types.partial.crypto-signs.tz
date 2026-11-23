@@ -1,0 +1,184 @@
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { TypeKind } from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import {
+  kAnyCryptoData,
+  kArgonAlgorithms,
+  kArgonLabel,
+  kArgonOptions,
+  kArgonRequired,
+  kBigintName,
+  kDataLabel,
+  kKeyLabel,
+  kKeyOption,
+  kPrimeOptions,
+  kSignatureLabel,
+  kSignKeyOptions,
+  kTextOrBuffers,
+} from "../../../crypto-rules/const/crypto-rules.const.tz";
+import { CryptoCall } from "../../../crypto-rules/types/crypto-rules.types.tz";
+
+partial class ExpressionTypes {
+  private signOnceCheck(
+    call: CryptoCall,
+    keyLabel: string,
+    isCounted: boolean,
+    module: int,
+  ): void {
+    const expr = call.expr;
+    const keyArg = expr.args[2]?.expr;
+    if (!isCounted || keyArg == undefined) {
+      return;
+    }
+
+    this.cryptoDataFine(
+      expr,
+      [{ index: 1, what: kDataLabel, kinds: kTextOrBuffers }],
+      module,
+    );
+    this.signKeyCheck(call, keyArg, keyLabel, module);
+  }
+
+  private verifyOnceCheck(
+    call: CryptoCall,
+    isCounted: boolean,
+    module: int,
+  ): void {
+    if (!isCounted) {
+      return;
+    }
+
+    this.signOnceCheck(call, kKeyLabel, isCounted, module);
+    this.cryptoDataFine(
+      call.expr,
+      [{ index: 3, what: kSignatureLabel, kinds: kTextOrBuffers }],
+      module,
+    );
+  }
+
+  private signKeyCheck(
+    call: CryptoCall,
+    keyArg: Expr,
+    keyLabel: string,
+    module: int,
+  ): void {
+    if (keyArg.kind != ExprKind.ObjectLit) {
+      return this.cryptoKeyDataCheck(keyArg, keyLabel, module);
+    }
+
+    const expr = call.expr;
+    const shown = call.shown;
+    if (!this.cryptoOptionsFine(expr, 2, shown, kSignKeyOptions, module)) {
+      return;
+    }
+
+    const key = this.cryptoOptionAt(expr, 2, kKeyOption);
+    if (key == undefined) {
+      return this.report(module, keyArg.loc, Code.CryptoNeedsKey, {
+        word: shown,
+      });
+    }
+
+    this.cryptoKeyDataCheck(key, kKeyLabel, module);
+  }
+
+  private cryptoKeyDataCheck(key: Expr, label: string, module: int): void {
+    const given = this.peekType(key, module);
+    const dataError = this.crypto.dataError(
+      key.loc,
+      label,
+      kAnyCryptoData,
+      given,
+    );
+
+    this.reportFound(module, dataError);
+  }
+
+  private argonCheck(call: CryptoCall, module: int): void {
+    const expr = call.expr;
+    const first = expr.args[0]?.expr;
+    if (expr.args.length != 2 || first == undefined) {
+      return;
+    }
+
+    const algorithm = this.constantText(first);
+    if (algorithm != undefined) {
+      const choiceError = this.crypto.choiceError(
+        first.loc,
+        kArgonLabel,
+        algorithm,
+        kArgonAlgorithms,
+      );
+      if (choiceError != undefined) {
+        return this.reportFound(module, choiceError);
+      }
+    }
+    if (!this.cryptoOptionsFine(expr, 1, call.shown, kArgonOptions, module)) {
+      return;
+    }
+
+    this.argonNeedsCheck(call, module);
+  }
+
+  private argonNeedsCheck(call: CryptoCall, module: int): void {
+    const expr = call.expr;
+    const options = expr.args[1]?.expr;
+    if (options == undefined || options.kind != ExprKind.ObjectLit) {
+      return;
+    }
+
+    const missing = kArgonRequired.find(
+      (name) => this.cryptoOptionAt(expr, 1, name) == undefined,
+    );
+    if (missing == undefined) {
+      return;
+    }
+
+    this.report(module, options.loc, Code.CryptoNeeds, {
+      word: call.shown,
+      other: missing,
+    });
+  }
+
+  private primeCheck(call: CryptoCall, module: int): void {
+    const expr = call.expr;
+    const count = expr.args.length;
+    if (count < 1 || count > 2) {
+      return;
+    }
+
+    this.cryptoIntAt(expr, 0, module);
+
+    if (!this.cryptoOptionsFine(expr, 1, call.shown, kPrimeOptions, module)) {
+      return;
+    }
+
+    const big = this.cryptoOptionAt(expr, 1, kBigintName);
+    if (big != undefined) {
+      this.report(module, big.loc, Code.CryptoPrimeBigint, kNoDetails);
+    }
+  }
+
+  private cryptoIntAt(expr: CallExpr, index: int, module: int): void {
+    const arg = expr.args[index]?.expr;
+    if (arg == undefined) {
+      return;
+    }
+
+    const given = this.peekType(arg, module);
+    const base = this.types.definedType(given);
+    if (base.kind != TypeKind.Double) {
+      return;
+    }
+
+    const wanted = this.store.integer(64, false);
+
+    this.coerce(arg, given, wanted, module, "");
+  }
+}

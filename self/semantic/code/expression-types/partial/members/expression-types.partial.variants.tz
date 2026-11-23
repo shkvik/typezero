@@ -1,3 +1,4 @@
+import { kErrnoHint, kErrnoName } from "../../const/expression-types.const.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import {
@@ -141,8 +142,13 @@ partial class ExpressionTypes {
     );
     if (isPlain) {
       const first = this.text.of(union);
+      const place = this.errnoHint(word);
 
-      return this.report(module, expr.loc, Code.UnionNoField, { word, first });
+      return this.report(module, expr.loc, Code.UnionNoField, {
+        word,
+        first,
+        place,
+      });
     }
 
     const first = this.text.of(part);
@@ -421,5 +427,13 @@ partial class ExpressionTypes {
     const entry = this.classMember(candidate, name).entry;
 
     return entry != undefined && !entry.isStatic;
+  }
+
+  private errnoHint(word: string): string {
+    if (word == kErrnoName) {
+      return kErrnoHint;
+    }
+
+    return "";
   }
 }

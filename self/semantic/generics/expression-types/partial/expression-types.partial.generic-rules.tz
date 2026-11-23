@@ -1,3 +1,4 @@
+import { kStringArgument } from "../const/expression-types.const.tz";
 import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { ClassDecl } from "../../../../program/ast/types/ast.types.classes.tz";
@@ -67,11 +68,24 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     const base = this.types.definedType(left);
-    if (this.classValues.isOpenTested(base) || decl.typeParams.length == 0) {
+    const word = decl.name ?? "";
+    if (decl.typeParams.length == 0) {
       return;
     }
 
-    const word = decl.name ?? "";
+    const isOpaque =
+      base.kind == TypeKind.Unknown || base.kind == TypeKind.AnyObject;
+    if (isOpaque) {
+      const code = this.genericCalls.genericTellCode(home);
+      const first = this.text.of(base);
+      const other = `${word}${kStringArgument}`;
+
+      return this.report(module, expr.loc, code, { word, first, other });
+    }
+    if (this.classValues.isOpenTested(base)) {
+      return;
+    }
+
     const parts = this.types.unionMembers(base);
     const isMatching = parts.some((part) =>
       this.generics.isInstanceOfClass(part, word),

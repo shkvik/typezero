@@ -7,7 +7,10 @@ import {
   CallExpr,
   ExprKind,
   MemberExpr,
+  NameExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
 import {
   FunctionType,
   InstanceType,
@@ -238,5 +241,94 @@ partial class ExpressionTypes {
     }
 
     return first;
+  }
+
+  private overloadedLibraryCall(
+    expr: CallExpr,
+    callee: NameExpr,
+    fn: FunctionDecl,
+    home: int,
+    module: int,
+  ): Type {
+    const variants = this.functionVariants(fn, home);
+    const count = expr.args.length;
+    const isPlain = expr.args.every(
+      (arg) => !arg.spread && arg.expr.kind != ExprKind.Function,
+    );
+    const isOpenFitting = variants.open.some((one) =>
+      this.overloads.isCountTaking(one.params, count),
+    );
+    if (isOpenFitting || !isPlain) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const chosen = this.cleanVariant(expr, callee, variants.types, module);
+    if (chosen == undefined) {
+      return this.sharedResult(variants);
+    }
+
+    this.positionMethod = callee.name;
+
+    const result = this.calledWith(
+      expr,
+      chosen,
+      callee.loc,
+      CallKind.Library,
+      module,
+    );
+
+    if (result.kind == TypeKind.Promise) {
+      this.lenientCalls.delete(expr);
+    }
+
+    return result;
+  }
+
+  private cleanVariant(
+    expr: CallExpr,
+    callee: NameExpr,
+    types: FunctionType[],
+    module: int,
+  ): FunctionType | undefined {
+    const count = expr.args.length;
+
+    for (const type of types) {
+      if (!this.overloads.isCountFitting(type, count)) {
+        continue;
+      }
+
+      this.errors.beginTrial();
+      this.calledWith(expr, type, callee.loc, CallKind.Library, module);
+
+      const isClean = this.errors.endTrial();
+      if (isClean) {
+        return type;
+      }
+    }
+
+    return undefined;
+  }
+
+  private functionVariants(fn: FunctionDecl, home: int): LibraryVariants {
+    const items = this.program.modules[home]?.file.items ?? [];
+    const types: FunctionType[] = [];
+    const open: OpenVariant[] = [];
+
+    for (const item of items) {
+      if (item.kind != StmtKind.Function || item.name != fn.name) {
+        continue;
+      }
+      if (item.typeParams.length > 0) {
+        open.push({ params: item.params });
+        continue;
+      }
+
+      const type = this.functionAt(home, item.loc);
+      if (type.kind == TypeKind.Function) {
+        types.push(type);
+      }
+    }
+
+    return { types, open };
   }
 }

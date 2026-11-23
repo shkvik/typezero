@@ -284,6 +284,16 @@ partial class ExpressionTypes {
       return made ?? this.store.plain(TypeKind.Error);
     }
     if (this.modules.isLibraryModule(target.module)) {
+      const fileMade = this.fileClassNew(
+        expr,
+        form.name,
+        target.module,
+        module,
+      );
+      if (fileMade != undefined) {
+        return fileMade;
+      }
+
       const subtleMade = this.subtleNew(expr, form.name, target.module, module);
       if (subtleMade != undefined) {
         return subtleMade;

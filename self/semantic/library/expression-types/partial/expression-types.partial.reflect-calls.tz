@@ -1,14 +1,30 @@
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
   CallExpr,
   Expr,
   ExprKind,
+  MemberExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
-import { TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  DictKind,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { kNoPlace } from "../../../code/expression-types/const/expression-types.const.tz";
 import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
 import {
+  kFillAbstract,
+  kFillError,
+  kFillJavascript,
+  kFillName,
+  kFillOwnCtor,
+  kFillOwnCtorEnd,
+  kFillValueError,
   kMetadataNames,
+  kMetadataReads,
+  kReflectName,
   kReflectNames,
 } from "../../library-rules/const/library-rules.const.tz";
 
@@ -228,5 +244,150 @@ partial class ExpressionTypes {
       kind == TypeKind.String ||
       kind == TypeKind.Literal
     );
+  }
+
+  private reflectStringRead(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): Type | undefined {
+    const owner = member.object;
+    const isReflect =
+      owner.kind == ExprKind.Name &&
+      owner.name == kReflectName &&
+      this.isGlobalUse(owner, module);
+    const hasSpread = expr.args.some((one) => one.spread);
+    const key = expr.args[0]?.expr;
+    if (!isReflect || hasSpread || key == undefined) {
+      return undefined;
+    }
+    if (!kMetadataReads.includes(member.name)) {
+      return undefined;
+    }
+
+    const given = this.peekType(key, module);
+    const base = this.types.apparent(given);
+    if (base.kind != TypeKind.String) {
+      return undefined;
+    }
+
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Unknown);
+  }
+
+  private reflectFillCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): Type | undefined {
+    const owner = member.object;
+    const isReflect =
+      owner.kind == ExprKind.Name &&
+      owner.name == kReflectName &&
+      this.isGlobalUse(owner, module);
+    const hasSpread = expr.args.some((one) => one.spread);
+    const isFill = isReflect && member.name == kFillName && !hasSpread;
+    const cls = expr.args[0]?.expr;
+    const values = expr.args[1]?.expr;
+    if (!isFill || expr.args.length != 2) {
+      return undefined;
+    }
+    if (cls == undefined || values == undefined) {
+      return undefined;
+    }
+    if (this.modules.isLibraryModule(module)) {
+      return undefined;
+    }
+
+    return this.filledType(cls, values, module);
+  }
+
+  private filledType(cls: Expr, values: Expr, module: int): Type {
+    const error = this.store.plain(TypeKind.Error);
+    if (this.libraryClassFill(cls, values, module)) {
+      return error;
+    }
+
+    const given = this.typed(cls, undefined, module);
+    const string = this.store.plain(TypeKind.String);
+    const unknown = this.store.plain(TypeKind.Unknown);
+    const map = this.store.dictOf(DictKind.Map, string, unknown);
+    const mapped = this.checked(values, map, module, kNoPlace);
+    if (given.kind == TypeKind.Error || mapped.kind == TypeKind.Error) {
+      return error;
+    }
+
+    const base = this.types.definedType(given);
+    if (base.kind != TypeKind.Class) {
+      const word = this.text.of(given);
+
+      this.report(module, cls.loc, Code.ReflectFillNotClass, { word });
+
+      return error;
+    }
+    if (!base.exact) {
+      return this.filledResult(base.instance, kFillError, module);
+    }
+
+    const instance = this.types.definedType(base.instance);
+    if (instance.kind != TypeKind.Instance) {
+      return error;
+    }
+
+    const decl = this.record(instance.module)?.classes.get(instance.loc);
+    const word = instance.name;
+    if (decl == undefined) {
+      return error;
+    }
+    if (decl.isAbstract) {
+      return this.fillRefused(cls, word, kFillAbstract, module);
+    }
+    if (decl.constructors.length > 0) {
+      const other = `${kFillOwnCtor}${word}${kFillOwnCtorEnd}`;
+
+      return this.fillRefused(cls, word, other, module);
+    }
+
+    return this.filledResult(base.instance, kFillValueError, module);
+  }
+
+  private libraryClassFill(cls: Expr, values: Expr, module: int): boolean {
+    if (cls.kind != ExprKind.Name) {
+      return false;
+    }
+
+    const target = this.targetOfName(cls, module);
+    if (target == undefined || target.kind != SymbolKind.Class) {
+      return false;
+    }
+    if (!this.modules.isLibraryModule(target.module)) {
+      return false;
+    }
+
+    this.fillRefused(cls, cls.name, kFillJavascript, module);
+    this.typed(values, undefined, module);
+
+    return true;
+  }
+
+  private fillRefused(
+    cls: Expr,
+    word: string,
+    other: string,
+    module: int,
+  ): Type {
+    this.report(module, cls.loc, Code.ReflectFillCannot, { word, other });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private filledResult(made: Type, failure: string, module: int): Type {
+    const fails = this.namedLibraryType(failure, 0, module);
+    if (fails.kind == TypeKind.Error) {
+      return fails;
+    }
+
+    return this.store.resultOf(made, fails);
   }
 }

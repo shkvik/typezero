@@ -489,6 +489,9 @@ partial class ExpressionTypes {
     if (target == undefined || target.kind != SymbolKind.Class) {
       return undefined;
     }
+    if (this.modules.isLibraryModule(target.module)) {
+      return this.libraryDerived(rhs.name, parts);
+    }
 
     const decl = this.record(target.module)?.classes.get(target.loc);
     if (decl == undefined || decl.typeParams.length > 0) {
@@ -496,6 +499,22 @@ partial class ExpressionTypes {
     }
 
     const instance = this.resolver.classInstance(target.module, decl, []);
+    const isDerived = parts.some((part) =>
+      this.relation.converts(instance, part),
+    );
+    if (!isDerived) {
+      return undefined;
+    }
+
+    return instance;
+  }
+
+  private libraryDerived(name: string, parts: Type[]): Type | undefined {
+    const instance = this.resolver.libraryInstance(name, []);
+    if (instance == undefined || instance.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
     const isDerived = parts.some((part) =>
       this.relation.converts(instance, part),
     );

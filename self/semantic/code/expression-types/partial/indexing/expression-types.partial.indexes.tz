@@ -291,14 +291,115 @@ partial class ExpressionTypes {
 
       const name = part.text;
       const field = object.fields.find((one) => one.name == name);
-      if (field == undefined || (common != undefined && field.type != common)) {
+      if (field == undefined) {
         return undefined;
       }
 
-      common = field.type;
+      const type = this.objects.fieldWanted(field);
+      if (common != undefined && type != common) {
+        return undefined;
+      }
+
+      common = type;
     }
 
     return common;
+  }
+
+  private keyedWriteCheck(target: Expr, module: int): boolean {
+    if (target.kind != ExprKind.Index) {
+      return false;
+    }
+
+    const holder = this.peekType(target.object, module);
+    const object = this.types.definedType(holder);
+    if (object.kind != TypeKind.Object) {
+      return false;
+    }
+
+    const key = this.peekType(target.index, module);
+    if (this.constantKeyOf(target.index, key, module) != undefined) {
+      return false;
+    }
+    if (this.isEnumKey(key)) {
+      return false;
+    }
+
+    const choices = this.keyChoices(target.index, key, module);
+    const field = this.chosenField(object, choices);
+    if (choices == undefined || field == undefined) {
+      return false;
+    }
+
+    const names: string[] = [];
+
+    for (const part of this.generics.partsOfType(choices)) {
+      if (part.kind == TypeKind.Literal) {
+        names.push(part.text);
+      }
+    }
+
+    return this.keyedFieldWrite(target, object, field, names, module);
+  }
+
+  private isEnumKey(key: Type): boolean {
+    const label = this.store.labelOf(key);
+    if (label == undefined) {
+      return false;
+    }
+
+    for (let index = 0; index < this.program.modules.length; index++) {
+      const opened = this.program.modules[index];
+      if (opened == undefined || opened.source.isLibrary) {
+        continue;
+      }
+
+      const record = this.record(index);
+      if (record == undefined) {
+        continue;
+      }
+
+      for (const decl of record.enums.values()) {
+        if (decl.name == label) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  private keyedFieldWrite(
+    target: Expr,
+    object: ObjectType,
+    field: Type,
+    names: string[],
+    module: int,
+  ): boolean {
+    const isReadonly = object.fields.some(
+      (one) => names.includes(one.name) && one.readonly,
+    );
+    if (isReadonly) {
+      this.report(module, target.loc, Code.KeyedReadonly, kNoDetails);
+
+      return true;
+    }
+
+    const assigned = this.assignedFieldNames();
+    const isKnown = names.every((name) => assigned.has(name));
+    const isLoose =
+      this.types.isOptional(field) ||
+      field.kind == TypeKind.Union ||
+      field.kind == TypeKind.Literal;
+    if (!isLoose || isKnown) {
+      return false;
+    }
+
+    this.report(module, target.loc, Code.KeyedByName, {
+      word: this.text.of(field),
+    });
+
+    return true;
   }
 
   private constantKeyOf(

@@ -10,6 +10,7 @@ import {
   kCryptoModule,
   kFsModule,
   kInTzFsHint,
+  kPendingCalls,
   kProcessHint,
   kProcessModule,
   kPromisesModule,
@@ -27,6 +28,12 @@ import {
 } from "./const/library-exports.const.tz";
 
 export class LibraryExports {
+  public isPendingCall(module: string, word: string): boolean {
+    return kPendingCalls.some(
+      (one) => one.module == module && one.name == word,
+    );
+  }
+
   public missing(module: string, path: string, word: string): Finding {
     const kind = this.kindOf(module, word);
 

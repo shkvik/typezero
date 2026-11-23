@@ -280,3 +280,31 @@ export const kSecretKeyTypes = ["hmac", "aes"];
 export const kSecretTypeLabel = "type of the key";
 export const kAesKeyType = "aes";
 export const kKeyLengthOption = "length";
+export const kArgonLabel = "algorithm of Argon2";
+export const kArgonAlgorithms = ["argon2d", "argon2i", "argon2id"];
+export const kArgonOptions = [
+  "message",
+  "nonce",
+  "parallelism",
+  "tagLength",
+  "memory",
+  "passes",
+  "secret",
+  "associatedData",
+];
+export const kArgonRequired = [
+  "message",
+  "nonce",
+  "parallelism",
+  "tagLength",
+  "memory",
+  "passes",
+];
+export const kPrimeOptions = ["add", "rem", "safe", "bigint"];
+export const kBigintName = "bigint";
+export const kSignKeyOptions = ["key", "padding", "saltLength", "dsaEncoding"];
+export const kKeyOption = "key";
+export const kDataLabel = "data";
+export const kKeyLabel = "key";
+export const kPrivateKeyLabel = "private key";
+export const kSignatureLabel = "signature";

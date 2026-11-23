@@ -1,0 +1,137 @@
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NameExpr,
+  NewExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import { NodeName } from "../../../node-value-rules/types/node-value-rules.types.tz";
+
+partial class ExpressionTypes {
+  private nodeNameOf(expr: Expr, module: int): NodeName | undefined {
+    if (expr.kind != ExprKind.Name || this.modules.isLibraryModule(module)) {
+      return undefined;
+    }
+
+    const symbol = this.record(module)?.uses.get(expr.loc)?.symbol;
+    const target = symbol?.target;
+    if (symbol == undefined || target == undefined) {
+      return undefined;
+    }
+    if (symbol.kind != SymbolKind.Import) {
+      return undefined;
+    }
+
+    const opened = this.program.modules[target.module];
+    if (opened == undefined || !this.nodeValues.isKnown(opened.name)) {
+      return undefined;
+    }
+
+    return this.nodeValues.nodeName(opened.name, target.name);
+  }
+
+  private nodeValueCheck(expr: NameExpr, module: int): boolean {
+    const node = this.nodeNameOf(expr, module);
+    if (node == undefined) {
+      return false;
+    }
+
+    const isMemberObject = this.memberObjects.has(expr);
+    const error = this.nodeValues.valueError(node, isMemberObject, expr.loc);
+    if (error == undefined) {
+      return false;
+    }
+
+    this.reportFound(module, error);
+
+    return true;
+  }
+
+  private nodeCallCheck(
+    expr: CallExpr,
+    callee: NameExpr,
+    module: int,
+  ): boolean {
+    const node = this.nodeNameOf(callee, module);
+    if (node == undefined) {
+      return false;
+    }
+
+    const error = this.nodeValues.callError(node, callee.name, callee.loc);
+    if (error == undefined) {
+      return false;
+    }
+
+    this.reportFound(module, error);
+    this.looseArguments(expr.args, module);
+
+    return true;
+  }
+
+  private nodeMemberCallCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): boolean {
+    const node = this.nodeNameOf(member.object, module);
+    if (node == undefined || node.name != "") {
+      return false;
+    }
+
+    const loc = member.loc;
+    const error = this.nodeValues.memberCallError(node, member.name, loc);
+    if (error == undefined) {
+      return false;
+    }
+
+    this.reportFound(module, error);
+    this.looseArguments(expr.args, module);
+
+    return true;
+  }
+
+  private nodeMemberReadCheck(expr: MemberExpr, module: int): boolean {
+    const node = this.nodeNameOf(expr.object, module);
+    if (node == undefined || node.name != "") {
+      return false;
+    }
+
+    const inner = this.nodeValues.nodeName(node.module, expr.name);
+    const error = this.nodeValues.valueError(inner, false, expr.loc);
+    if (error == undefined) {
+      return false;
+    }
+
+    this.reportFound(module, error);
+
+    return true;
+  }
+
+  private fileClassNew(
+    expr: NewExpr,
+    word: string,
+    home: int,
+    module: int,
+  ): Type | undefined {
+    const opened = this.program.modules[home];
+    if (opened == undefined || this.modules.isLibraryModule(module)) {
+      return undefined;
+    }
+    if (!this.nodeValues.isFileClass(opened.name, word)) {
+      return undefined;
+    }
+
+    this.report(module, expr.loc, Code.FsClassNew, { word });
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+}

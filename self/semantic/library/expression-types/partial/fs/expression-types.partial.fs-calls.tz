@@ -1,6 +1,7 @@
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import {
+  AssignExpr,
   CallExpr,
   Expr,
   ExprKind,
@@ -16,6 +17,8 @@ import {
   kEncodingOption,
   kFlagOption,
   kFlagOptions,
+  kStatsClass,
+  kStatsDates,
 } from "../../../fs-rules/const/fs-rules.const.tz";
 import { FsCall, FsShape } from "../../../fs-rules/types/fs-rules.types.tz";
 
@@ -459,5 +462,30 @@ partial class ExpressionTypes {
     }
 
     return 1;
+  }
+
+  private statsDateCheck(expr: AssignExpr, module: int): boolean {
+    const target = expr.target;
+    if (target.kind != ExprKind.Member || !kStatsDates.includes(target.name)) {
+      return false;
+    }
+
+    const object = this.peekType(target.object, module);
+    const base = this.types.definedType(object);
+    if (base.kind != TypeKind.Instance || base.name != kStatsClass) {
+      return false;
+    }
+
+    const opened = this.program.modules[base.module];
+    if (opened == undefined || !this.fs.isFsModule(opened.name)) {
+      return false;
+    }
+
+    this.report(module, target.loc, Code.StatsDateAssign, {
+      word: target.name,
+    });
+    this.typed(expr.value, undefined, module);
+
+    return true;
   }
 }

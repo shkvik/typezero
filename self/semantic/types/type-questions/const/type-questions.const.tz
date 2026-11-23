@@ -1,6 +1,7 @@
 import { DictKind } from "../../../../program/type/types/type.types.tz";
 import { DictText } from "../types/type-questions.types.tz";
 export const kIteratorKey = "[Symbol.iterator]";
+export const kAsyncIteratorKey = "[Symbol.asyncIterator]";
 export const kDateName = "Date";
 export const kRegExpName = "RegExp";
 

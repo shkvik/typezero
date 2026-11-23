@@ -97,24 +97,31 @@ partial class ExpressionTypes {
         return this.statementUsed(statement.expr, statement.loc, module);
       }
       case StmtKind.If:
+        this.bodyCheck(statement.thenStmt, module);
+        this.optionalBodyCheck(statement.elseStmt, module);
+
         return this.walkIf(statement, frame, module);
       case StmtKind.While:
+        this.bodyCheck(statement.body, module);
         this.forgetLooped(statement, module);
         this.branchCheck(statement.cond, TruthUse.Condition, module);
 
         return this.walkLoop(statement.cond, statement.body, frame, module);
       case StmtKind.DoWhile:
+        this.bodyCheck(statement.body, module);
         this.forgetLooped(statement, module);
         this.branchCheck(statement.cond, TruthUse.Condition, module);
 
         return this.walkLoop(undefined, statement.body, frame, module);
       case StmtKind.For:
+        this.optionalBodyCheck(statement.body, module);
         this.walkOptionalStatement(statement.init, frame, module);
         this.forgetLooped(statement, module);
         this.conditionCheck(statement.cond, module);
 
         return this.walkFor(statement, frame, module);
       case StmtKind.ForOf: {
+        this.bodyCheck(statement.body, module);
         this.forAwaitCheck(statement, module);
         this.loopVariableCheck(statement, module);
         this.localDoor(module, statement.binding.loc);
@@ -354,5 +361,23 @@ partial class ExpressionTypes {
     this.report(module, statement.loc, Code.ClassNotTopLevel, {
       word: statement.name ?? "",
     });
+  }
+
+  private optionalBodyCheck(body: Stmt | undefined, module: int): void {
+    if (body != undefined) {
+      this.bodyCheck(body, module);
+    }
+  }
+
+  private bodyCheck(body: Stmt, module: int): void {
+    switch (body.kind) {
+      case StmtKind.VarDecl:
+      case StmtKind.TypeAlias:
+      case StmtKind.Enum:
+      case StmtKind.Function:
+        return this.report(module, body.loc, Code.BodyDeclared, kNoDetails);
+      default:
+        return;
+    }
   }
 }

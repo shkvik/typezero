@@ -176,7 +176,7 @@ export const kEncodeComponentName = "encodeURIComponent";
 export const kDecodeComponentName = "decodeURIComponent";
 export const kJsonGlobalName = "JSON";
 export const kResultName = "Result";
-export const kCountedGlobals = ["encodeURI", "encodeURIComponent"];
+export const kCountedGlobals = ["encodeURI", "encodeURIComponent", "readLine"];
 export const kParentDepth = 64;
 export const kSetCombiners = [
   "union",
@@ -345,3 +345,9 @@ export const kObjectExamples = [
   { name: "RegExp", example: "new RegExp(pattern)" },
   { name: "JSON", example: "JSON.parse(text)" },
 ];
+export const kErrnoName = "errno";
+export const kErrnoHint =
+  ": tz gives no errno; the reason is in 'kind', the system's code in 'code'";
+export const kBusExample = "class Bus extends ";
+export const kIntExample = "class Int";
+export const kExampleEnd = " {}";
