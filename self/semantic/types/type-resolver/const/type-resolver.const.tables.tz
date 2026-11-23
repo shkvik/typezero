@@ -56,6 +56,7 @@ export const kBuiltinNames = [
 
 export const kLengthMember = "length";
 export const kAliasDepthLimit = 1000;
+export const kAliasNestLimit = 50;
 export const kFalseText = "false";
 export const kTrueText = "true";
 
@@ -204,3 +205,4 @@ export const kFewArgumentCodes = new Map<string, Code>([
   ["EventEmitter", Code.EmitterNeedsMap],
   ["WeakRef", Code.WeakRefNeedsObject],
 ]);
+export const kFunctionUtilities = ["ReturnType", "Parameters"];

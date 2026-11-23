@@ -5,6 +5,7 @@ import {
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import {
   ForOfStmt,
   ForStmt,
@@ -44,8 +45,17 @@ partial class ExpressionTypes {
     frame: FunctionFrame,
     module: int,
   ): void {
-    for (const statement of statements) {
+    for (let index = 0; index < statements.length; index++) {
+      const statement = statements[index];
+      if (statement == undefined) {
+        continue;
+      }
+
       this.walkStatement(statement, frame, module);
+
+      if (statement.kind == StmtKind.VarDecl && statement.isUsing) {
+        this.usingCheck(statement, statements.slice(index + 1), module);
+      }
     }
   }
 
@@ -86,9 +96,12 @@ partial class ExpressionTypes {
 
         return;
       case StmtKind.Class:
+        this.walkedClasses.add(statement);
         this.classPlaceCheck(statement, module);
+        this.walkClass(statement, module);
+        this.disposeCheck(statement, module);
 
-        return this.walkClass(statement, module);
+        return;
       case StmtKind.Expr: {
         if (statement.expr.kind == ExprKind.Yield) {
           this.unusedYields.add(statement.expr);

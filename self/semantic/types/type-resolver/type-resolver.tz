@@ -61,6 +61,8 @@ export class TypeResolver {
   private readonly records: Map<int, ModuleRecord>;
   private readonly doors: Map<string, AliasDoor>;
   private readonly working: Map<string, int>;
+  private readonly nesting: Map<string, int>;
+  private readonly tailUses: Set<TypeRef>;
   private readonly endless: Set<string>;
   private readonly bounded: Set<int>;
   private readonly holes: Set<int>;
@@ -88,6 +90,8 @@ export class TypeResolver {
     this.records = new Map<int, ModuleRecord>();
     this.doors = new Map<string, AliasDoor>();
     this.working = new Map<string, int>();
+    this.nesting = new Map<string, int>();
+    this.tailUses = new Set<TypeRef>();
     this.endless = new Set<string>();
     this.bounded = new Set<int>();
     this.holes = new Set<int>();
@@ -177,7 +181,7 @@ export class TypeResolver {
       written.push(type);
     }
 
-    return this.alias(module, decl, written);
+    return this.alias(module, decl, written, false);
   }
 
   public declaredEnum(module: int, decl: EnumDecl): Type {

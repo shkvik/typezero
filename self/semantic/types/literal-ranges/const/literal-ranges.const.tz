@@ -1,2 +1,4 @@
 export const kManyLiterals = 64;
 export const kIntervalSeparator = " or ";
+export const kHttpStatusName = "HttpStatus";
+export const kStatusGuard = "isHttpStatus";

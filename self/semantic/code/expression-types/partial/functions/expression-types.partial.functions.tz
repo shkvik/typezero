@@ -86,6 +86,7 @@ partial class ExpressionTypes {
     };
 
     this.resolver.typeParameters(module, fn.typeParams);
+    this.captureRequirements(fn, module);
     this.iterablePlaceCheck(fn, module);
     this.constructorArgsCheck(fn, module);
     const parameterPlaceErrors = this.decorators.parameterPlaceCheck(fn);
@@ -189,8 +190,17 @@ partial class ExpressionTypes {
         return;
       }
 
-      const found = this.quietResult(fn, frame, module);
+      const found = this.cycleResult(fn, frame, isOwn, assumed, module);
       const next = this.functions.widenedResult(assumed, found);
+      if (isOwn && assumed != undefined && next.kind == TypeKind.Error) {
+        const word = this.functions.functionName(fn);
+
+        this.report(module, fn.loc, Code.ReturnsCycleDiffer, { word });
+        door.type = this.functions.signatureOf(shape, next);
+
+        return;
+      }
+
       const isLast = round == kInferenceRounds || next.kind == TypeKind.Error;
       if (!isOwn || next == assumed || isLast) {
         const result = this.frameResult(fn, frame, module);
@@ -236,6 +246,35 @@ partial class ExpressionTypes {
     for (const key of this.functionOrder.slice(functions)) {
       this.functionDoors.delete(key);
     }
+  }
+
+  private cycleResult(
+    fn: FunctionDecl,
+    frame: FunctionFrame,
+    isOwn: boolean,
+    assumed: Type | undefined,
+    module: int,
+  ): Type {
+    const found = this.quietResult(fn, frame, module);
+    if (!isOwn || assumed != undefined || found.kind != TypeKind.Error) {
+      return found;
+    }
+
+    const known = frame.returns.filter(
+      (one) =>
+        !this.functions.isVoided(one.value) && one.type.kind != TypeKind.Error,
+    );
+    if (known.length == 0 || known.length == frame.returns.length) {
+      return found;
+    }
+
+    this.errors.beginTrial();
+
+    const joined = this.joinedReturns(fn, known, module);
+
+    this.errors.endTrial();
+
+    return joined ?? found;
   }
 
   private quietResult(

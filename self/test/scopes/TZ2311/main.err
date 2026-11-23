@@ -1,15 +1,15 @@
 main.tz:1:24: error TZ2799: there is no 'Error' in tz: an error is a value; make 'NotFound' a type of object with a tag, e.g. 'type NotFound = { code: "NotFound"; message: string }'
 class NotFound extends Error {}
                        ^
-main.tz:3:26: error TZ2311: there is no 'TypeError' in tz: an error is a value; return one with 'err(...)', e.g. 'return err({ kind: "NOT_FOUND" })'
+main.tz:3:26: error TZ2302: cannot find type 'TypeError'
 function report(problem: TypeError): void {
                          ^
-main.tz:7:19: error TZ2311: there is no 'Error' in tz: an error is a value; return one with 'err(...)', e.g. 'return err({ kind: "NOT_FOUND" })'
+main.tz:7:19: error TZ2308: cannot find class 'Error'
 const plain = new Error("x");
                   ^
-main.tz:8:19: error TZ2311: there is no 'RangeError' in tz: an error is a value; return one with 'err(...)', e.g. 'return err({ kind: "NOT_FOUND" })'
+main.tz:8:19: error TZ2308: cannot find class 'RangeError'
 const range = new RangeError("x");
                   ^
-main.tz:9:16: error TZ2311: there is no 'Error' in tz: an error is a value; return one with 'err(...)', e.g. 'return err({ kind: "NOT_FOUND" })'
+main.tz:9:16: error TZ2301: cannot find name 'Error'
 const called = Error("x");
                ^

@@ -131,7 +131,9 @@ partial class ExpressionTypes {
     this.ownerClasses.push(owner);
     this.selves.push(unknown);
     this.thisPlaces.push(ThisPlace.StaticField);
+    this.staticFields.push(field);
     this.staticInit(init, field, type, module);
+    this.staticFields.pop();
     this.thisPlaces.pop();
     this.selves.pop();
     this.ownerClasses.pop();

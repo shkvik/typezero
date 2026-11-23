@@ -18,6 +18,7 @@ partial class ExpressionTypes {
       isFresh: this.shapes.isFresh(expr),
       isPlaced: this.isPlacedLiteral(expr, wanted, module),
       place,
+      both: this.bothText(expr, wanted, module),
     };
     const isBytes =
       this.byteSources.isBytesType(given) &&
@@ -59,7 +60,13 @@ partial class ExpressionTypes {
 
     const value = this.intConstant(expr, given, module);
     if (value == undefined) {
-      return true;
+      return intervals.some((interval) =>
+        this.canProveBetween(
+          expr,
+          { what: "", low: interval.low.value, high: interval.high.value },
+          module,
+        ),
+      );
     }
 
     return intervals.some(

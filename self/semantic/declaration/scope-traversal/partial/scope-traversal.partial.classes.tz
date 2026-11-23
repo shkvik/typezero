@@ -18,13 +18,11 @@ import {
 } from "../../../../program/ast/types/ast.types.functions.tz";
 import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
 import {
+  CapturePlace,
   NameSymbol,
   SymbolKind,
 } from "../../../../program/scopes/types/scopes.types.tz";
-import {
-  CapturePlace,
-  ClassFrame,
-} from "../types/scope-traversal.types.tz";
+import { ClassFrame } from "../types/scope-traversal.types.tz";
 
 partial class ScopeTraversal {
   private traverseFunction(fn: FunctionDecl): void {
@@ -160,12 +158,12 @@ partial class ScopeTraversal {
 
   private classFrameOf(isExpression: boolean): ClassFrame {
     const outer = this.scopes.currentDepth();
-    const isChecked = isExpression && outer > 0 && this.genericFunctions == 0;
-    if (!isChecked) {
-      return { outer: 0, place: CapturePlace.None };
+    const isGeneric = this.genericFunctions > 0;
+    if (!isExpression || outer == 0) {
+      return { outer: 0, place: CapturePlace.None, isGeneric };
     }
 
-    return { outer, place: CapturePlace.None };
+    return { outer, place: CapturePlace.None, isGeneric };
   }
 
   private fieldPlace(frame: ClassFrame, form: FieldKind): CapturePlace {

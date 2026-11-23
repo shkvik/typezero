@@ -1,0 +1,5 @@
+export const kDisposeKey = "[Symbol.dispose]";
+export const kDisposeName = "dispose";
+export const kSymbolName = "Symbol";
+export const kSuperName = "super";
+export const kThisName = "this";

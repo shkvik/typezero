@@ -1,0 +1,12 @@
+export type JsonProblem = {
+  readonly message: string;
+  readonly offset: int;
+};
+
+export type JsonCursor = {
+  readonly text: string;
+  at: int;
+  readonly open: int[];
+  isOpened: boolean;
+  isDone: boolean;
+};

@@ -220,6 +220,19 @@ partial class ExpressionTypes {
     return this.knownFact(key) ?? declared;
   }
 
+  private fixedUpdateCheck(target: Expr, module: int): boolean {
+    if (target.kind != ExprKind.Name) {
+      return false;
+    }
+
+    const found = this.targetOfName(target, module);
+    if (found == undefined) {
+      return false;
+    }
+
+    return this.fixedTargetCheck(target, found, module);
+  }
+
   private updatedTyped(target: Expr, module: int): Type {
     if (this.dictTargetCheck(target, module)) {
       return this.store.plain(TypeKind.Error);
@@ -232,6 +245,10 @@ partial class ExpressionTypes {
     }
 
     this.updateTargetCheck(target, module);
+
+    if (this.fixedUpdateCheck(target, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
 
     const type = this.typed(target, undefined, module);
     const key = this.pathKey(target, module);

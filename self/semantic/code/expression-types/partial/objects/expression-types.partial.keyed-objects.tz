@@ -1,0 +1,150 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  Expr,
+  ExprKind,
+  ObjectLitExpr,
+  Property,
+  PropertyKind,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  ObjectType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { kNoPlace } from "../../const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private keyedLiteralCheck(
+    expr: ObjectLitExpr,
+    target: Type | undefined,
+    module: int,
+  ): void {
+    const seen = new Map<string, Type>();
+
+    for (const property of expr.props) {
+      const form = property.form;
+      if (form.kind != PropertyKind.Computed) {
+        continue;
+      }
+
+      const key = form.key;
+      if (this.constantKey(key, module) != undefined) {
+        continue;
+      }
+      if (this.isEnumMemberKey(key, module)) {
+        continue;
+      }
+
+      const keyType = this.peekType(key, module);
+      if (keyType.kind != TypeKind.Union) {
+        continue;
+      }
+      if (!this.objects.isLiteralKeys(keyType)) {
+        continue;
+      }
+
+      const isFailed = this.keyedPropertyFails(
+        property,
+        key,
+        keyType,
+        target,
+        seen,
+        module,
+      );
+      if (isFailed) {
+        return;
+      }
+    }
+  }
+
+  private isEnumMemberKey(key: Expr, module: int): boolean {
+    if (key.kind != ExprKind.Member) {
+      return false;
+    }
+
+    return this.enumHomeOf(key.object, module) != undefined;
+  }
+
+  private keyedPropertyFails(
+    property: Property,
+    key: Expr,
+    keyType: Type,
+    target: Type | undefined,
+    seen: Map<string, Type>,
+    module: int,
+  ): boolean {
+    if (target == undefined) {
+      return this.inferredKeyFails(property, key, keyType, seen, module);
+    }
+    if (target.kind == TypeKind.Object) {
+      return this.targetedKeyFails(property, key, keyType, target, module);
+    }
+
+    return false;
+  }
+
+  private targetedKeyFails(
+    property: Property,
+    key: Expr,
+    keyType: Type,
+    target: ObjectType,
+    module: int,
+  ): boolean {
+    const word = this.text.of(keyType);
+    const field = this.keyedFieldType(target, keyType);
+    if (field == undefined) {
+      this.report(module, key.loc, Code.KeyedFieldsDiffer, {
+        word,
+        other: this.text.of(target),
+      });
+
+      return true;
+    }
+    if (!this.types.isOptional(field)) {
+      this.report(module, key.loc, Code.KeyedNotOptional, {
+        word,
+        other: this.text.of(field),
+      });
+
+      return true;
+    }
+
+    this.checked(property.value, field, module, kNoPlace);
+
+    return false;
+  }
+
+  private inferredKeyFails(
+    property: Property,
+    key: Expr,
+    keyType: Type,
+    seen: Map<string, Type>,
+    module: int,
+  ): boolean {
+    const value = this.typed(property.value, undefined, module);
+    if (value.kind == TypeKind.Error) {
+      return true;
+    }
+
+    const optional = this.types.optional(value);
+
+    for (const part of this.generics.partsOfType(keyType)) {
+      if (part.kind != TypeKind.Literal) {
+        continue;
+      }
+
+      const name = part.text;
+      const same = seen.get(name);
+      if (same != undefined && same != optional) {
+        this.report(module, key.loc, Code.KeyedValuesDiffer, { word: name });
+
+        return true;
+      }
+
+      seen.set(name, optional);
+    }
+
+    return false;
+  }
+}

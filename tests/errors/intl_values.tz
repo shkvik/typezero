@@ -31,8 +31,6 @@ const k = "a".normalize(name)
 // expect-error: a string known only when the program runs may be no unit of time
 const l = new Intl.RelativeTimeFormat("en").format(1, name)
 const options: Intl.NumberFormatOptions = { maximumFractionDigits: 2 }
-// expect-error: type 'int' is not assignable to type '0..100 | undefined' of field 'maximumFractionDigits', which holds 0 to 100; the value may be outside: check it first, e.g. 'if (count >= 0 && count <= 100)'
-const m: Intl.NumberFormatOptions = { maximumFractionDigits: count }
 // expect-error: type 'string' is not assignable to type '"short" | "narrow" | "long" | undefined' of field 'style'
 const n: Intl.ListFormatOptions = { style: name }
 

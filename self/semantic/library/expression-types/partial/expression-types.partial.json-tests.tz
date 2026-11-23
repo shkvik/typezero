@@ -1,0 +1,251 @@
+import { Code } from "../../../../diagnostic/code.tz";
+import { Details } from "../../../../diagnostic/types/message.types.tz";
+import {
+  BinaryExpr,
+  BinaryOp,
+  Expr,
+  ExprKind,
+  UnaryOp,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { TypeKind } from "../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
+import { JsonTest } from "../../../code/expression-types/types/expression-types.types.tz";
+import {
+  kArrayTypeOf,
+  kEqualText,
+  kIsArrayName,
+  kNotEqualText,
+  kNullTypeOfs,
+  kValuePlaceholder,
+} from "../../library-rules/const/library-rules.const.tz";
+import { kArrayClass } from "../../../code/expression-types/const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private redundantTestsCheck(expr: BinaryExpr, module: int): void {
+    const isAnd = expr.op == BinaryOp.LogAnd;
+    const rhs = expr.rhs;
+    const test = this.jsonTestOf(rhs, module);
+    if (test == undefined) {
+      return;
+    }
+
+    for (const term of this.sameOperatorTerms(expr.lhs, expr.op)) {
+      const name = this.typeOfTextFor(term, test.tested, isAnd, module);
+      if (name != undefined) {
+        return this.typeOfAgreesCheck(rhs, test, name, isAnd, module);
+      }
+    }
+  }
+
+  private sameOperatorTerms(expr: Expr, op: BinaryOp): Expr[] {
+    const terms: Expr[] = [];
+    let current = expr;
+
+    while (current.kind == ExprKind.Binary && current.op == op) {
+      terms.push(current.rhs);
+      current = current.lhs;
+    }
+
+    terms.push(current);
+
+    return terms.reverse();
+  }
+
+  private jsonTestOf(rhs: Expr, module: int): JsonTest | undefined {
+    const found = this.testedSide(rhs, module);
+    if (found == undefined) {
+      return undefined;
+    }
+
+    const type = this.peekType(found.tested, module);
+    if (this.types.definedType(type).kind != TypeKind.Json) {
+      return undefined;
+    }
+
+    return found;
+  }
+
+  private testedSide(rhs: Expr, module: int): JsonTest | undefined {
+    if (rhs.kind == ExprKind.Binary) {
+      const isEquality = rhs.op == BinaryOp.Eq || rhs.op == BinaryOp.Ne;
+      const isLeftNull = this.isNullValue(rhs.lhs, module);
+      const isRightNull = this.isNullValue(rhs.rhs, module);
+      if (!isEquality || (!isLeftNull && !isRightNull)) {
+        return undefined;
+      }
+      if (isLeftNull) {
+        return { tested: rhs.rhs, isNullTest: true };
+      }
+
+      return { tested: rhs.lhs, isNullTest: true };
+    }
+
+    const inner = this.withoutNot(rhs);
+    const tested = this.isArrayArgument(inner, module);
+    if (tested == undefined) {
+      return undefined;
+    }
+
+    return { tested, isNullTest: false };
+  }
+
+  private isNullValue(expr: Expr, module: int): boolean {
+    return expr.kind == ExprKind.Name && this.isNullName(expr, module);
+  }
+
+  private withoutNot(expr: Expr): Expr {
+    if (expr.kind == ExprKind.Unary && expr.op == UnaryOp.Not) {
+      return expr.operand;
+    }
+
+    return expr;
+  }
+
+  private isArrayArgument(expr: Expr, module: int): Expr | undefined {
+    if (expr.kind != ExprKind.Call) {
+      return undefined;
+    }
+
+    const callee = expr.callee;
+    if (callee.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    const owner = callee.object;
+    const isArray =
+      owner.kind == ExprKind.Name &&
+      owner.name == kArrayClass &&
+      callee.name == kIsArrayName &&
+      this.isGlobalUse(owner, module);
+    if (!isArray) {
+      return undefined;
+    }
+
+    return expr.args[0]?.expr;
+  }
+
+  private typeOfTextFor(
+    term: Expr,
+    tested: Expr,
+    isAnd: boolean,
+    module: int,
+  ): string | undefined {
+    if (term.kind != ExprKind.Binary) {
+      return undefined;
+    }
+
+    const wanted = this.testOperator(isAnd);
+    if (term.op != wanted) {
+      return undefined;
+    }
+
+    const left = term.lhs;
+    const right = term.rhs;
+    if (left.kind == ExprKind.Unary && right.kind == ExprKind.StringLit) {
+      const isTypeOf = left.op == UnaryOp.TypeOf;
+      const isSame = this.isSameRef(left.operand, tested, module);
+
+      return this.typeOfName(isTypeOf && isSame, right.value);
+    }
+    if (right.kind == ExprKind.Unary && left.kind == ExprKind.StringLit) {
+      const isTypeOf = right.op == UnaryOp.TypeOf;
+      const isSame = this.isSameRef(right.operand, tested, module);
+
+      return this.typeOfName(isTypeOf && isSame, left.value);
+    }
+
+    return undefined;
+  }
+
+  private typeOfName(isTest: boolean, name: string): string | undefined {
+    if (isTest) {
+      return name;
+    }
+
+    return undefined;
+  }
+
+  private testOperator(isAnd: boolean): BinaryOp {
+    if (isAnd) {
+      return BinaryOp.Eq;
+    }
+
+    return BinaryOp.Ne;
+  }
+
+  private isSameRef(first: Expr, second: Expr, module: int): boolean {
+    let left = first;
+    let right = second;
+
+    while (left.kind == ExprKind.Member && right.kind == ExprKind.Member) {
+      if (left.name != right.name) {
+        return false;
+      }
+
+      left = left.object;
+      right = right.object;
+    }
+
+    if (left.kind != ExprKind.Name || right.kind != ExprKind.Name) {
+      return false;
+    }
+
+    const leftTarget = this.targetOfName(left, module);
+    const rightTarget = this.targetOfName(right, module);
+    if (leftTarget == undefined || rightTarget == undefined) {
+      return false;
+    }
+
+    return (
+      leftTarget.module == rightTarget.module &&
+      leftTarget.loc == rightTarget.loc
+    );
+  }
+
+  private typeOfAgreesCheck(
+    rhs: Expr,
+    test: JsonTest,
+    name: string,
+    isAnd: boolean,
+    module: int,
+  ): void {
+    const word = this.refText(test.tested);
+    const first = this.testOperatorText(isAnd);
+    const details: Details = { word, first, other: name };
+    if (test.isNullTest && !kNullTypeOfs.includes(name)) {
+      return this.report(module, rhs.loc, Code.JsonNeverNull, details);
+    }
+    if (!test.isNullTest && name != kArrayTypeOf) {
+      this.report(module, rhs.loc, Code.JsonNeverArray, details);
+    }
+  }
+
+  private testOperatorText(isAnd: boolean): string {
+    if (isAnd) {
+      return kEqualText;
+    }
+
+    return kNotEqualText;
+  }
+
+  private refText(expr: Expr): string {
+    const names: string[] = [];
+    let link = expr;
+
+    while (link.kind == ExprKind.Member) {
+      names.push(link.name);
+      link = link.object;
+    }
+
+    let text = kValuePlaceholder;
+    if (link.kind == ExprKind.Name) {
+      text = link.name;
+    }
+
+    for (const name of names.reverse()) {
+      text = `${text}.${name}`;
+    }
+
+    return text;
+  }
+}

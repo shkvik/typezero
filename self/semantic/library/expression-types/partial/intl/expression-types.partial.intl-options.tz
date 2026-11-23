@@ -1,0 +1,590 @@
+import { ProofRange } from "../../../../flow/proof-rules/types/proof-rules.types.tz";
+import { Linear } from "../../../../code/expression-types/types/expression-types.types.tz";
+import { kZeroTerm } from "../../../../flow/bound-rules/const/bound-rules.const.tz";
+import {
+  Expr,
+  ExprKind,
+  PropertyKind,
+  UnaryOp,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  ObjectField,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  kCurrencyOption,
+  kDigitPairs,
+  kDigitRanges,
+  kDisplayNamesClass,
+  kKeywordOptions,
+  kNumberFormatClass,
+  kRoundingIncrements,
+  kRoundingOption,
+  kStyleOption,
+  kTypeOption,
+  kUnitOption,
+} from "../../../intl-rules/const/intl-rules.const.tz";
+import {
+  IntlDigitRange,
+  IntlOption,
+  IntlOptionKind,
+  IntlService,
+} from "../../../intl-rules/types/intl-rules.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+
+partial class ExpressionTypes {
+  private intlOptionsCheck(
+    options: Expr,
+    service: IntlService,
+    what: string,
+    isLocaleOk: boolean,
+    isDisplay: boolean,
+    module: int,
+  ): boolean {
+    const given = this.typed(options, undefined, module);
+    const base = this.types.definedType(given);
+    if (given.kind == TypeKind.Error || this.modules.isLibraryModule(module)) {
+      return false;
+    }
+    if (given.kind == TypeKind.Undefined && isDisplay) {
+      const noTypeError = this.intl.optionsNoTypeError(options.loc);
+
+      this.reportFound(module, noTypeError);
+
+      return false;
+    }
+    if (!this.intl.isPlainOptions(given)) {
+      const objectError = this.intl.optionsObjectError(
+        options.loc,
+        what,
+        given,
+      );
+
+      this.reportFound(module, objectError);
+
+      return false;
+    }
+    if (base.kind != TypeKind.Object) {
+      return isLocaleOk;
+    }
+
+    let isFine = isLocaleOk;
+
+    for (const field of base.fields) {
+      const isFieldOk = this.intlFieldCheck(
+        options,
+        field,
+        service,
+        what,
+        module,
+      );
+
+      isFine = isFine && isFieldOk;
+    }
+
+    if (!isFine) {
+      return false;
+    }
+
+    const isTextOk = this.intlTextsCheck(options, base.fields, service, module);
+    const isDeclared =
+      options.kind != ExprKind.ObjectLit &&
+      this.store.labelOf(base) != undefined;
+    if (isDeclared) {
+      return isTextOk;
+    }
+
+    const isRangeOk = this.intlRangesCheck(options, base.fields, module);
+    const isPairOk = this.intlPairsCheck(options, base.fields, module);
+    const isRoundOk = this.intlRoundingCheck(options, base.fields, module);
+
+    return isTextOk && isRangeOk && isPairOk && isRoundOk;
+  }
+
+  private intlFieldCheck(
+    options: Expr,
+    field: ObjectField,
+    service: IntlService,
+    what: string,
+    module: int,
+  ): boolean {
+    const option = this.intl.option(service, field.name);
+    const loc = this.optionLoc(options, field.name);
+    if (option == undefined) {
+      const unknownError = this.intl.unknownOptionError(
+        loc,
+        field.name,
+        what,
+        service,
+      );
+
+      this.reportFound(module, unknownError);
+
+      return false;
+    }
+
+    const value = this.types.definedType(field.type);
+    if (value.kind == TypeKind.Undefined) {
+      return true;
+    }
+    if (!this.intl.kindFits(option.kind, value)) {
+      const kindError = this.intl.optionKindError(loc, option, field.type);
+
+      this.reportFound(module, kindError);
+
+      return false;
+    }
+
+    const text = this.optionText(options, field);
+    const isListed = option.values.length > 0;
+    if (
+      text != undefined &&
+      isListed &&
+      !this.intl.isAllowedText(option, text)
+    ) {
+      const badValueError = this.intl.badValueError(loc, option, text);
+
+      this.reportFound(module, badValueError);
+
+      return false;
+    }
+
+    const isClosed =
+      option.kind != IntlOptionKind.Number &&
+      option.kind != IntlOptionKind.Flag;
+    if (text != undefined || !isListed || !isClosed) {
+      return true;
+    }
+
+    return this.intlValuesCheck(options, field, option, loc, module);
+  }
+
+  private intlValuesCheck(
+    options: Expr,
+    field: ObjectField,
+    option: IntlOption,
+    loc: int,
+    module: int,
+  ): boolean {
+    const value = this.optionValue(options, field.name);
+    let texts = this.intl.literalTexts(field.type);
+
+    if (value != undefined) {
+      const given = this.peekType(value, module);
+      const known = this.encodingTexts(value, given, module, 0);
+
+      texts = known ?? texts;
+    }
+    if (texts == undefined) {
+      const openError = this.intl.openValueError(loc, option);
+
+      this.reportFound(module, openError);
+
+      return false;
+    }
+
+    const wrong = texts.find((one) => !this.intl.isAllowedText(option, one));
+    if (wrong == undefined) {
+      return true;
+    }
+
+    const badValueError = this.intl.badValueError(loc, option, wrong);
+
+    this.reportFound(module, badValueError);
+
+    return false;
+  }
+
+  private intlTextsCheck(
+    options: Expr,
+    fields: ObjectField[],
+    service: IntlService,
+    module: int,
+  ): boolean {
+    let isFine = true;
+    const currency = this.optionTextNamed(options, fields, kCurrencyOption);
+    const unit = this.optionTextNamed(options, fields, kUnitOption);
+
+    if (currency != undefined && !this.intl.isCurrency(currency)) {
+      const loc = this.optionLoc(options, kCurrencyOption);
+
+      this.reportFound(module, this.intl.currencyError(loc, currency));
+
+      isFine = false;
+    }
+    if (unit != undefined && !this.intl.isUnit(unit)) {
+      const loc = this.optionLoc(options, kUnitOption);
+
+      this.reportFound(module, this.intl.unitError(loc, unit));
+
+      isFine = false;
+    }
+
+    for (const name of kKeywordOptions) {
+      const value = this.optionTextNamed(options, fields, name);
+      if (value != undefined && !this.intl.isKeywordType(value)) {
+        const loc = this.optionLoc(options, name);
+
+        this.reportFound(module, this.intl.keywordError(loc, value, name));
+
+        isFine = false;
+      }
+    }
+
+    const isStyleOk = this.intlStyleCheck(options, fields, service, module);
+    const hasType = fields.some((one) => one.name == kTypeOption);
+    if (service.name == kDisplayNamesClass && !hasType) {
+      this.reportFound(module, this.intl.optionsNoTypeError(options.loc));
+
+      return false;
+    }
+
+    return isFine && isStyleOk;
+  }
+
+  private intlStyleCheck(
+    options: Expr,
+    fields: ObjectField[],
+    service: IntlService,
+    module: int,
+  ): boolean {
+    const style = fields.find((one) => one.name == kStyleOption);
+    if (style == undefined || service.name != kNumberFormatClass) {
+      return true;
+    }
+
+    const written = this.optionText(options, style);
+    const listed = this.intl.literalTexts(style.type) ?? [];
+    const styles = this.writtenStyles(written, listed);
+    const hasCurrency = fields.some((one) => one.name == kCurrencyOption);
+    const hasUnit = fields.some((one) => one.name == kUnitOption);
+    const loc = this.optionLoc(options, kStyleOption);
+    let isFine = true;
+
+    if (styles.includes(kCurrencyOption) && !hasCurrency) {
+      this.reportFound(module, this.intl.styleCurrencyError(loc));
+
+      isFine = false;
+    }
+    if (styles.includes(kUnitOption) && !hasUnit) {
+      this.reportFound(module, this.intl.styleUnitError(loc));
+
+      isFine = false;
+    }
+
+    return isFine;
+  }
+
+  private writtenStyles(
+    written: string | undefined,
+    listed: string[],
+  ): string[] {
+    if (written != undefined) {
+      return [written];
+    }
+
+    return listed;
+  }
+
+  private intlRangesCheck(
+    options: Expr,
+    fields: ObjectField[],
+    module: int,
+  ): boolean {
+    let isFine = true;
+
+    for (const range of kDigitRanges) {
+      const field = fields.find((one) => one.name == range.name);
+      if (
+        field != undefined &&
+        !this.digitRangeCheck(options, field, range, module)
+      ) {
+        isFine = false;
+      }
+    }
+
+    return isFine;
+  }
+
+  private digitRangeCheck(
+    options: Expr,
+    field: ObjectField,
+    range: IntlDigitRange,
+    module: int,
+  ): boolean {
+    const loc = this.optionLoc(options, field.name);
+    const constant = this.optionNumber(options, field);
+    if (constant != undefined) {
+      const isInside = constant >= range.low && constant <= range.high;
+      if (!isInside) {
+        const rangeError = this.intl.digitRangeError(
+          loc,
+          range.name,
+          range.low,
+          range.high,
+          true,
+        );
+
+        this.reportFound(module, rangeError);
+      }
+
+      return isInside;
+    }
+
+    const value = this.optionValue(options, field.name);
+    if (value != undefined) {
+      const given = this.peekType(value, module);
+      const base = this.types.definedType(given);
+      const proof: ProofRange = { what: "", low: range.low, high: range.high };
+      const isInt = base.kind == TypeKind.Int;
+      if (isInt && this.canProveBetween(value, proof, module)) {
+        return true;
+      }
+    }
+
+    const openError = this.intl.digitRangeError(
+      loc,
+      range.name,
+      range.low,
+      range.high,
+      false,
+    );
+
+    this.reportFound(module, openError);
+
+    return false;
+  }
+
+  private intlPairsCheck(
+    options: Expr,
+    fields: ObjectField[],
+    module: int,
+  ): boolean {
+    if (options.kind != ExprKind.ObjectLit) {
+      return true;
+    }
+
+    let isFine = true;
+
+    for (const pair of kDigitPairs) {
+      const low = fields.find((one) => one.name == pair.low);
+      const high = fields.find((one) => one.name == pair.high);
+      if (low == undefined || high == undefined) {
+        continue;
+      }
+      if (this.isNotAbove(options, low, high, module)) {
+        continue;
+      }
+
+      const isKnown =
+        this.optionNumber(options, low) != undefined &&
+        this.optionNumber(options, high) != undefined;
+      const loc = this.optionLoc(options, pair.high);
+      const aboveError = this.intl.aboveError(
+        loc,
+        pair.low,
+        pair.high,
+        isKnown,
+      );
+
+      this.reportFound(module, aboveError);
+
+      isFine = false;
+    }
+
+    return isFine;
+  }
+
+  private isNotAbove(
+    options: Expr,
+    low: ObjectField,
+    high: ObjectField,
+    module: int,
+  ): boolean {
+    const lowNumber = this.optionNumber(options, low);
+    const highNumber = this.optionNumber(options, high);
+    if (lowNumber != undefined && highNumber != undefined) {
+      return lowNumber.round(0, "floor") <= highNumber.round(0, "floor");
+    }
+
+    const lowLinear = this.optionLinear(options, low, lowNumber, module);
+    const highLinear = this.optionLinear(options, high, highNumber, module);
+    if (lowLinear == undefined || highLinear == undefined) {
+      return false;
+    }
+    if (lowLinear.term == highLinear.term) {
+      return lowLinear.offset <= highLinear.offset;
+    }
+
+    const room = lowLinear.offset - highLinear.offset;
+
+    return this.canProve(lowLinear.term, highLinear.term, room);
+  }
+
+  private optionLinear(
+    options: Expr,
+    field: ObjectField,
+    constant: decimal | undefined,
+    module: int,
+  ): Linear | undefined {
+    const value = this.optionValue(options, field.name);
+    if (value != undefined) {
+      const linear = this.linearOf(value, module);
+      if (linear != undefined) {
+        return linear;
+      }
+    }
+    if (constant == undefined || constant != constant.round(0, "floor")) {
+      return undefined;
+    }
+
+    return { term: kZeroTerm, offset: constant };
+  }
+
+  private intlRoundingCheck(
+    options: Expr,
+    fields: ObjectField[],
+    module: int,
+  ): boolean {
+    const field = fields.find((one) => one.name == kRoundingOption);
+    if (field == undefined) {
+      return true;
+    }
+
+    const constant = this.optionNumber(options, field);
+    const isUnion = this.intl.isIncrementUnion(field.type, kRoundingIncrements);
+    const isKnown = constant != undefined || isUnion;
+    const isListed =
+      constant == undefined || kRoundingIncrements.includes(constant);
+    const isLiteral = options.kind == ExprKind.ObjectLit;
+    const loc = this.optionLoc(options, kRoundingOption);
+    if (isLiteral && isKnown && constant != 1 && isListed) {
+      this.incrementDigitsCheck(options, fields, loc, module);
+    }
+    if (isKnown && isListed) {
+      return true;
+    }
+
+    const incrementsError = this.intl.incrementsError(
+      loc,
+      constant != undefined,
+    );
+
+    this.reportFound(module, incrementsError);
+
+    return false;
+  }
+
+  private incrementDigitsCheck(
+    options: Expr,
+    fields: ObjectField[],
+    loc: int,
+    module: int,
+  ): void {
+    const isSignificant = fields.some(
+      (one) =>
+        one.name == "minimumSignificantDigits" ||
+        one.name == "maximumSignificantDigits",
+    );
+    if (isSignificant) {
+      return this.reportFound(module, this.intl.incrementSignificantError(loc));
+    }
+
+    const low = fields.find((one) => one.name == "minimumFractionDigits");
+    const high = fields.find((one) => one.name == "maximumFractionDigits");
+    const isSame =
+      low != undefined &&
+      high != undefined &&
+      this.isNotAbove(options, low, high, module) &&
+      this.isNotAbove(options, high, low, module);
+    if (!isSame) {
+      this.reportFound(module, this.intl.incrementSameError(loc));
+    }
+  }
+
+  private optionValue(options: Expr, name: string): Expr | undefined {
+    if (options.kind != ExprKind.ObjectLit) {
+      return undefined;
+    }
+
+    const found = options.props.find(
+      (one) => one.form.kind != PropertyKind.Spread && one.name == name,
+    );
+
+    return found?.value;
+  }
+
+  private optionLoc(options: Expr, name: string): int {
+    const value = this.optionValue(options, name);
+
+    return value?.loc ?? options.loc;
+  }
+
+  private optionText(options: Expr, field: ObjectField): string | undefined {
+    const value = this.optionValue(options, field.name);
+    if (value != undefined) {
+      const written = this.textCoders.literalLabel(value);
+      if (written != undefined) {
+        return written;
+      }
+    }
+
+    const texts = this.intl.literalTexts(field.type);
+    const base = this.types.definedType(field.type);
+    if (
+      texts == undefined ||
+      texts.length != 1 ||
+      base.kind != TypeKind.Literal
+    ) {
+      return undefined;
+    }
+
+    return texts[0];
+  }
+
+  private optionTextNamed(
+    options: Expr,
+    fields: ObjectField[],
+    name: string,
+  ): string | undefined {
+    const field = fields.find((one) => one.name == name);
+    if (field == undefined) {
+      return undefined;
+    }
+
+    return this.optionText(options, field);
+  }
+
+  private optionNumber(options: Expr, field: ObjectField): decimal | undefined {
+    const value = this.optionValue(options, field.name);
+    if (value != undefined) {
+      const written = this.writtenNumber(value);
+      if (written != undefined) {
+        return written;
+      }
+    }
+
+    return this.intl.literalNumber(field.type);
+  }
+
+  private writtenNumber(value: Expr): decimal | undefined {
+    if (value.kind == ExprKind.Unary && value.op == UnaryOp.Neg) {
+      const inner = this.writtenNumber(value.operand);
+
+      return this.oppositeOf(inner);
+    }
+    if (value.kind == ExprKind.IntLit) {
+      return value.value.toDecimal();
+    }
+    if (value.kind != ExprKind.FloatLit) {
+      return undefined;
+    }
+
+    const parsed = decimal(`${value.value}`);
+    if (parsed.isErr()) {
+      return undefined;
+    }
+
+    return parsed.value;
+  }
+}

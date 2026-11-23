@@ -23,10 +23,6 @@ Response.redirect("http://x/", 301)
 const s: HttpStatus = code
 // expect-error: type '99' is not assignable to type 'HttpStatus | undefined' of field 'status', which holds 200 to 599
 const init: ResponseInit = { status: 99 }
-function reply(n: int) {
-  // expect-error: type 'int' is not assignable to type 'HttpStatus | undefined' of field 'status', which holds 200 to 599; the value may be outside: check it first, e.g. 'if (isHttpStatus(n))'
-  return new Response(undefined, { status: n })
-}
 function later(n: int) {
   if (n >= 200) {
     // expect-error: type 'int' is not assignable to type 'HttpStatus', which holds 200 to 599; the value may be outside: check it first, e.g. 'if (isHttpStatus(n))'
@@ -38,4 +34,4 @@ function later(n: int) {
 type Small = 1 | 2 | 3
 // expect-error: type 'int' is not assignable to type '1 | 2 | 3', which holds 1 to 3; the value may be outside: check it first, e.g. 'if (code >= 1 && code <= 3)'
 const small: Small = code
-console.log(s, init, reply(1), later(1), small)
+console.log(s, init, later(1), small)

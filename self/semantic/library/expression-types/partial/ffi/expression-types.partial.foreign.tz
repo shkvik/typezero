@@ -3,9 +3,18 @@ import {
   FunctionDecl,
   ParamKind,
 } from "../../../../../program/ast/types/ast.types.functions.tz";
-import { NewExpr } from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Expr,
+  NewExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  kCStringName,
+  kNulText,
+} from "../../../foreign-rules/const/foreign-rules.const.tz";
 import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
 import {
+  LiteralKind,
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
@@ -76,5 +85,57 @@ partial class ExpressionTypes {
     this.looseArguments(expr.args, module);
 
     return this.store.plain(TypeKind.Error);
+  }
+
+  private isCStringType(type: Type): boolean {
+    const base = this.types.definedType(type);
+    if (base.kind != TypeKind.Instance || base.name != kCStringName) {
+      return false;
+    }
+
+    return this.modules.isLibraryModule(base.module);
+  }
+
+  private cstringLiteral(expr: Expr, to: Type): Type | undefined {
+    if (!this.isCStringType(to)) {
+      return undefined;
+    }
+
+    const text = this.constantText(expr);
+    if (text == undefined || text.includes(kNulText)) {
+      return undefined;
+    }
+
+    return to;
+  }
+
+  private cstringMismatch(
+    expr: Expr,
+    given: Type,
+    wanted: Type,
+    module: int,
+  ): boolean {
+    const base = this.types.apparent(given);
+    const isText =
+      base.kind == TypeKind.String || base.kind == TypeKind.Template;
+    if (!this.isCStringType(wanted) || !isText) {
+      return false;
+    }
+
+    const first = this.text.of(given);
+    const second = this.text.of(wanted);
+    const text = this.constantText(expr);
+    if (text != undefined && text.includes(kNulText)) {
+      const literal = this.store.literal(LiteralKind.String, text);
+      const shown = this.text.of(literal);
+
+      this.report(module, expr.loc, Code.CStringNul, { first: shown, second });
+
+      return true;
+    }
+
+    this.report(module, expr.loc, Code.CStringText, { first, second });
+
+    return true;
   }
 }

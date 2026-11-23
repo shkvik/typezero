@@ -15,6 +15,7 @@ import {
   ParsedDeclaration,
   SourceText,
 } from "../../../program/module/types/module.types.tz";
+import { JsonModule } from "../../json-module/json-module.tz";
 import { Lexer } from "../../lexer/lexer.tz";
 import { ModuleState, OpenModule } from "../types/loader.types.tz";
 import { kWindowsPlatform } from "../const/loader.const.tz";
@@ -22,7 +23,7 @@ import { kWindowsPlatform } from "../const/loader.const.tz";
 partial class Loader {
   private linkedFile(from: ModulePath, file: string): ModuleLink {
     if (file.endsWith(kJsonExtension)) {
-      return { kind: LinkKind.Json, from };
+      return this.linkedJson(from, file);
     }
 
     const key = this.keyOf(file);
@@ -37,6 +38,35 @@ partial class Loader {
     if (module == undefined) {
       return { kind: LinkKind.Missing, from };
     }
+
+    return { kind: LinkKind.Module, from, target: module.id };
+  }
+
+  private linkedJson(from: ModulePath, file: string): ModuleLink {
+    const key = this.keyOf(file);
+    const known = this.byFile.get(key);
+    if (known != undefined) {
+      return { kind: LinkKind.Module, from, target: known };
+    }
+
+    const name = this.nameOf(file);
+    const path = this.shownPath(name);
+    const bytes = this.read(file, path);
+    if (bytes == undefined) {
+      return { kind: LinkKind.Missing, from };
+    }
+
+    const json = new JsonModule(bytes.toString("utf8"));
+    const moduleText = json.moduleText();
+    if (moduleText == undefined) {
+      return { kind: LinkKind.Json, from };
+    }
+
+    const text = Buffer.from(moduleText, "utf8");
+    const source: SourceText = { path, text, isLibrary: false };
+    const module = this.openSource(source, file, name);
+
+    this.byFile.set(key, module.id);
 
     return { kind: LinkKind.Module, from, target: module.id };
   }

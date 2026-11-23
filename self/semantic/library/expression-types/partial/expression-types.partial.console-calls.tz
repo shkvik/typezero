@@ -24,7 +24,11 @@ partial class ExpressionTypes {
     }
 
     for (const arg of expr.args) {
-      if (arg.spread || arg.expr.kind != ExprKind.Call) {
+      if (arg.spread) {
+        this.printSpreadCheck(arg.expr, module);
+        continue;
+      }
+      if (arg.expr.kind != ExprKind.Call) {
         continue;
       }
 
@@ -32,6 +36,21 @@ partial class ExpressionTypes {
       if (given.kind == TypeKind.Void) {
         this.report(module, arg.expr.loc, Code.PrintVoid, kNoDetails);
       }
+    }
+  }
+
+  private printSpreadCheck(value: Expr, module: int): void {
+    const given = this.peekType(value, module);
+    const base = this.types.definedType(given);
+    const isList =
+      base.kind == TypeKind.Array ||
+      base.kind == TypeKind.Tuple ||
+      base.kind == TypeKind.Error ||
+      base.kind == TypeKind.TypeParameter;
+    if (!isList) {
+      this.report(module, value.loc, Code.PrintSpread, {
+        word: this.text.of(given),
+      });
     }
   }
 

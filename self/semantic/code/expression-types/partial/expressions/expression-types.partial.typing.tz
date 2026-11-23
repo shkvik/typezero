@@ -59,6 +59,7 @@ partial class ExpressionTypes {
         this.timerArgumentsCheck(expr, module);
         this.mathOneTypeCheck(expr, module);
         this.uncaughtCheck(expr, module);
+        this.disposeCallCheck(expr, module);
 
         if (this.legacyCallCheck(expr, module)) {
           return this.store.plain(TypeKind.Error);
@@ -163,6 +164,9 @@ partial class ExpressionTypes {
       return;
     }
     if (this.mismatches.isIteratorFromClass(given, wanted)) {
+      return;
+    }
+    if (this.cstringMismatch(expr, given, wanted, module)) {
       return;
     }
 

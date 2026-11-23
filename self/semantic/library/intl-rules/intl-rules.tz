@@ -13,11 +13,6 @@ import {
 import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
 import {
   kCollationName,
-  kDateOptions,
-  kDateStyleName,
-  kDigitsName,
-  kHour12Name,
-  kTimeStyleName,
   kIntlMethods,
   kIntlServices,
   kNormalizationForms,
@@ -28,8 +23,6 @@ import {
   kValueMethods,
 } from "./const/intl-rules.const.tz";
 import {
-  DateLocaleKind,
-  DateOption,
   IntlMethodRow,
   IntlOption,
   IntlOptionKind,
@@ -488,103 +481,6 @@ export class IntlRules {
     return { code: Code.IntlIncrementSame, loc, details: kNoDetails };
   }
 
-  public dateOption(name: string): DateOption | undefined {
-    return kDateOptions.find((one) => one.name == name);
-  }
-
-  public isHour12(name: string): boolean {
-    return name == kHour12Name;
-  }
-
-  public isDigitsName(name: string): boolean {
-    return name == kDigitsName;
-  }
-
-  public isForeignStyle(name: string, kind: DateLocaleKind): boolean {
-    const isTime = kind == DateLocaleKind.Date && name == kTimeStyleName;
-    const isDate = kind == DateLocaleKind.Time && name == kDateStyleName;
-
-    return isTime || isDate;
-  }
-
-  public dateObjectError(loc: int, what: string, found: Type): SourceError {
-    const first = this.text.of(found);
-
-    return {
-      code: Code.DateOptionsNotObject,
-      loc,
-      details: { word: what, first },
-    };
-  }
-
-  public dateUnknownError(loc: int, name: string, what: string): SourceError {
-    return {
-      code: Code.DateOptionUnknown,
-      loc,
-      details: { word: name, first: what },
-    };
-  }
-
-  public dateKindError(
-    loc: int,
-    name: string,
-    wanted: string,
-    found: Type,
-  ): SourceError {
-    const second = this.text.of(found);
-    const details: Details = { word: name, first: wanted, second };
-
-    return { code: Code.IntlOptionKindWrong, loc, details };
-  }
-
-  public styleOnlyError(loc: int, name: string, what: string): SourceError {
-    return {
-      code: Code.DateStyleOnly,
-      loc,
-      details: { word: name, first: what },
-    };
-  }
-
-  public stylePartsError(loc: int): SourceError {
-    return { code: Code.DateStyleParts, loc, details: kNoDetails };
-  }
-
-  public digitsOpenError(loc: int): SourceError {
-    return { code: Code.DateDigitsOpen, loc, details: kNoDetails };
-  }
-
-  public dateValueOpenError(
-    loc: int,
-    option: DateOption,
-    written: string,
-  ): SourceError {
-    const first = option.values[0] ?? "";
-    const second = option.values[1] ?? "";
-    const details: Details = {
-      word: option.name,
-      first,
-      second,
-      other: written,
-    };
-
-    return { code: Code.DateOptionUnknownValue, loc, details };
-  }
-
-  public dateValueError(
-    loc: int,
-    option: DateOption,
-    text: string,
-  ): SourceError {
-    const other = this.valuesText(option.values);
-    const details: Details = { word: option.name, first: text, other };
-
-    return { code: Code.IntlOptionValue, loc, details };
-  }
-
-  public dateRangeError(loc: int, name: string): SourceError {
-    return { code: Code.DateFormatRange, loc, details: { word: name } };
-  }
-
   public numberLiterals(type: Type): decimal[] | undefined {
     const base = this.types.definedType(type);
     const parts = this.partsOf(base);
@@ -717,7 +613,7 @@ export class IntlRules {
     }
   }
 
-  private valuesText(values: string[]): string {
+  public valuesText(values: string[]): string {
     const parts: string[] = [];
 
     for (let index = 0; index < values.length; index++) {

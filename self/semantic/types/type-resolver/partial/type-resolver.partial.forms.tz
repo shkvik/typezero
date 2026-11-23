@@ -36,6 +36,7 @@ partial class TypeResolver {
       if (!element.spread) {
         const item = this.value(element.type, context);
 
+        this.typeListCheck(item, element.type.loc, context);
         items.push(item);
 
         continue;
@@ -67,6 +68,19 @@ partial class TypeResolver {
       required: items.length,
       rest: spreads[spreads.length - 1] ?? -1,
     });
+  }
+
+  private typeListCheck(item: Type, loc: int, context: TypeContext): void {
+    if (item.kind != TypeKind.TypeParameter) {
+      return;
+    }
+
+    const constraint = this.store.constraintOf(item);
+    const isList =
+      constraint?.kind == TypeKind.Array || constraint?.kind == TypeKind.Tuple;
+    if (isList) {
+      this.report(context.module, loc, Code.TupleTypeList, { word: item.name });
+    }
   }
 
   private spreadProblem(

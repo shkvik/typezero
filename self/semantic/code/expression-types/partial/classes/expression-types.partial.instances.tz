@@ -9,6 +9,7 @@ import {
   FieldPresence,
 } from "../../../../../program/ast/types/ast.types.classes.tz";
 import {
+  ExprKind,
   MemberExpr,
   NewExpr,
   NewKind,
@@ -179,9 +180,29 @@ partial class ExpressionTypes {
     return this.classMember(parent, name);
   }
 
+  private arrowFieldType(entry: ClassMemberEntry, field: ClassField): Type {
+    const init = field.init;
+    const owner = entry.owner;
+    if (init == undefined || init.kind != ExprKind.Function) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (owner.typeParams.length > 0) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.methodFunction(owner, init.fn, entry.instance.module);
+  }
+
   private fieldTypeOf(entry: ClassMemberEntry, field: ClassField): Type {
     const written = field.type;
-    if (written == undefined || field.form == FieldKind.ArrowMethod) {
+    const isArrow = this.classes.isArrowField(field);
+    if (
+      field.form == FieldKind.ArrowMethod ||
+      (isArrow && written == undefined)
+    ) {
+      return this.arrowFieldType(entry, field);
+    }
+    if (written == undefined) {
       return this.store.plain(TypeKind.Error);
     }
 
@@ -325,8 +346,31 @@ partial class ExpressionTypes {
     if (decl == undefined) {
       return this.store.plain(TypeKind.Error);
     }
+
+    const isEarly =
+      this.openFunctions.length == 0 &&
+      target.module == module &&
+      !this.walkedClasses.has(decl);
+    if (isEarly) {
+      this.report(module, expr.loc, Code.ClassUsedEarly, {
+        word: decl.name ?? form.name,
+      });
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
     if (decl.typeParams.length > 0 && expr.typeArgs.length == 0) {
-      return this.genericNew(expr, decl, target.module, wanted, module);
+      const inferred = this.genericNew(
+        expr,
+        decl,
+        target.module,
+        wanted,
+        module,
+      );
+
+      this.copyVariantsCheck(expr, inferred, decl, module);
+
+      return inferred;
     }
 
     const written = this.newArguments(expr, decl, module);
@@ -346,7 +390,11 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    return this.constructed(expr, instance, decl, module);
+    const made = this.constructed(expr, instance, decl, module);
+
+    this.copyVariantsCheck(expr, made, decl, module);
+
+    return made;
   }
 
   private newArguments(

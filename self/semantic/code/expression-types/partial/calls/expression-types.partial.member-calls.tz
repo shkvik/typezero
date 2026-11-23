@@ -11,7 +11,10 @@ import {
   TypeKind,
   UnionType,
 } from "../../../../../program/type/types/type.types.tz";
-import { kTakenMethods } from "../../const/expression-types.const.tz";
+import {
+  kJoinName,
+  kTakenMethods,
+} from "../../const/expression-types.const.tz";
 import { CallKind } from "../../types/expression-types.types.tz";
 import { kTakingMethods } from "../../../statement-rules/const/statement-rules.const.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
@@ -38,6 +41,11 @@ partial class ExpressionTypes {
     const recorded = this.reflectStringRead(expr, member, module);
     if (recorded != undefined) {
       return recorded;
+    }
+
+    const record = this.reflectRecordRead(expr, member, wanted, module);
+    if (record != undefined) {
+      return record;
     }
 
     const intlCall = this.intlNamespaceCall(expr, member, module);
@@ -70,6 +78,11 @@ partial class ExpressionTypes {
     }
     if (this.jsonStaticCheck(expr, member, module)) {
       return this.store.plain(TypeKind.Error);
+    }
+
+    const stringified = this.stringifiedType(expr, member, module);
+    if (stringified != undefined) {
+      return stringified;
     }
 
     if (this.staticSourceCheck(expr, member, module)) {
@@ -198,6 +211,16 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
+    const isList = this.parts.isListParameter(object);
+    if (isList && member.name != kJoinName) {
+      this.report(module, member.loc, Code.ListParamMethod, {
+        word: member.name,
+      });
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
     const constraint = this.store.constraintOf(object);
     if (constraint != undefined) {
       return this.receiverCall(expr, member, constraint, wanted, module);

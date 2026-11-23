@@ -107,6 +107,9 @@ partial class ExpressionTypes {
           kNoDetails,
         );
       }
+      if (key != undefined) {
+        this.metadataWriteCheck(key, value, given, module);
+      }
     }
 
     const target = expr.args[this.metadataTargetAt(isDefine)]?.expr;
@@ -121,6 +124,121 @@ partial class ExpressionTypes {
         word: this.text.of(targetType),
       });
     }
+  }
+
+  private metadataIdentity(key: Expr, module: int): string | undefined {
+    if (key.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const target = this.targetOfUse(key.loc, key.name, module);
+    const isNamed =
+      target?.kind == SymbolKind.Function || target?.kind == SymbolKind.Class;
+    if (target == undefined || !isNamed) {
+      return undefined;
+    }
+
+    return `${target.module} ${target.loc}`;
+  }
+
+  private metadataWriteCheck(
+    key: Expr,
+    value: Expr,
+    given: Type,
+    module: int,
+  ): void {
+    const identity = this.metadataIdentity(key, module);
+    if (identity == undefined || key.kind != ExprKind.Name) {
+      return;
+    }
+
+    const word = key.name;
+    const known = this.metadataRecords.get(identity);
+    if (known != undefined) {
+      const fits =
+        this.relation.extends(given, known) ||
+        this.relation.converts(given, known);
+      if (!fits && given.kind != TypeKind.Error) {
+        this.report(module, value.loc, Code.MetadataRecordType, {
+          word,
+          first: this.text.of(given),
+          second: this.text.of(known),
+        });
+      }
+
+      return;
+    }
+    if (given.kind == TypeKind.Undefined) {
+      return this.report(module, value.loc, Code.MetadataUndefinedRecord, {
+        word,
+      });
+    }
+
+    const record = this.types.apparent(given);
+    if (record.kind == TypeKind.Error || this.parts.mentionsParameter(record)) {
+      return;
+    }
+
+    this.metadataRecords.set(identity, record);
+  }
+
+  private reflectRecordRead(
+    expr: CallExpr,
+    member: MemberExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type | undefined {
+    const owner = member.object;
+    const isReflect =
+      owner.kind == ExprKind.Name &&
+      owner.name == kReflectName &&
+      this.isGlobalUse(owner, module);
+    const key = expr.args[0]?.expr;
+    const isRead = kMetadataReads.includes(member.name);
+    if (!isReflect || !isRead || key == undefined) {
+      return undefined;
+    }
+
+    const identity = this.metadataIdentity(key, module);
+    if (identity == undefined || key.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    this.reflectCallCheck(expr, module);
+    this.looseArguments(expr.args, module);
+
+    const known = this.metadataRecords.get(identity);
+    if (known != undefined) {
+      return this.types.optional(known);
+    }
+
+    const written = this.writtenRecord(wanted);
+    if (written == undefined) {
+      this.report(module, key.loc, Code.MetadataNoRecord, { word: key.name });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.metadataRecords.set(identity, written);
+
+    return this.types.optional(written);
+  }
+
+  private writtenRecord(wanted: Type | undefined): Type | undefined {
+    if (wanted == undefined) {
+      return undefined;
+    }
+
+    const plain = this.types.definedType(wanted);
+    const isOpen =
+      plain.kind == TypeKind.Unknown ||
+      plain.kind == TypeKind.Error ||
+      this.parts.mentionsParameter(plain);
+    if (isOpen) {
+      return undefined;
+    }
+
+    return plain;
   }
 
   private metadataTargetAt(isDefine: boolean): int {

@@ -22,7 +22,7 @@ partial class TypeResolver {
 
     this.errors.beginTrial();
 
-    const shape = this.alias(module, found, args);
+    const shape = this.alias(module, found, args, false);
 
     this.errors.endTrial();
 

@@ -21,6 +21,8 @@ import "./partial/statements/expression-types.partial.variables.tz";
 import "../../types/expression-types/partial/expression-types.partial.mismatch.tz";
 import "./partial/indexing/expression-types.partial.arrays.tz";
 import "./partial/objects/expression-types.partial.objects.tz";
+import "./partial/objects/expression-types.partial.keyed-objects.tz";
+import "./partial/classes/expression-types.partial.disposal.tz";
 import "./partial/dictionaries/expression-types.partial.dictionaries.tz";
 import "./partial/operators/expression-types.partial.arithmetic.tz";
 import "./partial/operators/expression-types.partial.operands.tz";
@@ -65,6 +67,8 @@ import "../../library/expression-types/partial/bytes/expression-types.partial.by
 import "../../library/expression-types/partial/bytes/expression-types.partial.byte-members.tz";
 import "../../library/expression-types/partial/bytes/expression-types.partial.text-coders.tz";
 import "../../library/expression-types/partial/intl/expression-types.partial.intl.tz";
+import "../../library/expression-types/partial/intl/expression-types.partial.intl-calls.tz";
+import "../../library/expression-types/partial/intl/expression-types.partial.intl-options.tz";
 import "../../library/expression-types/partial/intl/expression-types.partial.date-options.tz";
 import "../../library/expression-types/partial/fs/expression-types.partial.fs-calls.tz";
 import "../../library/expression-types/partial/process/expression-types.partial.process.tz";
@@ -80,6 +84,8 @@ import "../../library/expression-types/partial/crypto/expression-types.partial.c
 import "../../library/expression-types/partial/timers/expression-types.partial.timer-promises.tz";
 import "../../library/expression-types/partial/fs/expression-types.partial.readline.tz";
 import "../../library/expression-types/partial/ffi/expression-types.partial.foreign.tz";
+import "../../library/expression-types/partial/expression-types.partial.json-stringify.tz";
+import "../../library/expression-types/partial/expression-types.partial.json-tests.tz";
 import "../../library/expression-types/partial/crypto/expression-types.partial.crypto-signs.tz";
 import "../../library/expression-types/partial/dispatch/expression-types.partial.node-values.tz";
 import "../../library/expression-types/partial/expression-types.partial.promise-lists.tz";
@@ -216,6 +222,13 @@ import { CryptoRules } from "../../library/crypto-rules/crypto-rules.tz";
 import { SubtleRules } from "../../library/subtle-rules/subtle-rules.tz";
 import { ForeignRules } from "../../library/foreign-rules/foreign-rules.tz";
 import { NodeValueRules } from "../../library/node-value-rules/node-value-rules.tz";
+import { JsonText } from "../../library/json-text/json-text.tz";
+import { DisposeRules } from "../dispose-rules/dispose-rules.tz";
+import {
+  ClassDecl,
+  ClassField,
+} from "../../../program/ast/types/ast.types.classes.tz";
+import { IntlDateRules } from "../../library/intl-date-rules/intl-date-rules.tz";
 
 export class ExpressionTypes {
   private readonly store: TypeStore;
@@ -279,9 +292,14 @@ export class ExpressionTypes {
   private readonly subtle: SubtleRules;
   private readonly foreign: ForeignRules;
   private readonly nodeValues: NodeValueRules;
+  private readonly jsonTexts: JsonText;
+  private readonly disposes: DisposeRules;
+  private readonly intlDates: IntlDateRules;
   private readonly resolver: TypeResolver;
   private readonly errors: ErrorLog;
   private readonly memberObjects: Set<Expr>;
+  private readonly walkedClasses: Set<ClassDecl>;
+  private readonly staticFields: ClassField[];
   private readonly program: Program;
   private readonly scopes: Map<int, ModuleScopes>;
   private readonly records: Map<int, ValueRecord>;
@@ -332,6 +350,8 @@ export class ExpressionTypes {
   private readonly fixedCounts: Map<string, decimal>;
   private readonly requirements: Map<int, Requirement[]>;
   private readonly pendingCalls: PendingCall[];
+  private readonly metadataRecords: Map<string, Type>;
+  private readonly ownedCalls: Map<string, PendingCall[]>;
   private writtenFields?: Set<string>;
 
   public constructor(
@@ -512,6 +532,9 @@ export class ExpressionTypes {
       byteSources,
     );
     const nodeValues = new NodeValueRules();
+    const jsonTexts = new JsonText();
+    const disposes = new DisposeRules();
+    const intlDates = new IntlDateRules(text, intl);
 
     this.store = store;
     this.text = text;
@@ -574,9 +597,14 @@ export class ExpressionTypes {
     this.subtle = subtle;
     this.foreign = foreign;
     this.nodeValues = nodeValues;
+    this.jsonTexts = jsonTexts;
+    this.disposes = disposes;
+    this.intlDates = intlDates;
     this.resolver = resolver;
     this.errors = new ErrorLog();
     this.memberObjects = new Set<Expr>();
+    this.walkedClasses = new Set<ClassDecl>();
+    this.staticFields = [];
     this.program = program;
     this.scopes = new Map<int, ModuleScopes>();
     this.records = new Map<int, ValueRecord>();
@@ -627,6 +655,8 @@ export class ExpressionTypes {
     this.fixedCounts = new Map<string, decimal>();
     this.requirements = new Map<int, Requirement[]>();
     this.pendingCalls = [];
+    this.metadataRecords = new Map<string, Type>();
+    this.ownedCalls = new Map<string, PendingCall[]>();
 
     for (const scopes of resolved) {
       this.scopes.set(scopes.module.id, scopes);

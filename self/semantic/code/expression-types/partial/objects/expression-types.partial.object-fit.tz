@@ -9,7 +9,11 @@ import {
   NameExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
-import { kStringClass } from "../../const/expression-types.const.tz";
+import {
+  kBothEnd,
+  kBothStart,
+  kStringClass,
+} from "../../const/expression-types.const.tz";
 import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
 import {
   Type,
@@ -39,8 +43,41 @@ partial class ExpressionTypes {
 
     const isLiteral =
       init.kind == ExprKind.ObjectLit || init.kind == ExprKind.ArrayLit;
+    const places = this.conflictPlaces(variable, init, target.module);
 
-    return isLiteral && this.isFitting(init, wanted, target.module);
+    return (
+      isLiteral &&
+      places.length == 0 &&
+      this.isFitting(init, wanted, target.module)
+    );
+  }
+
+  private bothText(expr: Expr, wanted: Type, module: int): string {
+    if (expr.kind != ExprKind.Name) {
+      return "";
+    }
+
+    const target = this.targetOfName(expr, module);
+    if (target == undefined || target.kind != SymbolKind.Variable) {
+      return "";
+    }
+
+    const variable = this.record(target.module)?.variables.get(target.loc);
+    const init = variable?.decl.init;
+    if (variable == undefined || init == undefined) {
+      return "";
+    }
+
+    const places = this.conflictPlaces(variable, init, target.module);
+    const goal = this.types.definedType(wanted);
+    const other = places.find((one) => this.types.definedType(one) != goal);
+    if (other == undefined) {
+      return "";
+    }
+
+    const word = this.text.of(this.types.definedType(other));
+
+    return `${kBothStart}${word}${kBothEnd}`;
   }
 
   private objectTargetCheck(

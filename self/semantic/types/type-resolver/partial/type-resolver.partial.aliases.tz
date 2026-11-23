@@ -12,7 +12,10 @@ import {
   TypeKind,
   UnionType,
 } from "../../../../program/type/types/type.types.tz";
-import { kAliasDepthLimit } from "../const/type-resolver.const.tables.tz";
+import {
+  kAliasDepthLimit,
+  kAliasNestLimit,
+} from "../const/type-resolver.const.tables.tz";
 import {
   AliasDoor,
   DoorState,
@@ -21,7 +24,12 @@ import {
 } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  private alias(module: int, decl: TypeAliasDecl, written: Type[]): Type {
+  private alias(
+    module: int,
+    decl: TypeAliasDecl,
+    written: Type[],
+    isTail: boolean,
+  ): Type {
     const bindings = this.bind(module, decl.typeParams, written);
     const args = Array.from(bindings.values());
     const ids = args.map((arg) => `${arg.id}`);
@@ -34,6 +42,7 @@ partial class TypeResolver {
     }
 
     const depth = this.working.get(home) ?? 0;
+    const nested = this.nesting.get(home) ?? 0;
     const seen = new Set<int>();
     if (depth > 0 && this.anyDepends(args, seen)) {
       return this.operation(OperationKind.Alias, args, label);
@@ -42,10 +51,17 @@ partial class TypeResolver {
     const error = this.store.plain(TypeKind.Error);
 
     if (depth >= kAliasDepthLimit) {
-      this.reportDepth(module, decl, home);
+      this.reportDepth(module, decl, home, false);
 
       return error;
     }
+    if (nested >= kAliasNestLimit) {
+      this.reportDepth(module, decl, home, true);
+
+      return error;
+    }
+
+    this.markTailUses(decl.type);
 
     const reserved = this.reserve(decl.type, label);
     const door: AliasDoor = {
@@ -57,15 +73,18 @@ partial class TypeResolver {
 
     this.doors.set(key, door);
     this.working.set(home, depth + 1);
+    this.nesting.set(home, nested + this.nestingStep(isTail));
 
     const body = this.aliasBody(decl, {
       module,
       bindings,
       place: TypePlace.Plain,
     });
-    const result = this.settle(module, decl, door, body);
+    const settled = this.settle(module, decl, door, body);
+    const result = this.endedOr(home, settled);
 
     this.working.set(home, depth);
+    this.nesting.set(home, nested);
     door.result = result;
     door.state = DoorState.Done;
     this.labelAlias(decl, result, label);
@@ -92,7 +111,44 @@ partial class TypeResolver {
     this.aliasOrigins.set(result.id, { module, decl, args });
   }
 
-  private reportDepth(module: int, decl: TypeAliasDecl, home: string): void {
+  private endedOr(home: string, settled: Type): Type {
+    if (this.endless.has(home)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return settled;
+  }
+
+  private nestingStep(isTail: boolean): int {
+    if (isTail) {
+      return 0;
+    }
+
+    return 1;
+  }
+
+  private markTailUses(root: TypeRef): void {
+    const waiting: TypeRef[] = [root];
+
+    while (waiting.length > 0) {
+      const ref = waiting.pop();
+      if (ref == undefined || ref.form.kind != TypeRefKind.Conditional) {
+        continue;
+      }
+
+      for (const branch of ref.args.slice(2)) {
+        this.tailUses.add(branch);
+        waiting.push(branch);
+      }
+    }
+  }
+
+  private reportDepth(
+    module: int,
+    decl: TypeAliasDecl,
+    home: string,
+    isNested: boolean,
+  ): void {
     if (this.endless.has(home)) {
       return;
     }
@@ -109,7 +165,17 @@ partial class TypeResolver {
       return;
     }
 
-    this.report(module, decl.loc, Code.AliasTooDeep, { word: decl.name });
+    const code = this.deepCode(isNested);
+
+    this.report(module, decl.loc, code, { word: decl.name });
+  }
+
+  private deepCode(isNested: boolean): Code {
+    if (isNested) {
+      return Code.AliasNests;
+    }
+
+    return Code.AliasTooDeep;
   }
 
   private reenter(

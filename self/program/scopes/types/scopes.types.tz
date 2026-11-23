@@ -24,11 +24,18 @@ export type NameSymbol = {
   readonly constraint?: TypeRef;
 };
 
+export enum CapturePlace {
+  None,
+  StaticInit,
+  Later,
+}
+
 export type NameUse = {
   readonly loc: int;
   readonly name: string;
   readonly isType: boolean;
   readonly symbol?: NameSymbol;
+  readonly capture?: CapturePlace;
 };
 
 export type ModuleScopes = {

@@ -1,0 +1,415 @@
+import {
+  kAfterArray,
+  kAfterProperty,
+  kBackslash,
+  kBadEscapeEnd,
+  kBadEscapeStart,
+  kBadUnicode,
+  kCarriageReturn,
+  kClosingBrace,
+  kClosingBracket,
+  kColon,
+  kComma,
+  kControlCharacter,
+  kDigitsAfterMinus,
+  kDigitsAfterPoint,
+  kDigitsInExponent,
+  kDot,
+  kEscapes,
+  kExpectedColon,
+  kExpectedName,
+  kExpectedValue,
+  kFalseWord,
+  kFoundValue,
+  kFoundValueEnd,
+  kHexDigits,
+  kLeadingZero,
+  kLineFeed,
+  kMinus,
+  kNullWord,
+  kOpeningBrace,
+  kOpeningBracket,
+  kPlus,
+  kQuote,
+  kSmallE,
+  kSpace,
+  kStringOpen,
+  kTab,
+  kTextAfter,
+  kTextEnds,
+  kTrueWord,
+  kUnicodeEscape,
+  kUpperE,
+  kZero,
+} from "./const/json-text.const.tz";
+import { JsonCursor, JsonProblem } from "./types/json-text.types.tz";
+
+export class JsonText {
+  public problemOf(text: string): JsonProblem | undefined {
+    const cursor: JsonCursor = {
+      text,
+      at: 0,
+      open: [],
+      isOpened: false,
+      isDone: false,
+    };
+
+    while (true) {
+      this.skipSpace(cursor);
+
+      if (cursor.at >= text.length) {
+        return this.problem(cursor, kTextEnds);
+      }
+
+      cursor.isOpened = false;
+
+      const valueProblem = this.value(cursor);
+      if (valueProblem != undefined) {
+        return valueProblem;
+      }
+      if (cursor.isOpened) {
+        continue;
+      }
+
+      const afterProblem = this.afterValue(cursor);
+      if (afterProblem != undefined || cursor.isDone) {
+        return afterProblem;
+      }
+    }
+  }
+
+  public position(text: string, offset: int): int[] {
+    let line = 1;
+    let column = 1;
+
+    for (let index = 0; index < offset && index < text.length; index++) {
+      const code = text.charCodeAt(index) ?? 0;
+      const isLow = code >= 0xdc00 && code <= 0xdfff;
+
+      if (code == kLineFeed) {
+        line += 1;
+        column = 1;
+      } else if (!isLow) {
+        column += 1;
+      }
+    }
+
+    return [line, column];
+  }
+
+  private value(cursor: JsonCursor): JsonProblem | undefined {
+    const code = this.codeAt(cursor);
+
+    if (code == kQuote) {
+      return this.stringValue(cursor);
+    }
+    if (code == kMinus || this.isDigit(code)) {
+      return this.numberValue(cursor);
+    }
+    if (code == kOpeningBrace || code == kOpeningBracket) {
+      return this.container(cursor, code);
+    }
+
+    return this.wordValue(cursor, code);
+  }
+
+  private stringValue(cursor: JsonCursor): JsonProblem | undefined {
+    const start = cursor.at;
+    const message = this.stringBody(cursor);
+    if (message == undefined) {
+      return undefined;
+    }
+    if (message == kStringOpen) {
+      return { message, offset: start };
+    }
+
+    return this.problem(cursor, message);
+  }
+
+  private wordValue(cursor: JsonCursor, code: int): JsonProblem | undefined {
+    const rest = cursor.text.slice(cursor.at);
+    if (rest.startsWith(kTrueWord) || rest.startsWith(kNullWord)) {
+      cursor.at += 4;
+
+      return undefined;
+    }
+    if (rest.startsWith(kFalseWord)) {
+      cursor.at += 5;
+
+      return undefined;
+    }
+    if (code >= 0x21 && code < 0x7f) {
+      const shown = cursor.text.slice(cursor.at, cursor.at + 1);
+
+      return this.problem(cursor, `${kFoundValue}${shown}${kFoundValueEnd}`);
+    }
+
+    return this.problem(cursor, kExpectedValue);
+  }
+
+  private container(cursor: JsonCursor, code: int): JsonProblem | undefined {
+    cursor.at += 1;
+    this.skipSpace(cursor);
+
+    const isObject = code == kOpeningBrace;
+    if (this.codeAt(cursor) == this.closingOf(isObject)) {
+      cursor.at += 1;
+
+      return undefined;
+    }
+
+    cursor.open.push(code);
+    cursor.isOpened = true;
+
+    if (!isObject) {
+      return undefined;
+    }
+
+    return this.keyProblem(cursor);
+  }
+
+  private afterValue(cursor: JsonCursor): JsonProblem | undefined {
+    while (true) {
+      this.skipSpace(cursor);
+
+      const container = cursor.open[cursor.open.length - 1];
+      if (container == undefined) {
+        cursor.isDone = true;
+
+        return this.endProblem(cursor);
+      }
+
+      const isObject = container == kOpeningBrace;
+      const code = this.codeAt(cursor);
+      if (code == kComma) {
+        cursor.at += 1;
+
+        return this.commaProblem(cursor, isObject);
+      }
+      if (code == this.closingOf(isObject)) {
+        cursor.at += 1;
+        cursor.open.pop();
+        continue;
+      }
+      if (isObject) {
+        return this.problem(cursor, kAfterProperty);
+      }
+
+      return this.problem(cursor, kAfterArray);
+    }
+  }
+
+  private commaProblem(
+    cursor: JsonCursor,
+    isObject: boolean,
+  ): JsonProblem | undefined {
+    if (isObject) {
+      return this.keyProblem(cursor);
+    }
+
+    return undefined;
+  }
+
+  private endProblem(cursor: JsonCursor): JsonProblem | undefined {
+    if (cursor.at < cursor.text.length) {
+      return this.problem(cursor, kTextAfter);
+    }
+
+    return undefined;
+  }
+
+  private keyProblem(cursor: JsonCursor): JsonProblem | undefined {
+    const message = this.keyMessage(cursor);
+    if (message == undefined) {
+      return undefined;
+    }
+
+    return this.problem(cursor, message);
+  }
+
+  private keyMessage(cursor: JsonCursor): string | undefined {
+    this.skipSpace(cursor);
+
+    if (this.codeAt(cursor) != kQuote) {
+      return kExpectedName;
+    }
+
+    const stringMessage = this.stringBody(cursor);
+    if (stringMessage != undefined) {
+      return stringMessage;
+    }
+
+    this.skipSpace(cursor);
+
+    if (this.codeAt(cursor) != kColon) {
+      return kExpectedColon;
+    }
+
+    cursor.at += 1;
+
+    return undefined;
+  }
+
+  private stringBody(cursor: JsonCursor): string | undefined {
+    const text = cursor.text;
+
+    cursor.at += 1;
+
+    while (true) {
+      if (cursor.at >= text.length) {
+        return kStringOpen;
+      }
+
+      const code = this.codeAt(cursor);
+      if (code == kQuote) {
+        cursor.at += 1;
+
+        return undefined;
+      }
+      if (code < 0x20) {
+        return kControlCharacter;
+      }
+      if (code != kBackslash) {
+        cursor.at += 1;
+        continue;
+      }
+
+      const escapeMessage = this.escape(cursor);
+      if (escapeMessage != undefined) {
+        return escapeMessage;
+      }
+    }
+  }
+
+  private escape(cursor: JsonCursor): string | undefined {
+    const text = cursor.text;
+
+    cursor.at += 1;
+
+    if (cursor.at >= text.length) {
+      return kStringOpen;
+    }
+
+    const letter = text.slice(cursor.at, cursor.at + 1);
+    if (letter == kUnicodeEscape) {
+      return this.unicodeEscape(cursor);
+    }
+    if (!kEscapes.includes(letter)) {
+      return `${kBadEscapeStart}${letter}${kBadEscapeEnd}`;
+    }
+
+    cursor.at += 1;
+
+    return undefined;
+  }
+
+  private unicodeEscape(cursor: JsonCursor): string | undefined {
+    const text = cursor.text;
+
+    for (let count = 0; count < 4; count++) {
+      cursor.at += 1;
+
+      const digit = text.slice(cursor.at, cursor.at + 1);
+      if (cursor.at >= text.length || !kHexDigits.includes(digit)) {
+        return kBadUnicode;
+      }
+    }
+
+    cursor.at += 1;
+
+    return undefined;
+  }
+
+  private numberValue(cursor: JsonCursor): JsonProblem | undefined {
+    const text = cursor.text;
+
+    if (this.codeAt(cursor) == kMinus) {
+      cursor.at += 1;
+    }
+
+    if (this.codeAt(cursor) == kZero) {
+      cursor.at += 1;
+
+      if (this.isDigit(this.codeAt(cursor))) {
+        return this.problem(cursor, kLeadingZero);
+      }
+    } else if (!this.digits(cursor)) {
+      return this.problem(cursor, kDigitsAfterMinus);
+    }
+
+    if (this.codeAt(cursor) == kDot) {
+      cursor.at += 1;
+
+      if (!this.digits(cursor)) {
+        return this.problem(cursor, kDigitsAfterPoint);
+      }
+    }
+
+    return this.exponent(cursor);
+  }
+
+  private exponent(cursor: JsonCursor): JsonProblem | undefined {
+    const text = cursor.text;
+    const code = this.codeAt(cursor);
+    if (code != kSmallE && code != kUpperE) {
+      return undefined;
+    }
+
+    cursor.at += 1;
+
+    const sign = this.codeAt(cursor);
+    if (sign == kPlus || sign == kMinus) {
+      cursor.at += 1;
+    }
+    if (!this.digits(cursor)) {
+      return this.problem(cursor, kDigitsInExponent);
+    }
+
+    return undefined;
+  }
+
+  private digits(cursor: JsonCursor): boolean {
+    const start = cursor.at;
+
+    while (this.isDigit(this.codeAt(cursor))) {
+      cursor.at += 1;
+    }
+
+    return cursor.at > start;
+  }
+
+  private skipSpace(cursor: JsonCursor): void {
+    while (this.isSpace(this.codeAt(cursor))) {
+      cursor.at += 1;
+    }
+  }
+
+  private isSpace(code: int): boolean {
+    return (
+      code == kSpace ||
+      code == kTab ||
+      code == kLineFeed ||
+      code == kCarriageReturn
+    );
+  }
+
+  private isDigit(code: int): boolean {
+    return code >= 48 && code <= 57;
+  }
+
+  private closingOf(isObject: boolean): int {
+    if (isObject) {
+      return kClosingBrace;
+    }
+
+    return kClosingBracket;
+  }
+
+  private codeAt(cursor: JsonCursor): int {
+    return cursor.text.charCodeAt(cursor.at) ?? -1;
+  }
+
+  private problem(cursor: JsonCursor, message: string): JsonProblem {
+    return { message, offset: cursor.at };
+  }
+}

@@ -5,6 +5,7 @@ import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import {
   FunctionShape,
   InstanceType,
+  ParamWriter,
   LiteralKind,
   LiteralType,
   ObjectField,
@@ -25,6 +26,10 @@ export class TypeRelation {
     this.assumed = new Set<string>();
     this.holes = new Map<int, InferHole>();
     this.captured = new Map<int, Type>();
+  }
+
+  public writersOf(module: int, loc: int): ParamWriter[] | undefined {
+    return this.store.writersOf(module, loc);
   }
 
   public extends(source: Type, target: Type): boolean {
@@ -134,12 +139,38 @@ export class TypeRelation {
 
     const isSame = source.module == target.module && source.loc == target.loc;
     if (isSame) {
-      return this.allFit(source.args, target.args);
+      return this.argumentsFit(source, target);
     }
 
     const parents = this.store.parentsOf(source);
 
     return parents.some((parent) => this.instanceFits(parent, target));
+  }
+
+  private argumentsFit(source: InstanceType, target: InstanceType): boolean {
+    const writers = this.store.writersOf(target.module, target.loc) ?? [];
+
+    for (let index = 0; index < target.args.length; index++) {
+      const own = source.args[index];
+      const wide = target.args[index];
+      if (own == undefined || wide == undefined) {
+        return false;
+      }
+
+      const writer = writers[index]?.writer ?? "";
+      const isOpen =
+        this.holes.has(wide.id) ||
+        wide.kind == TypeKind.TypeParameter ||
+        own.kind == TypeKind.TypeParameter;
+      if (writer != "" && own != wide && !isOpen) {
+        return false;
+      }
+      if (!this.extends(own, wide)) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   private literalFits(source: LiteralType, target: Type): boolean {

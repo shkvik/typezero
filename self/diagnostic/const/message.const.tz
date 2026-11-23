@@ -776,7 +776,7 @@ export const kMessages: Record<Code, Message> = {
     text: "cannot find '{word}' to export: this file neither declares nor imports it",
   },
   [Code.DuplicateExport]: {
-    text: "duplicate export of '{word}': it is already exported at line {other}",
+    text: "duplicate export of '{word}'",
   },
   [Code.StarExportTwice]: {
     text: "'{word}' is exported both by '{path}' and by '{other}' through 'export *'; re-export the one you mean by name, e.g. 'export { {word} } from \"{path}\"'",
@@ -858,9 +858,6 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.TypeAsValue]: {
     text: "'{word}' is a type, not a value",
-  },
-  [Code.NoErrorClass]: {
-    text: "there is no '{word}' in tz: an error is a value; return one with 'err(...)', e.g. 'return err({ kind: \"NOT_FOUND\" })'",
   },
   [Code.NoCodeFromString]: {
     text: "'{word}' is not supported: a compiled program cannot run code from a string{other}",
@@ -3164,10 +3161,10 @@ export const kMessages: Record<Code, Message> = {
     text: "cannot infer a type from 'undefined'; write the type: 'let {word}: {first}'",
   },
   [Code.GenericCallRefused]: {
-    text: "cannot call '{word}' with {first} = {second}: {other}",
+    text: "cannot call '{word}' with {first}: {other}",
   },
   [Code.GenericClassRefused]: {
-    text: "cannot use '{word}' with {first} = {second}: {other}",
+    text: "cannot use '{word}' with {first}: {other}",
   },
   [Code.BytesLengthFraction]: {
     text: "the length of a typed array must be an integer, found 'double'; round it with Math.floor(x) or drop the fraction with 'x | 0'",
@@ -4080,5 +4077,107 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.ParamFieldNeedsType]: {
     text: "parameter '{word}' declares a field and needs a type, e.g. 'public {word}: int'",
+  },
+  [Code.JsonTextInvalid]: {
+    text: "this text is not JSON, so JSON.parse would always fail: {word} (line {first}, column {other})",
+  },
+  [Code.JsonTextBom]: {
+    text: "this text is not JSON, so JSON.parse would always fail: it starts with a byte order mark (BOM)",
+  },
+  [Code.JsonNeverNull]: {
+    text: "after 'typeof {word} {first} \"{other}\"' {word} is never null here: the typeof of null is \"null\"; drop this check",
+  },
+  [Code.JsonNeverArray]: {
+    text: "after 'typeof {word} {first} \"{other}\"' {word} is never an array here: the typeof of an array is \"array\"; drop this check",
+  },
+  [Code.KeyedFieldsDiffer]: {
+    text: "the fields that '{word}' names must all be in '{other}' and have one type",
+  },
+  [Code.KeyedNotOptional]: {
+    text: "the fields that '{word}' names are of type '{other}', not optional; the object gets only one of them, so the others would be missing",
+  },
+  [Code.KeyedValuesDiffer]: {
+    text: "field '{word}' gets values of different types; declare the type of the object",
+  },
+  [Code.CStringNul]: {
+    text: "type '{first}' is not assignable to type '{second}'; a 'cstring' holds no '\\0' inside: C would see only the text before it",
+  },
+  [Code.CStringText]: {
+    text: "type '{first}' is not assignable to type '{second}'; make one with 'text.toCString()', which gives undefined when the text holds '\\0'",
+  },
+  [Code.DisposeShape]: {
+    text: "'[Symbol.dispose]' is an instance method with no parameters that gives nothing: tz calls it when the last reference to the object is gone",
+  },
+  [Code.DisposeNoSuper]: {
+    text: "this '[Symbol.dispose]' replaces the one of '{word}': call 'super[Symbol.dispose]()' in it, or what '{word}' holds leaks",
+  },
+  [Code.DisposeThisLeaves]: {
+    text: "'this' cannot leave '[Symbol.dispose]': the object is dying; use its fields",
+  },
+  [Code.DisposeManual]: {
+    text: "tz calls '[Symbol.dispose]' itself when the last reference to the object is gone; a second call would free what it holds twice; give the class a method of its own to close it early",
+  },
+  [Code.UsingNotDisposable]: {
+    text: "'using' takes an object whose class has '[Symbol.dispose]'; '{word}' has none",
+  },
+  [Code.UsingOutlives]: {
+    text: "'{word}' of 'using' cannot outlive its block: '[Symbol.dispose]' runs when the block ends",
+  },
+  [Code.StaticUsedEarly]: {
+    text: "'{word}' is used before class '{other}' is declared, which sets it",
+  },
+  [Code.StaticReadBeforeSet]: {
+    text: "'{word}' is read before it is set: the static fields are set in the order they are declared",
+  },
+  [Code.ClassUsedEarly]: {
+    text: "class '{word}' is used before its declaration, which JavaScript has not run yet here (a ReferenceError); move the class up",
+  },
+  [Code.GenericLiteralClass]: {
+    text: "generic function '{word}' cannot return an object literal with methods yet: each copy of it makes a class of its own; declare a class, or give the object function fields, 'f: () => ...'",
+  },
+  [Code.PrintSpread]: {
+    text: "only an array can be spread into console.log, found '{word}'",
+  },
+  [Code.GenericIndexKey]: {
+    text: "'{word}' is indexed by its keys, such as 'k: K' with 'K extends keyof {word}', not by '{other}'",
+  },
+  [Code.UtilityNotFunction]: {
+    text: "'{word}' takes a function type, not '{other}'",
+  },
+  [Code.ReturnsCycleDiffer]: {
+    text: "{word} returns values of different types; a function returns values of one type",
+  },
+  [Code.ListParamMethod]: {
+    text: "a list of parameters has no method '{word}' here; it has 'length' and 'join', and goes on with '...args'",
+  },
+  [Code.AliasNests]: {
+    text: "type alias '{word}' nests more than 50 instances of itself, so it may never end; TypeScript stops there too, and a branch that is the alias itself, '... ? {word}<...> : ...', may go 1000 deep",
+  },
+  [Code.GenericChainEndless]: {
+    text: "calling '{word}' here needs another copy of it for each copy of the functions that lead here, without end: its type arguments keep growing ('{first}' by now); generic functions that call each other must pass their type parameters on unchanged",
+  },
+  [Code.TupleTypeList]: {
+    text: "'{word}' is a list of types; spread it into the tuple, '...{word}'",
+  },
+  [Code.ListArgumentsMany]: {
+    text: "too many arguments for the parameters '{word}'",
+  },
+  [Code.ListSpreadWrong]: {
+    text: "'...{word}' is spread where the parameters '{first}' take {other}",
+  },
+  [Code.ListNotSpread]: {
+    text: "the arguments for the parameters '{word}' of some function are spread from a list of them, e.g. '...args'",
+  },
+  [Code.ListMissing]: {
+    text: "the parameters '{word}' take {other} too, after these arguments",
+  },
+  [Code.MetadataRecordType]: {
+    text: "type '{first}' is not assignable to type '{second}' of the records of '{word}'",
+  },
+  [Code.MetadataUndefinedRecord]: {
+    text: "cannot tell the type of the records of '{word}' from 'undefined'; write a value of the type first",
+  },
+  [Code.MetadataNoRecord]: {
+    text: "the records of '{word}' have the type of the first one written, 'Reflect.defineMetadata({word}, value, target)', and none is written before this; write one first, give the type where this one goes (e.g. 'const x: string[] = ...'), or use a string key, whose records are 'unknown'",
   },
 };

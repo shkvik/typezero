@@ -70,6 +70,9 @@ partial class ExpressionTypes {
     if (this.byteIndexCheck(expr, object, module)) {
       return this.store.plain(TypeKind.Error);
     }
+    if (this.genericIndexCheck(expr, object, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
 
     this.walkedPart(expr.index, module);
 
@@ -93,6 +96,31 @@ partial class ExpressionTypes {
     }
 
     return this.store.plain(TypeKind.Error);
+  }
+
+  private genericIndexCheck(
+    expr: IndexExpr,
+    object: Type,
+    module: int,
+  ): boolean {
+    if (object.kind != TypeKind.TypeParameter) {
+      return false;
+    }
+
+    const key = this.peekType(expr.index, module);
+    const base = this.types.definedType(key);
+    const isText =
+      base.kind == TypeKind.String || base.kind == TypeKind.Template;
+    if (!isText) {
+      return false;
+    }
+
+    this.report(module, expr.index.loc, Code.GenericIndexKey, {
+      word: this.text.of(object),
+      other: this.text.of(key),
+    });
+
+    return true;
   }
 
   private listIndexed(expr: IndexExpr, list: Type, module: int): Type {

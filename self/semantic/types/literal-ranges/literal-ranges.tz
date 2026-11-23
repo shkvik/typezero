@@ -4,8 +4,10 @@ import {
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
 import {
+  kHttpStatusName,
   kIntervalSeparator,
   kManyLiterals,
+  kStatusGuard,
 } from "./const/literal-ranges.const.tz";
 import { Bound, Interval } from "./types/literal-ranges.types.tz";
 
@@ -58,7 +60,15 @@ export class LiteralRanges {
     return texts.join(kIntervalSeparator);
   }
 
-  public rangeCheck(name: string, intervals: Interval[]): string {
+  public rangeCheck(
+    name: string,
+    intervals: Interval[],
+    target: string,
+  ): string {
+    if (target == kHttpStatusName) {
+      return `${kStatusGuard}(${name})`;
+    }
+
     const widest = this.widestInterval(intervals);
     if (widest == undefined) {
       return name;

@@ -63,6 +63,43 @@ partial class ExpressionTypes {
     return chosen;
   }
 
+  private conflictPlaces(
+    variable: DeclaredVariable,
+    init: Expr,
+    module: int,
+  ): Type[] {
+    const isLiteral =
+      init.kind == ExprKind.ObjectLit || init.kind == ExprKind.ArrayLit;
+    if (!isLiteral || variable.decl.typeAnn != undefined) {
+      return [];
+    }
+
+    const list = this.record(module)?.destinations.get(variable.decl.loc);
+    const places: Type[] = [];
+
+    for (const one of list ?? []) {
+      const type = this.destinationType(one, module);
+      if (type == undefined || !this.isLiteralPlace(init, type, module)) {
+        continue;
+      }
+      if (this.parts.mentionsParameter(type)) {
+        return [];
+      }
+      if (!places.includes(type)) {
+        places.push(type);
+      }
+    }
+
+    const common = places.find((candidate) =>
+      places.every((other) => this.relation.converts(candidate, other)),
+    );
+    if (places.length < 2 || common != undefined) {
+      return [];
+    }
+
+    return places;
+  }
+
   private chosenPlace(chosen: Type | undefined, type: Type): Type | undefined {
     if (chosen == undefined || chosen == type) {
       return type;

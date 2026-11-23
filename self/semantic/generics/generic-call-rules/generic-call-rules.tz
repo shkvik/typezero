@@ -3,13 +3,18 @@ import {
   kNewPrefix,
   kOneTypeArgument,
   kSampleArgument,
+  kSampleList,
 } from "../generic-rules/const/generic-rules.const.tz";
 import {
   Checked,
   SourceError,
 } from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
-import { Type } from "../../../program/type/types/type.types.tz";
+import {
+  FunctionShape,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
 import {
   FunctionFrame,
   GenericDraft,
@@ -210,7 +215,7 @@ export class GenericCallRules {
 
     const word = this.text.of(param);
     const first = target.name;
-    const samples = target.params.map(() => kSampleArgument);
+    const samples = target.params.map((one) => this.sampleOf(one));
     const other = samples.join(kTypeSeparator);
 
     return {
@@ -222,6 +227,53 @@ export class GenericCallRules {
         other,
       },
     };
+  }
+
+  public sampleOf(param: Type): string {
+    if (this.parts.isListParameter(param)) {
+      return kSampleList;
+    }
+
+    return kSampleArgument;
+  }
+
+  public splitLists(shape: FunctionShape): Type[] {
+    const found: Type[] = [];
+
+    for (const param of shape.params) {
+      const type = param.type;
+      if (type.kind != TypeKind.Function || !type.shape.rest) {
+        continue;
+      }
+
+      const last = type.shape.params[type.shape.params.length - 1]?.type;
+      if (last == undefined || last.kind != TypeKind.Tuple) {
+        continue;
+      }
+
+      const lists = last.items.filter(
+        (item) =>
+          this.parts.isListParameter(item) && !this.isGivenList(shape, item),
+      );
+      if (lists.length > 1) {
+        for (const list of lists) {
+          found.push(list);
+        }
+      }
+    }
+
+    return found;
+  }
+
+  private isGivenList(shape: FunctionShape, list: Type): boolean {
+    return shape.params.some((param) => {
+      const type = param.type;
+
+      return (
+        type == list ||
+        (type.kind == TypeKind.Tuple && type.items.includes(list))
+      );
+    });
   }
 
   public clash(

@@ -181,8 +181,52 @@ partial class ExpressionTypes {
     if (found.kind == TypeKind.Function) {
       return this.store.plain(TypeKind.Error);
     }
+    if (this.staticOrderCheck(expr, owner, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
 
     return found;
+  }
+
+  private staticOrderCheck(
+    expr: MemberExpr,
+    owner: StaticOwner,
+    module: int,
+  ): boolean {
+    const decl = owner.decl;
+    const index = decl.fields.findIndex(
+      (field) => field.form == FieldKind.Static && field.name == expr.name,
+    );
+    if (index < 0) {
+      return false;
+    }
+
+    const className = decl.name ?? "";
+    const word = `${className}.${expr.name}`;
+    const isTopLevel = this.openFunctions.length == 0;
+    const isEarly =
+      isTopLevel &&
+      !decl.expression &&
+      owner.module == module &&
+      !this.walkedClasses.has(decl);
+    if (isEarly) {
+      this.report(module, expr.loc, Code.StaticUsedEarly, {
+        word,
+        other: className,
+      });
+
+      return true;
+    }
+
+    const current = this.staticFields[this.staticFields.length - 1];
+    const position = decl.fields.findIndex((field) => field == current);
+    if (current == undefined || position < 0 || index < position) {
+      return false;
+    }
+
+    this.report(module, expr.loc, Code.StaticReadBeforeSet, { word });
+
+    return true;
   }
 
   private staticCall(

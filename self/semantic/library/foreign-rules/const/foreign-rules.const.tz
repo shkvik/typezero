@@ -1,3 +1,4 @@
 export const kCStringName = "cstring";
 export const kOutName = "Out";
 export const kDataViewName = "DataView";
+export const kNulText = "\u0000";

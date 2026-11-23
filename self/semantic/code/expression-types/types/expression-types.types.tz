@@ -510,6 +510,9 @@ export enum RequirementKind {
   Sort,
   Unused,
   Follows,
+  Construct,
+  LaterCapture,
+  StaticCapture,
 }
 
 export type Requirement = {
@@ -524,6 +527,7 @@ export type PendingCall = {
   readonly bound: Map<int, Type>;
   readonly loc: int;
   readonly module: int;
+  readonly owner: string;
 };
 
 export type OpenVariant = {
@@ -534,4 +538,12 @@ export type OpenVariant = {
 export type LibraryVariants = {
   readonly types: FunctionType[];
   readonly open: OpenVariant[];
+};
+export type HeldStep = {
+  readonly type: Type;
+  readonly isLeave: boolean;
+};
+export type JsonTest = {
+  readonly tested: Expr;
+  readonly isNullTest: boolean;
 };

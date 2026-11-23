@@ -1,9 +1,15 @@
-import { kNewPrefix } from "../../generic-rules/const/generic-rules.const.tz";
+import {
+  kInstanceChainLimit,
+  kNewPrefix,
+} from "../../generic-rules/const/generic-rules.const.tz";
 import {
   BinaryExpr,
   BinaryOp,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+import { CapturePlace } from "../../../../program/scopes/types/scopes.types.tz";
 import {
+  CallTarget,
   GenericDraft,
   OperandPair,
   PendingCall,
@@ -24,10 +30,53 @@ partial class ExpressionTypes {
       return;
     }
 
-    const list = this.requirements.get(type.id) ?? [];
+    this.addRequirement(type.id, { kind, word, other: 0 });
+  }
 
-    list.push({ kind, word, other: 0 });
-    this.requirements.set(type.id, list);
+  private requireConstruct(type: Type, count: int): void {
+    if (type.kind != TypeKind.TypeParameter) {
+      return;
+    }
+
+    const kind = RequirementKind.Construct;
+
+    this.addRequirement(type.id, { kind, word: "", other: count });
+  }
+
+  private captureRequirements(fn: FunctionDecl, module: int): void {
+    const uses = this.record(module)?.uses;
+    if (fn.typeParams.length == 0 || uses == undefined) {
+      return;
+    }
+
+    const params = this.resolver.parameterTypes(module, fn.typeParams);
+    const first = params[0];
+    if (first == undefined) {
+      return;
+    }
+
+    for (const use of uses.values()) {
+      const capture = use.capture ?? CapturePlace.None;
+      const isInside = this.statements.isInsideFunction(fn, use.loc);
+      if (capture != CapturePlace.None && isInside) {
+        this.requireOf(first, this.captureKind(capture), use.name);
+      }
+    }
+  }
+
+  private captureKind(capture: CapturePlace): RequirementKind {
+    if (capture == CapturePlace.StaticInit) {
+      return RequirementKind.StaticCapture;
+    }
+
+    return RequirementKind.LaterCapture;
+  }
+
+  private addRequirement(id: int, requirement: Requirement): void {
+    const list = this.requirements.get(id) ?? [];
+
+    list.push(requirement);
+    this.requirements.set(id, list);
   }
 
   private requireFollowing(draft: GenericDraft, module: int): void {
@@ -40,20 +89,47 @@ partial class ExpressionTypes {
 
     for (const [id, type] of bound) {
       if (type.kind == TypeKind.TypeParameter) {
-        const list = this.requirements.get(type.id) ?? [];
+        const kind = RequirementKind.Follows;
 
-        list.push({ kind: RequirementKind.Follows, word: "", other: id });
-        this.requirements.set(type.id, list);
+        this.addRequirement(type.id, { kind, word: "", other: id });
       }
     }
 
-    this.pendingCalls.push({
+    const owner = this.ownerKey(module);
+    const call: PendingCall = {
       name: target.name,
       params: target.params,
       bound,
       loc: target.loc,
       module,
-    });
+      owner,
+    };
+
+    this.pendingCalls.push(call);
+
+    if (owner != "") {
+      const owned = this.ownedCalls.get(owner) ?? [];
+
+      owned.push(call);
+      this.ownedCalls.set(owner, owned);
+    }
+  }
+
+  private ownerKey(module: int): string {
+    for (let index = this.openFunctions.length - 1; index >= 0; index--) {
+      const fn = this.openFunctions[index];
+      if (fn != undefined && fn.typeParams.length > 0) {
+        const params = this.resolver.parameterTypes(module, fn.typeParams);
+
+        return this.paramsKey(params);
+      }
+    }
+
+    return "";
+  }
+
+  private paramsKey(params: Type[]): string {
+    return params.map((param) => `${param.id}`).join(" ");
   }
 
   private pendingCallsCheck(module: int): void {
@@ -92,14 +168,140 @@ partial class ExpressionTypes {
 
         this.report(call.module, call.loc, code, {
           word,
-          first: param.name,
-          second: this.text.of(type),
+          first: this.callBindings(call),
           other,
         });
 
         return;
       }
     }
+
+    this.chainCheck(call);
+  }
+
+  private chainCheck(call: PendingCall): void {
+    if (call.owner != "") {
+      return;
+    }
+
+    const key = this.paramsKey(call.params);
+    const seen = new Set<string>();
+    const found = this.chainFinding(key, call, call.bound, [], seen);
+    if (found == undefined) {
+      return;
+    }
+
+    this.report(call.module, call.loc, Code.GenericCallRefused, {
+      word: call.name,
+      first: this.callBindings(call),
+      other: messageText(found.code, found.details),
+    });
+  }
+
+  private chainFinding(
+    key: string,
+    call: PendingCall,
+    bound: Map<int, Type>,
+    path: string[],
+    seen: Set<string>,
+  ): Finding | undefined {
+    const count = path.filter((one) => one == key).length;
+    const types = this.boundTypes(call.params, bound);
+    if (count >= kInstanceChainLimit) {
+      const first = types.map((type) => this.text.of(type)).join(", ");
+
+      return {
+        code: Code.GenericChainEndless,
+        details: { word: call.name, first },
+      };
+    }
+
+    const visit = `${key} ${this.paramsKey(types)}`;
+    if (seen.has(visit)) {
+      return undefined;
+    }
+
+    seen.add(visit);
+    path.push(key);
+
+    const found = this.ownedFinding(key, bound, path, seen);
+
+    path.pop();
+
+    return found;
+  }
+
+  private boundTypes(params: Type[], bound: Map<int, Type>): Type[] {
+    const types: Type[] = [];
+
+    for (const param of params) {
+      const type = bound.get(param.id);
+      if (type != undefined) {
+        types.push(type);
+      }
+    }
+
+    return types;
+  }
+
+  private ownedFinding(
+    key: string,
+    bound: Map<int, Type>,
+    path: string[],
+    seen: Set<string>,
+  ): Finding | undefined {
+    for (const inner of this.ownedCalls.get(key) ?? []) {
+      const innerKey = this.paramsKey(inner.params);
+      if (innerKey == key) {
+        continue;
+      }
+
+      const next = new Map<int, Type>();
+
+      for (const [id, type] of inner.bound) {
+        next.set(id, this.resolver.substitute(type, bound));
+      }
+
+      const found = this.chainFinding(innerKey, inner, next, path, seen);
+      if (found != undefined) {
+        return found;
+      }
+    }
+
+    return undefined;
+  }
+
+  private callBindings(call: PendingCall): string {
+    const names: string[] = [];
+    const types: Type[] = [];
+
+    for (const param of call.params) {
+      if (param.kind != TypeKind.TypeParameter) {
+        continue;
+      }
+
+      const type = call.bound.get(param.id);
+      if (type != undefined) {
+        names.push(param.name);
+        types.push(type);
+      }
+    }
+
+    return this.bindingsText(names, types);
+  }
+
+  private bindingsText(names: string[], types: Type[]): string {
+    const parts: string[] = [];
+
+    for (let index = 0; index < names.length; index++) {
+      const name = names[index];
+      const type = types[index];
+      if (name != undefined && type != undefined) {
+        parts.push(`${name} = ${this.text.of(type)}`);
+      }
+    }
+
+    return parts.join(", ");
   }
 
   private parameterFinding(
@@ -137,6 +339,18 @@ partial class ExpressionTypes {
         return this.sortFinding(type);
       case RequirementKind.Unused:
         return this.unusedFinding(type);
+      case RequirementKind.Construct:
+        return this.constructFinding(type, one.other);
+      case RequirementKind.LaterCapture:
+        return {
+          code: Code.ClassExprLaterCapture,
+          details: { word: one.word },
+        };
+      case RequirementKind.StaticCapture:
+        return {
+          code: Code.ClassExprStaticCapture,
+          details: { word: one.word },
+        };
       default:
         return this.parameterFinding(one.other, type, seen);
     }
@@ -224,6 +438,56 @@ partial class ExpressionTypes {
     const other = this.statements.sortExample(type);
 
     return { code, details: { word, other } };
+  }
+
+  private constructFinding(type: Type, count: int): Finding | undefined {
+    const base = this.types.definedType(type);
+    if (base.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const decl = this.classOf(base);
+    if (decl == undefined) {
+      return undefined;
+    }
+
+    const maker = this.makerOf(base, decl);
+    if (maker == undefined) {
+      return undefined;
+    }
+
+    const constructors = maker.owner.constructors;
+    const chosen = constructors[0];
+    if (chosen == undefined && count > 0) {
+      return { code: Code.NoConstructor, details: { word: decl.name ?? "" } };
+    }
+    if (chosen == undefined || constructors.length > 1) {
+      return undefined;
+    }
+
+    const target = this.constructorTarget(maker, chosen, decl.loc);
+    if (target == undefined) {
+      return undefined;
+    }
+
+    return this.countFinding(target, count);
+  }
+
+  private countFinding(target: CallTarget, count: int): Finding | undefined {
+    const params = target.params;
+    const least = this.calls.leastArguments(target);
+    const isTooMany = !target.rest && count > params.length;
+    if (count >= least && !isTooMany) {
+      return undefined;
+    }
+
+    const word = this.calls.argumentCountText(
+      least,
+      params.length,
+      target.rest,
+    );
+
+    return { code: Code.ArgumentCount, details: { word, other: `${count}` } };
   }
 
   private unusedFinding(type: Type): Finding | undefined {

@@ -10,7 +10,7 @@ partial class ScopeTraversal {
   private reportMissingValue(name: string, loc: int, missing: Code): void {
     const absent = kGlobalNames.absent(name);
     const isMade = missing == Code.ClassNotFound;
-    if (absent != undefined && absent.asValue) {
+    if (absent != undefined && absent.asValue && this.isHinted(absent)) {
       return this.reportAbsent(absent, loc, isMade);
     }
     if (this.isTypeName(name) && this.isResultHalfName(name)) {
@@ -47,7 +47,7 @@ partial class ScopeTraversal {
 
   private reportMissingType(name: string, loc: int, missing: Code): void {
     const absent = kGlobalNames.absent(name);
-    if (absent != undefined && absent.asType) {
+    if (absent != undefined && absent.asType && this.isHinted(absent)) {
       return this.reportAbsent(absent, loc, false);
     }
 
@@ -59,6 +59,10 @@ partial class ScopeTraversal {
     const word = this.absentWord(absent, isMade);
 
     this.report(loc, code, { word, other: absent.instead ?? "" });
+  }
+
+  private isHinted(absent: AbsentName): boolean {
+    return absent.reason != AbsentReason.ErrorClass;
   }
 
   private absentWord(absent: AbsentName, isMade: boolean): string {
@@ -93,8 +97,6 @@ partial class ScopeTraversal {
 
   private absentCode(reason: AbsentReason): Code {
     switch (reason) {
-      case AbsentReason.ErrorClass:
-        return Code.NoErrorClass;
       case AbsentReason.CodeFromString:
         return Code.NoCodeFromString;
       case AbsentReason.Proxy:

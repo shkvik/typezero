@@ -248,3 +248,7 @@ export type Type =
   | TemplateType
   | OperationType
   | ClassType;
+export type ParamWriter = {
+  readonly name: string;
+  readonly writer: string;
+};

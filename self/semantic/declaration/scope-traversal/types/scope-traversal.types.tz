@@ -1,18 +1,15 @@
+import { CapturePlace } from "../../../../program/scopes/types/scopes.types.tz";
+
 export enum JumpKind {
   Loop,
   Switch,
   Block,
 }
 
-export enum CapturePlace {
-  None,
-  StaticInit,
-  Later,
-}
-
 export type ClassFrame = {
   readonly outer: int;
   place: CapturePlace;
+  readonly isGeneric: boolean;
 };
 
 export type JumpTarget = {

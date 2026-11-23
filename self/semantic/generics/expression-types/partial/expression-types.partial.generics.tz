@@ -40,6 +40,9 @@ partial class ExpressionTypes {
     );
     const shape = target.shape;
     const isOpaque = this.hasOperationParameter(shape);
+    if (hasLists) {
+      this.splitListsCheck(target, module);
+    }
     if (hasLists || isOpaque || this.generics.isListRest(shape)) {
       return this.store.plain(TypeKind.Error);
     }
@@ -60,6 +63,23 @@ partial class ExpressionTypes {
     this.contextualArguments(draft, module);
 
     return this.boundCall(draft, module);
+  }
+
+  private splitListsCheck(target: GenericTarget, module: int): void {
+    if (target.typeArgs.length > 0 || target.isLenient) {
+      return;
+    }
+
+    const lists = this.genericCalls.splitLists(target.shape);
+    const draft = this.generics.genericDraft(target, [], undefined);
+
+    for (const param of target.params) {
+      if (lists.includes(param)) {
+        const error = this.genericCalls.uninferredError(draft, param);
+
+        this.reportFound(module, error);
+      }
+    }
   }
 
   private isGenericArity(

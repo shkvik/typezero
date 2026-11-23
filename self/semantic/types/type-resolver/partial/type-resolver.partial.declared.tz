@@ -1,17 +1,37 @@
 import { TypeResolver } from "../type-resolver.tz";
 import { Code } from "../../../../diagnostic/code.tz";
-import { ClassDecl } from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  Access,
+  ClassDecl,
+  FieldKind,
+  MethodKind,
+} from "../../../../program/ast/types/ast.types.classes.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
 import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
 import {
   TypeParamDecl,
   TypeRef,
+  TypeRefKind,
 } from "../../../../program/ast/types/ast.types.types.tz";
 import {
   NameSymbol,
   SymbolKind,
 } from "../../../../program/scopes/types/scopes.types.tz";
-import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
-import { kFewArgumentCodes } from "../const/type-resolver.const.tables.tz";
+import {
+  ParamWriter,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  kSettableEnd,
+  kSettableStart,
+  kTakerMiddle,
+  kTakerStart,
+} from "../const/type-resolver.const.variance.tz";
+import {
+  kFewArgumentCodes,
+  kFunctionUtilities,
+} from "../const/type-resolver.const.tables.tz";
 import {
   ClassHome,
   TypeContext,
@@ -119,8 +139,13 @@ partial class TypeResolver {
         if (written == undefined || !fits) {
           return this.store.plain(TypeKind.Error);
         }
+        if (this.utilityOperandCheck(ref, module, name, written, context)) {
+          return this.store.plain(TypeKind.Error);
+        }
 
-        return this.alias(module, found, written);
+        const isTail = this.tailUses.has(ref);
+
+        return this.alias(module, found, written, isTail);
       }
       case StmtKind.Class: {
         const name = found.name ?? "";
@@ -232,6 +257,11 @@ partial class TypeResolver {
   }
 
   public classInstance(module: int, decl: ClassDecl, written: Type[]): Type {
+    const isUnknown = this.store.writersOf(module, decl.loc) == undefined;
+    if (decl.typeParams.length > 0 && isUnknown) {
+      this.store.setWriters(module, decl.loc, this.writersOf(decl));
+    }
+
     const name = decl.name ?? "";
     const parents = this.parentRefs(decl.base, decl.interfaces);
     const home: ClassHome = { module, name, loc: decl.loc };
@@ -371,5 +401,85 @@ partial class TypeResolver {
     const texts = written.map((type) => this.text.of(type));
 
     return `${prefix}${name}<${texts.join(", ")}>`;
+  }
+
+  private utilityOperandCheck(
+    ref: TypeRef,
+    module: int,
+    name: string,
+    written: Type[],
+    context: TypeContext,
+  ): boolean {
+    const operand = written[0];
+    const isUtility =
+      kFunctionUtilities.includes(name) && this.record(module)?.library == true;
+    if (!isUtility || operand == undefined) {
+      return false;
+    }
+
+    const base = operand;
+    const isFunction =
+      base.kind == TypeKind.Function ||
+      base.kind == TypeKind.TypeParameter ||
+      base.kind == TypeKind.Error;
+    if (isFunction) {
+      return false;
+    }
+
+    this.report(context.module, ref.loc, Code.UtilityNotFunction, {
+      word: name,
+      other: this.text.of(operand),
+    });
+
+    return true;
+  }
+
+  private writersOf(decl: ClassDecl): ParamWriter[] {
+    return decl.typeParams.map((param) => ({
+      name: param.name,
+      writer: this.writerOf(decl, param.name),
+    }));
+  }
+
+  private writerOf(decl: ClassDecl, name: string): string {
+    const taker = decl.methods.find((method) => this.isTaking(method, name));
+    if (taker != undefined) {
+      return `${kTakerStart}${taker.name}${kTakerMiddle}${name}`;
+    }
+
+    const field = decl.fields.find((one) => {
+      const isOpen =
+        one.form != FieldKind.Static &&
+        one.access == Access.Public &&
+        !one.readonly;
+      const written = one.type;
+
+      return isOpen && written != undefined && this.isMentioning(written, name);
+    });
+    if (field != undefined) {
+      return `${kSettableStart}${field.name}${kSettableEnd}`;
+    }
+
+    return "";
+  }
+
+  private isTaking(method: FunctionDecl, name: string): boolean {
+    const role = method.role;
+    const isStatic = role?.method == MethodKind.Static;
+    if (isStatic || (role != undefined && role.access != Access.Public)) {
+      return false;
+    }
+
+    return method.params.some((param) => {
+      const written = param.type;
+
+      return written != undefined && this.isMentioning(written, name);
+    });
+  }
+
+  private isMentioning(ref: TypeRef, name: string): boolean {
+    return this.refsOf(ref).some(
+      (part) => part.form.kind == TypeRefKind.Name && part.name == name,
+    );
   }
 }

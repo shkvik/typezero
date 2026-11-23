@@ -1,0 +1,136 @@
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import { ClassDecl } from "../../../../../program/ast/types/ast.types.classes.tz";
+import {
+  CallExpr,
+  ExprKind,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Stmt,
+  VarDeclStmt,
+} from "../../../../../program/ast/types/ast.types.statements.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { kSuperName } from "../../../dispose-rules/const/dispose-rules.const.tz";
+
+partial class ExpressionTypes {
+  private disposeCheck(decl: ClassDecl, module: int): void {
+    const dispose = this.disposes.ownDispose(decl);
+    if (dispose == undefined || this.modules.isLibraryModule(module)) {
+      return;
+    }
+
+    const type = this.functionDoors.get(`${module} ${dispose.loc}`)?.type;
+    const result = this.resultOfFunction(type);
+    const isGivingValue =
+      result != undefined &&
+      result.kind != TypeKind.Void &&
+      result.kind != TypeKind.Error;
+    const inherited = this.inheritedDispose(decl, module);
+    const disposeErrors = this.disposes.disposeErrors(
+      dispose,
+      isGivingValue,
+      inherited,
+    );
+
+    this.reportAll(module, disposeErrors);
+  }
+
+  private resultOfFunction(type: Type | undefined): Type | undefined {
+    if (type == undefined || type.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    return type.shape.result;
+  }
+
+  private inheritedDispose(decl: ClassDecl, module: int): string | undefined {
+    if (decl.typeParams.length > 0) {
+      return undefined;
+    }
+
+    const instance = this.resolver.classInstance(module, decl, []);
+    let base = this.types.baseClassOf(instance);
+
+    while (base != undefined && base.kind == TypeKind.Instance) {
+      const owner = this.record(base.module)?.classes.get(base.loc);
+      if (owner == undefined) {
+        return undefined;
+      }
+      if (this.disposes.ownDispose(owner) != undefined) {
+        return owner.name;
+      }
+
+      base = this.types.baseClassOf(base);
+    }
+
+    return undefined;
+  }
+
+  private usingCheck(
+    statement: VarDeclStmt,
+    following: Stmt[],
+    module: int,
+  ): void {
+    const first = statement.decls[0];
+    if (first == undefined || this.modules.isLibraryModule(module)) {
+      return;
+    }
+
+    const type = this.door(module, first.loc)?.type;
+    const isKnown = type != undefined && type.kind != TypeKind.Error;
+    if (isKnown && type != undefined && !this.isDisposable(type)) {
+      this.report(module, statement.loc, Code.UsingNotDisposable, {
+        word: this.text.of(type),
+      });
+    }
+
+    const outlivesErrors = this.disposes.outlivesErrors(statement, following);
+
+    this.reportAll(module, outlivesErrors);
+  }
+
+  private isDisposable(type: Type): boolean {
+    let current: Type | undefined = this.types.definedType(type);
+
+    while (current != undefined && current.kind == TypeKind.Instance) {
+      if (this.modules.isLibraryModule(current.module)) {
+        return false;
+      }
+
+      const owner = this.record(current.module)?.classes.get(current.loc);
+      if (owner == undefined) {
+        return false;
+      }
+      if (this.disposes.ownDispose(owner) != undefined) {
+        return true;
+      }
+
+      current = this.types.baseClassOf(current);
+    }
+
+    return false;
+  }
+
+  private disposeCallCheck(expr: CallExpr, module: int): void {
+    const callee = expr.callee;
+    if (callee.kind != ExprKind.Index || this.modules.isLibraryModule(module)) {
+      return;
+    }
+    if (!this.disposes.isDisposeCall(expr)) {
+      return;
+    }
+
+    const fn = this.openFunctions[this.openFunctions.length - 1];
+    const object = callee.object;
+    const isSuper = object.kind == ExprKind.Name && object.name == kSuperName;
+    if (isSuper && this.disposes.isDisposeMethod(fn)) {
+      return;
+    }
+
+    this.report(module, callee.loc, Code.DisposeManual, kNoDetails);
+  }
+}

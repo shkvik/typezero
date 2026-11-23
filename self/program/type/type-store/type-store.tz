@@ -7,6 +7,7 @@ import {
   ObjectField,
   OperationKind,
   OperationShape,
+  ParamWriter,
   PlainKind,
   TupleShape,
   Type,
@@ -20,6 +21,7 @@ export class TypeStore {
   private readonly parents: Map<Type, Type[]>;
   private readonly bases: Set<Type>;
   private readonly constraints: Map<Type, Type>;
+  private readonly writers: Map<string, ParamWriter[]>;
   private count: int;
 
   public constructor() {
@@ -29,6 +31,7 @@ export class TypeStore {
     this.parents = new Map<Type, Type[]>();
     this.bases = new Set<Type>();
     this.constraints = new Map<Type, Type>();
+    this.writers = new Map<string, ParamWriter[]>();
     this.count = 0;
   }
 
@@ -545,5 +548,13 @@ export class TypeStore {
     this.count += 1;
 
     return this.count;
+  }
+
+  public setWriters(module: int, loc: int, writers: ParamWriter[]): void {
+    this.writers.set(`${module} ${loc}`, writers);
+  }
+
+  public writersOf(module: int, loc: int): ParamWriter[] | undefined {
+    return this.writers.get(`${module} ${loc}`);
   }
 }

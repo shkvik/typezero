@@ -93,7 +93,11 @@ partial class ExpressionTypes {
       return;
     }
     if (base.kind != TypeKind.Object) {
-      const objectError = this.intl.dateObjectError(options.loc, what, given);
+      const objectError = this.intlDates.dateObjectError(
+        options.loc,
+        what,
+        given,
+      );
 
       return this.reportFound(module, objectError);
     }
@@ -113,9 +117,9 @@ partial class ExpressionTypes {
     let hasComponent = false;
 
     for (const field of fields) {
-      const option = this.intl.dateOption(field.name);
+      const option = this.intlDates.dateOption(field.name);
       if (option == undefined) {
-        const unknownError = this.intl.dateUnknownError(
+        const unknownError = this.intlDates.dateUnknownError(
           options.loc,
           field.name,
           what,
@@ -137,9 +141,9 @@ partial class ExpressionTypes {
         hasStyle = hasStyle || isPresent;
       }
 
-      const isForeign = this.intl.isForeignStyle(field.name, kind);
+      const isForeign = this.intlDates.isForeignStyle(field.name, kind);
       if (option.role == DateOptionRole.Style && isPresent && isForeign) {
-        const styleError = this.intl.styleOnlyError(
+        const styleError = this.intlDates.styleOnlyError(
           options.loc,
           field.name,
           what,
@@ -150,7 +154,7 @@ partial class ExpressionTypes {
     }
 
     if (hasStyle && hasComponent) {
-      this.reportFound(module, this.intl.stylePartsError(options.loc));
+      this.reportFound(module, this.intlDates.stylePartsError(options.loc));
     }
   }
 
@@ -164,7 +168,7 @@ partial class ExpressionTypes {
       return true;
     }
 
-    const kindError = this.intl.dateKindError(
+    const kindError = this.intlDates.dateKindError(
       options.loc,
       field.name,
       wanted,
@@ -178,10 +182,10 @@ partial class ExpressionTypes {
 
   private dateWanted(field: ObjectField): string {
     const value = this.types.definedType(field.type);
-    if (this.intl.isHour12(field.name)) {
+    if (this.intlDates.isHour12(field.name)) {
       return this.wantedIf(!this.intl.isFlagType(value), "a boolean");
     }
-    if (this.intl.isDigitsName(field.name)) {
+    if (this.intlDates.isDigitsName(field.name)) {
       const isNumber =
         this.intl.isNumberLike(value) ||
         this.intl.numberLiterals(value) != undefined;
@@ -206,13 +210,13 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     for (const field of fields) {
-      const option = this.intl.dateOption(field.name);
+      const option = this.intlDates.dateOption(field.name);
       const given = this.optionValue(options, field.name);
       const loc = this.optionLoc(options, field.name);
       if (option == undefined) {
         continue;
       }
-      if (this.intl.isDigitsName(field.name)) {
+      if (this.intlDates.isDigitsName(field.name)) {
         this.dateDigitsCheck(field, given, loc, module);
 
         continue;
@@ -245,7 +249,7 @@ partial class ExpressionTypes {
     const isInside =
       digits != undefined && digits.every((one) => one >= 1 && one <= 3);
     if (!isInside) {
-      this.reportFound(module, this.intl.digitsOpenError(loc));
+      this.reportFound(module, this.intlDates.digitsOpenError(loc));
     }
   }
 
@@ -263,14 +267,17 @@ partial class ExpressionTypes {
     const texts = this.dateTexts(field, given, module);
     if (texts == undefined) {
       const written = this.writtenOption(given, module);
-      const openError = this.intl.dateValueOpenError(loc, option, written);
+      const openError = this.intlDates.dateValueOpenError(loc, option, written);
 
       return this.reportFound(module, openError);
     }
 
     const wrong = texts.find((one) => !option.values.includes(one));
     if (wrong != undefined) {
-      this.reportFound(module, this.intl.dateValueError(loc, option, wrong));
+      this.reportFound(
+        module,
+        this.intlDates.dateValueError(loc, option, wrong),
+      );
     }
   }
 
@@ -310,7 +317,7 @@ partial class ExpressionTypes {
     member: MemberExpr,
     module: int,
   ): Type {
-    const rangeError = this.intl.dateRangeError(member.loc, member.name);
+    const rangeError = this.intlDates.dateRangeError(member.loc, member.name);
 
     this.reportFound(module, rangeError);
     this.looseArguments(expr.args, module);

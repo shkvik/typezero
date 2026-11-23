@@ -351,3 +351,6 @@ export const kErrnoHint =
 export const kBusExample = "class Bus extends ";
 export const kIntExample = "class Int";
 export const kExampleEnd = " {}";
+export const kJoinName = "join";
+export const kBothStart = "; the same object also goes where '";
+export const kBothEnd = "' is expected, and one object cannot be both";

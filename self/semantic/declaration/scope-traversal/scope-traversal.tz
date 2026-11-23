@@ -17,6 +17,7 @@ import { kLibrary } from "../../../program/library/library-modules/const/library
 import { ModuleNames } from "../../../program/module-names/types/module-names.types.tz";
 import { Module } from "../../../program/module/types/module.types.tz";
 import {
+  CapturePlace,
   ModuleScopes,
   NameSymbol,
   NameUse,
@@ -26,11 +27,7 @@ import { SourceLines } from "../../../program/source-lines/source-lines.tz";
 import { GlobalScope } from "../name-resolver/types/name-resolver.types.tz";
 import { ScopeStack } from "../scope-stack/scope-stack.tz";
 import { kHiddenPrefix, kNamePoint } from "./const/scope-traversal.const.tz";
-import {
-  CapturePlace,
-  ClassFrame,
-  JumpTarget,
-} from "./types/scope-traversal.types.tz";
+import { ClassFrame, JumpTarget } from "./types/scope-traversal.types.tz";
 
 export class ScopeTraversal {
   private readonly module: Module;
@@ -111,8 +108,10 @@ export class ScopeTraversal {
         this.report(loc, Code.OtherCaseVariable, { word: name });
       }
 
-      this.noteUse({ loc, name, isType: false, symbol: entry.symbol });
-      this.captureCheck(entry.symbol, entry.depth, loc);
+      const symbol = entry.symbol;
+      const capture = this.captureOf(symbol, entry.depth, loc);
+
+      this.noteUse({ loc, name, isType: false, symbol, capture });
 
       return;
     }
@@ -125,25 +124,36 @@ export class ScopeTraversal {
     this.reportMissingValue(name, loc, missing);
   }
 
-  private captureCheck(symbol: NameSymbol, depth: int, loc: int): void {
+  private captureOf(symbol: NameSymbol, depth: int, loc: int): CapturePlace {
     const frame = this.classFrames[this.classFrames.length - 1];
     if (frame == undefined || frame.place == CapturePlace.None) {
-      return;
+      return CapturePlace.None;
     }
 
     const isLocal =
       symbol.kind == SymbolKind.Variable || symbol.kind == SymbolKind.Parameter;
     const isOuter = depth > 0 && depth <= frame.outer;
     if (!isLocal || !isOuter) {
-      return;
+      return CapturePlace.None;
+    }
+    if (frame.isGeneric) {
+      return frame.place;
     }
 
     const word = symbol.name;
-    if (frame.place == CapturePlace.StaticInit) {
-      return this.report(loc, Code.ClassExprStaticCapture, { word });
+    const code = this.captureCode(frame.place);
+
+    this.report(loc, code, { word });
+
+    return CapturePlace.None;
+  }
+
+  private captureCode(place: CapturePlace): Code {
+    if (place == CapturePlace.StaticInit) {
+      return Code.ClassExprStaticCapture;
     }
 
-    this.report(loc, Code.ClassExprLaterCapture, { word });
+    return Code.ClassExprLaterCapture;
   }
 
   private reportEarlyUse(symbol: NameSymbol, loc: int): void {

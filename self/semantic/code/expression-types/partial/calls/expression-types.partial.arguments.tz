@@ -28,6 +28,9 @@ partial class ExpressionTypes {
     target: CallTarget,
     module: int,
   ): boolean {
+    if (this.listArgumentsCheck(args, target, module)) {
+      return true;
+    }
     if (target.isLenient && this.countCheck(args, target, module)) {
       return true;
     }
@@ -301,6 +304,106 @@ partial class ExpressionTypes {
     }
 
     this.checked(slot.expr, to, module, kNoPlace);
+  }
+
+  private listArgumentsCheck(
+    args: CallArgument[],
+    target: CallTarget,
+    module: int,
+  ): boolean {
+    const only = target.params[0];
+    if (!target.rest || target.params.length != 1 || only == undefined) {
+      return false;
+    }
+
+    const slots: ArgumentSlot[] = args.map((arg) => ({
+      expr: arg.expr,
+      spread: arg.spread,
+    }));
+
+    return this.listRestCheck(slots, only.type, target.loc, module);
+  }
+
+  private listRestCheck(
+    slots: ArgumentSlot[],
+    to: Type,
+    loc: int,
+    module: int,
+  ): boolean {
+    const parts = this.listParts(to);
+    if (parts.length == 0) {
+      return false;
+    }
+
+    const given = slots.map((slot) => this.typed(slot.expr, undefined, module));
+    const word = this.text.of(to);
+
+    for (let index = 0; index < slots.length; index++) {
+      const slot = slots[index];
+      const type = given[index];
+      const part = parts[index];
+      if (slot == undefined || type == undefined) {
+        continue;
+      }
+      if (part == undefined) {
+        this.report(module, slot.expr.loc, Code.ListArgumentsMany, { word });
+
+        return true;
+      }
+
+      const isList = this.parts.isListParameter(part);
+      if (slot.spread && type != part) {
+        this.report(module, slot.expr.loc, Code.ListSpreadWrong, {
+          word: this.text.of(type),
+          first: word,
+          other: this.listPartText(part),
+        });
+
+        return true;
+      }
+      if (!slot.spread && isList) {
+        this.report(module, slot.expr.loc, Code.ListNotSpread, {
+          word: this.text.of(part),
+        });
+
+        return true;
+      }
+    }
+
+    const missing = parts[slots.length];
+    if (missing != undefined) {
+      this.report(module, loc, Code.ListMissing, {
+        word,
+        other: this.listPartText(missing),
+      });
+    }
+
+    return true;
+  }
+
+  private listParts(to: Type): Type[] {
+    if (to.kind == TypeKind.TypeParameter && this.parts.isListParameter(to)) {
+      return [to];
+    }
+    if (to.kind != TypeKind.Tuple) {
+      return [];
+    }
+
+    const hasList = to.items.some((item) => this.parts.isListParameter(item));
+    if (!hasList) {
+      return [];
+    }
+
+    return to.items;
+  }
+
+  private listPartText(part: Type): string {
+    const name = this.text.of(part);
+    if (this.parts.isListParameter(part)) {
+      return `'...${name}'`;
+    }
+
+    return `'${name}'`;
   }
 
   private restCheck(

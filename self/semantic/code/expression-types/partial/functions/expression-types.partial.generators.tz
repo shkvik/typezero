@@ -209,8 +209,9 @@ partial class ExpressionTypes {
     generator: GeneratorFrame,
     module: int,
   ): Type {
-    const yields = generator.yields;
-    if (yields.some((one) => one.type.kind == TypeKind.Error)) {
+    const written = generator.yields;
+    const yields = written.filter((one) => one.type.kind != TypeKind.Error);
+    if (written.length > 0 && yields.length == 0) {
       return this.store.plain(TypeKind.Error);
     }
     if (yields.length == 0) {

@@ -10,3 +10,4 @@ export const kDictTexts: DictText[] = [
   { dict: DictKind.Map, kind: "Map", shown: "Map" },
   { dict: DictKind.Set, kind: "Set", shown: "Set" },
 ];
+export const kOptionalSuffix = " | undefined";

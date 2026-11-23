@@ -1,0 +1,127 @@
+import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { Type } from "../../../program/type/types/type.types.tz";
+import {
+  kDateOptions,
+  kDateStyleName,
+  kDigitsName,
+  kHour12Name,
+  kTimeStyleName,
+} from "../intl-rules/const/intl-rules.const.tz";
+import {
+  DateLocaleKind,
+  DateOption,
+} from "../intl-rules/types/intl-rules.types.tz";
+import { IntlRules } from "../intl-rules/intl-rules.tz";
+
+export class IntlDateRules {
+  private readonly text: TypeText;
+  private readonly intl: IntlRules;
+
+  public constructor(text: TypeText, intl: IntlRules) {
+    this.text = text;
+    this.intl = intl;
+  }
+
+  public dateOption(name: string): DateOption | undefined {
+    return kDateOptions.find((one) => one.name == name);
+  }
+
+  public isHour12(name: string): boolean {
+    return name == kHour12Name;
+  }
+
+  public isDigitsName(name: string): boolean {
+    return name == kDigitsName;
+  }
+
+  public isForeignStyle(name: string, kind: DateLocaleKind): boolean {
+    const isTime = kind == DateLocaleKind.Date && name == kTimeStyleName;
+    const isDate = kind == DateLocaleKind.Time && name == kDateStyleName;
+
+    return isTime || isDate;
+  }
+
+  public dateObjectError(loc: int, what: string, found: Type): SourceError {
+    const first = this.text.of(found);
+
+    return {
+      code: Code.DateOptionsNotObject,
+      loc,
+      details: { word: what, first },
+    };
+  }
+
+  public dateUnknownError(loc: int, name: string, what: string): SourceError {
+    return {
+      code: Code.DateOptionUnknown,
+      loc,
+      details: { word: name, first: what },
+    };
+  }
+
+  public dateKindError(
+    loc: int,
+    name: string,
+    wanted: string,
+    found: Type,
+  ): SourceError {
+    const second = this.text.of(found);
+    const details: Details = { word: name, first: wanted, second };
+
+    return { code: Code.IntlOptionKindWrong, loc, details };
+  }
+
+  public styleOnlyError(loc: int, name: string, what: string): SourceError {
+    return {
+      code: Code.DateStyleOnly,
+      loc,
+      details: { word: name, first: what },
+    };
+  }
+
+  public stylePartsError(loc: int): SourceError {
+    return { code: Code.DateStyleParts, loc, details: kNoDetails };
+  }
+
+  public digitsOpenError(loc: int): SourceError {
+    return { code: Code.DateDigitsOpen, loc, details: kNoDetails };
+  }
+
+  public dateValueOpenError(
+    loc: int,
+    option: DateOption,
+    written: string,
+  ): SourceError {
+    const first = option.values[0] ?? "";
+    const second = option.values[1] ?? "";
+    const details: Details = {
+      word: option.name,
+      first,
+      second,
+      other: written,
+    };
+
+    return { code: Code.DateOptionUnknownValue, loc, details };
+  }
+
+  public dateValueError(
+    loc: int,
+    option: DateOption,
+    text: string,
+  ): SourceError {
+    const other = this.intl.valuesText(option.values);
+    const details: Details = { word: option.name, first: text, other };
+
+    return { code: Code.IntlOptionValue, loc, details };
+  }
+
+  public dateRangeError(loc: int, name: string): SourceError {
+    return { code: Code.DateFormatRange, loc, details: { word: name } };
+  }
+}

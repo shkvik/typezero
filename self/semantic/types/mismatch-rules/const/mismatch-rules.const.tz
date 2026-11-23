@@ -1,1 +1,4 @@
 export const kConversionPrefix = "to";
+export const kWiderStart = "; '";
+export const kWiderMiddle = "' with a wider ";
+export const kWiderEnd = " would let a value of another type into it: ";

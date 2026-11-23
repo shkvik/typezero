@@ -105,6 +105,10 @@ partial class ExpressionTypes {
 
   private classValueNew(expr: NewExpr, callee: ClassType, module: int): Type {
     const instance = callee.instance;
+    const isSpread = expr.args.some((arg) => arg.spread);
+    if (!isSpread) {
+      this.requireConstruct(instance, expr.args.length);
+    }
     if (!callee.exact || instance.kind != TypeKind.Instance) {
       return instance;
     }

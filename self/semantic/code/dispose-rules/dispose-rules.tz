@@ -1,0 +1,405 @@
+import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import {
+  ClassDecl,
+  MethodKind,
+} from "../../../program/ast/types/ast.types.classes.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  NewExpr,
+  NewKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
+import {
+  Stmt,
+  StmtKind,
+  SwitchCase,
+  VarDeclStmt,
+} from "../../../program/ast/types/ast.types.statements.tz";
+import {
+  kDisposeKey,
+  kDisposeName,
+  kSuperName,
+  kSymbolName,
+  kThisName,
+} from "./const/dispose-rules.const.tz";
+
+export class DisposeRules {
+  public ownDispose(decl: ClassDecl): FunctionDecl | undefined {
+    return decl.methods.find((method) => method.name == kDisposeKey);
+  }
+
+  public isDisposeMethod(fn: FunctionDecl | undefined): boolean {
+    return fn != undefined && fn.name == kDisposeKey;
+  }
+
+  public disposeErrors(
+    dispose: FunctionDecl,
+    isGivingValue: boolean,
+    inherited: string | undefined,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+    const loc = dispose.loc;
+    const isStatic = dispose.role?.method == MethodKind.Static;
+    const isWrong =
+      dispose.params.length > 0 ||
+      isStatic ||
+      dispose.isAsync ||
+      dispose.isGenerator ||
+      isGivingValue;
+    if (isWrong) {
+      errors.push({ code: Code.DisposeShape, loc, details: kNoDetails });
+    }
+    if (inherited != undefined && !this.hasSuperDisposeCall(dispose)) {
+      errors.push({
+        code: Code.DisposeNoSuper,
+        loc,
+        details: { word: inherited },
+      });
+    }
+    if (this.isLeavingThis(dispose)) {
+      errors.push({ code: Code.DisposeThisLeaves, loc, details: kNoDetails });
+    }
+
+    return errors;
+  }
+
+  public outlivesErrors(
+    statement: VarDeclStmt,
+    following: Stmt[],
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    for (const decl of statement.decls) {
+      const isEscaping = following.some((one) =>
+        this.isEscaping(decl.name, one),
+      );
+      if (isEscaping) {
+        errors.push({
+          code: Code.UsingOutlives,
+          loc: decl.loc,
+          details: { word: decl.name },
+        });
+      }
+    }
+
+    return errors;
+  }
+
+  public isDisposeCall(expr: CallExpr): boolean {
+    const callee = expr.callee;
+    if (callee.kind != ExprKind.Index) {
+      return false;
+    }
+
+    return this.isDisposeKey(callee.index);
+  }
+
+  public isSuperDisposeCall(expr: CallExpr): boolean {
+    const callee = expr.callee;
+    if (callee.kind == ExprKind.Member) {
+      return callee.name == kDisposeKey;
+    }
+    if (callee.kind != ExprKind.Index) {
+      return false;
+    }
+
+    return (
+      this.isDisposeKey(callee.index) && this.isNamed(callee.object, kSuperName)
+    );
+  }
+
+  private isDisposeKey(key: Expr): boolean {
+    if (key.kind != ExprKind.Member || key.name != kDisposeName) {
+      return false;
+    }
+
+    return this.isNamed(key.object, kSymbolName);
+  }
+
+  private hasSuperDisposeCall(dispose: FunctionDecl): boolean {
+    const exprs = this.functionExprs(dispose, false);
+
+    return exprs.some(
+      (expr) => expr.kind == ExprKind.Call && this.isSuperDisposeCall(expr),
+    );
+  }
+
+  private isLeavingThis(dispose: FunctionDecl): boolean {
+    const exprs = this.functionExprs(dispose, false);
+    const reads = new Set<Expr>();
+
+    for (const expr of exprs) {
+      if (
+        expr.kind == ExprKind.Member &&
+        this.isNamed(expr.object, kThisName)
+      ) {
+        reads.add(expr.object);
+      }
+    }
+
+    return exprs.some((expr) => {
+      const isLoose = this.isNamed(expr, kThisName) && !reads.has(expr);
+
+      return isLoose || this.isCaptured(expr, kThisName);
+    });
+  }
+
+  private isEscaping(name: string, statement: Stmt): boolean {
+    const exprs: Expr[] = [];
+    const values: Expr[] = [];
+
+    this.statementExprs(statement, exprs, values, false);
+
+    if (values.some((value) => this.isNamed(value, name))) {
+      return true;
+    }
+
+    return exprs.some((expr) => {
+      const isHeld = this.heldParts(expr).some((part) =>
+        this.isNamed(part, name),
+      );
+
+      return isHeld || this.isCaptured(expr, name);
+    });
+  }
+
+  private isCaptured(expr: Expr, name: string): boolean {
+    if (expr.kind != ExprKind.Function) {
+      return false;
+    }
+
+    const inner = this.functionExprs(expr.fn, true);
+
+    return inner.some((one) => this.isNamed(one, name));
+  }
+
+  private heldParts(expr: Expr): Expr[] {
+    switch (expr.kind) {
+      case ExprKind.Assign:
+        return [expr.value];
+      case ExprKind.ArrayLit:
+        return expr.elements.map((element) => element.expr);
+      case ExprKind.ObjectLit:
+        return expr.props.map((property) => property.value);
+      case ExprKind.New:
+        return expr.args.map((arg) => arg.expr);
+      case ExprKind.Yield:
+        return this.optionalPart(expr.value);
+      default:
+        return [];
+    }
+  }
+
+  private optionalPart(expr: Expr | undefined): Expr[] {
+    if (expr == undefined) {
+      return [];
+    }
+
+    return [expr];
+  }
+
+  private isNamed(expr: Expr, name: string): boolean {
+    return expr.kind == ExprKind.Name && expr.name == name;
+  }
+
+  private functionExprs(fn: FunctionDecl, isDeep: boolean): Expr[] {
+    const exprs: Expr[] = [];
+    const values: Expr[] = [];
+    const body = fn.body;
+    if (body == undefined) {
+      return exprs;
+    }
+
+    for (const statement of body.body) {
+      this.statementExprs(statement, exprs, values, isDeep);
+    }
+
+    return exprs;
+  }
+
+  private statementExprs(
+    statement: Stmt,
+    exprs: Expr[],
+    values: Expr[],
+    isDeep: boolean,
+  ): void {
+    switch (statement.kind) {
+      case StmtKind.Block:
+        for (const inner of statement.body) {
+          this.statementExprs(inner, exprs, values, isDeep);
+        }
+
+        return;
+      case StmtKind.VarDecl:
+        for (const decl of statement.decls) {
+          this.optionalExprs(decl.init, exprs, isDeep);
+        }
+
+        return;
+      case StmtKind.Expr:
+        return this.exprs(statement.expr, exprs, isDeep);
+      case StmtKind.If:
+        this.exprs(statement.cond, exprs, isDeep);
+        this.statementExprs(statement.thenStmt, exprs, values, isDeep);
+
+        return this.optionalStatement(
+          statement.elseStmt,
+          exprs,
+          values,
+          isDeep,
+        );
+      case StmtKind.While:
+      case StmtKind.DoWhile:
+        this.exprs(statement.cond, exprs, isDeep);
+
+        return this.statementExprs(statement.body, exprs, values, isDeep);
+      case StmtKind.For:
+        this.optionalStatement(statement.init, exprs, values, isDeep);
+        this.optionalExprs(statement.cond, exprs, isDeep);
+        this.optionalExprs(statement.step, exprs, isDeep);
+
+        return this.optionalStatement(statement.body, exprs, values, isDeep);
+      case StmtKind.ForOf:
+        this.exprs(statement.iterable, exprs, isDeep);
+
+        return this.statementExprs(statement.body, exprs, values, isDeep);
+      case StmtKind.Switch:
+        return this.switchExprs(
+          statement.discriminant,
+          statement.cases,
+          exprs,
+          values,
+          isDeep,
+        );
+      case StmtKind.Labeled:
+        return this.statementExprs(statement.body, exprs, values, isDeep);
+      case StmtKind.Return: {
+        const value = statement.value;
+        if (value != undefined) {
+          values.push(value);
+          this.exprs(value, exprs, isDeep);
+        }
+
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  private switchExprs(
+    discriminant: Expr,
+    cases: SwitchCase[],
+    exprs: Expr[],
+    values: Expr[],
+    isDeep: boolean,
+  ): void {
+    this.exprs(discriminant, exprs, isDeep);
+
+    for (const option of cases) {
+      this.optionalExprs(option.test, exprs, isDeep);
+
+      for (const inner of option.body) {
+        this.statementExprs(inner, exprs, values, isDeep);
+      }
+    }
+  }
+
+  private optionalStatement(
+    statement: Stmt | undefined,
+    exprs: Expr[],
+    values: Expr[],
+    isDeep: boolean,
+  ): void {
+    if (statement != undefined) {
+      this.statementExprs(statement, exprs, values, isDeep);
+    }
+  }
+
+  private optionalExprs(
+    expr: Expr | undefined,
+    exprs: Expr[],
+    isDeep: boolean,
+  ): void {
+    if (expr != undefined) {
+      this.exprs(expr, exprs, isDeep);
+    }
+  }
+
+  private exprs(expr: Expr, exprs: Expr[], isDeep: boolean): void {
+    exprs.push(expr);
+
+    if (expr.kind == ExprKind.Function) {
+      return this.innerExprs(expr.fn, exprs, isDeep);
+    }
+
+    for (const child of this.children(expr)) {
+      this.exprs(child, exprs, isDeep);
+    }
+  }
+
+  private innerExprs(fn: FunctionDecl, exprs: Expr[], isDeep: boolean): void {
+    const body = fn.body;
+    const values: Expr[] = [];
+    if (!isDeep || body == undefined) {
+      return;
+    }
+
+    for (const statement of body.body) {
+      this.statementExprs(statement, exprs, values, isDeep);
+    }
+  }
+
+  private children(expr: Expr): Expr[] {
+    switch (expr.kind) {
+      case ExprKind.Member:
+        return [expr.object];
+      case ExprKind.Index:
+        return [expr.object, expr.index];
+      case ExprKind.Unary:
+      case ExprKind.Cast:
+        return [expr.operand];
+      case ExprKind.Binary:
+        return [expr.lhs, expr.rhs];
+      case ExprKind.Assign:
+        return [expr.target, expr.value];
+      case ExprKind.Update:
+        return [expr.target];
+      case ExprKind.Call:
+        return [expr.callee, ...expr.args.map((arg) => arg.expr)];
+      case ExprKind.New:
+        return this.newChildren(expr);
+      case ExprKind.Conditional:
+        return [expr.cond, expr.thenExpr, expr.elseExpr];
+      case ExprKind.Sequence:
+      case ExprKind.Template:
+        return expr.exprs;
+      case ExprKind.OptionalChain:
+        return [expr.chain];
+      case ExprKind.Yield:
+        return this.optionalPart(expr.value);
+      case ExprKind.Await:
+        return [expr.value];
+      case ExprKind.ArrayLit:
+        return expr.elements.map((element) => element.expr);
+      case ExprKind.ObjectLit:
+        return expr.props.map((property) => property.value);
+      default:
+        return [];
+    }
+  }
+
+  private newChildren(expr: NewExpr): Expr[] {
+    const args = expr.args.map((arg) => arg.expr);
+    const form = expr.form;
+    if (form.kind == NewKind.Named) {
+      return args;
+    }
+
+    return [form.callee, ...args];
+  }
+}

@@ -281,6 +281,10 @@ partial class ExpressionTypes {
       return true;
     }
 
+    if (fn.bodySource == BodySource.Foreign) {
+      return true;
+    }
+
     return (
       fn.bodySource == BodySource.External &&
       this.modules.isLibraryModule(module)

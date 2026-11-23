@@ -234,7 +234,7 @@ partial class TypeResolver {
 
     this.errors.beginTrial();
 
-    const made = this.alias(origin.module, origin.decl, args);
+    const made = this.alias(origin.module, origin.decl, args, false);
 
     this.errors.endTrial();
 

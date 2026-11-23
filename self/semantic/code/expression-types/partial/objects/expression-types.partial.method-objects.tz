@@ -14,6 +14,7 @@ import {
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
 import { ThisPlace } from "../../types/expression-types.types.tz";
+import { StmtKind } from "../../../../../program/ast/types/ast.types.statements.tz";
 
 partial class ExpressionTypes {
   private methodObject(
@@ -28,6 +29,10 @@ partial class ExpressionTypes {
     if (isSpread) {
       this.report(module, expr.loc, Code.LiteralMethodsSpread, kNoDetails);
 
+      return error;
+    }
+
+    if (this.genericLiteralCheck(expr, module)) {
       return error;
     }
 
@@ -59,6 +64,26 @@ partial class ExpressionTypes {
     this.store.markBase(goal);
 
     return reserved;
+  }
+
+  private genericLiteralCheck(expr: ObjectLitExpr, module: int): boolean {
+    const fn = this.openFunctions[this.openFunctions.length - 1];
+    const body = fn?.body;
+    if (fn == undefined || body == undefined || fn.typeParams.length == 0) {
+      return false;
+    }
+
+    const isReturned = body.body.some(
+      (statement) =>
+        statement.kind == StmtKind.Return && statement.value == expr,
+    );
+    if (!isReturned) {
+      return false;
+    }
+
+    this.report(module, expr.loc, Code.GenericLiteralClass, { word: fn.name });
+
+    return true;
   }
 
   private literalValueFields(

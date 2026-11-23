@@ -9,9 +9,13 @@ import {
 import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
 import {
   FunctionShape,
+  FunctionType,
+  InstanceType,
   Type,
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
+import { messageText } from "../../../../diagnostic/message.tz";
+import { Finding } from "../../../../diagnostic/types/message.types.tz";
 import { kNewWord } from "../../../code/expression-types/const/expression-types.const.tz";
 import {
   CallTarget,
@@ -163,6 +167,136 @@ partial class ExpressionTypes {
     };
 
     return this.genericCall(generic, expr.args, wanted, module);
+  }
+
+  private copyVariantsCheck(
+    expr: NewExpr,
+    made: Type,
+    decl: ClassDecl,
+    module: int,
+  ): void {
+    if (made.kind != TypeKind.Instance || decl.typeParams.length == 0) {
+      return;
+    }
+
+    const isOpen = made.args.some((arg) => arg.kind == TypeKind.TypeParameter);
+    if (isOpen) {
+      return;
+    }
+
+    const found = this.copyVariantsFinding(made, decl);
+    if (found == undefined) {
+      return;
+    }
+
+    const names = decl.typeParams.map((param) => param.name);
+
+    this.report(module, expr.loc, Code.GenericClassRefused, {
+      word: decl.name ?? "",
+      first: this.bindingsText(names, made.args),
+      other: messageText(found.code, found.details),
+    });
+  }
+
+  private copyVariantsFinding(
+    made: InstanceType,
+    decl: ClassDecl,
+  ): Finding | undefined {
+    for (const variants of this.variantGroups(decl)) {
+      const found = this.copyPairsFinding(made, decl, variants);
+      if (found != undefined) {
+        return found;
+      }
+    }
+
+    return undefined;
+  }
+
+  private copyPairsFinding(
+    made: InstanceType,
+    decl: ClassDecl,
+    variants: FunctionDecl[],
+  ): Finding | undefined {
+    if (variants.length < 2) {
+      return undefined;
+    }
+
+    const home = made.module;
+    const own = variants.map((fn) => this.ownMethodType(decl, fn, home));
+    const copied = variants.map((fn) => this.copiedMethodType(made, decl, fn));
+    const what = this.variantsWhat(variants);
+
+    for (let later = 1; later < variants.length; later++) {
+      for (let earlier = 0; earlier < later; earlier++) {
+        const first = variants[earlier];
+        const second = variants[later];
+        const ownFirst = own[earlier];
+        const ownSecond = own[later];
+        const one = copied[earlier];
+        const other = copied[later];
+        if (first == undefined || second == undefined) {
+          continue;
+        }
+        if (ownFirst == undefined || ownSecond == undefined) {
+          continue;
+        }
+        if (one == undefined || other == undefined) {
+          continue;
+        }
+
+        const declared = this.overloads.variantPairCheck(
+          first,
+          second,
+          ownFirst,
+          ownSecond,
+          what,
+        );
+        if (declared.value) {
+          continue;
+        }
+
+        const checked = this.overloads.variantPairCheck(
+          first,
+          second,
+          one,
+          other,
+          what,
+        );
+        const error = checked.error;
+        if (error != undefined) {
+          return { code: error.code, details: error.details };
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  private copiedMethodType(
+    made: InstanceType,
+    decl: ClassDecl,
+    method: FunctionDecl,
+  ): FunctionType | undefined {
+    const sites = this.classes.parameterSites(method);
+    if (sites == undefined) {
+      return undefined;
+    }
+
+    const part = this.partOf(decl, method);
+    const home = this.partModule(part, made.module);
+    const context = this.resolver.classContext(made, part.typeParams, home);
+
+    this.errors.beginTrial();
+
+    const type = this.resolver.signature(sites, method.returnType, context);
+
+    this.errors.endTrial();
+
+    if (type.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    return type;
   }
 
   private makerTarget(

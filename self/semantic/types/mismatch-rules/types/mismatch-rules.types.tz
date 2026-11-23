@@ -4,4 +4,5 @@ export type MismatchTexts = {
   readonly isFresh: boolean;
   readonly isPlaced: boolean;
   readonly place: string;
+  readonly both: string;
 };

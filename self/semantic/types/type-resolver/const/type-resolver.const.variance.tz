@@ -1,0 +1,4 @@
+export const kTakerStart = "its public method '";
+export const kTakerMiddle = "' takes ";
+export const kSettableStart = "its public field '";
+export const kSettableEnd = "' can be set";

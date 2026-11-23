@@ -1,8 +1,12 @@
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { TypeRelation } from "../type-relation/type-relation.tz";
-import { kIteratorKey } from "./const/type-questions.const.tz";
-import { kDateName, kRegExpName } from "./const/type-questions.const.tz";
+import {
+  kDateName,
+  kIteratorKey,
+  kOptionalSuffix,
+  kRegExpName,
+} from "./const/type-questions.const.tz";
 
 export class TypeQuestions {
   private readonly store: TypeStore;
@@ -23,8 +27,18 @@ export class TypeQuestions {
 
   public optional(type: Type): Type {
     const nothing = this.store.plain(TypeKind.Undefined);
+    const result = this.store.unionOf([type, nothing]);
+    const label = this.store.labelOf(type);
+    const isNamed =
+      type.kind == TypeKind.Union &&
+      label != undefined &&
+      result != type &&
+      this.store.labelOf(result) == undefined;
+    if (isNamed) {
+      this.store.label(result, `${label}${kOptionalSuffix}`);
+    }
 
-    return this.store.unionOf([type, nothing]);
+    return result;
   }
 
   public definedType(type: Type): Type {

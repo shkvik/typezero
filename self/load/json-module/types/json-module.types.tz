@@ -1,0 +1,38 @@
+export enum JsonNodeKind {
+  Null,
+  Bool,
+  Number,
+  String,
+  Array,
+  Object,
+}
+
+export type JsonNode = {
+  readonly kind: JsonNodeKind;
+  readonly raw: string;
+  readonly items: JsonNode[];
+  readonly keys: string[];
+};
+
+export type JsonFields = {
+  readonly keys: string[];
+  readonly items: JsonNode[];
+};
+
+export enum JsonShapeKind {
+  Unknown,
+  Json,
+  Bool,
+  Int,
+  Double,
+  String,
+  Array,
+  Object,
+}
+
+export type JsonShape = {
+  readonly kind: JsonShapeKind;
+  readonly items: JsonShape[];
+  readonly keys: string[];
+  readonly optional: boolean[];
+};

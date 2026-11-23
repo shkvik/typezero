@@ -1,3 +1,5 @@
+import { kByteOrderMark } from "../../json-text/const/json-text.const.tz";
+import { kEmbedTextName } from "../../library-rules/const/library-rules.const.tz";
 import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
@@ -52,6 +54,9 @@ partial class ExpressionTypes {
     }
 
     const second = expr.args[1]?.expr;
+    if (member.name == "parse" && second == undefined) {
+      this.jsonTextCheck(expr, module);
+    }
     if (member.name == "parse" && second != undefined) {
       this.report(module, second.loc, Code.JsonReviver, kNoDetails);
       this.nonNullArguments(expr, module);
@@ -180,5 +185,60 @@ partial class ExpressionTypes {
     });
 
     return this.store.plain(TypeKind.Error);
+  }
+
+  private jsonTextCheck(expr: CallExpr, module: int): void {
+    const arg = expr.args[0]?.expr;
+    if (arg == undefined || expr.args.length != 1) {
+      return;
+    }
+
+    const text = this.constantJsonText(arg, module);
+    if (text == undefined) {
+      return;
+    }
+    if (text.charCodeAt(0) == kByteOrderMark) {
+      return this.report(module, arg.loc, Code.JsonTextBom, kNoDetails);
+    }
+
+    const problem = this.jsonTexts.problemOf(text);
+    if (problem == undefined) {
+      return;
+    }
+
+    const place = this.jsonTexts.position(text, problem.offset);
+
+    this.report(module, arg.loc, Code.JsonTextInvalid, {
+      word: problem.message,
+      first: `${place[0] ?? 1}`,
+      other: `${place[1] ?? 1}`,
+    });
+  }
+
+  private constantJsonText(arg: Expr, module: int): string | undefined {
+    if (arg.kind == ExprKind.StringLit) {
+      return arg.value;
+    }
+    if (arg.kind != ExprKind.Call) {
+      return undefined;
+    }
+
+    const callee = arg.callee;
+    const path = arg.args[0]?.expr;
+    if (callee.kind != ExprKind.Name || callee.name != kEmbedTextName) {
+      return undefined;
+    }
+    if (path == undefined || !this.isGlobalUse(callee, module)) {
+      return undefined;
+    }
+
+    const shown = this.constantText(path);
+    if (shown == undefined) {
+      return undefined;
+    }
+
+    const home = this.program.modules[module]?.source.path ?? "";
+
+    return this.embedded.textOf(home, shown);
   }
 }

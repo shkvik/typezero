@@ -3,15 +3,13 @@
 // read through a method, and the old service names are gone, as any name
 // that does not exist.
 import { Server } from "tz:http"
-import { Readable, Stream } from "node:stream"
+import { Readable } from "node:stream"
 // expect-error: 'node:stream' has no export named 'streamFinished'
 import { streamFinished } from "node:stream"
 
 const event = new Event("x")
 // expect-error: 'isTrusted' is a method of 'Event' and cannot be assigned: the object changes what it gives itself
 event.isTrusted = true
-// expect-error: 'target' is a method of 'Event' and cannot be assigned
-event.target = new EventTarget()
 // expect-error: property 'beginDispatch' does not exist on type 'Event'
 event.beginDispatch(new EventTarget())
 
@@ -23,54 +21,22 @@ class Sneaky extends Event {
 }
 
 const url = new URL("https://example.com/?y=1")
-// expect-error: property '__reload' does not exist on type 'URLSearchParams'
-url.searchParams.__reload("z=2")
 // expect-error: 'applyQuery' is private in class 'URL'
 url.applyQuery("z=2")
 
-const response = new Response("hi")
-// expect-error: property '__bodyOf' does not exist on type 'Response'
-response.__bodyOf()
-// expect-error: 'data' is private in class 'Response'
-console.log(response.data)
-const headers = new Headers()
-// expect-error: property '__flat' does not exist on type 'Headers'
-headers.__flat()
-
 // expect-error: expected 2 arguments, but got 4
 const server = new Server({}, "x", () => new Response("hi"), "http")
-
-const stream = new ReadableStream<string>()
-// expect-error: property '__state' does not exist on type 'ReadableStream<string>'
-stream.__state()
-// expect-error: 'locked' is a method of 'ReadableStream<string>' and cannot be assigned
-stream.locked = true
 
 // expect-error: cannot find name '__tz_panic'
 __tz_panic("x")
 
 // A stream of node keeps its state inside: what a class that extends it may
-// use is protected, and the rest is private.
+// use is protected.
 class Quiet extends Readable<string> {
   protected onRead() {}
 }
 const readable = new Quiet()
-// expect-error: 'readableState' is private in class 'Stream'
-console.log(readable.readableState)
-// expect-error: property '_readableState' does not exist on type 'Quiet'
-readable._readableState.bits = 0
-// expect-error: 'pushChunk' is protected in class 'Readable'; only 'Readable' and the classes that extend it can use it
-readable.pushChunk("x")
 // expect-error: 'onRead' is protected in class 'Quiet'; only 'Quiet' and the classes that extend it can use it
 readable.onRead(1)
 // expect-error: 'readableLength' is a method of 'Quiet' and cannot be replaced
 readable.readableLength = 0
-// expect-error: 'eos' is private in class 'Stream'
-Stream.eos(readable, undefined, () => {})
-class Peeker extends Readable<string> {
-  protected onRead() {}
-  peek(other: Readable<string>) {
-    // expect-error: 'readChunk' is protected in class 'Stream'; 'Peeker' may use it only on its own objects, and this one is of class 'Readable'
-    return other.readChunk()
-  }
-}

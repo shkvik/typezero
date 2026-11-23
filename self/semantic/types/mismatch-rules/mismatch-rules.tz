@@ -12,7 +12,12 @@ import { Interval } from "../literal-ranges/types/literal-ranges.types.tz";
 import { TypeQuestions } from "../type-questions/type-questions.tz";
 import { kWideBits } from "../type-relation/const/type-relation.const.tz";
 import { TypeRelation } from "../type-relation/type-relation.tz";
-import { kConversionPrefix } from "./const/mismatch-rules.const.tz";
+import {
+  kConversionPrefix,
+  kWiderEnd,
+  kWiderMiddle,
+  kWiderStart,
+} from "./const/mismatch-rules.const.tz";
 import { MismatchTexts } from "./types/mismatch-rules.types.tz";
 
 export class MismatchRules {
@@ -45,9 +50,17 @@ export class MismatchRules {
     const target = this.innerObject(wanted, given);
     const first = this.text.of(given);
     const second = this.text.of(wanted);
-    const detail = this.objectDetail(source, target);
+    const widened = this.widenedDetail(source, target);
+    if (widened != "") {
+      const place = texts.place + widened;
+
+      return { code: Code.NotAssignable, details: { first, second, place } };
+    }
+
+    const hasOther = texts.both != "";
+    const detail = this.objectDetail(source, target, hasOther);
     if (detail != "" && !texts.isFresh && !texts.isPlaced) {
-      const place = texts.place + detail;
+      const place = texts.place + detail + texts.both;
       const details: Details = { first, second, place };
 
       return { code: Code.NotAssignable, details };
@@ -377,7 +390,11 @@ export class MismatchRules {
       case Code.ObjectIntoTaggedUnion:
         return this.sharedTag(target) ?? "";
       case Code.ValueOutsideRange:
-        return this.ranges.rangeCheck(texts.name, intervals);
+        return this.ranges.rangeCheck(
+          texts.name,
+          intervals,
+          this.text.of(this.types.definedType(target)),
+        );
       default:
         return texts.name;
     }
@@ -418,7 +435,7 @@ export class MismatchRules {
     }
   }
 
-  private objectDetail(source: Type, target: Type): string {
+  private objectDetail(source: Type, target: Type, hasOther: boolean): string {
     if (source.kind != TypeKind.Object || target.kind != TypeKind.Object) {
       return "";
     }
@@ -440,7 +457,7 @@ export class MismatchRules {
     for (const field of source.fields) {
       const other = target.fields.find((one) => one.name == field.name);
       if (other != undefined) {
-        const detail = this.fieldDetail(field, other, target);
+        const detail = this.fieldDetail(field, other, target, hasOther);
         if (detail != "") {
           return detail;
         }
@@ -454,6 +471,7 @@ export class MismatchRules {
     field: ObjectField,
     other: ObjectField,
     target: Type,
+    hasOther: boolean,
   ): string {
     const own = this.objectFieldType(field);
     const theirs = this.objectFieldType(other);
@@ -464,6 +482,10 @@ export class MismatchRules {
       const here = this.text.of(own);
       const there = this.text.of(theirs);
       const text = `; field '${name}' is '${here}' here and '${there}' in '${to}'`;
+
+      if (hasOther) {
+        return text;
+      }
 
       return text + this.objectTypeHint(own, theirs, to);
     }
@@ -495,5 +517,33 @@ export class MismatchRules {
 
   private isNumberKind(type: Type): boolean {
     return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
+  }
+
+  private widenedDetail(source: Type, target: Type): string {
+    if (source.kind != TypeKind.Instance || target.kind != TypeKind.Instance) {
+      return "";
+    }
+    if (source.module != target.module || source.loc != target.loc) {
+      return "";
+    }
+
+    const writers = this.relation.writersOf(target.module, target.loc) ?? [];
+
+    for (let index = 0; index < writers.length; index++) {
+      const writer = writers[index];
+      const own = source.args[index];
+      const wide = target.args[index];
+      if (writer == undefined || own == undefined || wide == undefined) {
+        continue;
+      }
+
+      const isWider =
+        writer.writer != "" && own != wide && this.relation.extends(own, wide);
+      if (isWider) {
+        return `${kWiderStart}${target.name}${kWiderMiddle}${writer.name}${kWiderEnd}${writer.writer}`;
+      }
+    }
+
+    return "";
   }
 }

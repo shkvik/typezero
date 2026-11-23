@@ -1,0 +1,456 @@
+import { Code } from "../../../../../diagnostic/code.tz";
+import { SourceError } from "../../../../../diagnostic/types/message.types.tz";
+import { DeclaredMemberKind } from "../../../../../program/ast/types/ast.types.declarations.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  kCanonicalName,
+  kCollatorClass,
+  kDateTimeFormatClass,
+  kIntlName,
+  kIntlPrefix,
+  kLocaleClass,
+  kLocaleCompareName,
+  kNormalizeName,
+  kNumberFormatClass,
+  kSupportedName,
+  kToLocaleName,
+  kValuesOfName,
+} from "../../../intl-rules/const/intl-rules.const.tz";
+import { IntlMethodKind } from "../../../intl-rules/types/intl-rules.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+
+partial class ExpressionTypes {
+  private intlNamespaceCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): Type | undefined {
+    const object = member.object;
+    if (object.kind == ExprKind.Member) {
+      return this.intlStaticCall(expr, member, object, module);
+    }
+    if (object.kind != ExprKind.Name || object.name != kIntlName) {
+      return undefined;
+    }
+    if (
+      !this.isGlobalUse(object, module) ||
+      expr.args.some((one) => one.spread)
+    ) {
+      return undefined;
+    }
+
+    const name = member.name;
+    if (name == kDateTimeFormatClass) {
+      return undefined;
+    }
+    if (name == kCanonicalName) {
+      return this.canonicalCall(expr, module);
+    }
+    if (name == kValuesOfName || name == kLocaleClass) {
+      return this.intlRefusedCall(expr, member, module);
+    }
+
+    const service = this.intl.service(name);
+    if (service == undefined) {
+      const unknownError = this.intl.unknownServiceError(member.loc, name);
+
+      this.reportFound(module, unknownError);
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (!service.callable) {
+      const withNewError = this.intl.withNewError(member.loc, name);
+
+      this.reportFound(module, withNewError);
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const what = `${kIntlPrefix}${name}`;
+
+    this.intlArguments(expr.args, 0, service, what, module);
+
+    return this.namedLibraryType(what, member.loc, module);
+  }
+
+  private intlRefusedCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): Type {
+    const refusedError = this.intlRefusedError(member);
+
+    this.reportFound(module, refusedError);
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private intlRefusedError(member: MemberExpr): SourceError {
+    if (member.name == kLocaleClass) {
+      return this.intl.localeNewError(member.loc);
+    }
+
+    return this.intl.valuesOfError(member.loc);
+  }
+
+  private canonicalCall(expr: CallExpr, module: int): Type {
+    const list = expr.args[0];
+    const text = this.store.plain(TypeKind.String);
+    if (list != undefined) {
+      this.localeListCheck(list.expr, "Intl.getCanonicalLocales", module);
+    }
+
+    return this.store.arrayOf(text);
+  }
+
+  private intlStaticCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    owner: MemberExpr,
+    module: int,
+  ): Type | undefined {
+    const root = owner.object;
+    if (root.kind != ExprKind.Name || root.name != kIntlName) {
+      return undefined;
+    }
+    if (!this.isGlobalUse(root, module) || owner.name == kLocaleClass) {
+      return undefined;
+    }
+
+    const what = `${kIntlPrefix}${owner.name}.${member.name}`;
+    const isService =
+      owner.name == kDateTimeFormatClass ||
+      this.intl.service(owner.name) != undefined;
+    if (!isService || member.name != kSupportedName) {
+      const staticError = this.intl.staticOnlyError(member.loc, what);
+
+      this.reportFound(module, staticError);
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const list = expr.args[0];
+    const options = expr.args[1];
+    const text = this.store.plain(TypeKind.String);
+    if (list == undefined) {
+      return this.store.arrayOf(text);
+    }
+    if (this.localeListCheck(list.expr, what, module) && options != undefined) {
+      const service = this.intl.supportedService();
+
+      this.intlOptionsCheck(options.expr, service, what, true, false, module);
+    }
+
+    return this.store.arrayOf(text);
+  }
+
+  private intlMethodCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type | undefined {
+    const service = this.intlServiceOf(instance);
+    const row = this.intl.method(service ?? "", member.name);
+    if (service == undefined || row == undefined) {
+      return undefined;
+    }
+    if (expr.args.some((one) => one.spread)) {
+      return undefined;
+    }
+
+    switch (row.kind) {
+      case IntlMethodKind.Unsupported:
+        return this.intlUnsupported(expr, member, false, module);
+      case IntlMethodKind.SelectRange:
+        return this.intlUnsupported(expr, member, true, module);
+      case IntlMethodKind.Compare:
+        return this.compareCall(expr, member, module);
+      case IntlMethodKind.Number:
+        return this.intlNumberCall(expr, member, instance, module);
+      case IntlMethodKind.Relative:
+        return this.relativeCall(expr, member, instance, module);
+      case IntlMethodKind.Containing:
+        return this.containingCall(expr, member, instance, module);
+      case IntlMethodKind.DateRange:
+        return this.dateFormatRange(expr, member, module);
+      default:
+        return undefined;
+    }
+  }
+
+  private intlServiceOf(instance: InstanceType): string | undefined {
+    const home = this.resolver.namespaceModule(kIntlName);
+    if (home == undefined || instance.module != home) {
+      return undefined;
+    }
+
+    return instance.name;
+  }
+
+  private intlUnsupported(
+    expr: CallExpr,
+    member: MemberExpr,
+    isSelect: boolean,
+    module: int,
+  ): Type {
+    const unsupportedError = this.intlUnsupportedError(member, isSelect);
+
+    this.reportFound(module, unsupportedError);
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private intlUnsupportedError(
+    member: MemberExpr,
+    isSelect: boolean,
+  ): SourceError {
+    if (isSelect) {
+      return this.intl.selectRangeError(member.loc);
+    }
+
+    return this.intl.rangeUnsupportedError(member.loc, member.name);
+  }
+
+  private compareCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): Type | undefined {
+    if (expr.args.length == 2) {
+      return undefined;
+    }
+
+    const word = this.calls.argumentCountText(2, 2, false);
+    const other = `${expr.args.length}`;
+
+    this.report(module, member.loc, Code.ArgumentCount, { word, other });
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private intlNumberCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type | undefined {
+    const value = expr.args[0];
+    if (value == undefined || expr.args.length != 1) {
+      return undefined;
+    }
+
+    const given = this.typed(value.expr, undefined, module);
+    const notNumberError = this.intl.notNumberError(
+      value.expr.loc,
+      member.name,
+      given,
+    );
+
+    this.reportFound(module, notNumberError);
+
+    return this.intlResult(instance, member.name);
+  }
+
+  private intlResult(instance: InstanceType, name: string): Type {
+    const method = this.receiverMember(instance, name, true);
+    if (method == undefined || method.kind != TypeKind.Function) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return method.shape.result;
+  }
+
+  private relativeCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type | undefined {
+    const value = expr.args[0];
+    const unit = expr.args[1];
+    if (value == undefined || unit == undefined || expr.args.length != 2) {
+      return undefined;
+    }
+
+    this.typed(value.expr, undefined, module);
+
+    const text = this.store.plain(TypeKind.String);
+    const given = this.checked(unit.expr, text, module, "");
+    const units = this.intl.relativeUnits();
+    const written = this.textCoders.literalLabel(unit.expr);
+
+    if (written != undefined && !this.intl.isRelativeUnit(written)) {
+      const unitError = this.intl.relativeUnitError(unit.expr.loc, written);
+
+      this.reportFound(module, unitError);
+    }
+    if (written == undefined) {
+      this.closedTextCheck(unit.expr, given, units, "unit of time", module);
+    }
+
+    return this.intlResult(instance, member.name);
+  }
+
+  private containingCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type | undefined {
+    const index = expr.args[0];
+    if (expr.args.length > 1) {
+      return undefined;
+    }
+    if (index != undefined) {
+      this.typed(index.expr, undefined, module);
+    }
+
+    return this.intlResult(instance, member.name);
+  }
+
+  private closedTextCheck(
+    arg: Expr,
+    given: Type,
+    allowed: string[],
+    what: string,
+    module: int,
+  ): void {
+    if (given.kind == TypeKind.Error || this.modules.isLibraryModule(module)) {
+      return;
+    }
+
+    const texts = this.encodingTexts(arg, given, module, 0);
+    if (texts == undefined) {
+      const unknownError = this.intl.closedUnknownError(arg.loc, what, allowed);
+
+      return this.reportFound(module, unknownError);
+    }
+
+    const closedError = this.intl.closedError(arg.loc, what, allowed, texts);
+
+    this.reportFound(module, closedError);
+  }
+
+  private intlMemberRead(
+    expr: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type | undefined {
+    const service = this.intlServiceOf(instance);
+    if (service == undefined) {
+      return undefined;
+    }
+
+    const found = this.declaredNamed(instance, expr.name);
+    const isMethod =
+      found != undefined && found.form.kind != DeclaredMemberKind.Field;
+    if (!isMethod || this.intl.isValueMethod(service, expr.name)) {
+      return undefined;
+    }
+
+    const onlyCalledError = this.intl.onlyCalledError(
+      expr.loc,
+      expr.name,
+      service,
+    );
+
+    this.reportFound(module, onlyCalledError);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private localeMethodCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): Type | undefined {
+    if (expr.args.some((one) => one.spread)) {
+      return undefined;
+    }
+
+    const base = this.types.apparent(object);
+    const name = member.name;
+    const isNumber = this.types.isNumber(base) || base.kind == TypeKind.Decimal;
+    const isText = base.kind == TypeKind.String;
+    if (isNumber && name == kToLocaleName && expr.args.length <= 2) {
+      return this.numberLocaleCall(expr, module);
+    }
+    if (isText && name == kLocaleCompareName && expr.args.length >= 1) {
+      return this.localeCompareCall(expr, module);
+    }
+    if (isText && name == kNormalizeName && expr.args.length <= 1) {
+      return this.normalizeCall(expr, module);
+    }
+
+    return undefined;
+  }
+
+  private numberLocaleCall(expr: CallExpr, module: int): Type {
+    const service = this.intl.service(kNumberFormatClass);
+    if (service != undefined) {
+      this.intlArguments(expr.args, 0, service, kToLocaleName, module);
+    }
+
+    return this.store.plain(TypeKind.String);
+  }
+
+  private localeCompareCall(expr: CallExpr, module: int): Type {
+    const that = expr.args[0];
+    const text = this.store.plain(TypeKind.String);
+    const service = this.intl.service(kCollatorClass);
+    if (that != undefined) {
+      this.checked(that.expr, text, module, "");
+    }
+    if (service != undefined) {
+      this.intlArguments(expr.args, 1, service, kLocaleCompareName, module);
+    }
+
+    return this.store.integer(64, false);
+  }
+
+  private normalizeCall(expr: CallExpr, module: int): Type {
+    const form = expr.args[0];
+    const text = this.store.plain(TypeKind.String);
+    if (form == undefined) {
+      return text;
+    }
+
+    const given = this.checked(form.expr, text, module, "");
+    const written = this.textCoders.literalLabel(form.expr);
+    const forms = this.intl.normalizationForms();
+    if (written != undefined && !forms.includes(written)) {
+      const badFormError = this.intl.badFormError(form.expr.loc, written);
+
+      this.reportFound(module, badFormError);
+    }
+    if (written == undefined) {
+      this.closedTextCheck(
+        form.expr,
+        given,
+        forms,
+        "normalization form",
+        module,
+      );
+    }
+
+    return text;
+  }
+}

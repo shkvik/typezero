@@ -2,5 +2,4 @@
 // loads b.tz first, which imports a.tz back (docs/modules.md).
 import { aName } from "./a"
 import { x } from "./c"
-import { e1 } from "./e"
-console.log(aName, x, e1)
+console.log(aName, x)

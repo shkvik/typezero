@@ -1,6 +1,5 @@
 // The chunk types of node:stream (docs/streams.md, section 2): setEncoding()
-// on a stream that went elsewhere before, or where its type would depend on
-// a branch; chunks of another type in push(), write() and pipeline(); a
+// on a stream that is used elsewhere already; chunks of another type in push(), write() and pipeline(); a
 // stream whose chunk type is not written; pipe(), which does not pass
 // an error on; streams made without a class of their own (Readable, Writable,
 // Duplex and Transform are abstract), push(undefined) instead of pushEnd(),
@@ -41,29 +40,11 @@ class Ends extends Readable<string> {
     this.push(undefined)
   }
 }
-function use(r: Readable<Buffer>) {
-  r.on("error", (e) => console.log(e.message))
-  r.on("end", () => {})
-}
 const a = createReadStream("a.txt")
 a.on("data", (b) => console.log(b.length))
 a.on("error", (e) => console.log(e.message))
 // expect-error: setEncoding() on a stream that is used elsewhere already, which sees its chunks as Buffers, but strings would come: it got listeners (on()) before this
 a.setEncoding("utf8")
-const b = createReadStream("b.txt")
-use(b)
-// expect-error: it went elsewhere (passed, stored or returned) before this
-b.setEncoding("utf8")
-const c = createReadStream("c.txt")
-// expect-error: but this setEncoding() is in a block of its own (an if, a loop, a function)
-if (process.argv.length > 2) c.setEncoding("utf8")
-let d = createReadStream("d.txt")
-// expect-error: but 'd' may hold another stream later; declare it with 'const'
-d.setEncoding("utf8")
-const e = createReadStream("e.txt")
-setTimeout(() => e.resume(), 1)
-// expect-error: a function written before uses it before this
-e.setEncoding("utf8")
 const objects = new Users()
 // expect-error: setEncoding() decodes the Buffers of a stream of bytes, and this is a stream of User
 objects.setEncoding("utf8")

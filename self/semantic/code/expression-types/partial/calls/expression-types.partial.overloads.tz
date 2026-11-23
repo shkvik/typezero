@@ -1,6 +1,9 @@
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
-import { ClassDecl } from "../../../../../program/ast/types/ast.types.classes.tz";
+import {
+  ClassDecl,
+  MethodKind,
+} from "../../../../../program/ast/types/ast.types.classes.tz";
 import {
   CallArgument,
   CallExpr,
@@ -24,7 +27,16 @@ import {
 
 partial class ExpressionTypes {
   private variantRules(decl: ClassDecl, module: int): void {
+    for (const variants of this.variantGroups(decl)) {
+      const what = this.variantsWhat(variants);
+
+      this.variantPairs(decl, variants, what, module);
+    }
+  }
+
+  private variantGroups(decl: ClassDecl): FunctionDecl[][] {
     const seen = new Set<string>();
+    const groups: FunctionDecl[][] = [];
 
     for (const fn of decl.methods) {
       const key = `${this.classes.isStaticMethod(fn)} ${fn.name}`;
@@ -40,10 +52,22 @@ partial class ExpressionTypes {
           this.classes.isStaticMethod(one) == this.classes.isStaticMethod(fn),
       );
 
-      this.variantPairs(decl, variants, `'${fn.name}'`, module);
+      groups.push(variants);
     }
 
-    this.variantPairs(decl, decl.constructors, "the constructor", module);
+    groups.push(decl.constructors);
+
+    return groups;
+  }
+
+  private variantsWhat(variants: FunctionDecl[]): string {
+    const first = variants[0];
+    const isConstructor = first?.role?.method == MethodKind.Constructor;
+    if (first == undefined || isConstructor) {
+      return "the constructor";
+    }
+
+    return `'${first.name}'`;
   }
 
   private variantPairs(

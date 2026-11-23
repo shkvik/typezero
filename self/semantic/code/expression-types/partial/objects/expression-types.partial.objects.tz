@@ -43,6 +43,8 @@ partial class ExpressionTypes {
       return this.spreadObject(expr, target, module);
     }
     if (draft.deferred) {
+      this.keyedLiteralCheck(expr, target, module);
+
       return this.store.plain(TypeKind.Error);
     }
     if (target == undefined) {
@@ -182,6 +184,14 @@ partial class ExpressionTypes {
         }
 
         return literal.text;
+      }
+      case ExprKind.Member: {
+        const member = this.enumLiteral(key, module);
+        if (member == undefined || member.kind != LiteralKind.String) {
+          return undefined;
+        }
+
+        return member.text;
       }
       default:
         return undefined;

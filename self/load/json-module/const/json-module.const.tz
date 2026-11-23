@@ -1,0 +1,16 @@
+export const kExportStart = "export const json: ";
+export const kValueStart = " = ";
+export const kByteOrderMark = "\uFEFF";
+export const kSpaceCharacters = " \t\n\r";
+export const kNumberCharacters = "-+0123456789.eE";
+export const kFractionMarks = [".", "e", "E"];
+export const kFractionTail = ".0";
+export const kLargestInteger = "9223372036854775807";
+export const kTrueWord = "true";
+export const kFalseWord = "false";
+export const kNullWord = "null";
+export const kJsonTypeName = "Json";
+export const kBooleanTypeName = "boolean";
+export const kIntTypeName = "int";
+export const kDoubleTypeName = "double";
+export const kStringTypeName = "string";

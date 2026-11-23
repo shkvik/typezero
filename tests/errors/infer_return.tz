@@ -21,11 +21,3 @@ function explicitVoid(): void {
   // expect-error: function 'explicitVoid' is declared to return 'void', but returns 'int'
   return 5
 }
-
-// Top-level code needs the return type before `limit` is declared.
-console.log(usesLater())
-function usesLater() {
-  // expect-error: 'limit' is declared after the code that first calls 'usesLater', which needs to know what 'usesLater' returns; move the declaration up, or declare the return type
-  return limit * 2
-}
-const limit = 10

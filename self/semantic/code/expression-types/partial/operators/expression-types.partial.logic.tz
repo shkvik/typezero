@@ -34,6 +34,7 @@ partial class ExpressionTypes {
 
       this.branchCheck(expr.rhs, TruthUse.Condition, module);
       this.facts = before;
+      this.redundantTestsCheck(expr, module);
 
       return;
     }
@@ -82,6 +83,7 @@ partial class ExpressionTypes {
     const right = this.logicalRight(expr, hint, side, module);
 
     this.facts = before;
+    this.redundantTestsCheck(expr, module);
 
     const isRightTruthy =
       side == LogicSide.Value ||
