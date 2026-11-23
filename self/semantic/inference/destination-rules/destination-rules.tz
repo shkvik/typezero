@@ -1,0 +1,73 @@
+import {
+  DictKind,
+  DictType,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import {
+  kElementMethods,
+  kFillMethod,
+  kKeyMethods,
+  kSetMethod,
+} from "./const/destination-rules.const.tz";
+
+export class DestinationRules {
+  public memberParameter(
+    object: Type,
+    name: string,
+    index: int,
+  ): Type | undefined {
+    if (object.kind == TypeKind.Array) {
+      return this.arrayParameter(object.item, name, index);
+    }
+    if (object.kind == TypeKind.Dict) {
+      return this.dictParameter(object, name, index);
+    }
+
+    return undefined;
+  }
+
+  private arrayParameter(
+    item: Type,
+    name: string,
+    index: int,
+  ): Type | undefined {
+    if (kElementMethods.includes(name)) {
+      return item;
+    }
+    if (name == kFillMethod && index == 0) {
+      return item;
+    }
+
+    return undefined;
+  }
+
+  private dictParameter(
+    dict: DictType,
+    name: string,
+    index: int,
+  ): Type | undefined {
+    const isMap = dict.dict == DictKind.Map;
+    if (isMap && name == kSetMethod) {
+      return this.pairPart(dict, index);
+    }
+
+    const isKeyed = dict.dict != DictKind.Record && kKeyMethods.includes(name);
+    if (isKeyed && index == 0) {
+      return dict.key;
+    }
+
+    return undefined;
+  }
+
+  private pairPart(dict: DictType, index: int): Type | undefined {
+    switch (index) {
+      case 0:
+        return dict.key;
+      case 1:
+        return dict.value;
+      default:
+        return undefined;
+    }
+  }
+}

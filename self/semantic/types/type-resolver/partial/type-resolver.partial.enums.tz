@@ -25,10 +25,16 @@ import {
   EnumFrame,
   EnumHome,
   EnumStep,
+  TypeContext,
 } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  private enumType(ref: TypeRef, decl: EnumDecl, module: int): Type {
+  private enumType(
+    ref: TypeRef,
+    decl: EnumDecl,
+    module: int,
+    context: TypeContext,
+  ): Type {
     const values = this.enumValues(module, decl);
     const point = ref.name.indexOf(kNamePoint);
     if (point < 0) {
@@ -40,6 +46,11 @@ partial class TypeResolver {
     const error = this.store.plain(TypeKind.Error);
 
     if (index < 0) {
+      this.report(context.module, ref.loc, Code.EnumTypeMemberMissing, {
+        word: decl.name,
+        other: member,
+      });
+
       return error;
     }
 

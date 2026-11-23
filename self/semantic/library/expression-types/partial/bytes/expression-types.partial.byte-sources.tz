@@ -1,0 +1,611 @@
+import { kNoPlace } from "../../../../code/expression-types/const/expression-types.const.tz";
+import {
+  CallArgument,
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NewExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import { Linear } from "../../../../code/expression-types/types/expression-types.types.tz";
+import { kZeroTerm } from "../../../../flow/bound-rules/const/bound-rules.const.tz";
+import { ByteOwner } from "../../../byte-number-rules/types/byte-number-rules.types.tz";
+import {
+  kAllocName,
+  kEndWhat,
+  kFillName,
+  kFromName,
+  kMapName,
+  kOffsetWhat,
+  kPartNames,
+  kSearchNames,
+  kSetName,
+  kSetOffsetWhat,
+  kWithName,
+} from "../../../byte-source-rules/const/byte-source-rules.const.tz";
+
+partial class ExpressionTypes {
+  private newSourceCheck(expr: NewExpr, made: Type, module: int): void {
+    const source = expr.args[0];
+    const hasSpread = expr.args.some((arg) => arg.spread);
+    if (source == undefined || hasSpread) {
+      return;
+    }
+    if (this.modules.isLibraryModule(module)) {
+      return;
+    }
+    if (this.byteNumbers.ownerOf(made) == ByteOwner.DataView) {
+      return this.dataViewCheck(expr, source.expr, module);
+    }
+
+    const name = this.byteSources.typedName(made);
+    const isLiteral = source.expr.kind == ExprKind.ArrayLit;
+    const element = this.bytes.elementOf(made);
+    if (name == undefined || element == undefined) {
+      return;
+    }
+    if (isLiteral && expr.args.length == 1) {
+      this.byteValuesChecked(source.expr, made, module);
+
+      return;
+    }
+
+    const from = this.peekType(source.expr, module);
+    const base = this.types.definedType(from);
+    if (this.byteSources.isArrayBuffer(from)) {
+      return this.typedViewCheck(expr, made, module);
+    }
+
+    const offset = expr.args[1];
+    if (offset != undefined && base.kind != TypeKind.Error) {
+      const offsetOnlyError = this.byteSources.offsetOnlyError(
+        offset.expr.loc,
+        name,
+        from,
+      );
+
+      return this.reportFound(module, offsetOnlyError);
+    }
+
+    const isLength =
+      base.kind == TypeKind.Int ||
+      base.kind == TypeKind.Double ||
+      base.kind == TypeKind.Error;
+    if (isLength) {
+      return;
+    }
+
+    this.byteSourceCheck(source.expr, from, made, module);
+  }
+
+  private byteSourceCheck(
+    source: Expr,
+    from: Type,
+    target: Type,
+    module: int,
+  ): boolean {
+    const shape = this.byteSources.sourceShape(from);
+    const name = this.byteSources.typedName(target) ?? "";
+    if (shape.element == undefined) {
+      const notSourceError = this.byteSources.notSourceError(
+        source.loc,
+        name,
+        from,
+      );
+
+      this.reportFound(module, notSourceError);
+
+      return false;
+    }
+
+    const shown = this.sources.valueText(source, module);
+    const elementError = this.byteSources.elementError(
+      source.loc,
+      target,
+      from,
+      shape,
+      shown,
+    );
+
+    this.reportFound(module, elementError);
+
+    return elementError == undefined;
+  }
+
+  private bytesStaticCheck(
+    expr: CallExpr,
+    instance: InstanceType,
+    member: MemberExpr,
+    module: int,
+  ): void {
+    if (this.modules.isLibraryModule(module)) {
+      return;
+    }
+
+    const owner = this.byteNumbers.ownerOf(instance);
+    if (owner == ByteOwner.Buffer && member.name == kAllocName) {
+      return this.allocFillCheck(expr, module);
+    }
+    if (owner == ByteOwner.Buffer || member.name != kFromName) {
+      return;
+    }
+    if (this.byteSources.typedName(instance) == undefined) {
+      return;
+    }
+
+    const source = expr.args[0];
+    const element = this.bytes.elementOf(instance);
+    if (source == undefined || source.spread || element == undefined) {
+      return;
+    }
+    if (source.expr.kind == ExprKind.ArrayLit && expr.args.length == 1) {
+      this.byteValuesChecked(source.expr, instance, module);
+
+      return;
+    }
+    if (source.expr.kind == ExprKind.ArrayLit) {
+      return;
+    }
+
+    const from = this.peekType(source.expr, module);
+    if (from.kind == TypeKind.Error) {
+      return;
+    }
+    if (expr.args.length == 1) {
+      this.byteSourceCheck(source.expr, from, instance, module);
+
+      return;
+    }
+
+    this.mappedSourceCheck(expr, source.expr, from, instance, module);
+  }
+
+  private mappedSourceCheck(
+    expr: CallExpr,
+    source: Expr,
+    from: Type,
+    instance: InstanceType,
+    module: int,
+  ): void {
+    const shape = this.byteSources.sourceShape(from);
+    const name = this.byteSources.typedName(instance) ?? "";
+    if (shape.element == undefined) {
+      const notIterableError = this.byteSources.notIterableError(
+        source.loc,
+        name,
+        from,
+      );
+
+      return this.reportFound(module, notIterableError);
+    }
+
+    const mapper = expr.args[1];
+    if (mapper == undefined || mapper.spread) {
+      return;
+    }
+
+    this.namedMapperCheck(mapper.expr, instance, module);
+  }
+
+  private namedMapperCheck(mapper: Expr, target: Type, module: int): void {
+    if (mapper.kind == ExprKind.Function) {
+      return;
+    }
+
+    const type = this.peekType(mapper, module);
+    const base = this.types.definedType(type);
+    if (base.kind != TypeKind.Function) {
+      return;
+    }
+
+    const mapFitError = this.byteSources.mapFitError(mapper.loc, target);
+
+    this.reportFound(module, mapFitError);
+  }
+
+  private allocFillCheck(expr: CallExpr, module: int): void {
+    const fill = expr.args[1];
+    if (fill == undefined || fill.spread) {
+      return;
+    }
+
+    const type = this.peekType(fill.expr, module);
+    const base = this.types.definedType(type);
+    if (base.kind == TypeKind.Error) {
+      return;
+    }
+    if (!this.byteSources.isFillValue(base)) {
+      const allocFillError = this.byteSources.allocFillError(
+        fill.expr.loc,
+        type,
+      );
+
+      return this.reportFound(module, allocFillError);
+    }
+
+    this.byteValueFitCheck(fill.expr, base, module);
+  }
+
+  private byteValueFitCheck(value: Expr, base: Type, module: int): void {
+    const info = this.byteSources.byteInfo();
+    if (base.kind != TypeKind.Int || info == undefined) {
+      return;
+    }
+
+    this.byteFitCheck(value, info, this.byteSources.byteRange(), module);
+  }
+
+  private typedSetCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type | undefined {
+    const element = this.bytes.elementOf(instance);
+    const source = expr.args[0];
+    const count = expr.args.length;
+    const isPlain =
+      count >= 1 && count <= 2 && expr.args.every((arg) => !arg.spread);
+    if (member.name != kSetName || element == undefined) {
+      return undefined;
+    }
+    if (!isPlain || source == undefined) {
+      return undefined;
+    }
+
+    const isFitting = this.setSourceTyped(
+      source.expr,
+      element,
+      instance,
+      module,
+    );
+    const offset = expr.args[1]?.expr;
+    const isPlaced = this.setOffsetTyped(offset, module);
+
+    if (isFitting && isPlaced) {
+      this.setRangeCheck(member.object, source.expr, offset, module);
+    }
+
+    return this.store.plain(TypeKind.Void);
+  }
+
+  private setSourceTyped(
+    source: Expr,
+    element: Type,
+    instance: InstanceType,
+    module: int,
+  ): boolean {
+    if (source.kind == ExprKind.ArrayLit) {
+      return this.byteValuesChecked(source, instance, module);
+    }
+
+    const from = this.typed(source, undefined, module);
+    if (from.kind == TypeKind.Error) {
+      return false;
+    }
+
+    const iteratorError = this.byteSources.setIteratorError(source.loc, from);
+    if (iteratorError != undefined) {
+      this.reportFound(module, iteratorError);
+
+      return false;
+    }
+
+    return this.byteSourceCheck(source, from, instance, module);
+  }
+
+  private byteValuesChecked(values: Expr, target: Type, module: int): boolean {
+    const before = this.errors.count();
+    const element = this.valueElement(target);
+    const wanted = this.store.arrayOf(element);
+    const given = this.checked(values, wanted, module, kNoPlace);
+
+    return given.kind != TypeKind.Error && this.errors.count() == before;
+  }
+
+  private valueElement(target: Type): Type {
+    const element = this.bytes.elementOf(target);
+    if (element == undefined || this.bytes.isClamped(target)) {
+      return this.store.integer(64, false);
+    }
+
+    return element;
+  }
+
+  private setOffsetTyped(offset: Expr | undefined, module: int): boolean {
+    if (offset == undefined) {
+      return true;
+    }
+
+    const int = this.store.integer(64, false);
+    const given = this.typed(offset, int, module);
+    return this.requireBetween(
+      offset,
+      given,
+      { what: kSetOffsetWhat, low: 0 },
+      module,
+    );
+  }
+
+  private setRangeCheck(
+    target: Expr,
+    source: Expr,
+    offset: Expr | undefined,
+    module: int,
+  ): void {
+    if (this.modules.isLibraryModule(module)) {
+      return;
+    }
+
+    const at = this.offsetLinear(offset, module);
+    const most = this.mostLength(source, module);
+    const length = this.measuredLength(target, module);
+    if (at != undefined && most != undefined && length != undefined) {
+      const sum = this.bounds.linearSum(at, most);
+      if (sum != undefined && this.isLinearUpTo(sum, length, 0)) {
+        return;
+      }
+    }
+
+    const shownOffset = this.shownOffset(offset, module);
+    const shownSource = this.sources.valueText(source, module);
+    const shownTarget = this.sources.valueText(target, module);
+    const setFitError = this.byteSources.setFitError(
+      source.loc,
+      shownOffset,
+      shownSource,
+      shownTarget,
+    );
+
+    this.reportFound(module, setFitError);
+  }
+
+  private offsetLinear(
+    offset: Expr | undefined,
+    module: int,
+  ): Linear | undefined {
+    if (offset == undefined) {
+      return { term: kZeroTerm, offset: 0 };
+    }
+
+    return this.linearOf(offset, module);
+  }
+
+  private mostLength(source: Expr, module: int): Linear | undefined {
+    switch (source.kind) {
+      case ExprKind.ArrayLit: {
+        const isPlain = source.elements.every(
+          (one) => !one.spread && !one.hole,
+        );
+        if (!isPlain) {
+          return undefined;
+        }
+
+        return { term: kZeroTerm, offset: source.elements.length.toDecimal() };
+      }
+      case ExprKind.Call:
+        return this.partLength(source, module);
+      default:
+        return (
+          this.madeLinear(source, module) ?? this.measuredLength(source, module)
+        );
+    }
+  }
+
+  private partLength(call: CallExpr, module: int): Linear | undefined {
+    const callee = call.callee;
+    const first = call.args[0]?.expr;
+    const second = call.args[1]?.expr;
+    const isPart =
+      callee.kind == ExprKind.Member &&
+      kPartNames.includes(callee.name) &&
+      call.args.length == 2;
+    if (!isPart || first == undefined || second == undefined) {
+      return undefined;
+    }
+
+    const from = this.partBound(first, module);
+    const to = this.partBound(second, module);
+    if (from == undefined || to == undefined || from < 0 || to < from) {
+      return undefined;
+    }
+
+    return { term: kZeroTerm, offset: to - from };
+  }
+
+  private partBound(value: Expr, module: int): decimal | undefined {
+    const given = this.peekType(value, module);
+
+    return this.intConstant(value, given, module);
+  }
+
+  private byteMethodCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): void {
+    if (this.modules.isLibraryModule(module)) {
+      return;
+    }
+    if (expr.args.some((arg) => arg.spread)) {
+      return;
+    }
+
+    const name = member.name;
+    const isTyped = this.byteSources.typedName(instance) != undefined;
+    const mapper = expr.args[0];
+    if (isTyped && name == kWithName) {
+      return this.withIndexCheck(expr, member, module);
+    }
+    if (isTyped && name == kMapName && mapper != undefined) {
+      return this.namedMapperCheck(mapper.expr, instance, module);
+    }
+    if (this.byteNumbers.ownerOf(instance) != ByteOwner.Buffer) {
+      return;
+    }
+    if (name == kFillName || kSearchNames.includes(name)) {
+      return this.bufferValueCheck(expr, member, module);
+    }
+
+    this.bufferPositionsCheck(expr, member, module);
+  }
+
+  private withIndexCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): void {
+    const index = expr.args[0];
+    if (index == undefined) {
+      return;
+    }
+
+    const given = this.peekType(index.expr, module);
+    if (given.kind == TypeKind.Error) {
+      return;
+    }
+    if (this.isAtInBounds(member.object, index.expr, module)) {
+      return;
+    }
+
+    const shown = this.sources.valueText(member.object, module);
+    const withIndexError = this.byteSources.withIndexError(
+      index.expr.loc,
+      shown,
+    );
+
+    this.reportFound(module, withIndexError);
+  }
+
+  private isAtInBounds(object: Expr, index: Expr, module: int): boolean {
+    const at = this.linearOf(index, module);
+    const length = this.measuredLength(object, module);
+    const isFromEnd =
+      at != undefined &&
+      length != undefined &&
+      at.term == kZeroTerm &&
+      at.offset < 0;
+    if (isFromEnd && at != undefined && length != undefined) {
+      const room = -(length.offset + at.offset);
+
+      return this.canProve(kZeroTerm, length.term, room);
+    }
+
+    return this.isProvenIndex(object, index, module);
+  }
+
+  private bufferValueCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): void {
+    const value = expr.args[0];
+    if (value == undefined) {
+      return;
+    }
+
+    const type = this.peekType(value.expr, module);
+    const base = this.types.definedType(type);
+    if (base.kind == TypeKind.Error) {
+      return;
+    }
+    if (!this.byteSources.isFillValue(base)) {
+      const valueArgumentError = this.byteSources.valueArgumentError(
+        value.expr.loc,
+        member.name,
+        type,
+      );
+
+      return this.reportFound(module, valueArgumentError);
+    }
+    if (member.name != kFillName) {
+      return;
+    }
+
+    this.byteValueFitCheck(value.expr, base, module);
+    this.fillPositionsCheck(expr.args, member.object, module);
+  }
+
+  private fillPositionsCheck(
+    args: CallArgument[],
+    buffer: Expr,
+    module: int,
+  ): void {
+    for (let index = 1; index < args.length && index < 3; index++) {
+      const position = args[index]?.expr;
+      if (position == undefined) {
+        return;
+      }
+
+      const type = this.peekType(position, module);
+      const base = this.types.definedType(type);
+      if (base.kind == TypeKind.String) {
+        return;
+      }
+
+      const what = this.fillWhat(index);
+
+      this.requireUpTo(position, buffer, { what, less: 0 }, module);
+    }
+  }
+
+  private fillWhat(index: int): string {
+    if (index == 1) {
+      return kOffsetWhat;
+    }
+
+    return kEndWhat;
+  }
+
+  private bufferPositionsCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): void {
+    const positions = this.byteSources.positionsOf(member.name);
+    const target = expr.args[0]?.expr;
+    if (positions.length == 0 || target == undefined) {
+      return;
+    }
+
+    for (let index = 1; index < expr.args.length; index++) {
+      const position = positions[index - 1];
+      const value = expr.args[index]?.expr;
+      if (position == undefined || value == undefined) {
+        continue;
+      }
+
+      const what = `'${position.name}'`;
+      if (!position.isEnd) {
+        const given = this.peekType(value, module);
+
+        this.requireBetween(value, given, { what, low: 0 }, module);
+
+        continue;
+      }
+
+      const array = this.positionArray(position.isTarget, target, member);
+
+      this.requireUpTo(value, array, { what, less: 0 }, module);
+    }
+  }
+
+  private positionArray(
+    isTarget: boolean,
+    target: Expr,
+    member: MemberExpr,
+  ): Expr {
+    if (isTarget) {
+      return target;
+    }
+
+    return member.object;
+  }
+}

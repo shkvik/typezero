@@ -1,8 +1,24 @@
+import { ViewShape } from "./types/expression-shapes.types.tz";
+import {
+  kAllocNames,
+  kArrayBufferName,
+  kBufferName,
+  kByteViewClasses,
+  kContextFunctions,
+  kCopyNames,
+  kUtf8Names,
+  kContextObjects,
+  kEmbedBytesName,
+  kLengthName,
+  kSizedClasses,
+} from "./const/expression-shapes.const.tz";
 import {
   ArrayLitExpr,
   BinaryOp,
+  CallExpr,
   Expr,
   ExprKind,
+  NewKind,
   ObjectLitExpr,
   PropertyKind,
   UnaryOp,
@@ -15,11 +31,6 @@ import {
   Stmt,
   StmtKind,
 } from "../../../program/ast/types/ast.types.statements.tz";
-import {
-  kContextFunctions,
-  kContextObjects,
-  kLengthName,
-} from "./const/expression-shapes.const.tz";
 
 export class ExpressionShapes {
   public isNumberLiteral(expr: Expr): boolean {
@@ -311,6 +322,130 @@ export class ExpressionShapes {
     }
   }
 
+  public madeSize(value: Expr): Expr | undefined {
+    if (value.kind != ExprKind.New) {
+      return undefined;
+    }
+
+    const form = value.form;
+    if (form.kind != NewKind.Named) {
+      return undefined;
+    }
+
+    const size = value.args[0];
+    const isSized =
+      kSizedClasses.includes(form.name) &&
+      form.member == undefined &&
+      value.args.length == 1;
+    if (!isSized || size == undefined || size.spread) {
+      return undefined;
+    }
+
+    return size.expr;
+  }
+
+  public madeCount(value: Expr): int | undefined {
+    const size = this.madeSize(value);
+    if (size == undefined || size.kind != ExprKind.ArrayLit) {
+      return undefined;
+    }
+
+    const isPlain = size.elements.every((one) => !one.spread && !one.hole);
+    if (!isPlain) {
+      return undefined;
+    }
+
+    return size.elements.length;
+  }
+
+  public embeddedPath(value: Expr): string | undefined {
+    if (value.kind != ExprKind.Call) {
+      return undefined;
+    }
+
+    const callee = value.callee;
+    const path = value.args[0]?.expr;
+    const isEmbed =
+      callee.kind == ExprKind.Name &&
+      callee.name == kEmbedBytesName &&
+      value.args.length == 1;
+    if (!isEmbed || path == undefined || path.kind != ExprKind.StringLit) {
+      return undefined;
+    }
+
+    return path.value;
+  }
+
+  public allocatedSize(value: Expr): Expr | undefined {
+    const call = this.bufferCall(value, kAllocNames);
+    const size = call?.args[0];
+    if (size == undefined || size.spread) {
+      return undefined;
+    }
+
+    return size.expr;
+  }
+
+  public copiedSource(value: Expr): Expr | undefined {
+    const call = this.bufferCall(value, kCopyNames);
+    const source = call?.args[0];
+    if (call == undefined || source == undefined || source.spread) {
+      return undefined;
+    }
+
+    const encoding = call.args[1]?.expr;
+    const isPlain =
+      encoding == undefined ||
+      (encoding.kind == ExprKind.StringLit &&
+        kUtf8Names.includes(encoding.value));
+    if (!isPlain || call.args.length > 2) {
+      return undefined;
+    }
+
+    return source.expr;
+  }
+
+  public viewOf(value: Expr): ViewShape | undefined {
+    if (value.kind != ExprKind.New) {
+      return undefined;
+    }
+
+    const form = value.form;
+    if (form.kind != NewKind.Named) {
+      return undefined;
+    }
+
+    const buffer = value.args[0];
+    const isView =
+      kByteViewClasses.includes(form.name) &&
+      form.member == undefined &&
+      value.args.length <= 3 &&
+      value.args.every((arg) => !arg.spread);
+    if (!isView || buffer == undefined) {
+      return undefined;
+    }
+
+    return {
+      name: form.name,
+      buffer: buffer.expr,
+      offset: value.args[1]?.expr,
+      length: value.args[2]?.expr,
+    };
+  }
+
+  public madeBuffer(value: Expr): Expr | undefined {
+    if (value.kind != ExprKind.New) {
+      return undefined;
+    }
+
+    const form = value.form;
+    if (form.kind != NewKind.Named || form.name != kArrayBufferName) {
+      return undefined;
+    }
+
+    return this.madeSize(value);
+  }
+
   private isArithmetic(op: BinaryOp): boolean {
     return op == BinaryOp.Div || this.isWholeArithmetic(op);
   }
@@ -372,5 +507,27 @@ export class ExpressionShapes {
       default:
         return false;
     }
+  }
+
+  private bufferCall(value: Expr, names: string[]): CallExpr | undefined {
+    if (value.kind != ExprKind.Call) {
+      return undefined;
+    }
+
+    const callee = value.callee;
+    if (callee.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    const owner = callee.object;
+    const isMaker =
+      owner.kind == ExprKind.Name &&
+      owner.name == kBufferName &&
+      names.includes(callee.name);
+    if (!isMaker) {
+      return undefined;
+    }
+
+    return value;
   }
 }

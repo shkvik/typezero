@@ -1,0 +1,24 @@
+import { ProofRange } from "../../../flow/proof-rules/types/proof-rules.types.tz";
+
+export const kPlacesRange: ProofRange = {
+  what: "the number of decimal places",
+  low: -1000000000,
+  high: 1000000000,
+};
+export const kPositivePlacesRange: ProofRange = {
+  what: "the number of decimal places",
+  low: 0,
+  high: 1000000000,
+};
+export const kDigitsRange: ProofRange = {
+  what: "the number of significant digits",
+  low: 1,
+  high: 1000000000,
+};
+export const kBaseRange: ProofRange = { what: "the base", low: 2, high: 36 };
+export const kPowerRange: ProofRange = {
+  what: "the power of ten",
+  low: -9007199254740991,
+  high: 9007199254740991,
+};
+export const kPositivePlacesMethods = ["div", "toExponential"];

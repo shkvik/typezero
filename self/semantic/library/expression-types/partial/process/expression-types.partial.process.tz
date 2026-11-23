@@ -1,0 +1,223 @@
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  AssignExpr,
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import {
+  kExitCodeName,
+  kProcessName,
+  kTtyName,
+} from "../../../process-rules/const/process-rules.const.tz";
+
+partial class ExpressionTypes {
+  private isProcessName(expr: Expr, module: int): boolean {
+    return (
+      expr.kind == ExprKind.Name &&
+      expr.name == kProcessName &&
+      this.isGlobalUse(expr, module)
+    );
+  }
+
+  private processMemberRead(expr: MemberExpr, module: int): boolean {
+    if (!this.isProcessName(expr.object, module)) {
+      return this.streamPartRead(expr, module);
+    }
+    if (this.modules.isLibraryModule(module)) {
+      return false;
+    }
+
+    const name = expr.name;
+    if (this.process.isValueMember(name)) {
+      return false;
+    }
+
+    const code = this.process.valueCode(name);
+
+    this.report(module, expr.loc, code, { word: name });
+
+    return true;
+  }
+
+  private streamPartRead(expr: MemberExpr, module: int): boolean {
+    const stream = this.streamName(expr.object, module);
+    if (stream == undefined || !this.process.isStreamPart(expr.name)) {
+      return false;
+    }
+
+    this.report(module, expr.loc, Code.ProcessStreamPart, {
+      word: stream,
+      first: expr.name,
+    });
+
+    return true;
+  }
+
+  private streamName(expr: Expr, module: int): string | undefined {
+    if (
+      expr.kind != ExprKind.Member ||
+      !this.isProcessName(expr.object, module)
+    ) {
+      return undefined;
+    }
+    if (!this.process.isStream(expr.name)) {
+      return undefined;
+    }
+
+    return `${kProcessName}.${expr.name}`;
+  }
+
+  private processCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): Type | undefined {
+    const stream = this.streamName(member.object, module);
+    if (stream != undefined && member.name == kTtyName) {
+      this.report(module, member.loc, Code.ProcessTtyValue, { word: stream });
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (!this.isProcessName(member.object, module)) {
+      return undefined;
+    }
+    if (this.modules.isLibraryModule(module)) {
+      return undefined;
+    }
+
+    const name = member.name;
+    if (this.process.isSignalMember(name)) {
+      return this.signalCall(expr, member, module);
+    }
+    if (this.process.isPlainCall(name)) {
+      return undefined;
+    }
+
+    const code = this.process.callCode(name);
+
+    this.report(module, member.loc, code, { word: name });
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private signalCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): Type | undefined {
+    const event = expr.args[0];
+    if (event == undefined || expr.args.length != 2 || event.spread) {
+      return undefined;
+    }
+
+    const written = this.textCoders.literalLabel(event.expr);
+    const isThrown =
+      written != undefined &&
+      this.process.isThrownListener(member.name, written);
+    if (isThrown) {
+      this.report(module, event.expr.loc, Code.ProcessNoThrown, kNoDetails);
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (written != undefined && !this.process.isSignal(written)) {
+      this.report(module, event.expr.loc, Code.ProcessSignal, {
+        word: member.name,
+        first: written,
+      });
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.memberObjects.add(member.object);
+
+    const object = this.typed(member.object, undefined, module);
+    const found = this.processMethod(object, member.name);
+    if (found == undefined || found.kind != TypeKind.Function) {
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Void);
+    }
+
+    const params = found.shape.params;
+
+    for (let index = 0; index < expr.args.length; index++) {
+      const arg = expr.args[index];
+      const param = params[index];
+      if (arg != undefined && param != undefined) {
+        this.checked(arg.expr, param.type, module, "");
+      }
+    }
+
+    return found.shape.result;
+  }
+
+  private processMethod(object: Type, name: string): Type | undefined {
+    const base = this.types.definedType(object);
+    if (base.kind != TypeKind.Object) {
+      return undefined;
+    }
+
+    const field = base.fields.find((one) => one.name == name);
+
+    return field?.type;
+  }
+
+  private processAssignCheck(expr: AssignExpr, module: int): boolean {
+    const target = expr.target;
+    if (target.kind != ExprKind.Member) {
+      return false;
+    }
+    if (!this.isProcessName(target.object, module)) {
+      return this.streamAssignCheck(expr, target, module);
+    }
+    if (target.name != kExitCodeName) {
+      this.report(module, target.loc, Code.ProcessAssigned, {
+        word: target.name,
+      });
+      this.typed(expr.value, undefined, module);
+
+      return true;
+    }
+    if (expr.op != undefined) {
+      this.report(module, expr.loc, Code.ProcessExitCodeOp, kNoDetails);
+      this.typed(expr.value, undefined, module);
+
+      return true;
+    }
+
+    const int = this.store.integer(64, false);
+
+    this.checked(expr.value, int, module, "");
+
+    return true;
+  }
+
+  private streamAssignCheck(
+    expr: AssignExpr,
+    target: MemberExpr,
+    module: int,
+  ): boolean {
+    const stream = this.streamName(target.object, module);
+    const object = target.object;
+    if (stream == undefined || object.kind != ExprKind.Member) {
+      return false;
+    }
+
+    this.report(module, target.loc, Code.ProcessChanged, { word: object.name });
+    this.typed(expr.value, undefined, module);
+
+    return true;
+  }
+}

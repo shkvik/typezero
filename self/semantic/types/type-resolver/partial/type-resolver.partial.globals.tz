@@ -38,6 +38,10 @@ partial class TypeResolver {
     return this.fromModule(ref, mentioned, ref.name, context);
   }
 
+  public namespaceModule(word: string): int | undefined {
+    return this.namespaces.get(word);
+  }
+
   private mentionedModule(name: string): int | undefined {
     const row = kLibrary.global(name);
     if (row == undefined) {
@@ -103,9 +107,39 @@ partial class TypeResolver {
       return this.store.plain(TypeKind.Error);
     }
 
+    if (this.isWeakTargetWrong(ref, name, written, context)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
     const parents = this.parentRefs(declared.base, declared.implemented);
     const home: ClassHome = { module, name, loc: declared.loc };
 
     return this.instance(home, params, written, parents);
+  }
+
+  private isWeakTargetWrong(
+    ref: TypeRef,
+    name: string,
+    written: Type[],
+    context: TypeContext,
+  ): boolean {
+    const target = written[0];
+    const place = ref.args[0];
+    const isWeak =
+      this.weakRefs.isWeakRefName(name) && !this.isLibrary(context.module);
+    if (!isWeak || target == undefined || place == undefined) {
+      return false;
+    }
+
+    const targetError = this.weakRefs.targetError(place.loc, target);
+    if (targetError == undefined) {
+      return false;
+    }
+
+    const { loc, code, details } = targetError;
+
+    this.report(context.module, loc, code, details);
+
+    return true;
   }
 }

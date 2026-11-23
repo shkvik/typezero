@@ -69,6 +69,7 @@ partial class ExpressionTypes {
     const checked = this.operators.parameterArithmetic(expr, pair);
 
     this.reportFound(module, checked.error);
+    this.requireJoin(expr, pair);
 
     return checked.value;
   }

@@ -1,3 +1,9 @@
+import {
+  ComparedPair,
+  ComparedSide,
+  OperandPair,
+  RequirementKind,
+} from "../../types/expression-types.types.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import {
@@ -10,11 +16,6 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import {
-  ComparedPair,
-  ComparedSide,
-  OperandPair,
-} from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private equalityTyped(expr: BinaryExpr, module: int): Type {
@@ -80,6 +81,11 @@ partial class ExpressionTypes {
     const hasParameter =
       plainLeft.kind == TypeKind.TypeParameter ||
       plainRight.kind == TypeKind.TypeParameter;
+    if (hasParameter && plainLeft == plainRight) {
+      const word = this.sources.operatorText(expr.op);
+
+      return this.requireOf(plainLeft, RequirementKind.Compare, word);
+    }
     if (hasParameter) {
       return;
     }
@@ -183,6 +189,10 @@ partial class ExpressionTypes {
     const isSameParameter =
       written.kind == TypeKind.TypeParameter && written == sides.right.type;
     if (isSameParameter) {
+      const word = this.sources.operatorText(expr.op);
+
+      this.requireOf(written, RequirementKind.Compare, word);
+
       return boolean;
     }
 

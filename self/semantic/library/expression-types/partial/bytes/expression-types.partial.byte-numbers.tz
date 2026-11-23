@@ -1,0 +1,191 @@
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  CallExpr,
+  Expr,
+  MemberExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  InstanceType,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import { ProofRange } from "../../../../flow/proof-rules/types/proof-rules.types.tz";
+import { kSliceName } from "../../../byte-number-rules/const/byte-number-rules.const.tz";
+import {
+  ByteKindInfo,
+  ByteOwner,
+  NumberMethod,
+  NumberPlaces,
+} from "../../../byte-number-rules/types/byte-number-rules.types.tz";
+
+partial class ExpressionTypes {
+  private refusedByteCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): boolean {
+    const owner = this.byteNumbers.ownerOf(instance);
+    if (owner == undefined) {
+      return false;
+    }
+
+    const word = member.name;
+    const method = this.byteNumbers.methodOf(word, owner);
+    if (method != undefined && method.isBigInt) {
+      this.report(module, member.loc, Code.NoBigint, { word });
+      this.looseArguments(expr.args, module);
+
+      return true;
+    }
+    if (owner == ByteOwner.Buffer && word == kSliceName) {
+      this.report(module, member.loc, Code.BufferSlice, kNoDetails);
+      this.looseArguments(expr.args, module);
+
+      return true;
+    }
+
+    return false;
+  }
+
+  private byteNumberCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): void {
+    const owner = this.byteNumbers.ownerOf(instance);
+    if (owner == undefined) {
+      return;
+    }
+
+    const method = this.byteNumbers.methodOf(member.name, owner);
+    if (method == undefined || method.isBigInt) {
+      return;
+    }
+    if (method.isVariable) {
+      return this.variableNumberCheck(expr, member, method, module);
+    }
+
+    const info = this.byteNumbers.infoOf(method);
+    if (info == undefined) {
+      return;
+    }
+
+    const places = this.byteNumbers.placesOf(method, owner, info.size);
+    if (!this.isPlacedCall(expr, places)) {
+      return;
+    }
+
+    const value = this.placedArgument(expr, places.value);
+    const range = info.range;
+    if (value != undefined && range != undefined) {
+      this.byteFitCheck(value, info, range, module);
+    }
+
+    const offset = this.placedArgument(expr, places.offset);
+    const what = `the offset of '${member.name}'`;
+
+    this.requireUpTo(offset, member.object, { what, less: info.size }, module);
+  }
+
+  private variableNumberCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    method: NumberMethod,
+    module: int,
+  ): void {
+    const places = this.byteNumbers.placesOf(method, ByteOwner.Buffer, 0);
+    const count = this.placedArgument(expr, places.count);
+    const offset = this.placedArgument(expr, places.offset);
+    const isPlaced = this.isPlacedCall(expr, places);
+    if (!isPlaced || count == undefined || offset == undefined) {
+      return;
+    }
+
+    const given = this.peekType(count, module);
+    const constant = this.intConstant(count, given, module);
+    const width = this.byteNumbers.countOf(constant);
+    if (width == undefined) {
+      const countError = this.byteNumbers.countError(count.loc, member.name);
+
+      return this.reportFound(module, countError);
+    }
+
+    const what = `the offset of '${member.name}'`;
+
+    this.requireUpTo(offset, member.object, { what, less: width }, module);
+
+    const value = this.placedArgument(expr, places.value);
+    if (value == undefined) {
+      return;
+    }
+
+    const range = this.byteNumbers.variableRange(width, method.isSigned);
+    if (this.isFittingValue(value, range, module)) {
+      return;
+    }
+
+    const variableError = this.byteNumbers.variableError(value.loc, range);
+
+    this.reportFound(module, variableError);
+  }
+
+  private isPlacedCall(expr: CallExpr, places: NumberPlaces): boolean {
+    const count = expr.args.length;
+    const hasSpread = expr.args.some((arg) => arg.spread);
+
+    return !hasSpread && count >= places.least && count <= places.most;
+  }
+
+  private placedArgument(
+    expr: CallExpr,
+    place: int | undefined,
+  ): Expr | undefined {
+    if (place == undefined) {
+      return undefined;
+    }
+
+    return expr.args[place]?.expr;
+  }
+
+  private isFittingValue(value: Expr, range: ProofRange, module: int): boolean {
+    const given = this.peekType(value, module);
+    const base = this.types.definedType(given);
+    if (base.kind != TypeKind.Int) {
+      return true;
+    }
+    if (this.canProveBetween(value, range, module)) {
+      return true;
+    }
+
+    const constant = this.intConstant(value, given, module);
+
+    return constant != undefined && this.proofs.isInside(constant, range);
+  }
+
+  private byteFitCheck(
+    value: Expr,
+    info: ByteKindInfo,
+    range: ProofRange,
+    module: int,
+  ): void {
+    if (this.isFittingValue(value, range, module)) {
+      return;
+    }
+
+    const given = this.peekType(value, module);
+    const constant = this.intConstant(value, given, module);
+    const shown = this.sources.valueText(value, module);
+    const fitError = this.byteNumbers.fitError(
+      value.loc,
+      info,
+      range,
+      constant,
+      shown,
+    );
+
+    this.reportFound(module, fitError);
+  }
+}

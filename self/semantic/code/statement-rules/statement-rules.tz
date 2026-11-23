@@ -1,4 +1,19 @@
 import {
+  ForOfStmt,
+  ReturnStmt,
+  Stmt,
+  StmtKind,
+  SwitchStmt,
+} from "../../../program/ast/types/ast.types.statements.tz";
+import {
+  kForAwaitWord,
+  kForInWord,
+  kForOfWord,
+  kLastAndSeparator,
+  kPromisePlaceholder,
+  kTakingMethods,
+} from "./const/statement-rules.const.tz";
+import {
   Checked,
   SourceError,
 } from "../../../diagnostic/types/message.types.tz";
@@ -9,13 +24,6 @@ import {
   MemberExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
-import {
-  ForOfStmt,
-  ReturnStmt,
-  Stmt,
-  StmtKind,
-  SwitchStmt,
-} from "../../../program/ast/types/ast.types.statements.tz";
 import { SymbolKind } from "../../../program/scopes/types/scopes.types.tz";
 import {
   DictKind,
@@ -39,11 +47,6 @@ import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { TypeRelation } from "../../types/type-relation/type-relation.tz";
 import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
 import { ModuleQuestions } from "../../declaration/module-questions/module-questions.tz";
-import {
-  kLastAndSeparator,
-  kPromisePlaceholder,
-  kTakingMethods,
-} from "./const/statement-rules.const.tz";
 
 export class StatementRules {
   private readonly store: TypeStore;
@@ -523,6 +526,31 @@ export class StatementRules {
     }
 
     return errors;
+  }
+
+  public loopWord(loop: ForOfStmt): string {
+    if (loop.isAwait) {
+      return kForAwaitWord;
+    }
+    if (loop.keys) {
+      return kForInWord;
+    }
+
+    return kForOfWord;
+  }
+
+  public untypedCode(first: string, isUndefined: boolean): Code {
+    if (first != "" && isUndefined) {
+      return Code.UndefinedLetWriteType;
+    }
+    if (first != "") {
+      return Code.VariableWriteType;
+    }
+    if (isUndefined) {
+      return Code.UndefinedLetNeedsType;
+    }
+
+    return Code.VariableNeedsType;
   }
 
   private namedTarget(

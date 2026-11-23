@@ -1,3 +1,4 @@
+import { RequirementKind } from "../../types/expression-types.types.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
@@ -32,6 +33,9 @@ partial class ExpressionTypes {
     if (held.kind != defined.kind) {
       return;
     }
+
+    this.requireOf(defined, RequirementKind.Unused, "");
+
     if (defined.kind == TypeKind.Promise) {
       const promiseUsedError = this.statements.promiseUsedError(
         expr,
@@ -96,11 +100,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.errors.beginTrial();
-
-    const object = this.typed(callee.object, undefined, module);
-
-    this.errors.endTrial();
+    const object = this.peekType(callee.object, module);
 
     const base = this.types.definedType(object);
 

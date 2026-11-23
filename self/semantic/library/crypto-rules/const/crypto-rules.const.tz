@@ -1,0 +1,282 @@
+import { ProofRange } from "../../../flow/proof-rules/types/proof-rules.types.tz";
+import { CryptoClass, CryptoDataKinds } from "../types/crypto-rules.types.tz";
+
+export const kCryptoModules = ["node:crypto", "tz:crypto"];
+export const kAsyncCryptoNames = [
+  "pbkdf2",
+  "scrypt",
+  "argon2",
+  "hkdf",
+  "randomFill",
+  "generateKeyPair",
+  "generateKey",
+  "generatePrime",
+  "checkPrime",
+  "randomBytesAsync",
+  "randomIntAsync",
+  "signAsync",
+  "verifyAsync",
+  "diffieHellmanAsync",
+];
+export const kSyncCryptoNames = [
+  "pbkdf2Sync",
+  "scryptSync",
+  "argon2Sync",
+  "hkdfSync",
+  "randomFillSync",
+  "generateKeyPairSync",
+  "generateKeySync",
+  "generatePrimeSync",
+  "checkPrimeSync",
+  "randomBytes",
+  "randomInt",
+  "sign",
+  "verify",
+  "diffieHellman",
+];
+export const kCcmMode = "ccm";
+export const kKeyBytesNames = ["Buffer", "Uint8Array"];
+export const kIterationsName = "iterations";
+export const kKeylenName = "keylen";
+export const kCostNames = ["N", "cost"];
+export const kTagLengthName = "authTagLength";
+export const kHashOptions = ["outputLength"];
+export const kCipherOptions = ["authTagLength"];
+export const kScryptOptions = [
+  "N",
+  "r",
+  "p",
+  "maxmem",
+  "cost",
+  "blockSize",
+  "parallelization",
+];
+export const kUuidOptions = ["disableEntropyCache"];
+export const kPairOptions = [
+  "modulusLength",
+  "publicExponent",
+  "namedCurve",
+  "publicKeyEncoding",
+  "privateKeyEncoding",
+  "divisorLength",
+  "hashAlgorithm",
+  "mgf1HashAlgorithm",
+  "saltLength",
+];
+export const kPairUnsupported = [
+  "hashAlgorithm",
+  "mgf1HashAlgorithm",
+  "saltLength",
+];
+export const kPairTypes = [
+  "rsa",
+  "rsa-pss",
+  "dsa",
+  "ec",
+  "ed25519",
+  "ed448",
+  "x25519",
+  "x448",
+];
+export const kPairTypeLabel = "type of the key pair";
+export const kModulusTypes = ["rsa", "rsa-pss", "dsa"];
+export const kRsaTypes = ["rsa", "rsa-pss"];
+export const kCurveTypes = ["ec"];
+export const kModulusOption = "modulusLength";
+export const kCurveOption = "namedCurve";
+export const kSmallestModulus = 512;
+export const kBytesHint = "'const bytes = randomBytes(n)'";
+export const kIntHint = "'const n = randomInt(max)'";
+export const kSignHint = "'const signature = sign(algorithm, data, key)'";
+export const kVerifyHint =
+  "'const ok = verify(algorithm, data, key, signature)'";
+export const kCryptoClasses = [
+  "Hash",
+  "Hmac",
+  "Cipheriv",
+  "Decipheriv",
+  "KeyObject",
+  "Sign",
+  "Verify",
+  "ECDH",
+  "X509Certificate",
+];
+export const kCertificateClass = "X509Certificate";
+export const kCryptoClassShapes: CryptoClass[] = [
+  {
+    name: "Hash",
+    methods: ["update", "digest", "copy"],
+    properties: [],
+    text: "'update', 'digest' and 'copy'",
+    isStream: true,
+    instead: "'update(data)' and 'digest()'",
+  },
+  {
+    name: "Hmac",
+    methods: ["update", "digest"],
+    properties: [],
+    text: "'update' and 'digest'",
+    isStream: true,
+    instead: "'update(data)' and 'digest()'",
+  },
+  {
+    name: "Cipheriv",
+    methods: ["update", "final", "setAAD", "getAuthTag", "setAutoPadding"],
+    properties: [],
+    text: "'update', 'final', 'setAAD', 'getAuthTag' and 'setAutoPadding'",
+    isStream: true,
+    instead: "'update(data)' and 'final()'",
+  },
+  {
+    name: "Decipheriv",
+    methods: ["update", "final", "setAAD", "setAuthTag", "setAutoPadding"],
+    properties: [],
+    text: "'update', 'final', 'setAAD', 'setAuthTag' and 'setAutoPadding'",
+    isStream: true,
+    instead: "'update(data)' and 'final()'",
+  },
+  {
+    name: "KeyObject",
+    methods: ["export", "equals"],
+    properties: [
+      "type",
+      "asymmetricKeyType",
+      "symmetricKeySize",
+      "asymmetricKeyDetails",
+    ],
+    text: "'export' and 'equals', and the properties 'type', 'asymmetricKeyType' and 'symmetricKeySize'",
+    isStream: false,
+    instead: "",
+  },
+  {
+    name: "Sign",
+    methods: ["update", "sign"],
+    properties: [],
+    text: "'update' and 'sign'",
+    isStream: true,
+    instead: "'update(data)' and 'sign(key)'",
+  },
+  {
+    name: "Verify",
+    methods: ["update", "verify"],
+    properties: [],
+    text: "'update' and 'verify'",
+    isStream: true,
+    instead: "'update(data)' and 'verify(key, signature)'",
+  },
+  {
+    name: "ECDH",
+    methods: [
+      "generateKeys",
+      "computeSecret",
+      "getPublicKey",
+      "getPrivateKey",
+      "setPrivateKey",
+    ],
+    properties: [],
+    text: "'generateKeys', 'computeSecret', 'getPublicKey', 'getPrivateKey' and 'setPrivateKey'",
+    isStream: false,
+    instead: "",
+  },
+  {
+    name: "X509Certificate",
+    methods: [
+      "checkHost",
+      "checkEmail",
+      "checkIP",
+      "checkIssued",
+      "checkPrivateKey",
+      "verify",
+      "toString",
+      "toJSON",
+    ],
+    properties: [
+      "subject",
+      "issuer",
+      "validFrom",
+      "validTo",
+      "validFromDate",
+      "validToDate",
+      "serialNumber",
+      "fingerprint",
+      "fingerprint256",
+      "fingerprint512",
+      "subjectAltName",
+      "infoAccess",
+      "keyUsage",
+      "ca",
+      "raw",
+      "publicKey",
+      "issuerCertificate",
+    ],
+    text: "'checkHost', 'checkEmail', 'checkIP', 'checkIssued', 'checkPrivateKey', 'verify', 'toString' and 'toJSON', and the properties 'subject', 'issuer', 'subjectAltName', 'infoAccess', 'validFrom', 'validTo', 'validFromDate', 'validToDate', 'serialNumber', 'fingerprint', 'fingerprint256', 'fingerprint512', 'keyUsage', 'ca', 'raw' and 'publicKey'",
+    isStream: false,
+    instead: "",
+  },
+];
+export const kStreamMethods = [
+  "write",
+  "end",
+  "pipe",
+  "unpipe",
+  "read",
+  "on",
+  "once",
+  "off",
+  "emit",
+  "pause",
+  "resume",
+  "setEncoding",
+  "destroy",
+  "addListener",
+  "cork",
+  "uncork",
+  "removeListener",
+  "setDefaultEncoding",
+];
+export const kKeyDetailsName = "asymmetricKeyDetails";
+export const kIssuerCertificateName = "issuerCertificate";
+export const kAnyCryptoData: CryptoDataKinds = {
+  isString: true,
+  isKey: true,
+  isArrayBuffer: true,
+};
+export const kTextOrBuffers: CryptoDataKinds = {
+  isString: true,
+  isKey: false,
+  isArrayBuffer: true,
+};
+export const kTextOrViews: CryptoDataKinds = {
+  isString: true,
+  isKey: false,
+  isArrayBuffer: false,
+};
+export const kBuffersOnly: CryptoDataKinds = {
+  isString: false,
+  isKey: false,
+  isArrayBuffer: true,
+};
+export const kKeyObjectClass = "KeyObject";
+export const kFloatArrays = ["Float16Array", "Float32Array", "Float64Array"];
+export const kGlobalCryptoName = "crypto";
+export const kGlobalCryptoMembers = ["randomUUID", "getRandomValues", "subtle"];
+export const kGlobalCryptoCalls = ["randomUUID", "getRandomValues"];
+export const kUpdateName = "update";
+export const kDigestName = "digest";
+export const kHashClasses = ["Hash", "Hmac"];
+export const kCipherClasses = ["Cipheriv", "Decipheriv"];
+export const kRandomSizeRange: ProofRange = {
+  what: "the size",
+  low: 0,
+  high: 2147483647,
+};
+export const kSizeRange: ProofRange = { what: "the size", low: 0 };
+export const kOffsetRange: ProofRange = { what: "the offset", low: 0 };
+export const kKeyBitsRange: ProofRange = {
+  what: "the length of the key",
+  low: 8,
+};
+export const kSecretKeyTypes = ["hmac", "aes"];
+export const kSecretTypeLabel = "type of the key";
+export const kAesKeyType = "aes";
+export const kKeyLengthOption = "length";

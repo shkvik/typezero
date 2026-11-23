@@ -462,7 +462,7 @@ partial class ExpressionTypes {
       case TypeKind.Array:
         return true;
       case TypeKind.Dict:
-        return this.classes.hasEmptyCollection(type.dict, written);
+        return this.classValues.hasEmptyCollection(type.dict, written);
       case TypeKind.Union:
         return type.parts.every((part) => part.kind == TypeKind.Literal);
       case TypeKind.Instance:

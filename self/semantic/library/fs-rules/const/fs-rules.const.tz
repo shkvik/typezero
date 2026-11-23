@@ -1,0 +1,137 @@
+import { FsCall, FsShape } from "../types/fs-rules.types.tz";
+
+export const kFsModule = "node:fs";
+export const kConstantsName = "constants";
+export const kEncodingOption = "encoding";
+export const kFlagOption = "flag";
+export const kBigintOption = "bigint";
+export const kUtf8Names = ["utf8", "utf-8"];
+export const kFsConstants = [
+  "F_OK",
+  "R_OK",
+  "W_OK",
+  "X_OK",
+  "COPYFILE_EXCL",
+  "COPYFILE_FICLONE",
+  "COPYFILE_FICLONE_FORCE",
+];
+export const kOpenFlags = [
+  "r",
+  "rs",
+  "sr",
+  "r+",
+  "rs+",
+  "sr+",
+  "w",
+  "wx",
+  "xw",
+  "w+",
+  "wx+",
+  "xw+",
+  "a",
+  "ax",
+  "xa",
+  "as",
+  "sa",
+  "a+",
+  "ax+",
+  "xa+",
+  "as+",
+  "sa+",
+];
+export const kFlagsText =
+  "'r', 'r+', 'w', 'wx', 'w+', 'wx+', 'a', 'ax', 'a+', 'ax+', and with 's' for synchronous writes 'rs', 'rs+', 'as', 'as+'";
+export const kFlagOptions = ["withFileTypes", "throwIfNoEntry", "bigint"];
+
+export const kFsCalls: FsCall[] = [
+  {
+    name: "readFileSync",
+    shape: FsShape.ReadFile,
+    options: ["encoding", "flag"],
+    isUtf8Only: false,
+  },
+  {
+    name: "writeFileSync",
+    shape: FsShape.WriteFile,
+    options: ["encoding", "flag", "mode"],
+    isUtf8Only: false,
+  },
+  {
+    name: "appendFileSync",
+    shape: FsShape.WriteFile,
+    options: ["encoding", "flag", "mode"],
+    isUtf8Only: false,
+  },
+  {
+    name: "realpathSync",
+    shape: FsShape.PathEncoding,
+    options: ["encoding"],
+    isUtf8Only: true,
+  },
+  {
+    name: "mkdtempSync",
+    shape: FsShape.PathEncoding,
+    options: ["encoding"],
+    isUtf8Only: true,
+  },
+  {
+    name: "statSync",
+    shape: FsShape.Stat,
+    options: ["throwIfNoEntry", "bigint"],
+    isUtf8Only: false,
+  },
+  {
+    name: "lstatSync",
+    shape: FsShape.Stat,
+    options: ["throwIfNoEntry", "bigint"],
+    isUtf8Only: false,
+  },
+  {
+    name: "readdirSync",
+    shape: FsShape.Readdir,
+    options: ["encoding", "withFileTypes", "recursive"],
+    isUtf8Only: true,
+  },
+  {
+    name: "mkdirSync",
+    shape: FsShape.Mkdir,
+    options: ["recursive", "mode"],
+    isUtf8Only: false,
+  },
+  { name: "rmdirSync", shape: FsShape.Rmdir, options: [], isUtf8Only: false },
+  {
+    name: "rmSync",
+    shape: FsShape.Rm,
+    options: ["recursive", "force", "maxRetries", "retryDelay"],
+    isUtf8Only: false,
+  },
+  {
+    name: "copyFileSync",
+    shape: FsShape.CopyFile,
+    options: [],
+    isUtf8Only: false,
+  },
+];
+export const kFsPromisesModule = "node:fs/promises";
+export const kSyncSuffix = "Sync";
+export const kThrowIfNoEntry = "throwIfNoEntry";
+export const kTimersPromisesModule = "node:timers/promises";
+export const kTimerPromiseNames = ["setTimeout", "setInterval", "setImmediate"];
+export const kImmediateName = "setImmediate";
+export const kTimerOptions = ["ref"];
+export const kReadlineModules = ["node:readline", "node:readline/promises"];
+export const kCreateInterfaceName = "createInterface";
+export const kReadlineOptions = [
+  "input",
+  "output",
+  "terminal",
+  "crlfDelay",
+  "historySize",
+  "removeHistoryDuplicates",
+  "prompt",
+  "tabSize",
+  "completer",
+  "escapeCodeTimeout",
+  "history",
+];
+export const kReadlineUnsupported = ["prompt", "completer", "history"];

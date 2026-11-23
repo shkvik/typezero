@@ -1,0 +1,37 @@
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+
+export type SubtleAlgorithmRow = {
+  readonly name: string;
+  readonly family: string;
+  readonly operations: string[];
+  readonly publicUsages: string[];
+  readonly privateUsages: string[];
+};
+
+export type SubtleDictionaryRow = {
+  readonly operation: string;
+  readonly algorithm: string;
+  readonly isPrefix: boolean;
+  readonly name: string;
+  readonly required: string[];
+};
+
+export type SubtleExampleRow = {
+  readonly name: string;
+  readonly example: string;
+};
+
+export type SubtleFamilyRow = {
+  readonly family: string;
+  readonly isSecret: boolean;
+  readonly formats: string[];
+};
+
+export type SubtleAlgorithmFound = {
+  readonly algorithm?: SubtleAlgorithmRow;
+  readonly error?: SourceError;
+};
+
+export type SubtleDraft = {
+  isBad: boolean;
+};

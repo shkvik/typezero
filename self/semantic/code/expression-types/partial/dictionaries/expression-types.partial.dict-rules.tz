@@ -84,11 +84,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.errors.beginTrial();
-
-    const object = this.typed(target.object, undefined, module);
-
-    this.errors.endTrial();
+    const object = this.peekType(target.object, module);
 
     const dict = this.dictionaries.collectionOf(object);
     if (dict == undefined) {
@@ -125,11 +121,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.errors.beginTrial();
-
-    const object = this.typed(target.object, undefined, module);
-
-    this.errors.endTrial();
+    const object = this.peekType(target.object, module);
 
     const dict = this.dictionaries.collectionOf(object);
     if (dict == undefined) {
@@ -175,11 +167,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.errors.beginTrial();
-
-    const type = this.typed(arg, undefined, module);
-
-    this.errors.endTrial();
+    const type = this.peekType(arg, module);
 
     const dict = this.dictionaries.collectionOf(type);
     if (dict == undefined) {

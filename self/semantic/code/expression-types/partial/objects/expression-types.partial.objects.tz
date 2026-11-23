@@ -112,7 +112,8 @@ partial class ExpressionTypes {
         return { property, name, value, named: false };
       case PropertyKind.Method:
         draft.deferred = true;
-        const literalMethodError = this.generics.literalMethodCheck(property);
+        const literalMethodError =
+          this.genericCalls.literalMethodCheck(property);
 
         this.reportFound(module, literalMethodError);
 
@@ -157,7 +158,7 @@ partial class ExpressionTypes {
 
     draft.typed = false;
 
-    const keyError = this.objects.keyError(key, keyType);
+    const keyError = this.objectMembers.keyError(key, keyType);
 
     this.reportFound(module, keyError);
 
@@ -197,7 +198,7 @@ partial class ExpressionTypes {
         continue;
       }
 
-      const voidFieldErrors = this.objects.voidFieldCheck(
+      const voidFieldErrors = this.objectMembers.voidFieldCheck(
         entry.value,
         type,
         entry.name,
@@ -225,7 +226,7 @@ partial class ExpressionTypes {
   }
 
   private isUsableField(entry: FieldEntry, type: Type, module: int): boolean {
-    const checked = this.objects.isUsableField(entry, type);
+    const checked = this.objectMembers.isUsableField(entry, type);
 
     this.reportFound(module, checked.error);
 
@@ -245,7 +246,7 @@ partial class ExpressionTypes {
     for (const entry of draft.entries) {
       const field = target.fields.find((one) => one.name == entry.name);
       if (!entry.named || field == undefined) {
-        const noFieldError = this.objects.noFieldError(entry, target);
+        const noFieldError = this.objectMembers.noFieldError(entry, target);
 
         this.reportFound(module, noFieldError);
         this.typed(entry.value, undefined, module);

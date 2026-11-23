@@ -19,3 +19,9 @@ export type JumpTarget = {
   readonly kind: JumpKind;
   readonly labels: string[];
 };
+
+export type KnownModuleRow = {
+  readonly path: string;
+  readonly isNode: boolean;
+  readonly typicalName: string;
+};

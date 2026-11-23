@@ -283,13 +283,7 @@ partial class ExpressionTypes {
   }
 
   private quietArguments(args: CallArgument[], module: int): Type[] {
-    this.errors.beginTrial();
-
-    const types = args.map((arg) => this.typed(arg.expr, undefined, module));
-
-    this.errors.endTrial();
-
-    return types;
+    return args.map((arg) => this.peekType(arg.expr, module));
   }
 
   private variantRanks(
@@ -335,6 +329,9 @@ partial class ExpressionTypes {
   ): int {
     if (type.kind == TypeKind.Error || this.types.apparent(type) == param) {
       return 0;
+    }
+    if (this.isEncodingParam(param) && this.isTextType(type)) {
+      return 1;
     }
     if (this.relation.converts(type, param)) {
       return 1;

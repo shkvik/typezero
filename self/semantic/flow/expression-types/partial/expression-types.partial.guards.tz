@@ -129,7 +129,7 @@ partial class ExpressionTypes {
     }
 
     const slot = this.narrowable(arg.expr, module);
-    if (slot != undefined && this.objects.isUnknownValue(slot.type)) {
+    if (slot != undefined && this.objectMembers.isUnknownValue(slot.type)) {
       facts.set(slot.key, this.store.plain(TypeKind.Json));
     }
 

@@ -1,3 +1,7 @@
+import {
+  RequirementKind,
+  ValueTarget,
+} from "../../types/expression-types.types.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import {
@@ -17,7 +21,6 @@ import {
   kFunctionMethods,
   kTextMethods,
 } from "../../const/expression-types.const.tz";
-import { ValueTarget } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private laterBlockCheck(
@@ -202,7 +205,9 @@ partial class ExpressionTypes {
     const element = object.item;
     const code = this.sortProblem(element);
     if (code == undefined) {
-      return;
+      const held = this.types.definedType(element);
+
+      return this.requireOf(held, RequirementKind.Sort, "");
     }
 
     const word = this.text.of(this.types.definedType(element));

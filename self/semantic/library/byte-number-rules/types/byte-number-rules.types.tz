@@ -1,0 +1,58 @@
+import { ProofRange } from "../../../flow/proof-rules/types/proof-rules.types.tz";
+
+export enum ByteOwner {
+  Buffer,
+  DataView,
+}
+
+export enum ByteKind {
+  Int8,
+  Uint8,
+  Int16,
+  Uint16,
+  Int32,
+  Uint32,
+  Float16,
+  Float32,
+  Float64,
+}
+
+export type ByteKindName = {
+  readonly name: string;
+  readonly kind: ByteKind;
+};
+
+export type ByteKindInfo = {
+  readonly kind: ByteKind;
+  readonly size: decimal;
+  readonly mask?: string;
+  readonly top?: string;
+  readonly range?: ProofRange;
+};
+
+export type NumberAccess = {
+  readonly rest: string;
+  readonly isWrite: boolean;
+};
+
+export type NumberMethod = {
+  readonly isWrite: boolean;
+  readonly isBigInt: boolean;
+  readonly isVariable: boolean;
+  readonly isSigned: boolean;
+  readonly kind?: ByteKind;
+};
+
+export type NumberPlaces = {
+  readonly value?: int;
+  readonly offset: int;
+  readonly count?: int;
+  readonly least: int;
+  readonly most: int;
+};
+
+export type ByteIntKind = {
+  readonly bits: int;
+  readonly unsigned: boolean;
+  readonly kind: ByteKind;
+};

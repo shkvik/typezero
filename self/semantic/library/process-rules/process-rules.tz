@@ -1,0 +1,59 @@
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  kCalledMembers,
+  kListenerMembers,
+  kNextTickName,
+  kSignalMembers,
+  kSignals,
+  kStderrName,
+  kStdoutName,
+  kStreamParts,
+  kThrownEvents,
+  kValueMembers,
+} from "./const/process-rules.const.tz";
+
+export class ProcessRules {
+  public isValueMember(name: string): boolean {
+    return kValueMembers.includes(name);
+  }
+
+  public isPlainCall(name: string): boolean {
+    return kCalledMembers.includes(name) || name == kNextTickName;
+  }
+
+  public isSignalMember(name: string): boolean {
+    return kSignalMembers.includes(name);
+  }
+
+  public isThrownListener(name: string, event: string): boolean {
+    return kListenerMembers.includes(name) && kThrownEvents.includes(event);
+  }
+
+  public isSignal(event: string): boolean {
+    return kSignals.includes(event);
+  }
+
+  public isStream(name: string): boolean {
+    return name == kStdoutName || name == kStderrName;
+  }
+
+  public isStreamPart(name: string): boolean {
+    return kStreamParts.includes(name);
+  }
+
+  public valueCode(name: string): Code {
+    if (kCalledMembers.includes(name)) {
+      return Code.ProcessOnlyCalled;
+    }
+
+    return Code.ProcessNotYet;
+  }
+
+  public callCode(name: string): Code {
+    if (kValueMembers.includes(name)) {
+      return Code.ProcessNotFunction;
+    }
+
+    return Code.ProcessNotYet;
+  }
+}

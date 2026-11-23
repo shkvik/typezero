@@ -31,7 +31,7 @@ partial class ExpressionTypes {
     }
 
     this.extendsCheck(decl, module);
-    const abstractMethodsErrors = this.classes.abstractMethodsCheck(decl);
+    const abstractMethodsErrors = this.overrides.abstractMethodsCheck(decl);
 
     this.reportAll(module, abstractMethodsErrors);
     this.abstractParentsCheck(decl, instance, module);
@@ -174,7 +174,10 @@ partial class ExpressionTypes {
       type.kind == TypeKind.Instance &&
       !this.modules.isLibraryModule(type.module)
     ) {
-      const implementsClassError = this.classes.implementsClassError(decl, ref);
+      const implementsClassError = this.overrides.implementsClassError(
+        decl,
+        ref,
+      );
 
       return this.reportFound(module, implementsClassError);
     }
@@ -212,7 +215,7 @@ partial class ExpressionTypes {
     }
     if (entry == undefined) {
       if (!field.optional) {
-        const missingMemberError = this.classes.missingMemberError(
+        const missingMemberError = this.overrides.missingMemberError(
           decl,
           iface,
           field,
@@ -309,7 +312,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const contractResultError = this.classes.contractResultError(
+    const contractResultError = this.overrides.contractResultError(
       method,
       type,
       wanted,

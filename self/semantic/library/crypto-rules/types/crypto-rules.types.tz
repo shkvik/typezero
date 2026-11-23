@@ -1,0 +1,63 @@
+import { CallExpr } from "../../../../program/ast/types/ast.types.expressions.tz";
+
+export enum DigestUse {
+  Hash,
+  Hmac,
+}
+
+export type HashName = {
+  readonly name: string;
+  readonly aliases: string[];
+  readonly isAnyLength: boolean;
+};
+
+export type CipherAlias = {
+  readonly alias: string;
+  readonly name: string;
+};
+
+export type TurnedOffCipher = {
+  readonly text: string;
+  readonly isPrefix: boolean;
+};
+
+export type CryptoNumber = {
+  readonly value: decimal;
+  readonly isWhole: boolean;
+  readonly shown: string;
+};
+
+export type DirectCipher = {
+  readonly name: string;
+  readonly keyBytes: int;
+  readonly ivBytes: int;
+  readonly isAnyIv: boolean;
+};
+
+export type CryptoCall = {
+  readonly expr: CallExpr;
+  readonly name: string;
+  readonly shown: string;
+  readonly loc: int;
+};
+
+export type CryptoClass = {
+  readonly name: string;
+  readonly methods: string[];
+  readonly properties: string[];
+  readonly text: string;
+  readonly isStream: boolean;
+  readonly instead: string;
+};
+
+export type CryptoDataKinds = {
+  readonly isString: boolean;
+  readonly isKey: boolean;
+  readonly isArrayBuffer: boolean;
+};
+
+export type CryptoData = {
+  readonly index: int;
+  readonly what: string;
+  readonly kinds: CryptoDataKinds;
+};

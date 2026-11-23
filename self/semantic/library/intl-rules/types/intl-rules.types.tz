@@ -1,0 +1,64 @@
+export enum IntlOptionKind {
+  Text,
+  Number,
+  Flag,
+  Grouping,
+}
+
+export enum IntlMethodKind {
+  Number,
+  Compare,
+  Relative,
+  Unsupported,
+  SelectRange,
+  Containing,
+  DateRange,
+  Other,
+}
+
+export type IntlOption = {
+  readonly name: string;
+  readonly kind: IntlOptionKind;
+  readonly values: string[];
+};
+
+export type IntlService = {
+  readonly name: string;
+  readonly callable: boolean;
+  readonly options: IntlOption[];
+};
+
+export type IntlDigitRange = {
+  readonly name: string;
+  readonly low: decimal;
+  readonly high: decimal;
+};
+
+export type IntlMethodRow = {
+  readonly service: string;
+  readonly name: string;
+  readonly kind: IntlMethodKind;
+};
+
+export type IntlDigitPair = {
+  readonly low: string;
+  readonly high: string;
+};
+
+export enum DateOptionRole {
+  Style,
+  Component,
+  Setting,
+}
+
+export enum DateLocaleKind {
+  Any,
+  Date,
+  Time,
+}
+
+export type DateOption = {
+  readonly name: string;
+  readonly role: DateOptionRole;
+  readonly values: string[];
+};

@@ -107,11 +107,7 @@ partial class ExpressionTypes {
   }
 
   private stringifiedValueCheck(value: Expr, module: int): boolean {
-    this.errors.beginTrial();
-
-    const type = this.typed(value, undefined, module);
-
-    this.errors.endTrial();
+    const type = this.peekType(value, module);
 
     if (type.kind == TypeKind.Void) {
       this.report(module, value.loc, Code.JsonVoidValue, kNoDetails);

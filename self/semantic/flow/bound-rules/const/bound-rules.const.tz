@@ -3,3 +3,6 @@ export const kBoundSeparator = "|";
 export const kLengthTerm = "n";
 export const kMostBoundConstant: uint64 = 1000000;
 export const kZeroTerm = "0";
+export const kByteLengthName = "byteLength";
+export const kSumTerm = "s";
+export const kSumSeparator = "+";

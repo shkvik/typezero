@@ -1,0 +1,498 @@
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  MemberExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  InstanceType,
+  ObjectType,
+  Type,
+  TypeKind,
+  UnionType,
+} from "../../../../../program/type/types/type.types.tz";
+import { kTakenMethods } from "../../const/expression-types.const.tz";
+import { CallKind } from "../../types/expression-types.types.tz";
+import { kTakingMethods } from "../../../statement-rules/const/statement-rules.const.tz";
+import { ExpressionTypes } from "../../expression-types.tz";
+
+partial class ExpressionTypes {
+  private memberCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    if (this.enumOfObject(member.object, module) != undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const intlCall = this.intlNamespaceCall(expr, member, module);
+    if (intlCall != undefined) {
+      return intlCall;
+    }
+
+    const processCall = this.processCall(expr, member, module);
+    if (processCall != undefined) {
+      return processCall;
+    }
+    if (this.jsonParseTypesCheck(expr, member, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const decimalStatic = this.decimalStaticCall(expr, member, module);
+    if (decimalStatic != undefined) {
+      return decimalStatic;
+    }
+    if (this.stringRawCheck(expr, member, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const spread = this.mathSpreadCall(expr, module);
+    if (spread != undefined) {
+      return spread;
+    }
+    if (this.mathDecimalCheck(expr, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.jsonStaticCheck(expr, member, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    if (this.staticSourceCheck(expr, member, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    const combined = this.resultStaticCall(expr, member, module);
+    if (combined != undefined) {
+      return combined;
+    }
+    if (this.resultSearchCheck(expr, member, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.thisPlaceCheck(member, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.callReadEarly(member, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.noteSelfCall(member, module);
+
+    if (this.isSuperName(member.object, module)) {
+      return this.superMethodCall(expr, member, wanted, module);
+    }
+    const isTaken = kTakenMethods.includes(member.name);
+    if (kTakingMethods.includes(member.name) && !isTaken) {
+      this.takenFrom(member.object, module);
+    }
+    if (this.promiseStatic(member, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const dated = this.dateStaticCall(expr, member, module);
+    if (dated != undefined) {
+      return dated;
+    }
+
+    const made = this.libraryStaticCall(expr, member, module);
+    if (made != undefined) {
+      return made;
+    }
+
+    const owner = this.staticOwner(member.object, module);
+    if (owner != undefined) {
+      return this.staticCall(expr, member, owner, module);
+    }
+
+    const fact = this.pathFact(member, module);
+    if (fact != undefined) {
+      return this.fieldValueCall(expr, member, fact, CallKind.Own, module);
+    }
+
+    const object = this.receiverOf(member.object, member.optional, module);
+
+    return this.receiverCall(expr, member, object, wanted, module);
+  }
+
+  private receiverCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    if (this.unknownCallCheck(expr, member, object, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.library.isJsonHolder(object)) {
+      return this.jsonMethodCall(expr, member, module);
+    }
+    const isDecimal = this.types.apparent(object).kind == TypeKind.Decimal;
+    if (isDecimal && member.name != "toLocaleString") {
+      return this.decimalMethodCall(expr, member, module);
+    }
+
+    const isClassLike =
+      object.kind == TypeKind.Instance ||
+      object.kind == TypeKind.Union ||
+      object.kind == TypeKind.Error ||
+      object.kind == TypeKind.TypeParameter;
+    if (member.typeArgs.length > 0 && !isClassLike) {
+      this.report(module, member.loc, Code.TypeArgsOnlyGeneric, kNoDetails);
+    }
+
+    switch (object.kind) {
+      case TypeKind.Object:
+        return this.fieldCall(expr, member, object, wanted, module);
+      case TypeKind.Instance:
+        return this.instanceCall(expr, member, object, wanted, module);
+      case TypeKind.Union:
+        return this.variantCall(expr, member, object, wanted, module);
+      case TypeKind.TypeParameter:
+        return this.parameterCall(expr, member, object, wanted, module);
+      case TypeKind.Tuple:
+        return this.tupleCall(expr, member, object, module);
+      case TypeKind.Result:
+        return this.resultMethodCall(expr, member, object, wanted, module);
+      case TypeKind.Function:
+        if (object.shape.self != undefined) {
+          return this.thisMethodCall(expr, member, object, module);
+        }
+
+        return this.functionMemberCall(member, object, module);
+      case TypeKind.Class:
+        return this.classValueCall(expr, member, object, module);
+      case TypeKind.Promise:
+        if (this.promiseMisuse(expr, member, object, module)) {
+          return this.store.plain(TypeKind.Error);
+        }
+
+        return this.otherCall(expr, member, object, wanted, module);
+      default:
+        return this.otherCall(expr, member, object, wanted, module);
+    }
+  }
+
+  private parameterCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const constraint = this.store.constraintOf(object);
+    if (constraint != undefined) {
+      return this.receiverCall(expr, member, constraint, wanted, module);
+    }
+
+    const word = member.name;
+    const first = this.text.of(object);
+
+    this.report(module, member.loc, Code.PropertyMissing, { word, first });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private instanceCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    if (!this.modules.isLibraryModule(instance.module)) {
+      return this.methodCall(expr, member, instance, wanted, module);
+    }
+    if (this.types.isDate(instance)) {
+      return this.dateMethodCall(expr, member, instance, wanted, module);
+    }
+    if (this.refusedByteCall(expr, member, instance, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const intlMethod = this.intlMethodCall(expr, member, instance, module);
+    if (intlMethod != undefined) {
+      return intlMethod;
+    }
+
+    const weakCall = this.weakRefCall(expr, member, instance, module);
+    if (weakCall != undefined) {
+      return weakCall;
+    }
+
+    const regexCall = this.regexMethodCall(expr, member, instance, module);
+    if (regexCall != undefined) {
+      return regexCall;
+    }
+
+    const cryptoCall = this.cryptoMethodCall(expr, member, instance, module);
+    if (cryptoCall != undefined) {
+      return cryptoCall;
+    }
+    if (this.missingByteMethod(expr, member, instance, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const set = this.typedSetCall(expr, member, instance, module);
+    if (set != undefined) {
+      return set;
+    }
+
+    const decoded = this.decodeCall(expr, member, instance, module);
+    if (decoded != undefined) {
+      return decoded;
+    }
+
+    const result = this.otherCall(expr, member, instance, wanted, module);
+
+    this.byteNumberCheck(expr, member, instance, module);
+    this.byteMethodCheck(expr, member, instance, module);
+
+    return result;
+  }
+
+  private otherCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const plan = this.callbacks.callbackPlan(expr, member, object);
+
+    this.rememberIndexParam(expr, plan, module);
+
+    if (this.iteratorCallCheck(member, object, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.nextUnionCheck(member, object, module);
+    this.flatMapResultCheck(expr, member, object, module);
+
+    if (this.dictMemberCheck(member, object, true, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.setCombineCheck(expr, member, object, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.recordMethodCheck(expr, member, object, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (!this.tupleCalls.has(expr)) {
+      this.arrayTextCheck(member, object, module);
+      this.arraySortCheck(expr, member, object, module);
+    }
+
+    if (plan != undefined) {
+      this.callbackArgumentsCheck(expr, plan, module);
+    }
+
+    const found = this.libraryCall(expr, member, object, wanted, module);
+
+    if (plan != undefined) {
+      this.callbackResultCheck(expr, plan, module);
+    }
+
+    return found ?? this.store.plain(TypeKind.Error);
+  }
+
+  private variantCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: UnionType,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    if (!this.types.isOptional(object)) {
+      const common = this.commonBaseWith(object, member.name);
+      const shaped = this.unionShapeCall(expr, member, object, common, module);
+      if (shaped != undefined) {
+        return shaped;
+      }
+      if (common == undefined) {
+        this.lackingVariantCheck(expr, member, object, module);
+
+        return this.store.plain(TypeKind.Error);
+      }
+
+      return this.receiverCall(expr, member, common, wanted, module);
+    }
+
+    const defined = this.types.definedType(object);
+    if (defined.kind == TypeKind.Json || defined.kind == TypeKind.Error) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.report(module, member.object.loc, Code.CallOfUndefined, {
+      word: member.name,
+    });
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private fieldCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: ObjectType,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const fields = object.fields.filter((one) => one.name == member.name);
+    const field = fields[0];
+    const isLibrary = this.resolver.isLibraryShape(object);
+    if (field == undefined && isLibrary) {
+      this.namespaceMissingCheck(expr, member, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (isLibrary && this.mathMemberCheck(expr, member, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (isLibrary && this.codePointCall(expr, member, module)) {
+      return this.store.plain(TypeKind.String);
+    }
+    if (field == undefined) {
+      const missingFieldError = this.objectMembers.missingFieldError(
+        member,
+        object,
+      );
+
+      this.reportFound(module, missingFieldError);
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (fields.length > 1 && !isLibrary) {
+      return this.signatureCall(expr, member, fields, module);
+    }
+    if (fields.length > 1) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const type = this.objects.fieldWanted(field);
+    if (isLibrary && type.kind == TypeKind.Function) {
+      return this.libraryMethodCall(expr, member, type, wanted, module);
+    }
+    if (this.parts.mentionsParameter(type)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const kind = this.calls.libraryKind(isLibrary);
+
+    return this.fieldValueCall(expr, member, type, kind, module);
+  }
+
+  private fieldValueCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    type: Type,
+    kind: CallKind,
+    module: int,
+  ): Type {
+    const link = this.linkOf(type, expr.optional);
+    const loc = member.loc;
+    const isLenient = kind != CallKind.Own;
+
+    if (link.kind == TypeKind.Function) {
+      return this.calledWith(expr, link, loc, kind, module);
+    }
+    if (link.kind == TypeKind.Error) {
+      return link;
+    }
+    if (link.kind == TypeKind.Object || isLenient) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (link.kind == TypeKind.Union && this.calls.isOptionalFunction(link)) {
+      this.report(module, loc, Code.FunctionMayBeUndefined, kNoDetails);
+    } else {
+      const word = member.name;
+      const first = this.text.of(link);
+
+      this.report(module, loc, Code.FieldNotFunction, { word, first });
+    }
+
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private methodCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const lookup = this.classMember(instance, member.name);
+    const entry = lookup.entry;
+
+    if (!lookup.isKnown) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (entry == undefined) {
+      const word = member.name;
+      const first = this.text.of(instance);
+
+      this.report(module, member.loc, Code.PropertyMissing, { word, first });
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (entry.isStatic) {
+      const staticCallError = this.classValues.staticCallError(member, entry);
+
+      this.reportFound(module, staticCallError);
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const field = entry.field;
+    if (field != undefined) {
+      this.checkAccess(entry, field.access, member, module);
+
+      const type = this.fieldTypeOf(entry, field);
+
+      return this.fieldValueCall(expr, member, type, CallKind.Own, module);
+    }
+
+    const method = entry.methods[0];
+    if (entry.methods.length > 1) {
+      return this.overloadCall(expr, member, entry, module);
+    }
+    if (method == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const access = this.classes.accessOf(method);
+    if (this.checkAccess(entry, access, member, module)) {
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    if (method.typeParams.length > 0) {
+      return this.genericMethodCall(
+        expr,
+        member,
+        entry,
+        method,
+        wanted,
+        module,
+      );
+    }
+    if (member.typeArgs.length > 0) {
+      this.report(module, member.loc, Code.NotGenericMethod, {
+        word: member.name,
+      });
+    }
+
+    const type = this.methodTypeOf(entry, method);
+    if (type.kind != TypeKind.Function) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.calledWith(expr, type, member.loc, CallKind.Own, module);
+  }
+}

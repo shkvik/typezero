@@ -79,8 +79,16 @@ partial class FileParser {
 
     const first = this.cursor.onlyOpenParens(this.statementStart, start);
     if (compound || !first || !this.endsPatternStatement()) {
-      this.cursor.report(start, Code.PatternAssignmentNotStatement);
+      this.cursor.report(start, this.patternValueCode(target));
     }
+  }
+
+  private patternValueCode(target: Expr): Code {
+    if (target.kind == ExprKind.ObjectLit) {
+      return Code.ObjectPatternAssignmentNotStatement;
+    }
+
+    return Code.PatternAssignmentNotStatement;
   }
 
   private endsPatternStatement(): boolean {

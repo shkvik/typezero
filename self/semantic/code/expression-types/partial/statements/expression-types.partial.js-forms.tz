@@ -23,11 +23,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.errors.beginTrial();
-
-    const left = this.typed(expr.lhs, undefined, module);
-
-    this.errors.endTrial();
+    const left = this.peekType(expr.lhs, module);
 
     if (left.kind == TypeKind.Error || object.kind == TypeKind.Error) {
       return true;

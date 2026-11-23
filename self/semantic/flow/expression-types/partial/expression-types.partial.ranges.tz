@@ -1,0 +1,219 @@
+import {
+  ArrayCallback,
+  CallbackPlan,
+} from "../../../code/expression-types/types/expression-types.types.tz";
+import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
+import {
+  BinaryExpr,
+  BinaryOp,
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NameExpr,
+  UnaryExpr,
+  UnaryOp,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  kMathName,
+  kValueTerm,
+} from "../../../code/expression-types/const/expression-types.const.tz";
+import { kZeroTerm } from "../../bound-rules/const/bound-rules.const.tz";
+import {
+  kCharCodeAtName,
+  kCodePointAtName,
+  kMaxName,
+  kMinName,
+  kMostCharCode,
+  kMostCodePoint,
+  kMostLength,
+  kRangedLengths,
+} from "../../interval-math/const/interval-math.const.tz";
+import { ValueRange } from "../../interval-math/types/interval-math.types.tz";
+
+partial class ExpressionTypes {
+  private valueRange(expr: Expr, module: int): ValueRange {
+    const given = this.peekType(expr, module);
+
+    const type = this.types.definedType(given);
+    if (type.kind != TypeKind.Int) {
+      return {};
+    }
+
+    const computed = this.computedRange(expr, type, module);
+
+    return this.intervals.clamped(type, computed);
+  }
+
+  private computedRange(expr: Expr, type: Type, module: int): ValueRange {
+    const constant = this.intConstant(expr, type, module);
+    if (constant != undefined) {
+      return this.intervals.exact(constant);
+    }
+
+    switch (expr.kind) {
+      case ExprKind.Name:
+        return this.nameRange(expr, type, module);
+      case ExprKind.Member:
+        return this.memberRange(expr);
+      case ExprKind.Call:
+        return this.callRange(expr, module);
+      case ExprKind.Unary:
+        return this.unaryRange(expr, module);
+      case ExprKind.Binary:
+        return this.binaryRange(expr, module);
+      case ExprKind.Conditional: {
+        const first = this.valueRange(expr.thenExpr, module);
+        const second = this.valueRange(expr.elseExpr, module);
+
+        return this.intervals.unite(first, second);
+      }
+      default:
+        return {};
+    }
+  }
+
+  private nameRange(expr: NameExpr, type: Type, module: int): ValueRange {
+    const key = this.pathKey(expr, module);
+    if (key == undefined || type.kind != TypeKind.Int || type.wraps) {
+      return {};
+    }
+
+    const term = kValueTerm + key;
+    const above = this.bestRoom(term, kZeroTerm);
+    const below = this.bestRoom(kZeroTerm, term);
+    const lowest = this.indexFloor(key, below);
+
+    return { lo: lowest, hi: this.oppositeOf(above) };
+  }
+
+  private indexFloor(
+    key: string,
+    below: decimal | undefined,
+  ): decimal | undefined {
+    const isIndex = this.indexParams.has(key);
+    if (isIndex && (below == undefined || below < 0)) {
+      return 0;
+    }
+
+    return below;
+  }
+
+  private rememberIndexParam(
+    expr: CallExpr,
+    plan: CallbackPlan | undefined,
+    module: int,
+  ): void {
+    const callback = expr.args[0]?.expr;
+    if (plan == undefined || plan.kind == ArrayCallback.Compare) {
+      return;
+    }
+    if (callback == undefined || callback.kind != ExprKind.Function) {
+      return;
+    }
+
+    const position = this.callbacks.indexPosition(plan.kind);
+    const param = callback.fn.params[position];
+    if (param != undefined) {
+      this.indexParams.add(`${module} ${param.loc}`);
+    }
+  }
+
+  private oppositeOf(value: decimal | undefined): decimal | undefined {
+    if (value == undefined) {
+      return undefined;
+    }
+
+    return -value;
+  }
+
+  private memberRange(expr: MemberExpr): ValueRange {
+    if (!kRangedLengths.includes(expr.name)) {
+      return {};
+    }
+
+    return { lo: 0, hi: kMostLength };
+  }
+
+  private callRange(expr: CallExpr, module: int): ValueRange {
+    const callee = expr.callee;
+    if (callee.kind != ExprKind.Member) {
+      return {};
+    }
+    if (callee.name == kCharCodeAtName) {
+      return { lo: 0, hi: kMostCharCode };
+    }
+    if (callee.name == kCodePointAtName) {
+      return { lo: 0, hi: kMostCodePoint };
+    }
+
+    return this.minMaxRange(expr, callee, module);
+  }
+
+  private minMaxRange(
+    expr: CallExpr,
+    callee: MemberExpr,
+    module: int,
+  ): ValueRange {
+    const owner = callee.object;
+    const isMath =
+      owner.kind == ExprKind.Name &&
+      owner.name == kMathName &&
+      this.isGlobalUse(owner, module);
+    const isMin = callee.name == kMinName;
+    const isChoice = isMin || callee.name == kMaxName;
+    const hasSpread = expr.args.some((arg) => arg.spread);
+    const first = expr.args[0];
+    if (!isMath || !isChoice || hasSpread || first == undefined) {
+      return {};
+    }
+
+    let range = this.valueRange(first.expr, module);
+
+    for (const arg of expr.args.slice(1)) {
+      const next = this.valueRange(arg.expr, module);
+
+      range = this.chosenRange(isMin, range, next);
+    }
+
+    return range;
+  }
+
+  private chosenRange(
+    isMin: boolean,
+    first: ValueRange,
+    second: ValueRange,
+  ): ValueRange {
+    if (isMin) {
+      return this.intervals.lowerOf(first, second);
+    }
+
+    return this.intervals.upperOf(first, second);
+  }
+
+  private unaryRange(expr: UnaryExpr, module: int): ValueRange {
+    const operand = this.valueRange(expr.operand, module);
+
+    switch (expr.op) {
+      case UnaryOp.Plus:
+        return operand;
+      case UnaryOp.Neg:
+        return this.intervals.negated(operand);
+      case UnaryOp.BitNot:
+        return this.intervals.inverted(operand);
+      default:
+        return {};
+    }
+  }
+
+  private binaryRange(expr: BinaryExpr, module: int): ValueRange {
+    const left = this.valueRange(expr.lhs, module);
+    const right = this.valueRange(expr.rhs, module);
+    if (expr.op == BinaryOp.Nullish) {
+      return this.intervals.unite(left, right);
+    }
+
+    return this.intervals.operate(expr.op, left, right);
+  }
+}

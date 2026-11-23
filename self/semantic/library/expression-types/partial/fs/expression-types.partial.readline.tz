@@ -1,0 +1,126 @@
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import {
+  kCreateInterfaceName,
+  kReadlineModules,
+  kReadlineOptions,
+  kReadlineUnsupported,
+} from "../../../fs-rules/const/fs-rules.const.tz";
+import { FsCall, FsShape } from "../../../fs-rules/types/fs-rules.types.tz";
+
+partial class ExpressionTypes {
+  private readlineCheck(expr: CallExpr, module: int): void {
+    const callee = expr.callee;
+    if (callee.kind != ExprKind.Name || this.modules.isLibraryModule(module)) {
+      return;
+    }
+
+    const count = expr.args.length;
+    const hasSpread = expr.args.some((one) => one.spread);
+    const first = expr.args[0]?.expr;
+    if (hasSpread || count > 2 || first == undefined) {
+      return;
+    }
+    if (!this.isReadlineCreate(callee, module)) {
+      return;
+    }
+    if (first.kind == ExprKind.ObjectLit) {
+      return this.readlineOptionsCheck(expr, first, module);
+    }
+
+    this.readlineStreamsCheck(first, expr.args[1]?.expr, module);
+  }
+
+  private isReadlineCreate(callee: Expr, module: int): boolean {
+    if (callee.kind != ExprKind.Name) {
+      return false;
+    }
+
+    const target = this.targetOfName(callee, module);
+    const isCallable =
+      target != undefined &&
+      (target.kind == SymbolKind.Function ||
+        target.kind == SymbolKind.Variable);
+    if (!isCallable || target == undefined) {
+      return false;
+    }
+
+    const opened = this.program.modules[target.module];
+    const name = this.importedName(callee, module);
+
+    return (
+      opened != undefined &&
+      kReadlineModules.includes(opened.name) &&
+      name == kCreateInterfaceName
+    );
+  }
+
+  private readlineOptionsCheck(
+    expr: CallExpr,
+    options: Expr,
+    module: int,
+  ): void {
+    const row: FsCall = {
+      name: kCreateInterfaceName,
+      shape: FsShape.PathOnly,
+      options: kReadlineOptions,
+      isUtf8Only: false,
+    };
+    if (!this.fsOptionsCheck(expr, 0, row, module)) {
+      return;
+    }
+
+    for (const name of kReadlineUnsupported) {
+      const value = this.optionValue(options, name);
+      if (value != undefined) {
+        return this.report(module, value.loc, Code.ReadlineOption, {
+          word: name,
+        });
+      }
+    }
+
+    const input = this.optionValue(options, "input");
+    if (input == undefined) {
+      return this.report(module, options.loc, Code.ReadlineNoInput, kNoDetails);
+    }
+
+    const output = this.optionValue(options, "output");
+
+    this.readlineStreamsCheck(input, output, module);
+  }
+
+  private readlineStreamsCheck(
+    input: Expr,
+    output: Expr | undefined,
+    module: int,
+  ): void {
+    if (!this.isProcessStream(input, "stdin", module)) {
+      return this.report(module, input.loc, Code.ReadlineNotStdin, kNoDetails);
+    }
+    if (output == undefined || output.kind == ExprKind.Undefined) {
+      return;
+    }
+
+    const isWritten =
+      this.isProcessStream(output, "stdout", module) ||
+      this.isProcessStream(output, "stderr", module);
+    if (!isWritten) {
+      this.report(module, output.loc, Code.ReadlineOutput, kNoDetails);
+    }
+  }
+
+  private isProcessStream(value: Expr, name: string, module: int): boolean {
+    return (
+      value.kind == ExprKind.Member &&
+      value.name == name &&
+      this.isProcessName(value.object, module)
+    );
+  }
+}

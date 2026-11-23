@@ -110,7 +110,7 @@ partial class ExpressionTypes {
     object: ClassType,
     module: int,
   ): Type {
-    const checked = this.classes.classValueMember(expr, object);
+    const checked = this.classValues.classValueMember(expr, object);
 
     this.reportFound(module, checked.error);
 

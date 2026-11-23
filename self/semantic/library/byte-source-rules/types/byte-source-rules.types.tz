@@ -1,0 +1,17 @@
+import { Type } from "../../../../program/type/types/type.types.tz";
+
+export type SourceShape = {
+  readonly element?: Type;
+  readonly isTyped: boolean;
+};
+
+export type BytePosition = {
+  readonly name: string;
+  readonly isEnd: boolean;
+  readonly isTarget: boolean;
+};
+
+export type ElementSize = {
+  readonly name: string;
+  readonly size: decimal;
+};

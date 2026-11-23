@@ -1,0 +1,195 @@
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NewExpr,
+  PropertyKind,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import { kNoPlace } from "../../../../code/expression-types/const/expression-types.const.tz";
+import { kFatalDecoderClass } from "../../../text-coder-rules/const/text-coder-rules.const.tz";
+
+partial class ExpressionTypes {
+  private codedNew(expr: NewExpr, made: Type, module: int): Type {
+    if (this.modules.isLibraryModule(module)) {
+      return made;
+    }
+    if (this.textCoders.isFatalNew(made)) {
+      const fatalNewError = this.textCoders.fatalNewError(expr.loc);
+
+      this.reportFound(module, fatalNewError);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.byteSources.isArrayBuffer(made)) {
+      return this.resizableCheck(expr, made, module);
+    }
+    if (!this.textCoders.isDecoderNew(made)) {
+      return made;
+    }
+
+    const label = expr.args[0];
+    if (label != undefined && label.expr.kind != ExprKind.Undefined) {
+      this.decoderLabelCheck(label.expr, module);
+    }
+
+    const options = expr.args[1];
+    if (options == undefined || !this.canBeFatal(options.expr, module, 0)) {
+      return made;
+    }
+
+    const fatal = this.resolver.libraryInstance(kFatalDecoderClass, []);
+
+    return fatal ?? made;
+  }
+
+  private resizableCheck(expr: NewExpr, made: Type, module: int): Type {
+    const options = expr.args[1];
+    if (options == undefined) {
+      return made;
+    }
+
+    const resizableError = this.textCoders.resizableError(options.expr.loc);
+
+    this.reportFound(module, resizableError);
+
+    return made;
+  }
+
+  private decoderLabelCheck(label: Expr, module: int): void {
+    const written = this.textCoders.literalLabel(label);
+    if (written != undefined) {
+      const labelError = this.textCoders.labelError(label.loc, [written]);
+
+      return this.reportFound(module, labelError);
+    }
+
+    const given = this.peekType(label, module);
+    if (given.kind == TypeKind.Error) {
+      return;
+    }
+
+    const texts = this.encodingTexts(label, given, module, 0);
+    if (texts == undefined) {
+      const unknownLabelError = this.textCoders.unknownLabelError(label.loc);
+
+      return this.reportFound(module, unknownLabelError);
+    }
+
+    const labelError = this.textCoders.labelError(label.loc, texts);
+
+    this.reportFound(module, labelError);
+  }
+
+  private canBeFatal(options: Expr, module: int, depth: int): boolean {
+    if (options.kind != ExprKind.ObjectLit) {
+      return this.isFatalShape(options, module);
+    }
+    if (depth > 8) {
+      return false;
+    }
+
+    let isFatal = false;
+
+    for (const property of options.props) {
+      const isSpread = property.form.kind == PropertyKind.Spread;
+      if (isSpread) {
+        isFatal = isFatal || this.canBeFatal(property.value, module, depth + 1);
+      }
+      if (!isSpread && this.textCoders.isFatalName(property.name)) {
+        isFatal = this.textCoders.isFatalFlag(property.value);
+      }
+    }
+
+    return isFatal;
+  }
+
+  private isFatalShape(options: Expr, module: int): boolean {
+    const type = this.peekType(options, module);
+    const base = this.types.definedType(type);
+    if (base.kind != TypeKind.Object) {
+      return false;
+    }
+
+    const field = base.fields.find((one) =>
+      this.textCoders.isFatalName(one.name),
+    );
+
+    return field != undefined && field.type.kind != TypeKind.Undefined;
+  }
+
+  private decodeCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type | undefined {
+    const method = this.receiverMember(instance, member.name, true);
+    const isPlain =
+      expr.args.length <= 2 && expr.args.every((arg) => !arg.spread);
+    if (!this.textCoders.isDecodeCall(instance, member.name) || !isPlain) {
+      return undefined;
+    }
+    if (method == undefined || method.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    const result = method.shape.result;
+    const input = expr.args[0];
+    if (input == undefined) {
+      return result;
+    }
+
+    const found = this.typed(input.expr, undefined, module);
+    const decodeInputError = this.textCoders.decodeInputError(
+      input.expr.loc,
+      found,
+    );
+    const options = expr.args[1];
+    if (decodeInputError != undefined) {
+      this.reportFound(module, decodeInputError);
+      this.looseArguments(expr.args.slice(1), module);
+
+      return result;
+    }
+
+    const wanted = method.shape.params[1]?.type;
+    if (options != undefined && wanted != undefined) {
+      this.checked(options.expr, wanted, module, kNoPlace);
+    }
+
+    return result;
+  }
+
+  private decoderParseCheck(
+    expr: CallExpr,
+    instance: InstanceType,
+    member: MemberExpr,
+    module: int,
+  ): void {
+    const label = expr.args[0];
+    const isParse = this.textCoders.isParseName(member.name);
+    if (
+      !isParse ||
+      !this.textCoders.isDecoderNew(instance) ||
+      label == undefined
+    ) {
+      return;
+    }
+
+    const written = this.textCoders.literalLabel(label.expr);
+    if (written == undefined || this.modules.isLibraryModule(module)) {
+      return;
+    }
+
+    const labelError = this.textCoders.labelError(label.expr.loc, [written]);
+
+    this.reportFound(module, labelError);
+  }
+}

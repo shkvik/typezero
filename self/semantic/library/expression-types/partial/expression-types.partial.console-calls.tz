@@ -1,0 +1,115 @@
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
+import {
+  kPerformanceName,
+  kPrintNames,
+} from "../../library-rules/const/library-rules.const.tz";
+
+partial class ExpressionTypes {
+  private printVoidCheck(expr: CallExpr, module: int): void {
+    const callee = expr.callee;
+    if (callee.kind != ExprKind.Member || !kPrintNames.includes(callee.name)) {
+      return;
+    }
+    if (!this.isGlobalNamed(callee.object, "console", module)) {
+      return;
+    }
+
+    for (const arg of expr.args) {
+      if (arg.spread || arg.expr.kind != ExprKind.Call) {
+        continue;
+      }
+
+      const given = this.peekType(arg.expr, module);
+      if (given.kind == TypeKind.Void) {
+        this.report(module, arg.expr.loc, Code.PrintVoid, kNoDetails);
+      }
+    }
+  }
+
+  private performanceRead(expr: MemberExpr, module: int): Type | undefined {
+    const isPerformance = this.isGlobalNamed(
+      expr.object,
+      kPerformanceName,
+      module,
+    );
+    if (!isPerformance || expr.name == "now") {
+      return undefined;
+    }
+
+    this.report(module, expr.loc, Code.PerformanceOther, { word: expr.name });
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private performanceCallCheck(expr: CallExpr, module: int): boolean {
+    const callee = expr.callee;
+    if (callee.kind != ExprKind.Member) {
+      return false;
+    }
+
+    const read = this.performanceRead(callee, module);
+    if (read == undefined) {
+      return false;
+    }
+
+    this.looseArguments(expr.args, module);
+
+    return true;
+  }
+
+  private isGlobalNamed(object: Expr, name: string, module: int): boolean {
+    return (
+      object.kind == ExprKind.Name &&
+      object.name == name &&
+      this.isGlobalUse(object, module)
+    );
+  }
+
+  private isJsonKnownCheck(expr: CallExpr, module: int): void {
+    const callee = expr.callee;
+    const value = expr.args[0]?.expr;
+    if (callee.kind != ExprKind.Member || callee.name != "isJson") {
+      return;
+    }
+    if (
+      !this.isGlobalNamed(callee.object, "Json", module) ||
+      value == undefined
+    ) {
+      return;
+    }
+
+    const given = this.peekType(value, module);
+    const base = this.types.definedType(given);
+    const isOpen =
+      base.kind == TypeKind.Unknown ||
+      base.kind == TypeKind.Error ||
+      base.kind == TypeKind.TypeParameter;
+    if (isOpen) {
+      return;
+    }
+
+    const other = this.jsonAlreadyHint(base.kind == TypeKind.Json);
+
+    this.report(module, value.loc, Code.JsonIsJsonKnown, {
+      word: this.text.of(given),
+      other,
+    });
+  }
+
+  private jsonAlreadyHint(isJson: boolean): string {
+    if (isJson) {
+      return ", and it is a Json already";
+    }
+
+    return "";
+  }
+}

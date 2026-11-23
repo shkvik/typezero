@@ -1,0 +1,16 @@
+export enum ExportKind {
+  Function,
+  Value,
+  InTzFs,
+  NotYet,
+  AsyncChild,
+  Fork,
+  Webcrypto,
+  Subtle,
+}
+
+export type LibraryExport = {
+  readonly module: string;
+  readonly name: string;
+  readonly kind: ExportKind;
+};

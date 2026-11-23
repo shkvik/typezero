@@ -1,0 +1,228 @@
+import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { ByteSourceRules } from "../byte-source-rules/byte-source-rules.tz";
+import {
+  kFlagsText,
+  kFsCalls,
+  kFsConstants,
+  kFsModule,
+  kFsPromisesModule,
+  kOpenFlags,
+  kSyncSuffix,
+  kThrowIfNoEntry,
+  kUtf8Names,
+} from "./const/fs-rules.const.tz";
+import { FsCall } from "./types/fs-rules.types.tz";
+
+export class FsRules {
+  private readonly text: TypeText;
+  private readonly types: TypeQuestions;
+  private readonly byteSources: ByteSourceRules;
+
+  public constructor(
+    text: TypeText,
+    types: TypeQuestions,
+    byteSources: ByteSourceRules,
+  ) {
+    this.text = text;
+    this.types = types;
+    this.byteSources = byteSources;
+  }
+
+  public isFsModule(name: string): boolean {
+    return name == kFsModule;
+  }
+
+  public call(name: string): FsCall | undefined {
+    return kFsCalls.find((one) => one.name == name);
+  }
+
+  public isFlag(text: string): boolean {
+    return kOpenFlags.includes(text);
+  }
+
+  public isConstant(name: string): boolean {
+    return kFsConstants.includes(name);
+  }
+
+  public isUtf8(name: string): boolean {
+    return kUtf8Names.includes(name.toLowerCase());
+  }
+
+  public isWritable(type: Type): boolean {
+    const base = this.types.definedType(type);
+    if (base.kind == TypeKind.String || base.kind == TypeKind.Error) {
+      return true;
+    }
+    if (base.kind == TypeKind.Union) {
+      return base.parts.every((part) => this.byteSources.isByteView(part));
+    }
+
+    return this.byteSources.isByteView(base);
+  }
+
+  public dataError(loc: int, name: string, found: Type): SourceError {
+    const base = this.types.definedType(found);
+    const first = this.text.of(found);
+    const other = this.dataHint(base);
+    const details: Details = { word: name, first, other };
+
+    return { code: Code.FsData, loc, details };
+  }
+
+  public encodingLiteralError(loc: int, name: string): SourceError {
+    return { code: Code.FsEncodingLiteral, loc, details: { word: name } };
+  }
+
+  public utf8OnlyError(loc: int, name: string, encoding: string): SourceError {
+    const details: Details = { word: name, first: encoding };
+
+    return { code: Code.FsEncodingUtf8Only, loc, details };
+  }
+
+  public dependsError(loc: int, name: string): SourceError {
+    return { code: Code.FsEncodingDepends, loc, details: { word: name } };
+  }
+
+  public forTextError(loc: int, name: string): SourceError {
+    return { code: Code.FsEncodingForText, loc, details: { word: name } };
+  }
+
+  public flagError(
+    loc: int,
+    name: string,
+    written: string | undefined,
+  ): SourceError {
+    if (written == undefined) {
+      const details: Details = { word: name, other: kFlagsText };
+
+      return { code: Code.FsFlagLiteral, loc, details };
+    }
+
+    const details: Details = { word: name, first: written, other: kFlagsText };
+
+    return { code: Code.FsFlagUnknown, loc, details };
+  }
+
+  public bigintError(loc: int): SourceError {
+    return { code: Code.FsBigint, loc, details: kNoDetails };
+  }
+
+  public rmdirError(loc: int): SourceError {
+    return { code: Code.FsRmdirOptions, loc, details: kNoDetails };
+  }
+
+  public copyModeError(loc: int, name: string): SourceError {
+    return { code: Code.FsCopyMode, loc, details: { word: name } };
+  }
+
+  public constantError(loc: int, name: string): SourceError {
+    return { code: Code.FsConstantNotYet, loc, details: { word: name } };
+  }
+
+  public optionsLiteralError(
+    loc: int,
+    name: string,
+    first: string,
+  ): SourceError {
+    return {
+      code: Code.NodeOptionsLiteral,
+      loc,
+      details: { word: name, first },
+    };
+  }
+
+  public byNameError(loc: int, name: string, first: string): SourceError {
+    return {
+      code: Code.NodeOptionsByName,
+      loc,
+      details: { word: name, first },
+    };
+  }
+
+  public unknownOptionError(
+    loc: int,
+    name: string,
+    option: string,
+    allowed: string[],
+  ): SourceError {
+    const other = this.namesText(allowed);
+    const details: Details = { word: name, first: option, other };
+
+    return { code: Code.NodeOptionUnknown, loc, details };
+  }
+
+  public flagOptionError(loc: int, name: string, option: string): SourceError {
+    return {
+      code: Code.NodeOptionFlag,
+      loc,
+      details: { word: name, first: option },
+    };
+  }
+
+  public isPromisesModule(name: string): boolean {
+    return name == kFsPromisesModule;
+  }
+
+  public promiseCall(name: string): FsCall | undefined {
+    const row = this.call(`${name}${kSyncSuffix}`);
+    if (row == undefined) {
+      return undefined;
+    }
+
+    const options = row.options.filter((one) => one != kThrowIfNoEntry);
+
+    return {
+      name,
+      shape: row.shape,
+      options,
+      isUtf8Only: row.isUtf8Only,
+    };
+  }
+
+  private dataHint(base: Type): string {
+    const isPlain =
+      base.kind == TypeKind.Int ||
+      base.kind == TypeKind.Double ||
+      base.kind == TypeKind.Boolean;
+    if (isPlain) {
+      return "; convert it first, e.g. 'String(x)'";
+    }
+    if (this.byteSources.isBytesType(base)) {
+      return "; write a view of it, e.g. 'new Uint8Array(buffer)'";
+    }
+
+    return "";
+  }
+
+  private namesText(names: string[]): string {
+    const parts: string[] = [];
+
+    for (let index = 0; index < names.length; index++) {
+      const name = names[index] ?? "";
+      const mark = this.nameJoint(index, names.length);
+
+      parts.push(`${mark}${name}`);
+    }
+
+    return parts.join("");
+  }
+
+  private nameJoint(index: int, count: int): string {
+    if (index == 0) {
+      return "";
+    }
+    if (index + 1 == count) {
+      return " and ";
+    }
+
+    return ", ";
+  }
+}

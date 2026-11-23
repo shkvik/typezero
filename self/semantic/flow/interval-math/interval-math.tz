@@ -1,0 +1,445 @@
+import { BinaryOp } from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { IntegerMath } from "../../code/integer-math/integer-math.tz";
+import {
+  kLargestInt,
+  kSmallestInt,
+} from "../../code/integer-math/const/integer-math.const.tz";
+import { kShiftLimit, kShiftWidth } from "./const/interval-math.const.tz";
+import { ValueRange } from "./types/interval-math.types.tz";
+
+export class IntervalMath {
+  private readonly integers: IntegerMath;
+
+  public constructor(integers: IntegerMath) {
+    this.integers = integers;
+  }
+
+  public exact(value: decimal): ValueRange {
+    return { lo: value, hi: value };
+  }
+
+  public unite(first: ValueRange, second: ValueRange): ValueRange {
+    return {
+      lo: this.least(first.lo, second.lo),
+      hi: this.most(first.hi, second.hi),
+    };
+  }
+
+  public lowerOf(first: ValueRange, second: ValueRange): ValueRange {
+    return {
+      lo: this.least(first.lo, second.lo),
+      hi: this.least(first.hi, second.hi) ?? first.hi ?? second.hi,
+    };
+  }
+
+  public upperOf(first: ValueRange, second: ValueRange): ValueRange {
+    return {
+      lo: this.most(first.lo, second.lo) ?? first.lo ?? second.lo,
+      hi: this.most(first.hi, second.hi),
+    };
+  }
+
+  public negated(range: ValueRange): ValueRange {
+    return this.arithmetic(BinaryOp.Sub, this.exact(0), range);
+  }
+
+  public inverted(range: ValueRange): ValueRange {
+    const lo = range.lo;
+    const hi = range.hi;
+    if (lo == undefined || hi == undefined) {
+      return {};
+    }
+
+    return { lo: -hi - 1, hi: -lo - 1 };
+  }
+
+  public clamped(type: Type, range: ValueRange): ValueRange {
+    if (type.kind != TypeKind.Int) {
+      return range;
+    }
+
+    const isNarrow = type.bits < 64;
+    const span = this.integers.spanOf(type);
+    const lowest = this.lowestOf(type.unsigned, span);
+    const highest = this.highestOf(type.unsigned, span);
+    let lo = range.lo;
+    let hi = range.hi;
+
+    if (isNarrow || type.unsigned) {
+      lo = this.most(lo, lowest) ?? lowest;
+    }
+    if (isNarrow) {
+      hi = this.least(hi, highest) ?? highest;
+    }
+
+    return { lo, hi };
+  }
+
+  public operate(
+    op: BinaryOp,
+    left: ValueRange,
+    right: ValueRange,
+  ): ValueRange {
+    const count = this.exactValue(right);
+
+    switch (op) {
+      case BinaryOp.BitAnd:
+        return this.bitAnd(left, right);
+      case BinaryOp.BitOr:
+      case BinaryOp.BitXor:
+        return this.bitOr(op, left, right);
+      case BinaryOp.Shl:
+        return this.shiftLeft(left, count);
+      case BinaryOp.Shr:
+        return this.shiftRight(left, count);
+      case BinaryOp.UShr:
+        return this.unsignedShift(left, count);
+      case BinaryOp.Rem:
+        return this.remainder(left, count);
+      case BinaryOp.Div:
+        return this.division(left, count);
+      case BinaryOp.Add:
+      case BinaryOp.Sub:
+      case BinaryOp.Mul:
+        return this.arithmetic(op, left, right);
+      default:
+        return {};
+    }
+  }
+
+  private lowestOf(isUnsigned: boolean, span: decimal): decimal {
+    if (isUnsigned) {
+      return 0;
+    }
+
+    return -span / 2;
+  }
+
+  private highestOf(isUnsigned: boolean, span: decimal): decimal {
+    if (isUnsigned) {
+      return span - 1;
+    }
+
+    return span / 2 - 1;
+  }
+
+  private least(
+    first: decimal | undefined,
+    second: decimal | undefined,
+  ): decimal | undefined {
+    if (first == undefined || second == undefined) {
+      return undefined;
+    }
+    if (first < second) {
+      return first;
+    }
+
+    return second;
+  }
+
+  private most(
+    first: decimal | undefined,
+    second: decimal | undefined,
+  ): decimal | undefined {
+    if (first == undefined || second == undefined) {
+      return undefined;
+    }
+    if (first > second) {
+      return first;
+    }
+
+    return second;
+  }
+
+  private exactValue(range: ValueRange): decimal | undefined {
+    if (range.lo == undefined || range.lo != range.hi) {
+      return undefined;
+    }
+
+    return range.lo;
+  }
+
+  private bounded(lo: decimal, hi: decimal): ValueRange {
+    if (lo < kSmallestInt || hi > kLargestInt) {
+      return {};
+    }
+
+    return { lo, hi };
+  }
+
+  private bitAnd(left: ValueRange, right: ValueRange): ValueRange {
+    const first = this.naturalTop(left);
+    const second = this.naturalTop(right);
+    const isNatural = this.isNatural(left) || this.isNatural(right);
+    if (!isNatural) {
+      return {};
+    }
+
+    return { lo: 0, hi: this.least(first, second) ?? first ?? second };
+  }
+
+  private isNatural(range: ValueRange): boolean {
+    return range.lo != undefined && range.lo >= 0;
+  }
+
+  private naturalTop(range: ValueRange): decimal | undefined {
+    if (!this.isNatural(range)) {
+      return undefined;
+    }
+
+    return range.hi;
+  }
+
+  private bitOr(op: BinaryOp, left: ValueRange, right: ValueRange): ValueRange {
+    const top = this.most(left.hi, right.hi);
+    const bottom = this.most(left.lo, right.lo);
+    const isNatural = this.isNatural(left) && this.isNatural(right);
+    if (!isNatural || top == undefined || bottom == undefined) {
+      return {};
+    }
+    if (op == BinaryOp.BitOr) {
+      return { lo: bottom, hi: this.allOnes(top) };
+    }
+
+    return { lo: 0, hi: this.allOnes(top) };
+  }
+
+  private allOnes(value: decimal): decimal {
+    let mask: decimal = 0;
+
+    while (mask < value) {
+      mask = mask * 2 + 1;
+    }
+
+    return mask;
+  }
+
+  private shiftLeft(left: ValueRange, count: decimal | undefined): ValueRange {
+    const lo = left.lo;
+    const hi = left.hi;
+    if (count == undefined || lo == undefined || hi == undefined) {
+      return {};
+    }
+
+    const limit = this.integers.twoPower(kShiftLimit);
+    const isSmall =
+      count >= 0 && count < kShiftLimit && lo > -limit && hi < limit;
+    if (!isSmall) {
+      return {};
+    }
+
+    const factor = this.integers.twoPower(count);
+
+    return this.bounded(lo * factor, hi * factor);
+  }
+
+  private shiftRight(left: ValueRange, count: decimal | undefined): ValueRange {
+    const lo = left.lo;
+    const hi = left.hi;
+    if (count == undefined || lo == undefined || hi == undefined) {
+      return {};
+    }
+    if (!this.isShiftCount(count)) {
+      return {};
+    }
+
+    const divisor = this.integers.twoPower(count);
+
+    return { lo: this.floored(lo, divisor), hi: this.floored(hi, divisor) };
+  }
+
+  private unsignedShift(
+    left: ValueRange,
+    count: decimal | undefined,
+  ): ValueRange {
+    if (count == undefined || !this.isShiftCount(count)) {
+      return {};
+    }
+
+    const lo = left.lo;
+    const hi = left.hi;
+    const divisor = this.integers.twoPower(count);
+    if (lo != undefined && lo >= 0 && hi != undefined) {
+      return { lo: this.floored(lo, divisor), hi: this.floored(hi, divisor) };
+    }
+    if (count > 0) {
+      const half = this.integers.twoPower(count - 1);
+
+      return { lo: 0, hi: this.floored(kLargestInt, half) };
+    }
+
+    return {};
+  }
+
+  private isShiftCount(count: decimal): boolean {
+    return count >= 0 && count < kShiftWidth;
+  }
+
+  private floored(value: decimal, divisor: decimal): decimal {
+    if (divisor == 0) {
+      return value;
+    }
+
+    const rest = this.integers.patternOf(value, divisor);
+
+    return (value - rest) / divisor;
+  }
+
+  private remainder(left: ValueRange, count: decimal | undefined): ValueRange {
+    if (count == undefined || count == 0) {
+      return {};
+    }
+
+    const most = count.abs() - 1;
+    const lo = left.lo;
+    const hi = left.hi;
+    if (lo != undefined && lo >= 0) {
+      return { lo: 0, hi: this.least(most, hi) ?? most };
+    }
+    if (hi != undefined && hi <= 0) {
+      return { lo: this.most(-most, lo) ?? -most, hi: 0 };
+    }
+
+    return { lo: -most, hi: most };
+  }
+
+  private division(left: ValueRange, count: decimal | undefined): ValueRange {
+    const lo = left.lo;
+    const hi = left.hi;
+    if (count == undefined || lo == undefined || hi == undefined) {
+      return {};
+    }
+    if (count <= 0) {
+      return {};
+    }
+
+    return { lo: this.quotient(lo, count), hi: this.quotient(hi, count) };
+  }
+
+  private quotient(value: decimal, divisor: decimal): decimal {
+    if (divisor == 0) {
+      return 0;
+    }
+
+    const size = value.abs();
+    const whole = (size - (size % divisor)) / divisor;
+    if (value < 0) {
+      return -whole;
+    }
+
+    return whole;
+  }
+
+  private arithmetic(
+    op: BinaryOp,
+    left: ValueRange,
+    right: ValueRange,
+  ): ValueRange {
+    const isExact =
+      left.lo != undefined &&
+      left.hi != undefined &&
+      right.lo != undefined &&
+      right.hi != undefined;
+    if (op != BinaryOp.Mul && !isExact) {
+      return this.openSum(op, left, right);
+    }
+    if (!isExact) {
+      return {};
+    }
+
+    return this.corners(op, left, right);
+  }
+
+  private openSum(
+    op: BinaryOp,
+    left: ValueRange,
+    right: ValueRange,
+  ): ValueRange {
+    if (op == BinaryOp.Add) {
+      return {
+        lo: this.checked(this.sum(left.lo, right.lo)),
+        hi: this.checked(this.sum(left.hi, right.hi)),
+      };
+    }
+
+    return {
+      lo: this.checked(this.difference(left.lo, right.hi)),
+      hi: this.checked(this.difference(left.hi, right.lo)),
+    };
+  }
+
+  private sum(
+    first: decimal | undefined,
+    second: decimal | undefined,
+  ): decimal | undefined {
+    if (first == undefined || second == undefined) {
+      return undefined;
+    }
+
+    return first + second;
+  }
+
+  private difference(
+    first: decimal | undefined,
+    second: decimal | undefined,
+  ): decimal | undefined {
+    if (first == undefined || second == undefined) {
+      return undefined;
+    }
+
+    return first - second;
+  }
+
+  private checked(value: decimal | undefined): decimal | undefined {
+    if (value == undefined || value < kSmallestInt || value > kLargestInt) {
+      return undefined;
+    }
+
+    return value;
+  }
+
+  private corners(
+    op: BinaryOp,
+    left: ValueRange,
+    right: ValueRange,
+  ): ValueRange {
+    const xs = [left.lo, left.hi];
+    const ys = [right.lo, right.hi];
+    let lo: decimal | undefined = undefined;
+    let hi: decimal | undefined = undefined;
+
+    for (const x of xs) {
+      for (const y of ys) {
+        const value = this.checked(this.applied(op, x, y));
+        if (value == undefined) {
+          return {};
+        }
+
+        lo = this.least(lo, value) ?? value;
+        hi = this.most(hi, value) ?? value;
+      }
+    }
+
+    return { lo, hi };
+  }
+
+  private applied(
+    op: BinaryOp,
+    first: decimal | undefined,
+    second: decimal | undefined,
+  ): decimal | undefined {
+    if (first == undefined || second == undefined) {
+      return undefined;
+    }
+
+    switch (op) {
+      case BinaryOp.Add:
+        return first + second;
+      case BinaryOp.Sub:
+        return first - second;
+      default:
+        return first * second;
+    }
+  }
+}

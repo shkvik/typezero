@@ -1,23 +1,16 @@
-import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
-import { Code } from "../../../../diagnostic/code.tz";
-import {
-  DeclaredClass,
-  DeclaredMember,
-  DeclaredMemberKind,
-} from "../../../../program/ast/types/ast.types.declarations.tz";
 import {
   CallExpr,
   ExprKind,
   MemberExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
 import {
   DictKind,
-  InstanceType,
   LiteralKind,
   Type,
   TypeKind,
 } from "../../../../program/type/types/type.types.tz";
-import { ParameterSite } from "../../../types/type-resolver/types/type-resolver.types.tz";
 import {
   kArrayShape,
   kAsyncGeneratorShape,
@@ -38,6 +31,7 @@ import {
 import {
   CallKind,
   GenericTarget,
+  LibraryVariants,
 } from "../../../code/expression-types/types/expression-types.types.tz";
 import { kMapClass } from "../../../code/class-rules/const/class-rules.const.tz";
 import { kPromiseClass } from "../../library-rules/const/library-rules.const.tz";
@@ -167,6 +161,23 @@ partial class ExpressionTypes {
       return undefined;
     }
 
+    const asyncNext = this.asyncNextCall(expr, member, object, module);
+    if (asyncNext != undefined) {
+      return asyncNext;
+    }
+
+    const patternCall = this.stringPatternCall(expr, member, object, module);
+    if (patternCall != undefined) {
+      return patternCall;
+    }
+
+    const localeCall = this.localeMethodCall(expr, member, object, module);
+    if (localeCall != undefined) {
+      return localeCall;
+    }
+
+    this.argumentRangeCheck(expr, member, object, module);
+
     const isProved =
       kSpecialMethods.includes(member.name) ||
       this.library.isRegexSplit(expr, member);
@@ -184,6 +195,10 @@ partial class ExpressionTypes {
     }
 
     const method = this.libraryMemberType(receiver, member.name, true);
+    const variants = this.receiverVariants(receiver, member.name);
+    if (generic == undefined && variants.types.length > 0) {
+      return this.variantLibraryCall(expr, member, variants, module);
+    }
     if (generic == undefined && method == undefined) {
       this.valueMissingCheck(expr, member, object, receiver, module);
     }
@@ -207,6 +222,14 @@ partial class ExpressionTypes {
     this.positionMethod = member.name;
 
     return this.fieldValueCall(expr, member, method, kind, module);
+  }
+
+  private receiverVariants(receiver: Type, name: string): LibraryVariants {
+    if (receiver.kind != TypeKind.Instance) {
+      return { types: [], open: [] };
+    }
+
+    return this.declaredVariants(receiver, name, false);
   }
 
   private libraryMethodCall(
@@ -396,151 +419,5 @@ partial class ExpressionTypes {
     }
 
     return CallKind.Library;
-  }
-
-  private libraryMemberType(
-    receiver: Type,
-    name: string,
-    isCalled: boolean,
-  ): Type | undefined {
-    const found = this.receiverMember(receiver, name, isCalled);
-    if (found == undefined || this.parts.mentionsParameter(found)) {
-      return undefined;
-    }
-
-    return found;
-  }
-
-  private receiverMember(
-    receiver: Type,
-    name: string,
-    isCalled: boolean,
-  ): Type | undefined {
-    if (receiver.kind == TypeKind.Object) {
-      const fields = receiver.fields.filter((field) => field.name == name);
-      const field = fields[0];
-      if (field == undefined || fields.length > 1) {
-        return undefined;
-      }
-
-      return this.objects.fieldWanted(field);
-    }
-    if (receiver.kind != TypeKind.Instance) {
-      return undefined;
-    }
-
-    return this.declaredMember(receiver, name, isCalled);
-  }
-
-  private declaredMember(
-    instance: InstanceType,
-    name: string,
-    isCalled: boolean,
-  ): Type | undefined {
-    const opened = this.program.modules[instance.module];
-    const declared = opened?.declared.find((one) => one.loc == instance.loc);
-    if (declared == undefined) {
-      return undefined;
-    }
-
-    const members = declared.members.filter(
-      (one) => one.name == name && !one.isStatic,
-    );
-    if (members.length == 0) {
-      return this.parentMember(instance, name, isCalled);
-    }
-
-    return this.declaredForm(instance, declared, members, isCalled);
-  }
-
-  private declaredStatic(
-    instance: InstanceType,
-    name: string,
-  ): Type | undefined {
-    const opened = this.program.modules[instance.module];
-    const declared = opened?.declared.find((one) => one.loc == instance.loc);
-    if (declared == undefined) {
-      return undefined;
-    }
-
-    const members = declared.members.filter(
-      (one) => one.name == name && one.isStatic,
-    );
-
-    return this.declaredForm(instance, declared, members, true);
-  }
-
-  private declaredForm(
-    instance: InstanceType,
-    declared: DeclaredClass,
-    members: DeclaredMember[],
-    isCalled: boolean,
-  ): Type | undefined {
-    const member = members[0];
-    if (member == undefined) {
-      return undefined;
-    }
-
-    const form = member.form;
-    const context = this.resolver.classContext(
-      instance,
-      declared.typeParams,
-      instance.module,
-    );
-
-    if (form.kind == DeclaredMemberKind.Field) {
-      const written = member.type;
-      if (written == undefined || isCalled) {
-        return undefined;
-      }
-
-      const type = this.resolver.resolve(written, context);
-
-      if (form.optional) {
-        return this.types.optional(type);
-      }
-
-      return type;
-    }
-
-    const isPlain = form.kind == DeclaredMemberKind.Method;
-    if (!isPlain || members.length > 1) {
-      return undefined;
-    }
-    if (form.typeParams.length > 0 && !isCalled) {
-      return undefined;
-    }
-
-    const sites: ParameterSite[] = [];
-
-    for (const param of form.params) {
-      const type = param.type;
-      if (type == undefined) {
-        return undefined;
-      }
-
-      sites.push({
-        name: param.name,
-        loc: param.loc,
-        kind: param.form.kind,
-        type,
-        isDeclared: false,
-      });
-    }
-
-    return this.resolver.signature(sites, member.type, context);
-  }
-
-  private parentMember(
-    instance: InstanceType,
-    name: string,
-    isCalled: boolean,
-  ): Type | undefined {
-    const parent = this.types.baseClassOf(instance);
-    if (parent == undefined || parent.kind != TypeKind.Instance) {
-      return undefined;
-    }
-
-    return this.declaredMember(parent, name, isCalled);
   }
 }

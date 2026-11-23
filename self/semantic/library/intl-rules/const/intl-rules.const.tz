@@ -1,0 +1,622 @@
+import {
+  DateOption,
+  DateOptionRole,
+  IntlDigitPair,
+  IntlDigitRange,
+  IntlMethodKind,
+  IntlMethodRow,
+  IntlOptionKind,
+  IntlService,
+  IntlOption,
+} from "../types/intl-rules.types.tz";
+
+export const kIntlServices: IntlService[] = [
+  {
+    name: "NumberFormat",
+    callable: true,
+    options: [
+      {
+        name: "localeMatcher",
+        kind: IntlOptionKind.Text,
+        values: ["lookup", "best fit"],
+      },
+      {
+        name: "numberingSystem",
+        kind: IntlOptionKind.Text,
+        values: [],
+      },
+      {
+        name: "style",
+        kind: IntlOptionKind.Text,
+        values: ["decimal", "percent", "currency", "unit"],
+      },
+      {
+        name: "currency",
+        kind: IntlOptionKind.Text,
+        values: [],
+      },
+      {
+        name: "currencyDisplay",
+        kind: IntlOptionKind.Text,
+        values: ["code", "symbol", "narrowSymbol", "name"],
+      },
+      {
+        name: "currencySign",
+        kind: IntlOptionKind.Text,
+        values: ["standard", "accounting"],
+      },
+      {
+        name: "unit",
+        kind: IntlOptionKind.Text,
+        values: [],
+      },
+      {
+        name: "unitDisplay",
+        kind: IntlOptionKind.Text,
+        values: ["short", "narrow", "long"],
+      },
+      {
+        name: "useGrouping",
+        kind: IntlOptionKind.Grouping,
+        values: ["min2", "auto", "always", "true", "false"],
+      },
+      {
+        name: "notation",
+        kind: IntlOptionKind.Text,
+        values: ["standard", "scientific", "engineering", "compact"],
+      },
+      {
+        name: "compactDisplay",
+        kind: IntlOptionKind.Text,
+        values: ["short", "long"],
+      },
+      {
+        name: "signDisplay",
+        kind: IntlOptionKind.Text,
+        values: ["auto", "never", "always", "exceptZero", "negative"],
+      },
+      {
+        name: "minimumIntegerDigits",
+        kind: IntlOptionKind.Number,
+        values: [],
+      },
+      {
+        name: "minimumFractionDigits",
+        kind: IntlOptionKind.Number,
+        values: [],
+      },
+      {
+        name: "maximumFractionDigits",
+        kind: IntlOptionKind.Number,
+        values: [],
+      },
+      {
+        name: "minimumSignificantDigits",
+        kind: IntlOptionKind.Number,
+        values: [],
+      },
+      {
+        name: "maximumSignificantDigits",
+        kind: IntlOptionKind.Number,
+        values: [],
+      },
+      {
+        name: "roundingIncrement",
+        kind: IntlOptionKind.Number,
+        values: [],
+      },
+      {
+        name: "roundingMode",
+        kind: IntlOptionKind.Text,
+        values: [
+          "ceil",
+          "floor",
+          "expand",
+          "trunc",
+          "halfCeil",
+          "halfFloor",
+          "halfExpand",
+          "halfTrunc",
+          "halfEven",
+        ],
+      },
+      {
+        name: "roundingPriority",
+        kind: IntlOptionKind.Text,
+        values: ["auto", "morePrecision", "lessPrecision"],
+      },
+      {
+        name: "trailingZeroDisplay",
+        kind: IntlOptionKind.Text,
+        values: ["auto", "stripIfInteger"],
+      },
+    ],
+  },
+  {
+    name: "Collator",
+    callable: true,
+    options: [
+      {
+        name: "localeMatcher",
+        kind: IntlOptionKind.Text,
+        values: ["lookup", "best fit"],
+      },
+      {
+        name: "usage",
+        kind: IntlOptionKind.Text,
+        values: ["sort", "search"],
+      },
+      {
+        name: "sensitivity",
+        kind: IntlOptionKind.Text,
+        values: ["base", "accent", "case", "variant"],
+      },
+      {
+        name: "ignorePunctuation",
+        kind: IntlOptionKind.Flag,
+        values: [],
+      },
+      {
+        name: "collation",
+        kind: IntlOptionKind.Text,
+        values: [],
+      },
+      {
+        name: "numeric",
+        kind: IntlOptionKind.Flag,
+        values: [],
+      },
+      {
+        name: "caseFirst",
+        kind: IntlOptionKind.Text,
+        values: ["upper", "lower", "false"],
+      },
+    ],
+  },
+  {
+    name: "PluralRules",
+    callable: false,
+    options: [
+      {
+        name: "localeMatcher",
+        kind: IntlOptionKind.Text,
+        values: ["lookup", "best fit"],
+      },
+      {
+        name: "type",
+        kind: IntlOptionKind.Text,
+        values: ["cardinal", "ordinal"],
+      },
+      {
+        name: "minimumIntegerDigits",
+        kind: IntlOptionKind.Number,
+        values: [],
+      },
+      {
+        name: "minimumFractionDigits",
+        kind: IntlOptionKind.Number,
+        values: [],
+      },
+      {
+        name: "maximumFractionDigits",
+        kind: IntlOptionKind.Number,
+        values: [],
+      },
+      {
+        name: "minimumSignificantDigits",
+        kind: IntlOptionKind.Number,
+        values: [],
+      },
+      {
+        name: "maximumSignificantDigits",
+        kind: IntlOptionKind.Number,
+        values: [],
+      },
+      {
+        name: "roundingIncrement",
+        kind: IntlOptionKind.Number,
+        values: [],
+      },
+      {
+        name: "roundingMode",
+        kind: IntlOptionKind.Text,
+        values: [
+          "ceil",
+          "floor",
+          "expand",
+          "trunc",
+          "halfCeil",
+          "halfFloor",
+          "halfExpand",
+          "halfTrunc",
+          "halfEven",
+        ],
+      },
+      {
+        name: "roundingPriority",
+        kind: IntlOptionKind.Text,
+        values: ["auto", "morePrecision", "lessPrecision"],
+      },
+      {
+        name: "trailingZeroDisplay",
+        kind: IntlOptionKind.Text,
+        values: ["auto", "stripIfInteger"],
+      },
+    ],
+  },
+  {
+    name: "RelativeTimeFormat",
+    callable: false,
+    options: [
+      {
+        name: "localeMatcher",
+        kind: IntlOptionKind.Text,
+        values: ["lookup", "best fit"],
+      },
+      {
+        name: "numberingSystem",
+        kind: IntlOptionKind.Text,
+        values: [],
+      },
+      {
+        name: "style",
+        kind: IntlOptionKind.Text,
+        values: ["long", "short", "narrow"],
+      },
+      {
+        name: "numeric",
+        kind: IntlOptionKind.Text,
+        values: ["always", "auto"],
+      },
+    ],
+  },
+  {
+    name: "ListFormat",
+    callable: false,
+    options: [
+      {
+        name: "localeMatcher",
+        kind: IntlOptionKind.Text,
+        values: ["lookup", "best fit"],
+      },
+      {
+        name: "type",
+        kind: IntlOptionKind.Text,
+        values: ["conjunction", "disjunction", "unit"],
+      },
+      {
+        name: "style",
+        kind: IntlOptionKind.Text,
+        values: ["long", "short", "narrow"],
+      },
+    ],
+  },
+  {
+    name: "DisplayNames",
+    callable: false,
+    options: [
+      {
+        name: "localeMatcher",
+        kind: IntlOptionKind.Text,
+        values: ["lookup", "best fit"],
+      },
+      {
+        name: "style",
+        kind: IntlOptionKind.Text,
+        values: ["long", "short", "narrow"],
+      },
+      {
+        name: "type",
+        kind: IntlOptionKind.Text,
+        values: [
+          "language",
+          "region",
+          "script",
+          "currency",
+          "calendar",
+          "dateTimeField",
+        ],
+      },
+      {
+        name: "fallback",
+        kind: IntlOptionKind.Text,
+        values: ["code", "none"],
+      },
+      {
+        name: "languageDisplay",
+        kind: IntlOptionKind.Text,
+        values: ["dialect", "standard"],
+      },
+    ],
+  },
+  {
+    name: "Segmenter",
+    callable: false,
+    options: [
+      {
+        name: "localeMatcher",
+        kind: IntlOptionKind.Text,
+        values: ["lookup", "best fit"],
+      },
+      {
+        name: "granularity",
+        kind: IntlOptionKind.Text,
+        values: ["grapheme", "word", "sentence"],
+      },
+    ],
+  },
+];
+
+export const kSupportedOptions: IntlOption[] = [
+  {
+    name: "localeMatcher",
+    kind: IntlOptionKind.Text,
+    values: ["lookup", "best fit"],
+  },
+];
+
+export const kDigitRanges: IntlDigitRange[] = [
+  { name: "minimumIntegerDigits", low: 1, high: 21 },
+  { name: "minimumFractionDigits", low: 0, high: 100 },
+  { name: "maximumFractionDigits", low: 0, high: 100 },
+  { name: "minimumSignificantDigits", low: 1, high: 21 },
+  { name: "maximumSignificantDigits", low: 1, high: 21 },
+];
+
+export const kDigitPairs: IntlDigitPair[] = [
+  { low: "minimumFractionDigits", high: "maximumFractionDigits" },
+  { low: "minimumSignificantDigits", high: "maximumSignificantDigits" },
+];
+
+export const kRoundingIncrements: decimal[] = [
+  1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000,
+];
+
+export const kSanctionedUnits = [
+  "acre",
+  "bit",
+  "byte",
+  "celsius",
+  "centimeter",
+  "day",
+  "degree",
+  "fahrenheit",
+  "fluid-ounce",
+  "foot",
+  "gallon",
+  "gigabit",
+  "gigabyte",
+  "gram",
+  "hectare",
+  "hour",
+  "inch",
+  "kilobit",
+  "kilobyte",
+  "kilogram",
+  "kilometer",
+  "liter",
+  "megabit",
+  "megabyte",
+  "meter",
+  "microsecond",
+  "mile",
+  "mile-scandinavian",
+  "milliliter",
+  "millimeter",
+  "millisecond",
+  "minute",
+  "month",
+  "nanosecond",
+  "ounce",
+  "percent",
+  "petabyte",
+  "pound",
+  "second",
+  "stone",
+  "terabit",
+  "terabyte",
+  "week",
+  "yard",
+  "year",
+];
+
+export const kRelativeUnits = [
+  "year",
+  "years",
+  "quarter",
+  "quarters",
+  "month",
+  "months",
+  "week",
+  "weeks",
+  "day",
+  "days",
+  "hour",
+  "hours",
+  "minute",
+  "minutes",
+  "second",
+  "seconds",
+];
+
+export const kNormalizationForms = ["NFC", "NFD", "NFKC", "NFKD"];
+export const kIntlName = "Intl";
+export const kIntlPrefix = "Intl.";
+export const kLocaleClass = "Locale";
+export const kDisplayNamesClass = "DisplayNames";
+export const kNumberFormatClass = "NumberFormat";
+export const kCollatorClass = "Collator";
+export const kDateTimeFormatClass = "DateTimeFormat";
+export const kCanonicalName = "getCanonicalLocales";
+export const kValuesOfName = "supportedValuesOf";
+export const kSupportedName = "supportedLocalesOf";
+export const kPerSeparator = "-per-";
+export const kCurrencyOption = "currency";
+export const kUnitOption = "unit";
+export const kStyleOption = "style";
+export const kTypeOption = "type";
+export const kRoundingOption = "roundingIncrement";
+export const kKeywordOptions = ["numberingSystem", "collation"];
+export const kCollationName = "collation";
+export const kToLocaleName = "toLocaleString";
+export const kLocaleCompareName = "localeCompare";
+export const kNormalizeName = "normalize";
+export const kValueMethods: IntlMethodRow[] = [
+  { service: "NumberFormat", name: "format", kind: IntlMethodKind.Other },
+  { service: "DateTimeFormat", name: "format", kind: IntlMethodKind.Other },
+  { service: "Collator", name: "compare", kind: IntlMethodKind.Other },
+];
+export const kIntlMethods: IntlMethodRow[] = [
+  { service: "NumberFormat", name: "format", kind: IntlMethodKind.Number },
+  {
+    service: "NumberFormat",
+    name: "formatToParts",
+    kind: IntlMethodKind.Number,
+  },
+  {
+    service: "NumberFormat",
+    name: "formatRange",
+    kind: IntlMethodKind.Unsupported,
+  },
+  {
+    service: "NumberFormat",
+    name: "formatRangeToParts",
+    kind: IntlMethodKind.Unsupported,
+  },
+  { service: "Collator", name: "compare", kind: IntlMethodKind.Compare },
+  { service: "PluralRules", name: "select", kind: IntlMethodKind.Number },
+  {
+    service: "PluralRules",
+    name: "selectRange",
+    kind: IntlMethodKind.SelectRange,
+  },
+  {
+    service: "RelativeTimeFormat",
+    name: "format",
+    kind: IntlMethodKind.Relative,
+  },
+  {
+    service: "RelativeTimeFormat",
+    name: "formatToParts",
+    kind: IntlMethodKind.Relative,
+  },
+  { service: "Segments", name: "containing", kind: IntlMethodKind.Containing },
+  {
+    service: "DateTimeFormat",
+    name: "format",
+    kind: IntlMethodKind.Containing,
+  },
+  {
+    service: "DateTimeFormat",
+    name: "formatRange",
+    kind: IntlMethodKind.DateRange,
+  },
+  {
+    service: "DateTimeFormat",
+    name: "formatRangeToParts",
+    kind: IntlMethodKind.DateRange,
+  },
+  {
+    service: "DateTimeFormat",
+    name: "formatToParts",
+    kind: IntlMethodKind.Containing,
+  },
+];
+
+export const kDateOptions: DateOption[] = [
+  {
+    name: "localeMatcher",
+    role: DateOptionRole.Setting,
+    values: ["lookup", "best fit"],
+  },
+  { name: "calendar", role: DateOptionRole.Setting, values: [] },
+  { name: "numberingSystem", role: DateOptionRole.Setting, values: [] },
+  {
+    name: "hourCycle",
+    role: DateOptionRole.Setting,
+    values: ["h11", "h12", "h23", "h24"],
+  },
+  { name: "timeZone", role: DateOptionRole.Setting, values: [] },
+  {
+    name: "weekday",
+    role: DateOptionRole.Component,
+    values: ["narrow", "short", "long"],
+  },
+  {
+    name: "era",
+    role: DateOptionRole.Component,
+    values: ["narrow", "short", "long"],
+  },
+  {
+    name: "year",
+    role: DateOptionRole.Component,
+    values: ["2-digit", "numeric"],
+  },
+  {
+    name: "month",
+    role: DateOptionRole.Component,
+    values: ["2-digit", "numeric", "narrow", "short", "long"],
+  },
+  {
+    name: "day",
+    role: DateOptionRole.Component,
+    values: ["2-digit", "numeric"],
+  },
+  {
+    name: "dayPeriod",
+    role: DateOptionRole.Component,
+    values: ["narrow", "short", "long"],
+  },
+  {
+    name: "hour",
+    role: DateOptionRole.Component,
+    values: ["2-digit", "numeric"],
+  },
+  {
+    name: "minute",
+    role: DateOptionRole.Component,
+    values: ["2-digit", "numeric"],
+  },
+  {
+    name: "second",
+    role: DateOptionRole.Component,
+    values: ["2-digit", "numeric"],
+  },
+  {
+    name: "timeZoneName",
+    role: DateOptionRole.Component,
+    values: [
+      "short",
+      "long",
+      "shortOffset",
+      "longOffset",
+      "shortGeneric",
+      "longGeneric",
+    ],
+  },
+  {
+    name: "formatMatcher",
+    role: DateOptionRole.Setting,
+    values: ["basic", "best fit"],
+  },
+  {
+    name: "dateStyle",
+    role: DateOptionRole.Style,
+    values: ["full", "long", "medium", "short"],
+  },
+  {
+    name: "timeStyle",
+    role: DateOptionRole.Style,
+    values: ["full", "long", "medium", "short"],
+  },
+  { name: "hour12", role: DateOptionRole.Setting, values: [] },
+  {
+    name: "fractionalSecondDigits",
+    role: DateOptionRole.Component,
+    values: [],
+  },
+];
+export const kHour12Name = "hour12";
+export const kDigitsName = "fractionalSecondDigits";
+export const kDateStyleName = "dateStyle";
+export const kTimeStyleName = "timeStyle";

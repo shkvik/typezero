@@ -1,0 +1,648 @@
+import { SourceError } from "../../../../../diagnostic/types/message.types.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  UnaryOp,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import { kZeroTerm } from "../../../../flow/bound-rules/const/bound-rules.const.tz";
+import {
+  kAnyCryptoData,
+  kBuffersOnly,
+  kBytesHint,
+  kCipherOptions,
+  kGlobalCryptoName,
+  kHashOptions,
+  kIntHint,
+  kIterationsName,
+  kKeylenName,
+  kSignHint,
+  kTagLengthName,
+  kTextOrBuffers,
+  kTextOrViews,
+  kUuidOptions,
+  kVerifyHint,
+} from "../../../crypto-rules/const/crypto-rules.const.tz";
+import {
+  CryptoCall,
+  CryptoData,
+  CryptoDataKinds,
+  CryptoNumber,
+  DigestUse,
+} from "../../../crypto-rules/types/crypto-rules.types.tz";
+
+partial class ExpressionTypes {
+  private cryptoCallCheck(expr: CallExpr, module: int): void {
+    const callee = expr.callee;
+    if (this.modules.isLibraryModule(module)) {
+      return;
+    }
+    if (callee.kind == ExprKind.Member) {
+      return this.globalCryptoCall(expr, callee, module);
+    }
+    if (callee.kind != ExprKind.Name) {
+      return;
+    }
+    if (expr.args.some((one) => one.spread)) {
+      return;
+    }
+
+    const target = this.targetOfName(callee, module);
+    const opened = this.program.modules[target?.module ?? -1];
+    if (target == undefined || target.kind != SymbolKind.Function) {
+      return;
+    }
+    if (opened == undefined || !this.crypto.isCryptoModule(opened.name)) {
+      return;
+    }
+
+    const shown = callee.name;
+    if (this.cryptoAsyncCallback(expr, shown, module)) {
+      return;
+    }
+
+    const call: CryptoCall = {
+      expr,
+      name: this.crypto.syncName(shown),
+      shown,
+      loc: callee.loc,
+    };
+
+    this.cryptoNamedCheck(call, module);
+    this.cryptoFormCheck(call, module);
+  }
+
+  private globalCryptoCall(
+    expr: CallExpr,
+    callee: MemberExpr,
+    module: int,
+  ): void {
+    const hasSpread = expr.args.some((one) => one.spread);
+    if (!this.isGlobalCrypto(callee.object, module) || hasSpread) {
+      return;
+    }
+
+    const call: CryptoCall = {
+      expr,
+      name: callee.name,
+      shown: callee.name,
+      loc: callee.loc,
+    };
+
+    this.cryptoFormCheck(call, module);
+  }
+
+  private isGlobalCrypto(object: Expr, module: int): boolean {
+    if (object.kind != ExprKind.Name || object.name != kGlobalCryptoName) {
+      return false;
+    }
+
+    return this.isGlobalUse(object, module);
+  }
+
+  private globalCryptoRead(expr: MemberExpr, module: int): Type | undefined {
+    if (!this.isGlobalCrypto(expr.object, module)) {
+      return undefined;
+    }
+
+    const memberError = this.crypto.globalMemberError(expr.loc, expr.name);
+    if (memberError == undefined) {
+      return undefined;
+    }
+
+    this.reportFound(module, memberError);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private cryptoNamedCheck(call: CryptoCall, module: int): void {
+    const expr = call.expr;
+    const count = expr.args.length;
+
+    switch (call.name) {
+      case "createHash":
+        return this.cryptoHashAt(expr, 0, DigestUse.Hash, count <= 2, module);
+      case "hash":
+        return this.cryptoHashAt(expr, 0, DigestUse.Hash, count <= 3, module);
+      case "createHmac":
+        return this.hmacCheck(expr, count == 2, module);
+      case "createSign":
+      case "createVerify":
+        return this.cryptoHashAt(expr, 0, DigestUse.Hmac, count == 1, module);
+      case "pbkdf2Sync":
+        return this.pbkdf2Check(expr, module);
+      case "hkdfSync":
+        return this.hkdfCheck(expr, module);
+      case "createCipheriv":
+      case "createDecipheriv":
+        return this.cipherCheck(expr, call.shown, module);
+      default:
+        return;
+    }
+  }
+
+  private cryptoFormCheck(call: CryptoCall, module: int): void {
+    const expr = call.expr;
+    const count = expr.args.length;
+
+    switch (call.name) {
+      case "hash":
+        return this.dataAt(expr, 1, "data", kTextOrViews, count <= 3, module);
+      case "scryptSync":
+        return this.scryptDataCheck(call, count >= 3 && count <= 4, module);
+      case "createSecretKey":
+        return this.dataAt(expr, 0, "key", kTextOrBuffers, count <= 2, module);
+      case "timingSafeEqual":
+        return this.timingSafeCheck(expr, count == 2, module);
+      case "getRandomValues":
+        return this.randomValuesCheck(expr, count == 1, module);
+      case "createHash":
+        return this.cryptoOptionsAt(call, 1, kHashOptions, count <= 2, module);
+      case "randomUUID":
+        return this.cryptoOptionsAt(call, 0, kUuidOptions, count <= 1, module);
+      case "randomBytes":
+        return this.randomBytesForm(call, count <= 2, module);
+      case "randomInt":
+        return this.randomIntForm(call, count <= 3, module);
+      case "randomFillSync":
+        return this.randomFillForm(call, count <= 3, module);
+      case "generateKeySync":
+        return this.secretKeyCheck(expr, call.shown, module);
+      case "sign":
+        return this.callbackAt(call, 3, kSignHint, count == 4, module);
+      case "verify":
+        return this.callbackAt(call, 4, kVerifyHint, count == 5, module);
+      case "generateKeyPairSync":
+        return this.keyPairCheck(expr, call.shown, call.loc, module);
+      case "createECDH":
+        return this.curveCheck(expr, module);
+      default:
+        return;
+    }
+  }
+
+  private cryptoOptionsAt(
+    call: CryptoCall,
+    index: int,
+    allowed: string[],
+    isCounted: boolean,
+    module: int,
+  ): void {
+    if (isCounted) {
+      this.cryptoOptionsFine(call.expr, index, call.shown, allowed, module);
+    }
+  }
+
+  private scryptDataCheck(
+    call: CryptoCall,
+    isCounted: boolean,
+    module: int,
+  ): void {
+    if (!isCounted) {
+      return;
+    }
+
+    const isDataFine = this.cryptoDataFine(
+      call.expr,
+      [
+        { index: 0, what: "password", kinds: kAnyCryptoData },
+        { index: 1, what: "salt", kinds: kTextOrBuffers },
+      ],
+      module,
+    );
+    if (isDataFine) {
+      this.scryptOptionsCheck(call.expr, call.shown, module);
+    }
+  }
+
+  private hmacCheck(expr: CallExpr, isCounted: boolean, module: int): void {
+    if (!isCounted) {
+      return;
+    }
+
+    this.cryptoHashFine(expr, 0, DigestUse.Hmac, module);
+    this.cryptoDataFine(
+      expr,
+      [{ index: 1, what: "key", kinds: kAnyCryptoData }],
+      module,
+    );
+  }
+
+  private dataAt(
+    expr: CallExpr,
+    index: int,
+    what: string,
+    kinds: CryptoDataKinds,
+    isCounted: boolean,
+    module: int,
+  ): void {
+    if (isCounted) {
+      this.cryptoDataFine(expr, [{ index, what, kinds }], module);
+    }
+  }
+
+  private timingSafeCheck(
+    expr: CallExpr,
+    isCounted: boolean,
+    module: int,
+  ): void {
+    if (!isCounted) {
+      return;
+    }
+
+    this.cryptoDataFine(
+      expr,
+      [
+        { index: 0, what: "first argument", kinds: kBuffersOnly },
+        { index: 1, what: "second argument", kinds: kBuffersOnly },
+      ],
+      module,
+    );
+  }
+
+  private randomValuesCheck(
+    expr: CallExpr,
+    isCounted: boolean,
+    module: int,
+  ): void {
+    const target = expr.args[0]?.expr;
+    if (!isCounted || target == undefined) {
+      return;
+    }
+
+    const given = this.peekType(target, module);
+    if (given.kind == TypeKind.Error) {
+      return;
+    }
+
+    const fillError = this.crypto.randomValuesError(target.loc, given);
+
+    this.reportFound(module, fillError);
+  }
+
+  private randomBytesForm(
+    call: CryptoCall,
+    isCounted: boolean,
+    module: int,
+  ): void {
+    if (!isCounted) {
+      return;
+    }
+
+    const expr = call.expr;
+    if (!this.cryptoSyncCallback(expr, 1, call.name, kBytesHint, module)) {
+      this.randomSizeCheck(expr, module);
+    }
+  }
+
+  private randomIntForm(
+    call: CryptoCall,
+    isCounted: boolean,
+    module: int,
+  ): void {
+    const expr = call.expr;
+    const count = expr.args.length;
+    if (!isCounted || count == 0) {
+      return;
+    }
+
+    const last = count - 1;
+    const isCallback =
+      count >= 2 &&
+      this.cryptoSyncCallback(expr, last, call.name, kIntHint, module);
+    if (!isCallback) {
+      this.randomIntCheck(expr, module);
+    }
+  }
+
+  private randomFillForm(
+    call: CryptoCall,
+    isCounted: boolean,
+    module: int,
+  ): void {
+    if (isCounted) {
+      this.fillSizeCheck(call.expr, module);
+    }
+  }
+
+  private callbackAt(
+    call: CryptoCall,
+    index: int,
+    hint: string,
+    isCounted: boolean,
+    module: int,
+  ): void {
+    if (isCounted) {
+      this.cryptoSyncCallback(call.expr, index, call.name, hint, module);
+    }
+  }
+
+  private curveCheck(expr: CallExpr, module: int): void {
+    const curve = expr.args[0]?.expr;
+    if (expr.args.length != 1 || curve == undefined) {
+      return;
+    }
+
+    const text = this.constantText(curve);
+    if (text != undefined) {
+      this.reportFound(module, this.crypto.curveError(curve.loc, text));
+    }
+  }
+
+  private cryptoHashAt(
+    expr: CallExpr,
+    index: int,
+    use: DigestUse,
+    isCounted: boolean,
+    module: int,
+  ): void {
+    if (isCounted) {
+      this.cryptoHashFine(expr, index, use, module);
+    }
+  }
+
+  private cryptoHashFine(
+    expr: CallExpr,
+    index: int,
+    use: DigestUse,
+    module: int,
+  ): boolean {
+    const arg = expr.args[index]?.expr;
+    if (arg == undefined) {
+      return false;
+    }
+
+    const text = this.constantText(arg);
+    if (text == undefined) {
+      return true;
+    }
+
+    const hashError = this.crypto.hashError(arg.loc, text, use);
+    if (hashError == undefined) {
+      return true;
+    }
+
+    this.reportFound(module, hashError);
+
+    return false;
+  }
+
+  private pbkdf2Check(expr: CallExpr, module: int): void {
+    if (expr.args.length != 5) {
+      return;
+    }
+
+    const isDataFine = this.cryptoDataFine(
+      expr,
+      [
+        { index: 0, what: "password", kinds: kAnyCryptoData },
+        { index: 1, what: "salt", kinds: kTextOrBuffers },
+      ],
+      module,
+    );
+    const isHashFine = this.cryptoHashFine(expr, 4, DigestUse.Hmac, module);
+    if (!isHashFine || !isDataFine) {
+      return;
+    }
+    if (!this.cryptoWholeFine(expr, 2, kIterationsName, module)) {
+      return;
+    }
+
+    this.cryptoWholeFine(expr, 3, kKeylenName, module);
+  }
+
+  private hkdfCheck(expr: CallExpr, module: int): void {
+    if (expr.args.length != 5) {
+      return;
+    }
+
+    const isHashFine = this.cryptoHashFine(expr, 0, DigestUse.Hmac, module);
+    const isDataFine = this.cryptoDataFine(
+      expr,
+      [
+        { index: 1, what: "ikm", kinds: kAnyCryptoData },
+        { index: 2, what: "salt", kinds: kTextOrBuffers },
+        { index: 3, what: "info", kinds: kTextOrBuffers },
+      ],
+      module,
+    );
+    if (!isHashFine || !isDataFine) {
+      return;
+    }
+
+    this.cryptoWholeFine(expr, 4, kKeylenName, module);
+  }
+
+  private cipherCheck(expr: CallExpr, shown: string, module: int): void {
+    const count = expr.args.length;
+    const name = expr.args[0]?.expr;
+    if (count < 3 || count > 4 || name == undefined) {
+      return;
+    }
+
+    const text = this.constantText(name);
+    const cipherError = this.cipherNameError(name, text);
+    const isDataFine = this.cryptoDataFine(
+      expr,
+      [
+        { index: 1, what: "key", kinds: kAnyCryptoData },
+        { index: 2, what: "iv", kinds: kTextOrBuffers },
+      ],
+      module,
+    );
+
+    this.reportFound(module, cipherError);
+
+    const isRead = this.cryptoOptionsFine(
+      expr,
+      3,
+      shown,
+      kCipherOptions,
+      module,
+    );
+    if (cipherError != undefined || !isDataFine || !isRead) {
+      return;
+    }
+    if (text == undefined || !this.cipherLengthsFine(expr, text, module)) {
+      return;
+    }
+
+    const tag = this.cryptoOptionAt(expr, 3, kTagLengthName);
+    if (tag == undefined && this.crypto.needsTagLength(text)) {
+      this.reportFound(module, this.crypto.tagLengthError(name.loc, text));
+    }
+  }
+
+  private cipherLengthsFine(
+    expr: CallExpr,
+    text: string,
+    module: int,
+  ): boolean {
+    const cipher = this.crypto.directCipher(text);
+    const key = expr.args[1]?.expr;
+    const iv = expr.args[2]?.expr;
+    if (cipher == undefined || key == undefined || iv == undefined) {
+      return true;
+    }
+
+    let isFine = true;
+    const keyBytes = this.cryptoBytes(key, module);
+    if (keyBytes != undefined) {
+      const keyError = this.crypto.keyError(key.loc, cipher, keyBytes);
+
+      this.reportFound(module, keyError);
+      isFine = keyError == undefined;
+    }
+
+    const ivBytes = this.cryptoBytes(iv, module);
+    if (ivBytes != undefined) {
+      const ivError = this.crypto.ivError(iv.loc, cipher, ivBytes);
+
+      this.reportFound(module, ivError);
+      isFine = isFine && ivError == undefined;
+    }
+
+    return isFine;
+  }
+
+  private cryptoOptionAt(
+    expr: CallExpr,
+    index: int,
+    name: string,
+  ): Expr | undefined {
+    const options = expr.args[index]?.expr;
+    if (options == undefined || options.kind == ExprKind.Undefined) {
+      return undefined;
+    }
+
+    return this.optionValue(options, name);
+  }
+
+  private cipherNameError(
+    name: Expr,
+    text: string | undefined,
+  ): SourceError | undefined {
+    if (text == undefined) {
+      return undefined;
+    }
+
+    return this.crypto.cipherError(name.loc, text);
+  }
+
+  private cryptoDataFine(
+    expr: CallExpr,
+    items: CryptoData[],
+    module: int,
+  ): boolean {
+    let isFine = true;
+
+    for (const item of items) {
+      const arg = expr.args[item.index]?.expr;
+      if (arg == undefined) {
+        isFine = false;
+        continue;
+      }
+
+      const given = this.peekType(arg, module);
+      const dataError = this.crypto.dataError(
+        arg.loc,
+        item.what,
+        item.kinds,
+        given,
+      );
+
+      this.reportFound(module, dataError);
+      isFine = isFine && dataError == undefined && given.kind != TypeKind.Error;
+    }
+
+    return isFine;
+  }
+
+  private cryptoWholeFine(
+    expr: CallExpr,
+    index: int,
+    name: string,
+    module: int,
+  ): boolean {
+    const arg = expr.args[index]?.expr;
+    if (arg == undefined) {
+      return false;
+    }
+
+    const number = this.cryptoNumber(arg, module);
+    if (number == undefined) {
+      return true;
+    }
+
+    const wholeError = this.crypto.wholeError(arg.loc, name, 1, number);
+
+    this.reportFound(module, wholeError);
+
+    return wholeError == undefined;
+  }
+
+  private cryptoBytes(value: Expr, module: int): decimal | undefined {
+    const type = this.peekType(value, module);
+    if (!this.crypto.isKeyBytes(type)) {
+      return undefined;
+    }
+
+    const fixed = this.fixedCount(value, module);
+    if (fixed != undefined) {
+      return fixed;
+    }
+
+    const made = this.madeLinear(value, module);
+    if (made == undefined || made.term != kZeroTerm) {
+      return undefined;
+    }
+
+    return made.offset;
+  }
+
+  private cryptoNumber(value: Expr, module: int): CryptoNumber | undefined {
+    if (value.kind == ExprKind.Unary && value.op == UnaryOp.Neg) {
+      const inner = this.cryptoNumber(value.operand, module);
+      if (inner == undefined) {
+        return undefined;
+      }
+
+      return {
+        value: -inner.value,
+        isWhole: inner.isWhole,
+        shown: `-${inner.shown}`,
+      };
+    }
+    if (value.kind == ExprKind.FloatLit) {
+      return this.fractionNumber(value.value);
+    }
+
+    const whole = this.plainConstant(value, module);
+    if (whole == undefined) {
+      return undefined;
+    }
+
+    return { value: whole, isWhole: true, shown: `${whole}` };
+  }
+
+  private fractionNumber(value: double): CryptoNumber | undefined {
+    const floor = Math.floor(value);
+    if (floor != value) {
+      return { value: (0).toDecimal(), isWhole: false, shown: `${value}` };
+    }
+    if (floor < -1000000000000000.0 || floor > 1000000000000000.0) {
+      return undefined;
+    }
+
+    const whole = Math.trunc(floor).toInt().toDecimal();
+
+    return { value: whole, isWhole: true, shown: `${whole}` };
+  }
+}

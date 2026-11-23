@@ -1,0 +1,10 @@
+export type ProofRange = {
+  readonly what: string;
+  readonly low: decimal;
+  readonly high?: decimal;
+};
+
+export type OffsetLimit = {
+  readonly what: string;
+  readonly less: decimal;
+};

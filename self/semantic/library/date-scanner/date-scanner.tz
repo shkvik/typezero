@@ -1,0 +1,284 @@
+import {
+  kDateKeywords,
+  kDateSymbols,
+  kEndToken,
+  kLeftParen,
+  kLineTerminators,
+  kLowerBit,
+  kMinus,
+  kNine,
+  kPlus,
+  kPrefixLength,
+  kRightParen,
+  kSignificantDigits,
+  kUnknownToken,
+  kUpperA,
+  kWhiteSpaces,
+  kWideSpaceFirst,
+  kWideSpaceLast,
+  kZero,
+} from "../date-reader/const/date-reader.const.tz";
+import {
+  DateToken,
+  DateTokenKind,
+} from "../date-reader/types/date-reader.types.tz";
+
+export class DateScanner {
+  private readonly text: string;
+  private index: int;
+  private char: int;
+  private next: DateToken;
+
+  public constructor(text: string) {
+    this.text = text;
+    this.index = 0;
+    this.char = 0;
+    this.next = kEndToken;
+  }
+
+  public start(): void {
+    this.nextChar();
+    this.next = this.scan();
+  }
+
+  public peek(): DateToken {
+    return this.next;
+  }
+
+  public isNextFixed(length: int): boolean {
+    return this.isFixedNumber(this.next, length);
+  }
+
+  public isNextNumber(): boolean {
+    return this.next.kind == DateTokenKind.Number;
+  }
+
+  public isNextSign(): boolean {
+    return this.isSign(this.next);
+  }
+
+  public isNextZ(): boolean {
+    return this.isZ(this.next);
+  }
+
+  public isNextSymbol(char: int): boolean {
+    return this.isSymbol(this.next, char);
+  }
+
+  public nextToken(): DateToken {
+    const token = this.next;
+
+    this.next = this.scan();
+
+    return token;
+  }
+
+  public isSymbol(token: DateToken, char: int): boolean {
+    return token.kind == DateTokenKind.Symbol && token.value == char;
+  }
+
+  public isSign(token: DateToken): boolean {
+    return this.isSymbol(token, kPlus) || this.isSymbol(token, kMinus);
+  }
+
+  public signOf(token: DateToken): int {
+    if (token.value == kMinus) {
+      return -1;
+    }
+
+    return 1;
+  }
+
+  public isFixedNumber(token: DateToken, length: int): boolean {
+    return token.kind == DateTokenKind.Number && token.length == length;
+  }
+
+  public isWord(token: DateToken): boolean {
+    switch (token.kind) {
+      case DateTokenKind.Other:
+      case DateTokenKind.Month:
+      case DateTokenKind.Zone:
+      case DateTokenKind.LetterT:
+      case DateTokenKind.Meridiem:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public isZ(token: DateToken): boolean {
+    return (
+      token.kind == DateTokenKind.Zone && token.length == 1 && token.value == 0
+    );
+  }
+
+  public skipSymbol(char: int): boolean {
+    if (!this.isSymbol(this.next, char)) {
+      return false;
+    }
+
+    this.next = this.scan();
+
+    return true;
+  }
+
+  private nextChar(): void {
+    const text = this.text;
+    const index = this.index;
+
+    this.char = 0;
+
+    if (index >= 0 && index < text.length) {
+      this.char = text.charCodeAt(index);
+    }
+
+    this.index = index + 1;
+  }
+
+  private isDigit(char: int): boolean {
+    return char >= kZero && char <= kNine;
+  }
+
+  private isWhiteSpace(char: int): boolean {
+    if (kWhiteSpaces.includes(char)) {
+      return true;
+    }
+
+    return char >= kWideSpaceFirst && char <= kWideSpaceLast;
+  }
+
+  private isSpace(char: int): boolean {
+    return this.isWhiteSpace(char) || kLineTerminators.includes(char);
+  }
+
+  private isLetter(char: int): boolean {
+    return char >= kUpperA && !this.isWhiteSpace(char);
+  }
+
+  private readNumber(): int {
+    while (this.char == kZero) {
+      this.nextChar();
+    }
+
+    const start = this.index - 1;
+
+    while (this.isDigit(this.char)) {
+      this.nextChar();
+    }
+
+    const end = Math.min(this.index - 1, start + kSignificantDigits);
+    const digits = this.text.slice(start, end);
+    const parsed = parseInt(digits);
+    const value = parsed.unwrapOr(0);
+    if (value < 0 || value > 999999999) {
+      return 0;
+    }
+
+    return value;
+  }
+
+  private readWord(): DateToken {
+    const prefix: int[] = [];
+    let length = 0;
+
+    while (this.isLetter(this.char)) {
+      if (length < kPrefixLength) {
+        prefix.push(this.char | kLowerBit);
+      }
+
+      length += 1;
+
+      this.nextChar();
+    }
+
+    return this.keyword(prefix, length);
+  }
+
+  private keyword(prefix: int[], length: int): DateToken {
+    for (const keyword of kDateKeywords) {
+      const isLong = length > kPrefixLength;
+      const isFitting = !isLong || keyword.kind == DateTokenKind.Month;
+      if (isFitting && this.isPrefix(prefix, keyword.prefix)) {
+        return { kind: keyword.kind, length, value: keyword.value };
+      }
+    }
+
+    return { kind: DateTokenKind.Other, length, value: 0 };
+  }
+
+  private isPrefix(prefix: int[], word: string): boolean {
+    if (prefix.length != word.length) {
+      return false;
+    }
+
+    for (let index = 0; index < word.length; index++) {
+      if (prefix[index] != word.charCodeAt(index)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private scan(): DateToken {
+    const start = this.index;
+    const char = this.char;
+    if (char == 0) {
+      return kEndToken;
+    }
+    if (this.isDigit(char)) {
+      const value = this.readNumber();
+      const length = this.index - start;
+
+      return { kind: DateTokenKind.Number, length, value };
+    }
+    if (kDateSymbols.includes(char)) {
+      this.nextChar();
+
+      return { kind: DateTokenKind.Symbol, length: 1, value: char };
+    }
+    if (this.isLetter(char)) {
+      return this.readWord();
+    }
+    if (this.isSpace(char)) {
+      this.nextChar();
+
+      const length = this.index - start;
+
+      return { kind: DateTokenKind.Space, length, value: -1 };
+    }
+    if (char == kLeftParen) {
+      this.skipComment();
+
+      return kUnknownToken;
+    }
+
+    this.nextChar();
+
+    return kUnknownToken;
+  }
+
+  private skipComment(): void {
+    let balance = 0;
+    let isOpen = true;
+
+    while (isOpen) {
+      balance += this.parenStep(this.char);
+
+      this.nextChar();
+
+      isOpen = balance > 0 && this.char != 0;
+    }
+  }
+
+  private parenStep(char: int): int {
+    if (char == kRightParen) {
+      return -1;
+    }
+    if (char == kLeftParen) {
+      return 1;
+    }
+
+    return 0;
+  }
+}

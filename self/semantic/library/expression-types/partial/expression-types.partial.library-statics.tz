@@ -1,0 +1,162 @@
+import {
+  CallExpr,
+  ExprKind,
+  MemberExpr,
+  NewExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  kCodePointRange,
+  kFromCodePointName,
+  kStringClassName,
+} from "../../library-rules/const/library-rules.const.ranges.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { CallKind } from "../../../code/expression-types/types/expression-types.types.tz";
+import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
+
+partial class ExpressionTypes {
+  private argumentRangeCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): void {
+    const range = this.library.argumentRange(object, member.name);
+    const arg = expr.args[0];
+    if (range == undefined || arg == undefined || arg.spread) {
+      return;
+    }
+
+    const given = this.peekType(arg.expr, module);
+    this.requireBetween(arg.expr, given, range, module);
+  }
+
+  private codePointCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): boolean {
+    const owner = member.object;
+    const isMaker =
+      member.name == kFromCodePointName &&
+      owner.kind == ExprKind.Name &&
+      owner.name == kStringClassName &&
+      this.isGlobalUse(owner, module);
+    const hasSpread = expr.args.some((arg) => arg.spread);
+    if (!isMaker || hasSpread) {
+      return false;
+    }
+
+    const int = this.store.integer(64, false);
+
+    for (const arg of expr.args) {
+      const given = this.typed(arg.expr, int, module);
+
+      this.requireBetween(arg.expr, given, kCodePointRange, module);
+    }
+
+    return true;
+  }
+
+  private madeSizeCheck(expr: NewExpr, name: string, module: int): void {
+    const what = this.bytes.sizeWhat(name);
+    const size = expr.args[0];
+    const isSized = expr.args.length == 1 && size != undefined;
+    if (what == undefined || !isSized || size == undefined || size.spread) {
+      return;
+    }
+
+    const given = this.peekType(size.expr, module);
+
+    const base = this.types.definedType(given);
+    if (base.kind == TypeKind.Double && this.bytes.isTypedName(name)) {
+      const code = Code.BytesLengthFraction;
+
+      return this.report(module, size.expr.loc, code, kNoDetails);
+    }
+    if (base.kind != TypeKind.Int) {
+      return;
+    }
+
+    this.requireBetween(size.expr, given, { what, low: 0 }, module);
+  }
+
+  private libraryStaticCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): Type | undefined {
+    const owner = member.object;
+    if (owner.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const target = this.targetOfName(owner, module);
+    const isLibraryClass =
+      target != undefined &&
+      target.kind == SymbolKind.Class &&
+      this.modules.isLibraryModule(target.module);
+    if (!isLibraryClass || target == undefined) {
+      return undefined;
+    }
+
+    const opened = this.program.modules[target.module];
+    const declared = opened?.declared.find((one) => one.loc == target.loc);
+    if (declared == undefined) {
+      return undefined;
+    }
+
+    const instance = this.resolver.declaredInstance(
+      target.module,
+      declared,
+      [],
+    );
+    if (instance == undefined || instance.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const regExpStatic = this.regExpStaticCall(expr, member, instance, module);
+    if (regExpStatic != undefined) {
+      return regExpStatic;
+    }
+
+    this.bytesStaticCheck(expr, instance, member, module);
+    this.decoderParseCheck(expr, instance, member, module);
+
+    const found = this.declaredStatic(instance, member.name);
+    const variants = this.declaredVariants(instance, member.name, true);
+    if (found == undefined && variants.types.length > 0) {
+      return this.variantLibraryCall(expr, member, variants, module);
+    }
+
+    const isPlain =
+      found != undefined &&
+      found.kind == TypeKind.Function &&
+      !this.parts.mentionsParameter(found);
+    if (!isPlain || found == undefined || found.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    this.staticRangeCheck(expr, owner.name, member.name, module);
+
+    return this.calledWith(expr, found, member.loc, CallKind.Library, module);
+  }
+
+  private staticRangeCheck(
+    expr: CallExpr,
+    owner: string,
+    name: string,
+    module: int,
+  ): void {
+    const range = this.bytes.staticRange(owner, name);
+    const arg = expr.args[0];
+    if (range == undefined || arg == undefined || arg.spread) {
+      return;
+    }
+
+    const given = this.peekType(arg.expr, module);
+    this.requireBetween(arg.expr, given, range, module);
+  }
+}

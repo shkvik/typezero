@@ -1,0 +1,367 @@
+import {
+  Checked,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
+import {
+  BinaryExpr,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../program/ast/types/ast.types.types.tz";
+import {
+  ClassType,
+  DictKind,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { ClassMemberEntry } from "../expression-types/types/expression-types.types.tz";
+import { ClassDecl } from "../../../program/ast/types/ast.types.classes.tz";
+import { kDateName } from "../../types/type-questions/const/type-questions.const.tz";
+import { kMapClass } from "../class-rules/const/class-rules.const.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { ModuleQuestions } from "../../declaration/module-questions/module-questions.tz";
+import { ClassRules } from "../class-rules/class-rules.tz";
+
+export class ClassValueRules {
+  private readonly text: TypeText;
+  private readonly types: TypeQuestions;
+  private readonly modules: ModuleQuestions;
+  private readonly store: TypeStore;
+  private readonly classes: ClassRules;
+
+  public constructor(
+    text: TypeText,
+    types: TypeQuestions,
+    modules: ModuleQuestions,
+    store: TypeStore,
+    classes: ClassRules,
+  ) {
+    this.text = text;
+    this.types = types;
+    this.modules = modules;
+    this.store = store;
+    this.classes = classes;
+  }
+
+  public hasEmptyCollection(
+    dict: DictKind,
+    written: TypeRef | undefined,
+  ): boolean {
+    const isCollection = dict == DictKind.Map || dict == DictKind.Set;
+
+    return isCollection && written?.form.kind == TypeRefKind.Generic;
+  }
+
+  public isCollectionOf(word: string, type: Type): boolean {
+    if (word == kDateName) {
+      return this.types.isDate(type);
+    }
+    if (type.kind != TypeKind.Dict) {
+      return false;
+    }
+    if (word == kMapClass) {
+      return type.dict == DictKind.Map;
+    }
+
+    return type.dict == DictKind.Set;
+  }
+
+  public isOpenTested(base: Type): boolean {
+    switch (base.kind) {
+      case TypeKind.Error:
+      case TypeKind.Unknown:
+      case TypeKind.AnyObject:
+      case TypeKind.TypeParameter:
+      case TypeKind.Operation:
+      case TypeKind.Json:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public isObjectTested(base: Type): boolean {
+    switch (base.kind) {
+      case TypeKind.Object:
+      case TypeKind.Instance:
+      case TypeKind.Tuple:
+      case TypeKind.Array:
+      case TypeKind.Dict:
+      case TypeKind.Function:
+      case TypeKind.Promise:
+      case TypeKind.Result:
+      case TypeKind.Iterator:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  public canHoldClass(parts: Type[], instance: Type): boolean {
+    return parts.some((part) => {
+      const isObject =
+        part.kind == TypeKind.Object || part.kind == TypeKind.Instance;
+
+      return isObject && !this.isUnrelatedClass(part, instance);
+    });
+  }
+
+  public isUnrelatedClass(part: Type, instance: Type): boolean {
+    if (
+      part.kind != TypeKind.Instance ||
+      this.modules.isLibraryModule(part.module)
+    ) {
+      return false;
+    }
+
+    return !this.isSameLine(part, instance);
+  }
+
+  public collectionTypeCheck(
+    expr: BinaryExpr,
+    left: Type,
+    base: Type,
+    word: string,
+  ): SourceError | undefined {
+    if (this.isCollectionOf(word, left)) {
+      return {
+        code: Code.InstanceOfAlwaysTrue,
+        loc: expr.loc,
+        details: {
+          word,
+          first: this.text.of(left),
+        },
+      };
+    }
+    if (this.types.isOptional(left) && this.isCollectionOf(word, base)) {
+      return {
+        code: Code.InstanceOfOrUndefined,
+        loc: expr.loc,
+        details: {
+          first: this.text.of(base),
+        },
+      };
+    }
+
+    return {
+      code: Code.InstanceOfNeverBuiltin,
+      loc: expr.loc,
+      details: {
+        word,
+        first: this.text.of(left),
+      },
+    };
+  }
+
+  public collectionUnionCheck(
+    expr: BinaryExpr,
+    left: Type,
+    parts: Type[],
+    word: string,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const matching = parts.filter((part) => this.isCollectionOf(word, part));
+    const first = this.text.of(this.types.definedType(left));
+    if (matching.length == 0) {
+      errors.push({
+        code: Code.InstanceOfNoneBuiltin,
+        loc: expr.loc,
+        details: {
+          word,
+          first,
+        },
+      });
+
+      return errors;
+    }
+
+    const isAll = matching.length == parts.length;
+    if (isAll && !this.types.isOptional(left)) {
+      errors.push({
+        code: Code.InstanceOfAllBuiltin,
+        loc: expr.loc,
+        details: {
+          word,
+          first,
+        },
+      });
+    }
+
+    return errors;
+  }
+
+  public relatedCheck(
+    expr: BinaryExpr,
+    base: Type,
+    instance: Type,
+    word: string,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const first = this.text.of(base);
+
+    if (base.kind == TypeKind.Instance) {
+      if (this.isUnrelatedClass(base, instance)) {
+        errors.push({
+          code: Code.InstanceOfNeverClass,
+          loc: expr.loc,
+          details: {
+            word,
+            first,
+          },
+        });
+      }
+
+      return errors;
+    }
+
+    const isPlain =
+      base.kind == TypeKind.Object && this.store.labelOf(base) == undefined;
+    if (!isPlain || this.types.ancestorsOf(instance).includes(base)) {
+      return errors;
+    }
+
+    errors.push({
+      code: Code.InstanceOfNeverMade,
+      loc: expr.loc,
+      details: { word, first },
+    });
+
+    return errors;
+  }
+
+  public staticError(
+    expr: MemberExpr,
+    entry: ClassMemberEntry,
+  ): SourceError | undefined {
+    return {
+      code: Code.StaticViaInstance,
+      loc: expr.loc,
+      details: {
+        word: expr.name,
+        first: entry.owner.name ?? "",
+      },
+    };
+  }
+
+  public instanceofCheck(
+    expr: BinaryExpr,
+    left: Type,
+    instance: Type,
+    decl: ClassDecl,
+  ): SourceError[] {
+    const errors: SourceError[] = [];
+
+    const base = this.types.definedType(left);
+    const word = decl.name ?? "";
+    const first = this.text.of(base);
+
+    if (this.isOpenTested(base)) {
+      return errors;
+    }
+    if (base.kind == TypeKind.Union) {
+      if (!this.canHoldClass(base.parts, instance)) {
+        errors.push({
+          code: Code.InstanceOfNeverUnion,
+          loc: expr.loc,
+          details: {
+            word,
+            first,
+          },
+        });
+      }
+
+      return errors;
+    }
+    if (!this.isObjectTested(base)) {
+      const shown = this.text.of(left);
+
+      errors.push({
+        code: Code.InstanceOfNotObject,
+        loc: expr.lhs.loc,
+        details: {
+          first: shown,
+        },
+      });
+
+      return errors;
+    }
+
+    const relatedErrors = this.relatedCheck(expr, base, instance, word);
+
+    for (const found of relatedErrors) {
+      errors.push(found);
+    }
+
+    return errors;
+  }
+
+  public staticCallError(
+    expr: MemberExpr,
+    entry: ClassMemberEntry,
+  ): SourceError | undefined {
+    const owner = entry.owner;
+    const isMethod = owner.methods.some(
+      (one) => one.name == expr.name && this.classes.isStaticMethod(one),
+    );
+    if (!isMethod) {
+      const staticError = this.staticError(expr, entry);
+
+      return staticError;
+    }
+
+    return {
+      code: Code.StaticMethodViaInstance,
+      loc: expr.loc,
+      details: {
+        word: expr.name,
+        first: owner.name ?? "",
+      },
+    };
+  }
+
+  public classValueMember(expr: MemberExpr, object: ClassType): Checked<Type> {
+    const error = this.store.plain(TypeKind.Error);
+    if (expr.name == "prototype") {
+      return {
+        value: error,
+        error: {
+          code: Code.ClassValuePrototype,
+          loc: expr.loc,
+          details: kNoDetails,
+        },
+      };
+    }
+    if (expr.name == "name") {
+      return { value: this.store.plain(TypeKind.String) };
+    }
+    if (!object.exact) {
+      return {
+        value: error,
+        error: {
+          code: Code.ClassValueRuntime,
+          loc: expr.loc,
+          details: {
+            word: this.text.of(object),
+          },
+        },
+      };
+    }
+
+    return { value: error };
+  }
+
+  private isSameLine(first: Type, second: Type): boolean {
+    const up = this.types.ancestorsOf(first).includes(second);
+    const down = this.types.ancestorsOf(second).includes(first);
+
+    return up || down;
+  }
+}

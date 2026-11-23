@@ -32,7 +32,7 @@ partial class ExpressionTypes {
         continue;
       }
       if (parent == undefined) {
-        const lonelyOverrideError = this.classes.lonelyOverrideCheck(
+        const lonelyOverrideError = this.overrides.lonelyOverrideCheck(
           decl,
           field,
           hasParent,
@@ -80,7 +80,7 @@ partial class ExpressionTypes {
       return;
     }
     if (entry == undefined || inherited == undefined) {
-      const newFieldError = this.classes.newFieldCheck(field, parent);
+      const newFieldError = this.overrides.newFieldCheck(field, parent);
 
       return this.reportFound(module, newFieldError);
     }
@@ -104,7 +104,7 @@ partial class ExpressionTypes {
     );
 
     this.reportFound(module, fieldAccessError);
-    const redeclaredValueError = this.classes.redeclaredValueCheck(
+    const redeclaredValueError = this.overrides.redeclaredValueCheck(
       decl,
       field,
       owner,
@@ -195,7 +195,7 @@ partial class ExpressionTypes {
     parent: InstanceType,
     module: int,
   ): boolean {
-    const checked = this.classes.methodOverFieldCheck(method, entry, parent);
+    const checked = this.overrides.methodOverFieldCheck(method, entry, parent);
 
     this.reportFound(module, checked.error);
 
@@ -302,11 +302,11 @@ partial class ExpressionTypes {
     decl: ClassDecl,
   ): boolean {
     const word = call.name;
-    const overrider = this.classes.overridingChild(found.children, word);
+    const overrider = this.overrides.overridingChild(found.children, word);
     if (overrider != undefined) {
       const first = decl.name ?? "";
       const other = overrider.name ?? "";
-      const code = this.classes.overriddenCode(site, call);
+      const code = this.overrides.overriddenCode(site, call);
 
       this.report(found.module, site.loc, code, { first, word, other });
 

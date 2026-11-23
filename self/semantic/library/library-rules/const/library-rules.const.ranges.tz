@@ -1,0 +1,38 @@
+import { ProofRange } from "../../../flow/proof-rules/types/proof-rules.types.tz";
+import { ArgumentRange, RangeReceiver } from "../types/library-rules.types.tz";
+
+export const kArgumentRanges: ArgumentRange[] = [
+  {
+    receiver: RangeReceiver.Number,
+    name: "toFixed",
+    range: { what: "the number of digits of 'toFixed'", low: 0, high: 100 },
+  },
+  {
+    receiver: RangeReceiver.Number,
+    name: "toString",
+    range: { what: "the radix of 'toString'", low: 2, high: 36 },
+  },
+  {
+    receiver: RangeReceiver.Text,
+    name: "repeat",
+    range: { what: "the count of 'repeat'", low: 0 },
+  },
+  {
+    receiver: RangeReceiver.Iterator,
+    name: "take",
+    range: { what: "the count of 'take'", low: 0 },
+  },
+  {
+    receiver: RangeReceiver.Iterator,
+    name: "drop",
+    range: { what: "the count of 'drop'", low: 0 },
+  },
+];
+
+export const kFromCodePointName = "fromCodePoint";
+export const kStringClassName = "String";
+export const kCodePointRange: ProofRange = {
+  what: "a code point",
+  low: 0,
+  high: 1114111,
+};

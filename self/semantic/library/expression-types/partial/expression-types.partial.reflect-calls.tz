@@ -1,0 +1,232 @@
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { TypeKind } from "../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
+import {
+  kMetadataNames,
+  kReflectNames,
+} from "../../library-rules/const/library-rules.const.tz";
+
+partial class ExpressionTypes {
+  private reflectCallCheck(expr: CallExpr, module: int): void {
+    const callee = expr.callee;
+    if (
+      callee.kind != ExprKind.Member ||
+      this.modules.isLibraryModule(module)
+    ) {
+      return;
+    }
+
+    const owner = callee.object;
+    const isReflect =
+      owner.kind == ExprKind.Name &&
+      owner.name == "Reflect" &&
+      this.isGlobalUse(owner, module);
+    const hasSpread = expr.args.some((one) => one.spread);
+    if (!isReflect || hasSpread) {
+      return;
+    }
+
+    switch (callee.name) {
+      case "get":
+        return this.reflectGetCheck(expr, module);
+      case "apply":
+        return this.reflectApplyCheck(expr, module);
+      case "construct":
+        return this.reflectConstructCheck(expr, module);
+      case "metadata":
+        return this.metadataValueCheck(owner.loc, callee.loc, module);
+      case "getMetadataKeys":
+      case "getOwnMetadataKeys":
+        return this.report(module, callee.loc, Code.ReflectMetadataKeys, {
+          word: callee.name,
+        });
+      default:
+        return this.reflectOtherCheck(expr, callee.name, callee.loc, module);
+    }
+  }
+
+  private metadataValueCheck(start: int, loc: int, module: int): void {
+    const text = this.program.modules[module]?.source.text;
+    const before = text?.[start - 1];
+    if (before == 64) {
+      return;
+    }
+
+    this.report(module, loc, Code.ReflectMetadataValue, kNoDetails);
+  }
+
+  private reflectOtherCheck(
+    expr: CallExpr,
+    name: string,
+    loc: int,
+    module: int,
+  ): void {
+    if (!kReflectNames.includes(name)) {
+      return this.report(module, loc, Code.ReflectUnknown, { word: name });
+    }
+    if (!kMetadataNames.includes(name)) {
+      return;
+    }
+
+    const isDefine = name == "defineMetadata";
+    const key = expr.args[0]?.expr;
+    if (key != undefined && !this.metadataKeyFine(key, isDefine, module)) {
+      return;
+    }
+
+    const value = expr.args[1]?.expr;
+    if (isDefine && value != undefined) {
+      const given = this.peekType(value, module);
+      if (given.kind == TypeKind.Void) {
+        return this.report(
+          module,
+          value.loc,
+          Code.MetadataVoidValue,
+          kNoDetails,
+        );
+      }
+    }
+
+    const target = expr.args[this.metadataTargetAt(isDefine)]?.expr;
+    if (target == undefined) {
+      return;
+    }
+
+    const targetType = this.peekType(target, module);
+    const base = this.types.definedType(targetType);
+    if (this.isPlainReflectValue(base.kind)) {
+      this.report(module, target.loc, Code.MetadataTarget, {
+        word: this.text.of(targetType),
+      });
+    }
+  }
+
+  private metadataTargetAt(isDefine: boolean): int {
+    if (isDefine) {
+      return 2;
+    }
+
+    return 1;
+  }
+
+  private metadataKeyFine(key: Expr, isDefine: boolean, module: int): boolean {
+    const isDesign =
+      key.kind == ExprKind.StringLit && key.value.startsWith("design:");
+    if (isDefine && isDesign) {
+      this.report(module, key.loc, Code.MetadataKeyDesign, kNoDetails);
+
+      return false;
+    }
+
+    const given = this.peekType(key, module);
+    const base = this.types.definedType(given);
+    const isWrong =
+      base.kind == TypeKind.Int ||
+      base.kind == TypeKind.Double ||
+      base.kind == TypeKind.Decimal ||
+      base.kind == TypeKind.Boolean;
+    if (isWrong) {
+      this.report(module, key.loc, Code.MetadataKeyType, {
+        word: this.text.of(given),
+      });
+
+      return false;
+    }
+
+    return true;
+  }
+
+  private reflectGetCheck(expr: CallExpr, module: int): void {
+    const target = expr.args[0]?.expr;
+    if (target == undefined) {
+      return;
+    }
+
+    const given = this.peekType(target, module);
+    const base = this.types.definedType(given);
+    if (base.kind == TypeKind.Json) {
+      return this.report(module, target.loc, Code.ReflectGetJson, kNoDetails);
+    }
+    if (this.isPlainReflectValue(base.kind)) {
+      this.report(module, target.loc, Code.ReflectGetNotObject, {
+        word: this.text.of(given),
+      });
+    }
+  }
+
+  private reflectApplyCheck(expr: CallExpr, module: int): void {
+    const fn = expr.args[0]?.expr;
+    if (fn == undefined) {
+      return;
+    }
+
+    const given = this.peekType(fn, module);
+    const base = this.types.definedType(given);
+    const isFunction =
+      base.kind == TypeKind.Function ||
+      base.kind == TypeKind.Error ||
+      base.kind == TypeKind.Unknown;
+    if (!isFunction) {
+      return this.report(module, fn.loc, Code.ReflectApplyNotFunction, {
+        word: this.text.of(given),
+      });
+    }
+
+    this.reflectArgumentsCheck(expr.args[2]?.expr, module);
+  }
+
+  private reflectConstructCheck(expr: CallExpr, module: int): void {
+    const third = expr.args[2]?.expr;
+    if (third != undefined) {
+      return this.report(
+        module,
+        third.loc,
+        Code.ReflectConstructThird,
+        kNoDetails,
+      );
+    }
+
+    const made = expr.args[0]?.expr;
+    if (made == undefined) {
+      return;
+    }
+
+    const given = this.peekType(made, module);
+    const base = this.types.definedType(given);
+    if (this.isPlainReflectValue(base.kind)) {
+      return this.report(module, made.loc, Code.ReflectConstructNotClass, {
+        word: this.text.of(given),
+      });
+    }
+
+    this.reflectArgumentsCheck(expr.args[1]?.expr, module);
+  }
+
+  private reflectArgumentsCheck(list: Expr | undefined, module: int): void {
+    if (list == undefined) {
+      return;
+    }
+
+    const given = this.peekType(list, module);
+    if (this.types.definedType(given).kind == TypeKind.Tuple) {
+      this.report(module, list.loc, Code.ReflectArgumentsTuple, kNoDetails);
+    }
+  }
+
+  private isPlainReflectValue(kind: TypeKind): boolean {
+    return (
+      kind == TypeKind.Int ||
+      kind == TypeKind.Double ||
+      kind == TypeKind.Decimal ||
+      kind == TypeKind.Boolean ||
+      kind == TypeKind.String ||
+      kind == TypeKind.Literal
+    );
+  }
+}

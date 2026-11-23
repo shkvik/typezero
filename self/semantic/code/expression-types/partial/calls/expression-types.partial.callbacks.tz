@@ -22,6 +22,7 @@ import {
   kFunctionValueStatics,
   kHolderNames,
   kOkValueNames,
+  kTestingCallbacks,
 } from "../../const/expression-types.const.tz";
 import {
   ArrayCallback,
@@ -126,6 +127,8 @@ partial class ExpressionTypes {
       return;
     }
     if (arg.kind == ExprKind.Function) {
+      this.asyncCallbackCheck(expr, arg, plan, module);
+
       return this.literalCallbackCheck(arg, plan, module);
     }
 
@@ -454,5 +457,39 @@ partial class ExpressionTypes {
     });
 
     return true;
+  }
+
+  private asyncCallbackCheck(
+    expr: CallExpr,
+    arg: Expr,
+    plan: CallbackPlan,
+    module: int,
+  ): void {
+    if (arg.kind != ExprKind.Function || !arg.fn.isAsync) {
+      return;
+    }
+
+    const word = plan.member.name;
+    if (kTestingCallbacks.includes(plan.kind)) {
+      return this.report(module, arg.loc, Code.CallbackAsyncTest, {
+        word,
+        first: "boolean",
+      });
+    }
+
+    const initial = expr.args[1]?.expr;
+    if (plan.kind != ArrayCallback.Reduce || initial == undefined) {
+      return;
+    }
+
+    const given = this.peekType(initial, module);
+    const base = this.types.definedType(given);
+    const isPlain =
+      base.kind != TypeKind.Promise && base.kind != TypeKind.Error;
+    if (isPlain) {
+      const first = this.text.of(given);
+
+      this.report(module, arg.loc, Code.CallbackAsyncValue, { word, first });
+    }
   }
 }

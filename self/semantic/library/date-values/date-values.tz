@@ -1,0 +1,67 @@
+import {
+  kPrefixLength,
+  kSignificantDigits,
+} from "../date-reader/const/date-reader.const.tz";
+import { DateToken } from "../date-reader/types/date-reader.types.tz";
+
+export class DateValues {
+  public between(value: int, low: int, high: int): boolean {
+    return value >= low && value <= high;
+  }
+
+  public isMonth(value: int): boolean {
+    return this.between(value, 1, 12);
+  }
+
+  public isDay(value: int): boolean {
+    return this.between(value, 1, 31);
+  }
+
+  public isHour(value: int): boolean {
+    return this.between(value, 0, 23);
+  }
+
+  public isMinute(value: int): boolean {
+    return this.between(value, 0, 59);
+  }
+
+  public isMillisecond(value: int): boolean {
+    return this.between(value, 0, 999);
+  }
+
+  public readMilliseconds(number: DateToken): int {
+    const value = number.value;
+    const length = number.length;
+    if (length == 1) {
+      return value * 100;
+    }
+    if (length == 2) {
+      return value * 10;
+    }
+
+    let shortened = value;
+    const counted = Math.min(length, kSignificantDigits);
+
+    for (let rest = counted; rest > kPrefixLength; rest--) {
+      shortened = shortened / 10;
+    }
+
+    return shortened;
+  }
+
+  public signFor(isNegative: boolean): int {
+    if (isNegative) {
+      return -1;
+    }
+
+    return 1;
+  }
+
+  public signed(value: int, isNegative: boolean): int {
+    if (isNegative) {
+      return -value;
+    }
+
+    return value;
+  }
+}

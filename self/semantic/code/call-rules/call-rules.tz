@@ -417,6 +417,21 @@ export class CallRules {
     return { value: common };
   }
 
+  public typeVariants(name: string, types: FunctionType[]): RankedVariant[] {
+    return types.map((type) => {
+      const fn = this.signatureDecl(name, type);
+      const variant: RankedVariant = {
+        fn,
+        type,
+        ranks: [],
+        isAdapted: false,
+        failed: -1,
+      };
+
+      return variant;
+    });
+  }
+
   private countRange(least: int, most: int, rest: boolean): string {
     if (rest) {
       return `${least}${kOrMore}`;
@@ -445,8 +460,6 @@ export class CallRules {
       case TypeKind.Unknown:
       case TypeKind.AnyObject:
       case TypeKind.Json:
-      case TypeKind.Literal:
-      case TypeKind.Instance:
       case TypeKind.Dict:
         return false;
       case TypeKind.Array:

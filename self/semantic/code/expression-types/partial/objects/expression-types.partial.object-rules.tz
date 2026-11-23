@@ -1,6 +1,8 @@
+import { ProofRange } from "../../../../flow/proof-rules/types/proof-rules.types.tz";
+import { kArrayLengthWhat } from "../../../../flow/proof-rules/const/proof-rules.const.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
-import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import {
   Expr,
   ExprKind,
@@ -66,10 +68,27 @@ partial class ExpressionTypes {
     }
   }
 
-  private newArrayCheck(expr: NewExpr, name: string, module: int): void {
+  private newArrayCheck(
+    expr: NewExpr,
+    name: string,
+    wanted: Type | undefined,
+    module: int,
+  ): void {
+    if (name != kArrayClass) {
+      return;
+    }
+    const goal = this.types.wantedPart(wanted);
+    const isFromExpected = goal != undefined && goal.kind == TypeKind.Array;
+    if (expr.typeArgs.length == 0 && !isFromExpected) {
+      this.report(module, expr.loc, Code.NewArrayNeedsElement, kNoDetails);
+
+      return;
+    }
+
     const written = expr.typeArgs[0];
+    const length = expr.args[0];
     const isSized = expr.args.length == 1 && expr.typeArgs.length == 1;
-    if (name != kArrayClass || !isSized || written == undefined) {
+    if (!isSized || written == undefined || length == undefined) {
       return;
     }
 
@@ -79,13 +98,16 @@ partial class ExpressionTypes {
       place: TypePlace.Plain,
     };
     const element = this.resolver.value(written, context);
-    if (this.objects.hasZeroValue(element)) {
-      return;
+    if (!this.objects.hasZeroValue(element)) {
+      this.report(module, expr.loc, Code.NewArrayNoDefault, {
+        word: this.text.of(element),
+      });
     }
 
-    this.report(module, expr.loc, Code.NewArrayNoDefault, {
-      word: this.text.of(element),
-    });
+    const range: ProofRange = { what: kArrayLengthWhat, low: 0 };
+
+    const given = this.peekType(length.expr, module);
+    this.requireBetween(length.expr, given, range, module);
   }
 
   private undefinedTargetCheck(target: MemberExpr, module: int): boolean {
@@ -94,11 +116,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.errors.beginTrial();
-
-    const type = this.typed(object, undefined, module);
-
-    this.errors.endTrial();
+    const type = this.peekType(object, module);
 
     if (!this.types.isOptional(type) || target.optional) {
       return false;
@@ -233,11 +251,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.errors.beginTrial();
-
-    const object = this.typed(callee.object, undefined, module);
-
-    this.errors.endTrial();
+    const object = this.peekType(callee.object, module);
 
     return (
       object.kind == TypeKind.Instance &&

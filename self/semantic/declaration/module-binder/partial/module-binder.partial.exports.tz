@@ -148,6 +148,14 @@ partial class ModuleBinder {
       return undefined;
     }
 
+    if (theirModule.source.isLibrary) {
+      const missing = this.exports.missing(theirModule.name, path, word);
+
+      this.report(bound, name.loc, missing.code, missing.details);
+
+      return undefined;
+    }
+
     this.report(bound, name.loc, Code.NoExportNamed, { path, word });
 
     return undefined;

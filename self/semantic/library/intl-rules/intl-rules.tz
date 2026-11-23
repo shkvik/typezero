@@ -1,0 +1,781 @@
+import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import {
+  LiteralKind,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import {
+  kCollationName,
+  kDateOptions,
+  kDateStyleName,
+  kDigitsName,
+  kHour12Name,
+  kTimeStyleName,
+  kIntlMethods,
+  kIntlServices,
+  kNormalizationForms,
+  kPerSeparator,
+  kRelativeUnits,
+  kSanctionedUnits,
+  kSupportedOptions,
+  kValueMethods,
+} from "./const/intl-rules.const.tz";
+import {
+  DateLocaleKind,
+  DateOption,
+  IntlMethodRow,
+  IntlOption,
+  IntlOptionKind,
+  IntlService,
+} from "./types/intl-rules.types.tz";
+
+export class IntlRules {
+  private readonly text: TypeText;
+  private readonly types: TypeQuestions;
+
+  public constructor(text: TypeText, types: TypeQuestions) {
+    this.text = text;
+    this.types = types;
+  }
+
+  public service(name: string): IntlService | undefined {
+    return kIntlServices.find((one) => one.name == name);
+  }
+
+  public supportedService(): IntlService {
+    return { name: "", callable: true, options: kSupportedOptions };
+  }
+
+  public method(service: string, name: string): IntlMethodRow | undefined {
+    return kIntlMethods.find(
+      (one) => one.service == service && one.name == name,
+    );
+  }
+
+  public isValueMethod(service: string, name: string): boolean {
+    return kValueMethods.some(
+      (one) => one.service == service && one.name == name,
+    );
+  }
+
+  public option(service: IntlService, name: string): IntlOption | undefined {
+    return service.options.find((one) => one.name == name);
+  }
+
+  public isLanguageTag(tag: string): boolean {
+    const parts = tag.split("-");
+    const language = parts[0] ?? "";
+    const isWritten = parts.every(
+      (part) => part.length > 0 && part.length <= 8 && this.isAlnum(part),
+    );
+    const size = language.length;
+    const isSized = (size >= 2 && size <= 3) || (size >= 5 && size <= 8);
+
+    return isWritten && isSized && this.isAlpha(language);
+  }
+
+  public isKeywordType(text: string): boolean {
+    const parts = text.split("-");
+
+    return parts.every(
+      (part) => part.length >= 3 && part.length <= 8 && this.isAlnum(part),
+    );
+  }
+
+  public isCurrency(code: string): boolean {
+    return code.length == 3 && this.isAlpha(code);
+  }
+
+  public isUnit(unit: string): boolean {
+    if (kSanctionedUnits.includes(unit)) {
+      return true;
+    }
+
+    const parts = unit.split(kPerSeparator);
+    const top = parts[0] ?? "";
+    const bottom = parts[1] ?? "";
+
+    return (
+      parts.length == 2 &&
+      kSanctionedUnits.includes(top) &&
+      kSanctionedUnits.includes(bottom)
+    );
+  }
+
+  public isRelativeUnit(unit: string): boolean {
+    return kRelativeUnits.includes(unit);
+  }
+
+  public relativeUnits(): string[] {
+    return kRelativeUnits;
+  }
+
+  public normalizationForms(): string[] {
+    return kNormalizationForms;
+  }
+
+  public isTextLike(type: Type): boolean {
+    const base = this.types.definedType(type);
+    if (base.kind == TypeKind.String || this.isTextLiteral(base)) {
+      return true;
+    }
+    if (base.kind != TypeKind.Union) {
+      return false;
+    }
+
+    return base.parts.every((part) => this.isTextLiteral(part));
+  }
+
+  public isNumberLike(type: Type): boolean {
+    const base = this.types.definedType(type);
+    if (base.kind == TypeKind.Union) {
+      return base.parts.every((part) => this.isNumberPart(part));
+    }
+
+    return this.isNumberPart(base);
+  }
+
+  public kindFits(kind: IntlOptionKind, type: Type): boolean {
+    const base = this.types.definedType(type);
+
+    switch (kind) {
+      case IntlOptionKind.Text:
+        return this.isTextLike(base);
+      case IntlOptionKind.Number:
+        return this.isNumberLike(base);
+      case IntlOptionKind.Flag:
+        return this.isFlag(base);
+      default:
+        return this.isGroupingValue(base);
+    }
+  }
+
+  public literalTexts(type: Type): string[] | undefined {
+    const base = this.types.definedType(type);
+    const parts = this.partsOf(base);
+    const texts: string[] = [];
+
+    for (const part of parts) {
+      if (part.kind == TypeKind.Literal && part.literal == LiteralKind.String) {
+        texts.push(part.text);
+
+        continue;
+      }
+      if (!this.isFlag(part)) {
+        return undefined;
+      }
+    }
+
+    return texts;
+  }
+
+  public literalNumber(type: Type): decimal | undefined {
+    const base = this.types.definedType(type);
+    if (base.kind != TypeKind.Literal) {
+      return undefined;
+    }
+    if (base.literal != LiteralKind.Int && base.literal != LiteralKind.Double) {
+      return undefined;
+    }
+
+    const parsed = decimal(base.text);
+    if (parsed.isErr()) {
+      return undefined;
+    }
+
+    return parsed.value;
+  }
+
+  public isIncrementUnion(type: Type, increments: decimal[]): boolean {
+    const base = this.types.definedType(type);
+    if (base.kind != TypeKind.Union) {
+      return false;
+    }
+
+    return base.parts.every((part) => {
+      const value = this.literalNumber(part);
+
+      return value != undefined && increments.includes(value);
+    });
+  }
+
+  public isPlainOptions(type: Type): boolean {
+    const base = this.types.definedType(type);
+
+    return base.kind == TypeKind.Object || base.kind == TypeKind.Undefined;
+  }
+
+  public unknownServiceError(loc: int, name: string): SourceError {
+    return { code: Code.IntlUnknownService, loc, details: { word: name } };
+  }
+
+  public withNewError(loc: int, name: string): SourceError {
+    return { code: Code.IntlWithNew, loc, details: { word: name } };
+  }
+
+  public noTypeNewError(loc: int): SourceError {
+    return { code: Code.IntlNewNoType, loc, details: kNoDetails };
+  }
+
+  public tagUnknownError(loc: int, what: string): SourceError {
+    return { code: Code.LanguageTagUnknown, loc, details: { word: what } };
+  }
+
+  public tagUnknownLocaleError(loc: int): SourceError {
+    return { code: Code.LanguageTagUnknownLocale, loc, details: kNoDetails };
+  }
+
+  public notTagError(loc: int, tag: string): SourceError {
+    return { code: Code.LanguageTagNot, loc, details: { word: tag } };
+  }
+
+  public takesError(loc: int, what: string, found: Type): SourceError {
+    const base = this.types.definedType(found);
+    const first = this.text.of(found);
+    const other = this.oneLanguageHint(base.kind == TypeKind.Array);
+    const details: Details = { word: what, first, other };
+
+    return { code: Code.LanguageTagTakes, loc, details };
+  }
+
+  public listError(loc: int, what: string, found: Type): SourceError {
+    const first = this.text.of(found);
+
+    return { code: Code.LanguageTagList, loc, details: { word: what, first } };
+  }
+
+  public listOpenError(loc: int, what: string): SourceError {
+    return { code: Code.LanguageTagListOpen, loc, details: { word: what } };
+  }
+
+  public spreadError(loc: int, what: string): SourceError {
+    return { code: Code.LanguageTagSpread, loc, details: { word: what } };
+  }
+
+  public localeOptionsError(loc: int): SourceError {
+    return { code: Code.IntlLocaleOptions, loc, details: kNoDetails };
+  }
+
+  public localeNewError(loc: int): SourceError {
+    return { code: Code.IntlLocaleWithNew, loc, details: kNoDetails };
+  }
+
+  public valuesOfError(loc: int): SourceError {
+    return { code: Code.IntlValuesOf, loc, details: kNoDetails };
+  }
+
+  public staticOnlyError(loc: int, what: string): SourceError {
+    return { code: Code.IntlStaticOnly, loc, details: { word: what } };
+  }
+
+  public onlyCalledError(loc: int, name: string, service: string): SourceError {
+    const first = `Intl.${service}`;
+
+    return {
+      code: Code.IntlOnlyCalled,
+      loc,
+      details: { word: name, first },
+    };
+  }
+
+  public notNumberError(
+    loc: int,
+    method: string,
+    found: Type,
+  ): SourceError | undefined {
+    const base = this.types.definedType(found);
+    const isNumber =
+      base.kind == TypeKind.Int ||
+      base.kind == TypeKind.Double ||
+      base.kind == TypeKind.Decimal ||
+      base.kind == TypeKind.Error;
+    const isPlain = !this.types.isOptional(found);
+    if (isNumber && isPlain) {
+      return undefined;
+    }
+
+    const first = this.text.of(found);
+    const other = this.numberHint(isNumber, base);
+    const details: Details = { word: method, first, other };
+
+    return { code: Code.IntlNotNumber, loc, details };
+  }
+
+  public closedUnknownError(
+    loc: int,
+    what: string,
+    allowed: string[],
+  ): SourceError {
+    const first = allowed[0] ?? "";
+    const second = allowed[1] ?? "";
+    const details: Details = { word: what, first, second };
+
+    return { code: Code.ClosedArgUnknown, loc, details };
+  }
+
+  public closedError(
+    loc: int,
+    what: string,
+    allowed: string[],
+    texts: string[],
+  ): SourceError | undefined {
+    const wrong = texts.find((one) => !allowed.includes(one));
+    if (wrong == undefined) {
+      return undefined;
+    }
+
+    const details: Details = { word: what, first: wrong };
+
+    return { code: Code.ClosedArgNotAllowed, loc, details };
+  }
+
+  public rangeUnsupportedError(loc: int, name: string): SourceError {
+    return { code: Code.IntlRangeUnsupported, loc, details: { word: name } };
+  }
+
+  public selectRangeError(loc: int): SourceError {
+    return { code: Code.IntlSelectRange, loc, details: kNoDetails };
+  }
+
+  public relativeUnitError(loc: int, unit: string): SourceError {
+    return { code: Code.IntlRelativeUnit, loc, details: { word: unit } };
+  }
+
+  public badFormError(loc: int, form: string): SourceError {
+    return { code: Code.IntlBadForm, loc, details: { word: form } };
+  }
+
+  public optionsNoTypeError(loc: int): SourceError {
+    return { code: Code.IntlOptionsNoType, loc, details: kNoDetails };
+  }
+
+  public optionsObjectError(loc: int, what: string, found: Type): SourceError {
+    const first = this.text.of(found);
+
+    return {
+      code: Code.IntlOptionsNotObject,
+      loc,
+      details: { word: what, first },
+    };
+  }
+
+  public unknownOptionError(
+    loc: int,
+    name: string,
+    what: string,
+    service: IntlService,
+  ): SourceError {
+    const names = service.options.map((one) => one.name);
+    const other = this.namesText(names);
+    const details: Details = { word: name, first: what, other };
+
+    return { code: Code.IntlOptionUnknown, loc, details };
+  }
+
+  public optionKindError(
+    loc: int,
+    option: IntlOption,
+    found: Type,
+  ): SourceError {
+    const first = this.kindName(option.kind);
+    const second = this.text.of(found);
+    const details: Details = { word: option.name, first, second };
+
+    return { code: Code.IntlOptionKindWrong, loc, details };
+  }
+
+  public badValueError(
+    loc: int,
+    option: IntlOption,
+    text: string,
+  ): SourceError {
+    const other = this.valuesText(option.values);
+    const details: Details = { word: option.name, first: text, other };
+
+    return { code: Code.IntlOptionValue, loc, details };
+  }
+
+  public openValueError(loc: int, option: IntlOption): SourceError {
+    const other = this.valuesText(option.values);
+    const first = this.exampleTest(option.values);
+    const details: Details = { word: option.name, first, other };
+
+    return { code: Code.IntlOptionOpen, loc, details };
+  }
+
+  public isAllowedText(option: IntlOption, text: string): boolean {
+    const isGrouping = option.kind == IntlOptionKind.Grouping;
+
+    return option.values.includes(text) || (isGrouping && text == "");
+  }
+
+  public currencyError(loc: int, code: string): SourceError {
+    return { code: Code.IntlCurrency, loc, details: { word: code } };
+  }
+
+  public unitError(loc: int, unit: string): SourceError {
+    return { code: Code.IntlUnit, loc, details: { word: unit } };
+  }
+
+  public keywordError(loc: int, value: string, name: string): SourceError {
+    const other = this.keywordExample(name);
+    const details: Details = { word: value, first: name, other };
+
+    return { code: Code.IntlKeyword, loc, details };
+  }
+
+  public styleCurrencyError(loc: int): SourceError {
+    return { code: Code.IntlStyleCurrency, loc, details: kNoDetails };
+  }
+
+  public styleUnitError(loc: int): SourceError {
+    return { code: Code.IntlStyleUnit, loc, details: kNoDetails };
+  }
+
+  public digitRangeError(
+    loc: int,
+    name: string,
+    low: decimal,
+    high: decimal,
+    isKnown: boolean,
+  ): SourceError {
+    const details: Details = {
+      word: name,
+      first: `${low}`,
+      second: `${high}`,
+    };
+    if (isKnown) {
+      return { code: Code.IntlDigitRange, loc, details };
+    }
+
+    return { code: Code.IntlDigitRangeOpen, loc, details };
+  }
+
+  public aboveError(
+    loc: int,
+    low: string,
+    high: string,
+    isKnown: boolean,
+  ): SourceError {
+    const details: Details = { word: low, first: high };
+    if (isKnown) {
+      return { code: Code.IntlDigitsAbove, loc, details };
+    }
+
+    return { code: Code.IntlDigitsMayAbove, loc, details };
+  }
+
+  public incrementsError(loc: int, isKnown: boolean): SourceError {
+    if (isKnown) {
+      return { code: Code.IntlIncrements, loc, details: kNoDetails };
+    }
+
+    return { code: Code.IntlIncrementsOpen, loc, details: kNoDetails };
+  }
+
+  public incrementSignificantError(loc: int): SourceError {
+    return { code: Code.IntlIncrementSignificant, loc, details: kNoDetails };
+  }
+
+  public incrementSameError(loc: int): SourceError {
+    return { code: Code.IntlIncrementSame, loc, details: kNoDetails };
+  }
+
+  public dateOption(name: string): DateOption | undefined {
+    return kDateOptions.find((one) => one.name == name);
+  }
+
+  public isHour12(name: string): boolean {
+    return name == kHour12Name;
+  }
+
+  public isDigitsName(name: string): boolean {
+    return name == kDigitsName;
+  }
+
+  public isForeignStyle(name: string, kind: DateLocaleKind): boolean {
+    const isTime = kind == DateLocaleKind.Date && name == kTimeStyleName;
+    const isDate = kind == DateLocaleKind.Time && name == kDateStyleName;
+
+    return isTime || isDate;
+  }
+
+  public dateObjectError(loc: int, what: string, found: Type): SourceError {
+    const first = this.text.of(found);
+
+    return {
+      code: Code.DateOptionsNotObject,
+      loc,
+      details: { word: what, first },
+    };
+  }
+
+  public dateUnknownError(loc: int, name: string, what: string): SourceError {
+    return {
+      code: Code.DateOptionUnknown,
+      loc,
+      details: { word: name, first: what },
+    };
+  }
+
+  public dateKindError(
+    loc: int,
+    name: string,
+    wanted: string,
+    found: Type,
+  ): SourceError {
+    const second = this.text.of(found);
+    const details: Details = { word: name, first: wanted, second };
+
+    return { code: Code.IntlOptionKindWrong, loc, details };
+  }
+
+  public styleOnlyError(loc: int, name: string, what: string): SourceError {
+    return {
+      code: Code.DateStyleOnly,
+      loc,
+      details: { word: name, first: what },
+    };
+  }
+
+  public stylePartsError(loc: int): SourceError {
+    return { code: Code.DateStyleParts, loc, details: kNoDetails };
+  }
+
+  public digitsOpenError(loc: int): SourceError {
+    return { code: Code.DateDigitsOpen, loc, details: kNoDetails };
+  }
+
+  public dateValueOpenError(
+    loc: int,
+    option: DateOption,
+    written: string,
+  ): SourceError {
+    const first = option.values[0] ?? "";
+    const second = option.values[1] ?? "";
+    const details: Details = {
+      word: option.name,
+      first,
+      second,
+      other: written,
+    };
+
+    return { code: Code.DateOptionUnknownValue, loc, details };
+  }
+
+  public dateValueError(
+    loc: int,
+    option: DateOption,
+    text: string,
+  ): SourceError {
+    const other = this.valuesText(option.values);
+    const details: Details = { word: option.name, first: text, other };
+
+    return { code: Code.IntlOptionValue, loc, details };
+  }
+
+  public dateRangeError(loc: int, name: string): SourceError {
+    return { code: Code.DateFormatRange, loc, details: { word: name } };
+  }
+
+  public numberLiterals(type: Type): decimal[] | undefined {
+    const base = this.types.definedType(type);
+    const parts = this.partsOf(base);
+    const numbers: decimal[] = [];
+
+    for (const part of parts) {
+      const value = this.literalNumber(part);
+      if (value == undefined) {
+        return undefined;
+      }
+
+      numbers.push(value);
+    }
+
+    return numbers;
+  }
+
+  public isFlagType(type: Type): boolean {
+    return this.isFlag(this.types.definedType(type));
+  }
+
+  public isTextUnion(type: Type): boolean {
+    const base = this.types.definedType(type);
+    if (base.kind == TypeKind.String) {
+      return true;
+    }
+
+    return this.partsOf(base).every((part) => this.isTextLiteral(part));
+  }
+
+  private isTextLiteral(type: Type): boolean {
+    return type.kind == TypeKind.Literal && type.literal == LiteralKind.String;
+  }
+
+  private isNumberPart(type: Type): boolean {
+    if (type.kind == TypeKind.Int || type.kind == TypeKind.Double) {
+      return true;
+    }
+
+    return (
+      type.kind == TypeKind.Literal &&
+      (type.literal == LiteralKind.Int || type.literal == LiteralKind.Double)
+    );
+  }
+
+  private isFlag(type: Type): boolean {
+    if (type.kind == TypeKind.Boolean) {
+      return true;
+    }
+
+    return type.kind == TypeKind.Literal && type.literal == LiteralKind.Boolean;
+  }
+
+  private isGroupingValue(base: Type): boolean {
+    if (this.isTextLike(base) || this.isFlag(base)) {
+      return true;
+    }
+    if (base.kind != TypeKind.Union) {
+      return false;
+    }
+
+    return base.parts.every(
+      (part) => this.isTextLiteral(part) || this.isFlag(part),
+    );
+  }
+
+  private partsOf(base: Type): Type[] {
+    if (base.kind == TypeKind.Union) {
+      return base.parts;
+    }
+
+    return [base];
+  }
+
+  private isAlnum(text: string): boolean {
+    for (const unit of text) {
+      const isLetter = this.isLetterUnit(unit);
+      const isDigit = unit >= "0" && unit <= "9";
+      if (!isLetter && !isDigit) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private isAlpha(text: string): boolean {
+    for (const unit of text) {
+      if (!this.isLetterUnit(unit)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private isLetterUnit(unit: string): boolean {
+    return (unit >= "a" && unit <= "z") || (unit >= "A" && unit <= "Z");
+  }
+
+  private oneLanguageHint(isArray: boolean): string {
+    if (isArray) {
+      return "; pass one language";
+    }
+
+    return "";
+  }
+
+  private numberHint(isNumber: boolean, base: Type): string {
+    if (isNumber) {
+      return "; the value may be undefined: check it first";
+    }
+    if (base.kind == TypeKind.String) {
+      return "; read the number first, e.g. 'decimal(s)', which keeps every digit";
+    }
+
+    return "";
+  }
+
+  private kindName(kind: IntlOptionKind): string {
+    switch (kind) {
+      case IntlOptionKind.Text:
+        return "a string";
+      case IntlOptionKind.Number:
+        return "a number";
+      case IntlOptionKind.Flag:
+        return "a boolean";
+      default:
+        return "a string or a boolean";
+    }
+  }
+
+  private valuesText(values: string[]): string {
+    const parts: string[] = [];
+
+    for (let index = 0; index < values.length; index++) {
+      const value = values[index] ?? "";
+      const mark = this.valueJoint(index, values.length);
+
+      parts.push(`${mark}'${value}'`);
+    }
+
+    return parts.join("");
+  }
+
+  private valueJoint(index: int, count: int): string {
+    if (index == 0) {
+      return "";
+    }
+    if (index + 1 == count) {
+      return " or ";
+    }
+
+    return ", ";
+  }
+
+  private namesText(names: string[]): string {
+    const parts: string[] = [];
+
+    for (let index = 0; index < names.length; index++) {
+      const name = names[index] ?? "";
+      const mark = this.nameJoint(index, names.length);
+
+      parts.push(`${mark}${name}`);
+    }
+
+    return parts.join("");
+  }
+
+  private nameJoint(index: int, count: int): string {
+    if (index == 0) {
+      return "";
+    }
+    if (index + 1 == count) {
+      return " and ";
+    }
+
+    return ", ";
+  }
+
+  private exampleTest(values: string[]): string {
+    const shown = values.slice(0, 2).map((value) => `x == "${value}"`);
+
+    return shown.join(" || ");
+  }
+
+  private keywordExample(name: string): string {
+    if (name == kCollationName) {
+      return "phonebk";
+    }
+
+    return "latn";
+  }
+}

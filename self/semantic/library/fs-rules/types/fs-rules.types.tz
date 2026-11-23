@@ -1,0 +1,20 @@
+export enum FsShape {
+  ReadFile,
+  WriteFile,
+  PathOnly,
+  PathEncoding,
+  Stat,
+  Readdir,
+  Mkdir,
+  Rmdir,
+  Rm,
+  TwoPaths,
+  CopyFile,
+}
+
+export type FsCall = {
+  readonly name: string;
+  readonly shape: FsShape;
+  readonly options: string[];
+  readonly isUtf8Only: boolean;
+};

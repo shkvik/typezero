@@ -1,0 +1,8 @@
+import { Code } from "../../../../diagnostic/code.tz";
+
+export const kRecoverableCodes: Code[] = [
+  Code.PatternAssignmentNotStatement,
+  Code.ObjectPatternAssignmentNotStatement,
+  Code.NoExportNamed,
+  Code.FieldNeedsType,
+];

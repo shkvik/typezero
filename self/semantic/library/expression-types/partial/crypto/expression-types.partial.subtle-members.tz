@@ -1,0 +1,250 @@
+import { SourceError } from "../../../../../diagnostic/types/message.types.tz";
+import {
+  ArrayLitExpr,
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NewExpr,
+  ObjectLitExpr,
+  PropertyKind,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import { kWebCryptoModule } from "../../../subtle-rules/const/subtle-rules.const.tz";
+import {
+  SubtleAlgorithmRow,
+  SubtleDraft,
+} from "../../../subtle-rules/types/subtle-rules.types.tz";
+
+partial class ExpressionTypes {
+  private algorithmNameExpr(arg: Expr): Expr | undefined {
+    if (arg.kind != ExprKind.ObjectLit) {
+      return arg;
+    }
+
+    const hasSpread = arg.props.some(
+      (one) => one.form.kind == PropertyKind.Spread,
+    );
+    if (hasSpread) {
+      return undefined;
+    }
+
+    return this.subtleProperty(arg, "name");
+  }
+
+  private subtleProperty(
+    literal: ObjectLitExpr,
+    name: string,
+  ): Expr | undefined {
+    const found = literal.props.find(
+      (one) =>
+        one.form.kind != PropertyKind.Spread &&
+        one.form.kind != PropertyKind.Computed &&
+        one.name == name,
+    );
+
+    return found?.value;
+  }
+
+  private subtleHashError(
+    literal: ObjectLitExpr,
+    dictionary: string,
+  ): SourceError | undefined {
+    const hash = this.subtleProperty(literal, "hash");
+    if (hash == undefined) {
+      return undefined;
+    }
+
+    const value = this.innerHashName(hash);
+    const written = this.constantText(value);
+    if (written == undefined) {
+      return undefined;
+    }
+
+    return this.subtle.shaError(value.loc, written, dictionary);
+  }
+
+  private innerHashName(hash: Expr): Expr {
+    if (hash.kind != ExprKind.ObjectLit) {
+      return hash;
+    }
+
+    return this.subtleProperty(hash, "name") ?? hash;
+  }
+
+  private subtleCurveError(literal: ObjectLitExpr): SourceError | undefined {
+    const curve = this.subtleProperty(literal, "namedCurve");
+    if (curve == undefined) {
+      return undefined;
+    }
+
+    const written = this.constantText(curve);
+    if (written == undefined) {
+      return undefined;
+    }
+
+    return this.subtle.curveError(curve.loc, written);
+  }
+
+  private subtleBitsError(
+    value: Expr | undefined,
+    algorithm: SubtleAlgorithmRow,
+    operation: string,
+    isLength: boolean,
+  ): SourceError | undefined {
+    if (value == undefined) {
+      return undefined;
+    }
+
+    const bits = this.subtleNumber(value);
+    if (bits == undefined) {
+      return undefined;
+    }
+    if (isLength) {
+      return this.subtle.aesLengthError(value.loc, algorithm, operation, bits);
+    }
+
+    return this.subtle.gcmTagError(value.loc, algorithm, bits);
+  }
+
+  private subtleNumber(value: Expr): double | undefined {
+    if (value.kind == ExprKind.IntLit) {
+      return value.value.toDouble();
+    }
+    if (value.kind == ExprKind.FloatLit) {
+      return value.value;
+    }
+
+    return undefined;
+  }
+
+  private subtleUsages(
+    expr: CallExpr,
+    index: int,
+    algorithm: SubtleAlgorithmRow | undefined,
+    isPublic: int,
+    isCreating: boolean,
+    draft: SubtleDraft,
+    module: int,
+  ): void {
+    const literal = expr.args[index]?.expr;
+    if (literal == undefined || literal.kind != ExprKind.ArrayLit) {
+      return;
+    }
+
+    const allowed = this.subtle.allowedUsages(algorithm, isPublic);
+
+    for (const element of literal.elements) {
+      const written = this.elementText(element.expr, element.spread);
+      if (written == undefined) {
+        return;
+      }
+      if (!this.subtle.isUsage(written)) {
+        draft.isBad = true;
+
+        const unknownError = this.subtle.unknownUsageError(
+          element.expr.loc,
+          written,
+        );
+
+        return this.reportFound(module, unknownError);
+      }
+      if (algorithm != undefined && !allowed.includes(written)) {
+        draft.isBad = true;
+
+        const notOfError = this.subtle.notOfUsageError(
+          element.expr.loc,
+          written,
+          algorithm,
+          isPublic,
+          allowed,
+        );
+
+        return this.reportFound(module, notOfError);
+      }
+    }
+
+    if (isCreating && algorithm != undefined && isPublic != 1) {
+      this.subtleOwnUsage(literal, algorithm, isPublic, draft, module);
+    }
+  }
+
+  private elementText(value: Expr, isSpread: boolean): string | undefined {
+    if (isSpread) {
+      return undefined;
+    }
+
+    return this.constantText(value);
+  }
+
+  private subtleOwnUsage(
+    literal: ArrayLitExpr,
+    algorithm: SubtleAlgorithmRow,
+    isPublic: int,
+    draft: SubtleDraft,
+    module: int,
+  ): void {
+    const own = algorithm.privateUsages;
+    const hasAny = literal.elements.some((element) => {
+      const written = this.constantText(element.expr);
+
+      return written != undefined && own.includes(written);
+    });
+    if (hasAny) {
+      return;
+    }
+
+    draft.isBad = true;
+
+    const isSingle = literal.elements.length == 0 || isPublic == 0;
+    const emptyError = this.subtle.emptyUsagesError(
+      literal.loc,
+      algorithm,
+      isSingle,
+    );
+
+    this.reportFound(module, emptyError);
+  }
+
+  private subtleNew(
+    expr: NewExpr,
+    name: string,
+    home: int,
+    module: int,
+  ): Type | undefined {
+    const opened = this.program.modules[home];
+    const isWeb = opened != undefined && opened.name == kWebCryptoModule;
+    if (!isWeb || this.modules.isLibraryModule(module)) {
+      return undefined;
+    }
+
+    const newError = this.subtle.newError(expr.loc, name);
+    if (newError == undefined) {
+      return undefined;
+    }
+
+    this.reportFound(module, newError);
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private globalThisRead(expr: MemberExpr, module: int): Type | undefined {
+    const object = expr.object;
+    const isGlobal =
+      object.kind == ExprKind.Name &&
+      object.name == "globalThis" &&
+      this.isGlobalUse(object, module);
+    if (!isGlobal || expr.name == "crypto") {
+      return undefined;
+    }
+
+    this.reportFound(module, this.subtle.globalThisError(expr.loc, expr.name));
+
+    return this.store.plain(TypeKind.Error);
+  }
+}

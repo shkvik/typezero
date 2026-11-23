@@ -83,11 +83,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.errors.beginTrial();
-
-    const object = this.typed(member.object, undefined, module);
-
-    this.errors.endTrial();
+    const object = this.peekType(member.object, module);
 
     const base = this.types.definedType(object);
     if (base.kind != TypeKind.Array || !this.results.holdsResults(base.item)) {

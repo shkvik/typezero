@@ -48,6 +48,9 @@ import {
   TypeContext,
 } from "./types/type-resolver.types.tz";
 import { ErrorLog } from "../../../diagnostic/error-log/error-log.tz";
+import { ModuleQuestions } from "../../declaration/module-questions/module-questions.tz";
+import { WeakRefRules } from "../../library/weak-ref-rules/weak-ref-rules.tz";
+import { TypeQuestions } from "../type-questions/type-questions.tz";
 
 export class TypeResolver {
   private readonly store: TypeStore;
@@ -70,6 +73,7 @@ export class TypeResolver {
   private readonly enumCache: Map<string, EnumStep[]>;
   private readonly enumOpen: Set<string>;
   private readonly errors: ErrorLog;
+  private readonly weakRefs: WeakRefRules;
 
   public constructor(
     store: TypeStore,
@@ -96,6 +100,11 @@ export class TypeResolver {
     this.enumCache = new Map<string, EnumStep[]>();
     this.enumOpen = new Set<string>();
     this.errors = new ErrorLog();
+    this.weakRefs = new WeakRefRules(
+      this.text,
+      new TypeQuestions(store, this.relation),
+      new ModuleQuestions(program),
+    );
 
     for (const scopes of resolved) {
       this.scopes.set(scopes.module.id, scopes);

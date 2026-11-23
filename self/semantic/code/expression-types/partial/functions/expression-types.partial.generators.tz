@@ -309,11 +309,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.errors.beginTrial();
-
-    const type = this.typed(arg, undefined, module);
-
-    this.errors.endTrial();
+    const type = this.peekType(arg, module);
 
     const base = this.types.apparent(type);
 

@@ -24,11 +24,86 @@ partial class ExpressionTypes {
 
     const parts = this.generics.partsOfType(value);
     const hasPromise = parts.some((part) => part.kind == TypeKind.Promise);
-    if (hasPromise) {
+    if (!hasPromise) {
+      return value;
+    }
+
+    const awaited = this.awaitedType(value);
+    if (awaited == undefined) {
+      const word = this.text.of(value);
+
+      this.report(module, expr.value.loc, Code.AwaitMixed, { word });
+
       return this.store.plain(TypeKind.Error);
     }
 
-    return value;
+    return awaited;
+  }
+
+  private awaitedType(type: Type): Type | undefined {
+    const defined = this.types.definedType(type);
+    const awaited = this.awaitedPlain(defined);
+    if (awaited == undefined || !this.types.isOptional(type)) {
+      return awaited;
+    }
+    if (awaited.kind == TypeKind.Void) {
+      return awaited;
+    }
+
+    return this.types.optional(awaited);
+  }
+
+  private awaitedPlain(type: Type): Type | undefined {
+    if (type.kind == TypeKind.Promise) {
+      return type.value;
+    }
+    if (type.kind != TypeKind.Union) {
+      return type;
+    }
+
+    const hasPromise = type.parts.some((part) => part.kind == TypeKind.Promise);
+    if (!hasPromise) {
+      return type;
+    }
+
+    let result: Type | undefined = undefined;
+
+    for (const part of type.parts) {
+      const candidate = this.promisedOrSelf(part);
+      const joined = this.joinedAwaited(result, candidate);
+      if (joined == undefined || joined.kind == TypeKind.Error) {
+        return undefined;
+      }
+
+      result = joined;
+    }
+
+    return result;
+  }
+
+  private promisedOrSelf(type: Type): Type {
+    if (type.kind == TypeKind.Promise) {
+      return type.value;
+    }
+
+    return type;
+  }
+
+  private joinedAwaited(
+    result: Type | undefined,
+    candidate: Type,
+  ): Type | undefined {
+    if (result == undefined) {
+      return candidate;
+    }
+
+    const isVoid =
+      result.kind == TypeKind.Void || candidate.kind == TypeKind.Void;
+    if (isVoid && result != candidate) {
+      return undefined;
+    }
+
+    return this.unifier.unionUnify(result, candidate);
   }
 
   private awaitPlaceCheck(expr: AwaitExpr, module: int): void {

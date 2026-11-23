@@ -1,0 +1,98 @@
+import {
+  ByteIntKind,
+  ByteKind,
+  ByteKindInfo,
+  ByteKindName,
+} from "../types/byte-number-rules.types.tz";
+
+export const kBufferClass = "Buffer";
+export const kDataViewClass = "DataView";
+export const kSliceName = "slice";
+export const kGetPrefix = "get";
+export const kSetPrefix = "set";
+export const kReadPrefix = "read";
+export const kWritePrefix = "write";
+export const kLittleEndianSuffix = "LE";
+export const kBigEndianSuffix = "BE";
+export const kSingleByteSuffix = "8";
+export const kFloatPrefix = "Float";
+export const kBufferOnlyPrefix = "UInt";
+export const kSignedVariable = "Int";
+export const kBufferFloatNames = ["Float", "Double"];
+export const kBigIntPrefixes = ["BigInt64", "BigUint64", "BigUInt64"];
+export const kVariableNames = ["Int", "UInt", "Uint"];
+export const kLeastByteCount = 1;
+export const kMostByteCount = 6;
+export const kBitsInByte = 8;
+export const kByteMask = "0xff";
+
+export const kKindNames: ByteKindName[] = [
+  { name: "Int8", kind: ByteKind.Int8 },
+  { name: "Uint8", kind: ByteKind.Uint8 },
+  { name: "UInt8", kind: ByteKind.Uint8 },
+  { name: "Int16", kind: ByteKind.Int16 },
+  { name: "Uint16", kind: ByteKind.Uint16 },
+  { name: "UInt16", kind: ByteKind.Uint16 },
+  { name: "Int32", kind: ByteKind.Int32 },
+  { name: "Uint32", kind: ByteKind.Uint32 },
+  { name: "UInt32", kind: ByteKind.Uint32 },
+  { name: "Float16", kind: ByteKind.Float16 },
+  { name: "Float32", kind: ByteKind.Float32 },
+  { name: "Float64", kind: ByteKind.Float64 },
+  { name: "Float", kind: ByteKind.Float32 },
+  { name: "Double", kind: ByteKind.Float64 },
+];
+
+export const kKindInfos: ByteKindInfo[] = [
+  {
+    kind: ByteKind.Int8,
+    mask: "0xff",
+    top: "0x80",
+    size: 1,
+    range: { what: "an Int8", low: -128, high: 127 },
+  },
+  {
+    kind: ByteKind.Uint8,
+    mask: "0xff",
+    size: 1,
+    range: { what: "a Uint8", low: 0, high: 255 },
+  },
+  {
+    kind: ByteKind.Int16,
+    mask: "0xffff",
+    top: "0x8000",
+    size: 2,
+    range: { what: "an Int16", low: -32768, high: 32767 },
+  },
+  {
+    kind: ByteKind.Uint16,
+    mask: "0xffff",
+    size: 2,
+    range: { what: "a Uint16", low: 0, high: 65535 },
+  },
+  {
+    kind: ByteKind.Int32,
+    mask: "0xffffffff",
+    top: "0x80000000",
+    size: 4,
+    range: { what: "an Int32", low: -2147483648, high: 2147483647 },
+  },
+  {
+    kind: ByteKind.Uint32,
+    mask: "0xffffffff",
+    size: 4,
+    range: { what: "a Uint32", low: 0, high: 4294967295 },
+  },
+  { kind: ByteKind.Float16, size: 2 },
+  { kind: ByteKind.Float32, size: 4 },
+  { kind: ByteKind.Float64, size: 8 },
+];
+
+export const kIntKinds: ByteIntKind[] = [
+  { bits: 8, unsigned: false, kind: ByteKind.Int8 },
+  { bits: 8, unsigned: true, kind: ByteKind.Uint8 },
+  { bits: 16, unsigned: false, kind: ByteKind.Int16 },
+  { bits: 16, unsigned: true, kind: ByteKind.Uint16 },
+  { bits: 32, unsigned: false, kind: ByteKind.Int32 },
+  { bits: 32, unsigned: true, kind: ByteKind.Uint32 },
+];

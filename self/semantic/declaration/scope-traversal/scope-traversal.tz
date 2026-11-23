@@ -1,3 +1,4 @@
+import "./partial/scope-traversal.partial.imports.tz";
 import "./partial/scope-traversal.partial.declarations.tz";
 import "./partial/scope-traversal.partial.statements.tz";
 import "./partial/scope-traversal.partial.expressions.tz";
@@ -45,6 +46,7 @@ export class ScopeTraversal {
   private pendingLabels: string[];
   private defaultOf: string;
   private genericFunctions: int;
+  private readonly memberUses: Map<string, string[]>;
 
   public constructor(
     names: ModuleNames,
@@ -64,6 +66,7 @@ export class ScopeTraversal {
     this.pendingLabels = [];
     this.defaultOf = "";
     this.genericFunctions = 0;
+    this.memberUses = new Map<string, string[]>();
   }
 
   public run(): ModuleScopes {
@@ -84,6 +87,7 @@ export class ScopeTraversal {
     }
 
     this.scopes.close();
+    this.wholeImportsCheck();
     this.errors.sort((first, second) => first.loc - second.loc);
 
     return { module: this.module, uses: this.uses, errors: this.errors };

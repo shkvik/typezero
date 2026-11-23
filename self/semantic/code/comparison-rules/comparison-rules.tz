@@ -1,3 +1,4 @@
+import { kOrderingOperators } from "./const/comparison-rules.const.tz";
 import { SourceError } from "../../../diagnostic/types/message.types.tz";
 import {
   BinaryExpr,
@@ -189,6 +190,10 @@ export class ComparisonRules {
     const operandsError = this.operators.operandsError(expr, pair);
 
     return operandsError;
+  }
+
+  public isOrdering(op: string): boolean {
+    return kOrderingOperators.includes(op);
   }
 
   private negatedOperand(isNegated: boolean, expr: Expr): Expr {

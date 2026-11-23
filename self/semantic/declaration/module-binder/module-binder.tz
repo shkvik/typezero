@@ -1,3 +1,4 @@
+import { LibraryExports } from "../library-exports/library-exports.tz";
 import "./partial/module-binder.partial.declared.tz";
 import "./partial/module-binder.partial.exports.tz";
 import "./partial/module-binder.partial.imports.tz";
@@ -21,11 +22,13 @@ export class ModuleBinder {
   private readonly program: Program;
   private readonly ordered: BoundModule[];
   private readonly byId: Map<int, BoundModule>;
+  private readonly exports: LibraryExports;
 
   public constructor(program: Program) {
     this.program = program;
     this.ordered = [];
     this.byId = new Map<int, BoundModule>();
+    this.exports = new LibraryExports();
   }
 
   public run(): ModuleNames[] {

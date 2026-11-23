@@ -1,0 +1,7 @@
+export const kTextDecoderClass = "TextDecoder";
+export const kFatalDecoderClass = "FatalTextDecoder";
+export const kDecoderClasses = ["TextDecoder", "FatalTextDecoder"];
+export const kDecodeName = "decode";
+export const kFatalName = "fatal";
+export const kLabelSpaces = [" ", "\t", "\n", "\f", "\r"];
+export const kParseName = "parse";

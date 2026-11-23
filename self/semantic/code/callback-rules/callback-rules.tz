@@ -381,6 +381,14 @@ export class CallbackRules {
     return errors;
   }
 
+  public indexPosition(kind: ArrayCallback): int {
+    if (kind == ArrayCallback.Reduce) {
+      return 2;
+    }
+
+    return 1;
+  }
+
   private callbackParams(kind: ArrayCallback, array: Type): Type[] {
     const item = this.elementOf(array);
     const index = this.store.integer(64, false);

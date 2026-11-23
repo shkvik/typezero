@@ -22,6 +22,11 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
+    const byteMember = this.byteUnionMember(expr, union, module);
+    if (byteMember != undefined) {
+      return byteMember;
+    }
+
     const base = this.types.apparent(union);
     if (base.kind != TypeKind.Union) {
       return this.memberOf(expr, base, module);
@@ -60,7 +65,7 @@ partial class ExpressionTypes {
     union: UnionType,
     module: int,
   ): Type {
-    const checked = this.objects.reportValueMember(expr, union);
+    const checked = this.objectMembers.reportValueMember(expr, union);
 
     this.reportFound(module, checked.error);
 
@@ -353,11 +358,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.errors.beginTrial();
-
-    const object = this.typed(target.object, undefined, module);
-
-    this.errors.endTrial();
+    const object = this.peekType(target.object, module);
 
     if (object.kind != TypeKind.Union || this.types.isOptional(object)) {
       return false;

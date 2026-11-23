@@ -11,3 +11,35 @@ export const kContextFunctions = [
 ];
 export const kContextObjects = ["Math", "Number", "String", "console"];
 export const kLengthName = "length";
+export const kSizedClasses = [
+  "Uint8Array",
+  "Uint8ClampedArray",
+  "Int8Array",
+  "Uint16Array",
+  "Int16Array",
+  "Uint32Array",
+  "Int32Array",
+  "Float16Array",
+  "Float32Array",
+  "Float64Array",
+  "ArrayBuffer",
+];
+export const kEmbedBytesName = "embedBytes";
+export const kBufferName = "Buffer";
+export const kAllocNames = ["alloc", "allocUnsafe", "allocUnsafeSlow"];
+export const kCopyNames = ["from"];
+export const kUtf8Names = ["utf8", "utf-8"];
+export const kByteViewClasses = [
+  "DataView",
+  "Uint8Array",
+  "Uint8ClampedArray",
+  "Int8Array",
+  "Uint16Array",
+  "Int16Array",
+  "Float16Array",
+  "Uint32Array",
+  "Int32Array",
+  "Float32Array",
+  "Float64Array",
+];
+export const kArrayBufferName = "ArrayBuffer";

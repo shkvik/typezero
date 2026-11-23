@@ -1,0 +1,186 @@
+import { kArrayBufferClass } from "../../../byte-source-rules/const/byte-source-rules.const.tz";
+import {
+  DeclaredMember,
+  DeclaredMemberKind,
+} from "../../../../../program/ast/types/ast.types.declarations.tz";
+import {
+  BinaryExpr,
+  CallExpr,
+  Expr,
+  ExprKind,
+  IndexExpr,
+  MemberExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  InstanceType,
+  Type,
+  UnionType,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+
+partial class ExpressionTypes {
+  private byteMemberRead(
+    expr: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type | undefined {
+    if (!this.byteSources.isBytesType(instance)) {
+      return undefined;
+    }
+
+    const found = this.declaredNamed(instance, expr.name);
+    const isTyped = this.byteSources.typedName(instance) != undefined;
+    if (found == undefined) {
+      const missingError = this.byteSources.missingMemberError(
+        expr.loc,
+        expr.name,
+        instance,
+        false,
+      );
+
+      this.reportFound(module, missingError);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const isMethod = found.form.kind != DeclaredMemberKind.Field;
+    if (!isMethod || !isTyped) {
+      return undefined;
+    }
+
+    const missingError = this.byteSources.missingMemberError(
+      expr.loc,
+      expr.name,
+      instance,
+      true,
+    );
+
+    this.reportFound(module, missingError);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private missingByteMethod(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): boolean {
+    if (!this.byteSources.isBytesType(instance)) {
+      return false;
+    }
+    if (this.declaredNamed(instance, member.name) != undefined) {
+      return false;
+    }
+
+    const isTyped = this.byteSources.typedName(instance) != undefined;
+    const methodError = this.byteSources.missingMethodError(
+      member.loc,
+      member.name,
+      instance,
+      isTyped,
+    );
+
+    this.reportFound(module, methodError);
+    this.looseArguments(expr.args, module);
+
+    return true;
+  }
+
+  private declaredNamed(
+    instance: InstanceType,
+    name: string,
+  ): DeclaredMember | undefined {
+    const opened = this.program.modules[instance.module];
+    const declared = opened?.declared.find((one) => one.loc == instance.loc);
+    const found = declared?.members.find(
+      (one) => one.name == name && !one.isStatic,
+    );
+    if (found != undefined) {
+      return found;
+    }
+
+    const parent = this.types.baseClassOf(instance);
+    if (parent == undefined || parent.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    return this.declaredNamed(parent, name);
+  }
+
+  private byteIndexCheck(expr: IndexExpr, object: Type, module: int): boolean {
+    const indexError = this.byteSources.notIndexedError(expr.loc, object);
+    if (indexError == undefined) {
+      return false;
+    }
+
+    this.reportFound(module, indexError);
+    this.typed(expr.index, undefined, module);
+
+    return true;
+  }
+
+  private byteTextCheck(operand: Expr, base: Type, module: int): boolean {
+    const textError = this.byteSources.noTextError(operand.loc, base);
+    if (textError == undefined) {
+      return false;
+    }
+
+    this.reportFound(module, textError);
+
+    return true;
+  }
+
+  private byteUnionMember(
+    expr: MemberExpr,
+    union: UnionType,
+    module: int,
+  ): Type | undefined {
+    if (!this.byteSources.isBytesUnion(union.parts)) {
+      return undefined;
+    }
+
+    const unionError = this.byteSources.unionMemberError(
+      expr.loc,
+      expr.name,
+      union.parts,
+      union,
+    );
+    if (unionError != undefined) {
+      this.reportFound(module, unionError);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.byteSources.isBufferName(expr.name)) {
+      const buffer = this.resolver.libraryInstance(kArrayBufferClass, []);
+
+      return buffer ?? this.store.plain(TypeKind.Error);
+    }
+
+    return this.store.integer(64, false);
+  }
+
+  private bytesInstanceof(expr: BinaryExpr, left: Type, module: int): boolean {
+    const rhs = expr.rhs;
+    if (rhs.kind != ExprKind.Name || !this.isGlobalUse(rhs, module)) {
+      return false;
+    }
+    if (!this.byteSources.isKindName(rhs.name)) {
+      return false;
+    }
+    if (left.kind == TypeKind.Error) {
+      return true;
+    }
+
+    const instanceofError = this.byteSources.instanceofError(
+      expr.loc,
+      left,
+      rhs.name,
+    );
+
+    this.reportFound(module, instanceofError);
+
+    return true;
+  }
+}

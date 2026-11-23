@@ -1,0 +1,8 @@
+import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
+
+export type ViewShape = {
+  readonly name: string;
+  readonly buffer: Expr;
+  readonly offset?: Expr;
+  readonly length?: Expr;
+};

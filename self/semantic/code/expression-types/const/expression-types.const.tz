@@ -1,11 +1,12 @@
-import { Code } from "../../../../diagnostic/code.tz";
 import {
+  ArrayCallback,
   DateStatic,
   DecimalArgument,
   DecimalMethod,
   DecimalResult,
   NarrowedCode,
 } from "../types/expression-types.types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
 
 export const kFieldSetKey = "#set|";
 export const kPanicName = "panic";
@@ -32,7 +33,6 @@ export const kSpecialMethods = [
   "filter",
   "match",
 ];
-export const kSpecialNews = ["TextDecoder"];
 export const kThisName = "this";
 export const kSuperName = "super";
 export const kTupleJoin = "join";
@@ -331,3 +331,17 @@ export const kDecimalMethods: DecimalMethod[] = [
 ];
 export const kMetadataName = "metadata";
 export const kReflectName = "Reflect";
+export const kTestingCallbacks = [
+  ArrayCallback.Filter,
+  ArrayCallback.Find,
+  ArrayCallback.FindIndex,
+  ArrayCallback.Test,
+];
+export const kObjectExamples = [
+  { name: "process", example: "process.argv" },
+  { name: "console", example: "console.log(x)" },
+  { name: "Date", example: "Date.now()" },
+  { name: "performance", example: "performance.now()" },
+  { name: "RegExp", example: "new RegExp(pattern)" },
+  { name: "JSON", example: "JSON.parse(text)" },
+];

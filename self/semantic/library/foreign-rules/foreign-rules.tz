@@ -1,0 +1,161 @@
+import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import { Program } from "../../../program/module/types/module.types.tz";
+import { StmtKind } from "../../../program/ast/types/ast.types.statements.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { ModuleQuestions } from "../../declaration/module-questions/module-questions.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { ByteSourceRules } from "../byte-source-rules/byte-source-rules.tz";
+import {
+  kCStringName,
+  kDataViewName,
+  kOutName,
+} from "./const/foreign-rules.const.tz";
+
+export class ForeignRules {
+  private readonly program: Program;
+  private readonly text: TypeText;
+  private readonly types: TypeQuestions;
+  private readonly modules: ModuleQuestions;
+  private readonly byteSources: ByteSourceRules;
+
+  public constructor(
+    program: Program,
+    text: TypeText,
+    types: TypeQuestions,
+    modules: ModuleQuestions,
+    byteSources: ByteSourceRules,
+  ) {
+    this.program = program;
+    this.text = text;
+    this.types = types;
+    this.modules = modules;
+    this.byteSources = byteSources;
+  }
+
+  public plainError(loc: int): SourceError {
+    return { code: Code.ForeignPlain, loc, details: kNoDetails };
+  }
+
+  public optionalError(loc: int): SourceError {
+    return { code: Code.ForeignOptional, loc, details: kNoDetails };
+  }
+
+  public noReturnError(loc: int): SourceError {
+    return { code: Code.ForeignNoReturn, loc, details: kNoDetails };
+  }
+
+  public takesError(loc: int, type: Type): SourceError | undefined {
+    if (type.kind == TypeKind.Error || this.isArgument(type)) {
+      return undefined;
+    }
+
+    const word = this.text.of(type);
+
+    return { code: Code.ForeignTakes, loc, details: { word } };
+  }
+
+  public givesError(loc: int, type: Type): SourceError | undefined {
+    const isPassing =
+      type.kind == TypeKind.Error ||
+      type.kind == TypeKind.Void ||
+      this.isResult(type);
+    if (isPassing) {
+      return undefined;
+    }
+
+    const word = this.text.of(type);
+
+    return { code: Code.ForeignGives, loc, details: { word } };
+  }
+
+  public handleNewError(loc: int, name: string): SourceError {
+    return { code: Code.ForeignHandleNew, loc, details: { word: name } };
+  }
+
+  private isArgument(type: Type): boolean {
+    return (
+      this.isResult(type) ||
+      this.isArray(type) ||
+      this.isBytes(type) ||
+      this.isOut(type)
+    );
+  }
+
+  private isResult(type: Type): boolean {
+    return (
+      this.isNumber(type) ||
+      type.kind == TypeKind.Boolean ||
+      this.isPointer(type)
+    );
+  }
+
+  private isNumber(type: Type): boolean {
+    return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
+  }
+
+  private isPointer(type: Type): boolean {
+    const pointed = this.types.definedType(type);
+
+    return this.isHandle(pointed) || this.isCString(pointed);
+  }
+
+  private isArray(type: Type): boolean {
+    if (type.kind != TypeKind.Array) {
+      return false;
+    }
+
+    const item = type.item;
+
+    return this.isNumber(item) || this.isHandle(item);
+  }
+
+  private isBytes(type: Type): boolean {
+    const name = this.byteSources.typedName(type);
+
+    return this.byteSources.isByteView(type) && name != kDataViewName;
+  }
+
+  private isOut(type: Type): boolean {
+    const isOut =
+      type.kind == TypeKind.Instance &&
+      type.name == kOutName &&
+      this.modules.isLibraryModule(type.module);
+    const element = type.kind == TypeKind.Instance ? type.args[0] : undefined;
+    if (!isOut || element == undefined) {
+      return false;
+    }
+
+    return (
+      this.isNumber(element) ||
+      element.kind == TypeKind.Boolean ||
+      this.isHandle(element)
+    );
+  }
+
+  private isCString(type: Type): boolean {
+    return (
+      type.kind == TypeKind.Instance &&
+      type.name == kCStringName &&
+      this.modules.isLibraryModule(type.module)
+    );
+  }
+
+  private isHandle(type: Type): boolean {
+    if (type.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    const opened = this.program.modules[type.module];
+    const loc = type.loc;
+
+    return (
+      opened != undefined &&
+      opened.file.items.some(
+        (item) => item.kind == StmtKind.Handle && item.loc == loc,
+      )
+    );
+  }
+}

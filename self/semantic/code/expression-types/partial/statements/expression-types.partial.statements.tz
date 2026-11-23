@@ -1,26 +1,22 @@
-import { ExpressionTypes } from "../../expression-types.tz";
-import { MethodKind } from "../../../../../program/ast/types/ast.types.classes.tz";
-import { Code } from "../../../../../diagnostic/code.tz";
-import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import { ClassDecl } from "../../../../../program/ast/types/ast.types.classes.tz";
 import {
   Expr,
   ExprKind,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
 import {
   ForOfStmt,
   ForStmt,
   IfStmt,
-  ReturnStmt,
   Stmt,
   StmtKind,
-  SwitchStmt,
 } from "../../../../../program/ast/types/ast.types.statements.tz";
 import {
   TupleType,
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import { kNoPlace } from "../../const/expression-types.const.tz";
 import { FunctionFrame } from "../../types/expression-types.types.tz";
 import { TruthUse } from "../../../../flow/truth-rules/types/truth-rules.types.tz";
 
@@ -80,7 +76,7 @@ partial class ExpressionTypes {
 
         return;
       case StmtKind.Function:
-        const nestedGenericError = this.generics.nestedGenericCheck(
+        const nestedGenericError = this.genericCalls.nestedGenericCheck(
           statement,
           frame,
         );
@@ -90,6 +86,8 @@ partial class ExpressionTypes {
 
         return;
       case StmtKind.Class:
+        this.classPlaceCheck(statement, module);
+
         return this.walkClass(statement, module);
       case StmtKind.Expr: {
         if (statement.expr.kind == ExprKind.Yield) {
@@ -117,6 +115,8 @@ partial class ExpressionTypes {
 
         return this.walkFor(statement, frame, module);
       case StmtKind.ForOf: {
+        this.forAwaitCheck(statement, module);
+        this.loopVariableCheck(statement, module);
         this.localDoor(module, statement.binding.loc);
         this.forgetLooped(statement, module);
 
@@ -289,353 +289,6 @@ partial class ExpressionTypes {
     }
   }
 
-  private walkSwitch(
-    statement: SwitchStmt,
-    frame: FunctionFrame,
-    module: int,
-  ): void {
-    const switchFunctionsErrors =
-      this.statements.switchFunctionsCheck(statement);
-
-    this.reportAll(module, switchFunctionsErrors);
-
-    const subject = this.typed(statement.discriminant, undefined, module);
-    const tests = this.caseTypes(statement, subject, module);
-
-    this.casesCheck(statement, subject, tests, module);
-
-    this.forgetLooped(statement, module);
-
-    const before = this.facts;
-    const discriminant = statement.discriminant;
-    let reached: Map<string, Type> | undefined = undefined;
-    let passed = new Map<string, Type>();
-    const exits: Map<string, Type>[] = [];
-    const lastCase = statement.cases[statement.cases.length - 1];
-
-    for (const option of statement.cases) {
-      const test = option.test;
-      const facts = this.caseFacts(discriminant, test, passed, module);
-
-      reached = this.reachedFacts(reached, facts);
-
-      if (test != undefined) {
-        passed = this.narrowings.mergedFacts(
-          passed,
-          this.factsOfCase(discriminant, test, passed, false, module),
-        );
-      }
-      if (option.body.length == 0) {
-        continue;
-      }
-
-      this.facts = this.narrowings.mergedFacts(before, reached);
-      this.walkStatements(option.body, frame, module);
-
-      if (this.isSwitchExit(option, option == lastCase, module)) {
-        exits.push(this.facts);
-      }
-
-      this.facts = before;
-      reached = undefined;
-    }
-
-    this.switchFieldsJoined(statement, exits);
-  }
-
-  private caseFacts(
-    discriminant: Expr,
-    test: Expr | undefined,
-    passed: Map<string, Type>,
-    module: int,
-  ): Map<string, Type> {
-    if (test == undefined) {
-      return passed;
-    }
-
-    const facts = this.factsOfCase(discriminant, test, passed, true, module);
-
-    return this.narrowings.mergedFacts(passed, facts);
-  }
-
-  private factsOfCase(
-    discriminant: Expr,
-    test: Expr,
-    passed: Map<string, Type>,
-    isEqual: boolean,
-    module: int,
-  ): Map<string, Type> {
-    const before = this.underFacts(passed);
-    const facts = this.equalityFacts(discriminant, test, isEqual, module);
-
-    this.facts = before;
-
-    return facts;
-  }
-
-  private reachedFacts(
-    reached: Map<string, Type> | undefined,
-    facts: Map<string, Type>,
-  ): Map<string, Type> {
-    if (reached == undefined) {
-      return facts;
-    }
-
-    return this.narrowings.joinedFacts(reached, facts);
-  }
-
-  private caseTypes(statement: SwitchStmt, subject: Type, module: int): Type[] {
-    const tests: Type[] = [];
-
-    if (subject.kind == TypeKind.Error) {
-      return tests;
-    }
-
-    for (const option of statement.cases) {
-      const test = option.test;
-      if (test != undefined) {
-        const type = this.typed(test, subject, module);
-
-        const caseTypeError = this.statements.caseTypeCheck(
-          test,
-          type,
-          subject,
-        );
-
-        this.reportFound(module, caseTypeError);
-        tests.push(type);
-      }
-    }
-
-    return tests;
-  }
-
-  private casesCheck(
-    statement: SwitchStmt,
-    subject: Type,
-    tests: Type[],
-    module: int,
-  ): void {
-    const key = `${module} ${statement.loc}`;
-    const isUnknown =
-      subject.kind == TypeKind.Error ||
-      tests.some((test) => test.kind == TypeKind.Error);
-    if (isUnknown) {
-      this.coveredSwitches.add(key);
-
-      return;
-    }
-
-    const hasDefault = statement.cases.some(
-      (option) => option.test == undefined,
-    );
-    const isListed =
-      !this.types.isOptional(subject) && this.objects.isLiteralSet(subject);
-    if (hasDefault || !isListed) {
-      return;
-    }
-
-    const left = this.types
-      .unionMembers(subject)
-      .filter((part) => !tests.includes(part));
-    const first = left[0];
-    if (first == undefined) {
-      this.coveredSwitches.add(key);
-
-      return;
-    }
-
-    const names = left.map((part) => this.text.of(part));
-    const word = this.statements.listedNames(names);
-    const other = this.text.of(first);
-
-    this.report(module, statement.discriminant.loc, Code.SwitchCasesLeft, {
-      word,
-      other,
-    });
-  }
-
-  private walkReturn(
-    statement: ReturnStmt,
-    frame: FunctionFrame,
-    module: int,
-  ): void {
-    this.walkReturnValue(statement, frame, module);
-    this.noteGuardExit(statement.value, frame, module);
-  }
-
-  private walkReturnValue(
-    statement: ReturnStmt,
-    frame: FunctionFrame,
-    module: int,
-  ): void {
-    const value = statement.value;
-    const fn = frame.fn;
-
-    this.returnBeforeSuper(statement.loc, module);
-    this.returnFieldsCheck(statement, fn, module);
-    const returnAwaitError = this.statements.returnAwaitCheck(value, frame);
-
-    this.reportFound(module, returnAwaitError);
-
-    if (fn == undefined) {
-      this.report(
-        module,
-        statement.loc,
-        Code.ReturnOutsideFunction,
-        kNoDetails,
-      );
-
-      return this.valueCheck(value, module);
-    }
-
-    if (value != undefined && fn.role?.method == MethodKind.Constructor) {
-      this.report(module, value.loc, Code.ConstructorReturn, kNoDetails);
-
-      return this.valueCheck(value, module);
-    }
-
-    const result = frame.result;
-    if (result == undefined) {
-      return this.collectReturn(value, frame, module);
-    }
-    if (result.kind == TypeKind.Void) {
-      return this.voidReturn(value, frame, module);
-    }
-    if (value == undefined) {
-      const emptyReturnError = this.statements.emptyReturnError(
-        statement,
-        result,
-        frame,
-      );
-
-      return this.reportFound(module, emptyReturnError);
-    }
-
-    const given = this.returnedType(value, result, frame, module);
-
-    this.coerce(value, given, result, module, kNoPlace);
-    this.predicateReturnCheck(fn, value, module);
-  }
-
-  private returnedType(
-    value: Expr,
-    wanted: Type | undefined,
-    frame: FunctionFrame,
-    module: int,
-  ): Type {
-    const given = this.typed(value, wanted, module);
-    if (frame.isAsync && given.kind == TypeKind.Promise) {
-      return given.value;
-    }
-
-    return given;
-  }
-
-  private collectReturn(
-    value: Expr | undefined,
-    frame: FunctionFrame,
-    module: int,
-  ): void {
-    if (value == undefined) {
-      frame.hasEmptyReturn = true;
-
-      return;
-    }
-
-    const before = this.recursions.length;
-    const hint = this.returnShapeHint(value, frame, module);
-    const type = this.hintedReturn(value, hint, frame, module);
-    const calls = this.recursions.slice(before);
-    if (calls.length > 0 && type.kind == TypeKind.Error) {
-      for (const call of calls) {
-        frame.recursive.push(call);
-      }
-
-      return;
-    }
-
-    frame.returns.push({ value, type });
-  }
-
-  private hintedReturn(
-    value: Expr,
-    hint: Type | undefined,
-    frame: FunctionFrame,
-    module: int,
-  ): Type {
-    const given = this.returnedType(value, hint, frame, module);
-
-    if (hint != undefined) {
-      this.coerce(value, given, hint, module, kNoPlace);
-    }
-
-    return given;
-  }
-
-  private returnShapeHint(
-    value: Expr,
-    frame: FunctionFrame,
-    module: int,
-  ): Type | undefined {
-    if (!this.isReturnShaped(value, module)) {
-      return undefined;
-    }
-
-    const earlier = frame.returns.find((one) =>
-      this.statements.isShapedType(one.type),
-    );
-
-    return earlier?.type;
-  }
-
-  private isReturnShaped(value: Expr, module: int): boolean {
-    switch (value.kind) {
-      case ExprKind.ObjectLit:
-      case ExprKind.ArrayLit:
-        return true;
-      case ExprKind.Conditional:
-        return (
-          this.isReturnShaped(value.thenExpr, module) ||
-          this.isReturnShaped(value.elseExpr, module)
-        );
-      case ExprKind.Call: {
-        const callee = value.callee;
-        const isMaker =
-          callee.kind == ExprKind.Name && this.isResultMaker(callee, module);
-        const isSpread = value.args.some((arg) => arg.spread);
-
-        return isMaker && value.args.length <= 1 && !isSpread;
-      }
-      default:
-        return false;
-    }
-  }
-
-  private voidReturn(
-    value: Expr | undefined,
-    frame: FunctionFrame,
-    module: int,
-  ): void {
-    if (value == undefined) {
-      return;
-    }
-
-    const given = this.returnedType(value, undefined, frame, module);
-    const isNothing =
-      given.kind == TypeKind.Void ||
-      given.kind == TypeKind.Undefined ||
-      given.kind == TypeKind.Error;
-    if (isNothing || frame.fn == undefined) {
-      return;
-    }
-
-    const word = this.functions.functionLabel(frame.fn);
-    const first = this.text.of(given);
-
-    this.report(module, value.loc, Code.VoidReturnsValue, { word, first });
-  }
-
   private loopItem(loop: ForOfStmt, module: int): Type {
     const iterable = this.typed(loop.iterable, undefined, module);
     if (loop.keys) {
@@ -679,5 +332,27 @@ partial class ExpressionTypes {
     this.reportFound(module, checked.error);
 
     return checked.value;
+  }
+
+  private loopVariableCheck(loop: ForOfStmt, module: int): void {
+    const written = loop.binding.typeAnn;
+    if (written == undefined) {
+      return;
+    }
+
+    const word = this.statements.loopWord(loop);
+
+    this.report(module, written.loc, Code.LoopVariableTyped, { word });
+  }
+
+  private classPlaceCheck(statement: ClassDecl, module: int): void {
+    const opened = this.program.modules[module];
+    if (opened == undefined || opened.file.items.includes(statement)) {
+      return;
+    }
+
+    this.report(module, statement.loc, Code.ClassNotTopLevel, {
+      word: statement.name ?? "",
+    });
   }
 }

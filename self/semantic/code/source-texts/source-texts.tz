@@ -1,10 +1,13 @@
 import {
+  AssignExpr,
   BinaryExpr,
   BinaryOp,
   CallArgument,
   Expr,
   ExprKind,
+  IndexExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
+import { kCompoundOperatorLength } from "../assignment-rules/const/assignment-rules.const.tz";
 import {
   kArgumentSeparator,
   kCloseBracket,
@@ -245,6 +248,35 @@ export class SourceTexts {
     return kTuplePlaceholder;
   }
 
+  public assignTexts(expr: AssignExpr, module: int): OperandTexts {
+    const span = expr.source;
+    const text = this.program.modules[module]?.source.text;
+    if (span == undefined || text == undefined) {
+      return { left: "", right: "" };
+    }
+
+    const start = expr.loc + kCompoundOperatorLength;
+    const before = text.toString("utf8", span.start, expr.loc);
+    const after = text.toString("utf8", start, span.end);
+
+    return { left: before.trim(), right: after.trim() };
+  }
+
+  public valueText(expr: Expr, module: int): string {
+    switch (expr.kind) {
+      case ExprKind.Name:
+        return expr.name;
+      case ExprKind.IntLit:
+        return `${expr.value}`;
+      case ExprKind.Binary:
+        return this.wrappedSource(expr, module);
+      case ExprKind.Index:
+        return this.elementText(expr, module);
+      default:
+        return kUnnamedOperand;
+    }
+  }
+
   private isPlainOperand(text: string): boolean {
     const head = text.slice(0, 1);
     if (text == "" || kSigns.includes(head)) {
@@ -366,5 +398,27 @@ export class SourceTexts {
     }
 
     return `${calleeText}(${joined})`;
+  }
+
+  private wrappedSource(expr: BinaryExpr, module: int): string {
+    const span = expr.source;
+    const text = this.program.modules[module]?.source.text;
+    if (span == undefined || text == undefined) {
+      return kUnnamedOperand;
+    }
+
+    const written = text.toString("utf8", span.start, span.end);
+
+    return `${kOpenParen}${written}${kCloseParen}`;
+  }
+
+  private elementText(expr: IndexExpr, module: int): string {
+    const object = this.valueText(expr.object, module);
+    const position = this.valueText(expr.index, module);
+    if (object == kUnnamedOperand || position == kUnnamedOperand) {
+      return kUnnamedOperand;
+    }
+
+    return `${object}${kOpenBracket}${position}${kCloseBracket}`;
   }
 }

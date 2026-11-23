@@ -1,0 +1,23 @@
+export const kWeakRefName = "WeakRef";
+export const kDerefName = "deref";
+export const kUnsupportedTargets = [
+  "Date",
+  "RegExp",
+  "DateTimeFormat",
+  "Uint8Array",
+  "Uint8ClampedArray",
+  "Int8Array",
+  "Uint16Array",
+  "Int16Array",
+  "Float16Array",
+  "Uint32Array",
+  "Int32Array",
+  "Float32Array",
+  "Float64Array",
+  "Buffer",
+  "ArrayBuffer",
+  "DataView",
+  "TextEncoder",
+  "TextDecoder",
+  "FatalTextDecoder",
+];

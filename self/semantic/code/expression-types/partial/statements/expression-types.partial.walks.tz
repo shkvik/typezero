@@ -1,10 +1,13 @@
-import { ExpressionTypes } from "../../expression-types.tz";
 import {
   CallArgument,
   Expr,
   ExprKind,
+  NewExpr,
+  NewKind,
   TemplateExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
+import { ExpressionTypes } from "../../expression-types.tz";
 import {
   Type,
   TypeKind,
@@ -79,10 +82,35 @@ partial class ExpressionTypes {
         return (
           this.shapes.isLogicOp(expr.op) && this.isHintNeeded(expr.rhs, module)
         );
-      case ExprKind.New:
-        return expr.typeArgs.length == 0 && expr.args.length == 0;
+      case ExprKind.New: {
+        const isBare = expr.typeArgs.length == 0 && expr.args.length == 0;
+
+        return isBare && !this.isPlainNew(expr, module);
+      }
       default:
         return false;
     }
+  }
+
+  private isPlainNew(expr: NewExpr, module: int): boolean {
+    const form = expr.form;
+    if (form.kind != NewKind.Named || form.member != undefined) {
+      return false;
+    }
+
+    const target = this.targetOfUse(expr.loc, form.name, module);
+    if (target == undefined || target.kind != SymbolKind.Class) {
+      return false;
+    }
+
+    const opened = this.program.modules[target.module];
+    const declared = opened?.declared.find((one) => one.loc == target.loc);
+    if (declared != undefined) {
+      return declared.typeParams.length == 0;
+    }
+
+    const decl = this.record(target.module)?.classes.get(target.loc);
+
+    return decl != undefined && decl.typeParams.length == 0;
   }
 }

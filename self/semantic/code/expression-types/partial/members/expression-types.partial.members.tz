@@ -42,6 +42,24 @@ partial class ExpressionTypes {
     if (this.isDecimalName(expr.object, module)) {
       return this.decimalStaticRead(expr, module);
     }
+    if (this.isRegExpName(expr.object, module)) {
+      return this.regExpStaticRead(expr, module);
+    }
+
+    const globalCrypto = this.globalCryptoRead(expr, module);
+    if (globalCrypto != undefined) {
+      return globalCrypto;
+    }
+
+    const globalThisValue = this.globalThisRead(expr, module);
+    if (globalThisValue != undefined) {
+      return globalThisValue;
+    }
+
+    const performanceValue = this.performanceRead(expr, module);
+    if (performanceValue != undefined) {
+      return performanceValue;
+    }
 
     const owner = this.staticOwner(expr.object, module);
     if (owner != undefined) {
@@ -78,6 +96,7 @@ partial class ExpressionTypes {
   }
 
   private receiverOf(object: Expr, optional: boolean, module: int): Type {
+    this.memberObjects.add(object);
     this.markThisObject(object, module);
 
     const type = this.typed(object, undefined, module);
@@ -97,6 +116,12 @@ partial class ExpressionTypes {
 
   private memberOf(expr: MemberExpr, object: Type, module: int): Type {
     if (this.unknownMemberCheck(expr, object, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.fsConstantCheck(expr, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.processMemberRead(expr, module)) {
       return this.store.plain(TypeKind.Error);
     }
 
@@ -189,7 +214,10 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
     if (field == undefined) {
-      const missingFieldError = this.objects.missingFieldError(expr, object);
+      const missingFieldError = this.objectMembers.missingFieldError(
+        expr,
+        object,
+      );
 
       this.reportFound(module, missingFieldError);
 
@@ -212,7 +240,7 @@ partial class ExpressionTypes {
   }
 
   private tupleMember(expr: MemberExpr, tuple: TupleType, module: int): Type {
-    const checked = this.objects.tupleMember(expr, tuple);
+    const checked = this.objectMembers.tupleMember(expr, tuple);
 
     this.reportFound(module, checked.error);
 
@@ -220,7 +248,7 @@ partial class ExpressionTypes {
   }
 
   private valueMember(expr: MemberExpr, object: Type, module: int): Type {
-    const checked = this.objects.valueMember(expr, object);
+    const checked = this.objectMembers.valueMember(expr, object);
 
     this.reportFound(module, checked.error);
 

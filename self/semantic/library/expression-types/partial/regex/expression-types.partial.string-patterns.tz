@@ -1,0 +1,330 @@
+import { Code } from "../../../../../diagnostic/code.tz";
+import { SourceError } from "../../../../../diagnostic/types/message.types.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { Param } from "../../../../../program/ast/types/ast.types.functions.tz";
+import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import { RegexShape } from "../../../regex-parser/types/regex-parser.types.tz";
+import {
+  kMatchAllName,
+  kMatchName,
+  kReplaceAllName,
+  kSearchName,
+  kSplitName,
+} from "../../../regex-rules/const/regex-rules.const.tz";
+
+partial class ExpressionTypes {
+  private stringPatternCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): Type | undefined {
+    const method = member.name;
+    const receiver = this.types.definedType(object);
+    const isBareSplit = method == kSplitName && expr.args.length == 0;
+    const hasSpread = expr.args.some((arg) => arg.spread);
+    const isPattern =
+      this.regexes.isText(receiver) && this.regexes.isPatternMethod(method);
+    if (!isPattern || isBareSplit || hasSpread) {
+      return undefined;
+    }
+
+    const count = expr.args.length;
+    const least = this.regexes.leastArguments(method);
+    const most = this.regexes.mostArguments(method);
+    const pattern = expr.args[0];
+    if (count < least || count > most || pattern == undefined) {
+      const word = this.calls.argumentCountText(least, most, false);
+
+      this.report(module, member.loc, Code.ArgumentCount, {
+        word,
+        other: `${count}`,
+      });
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const given = this.typed(pattern.expr, undefined, module);
+
+    return this.patternGivenCall(expr, member, given, module);
+  }
+
+  private patternGivenCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    given: Type,
+    module: int,
+  ): Type {
+    if (given.kind == TypeKind.Error) {
+      return this.patternRestLoosely(expr, module);
+    }
+    if (this.regexes.isRegExp(given)) {
+      return this.regexPatternCall(expr, member, module);
+    }
+    if (this.regexes.isText(given)) {
+      return this.textPatternCall(expr, member, module);
+    }
+
+    const pattern = expr.args[0]?.expr ?? member;
+    const notPattern = this.regexes.notPatternError(
+      pattern.loc,
+      member.name,
+      given,
+    );
+
+    this.reportFound(module, notPattern);
+
+    return this.patternRestLoosely(expr, module);
+  }
+
+  private patternRestLoosely(expr: CallExpr, module: int): Type {
+    this.looseArguments(expr.args.slice(1), module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private regexPatternCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): Type {
+    const method = member.name;
+    const pattern = expr.args[0]?.expr ?? member;
+    const shape = this.knownRegex(pattern, module);
+    if (method == kMatchName) {
+      return this.regexMatchCall(member, shape, module);
+    }
+
+    const isNeedingGlobal =
+      method == kMatchAllName || method == kReplaceAllName;
+    const isMissing = shape != undefined && !this.regexes.isGlobal(shape);
+    if (isNeedingGlobal && isMissing && shape != undefined) {
+      const needsGlobal = this.regexes.needsGlobalError(
+        pattern.loc,
+        method,
+        shape,
+      );
+
+      this.reportFound(module, needsGlobal);
+
+      return this.patternRestLoosely(expr, module);
+    }
+
+    switch (method) {
+      case kMatchAllName:
+        return this.store.plain(TypeKind.Error);
+      case kSearchName:
+        return this.store.integer(64, false);
+      case kSplitName:
+        this.splitLimitCheck(expr, module);
+
+        return this.regexes.splitType(shape);
+      default:
+        return this.regexReplaceCall(expr, member, shape, module);
+    }
+  }
+
+  private regexMatchCall(
+    member: MemberExpr,
+    shape: RegexShape | undefined,
+    module: int,
+  ): Type {
+    if (shape == undefined) {
+      this.reportFound(module, this.regexes.matchFlagError(member.loc));
+    }
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private splitLimitCheck(expr: CallExpr, module: int): void {
+    const limit = expr.args[1];
+    if (limit != undefined) {
+      this.checked(limit.expr, this.store.integer(64, false), module, "");
+    }
+  }
+
+  private regexReplaceCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    shape: RegexShape | undefined,
+    module: int,
+  ): Type {
+    const replacement = expr.args[1];
+    const text = this.store.plain(TypeKind.String);
+    if (replacement == undefined) {
+      return text;
+    }
+
+    const value = replacement.expr;
+    if (this.isFunctionReplacement(value, module)) {
+      return this.functionReplaceCall(value, member, shape, module);
+    }
+
+    this.checked(value, text, module, "");
+
+    if (shape != undefined && value.kind == ExprKind.StringLit) {
+      const groupError = this.regexes.groupReferenceError(
+        value.loc,
+        shape,
+        value.value,
+      );
+
+      this.reportFound(module, groupError);
+    }
+
+    return text;
+  }
+
+  private isFunctionReplacement(value: Expr, module: int): boolean {
+    if (value.kind == ExprKind.Function) {
+      return true;
+    }
+    if (value.kind != ExprKind.Name) {
+      return false;
+    }
+
+    const target = this.targetOfName(value, module);
+    if (target == undefined) {
+      return false;
+    }
+    if (target.kind == SymbolKind.Function) {
+      return true;
+    }
+    if (target.kind != SymbolKind.Variable) {
+      return false;
+    }
+
+    const given = this.peekType(value, module);
+
+    return this.types.definedType(given).kind == TypeKind.Function;
+  }
+
+  private functionReplaceCall(
+    value: Expr,
+    member: MemberExpr,
+    shape: RegexShape | undefined,
+    module: int,
+  ): Type {
+    const params = this.regexes.replacerParams(shape);
+    const text = this.store.plain(TypeKind.String);
+    const written = this.closureParams(value);
+    if (written.length > params.length) {
+      const extraError = this.extraParamsError(member, shape, written, params);
+
+      this.reportFound(module, extraError);
+    }
+
+    while (params.length < written.length) {
+      params.push(text);
+    }
+
+    const replacer = this.regexes.replacerType(params);
+    const peeked = this.peekType(value, module);
+    const isAsyncClosure = value.kind == ExprKind.Function && value.fn.isAsync;
+    const isAsync =
+      isAsyncClosure ||
+      (peeked.kind == TypeKind.Function &&
+        peeked.shape.result.kind == TypeKind.Promise);
+    if (isAsync) {
+      this.report(module, value.loc, Code.CallbackAsyncReplace, {
+        word: member.name,
+        first: "string",
+      });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const given = this.checked(value, replacer, module, "");
+    if (this.types.definedType(given).kind != TypeKind.Function) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return text;
+  }
+
+  private closureParams(value: Expr): Param[] {
+    if (value.kind != ExprKind.Function) {
+      return [];
+    }
+
+    return value.fn.params;
+  }
+
+  private extraParamsError(
+    member: MemberExpr,
+    shape: RegexShape | undefined,
+    written: Param[],
+    params: Type[],
+  ): SourceError | undefined {
+    if (shape == undefined) {
+      const second = written[1];
+      if (second == undefined) {
+        return undefined;
+      }
+
+      return this.regexes.onlyMatchError(second.loc);
+    }
+
+    const count = params.length;
+    const extra = written[count];
+    if (extra == undefined) {
+      return undefined;
+    }
+
+    return this.regexes.passesError(extra.loc, member.name, count, shape);
+  }
+
+  private textPatternCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): Type {
+    const method = member.name;
+    const pattern = expr.args[0]?.expr ?? member;
+    if (method == kSplitName) {
+      this.splitLimitCheck(expr, module);
+
+      return this.regexes.textsType();
+    }
+    if (method != kReplaceAllName) {
+      const textError = this.regexes.textPatternError(
+        member.loc,
+        method,
+        pattern,
+      );
+
+      this.reportFound(module, textError);
+
+      return this.patternRestLoosely(expr, module);
+    }
+
+    const replacement = expr.args[1]?.expr ?? member;
+    if (replacement.kind == ExprKind.Function) {
+      const functionError = this.regexes.functionTextError(
+        replacement.loc,
+        pattern,
+      );
+
+      this.reportFound(module, functionError);
+
+      return this.patternRestLoosely(expr, module);
+    }
+
+    const text = this.store.plain(TypeKind.String);
+
+    this.checked(replacement, text, module, "");
+
+    return text;
+  }
+}

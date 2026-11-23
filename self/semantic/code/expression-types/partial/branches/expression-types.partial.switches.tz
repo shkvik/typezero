@@ -1,0 +1,204 @@
+import {
+  Expr,
+  ExprKind,
+  UnaryOp,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { SwitchStmt } from "../../../../../program/ast/types/ast.types.statements.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { FunctionFrame } from "../../types/expression-types.types.tz";
+import { ExpressionTypes } from "../../expression-types.tz";
+
+partial class ExpressionTypes {
+  private walkSwitch(
+    statement: SwitchStmt,
+    frame: FunctionFrame,
+    module: int,
+  ): void {
+    const switchFunctionsErrors =
+      this.statements.switchFunctionsCheck(statement);
+
+    this.reportAll(module, switchFunctionsErrors);
+
+    const subject = this.typed(statement.discriminant, undefined, module);
+    const tests = this.caseTypes(statement, subject, module);
+
+    this.typeOfCasesCheck(statement, module);
+
+    this.casesCheck(statement, subject, tests, module);
+
+    this.forgetLooped(statement, module);
+
+    const before = this.facts;
+    const discriminant = statement.discriminant;
+    let reached: Map<string, Type> | undefined = undefined;
+    let passed = new Map<string, Type>();
+    const exits: Map<string, Type>[] = [];
+    const lastCase = statement.cases[statement.cases.length - 1];
+
+    for (const option of statement.cases) {
+      const test = option.test;
+      const facts = this.caseFacts(discriminant, test, passed, module);
+
+      reached = this.reachedFacts(reached, facts);
+
+      if (test != undefined) {
+        passed = this.narrowings.mergedFacts(
+          passed,
+          this.factsOfCase(discriminant, test, passed, false, module),
+        );
+      }
+      if (option.body.length == 0) {
+        continue;
+      }
+
+      this.facts = this.narrowings.mergedFacts(before, reached);
+      this.walkStatements(option.body, frame, module);
+
+      if (this.isSwitchExit(option, option == lastCase, module)) {
+        exits.push(this.facts);
+      }
+
+      this.facts = before;
+      reached = undefined;
+    }
+
+    this.switchFieldsJoined(statement, exits);
+  }
+
+  private caseFacts(
+    discriminant: Expr,
+    test: Expr | undefined,
+    passed: Map<string, Type>,
+    module: int,
+  ): Map<string, Type> {
+    if (test == undefined) {
+      return passed;
+    }
+
+    const facts = this.factsOfCase(discriminant, test, passed, true, module);
+
+    return this.narrowings.mergedFacts(passed, facts);
+  }
+
+  private factsOfCase(
+    discriminant: Expr,
+    test: Expr,
+    passed: Map<string, Type>,
+    isEqual: boolean,
+    module: int,
+  ): Map<string, Type> {
+    const before = this.underFacts(passed);
+    const facts = this.equalityFacts(discriminant, test, isEqual, module);
+
+    this.facts = before;
+
+    return facts;
+  }
+
+  private reachedFacts(
+    reached: Map<string, Type> | undefined,
+    facts: Map<string, Type>,
+  ): Map<string, Type> {
+    if (reached == undefined) {
+      return facts;
+    }
+
+    return this.narrowings.joinedFacts(reached, facts);
+  }
+
+  private caseTypes(statement: SwitchStmt, subject: Type, module: int): Type[] {
+    const tests: Type[] = [];
+
+    if (subject.kind == TypeKind.Error) {
+      return tests;
+    }
+
+    for (const option of statement.cases) {
+      const test = option.test;
+      if (test != undefined) {
+        const type = this.typed(test, subject, module);
+
+        const caseTypeError = this.statements.caseTypeCheck(
+          test,
+          type,
+          subject,
+        );
+
+        this.reportFound(module, caseTypeError);
+        tests.push(type);
+      }
+    }
+
+    return tests;
+  }
+
+  private casesCheck(
+    statement: SwitchStmt,
+    subject: Type,
+    tests: Type[],
+    module: int,
+  ): void {
+    const key = `${module} ${statement.loc}`;
+    const isUnknown =
+      subject.kind == TypeKind.Error ||
+      tests.some((test) => test.kind == TypeKind.Error);
+    if (isUnknown) {
+      this.coveredSwitches.add(key);
+
+      return;
+    }
+
+    const hasDefault = statement.cases.some(
+      (option) => option.test == undefined,
+    );
+    const isListed =
+      !this.types.isOptional(subject) && this.objects.isLiteralSet(subject);
+    if (hasDefault || !isListed) {
+      return;
+    }
+
+    const left = this.types
+      .unionMembers(subject)
+      .filter((part) => !tests.includes(part));
+    const first = left[0];
+    if (first == undefined) {
+      this.coveredSwitches.add(key);
+
+      return;
+    }
+
+    const names = left.map((part) => this.text.of(part));
+    const word = this.statements.listedNames(names);
+    const other = this.text.of(first);
+
+    this.report(module, statement.discriminant.loc, Code.SwitchCasesLeft, {
+      word,
+      other,
+    });
+  }
+
+  private typeOfCasesCheck(statement: SwitchStmt, module: int): void {
+    const subject = statement.discriminant;
+    if (subject.kind != ExprKind.Unary || subject.op != UnaryOp.TypeOf) {
+      return;
+    }
+
+    const tested = this.peekType(subject.operand, module);
+
+    for (const option of statement.cases) {
+      const test = option.test;
+      if (test == undefined || test.kind != ExprKind.StringLit) {
+        continue;
+      }
+
+      const answer = this.typeOfs.answerOf(tested, test.value);
+      if (answer != undefined) {
+        this.report(module, test.loc, answer.code, answer.details);
+      }
+    }
+  }
+}

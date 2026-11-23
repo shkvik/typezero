@@ -1,0 +1,361 @@
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  CallArgument,
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NameExpr,
+  NewExpr,
+  NewKind,
+  RegexLitExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
+import {
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import {
+  RegexShape,
+  RegexText,
+} from "../../../regex-parser/types/regex-parser.types.tz";
+import {
+  kCompileName,
+  kEscapeName,
+  kExecName,
+  kRegExpName,
+  kTestName,
+} from "../../../regex-rules/const/regex-rules.const.tz";
+
+partial class ExpressionTypes {
+  private regexLiteralTyped(expr: RegexLitExpr, module: int): Type {
+    const flags = expr.flags;
+    if (!this.regexes.isFlagsValid(flags)) {
+      const loc = expr.loc + expr.written - flags.length;
+
+      this.reportFound(module, this.regexes.flagsError(loc, flags));
+    }
+
+    return this.regExpType();
+  }
+
+  private regExpType(): Type {
+    const made = this.resolver.libraryInstance(kRegExpName, []);
+
+    return made ?? this.store.plain(TypeKind.Error);
+  }
+
+  private knownRegex(expr: Expr, module: int): RegexShape | undefined {
+    const written = this.regexTextOf(expr, module);
+    if (written == undefined) {
+      return undefined;
+    }
+
+    return this.regexes.shapeOf(written);
+  }
+
+  private regexTextOf(expr: Expr, module: int): RegexText | undefined {
+    switch (expr.kind) {
+      case ExprKind.RegexLit:
+        return { pattern: expr.pattern, flags: expr.flags };
+      case ExprKind.New:
+        return this.madeRegexText(expr, module);
+      case ExprKind.Name:
+        return this.heldRegexText(expr, module);
+      default:
+        return undefined;
+    }
+  }
+
+  private madeRegexText(expr: NewExpr, module: int): RegexText | undefined {
+    if (!this.isRegExpNew(expr, module)) {
+      return undefined;
+    }
+
+    return this.constantRegexText(expr.args);
+  }
+
+  private isRegExpNew(expr: NewExpr, module: int): boolean {
+    const form = expr.form;
+    const isNamed =
+      form.kind == NewKind.Named &&
+      form.member == undefined &&
+      form.name == kRegExpName;
+    if (!isNamed) {
+      return false;
+    }
+
+    const target = this.targetOfUse(expr.loc, kRegExpName, module);
+
+    return (
+      target != undefined &&
+      target.kind == SymbolKind.Class &&
+      this.modules.isLibraryModule(target.module)
+    );
+  }
+
+  private heldRegexText(expr: NameExpr, module: int): RegexText | undefined {
+    const target = this.targetOfName(expr, module);
+    if (target == undefined || target.kind != SymbolKind.Variable) {
+      return undefined;
+    }
+
+    const record = this.record(target.module);
+    const variable = record?.variables.get(target.loc);
+    const init = variable?.decl.init;
+    if (record == undefined || variable == undefined || init == undefined) {
+      return undefined;
+    }
+    if (!variable.isConst && record.assigned.has(target.loc)) {
+      return undefined;
+    }
+    if (init.kind == ExprKind.Name) {
+      return undefined;
+    }
+
+    return this.regexTextOf(init, target.module);
+  }
+
+  private constantRegexText(args: CallArgument[]): RegexText | undefined {
+    const first = args[0];
+    if (first == undefined || args.length > 2) {
+      return undefined;
+    }
+
+    const pattern = this.constantText(first.expr);
+    const second = args[1];
+    if (pattern == undefined) {
+      return undefined;
+    }
+    if (second == undefined) {
+      return { pattern, flags: "" };
+    }
+
+    const flags = this.constantText(second.expr);
+    if (flags == undefined) {
+      return undefined;
+    }
+
+    return { pattern, flags };
+  }
+
+  private constantText(expr: Expr): string | undefined {
+    if (expr.kind == ExprKind.StringLit) {
+      return expr.value;
+    }
+    if (expr.kind == ExprKind.Template && expr.exprs.length == 0) {
+      return expr.quasis[0];
+    }
+
+    return undefined;
+  }
+
+  private isRegExpName(expr: Expr, module: int): boolean {
+    if (expr.kind != ExprKind.Name || expr.name != kRegExpName) {
+      return false;
+    }
+
+    return this.isGlobalUse(expr, module);
+  }
+
+  private regexMethodCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type | undefined {
+    const hasSpread = expr.args.some((arg) => arg.spread);
+    if (!this.regexes.isRegExp(instance) || hasSpread) {
+      return undefined;
+    }
+
+    switch (member.name) {
+      case kCompileName:
+        this.reportFound(module, this.regexes.compileError(member.loc));
+        this.looseArguments(expr.args, module);
+
+        return this.store.plain(TypeKind.Error);
+      case kTestName:
+      case kExecName:
+        return this.regexRunCall(expr, member, module);
+      default:
+        return undefined;
+    }
+  }
+
+  private regexRunCall(expr: CallExpr, member: MemberExpr, module: int): Type {
+    const count = expr.args.length;
+    const text = expr.args[0];
+    if (count != 1 || text == undefined) {
+      const word = this.calls.argumentCountText(1, 1, false);
+
+      this.report(module, member.loc, Code.ArgumentCount, {
+        word,
+        other: `${count}`,
+      });
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.checked(text.expr, this.store.plain(TypeKind.String), module, "");
+
+    if (member.name == kExecName) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const shape = this.knownRegex(member.object, module);
+    if (shape != undefined && this.regexes.isGlobal(shape)) {
+      this.reportFound(module, this.regexes.testGlobalError(member.loc));
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.store.plain(TypeKind.Boolean);
+  }
+
+  private regexMemberRead(
+    expr: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type | undefined {
+    const isPlain =
+      !this.regexes.isRegExp(instance) || this.regexes.isField(expr.name);
+    if (isPlain) {
+      return undefined;
+    }
+
+    this.reportFound(module, this.regexes.readError(expr.loc, expr.name));
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private regExpStaticRead(expr: MemberExpr, module: int): Type {
+    this.reportFound(module, this.regexes.staticError(expr.loc, expr.name));
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private regExpStaticCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type | undefined {
+    const isKnown = this.regexes.isKnownStatic(member.name);
+    if (!this.regexes.isRegExp(instance) || isKnown) {
+      return undefined;
+    }
+
+    this.reportFound(module, this.regexes.staticError(member.loc, member.name));
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private regExpNew(expr: NewExpr, module: int): Type | undefined {
+    if (!this.isRegExpNew(expr, module)) {
+      return undefined;
+    }
+
+    return this.regExpMade(expr.loc, expr.args, module);
+  }
+
+  private regExpCalled(expr: CallExpr, module: int): Type | undefined {
+    const callee = expr.callee;
+    if (!this.isRegExpName(callee, module)) {
+      return undefined;
+    }
+
+    return this.regExpMade(callee.loc, expr.args, module);
+  }
+
+  private regExpMade(loc: int, args: CallArgument[], module: int): Type {
+    const count = args.length;
+    const pattern = args[0];
+    if (count > 2 || pattern == undefined) {
+      const word = this.calls.argumentCountText(1, 2, false);
+
+      this.report(module, loc, Code.ArgumentCount, { word, other: `${count}` });
+      this.looseArguments(args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const constant = this.constantRegexText(args);
+    if (constant != undefined) {
+      const flags = constant.flags;
+      if (!this.regexes.isFlagsValid(flags)) {
+        this.reportFound(module, this.regexes.flagsError(loc, flags));
+      }
+
+      return this.regExpType();
+    }
+
+    return this.escapedRegExp(loc, pattern, args[1], module);
+  }
+
+  private escapedRegExp(
+    loc: int,
+    pattern: CallArgument,
+    second: CallArgument | undefined,
+    module: int,
+  ): Type {
+    const flags = this.flagsText(second);
+    const isEscaped = this.isRegExpEscape(pattern.expr, module);
+    if (!isEscaped || flags == undefined) {
+      const hasFlags = second != undefined;
+
+      this.reportFound(module, this.regexes.unknownNewError(loc, hasFlags));
+      this.looseArguments([pattern], module);
+      this.looseSecond(second, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (second != undefined && !this.regexes.isFlagsValid(flags)) {
+      const flagsError = this.regexes.flagsError(second.expr.loc, flags);
+
+      this.reportFound(module, flagsError);
+      this.looseArguments([pattern, second], module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const text = this.store.plain(TypeKind.String);
+
+    this.checked(pattern.expr, text, module, "");
+    this.looseSecond(second, module);
+
+    return this.regExpType();
+  }
+
+  private flagsText(second: CallArgument | undefined): string | undefined {
+    if (second == undefined) {
+      return "";
+    }
+
+    return this.constantText(second.expr);
+  }
+
+  private looseSecond(second: CallArgument | undefined, module: int): void {
+    if (second != undefined) {
+      this.looseArguments([second], module);
+    }
+  }
+
+  private isRegExpEscape(expr: Expr, module: int): boolean {
+    if (expr.kind != ExprKind.Call) {
+      return false;
+    }
+
+    const callee = expr.callee;
+
+    return (
+      callee.kind == ExprKind.Member &&
+      callee.name == kEscapeName &&
+      this.isRegExpName(callee.object, module)
+    );
+  }
+}

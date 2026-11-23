@@ -1,0 +1,53 @@
+export const kRegexFlagLetters = ["d", "g", "i", "m", "s", "u", "v", "y"];
+export const kGlobalFlag = "g";
+export const kUnicodeFlag = "u";
+export const kRegexFields = [
+  "lastIndex",
+  "source",
+  "flags",
+  "hasIndices",
+  "global",
+  "ignoreCase",
+  "multiline",
+  "dotAll",
+  "unicode",
+  "unicodeSets",
+  "sticky",
+];
+export const kRunMethods = ["test", "exec"];
+export const kTestName = "test";
+export const kExecName = "exec";
+export const kCompileName = "compile";
+export const kRegExpName = "RegExp";
+export const kEscapeName = "escape";
+export const kParseName = "parse";
+export const kLegacyPrefix = "$";
+export const kLegacyStatics = [
+  "input",
+  "lastMatch",
+  "lastParen",
+  "leftContext",
+  "rightContext",
+];
+export const kPatternMethods = [
+  "replace",
+  "replaceAll",
+  "split",
+  "match",
+  "matchAll",
+  "search",
+];
+export const kReplaceName = "replace";
+export const kReplaceAllName = "replaceAll";
+export const kSplitName = "split";
+export const kMatchName = "match";
+export const kMatchAllName = "matchAll";
+export const kSearchName = "search";
+export const kRegexSpecials = "^$\\.*+?()[]{}|/";
+export const kTextPlaceholder = "s";
+export const kNamedGroupsHint = ", and the named groups";
+export const kOrString = " or a string";
+export const kMethodsCalled = "; methods must be called";
+export const kFlagsArgument = ", flags";
+export const kPlainQuoted =
+  " !#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^_`abcdefghijklmnopqrstuvwxyz{|}~";

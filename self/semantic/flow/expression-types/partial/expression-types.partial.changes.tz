@@ -1,0 +1,127 @@
+import {
+  Expr,
+  ExprKind,
+  PropertyKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  BoundSide,
+  DeclaredVariable,
+  Destination,
+  ParamSlot,
+  ValueRecord,
+} from "../../../code/expression-types/types/expression-types.types.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+import { Stmt } from "../../../../program/ast/types/ast.types.statements.tz";
+import { Type } from "../../../../program/type/types/type.types.tz";
+import { kDot } from "../../../code/source-texts/const/source-texts.const.tz";
+import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
+
+partial class ExpressionTypes {
+  private forgetPatterned(target: Expr, module: int): void {
+    switch (target.kind) {
+      case ExprKind.Name:
+      case ExprKind.Member: {
+        const key = this.pathKey(target, module);
+        if (key != undefined) {
+          this.forgetPath(key);
+        }
+
+        return;
+      }
+      case ExprKind.ArrayLit:
+        for (const element of target.elements) {
+          this.forgetPatterned(element.expr, module);
+        }
+
+        return;
+      case ExprKind.ObjectLit:
+        for (const property of target.props) {
+          if (property.form.kind != PropertyKind.Computed) {
+            this.forgetPatterned(property.value, module);
+          }
+        }
+
+        return;
+      case ExprKind.Assign:
+        return this.forgetPatterned(target.target, module);
+      default:
+        return;
+    }
+  }
+
+  private forgetPath(key: string): void {
+    this.forgetFacts(key);
+    this.forgetBounds(key, BoundSide.None);
+  }
+
+  private forgetFacts(key: string): void {
+    const prefix = key + kDot;
+    const kept = new Map<string, Type>();
+
+    for (const [known, type] of this.facts) {
+      if (known != key && !known.startsWith(prefix)) {
+        kept.set(known, type);
+      }
+    }
+
+    this.facts = kept;
+  }
+
+  private forgetLooped(statement: Stmt, module: int): void {
+    const record = this.record(module);
+    if (record == undefined) {
+      return;
+    }
+
+    const scratch: ValueRecord = {
+      uses: record.uses,
+      hidden: record.hidden,
+      variables: new Map<int, DeclaredVariable>(),
+      functions: new Map<int, FunctionDecl>(),
+      params: new Map<int, ParamSlot>(),
+      assigned: new Set<int>(),
+      changes: [],
+      enums: record.enums,
+      classes: record.classes,
+      destinations: new Map<int, Destination[]>(),
+      owners: [],
+    };
+
+    this.indexStatement(statement, scratch);
+
+    for (const loc of scratch.assigned) {
+      const side = this.loopDirection(scratch.changes, loc, module);
+      const key = `${module} ${loc}`;
+
+      this.forgetFacts(key);
+      this.forgetBounds(key, side);
+    }
+
+    for (const change of scratch.changes) {
+      this.forgetChangedPart(change, module);
+    }
+  }
+
+  private forgetChangedPart(change: Expr, module: int): void {
+    const target = this.bounds.changedTarget(change);
+    if (target == undefined) {
+      return;
+    }
+    if (target.kind == ExprKind.Member) {
+      const key = this.pathKey(target, module);
+      if (key != undefined) {
+        this.forgetFacts(key);
+      }
+
+      return;
+    }
+    if (target.kind != ExprKind.Index) {
+      return;
+    }
+
+    const key = this.pathKey(target.object, module);
+    if (key != undefined) {
+      this.forgetFacts(key);
+    }
+  }
+}

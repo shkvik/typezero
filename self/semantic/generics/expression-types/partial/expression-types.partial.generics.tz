@@ -115,7 +115,7 @@ partial class ExpressionTypes {
     const total = target.params.length;
     if (written.length > total) {
       const typeArgumentCountErrors =
-        this.generics.typeArgumentCountErrors(target);
+        this.genericCalls.typeArgumentCountErrors(target);
 
       this.reportAll(module, typeArgumentCountErrors);
 
@@ -413,7 +413,7 @@ partial class ExpressionTypes {
       const param = target.params[index];
       const isOpen = param != undefined && !draft.bound.has(index);
       if (isOpen && param != undefined && this.isMentioning(type, [param])) {
-        const callbackError = this.generics.callbackError(
+        const callbackError = this.genericCalls.callbackError(
           draft,
           closure,
           param,
@@ -533,6 +533,8 @@ partial class ExpressionTypes {
     if (!draft.target.isLenient) {
       this.boundArguments(draft, shape, module);
     }
+
+    this.requireFollowing(draft, module);
 
     return shape.result;
   }

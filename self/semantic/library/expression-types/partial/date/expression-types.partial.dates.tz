@@ -232,6 +232,12 @@ partial class ExpressionTypes {
   ): Type {
     const name = member.name;
     const isSpread = expr.args.some((arg) => arg.spread);
+    if (!isSpread && kDateLocaleMethods.includes(name)) {
+      const localeCall = this.dateLocaleCall(expr, member, module);
+      if (localeCall != undefined) {
+        return localeCall;
+      }
+    }
     if (isSpread || kDateLocaleMethods.includes(name)) {
       return this.otherCall(expr, member, instance, wanted, module);
     }

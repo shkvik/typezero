@@ -1,3 +1,4 @@
+import { kIntlName } from "../../../../library/intl-rules/const/intl-rules.const.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import {
@@ -39,7 +40,29 @@ partial class ExpressionTypes {
       return this.dateMemberRead(expr, instance, module);
     }
     if (this.modules.isLibraryModule(instance.module)) {
-      return this.libraryMemberTyped(expr, instance, module);
+      const intlMember = this.intlMemberRead(expr, instance, module);
+      if (intlMember != undefined) {
+        return intlMember;
+      }
+
+      const weakRead = this.weakRefRead(expr, instance, module);
+      if (weakRead != undefined) {
+        return weakRead;
+      }
+
+      const regexRead = this.regexMemberRead(expr, instance, module);
+      if (regexRead != undefined) {
+        return regexRead;
+      }
+
+      const cryptoRead = this.cryptoMemberRead(expr, instance, module);
+      if (cryptoRead != undefined) {
+        return cryptoRead;
+      }
+
+      const byteMember = this.byteMemberRead(expr, instance, module);
+
+      return byteMember ?? this.libraryMemberTyped(expr, instance, module);
     }
 
     const lookup = this.classMember(instance, expr.name);
@@ -57,7 +80,7 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
     if (entry.isStatic) {
-      const staticError = this.classes.staticError(expr, entry);
+      const staticError = this.classValues.staticError(expr, entry);
 
       this.reportFound(module, staticError);
 
@@ -236,11 +259,13 @@ partial class ExpressionTypes {
 
       return this.valueNew(expr, callee, form.callee.loc, module);
     }
-    if (form.member != undefined) {
-      return this.store.plain(TypeKind.Error);
+    const owned = form.member;
+    if (owned != undefined) {
+      return this.memberNew(expr, form.name, owned, module);
     }
 
-    this.newArrayCheck(expr, form.name, module);
+    this.newArrayCheck(expr, form.name, wanted, module);
+    this.madeSizeCheck(expr, form.name, module);
     const executorErrors = this.library.executorCheck(expr, form.name);
 
     this.reportAll(module, executorErrors);
@@ -249,13 +274,41 @@ partial class ExpressionTypes {
     if (target == undefined) {
       return this.store.plain(TypeKind.Error);
     }
+    const handleMade = this.handleNew(expr, form.name, target, module);
+    if (handleMade != undefined) {
+      return handleMade;
+    }
     if (target.kind != SymbolKind.Class) {
       const made = this.namedValueNew(expr, target, module);
 
       return made ?? this.store.plain(TypeKind.Error);
     }
     if (this.modules.isLibraryModule(target.module)) {
-      return this.libraryNew(expr, form.name, target, wanted, module);
+      const subtleMade = this.subtleNew(expr, form.name, target.module, module);
+      if (subtleMade != undefined) {
+        return subtleMade;
+      }
+
+      const cryptoMade = this.cryptoNew(expr, form.name, target.module, module);
+      if (cryptoMade != undefined) {
+        return cryptoMade;
+      }
+
+      const regExpMade = this.regExpNew(expr, module);
+      if (regExpMade != undefined) {
+        return regExpMade;
+      }
+
+      const weakMade = this.weakRefNew(expr, form.name, target, wanted, module);
+      if (weakMade != undefined) {
+        return weakMade;
+      }
+
+      const made = this.libraryNew(expr, form.name, target, wanted, module);
+
+      this.newSourceCheck(expr, made, module);
+
+      return this.codedNew(expr, made, module);
     }
 
     const decl = this.record(target.module)?.classes.get(target.loc);
@@ -464,5 +517,18 @@ partial class ExpressionTypes {
     const rest = shape.rest;
 
     return { params, rest, loc, isLenient: false };
+  }
+
+  private memberNew(
+    expr: NewExpr,
+    owner: string,
+    name: string,
+    module: int,
+  ): Type {
+    if (owner != kIntlName) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.intlNew(expr, name, module);
   }
 }

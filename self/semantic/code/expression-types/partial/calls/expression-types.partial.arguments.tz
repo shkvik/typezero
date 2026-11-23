@@ -203,6 +203,9 @@ partial class ExpressionTypes {
     if (kind == CallKind.Own || !isPlain) {
       return this.argumentCheck(slot, wanted, module);
     }
+    if (this.isEncodingParam(param.type)) {
+      return this.encodingArgumentCheck(slot.expr, module);
+    }
     if (slot.expr.kind == ExprKind.Undefined && param.optional) {
       return this.argumentCheck(slot, wanted, module);
     }

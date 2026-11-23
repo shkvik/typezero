@@ -1,0 +1,78 @@
+import {
+  CallExpr,
+  ExprKind,
+  NameExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import {
+  kTimerOptions,
+  kTimersPromisesModule,
+  kTimerPromiseNames,
+  kImmediateName,
+} from "../../../fs-rules/const/fs-rules.const.tz";
+import { FsCall, FsShape } from "../../../fs-rules/types/fs-rules.types.tz";
+
+partial class ExpressionTypes {
+  private timerPromisesCheck(expr: CallExpr, module: int): void {
+    const callee = expr.callee;
+    if (callee.kind != ExprKind.Name || this.modules.isLibraryModule(module)) {
+      return;
+    }
+    if (expr.args.some((one) => one.spread)) {
+      return;
+    }
+    if (!this.isTimersPromisesName(callee, module)) {
+      return;
+    }
+
+    const name = this.importedName(callee, module);
+    if (!kTimerPromiseNames.includes(name)) {
+      return;
+    }
+
+    const index = this.timerOptionsAt(name);
+    const row: FsCall = {
+      name,
+      shape: FsShape.PathOnly,
+      options: kTimerOptions,
+      isUtf8Only: false,
+    };
+    if (expr.args.length <= index + 1) {
+      this.fsOptionsCheck(expr, index, row, module);
+    }
+  }
+
+  private timerOptionsAt(name: string): int {
+    if (name == kImmediateName) {
+      return 1;
+    }
+
+    return 2;
+  }
+
+  private isTimersPromisesName(expr: NameExpr, module: int): boolean {
+    const target = this.targetOfName(expr, module);
+    const isCallable =
+      target != undefined &&
+      (target.kind == SymbolKind.Function ||
+        target.kind == SymbolKind.Variable);
+    if (!isCallable || target == undefined) {
+      return false;
+    }
+
+    const opened = this.program.modules[target.module];
+
+    return opened != undefined && opened.name == kTimersPromisesModule;
+  }
+
+  private importedName(expr: NameExpr, module: int): string {
+    const symbol = this.record(module)?.uses.get(expr.loc)?.symbol;
+    const target = symbol?.target;
+    if (symbol == undefined || symbol.kind != SymbolKind.Import) {
+      return expr.name;
+    }
+
+    return target?.name ?? expr.name;
+  }
+}

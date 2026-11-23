@@ -230,7 +230,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const overrideResultError = this.classes.overrideResultCheck(
+    const overrideResultError = this.overrides.overrideResultCheck(
       method,
       decl,
       ownType,
@@ -239,7 +239,7 @@ partial class ExpressionTypes {
     );
 
     this.reportFound(module, overrideResultError);
-    const overrideAccessError = this.classes.overrideAccessCheck(
+    const overrideAccessError = this.overrides.overrideAccessCheck(
       method,
       theirs,
       parent,
@@ -324,7 +324,7 @@ partial class ExpressionTypes {
       const same = type.fields.filter((one) => one.name == fn.name);
       const field = same[0];
       if (field != undefined && same.length == 1) {
-        return this.classes.contractFieldResult(field.type);
+        return this.overrides.contractFieldResult(field.type);
       }
     }
 

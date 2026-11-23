@@ -1,0 +1,356 @@
+import { ProofRange } from "../../../../flow/proof-rules/types/proof-rules.types.tz";
+import { kArrayLengthWhat } from "../../../../flow/proof-rules/const/proof-rules.const.tz";
+import { kLengthName } from "../../../expression-shapes/const/expression-shapes.const.tz";
+import {
+  kLengthTerm,
+  kZeroTerm,
+} from "../../../../flow/bound-rules/const/bound-rules.const.tz";
+import {
+  AssignExpr,
+  BinaryOp,
+  Expr,
+  ExprKind,
+  IndexExpr,
+  MemberExpr,
+  NameExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { ValueTarget } from "../../types/expression-types.types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { kNoPlace } from "../../const/expression-types.const.tz";
+import { ExpressionTypes } from "../../expression-types.tz";
+
+partial class ExpressionTypes {
+  private lengthAssignCheck(expr: AssignExpr, given: Type, module: int): void {
+    const target = expr.target;
+    const isLength =
+      expr.op == undefined &&
+      target.kind == ExprKind.Member &&
+      target.name == kLengthName;
+    if (!isLength || target.kind != ExprKind.Member) {
+      return;
+    }
+
+    const object = this.peekType(target.object, module);
+
+    const base = this.types.definedType(object);
+    if (base.kind != TypeKind.Array || given.kind == TypeKind.Error) {
+      return;
+    }
+    if (this.objects.hasZeroValue(base.item)) {
+      const range: ProofRange = { what: kArrayLengthWhat, low: 0 };
+
+      this.requireBetween(expr.value, given, range, module);
+
+      return;
+    }
+    if (this.isProvenLength(target.object, expr.value, module)) {
+      return;
+    }
+
+    this.report(module, expr.value.loc, Code.LengthNotProven, {
+      first: this.text.of(base.item),
+      word: this.sources.valueText(target.object, module),
+    });
+  }
+
+  private isProvenLength(object: Expr, value: Expr, module: int): boolean {
+    const at = this.linearOf(value, module);
+    const key = this.pathKey(object, module);
+    if (at == undefined || key == undefined) {
+      return false;
+    }
+    if (at.term == kZeroTerm && at.offset == 0) {
+      return true;
+    }
+
+    const isNatural = this.canProve(kZeroTerm, at.term, -at.offset);
+
+    return isNatural && this.canProve(at.term, kLengthTerm + key, at.offset);
+  }
+
+  private compoundValue(
+    expr: AssignExpr,
+    op: BinaryOp,
+    type: Type,
+    module: int,
+  ): Type {
+    const isLiteralTree = this.shapes.isIntTree(expr.value);
+    const hint = this.assignments.compoundHint(op, type, isLiteralTree);
+    const given = this.typed(expr.value, hint, module);
+
+    const target = expr.target;
+    const isUnchecked =
+      this.isLibraryTarget(target, module) ||
+      this.isPlacedLiteral(target, given, module);
+    if (isUnchecked) {
+      return given;
+    }
+    if (type.kind == TypeKind.String) {
+      const joinError = this.assignments.stringCompoundError(
+        expr,
+        op,
+        type,
+        given,
+        module,
+      );
+
+      this.reportFound(module, joinError);
+
+      return given;
+    }
+
+    this.numericCompoundCheck(expr, op, type, given, module);
+
+    return given;
+  }
+
+  private numericCompoundCheck(
+    expr: AssignExpr,
+    op: BinaryOp,
+    type: Type,
+    given: Type,
+    module: int,
+  ): void {
+    const isBits = this.assignments.isIntegerOnly(op);
+    const isBroken =
+      type.kind == TypeKind.Error || given.kind == TypeKind.Error;
+    const isDecimal = type.kind == TypeKind.Decimal && !isBits;
+    if (isBroken || isDecimal) {
+      return;
+    }
+
+    const value = expr.value;
+    const isShift = this.assignments.isShift(op);
+    const isOther = !isShift && given.kind == TypeKind.Int && given != type;
+    const isAdapting =
+      isOther && this.literalTarget(value, given, type, module) != undefined;
+    const isWrapping = !isShift && this.assignments.isWrapping(type, given);
+    const operandsError = this.assignments.compoundOperandsError(
+      expr,
+      op,
+      type,
+      given,
+      isAdapting || isWrapping,
+    );
+    if (operandsError != undefined) {
+      return this.reportFound(module, operandsError);
+    }
+    if (isAdapting) {
+      return;
+    }
+
+    const isDividing = op == BinaryOp.Div || op == BinaryOp.Rem;
+    const isCounted = isWrapping || type.kind == TypeKind.Int;
+    const isByZero =
+      isCounted && isDividing && this.intConstant(value, given, module) == 0;
+    if (isByZero) {
+      this.report(module, value.loc, Code.DivisionByZero, kNoDetails);
+    }
+    if (isWrapping || isShift) {
+      return;
+    }
+
+    this.coerce(value, given, type, module, kNoPlace);
+  }
+
+  private compoundUndefinedCheck(
+    expr: AssignExpr,
+    tested: Type,
+    module: int,
+  ): boolean {
+    const op = expr.op;
+    const isArithmetic =
+      op != undefined &&
+      op != BinaryOp.LogOr &&
+      op != BinaryOp.LogAnd &&
+      op != BinaryOp.Nullish;
+    const isMaybe =
+      this.types.isOptional(tested) || tested.kind == TypeKind.Undefined;
+    if (!isArithmetic || !isMaybe || op == undefined) {
+      return false;
+    }
+
+    const given = this.peekType(expr.value, module);
+
+    this.report(module, expr.loc, Code.OperandTypesUndefined, {
+      first: this.text.of(tested),
+      second: this.text.of(given),
+      other: `${this.sources.operatorText(op)}=`,
+    });
+
+    return true;
+  }
+
+  private logicalTargetCheck(expr: AssignExpr, module: int): boolean {
+    const checked = this.flows.logicalTargetCheck(expr);
+
+    this.reportFound(module, checked.error);
+
+    return checked.value;
+  }
+
+  private arrayWriteCheck(
+    target: IndexExpr,
+    isCompound: boolean,
+    module: int,
+  ): void {
+    const object = this.peekType(target.object, module);
+
+    const base = this.types.definedType(object);
+    if (base.kind == TypeKind.Tuple) {
+      const tupleWriteError = this.flows.tupleWriteCheck(target, base);
+
+      return this.reportFound(module, tupleWriteError);
+    }
+    if (base.kind == TypeKind.String) {
+      const code = Code.StringElementAssigned;
+
+      return this.report(module, target.loc, code, kNoDetails);
+    }
+    if (this.bytes.elementOf(base) != undefined) {
+      return this.bytesStoreCheck(target, base, module);
+    }
+    if (base.kind != TypeKind.Array) {
+      return;
+    }
+
+    this.writeIndexCheck(target, isCompound, module);
+  }
+
+  private assignedDeclared(target: Expr, module: int): Type | undefined {
+    if (target.kind == ExprKind.Member) {
+      return this.memberTargetDeclared(target, module);
+    }
+    if (target.kind == ExprKind.Index) {
+      return this.elementDeclared(target, module);
+    }
+    if (target.kind != ExprKind.Name) {
+      return undefined;
+    }
+    if (this.isThisName(target, module)) {
+      this.report(module, target.loc, Code.ThisAssigned, kNoDetails);
+
+      return undefined;
+    }
+
+    const found = this.targetOfName(target, module);
+    if (found == undefined) {
+      return undefined;
+    }
+    if (this.fixedTargetCheck(target, found, module)) {
+      return undefined;
+    }
+
+    return this.declaredOf(found);
+  }
+
+  private importedCode(home: int): Code {
+    if (this.modules.isLibraryModule(home)) {
+      return Code.AssignToImported;
+    }
+
+    return Code.AssignToImportedVariable;
+  }
+
+  private fixedTargetCheck(
+    target: NameExpr,
+    found: ValueTarget,
+    module: int,
+  ): boolean {
+    if (found.kind != SymbolKind.Variable) {
+      return false;
+    }
+
+    const word = target.name;
+    if (found.module != module) {
+      const code = this.importedCode(found.module);
+
+      this.report(module, target.loc, code, { word });
+
+      return true;
+    }
+
+    const variable = this.record(module)?.variables.get(found.loc);
+    if (variable == undefined || !variable.isConst) {
+      return false;
+    }
+
+    this.report(module, target.loc, Code.AssignToConstant, { word });
+
+    return true;
+  }
+
+  private bytesStoreCheck(target: IndexExpr, object: Type, module: int): void {
+    if (this.isProvenIndex(target.object, target.index, module)) {
+      return;
+    }
+
+    const key = this.peekType(target.index, module);
+
+    if (key.kind == TypeKind.Error) {
+      return;
+    }
+
+    const constant = this.intConstant(target.index, key, module);
+    const shownObject = this.sources.valueText(target.object, module);
+    const shownIndex = this.sources.valueText(target.index, module);
+    const storeError = this.bytes.storeError(
+      target,
+      object,
+      constant,
+      shownObject,
+      shownIndex,
+    );
+
+    this.reportFound(module, storeError);
+  }
+
+  private elementDeclared(target: IndexExpr, module: int): Type | undefined {
+    const object = this.peekType(target.object, module);
+
+    const base = this.types.definedType(object);
+    if (base.kind == TypeKind.Array) {
+      return base.item;
+    }
+    if (this.bytes.isClamped(base)) {
+      return this.store.integer(64, false);
+    }
+
+    return this.bytes.elementOf(base);
+  }
+
+  private fieldDeclared(target: MemberExpr, module: int): Type | undefined {
+    const key = this.pathKey(target, module);
+    if (key == undefined) {
+      return undefined;
+    }
+
+    const before = this.facts;
+
+    this.forgetPath(key);
+    const declared = this.peekType(target, module);
+    this.facts = before;
+
+    return declared;
+  }
+
+  private isLibraryTarget(target: Expr, module: int): boolean {
+    if (target.kind != ExprKind.Member) {
+      return false;
+    }
+
+    const object = this.peekType(target.object, module);
+
+    const isInstance =
+      object.kind == TypeKind.Instance &&
+      this.modules.isLibraryModule(object.module);
+
+    return isInstance || this.resolver.isLibraryShape(object);
+  }
+}

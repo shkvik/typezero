@@ -109,7 +109,7 @@ partial class ExpressionTypes {
     candidate: Type,
     module: int,
   ): Type | undefined {
-    const checked = this.generics.clash(draft, index, type, candidate);
+    const checked = this.genericCalls.clash(draft, index, type, candidate);
 
     this.reportFound(module, checked.error);
 
@@ -146,7 +146,7 @@ partial class ExpressionTypes {
   }
 
   private finishTypeArguments(draft: GenericDraft, module: int): void {
-    const isSilent = this.generics.hasArgumentErrors(draft);
+    const isSilent = this.genericCalls.hasArgumentErrors(draft);
 
     for (let index = 0; index < draft.target.params.length; index++) {
       this.finishTypeArgument(draft, index, isSilent, module);
@@ -173,7 +173,7 @@ partial class ExpressionTypes {
     const found = draft.bound.get(index);
     if (found == undefined) {
       if (!isSilent) {
-        const uninferredError = this.generics.uninferredError(draft, param);
+        const uninferredError = this.genericCalls.uninferredError(draft, param);
 
         this.reportFound(module, uninferredError);
       }

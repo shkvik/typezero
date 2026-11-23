@@ -86,11 +86,7 @@ partial class ExpressionTypes {
     slots: SpreadSlot[],
     module: int,
   ): boolean {
-    this.errors.beginTrial();
-
-    const type = this.typed(property.value, undefined, module);
-
-    this.errors.endTrial();
+    const type = this.peekType(property.value, module);
 
     const base = this.types.apparent(type);
     if (

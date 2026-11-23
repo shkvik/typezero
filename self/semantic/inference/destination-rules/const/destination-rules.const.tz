@@ -1,0 +1,10 @@
+export const kElementMethods = [
+  "push",
+  "unshift",
+  "includes",
+  "indexOf",
+  "lastIndexOf",
+];
+export const kFillMethod = "fill";
+export const kSetMethod = "set";
+export const kKeyMethods = ["get", "has", "delete", "add"];

@@ -1,0 +1,20 @@
+export const kTypedArrayName = "TypedArray";
+export const kClampedArrayName = "Uint8ClampedArray";
+export const kArrayBufferName = "ArrayBuffer";
+export const kArrayBufferLength = "the length of an ArrayBuffer";
+export const kBufferName = "Buffer";
+export const kBufferSize = "the size of a Buffer";
+export const kAllocMethods = ["alloc", "allocUnsafe"];
+export const kTypedArrayNames = [
+  "Uint8Array",
+  "Uint8ClampedArray",
+  "Int8Array",
+  "Uint16Array",
+  "Int16Array",
+  "Uint32Array",
+  "Int32Array",
+  "Float32Array",
+  "Float64Array",
+];
+export const kRawNames = ["ArrayBuffer", "DataView"];
+export const kBitsInByte = 8;

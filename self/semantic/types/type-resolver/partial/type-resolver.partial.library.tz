@@ -1,3 +1,4 @@
+import { TypeParamDecl } from "../../../../program/ast/types/ast.types.types.tz";
 import { TypeResolver } from "../type-resolver.tz";
 import { DeclaredClass } from "../../../../program/ast/types/ast.types.declarations.tz";
 import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
@@ -60,7 +61,7 @@ partial class TypeResolver {
     declared: DeclaredClass,
     args: Type[],
   ): Type | undefined {
-    if (declared.typeParams.length != args.length) {
+    if (!this.isFilling(declared.typeParams, args)) {
       return undefined;
     }
 
@@ -75,5 +76,15 @@ partial class TypeResolver {
     this.errors.endTrial();
 
     return instance;
+  }
+
+  private isFilling(params: TypeParamDecl[], args: Type[]): boolean {
+    if (args.length > params.length) {
+      return false;
+    }
+
+    const missing = params.slice(args.length);
+
+    return missing.every((param) => param.defaultType != undefined);
   }
 }

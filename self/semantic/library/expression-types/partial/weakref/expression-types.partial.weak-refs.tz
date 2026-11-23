@@ -1,0 +1,135 @@
+import {
+  CallExpr,
+  MemberExpr,
+  NewExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import { ValueTarget } from "../../../../code/expression-types/types/expression-types.types.tz";
+
+partial class ExpressionTypes {
+  private weakRefNew(
+    expr: NewExpr,
+    name: string,
+    target: ValueTarget,
+    wanted: Type | undefined,
+    module: int,
+  ): Type | undefined {
+    if (
+      !this.weakRefs.isWeakRefName(name) ||
+      this.modules.isLibraryModule(module)
+    ) {
+      return undefined;
+    }
+
+    const value = expr.args[0];
+    if (value == undefined || expr.args.length != 1 || value.spread) {
+      this.reportFound(module, this.weakRefs.oneObjectError(expr.loc));
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (expr.typeArgs.length > 1) {
+      this.reportFound(module, this.weakRefs.typeArgumentsError(expr.loc));
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const written = this.writtenArguments(expr.typeArgs, module);
+    if (written == undefined) {
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const expected = written[0] ?? this.weakTargetOf(wanted);
+    const given = this.typed(value.expr, expected, module);
+    const object = expected ?? given;
+    if (given.kind == TypeKind.Error) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const targetError = this.weakRefs.targetError(value.expr.loc, object);
+    if (targetError != undefined) {
+      this.reportFound(module, targetError);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.coerce(value.expr, given, object, module, "");
+
+    return this.weakRefOf(target, object);
+  }
+
+  private weakTargetOf(wanted: Type | undefined): Type | undefined {
+    if (wanted == undefined) {
+      return undefined;
+    }
+
+    const base = this.types.definedType(wanted);
+    if (base.kind != TypeKind.Instance || !this.weakRefs.isWeakRef(base)) {
+      return undefined;
+    }
+
+    return base.args[0];
+  }
+
+  private weakRefOf(target: ValueTarget, object: Type): Type {
+    const home = target.module;
+    const opened = this.program.modules[home];
+    const declared = opened?.declared.find((one) => one.loc == target.loc);
+    if (declared == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const made = this.resolver.declaredInstance(home, declared, [object]);
+
+    return made ?? this.store.plain(TypeKind.Error);
+  }
+
+  private weakRefCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type | undefined {
+    if (
+      !this.weakRefs.isWeakRef(instance) ||
+      this.weakRefs.isDeref(member.name)
+    ) {
+      return undefined;
+    }
+
+    const noMethodError = this.weakRefs.noMethodError(
+      member.loc,
+      member.name,
+      instance,
+    );
+
+    this.reportFound(module, noMethodError);
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private weakRefRead(
+    expr: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type | undefined {
+    if (!this.weakRefs.isWeakRef(instance)) {
+      return undefined;
+    }
+
+    const valueError = this.weakRefs.readError(expr.loc, expr.name, instance);
+
+    this.reportFound(module, valueError);
+
+    return this.store.plain(TypeKind.Error);
+  }
+}

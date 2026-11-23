@@ -1,0 +1,94 @@
+import { BytePosition, ElementSize } from "../types/byte-source-rules.types.tz";
+
+export const kArrayBufferClass = "ArrayBuffer";
+export const kClampedClass = "Uint8ClampedArray";
+export const kValuePlaceholder = "x";
+export const kStringBytesHint =
+  "; for the bytes of a string, use 'new TextEncoder().encode(s)' or 'Buffer.from(s)'";
+export const kSetName = "set";
+export const kWithName = "with";
+export const kMapName = "map";
+export const kFromName = "from";
+export const kFillName = "fill";
+export const kAllocName = "alloc";
+export const kSearchNames = ["indexOf", "lastIndexOf", "includes"];
+export const kOffsetWhat = "the offset";
+export const kEndWhat = "the end";
+export const kSetOffsetWhat = "the offset of 'set'";
+
+export const kComparePositions: BytePosition[] = [
+  { name: "targetStart", isEnd: false, isTarget: false },
+  { name: "targetEnd", isEnd: true, isTarget: true },
+  { name: "sourceStart", isEnd: false, isTarget: false },
+  { name: "sourceEnd", isEnd: true, isTarget: false },
+];
+
+export const kCopyPositions: BytePosition[] = [
+  { name: "targetStart", isEnd: false, isTarget: false },
+  { name: "sourceStart", isEnd: true, isTarget: false },
+  { name: "sourceEnd", isEnd: false, isTarget: false },
+];
+export const kPartNames = ["subarray", "slice"];
+export const kBufferName = "buffer";
+export const kByteOffsetName = "byteOffset";
+export const kByteLengthName = "byteLength";
+export const kLengthName = "length";
+export const kDataViewWhat = "the DataView";
+export const kViewHint =
+  "; give its buffer: 'new DataView(u.buffer, u.byteOffset, u.byteLength)'";
+export const kElementSizes: ElementSize[] = [
+  { name: "Uint8Array", size: 1 },
+  { name: "Uint8ClampedArray", size: 1 },
+  { name: "Int8Array", size: 1 },
+  { name: "Buffer", size: 1 },
+  { name: "DataView", size: 1 },
+  { name: "Uint16Array", size: 2 },
+  { name: "Int16Array", size: 2 },
+  { name: "Float16Array", size: 2 },
+  { name: "Uint32Array", size: 4 },
+  { name: "Int32Array", size: 4 },
+  { name: "Float32Array", size: 4 },
+  { name: "Float64Array", size: 8 },
+];
+export const kBufferEncodingLabel = "BufferEncoding";
+export const kBufferEncodings = [
+  "utf8",
+  "utf-8",
+  "utf16le",
+  "utf-16le",
+  "ucs2",
+  "ucs-2",
+  "latin1",
+  "binary",
+  "ascii",
+  "base64",
+  "base64url",
+  "hex",
+];
+export const kSizeNames = ["length", "byteLength"];
+export const kTextCoderNames = [
+  "TextEncoder",
+  "TextDecoder",
+  "FatalTextDecoder",
+];
+export const kDataViewClass = "DataView";
+export const kFlatMapName = "flatMap";
+export const kLocaleName = "toLocaleString";
+export const kBufferIndexHint =
+  "read its bytes through a view, e.g. 'new Uint8Array(buffer)[i]'";
+export const kViewIndexHint = "read its bytes with getUint8(i) and the like";
+export const kNoElementsHint = "it holds no elements";
+export const kBufferTextHint =
+  ", or the text of its bytes with 'new TextDecoder().decode(buffer)'";
+export const kUnionNarrowNames = [
+  "BYTES_PER_ELEMENT",
+  "maxByteLength",
+  "resizable",
+  "detached",
+  "encoding",
+  "fatal",
+  "ignoreBOM",
+];
+export const kViewOnlyNames = ["byteOffset", "buffer"];
+export const kBufferClass = "Buffer";
+export const kUint8Class = "Uint8Array";

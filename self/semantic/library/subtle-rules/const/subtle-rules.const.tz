@@ -1,0 +1,51 @@
+export const kSubtleMethods = [
+  "digest",
+  "generateKey",
+  "importKey",
+  "exportKey",
+  "sign",
+  "verify",
+  "encrypt",
+  "decrypt",
+  "deriveBits",
+  "deriveKey",
+  "wrapKey",
+  "unwrapKey",
+];
+export const kSubtleName = "subtle";
+export const kKeyLengthOperation = "get key length";
+export const kDigestOperation = "digest";
+export const kGenerateOperation = "generateKey";
+export const kImportOperation = "importKey";
+export const kDeriveBitsOperation = "deriveBits";
+export const kWrapOperation = "wrapKey";
+export const kUnwrapOperation = "unwrapKey";
+export const kEncryptOperation = "encrypt";
+export const kDecryptOperation = "decrypt";
+export const kSubtleVerbs = [
+  { operation: "digest", verb: "hashes" },
+  { operation: "generateKey", verb: "makes keys" },
+  { operation: "importKey", verb: "imports keys" },
+  { operation: "encrypt", verb: "encrypts" },
+  { operation: "decrypt", verb: "decrypts" },
+  { operation: "sign", verb: "signs" },
+  { operation: "verify", verb: "verifies" },
+  { operation: "deriveBits", verb: "derives" },
+  { operation: "wrapKey", verb: "wraps keys" },
+  { operation: "unwrapKey", verb: "unwraps keys" },
+];
+export const kDeriveKeysVerb = "derives keys";
+export const kShaPrefix = "sha";
+export const kAesFamily = "AES";
+export const kKdfFamily = "KDF";
+export const kAesGcmName = "AES-GCM";
+export const kAesLengths = [128, 192, 256];
+export const kGcmTagLengths = [32, 64, 96, 104, 112, 120, 128];
+export const kJwkFormat = "jwk";
+export const kSpkiFormat = "spki";
+export const kRawFormat = "raw";
+export const kPkcs8Format = "pkcs8";
+export const kVowelStarts = "EHRAX";
+export const kCryptoKeyClass = "CryptoKey";
+export const kSubtleCryptoClass = "SubtleCrypto";
+export const kWebCryptoModule = "tz:webcrypto";

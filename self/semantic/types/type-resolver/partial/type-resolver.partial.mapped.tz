@@ -8,6 +8,7 @@ import {
 } from "../../../../program/ast/types/ast.types.types.tz";
 import {
   Change,
+  LiteralKind,
   ObjectField,
   OperationKind,
   Type,
@@ -159,6 +160,13 @@ partial class TypeResolver {
 
     const renamed = this.resolve(rename, inner);
     if (renamed.kind != TypeKind.Literal) {
+      return undefined;
+    }
+    if (renamed.literal != LiteralKind.String) {
+      this.report(inner.module, rename.loc, Code.MappedRename, {
+        word: renamed.text,
+      });
+
       return undefined;
     }
 

@@ -2,3 +2,4 @@ export const kIterableName = "Iterable";
 export const kManyElements = " elements";
 export const kNextName = "next";
 export const kOneElement = " element";
+export const kRewritingMethods = ["fill", "sort", "reverse"];

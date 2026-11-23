@@ -1,3 +1,12 @@
+import {
+  kBoundMark,
+  kBoundSeparator,
+  kLengthTerm,
+  kMostBoundConstant,
+  kSumSeparator,
+  kSumTerm,
+  kZeroTerm,
+} from "./const/bound-rules.const.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import {
   BinaryOp,
@@ -11,13 +20,6 @@ import {
   Linear,
 } from "../../code/expression-types/types/expression-types.types.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
-import {
-  kBoundMark,
-  kBoundSeparator,
-  kLengthTerm,
-  kMostBoundConstant,
-  kZeroTerm,
-} from "./const/bound-rules.const.tz";
 
 export class BoundRules {
   private readonly store: TypeStore;
@@ -203,6 +205,27 @@ export class BoundRules {
     return offset;
   }
 
+  public isBoundConstant(value: decimal): boolean {
+    return value.abs() <= kMostBoundConstant.toDecimal();
+  }
+
+  public linearSum(first: Linear, second: Linear): Linear | undefined {
+    const offset = first.offset + second.offset;
+    if (first.term == kZeroTerm) {
+      return { term: second.term, offset };
+    }
+    if (second.term == kZeroTerm) {
+      return { term: first.term, offset };
+    }
+    if (first.term.startsWith(kSumTerm) || second.term.startsWith(kSumTerm)) {
+      return undefined;
+    }
+
+    const term = this.sumTerm(first.term, second.term);
+
+    return { term, offset };
+  }
+
   private boundKey(upper: string, lower: string, room: decimal): string {
     const parts = [kBoundMark, upper, lower, `${room}`];
 
@@ -215,5 +238,13 @@ export class BoundRules {
     }
 
     return moves.get(term) ?? "";
+  }
+
+  private sumTerm(first: string, second: string): string {
+    if (first < second) {
+      return `${kSumTerm}${first}${kSumSeparator}${second}`;
+    }
+
+    return `${kSumTerm}${second}${kSumSeparator}${first}`;
   }
 }

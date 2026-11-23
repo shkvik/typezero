@@ -1,3 +1,12 @@
+import { ProofRange } from "../../../../flow/proof-rules/types/proof-rules.types.tz";
+import {
+  kBaseRange,
+  kDigitsRange,
+  kPlacesRange,
+  kPositivePlacesMethods,
+  kPositivePlacesRange,
+  kPowerRange,
+} from "../../../decimal-rules/const/decimal-rules.const.ranges.tz";
 import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
@@ -265,7 +274,7 @@ partial class ExpressionTypes {
       const arg = expr.args[index]?.expr;
       const kind = method.args[index];
       if (arg != undefined && kind != undefined) {
-        this.decimalArgument(arg, kind, module);
+        this.decimalArgument(arg, kind, name, module);
       }
     }
 
@@ -277,30 +286,39 @@ partial class ExpressionTypes {
     return this.decimals.decimalMethodResult(method);
   }
 
-  private decimalArgument(arg: Expr, kind: DecimalArgument, module: int): void {
+  private decimalArgument(
+    arg: Expr,
+    kind: DecimalArgument,
+    method: string,
+    module: int,
+  ): void {
     switch (kind) {
       case DecimalArgument.Decimal:
         this.checked(arg, this.decimals.decimalType(), module, kNoPlace);
 
         return;
       case DecimalArgument.Places:
-        return this.decimalCount(arg, "the number of decimal places", module);
+        return this.decimalCount(arg, this.placesRange(method), module);
       case DecimalArgument.Digits:
-        return this.decimalCount(
-          arg,
-          "the number of significant digits",
-          module,
-        );
+        return this.decimalCount(arg, kDigitsRange, module);
       case DecimalArgument.Base:
-        return this.decimalCount(arg, "the base", module);
+        return this.decimalCount(arg, kBaseRange, module);
       case DecimalArgument.Power:
-        return this.decimalCount(arg, "the power of ten", module);
+        return this.decimalCount(arg, kPowerRange, module);
       default:
         return this.roundingModeCheck(arg, module);
     }
   }
 
-  private decimalCount(arg: Expr, what: string, module: int): void {
+  private placesRange(method: string): ProofRange {
+    if (kPositivePlacesMethods.includes(method)) {
+      return kPositivePlacesRange;
+    }
+
+    return kPlacesRange;
+  }
+
+  private decimalCount(arg: Expr, range: ProofRange, module: int): void {
     const int = this.store.integer(64, false);
     const type = this.typed(arg, int, module);
     const base = this.types.apparent(type);
@@ -312,7 +330,7 @@ partial class ExpressionTypes {
     }
 
     this.report(module, arg.loc, Code.DecimalCountType, {
-      word: what,
+      word: range.what,
       first: this.text.of(type),
       place: this.decimals.maybePlace(this.types.isOptional(type)),
     });
@@ -374,11 +392,7 @@ partial class ExpressionTypes {
     }
 
     for (const arg of expr.args) {
-      this.errors.beginTrial();
-
-      const type = this.typed(arg.expr, undefined, module);
-
-      this.errors.endTrial();
+      const type = this.peekType(arg.expr, module);
 
       if (!arg.spread && this.types.apparent(type).kind == TypeKind.Decimal) {
         this.report(module, arg.expr.loc, Code.MathArgumentDecimal, {

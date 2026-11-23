@@ -16,7 +16,7 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): boolean {
-    const checked = this.objects.unknownMemberCheck(expr, object);
+    const checked = this.objectMembers.unknownMemberCheck(expr, object);
 
     this.reportFound(module, checked.error);
 
@@ -29,14 +29,14 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): boolean {
-    if (!this.objects.isUnknownValue(object)) {
+    if (!this.objectMembers.isUnknownValue(object)) {
       return false;
     }
 
     const what = `method '${member.name}'`;
 
     this.looseArguments(expr.args, module);
-    const unknownUseError = this.objects.unknownUseError(
+    const unknownUseError = this.objectMembers.unknownUseError(
       member.object,
       object,
       what,
@@ -52,12 +52,12 @@ partial class ExpressionTypes {
     object: Type,
     module: int,
   ): boolean {
-    if (!this.objects.isUnknownValue(object)) {
+    if (!this.objectMembers.isUnknownValue(object)) {
       return false;
     }
 
     this.walkedPart(expr.index, module);
-    const unknownUseError = this.objects.unknownUseError(
+    const unknownUseError = this.objectMembers.unknownUseError(
       expr.object,
       object,
       "",

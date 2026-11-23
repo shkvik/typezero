@@ -1,3 +1,21 @@
+import {
+  FunctionDoor,
+  GeneratorFrame,
+  GuardSummary,
+  InitFrame,
+  InitializingVariable,
+  PendingCall,
+  Requirement,
+  StalledFunction,
+  StaticOwner,
+  SuperFrame,
+  ThisPlace,
+  ValueRecord,
+  ValueTarget,
+  VariableDoor,
+} from "./types/expression-types.types.tz";
+import "./partial/expressions/expression-types.partial.typing.tz";
+import "./partial/expressions/expression-types.partial.reports.tz";
 import "./partial/statements/expression-types.partial.literals.tz";
 import "./partial/statements/expression-types.partial.variables.tz";
 import "../../types/expression-types/partial/expression-types.partial.mismatch.tz";
@@ -14,21 +32,59 @@ import "./partial/operators/expression-types.partial.folding.tz";
 import "./partial/operators/expression-types.partial.comparisons.tz";
 import "./partial/operators/expression-types.partial.typeof.tz";
 import "../../flow/expression-types/partial/expression-types.partial.truth.tz";
+import "../../flow/expression-types/partial/expression-types.partial.proofs.tz";
+import "../../flow/expression-types/partial/expression-types.partial.ranges.tz";
+import "../../generics/expression-types/partial/expression-types.partial.requirements.tz";
 import "./partial/operators/expression-types.partial.logic.tz";
 import "../../inference/expression-types/partial/expression-types.partial.index.tz";
 import "./partial/statements/expression-types.partial.names.tz";
 import "./partial/functions/expression-types.partial.functions.tz";
 import "./partial/statements/expression-types.partial.statements.tz";
+import "./partial/branches/expression-types.partial.switches.tz";
+import "./partial/returns/expression-types.partial.returns.tz";
 import "../../flow/expression-types/partial/expression-types.partial.reachability.tz";
 import "../../flow/expression-types/partial/expression-types.partial.narrowing.tz";
 import "./partial/members/expression-types.partial.members.tz";
 import "./partial/members/expression-types.partial.variants.tz";
 import "./partial/classes/expression-types.partial.instances.tz";
 import "./partial/calls/expression-types.partial.calls.tz";
+import "./partial/calls/expression-types.partial.member-calls.tz";
 import "./partial/calls/expression-types.partial.arguments.tz";
 import "../../flow/expression-types/partial/expression-types.partial.flow.tz";
+import "../../flow/expression-types/partial/expression-types.partial.changes.tz";
+import "./partial/assignments/expression-types.partial.assignment-checks.tz";
 import "../../flow/expression-types/partial/expression-types.partial.guards.tz";
 import "../../library/expression-types/partial/expression-types.partial.library.tz";
+import "../../library/expression-types/partial/expression-types.partial.library-statics.tz";
+import "../../library/expression-types/partial/expression-types.partial.declared-members.tz";
+import "../../library/expression-types/partial/expression-types.partial.library-variants.tz";
+import "../../library/expression-types/partial/bytes/expression-types.partial.byte-numbers.tz";
+import "../../library/expression-types/partial/bytes/expression-types.partial.byte-sources.tz";
+import "../../library/expression-types/partial/bytes/expression-types.partial.byte-views.tz";
+import "../../library/expression-types/partial/bytes/expression-types.partial.byte-encodings.tz";
+import "../../library/expression-types/partial/bytes/expression-types.partial.byte-members.tz";
+import "../../library/expression-types/partial/bytes/expression-types.partial.text-coders.tz";
+import "../../library/expression-types/partial/intl/expression-types.partial.intl.tz";
+import "../../library/expression-types/partial/intl/expression-types.partial.date-options.tz";
+import "../../library/expression-types/partial/fs/expression-types.partial.fs-calls.tz";
+import "../../library/expression-types/partial/process/expression-types.partial.process.tz";
+import "../../library/expression-types/partial/child/expression-types.partial.child-calls.tz";
+import "../../library/expression-types/partial/weakref/expression-types.partial.weak-refs.tz";
+import "../../library/expression-types/partial/regex/expression-types.partial.regexes.tz";
+import "../../library/expression-types/partial/regex/expression-types.partial.string-patterns.tz";
+import "../../library/expression-types/partial/crypto/expression-types.partial.crypto-calls.tz";
+import "../../library/expression-types/partial/crypto/expression-types.partial.crypto-forms.tz";
+import "../../library/expression-types/partial/crypto/expression-types.partial.subtle-calls.tz";
+import "../../library/expression-types/partial/crypto/expression-types.partial.subtle-members.tz";
+import "../../library/expression-types/partial/crypto/expression-types.partial.crypto-numbers.tz";
+import "../../library/expression-types/partial/timers/expression-types.partial.timer-promises.tz";
+import "../../library/expression-types/partial/fs/expression-types.partial.readline.tz";
+import "../../library/expression-types/partial/ffi/expression-types.partial.foreign.tz";
+import "../../library/expression-types/partial/expression-types.partial.promise-lists.tz";
+import "../../library/expression-types/partial/expression-types.partial.embeds.tz";
+import "./partial/statements/expression-types.partial.for-await.tz";
+import "../../library/expression-types/partial/expression-types.partial.reflect-calls.tz";
+import "../../library/expression-types/partial/expression-types.partial.console-calls.tz";
 import "./partial/statements/expression-types.partial.statement-values.tz";
 import "./partial/calls/expression-types.partial.construction.tz";
 import "../../inference/expression-types/partial/expression-types.partial.destinations.tz";
@@ -87,14 +143,8 @@ import "./partial/calls/expression-types.partial.union-methods.tz";
 import "./partial/classes/expression-types.partial.class-values.tz";
 import "./partial/classes/expression-types.partial.decorators.tz";
 import "./partial/calls/expression-types.partial.this-calls.tz";
-import { Code } from "../../../diagnostic/code.tz";
-import {
-  Details,
-  SourceError,
-} from "../../../diagnostic/types/message.types.tz";
 import {
   Expr,
-  ExprKind,
   MemberExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
@@ -102,23 +152,9 @@ import { Program } from "../../../program/module/types/module.types.tz";
 import { ModuleScopes } from "../../../program/scopes/types/scopes.types.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { TypeText } from "../../../program/type/type-text/type-text.tz";
-import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { Type } from "../../../program/type/types/type.types.tz";
 import { TypeRelation } from "../../types/type-relation/type-relation.tz";
 import { TypeResolver } from "../../types/type-resolver/type-resolver.tz";
-import {
-  FunctionDoor,
-  GeneratorFrame,
-  GuardSummary,
-  InitFrame,
-  InitializingVariable,
-  StalledFunction,
-  StaticOwner,
-  SuperFrame,
-  ThisPlace,
-  ValueRecord,
-  ValueTarget,
-  VariableDoor,
-} from "./types/expression-types.types.tz";
 import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
 import { TruthRules } from "../../flow/truth-rules/truth-rules.tz";
 import { TypeUnifier } from "../../types/type-unifier/type-unifier.tz";
@@ -155,6 +191,28 @@ import { DecimalRules } from "../../library/decimal-rules/decimal-rules.tz";
 import { ResultRules } from "../../library/result-rules/result-rules.tz";
 import { LibraryRules } from "../../library/library-rules/library-rules.tz";
 import { ErrorLog } from "../../../diagnostic/error-log/error-log.tz";
+import { AssignmentRules } from "../assignment-rules/assignment-rules.tz";
+import { DestinationRules } from "../../inference/destination-rules/destination-rules.tz";
+import { ProofRules } from "../../flow/proof-rules/proof-rules.tz";
+import { IntervalMath } from "../../flow/interval-math/interval-math.tz";
+import { BytesRules } from "../../library/bytes-rules/bytes-rules.tz";
+import { EmbeddedFiles } from "../../../load/embedded-files/embedded-files.tz";
+import { ByteNumberRules } from "../../library/byte-number-rules/byte-number-rules.tz";
+import { ClassValueRules } from "../class-value-rules/class-value-rules.tz";
+import { ClassOverrideRules } from "../class-override-rules/class-override-rules.tz";
+import { ObjectMemberRules } from "../object-member-rules/object-member-rules.tz";
+import { GenericCallRules } from "../../generics/generic-call-rules/generic-call-rules.tz";
+import { ByteSourceRules } from "../../library/byte-source-rules/byte-source-rules.tz";
+import { TextCoderRules } from "../../library/text-coder-rules/text-coder-rules.tz";
+import { IntlRules } from "../../library/intl-rules/intl-rules.tz";
+import { FsRules } from "../../library/fs-rules/fs-rules.tz";
+import { ProcessRules } from "../../library/process-rules/process-rules.tz";
+import { ChildRules } from "../../library/child-rules/child-rules.tz";
+import { WeakRefRules } from "../../library/weak-ref-rules/weak-ref-rules.tz";
+import { RegexRules } from "../../library/regex-rules/regex-rules.tz";
+import { CryptoRules } from "../../library/crypto-rules/crypto-rules.tz";
+import { SubtleRules } from "../../library/subtle-rules/subtle-rules.tz";
+import { ForeignRules } from "../../library/foreign-rules/foreign-rules.tz";
 
 export class ExpressionTypes {
   private readonly store: TypeStore;
@@ -195,8 +253,31 @@ export class ExpressionTypes {
   private readonly statements: StatementRules;
   private readonly results: ResultRules;
   private readonly library: LibraryRules;
+  private readonly assignments: AssignmentRules;
+  private readonly destinations: DestinationRules;
+  private readonly proofs: ProofRules;
+  private readonly intervals: IntervalMath;
+  private readonly bytes: BytesRules;
+  private readonly embedded: EmbeddedFiles;
+  private readonly byteNumbers: ByteNumberRules;
+  private readonly classValues: ClassValueRules;
+  private readonly overrides: ClassOverrideRules;
+  private readonly objectMembers: ObjectMemberRules;
+  private readonly genericCalls: GenericCallRules;
+  private readonly byteSources: ByteSourceRules;
+  private readonly textCoders: TextCoderRules;
+  private readonly intl: IntlRules;
+  private readonly fs: FsRules;
+  private readonly process: ProcessRules;
+  private readonly child: ChildRules;
+  private readonly weakRefs: WeakRefRules;
+  private readonly regexes: RegexRules;
+  private readonly crypto: CryptoRules;
+  private readonly subtle: SubtleRules;
+  private readonly foreign: ForeignRules;
   private readonly resolver: TypeResolver;
   private readonly errors: ErrorLog;
+  private readonly memberObjects: Set<Expr>;
   private readonly program: Program;
   private readonly scopes: Map<int, ModuleScopes>;
   private readonly records: Map<int, ValueRecord>;
@@ -242,6 +323,11 @@ export class ExpressionTypes {
   private positionMethod: string;
   private readonly unusedYields: Set<Expr>;
   private readonly yieldOf: Map<Expr, int>;
+  private readonly indexParams: Set<string>;
+  private readonly fixedLengths: Set<string>;
+  private readonly fixedCounts: Map<string, decimal>;
+  private readonly requirements: Map<int, Requirement[]>;
+  private readonly pendingCalls: PendingCall[];
   private writtenFields?: Set<string>;
 
   public constructor(
@@ -313,15 +399,7 @@ export class ExpressionTypes {
     const functions = new FunctionRules(store, relation, types, unifier, text);
     const literals = new LiteralRules(store, types, text);
     const indexes = new IndexRules(store, text, types);
-    const objects = new ObjectRules(
-      store,
-      text,
-      relation,
-      types,
-      sources,
-      unifier,
-      typeOfs,
-    );
+    const objects = new ObjectRules(store, text, relation, types, unifier);
     const calls = new CallRules(store, types, parts, text, objects);
     const callbacks = new CallbackRules(
       store,
@@ -331,7 +409,7 @@ export class ExpressionTypes {
       text,
       relation,
     );
-    const classes = new ClassRules(text, types, modules, relation, store);
+    const classes = new ClassRules(text, types);
     const overloads = new OverloadRules(
       text,
       types,
@@ -353,12 +431,10 @@ export class ExpressionTypes {
     const generics = new GenericRules(
       store,
       types,
-      modules,
       unifier,
       parts,
       calls,
       literals,
-      text,
     );
     const dates = new DateRules(types, text, calls, sources, operators, store);
     const decimals = new DecimalRules(store, types, sources, text, operators);
@@ -384,6 +460,53 @@ export class ExpressionTypes {
     );
     const results = new ResultRules(store, types, unifier, bounds, text);
     const library = new LibraryRules(types, modules, sources, mismatches);
+    const assignments = new AssignmentRules(text, types, sources, mismatches);
+    const destinations = new DestinationRules();
+    const proofs = new ProofRules(text);
+    const intervals = new IntervalMath(integers);
+    const bytes = new BytesRules(text, types, modules);
+    const embedded = new EmbeddedFiles();
+    const byteNumbers = new ByteNumberRules(types, modules, integers);
+    const classValues = new ClassValueRules(
+      text,
+      types,
+      modules,
+      store,
+      classes,
+    );
+    const overrides = new ClassOverrideRules(text, relation, classes);
+    const objectMembers = new ObjectMemberRules(
+      store,
+      text,
+      relation,
+      types,
+      sources,
+      typeOfs,
+    );
+    const genericCalls = new GenericCallRules(modules, parts, text, generics);
+    const byteSources = new ByteSourceRules(
+      text,
+      types,
+      bytes,
+      byteNumbers,
+      modules,
+    );
+    const textCoders = new TextCoderRules(text, types, byteSources);
+    const intl = new IntlRules(text, types);
+    const fs = new FsRules(text, types, byteSources);
+    const process = new ProcessRules();
+    const child = new ChildRules(text);
+    const weakRefs = new WeakRefRules(text, types, modules);
+    const regexes = new RegexRules(store, text, types);
+    const crypto = new CryptoRules(text, types, modules, byteSources);
+    const subtle = new SubtleRules(text, types, byteSources);
+    const foreign = new ForeignRules(
+      program,
+      text,
+      types,
+      modules,
+      byteSources,
+    );
 
     this.store = store;
     this.text = text;
@@ -423,8 +546,31 @@ export class ExpressionTypes {
     this.statements = statements;
     this.results = results;
     this.library = library;
+    this.assignments = assignments;
+    this.destinations = destinations;
+    this.proofs = proofs;
+    this.intervals = intervals;
+    this.bytes = bytes;
+    this.embedded = embedded;
+    this.byteNumbers = byteNumbers;
+    this.classValues = classValues;
+    this.overrides = overrides;
+    this.objectMembers = objectMembers;
+    this.genericCalls = genericCalls;
+    this.byteSources = byteSources;
+    this.textCoders = textCoders;
+    this.intl = intl;
+    this.fs = fs;
+    this.process = process;
+    this.child = child;
+    this.weakRefs = weakRefs;
+    this.regexes = regexes;
+    this.crypto = crypto;
+    this.subtle = subtle;
+    this.foreign = foreign;
     this.resolver = resolver;
     this.errors = new ErrorLog();
+    this.memberObjects = new Set<Expr>();
     this.program = program;
     this.scopes = new Map<int, ModuleScopes>();
     this.records = new Map<int, ValueRecord>();
@@ -470,170 +616,14 @@ export class ExpressionTypes {
     this.positionMethod = "";
     this.unusedYields = new Set<Expr>();
     this.yieldOf = new Map<Expr, int>();
+    this.indexParams = new Set<string>();
+    this.fixedLengths = new Set<string>();
+    this.fixedCounts = new Map<string, decimal>();
+    this.requirements = new Map<int, Requirement[]>();
+    this.pendingCalls = [];
 
     for (const scopes of resolved) {
       this.scopes.set(scopes.module.id, scopes);
     }
-  }
-
-  public problems(module: int): SourceError[] {
-    this.unreadResultsCheck(module);
-
-    return this.errors.of(module);
-  }
-
-  public variable(module: int, loc: int): Type {
-    const door = this.door(module, loc);
-    if (door == undefined) {
-      return this.store.plain(TypeKind.Error);
-    }
-
-    return door.type;
-  }
-
-  private typed(expr: Expr, wanted: Type | undefined, module: int): Type {
-    this.visited.add(expr);
-
-    const literal = this.literalOf(expr, module);
-    if (literal != undefined) {
-      return this.literalTyped(expr, literal, wanted, module);
-    }
-
-    switch (expr.kind) {
-      case ExprKind.Undefined:
-        return this.store.plain(TypeKind.Undefined);
-      case ExprKind.Template:
-        return this.templateTyped(expr, wanted, module);
-      case ExprKind.ArrayLit:
-        return this.arrayTyped(expr, wanted, module);
-      case ExprKind.ObjectLit:
-        return this.objectTyped(expr, wanted, module);
-      case ExprKind.Name:
-        return this.named(expr, wanted, module);
-      case ExprKind.Binary:
-        return this.binaryTyped(expr, wanted, module);
-      case ExprKind.Unary:
-        return this.unaryTyped(expr, wanted, module);
-      case ExprKind.Conditional:
-        return this.conditionalTyped(expr, wanted, module);
-      case ExprKind.Member:
-        if (this.holderValueCheck(expr, wanted, module)) {
-          return this.store.plain(TypeKind.Error);
-        }
-
-        return this.memberTyped(expr, module);
-      case ExprKind.Index:
-        return this.indexTyped(expr, module);
-      case ExprKind.Await:
-        return this.awaitTyped(expr, module);
-      case ExprKind.OptionalChain:
-        return this.chainTyped(expr, wanted, module);
-      case ExprKind.Call: {
-        this.noteArguments(expr.args);
-        this.dictKeysCheck(expr, module);
-        this.objectKeysCheck(expr, module);
-        this.booleanCallCheck(expr, module);
-        this.numberCallCheck(expr, module);
-        this.timerArgumentsCheck(expr, module);
-        this.mathOneTypeCheck(expr, module);
-        this.uncaughtCheck(expr, module);
-
-        if (this.legacyCallCheck(expr, module)) {
-          return this.store.plain(TypeKind.Error);
-        }
-
-        const type = this.callTyped(expr, wanted, module);
-
-        if (this.isOwnCall(expr.callee, module)) {
-          this.forgetCalledFields();
-        }
-
-        this.walkedArguments(expr.args, module);
-
-        return type;
-      }
-      case ExprKind.New: {
-        const type = this.newTyped(expr, wanted, module);
-
-        this.walkedArguments(expr.args, module);
-
-        return type;
-      }
-      case ExprKind.Class:
-        return this.classExprTyped(expr, module);
-      case ExprKind.Function:
-        this.genericClosureCheck(expr, module);
-        this.iterablePlaceCheck(expr.fn, module);
-
-        return this.closureTyped(expr, wanted, module);
-      case ExprKind.Assign:
-        return this.assignedTyped(expr, module);
-      case ExprKind.Update:
-        return this.updatedTyped(expr.target, module);
-      case ExprKind.Yield:
-        return this.yieldTyped(expr, module);
-      case ExprKind.Cast:
-        return this.castTyped(expr, module);
-      default:
-        return this.childrenTyped(expr, module);
-    }
-  }
-
-  private checked(expr: Expr, wanted: Type, module: int, place: string): Type {
-    const given = this.typed(expr, wanted, module);
-
-    this.coerce(expr, given, wanted, module, place);
-
-    return given;
-  }
-
-  private coerce(
-    expr: Expr,
-    given: Type,
-    wanted: Type,
-    module: int,
-    place: string,
-  ): void {
-    if (this.relation.converts(given, wanted)) {
-      return;
-    }
-    if (this.literalTarget(expr, given, wanted, module) != undefined) {
-      return;
-    }
-    if (this.isRangeProven(expr, given, wanted, module)) {
-      return;
-    }
-    if (this.functions.isFunctionAdapting(expr, given, wanted, module)) {
-      return;
-    }
-    if (this.mismatches.isUndecided(wanted)) {
-      return;
-    }
-    if (this.mismatches.isIteratorFromClass(given, wanted)) {
-      return;
-    }
-
-    this.mismatch(expr, given, wanted, module, place);
-  }
-
-  private reportFound(module: int, error: SourceError | undefined): void {
-    if (error != undefined) {
-      this.report(module, error.loc, error.code, error.details);
-    }
-  }
-
-  private reportAll(module: int, errors: SourceError[]): void {
-    for (const error of errors) {
-      this.report(module, error.loc, error.code, error.details);
-    }
-  }
-
-  private report(module: int, loc: int, code: Code, details: Details): void {
-    const record = this.record(module);
-    if (record == undefined) {
-      return;
-    }
-
-    this.errors.write(module, loc, code, details);
   }
 }

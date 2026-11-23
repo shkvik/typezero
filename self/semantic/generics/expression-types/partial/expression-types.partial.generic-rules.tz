@@ -14,7 +14,10 @@ partial class ExpressionTypes {
     this.classGrowthCheck(decl, module);
 
     for (const fn of decl.methods) {
-      const genericMethodErrors = this.generics.genericMethodErrors(decl, fn);
+      const genericMethodErrors = this.genericCalls.genericMethodErrors(
+        decl,
+        fn,
+      );
 
       this.reportAll(module, genericMethodErrors);
     }
@@ -49,7 +52,7 @@ partial class ExpressionTypes {
     method: FunctionDecl,
     module: int,
   ): boolean {
-    const checked = this.generics.genericMethodValue(expr, method);
+    const checked = this.genericCalls.genericMethodValue(expr, method);
 
     this.reportFound(module, checked.error);
 
@@ -64,7 +67,7 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     const base = this.types.definedType(left);
-    if (this.classes.isOpenTested(base) || decl.typeParams.length == 0) {
+    if (this.classValues.isOpenTested(base) || decl.typeParams.length == 0) {
       return;
     }
 
@@ -91,7 +94,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const code = this.generics.genericTellCode(home);
+    const code = this.genericCalls.genericTellCode(home);
 
     this.report(module, expr.loc, code, { word, first, other: first });
   }

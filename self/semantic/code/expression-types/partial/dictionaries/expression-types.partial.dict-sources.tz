@@ -176,11 +176,7 @@ partial class ExpressionTypes {
       return false;
     }
 
-    this.errors.beginTrial();
-
-    const given = this.typed(arg, undefined, module);
-
-    this.errors.endTrial();
+    const given = this.peekType(arg, module);
 
     const other = this.types.definedType(given);
     const isDict = other.kind == TypeKind.Dict && other.dict != DictKind.Record;
@@ -204,11 +200,7 @@ partial class ExpressionTypes {
 
     const holder = target.object;
 
-    this.errors.beginTrial();
-
-    const object = this.typed(holder, undefined, module);
-
-    this.errors.endTrial();
+    const object = this.peekType(holder, module);
 
     const base = this.types.definedType(object);
     if (base.kind != TypeKind.Dict || base.dict != DictKind.Record) {
@@ -224,11 +216,7 @@ partial class ExpressionTypes {
   }
 
   private recordValueOf(holder: Expr, module: int): Type | undefined {
-    this.errors.beginTrial();
-
-    const object = this.typed(holder, undefined, module);
-
-    this.errors.endTrial();
+    const object = this.peekType(holder, module);
 
     const base = this.types.definedType(object);
     if (base.kind != TypeKind.Dict || base.dict != DictKind.Record) {
@@ -264,11 +252,7 @@ partial class ExpressionTypes {
   }
 
   private spreadCheck(property: Property, module: int): void {
-    this.errors.beginTrial();
-
-    const type = this.typed(property.value, undefined, module);
-
-    this.errors.endTrial();
+    const type = this.peekType(property.value, module);
 
     if (this.types.hasMethodFields(type)) {
       this.report(module, property.value.loc, Code.SpreadMethods, kNoDetails);
@@ -287,11 +271,7 @@ partial class ExpressionTypes {
   }
 
   private recordSpreadCheck(property: Property, module: int): boolean {
-    this.errors.beginTrial();
-
-    const type = this.typed(property.value, undefined, module);
-
-    this.errors.endTrial();
+    const type = this.peekType(property.value, module);
 
     const base = this.types.apparent(type);
     const code = this.dictionaries.recordSpreadCode(base);
@@ -326,6 +306,40 @@ partial class ExpressionTypes {
     if (callee.name == "fromEntries") {
       this.fromEntriesKeysCheck(expr, module);
     }
+    if (callee.name == "values" || callee.name == "entries") {
+      this.numberEnumListCheck(expr, callee.name, module);
+    }
+  }
+
+  private numberEnumListCheck(expr: CallExpr, name: string, module: int): void {
+    const listed = expr.args[0]?.expr;
+    if (listed == undefined || expr.args.length != 1) {
+      return;
+    }
+
+    const home = this.enumHomeOf(listed, module);
+    if (home == undefined) {
+      return;
+    }
+
+    const decl = home.decl;
+    const isText = decl.members.some(
+      (member) =>
+        member.init != undefined &&
+        (member.init.kind == ExprKind.StringLit ||
+          member.init.kind == ExprKind.Template),
+    );
+    if (isText) {
+      return;
+    }
+
+    const other = decl.members[0]?.name ?? "A";
+
+    this.report(module, listed.loc, Code.ObjectNumberEnum, {
+      word: name,
+      first: decl.name,
+      other,
+    });
   }
 
   private groupByKeysCheck(expr: CallExpr, module: int): void {

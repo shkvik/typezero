@@ -1,0 +1,252 @@
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import {
+  AssignExpr,
+  BinaryOp,
+  ExprKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { MismatchRules } from "../../types/mismatch-rules/mismatch-rules.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import { SourceTexts } from "../source-texts/source-texts.tz";
+import {
+  kAssignSuffix,
+  kConvertWithString,
+} from "./const/assignment-rules.const.tz";
+
+export class AssignmentRules {
+  private readonly text: TypeText;
+  private readonly types: TypeQuestions;
+  private readonly sources: SourceTexts;
+  private readonly mismatches: MismatchRules;
+
+  public constructor(
+    text: TypeText,
+    types: TypeQuestions,
+    sources: SourceTexts,
+    mismatches: MismatchRules,
+  ) {
+    this.text = text;
+    this.types = types;
+    this.sources = sources;
+    this.mismatches = mismatches;
+  }
+
+  public isArithmetic(op: BinaryOp | undefined): boolean {
+    switch (op) {
+      case undefined:
+      case BinaryOp.LogOr:
+      case BinaryOp.LogAnd:
+      case BinaryOp.Nullish:
+        return false;
+      default:
+        return true;
+    }
+  }
+
+  public isShift(op: BinaryOp): boolean {
+    return op == BinaryOp.Shl || op == BinaryOp.Shr || op == BinaryOp.UShr;
+  }
+
+  public isIntegerOnly(op: BinaryOp): boolean {
+    return this.isBitwise(op) || this.isShift(op);
+  }
+
+  public isWrapping(type: Type, given: Type): boolean {
+    if (type.kind != TypeKind.Int || given.kind != TypeKind.Int) {
+      return false;
+    }
+
+    return type.wraps && (!given.wraps || given == type);
+  }
+
+  public compoundTarget(declared: Type, narrowed: Type): Type {
+    const isPlain =
+      this.types.isNumber(declared) || declared.kind == TypeKind.String;
+    if (isPlain) {
+      return declared;
+    }
+
+    return narrowed;
+  }
+
+  public compoundHint(
+    op: BinaryOp,
+    type: Type,
+    isLiteralTree: boolean,
+  ): Type | undefined {
+    const isPower = type.kind == TypeKind.Decimal && op == BinaryOp.Pow;
+    const isBitsOfOther = this.isIntegerOnly(op) && type.kind != TypeKind.Int;
+    const isPlainShift = this.isShift(op) && !isLiteralTree;
+    const isHintless = isPower || isBitsOfOther || isPlainShift;
+    if (type.kind == TypeKind.String || isHintless) {
+      return undefined;
+    }
+
+    return type;
+  }
+
+  public stringCompoundError(
+    expr: AssignExpr,
+    op: BinaryOp,
+    type: Type,
+    given: Type,
+    module: int,
+  ): SourceError | undefined {
+    if (given.kind == TypeKind.Error) {
+      return undefined;
+    }
+    if (op != BinaryOp.Add) {
+      return this.operandTypesError(expr, op, type, given);
+    }
+
+    const base = this.types.definedType(given);
+    const isJoining =
+      this.types.isNumeric(base) || base.kind == TypeKind.Boolean;
+    if (!isJoining) {
+      return undefined;
+    }
+
+    const first = this.text.of(given);
+    const other = this.joinHint(expr, module);
+
+    return {
+      code: Code.CompoundJoinsText,
+      loc: expr.loc,
+      details: { first, other },
+    };
+  }
+
+  public compoundOperandsError(
+    expr: AssignExpr,
+    op: BinaryOp,
+    type: Type,
+    given: Type,
+    isSettled: boolean,
+  ): SourceError | undefined {
+    const other = this.spelling(op);
+    const loc = expr.loc;
+    const isBits = this.isIntegerOnly(op);
+    const hasDouble =
+      type.kind == TypeKind.Double || given.kind == TypeKind.Double;
+    if (isBits && hasDouble) {
+      return { code: Code.CompoundBitsOfDouble, loc, details: { other } };
+    }
+    if (this.isWrongTarget(isBits, type)) {
+      return this.operandTypesError(expr, op, type, given);
+    }
+
+    const isSame = op == BinaryOp.BitOr || op == BinaryOp.UShr;
+    if (isSame && this.isZero(expr) && !this.wraps(type)) {
+      return { code: Code.CompoundNothingChanged, loc, details: { other } };
+    }
+
+    const first = this.text.of(type);
+    if (op == BinaryOp.UShr && !this.isUnsigned(type)) {
+      return { code: Code.CompoundSignedShift, loc, details: { first } };
+    }
+
+    const isMixed =
+      this.isBitwise(op) && given.kind == TypeKind.Int && given != type;
+    if (isSettled || !isMixed) {
+      return undefined;
+    }
+
+    const second = this.text.of(given);
+    const place = this.conversionHint(expr, type);
+    const details: Details = { other, first, second, place };
+
+    return { code: Code.CompoundMixedNumbers, loc, details };
+  }
+
+  private isBitwise(op: BinaryOp): boolean {
+    switch (op) {
+      case BinaryOp.BitAnd:
+      case BinaryOp.BitOr:
+      case BinaryOp.BitXor:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private isWrongTarget(isBits: boolean, type: Type): boolean {
+    if (isBits) {
+      return type.kind != TypeKind.Int;
+    }
+
+    return !this.types.isNumber(type);
+  }
+
+  private isZero(expr: AssignExpr): boolean {
+    const value = expr.value;
+
+    return value.kind == ExprKind.IntLit && value.value == 0;
+  }
+
+  private wraps(type: Type): boolean {
+    return type.kind == TypeKind.Int && type.wraps;
+  }
+
+  private isUnsigned(type: Type): boolean {
+    return type.kind == TypeKind.Int && type.unsigned;
+  }
+
+  private spelling(op: BinaryOp): string {
+    return `${this.sources.operatorText(op)}${kAssignSuffix}`;
+  }
+
+  private operandTypesError(
+    expr: AssignExpr,
+    op: BinaryOp,
+    type: Type,
+    given: Type,
+  ): SourceError {
+    const first = this.text.of(type);
+    const second = this.text.of(given);
+    const other = this.spelling(op);
+    const code = this.operandTypesCode(type, given);
+
+    return { code, loc: expr.loc, details: { first, second, other } };
+  }
+
+  private operandTypesCode(type: Type, given: Type): Code {
+    const isUndefined =
+      this.types.isOptional(type) ||
+      this.types.isOptional(given) ||
+      type.kind == TypeKind.Undefined ||
+      given.kind == TypeKind.Undefined;
+    if (isUndefined) {
+      return Code.OperandTypesUndefined;
+    }
+
+    return Code.OperandTypes;
+  }
+
+  private joinHint(expr: AssignExpr, module: int): string {
+    const texts = this.sources.assignTexts(expr, module);
+    if (texts.left == "") {
+      return kConvertWithString;
+    }
+
+    const shown = this.sources.withoutParens(texts.right);
+
+    return `; write '${texts.left} += String(${shown})'`;
+  }
+
+  private conversionHint(expr: AssignExpr, type: Type): string {
+    const target = this.types.definedType(type);
+    if (!this.types.isNumber(target)) {
+      return "";
+    }
+
+    const shown = this.sources.operandName(expr.value);
+    const method = this.mismatches.conversionName(target);
+
+    return `; convert it explicitly: '${shown}.${method}()'`;
+  }
+}

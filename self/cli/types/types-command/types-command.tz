@@ -1,3 +1,5 @@
+import { Module, Program } from "../../../program/module/types/module.types.tz";
+import { kRecoverableCodes } from "./const/types-command.const.recoverable.tz";
 import { extname } from "node:path";
 import { SourceError } from "../../../diagnostic/types/message.types.tz";
 import { ModuleNames } from "../../../program/module-names/types/module-names.types.tz";
@@ -47,7 +49,10 @@ export class TypesCommand {
 
     this.report.unreadable(loaded.unreadable);
     this.report.moduleErrors(program);
-    if (this.report.hasFailed()) {
+
+    const isReadable = loaded.unreadable.length == 0;
+    const isChecked = isReadable && this.isRecoverable(program);
+    if (this.report.hasFailed() && !isChecked) {
       return;
     }
 
@@ -81,6 +86,24 @@ export class TypesCommand {
     for (let index = 0; index < resolved.length; index++) {
       this.printErrors(names[index], resolved[index], types, values);
     }
+  }
+
+  private isRecoverable(program: Program): boolean {
+    const hasBroken = program.builtins.some(
+      (builtin) => builtin.parsed.errors.length > 0,
+    );
+    if (hasBroken) {
+      return false;
+    }
+
+    return program.order.every((module) => this.isRecoverableModule(module));
+  }
+
+  private isRecoverableModule(module: Module): boolean {
+    const declared = module.declaration?.errors ?? [];
+    const errors = module.errors.concat(declared);
+
+    return errors.every((error) => kRecoverableCodes.includes(error.code));
   }
 
   private printTypes(types: ModuleTypes): void {

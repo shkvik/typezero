@@ -1,6 +1,3 @@
-import { ExpressionTypes } from "../../expression-types.tz";
-import { Code } from "../../../../../diagnostic/code.tz";
-import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import {
   BinaryExpr,
   CallExpr,
@@ -10,6 +7,10 @@ import {
   MemberExpr,
   UnaryExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { kRewritingMethods } from "../../../index-rules/const/index-rules.const.tz";
+import { ExpressionTypes } from "../../expression-types.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import {
   DictKind,
   DictType,
@@ -62,6 +63,14 @@ partial class ExpressionTypes {
       return this.listIndexed(expr, object, module);
     }
 
+    const element = this.bytes.elementOf(object);
+    if (element != undefined) {
+      return this.bytesIndexed(expr, element, module);
+    }
+    if (this.byteIndexCheck(expr, object, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+
     this.walkedPart(expr.index, module);
 
     const defined = this.types.definedType(object);
@@ -91,6 +100,8 @@ partial class ExpressionTypes {
     const key = this.typed(expr.index, int, module);
     const item = this.indexes.listItem(list);
     if (key.kind != TypeKind.Int || item == undefined) {
+      this.indexPositionCheck(expr.index, key, module);
+
       return this.store.plain(TypeKind.Error);
     }
     if (this.isProvenIndex(expr.object, expr.index, module)) {
@@ -98,6 +109,45 @@ partial class ExpressionTypes {
     }
 
     return this.types.optional(item);
+  }
+
+  private indexPositionCheck(index: Expr, key: Type, module: int): void {
+    const base = this.types.apparent(this.types.definedType(key));
+    const isNumber = base.kind == TypeKind.Double || base.kind == TypeKind.Int;
+    if (key.kind == TypeKind.Error || !isNumber) {
+      return;
+    }
+
+    const code = this.calls.positionCode(key, base);
+    const word = this.text.of(key);
+
+    this.report(module, index.loc, code, { word });
+  }
+
+  private bytesIndexed(expr: IndexExpr, item: Type, module: int): Type {
+    const int = this.store.integer(64, false);
+    const key = this.typed(expr.index, int, module);
+    if (key.kind != TypeKind.Int) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.isProvenIndex(expr.object, expr.index, module)) {
+      return item;
+    }
+    if (this.isMadeIndex(expr, key, module)) {
+      return item;
+    }
+
+    return this.types.optional(item);
+  }
+
+  private isMadeIndex(expr: IndexExpr, key: Type, module: int): boolean {
+    const count = this.shapes.madeCount(expr.object);
+    const at = this.intConstant(expr.index, key, module);
+    if (count == undefined || at == undefined) {
+      return false;
+    }
+
+    return at >= 0 && at < count.toDecimal();
   }
 
   private tupleIndexed(expr: IndexExpr, tuple: TupleType, module: int): Type {
@@ -426,11 +476,12 @@ partial class ExpressionTypes {
     const error = this.store.plain(TypeKind.Error);
     const element = this.indexes.tupleElement(tuple);
     const isResizing = kResizingMethods.includes(word);
+    const isRewriting = kRewritingMethods.includes(word);
 
     if (word == kTupleJoin || !this.isArrayMethod(word, tuple)) {
       return error;
     }
-    if (element != undefined && !isResizing) {
+    if (element != undefined && !isResizing && !isRewriting) {
       const list = this.store.arrayOf(element);
 
       this.tupleCalls.add(expr);
@@ -443,9 +494,38 @@ partial class ExpressionTypes {
       return error;
     }
 
+    if (this.tupleUnion(tuple) == undefined) {
+      const code = Code.TupleMethodDestructure;
+
+      this.report(module, member.loc, code, { word, first });
+
+      return error;
+    }
+
     this.report(module, member.loc, Code.TupleMethodCopy, { word, first });
 
     return error;
+  }
+
+  private tupleUnion(tuple: TupleType): Type | undefined {
+    let joined: Type | undefined = undefined;
+
+    for (const item of tuple.items) {
+      joined = this.joinedUnion(joined, item);
+      if (joined == undefined || joined.kind == TypeKind.Error) {
+        return undefined;
+      }
+    }
+
+    return joined;
+  }
+
+  private joinedUnion(joined: Type | undefined, item: Type): Type | undefined {
+    if (joined == undefined) {
+      return item;
+    }
+
+    return this.unifier.unionUnify(joined, item);
   }
 
   private isArrayMethod(name: string, tuple: TupleType): boolean {

@@ -1,0 +1,171 @@
+import {
+  Expr,
+  ExprKind,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../expression-types.tz";
+
+partial class ExpressionTypes {
+  private typed(expr: Expr, wanted: Type | undefined, module: int): Type {
+    if (!this.errors.isTrying()) {
+      this.visited.add(expr);
+    }
+
+    const literal = this.literalOf(expr, module);
+    if (literal != undefined) {
+      return this.literalTyped(expr, literal, wanted, module);
+    }
+
+    switch (expr.kind) {
+      case ExprKind.Undefined:
+        return this.store.plain(TypeKind.Undefined);
+      case ExprKind.RegexLit:
+        return this.regexLiteralTyped(expr, module);
+      case ExprKind.Template:
+        return this.templateTyped(expr, wanted, module);
+      case ExprKind.ArrayLit:
+        return this.arrayTyped(expr, wanted, module);
+      case ExprKind.ObjectLit:
+        return this.objectTyped(expr, wanted, module);
+      case ExprKind.Name:
+        return this.named(expr, wanted, module);
+      case ExprKind.Binary:
+        return this.binaryTyped(expr, wanted, module);
+      case ExprKind.Unary:
+        return this.unaryTyped(expr, wanted, module);
+      case ExprKind.Conditional:
+        return this.conditionalTyped(expr, wanted, module);
+      case ExprKind.Member:
+        if (this.holderValueCheck(expr, wanted, module)) {
+          return this.store.plain(TypeKind.Error);
+        }
+
+        return this.memberTyped(expr, module);
+      case ExprKind.Index:
+        return this.indexTyped(expr, module);
+      case ExprKind.Await:
+        return this.awaitTyped(expr, module);
+      case ExprKind.OptionalChain:
+        return this.chainTyped(expr, wanted, module);
+      case ExprKind.Call: {
+        this.noteArguments(expr.args);
+        this.dictKeysCheck(expr, module);
+        this.objectKeysCheck(expr, module);
+        this.booleanCallCheck(expr, module);
+        this.numberCallCheck(expr, module);
+        this.timerArgumentsCheck(expr, module);
+        this.mathOneTypeCheck(expr, module);
+        this.uncaughtCheck(expr, module);
+
+        if (this.legacyCallCheck(expr, module)) {
+          return this.store.plain(TypeKind.Error);
+        }
+
+        this.fsCallCheck(expr, module);
+        this.childCallCheck(expr, module);
+        this.cryptoCallCheck(expr, module);
+        this.subtleCallCheck(expr, module);
+        this.timerPromisesCheck(expr, module);
+        this.readlineCheck(expr, module);
+        this.promiseListCheck(expr, module);
+        this.embedCheck(expr, module);
+        this.reflectCallCheck(expr, module);
+        this.printVoidCheck(expr, module);
+        this.isJsonKnownCheck(expr, module);
+
+        if (this.performanceCallCheck(expr, module)) {
+          return this.store.plain(TypeKind.Error);
+        }
+
+        const madeRegex = this.regExpCalled(expr, module);
+        if (madeRegex != undefined) {
+          return madeRegex;
+        }
+
+        const type = this.callTyped(expr, wanted, module);
+
+        if (this.isOwnCall(expr.callee, module)) {
+          this.forgetCalledFields();
+        }
+
+        this.walkedArguments(expr.args, module);
+
+        return type;
+      }
+      case ExprKind.New: {
+        const type = this.newTyped(expr, wanted, module);
+
+        this.walkedArguments(expr.args, module);
+
+        return type;
+      }
+      case ExprKind.Class:
+        return this.classExprTyped(expr, module);
+      case ExprKind.Function:
+        this.genericClosureCheck(expr, module);
+        this.iterablePlaceCheck(expr.fn, module);
+
+        return this.closureTyped(expr, wanted, module);
+      case ExprKind.Assign:
+        return this.assignedTyped(expr, module);
+      case ExprKind.Update:
+        return this.updatedTyped(expr.target, module);
+      case ExprKind.Yield:
+        return this.yieldTyped(expr, module);
+      case ExprKind.Cast:
+        return this.castTyped(expr, module);
+      default:
+        return this.childrenTyped(expr, module);
+    }
+  }
+
+  private peekType(expr: Expr, module: int): Type {
+    this.errors.beginTrial();
+
+    const given = this.typed(expr, undefined, module);
+
+    this.errors.endTrial();
+
+    return given;
+  }
+
+  private checked(expr: Expr, wanted: Type, module: int, place: string): Type {
+    const given = this.typed(expr, wanted, module);
+
+    this.coerce(expr, given, wanted, module, place);
+
+    return given;
+  }
+
+  private coerce(
+    expr: Expr,
+    given: Type,
+    wanted: Type,
+    module: int,
+    place: string,
+  ): void {
+    if (this.relation.converts(given, wanted)) {
+      return;
+    }
+    if (this.literalTarget(expr, given, wanted, module) != undefined) {
+      return;
+    }
+    if (this.isRangeProven(expr, given, wanted, module)) {
+      return;
+    }
+    if (this.functions.isFunctionAdapting(expr, given, wanted, module)) {
+      return;
+    }
+    if (this.mismatches.isUndecided(wanted)) {
+      return;
+    }
+    if (this.mismatches.isIteratorFromClass(given, wanted)) {
+      return;
+    }
+
+    this.mismatch(expr, given, wanted, module, place);
+  }
+}

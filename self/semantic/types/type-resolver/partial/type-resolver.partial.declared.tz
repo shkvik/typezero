@@ -144,7 +144,7 @@ partial class TypeResolver {
           return this.store.plain(TypeKind.Error);
         }
 
-        return this.enumType(ref, found, module);
+        return this.enumType(ref, found, module, context);
       }
       default: {
         const written = this.written(ref, found.name, [], context);
@@ -165,7 +165,8 @@ partial class TypeResolver {
     isClass: boolean = false,
   ): Type[] | undefined {
     const count = ref.args.length;
-    if (context.place == TypePlace.Base && count == 0 && params.length > 0) {
+    const isBare = count == 0 && this.neededCount(params) > 0;
+    if (context.place == TypePlace.Base && isBare) {
       return undefined;
     }
     if (params.length == 0 && count > 0) {
@@ -256,7 +257,8 @@ partial class TypeResolver {
     const bindings = this.bind(module, params, written);
     const args = Array.from(bindings.values());
     const type = this.store.instanceOf(module, home.loc, home.name, args);
-    const label = this.labelText(module, home.name, written);
+    const shown = this.shownArguments(module, params, bindings);
+    const label = this.labelText(module, home.name, shown);
 
     this.store.label(type, label);
 
@@ -320,6 +322,43 @@ partial class TypeResolver {
     }
 
     return this.resolve(written, context);
+  }
+
+  private shownArguments(
+    module: int,
+    params: TypeParamDecl[],
+    bindings: Map<int, Type>,
+  ): Type[] {
+    const args = Array.from(bindings.values());
+    let count = args.length;
+
+    while (count > 0) {
+      const param = params[count - 1];
+      const arg = args[count - 1];
+      if (!this.isDefaultOf(module, param, arg, bindings)) {
+        break;
+      }
+
+      count -= 1;
+    }
+
+    return args.slice(0, count);
+  }
+
+  private isDefaultOf(
+    module: int,
+    param: TypeParamDecl | undefined,
+    arg: Type | undefined,
+    bindings: Map<int, Type>,
+  ): boolean {
+    if (param == undefined || param.defaultType == undefined) {
+      return false;
+    }
+
+    const context: TypeContext = { module, bindings, place: TypePlace.Plain };
+    const fallback = this.resolve(param.defaultType, context);
+
+    return fallback == arg;
   }
 
   private labelText(module: int, name: string, written: Type[]): string {

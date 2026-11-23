@@ -1,0 +1,26 @@
+export const kFsModule = "node:fs";
+export const kPromisesModule = "node:fs/promises";
+export const kChildModule = "node:child_process";
+export const kCryptoModule = "node:crypto";
+export const kTzFsModule = "tz:fs";
+export const kTzIoModule = "tz:io";
+export const kPathModule = "node:path";
+export const kOsModule = "node:os";
+export const kProcessModule = "node:process";
+export const kBufferModule = "node:buffer";
+export const kTimersModule = "node:timers/promises";
+export const kReadlineModules = ["node:readline", "node:readline/promises"];
+export const kSyncSuffix = "Sync";
+export const kReadFileName = "readFile";
+export const kReadFileExample =
+  ", e.g. 'const text = await readFile(path, \"utf8\")'";
+export const kInTzFsHint = '; it is in "tz:fs"';
+export const kReadlineHint = "; tz has createInterface";
+export const kChildHint = "; tz has spawnSync, execFileSync and execSync";
+export const kProcessHint =
+  "; tz has: argv, env, exit, exitCode, cwd, platform, execPath, stdin, stdout, stderr, uptime and pid";
+export const kBufferHint = "; tz has Buffer";
+export const kTimersHint =
+  "; it has setTimeout, setImmediate, setInterval and scheduler";
+export const kTzFsHint = "; it has replaceSync, replace and ReplaceError";
+export const kTzIoHint = "; it has readLine";

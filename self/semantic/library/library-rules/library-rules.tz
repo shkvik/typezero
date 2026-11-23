@@ -1,3 +1,11 @@
+import { ProofRange } from "../../flow/proof-rules/types/proof-rules.types.tz";
+import { kArgumentRanges } from "./const/library-rules.const.ranges.tz";
+import { RangeReceiver } from "./types/library-rules.types.tz";
+import {
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
 import {
   Checked,
   SourceError,
@@ -11,11 +19,6 @@ import {
   MemberExpr,
   NewExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
-import {
-  InstanceType,
-  Type,
-  TypeKind,
-} from "../../../program/type/types/type.types.tz";
 import {
   kPromiseClass,
   kPromiseStatics,
@@ -200,6 +203,15 @@ export class LibraryRules {
     };
   }
 
+  public argumentRange(object: Type, name: string): ProofRange | undefined {
+    const receiver = this.rangeReceiver(object);
+    const row = kArgumentRanges.find(
+      (one) => one.receiver == receiver && one.name == name,
+    );
+
+    return row?.range;
+  }
+
   private positionsOf(method: Type): boolean[] {
     if (method.kind != TypeKind.Function) {
       return [];
@@ -210,5 +222,21 @@ export class LibraryRules {
 
       return base.kind == TypeKind.Int && !base.wraps;
     });
+  }
+
+  private rangeReceiver(object: Type): RangeReceiver {
+    const base = this.types.definedType(object);
+    if (this.types.isNumber(base)) {
+      return RangeReceiver.Number;
+    }
+
+    switch (base.kind) {
+      case TypeKind.String:
+        return RangeReceiver.Text;
+      case TypeKind.Iterator:
+        return RangeReceiver.Iterator;
+      default:
+        return RangeReceiver.Other;
+    }
   }
 }

@@ -1,0 +1,127 @@
+import { ValueRange } from "../interval-math/types/interval-math.types.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { ProofRange } from "./types/proof-rules.types.tz";
+import { kByteLengthSuffix, kLengthSuffix } from "./const/proof-rules.const.tz";
+
+export class ProofRules {
+  private readonly text: TypeText;
+
+  public constructor(text: TypeText) {
+    this.text = text;
+  }
+
+  public isInside(value: decimal, range: ProofRange): boolean {
+    const high = range.high;
+    if (high != undefined && value > high) {
+      return false;
+    }
+
+    return value >= range.low;
+  }
+
+  public isFrom(known: ValueRange, low: decimal): boolean {
+    return known.lo != undefined && known.lo >= low;
+  }
+
+  public isUpTo(known: ValueRange, high: decimal): boolean {
+    return known.hi != undefined && known.hi <= high;
+  }
+
+  public betweenError(
+    loc: int,
+    range: ProofRange,
+    constant: decimal | undefined,
+    given: Type,
+    shown: string,
+  ): SourceError {
+    const word = range.what;
+    const place = this.rangeText(range);
+
+    if (constant != undefined && range.high == undefined && range.low == 0) {
+      const details: Details = { word, other: `${constant}` };
+
+      return { code: Code.ProofNegative, loc, details };
+    }
+    if (constant != undefined) {
+      const details: Details = { word, place, other: `${constant}` };
+
+      return { code: Code.ProofOutside, loc, details };
+    }
+    if (given.kind != TypeKind.Int) {
+      const first = this.text.of(given);
+
+      return { code: Code.ProofNotWhole, loc, details: { word, place, first } };
+    }
+
+    const other = this.testText(shown, range);
+
+    return { code: Code.ProofBetween, loc, details: { word, place, other } };
+  }
+
+  public limitText(object: string, hasBytes: boolean, less: decimal): string {
+    const limit = `${object}${this.lengthWord(hasBytes)}`;
+    if (less == 0) {
+      return limit;
+    }
+
+    return `${limit} - ${less}`;
+  }
+
+  public upToError(
+    loc: int,
+    word: string,
+    shown: string | undefined,
+    place: string,
+  ): SourceError {
+    if (shown == undefined) {
+      const details: Details = { word, first: "0", place, other: "0" };
+
+      return { code: Code.OffsetUnproven, loc, details };
+    }
+
+    const first = `'${shown}'`;
+    const other = `${shown} >= 0 && ${shown}`;
+
+    return {
+      code: Code.OffsetUnproven,
+      loc,
+      details: { word, first, place, other },
+    };
+  }
+
+  private lengthWord(hasBytes: boolean): string {
+    if (hasBytes) {
+      return kByteLengthSuffix;
+    }
+
+    return kLengthSuffix;
+  }
+
+  private rangeText(range: ProofRange): string {
+    const high = range.high;
+    if (high != undefined) {
+      return `from ${range.low} to ${high}`;
+    }
+    if (range.low == 0) {
+      return "not negative";
+    }
+
+    return `at least ${range.low}`;
+  }
+
+  private testText(shown: string, range: ProofRange): string {
+    const lower = `${shown} >= ${range.low}`;
+    const high = range.high;
+    if (high == undefined) {
+      return lower;
+    }
+
+    return `${lower} && ${shown} <= ${high}`;
+  }
+}

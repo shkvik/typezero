@@ -1,29 +1,13 @@
 import {
   kColon,
-  kDateKeywords,
-  kDateSymbols,
   kDot,
   kEndToken,
   kInvalidToken,
   kLargestSigned,
-  kLeftParen,
-  kLineTerminators,
-  kLowerBit,
   kMinus,
-  kNine,
-  kLargestNumber,
   kNone,
-  kPlus,
-  kPrefixLength,
   kRightParen,
-  kSignificantDigits,
-  kUnknownToken,
   kUnsignedRange,
-  kUpperA,
-  kWhiteSpaces,
-  kWideSpaceFirst,
-  kWideSpaceLast,
-  kZero,
 } from "./const/date-reader.const.tz";
 import {
   DateFields,
@@ -33,12 +17,12 @@ import {
   TimeValue,
   ZoneValue,
 } from "./types/date-reader.types.tz";
+import { DateScanner } from "../date-scanner/date-scanner.tz";
+import { DateValues } from "../date-values/date-values.tz";
 
 export class DateReader {
-  private readonly text: string;
-  private index: int;
-  private char: int;
-  private next: DateToken;
+  private readonly scanner: DateScanner;
+  private readonly values: DateValues;
   private dayParts: int[];
   private namedMonth: int;
   private isIso: boolean;
@@ -50,10 +34,8 @@ export class DateReader {
   private zoneMinute: int;
 
   public constructor(text: string) {
-    this.text = text;
-    this.index = 0;
-    this.char = 0;
-    this.next = kEndToken;
+    this.scanner = new DateScanner(text);
+    this.values = new DateValues();
     this.dayParts = [];
     this.namedMonth = kNone;
     this.isIso = false;
@@ -66,8 +48,7 @@ export class DateReader {
   }
 
   public read(): DateFields | undefined {
-    this.nextChar();
-    this.next = this.scan();
+    this.scanner.start();
 
     const first = this.parseIso();
     if (first.kind == DateTokenKind.Invalid) {
@@ -88,7 +69,7 @@ export class DateReader {
         return undefined;
       }
 
-      token = this.nextToken();
+      token = this.scanner.nextToken();
     }
 
     const day = this.writtenDay();
@@ -99,269 +80,6 @@ export class DateReader {
     }
 
     return { day, time, zone, isDateOnly };
-  }
-
-  private nextChar(): void {
-    const text = this.text;
-    const index = this.index;
-
-    this.char = 0;
-
-    if (index >= 0 && index < text.length) {
-      this.char = text.charCodeAt(index);
-    }
-
-    this.index = index + 1;
-  }
-
-  private isDigit(char: int): boolean {
-    return char >= kZero && char <= kNine;
-  }
-
-  private isWhiteSpace(char: int): boolean {
-    if (kWhiteSpaces.includes(char)) {
-      return true;
-    }
-
-    return char >= kWideSpaceFirst && char <= kWideSpaceLast;
-  }
-
-  private isSpace(char: int): boolean {
-    return this.isWhiteSpace(char) || kLineTerminators.includes(char);
-  }
-
-  private isLetter(char: int): boolean {
-    return char >= kUpperA && !this.isWhiteSpace(char);
-  }
-
-  private readNumber(): int {
-    while (this.char == kZero) {
-      this.nextChar();
-    }
-
-    const start = this.index - 1;
-
-    while (this.isDigit(this.char)) {
-      this.nextChar();
-    }
-
-    const end = Math.min(this.index - 1, start + kSignificantDigits);
-    const digits = this.text.slice(start, end);
-    const parsed = parseInt(digits);
-    const value = parsed.unwrapOr(0);
-    if (value < 0 || value > 999999999) {
-      return 0;
-    }
-
-    return value;
-  }
-
-  private readWord(): DateToken {
-    const prefix: int[] = [];
-    let length = 0;
-
-    while (this.isLetter(this.char)) {
-      if (length < kPrefixLength) {
-        prefix.push(this.char | kLowerBit);
-      }
-
-      length += 1;
-
-      this.nextChar();
-    }
-
-    return this.keyword(prefix, length);
-  }
-
-  private keyword(prefix: int[], length: int): DateToken {
-    for (const keyword of kDateKeywords) {
-      const isLong = length > kPrefixLength;
-      const isFitting = !isLong || keyword.kind == DateTokenKind.Month;
-      if (isFitting && this.isPrefix(prefix, keyword.prefix)) {
-        return { kind: keyword.kind, length, value: keyword.value };
-      }
-    }
-
-    return { kind: DateTokenKind.Other, length, value: 0 };
-  }
-
-  private isPrefix(prefix: int[], word: string): boolean {
-    if (prefix.length != word.length) {
-      return false;
-    }
-
-    for (let index = 0; index < word.length; index++) {
-      if (prefix[index] != word.charCodeAt(index)) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  private scan(): DateToken {
-    const start = this.index;
-    const char = this.char;
-    if (char == 0) {
-      return kEndToken;
-    }
-    if (this.isDigit(char)) {
-      const value = this.readNumber();
-      const length = this.index - start;
-
-      return { kind: DateTokenKind.Number, length, value };
-    }
-    if (kDateSymbols.includes(char)) {
-      this.nextChar();
-
-      return { kind: DateTokenKind.Symbol, length: 1, value: char };
-    }
-    if (this.isLetter(char)) {
-      return this.readWord();
-    }
-    if (this.isSpace(char)) {
-      this.nextChar();
-
-      const length = this.index - start;
-
-      return { kind: DateTokenKind.Space, length, value: -1 };
-    }
-    if (char == kLeftParen) {
-      this.skipComment();
-
-      return kUnknownToken;
-    }
-
-    this.nextChar();
-
-    return kUnknownToken;
-  }
-
-  private skipComment(): void {
-    let balance = 0;
-    let isOpen = true;
-
-    while (isOpen) {
-      balance += this.parenStep(this.char);
-
-      this.nextChar();
-
-      isOpen = balance > 0 && this.char != 0;
-    }
-  }
-
-  private parenStep(char: int): int {
-    if (char == kRightParen) {
-      return -1;
-    }
-    if (char == kLeftParen) {
-      return 1;
-    }
-
-    return 0;
-  }
-
-  private nextToken(): DateToken {
-    const token = this.next;
-
-    this.next = this.scan();
-
-    return token;
-  }
-
-  private isSymbol(token: DateToken, char: int): boolean {
-    return token.kind == DateTokenKind.Symbol && token.value == char;
-  }
-
-  private isSign(token: DateToken): boolean {
-    return this.isSymbol(token, kPlus) || this.isSymbol(token, kMinus);
-  }
-
-  private signOf(token: DateToken): int {
-    if (token.value == kMinus) {
-      return -1;
-    }
-
-    return 1;
-  }
-
-  private isFixedNumber(token: DateToken, length: int): boolean {
-    return token.kind == DateTokenKind.Number && token.length == length;
-  }
-
-  private isWord(token: DateToken): boolean {
-    switch (token.kind) {
-      case DateTokenKind.Other:
-      case DateTokenKind.Month:
-      case DateTokenKind.Zone:
-      case DateTokenKind.LetterT:
-      case DateTokenKind.Meridiem:
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  private isZ(token: DateToken): boolean {
-    return (
-      token.kind == DateTokenKind.Zone &&
-      token.length == 1 &&
-      token.value == 0
-    );
-  }
-
-  private skipSymbol(char: int): boolean {
-    if (!this.isSymbol(this.next, char)) {
-      return false;
-    }
-
-    this.next = this.scan();
-
-    return true;
-  }
-
-  private between(value: int, low: int, high: int): boolean {
-    return value >= low && value <= high;
-  }
-
-  private isMonth(value: int): boolean {
-    return this.between(value, 1, 12);
-  }
-
-  private isDay(value: int): boolean {
-    return this.between(value, 1, 31);
-  }
-
-  private isHour(value: int): boolean {
-    return this.between(value, 0, 23);
-  }
-
-  private isMinute(value: int): boolean {
-    return this.between(value, 0, 59);
-  }
-
-  private isMillisecond(value: int): boolean {
-    return this.between(value, 0, 999);
-  }
-
-  private readMilliseconds(number: DateToken): int {
-    const value = number.value;
-    const length = number.length;
-    if (length == 1) {
-      return value * 100;
-    }
-    if (length == 2) {
-      return value * 10;
-    }
-
-    let shortened = value;
-    const counted = Math.min(length, kSignificantDigits);
-
-    for (let rest = counted; rest > kPrefixLength; rest--) {
-      shortened = shortened / 10;
-    }
-
-    return shortened;
   }
 
   private addDay(value: int): boolean {
@@ -398,9 +116,9 @@ export class DateReader {
 
   private isTimeExpecting(value: int): boolean {
     const count = this.timeParts.length;
-    const isMinute = count == 1 && this.isMinute(value);
-    const isSecond = count == 2 && this.isMinute(value);
-    const isMillisecond = count == 3 && this.isMillisecond(value);
+    const isMinute = count == 1 && this.values.isMinute(value);
+    const isSecond = count == 2 && this.values.isMinute(value);
+    const isMillisecond = count == 3 && this.values.isMillisecond(value);
 
     return isMinute || isSecond || isMillisecond;
   }
@@ -408,32 +126,16 @@ export class DateReader {
   private setZone(hours: int): void {
     const isNegative = hours < 0;
 
-    this.zoneSign = this.signFor(isNegative);
-    this.zoneHour = this.signed(hours, isNegative);
+    this.zoneSign = this.values.signFor(isNegative);
+    this.zoneHour = this.values.signed(hours, isNegative);
     this.zoneMinute = 0;
-  }
-
-  private signFor(isNegative: boolean): int {
-    if (isNegative) {
-      return -1;
-    }
-
-    return 1;
-  }
-
-  private signed(value: int, isNegative: boolean): int {
-    if (isNegative) {
-      return -value;
-    }
-
-    return value;
   }
 
   private isZoneExpecting(value: int): boolean {
     return (
       this.zoneHour != kNone &&
       this.zoneMinute == kNone &&
-      this.isMinute(value)
+      this.values.isMinute(value)
     );
   }
 
@@ -465,31 +167,35 @@ export class DateReader {
     if (yearStop != undefined) {
       return yearStop;
     }
-    if (!this.skipSymbol(kMinus)) {
+    if (!this.scanner.skipSymbol(kMinus)) {
       return undefined;
     }
 
+    const month = this.scanner.peek();
     const isMonth =
-      this.isFixedNumber(this.next, 2) && this.isMonth(this.next.value);
-    if (!isMonth) {
-      return this.nextToken();
-    }
+      this.scanner.isFixedNumber(month, 2) && this.values.isMonth(month.value);
 
-    const month = this.nextToken();
+    this.scanner.nextToken();
+
+    if (!isMonth) {
+      return month;
+    }
 
     this.addDay(month.value);
 
-    if (!this.skipSymbol(kMinus)) {
+    if (!this.scanner.skipSymbol(kMinus)) {
       return undefined;
     }
 
+    const day = this.scanner.peek();
     const isDay =
-      this.isFixedNumber(this.next, 2) && this.isDay(this.next.value);
-    if (!isDay) {
-      return this.nextToken();
-    }
+      this.scanner.isFixedNumber(day, 2) && this.values.isDay(day.value);
 
-    const day = this.nextToken();
+    this.scanner.nextToken();
+
+    if (!isDay) {
+      return day;
+    }
 
     this.addDay(day.value);
 
@@ -497,14 +203,14 @@ export class DateReader {
   }
 
   private isoYear(): DateToken | undefined {
-    if (this.isSign(this.next)) {
-      const sign = this.nextToken();
-      if (!this.isFixedNumber(this.next, 6)) {
+    if (this.scanner.isNextSign()) {
+      const sign = this.scanner.nextToken();
+      if (!this.scanner.isNextFixed(6)) {
         return sign;
       }
 
-      const year = this.nextToken();
-      const direction = this.signOf(sign);
+      const year = this.scanner.nextToken();
+      const direction = this.scanner.signOf(sign);
       if (direction < 0 && year.value == 0) {
         return sign;
       }
@@ -513,44 +219,44 @@ export class DateReader {
 
       return undefined;
     }
-    if (this.isFixedNumber(this.next, 4)) {
-      const year = this.nextToken();
+    if (this.scanner.isNextFixed(4)) {
+      const year = this.scanner.nextToken();
 
       this.addDay(year.value);
 
       return undefined;
     }
 
-    return this.nextToken();
+    return this.scanner.nextToken();
   }
 
   private isoTime(): DateToken | undefined {
-    if (this.next.kind != DateTokenKind.LetterT) {
-      if (this.next.kind != DateTokenKind.End) {
-        return this.nextToken();
-      }
-
-      return undefined;
+    const mark = this.scanner.peek();
+    if (mark.kind != DateTokenKind.LetterT) {
+      return this.isoEnd(mark);
     }
 
-    this.nextToken();
+    this.scanner.nextToken();
 
+    const hour = this.scanner.peek();
     const isHour =
-      this.isFixedNumber(this.next, 2) && this.between(this.next.value, 0, 24);
+      this.scanner.isFixedNumber(hour, 2) &&
+      this.values.between(hour.value, 0, 24);
     if (!isHour) {
       return kInvalidToken;
     }
 
-    const isMidnight = this.next.value == 24;
-    const hour = this.nextToken();
+    const isMidnight = hour.value == 24;
+
+    this.scanner.nextToken();
 
     this.addTime(hour.value);
 
-    if (!this.skipSymbol(kColon) || !this.isClockPart(isMidnight)) {
+    if (!this.scanner.skipSymbol(kColon) || !this.isClockPart(isMidnight)) {
       return kInvalidToken;
     }
 
-    const minute = this.nextToken();
+    const minute = this.scanner.nextToken();
 
     this.addTime(minute.value);
 
@@ -563,44 +269,57 @@ export class DateReader {
     if (zoneStop != undefined) {
       return zoneStop;
     }
-    if (this.next.kind != DateTokenKind.End) {
+    const last = this.scanner.peek();
+    if (last.kind != DateTokenKind.End) {
       return kInvalidToken;
     }
 
     return undefined;
   }
 
+  private isoEnd(mark: DateToken): DateToken | undefined {
+    if (mark.kind == DateTokenKind.End) {
+      return undefined;
+    }
+
+    return this.scanner.nextToken();
+  }
+
   private isClockPart(isMidnight: boolean): boolean {
-    const part = this.next;
+    const part = this.scanner.peek();
     const isLate = isMidnight && part.value > 0;
 
-    return this.isFixedNumber(part, 2) && this.isMinute(part.value) && !isLate;
+    return (
+      this.scanner.isFixedNumber(part, 2) &&
+      this.values.isMinute(part.value) &&
+      !isLate
+    );
   }
 
   private isoSeconds(isMidnight: boolean): DateToken | undefined {
-    if (!this.skipSymbol(kColon)) {
+    if (!this.scanner.skipSymbol(kColon)) {
       return undefined;
     }
     if (!this.isClockPart(isMidnight)) {
       return kInvalidToken;
     }
 
-    const second = this.nextToken();
+    const second = this.scanner.nextToken();
 
     this.addTime(second.value);
 
-    if (!this.skipSymbol(kDot)) {
+    if (!this.scanner.skipSymbol(kDot)) {
       return undefined;
     }
 
-    const part = this.next;
+    const part = this.scanner.peek();
     const isLate = isMidnight && part.value > 0;
     if (part.kind != DateTokenKind.Number || isLate) {
       return kInvalidToken;
     }
 
-    const fraction = this.nextToken();
-    const milliseconds = this.readMilliseconds(fraction);
+    const fraction = this.scanner.nextToken();
+    const milliseconds = this.values.readMilliseconds(fraction);
 
     this.addTime(milliseconds);
 
@@ -608,45 +327,48 @@ export class DateReader {
   }
 
   private isoZone(): DateToken | undefined {
-    if (this.isZ(this.next)) {
-      this.nextToken();
+    if (this.scanner.isNextZ()) {
+      this.scanner.nextToken();
       this.setZone(0);
 
       return undefined;
     }
-    if (!this.isSign(this.next)) {
+    if (!this.scanner.isNextSign()) {
       return undefined;
     }
 
-    const sign = this.nextToken();
+    const sign = this.scanner.nextToken();
 
-    this.zoneSign = this.signOf(sign);
+    this.zoneSign = this.scanner.signOf(sign);
 
-    if (this.isFixedNumber(this.next, 4)) {
+    if (this.scanner.isNextFixed(4)) {
       return this.joinedZone();
     }
 
+    const hour = this.scanner.peek();
     const isHour =
-      this.isFixedNumber(this.next, 2) && this.isHour(this.next.value);
+      this.scanner.isFixedNumber(hour, 2) && this.values.isHour(hour.value);
     if (!isHour) {
       return kInvalidToken;
     }
 
-    const hour = this.nextToken();
+    this.scanner.nextToken();
 
     this.zoneHour = hour.value;
 
-    if (!this.skipSymbol(kColon)) {
+    if (!this.scanner.skipSymbol(kColon)) {
       return kInvalidToken;
     }
 
+    const minute = this.scanner.peek();
     const isMinute =
-      this.isFixedNumber(this.next, 2) && this.isMinute(this.next.value);
+      this.scanner.isFixedNumber(minute, 2) &&
+      this.values.isMinute(minute.value);
     if (!isMinute) {
       return kInvalidToken;
     }
 
-    const minute = this.nextToken();
+    this.scanner.nextToken();
 
     this.zoneMinute = minute.value;
 
@@ -654,10 +376,10 @@ export class DateReader {
   }
 
   private joinedZone(): DateToken | undefined {
-    const joined = this.nextToken();
+    const joined = this.scanner.nextToken();
     const hour = joined.value / 100;
     const minute = joined.value % 100;
-    if (!this.isHour(hour) || !this.isMinute(minute)) {
+    if (!this.values.isHour(hour) || !this.values.isMinute(minute)) {
       return kInvalidToken;
     }
 
@@ -671,17 +393,17 @@ export class DateReader {
     if (token.kind == DateTokenKind.Number) {
       return this.numberStep(token.value);
     }
-    if (this.isWord(token)) {
+    if (this.scanner.isWord(token)) {
       return this.wordStep(token);
     }
 
-    const isSign = this.isSign(token);
+    const isSign = this.scanner.isSign(token);
     const isZoned = this.isUtcZone() || this.timeParts.length != 0;
     if (isSign && isZoned) {
       return this.zoneSignStep(token);
     }
 
-    const isClosing = this.isSymbol(token, kRightParen);
+    const isClosing = this.scanner.isSymbol(token, kRightParen);
 
     return !((isSign || isClosing) && this.hasNumber);
   }
@@ -689,11 +411,11 @@ export class DateReader {
   private numberStep(value: int): boolean {
     this.hasNumber = true;
 
-    if (this.skipSymbol(kColon)) {
+    if (this.scanner.skipSymbol(kColon)) {
       return this.clockStep(value);
     }
 
-    const isDot = this.skipSymbol(kDot);
+    const isDot = this.scanner.skipSymbol(kDot);
     if (isDot && this.isTimeExpecting(value)) {
       return this.fractionStep(value);
     }
@@ -709,13 +431,13 @@ export class DateReader {
       return false;
     }
 
-    this.skipSymbol(kMinus);
+    this.scanner.skipSymbol(kMinus);
 
     return true;
   }
 
   private clockStep(value: int): boolean {
-    if (this.skipSymbol(kColon)) {
+    if (this.scanner.skipSymbol(kColon)) {
       if (this.timeParts.length != 0) {
         return false;
       }
@@ -728,8 +450,8 @@ export class DateReader {
     if (!this.addTime(value)) {
       return false;
     }
-    if (this.isSymbol(this.next, kDot)) {
-      this.nextToken();
+    if (this.scanner.isNextSymbol(kDot)) {
+      this.scanner.nextToken();
     }
 
     return true;
@@ -738,12 +460,12 @@ export class DateReader {
   private fractionStep(value: int): boolean {
     this.addTime(value);
 
-    if (this.next.kind != DateTokenKind.Number) {
+    if (!this.scanner.isNextNumber()) {
       return false;
     }
 
-    const fraction = this.nextToken();
-    const milliseconds = this.readMilliseconds(fraction);
+    const fraction = this.scanner.nextToken();
+    const milliseconds = this.values.readMilliseconds(fraction);
     if (milliseconds < 0) {
       return false;
     }
@@ -756,11 +478,11 @@ export class DateReader {
   private lastClockStep(value: int): boolean {
     this.addLastTime(value);
 
-    const peek = this.next;
+    const peek = this.scanner.peek();
     const isOpen =
       peek.kind == DateTokenKind.End || peek.kind == DateTokenKind.Space;
 
-    return isOpen || this.isZ(peek) || this.isSign(peek);
+    return isOpen || this.scanner.isZ(peek) || this.scanner.isSign(peek);
   }
 
   private wordStep(token: DateToken): boolean {
@@ -772,7 +494,7 @@ export class DateReader {
     }
     if (token.kind == DateTokenKind.Month) {
       this.namedMonth = token.value;
-      this.skipSymbol(kMinus);
+      this.scanner.skipSymbol(kMinus);
 
       return true;
     }
@@ -785,11 +507,11 @@ export class DateReader {
       return false;
     }
 
-    return this.next.kind != DateTokenKind.Number;
+    return !this.scanner.isNextNumber();
   }
 
   private zoneSignStep(token: DateToken): boolean {
-    this.zoneSign = this.signOf(token);
+    this.zoneSign = this.scanner.signOf(token);
 
     const number = this.zoneNumber();
     const digits = number.length;
@@ -797,7 +519,7 @@ export class DateReader {
 
     this.hasNumber = true;
 
-    if (this.isSymbol(this.next, kColon)) {
+    if (this.scanner.isNextSymbol(kColon)) {
       this.zoneHour = value;
       this.zoneMinute = kNone;
 
@@ -820,8 +542,8 @@ export class DateReader {
   }
 
   private zoneNumber(): DateToken {
-    if (this.next.kind == DateTokenKind.Number) {
-      return this.nextToken();
+    if (this.scanner.isNextNumber()) {
+      return this.scanner.nextToken();
     }
 
     return { kind: DateTokenKind.Number, length: 0, value: 0 };
@@ -842,7 +564,8 @@ export class DateReader {
     const third = parts[2] ?? 0;
     const read = this.orderedDay(first, second, third);
     const year = this.fullYear(read.year);
-    const isFitting = this.isMonth(read.month) && this.isDay(read.day);
+    const isFitting =
+      this.values.isMonth(read.month) && this.values.isDay(read.day);
     if (!isFitting) {
       return undefined;
     }
@@ -854,7 +577,7 @@ export class DateReader {
     if (this.namedMonth != kNone) {
       return this.namedDay(first, second);
     }
-    if (this.isIso || !this.isDay(first)) {
+    if (this.isIso || !this.values.isDay(first)) {
       return { year: first, month: second, day: third };
     }
 
@@ -863,7 +586,7 @@ export class DateReader {
 
   private namedDay(first: int, second: int): DayValue {
     const month = this.namedMonth;
-    if (!this.isDay(first)) {
+    if (!this.values.isDay(first)) {
       return { year: first, month, day: second };
     }
 
@@ -874,10 +597,10 @@ export class DateReader {
     if (this.isIso) {
       return year;
     }
-    if (this.between(year, 0, 49)) {
+    if (this.values.between(year, 0, 49)) {
       return year + 2000;
     }
-    if (this.between(year, 50, 99)) {
+    if (this.values.between(year, 50, 99)) {
       return year + 1900;
     }
 
@@ -895,16 +618,16 @@ export class DateReader {
     const second = parts[2] ?? 0;
     const millisecond = parts[3] ?? 0;
     const isHalf = this.hourOffset != kNone;
-    if (isHalf && !this.between(written, 0, 12)) {
+    if (isHalf && !this.values.between(written, 0, 12)) {
       return undefined;
     }
 
     const hour = this.dayHour(written);
     const isFitting =
-      this.isHour(hour) &&
-      this.isMinute(minute) &&
-      this.isMinute(second) &&
-      this.isMillisecond(millisecond);
+      this.values.isHour(hour) &&
+      this.values.isMinute(minute) &&
+      this.values.isMinute(second) &&
+      this.values.isMillisecond(millisecond);
     const isMidnight =
       hour == 24 && minute == 0 && second == 0 && millisecond == 0;
     if (!isFitting && !isMidnight) {
@@ -934,7 +657,7 @@ export class DateReader {
       return undefined;
     }
 
-    const offset = this.signed(total, this.zoneSign < 0);
+    const offset = this.values.signed(total, this.zoneSign < 0);
 
     return { isLocal: false, offset };
   }

@@ -1,3 +1,9 @@
+import { kBufferName } from "../../../library/byte-source-rules/const/byte-source-rules.const.tz";
+import {
+  kByteLengthName,
+  kLengthTerm,
+  kZeroTerm,
+} from "../../bound-rules/const/bound-rules.const.tz";
 import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
 import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
@@ -8,7 +14,10 @@ import {
   CallArgument,
   ExprKind,
   IndexExpr,
+  MemberExpr,
   NameExpr,
+  UnaryExpr,
+  UnaryOp,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
 import { VarDeclarator } from "../../../../program/ast/types/ast.types.patterns.tz";
@@ -20,10 +29,6 @@ import {
   Linear,
 } from "../../../code/expression-types/types/expression-types.types.tz";
 import { kLengthName } from "../../../code/expression-shapes/const/expression-shapes.const.tz";
-import {
-  kLengthTerm,
-  kZeroTerm,
-} from "../../bound-rules/const/bound-rules.const.tz";
 
 partial class ExpressionTypes {
   private linearOf(expr: Expr, module: int): Linear | undefined {
@@ -40,15 +45,36 @@ partial class ExpressionTypes {
           return undefined;
         }
 
+        const constant = this.intConstant(expr, type, module);
+        if (constant != undefined) {
+          return { term: kZeroTerm, offset: constant };
+        }
+
         return { term: kValueTerm + key, offset: 0 };
       }
       case ExprKind.Member:
         return this.lengthLinear(expr, module);
       case ExprKind.Binary:
         return this.shiftedLinear(expr, module);
+      case ExprKind.Unary:
+        return this.negatedLinear(expr);
       default:
         return undefined;
     }
+  }
+
+  private negatedLinear(expr: UnaryExpr): Linear | undefined {
+    const operand = expr.operand;
+    if (expr.op != UnaryOp.Neg || operand.kind != ExprKind.IntLit) {
+      return undefined;
+    }
+
+    const value = this.bounds.constantLinear(operand.value);
+    if (value == undefined) {
+      return undefined;
+    }
+
+    return { term: kZeroTerm, offset: -value.offset };
   }
 
   private valueTypeOf(expr: NameExpr, module: int): Type | undefined {
@@ -65,7 +91,13 @@ partial class ExpressionTypes {
   }
 
   private lengthLinear(expr: Expr, module: int): Linear | undefined {
-    if (expr.kind != ExprKind.Member || expr.name != kLengthName) {
+    if (expr.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    const isLength =
+      expr.name == kLengthName || this.isByteLength(expr, module);
+    if (!isLength) {
       return undefined;
     }
 
@@ -74,7 +106,57 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    return { term: kLengthTerm + key, offset: 0 };
+    const term = kLengthTerm + key;
+
+    this.rememberFixedCount(expr.object, term, module);
+
+    if (this.isFixedLength(expr.object, module)) {
+      this.fixedLengths.add(term);
+    }
+
+    return { term, offset: 0 };
+  }
+
+  private rememberFixedCount(object: Expr, term: string, module: int): void {
+    const count = this.fixedCount(object, module);
+    if (count != undefined) {
+      this.fixedCounts.set(term, count);
+    }
+  }
+
+  private fixedCount(object: Expr, module: int): decimal | undefined {
+    if (object.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const target = this.targetOfName(object, module);
+    if (target == undefined || target.kind != SymbolKind.Variable) {
+      return undefined;
+    }
+
+    const variable = this.record(target.module)?.variables.get(target.loc);
+    const init = variable?.decl.init;
+    if (variable == undefined || !variable.isConst || init == undefined) {
+      return undefined;
+    }
+
+    const count = this.sizedLinear(init, target.module);
+    if (count == undefined || count.term != kZeroTerm) {
+      return undefined;
+    }
+
+    return count.offset;
+  }
+
+  private isByteLength(expr: MemberExpr, module: int): boolean {
+    const object = expr.object;
+    if (expr.name != kByteLengthName || object.kind != ExprKind.Name) {
+      return false;
+    }
+
+    const type = this.valueTypeOf(object, module);
+
+    return type != undefined && this.bytes.isByteSized(type);
   }
 
   private shiftedLinear(expr: BinaryExpr, module: int): Linear | undefined {
@@ -82,25 +164,30 @@ partial class ExpressionTypes {
     if (!isAdd && expr.op != BinaryOp.Sub) {
       return undefined;
     }
-    if (expr.rhs.kind != ExprKind.IntLit) {
-      return undefined;
-    }
-
     const base = this.linearOf(expr.lhs, module);
-    const step = this.bounds.constantLinear(expr.rhs.value);
+    const step = this.linearOf(expr.rhs, module);
     if (base == undefined || step == undefined) {
       return undefined;
     }
     if (isAdd) {
-      return { term: base.term, offset: base.offset + step.offset };
+      return this.bounds.linearSum(base, step);
+    }
+    if (step.term != kZeroTerm) {
+      return undefined;
     }
 
     return { term: base.term, offset: base.offset - step.offset };
   }
 
   private canProve(lower: string, upper: string, room: decimal): boolean {
+    const found = this.bestRoom(lower, upper);
+
+    return found != undefined && found >= room;
+  }
+
+  private bestRoom(lower: string, upper: string): decimal | undefined {
     if (lower == upper) {
-      return room <= 0;
+      return 0;
     }
 
     const distances = new Map<string, decimal>();
@@ -130,9 +217,7 @@ partial class ExpressionTypes {
       }
     }
 
-    const found = distances.get(upper);
-
-    return found != undefined && found >= room;
+    return distances.get(upper);
   }
 
   private boundEdges(): BoundEdge[] {
@@ -152,6 +237,11 @@ partial class ExpressionTypes {
 
     for (const length of lengths) {
       edges.push({ upper: length, lower: kZeroTerm, room: 0 });
+    }
+
+    for (const [term, count] of this.fixedCounts) {
+      edges.push({ upper: term, lower: kZeroTerm, room: count });
+      edges.push({ upper: kZeroTerm, lower: term, room: -count });
     }
 
     return edges;
@@ -208,10 +298,12 @@ partial class ExpressionTypes {
     const key = `${module} ${decl.loc}`;
 
     this.literalLength(key, init);
+    this.declaredLength(key, init, module);
+    this.embeddedLength(key, init, module);
 
     const value = this.linearOf(init, module);
     if (value == undefined) {
-      return;
+      return this.rangeBounds(key, init, module);
     }
 
     const own: Linear = { term: kValueTerm + key, offset: 0 };
@@ -233,6 +325,7 @@ partial class ExpressionTypes {
     }
 
     this.literalLength(key, expr.value);
+    this.madeLength(key, expr.value, module);
 
     const value = this.linearOf(expr.value, module);
     if (value == undefined) {
@@ -270,10 +363,213 @@ partial class ExpressionTypes {
     this.facts = facts;
   }
 
+  private madeLength(key: string, value: Expr, module: int): void {
+    const count = this.madeLinear(value, module);
+    if (count == undefined) {
+      return;
+    }
+
+    const length: Linear = { term: kLengthTerm + key, offset: 0 };
+    const facts = new Map<string, Type>(this.facts);
+
+    this.fixedLengths.add(length.term);
+    this.bounds.addBound(facts, length, count, 0);
+    this.facts = facts;
+  }
+
+  private declaredLength(key: string, value: Expr, module: int): void {
+    const count = this.madeLinear(value, module);
+    if (count == undefined) {
+      return;
+    }
+
+    const length: Linear = { term: kLengthTerm + key, offset: 0 };
+    const facts = new Map<string, Type>(this.facts);
+
+    this.fixedLengths.add(length.term);
+    this.bounds.addEquality(facts, length, count);
+    this.facts = facts;
+  }
+
+  private madeLinear(value: Expr, module: int): Linear | undefined {
+    const sized = this.sizedLinear(value, module);
+    if (sized != undefined) {
+      return sized;
+    }
+
+    return this.viewLinear(value, module);
+  }
+
+  private sizedLinear(value: Expr, module: int): Linear | undefined {
+    const size =
+      this.shapes.madeSize(value) ?? this.shapes.allocatedSize(value);
+    const source = this.shapes.copiedSource(value);
+
+    if (size != undefined) {
+      const sized = this.listedLinear(size) ?? this.linearOf(size, module);
+      if (sized != undefined) {
+        return sized;
+      }
+    }
+    if (source != undefined) {
+      return this.listedLinear(source) ?? this.textLinear(source);
+    }
+
+    return undefined;
+  }
+
+  private listedLinear(value: Expr): Linear | undefined {
+    if (value.kind != ExprKind.ArrayLit) {
+      return undefined;
+    }
+
+    const isPlain = value.elements.every((one) => !one.spread && !one.hole);
+    if (!isPlain) {
+      return undefined;
+    }
+
+    return { term: kZeroTerm, offset: value.elements.length.toDecimal() };
+  }
+
+  private textLinear(value: Expr): Linear | undefined {
+    if (value.kind != ExprKind.StringLit) {
+      return undefined;
+    }
+
+    const size = Buffer.byteLength(value.value);
+
+    return { term: kZeroTerm, offset: size.toDecimal() };
+  }
+
+  private viewLinear(value: Expr, module: int): Linear | undefined {
+    const view = this.shapes.viewOf(value);
+    if (view == undefined) {
+      return undefined;
+    }
+
+    const length = view.length;
+    if (length != undefined) {
+      return this.linearOf(length, module);
+    }
+
+    const whole = this.wholeLinear(view.buffer, module);
+    const start = this.offsetLinear(view.offset, module);
+    const size = this.byteSources.sizeOfName(view.name);
+    if (whole == undefined || start == undefined || size == undefined) {
+      return undefined;
+    }
+    if (start.term != kZeroTerm) {
+      return undefined;
+    }
+    if (size == 1) {
+      return { term: whole.term, offset: whole.offset - start.offset };
+    }
+
+    const exact = this.settledLinear(whole);
+    const bytes = exact.offset - start.offset;
+    if (exact.term != kZeroTerm || bytes % size != 0) {
+      return undefined;
+    }
+
+    return { term: kZeroTerm, offset: bytes / size };
+  }
+
+  private wholeLinear(buffer: Expr, module: int): Linear | undefined {
+    const size = this.shapes.madeBuffer(buffer);
+    if (size != undefined) {
+      return this.linearOf(size, module);
+    }
+
+    const holder = this.peekType(buffer, module);
+    if (!this.bytes.isRaw(holder)) {
+      return undefined;
+    }
+
+    return this.freshLength(buffer, module);
+  }
+
+  private freshLength(buffer: Expr, module: int): Linear | undefined {
+    if (buffer.kind != ExprKind.Member || buffer.name != kBufferName) {
+      return this.measuredLength(buffer, module);
+    }
+
+    const view = buffer.object;
+    const count = this.madeLinear(view, module);
+    const type = this.peekType(view, module);
+    const size = this.byteSources.elementSize(type);
+    if (count == undefined || size == undefined || count.term != kZeroTerm) {
+      return undefined;
+    }
+
+    return { term: kZeroTerm, offset: count.offset * size };
+  }
+
+  private embeddedLength(key: string, value: Expr, module: int): void {
+    const relative = this.shapes.embeddedPath(value);
+    const home = this.program.modules[module]?.source.path;
+    if (relative == undefined || home == undefined) {
+      return;
+    }
+
+    const size = this.embedded.sizeOf(home, relative);
+    if (size == undefined) {
+      return;
+    }
+
+    const length: Linear = { term: kLengthTerm + key, offset: 0 };
+    const zero: Linear = { term: kZeroTerm, offset: 0 };
+    const facts = new Map<string, Type>(this.facts);
+
+    this.fixedLengths.add(length.term);
+    this.bounds.addBound(facts, length, zero, size.toDecimal());
+    this.facts = facts;
+  }
+
+  private rangeBounds(key: string, init: Expr, module: int): void {
+    const declared = this.doors.get(key)?.type;
+    if (declared == undefined || declared.kind != TypeKind.Int) {
+      return;
+    }
+
+    const range = this.valueRange(init, module);
+    const lo = range.lo;
+    const hi = range.hi;
+    if (lo == undefined && hi == undefined) {
+      return;
+    }
+
+    const own: Linear = { term: kValueTerm + key, offset: 0 };
+    const zero: Linear = { term: kZeroTerm, offset: 0 };
+    const facts = new Map<string, Type>(this.facts);
+
+    if (lo != undefined && this.bounds.isBoundConstant(lo)) {
+      this.bounds.addBound(facts, own, zero, lo);
+    }
+    if (hi != undefined && this.bounds.isBoundConstant(hi)) {
+      this.bounds.addBound(facts, zero, own, -hi);
+    }
+
+    this.facts = facts;
+  }
+
+  private isFixedLength(expr: Expr, module: int): boolean {
+    if (expr.kind != ExprKind.Name) {
+      return false;
+    }
+
+    const type = this.valueTypeOf(expr, module);
+
+    if (type == undefined) {
+      return false;
+    }
+
+    return this.bytes.elementOf(type) != undefined || this.bytes.isRaw(type);
+  }
+
   private forgetLengths(args: CallArgument[], module: int): void {
     for (const arg of args) {
       const key = this.pathKey(arg.expr, module);
-      if (key != undefined) {
+      if (key != undefined && !this.isFixedLength(arg.expr, module)) {
         this.forgetLength(key);
       }
     }
@@ -372,12 +668,24 @@ partial class ExpressionTypes {
         edge != undefined &&
         (edge.upper.startsWith(kLengthTerm) ||
           edge.lower.startsWith(kLengthTerm));
-      if (!isLength) {
+      if (!isLength || this.isFixedEdge(edge)) {
         facts.set(known, type);
       }
     }
 
     this.facts = facts;
+  }
+
+  private isFixedEdge(edge: BoundEdge | undefined): boolean {
+    if (edge == undefined) {
+      return false;
+    }
+
+    const lengths = [edge.upper, edge.lower].filter((term) =>
+      term.startsWith(kLengthTerm),
+    );
+
+    return lengths.every((term) => this.fixedLengths.has(term));
   }
 
   private isProvenFilled(object: Expr, module: int): boolean {

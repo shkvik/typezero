@@ -60,6 +60,14 @@ export class ErrorLog {
     return this.asked == mark.asked;
   }
 
+  public count(): int {
+    return this.asked;
+  }
+
+  public isTrying(): boolean {
+    return this.trials.length > 0;
+  }
+
   public mark(): int {
     return this.written.length;
   }

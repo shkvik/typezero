@@ -1,30 +1,16 @@
-import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
-import { Code } from "../../../../diagnostic/code.tz";
-import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
   AssignExpr,
   BinaryOp,
   Expr,
   ExprKind,
-  IndexExpr,
-  MemberExpr,
-  PropertyKind,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
-import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
-import { Stmt } from "../../../../program/ast/types/ast.types.statements.tz";
+import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
 import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import {
   kNoPlace,
   kThisName,
 } from "../../../code/expression-types/const/expression-types.const.tz";
-import {
-  BoundSide,
-  DeclaredVariable,
-  Destination,
-  ParamSlot,
-  ValueRecord,
-} from "../../../code/expression-types/types/expression-types.types.tz";
 import {
   kDot,
   kHiddenMark,
@@ -108,6 +94,9 @@ partial class ExpressionTypes {
 
       return this.store.plain(TypeKind.Error);
     }
+    if (this.processAssignCheck(expr, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
 
     const isCompound = expr.op != undefined && expr.op != BinaryOp.Nullish;
     const isRefused =
@@ -164,15 +153,7 @@ partial class ExpressionTypes {
       this.checkTruthy(target, tested, use, expr.value, module);
     }
 
-    const wanted = this.flows.assignedWanted(expr.op, declared);
-    const given = this.typed(expr.value, wanted, module);
-
-    const isChecked =
-      !this.isLibraryTarget(target, module) &&
-      !this.isPlacedLiteral(target, given, module);
-    if (wanted != undefined && isChecked) {
-      this.coerce(expr.value, given, wanted, module, kNoPlace);
-    }
+    const given = this.assignedValue(expr, declared, tested, module);
 
     this.forgetPatterned(target, module);
     this.fieldSetMark(target, module);
@@ -195,126 +176,33 @@ partial class ExpressionTypes {
     return given;
   }
 
-  private compoundUndefinedCheck(
+  private assignedValue(
     expr: AssignExpr,
+    declared: Type,
     tested: Type,
     module: int,
-  ): boolean {
+  ): Type {
     const op = expr.op;
-    const isArithmetic =
-      op != undefined &&
-      op != BinaryOp.LogOr &&
-      op != BinaryOp.LogAnd &&
-      op != BinaryOp.Nullish;
-    const isMaybe =
-      this.types.isOptional(tested) || tested.kind == TypeKind.Undefined;
-    if (!isArithmetic || !isMaybe || op == undefined) {
-      return false;
+    if (op != undefined && this.assignments.isArithmetic(op)) {
+      const type = this.assignments.compoundTarget(declared, tested);
+
+      return this.compoundValue(expr, op, type, module);
     }
 
-    this.errors.beginTrial();
-
-    const given = this.typed(expr.value, undefined, module);
-
-    this.errors.endTrial();
-
-    this.report(module, expr.loc, Code.OperandTypesUndefined, {
-      first: this.text.of(tested),
-      second: this.text.of(given),
-      other: `${this.sources.operatorText(op)}=`,
-    });
-
-    return true;
-  }
-
-  private logicalTargetCheck(expr: AssignExpr, module: int): boolean {
-    const checked = this.flows.logicalTargetCheck(expr);
-
-    this.reportFound(module, checked.error);
-
-    return checked.value;
-  }
-
-  private arrayWriteCheck(
-    target: IndexExpr,
-    isCompound: boolean,
-    module: int,
-  ): void {
-    this.errors.beginTrial();
-
-    const object = this.typed(target.object, undefined, module);
-
-    this.errors.endTrial();
-
-    const base = this.types.definedType(object);
-    if (base.kind == TypeKind.Tuple) {
-      const tupleWriteError = this.flows.tupleWriteCheck(target, base);
-
-      return this.reportFound(module, tupleWriteError);
-    }
-    if (base.kind != TypeKind.Array) {
-      return;
+    const target = expr.target;
+    const wanted = this.flows.assignedWanted(op, declared);
+    const given = this.typed(expr.value, wanted, module);
+    const isChecked =
+      !this.isLibraryTarget(target, module) &&
+      !this.isPlacedLiteral(target, given, module);
+    if (wanted != undefined && isChecked) {
+      this.coerce(expr.value, given, wanted, module, kNoPlace);
     }
 
-    this.writeIndexCheck(target, isCompound, module);
-  }
+    this.lengthAssignCheck(expr, given, module);
+    this.bytesLengthCheck(expr, module);
 
-  private assignedDeclared(target: Expr, module: int): Type | undefined {
-    if (target.kind == ExprKind.Member) {
-      return this.memberTargetDeclared(target, module);
-    }
-    if (target.kind != ExprKind.Name) {
-      return undefined;
-    }
-    if (this.isThisName(target, module)) {
-      this.report(module, target.loc, Code.ThisAssigned, kNoDetails);
-
-      return undefined;
-    }
-
-    const found = this.targetOfName(target, module);
-    if (found == undefined) {
-      return undefined;
-    }
-
-    return this.declaredOf(found);
-  }
-
-  private fieldDeclared(target: MemberExpr, module: int): Type | undefined {
-    const key = this.pathKey(target, module);
-    if (key == undefined) {
-      return undefined;
-    }
-
-    const before = this.facts;
-
-    this.forgetPath(key);
-    this.errors.beginTrial();
-
-    const declared = this.typed(target, undefined, module);
-
-    this.errors.endTrial();
-    this.facts = before;
-
-    return declared;
-  }
-
-  private isLibraryTarget(target: Expr, module: int): boolean {
-    if (target.kind != ExprKind.Member) {
-      return false;
-    }
-
-    this.errors.beginTrial();
-
-    const object = this.typed(target.object, undefined, module);
-
-    this.errors.endTrial();
-
-    const isInstance =
-      object.kind == TypeKind.Instance &&
-      this.modules.isLibraryModule(object.module);
-
-    return isInstance || this.resolver.isLibraryShape(object);
+    return given;
   }
 
   private assignedCurrent(
@@ -348,113 +236,5 @@ partial class ExpressionTypes {
     }
 
     return type;
-  }
-
-  private forgetPatterned(target: Expr, module: int): void {
-    switch (target.kind) {
-      case ExprKind.Name:
-      case ExprKind.Member: {
-        const key = this.pathKey(target, module);
-        if (key != undefined) {
-          this.forgetPath(key);
-        }
-
-        return;
-      }
-      case ExprKind.ArrayLit:
-        for (const element of target.elements) {
-          this.forgetPatterned(element.expr, module);
-        }
-
-        return;
-      case ExprKind.ObjectLit:
-        for (const property of target.props) {
-          if (property.form.kind != PropertyKind.Computed) {
-            this.forgetPatterned(property.value, module);
-          }
-        }
-
-        return;
-      case ExprKind.Assign:
-        return this.forgetPatterned(target.target, module);
-      default:
-        return;
-    }
-  }
-
-  private forgetPath(key: string): void {
-    this.forgetFacts(key);
-    this.forgetBounds(key, BoundSide.None);
-  }
-
-  private forgetFacts(key: string): void {
-    const prefix = key + kDot;
-    const kept = new Map<string, Type>();
-
-    for (const [known, type] of this.facts) {
-      if (known != key && !known.startsWith(prefix)) {
-        kept.set(known, type);
-      }
-    }
-
-    this.facts = kept;
-  }
-
-  private forgetLooped(statement: Stmt, module: int): void {
-    const record = this.record(module);
-    if (record == undefined) {
-      return;
-    }
-
-    const scratch: ValueRecord = {
-      uses: record.uses,
-      hidden: record.hidden,
-      variables: new Map<int, DeclaredVariable>(),
-      functions: new Map<int, FunctionDecl>(),
-      params: new Map<int, ParamSlot>(),
-      assigned: new Set<int>(),
-      changes: [],
-      enums: record.enums,
-      classes: record.classes,
-      destinations: new Map<int, Destination[]>(),
-      owners: [],
-    };
-
-    this.indexStatement(statement, scratch);
-
-    for (const loc of scratch.assigned) {
-      const side = this.loopDirection(scratch.changes, loc, module);
-      const key = `${module} ${loc}`;
-
-      this.forgetFacts(key);
-      this.forgetBounds(key, side);
-    }
-
-    for (const change of scratch.changes) {
-      this.forgetChangedPart(change, module);
-    }
-  }
-
-  private forgetChangedPart(change: Expr, module: int): void {
-    const target = this.bounds.changedTarget(change);
-    if (target == undefined) {
-      return;
-    }
-    if (target.kind == ExprKind.Member) {
-      const key = this.pathKey(target, module);
-      if (key != undefined) {
-        this.forgetFacts(key);
-      }
-
-      return;
-    }
-    if (target.kind != ExprKind.Index) {
-      return;
-    }
-
-    const key = this.pathKey(target.object, module);
-    if (key != undefined) {
-      this.forgetFacts(key);
-    }
   }
 }

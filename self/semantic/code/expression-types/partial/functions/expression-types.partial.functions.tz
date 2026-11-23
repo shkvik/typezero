@@ -93,6 +93,9 @@ partial class ExpressionTypes {
     this.reportAll(module, parameterPlaceErrors);
 
     const shape = this.parameterShape(fn, context, module);
+
+    this.foreignCheck(fn, shape, context, module);
+
     const self = shape.self ?? this.literalOwners.get(fn);
     const place = this.functions.functionPlace(fn, self);
 

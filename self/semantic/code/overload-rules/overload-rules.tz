@@ -1,7 +1,11 @@
 import { Checked } from "../../../diagnostic/types/message.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import { CallArgument } from "../../../program/ast/types/ast.types.expressions.tz";
-import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
+import {
+  FunctionDecl,
+  Param,
+  ParamKind,
+} from "../../../program/ast/types/ast.types.functions.tz";
 import {
   FunctionType,
   Type,
@@ -212,6 +216,15 @@ export class OverloadRules {
         },
       },
     };
+  }
+
+  public isCountTaking(params: Param[], count: int): boolean {
+    const needed = params.filter(
+      (param) => param.form.kind == ParamKind.Required,
+    );
+    const hasRest = params.some((param) => param.form.kind == ParamKind.Rest);
+
+    return count >= needed.length && (hasRest || count <= params.length);
   }
 
   private isSamePrefix(

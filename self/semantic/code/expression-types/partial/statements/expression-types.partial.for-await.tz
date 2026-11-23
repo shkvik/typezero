@@ -1,0 +1,75 @@
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import { ForOfStmt } from "../../../../../program/ast/types/ast.types.statements.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  CallExpr,
+  MemberExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { ExpressionTypes } from "../../expression-types.tz";
+
+partial class ExpressionTypes {
+  private forAwaitCheck(statement: ForOfStmt, module: int): void {
+    if (statement.keys || this.modules.isLibraryModule(module)) {
+      return;
+    }
+
+    const fn = this.openFunctions[this.openFunctions.length - 1];
+    const isOutside = fn != undefined && !fn.isAsync;
+    if (statement.isAwait && isOutside) {
+      this.report(module, statement.loc, Code.ForAwaitPlace, kNoDetails);
+
+      return;
+    }
+
+    const iterable = statement.iterable;
+    const given = this.peekType(iterable, module);
+    const base = this.types.definedType(given);
+    if (base.kind == TypeKind.Error) {
+      return;
+    }
+
+    const isAsyncIterator = base.kind == TypeKind.Iterator && base.shape.async;
+    if (!statement.isAwait && isAsyncIterator) {
+      const word = this.text.of(given);
+
+      this.report(module, iterable.loc, Code.ForOfLater, { word });
+
+      return;
+    }
+
+    const isPlainValue =
+      base.kind == TypeKind.Int ||
+      base.kind == TypeKind.Double ||
+      base.kind == TypeKind.Decimal ||
+      base.kind == TypeKind.Boolean;
+    if (statement.isAwait && isPlainValue) {
+      const word = this.text.of(given);
+
+      this.report(module, iterable.loc, Code.ForAwaitNotIterable, { word });
+    }
+  }
+
+  private asyncNextCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    module: int,
+  ): Type | undefined {
+    const base = this.types.definedType(object);
+    const isAsync = base.kind == TypeKind.Iterator && base.shape.async;
+    if (!isAsync || member.name != "next") {
+      return undefined;
+    }
+
+    this.report(module, member.loc, Code.AsyncNextNotYet, {
+      word: member.name,
+    });
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+}

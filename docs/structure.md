@@ -780,6 +780,62 @@ self/             компилятор на tz, пробный (порт compile
                   ли проба чистой. Объявление, которое проба открыла по пути (тело функции,
                   значение переменной, перечисление), оставляет свои ошибки: mark() перед работой,
                   keepSince() после — его второй раз не обходят;
+                  Проверки, добавленные 23.11 (каждая — класс правил и место в обходе, где его
+                  спрашивают): semantic/code/assignment-rules/ — AssignmentRules: составные
+                  присваивания (`+=` к строке, биты у double, `|= 0`, `>>>=` у знакового, смешение
+                  целых типов); semantic/inference/destination-rules/ — DestinationRules: какой тип
+                  ждёт аргумент вызова метода (push, set, add…), чтобы литерал взял его;
+                  semantic/flow/proof-rules/ — ProofRules: «докажи, что число в диапазоне»
+                  (betweenError), части обхода flow/…/partial.proofs (requireBetween) и
+                  partial.ranges (valueRange — отрезок значений выражения);
+                  semantic/flow/interval-math/ — IntervalMath: арифметика отрезков;
+                  semantic/library/bytes-rules/ — BytesRules: элемент типизированного массива и
+                  ошибка записи по недоказанному индексу; semantic/declaration/library-exports/ —
+                  LibraryExports: что ответить на импорт имени, которого в модуле библиотеки нет
+                  (таблица — program/library/library-exports/, собрана из таблиц C++);
+                  load/embedded-files/ — EmbeddedFiles: размер файла для embedBytes.
+                  Команда types идёт дальше после ошибок загрузки из списка
+                  cli/types/types-command/const/…recoverable (присваивание шаблону как значение,
+                  поле без типа), как это делает C++;
+                  Добавлено 23.11 позже: semantic/library/byte-number-rules/ — ByteNumberRules:
+                  числовые методы Buffer и DataView (вид числа по имени метода, место значения,
+                  смещения и числа байтов, ошибки «не влезает»), часть обхода
+                  library/…/partial/bytes/…byte-numbers; flow/…/partial.proofs — requireUpTo
+                  (смещение от 0 до длины минус размер); library/…/partial.library-variants —
+                  выбор варианта у перегруженных членов библиотеки; генерик-требования — часть
+                  generics/…/partial.requirements; тип части выражения без ожидаемого типа
+                  спрашивают только через peekType (code/…/partial/expressions/…typing, рядом с
+                  typed), чтобы потом его заменила таблица ответов. Файлы длиннее 700 строк
+                  поделены: ClassRules → ClassRules (поиск членов и доступ), ClassValueRules
+                  (`instanceof`, классы как значения, коллекции), ClassOverrideRules
+                  (переопределения, контракты, абстрактные методы); ObjectRules → ObjectRules и
+                  ObjectMemberRules (члены значений, методы объектов, ошибки полей);
+                  GenericRules → GenericRules и GenericCallRules (ошибки обобщённых вызовов);
+                  DateReader → DateReader, DateScanner (лексемы строки даты), DateValues
+                  (диапазоны частей даты); новые части обхода: calls/…member-calls,
+                  returns/…returns, branches/…switches, assignments/…assignment-checks,
+                  flow/…changes, library/…declared-members, library/…library-statics;
+                  ещё позже 23.11: library/byte-source-rules/ — ByteSourceRules (источники
+                  байтов, кодировки), text-coder-rules/ — TextCoderRules, intl-rules/ —
+                  IntlRules, fs-rules/ — FsRules, process-rules/ — ProcessRules, child-rules/ —
+                  ChildRules, weak-ref-rules/ — WeakRefRules (TypeResolver держит свой экземпляр
+                  для `WeakRef<T>` в аннотации), regex-parser/ — RegexParser (группы шаблона,
+                  имена, обязательность; без синтаксических ошибок), regex-rules/ — RegexRules
+                  (флаги, методы regex и строк с шаблоном), crypto-rules/ — CryptoRules (имена
+                  хэшей и шифров, длины, опции, обратные вызовы, классы node:crypto; таблицы
+                  const/…names сняты скриптом из C++), subtle-rules/ — SubtleRules (Web Crypto:
+                  алгоритмы, словари, использования, форматы; таблицы const/…tables из C++);
+                  части обхода library/…/partial/: bytes/…byte-sources, byte-encodings,
+                  text-coders, intl/…intl, date-options, fs/…fs-calls, process/…process,
+                  child/…child-calls, weakref/…weak-refs, regex/…regexes, string-patterns,
+                  crypto/…crypto-calls, crypto-forms, subtle-calls, subtle-members;
+                  ещё: library/foreign-rules/ — ForeignRules (функции C: виды параметров и
+                  результата, handle), части library/…/partial/: crypto/…crypto-numbers,
+                  fs/…readline, timers/…timer-promises, ffi/…foreign, …promise-lists,
+                  …embeds, …reflect-calls, …console-calls; code/…/partial/statements/…for-await,
+                  code/…/partial/expressions/…reports (problems, variable, report*);
+                  declaration/scope-traversal/partial/…imports — импорт по умолчанию и
+                  `import * as` встроенных модулей, 'neverthrow';
                   semantic/flow/truth-rules/ — TruthRules: можно ли проверять значение
                   типа как условие (problemOf) и какой ошибкой ответить (answerOf);
                   semantic/declaration/scope-stack/ — ScopeStack: состояние обхода — стек областей

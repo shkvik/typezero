@@ -1,0 +1,10 @@
+export const kShiftLimit: decimal = 40;
+export const kShiftWidth: decimal = 64;
+export const kMostLength: decimal = 1073741823;
+export const kMostCharCode: decimal = 65535;
+export const kMostCodePoint: decimal = 1114111;
+export const kRangedLengths = ["length", "byteLength"];
+export const kMinName = "min";
+export const kMaxName = "max";
+export const kCharCodeAtName = "charCodeAt";
+export const kCodePointAtName = "codePointAt";

@@ -1,0 +1,144 @@
+import { Code } from "../../../diagnostic/code.tz";
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import { IndexExpr } from "../../../program/ast/types/ast.types.expressions.tz";
+import { TypeText } from "../../../program/type/type-text/type-text.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { ModuleQuestions } from "../../declaration/module-questions/module-questions.tz";
+import { TypeQuestions } from "../../types/type-questions/type-questions.tz";
+import {
+  kAllocMethods,
+  kArrayBufferLength,
+  kArrayBufferName,
+  kBufferName,
+  kBufferSize,
+  kBitsInByte,
+  kClampedArrayName,
+  kRawNames,
+  kTypedArrayName,
+  kTypedArrayNames,
+} from "./const/bytes-rules.const.tz";
+import { ProofRange } from "../../flow/proof-rules/types/proof-rules.types.tz";
+
+export class BytesRules {
+  private readonly text: TypeText;
+  private readonly types: TypeQuestions;
+  private readonly modules: ModuleQuestions;
+
+  public constructor(
+    text: TypeText,
+    types: TypeQuestions,
+    modules: ModuleQuestions,
+  ) {
+    this.text = text;
+    this.types = types;
+    this.modules = modules;
+  }
+
+  public elementOf(type: Type): Type | undefined {
+    const base = this.types.definedType(type);
+    if (base.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const chain = this.types.ancestorsOf(base);
+    const root = chain.find((one) => this.isTypedRoot(one));
+    if (root == undefined || root.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    return root.args[0];
+  }
+
+  public storeError(
+    target: IndexExpr,
+    object: Type,
+    constant: decimal | undefined,
+    shownObject: string,
+    shownIndex: string,
+  ): SourceError {
+    const first = this.text.of(object);
+    const other = this.storeTest(constant, shownObject, shownIndex);
+
+    return {
+      code: Code.BytesStoreUnproven,
+      loc: target.loc,
+      details: { first, other },
+    };
+  }
+
+  public isClamped(type: Type): boolean {
+    return (
+      type.kind == TypeKind.Instance &&
+      type.name == kClampedArrayName &&
+      this.modules.isLibraryModule(type.module)
+    );
+  }
+
+  public sizeWhat(name: string): string | undefined {
+    if (name == kArrayBufferName) {
+      return kArrayBufferLength;
+    }
+    if (!kTypedArrayNames.includes(name)) {
+      return undefined;
+    }
+
+    return `the length of a ${name}`;
+  }
+
+  public isTypedName(name: string): boolean {
+    return kTypedArrayNames.includes(name);
+  }
+
+  public staticRange(owner: string, name: string): ProofRange | undefined {
+    const isAlloc = owner == kBufferName && kAllocMethods.includes(name);
+    if (!isAlloc) {
+      return undefined;
+    }
+
+    return { what: kBufferSize, low: 0 };
+  }
+
+  public isRaw(type: Type): boolean {
+    const base = this.types.definedType(type);
+
+    return (
+      base.kind == TypeKind.Instance &&
+      kRawNames.includes(base.name) &&
+      this.modules.isLibraryModule(base.module)
+    );
+  }
+
+  public isByteSized(type: Type): boolean {
+    if (this.isRaw(type)) {
+      return true;
+    }
+
+    const element = this.elementOf(type);
+
+    return (
+      element != undefined &&
+      element.kind == TypeKind.Int &&
+      element.bits == kBitsInByte
+    );
+  }
+
+  private storeTest(
+    constant: decimal | undefined,
+    shownObject: string,
+    shownIndex: string,
+  ): string {
+    if (constant != undefined) {
+      return `${shownObject}.length > ${constant}`;
+    }
+
+    return `${shownIndex} >= 0 && ${shownIndex} < ${shownObject}.length`;
+  }
+
+  private isTypedRoot(type: Type): boolean {
+    return (
+      type.kind == TypeKind.Instance &&
+      type.name == kTypedArrayName &&
+      this.modules.isLibraryModule(type.module)
+    );
+  }
+}

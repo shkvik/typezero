@@ -1,0 +1,29 @@
+import { KnownModuleRow } from "../types/scope-traversal.types.tz";
+
+export const kKnownModules: KnownModuleRow[] = [
+  { path: "tz:io", isNode: false, typicalName: "readLine" },
+  { path: "tz:fs", isNode: false, typicalName: "replaceSync" },
+  { path: "tz:crypto", isNode: false, typicalName: "randomBytesAsync" },
+  { path: "tz:string", isNode: false, typicalName: "cstring" },
+  { path: "fs", isNode: true, typicalName: "readFileSync" },
+  { path: "fs/promises", isNode: true, typicalName: "readFile" },
+  { path: "timers/promises", isNode: true, typicalName: "setTimeout" },
+  { path: "readline", isNode: true, typicalName: "createInterface" },
+  { path: "readline/promises", isNode: true, typicalName: "createInterface" },
+  { path: "path", isNode: true, typicalName: "join" },
+  { path: "path/posix", isNode: true, typicalName: "join" },
+  { path: "path/win32", isNode: true, typicalName: "join" },
+  { path: "os", isNode: true, typicalName: "homedir" },
+  { path: "process", isNode: true, typicalName: "argv" },
+  { path: "buffer", isNode: true, typicalName: "Buffer" },
+  { path: "child_process", isNode: true, typicalName: "execFileSync" },
+  { path: "crypto", isNode: true, typicalName: "createHash" },
+];
+export const kNodePrefix = "node:";
+export const kDefaultImportForm =
+  "default imports are not supported: there is no 'export default'";
+export const kWholeImportForm = "'import * as' is not supported";
+export const kProcessModulePath = "process";
+export const kBufferModulePath = "buffer";
+export const kProcessName = "process";
+export const kResultPackage = "neverthrow";

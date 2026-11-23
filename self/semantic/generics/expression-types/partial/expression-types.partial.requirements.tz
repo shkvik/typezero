@@ -1,0 +1,237 @@
+import { kNewPrefix } from "../../generic-rules/const/generic-rules.const.tz";
+import {
+  BinaryExpr,
+  BinaryOp,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  GenericDraft,
+  OperandPair,
+  PendingCall,
+  Requirement,
+  RequirementKind,
+} from "../../../code/expression-types/types/expression-types.types.tz";
+import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import { messageText } from "../../../../diagnostic/message.tz";
+import { Finding } from "../../../../diagnostic/types/message.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { kToStringName } from "../../../code/expression-types/const/expression-types.const.tz";
+
+partial class ExpressionTypes {
+  private requireOf(type: Type, kind: RequirementKind, word: string): void {
+    if (type.kind != TypeKind.TypeParameter) {
+      return;
+    }
+
+    const list = this.requirements.get(type.id) ?? [];
+
+    list.push({ kind, word, other: 0 });
+    this.requirements.set(type.id, list);
+  }
+
+  private requireFollowing(draft: GenericDraft, module: int): void {
+    const target = draft.target;
+    const bound = this.generics.boundById(draft);
+
+    if (target.isLenient) {
+      return;
+    }
+
+    for (const [id, type] of bound) {
+      if (type.kind == TypeKind.TypeParameter) {
+        const list = this.requirements.get(type.id) ?? [];
+
+        list.push({ kind: RequirementKind.Follows, word: "", other: id });
+        this.requirements.set(type.id, list);
+      }
+    }
+
+    this.pendingCalls.push({
+      name: target.name,
+      params: target.params,
+      bound,
+      loc: target.loc,
+      module,
+    });
+  }
+
+  private pendingCallsCheck(module: int): void {
+    const mine = this.pendingCalls.filter((call) => call.module == module);
+    const rest = this.pendingCalls.filter((call) => call.module != module);
+
+    this.pendingCalls.splice(0, this.pendingCalls.length);
+
+    for (const call of rest) {
+      this.pendingCalls.push(call);
+    }
+
+    for (const call of mine) {
+      this.pendingCallCheck(call);
+    }
+  }
+
+  private pendingCallCheck(call: PendingCall): void {
+    for (const param of call.params) {
+      if (param.kind != TypeKind.TypeParameter) {
+        continue;
+      }
+
+      const type = call.bound.get(param.id);
+      if (type == undefined || type.kind == TypeKind.TypeParameter) {
+        continue;
+      }
+
+      const seen = new Set<int>();
+      const found = this.parameterFinding(param.id, type, seen);
+      if (found != undefined) {
+        const other = messageText(found.code, found.details);
+        const isClass = call.name.startsWith(kNewPrefix);
+        const code = this.genericCalls.refusedCode(isClass);
+        const word = this.genericCalls.refusedName(call.name, isClass);
+
+        this.report(call.module, call.loc, code, {
+          word,
+          first: param.name,
+          second: this.text.of(type),
+          other,
+        });
+
+        return;
+      }
+    }
+  }
+
+  private parameterFinding(
+    id: int,
+    type: Type,
+    seen: Set<int>,
+  ): Finding | undefined {
+    if (seen.has(id)) {
+      return undefined;
+    }
+
+    seen.add(id);
+
+    for (const one of this.requirements.get(id) ?? []) {
+      const found = this.requirementFinding(one, type, seen);
+      if (found != undefined) {
+        return found;
+      }
+    }
+
+    return undefined;
+  }
+
+  private requirementFinding(
+    one: Requirement,
+    type: Type,
+    seen: Set<int>,
+  ): Finding | undefined {
+    switch (one.kind) {
+      case RequirementKind.Text:
+        return this.textFinding(type);
+      case RequirementKind.Compare:
+        return this.comparisonFinding(type, one.word);
+      case RequirementKind.Sort:
+        return this.sortFinding(type);
+      case RequirementKind.Unused:
+        return this.unusedFinding(type);
+      default:
+        return this.parameterFinding(one.other, type, seen);
+    }
+  }
+
+  private textFinding(type: Type): Finding | undefined {
+    const base = this.types.definedType(type);
+    const isText = type.kind == TypeKind.String || type.kind == TypeKind.Error;
+    if (base.kind == TypeKind.Instance) {
+      return this.instanceTextFinding(base);
+    }
+    if (isText || base.kind == TypeKind.TypeParameter) {
+      return undefined;
+    }
+
+    return this.concatenations.textAnswer(type, base);
+  }
+
+  private instanceTextFinding(base: Type): Finding | undefined {
+    if (
+      base.kind != TypeKind.Instance ||
+      this.modules.isLibraryModule(base.module)
+    ) {
+      return undefined;
+    }
+
+    const decl = this.classOf(base);
+    if (decl == undefined || decl.typeParams.length > 0) {
+      return undefined;
+    }
+
+    const hasOwn = decl.methods.some((one) => one.name == kToStringName);
+    if (hasOwn) {
+      return undefined;
+    }
+
+    return { code: Code.ObjectToText, details: kNoDetails };
+  }
+
+  private requireJoin(expr: BinaryExpr, pair: OperandPair): void {
+    const left = this.types.definedType(pair.left);
+    const right = this.types.definedType(pair.right);
+    const hasText =
+      left.kind == TypeKind.String || right.kind == TypeKind.String;
+    if (expr.op != BinaryOp.Add || !hasText) {
+      return;
+    }
+
+    this.requireOf(left, RequirementKind.Text, "");
+    this.requireOf(right, RequirementKind.Text, "");
+  }
+
+  private comparisonFinding(type: Type, other: string): Finding | undefined {
+    const base = this.types.definedType(type);
+    if (base.kind == TypeKind.Result) {
+      return { code: Code.ResultsCompared, details: { other } };
+    }
+    if (!this.comparisons.isOrdering(other)) {
+      return undefined;
+    }
+
+    const isOrdered =
+      base.kind == TypeKind.String ||
+      this.types.isNumber(base) ||
+      this.types.isDate(base);
+    if (isOrdered) {
+      return undefined;
+    }
+
+    const first = this.text.of(type);
+
+    return {
+      code: Code.OperandTypes,
+      details: { first, second: first, other },
+    };
+  }
+
+  private sortFinding(type: Type): Finding | undefined {
+    const code = this.sortProblem(type);
+    if (code == undefined) {
+      return undefined;
+    }
+
+    const word = this.text.of(this.types.definedType(type));
+    const other = this.statements.sortExample(type);
+
+    return { code, details: { word, other } };
+  }
+
+  private unusedFinding(type: Type): Finding | undefined {
+    const base = this.types.definedType(type);
+    if (base.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    return { code: Code.ResultUnused, details: kNoDetails };
+  }
+}

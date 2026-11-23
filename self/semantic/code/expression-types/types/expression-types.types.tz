@@ -503,3 +503,35 @@ export type DecoratorPlaceText = {
   readonly given: int;
   readonly args: string;
 };
+
+export enum RequirementKind {
+  Text,
+  Compare,
+  Sort,
+  Unused,
+  Follows,
+}
+
+export type Requirement = {
+  readonly kind: RequirementKind;
+  readonly word: string;
+  readonly other: int;
+};
+
+export type PendingCall = {
+  readonly name: string;
+  readonly params: Type[];
+  readonly bound: Map<int, Type>;
+  readonly loc: int;
+  readonly module: int;
+};
+
+export type OpenVariant = {
+  readonly params: Param[];
+  readonly result?: Type;
+};
+
+export type LibraryVariants = {
+  readonly types: FunctionType[];
+  readonly open: OpenVariant[];
+};

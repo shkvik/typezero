@@ -1,0 +1,372 @@
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NewExpr,
+  PropertyKind,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import {
+  kCipherClasses,
+  kCostNames,
+  kCurveOption,
+  kDigestName,
+  kHashClasses,
+  kModulusOption,
+  kPairOptions,
+  kPairUnsupported,
+  kScryptOptions,
+  kTextOrBuffers,
+  kTextOrViews,
+  kUpdateName,
+} from "../../../crypto-rules/const/crypto-rules.const.tz";
+import {
+  CryptoClass,
+  CryptoData,
+} from "../../../crypto-rules/types/crypto-rules.types.tz";
+
+partial class ExpressionTypes {
+  private cryptoAsyncCallback(
+    expr: CallExpr,
+    shown: string,
+    module: int,
+  ): boolean {
+    const last = expr.args[expr.args.length - 1]?.expr;
+    const isCallback = last != undefined && last.kind == ExprKind.Function;
+    if (!this.crypto.isAsyncName(shown) || !isCallback || last == undefined) {
+      return false;
+    }
+
+    this.reportFound(module, this.crypto.asyncCallbackError(last.loc, shown));
+
+    return true;
+  }
+
+  private cryptoSyncCallback(
+    expr: CallExpr,
+    index: int,
+    name: string,
+    hint: string,
+    module: int,
+  ): boolean {
+    const arg = expr.args[index]?.expr;
+    if (arg == undefined) {
+      return false;
+    }
+
+    const given = this.types.definedType(this.peekType(arg, module));
+    if (given.kind != TypeKind.Function) {
+      return false;
+    }
+
+    const callbackError = this.crypto.syncCallbackError(arg.loc, name, hint);
+
+    this.reportFound(module, callbackError);
+
+    return true;
+  }
+
+  private cryptoOptionsFine(
+    expr: CallExpr,
+    index: int,
+    shown: string,
+    allowed: string[],
+    module: int,
+  ): boolean {
+    const options = expr.args[index]?.expr;
+    if (options == undefined || options.kind == ExprKind.Undefined) {
+      return true;
+    }
+    if (options.kind != ExprKind.ObjectLit) {
+      const literalError = this.crypto.optionsLiteralError(
+        options.loc,
+        shown,
+        allowed,
+      );
+
+      this.reportFound(module, literalError);
+
+      return false;
+    }
+
+    for (const property of options.props) {
+      const kind = property.form.kind;
+      const isNamed =
+        kind != PropertyKind.Spread &&
+        kind != PropertyKind.Computed &&
+        kind != PropertyKind.Method &&
+        property.name != "";
+      if (!isNamed) {
+        const byNameError = this.crypto.optionsByNameError(
+          property.loc,
+          shown,
+          allowed,
+        );
+
+        this.reportFound(module, byNameError);
+
+        return false;
+      }
+      if (!allowed.includes(property.name)) {
+        const unknownError = this.crypto.optionUnknownError(
+          property.loc,
+          shown,
+          property.name,
+          allowed,
+        );
+
+        this.reportFound(module, unknownError);
+
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private scryptOptionsCheck(expr: CallExpr, shown: string, module: int): void {
+    if (!this.cryptoOptionsFine(expr, 3, shown, kScryptOptions, module)) {
+      return;
+    }
+
+    const options = expr.args[3]?.expr;
+    if (options == undefined) {
+      return;
+    }
+
+    const pairs = [
+      ["N", "cost"],
+      ["r", "blockSize"],
+      ["p", "parallelization"],
+    ];
+
+    for (const pair of pairs) {
+      const first = pair[0] ?? "";
+      const second = pair[1] ?? "";
+      const later = this.optionValue(options, second);
+      const isBoth = this.optionValue(options, first) != undefined;
+      if (isBoth && later != undefined) {
+        const togetherError = this.crypto.togetherError(
+          later.loc,
+          first,
+          second,
+        );
+
+        return this.reportFound(module, togetherError);
+      }
+    }
+
+    this.scryptCostCheck(options, module);
+  }
+
+  private scryptCostCheck(options: Expr, module: int): void {
+    const costs = kCostNames
+      .map((name) => this.optionValue(options, name))
+      .filter((value) => value != undefined);
+    const cost = costs[0];
+    if (cost == undefined) {
+      return;
+    }
+
+    const number = this.cryptoNumber(cost, module);
+    if (number != undefined) {
+      this.reportFound(module, this.crypto.costError(cost.loc, number));
+    }
+  }
+
+  private keyPairCheck(
+    expr: CallExpr,
+    shown: string,
+    calleeLoc: int,
+    module: int,
+  ): void {
+    const count = expr.args.length;
+    const first = expr.args[0]?.expr;
+    if (count > 2 || first == undefined) {
+      return;
+    }
+
+    const type = this.constantText(first) ?? "";
+    const typeError = this.crypto.pairTypeError(first.loc, type);
+    if (type != "" && typeError != undefined) {
+      return this.reportFound(module, typeError);
+    }
+    if (!this.cryptoOptionsFine(expr, 1, shown, kPairOptions, module)) {
+      return;
+    }
+
+    for (const name of kPairUnsupported) {
+      const value = this.cryptoOptionAt(expr, 1, name);
+      if (value != undefined) {
+        const optionError = this.crypto.pairOptionError(value.loc, name);
+
+        return this.reportFound(module, optionError);
+      }
+    }
+
+    this.keyPairNeedsCheck(expr, type, calleeLoc, module);
+  }
+
+  private keyPairNeedsCheck(
+    expr: CallExpr,
+    type: string,
+    calleeLoc: int,
+    module: int,
+  ): void {
+    const modulus = this.cryptoOptionAt(expr, 1, kModulusOption);
+    const curve = this.cryptoOptionAt(expr, 1, kCurveOption);
+    const needsError = this.crypto.pairNeedsError(
+      calleeLoc,
+      type,
+      modulus != undefined,
+      curve != undefined,
+    );
+    if (needsError != undefined) {
+      return this.reportFound(module, needsError);
+    }
+    if (modulus == undefined) {
+      return;
+    }
+
+    const bits = this.cryptoNumber(modulus, module);
+    if (bits != undefined) {
+      const smallError = this.crypto.smallModulusError(modulus.loc, type, bits);
+
+      this.reportFound(module, smallError);
+    }
+  }
+
+  private cryptoNew(
+    expr: NewExpr,
+    name: string,
+    home: int,
+    module: int,
+  ): Type | undefined {
+    const opened = this.program.modules[home];
+    const isCrypto =
+      opened != undefined &&
+      this.crypto.isCryptoModule(opened.name) &&
+      this.crypto.isCryptoClass(name);
+    if (!isCrypto || this.modules.isLibraryModule(module)) {
+      return undefined;
+    }
+
+    this.reportFound(module, this.crypto.newError(expr.loc, name));
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private cryptoMethodCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type | undefined {
+    const home = this.program.modules[instance.module]?.name ?? "";
+    const shape = this.crypto.classOf(instance, home);
+    const hasSpread = expr.args.some((arg) => arg.spread);
+    if (shape == undefined || hasSpread) {
+      return undefined;
+    }
+
+    const methodError = this.crypto.methodError(member.loc, shape, member.name);
+    if (methodError == undefined) {
+      this.cryptoMethodArguments(expr, member, shape, module);
+
+      return undefined;
+    }
+
+    this.reportFound(module, methodError);
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private cryptoMemberRead(
+    expr: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type | undefined {
+    const home = this.program.modules[instance.module]?.name ?? "";
+    const shape = this.crypto.classOf(instance, home);
+    if (shape == undefined) {
+      return undefined;
+    }
+
+    const memberError = this.crypto.memberError(expr.loc, shape, expr.name);
+    if (memberError == undefined) {
+      return undefined;
+    }
+
+    this.reportFound(module, memberError);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private cryptoMethodArguments(
+    expr: CallExpr,
+    member: MemberExpr,
+    shape: CryptoClass,
+    module: int,
+  ): void {
+    const isHash = kHashClasses.includes(shape.name);
+    const isCipher = kCipherClasses.includes(shape.name);
+    const count = expr.args.length;
+    if (member.name == kUpdateName && isHash && count <= 2) {
+      const item = { index: 0, what: "data", kinds: kTextOrViews };
+
+      return this.cryptoUpdateCheck(expr, item, module);
+    }
+    if (member.name == kUpdateName && isCipher && count <= 3) {
+      const item = { index: 0, what: "data", kinds: kTextOrBuffers };
+
+      return this.cryptoUpdateCheck(expr, item, module);
+    }
+    if (member.name == kDigestName && isHash && count <= 1) {
+      this.cryptoEncodingCheck(expr, 0, member.name, module);
+    }
+  }
+
+  private cryptoUpdateCheck(
+    expr: CallExpr,
+    item: CryptoData,
+    module: int,
+  ): void {
+    if (this.cryptoDataFine(expr, [item], module)) {
+      this.cryptoEncodingCheck(expr, 1, "update", module);
+    }
+  }
+
+  private cryptoEncodingCheck(
+    expr: CallExpr,
+    index: int,
+    name: string,
+    module: int,
+  ): void {
+    const encoding = expr.args[index]?.expr;
+    if (encoding == undefined || encoding.kind == ExprKind.Undefined) {
+      return;
+    }
+
+    const text = this.constantText(encoding);
+    if (text == undefined) {
+      const literalError = this.crypto.encodingLiteralError(encoding.loc, name);
+
+      return this.reportFound(module, literalError);
+    }
+    if (text == "buffer") {
+      return;
+    }
+
+    const unknownError = this.byteSources.encodingError(encoding.loc, [text]);
+
+    this.reportFound(module, unknownError);
+  }
+}

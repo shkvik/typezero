@@ -1,3 +1,7 @@
+import {
+  OperandPair,
+  RequirementKind,
+} from "../../types/expression-types.types.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
@@ -10,7 +14,6 @@ import {
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
 import { kToStringName } from "../../const/expression-types.const.tz";
-import { OperandPair } from "../../types/expression-types.types.tz";
 import { ConcatLink } from "../../../concatenation-rules/types/concatenation-rules.types.tz";
 
 partial class ExpressionTypes {
@@ -29,7 +32,7 @@ partial class ExpressionTypes {
       return this.instanceTextCheck(operand, base, module);
     }
     if (isText || base.kind == TypeKind.TypeParameter) {
-      return;
+      return this.requireOf(base, RequirementKind.Text, "");
     }
 
     const answer = this.concatenations.textAnswer(type, base);
@@ -39,6 +42,9 @@ partial class ExpressionTypes {
   }
 
   private instanceTextCheck(operand: Expr, base: Type, module: int): void {
+    if (this.byteTextCheck(operand, base, module)) {
+      return;
+    }
     if (
       base.kind != TypeKind.Instance ||
       this.modules.isLibraryModule(base.module)

@@ -1,0 +1,15 @@
+import { statSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+export class EmbeddedFiles {
+  public sizeOf(modulePath: string, relative: string): int | undefined {
+    const folder = dirname(modulePath);
+    const path = join(folder, relative);
+    const stat = statSync(path);
+    if (stat.isErr()) {
+      return undefined;
+    }
+
+    return stat.value.size;
+  }
+}

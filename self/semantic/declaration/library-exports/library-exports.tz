@@ -1,0 +1,200 @@
+import { Code } from "../../../diagnostic/code.tz";
+import { Details, Finding } from "../../../diagnostic/types/message.types.tz";
+import { kLibraryExports } from "../../../program/library/library-exports/const/library-exports.const.tz";
+import { ExportKind } from "../../../program/library/library-exports/types/library-exports.types.tz";
+import {
+  kBufferHint,
+  kBufferModule,
+  kChildHint,
+  kChildModule,
+  kCryptoModule,
+  kFsModule,
+  kInTzFsHint,
+  kProcessHint,
+  kProcessModule,
+  kPromisesModule,
+  kReadFileExample,
+  kReadFileName,
+  kReadlineHint,
+  kReadlineModules,
+  kSyncSuffix,
+  kTimersHint,
+  kTimersModule,
+  kTzFsHint,
+  kTzFsModule,
+  kTzIoHint,
+  kTzIoModule,
+} from "./const/library-exports.const.tz";
+
+export class LibraryExports {
+  public missing(module: string, path: string, word: string): Finding {
+    const kind = this.kindOf(module, word);
+
+    if (module == kFsModule) {
+      return this.missingInFs(path, word, kind);
+    }
+    if (module == kPromisesModule) {
+      return this.missingInPromises(path, word, kind);
+    }
+    if (module == kChildModule) {
+      return this.missingInChild(path, word, kind);
+    }
+    if (module == kCryptoModule) {
+      return this.missingInCrypto(path, word, kind);
+    }
+
+    const hint = this.hintOf(module, word);
+    const isPending = kind == ExportKind.NotYet || module == kProcessModule;
+    if (isPending) {
+      return this.notYet(path, word, hint);
+    }
+
+    return this.none(path, word, hint);
+  }
+
+  private kindOf(module: string, name: string): ExportKind | undefined {
+    const row = kLibraryExports.find(
+      (one) => one.module == module && one.name == name,
+    );
+
+    return row?.kind;
+  }
+
+  private isFunction(module: string, name: string): boolean {
+    return this.kindOf(module, name) == ExportKind.Function;
+  }
+
+  private missingInFs(
+    path: string,
+    word: string,
+    kind: ExportKind | undefined,
+  ): Finding {
+    if (kind == ExportKind.InTzFs) {
+      return this.none(path, word, kInTzFsHint);
+    }
+
+    const other = `${word}${kSyncSuffix}`;
+    const hasSync = this.isFunction(kFsModule, other);
+    if (hasSync && this.isFunction(kPromisesModule, word)) {
+      const place = this.exampleOf(word);
+      const details: Details = { path, word, other, place };
+
+      return { code: Code.ExportTakesCallback, details };
+    }
+    if (hasSync) {
+      return { code: Code.ExportSyncOnly, details: { path, word, other } };
+    }
+    if (kind == ExportKind.NotYet) {
+      return this.notYet(path, word, "");
+    }
+
+    return this.none(path, word, "");
+  }
+
+  private exampleOf(word: string): string {
+    if (word == kReadFileName) {
+      return kReadFileExample;
+    }
+
+    return "";
+  }
+
+  private missingInPromises(
+    path: string,
+    word: string,
+    kind: ExportKind | undefined,
+  ): Finding {
+    if (kind == ExportKind.InTzFs) {
+      return this.none(path, word, kInTzFsHint);
+    }
+    if (kind == ExportKind.NotYet) {
+      return this.notYet(path, word, "");
+    }
+    if (this.isFunction(kFsModule, word)) {
+      const waiting = word.slice(0, word.length - kSyncSuffix.length);
+      const hint = `; the function that waits is '${waiting}', or import '${word}' from "node:fs"`;
+
+      return this.none(path, word, hint);
+    }
+
+    return this.none(path, word, "");
+  }
+
+  private missingInChild(
+    path: string,
+    word: string,
+    kind: ExportKind | undefined,
+  ): Finding {
+    switch (kind) {
+      case ExportKind.AsyncChild:
+        return { code: Code.ExportAsyncChild, details: { path, word } };
+      case ExportKind.Fork:
+        return { code: Code.ExportFork, details: { path, word } };
+      case ExportKind.NotYet:
+        return this.notYet(path, word, kChildHint);
+      default:
+        return this.none(path, word, "");
+    }
+  }
+
+  private missingInCrypto(
+    path: string,
+    word: string,
+    kind: ExportKind | undefined,
+  ): Finding {
+    switch (kind) {
+      case ExportKind.Webcrypto:
+        return { code: Code.ExportWebcrypto, details: { path, word } };
+      case ExportKind.Subtle:
+        return { code: Code.ExportSubtle, details: { path, word } };
+      case ExportKind.NotYet:
+        return this.notYet(path, word, "");
+      default:
+        return this.none(path, word, "");
+    }
+  }
+
+  private hintOf(module: string, word: string): string {
+    if (kReadlineModules.includes(module)) {
+      return kReadlineHint;
+    }
+
+    switch (module) {
+      case kTzFsModule:
+        return this.tzFsHint(word);
+      case kTzIoModule:
+        return kTzIoHint;
+      case kProcessModule:
+        return kProcessHint;
+      case kBufferModule:
+        return kBufferHint;
+      case kTimersModule:
+        return kTimersHint;
+      default:
+        return "";
+    }
+  }
+
+  private tzFsHint(word: string): string {
+    const isInNode =
+      this.isFunction(kFsModule, word) ||
+      this.isFunction(kPromisesModule, word);
+    if (isInNode) {
+      return `${kTzFsHint}; '${word}' is in "node:fs"`;
+    }
+
+    return kTzFsHint;
+  }
+
+  private notYet(path: string, word: string, other: string): Finding {
+    return { code: Code.ExportNotYet, details: { path, word, other } };
+  }
+
+  private none(path: string, word: string, other: string): Finding {
+    if (other == "") {
+      return { code: Code.NoExportNamed, details: { path, word } };
+    }
+
+    return { code: Code.NoExportNamedHint, details: { path, word, other } };
+  }
+}

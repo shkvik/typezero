@@ -1,0 +1,264 @@
+import {
+  Expr,
+  ExprKind,
+  NewExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import { Linear } from "../../../../code/expression-types/types/expression-types.types.tz";
+import { kZeroTerm } from "../../../../flow/bound-rules/const/bound-rules.const.tz";
+import {
+  kBufferName,
+  kByteLengthName,
+  kByteOffsetName,
+  kDataViewWhat,
+  kLengthName,
+} from "../../../byte-source-rules/const/byte-source-rules.const.tz";
+
+partial class ExpressionTypes {
+  private dataViewCheck(expr: NewExpr, buffer: Expr, module: int): void {
+    const found = this.peekType(buffer, module);
+    const base = this.types.definedType(found);
+    if (base.kind == TypeKind.Error) {
+      return;
+    }
+    if (!this.byteSources.isArrayBuffer(base)) {
+      const viewOverError = this.byteSources.viewOverError(buffer.loc, found);
+
+      return this.reportFound(module, viewOverError);
+    }
+
+    const offset = expr.args[1]?.expr;
+    const length = expr.args[2]?.expr;
+
+    this.viewCheck(buffer, offset, length, 1, kDataViewWhat, module);
+  }
+
+  private typedViewCheck(expr: NewExpr, made: Type, module: int): void {
+    const buffer = expr.args[0]?.expr;
+    const size = this.byteSources.elementSize(made);
+    const name = this.byteSources.typedName(made);
+    if (buffer == undefined || size == undefined || name == undefined) {
+      return;
+    }
+
+    const offset = expr.args[1]?.expr;
+    const length = expr.args[2]?.expr;
+
+    this.viewCheck(buffer, offset, length, size, `the ${name}`, module);
+  }
+
+  private viewCheck(
+    buffer: Expr,
+    offset: Expr | undefined,
+    length: Expr | undefined,
+    size: decimal,
+    what: string,
+    module: int,
+  ): void {
+    if (this.isSameView(buffer, offset, length, size, module)) {
+      return;
+    }
+    if (offset != undefined) {
+      const offsetWhat = `the offset of ${what}`;
+      const isPlaced = this.requireUpTo(
+        offset,
+        buffer,
+        { what: offsetWhat, less: 0 },
+        module,
+      );
+      if (!isPlaced) {
+        return;
+      }
+    }
+    if (!this.isAlignedOffset(offset, size, what, module)) {
+      return;
+    }
+    if (length == undefined) {
+      return this.wholeViewCheck(buffer, size, what, module);
+    }
+
+    const given = this.peekType(length, module);
+    const lengthWhat = `the length of ${what}`;
+    const isCounted = this.requireBetween(
+      length,
+      given,
+      { what: lengthWhat, low: 0 },
+      module,
+    );
+    if (!isCounted) {
+      return;
+    }
+
+    this.viewFitCheck(buffer, offset, length, size, what, module);
+  }
+
+  private isAlignedOffset(
+    offset: Expr | undefined,
+    size: decimal,
+    what: string,
+    module: int,
+  ): boolean {
+    if (offset == undefined || size <= 1) {
+      return true;
+    }
+
+    const given = this.peekType(offset, module);
+    const start = this.intConstant(offset, given, module);
+    if (start != undefined && start % size == 0) {
+      return true;
+    }
+
+    const offsetAlignedError = this.byteSources.offsetAlignedError(
+      offset.loc,
+      what,
+      size,
+    );
+
+    this.reportFound(module, offsetAlignedError);
+
+    return false;
+  }
+
+  private wholeViewCheck(
+    buffer: Expr,
+    size: decimal,
+    what: string,
+    module: int,
+  ): void {
+    if (size <= 1) {
+      return;
+    }
+
+    const whole = this.freshLength(buffer, module);
+    if (whole != undefined) {
+      const exact = this.settledLinear(whole);
+      if (exact.term == kZeroTerm && exact.offset % size == 0) {
+        return;
+      }
+    }
+
+    const sizeAlignedError = this.byteSources.sizeAlignedError(
+      buffer.loc,
+      what,
+      size,
+    );
+
+    this.reportFound(module, sizeAlignedError);
+  }
+
+  private viewFitCheck(
+    buffer: Expr,
+    offset: Expr | undefined,
+    length: Expr,
+    size: decimal,
+    what: string,
+    module: int,
+  ): void {
+    const from = this.offsetLinear(offset, module);
+    const count = this.viewCount(length, size, module);
+    const whole = this.measuredLength(buffer, module);
+    if (from != undefined && count != undefined && whole != undefined) {
+      const sum = this.bounds.linearSum(from, count);
+      if (sum != undefined && this.isLinearUpTo(sum, whole, 0)) {
+        return;
+      }
+    }
+
+    const shownOffset = this.shownOffset(offset, module);
+    const shownLength = this.sources.valueText(length, module);
+    const shownBuffer = this.sources.valueText(buffer, module);
+    const notFitsError = this.byteSources.notFitsError(
+      length.loc,
+      what,
+      shownOffset,
+      shownLength,
+      size,
+      shownBuffer,
+    );
+
+    this.reportFound(module, notFitsError);
+  }
+
+  private viewCount(
+    length: Expr,
+    size: decimal,
+    module: int,
+  ): Linear | undefined {
+    const count = this.linearOf(length, module);
+    if (count == undefined || size <= 1) {
+      return count;
+    }
+
+    const exact = this.settledLinear(count);
+    if (exact.term != kZeroTerm) {
+      return undefined;
+    }
+
+    return { term: kZeroTerm, offset: exact.offset * size };
+  }
+
+  private isSameView(
+    buffer: Expr,
+    offset: Expr | undefined,
+    length: Expr | undefined,
+    size: decimal,
+    module: int,
+  ): boolean {
+    const owner = this.viewOwner(buffer, kBufferName, module);
+    if (owner == undefined || offset == undefined) {
+      return false;
+    }
+    if (this.viewOwner(offset, kByteOffsetName, module) != owner) {
+      return false;
+    }
+    if (length == undefined) {
+      return size == 1;
+    }
+    if (this.viewOwner(length, kByteLengthName, module) == owner) {
+      return size == 1;
+    }
+    if (this.viewOwner(length, kLengthName, module) != owner) {
+      return false;
+    }
+
+    const held = this.viewOwnerSize(buffer, module);
+
+    return held == size;
+  }
+
+  private viewOwner(
+    expr: Expr,
+    field: string,
+    module: int,
+  ): string | undefined {
+    if (expr.kind != ExprKind.Member || expr.name != field) {
+      return undefined;
+    }
+
+    const object = expr.object;
+    if (object.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const type = this.peekType(object, module);
+    if (!this.byteSources.isByteView(type)) {
+      return undefined;
+    }
+
+    return this.pathKey(object, module);
+  }
+
+  private viewOwnerSize(buffer: Expr, module: int): decimal | undefined {
+    if (buffer.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    const type = this.peekType(buffer.object, module);
+
+    return this.byteSources.elementSize(type);
+  }
+}

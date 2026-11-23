@@ -39,7 +39,10 @@ partial class ExpressionTypes {
     }
 
     this.store.fillObject(reserved, fields);
-    this.store.label(reserved, this.objects.methodObjectName(expr, fields));
+    this.store.label(
+      reserved,
+      this.objectMembers.methodObjectName(expr, fields),
+    );
 
     const methods = this.literalMethods(expr, reserved, goal, module);
 
@@ -144,7 +147,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const member = this.objects.plainMember(goal, property.name);
+    const member = this.objectMembers.plainMember(goal, property.name);
     const isTyped =
       member != undefined &&
       member.readonly &&
@@ -162,7 +165,7 @@ partial class ExpressionTypes {
     methods: ObjectField[],
     module: int,
   ): boolean {
-    const checked = this.objects.methodTargetCheck(expr, goal, methods);
+    const checked = this.objectMembers.methodTargetCheck(expr, goal, methods);
 
     this.reportFound(module, checked.error);
 

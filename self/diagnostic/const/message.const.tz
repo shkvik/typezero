@@ -269,7 +269,7 @@ export const kMessages: Record<Code, Message> = {
     text: "the class after 'new' cannot be reached through '?.': when the object is 'undefined' there is no class to create; check the object first",
   },
   [Code.PatternAssignmentNotStatement]: {
-    text: "an assignment to a pattern is a statement of its own and gives no value: write it on a line of its own, e.g. '[a, b] = [b, a];'",
+    text: "destructuring assignment can only be a statement, e.g. '[a, b] = [b, a]'",
   },
   [Code.ExpectedAfterExtendsClause]: {
     text: "expected {expected} after the 'extends' clause of the conditional type, e.g. 'T extends string ? A : B', found {found}",
@@ -791,7 +791,7 @@ export const kMessages: Record<Code, Message> = {
     text: "import '{word}' conflicts with the declaration of '{word}' in this file; import it under another name, e.g. 'import { {other} as {other}2 } from \"{path}\"'",
   },
   [Code.DuplicateImport]: {
-    text: "duplicate import of '{word}': it is already imported at line {other}",
+    text: "duplicate import of '{word}'",
   },
   [Code.PartListWithoutPart]: {
     text: "an import must name what it takes: 'import \"{path}\"' only lists a file with a part of a class declared here ('partial class'); import the names you need, e.g. 'import { a } from \"{path}\"'",
@@ -836,13 +836,13 @@ export const kMessages: Record<Code, Message> = {
     text: "cannot find type '{word}'",
   },
   [Code.DuplicateDeclaration]: {
-    text: "duplicate declaration of '{word}': it is already declared at line {other}",
+    text: "duplicate declaration of '{word}'",
   },
   [Code.DuplicateFunction]: {
-    text: "duplicate declaration of '{word}', already declared at line {other}; plain functions are not overloaded: give each variant its own name",
+    text: "duplicate declaration of '{word}'; plain functions are not overloaded: give each variant its own name",
   },
   [Code.DuplicateType]: {
-    text: "duplicate declaration of type '{word}': it is already declared at line {other}",
+    text: "duplicate declaration of type '{word}'",
   },
   [Code.DuplicateTypeParameter]: {
     text: "duplicate type parameter '{word}'",
@@ -905,7 +905,7 @@ export const kMessages: Record<Code, Message> = {
     text: "the keys of a mapped type are names of fields, string literal types such as '\"id\" | \"name\"' or 'keyof T', not '{word}'",
   },
   [Code.IntersectionNeedsObjects]: {
-    text: "'&' joins object types into one with the fields of all, and '{word}' is not an object type; of TypeScript's other idioms with '&', 'K & string' (what of K is a string) and 'T & {}' (T without undefined) work too",
+    text: "'&' joins object types into one with the fields of all, and '{word}' is not an object type; of TypeScript's other idioms with '&', 'K & string' (what of K is a string) and 'T & {}' (T without undefined) work",
   },
   [Code.AliasTooDeep]: {
     text: "type alias '{word}' calls itself more than 1000 times, so it may never end; TypeScript stops there too",
@@ -3075,5 +3075,929 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.MethodThisParameter]: {
     text: "a method cannot have a 'this' parameter: its 'this' is its object",
+  },
+  [Code.CompoundJoinsText]: {
+    text: "operator '+=' cannot be applied to types 'string' and '{first}' (JavaScript would join them as text){other}",
+  },
+  [Code.CompoundBitsOfDouble]: {
+    text: "operator '{other}' works on the bits of integers, and this is a double; drop the fraction first, e.g. 'Math.trunc(x).toInt()'",
+  },
+  [Code.CompoundNothingChanged]: {
+    text: "'{other} 0' changes nothing in tz: integers are exact, and nothing wraps around here; to count modulo 2^32, use 'Bit.Wrap32'",
+  },
+  [Code.CompoundSignedShift]: {
+    text: "'>>>=' shifts in zeros, as a shift of an unsigned type does; '{first}' is signed: use '>>='",
+  },
+  [Code.CompoundMixedNumbers]: {
+    text: "operator '{other}' cannot be applied to types '{first}' and '{second}': a number changes its type only explicitly{place}",
+  },
+  [Code.ProofNegative]: {
+    text: "{word} cannot be negative, found {other}",
+  },
+  [Code.ProofOutside]: {
+    text: "{word} must be {place}, found {other}",
+  },
+  [Code.ProofNotWhole]: {
+    text: "{word} must be a whole number {place}, found '{first}'",
+  },
+  [Code.ProofBetween]: {
+    text: "cannot prove that {word} is {place}, and JavaScript would throw a RangeError; check it first, e.g. 'if ({other})'",
+  },
+  [Code.NewArrayNeedsElement]: {
+    text: "'new Array' needs an element type, e.g. 'new Array<int>(n)'",
+  },
+  [Code.LoopVariableTyped]: {
+    text: "a '{word}' variable cannot have a type annotation",
+  },
+  [Code.StringElementAssigned]: {
+    text: "strings are immutable; a character cannot be assigned to",
+  },
+  [Code.BytesStoreUnproven]: {
+    text: "cannot prove that the index is within the {first} (0 <= index < length): it never grows, and JavaScript would drop the write; check the index first, e.g. 'if ({other})'",
+  },
+  [Code.AssignToConstant]: {
+    text: "cannot assign to '{word}' because it is a constant",
+  },
+  [Code.AssignToImported]: {
+    text: "cannot assign to '{word}' because it is imported",
+  },
+  [Code.TupleMethodDestructure]: {
+    text: "'{word}' is not supported on tuples; destructure it instead, e.g. 'const [a, b] = {first}'",
+  },
+  [Code.AssignToImportedVariable]: {
+    text: "cannot assign to '{word}' because it is imported; change it in the file that declares it, e.g. with a function that file exports",
+  },
+  [Code.ObjectPatternAssignmentNotStatement]: {
+    text: "destructuring assignment can only be a statement, e.g. '({ a, b } = o)'",
+  },
+  [Code.ExportNotYet]: {
+    text: "'{word}' of '{path}' is not supported yet{other}",
+  },
+  [Code.ExportTakesCallback]: {
+    text: "'{word}' of '{path}' takes a callback, which tz does not have; import '{word}' from \"node:fs/promises\", which gives a Promise, or '{other}', which gives what it reads{place}",
+  },
+  [Code.ExportSyncOnly]: {
+    text: "'{word}' of '{path}' takes a callback, which tz does not have; import '{other}' and use what it returns",
+  },
+  [Code.NoExportNamedHint]: {
+    text: "'{path}' has no export named '{word}'{other}",
+  },
+  [Code.ExportAsyncChild]: {
+    text: "'{word}' of '{path}' is not supported yet: it comes with EventEmitter and the streams of Node (docs/process.md, step 2); use '{word}Sync', which waits for the program and gives what it printed",
+  },
+  [Code.ExportFork]: {
+    text: "'{word}' of '{path}' is not possible: it starts another Node with a channel to it, and tz has no Node (docs/process.md, section 4); for parallel work use async functions (docs/async.md), and to run a program 'spawnSync(process.execPath, [...])'",
+  },
+  [Code.ExportWebcrypto]: {
+    text: "'{word}' of '{path}' is the global crypto of Web Crypto, which needs no import: use 'crypto.subtle', 'crypto.getRandomValues' and 'crypto.randomUUID'",
+  },
+  [Code.ExportSubtle]: {
+    text: "'{word}' of '{path}' is the global crypto.subtle, which needs no import: use 'crypto.subtle'",
+  },
+  [Code.LengthNotProven]: {
+    text: "cannot prove that the new length is from 0 to the old one: an array of '{first}' cannot grow by setting its length, which would leave elements without a value; check it first, e.g. 'if (n >= 0 && n <= {word}.length)', or use push()",
+  },
+  [Code.VariableWriteType]: {
+    text: "variable '{word}' needs a type annotation or an initializer; write the type: 'let {word}: {first}'",
+  },
+  [Code.UndefinedLetWriteType]: {
+    text: "cannot infer a type from 'undefined'; write the type: 'let {word}: {first}'",
+  },
+  [Code.GenericCallRefused]: {
+    text: "cannot call '{word}' with {first} = {second}: {other}",
+  },
+  [Code.GenericClassRefused]: {
+    text: "cannot use '{word}' with {first} = {second}: {other}",
+  },
+  [Code.BytesLengthFraction]: {
+    text: "the length of a typed array must be an integer, found 'double'; round it with Math.floor(x) or drop the fraction with 'x | 0'",
+  },
+  [Code.ByteCountNotWritten]: {
+    text: "the byte count of '{word}' must be written as a number from 1 to 6",
+  },
+  [Code.ByteValueUnproven]: {
+    text: "cannot prove that the value fits in {word} ({place}), and node would throw a RangeError; check it first",
+  },
+  [Code.ByteFitConstant]: {
+    text: "{word} does not fit in {first} ({place}): JavaScript would store {second}; write a value that fits, or cut it explicitly: '{other}'",
+  },
+  [Code.ByteFitUnproven]: {
+    text: "cannot prove that the value fits in {first} ({place}), and JavaScript would cut it without a word; check it first, e.g. 'if ({second})', or cut it explicitly: '{other}'",
+  },
+  [Code.OffsetUnproven]: {
+    text: "cannot prove that {word} {first} is from 0 to {place}, and JavaScript would throw a RangeError; check it first, e.g. 'if ({other} <= {place})'",
+  },
+  [Code.BufferSlice]: {
+    text: "'slice' of a Buffer is not supported: in node it shares the memory, unlike 'slice' of a Uint8Array, and is deprecated; use 'subarray(start, end)' for the same memory, or 'Buffer.from(b.subarray(start, end))' for a copy",
+  },
+  [Code.NewBuffer]: {
+    text: "'new Buffer(...)' is not supported, as in node, where it is deprecated: make one with 'Buffer.from(values)' or 'Buffer.alloc(size)'",
+  },
+  [Code.BytesSourceKind]: {
+    text: "a {word} is made from a length, an array or an iterator of numbers, another typed array or an ArrayBuffer, found '{first}'{other}",
+  },
+  [Code.BytesFromSource]: {
+    text: "{word} takes an array, a typed array or an iterator, found '{first}'",
+  },
+  [Code.BytesSourceNotNumbers]: {
+    text: "the elements of '{first}' are not numbers, which a {word} holds",
+  },
+  [Code.BytesSourceDoubles]: {
+    text: "the elements of '{first}' are doubles, which an element of '{word}' cannot hold without an explicit conversion; convert them, e.g. '{word}.from({other}, x => Math.round(x) & 0xff)'",
+  },
+  [Code.BytesSourceMayNotFit]: {
+    text: "the elements of '{first}' ({second}) may not fit in an element of '{word}' ({place}), and JavaScript would cut them without a word; convert them explicitly, e.g. '{other}'",
+  },
+  [Code.BytesSourceUnproven]: {
+    text: "cannot prove that the elements of '{first}' fit in an element of '{word}' ({place}), and JavaScript would cut them without a word; write the values in the literal, or convert them explicitly, e.g. '{other}'",
+  },
+  [Code.BytesSetIterator]: {
+    text: "'set' takes an array or a typed array; collect the values of the iterator first, e.g. '[...it]'",
+  },
+  [Code.BytesSetUnproven]: {
+    text: "cannot prove that the values fit, '{word}', and JavaScript would throw a RangeError; check it first, with the offset written as a number",
+  },
+  [Code.BytesWithIndex]: {
+    text: "cannot prove that the index is within the array, and JavaScript would throw a RangeError; check it first, e.g. 'if (i >= 0 && i < {word}.length)'",
+  },
+  [Code.BufferValueArgument]: {
+    text: "'{word}' takes a number, a string or a Uint8Array, found '{first}'",
+  },
+  [Code.BufferAllocFill]: {
+    text: "'Buffer.alloc' fills with a number, a string or a Uint8Array, found '{first}'",
+  },
+  [Code.BytesMapUnproven]: {
+    text: "cannot prove that what the function returns fits in {word} ({place}), and JavaScript would cut it without a word; pass an arrow that cuts it explicitly, e.g. 'x => {other}'",
+  },
+  [Code.ViewOffsetAligned]: {
+    text: "the offset of {word} must be a multiple of {other}, written as a number; JavaScript throws a RangeError otherwise",
+  },
+  [Code.ViewSizeAligned]: {
+    text: "cannot prove that the size of the buffer is a multiple of {other} for {word}, and JavaScript would throw a RangeError; give the length: 'new X(buffer, offset, length)'",
+  },
+  [Code.ViewNotFits]: {
+    text: "cannot prove that {word} fits in the buffer, '{other} <= {first}.byteLength', and JavaScript would throw a RangeError; check it first, with the offset or the length written as a number",
+  },
+  [Code.ViewOverBuffer]: {
+    text: "a DataView is made over an ArrayBuffer, found '{first}'{other}",
+  },
+  [Code.ViewOffsetOnly]: {
+    text: "'new {word}' takes an offset and a length only with an ArrayBuffer, found '{first}'",
+  },
+  [Code.BufferEncodingUnknown]: {
+    text: "unknown encoding '{word}' (node throws a TypeError); Buffer knows utf8, utf16le, latin1, ascii, base64, base64url and hex",
+  },
+  [Code.BufferEncodingNotKnown]: {
+    text: "an encoding known only when the program runs may be one Buffer does not know, which node would throw a TypeError for; check it first, e.g. 'if (enc == \"hex\" || enc == \"base64\")', or give it the type 'BufferEncoding'",
+  },
+  [Code.BytesLengthFixed]: {
+    text: "the length of '{word}' cannot change; make a new one of the length wanted",
+  },
+  [Code.BytesFlatMap]: {
+    text: "typed arrays have no 'flatMap'; spread the elements into an array first, e.g. '[...u].flatMap(f)'",
+  },
+  [Code.BytesLocale]: {
+    text: "'toLocaleString' of a typed array is not supported; join the elements with 'join()', or format each with toLocaleString",
+  },
+  [Code.BytesNotIndexed]: {
+    text: "type '{first}' cannot be indexed; {other}",
+  },
+  [Code.BytesNoText]: {
+    text: "a value of type '{first}' cannot be converted to a string: JavaScript would give '[object {first}]'; print it with console.log{other}",
+  },
+  [Code.DecoderLabelUnknown]: {
+    text: "'{word}' is not an encoding TextDecoder knows (JavaScript throws a RangeError); e.g. 'utf-8', 'utf-16le', 'windows-1251', 'latin1'",
+  },
+  [Code.DecoderLabelNotKnown]: {
+    text: "a label known only when the program runs may name no encoding, which JavaScript would throw a RangeError for; parse it with 'TextDecoder.parse(label)', which gives a Result, or check it first, e.g. 'if (label == \"utf-8\" || label == \"windows-1251\")'",
+  },
+  [Code.DecodeInput]: {
+    text: "'decode' takes a typed array, a DataView or an ArrayBuffer, found '{first}'",
+  },
+  [Code.FatalDecoderNew]: {
+    text: "a FatalTextDecoder is made by 'new TextDecoder(label, { fatal: true })'",
+  },
+  [Code.ResizableBuffer]: {
+    text: "an ArrayBuffer that can change its size is not supported yet (docs/bytes.md, section 7); make a new one of the size wanted",
+  },
+  [Code.BytesUnionNarrow]: {
+    text: "property '{word}' of '{first}' is not supported yet; narrow it first",
+  },
+  [Code.BytesUnionLacking]: {
+    text: "property '{word}' does not exist on '{second}', which '{first}' may be; narrow it first{other}",
+  },
+  [Code.IntlUnknownService]: {
+    text: "'Intl.{word}' is not supported yet; Intl has DateTimeFormat, NumberFormat, Collator, PluralRules, RelativeTimeFormat, ListFormat, DisplayNames, Segmenter and Locale",
+  },
+  [Code.IntlWithNew]: {
+    text: "'Intl.{word}' is made with 'new': 'new Intl.{word}(...)', and JavaScript would throw a TypeError without it",
+  },
+  [Code.IntlNewNoType]: {
+    text: "Intl.DisplayNames needs the option 'type', e.g. 'new Intl.DisplayNames(\"ru\", { type: \"region\" })', which JavaScript would throw a TypeError without",
+  },
+  [Code.LanguageTagUnknown]: {
+    text: "a language known only when the program runs may be no language tag, which JavaScript would throw a RangeError for; parse it first: 'Intl.Locale.parse(tag)' gives a Result with an Intl.Locale, which {word} takes",
+  },
+  [Code.LanguageTagUnknownLocale]: {
+    text: "a language known only when the program runs may be no language tag, which JavaScript would throw a RangeError for; parse it with 'Intl.Locale.parse(tag)', which gives a Result",
+  },
+  [Code.LanguageTagNot]: {
+    text: "'{word}' is not a language tag, and JavaScript would throw a RangeError; write it as BCP 47 does, e.g. 'en-US' or 'ru'",
+  },
+  [Code.LanguageTagTakes]: {
+    text: "{word} takes the language as a string, e.g. \"ru-RU\", or an Intl.Locale, found '{first}'{other}",
+  },
+  [Code.LanguageTagList]: {
+    text: "{word} takes a language or an array of them, found '{first}'",
+  },
+  [Code.LanguageTagListOpen]: {
+    text: "languages known only when the program runs may be no language tags, which JavaScript would throw a RangeError for; parse each with 'Intl.Locale.parse(tag)', which gives a Result, and pass them to {word} one by one",
+  },
+  [Code.LanguageTagSpread]: {
+    text: "{word} takes the languages written in the array, not spread",
+  },
+  [Code.IntlLocaleOptions]: {
+    text: "the options of Intl.Locale are not supported; write them into the tag, e.g. 'new Intl.Locale(\"th-TH-u-ca-buddhist\")'",
+  },
+  [Code.IntlLocaleWithNew]: {
+    text: "'Intl.Locale' is made with 'new': 'new Intl.Locale(tag)' or 'Intl.Locale.parse(tag)', and JavaScript would throw a TypeError without it",
+  },
+  [Code.IntlValuesOf]: {
+    text: "'Intl.supportedValuesOf' is not supported yet",
+  },
+  [Code.IntlStaticOnly]: {
+    text: "'{word}' is not supported; of the classes of Intl, only 'supportedLocalesOf' is",
+  },
+  [Code.IntlOnlyCalled]: {
+    text: "property '{word}' of {first} can only be called, '{word}(...)'; as values there are only 'format' of Intl.NumberFormat and Intl.DateTimeFormat and 'compare' of Intl.Collator",
+  },
+  [Code.IntlNotNumber]: {
+    text: "'{word}' takes a number or a decimal, found '{first}'{other}",
+  },
+  [Code.ClosedArgUnknown]: {
+    text: "a string known only when the program runs may be no {word}, which JavaScript would throw a RangeError for; compare it with them first, e.g. 'if (x == \"{first}\" || x == \"{second}\")'",
+  },
+  [Code.ClosedArgNotAllowed]: {
+    text: "'{first}' is no {word}, and JavaScript would throw a RangeError",
+  },
+  [Code.IntlRangeUnsupported]: {
+    text: "'{word}' is not supported yet; format both numbers",
+  },
+  [Code.IntlSelectRange]: {
+    text: "'selectRange' is not supported yet; select each number",
+  },
+  [Code.IntlRelativeUnit]: {
+    text: "'{word}' is not a unit of Intl.RelativeTimeFormat, and JavaScript would throw a RangeError; the units are year, quarter, month, week, day, hour, minute and second, also in the plural",
+  },
+  [Code.IntlBadForm]: {
+    text: "'{word}' is not a normalization form, and JavaScript would throw a RangeError; it is 'NFC', 'NFD', 'NFKC' or 'NFKD'",
+  },
+  [Code.IntlOptionsNoType]: {
+    text: "Intl.DisplayNames needs the option 'type', e.g. '{ type: \"region\" }', which JavaScript would throw a TypeError without",
+  },
+  [Code.IntlOptionsNotObject]: {
+    text: "{word} takes its options as an object, e.g. '{ style: \"percent\" }', found '{first}'",
+  },
+  [Code.IntlOptionUnknown]: {
+    text: "'{word}' is not an option of {first}; the options are {other}",
+  },
+  [Code.IntlOptionKindWrong]: {
+    text: "the option '{word}' is {first}, found '{second}'",
+  },
+  [Code.IntlOptionValue]: {
+    text: "'{first}' is not a value of the option '{word}', and JavaScript would throw a RangeError; it is {other}",
+  },
+  [Code.IntlOptionOpen]: {
+    text: "the option '{word}' is {other}, and a string known only when the program runs may be another, which JavaScript would throw a RangeError for; compare it with them first, e.g. 'if ({first})'",
+  },
+  [Code.IntlCurrency]: {
+    text: "'{word}' is not a currency code, and JavaScript would throw a RangeError; a code is three letters, e.g. 'RUB' or 'USD'",
+  },
+  [Code.IntlUnit]: {
+    text: "'{word}' is not a unit of Intl, and JavaScript would throw a RangeError; the units are those like 'kilometer', 'liter', 'percent' or 'megabyte', and two joined by '-per-', e.g. 'kilometer-per-hour'",
+  },
+  [Code.IntlKeyword]: {
+    text: "'{word}' is not a {first}, and JavaScript would throw a RangeError; it is 3 to 8 letters or digits, e.g. '{other}'",
+  },
+  [Code.IntlStyleCurrency]: {
+    text: "style 'currency' needs the option 'currency', e.g. '{ style: \"currency\", currency: \"RUB\" }', which JavaScript would throw a TypeError without",
+  },
+  [Code.IntlStyleUnit]: {
+    text: "style 'unit' needs the option 'unit', e.g. '{ style: \"unit\", unit: \"kilometer\" }', which JavaScript would throw a TypeError without",
+  },
+  [Code.IntlDigitRange]: {
+    text: "{word} is from {first} to {second}, and JavaScript would throw a RangeError",
+  },
+  [Code.IntlDigitRangeOpen]: {
+    text: "{word} is from {first} to {second}, and a number known only when the program runs may be outside, which JavaScript would throw a RangeError for; give an int and check it first, e.g. 'if (n >= {first} && n <= {second})'",
+  },
+  [Code.IntlDigitsAbove]: {
+    text: "{word} is above {first}, and JavaScript would throw a RangeError",
+  },
+  [Code.IntlDigitsMayAbove]: {
+    text: "{word} may be above {first}, which JavaScript would throw a RangeError for; check it first, e.g. 'if (low <= high)'",
+  },
+  [Code.IntlIncrements]: {
+    text: "roundingIncrement is one of 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500 and 5000, and JavaScript would throw a RangeError",
+  },
+  [Code.IntlIncrementsOpen]: {
+    text: "roundingIncrement is one of 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500 and 5000, and a number known only when the program runs may be another, which JavaScript would throw a RangeError for; compare it with them first",
+  },
+  [Code.IntlIncrementSignificant]: {
+    text: "roundingIncrement rounds to fraction digits, and with significant digits JavaScript would throw a TypeError",
+  },
+  [Code.IntlIncrementSame]: {
+    text: "roundingIncrement needs minimumFractionDigits and maximumFractionDigits, and the same, e.g. '{ roundingIncrement: 5, minimumFractionDigits: 0, maximumFractionDigits: 0 }', or JavaScript may throw a RangeError",
+  },
+  [Code.DateOptionsNotObject]: {
+    text: "{word} takes its options as an object, e.g. '{ month: \"long\" }', found '{first}'",
+  },
+  [Code.DateOptionUnknown]: {
+    text: "'{word}' is not an option of {first}; the options are weekday, era, year, month, day, dayPeriod, hour, minute, second, fractionalSecondDigits, timeZoneName, timeZone, hour12, hourCycle, dateStyle, timeStyle, calendar, numberingSystem, localeMatcher and formatMatcher",
+  },
+  [Code.DateStyleOnly]: {
+    text: "'{word}' is not an option of {first}, which JavaScript would throw a TypeError for; use toLocaleString",
+  },
+  [Code.DateStyleParts]: {
+    text: "dateStyle and timeStyle cannot go with weekday, year, month, day, hour and the other parts, which JavaScript would throw a TypeError for; use either the styles or the parts",
+  },
+  [Code.DateDigitsOpen]: {
+    text: "fractionalSecondDigits known only when the program runs may be out of 1 to 3, which JavaScript would throw a RangeError for; give it the type '1 | 2 | 3'",
+  },
+  [Code.DateOptionUnknownValue]: {
+    text: "the option '{word}' known only when the program runs may be no value of it, which JavaScript would throw a RangeError for; check it first, e.g. 'if ({other} == \"{first}\" || {other} == \"{second}\")'",
+  },
+  [Code.DateFormatRange]: {
+    text: "'{word}' is not supported yet; format both dates",
+  },
+  [Code.FsEncodingLiteral]: {
+    text: "the encoding of '{word}' is written as a literal, 'utf8'",
+  },
+  [Code.FsEncodingUtf8Only]: {
+    text: "'{word}' gives names in utf8 only; drop the encoding '{first}'",
+  },
+  [Code.FsEncodingDepends]: {
+    text: "the encoding of '{word}' is written as a literal, 'utf8': the type of what it gives depends on it",
+  },
+  [Code.FsEncodingForText]: {
+    text: "an encoding is for text; '{word}' writes the bytes as they are: drop the encoding",
+  },
+  [Code.FsFlagUnknown]: {
+    text: "'{first}' is not a flag of '{word}'; the flags are {other}",
+  },
+  [Code.FsFlagLiteral]: {
+    text: "the flag of '{word}' is written as a literal: {other}",
+  },
+  [Code.FsData]: {
+    text: "'{word}' writes a string or bytes (a Uint8Array or a Buffer); found '{first}'{other}",
+  },
+  [Code.FsBigint]: {
+    text: "'bigint' is not supported: tz has no bigint; the numbers of Stats are doubles",
+  },
+  [Code.FsRmdirOptions]: {
+    text: "the options of 'rmdirSync' are deprecated in Node; to delete a directory with what is in it, use 'rmSync(path, { recursive: true })'",
+  },
+  [Code.FsCopyMode]: {
+    text: "'{word}' never replaces a file that is already there, so it takes no mode: drop it; to replace a file on purpose, copy it to a temporary name and move that over the file with 'replaceSync' from \"tz:fs\"",
+  },
+  [Code.FsConstantNotYet]: {
+    text: "'constants.{word}' of 'node:fs' is not supported yet; tz has F_OK, R_OK, W_OK, X_OK and the COPYFILE_ ones",
+  },
+  [Code.NodeOptionsLiteral]: {
+    text: "the options of '{word}' are written in the call, as an object literal, e.g. '{ {first}: ... }': the type of what it gives may depend on them",
+  },
+  [Code.NodeOptionsByName]: {
+    text: "write each option of '{word}' by its name, e.g. '{ {first}: ... }'",
+  },
+  [Code.NodeOptionUnknown]: {
+    text: "'{word}' has no option '{first}'; it takes {other}",
+  },
+  [Code.NodeOptionFlag]: {
+    text: "the option '{first}' of '{word}' is written as a literal, true or false: the type of what it gives depends on it",
+  },
+  [Code.ProcessNotYet]: {
+    text: "'process.{word}' is not supported yet",
+  },
+  [Code.ProcessOnlyCalled]: {
+    text: "'process.{word}' can only be called: 'process.{word}()'",
+  },
+  [Code.ProcessNotFunction]: {
+    text: "'process.{word}' is not a function",
+  },
+  [Code.ProcessSignal]: {
+    text: "'process.{word}' listens only to the signals 'SIGINT', 'SIGTERM', 'SIGHUP' and 'SIGBREAK', not to '{first}'",
+  },
+  [Code.ProcessNoThrown]: {
+    text: "there is nothing to catch: nothing is thrown or rejected in tz, an error is a Result that the code which gets it handles (docs/errors.md, section 4)",
+  },
+  [Code.ProcessTtyValue]: {
+    text: "'{word}.isTTY' is a boolean, not a function",
+  },
+  [Code.ProcessStreamPart]: {
+    text: "'{word}.{first}' is not supported yet; only 'isTTY', 'write()' and the rest of a Writable of node:stream are",
+  },
+  [Code.ProcessAssigned]: {
+    text: "'process.{word}' cannot be assigned to",
+  },
+  [Code.ProcessExitCodeOp]: {
+    text: "only '=' can set 'process.exitCode'",
+  },
+  [Code.ProcessChanged]: {
+    text: "'process.{word}' cannot be changed",
+  },
+  [Code.ChildOptionsAt]: {
+    text: "the options of '{word}' come after its arguments, e.g. '{word}(file, [\"--version\"], { cwd })'",
+  },
+  [Code.ChildZeroFile]: {
+    text: "could not run it: the {word} has a zero character in it",
+  },
+  [Code.ChildEmptyName]: {
+    text: "could not run a program: its name is empty",
+  },
+  [Code.ChildZeroArg]: {
+    text: "could not run it: args[{word}] has a zero character in it",
+  },
+  [Code.ChildEncoding]: {
+    text: "the option 'encoding' of '{word}' is written as a literal, e.g. 'utf8': it decides whether the output is a string or a Buffer",
+  },
+  [Code.ChildStdio]: {
+    text: "the option 'stdio' of '{word}' is written as a literal, e.g. \"inherit\" or [\"pipe\", \"inherit\", \"pipe\"]: whether there is output depends on it",
+  },
+  [Code.ChildStdioThree]: {
+    text: "only stdin, stdout and stderr are supported in 'stdio'; more streams come with the async functions (docs/process.md, step 2)",
+  },
+  [Code.ChildStdioLiteral]: {
+    text: "each stream of 'stdio' is written as a literal: \"pipe\", \"inherit\", \"ignore\" or a file descriptor such as 2",
+  },
+  [Code.ChildStdioIpc]: {
+    text: "'ipc' is the channel to another Node that fork starts, which tz does not have (docs/process.md, section 4)",
+  },
+  [Code.ChildStdioUnknown]: {
+    text: "unknown stdio '{word}'; a stream is \"pipe\", \"inherit\", \"ignore\" or a file descriptor such as 2",
+  },
+  [Code.ChildStdioSpread]: {
+    text: "write each stream of 'stdio' in the literal",
+  },
+  [Code.ChildStdioNoFd]: {
+    text: "there is no file descriptor {word}",
+  },
+  [Code.ChildZeroCwd]: {
+    text: "could not run it: cwd has a zero character in it",
+  },
+  [Code.ChildNegative]: {
+    text: "could not run it: {word} must be 0 or more",
+  },
+  [Code.ChildNoSignal]: {
+    text: "could not run it: there is no signal {word} (killSignal)",
+  },
+  [Code.ChildInput]: {
+    text: "'input' of '{word}' is the text or the bytes the program reads (a string, a Buffer or a Uint8Array); found '{first}'",
+  },
+  [Code.ChildBufferText]: {
+    text: "text input with the encoding 'buffer' is a TypeError in Node (Unknown encoding: buffer); pass its bytes, 'Buffer.from(text)', or drop the encoding",
+  },
+  [Code.ChildKillSignal]: {
+    text: "'killSignal' is the name of a signal, e.g. \"SIGKILL\", or its number; found '{first}'",
+  },
+  [Code.ChildExecShell]: {
+    text: "'execSync' always runs the command through a shell; 'shell' may name another one, e.g. shell: \"powershell.exe\", and to run a program without one, use 'execFileSync'",
+  },
+  [Code.ChildShellFlag]: {
+    text: "the option 'shell' of '{word}' is written as a literal, true or false: what can go wrong, and so the type of the error, depends on it",
+  },
+  [Code.ChildShell]: {
+    text: "'shell' is true, false or the path of a shell; found '{first}'",
+  },
+  [Code.WeakRefNotYet]: {
+    text: "a WeakRef of '{word}' is not supported yet; it refers to objects of the program's types",
+  },
+  [Code.WeakRefNotObject]: {
+    text: "a WeakRef refers to an object, not to a value of type '{word}'{other}",
+  },
+  [Code.WeakRefOneObject]: {
+    text: "'new WeakRef' takes the object it refers to, e.g. 'new WeakRef(node)'",
+  },
+  [Code.WeakRefTypeArguments]: {
+    text: "'WeakRef' takes one type argument, the type of its object",
+  },
+  [Code.WeakRefNoMethod]: {
+    text: "property '{word}' does not exist on type '{first}'; it has 'deref()'",
+  },
+  [Code.WeakRefDerefValue]: {
+    text: "property '{word}' of a WeakRef can only be called: 'deref()'",
+  },
+  [Code.RegexFlagsInvalid]: {
+    text: "invalid regular expression flags '{word}': the flags are d, g, i, m, s, u, v and y, each at most once, and not u with v",
+  },
+  [Code.RegexTestGlobal]: {
+    text: "'test' of a regex with the 'g' flag starts where the previous match ended (lastIndex), so the same call can give true and then false; remove 'g'",
+  },
+  [Code.RegexCompile]: {
+    text: "'compile' is a legacy method that changes the regex in place; make a new one instead: 'new RegExp(pattern, flags)'",
+  },
+  [Code.RegexNoMember]: {
+    text: "property '{word}' does not exist on type 'RegExp'{other}",
+  },
+  [Code.RegexStaticEscape]: {
+    text: "'RegExp.escape' can be used as a value only where a function type is expected, e.g. as a callback",
+  },
+  [Code.RegexStaticLegacy]: {
+    text: "'RegExp.{word}' is a legacy property that holds what the last match of any regex found; read it from the match itself, e.g. 'm[1]'",
+  },
+  [Code.RegexStaticNoMember]: {
+    text: "property '{word}' does not exist on 'RegExp'",
+  },
+  [Code.RegexNewUnknown]: {
+    text: "'new RegExp' of a pattern known only when the program runs may fail, and 'new' gives no Result; write 'RegExp.parse(pattern{other})', which gives a Result<RegExp, RegexError>",
+  },
+  [Code.RegexMatchFlag]: {
+    text: "what 'match' gives depends on the g flag (all the texts that match, or one match with its groups), and the regex is known only when the program runs (it is not a literal, nor a variable that holds one all along); for one match write 're.exec(s)', for all of them 's.matchAll(re)'",
+  },
+  [Code.RegexNeedsGlobal]: {
+    text: "'{word}' needs a regex with the g flag (JavaScript throws a TypeError without it), e.g. '/{first}/{other}g'",
+  },
+  [Code.RegexNotPattern]: {
+    text: "'{word}' takes a regex{other}, found '{first}'",
+  },
+  [Code.RegexTextReplace]: {
+    text: "'replace' with a string replaces only the first occurrence (\"a-b-c\".replace(\"-\", \"+\") is \"a+b-c\" in JavaScript); to replace all of them write 'replaceAll({word}, ...)', for only the first one a regex: 'replace({first}, ...)'",
+  },
+  [Code.RegexTextSearch]: {
+    text: "'search' takes a regex, and JavaScript makes one of a string, where '.' matches any character; to find the text write 'indexOf({word})', for a regex '{first}'",
+  },
+  [Code.RegexTextInclude]: {
+    text: "'{word}' takes a regex, and JavaScript makes one of a string, where '.' matches any character; to check for the text write 'includes({first})', for a regex '{other}'",
+  },
+  [Code.RegexFunctionText]: {
+    text: "a function as the replacement needs a regex: 'replaceAll({word}, ...)'",
+  },
+  [Code.RegexNoGroup]: {
+    text: "the regex has {word} group{other}, so there is no group {first} for '${first}' (JavaScript would insert it as it is); write '$$' for '$'",
+  },
+  [Code.RegexNoNamedGroup]: {
+    text: "the regex has no group named '{word}' for '$<{word}>'",
+  },
+  [Code.RegexNoNamedGroups]: {
+    text: "the regex has no named groups, so JavaScript would insert '$<{word}>' as it is; name a group with '(?<{word}>...)'",
+  },
+  [Code.RegexOnlyMatch]: {
+    text: "the function gets only the match: the regex is known only when the program runs (it is not a literal, nor a variable that holds one all along), so its groups are not known when compiling",
+  },
+  [Code.RegexPasses]: {
+    text: "'{word}' passes {first} arguments: the match, {second} group{other}, the offset and the string{place}",
+  },
+  [Code.CryptoHashAnyLength]: {
+    text: "'{word}' gives output of any length, which HMAC and the KDFs cannot use; use a hash such as 'sha256'",
+  },
+  [Code.CryptoHashTurnedOff]: {
+    text: "'{word}' is turned off in node 24 (it throws ERR_OSSL_EVP_UNSUPPORTED) and in tz; use 'sha256'",
+  },
+  [Code.CryptoHashUnknown]: {
+    text: "unknown hash '{word}'; node has those getHashes() lists, e.g. 'sha256', 'sha512', 'sha3-256', 'md5'",
+  },
+  [Code.CryptoCipherTurnedOff]: {
+    text: "'{word}' is turned off in node 24 (it throws ERR_OSSL_EVP_UNSUPPORTED) and in tz; use 'aes-256-gcm'",
+  },
+  [Code.CryptoCipherUnknown]: {
+    text: "unknown cipher '{word}'; node has those getCiphers() lists, e.g. 'aes-256-gcm', 'aes-256-cbc', 'chacha20-poly1305'",
+  },
+  [Code.CryptoKeyBytes]: {
+    text: "{word} needs a {first}-byte key, but this one has {second} bytes",
+  },
+  [Code.CryptoIvEmpty]: {
+    text: "{word} needs an IV of 1 byte or more, but it is empty",
+  },
+  [Code.CryptoIvBytes]: {
+    text: "{word} needs a {first}-byte IV, but this one has {second} bytes",
+  },
+  [Code.CryptoWhole]: {
+    text: "{word} must be a whole number of {first} or more, not {second}",
+  },
+  [Code.CryptoScryptCost]: {
+    text: "N must be a power of two greater than 1, not {word}",
+  },
+  [Code.CryptoTagLength]: {
+    text: "'{word}' needs the length of its tag: '{ authTagLength: 16 }'",
+  },
+  [Code.CryptoOptionsLiteral]: {
+    text: "the options of '{word}' are written in the call, as an object literal, e.g. '{ {first}: ... }'",
+  },
+  [Code.CryptoOptionsByName]: {
+    text: "write each option of '{word}' by its name, e.g. '{ {first}: ... }'",
+  },
+  [Code.CryptoOptionUnknown]: {
+    text: "'{word}' has no option '{first}'; it takes {other}",
+  },
+  [Code.CryptoOptionsTogether]: {
+    text: "option '{word}' cannot be used together with '{first}': they are one option",
+  },
+  [Code.CryptoAsyncCallback]: {
+    text: "'{word}' with a callback is not supported: tz has no callbacks (docs/crypto.md, section 5); without one it returns a Promise: 'const result = await {word}(...)'",
+  },
+  [Code.CryptoSyncCallback]: {
+    text: "'{word}' with a callback is not supported: tz has no callback forms of node:crypto (docs/crypto.md, section 5); call it without one and use what it returns: {other}, or run it on the thread pool with '{word}Async' of \"tz:crypto\": 'await {word}Async(...)'",
+  },
+  [Code.CryptoCurveUnknown]: {
+    text: "unknown curve '{word}'; node has those getCurves() lists, e.g. 'prime256v1', 'secp384r1', 'secp256k1'",
+  },
+  [Code.CryptoChoiceUnknown]: {
+    text: "unknown {word} '{first}'; it is {other}",
+  },
+  [Code.CryptoPairOption]: {
+    text: "the option '{word}' of 'rsa-pss' keys is not supported yet",
+  },
+  [Code.CryptoPairModulus]: {
+    text: "'{word}' keys need '{ modulusLength: 2048 }'",
+  },
+  [Code.CryptoPairCurve]: {
+    text: "'ec' keys need '{ namedCurve: \"P-256\" }'",
+  },
+  [Code.CryptoPairSmall]: {
+    text: "an RSA key needs a modulusLength of 512 bits or more, not {word}",
+  },
+  [Code.CryptoNewCertificate]: {
+    text: "'new X509Certificate' may fail on the data it reads, and 'new' gives no Result; write 'X509Certificate.parse(pem)', which gives a Result<X509Certificate, ParseCertificateError>",
+  },
+  [Code.CryptoNewClass]: {
+    text: "'new {word}' is not how node makes one: {other}",
+  },
+  [Code.CryptoNoMethod]: {
+    text: "property '{word}' does not exist on type '{first}'; it has {other}",
+  },
+  [Code.CryptoStreamMethod]: {
+    text: "'{word}' of {first} is not supported yet: in node it is a stream too, and tz has no streams yet (docs/streams.md); use {other}",
+  },
+  [Code.CryptoOnlyCalled]: {
+    text: "property '{word}' of {first} can only be called; it has {other}",
+  },
+  [Code.CryptoKeyDetails]: {
+    text: "'asymmetricKeyDetails' is not supported yet: node gives the exponent of RSA as a bigint, which tz has not",
+  },
+  [Code.CryptoIssuerCertificate]: {
+    text: "'issuerCertificate' comes only with TLS (docs/net.md)",
+  },
+  [Code.CryptoNotData]: {
+    text: "the {word} is {other} (a Buffer, a typed array or a DataView{first}); found '{second}'{place}",
+  },
+  [Code.CryptoEncodingLiteral]: {
+    text: "the encoding of '{word}' is written as a literal, e.g. 'hex': the type of what it gives depends on it",
+  },
+  [Code.CryptoRandomValues]: {
+    text: "'getRandomValues' fills an array of integers (a Uint8Array, an Int32Array, a Buffer...); found '{word}'",
+  },
+  [Code.CryptoGlobalMember]: {
+    text: "'crypto.{word}' does not exist; the global crypto has 'randomUUID', 'getRandomValues' and 'subtle'",
+  },
+  [Code.CryptoGlobalCalled]: {
+    text: "'crypto.{word}' can only be called",
+  },
+  [Code.SubtleExperiment]: {
+    text: "'{word}' is an algorithm node 24 has as an experiment, which tz has not yet; Web Crypto {first} with {other}",
+  },
+  [Code.SubtleOtherOperation]: {
+    text: "'{word}' is no algorithm of {path}; it {first} with {other}",
+  },
+  [Code.SubtleUnknownAlgorithm]: {
+    text: "unknown algorithm '{word}' of {path}; Web Crypto {first} with {other}",
+  },
+  [Code.SubtleParamsObject]: {
+    text: "'{word}' of {path} takes its parameters ({first}): write an object, e.g. { name: \"{word}\", {second}: {other} }",
+  },
+  [Code.SubtleNeedsMember]: {
+    text: "the algorithm '{word}' of {path} needs '{first}' ({second}); add it, e.g. '{first}: {other}'",
+  },
+  [Code.SubtleUnknownHash]: {
+    text: "unknown hash '{word}' of {first}; Web Crypto hashes with {other}",
+  },
+  [Code.SubtleNotSha]: {
+    text: "'{word}' is no SHA hash, which {first} takes; use 'SHA-256', 'SHA-384', 'SHA-512' or 'SHA-1'",
+  },
+  [Code.SubtleCurve]: {
+    text: "unknown namedCurve '{word}'; Web Crypto has 'P-256', 'P-384' and 'P-521'",
+  },
+  [Code.SubtleAesLength]: {
+    text: "an AES key is 128, 192 or 256 bits long",
+  },
+  [Code.SubtleGcmTag]: {
+    text: "the tag of AES-GCM is 32, 64, 96, 104, 112, 120 or 128 bits long",
+  },
+  [Code.SubtleFormat]: {
+    text: "unknown key format '{word}'; it is 'raw', 'pkcs8', 'spki' or 'jwk'",
+  },
+  [Code.SubtleImportFormat]: {
+    text: "'{word}' keys are not imported as '{first}' (node: 'Unable to import {word} using {first} format'); it takes {other}",
+  },
+  [Code.SubtleUnwrapFormat]: {
+    text: "'{word}' keys are not imported as '{first}'; it takes {other}",
+  },
+  [Code.SubtleDerived]: {
+    text: "deriveKey makes secret keys: AES, HMAC, HKDF or PBKDF2, not '{word}'",
+  },
+  [Code.SubtleUnknownUsage]: {
+    text: "usage '{word}' does not exist; the usages are {other}",
+  },
+  [Code.SubtleNotUsage]: {
+    text: "'{word}' is no usage of {first}; {other}",
+  },
+  [Code.SubtleEmptyUsages]: {
+    text: "a key without usages can do nothing, and node rejects it ('Usages cannot be empty'); give its usages, e.g. {other}",
+  },
+  [Code.SubtlePairEmpty]: {
+    text: "the private key of the pair would have no usages, which node rejects ('Usages cannot be empty'); add {other}",
+  },
+  [Code.SubtleJwkData]: {
+    text: "the key data of 'jwk' is a JsonWebKey; found '{word}'",
+  },
+  [Code.SubtleBytesData]: {
+    text: "the key data of '{word}' is bytes (a BufferSource); found '{first}'",
+  },
+  [Code.SubtleNewKey]: {
+    text: "a CryptoKey is made by crypto.subtle: importKey, generateKey, deriveKey or unwrapKey",
+  },
+  [Code.SubtleNewSubtle]: {
+    text: "there is one SubtleCrypto: crypto.subtle",
+  },
+  [Code.GlobalThisMember]: {
+    text: "'globalThis.{word}' is not supported: tz has only 'globalThis.crypto'; write '{word}'",
+  },
+  [Code.ReadlineOption]: {
+    text: "the option '{word}' of 'createInterface' is not supported yet",
+  },
+  [Code.ReadlineNoInput]: {
+    text: "'createInterface' needs the input: '{ input: process.stdin }'",
+  },
+  [Code.ReadlineNotStdin]: {
+    text: "readline reads only stdin yet: the input is 'process.stdin'; for the lines of a file, 'readFile' it and split them",
+  },
+  [Code.ReadlineOutput]: {
+    text: "the output of readline is 'process.stdout' or 'process.stderr'",
+  },
+  [Code.CryptoRandomArgs]: {
+    text: "'randomInt' takes a minimum and a maximum",
+  },
+  [Code.CryptoRandomInt]: {
+    text: "'randomInt' takes whole numbers ('int'), found '{word}'",
+  },
+  [Code.CryptoGreaterMinimum]: {
+    text: "cannot prove that the maximum is greater than the minimum, and JavaScript would throw a RangeError; check it first, e.g. 'if ({word} < {other})'",
+  },
+  [Code.CryptoGreaterZero]: {
+    text: "cannot prove that the maximum is greater than 0, and JavaScript would throw a RangeError; check it first, e.g. 'if ({word} < {other})'",
+  },
+  [Code.CryptoKeyLengthNeeded]: {
+    text: "'{word}' needs the length of the key in bits: '{ length: 256 }'",
+  },
+  [Code.CryptoAesKeyLength]: {
+    text: "the length of an AES key is 128, 192 or 256, written as a number; JavaScript throws a TypeError otherwise",
+  },
+  [Code.ForeignPlain]: {
+    text: "a function in C takes plain parameters: no type parameters, no rest",
+  },
+  [Code.ForeignOptional]: {
+    text: "a function in C has no optional parameters",
+  },
+  [Code.ForeignTakes]: {
+    text: "a function in C cannot take a value of type '{word}'; it takes numbers, 'boolean', 'cstring', handles ('declare class'), arrays of numbers and handles, 'Buffer' and 'Out<T>'",
+  },
+  [Code.ForeignGives]: {
+    text: "a function in C cannot give a value of type '{word}'; it gives numbers, 'boolean', 'cstring' and handles ('declare class')",
+  },
+  [Code.ForeignNoReturn]: {
+    text: "a function in C needs its return type written: tz cannot see its code",
+  },
+  [Code.ForeignHandleNew]: {
+    text: "'{word}' is a handle from C ('declare class'): only functions in C give it out",
+  },
+  [Code.CallbackAsyncTest]: {
+    text: "'{word}' uses what the function returns as '{first}', but an async function returns a Promise; a Promise is always truthy, so JavaScript would take every element as passing: await the tests first, e.g. 'const passed = await Promise.all(xs.map(async x => ...))', then test 'passed[i]'",
+  },
+  [Code.CallbackAsyncValue]: {
+    text: "'{word}' uses what the function returns as '{first}', but an async function returns a Promise; drop 'async', or await what the function needs before the call",
+  },
+  [Code.CallbackAsyncReplace]: {
+    text: "'{word}' uses what the function returns as '{first}', but an async function returns a Promise; JavaScript would insert \"[object Promise]\" for each match: work out the replacements first, then replace with a function that is not async",
+  },
+  [Code.AwaitMixed]: {
+    text: "'await' of '{word}' gives the value of the Promise or the value itself, which make no one type; check what it holds first",
+  },
+  [Code.PromiseListMayBe]: {
+    text: "'{word}' of values that may be promises ('{first}') is not supported yet; await each first, or make each a Promise",
+  },
+  [Code.PromiseListNotArray]: {
+    text: "'{word}' needs an array of promises, found '{first}'{other}",
+  },
+  [Code.EmbedLiteral]: {
+    text: "the path of {word} must be a string literal: the file is read when the program is compiled, e.g. '{other}'",
+  },
+  [Code.EmbedBackslash]: {
+    text: "write '/' in the path, not '\\', as on every system",
+  },
+  [Code.EmbedRelative]: {
+    text: "the path of {word} is relative to the file it is written in, e.g. '{other}'",
+  },
+  [Code.EmbedUnread]: {
+    text: "cannot read '{word}': {other}",
+  },
+  [Code.ForAwaitPlace]: {
+    text: "'for await' can only be used in an async function or in top-level code; make the function async",
+  },
+  [Code.ForAwaitNotIterable]: {
+    text: "'for await' needs an async iterator, an array or an iterator, found '{word}'",
+  },
+  [Code.ForOfLater]: {
+    text: "'{word}' gives its values later: iterate it with 'for await (const x of ...)'",
+  },
+  [Code.AsyncNextNotYet]: {
+    text: "'{word}()' of an async iterator is not supported yet; iterate it with 'for await'",
+  },
+  [Code.ObjectNumberEnum]: {
+    text: "'Object.{word}' of numeric enum '{first}' is not supported: in JavaScript it mixes the names of the members with their numbers; list the members you need, e.g. '[{first}.{other}]'",
+  },
+  [Code.EnumTypeMemberMissing]: {
+    text: "enum '{word}' has no member '{other}'",
+  },
+  [Code.ClassNotTopLevel]: {
+    text: "a class can be declared only at the top level of a file; here, make it with a class expression, 'const {word} = class { ... }'",
+  },
+  [Code.TemplateHole]: {
+    text: "a template literal type holds strings, numbers, booleans and undefined, not '{word}'",
+  },
+  [Code.TextChangeNotString]: {
+    text: "'{word}' takes a string type, such as a string literal type, not '{other}'",
+  },
+  [Code.MappedRename]: {
+    text: "a mapped type renames its keys to names of fields, string literal types such as `get${Capitalize<K>}`, not '{word}'",
+  },
+  [Code.ReflectGetJson]: {
+    text: "Reflect.get takes an object of the language; read a key of a Json as JavaScript does, 'j[key]'",
+  },
+  [Code.ReflectGetNotObject]: {
+    text: "Reflect.get takes an object, and this is a '{word}'",
+  },
+  [Code.ReflectApplyNotFunction]: {
+    text: "Reflect.apply calls a function, and this is a '{word}'",
+  },
+  [Code.ReflectConstructThird]: {
+    text: "the third argument of Reflect.construct, the class whose prototype the object gets, is not supported: there are no prototypes in tz; make an object of that class",
+  },
+  [Code.ReflectConstructNotClass]: {
+    text: "Reflect.construct makes an object of a class, and this is a '{word}'",
+  },
+  [Code.ReflectArgumentsTuple]: {
+    text: "the arguments are an array, and this is a tuple; copy it into one, '[...t]'",
+  },
+  [Code.ReflectMetadataValue]: {
+    text: "'Reflect.metadata(key, value)' makes a decorator; write it as one, before a class or a member: '@Reflect.metadata(key, value)'",
+  },
+  [Code.ReflectMetadataKeys]: {
+    text: "'Reflect.{word}' is not supported: the keys of records are decorators, classes and strings, which no one type holds; ask for each key with 'Reflect.hasMetadata(key, target)'",
+  },
+  [Code.ReflectUnknown]: {
+    text: "'Reflect.{word}' is not supported; Reflect has get, apply, construct, fill, defineMetadata, getMetadata, getOwnMetadata, hasMetadata, hasOwnMetadata and deleteMetadata",
+  },
+  [Code.MetadataKeyType]: {
+    text: "a key of metadata is a decorator, a class or a constant, whose records have the type of what is written, or a string, whose records are 'unknown'; found '{word}'",
+  },
+  [Code.MetadataKeyDesign]: {
+    text: "the records 'design:*' are what the compiler writes for decorated members; write a key of your own",
+  },
+  [Code.MetadataVoidValue]: {
+    text: "an expression of type 'void' has no value to record",
+  },
+  [Code.MetadataTarget]: {
+    text: "the target of metadata is an object, such as a class, found '{word}'",
+  },
+  [Code.WholeImportUses]: {
+    text: "{word}; import the names this file uses: 'import { {first} } from \"{path}\"'",
+  },
+  [Code.WholeImportTypical]: {
+    text: "{word}; import the names you need, e.g. 'import { {first} } from \"{path}\"'",
+  },
+  [Code.WholeImportProcess]: {
+    text: "{word}; 'process' is global, as in Node, so the import is not needed: drop it",
+  },
+  [Code.WholeImportBuffer]: {
+    text: "{word}; 'Buffer' is global, as in Node: import it as 'import { Buffer } from \"{path}\"', or drop the import",
+  },
+  [Code.ObjectNameValue]: {
+    text: "'{word}' can only be used through its properties, e.g. '{other}'",
+  },
+  [Code.PrintVoid]: {
+    text: "an expression of type 'void' cannot be printed",
+  },
+  [Code.PerformanceOther]: {
+    text: "'performance.{word}' is not supported yet; only 'performance.now()' is",
+  },
+  [Code.ResultImportBuiltIn]: {
+    text: "Result, ok and err are built in: remove the import from 'neverthrow'",
+  },
+  [Code.ResultExportBuiltIn]: {
+    text: "Result, ok and err are built in: remove the export from 'neverthrow'",
+  },
+  [Code.JsonIsJsonKnown]: {
+    text: "Json.isJson tells whether an 'unknown' value holds a Json; a value of type '{word}' is known when the program is built{other}",
+  },
+  [Code.FsZeroPath]: {
+    text: "the path has a zero character in it, which no file name can have",
   },
 };

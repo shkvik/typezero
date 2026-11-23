@@ -35,6 +35,9 @@ partial class ExpressionTypes {
     if (this.collectionInstanceof(expr, left, module)) {
       return boolean;
     }
+    if (this.bytesInstanceof(expr, left, module)) {
+      return boolean;
+    }
     const decl = this.testedClass(expr.rhs, module);
     if (decl == undefined) {
       return boolean;
@@ -51,7 +54,7 @@ partial class ExpressionTypes {
       return boolean;
     }
 
-    const instanceofErrors = this.classes.instanceofCheck(
+    const instanceofErrors = this.classValues.instanceofCheck(
       expr,
       left,
       instance,
@@ -92,11 +95,11 @@ partial class ExpressionTypes {
 
       return true;
     }
-    if (isOpaque || this.classes.isOpenTested(base)) {
+    if (isOpaque || this.classValues.isOpenTested(base)) {
       return true;
     }
     if (base.kind == TypeKind.Union) {
-      const collectionUnionErrors = this.classes.collectionUnionCheck(
+      const collectionUnionErrors = this.classValues.collectionUnionCheck(
         expr,
         left,
         base.parts,
@@ -108,7 +111,7 @@ partial class ExpressionTypes {
       return true;
     }
 
-    const collectionTypeError = this.classes.collectionTypeCheck(
+    const collectionTypeError = this.classValues.collectionTypeCheck(
       expr,
       left,
       base,
@@ -190,11 +193,7 @@ partial class ExpressionTypes {
       return declared;
     }
 
-    this.errors.beginTrial();
-
-    const object = this.typed(target.object, undefined, module);
-
-    this.errors.endTrial();
+    const object = this.peekType(target.object, module);
 
     if (object.kind == TypeKind.Instance) {
       this.instanceTargetCheck(target, object, module);

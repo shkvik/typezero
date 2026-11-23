@@ -1,0 +1,242 @@
+import {
+  DeclaredMember,
+  DeclaredMemberKind,
+} from "../../../../program/ast/types/ast.types.declarations.tz";
+import {
+  CallArgument,
+  CallExpr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionType,
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
+import {
+  CallKind,
+  LibraryVariants,
+  OpenVariant,
+  RankedVariant,
+} from "../../../code/expression-types/types/expression-types.types.tz";
+import {
+  ParameterSite,
+  TypeContext,
+} from "../../../types/type-resolver/types/type-resolver.types.tz";
+
+partial class ExpressionTypes {
+  private declaredVariants(
+    instance: InstanceType,
+    name: string,
+    isStatic: boolean,
+  ): LibraryVariants {
+    const opened = this.program.modules[instance.module];
+    const declared = opened?.declared.find((one) => one.loc == instance.loc);
+    if (declared == undefined) {
+      return { types: [], open: [] };
+    }
+
+    const members = declared.members.filter(
+      (one) => one.name == name && one.isStatic == isStatic,
+    );
+    if (members.length == 0 && !isStatic) {
+      return this.parentVariantTypes(instance, name);
+    }
+    if (members.length < 2) {
+      return { types: [], open: [] };
+    }
+
+    const context = this.resolver.classContext(
+      instance,
+      declared.typeParams,
+      instance.module,
+    );
+
+    return this.variantsOf(members, context);
+  }
+
+  private variantsOf(
+    members: DeclaredMember[],
+    context: TypeContext,
+  ): LibraryVariants {
+    const types: FunctionType[] = [];
+    const open: OpenVariant[] = [];
+
+    for (const member of members) {
+      const type = this.variantType(member, context);
+      const form = member.form;
+
+      if (type != undefined) {
+        types.push(type);
+      }
+      if (type == undefined && form.kind != DeclaredMemberKind.Field) {
+        const result = this.openResult(member, context);
+
+        open.push({ params: form.params, result });
+      }
+    }
+
+    return { types, open };
+  }
+
+  private openResult(
+    member: DeclaredMember,
+    context: TypeContext,
+  ): Type | undefined {
+    const written = member.type;
+    if (written == undefined) {
+      return undefined;
+    }
+
+    this.errors.beginTrial();
+
+    const result = this.resolver.resolve(written, context);
+
+    this.errors.endTrial();
+
+    if (result.kind == TypeKind.Error || this.parts.mentionsParameter(result)) {
+      return undefined;
+    }
+
+    return result;
+  }
+
+  private parentVariantTypes(
+    instance: InstanceType,
+    name: string,
+  ): LibraryVariants {
+    const parent = this.types.baseClassOf(instance);
+    if (parent == undefined || parent.kind != TypeKind.Instance) {
+      return { types: [], open: [] };
+    }
+
+    return this.declaredVariants(parent, name, false);
+  }
+
+  private variantType(
+    member: DeclaredMember,
+    context: TypeContext,
+  ): FunctionType | undefined {
+    const form = member.form;
+    if (form.kind == DeclaredMemberKind.Field || form.typeParams.length > 0) {
+      return undefined;
+    }
+
+    const sites: ParameterSite[] = [];
+
+    for (const param of form.params) {
+      const type = param.type;
+      if (type == undefined) {
+        return undefined;
+      }
+
+      sites.push({
+        name: param.name,
+        loc: param.loc,
+        kind: param.form.kind,
+        type,
+        isDeclared: false,
+      });
+    }
+
+    const signature = this.resolver.signature(sites, member.type, context);
+    if (signature.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    return signature;
+  }
+
+  private variantLibraryCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    variants: LibraryVariants,
+    module: int,
+  ): Type {
+    const chosen = this.quietVariant(expr.args, member.name, variants, module);
+    if (chosen == undefined) {
+      this.looseValues(expr.args, module);
+
+      return this.sharedResult(variants);
+    }
+
+    this.positionMethod = member.name;
+
+    return this.calledWith(expr, chosen, member.loc, CallKind.Library, module);
+  }
+
+  private looseValues(args: CallArgument[], module: int): void {
+    for (const arg of args) {
+      if (arg.expr.kind != ExprKind.Function) {
+        this.typed(arg.expr, undefined, module);
+      }
+    }
+  }
+
+  private quietVariant(
+    args: CallArgument[],
+    name: string,
+    variants: LibraryVariants,
+    module: int,
+  ): FunctionType | undefined {
+    const count = args.length;
+    const ranked = this.calls.typeVariants(name, variants.types);
+    const counted = ranked.filter((one) =>
+      this.overloads.isCountFitting(one.type, count),
+    );
+    const others = variants.open.filter((one) =>
+      this.overloads.isCountTaking(one.params, count),
+    );
+    const isPlain = args.every(
+      (arg) => !arg.spread && arg.expr.kind != ExprKind.Function,
+    );
+    const only = counted[0];
+    const isOnly = counted.length == 1 && others.length == 0;
+    if (isOnly && only != undefined && !isPlain) {
+      return only.type;
+    }
+    if (!isPlain) {
+      return undefined;
+    }
+
+    const given = this.quietArguments(args, module);
+    const applicable: RankedVariant[] = [];
+
+    for (const variant of counted) {
+      const reason = this.variantRanks(args, given, variant, module);
+      if (reason == "") {
+        applicable.push(variant);
+      }
+    }
+
+    const best = applicable.find((one) =>
+      this.overloads.isBestVariant(one, applicable),
+    );
+    const chosen = best ?? applicable[0];
+
+    return chosen?.type;
+  }
+
+  private sharedResult(variants: LibraryVariants): Type {
+    const results: (Type | undefined)[] = [];
+
+    for (const type of variants.types) {
+      results.push(type.shape.result);
+    }
+
+    for (const other of variants.open) {
+      results.push(other.result);
+    }
+
+    const first = results[0];
+    const isShared =
+      first != undefined && results.every((result) => result == first);
+    if (!isShared || first == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return first;
+  }
+}

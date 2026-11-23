@@ -1,0 +1,371 @@
+import {
+  kAtomNode,
+  kDigits,
+  kGroupMarkers,
+  kModifierLetters,
+  kQuantifierStarts,
+} from "./const/regex-parser.const.tz";
+import {
+  RegexGroupKind,
+  RegexNode,
+  RegexNodeKind,
+} from "./types/regex-parser.types.tz";
+
+export class RegexParser {
+  private readonly text: string;
+  private readonly isSets: boolean;
+  private readonly names: string[];
+  private index: int;
+  private isBroken: boolean;
+
+  public constructor(text: string, isSets: boolean) {
+    this.text = text;
+    this.isSets = isSets;
+    this.names = [""];
+    this.index = 0;
+    this.isBroken = false;
+  }
+
+  public parse(): RegexNode | undefined {
+    const root = this.alternation();
+    if (this.isBroken || this.index < this.text.length) {
+      return undefined;
+    }
+
+    return root;
+  }
+
+  public groupNames(): string[] {
+    return this.names;
+  }
+
+  public requiredGroups(node: RegexNode, isByName: boolean): Set<int> {
+    switch (node.kind) {
+      case RegexNodeKind.Alternation:
+        return this.commonGroups(node.parts, isByName);
+      case RegexNodeKind.Sequence:
+        return this.sequenceGroups(node, isByName);
+      default:
+        return new Set<int>();
+    }
+  }
+
+  private sequenceGroups(node: RegexNode, isByName: boolean): Set<int> {
+    const found = new Set<int>();
+    if (!node.isRequired) {
+      return found;
+    }
+
+    for (const part of node.parts) {
+      for (const group of this.requiredGroups(part, isByName)) {
+        found.add(group);
+      }
+    }
+
+    if (node.capture > 0) {
+      this.addCapture(found, node.capture, isByName);
+    }
+
+    return found;
+  }
+
+  private addCapture(found: Set<int>, capture: int, isByName: boolean): void {
+    found.add(capture);
+
+    const name = this.names[capture] ?? "";
+    if (!isByName || name == "") {
+      return;
+    }
+
+    for (let other = 1; other < this.names.length; other++) {
+      if (this.names[other] == name) {
+        found.add(other);
+      }
+    }
+  }
+
+  private commonGroups(branches: RegexNode[], isByName: boolean): Set<int> {
+    const first = branches[0];
+    if (first == undefined) {
+      return new Set<int>();
+    }
+
+    let common = this.requiredGroups(first, isByName);
+
+    for (const branch of branches.slice(1)) {
+      const found = this.requiredGroups(branch, isByName);
+      const kept = new Set<int>();
+
+      for (const group of common) {
+        if (found.has(group)) {
+          kept.add(group);
+        }
+      }
+
+      common = kept;
+    }
+
+    return common;
+  }
+
+  private alternation(): RegexNode {
+    const branches = [this.sequence()];
+
+    while (this.isAt("|")) {
+      this.index += 1;
+      branches.push(this.sequence());
+    }
+
+    return {
+      kind: RegexNodeKind.Alternation,
+      parts: branches,
+      capture: 0,
+      isRequired: true,
+    };
+  }
+
+  private sequence(): RegexNode {
+    const terms: RegexNode[] = [];
+
+    while (this.isTermNext()) {
+      terms.push(this.term());
+    }
+
+    return this.wrapped(terms, 0, true);
+  }
+
+  private wrapped(
+    parts: RegexNode[],
+    capture: int,
+    isRequired: boolean,
+  ): RegexNode {
+    return { kind: RegexNodeKind.Sequence, parts, capture, isRequired };
+  }
+
+  private isTermNext(): boolean {
+    const char = this.current();
+
+    return !this.isBroken && char != "" && char != "|" && char != ")";
+  }
+
+  private term(): RegexNode {
+    if (kQuantifierStarts.includes(this.current())) {
+      this.isBroken = true;
+      this.index += 1;
+
+      return kAtomNode;
+    }
+
+    const atom = this.atom();
+
+    return this.quantified(atom);
+  }
+
+  private atom(): RegexNode {
+    switch (this.current()) {
+      case "(":
+        return this.group();
+      case "[":
+        return this.characterClass();
+      case "\\":
+        return this.escaped();
+      default:
+        this.index += 1;
+
+        return kAtomNode;
+    }
+  }
+
+  private quantified(atom: RegexNode): RegexNode {
+    const char = this.current();
+    if (char == "{") {
+      return this.braced(atom);
+    }
+    if (!kQuantifierStarts.includes(char)) {
+      return atom;
+    }
+
+    this.index += 1;
+    this.skipLazy();
+
+    return this.wrapped([atom], 0, char == "+");
+  }
+
+  private braced(atom: RegexNode): RegexNode {
+    const start = this.index + 1;
+    const leastEnd = this.digitsEnd(start);
+    if (leastEnd == start) {
+      return atom;
+    }
+
+    const end = this.mostEnd(leastEnd);
+    if (this.text.slice(end, end + 1) != "}") {
+      return atom;
+    }
+
+    const least = this.text.slice(start, leastEnd);
+    const isRequired = least.split("").some((digit) => digit != "0");
+
+    this.index = end + 1;
+    this.skipLazy();
+
+    return this.wrapped([atom], 0, isRequired);
+  }
+
+  private mostEnd(leastEnd: int): int {
+    if (this.text.slice(leastEnd, leastEnd + 1) != ",") {
+      return leastEnd;
+    }
+
+    return this.digitsEnd(leastEnd + 1);
+  }
+
+  private digitsEnd(start: int): int {
+    let end = start;
+
+    while (kDigits.includes(this.text.slice(end, end + 1))) {
+      end += 1;
+    }
+
+    return end;
+  }
+
+  private skipLazy(): void {
+    if (this.isAt("?")) {
+      this.index += 1;
+    }
+  }
+
+  private group(): RegexNode {
+    this.index += 1;
+
+    const rest = this.text.slice(this.index);
+    const marker = kGroupMarkers.find((one) => rest.startsWith(one.text));
+    if (marker != undefined) {
+      this.index += marker.text.length;
+
+      return this.markedGroup(marker.kind);
+    }
+    if (this.isAt("?")) {
+      this.skipModifiers();
+
+      return this.markedGroup(RegexGroupKind.Plain);
+    }
+
+    return this.markedGroup(RegexGroupKind.Capture);
+  }
+
+  private markedGroup(kind: RegexGroupKind): RegexNode {
+    switch (kind) {
+      case RegexGroupKind.Capture:
+        return this.captureGroup("");
+      case RegexGroupKind.Named:
+        return this.captureGroup(this.groupName());
+      case RegexGroupKind.NegativeLook:
+        return this.closedGroup(0, false);
+      default:
+        return this.closedGroup(0, true);
+    }
+  }
+
+  private captureGroup(name: string): RegexNode {
+    const capture = this.names.length;
+
+    this.names.push(name);
+
+    return this.closedGroup(capture, true);
+  }
+
+  private closedGroup(capture: int, isRequired: boolean): RegexNode {
+    const inner = this.alternation();
+    if (!this.isAt(")")) {
+      this.isBroken = true;
+    }
+
+    this.index += 1;
+
+    return this.wrapped([inner], capture, isRequired);
+  }
+
+  private groupName(): string {
+    const end = this.text.indexOf(">", this.index);
+    if (end < 0) {
+      this.isBroken = true;
+
+      return "";
+    }
+
+    const name = this.text.slice(this.index, end);
+
+    this.index = end + 1;
+
+    return name;
+  }
+
+  private skipModifiers(): void {
+    this.index += 1;
+
+    while (kModifierLetters.includes(this.current())) {
+      this.index += 1;
+    }
+
+    if (!this.isAt(":")) {
+      this.isBroken = true;
+    }
+
+    this.index += 1;
+  }
+
+  private characterClass(): RegexNode {
+    let depth = 0;
+
+    while (this.index < this.text.length) {
+      const char = this.current();
+
+      this.index += 1;
+      depth += this.classStep(char, depth);
+
+      if (depth == 0) {
+        return kAtomNode;
+      }
+    }
+
+    this.isBroken = true;
+
+    return kAtomNode;
+  }
+
+  private classStep(char: string, depth: int): int {
+    if (char == "\\") {
+      this.index += 1;
+
+      return 0;
+    }
+    if (char == "[" && (depth == 0 || this.isSets)) {
+      return 1;
+    }
+    if (char == "]") {
+      return -1;
+    }
+
+    return 0;
+  }
+
+  private escaped(): RegexNode {
+    if (this.index + 1 >= this.text.length) {
+      this.isBroken = true;
+    }
+
+    this.index += 2;
+
+    return kAtomNode;
+  }
+
+  private isAt(char: string): boolean {
+    return this.current() == char;
+  }
+
+  private current(): string {
+    return this.text.slice(this.index, this.index + 1);
+  }
+}

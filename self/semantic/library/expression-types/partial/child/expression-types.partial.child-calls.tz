@@ -1,0 +1,323 @@
+import {
+  ArrayElement,
+  CallExpr,
+  Expr,
+  ExprKind,
+  UnaryOp,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
+import { TypeKind } from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import { FsCall, FsShape } from "../../../fs-rules/types/fs-rules.types.tz";
+
+partial class ExpressionTypes {
+  private childCallCheck(expr: CallExpr, module: int): void {
+    const callee = expr.callee;
+    if (callee.kind != ExprKind.Name || this.modules.isLibraryModule(module)) {
+      return;
+    }
+    if (expr.args.some((one) => one.spread) || expr.args.length == 0) {
+      return;
+    }
+
+    const target = this.targetOfName(callee, module);
+    const opened = this.program.modules[target?.module ?? -1];
+    if (target == undefined || target.kind != SymbolKind.Function) {
+      return;
+    }
+    if (opened == undefined || !this.child.isChildModule(opened.name)) {
+      return;
+    }
+    if (!this.child.isRun(callee.name)) {
+      return;
+    }
+
+    this.childRunCheck(expr, callee.name, module);
+  }
+
+  private childRunCheck(expr: CallExpr, name: string, module: int): void {
+    const isExec = this.child.isExec(name);
+    const file = expr.args[0];
+    const list = expr.args[1];
+    if (file == undefined) {
+      return;
+    }
+
+    this.childFileCheck(file.expr, isExec, module);
+    const isList =
+      !isExec && list != undefined && list.expr.kind != ExprKind.ObjectLit;
+    const later = expr.args[2];
+    if (!isExec && !isList && later != undefined) {
+      const optionsAtError = this.child.optionsAtError(later.expr.loc, name);
+
+      return this.reportFound(module, optionsAtError);
+    }
+    if (isList && list != undefined && list.expr.kind == ExprKind.ArrayLit) {
+      this.childZeroCheck(list.expr.elements, module);
+    }
+
+    const index = this.childOptionsAt(isList);
+    const row: FsCall = {
+      name,
+      shape: FsShape.PathOnly,
+      options: this.child.options(),
+      isUtf8Only: false,
+    };
+    if (!this.fsOptionsCheck(expr, index, row, module)) {
+      return;
+    }
+
+    this.childOptionsCheck(expr, index, name, isExec, module);
+  }
+
+  private childOptionsAt(isList: boolean): int {
+    if (isList) {
+      return 2;
+    }
+
+    return 1;
+  }
+
+  private childFileCheck(file: Expr, isExec: boolean, module: int): boolean {
+    if (file.kind != ExprKind.StringLit) {
+      return true;
+    }
+    if (file.value.includes("\u0000")) {
+      this.reportFound(module, this.child.zeroFileError(file.loc, isExec));
+
+      return false;
+    }
+    if (file.value == "" && !isExec) {
+      this.reportFound(module, this.child.emptyNameError(file.loc));
+
+      return false;
+    }
+
+    return true;
+  }
+
+  private childZeroCheck(elements: ArrayElement[], module: int): boolean {
+    let isFine = true;
+
+    for (let index = 0; index < elements.length; index++) {
+      const element = elements[index];
+      if (element == undefined || element.spread) {
+        continue;
+      }
+
+      const value = element.expr;
+      if (value.kind == ExprKind.StringLit && value.value.includes("\u0000")) {
+        this.reportFound(module, this.child.zeroArgError(value.loc, index));
+
+        isFine = false;
+      }
+    }
+
+    return isFine;
+  }
+
+  private childOptionsCheck(
+    expr: CallExpr,
+    index: int,
+    name: string,
+    isExec: boolean,
+    module: int,
+  ): void {
+    const encoding = this.fsOptionValue(expr, index, "encoding");
+    const isBuffer = this.childEncodingCheck(encoding, name, module);
+
+    this.childStdioCheck(expr, index, name, module);
+    this.childLimitsCheck(expr, index, module);
+    this.childInputCheck(expr, index, name, isBuffer, module);
+    this.childSignalCheck(expr, index, module);
+    this.childShellCheck(expr, index, name, isExec, module);
+  }
+
+  private childEncodingCheck(
+    encoding: Expr | undefined,
+    name: string,
+    module: int,
+  ): boolean {
+    if (encoding == undefined || encoding.kind == ExprKind.Undefined) {
+      return true;
+    }
+    if (encoding.kind != ExprKind.StringLit) {
+      this.reportFound(module, this.child.encodingError(encoding.loc, name));
+
+      return false;
+    }
+    if (this.child.isBufferMarker(encoding.value)) {
+      return true;
+    }
+
+    const unknownError = this.byteSources.encodingError(encoding.loc, [
+      encoding.value,
+    ]);
+
+    this.reportFound(module, unknownError);
+
+    return false;
+  }
+
+  private childStdioCheck(
+    expr: CallExpr,
+    index: int,
+    name: string,
+    module: int,
+  ): void {
+    const stdio = this.fsOptionValue(expr, index, "stdio");
+    if (stdio == undefined || stdio.kind == ExprKind.Undefined) {
+      return;
+    }
+    if (stdio.kind == ExprKind.StringLit) {
+      const kindError = this.child.stdioKindError(stdio.loc, stdio);
+
+      return this.reportFound(module, kindError);
+    }
+    if (stdio.kind != ExprKind.ArrayLit) {
+      return this.reportFound(module, this.child.stdioError(stdio.loc, name));
+    }
+
+    const fourth = stdio.elements[3];
+    if (fourth != undefined) {
+      this.reportFound(module, this.child.threeError(fourth.expr.loc));
+    }
+
+    for (const element of stdio.elements.slice(0, 3)) {
+      const entryError = this.child.stdioEntryError(element);
+      if (entryError != undefined) {
+        this.reportFound(module, entryError);
+      }
+    }
+  }
+
+  private childLimitsCheck(expr: CallExpr, index: int, module: int): void {
+    const directory = this.fsOptionValue(expr, index, "cwd");
+    const isZero =
+      directory != undefined &&
+      directory.kind == ExprKind.StringLit &&
+      directory.value.includes("\u0000");
+    if (isZero && directory != undefined) {
+      this.reportFound(module, this.child.zeroCwdError(directory.loc));
+    }
+
+    for (const limit of ["timeout", "maxBuffer"]) {
+      const value = this.fsOptionValue(expr, index, limit);
+      if (value != undefined && this.isNegativeNumber(value)) {
+        this.reportFound(module, this.child.negativeError(value.loc, limit));
+      }
+    }
+
+    const signal = this.fsOptionValue(expr, index, "killSignal");
+    if (signal == undefined || signal.kind != ExprKind.StringLit) {
+      return;
+    }
+    if (!this.child.isSignal(signal.value)) {
+      this.reportFound(
+        module,
+        this.child.noSignalError(signal.loc, signal.value),
+      );
+    }
+  }
+
+  private isNegativeNumber(value: Expr): boolean {
+    if (value.kind != ExprKind.Unary || value.op != UnaryOp.Neg) {
+      return false;
+    }
+
+    const operand = value.operand;
+
+    return operand.kind == ExprKind.IntLit || operand.kind == ExprKind.FloatLit;
+  }
+
+  private childInputCheck(
+    expr: CallExpr,
+    index: int,
+    name: string,
+    isBuffer: boolean,
+    module: int,
+  ): void {
+    const input = this.fsOptionValue(expr, index, "input");
+    if (input == undefined) {
+      return;
+    }
+
+    const given = this.peekType(input, module);
+    const base = this.types.definedType(given);
+    if (base.kind == TypeKind.Error) {
+      return;
+    }
+
+    const isText = this.intl.isTextLike(base);
+    if (!isText && !this.byteSources.isByteView(base)) {
+      const inputError = this.child.inputError(input.loc, name, given);
+
+      return this.reportFound(module, inputError);
+    }
+
+    const encoding = this.fsOptionValue(expr, index, "encoding");
+    const isMarked =
+      encoding != undefined &&
+      encoding.kind == ExprKind.StringLit &&
+      this.child.isBufferMarker(encoding.value);
+    if (isText && isMarked && isBuffer) {
+      this.reportFound(module, this.child.bufferTextError(input.loc));
+    }
+  }
+
+  private childSignalCheck(expr: CallExpr, index: int, module: int): void {
+    const signal = this.fsOptionValue(expr, index, "killSignal");
+    if (signal == undefined) {
+      return;
+    }
+
+    const given = this.peekType(signal, module);
+    const base = this.types.definedType(given);
+    const isFitting =
+      this.intl.isTextLike(base) ||
+      base.kind == TypeKind.Int ||
+      base.kind == TypeKind.Error ||
+      this.intl.isNumberLike(base);
+    if (!isFitting) {
+      this.reportFound(module, this.child.killSignalError(signal.loc, given));
+    }
+  }
+
+  private childShellCheck(
+    expr: CallExpr,
+    index: int,
+    name: string,
+    isExec: boolean,
+    module: int,
+  ): void {
+    const shell = this.fsOptionValue(expr, index, "shell");
+    if (shell == undefined) {
+      return;
+    }
+
+    const given = this.peekType(shell, module);
+    const base = this.types.definedType(given);
+    if (this.intl.isTextLike(base) || base.kind == TypeKind.Error) {
+      return;
+    }
+
+    const isFlag = this.intl.isFlagType(base);
+    const isLiteral = shell.kind == ExprKind.BoolLit;
+    if (isFlag && isExec) {
+      const isTrue = isLiteral && shell.kind == ExprKind.BoolLit && shell.value;
+      if (!isTrue) {
+        this.reportFound(module, this.child.execShellError(shell.loc));
+      }
+
+      return;
+    }
+    if (isFlag && !isLiteral) {
+      this.reportFound(module, this.child.shellFlagError(shell.loc, name));
+
+      return;
+    }
+    if (!isFlag) {
+      this.reportFound(module, this.child.shellError(shell.loc, given));
+    }
+  }
+}

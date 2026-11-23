@@ -1,3 +1,17 @@
+import {
+  BindingKind,
+  NameOrigin,
+  VarDeclarator,
+} from "../../../../../program/ast/types/ast.types.patterns.tz";
+import {
+  DeclaredVariable,
+  Destination,
+  DestinationKind,
+  HiddenName,
+  ParamSlot,
+  ValueRecord,
+  VariableDoor,
+} from "../../types/expression-types.types.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import {
@@ -5,10 +19,6 @@ import {
   ExprKind,
   NameExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
-import {
-  BindingKind,
-  NameOrigin,
-} from "../../../../../program/ast/types/ast.types.patterns.tz";
 import {
   ClassDecl,
   EnumDecl,
@@ -29,14 +39,6 @@ import {
 } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import { kNoPlace } from "../../const/expression-types.const.tz";
-import {
-  DeclaredVariable,
-  HiddenName,
-  Destination,
-  ParamSlot,
-  ValueRecord,
-  VariableDoor,
-} from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
   private record(module: int): ValueRecord | undefined {
@@ -178,9 +180,10 @@ partial class ExpressionTypes {
       return this.keepConstant(door, variable, init, given, module);
     }
     if (init == undefined) {
-      this.report(module, decl.loc, Code.VariableNeedsType, {
-        word: decl.name,
-      });
+      const first = this.assignedTypeText(decl, false, module);
+      const code = this.statements.untypedCode(first, false);
+
+      this.report(module, decl.loc, code, { word: decl.name, first });
 
       return;
     }
@@ -191,6 +194,12 @@ partial class ExpressionTypes {
       this.report(module, init.loc, Code.VoidInitializer, kNoDetails);
 
       return;
+    }
+    if (given.kind == TypeKind.Undefined && !variable.isConst) {
+      const first = this.assignedTypeText(decl, true, module);
+      const code = this.statements.untypedCode(first, true);
+
+      return this.report(module, decl.loc, code, { word: decl.name, first });
     }
     if (given.kind == TypeKind.Undefined) {
       const undefinedError = this.statements.undefinedError(variable, init);
@@ -274,5 +283,57 @@ partial class ExpressionTypes {
     }
 
     return this.isWholeTree(init, module);
+  }
+
+  private assignedTypeText(
+    decl: VarDeclarator,
+    isUndefined: boolean,
+    module: int,
+  ): string {
+    const list = this.record(module)?.destinations.get(decl.loc) ?? [];
+    let joined: Type | undefined = undefined;
+
+    if (isUndefined) {
+      joined = this.store.plain(TypeKind.Undefined);
+    }
+
+    for (const one of list) {
+      const value = one.value;
+      if (one.kind != DestinationKind.Assigned || value == undefined) {
+        continue;
+      }
+
+      const given = this.peekType(value, module);
+
+      joined = this.assignedJoin(joined, given);
+    }
+
+    const isKnown =
+      joined != undefined &&
+      joined.kind != TypeKind.Error &&
+      joined.kind != TypeKind.Undefined;
+    if (!isKnown || joined == undefined) {
+      return "";
+    }
+
+    return this.text.of(joined);
+  }
+
+  private assignedJoin(joined: Type | undefined, given: Type): Type {
+    if (joined == undefined) {
+      return given;
+    }
+
+    const isMixed =
+      this.types.isNumeric(joined) &&
+      this.types.isNumeric(given) &&
+      joined.kind != given.kind;
+    if (isMixed) {
+      return this.store.plain(TypeKind.Double);
+    }
+
+    return (
+      this.unifier.unify(joined, given) ?? this.store.plain(TypeKind.Error)
+    );
   }
 }

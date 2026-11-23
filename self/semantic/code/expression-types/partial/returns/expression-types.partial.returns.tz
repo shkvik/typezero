@@ -1,0 +1,198 @@
+import {
+  Expr,
+  ExprKind,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { MethodKind } from "../../../../../program/ast/types/ast.types.classes.tz";
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import { ReturnStmt } from "../../../../../program/ast/types/ast.types.statements.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { kNoPlace } from "../../const/expression-types.const.tz";
+import { FunctionFrame } from "../../types/expression-types.types.tz";
+import { ExpressionTypes } from "../../expression-types.tz";
+
+partial class ExpressionTypes {
+  private walkReturn(
+    statement: ReturnStmt,
+    frame: FunctionFrame,
+    module: int,
+  ): void {
+    this.walkReturnValue(statement, frame, module);
+    this.noteGuardExit(statement.value, frame, module);
+  }
+
+  private walkReturnValue(
+    statement: ReturnStmt,
+    frame: FunctionFrame,
+    module: int,
+  ): void {
+    const value = statement.value;
+    const fn = frame.fn;
+
+    this.returnBeforeSuper(statement.loc, module);
+    this.returnFieldsCheck(statement, fn, module);
+    const returnAwaitError = this.statements.returnAwaitCheck(value, frame);
+
+    this.reportFound(module, returnAwaitError);
+
+    if (fn == undefined) {
+      this.report(
+        module,
+        statement.loc,
+        Code.ReturnOutsideFunction,
+        kNoDetails,
+      );
+
+      return this.valueCheck(value, module);
+    }
+
+    if (value != undefined && fn.role?.method == MethodKind.Constructor) {
+      this.report(module, value.loc, Code.ConstructorReturn, kNoDetails);
+
+      return this.valueCheck(value, module);
+    }
+
+    const result = frame.result;
+    if (result == undefined) {
+      return this.collectReturn(value, frame, module);
+    }
+    if (result.kind == TypeKind.Void) {
+      return this.voidReturn(value, frame, module);
+    }
+    if (value == undefined) {
+      const emptyReturnError = this.statements.emptyReturnError(
+        statement,
+        result,
+        frame,
+      );
+
+      return this.reportFound(module, emptyReturnError);
+    }
+
+    const given = this.returnedType(value, result, frame, module);
+
+    this.coerce(value, given, result, module, kNoPlace);
+    this.predicateReturnCheck(fn, value, module);
+  }
+
+  private returnedType(
+    value: Expr,
+    wanted: Type | undefined,
+    frame: FunctionFrame,
+    module: int,
+  ): Type {
+    const given = this.typed(value, wanted, module);
+    if (frame.isAsync && given.kind == TypeKind.Promise) {
+      return given.value;
+    }
+
+    return given;
+  }
+
+  private collectReturn(
+    value: Expr | undefined,
+    frame: FunctionFrame,
+    module: int,
+  ): void {
+    if (value == undefined) {
+      frame.hasEmptyReturn = true;
+
+      return;
+    }
+
+    const before = this.recursions.length;
+    const hint = this.returnShapeHint(value, frame, module);
+    const type = this.hintedReturn(value, hint, frame, module);
+    const calls = this.recursions.slice(before);
+    if (calls.length > 0 && type.kind == TypeKind.Error) {
+      for (const call of calls) {
+        frame.recursive.push(call);
+      }
+
+      return;
+    }
+
+    frame.returns.push({ value, type });
+  }
+
+  private hintedReturn(
+    value: Expr,
+    hint: Type | undefined,
+    frame: FunctionFrame,
+    module: int,
+  ): Type {
+    const given = this.returnedType(value, hint, frame, module);
+
+    if (hint != undefined) {
+      this.coerce(value, given, hint, module, kNoPlace);
+    }
+
+    return given;
+  }
+
+  private returnShapeHint(
+    value: Expr,
+    frame: FunctionFrame,
+    module: int,
+  ): Type | undefined {
+    if (!this.isReturnShaped(value, module)) {
+      return undefined;
+    }
+
+    const earlier = frame.returns.find((one) =>
+      this.statements.isShapedType(one.type),
+    );
+
+    return earlier?.type;
+  }
+
+  private isReturnShaped(value: Expr, module: int): boolean {
+    switch (value.kind) {
+      case ExprKind.ObjectLit:
+      case ExprKind.ArrayLit:
+        return true;
+      case ExprKind.Conditional:
+        return (
+          this.isReturnShaped(value.thenExpr, module) ||
+          this.isReturnShaped(value.elseExpr, module)
+        );
+      case ExprKind.Call: {
+        const callee = value.callee;
+        const isMaker =
+          callee.kind == ExprKind.Name && this.isResultMaker(callee, module);
+        const isSpread = value.args.some((arg) => arg.spread);
+
+        return isMaker && value.args.length <= 1 && !isSpread;
+      }
+      default:
+        return false;
+    }
+  }
+
+  private voidReturn(
+    value: Expr | undefined,
+    frame: FunctionFrame,
+    module: int,
+  ): void {
+    if (value == undefined) {
+      return;
+    }
+
+    const given = this.returnedType(value, undefined, frame, module);
+    const isNothing =
+      given.kind == TypeKind.Void ||
+      given.kind == TypeKind.Undefined ||
+      given.kind == TypeKind.Error;
+    if (isNothing || frame.fn == undefined) {
+      return;
+    }
+
+    const word = this.functions.functionLabel(frame.fn);
+    const first = this.text.of(given);
+
+    this.report(module, value.loc, Code.VoidReturnsValue, { word, first });
+  }
+}

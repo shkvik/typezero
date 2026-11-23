@@ -1,0 +1,39 @@
+export enum RegexNodeKind {
+  Sequence,
+  Alternation,
+  Atom,
+}
+
+export enum RegexGroupKind {
+  Capture,
+  Named,
+  Plain,
+  Look,
+  NegativeLook,
+}
+
+export type RegexNode = {
+  readonly kind: RegexNodeKind;
+  readonly parts: RegexNode[];
+  readonly capture: int;
+  readonly isRequired: boolean;
+};
+
+export type RegexGroupMarker = {
+  readonly text: string;
+  readonly kind: RegexGroupKind;
+};
+
+export type RegexShape = {
+  readonly pattern: string;
+  readonly flags: string;
+  readonly groups: int;
+  readonly names: string[];
+  readonly mandatory: boolean[];
+  readonly namedMandatory: boolean[];
+};
+
+export type RegexText = {
+  readonly pattern: string;
+  readonly flags: string;
+};

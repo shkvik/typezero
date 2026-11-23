@@ -77,11 +77,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.errors.beginTrial();
-
-    const type = this.typed(arg.expr, undefined, module);
-
-    this.errors.endTrial();
+    const type = this.peekType(arg.expr, module);
     this.checkTruthy(arg.expr, type, TruthUse.Condition, undefined, module);
   }
 
@@ -96,11 +92,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    this.errors.beginTrial();
-
-    const type = this.typed(arg.expr, undefined, module);
-
-    this.errors.endTrial();
+    const type = this.peekType(arg.expr, module);
 
     const code = this.numberSourceCode(type);
     if (code != undefined) {

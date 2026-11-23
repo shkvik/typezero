@@ -30,6 +30,7 @@ partial class ScopeTraversal {
 
         return this.traverseTypes(expr.typeArgs);
       case ExprKind.Member:
+        this.noteMemberUse(expr.object, expr.name);
         this.traverseExpr(expr.object);
 
         return this.traverseTypes(expr.typeArgs);

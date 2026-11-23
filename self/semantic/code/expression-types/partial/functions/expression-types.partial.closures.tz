@@ -105,7 +105,12 @@ partial class ExpressionTypes {
       const kind = param.form.kind;
       const given = goal?.shape.params[index];
       const type = this.closureParameter(param, given, context, module);
-      const inside = this.functions.insideType(type, kind);
+      const isTaken =
+        param.type == undefined &&
+        kind == ParamKind.Required &&
+        given != undefined &&
+        given.optional;
+      const inside = this.closureInside(type, kind, isTaken);
 
       this.paramTypes.set(`${module} ${param.loc}`, inside);
 
@@ -119,7 +124,7 @@ partial class ExpressionTypes {
       }
 
       const optional =
-        kind == ParamKind.Optional || kind == ParamKind.Defaulted;
+        kind == ParamKind.Optional || kind == ParamKind.Defaulted || isTaken;
 
       rest = rest || kind == ParamKind.Rest;
       params.push({ type, optional });
@@ -127,6 +132,14 @@ partial class ExpressionTypes {
     }
 
     return { params, rest, self };
+  }
+
+  private closureInside(type: Type, kind: ParamKind, isTaken: boolean): Type {
+    if (isTaken) {
+      return this.types.optional(type);
+    }
+
+    return this.functions.insideType(type, kind);
   }
 
   private closureParameter(

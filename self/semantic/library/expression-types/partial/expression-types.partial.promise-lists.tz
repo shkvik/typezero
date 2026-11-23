@@ -1,0 +1,120 @@
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
+import {
+  kPromiseClass,
+  kPromiseListStatics,
+} from "../../library-rules/const/library-rules.const.tz";
+
+partial class ExpressionTypes {
+  private promiseListCheck(expr: CallExpr, module: int): void {
+    const callee = expr.callee;
+    if (
+      callee.kind != ExprKind.Member ||
+      this.modules.isLibraryModule(module)
+    ) {
+      return;
+    }
+
+    const owner = callee.object;
+    const isPromise =
+      owner.kind == ExprKind.Name &&
+      owner.name == kPromiseClass &&
+      this.isGlobalUse(owner, module);
+    const list = expr.args[0]?.expr;
+    const isList = kPromiseListStatics.includes(callee.name);
+    if (!isPromise || !isList || list == undefined || expr.args.length != 1) {
+      return;
+    }
+
+    this.promiseListArgument(callee, list, module);
+  }
+
+  private promiseListArgument(
+    callee: MemberExpr,
+    list: Expr,
+    module: int,
+  ): void {
+    const word = `${kPromiseClass}.${callee.name}`;
+    const given = this.peekType(list, module);
+    const base = this.types.definedType(given);
+    if (base.kind == TypeKind.Error) {
+      return;
+    }
+    if (base.kind != TypeKind.Array && base.kind != TypeKind.Tuple) {
+      const other = this.promiseSpreadHint(word, list, base);
+      const first = this.text.of(given);
+
+      return this.report(module, list.loc, Code.PromiseListNotArray, {
+        word,
+        first,
+        other,
+      });
+    }
+    if (list.kind == ExprKind.ArrayLit) {
+      for (const element of list.elements) {
+        if (!element.spread) {
+          this.promiseValueCheck(element.expr, word, module);
+        }
+      }
+
+      return;
+    }
+    if (base.kind == TypeKind.Array) {
+      this.promiseItemCheck(list, base.item, word, module);
+    }
+  }
+
+  private promiseSpreadHint(word: string, list: Expr, base: Type): string {
+    const isIterable =
+      base.kind == TypeKind.Iterator || base.kind == TypeKind.Dict;
+    if (!isIterable) {
+      return "";
+    }
+
+    const values = this.promiseValuesLabel(list);
+
+    return `; make an array of them: '${word}([...${values}])'`;
+  }
+
+  private promiseValuesLabel(list: Expr): string {
+    if (list.kind == ExprKind.Name) {
+      return list.name;
+    }
+
+    return "values";
+  }
+
+  private promiseValueCheck(value: Expr, word: string, module: int): void {
+    const given = this.peekType(value, module);
+
+    this.promiseItemCheck(value, given, word, module);
+  }
+
+  private promiseItemCheck(
+    place: Expr,
+    item: Type,
+    word: string,
+    module: int,
+  ): void {
+    const base = this.types.definedType(item);
+    if (base.kind == TypeKind.Promise || base.kind == TypeKind.Error) {
+      return;
+    }
+
+    const awaited = this.awaitedType(item);
+    if (awaited == item) {
+      return;
+    }
+
+    const first = this.text.of(item);
+
+    this.report(module, place.loc, Code.PromiseListMayBe, { word, first });
+  }
+}

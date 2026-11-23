@@ -1,0 +1,25 @@
+import {
+  RegexGroupKind,
+  RegexGroupMarker,
+  RegexNode,
+  RegexNodeKind,
+} from "../types/regex-parser.types.tz";
+
+export const kAtomNode: RegexNode = {
+  kind: RegexNodeKind.Atom,
+  parts: [],
+  capture: 0,
+  isRequired: true,
+};
+export const kGroupMarkers: RegexGroupMarker[] = [
+  { text: "?:", kind: RegexGroupKind.Plain },
+  { text: "?=", kind: RegexGroupKind.Look },
+  { text: "?!", kind: RegexGroupKind.NegativeLook },
+  { text: "?<=", kind: RegexGroupKind.Look },
+  { text: "?<!", kind: RegexGroupKind.NegativeLook },
+  { text: "?<", kind: RegexGroupKind.Named },
+];
+export const kQuantifierStarts = ["*", "+", "?"];
+export const kModifierLetters = ["i", "m", "s", "-"];
+export const kDigits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+export const kSetsFlag = "v";

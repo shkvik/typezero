@@ -1,0 +1,49 @@
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../../../diagnostic/types/message.types.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../expression-types.tz";
+
+partial class ExpressionTypes {
+  public problems(module: int): SourceError[] {
+    this.unreadResultsCheck(module);
+    this.pendingCallsCheck(module);
+
+    return this.errors.of(module);
+  }
+
+  public variable(module: int, loc: int): Type {
+    const door = this.door(module, loc);
+    if (door == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return door.type;
+  }
+
+  private reportFound(module: int, error: SourceError | undefined): void {
+    if (error != undefined) {
+      this.report(module, error.loc, error.code, error.details);
+    }
+  }
+
+  private reportAll(module: int, errors: SourceError[]): void {
+    for (const error of errors) {
+      this.report(module, error.loc, error.code, error.details);
+    }
+  }
+
+  private report(module: int, loc: int, code: Code, details: Details): void {
+    const record = this.record(module);
+    if (record == undefined) {
+      return;
+    }
+
+    this.errors.write(module, loc, code, details);
+  }
+}

@@ -1,0 +1,141 @@
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import { SourceError } from "../../../../diagnostic/types/message.types.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  ImportDecl,
+  WholeImport,
+} from "../../../../program/ast/types/ast.types.modules.tz";
+import {
+  kBufferModulePath,
+  kDefaultImportForm,
+  kKnownModules,
+  kNodePrefix,
+  kProcessModulePath,
+  kProcessName,
+  kResultPackage,
+  kWholeImportForm,
+} from "../const/scope-traversal.const.modules.tz";
+import { KnownModuleRow } from "../types/scope-traversal.types.tz";
+import { ScopeTraversal } from "../scope-traversal.tz";
+
+partial class ScopeTraversal {
+  private noteMemberUse(object: Expr, name: string): void {
+    if (object.kind != ExprKind.Name) {
+      return;
+    }
+
+    const known = this.memberUses.get(object.name);
+    if (known == undefined) {
+      this.memberUses.set(object.name, [name]);
+
+      return;
+    }
+    if (!known.includes(name)) {
+      known.push(name);
+    }
+  }
+
+  private wholeImportsCheck(): void {
+    for (const decl of this.module.file.imports) {
+      const whole = decl.whole;
+      if (whole != undefined) {
+        this.wholeImportCheck(decl, whole);
+      }
+      if (decl.from.path == kResultPackage) {
+        this.errors.push({
+          code: Code.ResultImportBuiltIn,
+          loc: decl.from.loc,
+          details: kNoDetails,
+        });
+      }
+    }
+
+    for (const decl of this.module.file.exports) {
+      const from = decl.from;
+      if (from != undefined && from.path == kResultPackage) {
+        this.errors.push({
+          code: Code.ResultExportBuiltIn,
+          loc: from.loc,
+          details: kNoDetails,
+        });
+      }
+    }
+  }
+
+  private wholeImportCheck(decl: ImportDecl, whole: WholeImport): void {
+    const path = decl.from.path;
+    const row = this.knownModule(path);
+    if (row != undefined) {
+      const error = this.wholeImportError(path, whole, row);
+
+      this.errors.push(error);
+    }
+  }
+
+  private wholeImportError(
+    path: string,
+    whole: WholeImport,
+    row: KnownModuleRow,
+  ): SourceError {
+    const word = this.importForm(whole.isDefault);
+    const bare = this.barePath(path);
+    const loc = whole.loc;
+    if (bare == kProcessModulePath && whole.name == kProcessName) {
+      return { code: Code.WholeImportProcess, loc, details: { word } };
+    }
+    if (bare == kBufferModulePath) {
+      return { code: Code.WholeImportBuffer, loc, details: { word, path } };
+    }
+
+    const used = this.memberUses.get(whole.name) ?? [];
+    if (used.length > 0) {
+      const first = used.join(", ");
+
+      return {
+        code: Code.WholeImportUses,
+        loc,
+        details: { word, first, path },
+      };
+    }
+
+    const first = row.typicalName;
+
+    return {
+      code: Code.WholeImportTypical,
+      loc,
+      details: { word, first, path },
+    };
+  }
+
+  private knownModule(path: string): KnownModuleRow | undefined {
+    const bare = this.barePath(path);
+
+    return kKnownModules.find((row) => {
+      if (row.isNode) {
+        return row.path == bare;
+      }
+
+      return row.path == path;
+    });
+  }
+
+  private barePath(path: string): string {
+    if (path.startsWith(kNodePrefix)) {
+      return path.slice(kNodePrefix.length);
+    }
+
+    return path;
+  }
+
+  private importForm(isDefault: boolean): string {
+    if (isDefault) {
+      return kDefaultImportForm;
+    }
+
+    return kWholeImportForm;
+  }
+}

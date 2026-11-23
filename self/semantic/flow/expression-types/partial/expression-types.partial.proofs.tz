@@ -1,0 +1,236 @@
+import { kBufferName } from "../../../library/byte-source-rules/const/byte-source-rules.const.tz";
+import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import { Linear } from "../../../code/expression-types/types/expression-types.types.tz";
+import {
+  kLengthTerm,
+  kZeroTerm,
+} from "../../bound-rules/const/bound-rules.const.tz";
+import {
+  OffsetLimit,
+  ProofRange,
+} from "../../proof-rules/types/proof-rules.types.tz";
+
+partial class ExpressionTypes {
+  private requireBetween(
+    expr: Expr,
+    given: Type,
+    range: ProofRange,
+    module: int,
+  ): boolean {
+    const isExempt =
+      given.kind == TypeKind.Error || this.modules.isLibraryModule(module);
+    if (isExempt) {
+      return false;
+    }
+    if (this.canProveBetween(expr, range, module)) {
+      return true;
+    }
+
+    const constant = this.intConstant(expr, given, module);
+    if (constant != undefined && this.proofs.isInside(constant, range)) {
+      return true;
+    }
+
+    const shown = this.sources.valueText(expr, module);
+    const betweenError = this.proofs.betweenError(
+      expr.loc,
+      range,
+      constant,
+      given,
+      shown,
+    );
+
+    this.reportFound(module, betweenError);
+
+    return false;
+  }
+
+  private canProveBetween(expr: Expr, range: ProofRange, module: int): boolean {
+    if (expr.kind == ExprKind.Conditional) {
+      return (
+        this.canProveBetween(expr.thenExpr, range, module) &&
+        this.canProveBetween(expr.elseExpr, range, module)
+      );
+    }
+
+    const value = this.linearOf(expr, module);
+    const known = this.valueRange(expr, module);
+    const high = range.high;
+    const isLower =
+      this.isAtLeast(value, range.low) || this.proofs.isFrom(known, range.low);
+    if (high == undefined || !isLower) {
+      return isLower;
+    }
+
+    return this.isAtMost(value, high) || this.proofs.isUpTo(known, high);
+  }
+
+  private isAtLeast(value: Linear | undefined, low: decimal): boolean {
+    if (value == undefined) {
+      return false;
+    }
+    if (value.term == kZeroTerm) {
+      return value.offset >= low;
+    }
+
+    return this.canProve(kZeroTerm, value.term, low - value.offset);
+  }
+
+  private isAtMost(value: Linear | undefined, high: decimal): boolean {
+    if (value == undefined) {
+      return false;
+    }
+    if (value.term == kZeroTerm) {
+      return value.offset <= high;
+    }
+
+    return this.canProve(value.term, kZeroTerm, value.offset - high);
+  }
+
+  private requireUpTo(
+    value: Expr | undefined,
+    object: Expr,
+    limit: OffsetLimit,
+    module: int,
+  ): boolean {
+    if (this.modules.isLibraryModule(module)) {
+      return false;
+    }
+    if (value != undefined) {
+      const given = this.peekType(value, module);
+      if (given.kind == TypeKind.Error) {
+        return true;
+      }
+    }
+    if (this.canProveUpTo(value, object, limit.less, module)) {
+      return true;
+    }
+
+    const holder = this.peekType(object, module);
+    const hasBytes = this.bytes.isRaw(holder);
+    const shown = this.shownOffset(value, module);
+    const objectText = this.sources.valueText(object, module);
+    const place = this.proofs.limitText(objectText, hasBytes, limit.less);
+    const loc = value?.loc ?? object.loc;
+    const upToError = this.proofs.upToError(loc, limit.what, shown, place);
+
+    this.reportFound(module, upToError);
+
+    return false;
+  }
+
+  private shownOffset(
+    value: Expr | undefined,
+    module: int,
+  ): string | undefined {
+    if (value == undefined) {
+      return undefined;
+    }
+
+    return this.sources.valueText(value, module);
+  }
+
+  private canProveUpTo(
+    value: Expr | undefined,
+    object: Expr,
+    less: decimal,
+    module: int,
+  ): boolean {
+    const length = this.measuredLength(object, module);
+    if (length == undefined) {
+      return false;
+    }
+    if (value == undefined) {
+      const zero: Linear = { term: kZeroTerm, offset: 0 };
+
+      return this.isLinearUpTo(zero, length, less);
+    }
+
+    const natural: ProofRange = { what: "", low: 0 };
+    if (!this.canProveBetween(value, natural, module)) {
+      return false;
+    }
+
+    const at = this.linearOf(value, module);
+    if (at != undefined && this.isLinearUpTo(at, length, less)) {
+      return true;
+    }
+
+    const highest = this.valueRange(value, module).hi;
+    if (highest == undefined) {
+      return false;
+    }
+
+    const top: Linear = { term: kZeroTerm, offset: highest };
+
+    return this.isLinearUpTo(top, length, less);
+  }
+
+  private isLinearUpTo(value: Linear, length: Linear, less: decimal): boolean {
+    const room = value.offset + less - length.offset;
+
+    return this.canProve(value.term, length.term, room);
+  }
+
+  private measuredLength(object: Expr, module: int): Linear | undefined {
+    if (object.kind == ExprKind.Member && object.name == kBufferName) {
+      return this.bufferLength(object.object, module);
+    }
+    if (object.kind != ExprKind.Name) {
+      return this.madeLinear(object, module);
+    }
+
+    const key = this.pathKey(object, module);
+    if (key == undefined) {
+      return undefined;
+    }
+
+    const term = kLengthTerm + key;
+
+    this.rememberFixedCount(object, term, module);
+
+    if (this.isFixedLength(object, module)) {
+      this.fixedLengths.add(term);
+    }
+
+    return { term, offset: 0 };
+  }
+
+  private bufferLength(view: Expr, module: int): Linear | undefined {
+    const type = this.peekType(view, module);
+    const size = this.byteSources.elementSize(type);
+    const length = this.measuredLength(view, module);
+    if (size == undefined || length == undefined) {
+      return undefined;
+    }
+    if (size == 1) {
+      return length;
+    }
+
+    const exact = this.settledLinear(length);
+    if (exact.term != kZeroTerm) {
+      return undefined;
+    }
+
+    return { term: kZeroTerm, offset: exact.offset * size };
+  }
+
+  private settledLinear(value: Linear): Linear {
+    if (value.term == kZeroTerm) {
+      return value;
+    }
+
+    const above = this.bestRoom(kZeroTerm, value.term);
+    const below = this.bestRoom(value.term, kZeroTerm);
+    if (above == undefined || below == undefined || above != -below) {
+      return value;
+    }
+
+    return { term: kZeroTerm, offset: above + value.offset };
+  }
+}

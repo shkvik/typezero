@@ -1,3 +1,4 @@
+import { kObjectExamples } from "../../const/expression-types.const.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
@@ -30,6 +31,9 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
     if (this.builtinValueCheck(expr, wanted, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.objectValueCheck(expr, module)) {
       return this.store.plain(TypeKind.Error);
     }
 
@@ -252,6 +256,28 @@ partial class ExpressionTypes {
       }
     }
 
-    return undefined;
+    const declared = opened.declared.find((one) => one.name == name);
+    if (declared == undefined) {
+      return undefined;
+    }
+
+    return { module, kind: SymbolKind.Class, loc: declared.loc };
+  }
+
+  private objectValueCheck(expr: NameExpr, module: int): boolean {
+    const found = kObjectExamples.find((one) => one.name == expr.name);
+    if (found == undefined || this.memberObjects.has(expr)) {
+      return false;
+    }
+    if (!this.isGlobalUse(expr, module)) {
+      return false;
+    }
+
+    this.report(module, expr.loc, Code.ObjectNameValue, {
+      word: expr.name,
+      other: found.example,
+    });
+
+    return true;
   }
 }

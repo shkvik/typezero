@@ -20,7 +20,7 @@ import { StaticOwner, ThisPlace } from "../../types/expression-types.types.tz";
 partial class ExpressionTypes {
   private checkFields(decl: ClassDecl, module: int): void {
     for (let index = 0; index < decl.fields.length; index++) {
-      const memberNameErrors = this.classes.memberNameErrors(decl, index);
+      const memberNameErrors = this.overrides.memberNameErrors(decl, index);
 
       this.reportAll(module, memberNameErrors);
     }

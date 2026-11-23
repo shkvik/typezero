@@ -1,0 +1,28 @@
+export const kProcessName = "process";
+export const kStdoutName = "stdout";
+export const kStderrName = "stderr";
+export const kTtyName = "isTTY";
+export const kExitCodeName = "exitCode";
+export const kNextTickName = "nextTick";
+export const kValueMembers = [
+  "argv",
+  "env",
+  "exitCode",
+  "execPath",
+  "platform",
+  "pid",
+  "stdin",
+  "stdout",
+  "stderr",
+];
+export const kCalledMembers = ["exit", "cwd", "uptime"];
+export const kSignalMembers = ["on", "once", "off"];
+export const kListenerMembers = [
+  "on",
+  "once",
+  "addListener",
+  "prependListener",
+];
+export const kSignals = ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"];
+export const kThrownEvents = ["uncaughtException", "unhandledRejection"];
+export const kStreamParts = ["columns", "rows"];

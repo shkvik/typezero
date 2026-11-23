@@ -1,0 +1,320 @@
+import {
+  CallArgument,
+  CallExpr,
+  Expr,
+  MemberExpr,
+  NewExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { ProofRange } from "../../../../flow/proof-rules/types/proof-rules.types.tz";
+import {
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import {
+  DateLocaleKind,
+  DateOption,
+  DateOptionRole,
+} from "../../../intl-rules/types/intl-rules.types.tz";
+
+partial class ExpressionTypes {
+  private dateLocaleCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): Type | undefined {
+    if (expr.args.length > 2 || expr.args.some((one) => one.spread)) {
+      return undefined;
+    }
+
+    const kind = this.dateLocaleKind(member.name);
+
+    this.dateArguments(expr.args, member.name, kind, module);
+
+    return this.store.plain(TypeKind.String);
+  }
+
+  private dateLocaleKind(name: string): DateLocaleKind {
+    if (name == "toLocaleDateString") {
+      return DateLocaleKind.Date;
+    }
+    if (name == "toLocaleTimeString") {
+      return DateLocaleKind.Time;
+    }
+
+    return DateLocaleKind.Any;
+  }
+
+  private dateFormatNew(expr: NewExpr, module: int): void {
+    if (expr.args.length > 2 || expr.args.some((one) => one.spread)) {
+      return this.looseArguments(expr.args, module);
+    }
+
+    this.dateArguments(
+      expr.args,
+      "Intl.DateTimeFormat",
+      DateLocaleKind.Any,
+      module,
+    );
+  }
+
+  private dateArguments(
+    args: CallArgument[],
+    what: string,
+    kind: DateLocaleKind,
+    module: int,
+  ): void {
+    const locale = args[0];
+    const options = args[1];
+
+    if (locale != undefined) {
+      const given = this.typed(locale.expr, undefined, module);
+
+      this.localeArgumentCheck(locale.expr, given, what, module);
+    }
+    if (options != undefined) {
+      this.dateOptionsCheck(options.expr, what, kind, module);
+    }
+  }
+
+  private dateOptionsCheck(
+    options: Expr,
+    what: string,
+    kind: DateLocaleKind,
+    module: int,
+  ): void {
+    const given = this.typed(options, undefined, module);
+    const base = this.types.definedType(given);
+    if (given.kind == TypeKind.Error || given.kind == TypeKind.Undefined) {
+      return;
+    }
+    if (this.modules.isLibraryModule(module)) {
+      return;
+    }
+    if (base.kind != TypeKind.Object) {
+      const objectError = this.intl.dateObjectError(options.loc, what, given);
+
+      return this.reportFound(module, objectError);
+    }
+
+    this.dateKindsCheck(options, base.fields, what, kind, module);
+    this.dateValuesCheck(options, base.fields, module);
+  }
+
+  private dateKindsCheck(
+    options: Expr,
+    fields: ObjectField[],
+    what: string,
+    kind: DateLocaleKind,
+    module: int,
+  ): void {
+    let hasStyle = false;
+    let hasComponent = false;
+
+    for (const field of fields) {
+      const option = this.intl.dateOption(field.name);
+      if (option == undefined) {
+        const unknownError = this.intl.dateUnknownError(
+          options.loc,
+          field.name,
+          what,
+        );
+
+        this.reportFound(module, unknownError);
+
+        continue;
+      }
+      if (!this.dateKindFits(options, field, module)) {
+        continue;
+      }
+
+      const isPresent = !field.optional && !this.types.isOptional(field.type);
+      if (option.role == DateOptionRole.Component) {
+        hasComponent = hasComponent || isPresent;
+      }
+      if (option.role == DateOptionRole.Style) {
+        hasStyle = hasStyle || isPresent;
+      }
+
+      const isForeign = this.intl.isForeignStyle(field.name, kind);
+      if (option.role == DateOptionRole.Style && isPresent && isForeign) {
+        const styleError = this.intl.styleOnlyError(
+          options.loc,
+          field.name,
+          what,
+        );
+
+        this.reportFound(module, styleError);
+      }
+    }
+
+    if (hasStyle && hasComponent) {
+      this.reportFound(module, this.intl.stylePartsError(options.loc));
+    }
+  }
+
+  private dateKindFits(
+    options: Expr,
+    field: ObjectField,
+    module: int,
+  ): boolean {
+    const wanted = this.dateWanted(field);
+    if (wanted == "") {
+      return true;
+    }
+
+    const kindError = this.intl.dateKindError(
+      options.loc,
+      field.name,
+      wanted,
+      field.type,
+    );
+
+    this.reportFound(module, kindError);
+
+    return false;
+  }
+
+  private dateWanted(field: ObjectField): string {
+    const value = this.types.definedType(field.type);
+    if (this.intl.isHour12(field.name)) {
+      return this.wantedIf(!this.intl.isFlagType(value), "a boolean");
+    }
+    if (this.intl.isDigitsName(field.name)) {
+      const isNumber =
+        this.intl.isNumberLike(value) ||
+        this.intl.numberLiterals(value) != undefined;
+
+      return this.wantedIf(!isNumber, "a number");
+    }
+
+    return this.wantedIf(!this.intl.isTextUnion(value), "a string");
+  }
+
+  private wantedIf(isWrong: boolean, wanted: string): string {
+    if (isWrong) {
+      return wanted;
+    }
+
+    return "";
+  }
+
+  private dateValuesCheck(
+    options: Expr,
+    fields: ObjectField[],
+    module: int,
+  ): void {
+    for (const field of fields) {
+      const option = this.intl.dateOption(field.name);
+      const given = this.optionValue(options, field.name);
+      const loc = this.optionLoc(options, field.name);
+      if (option == undefined) {
+        continue;
+      }
+      if (this.intl.isDigitsName(field.name)) {
+        this.dateDigitsCheck(field, given, loc, module);
+
+        continue;
+      }
+
+      this.dateTextCheck(field, option, given, loc, module);
+    }
+  }
+
+  private dateDigitsCheck(
+    field: ObjectField,
+    given: Expr | undefined,
+    loc: int,
+    module: int,
+  ): void {
+    if (given != undefined) {
+      const type = this.peekType(given, module);
+      const range: ProofRange = {
+        what: "fractionalSecondDigits",
+        low: 1,
+        high: 3,
+      };
+
+      this.requireBetween(given, type, range, module);
+
+      return;
+    }
+
+    const digits = this.intl.numberLiterals(field.type);
+    const isInside =
+      digits != undefined && digits.every((one) => one >= 1 && one <= 3);
+    if (!isInside) {
+      this.reportFound(module, this.intl.digitsOpenError(loc));
+    }
+  }
+
+  private dateTextCheck(
+    field: ObjectField,
+    option: DateOption,
+    given: Expr | undefined,
+    loc: int,
+    module: int,
+  ): void {
+    if (option.values.length == 0) {
+      return;
+    }
+
+    const texts = this.dateTexts(field, given, module);
+    if (texts == undefined) {
+      const written = this.writtenOption(given, module);
+      const openError = this.intl.dateValueOpenError(loc, option, written);
+
+      return this.reportFound(module, openError);
+    }
+
+    const wrong = texts.find((one) => !option.values.includes(one));
+    if (wrong != undefined) {
+      this.reportFound(module, this.intl.dateValueError(loc, option, wrong));
+    }
+  }
+
+  private dateTexts(
+    field: ObjectField,
+    given: Expr | undefined,
+    module: int,
+  ): string[] | undefined {
+    if (given != undefined) {
+      const type = this.peekType(given, module);
+      const known = this.encodingTexts(given, type, module, 0);
+      if (known != undefined) {
+        return known;
+      }
+    }
+
+    const base = this.types.definedType(field.type);
+    const texts = this.intl.literalTexts(base);
+    const isText = this.intl.isTextUnion(base) && base.kind != TypeKind.String;
+    if (!isText) {
+      return undefined;
+    }
+
+    return texts;
+  }
+
+  private writtenOption(given: Expr | undefined, module: int): string {
+    if (given == undefined) {
+      return "value";
+    }
+
+    return this.sources.valueText(given, module);
+  }
+
+  private dateFormatRange(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): Type {
+    const rangeError = this.intl.dateRangeError(member.loc, member.name);
+
+    this.reportFound(module, rangeError);
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+}

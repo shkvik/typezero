@@ -82,7 +82,7 @@ partial class ExpressionTypes {
 
       const type = this.methodTypeOf(entry, found);
       if (type.kind == TypeKind.Function) {
-        const contractResultError = this.classes.contractResultError(
+        const contractResultError = this.overrides.contractResultError(
           found,
           type,
           wanted,
@@ -139,7 +139,7 @@ partial class ExpressionTypes {
         return;
       }
 
-      const contractResultError = this.classes.contractResultError(
+      const contractResultError = this.overrides.contractResultError(
         found,
         type,
         wanted,

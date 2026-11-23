@@ -1,0 +1,14 @@
+import { ProofRange } from "../../../flow/proof-rules/types/proof-rules.types.tz";
+
+export enum RangeReceiver {
+  Number,
+  Text,
+  Iterator,
+  Other,
+}
+
+export type ArgumentRange = {
+  readonly receiver: RangeReceiver;
+  readonly name: string;
+  readonly range: ProofRange;
+};

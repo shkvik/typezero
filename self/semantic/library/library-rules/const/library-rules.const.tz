@@ -9,3 +9,29 @@ export const kPromiseStatics = [
   "allSettled",
   "any",
 ];
+export const kPromiseListStatics = ["all", "race", "allSettled", "any"];
+export const kEmbedNames = ["embedText", "embedBytes"];
+export const kEmbedTextName = "embedText";
+export const kMissingFileReason = "no such file or directory";
+export const kReflectNames = [
+  "get",
+  "apply",
+  "construct",
+  "fill",
+  "defineMetadata",
+  "getMetadata",
+  "getOwnMetadata",
+  "hasMetadata",
+  "hasOwnMetadata",
+  "deleteMetadata",
+];
+export const kMetadataNames = [
+  "defineMetadata",
+  "getMetadata",
+  "getOwnMetadata",
+  "hasMetadata",
+  "hasOwnMetadata",
+  "deleteMetadata",
+];
+export const kPrintNames = ["log", "info", "debug", "error", "warn"];
+export const kPerformanceName = "performance";
