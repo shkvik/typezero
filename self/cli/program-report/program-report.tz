@@ -79,6 +79,11 @@ export class ProgramReport {
     this.fail();
   }
 
+  public failure(message: string): void {
+    console.error(message);
+    this.fail();
+  }
+
   private renameAdvice(entry: string): string {
     if (extname(entry) != kTypeScriptExtension) {
       return "";

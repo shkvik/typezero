@@ -1,0 +1,15 @@
+export type IrValue = {
+  readonly type: string;
+  readonly text: string;
+};
+
+export type Unlowered = {
+  readonly module: int;
+  readonly loc: int;
+  readonly form: string;
+};
+
+export type LoweredProgram = {
+  readonly text: string;
+  readonly unlowered: Unlowered[];
+};

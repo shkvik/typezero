@@ -1,0 +1,30 @@
+export class IrFunction {
+  private readonly header: string;
+  private readonly lines: string[];
+  private next: int;
+
+  public constructor(header: string) {
+    this.header = header;
+    this.lines = [];
+    this.next = 0;
+  }
+
+  public instruction(text: string): string {
+    const name = `%${this.next}`;
+
+    this.next += 1;
+    this.lines.push(`  ${name} = ${text}`);
+
+    return name;
+  }
+
+  public statement(text: string): void {
+    this.lines.push(`  ${text}`);
+  }
+
+  public text(): string {
+    const body = this.lines.join("\n");
+
+    return `${this.header} {\nentry:\n${body}\n}\n`;
+  }
+}

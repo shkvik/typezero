@@ -10,10 +10,21 @@ import { ExpressionTypes } from "../../expression-types.tz";
 
 partial class ExpressionTypes {
   private typed(expr: Expr, wanted: Type | undefined, module: int): Type {
-    if (!this.errors.isTrying()) {
-      this.visited.add(expr);
+    const isTrying = this.errors.isTrying();
+    if (!isTrying) {
+      this.answers.visit(expr);
     }
 
+    const type = this.typedByKind(expr, wanted, module);
+
+    if (!isTrying) {
+      this.answers.answer(expr, type);
+    }
+
+    return type;
+  }
+
+  private typedByKind(expr: Expr, wanted: Type | undefined, module: int): Type {
     const literal = this.literalOf(expr, module);
     if (literal != undefined) {
       return this.literalTyped(expr, literal, wanted, module);

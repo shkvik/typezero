@@ -246,6 +246,7 @@ import { ExpressionCollector } from "../expression-collector/expression-collecto
 import { FetchRules } from "../../library/fetch-rules/fetch-rules.tz";
 import { EventRules } from "../../library/event-rules/event-rules.tz";
 import { EventMarks } from "../../library/event-marks/event-marks.tz";
+import { ExpressionAnswers } from "../../../program/expression-answers/expression-answers.tz";
 
 export class ExpressionTypes {
   private readonly store: TypeStore;
@@ -323,7 +324,6 @@ export class ExpressionTypes {
   private readonly scopes: Map<int, ModuleScopes>;
   private readonly records: Map<int, ValueRecord>;
   private readonly doors: Map<string, VariableDoor>;
-  private readonly folded: Map<Expr, decimal>;
   private readonly functionDoors: Map<string, FunctionDoor>;
   private readonly paramTypes: Map<string, Type>;
   private readonly checkedModules: Set<int>;
@@ -344,7 +344,7 @@ export class ExpressionTypes {
   private readonly selves: Type[];
   private readonly literalOwners: Map<FunctionDecl, Type>;
   private readonly ownerClasses: StaticOwner[];
-  private readonly visited: Set<Expr>;
+  public readonly answers: ExpressionAnswers;
   private readonly thisPlaces: ThisPlace[];
   private readonly currentMethods: FunctionDecl[];
   private readonly superFrames: SuperFrame[];
@@ -638,7 +638,6 @@ export class ExpressionTypes {
     this.scopes = new Map<int, ModuleScopes>();
     this.records = new Map<int, ValueRecord>();
     this.doors = new Map<string, VariableDoor>();
-    this.folded = new Map<Expr, decimal>();
     this.functionDoors = new Map<string, FunctionDoor>();
     this.paramTypes = new Map<string, Type>();
     this.checkedModules = new Set<int>();
@@ -659,7 +658,7 @@ export class ExpressionTypes {
     this.selves = [];
     this.literalOwners = new Map<FunctionDecl, Type>();
     this.ownerClasses = [];
-    this.visited = new Set<Expr>();
+    this.answers = new ExpressionAnswers();
     this.thisPlaces = [];
     this.currentMethods = [];
     this.superFrames = [];

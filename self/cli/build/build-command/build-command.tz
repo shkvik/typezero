@@ -1,0 +1,231 @@
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, extname, join } from "node:path";
+import { kSourceExtension } from "../../../program/module/const/module.const.tz";
+import { Program } from "../../../program/module/types/module.types.tz";
+import { SourceLines } from "../../../program/source-lines/source-lines.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { Lowering } from "../../../lower/lowering/lowering.tz";
+import { Unlowered } from "../../../lower/lowering/types/lowering.types.tz";
+import { FrontEnd } from "../../../pipeline/front-end/front-end.tz";
+import { kProgramName } from "../../const/cli.const.tz";
+import { ProgramReport } from "../../program-report/program-report.tz";
+import { ProgramSource } from "../../program-source/program-source.tz";
+import {
+  kCompilerArguments,
+  kCompilerTool,
+  kEmitIrOption,
+  kExecutableExtension,
+  kIrExtension,
+  kIrFile,
+  kLinkerArguments,
+  kLinkerTool,
+  kObjectFile,
+  kOutputOption,
+  kRuntimeLibrary,
+  kSystemLibraries,
+  kTemporaryPrefix,
+} from "./const/build-command.const.tz";
+import { BuildOptions } from "./types/build-command.types.tz";
+
+export class BuildCommand {
+  private readonly args: string[];
+  private readonly report: ProgramReport;
+  private readonly store: TypeStore;
+
+  public constructor(args: string[]) {
+    this.args = args;
+    this.report = new ProgramReport();
+    this.store = new TypeStore();
+  }
+
+  public run(): void {
+    const options = this.optionsOf();
+    const entry = options.entry;
+    if (options.isWrong || entry == undefined) {
+      return this.report.wrongUsage();
+    }
+    if (extname(entry) != kSourceExtension) {
+      return this.report.notSource(entry);
+    }
+
+    const source = new ProgramSource();
+    const loaded = source.load(entry);
+    const program = loaded.program;
+
+    this.report.loadProblems(loaded);
+    this.report.moduleErrors(program);
+
+    const front = new FrontEnd(this.store, program);
+    if (this.report.hasFailed() && !front.isCheckable(loaded)) {
+      return;
+    }
+
+    const checked = front.run();
+
+    for (const problems of front.problems(checked)) {
+      this.report.sourceErrors(problems.source, problems.errors);
+    }
+
+    if (this.report.hasFailed()) {
+      return;
+    }
+
+    const lowering = new Lowering(program, checked);
+    const lowered = lowering.run();
+    if (lowered.unlowered.length > 0) {
+      return this.unloweredReport(program, lowered.unlowered);
+    }
+
+    const output = this.outputOf(options, entry);
+
+    if (options.isEmittingIr) {
+      return this.irWritten(output, lowered.text);
+    }
+
+    this.executableMade(output, lowered.text);
+  }
+
+  private optionsOf(): BuildOptions {
+    let entry: string | undefined = undefined;
+    let output: string | undefined = undefined;
+    let isEmittingIr = false;
+    let isWrong = false;
+
+    for (let index = 3; index < this.args.length; index++) {
+      const arg = this.args[index] ?? "";
+      if (arg == kOutputOption) {
+        index += 1;
+        output = this.args[index];
+        isWrong = isWrong || output == undefined;
+      } else if (arg == kEmitIrOption) {
+        isEmittingIr = true;
+      } else if (entry == undefined) {
+        entry = arg;
+      } else {
+        isWrong = true;
+      }
+    }
+
+    return { entry, output, isEmittingIr, isWrong };
+  }
+
+  private outputOf(options: BuildOptions, entry: string): string {
+    const given = options.output;
+    if (given != undefined) {
+      return given;
+    }
+
+    const stem = basename(entry, kSourceExtension);
+
+    if (options.isEmittingIr) {
+      return `${stem}${kIrExtension}`;
+    }
+
+    return `${stem}${kExecutableExtension}`;
+  }
+
+  private unloweredReport(program: Program, unlowered: Unlowered[]): void {
+    for (const one of unlowered) {
+      const module = program.modules[one.module];
+      if (module == undefined) {
+        continue;
+      }
+
+      const lines = new SourceLines(module.source.text);
+      const place = lines.placeOf(one.loc);
+      const where = `${module.source.path}:${place.line}:${place.column}`;
+
+      this.report.failure(
+        `${where}: error: lowering of ${one.form} is not done yet`,
+      );
+    }
+  }
+
+  private irWritten(path: string, text: string): void {
+    const written = writeFileSync(path, text);
+    if (written.isErr()) {
+      this.report.failure(
+        `${kProgramName}: cannot write '${path}': ${written.error.message}`,
+      );
+    }
+  }
+
+  private executableMade(output: string, text: string): void {
+    const prefix = join(tmpdir(), kTemporaryPrefix);
+    const folder = mkdtempSync(prefix);
+    if (folder.isErr()) {
+      const reason = folder.error.message;
+
+      this.report.failure(
+        `${kProgramName}: cannot make a temporary folder: ${reason}`,
+      );
+
+      return;
+    }
+
+    const irPath = join(folder.value, kIrFile);
+    const objectPath = join(folder.value, kObjectFile);
+
+    this.irWritten(irPath, text);
+
+    const isMade =
+      !this.report.hasFailed() &&
+      this.objectMade(irPath, objectPath) &&
+      this.linked(objectPath, output);
+    const removed = rmSync(folder.value, { force: true, recursive: true });
+    if (isMade && removed.isErr()) {
+      const reason = removed.error.message;
+
+      this.report.failure(
+        `${kProgramName}: cannot remove '${folder.value}': ${reason}`,
+      );
+    }
+  }
+
+  private objectMade(irPath: string, objectPath: string): boolean {
+    const compiler = this.toolPath(kCompilerTool);
+    const args = kCompilerArguments.concat([objectPath, irPath]);
+
+    return this.toolRan(compiler, args);
+  }
+
+  private linked(objectPath: string, output: string): boolean {
+    const linker = this.toolPath(kLinkerTool);
+    const runtime = this.toolPath(kRuntimeLibrary);
+    const inputs = [`/out:${output}`, objectPath, runtime];
+    const args = kLinkerArguments.concat(inputs, kSystemLibraries);
+
+    return this.toolRan(linker, args);
+  }
+
+  private toolPath(name: string): string {
+    const home = dirname(process.execPath);
+
+    return join(home, name);
+  }
+
+  private toolRan(path: string, args: string[]): boolean {
+    const ran = spawnSync(path, args, { encoding: "utf8" });
+    if (ran.isErr()) {
+      this.report.failure(
+        `${kProgramName}: cannot run '${path}': ${ran.error.message}`,
+      );
+
+      return false;
+    }
+
+    const done = ran.value;
+    if (done.status != 0) {
+      const said = `${done.stdout ?? ""}${done.stderr ?? ""}`;
+      const tool = basename(path);
+
+      this.report.failure(`${said}${kProgramName}: '${tool}' failed`);
+
+      return false;
+    }
+
+    return true;
+  }
+}

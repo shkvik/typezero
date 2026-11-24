@@ -1,0 +1,20 @@
+export const kBuildWord = "build";
+export const kOutputOption = "-o";
+export const kEmitIrOption = "--emit-llvm";
+export const kExecutableExtension = ".exe";
+export const kIrExtension = ".ll";
+export const kTemporaryPrefix = "tz-";
+export const kIrFile = "main.ll";
+export const kObjectFile = "main.obj";
+export const kCompilerTool = "clang.exe";
+export const kLinkerTool = "lld-link.exe";
+export const kRuntimeLibrary = "tzrt.lib";
+export const kCompilerArguments = ["-c", "-O0", "-o"];
+export const kLinkerArguments = [
+  "/nologo",
+  "/subsystem:console",
+  "/incremental:no",
+  "/stack:1073741824",
+  "/machine:x64",
+];
+export const kSystemLibraries = ["/defaultlib:libcmt", "/defaultlib:kernel32"];

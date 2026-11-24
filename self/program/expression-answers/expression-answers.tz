@@ -1,0 +1,38 @@
+import { Expr } from "../ast/types/ast.types.expressions.tz";
+import { Type } from "../type/types/type.types.tz";
+
+export class ExpressionAnswers {
+  private readonly visited: Set<Expr>;
+  private readonly types: Map<Expr, Type>;
+  private readonly folded: Map<Expr, decimal>;
+
+  public constructor() {
+    this.visited = new Set<Expr>();
+    this.types = new Map<Expr, Type>();
+    this.folded = new Map<Expr, decimal>();
+  }
+
+  public visit(expr: Expr): void {
+    this.visited.add(expr);
+  }
+
+  public isVisited(expr: Expr): boolean {
+    return this.visited.has(expr);
+  }
+
+  public answer(expr: Expr, type: Type): void {
+    this.types.set(expr, type);
+  }
+
+  public typeOf(expr: Expr): Type | undefined {
+    return this.types.get(expr);
+  }
+
+  public fold(expr: Expr, value: decimal): void {
+    this.folded.set(expr, value);
+  }
+
+  public foldedOf(expr: Expr): decimal | undefined {
+    return this.folded.get(expr);
+  }
+}

@@ -61,7 +61,7 @@ partial class ExpressionTypes {
       return;
     }
     if (this.integers.isInside(value, type)) {
-      this.folded.set(expr, value);
+      this.answers.fold(expr, value);
 
       return;
     }
@@ -88,7 +88,7 @@ partial class ExpressionTypes {
 
     switch (expr.op) {
       case UnaryOp.Plus:
-        this.folded.set(expr, value);
+        this.answers.fold(expr, value);
 
         return;
       case UnaryOp.Neg:
@@ -97,7 +97,7 @@ partial class ExpressionTypes {
         const pattern = this.integers.wrapTo(value, type);
         const inverted = this.integers.wrapTo(-pattern - 1, type);
 
-        this.folded.set(expr, inverted);
+        this.answers.fold(expr, inverted);
 
         return;
       }
@@ -108,7 +108,7 @@ partial class ExpressionTypes {
 
   private settle(expr: Expr, type: IntType, value: decimal, module: int): void {
     if (this.integers.isInside(value, type)) {
-      this.folded.set(expr, value);
+      this.answers.fold(expr, value);
 
       return;
     }
@@ -157,7 +157,7 @@ partial class ExpressionTypes {
 
     const exact = this.integers.exactPower(base, exponent);
     if (exact != undefined && this.integers.isInside(exact, type)) {
-      this.folded.set(expr, exact);
+      this.answers.fold(expr, exact);
 
       return;
     }
@@ -200,7 +200,7 @@ partial class ExpressionTypes {
 
     const value = this.integers.wrapTo(result, type);
 
-    this.folded.set(expr, value);
+    this.answers.fold(expr, value);
   }
 
   private foldShift(
@@ -216,14 +216,14 @@ partial class ExpressionTypes {
       const dropped = this.integers.patternOf(value, factor);
       const moved = (value - dropped).div(factor, 0, kRoundDown);
 
-      this.folded.set(expr, moved);
+      this.answers.fold(expr, moved);
 
       return;
     }
 
     const exact = value * factor;
     if (this.integers.isInside(exact, shifted)) {
-      this.folded.set(expr, exact);
+      this.answers.fold(expr, exact);
 
       return;
     }

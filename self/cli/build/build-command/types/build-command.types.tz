@@ -1,0 +1,6 @@
+export type BuildOptions = {
+  readonly entry?: string;
+  readonly output?: string;
+  readonly isEmittingIr: boolean;
+  readonly isWrong: boolean;
+};

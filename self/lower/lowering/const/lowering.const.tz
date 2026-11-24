@@ -1,0 +1,15 @@
+export const kMainHeader = "define i32 @main()";
+export const kMainReturn = "ret i32 0";
+export const kRuntimeInit = "tz_rt_init";
+export const kRuntimeMainDone = "tz_rt_main_done";
+export const kRuntimeShutdown = "tz_rt_shutdown";
+export const kPrintInt = "tz_print_i64";
+export const kPrintChar = "tz_print_char";
+export const kConsoleName = "console";
+export const kLogName = "log";
+export const kSpaceCode = 32;
+export const kNewlineCode = 10;
+export const kIntType = "i64";
+export const kCharType = "i32";
+export const kVoidType = "void";
+export const kIntBits = 64;

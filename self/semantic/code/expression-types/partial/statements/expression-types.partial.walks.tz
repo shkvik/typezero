@@ -46,7 +46,7 @@ partial class ExpressionTypes {
 
   private walkedArguments(args: CallArgument[], module: int): void {
     for (const arg of args) {
-      if (!this.visited.has(arg.expr)) {
+      if (!this.answers.isVisited(arg.expr)) {
         this.walkedPart(arg.expr, module);
       }
     }

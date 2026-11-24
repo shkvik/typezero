@@ -1,0 +1,20 @@
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import { ModuleNames } from "../../../program/module-names/types/module-names.types.tz";
+import { ModuleTypes } from "../../../program/module-types/types/module-types.types.tz";
+import { SourceText } from "../../../program/module/types/module.types.tz";
+import { ModuleScopes } from "../../../program/scopes/types/scopes.types.tz";
+import { ExpressionTypes } from "../../../semantic/code/expression-types/expression-types.tz";
+import { TypeResolver } from "../../../semantic/types/type-resolver/type-resolver.tz";
+
+export type CheckedProgram = {
+  readonly names: ModuleNames[];
+  readonly resolved: ModuleScopes[];
+  readonly types: TypeResolver;
+  readonly values: ExpressionTypes;
+  readonly typed: ModuleTypes[];
+};
+
+export type ModuleProblems = {
+  readonly source: SourceText;
+  readonly errors: SourceError[];
+};

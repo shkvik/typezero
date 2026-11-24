@@ -1,3 +1,5 @@
+import { BuildCommand } from "./cli/build/build-command/build-command.tz";
+import { kBuildWord } from "./cli/build/build-command/const/build-command.const.tz";
 import { LoadCommand } from "./cli/load/load-command/load-command.tz";
 import { kLoadWord } from "./cli/load/load-command/const/load-command.const.tz";
 import { NamesCommand } from "./cli/names/names-command/names-command.tz";
@@ -9,6 +11,13 @@ import { TypesCommand } from "./cli/types/types-command/types-command.tz";
 import { kTypesWord } from "./cli/types/types-command/const/types-command.const.tz";
 
 switch (process.argv[2]) {
+  case kBuildWord: {
+    const command = new BuildCommand(process.argv);
+
+    command.run();
+
+    break;
+  }
   case kLoadWord: {
     const command = new LoadCommand(process.argv);
 

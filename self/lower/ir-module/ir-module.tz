@@ -1,0 +1,37 @@
+import { IrFunction } from "../ir-function/ir-function.tz";
+
+export class IrModule {
+  private readonly name: string;
+  private readonly declared: Map<string, string>;
+  private readonly functions: IrFunction[];
+
+  public constructor(name: string) {
+    this.name = name;
+    this.declared = new Map<string, string>();
+    this.functions = [];
+  }
+
+  public declare(name: string, result: string, params: string[]): void {
+    if (this.declared.has(name)) {
+      return;
+    }
+
+    const list = params.join(", ");
+
+    this.declared.set(name, `declare ${result} @${name}(${list})`);
+  }
+
+  public add(made: IrFunction): void {
+    this.functions.push(made);
+  }
+
+  public text(): string {
+    const head = `source_filename = "${this.name}"`;
+    const lines = Array.from(this.declared.values());
+    const declarations = lines.join("\n");
+    const texts = this.functions.map((made) => made.text());
+    const bodies = texts.join("\n");
+
+    return `${head}\n\n${declarations}\n\n${bodies}`;
+  }
+}

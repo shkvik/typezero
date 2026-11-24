@@ -1,23 +1,14 @@
-import { Module, Program } from "../../../program/module/types/module.types.tz";
-import { kRecoverableCodes } from "./const/types-command.const.recoverable.tz";
 import { extname } from "node:path";
-import { SourceError } from "../../../diagnostic/types/message.types.tz";
-import { ModuleNames } from "../../../program/module-names/types/module-names.types.tz";
 import {
   DeclarationForm,
   ModuleTypes,
   TypedDeclaration,
 } from "../../../program/module-types/types/module-types.types.tz";
 import { kSourceExtension } from "../../../program/module/const/module.const.tz";
-import { ModuleScopes } from "../../../program/scopes/types/scopes.types.tz";
 import { SourceLines } from "../../../program/source-lines/source-lines.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { TypeText } from "../../../program/type/type-text/type-text.tz";
-import { DeclarationTypes } from "../../../semantic/declaration/declaration-types/declaration-types.tz";
-import { ModuleBinder } from "../../../semantic/declaration/module-binder/module-binder.tz";
-import { NameResolver } from "../../../semantic/declaration/name-resolver/name-resolver.tz";
-import { ExpressionTypes } from "../../../semantic/code/expression-types/expression-types.tz";
-import { TypeResolver } from "../../../semantic/types/type-resolver/type-resolver.tz";
+import { FrontEnd } from "../../../pipeline/front-end/front-end.tz";
 import { ProgramReport } from "../../program-report/program-report.tz";
 import { ProgramSource } from "../../program-source/program-source.tz";
 
@@ -50,61 +41,20 @@ export class TypesCommand {
     this.report.loadProblems(loaded);
     this.report.moduleErrors(program);
 
-    const isReadable =
-      loaded.unreadable.length == 0 && loaded.packageErrors.length == 0;
-    const isChecked = isReadable && this.isRecoverable(program);
-    if (this.report.hasFailed() && !isChecked) {
+    const front = new FrontEnd(this.store, program);
+    if (this.report.hasFailed() && !front.isCheckable(loaded)) {
       return;
     }
 
-    const binder = new ModuleBinder(program);
-    const names = binder.run();
-    const resolver = new NameResolver(program, names);
-    const resolved = resolver.run();
-    const types = new TypeResolver(this.store, program, resolved);
-    const values = new ExpressionTypes(this.store, types, program, resolved);
+    const checked = front.run();
 
-    const steps: DeclarationTypes[] = [];
-
-    for (const scopes of resolved) {
-      const module = scopes.module;
-      if (module.source.isLibrary) {
-        continue;
-      }
-
-      const declarations = new DeclarationTypes(types, values, module);
-
-      declarations.resolveAliases();
-      steps.push(declarations);
-    }
-
-    for (const declarations of steps) {
-      const typed = declarations.run();
-
+    for (const typed of checked.typed) {
       this.printTypes(typed);
     }
 
-    for (let index = 0; index < resolved.length; index++) {
-      this.printErrors(names[index], resolved[index], types, values);
+    for (const problems of front.problems(checked)) {
+      this.report.sourceErrors(problems.source, problems.errors);
     }
-  }
-
-  private isRecoverable(program: Program): boolean {
-    const hasBroken = program.builtins.some(
-      (builtin) => builtin.parsed.errors.length > 0,
-    );
-    if (hasBroken) {
-      return false;
-    }
-
-    return program.order.every((module) => this.isRecoverableModule(module));
-  }
-
-  private isRecoverableModule(module: Module): boolean {
-    const declared = module.declaration?.errors ?? [];
-    const errors = module.errors.concat(declared);
-
-    return errors.every((error) => kRecoverableCodes.includes(error.code));
   }
 
   private printTypes(types: ModuleTypes): void {
@@ -141,28 +91,5 @@ export class TypesCommand {
         return `${name}: ${type}`;
       }
     }
-  }
-
-  private printErrors(
-    names: ModuleNames | undefined,
-    scopes: ModuleScopes | undefined,
-    types: TypeResolver,
-    values: ExpressionTypes,
-  ): void {
-    if (names == undefined || scopes == undefined) {
-      return;
-    }
-
-    const module = scopes.module;
-    const found = types.problems(module.id);
-    const wrong = values.problems(module.id);
-    const errors: SourceError[] = names.errors.concat(
-      scopes.errors,
-      found,
-      wrong,
-    );
-
-    errors.sort((first, second) => first.loc - second.loc);
-    this.report.sourceErrors(module.source, errors);
   }
 }

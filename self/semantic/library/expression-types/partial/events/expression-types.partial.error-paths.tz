@@ -98,11 +98,15 @@ partial class ExpressionTypes {
     }
 
     const call = statement.expr;
-    if (call.kind != ExprKind.Call || call.callee.kind != ExprKind.Member) {
+    if (call.kind != ExprKind.Call) {
       return false;
     }
 
     const member = call.callee;
+    if (member.kind != ExprKind.Member) {
+      return false;
+    }
+
     const name = call.args[0]?.expr;
     const isListening =
       this.events.isListenerMethod(member.name) &&

@@ -51,7 +51,7 @@ partial class ExpressionTypes {
       case ExprKind.Unary:
         return this.unaryConstant(expr);
       case ExprKind.Binary:
-        return this.folded.get(expr);
+        return this.answers.foldedOf(expr);
       case ExprKind.Member:
         return this.enumConstant(expr, module);
       default:
@@ -62,7 +62,7 @@ partial class ExpressionTypes {
   private unaryConstant(expr: UnaryExpr): decimal | undefined {
     const operand = expr.operand;
     if (operand.kind != ExprKind.IntLit) {
-      return this.folded.get(expr);
+      return this.answers.foldedOf(expr);
     }
 
     const value = operand.value.toDecimal();
@@ -73,7 +73,7 @@ partial class ExpressionTypes {
       case UnaryOp.Neg:
         return -value;
       default:
-        return this.folded.get(expr);
+        return this.answers.foldedOf(expr);
     }
   }
 

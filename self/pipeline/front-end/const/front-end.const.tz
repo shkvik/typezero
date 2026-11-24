@@ -1,4 +1,4 @@
-import { Code } from "../../../../diagnostic/code.tz";
+import { Code } from "../../../diagnostic/code.tz";
 
 export const kRecoverableCodes: Code[] = [
   Code.PatternAssignmentNotStatement,

@@ -1,0 +1,106 @@
+import { SourceError } from "../../diagnostic/types/message.types.tz";
+import { LoadResult } from "../../load/loader/types/loader.types.tz";
+import { Module, Program } from "../../program/module/types/module.types.tz";
+import { TypeStore } from "../../program/type/type-store/type-store.tz";
+import { ExpressionTypes } from "../../semantic/code/expression-types/expression-types.tz";
+import { DeclarationTypes } from "../../semantic/declaration/declaration-types/declaration-types.tz";
+import { ModuleBinder } from "../../semantic/declaration/module-binder/module-binder.tz";
+import { NameResolver } from "../../semantic/declaration/name-resolver/name-resolver.tz";
+import { TypeResolver } from "../../semantic/types/type-resolver/type-resolver.tz";
+import { kRecoverableCodes } from "./const/front-end.const.tz";
+import { CheckedProgram, ModuleProblems } from "./types/front-end.types.tz";
+
+export class FrontEnd {
+  private readonly store: TypeStore;
+  private readonly program: Program;
+
+  public constructor(store: TypeStore, program: Program) {
+    this.store = store;
+    this.program = program;
+  }
+
+  public isCheckable(loaded: LoadResult): boolean {
+    const isReadable =
+      loaded.unreadable.length == 0 && loaded.packageErrors.length == 0;
+
+    return isReadable && this.isRecoverable();
+  }
+
+  public run(): CheckedProgram {
+    const binder = new ModuleBinder(this.program);
+    const names = binder.run();
+    const resolver = new NameResolver(this.program, names);
+    const resolved = resolver.run();
+    const types = new TypeResolver(this.store, this.program, resolved);
+    const values = new ExpressionTypes(
+      this.store,
+      types,
+      this.program,
+      resolved,
+    );
+
+    const steps: DeclarationTypes[] = [];
+
+    for (const scopes of resolved) {
+      const module = scopes.module;
+      if (module.source.isLibrary) {
+        continue;
+      }
+
+      const declarations = new DeclarationTypes(types, values, module);
+
+      declarations.resolveAliases();
+      steps.push(declarations);
+    }
+
+    const typed = steps.map((declarations) => declarations.run());
+
+    return { names, resolved, types, values, typed };
+  }
+
+  public problems(checked: CheckedProgram): ModuleProblems[] {
+    const found: ModuleProblems[] = [];
+
+    for (let index = 0; index < checked.resolved.length; index++) {
+      const names = checked.names[index];
+      const scopes = checked.resolved[index];
+      if (names == undefined || scopes == undefined) {
+        continue;
+      }
+
+      const module = scopes.module;
+      const typeErrors = checked.types.problems(module.id);
+      const valueErrors = checked.values.problems(module.id);
+      const errors: SourceError[] = names.errors.concat(
+        scopes.errors,
+        typeErrors,
+        valueErrors,
+      );
+
+      errors.sort((first, second) => first.loc - second.loc);
+      found.push({ source: module.source, errors });
+    }
+
+    return found;
+  }
+
+  private isRecoverable(): boolean {
+    const hasBroken = this.program.builtins.some(
+      (builtin) => builtin.parsed.errors.length > 0,
+    );
+    if (hasBroken) {
+      return false;
+    }
+
+    return this.program.order.every((module) =>
+      this.isRecoverableModule(module),
+    );
+  }
+
+  private isRecoverableModule(module: Module): boolean {
+    const declared = module.declaration?.errors ?? [];
+    const errors = module.errors.concat(declared);
+
+    return errors.every((error) => kRecoverableCodes.includes(error.code));
+  }
+}
