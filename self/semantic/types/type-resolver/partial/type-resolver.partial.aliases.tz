@@ -448,7 +448,15 @@ partial class TypeResolver {
     const written = decl.type.form.kind == TypeRefKind.Union;
     const isPlain = decl.typeParams.length == 0;
     const isLibrary = this.record(module)?.library == true;
-    if (written && isPlain && isLibrary && result.kind == TypeKind.Union) {
+    if (!written || !isPlain || !isLibrary || result.kind != TypeKind.Union) {
+      return;
+    }
+
+    const isOfObjects = result.parts.some(
+      (part) => part.kind == TypeKind.Object,
+    );
+    const isDeclared = this.program.modules[module]?.isDeclarationOnly == true;
+    if (!isOfObjects || isDeclared) {
       this.store.label(result, label);
     }
   }

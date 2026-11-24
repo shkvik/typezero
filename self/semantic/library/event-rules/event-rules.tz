@@ -101,11 +101,7 @@ export class EventRules {
     };
   }
 
-  public listenerType(
-    args: Type,
-    result: Type,
-    self: Type | undefined,
-  ): Type {
+  public listenerType(args: Type, result: Type, self: Type | undefined): Type {
     if (args.kind != TypeKind.Tuple) {
       return this.store.plain(TypeKind.Error);
     }
@@ -178,6 +174,21 @@ export class EventRules {
 
   public asyncThisError(loc: int): SourceError {
     return { code: Code.ListenerAsyncThis, loc, details: kNoDetails };
+  }
+
+  public notEmittedError(loc: int, names: string[], name: string): SourceError {
+    if (names.length == 0) {
+      return { code: Code.EventNeverEmitted, loc, details: { word: name } };
+    }
+
+    const first = this.listText(names);
+    const other = this.nearestHint(names, name);
+
+    return {
+      code: Code.EventNotEmitted,
+      loc,
+      details: { word: name, first, other },
+    };
   }
 
   private recordMapError(loc: int, args: Type): SourceError | undefined {

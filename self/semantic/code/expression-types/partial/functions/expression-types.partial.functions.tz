@@ -109,6 +109,7 @@ partial class ExpressionTypes {
 
     this.openFunctions.push(fn);
     this.openBody(door, fn, shape, context, module);
+    this.errorPathsCheck(fn, module);
     this.openFunctions.pop();
 
     if (place != undefined) {
@@ -404,7 +405,9 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
-    return this.parameterOf(param, context, module);
+    const type = this.parameterOf(param, context, module);
+
+    return this.hookedParameter(fn, param, type);
   }
 
   private isLibraryOverride(fn: FunctionDecl): boolean {
@@ -425,6 +428,9 @@ partial class ExpressionTypes {
 
     const parent = this.classes.parentOf(self, decl);
     if (parent == undefined || !this.modules.isLibraryModule(parent.module)) {
+      return false;
+    }
+    if (this.modules.isTypedLibrary(parent.module)) {
       return false;
     }
 

@@ -30,7 +30,7 @@ import { Code } from "../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 
 partial class Loader {
-  private linkedFile(from: ModulePath, file: string, package: int): ModuleLink {
+  private linkedFile(from: ModulePath, file: string, owner: int): ModuleLink {
     if (file.endsWith(kJsonExtension)) {
       return this.linkedJson(from, file);
     }
@@ -48,7 +48,7 @@ partial class Loader {
       return { kind: LinkKind.Missing, from };
     }
 
-    this.packageOf.set(module.id, package);
+    this.packageOf.set(module.id, owner);
 
     return { kind: LinkKind.Module, from, target: module.id };
   }

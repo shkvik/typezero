@@ -165,12 +165,22 @@ export class TypeRelation {
       if (writer != "" && own != wide && !isOpen) {
         return false;
       }
+      if (this.isUnsaid(own, wide)) {
+        return false;
+      }
       if (!this.extends(own, wide)) {
         return false;
       }
     }
 
     return true;
+  }
+
+  public isUnsaid(own: Type, wide: Type): boolean {
+    const isObjects =
+      own.kind == TypeKind.Object && wide.kind == TypeKind.Object;
+
+    return isObjects && own != wide && !this.descends(own, wide);
   }
 
   private literalFits(source: LiteralType, target: Type): boolean {

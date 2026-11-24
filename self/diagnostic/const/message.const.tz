@@ -3478,9 +3478,6 @@ export const kMessages: Record<Code, Message> = {
   [Code.ProcessSignal]: {
     text: "'process.{word}' listens only to the signals 'SIGINT', 'SIGTERM', 'SIGHUP' and 'SIGBREAK', not to '{first}'",
   },
-  [Code.ProcessNoThrown]: {
-    text: "there is nothing to catch: nothing is thrown or rejected in tz, an error is a Result that the code which gets it handles (docs/errors.md, section 4)",
-  },
   [Code.ProcessTtyValue]: {
     text: "'{word}.isTTY' is a boolean, not a function",
   },
@@ -4290,5 +4287,116 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.ObjectListingEmitter]: {
     text: "'Object.{word}' of an emitter is not supported: its fields are the listeners it keeps; read the fields of its class by name",
+  },
+  [Code.TargetListenerEvent]: {
+    text: "a listener of an EventTarget takes an Event, or a kind of it such as 'CustomEvent<int>', but this one takes '{first}'",
+  },
+  [Code.EventErrorUnheard]: {
+    text: "'error' is emitted here, but nothing in the program listens for 'error' on this emitter, so the error would be lost (node would end the program); listen for it, e.g. 'bus.on(\"error\", (e) => ...)'",
+  },
+  [Code.StreamPipe]: {
+    text: "'pipe' is not supported: it does not pass an error on, so the source stops and the destination stays open; join the streams with 'await pipeline(source, destination)', which gives a Result",
+  },
+  [Code.StreamNotReadable]: {
+    text: "'{word}' has no {other}(): it is not readable",
+  },
+  [Code.StreamNotWritable]: {
+    text: "'{word}' has no {other}(): it is not writable",
+  },
+  [Code.StreamPushUndefined]: {
+    text: "'{word}(undefined)' does not end a stream: a chunk is never undefined; end the stream with 'pushEnd()'",
+  },
+  [Code.StreamByteChunk]: {
+    text: "'{word}' of a stream of {first} takes a string, a Buffer or a Uint8Array, but this is '{second}'; to write objects, make the stream one of their type, e.g. 'class Users extends Readable<User>'",
+  },
+  [Code.StreamTextChunk]: {
+    text: "'{word}' of a stream of {first} takes a string, but this is '{second}'; a Writable<string> gives its onWrite() the strings written; make it a Writable<Buffer> to write bytes",
+  },
+  [Code.StreamAbstract]: {
+    text: "'{word}' is abstract: write a class that extends it and puts its work in '{first}', e.g. '{second}'",
+  },
+  [Code.StreamAbstractReadable]: {
+    text: "'Readable' is abstract: write a class that extends it and puts its work in 'onRead', e.g. 'class Lines extends Readable<string> { protected onRead() { ... } }'; for a stream of values you already have, use 'Readable.from(values)'",
+  },
+  [Code.StreamUntypedNew]: {
+    text: "'{word}' needs the type of its chunks, e.g. 'new {word}<Buffer>()', 'new {word}<string>()' or 'new {word}<User>()'",
+  },
+  [Code.StreamUntypedBase]: {
+    text: "'{word}' needs the type of its chunks, e.g. '{word}<Buffer>', '{word}<string>' or '{word}<User>'",
+  },
+  [Code.StreamHookOther]: {
+    text: "'{word}' is what node:stream calls, as '{first}', and a method with other parameters is another variant of the name, which it never calls; take those parameters, or leave out their types",
+  },
+  [Code.StreamHookOtherChunks]: {
+    text: "'{word}' is what node:stream calls, as '{first}', and a method with other parameters is another variant of the name, which it never calls; take those parameters, or leave out their types; for chunks of another type, give the class it extends type arguments, e.g. 'extends Writable<string>'",
+  },
+  [Code.StreamEncodingObjects]: {
+    text: "setEncoding() decodes the Buffers of a stream of bytes, and this is a stream of {word}; push strings into it instead",
+  },
+  [Code.StreamEncodingUnreadable]: {
+    text: "'{word}' has no setEncoding(): it is not readable",
+  },
+  [Code.StreamEncodingListened]: {
+    text: "setEncoding() on a stream that is used elsewhere already, which sees its chunks as Buffers, but strings would come: it got listeners ({word}()) before this; give the stream its encoding where it is created, e.g. 'createReadStream(path, \"utf8\")', or call setEncoding() first",
+  },
+  [Code.StreamStageChunk]: {
+    text: "{word}() writes chunks of {first} to '{second}', which takes {other}",
+  },
+  [Code.StreamPipelineUnwritable]: {
+    text: "pipeline() writes the chunks before it to each stream after the first, but '{word}' is not writable",
+  },
+  [Code.StreamComposeOther]: {
+    text: "compose() takes streams, and this is '{word}'; to put a function between them, use pipeline()",
+  },
+  [Code.StreamComposeFew]: {
+    text: "compose() takes the streams to make one Duplex of, e.g. 'compose(a, b)'",
+  },
+  [Code.StreamFromSource]: {
+    text: "'Readable.from' takes an iterable, an async iterable, a string or a Buffer, but this is '{word}'",
+  },
+  [Code.EventNotEmitted]: {
+    text: "no code of the program emits '{word}' on this emitter; it emits {first}{other}",
+  },
+  [Code.EventNeverEmitted]: {
+    text: "no code of the program emits '{word}' on this emitter, nor any other event: an emitter without an event map has the events that emit() calls give it, e.g. 'bus.emit(\"{word}\", ...)'",
+  },
+  [Code.EventEmittedCount]: {
+    text: "'{word}' is emitted with {first} at {second}, but with {other} here",
+  },
+  [Code.EventEmittedType]: {
+    text: "'{word}' is emitted with {first} at {second}, but with '{other}' here; an event has one type of arguments",
+  },
+  [Code.ProtectedElsewhere]: {
+    text: "'{word}' is protected in class '{first}'; '{second}' may use it only on its own objects, and this one is of class '{other}'",
+  },
+  [Code.ListenerKeeps]: {
+    text: "the listener keeps '{word}', which nothing else holds, so nothing tells when its subscription ends; keep the state in an object and subscribe its method, e.g. 'bus.on(\"data\", counter.add)' (docs/events.md, section 6)",
+  },
+  [Code.TimerKeeps]: {
+    text: "the interval keeps '{word}', which nothing else holds, so nothing tells when it should stop; keep the state in an object and pass its method, e.g. 'setInterval(counter.tick, 1000)' (docs/events.md, section 7)",
+  },
+  [Code.ListenerCaptures]: {
+    text: "the listener captures {first}, but it may depend on one object only, the one whose life it follows; store what it needs from {second} in a field of '{other}' (docs/events.md, section 6)",
+  },
+  [Code.TimerCaptures]: {
+    text: "the interval captures {first}, but it may depend on one object only, the one whose life it follows; store what it needs from {second} in a field of '{other}' (docs/events.md, section 7)",
+  },
+  [Code.ListenerUnknown]: {
+    text: "can't tell what this listener captures, so not when its subscription ends; pass a method here, e.g. 'this.onData', or an arrow that uses one object, e.g. '(chunk) => this.add(chunk)' (docs/events.md, section 6)",
+  },
+  [Code.TimerUnknown]: {
+    text: "can't tell what this interval captures, so not when it should stop; pass a method here, e.g. 'this.onData', or an arrow that uses one object, e.g. '(chunk) => this.add(chunk)' (docs/events.md, section 7)",
+  },
+  [Code.EmitterDropped]: {
+    text: "the new {word} is held by nothing, so the listeners its constructor adds would stop at once; store it, e.g. 'const {other} = new {word}(...)' (docs/events.md, section 6)",
+  },
+  [Code.EventsWaitEndless]: {
+    text: "{word} may never emit this event, so the wait may never end; give it a time limit, e.g. '{first}(emitter, \"done\", { timeout: 5000 })' (docs/events.md, section 6)",
+  },
+  [Code.EmitOneValue]: {
+    text: "an event carries one value: pass an object, e.g. 'emit(\"{word}\", { from, text })' (docs/events.md, section 2)",
+  },
+  [Code.EventErrorPaths]: {
+    text: "{word} may emit 'error', and nothing listens for it on every path here, so the error would be lost (node would end the program); listen in this function: '{first}.on(\"error\", (e) => ...)'",
   },
 };

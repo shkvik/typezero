@@ -14,6 +14,9 @@ partial class ExpressionTypes {
     this.unreadResultsCheck(module);
     this.pendingCallsCheck(module);
     this.reflectedNewsCheck(module);
+    this.unheardErrorsCheck(module);
+    this.unemittedListensCheck(module);
+    this.droppedNewsCheck(module);
 
     return this.errors.of(module);
   }

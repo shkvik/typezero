@@ -1,4 +1,5 @@
 import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
+import { kIntervalName } from "../../event-rules/const/event-rules.const.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
@@ -13,6 +14,13 @@ partial class ExpressionTypes {
       callee.kind == ExprKind.Name &&
       (callee.name == "setTimeout" || callee.name == "setInterval") &&
       this.isGlobalUse(callee, module);
+    const callback = expr.args[0]?.expr;
+    const isInterval =
+      isTimer && callee.kind == ExprKind.Name && callee.name == kIntervalName;
+    if (isInterval && callback != undefined) {
+      this.listenerLifeCheck(callback, undefined, true, module);
+    }
+
     const extra = expr.args[2]?.expr;
     if (!isTimer || extra == undefined) {
       return;
@@ -33,12 +41,10 @@ partial class ExpressionTypes {
       holder.kind == ExprKind.Name &&
       holder.name == "process" &&
       this.isGlobalUse(holder, module);
-    const isListen = callee.name == "on" || callee.name == "once";
     const isUncaught =
       event.kind == ExprKind.StringLit &&
-      (event.value == "uncaughtException" ||
-        event.value == "unhandledRejection");
-    if (!isProcess || !isListen || !isUncaught) {
+      this.process.isThrownListener(callee.name, event.value);
+    if (!isProcess || !isUncaught) {
       return;
     }
 

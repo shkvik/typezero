@@ -1,0 +1,35 @@
+import {
+  DroppedNew,
+  ErrorEmit,
+  ErrorPending,
+  EventListen,
+  FirstEmit,
+} from "./types/event-marks.types.tz";
+
+export class EventMarks {
+  public readonly errorEmits: ErrorEmit[];
+  public readonly errorListened: Set<string>;
+  public readonly encodedStreams: Set<string>;
+  public readonly listenedStreams: Map<string, string>;
+  public readonly emittedNames: Map<string, string[]>;
+  public readonly firstEmits: Map<string, FirstEmit>;
+  public readonly listens: EventListen[];
+  public readonly looseEmitModules: Set<int>;
+  public readonly selfListeners: Set<string>;
+  public readonly droppedNews: DroppedNew[];
+  public readonly errorPending: ErrorPending[];
+
+  public constructor() {
+    this.errorEmits = [];
+    this.errorListened = new Set<string>();
+    this.encodedStreams = new Set<string>();
+    this.listenedStreams = new Map<string, string>();
+    this.emittedNames = new Map<string, string[]>();
+    this.firstEmits = new Map<string, FirstEmit>();
+    this.listens = [];
+    this.looseEmitModules = new Set<int>();
+    this.selfListeners = new Set<string>();
+    this.droppedNews = [];
+    this.errorPending = [];
+  }
+}

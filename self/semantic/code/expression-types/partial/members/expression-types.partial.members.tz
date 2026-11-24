@@ -131,6 +131,10 @@ partial class ExpressionTypes {
     if (this.fsConstantCheck(expr, module)) {
       return this.store.plain(TypeKind.Error);
     }
+    const processStream = this.processStreamTyped(expr, module);
+    if (processStream != undefined) {
+      return processStream;
+    }
     if (this.processMemberRead(expr, module)) {
       return this.store.plain(TypeKind.Error);
     }
@@ -228,7 +232,10 @@ partial class ExpressionTypes {
     const fields = object.fields.filter((one) => one.name == expr.name);
     const field = fields[0];
     const isLibrary = this.resolver.isLibraryShape(object);
-    if (field == undefined && isLibrary) {
+    const isData = object.fields.every(
+      (one) => one.type.kind != TypeKind.Function,
+    );
+    if (field == undefined && isLibrary && !isData) {
       this.namespaceReadCheck(expr, module);
 
       return this.store.plain(TypeKind.Error);

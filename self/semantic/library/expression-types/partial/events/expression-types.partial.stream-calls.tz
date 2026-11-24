@@ -1,0 +1,341 @@
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import { kNoPlace } from "../../../../code/expression-types/const/expression-types.const.tz";
+import {
+  kBufferChunkName,
+  kEndName,
+  kEndTypedName,
+  kDestroyName,
+  kSetEncodingName,
+  kWriteTypedName,
+  kDuplexNames,
+  kPipeName,
+  kReadableName,
+  kStreamModule,
+  kStreamReadMethods,
+  kStreamWriteMethods,
+  kWritableName,
+} from "../../../event-rules/const/event-rules.const.tz";
+
+partial class ExpressionTypes {
+  private streamCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type | undefined {
+    const name = member.name;
+    const isData =
+      kStreamReadMethods.includes(name) || kStreamWriteMethods.includes(name);
+    const isOther = name == kPipeName || name == kSetEncodingName;
+    const isPlainDestroy = name == kDestroyName && expr.args.length == 0;
+    if (!isData && !isOther && !isPlainDestroy) {
+      return undefined;
+    }
+    if (this.modules.isLibraryModule(module) || !this.isStream(instance)) {
+      return undefined;
+    }
+    if (isPlainDestroy) {
+      return this.store.plain(TypeKind.Undefined);
+    }
+    if (name == kSetEncodingName) {
+      return this.setEncodingCall(expr, member, instance, module);
+    }
+    if (this.hasOwnStreamMethod(instance, name)) {
+      return undefined;
+    }
+    if (name == kPipeName) {
+      this.report(module, member.loc, Code.StreamPipe, kNoDetails);
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const isReading = kStreamReadMethods.includes(name);
+    const chunk = this.streamChunk(instance, isReading);
+    if (chunk == undefined) {
+      const word = this.text.of(instance);
+      const code = this.sideCode(isReading);
+
+      this.report(module, member.loc, code, { word, other: name });
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.streamChunkCheck(expr, name, chunk, isReading, module);
+    this.streamRestArguments(expr, instance, module);
+
+    if (name == kEndName) {
+      return this.typedMethodResult(instance, kEndTypedName);
+    }
+
+    return this.store.plain(TypeKind.Boolean);
+  }
+
+  private setEncodingCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type {
+    this.looseArguments(expr.args, module);
+
+    const chunk = this.streamChunk(instance, true);
+    if (chunk == undefined) {
+      const word = this.text.of(instance);
+
+      this.report(module, member.loc, Code.StreamEncodingUnreadable, { word });
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (chunk.kind == TypeKind.String) {
+      return instance;
+    }
+    if (!this.isBufferChunk(chunk)) {
+      const word = this.text.of(chunk);
+
+      this.report(module, member.loc, Code.StreamEncodingObjects, { word });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const key = this.emitterKey(member.object, module);
+    if (key == undefined) {
+      return instance;
+    }
+
+    const listened = this.eventMarks.listenedStreams.get(key);
+    if (listened != undefined) {
+      this.report(module, member.loc, Code.StreamEncodingListened, {
+        word: listened,
+      });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    this.eventMarks.encodedStreams.add(key);
+
+    return instance;
+  }
+
+  private noteStreamListened(
+    member: MemberExpr,
+    isListening: boolean,
+    module: int,
+  ): void {
+    const key = this.emitterKey(member.object, module);
+    if (
+      !isListening ||
+      key == undefined ||
+      this.eventMarks.listenedStreams.has(key)
+    ) {
+      return;
+    }
+
+    this.eventMarks.listenedStreams.set(key, member.name);
+  }
+
+  private streamRestArguments(
+    expr: CallExpr,
+    instance: InstanceType,
+    module: int,
+  ): void {
+    const callback = this.writeCallbackType(instance);
+
+    for (const arg of expr.args.slice(1)) {
+      const isFunction = arg.expr.kind == ExprKind.Function;
+      if (isFunction && callback != undefined) {
+        this.checked(arg.expr, callback, module, kNoPlace);
+      } else {
+        this.listenerLoose(arg.expr, module);
+      }
+    }
+  }
+
+  private writeCallbackType(instance: InstanceType): Type | undefined {
+    const entry = this.classMember(instance, kWriteTypedName).entry;
+    const fn = entry?.methods[0];
+    if (entry == undefined || fn == undefined) {
+      return undefined;
+    }
+
+    const type = this.methodTypeOf(entry, fn);
+    if (type.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    const last = type.shape.params[2]?.type;
+    if (last == undefined) {
+      return undefined;
+    }
+
+    return this.types.definedType(last);
+  }
+
+  private typedMethodResult(instance: InstanceType, name: string): Type {
+    const entry = this.classMember(instance, name).entry;
+    const fn = entry?.methods[0];
+    if (entry == undefined || fn == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const type = this.methodTypeOf(entry, fn);
+    if (type.kind != TypeKind.Function) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return type.shape.result;
+  }
+
+  private sideCode(isReading: boolean): Code {
+    if (isReading) {
+      return Code.StreamNotReadable;
+    }
+
+    return Code.StreamNotWritable;
+  }
+
+  private streamChunkCheck(
+    expr: CallExpr,
+    name: string,
+    chunk: Type,
+    isReading: boolean,
+    module: int,
+  ): void {
+    const value = expr.args[0]?.expr;
+    if (value == undefined) {
+      return;
+    }
+    if (value.kind == ExprKind.Undefined && isReading) {
+      this.report(module, value.loc, Code.StreamPushUndefined, { word: name });
+
+      return;
+    }
+    if (!this.isByteChunk(chunk)) {
+      this.checked(value, chunk, module, kNoPlace);
+
+      return;
+    }
+
+    const given = this.typed(value, undefined, module);
+    if (given.kind == TypeKind.Error) {
+      return;
+    }
+
+    const isOnlyText = !isReading && chunk.kind == TypeKind.String;
+    const parts = this.types.unionMembers(given);
+    const isFitting = parts.every((part) =>
+      this.isChunkValue(part, isOnlyText),
+    );
+    if (isFitting) {
+      return;
+    }
+
+    const code = this.chunkCode(isOnlyText);
+
+    this.report(module, value.loc, code, {
+      word: name,
+      first: this.text.of(chunk),
+      second: this.text.of(given),
+    });
+  }
+
+  private chunkCode(isOnlyText: boolean): Code {
+    if (isOnlyText) {
+      return Code.StreamTextChunk;
+    }
+
+    return Code.StreamByteChunk;
+  }
+
+  private isChunkValue(type: Type, isOnlyText: boolean): boolean {
+    const isText =
+      type.kind == TypeKind.String ||
+      type.kind == TypeKind.Template ||
+      this.regexes.isText(type);
+    if (isText || isOnlyText) {
+      return isText;
+    }
+
+    return this.byteSources.isBytesType(type) || this.isBufferChunk(type);
+  }
+
+  private isByteChunk(chunk: Type): boolean {
+    return chunk.kind == TypeKind.String || this.isBufferChunk(chunk);
+  }
+
+  private isBufferChunk(type: Type): boolean {
+    const base = this.types.definedType(type);
+
+    return base.kind == TypeKind.Instance && base.name == kBufferChunkName;
+  }
+
+  private streamChunk(instance: Type, isReading: boolean): Type | undefined {
+    for (const one of this.types.ancestorsOf(instance)) {
+      if (one.kind != TypeKind.Instance || !this.isStreamModule(one.module)) {
+        continue;
+      }
+      if (kDuplexNames.includes(one.name)) {
+        return this.duplexChunk(one, isReading);
+      }
+      if (one.name == kReadableName && isReading) {
+        return one.args[0];
+      }
+      if (one.name == kWritableName && !isReading) {
+        return one.args[0];
+      }
+    }
+
+    return undefined;
+  }
+
+  private duplexChunk(
+    instance: InstanceType,
+    isReading: boolean,
+  ): Type | undefined {
+    const written = instance.args[0];
+    if (!isReading) {
+      return written;
+    }
+
+    return instance.args[1] ?? written;
+  }
+
+  private isStream(type: Type): boolean {
+    return this.types
+      .ancestorsOf(type)
+      .some(
+        (one) =>
+          one.kind == TypeKind.Instance &&
+          this.isStreamModule(one.module) &&
+          (one.name == kReadableName ||
+            one.name == kWritableName ||
+            kDuplexNames.includes(one.name)),
+      );
+  }
+
+  private isStreamModule(module: int): boolean {
+    return this.program.modules[module]?.name == kStreamModule;
+  }
+
+  private hasOwnStreamMethod(instance: InstanceType, name: string): boolean {
+    const entry = this.classMember(instance, name).entry;
+    if (entry == undefined || entry.field != undefined) {
+      return false;
+    }
+
+    return !this.isStreamModule(entry.instance.module);
+  }
+}

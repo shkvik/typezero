@@ -23,3 +23,77 @@ export const kOnName = "on";
 export const kEventTargetName = "EventTarget";
 export const kWebModule = "tz:web";
 export const kOrEventTarget = " or an EventTarget";
+export const kEventName = "Event";
+export const kTargetListenerMethods = [
+  "addEventListener",
+  "removeEventListener",
+];
+export const kErrorEvent = "error";
+export const kOffName = "off";
+export const kRemoveListenerName = "removeListener";
+export const kStreamModule = "node:stream";
+export const kStreamEmitterName = "StreamEmitter";
+export const kReadableName = "Readable";
+export const kWritableName = "Writable";
+export const kDuplexNames = ["Duplex", "Transform", "PassThrough"];
+export const kStreamReadMethods = ["push", "unshift"];
+export const kStreamWriteMethods = ["write", "end"];
+export const kPipeName = "pipe";
+export const kBufferChunkName = "Buffer";
+export const kEndName = "end";
+export const kEndTypedName = "endTyped";
+export const kDataEvent = "data";
+export const kStreamModules = ["node:stream", "node:stream/promises"];
+export const kStreamFunctions = ["pipeline", "finished", "compose"];
+export const kDestroyName = "destroy";
+export const kSetEncodingName = "setEncoding";
+export const kWriteTypedName = "writeTyped";
+export const kPassThroughName = "PassThrough";
+export const kStreamClassNames = [
+  "Readable",
+  "Writable",
+  "Duplex",
+  "Transform",
+  "PassThrough",
+];
+export const kStreamAbstractHooks = new Map<string, string>([
+  ["Writable", "onWrite"],
+  ["Duplex", "onRead' and 'onWrite"],
+  ["Transform", "onTransform"],
+]);
+export const kStreamAbstractExamples = new Map<string, string>([
+  [
+    "Writable",
+    "class Sink extends Writable<string> { protected onWrite(chunk, encoding, callback) { ... } }",
+  ],
+  ["Duplex", "class Upper extends Duplex<string> { ... }"],
+  ["Transform", "class Upper extends Transform<string> { ... }"],
+]);
+export const kStreamHookNames = [
+  "onRead",
+  "onWrite",
+  "onWritev",
+  "onFinal",
+  "onConstruct",
+  "onDestroy",
+  "onFlush",
+  "onTransform",
+];
+export const kStreamChunkHooks = ["onWrite", "onWritev", "onTransform"];
+export const kComposeName = "compose";
+export const kFinishedName = "finished";
+export const kPipelineName = "pipeline";
+export const kFromName = "from";
+export const kNotReceivers = [
+  "Date",
+  "RegExp",
+  "WeakRef",
+  "Buffer",
+  "Uint8Array",
+  "Timeout",
+];
+export const kThisWord = "this";
+export const kTimeoutField = "timeout";
+export const kThisEmitter = "this emitter";
+export const kConstructorWord = "constructor";
+export const kIntervalName = "setInterval";

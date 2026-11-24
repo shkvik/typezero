@@ -1,0 +1,56 @@
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  InstanceType,
+  Type,
+} from "../../../../program/type/types/type.types.tz";
+
+export type ErrorEmit = {
+  readonly key: string;
+  readonly loc: int;
+  readonly module: int;
+};
+
+export type FirstEmit = {
+  readonly args: Type[];
+  readonly place: string;
+};
+
+export type EventListen = {
+  readonly key: string;
+  readonly event: string;
+  readonly loc: int;
+  readonly module: int;
+};
+
+export type DroppedNew = {
+  readonly instance: InstanceType;
+  readonly loc: int;
+  readonly module: int;
+};
+
+export type Capture = {
+  readonly name: string;
+  readonly type: Type;
+  readonly isChanged: boolean;
+  readonly isThis: boolean;
+};
+
+export enum ListenerForm {
+  Free,
+  Receiver,
+  Captures,
+  Unknown,
+}
+
+export type ListenerShape = {
+  readonly form: ListenerForm;
+  readonly captured: Capture[];
+  readonly isSelf: boolean;
+};
+
+export type ErrorPending = {
+  readonly fn: FunctionDecl;
+  readonly key: string;
+  readonly name: string;
+  readonly loc: int;
+};

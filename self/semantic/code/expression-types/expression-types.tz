@@ -97,6 +97,13 @@ import "../../library/expression-types/partial/expression-types.partial.reflecte
 import "../../library/expression-types/partial/regex/expression-types.partial.matches.tz";
 import "../../library/expression-types/partial/fetch/expression-types.partial.fetch.tz";
 import "../../library/expression-types/partial/events/expression-types.partial.emitters.tz";
+import "../../library/expression-types/partial/events/expression-types.partial.inferred-events.tz";
+import "../../library/expression-types/partial/events/expression-types.partial.listener-life.tz";
+import "../../library/expression-types/partial/events/expression-types.partial.error-paths.tz";
+import "../../library/expression-types/partial/events/expression-types.partial.events-functions.tz";
+import "../../library/expression-types/partial/events/expression-types.partial.stream-calls.tz";
+import "../../library/expression-types/partial/events/expression-types.partial.stream-functions.tz";
+import "../../library/expression-types/partial/events/expression-types.partial.stream-classes.tz";
 import "../../library/expression-types/partial/expression-types.partial.console-calls.tz";
 import "./partial/statements/expression-types.partial.statement-values.tz";
 import "./partial/calls/expression-types.partial.construction.tz";
@@ -238,6 +245,7 @@ import { IntlDateRules } from "../../library/intl-date-rules/intl-date-rules.tz"
 import { ExpressionCollector } from "../expression-collector/expression-collector.tz";
 import { FetchRules } from "../../library/fetch-rules/fetch-rules.tz";
 import { EventRules } from "../../library/event-rules/event-rules.tz";
+import { EventMarks } from "../../library/event-marks/event-marks.tz";
 
 export class ExpressionTypes {
   private readonly store: TypeStore;
@@ -364,6 +372,7 @@ export class ExpressionTypes {
   private readonly pendingCalls: PendingCall[];
   private readonly metadataRecords: Map<string, Type>;
   private readonly callChanged: Map<int, string[]>;
+  private readonly eventMarks: EventMarks;
   private readonly constructorCasts: ConstructorCast[];
   private readonly constructorWidenings: Map<int, Type[]>;
   private readonly reflectedNews: ReflectedNew[];
@@ -678,6 +687,7 @@ export class ExpressionTypes {
     this.pendingCalls = [];
     this.metadataRecords = new Map<string, Type>();
     this.callChanged = new Map<int, string[]>();
+    this.eventMarks = new EventMarks();
     this.constructorCasts = [];
     this.constructorWidenings = new Map<int, Type[]>();
     this.reflectedNews = [];

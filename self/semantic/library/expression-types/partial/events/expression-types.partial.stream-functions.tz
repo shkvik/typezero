@@ -1,0 +1,181 @@
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { StaticOwner } from "../../../../code/expression-types/types/expression-types.types.tz";
+import {
+  kComposeName,
+  kFinishedName,
+  kFromName,
+  kPipelineName,
+  kReadableName,
+} from "../../../event-rules/const/event-rules.const.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+
+partial class ExpressionTypes {
+  private streamFunctionCall(expr: CallExpr, name: string, module: int): Type {
+    if (name == kFinishedName) {
+      for (const arg of expr.args) {
+        this.listenerLoose(arg.expr, module);
+      }
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    let chunk: Type | undefined = undefined;
+
+    for (const arg of expr.args) {
+      const value = arg.expr;
+      if (value.kind == ExprKind.Function) {
+        this.listenerLoose(value, module);
+        chunk = undefined;
+
+        continue;
+      }
+
+      const type = this.typed(value, undefined, module);
+
+      chunk = this.stageChunk(name, value, type, chunk, module);
+    }
+
+    if (name == kComposeName && expr.args.length < 2) {
+      this.report(module, expr.loc, Code.StreamComposeFew, kNoDetails);
+    }
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private stageChunk(
+    name: string,
+    value: Expr,
+    type: Type,
+    before: Type | undefined,
+    module: int,
+  ): Type | undefined {
+    if (type.kind == TypeKind.Error) {
+      return undefined;
+    }
+    if (!this.isStream(type)) {
+      if (name == kComposeName) {
+        const word = this.text.of(type);
+
+        this.report(module, value.loc, Code.StreamComposeOther, { word });
+      }
+
+      return undefined;
+    }
+    if (before != undefined) {
+      this.stageTakesCheck(name, value, type, before, module);
+    }
+
+    return this.streamChunk(type, true);
+  }
+
+  private stageTakesCheck(
+    name: string,
+    value: Expr,
+    type: Type,
+    before: Type,
+    module: int,
+  ): void {
+    const takes = this.streamChunk(type, false);
+    if (takes == undefined) {
+      if (name == kPipelineName) {
+        const word = this.text.of(type);
+
+        this.report(module, value.loc, Code.StreamPipelineUnwritable, { word });
+      }
+
+      return;
+    }
+    if (this.isStreamTaking(takes, before)) {
+      return;
+    }
+
+    this.report(module, value.loc, Code.StreamStageChunk, {
+      word: name,
+      first: this.text.of(before),
+      second: this.stageText(type),
+      other: this.text.of(takes),
+    });
+  }
+
+  private stageText(type: Type): string {
+    if (type.kind != TypeKind.Instance || type.args.length == 0) {
+      return this.text.of(type);
+    }
+
+    const args = type.args.map((one) => this.text.of(one));
+
+    return `${type.name}<${args.join(", ")}>`;
+  }
+
+  private isStreamTaking(takes: Type, chunk: Type): boolean {
+    if (takes == chunk || chunk.kind == TypeKind.Error) {
+      return true;
+    }
+
+    const isText =
+      chunk.kind == TypeKind.String || chunk.kind == TypeKind.Template;
+    if (this.isBufferChunk(takes) && isText) {
+      return true;
+    }
+
+    return this.relation.extends(chunk, takes);
+  }
+
+  private streamFromCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    owner: StaticOwner,
+    module: int,
+  ): Type | undefined {
+    const isFrom =
+      member.name == kFromName &&
+      owner.decl.name == kReadableName &&
+      this.isStreamModule(owner.module);
+    if (!isFrom || this.modules.isLibraryModule(module)) {
+      return undefined;
+    }
+
+    const value = expr.args[0]?.expr;
+
+    this.looseArguments(expr.args.slice(1), module);
+
+    if (value == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const given = this.typed(value, undefined, module);
+    if (given.kind == TypeKind.Error) {
+      return given;
+    }
+
+    const chunk = this.fromChunk(given);
+    if (chunk == undefined) {
+      const word = this.text.of(given);
+
+      this.report(module, value.loc, Code.StreamFromSource, { word });
+
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.resolver.classInstance(owner.module, owner.decl, [chunk]);
+  }
+
+  private fromChunk(given: Type): Type | undefined {
+    if (this.isBufferChunk(given)) {
+      return this.types.definedType(given);
+    }
+
+    return this.iteratedItem(given);
+  }
+}

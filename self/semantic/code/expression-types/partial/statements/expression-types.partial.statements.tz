@@ -278,6 +278,8 @@ partial class ExpressionTypes {
     if (expr.kind != ExprKind.Sequence) {
       const type = this.typed(expr, undefined, module);
 
+      this.noteDroppedNew(expr, type, module);
+
       return this.usedCheck(expr, type, at, module);
     }
 
@@ -316,7 +318,7 @@ partial class ExpressionTypes {
       return this.forInKeys(loop, iterable, module);
     }
     if (loop.isAwait) {
-      return this.store.plain(TypeKind.Error);
+      return this.awaitLoopItem(iterable);
     }
 
     const base = this.types.apparent(iterable);

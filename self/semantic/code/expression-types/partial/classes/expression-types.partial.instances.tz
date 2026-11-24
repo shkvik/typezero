@@ -122,6 +122,10 @@ partial class ExpressionTypes {
     expr: MemberExpr,
     module: int,
   ): boolean {
+    if (this.protectedElsewhere(entry.owner, access, expr, module)) {
+      return true;
+    }
+
     return this.reportAccess(entry.owner, access, expr.name, expr.loc, module);
   }
 
@@ -233,7 +237,7 @@ partial class ExpressionTypes {
       return this.methodFunction(owner, method, entry.instance.module);
     }
     if (written == undefined) {
-      return this.store.plain(TypeKind.Error);
+      return this.inferredGenericMethod(entry, method);
     }
 
     const sites = this.classes.parameterSites(method);
@@ -250,6 +254,32 @@ partial class ExpressionTypes {
     );
 
     return this.resolver.signature(sites, written, context);
+  }
+
+  private inferredGenericMethod(
+    entry: ClassMemberEntry,
+    method: FunctionDecl,
+  ): Type {
+    const instance = entry.instance;
+    const part = this.partOf(entry.owner, method);
+    const home = this.partModule(part, instance.module);
+    const opened = this.resolver.parameterTypes(home, part.typeParams);
+    const generic = this.methodFunction(entry.owner, method, instance.module);
+    if (generic.kind != TypeKind.Function) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const bound = new Map<int, Type>();
+
+    for (let index = 0; index < opened.length; index++) {
+      const param = opened[index];
+      const arg = instance.args[index];
+      if (param != undefined && arg != undefined) {
+        bound.set(param.id, arg);
+      }
+    }
+
+    return this.resolver.substitute(generic, bound);
   }
 
   private partOf(owner: ClassDecl, method: FunctionDecl): ClassDecl {
@@ -359,6 +389,17 @@ partial class ExpressionTypes {
     const emitterMade = this.emitterNew(expr, decl, target.module, module);
     if (emitterMade != undefined) {
       return emitterMade;
+    }
+
+    const streamMade = this.streamNew(
+      expr,
+      decl,
+      target.module,
+      wanted,
+      module,
+    );
+    if (streamMade != undefined) {
+      return streamMade;
     }
     if (decl.typeParams.length > 0 && expr.typeArgs.length == 0) {
       const inferred = this.genericNew(

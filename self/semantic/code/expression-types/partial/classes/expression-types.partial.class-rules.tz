@@ -199,10 +199,26 @@ partial class ExpressionTypes {
     if (object.kind == TypeKind.Instance) {
       this.instanceTargetCheck(target, object, module);
     }
+    if (
+      object.kind == TypeKind.Instance &&
+      this.isMethodTarget(target, object)
+    ) {
+      return this.store.plain(TypeKind.Error);
+    }
 
     this.objectTargetCheck(target, object, module);
 
     return declared;
+  }
+
+  private isMethodTarget(target: MemberExpr, object: InstanceType): boolean {
+    if (this.isDeclaredLibrary(object.module, object.loc)) {
+      return false;
+    }
+
+    const entry = this.classMember(object, target.name).entry;
+
+    return entry != undefined && entry.field == undefined && !entry.isStatic;
   }
 
   private isMadeThis(object: Expr, module: int): boolean {
@@ -383,7 +399,7 @@ partial class ExpressionTypes {
     module: int,
   ): void {
     const word = target.name;
-    const first = owner.name ?? "";
+    const first = object.name;
     if (!this.modules.isTypedLibrary(object.module)) {
       return this.report(module, target.loc, Code.MethodReplaced, {
         word,

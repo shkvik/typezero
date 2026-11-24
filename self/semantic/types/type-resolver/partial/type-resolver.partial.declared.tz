@@ -33,6 +33,12 @@ import {
   kFunctionUtilities,
 } from "../const/type-resolver.const.tables.tz";
 import {
+  kEmitterName,
+  kEventsModule,
+  kStreamClassNames,
+  kStreamModule,
+} from "../../../library/event-rules/const/event-rules.const.tz";
+import {
   ClassHome,
   TypeContext,
   TypeDeclaration,
@@ -150,6 +156,21 @@ partial class TypeResolver {
       case StmtKind.Class: {
         const name = found.name ?? "";
         const params = found.typeParams;
+        if (this.isBareEmitter(ref, module, name, context)) {
+          const parents = this.parentRefs(found.base, found.interfaces);
+          const home: ClassHome = { module, name, loc: found.loc };
+          const unknown = this.store.plain(TypeKind.Error);
+
+          return this.instance(home, params, [unknown], parents);
+        }
+        if (this.isBareStream(ref, module, name, context)) {
+          this.report(context.module, ref.loc, Code.StreamUntypedBase, {
+            word: name,
+          });
+
+          return this.store.plain(TypeKind.Error);
+        }
+
         const written = this.written(ref, name, params, context, true);
         const fits =
           written != undefined &&
@@ -226,6 +247,37 @@ partial class TypeResolver {
     }
 
     return this.resolveAll(ref.args, context);
+  }
+
+  private isBareEmitter(
+    ref: TypeRef,
+    module: int,
+    name: string,
+    context: TypeContext,
+  ): boolean {
+    const isBase = context.place == TypePlace.Base && ref.args.length == 0;
+    const home = this.program.modules[module]?.name;
+
+    return isBase && home == kEventsModule && name == kEmitterName;
+  }
+
+  private isBareStream(
+    ref: TypeRef,
+    module: int,
+    name: string,
+    context: TypeContext,
+  ): boolean {
+    const isBase = context.place == TypePlace.Base && ref.args.length == 0;
+    const home = this.program.modules[module]?.name;
+    const user = this.program.modules[context.module];
+    const isUser = user != undefined && !user.source.isLibrary;
+
+    return (
+      isBase &&
+      isUser &&
+      home == kStreamModule &&
+      kStreamClassNames.includes(name)
+    );
   }
 
   private notGenericCode(isClass: boolean): Code {

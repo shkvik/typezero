@@ -2,3 +2,7 @@ export const kConversionPrefix = "to";
 export const kWiderStart = "; '";
 export const kWiderMiddle = "' with a wider ";
 export const kWiderEnd = " would let a value of another type into it: ";
+export const kUnsaidMiddle = " does not extend ";
+export const kUnsaidExample =
+  ": a type goes where a wider one is wanted only when it says so, e.g. 'interface ";
+export const kUnsaidSample = "MyError";

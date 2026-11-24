@@ -214,6 +214,7 @@ partial class ExpressionTypes {
         return this.literalText(draft, index, expr, pattern, module);
       case ArgumentForm.Contextual:
         draft.contextual.push(index);
+        this.inferObjectFields(set, pattern, expr, module);
 
         return;
       case ArgumentForm.Shape: {

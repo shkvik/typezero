@@ -1,0 +1,206 @@
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import { ClassDecl } from "../../../../../program/ast/types/ast.types.classes.tz";
+import { NewExpr } from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+  Param,
+} from "../../../../../program/ast/types/ast.types.functions.tz";
+import {
+  FunctionType,
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import {
+  kPassThroughName,
+  kStreamAbstractExamples,
+  kStreamAbstractHooks,
+  kStreamChunkHooks,
+  kStreamClassNames,
+  kStreamHookNames,
+  kReadableName,
+} from "../../../event-rules/const/event-rules.const.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+
+partial class ExpressionTypes {
+  private streamNew(
+    expr: NewExpr,
+    decl: ClassDecl,
+    home: int,
+    wanted: Type | undefined,
+    module: int,
+  ): Type | undefined {
+    const name = decl.name ?? "";
+    const isStreamClass =
+      this.isStreamModule(home) && kStreamClassNames.includes(name);
+    if (!isStreamClass || this.modules.isLibraryModule(module)) {
+      return undefined;
+    }
+    if (name != kPassThroughName) {
+      this.reportAbstractStream(expr, name, module);
+      this.looseArguments(expr.args, module);
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (expr.typeArgs.length > 0 || this.isWantedClass(wanted, name, home)) {
+      return undefined;
+    }
+
+    this.report(module, expr.loc, Code.StreamUntypedNew, { word: name });
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private reportAbstractStream(expr: NewExpr, name: string, module: int): void {
+    if (name == kReadableName) {
+      this.report(module, expr.loc, Code.StreamAbstractReadable, kNoDetails);
+
+      return;
+    }
+
+    const first = kStreamAbstractHooks.get(name) ?? "";
+    const second = kStreamAbstractExamples.get(name) ?? "";
+
+    this.report(module, expr.loc, Code.StreamAbstract, {
+      word: name,
+      first,
+      second,
+    });
+  }
+
+  private isWantedClass(
+    wanted: Type | undefined,
+    name: string,
+    home: int,
+  ): boolean {
+    if (wanted == undefined) {
+      return false;
+    }
+
+    return this.types
+      .unionMembers(wanted)
+      .some(
+        (one) =>
+          one.kind == TypeKind.Instance &&
+          one.name == name &&
+          one.module == home,
+      );
+  }
+
+  private hookedParameter(fn: FunctionDecl, param: Param, type: Type): Type {
+    const isHook = kStreamHookNames.includes(fn.name);
+    if (type.kind != TypeKind.Double || !isHook) {
+      return type;
+    }
+
+    const hook = this.libraryHookType(fn);
+    const index = fn.params.indexOf(param);
+    const wanted = hook?.shape.params[index]?.type;
+    if (wanted == undefined || wanted.kind != TypeKind.Int) {
+      return type;
+    }
+
+    return wanted;
+  }
+
+  private libraryHookType(fn: FunctionDecl): FunctionType | undefined {
+    const current = this.ownerClasses[this.ownerClasses.length - 1];
+    if (current == undefined || current.decl.typeParams.length > 0) {
+      return undefined;
+    }
+
+    const decl = current.decl;
+    const self = this.resolver.classInstance(current.module, decl, []);
+    if (self.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const parent = this.classes.parentOf(self, decl);
+    if (parent == undefined) {
+      return undefined;
+    }
+
+    const entry = this.classMember(parent, fn.name).entry;
+    const theirs = entry?.methods[0];
+    if (entry == undefined || theirs == undefined) {
+      return undefined;
+    }
+    if (!this.isStreamModule(entry.instance.module)) {
+      return undefined;
+    }
+
+    const type = this.methodTypeOf(entry, theirs);
+    if (type.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    return type;
+  }
+
+  private streamHookCheck(
+    method: FunctionDecl,
+    decl: ClassDecl,
+    parent: InstanceType,
+    module: int,
+  ): void {
+    const hook = this.streamHookVariant(method, decl, parent, module);
+    if (hook == undefined) {
+      return;
+    }
+
+    const code = this.hookCode(method.name);
+
+    this.report(module, method.loc, code, { word: method.name, first: hook });
+  }
+
+  private hookCode(name: string): Code {
+    if (kStreamChunkHooks.includes(name)) {
+      return Code.StreamHookOtherChunks;
+    }
+
+    return Code.StreamHookOther;
+  }
+
+  private streamHookVariant(
+    method: FunctionDecl,
+    decl: ClassDecl,
+    parent: InstanceType | undefined,
+    module: int,
+  ): string | undefined {
+    const isHook = kStreamHookNames.includes(method.name);
+    const isTyped = method.params.every((param) => param.type != undefined);
+    if (!isHook || !isTyped || parent == undefined) {
+      return undefined;
+    }
+    if (this.modules.isLibraryModule(module)) {
+      return undefined;
+    }
+
+    const entry = this.classMember(parent, method.name).entry;
+    const theirs = entry?.methods[0];
+    if (entry == undefined || theirs == undefined) {
+      return undefined;
+    }
+    if (!this.isStreamModule(entry.instance.module)) {
+      return undefined;
+    }
+
+    const theirType = this.methodTypeOf(entry, theirs);
+    const ownType = this.ownMethodType(decl, method, module);
+    if (theirType.kind != TypeKind.Function || ownType == undefined) {
+      return undefined;
+    }
+
+    const home = entry.instance.module;
+    const isSame =
+      this.classes.isSameParameters(ownType, theirType) ||
+      this.isLibraryHookPrefix(ownType, theirType, home);
+    if (isSame) {
+      return undefined;
+    }
+
+    return this.classes.variantText(theirs, theirType);
+  }
+}

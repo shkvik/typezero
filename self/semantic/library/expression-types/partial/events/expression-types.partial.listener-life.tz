@@ -1,0 +1,447 @@
+import { Code } from "../../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../../program/ast/types/ast.types.functions.tz";
+import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
+import {
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import { ValueTarget } from "../../../../code/expression-types/types/expression-types.types.tz";
+import {
+  Capture,
+  ListenerForm,
+  ListenerShape,
+} from "../../../event-marks/types/event-marks.types.tz";
+import {
+  kEmitterBaseName,
+  kEmitterName,
+  kNotReceivers,
+  kOffName,
+  kRemoveListenerName,
+  kConstructorWord,
+  kThisEmitter,
+  kThisWord,
+  kTimeoutField,
+} from "../../../event-rules/const/event-rules.const.tz";
+
+partial class ExpressionTypes {
+  private listenerLife(expr: CallExpr, member: MemberExpr, module: int): void {
+    const name = member.name;
+    const listener = expr.args[1]?.expr;
+    const isRemoving = name == kOffName || name == kRemoveListenerName;
+    if (listener == undefined || isRemoving) {
+      return;
+    }
+
+    this.listenerLifeCheck(listener, member.object, false, module);
+  }
+
+  private listenerLifeCheck(
+    listener: Expr,
+    emitter: Expr | undefined,
+    isTimer: boolean,
+    module: int,
+  ): void {
+    if (this.modules.isLibraryModule(module)) {
+      return;
+    }
+
+    const shape = this.listenerShape(listener, module);
+    if (shape.isSelf) {
+      this.noteSelfListener();
+    }
+
+    const isTopLevel =
+      this.openFunctions.length == 0 ||
+      (emitter != undefined && this.isOwningEmitter(emitter, module));
+    if (isTopLevel) {
+      return;
+    }
+
+    switch (shape.form) {
+      case ListenerForm.Captures:
+        return this.capturesReport(listener, shape.captured, isTimer, module);
+      case ListenerForm.Unknown: {
+        const code = this.lifeCode(
+          isTimer,
+          Code.TimerUnknown,
+          Code.ListenerUnknown,
+        );
+
+        return this.report(module, listener.loc, code, kNoDetails);
+      }
+      default:
+        return;
+    }
+  }
+
+  private lifeCode(isTimer: boolean, timer: Code, listener: Code): Code {
+    if (isTimer) {
+      return timer;
+    }
+
+    return listener;
+  }
+
+  private capturesReport(
+    listener: Expr,
+    captured: Capture[],
+    isTimer: boolean,
+    module: int,
+  ): void {
+    for (const one of captured) {
+      if (one.isChanged || !this.canReceive(one.type)) {
+        const code = this.lifeCode(
+          isTimer,
+          Code.TimerKeeps,
+          Code.ListenerKeeps,
+        );
+
+        this.report(module, listener.loc, code, { word: one.name });
+
+        return;
+      }
+    }
+
+    const kept = captured.find((one) => one.isThis) ?? captured[0];
+    if (kept == undefined) {
+      return;
+    }
+
+    const others = captured.filter((one) => one != kept);
+    const code = this.lifeCode(
+      isTimer,
+      Code.TimerCaptures,
+      Code.ListenerCaptures,
+    );
+
+    this.report(module, listener.loc, code, {
+      first: this.namesText(captured),
+      second: this.namesText(others),
+      other: kept.name,
+    });
+  }
+
+  private namesText(captured: Capture[]): string {
+    const quoted = captured.map((one) => `'${one.name}'`);
+    const last = quoted[quoted.length - 1] ?? "";
+    if (quoted.length < 2) {
+      return last;
+    }
+
+    const head = quoted.slice(0, quoted.length - 1).join(", ");
+
+    return `${head} and ${last}`;
+  }
+
+  private listenerShape(listener: Expr, module: int): ListenerShape {
+    if (listener.kind == ExprKind.Function) {
+      return this.listenerClosure(listener.fn, module);
+    }
+    if (listener.kind == ExprKind.Member) {
+      return this.memberShape(listener, module);
+    }
+    if (listener.kind == ExprKind.Name) {
+      const target = this.targetOfName(listener, module);
+      const fn = this.declaredFunction(target);
+      if (fn != undefined) {
+        return this.listenerClosure(fn, module);
+      }
+    }
+
+    return { form: ListenerForm.Unknown, captured: [], isSelf: false };
+  }
+
+  private declaredFunction(
+    target: ValueTarget | undefined,
+  ): FunctionDecl | undefined {
+    if (target == undefined || target.kind != SymbolKind.Function) {
+      return undefined;
+    }
+
+    return this.record(target.module)?.functions.get(target.loc);
+  }
+
+  private memberShape(listener: MemberExpr, module: int): ListenerShape {
+    const object = this.types.definedType(
+      this.peekType(listener.object, module),
+    );
+    const isMethod =
+      object.kind == TypeKind.Instance &&
+      this.isOwnMethod(object, listener.name) &&
+      this.canReceive(object);
+    if (!isMethod) {
+      return { form: ListenerForm.Unknown, captured: [], isSelf: false };
+    }
+
+    const isSelf = this.isThisName(listener.object, module);
+
+    return { form: ListenerForm.Receiver, captured: [], isSelf };
+  }
+
+  private isOwnMethod(instance: InstanceType, name: string): boolean {
+    const entry = this.classMember(instance, name).entry;
+
+    return entry != undefined && entry.field == undefined && !entry.isStatic;
+  }
+
+  private listenerClosure(fn: FunctionDecl, module: int): ListenerShape {
+    const captured = this.capturesOf(fn, module);
+    const only = captured[0];
+    if (only == undefined) {
+      return { form: ListenerForm.Free, captured, isSelf: false };
+    }
+
+    const isSingle =
+      captured.length == 1 &&
+      !fn.isGenerator &&
+      !only.isChanged &&
+      this.canReceive(only.type);
+    if (isSingle) {
+      return { form: ListenerForm.Receiver, captured, isSelf: only.isThis };
+    }
+
+    return { form: ListenerForm.Captures, captured, isSelf: false };
+  }
+
+  private capturesOf(fn: FunctionDecl, module: int): Capture[] {
+    const exprs = this.collector.functionExprs(fn, true);
+    let last = fn.loc;
+
+    for (const expr of exprs) {
+      if (expr.loc > last) {
+        last = expr.loc;
+      }
+    }
+
+    const changed = this.changedNames(exprs, module);
+    const captured: Capture[] = [];
+    const seen = new Set<string>();
+
+    for (const expr of exprs) {
+      if (expr.kind != ExprKind.Name || seen.has(expr.name)) {
+        continue;
+      }
+      if (this.isThisName(expr, module)) {
+        seen.add(expr.name);
+        captured.push(this.thisCapture());
+
+        continue;
+      }
+
+      const target = this.targetOfName(expr, module);
+      const isOutside =
+        target != undefined &&
+        (target.loc < fn.loc || target.loc > last) &&
+        this.isLocalTarget(target, module);
+      if (target == undefined || !isOutside) {
+        continue;
+      }
+
+      seen.add(expr.name);
+      captured.push({
+        name: expr.name,
+        type:
+          this.valueOfName(expr, module) ?? this.store.plain(TypeKind.Error),
+        isChanged: changed.has(target.loc),
+        isThis: false,
+      });
+    }
+
+    return captured;
+  }
+
+  private thisCapture(): Capture {
+    const self = this.selves[this.selves.length - 1];
+
+    return {
+      name: kThisWord,
+      type: self ?? this.store.plain(TypeKind.Error),
+      isChanged: false,
+      isThis: true,
+    };
+  }
+
+  private changedNames(exprs: Expr[], module: int): Set<int> {
+    const changed = new Set<int>();
+
+    for (const expr of exprs) {
+      const target = this.changedTarget(expr);
+      if (target == undefined || target.kind != ExprKind.Name) {
+        continue;
+      }
+
+      const found = this.targetOfName(target, module);
+      if (found != undefined) {
+        changed.add(found.loc);
+      }
+    }
+
+    return changed;
+  }
+
+  private changedTarget(expr: Expr): Expr | undefined {
+    if (expr.kind == ExprKind.Update || expr.kind == ExprKind.Assign) {
+      return expr.target;
+    }
+
+    return undefined;
+  }
+
+  private isLocalTarget(target: ValueTarget, module: int): boolean {
+    const isValue =
+      target.kind == SymbolKind.Variable || target.kind == SymbolKind.Parameter;
+    if (!isValue || target.module != module) {
+      return false;
+    }
+
+    return !this.isModuleVariable(target);
+  }
+
+  private isModuleVariable(target: ValueTarget): boolean {
+    const opened = this.program.modules[target.module];
+    if (opened == undefined) {
+      return false;
+    }
+
+    return opened.file.items.some((item) =>
+      this.statements.isItemDeclaring(item, target.loc),
+    );
+  }
+
+  private canReceive(type: Type): boolean {
+    const base = this.types.definedType(type);
+    if (base.kind == TypeKind.Object) {
+      return true;
+    }
+
+    return base.kind == TypeKind.Instance && !kNotReceivers.includes(base.name);
+  }
+
+  private isOwningEmitter(emitter: Expr, module: int): boolean {
+    if (emitter.kind == ExprKind.New) {
+      return true;
+    }
+    if (emitter.kind != ExprKind.Name || this.isThisName(emitter, module)) {
+      return false;
+    }
+
+    const fn = this.openFunctions[this.openFunctions.length - 1];
+    const target = this.targetOfName(emitter, module);
+    if (fn == undefined || target == undefined) {
+      return false;
+    }
+    if (target.kind != SymbolKind.Variable || target.loc < fn.loc) {
+      return false;
+    }
+
+    return this.isLocalTarget(target, module);
+  }
+
+  private noteSelfListener(): void {
+    const owner = this.ownerClasses[this.ownerClasses.length - 1];
+    const fn = this.currentMethods[this.currentMethods.length - 1];
+    if (owner == undefined || fn == undefined || fn.name != kConstructorWord) {
+      return;
+    }
+
+    this.eventMarks.selfListeners.add(`${owner.module} ${owner.decl.loc}`);
+  }
+
+  private noteDroppedNew(expr: Expr, type: Type, module: int): void {
+    if (expr.kind != ExprKind.New || type.kind != TypeKind.Instance) {
+      return;
+    }
+
+    this.eventMarks.droppedNews.push({ instance: type, loc: expr.loc, module });
+  }
+
+  private droppedNewsCheck(module: int): void {
+    for (const dropped of this.eventMarks.droppedNews) {
+      if (dropped.module != module) {
+        continue;
+      }
+
+      const isListening = this.types
+        .ancestorsOf(dropped.instance)
+        .some(
+          (one) =>
+            one.kind == TypeKind.Instance &&
+            this.eventMarks.selfListeners.has(`${one.module} ${one.loc}`),
+        );
+      if (!isListening) {
+        continue;
+      }
+
+      const word = dropped.instance.name;
+
+      this.report(module, dropped.loc, Code.EmitterDropped, {
+        word,
+        other: word.toLowerCase(),
+      });
+    }
+  }
+
+  private endlessWaitCheck(expr: CallExpr, name: string, module: int): void {
+    const first = expr.args[0]?.expr;
+    if (first == undefined || this.isTimedWait(expr)) {
+      return;
+    }
+
+    const given = this.types.definedType(this.peekType(first, module));
+    if (given.kind != TypeKind.Instance || this.isEndingSource(given)) {
+      return;
+    }
+
+    const isTopLevel =
+      this.openFunctions.length == 0 || this.isOwningEmitter(first, module);
+    if (isTopLevel) {
+      return;
+    }
+
+    const word = this.emitterWord(first);
+
+    this.report(module, first.loc, Code.EventsWaitEndless, {
+      word,
+      first: name,
+    });
+  }
+
+  private isTimedWait(expr: CallExpr): boolean {
+    const options = expr.args[2]?.expr;
+    if (options == undefined || options.kind != ExprKind.ObjectLit) {
+      return false;
+    }
+
+    return options.props.some((prop) => prop.name == kTimeoutField);
+  }
+
+  private isEndingSource(given: InstanceType): boolean {
+    const isPlain = this.types
+      .ancestorsOf(given)
+      .some(
+        (one) =>
+          this.isEventsClass(one, kEmitterName) ||
+          this.isEventsClass(one, kEmitterBaseName),
+      );
+    const isLibrary = this.modules.isLibraryModule(given.module);
+
+    return isLibrary && !this.isEventsClass(given, kEmitterName) && !isPlain;
+  }
+
+  private emitterWord(first: Expr): string {
+    if (first.kind == ExprKind.Name) {
+      return `'${first.name}'`;
+    }
+
+    return kThisEmitter;
+  }
+}

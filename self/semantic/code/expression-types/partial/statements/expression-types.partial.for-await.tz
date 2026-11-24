@@ -111,4 +111,49 @@ partial class ExpressionTypes {
       first: this.text.of(result),
     });
   }
+
+  private awaitLoopItem(given: Type): Type {
+    const base = this.types.definedType(given);
+
+    switch (base.kind) {
+      case TypeKind.Iterator:
+        return this.awaitedItem(base.shape.yielded);
+      case TypeKind.Array:
+        return this.awaitedItem(base.item);
+      case TypeKind.Instance:
+        return this.asyncInstanceItem(base);
+      default:
+        return this.store.plain(TypeKind.Error);
+    }
+  }
+
+  private asyncInstanceItem(instance: InstanceType): Type {
+    const entry = this.classMember(instance, kAsyncIteratorKey).entry;
+    const method = entry?.methods[0];
+    if (entry == undefined || method == undefined) {
+      const item = this.instanceItem(instance);
+
+      return this.awaitedItem(item ?? this.store.plain(TypeKind.Error));
+    }
+
+    const type = this.methodTypeOf(entry, method);
+    if (type.kind != TypeKind.Function) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    const result = type.shape.result;
+    if (result.kind != TypeKind.Iterator) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return result.shape.yielded;
+  }
+
+  private awaitedItem(item: Type): Type {
+    if (item.kind == TypeKind.Promise) {
+      return item.value;
+    }
+
+    return item;
+  }
 }

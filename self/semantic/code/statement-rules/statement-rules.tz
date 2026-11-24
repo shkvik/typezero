@@ -341,6 +341,14 @@ export class StatementRules {
     return "x - y";
   }
 
+  public isItemDeclaring(item: Stmt, loc: int): boolean {
+    if (item.kind != StmtKind.VarDecl) {
+      return false;
+    }
+
+    return item.decls.some((decl) => decl.loc == loc);
+  }
+
   private caseShown(type: Type, subject: Type): Type {
     const parts = this.types.unionMembers(subject);
     const hasLiterals = parts.some((part) => part.kind == TypeKind.Literal);

@@ -6,6 +6,7 @@ import {
   TypePlace,
 } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 import {
+  Access,
   ClassDecl,
   MethodKind,
 } from "../../../../../program/ast/types/ast.types.classes.tz";
@@ -13,6 +14,7 @@ import {
   CallExpr,
   Expr,
   ExprKind,
+  MemberExpr,
   NameExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../../../program/ast/types/ast.types.functions.tz";
@@ -27,6 +29,7 @@ import {
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
 import {
+  CallTarget,
   ClassMemberEntry,
   SuperFrame,
   ThisPlace,
@@ -122,8 +125,55 @@ partial class ExpressionTypes {
 
     frame.isBefore = false;
     this.superFieldsSet();
+    this.superArgumentsCheck(expr, module);
 
     return nothing;
+  }
+
+  private superArgumentsCheck(expr: CallExpr, module: int): void {
+    const target = this.parentConstructor(expr.loc);
+    if (target == undefined) {
+      for (const arg of expr.args) {
+        this.listenerLoose(arg.expr, module);
+      }
+
+      return;
+    }
+
+    this.argumentsCheck(expr.args, target, module);
+  }
+
+  private parentConstructor(loc: int): CallTarget | undefined {
+    const owner = this.ownerClasses[this.ownerClasses.length - 1];
+    if (owner == undefined) {
+      return undefined;
+    }
+
+    const decl = owner.decl;
+    const params = this.resolver.parameterTypes(owner.module, decl.typeParams);
+    const self = this.resolver.classInstance(owner.module, decl, params);
+    if (self.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const parent = this.classes.parentOf(self, decl);
+    const parentDecl = this.parentDeclOf(parent);
+    if (parent == undefined || parentDecl == undefined) {
+      return undefined;
+    }
+
+    const maker = this.makerOf(parent, parentDecl);
+    if (maker == undefined) {
+      return undefined;
+    }
+
+    const constructors = this.visibleConstructors(maker.owner);
+    const chosen = constructors[0];
+    if (chosen == undefined || constructors.length > 1) {
+      return undefined;
+    }
+
+    return this.constructorTarget(maker, chosen, loc);
   }
 
   private thisBeforeSuper(expr: NameExpr, module: int): void {
@@ -216,7 +266,11 @@ partial class ExpressionTypes {
     if (theirType.kind != TypeKind.Function || ownType == undefined) {
       return;
     }
-    if (!this.classes.isSameParameters(ownType, theirType)) {
+    const isSame =
+      this.classes.isSameParameters(ownType, theirType) ||
+      this.isLibraryHookPrefix(ownType, theirType, entry.instance.module);
+    if (!isSame) {
+      this.streamHookCheck(method, decl, parent, module);
       if (isMarked) {
         const other = this.classes.variantText(theirs, theirType);
 
@@ -342,5 +396,75 @@ partial class ExpressionTypes {
     }
 
     return entry;
+  }
+
+  private isLibraryHookPrefix(own: Type, theirs: Type, home: int): boolean {
+    const isFunctions =
+      own.kind == TypeKind.Function && theirs.kind == TypeKind.Function;
+    if (!isFunctions || !this.modules.isTypedLibrary(home)) {
+      return false;
+    }
+    if (own.kind != TypeKind.Function || theirs.kind != TypeKind.Function) {
+      return false;
+    }
+
+    const mine = own.shape.params;
+    const wider = theirs.shape.params;
+
+    return (
+      mine.length < wider.length &&
+      mine.every((param, index) => param.type == wider[index]?.type)
+    );
+  }
+
+  private protectedElsewhere(
+    owner: ClassDecl,
+    access: Access,
+    expr: MemberExpr,
+    module: int,
+  ): boolean {
+    const current = this.ownerClasses[this.ownerClasses.length - 1];
+    const isOwnInside = this.isInsideClass(owner);
+    if (access != Access.Protected || current == undefined || isOwnInside) {
+      return false;
+    }
+    if (!this.isDerivedInside(owner)) {
+      return false;
+    }
+
+    const object = expr.object;
+    const isSelf =
+      this.isThisName(object, module) || this.isSuperName(object, module);
+    if (isSelf) {
+      return false;
+    }
+
+    const given = this.types.definedType(this.peekType(object, module));
+    if (given.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    const ownLoc = current.decl.loc;
+    const ownModule = current.module;
+    const isOwn = this.types
+      .ancestorsOf(given)
+      .some(
+        (one) =>
+          one.kind == TypeKind.Instance &&
+          one.loc == ownLoc &&
+          one.module == ownModule,
+      );
+    if (isOwn) {
+      return false;
+    }
+
+    this.report(module, expr.loc, Code.ProtectedElsewhere, {
+      word: expr.name,
+      first: owner.name ?? "",
+      second: current.decl.name ?? "",
+      other: given.name,
+    });
+
+    return true;
   }
 }

@@ -1,0 +1,277 @@
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  CallArgument,
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
+import { SourceLines } from "../../../../../program/source-lines/source-lines.tz";
+import {
+  InstanceType,
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import { kNoPlace } from "../../../../code/expression-types/const/expression-types.const.tz";
+import { FirstEmit } from "../../../event-marks/types/event-marks.types.tz";
+import {
+  kEmitName,
+  kEmitterName,
+  kListenerQueries,
+} from "../../../event-rules/const/event-rules.const.tz";
+
+partial class ExpressionTypes {
+  private inferredCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type {
+    const isEmitting = member.name == kEmitName;
+    const name = expr.args[0]?.expr;
+    const rest = expr.args.slice(1);
+    if (name == undefined) {
+      return this.inferredResult(member, instance);
+    }
+
+    const text = this.store.plain(TypeKind.String);
+
+    this.checked(name, text, module, kNoPlace);
+
+    const event = this.constantKey(name, module);
+    if (event == undefined) {
+      if (isEmitting) {
+        this.report(module, name.loc, Code.EventNameUnknown, {
+          word: member.name,
+        });
+      }
+
+      this.inferredLoose(rest, module);
+
+      return this.inferredResult(member, instance);
+    }
+
+    const key = this.inferredKey(member.object, instance, module);
+    if (isEmitting) {
+      this.inferredEmit(rest, name, event, key, module);
+    } else {
+      this.inferredListen(name, event, key, module);
+      this.inferredListener(expr, instance, event, key, module);
+    }
+
+    return this.inferredResult(member, instance);
+  }
+
+  private inferredListener(
+    expr: CallExpr,
+    instance: InstanceType,
+    event: string,
+    key: string | undefined,
+    module: int,
+  ): void {
+    const rest = expr.args.slice(1);
+    const first = this.eventMarks.firstEmits.get(`${key} ${event}`);
+    if (key == undefined || first == undefined) {
+      return this.inferredLoose(rest, module);
+    }
+
+    const args = this.store.tupleOf({
+      items: first.args,
+      readonly: false,
+      required: first.args.length,
+      rest: -1,
+    });
+
+    this.listenerChecked(expr, instance, args, module);
+  }
+
+  private inferredLoose(args: CallArgument[], module: int): void {
+    for (const arg of args) {
+      this.listenerLoose(arg.expr, module);
+    }
+  }
+
+  private inferredResult(member: MemberExpr, instance: InstanceType): Type {
+    if (member.name == kEmitName) {
+      return this.store.plain(TypeKind.Boolean);
+    }
+    if (kListenerQueries.includes(member.name)) {
+      return this.listenersOf(undefined);
+    }
+
+    return instance;
+  }
+
+  private inferredKey(
+    object: Expr,
+    instance: InstanceType,
+    module: int,
+  ): string | undefined {
+    if (!this.isEventsClass(instance, kEmitterName)) {
+      return `class ${instance.module} ${instance.loc}`;
+    }
+    if (object.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const target = this.targetOfName(object, module);
+    if (target == undefined || target.kind != SymbolKind.Variable) {
+      return undefined;
+    }
+
+    return `${target.module} ${target.loc}`;
+  }
+
+  private inferredListen(
+    name: Expr,
+    event: string,
+    key: string | undefined,
+    module: int,
+  ): void {
+    if (key == undefined) {
+      return;
+    }
+
+    this.eventMarks.listens.push({ key, event, loc: name.loc, module });
+  }
+
+  private inferredEmit(
+    rest: CallArgument[],
+    name: Expr,
+    event: string,
+    key: string | undefined,
+    module: int,
+  ): void {
+    const given = rest.map((arg) => this.emittedType(arg.expr, module));
+    if (key == undefined) {
+      this.eventMarks.looseEmitModules.add(module);
+
+      return;
+    }
+
+    const names = this.eventMarks.emittedNames.get(key) ?? [];
+    if (!names.includes(event)) {
+      names.push(event);
+    }
+
+    this.eventMarks.emittedNames.set(key, names);
+
+    const slot = `${key} ${event}`;
+    const first = this.eventMarks.firstEmits.get(slot);
+    if (first == undefined) {
+      const place = this.placeText(module, name.loc);
+
+      this.eventMarks.firstEmits.set(slot, { args: given, place });
+
+      return;
+    }
+
+    this.emittedAgainCheck(rest, name, event, given, first, module);
+  }
+
+  private emittedType(value: Expr, module: int): Type {
+    const type = this.typed(value, undefined, module);
+
+    return this.relation.baseOf(type) ?? type;
+  }
+
+  private emittedAgainCheck(
+    rest: CallArgument[],
+    name: Expr,
+    event: string,
+    given: Type[],
+    first: FirstEmit,
+    module: int,
+  ): void {
+    const shown = this.emittedText(first.args);
+    if (given.length != first.args.length) {
+      const count = given.length;
+      const other = `${count} argument${this.countMark(count)}`;
+
+      this.report(module, name.loc, Code.EventEmittedCount, {
+        word: event,
+        first: shown,
+        second: first.place,
+        other,
+      });
+
+      return;
+    }
+
+    for (let index = 0; index < given.length; index++) {
+      const now = given[index];
+      const before = first.args[index];
+      const arg = rest[index];
+      if (now == undefined || before == undefined || arg == undefined) {
+        continue;
+      }
+      if (now.kind == TypeKind.Error || this.relation.converts(now, before)) {
+        continue;
+      }
+
+      this.report(module, arg.expr.loc, Code.EventEmittedType, {
+        word: event,
+        first: shown,
+        second: first.place,
+        other: this.text.of(now),
+      });
+
+      return;
+    }
+  }
+
+  private emittedText(args: Type[]): string {
+    const parts = args.map((one) => this.text.of(one));
+
+    return `[${parts.join(", ")}]`;
+  }
+
+  private countMark(count: int): string {
+    if (count == 1) {
+      return "";
+    }
+
+    return "s";
+  }
+
+  private placeText(module: int, loc: int): string {
+    const opened = this.program.modules[module];
+    if (opened == undefined) {
+      return "";
+    }
+
+    const lines = new SourceLines(opened.source.text);
+    const place = lines.placeOf(loc);
+    const path = opened.source.path.replaceAll("\\", "/");
+    const file = path.slice(path.lastIndexOf("/") + 1);
+
+    return `${file}:${place.line}:${place.column}`;
+  }
+
+  private unemittedListensCheck(module: int): void {
+    if (this.eventMarks.looseEmitModules.size > 0) {
+      return;
+    }
+
+    for (const listen of this.eventMarks.listens) {
+      if (listen.module != module) {
+        continue;
+      }
+
+      const names = this.eventMarks.emittedNames.get(listen.key) ?? [];
+      if (names.includes(listen.event)) {
+        continue;
+      }
+
+      const error = this.events.notEmittedError(
+        listen.loc,
+        names,
+        listen.event,
+      );
+
+      this.reportFound(module, error);
+    }
+  }
+}

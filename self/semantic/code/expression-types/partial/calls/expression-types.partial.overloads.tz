@@ -18,10 +18,7 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import {
-  kNoPlace,
-  kParentDepth,
-} from "../../const/expression-types.const.tz";
+import { kNoPlace, kParentDepth } from "../../const/expression-types.const.tz";
 import {
   CallKind,
   CallTarget,
@@ -136,7 +133,9 @@ partial class ExpressionTypes {
     const ranked = this.rankedVariants(entry);
     const isGeneric = entry.methods.some((fn) => fn.typeParams.length > 0);
     if (ranked.length == 0 || isGeneric) {
-      this.looseArguments(expr.args, module);
+      for (const arg of expr.args) {
+        this.listenerLoose(arg.expr, module);
+      }
 
       return error;
     }

@@ -14,6 +14,9 @@ import { kWideBits } from "../type-relation/const/type-relation.const.tz";
 import { TypeRelation } from "../type-relation/type-relation.tz";
 import {
   kConversionPrefix,
+  kUnsaidExample,
+  kUnsaidMiddle,
+  kUnsaidSample,
   kWiderEnd,
   kWiderMiddle,
   kWiderStart,
@@ -53,6 +56,13 @@ export class MismatchRules {
     const widened = this.widenedDetail(source, target);
     if (widened != "") {
       const place = texts.place + widened;
+
+      return { code: Code.NotAssignable, details: { first, second, place } };
+    }
+
+    const unsaid = this.unsaidDetail(source, target);
+    if (unsaid != "") {
+      const place = texts.place + unsaid;
 
       return { code: Code.NotAssignable, details: { first, second, place } };
     }
@@ -543,6 +553,47 @@ export class MismatchRules {
 
   private isNumberKind(type: Type): boolean {
     return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
+  }
+
+  private unsaidDetail(source: Type, target: Type): string {
+    if (source.kind != TypeKind.Instance || target.kind != TypeKind.Instance) {
+      return "";
+    }
+    if (source.module != target.module || source.loc != target.loc) {
+      return "";
+    }
+
+    for (let index = 0; index < target.args.length; index++) {
+      const own = source.args[index];
+      const wide = target.args[index];
+      if (own != undefined && wide != undefined) {
+        if (this.relation.isUnsaid(own, wide)) {
+          return this.unsaidText(own, wide);
+        }
+      }
+    }
+
+    return "";
+  }
+
+  private unsaidText(own: Type, wide: Type): string {
+    const ownName = this.text.of(own);
+    const wideName = this.text.of(wide);
+    const isNamed = !ownName.startsWith("{") && own.kind != TypeKind.Union;
+    const example = this.unsaidExample(isNamed, ownName);
+
+    const head = `; '${ownName}'${kUnsaidMiddle}'${wideName}'`;
+    const tail = `${kUnsaidExample}${example} extends ${wideName} { ... }'`;
+
+    return head + tail;
+  }
+
+  private unsaidExample(isNamed: boolean, name: string): string {
+    if (isNamed) {
+      return name;
+    }
+
+    return kUnsaidSample;
   }
 
   private widenedDetail(source: Type, target: Type): string {

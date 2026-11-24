@@ -133,7 +133,12 @@ partial class ExpressionTypes {
 
     const owner = this.staticOwner(member.object, module);
     if (owner != undefined) {
-      return this.staticCall(expr, member, owner, module);
+      const fromStream = this.streamFromCall(expr, member, owner, module);
+      const fromEvents = this.emitterStaticCall(expr, member, owner, module);
+
+      return (
+        fromStream ?? fromEvents ?? this.staticCall(expr, member, owner, module)
+      );
     }
 
     const fact = this.pathFact(member, module);
@@ -258,6 +263,16 @@ partial class ExpressionTypes {
     const emitted = this.emitterCall(expr, member, instance, module);
     if (emitted != undefined) {
       return emitted;
+    }
+
+    const targeted = this.targetCall(expr, member, instance, module);
+    if (targeted != undefined) {
+      return targeted;
+    }
+
+    const streamed = this.streamCall(expr, member, instance, module);
+    if (streamed != undefined) {
+      return streamed;
     }
     if (!this.isDeclaredLibrary(instance.module, instance.loc)) {
       const called = this.methodCall(expr, member, instance, wanted, module);

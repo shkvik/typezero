@@ -5,7 +5,13 @@ import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import {
   CandidateStrength,
   GenericDraft,
+  InferenceSet,
 } from "../../../code/expression-types/types/expression-types.types.tz";
+import {
+  Expr,
+  ExprKind,
+  PropertyKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
 
 partial class ExpressionTypes {
   private settleStrong(draft: GenericDraft, module: int): void {
@@ -278,5 +284,35 @@ partial class ExpressionTypes {
     }
 
     return fallback;
+  }
+
+  private inferObjectFields(
+    set: InferenceSet,
+    pattern: Type,
+    expr: Expr,
+    module: int,
+  ): void {
+    const wanted = this.types.definedType(pattern);
+    if (expr.kind != ExprKind.ObjectLit || wanted.kind != TypeKind.Object) {
+      return;
+    }
+
+    for (const prop of expr.props) {
+      const field = wanted.fields.find((one) => one.name == prop.name);
+      const value = prop.value;
+      const isPlain =
+        prop.form.kind == PropertyKind.Value &&
+        value.kind != ExprKind.Function &&
+        this.literalShapeOf(value) == undefined &&
+        !this.isContextual(value, module);
+      if (field == undefined || !isPlain) {
+        continue;
+      }
+
+      const given = this.peekType(value, module);
+      const strength = CandidateStrength.Strong;
+
+      this.inferArgument(set, field.type, given, strength, false);
+    }
   }
 }

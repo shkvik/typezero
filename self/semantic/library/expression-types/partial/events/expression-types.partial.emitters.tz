@@ -7,17 +7,16 @@ import {
   ExprKind,
   FunctionExpr,
   MemberExpr,
-  NameExpr,
   NewExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import {
+  FunctionParameter,
   InstanceType,
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
 import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
 import { kNoPlace } from "../../../../code/expression-types/const/expression-types.const.tz";
-import { ValueTarget } from "../../../../code/expression-types/types/expression-types.types.tz";
 import {
   kEmitName,
   kListenerQueries,
@@ -25,14 +24,18 @@ import {
   kEmitterName,
   kEventsModule,
   kThisParam,
-  kEventsFunctions,
   kEventTargetName,
-  kOnName,
-  kOrEventTarget,
   kWebModule,
+  kEventName,
+  kTargetListenerMethods,
+  kDataEvent,
+  kStreamEmitterName,
+  kStreamModule,
+  kErrorEvent,
+  kOffName,
+  kRemoveListenerName,
 } from "../../../event-rules/const/event-rules.const.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
-import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
 
 partial class ExpressionTypes {
   private emitterMapCheck(expr: NewExpr, made: Type, module: int): void {
@@ -65,9 +68,27 @@ partial class ExpressionTypes {
     if (member.typeArgs.length > 0) {
       this.report(module, member.loc, Code.EmitTypeArgs, { word: member.name });
     }
+    if (isListening) {
+      this.listenerLife(expr, member, module);
+      this.noteErrorPending(expr, member, instance, module);
+    }
 
     const events = this.eventMapOf(instance);
-    const args = this.eventArgsOf(expr, member, events, module);
+    if (events == undefined) {
+      this.noteErrorEvent(expr, member, isEmitting, module);
+
+      return this.inferredCall(expr, member, instance, module);
+    }
+
+    const args = this.encodedArgs(
+      expr,
+      member,
+      this.eventArgsOf(expr, member, events, module),
+      module,
+    );
+
+    this.noteErrorEvent(expr, member, isEmitting, module);
+    this.noteStreamListened(member, isListening, module);
     if (isEmitting) {
       return this.emitChecked(expr, args, module);
     }
@@ -150,6 +171,12 @@ partial class ExpressionTypes {
     const isFitting =
       given.length >= args.required &&
       (args.rest >= 0 || given.length <= args.items.length);
+    if (!isFitting && args.items.length == 1 && given.length > 1) {
+      this.report(module, expr.loc, Code.EmitOneValue, { word: event });
+      this.looseArguments(given, module);
+
+      return boolean;
+    }
     if (!isFitting) {
       const most = args.items.length;
       const wanted = this.calls.argumentCountText(args.required, most, false);
@@ -378,7 +405,18 @@ partial class ExpressionTypes {
   private isPlainEmitter(type: Type): boolean {
     return this.types
       .ancestorsOf(type)
-      .some((one) => this.isEventsClass(one, kEmitterName));
+      .some(
+        (one) =>
+          this.isEventsClass(one, kEmitterName) || this.isStreamEmitter(one),
+      );
+  }
+
+  private isStreamEmitter(type: Type): boolean {
+    if (type.kind != TypeKind.Instance || type.name != kStreamEmitterName) {
+      return false;
+    }
+
+    return this.program.modules[type.module]?.name == kStreamModule;
   }
 
   private isEmitter(type: Type): boolean {
@@ -390,7 +428,8 @@ partial class ExpressionTypes {
   private eventMapOf(type: Type): Type | undefined {
     for (const one of this.types.ancestorsOf(type)) {
       const isMap =
-        one.kind == TypeKind.Instance && this.isEventsClass(one, kEmitterName);
+        one.kind == TypeKind.Instance &&
+        (this.isEventsClass(one, kEmitterName) || this.isStreamEmitter(one));
       if (isMap && one.kind == TypeKind.Instance) {
         return this.knownMap(one.args[0]);
       }
@@ -415,58 +454,32 @@ partial class ExpressionTypes {
     return this.program.modules[type.module]?.name == kEventsModule;
   }
 
-  private eventsFunctionCall(
+  private encodedArgs(
     expr: CallExpr,
-    callee: NameExpr,
-    target: ValueTarget,
+    member: MemberExpr,
+    args: Type | undefined,
     module: int,
   ): Type | undefined {
-    const isFunction =
-      target.kind == SymbolKind.Function &&
-      this.program.modules[target.module]?.name == kEventsModule &&
-      kEventsFunctions.includes(callee.name);
-    const first = expr.args[0]?.expr;
-    if (!isFunction || first == undefined) {
-      return undefined;
-    }
-    if (this.modules.isLibraryModule(module)) {
-      return undefined;
-    }
-
-    const given = this.peekType(first, module);
-    const base = this.types.definedType(given);
-    const isTarget = this.isWebClass(base, kEventTargetName);
-    const isUnknownClass = base.kind == TypeKind.Instance && !isTarget;
-    if (base.kind == TypeKind.Error || isUnknownClass) {
-      return undefined;
-    }
-    if (isTarget && callee.name != kOnName) {
-      return undefined;
-    }
-    if (isTarget) {
-      this.report(module, callee.loc, Code.EventsTargetOn, kNoDetails);
-    } else {
-      const other = this.targetHint(callee.name);
-      const shown = this.text.of(given);
-
-      this.report(module, first.loc, Code.EventsNotEmitter, {
-        word: callee.name,
-        other,
-        first: shown,
-      });
+    const name = expr.args[0]?.expr;
+    const key = this.emitterKey(member.object, module);
+    const isData =
+      name != undefined && this.constantKey(name, module) == kDataEvent;
+    if (
+      !isData ||
+      key == undefined ||
+      !this.eventMarks.encodedStreams.has(key)
+    ) {
+      return args;
     }
 
-    this.looseArguments(expr.args, module);
+    const text = this.store.plain(TypeKind.String);
 
-    return this.store.plain(TypeKind.Error);
-  }
-
-  private targetHint(name: string): string {
-    if (name == kOnName) {
-      return "";
-    }
-
-    return kOrEventTarget;
+    return this.store.tupleOf({
+      items: [text],
+      readonly: false,
+      required: 1,
+      rest: -1,
+    });
   }
 
   private isWebClass(type: Type, name: string): boolean {
@@ -475,5 +488,142 @@ partial class ExpressionTypes {
     }
 
     return this.program.modules[type.module]?.name == kWebModule;
+  }
+
+  private targetCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): Type | undefined {
+    const isListening = kTargetListenerMethods.includes(member.name);
+    const isTarget = this.types
+      .ancestorsOf(instance)
+      .some((one) => this.isWebClass(one, kEventTargetName));
+    if (!isListening || !isTarget) {
+      return undefined;
+    }
+
+    const name = expr.args[0]?.expr;
+    const listener = expr.args[1]?.expr;
+    const text = this.store.plain(TypeKind.String);
+
+    if (name != undefined) {
+      this.checked(name, text, module, kNoPlace);
+    }
+    if (listener != undefined) {
+      this.targetListenerCheck(listener, instance.module, module);
+    }
+
+    this.looseArguments(expr.args.slice(2), module);
+
+    return this.store.plain(TypeKind.Undefined);
+  }
+
+  private targetListenerCheck(listener: Expr, home: int, module: int): void {
+    const event = this.webEventType(home);
+    if (event == undefined) {
+      this.typed(listener, undefined, module);
+
+      return;
+    }
+
+    const isWritten =
+      listener.kind == ExprKind.Function &&
+      listener.fn.params.some((param) => param.type != undefined);
+    if (listener.kind == ExprKind.Function && !isWritten) {
+      const result = this.listenerResult(listener.fn.isAsync);
+      const params: FunctionParameter[] = listener.fn.params.map(() => ({
+        type: event,
+        optional: false,
+      }));
+      const wanted = this.store.functionOf({ params, rest: false, result });
+
+      this.typed(listener, wanted, module);
+
+      return;
+    }
+
+    const given = this.typed(listener, undefined, module);
+    if (given.kind != TypeKind.Function) {
+      return;
+    }
+
+    const first = given.shape.params[0]?.type;
+    if (first == undefined || this.isEventKind(first, event)) {
+      return;
+    }
+
+    this.report(module, listener.loc, Code.TargetListenerEvent, {
+      first: this.text.of(first),
+    });
+  }
+
+  private isEventKind(type: Type, event: Type): boolean {
+    if (type.kind == TypeKind.Error) {
+      return true;
+    }
+
+    return this.types.ancestorsOf(type).some((one) => one == event);
+  }
+
+  private webEventType(home: int): Type | undefined {
+    const classes = this.record(home)?.classes;
+    if (classes == undefined) {
+      return undefined;
+    }
+
+    for (const decl of classes.values()) {
+      if (decl.name == kEventName) {
+        return this.resolver.classInstance(home, decl, []);
+      }
+    }
+
+    return undefined;
+  }
+
+  private noteErrorEvent(
+    expr: CallExpr,
+    member: MemberExpr,
+    isEmitting: boolean,
+    module: int,
+  ): void {
+    const name = expr.args[0]?.expr;
+    const isError =
+      name != undefined && this.constantKey(name, module) == kErrorEvent;
+    const key = this.emitterKey(member.object, module);
+    if (!isError || key == undefined) {
+      return;
+    }
+    if (isEmitting) {
+      this.eventMarks.errorEmits.push({ key, loc: member.loc, module });
+
+      return;
+    }
+    if (member.name != kOffName && member.name != kRemoveListenerName) {
+      this.eventMarks.errorListened.add(key);
+    }
+  }
+
+  private emitterKey(object: Expr, module: int): string | undefined {
+    if (object.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const target = this.targetOfName(object, module);
+    if (target == undefined) {
+      return undefined;
+    }
+
+    return `${target.module} ${target.loc}`;
+  }
+
+  private unheardErrorsCheck(module: int): void {
+    for (const emit of this.eventMarks.errorEmits) {
+      const isHeard = this.eventMarks.errorListened.has(emit.key);
+      if (emit.module == module && !isHeard) {
+        this.report(module, emit.loc, Code.EventErrorUnheard, kNoDetails);
+      }
+    }
   }
 }

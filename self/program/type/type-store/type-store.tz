@@ -13,6 +13,7 @@ import {
   Type,
   TypeKind,
 } from "../types/type.types.tz";
+import { kParentDepthLimit } from "./const/type-store.const.tz";
 
 export class TypeStore {
   private readonly plains: Map<TypeKind, Type>;
@@ -478,7 +479,11 @@ export class TypeStore {
 
         continue;
       }
-      if (part.kind != TypeKind.Never) {
+      const isKept =
+        part.kind != TypeKind.Never &&
+        !this.isUninhabited(part) &&
+        !this.isAbsorbed(part, flat);
+      if (isKept) {
         ordered.push(part);
       }
     }
@@ -488,6 +493,33 @@ export class TypeStore {
     }
 
     return ordered;
+  }
+
+  private isAbsorbed(part: Type, flat: Type[]): boolean {
+    let current = this.parentsOf(part);
+
+    for (let depth = 0; depth < kParentDepthLimit; depth++) {
+      if (current.length == 0) {
+        return false;
+      }
+      if (current.some((parent) => flat.includes(parent))) {
+        return true;
+      }
+
+      current = current.flatMap((parent) => this.parentsOf(parent));
+    }
+
+    return false;
+  }
+
+  private isUninhabited(part: Type): boolean {
+    if (part.kind != TypeKind.Object) {
+      return false;
+    }
+
+    return part.fields.some(
+      (field) => !field.optional && field.type.kind == TypeKind.Never,
+    );
   }
 
   private compareNames(first: ObjectField, second: ObjectField): int {

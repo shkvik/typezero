@@ -4,4 +4,6 @@ export const kTypedLibraries = [
   "tz:http",
   "tz:sync",
   "node:events",
+  "tz:web",
+  "node:stream",
 ];

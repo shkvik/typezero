@@ -69,9 +69,13 @@ partial class ExpressionTypes {
     }
 
     const done = new Set<string>();
+    const parent = this.classes.parentOf(instance, decl);
 
     for (const method of decl.methods) {
-      done.add(method.name);
+      const hook = this.streamHookVariant(method, decl, parent, module);
+      if (hook == undefined) {
+        done.add(method.name);
+      }
     }
 
     const seen = new Set<ClassDecl>();

@@ -1,0 +1,119 @@
+import { Code } from "../../../../../diagnostic/code.tz";
+import {
+  CallExpr,
+  ExprKind,
+  MemberExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../../program/ast/types/ast.types.functions.tz";
+import {
+  Stmt,
+  StmtKind,
+} from "../../../../../program/ast/types/ast.types.statements.tz";
+import {
+  InstanceType,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import {
+  kErrorEvent,
+  kOffName,
+  kRemoveListenerName,
+} from "../../../event-rules/const/event-rules.const.tz";
+
+partial class ExpressionTypes {
+  private noteErrorPending(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: InstanceType,
+    module: int,
+  ): void {
+    const fn = this.openFunctions[this.openFunctions.length - 1];
+    const name = expr.args[0]?.expr;
+    const object = member.object;
+    const isRemoving =
+      member.name == kOffName || member.name == kRemoveListenerName;
+    if (fn == undefined || name == undefined || isRemoving) {
+      return;
+    }
+    if (object.kind != ExprKind.Name || !this.mayEmitError(instance)) {
+      return;
+    }
+
+    const event = this.constantKey(name, module);
+    const key = this.emitterKey(object, module);
+    if (event == undefined || event == kErrorEvent || key == undefined) {
+      return;
+    }
+
+    this.eventMarks.errorPending.push({
+      fn,
+      key,
+      name: object.name,
+      loc: member.loc,
+    });
+  }
+
+  private mayEmitError(instance: InstanceType): boolean {
+    const events = this.eventMapOf(instance);
+    if (events == undefined || events.kind != TypeKind.Object) {
+      return false;
+    }
+
+    return events.fields.some((field) => field.name == kErrorEvent);
+  }
+
+  private errorPathsCheck(fn: FunctionDecl, module: int): void {
+    const pending = this.eventMarks.errorPending.filter((one) => one.fn == fn);
+    const reported = new Set<string>();
+
+    for (const one of pending) {
+      const isHeard = this.isErrorHeardAlways(fn, one.key, module);
+      if (isHeard || reported.has(one.key)) {
+        continue;
+      }
+
+      reported.add(one.key);
+      this.report(module, one.loc, Code.EventErrorPaths, {
+        word: `'${one.name}'`,
+        first: one.name,
+      });
+    }
+  }
+
+  private isErrorHeardAlways(
+    fn: FunctionDecl,
+    key: string,
+    module: int,
+  ): boolean {
+    const body = fn.body?.body ?? [];
+
+    return body.some((statement) =>
+      this.isErrorListening(statement, key, module),
+    );
+  }
+
+  private isErrorListening(statement: Stmt, key: string, module: int): boolean {
+    if (statement.kind != StmtKind.Expr) {
+      return false;
+    }
+
+    const call = statement.expr;
+    if (call.kind != ExprKind.Call || call.callee.kind != ExprKind.Member) {
+      return false;
+    }
+
+    const member = call.callee;
+    const name = call.args[0]?.expr;
+    const isListening =
+      this.events.isListenerMethod(member.name) &&
+      member.name != kOffName &&
+      member.name != kRemoveListenerName;
+    if (!isListening || name == undefined) {
+      return false;
+    }
+
+    const isError = this.constantKey(name, module) == kErrorEvent;
+
+    return isError && this.emitterKey(member.object, module) == key;
+  }
+}
