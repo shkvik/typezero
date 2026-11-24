@@ -40,6 +40,13 @@ export class IntervalMath {
     };
   }
 
+  public meet(first: ValueRange, second: ValueRange): ValueRange {
+    return {
+      lo: this.most(first.lo, second.lo) ?? first.lo ?? second.lo,
+      hi: this.least(first.hi, second.hi) ?? first.hi ?? second.hi,
+    };
+  }
+
   public negated(range: ValueRange): ValueRange {
     return this.arithmetic(BinaryOp.Sub, this.exact(0), range);
   }

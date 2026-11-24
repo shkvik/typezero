@@ -139,6 +139,7 @@ partial class ExpressionTypes {
         this.loopVariableCheck(statement, module);
         this.localDoor(module, statement.binding.loc);
         this.forgetLooped(statement, module);
+        this.rememberLoopElement(statement, module);
 
         const before = this.facts;
 
@@ -328,6 +329,11 @@ partial class ExpressionTypes {
     );
 
     this.reportFound(module, resumedError);
+
+    const matched = this.matchItem(base);
+    if (matched != undefined) {
+      return matched;
+    }
 
     switch (base.kind) {
       case TypeKind.Tuple:

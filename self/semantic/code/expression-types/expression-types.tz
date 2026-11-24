@@ -91,10 +91,12 @@ import "../../library/expression-types/partial/expression-types.partial.json-tes
 import "../../library/expression-types/partial/crypto/expression-types.partial.crypto-signs.tz";
 import "../../library/expression-types/partial/dispatch/expression-types.partial.node-values.tz";
 import "../../library/expression-types/partial/expression-types.partial.promise-lists.tz";
+import "../../library/expression-types/partial/expression-types.partial.promise-statics.tz";
 import "../../library/expression-types/partial/expression-types.partial.embeds.tz";
 import "./partial/statements/expression-types.partial.for-await.tz";
 import "../../library/expression-types/partial/expression-types.partial.reflect-calls.tz";
 import "../../library/expression-types/partial/expression-types.partial.reflected-news.tz";
+import "../../library/expression-types/partial/regex/expression-types.partial.matches.tz";
 import "../../library/expression-types/partial/expression-types.partial.console-calls.tz";
 import "./partial/statements/expression-types.partial.statement-values.tz";
 import "./partial/calls/expression-types.partial.construction.tz";
@@ -113,6 +115,7 @@ import "./partial/classes/expression-types.partial.class-heritage.tz";
 import "./partial/classes/expression-types.partial.class-contracts.tz";
 import "./partial/indexing/expression-types.partial.indexes.tz";
 import "../../flow/expression-types/partial/expression-types.partial.bounds.tz";
+import "../../flow/expression-types/partial/expression-types.partial.lengths.tz";
 import "./partial/functions/expression-types.partial.awaits.tz";
 import "../../library/expression-types/partial/expression-types.partial.promises.tz";
 import "./partial/classes/expression-types.partial.class-init.tz";
@@ -206,6 +209,7 @@ import { AssignmentRules } from "../assignment-rules/assignment-rules.tz";
 import { DestinationRules } from "../../inference/destination-rules/destination-rules.tz";
 import { ProofRules } from "../../flow/proof-rules/proof-rules.tz";
 import { IntervalMath } from "../../flow/interval-math/interval-math.tz";
+import { ValueRange } from "../../flow/interval-math/types/interval-math.types.tz";
 import { BytesRules } from "../../library/bytes-rules/bytes-rules.tz";
 import { EmbeddedFiles } from "../../../load/embedded-files/embedded-files.tz";
 import { ByteNumberRules } from "../../library/byte-number-rules/byte-number-rules.tz";
@@ -232,6 +236,7 @@ import {
   ClassField,
 } from "../../../program/ast/types/ast.types.classes.tz";
 import { IntlDateRules } from "../../library/intl-date-rules/intl-date-rules.tz";
+import { ExpressionCollector } from "../expression-collector/expression-collector.tz";
 
 export class ExpressionTypes {
   private readonly store: TypeStore;
@@ -296,6 +301,7 @@ export class ExpressionTypes {
   private readonly foreign: ForeignRules;
   private readonly nodeValues: NodeValueRules;
   private readonly jsonTexts: JsonText;
+  private readonly collector: ExpressionCollector;
   private readonly disposes: DisposeRules;
   private readonly intlDates: IntlDateRules;
   private readonly resolver: TypeResolver;
@@ -349,11 +355,13 @@ export class ExpressionTypes {
   private readonly unusedYields: Set<Expr>;
   private readonly yieldOf: Map<Expr, int>;
   private readonly indexParams: Set<string>;
+  private readonly elementRanges: Map<string, ValueRange>;
   private readonly fixedLengths: Set<string>;
   private readonly fixedCounts: Map<string, decimal>;
   private readonly requirements: Map<int, Requirement[]>;
   private readonly pendingCalls: PendingCall[];
   private readonly metadataRecords: Map<string, Type>;
+  private readonly callChanged: Map<int, string[]>;
   private readonly constructorCasts: ConstructorCast[];
   private readonly constructorWidenings: Map<int, Type[]>;
   private readonly reflectedNews: ReflectedNew[];
@@ -539,7 +547,8 @@ export class ExpressionTypes {
     );
     const nodeValues = new NodeValueRules();
     const jsonTexts = new JsonText();
-    const disposes = new DisposeRules();
+    const collector = new ExpressionCollector();
+    const disposes = new DisposeRules(collector);
     const intlDates = new IntlDateRules(text, intl);
 
     this.store = store;
@@ -604,6 +613,7 @@ export class ExpressionTypes {
     this.foreign = foreign;
     this.nodeValues = nodeValues;
     this.jsonTexts = jsonTexts;
+    this.collector = collector;
     this.disposes = disposes;
     this.intlDates = intlDates;
     this.resolver = resolver;
@@ -657,11 +667,13 @@ export class ExpressionTypes {
     this.unusedYields = new Set<Expr>();
     this.yieldOf = new Map<Expr, int>();
     this.indexParams = new Set<string>();
+    this.elementRanges = new Map<string, ValueRange>();
     this.fixedLengths = new Set<string>();
     this.fixedCounts = new Map<string, decimal>();
     this.requirements = new Map<int, Requirement[]>();
     this.pendingCalls = [];
     this.metadataRecords = new Map<string, Type>();
+    this.callChanged = new Map<int, string[]>();
     this.constructorCasts = [];
     this.constructorWidenings = new Map<int, Type[]>();
     this.reflectedNews = [];

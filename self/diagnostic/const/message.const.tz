@@ -4189,4 +4189,34 @@ export const kMessages: Record<Code, Message> = {
   [Code.ImportBackReturn]: {
     text: "cannot tell what {word} returns: it uses a file that imports it back and calls it while loading; declare its return type, e.g. '): int'",
   },
+  [Code.PromiseStaticTypeArgs]: {
+    text: "type arguments can be given to 'Promise.withResolvers<T>()'; the other functions of Promise take their types from what they get",
+  },
+  [Code.PromiseVoidGiven]: {
+    text: "a value of type 'void' cannot be given to '{word}'",
+  },
+  [Code.PromiseResolversTypeArgs]: {
+    text: "'Promise.withResolvers' takes one type argument, the type of the value",
+  },
+  [Code.PromiseResolversUnknown]: {
+    text: "'Promise.withResolvers' needs the type of the value; write it, e.g. 'Promise.withResolvers<int>()'",
+  },
+  [Code.PromiseListNoType]: {
+    text: "'{word}' of no promises needs the type of their values; give the array a type, e.g. 'const ps: Promise<int>[] = []'",
+  },
+  [Code.PromiseAllVoid]: {
+    text: "'Promise.all' collects the values, and a Promise<void> has none; await it on its own",
+  },
+  [Code.PromiseRaceDiffer]: {
+    text: "'{word}' gives a value of one of the promises, but they give '{first}' and '{second}'; make them give one type",
+  },
+  [Code.PromiseValueNotInferred]: {
+    text: "cannot tell the type of the Promise's value from what is given to 'resolve'; write it, e.g. 'new Promise<int>(...)'",
+  },
+  [Code.CryptoFillFits]: {
+    text: "cannot prove that the offset and the size fit in the bytes, and JavaScript would throw a RangeError; check it first, e.g. 'if ({word} <= buf.length - {other})'",
+  },
+  [Code.ReferenceDirective]: {
+    text: "'/// <reference>' is not supported: files are joined by imports; import what the file needs by name, e.g. 'import { a } from \"./x\"'",
+  },
 };

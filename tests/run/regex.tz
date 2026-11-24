@@ -6,7 +6,7 @@ console.log(date.test("on 2024-01"), date.test("no date"), /^\d+$/.test("123"), 
 const m = date.exec("on 2024-01, then")
 console.log(m)
 if (m) {
-  const year: string = m[1]
+  const year: string = m[1] ?? ""
   const day: string | undefined = m[3]
   console.log(year, m[2], day, m.index, m.input, m.length)
   console.log(m.groups.year, m.groups.month)

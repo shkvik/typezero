@@ -82,6 +82,19 @@ partial class TypeRelation {
     }
   }
 
+  private isSameUnion(own: Type, wide: Type): boolean {
+    if (own.kind != TypeKind.Union || wide.kind != TypeKind.Union) {
+      return false;
+    }
+
+    const theirs = wide.parts;
+    if (own.parts.length != theirs.length) {
+      return false;
+    }
+
+    return own.parts.every((part) => theirs.includes(part));
+  }
+
   private sameReference(from: Type, to: Type): boolean {
     let own = from;
     let wide = to;
@@ -103,7 +116,7 @@ partial class TypeRelation {
       wide = inner;
     }
 
-    if (own == wide) {
+    if (own == wide || this.isSameUnion(own, wide)) {
       return true;
     }
     if (own.kind != TypeKind.Union) {

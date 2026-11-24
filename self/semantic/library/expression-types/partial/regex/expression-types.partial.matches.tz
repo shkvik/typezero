@@ -1,0 +1,123 @@
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  IndexExpr,
+  MemberExpr,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import { kMatchArrayName } from "../../../regex-rules/const/regex-rules.const.tz";
+
+partial class ExpressionTypes {
+  private matchShape(): Type {
+    return this.namedLibraryType(kMatchArrayName, 0, 0);
+  }
+
+  private foundMatch(): Type {
+    return this.types.optional(this.matchShape());
+  }
+
+  private allMatches(): Type {
+    const nothing = this.store.plain(TypeKind.Void);
+
+    return this.store.iteratorOf({
+      yielded: this.matchShape(),
+      returned: nothing,
+      sent: nothing,
+      async: false,
+    });
+  }
+
+  private matchItem(type: Type): Type | undefined {
+    if (type.kind != TypeKind.Object || type != this.matchShape()) {
+      return undefined;
+    }
+
+    const text = this.store.plain(TypeKind.String);
+
+    return this.types.optional(text);
+  }
+
+  private matchList(type: Type): Type | undefined {
+    const item = this.matchItem(type);
+    if (item == undefined) {
+      return undefined;
+    }
+
+    return this.store.arrayOf(item);
+  }
+
+  private matchListFor(type: Type, name: string): Type | undefined {
+    const list = this.matchList(type);
+    if (list == undefined || type.kind != TypeKind.Object) {
+      return undefined;
+    }
+    if (type.fields.some((field) => field.name == name)) {
+      return undefined;
+    }
+
+    return list;
+  }
+
+  private matchBeforeList(given: Type, other: Expr): Type {
+    const list = this.matchList(this.types.definedType(given));
+    if (list == undefined || other.kind != ExprKind.ArrayLit) {
+      return given;
+    }
+    if (this.types.isOptional(given)) {
+      return this.types.optional(list);
+    }
+
+    return list;
+  }
+
+  private matchIndexed(
+    expr: IndexExpr,
+    object: Type,
+    module: int,
+  ): Type | undefined {
+    const list = this.matchList(object);
+    if (list == undefined) {
+      return undefined;
+    }
+
+    const index = expr.index;
+    if (index.kind == ExprKind.IntLit && index.value == 0) {
+      return this.store.plain(TypeKind.String);
+    }
+
+    return this.listIndexed(expr, list, module);
+  }
+
+  private matchMemberRead(
+    expr: MemberExpr,
+    object: Type,
+    module: int,
+  ): Type | undefined {
+    const list = this.matchListFor(object, expr.name);
+    if (list == undefined) {
+      return undefined;
+    }
+
+    return this.valueMember(expr, list, module);
+  }
+
+  private matchMemberCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    object: Type,
+    wanted: Type | undefined,
+    module: int,
+  ): Type | undefined {
+    const list = this.matchListFor(object, member.name);
+    if (list == undefined) {
+      return undefined;
+    }
+
+    return this.otherCall(expr, member, list, wanted, module);
+  }
+}

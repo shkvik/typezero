@@ -18,6 +18,9 @@ partial class ExpressionTypes {
     this.awaitPlaceCheck(expr, module);
 
     const value = this.typed(expr.value, undefined, module);
+
+    this.forgetCallChanged(module);
+
     if (value.kind == TypeKind.Promise) {
       return value.value;
     }

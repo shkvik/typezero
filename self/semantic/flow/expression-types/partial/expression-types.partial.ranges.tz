@@ -14,6 +14,7 @@ import {
   UnaryExpr,
   UnaryOp,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
+import { ForOfStmt } from "../../../../program/ast/types/ast.types.statements.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import {
   kMathName,
@@ -84,8 +85,84 @@ partial class ExpressionTypes {
     const above = this.bestRoom(term, kZeroTerm);
     const below = this.bestRoom(kZeroTerm, term);
     const lowest = this.indexFloor(key, below);
+    const known: ValueRange = { lo: lowest, hi: this.oppositeOf(above) };
+    const listed = this.elementRanges.get(key);
+    if (listed == undefined) {
+      return known;
+    }
 
-    return { lo: lowest, hi: this.oppositeOf(above) };
+    return this.intervals.meet(known, listed);
+  }
+
+  private listedRange(list: Expr, module: int): ValueRange | undefined {
+    if (list.kind != ExprKind.ArrayLit) {
+      return undefined;
+    }
+
+    const int = this.store.integer(64, false);
+    let range: ValueRange | undefined = undefined;
+
+    for (const element of list.elements) {
+      if (element.spread || element.hole) {
+        return undefined;
+      }
+
+      const value = this.intConstant(element.expr, int, module);
+      if (value == undefined) {
+        return undefined;
+      }
+
+      range = this.widerRange(range, value);
+    }
+
+    return range;
+  }
+
+  private widerRange(
+    range: ValueRange | undefined,
+    value: decimal,
+  ): ValueRange {
+    const exact = this.intervals.exact(value);
+    if (range == undefined) {
+      return exact;
+    }
+
+    return this.intervals.unite(range, exact);
+  }
+
+  private rememberLoopElement(loop: ForOfStmt, module: int): void {
+    const range = this.listedRange(loop.iterable, module);
+    const isPlain = loop.isConst && !loop.keys && !loop.isAwait;
+    if (range != undefined && isPlain) {
+      this.elementRanges.set(`${module} ${loop.binding.loc}`, range);
+    }
+  }
+
+  private rememberElementParam(
+    expr: CallExpr,
+    member: MemberExpr,
+    plan: CallbackPlan | undefined,
+    module: int,
+  ): void {
+    const callback = expr.args[0]?.expr;
+    if (plan == undefined || plan.kind == ArrayCallback.Compare) {
+      return;
+    }
+    if (callback == undefined || callback.kind != ExprKind.Function) {
+      return;
+    }
+
+    const position = this.callbacks.indexPosition(plan.kind) - 1;
+    const param = callback.fn.params[position];
+    const range = this.listedRange(member.object, module);
+    if (param == undefined || range == undefined) {
+      return;
+    }
+    if (this.record(module)?.assigned.has(param.loc) == true) {
+      return;
+    }
+
+    this.elementRanges.set(`${module} ${param.loc}`, range);
   }
 
   private indexFloor(

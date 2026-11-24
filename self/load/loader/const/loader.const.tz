@@ -1,2 +1,7 @@
 export const kWindowsPlatform = "win32";
 export const kLineBreak = "\n";
+export const kTripleSlash = "///";
+export const kReferenceWord = "<reference";
+export const kNewlineByte = 10;
+export const kSpaceByte = 32;
+export const kTabByte = 9;

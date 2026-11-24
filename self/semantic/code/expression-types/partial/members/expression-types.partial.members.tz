@@ -136,6 +136,11 @@ partial class ExpressionTypes {
       return keyed;
     }
 
+    const matched = this.matchMemberRead(expr, object, module);
+    if (matched != undefined) {
+      return matched;
+    }
+
     switch (object.kind) {
       case TypeKind.Union:
         return this.unionMemberOf(expr, object, module);

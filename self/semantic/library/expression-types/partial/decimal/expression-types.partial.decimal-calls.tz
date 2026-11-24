@@ -326,6 +326,8 @@ partial class ExpressionTypes {
       return;
     }
     if (base.kind == TypeKind.Int && !this.types.isOptional(type)) {
+      this.requireBetween(arg, type, range, module);
+
       return;
     }
 

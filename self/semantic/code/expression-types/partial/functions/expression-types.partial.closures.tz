@@ -19,6 +19,8 @@ import {
 } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 import { ParameterShape } from "../../types/expression-types.types.tz";
 import { kDot } from "../../../source-texts/const/source-texts.const.tz";
+import { kZeroTerm } from "../../../../flow/bound-rules/const/bound-rules.const.tz";
+import { kValueTerm } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
   private closureTyped(
@@ -234,12 +236,32 @@ partial class ExpressionTypes {
     const kept = new Map<string, Type>();
 
     for (const [key, type] of facts) {
-      if (this.isConstPath(key)) {
+      if (this.isConstPath(key) || this.isConstBound(key)) {
         kept.set(key, type);
       }
     }
 
     return kept;
+  }
+
+  private isConstBound(key: string): boolean {
+    const edge = this.bounds.edgeOf(key);
+    if (edge == undefined) {
+      return false;
+    }
+
+    return this.isConstTerm(edge.upper) && this.isConstTerm(edge.lower);
+  }
+
+  private isConstTerm(term: string): boolean {
+    if (term == kZeroTerm) {
+      return true;
+    }
+    if (!term.startsWith(kValueTerm)) {
+      return false;
+    }
+
+    return this.constKeys.has(term.slice(kValueTerm.length));
   }
 
   private isConstPath(key: string): boolean {

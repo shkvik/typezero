@@ -123,7 +123,7 @@ partial class ExpressionTypes {
 
     switch (method) {
       case kMatchAllName:
-        return this.store.plain(TypeKind.Error);
+        return this.allMatches();
       case kSearchName:
         return this.store.integer(64, false);
       case kSplitName:
@@ -142,9 +142,16 @@ partial class ExpressionTypes {
   ): Type {
     if (shape == undefined) {
       this.reportFound(module, this.regexes.matchFlagError(member.loc));
+
+      return this.store.plain(TypeKind.Error);
+    }
+    if (this.regexes.isGlobal(shape)) {
+      const text = this.store.plain(TypeKind.String);
+
+      return this.types.optional(this.store.arrayOf(text));
     }
 
-    return this.store.plain(TypeKind.Error);
+    return this.foundMatch();
   }
 
   private splitLimitCheck(expr: CallExpr, module: int): void {

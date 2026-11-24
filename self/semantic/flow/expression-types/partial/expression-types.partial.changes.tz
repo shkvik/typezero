@@ -12,6 +12,10 @@ import {
 } from "../../../code/expression-types/types/expression-types.types.tz";
 import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
 import { Stmt } from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  NameSymbol,
+  SymbolKind,
+} from "../../../../program/scopes/types/scopes.types.tz";
 import { Type } from "../../../../program/type/types/type.types.tz";
 import { kDot } from "../../../code/source-texts/const/source-texts.const.tz";
 import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
@@ -47,6 +51,96 @@ partial class ExpressionTypes {
       default:
         return;
     }
+  }
+
+  private forgetCallChanged(module: int): void {
+    for (const key of this.callChangedKeys(module)) {
+      if (this.hasFactOf(key)) {
+        this.forgetPath(key);
+      }
+    }
+  }
+
+  private hasFactOf(key: string): boolean {
+    for (const known of this.facts.keys()) {
+      if (known.includes(key)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private callChangedKeys(module: int): string[] {
+    const known = this.callChanged.get(module);
+    if (known != undefined) {
+      return known;
+    }
+
+    const keys: string[] = [];
+    const record = this.record(module);
+
+    this.callChanged.set(module, keys);
+
+    if (record == undefined) {
+      return keys;
+    }
+
+    const functions = Array.from(record.functions.values());
+    const seen = new Set<int>();
+
+    for (const use of record.uses.values()) {
+      const symbol = use.symbol;
+      if (symbol == undefined || seen.has(symbol.loc)) {
+        continue;
+      }
+      if (!this.isChangeable(symbol, module)) {
+        continue;
+      }
+
+      const home = this.innermostFunction(functions, symbol.loc);
+      const user = this.innermostFunction(functions, use.loc);
+      if (user != undefined && user != home) {
+        seen.add(symbol.loc);
+        keys.push(`${module} ${symbol.loc}`);
+      }
+    }
+
+    return keys;
+  }
+
+  private isChangeable(symbol: NameSymbol, module: int): boolean {
+    if (symbol.kind == SymbolKind.Parameter) {
+      return true;
+    }
+    if (symbol.kind != SymbolKind.Variable) {
+      return false;
+    }
+
+    const variable = this.record(module)?.variables.get(symbol.loc);
+
+    return variable != undefined && !variable.isConst;
+  }
+
+  private innermostFunction(
+    functions: FunctionDecl[],
+    loc: int,
+  ): FunctionDecl | undefined {
+    let found: FunctionDecl | undefined = undefined;
+    let start = -1;
+
+    for (const fn of functions) {
+      const span = fn.source;
+      if (span == undefined || loc < span.start || loc >= span.end) {
+        continue;
+      }
+      if (span.start > start) {
+        found = fn;
+        start = span.start;
+      }
+    }
+
+    return found;
   }
 
   private forgetPath(key: string): void {

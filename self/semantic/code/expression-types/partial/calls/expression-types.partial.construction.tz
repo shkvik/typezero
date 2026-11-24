@@ -69,7 +69,7 @@ partial class ExpressionTypes {
           module,
         );
       case kPromiseClass:
-        return this.calls.promiseNew(written, wanted);
+        return this.promiseNew(expr, written, wanted, module);
       case kDateName:
         return this.dateNew(expr, module);
       default:

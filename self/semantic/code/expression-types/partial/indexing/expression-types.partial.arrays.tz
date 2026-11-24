@@ -187,6 +187,11 @@ partial class ExpressionTypes {
   }
 
   private spreadItem(expr: Expr, type: Type, module: int): Type {
+    const matched = this.matchItem(type);
+    if (matched != undefined) {
+      return matched;
+    }
+
     const isLibrary =
       (type.kind == TypeKind.Instance &&
         this.modules.isLibraryModule(type.module)) ||
@@ -268,7 +273,8 @@ partial class ExpressionTypes {
 
     for (const item of expr.elements) {
       const given = draft.types.get(index) ?? this.store.plain(TypeKind.Error);
-      const source = draft.spreads.get(index) ?? given;
+      const spread = draft.spreads.get(index) ?? given;
+      const source = this.matchList(spread) ?? spread;
 
       index += 1;
 

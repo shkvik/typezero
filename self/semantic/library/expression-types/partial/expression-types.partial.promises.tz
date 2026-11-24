@@ -6,7 +6,11 @@ import {
   ExprKind,
   MemberExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
-import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  FunctionParameter,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
 import {
   kAllSettledName,
   kAnyName,
@@ -88,6 +92,73 @@ partial class ExpressionTypes {
     this.looseArguments(expr.args, module);
 
     return true;
+  }
+
+  private thenCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    value: Type,
+    module: int,
+  ): Type {
+    const error = this.store.plain(TypeKind.Error);
+    const next = expr.args[0];
+    const count = expr.args.length;
+    if (count != 1 || next == undefined) {
+      const word = this.calls.argumentCountText(1, 1, false);
+
+      this.report(module, member.loc, Code.ArgumentCount, {
+        word,
+        other: `${count}`,
+      });
+      this.looseArguments(expr.args, module);
+
+      return error;
+    }
+    if (next.expr.kind == ExprKind.Undefined) {
+      return this.store.promiseOf(value);
+    }
+
+    const params: FunctionParameter[] = [];
+
+    if (value.kind != TypeKind.Void) {
+      params.push({ type: value, optional: false });
+    }
+
+    const signature = this.store.functionOf({
+      params,
+      rest: false,
+      result: error,
+    });
+    const given = this.typed(next.expr, signature, module);
+    if (given.kind == TypeKind.Error) {
+      return error;
+    }
+    if (given.kind != TypeKind.Function) {
+      this.report(module, next.expr.loc, Code.CallbackNotFunction, {
+        word: member.name,
+        first: this.text.of(given),
+      });
+
+      return error;
+    }
+
+    const returned = this.thenResult(given.shape.result);
+    if (returned.kind == TypeKind.Error) {
+      return error;
+    }
+    if (returned.kind == TypeKind.Never) {
+      return this.store.promiseOf(value);
+    }
+
+    return this.store.promiseOf(returned);
+  }
+
+  private thenResult(returned: Type): Type {
+    if (returned.kind == TypeKind.Promise) {
+      return returned.value;
+    }
+
+    return returned;
   }
 
   private promiseMissing(

@@ -45,6 +45,9 @@ partial class ExpressionTypes {
         if (this.types.isIterableTarget(base)) {
           return;
         }
+        if (this.matchItem(base) != undefined) {
+          return;
+        }
 
         this.report(module, loc, Code.ForOfCannot, {
           word: this.text.of(base),

@@ -14,6 +14,7 @@ import {
 import {
   kJoinName,
   kTakenMethods,
+  kThenName,
 } from "../../const/expression-types.const.tz";
 import { CallKind } from "../../types/expression-types.types.tz";
 import { kTakingMethods } from "../../../statement-rules/const/statement-rules.const.tz";
@@ -115,6 +116,11 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
+    const settled = this.promiseStaticCall(expr, member, wanted, module);
+    if (settled != undefined) {
+      return settled;
+    }
+
     const dated = this.dateStaticCall(expr, member, module);
     if (dated != undefined) {
       return dated;
@@ -172,6 +178,11 @@ partial class ExpressionTypes {
       this.report(module, member.loc, Code.TypeArgsOnlyGeneric, kNoDetails);
     }
 
+    const matched = this.matchMemberCall(expr, member, object, wanted, module);
+    if (matched != undefined) {
+      return matched;
+    }
+
     switch (object.kind) {
       case TypeKind.Object:
         return this.fieldCall(expr, member, object, wanted, module);
@@ -196,6 +207,9 @@ partial class ExpressionTypes {
       case TypeKind.Promise:
         if (this.promiseMisuse(expr, member, object, module)) {
           return this.store.plain(TypeKind.Error);
+        }
+        if (member.name == kThenName) {
+          return this.thenCall(expr, member, object.value, module);
         }
 
         return this.otherCall(expr, member, object, wanted, module);
@@ -302,6 +316,7 @@ partial class ExpressionTypes {
     const plan = this.callbacks.callbackPlan(expr, member, object);
 
     this.rememberIndexParam(expr, plan, module);
+    this.rememberElementParam(expr, member, plan, module);
 
     if (this.iteratorCallCheck(member, object, module)) {
       return this.store.plain(TypeKind.Error);

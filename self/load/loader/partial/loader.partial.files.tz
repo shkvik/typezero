@@ -18,7 +18,16 @@ import {
 import { JsonModule } from "../../json-module/json-module.tz";
 import { Lexer } from "../../lexer/lexer.tz";
 import { ModuleState, OpenModule } from "../types/loader.types.tz";
-import { kWindowsPlatform } from "../const/loader.const.tz";
+import {
+  kNewlineByte,
+  kReferenceWord,
+  kSpaceByte,
+  kTabByte,
+  kTripleSlash,
+  kWindowsPlatform,
+} from "../const/loader.const.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
 
 partial class Loader {
   private linkedFile(from: ModulePath, file: string): ModuleLink {
@@ -116,8 +125,62 @@ partial class Loader {
     };
 
     this.opened.push(module);
+    this.rejectReferences(module, source.text);
 
     return module;
+  }
+
+  private rejectReferences(module: OpenModule, text: Buffer): void {
+    let from = 0;
+
+    while (from < text.length) {
+      const at = text.indexOf(kTripleSlash, from);
+      if (at < 0) {
+        return;
+      }
+      if (this.isReferenceAt(text, at)) {
+        module.problems.push({
+          code: Code.ReferenceDirective,
+          loc: at,
+          details: kNoDetails,
+        });
+      }
+
+      from = at + kTripleSlash.length;
+    }
+  }
+
+  private isReferenceAt(text: Buffer, at: int): boolean {
+    let before = at - 1;
+
+    while (before >= 0 && this.isBlankByte(this.byteAt(text, before))) {
+      before -= 1;
+    }
+
+    const isLineStart = before < 0 || this.byteAt(text, before) == kNewlineByte;
+    let after = at + kTripleSlash.length;
+
+    while (after < text.length && this.isBlankByte(this.byteAt(text, after))) {
+      after += 1;
+    }
+
+    const end = after + kReferenceWord.length;
+    const word = text.subarray(after, end).toString("utf8");
+
+    return isLineStart && word == kReferenceWord;
+  }
+
+  private byteAt(text: Buffer, at: int): int {
+    const byte = text[at];
+    if (byte == undefined) {
+      return 0;
+    }
+
+    return byte.toInt();
+  }
+
+  private isBlankByte(byte: int): boolean {
+    return byte == kSpaceByte || byte == kTabByte;
   }
 
   private read(file: string, path: string): Buffer | undefined {

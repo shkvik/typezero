@@ -90,6 +90,7 @@ partial class ExpressionTypes {
 
         if (this.isOwnCall(expr.callee, module)) {
           this.forgetCalledFields();
+          this.forgetCallChanged(module);
         }
 
         this.walkedArguments(expr.args, module);

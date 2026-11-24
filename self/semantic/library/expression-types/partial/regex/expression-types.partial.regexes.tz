@@ -203,7 +203,7 @@ partial class ExpressionTypes {
     this.checked(text.expr, this.store.plain(TypeKind.String), module, "");
 
     if (member.name == kExecName) {
-      return this.store.plain(TypeKind.Error);
+      return this.foundMatch();
     }
 
     const shape = this.knownRegex(member.object, module);

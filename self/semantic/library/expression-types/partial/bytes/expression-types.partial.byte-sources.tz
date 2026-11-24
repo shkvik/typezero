@@ -186,11 +186,25 @@ partial class ExpressionTypes {
     }
 
     const mapper = expr.args[1];
-    if (mapper == undefined || mapper.spread) {
+    const element = this.bytes.elementOf(instance);
+    if (mapper == undefined || mapper.spread || element == undefined) {
       return;
     }
+    if (mapper.expr.kind != ExprKind.Function) {
+      return this.namedMapperCheck(mapper.expr, instance, module);
+    }
 
-    this.namedMapperCheck(mapper.expr, instance, module);
+    const index = this.store.integer(64, false);
+    const signature = this.store.functionOf({
+      params: [
+        { type: shape.element, optional: false },
+        { type: index, optional: false },
+      ],
+      rest: false,
+      result: element,
+    });
+
+    this.typed(mapper.expr, signature, module);
   }
 
   private namedMapperCheck(mapper: Expr, target: Type, module: int): void {
@@ -200,7 +214,9 @@ partial class ExpressionTypes {
 
     const type = this.peekType(mapper, module);
     const base = this.types.definedType(type);
-    if (base.kind != TypeKind.Function) {
+    const isLibraryFunction =
+      base.kind == TypeKind.Error && mapper.kind == ExprKind.Member;
+    if (base.kind != TypeKind.Function && !isLibraryFunction) {
       return;
     }
 

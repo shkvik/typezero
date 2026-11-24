@@ -42,6 +42,11 @@ partial class ExpressionTypes {
       return this.jsonIndexed(expr, module);
     }
 
+    const matched = this.matchIndexed(expr, object, module);
+    if (matched != undefined) {
+      return matched;
+    }
+
     switch (object.kind) {
       case TypeKind.Tuple:
         return this.tupleIndexed(expr, object, module);

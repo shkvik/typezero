@@ -139,9 +139,58 @@ partial class ExpressionTypes {
     }
 
     const given = this.peekType(size, module);
-    if (given.kind != TypeKind.Error) {
-      this.requireBetween(size, given, kSizeRange, module);
+    if (given.kind == TypeKind.Error) {
+      return;
     }
+    if (!this.requireBetween(size, given, kSizeRange, module)) {
+      return;
+    }
+
+    const target = expr.args[0]?.expr;
+    if (
+      target == undefined ||
+      this.isFillFitting(target, offset, size, module)
+    ) {
+      return;
+    }
+
+    this.report(module, size.loc, Code.CryptoFillFits, {
+      word: this.sources.valueText(size, module),
+      other: this.sources.valueText(offset, module),
+    });
+  }
+
+  private isFillFitting(
+    target: Expr,
+    offset: Expr,
+    size: Expr,
+    module: int,
+  ): boolean {
+    const start = this.linearOf(offset, module);
+    const count = this.linearOf(size, module);
+    const length = this.measuredLength(target, module);
+    if (start == undefined || count == undefined || length == undefined) {
+      return false;
+    }
+
+    const sum = this.sumLinear(start, count);
+    if (sum == undefined) {
+      return false;
+    }
+
+    return this.isLinearUpTo(sum, length, 0);
+  }
+
+  private sumLinear(first: Linear, second: Linear): Linear | undefined {
+    const offset = first.offset + second.offset;
+    if (first.term == kZeroTerm) {
+      return { term: second.term, offset };
+    }
+    if (second.term == kZeroTerm) {
+      return { term: first.term, offset };
+    }
+
+    return undefined;
   }
 
   private secretKeyCheck(expr: CallExpr, shown: string, module: int): void {

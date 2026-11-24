@@ -155,6 +155,8 @@ partial class ExpressionTypes {
         return this.indexes.iteratedDictItem(base.dict, base.key, base.value);
       case TypeKind.Instance:
         return this.instanceItem(base);
+      case TypeKind.Object:
+        return this.matchItem(base);
       case TypeKind.Error:
         return base;
       default:

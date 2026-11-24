@@ -58,3 +58,9 @@ export const kNoArgumentsReason = "its constructor takes no arguments";
 export const kSeveralReason =
   "the arguments may fit several of its constructors";
 export const kTakesReason = "its constructor takes ";
+export const kResolveName = "resolve";
+export const kWithResolversName = "withResolvers";
+export const kAllName = "all";
+export const kRaceName = "race";
+export const kPromiseField = "promise";
+export const kTypedStatics = ["resolve", "all", "race"];

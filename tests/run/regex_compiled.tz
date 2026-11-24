@@ -20,7 +20,7 @@ for (const s of [text, wide]) {
   let n = 0
   let last = ""
   for (const m of s.matchAll(/(\w+)ing (\w+)/g)) {
-    n += m[2].length
+    n += (m[2] ?? "").length
     last = `${m.index} ${m[1]} ${m[2]}`
   }
   console.log(n, last)

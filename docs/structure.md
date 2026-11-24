@@ -858,6 +858,17 @@ self/             компилятор на tz, пробный (порт compile
                   считает TypeResolver.classInstance); NameUse.capture (CapturePlace в
                   program/scopes) — захват переменной выражением класса внутри обобщённой
                   функции: о нём сообщает вызов с конкретным типом;
+                  добавлено 24.11 позже: code/expression-collector/ — ExpressionCollector (все
+                  выражения тела функции, с вложенными функциями или без; им пользуются
+                  DisposeRules и вывод значения `new Promise`); части обхода
+                  library/…/regex/…matches (совпадение regex — объявленный `RegExpMatchArray`:
+                  `m[0]` — string, `m[N]` — string | undefined, как массив в циклах и методах),
+                  library/…promise-statics (`Promise.resolve`, `withResolvers`, `all`, `race`,
+                  `new Promise` без типа), flow/…lengths (длины: литералы, `new`, виды байтов —
+                  отделены от flow/…bounds); flow/…changes — `forgetCallChanged`: после своего
+                  вызова и `await` забываются сужения переменных, которыми пользуется чужая
+                  функция; flow/…ranges — отрезок значения из литерала массива (`elementRanges`);
+                  load/loader/…files — `rejectReferences` (`/// <reference>`);
                   semantic/flow/truth-rules/ — TruthRules: можно ли проверять значение
                   типа как условие (problemOf) и какой ошибкой ответить (answerOf);
                   semantic/declaration/scope-stack/ — ScopeStack: состояние обхода — стек областей

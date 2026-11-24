@@ -4,7 +4,7 @@ const text = "a=1, bb=22, ccc=333"
 for (const { groups } of text.matchAll(/(?<key>\w+)=(?<value>\w+)/g))
   console.log(groups.key, groups.value)
 for (const m of text.matchAll(/(\w+)=(\d+)/g))
-  console.log(m.index, m[1], m[2].length)
+  console.log(m.index, m[1], (m[2] ?? "").length)
 for (const [all, key] of text.matchAll(/(\w+)=/g)) console.log(all, key)
 console.log([...text.matchAll(/\d+/g)].map(m => m[0]), [..."aaa".matchAll(/(?:)/g)].length)
 const g = /b/g
@@ -13,7 +13,7 @@ console.log([..."abcabc".matchAll(g)].map(m => m.index), g.lastIndex)
 // A lazy iterator: each match is found when it is asked for.
 const it = text.matchAll(/\d+/g)
 console.log(it.next().value?.[0], it.next().value?.index, it)
-console.log(text.matchAll(/(\w+)=/g).map(m => m[1].toUpperCase()).toArray())
+console.log(text.matchAll(/(\w+)=/g).map(m => (m[1] ?? "").toUpperCase()).toArray())
 console.log(Array.from("x1y22".matchAll(/\d+/g), m => m[0].length), it.next().done)
 
 // The syntax: lookahead and lookbehind, references, lazy loops, classes.

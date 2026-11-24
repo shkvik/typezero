@@ -1,0 +1,553 @@
+import { Code } from "../../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
+import {
+  ArrayLitExpr,
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NewExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  FunctionParameter,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
+import { PromiseValues } from "../../../code/expression-types/types/expression-types.types.tz";
+import {
+  TypeContext,
+  TypePlace,
+} from "../../../types/type-resolver/types/type-resolver.types.tz";
+import {
+  kAllName,
+  kPromiseClass,
+  kPromiseField,
+  kRaceName,
+  kResolveName,
+  kTypedStatics,
+  kWithResolversName,
+} from "../../library-rules/const/library-rules.const.tz";
+
+partial class ExpressionTypes {
+  private promiseStaticCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type | undefined {
+    const owner = member.object;
+    const isPromise =
+      owner.kind == ExprKind.Name &&
+      owner.name == kPromiseClass &&
+      this.isGlobalUse(owner, module);
+    const hasSpread = expr.args.some((arg) => arg.spread);
+    if (!isPromise || hasSpread || this.modules.isLibraryModule(module)) {
+      return undefined;
+    }
+
+    const isTyped = kTypedStatics.includes(member.name);
+    if (isTyped && member.typeArgs.length > 0) {
+      this.report(module, member.loc, Code.PromiseStaticTypeArgs, kNoDetails);
+    }
+
+    switch (member.name) {
+      case kResolveName:
+        return this.promiseResolveCall(expr, member, wanted, module);
+      case kWithResolversName:
+        return this.withResolversCall(expr, member, wanted, module);
+      case kAllName:
+      case kRaceName:
+        return this.promiseCombinatorCall(expr, member, wanted, module);
+      default:
+        return undefined;
+    }
+  }
+
+  private promiseNew(
+    expr: NewExpr,
+    written: Type[],
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const known = this.calls.promiseNew(written, wanted);
+    const executor = expr.args[0]?.expr;
+    if (known.kind != TypeKind.Error || expr.typeArgs.length > 0) {
+      return known;
+    }
+    if (expr.args.length != 1 || executor == undefined) {
+      return known;
+    }
+    if (executor.kind != ExprKind.Function) {
+      this.report(module, expr.loc, Code.PromiseValueNotInferred, kNoDetails);
+
+      return known;
+    }
+
+    const nothing = this.store.plain(TypeKind.Void);
+    const resolve = executor.fn.params[0]?.name;
+    const values = this.resolvedExprs(executor.fn, resolve);
+    if (values.length == 0) {
+      return this.store.promiseOf(nothing);
+    }
+
+    const types = values.map((value) => this.peekType(value, module));
+    if (types.some((type) => type.kind == TypeKind.Error)) {
+      return known;
+    }
+
+    const value = this.joinedResolved(types);
+    if (value == undefined) {
+      this.report(module, expr.loc, Code.PromiseValueNotInferred, kNoDetails);
+
+      return known;
+    }
+
+    return this.store.promiseOf(value);
+  }
+
+  private resolvedExprs(fn: FunctionDecl, resolve: string | undefined): Expr[] {
+    const values: Expr[] = [];
+
+    for (const expr of this.collector.functionExprs(fn, true)) {
+      const value = this.resolvedExpr(expr, resolve);
+      if (value != undefined) {
+        values.push(value);
+      }
+    }
+
+    return values;
+  }
+
+  private resolvedExpr(
+    expr: Expr,
+    resolve: string | undefined,
+  ): Expr | undefined {
+    if (expr.kind != ExprKind.Call) {
+      return undefined;
+    }
+
+    const callee = expr.callee;
+    if (callee.kind != ExprKind.Name || callee.name != resolve) {
+      return undefined;
+    }
+
+    return expr.args[0]?.expr;
+  }
+
+  private joinedResolved(types: Type[]): Type | undefined {
+    let found: Type | undefined = undefined;
+
+    for (const type of types) {
+      const isNothing =
+        type.kind == TypeKind.Void || type.kind == TypeKind.Undefined;
+      if (isNothing) {
+        return undefined;
+      }
+
+      found = this.raceJoin(found, this.types.apparent(type));
+      if (found == undefined) {
+        return undefined;
+      }
+    }
+
+    return found;
+  }
+
+  private promisedWanted(wanted: Type | undefined): Type | undefined {
+    if (wanted == undefined) {
+      return undefined;
+    }
+
+    const base = this.types.definedType(wanted);
+    if (base.kind != TypeKind.Promise || base.value.kind == TypeKind.Never) {
+      return undefined;
+    }
+
+    return base.value;
+  }
+
+  private staticCountCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    least: int,
+    most: int,
+    module: int,
+  ): boolean {
+    const count = expr.args.length;
+    if (count >= least && count <= most) {
+      return false;
+    }
+
+    const word = this.calls.argumentCountText(least, most, false);
+
+    this.report(module, member.loc, Code.ArgumentCount, {
+      word,
+      other: `${count}`,
+    });
+    this.looseArguments(expr.args, module);
+
+    return true;
+  }
+
+  private promiseResolveCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const error = this.store.plain(TypeKind.Error);
+    const nothing = this.store.plain(TypeKind.Void);
+    if (this.staticCountCheck(expr, member, 0, 1, module)) {
+      return error;
+    }
+
+    const value = expr.args[0]?.expr;
+    if (value == undefined) {
+      return this.store.promiseOf(nothing);
+    }
+
+    const hint = this.resolveHint(value, wanted);
+    const given = this.typed(value, hint, module);
+
+    switch (given.kind) {
+      case TypeKind.Error:
+        return error;
+      case TypeKind.Promise:
+        return given;
+      case TypeKind.Undefined:
+        return this.store.promiseOf(nothing);
+      case TypeKind.Void:
+        this.report(module, value.loc, Code.PromiseVoidGiven, {
+          word: `${kPromiseClass}.${member.name}`,
+        });
+
+        return error;
+      default:
+        return this.store.promiseOf(this.resolvedValue(given, hint));
+    }
+  }
+
+  private resolveHint(value: Expr, wanted: Type | undefined): Type | undefined {
+    if (value.kind == ExprKind.Undefined) {
+      return undefined;
+    }
+
+    return this.promisedWanted(wanted);
+  }
+
+  private resolvedValue(given: Type, hint: Type | undefined): Type {
+    if (hint != undefined && this.relation.converts(given, hint)) {
+      return hint;
+    }
+
+    return this.types.apparent(given);
+  }
+
+  private withResolversCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const error = this.store.plain(TypeKind.Error);
+    if (this.staticCountCheck(expr, member, 0, 0, module)) {
+      return error;
+    }
+    if (member.typeArgs.length > 1) {
+      const code = Code.PromiseResolversTypeArgs;
+
+      this.report(module, member.loc, code, kNoDetails);
+
+      return error;
+    }
+
+    const value = this.resolversValue(member, wanted, module);
+    if (value == undefined) {
+      this.report(module, member.loc, Code.PromiseResolversUnknown, kNoDetails);
+
+      return error;
+    }
+    if (value.kind == TypeKind.Error) {
+      return error;
+    }
+
+    const params: FunctionParameter[] = [];
+
+    if (value.kind != TypeKind.Void) {
+      params.push({ type: value, optional: false });
+    }
+
+    const nothing = this.store.plain(TypeKind.Void);
+    const resolver = this.store.functionOf({
+      params,
+      rest: false,
+      result: nothing,
+    });
+    const promise = this.store.promiseOf(value);
+
+    return this.store.objectOf([
+      { name: kPromiseField, type: promise, optional: false, readonly: false },
+      { name: kResolveName, type: resolver, optional: false, readonly: false },
+    ]);
+  }
+
+  private resolversValue(
+    member: MemberExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type | undefined {
+    const written = member.typeArgs[0];
+    if (written == undefined) {
+      return this.expectedResolversValue(wanted);
+    }
+
+    const context: TypeContext = {
+      module,
+      bindings: new Map<int, Type>(),
+      place: TypePlace.Plain,
+    };
+    const type = this.resolver.returnType(written, context);
+
+    return this.awaitedValue(type);
+  }
+
+  private expectedResolversValue(wanted: Type | undefined): Type | undefined {
+    if (wanted == undefined || wanted.kind != TypeKind.Object) {
+      return undefined;
+    }
+
+    const field = wanted.fields.find((one) => one.name == kPromiseField);
+    const promise = field?.type;
+    if (promise == undefined || promise.kind != TypeKind.Promise) {
+      return undefined;
+    }
+
+    return promise.value;
+  }
+
+  private awaitedValue(type: Type): Type {
+    if (type.kind == TypeKind.Promise) {
+      return type.value;
+    }
+
+    return type;
+  }
+
+  private promiseCombinatorCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    wanted: Type | undefined,
+    module: int,
+  ): Type {
+    const error = this.store.plain(TypeKind.Error);
+    const list = expr.args[0]?.expr;
+    if (this.staticCountCheck(expr, member, 1, 1, module)) {
+      return error;
+    }
+    if (list == undefined) {
+      return error;
+    }
+
+    const isRace = member.name == kRaceName;
+    const word = `${kPromiseClass}.${member.name}`;
+    const element = this.combinatorWanted(wanted, isRace);
+    const values = this.promiseValues(list, element, word, module);
+    if (values == undefined) {
+      return error;
+    }
+    if (isRace) {
+      return this.raceResult(values, element, list, word, module);
+    }
+
+    return this.allResult(values, element, list, module);
+  }
+
+  private combinatorWanted(
+    wanted: Type | undefined,
+    isRace: boolean,
+  ): Type | undefined {
+    const value = this.promisedWanted(wanted);
+    if (value == undefined || isRace) {
+      return value;
+    }
+    if (value.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    return value.item;
+  }
+
+  private promiseValues(
+    list: Expr,
+    wanted: Type | undefined,
+    word: string,
+    module: int,
+  ): PromiseValues | undefined {
+    const isPlain =
+      list.kind == ExprKind.ArrayLit &&
+      list.elements.every((element) => !element.spread && !element.hole);
+    if (list.kind == ExprKind.ArrayLit && isPlain) {
+      return this.literalPromiseValues(list, wanted, word, module);
+    }
+
+    const given = this.typed(list, undefined, module);
+    const base = this.types.definedType(given);
+    if (base.kind == TypeKind.Array && this.isPlainPromised(base.item)) {
+      return { element: this.awaitedValue(base.item), tuple: [] };
+    }
+    if (base.kind != TypeKind.Tuple) {
+      return undefined;
+    }
+    if (!base.items.every((item) => this.isPlainPromised(item))) {
+      return undefined;
+    }
+
+    return { tuple: base.items.map((item) => this.awaitedValue(item)) };
+  }
+
+  private isPlainPromised(type: Type): boolean {
+    return type.kind == TypeKind.Promise || this.awaitedType(type) == type;
+  }
+
+  private literalPromiseValues(
+    list: ArrayLitExpr,
+    wanted: Type | undefined,
+    word: string,
+    module: int,
+  ): PromiseValues | undefined {
+    if (list.elements.length == 0) {
+      if (wanted == undefined) {
+        this.report(module, list.loc, Code.PromiseListNoType, { word });
+
+        return undefined;
+      }
+
+      return { element: wanted, tuple: [] };
+    }
+
+    const types: Type[] = [];
+
+    for (const element of list.elements) {
+      const type = this.typed(element.expr, undefined, module);
+      if (type.kind == TypeKind.Error || !this.isPlainPromised(type)) {
+        return undefined;
+      }
+      if (type.kind == TypeKind.Void) {
+        this.report(module, element.expr.loc, Code.PromiseVoidGiven, { word });
+
+        return undefined;
+      }
+
+      types.push(this.types.apparent(type));
+    }
+
+    const common = this.commonPromised(types);
+    if (common != undefined) {
+      return { element: this.awaitedValue(common), tuple: [] };
+    }
+
+    return { tuple: types.map((type) => this.awaitedValue(type)) };
+  }
+
+  private commonPromised(types: Type[]): Type | undefined {
+    let common: Type | undefined = types[0];
+
+    for (const type of types) {
+      if (common != undefined && common != type) {
+        common = this.unifier.unify(common, type);
+      }
+    }
+
+    if (common == undefined || common.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return common;
+  }
+
+  private settledElement(
+    element: Type | undefined,
+    wanted: Type | undefined,
+  ): Type {
+    const nothing = this.store.plain(TypeKind.Void);
+    if (element == undefined) {
+      return nothing;
+    }
+    if (element.kind != TypeKind.Never) {
+      return element;
+    }
+
+    return wanted ?? nothing;
+  }
+
+  private allResult(
+    values: PromiseValues,
+    wanted: Type | undefined,
+    list: Expr,
+    module: int,
+  ): Type {
+    if (values.tuple.length > 0) {
+      if (values.tuple.some((type) => type.kind == TypeKind.Void)) {
+        this.report(module, list.loc, Code.PromiseAllVoid, kNoDetails);
+
+        return this.store.plain(TypeKind.Error);
+      }
+
+      return this.store.promiseOf(this.store.plainTuple(values.tuple));
+    }
+
+    const element = this.settledElement(values.element, wanted);
+    if (element.kind == TypeKind.Void) {
+      return this.store.promiseOf(element);
+    }
+
+    return this.store.promiseOf(this.store.arrayOf(element));
+  }
+
+  private raceResult(
+    values: PromiseValues,
+    wanted: Type | undefined,
+    list: Expr,
+    word: string,
+    module: int,
+  ): Type {
+    let joined = values.element ?? values.tuple[0];
+
+    for (const part of values.tuple) {
+      const next = this.raceJoin(joined, part);
+      if (joined != undefined && next == undefined) {
+        this.report(module, list.loc, Code.PromiseRaceDiffer, {
+          word,
+          first: this.text.of(joined),
+          second: this.text.of(part),
+        });
+
+        return this.store.plain(TypeKind.Error);
+      }
+
+      joined = next;
+    }
+
+    return this.store.promiseOf(this.settledElement(joined, wanted));
+  }
+
+  private raceJoin(joined: Type | undefined, part: Type): Type | undefined {
+    if (joined == undefined || joined == part) {
+      return part;
+    }
+
+    const isVoid = joined.kind == TypeKind.Void || part.kind == TypeKind.Void;
+    if (isVoid) {
+      return undefined;
+    }
+
+    const common = this.unifier.unionUnify(joined, part);
+    if (common == undefined || common.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    return common;
+  }
+}

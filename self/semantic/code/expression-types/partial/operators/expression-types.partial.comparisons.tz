@@ -263,7 +263,8 @@ partial class ExpressionTypes {
     module: int,
   ): Type {
     const expected = this.types.wantedPart(wanted);
-    const left = this.typed(expr.lhs, expected, module);
+    const given = this.typed(expr.lhs, expected, module);
+    const left = this.matchBeforeList(given, expr.rhs);
     if (left.kind == TypeKind.Error) {
       return left;
     }

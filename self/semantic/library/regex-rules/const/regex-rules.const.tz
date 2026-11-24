@@ -41,6 +41,7 @@ export const kReplaceName = "replace";
 export const kReplaceAllName = "replaceAll";
 export const kSplitName = "split";
 export const kMatchName = "match";
+export const kMatchArrayName = "RegExpMatchArray";
 export const kMatchAllName = "matchAll";
 export const kSearchName = "search";
 export const kRegexSpecials = "^$\\.*+?()[]{}|/";

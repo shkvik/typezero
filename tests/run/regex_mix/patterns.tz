@@ -21,7 +21,7 @@ export class Scanner {
 export function parseSetting(line: string): Result<{ key: string; value: string }, string> {
   const m = /^\s*(?<key>[a-z_]+)\s*=\s*(?<value>.*?)\s*$/.exec(line)
   if (m == undefined) return err(`not a setting: '${line}'`)
-  return ok({ key: m.groups.key, value: m.groups.value })
+  return ok({ key: m.groups.key ?? "", value: m.groups.value ?? "" })
 }
 
 export const report = "Ann paid 19.99 and 0.01; Bob paid -5 and 2.5"

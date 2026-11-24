@@ -561,3 +561,8 @@ export type ReflectedNew = {
   readonly args: Type[];
   readonly module: int;
 };
+
+export type PromiseValues = {
+  readonly element?: Type;
+  readonly tuple: Type[];
+};
