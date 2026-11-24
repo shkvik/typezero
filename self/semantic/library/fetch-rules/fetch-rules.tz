@@ -1,0 +1,527 @@
+import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
+import { SourceError } from "../../../diagnostic/types/message.types.tz";
+import { kDigits } from "../regex-parser/const/regex-parser.const.tz";
+import {
+  kAddressMarks,
+  kAuthorityEnds,
+  kBodilessMethods,
+  kDeleteCode,
+  kForbiddenMethods,
+  kHighFirstCode,
+  kHighLastCode,
+  kHighestPort,
+  kHostForbidden,
+  kHostSetter,
+  kHostnameSetter,
+  kHrefSetter,
+  kImplicitGet,
+  kLastVisibleCode,
+  kNewlineCode,
+  kNoBase,
+  kPortDigits,
+  kPortSetter,
+  kProtocolSetter,
+  kReturnCode,
+  kSchemeEnd,
+  kSchemeMarks,
+  kSpaceCode,
+  kSpecialSchemes,
+  kTabCode,
+  kTokenSymbols,
+  kUrlSpaces,
+  kWithBase,
+  kWithPort,
+} from "./const/fetch-rules.const.tz";
+
+export class FetchRules {
+  public urlTextError(
+    loc: int,
+    text: string,
+    isBased: boolean,
+  ): SourceError | undefined {
+    if (this.isValidUrlText(text, isBased)) {
+      return undefined;
+    }
+
+    const other = this.baseHint(isBased);
+
+    return { code: Code.UrlNotValid, loc, details: { word: text, other } };
+  }
+
+  public urlUnknownError(loc: int, isBased: boolean): SourceError {
+    const other = this.basedHint(isBased);
+
+    return { code: Code.UrlNewUnknown, loc, details: { other } };
+  }
+
+  public urlBaseError(loc: int): SourceError {
+    return { code: Code.UrlNewBase, loc, details: kNoDetails };
+  }
+
+  public requestUrlError(loc: int, text: string): SourceError | undefined {
+    if (!this.isValidUrlText(text, false)) {
+      return { code: Code.UrlNotValid, loc, details: { word: text, other: "" } };
+    }
+    if (this.hasCredentials(text)) {
+      return { code: Code.RequestCredentials, loc, details: kNoDetails };
+    }
+
+    return undefined;
+  }
+
+  public requestUnknownError(loc: int): SourceError {
+    return { code: Code.RequestUnknownInput, loc, details: kNoDetails };
+  }
+
+  public methodError(loc: int, method: string): SourceError | undefined {
+    if (!this.isToken(method)) {
+      return {
+        code: Code.RequestMethodInvalid,
+        loc,
+        details: { word: method },
+      };
+    }
+
+    const upper = method.toUpperCase();
+    if (kForbiddenMethods.includes(upper)) {
+      return {
+        code: Code.RequestMethodForbidden,
+        loc,
+        details: { word: method },
+      };
+    }
+
+    return undefined;
+  }
+
+  public isBodiless(method: string): boolean {
+    return kBodilessMethods.includes(method);
+  }
+
+  public getBodyError(loc: int, method: string, isGiven: boolean): SourceError {
+    const other = this.implicitHint(isGiven);
+
+    return {
+      code: Code.RequestGetBody,
+      loc,
+      details: { word: method, other },
+    };
+  }
+
+  public headerNameError(loc: int, name: string): SourceError | undefined {
+    if (this.isToken(name)) {
+      return undefined;
+    }
+
+    return { code: Code.HeaderNameNotToken, loc, details: { word: name } };
+  }
+
+  public headerValueError(loc: int, text: string): SourceError | undefined {
+    if (this.isValidHeaderValue(text)) {
+      return undefined;
+    }
+
+    return { code: Code.HeaderValueBreak, loc, details: kNoDetails };
+  }
+
+  public noBodyError(loc: int, status: decimal): SourceError {
+    return {
+      code: Code.ResponseStatusNoBody,
+      loc,
+      details: { word: `${status}` },
+    };
+  }
+
+  public statusTextError(loc: int, text: string): SourceError | undefined {
+    const units = this.unitsOf(text);
+    if (units.every((unit) => this.isReasonUnit(unit))) {
+      return undefined;
+    }
+
+    return { code: Code.ResponseStatusText, loc, details: kNoDetails };
+  }
+
+  public setterError(
+    loc: int,
+    setter: string,
+    value: string,
+  ): SourceError | undefined {
+    switch (setter) {
+      case kHrefSetter:
+        return this.requestHrefError(loc, value);
+      case kProtocolSetter:
+        return this.protocolError(loc, value);
+      case kPortSetter:
+        return this.portError(loc, value);
+      case kHostSetter:
+        return this.hostError(loc, value, true);
+      case kHostnameSetter:
+        return this.hostError(loc, value, false);
+      default:
+        return undefined;
+    }
+  }
+
+  public isValidUrlText(text: string, isRelative: boolean): boolean {
+    const trimmed = this.trimmed(text);
+    const colon = trimmed.indexOf(":");
+    if (!this.hasScheme(trimmed, colon)) {
+      return isRelative;
+    }
+
+    const scheme = trimmed.slice(0, colon).toLowerCase();
+    if (!kSpecialSchemes.includes(scheme)) {
+      return true;
+    }
+
+    const rest = this.withoutSlashes(trimmed.slice(colon + 1));
+    const authority = this.authorityOf(rest);
+    const at = authority.lastIndexOf("@");
+    const hostPort = authority.slice(at + 1);
+
+    return this.isHostPortValid(hostPort);
+  }
+
+  private requestHrefError(loc: int, value: string): SourceError | undefined {
+    if (this.isValidUrlText(value, false)) {
+      return undefined;
+    }
+
+    return { code: Code.UrlNotValid, loc, details: { word: value, other: "" } };
+  }
+
+  private protocolError(loc: int, value: string): SourceError | undefined {
+    const scheme = this.withoutColon(value);
+    const first = scheme.slice(0, 1);
+    const isGood =
+      scheme != "" &&
+      this.isLetter(first) &&
+      scheme.split("").every((char) => this.isSchemeChar(char));
+    if (isGood) {
+      return undefined;
+    }
+
+    return { code: Code.UrlNotProtocol, loc, details: { word: value } };
+  }
+
+  private portError(loc: int, value: string): SourceError | undefined {
+    if (value == "" || this.isValidPort(value)) {
+      return undefined;
+    }
+
+    return { code: Code.UrlNotPort, loc, details: { word: value } };
+  }
+
+  private hostError(
+    loc: int,
+    value: string,
+    hasPort: boolean,
+  ): SourceError | undefined {
+    const host = this.settableHost(value, hasPort);
+    const port = this.portAfter(value.slice(host.length));
+    const isWrong =
+      !this.isValidHost(host) || (port != "" && !this.isValidPort(port));
+    if (!isWrong) {
+      return undefined;
+    }
+
+    const other = this.portHint(hasPort);
+
+    return { code: Code.UrlNotHost, loc, details: { word: value, other } };
+  }
+
+  private settableHost(value: string, hasPort: boolean): string {
+    if (!hasPort) {
+      return value;
+    }
+    if (!value.startsWith("[")) {
+      return this.beforeColon(value);
+    }
+
+    const close = value.indexOf("]");
+    if (close < 0) {
+      return value;
+    }
+
+    return value.slice(0, close + 1);
+  }
+
+  private portAfter(tail: string): string {
+    if (tail.startsWith(":")) {
+      return tail.slice(1);
+    }
+
+    return tail;
+  }
+
+  private isHostPortValid(hostPort: string): boolean {
+    if (!hostPort.startsWith("[")) {
+      const host = this.beforeColon(hostPort);
+      const port = hostPort.slice(host.length + 1);
+
+      return this.isValidHost(host) && (port == "" || this.isValidPort(port));
+    }
+
+    const close = hostPort.indexOf("]");
+    if (close < 0) {
+      return this.isValidHost(hostPort);
+    }
+
+    const host = hostPort.slice(0, close + 1);
+    const tail = hostPort.slice(close + 1);
+    if (tail != "" && !tail.startsWith(":")) {
+      return false;
+    }
+
+    const port = tail.slice(1);
+
+    return this.isValidHost(host) && (port == "" || this.isValidPort(port));
+  }
+
+  private isValidHost(host: string): boolean {
+    if (host == "") {
+      return false;
+    }
+    if (host.startsWith("[")) {
+      return this.isBracketHost(host);
+    }
+
+    return this.unitsOf(host).every((unit) => this.isHostUnit(unit));
+  }
+
+  private isBracketHost(host: string): boolean {
+    if (!host.endsWith("]") || host.length < 3) {
+      return false;
+    }
+
+    const inner = host.slice(1, host.length - 1);
+
+    return inner.split("").every((char) => this.isAddressChar(char));
+  }
+
+  private isAddressChar(char: string): boolean {
+    const lowered = char.toLowerCase();
+    const isHex = kDigits.includes(char) || (lowered >= "a" && lowered <= "f");
+
+    return isHex || kAddressMarks.includes(char);
+  }
+
+  private isHostUnit(unit: int): boolean {
+    const char = String.fromCharCode(unit);
+
+    return (
+      unit > kSpaceCode && unit != kDeleteCode && !kHostForbidden.includes(char)
+    );
+  }
+
+  private isValidPort(port: string): boolean {
+    const isDigits = port.split("").every((char) => kDigits.includes(char));
+    if (!isDigits || port.length > kPortDigits) {
+      return false;
+    }
+
+    return this.portNumber(port) <= kHighestPort;
+  }
+
+  private portNumber(port: string): int {
+    let value = 0;
+
+    for (let index = 0; index < port.length && index < kPortDigits; index++) {
+      const digit = kDigits.indexOf(port.slice(index, index + 1));
+
+      value = value * 10 + digit;
+    }
+
+    return value;
+  }
+
+  private hasScheme(text: string, colon: int): boolean {
+    if (colon <= 0 || !this.isLetter(text.slice(0, 1))) {
+      return false;
+    }
+
+    const scheme = text.slice(0, colon);
+
+    return scheme.split("").every((char) => this.isSchemeChar(char));
+  }
+
+  private isSchemeChar(char: string): boolean {
+    return (
+      this.isLetter(char) ||
+      kDigits.includes(char) ||
+      kSchemeMarks.includes(char)
+    );
+  }
+
+  private isLetter(char: string): boolean {
+    return (char >= "a" && char <= "z") || (char >= "A" && char <= "Z");
+  }
+
+  private isToken(text: string): boolean {
+    if (text == "") {
+      return false;
+    }
+
+    return text.split("").every((char) => this.isTokenChar(char));
+  }
+
+  private isTokenChar(char: string): boolean {
+    return (
+      this.isLetter(char) ||
+      kDigits.includes(char) ||
+      kTokenSymbols.includes(char)
+    );
+  }
+
+  private isValidHeaderValue(text: string): boolean {
+    const units = this.unitsOf(text);
+    let start = 0;
+    let end = units.length;
+
+    while (start < end && this.isHttpSpace(units[start] ?? 0)) {
+      start += 1;
+    }
+
+    while (end > start && this.isHttpSpace(units[end - 1] ?? 0)) {
+      end -= 1;
+    }
+
+    const inner = units.slice(start, end);
+
+    return inner.every((unit) => !this.isBreakUnit(unit));
+  }
+
+  private isHttpSpace(unit: int): boolean {
+    return (
+      unit == kSpaceCode ||
+      unit == kTabCode ||
+      unit == kNewlineCode ||
+      unit == kReturnCode
+    );
+  }
+
+  private isBreakUnit(unit: int): boolean {
+    return unit == 0 || unit == kNewlineCode || unit == kReturnCode;
+  }
+
+  private isReasonUnit(unit: int): boolean {
+    const isVisible = unit >= kSpaceCode && unit <= kLastVisibleCode;
+    const isHigh = unit >= kHighFirstCode && unit <= kHighLastCode;
+
+    return unit == kTabCode || isVisible || isHigh;
+  }
+
+  private hasCredentials(url: string): boolean {
+    const scheme = url.indexOf(kSchemeEnd);
+    if (scheme < 0) {
+      return false;
+    }
+
+    const rest = url.slice(scheme + kSchemeEnd.length);
+
+    return this.authorityOf(rest).includes("@");
+  }
+
+  private authorityOf(rest: string): string {
+    let end = 0;
+
+    while (end < rest.length && !this.isAuthorityEnd(rest, end)) {
+      end += 1;
+    }
+
+    return rest.slice(0, end);
+  }
+
+  private isAuthorityEnd(text: string, at: int): boolean {
+    return kAuthorityEnds.includes(text.slice(at, at + 1));
+  }
+
+  private withoutSlashes(text: string): string {
+    let start = 0;
+
+    while (start < text.length && this.isSlash(text.slice(start, start + 1))) {
+      start += 1;
+    }
+
+    return text.slice(start);
+  }
+
+  private isSlash(char: string): boolean {
+    return char == "/" || char == "\\";
+  }
+
+  private trimmed(text: string): string {
+    let start = 0;
+    let end = text.length;
+
+    while (start < end && kUrlSpaces.includes(text.slice(start, start + 1))) {
+      start += 1;
+    }
+
+    while (end > start && kUrlSpaces.includes(text.slice(end - 1, end))) {
+      end -= 1;
+    }
+
+    return text.slice(start, end);
+  }
+
+  private beforeColon(text: string): string {
+    const colon = text.indexOf(":");
+    if (colon < 0) {
+      return text;
+    }
+
+    return text.slice(0, colon);
+  }
+
+  private withoutColon(text: string): string {
+    if (text.endsWith(":")) {
+      return text.slice(0, text.length - 1);
+    }
+
+    return text;
+  }
+
+  private unitsOf(text: string): int[] {
+    const units: int[] = [];
+
+    for (let index = 0; index < text.length; index++) {
+      units.push(text.charCodeAt(index) ?? 0);
+    }
+
+    return units;
+  }
+
+  private baseHint(isBased: boolean): string {
+    if (isBased) {
+      return "";
+    }
+
+    return kNoBase;
+  }
+
+  private basedHint(isBased: boolean): string {
+    if (isBased) {
+      return kWithBase;
+    }
+
+    return "";
+  }
+
+  private portHint(hasPort: boolean): string {
+    if (hasPort) {
+      return kWithPort;
+    }
+
+    return "";
+  }
+
+  private implicitHint(isGiven: boolean): string {
+    if (isGiven) {
+      return "";
+    }
+
+    return kImplicitGet;
+  }
+}

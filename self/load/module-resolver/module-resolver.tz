@@ -1,3 +1,4 @@
+import "./partial/module-resolver.partial.packages.tz";
 import { readdirSync, statSync } from "node:fs";
 import { basename, extname, isAbsolute, join } from "node:path";
 import { Code } from "../../diagnostic/code.tz";
@@ -12,6 +13,7 @@ import {
   kSourceExtension,
   kWindowsSeparator,
 } from "../../program/module/const/module.const.tz";
+import { PackageGraph } from "../package-graph/package-graph.tz";
 import {
   Location,
   LocationKind,
@@ -37,15 +39,18 @@ import {
 
 export class ModuleResolver {
   private readonly listings: Map<string, string[]>;
+  private readonly packages: PackageGraph;
 
-  public constructor() {
+  public constructor(packages: PackageGraph) {
     this.listings = new Map<string, string[]>();
+    this.packages = packages;
   }
 
   public resolve(
     directory: string,
     spec: string,
     fromLibrary: boolean,
+    home: int,
   ): Resolution {
     const module = kLibrary.imported(spec, fromLibrary);
     if (module != undefined) {
@@ -58,22 +63,22 @@ export class ModuleResolver {
       return this.problem(Code.ImportPathBackslash, kNoDetails);
     }
     if (!this.isRelative(spec)) {
-      return this.outsideProgram(spec);
+      return this.outsideProgram(spec, home);
     }
     if (this.namesDirectory(spec)) {
       const index = this.indexOf(spec);
 
-      return this.found(directory, spec, [index]);
+      return this.found(directory, spec, [index], home);
     }
 
-    const foreign = this.foreignProblem(directory, spec);
+    const foreign = this.foreignProblem(directory, spec, spec);
     if (foreign != undefined) {
       return foreign;
     }
 
     const candidates = this.candidates(spec);
 
-    return this.found(directory, spec, candidates);
+    return this.found(directory, spec, candidates, home);
   }
 
   private problem(code: Code, details: Details): Resolution {
@@ -135,9 +140,9 @@ export class ModuleResolver {
     );
   }
 
-  private outsideProgram(spec: string): Resolution {
+  private outsideProgram(spec: string, home: int): Resolution {
     if (spec.startsWith(kJsrPrefix) || spec.startsWith(kNpmPrefix)) {
-      return { kind: ResolutionKind.Package };
+      return this.packageResolution(spec, home);
     }
 
     const misplaced =
@@ -149,7 +154,7 @@ export class ModuleResolver {
       return this.problem(Code.ImportPathNotRelative, kNoDetails);
     }
 
-    return { kind: ResolutionKind.Package };
+    return this.packageResolution(spec, home);
   }
 
   private namesDirectory(spec: string): boolean {
@@ -183,24 +188,25 @@ export class ModuleResolver {
 
   private foreignProblem(
     directory: string,
-    spec: string,
+    file: string,
+    shown: string,
   ): Resolution | undefined {
-    const extension = extname(spec);
+    const extension = extname(file);
     if (!kForeignExtensions.includes(extension)) {
       return undefined;
     }
-    if (spec.endsWith(kTypeScriptDeclarations)) {
+    if (file.endsWith(kTypeScriptDeclarations)) {
       return this.problem(Code.ImportTypeScriptDeclarations, kNoDetails);
     }
 
-    const word = spec.slice(0, spec.length - extension.length);
-    const location = this.locate(directory, spec);
+    const word = shown.slice(0, shown.length - extension.length);
+    const location = this.locate(directory, file);
     if (location.kind == LocationKind.Absent) {
       return this.problem(Code.ImportForeignFile, { word });
     }
 
-    const path = basename(spec);
-    const stem = basename(word);
+    const path = basename(file);
+    const stem = path.slice(0, path.length - extension.length);
     const other = `${stem}${kSourceExtension}`;
 
     return this.problem(Code.ImportForeignFileExists, { word, path, other });
@@ -210,11 +216,16 @@ export class ModuleResolver {
     directory: string,
     spec: string,
     candidates: string[],
+    home: int,
   ): Resolution {
     for (const candidate of candidates) {
       const location = this.locate(directory, candidate);
       if (location.kind == LocationKind.Found) {
-        return { kind: ResolutionKind.File, file: location.file };
+        return {
+          kind: ResolutionKind.File,
+          file: location.file,
+          package: home,
+        };
       }
       if (location.kind == LocationKind.OtherCase) {
         return this.problem(Code.ImportFileNameCase, {
@@ -240,10 +251,13 @@ export class ModuleResolver {
       return this.problem(Code.ImportFileNotFound, { word: spec, path });
     }
 
+    const stem = other.slice(0, other.length - kTypeScriptExtension.length);
+
     return this.problem(Code.ImportFileNotFoundTypeScript, {
       word: spec,
       path,
       other,
+      second: `${stem}${kSourceExtension}`,
     });
   }
 

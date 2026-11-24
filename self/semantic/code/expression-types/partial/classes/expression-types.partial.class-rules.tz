@@ -15,6 +15,7 @@ import {
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
 import {
+  InstanceType,
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
@@ -217,7 +218,7 @@ partial class ExpressionTypes {
   ): void {
     if (
       object.kind != TypeKind.Instance ||
-      this.modules.isLibraryModule(object.module)
+      this.isDeclaredLibrary(object.module, object.loc)
     ) {
       return;
     }
@@ -245,9 +246,7 @@ partial class ExpressionTypes {
       return;
     }
     if (field == undefined) {
-      this.report(module, target.loc, Code.MethodReplaced, { word, first });
-
-      return;
+      return this.methodTargetReport(object, target, owner, module);
     }
     if (this.checkAccess(entry, field.access, target, module)) {
       return;
@@ -375,5 +374,37 @@ partial class ExpressionTypes {
     this.report(module, expr.loc, Code.ThisInFunction, kNoDetails);
 
     return true;
+  }
+
+  private methodTargetReport(
+    object: InstanceType,
+    target: MemberExpr,
+    owner: ClassDecl,
+    module: int,
+  ): void {
+    const word = target.name;
+    const first = owner.name ?? "";
+    if (!this.modules.isTypedLibrary(object.module)) {
+      return this.report(module, target.loc, Code.MethodReplaced, {
+        word,
+        first,
+      });
+    }
+
+    const head = word.slice(0, 1).toUpperCase();
+    const setter = `set${head}${word.slice(1)}`;
+    const found = this.classMember(object, setter).entry;
+    if (found != undefined && found.field == undefined) {
+      return this.report(module, target.loc, Code.LibrarySetterMethod, {
+        word,
+        first,
+        other: setter,
+      });
+    }
+
+    this.report(module, target.loc, Code.LibraryMethodAssigned, {
+      word,
+      first,
+    });
   }
 }

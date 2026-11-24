@@ -1,0 +1,527 @@
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { kBuiltinModules } from "../../program/library/builtin-modules/const/builtin-modules.const.tz";
+import { JsonModule } from "../json-module/json-module.tz";
+import {
+  JsonNode,
+  JsonNodeKind,
+} from "../json-module/types/json-module.types.tz";
+import {
+  Manifest,
+  ManifestDependency,
+  PackageExport,
+} from "../package-graph/types/package-graph.types.tz";
+import {
+  kAliasPunctuation,
+  kDependenciesField,
+  kDependenciesObjectText,
+  kDependencyStringText,
+  kEscapeMark,
+  kExportFileText,
+  kExportKeyText,
+  kExportsField,
+  kExportsShapeText,
+  kHerePrefix,
+  kHexBase,
+  kHexDigits,
+  kInvalidJsonText,
+  kMainField,
+  kManifestFile,
+  kNameField,
+  kOtherManifests,
+  kResultPackage,
+  kRootExport,
+  kRootObjectText,
+  kScopeMark,
+  kScopeSeparator,
+  kScriptCommandText,
+  kScriptsField,
+  kScriptsObjectText,
+  kSourceExtension,
+  kTextFields,
+  kUnicodeDigits,
+  kUnicodeEscape,
+  kVersionField,
+} from "./const/manifest-reader.const.tz";
+
+export class ManifestReader {
+  public readonly errors: string[];
+
+  public constructor() {
+    this.errors = [];
+  }
+
+  public findAbove(directory: string): string | undefined {
+    let current = resolve(directory);
+    let parent = dirname(current);
+
+    while (!this.isFile(join(current, kManifestFile))) {
+      if (parent == current) {
+        return undefined;
+      }
+
+      current = parent;
+      parent = dirname(current);
+    }
+
+    return join(current, kManifestFile);
+  }
+
+  public canonical(directory: string): string {
+    const absolute = resolve(directory);
+    const real = realpathSync(absolute);
+
+    return real.unwrapOr(absolute);
+  }
+
+  public isDirectory(path: string): boolean {
+    const stat = statSync(path);
+    if (stat.isErr()) {
+      return false;
+    }
+
+    return stat.value.isDirectory();
+  }
+
+  public read(path: string): Manifest | undefined {
+    const root = this.rootOf(path);
+    if (root == undefined) {
+      return undefined;
+    }
+    if (root.kind != JsonNodeKind.Object) {
+      return this.failed(path, kRootObjectText);
+    }
+
+    const texts = new Map<string, string>();
+    const exports: PackageExport[] = [];
+    const dependencies: ManifestDependency[] = [];
+
+    for (let index = 0; index < root.keys.length; index++) {
+      const key = this.decoded(root.keys[index] ?? "");
+      const value = root.items[index];
+      if (value == undefined) {
+        continue;
+      }
+
+      const isFine = this.isFieldFine(path, key, value, texts);
+      const isListFine = this.isListFine(
+        path,
+        key,
+        value,
+        exports,
+        dependencies,
+      );
+      if (!isFine || !isListFine) {
+        return undefined;
+      }
+    }
+
+    return {
+      path,
+      directory: this.canonical(dirname(path)),
+      name: texts.get(kNameField) ?? "",
+      version: texts.get(kVersionField) ?? "",
+      main: texts.get(kMainField) ?? "",
+      exports,
+      dependencies,
+    };
+  }
+
+  public readPackageDirectory(directory: string): Manifest | undefined {
+    const file = join(directory, kManifestFile);
+    if (this.isFile(file) && this.namesSourceFiles(file)) {
+      return this.read(file);
+    }
+
+    for (const name of kOtherManifests) {
+      const other = join(directory, name);
+      if (this.isFile(other)) {
+        return this.otherManifest(other, directory);
+      }
+    }
+
+    return {
+      path: "",
+      directory: this.canonical(directory),
+      name: "",
+      version: "",
+      main: "",
+      exports: [],
+      dependencies: [],
+    };
+  }
+
+  private otherManifest(path: string, directory: string): Manifest | undefined {
+    const root = this.rootOf(path);
+    if (root == undefined) {
+      return undefined;
+    }
+
+    const exports: PackageExport[] = [];
+    const exported = this.fieldOf(root, kExportsField);
+    if (exported != undefined && !this.isExportsFine(path, exported, exports)) {
+      return undefined;
+    }
+
+    return {
+      path,
+      directory: this.canonical(directory),
+      name: this.fieldText(root, kNameField),
+      version: this.fieldText(root, kVersionField),
+      main: "",
+      exports,
+      dependencies: [],
+    };
+  }
+
+  private rootOf(path: string): JsonNode | undefined {
+    const bytes = readFileSync(path);
+    if (bytes.isErr()) {
+      this.errors.push(`cannot read '${path}'`);
+
+      return undefined;
+    }
+
+    const json = new JsonModule(bytes.value.toString("utf8"));
+    const root = json.rootNode();
+    if (root == undefined) {
+      return this.failedNode(path, kInvalidJsonText);
+    }
+
+    return root;
+  }
+
+  private isFieldFine(
+    path: string,
+    key: string,
+    value: JsonNode,
+    texts: Map<string, string>,
+  ): boolean {
+    if (kTextFields.includes(key)) {
+      const text = this.textOf(value);
+      if (text == undefined) {
+        return this.failedField(path, `'${key}' is a string`);
+      }
+
+      texts.set(key, text);
+
+      return true;
+    }
+    if (key == kScriptsField) {
+      return this.isScriptsFine(path, value);
+    }
+
+    return true;
+  }
+
+  private isListFine(
+    path: string,
+    key: string,
+    value: JsonNode,
+    exports: PackageExport[],
+    dependencies: ManifestDependency[],
+  ): boolean {
+    if (key == kExportsField) {
+      return this.isExportsFine(path, value, exports);
+    }
+    if (key == kDependenciesField) {
+      return this.isDependenciesFine(path, value, dependencies);
+    }
+
+    return true;
+  }
+
+  private isScriptsFine(path: string, value: JsonNode): boolean {
+    if (value.kind != JsonNodeKind.Object) {
+      return this.failedField(path, kScriptsObjectText);
+    }
+
+    const isEveryText = value.items.every(
+      (item) => item.kind == JsonNodeKind.String,
+    );
+    if (!isEveryText) {
+      return this.failedField(path, kScriptCommandText);
+    }
+
+    return true;
+  }
+
+  private isExportsFine(
+    path: string,
+    value: JsonNode,
+    exports: PackageExport[],
+  ): boolean {
+    if (value.kind == JsonNodeKind.String) {
+      return this.isExportFine(path, kRootExport, value, exports);
+    }
+    if (value.kind != JsonNodeKind.Object) {
+      return this.failedField(path, kExportsShapeText);
+    }
+
+    for (let index = 0; index < value.keys.length; index++) {
+      const key = this.decoded(value.keys[index] ?? "");
+      const target = value.items[index];
+      if (key != kRootExport && !key.startsWith(kHerePrefix)) {
+        return this.failedField(path, kExportKeyText);
+      }
+      if (target == undefined) {
+        continue;
+      }
+      if (!this.isExportFine(path, key, target, exports)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private isExportFine(
+    path: string,
+    key: string,
+    target: JsonNode,
+    exports: PackageExport[],
+  ): boolean {
+    const text = this.textOf(target);
+    if (text == undefined) {
+      return this.failedField(path, kExportFileText);
+    }
+
+    exports.push({ key, file: this.withoutHere(text) });
+
+    return true;
+  }
+
+  private isDependenciesFine(
+    path: string,
+    value: JsonNode,
+    dependencies: ManifestDependency[],
+  ): boolean {
+    if (value.kind != JsonNodeKind.Object) {
+      return this.failedField(path, kDependenciesObjectText);
+    }
+
+    for (let index = 0; index < value.keys.length; index++) {
+      const alias = this.decoded(value.keys[index] ?? "");
+      const problem = this.aliasProblem(alias);
+      if (problem != undefined) {
+        return this.failedField(path, problem);
+      }
+
+      const spec = this.textOf(value.items[index]);
+      if (spec == undefined) {
+        return this.failedField(path, kDependencyStringText);
+      }
+
+      dependencies.push({ alias, spec });
+    }
+
+    return true;
+  }
+
+  private aliasProblem(alias: string): string | undefined {
+    if (!this.isAliasValid(alias)) {
+      return `'${alias}' cannot be imported as a package name: write a name like 'zod' or '@std/path'`;
+    }
+
+    const isBuiltin = kBuiltinModules.has(alias) || alias == kResultPackage;
+    if (isBuiltin) {
+      return `'${alias}' is the name of a module built into tz; give the package another name`;
+    }
+
+    return undefined;
+  }
+
+  private isAliasValid(alias: string): boolean {
+    if (!alias.startsWith(kScopeMark)) {
+      return this.isAliasPart(alias);
+    }
+
+    const rest = alias.slice(kScopeMark.length);
+    const slash = rest.indexOf(kScopeSeparator);
+    if (slash < 0) {
+      return false;
+    }
+
+    const scope = rest.slice(0, slash);
+    const name = rest.slice(slash + 1);
+
+    return this.isAliasPart(scope) && this.isAliasPart(name);
+  }
+
+  private isAliasPart(part: string): boolean {
+    if (part == "" || part.startsWith(".")) {
+      return false;
+    }
+
+    return part.split("").every((char) => this.isAliasChar(char));
+  }
+
+  private isAliasChar(char: string): boolean {
+    const isLetter =
+      (char >= "a" && char <= "z") || (char >= "A" && char <= "Z");
+    const isDigit = char >= "0" && char <= "9";
+
+    return isLetter || isDigit || kAliasPunctuation.includes(char);
+  }
+
+  private namesSourceFiles(path: string): boolean {
+    const bytes = readFileSync(path);
+    if (bytes.isErr()) {
+      return false;
+    }
+
+    const json = new JsonModule(bytes.value.toString("utf8"));
+    const root = json.rootNode();
+    if (root == undefined || root.kind != JsonNodeKind.Object) {
+      return true;
+    }
+
+    const main = this.fieldOf(root, kMainField);
+    const exported = this.fieldOf(root, kExportsField);
+    if (main == undefined && exported == undefined) {
+      return true;
+    }
+    if (this.isSourceText(main) || this.isSourceText(exported)) {
+      return true;
+    }
+    if (exported == undefined || exported.kind != JsonNodeKind.Object) {
+      return false;
+    }
+
+    return exported.items.some((item) => this.isSourceText(item));
+  }
+
+  private isSourceText(node: JsonNode | undefined): boolean {
+    const text = this.textOf(node);
+
+    return text != undefined && text.endsWith(kSourceExtension);
+  }
+
+  private fieldOf(root: JsonNode, name: string): JsonNode | undefined {
+    for (let index = 0; index < root.keys.length; index++) {
+      if (this.decoded(root.keys[index] ?? "") == name) {
+        return root.items[index];
+      }
+    }
+
+    return undefined;
+  }
+
+  private fieldText(root: JsonNode, name: string): string {
+    const field = this.fieldOf(root, name);
+
+    return this.textOf(field) ?? "";
+  }
+
+  private textOf(node: JsonNode | undefined): string | undefined {
+    if (node == undefined || node.kind != JsonNodeKind.String) {
+      return undefined;
+    }
+
+    return this.decoded(node.raw);
+  }
+
+  private decoded(raw: string): string {
+    const inner = raw.slice(1, raw.length - 1);
+    if (!inner.includes(kEscapeMark)) {
+      return inner;
+    }
+
+    let text = "";
+    let index = 0;
+
+    while (index < inner.length) {
+      const char = inner.slice(index, index + 1);
+      if (char != kEscapeMark) {
+        text += char;
+        index += 1;
+
+        continue;
+      }
+
+      const letter = inner.slice(index + 1, index + 2);
+      if (letter == kUnicodeEscape) {
+        const digits = inner.slice(index + 2, index + 2 + kUnicodeDigits);
+
+        text += String.fromCharCode(this.hexValue(digits));
+        index += 2 + kUnicodeDigits;
+
+        continue;
+      }
+
+      text += this.escapedChar(letter);
+      index += 2;
+    }
+
+    return text;
+  }
+
+  private hexValue(digits: string): int {
+    const lowered = digits.toLowerCase();
+    let value = 0;
+
+    for (let offset = 0; offset < kUnicodeDigits; offset++) {
+      const digit = lowered.slice(offset, offset + 1);
+      const found = kHexDigits.indexOf(digit);
+      if (found < 0) {
+        return value;
+      }
+
+      value = value * kHexBase + found;
+    }
+
+    return value;
+  }
+
+  private escapedChar(letter: string): string {
+    switch (letter) {
+      case "n":
+        return "\n";
+      case "t":
+        return "\t";
+      case "r":
+        return "\r";
+      case "b":
+        return "\b";
+      case "f":
+        return "\f";
+      default:
+        return letter;
+    }
+  }
+
+  private withoutHere(file: string): string {
+    if (file.startsWith(kHerePrefix)) {
+      return file.slice(kHerePrefix.length);
+    }
+
+    return file;
+  }
+
+  private isFile(path: string): boolean {
+    const stat = statSync(path);
+    if (stat.isErr()) {
+      return false;
+    }
+
+    return stat.value.isFile();
+  }
+
+  private failed(path: string, message: string): Manifest | undefined {
+    this.errors.push(`${path}: ${message}`);
+
+    return undefined;
+  }
+
+  private failedNode(path: string, message: string): JsonNode | undefined {
+    this.errors.push(`${path}: ${message}`);
+
+    return undefined;
+  }
+
+  private failedField(path: string, message: string): boolean {
+    this.errors.push(`${path}: ${message}`);
+
+    return false;
+  }
+}

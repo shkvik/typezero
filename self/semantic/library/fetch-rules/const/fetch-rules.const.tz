@@ -1,0 +1,91 @@
+export const kUrlName = "URL";
+export const kRequestName = "Request";
+export const kResponseName = "Response";
+export const kHeadersName = "Headers";
+export const kUrlField = "url";
+export const kHrefName = "href";
+export const kStatusField = "status";
+export const kStatusTextField = "statusText";
+export const kHeadersField = "headers";
+export const kMethodField = "method";
+export const kBodyField = "body";
+export const kGetMethod = "GET";
+export const kSetterPrefix = "set";
+export const kHrefSetter = "setHref";
+export const kProtocolSetter = "setProtocol";
+export const kHostSetter = "setHost";
+export const kHostnameSetter = "setHostname";
+export const kPortSetter = "setPort";
+export const kUrlSetters = [
+  "setHref",
+  "setProtocol",
+  "setHost",
+  "setHostname",
+  "setPort",
+];
+export const kHeaderNameMethods = ["append", "set", "get", "has", "delete"];
+export const kHeaderValueMethods = ["append", "set"];
+export const kBodilessMethods = ["GET", "HEAD"];
+export const kForbiddenMethods = ["CONNECT", "TRACE", "TRACK"];
+export const kEmptyStatuses = [204, 205, 304];
+export const kSpecialSchemes = ["http", "https", "ws", "wss", "ftp"];
+export const kUrlSpaces = [" ", "\t", "\n", "\r", "\f", "\v"];
+export const kHostForbidden = [
+  "#",
+  "%",
+  "/",
+  ":",
+  "<",
+  ">",
+  "?",
+  "@",
+  "[",
+  "\\",
+  "]",
+  "^",
+  "|",
+];
+export const kAuthorityEnds = ["/", "\\", "?", "#"];
+export const kSchemeMarks = ["+", "-", "."];
+export const kAddressMarks = [":", "."];
+export const kTokenSymbols = [
+  "!",
+  "#",
+  "$",
+  "%",
+  "&",
+  "'",
+  "*",
+  "+",
+  "-",
+  ".",
+  "^",
+  "_",
+  "`",
+  "|",
+  "~",
+];
+export const kSchemeEnd = "://";
+export const kHighestPort = 65535;
+export const kPortDigits = 5;
+export const kSpaceCode = 32;
+export const kDeleteCode = 127;
+export const kTabCode = 9;
+export const kNewlineCode = 10;
+export const kReturnCode = 13;
+export const kLastVisibleCode = 126;
+export const kHighFirstCode = 128;
+export const kHighLastCode = 255;
+export const kNoBase = " without a base";
+export const kWithPort = ", with an optional port";
+export const kWithBase = ", base";
+export const kImplicitGet = " (a request without 'method' is a GET)";
+export const kReadableStreamName = "ReadableStream";
+export const kFormDataName = "FormData";
+export const kRequestInitName = "RequestInit";
+export const kRequestOptionsName = "RequestOptions";
+export const kStreamBodyHint =
+  "; 'new Response' and 'new Request' take no streams: a stream is sent with 'Response.stream(stream, init)', 'Request.stream(input, stream, options)' or 'fetch(url, { body: stream })'";
+export const kRequestInitHint =
+  "; 'new Request' takes 'RequestOptions', whose body is never a stream; a 'RequestInit' goes to 'fetch(url, init)'";
+export const kConcurrentMapName = "ConcurrentMap";

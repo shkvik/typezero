@@ -740,7 +740,7 @@ export const kMessages: Record<Code, Message> = {
     text: "cannot find '{word}': there is no {path}",
   },
   [Code.ImportFileNotFoundTypeScript]: {
-    text: "cannot find '{word}': there is no {path}; there is {other}, and the files of tz end in .tz: rename it so that it ends in .tz",
+    text: "cannot find '{word}': there is no {path}; there is {other}, and the files of tz end in .tz: rename it to {second}",
   },
   [Code.BuiltinModuleUnknown]: {
     text: "there is no built-in module '{word}'",
@@ -4218,5 +4218,140 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.ReferenceDirective]: {
     text: "'/// <reference>' is not supported: files are joined by imports; import what the file needs by name, e.g. 'import { a } from \"./x\"'",
+  },
+  [Code.RegexInvalid]: {
+    text: "invalid regular expression: {word}",
+  },
+  [Code.PackageNpm]: {
+    text: "npm packages are not supported: npm has compiled JavaScript, not TypeScript sources (docs/packages.md); look for the package on JSR or take its sources from git",
+  },
+  [Code.PackageWithoutManifest]: {
+    text: "'{word}' is the name of a package, but there is no package.json to list packages in; make one with 'tz init' and add the package with 'tz add {word}' (a file of the program is imported by its relative path, e.g. './{word}')",
+  },
+  [Code.PackageJsrNotName]: {
+    text: "'{word}' does not name a JSR package: 'jsr:@scope/name@^1'",
+  },
+  [Code.PackageJsrByName]: {
+    text: "import a package by its name in package.json: add it with 'tz add jsr:{word}' and write 'from \"{first}\"'",
+  },
+  [Code.PackageBadName]: {
+    text: "'{word}' does not name a package: a scoped name is '@scope/name'",
+  },
+  [Code.PackageNotDependency]: {
+    text: "'{word}' is not a dependency in {path}; add it with 'tz add {word}'",
+  },
+  [Code.PackageNotDependencyOf]: {
+    text: "'{word}' is not a dependency of package {other}{place}",
+  },
+  [Code.PackageNoExport]: {
+    text: "'{word}' names nothing {other} exports; it exports {path}",
+  },
+  [Code.PackageFileMissing]: {
+    text: "cannot find '{word}' in package {other} ({path}), which '{place}' names",
+  },
+  [Code.PackageFilesMissing]: {
+    text: "cannot find '{word}': package {other} has no {first} or {second} (in {path})",
+  },
+  [Code.PackageNoEntry]: {
+    text: "package {other} names no file to import: it has no package.json with \"main\" or \"exports\", and none of {word} (in {path})",
+  },
+  [Code.PackageForeignNamed]: {
+    text: "'{word}' names {path}, and the files of tz end in .tz: rename it to {other}",
+  },
+  [Code.DecoratorOldObject]: {
+    text: "the decorator gives '{word}' another class in its place, and static field '{other}' holds an object made before, of the class as declared; make that object where it is used, or keep it outside the class",
+  },
+  [Code.UrlNotValid]: {
+    text: "'{word}' is not a valid URL{other}",
+  },
+  [Code.UrlNotProtocol]: {
+    text: "'{word}' is not a protocol: a protocol is a letter, then letters, digits and +-., e.g. 'https:'",
+  },
+  [Code.UrlNotPort]: {
+    text: "'{word}' is not a port: a port is digits from 0 to 65535, or '' for none",
+  },
+  [Code.UrlNotHost]: {
+    text: "'{word}' is not a host{other}",
+  },
+  [Code.UrlNewUnknown]: {
+    text: "'new URL' of a text known only when the program runs may fail, and 'new' gives no Result; write 'URL.parse(text{other})', which gives a Result<URL, UrlError>",
+  },
+  [Code.UrlNewBase]: {
+    text: "'new URL' with a base known only when the program runs may fail, and 'new' gives no Result; write 'URL.parse(input, base)', which gives a Result<URL, UrlError>",
+  },
+  [Code.HeaderNameNotToken]: {
+    text: "'{word}' is not a name of a header: a name is letters, digits and !#$%&'*+-.^_`|~, without spaces",
+  },
+  [Code.HeaderValueBreak]: {
+    text: "the value of a header cannot hold a line break or NUL",
+  },
+  [Code.ResponseStatusNoBody]: {
+    text: "a response with status {word} has no body; write 'new Response(undefined, { status: {word} })'",
+  },
+  [Code.ResponseStatusText]: {
+    text: "a statusText holds only tabs, spaces and visible characters up to U+00FF: no line breaks, no other control characters",
+  },
+  [Code.RequestCredentials]: {
+    text: "a request cannot go to a URL with a user name or a password in it, as in node: send them in a header, e.g. 'authorization'",
+  },
+  [Code.RequestUnknownInput]: {
+    text: "'new Request' of a text known only when the program runs may fail, and 'new' gives no Result; parse the text with 'URL.parse(text)' and pass the URL, or give the text to fetch, which gives a Result",
+  },
+  [Code.RequestMethodInvalid]: {
+    text: "'{word}' is not a valid HTTP method",
+  },
+  [Code.RequestMethodForbidden]: {
+    text: "fetch does not make requests with method '{word}'",
+  },
+  [Code.RequestGetBody]: {
+    text: "a {word} request has no body{other}; give the method, e.g. 'method: \"POST\"'",
+  },
+  [Code.LibrarySetterMethod]: {
+    text: "'{word}' is a method of '{first}'; change it with '{other}(...)'",
+  },
+  [Code.LibraryMethodAssigned]: {
+    text: "'{word}' is a method of '{first}' and cannot be assigned: the object changes what it gives itself",
+  },
+  [Code.ForOfConcurrentMap]: {
+    text: "a ConcurrentMap is not iterated directly, as other tasks change it during the loop; iterate a snapshot: 'for (const [key, value] of map.entries())'",
+  },
+  [Code.EventMapInvalid]: {
+    text: "the type argument of 'EventEmitter' is its event map: each event with the arguments its listeners get, as a tuple, e.g. 'EventEmitter<{ data: [chunk: string]; end: [] }>'; {word}",
+  },
+  [Code.EventServiceInMap]: {
+    text: "every emitter has the event '{word}', whose listeners get the name of the event and the listener, '[change: { event: string; listener: unknown }]', but the event map gives it '{first}'; leave it out of the map",
+  },
+  [Code.EventSeveral]: {
+    text: "{word} carries '{first}', but an event carries one value: give it an object, e.g. 'message: [message: { from: User; text: string }]' (docs/events.md, section 2)",
+  },
+  [Code.EventNotInMap]: {
+    text: "the emitter has no event '{word}': its event map has {first}{other}",
+  },
+  [Code.EventNameUnknown]: {
+    text: "the name of the event must be known when compiling, as a string literal, e.g. '{word}(\"data\", ...)'; to name events known only when the program runs, give the emitter a map that takes any name, e.g. 'new EventEmitter<{ [name: string]: [msg: string] }>()'",
+  },
+  [Code.EmitTypeArgs]: {
+    text: "'{word}' takes no type arguments: the event map of the emitter gives the types",
+  },
+  [Code.EmitArity]: {
+    text: "the listeners of '{word}' get '{first}': {second}, but got {other}",
+  },
+  [Code.EmitterMethodValue]: {
+    text: "'{word}' of an emitter can only be called: the event map checks each call by the name of its event; wrap it in an arrow, e.g. '(listener) => bus.{word}(\"data\", listener)'",
+  },
+  [Code.ListenerNotFunction]: {
+    text: "a listener is a function, but this is '{first}'",
+  },
+  [Code.ListenerGets]: {
+    text: "the listeners of '{word}' get '{first}', but this function is '{second}'",
+  },
+  [Code.ListenerAsyncResult]: {
+    text: "an async listener returns 'Promise<void>', but this one returns '{first}', which the emitter would drop; wrap it, e.g. 'async (...) => { await f(...) }'",
+  },
+  [Code.ListenerThisType]: {
+    text: "the listener takes 'this' of type '{first}', but it gets the emitter, of type '{second}'",
+  },
+  [Code.ListenerAsyncThis]: {
+    text: "an async listener cannot take 'this'; use the emitter by name",
   },
 };

@@ -16,8 +16,10 @@ import {
   ModuleLink,
 } from "../../program/module/types/module.types.tz";
 import { LibraryMentions } from "../library-mentions/library-mentions.tz";
+import { ManifestReader } from "../manifest-reader/manifest-reader.tz";
 import { ModuleResolver } from "../module-resolver/module-resolver.tz";
 import { ResolutionKind } from "../module-resolver/types/module-resolver.types.tz";
+import { PackageGraph } from "../package-graph/package-graph.tz";
 import { Parser } from "../parser/parser.tz";
 import { PartialClasses } from "../partial-classes/partial-classes.tz";
 import {
@@ -39,13 +41,23 @@ export class Loader {
   private readonly libraries: Map<string, int>;
   private readonly order: OpenModule[];
   private readonly unreadable: string[];
+  private readonly packageErrors: string[];
+  private readonly packageOf: Map<int, int>;
 
   public constructor(entryPath: string, libraryDirectory: string) {
+    const entryDirectory = dirname(entryPath);
+    const reader = new ManifestReader();
+    const packages = new PackageGraph(reader);
+
+    packages.build(entryDirectory);
+
     this.entryPath = entryPath;
-    this.entryDirectory = dirname(entryPath);
+    this.entryDirectory = entryDirectory;
     this.libraryDirectory = libraryDirectory;
     this.parser = new Parser([]);
-    this.resolver = new ModuleResolver();
+    this.resolver = new ModuleResolver(packages);
+    this.packageErrors = reader.errors;
+    this.packageOf = new Map<int, int>();
     this.mentions = new LibraryMentions();
     this.opened = [];
     this.byFile = new Map<string, int>();
@@ -82,6 +94,7 @@ export class Loader {
     return {
       program: { modules, order, globals, ambient, builtins },
       unreadable: this.unreadable,
+      packageErrors: this.packageErrors,
     };
   }
 
@@ -209,9 +222,15 @@ export class Loader {
 
     const directory = dirname(module.file);
     const fromLibrary = module.parsed.source.isLibrary;
-    const resolution = this.resolver.resolve(directory, from.path, fromLibrary);
+    const home = this.packageOf.get(module.id) ?? 0;
+    const resolution = this.resolver.resolve(
+      directory,
+      from.path,
+      fromLibrary,
+      home,
+    );
     if (resolution.kind == ResolutionKind.File) {
-      return this.linkedFile(from, resolution.file);
+      return this.linkedFile(from, resolution.file, resolution.package);
     }
     if (resolution.kind == ResolutionKind.Library) {
       return this.linkedLibrary(from, resolution.module);

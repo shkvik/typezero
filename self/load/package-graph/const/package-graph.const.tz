@@ -1,0 +1,28 @@
+export const kLocalPrefix = "file:";
+export const kRemotePrefixes = ["jsr:", "github:", "git:"];
+export const kNpmPrefix = "npm:";
+export const kLocalStarts = ["./", "../"];
+export const kLocalNames = [".", ".."];
+export const kLatestWord = "latest";
+export const kFirstRange = "^1";
+export const kVersionStarts = [
+  "^",
+  "~",
+  "<",
+  ">",
+  "=",
+  "*",
+  "0",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+];
+export const kUniqueMark = "~";
+export const kNpmSourceText =
+  "npm packages are not supported: npm has compiled JavaScript, not TypeScript sources (docs/packages.md); look for the package on JSR ('jsr:@scope/name@^1') or take its sources from git ('github:user/repo@v1.0.0')";

@@ -869,6 +869,18 @@ self/             компилятор на tz, пробный (порт compile
                   вызова и `await` забываются сужения переменных, которыми пользуется чужая
                   функция; flow/…ranges — отрезок значения из литерала массива (`elementRanges`);
                   load/loader/…files — `rejectReferences` (`/// <reference>`);
+                  добавлено 24.11 вечером: library/regex-syntax/ — RegexSyntax (свой разбор
+                  синтаксиса регулярного выражения, перенос regex_compile.c без сборки
+                  программы) с помощниками regex-cursor/ (RegexCursor: чтение по кодовым
+                  единицам), regex-escapes/ (RegexEscapes: escape, `\p{…}`, имена групп),
+                  regex-classes/ (RegexClasses: классы, множества v), regex-quantifiers/
+                  (RegexQuantifiers), имена свойств Unicode — regex-syntax/const;
+                  load/manifest-reader/ — ManifestReader (package.json: поиск вверх, поля,
+                  ошибки), load/package-graph/ — PackageGraph (корень и пакеты `file:`),
+                  load/module-resolver/…packages — импорт пакета по имени; library/fetch-rules/
+                  — FetchRules (литералы URL, заголовков, методов, статусов) и часть
+                  library/…fetch; ModuleQuestions.isTypedLibrary — модули библиотеки на tz
+                  (tz:url, tz:fetch, tz:http, tz:sync), чьи классы идут веткой программы;
                   semantic/flow/truth-rules/ — TruthRules: можно ли проверять значение
                   типа как условие (problemOf) и какой ошибкой ответить (answerOf);
                   semantic/declaration/scope-stack/ — ScopeStack: состояние обхода — стек областей

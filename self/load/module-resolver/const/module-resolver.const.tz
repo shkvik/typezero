@@ -12,6 +12,16 @@ export const kNpmPrefix = "npm:";
 export const kTypeScriptExtension = ".ts";
 export const kTypeScriptDeclarations = ".d.ts";
 export const kCandidateJoin = " or ";
+export const kExportJoin = ", ";
+export const kScopeMark = "@";
+export const kResultPackage = "neverthrow";
+export const kNoManifestPlace = ", which has no package.json";
+export const kEntryCandidates = [
+  "mod.tz",
+  "index.tz",
+  "src/index.tz",
+  "src/mod.tz",
+];
 
 export const kForeignExtensions = [
   ".ts",

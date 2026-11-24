@@ -204,8 +204,12 @@ partial class ExpressionTypes {
     const set = draft.inference;
 
     switch (form) {
-      case ArgumentForm.Plain:
-        return this.plainArgument(draft, index, expr, pattern, module);
+      case ArgumentForm.Plain: {
+        const shape = draft.target.shape;
+        const slot = this.generics.slotAt(shape, index, arg.spread);
+
+        return this.plainArgument(draft, index, expr, slot, module);
+      }
       case ArgumentForm.LiteralText:
         return this.literalText(draft, index, expr, pattern, module);
       case ArgumentForm.Contextual:
@@ -235,12 +239,28 @@ partial class ExpressionTypes {
         const given = this.typed(expr, undefined, module);
         const isWhole = this.isWholeArgument(expr, given, module);
         const strength = CandidateStrength.Strong;
+        const inferred = this.optionalGiven(draft, index, pattern, given);
 
         draft.given.set(index, given);
 
-        return this.inferArgument(set, pattern, given, strength, isWhole);
+        return this.inferArgument(set, pattern, inferred, strength, isWhole);
       }
     }
+  }
+
+  private optionalGiven(
+    draft: GenericDraft,
+    index: int,
+    pattern: Type,
+    given: Type,
+  ): Type {
+    const param = draft.target.shape.params[index];
+    const isOptional = param != undefined && param.optional;
+    if (!isOptional || this.types.isOptional(pattern)) {
+      return given;
+    }
+
+    return this.types.definedType(given);
   }
 
   private isSkippedNull(expr: Expr, module: int): boolean {

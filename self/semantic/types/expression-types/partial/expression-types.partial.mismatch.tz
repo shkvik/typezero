@@ -17,7 +17,7 @@ partial class ExpressionTypes {
       unknownCheck: this.unknownCheckText(expr, given, wanted),
       isFresh: this.shapes.isFresh(expr),
       isPlaced: this.isPlacedLiteral(expr, wanted, module),
-      place,
+      place: place + this.fetchMismatchHint(given, wanted),
       both: this.bothText(expr, wanted, module),
     };
     const isBytes =

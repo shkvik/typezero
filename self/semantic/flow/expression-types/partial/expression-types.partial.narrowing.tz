@@ -489,7 +489,7 @@ partial class ExpressionTypes {
     if (target == undefined || target.kind != SymbolKind.Class) {
       return undefined;
     }
-    if (this.modules.isLibraryModule(target.module)) {
+    if (this.isDeclaredLibrary(target.module, target.loc)) {
       return this.libraryDerived(rhs.name, parts);
     }
 

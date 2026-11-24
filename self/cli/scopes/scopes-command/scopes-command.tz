@@ -37,7 +37,7 @@ export class ScopesCommand {
     const loaded = source.load(entry);
     const program = loaded.program;
 
-    this.report.unreadable(loaded.unreadable);
+    this.report.loadProblems(loaded);
     this.report.moduleErrors(program);
     if (this.report.hasFailed()) {
       return;

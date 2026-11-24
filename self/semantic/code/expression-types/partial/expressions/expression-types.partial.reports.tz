@@ -41,7 +41,7 @@ partial class ExpressionTypes {
 
   private report(module: int, loc: int, code: Code, details: Details): void {
     const record = this.record(module);
-    if (record == undefined) {
+    if (record == undefined || this.modules.isTypedLibrary(module)) {
       return;
     }
 

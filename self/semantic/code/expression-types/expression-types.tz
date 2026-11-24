@@ -97,6 +97,8 @@ import "./partial/statements/expression-types.partial.for-await.tz";
 import "../../library/expression-types/partial/expression-types.partial.reflect-calls.tz";
 import "../../library/expression-types/partial/expression-types.partial.reflected-news.tz";
 import "../../library/expression-types/partial/regex/expression-types.partial.matches.tz";
+import "../../library/expression-types/partial/fetch/expression-types.partial.fetch.tz";
+import "../../library/expression-types/partial/events/expression-types.partial.emitters.tz";
 import "../../library/expression-types/partial/expression-types.partial.console-calls.tz";
 import "./partial/statements/expression-types.partial.statement-values.tz";
 import "./partial/calls/expression-types.partial.construction.tz";
@@ -237,6 +239,8 @@ import {
 } from "../../../program/ast/types/ast.types.classes.tz";
 import { IntlDateRules } from "../../library/intl-date-rules/intl-date-rules.tz";
 import { ExpressionCollector } from "../expression-collector/expression-collector.tz";
+import { FetchRules } from "../../library/fetch-rules/fetch-rules.tz";
+import { EventRules } from "../../library/event-rules/event-rules.tz";
 
 export class ExpressionTypes {
   private readonly store: TypeStore;
@@ -304,6 +308,8 @@ export class ExpressionTypes {
   private readonly collector: ExpressionCollector;
   private readonly disposes: DisposeRules;
   private readonly intlDates: IntlDateRules;
+  private readonly fetches: FetchRules;
+  private readonly events: EventRules;
   private readonly resolver: TypeResolver;
   private readonly errors: ErrorLog;
   private readonly memberObjects: Set<Expr>;
@@ -550,6 +556,8 @@ export class ExpressionTypes {
     const collector = new ExpressionCollector();
     const disposes = new DisposeRules(collector);
     const intlDates = new IntlDateRules(text, intl);
+    const fetches = new FetchRules();
+    const events = new EventRules(store, text);
 
     this.store = store;
     this.text = text;
@@ -616,6 +624,8 @@ export class ExpressionTypes {
     this.collector = collector;
     this.disposes = disposes;
     this.intlDates = intlDates;
+    this.fetches = fetches;
+    this.events = events;
     this.resolver = resolver;
     this.errors = new ErrorLog();
     this.memberObjects = new Set<Expr>();

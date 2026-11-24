@@ -442,7 +442,10 @@ partial class ExpressionTypes {
 
   private isBodyWalked(fn: FunctionDecl, module: int): boolean {
     const opened = this.program.modules[module];
-    if (opened == undefined || opened.source.isLibrary) {
+    if (opened == undefined) {
+      return false;
+    }
+    if (opened.source.isLibrary && !this.modules.isTypedLibrary(module)) {
       return false;
     }
     if (fn.role?.method == MethodKind.Abstract) {

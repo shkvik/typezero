@@ -1,0 +1,20 @@
+export const kListenerMethods = [
+  "on",
+  "once",
+  "addListener",
+  "prependListener",
+  "prependOnceListener",
+  "off",
+  "removeListener",
+];
+export const kServiceEvents = ["newListener", "removeListener"];
+export const kChangeEventField = "event";
+export const kChangeListenerField = "listener";
+export const kEachEvent = "each event";
+export const kNoEvents = "none";
+export const kEmitName = "emit";
+export const kEmitterName = "EventEmitter";
+export const kEmitterBaseName = "EventEmitterBase";
+export const kEventsModule = "node:events";
+export const kThisParam = "this";
+export const kListenerQueries = ["listeners", "rawListeners"];

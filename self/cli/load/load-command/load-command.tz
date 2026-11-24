@@ -31,7 +31,7 @@ export class LoadCommand {
     const source = new ProgramSource();
     const loaded = source.load(entry);
 
-    this.report.unreadable(loaded.unreadable);
+    this.report.loadProblems(loaded);
     this.printProgram(loaded.program);
     this.report.moduleErrors(loaded.program);
   }

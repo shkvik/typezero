@@ -482,7 +482,7 @@ partial class ExpressionTypes {
     instance: InstanceType,
     visiting: Set<ClassDecl>,
   ): boolean {
-    if (this.modules.isLibraryModule(instance.module)) {
+    if (this.isDeclaredLibrary(instance.module, instance.loc)) {
       return false;
     }
 

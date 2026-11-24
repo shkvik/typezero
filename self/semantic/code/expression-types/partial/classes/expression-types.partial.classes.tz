@@ -157,7 +157,7 @@ partial class ExpressionTypes {
     if (target.kind != SymbolKind.Class) {
       return this.valueOwner(target);
     }
-    if (this.modules.isLibraryModule(target.module)) {
+    if (this.isDeclaredLibrary(target.module, target.loc)) {
       return undefined;
     }
 

@@ -43,4 +43,5 @@ export type Request = {
 export type LoadResult = {
   readonly program: Program;
   readonly unreadable: string[];
+  readonly packageErrors: string[];
 };

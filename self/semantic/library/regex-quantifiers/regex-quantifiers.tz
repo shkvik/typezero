@@ -1,0 +1,131 @@
+import { RegexCursor } from "../regex-cursor/regex-cursor.tz";
+import {
+  kDecimalBase,
+  kIncompleteQuantifierText,
+  kInfinity,
+  kQuantifierOrderText,
+  kRepeatChars,
+} from "../regex-syntax/const/regex-syntax.const.tz";
+import { RegexBraces } from "../regex-syntax/types/regex-syntax.types.tz";
+
+export class RegexQuantifiers {
+  private readonly cursor: RegexCursor;
+
+  public constructor(cursor: RegexCursor) {
+    this.cursor = cursor;
+  }
+
+  public quantifier(): boolean {
+    const cursor = this.cursor;
+    const at = cursor.index;
+    if (kRepeatChars.includes(cursor.current())) {
+      cursor.index += 1;
+      cursor.accept("?");
+
+      return true;
+    }
+    if (!cursor.isAt("{")) {
+      return true;
+    }
+
+    const braces = this.braces();
+    if (braces == undefined) {
+      return this.loneBrace();
+    }
+    if (braces.least > braces.most) {
+      cursor.index = at;
+
+      return cursor.fail(kQuantifierOrderText);
+    }
+
+    cursor.accept("?");
+
+    return true;
+  }
+
+  private loneBrace(): boolean {
+    if (this.cursor.isUnicode) {
+      return this.cursor.fail(kIncompleteQuantifierText);
+    }
+
+    return true;
+  }
+
+  public isQuantifierStart(): boolean {
+    const cursor = this.cursor;
+    if (kRepeatChars.includes(cursor.current())) {
+      return true;
+    }
+    if (!cursor.isAt("{")) {
+      return false;
+    }
+
+    const start = cursor.index;
+    const braces = this.braces();
+
+    cursor.index = start;
+
+    return braces != undefined;
+  }
+
+  private braces(): RegexBraces | undefined {
+    const cursor = this.cursor;
+    const start = cursor.index;
+
+    cursor.index += 1;
+
+    const least = this.number();
+    if (least < 0) {
+      cursor.index = start;
+
+      return undefined;
+    }
+
+    const most = this.mostCount(least);
+    if (!cursor.accept("}")) {
+      cursor.index = start;
+
+      return undefined;
+    }
+
+    return { least, most };
+  }
+
+  private mostCount(least: int): int {
+    const cursor = this.cursor;
+    if (!cursor.accept(",")) {
+      return least;
+    }
+    if (!cursor.isDigitAt(cursor.index)) {
+      return kInfinity;
+    }
+
+    return this.number();
+  }
+
+  private number(): int {
+    const cursor = this.cursor;
+    if (!cursor.isDigitAt(cursor.index)) {
+      return -1;
+    }
+
+    let value = 0;
+
+    while (cursor.isDigitAt(cursor.index)) {
+      const digit = cursor.digitAt(cursor.index);
+
+      value = this.clamped(value * kDecimalBase + digit);
+      cursor.index += 1;
+    }
+
+    return value;
+  }
+
+  public clamped(value: int): int {
+    if (value > kInfinity - 1) {
+      return kInfinity - 1;
+    }
+
+    return value;
+  }
+}

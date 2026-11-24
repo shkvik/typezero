@@ -204,7 +204,8 @@ export class FunctionRules {
     const target = this.types.definedType(wanted);
     const isPair =
       given.kind == TypeKind.Function && target.kind == TypeKind.Function;
-    if (expr.kind != ExprKind.Name || !isPair) {
+    const isNamed = expr.kind == ExprKind.Name || expr.kind == ExprKind.Member;
+    if (!isNamed || !isPair) {
       return false;
     }
     if (given.kind != TypeKind.Function || target.kind != TypeKind.Function) {

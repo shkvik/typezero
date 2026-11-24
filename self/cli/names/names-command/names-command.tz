@@ -32,7 +32,7 @@ export class NamesCommand {
     const source = new ProgramSource();
     const loaded = source.load(entry);
 
-    this.report.unreadable(loaded.unreadable);
+    this.report.loadProblems(loaded);
     this.report.moduleErrors(loaded.program);
     if (this.report.hasFailed()) {
       return;

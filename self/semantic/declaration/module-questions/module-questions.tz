@@ -1,4 +1,5 @@
 import { Program } from "../../../program/module/types/module.types.tz";
+import { kTypedLibraries } from "./const/module-questions.const.tz";
 
 export class ModuleQuestions {
   private readonly program: Program;
@@ -14,5 +15,14 @@ export class ModuleQuestions {
     }
 
     return opened.source.isLibrary;
+  }
+
+  public isTypedLibrary(module: int): boolean {
+    const opened = this.program.modules[module];
+    if (opened == undefined || !opened.source.isLibrary) {
+      return false;
+    }
+
+    return kTypedLibraries.includes(opened.name);
   }
 }

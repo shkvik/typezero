@@ -1,0 +1,231 @@
+import {
+  kDigits,
+  kSetsFlag,
+} from "../regex-parser/const/regex-parser.const.tz";
+import { kUnicodeFlag } from "../regex-rules/const/regex-rules.const.tz";
+import {
+  kHexBase,
+  kHexDigits,
+  kLeadFirst,
+  kLeadLast,
+  kMaxCodePoint,
+  kNoUnit,
+  kPairBase,
+  kPairShift,
+  kTrailFirst,
+  kTrailLast,
+} from "../regex-syntax/const/regex-syntax.const.tz";
+
+export class RegexCursor {
+  public readonly text: string;
+  public readonly isSets: boolean;
+  public readonly isUnicode: boolean;
+  public index: int;
+  public depth: int;
+  public hasNames: boolean;
+  public error: string;
+  public errorAt: int;
+
+  public constructor(text: string, flags: string) {
+    this.text = text;
+    this.isSets = flags.includes(kSetsFlag);
+    this.isUnicode = this.isSets || flags.includes(kUnicodeFlag);
+    this.index = 0;
+    this.depth = 0;
+    this.hasNames = false;
+    this.error = "";
+    this.errorAt = 0;
+  }
+
+  public isFailed(): boolean {
+    return this.error != "";
+  }
+
+  public fail(message: string): boolean {
+    if (this.error == "") {
+      this.error = message;
+      this.errorAt = this.index;
+    }
+
+    return false;
+  }
+
+  public renameError(message: string): void {
+    this.error = message;
+  }
+
+  public isAtEnd(): boolean {
+    return this.index >= this.text.length;
+  }
+
+  public charAt(at: int): string {
+    return this.text.slice(at, at + 1);
+  }
+
+  public current(): string {
+    return this.charAt(this.index);
+  }
+
+  public isAt(char: string): boolean {
+    return this.current() == char;
+  }
+
+  public isNextAt(char: string): boolean {
+    return this.charAt(this.index + 1) == char;
+  }
+
+  public isDoubleAt(char: string): boolean {
+    return this.isAt(char) && this.isNextAt(char);
+  }
+
+  public accept(char: string): boolean {
+    if (!this.isAt(char)) {
+      return false;
+    }
+
+    this.index += 1;
+
+    return true;
+  }
+
+  public unitAt(at: int): int {
+    if (at < 0 || at >= this.text.length) {
+      return kNoUnit;
+    }
+
+    return this.text.charCodeAt(at) ?? kNoUnit;
+  }
+
+  public isDigitAt(at: int): boolean {
+    return kDigits.includes(this.charAt(at));
+  }
+
+  public digitAt(at: int): int {
+    return kDigits.indexOf(this.charAt(at));
+  }
+
+  public hexAt(at: int): int {
+    const char = this.charAt(at).toLowerCase();
+
+    return kHexDigits.indexOf(char);
+  }
+
+  public isLead(unit: int): boolean {
+    return unit >= kLeadFirst && unit <= kLeadLast;
+  }
+
+  public isTrail(unit: int): boolean {
+    return unit >= kTrailFirst && unit <= kTrailLast;
+  }
+
+  public pairAt(at: int): int {
+    const lead = this.unitAt(at);
+    const trail = this.unitAt(at + 1);
+    if (!this.isLead(lead) || !this.isTrail(trail)) {
+      return kNoUnit;
+    }
+
+    return this.joined(lead, trail);
+  }
+
+  public nextChar(): int {
+    const pair = this.pairAt(this.index);
+    if (this.isUnicode && pair != kNoUnit) {
+      this.index += 2;
+
+      return pair;
+    }
+
+    const unit = this.unitAt(this.index);
+
+    this.index += 1;
+
+    return unit;
+  }
+
+  public readHex(count: int): int {
+    let value = 0;
+
+    for (let offset = 0; offset < count; offset++) {
+      const digit = this.hexAt(this.index + offset);
+      if (digit < 0) {
+        return kNoUnit;
+      }
+
+      value = value * kHexBase + digit;
+    }
+
+    this.index += count;
+
+    return value;
+  }
+
+  public unicodeEscape(isUnicode: boolean): int {
+    if (isUnicode && this.isAt("{")) {
+      return this.bracedCodePoint();
+    }
+
+    const value = this.readHex(4);
+    if (value < 0 || !isUnicode || !this.isLead(value)) {
+      return value;
+    }
+
+    return this.trailedEscape(value);
+  }
+
+  private bracedCodePoint(): int {
+    const start = this.index;
+    let value = 0;
+    let digits = 0;
+
+    this.index += 1;
+
+    let digit = this.hexAt(this.index);
+
+    while (digit >= 0) {
+      value = value * kHexBase + digit;
+      this.index += 1;
+      digits += 1;
+
+      if (value > kMaxCodePoint) {
+        this.index = start;
+
+        return kNoUnit;
+      }
+
+      digit = this.hexAt(this.index);
+    }
+
+    if (digits == 0 || !this.accept("}")) {
+      this.index = start;
+
+      return kNoUnit;
+    }
+
+    return value;
+  }
+
+  private trailedEscape(lead: int): int {
+    const before = this.index;
+    if (!this.isAt("\\") || !this.isNextAt("u")) {
+      return lead;
+    }
+
+    this.index += 2;
+
+    const trail = this.readHex(4);
+    if (trail >= 0 && this.isTrail(trail)) {
+      return this.joined(lead, trail);
+    }
+
+    this.index = before;
+
+    return lead;
+  }
+
+  private joined(lead: int, trail: int): int {
+    const high = (lead - kLeadFirst) * kPairShift;
+
+    return kPairBase + high + (trail - kTrailFirst);
+  }
+}

@@ -124,6 +124,29 @@ partial class ExpressionTypes {
   }
 
   private fixedCount(object: Expr, module: int): decimal | undefined {
+    const count = this.constLength(object, module);
+    if (count == undefined || count.term != kZeroTerm) {
+      return undefined;
+    }
+
+    return count.offset;
+  }
+
+  private pinnedLinear(linear: Linear | undefined): Linear | undefined {
+    if (linear == undefined || linear.term == kZeroTerm) {
+      return linear;
+    }
+
+    const least = this.bestRoom(kZeroTerm, linear.term);
+    const most = this.bestRoom(linear.term, kZeroTerm);
+    if (least == undefined || most == undefined || least != -most) {
+      return linear;
+    }
+
+    return { term: kZeroTerm, offset: least + linear.offset };
+  }
+
+  private constLength(object: Expr, module: int): Linear | undefined {
     if (object.kind != ExprKind.Name) {
       return undefined;
     }
@@ -139,12 +162,7 @@ partial class ExpressionTypes {
       return undefined;
     }
 
-    const count = this.sizedLinear(init, target.module);
-    if (count == undefined || count.term != kZeroTerm) {
-      return undefined;
-    }
-
-    return count.offset;
+    return this.sizedLinear(init, target.module);
   }
 
   private isByteLength(expr: MemberExpr, module: int): boolean {
@@ -164,7 +182,7 @@ partial class ExpressionTypes {
       return undefined;
     }
     const base = this.linearOf(expr.lhs, module);
-    const step = this.linearOf(expr.rhs, module);
+    const step = this.pinnedLinear(this.linearOf(expr.rhs, module));
     if (base == undefined || step == undefined) {
       return undefined;
     }

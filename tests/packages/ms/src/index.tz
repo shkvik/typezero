@@ -88,11 +88,11 @@ export function parse(str: string): number | undefined {
     return undefined;
   }
 
-  // The named groups have the types the regex gives them.
+  // tz: a group of a match may be missing, so it is 'string | undefined'.
   const { value, unit = 'ms' } = match.groups;
 
   // tz: parseFloat gives a Result: an Err where JavaScript gives NaN.
-  const parsed = parseFloat(value);
+  const parsed = parseFloat(value ?? '');
   if (parsed.isErr()) {
     return undefined;
   }

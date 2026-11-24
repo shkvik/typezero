@@ -146,7 +146,8 @@ partial class ExpressionTypes {
     if (target == undefined || target.kind != SymbolKind.Function) {
       return new Map<string, Type>();
     }
-    if (this.modules.isLibraryModule(target.module)) {
+    const isTyped = this.modules.isTypedLibrary(target.module);
+    if (this.modules.isLibraryModule(target.module) && !isTyped) {
       return new Map<string, Type>();
     }
 

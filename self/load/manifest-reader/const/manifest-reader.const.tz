@@ -1,0 +1,54 @@
+export const kManifestFile = "package.json";
+export const kOtherManifests = ["jsr.json", "deno.json", "deno.jsonc"];
+export const kNameField = "name";
+export const kVersionField = "version";
+export const kMainField = "main";
+export const kScriptsField = "scripts";
+export const kExportsField = "exports";
+export const kDependenciesField = "dependencies";
+export const kTextFields = ["name", "version", "main"];
+export const kRootExport = ".";
+export const kHerePrefix = "./";
+export const kScopeMark = "@";
+export const kScopeSeparator = "/";
+export const kResultPackage = "neverthrow";
+export const kSourceExtension = ".tz";
+export const kEscapeMark = "\\";
+export const kUnicodeEscape = "u";
+export const kUnicodeDigits = 4;
+export const kHexBase = 16;
+export const kAliasPunctuation = ["-", "_", "."];
+export const kHexDigits = [
+  "0",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "a",
+  "b",
+  "c",
+  "d",
+  "e",
+  "f",
+];
+
+export const kInvalidJsonText = "the file is not valid JSON";
+export const kRootObjectText =
+  'package.json holds an object: { "name": ..., "dependencies": { ... } }';
+export const kScriptsObjectText =
+  '\'scripts\' is an object: { "start": "tz run", "build": "tz build" }';
+export const kScriptCommandText = 'a script is a command line, e.g. "tz build"';
+export const kExportFileText = "an export names a .tz file of the package";
+export const kExportsShapeText =
+  '\'exports\' is a file, or an object such as { ".": "./mod.tz", "./mini": "./mini.tz" }';
+export const kExportKeyText =
+  "an export is named '.' or './name', as imports write it after the package's name";
+export const kDependenciesObjectText =
+  '\'dependencies\' is an object: { "zod": "jsr:@tz/zod@^4" }';
+export const kDependencyStringText =
+  'a dependency is a string that says where the package comes from, e.g. "jsr:@std/path@^1"';

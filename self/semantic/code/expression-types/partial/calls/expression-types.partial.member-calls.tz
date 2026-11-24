@@ -255,8 +255,14 @@ partial class ExpressionTypes {
     wanted: Type | undefined,
     module: int,
   ): Type {
-    if (!this.modules.isLibraryModule(instance.module)) {
-      return this.methodCall(expr, member, instance, wanted, module);
+    const emitted = this.emitterCall(expr, member, instance, module);
+    if (emitted != undefined) {
+      return emitted;
+    }
+    if (!this.isDeclaredLibrary(instance.module, instance.loc)) {
+      const called = this.methodCall(expr, member, instance, wanted, module);
+
+      return this.fetchCallChecked(expr, member, instance, called, module);
     }
     if (this.types.isDate(instance)) {
       return this.dateMethodCall(expr, member, instance, wanted, module);

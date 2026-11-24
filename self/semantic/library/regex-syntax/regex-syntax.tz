@@ -1,0 +1,610 @@
+import { RegexClasses } from "../regex-classes/regex-classes.tz";
+import { RegexCursor } from "../regex-cursor/regex-cursor.tz";
+import { RegexEscapes } from "../regex-escapes/regex-escapes.tz";
+import { RegexQuantifiers } from "../regex-quantifiers/regex-quantifiers.tz";
+import {
+  kBackslashEndText,
+  kDecimalBase,
+  kDuplicateNameText,
+  kEscapeText,
+  kInvalidFlagGroupText,
+  kInvalidGroupText,
+  kInvalidQuantifierText,
+  kLoneBracketsText,
+  kMaxCaptures,
+  kMaxDepth,
+  kModifierFlags,
+  kMultipleDashesText,
+  kNamedReferenceText,
+  kNegatedProperty,
+  kNoSuchGroupText,
+  kNothingToRepeatText,
+  kPropertyEscapes,
+  kPropertyFlagText,
+  kRepeatedFlagText,
+  kTooLargeText,
+  kTooManyCapturesText,
+  kUnknownNameText,
+  kUnmatchedCloseText,
+  kUnterminatedGroupText,
+} from "./const/regex-syntax.const.tz";
+import {
+  RegexGroupEnd,
+  RegexNamedReference,
+  RegexSyntaxError,
+} from "./types/regex-syntax.types.tz";
+
+export class RegexSyntax {
+  private readonly cursor: RegexCursor;
+  private readonly escapes: RegexEscapes;
+  private readonly classes: RegexClasses;
+  private readonly quantifiers: RegexQuantifiers;
+  private readonly names: string[];
+  private readonly paths: int[][];
+  private readonly path: int[];
+  private readonly open: int[];
+  private readonly references: RegexNamedReference[];
+  private captures: int;
+  private totalCaptures: int;
+  private disjunctions: int;
+
+  public constructor(text: string, flags: string) {
+    this.cursor = new RegexCursor(text, flags);
+    this.escapes = new RegexEscapes(this.cursor);
+    this.classes = new RegexClasses(this.cursor, this.escapes);
+    this.quantifiers = new RegexQuantifiers(this.cursor);
+    this.names = [""];
+    this.paths = [[]];
+    this.path = [];
+    this.open = [];
+    this.references = [];
+    this.captures = 0;
+    this.totalCaptures = 0;
+    this.disjunctions = 0;
+  }
+
+  public check(): RegexSyntaxError | undefined {
+    const cursor = this.cursor;
+
+    this.scanCaptures();
+
+    const isParsed = this.disjunction();
+    if (isParsed && !cursor.isAtEnd()) {
+      cursor.fail(this.leftoverText());
+    }
+    if (!cursor.isFailed()) {
+      this.resolveNames();
+    }
+    if (!cursor.isFailed()) {
+      return undefined;
+    }
+
+    return { message: cursor.error, at: cursor.errorAt };
+  }
+
+  private leftoverText(): string {
+    if (this.cursor.isAt(")")) {
+      return kUnmatchedCloseText;
+    }
+
+    return kUnterminatedGroupText;
+  }
+
+  private scanCaptures(): void {
+    const cursor = this.cursor;
+    const text = cursor.text;
+    let depth = 0;
+    let index = 0;
+
+    while (index < text.length) {
+      const char = cursor.charAt(index);
+      if (char == "\\") {
+        index += 2;
+
+        continue;
+      }
+      if (char == "[" && (depth == 0 || cursor.isSets)) {
+        depth += 1;
+      }
+      if (char == "]" && depth > 0) {
+        depth -= 1;
+      }
+      if (char == "(" && depth == 0) {
+        this.countGroupAt(index);
+      }
+
+      index += 1;
+    }
+  }
+
+  private countGroupAt(index: int): void {
+    const cursor = this.cursor;
+    if (cursor.charAt(index + 1) != "?") {
+      this.totalCaptures += 1;
+
+      return;
+    }
+
+    const third = cursor.charAt(index + 3);
+    const isNamed =
+      cursor.charAt(index + 2) == "<" && third != "=" && third != "!";
+    if (isNamed) {
+      this.totalCaptures += 1;
+      cursor.hasNames = true;
+    }
+  }
+
+  private disjunction(): boolean {
+    const cursor = this.cursor;
+    const id = this.disjunctions;
+
+    this.disjunctions += 1;
+    this.path.push(id);
+    this.path.push(0);
+
+    if (!this.alternative()) {
+      return false;
+    }
+
+    let branch = 1;
+
+    while (cursor.accept("|")) {
+      this.path.splice(this.path.length - 1, 1, branch);
+
+      if (!this.alternative()) {
+        return false;
+      }
+
+      branch += 1;
+    }
+
+    this.path.splice(this.path.length - 2, 2);
+
+    return true;
+  }
+
+  private alternative(): boolean {
+    let isMore = this.term();
+
+    while (isMore) {
+      isMore = this.term();
+    }
+
+    return !this.cursor.isFailed();
+  }
+
+  private term(): boolean {
+    const cursor = this.cursor;
+    if (cursor.isAtEnd()) {
+      return false;
+    }
+
+    const char = cursor.current();
+
+    switch (char) {
+      case "|":
+      case ")":
+        return false;
+      case "^":
+      case "$":
+        cursor.index += 1;
+
+        return this.unquantifiable(false);
+      case "(":
+        return this.groupTerm();
+      case "[":
+        return this.classTerm();
+      case "\\":
+        return this.escapeTerm();
+      case "*":
+      case "+":
+      case "?":
+        return cursor.fail(kNothingToRepeatText);
+      case "{":
+        return this.braceTerm();
+      case "}":
+      case "]":
+        return this.bracketTerm();
+      default:
+        cursor.nextChar();
+
+        return this.quantifiers.quantifier();
+    }
+  }
+
+  private unquantifiable(isLook: boolean): boolean {
+    if (!this.quantifiers.isQuantifierStart()) {
+      return true;
+    }
+    if (isLook) {
+      return this.cursor.fail(kInvalidQuantifierText);
+    }
+
+    return this.cursor.fail(kNothingToRepeatText);
+  }
+
+  private groupTerm(): boolean {
+    const cursor = this.cursor;
+
+    cursor.index += 1;
+    cursor.depth += 1;
+
+    if (cursor.depth > kMaxDepth) {
+      return cursor.fail(kTooLargeText);
+    }
+
+    const end = this.group();
+
+    cursor.depth -= 1;
+
+    switch (end) {
+      case RegexGroupEnd.Failed:
+        return false;
+      case RegexGroupEnd.Fixed:
+        return this.unquantifiable(true);
+      default:
+        return this.quantifiers.quantifier();
+    }
+  }
+
+  private classTerm(): boolean {
+    const cursor = this.cursor;
+
+    cursor.index += 1;
+
+    const isFine = this.classFine();
+    if (!isFine) {
+      return false;
+    }
+
+    return this.quantifiers.quantifier();
+  }
+
+  private classFine(): boolean {
+    if (this.cursor.isSets) {
+      return this.classes.setClass();
+    }
+
+    return this.classes.legacyClass();
+  }
+
+  private braceTerm(): boolean {
+    const cursor = this.cursor;
+    if (this.quantifiers.isQuantifierStart()) {
+      return cursor.fail(kNothingToRepeatText);
+    }
+    if (cursor.isUnicode) {
+      return cursor.fail(kLoneBracketsText);
+    }
+
+    cursor.index += 1;
+
+    return this.quantifiers.quantifier();
+  }
+
+  private bracketTerm(): boolean {
+    const cursor = this.cursor;
+    if (cursor.isUnicode) {
+      return cursor.fail(kLoneBracketsText);
+    }
+
+    cursor.index += 1;
+
+    return this.quantifiers.quantifier();
+  }
+
+  private group(): RegexGroupEnd {
+    const cursor = this.cursor;
+    const at = cursor.index - 1;
+    if (!cursor.accept("?")) {
+      return this.captureGroup("", at);
+    }
+
+    const char = cursor.current();
+    const isBehind =
+      char == "<" && (cursor.isNextAt("=") || cursor.isNextAt("!"));
+    if (char == "=" || char == "!") {
+      cursor.index += 1;
+
+      return this.lookGroup(false);
+    }
+    if (isBehind) {
+      cursor.index += 2;
+
+      return this.lookGroup(true);
+    }
+    if (char == "<") {
+      cursor.index += 1;
+
+      return this.namedGroup(at);
+    }
+    if (char != ":" && !this.modifiers()) {
+      cursor.fail(kInvalidGroupText);
+
+      return RegexGroupEnd.Failed;
+    }
+
+    cursor.accept(":");
+
+    return this.closedGroup();
+  }
+
+  private captureGroup(name: string, at: int): RegexGroupEnd {
+    const cursor = this.cursor;
+
+    this.captures += 1;
+
+    if (this.captures > kMaxCaptures) {
+      cursor.fail(kTooManyCapturesText);
+
+      return RegexGroupEnd.Failed;
+    }
+
+    const path = this.path.slice();
+    if (this.isDuplicateName(name, path)) {
+      cursor.index = at;
+      cursor.fail(kDuplicateNameText);
+
+      return RegexGroupEnd.Failed;
+    }
+
+    this.names.push(name);
+    this.paths.push(path);
+
+    return this.openGroup(this.captures);
+  }
+
+  private namedGroup(at: int): RegexGroupEnd {
+    if (this.captures + 1 > kMaxCaptures) {
+      this.cursor.fail(kTooManyCapturesText);
+
+      return RegexGroupEnd.Failed;
+    }
+
+    const name = this.escapes.groupName();
+    if (name == undefined) {
+      return RegexGroupEnd.Failed;
+    }
+
+    return this.captureGroup(name, at);
+  }
+
+  private openGroup(index: int): RegexGroupEnd {
+    this.open.push(index);
+
+    if (!this.disjunction()) {
+      return RegexGroupEnd.Failed;
+    }
+
+    this.open.pop();
+
+    return this.closedEnd(RegexGroupEnd.Quantifiable);
+  }
+
+  private lookGroup(isBehind: boolean): RegexGroupEnd {
+    if (!this.disjunction()) {
+      return RegexGroupEnd.Failed;
+    }
+    if (this.cursor.isUnicode || isBehind) {
+      return this.closedEnd(RegexGroupEnd.Fixed);
+    }
+
+    return this.closedEnd(RegexGroupEnd.Quantifiable);
+  }
+
+  private closedGroup(): RegexGroupEnd {
+    if (!this.disjunction()) {
+      return RegexGroupEnd.Failed;
+    }
+
+    return this.closedEnd(RegexGroupEnd.Quantifiable);
+  }
+
+  private closedEnd(end: RegexGroupEnd): RegexGroupEnd {
+    if (this.cursor.accept(")")) {
+      return end;
+    }
+
+    this.cursor.fail(kUnterminatedGroupText);
+
+    return RegexGroupEnd.Failed;
+  }
+
+  private modifiers(): boolean {
+    const cursor = this.cursor;
+    let added = "";
+    let removed = "";
+    let hasDash = false;
+
+    while (!cursor.accept(":")) {
+      const char = cursor.current();
+      if (char == "-") {
+        if (hasDash) {
+          return cursor.fail(kMultipleDashesText);
+        }
+
+        hasDash = true;
+        cursor.index += 1;
+
+        continue;
+      }
+      if (!kModifierFlags.includes(char)) {
+        return cursor.fail(kInvalidGroupText);
+      }
+      if (added.includes(char) || removed.includes(char)) {
+        return cursor.fail(kRepeatedFlagText);
+      }
+
+      if (hasDash) {
+        removed += char;
+      } else {
+        added += char;
+      }
+
+      cursor.index += 1;
+    }
+
+    if (hasDash && removed == "" && added == "") {
+      return cursor.fail(kInvalidFlagGroupText);
+    }
+
+    return true;
+  }
+
+  private isDuplicateName(name: string, path: int[]): boolean {
+    if (name == "") {
+      return false;
+    }
+
+    for (let index = 1; index < this.names.length; index++) {
+      const other = this.paths[index];
+      const isSame = this.names[index] == name;
+      if (other == undefined || !isSame) {
+        continue;
+      }
+      if (this.mightBothParticipate(other, path)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private mightBothParticipate(first: int[], second: int[]): boolean {
+    let index = 0;
+
+    while (index + 1 < first.length && index + 1 < second.length) {
+      if (this.stepAt(first, index) != this.stepAt(second, index)) {
+        return true;
+      }
+      if (this.stepAt(first, index + 1) != this.stepAt(second, index + 1)) {
+        return false;
+      }
+
+      index += 2;
+    }
+
+    return true;
+  }
+
+  private stepAt(path: int[], index: int): int {
+    return path[index] ?? -1;
+  }
+
+  private escapeTerm(): boolean {
+    const cursor = this.cursor;
+    const at = cursor.index;
+
+    cursor.index += 1;
+
+    if (cursor.isAtEnd()) {
+      return cursor.fail(kBackslashEndText);
+    }
+
+    const char = cursor.current();
+    const isNamed = cursor.isUnicode || cursor.hasNames;
+    if (char == "b" || char == "B") {
+      cursor.index += 1;
+
+      return this.unquantifiable(false);
+    }
+    if (char >= "1" && char <= "9") {
+      return this.numberedReference(at);
+    }
+    if (char == "k" && isNamed) {
+      return this.namedReference(at);
+    }
+    if (this.escapes.isSetEscape(char)) {
+      cursor.index += 1;
+
+      return this.quantifiers.quantifier();
+    }
+    if (kPropertyEscapes.includes(char)) {
+      return this.propertyTerm(char);
+    }
+    if (this.escapes.characterEscape(false) < 0) {
+      return false;
+    }
+
+    return this.quantifiers.quantifier();
+  }
+
+  private propertyTerm(char: string): boolean {
+    const cursor = this.cursor;
+    if (!cursor.isUnicode) {
+      return cursor.fail(kPropertyFlagText);
+    }
+
+    cursor.index += 1;
+
+    if (!this.escapes.propertyEscape(char == kNegatedProperty)) {
+      return false;
+    }
+
+    return this.quantifiers.quantifier();
+  }
+
+  private numberedReference(at: int): boolean {
+    const cursor = this.cursor;
+    const start = cursor.index;
+    let number = 0;
+
+    while (cursor.isDigitAt(cursor.index) && number <= kMaxCaptures) {
+      const digit = cursor.digitAt(cursor.index);
+
+      number = this.quantifiers.clamped(number * kDecimalBase + digit);
+      cursor.index += 1;
+    }
+
+    if (number <= this.totalCaptures) {
+      return this.quantifiers.quantifier();
+    }
+
+    cursor.index = start;
+
+    if (cursor.isUnicode) {
+      return cursor.fail(kEscapeText);
+    }
+
+    cursor.index = at;
+
+    return cursor.fail(kNoSuchGroupText);
+  }
+
+  private namedReference(at: int): boolean {
+    const cursor = this.cursor;
+
+    cursor.index += 1;
+
+    if (!cursor.accept("<")) {
+      return cursor.fail(kNamedReferenceText);
+    }
+
+    const name = this.escapes.groupName();
+    if (name == undefined) {
+      cursor.renameError(kNamedReferenceText);
+
+      return false;
+    }
+
+    const isOpen = this.open.some((index) => this.names[index] == name);
+    if (!isOpen) {
+      this.references.push({ name, at });
+    }
+
+    return this.quantifiers.quantifier();
+  }
+
+  private resolveNames(): void {
+    const known = this.names.slice(1);
+
+    for (const reference of this.references) {
+      if (!known.includes(reference.name)) {
+        this.cursor.index = reference.at;
+        this.cursor.fail(kUnknownNameText);
+
+        return;
+      }
+    }
+  }
+}

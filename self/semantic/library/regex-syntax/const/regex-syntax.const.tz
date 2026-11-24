@@ -1,0 +1,174 @@
+export const kNoUnit = -1;
+export const kMaxCodePoint = 1114111;
+export const kLeadFirst = 55296;
+export const kLeadLast = 56319;
+export const kTrailFirst = 56320;
+export const kTrailLast = 57343;
+export const kPairBase = 65536;
+export const kPairShift = 1024;
+export const kAsciiEnd = 128;
+export const kOneByteEnd = 128;
+export const kTwoBytesEnd = 2048;
+export const kInfinity = 4294967295;
+export const kMaxDepth = 500;
+export const kMaxCaptures = 65535;
+export const kMaxPropertyText = 63;
+export const kBackspaceCode = 8;
+export const kTabCode = 9;
+export const kNewlineCode = 10;
+export const kVerticalTabCode = 11;
+export const kFormFeedCode = 12;
+export const kReturnCode = 13;
+export const kBackslashCode = 92;
+export const kLetterKCode = 107;
+export const kDollarCode = 36;
+export const kUnderscoreCode = 95;
+export const kControlBase = 32;
+export const kOctalBase = 8;
+export const kHexBase = 16;
+export const kDecimalBase = 10;
+
+export const kHexDigits = [
+  "0",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "a",
+  "b",
+  "c",
+  "d",
+  "e",
+  "f",
+];
+export const kOctalDigits = ["0", "1", "2", "3", "4", "5", "6", "7"];
+export const kSmallOctalDigits = ["0", "1", "2", "3"];
+export const kSetEscapes = ["d", "D", "s", "S", "w", "W"];
+export const kPropertyEscapes = ["p", "P"];
+export const kNegatedProperty = "P";
+export const kModifierFlags = ["i", "m", "s"];
+export const kRepeatChars = ["*", "+", "?"];
+export const kSyntaxChars = [
+  "^",
+  "$",
+  "\\",
+  ".",
+  "*",
+  "+",
+  "?",
+  "(",
+  ")",
+  "[",
+  "]",
+  "{",
+  "}",
+  "|",
+];
+export const kSetPunctuators = [
+  "&",
+  "-",
+  "!",
+  "#",
+  "%",
+  ",",
+  ":",
+  ";",
+  "<",
+  "=",
+  ">",
+  "@",
+  "`",
+  "~",
+];
+export const kReservedDoubles = [
+  "&",
+  "!",
+  "#",
+  "$",
+  "%",
+  "*",
+  "+",
+  ",",
+  ".",
+  ":",
+  ";",
+  "<",
+  "=",
+  ">",
+  "?",
+  "@",
+  "^",
+  "`",
+  "~",
+];
+export const kSetSyntaxChars = [
+  "(",
+  ")",
+  "[",
+  "]",
+  "{",
+  "}",
+  "/",
+  "-",
+  "\\",
+  "|",
+];
+export const kStringProperties = [
+  "Basic_Emoji",
+  "Emoji_Keycap_Sequence",
+  "RGI_Emoji_Modifier_Sequence",
+  "RGI_Emoji_Flag_Sequence",
+  "RGI_Emoji_Tag_Sequence",
+  "RGI_Emoji_ZWJ_Sequence",
+  "RGI_Emoji",
+];
+export const kCategoryKeys = ["General_Category", "gc"];
+export const kScriptKeys = ["Script", "sc", "Script_Extensions", "scx"];
+export const kIntersection = "&&";
+export const kSubtraction = "--";
+
+export const kInvalidPropertyText = "Invalid property name";
+export const kStringPropertyText =
+  "Properties of strings are not supported yet";
+export const kUnicodeEscapeText = "Invalid Unicode escape";
+export const kClassEscapeText = "Invalid class escape";
+export const kDecimalEscapeText = "Invalid decimal escape";
+export const kEscapeText = "Invalid escape";
+export const kNamedReferenceText = "Invalid named reference";
+export const kGroupNameText = "Invalid capture group name";
+export const kUnterminatedClassText = "Unterminated character class";
+export const kBackslashEndText = "\\ at end of pattern";
+export const kTwoUnitsText =
+  "without the u flag, a class takes a character written with two code units (such as an emoji) as two separate halves; add the u flag";
+export const kInvalidClassText = "Invalid character class";
+export const kRangeOrderText = "Range out of order in character class";
+export const kTooLargeText = "Regular expression too large";
+export const kSetOperationText = "Invalid set operation in character class";
+export const kSetCharacterText = "Invalid character in character class";
+export const kNegatedStringsText =
+  "Negated character class may contain strings";
+export const kIncompleteQuantifierText = "Incomplete quantifier";
+export const kQuantifierOrderText = "numbers out of order in {} quantifier";
+export const kMultipleDashesText = "Multiple dashes in flag group";
+export const kInvalidGroupText = "Invalid group";
+export const kRepeatedFlagText = "Repeated flag in flag group";
+export const kInvalidFlagGroupText = "Invalid flag group";
+export const kTooManyCapturesText = "Too many captures";
+export const kUnterminatedGroupText = "Unterminated group";
+export const kDuplicateNameText = "Duplicate capture group name";
+export const kNoSuchGroupText =
+  "there is no such group to refer to (JavaScript would read an octal escape here); write a character as '\\xNN'";
+export const kPropertyFlagText =
+  "'\\p' needs the u or v flag: without it, '\\p{L}' is the text 'p{L}'";
+export const kNothingToRepeatText = "Nothing to repeat";
+export const kLoneBracketsText = "Lone quantifier brackets";
+export const kInvalidQuantifierText = "Invalid quantifier";
+export const kUnmatchedCloseText = "Unmatched ')'";
+export const kUnknownNameText = "Invalid named capture referenced";
+export const kRepeatHint =
+  "; to match the character itself, escape it with '\\'";

@@ -130,6 +130,9 @@ partial class ExpressionTypes {
     if (this.processMemberRead(expr, module)) {
       return this.store.plain(TypeKind.Error);
     }
+    if (this.emitterMethodValueCheck(expr, object, module)) {
+      return this.store.plain(TypeKind.Error);
+    }
 
     const keyed = this.dictionaries.recordMemberTyped(expr, object);
     if (keyed != undefined) {

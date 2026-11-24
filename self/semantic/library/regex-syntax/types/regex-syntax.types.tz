@@ -1,0 +1,25 @@
+export enum RegexGroupEnd {
+  Failed,
+  Quantifiable,
+  Fixed,
+}
+
+export type RegexSyntaxError = {
+  readonly message: string;
+  readonly at: int;
+};
+
+export type RegexClassAtom = {
+  readonly char: int;
+  readonly isSet: boolean;
+};
+
+export type RegexBraces = {
+  readonly least: int;
+  readonly most: int;
+};
+
+export type RegexNamedReference = {
+  readonly name: string;
+  readonly at: int;
+};

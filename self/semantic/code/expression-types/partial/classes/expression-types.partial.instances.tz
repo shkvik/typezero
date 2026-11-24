@@ -35,12 +35,12 @@ partial class ExpressionTypes {
     module: int,
   ): Type {
     if (
-      this.modules.isLibraryModule(instance.module) &&
+      this.isDeclaredLibrary(instance.module, instance.loc) &&
       this.types.isDate(instance)
     ) {
       return this.dateMemberRead(expr, instance, module);
     }
-    if (this.modules.isLibraryModule(instance.module)) {
+    if (this.isDeclaredLibrary(instance.module, instance.loc)) {
       const intlMember = this.intlMemberRead(expr, instance, module);
       if (intlMember != undefined) {
         return intlMember;
@@ -152,7 +152,7 @@ partial class ExpressionTypes {
   }
 
   private classOf(instance: InstanceType): ClassDecl | undefined {
-    if (this.modules.isLibraryModule(instance.module)) {
+    if (this.isDeclaredLibrary(instance.module, instance.loc)) {
       return undefined;
     }
 
@@ -335,11 +335,13 @@ partial class ExpressionTypes {
         return weakMade;
       }
 
-      const made = this.libraryNew(expr, form.name, target, wanted, module);
+      if (this.isDeclaredLibrary(target.module, target.loc)) {
+        const made = this.libraryNew(expr, form.name, target, wanted, module);
 
-      this.newSourceCheck(expr, made, module);
+        this.newSourceCheck(expr, made, module);
 
-      return this.codedNew(expr, made, module);
+        return this.codedNew(expr, made, module);
+      }
     }
 
     const decl = this.record(target.module)?.classes.get(target.loc);
@@ -358,6 +360,10 @@ partial class ExpressionTypes {
       this.looseArguments(expr.args, module);
 
       return this.store.plain(TypeKind.Error);
+    }
+    const emitterMade = this.emitterNew(expr, decl, target.module, module);
+    if (emitterMade != undefined) {
+      return emitterMade;
     }
     if (decl.typeParams.length > 0 && expr.typeArgs.length == 0) {
       const inferred = this.genericNew(
@@ -393,6 +399,8 @@ partial class ExpressionTypes {
     const made = this.constructed(expr, instance, decl, module);
 
     this.copyVariantsCheck(expr, made, decl, module);
+    this.fetchNewCheck(expr, decl, target.module, made, module);
+    this.emitterMapCheck(expr, made, module);
 
     return made;
   }
@@ -420,7 +428,11 @@ partial class ExpressionTypes {
 
       return undefined;
     }
-    if (count != params) {
+    const missing = decl.typeParams.slice(count);
+    const isDefaulted = missing.every(
+      (param) => param.defaultType != undefined,
+    );
+    if (count != params && !isDefaulted) {
       return undefined;
     }
 
@@ -438,7 +450,7 @@ partial class ExpressionTypes {
       return instance;
     }
 
-    const constructors = maker.owner.constructors;
+    const constructors = this.visibleConstructors(maker.owner);
     if (constructors.length == 0 && expr.args.length > 0) {
       this.report(module, expr.loc, Code.NoConstructor, {
         word: decl.name ?? "",
@@ -472,6 +484,25 @@ partial class ExpressionTypes {
     }
 
     return instance;
+  }
+
+  private visibleConstructors(owner: ClassDecl): FunctionDecl[] {
+    const all = owner.constructors;
+    const visible = all.filter((fn) => this.isVisibleConstructor(owner, fn));
+    if (visible.length == 0) {
+      return all;
+    }
+
+    return visible;
+  }
+
+  private isVisibleConstructor(owner: ClassDecl, fn: FunctionDecl): boolean {
+    const access = this.classes.accessOf(fn);
+    if (access == Access.Public || this.isInsideClass(owner)) {
+      return true;
+    }
+
+    return access == Access.Protected && this.isDerivedInside(owner);
   }
 
   private variantNew(
@@ -588,5 +619,16 @@ partial class ExpressionTypes {
     }
 
     return this.intlNew(expr, name, module);
+  }
+
+  private isDeclaredLibrary(module: int, loc: int): boolean {
+    if (!this.modules.isLibraryModule(module)) {
+      return false;
+    }
+    if (!this.modules.isTypedLibrary(module)) {
+      return true;
+    }
+
+    return this.record(module)?.classes.get(loc) == undefined;
   }
 }

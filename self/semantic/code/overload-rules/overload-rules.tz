@@ -126,6 +126,9 @@ export class OverloadRules {
     if (isRest && param.type.kind == TypeKind.Array) {
       return param.type.item;
     }
+    if (param.optional && !isRest) {
+      return this.types.optional(param.type);
+    }
 
     return param.type;
   }

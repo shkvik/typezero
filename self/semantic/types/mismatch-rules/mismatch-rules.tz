@@ -59,7 +59,8 @@ export class MismatchRules {
 
     const hasOther = texts.both != "";
     const detail = this.objectDetail(source, target, hasOther);
-    if (detail != "" && !texts.isFresh && !texts.isPlaced) {
+    const isWider = this.isOptionalWidening(source, target);
+    if (detail != "" && !texts.isFresh && !texts.isPlaced && !isWider) {
       const place = texts.place + detail + texts.both;
       const details: Details = { first, second, place };
 
@@ -433,6 +434,31 @@ export class MismatchRules {
       default:
         return false;
     }
+  }
+
+  private isOptionalWidening(source: Type, target: Type): boolean {
+    if (source.kind != TypeKind.Object || target.kind != TypeKind.Object) {
+      return false;
+    }
+
+    const own = source.fields;
+    const wide = target.fields;
+    const isEachKnown = own.every((field) => this.isWiderField(field, wide));
+    const isRestOptional = wide.every(
+      (field) => field.optional || this.hasField(own, field.name),
+    );
+
+    return isEachKnown && isRestOptional;
+  }
+
+  private isWiderField(field: ObjectField, wide: ObjectField[]): boolean {
+    const other = wide.find((one) => one.name == field.name);
+
+    return other != undefined && this.relation.converts(field.type, other.type);
+  }
+
+  private hasField(fields: ObjectField[], name: string): boolean {
+    return fields.some((one) => one.name == name);
   }
 
   private objectDetail(source: Type, target: Type, hasOther: boolean): string {

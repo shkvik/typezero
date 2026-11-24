@@ -23,6 +23,7 @@ import {
 } from "../../types/expression-types.types.tz";
 import { kIteratorKey } from "../../../../types/type-questions/const/type-questions.const.tz";
 import { kIterableName } from "../../../index-rules/const/index-rules.const.tz";
+import { kConcurrentMapName } from "../../../../library/fetch-rules/const/fetch-rules.const.tz";
 
 partial class ExpressionTypes {
   private iterablePlaceCheck(fn: FunctionDecl, module: int): void {
@@ -165,7 +166,7 @@ partial class ExpressionTypes {
   }
 
   private instanceItem(instance: InstanceType): Type | undefined {
-    if (this.modules.isLibraryModule(instance.module)) {
+    if (this.isDeclaredLibrary(instance.module, instance.loc)) {
       return this.store.plain(TypeKind.Error);
     }
 
@@ -193,7 +194,7 @@ partial class ExpressionTypes {
     instance: InstanceType,
     module: int,
   ): void {
-    if (this.modules.isLibraryModule(instance.module)) {
+    if (this.isDeclaredLibrary(instance.module, instance.loc)) {
       return;
     }
 
@@ -201,6 +202,11 @@ partial class ExpressionTypes {
     const entry = lookup.entry;
     const word = this.text.of(instance);
     if (!lookup.isKnown) {
+      return;
+    }
+    if (entry == undefined && this.isConcurrentMap(instance)) {
+      this.report(module, loop.loc, Code.ForOfConcurrentMap, kNoDetails);
+
       return;
     }
     if (entry == undefined) {
@@ -232,5 +238,12 @@ partial class ExpressionTypes {
       word,
       first: this.text.of(result),
     });
+  }
+
+  private isConcurrentMap(instance: InstanceType): boolean {
+    return (
+      this.modules.isTypedLibrary(instance.module) &&
+      instance.name == kConcurrentMapName
+    );
   }
 }

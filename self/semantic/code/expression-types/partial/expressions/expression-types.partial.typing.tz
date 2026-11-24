@@ -172,6 +172,11 @@ partial class ExpressionTypes {
     if (this.cstringMismatch(expr, given, wanted, module)) {
       return;
     }
+    const goal = this.types.definedType(wanted);
+    const isJson = goal.kind == TypeKind.Json;
+    if (!isJson && this.isPlacedLiteral(expr, wanted, module)) {
+      return;
+    }
 
     this.mismatch(expr, given, wanted, module, place);
   }

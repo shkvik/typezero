@@ -105,7 +105,7 @@ partial class ExpressionTypes {
 
     for (const param of fn.params) {
       const kind = param.form.kind;
-      const given = goal?.shape.params[index];
+      const given = this.closureGiven(goal, index, param.name == kThisParameter);
       const type = this.closureParameter(param, given, context, module);
       const isTaken =
         param.type == undefined &&
@@ -134,6 +134,23 @@ partial class ExpressionTypes {
     }
 
     return { params, rest, self };
+  }
+
+  private closureGiven(
+    goal: FunctionType | undefined,
+    index: int,
+    isThis: boolean,
+  ): FunctionParameter | undefined {
+    if (!isThis) {
+      return goal?.shape.params[index];
+    }
+
+    const self = goal?.shape.self;
+    if (self == undefined) {
+      return undefined;
+    }
+
+    return { type: self, optional: false };
   }
 
   private closureInside(type: Type, kind: ParamKind, isTaken: boolean): Type {
@@ -209,10 +226,21 @@ partial class ExpressionTypes {
     if (expected.kind == TypeKind.Error) {
       return this.inferredClosure(fn, false, module);
     }
+    if (fn.isAsync && !this.isPromising(expected)) {
+      return this.inferredClosure(fn, false, module);
+    }
 
     this.walkWritten(fn, expected, module);
 
     return expected;
+  }
+
+  private isPromising(type: Type): boolean {
+    if (type.kind == TypeKind.Union) {
+      return type.parts.some((part) => part.kind == TypeKind.Promise);
+    }
+
+    return type.kind == TypeKind.Promise;
   }
 
   private inferredClosure(

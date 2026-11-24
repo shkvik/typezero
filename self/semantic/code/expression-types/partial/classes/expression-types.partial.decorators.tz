@@ -3,6 +3,8 @@ import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import {
   ClassDecl,
+  ClassField,
+  FieldKind,
   MethodKind,
 } from "../../../../../program/ast/types/ast.types.classes.tz";
 import {
@@ -10,6 +12,10 @@ import {
   ExprKind,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
+import {
+  Stmt,
+  StmtKind,
+} from "../../../../../program/ast/types/ast.types.statements.tz";
 import {
   Type,
   TypeKind,
@@ -22,6 +28,7 @@ import {
   DecorateRun,
   DecoratorPlace,
   DecoratorUse,
+  StaticOwner,
 } from "../../types/expression-types.types.tz";
 import { kDecoratorPlaces } from "../../../decorator-rules/const/decorator-rules.const.tz";
 
@@ -162,6 +169,14 @@ partial class ExpressionTypes {
 
     const result = type.shape.result;
     const place = this.decorators.usePlace(run, use);
+    const isClassPlace = place == DecoratorPlace.Class;
+    const isReplacing =
+      this.isReplacement(run.decl, type, module) ||
+      this.isExtendingDecorator(use.decorator.expr, result, module);
+    if (isClassPlace && isReplacing) {
+      return this.oldObjectCheck(run.decl, module);
+    }
+
     const isNothing =
       result.kind == TypeKind.Void ||
       result.kind == TypeKind.Undefined ||
@@ -175,7 +190,6 @@ partial class ExpressionTypes {
     if (isDescriptor && result == third) {
       return;
     }
-    const isClassPlace = place == DecoratorPlace.Class;
     if (isClassPlace && this.isReplacing(run.decl, result, module)) {
       return;
     }
@@ -210,6 +224,144 @@ partial class ExpressionTypes {
       first,
       second: row?.noun ?? "",
     });
+  }
+
+  private isReplacement(
+    decl: ClassDecl,
+    decorator: Type,
+    module: int,
+  ): boolean {
+    if (decorator.kind != TypeKind.Function || decl.typeParams.length > 0) {
+      return false;
+    }
+
+    const result = decorator.shape.result;
+    if (result.kind != TypeKind.Class || !result.exact) {
+      return false;
+    }
+
+    const own = this.resolver.classInstance(module, decl, []);
+    if (result.instance == own) {
+      return false;
+    }
+
+    const given = decorator.shape.params[0]?.type;
+    if (given?.kind == TypeKind.TypeParameter) {
+      return this.isBuiltOnGiven(result.instance);
+    }
+
+    return this.relation.converts(result.instance, own);
+  }
+
+  private isExtendingDecorator(
+    expr: Expr,
+    result: Type,
+    module: int,
+  ): boolean {
+    if (result.kind != TypeKind.Error || expr.kind != ExprKind.Name) {
+      return false;
+    }
+
+    const target = this.targetOfName(expr, module);
+    if (target == undefined || target.kind != SymbolKind.Function) {
+      return false;
+    }
+
+    const fn = this.record(target.module)?.functions.get(target.loc);
+    const given = fn?.params[0]?.name;
+    const body = fn?.body;
+    if (given == undefined || body == undefined || fn?.typeParams.length == 0) {
+      return false;
+    }
+
+    const returned = body.body.filter((one) => one.kind == StmtKind.Return);
+
+    return (
+      returned.length > 0 &&
+      returned.every((one) => this.isGivenSubclass(one, given))
+    );
+  }
+
+  private isGivenSubclass(statement: Stmt, given: string): boolean {
+    if (statement.kind != StmtKind.Return) {
+      return false;
+    }
+
+    const value = statement.value;
+    if (value == undefined || value.kind != ExprKind.Class) {
+      return false;
+    }
+
+    const decl = value.decl;
+    const base = decl.baseExpr;
+    if (base != undefined && base.kind == ExprKind.Name) {
+      return base.name == given;
+    }
+
+    return decl.base?.name == given;
+  }
+
+  private isBuiltOnGiven(instance: Type): boolean {
+    if (instance.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    const made = this.classOf(instance);
+    const module = instance.module;
+    const base = made?.base;
+    if (base != undefined) {
+      const target = this.targetOfUse(base.loc, base.name, module);
+
+      return target?.kind == SymbolKind.Parameter;
+    }
+
+    const expr = made?.baseExpr;
+    if (expr == undefined || expr.kind != ExprKind.Name) {
+      return false;
+    }
+
+    return this.targetOfName(expr, module)?.kind == SymbolKind.Parameter;
+  }
+
+  private oldObjectCheck(decl: ClassDecl, module: int): void {
+    const own = this.resolver.classInstance(module, decl, []);
+    const owner: StaticOwner = { decl, module };
+
+    for (const field of decl.fields) {
+      if (field.form != FieldKind.Static) {
+        continue;
+      }
+
+      const type = this.staticHeldType(field, owner);
+      if (type != undefined && this.isHolding(type, own)) {
+        return this.report(module, field.loc, Code.DecoratorOldObject, {
+          word: decl.name ?? "",
+          other: field.name,
+        });
+      }
+    }
+  }
+
+  private staticHeldType(
+    field: ClassField,
+    owner: StaticOwner,
+  ): Type | undefined {
+    if (field.type != undefined) {
+      return this.staticFieldType(field.type, field.presence, owner);
+    }
+    if (field.init == undefined) {
+      return undefined;
+    }
+
+    return this.peekType(field.init, owner.module);
+  }
+
+  private isHolding(type: Type, own: Type): boolean {
+    if (type == own) {
+      return true;
+    }
+
+    return this.parts.typeParts(type).some((part) => this.isHolding(part, own));
   }
 
   private isReplacing(decl: ClassDecl, result: Type, module: int): boolean {

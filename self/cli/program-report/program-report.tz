@@ -6,6 +6,7 @@ import {
   Program,
   SourceText,
 } from "../../program/module/types/module.types.tz";
+import { LoadResult } from "../../load/loader/types/loader.types.tz";
 import { kProgramName, kUsage, kUsageExitCode } from "../const/cli.const.tz";
 import { kTypeScriptExtension } from "./const/program-report.const.tz";
 
@@ -32,6 +33,15 @@ export class ProgramReport {
       `${kProgramName}: '${entry}' is not a file of tz: they end in .tz${advice}`,
     );
     this.fail();
+  }
+
+  public loadProblems(loaded: LoadResult): void {
+    this.unreadable(loaded.unreadable);
+
+    for (const message of loaded.packageErrors) {
+      console.error(`${kProgramName}: ${message}`);
+      this.fail();
+    }
   }
 
   public unreadable(paths: string[]): void {

@@ -36,6 +36,19 @@ export class JsonModule {
   }
 
   public moduleText(): string | undefined {
+    const root = this.rootNode();
+    if (root == undefined) {
+      return undefined;
+    }
+
+    const shape = this.shapeOf(root);
+    const type = this.typeText(shape);
+    const value = this.valueText(root, shape);
+
+    return `${kExportStart}${type}${kValueStart}${value}\n`;
+  }
+
+  public rootNode(): JsonNode | undefined {
     if (this.text.startsWith(kByteOrderMark)) {
       this.position = kByteOrderMark.length;
     }
@@ -51,11 +64,7 @@ export class JsonModule {
       return undefined;
     }
 
-    const shape = this.shapeOf(root);
-    const type = this.typeText(shape);
-    const value = this.valueText(root, shape);
-
-    return `${kExportStart}${type}${kValueStart}${value}\n`;
+    return root;
   }
 
   private current(): string {

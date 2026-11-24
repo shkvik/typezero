@@ -359,9 +359,10 @@ partial class ExpressionTypes {
       return;
     }
 
-    const at = this.offsetLinear(offset, module);
-    const most = this.mostLength(source, module);
-    const length = this.measuredLength(target, module);
+    const at = this.pinnedLinear(this.offsetLinear(offset, module));
+    const most = this.pinnedLinear(this.mostLength(source, module));
+    const length =
+      this.constLength(target, module) ?? this.measuredLength(target, module);
     if (at != undefined && most != undefined && length != undefined) {
       const sum = this.bounds.linearSum(at, most);
       if (sum != undefined && this.isLinearUpTo(sum, length, 0)) {

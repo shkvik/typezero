@@ -1,0 +1,7 @@
+export const kTypedLibraries = [
+  "tz:url",
+  "tz:fetch",
+  "tz:http",
+  "tz:sync",
+  "node:events",
+];

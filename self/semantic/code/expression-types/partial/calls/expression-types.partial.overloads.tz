@@ -8,6 +8,7 @@ import {
   CallArgument,
   CallExpr,
   Expr,
+  ExprKind,
   MemberExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../../../program/ast/types/ast.types.functions.tz";
@@ -17,7 +18,10 @@ import {
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
-import { kParentDepth } from "../../const/expression-types.const.tz";
+import {
+  kNoPlace,
+  kParentDepth,
+} from "../../const/expression-types.const.tz";
 import {
   CallKind,
   CallTarget,
@@ -354,7 +358,8 @@ partial class ExpressionTypes {
     if (type.kind == TypeKind.Error || this.types.apparent(type) == param) {
       return 0;
     }
-    if (this.isEncodingParam(param) && this.isTextType(type)) {
+    const goal = this.types.definedType(param);
+    if (this.isEncodingParam(goal) && this.isTextType(type)) {
       return 1;
     }
     if (this.relation.converts(type, param)) {
@@ -384,6 +389,9 @@ partial class ExpressionTypes {
         this.isWholeTree(expr, module) || this.shapes.isNumberLiteral(expr)
       );
     }
+    if (expr.kind == ExprKind.ObjectLit || expr.kind == ExprKind.ArrayLit) {
+      return this.isFittingLiteral(expr, param, module);
+    }
 
     this.errors.beginTrial();
 
@@ -392,6 +400,13 @@ partial class ExpressionTypes {
     this.errors.endTrial();
 
     return adapted != undefined;
+  }
+
+  private isFittingLiteral(expr: Expr, param: Type, module: int): boolean {
+    this.errors.beginTrial();
+    this.checked(expr, param, module, kNoPlace);
+
+    return this.errors.endTrial();
   }
 
   private variantValueCheck(

@@ -1,0 +1,510 @@
+import { ClassDecl } from "../../../../../program/ast/types/ast.types.classes.tz";
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NewExpr,
+  ObjectLitExpr,
+  Property,
+  PropertyKind,
+} from "../../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  Type,
+  TypeKind,
+} from "../../../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
+import {
+  kBodyField,
+  kEmptyStatuses,
+  kGetMethod,
+  kHeaderNameMethods,
+  kHeaderValueMethods,
+  kHeadersField,
+  kHeadersName,
+  kHrefName,
+  kMethodField,
+  kRequestName,
+  kResponseName,
+  kStatusField,
+  kStatusTextField,
+  kUrlField,
+  kUrlName,
+  kUrlSetters,
+  kReadableStreamName,
+  kFormDataName,
+  kStreamBodyHint,
+  kRequestInitName,
+  kRequestOptionsName,
+  kRequestInitHint,
+} from "../../../fetch-rules/const/fetch-rules.const.tz";
+
+partial class ExpressionTypes {
+  private fetchNewCheck(
+    expr: NewExpr,
+    decl: ClassDecl,
+    home: int,
+    made: Type,
+    module: int,
+  ): void {
+    const isChecked =
+      this.modules.isTypedLibrary(home) &&
+      !this.modules.isLibraryModule(module) &&
+      made.kind != TypeKind.Error;
+    if (!isChecked) {
+      return;
+    }
+
+    const isFailed = expr.args.some((arg) => this.isFailedArgument(arg.expr, module));
+
+    switch (decl.name) {
+      case kUrlName:
+        if (isFailed) {
+          return;
+        }
+
+        return this.urlNewCheck(expr, module);
+      case kRequestName:
+        if (isFailed) {
+          return;
+        }
+
+        return this.requestNewCheck(expr, module);
+      case kResponseName:
+        return this.responseNewCheck(expr, module);
+      case kHeadersName:
+        return this.headersNewCheck(expr, module);
+      default:
+        return;
+    }
+  }
+
+  private isFailedArgument(expr: Expr, module: int): boolean {
+    return this.peekType(expr, module).kind == TypeKind.Error;
+  }
+
+  private urlNewCheck(expr: NewExpr, module: int): void {
+    const input = expr.args[0]?.expr;
+    const base = expr.args[1]?.expr;
+    if (input == undefined) {
+      return;
+    }
+
+    const isBased = base != undefined;
+    if (base != undefined && !this.isKnownAbsolute(base, module)) {
+      return this.reportFound(module, this.fetches.urlBaseError(base.loc));
+    }
+
+    const text = this.fetchText(input);
+    if (text != undefined) {
+      const error = this.fetches.urlTextError(input.loc, text, isBased);
+
+      return this.reportFound(module, error);
+    }
+    if (!this.isKnownAbsolute(input, module)) {
+      const error = this.fetches.urlUnknownError(input.loc, isBased);
+
+      this.reportFound(module, error);
+    }
+  }
+
+  private requestNewCheck(expr: NewExpr, module: int): void {
+    const input = expr.args[0]?.expr;
+    if (input == undefined) {
+      return;
+    }
+
+    const given = this.peekType(input, module);
+    const isRequestInput =
+      this.isFetchClass(given, kRequestName) ||
+      this.isFetchClass(given, kUrlName);
+    if (!isRequestInput) {
+      this.requestInputCheck(input, module);
+    }
+
+    const init = expr.args[1]?.expr;
+    if (init == undefined || init.kind != ExprKind.ObjectLit) {
+      return;
+    }
+
+    const isPlainInput = !this.isFetchClass(given, kRequestName);
+
+    this.requestInitCheck(init, isPlainInput, module);
+  }
+
+  private requestInputCheck(input: Expr, module: int): void {
+    const text = this.fetchText(input);
+    if (text != undefined) {
+      return this.reportFound(
+        module,
+        this.fetches.requestUrlError(input.loc, text),
+      );
+    }
+    if (!this.isKnownAbsolute(input, module)) {
+      this.reportFound(module, this.fetches.requestUnknownError(input.loc));
+    }
+  }
+
+  private requestInitCheck(
+    init: ObjectLitExpr,
+    isPlainInput: boolean,
+    module: int,
+  ): void {
+    const methodProperty = this.literalProperty(init, kMethodField);
+    const body = this.literalProperty(init, kBodyField);
+    const headers = this.literalProperty(init, kHeadersField);
+    const method = this.requestMethod(methodProperty, module);
+    const isKnown = this.isMethodKnown(methodProperty, method, isPlainInput);
+    const isGet = this.fetches.isBodiless(this.methodOrGet(method));
+
+    if (
+      body != undefined &&
+      isKnown &&
+      isGet &&
+      this.hasBody(body.value, module)
+    ) {
+      const isGiven = methodProperty != undefined;
+      const shown = this.methodOrGet(method);
+      const error = this.fetches.getBodyError(body.value.loc, shown, isGiven);
+
+      this.reportFound(module, error);
+    }
+    if (headers != undefined) {
+      this.headersInitCheck(headers.value, module);
+    }
+  }
+
+  private isMethodKnown(
+    property: Property | undefined,
+    method: string,
+    isPlainInput: boolean,
+  ): boolean {
+    if (property == undefined) {
+      return isPlainInput;
+    }
+
+    return method != "";
+  }
+
+  private methodOrGet(method: string): string {
+    if (method == "") {
+      return kGetMethod;
+    }
+
+    return method;
+  }
+
+  private requestMethod(property: Property | undefined, module: int): string {
+    if (property == undefined) {
+      return "";
+    }
+
+    const text = this.fetchText(property.value);
+    if (text == undefined) {
+      return "";
+    }
+
+    const error = this.fetches.methodError(property.value.loc, text);
+
+    this.reportFound(module, error);
+
+    return text.toUpperCase();
+  }
+
+  private responseNewCheck(expr: NewExpr, module: int): void {
+    const body = expr.args[0]?.expr;
+    const init = expr.args[1]?.expr;
+    if (body == undefined || init == undefined) {
+      return;
+    }
+    if (init.kind != ExprKind.ObjectLit) {
+      return;
+    }
+
+    for (const property of init.props) {
+      if (property.form.kind == PropertyKind.Value) {
+        this.responseFieldCheck(body, property, module);
+      }
+    }
+  }
+
+  private responseFieldCheck(
+    body: Expr,
+    property: Property,
+    module: int,
+  ): void {
+    const value = property.value;
+
+    switch (property.name) {
+      case kStatusField:
+        return this.responseStatusCheck(body, value, module);
+      case kStatusTextField:
+        return this.statusTextCheck(value, module);
+      case kHeadersField:
+        return this.headersInitCheck(value, module);
+      default:
+        return;
+    }
+  }
+
+  private responseStatusCheck(body: Expr, value: Expr, module: int): void {
+    const int = this.store.integer(64, false);
+    const status = this.intConstant(value, int, module);
+    if (status == undefined) {
+      return;
+    }
+
+    const isEmpty = kEmptyStatuses.some((one) => one.toDecimal() == status);
+    if (isEmpty && this.hasBody(body, module)) {
+      this.reportFound(module, this.fetches.noBodyError(body.loc, status));
+    }
+  }
+
+  private statusTextCheck(value: Expr, module: int): void {
+    const text = this.fetchText(value);
+    if (text != undefined) {
+      this.reportFound(module, this.fetches.statusTextError(value.loc, text));
+    }
+  }
+
+  private headersNewCheck(expr: NewExpr, module: int): void {
+    const init = expr.args[0]?.expr;
+    if (init != undefined) {
+      this.headersInitCheck(init, module);
+    }
+  }
+
+  private headersInitCheck(init: Expr, module: int): void {
+    if (init.kind == ExprKind.ObjectLit) {
+      for (const property of init.props) {
+        this.headerPropertyCheck(property, module);
+      }
+
+      return;
+    }
+    if (init.kind != ExprKind.ArrayLit) {
+      return;
+    }
+
+    for (const element of init.elements) {
+      if (!element.spread && !element.hole) {
+        this.headerPairCheck(element.expr, module);
+      }
+    }
+  }
+
+  private headerPropertyCheck(property: Property, module: int): void {
+    if (property.form.kind != PropertyKind.Value) {
+      return;
+    }
+
+    const nameError = this.fetches.headerNameError(property.loc, property.name);
+
+    this.reportFound(module, nameError);
+    this.headerValueCheck(property.value, module);
+  }
+
+  private headerPairCheck(pair: Expr, module: int): void {
+    if (pair.kind != ExprKind.ArrayLit || pair.elements.length != 2) {
+      return;
+    }
+
+    const name = pair.elements[0];
+    const value = pair.elements[1];
+    if (name == undefined || value == undefined) {
+      return;
+    }
+    if (name.spread || value.spread) {
+      return;
+    }
+
+    this.headerNameCheck(name.expr, module);
+    this.headerValueCheck(value.expr, module);
+  }
+
+  private headerNameCheck(expr: Expr, module: int): void {
+    const text = this.fetchText(expr);
+    if (text != undefined) {
+      this.reportFound(module, this.fetches.headerNameError(expr.loc, text));
+    }
+  }
+
+  private headerValueCheck(expr: Expr, module: int): void {
+    const text = this.fetchText(expr);
+    if (text != undefined) {
+      this.reportFound(module, this.fetches.headerValueError(expr.loc, text));
+    }
+  }
+
+  private fetchCallChecked(
+    expr: CallExpr,
+    member: MemberExpr,
+    instance: Type,
+    called: Type,
+    module: int,
+  ): Type {
+    if (this.modules.isLibraryModule(module)) {
+      return called;
+    }
+    if (this.isFetchClass(instance, kHeadersName)) {
+      this.headersCallCheck(expr, member, module);
+
+      return called;
+    }
+    if (!this.isFetchClass(instance, kUrlName)) {
+      return called;
+    }
+    if (!this.isProvenSetter(expr, member, module)) {
+      return called;
+    }
+    if (called.kind != TypeKind.Result) {
+      return called;
+    }
+
+    return this.store.plain(TypeKind.Undefined);
+  }
+
+  private headersCallCheck(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): void {
+    const name = expr.args[0]?.expr;
+    const value = expr.args[1]?.expr;
+    if (name != undefined && kHeaderNameMethods.includes(member.name)) {
+      this.headerNameCheck(name, module);
+    }
+    if (value != undefined && kHeaderValueMethods.includes(member.name)) {
+      this.headerValueCheck(value, module);
+    }
+  }
+
+  private isProvenSetter(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): boolean {
+    const input = expr.args[0]?.expr;
+    const isSetter = kUrlSetters.includes(member.name);
+    if (!isSetter || input == undefined || expr.args.length != 1) {
+      return false;
+    }
+
+    const text = this.fetchText(input);
+    if (text == undefined) {
+      return false;
+    }
+
+    const error = this.fetches.setterError(input.loc, member.name, text);
+
+    this.reportFound(module, error);
+
+    return error == undefined;
+  }
+
+  private isKnownAbsolute(expr: Expr, module: int): boolean {
+    const text = this.fetchText(expr);
+    if (text != undefined) {
+      return this.fetches.isValidUrlText(text, false);
+    }
+
+    const type = this.peekType(expr, module);
+    if (this.isFetchClass(type, kUrlName)) {
+      return true;
+    }
+    if (expr.kind == ExprKind.Member) {
+      return this.isRequestUrl(expr, module);
+    }
+    if (expr.kind == ExprKind.Call && expr.args.length == 0) {
+      return this.isHrefCall(expr.callee, module);
+    }
+
+    return false;
+  }
+
+  private isRequestUrl(expr: MemberExpr, module: int): boolean {
+    const object = this.peekType(expr.object, module);
+
+    return expr.name == kUrlField && this.isFetchClass(object, kRequestName);
+  }
+
+  private isHrefCall(callee: Expr, module: int): boolean {
+    if (callee.kind != ExprKind.Member || callee.name != kHrefName) {
+      return false;
+    }
+
+    const object = this.peekType(callee.object, module);
+
+    return this.isFetchClass(object, kUrlName);
+  }
+
+  private isFetchClass(type: Type, name: string): boolean {
+    const base = this.types.definedType(type);
+    if (base.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    return this.modules.isTypedLibrary(base.module) && base.name == name;
+  }
+
+  private hasBody(body: Expr, module: int): boolean {
+    const type = this.peekType(body, module);
+
+    return (
+      type.kind != TypeKind.Error &&
+      type.kind != TypeKind.Undefined &&
+      !this.types.isOptional(type)
+    );
+  }
+
+  private fetchText(expr: Expr): string | undefined {
+    if (expr.kind == ExprKind.StringLit) {
+      return expr.value;
+    }
+    if (expr.kind == ExprKind.Template && expr.exprs.length == 0) {
+      return expr.quasis[0];
+    }
+
+    return undefined;
+  }
+
+  private literalProperty(
+    init: ObjectLitExpr,
+    name: string,
+  ): Property | undefined {
+    return init.props.find(
+      (property) =>
+        property.form.kind == PropertyKind.Value && property.name == name,
+    );
+  }
+
+  private fetchMismatchHint(given: Type, wanted: Type): string {
+    const from = this.types.definedType(given);
+    const to = this.types.definedType(wanted);
+    const parts = this.unionParts(to);
+    const isStream = this.isFetchClass(from, kReadableStreamName);
+    const hasForm = parts.some((part) => this.isFetchClass(part, kFormDataName));
+    const hasStream = parts.some((part) =>
+      this.isFetchClass(part, kReadableStreamName),
+    );
+    if (isStream && hasForm && !hasStream) {
+      return kStreamBodyHint;
+    }
+
+    const fromName = this.text.of(from);
+    const toName = this.text.of(to);
+    if (fromName.startsWith(kRequestInitName) && toName == kRequestOptionsName) {
+      return kRequestInitHint;
+    }
+
+    return "";
+  }
+
+  private unionParts(type: Type): Type[] {
+    if (type.kind == TypeKind.Union) {
+      return type.parts;
+    }
+
+    return [type];
+  }
+}

@@ -152,7 +152,7 @@ partial class ExpressionTypes {
     let current: Type | undefined = instance;
 
     while (current != undefined && current.kind == TypeKind.Instance) {
-      if (this.modules.isLibraryModule(current.module)) {
+      if (this.isDeclaredLibrary(current.module, current.loc)) {
         return types;
       }
 

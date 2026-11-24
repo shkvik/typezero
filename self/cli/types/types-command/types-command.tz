@@ -47,10 +47,11 @@ export class TypesCommand {
     const loaded = source.load(entry);
     const program = loaded.program;
 
-    this.report.unreadable(loaded.unreadable);
+    this.report.loadProblems(loaded);
     this.report.moduleErrors(program);
 
-    const isReadable = loaded.unreadable.length == 0;
+    const isReadable =
+      loaded.unreadable.length == 0 && loaded.packageErrors.length == 0;
     const isChecked = isReadable && this.isRecoverable(program);
     if (this.report.hasFailed() && !isChecked) {
       return;

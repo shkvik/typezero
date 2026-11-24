@@ -10,7 +10,11 @@ export enum ResolutionKind {
 }
 
 export type Resolution =
-  | { readonly kind: ResolutionKind.File; readonly file: string }
+  | {
+      readonly kind: ResolutionKind.File;
+      readonly file: string;
+      readonly package: int;
+    }
   | { readonly kind: ResolutionKind.Library; readonly module: LibraryModule }
   | { readonly kind: ResolutionKind.Package }
   | {

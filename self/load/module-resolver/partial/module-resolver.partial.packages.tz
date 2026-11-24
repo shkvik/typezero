@@ -1,0 +1,338 @@
+import { basename, extname } from "node:path";
+import { Code } from "../../../diagnostic/code.tz";
+import { kNoDetails } from "../../../diagnostic/const/message.const.tz";
+import {
+  kJsonExtension,
+  kPathSeparator,
+  kSourceExtension,
+} from "../../../program/module/const/module.const.tz";
+import {
+  PackageInfo,
+  PackageSpecifier,
+} from "../../package-graph/types/package-graph.types.tz";
+import { ModuleResolver } from "../module-resolver.tz";
+import {
+  LocationKind,
+  Resolution,
+  ResolutionKind,
+} from "../types/module-resolver.types.tz";
+import {
+  kEntryCandidates,
+  kExportJoin,
+  kHere,
+  kHerePrefix,
+  kIndexFile,
+  kJsrPrefix,
+  kNoManifestPlace,
+  kNpmPrefix,
+  kResultPackage,
+  kScopeMark,
+} from "../const/module-resolver.const.tz";
+
+partial class ModuleResolver {
+  private packageResolution(spec: string, home: int): Resolution {
+    if (spec == kResultPackage) {
+      return { kind: ResolutionKind.Package };
+    }
+    if (spec.startsWith(kNpmPrefix)) {
+      return this.problem(Code.PackageNpm, kNoDetails);
+    }
+
+    const owner = this.packages.packageAt(home);
+    if (owner == undefined) {
+      return this.problem(Code.PackageWithoutManifest, { word: spec });
+    }
+    if (spec.startsWith(kJsrPrefix)) {
+      return this.jsrImport(spec);
+    }
+
+    const specifier = this.packageSpecifier(spec);
+    if (specifier == undefined) {
+      return this.problem(Code.PackageBadName, { word: spec });
+    }
+    if (owner.remote.includes(specifier.name)) {
+      return { kind: ResolutionKind.Package };
+    }
+
+    const target = owner.aliases.get(specifier.name);
+    const found = this.packageTarget(target);
+    if (target == undefined || found == undefined) {
+      return this.notDependency(specifier.name, owner, home);
+    }
+
+    return this.packageFile(spec, specifier, target, found);
+  }
+
+  private packageTarget(target: int | undefined): PackageInfo | undefined {
+    if (target == undefined) {
+      return undefined;
+    }
+
+    return this.packages.packageAt(target);
+  }
+
+  private jsrImport(spec: string): Resolution {
+    const rest = this.withoutSlash(spec.slice(kJsrPrefix.length));
+    if (!rest.startsWith(kScopeMark)) {
+      return this.problem(Code.PackageJsrNotName, { word: spec });
+    }
+
+    const slash = rest.indexOf(kPathSeparator);
+    const end = this.nextSlash(rest, slash);
+    const full = this.headOf(rest, end);
+    const name = this.headOf(full, full.indexOf(kScopeMark, 1));
+    const inside = this.tailOf(rest, end);
+
+    return this.problem(Code.PackageJsrByName, {
+      word: name,
+      first: `${name}${inside}`,
+    });
+  }
+
+  private withoutSlash(text: string): string {
+    if (text.startsWith(kPathSeparator)) {
+      return text.slice(kPathSeparator.length);
+    }
+
+    return text;
+  }
+
+  private nextSlash(text: string, slash: int): int {
+    if (slash < 0) {
+      return -1;
+    }
+
+    return text.indexOf(kPathSeparator, slash + 1);
+  }
+
+  private headOf(text: string, end: int): string {
+    if (end < 0) {
+      return text;
+    }
+
+    return text.slice(0, end);
+  }
+
+  private tailOf(text: string, end: int): string {
+    if (end < 0) {
+      return "";
+    }
+
+    return text.slice(end);
+  }
+
+  private packageSpecifier(spec: string): PackageSpecifier | undefined {
+    const slash = spec.indexOf(kPathSeparator);
+    if (spec.startsWith(kScopeMark) && slash < 0) {
+      return undefined;
+    }
+
+    const end = this.nameEnd(spec, slash);
+    const name = this.headOf(spec, end);
+    if (name == "") {
+      return undefined;
+    }
+
+    return { name, subpath: this.subpathOf(spec, end) };
+  }
+
+  private nameEnd(spec: string, slash: int): int {
+    if (spec.startsWith(kScopeMark)) {
+      return spec.indexOf(kPathSeparator, slash + 1);
+    }
+
+    return slash;
+  }
+
+  private subpathOf(spec: string, end: int): string {
+    if (end < 0) {
+      return kHere;
+    }
+
+    const rest = spec.slice(end + 1);
+
+    return `${kHerePrefix}${rest}`;
+  }
+
+  private notDependency(
+    name: string,
+    owner: PackageInfo,
+    home: int,
+  ): Resolution {
+    if (home == 0) {
+      return this.problem(Code.PackageNotDependency, {
+        word: name,
+        path: owner.manifestPath,
+      });
+    }
+
+    const place = this.manifestPlace(owner);
+
+    return this.problem(Code.PackageNotDependencyOf, {
+      word: name,
+      other: owner.name,
+      place,
+    });
+  }
+
+  private manifestPlace(owner: PackageInfo): string {
+    if (owner.manifestPath == "") {
+      return kNoManifestPlace;
+    }
+
+    return ` (${owner.manifestPath})`;
+  }
+
+  private packageFile(
+    spec: string,
+    specifier: PackageSpecifier,
+    target: int,
+    found: PackageInfo,
+  ): Resolution {
+    if (found.exports.length > 0) {
+      return this.exportedFile(spec, specifier, target, found);
+    }
+    if (specifier.subpath == kHere) {
+      return this.packageFound(
+        spec,
+        target,
+        found,
+        this.entryCandidates(found),
+      );
+    }
+
+    const file = specifier.subpath.slice(kHerePrefix.length);
+    if (file.endsWith(kSourceExtension)) {
+      return this.packageFound(spec, target, found, [file]);
+    }
+
+    const foreign = this.foreignProblem(found.directory, file, spec);
+    if (foreign != undefined) {
+      return foreign;
+    }
+
+    const candidates = [
+      `${file}${kSourceExtension}`,
+      `${file}${kPathSeparator}${kIndexFile}`,
+    ];
+
+    return this.packageFound(spec, target, found, candidates);
+  }
+
+  private entryCandidates(found: PackageInfo): string[] {
+    if (found.main != "") {
+      return [found.main];
+    }
+
+    return kEntryCandidates;
+  }
+
+  private exportedFile(
+    spec: string,
+    specifier: PackageSpecifier,
+    target: int,
+    found: PackageInfo,
+  ): Resolution {
+    const exports = found.exports;
+    const matching = exports.filter((one) => one.key == specifier.subpath);
+    const candidates = matching.map((one) => one.file);
+    if (candidates.length > 0) {
+      return this.packageFound(spec, target, found, candidates);
+    }
+
+    const listed = exports.map((one) =>
+      this.exportShown(specifier.name, one.key),
+    );
+
+    return this.problem(Code.PackageNoExport, {
+      word: spec,
+      other: specifier.name,
+      path: listed.join(kExportJoin),
+    });
+  }
+
+  private exportShown(name: string, key: string): string {
+    if (key == kHere) {
+      return `'${name}'`;
+    }
+
+    const rest = key.slice(kHere.length);
+
+    return `'${name}${rest}'`;
+  }
+
+  private packageFound(
+    spec: string,
+    target: int,
+    found: PackageInfo,
+    candidates: string[],
+  ): Resolution {
+    for (const candidate of candidates) {
+      const location = this.locate(found.directory, candidate);
+      if (location.kind == LocationKind.OtherCase) {
+        return this.problem(Code.ImportFileNameCase, {
+          word: spec,
+          path: location.written,
+        });
+      }
+      if (location.kind == LocationKind.Found) {
+        return this.packageModule(spec, target, location.file);
+      }
+    }
+
+    return this.packageMissing(spec, found, candidates);
+  }
+
+  private packageModule(spec: string, target: int, file: string): Resolution {
+    const extension = extname(file);
+    const isKnown =
+      extension == kSourceExtension || extension == kJsonExtension;
+    if (isKnown) {
+      return { kind: ResolutionKind.File, file, package: target };
+    }
+
+    const path = basename(file);
+    const stem = path.slice(0, path.length - extension.length);
+
+    return this.problem(Code.PackageForeignNamed, {
+      word: spec,
+      path,
+      other: `${stem}${kSourceExtension}`,
+    });
+  }
+
+  private packageMissing(
+    spec: string,
+    found: PackageInfo,
+    candidates: string[],
+  ): Resolution {
+    const first = candidates[0] ?? "";
+    const second = candidates[1] ?? "";
+    const other = found.name;
+    const path = found.directory;
+
+    switch (candidates.length) {
+      case 1:
+        return this.problem(Code.PackageFileMissing, {
+          word: first,
+          other,
+          path,
+          place: spec,
+        });
+      case 2:
+        return this.problem(Code.PackageFilesMissing, {
+          word: spec,
+          other,
+          first,
+          second,
+          path,
+        });
+      default:
+        return this.problem(Code.PackageNoEntry, {
+          word: candidates.join(kExportJoin),
+          other,
+          path,
+        });
+    }
+  }
+}

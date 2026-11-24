@@ -20,6 +20,16 @@ import {
 } from "../regex-parser/const/regex-parser.const.tz";
 import { RegexParser } from "../regex-parser/regex-parser.tz";
 import {
+  kLeadFirst,
+  kLoneBracketsText,
+  kNothingToRepeatText,
+  kOneByteEnd,
+  kRepeatHint,
+  kTrailLast,
+  kTwoBytesEnd,
+} from "../regex-syntax/const/regex-syntax.const.tz";
+import { RegexSyntax } from "../regex-syntax/regex-syntax.tz";
+import {
   RegexShape,
   RegexText,
 } from "../regex-parser/types/regex-parser.types.tz";
@@ -287,6 +297,23 @@ export class RegexRules {
     return undefined;
   }
 
+  public syntaxError(
+    written: RegexText,
+    loc: int,
+    isWritten: boolean,
+  ): SourceError | undefined {
+    const syntax = new RegexSyntax(written.pattern, written.flags);
+    const found = syntax.check();
+    if (found == undefined) {
+      return undefined;
+    }
+
+    const word = this.syntaxText(found.message);
+    const at = this.syntaxLoc(written.pattern, found.at, loc, isWritten);
+
+    return { code: Code.RegexInvalid, loc: at, details: { word } };
+  }
+
   public onlyMatchError(loc: int): SourceError {
     return { code: Code.RegexOnlyMatch, loc, details: kNoDetails };
   }
@@ -374,6 +401,52 @@ export class RegexRules {
 
   public hasNamedGroups(shape: RegexShape): boolean {
     return shape.names.some((name) => name != "");
+  }
+
+  private syntaxText(message: string): string {
+    const first = message.slice(0, 1).toLowerCase();
+    const lowered = `${first}${message.slice(1)}`;
+    const isRepeat =
+      lowered == kNothingToRepeatText.toLowerCase() ||
+      lowered == kLoneBracketsText.toLowerCase();
+    if (isRepeat) {
+      return `${lowered}${kRepeatHint}`;
+    }
+
+    return lowered;
+  }
+
+  private syntaxLoc(
+    pattern: string,
+    at: int,
+    loc: int,
+    isWritten: boolean,
+  ): int {
+    if (!isWritten) {
+      return loc;
+    }
+
+    let bytes = 0;
+
+    for (let index = 0; index < at && index < pattern.length; index++) {
+      bytes += this.utf8Size(pattern.charCodeAt(index));
+    }
+
+    return loc + 1 + bytes;
+  }
+
+  private utf8Size(unit: int): int {
+    if (unit < kOneByteEnd) {
+      return 1;
+    }
+    if (unit < kTwoBytesEnd) {
+      return 2;
+    }
+    if (unit >= kLeadFirst && unit <= kTrailLast) {
+      return 2;
+    }
+
+    return 3;
   }
 
   private groupType(isMandatory: boolean): Type {

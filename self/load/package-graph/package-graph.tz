@@ -1,0 +1,264 @@
+import { basename, isAbsolute, join } from "node:path";
+import { ManifestReader } from "../manifest-reader/manifest-reader.tz";
+import {
+  kFirstRange,
+  kLatestWord,
+  kLocalNames,
+  kLocalPrefix,
+  kLocalStarts,
+  kNpmPrefix,
+  kNpmSourceText,
+  kRemotePrefixes,
+  kUniqueMark,
+  kVersionStarts,
+} from "./const/package-graph.const.tz";
+import {
+  DependencySource,
+  DependencySourceKind,
+  Manifest,
+  PackageInfo,
+} from "./types/package-graph.types.tz";
+
+export class PackageGraph {
+  public readonly packages: PackageInfo[];
+  private readonly reader: ManifestReader;
+  private readonly names: Set<string>;
+
+  public constructor(reader: ManifestReader) {
+    this.packages = [];
+    this.reader = reader;
+    this.names = new Set<string>();
+  }
+
+  public build(entryDirectory: string): void {
+    const reader = this.reader;
+    const path = reader.findAbove(entryDirectory);
+    if (path == undefined) {
+      return;
+    }
+
+    const root = reader.read(path);
+    if (root == undefined) {
+      return;
+    }
+
+    const locals = this.localManifests(root);
+    if (reader.errors.length > 0) {
+      return;
+    }
+
+    const ids = Array.from(locals.keys()).sort();
+    const index = new Map<string, int>();
+    const manifests = [root];
+
+    for (const id of ids) {
+      const local = locals.get(id);
+      if (local != undefined) {
+        index.set(id, manifests.length);
+        manifests.push(local);
+      }
+    }
+
+    for (let at = 0; at < manifests.length; at++) {
+      const manifest = manifests[at];
+      if (manifest != undefined) {
+        this.packages.push(this.packageOf(manifest, at, index));
+      }
+    }
+  }
+
+  public isPresent(): boolean {
+    return this.packages.length > 0;
+  }
+
+  public packageAt(index: int): PackageInfo | undefined {
+    return this.packages[index];
+  }
+
+  private packageOf(
+    manifest: Manifest,
+    at: int,
+    index: Map<string, int>,
+  ): PackageInfo {
+    const aliases = new Map<string, int>();
+    const remote: string[] = [];
+
+    for (const dependency of manifest.dependencies) {
+      const source = this.sourceOf(dependency.spec, manifest.directory);
+      if (source.kind == DependencySourceKind.Remote) {
+        remote.push(dependency.alias);
+      }
+      if (source.kind != DependencySourceKind.Local) {
+        continue;
+      }
+
+      const target = index.get(this.localId(source.directory));
+      if (target != undefined) {
+        aliases.set(dependency.alias, target);
+      }
+    }
+
+    return {
+      name: this.packageName(manifest, at),
+      directory: manifest.directory,
+      manifestPath: manifest.path,
+      main: manifest.main,
+      exports: manifest.exports,
+      aliases,
+      remote,
+    };
+  }
+
+  private packageName(manifest: Manifest, at: int): string {
+    if (at == 0) {
+      return "";
+    }
+    if (manifest.name != "") {
+      return this.uniqueName(manifest.name);
+    }
+
+    return this.uniqueName(basename(manifest.directory));
+  }
+
+  private uniqueName(name: string): string {
+    let unique = name;
+    let count = 2;
+
+    while (this.names.has(unique)) {
+      unique = `${name}${kUniqueMark}${count}`;
+      count += 1;
+    }
+
+    this.names.add(unique);
+
+    return unique;
+  }
+
+  private localManifests(root: Manifest): Map<string, Manifest> {
+    const found = new Map<string, Manifest>();
+    const queue = [root];
+    let next = 0;
+
+    while (next < queue.length) {
+      const manifest = queue[next];
+
+      next += 1;
+
+      if (manifest != undefined) {
+        this.addLocals(manifest, found, queue);
+      }
+    }
+
+    return found;
+  }
+
+  private addLocals(
+    manifest: Manifest,
+    found: Map<string, Manifest>,
+    queue: Manifest[],
+  ): void {
+    for (const dependency of manifest.dependencies) {
+      const source = this.sourceOf(dependency.spec, manifest.directory);
+      if (source.kind == DependencySourceKind.Problem) {
+        this.reader.errors.push(`${manifest.path}: ${source.message}`);
+
+        continue;
+      }
+      if (source.kind != DependencySourceKind.Local) {
+        continue;
+      }
+
+      const id = this.localId(source.directory);
+      if (found.has(id)) {
+        continue;
+      }
+
+      const local = this.reader.readPackageDirectory(source.directory);
+      if (local != undefined) {
+        found.set(id, local);
+        queue.push(local);
+      }
+    }
+  }
+
+  private localId(directory: string): string {
+    const slashed = directory.replaceAll("\\", "/");
+
+    return `${kLocalPrefix}${slashed}`;
+  }
+
+  private sourceOf(spec: string, base: string): DependencySource {
+    const isRemote = kRemotePrefixes.some((prefix) => spec.startsWith(prefix));
+    if (isRemote) {
+      return { kind: DependencySourceKind.Remote };
+    }
+
+    const isLocal = spec.startsWith(kLocalPrefix);
+    const rest = this.localRest(spec, isLocal);
+    const isRelative =
+      kLocalStarts.some((start) => rest.startsWith(start)) ||
+      kLocalNames.includes(rest);
+    if (isLocal || isRelative) {
+      return this.localSource(rest, base);
+    }
+    if (rest.startsWith(kNpmPrefix)) {
+      return this.sourceProblem(kNpmSourceText);
+    }
+    if (this.isVersion(rest)) {
+      const range = this.shownRange(rest);
+
+      return this.sourceProblem(
+        `'${spec}' is a version, but not where the package comes from; tz takes packages from JSR and git: write e.g. 'jsr:@scope/name@${range}'`,
+      );
+    }
+
+    return this.sourceProblem(
+      `'${spec}' does not say where the package comes from; write 'jsr:@scope/name@^1', 'github:user/repo@v1.0.0', 'git:<address>@v1.0.0' or 'file:<directory>'`,
+    );
+  }
+
+  private localRest(spec: string, isLocal: boolean): string {
+    if (isLocal) {
+      return spec.slice(kLocalPrefix.length);
+    }
+
+    return spec;
+  }
+
+  private localSource(rest: string, base: string): DependencySource {
+    const full = this.fullPath(rest, base);
+    if (!this.reader.isDirectory(full)) {
+      return this.sourceProblem(`there is no directory '${rest}' in ${base}`);
+    }
+
+    const directory = this.reader.canonical(full);
+
+    return { kind: DependencySourceKind.Local, directory };
+  }
+
+  private fullPath(rest: string, base: string): string {
+    if (isAbsolute(rest)) {
+      return rest;
+    }
+
+    return join(base, rest);
+  }
+
+  private isVersion(rest: string): boolean {
+    const first = rest.slice(0, 1);
+
+    return rest == kLatestWord || kVersionStarts.includes(first);
+  }
+
+  private shownRange(rest: string): string {
+    if (rest == kLatestWord) {
+      return kFirstRange;
+    }
+
+    return rest;
+  }
+
+  private sourceProblem(message: string): DependencySource {
+    return { kind: DependencySourceKind.Problem, message };
+  }
+}

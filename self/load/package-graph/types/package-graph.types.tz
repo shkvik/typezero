@@ -1,0 +1,51 @@
+export type PackageExport = {
+  readonly key: string;
+  readonly file: string;
+};
+
+export type ManifestDependency = {
+  readonly alias: string;
+  readonly spec: string;
+};
+
+export type Manifest = {
+  readonly path: string;
+  readonly directory: string;
+  readonly name: string;
+  readonly version: string;
+  readonly main: string;
+  readonly exports: PackageExport[];
+  readonly dependencies: ManifestDependency[];
+};
+
+export type PackageInfo = {
+  readonly name: string;
+  readonly directory: string;
+  readonly manifestPath: string;
+  readonly main: string;
+  readonly exports: PackageExport[];
+  readonly aliases: Map<string, int>;
+  readonly remote: string[];
+};
+
+export enum DependencySourceKind {
+  Local,
+  Remote,
+  Problem,
+}
+
+export type DependencySource =
+  | {
+      readonly kind: DependencySourceKind.Local;
+      readonly directory: string;
+    }
+  | { readonly kind: DependencySourceKind.Remote }
+  | {
+      readonly kind: DependencySourceKind.Problem;
+      readonly message: string;
+    };
+
+export type PackageSpecifier = {
+  readonly name: string;
+  readonly subpath: string;
+};

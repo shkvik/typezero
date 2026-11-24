@@ -36,9 +36,27 @@ partial class ExpressionTypes {
       const loc = expr.loc + expr.written - flags.length;
 
       this.reportFound(module, this.regexes.flagsError(loc, flags));
+
+      return this.regExpType();
     }
 
+    const written = { pattern: expr.pattern, flags };
+
+    this.syntaxCheck(written, expr.loc, true, module);
+
     return this.regExpType();
+  }
+
+  private syntaxCheck(
+    written: RegexText,
+    loc: int,
+    isWritten: boolean,
+    module: int,
+  ): void {
+    const error = this.regexes.syntaxError(written, loc, isWritten);
+    if (error != undefined) {
+      this.reportFound(module, error);
+    }
   }
 
   private regExpType(): Type {
@@ -289,6 +307,8 @@ partial class ExpressionTypes {
       const flags = constant.flags;
       if (!this.regexes.isFlagsValid(flags)) {
         this.reportFound(module, this.regexes.flagsError(loc, flags));
+      } else {
+        this.syntaxCheck(constant, loc, false, module);
       }
 
       return this.regExpType();
