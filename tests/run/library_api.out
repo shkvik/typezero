@@ -8,10 +8,6 @@ https://example.com/a?q=a%20b a b
 https://example.com/a ["x=1&y=2+3","z=9","q=a b",null]
 false false
 a true true
-true
-true
-64
-ERR_INVALID_ACCESS
 127.0.0.1 true 127.0.0.1
 hi /there
 another port

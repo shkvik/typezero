@@ -99,6 +99,11 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
+    const eventsMade = this.eventsFunctionCall(expr, callee, target, module);
+    if (eventsMade != undefined) {
+      return eventsMade;
+    }
+
     const isLibrary = this.modules.isLibraryModule(target.module);
     const isClass = target.kind == SymbolKind.Class;
     if (isLibrary && isClass && callee.name == kDateName) {

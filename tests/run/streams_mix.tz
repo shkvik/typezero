@@ -2,7 +2,7 @@
 // Streams with the rest (docs/streams.md, steps 1–3): an async generator of
 // records through a Transform in object mode and one to lines into a file,
 // a server of tz:http that sends what a read stream of the file gives,
-// hashes and Web Crypto over the chunks, an EventEmitter that reports the
+// hashes over the chunks, an EventEmitter that reports the
 // stages, stream objects that hold each other (pipeline, listeners), and a
 // Dog[] that a stream of Animal[] only reads.
 import { createReadStream, createWriteStream, mkdtempSync, rmSync } from "node:fs"
@@ -79,8 +79,7 @@ console.log(JSON.stringify(must(await text(joined))))
 // A server that sends the file as it reads it.
 const server = new Server({ port: 0, hostname: "127.0.0.1" }, async () => {
   const body = (await text(createReadStream(file, "utf8"))).unwrapOr("")
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body))
-  const hash = digest.map(d => Buffer.from(d).toString("hex")).unwrapOr("-")
+  const hash = createHash("sha256").map(h => h.update(body).digest("hex")).unwrapOr("-")
   return new Response(body, { headers: { "x-digest": hash } })
 })
 const started = server.listen()

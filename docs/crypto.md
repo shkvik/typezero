@@ -5,10 +5,15 @@
 шифры на 32- и 64-битном счёте — `Bit.Wrap32`, `Bit.Wrap64` и объект `Bit`
 ([numbers.md](numbers.md)).
 
+Решение 24 ноября 2026 года: Web Crypto (`crypto.subtle`, `CryptoKey` и его типы) убран из
+языка; криптография — только `node:crypto`, у глобального `crypto` остаются `randomUUID` и
+`getRandomValues`. В self (компиляторе на tz) убран сразу: `crypto.subtle` и `CryptoKey` там —
+обычные неизвестные имена, без подсказки. В C++ и в `library/crypto/webcrypto.tz` он пока
+остаётся, до ухода с C++; тесты Web Crypto удалены. Всё ниже про Web Crypto — история решений.
+
 ## Коротко
 
-- `node:crypto` и Web Crypto (`crypto.subtle`, `crypto.getRandomValues`, `crypto.randomUUID`) —
-  как в JS.
+- `node:crypto` и глобальный `crypto` (`crypto.getRandomValues`, `crypto.randomUUID`) — как в JS.
 - Внутри — OpenSSL 3.5, та же библиотека и версия, что в node 24. Готовые библиотеки — в
   поставке tz, собирать ничего не нужно.
 - OpenSSL собран как в node: без того, что node и сам выключил.

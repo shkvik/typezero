@@ -25,6 +25,14 @@ import {
   kTzFsModule,
   kTzIoHint,
   kTzIoModule,
+  kAbortListenerHint,
+  kAbortListenerName,
+  kEventsModuleName,
+  kEventsResourceHint,
+  kEventsResources,
+  kEventsSymbolHint,
+  kEventsSymbols,
+  kWebEventNames,
 } from "./const/library-exports.const.tz";
 
 export class LibraryExports {
@@ -150,10 +158,6 @@ export class LibraryExports {
     kind: ExportKind | undefined,
   ): Finding {
     switch (kind) {
-      case ExportKind.Webcrypto:
-        return { code: Code.ExportWebcrypto, details: { path, word } };
-      case ExportKind.Subtle:
-        return { code: Code.ExportSubtle, details: { path, word } };
       case ExportKind.NotYet:
         return this.notYet(path, word, "");
       default:
@@ -177,9 +181,28 @@ export class LibraryExports {
         return kBufferHint;
       case kTimersModule:
         return kTimersHint;
+      case kEventsModuleName:
+        return this.eventsHint(word);
       default:
         return "";
     }
+  }
+
+  private eventsHint(word: string): string {
+    if (kEventsSymbols.includes(word)) {
+      return kEventsSymbolHint;
+    }
+    if (word == kAbortListenerName) {
+      return kAbortListenerHint;
+    }
+    if (kEventsResources.includes(word)) {
+      return kEventsResourceHint;
+    }
+    if (kWebEventNames.includes(word)) {
+      return `; '${word}' is global, as in node: use it without an import`;
+    }
+
+    return "";
   }
 
   private tzFsHint(word: string): string {

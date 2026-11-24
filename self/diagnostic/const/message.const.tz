@@ -3145,12 +3145,6 @@ export const kMessages: Record<Code, Message> = {
   [Code.ExportFork]: {
     text: "'{word}' of '{path}' is not possible: it starts another Node with a channel to it, and tz has no Node (docs/process.md, section 4); for parallel work use async functions (docs/async.md), and to run a program 'spawnSync(process.execPath, [...])'",
   },
-  [Code.ExportWebcrypto]: {
-    text: "'{word}' of '{path}' is the global crypto of Web Crypto, which needs no import: use 'crypto.subtle', 'crypto.getRandomValues' and 'crypto.randomUUID'",
-  },
-  [Code.ExportSubtle]: {
-    text: "'{word}' of '{path}' is the global crypto.subtle, which needs no import: use 'crypto.subtle'",
-  },
   [Code.LengthNotProven]: {
     text: "cannot prove that the new length is from 0 to the old one: an array of '{first}' cannot grow by setting its length, which would leave elements without a value; check it first, e.g. 'if (n >= 0 && n <= {word}.length)', or use push()",
   },
@@ -3743,76 +3737,10 @@ export const kMessages: Record<Code, Message> = {
     text: "'getRandomValues' fills an array of integers (a Uint8Array, an Int32Array, a Buffer...); found '{word}'",
   },
   [Code.CryptoGlobalMember]: {
-    text: "'crypto.{word}' does not exist; the global crypto has 'randomUUID', 'getRandomValues' and 'subtle'",
+    text: "'crypto.{word}' does not exist; the global crypto has 'randomUUID' and 'getRandomValues'",
   },
   [Code.CryptoGlobalCalled]: {
     text: "'crypto.{word}' can only be called",
-  },
-  [Code.SubtleExperiment]: {
-    text: "'{word}' is an algorithm node 24 has as an experiment, which tz has not yet; Web Crypto {first} with {other}",
-  },
-  [Code.SubtleOtherOperation]: {
-    text: "'{word}' is no algorithm of {path}; it {first} with {other}",
-  },
-  [Code.SubtleUnknownAlgorithm]: {
-    text: "unknown algorithm '{word}' of {path}; Web Crypto {first} with {other}",
-  },
-  [Code.SubtleParamsObject]: {
-    text: "'{word}' of {path} takes its parameters ({first}): write an object, e.g. { name: \"{word}\", {second}: {other} }",
-  },
-  [Code.SubtleNeedsMember]: {
-    text: "the algorithm '{word}' of {path} needs '{first}' ({second}); add it, e.g. '{first}: {other}'",
-  },
-  [Code.SubtleUnknownHash]: {
-    text: "unknown hash '{word}' of {first}; Web Crypto hashes with {other}",
-  },
-  [Code.SubtleNotSha]: {
-    text: "'{word}' is no SHA hash, which {first} takes; use 'SHA-256', 'SHA-384', 'SHA-512' or 'SHA-1'",
-  },
-  [Code.SubtleCurve]: {
-    text: "unknown namedCurve '{word}'; Web Crypto has 'P-256', 'P-384' and 'P-521'",
-  },
-  [Code.SubtleAesLength]: {
-    text: "an AES key is 128, 192 or 256 bits long",
-  },
-  [Code.SubtleGcmTag]: {
-    text: "the tag of AES-GCM is 32, 64, 96, 104, 112, 120 or 128 bits long",
-  },
-  [Code.SubtleFormat]: {
-    text: "unknown key format '{word}'; it is 'raw', 'pkcs8', 'spki' or 'jwk'",
-  },
-  [Code.SubtleImportFormat]: {
-    text: "'{word}' keys are not imported as '{first}' (node: 'Unable to import {word} using {first} format'); it takes {other}",
-  },
-  [Code.SubtleUnwrapFormat]: {
-    text: "'{word}' keys are not imported as '{first}'; it takes {other}",
-  },
-  [Code.SubtleDerived]: {
-    text: "deriveKey makes secret keys: AES, HMAC, HKDF or PBKDF2, not '{word}'",
-  },
-  [Code.SubtleUnknownUsage]: {
-    text: "usage '{word}' does not exist; the usages are {other}",
-  },
-  [Code.SubtleNotUsage]: {
-    text: "'{word}' is no usage of {first}; {other}",
-  },
-  [Code.SubtleEmptyUsages]: {
-    text: "a key without usages can do nothing, and node rejects it ('Usages cannot be empty'); give its usages, e.g. {other}",
-  },
-  [Code.SubtlePairEmpty]: {
-    text: "the private key of the pair would have no usages, which node rejects ('Usages cannot be empty'); add {other}",
-  },
-  [Code.SubtleJwkData]: {
-    text: "the key data of 'jwk' is a JsonWebKey; found '{word}'",
-  },
-  [Code.SubtleBytesData]: {
-    text: "the key data of '{word}' is bytes (a BufferSource); found '{first}'",
-  },
-  [Code.SubtleNewKey]: {
-    text: "a CryptoKey is made by crypto.subtle: importKey, generateKey, deriveKey or unwrapKey",
-  },
-  [Code.SubtleNewSubtle]: {
-    text: "there is one SubtleCrypto: crypto.subtle",
   },
   [Code.GlobalThisMember]: {
     text: "'globalThis.{word}' is not supported: tz has only 'globalThis.crypto'; write '{word}'",
@@ -4343,7 +4271,7 @@ export const kMessages: Record<Code, Message> = {
     text: "a listener is a function, but this is '{first}'",
   },
   [Code.ListenerGets]: {
-    text: "the listeners of '{word}' get '{first}', but this function is '{second}'",
+    text: "the listeners of '{word}' get '{first}', but this function is '{second}'; pass an arrow that calls it with what it needs",
   },
   [Code.ListenerAsyncResult]: {
     text: "an async listener returns 'Promise<void>', but this one returns '{first}', which the emitter would drop; wrap it, e.g. 'async (...) => { await f(...) }'",
@@ -4353,5 +4281,14 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.ListenerAsyncThis]: {
     text: "an async listener cannot take 'this'; use the emitter by name",
+  },
+  [Code.EventsNotEmitter]: {
+    text: "'{word}' takes an emitter of node:events{other}, but this is '{first}'",
+  },
+  [Code.EventsTargetOn]: {
+    text: "'on' of node:events takes an emitter of node:events; the events of an EventTarget are not supported yet: listen with 'addEventListener', or wait for one with 'await once(target, name)'",
+  },
+  [Code.ObjectListingEmitter]: {
+    text: "'Object.{word}' of an emitter is not supported: its fields are the listeners it keeps; read the fields of its class by name",
   },
 };

@@ -5,8 +5,6 @@ export enum ExportKind {
   NotYet,
   AsyncChild,
   Fork,
-  Webcrypto,
-  Subtle,
 }
 
 export type LibraryExport = {

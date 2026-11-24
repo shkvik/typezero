@@ -315,11 +315,6 @@ partial class ExpressionTypes {
         return fileMade;
       }
 
-      const subtleMade = this.subtleNew(expr, form.name, target.module, module);
-      if (subtleMade != undefined) {
-        return subtleMade;
-      }
-
       const cryptoMade = this.cryptoNew(expr, form.name, target.module, module);
       if (cryptoMade != undefined) {
         return cryptoMade;
@@ -451,7 +446,11 @@ partial class ExpressionTypes {
     }
 
     const constructors = this.visibleConstructors(maker.owner);
-    if (constructors.length == 0 && expr.args.length > 0) {
+    const isLibraryEmpty =
+      maker.owner != decl &&
+      this.modules.isLibraryModule(instance.module) &&
+      constructors.every((fn) => fn.params.length == 0);
+    if ((constructors.length == 0 || isLibraryEmpty) && expr.args.length > 0) {
       this.report(module, expr.loc, Code.NoConstructor, {
         word: decl.name ?? "",
       });

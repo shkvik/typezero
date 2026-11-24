@@ -68,7 +68,6 @@ partial class ExpressionTypes {
         this.fsCallCheck(expr, module);
         this.childCallCheck(expr, module);
         this.cryptoCallCheck(expr, module);
-        this.subtleCallCheck(expr, module);
         this.timerPromisesCheck(expr, module);
         this.readlineCheck(expr, module);
         this.promiseListCheck(expr, module);

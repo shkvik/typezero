@@ -37,25 +37,6 @@ const reader = stream.getReader()
 const first = await reader.read()
 console.log(first.isOk() && !first.value.done ? first.value.value : "-", stream.locked(), stream.disturbed())
 
-// A key does its own operations; crypto.subtle calls them.
-const made = await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, true, ["sign", "verify"])
-if (made.isOk() && made.value instanceof CryptoKey) {
-  const key = made.value
-  const data = new TextEncoder().encode("hello")
-  const signature = await key.sign("HMAC", data)
-  if (signature.isOk()) {
-    console.log((await key.verify("HMAC", signature.value, data)).unwrapOr(false))
-    console.log((await crypto.subtle.verify("HMAC", key, signature.value, data)).unwrapOr(false))
-  }
-  const raw = await key.export("raw")
-  if (raw.isOk()) {
-    const value = raw.value
-    console.log(value instanceof ArrayBuffer ? value.byteLength : -1)
-  }
-  const refused = await key.encrypt({ name: "AES-GCM", iv: new Uint8Array(12) }, data)
-  console.log(refused.isErr() ? refused.error.code : "encrypted")
-}
-
 // A server is made with its options, then listens; listen gives what
 // listens: its address, and stop(). Each listen is another socket.
 const server = new Server({ port: 0, hostname: "127.0.0.1" }, (request) => new Response(`hi ${new URL(request.url).pathname()}`))

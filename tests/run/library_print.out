@@ -88,16 +88,3 @@ EventEmitter {
     }
   }
 }
-CryptoKey {
-  type: 'secret',
-  extractable: false,
-  algorithm: { name: 'AES-GCM', length: 128 },
-  usages: [ 'encrypt' ],
-  handle: AesHandle {
-    key: SecretKeyObject {},
-    type: 'secret',
-    name: 'AES-GCM',
-    usages: [Array],
-    bits: 128
-  }
-}

@@ -252,8 +252,6 @@ export const kLibraryExports: LibraryExport[] = [
     kind: ExportKind.NotYet,
   },
   { module: "node:child_process", name: "_forkChild", kind: ExportKind.NotYet },
-  { module: "node:crypto", name: "webcrypto", kind: ExportKind.Webcrypto },
-  { module: "node:crypto", name: "subtle", kind: ExportKind.Subtle },
   { module: "node:crypto", name: "Certificate", kind: ExportKind.NotYet },
   { module: "node:crypto", name: "DiffieHellman", kind: ExportKind.NotYet },
   {

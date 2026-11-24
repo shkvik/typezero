@@ -7,6 +7,7 @@ import {
   ExprKind,
   FunctionExpr,
   MemberExpr,
+  NameExpr,
   NewExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import {
@@ -16,6 +17,7 @@ import {
 } from "../../../../../program/type/types/type.types.tz";
 import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
 import { kNoPlace } from "../../../../code/expression-types/const/expression-types.const.tz";
+import { ValueTarget } from "../../../../code/expression-types/types/expression-types.types.tz";
 import {
   kEmitName,
   kListenerQueries,
@@ -23,7 +25,14 @@ import {
   kEmitterName,
   kEventsModule,
   kThisParam,
+  kEventsFunctions,
+  kEventTargetName,
+  kOnName,
+  kOrEventTarget,
+  kWebModule,
 } from "../../../event-rules/const/event-rules.const.tz";
+import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
+import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz";
 
 partial class ExpressionTypes {
   private emitterMapCheck(expr: NewExpr, made: Type, module: int): void {
@@ -367,9 +376,9 @@ partial class ExpressionTypes {
   }
 
   private isPlainEmitter(type: Type): boolean {
-    return this.types.ancestorsOf(type).some((one) =>
-      this.isEventsClass(one, kEmitterName),
-    );
+    return this.types
+      .ancestorsOf(type)
+      .some((one) => this.isEventsClass(one, kEmitterName));
   }
 
   private isEmitter(type: Type): boolean {
@@ -404,5 +413,67 @@ partial class ExpressionTypes {
     }
 
     return this.program.modules[type.module]?.name == kEventsModule;
+  }
+
+  private eventsFunctionCall(
+    expr: CallExpr,
+    callee: NameExpr,
+    target: ValueTarget,
+    module: int,
+  ): Type | undefined {
+    const isFunction =
+      target.kind == SymbolKind.Function &&
+      this.program.modules[target.module]?.name == kEventsModule &&
+      kEventsFunctions.includes(callee.name);
+    const first = expr.args[0]?.expr;
+    if (!isFunction || first == undefined) {
+      return undefined;
+    }
+    if (this.modules.isLibraryModule(module)) {
+      return undefined;
+    }
+
+    const given = this.peekType(first, module);
+    const base = this.types.definedType(given);
+    const isTarget = this.isWebClass(base, kEventTargetName);
+    const isUnknownClass = base.kind == TypeKind.Instance && !isTarget;
+    if (base.kind == TypeKind.Error || isUnknownClass) {
+      return undefined;
+    }
+    if (isTarget && callee.name != kOnName) {
+      return undefined;
+    }
+    if (isTarget) {
+      this.report(module, callee.loc, Code.EventsTargetOn, kNoDetails);
+    } else {
+      const other = this.targetHint(callee.name);
+      const shown = this.text.of(given);
+
+      this.report(module, first.loc, Code.EventsNotEmitter, {
+        word: callee.name,
+        other,
+        first: shown,
+      });
+    }
+
+    this.looseArguments(expr.args, module);
+
+    return this.store.plain(TypeKind.Error);
+  }
+
+  private targetHint(name: string): string {
+    if (name == kOnName) {
+      return "";
+    }
+
+    return kOrEventTarget;
+  }
+
+  private isWebClass(type: Type, name: string): boolean {
+    if (type.kind != TypeKind.Instance || type.name != name) {
+      return false;
+    }
+
+    return this.program.modules[type.module]?.name == kWebModule;
   }
 }

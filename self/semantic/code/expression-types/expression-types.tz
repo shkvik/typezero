@@ -80,8 +80,6 @@ import "../../library/expression-types/partial/regex/expression-types.partial.re
 import "../../library/expression-types/partial/regex/expression-types.partial.string-patterns.tz";
 import "../../library/expression-types/partial/crypto/expression-types.partial.crypto-calls.tz";
 import "../../library/expression-types/partial/crypto/expression-types.partial.crypto-forms.tz";
-import "../../library/expression-types/partial/crypto/expression-types.partial.subtle-calls.tz";
-import "../../library/expression-types/partial/crypto/expression-types.partial.subtle-members.tz";
 import "../../library/expression-types/partial/crypto/expression-types.partial.crypto-numbers.tz";
 import "../../library/expression-types/partial/timers/expression-types.partial.timer-promises.tz";
 import "../../library/expression-types/partial/fs/expression-types.partial.readline.tz";
@@ -228,7 +226,6 @@ import { ChildRules } from "../../library/child-rules/child-rules.tz";
 import { WeakRefRules } from "../../library/weak-ref-rules/weak-ref-rules.tz";
 import { RegexRules } from "../../library/regex-rules/regex-rules.tz";
 import { CryptoRules } from "../../library/crypto-rules/crypto-rules.tz";
-import { SubtleRules } from "../../library/subtle-rules/subtle-rules.tz";
 import { ForeignRules } from "../../library/foreign-rules/foreign-rules.tz";
 import { NodeValueRules } from "../../library/node-value-rules/node-value-rules.tz";
 import { JsonText } from "../../library/json-text/json-text.tz";
@@ -301,7 +298,6 @@ export class ExpressionTypes {
   private readonly weakRefs: WeakRefRules;
   private readonly regexes: RegexRules;
   private readonly crypto: CryptoRules;
-  private readonly subtle: SubtleRules;
   private readonly foreign: ForeignRules;
   private readonly nodeValues: NodeValueRules;
   private readonly jsonTexts: JsonText;
@@ -543,7 +539,6 @@ export class ExpressionTypes {
     const weakRefs = new WeakRefRules(text, types, modules);
     const regexes = new RegexRules(store, text, types);
     const crypto = new CryptoRules(text, types, modules, byteSources);
-    const subtle = new SubtleRules(text, types, byteSources);
     const foreign = new ForeignRules(
       program,
       text,
@@ -617,7 +612,6 @@ export class ExpressionTypes {
     this.weakRefs = weakRefs;
     this.regexes = regexes;
     this.crypto = crypto;
-    this.subtle = subtle;
     this.foreign = foreign;
     this.nodeValues = nodeValues;
     this.jsonTexts = jsonTexts;

@@ -21,5 +21,3 @@ bus.emit("count", 1)
 console.log(bus, Object.keys(bus), JSON.stringify(bus).unwrapOr(""))
 console.log([bus], { deep: { emitter: bus } })
 
-const key = await crypto.subtle.importKey("raw", new Uint8Array(16), "AES-GCM", false, ["encrypt"])
-if (key.isOk()) console.log(key.value)

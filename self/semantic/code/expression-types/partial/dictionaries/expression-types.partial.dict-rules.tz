@@ -201,6 +201,11 @@ partial class ExpressionTypes {
   ): void {
     const base = this.types.apparent(type);
     const isValues = word == "values" || word == "entries";
+    if (isValues && this.isEmitter(base)) {
+      this.report(module, arg.loc, Code.ObjectListingEmitter, { word });
+
+      return;
+    }
     if (isValues && this.types.hasMethodFields(type)) {
       this.report(module, arg.loc, Code.ObjectListingMethods, { word });
 

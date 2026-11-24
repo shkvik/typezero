@@ -195,7 +195,7 @@ self/             компилятор на tz, пробный (порт compile
                   же — library/console/console.d.tz, math, json: интерфейс с методами и
                   константа этого типа; записи таблицы с доступом Global загружаются всегда,
                   лежат в Program.globals, и всё, что они объявляют, — глобальные имена (в
-                  выводе команд этих модулей нет). Пространство имён (`Bit`, `Intl`, `NodeJS`) — тоже файл объявлений (library/math/bit.d.tz, intl/intl.d.tz, timers/nodejs.d.tz): запись таблицы с полем `namespace`; типы файла зовутся с именем пространства впереди (`Intl.NumberFormat`, `Bit.Wrap32`), его значения — члены пространства (`Bit.rotateLeft32`), а тип, которого в файле нет, — TZ2302; intl.d.tz собирает tmp/selfhost/probes/intl_gen.py из данных таблиц C++. Модуль node, который отдаёт глобальное имя (`node:buffer` — `Buffer`), — файл объявлений с одним `export { Buffer } from "tz:global/buffer"` (library/buffer/node_buffer.d.tz): имя из импорта и глобальное — одно объявление; по своему имени глобальный модуль виден только коду библиотеки (программе — TZ2010), и только библиотеке разрешён `export … from` встроенного модуля. `node:process` (library/process/node_process.d.tz) отдаёт поля `process` по имени: `export declare const argv: Process["argv"]`. Потоки `process.stdin` / `stdout` / `stderr` объявлены отдельно (library/process/process_streams.d.tz, модуль `tz:process/streams`) и приходят в программу только по упоминанию — записи kLibraryMembers, как `crypto.subtle`: иначе библиотека потоков (около 4800 строк) загружалась бы в каждую программу. В интерфейсах библиотеки метод может
+                  выводе команд этих модулей нет). Пространство имён (`Bit`, `Intl`, `NodeJS`) — тоже файл объявлений (library/math/bit.d.tz, intl/intl.d.tz, timers/nodejs.d.tz): запись таблицы с полем `namespace`; типы файла зовутся с именем пространства впереди (`Intl.NumberFormat`, `Bit.Wrap32`), его значения — члены пространства (`Bit.rotateLeft32`), а тип, которого в файле нет, — TZ2302; intl.d.tz собирает tmp/selfhost/probes/intl_gen.py из данных таблиц C++. Модуль node, который отдаёт глобальное имя (`node:buffer` — `Buffer`), — файл объявлений с одним `export { Buffer } from "tz:global/buffer"` (library/buffer/node_buffer.d.tz): имя из импорта и глобальное — одно объявление; по своему имени глобальный модуль виден только коду библиотеки (программе — TZ2010), и только библиотеке разрешён `export … from` встроенного модуля. `node:process` (library/process/node_process.d.tz) отдаёт поля `process` по имени: `export declare const argv: Process["argv"]`. Потоки `process.stdin` / `stdout` / `stderr` объявлены отдельно (library/process/process_streams.d.tz, модуль `tz:process/streams`) и приходят в программу только по упоминанию — записи kLibraryMembers, как `Intl.Locale`: иначе библиотека потоков (около 4800 строк) загружалась бы в каждую программу. В интерфейсах библиотеки метод может
                   иметь свои параметры типа (`max<N extends MathNumber>(...values: N[]): N`,
                   ObjectTypeField.typeParams); в коде программы это по-прежнему TZ1328.
                   То, что создаётся через `new` (`Map`, `Set`, `WeakRef`, `Date`, `Promise`,
@@ -250,7 +250,7 @@ self/             компилятор на tz, пробный (порт compile
                   load/library-mentions/ — LibraryMentions.imports(токены, дерево): неявные
                   импорты файла программы — глобальные имена библиотеки (`URL`, `fetch`,
                   `Headers`…), которые в тексте есть не после точки и которых файл сам не
-                  объявляет и не импортирует, плюс `crypto.subtle` и `Intl.Locale`; они
+                  объявляет и не импортирует, плюс `Intl.Locale` и потоки `process`; они
                   лежат в Module.implicit, дерево файла не меняется; загрузчик для этого
                   лексит файл сам и отдаёт токены парсеру (Parser.parseLexed);
                   load/partial-classes/ — PartialClasses: склейка частей `partial class`.
@@ -823,12 +823,12 @@ self/             компилятор на tz, пробный (порт compile
                   имена, обязательность; без синтаксических ошибок), regex-rules/ — RegexRules
                   (флаги, методы regex и строк с шаблоном), crypto-rules/ — CryptoRules (имена
                   хэшей и шифров, длины, опции, обратные вызовы, классы node:crypto; таблицы
-                  const/…names сняты скриптом из C++), subtle-rules/ — SubtleRules (Web Crypto:
-                  алгоритмы, словари, использования, форматы; таблицы const/…tables из C++);
+                  const/…names сняты скриптом из C++) (SubtleRules — Web Crypto — убран
+                  24.11 вместе с Web Crypto в языке);
                   части обхода library/…/partial/: bytes/…byte-sources, byte-encodings,
                   text-coders, intl/…intl, date-options, fs/…fs-calls, process/…process,
                   child/…child-calls, weakref/…weak-refs, regex/…regexes, string-patterns,
-                  crypto/…crypto-calls, crypto-forms, subtle-calls, subtle-members;
+                  crypto/…crypto-calls, crypto-forms;
                   ещё: library/foreign-rules/ — ForeignRules (функции C: виды параметров и
                   результата, handle), части library/…/partial/: crypto/…crypto-numbers,
                   fs/…readline, timers/…timer-promises, ffi/…foreign, …promise-lists,
@@ -911,7 +911,7 @@ self/             компилятор на tz, пробный (порт compile
                   kLibrary): таблицы библиотеки в const/library-modules.const.tables.tz —
                   модули-файлы (имя, файл, части, как пишется в импорте, кому виден:
                   программе, только библиотеке или только неявно), глобальные имена и их
-                  модули, `crypto.subtle` и `Intl.Locale`, файлы встроенных объявлений;
+                  модули, `Intl.Locale`, файлы встроенных объявлений;
                   load/token/ — токены, общие для лексера и парсера (TokenKind, KnownName,
                   Token — в types/token.types.tz; в token.tz — класс TokenTable: isName,
                   isKeyword, keywordKind, knownName, spelling; общий экземпляр kTokenTable — в

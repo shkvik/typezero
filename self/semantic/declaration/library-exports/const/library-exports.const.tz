@@ -25,3 +25,14 @@ export const kTimersHint =
 export const kTzFsHint = "; it has replaceSync, replace and ReplaceError";
 export const kTzIoHint = "; it has readLine";
 export const kPendingCalls = [{ module: "node:fs/promises", name: "open" }];
+export const kEventsModuleName = "node:events";
+export const kEventsSymbols = ["errorMonitor", "captureRejectionSymbol"];
+export const kEventsSymbolHint =
+  ": in node it is a symbol, and tz has no symbols of its own; the names of events are strings (docs/events.md, section 4)";
+export const kAbortListenerName = "addAbortListener";
+export const kAbortListenerHint =
+  " yet; listen to the signal: 'signal.addEventListener(\"abort\", listener, { once: true })'";
+export const kEventsResources = ["EventEmitterAsyncResource", "usingDomains"];
+export const kEventsResourceHint =
+  ': tz has neither async resources nor domains; a store that follows a request is AsyncLocalStorage of "node:async_hooks"';
+export const kWebEventNames = ["EventTarget", "Event", "CustomEvent"];

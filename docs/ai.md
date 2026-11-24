@@ -75,7 +75,7 @@ console.log(age.value + 1)
   обязан разобрать все варианты. Поле есть только у одного варианта — сначала сузь:
   `if (e.code == "ERR_STREAM_FAILED") e.details`.
 - Библиотека отдаёт `Result` там, где node бросает: `fetch`, тела ответов, `JSON.parse`, `node:fs`,
-  `parseInt`, `URL.parse`, `crypto.subtle`, `execSync`…
+  `parseInt`, `URL.parse`, `node:crypto`, `execSync`…
 
 ## Async
 

@@ -18,6 +18,10 @@ import {
 } from "../../../../../program/type/types/type.types.tz";
 import { EnumHome } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 import { LiteralValue } from "../../types/expression-types.types.tz";
+import {
+  kCryptoName,
+  kGlobalThisName,
+} from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
   private memberTyped(expr: MemberExpr, module: int): Type {
@@ -353,5 +357,20 @@ partial class ExpressionTypes {
     }
 
     return this.resolver.declaredEnum(home.module, home.decl);
+  }
+
+  private globalThisRead(expr: MemberExpr, module: int): Type | undefined {
+    const object = expr.object;
+    const isGlobal =
+      object.kind == ExprKind.Name &&
+      object.name == kGlobalThisName &&
+      this.isGlobalUse(object, module);
+    if (!isGlobal || expr.name == kCryptoName) {
+      return undefined;
+    }
+
+    this.report(module, expr.loc, Code.GlobalThisMember, { word: expr.name });
+
+    return this.store.plain(TypeKind.Error);
   }
 }
