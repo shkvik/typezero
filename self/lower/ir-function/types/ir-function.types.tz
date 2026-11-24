@@ -1,0 +1,58 @@
+import { LLVMType, LLVMValue } from "../../llvm-api/llvm-api.tz";
+
+export enum IrOpcode {
+  Add = 8,
+  FAdd = 9,
+  Sub = 10,
+  FSub = 11,
+  Mul = 12,
+  FMul = 13,
+  UDiv = 14,
+  SDiv = 15,
+  FDiv = 16,
+  URem = 17,
+  SRem = 18,
+  FRem = 19,
+  Shl = 20,
+  LShr = 21,
+  AShr = 22,
+  And = 23,
+  Or = 24,
+  Xor = 25,
+  Trunc = 30,
+  ZExt = 31,
+  SExt = 32,
+  UIToFP = 35,
+  SIToFP = 36,
+  PtrToInt = 39,
+  IntToPtr = 40,
+  BitCast = 41,
+}
+
+export enum IrIntPredicate {
+  Equal = 32,
+  NotEqual = 33,
+  UnsignedGreater = 34,
+  UnsignedGreaterOrEqual = 35,
+  UnsignedLess = 36,
+  UnsignedLessOrEqual = 37,
+  SignedGreater = 38,
+  SignedGreaterOrEqual = 39,
+  SignedLess = 40,
+  SignedLessOrEqual = 41,
+}
+
+export enum IrRealPredicate {
+  OrderedEqual = 1,
+  OrderedGreater = 2,
+  OrderedGreaterOrEqual = 3,
+  OrderedLess = 4,
+  OrderedLessOrEqual = 5,
+  OrderedNotEqual = 6,
+  UnorderedNotEqual = 14,
+}
+
+export type IrCallee = {
+  readonly fn: LLVMValue;
+  readonly type: LLVMType;
+};

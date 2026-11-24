@@ -1,15 +1,104 @@
-export const kMainHeader = "define i32 @main()";
-export const kMainReturn = "ret i32 0";
+export const kMainName = "main";
 export const kRuntimeInit = "tz_rt_init";
 export const kRuntimeMainDone = "tz_rt_main_done";
 export const kRuntimeShutdown = "tz_rt_shutdown";
 export const kPrintInt = "tz_print_i64";
+export const kPrintUnsigned = "tz_print_u64";
+export const kPrintDouble = "tz_print_f64";
+export const kPrintBoolean = "tz_print_bool";
 export const kPrintChar = "tz_print_char";
+export const kPrintString = "tz_print_string";
+export const kErrorBegin = "tz_err_begin";
+export const kErrorEnd = "tz_err_end";
+export const kPanic = "tz_panic";
+export const kDebugger = "tz_debugger";
+export const kStringEqual = "tz_str_equal";
+export const kStringCompare = "tz_str_compare";
+export const kPowDouble = "tz_math_pow";
+export const kPowInt = "tz_math_pow_long";
 export const kConsoleName = "console";
-export const kLogName = "log";
+export const kStdoutPrints = ["log", "info", "debug"];
+export const kStderrPrints = ["error", "warn"];
 export const kSpaceCode = 32;
 export const kNewlineCode = 10;
 export const kIntType = "i64";
 export const kCharType = "i32";
+export const kFlagType = "i32";
+export const kBooleanType = "i1";
+export const kDoubleType = "double";
+export const kStringType = "{ ptr, i64 }";
+export const kPointerType = "ptr";
 export const kVoidType = "void";
-export const kIntBits = 64;
+export const kWideType = "i65";
+export const kNoOwner = -1;
+export const kMainFrame = 0;
+export const kTrue = "true";
+export const kFalse = "false";
+export const kZero = "zeroinitializer";
+export const kDivisionByZero = "Division by zero";
+export const kLengthMask = "3FFFFFFF";
+export const kLiteralCount = "4000000000000000";
+export const kFlagAscii = 1;
+export const kFlagTwoBytes = 2;
+export const kFlagInline = 4;
+export const kInlineLimit = 8;
+export const kOneByteKind = 1;
+export const kTwoByteKind = 2;
+export const kLatinLimit = 255;
+export const kAsciiLimit = 127;
+export const kUndefinedText = "undefined";
+export const kTypeKindNames = [
+  "error",
+  "void",
+  "undefined",
+  "never",
+  "unknown",
+  "boolean",
+  "double",
+  "decimal",
+  "string",
+  "Json",
+  "object",
+  "int",
+  "literal",
+  "array",
+  "tuple",
+  "object",
+  "function",
+  "union",
+  "Result",
+  "Promise",
+  "iterator",
+  "dictionary",
+  "class instance",
+  "type parameter",
+  "template",
+  "type operation",
+  "class",
+];
+export const kStringRetain = "tz.str.retain";
+export const kStringRelease = "tz.str.release";
+export const kStringConcat = "tz_str_concat_n";
+export const kNumberPartInt = "6000000000000001";
+export const kNumberPartDouble = "6000000000000002";
+export const kArrayRetain = "tz.arr.retain";
+export const kArrayRelease = "tz.arr.release";
+export const kStringFree = "tz_str_free";
+export const kArrayFree = "tz_arr_free";
+export const kArrayNew = "tz_arr_new";
+export const kArrayGrow = "tz_arr_grow";
+export const kPrintValue = "tz_print_value";
+export const kArrayLayout = "{ i64, ptr, ptr, i32, i32, ptr }";
+export const kDescriptorLayout = "{ i32, i32, ptr }";
+export const kArrayDataField = 2;
+export const kArrayLengthField = 3;
+export const kArrayCapacityField = 4;
+export const kLengthName = "length";
+export const kPushName = "push";
+export const kObjectAllocate = "tz_obj_alloc";
+export const kObjectHeader = "{ i64, ptr }";
+export const kInstanceRelease = "tz.instance.release";
+export const kFirstClassId = 100;
+export const kThisName = "this";
+export const kLayoutHead = "{ ptr, ptr, i32, i32, ptr, i32, i32 }";
+export const kObjectFree = "tz_obj_free";

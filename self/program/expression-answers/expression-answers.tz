@@ -4,11 +4,13 @@ import { Type } from "../type/types/type.types.tz";
 export class ExpressionAnswers {
   private readonly visited: Set<Expr>;
   private readonly types: Map<Expr, Type>;
+  private readonly tried: Map<Expr, Type>;
   private readonly folded: Map<Expr, decimal>;
 
   public constructor() {
     this.visited = new Set<Expr>();
     this.types = new Map<Expr, Type>();
+    this.tried = new Map<Expr, Type>();
     this.folded = new Map<Expr, decimal>();
   }
 
@@ -24,8 +26,14 @@ export class ExpressionAnswers {
     this.types.set(expr, type);
   }
 
+  public tryAnswer(expr: Expr, type: Type): void {
+    if (!this.tried.has(expr)) {
+      this.tried.set(expr, type);
+    }
+  }
+
   public typeOf(expr: Expr): Type | undefined {
-    return this.types.get(expr);
+    return this.types.get(expr) ?? this.tried.get(expr);
   }
 
   public fold(expr: Expr, value: decimal): void {

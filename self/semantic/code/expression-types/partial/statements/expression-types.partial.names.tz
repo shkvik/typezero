@@ -159,6 +159,10 @@ partial class ExpressionTypes {
     return opened != undefined && opened.source.isLibrary;
   }
 
+  public valueTargetOf(expr: NameExpr, module: int): ValueTarget | undefined {
+    return this.targetOfName(expr, module);
+  }
+
   private targetOfName(expr: NameExpr, module: int): ValueTarget | undefined {
     return this.targetOfUse(expr.loc, expr.name, module);
   }

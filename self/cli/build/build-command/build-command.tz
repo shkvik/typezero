@@ -1,11 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import { kSourceExtension } from "../../../program/module/const/module.const.tz";
 import { Program } from "../../../program/module/types/module.types.tz";
 import { SourceLines } from "../../../program/source-lines/source-lines.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { IrModule } from "../../../lower/ir-module/ir-module.tz";
 import { Lowering } from "../../../lower/lowering/lowering.tz";
 import { Unlowered } from "../../../lower/lowering/types/lowering.types.tz";
 import { FrontEnd } from "../../../pipeline/front-end/front-end.tz";
@@ -13,12 +14,9 @@ import { kProgramName } from "../../const/cli.const.tz";
 import { ProgramReport } from "../../program-report/program-report.tz";
 import { ProgramSource } from "../../program-source/program-source.tz";
 import {
-  kCompilerArguments,
-  kCompilerTool,
   kEmitIrOption,
   kExecutableExtension,
   kIrExtension,
-  kIrFile,
   kLinkerArguments,
   kLinkerTool,
   kObjectFile,
@@ -72,19 +70,26 @@ export class BuildCommand {
       return;
     }
 
-    const lowering = new Lowering(program, checked);
+    const lowering = new Lowering(this.store, program, checked);
     const lowered = lowering.run();
     if (lowered.unlowered.length > 0) {
       return this.unloweredReport(program, lowered.unlowered);
     }
 
+    const ir = lowering.ir;
+    if (!ir.isValid()) {
+      return this.report.failure(
+        `${kProgramName}: LLVM rejected the lowered program`,
+      );
+    }
+
     const output = this.outputOf(options, entry);
 
     if (options.isEmittingIr) {
-      return this.irWritten(output, lowered.text);
+      return this.irWritten(ir, output);
     }
 
-    this.executableMade(output, lowered.text);
+    this.executableMade(ir, output);
   }
 
   private optionsOf(): BuildOptions {
@@ -143,16 +148,13 @@ export class BuildCommand {
     }
   }
 
-  private irWritten(path: string, text: string): void {
-    const written = writeFileSync(path, text);
-    if (written.isErr()) {
-      this.report.failure(
-        `${kProgramName}: cannot write '${path}': ${written.error.message}`,
-      );
+  private irWritten(ir: IrModule, path: string): void {
+    if (!ir.printed(path)) {
+      this.report.failure(`${kProgramName}: cannot write '${path}'`);
     }
   }
 
-  private executableMade(output: string, text: string): void {
+  private executableMade(ir: IrModule, output: string): void {
     const prefix = join(tmpdir(), kTemporaryPrefix);
     const folder = mkdtempSync(prefix);
     if (folder.isErr()) {
@@ -165,15 +167,9 @@ export class BuildCommand {
       return;
     }
 
-    const irPath = join(folder.value, kIrFile);
     const objectPath = join(folder.value, kObjectFile);
-
-    this.irWritten(irPath, text);
-
     const isMade =
-      !this.report.hasFailed() &&
-      this.objectMade(irPath, objectPath) &&
-      this.linked(objectPath, output);
+      this.objectMade(ir, objectPath) && this.linked(objectPath, output);
     const removed = rmSync(folder.value, { force: true, recursive: true });
     if (isMade && removed.isErr()) {
       const reason = removed.error.message;
@@ -184,11 +180,14 @@ export class BuildCommand {
     }
   }
 
-  private objectMade(irPath: string, objectPath: string): boolean {
-    const compiler = this.toolPath(kCompilerTool);
-    const args = kCompilerArguments.concat([objectPath, irPath]);
+  private objectMade(ir: IrModule, objectPath: string): boolean {
+    if (ir.emitted(objectPath)) {
+      return true;
+    }
 
-    return this.toolRan(compiler, args);
+    this.report.failure(`${kProgramName}: cannot write '${objectPath}'`);
+
+    return false;
   }
 
   private linked(objectPath: string, output: string): boolean {

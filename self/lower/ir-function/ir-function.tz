@@ -1,30 +1,358 @@
+import {
+  LLVMAddIncoming,
+  LLVMAppendBasicBlockInContext,
+  LLVMBlock,
+  LLVMBuildAlloca,
+  LLVMBuildBinOp,
+  LLVMBuildBr,
+  LLVMBuildCall2,
+  LLVMBuildCast,
+  LLVMBuildCondBr,
+  LLVMBuildExtractValue,
+  LLVMBuildFCmp,
+  LLVMBuildFNeg,
+  LLVMBuildICmp,
+  LLVMBuildInBoundsGEP2,
+  LLVMBuildInsertValue,
+  LLVMBuildLoad2,
+  LLVMBuildPhi,
+  LLVMBuildRet,
+  LLVMBuildRetVoid,
+  LLVMBuildSelect,
+  LLVMBuildStore,
+  LLVMBuildStructGEP2,
+  LLVMBuildUnreachable,
+  LLVMBuilder,
+  LLVMCreateBuilderInContext,
+  LLVMGetBasicBlockTerminator,
+  LLVMGetParam,
+  LLVMPositionBuilderAtEnd,
+  LLVMType,
+  LLVMValue,
+} from "../llvm-api/llvm-api.tz";
+import { IrModule } from "../ir-module/ir-module.tz";
+import {
+  kDeadLabel,
+  kEntryLabel,
+  kStartLabel,
+} from "./const/ir-function.const.tz";
+import {
+  IrCallee,
+  IrIntPredicate,
+  IrOpcode,
+  IrRealPredicate,
+} from "./types/ir-function.types.tz";
+
 export class IrFunction {
-  private readonly header: string;
-  private readonly lines: string[];
+  public readonly callee: IrCallee;
+  private readonly module: IrModule;
+  private readonly builder: LLVMBuilder;
+  private readonly entryBuilder: LLVMBuilder;
+  private readonly entry: LLVMBlock;
+  private readonly start: LLVMBlock;
+  private current: LLVMBlock;
   private next: int;
 
-  public constructor(header: string) {
-    this.header = header;
-    this.lines = [];
+  public constructor(
+    module: IrModule,
+    name: string,
+    result: string,
+    params: string[],
+  ) {
+    const callee = module.declare(name, result, params);
+    const fn = callee.fn;
+    const context = module.context;
+    const entryName = module.cname(kEntryLabel);
+    const startName = module.cname(kStartLabel);
+    const entry = LLVMAppendBasicBlockInContext(context, fn, entryName);
+    const start = LLVMAppendBasicBlockInContext(context, fn, startName);
+    const builder = LLVMCreateBuilderInContext(context);
+    const entryBuilder = LLVMCreateBuilderInContext(context);
+
+    LLVMPositionBuilderAtEnd(entryBuilder, entry);
+    LLVMPositionBuilderAtEnd(builder, start);
+
+    this.callee = callee;
+    this.module = module;
+    this.builder = builder;
+    this.entryBuilder = entryBuilder;
+    this.entry = entry;
+    this.start = start;
+    this.current = start;
     this.next = 0;
   }
 
-  public instruction(text: string): string {
-    const name = `%${this.next}`;
+  public param(index: int): LLVMValue {
+    return LLVMGetParam(this.callee.fn, index.toUint32());
+  }
+
+  public slot(type: string, name: string): LLVMValue {
+    const cname = this.module.cname(name);
+
+    return LLVMBuildAlloca(this.entryBuilder, this.module.type(type), cname);
+  }
+
+  public entryStore(value: LLVMValue, pointer: LLVMValue): void {
+    LLVMBuildStore(this.entryBuilder, value, pointer);
+  }
+
+  public block(prefix: string): LLVMBlock {
+    const name = this.module.cname(`${prefix}${this.counted()}`);
+
+    const fn = this.callee.fn;
+
+    return LLVMAppendBasicBlockInContext(this.module.context, fn, name);
+  }
+
+  public open(block: LLVMBlock): void {
+    if (!this.isClosed()) {
+      LLVMBuildBr(this.builder, block);
+    }
+
+    LLVMPositionBuilderAtEnd(this.builder, block);
+    this.current = block;
+  }
+
+  public currentBlock(): LLVMBlock {
+    return this.current;
+  }
+
+  public isClosed(): boolean {
+    return LLVMGetBasicBlockTerminator(this.current) != undefined;
+  }
+
+  public binary(
+    opcode: IrOpcode,
+    left: LLVMValue,
+    right: LLVMValue,
+  ): LLVMValue {
+    this.alive();
+
+    const code: int = opcode;
+
+    return LLVMBuildBinOp(this.builder, code.toInt32(), left, right, "");
+  }
+
+  public negated(value: LLVMValue): LLVMValue {
+    this.alive();
+
+    return LLVMBuildFNeg(this.builder, value, "");
+  }
+
+  public integerCompare(
+    predicate: IrIntPredicate,
+    left: LLVMValue,
+    right: LLVMValue,
+  ): LLVMValue {
+    this.alive();
+
+    const code: int = predicate;
+
+    return LLVMBuildICmp(this.builder, code.toInt32(), left, right, "");
+  }
+
+  public realCompare(
+    predicate: IrRealPredicate,
+    left: LLVMValue,
+    right: LLVMValue,
+  ): LLVMValue {
+    this.alive();
+
+    const code: int = predicate;
+
+    return LLVMBuildFCmp(this.builder, code.toInt32(), left, right, "");
+  }
+
+  public cast(opcode: IrOpcode, value: LLVMValue, type: string): LLVMValue {
+    const code: int = opcode;
+
+    this.alive();
+
+    return LLVMBuildCast(
+      this.builder,
+      code.toInt32(),
+      value,
+      this.module.type(type),
+      "",
+    );
+  }
+
+  public load(type: string, pointer: LLVMValue): LLVMValue {
+    this.alive();
+
+    return LLVMBuildLoad2(this.builder, this.module.type(type), pointer, "");
+  }
+
+  public store(value: LLVMValue, pointer: LLVMValue): void {
+    this.alive();
+    LLVMBuildStore(this.builder, value, pointer);
+  }
+
+  public element(
+    type: string,
+    pointer: LLVMValue,
+    index: LLVMValue,
+  ): LLVMValue {
+    this.alive();
+
+    const element = this.module.type(type);
+
+    return LLVMBuildInBoundsGEP2(
+      this.builder,
+      element,
+      pointer,
+      [index],
+      1,
+      "",
+    );
+  }
+
+  public field(type: string, pointer: LLVMValue, index: int): LLVMValue {
+    this.alive();
+
+    const struct = this.module.type(type);
+
+    const at = index.toUint32();
+
+    return LLVMBuildStructGEP2(this.builder, struct, pointer, at, "");
+  }
+
+  public call(callee: IrCallee, args: LLVMValue[]): LLVMValue {
+    this.alive();
+
+    return LLVMBuildCall2(
+      this.builder,
+      callee.type,
+      callee.fn,
+      args,
+      args.length.toUint32(),
+      "",
+    );
+  }
+
+  public indirectCall(
+    type: LLVMType,
+    fn: LLVMValue,
+    args: LLVMValue[],
+  ): LLVMValue {
+    this.alive();
+
+    const count = args.length.toUint32();
+
+    return LLVMBuildCall2(this.builder, type, fn, args, count, "");
+  }
+
+  public phi(
+    type: string,
+    values: LLVMValue[],
+    blocks: LLVMBlock[],
+  ): LLVMValue {
+    this.alive();
+
+    const made = LLVMBuildPhi(this.builder, this.module.type(type), "");
+
+    LLVMAddIncoming(made, values, blocks, values.length.toUint32());
+
+    return made;
+  }
+
+  public select(
+    condition: LLVMValue,
+    then: LLVMValue,
+    otherwise: LLVMValue,
+  ): LLVMValue {
+    this.alive();
+
+    return LLVMBuildSelect(this.builder, condition, then, otherwise, "");
+  }
+
+  public extract(aggregate: LLVMValue, index: int): LLVMValue {
+    this.alive();
+
+    const at = index.toUint32();
+
+    return LLVMBuildExtractValue(this.builder, aggregate, at, "");
+  }
+
+  public insert(aggregate: LLVMValue, value: LLVMValue, index: int): LLVMValue {
+    this.alive();
+
+    const at = index.toUint32();
+
+    return LLVMBuildInsertValue(this.builder, aggregate, value, at, "");
+  }
+
+  public branch(block: LLVMBlock): void {
+    this.alive();
+    LLVMBuildBr(this.builder, block);
+  }
+
+  public conditionalBranch(
+    condition: LLVMValue,
+    then: LLVMBlock,
+    otherwise: LLVMBlock,
+  ): void {
+    this.alive();
+    LLVMBuildCondBr(this.builder, condition, then, otherwise);
+  }
+
+  public returned(value: LLVMValue): void {
+    this.alive();
+    LLVMBuildRet(this.builder, value);
+  }
+
+  public returnedVoid(): void {
+    this.alive();
+    LLVMBuildRetVoid(this.builder);
+  }
+
+  public unreachable(): void {
+    this.alive();
+    LLVMBuildUnreachable(this.builder);
+  }
+
+  public finishVoid(): void {
+    if (!this.isClosed()) {
+      LLVMBuildRetVoid(this.builder);
+    }
+
+    this.sealed();
+  }
+
+  public finishValue(value: LLVMValue): void {
+    if (!this.isClosed()) {
+      LLVMBuildRet(this.builder, value);
+    }
+
+    this.sealed();
+  }
+
+  public finishUnreachable(): void {
+    if (!this.isClosed()) {
+      LLVMBuildUnreachable(this.builder);
+    }
+
+    this.sealed();
+  }
+
+  private sealed(): void {
+    LLVMBuildBr(this.entryBuilder, this.start);
+  }
+
+  private alive(): void {
+    if (this.isClosed()) {
+      const dead = this.block(kDeadLabel);
+
+      LLVMPositionBuilderAtEnd(this.builder, dead);
+      this.current = dead;
+    }
+  }
+
+  private counted(): int {
+    const value = this.next;
 
     this.next += 1;
-    this.lines.push(`  ${name} = ${text}`);
 
-    return name;
-  }
-
-  public statement(text: string): void {
-    this.lines.push(`  ${text}`);
-  }
-
-  public text(): string {
-    const body = this.lines.join("\n");
-
-    return `${this.header} {\nentry:\n${body}\n}\n`;
+    return value;
   }
 }

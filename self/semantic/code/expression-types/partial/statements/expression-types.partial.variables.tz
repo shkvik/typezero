@@ -41,6 +41,10 @@ import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import { kNoPlace } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
+  public variableOf(module: int, loc: int): Type | undefined {
+    return this.door(module, loc)?.type;
+  }
+
   private record(module: int): ValueRecord | undefined {
     const known = this.records.get(module);
     if (known != undefined) {

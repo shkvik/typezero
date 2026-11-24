@@ -1,0 +1,158 @@
+import {
+  AssignExpr,
+  BinaryOp,
+  Expr,
+  ExprKind,
+  UpdateExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { IrOpcode } from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import { kDoubleType } from "../const/lowering.const.tz";
+import { Frame, IrValue, Place } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private assigned(frame: Frame, expr: AssignExpr): IrValue | undefined {
+    const place = this.targetPlace(frame, expr.target);
+    if (place == undefined) {
+      return undefined;
+    }
+
+    const value = this.assignedValue(frame, expr, place);
+    if (value == undefined) {
+      return undefined;
+    }
+
+    this.stored(frame, place, value);
+
+    return { type: value.type, value: value.value, tz: value.tz };
+  }
+
+  private assignedValue(
+    frame: Frame,
+    expr: AssignExpr,
+    place: Place,
+  ): IrValue | undefined {
+    const op = expr.op;
+    if (op == undefined) {
+      const given = this.value(frame, expr.value);
+      if (given == undefined) {
+        return undefined;
+      }
+
+      return this.converted(frame, given, place.tz, expr.value.loc);
+    }
+    if (op == BinaryOp.Add && this.isString(place.tz)) {
+      const current = this.loaded(frame, place);
+
+      return this.concatenated(frame, [current], [expr.value]);
+    }
+
+    const isNumber = this.isInteger(place.tz) || this.isDouble(place.tz);
+    if (!isNumber) {
+      this.notLowered(frame.module, expr.loc, "this assignment");
+
+      return undefined;
+    }
+
+    const current = this.loaded(frame, place);
+    const right = this.operand(frame, expr.value, place.tz);
+    if (right == undefined) {
+      return undefined;
+    }
+
+    return this.arithmetic(frame, op, current, right, expr.loc);
+  }
+
+  private targetPlace(frame: Frame, target: Expr): Place | undefined {
+    if (target.kind == ExprKind.Name) {
+      return this.namePlace(frame, target);
+    }
+    if (target.kind != ExprKind.Member) {
+      this.notLowered(frame.module, target.loc, "an assignment to this target");
+
+      return undefined;
+    }
+
+    const holder = this.value(frame, target.object);
+    if (holder == undefined) {
+      return undefined;
+    }
+
+    const place = this.fieldAt(
+      frame,
+      holder.value,
+      holder.tz,
+      target.name,
+      target.loc,
+    );
+
+    this.dropping(frame, holder);
+
+    return place;
+  }
+
+  private loaded(frame: Frame, place: Place): IrValue {
+    const value = frame.made.load(place.type, place.pointer);
+
+    return { type: place.type, value, tz: place.tz };
+  }
+
+  private updated(frame: Frame, expr: UpdateExpr): IrValue | undefined {
+    const target = expr.target;
+    if (target.kind != ExprKind.Name) {
+      this.notLowered(frame.module, expr.loc, "an update of this target");
+
+      return undefined;
+    }
+
+    const place = this.namePlace(frame, target);
+    if (place == undefined) {
+      return undefined;
+    }
+
+    const isNumber = this.isInteger(place.tz) || this.isDouble(place.tz);
+    if (!isNumber) {
+      this.notLowered(frame.module, expr.loc, "this update");
+
+      return undefined;
+    }
+
+    const before = this.loaded(frame, place);
+    const after = this.stepped(frame, before, expr.increment);
+
+    frame.made.store(after.value, place.pointer);
+
+    if (expr.prefix) {
+      return after;
+    }
+
+    return before;
+  }
+
+  private stepped(frame: Frame, value: IrValue, isUp: boolean): IrValue {
+    const isDouble = value.type == kDoubleType;
+    const one = this.oneOf(value.type, isDouble);
+    let opcode: IrOpcode = this.opcodeFor(
+      isDouble,
+      IrOpcode.FSub,
+      IrOpcode.Sub,
+    );
+
+    if (isUp) {
+      opcode = this.opcodeFor(isDouble, IrOpcode.FAdd, IrOpcode.Add);
+    }
+
+    const made = frame.made.binary(opcode, value.value, one);
+
+    return { type: value.type, value: made, tz: value.tz };
+  }
+
+  private oneOf(type: string, isDouble: boolean): LLVMValue {
+    if (isDouble) {
+      return this.ir.real(1);
+    }
+
+    return this.ir.integer(type, "1");
+  }
+}

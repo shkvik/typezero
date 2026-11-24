@@ -1,0 +1,291 @@
+import { Type } from "../../../program/type/types/type.types.tz";
+import { IrFunction } from "../../ir-function/ir-function.tz";
+import {
+  IrCallee,
+  IrIntPredicate,
+  IrOpcode,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kArrayFree,
+  kArrayRelease,
+  kArrayRetain,
+  kInstanceRelease,
+  kIntType,
+  kObjectHeader,
+  kPointerType,
+  kStringFree,
+  kStringRelease,
+  kStringRetain,
+  kStringType,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue, Place } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private isManaged(type: Type): boolean {
+    const inner = this.optionalInner(type);
+    if (inner != undefined) {
+      return this.isManaged(inner);
+    }
+
+    return this.isString(type) || this.isArray(type) || this.isInstance(type);
+  }
+
+  private owning(frame: Frame, value: IrValue): IrValue {
+    const isFree =
+      value.owned == true ||
+      !this.isManaged(value.tz) ||
+      this.isConstant(value);
+    if (!isFree) {
+      this.countCall(frame, true, value);
+    }
+
+    return { type: value.type, value: value.value, tz: value.tz, owned: true };
+  }
+
+  private dropping(frame: Frame, value: IrValue): void {
+    const isOwned =
+      value.owned == true &&
+      this.isManaged(value.tz) &&
+      !this.isConstant(value);
+    if (isOwned) {
+      this.countCall(frame, false, value);
+    }
+  }
+
+  private countCall(frame: Frame, isRetain: boolean, value: IrValue): void {
+    const inner = this.optionalInner(value.tz);
+    if (inner != undefined) {
+      const inside = this.insideValue(frame, value, inner);
+
+      return this.countCall(frame, isRetain, inside);
+    }
+
+    const helper = this.countHelperOf(value.tz, isRetain);
+
+    frame.made.call(helper, [value.value]);
+  }
+
+  private countHelperOf(type: Type, isRetain: boolean): IrCallee {
+    if (this.isString(type)) {
+      const name = this.pick(isRetain, kStringRetain, kStringRelease);
+
+      return this.countHelper(name, isRetain, true);
+    }
+    if (this.isInstance(type) && !isRetain) {
+      return this.instanceReleaseHelper();
+    }
+
+    const name = this.pick(isRetain, kArrayRetain, kArrayRelease);
+
+    return this.countHelper(name, isRetain, false);
+  }
+
+  private openScope(frame: Frame): void {
+    frame.scopes.push([]);
+  }
+
+  private closeScope(frame: Frame): void {
+    const scope = frame.scopes.pop();
+    if (scope == undefined || frame.made.isClosed()) {
+      return;
+    }
+
+    this.scopeCleanup(frame, scope);
+  }
+
+  private cleanupsTo(frame: Frame, depth: int): void {
+    for (let index = frame.scopes.length - 1; index >= depth; index--) {
+      const scope = frame.scopes[index];
+      if (scope != undefined) {
+        this.scopeCleanup(frame, scope);
+      }
+    }
+  }
+
+  private scopeCleanup(frame: Frame, scope: Place[]): void {
+    for (let index = scope.length - 1; index >= 0; index--) {
+      const place = scope[index];
+      if (place != undefined) {
+        this.placeReleased(frame, place);
+      }
+    }
+  }
+
+  private placeReleased(frame: Frame, place: Place): void {
+    const made = frame.made;
+    const loaded = made.load(place.type, place.pointer);
+    const value: IrValue = {
+      type: place.type,
+      value: loaded,
+      tz: place.tz,
+      owned: true,
+    };
+
+    made.store(this.ir.zero(place.type), place.pointer);
+    this.dropping(frame, value);
+  }
+
+  private keepPlace(frame: Frame, place: Place): void {
+    const scope = frame.scopes[frame.scopes.length - 1];
+    if (scope != undefined && this.isManaged(place.tz)) {
+      scope.push(place);
+    }
+  }
+
+  private stored(frame: Frame, place: Place, value: IrValue): void {
+    const made = frame.made;
+    const owned = this.owning(frame, value);
+    if (!this.isManaged(place.tz)) {
+      return made.store(owned.value, place.pointer);
+    }
+
+    const before = made.load(place.type, place.pointer);
+    const old: IrValue = {
+      type: place.type,
+      value: before,
+      tz: place.tz,
+      owned: true,
+    };
+
+    made.store(owned.value, place.pointer);
+    this.dropping(frame, old);
+  }
+
+  private countHelper(
+    name: string,
+    isRetain: boolean,
+    isString: boolean,
+  ): IrCallee {
+    const known = this.ir.callee(name);
+    if (known != undefined) {
+      return known;
+    }
+
+    const param = this.pick(isString, kStringType, kPointerType);
+    const made = new IrFunction(this.ir, name, kVoidType, [param]);
+    const argument = made.param(0);
+    const counted = made.block("counted");
+    const done = made.block("done");
+    const object = this.countedObject(made, argument, isString);
+    const isCounted = this.isCountedTest(made, argument, isString);
+
+    made.conditionalBranch(isCounted, counted, done);
+    made.open(counted);
+
+    const count = made.load(kIntType, object);
+
+    if (isRetain) {
+      const one = this.ir.integer(kIntType, "1");
+      const more = made.binary(IrOpcode.Add, count, one);
+
+      made.store(more, object);
+    } else {
+      const free = this.pick(isString, kStringFree, kArrayFree);
+
+      this.lastReference(made, object, count, free);
+    }
+
+    made.open(done);
+    made.finishVoid();
+
+    return made.callee;
+  }
+
+  private countedObject(
+    made: IrFunction,
+    argument: LLVMValue,
+    isString: boolean,
+  ): LLVMValue {
+    if (isString) {
+      return made.extract(argument, 0);
+    }
+
+    return argument;
+  }
+
+  private isCountedTest(
+    made: IrFunction,
+    argument: LLVMValue,
+    isString: boolean,
+  ): LLVMValue {
+    if (isString) {
+      const meta = made.extract(argument, 1);
+      const zero = this.ir.zero(kIntType);
+
+      return made.integerCompare(IrIntPredicate.SignedLess, meta, zero);
+    }
+
+    const none = this.ir.zero(kPointerType);
+
+    return made.integerCompare(IrIntPredicate.NotEqual, argument, none);
+  }
+
+  private lastReference(
+    made: IrFunction,
+    object: LLVMValue,
+    count: LLVMValue,
+    free: string,
+  ): void {
+    const freed = made.block("free");
+    const after = made.block("after");
+    const one = this.ir.integer(kIntType, "1");
+    const left = made.binary(IrOpcode.Sub, count, one);
+    const zero = this.ir.zero(kIntType);
+    const isLast = made.integerCompare(IrIntPredicate.Equal, left, zero);
+    const freeing = this.ir.declare(free, kVoidType, [kPointerType]);
+
+    made.store(left, object);
+    made.conditionalBranch(isLast, freed, after);
+    made.open(freed);
+    made.call(freeing, [object]);
+    made.open(after);
+  }
+
+  private instanceReleaseHelper(): IrCallee {
+    const known = this.ir.callee(kInstanceRelease);
+    if (known != undefined) {
+      return known;
+    }
+
+    const made = new IrFunction(this.ir, kInstanceRelease, kVoidType, [
+      kPointerType,
+    ]);
+    const object = made.param(0);
+    const counted = made.block("counted");
+    const dropped = made.block("drop");
+    const done = made.block("done");
+    const none = this.ir.zero(kPointerType);
+    const isCounted = made.integerCompare(
+      IrIntPredicate.NotEqual,
+      object,
+      none,
+    );
+
+    made.conditionalBranch(isCounted, counted, done);
+    made.open(counted);
+
+    const count = made.load(kIntType, object);
+    const one = this.ir.integer(kIntType, "1");
+    const left = made.binary(IrOpcode.Sub, count, one);
+    const zero = this.ir.zero(kIntType);
+    const isLast = made.integerCompare(IrIntPredicate.Equal, left, zero);
+
+    made.store(left, object);
+    made.conditionalBranch(isLast, dropped, done);
+    made.open(dropped);
+
+    const kind = made.field(kObjectHeader, object, 1);
+    const layout = made.load(kPointerType, kind);
+    const dropper = made.load(kPointerType, layout);
+    const dropType = this.ir.signature(kVoidType, [kPointerType]);
+
+    made.indirectCall(dropType, dropper, [object]);
+    made.open(done);
+    made.finishVoid();
+
+    return made.callee;
+  }
+}

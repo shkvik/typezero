@@ -1,0 +1,220 @@
+import {
+  BinaryExpr,
+  BinaryOp,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { TypeKind } from "../../../program/type/types/type.types.tz";
+import {
+  IrIntPredicate,
+  IrRealPredicate,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kBooleanType,
+  kFlagType,
+  kIntType,
+  kPointerType,
+  kStringCompare,
+  kStringEqual,
+  kWideType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private comparison(frame: Frame, expr: BinaryExpr): IrValue | undefined {
+    const left = this.value(frame, expr.lhs);
+    const right = this.value(frame, expr.rhs);
+    if (left == undefined || right == undefined) {
+      return undefined;
+    }
+
+    const tz = this.store.plain(TypeKind.Boolean);
+    const value = this.compared(frame, expr, left, right);
+    if (value == undefined) {
+      return undefined;
+    }
+
+    this.dropping(frame, left);
+    this.dropping(frame, right);
+
+    return { type: kBooleanType, value, tz };
+  }
+
+  private compared(
+    frame: Frame,
+    expr: BinaryExpr,
+    left: IrValue,
+    right: IrValue,
+  ): LLVMValue | undefined {
+    const isNumber =
+      (this.isInteger(left.tz) || this.isDouble(left.tz)) &&
+      (this.isInteger(right.tz) || this.isDouble(right.tz));
+    if (isNumber) {
+      return this.numbersCompared(frame, expr, left, right);
+    }
+
+    const isEquality = expr.op == BinaryOp.Eq || expr.op == BinaryOp.Ne;
+    if (isEquality && this.isBoolean(left.tz) && this.isBoolean(right.tz)) {
+      const predicate = this.integerPredicate(expr.op, false);
+
+      return frame.made.integerCompare(predicate, left.value, right.value);
+    }
+    if (this.isString(left.tz) && this.isString(right.tz)) {
+      return this.stringsCompared(frame, expr.op, left, right);
+    }
+
+    this.notLowered(frame.module, expr.loc, "a comparison of these types");
+
+    return undefined;
+  }
+
+  private numbersCompared(
+    frame: Frame,
+    expr: BinaryExpr,
+    left: IrValue,
+    right: IrValue,
+  ): LLVMValue | undefined {
+    const made = frame.made;
+    if (this.isDouble(left.tz) || this.isDouble(right.tz)) {
+      const double = this.store.plain(TypeKind.Double);
+      const first = this.converted(frame, left, double, expr.lhs.loc);
+      const second = this.converted(frame, right, double, expr.rhs.loc);
+      if (first == undefined || second == undefined) {
+        return undefined;
+      }
+
+      const predicate = this.doublePredicate(expr.op);
+
+      return made.realCompare(predicate, first.value, second.value);
+    }
+    if (left.type == right.type && this.sameSign(left, right)) {
+      const isUnsigned = this.isUnsigned(left.tz);
+      const predicate = this.integerPredicate(expr.op, isUnsigned);
+
+      return made.integerCompare(predicate, left.value, right.value);
+    }
+
+    const first = this.wide(frame, left);
+    const second = this.wide(frame, right);
+    const predicate = this.integerPredicate(expr.op, false);
+
+    return made.integerCompare(predicate, first, second);
+  }
+
+  private sameSign(left: IrValue, right: IrValue): boolean {
+    return this.isUnsigned(left.tz) == this.isUnsigned(right.tz);
+  }
+
+  private wide(frame: Frame, value: IrValue): LLVMValue {
+    const opcode = this.resizing(this.bitsOf(value.tz), 65, value.tz);
+
+    return frame.made.cast(opcode, value.value, kWideType);
+  }
+
+  private stringsCompared(
+    frame: Frame,
+    op: BinaryOp,
+    left: IrValue,
+    right: IrValue,
+  ): LLVMValue {
+    const made = frame.made;
+    const first = this.stringParts(frame, left);
+    const second = this.stringParts(frame, right);
+    const parts = first.concat(second);
+    const zero = this.ir.zero(kFlagType);
+    const isEquality = op == BinaryOp.Eq || op == BinaryOp.Ne;
+    if (isEquality) {
+      const equal = this.runtimeValue(frame, kStringEqual, kFlagType, parts);
+      const predicate = this.equalFlagPredicate(op);
+
+      return made.integerCompare(predicate, equal, zero);
+    }
+
+    const order = this.runtimeValue(frame, kStringCompare, kFlagType, parts);
+    const predicate = this.integerPredicate(op, false);
+
+    return made.integerCompare(predicate, order, zero);
+  }
+
+  private stringParts(frame: Frame, value: IrValue): IrValue[] {
+    const made = frame.made;
+    const tz = this.store.integer(64, false);
+    const pointer = made.extract(value.value, 0);
+    const meta = made.extract(value.value, 1);
+
+    return [
+      { type: kPointerType, value: pointer, tz },
+      { type: kIntType, value: meta, tz },
+    ];
+  }
+
+  private equalFlagPredicate(op: BinaryOp): IrIntPredicate {
+    if (op == BinaryOp.Eq) {
+      return IrIntPredicate.NotEqual;
+    }
+
+    return IrIntPredicate.Equal;
+  }
+
+  private doublePredicate(op: BinaryOp): IrRealPredicate {
+    switch (op) {
+      case BinaryOp.Lt:
+        return IrRealPredicate.OrderedLess;
+      case BinaryOp.Le:
+        return IrRealPredicate.OrderedLessOrEqual;
+      case BinaryOp.Gt:
+        return IrRealPredicate.OrderedGreater;
+      case BinaryOp.Ge:
+        return IrRealPredicate.OrderedGreaterOrEqual;
+      case BinaryOp.Eq:
+        return IrRealPredicate.OrderedEqual;
+      default:
+        return IrRealPredicate.UnorderedNotEqual;
+    }
+  }
+
+  private integerPredicate(op: BinaryOp, isUnsigned: boolean): IrIntPredicate {
+    switch (op) {
+      case BinaryOp.Lt:
+        return this.predicateFor(
+          isUnsigned,
+          IrIntPredicate.UnsignedLess,
+          IrIntPredicate.SignedLess,
+        );
+      case BinaryOp.Le:
+        return this.predicateFor(
+          isUnsigned,
+          IrIntPredicate.UnsignedLessOrEqual,
+          IrIntPredicate.SignedLessOrEqual,
+        );
+      case BinaryOp.Gt:
+        return this.predicateFor(
+          isUnsigned,
+          IrIntPredicate.UnsignedGreater,
+          IrIntPredicate.SignedGreater,
+        );
+      case BinaryOp.Ge:
+        return this.predicateFor(
+          isUnsigned,
+          IrIntPredicate.UnsignedGreaterOrEqual,
+          IrIntPredicate.SignedGreaterOrEqual,
+        );
+      case BinaryOp.Eq:
+        return IrIntPredicate.Equal;
+      default:
+        return IrIntPredicate.NotEqual;
+    }
+  }
+
+  private predicateFor(
+    isFirst: boolean,
+    first: IrIntPredicate,
+    second: IrIntPredicate,
+  ): IrIntPredicate {
+    if (isFirst) {
+      return first;
+    }
+
+    return second;
+  }
+}

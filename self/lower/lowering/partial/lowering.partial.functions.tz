@@ -1,0 +1,299 @@
+import {
+  CallArgument,
+  CallExpr,
+  ExprKind,
+  NameExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+  ParamKind,
+} from "../../../program/ast/types/ast.types.functions.tz";
+import { SymbolKind } from "../../../program/scopes/types/scopes.types.tz";
+import {
+  FunctionShape,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { IrFunction } from "../../ir-function/ir-function.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import { kPushName, kVoidType } from "../const/lowering.const.tz";
+import { Frame, IrValue, Place } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private functionDeclared(frame: Frame, fn: FunctionDecl): void {
+    const module = frame.module;
+    const body = fn.body;
+    const shape = this.shapeOf(module, fn.loc);
+    if (body == undefined || shape == undefined) {
+      return this.notLowered(module, fn.loc, "this function");
+    }
+
+    const isPlain =
+      fn.typeParams.length == 0 &&
+      !fn.isAsync &&
+      !fn.isGenerator &&
+      !shape.rest &&
+      fn.params.every(
+        (param) =>
+          param.form.kind == ParamKind.Required && param.pattern == undefined,
+      );
+    if (!isPlain) {
+      return this.notLowered(module, fn.loc, "this kind of function");
+    }
+
+    const result = this.irType(shape.result);
+    const params = this.parameterTypes(module, fn, shape);
+    if (result == undefined || params == undefined) {
+      return this.notLowered(module, fn.loc, "a function of these types");
+    }
+
+    const name = this.functionName(module, fn.loc);
+    const made = new IrFunction(this.ir, name, result, params);
+    const inner: Frame = {
+      made,
+      id: this.frameId(),
+      module,
+      result: shape.result,
+      loops: [],
+      scopes: [],
+    };
+
+    this.openScope(inner);
+    this.parametersStored(inner, fn, shape, params);
+    this.statements(inner, body.body);
+    this.closeScope(inner);
+    this.finished(made, result);
+  }
+
+  private finished(made: IrFunction, result: string): void {
+    if (result == kVoidType) {
+      return made.finishVoid();
+    }
+
+    made.finishUnreachable();
+  }
+
+  private shapeOf(module: int, loc: int): FunctionShape | undefined {
+    const type = this.values.functionOf(module, loc);
+    if (type.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    return type.shape;
+  }
+
+  private parameterTypes(
+    module: int,
+    fn: FunctionDecl,
+    shape: FunctionShape,
+  ): string[] | undefined {
+    const types: string[] = [];
+
+    for (let index = 0; index < fn.params.length; index++) {
+      const param = shape.params[index];
+      if (param == undefined || param.optional) {
+        return undefined;
+      }
+
+      const type = this.irType(param.type);
+      if (type == undefined) {
+        return undefined;
+      }
+
+      types.push(type);
+    }
+
+    return types;
+  }
+
+  private parametersStored(
+    frame: Frame,
+    fn: FunctionDecl,
+    shape: FunctionShape,
+    types: string[],
+  ): void {
+    for (let index = 0; index < fn.params.length; index++) {
+      const param = fn.params[index];
+      const tz = shape.params[index]?.type;
+      const type = types[index];
+      if (param == undefined || tz == undefined || type == undefined) {
+        continue;
+      }
+
+      const pointer = frame.made.slot(type, param.name);
+      const key = this.placeKey(frame.module, param.loc);
+
+      const place: Place = { pointer, type, tz, owner: frame.id };
+      const given = frame.made.param(index + this.selfOffset(frame));
+
+      frame.made.store(given, pointer);
+      this.places.set(key, place);
+      this.keepPlace(frame, place);
+    }
+  }
+
+  private selfOffset(frame: Frame): int {
+    if (frame.self != undefined) {
+      return 1;
+    }
+
+    return 0;
+  }
+
+  private functionName(module: int, loc: int): string {
+    return `tz.f${module}.${loc}`;
+  }
+
+  private callValue(frame: Frame, call: CallExpr): IrValue | undefined {
+    const callee = call.callee;
+    if (callee.kind == ExprKind.Member) {
+      return this.memberCall(frame, call);
+    }
+    if (callee.kind != ExprKind.Name) {
+      this.notLowered(frame.module, call.loc, "this call");
+
+      return undefined;
+    }
+
+    return this.namedCall(frame, call, callee);
+  }
+
+  private namedCall(
+    frame: Frame,
+    call: CallExpr,
+    callee: NameExpr,
+  ): IrValue | undefined {
+    const target = this.values.valueTargetOf(callee, frame.module);
+    const opened = this.program.modules[target?.module ?? -1];
+    const isOwn =
+      target != undefined &&
+      target.kind == SymbolKind.Function &&
+      opened != undefined &&
+      !opened.source.isLibrary;
+    if (target == undefined || !isOwn) {
+      this.notLowered(frame.module, call.loc, "a call of this function");
+
+      return undefined;
+    }
+
+    const shape = this.shapeOf(target.module, target.loc);
+    if (shape == undefined || shape.params.length != call.args.length) {
+      this.notLowered(frame.module, call.loc, "this call");
+
+      return undefined;
+    }
+
+    const args = this.callArguments(frame, call.args, shape, call.loc);
+    const result = this.irType(shape.result);
+    const params = this.shapeTypes(shape);
+    if (args == undefined || result == undefined || params == undefined) {
+      return undefined;
+    }
+
+    const name = this.functionName(target.module, target.loc);
+    const declared = this.ir.declare(name, result, params);
+    const value = frame.made.call(declared, args);
+
+    return { type: result, value, tz: shape.result, owned: true };
+  }
+
+  private shapeTypes(shape: FunctionShape): string[] | undefined {
+    const types: string[] = [];
+
+    for (const param of shape.params) {
+      const type = this.irType(param.type);
+      if (type == undefined) {
+        return undefined;
+      }
+
+      types.push(type);
+    }
+
+    return types;
+  }
+
+  private callArguments(
+    frame: Frame,
+    passed: CallArgument[],
+    shape: FunctionShape,
+    loc: int,
+  ): LLVMValue[] | undefined {
+    const args: LLVMValue[] = [];
+    if (passed.length != shape.params.length) {
+      this.notLowered(frame.module, loc, "these arguments");
+
+      return undefined;
+    }
+
+    for (let index = 0; index < passed.length; index++) {
+      const arg = passed[index];
+      const param = shape.params[index];
+      if (arg == undefined || param == undefined || arg.spread) {
+        this.notLowered(frame.module, loc, "these arguments");
+
+        return undefined;
+      }
+
+      const given = this.value(frame, arg.expr);
+      if (given == undefined) {
+        return undefined;
+      }
+
+      const value = this.converted(frame, given, param.type, arg.expr.loc);
+      if (value == undefined) {
+        return undefined;
+      }
+
+      const owned = this.owning(frame, value);
+
+      args.push(owned.value);
+    }
+
+    return args;
+  }
+
+  private memberCall(frame: Frame, call: CallExpr): IrValue | undefined {
+    const isError = this.printStream(frame, call);
+    if (isError != undefined) {
+      return this.printed(frame, call, isError);
+    }
+
+    const callee = call.callee;
+    if (callee.kind == ExprKind.Member) {
+      const object = this.answers.typeOf(callee.object);
+      const isPush =
+        object != undefined && this.isArray(object) && callee.name == kPushName;
+      if (object != undefined && isPush) {
+        return this.arrayCall(frame, call, callee, object);
+      }
+      if (object != undefined && object.kind == TypeKind.Instance) {
+        return this.methodCall(frame, call, callee, object);
+      }
+    }
+
+    this.notLowered(frame.module, call.loc, "this method call");
+
+    return undefined;
+  }
+
+  private runtimeCall(made: IrFunction, name: string, args: IrValue[]): void {
+    const params = args.map((arg) => arg.type);
+    const given = args.map((arg) => arg.value);
+    const callee = this.ir.declare(name, kVoidType, params);
+
+    made.call(callee, given);
+  }
+
+  private runtimeValue(
+    frame: Frame,
+    name: string,
+    result: string,
+    args: IrValue[],
+  ): LLVMValue {
+    const params = args.map((arg) => arg.type);
+    const given = args.map((arg) => arg.value);
+    const callee = this.ir.declare(name, result, params);
+
+    return frame.made.call(callee, given);
+  }
+}

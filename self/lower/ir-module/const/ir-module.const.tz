@@ -1,0 +1,8 @@
+export const kInternalLinkage = 8;
+export const kPrivateLinkage = 9;
+export const kGlobalUnnamed = 2;
+export const kPrintMessageAction = 1;
+export const kTargetName = "x86-64";
+export const kGenericCpu = "generic";
+export const kCodeGenLevelNone = 0;
+export const kObjectFileKind = 1;

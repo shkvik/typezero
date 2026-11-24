@@ -1,0 +1,153 @@
+import { TypeKind } from "../../../program/type/types/type.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kAsciiLimit,
+  kFlagAscii,
+  kFlagInline,
+  kFlagTwoBytes,
+  kInlineLimit,
+  kIntType,
+  kLatinLimit,
+  kLiteralCount,
+  kOneByteKind,
+  kStringType,
+  kTwoByteKind,
+} from "../const/lowering.const.tz";
+import { IrValue, TextConstant } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private stringValue(text: string): IrValue {
+    const tz = this.store.plain(TypeKind.String);
+    const known = this.strings.get(text);
+    if (known != undefined) {
+      return { type: kStringType, value: known, tz };
+    }
+
+    const constant = this.stringConstant(text);
+
+    this.strings.set(text, constant);
+
+    return { type: kStringType, value: constant, tz };
+  }
+
+  private stringConstant(text: string): LLVMValue {
+    const units = this.codeUnits(text);
+    const isTwoBytes = units.some((unit) => unit > kLatinLimit);
+    const isAscii = units.every((unit) => unit <= kAsciiLimit);
+    const asciiFlag = this.flagIf(isAscii, kFlagAscii);
+    if (units.length == 0) {
+      const meta = this.metaValue(0, kFlagAscii);
+      const none = this.ir.zero("ptr");
+
+      return this.ir.constStruct([none, meta]);
+    }
+    if (!isTwoBytes && units.length <= kInlineLimit) {
+      const bits = this.ir.pointerFromBits(this.inlineBits(units));
+      const meta = this.metaValue(units.length, kFlagInline + asciiFlag);
+
+      return this.ir.constStruct([bits, meta]);
+    }
+
+    const buffer = this.bufferConstant(units, isTwoBytes);
+    const twoFlag = this.flagIf(isTwoBytes, kFlagTwoBytes);
+    const meta = this.metaValue(units.length, twoFlag + asciiFlag);
+
+    return this.ir.constStruct([buffer, meta]);
+  }
+
+  private bufferConstant(units: int[], isTwoBytes: boolean): LLVMValue {
+    const name = this.ir.uniqueName(".str.");
+    const length = units.length;
+    let element: string = "i8";
+    let kind: int = kOneByteKind;
+    let data: LLVMValue = this.byteArray(units);
+
+    if (isTwoBytes) {
+      const items = units.map((unit) => this.ir.integer("i16", `${unit}`));
+
+      element = "i16";
+      kind = kTwoByteKind;
+      data = this.ir.constArray("i16", items);
+    }
+
+    const array = `[${length} x ${element}]`;
+    const layout = `{ i64, i32, i32, i32, i32, ${array} }`;
+    const sizes = this.ir.integer("i32", `${length}`);
+    const value = this.ir.constStruct([
+      this.ir.hexInteger(kIntType, kLiteralCount),
+      this.ir.integer("i32", `${kind}`),
+      this.ir.integer("i32", "0"),
+      sizes,
+      sizes,
+      data,
+    ]);
+
+    return this.ir.global(name, layout, value, true);
+  }
+
+  private byteText(message: string): TextConstant {
+    const bytes = Buffer.from(message, "utf8");
+    const name = this.ir.uniqueName(".text.");
+    const data = this.ir.bytes(bytes, false);
+    const array = `[${bytes.length} x i8]`;
+    const pointer = this.ir.global(name, array, data, true);
+
+    return { pointer, length: bytes.length };
+  }
+
+  private byteArray(units: int[]): LLVMValue {
+    const bytes = Buffer.alloc(units.length);
+
+    for (let index = 0; index < units.length; index++) {
+      const unit = units[index] ?? 0;
+
+      bytes[index] = unit.toUint8();
+    }
+
+    return this.ir.bytes(bytes, false);
+  }
+
+  private codeUnits(text: string): int[] {
+    const units: int[] = [];
+
+    for (let index = 0; index < text.length; index++) {
+      units.push(text.charCodeAt(index) ?? 0);
+    }
+
+    return units;
+  }
+
+  private flagIf(isSet: boolean, flag: int): int {
+    if (isSet) {
+      return flag;
+    }
+
+    return 0;
+  }
+
+  private metaValue(length: int, flags: int): LLVMValue {
+    const top = flags.toString(16);
+    const rest = length.toString(16).padStart(15, "0");
+
+    return this.ir.hexInteger(kIntType, `${top}${rest}`);
+  }
+
+  private inlineBits(units: int[]): string {
+    const bytes: string[] = [];
+
+    for (let index = kInlineLimit - 1; index >= 0; index--) {
+      const unit = units[index] ?? 0;
+
+      bytes.push(this.hexByte(unit));
+    }
+
+    return bytes.join("");
+  }
+
+  private hexByte(unit: int): string {
+    const text = unit.toString(16).padStart(2, "0");
+
+    return text.toUpperCase();
+  }
+}

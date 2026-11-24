@@ -1,0 +1,419 @@
+import {
+  ConditionalExpr,
+  Expr,
+  ExprKind,
+  NameExpr,
+  UnaryExpr,
+  UnaryOp,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../program/scopes/types/scopes.types.tz";
+import {
+  LiteralKind,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import {
+  IrIntPredicate,
+  IrOpcode,
+  IrRealPredicate,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kBooleanType,
+  kDoubleType,
+  kIntType,
+  kLengthMask,
+  kNoOwner,
+  kThisName,
+  kTrue,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue, Place } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private value(frame: Frame, expr: Expr): IrValue | undefined {
+    const constant = this.constantOf(expr);
+    if (constant != undefined) {
+      return constant;
+    }
+
+    switch (expr.kind) {
+      case ExprKind.Undefined: {
+        const tz = this.store.plain(TypeKind.Undefined);
+
+        return { type: kBooleanType, value: this.ir.zero(kBooleanType), tz };
+      }
+      case ExprKind.IntLit: {
+        const tz = this.store.integer(64, false);
+
+        return this.integerValue(kIntType, `${expr.value}`, tz);
+      }
+      case ExprKind.FloatLit:
+        return this.doubleValue(expr.value);
+      case ExprKind.BoolLit:
+        return this.booleanValue(expr.value);
+      case ExprKind.StringLit:
+        return this.stringValue(expr.value);
+      case ExprKind.Name:
+        return this.nameValue(frame, expr);
+      case ExprKind.Binary:
+        return this.binary(frame, expr);
+      case ExprKind.Unary:
+        return this.unary(frame, expr);
+      case ExprKind.Assign:
+        return this.assigned(frame, expr);
+      case ExprKind.Update:
+        return this.updated(frame, expr);
+      case ExprKind.Call:
+        return this.callValue(frame, expr);
+      case ExprKind.Conditional:
+        return this.conditional(frame, expr);
+      case ExprKind.Sequence:
+        return this.sequence(frame, expr.exprs);
+      case ExprKind.Cast:
+        return this.cast(frame, expr, expr.operand);
+      case ExprKind.Template:
+        return this.templateValue(frame, expr);
+      case ExprKind.ArrayLit:
+        return this.arrayLiteral(frame, expr);
+      case ExprKind.New:
+        return this.newValue(frame, expr);
+      case ExprKind.Index:
+        return this.indexValue(frame, expr);
+      case ExprKind.Member:
+        return this.memberValue(frame, expr);
+      default:
+        this.notLowered(frame.module, expr.loc, "this expression");
+
+        return undefined;
+    }
+  }
+
+  private constantOf(expr: Expr): IrValue | undefined {
+    const type = this.answers.typeOf(expr);
+    if (type == undefined) {
+      return undefined;
+    }
+
+    const folded = this.answers.foldedOf(expr);
+    if (folded != undefined && this.isInteger(type)) {
+      const tz = this.widened(type);
+      const ir = this.irType(tz) ?? kIntType;
+
+      return this.integerValue(ir, `${folded}`, tz);
+    }
+    if (type.kind != TypeKind.Literal) {
+      return undefined;
+    }
+
+    switch (type.literal) {
+      case LiteralKind.Int: {
+        const tz = this.widened(type);
+
+        return this.integerValue(kIntType, type.text, tz);
+      }
+      case LiteralKind.Boolean:
+        return this.booleanValue(type.text == kTrue);
+      default:
+        return undefined;
+    }
+  }
+
+  private booleanValue(value: boolean): IrValue {
+    const tz = this.store.plain(TypeKind.Boolean);
+    let text: string = "0";
+
+    if (value) {
+      text = "1";
+    }
+
+    return this.integerValue(kBooleanType, text, tz);
+  }
+
+  private nameValue(frame: Frame, expr: NameExpr): IrValue | undefined {
+    const self = frame.self;
+    if (expr.name == kThisName && self != undefined) {
+      return this.loaded(frame, self);
+    }
+
+    const place = this.namePlace(frame, expr);
+    if (place == undefined) {
+      return undefined;
+    }
+
+    const loaded = this.loaded(frame, place);
+    const seen = this.answers.typeOf(expr);
+    if (seen == undefined || this.irType(seen) == place.type) {
+      return loaded;
+    }
+
+    return this.converted(frame, loaded, seen, expr.loc);
+  }
+
+  private namePlace(frame: Frame, expr: NameExpr): Place | undefined {
+    const target = this.values.valueTargetOf(expr, frame.module);
+    const isValue =
+      target != undefined &&
+      (target.kind == SymbolKind.Variable ||
+        target.kind == SymbolKind.Parameter);
+    if (target == undefined || !isValue) {
+      this.notLowered(frame.module, expr.loc, "this name");
+
+      return undefined;
+    }
+
+    const key = this.placeKey(target.module, target.loc);
+    const place = this.places.get(key);
+    if (place == undefined) {
+      this.notLowered(frame.module, expr.loc, "this variable");
+
+      return undefined;
+    }
+    if (place.owner != kNoOwner && place.owner != frame.id) {
+      this.notLowered(frame.module, expr.loc, "a captured variable");
+
+      return undefined;
+    }
+
+    return place;
+  }
+
+  private unary(frame: Frame, expr: UnaryExpr): IrValue | undefined {
+    switch (expr.op) {
+      case UnaryOp.Plus:
+      case UnaryOp.NonNull:
+        return this.value(frame, expr.operand);
+      case UnaryOp.Not:
+        return this.negated(frame, expr.operand);
+      case UnaryOp.Neg:
+        return this.minus(frame, expr);
+      case UnaryOp.BitNot:
+        return this.inverted(frame, expr);
+      default:
+        this.notLowered(frame.module, expr.loc, "this operator");
+
+        return undefined;
+    }
+  }
+
+  private negated(frame: Frame, operand: Expr): IrValue | undefined {
+    const test = this.truth(frame, operand);
+    if (test == undefined) {
+      return undefined;
+    }
+
+    const tz = this.store.plain(TypeKind.Boolean);
+    const yes = this.ir.integer(kBooleanType, "1");
+    const value = frame.made.binary(IrOpcode.Xor, test, yes);
+
+    return { type: kBooleanType, value, tz };
+  }
+
+  private minus(frame: Frame, expr: UnaryExpr): IrValue | undefined {
+    const given = this.value(frame, expr.operand);
+    if (given == undefined) {
+      return undefined;
+    }
+    if (this.isDouble(given.tz)) {
+      const value = frame.made.negated(given.value);
+
+      return { type: given.type, value, tz: given.tz };
+    }
+    if (this.isInteger(given.tz)) {
+      const zero = this.ir.zero(given.type);
+      const value = frame.made.binary(IrOpcode.Sub, zero, given.value);
+
+      return { type: given.type, value, tz: given.tz };
+    }
+
+    this.notLowered(frame.module, expr.loc, "this operator");
+
+    return undefined;
+  }
+
+  private inverted(frame: Frame, expr: UnaryExpr): IrValue | undefined {
+    const given = this.value(frame, expr.operand);
+    if (given == undefined || !this.isInteger(given.tz)) {
+      this.notLowered(frame.module, expr.loc, "this operator");
+
+      return undefined;
+    }
+
+    const ones = this.ir.integer(given.type, "-1");
+    const value = frame.made.binary(IrOpcode.Xor, given.value, ones);
+
+    return { type: given.type, value, tz: given.tz };
+  }
+
+  private conditional(
+    frame: Frame,
+    expr: ConditionalExpr,
+  ): IrValue | undefined {
+    const made = frame.made;
+    const result = this.answers.typeOf(expr);
+    const type = this.typeOrUndefined(result);
+    const test = this.truth(frame, expr.cond);
+    if (result == undefined || type == undefined || test == undefined) {
+      this.notLowered(frame.module, expr.loc, "this condition");
+
+      return undefined;
+    }
+
+    const then = made.block("cond.then");
+    const otherwise = made.block("cond.else");
+    const end = made.block("cond.end");
+
+    made.conditionalBranch(test, then, otherwise);
+    made.open(then);
+
+    const first = this.branchValue(frame, expr.thenExpr, result);
+    const firstBlock = made.currentBlock();
+
+    this.jumpTo(frame, end);
+    made.open(otherwise);
+
+    const second = this.branchValue(frame, expr.elseExpr, result);
+    const secondBlock = made.currentBlock();
+
+    this.jumpTo(frame, end);
+    made.open(end);
+
+    if (first == undefined || second == undefined) {
+      return undefined;
+    }
+
+    const value = made.phi(
+      type,
+      [first.value, second.value],
+      [firstBlock, secondBlock],
+    );
+
+    return { type, value, tz: result, owned: true };
+  }
+
+  private branchValue(
+    frame: Frame,
+    expr: Expr,
+    result: Type,
+  ): IrValue | undefined {
+    const given = this.value(frame, expr);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const value = this.converted(frame, given, result, expr.loc);
+    if (value == undefined) {
+      return undefined;
+    }
+
+    return this.owning(frame, value);
+  }
+
+  private typeOrUndefined(type: Type | undefined): string | undefined {
+    if (type == undefined) {
+      return undefined;
+    }
+
+    return this.irType(type);
+  }
+
+  private sequence(frame: Frame, exprs: Expr[]): IrValue | undefined {
+    let last: IrValue | undefined = undefined;
+
+    for (const expr of exprs) {
+      if (last != undefined) {
+        this.dropping(frame, last);
+      }
+
+      last = this.value(frame, expr);
+    }
+
+    return last;
+  }
+
+  private cast(frame: Frame, expr: Expr, operand: Expr): IrValue | undefined {
+    const target = this.answers.typeOf(expr);
+    const given = this.value(frame, operand);
+    if (target == undefined || given == undefined) {
+      return undefined;
+    }
+
+    return this.converted(frame, given, target, expr.loc);
+  }
+
+  private truth(frame: Frame, expr: Expr): LLVMValue | undefined {
+    const value = this.value(frame, expr);
+    if (value == undefined) {
+      return undefined;
+    }
+
+    const inner = this.optionalInner(value.tz);
+    if (inner != undefined && this.isReferenceLike(inner)) {
+      const has = this.hasValue(frame, value);
+
+      this.dropping(frame, value);
+
+      return has;
+    }
+    if (inner != undefined) {
+      const inside = this.insideValue(frame, value, inner);
+      const borrowed: IrValue = {
+        type: inside.type,
+        value: inside.value,
+        tz: inside.tz,
+      };
+      const test = this.truthOf(frame, borrowed, expr);
+
+      this.dropping(frame, value);
+
+      return test;
+    }
+
+    return this.truthOf(frame, value, expr);
+  }
+
+  private truthOf(
+    frame: Frame,
+    value: IrValue,
+    expr: Expr,
+  ): LLVMValue | undefined {
+    const made = frame.made;
+    if (this.isBoolean(value.tz)) {
+      return value.value;
+    }
+    if (this.isInteger(value.tz)) {
+      const zero = this.ir.zero(value.type);
+
+      return made.integerCompare(IrIntPredicate.NotEqual, value.value, zero);
+    }
+    if (this.isDouble(value.tz)) {
+      const zero = this.ir.zero(kDoubleType);
+
+      return made.realCompare(
+        IrRealPredicate.OrderedNotEqual,
+        value.value,
+        zero,
+      );
+    }
+    if (this.isArray(value.tz) || this.isInstance(value.tz)) {
+      this.dropping(frame, value);
+
+      return this.ir.integer(kBooleanType, "1");
+    }
+    if (this.isString(value.tz)) {
+      const meta = made.extract(value.value, 1);
+      const mask = this.ir.hexInteger(kIntType, kLengthMask);
+      const length = made.binary(IrOpcode.And, meta, mask);
+      const zero = this.ir.zero(kIntType);
+      const test = made.integerCompare(IrIntPredicate.NotEqual, length, zero);
+
+      this.dropping(frame, value);
+
+      return test;
+    }
+
+    this.notLowered(frame.module, expr.loc, "a test of this type");
+
+    return undefined;
+  }
+}

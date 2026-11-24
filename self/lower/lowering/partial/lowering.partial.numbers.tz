@@ -1,0 +1,105 @@
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrOpcode } from "../../ir-function/types/ir-function.types.tz";
+import { Lowering } from "../lowering.tz";
+import { kDoubleType } from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private converted(
+    frame: Frame,
+    value: IrValue,
+    target: Type,
+    loc: int,
+  ): IrValue | undefined {
+    const type = this.irType(target);
+    if (type == undefined) {
+      const kind = this.kindName(target);
+
+      this.notLowered(frame.module, loc, `a value of type ${kind}`);
+
+      return undefined;
+    }
+    if (value.tz.kind == TypeKind.Undefined) {
+      return { type, value: this.ir.zero(type), tz: target };
+    }
+
+    const inner = this.optionalInner(target);
+    const sourceInner = this.optionalInner(value.tz);
+    if (inner != undefined && sourceInner == undefined) {
+      const placed = this.converted(frame, value, inner, loc);
+      if (placed == undefined) {
+        return undefined;
+      }
+
+      return this.somewhere(frame, placed, target);
+    }
+    if (sourceInner != undefined && inner == undefined) {
+      const inside = this.insideValue(frame, value, sourceInner);
+
+      return this.converted(frame, inside, target, loc);
+    }
+    if (type == value.type) {
+      return { type, value: value.value, tz: target, owned: value.owned };
+    }
+    if (this.isInteger(value.tz) && this.isInteger(target)) {
+      return this.integerConverted(frame, value, target, type);
+    }
+    if (this.isInteger(value.tz) && this.isDouble(target)) {
+      const opcode = this.integerToDouble(value.tz);
+      const made = frame.made.cast(opcode, value.value, kDoubleType);
+
+      return { type, value: made, tz: target };
+    }
+
+    this.notLowered(frame.module, loc, "this conversion");
+
+    return undefined;
+  }
+
+  private integerConverted(
+    frame: Frame,
+    value: IrValue,
+    target: Type,
+    type: string,
+  ): IrValue {
+    const from = this.bitsOf(value.tz);
+    const to = this.bitsOf(target);
+    const opcode = this.resizing(from, to, value.tz);
+    const made = frame.made.cast(opcode, value.value, type);
+
+    return { type, value: made, tz: target };
+  }
+
+  private resizing(from: int, to: int, source: Type): IrOpcode {
+    if (to < from) {
+      return IrOpcode.Trunc;
+    }
+    if (this.isUnsigned(source)) {
+      return IrOpcode.ZExt;
+    }
+
+    return IrOpcode.SExt;
+  }
+
+  private integerToDouble(source: Type): IrOpcode {
+    if (this.isUnsigned(source)) {
+      return IrOpcode.UIToFP;
+    }
+
+    return IrOpcode.SIToFP;
+  }
+
+  private isConstant(value: IrValue): boolean {
+    return this.ir.isConstant(value.value);
+  }
+
+  private doubleValue(value: double): IrValue {
+    const tz = this.store.plain(TypeKind.Double);
+
+    return { type: kDoubleType, value: this.ir.real(value), tz };
+  }
+
+  private integerValue(type: string, text: string, tz: Type): IrValue {
+    return { type, value: this.ir.integer(type, text), tz };
+  }
+}

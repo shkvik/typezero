@@ -27,6 +27,7 @@ import {
   ClassMemberEntry,
 } from "../../types/expression-types.types.tz";
 import { kConstructorName } from "../../../object-rules/const/object-rules.const.tz";
+import { InstanceField } from "../../../../../program/expression-answers/types/expression-answers.types.tz";
 
 partial class ExpressionTypes {
   private instanceMember(
@@ -153,6 +154,40 @@ partial class ExpressionTypes {
     this.report(module, loc, Code.PrivateMember, { word, first });
 
     return true;
+  }
+
+  public classDeclOf(type: Type): ClassDecl | undefined {
+    if (type.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    return this.classOf(type);
+  }
+
+  public instanceFields(type: Type): InstanceField[] | undefined {
+    const decl = this.classDeclOf(type);
+    if (decl == undefined || type.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const fields: InstanceField[] = [];
+
+    for (const field of decl.fields) {
+      if (field.form == FieldKind.Static) {
+        continue;
+      }
+
+      const entry = this.classes.ownMember(type, decl, field.name);
+      if (entry == undefined) {
+        return undefined;
+      }
+
+      const fieldType = this.fieldTypeOf(entry, field);
+
+      fields.push({ name: field.name, loc: field.loc, type: fieldType });
+    }
+
+    return fields;
   }
 
   private classOf(instance: InstanceType): ClassDecl | undefined {

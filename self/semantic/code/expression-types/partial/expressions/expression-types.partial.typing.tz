@@ -17,7 +17,9 @@ partial class ExpressionTypes {
 
     const type = this.typedByKind(expr, wanted, module);
 
-    if (!isTrying) {
+    if (isTrying) {
+      this.answers.tryAnswer(expr, type);
+    } else {
       this.answers.answer(expr, type);
     }
 

@@ -1,0 +1,538 @@
+import { ClassDecl } from "../../../program/ast/types/ast.types.classes.tz";
+import {
+  CallExpr,
+  MemberExpr,
+  NewExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FunctionDecl,
+  ParamKind,
+} from "../../../program/ast/types/ast.types.functions.tz";
+import { InstanceField } from "../../../program/expression-answers/types/expression-answers.types.tz";
+import {
+  FunctionShape,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { IrFunction } from "../../ir-function/ir-function.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kFlagType,
+  kIntType,
+  kLayoutHead,
+  kObjectAllocate,
+  kObjectFree,
+  kObjectHeader,
+  kPointerType,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import {
+  ClassLayout,
+  Frame,
+  IrValue,
+  LayoutField,
+  Place,
+} from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private classDeclared(frame: Frame, decl: ClassDecl): void {
+    if (!this.isPlainClass(decl)) {
+      return this.notLowered(frame.module, decl.loc, "this class");
+    }
+
+    for (const fn of decl.constructors) {
+      this.methodLowered(frame.module, decl, fn);
+    }
+
+    for (const fn of decl.methods) {
+      if (fn.body != undefined) {
+        this.methodLowered(frame.module, decl, fn);
+      }
+    }
+  }
+
+  private isPlainClass(decl: ClassDecl): boolean {
+    return (
+      decl.typeParams.length == 0 &&
+      decl.base == undefined &&
+      decl.baseExpr == undefined &&
+      decl.decorators.length == 0 &&
+      !decl.isPartial
+    );
+  }
+
+  private methodName(module: int, decl: ClassDecl, fn: FunctionDecl): string {
+    return `tz.k${module}.${decl.loc}.${fn.name}.${fn.loc}`;
+  }
+
+  private methodLowered(module: int, decl: ClassDecl, fn: FunctionDecl): void {
+    const body = fn.body;
+    const shape = this.shapeOf(module, fn.loc);
+    const self = this.resolver.classInstance(module, decl, []);
+    if (body == undefined || shape == undefined) {
+      return this.notLowered(module, fn.loc, "this method");
+    }
+
+    const isPlain =
+      fn.typeParams.length == 0 &&
+      !fn.isAsync &&
+      !fn.isGenerator &&
+      !shape.rest &&
+      fn.params.every(
+        (param) =>
+          param.form.kind == ParamKind.Required && param.pattern == undefined,
+      );
+    if (!isPlain) {
+      return this.notLowered(module, fn.loc, "this kind of method");
+    }
+
+    const result = this.irType(shape.result);
+    const params = this.parameterTypes(module, fn, shape);
+    if (result == undefined || params == undefined) {
+      return this.notLowered(module, fn.loc, "a method of these types");
+    }
+
+    const name = this.methodName(module, decl, fn);
+    const all = [kPointerType].concat(params);
+    const made = new IrFunction(this.ir, name, result, all);
+    const selfPlace: Place = {
+      pointer: made.slot(kPointerType, "this"),
+      type: kPointerType,
+      tz: self,
+      owner: -1,
+    };
+    const inner: Frame = {
+      made,
+      id: this.frameId(),
+      module,
+      result: shape.result,
+      loops: [],
+      scopes: [],
+      self: selfPlace,
+    };
+
+    made.store(made.param(0), selfPlace.pointer);
+    this.openScope(inner);
+    this.parametersStored(inner, fn, shape, params);
+    this.statements(inner, body.body);
+    this.closeScope(inner);
+    this.finished(made, result);
+  }
+
+  private layoutOf(type: Type): ClassLayout | undefined {
+    const known = this.layouts.get(type.id);
+    if (known != undefined) {
+      return known;
+    }
+
+    const decl = this.values.classDeclOf(type);
+    const fields = this.values.instanceFields(type);
+    if (decl == undefined || fields == undefined || !this.isPlainClass(decl)) {
+      return undefined;
+    }
+
+    const placed = this.placedFields(fields);
+    if (placed == undefined) {
+      return undefined;
+    }
+
+    const types = [kIntType, kPointerType].concat(
+      placed.map((field) => field.ir),
+    );
+    const struct = `{ ${types.join(", ")} }`;
+    const size = this.structSize(placed);
+    const name = decl.name ?? "object";
+    const drop = this.dropFunction(name, struct, placed);
+    const descriptor = this.layoutDescriptor(name, drop, fields, placed);
+    const layout: ClassLayout = { struct, size, fields: placed, descriptor };
+
+    this.layouts.set(type.id, layout);
+
+    return layout;
+  }
+
+  private placedFields(fields: InstanceField[]): LayoutField[] | undefined {
+    const order = fields.slice();
+
+    order.sort((first, second) => this.fieldOrder(first, second));
+
+    const placed: LayoutField[] = [];
+    let offset: int = 16;
+
+    for (let index = 0; index < order.length; index++) {
+      const field = order[index];
+      if (field == undefined) {
+        return undefined;
+      }
+
+      const ir = this.irType(field.type);
+      if (ir == undefined || ir == kVoidType) {
+        return undefined;
+      }
+
+      const align = this.alignOf(field.type);
+
+      offset = this.aligned(offset, align);
+      placed.push({
+        name: field.name,
+        index: index + 2,
+        offset,
+        type: field.type,
+        ir,
+      });
+      offset += this.sizeOf(field.type);
+    }
+
+    return placed;
+  }
+
+  private fieldOrder(first: InstanceField, second: InstanceField): int {
+    const firstAlign = this.alignOf(first.type);
+    const secondAlign = this.alignOf(second.type);
+    if (firstAlign != secondAlign) {
+      return secondAlign - firstAlign;
+    }
+    if (first.name < second.name) {
+      return -1;
+    }
+    if (first.name > second.name) {
+      return 1;
+    }
+
+    return 0;
+  }
+
+  private structSize(fields: LayoutField[]): int {
+    let end: int = 16;
+
+    for (const field of fields) {
+      end = field.offset + this.sizeOf(field.type);
+    }
+
+    return this.aligned(end, 8);
+  }
+
+  private aligned(offset: int, align: int): int {
+    const rest = offset % align;
+    if (rest == 0) {
+      return offset;
+    }
+
+    return offset + align - rest;
+  }
+
+  private dropFunction(
+    name: string,
+    struct: string,
+    fields: LayoutField[],
+  ): LLVMValue {
+    const dropName = this.ir.uniqueName(`tz.drop.${name}.`);
+    const made = new IrFunction(this.ir, dropName, kVoidType, [kPointerType]);
+    const object = made.param(0);
+    const frame: Frame = {
+      made,
+      id: this.frameId(),
+      module: 0,
+      loops: [],
+      scopes: [],
+    };
+    const held: IrValue[] = [];
+
+    for (const field of fields) {
+      if (!this.isManaged(field.type)) {
+        continue;
+      }
+
+      const address = made.field(struct, object, field.index);
+      const value = made.load(field.ir, address);
+
+      held.push({ type: field.ir, value, tz: field.type, owned: true });
+    }
+
+    const freeing = this.ir.declare(kObjectFree, kVoidType, [kPointerType]);
+
+    made.call(freeing, [object]);
+
+    for (const value of held) {
+      this.dropping(frame, value);
+    }
+
+    made.finishVoid();
+
+    return made.callee.fn;
+  }
+
+  private layoutDescriptor(
+    name: string,
+    drop: LLVMValue,
+    fields: InstanceField[],
+    placed: LayoutField[],
+  ): LLVMValue {
+    const entries: LLVMValue[] = [];
+
+    for (const field of fields) {
+      const spot = placed.find((one) => one.name == field.name);
+      const type = this.descriptor(field.type) ?? this.ir.zero(kPointerType);
+      const offset = spot?.offset ?? 0;
+
+      entries.push(
+        this.ir.constStruct([
+          this.cText(field.name),
+          this.ir.integer(kFlagType, `${field.name.length}`),
+          this.ir.integer(kFlagType, `${offset}`),
+          type,
+        ]),
+      );
+    }
+
+    const entry = "{ ptr, i32, i32, ptr }";
+    const count = entries.length;
+    const tableName = this.ir.uniqueName(`tz.fields.${name}.`);
+    const tableType = `[${count} x ${entry}]`;
+    const values = this.ir.constArray(entry, entries);
+    const table = this.ir.global(tableName, tableType, values, true);
+    const head = this.ir.constStruct([
+      drop,
+      table,
+      this.ir.integer(kFlagType, `${count}`),
+      this.ir.integer(kFlagType, "0"),
+      this.cText(name),
+      this.ir.integer(kFlagType, `${name.length}`),
+      this.ir.integer(kFlagType, `${this.nextClassId()}`),
+    ]);
+    const slots = this.ir.constArray(kPointerType, []);
+    const descriptor = this.ir.constStruct([
+      head,
+      this.ir.zero(kPointerType),
+      slots,
+    ]);
+    const globalName = this.ir.uniqueName(`tz.layout.${name}.`);
+    const globalType = `{ ${kLayoutHead}, ptr, [0 x ptr] }`;
+
+    return this.ir.global(globalName, globalType, descriptor, true);
+  }
+
+  private cText(text: string): LLVMValue {
+    const known = this.cTexts.get(text);
+    if (known != undefined) {
+      return known;
+    }
+
+    const bytes = Buffer.from(text, "utf8");
+    const name = this.ir.uniqueName(".name.");
+    const data = this.ir.bytes(bytes, true);
+    const array = `[${bytes.length + 1} x i8]`;
+    const global = this.ir.global(name, array, data, true);
+
+    this.cTexts.set(text, global);
+
+    return global;
+  }
+
+  private resultType(shape: FunctionShape | undefined): string | undefined {
+    if (shape == undefined) {
+      return undefined;
+    }
+
+    return this.irType(shape.result);
+  }
+
+  private shapeTypesOf(shape: FunctionShape | undefined): string[] | undefined {
+    if (shape == undefined) {
+      return undefined;
+    }
+
+    return this.shapeTypes(shape);
+  }
+
+  private nextClassId(): int {
+    const id = this.classIds;
+
+    this.classIds += 1;
+
+    return id;
+  }
+
+  private newValue(frame: Frame, expr: NewExpr): IrValue | undefined {
+    const type = this.answers.typeOf(expr);
+    if (type == undefined || type.kind != TypeKind.Instance) {
+      this.notLowered(frame.module, expr.loc, "this new");
+
+      return undefined;
+    }
+
+    const decl = this.values.classDeclOf(type);
+    const layout = this.layoutOf(type);
+    if (decl == undefined || layout == undefined) {
+      this.notLowered(frame.module, expr.loc, "this new");
+
+      return undefined;
+    }
+
+    const made = frame.made;
+    const tz = this.store.integer(64, false);
+    const size = this.ir.integer(kIntType, `${layout.size}`);
+    const sizeValue: IrValue = { type: kIntType, value: size, tz };
+    const object = this.runtimeValue(frame, kObjectAllocate, kPointerType, [
+      sizeValue,
+    ]);
+    const count = made.field(kObjectHeader, object, 0);
+    const kind = made.field(kObjectHeader, object, 1);
+
+    made.store(this.ir.integer(kIntType, "1"), count);
+    made.store(layout.descriptor, kind);
+    this.zeroFields(frame, object, layout);
+
+    const value: IrValue = {
+      type: kPointerType,
+      value: object,
+      tz: type,
+      owned: true,
+    };
+    const ctor = decl.constructors[0];
+    if (ctor == undefined) {
+      return value;
+    }
+
+    const shape = this.shapeOf(type.module, ctor.loc);
+    const params = this.shapeTypesOf(shape);
+    if (shape == undefined || params == undefined) {
+      this.notLowered(frame.module, expr.loc, "this new");
+
+      return undefined;
+    }
+
+    const args = this.callArguments(frame, expr.args, shape, expr.loc);
+    if (args == undefined) {
+      return undefined;
+    }
+
+    const name = this.methodName(type.module, decl, ctor);
+    const all = [kPointerType].concat(params);
+    const callee = this.ir.declare(name, kVoidType, all);
+
+    made.call(callee, [object].concat(args));
+
+    return value;
+  }
+
+  private zeroFields(
+    frame: Frame,
+    object: LLVMValue,
+    layout: ClassLayout,
+  ): void {
+    for (const field of layout.fields) {
+      const address = frame.made.field(layout.struct, object, field.index);
+
+      frame.made.store(this.ir.zero(field.ir), address);
+    }
+  }
+
+  private fieldPlace(
+    frame: Frame,
+    object: Place,
+    name: string,
+    loc: int,
+  ): Place | undefined {
+    const pointer = frame.made.load(kPointerType, object.pointer);
+
+    return this.fieldAt(frame, pointer, object.tz, name, loc);
+  }
+
+  private fieldAt(
+    frame: Frame,
+    object: LLVMValue,
+    type: Type,
+    name: string,
+    loc: int,
+  ): Place | undefined {
+    const layout = this.layoutOf(type);
+    const field = layout?.fields.find((one) => one.name == name);
+    if (layout == undefined || field == undefined) {
+      this.notLowered(frame.module, loc, "this field");
+
+      return undefined;
+    }
+
+    const pointer = frame.made.field(layout.struct, object, field.index);
+
+    return { pointer, type: field.ir, tz: field.type, owner: -1 };
+  }
+
+  private fieldValue(frame: Frame, expr: MemberExpr): IrValue | undefined {
+    const object = this.value(frame, expr.object);
+    if (object == undefined) {
+      return undefined;
+    }
+
+    const place = this.fieldAt(
+      frame,
+      object.value,
+      object.tz,
+      expr.name,
+      expr.loc,
+    );
+    if (place == undefined) {
+      return undefined;
+    }
+
+    const loaded = this.loaded(frame, place);
+    if (object.owned != true) {
+      return loaded;
+    }
+
+    const kept = this.owning(frame, loaded);
+
+    this.dropping(frame, object);
+
+    return kept;
+  }
+
+  private methodCall(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const decl = this.values.classDeclOf(object);
+    const fn = decl?.methods.find((one) => one.name == member.name);
+    if (
+      decl == undefined ||
+      fn == undefined ||
+      object.kind != TypeKind.Instance
+    ) {
+      this.notLowered(frame.module, call.loc, "this method call");
+
+      return undefined;
+    }
+
+    const shape = this.shapeOf(object.module, fn.loc);
+    const result = this.resultType(shape);
+    const params = this.shapeTypesOf(shape);
+    if (shape == undefined || result == undefined || params == undefined) {
+      this.notLowered(frame.module, call.loc, "this method call");
+
+      return undefined;
+    }
+
+    const self = this.value(frame, member.object);
+    if (self == undefined) {
+      return undefined;
+    }
+
+    const args = this.callArguments(frame, call.args, shape, call.loc);
+    if (args == undefined) {
+      return undefined;
+    }
+
+    const name = this.methodName(object.module, decl, fn);
+    const all = [kPointerType].concat(params);
+    const callee = this.ir.declare(name, result, all);
+    const made = frame.made.call(callee, [self.value].concat(args));
+
+    this.dropping(frame, self);
+
+    return { type: result, value: made, tz: shape.result, owned: true };
+  }
+}

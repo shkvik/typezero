@@ -1,6 +1,36 @@
+import { Type } from "../../../program/type/types/type.types.tz";
+import { IrFunction } from "../../ir-function/ir-function.tz";
+import { LLVMBlock, LLVMValue } from "../../llvm-api/llvm-api.tz";
+
 export type IrValue = {
   readonly type: string;
-  readonly text: string;
+  readonly value: LLVMValue;
+  readonly tz: Type;
+  readonly owned?: boolean;
+};
+
+export type Place = {
+  readonly pointer: LLVMValue;
+  readonly type: string;
+  readonly tz: Type;
+  readonly owner: int;
+};
+
+export type LoopTarget = {
+  readonly breakBlock: LLVMBlock;
+  readonly continueBlock?: LLVMBlock;
+  readonly label: string;
+  readonly depth: int;
+};
+
+export type Frame = {
+  readonly made: IrFunction;
+  readonly id: int;
+  readonly module: int;
+  readonly result?: Type;
+  readonly loops: LoopTarget[];
+  readonly scopes: Place[][];
+  readonly self?: Place;
 };
 
 export type Unlowered = {
@@ -10,6 +40,31 @@ export type Unlowered = {
 };
 
 export type LoweredProgram = {
-  readonly text: string;
   readonly unlowered: Unlowered[];
+};
+
+export type TextConstant = {
+  readonly pointer: LLVMValue;
+  readonly length: int;
+};
+
+export type DescriptorShape = {
+  readonly kind: int;
+  readonly size: int;
+  readonly inner?: LLVMValue;
+};
+
+export type LayoutField = {
+  readonly name: string;
+  readonly index: int;
+  readonly offset: int;
+  readonly type: Type;
+  readonly ir: string;
+};
+
+export type ClassLayout = {
+  readonly struct: string;
+  readonly size: int;
+  readonly fields: LayoutField[];
+  readonly descriptor: LLVMValue;
 };

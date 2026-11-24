@@ -1,0 +1,289 @@
+import { cstring } from "tz:string";
+
+export declare class LLVMContext {}
+export declare class LLVMModule {}
+export declare class LLVMType {}
+export declare class LLVMValue {}
+export declare class LLVMBlock {}
+export declare class LLVMBuilder {}
+export declare class LLVMTarget {}
+export declare class LLVMTargetMachine {}
+export declare class LLVMTargetData {}
+export declare class LLVMText {}
+export declare class LLVMMessageSlot {}
+
+export declare function LLVMContextCreate(): LLVMContext;
+export declare function LLVMModuleCreateWithNameInContext(
+  name: cstring,
+  context: LLVMContext,
+): LLVMModule;
+
+export declare function LLVMIntTypeInContext(
+  context: LLVMContext,
+  bits: uint32,
+): LLVMType;
+export declare function LLVMDoubleTypeInContext(context: LLVMContext): LLVMType;
+export declare function LLVMVoidTypeInContext(context: LLVMContext): LLVMType;
+export declare function LLVMPointerTypeInContext(
+  context: LLVMContext,
+  space: uint32,
+): LLVMType;
+export declare function LLVMStructTypeInContext(
+  context: LLVMContext,
+  elements: LLVMType[],
+  count: uint32,
+  packed: int32,
+): LLVMType;
+export declare function LLVMArrayType2(
+  element: LLVMType,
+  count: uint64,
+): LLVMType;
+export declare function LLVMFunctionType(
+  result: LLVMType,
+  params: LLVMType[],
+  count: uint32,
+  isVariadic: int32,
+): LLVMType;
+
+export declare function LLVMConstIntOfString(
+  type: LLVMType,
+  text: cstring,
+  radix: uint8,
+): LLVMValue;
+export declare function LLVMConstReal(type: LLVMType, value: double): LLVMValue;
+export declare function LLVMConstNull(type: LLVMType): LLVMValue;
+export declare function LLVMGetUndef(type: LLVMType): LLVMValue;
+export declare function LLVMConstStructInContext(
+  context: LLVMContext,
+  values: LLVMValue[],
+  count: uint32,
+  packed: int32,
+): LLVMValue;
+export declare function LLVMConstArray2(
+  element: LLVMType,
+  values: LLVMValue[],
+  count: uint64,
+): LLVMValue;
+export declare function LLVMConstStringInContext2(
+  context: LLVMContext,
+  bytes: Buffer,
+  length: uint64,
+  isUnterminated: int32,
+): LLVMValue;
+export declare function LLVMConstIntToPtr(
+  value: LLVMValue,
+  type: LLVMType,
+): LLVMValue;
+export declare function LLVMIsConstant(value: LLVMValue): int32;
+
+export declare function LLVMAddGlobal(
+  module: LLVMModule,
+  type: LLVMType,
+  name: cstring,
+): LLVMValue;
+export declare function LLVMSetInitializer(
+  global: LLVMValue,
+  value: LLVMValue,
+): void;
+export declare function LLVMSetGlobalConstant(
+  global: LLVMValue,
+  isConstant: int32,
+): void;
+export declare function LLVMSetLinkage(global: LLVMValue, linkage: int32): void;
+export declare function LLVMSetUnnamedAddress(
+  global: LLVMValue,
+  kind: int32,
+): void;
+export declare function LLVMSetAlignment(value: LLVMValue, bytes: uint32): void;
+
+export declare function LLVMAddFunction(
+  module: LLVMModule,
+  name: cstring,
+  type: LLVMType,
+): LLVMValue;
+export declare function LLVMGetParam(fn: LLVMValue, index: uint32): LLVMValue;
+export declare function LLVMAppendBasicBlockInContext(
+  context: LLVMContext,
+  fn: LLVMValue,
+  name: cstring,
+): LLVMBlock;
+
+export declare function LLVMCreateBuilderInContext(
+  context: LLVMContext,
+): LLVMBuilder;
+export declare function LLVMPositionBuilderAtEnd(
+  builder: LLVMBuilder,
+  block: LLVMBlock,
+): void;
+export declare function LLVMGetBasicBlockTerminator(
+  block: LLVMBlock,
+): LLVMValue | undefined;
+
+export declare function LLVMBuildRetVoid(builder: LLVMBuilder): LLVMValue;
+export declare function LLVMBuildRet(
+  builder: LLVMBuilder,
+  value: LLVMValue,
+): LLVMValue;
+export declare function LLVMBuildBr(
+  builder: LLVMBuilder,
+  block: LLVMBlock,
+): LLVMValue;
+export declare function LLVMBuildCondBr(
+  builder: LLVMBuilder,
+  condition: LLVMValue,
+  then: LLVMBlock,
+  otherwise: LLVMBlock,
+): LLVMValue;
+export declare function LLVMBuildUnreachable(builder: LLVMBuilder): LLVMValue;
+
+export declare function LLVMBuildBinOp(
+  builder: LLVMBuilder,
+  opcode: int32,
+  left: LLVMValue,
+  right: LLVMValue,
+  name: cstring,
+): LLVMValue;
+export declare function LLVMBuildFNeg(
+  builder: LLVMBuilder,
+  value: LLVMValue,
+  name: cstring,
+): LLVMValue;
+export declare function LLVMBuildICmp(
+  builder: LLVMBuilder,
+  predicate: int32,
+  left: LLVMValue,
+  right: LLVMValue,
+  name: cstring,
+): LLVMValue;
+export declare function LLVMBuildFCmp(
+  builder: LLVMBuilder,
+  predicate: int32,
+  left: LLVMValue,
+  right: LLVMValue,
+  name: cstring,
+): LLVMValue;
+export declare function LLVMBuildCast(
+  builder: LLVMBuilder,
+  opcode: int32,
+  value: LLVMValue,
+  type: LLVMType,
+  name: cstring,
+): LLVMValue;
+
+export declare function LLVMBuildAlloca(
+  builder: LLVMBuilder,
+  type: LLVMType,
+  name: cstring,
+): LLVMValue;
+export declare function LLVMBuildLoad2(
+  builder: LLVMBuilder,
+  type: LLVMType,
+  pointer: LLVMValue,
+  name: cstring,
+): LLVMValue;
+export declare function LLVMBuildStore(
+  builder: LLVMBuilder,
+  value: LLVMValue,
+  pointer: LLVMValue,
+): LLVMValue;
+export declare function LLVMBuildInBoundsGEP2(
+  builder: LLVMBuilder,
+  type: LLVMType,
+  pointer: LLVMValue,
+  indices: LLVMValue[],
+  count: uint32,
+  name: cstring,
+): LLVMValue;
+export declare function LLVMBuildStructGEP2(
+  builder: LLVMBuilder,
+  type: LLVMType,
+  pointer: LLVMValue,
+  index: uint32,
+  name: cstring,
+): LLVMValue;
+export declare function LLVMBuildCall2(
+  builder: LLVMBuilder,
+  type: LLVMType,
+  fn: LLVMValue,
+  args: LLVMValue[],
+  count: uint32,
+  name: cstring,
+): LLVMValue;
+export declare function LLVMBuildPhi(
+  builder: LLVMBuilder,
+  type: LLVMType,
+  name: cstring,
+): LLVMValue;
+export declare function LLVMAddIncoming(
+  phi: LLVMValue,
+  values: LLVMValue[],
+  blocks: LLVMBlock[],
+  count: uint32,
+): void;
+export declare function LLVMBuildSelect(
+  builder: LLVMBuilder,
+  condition: LLVMValue,
+  then: LLVMValue,
+  otherwise: LLVMValue,
+  name: cstring,
+): LLVMValue;
+export declare function LLVMBuildExtractValue(
+  builder: LLVMBuilder,
+  aggregate: LLVMValue,
+  index: uint32,
+  name: cstring,
+): LLVMValue;
+export declare function LLVMBuildInsertValue(
+  builder: LLVMBuilder,
+  aggregate: LLVMValue,
+  value: LLVMValue,
+  index: uint32,
+  name: cstring,
+): LLVMValue;
+
+export declare function LLVMVerifyModule(
+  module: LLVMModule,
+  action: int32,
+  message: LLVMMessageSlot | undefined,
+): int32;
+export declare function LLVMPrintModuleToFile(
+  module: LLVMModule,
+  file: cstring,
+  message: LLVMMessageSlot | undefined,
+): int32;
+
+export declare function LLVMInitializeX86TargetInfo(): void;
+export declare function LLVMInitializeX86Target(): void;
+export declare function LLVMInitializeX86TargetMC(): void;
+export declare function LLVMInitializeX86AsmPrinter(): void;
+export declare function LLVMGetDefaultTargetTriple(): LLVMText;
+export declare function LLVMGetTargetFromName(
+  name: cstring,
+): LLVMTarget | undefined;
+export declare function LLVMCreateTargetMachine(
+  target: LLVMTarget,
+  triple: LLVMText,
+  cpu: cstring,
+  features: cstring,
+  level: int32,
+  relocation: int32,
+  model: int32,
+): LLVMTargetMachine;
+export declare function LLVMSetTarget(
+  module: LLVMModule,
+  triple: LLVMText,
+): void;
+export declare function LLVMCreateTargetDataLayout(
+  machine: LLVMTargetMachine,
+): LLVMTargetData;
+export declare function LLVMSetModuleDataLayout(
+  module: LLVMModule,
+  data: LLVMTargetData,
+): void;
+export declare function LLVMTargetMachineEmitToFile(
+  machine: LLVMTargetMachine,
+  module: LLVMModule,
+  file: cstring,
+  kind: int32,
+  message: LLVMMessageSlot | undefined,
+): int32;

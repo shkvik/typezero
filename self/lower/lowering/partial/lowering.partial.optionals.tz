@@ -1,0 +1,215 @@
+import {
+  BinaryExpr,
+  BinaryOp,
+  Expr,
+  ExprKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import {
+  IrIntPredicate,
+  IrOpcode,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import { kBooleanType, kPointerType, kZero } from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private optionalInner(type: Type): Type | undefined {
+    if (type.kind != TypeKind.Union || type.parts.length != 2) {
+      return undefined;
+    }
+
+    const defined = type.parts.filter(
+      (part) => part.kind != TypeKind.Undefined,
+    );
+    const inner = defined[0];
+    if (defined.length != 1 || inner == undefined) {
+      return undefined;
+    }
+
+    return inner;
+  }
+
+  private isReferenceLike(type: Type): boolean {
+    return this.isArray(type) || this.isInstance(type);
+  }
+
+  private optionalType(inner: Type): string | undefined {
+    const type = this.irType(inner);
+    if (type == undefined) {
+      return undefined;
+    }
+    if (this.isReferenceLike(inner)) {
+      return type;
+    }
+
+    return `{ ${type}, ${kBooleanType} }`;
+  }
+
+  private somewhere(frame: Frame, value: IrValue, target: Type): IrValue {
+    const type = this.irType(target) ?? kPointerType;
+    if (type == value.type) {
+      return { type, value: value.value, tz: target, owned: value.owned };
+    }
+
+    const made = frame.made;
+    const empty = this.ir.undefinedOf(type);
+    const first = made.insert(empty, value.value, 0);
+    const yes = this.ir.integer(kBooleanType, "1");
+    const placed = made.insert(first, yes, 1);
+
+    return { type, value: placed, tz: target, owned: value.owned };
+  }
+
+  private insideValue(frame: Frame, value: IrValue, inner: Type): IrValue {
+    const type = this.irType(inner) ?? kPointerType;
+    if (type == value.type) {
+      return { type, value: value.value, tz: inner, owned: value.owned };
+    }
+
+    const made = frame.made.extract(value.value, 0);
+
+    return { type, value: made, tz: inner, owned: value.owned };
+  }
+
+  private proven(frame: Frame, value: IrValue): IrValue {
+    const inner = this.optionalInner(value.tz);
+    if (inner == undefined) {
+      return value;
+    }
+
+    return this.insideValue(frame, value, inner);
+  }
+
+  private hasValue(frame: Frame, value: IrValue): LLVMValue {
+    const inner = this.optionalInner(value.tz);
+    if (inner != undefined && this.isReferenceLike(inner)) {
+      const none = this.ir.zero(kPointerType);
+
+      return frame.made.integerCompare(
+        IrIntPredicate.NotEqual,
+        value.value,
+        none,
+      );
+    }
+
+    return frame.made.extract(value.value, 1);
+  }
+
+  private undefinedValue(target: Type): IrValue | undefined {
+    const type = this.irType(target);
+    if (type == undefined) {
+      return undefined;
+    }
+
+    return { type, value: this.ir.zero(type), tz: target };
+  }
+
+  private undefinedTest(frame: Frame, expr: BinaryExpr): IrValue | undefined {
+    const other = this.definedSide(expr);
+    const value = this.value(frame, other);
+    if (value == undefined) {
+      return undefined;
+    }
+    if (this.optionalInner(value.tz) == undefined) {
+      this.notLowered(frame.module, expr.loc, "this test for undefined");
+
+      return undefined;
+    }
+
+    const has = this.hasValue(frame, value);
+    const tz = this.store.plain(TypeKind.Boolean);
+
+    this.dropping(frame, value);
+
+    if (expr.op == BinaryOp.Ne) {
+      return { type: kBooleanType, value: has, tz };
+    }
+
+    const yes = this.ir.integer(kBooleanType, "1");
+    const missing = frame.made.binary(IrOpcode.Xor, has, yes);
+
+    return { type: kBooleanType, value: missing, tz };
+  }
+
+  private definedSide(expr: BinaryExpr): Expr {
+    if (expr.lhs.kind == ExprKind.Undefined) {
+      return expr.rhs;
+    }
+
+    return expr.lhs;
+  }
+
+  private nullish(frame: Frame, expr: BinaryExpr): IrValue | undefined {
+    const made = frame.made;
+    const result = this.answers.typeOf(expr);
+    const type = this.typeOrUndefined(result);
+    const left = this.value(frame, expr.lhs);
+    if (result == undefined || type == undefined || left == undefined) {
+      this.notLowered(frame.module, expr.loc, "this operator");
+
+      return undefined;
+    }
+
+    const inner = this.optionalInner(left.tz);
+    if (inner == undefined) {
+      return this.converted(frame, left, result, expr.loc);
+    }
+
+    const has = this.hasValue(frame, left);
+    const given = made.block("nullish.given");
+    const other = made.block("nullish.other");
+    const end = made.block("nullish.end");
+
+    made.conditionalBranch(has, given, other);
+    made.open(given);
+
+    const inside = this.insideValue(frame, left, inner);
+    const first = this.branchOwned(frame, inside, result, expr.loc);
+    const firstBlock = made.currentBlock();
+
+    this.jumpTo(frame, end);
+    made.open(other);
+
+    const second = this.branchValue(frame, expr.rhs, result);
+    const secondBlock = made.currentBlock();
+
+    this.jumpTo(frame, end);
+    made.open(end);
+
+    if (first == undefined || second == undefined) {
+      return undefined;
+    }
+
+    const value = made.phi(
+      type,
+      [first.value, second.value],
+      [firstBlock, secondBlock],
+    );
+
+    this.dropping(frame, left);
+
+    return { type, value, tz: result, owned: true };
+  }
+
+  private branchOwned(
+    frame: Frame,
+    value: IrValue,
+    result: Type,
+    loc: int,
+  ): IrValue | undefined {
+    const converted = this.converted(frame, value, result, loc);
+    if (converted == undefined) {
+      return undefined;
+    }
+
+    const borrowed: IrValue = {
+      type: converted.type,
+      value: converted.value,
+      tz: converted.tz,
+    };
+
+    return this.owning(frame, borrowed);
+  }
+}

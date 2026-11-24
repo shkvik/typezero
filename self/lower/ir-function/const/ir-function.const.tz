@@ -1,0 +1,3 @@
+export const kEntryLabel = "entry";
+export const kStartLabel = "start";
+export const kDeadLabel = "dead";

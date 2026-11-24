@@ -1,37 +1,333 @@
-import { IrFunction } from "../ir-function/ir-function.tz";
+import { cstring } from "tz:string";
+import {
+  LLVMAddFunction,
+  LLVMAddGlobal,
+  LLVMArrayType2,
+  LLVMConstArray2,
+  LLVMConstIntOfString,
+  LLVMConstIntToPtr,
+  LLVMConstNull,
+  LLVMConstReal,
+  LLVMConstStringInContext2,
+  LLVMConstStructInContext,
+  LLVMContext,
+  LLVMContextCreate,
+  LLVMCreateTargetDataLayout,
+  LLVMCreateTargetMachine,
+  LLVMDoubleTypeInContext,
+  LLVMFunctionType,
+  LLVMGetDefaultTargetTriple,
+  LLVMGetTargetFromName,
+  LLVMGetUndef,
+  LLVMInitializeX86AsmPrinter,
+  LLVMInitializeX86Target,
+  LLVMInitializeX86TargetInfo,
+  LLVMInitializeX86TargetMC,
+  LLVMIntTypeInContext,
+  LLVMIsConstant,
+  LLVMModule,
+  LLVMModuleCreateWithNameInContext,
+  LLVMPointerTypeInContext,
+  LLVMPrintModuleToFile,
+  LLVMSetAlignment,
+  LLVMSetGlobalConstant,
+  LLVMSetInitializer,
+  LLVMSetLinkage,
+  LLVMSetModuleDataLayout,
+  LLVMSetTarget,
+  LLVMSetUnnamedAddress,
+  LLVMStructTypeInContext,
+  LLVMTargetMachineEmitToFile,
+  LLVMType,
+  LLVMValue,
+  LLVMVerifyModule,
+  LLVMVoidTypeInContext,
+} from "../llvm-api/llvm-api.tz";
+import { IrCallee } from "../ir-function/types/ir-function.types.tz";
+import {
+  kCodeGenLevelNone,
+  kGenericCpu,
+  kGlobalUnnamed,
+  kInternalLinkage,
+  kObjectFileKind,
+  kPrintMessageAction,
+  kPrivateLinkage,
+  kTargetName,
+} from "./const/ir-module.const.tz";
 
 export class IrModule {
-  private readonly name: string;
-  private readonly declared: Map<string, string>;
-  private readonly functions: IrFunction[];
+  public readonly context: LLVMContext;
+  private readonly module: LLVMModule;
+  private readonly types: Map<string, LLVMType>;
+  private readonly callees: Map<string, IrCallee>;
+  private next: int;
 
   public constructor(name: string) {
-    this.name = name;
-    this.declared = new Map<string, string>();
-    this.functions = [];
+    const context = LLVMContextCreate();
+    const cname = name.toCString() ?? "main";
+
+    this.context = context;
+    this.module = LLVMModuleCreateWithNameInContext(cname, context);
+    this.types = new Map<string, LLVMType>();
+    this.callees = new Map<string, IrCallee>();
+    this.next = 0;
   }
 
-  public declare(name: string, result: string, params: string[]): void {
-    if (this.declared.has(name)) {
-      return;
+  public type(key: string): LLVMType {
+    const known = this.types.get(key);
+    if (known != undefined) {
+      return known;
     }
 
-    const list = params.join(", ");
+    const made = this.parsedType(key.trim());
 
-    this.declared.set(name, `declare ${result} @${name}(${list})`);
+    this.types.set(key, made);
+
+    return made;
   }
 
-  public add(made: IrFunction): void {
-    this.functions.push(made);
+  public callee(name: string): IrCallee | undefined {
+    return this.callees.get(name);
   }
 
-  public text(): string {
-    const head = `source_filename = "${this.name}"`;
-    const lines = Array.from(this.declared.values());
-    const declarations = lines.join("\n");
-    const texts = this.functions.map((made) => made.text());
-    const bodies = texts.join("\n");
+  public signature(result: string, params: string[]): LLVMType {
+    const elements = params.map((param) => this.type(param));
+    const returned = this.type(result);
 
-    return `${head}\n\n${declarations}\n\n${bodies}`;
+    const count = elements.length.toUint32();
+
+    return LLVMFunctionType(returned, elements, count, 0);
+  }
+
+  public declare(name: string, result: string, params: string[]): IrCallee {
+    const known = this.callees.get(name);
+    if (known != undefined) {
+      return known;
+    }
+
+    const type = this.signature(result, params);
+    const fn = LLVMAddFunction(this.module, this.cname(name), type);
+    const callee: IrCallee = { fn, type };
+
+    this.callees.set(name, callee);
+
+    return callee;
+  }
+
+  public integer(key: string, text: string): LLVMValue {
+    return LLVMConstIntOfString(this.type(key), this.cname(text), 10);
+  }
+
+  public hexInteger(key: string, hex: string): LLVMValue {
+    return LLVMConstIntOfString(this.type(key), this.cname(hex), 16);
+  }
+
+  public real(value: double): LLVMValue {
+    return LLVMConstReal(this.type("double"), value);
+  }
+
+  public zero(key: string): LLVMValue {
+    return LLVMConstNull(this.type(key));
+  }
+
+  public undefinedOf(key: string): LLVMValue {
+    return LLVMGetUndef(this.type(key));
+  }
+
+  public constStruct(values: LLVMValue[]): LLVMValue {
+    const count = values.length.toUint32();
+
+    return LLVMConstStructInContext(this.context, values, count, 0);
+  }
+
+  public constArray(element: string, values: LLVMValue[]): LLVMValue {
+    const count = values.length.toUint64();
+
+    return LLVMConstArray2(this.type(element), values, count);
+  }
+
+  public bytes(data: Buffer, isTerminated: boolean): LLVMValue {
+    let unterminated: int32 = 1;
+
+    if (isTerminated) {
+      unterminated = 0;
+    }
+
+    return LLVMConstStringInContext2(
+      this.context,
+      data,
+      data.length.toUint64(),
+      unterminated,
+    );
+  }
+
+  public pointerFromBits(hex: string): LLVMValue {
+    const bits = this.hexInteger("i64", hex);
+
+    return LLVMConstIntToPtr(bits, this.type("ptr"));
+  }
+
+  public isConstant(value: LLVMValue): boolean {
+    return LLVMIsConstant(value) != 0;
+  }
+
+  public global(
+    name: string,
+    key: string,
+    init: LLVMValue,
+    isConstant: boolean,
+  ): LLVMValue {
+    const global = LLVMAddGlobal(this.module, this.type(key), this.cname(name));
+
+    LLVMSetInitializer(global, init);
+
+    if (isConstant) {
+      LLVMSetGlobalConstant(global, 1);
+      LLVMSetLinkage(global, kPrivateLinkage);
+      LLVMSetUnnamedAddress(global, kGlobalUnnamed);
+    } else {
+      LLVMSetLinkage(global, kInternalLinkage);
+    }
+
+    LLVMSetAlignment(global, 8);
+
+    return global;
+  }
+
+  public uniqueName(prefix: string): string {
+    const name = `${prefix}${this.next}`;
+
+    this.next += 1;
+
+    return name;
+  }
+
+  public cname(text: string): cstring {
+    const made = text.toCString();
+    if (made == undefined) {
+      return "";
+    }
+
+    return made;
+  }
+
+  public isValid(): boolean {
+    return LLVMVerifyModule(this.module, kPrintMessageAction, undefined) == 0;
+  }
+
+  public printed(path: string): boolean {
+    return LLVMPrintModuleToFile(this.module, this.cname(path), undefined) == 0;
+  }
+
+  public emitted(path: string): boolean {
+    LLVMInitializeX86TargetInfo();
+    LLVMInitializeX86Target();
+    LLVMInitializeX86TargetMC();
+    LLVMInitializeX86AsmPrinter();
+
+    const target = LLVMGetTargetFromName(this.cname(kTargetName));
+    if (target == undefined) {
+      return false;
+    }
+
+    const triple = LLVMGetDefaultTargetTriple();
+    const machine = LLVMCreateTargetMachine(
+      target,
+      triple,
+      this.cname(kGenericCpu),
+      "",
+      kCodeGenLevelNone,
+      0,
+      0,
+    );
+    const data = LLVMCreateTargetDataLayout(machine);
+    const file = this.cname(path);
+
+    LLVMSetTarget(this.module, triple);
+    LLVMSetModuleDataLayout(this.module, data);
+
+    const failed = LLVMTargetMachineEmitToFile(
+      machine,
+      this.module,
+      file,
+      kObjectFileKind,
+      undefined,
+    );
+
+    return failed == 0;
+  }
+
+  private parsedType(key: string): LLVMType {
+    if (key.startsWith("{")) {
+      const inner = key.slice(1, key.length - 1);
+      const parts = this.topLevelParts(inner);
+      const elements = parts.map((part) => this.type(part));
+
+      return LLVMStructTypeInContext(
+        this.context,
+        elements,
+        elements.length.toUint32(),
+        0,
+      );
+    }
+    if (key.startsWith("[")) {
+      const inner = key.slice(1, key.length - 1);
+      const at = inner.indexOf(" x ");
+      const count = this.digits(inner.slice(0, at));
+      const element = this.type(inner.slice(at + 3));
+
+      return LLVMArrayType2(element, count.toUint64());
+    }
+
+    switch (key) {
+      case "void":
+        return LLVMVoidTypeInContext(this.context);
+      case "double":
+        return LLVMDoubleTypeInContext(this.context);
+      case "ptr":
+        return LLVMPointerTypeInContext(this.context, 0);
+      default: {
+        const bits = this.digits(key.slice(1));
+
+        return LLVMIntTypeInContext(this.context, bits.toUint32());
+      }
+    }
+  }
+
+  private topLevelParts(text: string): string[] {
+    const parts: string[] = [];
+    let depth: int = 0;
+    let start: int = 0;
+
+    for (let index = 0; index < text.length; index++) {
+      const char = text[index] ?? "";
+      if (char == "{" || char == "[") {
+        depth += 1;
+      } else if (char == "}" || char == "]") {
+        depth -= 1;
+      } else if (char == "," && depth == 0) {
+        parts.push(text.slice(start, index).trim());
+        start = index + 1;
+      }
+    }
+
+    const last = text.slice(start).trim();
+    if (last.length > 0) {
+      parts.push(last);
+    }
+
+    return parts;
+  }
+
+  private digits(text: string): int {
+    let value: int = 0;
+
+    for (const char of text.trim()) {
+      const code = char.charCodeAt(0) ?? 48;
+
+      value = value * 10 + code - 48;
+    }
+
+    return value;
   }
 }

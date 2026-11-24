@@ -1,0 +1,7 @@
+import { Type } from "../../type/types/type.types.tz";
+
+export type InstanceField = {
+  readonly name: string;
+  readonly loc: int;
+  readonly type: Type;
+};

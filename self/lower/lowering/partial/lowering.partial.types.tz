@@ -1,0 +1,154 @@
+import {
+  LiteralKind,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kBooleanType,
+  kDoubleType,
+  kPointerType,
+  kStringType,
+  kTypeKindNames,
+  kVoidType,
+} from "../const/lowering.const.tz";
+
+partial class Lowering {
+  private widened(type: Type): Type {
+    if (type.kind != TypeKind.Literal) {
+      return type;
+    }
+
+    switch (type.literal) {
+      case LiteralKind.Int:
+        return this.store.integer(64, false);
+      case LiteralKind.Double:
+        return this.store.plain(TypeKind.Double);
+      case LiteralKind.Boolean:
+        return this.store.plain(TypeKind.Boolean);
+      default:
+        return this.store.plain(TypeKind.String);
+    }
+  }
+
+  private irType(type: Type): string | undefined {
+    const plain = this.widened(type);
+
+    switch (plain.kind) {
+      case TypeKind.Int:
+        return `i${plain.bits}`;
+      case TypeKind.Double:
+        return kDoubleType;
+      case TypeKind.Boolean:
+        return kBooleanType;
+      case TypeKind.String:
+        return kStringType;
+      case TypeKind.Array:
+      case TypeKind.Instance:
+        return kPointerType;
+      case TypeKind.Void:
+        return kVoidType;
+      case TypeKind.Undefined:
+        return kBooleanType;
+      case TypeKind.Union:
+        return this.unionType(plain);
+      default:
+        return undefined;
+    }
+  }
+
+  private unionType(type: Type): string | undefined {
+    const inner = this.optionalInner(type);
+    if (inner == undefined) {
+      return undefined;
+    }
+
+    return this.optionalType(inner);
+  }
+
+  private isInteger(type: Type): boolean {
+    return this.widened(type).kind == TypeKind.Int;
+  }
+
+  private isUnsigned(type: Type): boolean {
+    const plain = this.widened(type);
+
+    return plain.kind == TypeKind.Int && plain.unsigned;
+  }
+
+  private bitsOf(type: Type): int {
+    const plain = this.widened(type);
+    if (plain.kind != TypeKind.Int) {
+      return 0;
+    }
+
+    return plain.bits;
+  }
+
+  private isDouble(type: Type): boolean {
+    return this.widened(type).kind == TypeKind.Double;
+  }
+
+  private isBoolean(type: Type): boolean {
+    return this.widened(type).kind == TypeKind.Boolean;
+  }
+
+  private isString(type: Type): boolean {
+    return this.widened(type).kind == TypeKind.String;
+  }
+
+  private isArray(type: Type): boolean {
+    return type.kind == TypeKind.Array;
+  }
+
+  private isInstance(type: Type): boolean {
+    return type.kind == TypeKind.Instance;
+  }
+
+  private sizeOf(type: Type): int {
+    const plain = this.widened(type);
+    const inner = this.optionalInner(plain);
+    if (inner != undefined && !this.isReferenceLike(inner)) {
+      const align = this.alignOf(inner);
+      const size = this.sizeOf(inner);
+
+      return this.aligned(size + 1, align);
+    }
+
+    switch (plain.kind) {
+      case TypeKind.Int:
+        return plain.bits >> 3;
+      case TypeKind.Boolean:
+      case TypeKind.Undefined:
+        return 1;
+      case TypeKind.String:
+        return 16;
+      default:
+        return 8;
+    }
+  }
+
+  private alignOf(type: Type): int {
+    const plain = this.widened(type);
+    const inner = this.optionalInner(plain);
+    if (inner != undefined && !this.isReferenceLike(inner)) {
+      return this.alignOf(inner);
+    }
+
+    switch (plain.kind) {
+      case TypeKind.Int:
+        return plain.bits >> 3;
+      case TypeKind.Boolean:
+      case TypeKind.Undefined:
+        return 1;
+      default:
+        return 8;
+    }
+  }
+
+  private kindName(type: Type): string {
+    const position: int = type.kind;
+
+    return kTypeKindNames[position] ?? "?";
+  }
+}

@@ -1,255 +1,148 @@
-import {
-  BinaryExpr,
-  BinaryOp,
-  CallExpr,
-  Expr,
-  ExprKind,
-} from "../../program/ast/types/ast.types.expressions.tz";
-import {
-  Stmt,
-  StmtKind,
-} from "../../program/ast/types/ast.types.statements.tz";
+import "./partial/lowering.partial.statements.tz";
+import "./partial/lowering.partial.loops.tz";
+import "./partial/lowering.partial.functions.tz";
+import "./partial/lowering.partial.expressions.tz";
+import "./partial/lowering.partial.operators.tz";
+import "./partial/lowering.partial.comparisons.tz";
+import "./partial/lowering.partial.assignments.tz";
+import "./partial/lowering.partial.numbers.tz";
+import "./partial/lowering.partial.strings.tz";
+import "./partial/lowering.partial.console.tz";
+import "./partial/lowering.partial.types.tz";
+import "./partial/lowering.partial.memory.tz";
+import "./partial/lowering.partial.texts.tz";
+import "./partial/lowering.partial.arrays.tz";
+import "./partial/lowering.partial.optionals.tz";
+import "./partial/lowering.partial.classes.tz";
 import { ExpressionAnswers } from "../../program/expression-answers/expression-answers.tz";
-import { Program } from "../../program/module/types/module.types.tz";
-import { NameUse } from "../../program/scopes/types/scopes.types.tz";
-import {
-  LiteralKind,
-  Type,
-  TypeKind,
-} from "../../program/type/types/type.types.tz";
+import { Module, Program } from "../../program/module/types/module.types.tz";
+import { TypeStore } from "../../program/type/type-store/type-store.tz";
+import { ExpressionTypes } from "../../semantic/code/expression-types/expression-types.tz";
+import { TypeResolver } from "../../semantic/types/type-resolver/type-resolver.tz";
 import { CheckedProgram } from "../../pipeline/front-end/types/front-end.types.tz";
 import { IrFunction } from "../ir-function/ir-function.tz";
 import { IrModule } from "../ir-module/ir-module.tz";
+import { LLVMValue } from "../llvm-api/llvm-api.tz";
 import {
-  kCharType,
-  kConsoleName,
-  kIntBits,
-  kIntType,
-  kLogName,
-  kMainHeader,
-  kMainReturn,
-  kNewlineCode,
-  kPrintChar,
-  kPrintInt,
+  kFirstClassId,
+  kMainFrame,
+  kFlagType,
+  kMainName,
   kRuntimeInit,
   kRuntimeMainDone,
   kRuntimeShutdown,
-  kSpaceCode,
-  kVoidType,
 } from "./const/lowering.const.tz";
-import { IrValue, LoweredProgram, Unlowered } from "./types/lowering.types.tz";
+import {
+  ClassLayout,
+  Frame,
+  LoweredProgram,
+  Place,
+  Unlowered,
+} from "./types/lowering.types.tz";
 
 export class Lowering {
   private readonly program: Program;
+  private readonly store: TypeStore;
+  private readonly values: ExpressionTypes;
+  private readonly resolver: TypeResolver;
   private readonly answers: ExpressionAnswers;
-  private readonly uses: Map<int, Map<int, NameUse>>;
+  public readonly ir: IrModule;
   private readonly unlowered: Unlowered[];
-  private readonly ir: IrModule;
+  private readonly places: Map<string, Place>;
+  private readonly managedGlobals: Place[];
+  private readonly strings: Map<string, LLVMValue>;
+  private readonly descriptors: Map<int, LLVMValue>;
+  private readonly layouts: Map<int, ClassLayout>;
+  private readonly cTexts: Map<string, LLVMValue>;
+  private classIds: int;
+  private pendingLabel: string;
+  private nextFrame: int;
 
-  public constructor(program: Program, checked: CheckedProgram) {
+  public constructor(
+    store: TypeStore,
+    program: Program,
+    checked: CheckedProgram,
+  ) {
     const name = program.modules[0]?.name ?? "";
 
     this.program = program;
+    this.store = store;
+    this.values = checked.values;
+    this.resolver = checked.types;
     this.answers = checked.values.answers;
-    this.uses = new Map<int, Map<int, NameUse>>();
-    this.unlowered = [];
     this.ir = new IrModule(name);
-
-    for (const scopes of checked.resolved) {
-      const byPlace = new Map<int, NameUse>();
-
-      for (const use of scopes.uses) {
-        byPlace.set(use.loc, use);
-      }
-
-      this.uses.set(scopes.module.id, byPlace);
-    }
+    this.unlowered = [];
+    this.places = new Map<string, Place>();
+    this.managedGlobals = [];
+    this.strings = new Map<string, LLVMValue>();
+    this.descriptors = new Map<int, LLVMValue>();
+    this.layouts = new Map<int, ClassLayout>();
+    this.cTexts = new Map<string, LLVMValue>();
+    this.classIds = kFirstClassId;
+    this.pendingLabel = "";
+    this.nextFrame = kMainFrame + 1;
   }
 
   public run(): LoweredProgram {
-    const entry = this.program.modules[0];
-    const main = new IrFunction(kMainHeader);
+    const main = new IrFunction(this.ir, kMainName, kFlagType, []);
+    const modules = this.program.order.filter((module) =>
+      this.isProgramModule(module),
+    );
 
     this.runtimeCall(main, kRuntimeInit, []);
 
-    if (entry != undefined) {
-      for (const statement of entry.file.items) {
-        this.statement(main, statement, entry.id);
+    for (const module of modules) {
+      this.moduleGlobals(module);
+    }
+
+    for (const module of modules) {
+      const frame: Frame = {
+        made: main,
+        id: kMainFrame,
+        module: module.id,
+        loops: [],
+        scopes: [],
+      };
+
+      for (const statement of module.file.items) {
+        this.statement(frame, statement);
       }
     }
 
     this.runtimeCall(main, kRuntimeMainDone, []);
+    this.globalsReleased(main);
     this.runtimeCall(main, kRuntimeShutdown, []);
-    main.statement(kMainReturn);
-    this.ir.add(main);
+    main.finishValue(this.ir.integer(kFlagType, "0"));
 
-    const text = this.ir.text();
-
-    return { text, unlowered: this.unlowered };
+    return { unlowered: this.unlowered };
   }
 
-  private statement(made: IrFunction, statement: Stmt, module: int): void {
-    if (statement.kind != StmtKind.Expr) {
-      return this.notLowered(module, statement.loc, "this statement");
-    }
+  private globalsReleased(main: IrFunction): void {
+    const frame: Frame = {
+      made: main,
+      id: kMainFrame,
+      module: 0,
+      loops: [],
+      scopes: [this.managedGlobals],
+    };
 
-    const expr = statement.expr;
-    if (expr.kind == ExprKind.Call && this.isConsoleLog(expr, module)) {
-      return this.printCall(made, expr, module);
-    }
-
-    this.value(made, expr, module);
+    this.cleanupsTo(frame, 0);
   }
 
-  private value(
-    made: IrFunction,
-    expr: Expr,
-    module: int,
-  ): IrValue | undefined {
-    const constant = this.constantOf(expr);
-    if (constant != undefined) {
-      return constant;
-    }
-    if (expr.kind == ExprKind.Binary) {
-      return this.binary(made, expr, module);
-    }
-
-    this.notLowered(module, expr.loc, "this expression");
-
-    return undefined;
+  private isProgramModule(module: Module): boolean {
+    return !module.source.isLibrary && !module.isDeclarationOnly;
   }
 
-  private constantOf(expr: Expr): IrValue | undefined {
-    const type = this.answers.typeOf(expr);
-    if (type == undefined || !this.isWholeNumber(type)) {
-      return undefined;
-    }
-    if (expr.kind == ExprKind.IntLit) {
-      return { type: kIntType, text: `${expr.value}` };
-    }
-
-    const folded = this.answers.foldedOf(expr);
-    if (folded != undefined) {
-      return { type: kIntType, text: `${folded}` };
-    }
-    if (type.kind == TypeKind.Literal) {
-      return { type: kIntType, text: type.text };
-    }
-
-    return undefined;
+  private placeKey(module: int, loc: int): string {
+    return `${module} ${loc}`;
   }
 
-  private isWholeNumber(type: Type): boolean {
-    if (type.kind == TypeKind.Literal) {
-      return type.literal == LiteralKind.Int;
-    }
+  private frameId(): int {
+    const id = this.nextFrame;
 
-    return type.kind == TypeKind.Int && type.bits == kIntBits && !type.unsigned;
-  }
+    this.nextFrame += 1;
 
-  private binary(
-    made: IrFunction,
-    expr: BinaryExpr,
-    module: int,
-  ): IrValue | undefined {
-    const operation = this.operationOf(expr.op);
-    const type = this.answers.typeOf(expr);
-    if (operation == undefined || type == undefined) {
-      this.notLowered(module, expr.loc, "this operator");
-
-      return undefined;
-    }
-    if (!this.isWholeNumber(type)) {
-      this.notLowered(module, expr.loc, "this operator on these types");
-
-      return undefined;
-    }
-
-    const left = this.value(made, expr.lhs, module);
-    const right = this.value(made, expr.rhs, module);
-    if (left == undefined || right == undefined) {
-      return undefined;
-    }
-
-    const text = `${operation} ${kIntType} ${left.text}, ${right.text}`;
-    const result = made.instruction(text);
-
-    return { type: kIntType, text: result };
-  }
-
-  private operationOf(op: BinaryOp): string | undefined {
-    switch (op) {
-      case BinaryOp.Add:
-        return "add";
-      case BinaryOp.Sub:
-        return "sub";
-      case BinaryOp.Mul:
-        return "mul";
-      default:
-        return undefined;
-    }
-  }
-
-  private isConsoleLog(call: CallExpr, module: int): boolean {
-    const callee = call.callee;
-    if (callee.kind != ExprKind.Member || callee.name != kLogName) {
-      return false;
-    }
-
-    const object = callee.object;
-    if (object.kind != ExprKind.Name || object.name != kConsoleName) {
-      return false;
-    }
-
-    const use = this.uses.get(module)?.get(object.loc);
-
-    return use != undefined && use.symbol == undefined;
-  }
-
-  private printCall(made: IrFunction, call: CallExpr, module: int): void {
-    const values: IrValue[] = [];
-
-    for (const arg of call.args) {
-      if (arg.spread) {
-        this.notLowered(module, arg.expr.loc, "a spread argument");
-
-        continue;
-      }
-
-      const value = this.value(made, arg.expr, module);
-      if (value != undefined) {
-        values.push(value);
-      }
-    }
-
-    for (let index = 0; index < values.length; index++) {
-      const value = values[index];
-      if (value == undefined) {
-        continue;
-      }
-      if (index > 0) {
-        this.printCode(made, kSpaceCode);
-      }
-
-      this.runtimeCall(made, kPrintInt, [value]);
-    }
-
-    this.printCode(made, kNewlineCode);
-  }
-
-  private printCode(made: IrFunction, code: int): void {
-    const value: IrValue = { type: kCharType, text: `${code}` };
-
-    this.runtimeCall(made, kPrintChar, [value]);
-  }
-
-  private runtimeCall(made: IrFunction, name: string, args: IrValue[]): void {
-    const params = args.map((arg) => arg.type);
-    const given = args.map((arg) => `${arg.type} ${arg.text}`);
-    const list = given.join(", ");
-
-    this.ir.declare(name, kVoidType, params);
-    made.statement(`call ${kVoidType} @${name}(${list})`);
+    return id;
   }
 
   private notLowered(module: int, loc: int, form: string): void {

@@ -1,0 +1,232 @@
+import {
+  BinaryOp,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  TemplateExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrOpcode } from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kFalse,
+  kIntType,
+  kLengthMask,
+  kNumberPartDouble,
+  kNumberPartInt,
+  kPointerType,
+  kStringConcat,
+  kStringType,
+  kTrue,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private concatenated(
+    frame: Frame,
+    given: IrValue[],
+    exprs: Expr[],
+  ): IrValue | undefined {
+    const leaves: Expr[] = [];
+
+    for (const expr of exprs) {
+      this.concatLeaves(expr, leaves);
+    }
+
+    const parts = given.slice();
+
+    for (const leaf of leaves) {
+      const part = this.concatPart(frame, leaf);
+      if (part == undefined) {
+        return undefined;
+      }
+
+      parts.push(part);
+    }
+
+    return this.joined(frame, parts);
+  }
+
+  private concatLeaves(expr: Expr, leaves: Expr[]): void {
+    const type = this.answers.typeOf(expr);
+    const isText = type != undefined && this.isString(type);
+    if (expr.kind != ExprKind.Binary || expr.op != BinaryOp.Add || !isText) {
+      leaves.push(expr);
+
+      return;
+    }
+
+    this.concatLeaves(expr.lhs, leaves);
+    this.concatLeaves(expr.rhs, leaves);
+  }
+
+  private concatPart(frame: Frame, expr: Expr): IrValue | undefined {
+    const given = this.value(frame, expr);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const value = this.proven(frame, given);
+    if (this.isString(value.tz)) {
+      return value;
+    }
+    if (this.isBoolean(value.tz)) {
+      const yes = this.stringValue(kTrue);
+      const no = this.stringValue(kFalse);
+      const made = frame.made.select(value.value, yes.value, no.value);
+
+      return { type: kStringType, value: made, tz: yes.tz };
+    }
+
+    const isWideUnsigned =
+      this.isUnsigned(value.tz) && this.bitsOf(value.tz) == 64;
+    if (this.isInteger(value.tz) && !isWideUnsigned) {
+      const long = this.toLong(frame, value);
+
+      return this.numberPart(frame, long.value, kNumberPartInt);
+    }
+    if (this.isDouble(value.tz)) {
+      const bits = frame.made.cast(IrOpcode.BitCast, value.value, kIntType);
+
+      return this.numberPart(frame, bits, kNumberPartDouble);
+    }
+
+    this.notLowered(frame.module, expr.loc, "this value in a text");
+
+    return undefined;
+  }
+
+  private numberPart(frame: Frame, bits: LLVMValue, meta: string): IrValue {
+    const made = frame.made;
+    const tz = this.store.plain(TypeKind.Unknown);
+    const pointer = made.cast(IrOpcode.IntToPtr, bits, kPointerType);
+    const empty = this.ir.undefinedOf(kStringType);
+    const first = made.insert(empty, pointer, 0);
+    const mark = this.ir.hexInteger(kIntType, meta);
+    const value = made.insert(first, mark, 1);
+
+    return { type: kStringType, value, tz };
+  }
+
+  private joined(frame: Frame, parts: IrValue[]): IrValue {
+    const made = frame.made;
+    const tz = this.store.plain(TypeKind.String);
+    const count = parts.length;
+    if (count == 0) {
+      return this.stringValue("");
+    }
+
+    const array = `[${count} x ${kStringType}]`;
+    const slot = made.slot(array, "concat.parts");
+    const out = made.slot(kStringType, "str.out");
+
+    for (let index = 0; index < count; index++) {
+      const part = parts[index];
+      if (part == undefined) {
+        continue;
+      }
+
+      const at = made.field(array, slot, index);
+
+      made.store(part.value, at);
+    }
+
+    const concat = this.ir.declare(kStringConcat, kVoidType, [
+      kPointerType,
+      kPointerType,
+      kIntType,
+    ]);
+    const size = this.ir.integer(kIntType, `${count}`);
+
+    made.call(concat, [out, slot, size]);
+
+    const value = made.load(kStringType, out);
+
+    for (const part of parts) {
+      this.dropping(frame, part);
+    }
+
+    return { type: kStringType, value, tz, owned: true };
+  }
+
+  private templateValue(frame: Frame, expr: TemplateExpr): IrValue | undefined {
+    const parts: IrValue[] = [];
+    const only = expr.exprs[0];
+    const isAlone =
+      expr.exprs.length == 1 && expr.quasis.every((quasi) => quasi.length == 0);
+    if (only != undefined && isAlone) {
+      return this.aloneValue(frame, only);
+    }
+
+    for (let index = 0; index < expr.quasis.length; index++) {
+      const quasi = expr.quasis[index] ?? "";
+      const inner = expr.exprs[index];
+
+      if (quasi.length > 0) {
+        parts.push(this.stringValue(quasi));
+      }
+      if (inner == undefined) {
+        continue;
+      }
+
+      const part = this.concatPart(frame, inner);
+      if (part == undefined) {
+        return undefined;
+      }
+
+      parts.push(part);
+    }
+
+    const first = parts[0];
+    if (parts.length == 1 && first != undefined && this.isString(first.tz)) {
+      return first;
+    }
+
+    return this.joined(frame, parts);
+  }
+
+  private aloneValue(frame: Frame, expr: Expr): IrValue | undefined {
+    const part = this.concatPart(frame, expr);
+    if (part == undefined || this.isString(part.tz)) {
+      return part;
+    }
+
+    return this.joined(frame, [part]);
+  }
+
+  private memberValue(frame: Frame, expr: MemberExpr): IrValue | undefined {
+    const object = this.answers.typeOf(expr.object);
+    const isArray = object != undefined && this.isArray(object);
+    if (isArray && expr.name == "length") {
+      return this.arrayMember(frame, expr);
+    }
+    if (object != undefined && this.isInstance(object)) {
+      return this.fieldValue(frame, expr);
+    }
+
+    const isLength =
+      expr.name == "length" && object != undefined && this.isString(object);
+    if (!isLength) {
+      this.notLowered(frame.module, expr.loc, "this member");
+
+      return undefined;
+    }
+
+    const text = this.value(frame, expr.object);
+    if (text == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const meta = made.extract(text.value, 1);
+    const mask = this.ir.hexInteger(kIntType, kLengthMask);
+    const length = made.binary(IrOpcode.And, meta, mask);
+    const tz = this.store.integer(64, false);
+
+    this.dropping(frame, text);
+
+    return { type: kIntType, value: length, tz };
+  }
+}
