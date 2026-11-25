@@ -1,4 +1,4 @@
-import { Type } from "../../../program/type/types/type.types.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { IrFunction } from "../../ir-function/ir-function.tz";
 import {
   IrCallee,
@@ -11,6 +11,10 @@ import {
   kArrayFree,
   kArrayRelease,
   kArrayRetain,
+  kDecimalFree,
+  kDecimalRelease,
+  kDecimalRetain,
+  kDecimalType,
   kInstanceRelease,
   kIntType,
   kObjectHeader,
@@ -21,7 +25,12 @@ import {
   kStringType,
   kVoidType,
 } from "../const/lowering.const.tz";
-import { Frame, IrValue, Place } from "../types/lowering.types.tz";
+import {
+  CountForm,
+  Frame,
+  IrValue,
+  Place,
+} from "../types/lowering.types.tz";
 
 partial class Lowering {
   private isManaged(type: Type): boolean {
@@ -30,7 +39,26 @@ partial class Lowering {
       return this.isManaged(inner);
     }
 
-    return this.isString(type) || this.isArray(type) || this.isInstance(type);
+    return (
+      this.isString(type) ||
+      this.isArray(type) ||
+      this.isCounted(type) ||
+      this.isDecimal(type) ||
+      this.isManagedResult(type)
+    );
+  }
+
+  private isManagedResult(type: Type): boolean {
+    if (type.kind != TypeKind.Result) {
+      return false;
+    }
+
+    const isValueManaged =
+      !this.isEmptyHalf(type.value) && this.isManaged(type.value);
+    const isErrorManaged =
+      !this.isEmptyHalf(type.error) && this.isManaged(type.error);
+
+    return isValueManaged || isErrorManaged;
   }
 
   private owning(frame: Frame, value: IrValue): IrValue {
@@ -69,18 +97,27 @@ partial class Lowering {
   }
 
   private countHelperOf(type: Type, isRetain: boolean): IrCallee {
+    const result = this.resultCounter(type, isRetain);
+    if (result != undefined) {
+      return result;
+    }
     if (this.isString(type)) {
       const name = this.pick(isRetain, kStringRetain, kStringRelease);
 
-      return this.countHelper(name, isRetain, true);
+      return this.countHelper(name, isRetain, CountForm.Text);
     }
-    if (this.isInstance(type) && !isRetain) {
+    if (this.isDecimal(type)) {
+      const name = this.pick(isRetain, kDecimalRetain, kDecimalRelease);
+
+      return this.countHelper(name, isRetain, CountForm.Decimal);
+    }
+    if (this.isCounted(type) && !isRetain) {
       return this.instanceReleaseHelper();
     }
 
     const name = this.pick(isRetain, kArrayRetain, kArrayRelease);
 
-    return this.countHelper(name, isRetain, false);
+    return this.countHelper(name, isRetain, CountForm.Pointer);
   }
 
   private openScope(frame: Frame): void {
@@ -157,24 +194,24 @@ partial class Lowering {
   private countHelper(
     name: string,
     isRetain: boolean,
-    isString: boolean,
+    form: CountForm,
   ): IrCallee {
     const known = this.ir.callee(name);
     if (known != undefined) {
       return known;
     }
 
-    const param = this.pick(isString, kStringType, kPointerType);
+    const param = this.countParam(form);
     const made = new IrFunction(this.ir, name, kVoidType, [param]);
     const argument = made.param(0);
     const counted = made.block("counted");
     const done = made.block("done");
-    const object = this.countedObject(made, argument, isString);
-    const isCounted = this.isCountedTest(made, argument, isString);
+    const isCounted = this.isCountedTest(made, argument, form);
 
     made.conditionalBranch(isCounted, counted, done);
     made.open(counted);
 
+    const object = this.countedObject(made, argument, form);
     const count = made.load(kIntType, object);
 
     if (isRetain) {
@@ -183,7 +220,7 @@ partial class Lowering {
 
       made.store(more, object);
     } else {
-      const free = this.pick(isString, kStringFree, kArrayFree);
+      const free = this.freeName(form);
 
       this.lastReference(made, object, count, free);
     }
@@ -194,24 +231,52 @@ partial class Lowering {
     return made.callee;
   }
 
+  private countParam(form: CountForm): string {
+    switch (form) {
+      case CountForm.Text:
+        return kStringType;
+      case CountForm.Decimal:
+        return kDecimalType;
+      default:
+        return kPointerType;
+    }
+  }
+
+  private freeName(form: CountForm): string {
+    switch (form) {
+      case CountForm.Text:
+        return kStringFree;
+      case CountForm.Decimal:
+        return kDecimalFree;
+      default:
+        return kArrayFree;
+    }
+  }
+
   private countedObject(
     made: IrFunction,
     argument: LLVMValue,
-    isString: boolean,
+    form: CountForm,
   ): LLVMValue {
-    if (isString) {
-      return made.extract(argument, 0);
-    }
+    switch (form) {
+      case CountForm.Text:
+        return made.extract(argument, 0);
+      case CountForm.Decimal: {
+        const bits = made.extract(argument, 0);
 
-    return argument;
+        return made.cast(IrOpcode.IntToPtr, bits, kPointerType);
+      }
+      default:
+        return argument;
+    }
   }
 
   private isCountedTest(
     made: IrFunction,
     argument: LLVMValue,
-    isString: boolean,
+    form: CountForm,
   ): LLVMValue {
-    if (isString) {
+    if (form != CountForm.Pointer) {
       const meta = made.extract(argument, 1);
       const zero = this.ir.zero(kIntType);
 

@@ -22,6 +22,8 @@ export enum IrOpcode {
   Trunc = 30,
   ZExt = 31,
   SExt = 32,
+  FPToUI = 33,
+  FPToSI = 34,
   UIToFP = 35,
   SIToFP = 36,
   PtrToInt = 39,

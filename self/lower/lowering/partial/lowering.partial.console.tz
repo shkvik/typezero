@@ -128,8 +128,9 @@ partial class Lowering {
       return this.runtimeCall(made, kPrintDouble, [value]);
     }
     const isWhole =
-      this.isArray(value.tz) ||
-      this.isInstance(value.tz) ||
+      this.isReferenceLike(value.tz) ||
+      this.isDecimal(value.tz) ||
+      value.tz.kind == TypeKind.Result ||
       this.optionalInner(value.tz) != undefined;
     if (isWhole) {
       return this.printedWhole(frame, value);

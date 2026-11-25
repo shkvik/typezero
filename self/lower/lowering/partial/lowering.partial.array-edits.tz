@@ -1,0 +1,191 @@
+import {
+  CallArgument,
+  CallExpr,
+  Expr,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrOpcode } from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kArrayAppend,
+  kArrayLengthField,
+  kArraySplice,
+  kArrayUnshift,
+  kFlagType,
+  kIntType,
+  kPointerType,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue, Place } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private insertedItems(
+    frame: Frame,
+    args: CallArgument[],
+    item: Type,
+  ): IrValue[] | undefined {
+    const items: IrValue[] = [];
+
+    for (const argument of args) {
+      if (argument.spread) {
+        this.notLowered(frame.module, argument.expr.loc, "a spread argument");
+
+        return undefined;
+      }
+
+      const given = this.wantedValue(frame, argument.expr, item);
+      if (given == undefined) {
+        return undefined;
+      }
+
+      const loc = argument.expr.loc;
+      const value = this.converted(frame, given, item, loc);
+      if (value == undefined) {
+        return undefined;
+      }
+
+      items.push(this.owning(frame, value));
+    }
+
+    return items;
+  }
+
+  private itemsPlaced(
+    frame: Frame,
+    slots: LLVMValue,
+    items: IrValue[],
+    element: string,
+  ): void {
+    const made = frame.made;
+
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index];
+      if (item == undefined) {
+        continue;
+      }
+
+      const position = this.ir.integer(kIntType, `${index}`);
+      const address = made.element(element, slots, position);
+
+      made.store(item.value, address);
+    }
+  }
+
+  private splicedArray(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    if (object.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    const element = this.irType(object.item);
+    const array = this.value(frame, member.object);
+    const start = this.integerArgument(frame, call, 0);
+    const count = this.integerArgument(frame, call, 1);
+    if (element == undefined || array == undefined) {
+      return undefined;
+    }
+    if (start == undefined || count == undefined) {
+      return undefined;
+    }
+
+    const items = this.insertedItems(frame, call.args.slice(2), object.item);
+    if (items == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const slots = made.slot(kPointerType, "splice.slots");
+    const params = [
+      kPointerType,
+      kIntType,
+      kIntType,
+      kFlagType,
+      kIntType,
+      kPointerType,
+    ];
+    const splicing = this.ir.declare(kArraySplice, kPointerType, params);
+    const hasCount = this.ir.integer(kFlagType, `${count.given}`);
+    const inserted = this.ir.integer(kIntType, `${items.length}`);
+    const removed = made.call(splicing, [
+      array.value,
+      start.value,
+      count.value,
+      hasCount,
+      inserted,
+      slots,
+    ]);
+    const data = made.load(kPointerType, slots);
+
+    this.itemsPlaced(frame, data, items, element);
+    this.dropping(frame, array);
+
+    return { type: kPointerType, value: removed, tz: object, owned: true };
+  }
+
+  private unshiftedArray(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    if (object.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    const element = this.irType(object.item);
+    const array = this.value(frame, member.object);
+    if (element == undefined || array == undefined) {
+      return undefined;
+    }
+
+    const items = this.insertedItems(frame, call.args, object.item);
+    if (items == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const params = [kPointerType, kIntType];
+    const opening = this.ir.declare(kArrayUnshift, kPointerType, params);
+    const count = this.ir.integer(kIntType, `${items.length}`);
+    const data = made.call(opening, [array.value, count]);
+
+    this.itemsPlaced(frame, data, items, element);
+
+    const lengthField = this.arrayField(frame, array.value, kArrayLengthField);
+    const length = made.load(kFlagType, lengthField);
+    const value = made.cast(IrOpcode.ZExt, length, kIntType);
+    const tz = this.store.integer(64, false);
+
+    this.dropping(frame, array);
+
+    return { type: kIntType, value, tz };
+  }
+
+  private flatPushed(
+    frame: Frame,
+    place: Place,
+    returned: IrValue,
+    callback: Expr,
+  ): boolean {
+    const part = this.converted(frame, returned, place.tz, callback.loc);
+    if (part == undefined) {
+      return false;
+    }
+
+    const made = frame.made;
+    const array = made.load(kPointerType, place.pointer);
+    const params = [kPointerType, kPointerType];
+    const appending = this.ir.declare(kArrayAppend, kVoidType, params);
+
+    made.call(appending, [array, part.value]);
+    this.dropping(frame, part);
+
+    return true;
+  }
+}

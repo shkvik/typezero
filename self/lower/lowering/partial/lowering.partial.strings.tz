@@ -61,14 +61,11 @@ partial class Lowering {
     const length = units.length;
     let element: string = "i8";
     let kind: int = kOneByteKind;
-    let data: LLVMValue = this.byteArray(units);
+    const data = this.unitsData(units, isTwoBytes);
 
     if (isTwoBytes) {
-      const items = units.map((unit) => this.ir.integer("i16", `${unit}`));
-
       element = "i16";
       kind = kTwoByteKind;
-      data = this.ir.constArray("i16", items);
     }
 
     const array = `[${length} x ${element}]`;
@@ -84,6 +81,16 @@ partial class Lowering {
     ]);
 
     return this.ir.global(name, layout, value, true);
+  }
+
+  private unitsData(units: int[], isTwoBytes: boolean): LLVMValue {
+    if (!isTwoBytes) {
+      return this.byteArray(units);
+    }
+
+    const items = units.map((unit) => this.ir.integer("i16", `${unit}`));
+
+    return this.ir.constArray("i16", items);
   }
 
   private byteText(message: string): TextConstant {

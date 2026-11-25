@@ -1,15 +1,18 @@
 import {
   ArrayLitExpr,
+  CallArgument,
   CallExpr,
+  Expr,
+  ExprKind,
   IndexExpr,
   MemberExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
-import {
-  BindingKind,
-  NameOrigin,
-} from "../../../program/ast/types/ast.types.patterns.tz";
 import { ForOfStmt } from "../../../program/ast/types/ast.types.statements.tz";
-import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import {
+  DictKind,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
 import {
   IrIntPredicate,
   IrOpcode,
@@ -17,6 +20,7 @@ import {
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
+  kArrayAppend,
   kArrayCapacityField,
   kArrayDataField,
   kArrayGrow,
@@ -25,6 +29,8 @@ import {
   kArrayNew,
   kDescriptorLayout,
   kFlagType,
+  kHandleKind,
+  kHandleLayout,
   kIntType,
   kPointerType,
   kVoidType,
@@ -38,12 +44,52 @@ import {
 
 partial class Lowering {
   private arrayLiteral(frame: Frame, expr: ArrayLitExpr): IrValue | undefined {
-    const type = this.answers.typeOf(expr);
+    return this.arrayLiteralOf(frame, expr, this.typeOf(expr));
+  }
+
+  private wantedValue(
+    frame: Frame,
+    expr: Expr,
+    wanted: Type,
+  ): IrValue | undefined {
+    const known = this.typeOf(expr);
+    if (known == undefined && expr.kind == ExprKind.ArrayLit) {
+      return this.arrayLiteralOf(frame, expr, wanted);
+    }
+    if (known == undefined && expr.kind == ExprKind.ObjectLit) {
+      return this.objectLiteral(frame, expr, wanted);
+    }
+
+    const literal = this.wantedText(expr, wanted);
+    if (literal != undefined) {
+      return literal;
+    }
+
+    return this.value(frame, expr);
+  }
+
+  private arrayLiteralOf(
+    frame: Frame,
+    expr: ArrayLitExpr,
+    type: Type | undefined,
+  ): IrValue | undefined {
     const isPlain = expr.elements.every(
       (element) => !element.spread && !element.hole,
     );
+    if (type != undefined && type.kind == TypeKind.Tuple && isPlain) {
+      return this.tupleLiteral(frame, expr, type);
+    }
+
+    const hasHoles = expr.elements.some((element) => element.hole);
+    if (type != undefined && type.kind == TypeKind.Array && !hasHoles) {
+      if (!isPlain) {
+        return this.spreadArray(frame, expr, type);
+      }
+    }
     if (type == undefined || type.kind != TypeKind.Array || !isPlain) {
-      this.notLowered(frame.module, expr.loc, "this array");
+      const kind = this.kindName(type);
+
+      this.notLowered(frame.module, expr.loc, `an array literal of ${kind}`);
 
       return undefined;
     }
@@ -87,6 +133,39 @@ partial class Lowering {
     return { type: kPointerType, value: array, tz: type, owned: true };
   }
 
+  private spreadArray(
+    frame: Frame,
+    expr: ArrayLitExpr,
+    type: Type,
+  ): IrValue | undefined {
+    const item = this.itemOf(type);
+    if (item == undefined) {
+      return undefined;
+    }
+
+    const descriptor = this.descriptor(item);
+    if (descriptor == undefined) {
+      this.notLowered(frame.module, expr.loc, "an array of this type");
+
+      return undefined;
+    }
+
+    const array = this.emptyArray(frame, descriptor);
+
+    for (const element of expr.elements) {
+      const argument: CallArgument = {
+        expr: element.expr,
+        spread: element.spread,
+      };
+      const isAdded = this.itemAdded(frame, array, argument, type);
+      if (!isAdded) {
+        return undefined;
+      }
+    }
+
+    return { type: kPointerType, value: array, tz: type, owned: true };
+  }
+
   private newArray(frame: Frame, descriptor: LLVMValue, count: int): LLVMValue {
     const tz = this.store.integer(64, false);
     const size = this.ir.integer(kIntType, `${count}`);
@@ -117,10 +196,18 @@ partial class Lowering {
   }
 
   private descriptor(type: Type): LLVMValue | undefined {
+    if (type.kind == TypeKind.Result) {
+      return this.resultDescriptor(type);
+    }
+
     const plain = this.widened(type);
     const known = this.descriptors.get(plain.id);
     if (known != undefined) {
       return known;
+    }
+
+    if (this.isHandleType(plain)) {
+      return this.handleDescriptor(plain);
     }
 
     const shape = this.descriptorShape(plain);
@@ -142,6 +229,32 @@ partial class Lowering {
     return global;
   }
 
+  private handleDescriptor(type: Type): LLVMValue {
+    let label = "";
+
+    if (type.kind == TypeKind.Instance) {
+      label = type.name;
+    }
+
+    const name = this.ir.uniqueName("tz.type.");
+    const base = this.ir.constStruct([
+      this.ir.integer(kFlagType, `${kHandleKind}`),
+      this.ir.integer(kFlagType, "8"),
+      this.ir.zero(kPointerType),
+    ]);
+    const length = Buffer.from(label, "utf8").length;
+    const value = this.ir.constStruct([
+      base,
+      this.cText(label),
+      this.ir.integer(kFlagType, `${length}`),
+    ]);
+    const global = this.ir.global(name, kHandleLayout, value, true);
+
+    this.descriptors.set(type.id, global);
+
+    return global;
+  }
+
   private descriptorShape(type: Type): DescriptorShape | undefined {
     switch (type.kind) {
       case TypeKind.Int:
@@ -155,6 +268,8 @@ partial class Lowering {
         return { kind: 4, size: 1 };
       case TypeKind.String:
         return { kind: 5, size: 16 };
+      case TypeKind.Decimal:
+        return { kind: 11, size: 16 };
       case TypeKind.Array: {
         const inner = this.descriptor(type.item);
         if (inner == undefined) {
@@ -166,12 +281,23 @@ partial class Lowering {
       case TypeKind.Undefined:
         return { kind: 8, size: 1 };
       case TypeKind.Instance:
+      case TypeKind.Object:
+      case TypeKind.Tuple:
+      case TypeKind.Dict:
         return { kind: 10, size: 8 };
       case TypeKind.Union:
-        return this.optionalShape(type);
+        return this.unionShape(type);
       default:
         return undefined;
     }
+  }
+
+  private unionShape(type: Type): DescriptorShape | undefined {
+    if (this.isObjectLike(type)) {
+      return { kind: 10, size: 8 };
+    }
+
+    return this.optionalShape(type);
   }
 
   private optionalShape(type: Type): DescriptorShape | undefined {
@@ -191,14 +317,18 @@ partial class Lowering {
   }
 
   private optionalSize(inner: Type): int {
+    if (this.isReferenceLike(inner)) {
+      return 8;
+    }
+
     switch (inner.kind) {
       case TypeKind.Int:
         return inner.bits >> 2;
       case TypeKind.Boolean:
         return 2;
       case TypeKind.String:
+      case TypeKind.Decimal:
         return 24;
-      case TypeKind.Array:
       case TypeKind.Instance:
         return 8;
       default:
@@ -228,12 +358,24 @@ partial class Lowering {
   }
 
   private indexValue(frame: Frame, expr: IndexExpr): IrValue | undefined {
-    const object = this.answers.typeOf(expr.object);
-    const result = this.answers.typeOf(expr);
+    const object = this.typeIn(frame, expr.object);
+    const result = this.typeOf(expr);
     if (object == undefined || result == undefined) {
       this.notLowered(frame.module, expr.loc, "this index");
 
       return undefined;
+    }
+    if (this.isString(object)) {
+      return this.textIndexed(frame, expr, result);
+    }
+    if (this.isBytesType(object)) {
+      return this.bytesIndexed(frame, expr, result);
+    }
+    if (object.kind == TypeKind.Tuple) {
+      return this.tupleIndexed(frame, expr);
+    }
+    if (object.kind == TypeKind.Object) {
+      return this.keyedIndexed(frame, expr, object);
     }
 
     const item = this.itemOf(object);
@@ -347,34 +489,70 @@ partial class Lowering {
     member: MemberExpr,
     object: Type,
   ): IrValue | undefined {
-    const value = call.args[0];
-    if (
-      object.kind != TypeKind.Array ||
-      call.args.length != 1 ||
-      value == undefined
-    ) {
-      this.notLowered(frame.module, call.loc, "this method call");
+    if (object.kind != TypeKind.Array) {
+      const name = this.calledName(call);
+
+      this.notLowered(frame.module, call.loc, `a call of method ${name}`);
 
       return undefined;
     }
 
     const array = this.value(frame, member.object);
-    const given = this.value(frame, value.expr);
-    if (array == undefined || given == undefined) {
+    if (array == undefined) {
       return undefined;
     }
 
-    const item = this.converted(frame, given, object.item, value.expr.loc);
-    if (item == undefined) {
-      return undefined;
+    for (const argument of call.args) {
+      const isAdded = this.itemAdded(frame, array.value, argument, object);
+      if (!isAdded) {
+        return undefined;
+      }
     }
 
-    const length = this.pushed(frame, array.value, item, object.item);
+    const length = this.arrayLength(frame, array.value);
     const tz = this.store.integer(64, false);
 
     this.dropping(frame, array);
 
     return { type: kIntType, value: length, tz };
+  }
+
+  private itemAdded(
+    frame: Frame,
+    array: LLVMValue,
+    argument: CallArgument,
+    object: Type,
+  ): boolean {
+    if (object.kind != TypeKind.Array) {
+      return false;
+    }
+
+    const loc = argument.expr.loc;
+    if (argument.spread) {
+      const given = this.wantedValue(frame, argument.expr, object);
+      const other = this.convertedOrNone(frame, given, object, loc);
+      if (other == undefined) {
+        return false;
+      }
+
+      const params = [kPointerType, kPointerType];
+      const appending = this.ir.declare(kArrayAppend, kVoidType, params);
+
+      frame.made.call(appending, [array, other.value]);
+      this.dropping(frame, other);
+
+      return true;
+    }
+
+    const given = this.wantedValue(frame, argument.expr, object.item);
+    const item = this.convertedOrNone(frame, given, object.item, loc);
+    if (item == undefined) {
+      return false;
+    }
+
+    this.pushed(frame, array, item, object.item);
+
+    return true;
   }
 
   private pushed(
@@ -423,16 +601,19 @@ partial class Lowering {
   }
 
   private forOfLoop(frame: Frame, statement: ForOfStmt): void {
-    const iterable = this.answers.typeOf(statement.iterable);
+    const iterated = this.typeIn(frame, statement.iterable);
+    if (iterated != undefined && this.isString(iterated)) {
+      return this.textLoop(frame, statement);
+    }
+
+    const itemType = this.loopItemType(frame, statement.iterable);
     const binding = statement.binding;
-    const isPlain =
-      !statement.isAwait &&
-      !statement.keys &&
-      binding.form.kind == BindingKind.Plain &&
-      binding.origin == NameOrigin.Written;
-    if (iterable == undefined || iterable.kind != TypeKind.Array || !isPlain) {
+    const isPlain = !statement.isAwait && !statement.keys;
+    if (itemType == undefined || !isPlain) {
       return this.notLowered(frame.module, statement.loc, "this loop");
     }
+
+    const iterable = this.store.arrayOf(itemType);
 
     const made = frame.made;
     const cond = made.block("for.of.cond");
@@ -442,8 +623,8 @@ partial class Lowering {
     this.openScope(frame);
 
     const target = this.loopTarget(frame, end, cond);
-    const source = this.value(frame, statement.iterable);
-    const element = this.irType(iterable.item);
+    const source = this.loopSource(frame, statement.iterable);
+    const element = this.irType(itemType);
     if (source == undefined || element == undefined) {
       return;
     }
@@ -486,7 +667,7 @@ partial class Lowering {
     this.loopItem(frame, statement, {
       type: element,
       value: item,
-      tz: iterable.item,
+      tz: itemType,
     });
     frame.loops.push(target);
     this.statement(frame, statement.body);
@@ -497,9 +678,51 @@ partial class Lowering {
     this.closeScope(frame);
   }
 
+  private loopItemType(frame: Frame, expr: Expr): Type | undefined {
+    const type = this.typeIn(frame, expr);
+    const listed = this.listedDict(expr);
+    if (listed != undefined) {
+      const object = this.typeOf(listed.object);
+      if (object == undefined) {
+        return undefined;
+      }
+
+      return this.dictItemType(object, listed.name == "keys");
+    }
+    if (type == undefined) {
+      return undefined;
+    }
+    if (type.kind == TypeKind.Array) {
+      return type.item;
+    }
+    if (type.kind == TypeKind.Dict && type.dict == DictKind.Set) {
+      return type.key;
+    }
+    if (type.kind == TypeKind.Dict && type.dict == DictKind.Map) {
+      return this.store.plainTuple([type.key, type.value]);
+    }
+
+    return undefined;
+  }
+
+  private loopSource(frame: Frame, expr: Expr): IrValue | undefined {
+    const type = this.typeIn(frame, expr);
+    if (type != undefined && type.kind == TypeKind.Dict) {
+      if (type.dict == DictKind.Map) {
+        return this.dictEntries(frame, expr, type);
+      }
+
+      return this.dictItems(frame, expr, true);
+    }
+
+    return this.sourceItems(frame, expr);
+  }
+
   private loopItem(frame: Frame, statement: ForOfStmt, item: IrValue): void {
     const binding = statement.binding;
-    const place = this.localPlace(frame, binding);
+    const declared = this.values.variableOf(frame.module, binding.loc);
+    const isUnknown = declared == undefined || declared.kind == TypeKind.Error;
+    const place = this.boundPlace(frame, binding, item.tz, isUnknown);
     if (place == undefined) {
       return;
     }

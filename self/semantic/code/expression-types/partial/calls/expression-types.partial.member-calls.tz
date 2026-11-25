@@ -2,6 +2,7 @@ import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import {
   CallExpr,
+  ExprKind,
   MemberExpr,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import {
@@ -12,6 +13,8 @@ import {
   UnionType,
 } from "../../../../../program/type/types/type.types.tz";
 import {
+  kArrayName,
+  kFromName,
   kJoinName,
   kTakenMethods,
   kThenName,
@@ -57,6 +60,11 @@ partial class ExpressionTypes {
     const processCall = this.processCall(expr, member, module);
     if (processCall != undefined) {
       return processCall;
+    }
+
+    const bitCall = this.bitCall(expr, member, module);
+    if (bitCall != undefined) {
+      return bitCall;
     }
     if (this.jsonParseTypesCheck(expr, member, module)) {
       return this.store.plain(TypeKind.Error);
@@ -124,6 +132,11 @@ partial class ExpressionTypes {
     const dated = this.dateStaticCall(expr, member, module);
     if (dated != undefined) {
       return dated;
+    }
+
+    const listed = this.arrayFromCall(expr, member, module);
+    if (listed != undefined) {
+      return listed;
     }
 
     const made = this.libraryStaticCall(expr, member, module);
@@ -576,5 +589,33 @@ partial class ExpressionTypes {
     }
 
     return this.calledWith(expr, type, member.loc, CallKind.Own, module);
+  }
+
+  private arrayFromCall(
+    expr: CallExpr,
+    member: MemberExpr,
+    module: int,
+  ): Type | undefined {
+    const object = member.object;
+    const source = expr.args[0];
+    const isFrom =
+      object.kind == ExprKind.Name &&
+      object.name == kArrayName &&
+      member.name == kFromName &&
+      expr.args.length == 1;
+    if (!isFrom || object.kind != ExprKind.Name || source == undefined) {
+      return undefined;
+    }
+    if (source.spread || !this.isLibraryName(object, module)) {
+      return undefined;
+    }
+
+    const given = this.typed(source.expr, undefined, module);
+    const item = this.iteratedItem(given);
+    if (item == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.store.arrayOf(item);
   }
 }

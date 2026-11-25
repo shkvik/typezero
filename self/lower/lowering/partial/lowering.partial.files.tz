@@ -1,0 +1,604 @@
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  NameExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrFunction } from "../../ir-function/ir-function.tz";
+import {
+  IrIntPredicate,
+  IrOpcode,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kBooleanType,
+  kEmptyType,
+  kFlagType,
+  kFsCompose,
+  kFsErrorOrders,
+  kFsExists,
+  kFsMakeTemporary,
+  kFsReadDirectory,
+  kFsReadFile,
+  kFsReadFileBytes,
+  kFsRealPath,
+  kFsRemove,
+  kFsStat,
+  kFsVerbs,
+  kIntType,
+  kPointerType,
+  kReadFlag,
+  kStatsOrder,
+  kStringType,
+  kTextCompareC,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import {
+  ClassLayout,
+  FileCallParts,
+  Frame,
+  IrValue,
+} from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private filesCall(
+    frame: Frame,
+    call: CallExpr,
+    callee: NameExpr,
+  ): IrValue | undefined {
+    switch (callee.name) {
+      case "existsSync":
+        return this.fileExists(frame, call);
+      case "readFileSync":
+        return this.fileRead(frame, call);
+      case "realpathSync":
+        return this.fileText(frame, call, kFsRealPath);
+      case "mkdtempSync":
+        return this.fileText(frame, call, kFsMakeTemporary);
+      case "statSync":
+        return this.fileStatus(frame, call);
+      case "readdirSync":
+        return this.directoryRead(frame, call);
+      case "rmSync":
+        return this.fileRemoved(frame, call);
+      default:
+        this.notLowered(frame.module, call.loc, "a call of this function");
+
+        return undefined;
+    }
+  }
+
+  private pathArgument(frame: Frame, call: CallExpr): IrValue | undefined {
+    const first = call.args[0];
+    if (first == undefined) {
+      return undefined;
+    }
+
+    const string = this.store.plain(TypeKind.String);
+    const given = this.value(frame, first.expr);
+
+    return this.convertedOrNone(frame, given, string, first.expr.loc);
+  }
+
+  private fileExists(frame: Frame, call: CallExpr): IrValue | undefined {
+    const path = this.pathArgument(frame, call);
+    if (path == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const params = [kPointerType, kIntType];
+    const callee = this.ir.declare(kFsExists, kFlagType, params);
+    const flag = made.call(callee, this.textParts(frame, path));
+    const zero = this.ir.zero(kFlagType);
+    const value = made.integerCompare(IrIntPredicate.NotEqual, flag, zero);
+    const tz = this.store.plain(TypeKind.Boolean);
+
+    this.dropping(frame, path);
+
+    return { type: kBooleanType, value, tz };
+  }
+
+  private fileResultParts(
+    frame: Frame,
+    call: CallExpr,
+  ): FileCallParts | undefined {
+    const type = this.typeOf(call);
+    if (type == undefined || type.kind != TypeKind.Result) {
+      this.notLowered(frame.module, call.loc, "a result of this type");
+
+      return undefined;
+    }
+
+    const maker = this.fsErrorMaker(type.error);
+    if (maker == undefined) {
+      this.notLowered(frame.module, call.loc, "an error of this type");
+
+      return undefined;
+    }
+
+    return { type, value: type.value, maker };
+  }
+
+  private fileRead(frame: Frame, call: CallExpr): IrValue | undefined {
+    const parts = this.fileResultParts(frame, call);
+    const path = this.pathArgument(frame, call);
+    if (parts == undefined || path == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const flag = this.stringValue(kReadFlag);
+    const args = this.textParts(frame, path).concat(
+      this.textParts(frame, flag),
+    );
+    if (this.isBytesType(parts.value)) {
+      const params = [kPointerType, kIntType, kPointerType, kIntType];
+      const all = params.concat([kPointerType]);
+      const callee = this.ir.declare(kFsReadFileBytes, kPointerType, all);
+      const read = made.call(callee, args.concat([parts.maker]));
+      const value: IrValue = {
+        type: kPointerType,
+        value: read,
+        tz: parts.value,
+        owned: true,
+      };
+
+      this.dropping(frame, path);
+
+      return this.caughtResult(frame, value, parts.type, call.loc);
+    }
+
+    const encoding = this.encodingOf(frame, call.args[1]?.expr);
+    const wide = made.cast(IrOpcode.SExt, encoding, kIntType);
+    const params = [kPointerType, kIntType, kPointerType, kIntType, kIntType];
+    const all = args.concat([wide]);
+    const text = this.fileOut(frame, kFsReadFile, params, all, parts);
+
+    this.dropping(frame, path);
+
+    return this.caughtResult(frame, text, parts.type, call.loc);
+  }
+
+  private fileOut(
+    frame: Frame,
+    name: string,
+    params: string[],
+    args: LLVMValue[],
+    parts: FileCallParts,
+  ): IrValue {
+    const made = frame.made;
+    const out = made.slot(kStringType, "file.out");
+    const all = [kPointerType].concat(params).concat([kPointerType]);
+    const callee = this.ir.declare(name, kVoidType, all);
+
+    made.call(callee, [out].concat(args).concat([parts.maker]));
+
+    const value = made.load(kStringType, out);
+    const tz = this.store.plain(TypeKind.String);
+
+    return { type: kStringType, value, tz, owned: true };
+  }
+
+  private fileText(
+    frame: Frame,
+    call: CallExpr,
+    name: string,
+  ): IrValue | undefined {
+    const parts = this.fileResultParts(frame, call);
+    const path = this.pathArgument(frame, call);
+    if (parts == undefined || path == undefined) {
+      return undefined;
+    }
+
+    const params = [kPointerType, kIntType];
+    const args = this.textParts(frame, path);
+    const text = this.fileOut(frame, name, params, args, parts);
+
+    this.dropping(frame, path);
+
+    return this.caughtResult(frame, text, parts.type, call.loc);
+  }
+
+  private fileStatus(frame: Frame, call: CallExpr): IrValue | undefined {
+    const parts = this.fileResultParts(frame, call);
+    const path = this.pathArgument(frame, call);
+    if (parts == undefined || path == undefined) {
+      return undefined;
+    }
+
+    const stats = this.definedOf(parts.value);
+    const statsMaker = this.orderMaker(stats, kStatsOrder);
+    if (statsMaker == undefined || call.args.length > 1) {
+      this.notLowered(frame.module, call.loc, "this call of statSync");
+
+      return undefined;
+    }
+
+    const made = frame.made;
+    const params = [
+      kPointerType,
+      kIntType,
+      kFlagType,
+      kFlagType,
+      kPointerType,
+      kPointerType,
+    ];
+    const callee = this.ir.declare(kFsStat, kPointerType, params);
+    const yes = this.ir.integer(kFlagType, "1");
+    const args = this.textParts(frame, path).concat([
+      yes,
+      yes,
+      statsMaker,
+      parts.maker,
+    ]);
+    const found = made.call(callee, args);
+    const value: IrValue = {
+      type: kPointerType,
+      value: found,
+      tz: stats,
+      owned: true,
+    };
+
+    this.dropping(frame, path);
+
+    return this.caughtResult(frame, value, parts.type, call.loc);
+  }
+
+  private directoryRead(frame: Frame, call: CallExpr): IrValue | undefined {
+    const parts = this.fileResultParts(frame, call);
+    const path = this.pathArgument(frame, call);
+    if (parts == undefined || path == undefined) {
+      return undefined;
+    }
+
+    const item = this.itemOf(parts.value);
+    const element = this.descriptorOrNone(item);
+    if (element == undefined || call.args.length > 1) {
+      this.notLowered(frame.module, call.loc, "this call of readdirSync");
+
+      return undefined;
+    }
+
+    const made = frame.made;
+    const params = [
+      kPointerType,
+      kIntType,
+      kFlagType,
+      kPointerType,
+      kPointerType,
+      kPointerType,
+    ];
+    const callee = this.ir.declare(kFsReadDirectory, kPointerType, params);
+    const args = this.textParts(frame, path).concat([
+      this.ir.zero(kFlagType),
+      element,
+      this.ir.zero(kPointerType),
+      parts.maker,
+    ]);
+    const listed = made.call(callee, args);
+    const value: IrValue = {
+      type: kPointerType,
+      value: listed,
+      tz: parts.value,
+      owned: true,
+    };
+
+    this.dropping(frame, path);
+
+    return this.caughtResult(frame, value, parts.type, call.loc);
+  }
+
+  private descriptorOrNone(type: Type | undefined): LLVMValue | undefined {
+    if (type == undefined) {
+      return undefined;
+    }
+
+    return this.descriptor(type);
+  }
+
+  private fileRemoved(frame: Frame, call: CallExpr): IrValue | undefined {
+    const parts = this.fileResultParts(frame, call);
+    const path = this.pathArgument(frame, call);
+    if (parts == undefined || path == undefined) {
+      return undefined;
+    }
+
+    const options = call.args[1]?.expr;
+    const isRecursive = this.optionFlag(options, "recursive");
+    const isForced = this.optionFlag(options, "force");
+    const params = [
+      kPointerType,
+      kIntType,
+      kFlagType,
+      kFlagType,
+      kPointerType,
+    ];
+    const callee = this.ir.declare(kFsRemove, kVoidType, params);
+    const args = this.textParts(frame, path).concat([
+      this.ir.integer(kFlagType, `${this.flagIf(isRecursive, 1)}`),
+      this.ir.integer(kFlagType, `${this.flagIf(isForced, 1)}`),
+      parts.maker,
+    ]);
+
+    frame.made.call(callee, args);
+    this.dropping(frame, path);
+
+    const done: IrValue = {
+      type: kEmptyType,
+      value: this.ir.zero(kEmptyType),
+      tz: this.store.plain(TypeKind.Void),
+    };
+
+    return this.caughtResult(frame, done, parts.type, call.loc);
+  }
+
+  private optionFlag(options: Expr | undefined, name: string): boolean {
+    if (options == undefined || options.kind != ExprKind.ObjectLit) {
+      return false;
+    }
+
+    const property = options.props.find((one) => one.name == name);
+    const value = property?.value;
+
+    if (value == undefined || value.kind != ExprKind.BoolLit) {
+      return false;
+    }
+
+    return value.value;
+  }
+
+  private fsErrorMaker(error: Type): LLVMValue | undefined {
+    const known = this.makers.get(error.id);
+    if (known != undefined) {
+      return known;
+    }
+
+    const variants = this.objectParts(error);
+    const makers: LLVMValue[] = [];
+
+    for (const variant of variants) {
+      const order = this.errorOrder(variant);
+      const maker = this.orderMakerOrNone(variant, order);
+      if (maker == undefined) {
+        return undefined;
+      }
+
+      makers.push(maker);
+    }
+
+    const label = this.store.labelOf(error) ?? "";
+    const verb = kFsVerbs.get(label) ?? "";
+    const name = this.ir.uniqueName("tz.make.fs.");
+    const made = new IrFunction(this.ir, name, kPointerType, [kPointerType]);
+    const parts = made.param(0);
+    const code = made.load(kPointerType, parts);
+    const chosen = this.variantChosen(made, code, variants);
+    const compose = this.ir.declare(kFsCompose, kVoidType, [
+      kPointerType,
+      kPointerType,
+      kFlagType,
+    ]);
+    const none = this.ir.integer(kFlagType, "-1");
+    const isKnown = made.integerCompare(IrIntPredicate.NotEqual, chosen, none);
+    const knownFlag = made.cast(IrOpcode.ZExt, isKnown, kFlagType);
+    const unknown = this.unknownVariant(variants);
+    const fallback = this.ir.integer(kFlagType, `${unknown}`);
+    const index = made.select(isKnown, chosen, fallback);
+
+    made.call(compose, [parts, this.cText(verb), knownFlag]);
+
+    const result = this.ir.zero(kPointerType);
+
+    for (let position = 0; position < makers.length; position++) {
+      const maker = makers[position];
+      if (maker == undefined) {
+        continue;
+      }
+
+      const wanted = this.ir.integer(kFlagType, `${position}`);
+      const isThis = made.integerCompare(IrIntPredicate.Equal, index, wanted);
+      const signature = this.ir.signature(kPointerType, [kPointerType]);
+      const thisBlock = made.block("variant.make");
+      const nextBlock = made.block("variant.next");
+
+      made.conditionalBranch(isThis, thisBlock, nextBlock);
+      made.open(thisBlock);
+      made.returned(made.indirectCall(signature, maker, [parts]));
+      made.open(nextBlock);
+    }
+
+    made.finishValue(result);
+    this.makers.set(error.id, made.callee.fn);
+
+    return made.callee.fn;
+  }
+
+  private variantChosen(
+    made: IrFunction,
+    code: LLVMValue,
+    variants: Type[],
+  ): LLVMValue {
+    const compare = this.ir.declare(kTextCompareC, kFlagType, [
+      kPointerType,
+      kPointerType,
+    ]);
+    const zero = this.ir.zero(kFlagType);
+    let index: LLVMValue = this.ir.integer(kFlagType, "-1");
+
+    for (let position = 0; position < variants.length; position++) {
+      const codes = this.variantCodes(variants[position]);
+
+      for (const literal of codes) {
+        const order = made.call(compare, [code, this.cText(literal)]);
+        const isSame = made.integerCompare(IrIntPredicate.Equal, order, zero);
+        const value = this.ir.integer(kFlagType, `${position}`);
+
+        index = made.select(isSame, value, index);
+      }
+    }
+
+    return index;
+  }
+
+  private variantCodes(variant: Type | undefined): string[] {
+    if (variant == undefined || variant.kind != TypeKind.Object) {
+      return [];
+    }
+
+    const field = variant.fields.find((one) => one.name == "code");
+    if (field == undefined) {
+      return [];
+    }
+
+    return this.textLiterals(field.type);
+  }
+
+  private unknownVariant(variants: Type[]): int {
+    for (let position = 0; position < variants.length; position++) {
+      if (this.variantCodes(variants[position]).includes("UNKNOWN")) {
+        return position;
+      }
+    }
+
+    return 0;
+  }
+
+  private errorOrder(variant: Type): string[] {
+    if (variant.kind != TypeKind.Object) {
+      return [];
+    }
+
+    const fields = variant.fields;
+
+    for (const order of kFsErrorOrders) {
+      const isPresent = order.every((name) =>
+        fields.some((field) => field.name == name),
+      );
+      const isCovered = fields.every(
+        (field) =>
+          order.includes(field.name) ||
+          this.textLiterals(field.type).length == 1,
+      );
+      if (isPresent && isCovered) {
+        return order;
+      }
+    }
+
+    return [];
+  }
+
+  private orderMakerOrNone(
+    type: Type,
+    order: string[],
+  ): LLVMValue | undefined {
+    if (order.length == 0) {
+      return undefined;
+    }
+
+    return this.orderMaker(type, order);
+  }
+
+  private orderMaker(type: Type, order: string[]): LLVMValue | undefined {
+    const key = `${type.id} ${order.join(" ")}`;
+    const known = this.orderMakers.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const layout = this.layoutOf(type);
+    if (layout == undefined) {
+      return undefined;
+    }
+
+    const elements: string[] = [];
+
+    for (const name of order) {
+      const field = layout.fields.find((one) => one.name == name);
+      if (field == undefined) {
+        return undefined;
+      }
+
+      elements.push(this.partIr(field.type, field.ir));
+    }
+
+    const struct = `{ ${elements.join(", ")} }`;
+    const name = this.ir.uniqueName("tz.make.");
+    const made = new IrFunction(this.ir, name, kPointerType, [kPointerType]);
+    const frame: Frame = {
+      made,
+      id: this.frameId(),
+      module: 0,
+      loops: [],
+      scopes: [],
+    };
+    const parts = made.param(0);
+    const object = this.allocated(frame, layout);
+
+    for (let index = 0; index < order.length; index++) {
+      const field = layout.fields.find((one) => one.name == order[index]);
+      if (field == undefined) {
+        continue;
+      }
+
+      const address = made.field(struct, parts, index);
+      const value = this.partValue(frame, address, field.type, field.ir);
+
+      made.store(value, made.field(layout.struct, object, field.index));
+    }
+
+    this.fixedFields(frame, object, layout, order);
+    made.finishValue(object);
+    this.orderMakers.set(key, made.callee.fn);
+
+    return made.callee.fn;
+  }
+
+  private partIr(type: Type, ir: string): string {
+    if (this.textLiterals(type).length > 0) {
+      return kPointerType;
+    }
+
+    return ir;
+  }
+
+  private partValue(
+    frame: Frame,
+    address: LLVMValue,
+    type: Type,
+    ir: string,
+  ): LLVMValue {
+    const made = frame.made;
+    if (this.textLiterals(type).length > 0) {
+      const text = made.load(kPointerType, address);
+
+      return this.codeChosen(frame, text, type);
+    }
+
+    return made.load(ir, address);
+  }
+
+  private fixedFields(
+    frame: Frame,
+    object: LLVMValue,
+    layout: ClassLayout,
+    order: string[],
+  ): void {
+    const made = frame.made;
+
+    for (const field of layout.fields) {
+      const literals = this.textLiterals(field.type);
+      const only = literals[0];
+      if (order.includes(field.name) || literals.length != 1) {
+        continue;
+      }
+      if (only != undefined) {
+        const address = made.field(layout.struct, object, field.index);
+
+        made.store(this.stringValue(only).value, address);
+      }
+    }
+  }
+}

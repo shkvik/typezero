@@ -1,0 +1,590 @@
+import { dirname, relative, resolve } from "node:path";
+import {
+  CallExpr,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  kPathSeparator,
+  kWindowsSeparator,
+} from "../../../program/module/const/module.const.tz";
+import { SourceLines } from "../../../program/source-lines/source-lines.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrFunction } from "../../ir-function/ir-function.tz";
+import {
+  IrCallee,
+  IrOpcode,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kBooleanType,
+  kEmptyType,
+  kFlagType,
+  kPointerType,
+  kResultDescriptorLayout,
+  kResultKind,
+  kResultRelease,
+  kResultRetain,
+  kSiteLayout,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import {
+  Frame,
+  IrValue,
+  ResultLayout,
+  ResultShape,
+} from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private resultLayout(type: Type): ResultLayout | undefined {
+    if (type.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    const value = this.halfType(type.value);
+    const error = this.halfType(type.error);
+    if (value == undefined || error == undefined) {
+      return undefined;
+    }
+
+    const valueAlign = this.halfAlign(type.value);
+    const errorAlign = this.halfAlign(type.error);
+    const isErrorFirst = errorAlign > valueAlign;
+    if (isErrorFirst) {
+      const struct = `{ ${error}, ${value}, i1, ptr }`;
+
+      return { struct, value: 1, error: 0, ok: 2, site: 3 };
+    }
+
+    const struct = `{ ${value}, ${error}, i1, ptr }`;
+
+    return { struct, value: 0, error: 1, ok: 2, site: 3 };
+  }
+
+  private halfType(type: Type): string | undefined {
+    if (this.isEmptyHalf(type)) {
+      return kEmptyType;
+    }
+
+    return this.irType(type);
+  }
+
+  private isEmptyHalf(type: Type): boolean {
+    return type.kind == TypeKind.Void || type.kind == TypeKind.Never;
+  }
+
+  private halfAlign(type: Type): int {
+    if (this.isEmptyHalf(type)) {
+      return 1;
+    }
+
+    return this.alignOf(type);
+  }
+
+  private halfSize(type: Type): int {
+    if (this.isEmptyHalf(type)) {
+      return 0;
+    }
+
+    return this.sizeOf(type);
+  }
+
+  private resultShape(type: Type): ResultShape | undefined {
+    if (type.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    const layout = this.resultLayout(type);
+    const value = this.halfDescriptor(type.value);
+    const error = this.halfDescriptor(type.error);
+    if (layout == undefined || value == undefined || error == undefined) {
+      return undefined;
+    }
+
+    const isValueFirst = layout.value == 0;
+    const first = this.pickType(isValueFirst, type.value, type.error);
+    const second = this.pickType(isValueFirst, type.error, type.value);
+    const secondOffset = this.aligned(
+      this.halfSize(first),
+      this.halfAlign(second),
+    );
+    const okOffset = secondOffset + this.halfSize(second);
+    const siteOffset = this.aligned(okOffset + 1, 8);
+    const size = siteOffset + 8;
+    const valueOffset = this.choose(layout.value == 0, 0, secondOffset);
+    const errorOffset = this.choose(layout.error == 0, 0, secondOffset);
+
+    return {
+      value,
+      error,
+      size,
+      valueOffset,
+      errorOffset,
+      okOffset,
+      siteOffset,
+    };
+  }
+
+  private halfDescriptor(type: Type): LLVMValue | undefined {
+    if (this.isEmptyHalf(type)) {
+      const empty = this.store.plain(TypeKind.Undefined);
+
+      return this.descriptor(empty);
+    }
+
+    return this.descriptor(type);
+  }
+
+  private resultDescriptor(type: Type): LLVMValue | undefined {
+    const known = this.descriptors.get(type.id);
+    if (known != undefined) {
+      return known;
+    }
+
+    const shape = this.resultShape(type);
+    if (shape == undefined) {
+      return undefined;
+    }
+
+    const value = this.ir.constStruct([
+      this.ir.integer(kFlagType, `${kResultKind}`),
+      this.ir.integer(kFlagType, `${shape.size}`),
+      shape.value,
+      shape.error,
+      this.ir.integer(kFlagType, `${shape.valueOffset}`),
+      this.ir.integer(kFlagType, `${shape.errorOffset}`),
+      this.ir.integer(kFlagType, `${shape.okOffset}`),
+      this.ir.integer(kFlagType, `${shape.siteOffset}`),
+    ]);
+    const name = this.ir.uniqueName("tz.type.result.");
+    const global = this.ir.global(name, kResultDescriptorLayout, value, true);
+
+    this.descriptors.set(type.id, global);
+
+    return global;
+  }
+
+  private madeResult(
+    frame: Frame,
+    type: Type,
+    isOk: boolean,
+    half: IrValue | undefined,
+    loc: int,
+  ): IrValue | undefined {
+    const layout = this.resultLayout(type);
+    if (layout == undefined || type.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const flag = this.ir.integer(kBooleanType, `${this.flagIf(isOk, 1)}`);
+    const empty = this.ir.zero(layout.struct);
+    const sited = this.sitedResult(frame, empty, layout, isOk, loc);
+    const flagged = made.insert(sited, flag, layout.ok);
+    const target = this.pickType(isOk, type.value, type.error);
+    const position = this.choose(isOk, layout.value, layout.error);
+    if (half == undefined || this.isEmptyHalf(target)) {
+      return { type: layout.struct, value: flagged, tz: type, owned: true };
+    }
+
+    const converted = this.converted(frame, half, target, 0);
+    if (converted == undefined) {
+      return undefined;
+    }
+
+    const owned = this.owning(frame, converted);
+    const value = made.insert(flagged, owned.value, position);
+
+    return { type: layout.struct, value, tz: type, owned: true };
+  }
+
+  private pickType(isFirst: boolean, first: Type, second: Type): Type {
+    if (isFirst) {
+      return first;
+    }
+
+    return second;
+  }
+
+  private resultMade(
+    frame: Frame,
+    call: CallExpr,
+    isOk: boolean,
+  ): IrValue | undefined {
+    const type = this.typeOf(call);
+    const argument = call.args[0];
+    if (type == undefined || type.kind != TypeKind.Result) {
+      this.notLowered(frame.module, call.loc, "a result of this type");
+
+      return undefined;
+    }
+    if (argument == undefined) {
+      return this.madeResult(frame, type, isOk, undefined, call.loc);
+    }
+
+    const half = this.pickType(isOk, type.value, type.error);
+    const given = this.wantedValue(frame, argument.expr, half);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    return this.madeResult(frame, type, isOk, given, call.loc);
+  }
+
+  private sitedResult(
+    frame: Frame,
+    empty: LLVMValue,
+    layout: ResultLayout,
+    isOk: boolean,
+    loc: int,
+  ): LLVMValue {
+    if (isOk) {
+      return empty;
+    }
+
+    const site = this.errorSite(frame, loc);
+
+    return frame.made.insert(empty, site, layout.site);
+  }
+
+  private errorSite(frame: Frame, loc: int): LLVMValue {
+    const module = this.program.modules[frame.module];
+    if (module == undefined || module.source.isLibrary) {
+      return this.ir.zero(kPointerType);
+    }
+
+    const lines = this.linesOf(frame.module, module.source.text);
+    const line = lines.placeOf(loc).line;
+    const file = this.siteFile(module.source.path);
+    const where = `${file}:${line}`;
+    const title = frame.place ?? "";
+    const text = this.siteText(title, where);
+    const known = this.sites.get(text);
+    if (known != undefined) {
+      return known;
+    }
+
+    const bytes = this.byteText(text);
+    const length = this.ir.integer(kFlagType, `${bytes.length}`);
+    const value = this.ir.constStruct([bytes.pointer, length]);
+    const name = this.ir.uniqueName("tz.site.");
+    const global = this.ir.global(name, kSiteLayout, value, true);
+
+    this.sites.set(text, global);
+
+    return global;
+  }
+
+  private siteText(title: string, where: string): string {
+    if (title.length == 0) {
+      return where;
+    }
+
+    return `${title} (${where})`;
+  }
+
+  private siteFile(path: string): string {
+    const entry = this.program.modules[0]?.source.path ?? "";
+    const base = dirname(resolve(entry));
+    const native = relative(base, resolve(path));
+
+    return native.replaceAll(kWindowsSeparator, kPathSeparator);
+  }
+
+  private linesOf(module: int, text: Buffer): SourceLines {
+    const known = this.lines.get(module);
+    if (known != undefined) {
+      return known;
+    }
+
+    const made = new SourceLines(text);
+
+    this.lines.set(module, made);
+
+    return made;
+  }
+
+  private resultConverted(
+    frame: Frame,
+    value: IrValue,
+    target: Type,
+  ): IrValue | undefined {
+    const from = value.tz;
+    const source = this.resultLayout(from);
+    const layout = this.resultLayout(target);
+    if (source == undefined || layout == undefined) {
+      return undefined;
+    }
+    if (from.kind != TypeKind.Result || target.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const ok = made.extract(value.value, source.ok);
+    const site = made.extract(value.value, source.site);
+    const empty = this.ir.zero(layout.struct);
+    const flagged = made.insert(empty, ok, layout.ok);
+    const sited = made.insert(flagged, site, layout.site);
+    const withValue = this.halfMoved(
+      frame,
+      value,
+      sited,
+      source.value,
+      layout.value,
+      from.value,
+      target.value,
+    );
+    if (withValue == undefined) {
+      return undefined;
+    }
+
+    const whole = this.halfMoved(
+      frame,
+      value,
+      withValue,
+      source.error,
+      layout.error,
+      from.error,
+      target.error,
+    );
+    if (whole == undefined) {
+      return undefined;
+    }
+
+    const owned = value.owned;
+
+    return { type: layout.struct, value: whole, tz: target, owned };
+  }
+
+  private halfMoved(
+    frame: Frame,
+    value: IrValue,
+    into: LLVMValue,
+    from: int,
+    to: int,
+    fromType: Type,
+    toType: Type,
+  ): LLVMValue | undefined {
+    if (this.isEmptyHalf(fromType) || this.isEmptyHalf(toType)) {
+      return into;
+    }
+
+    const type = this.irType(fromType);
+    if (type == undefined) {
+      return undefined;
+    }
+
+    const half: IrValue = {
+      type,
+      value: frame.made.extract(value.value, from),
+      tz: fromType,
+    };
+    const converted = this.converted(frame, half, toType, 0);
+    if (converted == undefined) {
+      return undefined;
+    }
+
+    return frame.made.insert(into, converted.value, to);
+  }
+
+  private resultMethod(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+  ): IrValue | undefined {
+    const result = this.value(frame, member.object);
+    if (result == undefined) {
+      return undefined;
+    }
+
+    const layout = this.resultLayout(result.tz);
+    if (layout == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const ok = made.extract(result.value, layout.ok);
+    const tz = this.store.plain(TypeKind.Boolean);
+
+    switch (member.name) {
+      case "isOk":
+        this.dropping(frame, result);
+
+        return { type: kBooleanType, value: ok, tz };
+      case "isErr": {
+        const yes = this.ir.integer(kBooleanType, "1");
+        const value = made.binary(IrOpcode.Xor, ok, yes);
+
+        this.dropping(frame, result);
+
+        return { type: kBooleanType, value, tz };
+      }
+      case "unwrapOr":
+        return this.unwrappedOr(frame, call, result, ok);
+      default: {
+        const name = this.calledName(call);
+
+        this.dropping(frame, result);
+        this.notLowered(frame.module, call.loc, `a call of method ${name}`);
+
+        return undefined;
+      }
+    }
+  }
+
+  private unwrappedOr(
+    frame: Frame,
+    call: CallExpr,
+    result: IrValue,
+    ok: LLVMValue,
+  ): IrValue | undefined {
+    const type = this.typeOf(call);
+    const resultIr = this.typeOrUndefined(type);
+    const fallback = call.args[0];
+    const from = result.tz;
+    const layout = this.resultLayout(from);
+    if (type == undefined || resultIr == undefined || fallback == undefined) {
+      return undefined;
+    }
+    if (layout == undefined || from.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const kept = made.block("unwrap.ok");
+    const other = made.block("unwrap.other");
+    const end = made.block("unwrap.end");
+
+    made.conditionalBranch(ok, kept, other);
+    made.open(kept);
+
+    const half = this.resultHalf(frame, result, layout.value, from.value);
+    const first = this.branchOwned(frame, half, type, call.loc);
+    const firstEnd = made.currentBlock();
+
+    made.branch(end);
+    made.open(other);
+
+    const second = this.branchValue(frame, fallback.expr, type);
+    const secondEnd = made.currentBlock();
+
+    made.branch(end);
+    made.open(end);
+
+    if (first == undefined || second == undefined) {
+      return undefined;
+    }
+
+    const value = made.phi(
+      resultIr,
+      [first.value, second.value],
+      [firstEnd, secondEnd],
+    );
+
+    this.dropping(frame, result);
+
+    return { type: resultIr, value, tz: type, owned: true };
+  }
+
+  private resultHalf(
+    frame: Frame,
+    result: IrValue,
+    position: int,
+    type: Type,
+  ): IrValue {
+    const ir = this.halfType(type) ?? kEmptyType;
+    const value = frame.made.extract(result.value, position);
+
+    return { type: ir, value, tz: type };
+  }
+
+  private resultMember(frame: Frame, expr: MemberExpr): IrValue | undefined {
+    const result = this.value(frame, expr.object);
+    if (result == undefined) {
+      return undefined;
+    }
+
+    const from = result.tz;
+    const layout = this.resultLayout(from);
+    if (layout == undefined || from.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    const isValue = expr.name == "value";
+    if (!isValue && expr.name != "error") {
+      this.notLowered(frame.module, expr.loc, "this member of a result");
+
+      return undefined;
+    }
+
+    const position = this.choose(isValue, layout.value, layout.error);
+    const type = this.pickType(isValue, from.value, from.error);
+    const half = this.resultHalf(frame, result, position, type);
+    if (result.owned != true) {
+      return half;
+    }
+
+    const kept = this.owning(frame, half);
+
+    this.dropping(frame, result);
+
+    return kept;
+  }
+
+  private resultCounter(type: Type, isRetain: boolean): IrCallee | undefined {
+    const layout = this.resultLayout(type);
+    if (layout == undefined || type.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    const prefix = this.pick(isRetain, kResultRetain, kResultRelease);
+    const name = `${prefix}${type.id}`;
+    const known = this.ir.callee(name);
+    if (known != undefined) {
+      return known;
+    }
+
+    const made = new IrFunction(this.ir, name, kVoidType, [layout.struct]);
+    const frame: Frame = {
+      made,
+      id: this.frameId(),
+      module: 0,
+      loops: [],
+      scopes: [],
+    };
+    const argument = made.param(0);
+    const whole: IrValue = { type: layout.struct, value: argument, tz: type };
+    const ok = made.extract(argument, layout.ok);
+    const isOk = made.block("result.ok");
+    const isError = made.block("result.error");
+    const done = made.block("result.done");
+
+    made.conditionalBranch(ok, isOk, isError);
+    made.open(isOk);
+    this.halfCounted(frame, whole, layout.value, type.value, isRetain);
+    made.branch(done);
+    made.open(isError);
+    this.halfCounted(frame, whole, layout.error, type.error, isRetain);
+    made.branch(done);
+    made.open(done);
+    made.finishVoid();
+
+    return made.callee;
+  }
+
+  private halfCounted(
+    frame: Frame,
+    whole: IrValue,
+    position: int,
+    type: Type,
+    isRetain: boolean,
+  ): void {
+    if (this.isEmptyHalf(type) || !this.isManaged(type)) {
+      return;
+    }
+
+    const half = this.resultHalf(frame, whole, position, type);
+
+    this.countCall(frame, isRetain, half);
+  }
+}

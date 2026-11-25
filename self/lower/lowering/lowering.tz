@@ -14,6 +14,30 @@ import "./partial/lowering.partial.texts.tz";
 import "./partial/lowering.partial.arrays.tz";
 import "./partial/lowering.partial.optionals.tz";
 import "./partial/lowering.partial.classes.tz";
+import "./partial/lowering.partial.objects.tz";
+import "./partial/lowering.partial.switches.tz";
+import "./partial/lowering.partial.dictionaries.tz";
+import "./partial/lowering.partial.callbacks.tz";
+import "./partial/lowering.partial.array-methods.tz";
+import "./partial/lowering.partial.chains.tz";
+import "./partial/lowering.partial.string-methods.tz";
+import "./partial/lowering.partial.decimals.tz";
+import "./partial/lowering.partial.number-methods.tz";
+import "./partial/lowering.partial.results.tz";
+import "./partial/lowering.partial.library-calls.tz";
+import "./partial/lowering.partial.foreign.tz";
+import "./partial/lowering.partial.bytes.tz";
+import "./partial/lowering.partial.failures.tz";
+import "./partial/lowering.partial.statics.tz";
+import "./partial/lowering.partial.files.tz";
+import "./partial/lowering.partial.process.tz";
+import "./partial/lowering.partial.array-edits.tz";
+import "./partial/lowering.partial.bits.tz";
+import "./partial/lowering.partial.element-writes.tz";
+import "./partial/lowering.partial.keyed.tz";
+import "./partial/lowering.partial.file-kinds.tz";
+import "./partial/lowering.partial.bytes-extras.tz";
+import "./partial/lowering.partial.children.tz";
 import { ExpressionAnswers } from "../../program/expression-answers/expression-answers.tz";
 import { Module, Program } from "../../program/module/types/module.types.tz";
 import { TypeStore } from "../../program/type/type-store/type-store.tz";
@@ -21,8 +45,12 @@ import { ExpressionTypes } from "../../semantic/code/expression-types/expression
 import { TypeResolver } from "../../semantic/types/type-resolver/type-resolver.tz";
 import { CheckedProgram } from "../../pipeline/front-end/types/front-end.types.tz";
 import { IrFunction } from "../ir-function/ir-function.tz";
+import { IrCallee } from "../ir-function/types/ir-function.types.tz";
 import { IrModule } from "../ir-module/ir-module.tz";
-import { LLVMValue } from "../llvm-api/llvm-api.tz";
+import { LLVMBlock, LLVMValue } from "../llvm-api/llvm-api.tz";
+import { Expr } from "../../program/ast/types/ast.types.expressions.tz";
+import { Type } from "../../program/type/types/type.types.tz";
+import { SourceLines } from "../../program/source-lines/source-lines.tz";
 import {
   kFirstClassId,
   kMainFrame,
@@ -34,7 +62,9 @@ import {
 } from "./const/lowering.const.tz";
 import {
   ClassLayout,
+  DictLayout,
   Frame,
+  IrValue,
   LoweredProgram,
   Place,
   Unlowered,
@@ -53,7 +83,19 @@ export class Lowering {
   private readonly strings: Map<string, LLVMValue>;
   private readonly descriptors: Map<int, LLVMValue>;
   private readonly layouts: Map<int, ClassLayout>;
+  private readonly dictLayouts: Map<int, DictLayout>;
   private readonly cTexts: Map<string, LLVMValue>;
+  private readonly knownTypes: Map<Expr, Type>;
+  private readonly evaluated: Map<Expr, IrValue>;
+  private readonly chainExits: LLVMBlock[];
+  private readonly sites: Map<string, LLVMValue>;
+  private readonly lines: Map<int, SourceLines>;
+  private readonly handles: Map<int, boolean>;
+  private readonly cstrings: Map<string, LLVMValue>;
+  private readonly makers: Map<int, LLVMValue>;
+  private readonly orderedDescriptors: Map<string, LLVMValue>;
+  private readonly orderMakers: Map<string, LLVMValue>;
+  private readonly keyedFinders: Map<string, IrCallee>;
   private classIds: int;
   private pendingLabel: string;
   private nextFrame: int;
@@ -77,7 +119,19 @@ export class Lowering {
     this.strings = new Map<string, LLVMValue>();
     this.descriptors = new Map<int, LLVMValue>();
     this.layouts = new Map<int, ClassLayout>();
+    this.dictLayouts = new Map<int, DictLayout>();
     this.cTexts = new Map<string, LLVMValue>();
+    this.knownTypes = new Map<Expr, Type>();
+    this.evaluated = new Map<Expr, IrValue>();
+    this.chainExits = [];
+    this.sites = new Map<string, LLVMValue>();
+    this.lines = new Map<int, SourceLines>();
+    this.handles = new Map<int, boolean>();
+    this.cstrings = new Map<string, LLVMValue>();
+    this.makers = new Map<int, LLVMValue>();
+    this.orderedDescriptors = new Map<string, LLVMValue>();
+    this.orderMakers = new Map<string, LLVMValue>();
+    this.keyedFinders = new Map<string, IrCallee>();
     this.classIds = kFirstClassId;
     this.pendingLabel = "";
     this.nextFrame = kMainFrame + 1;

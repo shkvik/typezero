@@ -1,0 +1,289 @@
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrOpcode } from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kBitName,
+  kBooleanType,
+  kIntType,
+  kPointerType,
+  kWordPairType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private isBitHolder(frame: Frame, expr: Expr): boolean {
+    if (expr.kind == ExprKind.Member) {
+      return this.isBitHolder(frame, expr.object);
+    }
+    if (expr.kind != ExprKind.Name || expr.name != kBitName) {
+      return false;
+    }
+
+    return this.values.valueTargetOf(expr, frame.module) == undefined;
+  }
+
+  private bitCall(
+    frame: Frame,
+    call: CallExpr,
+    callee: MemberExpr,
+  ): IrValue | undefined {
+    const result = this.typeOf(call);
+    const values = this.bitArguments(frame, call);
+    const first = values?.[0];
+    if (result == undefined || values == undefined || first == undefined) {
+      return undefined;
+    }
+    if (callee.object.kind == ExprKind.Member) {
+      return this.wrappedFrom(frame, first, result);
+    }
+
+    switch (callee.name) {
+      case "mul64":
+      case "add64":
+      case "sub64":
+        return this.wideBits(frame, callee.name, values, result);
+      case "rotateLeft32":
+      case "rotateLeft64":
+        return this.rotated(frame, "fshl", values, result);
+      case "rotateRight32":
+      case "rotateRight64":
+        return this.rotated(frame, "fshr", values, result);
+      case "reverseBytes32":
+      case "reverseBytes64":
+        return this.bitIntrinsic(frame, "bswap", first, result, false);
+      case "leadingZeros32":
+      case "leadingZeros64":
+        return this.bitIntrinsic(frame, "ctlz", first, result, true);
+      case "trailingZeros32":
+      case "trailingZeros64":
+        return this.bitIntrinsic(frame, "cttz", first, result, true);
+      case "onesCount32":
+      case "onesCount64":
+        return this.bitIntrinsic(frame, "ctpop", first, result, false);
+      default:
+        this.notLowered(frame.module, call.loc, "this call of Bit");
+
+        return undefined;
+    }
+  }
+
+  private wrappedValue(
+    frame: Frame,
+    expr: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    if (object.kind != TypeKind.Int || !object.wraps || expr.name != "value") {
+      this.notLowered(frame.module, expr.loc, "a member of this number");
+
+      return undefined;
+    }
+
+    const given = this.value(frame, expr.object);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const tz = this.store.integer(object.bits, true);
+
+    return { type: given.type, value: given.value, tz };
+  }
+
+  private bitArguments(frame: Frame, call: CallExpr): IrValue[] | undefined {
+    const values: IrValue[] = [];
+
+    for (const argument of call.args) {
+      const given = this.value(frame, argument.expr);
+      if (given == undefined || argument.spread) {
+        return undefined;
+      }
+
+      values.push(given);
+    }
+
+    return values;
+  }
+
+  private wrappedFrom(
+    frame: Frame,
+    given: IrValue,
+    result: Type,
+  ): IrValue | undefined {
+    const type = this.irType(result);
+    if (type == undefined || result.kind != TypeKind.Int) {
+      return undefined;
+    }
+
+    const from = this.bitsOf(given.tz);
+    const value = this.resizedBits(frame, given, from, result.bits);
+
+    return { type, value, tz: result };
+  }
+
+  private resizedBits(
+    frame: Frame,
+    given: IrValue,
+    from: int,
+    to: int,
+  ): LLVMValue {
+    const type = `i${to}`;
+    if (from == to) {
+      return given.value;
+    }
+    if (from > to) {
+      return frame.made.cast(IrOpcode.Trunc, given.value, type);
+    }
+
+    const opcode = this.resizing(from, to, given.tz);
+
+    return frame.made.cast(opcode, given.value, type);
+  }
+
+  private wideBits(
+    frame: Frame,
+    name: string,
+    values: IrValue[],
+    result: Type,
+  ): IrValue | undefined {
+    const layout = this.layoutOf(result);
+    if (layout == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const wide = values.map((one) =>
+      made.cast(IrOpcode.ZExt, one.value, kWordPairType),
+    );
+    const first = wide[0];
+    const second = wide[1];
+    if (first == undefined || second == undefined) {
+      return undefined;
+    }
+
+    let total: LLVMValue = first;
+
+    if (name == "mul64") {
+      total = made.binary(IrOpcode.Mul, first, second);
+    } else if (name == "add64") {
+      total = this.summed(frame, IrOpcode.Add, wide);
+    } else {
+      total = this.summed(frame, IrOpcode.Sub, wide);
+    }
+
+    const low = made.cast(IrOpcode.Trunc, total, kIntType);
+    const shift = this.ir.integer(kWordPairType, "64");
+    const top = made.binary(IrOpcode.LShr, total, shift);
+    let high: LLVMValue = made.cast(IrOpcode.Trunc, top, kIntType);
+
+    if (name != "mul64") {
+      high = made.binary(IrOpcode.And, high, this.ir.integer(kIntType, "1"));
+    }
+
+    const object = this.allocated(frame, layout);
+    const names = this.halfNames(name);
+
+    for (const field of layout.fields) {
+      let value: LLVMValue = high;
+
+      if (field.name == names[1]) {
+        value = low;
+      }
+
+      made.store(value, made.field(layout.struct, object, field.index));
+    }
+
+    return { type: kPointerType, value: object, tz: result, owned: true };
+  }
+
+  private summed(
+    frame: Frame,
+    opcode: IrOpcode,
+    wide: LLVMValue[],
+  ): LLVMValue {
+    const first = wide[0];
+    if (first == undefined) {
+      return this.ir.zero(kWordPairType);
+    }
+
+    let total: LLVMValue = first;
+
+    for (const one of wide.slice(1)) {
+      total = frame.made.binary(opcode, total, one);
+    }
+
+    return total;
+  }
+
+  private halfNames(name: string): string[] {
+    switch (name) {
+      case "mul64":
+        return ["hi", "lo"];
+      case "add64":
+        return ["carry", "sum"];
+      default:
+        return ["borrow", "diff"];
+    }
+  }
+
+  private rotated(
+    frame: Frame,
+    name: string,
+    values: IrValue[],
+    result: Type,
+  ): IrValue | undefined {
+    const first = values[0];
+    const count = values[1];
+    const type = this.irType(result);
+    if (first == undefined || count == undefined || type == undefined) {
+      return undefined;
+    }
+
+    const bits = this.bitsOf(result);
+    const amount = this.resizedBits(frame, count, this.bitsOf(count.tz), bits);
+    const params = [type, type, type];
+    const callee = this.ir.declare(`llvm.${name}.${type}`, type, params);
+    const value = frame.made.call(callee, [first.value, first.value, amount]);
+
+    return { type, value, tz: result };
+  }
+
+  private bitIntrinsic(
+    frame: Frame,
+    name: string,
+    given: IrValue,
+    result: Type,
+    hasFlag: boolean,
+  ): IrValue | undefined {
+    const type = given.type;
+    const resultIr = this.irType(result);
+    if (resultIr == undefined) {
+      return undefined;
+    }
+
+    const params = [type];
+    const args = [given.value];
+
+    if (hasFlag) {
+      params.push(kBooleanType);
+      args.push(this.ir.integer(kBooleanType, "0"));
+    }
+
+    const callee = this.ir.declare(`llvm.${name}.${type}`, type, params);
+    const counted = frame.made.call(callee, args);
+    const bits = this.bitsOf(given.tz);
+    const value = this.resizedBits(
+      frame,
+      { type, value: counted, tz: this.store.integer(bits, true) },
+      bits,
+      this.bitsOf(result),
+    );
+
+    return { type: resultIr, value, tz: result };
+  }
+}

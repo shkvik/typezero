@@ -60,6 +60,7 @@ export class IrModule {
   private readonly module: LLVMModule;
   private readonly types: Map<string, LLVMType>;
   private readonly callees: Map<string, IrCallee>;
+  private readonly externals: Map<string, LLVMValue>;
   private next: int;
 
   public constructor(name: string) {
@@ -70,6 +71,7 @@ export class IrModule {
     this.module = LLVMModuleCreateWithNameInContext(cname, context);
     this.types = new Map<string, LLVMType>();
     this.callees = new Map<string, IrCallee>();
+    this.externals = new Map<string, LLVMValue>();
     this.next = 0;
   }
 
@@ -190,6 +192,19 @@ export class IrModule {
     }
 
     LLVMSetAlignment(global, 8);
+
+    return global;
+  }
+
+  public external(name: string, key: string): LLVMValue {
+    const known = this.externals.get(name);
+    if (known != undefined) {
+      return known;
+    }
+
+    const global = LLVMAddGlobal(this.module, this.type(key), this.cname(name));
+
+    this.externals.set(name, global);
 
     return global;
   }

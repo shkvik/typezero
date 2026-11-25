@@ -1,0 +1,311 @@
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import {
+  IrIntPredicate,
+  IrOpcode,
+  IrRealPredicate,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kCharCodesText,
+  kCodePointsText,
+  kDateNow,
+  kDoubleType,
+  kIntType,
+  kMathAbsolute,
+  kMathCeil,
+  kMathFloor,
+  kMathRound,
+  kMathTrunc,
+  kPerformanceNow,
+  kPointerType,
+  kStaticHolders,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private isStaticHolder(frame: Frame, expr: Expr): boolean {
+    if (expr.kind != ExprKind.Name || !kStaticHolders.includes(expr.name)) {
+      return false;
+    }
+
+    const target = this.values.valueTargetOf(expr, frame.module);
+    if (target == undefined) {
+      return true;
+    }
+
+    const opened = this.program.modules[target.module];
+
+    return opened != undefined && opened.source.isLibrary;
+  }
+
+  private staticCall(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+  ): IrValue | undefined {
+    const holder = member.object;
+    const holderName = this.nameOf(holder);
+    const key = `${holderName}.${member.name}`;
+
+    switch (key) {
+      case "Math.min":
+      case "Math.max":
+        return this.mathPicked(frame, call, member.name == "min");
+      case "Math.abs":
+        return this.mathAbsolute(frame, call);
+      case "Math.trunc":
+      case "Math.floor":
+      case "Math.ceil":
+      case "Math.round":
+        return this.mathRounded(frame, call, member.name);
+      case "String.fromCharCode":
+        return this.charCodesText(frame, call);
+      case "String.fromCodePoint":
+        return this.codePointsText(frame, call);
+      case "performance.now": {
+        const callee = this.ir.declare(kPerformanceNow, kDoubleType, []);
+        const value = frame.made.call(callee, []);
+        const tz = this.store.plain(TypeKind.Double);
+
+        return { type: kDoubleType, value, tz };
+      }
+      case "Date.now": {
+        const callee = this.ir.declare(kDateNow, kIntType, []);
+        const value = frame.made.call(callee, []);
+        const tz = this.store.integer(64, false);
+
+        return { type: kIntType, value, tz };
+      }
+      default:
+        this.notLowered(frame.module, call.loc, `a call of ${key}`);
+
+        return undefined;
+    }
+  }
+
+  private nameOf(expr: Expr): string {
+    if (expr.kind != ExprKind.Name) {
+      return "";
+    }
+
+    return expr.name;
+  }
+
+  private mathArguments(
+    frame: Frame,
+    call: CallExpr,
+    type: Type,
+  ): LLVMValue[] | undefined {
+    const values: LLVMValue[] = [];
+
+    for (const argument of call.args) {
+      const given = this.value(frame, argument.expr);
+      if (given == undefined || argument.spread) {
+        this.notLowered(frame.module, call.loc, "these arguments");
+
+        return undefined;
+      }
+
+      const inside = this.proven(frame, given);
+      const value = this.converted(frame, inside, type, argument.expr.loc);
+      if (value == undefined) {
+        return undefined;
+      }
+
+      values.push(value.value);
+    }
+
+    return values;
+  }
+
+  private mathPicked(
+    frame: Frame,
+    call: CallExpr,
+    isMin: boolean,
+  ): IrValue | undefined {
+    const result = this.typeOf(call);
+    const type = this.typeOrUndefined(result);
+    if (result == undefined || type == undefined) {
+      return undefined;
+    }
+
+    const values = this.mathArguments(frame, call, result);
+    const first = values?.[0];
+    if (values == undefined || first == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    let picked: LLVMValue = first;
+
+    for (const value of values.slice(1)) {
+      const isLess = this.lessTest(frame, value, picked, result);
+      if (isMin) {
+        picked = made.select(isLess, value, picked);
+      } else {
+        picked = made.select(isLess, picked, value);
+      }
+    }
+
+    return { type, value: picked, tz: result };
+  }
+
+  private lessTest(
+    frame: Frame,
+    left: LLVMValue,
+    right: LLVMValue,
+    type: Type,
+  ): LLVMValue {
+    const made = frame.made;
+    if (this.isDouble(type)) {
+      return made.realCompare(IrRealPredicate.OrderedLess, left, right);
+    }
+    if (this.isUnsigned(type)) {
+      return made.integerCompare(IrIntPredicate.UnsignedLess, left, right);
+    }
+
+    return made.integerCompare(IrIntPredicate.SignedLess, left, right);
+  }
+
+  private mathAbsolute(frame: Frame, call: CallExpr): IrValue | undefined {
+    const result = this.typeOf(call);
+    const type = this.typeOrUndefined(result);
+    if (result == undefined || type == undefined) {
+      return undefined;
+    }
+
+    const values = this.mathArguments(frame, call, result);
+    const value = values?.[0];
+    if (value == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    if (this.isDouble(result)) {
+      const params = [kDoubleType];
+      const callee = this.ir.declare(kMathAbsolute, kDoubleType, params);
+
+      return { type, value: made.call(callee, [value]), tz: result };
+    }
+    if (this.isUnsigned(result)) {
+      return { type, value, tz: result };
+    }
+
+    const zero = this.ir.zero(type);
+    const isNegative = made.integerCompare(
+      IrIntPredicate.SignedLess,
+      value,
+      zero,
+    );
+    const negative = made.binary(IrOpcode.Sub, zero, value);
+    const picked = made.select(isNegative, negative, value);
+
+    return { type, value: picked, tz: result };
+  }
+
+  private mathRounded(
+    frame: Frame,
+    call: CallExpr,
+    name: string,
+  ): IrValue | undefined {
+    const result = this.typeOf(call);
+    const argument = call.args[0];
+    const type = this.typeOrUndefined(result);
+    if (result == undefined || type == undefined || argument == undefined) {
+      return undefined;
+    }
+
+    const given = this.value(frame, argument.expr);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const inside = this.proven(frame, given);
+    if (!this.isDouble(inside.tz)) {
+      return this.converted(frame, inside, result, call.loc);
+    }
+
+    const runtime = this.roundingRuntime(name);
+    const callee = this.ir.declare(runtime, kDoubleType, [kDoubleType]);
+    const rounded = made.call(callee, [inside.value]);
+    const double = this.store.plain(TypeKind.Double);
+    if (this.isDouble(result)) {
+      return { type, value: rounded, tz: result };
+    }
+
+    const value: IrValue = { type: kDoubleType, value: rounded, tz: double };
+
+    return this.integerFitted(frame, value, this.widened(result));
+  }
+
+  private roundingRuntime(name: string): string {
+    switch (name) {
+      case "floor":
+        return kMathFloor;
+      case "ceil":
+        return kMathCeil;
+      case "round":
+        return kMathRound;
+      default:
+        return kMathTrunc;
+    }
+  }
+
+  private charCodesText(frame: Frame, call: CallExpr): IrValue | undefined {
+    const int32 = this.store.integer(32, false);
+    const values = this.mathArguments(frame, call, int32);
+    if (values == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const count = values.length;
+    const array = `[${count} x i32]`;
+    const slot = made.slot(array, "char.codes");
+
+    for (let index = 0; index < count; index++) {
+      const value = values[index];
+      if (value != undefined) {
+        made.store(value, made.field(array, slot, index));
+      }
+    }
+
+    const size = this.ir.integer(kIntType, `${count}`);
+    const params = [kPointerType, kIntType];
+
+    return this.textOut(frame, kCharCodesText, params, [slot, size]);
+  }
+
+  private codePointsText(frame: Frame, call: CallExpr): IrValue | undefined {
+    const double = this.store.plain(TypeKind.Double);
+    const values = this.mathArguments(frame, call, double);
+    if (values == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const count = values.length;
+    const array = `[${count} x ${kDoubleType}]`;
+    const slot = made.slot(array, "code.points");
+
+    for (let index = 0; index < count; index++) {
+      const value = values[index];
+      if (value != undefined) {
+        made.store(value, made.field(array, slot, index));
+      }
+    }
+
+    const size = this.ir.integer(kIntType, `${count}`);
+    const params = [kPointerType, kIntType];
+
+    return this.textOut(frame, kCodePointsText, params, [slot, size]);
+  }
+}

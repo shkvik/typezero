@@ -52,6 +52,39 @@ partial class Lowering {
     }
   }
 
+  private joinedTypeIn(frame: Frame, expr: BinaryExpr): Type | undefined {
+    const left = this.definedIn(frame, expr.lhs);
+    const right = this.definedIn(frame, expr.rhs);
+    if (left == undefined || right == undefined) {
+      return undefined;
+    }
+
+    const isText = this.isString(left) || this.isString(right);
+    if (expr.op == BinaryOp.Add && isText) {
+      return this.store.plain(TypeKind.String);
+    }
+    if (this.isDecimal(left) || this.isDecimal(right)) {
+      return this.store.plain(TypeKind.Decimal);
+    }
+    if (this.isDouble(left) || this.isDouble(right)) {
+      return this.store.plain(TypeKind.Double);
+    }
+    if (this.isInteger(left) && this.isInteger(right)) {
+      return this.widened(left);
+    }
+
+    return undefined;
+  }
+
+  private definedIn(frame: Frame, expr: Expr): Type | undefined {
+    const type = this.typeIn(frame, expr);
+    if (type == undefined) {
+      return undefined;
+    }
+
+    return this.definedOf(type);
+  }
+
   private isUndefinedTest(expr: BinaryExpr): boolean {
     return (
       expr.lhs.kind == ExprKind.Undefined || expr.rhs.kind == ExprKind.Undefined
@@ -59,7 +92,7 @@ partial class Lowering {
   }
 
   private arithmeticExpr(frame: Frame, expr: BinaryExpr): IrValue | undefined {
-    const type = this.answers.typeOf(expr);
+    const type = this.typeOf(expr) ?? this.joinedTypeIn(frame, expr);
     if (type == undefined) {
       this.notLowered(frame.module, expr.loc, "this operator");
 
@@ -68,10 +101,15 @@ partial class Lowering {
     if (expr.op == BinaryOp.Add && this.isString(type)) {
       return this.concatenated(frame, [], [expr]);
     }
+    if (this.isDecimal(type)) {
+      return this.decimalArithmetic(frame, expr);
+    }
 
     const isNumber = this.isInteger(type) || this.isDouble(type);
     if (!isNumber) {
-      this.notLowered(frame.module, expr.loc, "this operator on these types");
+      const kind = this.kindName(type);
+
+      this.notLowered(frame.module, expr.loc, `an operator of type ${kind}`);
 
       return undefined;
     }
@@ -304,9 +342,11 @@ partial class Lowering {
 
   private logical(frame: Frame, expr: BinaryExpr): IrValue | undefined {
     const made = frame.made;
-    const result = this.answers.typeOf(expr);
-    if (result == undefined || !this.isBoolean(result)) {
-      this.notLowered(frame.module, expr.loc, "this operator on these types");
+    const result = this.typeOf(expr);
+    if (result != undefined && !this.isBoolean(result)) {
+      const kind = this.kindName(result);
+
+      this.notLowered(frame.module, expr.loc, `a logical of type ${kind}`);
 
       return undefined;
     }
@@ -342,8 +382,9 @@ partial class Lowering {
     const early = this.pick(isAnd, "0", "1");
     const first = this.ir.integer(kBooleanType, early);
     const value = made.phi(kBooleanType, [first, right], [start, restEnd]);
+    const tz = this.store.plain(TypeKind.Boolean);
 
-    return { type: kBooleanType, value, tz: result };
+    return { type: kBooleanType, value, tz };
   }
 
   private panic(frame: Frame, message: string): void {

@@ -5,7 +5,7 @@ import {
   MemberExpr,
   TemplateExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
-import { TypeKind } from "../../../program/type/types/type.types.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { IrOpcode } from "../../ir-function/types/ir-function.types.tz";
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
@@ -20,6 +20,7 @@ import {
   kStringType,
   kTrue,
   kVoidType,
+  kTextFromUnsigned,
 } from "../const/lowering.const.tz";
 import { Frame, IrValue } from "../types/lowering.types.tz";
 
@@ -50,8 +51,8 @@ partial class Lowering {
   }
 
   private concatLeaves(expr: Expr, leaves: Expr[]): void {
-    const type = this.answers.typeOf(expr);
-    const isText = type != undefined && this.isString(type);
+    const type = this.typeOf(expr);
+    const isText = type == undefined || this.isString(type);
     if (expr.kind != ExprKind.Binary || expr.op != BinaryOp.Add || !isText) {
       leaves.push(expr);
 
@@ -80,9 +81,18 @@ partial class Lowering {
       return { type: kStringType, value: made, tz: yes.tz };
     }
 
+    if (this.isDecimal(value.tz)) {
+      return this.decimalText(frame, value);
+    }
+
     const isWideUnsigned =
       this.isUnsigned(value.tz) && this.bitsOf(value.tz) == 64;
-    if (this.isInteger(value.tz) && !isWideUnsigned) {
+    if (isWideUnsigned) {
+      const args = [value.value];
+
+      return this.textOut(frame, kTextFromUnsigned, [kIntType], args);
+    }
+    if (this.isInteger(value.tz)) {
       const long = this.toLong(frame, value);
 
       return this.numberPart(frame, long.value, kNumberPartInt);
@@ -196,20 +206,47 @@ partial class Lowering {
     return this.joined(frame, [part]);
   }
 
+  private isOptionalObject(type: Type): boolean {
+    const defined = this.optionalInner(type);
+
+    return defined != undefined && this.isObjectLike(defined);
+  }
+
   private memberValue(frame: Frame, expr: MemberExpr): IrValue | undefined {
-    const object = this.answers.typeOf(expr.object);
+    if (this.isProcessName(frame, expr.object)) {
+      return this.processMember(frame, expr);
+    }
+
+    const object = this.typeIn(frame, expr.object);
     const isArray = object != undefined && this.isArray(object);
     if (isArray && expr.name == "length") {
       return this.arrayMember(frame, expr);
     }
-    if (object != undefined && this.isInstance(object)) {
+    if (object != undefined && this.isBytesType(object)) {
+      return this.bytesMember(frame, expr);
+    }
+    if (object != undefined && this.isObjectLike(object)) {
       return this.fieldValue(frame, expr);
+    }
+    if (object != undefined && this.isOptionalObject(object)) {
+      return this.fieldValue(frame, expr);
+    }
+    if (object != undefined && object.kind == TypeKind.Dict) {
+      return this.dictSize(frame, expr);
+    }
+    if (object != undefined && object.kind == TypeKind.Result) {
+      return this.resultMember(frame, expr);
+    }
+    if (object != undefined && object.kind == TypeKind.Int) {
+      return this.wrappedValue(frame, expr, object);
     }
 
     const isLength =
       expr.name == "length" && object != undefined && this.isString(object);
     if (!isLength) {
-      this.notLowered(frame.module, expr.loc, "this member");
+      const kind = this.kindName(object);
+
+      this.notLowered(frame.module, expr.loc, `a member of type ${kind}`);
 
       return undefined;
     }

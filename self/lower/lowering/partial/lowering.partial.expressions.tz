@@ -2,6 +2,7 @@ import {
   ConditionalExpr,
   Expr,
   ExprKind,
+  IntLitExpr,
   NameExpr,
   UnaryExpr,
   UnaryOp,
@@ -22,17 +23,30 @@ import { Lowering } from "../lowering.tz";
 import {
   kBooleanType,
   kDoubleType,
+  kHexPrefix,
   kIntType,
   kLengthMask,
+  kNineCode,
   kNoOwner,
   kThisName,
   kTrue,
+  kZeroCode,
 } from "../const/lowering.const.tz";
 import { Frame, IrValue, Place } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private value(frame: Frame, expr: Expr): IrValue | undefined {
-    const constant = this.constantOf(expr);
+    const ready = this.readyValue(expr);
+    if (ready != undefined) {
+      return ready;
+    }
+
+    const isChained = this.chainedObject(frame, expr);
+    if (!isChained) {
+      return undefined;
+    }
+
+    const constant = this.constantOf(frame, expr);
     if (constant != undefined) {
       return constant;
     }
@@ -43,11 +57,8 @@ partial class Lowering {
 
         return { type: kBooleanType, value: this.ir.zero(kBooleanType), tz };
       }
-      case ExprKind.IntLit: {
-        const tz = this.store.integer(64, false);
-
-        return this.integerValue(kIntType, `${expr.value}`, tz);
-      }
+      case ExprKind.IntLit:
+        return this.intLiteral(frame, expr);
       case ExprKind.FloatLit:
         return this.doubleValue(expr.value);
       case ExprKind.BoolLit:
@@ -76,21 +87,41 @@ partial class Lowering {
         return this.templateValue(frame, expr);
       case ExprKind.ArrayLit:
         return this.arrayLiteral(frame, expr);
+      case ExprKind.ObjectLit:
+        return this.objectLiteral(frame, expr);
       case ExprKind.New:
         return this.newValue(frame, expr);
       case ExprKind.Index:
         return this.indexValue(frame, expr);
       case ExprKind.Member:
         return this.memberValue(frame, expr);
+      case ExprKind.OptionalChain:
+        return this.chainValue(frame, expr);
       default:
-        this.notLowered(frame.module, expr.loc, "this expression");
+        this.notLowered(frame.module, expr.loc, `an expression #${expr.kind}`);
 
         return undefined;
     }
   }
 
-  private constantOf(expr: Expr): IrValue | undefined {
-    const type = this.answers.typeOf(expr);
+  private constantOf(frame: Frame, expr: Expr): IrValue | undefined {
+    if (expr.kind == ExprKind.IntLit) {
+      return this.intLiteral(frame, expr);
+    }
+
+    const text = this.enumText(frame, expr);
+    if (text != undefined) {
+      return this.stringValue(text);
+    }
+
+    const number = this.enumNumber(frame, expr);
+    if (number != undefined) {
+      const int = this.store.integer(64, false);
+
+      return this.integerValue(kIntType, `${number}`, int);
+    }
+
+    const type = this.typeOf(expr);
     if (type == undefined) {
       return undefined;
     }
@@ -119,6 +150,22 @@ partial class Lowering {
     }
   }
 
+  private enumText(frame: Frame, expr: Expr): string | undefined {
+    if (expr.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    return this.values.enumText(expr, frame.module);
+  }
+
+  private enumNumber(frame: Frame, expr: Expr): decimal | undefined {
+    if (expr.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    return this.values.enumNumber(expr, frame.module);
+  }
+
   private booleanValue(value: boolean): IrValue {
     const tz = this.store.plain(TypeKind.Boolean);
     let text: string = "0";
@@ -142,9 +189,17 @@ partial class Lowering {
     }
 
     const loaded = this.loaded(frame, place);
-    const seen = this.answers.typeOf(expr);
-    if (seen == undefined || this.irType(seen) == place.type) {
+    const seen = this.typeOf(expr);
+    if (seen == undefined || seen.kind == TypeKind.Error) {
       return loaded;
+    }
+
+    const seenType = this.irType(seen);
+    if (seenType == undefined) {
+      return loaded;
+    }
+    if (seenType == place.type) {
+      return { type: loaded.type, value: loaded.value, tz: seen };
     }
 
     return this.converted(frame, loaded, seen, expr.loc);
@@ -210,9 +265,14 @@ partial class Lowering {
   }
 
   private minus(frame: Frame, expr: UnaryExpr): IrValue | undefined {
-    const given = this.value(frame, expr.operand);
-    if (given == undefined) {
+    const operand = this.value(frame, expr.operand);
+    if (operand == undefined) {
       return undefined;
+    }
+
+    const given = this.proven(frame, operand);
+    if (this.isDecimal(given.tz)) {
+      return this.decimalNegated(frame, given);
     }
     if (this.isDouble(given.tz)) {
       const value = frame.made.negated(given.value);
@@ -250,7 +310,7 @@ partial class Lowering {
     expr: ConditionalExpr,
   ): IrValue | undefined {
     const made = frame.made;
-    const result = this.answers.typeOf(expr);
+    const result = this.typeOf(expr);
     const type = this.typeOrUndefined(result);
     const test = this.truth(frame, expr.cond);
     if (result == undefined || type == undefined || test == undefined) {
@@ -296,7 +356,7 @@ partial class Lowering {
     expr: Expr,
     result: Type,
   ): IrValue | undefined {
-    const given = this.value(frame, expr);
+    const given = this.wantedValue(frame, expr, result);
     if (given == undefined) {
       return undefined;
     }
@@ -332,7 +392,7 @@ partial class Lowering {
   }
 
   private cast(frame: Frame, expr: Expr, operand: Expr): IrValue | undefined {
-    const target = this.answers.typeOf(expr);
+    const target = this.typeOf(expr);
     const given = this.value(frame, operand);
     if (target == undefined || given == undefined) {
       return undefined;
@@ -395,7 +455,7 @@ partial class Lowering {
         zero,
       );
     }
-    if (this.isArray(value.tz) || this.isInstance(value.tz)) {
+    if (this.isReferenceLike(value.tz)) {
       this.dropping(frame, value);
 
       return this.ir.integer(kBooleanType, "1");
@@ -415,5 +475,62 @@ partial class Lowering {
     this.notLowered(frame.module, expr.loc, "a test of this type");
 
     return undefined;
+  }
+
+  private intLiteral(frame: Frame, expr: IntLitExpr): IrValue {
+    const answered = this.typeOf(expr);
+    let tz = this.store.integer(64, false);
+
+    if (answered != undefined && this.isInteger(answered)) {
+      tz = this.widened(answered);
+    }
+
+    const type = this.irType(tz) ?? kIntType;
+    const written = this.writtenDigits(frame, expr);
+    if (written == undefined) {
+      return this.integerValue(type, `${expr.value}`, tz);
+    }
+    if (written.startsWith(kHexPrefix)) {
+      const digits = written.slice(kHexPrefix.length);
+
+      return { type, value: this.ir.hexInteger(type, digits), tz };
+    }
+
+    return this.integerValue(type, written, tz);
+  }
+
+  private writtenDigits(frame: Frame, expr: IntLitExpr): string | undefined {
+    const span = expr.text;
+    const module = this.program.modules[frame.module];
+    if (span == undefined || module == undefined) {
+      return undefined;
+    }
+
+    const bytes = module.source.text.subarray(span.start, span.end);
+    const written = bytes.toString().replaceAll("_", "").toLowerCase();
+    if (written.startsWith(kHexPrefix)) {
+      return written;
+    }
+
+    if (!this.isDigitText(written)) {
+      return undefined;
+    }
+
+    return written;
+  }
+
+  private isDigitText(text: string): boolean {
+    if (text.length == 0) {
+      return false;
+    }
+
+    for (let index = 0; index < text.length; index++) {
+      const code = text.charCodeAt(index);
+      if (code < kZeroCode || code > kNineCode) {
+        return false;
+      }
+    }
+
+    return true;
   }
 }

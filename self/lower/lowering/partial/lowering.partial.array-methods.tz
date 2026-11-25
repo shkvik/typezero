@@ -1,0 +1,957 @@
+import {
+  CallExpr,
+  Expr,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrFunction } from "../../ir-function/ir-function.tz";
+import {
+  IrIntPredicate,
+  IrOpcode,
+  IrRealPredicate,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMBlock, LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kArrayAppend,
+  kArrayIndexOf,
+  kArrayJoin,
+  kArrayLengthField,
+  kArrayNew,
+  kArrayReverse,
+  kArraySlice,
+  kArraySort,
+  kArraySortWith,
+  kBooleanType,
+  kDoubleType,
+  kFlagType,
+  kIntType,
+  kPointerType,
+  kStringType,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import {
+  CallbackStep,
+  EachLoop,
+  Frame,
+  GivenNumber,
+  GivenText,
+  IrValue,
+  Place,
+} from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private arrayMethod(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    if (object.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    switch (member.name) {
+      case "push":
+        return this.arrayCall(frame, call, member, object);
+      case "some":
+      case "every":
+      case "find":
+      case "findIndex":
+      case "filter":
+      case "map":
+      case "flatMap":
+      case "forEach":
+        return this.callbackMethod(frame, call, member, object);
+      case "includes":
+      case "indexOf":
+      case "lastIndexOf":
+        return this.searched(frame, call, member, object);
+      case "join":
+        return this.arrayJoined(frame, call, member);
+      case "slice":
+        return this.arraySliced(frame, call, member, object);
+      case "pop":
+        return this.popped(frame, call, member, object);
+      case "concat":
+        return this.concatArrays(frame, call, member, object);
+      case "sort":
+        return this.sortedArray(frame, call, member, object);
+      case "reverse":
+        return this.reversedArray(frame, member);
+      case "splice":
+        return this.splicedArray(frame, call, member, object);
+      case "unshift":
+        return this.unshiftedArray(frame, call, member, object);
+      default: {
+        const name = this.calledName(call);
+
+        this.notLowered(frame.module, call.loc, `a call of method ${name}`);
+
+        return undefined;
+      }
+    }
+  }
+
+  private eachStart(
+    frame: Frame,
+    array: LLVMValue,
+    item: Type,
+  ): EachLoop | undefined {
+    const made = frame.made;
+    const element = this.irType(item);
+    if (element == undefined) {
+      return undefined;
+    }
+
+    const counter = made.slot(kIntType, "each.index");
+    const cond = made.block("each.cond");
+    const body = made.block("each.body");
+    const step = made.block("each.step");
+    const done = made.block("each.done");
+    const tz = this.store.integer(64, false);
+
+    made.store(this.ir.zero(kIntType), counter);
+    made.open(cond);
+
+    const index = made.load(kIntType, counter);
+    const length = this.arrayLength(frame, array);
+    const isInside = made.integerCompare(
+      IrIntPredicate.UnsignedLess,
+      index,
+      length,
+    );
+
+    made.conditionalBranch(isInside, body, done);
+    made.open(body);
+
+    const data = this.arrayData(frame, array);
+    const address = made.element(element, data, index);
+    const value: IrValue = {
+      type: element,
+      value: made.load(element, address),
+      tz: item,
+    };
+    const position: IrValue = { type: kIntType, value: index, tz };
+
+    return { item: value, index: position, counter, cond, step, done };
+  }
+
+  private eachEnd(frame: Frame, loop: EachLoop): void {
+    const made = frame.made;
+
+    made.open(loop.step);
+
+    const one = this.ir.integer(kIntType, "1");
+    const next = made.binary(IrOpcode.Add, loop.index.value, one);
+
+    made.store(next, loop.counter);
+    made.branch(loop.cond);
+    made.open(loop.done);
+  }
+
+  private methodResult(
+    call: CallExpr,
+    name: string,
+    object: Type,
+  ): Type | undefined {
+    const answered = this.typeOf(call);
+    if (answered != undefined && answered.kind != TypeKind.Error) {
+      return answered;
+    }
+
+    switch (name) {
+      case "some":
+      case "every":
+        return this.store.plain(TypeKind.Boolean);
+      case "findIndex":
+        return this.store.integer(64, false);
+      case "forEach":
+        return this.store.plain(TypeKind.Void);
+      case "filter":
+        return object;
+      case "find": {
+        const item = this.itemOf(object);
+        if (item == undefined) {
+          return undefined;
+        }
+
+        const empty = this.store.plain(TypeKind.Undefined);
+
+        return this.store.unionOf([item, empty]);
+      }
+      default:
+        return answered;
+    }
+  }
+
+  private callbackMethod(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const callback = call.args[0];
+    const result = this.methodResult(call, member.name, object);
+    const resultIr = this.typeOrUndefined(result);
+    if (object.kind != TypeKind.Array || callback == undefined) {
+      this.notLowered(frame.module, call.loc, "these arguments");
+
+      return undefined;
+    }
+    if (result == undefined || resultIr == undefined) {
+      this.notLowered(frame.module, call.loc, "a result of this type");
+
+      return undefined;
+    }
+    if (!this.isInlineable(callback.expr)) {
+      this.notLowered(frame.module, call.loc, "a callback that is not inline");
+
+      return undefined;
+    }
+
+    const array = this.value(frame, member.object);
+    if (array == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const borrowed: IrValue = {
+      type: array.type,
+      value: array.value,
+      tz: array.tz,
+    };
+    const slotType = this.slotTypeOf(resultIr);
+    const slot = made.slot(slotType, "method.result");
+    const place: Place = {
+      pointer: slot,
+      type: slotType,
+      tz: result,
+      owner: frame.id,
+    };
+
+    made.entryStore(this.ir.zero(slotType), slot);
+
+    const isStarted = this.methodStart(frame, member.name, place, result);
+    if (!isStarted) {
+      return undefined;
+    }
+
+    const loop = this.eachStart(frame, array.value, object.item);
+    if (loop == undefined) {
+      return undefined;
+    }
+
+    const isStepped = this.callbackStep(
+      frame,
+      member.name,
+      callback.expr,
+      place,
+      { item: loop.item, index: loop.index, array: borrowed, done: loop.done },
+    );
+    if (!isStepped) {
+      return undefined;
+    }
+
+    this.eachEnd(frame, loop);
+
+    const value = made.load(slotType, slot);
+
+    made.store(this.ir.zero(slotType), slot);
+    this.dropping(frame, array);
+
+    return { type: resultIr, value, tz: result, owned: true };
+  }
+
+  private slotTypeOf(type: string): string {
+    if (type == kVoidType) {
+      return kBooleanType;
+    }
+
+    return type;
+  }
+
+  private methodStart(
+    frame: Frame,
+    name: string,
+    place: Place,
+    result: Type,
+  ): boolean {
+    const made = frame.made;
+
+    switch (name) {
+      case "every":
+        made.store(this.ir.integer(kBooleanType, "1"), place.pointer);
+
+        return true;
+      case "findIndex":
+        made.store(this.ir.integer(kIntType, "-1"), place.pointer);
+
+        return true;
+      case "filter":
+      case "map":
+      case "flatMap": {
+        const item = this.itemOf(result);
+        const descriptor = this.descriptor(item ?? result);
+        if (item == undefined || descriptor == undefined) {
+          return false;
+        }
+
+        const array = this.emptyArray(frame, descriptor);
+
+        made.store(array, place.pointer);
+
+        return true;
+      }
+      default:
+        return true;
+    }
+  }
+
+  private callbackStep(
+    frame: Frame,
+    name: string,
+    callback: Expr,
+    place: Place,
+    step: CallbackStep,
+  ): boolean {
+    const args = [step.item, step.index, step.array];
+    const wanted = this.flatWanted(name, place);
+    const returned = this.inlineCall(frame, callback, args, wanted);
+    if (returned == undefined) {
+      return false;
+    }
+
+    switch (name) {
+      case "forEach":
+        this.dropping(frame, returned);
+
+        return true;
+      case "map":
+        return this.mappedPush(frame, place, returned, callback);
+      case "flatMap":
+        return this.flatPushed(frame, place, returned, callback);
+      default:
+        return this.testedStep(frame, name, callback, place, step, returned);
+    }
+  }
+
+  private flatWanted(name: string, place: Place): Type | undefined {
+    if (name != "flatMap") {
+      return undefined;
+    }
+
+    return place.tz;
+  }
+
+  private mappedPush(
+    frame: Frame,
+    place: Place,
+    returned: IrValue,
+    callback: Expr,
+  ): boolean {
+    const item = this.itemOf(place.tz);
+    if (item == undefined) {
+      return false;
+    }
+
+    const value = this.converted(frame, returned, item, callback.loc);
+    if (value == undefined) {
+      return false;
+    }
+
+    const array = frame.made.load(kPointerType, place.pointer);
+
+    this.pushed(frame, array, value, item);
+
+    return true;
+  }
+
+  private testedStep(
+    frame: Frame,
+    name: string,
+    callback: Expr,
+    place: Place,
+    step: CallbackStep,
+    returned: IrValue,
+  ): boolean {
+    const made = frame.made;
+    const test = this.truthOf(frame, returned, callback);
+    if (test == undefined) {
+      return false;
+    }
+
+    const hit = made.block("method.hit");
+    const miss = made.block("method.miss");
+
+    if (name == "every") {
+      made.conditionalBranch(test, miss, hit);
+    } else {
+      made.conditionalBranch(test, hit, miss);
+    }
+
+    made.open(hit);
+
+    const isStored = this.hitStored(frame, name, place, step);
+    if (!isStored) {
+      return false;
+    }
+
+    made.open(miss);
+
+    return true;
+  }
+
+  private hitStored(
+    frame: Frame,
+    name: string,
+    place: Place,
+    step: CallbackStep,
+  ): boolean {
+    const made = frame.made;
+
+    switch (name) {
+      case "some":
+        made.store(this.ir.integer(kBooleanType, "1"), place.pointer);
+        made.branch(step.done);
+
+        return true;
+      case "every":
+        made.store(this.ir.integer(kBooleanType, "0"), place.pointer);
+        made.branch(step.done);
+
+        return true;
+      case "findIndex":
+        made.store(step.index.value, place.pointer);
+        made.branch(step.done);
+
+        return true;
+      case "find": {
+        const kept = this.owning(frame, step.item);
+        const value = this.converted(frame, kept, place.tz, 0);
+        if (value == undefined) {
+          return false;
+        }
+
+        made.store(value.value, place.pointer);
+        made.branch(step.done);
+
+        return true;
+      }
+      case "filter": {
+        const array = made.load(kPointerType, place.pointer);
+        const item = this.itemOf(place.tz);
+        if (item == undefined) {
+          return false;
+        }
+
+        this.pushed(frame, array, step.item, item);
+
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
+  private emptyArray(frame: Frame, descriptor: LLVMValue): LLVMValue {
+    const tz = this.store.integer(64, false);
+    const zero = this.ir.zero(kIntType);
+    const args: IrValue[] = [
+      { type: kPointerType, value: descriptor, tz },
+      { type: kIntType, value: zero, tz },
+      { type: kIntType, value: zero, tz },
+    ];
+
+    return this.runtimeValue(frame, kArrayNew, kPointerType, args);
+  }
+
+  private searched(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const argument = call.args[0];
+    if (object.kind != TypeKind.Array || argument == undefined) {
+      this.notLowered(frame.module, call.loc, "these arguments");
+
+      return undefined;
+    }
+    if (call.args.length > 1) {
+      this.notLowered(frame.module, call.loc, "a search from a position");
+
+      return undefined;
+    }
+
+    const array = this.value(frame, member.object);
+    const given = this.value(frame, argument.expr);
+    if (array == undefined || given == undefined) {
+      return undefined;
+    }
+
+    const loc = argument.expr.loc;
+    const wanted = this.converted(frame, given, object.item, loc);
+    if (wanted == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const slot = made.slot(wanted.type, "search.value");
+    const mode = this.searchMode(member.name);
+
+    made.store(wanted.value, slot);
+
+    const searching = this.ir.declare(kArrayIndexOf, kFlagType, [
+      kPointerType,
+      kPointerType,
+      kIntType,
+      kFlagType,
+      kFlagType,
+    ]);
+    const found = made.call(searching, [
+      array.value,
+      slot,
+      this.ir.zero(kIntType),
+      this.ir.zero(kFlagType),
+      this.ir.integer(kFlagType, `${mode}`),
+    ]);
+
+    this.dropping(frame, wanted);
+    this.dropping(frame, array);
+
+    if (mode == 2) {
+      const zero = this.ir.zero(kFlagType);
+      const value = made.integerCompare(IrIntPredicate.NotEqual, found, zero);
+      const tz = this.store.plain(TypeKind.Boolean);
+
+      return { type: kBooleanType, value, tz };
+    }
+
+    const value = made.cast(IrOpcode.SExt, found, kIntType);
+    const tz = this.store.integer(64, false);
+
+    return { type: kIntType, value, tz };
+  }
+
+  private searchMode(name: string): int {
+    switch (name) {
+      case "lastIndexOf":
+        return 1;
+      case "includes":
+        return 2;
+      default:
+        return 0;
+    }
+  }
+
+  private arrayJoined(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+  ): IrValue | undefined {
+    const array = this.value(frame, member.object);
+    const argument = call.args[0];
+    if (array == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const separator = this.optionalText(frame, argument?.expr);
+    if (separator == undefined) {
+      return undefined;
+    }
+
+    const out = made.slot(kStringType, "join.out");
+    const joining = this.ir.declare(kArrayJoin, kVoidType, [
+      kPointerType,
+      kPointerType,
+      kPointerType,
+      kIntType,
+      kFlagType,
+    ]);
+    const text = made.extract(separator.value, 0);
+    const meta = made.extract(separator.value, 1);
+    const hasSeparator = this.ir.integer(kFlagType, `${separator.given}`);
+
+    made.call(joining, [out, array.value, text, meta, hasSeparator]);
+
+    const value = made.load(kStringType, out);
+    const tz = this.store.plain(TypeKind.String);
+
+    this.dropping(frame, separator.text);
+    this.dropping(frame, array);
+
+    return { type: kStringType, value, tz, owned: true };
+  }
+
+  private optionalText(
+    frame: Frame,
+    expr: Expr | undefined,
+  ): GivenText | undefined {
+    if (expr == undefined) {
+      const empty = this.stringValue("");
+
+      return { value: empty.value, text: empty, given: 0 };
+    }
+
+    const given = this.value(frame, expr);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const text = this.converted(
+      frame,
+      given,
+      this.store.plain(TypeKind.String),
+      expr.loc,
+    );
+    if (text == undefined) {
+      return undefined;
+    }
+
+    return { value: text.value, text, given: 1 };
+  }
+
+  private arraySliced(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const array = this.value(frame, member.object);
+    const start = this.integerArgument(frame, call, 0);
+    const end = this.integerArgument(frame, call, 1);
+    if (array == undefined || start == undefined || end == undefined) {
+      return undefined;
+    }
+
+    const hasEnd = this.ir.integer(kFlagType, `${end.given}`);
+    const slicing = this.ir.declare(kArraySlice, kPointerType, [
+      kPointerType,
+      kIntType,
+      kIntType,
+      kFlagType,
+    ]);
+    const value = frame.made.call(slicing, [
+      array.value,
+      start.value,
+      end.value,
+      hasEnd,
+    ]);
+
+    this.dropping(frame, array);
+
+    return { type: kPointerType, value, tz: object, owned: true };
+  }
+
+  private integerArgument(
+    frame: Frame,
+    call: CallExpr,
+    position: int,
+  ): GivenNumber | undefined {
+    const argument = call.args[position];
+    if (argument == undefined) {
+      return { value: this.ir.zero(kIntType), given: 0 };
+    }
+
+    const given = this.value(frame, argument.expr);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const int = this.store.integer(64, false);
+    const value = this.converted(frame, given, int, argument.expr.loc);
+    if (value == undefined) {
+      return undefined;
+    }
+
+    return { value: value.value, given: 1 };
+  }
+
+  private popped(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const result = this.typeOf(call);
+    const resultIr = this.typeOrUndefined(result);
+    if (result == undefined || resultIr == undefined) {
+      this.notLowered(frame.module, call.loc, "a result of this type");
+
+      return undefined;
+    }
+    if (object.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    const element = this.irType(object.item);
+    if (element == undefined) {
+      return undefined;
+    }
+
+    const array = this.value(frame, member.object);
+    if (array == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const lengthField = this.arrayField(frame, array.value, kArrayLengthField);
+    const length = made.load(kFlagType, lengthField);
+    const zero = this.ir.zero(kFlagType);
+    const isEmpty = made.integerCompare(IrIntPredicate.Equal, length, zero);
+    const before = made.currentBlock();
+    const take = made.block("pop.take");
+    const end = made.block("pop.end");
+
+    made.conditionalBranch(isEmpty, end, take);
+    made.open(take);
+
+    const one = this.ir.integer(kFlagType, "1");
+    const last = made.binary(IrOpcode.Sub, length, one);
+    const data = this.arrayData(frame, array.value);
+    const at = made.cast(IrOpcode.ZExt, last, kIntType);
+    const address = made.element(element, data, at);
+    const item: IrValue = {
+      type: element,
+      value: made.load(element, address),
+      tz: object.item,
+      owned: true,
+    };
+
+    made.store(last, lengthField);
+
+    const placed = this.converted(frame, item, result, call.loc);
+    const takeEnd = made.currentBlock();
+
+    made.branch(end);
+    made.open(end);
+
+    if (placed == undefined) {
+      return undefined;
+    }
+
+    const missing = this.ir.zero(resultIr);
+    const value = made.phi(
+      resultIr,
+      [missing, placed.value],
+      [before, takeEnd],
+    );
+
+    this.dropping(frame, array);
+
+    return { type: resultIr, value, tz: result, owned: true };
+  }
+
+  private concatArrays(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const array = this.value(frame, member.object);
+    if (array == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const copying = this.ir.declare(kArraySlice, kPointerType, [
+      kPointerType,
+      kIntType,
+      kIntType,
+      kFlagType,
+    ]);
+    const zero = this.ir.zero(kIntType);
+    const none = this.ir.zero(kFlagType);
+    const copy = made.call(copying, [array.value, zero, zero, none]);
+    const appending = this.ir.declare(kArrayAppend, kVoidType, [
+      kPointerType,
+      kPointerType,
+    ]);
+
+    this.dropping(frame, array);
+
+    for (const argument of call.args) {
+      const given = this.wantedValue(frame, argument.expr, object);
+      if (given == undefined) {
+        return undefined;
+      }
+
+      const other = this.converted(frame, given, object, argument.expr.loc);
+      if (other == undefined || argument.spread) {
+        this.notLowered(frame.module, argument.expr.loc, "this argument");
+
+        return undefined;
+      }
+
+      made.call(appending, [copy, other.value]);
+      this.dropping(frame, other);
+    }
+
+    return { type: kPointerType, value: copy, tz: object, owned: true };
+  }
+
+  private sortedArray(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const callback = call.args[0];
+    if (object.kind != TypeKind.Array) {
+      return undefined;
+    }
+
+    const array = this.value(frame, member.object);
+    if (array == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    if (callback == undefined) {
+      const sorting = this.ir.declare(kArraySort, kVoidType, [kPointerType]);
+
+      made.call(sorting, [array.value]);
+
+      return array;
+    }
+
+    const compare = this.comparator(frame, callback.expr, object.item);
+    if (compare == undefined) {
+      return undefined;
+    }
+
+    const params = [kPointerType, kPointerType, kPointerType];
+    const sorting = this.ir.declare(kArraySortWith, kVoidType, params);
+    const context = this.comparatorContext(frame);
+
+    made.call(sorting, [array.value, compare, context]);
+
+    return array;
+  }
+
+  private comparatorContext(frame: Frame): LLVMValue {
+    const self = frame.self;
+    if (self == undefined) {
+      return this.ir.zero(kPointerType);
+    }
+
+    return frame.made.load(kPointerType, self.pointer);
+  }
+
+  private comparator(
+    frame: Frame,
+    callback: Expr,
+    item: Type,
+  ): LLVMValue | undefined {
+    const element = this.irType(item);
+    if (element == undefined || !this.isInlineable(callback)) {
+      this.notLowered(frame.module, callback.loc, "this comparison");
+
+      return undefined;
+    }
+
+    const name = this.ir.uniqueName("tz.compare.");
+    const params = [kPointerType, kPointerType, kPointerType];
+    const made = new IrFunction(this.ir, name, kFlagType, params);
+    const self = this.comparatorSelf(made, frame.self);
+    const inner: Frame = {
+      made,
+      id: this.frameId(),
+      module: frame.module,
+      loops: [],
+      scopes: [],
+      self,
+      place: "",
+    };
+    const first: IrValue = {
+      type: element,
+      value: made.load(element, made.param(1)),
+      tz: item,
+    };
+    const second: IrValue = {
+      type: element,
+      value: made.load(element, made.param(2)),
+      tz: item,
+    };
+
+    this.openScope(inner);
+
+    const returned = this.inlineCall(inner, callback, [first, second]);
+    if (returned == undefined) {
+      return undefined;
+    }
+
+    const sign = this.signOf(inner, returned);
+
+    this.dropping(inner, returned);
+    this.closeScope(inner);
+    made.finishValue(sign);
+
+    return made.callee.fn;
+  }
+
+  private comparatorSelf(
+    made: IrFunction,
+    outer: Place | undefined,
+  ): Place | undefined {
+    if (outer == undefined) {
+      return undefined;
+    }
+
+    const pointer = made.slot(kPointerType, "this");
+
+    made.store(made.param(0), pointer);
+
+    return { pointer, type: kPointerType, tz: outer.tz, owner: -1 };
+  }
+
+  private signOf(frame: Frame, value: IrValue): LLVMValue {
+    const made = frame.made;
+    const one = this.ir.integer(kFlagType, "1");
+    const minus = this.ir.integer(kFlagType, "-1");
+    const zero = this.ir.zero(kFlagType);
+    if (this.isDouble(value.tz)) {
+      const none = this.ir.zero(kDoubleType);
+      const above = made.realCompare(
+        IrRealPredicate.OrderedGreater,
+        value.value,
+        none,
+      );
+      const below = made.realCompare(
+        IrRealPredicate.OrderedLess,
+        value.value,
+        none,
+      );
+      const low = made.select(below, minus, zero);
+
+      return made.select(above, one, low);
+    }
+
+    const long = this.toLong(frame, value).value;
+    const none = this.ir.zero(kIntType);
+    const above = made.integerCompare(IrIntPredicate.SignedGreater, long, none);
+    const below = made.integerCompare(IrIntPredicate.SignedLess, long, none);
+    const low = made.select(below, minus, zero);
+
+    return made.select(above, one, low);
+  }
+
+  private reversedArray(
+    frame: Frame,
+    member: MemberExpr,
+  ): IrValue | undefined {
+    const array = this.value(frame, member.object);
+    if (array == undefined) {
+      return undefined;
+    }
+
+    const params = [kPointerType];
+    const reversing = this.ir.declare(kArrayReverse, kVoidType, params);
+
+    frame.made.call(reversing, [array.value]);
+
+    return array;
+  }
+}

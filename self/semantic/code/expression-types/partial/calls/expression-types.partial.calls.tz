@@ -20,6 +20,8 @@ import {
 } from "../../../../../program/type/types/type.types.tz";
 import {
   kCountedGlobals,
+  kNumberErrorName,
+  kNumberName,
   kPushName,
   kTextStatics,
   kStrictGlobals,
@@ -109,6 +111,9 @@ partial class ExpressionTypes {
     if (isLibrary && isClass && callee.name == kDateName) {
       return this.dateFunctionCall(expr, callee, module);
     }
+    if (isLibrary && callee.name == kNumberName) {
+      return this.numberCall(expr, module);
+    }
     if (isLibrary && target.kind != SymbolKind.Function) {
       return this.store.plain(TypeKind.Error);
     }
@@ -128,6 +133,26 @@ partial class ExpressionTypes {
       default:
         return this.valueCall(expr, module);
     }
+  }
+
+  private numberCall(expr: CallExpr, module: int): Type {
+    const double = this.store.plain(TypeKind.Double);
+    const arg = expr.args[0];
+    if (arg == undefined) {
+      return double;
+    }
+
+    const given = this.typed(arg.expr, undefined, module);
+    if (!this.decimals.isTextType(given)) {
+      return double;
+    }
+
+    const error = this.resolver.libraryShape(kNumberErrorName, []);
+    if (error == undefined) {
+      return this.store.plain(TypeKind.Error);
+    }
+
+    return this.store.resultOf(double, error);
   }
 
   private functionCall(

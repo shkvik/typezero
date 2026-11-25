@@ -1,0 +1,133 @@
+import {
+  AssignExpr,
+  IndexExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type } from "../../../program/type/types/type.types.tz";
+import { IrIntPredicate } from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import { kByteType } from "../const/lowering.const.tz";
+import { Frame, IrValue, Place } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private elementAssigned(
+    frame: Frame,
+    expr: AssignExpr,
+    target: IndexExpr,
+  ): IrValue | undefined {
+    const object = this.typeIn(frame, target.object);
+    if (object == undefined || expr.op != undefined) {
+      this.notLowered(frame.module, expr.loc, "an assignment to this element");
+
+      return undefined;
+    }
+    if (this.isBytesType(object)) {
+      return this.byteAssigned(frame, expr, target);
+    }
+
+    const item = this.itemOf(object);
+    const element = this.typeOrUndefined(item);
+    if (item == undefined || element == undefined) {
+      this.notLowered(frame.module, expr.loc, "an assignment to this element");
+
+      return undefined;
+    }
+
+    const array = this.value(frame, target.object);
+    const index = this.value(frame, target.index);
+    const given = this.wantedValue(frame, expr.value, item);
+    if (array == undefined || index == undefined || given == undefined) {
+      return undefined;
+    }
+
+    const value = this.converted(frame, given, item, expr.value.loc);
+    if (value == undefined) {
+      return undefined;
+    }
+
+    const owned = this.owning(frame, value);
+    const position = this.toLong(frame, index).value;
+
+    this.elementPlaced(frame, array.value, position, owned, item);
+    this.dropping(frame, array);
+
+    return { type: owned.type, value: owned.value, tz: owned.tz };
+  }
+
+  private elementPlaced(
+    frame: Frame,
+    array: LLVMValue,
+    position: LLVMValue,
+    value: IrValue,
+    item: Type,
+  ): void {
+    const made = frame.made;
+    const element = value.type;
+    const length = this.arrayLength(frame, array);
+    const isInside = made.integerCompare(
+      IrIntPredicate.UnsignedLess,
+      position,
+      length,
+    );
+    const replace = made.block("element.replace");
+    const append = made.block("element.append");
+    const end = made.block("element.end");
+
+    made.conditionalBranch(isInside, replace, append);
+    made.open(replace);
+
+    const data = this.arrayData(frame, array);
+    const pointer = made.element(element, data, position);
+    const place: Place = { pointer, type: element, tz: item, owner: frame.id };
+
+    this.stored(frame, place, value);
+    made.branch(end);
+    made.open(append);
+    this.pushed(frame, array, value, item);
+    made.branch(end);
+    made.open(end);
+  }
+
+  private byteAssigned(
+    frame: Frame,
+    expr: AssignExpr,
+    target: IndexExpr,
+  ): IrValue | undefined {
+    const bytes = this.value(frame, target.object);
+    const index = this.value(frame, target.index);
+    const given = this.value(frame, expr.value);
+    if (bytes == undefined || index == undefined || given == undefined) {
+      return undefined;
+    }
+
+    const byte = this.store.integer(8, true);
+    const value = this.converted(frame, given, byte, expr.value.loc);
+    if (value == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const position = this.toLong(frame, index).value;
+    const length = this.bytesLength(frame, bytes.value);
+    const isInside = made.integerCompare(
+      IrIntPredicate.UnsignedLess,
+      position,
+      length,
+    );
+    const write = made.block("byte.write");
+    const end = made.block("byte.end");
+
+    made.conditionalBranch(isInside, write, end);
+    made.open(write);
+
+    const data = this.bytesData(frame, bytes.value);
+    const address = made.element(kByteType, data, position);
+
+    made.store(value.value, address);
+    made.branch(end);
+    made.open(end);
+    this.dropping(frame, bytes);
+
+    return value;
+  }
+}

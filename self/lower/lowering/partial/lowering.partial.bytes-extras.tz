@@ -1,0 +1,180 @@
+import {
+  CallExpr,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import {
+  IrIntPredicate,
+  IrOpcode,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kBufferByteLength,
+  kBufferConcat,
+  kBufferIndexOfText,
+  kBooleanType,
+  kByteType,
+  kFlagType,
+  kIntType,
+  kPointerType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private bufferByteLength(
+    frame: Frame,
+    call: CallExpr,
+    given: IrValue,
+  ): IrValue | undefined {
+    const made = frame.made;
+    const tz = this.store.integer(64, false);
+    if (this.isBytesType(given.tz)) {
+      const length = this.bytesLength(frame, given.value);
+
+      this.dropping(frame, given);
+
+      return { type: kIntType, value: length, tz };
+    }
+
+    const encoding = this.encodingOf(frame, call.args[1]?.expr);
+    const params = [kPointerType, kIntType, kFlagType];
+    const callee = this.ir.declare(kBufferByteLength, kFlagType, params);
+    const args = this.textParts(frame, given).concat([encoding]);
+    const length = made.call(callee, args);
+    const value = made.cast(IrOpcode.SExt, length, kIntType);
+
+    this.dropping(frame, given);
+
+    return { type: kIntType, value, tz };
+  }
+
+  private bufferConcat(
+    frame: Frame,
+    call: CallExpr,
+    list: IrValue,
+    result: Type,
+  ): IrValue | undefined {
+    const total = this.integerArgument(frame, call, 1);
+    if (total == undefined) {
+      return undefined;
+    }
+
+    const params = [kPointerType, kIntType, kFlagType];
+    const callee = this.ir.declare(kBufferConcat, kPointerType, params);
+    const hasTotal = this.ir.integer(kFlagType, `${total.given}`);
+    const value = frame.made.call(callee, [list.value, total.value, hasTotal]);
+
+    this.dropping(frame, list);
+
+    return { type: kPointerType, value, tz: result, owned: true };
+  }
+
+  private bytesSearched(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+  ): IrValue | undefined {
+    const bytes = this.value(frame, member.object);
+    const needle = call.args[0];
+    if (bytes == undefined || needle == undefined) {
+      return undefined;
+    }
+
+    const given = this.value(frame, needle.expr);
+    const from = this.integerArgument(frame, call, 1);
+    if (given == undefined || from == undefined || !this.isString(given.tz)) {
+      this.notLowered(frame.module, call.loc, "this search in bytes");
+
+      return undefined;
+    }
+
+    const made = frame.made;
+    const encoding = this.encodingOf(frame, call.args[2]?.expr);
+    const params = [
+      kPointerType,
+      kPointerType,
+      kIntType,
+      kIntType,
+      kFlagType,
+      kFlagType,
+      kFlagType,
+    ];
+    const callee = this.ir.declare(kBufferIndexOfText, kFlagType, params);
+    const hasFrom = this.ir.integer(kFlagType, `${from.given}`);
+    const mode = this.ir.integer(kFlagType, `${this.searchMode(member.name)}`);
+    const args = [bytes.value]
+      .concat(this.textParts(frame, given))
+      .concat([from.value, hasFrom, encoding, mode]);
+    const found = made.call(callee, args);
+
+    this.dropping(frame, given);
+    this.dropping(frame, bytes);
+
+    if (member.name == "includes") {
+      const zero = this.ir.zero(kFlagType);
+      const value = made.integerCompare(IrIntPredicate.NotEqual, found, zero);
+      const tz = this.store.plain(TypeKind.Boolean);
+
+      return { type: kBooleanType, value, tz };
+    }
+
+    const value = made.cast(IrOpcode.SExt, found, kIntType);
+    const tz = this.store.integer(64, false);
+
+    return { type: kIntType, value, tz };
+  }
+
+  private doubleWritten(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+  ): IrValue | undefined {
+    const bytes = this.value(frame, member.object);
+    const first = call.args[0];
+    const offset = this.integerArgument(frame, call, 1);
+    if (bytes == undefined || first == undefined || offset == undefined) {
+      return undefined;
+    }
+
+    const given = this.value(frame, first.expr);
+    const double = this.store.plain(TypeKind.Double);
+    const number = this.convertedOrNone(frame, given, double, call.loc);
+    if (number == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const raw = made.cast(IrOpcode.BitCast, number.value, kIntType);
+    const data = this.bytesData(frame, bytes.value);
+    const isBig = member.name == "writeDoubleBE";
+
+    for (let index = 0; index < 8; index++) {
+      const shift = this.byteShift(index, isBig);
+      const moved = made.binary(IrOpcode.LShr, raw, shift);
+      const byte = made.cast(IrOpcode.Trunc, moved, kByteType);
+      const step = this.ir.integer(kIntType, `${index}`);
+      const at = made.binary(IrOpcode.Add, offset.value, step);
+
+      made.store(byte, made.element(kByteType, data, at));
+    }
+
+    const size = this.ir.integer(kIntType, "8");
+    const value = made.binary(IrOpcode.Add, offset.value, size);
+    const tz = this.store.integer(64, false);
+
+    this.dropping(frame, bytes);
+
+    return { type: kIntType, value, tz };
+  }
+
+  private byteShift(index: int, isBig: boolean): LLVMValue {
+    let place = index;
+
+    if (isBig) {
+      place = 7 - index;
+    }
+
+    return this.ir.integer(kIntType, `${place * 8}`);
+  }
+}

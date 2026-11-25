@@ -11,12 +11,17 @@ import {
 } from "../../ir-function/types/ir-function.types.tz";
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
-import { kBooleanType, kPointerType, kZero } from "../const/lowering.const.tz";
+import {
+  kBooleanType,
+  kPointerType,
+  kThisName,
+  kZero,
+} from "../const/lowering.const.tz";
 import { Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private optionalInner(type: Type): Type | undefined {
-    if (type.kind != TypeKind.Union || type.parts.length != 2) {
+    if (type.kind != TypeKind.Union) {
       return undefined;
     }
 
@@ -24,15 +29,20 @@ partial class Lowering {
       (part) => part.kind != TypeKind.Undefined,
     );
     const inner = defined[0];
-    if (defined.length != 1 || inner == undefined) {
+    if (defined.length == type.parts.length || inner == undefined) {
       return undefined;
     }
+    if (defined.length == 1) {
+      return inner;
+    }
 
-    return inner;
+    return this.store.unionOf(defined);
   }
 
   private isReferenceLike(type: Type): boolean {
-    return this.isArray(type) || this.isInstance(type);
+    return (
+      this.isArray(type) || this.isCounted(type) || this.isHandleType(type)
+    );
   }
 
   private optionalType(inner: Type): string | undefined {
@@ -84,7 +94,19 @@ partial class Lowering {
 
   private hasValue(frame: Frame, value: IrValue): LLVMValue {
     const inner = this.optionalInner(value.tz);
-    if (inner != undefined && this.isReferenceLike(inner)) {
+    if (inner == undefined && value.type == kPointerType) {
+      const none = this.ir.zero(kPointerType);
+
+      return frame.made.integerCompare(
+        IrIntPredicate.NotEqual,
+        value.value,
+        none,
+      );
+    }
+    if (inner == undefined) {
+      return this.ir.integer(kBooleanType, "1");
+    }
+    if (this.isReferenceLike(inner)) {
       const none = this.ir.zero(kPointerType);
 
       return frame.made.integerCompare(
@@ -108,13 +130,8 @@ partial class Lowering {
 
   private undefinedTest(frame: Frame, expr: BinaryExpr): IrValue | undefined {
     const other = this.definedSide(expr);
-    const value = this.value(frame, other);
+    const value = this.rawValue(frame, other);
     if (value == undefined) {
-      return undefined;
-    }
-    if (this.optionalInner(value.tz) == undefined) {
-      this.notLowered(frame.module, expr.loc, "this test for undefined");
-
       return undefined;
     }
 
@@ -133,6 +150,20 @@ partial class Lowering {
     return { type: kBooleanType, value: missing, tz };
   }
 
+  private rawValue(frame: Frame, expr: Expr): IrValue | undefined {
+    const isThis = expr.kind == ExprKind.Name && expr.name == kThisName;
+    if (expr.kind != ExprKind.Name || isThis) {
+      return this.value(frame, expr);
+    }
+
+    const place = this.namePlace(frame, expr);
+    if (place == undefined) {
+      return undefined;
+    }
+
+    return this.loaded(frame, place);
+  }
+
   private definedSide(expr: BinaryExpr): Expr {
     if (expr.lhs.kind == ExprKind.Undefined) {
       return expr.rhs;
@@ -143,7 +174,7 @@ partial class Lowering {
 
   private nullish(frame: Frame, expr: BinaryExpr): IrValue | undefined {
     const made = frame.made;
-    const result = this.answers.typeOf(expr);
+    const result = this.nullishResult(frame, expr);
     const type = this.typeOrUndefined(result);
     const left = this.value(frame, expr.lhs);
     if (result == undefined || type == undefined || left == undefined) {
@@ -191,6 +222,21 @@ partial class Lowering {
     this.dropping(frame, left);
 
     return { type, value, tz: result, owned: true };
+  }
+
+  private nullishResult(frame: Frame, expr: BinaryExpr): Type | undefined {
+    const result = this.typeIn(frame, expr);
+    const left = this.typeIn(frame, expr.lhs);
+    if (result == undefined || left == undefined) {
+      return result;
+    }
+
+    const defined = this.definedOf(left);
+    if (this.isCString(defined) && expr.rhs.kind == ExprKind.StringLit) {
+      return defined;
+    }
+
+    return result;
   }
 
   private branchOwned(

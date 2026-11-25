@@ -43,7 +43,7 @@ partial class ExpressionTypes {
           return this.resultFacts(call, callee, isTrue, module);
         }
 
-        return this.methodGuardFacts(call, callee, module);
+        return this.methodGuardFacts(call, callee, isTrue, module);
       default:
         return new Map<string, Type>();
     }
@@ -236,8 +236,14 @@ partial class ExpressionTypes {
   private methodGuardFacts(
     call: CallExpr,
     callee: MemberExpr,
+    isTrue: boolean,
     module: int,
   ): Map<string, Type> {
+    const summary = this.methodSummaryFacts(call, callee, isTrue, module);
+    if (summary != undefined) {
+      return summary;
+    }
+
     const receiver = this.narrowable(callee.object, module);
     const values = call.args.map((arg) => arg.expr);
 
@@ -251,6 +257,42 @@ partial class ExpressionTypes {
     values.push(callee.object);
 
     return this.unknownFacts(values, module);
+  }
+
+  private methodSummaryFacts(
+    call: CallExpr,
+    callee: MemberExpr,
+    isTrue: boolean,
+    module: int,
+  ): Map<string, Type> | undefined {
+    const receiver = this.peekType(callee.object, module);
+    if (receiver.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const entry = this.classMember(receiver, callee.name).entry;
+    const method = entry?.methods[0];
+    if (entry == undefined || method == undefined || entry.isStatic) {
+      return undefined;
+    }
+
+    const owner = entry.owner;
+    const isGeneric =
+      method.typeParams.length > 0 || owner.typeParams.length > 0;
+    if (entry.methods.length != 1 || isGeneric) {
+      return undefined;
+    }
+
+    const instance = entry.instance;
+    const type = this.methodFunction(owner, method, instance.module);
+    const part = this.partOf(owner, method);
+    const home = this.partModule(part, instance.module);
+    const summary = this.guardSummaries.get(`${home} ${method.loc}`);
+    if (summary == undefined || !this.narrowings.isBooleanFunction(type)) {
+      return undefined;
+    }
+
+    return this.summaryApplied(call, summary, isTrue, module);
   }
 
   private unknownFacts(values: Expr[], module: int): Map<string, Type> {

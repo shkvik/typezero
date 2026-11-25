@@ -1,0 +1,96 @@
+import {
+  AssignExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { TypeKind } from "../../../program/type/types/type.types.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kFlagType,
+  kIntType,
+  kPointerType,
+  kProcessArgv,
+  kProcessExecPath,
+  kProcessName,
+  kProcessPlatform,
+  kProcessSetExitCode,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private isProcessName(frame: Frame, expr: Expr): boolean {
+    if (expr.kind != ExprKind.Name || expr.name != kProcessName) {
+      return false;
+    }
+
+    const target = this.values.valueTargetOf(expr, frame.module);
+    const opened = this.program.modules[target?.module ?? -1];
+    if (opened == undefined) {
+      return false;
+    }
+
+    return opened.source.isLibrary;
+  }
+
+  private processMember(frame: Frame, expr: MemberExpr): IrValue | undefined {
+    switch (expr.name) {
+      case "argv":
+        return this.processArgv(frame);
+      case "execPath":
+        return this.textOut(frame, kProcessExecPath, [], []);
+      case "platform":
+        return this.textOut(frame, kProcessPlatform, [], []);
+      default:
+        this.notLowered(frame.module, expr.loc, "this member of process");
+
+        return undefined;
+    }
+  }
+
+  private processArgv(frame: Frame): IrValue | undefined {
+    const string = this.store.plain(TypeKind.String);
+    const descriptor = this.descriptor(string);
+    if (descriptor == undefined) {
+      return undefined;
+    }
+
+    const callee = this.ir.declare(kProcessArgv, kPointerType, [kPointerType]);
+    const value = frame.made.call(callee, [descriptor]);
+    const tz = this.store.arrayOf(string);
+
+    return { type: kPointerType, value, tz, owned: true };
+  }
+
+  private processAssigned(
+    frame: Frame,
+    expr: AssignExpr,
+    target: MemberExpr,
+  ): IrValue | undefined {
+    if (target.name != "exitCode" || expr.op != undefined) {
+      this.notLowered(frame.module, expr.loc, "an assignment to process");
+
+      return undefined;
+    }
+
+    const given = this.value(frame, expr.value);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const int = this.store.integer(64, false);
+    const code = this.converted(frame, given, int, expr.value.loc);
+    if (code == undefined) {
+      return undefined;
+    }
+
+    const params = [kIntType, kFlagType];
+    const callee = this.ir.declare(kProcessSetExitCode, kVoidType, params);
+    const has = this.ir.integer(kFlagType, "1");
+
+    frame.made.call(callee, [code.value, has]);
+
+    return code;
+  }
+}

@@ -17,6 +17,7 @@ import {
   kEmitIrOption,
   kExecutableExtension,
   kIrExtension,
+  kLibraryOption,
   kLinkerArguments,
   kLinkerTool,
   kObjectFile,
@@ -89,12 +90,13 @@ export class BuildCommand {
       return this.irWritten(ir, output);
     }
 
-    this.executableMade(ir, output);
+    this.executableMade(ir, output, options.libraries);
   }
 
   private optionsOf(): BuildOptions {
     let entry: string | undefined = undefined;
     let output: string | undefined = undefined;
+    const libraries: string[] = [];
     let isEmittingIr = false;
     let isWrong = false;
 
@@ -104,6 +106,13 @@ export class BuildCommand {
         index += 1;
         output = this.args[index];
         isWrong = isWrong || output == undefined;
+      } else if (arg == kLibraryOption) {
+        index += 1;
+
+        const library = this.args[index];
+
+        isWrong = isWrong || library == undefined;
+        libraries.push(library ?? "");
       } else if (arg == kEmitIrOption) {
         isEmittingIr = true;
       } else if (entry == undefined) {
@@ -113,7 +122,7 @@ export class BuildCommand {
       }
     }
 
-    return { entry, output, isEmittingIr, isWrong };
+    return { entry, output, libraries, isEmittingIr, isWrong };
   }
 
   private outputOf(options: BuildOptions, entry: string): string {
@@ -154,7 +163,11 @@ export class BuildCommand {
     }
   }
 
-  private executableMade(ir: IrModule, output: string): void {
+  private executableMade(
+    ir: IrModule,
+    output: string,
+    libraries: string[],
+  ): void {
     const prefix = join(tmpdir(), kTemporaryPrefix);
     const folder = mkdtempSync(prefix);
     if (folder.isErr()) {
@@ -169,7 +182,8 @@ export class BuildCommand {
 
     const objectPath = join(folder.value, kObjectFile);
     const isMade =
-      this.objectMade(ir, objectPath) && this.linked(objectPath, output);
+      this.objectMade(ir, objectPath) &&
+      this.linked(objectPath, output, libraries);
     const removed = rmSync(folder.value, { force: true, recursive: true });
     if (isMade && removed.isErr()) {
       const reason = removed.error.message;
@@ -190,10 +204,14 @@ export class BuildCommand {
     return false;
   }
 
-  private linked(objectPath: string, output: string): boolean {
+  private linked(
+    objectPath: string,
+    output: string,
+    libraries: string[],
+  ): boolean {
     const linker = this.toolPath(kLinkerTool);
     const runtime = this.toolPath(kRuntimeLibrary);
-    const inputs = [`/out:${output}`, objectPath, runtime];
+    const inputs = [`/out:${output}`, objectPath, runtime].concat(libraries);
     const args = kLinkerArguments.concat(inputs, kSystemLibraries);
 
     return this.toolRan(linker, args);

@@ -147,6 +147,7 @@ import "./partial/dictionaries/expression-types.partial.dict-sources.tz";
 import "./partial/indexing/expression-types.partial.iterables.tz";
 import "../../library/expression-types/partial/expression-types.partial.async-calls.tz";
 import "../../library/expression-types/partial/expression-types.partial.number-calls.tz";
+import "../../library/expression-types/partial/expression-types.partial.bit-calls.tz";
 import "../../library/expression-types/partial/date/expression-types.partial.dates.tz";
 import "../../library/expression-types/partial/date/expression-types.partial.date-fields.tz";
 import "./partial/indexing/expression-types.partial.key-loops.tz";

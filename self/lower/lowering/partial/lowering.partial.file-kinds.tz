@@ -1,0 +1,60 @@
+import { MemberExpr } from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import {
+  IrIntPredicate,
+  IrOpcode,
+} from "../../ir-function/types/ir-function.types.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kBooleanType,
+  kFileKindMask,
+  kFileKinds,
+  kStatsName,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private isFileKindCall(object: Type, member: MemberExpr): boolean {
+    if (object.kind != TypeKind.Instance || object.name != kStatsName) {
+      return false;
+    }
+
+    const opened = this.program.modules[object.module];
+    if (opened == undefined || !opened.source.isLibrary) {
+      return false;
+    }
+
+    return kFileKinds.has(member.name);
+  }
+
+  private fileKindCall(frame: Frame, member: MemberExpr): IrValue | undefined {
+    const kind = kFileKinds.get(member.name);
+    const stats = this.value(frame, member.object);
+    if (kind == undefined || stats == undefined) {
+      return undefined;
+    }
+
+    const place = this.fieldAt(
+      frame,
+      stats.value,
+      stats.tz,
+      "mode",
+      member.loc,
+    );
+    if (place == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const mode = made.load(place.type, place.pointer);
+    const mask = this.ir.integer(place.type, `${kFileKindMask}`);
+    const masked = made.binary(IrOpcode.And, mode, mask);
+    const wanted = this.ir.integer(place.type, `${kind}`);
+    const value = made.integerCompare(IrIntPredicate.Equal, masked, wanted);
+    const tz = this.store.plain(TypeKind.Boolean);
+
+    this.dropping(frame, stats);
+
+    return { type: kBooleanType, value, tz };
+  }
+}

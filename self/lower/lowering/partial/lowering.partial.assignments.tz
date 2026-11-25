@@ -13,6 +13,16 @@ import { Frame, IrValue, Place } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private assigned(frame: Frame, expr: AssignExpr): IrValue | undefined {
+    const target = expr.target;
+    if (target.kind == ExprKind.Index) {
+      return this.elementAssigned(frame, expr, target);
+    }
+    if (target.kind == ExprKind.Member) {
+      if (this.isProcessName(frame, target.object)) {
+        return this.processAssigned(frame, expr, target);
+      }
+    }
+
     const place = this.targetPlace(frame, expr.target);
     if (place == undefined) {
       return undefined;
@@ -46,6 +56,12 @@ partial class Lowering {
       const current = this.loaded(frame, place);
 
       return this.concatenated(frame, [current], [expr.value]);
+    }
+
+    if (this.isDecimal(place.tz)) {
+      const current = this.loaded(frame, place);
+
+      return this.decimalCompound(frame, op, current, expr.value);
     }
 
     const isNumber = this.isInteger(place.tz) || this.isDouble(place.tz);

@@ -1,0 +1,260 @@
+import { CallExpr } from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrFunction } from "../../ir-function/ir-function.tz";
+import { IrIntPredicate } from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kDoubleType,
+  kFailedSlot,
+  kFlagType,
+  kIntType,
+  kParseInteger,
+  kPointerType,
+  kStringType,
+  kTextCompareC,
+  kTextToNumber,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private failureMaker(
+    error: Type,
+    extra: string[] = [],
+  ): LLVMValue | undefined {
+    const known = this.makers.get(error.id);
+    if (known != undefined) {
+      return known;
+    }
+
+    const layout = this.layoutOf(error);
+    const code = layout?.fields.find((one) => one.name == "code");
+    const message = layout?.fields.find((one) => one.name == "message");
+    if (layout == undefined || code == undefined || message == undefined) {
+      return undefined;
+    }
+
+    const name = this.ir.uniqueName("tz.make.");
+    const made = new IrFunction(this.ir, name, kPointerType, [kPointerType]);
+    const frame: Frame = {
+      made,
+      id: this.frameId(),
+      module: 0,
+      loops: [],
+      scopes: [],
+    };
+    const parts = made.param(0);
+    const object = this.allocated(frame, layout);
+    const partsType = this.failurePartsType(extra.length);
+    const codeAddress = made.field(partsType, parts, 0);
+    const codeText = made.load(kPointerType, codeAddress);
+    const codeValue = this.codeChosen(frame, codeText, code.type);
+    const messageAddress = made.field(partsType, parts, 1);
+    const messageValue = made.load(kStringType, messageAddress);
+
+    made.store(codeValue, made.field(layout.struct, object, code.index));
+    made.store(messageValue, made.field(layout.struct, object, message.index));
+
+    for (let index = 0; index < extra.length; index++) {
+      const field = layout.fields.find((one) => one.name == extra[index]);
+      if (field == undefined) {
+        continue;
+      }
+
+      const address = made.field(partsType, parts, index + 2);
+      const value = made.load(kStringType, address);
+
+      made.store(value, made.field(layout.struct, object, field.index));
+    }
+
+    for (const field of layout.fields) {
+      const literals = this.textLiterals(field.type);
+      const only = literals[0];
+      const isFixed = field.name != "code" && literals.length == 1;
+      if (isFixed && only != undefined) {
+        const address = made.field(layout.struct, object, field.index);
+
+        made.store(this.stringValue(only).value, address);
+      }
+    }
+    made.finishValue(object);
+    this.makers.set(error.id, made.callee.fn);
+
+    return made.callee.fn;
+  }
+
+  private failurePartsType(extra: int): string {
+    let parts = `{ ${kPointerType}, ${kStringType}`;
+
+    for (let index = 0; index < extra; index++) {
+      parts = `${parts}, ${kStringType}`;
+    }
+
+    return `${parts} }`;
+  }
+
+  private codeChosen(frame: Frame, text: LLVMValue, type: Type): LLVMValue {
+    const made = frame.made;
+    const literals = this.textLiterals(type);
+    const first = literals[0] ?? "";
+    let chosen: LLVMValue = this.stringValue(first).value;
+    const compare = this.ir.declare(kTextCompareC, kFlagType, [
+      kPointerType,
+      kPointerType,
+    ]);
+    const zero = this.ir.zero(kFlagType);
+
+    for (const literal of literals.slice(1)) {
+      const order = made.call(compare, [text, this.cText(literal)]);
+      const isSame = made.integerCompare(IrIntPredicate.Equal, order, zero);
+      const value = this.stringValue(literal).value;
+
+      chosen = made.select(isSame, value, chosen);
+    }
+
+    return chosen;
+  }
+
+  private textLiterals(type: Type): string[] {
+    if (type.kind == TypeKind.Literal) {
+      return [type.text];
+    }
+    if (type.kind != TypeKind.Union) {
+      return [];
+    }
+
+    const texts: string[] = [];
+
+    for (const part of type.parts) {
+      if (part.kind == TypeKind.Literal) {
+        texts.push(part.text);
+      }
+    }
+
+    return texts;
+  }
+
+  private failedSlot(): LLVMValue {
+    return this.ir.external(kFailedSlot, "{ ptr }");
+  }
+
+  private caughtResult(
+    frame: Frame,
+    value: IrValue,
+    type: Type,
+    loc: int,
+  ): IrValue | undefined {
+    const layout = this.resultLayout(type);
+    if (layout == undefined || type.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const slot = this.failedSlot();
+    const failure = made.load(kPointerType, slot);
+    const none = this.ir.zero(kPointerType);
+    const isFailed = made.integerCompare(IrIntPredicate.NotEqual, failure, none);
+    const failed = made.block("call.failed");
+    const fine = made.block("call.ok");
+    const end = made.block("call.end");
+
+    made.conditionalBranch(isFailed, failed, fine);
+    made.open(failed);
+    made.store(none, slot);
+
+    const error: IrValue = {
+      type: kPointerType,
+      value: failure,
+      tz: type.error,
+      owned: true,
+    };
+    const bad = this.madeResult(frame, type, false, error, loc);
+    const badEnd = made.currentBlock();
+
+    made.branch(end);
+    made.open(fine);
+
+    const good = this.madeResult(frame, type, true, value, loc);
+    const goodEnd = made.currentBlock();
+
+    made.branch(end);
+    made.open(end);
+
+    if (bad == undefined || good == undefined) {
+      return undefined;
+    }
+
+    const result = made.phi(
+      layout.struct,
+      [bad.value, good.value],
+      [badEnd, goodEnd],
+    );
+
+    return { type: layout.struct, value: result, tz: type, owned: true };
+  }
+
+  private numberOf(frame: Frame, call: CallExpr): IrValue | undefined {
+    const type = this.typeOf(call);
+    const argument = call.args[0];
+    const double = this.store.plain(TypeKind.Double);
+    if (argument == undefined) {
+      return this.doubleValue(0.0);
+    }
+
+    const given = this.value(frame, argument.expr);
+    if (given == undefined || type == undefined) {
+      return undefined;
+    }
+    if (!this.isString(given.tz) || type.kind != TypeKind.Result) {
+      return this.converted(frame, given, double, call.loc);
+    }
+
+    const maker = this.failureMaker(type.error);
+    if (maker == undefined) {
+      this.notLowered(frame.module, call.loc, "a failure of this type");
+
+      return undefined;
+    }
+
+    const params = [kPointerType, kIntType, kPointerType];
+    const callee = this.ir.declare(kTextToNumber, kDoubleType, params);
+    const args = this.textParts(frame, given).concat([maker]);
+    const parsed = frame.made.call(callee, args);
+    const value: IrValue = { type: kDoubleType, value: parsed, tz: double };
+
+    this.dropping(frame, given);
+
+    return this.caughtResult(frame, value, type, call.loc);
+  }
+
+  private parsedInteger(frame: Frame, call: CallExpr): IrValue | undefined {
+    const type = this.typeOf(call);
+    const argument = call.args[0];
+    if (argument == undefined || type == undefined) {
+      return undefined;
+    }
+    if (type.kind != TypeKind.Result) {
+      return undefined;
+    }
+
+    const maker = this.failureMaker(type.error);
+    const given = this.value(frame, argument.expr);
+    const radix = this.integerArgument(frame, call, 1);
+    if (maker == undefined || given == undefined || radix == undefined) {
+      this.notLowered(frame.module, call.loc, "this call of parseInt");
+
+      return undefined;
+    }
+
+    const params = [kPointerType, kIntType, kIntType, kPointerType];
+    const callee = this.ir.declare(kParseInteger, kIntType, params);
+    const args = this.textParts(frame, given).concat([radix.value, maker]);
+    const parsed = frame.made.call(callee, args);
+    const int = this.store.integer(64, false);
+    const value: IrValue = { type: kIntType, value: parsed, tz: int };
+
+    this.dropping(frame, given);
+
+    return this.caughtResult(frame, value, type, call.loc);
+  }
+}

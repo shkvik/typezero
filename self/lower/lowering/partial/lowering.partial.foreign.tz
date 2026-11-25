@@ -1,0 +1,354 @@
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
+import { StmtKind } from "../../../program/ast/types/ast.types.statements.tz";
+import {
+  FunctionShape,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { IrIntPredicate } from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kBooleanType,
+  kByteType,
+  kBytesDataField,
+  kBytesNames,
+  kBytesStruct,
+  kCStringCopy,
+  kCStringFromText,
+  kCStringLayout,
+  kCStringName,
+  kCStringTextOffset,
+  kDoubleType,
+  kForeignNullText,
+  kForeverCount,
+  kIntType,
+  kPointerType,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private isHandleType(type: Type): boolean {
+    if (type.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    const known = this.handles.get(type.id);
+    if (known != undefined) {
+      return known;
+    }
+
+    const opened = this.program.modules[type.module];
+    const loc = type.loc;
+    const isHandle =
+      opened != undefined &&
+      opened.file.items.some(
+        (item) => item.kind == StmtKind.Handle && item.loc == loc,
+      );
+
+    this.handles.set(type.id, isHandle);
+
+    return isHandle;
+  }
+
+  private isCString(type: Type): boolean {
+    const opened = this.program.modules[this.typeModule(type)];
+
+    return (
+      type.kind == TypeKind.Instance &&
+      type.name == kCStringName &&
+      opened != undefined &&
+      opened.source.isLibrary
+    );
+  }
+
+  private typeModule(type: Type): int {
+    if (type.kind != TypeKind.Instance) {
+      return -1;
+    }
+
+    return type.module;
+  }
+
+  private isBytesType(type: Type): boolean {
+    if (type.kind != TypeKind.Instance) {
+      return false;
+    }
+
+    const opened = this.program.modules[type.module];
+
+    return (
+      opened != undefined &&
+      opened.source.isLibrary &&
+      kBytesNames.includes(type.name)
+    );
+  }
+
+  private bytesData(frame: Frame, bytes: LLVMValue): LLVMValue {
+    const made = frame.made;
+    const field = made.field(kBytesStruct, bytes, kBytesDataField);
+
+    return made.load(kPointerType, field);
+  }
+
+  private declaredFunction(module: int, loc: int): FunctionDecl | undefined {
+    const opened = this.program.modules[module];
+    if (opened == undefined) {
+      return undefined;
+    }
+
+    for (const item of opened.file.items) {
+      if (item.kind == StmtKind.Function && item.loc == loc) {
+        return item;
+      }
+    }
+
+    return undefined;
+  }
+
+  private cstringLiteral(text: string, tz: Type): IrValue {
+    const known = this.cstrings.get(text);
+    if (known != undefined) {
+      return { type: kPointerType, value: known, tz };
+    }
+
+    const bytes = Buffer.from(text, "utf8");
+    const layout = this.ir.external(kCStringLayout, kPointerType);
+    const data = this.ir.bytes(bytes, true);
+    const array = `[${bytes.length + 1} x i8]`;
+    const value = this.ir.constStruct([
+      this.ir.hexInteger(kIntType, kForeverCount),
+      layout,
+      this.ir.integer(kIntType, `${bytes.length}`),
+      data,
+    ]);
+    const name = this.ir.uniqueName("tz.cstring.");
+    const struct = `{ i64, ptr, i64, ${array} }`;
+    const global = this.ir.global(name, struct, value, false);
+
+    this.cstrings.set(text, global);
+
+    return { type: kPointerType, value: global, tz };
+  }
+
+  private definedOf(type: Type): Type {
+    const inner = this.optionalInner(type);
+    if (inner == undefined) {
+      return type;
+    }
+
+    return inner;
+  }
+
+  private wantedText(expr: Expr, wanted: Type): IrValue | undefined {
+    const inner = this.definedOf(wanted);
+    if (expr.kind != ExprKind.StringLit || !this.isCString(inner)) {
+      return undefined;
+    }
+
+    return this.cstringLiteral(expr.value, inner);
+  }
+
+  private foreignCall(
+    frame: Frame,
+    call: CallExpr,
+    fn: FunctionDecl,
+    shape: FunctionShape,
+  ): IrValue | undefined {
+    const made = frame.made;
+    const given: IrValue[] = [];
+    const args: LLVMValue[] = [];
+    const params: string[] = [];
+
+    for (let index = 0; index < shape.params.length; index++) {
+      const param = shape.params[index];
+      const argument = call.args[index];
+      if (param == undefined) {
+        return undefined;
+      }
+
+      const wanted = this.passedType(param);
+      const expr = argument?.expr;
+      const value = this.foreignArgument(frame, expr, wanted, call.loc);
+      if (value == undefined) {
+        return undefined;
+      }
+
+      given.push(value);
+      args.push(this.foreignValue(frame, value));
+      params.push(this.foreignType(wanted));
+    }
+
+    const result = shape.result;
+    const returned = this.foreignType(result);
+    const callee = this.ir.declare(fn.name, returned, params);
+    const value = made.call(callee, args);
+
+    for (const one of given) {
+      this.dropping(frame, one);
+    }
+
+    return this.foreignResult(frame, fn, result, value);
+  }
+
+  private foreignArgument(
+    frame: Frame,
+    expr: Expr | undefined,
+    wanted: Type,
+    loc: int,
+  ): IrValue | undefined {
+    if (expr == undefined) {
+      const type = this.irType(wanted);
+      if (type == undefined) {
+        return undefined;
+      }
+
+      return { type, value: this.ir.zero(type), tz: wanted };
+    }
+
+    const literal = this.wantedText(expr, wanted);
+    if (literal != undefined) {
+      return literal;
+    }
+
+    const given = this.wantedValue(frame, expr, wanted);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const value = this.converted(frame, given, wanted, loc);
+    if (value == undefined) {
+      return undefined;
+    }
+
+    return value;
+  }
+
+  private foreignValue(frame: Frame, value: IrValue): LLVMValue {
+    const made = frame.made;
+    const type = this.definedOf(value.tz);
+    if (this.isCString(type)) {
+      const none = this.ir.zero(kPointerType);
+      const isAbsent = made.integerCompare(
+        IrIntPredicate.Equal,
+        value.value,
+        none,
+      );
+      const offset = this.ir.integer(kIntType, `${kCStringTextOffset}`);
+      const text = made.element(kByteType, value.value, offset);
+
+      return made.select(isAbsent, none, text);
+    }
+    if (type.kind == TypeKind.Array) {
+      return this.arrayData(frame, value.value);
+    }
+    if (this.isBytesType(type)) {
+      return this.bytesData(frame, value.value);
+    }
+
+    return value.value;
+  }
+
+  private foreignType(type: Type): string {
+    const plain = this.widened(type);
+
+    switch (plain.kind) {
+      case TypeKind.Void:
+        return kVoidType;
+      case TypeKind.Boolean:
+        return kBooleanType;
+      case TypeKind.Int:
+        return `i${plain.bits}`;
+      case TypeKind.Double:
+        return kDoubleType;
+      default:
+        return kPointerType;
+    }
+  }
+
+  private foreignResult(
+    frame: Frame,
+    fn: FunctionDecl,
+    result: Type,
+    value: LLVMValue,
+  ): IrValue | undefined {
+    const type = this.irType(result);
+    if (type == undefined) {
+      return undefined;
+    }
+
+    const isOptional = this.optionalInner(result) != undefined;
+    const target = this.definedOf(result);
+    if (this.isCString(target)) {
+      const copied = this.cstringCopied(frame, value, isOptional, fn);
+
+      return { type, value: copied, tz: result, owned: true };
+    }
+    if (this.isHandleType(target) && !isOptional) {
+      this.notNullChecked(frame, value, fn);
+    }
+
+    return { type, value, tz: result, owned: true };
+  }
+
+  private cstringCopied(
+    frame: Frame,
+    value: LLVMValue,
+    isOptional: boolean,
+    fn: FunctionDecl,
+  ): LLVMValue {
+    const made = frame.made;
+    const params = [kPointerType];
+    const copying = this.ir.declare(kCStringCopy, kPointerType, params);
+    if (!isOptional) {
+      this.notNullChecked(frame, value, fn);
+
+      return made.call(copying, [value]);
+    }
+
+    const none = this.ir.zero(kPointerType);
+    const isAbsent = made.integerCompare(IrIntPredicate.Equal, value, none);
+    const before = made.currentBlock();
+    const copy = made.block("foreign.copy");
+    const end = made.block("foreign.copied");
+
+    made.conditionalBranch(isAbsent, end, copy);
+    made.open(copy);
+
+    const copied = made.call(copying, [value]);
+    const copyEnd = made.currentBlock();
+
+    made.branch(end);
+    made.open(end);
+
+    return made.phi(kPointerType, [none, copied], [before, copyEnd]);
+  }
+
+  private notNullChecked(
+    frame: Frame,
+    value: LLVMValue,
+    fn: FunctionDecl,
+  ): void {
+    const made = frame.made;
+    const none = this.ir.zero(kPointerType);
+    const isNull = made.integerCompare(IrIntPredicate.Equal, value, none);
+    const bad = made.block("foreign.null");
+    const good = made.block("foreign.value");
+
+    made.conditionalBranch(isNull, bad, good);
+    made.open(bad);
+
+    const message = `${fn.name}${kForeignNullText}`;
+
+    this.panic(frame, message);
+    made.unreachable();
+    made.open(good);
+  }
+}

@@ -128,6 +128,15 @@ partial class ExpressionTypes {
       return undefined;
     }
 
+    return this.summaryApplied(call, summary, isTrue, module);
+  }
+
+  private summaryApplied(
+    call: CallExpr,
+    summary: GuardSummary,
+    isTrue: boolean,
+    module: int,
+  ): Map<string, Type> {
     const facts = new Map<string, Type>();
     const side = this.narrowings.summarySide(summary, isTrue);
     if (side == undefined) {
@@ -199,7 +208,43 @@ partial class ExpressionTypes {
     }
 
     const path = key.slice(param.length);
+    const place = slot.key + path;
+    const now = this.currentOf(place, path, slot.type);
+    if (now == undefined) {
+      facts.set(place, narrowed);
 
-    facts.set(slot.key + path, narrowed);
+      return;
+    }
+
+    const kept = this.keptByGuard(now, narrowed);
+    if (kept != undefined) {
+      facts.set(place, kept);
+    }
+  }
+
+  private currentOf(place: string, path: string, type: Type): Type | undefined {
+    if (path == "") {
+      return type;
+    }
+
+    return this.knownFact(place);
+  }
+
+  private keptByGuard(now: Type, narrowed: Type): Type | undefined {
+    if (now.kind == TypeKind.Error || this.relation.converts(now, narrowed)) {
+      return undefined;
+    }
+    if (this.relation.converts(narrowed, now)) {
+      return narrowed;
+    }
+
+    const kept = this.types
+      .unionMembers(now)
+      .filter((part) => this.relation.converts(part, narrowed));
+    if (kept.length == 0) {
+      return undefined;
+    }
+
+    return this.store.unionOf(kept);
   }
 }

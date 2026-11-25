@@ -14,6 +14,7 @@ export const kExitName = "exit";
 export const kProcessName = "process";
 export const kInferenceRounds = 8;
 export const kArrayName = "Array";
+export const kFromName = "from";
 export const kIsArrayName = "isArray";
 export const kStringShape = "string";
 export const kDoubleShape = "double";
@@ -34,6 +35,7 @@ export const kSpecialMethods = [
   "match",
 ];
 export const kThisName = "this";
+export const kFilterName = "filter";
 export const kSuperName = "super";
 export const kTupleJoin = "join";
 export const kToStringName = "toString";
@@ -170,6 +172,7 @@ export const kStrictGlobals = [
   "decodeURIComponent",
 ];
 export const kNumberName = "Number";
+export const kNumberErrorName = "NumberError";
 export const kEscapeName = "escape";
 export const kUnescapeName = "unescape";
 export const kEncodeComponentName = "encodeURIComponent";
@@ -359,3 +362,21 @@ export const kAlreadyStarted = " already started";
 export const kNotLoadedYet = " not loaded yet";
 export const kGlobalThisName = "globalThis";
 export const kCryptoName = "crypto";
+export const kBitName = "Bit";
+export const kBitWraps = new Map<string, int>([
+  ["Wrap32", 32],
+  ["Wrap64", 64],
+]);
+export const kBitHalves = new Map<string, string[]>([
+  ["mul64", ["hi", "lo"]],
+  ["add64", ["sum", "carry"]],
+  ["sub64", ["diff", "borrow"]],
+]);
+export const kBitCounts = [
+  "leadingZeros32",
+  "leadingZeros64",
+  "trailingZeros32",
+  "trailingZeros64",
+  "onesCount32",
+  "onesCount64",
+];

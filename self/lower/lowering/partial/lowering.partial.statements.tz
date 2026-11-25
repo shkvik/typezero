@@ -1,9 +1,9 @@
-import { Expr } from "../../../program/ast/types/ast.types.expressions.tz";
 import {
-  BindingKind,
-  NameOrigin,
-  VarDeclarator,
-} from "../../../program/ast/types/ast.types.patterns.tz";
+  BinaryOp,
+  Expr,
+  ExprKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { VarDeclarator } from "../../../program/ast/types/ast.types.patterns.tz";
 import {
   IfStmt,
   JumpStmt,
@@ -14,6 +14,7 @@ import {
   VarDeclStmt,
 } from "../../../program/ast/types/ast.types.statements.tz";
 import { Module } from "../../../program/module/types/module.types.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { LLVMBlock } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import { kDebugger, kNoOwner } from "../const/lowering.const.tz";
@@ -40,6 +41,8 @@ partial class Lowering {
         return this.forOfLoop(frame, statement);
       case StmtKind.Labeled:
         return this.labeled(frame, statement);
+      case StmtKind.Switch:
+        return this.switchStatement(frame, statement);
       case StmtKind.Return:
         return this.returned(frame, statement);
       case StmtKind.Break:
@@ -52,6 +55,7 @@ partial class Lowering {
       case StmtKind.Debugger:
         return this.runtimeCall(frame.made, kDebugger, []);
       case StmtKind.Empty:
+      case StmtKind.Enum:
       case StmtKind.TypeAlias:
       case StmtKind.Handle:
         return;
@@ -93,7 +97,7 @@ partial class Lowering {
 
   private moduleGlobal(module: int, decl: VarDeclarator): void {
     const tz = this.values.variableOf(module, decl.loc);
-    const type = this.typeOfVariable(module, decl);
+    const type = this.typeOfVariable(module, decl, tz);
     if (tz == undefined || type == undefined) {
       return;
     }
@@ -111,16 +115,26 @@ partial class Lowering {
     }
   }
 
-  private typeOfVariable(module: int, decl: VarDeclarator): string | undefined {
-    const isPlain =
-      decl.form.kind == BindingKind.Plain && decl.origin == NameOrigin.Written;
-    if (!isPlain) {
-      this.notLowered(module, decl.loc, "a destructuring pattern");
-
-      return undefined;
+  private variableTypeIn(frame: Frame, decl: VarDeclarator): Type | undefined {
+    const tz = this.values.variableOf(frame.module, decl.loc);
+    const init = decl.init;
+    if (init != undefined && init.kind == ExprKind.Binary) {
+      if (init.op == BinaryOp.Nullish) {
+        return this.nullishResult(frame, init) ?? tz;
+      }
+    }
+    if (tz == undefined || tz.kind != TypeKind.Error || init == undefined) {
+      return tz;
     }
 
-    const tz = this.values.variableOf(module, decl.loc);
+    return this.typeIn(frame, init) ?? tz;
+  }
+
+  private typeOfVariable(
+    module: int,
+    decl: VarDeclarator,
+    tz: Type | undefined,
+  ): string | undefined {
     if (tz == undefined) {
       this.notLowered(module, decl.loc, "a variable without a type");
 
@@ -168,9 +182,35 @@ partial class Lowering {
     this.stored(frame, place, value);
   }
 
+  private boundPlace(
+    frame: Frame,
+    decl: VarDeclarator,
+    item: Type,
+    isUnknown: boolean,
+  ): Place | undefined {
+    if (!isUnknown) {
+      return this.localPlace(frame, decl);
+    }
+
+    const type = this.typeOfVariable(frame.module, decl, item);
+    if (type == undefined) {
+      return undefined;
+    }
+
+    const pointer = frame.made.slot(type, decl.name);
+    const place: Place = { pointer, type, tz: item, owner: frame.id };
+    const key = this.placeKey(frame.module, decl.loc);
+
+    frame.made.entryStore(this.ir.zero(type), pointer);
+    this.places.set(key, place);
+    this.keepPlace(frame, place);
+
+    return place;
+  }
+
   private localPlace(frame: Frame, decl: VarDeclarator): Place | undefined {
-    const tz = this.values.variableOf(frame.module, decl.loc);
-    const type = this.typeOfVariable(frame.module, decl);
+    const tz = this.variableTypeIn(frame, decl);
+    const type = this.typeOfVariable(frame.module, decl, tz);
     if (tz == undefined || type == undefined) {
       return undefined;
     }
@@ -288,6 +328,11 @@ partial class Lowering {
   }
 
   private returned(frame: Frame, statement: ReturnStmt): void {
+    const inline = frame.inline;
+    if (inline != undefined) {
+      return this.inlineReturned(frame, statement, inline);
+    }
+
     const given = statement.value;
     const result = frame.result;
     if (given == undefined || result == undefined) {
@@ -295,8 +340,14 @@ partial class Lowering {
 
       return frame.made.returnedVoid();
     }
+    if (result.kind == TypeKind.Void) {
+      this.discarded(frame, given);
+      this.cleanupsTo(frame, 0);
 
-    const value = this.value(frame, given);
+      return frame.made.returnedVoid();
+    }
+
+    const value = this.wantedValue(frame, given, result);
     if (value == undefined) {
       return;
     }

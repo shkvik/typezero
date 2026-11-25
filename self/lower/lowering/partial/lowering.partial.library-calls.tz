@@ -1,0 +1,283 @@
+import {
+  CallExpr,
+  NameExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrIntPredicate } from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kBooleanType,
+  kChildModule,
+  kFlagType,
+  kIntType,
+  kPathBasename,
+  kPathDirname,
+  kPathExtname,
+  kPathIsAbsolute,
+  kFsModule,
+  kNumberName,
+  kOsModule,
+  kOsText,
+  kOsTexts,
+  kParseIntName,
+  kPathJoin,
+  kPathModule,
+  kPathNormalize,
+  kPathRelative,
+  kPathResolve,
+  kPathStyle,
+  kPointerType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private libraryCall(
+    frame: Frame,
+    call: CallExpr,
+    callee: NameExpr,
+    module: int,
+  ): IrValue | undefined {
+    if (callee.name == kNumberName) {
+      return this.numberOf(frame, call);
+    }
+    if (callee.name == kParseIntName) {
+      return this.parsedInteger(frame, call);
+    }
+
+    const opened = this.program.modules[module];
+    if (opened != undefined && opened.name == kFsModule) {
+      return this.filesCall(frame, call, callee);
+    }
+    if (opened != undefined && opened.name == kChildModule) {
+      return this.childCall(frame, call, callee);
+    }
+    if (opened != undefined && opened.name == kOsModule) {
+      return this.osCall(frame, call, callee);
+    }
+    if (opened == undefined || opened.name != kPathModule) {
+      this.notLowered(frame.module, call.loc, "a call of this function");
+
+      return undefined;
+    }
+
+    switch (callee.name) {
+      case "join":
+      case "resolve":
+        return this.pathJoined(frame, call, callee.name);
+      case "dirname":
+      case "extname":
+      case "normalize":
+        return this.pathPart(frame, call, callee.name);
+      case "basename":
+        return this.pathBase(frame, call);
+      case "relative":
+        return this.pathRelative(frame, call);
+      case "isAbsolute":
+        return this.pathAbsolute(frame, call);
+      default:
+        this.notLowered(frame.module, call.loc, "a call of this function");
+
+        return undefined;
+    }
+  }
+
+  private osCall(
+    frame: Frame,
+    call: CallExpr,
+    callee: NameExpr,
+  ): IrValue | undefined {
+    const which = kOsTexts.indexOf(callee.name);
+    if (which < 0 || call.args.length > 0) {
+      this.notLowered(frame.module, call.loc, "a call of this function");
+
+      return undefined;
+    }
+
+    const kind = this.ir.integer(kIntType, `${which}`);
+
+    return this.textOut(frame, kOsText, [kIntType], [kind]);
+  }
+
+  private pathTexts(frame: Frame, call: CallExpr): IrValue[] | undefined {
+    const texts: IrValue[] = [];
+    const string = this.store.plain(TypeKind.String);
+
+    for (const argument of call.args) {
+      const given = this.value(frame, argument.expr);
+      if (given == undefined || argument.spread) {
+        this.notLowered(frame.module, call.loc, "these arguments");
+
+        return undefined;
+      }
+
+      const text = this.converted(frame, given, string, argument.expr.loc);
+      if (text == undefined) {
+        return undefined;
+      }
+
+      texts.push(text);
+    }
+
+    return texts;
+  }
+
+  private pathStyle(): LLVMValue {
+    return this.ir.integer(kIntType, `${kPathStyle}`);
+  }
+
+  private textsDropped(frame: Frame, texts: IrValue[]): void {
+    for (const text of texts) {
+      this.dropping(frame, text);
+    }
+  }
+
+  private pathJoined(
+    frame: Frame,
+    call: CallExpr,
+    name: string,
+  ): IrValue | undefined {
+    const texts = this.pathTexts(frame, call);
+    const string = this.store.plain(TypeKind.String);
+    const descriptor = this.descriptor(string);
+    if (texts == undefined || descriptor == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const array = this.newArray(frame, descriptor, texts.length);
+    const data = this.arrayData(frame, array);
+
+    for (let index = 0; index < texts.length; index++) {
+      const text = texts[index];
+      if (text == undefined) {
+        continue;
+      }
+
+      const owned = this.owning(frame, text);
+      const position = this.ir.integer(kIntType, `${index}`);
+      const at = made.element(text.type, data, position);
+
+      made.store(owned.value, at);
+    }
+
+    const runtime = this.pick(name == "join", kPathJoin, kPathResolve);
+    const params = [kPointerType, kIntType];
+    const result = this.textOut(frame, runtime, params, [
+      array,
+      this.pathStyle(),
+    ]);
+    const list: IrValue = {
+      type: kPointerType,
+      value: array,
+      tz: this.store.arrayOf(string),
+      owned: true,
+    };
+
+    this.dropping(frame, list);
+
+    return result;
+  }
+
+  private pathPart(
+    frame: Frame,
+    call: CallExpr,
+    name: string,
+  ): IrValue | undefined {
+    const texts = this.pathTexts(frame, call);
+    const text = texts?.[0];
+    if (texts == undefined || text == undefined) {
+      return undefined;
+    }
+
+    const runtime = this.pathPartRuntime(name);
+    const args = this.textParts(frame, text).concat([this.pathStyle()]);
+    const params = [kPointerType, kIntType, kIntType];
+    const result = this.textOut(frame, runtime, params, args);
+
+    this.textsDropped(frame, texts);
+
+    return result;
+  }
+
+  private pathPartRuntime(name: string): string {
+    switch (name) {
+      case "dirname":
+        return kPathDirname;
+      case "extname":
+        return kPathExtname;
+      default:
+        return kPathNormalize;
+    }
+  }
+
+  private pathBase(frame: Frame, call: CallExpr): IrValue | undefined {
+    const texts = this.pathTexts(frame, call);
+    const text = texts?.[0];
+    if (texts == undefined || text == undefined) {
+      return undefined;
+    }
+
+    const suffix = texts[1];
+    const hasSuffix = this.flagIf(suffix != undefined, 1);
+    const args = this.textParts(frame, text)
+      .concat(this.separatorParts(frame, suffix))
+      .concat([
+        this.ir.integer(kFlagType, `${hasSuffix}`),
+        this.pathStyle(),
+      ]);
+    const params = [
+      kPointerType,
+      kIntType,
+      kPointerType,
+      kIntType,
+      kFlagType,
+      kIntType,
+    ];
+    const result = this.textOut(frame, kPathBasename, params, args);
+
+    this.textsDropped(frame, texts);
+
+    return result;
+  }
+
+  private pathRelative(frame: Frame, call: CallExpr): IrValue | undefined {
+    const texts = this.pathTexts(frame, call);
+    const from = texts?.[0];
+    const to = texts?.[1];
+    if (texts == undefined || from == undefined || to == undefined) {
+      return undefined;
+    }
+
+    const args = this.textParts(frame, from)
+      .concat(this.textParts(frame, to))
+      .concat([this.pathStyle()]);
+    const params = [kPointerType, kIntType, kPointerType, kIntType, kIntType];
+    const result = this.textOut(frame, kPathRelative, params, args);
+
+    this.textsDropped(frame, texts);
+
+    return result;
+  }
+
+  private pathAbsolute(frame: Frame, call: CallExpr): IrValue | undefined {
+    const texts = this.pathTexts(frame, call);
+    const text = texts?.[0];
+    if (texts == undefined || text == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const params = [kPointerType, kIntType, kIntType];
+    const callee = this.ir.declare(kPathIsAbsolute, kFlagType, params);
+    const args = this.textParts(frame, text).concat([this.pathStyle()]);
+    const flag = made.call(callee, args);
+    const zero = this.ir.zero(kFlagType);
+    const value = made.integerCompare(IrIntPredicate.NotEqual, flag, zero);
+    const tz = this.store.plain(TypeKind.Boolean);
+
+    this.textsDropped(frame, texts);
+
+    return { type: kBooleanType, value, tz };
+  }
+}

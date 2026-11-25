@@ -1,10 +1,12 @@
 import {
   BinaryExpr,
   BinaryOp,
+  ExprKind,
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import { TypeKind } from "../../../program/type/types/type.types.tz";
 import {
   IrIntPredicate,
+  IrOpcode,
   IrRealPredicate,
 } from "../../ir-function/types/ir-function.types.tz";
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
@@ -46,6 +48,16 @@ partial class Lowering {
     left: IrValue,
     right: IrValue,
   ): LLVMValue | undefined {
+    if (right.tz.kind == TypeKind.Undefined) {
+      return this.emptyCompared(frame, expr.op, left);
+    }
+    if (left.tz.kind == TypeKind.Undefined) {
+      return this.emptyCompared(frame, expr.op, right);
+    }
+    if (this.isDecimal(left.tz) || this.isDecimal(right.tz)) {
+      return this.decimalsCompared(frame, expr.op, left, right);
+    }
+
     const isNumber =
       (this.isInteger(left.tz) || this.isDouble(left.tz)) &&
       (this.isInteger(right.tz) || this.isDouble(right.tz));
@@ -63,9 +75,94 @@ partial class Lowering {
       return this.stringsCompared(frame, expr.op, left, right);
     }
 
-    this.notLowered(frame.module, expr.loc, "a comparison of these types");
+    const isReference =
+      left.type == kPointerType && right.type == kPointerType;
+    if (isEquality && isReference) {
+      const predicate = this.integerPredicate(expr.op, false);
+
+      return frame.made.integerCompare(predicate, left.value, right.value);
+    }
+
+    const leftInner = this.optionalInner(left.tz);
+    const rightInner = this.optionalInner(right.tz);
+    const isOptional = leftInner != undefined || rightInner != undefined;
+    if (isEquality && isOptional) {
+      return this.optionalsCompared(frame, expr, left, right);
+    }
+
+    const first = this.kindName(left.tz);
+    const second = this.kindName(right.tz);
+    const form = `a comparison of ${first} and ${second}`;
+
+    this.notLowered(frame.module, expr.loc, form);
 
     return undefined;
+  }
+
+  private emptyCompared(
+    frame: Frame,
+    op: BinaryOp,
+    value: IrValue,
+  ): LLVMValue {
+    const made = frame.made;
+    const yes = this.ir.integer(kBooleanType, "1");
+    let has: LLVMValue = yes;
+
+    if (this.optionalInner(value.tz) != undefined) {
+      has = this.hasValue(frame, value);
+    }
+    if (op == BinaryOp.Ne) {
+      return has;
+    }
+
+    return made.binary(IrOpcode.Xor, has, yes);
+  }
+
+  private optionalsCompared(
+    frame: Frame,
+    expr: BinaryExpr,
+    left: IrValue,
+    right: IrValue,
+  ): LLVMValue | undefined {
+    const made = frame.made;
+    const leftHas = this.hasValue(frame, left);
+    const rightHas = this.hasValue(frame, right);
+    const first = this.presentPart(frame, left);
+    const second = this.presentPart(frame, right);
+    const same: BinaryExpr = {
+      kind: ExprKind.Binary,
+      loc: expr.loc,
+      op: BinaryOp.Eq,
+      lhs: expr.lhs,
+      rhs: expr.rhs,
+    };
+    const isInnerEqual = this.compared(frame, same, first, second);
+    if (isInnerEqual == undefined) {
+      return undefined;
+    }
+
+    const isBothSet = made.binary(IrOpcode.And, leftHas, rightHas);
+    const isNoneSet = made.binary(IrOpcode.Or, leftHas, rightHas);
+    const yes = this.ir.integer(kBooleanType, "1");
+    const isBothEmpty = made.binary(IrOpcode.Xor, isNoneSet, yes);
+    const isMatch = made.binary(IrOpcode.And, isBothSet, isInnerEqual);
+    const isEqual = made.binary(IrOpcode.Or, isMatch, isBothEmpty);
+    if (expr.op == BinaryOp.Eq) {
+      return isEqual;
+    }
+
+    return made.binary(IrOpcode.Xor, isEqual, yes);
+  }
+
+  private presentPart(frame: Frame, value: IrValue): IrValue {
+    const inner = this.optionalInner(value.tz);
+    if (inner == undefined) {
+      return value;
+    }
+
+    const inside = this.insideValue(frame, value, inner);
+
+    return { type: inside.type, value: inside.value, tz: inside.tz };
   }
 
   private numbersCompared(

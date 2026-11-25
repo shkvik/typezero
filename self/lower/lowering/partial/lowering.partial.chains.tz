@@ -1,0 +1,294 @@
+import {
+  BinaryExpr,
+  BinaryOp,
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NameExpr,
+  OptionalChainExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { Lowering } from "../lowering.tz";
+import { kThisName } from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private typeOf(expr: Expr): Type | undefined {
+    return this.knownTypes.get(expr) ?? this.answers.typeOf(expr);
+  }
+
+  private typeIn(frame: Frame, expr: Expr): Type | undefined {
+    const known = this.typeOf(expr);
+    if (known != undefined && known.kind != TypeKind.Error) {
+      return known;
+    }
+
+    switch (expr.kind) {
+      case ExprKind.Name:
+        return this.declaredTypeOf(frame, expr) ?? known;
+      case ExprKind.Member:
+        return this.fieldTypeOf(frame, expr) ?? known;
+      case ExprKind.Call:
+        return this.resultTypeOf(frame, expr) ?? known;
+      case ExprKind.Binary:
+        if (expr.op != BinaryOp.Nullish) {
+          return known;
+        }
+
+        return this.nullishTypeIn(frame, expr) ?? known;
+      case ExprKind.OptionalChain:
+        return this.chainTypeIn(frame, expr) ?? known;
+      default:
+        return this.literalTypeOf(expr) ?? known;
+    }
+  }
+
+  private literalTypeOf(expr: Expr): Type | undefined {
+    switch (expr.kind) {
+      case ExprKind.StringLit:
+        return this.store.plain(TypeKind.String);
+      case ExprKind.BoolLit:
+        return this.store.plain(TypeKind.Boolean);
+      case ExprKind.IntLit:
+        return this.store.integer(64, false);
+      case ExprKind.Undefined:
+        return this.store.plain(TypeKind.Undefined);
+      default:
+        return undefined;
+    }
+  }
+
+  private nullishTypeIn(frame: Frame, expr: BinaryExpr): Type | undefined {
+    const left = this.typeIn(frame, expr.lhs);
+    const right = this.typeIn(frame, expr.rhs);
+    if (left == undefined || right == undefined) {
+      return undefined;
+    }
+    if (left.kind == TypeKind.Error || right.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    const defined = this.definedOf(left);
+    if (this.widened(right) == defined) {
+      return defined;
+    }
+
+    return this.store.unionOf([defined, right]);
+  }
+
+  private chainTypeIn(
+    frame: Frame,
+    expr: OptionalChainExpr,
+  ): Type | undefined {
+    const inner = this.typeIn(frame, expr.chain);
+    if (inner == undefined || inner.kind == TypeKind.Error) {
+      return undefined;
+    }
+
+    const empty = this.store.plain(TypeKind.Undefined);
+
+    return this.store.unionOf([inner, empty]);
+  }
+
+  private resultTypeOf(frame: Frame, call: CallExpr): Type | undefined {
+    const callee = call.callee;
+    if (callee.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    const object = this.typeIn(frame, callee.object);
+    if (object != undefined && object.kind == TypeKind.Dict) {
+      return this.dictResultOf(callee.name, object);
+    }
+    if (object == undefined || object.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const decl = this.values.classDeclOf(object);
+    const fn = decl?.methods.find((one) => one.name == callee.name);
+    if (decl == undefined || fn == undefined) {
+      return undefined;
+    }
+
+    return this.methodShape(object.module, decl, fn)?.result;
+  }
+
+  private dictResultOf(name: string, dict: Type): Type | undefined {
+    if (dict.kind != TypeKind.Dict || name != "get") {
+      return undefined;
+    }
+
+    const empty = this.store.plain(TypeKind.Undefined);
+
+    return this.store.unionOf([dict.value, empty]);
+  }
+
+  private declaredTypeOf(frame: Frame, expr: NameExpr): Type | undefined {
+    const self = frame.self;
+    if (expr.name == kThisName && self != undefined) {
+      return self.tz;
+    }
+
+    const target = this.values.valueTargetOf(expr, frame.module);
+    if (target == undefined) {
+      return undefined;
+    }
+
+    const key = this.placeKey(target.module, target.loc);
+
+    return this.places.get(key)?.tz;
+  }
+
+  private fieldTypeOf(frame: Frame, expr: MemberExpr): Type | undefined {
+    const object = this.typeIn(frame, expr.object);
+    if (object == undefined) {
+      return undefined;
+    }
+
+    const parts = this.objectParts(this.definedOf(object));
+    const types: Type[] = [];
+
+    for (const part of parts) {
+      const layout = this.layoutOf(part);
+      const field = layout?.fields.find((one) => one.name == expr.name);
+      if (field != undefined) {
+        types.push(field.type);
+      }
+    }
+
+    const first = types[0];
+    if (first == undefined) {
+      return undefined;
+    }
+    if (types.every((type) => type == first)) {
+      return first;
+    }
+
+    return this.store.unionOf(types);
+  }
+
+  private objectParts(type: Type): Type[] {
+    if (type.kind == TypeKind.Union) {
+      return type.parts;
+    }
+
+    return [type];
+  }
+
+  private readyValue(expr: Expr): IrValue | undefined {
+    const ready = this.evaluated.get(expr);
+    if (ready == undefined) {
+      return undefined;
+    }
+
+    this.evaluated.delete(expr);
+
+    return ready;
+  }
+
+  private chainValue(
+    frame: Frame,
+    expr: OptionalChainExpr,
+  ): IrValue | undefined {
+    const made = frame.made;
+    const result = this.typeIn(frame, expr);
+    const type = this.typeOrUndefined(result);
+    if (result == undefined || type == undefined) {
+      const kind = this.kindName(result);
+
+      this.notLowered(frame.module, expr.loc, `a chain of type ${kind}`);
+
+      return undefined;
+    }
+
+    const missing = made.block("chain.missing");
+    const end = made.block("chain.end");
+
+    this.chainExits.push(missing);
+
+    const given = this.value(frame, expr.chain);
+
+    this.chainExits.pop();
+
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const converted = this.converted(frame, given, result, expr.loc);
+    if (converted == undefined) {
+      return undefined;
+    }
+
+    const owned = this.owning(frame, converted);
+    const valueEnd = made.currentBlock();
+
+    made.branch(end);
+    made.open(missing);
+    made.branch(end);
+    made.open(end);
+
+    const none = this.ir.zero(type);
+    const value = made.phi(type, [owned.value, none], [valueEnd, missing]);
+
+    return { type, value, tz: result, owned: true };
+  }
+
+  private chainedObject(frame: Frame, expr: Expr): boolean {
+    const object = this.optionalObject(expr);
+    if (object == undefined) {
+      return true;
+    }
+
+    const exit = this.chainExits[this.chainExits.length - 1];
+    const given = this.value(frame, object);
+    if (exit == undefined || given == undefined) {
+      this.notLowered(frame.module, expr.loc, "this optional access");
+
+      return false;
+    }
+
+    const made = frame.made;
+    const inner = this.optionalInner(given.tz);
+    const has = this.hasValue(frame, given);
+    const present = made.block("chain.present");
+
+    made.conditionalBranch(has, present, exit);
+    made.open(present);
+
+    if (inner == undefined) {
+      this.evaluated.set(object, given);
+
+      return true;
+    }
+
+    const inside = this.insideValue(frame, given, inner);
+
+    this.evaluated.set(object, inside);
+    this.knownTypes.set(object, inner);
+
+    return true;
+  }
+
+  private optionalObject(expr: Expr): Expr | undefined {
+    switch (expr.kind) {
+      case ExprKind.Member:
+      case ExprKind.Index:
+        if (!expr.optional) {
+          return undefined;
+        }
+
+        return expr.object;
+      case ExprKind.Call: {
+        const callee = expr.callee;
+        if (callee.kind != ExprKind.Member || !callee.optional) {
+          return undefined;
+        }
+
+        return callee.object;
+      }
+      default:
+        return undefined;
+    }
+  }
+}

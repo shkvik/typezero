@@ -133,8 +133,9 @@ export class NarrowingRules {
   public isGuardable(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.Union:
-      case TypeKind.Instance:
         return true;
+      case TypeKind.Instance:
+        return this.store.isBase(type);
       default:
         return false;
     }

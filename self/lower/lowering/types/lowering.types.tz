@@ -1,6 +1,13 @@
+import { InstanceField } from "../../../program/expression-answers/types/expression-answers.types.tz";
 import { Type } from "../../../program/type/types/type.types.tz";
 import { IrFunction } from "../../ir-function/ir-function.tz";
 import { LLVMBlock, LLVMValue } from "../../llvm-api/llvm-api.tz";
+
+export enum CountForm {
+  Text,
+  Decimal,
+  Pointer,
+}
 
 export type IrValue = {
   readonly type: string;
@@ -31,6 +38,70 @@ export type Frame = {
   readonly loops: LoopTarget[];
   readonly scopes: Place[][];
   readonly self?: Place;
+  readonly inline?: InlineTarget;
+  readonly place?: string;
+};
+
+export type CallbackStep = {
+  readonly item: IrValue;
+  readonly index: IrValue;
+  readonly array: IrValue;
+  readonly done: LLVMBlock;
+};
+
+export type GivenText = {
+  readonly value: LLVMValue;
+  readonly text: IrValue;
+  readonly given: int;
+};
+
+export type ResultLayout = {
+  readonly struct: string;
+  readonly value: int;
+  readonly error: int;
+  readonly ok: int;
+  readonly site: int;
+};
+
+export type ResultShape = {
+  readonly value: LLVMValue;
+  readonly error: LLVMValue;
+  readonly size: int;
+  readonly valueOffset: int;
+  readonly errorOffset: int;
+  readonly okOffset: int;
+  readonly siteOffset: int;
+};
+
+export type FileCallParts = {
+  readonly type: Type;
+  readonly value: Type;
+  readonly maker: LLVMValue;
+};
+
+export type EachLoop = {
+  readonly item: IrValue;
+  readonly index: IrValue;
+  readonly counter: LLVMValue;
+  readonly cond: LLVMBlock;
+  readonly step: LLVMBlock;
+  readonly done: LLVMBlock;
+};
+
+export type TextArguments = {
+  readonly texts: IrValue[];
+  readonly numbers: LLVMValue[];
+};
+
+export type GivenNumber = {
+  readonly value: LLVMValue;
+  readonly given: int;
+};
+
+export type InlineTarget = {
+  readonly result?: Place;
+  readonly end: LLVMBlock;
+  readonly depth: int;
 };
 
 export type Unlowered = {
@@ -67,4 +138,21 @@ export type ClassLayout = {
   readonly size: int;
   readonly fields: LayoutField[];
   readonly descriptor: LLVMValue;
+  readonly classId: int;
+  readonly shape: LayoutShape;
+  readonly drop: LLVMValue;
+};
+
+export type DictLayout = {
+  readonly descriptor: LLVMValue;
+  readonly keyOffset: int;
+  readonly valueOffset: int;
+  readonly key: string;
+  readonly value: string;
+};
+
+export type LayoutShape = {
+  readonly name: string;
+  readonly fields: InstanceField[];
+  readonly flags: int;
 };

@@ -1,0 +1,121 @@
+import { IndexExpr } from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrFunction } from "../../ir-function/ir-function.tz";
+import {
+  IrCallee,
+  IrIntPredicate,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kFlagType,
+  kIntType,
+  kPointerType,
+  kStringEqual,
+} from "../const/lowering.const.tz";
+import { ClassLayout, Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private keyedIndexed(
+    frame: Frame,
+    expr: IndexExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const keyType = this.typeIn(frame, expr.index);
+    const layout = this.layoutOf(object);
+    const names = this.textLiterals(this.widenedKey(keyType));
+    const first = layout?.fields[0];
+    if (layout == undefined || first == undefined || names.length == 0) {
+      this.notLowered(frame.module, expr.loc, "an index on type object");
+
+      return undefined;
+    }
+
+    const isSameKind = layout.fields.every((field) => field.ir == first.ir);
+    if (!isSameKind) {
+      this.notLowered(frame.module, expr.loc, "an index on these fields");
+
+      return undefined;
+    }
+
+    const holder = this.value(frame, expr.object);
+    const key = this.value(frame, expr.index);
+    if (holder == undefined || key == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const finder = this.keyedFinder(layout, names);
+    const text = made.extract(key.value, 0);
+    const meta = made.extract(key.value, 1);
+    const pointer = made.call(finder, [holder.value, text, meta]);
+    const loaded: IrValue = {
+      type: first.ir,
+      value: made.load(first.ir, pointer),
+      tz: first.type,
+    };
+    const kept = this.owning(frame, loaded);
+
+    this.dropping(frame, key);
+    this.dropping(frame, holder);
+
+    return kept;
+  }
+
+  private widenedKey(type: Type | undefined): Type {
+    if (type == undefined) {
+      return this.store.plain(TypeKind.Never);
+    }
+
+    return type;
+  }
+
+  private keyedFinder(layout: ClassLayout, names: string[]): IrCallee {
+    const key = `${layout.struct} ${names.join(" ")}`;
+    const known = this.keyedFinders.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const name = this.ir.uniqueName("tz.keyed.");
+    const params = [kPointerType, kPointerType, kIntType];
+    const made = new IrFunction(this.ir, name, kPointerType, params);
+    const object = made.param(0);
+    const text = made.param(1);
+    const meta = made.param(2);
+    const equal = this.ir.declare(kStringEqual, kFlagType, [
+      kPointerType,
+      kIntType,
+      kPointerType,
+      kIntType,
+    ]);
+    const zero = this.ir.zero(kFlagType);
+    let fallback: LLVMValue = made.field(layout.struct, object, 0);
+
+    for (const one of names) {
+      const field = layout.fields.find((spot) => spot.name == one);
+      if (field == undefined) {
+        continue;
+      }
+
+      const literal = this.stringValue(one).value;
+      const literalText = made.extract(literal, 0);
+      const literalMeta = made.extract(literal, 1);
+      const same = made.call(equal, [text, meta, literalText, literalMeta]);
+      const isSame = made.integerCompare(IrIntPredicate.NotEqual, same, zero);
+      const found = made.block("keyed.found");
+      const next = made.block("keyed.next");
+
+      made.conditionalBranch(isSame, found, next);
+      made.open(found);
+      made.returned(made.field(layout.struct, object, field.index));
+      made.open(next);
+      fallback = made.field(layout.struct, object, 0);
+    }
+
+    made.finishValue(fallback);
+    this.keyedFinders.set(key, made.callee);
+
+    return made.callee;
+  }
+}

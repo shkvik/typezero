@@ -38,11 +38,31 @@ partial class Lowering {
 
       return this.converted(frame, inside, target, loc);
     }
+    const isResults =
+      value.tz.kind == TypeKind.Result && target.kind == TypeKind.Result;
+    if (isResults && value.tz != target) {
+      return this.resultConverted(frame, value, target);
+    }
+    if (this.isReshaped(value.tz, target)) {
+      return this.reshaped(frame, value, target, loc);
+    }
     if (type == value.type) {
       return { type, value: value.value, tz: target, owned: value.owned };
     }
     if (this.isInteger(value.tz) && this.isInteger(target)) {
       return this.integerConverted(frame, value, target, type);
+    }
+    if (this.isDecimal(target)) {
+      const decimal = this.decimalFrom(frame, value);
+      if (decimal != undefined) {
+        return decimal;
+      }
+    }
+    if (this.isDecimal(value.tz) && this.isDouble(target)) {
+      return this.decimalToDouble(frame, value);
+    }
+    if (this.isDouble(value.tz) && this.isInteger(target)) {
+      return this.saturated(frame, value, target, type);
     }
     if (this.isInteger(value.tz) && this.isDouble(target)) {
       const opcode = this.integerToDouble(value.tz);
@@ -101,5 +121,19 @@ partial class Lowering {
 
   private integerValue(type: string, text: string, tz: Type): IrValue {
     return { type, value: this.ir.integer(type, text), tz };
+  }
+
+  private saturated(
+    frame: Frame,
+    value: IrValue,
+    target: Type,
+    type: string,
+  ): IrValue {
+    const sign = this.pick(this.isUnsigned(target), "u", "s");
+    const name = `llvm.fpto${sign}i.sat.${type}.f64`;
+    const callee = this.ir.declare(name, type, [kDoubleType]);
+    const made = frame.made.call(callee, [value.value]);
+
+    return { type, value: made, tz: target };
   }
 }

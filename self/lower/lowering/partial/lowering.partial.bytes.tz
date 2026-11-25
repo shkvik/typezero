@@ -1,0 +1,300 @@
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  IndexExpr,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import {
+  IrIntPredicate,
+  IrOpcode,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kBufferAlloc,
+  kBufferEncoding,
+  kBufferFromText,
+  kBufferName,
+  kBufferToText,
+  kByteType,
+  kBytesLengthField,
+  kBytesStruct,
+  kBytesSubarray,
+  kFlagType,
+  kIntType,
+  kPointerType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private bytesLength(frame: Frame, bytes: LLVMValue): LLVMValue {
+    const made = frame.made;
+    const field = made.field(kBytesStruct, bytes, kBytesLengthField);
+    const length = made.load(kFlagType, field);
+
+    return made.cast(IrOpcode.SExt, length, kIntType);
+  }
+
+  private bytesMember(frame: Frame, expr: MemberExpr): IrValue | undefined {
+    if (expr.name != "length") {
+      this.notLowered(frame.module, expr.loc, "this member of bytes");
+
+      return undefined;
+    }
+
+    const bytes = this.value(frame, expr.object);
+    if (bytes == undefined) {
+      return undefined;
+    }
+
+    const value = this.bytesLength(frame, bytes.value);
+    const tz = this.store.integer(64, false);
+
+    this.dropping(frame, bytes);
+
+    return { type: kIntType, value, tz };
+  }
+
+  private bytesIndexed(
+    frame: Frame,
+    expr: IndexExpr,
+    result: Type,
+  ): IrValue | undefined {
+    const resultIr = this.irType(result);
+    const bytes = this.value(frame, expr.object);
+    const index = this.value(frame, expr.index);
+    if (resultIr == undefined || bytes == undefined || index == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const position = this.toLong(frame, index).value;
+    const length = this.bytesLength(frame, bytes.value);
+    const isInside = made.integerCompare(
+      IrIntPredicate.UnsignedLess,
+      position,
+      length,
+    );
+    const before = made.currentBlock();
+    const read = made.block("byte.read");
+    const end = made.block("byte.end");
+
+    made.conditionalBranch(isInside, read, end);
+    made.open(read);
+
+    const data = this.bytesData(frame, bytes.value);
+    const address = made.element(kByteType, data, position);
+    const byte = made.load(kByteType, address);
+    const tz = this.store.integer(8, true);
+    const loaded: IrValue = { type: kByteType, value: byte, tz };
+    const placed = this.converted(frame, loaded, result, expr.loc);
+    const readEnd = made.currentBlock();
+
+    made.branch(end);
+    made.open(end);
+
+    if (placed == undefined) {
+      return undefined;
+    }
+
+    const missing = this.ir.zero(resultIr);
+    const value = made.phi(
+      resultIr,
+      [missing, placed.value],
+      [before, readEnd],
+    );
+
+    this.dropping(frame, bytes);
+
+    return { type: resultIr, value, tz: result };
+  }
+
+  private bytesMethod(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+  ): IrValue | undefined {
+    switch (member.name) {
+      case "toString":
+        return this.bytesText(frame, call, member);
+      case "subarray":
+        return this.bytesView(frame, call, member);
+      case "indexOf":
+      case "lastIndexOf":
+      case "includes":
+        return this.bytesSearched(frame, call, member);
+      case "writeDoubleBE":
+      case "writeDoubleLE":
+        return this.doubleWritten(frame, call, member);
+      default: {
+        const name = this.calledName(call);
+
+        this.notLowered(frame.module, call.loc, `a call of method ${name}`);
+
+        return undefined;
+      }
+    }
+  }
+
+  private encodingOf(frame: Frame, expr: Expr | undefined): LLVMValue {
+    if (expr == undefined) {
+      return this.ir.zero(kFlagType);
+    }
+
+    const made = frame.made;
+    const given = this.value(frame, expr);
+    if (given == undefined) {
+      return this.ir.zero(kFlagType);
+    }
+
+    const params = [kPointerType, kIntType];
+    const callee = this.ir.declare(kBufferEncoding, kFlagType, params);
+    const code = made.call(callee, this.textParts(frame, given));
+
+    this.dropping(frame, given);
+
+    return code;
+  }
+
+  private positionsOf(
+    frame: Frame,
+    call: CallExpr,
+    from: int,
+  ): LLVMValue[] | undefined {
+    const values: LLVMValue[] = [];
+    let has: int = 0;
+
+    for (let step = 0; step < 2; step++) {
+      const argument = call.args[from + step];
+      if (argument == undefined) {
+        values.push(this.ir.zero(kIntType));
+
+        continue;
+      }
+
+      const given = this.value(frame, argument.expr);
+      if (given == undefined) {
+        return undefined;
+      }
+
+      values.push(this.toLong(frame, this.proven(frame, given)).value);
+      has += 1 << step;
+    }
+
+    values.push(this.ir.integer(kFlagType, `${has}`));
+
+    return values;
+  }
+
+  private bytesText(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+  ): IrValue | undefined {
+    const bytes = this.value(frame, member.object);
+    if (bytes == undefined) {
+      return undefined;
+    }
+
+    const encoding = this.encodingOf(frame, call.args[0]?.expr);
+    const positions = this.positionsOf(frame, call, 1);
+    if (positions == undefined) {
+      return undefined;
+    }
+
+    const args = [bytes.value, encoding].concat(positions);
+    const params = [kPointerType, kFlagType, kIntType, kIntType, kFlagType];
+    const text = this.textOut(frame, kBufferToText, params, args);
+
+    this.dropping(frame, bytes);
+
+    return text;
+  }
+
+  private bytesView(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+  ): IrValue | undefined {
+    const bytes = this.value(frame, member.object);
+    if (bytes == undefined) {
+      return undefined;
+    }
+
+    const positions = this.positionsOf(frame, call, 0);
+    if (positions == undefined) {
+      return undefined;
+    }
+
+    const params = [kPointerType, kIntType, kIntType, kFlagType];
+    const callee = this.ir.declare(kBytesSubarray, kPointerType, params);
+    const value = frame.made.call(callee, [bytes.value].concat(positions));
+
+    this.dropping(frame, bytes);
+
+    return { type: kPointerType, value, tz: bytes.tz, owned: true };
+  }
+
+  private isBufferName(expr: Expr): boolean {
+    if (expr.kind != ExprKind.Name || expr.name != kBufferName) {
+      return false;
+    }
+
+    const answered = this.typeOf(expr);
+
+    return answered == undefined || answered.kind != TypeKind.Instance;
+  }
+
+  private bufferStatic(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+  ): IrValue | undefined {
+    const result = this.typeOf(call);
+    const first = call.args[0];
+    if (result == undefined || first == undefined) {
+      this.notLowered(frame.module, call.loc, "this call of Buffer");
+
+      return undefined;
+    }
+
+    const made = frame.made;
+    const given = this.value(frame, first.expr);
+    if (given == undefined) {
+      return undefined;
+    }
+    if (member.name == "byteLength") {
+      return this.bufferByteLength(frame, call, given);
+    }
+    if (member.name == "concat") {
+      return this.bufferConcat(frame, call, given, result);
+    }
+    if (member.name == "alloc") {
+      const size = this.toLong(frame, given).value;
+      const params = [kIntType, kFlagType];
+      const callee = this.ir.declare(kBufferAlloc, kPointerType, params);
+      const zeroed = this.ir.integer(kFlagType, "1");
+      const value = made.call(callee, [size, zeroed]);
+
+      return { type: kPointerType, value, tz: result, owned: true };
+    }
+    if (member.name == "from" && this.isString(given.tz)) {
+      const encoding = this.encodingOf(frame, call.args[1]?.expr);
+      const params = [kPointerType, kIntType, kFlagType];
+      const callee = this.ir.declare(kBufferFromText, kPointerType, params);
+      const args = this.textParts(frame, given).concat([encoding]);
+      const value = made.call(callee, args);
+
+      this.dropping(frame, given);
+
+      return { type: kPointerType, value, tz: result, owned: true };
+    }
+
+    this.dropping(frame, given);
+    this.notLowered(frame.module, call.loc, "this call of Buffer");
+
+    return undefined;
+  }
+}

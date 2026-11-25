@@ -1,26 +1,40 @@
 import {
   CallArgument,
   CallExpr,
+  Expr,
   ExprKind,
   NameExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import {
+  BodySource,
   FunctionDecl,
+  Param,
   ParamKind,
 } from "../../../program/ast/types/ast.types.functions.tz";
 import { SymbolKind } from "../../../program/scopes/types/scopes.types.tz";
 import {
+  FunctionParameter,
   FunctionShape,
+  Type,
   TypeKind,
 } from "../../../program/type/types/type.types.tz";
 import { IrFunction } from "../../ir-function/ir-function.tz";
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
-import { kPushName, kVoidType } from "../const/lowering.const.tz";
+import {
+  kDecimalName,
+  kErrName,
+  kOkName,
+  kVoidType,
+} from "../const/lowering.const.tz";
 import { Frame, IrValue, Place } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private functionDeclared(frame: Frame, fn: FunctionDecl): void {
+    if (fn.bodySource == BodySource.Foreign) {
+      return;
+    }
+
     const module = frame.module;
     const body = fn.body;
     const shape = this.shapeOf(module, fn.loc);
@@ -33,10 +47,7 @@ partial class Lowering {
       !fn.isAsync &&
       !fn.isGenerator &&
       !shape.rest &&
-      fn.params.every(
-        (param) =>
-          param.form.kind == ParamKind.Required && param.pattern == undefined,
-      );
+      fn.params.every((param) => this.isPlainParameter(param));
     if (!isPlain) {
       return this.notLowered(module, fn.loc, "this kind of function");
     }
@@ -44,7 +55,9 @@ partial class Lowering {
     const result = this.irType(shape.result);
     const params = this.parameterTypes(module, fn, shape);
     if (result == undefined || params == undefined) {
-      return this.notLowered(module, fn.loc, "a function of these types");
+      const kind = this.shapeProblem(shape);
+
+      return this.notLowered(module, fn.loc, `a function of type ${kind}`);
     }
 
     const name = this.functionName(module, fn.loc);
@@ -56,6 +69,7 @@ partial class Lowering {
       result: shape.result,
       loops: [],
       scopes: [],
+      place: fn.name,
     };
 
     this.openScope(inner);
@@ -91,11 +105,11 @@ partial class Lowering {
 
     for (let index = 0; index < fn.params.length; index++) {
       const param = shape.params[index];
-      if (param == undefined || param.optional) {
+      if (param == undefined) {
         return undefined;
       }
 
-      const type = this.irType(param.type);
+      const type = this.irType(this.passedType(param));
       if (type == undefined) {
         return undefined;
       }
@@ -106,6 +120,26 @@ partial class Lowering {
     return types;
   }
 
+  private isPlainParameter(param: Param): boolean {
+    const kind = param.form.kind;
+    const isTaken =
+      kind == ParamKind.Required ||
+      kind == ParamKind.Optional ||
+      kind == ParamKind.Defaulted;
+
+    return isTaken && param.pattern == undefined;
+  }
+
+  private passedType(param: FunctionParameter): Type {
+    if (!param.optional || this.optionalInner(param.type) != undefined) {
+      return param.type;
+    }
+
+    const empty = this.store.plain(TypeKind.Undefined);
+
+    return this.store.unionOf([param.type, empty]);
+  }
+
   private parametersStored(
     frame: Frame,
     fn: FunctionDecl,
@@ -114,22 +148,93 @@ partial class Lowering {
   ): void {
     for (let index = 0; index < fn.params.length; index++) {
       const param = fn.params[index];
-      const tz = shape.params[index]?.type;
+      const passed = shape.params[index];
       const type = types[index];
-      if (param == undefined || tz == undefined || type == undefined) {
+      if (param == undefined || passed == undefined || type == undefined) {
+        continue;
+      }
+
+      const tz = this.passedType(passed);
+      const position = index + this.selfOffset(frame);
+      const given: IrValue = {
+        type,
+        value: frame.made.param(position),
+        tz,
+        owned: true,
+      };
+      const form = param.form;
+      const isOptional = this.optionalInner(tz) != undefined;
+      if (form.kind == ParamKind.Defaulted && isOptional) {
+        this.defaultedStored(frame, param, form.defaultValue, given);
+
         continue;
       }
 
       const pointer = frame.made.slot(type, param.name);
       const key = this.placeKey(frame.module, param.loc);
-
       const place: Place = { pointer, type, tz, owner: frame.id };
-      const given = frame.made.param(index + this.selfOffset(frame));
 
-      frame.made.store(given, pointer);
+      frame.made.store(given.value, pointer);
       this.places.set(key, place);
       this.keepPlace(frame, place);
     }
+  }
+
+  private defaultedStored(
+    frame: Frame,
+    param: Param,
+    fallback: Expr,
+    given: IrValue,
+  ): void {
+    const made = frame.made;
+    const inner = this.optionalInner(given.tz);
+    const type = this.typeOrUndefined(inner);
+    if (inner == undefined || type == undefined) {
+      return this.notLowered(frame.module, param.loc, "this default value");
+    }
+
+    const pointer = made.slot(type, param.name);
+    const key = this.placeKey(frame.module, param.loc);
+    const place: Place = { pointer, type, tz: inner, owner: frame.id };
+    const has = this.hasValue(frame, given);
+    const passed = made.block("default.passed");
+    const missing = made.block("default.missing");
+    const end = made.block("default.end");
+
+    made.entryStore(this.ir.zero(type), pointer);
+    this.places.set(key, place);
+    this.keepPlace(frame, place);
+    made.conditionalBranch(has, passed, missing);
+    made.open(passed);
+
+    const inside = this.insideValue(frame, given, inner);
+
+    made.store(inside.value, pointer);
+    made.branch(end);
+    made.open(missing);
+
+    const value = this.value(frame, fallback);
+    const converted = this.convertedOrNone(frame, value, inner, fallback.loc);
+
+    if (converted != undefined) {
+      this.stored(frame, place, converted);
+    }
+
+    made.branch(end);
+    made.open(end);
+  }
+
+  private convertedOrNone(
+    frame: Frame,
+    value: IrValue | undefined,
+    target: Type,
+    loc: int,
+  ): IrValue | undefined {
+    if (value == undefined) {
+      return undefined;
+    }
+
+    return this.converted(frame, value, target, loc);
   }
 
   private selfOffset(frame: Frame): int {
@@ -170,17 +275,34 @@ partial class Lowering {
       target.kind == SymbolKind.Function &&
       opened != undefined &&
       !opened.source.isLibrary;
-    if (target == undefined || !isOwn) {
+    if (callee.name == kDecimalName && !isOwn) {
+      return this.decimalOf(frame, call);
+    }
+    if (callee.name == kOkName && !isOwn) {
+      return this.resultMade(frame, call, true);
+    }
+    if (callee.name == kErrName && !isOwn) {
+      return this.resultMade(frame, call, false);
+    }
+    if (target != undefined && !isOwn) {
+      return this.libraryCall(frame, call, callee, target.module);
+    }
+    if (target == undefined) {
       this.notLowered(frame.module, call.loc, "a call of this function");
 
       return undefined;
     }
 
     const shape = this.shapeOf(target.module, target.loc);
-    if (shape == undefined || shape.params.length != call.args.length) {
+    if (shape == undefined) {
       this.notLowered(frame.module, call.loc, "this call");
 
       return undefined;
+    }
+
+    const foreign = this.declaredFunction(target.module, target.loc);
+    if (foreign != undefined && foreign.bodySource == BodySource.Foreign) {
+      return this.foreignCall(frame, call, foreign, shape);
     }
 
     const args = this.callArguments(frame, call.args, shape, call.loc);
@@ -197,11 +319,21 @@ partial class Lowering {
     return { type: result, value, tz: shape.result, owned: true };
   }
 
+  private shapeProblem(shape: FunctionShape): string {
+    const types = [shape.result].concat(shape.params.map((one) => one.type));
+    const failed = types.find((type) => this.irType(type) == undefined);
+    if (failed == undefined) {
+      return "optional parameter";
+    }
+
+    return this.kindName(failed);
+  }
+
   private shapeTypes(shape: FunctionShape): string[] | undefined {
     const types: string[] = [];
 
     for (const param of shape.params) {
-      const type = this.irType(param.type);
+      const type = this.irType(this.passedType(param));
       if (type == undefined) {
         return undefined;
       }
@@ -219,27 +351,42 @@ partial class Lowering {
     loc: int,
   ): LLVMValue[] | undefined {
     const args: LLVMValue[] = [];
-    if (passed.length != shape.params.length) {
+    if (passed.length > shape.params.length) {
       this.notLowered(frame.module, loc, "these arguments");
 
       return undefined;
     }
 
-    for (let index = 0; index < passed.length; index++) {
+    for (let index = 0; index < shape.params.length; index++) {
       const arg = passed[index];
       const param = shape.params[index];
-      if (arg == undefined || param == undefined || arg.spread) {
-        this.notLowered(frame.module, loc, "these arguments");
+      if (param == undefined) {
+        return undefined;
+      }
+
+      const wanted = this.passedType(param);
+      if (arg == undefined) {
+        const missing = this.missingArgument(frame, param, wanted, loc);
+        if (missing == undefined) {
+          return undefined;
+        }
+
+        args.push(missing);
+
+        continue;
+      }
+      if (arg.spread) {
+        this.notLowered(frame.module, loc, "a spread argument");
 
         return undefined;
       }
 
-      const given = this.value(frame, arg.expr);
+      const given = this.wantedValue(frame, arg.expr, wanted);
       if (given == undefined) {
         return undefined;
       }
 
-      const value = this.converted(frame, given, param.type, arg.expr.loc);
+      const value = this.converted(frame, given, wanted, arg.expr.loc);
       if (value == undefined) {
         return undefined;
       }
@@ -252,6 +399,22 @@ partial class Lowering {
     return args;
   }
 
+  private missingArgument(
+    frame: Frame,
+    param: FunctionParameter,
+    wanted: Type,
+    loc: int,
+  ): LLVMValue | undefined {
+    const type = this.irType(wanted);
+    if (!param.optional || type == undefined) {
+      this.notLowered(frame.module, loc, "these arguments");
+
+      return undefined;
+    }
+
+    return this.ir.zero(type);
+  }
+
   private memberCall(frame: Frame, call: CallExpr): IrValue | undefined {
     const isError = this.printStream(frame, call);
     if (isError != undefined) {
@@ -260,20 +423,70 @@ partial class Lowering {
 
     const callee = call.callee;
     if (callee.kind == ExprKind.Member) {
-      const object = this.answers.typeOf(callee.object);
-      const isPush =
-        object != undefined && this.isArray(object) && callee.name == kPushName;
-      if (object != undefined && isPush) {
-        return this.arrayCall(frame, call, callee, object);
+      if (this.isBufferName(callee.object)) {
+        return this.bufferStatic(frame, call, callee);
+      }
+      if (this.isArrayFrom(callee)) {
+        return this.arrayFrom(frame, call);
+      }
+      if (this.isBitHolder(frame, callee.object)) {
+        return this.bitCall(frame, call, callee);
+      }
+      if (this.isStaticHolder(frame, callee.object)) {
+        return this.staticCall(frame, call, callee);
+      }
+
+      const object = this.typeIn(frame, callee.object);
+      if (object != undefined && this.isBytesType(object)) {
+        return this.bytesMethod(frame, call, callee);
+      }
+      if (object != undefined && object.kind == TypeKind.Array) {
+        return this.arrayMethod(frame, call, callee, object);
+      }
+      if (object != undefined && this.isFileKindCall(object, callee)) {
+        return this.fileKindCall(frame, callee);
       }
       if (object != undefined && object.kind == TypeKind.Instance) {
         return this.methodCall(frame, call, callee, object);
       }
+      if (object != undefined && object.kind == TypeKind.Dict) {
+        return this.dictCall(frame, call, callee, object);
+      }
+      if (object != undefined && this.isString(object)) {
+        return this.stringMethod(frame, call, callee);
+      }
+      if (object != undefined && this.isDecimal(object)) {
+        return this.decimalMethod(frame, call, callee);
+      }
+      if (object != undefined && object.kind == TypeKind.Result) {
+        return this.resultMethod(frame, call, callee);
+      }
+
+      const isNumber =
+        object != undefined &&
+        (this.isInteger(object) || this.isDouble(object));
+      if (isNumber) {
+        return this.numberMethod(frame, call, callee);
+      }
     }
 
-    this.notLowered(frame.module, call.loc, "this method call");
+    const name = this.calledName(call);
+
+    this.notLowered(frame.module, call.loc, `a call of method ${name}`);
 
     return undefined;
+  }
+
+  private calledName(call: CallExpr): string {
+    const callee = call.callee;
+    if (callee.kind != ExprKind.Member) {
+      return "?";
+    }
+
+    const object = this.typeOf(callee.object);
+    const kind = this.kindName(object);
+
+    return `${kind}.${callee.name}`;
   }
 
   private runtimeCall(made: IrFunction, name: string, args: IrValue[]): void {

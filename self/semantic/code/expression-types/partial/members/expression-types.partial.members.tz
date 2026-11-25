@@ -36,6 +36,8 @@ partial class ExpressionTypes {
 
     const fact = this.pathFact(expr, module);
     if (fact != undefined) {
+      this.objectAnswered(expr.object, module);
+
       return fact;
     }
 
@@ -302,6 +304,16 @@ partial class ExpressionTypes {
     }
 
     return { module: target.module, decl };
+  }
+
+  private objectAnswered(object: Expr, module: int): void {
+    if (this.answers.isVisited(object)) {
+      return;
+    }
+
+    this.errors.beginTrial();
+    this.typed(object, undefined, module);
+    this.errors.endTrial();
   }
 
   private enumMemberTyped(expr: MemberExpr, home: EnumHome, module: int): Type {

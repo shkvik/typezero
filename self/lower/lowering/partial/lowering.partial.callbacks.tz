@@ -1,0 +1,235 @@
+import {
+  Expr,
+  ExprKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { ReturnStmt } from "../../../program/ast/types/ast.types.statements.tz";
+import {
+  FunctionShape,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { Lowering } from "../lowering.tz";
+import { kBooleanType, kVoidType } from "../const/lowering.const.tz";
+import {
+  Frame,
+  InlineTarget,
+  IrValue,
+  Place,
+} from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private isInlineable(expr: Expr): boolean {
+    if (expr.kind != ExprKind.Function) {
+      return false;
+    }
+
+    const fn = expr.fn;
+
+    return (
+      fn.typeParams.length == 0 &&
+      !fn.isAsync &&
+      !fn.isGenerator &&
+      fn.body != undefined &&
+      fn.params.every((param) => param.pattern == undefined)
+    );
+  }
+
+  private callbackShape(frame: Frame, expr: Expr): FunctionShape | undefined {
+    if (expr.kind != ExprKind.Function) {
+      return undefined;
+    }
+
+    const answered = this.typeOf(expr);
+    if (answered != undefined && answered.kind == TypeKind.Function) {
+      return answered.shape;
+    }
+
+    const type = this.values.functionOf(frame.module, expr.fn.loc);
+    if (type.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    return type.shape;
+  }
+
+  private inlineCall(
+    frame: Frame,
+    callee: Expr,
+    args: IrValue[],
+    wanted?: Type,
+  ): IrValue | undefined {
+    const shape = this.callbackShape(frame, callee);
+    if (callee.kind != ExprKind.Function || !this.isInlineable(callee)) {
+      this.notLowered(frame.module, callee.loc, "this callback");
+
+      return undefined;
+    }
+
+    const body = callee.fn.body;
+    const returns = this.callbackResult(shape, wanted);
+    const resultIr = this.typeOrUndefined(returns);
+    if (shape == undefined || body == undefined || resultIr == undefined) {
+      const kind = this.kindName(returns);
+
+      this.notLowered(frame.module, callee.loc, `a callback of type ${kind}`);
+
+      return undefined;
+    }
+
+    const made = frame.made;
+    const end = made.block("inline.end");
+    if (returns == undefined) {
+      return undefined;
+    }
+
+    const result = this.inlineResult(frame, resultIr, returns);
+
+    this.openScope(frame);
+
+    const target: InlineTarget = {
+      result,
+      end,
+      depth: frame.scopes.length,
+    };
+    const inner: Frame = {
+      made,
+      id: frame.id,
+      module: frame.module,
+      result: returns,
+      loops: [],
+      scopes: frame.scopes,
+      self: frame.self,
+      inline: target,
+      place: "",
+    };
+    const isBound = this.callbackParameters(inner, callee, shape, args);
+    if (!isBound) {
+      return undefined;
+    }
+
+    this.statements(inner, body.body);
+    made.open(end);
+    this.closeScope(frame);
+
+    if (result == undefined) {
+      const none = this.ir.zero(kBooleanType);
+
+      return { type: kVoidType, value: none, tz: returns };
+    }
+
+    const value = made.load(result.type, result.pointer);
+
+    made.store(this.ir.zero(result.type), result.pointer);
+
+    return { type: result.type, value, tz: returns, owned: true };
+  }
+
+  private callbackResult(
+    shape: FunctionShape | undefined,
+    wanted: Type | undefined,
+  ): Type | undefined {
+    if (wanted != undefined) {
+      return wanted;
+    }
+
+    return shape?.result;
+  }
+
+  private inlineResult(
+    frame: Frame,
+    type: string,
+    returns: Type,
+  ): Place | undefined {
+    if (type == kVoidType) {
+      return undefined;
+    }
+
+    const pointer = frame.made.slot(type, "inline.result");
+
+    frame.made.entryStore(this.ir.zero(type), pointer);
+
+    return { pointer, type, tz: returns, owner: frame.id };
+  }
+
+  private callbackParameters(
+    frame: Frame,
+    callee: Expr,
+    shape: FunctionShape,
+    args: IrValue[],
+  ): boolean {
+    if (callee.kind != ExprKind.Function) {
+      return false;
+    }
+
+    const params = callee.fn.params;
+
+    for (let index = 0; index < params.length; index++) {
+      const param = params[index];
+      const tz = shape.params[index]?.type;
+      const given = args[index];
+      const type = this.typeOrUndefined(tz);
+      if (param == undefined || tz == undefined || type == undefined) {
+        const kind = this.kindName(tz);
+
+        this.notLowered(frame.module, param.loc, `a parameter of type ${kind}`);
+
+        return false;
+      }
+      if (given == undefined) {
+        this.notLowered(frame.module, param.loc, "this callback parameter");
+
+        return false;
+      }
+
+      const value = this.converted(frame, given, tz, param.loc);
+      if (value == undefined) {
+        return false;
+      }
+
+      const pointer = frame.made.slot(type, param.name);
+      const place: Place = { pointer, type, tz, owner: frame.id };
+      const key = this.placeKey(frame.module, param.loc);
+
+      frame.made.entryStore(this.ir.zero(type), pointer);
+      this.places.set(key, place);
+      this.keepPlace(frame, place);
+      this.stored(frame, place, value);
+    }
+
+    return true;
+  }
+
+  private inlineReturned(
+    frame: Frame,
+    statement: ReturnStmt,
+    inline: InlineTarget,
+  ): void {
+    const given = statement.value;
+    const result = frame.result;
+    const place = inline.result;
+    if (given != undefined && place == undefined) {
+      this.discarded(frame, given);
+    }
+    if (given == undefined || result == undefined || place == undefined) {
+      this.cleanupsTo(frame, inline.depth);
+
+      return frame.made.branch(inline.end);
+    }
+
+    const value = this.value(frame, given);
+    if (value == undefined) {
+      return;
+    }
+
+    const returned = this.converted(frame, value, result, given.loc);
+    if (returned == undefined) {
+      return;
+    }
+
+    const owned = this.owning(frame, returned);
+
+    frame.made.store(owned.value, place.pointer);
+    this.cleanupsTo(frame, inline.depth);
+    frame.made.branch(inline.end);
+  }
+}

@@ -1,8 +1,11 @@
 import {
+  BinaryOp,
   CallExpr,
+  Expr,
   ExprKind,
   MemberExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
+import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
 import {
@@ -18,6 +21,7 @@ import {
   kCodeMethods,
   kDecimalShape,
   kDoubleShape,
+  kFilterName,
   kGeneratorShape,
   kMathConstants,
   kMathName,
@@ -178,8 +182,10 @@ partial class ExpressionTypes {
 
     this.argumentRangeCheck(expr, member, object, module);
 
+    const isFilter =
+      member.name == kFilterName && object.kind == TypeKind.Array;
     const isProved =
-      kSpecialMethods.includes(member.name) ||
+      (kSpecialMethods.includes(member.name) && !isFilter) ||
       this.library.isRegexSplit(expr, member);
     const generic = this.receiverMember(receiver, member.name, true);
     const isGeneric =
@@ -221,7 +227,59 @@ partial class ExpressionTypes {
     this.positionMask = this.library.maskOf(object, marked);
     this.positionMethod = member.name;
 
-    return this.fieldValueCall(expr, member, method, kind, module);
+    const called = this.fieldValueCall(expr, member, method, kind, module);
+    if (isFilter) {
+      return this.filteredArray(expr, called);
+    }
+
+    return called;
+  }
+
+  private filteredArray(expr: CallExpr, kept: Type): Type {
+    if (kept.kind != TypeKind.Array || !this.types.isOptional(kept.item)) {
+      return kept;
+    }
+
+    const callback = expr.args[0]?.expr;
+    if (callback == undefined || !this.keepsDefined(callback)) {
+      return kept;
+    }
+
+    const defined = this.types.definedType(kept.item);
+
+    return this.store.arrayOf(defined);
+  }
+
+  private keepsDefined(callback: Expr): boolean {
+    if (callback.kind != ExprKind.Function) {
+      return false;
+    }
+
+    const fn = callback.fn;
+    const param = fn.params[0];
+    const only = fn.body?.body[0];
+    if (param == undefined || only == undefined || !fn.concise) {
+      return false;
+    }
+    if (only.kind != StmtKind.Return || only.value == undefined) {
+      return false;
+    }
+
+    const test = only.value;
+    if (test.kind != ExprKind.Binary || test.op != BinaryOp.Ne) {
+      return false;
+    }
+
+    const isLeft =
+      test.lhs.kind == ExprKind.Name &&
+      test.lhs.name == param.name &&
+      test.rhs.kind == ExprKind.Undefined;
+    const isRight =
+      test.rhs.kind == ExprKind.Name &&
+      test.rhs.name == param.name &&
+      test.lhs.kind == ExprKind.Undefined;
+
+    return isLeft || isRight;
   }
 
   private receiverVariants(receiver: Type, name: string): LibraryVariants {

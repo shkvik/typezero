@@ -6,12 +6,34 @@ import {
   UnaryOp,
 } from "../../../../../program/ast/types/ast.types.expressions.tz";
 import {
+  LiteralKind,
   Type,
   TypeKind,
 } from "../../../../../program/type/types/type.types.tz";
 import { kLargestInt } from "../../../integer-math/const/integer-math.const.tz";
 
 partial class ExpressionTypes {
+  public enumText(expr: Expr, module: int): string | undefined {
+    if (expr.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    const literal = this.enumLiteral(expr, module);
+    if (literal == undefined || literal.kind != LiteralKind.String) {
+      return undefined;
+    }
+
+    return literal.text;
+  }
+
+  public enumNumber(expr: Expr, module: int): decimal | undefined {
+    if (expr.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    return this.enumConstant(expr, module);
+  }
+
   private intConstant(
     expr: Expr,
     type: Type,

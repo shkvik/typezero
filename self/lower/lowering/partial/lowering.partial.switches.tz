@@ -1,0 +1,132 @@
+import {
+  BinaryExpr,
+  BinaryOp,
+  Expr,
+  ExprKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { SwitchStmt } from "../../../program/ast/types/ast.types.statements.tz";
+import { LLVMBlock, LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import { kSubjectName } from "../const/lowering.const.tz";
+import { Frame, LoopTarget, Place } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private switchStatement(frame: Frame, statement: SwitchStmt): void {
+    const made = frame.made;
+    const end = made.block("switch.end");
+    const bodies = statement.cases.map(() => made.block("switch.case"));
+
+    this.openScope(frame);
+
+    const subject = this.switchSubject(frame, statement.discriminant);
+    if (subject == undefined) {
+      return;
+    }
+
+    let missed: LLVMBlock = end;
+
+    for (let index = 0; index < statement.cases.length; index++) {
+      const test = statement.cases[index]?.test;
+      const body = bodies[index];
+      if (body == undefined) {
+        continue;
+      }
+      if (test == undefined) {
+        missed = body;
+
+        continue;
+      }
+
+      const isMatch = this.caseTest(frame, statement, subject, test);
+      if (isMatch == undefined) {
+        return;
+      }
+
+      const next = made.block("switch.next");
+
+      made.conditionalBranch(isMatch, body, next);
+      made.open(next);
+    }
+
+    made.branch(missed);
+    this.caseBodies(frame, statement, bodies, end);
+    made.open(end);
+    this.closeScope(frame);
+  }
+
+  private switchSubject(frame: Frame, expr: Expr): Place | undefined {
+    const given = this.value(frame, expr);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const pointer = frame.made.slot(given.type, kSubjectName);
+    const place: Place = {
+      pointer,
+      type: given.type,
+      tz: given.tz,
+      owner: frame.id,
+    };
+
+    frame.made.entryStore(this.ir.zero(given.type), pointer);
+    this.keepPlace(frame, place);
+    this.stored(frame, place, given);
+
+    return place;
+  }
+
+  private caseTest(
+    frame: Frame,
+    statement: SwitchStmt,
+    subject: Place,
+    test: Expr,
+  ): LLVMValue | undefined {
+    const left = this.loaded(frame, subject);
+    const right = this.value(frame, test);
+    if (right == undefined) {
+      return undefined;
+    }
+
+    const expr: BinaryExpr = {
+      kind: ExprKind.Binary,
+      loc: test.loc,
+      op: BinaryOp.Eq,
+      lhs: statement.discriminant,
+      rhs: test,
+    };
+    const isMatch = this.compared(frame, expr, left, right);
+
+    this.dropping(frame, right);
+
+    return isMatch;
+  }
+
+  private caseBodies(
+    frame: Frame,
+    statement: SwitchStmt,
+    bodies: LLVMBlock[],
+    end: LLVMBlock,
+  ): void {
+    const made = frame.made;
+    const target: LoopTarget = {
+      breakBlock: end,
+      label: "",
+      depth: frame.scopes.length,
+    };
+
+    frame.loops.push(target);
+
+    for (let index = 0; index < statement.cases.length; index++) {
+      const body = bodies[index];
+      const item = statement.cases[index];
+      if (body == undefined || item == undefined) {
+        continue;
+      }
+
+      made.open(body);
+      this.statements(frame, item.body);
+    }
+
+    frame.loops.pop();
+  }
+}

@@ -6,7 +6,9 @@ import {
 import { Lowering } from "../lowering.tz";
 import {
   kBooleanType,
+  kDecimalType,
   kDoubleType,
+  kEmptyType,
   kPointerType,
   kStringType,
   kTypeKindNames,
@@ -15,6 +17,12 @@ import {
 
 partial class Lowering {
   private widened(type: Type): Type {
+    if (this.isNumberUnion(type)) {
+      return this.store.integer(64, false);
+    }
+    if (this.isTextUnion(type)) {
+      return this.store.plain(TypeKind.String);
+    }
     if (type.kind != TypeKind.Literal) {
       return type;
     }
@@ -31,6 +39,28 @@ partial class Lowering {
     }
   }
 
+  private isNumberUnion(type: Type): boolean {
+    if (type.kind != TypeKind.Union) {
+      return false;
+    }
+
+    return type.parts.every(
+      (part) =>
+        part.kind == TypeKind.Literal && part.literal == LiteralKind.Int,
+    );
+  }
+
+  private isTextUnion(type: Type): boolean {
+    if (type.kind != TypeKind.Union) {
+      return false;
+    }
+
+    return type.parts.every(
+      (part) =>
+        part.kind == TypeKind.Literal && part.literal == LiteralKind.String,
+    );
+  }
+
   private irType(type: Type): string | undefined {
     const plain = this.widened(type);
 
@@ -43,11 +73,20 @@ partial class Lowering {
         return kBooleanType;
       case TypeKind.String:
         return kStringType;
+      case TypeKind.Decimal:
+        return kDecimalType;
       case TypeKind.Array:
       case TypeKind.Instance:
+      case TypeKind.Object:
+      case TypeKind.Tuple:
+      case TypeKind.Dict:
         return kPointerType;
       case TypeKind.Void:
         return kVoidType;
+      case TypeKind.Never:
+        return kEmptyType;
+      case TypeKind.Result:
+        return this.resultLayout(plain)?.struct;
       case TypeKind.Undefined:
         return kBooleanType;
       case TypeKind.Union:
@@ -58,6 +97,10 @@ partial class Lowering {
   }
 
   private unionType(type: Type): string | undefined {
+    if (this.isObjectLike(type)) {
+      return kPointerType;
+    }
+
     const inner = this.optionalInner(type);
     if (inner == undefined) {
       return undefined;
@@ -105,6 +148,24 @@ partial class Lowering {
     return type.kind == TypeKind.Instance;
   }
 
+  private isCounted(type: Type): boolean {
+    return this.isObjectLike(type) || type.kind == TypeKind.Dict;
+  }
+
+  private isObjectLike(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Instance:
+        return !this.isHandleType(type);
+      case TypeKind.Object:
+      case TypeKind.Tuple:
+        return true;
+      case TypeKind.Union:
+        return type.parts.every((part) => this.isObjectLike(part));
+      default:
+        return false;
+    }
+  }
+
   private sizeOf(type: Type): int {
     const plain = this.widened(type);
     const inner = this.optionalInner(plain);
@@ -122,6 +183,7 @@ partial class Lowering {
       case TypeKind.Undefined:
         return 1;
       case TypeKind.String:
+      case TypeKind.Decimal:
         return 16;
       default:
         return 8;
@@ -146,7 +208,11 @@ partial class Lowering {
     }
   }
 
-  private kindName(type: Type): string {
+  private kindName(type: Type | undefined): string {
+    if (type == undefined) {
+      return "unknown";
+    }
+
     const position: int = type.kind;
 
     return kTypeKindNames[position] ?? "?";

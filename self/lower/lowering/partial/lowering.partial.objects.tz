@@ -1,0 +1,696 @@
+import {
+  ArrayLitExpr,
+  Expr,
+  ExprKind,
+  IndexExpr,
+  MemberExpr,
+  ObjectLitExpr,
+  Property,
+  PropertyKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrIntPredicate } from "../../ir-function/types/ir-function.types.tz";
+import { LLVMBlock, LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kByteType,
+  kClassIdIndex,
+  kFlagType,
+  kIntType,
+  kLayoutHead,
+  kObjectHeader,
+  kPointerType,
+} from "../const/lowering.const.tz";
+import {
+  ClassLayout,
+  Frame,
+  IrValue,
+  LayoutField,
+  Place,
+} from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private objectLiteral(
+    frame: Frame,
+    expr: ObjectLitExpr,
+    wanted?: Type,
+  ): IrValue | undefined {
+    const known = this.knownOr(this.typeOf(expr), wanted);
+    const type = this.literalTarget(frame, expr, known);
+    if (type == undefined || type.kind != TypeKind.Object) {
+      this.notLowered(frame.module, expr.loc, "this object");
+
+      return undefined;
+    }
+
+    const layout = this.layoutOf(type);
+    const isPlain = expr.props.every(
+      (property) =>
+        property.form.kind == PropertyKind.Value ||
+        property.form.kind == PropertyKind.Spread ||
+        this.isConstantKey(frame, property),
+    );
+    if (!isPlain) {
+      const form = "an object with these properties";
+
+      this.notLowered(frame.module, expr.loc, form);
+
+      return undefined;
+    }
+    if (layout == undefined) {
+      const problem = this.layoutProblem(type);
+      const form = `an object with a field of ${problem}`;
+
+      this.notLowered(frame.module, expr.loc, form);
+
+      return undefined;
+    }
+
+    const object = this.allocated(frame, layout);
+    const names = this.literalOrder(frame, expr, layout);
+    const descriptor = this.orderedDescriptor(layout, names);
+
+    if (descriptor != layout.descriptor) {
+      const kind = frame.made.field(kObjectHeader, object, 1);
+
+      frame.made.store(descriptor, kind);
+    }
+
+    for (const property of expr.props) {
+      const isStored = this.propertyStored(frame, object, layout, property);
+      if (!isStored) {
+        return undefined;
+      }
+    }
+
+    return { type: kPointerType, value: object, tz: type, owned: true };
+  }
+
+  private knownOr(
+    known: Type | undefined,
+    wanted: Type | undefined,
+  ): Type | undefined {
+    if (known != undefined) {
+      return known;
+    }
+
+    return wanted;
+  }
+
+  private literalTarget(
+    frame: Frame,
+    expr: ObjectLitExpr,
+    type: Type | undefined,
+  ): Type | undefined {
+    if (type == undefined || type.kind != TypeKind.Union) {
+      return type;
+    }
+
+    const parts = type.parts.filter((part) =>
+      this.isLiteralPart(frame, expr, part),
+    );
+
+    return parts[0];
+  }
+
+  private isLiteralPart(
+    frame: Frame,
+    expr: ObjectLitExpr,
+    part: Type,
+  ): boolean {
+    if (part.kind != TypeKind.Object) {
+      return false;
+    }
+
+    for (const field of part.fields) {
+      const fieldType = field.type;
+      if (fieldType.kind != TypeKind.Literal) {
+        continue;
+      }
+
+      const property = expr.props.find((one) => one.name == field.name);
+      if (property == undefined) {
+        return false;
+      }
+
+      const text = this.constantText(frame, property.value);
+      if (text != fieldType.text) {
+        return false;
+      }
+    }
+
+    const fields = part.fields;
+
+    return expr.props.every(
+      (one) =>
+        one.form.kind != PropertyKind.Value ||
+        fields.some((field) => field.name == one.name),
+    );
+  }
+
+  private constantText(frame: Frame, expr: Expr): string | undefined {
+    if (expr.kind == ExprKind.StringLit) {
+      return expr.value;
+    }
+
+    const text = this.enumText(frame, expr);
+    if (text != undefined) {
+      return text;
+    }
+
+    const number = this.enumNumber(frame, expr);
+    if (number == undefined) {
+      return undefined;
+    }
+
+    return `${number}`;
+  }
+
+  private isConstantKey(frame: Frame, property: Property): boolean {
+    if (property.form.kind != PropertyKind.Computed) {
+      return false;
+    }
+
+    return this.propertyKey(frame, property) != undefined;
+  }
+
+  private propertyKey(frame: Frame, property: Property): string | undefined {
+    const form = property.form;
+    if (form.kind != PropertyKind.Computed) {
+      return property.name;
+    }
+
+    const key = form.key;
+    if (key.kind == ExprKind.StringLit) {
+      return key.value;
+    }
+
+    return this.values.enumText(key, frame.module);
+  }
+
+  private literalOrder(
+    frame: Frame,
+    expr: ObjectLitExpr,
+    layout: ClassLayout,
+  ): string[] {
+    const names: string[] = [];
+
+    for (const property of expr.props) {
+      const added = this.propertyNames(frame, property, layout);
+
+      for (const name of added) {
+        if (!names.includes(name)) {
+          names.push(name);
+        }
+      }
+    }
+
+    return names;
+  }
+
+  private propertyNames(
+    frame: Frame,
+    property: Property,
+    layout: ClassLayout,
+  ): string[] {
+    if (property.form.kind != PropertyKind.Spread) {
+      const key = this.propertyKey(frame, property);
+      if (key == undefined) {
+        return [];
+      }
+
+      return [key];
+    }
+
+    const source = this.typeOf(property.value);
+    const from = this.layoutOrNone(source);
+    if (from == undefined) {
+      return [];
+    }
+
+    const names = from.shape.fields.map((field) => field.name);
+
+    return names.filter((name) =>
+      layout.fields.some((field) => field.name == name),
+    );
+  }
+
+  private layoutOrNone(type: Type | undefined): ClassLayout | undefined {
+    if (type == undefined) {
+      return undefined;
+    }
+
+    return this.layoutOf(type);
+  }
+
+  private propertyStored(
+    frame: Frame,
+    object: LLVMValue,
+    layout: ClassLayout,
+    property: Property,
+  ): boolean {
+    if (property.form.kind == PropertyKind.Spread) {
+      return this.spreadStored(frame, object, layout, property.value);
+    }
+
+    const key = this.propertyKey(frame, property);
+    const field = layout.fields.find((one) => one.name == key);
+    if (field == undefined) {
+      this.notLowered(frame.module, property.loc, "this property");
+
+      return false;
+    }
+
+    const given = this.value(frame, property.value);
+    if (given == undefined) {
+      return false;
+    }
+
+    const loc = property.value.loc;
+    const value = this.converted(frame, given, field.type, loc);
+    if (value == undefined) {
+      return false;
+    }
+
+    const place = this.fieldPlaceOf(frame, object, layout, field);
+
+    this.stored(frame, place, value);
+
+    return true;
+  }
+
+  private fieldPlaceOf(
+    frame: Frame,
+    object: LLVMValue,
+    layout: ClassLayout,
+    field: LayoutField,
+  ): Place {
+    const pointer = frame.made.field(layout.struct, object, field.index);
+
+    return { pointer, type: field.ir, tz: field.type, owner: -1 };
+  }
+
+  private spreadStored(
+    frame: Frame,
+    object: LLVMValue,
+    layout: ClassLayout,
+    expr: Expr,
+  ): boolean {
+    const source = this.value(frame, expr);
+    if (source == undefined) {
+      return false;
+    }
+
+    const from = this.layoutOf(source.tz);
+    if (from == undefined) {
+      this.notLowered(frame.module, expr.loc, "a spread of this value");
+
+      return false;
+    }
+
+    for (const field of from.fields) {
+      const target = layout.fields.find((one) => one.name == field.name);
+      if (target == undefined) {
+        continue;
+      }
+
+      const address = frame.made.field(from.struct, source.value, field.index);
+      const loaded: IrValue = {
+        type: field.ir,
+        value: frame.made.load(field.ir, address),
+        tz: field.type,
+      };
+      const value = this.converted(frame, loaded, target.type, expr.loc);
+      if (value == undefined) {
+        return false;
+      }
+
+      const place = this.fieldPlaceOf(frame, object, layout, target);
+
+      this.stored(frame, place, value);
+    }
+
+    this.dropping(frame, source);
+
+    return true;
+  }
+
+  private unionFieldAt(
+    frame: Frame,
+    object: LLVMValue,
+    parts: Type[],
+    name: string,
+    loc: int,
+  ): Place | undefined {
+    const layouts: ClassLayout[] = [];
+    const spots: LayoutField[] = [];
+
+    for (const part of parts) {
+      const layout = this.layoutOf(part);
+      if (layout == undefined) {
+        this.notLowered(frame.module, loc, "a field of these objects");
+
+        return undefined;
+      }
+
+      const spot = layout.fields.find((one) => one.name == name);
+      if (spot != undefined) {
+        layouts.push(layout);
+        spots.push(spot);
+      }
+    }
+    if (spots.length == 0) {
+      this.notLowered(frame.module, loc, "this field");
+
+      return undefined;
+    }
+
+    const first = spots[0];
+    const isSameKind =
+      first != undefined && spots.every((spot) => spot.ir == first.ir);
+    if (first == undefined || !isSameKind) {
+      this.notLowered(frame.module, loc, "a field of these objects");
+
+      return undefined;
+    }
+
+    const types = spots.map((spot) => spot.type);
+    const tz = this.store.unionOf(types);
+    const isSameSpot = spots.every((spot) => spot.offset == first.offset);
+    if (isSameSpot) {
+      const offset = this.ir.integer(kIntType, `${first.offset}`);
+      const pointer = frame.made.element(kByteType, object, offset);
+
+      return { pointer, type: first.ir, tz, owner: -1 };
+    }
+
+    const pointer = this.chosenField(frame, object, layouts, spots);
+
+    return { pointer, type: first.ir, tz, owner: -1 };
+  }
+
+  private chosenField(
+    frame: Frame,
+    object: LLVMValue,
+    layouts: ClassLayout[],
+    spots: LayoutField[],
+  ): LLVMValue {
+    const made = frame.made;
+    const id = this.objectClassId(frame, object);
+    const end = made.block("field.end");
+    const pointers: LLVMValue[] = [];
+    const blocks: LLVMBlock[] = [];
+    const last = layouts.length - 1;
+
+    for (let index = 0; index < layouts.length; index++) {
+      const layout = layouts[index];
+      const spot = spots[index];
+      if (layout == undefined || spot == undefined) {
+        continue;
+      }
+      if (index < last) {
+        const here = made.block("field.here");
+        const next = made.block("field.next");
+        const wanted = this.ir.integer(kFlagType, `${layout.classId}`);
+        const test = made.integerCompare(IrIntPredicate.Equal, id, wanted);
+
+        made.conditionalBranch(test, here, next);
+        made.open(here);
+        pointers.push(made.field(layout.struct, object, spot.index));
+        blocks.push(made.currentBlock());
+        made.branch(end);
+        made.open(next);
+
+        continue;
+      }
+
+      pointers.push(made.field(layout.struct, object, spot.index));
+      blocks.push(made.currentBlock());
+      made.branch(end);
+    }
+
+    made.open(end);
+
+    return made.phi(kPointerType, pointers, blocks);
+  }
+
+  private objectClassId(frame: Frame, object: LLVMValue): LLVMValue {
+    const made = frame.made;
+    const kind = made.field(kObjectHeader, object, 1);
+    const layout = made.load(kPointerType, kind);
+    const id = made.field(kLayoutHead, layout, kClassIdIndex);
+
+    return made.load(kFlagType, id);
+  }
+
+  private tupleIndexed(frame: Frame, expr: IndexExpr): IrValue | undefined {
+    const position = this.constantIndex(expr.index);
+    if (position == undefined) {
+      this.notLowered(frame.module, expr.loc, "an index of a tuple");
+
+      return undefined;
+    }
+
+    const object = this.value(frame, expr.object);
+    if (object == undefined) {
+      return undefined;
+    }
+
+    const name = `${position}`;
+    const place = this.fieldAt(frame, object.value, object.tz, name, expr.loc);
+    if (place == undefined) {
+      return undefined;
+    }
+
+    const loaded = this.loaded(frame, place);
+    if (object.owned != true) {
+      return loaded;
+    }
+
+    const kept = this.owning(frame, loaded);
+
+    this.dropping(frame, object);
+
+    return kept;
+  }
+
+  private constantIndex(expr: Expr): int | undefined {
+    if (expr.kind == ExprKind.IntLit) {
+      return expr.value.toInt();
+    }
+
+    const folded = this.answers.foldedOf(expr);
+    if (folded == undefined) {
+      return undefined;
+    }
+
+    const text = `${folded}`;
+
+    return parseInt(text).unwrapOr(-1);
+  }
+
+  private tupleLiteral(
+    frame: Frame,
+    expr: ArrayLitExpr,
+    type: Type,
+  ): IrValue | undefined {
+    const layout = this.layoutOf(type);
+    if (layout == undefined) {
+      this.notLowered(frame.module, expr.loc, "a tuple of these types");
+
+      return undefined;
+    }
+
+    const object = this.allocated(frame, layout);
+
+    for (let index = 0; index < expr.elements.length; index++) {
+      const element = expr.elements[index];
+      const name = `${index}`;
+      const field = layout.fields.find((one) => one.name == name);
+      if (element == undefined || field == undefined) {
+        return undefined;
+      }
+
+      const given = this.value(frame, element.expr);
+      if (given == undefined) {
+        return undefined;
+      }
+
+      const loc = element.expr.loc;
+      const value = this.converted(frame, given, field.type, loc);
+      if (value == undefined) {
+        return undefined;
+      }
+
+      const owned = this.owning(frame, value);
+      const address = frame.made.field(layout.struct, object, field.index);
+
+      frame.made.store(owned.value, address);
+    }
+
+    return { type: kPointerType, value: object, tz: type, owned: true };
+  }
+
+  private mixedSpots(type: Type, name: string): LayoutField[] {
+    const spots: LayoutField[] = [];
+    if (type.kind != TypeKind.Union) {
+      return spots;
+    }
+
+    for (const part of type.parts) {
+      const spot = this.layoutOf(part)?.fields.find((one) => one.name == name);
+      if (spot != undefined) {
+        spots.push(spot);
+      }
+    }
+
+    return spots;
+  }
+
+  private isMixedField(type: Type, name: string): boolean {
+    const spots = this.mixedSpots(type, name);
+    const first = spots[0];
+    if (first == undefined) {
+      return false;
+    }
+
+    return spots.some((spot) => spot.ir != first.ir);
+  }
+
+  private mixedFieldValue(
+    frame: Frame,
+    object: IrValue,
+    expr: MemberExpr,
+  ): IrValue | undefined {
+    const result = this.typeIn(frame, expr);
+    const resultIr = this.typeOrUndefined(result);
+    const type = object.tz;
+    if (result == undefined || resultIr == undefined) {
+      this.notLowered(frame.module, expr.loc, "a field of these objects");
+
+      return undefined;
+    }
+    if (type.kind != TypeKind.Union) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const id = this.objectClassId(frame, object.value);
+    const end = made.block("field.end");
+    const values: LLVMValue[] = [];
+    const blocks: LLVMBlock[] = [];
+
+    for (const part of type.parts) {
+      const layout = this.layoutOf(part);
+      const spot = layout?.fields.find((one) => one.name == expr.name);
+      if (layout == undefined || spot == undefined) {
+        continue;
+      }
+
+      const here = made.block("field.here");
+      const next = made.block("field.next");
+      const wanted = this.ir.integer(kFlagType, `${layout.classId}`);
+      const test = made.integerCompare(IrIntPredicate.Equal, id, wanted);
+
+      made.conditionalBranch(test, here, next);
+      made.open(here);
+
+      const pointer = made.field(layout.struct, object.value, spot.index);
+      const loaded: IrValue = {
+        type: spot.ir,
+        value: made.load(spot.ir, pointer),
+        tz: spot.type,
+      };
+      const converted = this.converted(frame, loaded, result, expr.loc);
+      if (converted == undefined) {
+        return undefined;
+      }
+
+      const kept = this.owning(frame, converted);
+
+      values.push(kept.value);
+      blocks.push(made.currentBlock());
+      made.branch(end);
+      made.open(next);
+    }
+
+    values.push(this.ir.zero(resultIr));
+    blocks.push(made.currentBlock());
+    made.branch(end);
+    made.open(end);
+
+    const value = made.phi(resultIr, values, blocks);
+
+    this.dropping(frame, object);
+
+    return { type: resultIr, value, tz: result, owned: true };
+  }
+
+  private isReshaped(source: Type, target: Type): boolean {
+    if (source == target) {
+      return false;
+    }
+    if (source.kind != TypeKind.Object || target.kind != TypeKind.Object) {
+      return false;
+    }
+
+    const from = this.layoutOf(source);
+    const to = this.layoutOf(target);
+    if (from == undefined || to == undefined) {
+      return false;
+    }
+
+    return !to.fields.every((field) => this.isSameSpot(from, field));
+  }
+
+  private isSameSpot(layout: ClassLayout, field: LayoutField): boolean {
+    const spot = layout.fields.find((one) => one.name == field.name);
+    if (spot == undefined) {
+      return false;
+    }
+
+    return spot.index == field.index && spot.ir == field.ir;
+  }
+
+  private reshaped(
+    frame: Frame,
+    value: IrValue,
+    target: Type,
+    loc: int,
+  ): IrValue | undefined {
+    const from = this.layoutOf(value.tz);
+    const to = this.layoutOf(target);
+    if (from == undefined || to == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const object = this.allocated(frame, to);
+
+    for (const field of to.fields) {
+      const spot = from.fields.find((one) => one.name == field.name);
+      if (spot == undefined) {
+        continue;
+      }
+
+      const pointer = made.field(from.struct, value.value, spot.index);
+      const loaded: IrValue = {
+        type: spot.ir,
+        value: made.load(spot.ir, pointer),
+        tz: spot.type,
+      };
+      const converted = this.converted(frame, loaded, field.type, loc);
+      if (converted == undefined) {
+        return undefined;
+      }
+
+      const place = this.fieldPlaceOf(frame, object, to, field);
+
+      this.stored(frame, place, converted);
+    }
+
+    this.dropping(frame, value);
+
+    return { type: kPointerType, value: object, tz: target, owned: true };
+  }
+}

@@ -1,0 +1,643 @@
+import {
+  CallExpr,
+  IndexExpr,
+  MemberExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { ForOfStmt } from "../../../program/ast/types/ast.types.statements.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import {
+  IrIntPredicate,
+  IrOpcode,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kBooleanType,
+  kFlagType,
+  kIntType,
+  kLengthMask,
+  kPointerType,
+  kStringType,
+  kCStringFromText,
+  kTextCharAt,
+  kTextCodePointAt,
+  kTextCharCode,
+  kTextCodePoint,
+  kTextEndsWith,
+  kTextIncludes,
+  kTextIndexOf,
+  kTextLastIndexOf,
+  kTextLower,
+  kTextPad,
+  kTextRepeat,
+  kTextReplace,
+  kTextSlice,
+  kTextSplit,
+  kTextStartsWith,
+  kTextSubstring,
+  kTextTrim,
+  kTextUpper,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import {
+  Frame,
+  IrValue,
+  Place,
+  TextArguments,
+} from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private stringMethod(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+  ): IrValue | undefined {
+    const receiver = this.value(frame, member.object);
+    const given = this.textArguments(frame, call);
+    if (receiver == undefined || given == undefined) {
+      return undefined;
+    }
+
+    const result = this.stringMethodValue(frame, call, member, receiver, given);
+
+    this.dropping(frame, receiver);
+
+    for (const text of given.texts) {
+      this.dropping(frame, text);
+    }
+
+    return result;
+  }
+
+  private textArguments(
+    frame: Frame,
+    call: CallExpr,
+  ): TextArguments | undefined {
+    const texts: IrValue[] = [];
+    const numbers: LLVMValue[] = [];
+    const int = this.store.integer(64, false);
+
+    for (const argument of call.args) {
+      const given = this.value(frame, argument.expr);
+      if (given == undefined || argument.spread) {
+        return undefined;
+      }
+      if (this.isString(given.tz)) {
+        texts.push(given);
+
+        continue;
+      }
+
+      const number = this.converted(frame, given, int, argument.expr.loc);
+      if (number == undefined) {
+        return undefined;
+      }
+
+      numbers.push(number.value);
+    }
+
+    return { texts, numbers };
+  }
+
+  private stringMethodValue(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    receiver: IrValue,
+    given: TextArguments,
+  ): IrValue | undefined {
+    const name = member.name;
+
+    switch (name) {
+      case "toString":
+        return this.owning(frame, receiver);
+      case "toCString":
+        return this.cstringOf(frame, call, receiver);
+      case "slice":
+      case "substring":
+        return this.textSlice(frame, name, receiver, given);
+      case "indexOf":
+      case "lastIndexOf":
+      case "includes":
+      case "startsWith":
+      case "endsWith":
+        return this.textSearch(frame, name, receiver, given);
+      case "toLowerCase":
+      case "toUpperCase":
+        return this.textCase(frame, name, receiver);
+      case "trim":
+      case "trimStart":
+      case "trimEnd":
+        return this.textTrim(frame, name, receiver);
+      case "charCodeAt":
+      case "codePointAt":
+        return this.textCode(frame, call, name, receiver, given);
+      case "charAt":
+        return this.textCharAt(frame, receiver, given);
+      case "split":
+        return this.textSplit(frame, receiver, given);
+      case "replace":
+      case "replaceAll":
+        return this.textReplace(frame, call, name, receiver, given);
+      case "repeat":
+        return this.textRepeat(frame, receiver, given);
+      case "padStart":
+      case "padEnd":
+        return this.textPad(frame, name, receiver, given);
+      default: {
+        const called = this.calledName(call);
+
+        this.notLowered(frame.module, call.loc, `a call of method ${called}`);
+
+        return undefined;
+      }
+    }
+  }
+
+  private cstringOf(
+    frame: Frame,
+    call: CallExpr,
+    receiver: IrValue,
+  ): IrValue | undefined {
+    const result = this.typeOf(call);
+    if (result == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const params = [kPointerType, kIntType];
+    const callee = this.ir.declare(kCStringFromText, kPointerType, params);
+    const value = made.call(callee, this.textParts(frame, receiver));
+
+    return { type: kPointerType, value, tz: result, owned: true };
+  }
+
+  private textParts(frame: Frame, text: IrValue): LLVMValue[] {
+    const made = frame.made;
+
+    return [made.extract(text.value, 0), made.extract(text.value, 1)];
+  }
+
+  private numberAt(given: TextArguments, index: int): LLVMValue {
+    return given.numbers[index] ?? this.ir.zero(kIntType);
+  }
+
+  private flagAt(given: TextArguments, index: int): LLVMValue {
+    const isGiven = index < given.numbers.length;
+
+    return this.ir.integer(kFlagType, `${this.flagIf(isGiven, 1)}`);
+  }
+
+  private textOut(
+    frame: Frame,
+    name: string,
+    params: string[],
+    args: LLVMValue[],
+  ): IrValue {
+    const made = frame.made;
+    const out = made.slot(kStringType, "text.out");
+    const all = [kPointerType].concat(params);
+    const callee = this.ir.declare(name, kVoidType, all);
+
+    made.call(callee, [out].concat(args));
+
+    const value = made.load(kStringType, out);
+    const tz = this.store.plain(TypeKind.String);
+
+    return { type: kStringType, value, tz, owned: true };
+  }
+
+  private textSlice(
+    frame: Frame,
+    name: string,
+    receiver: IrValue,
+    given: TextArguments,
+  ): IrValue {
+    const isSlice = name == "slice";
+    const runtime = this.pick(isSlice, kTextSlice, kTextSubstring);
+    const args = this.textParts(frame, receiver).concat([
+      this.numberAt(given, 0),
+      this.numberAt(given, 1),
+      this.flagAt(given, 1),
+    ]);
+    const params = [kPointerType, kIntType, kIntType, kIntType, kFlagType];
+
+    return this.textOut(frame, runtime, params, args);
+  }
+
+  private textSearch(
+    frame: Frame,
+    name: string,
+    receiver: IrValue,
+    given: TextArguments,
+  ): IrValue | undefined {
+    const search = given.texts[0];
+    if (search == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const runtime = this.searchRuntime(name);
+    const params = [
+      kPointerType,
+      kIntType,
+      kPointerType,
+      kIntType,
+      kIntType,
+      kFlagType,
+    ];
+    const callee = this.ir.declare(runtime, kFlagType, params);
+    const args = this.textParts(frame, receiver)
+      .concat(this.textParts(frame, search))
+      .concat([this.numberAt(given, 0), this.flagAt(given, 0)]);
+    const found = made.call(callee, args);
+    if (name == "indexOf" || name == "lastIndexOf") {
+      const value = made.cast(IrOpcode.SExt, found, kIntType);
+      const tz = this.store.integer(64, false);
+
+      return { type: kIntType, value, tz };
+    }
+
+    const zero = this.ir.zero(kFlagType);
+    const value = made.integerCompare(IrIntPredicate.NotEqual, found, zero);
+    const tz = this.store.plain(TypeKind.Boolean);
+
+    return { type: kBooleanType, value, tz };
+  }
+
+  private searchRuntime(name: string): string {
+    switch (name) {
+      case "indexOf":
+        return kTextIndexOf;
+      case "lastIndexOf":
+        return kTextLastIndexOf;
+      case "includes":
+        return kTextIncludes;
+      case "startsWith":
+        return kTextStartsWith;
+      default:
+        return kTextEndsWith;
+    }
+  }
+
+  private textCase(frame: Frame, name: string, receiver: IrValue): IrValue {
+    const isUpper = name == "toUpperCase";
+    const runtime = this.pick(isUpper, kTextUpper, kTextLower);
+    const args = this.textParts(frame, receiver);
+
+    return this.textOut(frame, runtime, [kPointerType, kIntType], args);
+  }
+
+  private textTrim(frame: Frame, name: string, receiver: IrValue): IrValue {
+    const ends = this.trimEnds(name);
+    const args = this.textParts(frame, receiver).concat([
+      this.ir.integer(kFlagType, `${ends}`),
+    ]);
+    const params = [kPointerType, kIntType, kFlagType];
+
+    return this.textOut(frame, kTextTrim, params, args);
+  }
+
+  private trimEnds(name: string): int {
+    switch (name) {
+      case "trimStart":
+        return 1;
+      case "trimEnd":
+        return 2;
+      default:
+        return 3;
+    }
+  }
+
+  private textCode(
+    frame: Frame,
+    call: CallExpr,
+    name: string,
+    receiver: IrValue,
+    given: TextArguments,
+  ): IrValue | undefined {
+    const result = this.typeOf(call);
+    const resultIr = this.typeOrUndefined(result);
+    if (result == undefined || resultIr == undefined) {
+      this.notLowered(frame.module, call.loc, "a result of this type");
+
+      return undefined;
+    }
+
+    const made = frame.made;
+    const position = this.numberAt(given, 0);
+    const int = this.store.integer(64, false);
+    const isCode = name == "charCodeAt";
+    const runtime = this.pick(isCode, kTextCharCode, kTextCodePoint);
+    const callee = this.ir.declare(runtime, kFlagType, [
+      kPointerType,
+      kIntType,
+      kIntType,
+    ]);
+    if (this.optionalInner(result) == undefined) {
+      const args = this.textParts(frame, receiver).concat([position]);
+      const code = made.cast(IrOpcode.SExt, made.call(callee, args), kIntType);
+
+      return { type: kIntType, value: code, tz: int };
+    }
+
+    const length = this.textLength(frame, receiver);
+    const isInside = made.integerCompare(
+      IrIntPredicate.UnsignedLess,
+      position,
+      length,
+    );
+    const before = made.currentBlock();
+    const read = made.block("code.read");
+    const end = made.block("code.end");
+
+    made.conditionalBranch(isInside, read, end);
+    made.open(read);
+
+    const args = this.textParts(frame, receiver).concat([position]);
+    const code = made.cast(IrOpcode.SExt, made.call(callee, args), kIntType);
+    const found: IrValue = { type: kIntType, value: code, tz: int };
+    const placed = this.somewhere(frame, found, result);
+    const readEnd = made.currentBlock();
+
+    made.branch(end);
+    made.open(end);
+
+    const missing = this.ir.zero(resultIr);
+    const value = made.phi(
+      resultIr,
+      [missing, placed.value],
+      [before, readEnd],
+    );
+
+    return { type: resultIr, value, tz: result };
+  }
+
+  private textIndexed(
+    frame: Frame,
+    expr: IndexExpr,
+    result: Type,
+  ): IrValue | undefined {
+    const resultIr = this.irType(result);
+    const text = this.value(frame, expr.object);
+    const index = this.value(frame, expr.index);
+    if (resultIr == undefined || text == undefined || index == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const position = this.toLong(frame, index).value;
+    const length = this.textLength(frame, text);
+    const isInside = made.integerCompare(
+      IrIntPredicate.UnsignedLess,
+      position,
+      length,
+    );
+    const before = made.currentBlock();
+    const read = made.block("char.read");
+    const end = made.block("char.end");
+
+    made.conditionalBranch(isInside, read, end);
+    made.open(read);
+
+    const args = this.textParts(frame, text).concat([position]);
+    const params = [kPointerType, kIntType, kIntType];
+    const char = this.textOut(frame, kTextCharAt, params, args);
+    const placed = this.converted(frame, char, result, expr.loc);
+    const readEnd = made.currentBlock();
+
+    made.branch(end);
+    made.open(end);
+
+    if (placed == undefined) {
+      return undefined;
+    }
+
+    const missing = this.ir.zero(resultIr);
+    const value = made.phi(
+      resultIr,
+      [missing, placed.value],
+      [before, readEnd],
+    );
+
+    this.dropping(frame, text);
+
+    return { type: resultIr, value, tz: result, owned: true };
+  }
+
+  private textLoop(frame: Frame, statement: ForOfStmt): void {
+    const made = frame.made;
+    const cond = made.block("text.of.cond");
+    const body = made.block("text.of.body");
+    const end = made.block("text.of.end");
+    const string = this.store.plain(TypeKind.String);
+
+    this.openScope(frame);
+
+    const target = this.loopTarget(frame, end, cond);
+    const source = this.value(frame, statement.iterable);
+    if (source == undefined) {
+      return;
+    }
+
+    const holder: Place = {
+      pointer: made.slot(kStringType, "for.text"),
+      type: kStringType,
+      tz: string,
+      owner: frame.id,
+    };
+    const counter = made.slot(kIntType, "for.unit");
+
+    made.entryStore(this.ir.zero(kStringType), holder.pointer);
+    this.keepPlace(frame, holder);
+    this.stored(frame, holder, source);
+    made.store(this.ir.zero(kIntType), counter);
+    made.open(cond);
+
+    const text = this.loaded(frame, holder);
+    const index = made.load(kIntType, counter);
+    const length = this.textLength(frame, text);
+    const isInside = made.integerCompare(
+      IrIntPredicate.UnsignedLess,
+      index,
+      length,
+    );
+
+    made.conditionalBranch(isInside, body, end);
+    made.open(body);
+    this.openScope(frame);
+
+    const out = made.slot(kStringType, "text.point");
+    const params = [kPointerType, kPointerType, kIntType, kIntType];
+    const callee = this.ir.declare(kTextCodePointAt, kFlagType, params);
+    const args = [out].concat(this.textParts(frame, text)).concat([index]);
+    const units = made.call(callee, args);
+    const step = made.cast(IrOpcode.SExt, units, kIntType);
+
+    made.store(made.binary(IrOpcode.Add, index, step), counter);
+
+    const point = made.load(kStringType, out);
+    const item: IrValue = {
+      type: kStringType,
+      value: point,
+      tz: string,
+      owned: true,
+    };
+
+    this.loopItem(frame, statement, item);
+    frame.loops.push(target);
+    this.statement(frame, statement.body);
+    frame.loops.pop();
+    this.closeScope(frame);
+    this.jumpTo(frame, cond);
+    made.open(end);
+    this.closeScope(frame);
+  }
+
+  private textLength(frame: Frame, text: IrValue): LLVMValue {
+    const made = frame.made;
+    const meta = made.extract(text.value, 1);
+    const mask = this.ir.hexInteger(kIntType, kLengthMask);
+
+    return made.binary(IrOpcode.And, meta, mask);
+  }
+
+  private textCharAt(
+    frame: Frame,
+    receiver: IrValue,
+    given: TextArguments,
+  ): IrValue {
+    const args = this.textParts(frame, receiver).concat([
+      this.numberAt(given, 0),
+    ]);
+    const params = [kPointerType, kIntType, kIntType];
+
+    return this.textOut(frame, kTextCharAt, params, args);
+  }
+
+  private textSplit(
+    frame: Frame,
+    receiver: IrValue,
+    given: TextArguments,
+  ): IrValue | undefined {
+    const string = this.store.plain(TypeKind.String);
+    const descriptor = this.descriptor(string);
+    if (descriptor == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const separator = given.texts[0];
+    const hasSeparator = this.flagIf(separator != undefined, 1);
+    const parts = this.separatorParts(frame, separator);
+    const params = [
+      kPointerType,
+      kPointerType,
+      kIntType,
+      kPointerType,
+      kIntType,
+      kFlagType,
+      kIntType,
+      kFlagType,
+    ];
+    const callee = this.ir.declare(kTextSplit, kPointerType, params);
+    const args = [descriptor]
+      .concat(this.textParts(frame, receiver))
+      .concat(parts)
+      .concat([
+        this.ir.integer(kFlagType, `${hasSeparator}`),
+        this.numberAt(given, 0),
+        this.flagAt(given, 0),
+      ]);
+    const value = made.call(callee, args);
+    const tz = this.store.arrayOf(string);
+
+    return { type: kPointerType, value, tz, owned: true };
+  }
+
+  private separatorParts(
+    frame: Frame,
+    separator: IrValue | undefined,
+  ): LLVMValue[] {
+    if (separator == undefined) {
+      return [this.ir.zero(kPointerType), this.ir.zero(kIntType)];
+    }
+
+    return this.textParts(frame, separator);
+  }
+
+  private textReplace(
+    frame: Frame,
+    call: CallExpr,
+    name: string,
+    receiver: IrValue,
+    given: TextArguments,
+  ): IrValue | undefined {
+    const pattern = given.texts[0];
+    const replacement = given.texts[1];
+    if (pattern == undefined || replacement == undefined) {
+      this.notLowered(frame.module, call.loc, "a replacement of this kind");
+
+      return undefined;
+    }
+
+    const isAll = this.flagIf(name == "replaceAll", 1);
+    const args = this.textParts(frame, receiver)
+      .concat(this.textParts(frame, pattern))
+      .concat(this.textParts(frame, replacement))
+      .concat([this.ir.integer(kFlagType, `${isAll}`)]);
+    const params = [
+      kPointerType,
+      kIntType,
+      kPointerType,
+      kIntType,
+      kPointerType,
+      kIntType,
+      kFlagType,
+    ];
+
+    return this.textOut(frame, kTextReplace, params, args);
+  }
+
+  private textRepeat(
+    frame: Frame,
+    receiver: IrValue,
+    given: TextArguments,
+  ): IrValue {
+    const args = this.textParts(frame, receiver).concat([
+      this.numberAt(given, 0),
+    ]);
+    const params = [kPointerType, kIntType, kIntType];
+
+    return this.textOut(frame, kTextRepeat, params, args);
+  }
+
+  private textPad(
+    frame: Frame,
+    name: string,
+    receiver: IrValue,
+    given: TextArguments,
+  ): IrValue {
+    const fill = given.texts[0];
+    const hasFill = this.flagIf(fill != undefined, 1);
+    const atStart = this.flagIf(name == "padStart", 1);
+    const args = this.textParts(frame, receiver)
+      .concat([this.numberAt(given, 0)])
+      .concat(this.separatorParts(frame, fill))
+      .concat([
+        this.ir.integer(kFlagType, `${hasFill}`),
+        this.ir.integer(kFlagType, `${atStart}`),
+      ]);
+    const params = [
+      kPointerType,
+      kIntType,
+      kIntType,
+      kPointerType,
+      kIntType,
+      kFlagType,
+      kFlagType,
+    ];
+
+    return this.textOut(frame, kTextPad, params, args);
+  }
+}

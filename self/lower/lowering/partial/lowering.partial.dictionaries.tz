@@ -1,0 +1,886 @@
+import {
+  CallExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NewExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import {
+  DictKind,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import {
+  IrIntPredicate,
+  IrOpcode,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kBooleanType,
+  kByteType,
+  kDictLayoutFlag,
+  kFlagType,
+  kIntType,
+  kLayoutHead,
+  kMapAdd,
+  kArrayName,
+  kArraySlice,
+  kFromName,
+  kMapAddText,
+  kMapCopy,
+  kMapCountField,
+  kMapDelete,
+  kMapDeleteText,
+  kMapDrop,
+  kMapEntries,
+  kMapFind,
+  kMapFindText,
+  kMapKeys,
+  kMapLayout,
+  kMapNew,
+  kMapStruct,
+  kMapValues,
+  kPointerType,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import { DictLayout, Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private dictLayout(type: Type): DictLayout | undefined {
+    const known = this.dictLayouts.get(type.id);
+    if (known != undefined) {
+      return known;
+    }
+    if (type.kind != TypeKind.Dict) {
+      return undefined;
+    }
+
+    const isSet = type.dict == DictKind.Set;
+    const key = this.descriptor(type.key);
+    const value = this.dictValueDescriptor(type, isSet);
+    const keyIr = this.irType(type.key);
+    const valueIr = this.irType(type.value);
+    if (key == undefined || value == undefined) {
+      return undefined;
+    }
+    if (keyIr == undefined || valueIr == undefined) {
+      return undefined;
+    }
+
+    const keyOffset = this.aligned(8, this.alignOf(type.key));
+    const keyEnd = keyOffset + this.sizeOf(type.key);
+    const valueOffset = this.dictValueOffset(type, isSet, keyEnd);
+    const size = this.dictEntrySize(type, isSet, keyEnd, valueOffset);
+    const descriptor = this.dictDescriptor(
+      type,
+      key,
+      value,
+      size,
+      keyOffset,
+      valueOffset,
+    );
+    const layout: DictLayout = {
+      descriptor,
+      keyOffset,
+      valueOffset,
+      key: keyIr,
+      value: valueIr,
+    };
+
+    this.dictLayouts.set(type.id, layout);
+
+    return layout;
+  }
+
+  private dictValueDescriptor(
+    type: Type,
+    isSet: boolean,
+  ): LLVMValue | undefined {
+    if (isSet || type.kind != TypeKind.Dict) {
+      return this.ir.zero(kPointerType);
+    }
+
+    return this.descriptor(type.value);
+  }
+
+  private dictValueOffset(type: Type, isSet: boolean, keyEnd: int): int {
+    if (isSet || type.kind != TypeKind.Dict) {
+      return 0;
+    }
+
+    return this.aligned(keyEnd, this.alignOf(type.value));
+  }
+
+  private dictEntrySize(
+    type: Type,
+    isSet: boolean,
+    keyEnd: int,
+    valueOffset: int,
+  ): int {
+    if (type.kind != TypeKind.Dict) {
+      return keyEnd;
+    }
+
+    const keyAlign = this.alignOf(type.key);
+    if (isSet) {
+      return this.aligned(keyEnd, Math.max(4, keyAlign));
+    }
+
+    const end = valueOffset + this.sizeOf(type.value);
+    const valueAlign = this.alignOf(type.value);
+    const align = Math.max(4, Math.max(keyAlign, valueAlign));
+
+    return this.aligned(end, align);
+  }
+
+  private dictDescriptor(
+    type: Type,
+    key: LLVMValue,
+    value: LLVMValue,
+    size: int,
+    keyOffset: int,
+    valueOffset: int,
+  ): LLVMValue {
+    const none = this.ir.zero(kPointerType);
+    const drop = this.ir.declare(kMapDrop, kVoidType, [kPointerType]);
+    const head = this.ir.constStruct([
+      drop.fn,
+      none,
+      this.ir.integer(kFlagType, "0"),
+      this.ir.integer(kFlagType, `${kDictLayoutFlag}`),
+      none,
+      this.ir.integer(kFlagType, "0"),
+      this.ir.integer(kFlagType, `${this.nextClassId()}`),
+    ]);
+    const kind = this.dictKindNumber(type);
+    const descriptor = this.ir.constStruct([
+      head,
+      key,
+      value,
+      this.ir.integer(kFlagType, `${kind}`),
+      this.ir.integer(kFlagType, `${size}`),
+      this.ir.integer(kFlagType, `${keyOffset}`),
+      this.ir.integer(kFlagType, `${valueOffset}`),
+    ]);
+    const name = this.ir.uniqueName("tz.layout.dict.");
+
+    return this.ir.global(name, kMapLayout, descriptor, true);
+  }
+
+  private dictKindNumber(type: Type): int {
+    if (type.kind != TypeKind.Dict) {
+      return 0;
+    }
+
+    switch (type.dict) {
+      case DictKind.Record:
+        return 0;
+      case DictKind.Map:
+        return 1;
+      default:
+        return 2;
+    }
+  }
+
+  private newDict(frame: Frame, type: Type, loc: int): IrValue | undefined {
+    const layout = this.dictLayout(type);
+    if (layout == undefined) {
+      this.notLowered(frame.module, loc, "a dictionary of these types");
+
+      return undefined;
+    }
+
+    const creating = this.ir.declare(kMapNew, kPointerType, [kPointerType]);
+    const map = frame.made.call(creating, [layout.descriptor]);
+
+    return { type: kPointerType, value: map, tz: type, owned: true };
+  }
+
+  private dictCall(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const layout = this.dictLayout(object);
+    if (layout == undefined || object.kind != TypeKind.Dict) {
+      this.notLowered(frame.module, call.loc, "a dictionary of these types");
+
+      return undefined;
+    }
+
+    switch (member.name) {
+      case "get":
+        return this.dictGet(frame, call, member, object);
+      case "has":
+        return this.dictHas(frame, call, member, object);
+      case "set":
+      case "add":
+        return this.dictPut(frame, call, member, object);
+      case "delete":
+        return this.dictDelete(frame, call, member, object);
+      default: {
+        const name = this.calledName(call);
+
+        this.notLowered(frame.module, call.loc, `a call of method ${name}`);
+
+        return undefined;
+      }
+    }
+  }
+
+  private dictKey(
+    frame: Frame,
+    call: CallExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const argument = call.args[0];
+    if (argument == undefined || object.kind != TypeKind.Dict) {
+      this.notLowered(frame.module, call.loc, "these arguments");
+
+      return undefined;
+    }
+
+    const given = this.value(frame, argument.expr);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    return this.converted(frame, given, object.key, argument.expr.loc);
+  }
+
+  private dictFind(
+    frame: Frame,
+    map: LLVMValue,
+    key: IrValue,
+  ): LLVMValue {
+    const made = frame.made;
+    if (this.isString(key.tz)) {
+      const text = made.extract(key.value, 0);
+      const meta = made.extract(key.value, 1);
+      const finding = this.ir.declare(kMapFindText, kPointerType, [
+        kPointerType,
+        kPointerType,
+        kIntType,
+      ]);
+
+      return made.call(finding, [map, text, meta]);
+    }
+
+    const slot = this.keySlot(frame, key);
+    const finding = this.ir.declare(kMapFind, kPointerType, [
+      kPointerType,
+      kPointerType,
+    ]);
+
+    return made.call(finding, [map, slot]);
+  }
+
+  private dictAdd(frame: Frame, map: LLVMValue, key: IrValue): LLVMValue {
+    const made = frame.made;
+    const added = made.slot(kFlagType, "map.added");
+    if (this.isString(key.tz)) {
+      const text = made.extract(key.value, 0);
+      const meta = made.extract(key.value, 1);
+      const adding = this.ir.declare(kMapAddText, kPointerType, [
+        kPointerType,
+        kPointerType,
+        kIntType,
+        kPointerType,
+      ]);
+
+      return made.call(adding, [map, text, meta, added]);
+    }
+
+    const slot = this.keySlot(frame, key);
+    const adding = this.ir.declare(kMapAdd, kPointerType, [
+      kPointerType,
+      kPointerType,
+      kPointerType,
+    ]);
+
+    return made.call(adding, [map, slot, added]);
+  }
+
+  private keySlot(frame: Frame, key: IrValue): LLVMValue {
+    const slot = frame.made.slot(key.type, "map.key");
+
+    frame.made.store(key.value, slot);
+
+    return slot;
+  }
+
+  private entryField(frame: Frame, entry: LLVMValue, offset: int): LLVMValue {
+    const at = this.ir.integer(kIntType, `${offset}`);
+
+    return frame.made.element(kByteType, entry, at);
+  }
+
+  private dictGet(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const layout = this.dictLayout(object);
+    const result = this.typeOf(call);
+    const resultIr = this.typeOrUndefined(result);
+    const map = this.value(frame, member.object);
+    const key = this.dictKey(frame, call, object);
+    if (layout == undefined || object.kind != TypeKind.Dict) {
+      return undefined;
+    }
+    if (result == undefined || resultIr == undefined) {
+      this.notLowered(frame.module, call.loc, "a value of this dictionary");
+
+      return undefined;
+    }
+    if (map == undefined || key == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const entry = this.dictFind(frame, map.value, key);
+    const none = this.ir.zero(kPointerType);
+    const isFound = made.integerCompare(IrIntPredicate.NotEqual, entry, none);
+    const before = made.currentBlock();
+    const read = made.block("map.read");
+    const end = made.block("map.got");
+
+    made.conditionalBranch(isFound, read, end);
+    made.open(read);
+
+    const address = this.entryField(frame, entry, layout.valueOffset);
+    const loaded: IrValue = {
+      type: layout.value,
+      value: made.load(layout.value, address),
+      tz: object.value,
+    };
+    const owned = this.owning(frame, loaded);
+    const placed = this.converted(frame, owned, result, call.loc);
+    const readEnd = made.currentBlock();
+
+    made.branch(end);
+    made.open(end);
+
+    if (placed == undefined) {
+      return undefined;
+    }
+
+    const missing = this.ir.zero(resultIr);
+    const value = made.phi(
+      resultIr,
+      [missing, placed.value],
+      [before, readEnd],
+    );
+
+    this.dropping(frame, key);
+    this.dropping(frame, map);
+
+    return { type: resultIr, value, tz: result, owned: true };
+  }
+
+  private dictHas(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const map = this.value(frame, member.object);
+    const key = this.dictKey(frame, call, object);
+    if (map == undefined || key == undefined) {
+      return undefined;
+    }
+
+    const entry = this.dictFind(frame, map.value, key);
+    const none = this.ir.zero(kPointerType);
+    const value = frame.made.integerCompare(
+      IrIntPredicate.NotEqual,
+      entry,
+      none,
+    );
+    const tz = this.store.plain(TypeKind.Boolean);
+
+    this.dropping(frame, key);
+    this.dropping(frame, map);
+
+    return { type: kBooleanType, value, tz };
+  }
+
+  private dictPut(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const layout = this.dictLayout(object);
+    const map = this.value(frame, member.object);
+    const key = this.dictKey(frame, call, object);
+    if (layout == undefined || object.kind != TypeKind.Dict) {
+      return undefined;
+    }
+    if (map == undefined || key == undefined) {
+      return undefined;
+    }
+
+    const isSet = object.dict == DictKind.Set;
+    const stored = this.dictStoredValue(frame, call, object, isSet);
+    if (stored == undefined && !isSet) {
+      return undefined;
+    }
+
+    const entry = this.dictAdd(frame, map.value, key);
+
+    if (stored != undefined) {
+      this.entryStored(frame, entry, layout.valueOffset, stored);
+    }
+
+    this.dropping(frame, key);
+
+    return map;
+  }
+
+  private dictStoredValue(
+    frame: Frame,
+    call: CallExpr,
+    object: Type,
+    isSet: boolean,
+  ): IrValue | undefined {
+    const argument = call.args[1];
+    if (isSet || argument == undefined || object.kind != TypeKind.Dict) {
+      return undefined;
+    }
+
+    const given = this.value(frame, argument.expr);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const loc = argument.expr.loc;
+    const value = this.converted(frame, given, object.value, loc);
+    if (value == undefined) {
+      return undefined;
+    }
+
+    return this.owning(frame, value);
+  }
+
+  private entryStored(
+    frame: Frame,
+    entry: LLVMValue,
+    offset: int,
+    value: IrValue,
+  ): void {
+    const made = frame.made;
+    const address = this.entryField(frame, entry, offset);
+    const before = made.load(value.type, address);
+    const old: IrValue = {
+      type: value.type,
+      value: before,
+      tz: value.tz,
+      owned: true,
+    };
+
+    made.store(value.value, address);
+    this.dropping(frame, old);
+  }
+
+  private dictDelete(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const made = frame.made;
+    const map = this.value(frame, member.object);
+    const key = this.dictKey(frame, call, object);
+    if (map == undefined || key == undefined) {
+      return undefined;
+    }
+
+    const removed = this.dictRemoved(frame, map.value, key);
+    const zero = this.ir.zero(kFlagType);
+    const value = made.integerCompare(IrIntPredicate.NotEqual, removed, zero);
+    const tz = this.store.plain(TypeKind.Boolean);
+
+    this.dropping(frame, key);
+    this.dropping(frame, map);
+
+    return { type: kBooleanType, value, tz };
+  }
+
+  private dictRemoved(frame: Frame, map: LLVMValue, key: IrValue): LLVMValue {
+    const made = frame.made;
+    if (this.isString(key.tz)) {
+      const text = made.extract(key.value, 0);
+      const meta = made.extract(key.value, 1);
+      const removing = this.ir.declare(kMapDeleteText, kFlagType, [
+        kPointerType,
+        kPointerType,
+        kIntType,
+      ]);
+
+      return made.call(removing, [map, text, meta]);
+    }
+
+    const slot = this.keySlot(frame, key);
+    const removing = this.ir.declare(kMapDelete, kFlagType, [
+      kPointerType,
+      kPointerType,
+    ]);
+
+    return made.call(removing, [map, slot]);
+  }
+
+  private dictSize(frame: Frame, expr: MemberExpr): IrValue | undefined {
+    if (expr.name != "size") {
+      this.notLowered(frame.module, expr.loc, "this member of a dictionary");
+
+      return undefined;
+    }
+
+    const map = this.value(frame, expr.object);
+    if (map == undefined) {
+      return undefined;
+    }
+
+    const made = frame.made;
+    const field = made.field(kMapStruct, map.value, kMapCountField);
+    const count = made.load(kFlagType, field);
+    const value = made.cast(IrOpcode.ZExt, count, kIntType);
+    const tz = this.store.integer(64, false);
+
+    this.dropping(frame, map);
+
+    return { type: kIntType, value, tz };
+  }
+
+  private dictItems(
+    frame: Frame,
+    expr: Expr,
+    isKeys: boolean,
+  ): IrValue | undefined {
+    const object = this.typeOf(expr);
+    const map = this.value(frame, expr);
+    if (object == undefined || object.kind != TypeKind.Dict) {
+      this.notLowered(frame.module, expr.loc, "this dictionary");
+
+      return undefined;
+    }
+    if (map == undefined) {
+      return undefined;
+    }
+
+    const item = this.dictItemType(object, isKeys);
+    const element = this.descriptor(item);
+    if (element == undefined) {
+      this.notLowered(frame.module, expr.loc, "a dictionary of these types");
+
+      return undefined;
+    }
+
+    const name = this.pick(isKeys, kMapKeys, kMapValues);
+    const listing = this.ir.declare(name, kPointerType, [
+      kPointerType,
+      kPointerType,
+    ]);
+    const array = frame.made.call(listing, [map.value, element]);
+    const tz = this.store.arrayOf(item);
+
+    this.dropping(frame, map);
+
+    return { type: kPointerType, value: array, tz, owned: true };
+  }
+
+  private dictItemType(object: Type, isKeys: boolean): Type {
+    if (object.kind != TypeKind.Dict || isKeys) {
+      return this.dictKeyType(object);
+    }
+
+    return object.value;
+  }
+
+  private dictKeyType(object: Type): Type {
+    if (object.kind != TypeKind.Dict) {
+      return object;
+    }
+
+    return object.key;
+  }
+
+  private newDictFrom(
+    frame: Frame,
+    expr: NewExpr,
+    type: Type,
+  ): IrValue | undefined {
+    const source = expr.args[0];
+    if (source == undefined) {
+      return this.newDict(frame, type, expr.loc);
+    }
+
+    const from = this.typeOf(source.expr);
+    if (from != undefined && from.kind == TypeKind.Dict) {
+      return this.dictCopy(frame, source.expr, type);
+    }
+
+    const items = this.sourceItems(frame, source.expr);
+    if (items == undefined || items.tz.kind != TypeKind.Array) {
+      this.notLowered(frame.module, expr.loc, "a dictionary from this source");
+
+      return undefined;
+    }
+
+    const made = this.newDict(frame, type, expr.loc);
+    if (made == undefined) {
+      return undefined;
+    }
+
+    this.itemsAdded(frame, made, items, type);
+    this.dropping(frame, items);
+
+    return made;
+  }
+
+  private sourceItems(frame: Frame, expr: Expr): IrValue | undefined {
+    const listed = this.listedDict(expr);
+    if (listed != undefined) {
+      return this.dictItems(frame, listed.object, listed.name == "keys");
+    }
+
+    return this.value(frame, expr);
+  }
+
+  private listedDict(expr: Expr): MemberExpr | undefined {
+    if (expr.kind != ExprKind.Call || expr.args.length != 0) {
+      return undefined;
+    }
+
+    const callee = expr.callee;
+    if (callee.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    const object = this.typeOf(callee.object);
+    const isListing = callee.name == "keys" || callee.name == "values";
+    if (object == undefined || object.kind != TypeKind.Dict || !isListing) {
+      return undefined;
+    }
+
+    return callee;
+  }
+
+  private dictCopy(
+    frame: Frame,
+    source: Expr,
+    type: Type,
+  ): IrValue | undefined {
+    const layout = this.dictLayout(type);
+    const from = this.value(frame, source);
+    if (layout == undefined || from == undefined) {
+      this.notLowered(frame.module, source.loc, "a dictionary of these types");
+
+      return undefined;
+    }
+
+    const copying = this.ir.declare(kMapCopy, kPointerType, [
+      kPointerType,
+      kPointerType,
+    ]);
+    const map = frame.made.call(copying, [from.value, layout.descriptor]);
+
+    this.dropping(frame, from);
+
+    return { type: kPointerType, value: map, tz: type, owned: true };
+  }
+
+  private itemsAdded(
+    frame: Frame,
+    map: IrValue,
+    items: IrValue,
+    type: Type,
+  ): void {
+    const made = frame.made;
+    const array = items.value;
+    const tz = items.tz;
+    if (tz.kind != TypeKind.Array) {
+      return;
+    }
+
+    const item = this.irType(tz.item);
+    if (item == undefined) {
+      return;
+    }
+
+    const cond = made.block("fill.cond");
+    const body = made.block("fill.body");
+    const end = made.block("fill.end");
+    const counter = made.slot(kIntType, "fill.index");
+
+    made.store(this.ir.zero(kIntType), counter);
+    made.open(cond);
+
+    const index = made.load(kIntType, counter);
+    const length = this.arrayLength(frame, array);
+    const isInside = made.integerCompare(
+      IrIntPredicate.UnsignedLess,
+      index,
+      length,
+    );
+
+    made.conditionalBranch(isInside, body, end);
+    made.open(body);
+
+    const data = this.arrayData(frame, array);
+    const address = made.element(item, data, index);
+    const loaded: IrValue = {
+      type: item,
+      value: made.load(item, address),
+      tz: tz.item,
+    };
+    const one = this.ir.integer(kIntType, "1");
+
+    this.entryAdded(frame, map.value, loaded, type);
+    made.store(made.binary(IrOpcode.Add, index, one), counter);
+    made.branch(cond);
+    made.open(end);
+  }
+
+  private entryAdded(
+    frame: Frame,
+    map: LLVMValue,
+    item: IrValue,
+    type: Type,
+  ): void {
+    const dictLayout = this.dictLayout(type);
+    if (type.kind != TypeKind.Dict || dictLayout == undefined) {
+      return;
+    }
+    if (type.dict == DictKind.Set) {
+      const key = this.converted(frame, item, type.key, 0);
+      if (key != undefined) {
+        this.dictAdd(frame, map, key);
+      }
+
+      return;
+    }
+
+    const pair = this.layoutOf(item.tz);
+    const first = pair?.fields.find((one) => one.name == "0");
+    const second = pair?.fields.find((one) => one.name == "1");
+    if (pair == undefined || first == undefined || second == undefined) {
+      return;
+    }
+
+    const made = frame.made;
+    const keyAddress = made.field(pair.struct, item.value, first.index);
+    const valueAddress = made.field(pair.struct, item.value, second.index);
+    const keyRead: IrValue = {
+      type: first.ir,
+      value: made.load(first.ir, keyAddress),
+      tz: first.type,
+    };
+    const valueRead: IrValue = {
+      type: second.ir,
+      value: made.load(second.ir, valueAddress),
+      tz: second.type,
+    };
+    const key = this.converted(frame, keyRead, type.key, 0);
+    const value = this.converted(frame, valueRead, type.value, 0);
+    if (key == undefined || value == undefined) {
+      return;
+    }
+
+    const entry = this.dictAdd(frame, map, key);
+    const owned = this.owning(frame, value);
+
+    this.entryStored(frame, entry, dictLayout.valueOffset, owned);
+  }
+
+  private isArrayFrom(member: MemberExpr): boolean {
+    const object = member.object;
+
+    return (
+      object.kind == ExprKind.Name &&
+      object.name == kArrayName &&
+      member.name == kFromName
+    );
+  }
+
+  private arrayFrom(frame: Frame, call: CallExpr): IrValue | undefined {
+    const source = call.args[0];
+    if (source == undefined || call.args.length != 1) {
+      this.notLowered(frame.module, call.loc, "this call of Array.from");
+
+      return undefined;
+    }
+
+    const type = this.typeIn(frame, source.expr);
+    const listed = this.listedDict(source.expr);
+    if (listed != undefined) {
+      return this.dictItems(frame, listed.object, listed.name == "keys");
+    }
+    if (type != undefined && type.kind == TypeKind.Dict) {
+      return this.dictItems(frame, source.expr, true);
+    }
+    if (type == undefined || type.kind != TypeKind.Array) {
+      this.notLowered(frame.module, call.loc, "this call of Array.from");
+
+      return undefined;
+    }
+
+    const given = this.value(frame, source.expr);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const copying = this.ir.declare(kArraySlice, kPointerType, [
+      kPointerType,
+      kIntType,
+      kIntType,
+      kFlagType,
+    ]);
+    const zero = this.ir.zero(kIntType);
+    const none = this.ir.zero(kFlagType);
+    const copy = frame.made.call(copying, [given.value, zero, zero, none]);
+
+    this.dropping(frame, given);
+
+    return { type: kPointerType, value: copy, tz: type, owned: true };
+  }
+
+  private dictEntries(
+    frame: Frame,
+    expr: Expr,
+    type: Type,
+  ): IrValue | undefined {
+    if (type.kind != TypeKind.Dict) {
+      return undefined;
+    }
+
+    const tuple = this.store.plainTuple([type.key, type.value]);
+    const layout = this.layoutOf(tuple);
+    const element = this.descriptor(tuple);
+    const map = this.value(frame, expr);
+    if (layout == undefined || element == undefined || map == undefined) {
+      this.notLowered(frame.module, expr.loc, "the entries of this map");
+
+      return undefined;
+    }
+
+    const listing = this.ir.declare(kMapEntries, kPointerType, [
+      kPointerType,
+      kPointerType,
+      kPointerType,
+      kIntType,
+    ]);
+    const size = this.ir.integer(kIntType, `${layout.size}`);
+    const args = [map.value, element, layout.descriptor, size];
+    const array = frame.made.call(listing, args);
+    const tz = this.store.arrayOf(tuple);
+
+    this.dropping(frame, map);
+
+    return { type: kPointerType, value: array, tz, owned: true };
+  }
+}
