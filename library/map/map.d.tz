@@ -14,12 +14,6 @@ export declare class Map<K, V> {
   public get(key: K): V | undefined;
   /** Sets the value of the key and gives the map itself. */
   public set(key: K, value: V): Map<K, V>;
-  /**
-   * The value of the key; when the key is not there, sets it to the value
-   * first.
-   * @example counts.getOrInsert(word, []).push(line)
-   */
-  public getOrInsert(key: K, value: V): V;
   public has(key: K): boolean;
   /** Removes the key; whether it was there. */
   public delete(key: K): boolean;

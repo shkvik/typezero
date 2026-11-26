@@ -39,6 +39,7 @@ import {
   FunctionFrame,
   ParameterShape,
   ReturnedValue,
+  StalledFunction,
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
@@ -350,9 +351,13 @@ partial class ExpressionTypes {
     }
 
     for (const hit of hits) {
-      const list = this.stalled.getOrInsert(hit, []);
+      const stall: StalledFunction = { fn, module };
 
-      list.push({ fn, module });
+      if (!this.stalled.has(hit)) {
+        this.stalled.set(hit, []);
+      }
+
+      this.stalled.get(hit)?.push(stall);
     }
   }
 

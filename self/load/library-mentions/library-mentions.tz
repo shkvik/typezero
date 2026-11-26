@@ -13,6 +13,21 @@ import { Token, TokenKind } from "../token/types/token.types.tz";
 import { Mentions } from "./types/library-mentions.types.tz";
 
 export class LibraryMentions {
+  private readonly grouped(
+    groups: Map<string, ModuleName[]>,
+    module: string,
+    name: ModuleName,
+  ): void {
+    const names = groups.get(module);
+    if (names == undefined) {
+      groups.set(module, [name]);
+
+      return;
+    }
+
+    names.push(name);
+  }
+
   public readonly imports(tokens: readonly Token[], file: Read<SourceFile>): ImportDecl[] {
     const mentions = this.mentioned(tokens);
     const grouped = new Map<string, ModuleName[]>();
@@ -27,7 +42,7 @@ export class LibraryMentions {
       const name = global.name;
       const loc = mentions.globals.get(name);
       if (loc != undefined && !own.has(name)) {
-        grouped.getOrInsert(global.module, []).push({
+        this.grouped(grouped, global.module, {
           name,
           loc,
           as: name,
@@ -39,7 +54,7 @@ export class LibraryMentions {
     for (const member of kLibrary.members()) {
       const loc = mentions.members.get(member.alias);
       if (loc != undefined) {
-        grouped.getOrInsert(member.module, []).push({
+        this.grouped(grouped, member.module, {
           name: member.name,
           loc,
           as: member.alias,

@@ -33,7 +33,14 @@ export class ErrorLog {
     }
 
     this.reported.add(key);
-    this.lists.getOrInsert(module, []).push({ code, loc, details });
+
+    const error: SourceError = { code, loc, details };
+
+    if (!this.lists.has(module)) {
+      this.lists.set(module, []);
+    }
+
+    this.lists.get(module)?.push(error);
 
     if (this.trials.length > 0) {
       this.written.push({ module, loc, code });

@@ -235,8 +235,6 @@ partial class Lowering {
       case "set":
       case "add":
         return this.dictPut(frame, call, member, object);
-      case "getOrInsert":
-        return this.dictGetOrInsert(frame, call, member, object);
       case "delete":
         return this.dictDelete(frame, call, member, object);
       default: {
@@ -490,59 +488,6 @@ partial class Lowering {
     }
 
     return this.owning(frame, value);
-  }
-
-  private dictGetOrInsert(
-    frame: Frame,
-    call: CallExpr,
-    member: MemberExpr,
-    object: Type,
-  ): IrValue | undefined {
-    const layout = this.dictLayout(object);
-    const map = this.value(frame, member.object);
-    const key = this.dictKey(frame, call, object);
-    if (layout == undefined || object.kind != TypeKind.Dict) {
-      return undefined;
-    }
-    if (map == undefined || key == undefined) {
-      return undefined;
-    }
-
-    const stored = this.dictStoredValue(frame, call, object, false);
-    if (stored == undefined) {
-      return undefined;
-    }
-
-    const added = frame.made.slot(kFlagType, "map.added");
-    const entry = this.dictAddFlagged(frame, map.value, key, added);
-    const address = this.entryField(frame, entry, layout.valueOffset);
-    const flag = frame.made.load(kFlagType, added);
-    const zero = this.ir.zero(kFlagType);
-    const isAdded = frame.made.integerCompare(IrIntPredicate.NotEqual, flag, zero);
-    const putting = frame.made.block("map.put");
-    const keeping = frame.made.block("map.kept");
-    const end = frame.made.block("map.ready");
-
-    frame.made.conditionalBranch(isAdded, putting, keeping);
-    frame.made.open(putting);
-    frame.made.store(stored.value, address);
-    frame.made.branch(end);
-    frame.made.open(keeping);
-    this.dropping(frame, stored);
-    frame.made.branch(end);
-    frame.made.open(end);
-
-    const loaded: IrValue = {
-      type: layout.value,
-      value: frame.made.load(layout.value, address),
-      tz: object.value,
-    };
-    const owned = this.owning(frame, loaded);
-
-    this.dropping(frame, key);
-    this.dropping(frame, map);
-
-    return owned;
   }
 
   private entryStored(

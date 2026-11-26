@@ -145,8 +145,10 @@ drop(a); // освободить сейчас; дальше a пусто
   пустого значения — ошибка TZ4029, нужен `replace`.
 - Первый аргумент — место: имя, поле, элемент. Новое значение местом не бывает (TZ4033).
 - `structuredClone(value)` — глубокая копия, своя.
-- `Map.getOrInsert(key, value)` (предложение upsert из JavaScript) отдаёт значение по ключу,
-  положив `value`, если его не было: `groups.getOrInsert(word, []).push(line)`.
+- Список по ключу `Map` пополняют так: `get` и, если ключа нет, `set` нового —
+  `const list = groups.get(word); if (list == undefined) groups.set(word, [line]); else
+  list.push(line)`. Старый приём `const list = groups.get(word) ?? []; list.push(line);
+  groups.set(word, list)` по правилам не проходит: `list` то смотрит в `groups`, то свой.
 
 ## 6. `Cell` и `Interned`
 

@@ -27,9 +27,9 @@ function words(): string {
 function listed(): string {
   const groups = new Map<int, string[]>();
 
-  groups.getOrInsert(1, []).push("one");
-  groups.getOrInsert(2, []).push("two");
-  groups.getOrInsert(1, []).push("uno");
+  groups.set(1, ["one"]);
+  groups.set(2, ["two"]);
+  groups.get(1)?.push("uno");
   groups.delete(2);
 
   const keys = Array.from(groups.keys());

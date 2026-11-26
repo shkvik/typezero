@@ -3,8 +3,10 @@ import { OwnershipCheck } from "../ownership-check.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import {
   ArrayLitExpr,
+  BinaryOp,
   Expr,
   ExprKind,
+  NameExpr,
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 import {
   ForOfStmt,
@@ -187,17 +189,74 @@ partial class OwnershipCheck {
     this.evaluate(stmt.cond);
 
     const before = this.copyState(this.state);
+    const thenEmpty = this.emptiedBorrow(stmt.cond, BinaryOp.Eq);
 
-    this.walkStatement(stmt.thenStmt);
+    this.walkBranch(stmt.thenStmt, thenEmpty);
 
     const afterThen = replace(this.state, before);
 
     const elseStmt = stmt.elseStmt;
     if (elseStmt != undefined) {
-      this.walkStatement(elseStmt);
+      const elseEmpty = this.emptiedBorrow(stmt.cond, BinaryOp.Ne);
+
+      this.walkBranch(elseStmt, elseEmpty);
     }
 
     this.state = this.merged(afterThen, this.state);
+  }
+
+  private walkBranch(stmt: Stmt, emptied: int | undefined): void {
+    if (emptied == undefined) {
+      return this.walkStatement(stmt);
+    }
+
+    const variable = this.variableOf(emptied);
+    if (variable == undefined) {
+      return this.walkStatement(stmt);
+    }
+
+    const loans = replace(variable.loans, []);
+
+    this.walkStatement(stmt);
+
+    const after = this.variableOf(emptied);
+    if (after != undefined) {
+      after.loans = loans;
+    }
+  }
+
+  private readonly emptiedBorrow(cond: Expr, op: BinaryOp): int | undefined {
+    if (cond.kind != ExprKind.Binary || cond.op != op) {
+      return undefined;
+    }
+
+    const name = this.comparedName(cond.lhs, cond.rhs);
+    if (name == undefined) {
+      return undefined;
+    }
+
+    const key = this.keyOfName(name);
+    if (key == undefined) {
+      return undefined;
+    }
+
+    const variable = this.variableOf(key);
+    if (variable == undefined || !variable.isConst || variable.holding != Holding.Borrow) {
+      return undefined;
+    }
+
+    return key;
+  }
+
+  private readonly comparedName(lhs: Expr, rhs: Expr): NameExpr | undefined {
+    if (lhs.kind == ExprKind.Name && rhs.kind == ExprKind.Undefined) {
+      return lhs;
+    }
+    if (rhs.kind == ExprKind.Name && lhs.kind == ExprKind.Undefined) {
+      return rhs;
+    }
+
+    return undefined;
   }
 
   private walkLoop(cond: Expr, body: Stmt, step: Expr | undefined): void {

@@ -114,7 +114,12 @@ partial class FileParser {
 
   private recordConstant(name: string, init: Expr): void {
     const values = this.constantTexts(init);
-    const all = this.stringConstants.getOrInsert(name, []);
+    const all = this.stringConstants.get(name);
+    if (all == undefined) {
+      this.stringConstants.set(name, values);
+
+      return;
+    }
 
     for (const value of values) {
       all.push(value);

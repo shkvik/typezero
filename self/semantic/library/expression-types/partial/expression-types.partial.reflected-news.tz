@@ -53,12 +53,15 @@ partial class ExpressionTypes {
       return;
     }
 
-    const list = this.constructorWidenings.getOrInsert(from.id, []);
-    if (list.includes(to)) {
+    const isKnown = this.constructorWidenings.get(from.id)?.includes(to) ?? false;
+    if (isKnown) {
       return;
     }
+    if (!this.constructorWidenings.has(from.id)) {
+      this.constructorWidenings.set(from.id, []);
+    }
 
-    list.push(to);
+    this.constructorWidenings.get(from.id)?.push(to);
   }
 
   private readonly reflectedNewNote(expr: NewExpr, made: Type, module: int): void {

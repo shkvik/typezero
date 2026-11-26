@@ -151,9 +151,14 @@ partial class ExpressionTypes {
       return;
     }
 
-    const names = this.eventMarks.emittedNames.getOrInsert(key, []);
-    if (!names.includes(event)) {
-      names.push(event);
+    const marks = this.eventMarks;
+    const isNamed = marks.emittedNames.get(key)?.includes(event) ?? false;
+
+    if (!marks.emittedNames.has(key)) {
+      marks.emittedNames.set(key, []);
+    }
+    if (!isNamed) {
+      marks.emittedNames.get(key)?.push(event);
     }
 
     const slot = `${key} ${event}`;

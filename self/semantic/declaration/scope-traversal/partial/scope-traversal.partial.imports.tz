@@ -28,7 +28,12 @@ partial class ScopeTraversal {
       return;
     }
 
-    const known = this.memberUses.getOrInsert(object.name, []);
+    const known = this.memberUses.get(object.name);
+    if (known == undefined) {
+      this.memberUses.set(object.name, [name]);
+
+      return;
+    }
     if (!known.includes(name)) {
       known.push(name);
     }

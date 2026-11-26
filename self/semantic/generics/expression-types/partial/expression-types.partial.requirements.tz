@@ -73,9 +73,11 @@ partial class ExpressionTypes {
   }
 
   private readonly addRequirement(id: int, requirement: Requirement): void {
-    const list = this.requirements.getOrInsert(id, []);
+    if (!this.requirements.has(id)) {
+      this.requirements.set(id, []);
+    }
 
-    list.push(requirement);
+    this.requirements.get(id)?.push(requirement);
   }
 
   private readonly requireFollowing(draft: Read<GenericDraft>, module: int): void {
@@ -106,11 +108,14 @@ partial class ExpressionTypes {
 
     this.pendingCalls.push(call);
 
-    if (owner != "") {
-      const owned = this.ownedCalls.getOrInsert(owner, []);
-
-      owned.push(call);
+    if (owner == "") {
+      return;
     }
+    if (!this.ownedCalls.has(owner)) {
+      this.ownedCalls.set(owner, []);
+    }
+
+    this.ownedCalls.get(owner)?.push(call);
   }
 
   private readonly ownerKey(module: int): string {

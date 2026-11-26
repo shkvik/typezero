@@ -197,13 +197,6 @@ export const kMapMethods: BuiltinMethod[] = [
     result: ResultMode.Copy,
   },
   {
-    name: "getOrInsert",
-    receiver: LoanKind.Exclusive,
-    params: [ParamMode.Own, ParamMode.Own],
-    isRestOwn: false,
-    result: ResultMode.Element,
-  },
-  {
     name: "add",
     receiver: LoanKind.Exclusive,
     params: [ParamMode.Own],

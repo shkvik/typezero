@@ -7,7 +7,6 @@ import {
 import {
   kElementMethods,
   kFillMethod,
-  kGetOrInsertMethod,
   kKeyMethods,
   kSetMethod,
 } from "./const/destination-rules.const.tz";
@@ -49,7 +48,7 @@ export class DestinationRules {
     index: int,
   ): Type | undefined {
     const isMap = dict.dict == DictKind.Map;
-    if (isMap && (name == kSetMethod || name == kGetOrInsertMethod)) {
+    if (isMap && name == kSetMethod) {
       return this.pairPart(dict, index);
     }
 

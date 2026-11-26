@@ -70,17 +70,6 @@ export class HashMap<K, V> {
     return peekAt(this.values, entry);
   }
 
-  public getOrInsert(key: Own<K>, value: Own<V>): Read<V> {
-    const found = this.entryOf(key);
-    if (found >= 0) {
-      return this.valueAt(found);
-    }
-
-    this.set(key, value);
-
-    return this.valueAt(this.entries - 1);
-  }
-
   @Unsafe({
     uses: [UnsafeUse.Memory],
     reason: "a found entry is live; a new entry goes to the first cell after the last one",

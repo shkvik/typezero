@@ -265,11 +265,15 @@ partial class ExpressionTypes {
       return;
     }
 
-    const calls = this.selfCalls.getOrInsert(fn, []);
-
-    if (!calls.includes(member)) {
-      calls.push(member);
+    const isKnown = this.selfCalls.get(fn)?.includes(member) ?? false;
+    if (isKnown) {
+      return;
     }
+    if (!this.selfCalls.has(fn)) {
+      this.selfCalls.set(fn, []);
+    }
+
+    this.selfCalls.get(fn)?.push(member);
   }
 
   private readonly overriddenCallChecks(decl: ClassDecl, module: int): void {

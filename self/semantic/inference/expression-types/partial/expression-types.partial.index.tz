@@ -27,7 +27,10 @@ import {
 import { kHiddenMark } from "../../../code/source-texts/const/source-texts.const.tz";
 
 partial class ExpressionTypes {
-  private readonly indexStatements(statements: Read<Stmt[]>, record: ValueRecord): void {
+  private readonly indexStatements(
+    statements: Read<Stmt[]>,
+    record: ValueRecord,
+  ): void {
     for (const statement of statements) {
       this.indexStatement(statement, record);
     }
@@ -115,7 +118,10 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly indexVariables(statement: VarDeclStmt, record: ValueRecord): void {
+  private readonly indexVariables(
+    statement: VarDeclStmt,
+    record: ValueRecord,
+  ): void {
     const isConst = statement.isConst;
 
     for (const decl of statement.decls) {
@@ -140,9 +146,11 @@ partial class ExpressionTypes {
       return;
     }
 
-    const list = record.destinations.getOrInsert(symbol.loc, []);
+    if (!record.destinations.has(symbol.loc)) {
+      record.destinations.set(symbol.loc, []);
+    }
 
-    list.push(destination);
+    record.destinations.get(symbol.loc)?.push(destination);
   }
 
   private readonly keepAssigned(
@@ -170,7 +178,10 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly keepReturned(value: Expr | undefined, record: ValueRecord): void {
+  private readonly keepReturned(
+    value: Expr | undefined,
+    record: ValueRecord,
+  ): void {
     const fn = record.owners[record.owners.length - 1];
     if (fn != undefined && fn.returnType != undefined) {
       const kind = DestinationKind.Returned;
@@ -250,7 +261,10 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly indexExpressions(exprs: Read<Expr[]>, record: ValueRecord): void {
+  private readonly indexExpressions(
+    exprs: Read<Expr[]>,
+    record: ValueRecord,
+  ): void {
     for (const expr of exprs) {
       this.indexExpression(expr, record);
     }

@@ -7,5 +7,4 @@ export const kElementMethods = [
 ];
 export const kFillMethod = "fill";
 export const kSetMethod = "set";
-export const kGetOrInsertMethod = "getOrInsert";
 export const kKeyMethods = ["get", "has", "delete", "add"];
