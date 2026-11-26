@@ -1,2 +1,4 @@
 export const kTypesWord = "types";
 export const kOwnershipFlag = "--ownership";
+export const kQuietFlag = "--quiet";
+export const kOverlayFlag = "--overlay";

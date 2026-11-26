@@ -1,13 +1,20 @@
 import { dirname, join } from "node:path";
 import { Loader } from "../../load/loader/loader.tz";
-import { LoadResult } from "../../load/loader/types/loader.types.tz";
+import { LoadResult, Overlay } from "../../load/loader/types/loader.types.tz";
 import { kLibraryDirectory } from "../../program/library/library-modules/const/library-modules.const.tables.tz";
 
 export class ProgramSource {
   public readonly load(entry: string): LoadResult {
+    return this.loadWith(entry, []);
+  }
+
+  public readonly loadWith(
+    entry: string,
+    overlays: Read<Overlay[]>,
+  ): LoadResult {
     const home = dirname(process.execPath);
     const library = join(home, kLibraryDirectory);
-    const loader = new Loader(entry, library);
+    const loader = new Loader(entry, library, overlays);
 
     return loader.run();
   }

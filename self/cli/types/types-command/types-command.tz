@@ -14,11 +14,18 @@ import { ProgramSource } from "../../program-source/program-source.tz";
 import { Program } from "../../../program/module/types/module.types.tz";
 import { ExpressionTypes } from "../../../semantic/code/expression-types/expression-types.tz";
 import { OwnershipCheck } from "../../../semantic/ownership/ownership-check/ownership-check.tz";
-import { kOwnershipFlag } from "./const/types-command.const.tz";
+import { Overlay } from "../../../load/loader/types/loader.types.tz";
+import {
+  kOverlayFlag,
+  kOwnershipFlag,
+  kQuietFlag,
+} from "./const/types-command.const.tz";
 
 export class TypesCommand {
   private readonly entry?: string;
   private readonly isOwnershipChecked: boolean;
+  private readonly isQuiet: boolean;
+  private readonly overlays: Overlay[];
   private readonly report: ProgramReport;
   private readonly store: TypeStore;
   private readonly text: TypeText;
@@ -26,9 +33,13 @@ export class TypesCommand {
   public constructor(args: Read<string[]>) {
     this.entry = args[3];
     this.isOwnershipChecked = args.includes(kOwnershipFlag);
+    this.isQuiet = args.includes(kQuietFlag);
+    this.overlays = [];
     this.report = new ProgramReport();
     this.store = new TypeStore();
     this.text = new TypeText(this.store);
+
+    this.readOverlays(args);
   }
 
   public run(): void {
@@ -41,7 +52,7 @@ export class TypesCommand {
     }
 
     const source = new ProgramSource();
-    const loaded = source.load(entry);
+    const loaded = source.loadWith(entry, this.overlays);
     const program = loaded.program;
 
     this.report.loadProblems(loaded);
@@ -54,8 +65,10 @@ export class TypesCommand {
 
     const checked = front.run();
 
-    for (const typed of checked.typed) {
-      this.printTypes(typed);
+    if (!this.isQuiet) {
+      for (const typed of checked.typed) {
+        this.printTypes(typed);
+      }
     }
 
     for (const problems of front.problems(checked)) {
@@ -64,6 +77,21 @@ export class TypesCommand {
 
     if (this.isOwnershipChecked) {
       this.checkOwnership(program, checked.values);
+    }
+  }
+
+  private readOverlays(args: Read<string[]>): void {
+    for (let index = 0; index < args.length; index++) {
+      const path = args[index + 1];
+      const textFile = args[index + 2];
+      if (args[index] != kOverlayFlag) {
+        continue;
+      }
+      if (path == undefined || textFile == undefined) {
+        continue;
+      }
+
+      this.overlays.push({ path, textFile });
     }
   }
 

@@ -12,9 +12,13 @@ const plugins = [require("./prettier/plugins/typescript.js"), require("./prettie
 // `range` ({ start, end }, offsets in the text), only the statements it
 // touches change. A Promise of the whole text; it rejects on a syntax error,
 // with "(line:column)" at the end of the first line of its message.
-// TypeScript has no `partial class` (docs/objects.md, section 6): Prettier
-// reads `partial` as a comment of the same length, so offsets stay as they are.
+// TypeScript has no `partial class` (docs/objects.md, section 6) and no
+// `readonly` before a method (docs/ownership.md): Prettier reads each as a
+// comment of the same length, so offsets stay as they are.
 const kPartialMask = "/*@pc*/"
+const kReadonlyMask = "/*@ro_*/"
+const kReadonlyMethod =
+  /\breadonly(?=[ \t]+(?:[A-Za-z_$][\w$]*|\[[^\]\r\n]*\])[ \t]*(?:<[^\r\n]*?>)?[ \t]*\()/g
 
 function format(text, { tabSize = 2, insertSpaces = true, range } = {}) {
   const options = {
@@ -28,12 +32,16 @@ function format(text, { tabSize = 2, insertSpaces = true, range } = {}) {
     options.rangeStart = range.start
     options.rangeEnd = range.end
   }
-  const masked = text.replace(/(^|[\r\n])([ \t]*)partial(?=[ \t]+class\b)/g, `$1$2${kPartialMask}`)
-  return prettier.format(masked, options).then(unmaskPartial)
+  const masked = text
+    .replace(/(^|[\r\n])([ \t]*)partial(?=[ \t]+class\b)/g, `$1$2${kPartialMask}`)
+    .replace(kReadonlyMethod, kReadonlyMask)
+  return prettier.format(masked, options).then(unmask)
 }
 
-function unmaskPartial(text) {
-  return text.replace(/\/\*@pc\*\/[ \t]*class\b/g, "partial class")
+function unmask(text) {
+  return text
+    .replace(/\/\*@pc\*\/[ \t]*class\b/g, "partial class")
+    .replace(/\/\*@ro_\*\/([ \t]*)/g, "readonly ")
 }
 
 module.exports = { format }

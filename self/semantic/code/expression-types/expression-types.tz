@@ -379,6 +379,8 @@ export class ExpressionTypes {
   private reflectedNews: Cell<ReflectedNew[]>;
   private ownedCalls: Cell<Map<string, PendingCall[]>>;
   private writtenFields?: Cell<Set<string>>;
+  private methodParts: Cell<Map<FunctionDecl, ClassDecl>>;
+  private partHomes: Cell<Map<ClassDecl, int>>;
 
   public constructor(
     store: TypeStore,
@@ -692,9 +694,29 @@ export class ExpressionTypes {
     this.constructorWidenings = new Map<int, Type[]>();
     this.reflectedNews = [];
     this.ownedCalls = new Map<string, PendingCall[]>();
+    this.methodParts = new Map<FunctionDecl, ClassDecl>();
+    this.partHomes = new Map<ClassDecl, int>();
 
     for (const scopes of resolved) {
       this.scopes.set(scopes.module.id, scopes);
+    }
+
+    for (const opened of this.program.modules) {
+      for (const part of opened.parts) {
+        this.indexPart(part, opened.id);
+      }
+    }
+  }
+
+  private readonly indexPart(part: ClassDecl, module: int): void {
+    if (!this.partHomes.has(part)) {
+      this.partHomes.set(part, module);
+    }
+
+    for (const method of part.methods) {
+      if (!this.methodParts.has(method)) {
+        this.methodParts.set(method, part);
+      }
     }
   }
 }

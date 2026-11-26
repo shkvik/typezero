@@ -2,4 +2,4 @@ export const kProgramName = "tzparse";
 export const kUsageExitCode = 2;
 export const kLibraryMark = " (library)";
 export const kUsage =
-  "usage: tzparse tokens|tree|check|each|time|hold|read <file.tz | @list> [repeat]\n       tzparse load|names|scopes|types <main.tz>\n       tzparse build [-o <file>] [--emit-llvm] [--library <file.lib>] <main.tz>";
+  "usage: tzparse tokens|tree|check|each|time|hold|read <file.tz | @list> [repeat]\n       tzparse load|names|scopes|types <main.tz>\n       tzparse types <main.tz> [--ownership] [--quiet] [--overlay <file.tz> <text file>]...\n       tzparse build [-o <file>] [--emit-llvm] [--library <file.lib>] <main.tz>";

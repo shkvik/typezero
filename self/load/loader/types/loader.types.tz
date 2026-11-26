@@ -42,6 +42,11 @@ export type Request = {
 
 export type InternedLoad = Interned<OpenModule | Request>;
 
+export type Overlay = {
+  readonly path: string;
+  readonly textFile: string;
+};
+
 export type LoadResult = {
   readonly program: Program;
   readonly unreadable: string[];

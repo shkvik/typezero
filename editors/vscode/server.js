@@ -1,6 +1,9 @@
-// The language server: `tz lsp`, which shows the errors of .tz files as they
-// are typed (docs/lsp.md). The client is vscode-languageclient, which
-// install.ps1 copies here as client.js from third_party/vscode-languageclient.
+// The language server: `tz lsp` (docs/lsp.md), which answers hover, go to
+// definition, references, completion and rename. The client is
+// vscode-languageclient, which install.ps1 copies here as client.js from
+// third_party/vscode-languageclient. Its errors are not shown while tzparse
+// of check.js is found: the C++ compiler does not know the rules of ownership
+// and would mark them all as errors.
 //
 // tz is the one of the setting tz.path, else the one on PATH, else
 // build/dev/bin/tz.exe of an open folder (the repository of tz). The server
@@ -13,6 +16,7 @@ const os = require("os")
 const path = require("path")
 const vscode = require("vscode")
 const { LanguageClient } = require("./client.js")
+const check = require("./check.js")
 
 const exe = process.platform == "win32" ? "tz.exe" : "tz"
 let client
@@ -80,6 +84,11 @@ async function start() {
       documentSelector: [{ scheme: "file", language: "tz" }],
       synchronize: { fileEvents: vscode.workspace.createFileSystemWatcher("**/*.{tz,json}") },
       outputChannel: output,
+      middleware: {
+        handleDiagnostics: (uri, diagnostics, next) => {
+          next(uri, check.isActive() ? [] : diagnostics)
+        },
+      },
     },
   )
   await client.start()

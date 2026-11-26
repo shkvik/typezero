@@ -27,6 +27,7 @@ import {
   LoadResult,
   ModuleState,
   OpenModule,
+  Overlay,
   Request,
 } from "./types/loader.types.tz";
 
@@ -44,8 +45,13 @@ export class Loader {
   private unreadable: string[];
   private packageErrors: string[];
   private readonly packageOf: Map<int, int>;
+  private readonly overlays: Map<string, string>;
 
-  public constructor(entryPath: string, libraryDirectory: string) {
+  public constructor(
+    entryPath: string,
+    libraryDirectory: string,
+    overlays: Read<Overlay[]>,
+  ) {
     const entryDirectory = dirname(entryPath);
     const reader = new ManifestReader();
     const packages = new PackageGraph(reader);
@@ -65,6 +71,13 @@ export class Loader {
     this.libraries = new Map<string, int>();
     this.order = [];
     this.unreadable = [];
+    this.overlays = new Map<string, string>();
+
+    for (const overlay of overlays) {
+      const key = this.keyOf(overlay.path);
+
+      this.overlays.set(key, overlay.textFile);
+    }
   }
 
   public run(): LoadResult {

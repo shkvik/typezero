@@ -1,12 +1,14 @@
 // The extension's code: the formatter of .tz files (Format Document,
 // Alt+Shift+F, and Format Selection) through format.js, the errors as you
-// type through the language server, server.js, and F5 on a .tz file through
+// type through tz's own compiler, check.js, hover, go to definition and the
+// rest through the language server, server.js, and F5 on a .tz file through
 // debug.js. Everything else, the language and its highlighting, is in
 // package.json.
 "use strict"
 const path = require("path")
 const vscode = require("vscode")
 const { format } = require("./format.js")
+const check = require("./check.js")
 const server = require("./server.js")
 const debug = require("./debug.js")
 
@@ -39,11 +41,13 @@ function activate(context) {
         edits(document, options, range),
     }),
   )
+  check.activate(context)
   server.activate(context)
   debug.activate(context, server.findTz)
 }
 
 function deactivate() {
+  check.deactivate()
   return server.deactivate()
 }
 

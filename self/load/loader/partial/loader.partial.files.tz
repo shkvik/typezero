@@ -186,7 +186,8 @@ partial class Loader {
   }
 
   private read(file: string, path: string): Buffer | undefined {
-    const text = readFileSync(file);
+    const source = this.textFileOf(file);
+    const text = readFileSync(source);
     if (text.isErr()) {
       this.unreadable.push(path);
 
@@ -194,6 +195,16 @@ partial class Loader {
     }
 
     return text.value;
+  }
+
+  private readonly textFileOf(file: string): string {
+    if (this.overlays.size == 0) {
+      return file;
+    }
+
+    const key = this.keyOf(file);
+
+    return this.overlays.get(key) ?? file;
   }
 
   private declarationOf(

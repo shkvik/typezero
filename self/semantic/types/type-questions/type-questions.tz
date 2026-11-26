@@ -42,12 +42,7 @@ export class TypeQuestions {
   }
 
   public readonly definedType(type: Type): Type {
-    const parts = this.definedParts(type);
-    if (parts.length == 0) {
-      return type;
-    }
-
-    return this.store.unionOf(parts);
+    return this.store.definedOf(type);
   }
 
   public readonly definedParts(type: Type): Type[] {

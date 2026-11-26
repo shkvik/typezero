@@ -318,24 +318,16 @@ partial class ExpressionTypes {
   }
 
   private readonly partOf(owner: ClassDecl, method: FunctionDecl): ClassDecl {
-    for (const opened of this.program.modules) {
-      const part = opened.parts.find(
-        (one) => one.name == owner.name && one.methods.includes(method),
-      );
-      if (part != undefined) {
-        return part;
-      }
+    const part = this.methodParts.get(method);
+    if (part == undefined || part.name != owner.name) {
+      return owner;
     }
 
-    return owner;
+    return part;
   }
 
   private readonly partModule(part: ClassDecl, module: int): int {
-    const home = this.program.modules.find((opened) =>
-      opened.parts.includes(part),
-    );
-
-    return home?.id ?? module;
+    return this.partHomes.get(part) ?? module;
   }
 
   private readonly newTyped(expr: NewExpr, wanted: Type | undefined, module: int): Type {

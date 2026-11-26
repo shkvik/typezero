@@ -25,6 +25,7 @@ export class TypeStore {
   private constraints: Cell<Map<Type, Type>>;
   private writers: Cell<Map<string, readonly ParamWriter[]>>;
   private interned: Cell<Set<int>>;
+  private defined: Cell<Map<int, Type>>;
   private count: Cell<int>;
 
   public constructor() {
@@ -36,7 +37,35 @@ export class TypeStore {
     this.constraints = new Map<Type, Type>();
     this.writers = new Map<string, readonly ParamWriter[]>();
     this.interned = new Set<int>();
+    this.defined = new Map<int, Type>();
     this.count = 0;
+  }
+
+  public readonly definedOf(type: Type): Type {
+    const known = this.defined.get(type.id);
+    if (known != undefined) {
+      return known;
+    }
+
+    const parts = this.partsBesideUndefined(type);
+    if (parts.length == 0) {
+      return type;
+    }
+
+    const defined = this.unionOf(parts);
+    if (type.kind == TypeKind.Union && !type.recursive) {
+      this.defined.set(type.id, defined);
+    }
+
+    return defined;
+  }
+
+  private readonly partsBesideUndefined(type: Type): Type[] {
+    if (type.kind != TypeKind.Union) {
+      return [type];
+    }
+
+    return type.parts.filter((part) => part.kind != TypeKind.Undefined);
   }
 
   public readonly markInterned(type: Type): void {
@@ -265,6 +294,11 @@ export class TypeStore {
   }
 
   public readonly unionOf(parts: Read<Type[]>): Type {
+    const single = this.singlePart(parts);
+    if (single != undefined) {
+      return single;
+    }
+
     const flat = this.flatParts(parts);
     const unknown = flat.find((part) => part.kind == TypeKind.Unknown);
     if (unknown != undefined) {
@@ -487,23 +521,46 @@ export class TypeStore {
     }
   }
 
+  private readonly singlePart(parts: Read<Type[]>): Type | undefined {
+    const only = parts[0];
+    if (parts.length != 1 || only == undefined) {
+      return undefined;
+    }
+
+    const isPlain =
+      only.kind != TypeKind.Union &&
+      only.kind != TypeKind.Never &&
+      !this.isUninhabited(only);
+    if (!isPlain) {
+      return undefined;
+    }
+
+    return only;
+  }
+
   private readonly flatParts(parts: Read<Type[]>): Type[] {
     const flat: Type[] = [];
+    const seen = new Set<int>();
 
     for (const part of parts) {
       if (part.kind == TypeKind.Union && !part.recursive) {
-        this.addParts(flat, part.parts);
+        this.addParts(flat, seen, part.parts);
       } else {
-        this.addParts(flat, [part]);
+        this.addParts(flat, seen, [part]);
       }
     }
 
     return flat;
   }
 
-  private readonly addParts(flat: Type[], parts: Read<Type[]>): void {
+  private readonly addParts(
+    flat: Type[],
+    seen: Set<int>,
+    parts: Read<Type[]>,
+  ): void {
     for (const part of parts) {
-      if (!flat.includes(part)) {
+      if (!seen.has(part.id)) {
+        seen.add(part.id);
         flat.push(part);
       }
     }
@@ -512,6 +569,11 @@ export class TypeStore {
   private readonly orderedParts(flat: Read<Type[]>): Type[] {
     const ordered: Type[] = [];
     const absent: Type[] = [];
+    const ids = new Set<int>();
+
+    for (const part of flat) {
+      ids.add(part.id);
+    }
 
     for (const part of flat) {
       if (part.kind == TypeKind.Undefined) {
@@ -522,7 +584,7 @@ export class TypeStore {
       const isKept =
         part.kind != TypeKind.Never &&
         !this.isUninhabited(part) &&
-        !this.isAbsorbed(part, flat);
+        !this.isAbsorbed(part, ids);
       if (isKept) {
         ordered.push(part);
       }
@@ -535,14 +597,14 @@ export class TypeStore {
     return ordered;
   }
 
-  private readonly isAbsorbed(part: Type, flat: Read<Type[]>): boolean {
+  private readonly isAbsorbed(part: Type, ids: Read<Set<int>>): boolean {
     let current = this.parentsOf(part);
 
     for (let depth = 0; depth < kParentDepthLimit; depth++) {
       if (current.length == 0) {
         return false;
       }
-      if (current.some((parent) => flat.includes(parent))) {
+      if (current.some((parent) => ids.has(parent.id))) {
         return true;
       }
 
