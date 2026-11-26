@@ -28,7 +28,13 @@ import {
   ParamMode,
   ResultMode,
 } from "../types/ownership-check.types.tz";
-import { kThisKey, kThisName } from "../const/ownership-check.const.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import {
+  kForeignKeyBase,
+  kForeignModuleSpan,
+  kThisKey,
+  kThisName,
+} from "../const/ownership-check.const.tz";
 
 partial class OwnershipCheck {
   private collectUses(frame: FunctionFrame, items: Read<Stmt[]>): void {
@@ -127,7 +133,7 @@ partial class OwnershipCheck {
         }
 
         const type = this.values.variableOf(this.module, one.key);
-        if (type != undefined && this.traits.isCopy(type)) {
+        if (type != undefined && this.traits.isCopy(type, this.values)) {
           continue;
         }
 
@@ -185,6 +191,8 @@ partial class OwnershipCheck {
     isConst: boolean,
     isUsing: boolean,
   ): void {
+    const isBorrowArray = this.isBorrowArrayRef(declarator.typeAnn);
+
     frame.variables.set(declarator.loc, {
       key: declarator.loc,
       name: declarator.name,
@@ -197,7 +205,7 @@ partial class OwnershipCheck {
       lastUse: declarator.loc,
       isChanged: false,
       isCaptured: false,
-      isBorrowArray: this.isBorrowArrayRef(declarator.typeAnn),
+      isBorrowArray,
       isPattern:
         declarator.form.kind != BindingKind.Plain &&
         declarator.origin == NameOrigin.Generated,
@@ -207,7 +215,7 @@ partial class OwnershipCheck {
   private readonly isBorrowArrayRef(ref: TypeRef | undefined): boolean {
     return (
       ref != undefined &&
-      ref.form.kind == TypeRefKind.Array &&
+      (ref.form.kind == TypeRefKind.Array || ref.form.kind == TypeRefKind.Tuple) &&
       this.isBorrowRef(ref)
     );
   }
@@ -377,10 +385,19 @@ partial class OwnershipCheck {
     }
 
     const target = this.values.valueTargetOf(expr, this.module);
-    if (target == undefined || target.module != this.module) {
+    if (target == undefined) {
+      return undefined;
+    }
+    if (target.module == this.module) {
+      return target.loc;
+    }
+    const home = this.program.modules[target.module];
+    if (target.kind != SymbolKind.Variable || home == undefined || home.source.isLibrary) {
       return undefined;
     }
 
-    return target.loc;
+    const shift = target.module * kForeignModuleSpan;
+
+    return kForeignKeyBase - shift - target.loc;
   }
 }

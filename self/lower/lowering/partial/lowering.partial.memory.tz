@@ -71,6 +71,14 @@ partial class Lowering {
   }
 
   private owning(frame: Read<Frame>, value: IrValue): IrValue {
+    if (value.isStatic == true) {
+      return { type: value.type, value: value.value, tz: value.tz, owned: true, isStatic: true };
+    }
+
+    const ownedFlag = value.ownedFlag;
+    if (ownedFlag != undefined) {
+      return this.flagOwning(frame, ownedFlag, value);
+    }
     if (this.isArena(value.tz) && !this.isConstant(value)) {
       this.immortalized(frame, value);
     }
@@ -92,7 +100,7 @@ partial class Lowering {
     if (!this.isAuditing || this.isString(inner) || this.isDecimal(inner)) {
       return;
     }
-    if (this.traits.isCopy(inner)) {
+    if (this.traits.isCopy(inner, this.values)) {
       return;
     }
 
@@ -122,6 +130,13 @@ partial class Lowering {
       return this.immortalized(frame, inside);
     }
     if (value.type != kPointerType) {
+      return;
+    }
+
+    const deep = this.deepImmortalCallee(value.tz);
+    if (deep != undefined) {
+      frame.made.call(deep, [value.value]);
+
       return;
     }
 
@@ -155,6 +170,15 @@ partial class Lowering {
   }
 
   private dropping(frame: Read<Frame>, value: IrValue): void {
+    if (value.isStatic == true) {
+      return;
+    }
+
+    const ownedFlag = value.ownedFlag;
+    if (ownedFlag != undefined) {
+      return this.flagDropped(frame, ownedFlag, value);
+    }
+
     const isOwned =
       value.owned == true &&
       this.isManaged(value.tz) &&
@@ -252,6 +276,35 @@ partial class Lowering {
     }
 
     this.flaggedDrop(frame, flag, value);
+  }
+
+  private flagDropped(frame: Read<Frame>, ownedFlag: LLVMValue, value: IrValue): void {
+    const release = frame.made.block("owned.drop");
+    const after = frame.made.block("owned.after");
+    const owned: IrValue = {
+      type: value.type,
+      value: value.value,
+      tz: value.tz,
+      owned: true,
+    };
+
+    frame.made.conditionalBranch(ownedFlag, release, after);
+    frame.made.open(release);
+    this.dropping(frame, owned);
+    frame.made.open(after);
+  }
+
+  private flagOwning(frame: Read<Frame>, ownedFlag: LLVMValue, value: IrValue): IrValue {
+    const retain = frame.made.block("borrowed.count");
+    const after = frame.made.block("borrowed.after");
+    const borrowed: IrValue = { type: value.type, value: value.value, tz: value.tz };
+
+    frame.made.conditionalBranch(ownedFlag, after, retain);
+    frame.made.open(retain);
+    this.owning(frame, borrowed);
+    frame.made.open(after);
+
+    return { type: value.type, value: value.value, tz: value.tz, owned: true };
   }
 
   private flaggedDrop(

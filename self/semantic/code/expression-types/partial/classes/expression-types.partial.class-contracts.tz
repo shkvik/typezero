@@ -20,7 +20,7 @@ import { TypePlace } from "../../../../types/type-resolver/types/type-resolver.t
 import { ClassMemberEntry } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly contractChecks(decl: ClassDecl, module: int): void {
+  private contractChecks(decl: ClassDecl, module: int): void {
     if (decl.typeParams.length > 0) {
       return;
     }
@@ -59,7 +59,7 @@ partial class ExpressionTypes {
     this.report(module, base.loc, Code.ExtendsNotClass, { word, first });
   }
 
-  private readonly abstractParentsCheck(
+  private abstractParentsCheck(
     decl: ClassDecl,
     instance: InstanceType,
     module: int,
@@ -112,7 +112,7 @@ partial class ExpressionTypes {
     return this.classOf(parent);
   }
 
-  private readonly abstractOwnerCheck(
+  private abstractOwnerCheck(
     decl: ClassDecl,
     owner: ClassDecl,
     instance: InstanceType,
@@ -135,7 +135,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly reportAbstract(
+  private reportAbstract(
     decl: ClassDecl,
     owner: ClassDecl,
     instance: InstanceType,
@@ -164,7 +164,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private readonly implementsCheck(
+  private implementsCheck(
     decl: ClassDecl,
     instance: InstanceType,
     ref: TypeRef,
@@ -203,7 +203,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly contractMember(
+  private contractMember(
     decl: ClassDecl,
     instance: InstanceType,
     iface: string,
@@ -262,7 +262,7 @@ partial class ExpressionTypes {
     this.contractMethods(entry, iface, field, first, module);
   }
 
-  private readonly contractField(
+  private contractField(
     entry: Read<ClassMemberEntry>,
     iface: string,
     field: ObjectField,
@@ -291,7 +291,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private readonly contractMethod(
+  private contractMethod(
     entry: Read<ClassMemberEntry>,
     method: FunctionDecl,
     iface: string,
@@ -327,7 +327,7 @@ partial class ExpressionTypes {
     this.reportFound(module, contractResultError);
   }
 
-  private readonly superMethodCall(
+  private superMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     wanted: Type | undefined,

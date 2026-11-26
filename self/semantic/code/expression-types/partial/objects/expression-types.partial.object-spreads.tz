@@ -13,7 +13,7 @@ import {
 import { SpreadSlot } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly spreadObject(
+  private spreadObject(
     expr: ObjectLitExpr,
     target: Type | undefined,
     module: int,
@@ -48,7 +48,7 @@ partial class ExpressionTypes {
     return result;
   }
 
-  private readonly spreadProperty(
+  private spreadProperty(
     property: Property,
     target: Type | undefined,
     slots: SpreadSlot[],
@@ -85,7 +85,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly spreadMerged(
+  private spreadMerged(
     property: Property,
     slots: SpreadSlot[],
     module: int,

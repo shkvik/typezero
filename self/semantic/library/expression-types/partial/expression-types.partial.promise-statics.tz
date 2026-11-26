@@ -31,7 +31,7 @@ import {
 } from "../../library-rules/const/library-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly promiseStaticCall(
+  private promiseStaticCall(
     expr: CallExpr,
     member: MemberExpr,
     wanted: Type | undefined,
@@ -65,7 +65,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly promiseNew(
+  private promiseNew(
     expr: NewExpr,
     written: Read<Type[]>,
     wanted: Type | undefined,
@@ -168,7 +168,7 @@ partial class ExpressionTypes {
     return base.value;
   }
 
-  private readonly staticCountCheck(
+  private staticCountCheck(
     expr: CallExpr,
     member: MemberExpr,
     least: int,
@@ -191,7 +191,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly promiseResolveCall(
+  private promiseResolveCall(
     expr: CallExpr,
     member: MemberExpr,
     wanted: Type | undefined,
@@ -245,7 +245,7 @@ partial class ExpressionTypes {
     return this.types.apparent(given);
   }
 
-  private readonly withResolversCall(
+  private withResolversCall(
     expr: CallExpr,
     member: MemberExpr,
     wanted: Type | undefined,
@@ -335,7 +335,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private readonly promiseCombinatorCall(
+  private promiseCombinatorCall(
     expr: CallExpr,
     member: MemberExpr,
     wanted: Type | undefined,
@@ -379,7 +379,7 @@ partial class ExpressionTypes {
     return value.item;
   }
 
-  private readonly promiseValues(
+  private promiseValues(
     list: Expr,
     wanted: Type | undefined,
     word: string,
@@ -411,7 +411,7 @@ partial class ExpressionTypes {
     return type.kind == TypeKind.Promise || this.awaitedType(type) == type;
   }
 
-  private readonly literalPromiseValues(
+  private literalPromiseValues(
     list: ArrayLitExpr,
     wanted: Type | undefined,
     word: string,

@@ -22,7 +22,7 @@ partial class ExpressionTypes {
     return isMaker && this.isGlobalUse(callee, module);
   }
 
-  private readonly resultMakerCall(
+  private resultMakerCall(
     expr: CallExpr,
     callee: NameExpr,
     wanted: Type | undefined,
@@ -93,7 +93,7 @@ partial class ExpressionTypes {
     return made;
   }
 
-  private readonly halfValueTyped(
+  private halfValueTyped(
     expr: CallExpr,
     callee: NameExpr,
     goal: ResultType | undefined,

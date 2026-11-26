@@ -23,7 +23,7 @@ import { kPromiseClass } from "../../library-rules/const/library-rules.const.tz"
 import { kResultMethods } from "../../result-rules/const/result-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly promiseMisuse(
+  private promiseMisuse(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -54,7 +54,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly resultOnPromiseCheck(
+  private resultOnPromiseCheck(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -82,7 +82,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly thenTwoCheck(expr: CallExpr, module: int): boolean {
+  private thenTwoCheck(expr: CallExpr, module: int): boolean {
     const second = expr.args[1];
     if (second == undefined) {
       return false;
@@ -94,7 +94,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly thenCall(
+  private thenCall(
     expr: CallExpr,
     member: MemberExpr,
     value: Type,

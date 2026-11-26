@@ -28,7 +28,7 @@ export class IntlDateRules {
     this.intl = intl;
   }
 
-  public readonly dateOption(name: string): DateOption | undefined {
+  public readonly dateOption(name: string): Read<DateOption> | undefined {
     return kDateOptions.find((one) => one.name == name);
   }
 

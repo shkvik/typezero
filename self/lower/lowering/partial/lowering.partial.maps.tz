@@ -14,8 +14,10 @@ import { Lowering } from "../lowering.tz";
 import {
   kHashMapName,
   kMapAddedName,
+  kMapTakenName,
   kSetAddName,
   kSetAddedName,
+  kSetTakenName,
   kMapModule,
   kPointerType,
   kVoidType,
@@ -220,17 +222,48 @@ partial class Lowering {
       return;
     }
 
+    const isCopy = this.isCopyEntries(type);
+
     if (this.isTzSet(type)) {
-      const target = { module: kMapModule, name: kSetAddedName };
+      const name = this.pick(isCopy, kSetAddedName, kSetTakenName);
+      const target = { module: kMapModule, name };
 
       this.runtimeFunctionCall(frame, target, [type.key], [map, entries], 0);
 
       return;
     }
 
-    const target = { module: kMapModule, name: kMapAddedName };
+    const name = this.pick(isCopy, kMapAddedName, kMapTakenName);
+    const target = { module: kMapModule, name };
     const items = [type.key, type.value];
 
     this.runtimeFunctionCall(frame, target, items, [map, entries], 0);
+  }
+
+  private isCopyEntries(type: Type): boolean {
+    if (type.kind != TypeKind.Dict) {
+      return true;
+    }
+
+    const isKeyCopy = this.traits.isCopy(type.key, this.values);
+    const isValueCopy = type.dict == DictKind.Set || this.traits.isCopy(type.value, this.values);
+
+    return isKeyCopy && isValueCopy;
+  }
+
+  private mapMoved(frame: Frame, source: Expr, type: Type): IrValue | undefined {
+    const map = this.value(frame, source);
+    if (map == undefined) {
+      return undefined;
+    }
+
+    const moved: IrValue = {
+      type: map.type,
+      value: map.value,
+      tz: type,
+      owned: map.owned,
+    };
+
+    return this.owning(frame, moved);
   }
 }

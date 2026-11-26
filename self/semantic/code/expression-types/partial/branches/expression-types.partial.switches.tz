@@ -14,7 +14,7 @@ import { FunctionFrame } from "../../types/expression-types.types.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 
 partial class ExpressionTypes {
-  private readonly walkSwitch(
+  private walkSwitch(
     statement: SwitchStmt,
     frame: FunctionFrame,
     module: int,
@@ -73,7 +73,7 @@ partial class ExpressionTypes {
     this.switchFieldsJoined(statement, exits);
   }
 
-  private readonly caseFacts(
+  private caseFacts(
     discriminant: Expr,
     test: Expr | undefined,
     passed: Read<Map<string, Type>>,
@@ -88,7 +88,7 @@ partial class ExpressionTypes {
     return this.narrowings.mergedFacts(passed, facts);
   }
 
-  private readonly factsOfCase(
+  private factsOfCase(
     discriminant: Expr,
     test: Expr,
     passed: Read<Map<string, Type>>,
@@ -114,7 +114,7 @@ partial class ExpressionTypes {
     return this.narrowings.joinedFacts(reached, facts);
   }
 
-  private readonly caseTypes(statement: SwitchStmt, subject: Type, module: int): Type[] {
+  private caseTypes(statement: SwitchStmt, subject: Type, module: int): Type[] {
     const tests: Type[] = [];
 
     if (subject.kind == TypeKind.Error) {
@@ -140,7 +140,7 @@ partial class ExpressionTypes {
     return tests;
   }
 
-  private readonly casesCheck(
+  private casesCheck(
     statement: SwitchStmt,
     subject: Type,
     tests: Read<Type[]>,
@@ -185,7 +185,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private readonly typeOfCasesCheck(statement: SwitchStmt, module: int): void {
+  private typeOfCasesCheck(statement: SwitchStmt, module: int): void {
     const subject = statement.discriminant;
     if (subject.kind != ExprKind.Unary || subject.op != UnaryOp.TypeOf) {
       return;

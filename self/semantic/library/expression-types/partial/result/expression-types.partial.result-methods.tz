@@ -16,7 +16,7 @@ import { kUnsupportedMark } from "../../../../code/expression-types/const/expres
 import { kResultMethods } from "../../../result-rules/const/result-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly resultFacts(
+  private resultFacts(
     call: CallExpr,
     callee: MemberExpr,
     isTrue: boolean,
@@ -64,7 +64,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private readonly resultMethodCall(
+  private resultMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     result: ResultType,
@@ -109,7 +109,7 @@ partial class ExpressionTypes {
     return this.resultMethodTyped(expr, member, result, wanted, module);
   }
 
-  private readonly resultMethodTyped(
+  private resultMethodTyped(
     expr: CallExpr,
     member: MemberExpr,
     result: ResultType,
@@ -147,7 +147,7 @@ partial class ExpressionTypes {
     return this.resultCallTyped(name, first, result, returned, module);
   }
 
-  private readonly resultCallback(
+  private resultCallback(
     arg: Expr,
     half: Type,
     hint: Type | undefined,
@@ -302,7 +302,7 @@ partial class ExpressionTypes {
     return `: ${full.slice(mark + kUnsupportedMark.length)}`;
   }
 
-  private readonly unwrapOrTyped(arg: Expr, result: ResultType, module: int): Type {
+  private unwrapOrTyped(arg: Expr, result: ResultType, module: int): Type {
     const value = result.value;
     const isGiving =
       value.kind != TypeKind.Never && value.kind != TypeKind.Void;
@@ -325,7 +325,7 @@ partial class ExpressionTypes {
     return joined;
   }
 
-  private readonly matchTyped(
+  private matchTyped(
     expr: CallExpr,
     member: MemberExpr,
     result: ResultType,

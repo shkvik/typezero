@@ -29,7 +29,7 @@ import {
 } from "../../../event-rules/const/event-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly streamCall(
+  private streamCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -84,7 +84,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Boolean);
   }
 
-  private readonly setEncodingCall(
+  private setEncodingCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -130,7 +130,7 @@ partial class ExpressionTypes {
     return instance;
   }
 
-  private readonly noteStreamListened(
+  private noteStreamListened(
     member: MemberExpr,
     isListening: boolean,
     module: int,
@@ -147,7 +147,7 @@ partial class ExpressionTypes {
     this.eventMarks.listenedStreams.set(key, member.name);
   }
 
-  private readonly streamRestArguments(
+  private streamRestArguments(
     expr: CallExpr,
     instance: InstanceType,
     module: int,
@@ -164,7 +164,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly writeCallbackType(instance: InstanceType): Type | undefined {
+  private writeCallbackType(instance: InstanceType): Type | undefined {
     const entry = this.classMember(instance, kWriteTypedName).entry;
     const fn = entry?.methods[0];
     if (entry == undefined || fn == undefined) {
@@ -184,7 +184,7 @@ partial class ExpressionTypes {
     return this.types.definedType(last);
   }
 
-  private readonly typedMethodResult(instance: InstanceType, name: string): Type {
+  private typedMethodResult(instance: InstanceType, name: string): Type {
     const entry = this.classMember(instance, name).entry;
     const fn = entry?.methods[0];
     if (entry == undefined || fn == undefined) {
@@ -207,7 +207,7 @@ partial class ExpressionTypes {
     return Code.StreamNotWritable;
   }
 
-  private readonly streamChunkCheck(
+  private streamChunkCheck(
     expr: CallExpr,
     name: string,
     chunk: Type,

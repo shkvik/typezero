@@ -16,10 +16,12 @@ import {
   kBufferAlloc,
   kBufferEncoding,
   kBufferFromText,
+  kBufferKindCode,
   kBufferName,
   kBufferToText,
   kByteType,
   kBytesDataField,
+  kBytesFromBytes,
   kBytesLengthField,
   kBytesOffsetField,
   kBytesStruct,
@@ -341,6 +343,16 @@ partial class Lowering {
       const callee = this.ir.declare(kBufferFromText, kPointerType, params);
       const args = this.textParts(frame, given).concat([encoding]);
       const value = frame.made.call(callee, args);
+
+      this.dropping(frame, given);
+
+      return { type: kPointerType, value, tz: result, owned: true };
+    }
+    if (member.name == "from" && this.isBytesType(given.tz)) {
+      const params = [kFlagType, kPointerType];
+      const callee = this.ir.declare(kBytesFromBytes, kPointerType, params);
+      const kind = this.ir.integer(kFlagType, kBufferKindCode);
+      const value = frame.made.call(callee, [kind, given.value]);
 
       this.dropping(frame, given);
 

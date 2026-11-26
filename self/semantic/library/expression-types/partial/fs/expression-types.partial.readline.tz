@@ -75,10 +75,11 @@ partial class ExpressionTypes {
     options: Expr,
     module: int,
   ): void {
+    const known = kReadlineOptions.slice();
     const row: FsCall = {
       name: kCreateInterfaceName,
       shape: FsShape.PathOnly,
-      options: kReadlineOptions,
+      options: known,
       isUtf8Only: false,
     };
     if (!this.fsOptionsCheck(expr, 0, row, module)) {
@@ -163,7 +164,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly readlineMethodCall(
+  private readlineMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,

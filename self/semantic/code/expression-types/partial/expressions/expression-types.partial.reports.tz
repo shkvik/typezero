@@ -11,17 +11,19 @@ import { ExpressionTypes } from "../../expression-types.tz";
 
 partial class ExpressionTypes {
   public readonly problems(module: int): SourceError[] {
+    return this.errors.of(module);
+  }
+
+  private moduleChecksDone(module: int): void {
     this.unreadResultsCheck(module);
     this.pendingCallsCheck(module);
     this.reflectedNewsCheck(module);
     this.unheardErrorsCheck(module);
     this.unemittedListensCheck(module);
     this.droppedNewsCheck(module);
-
-    return this.errors.of(module);
   }
 
-  public readonly variable(module: int, loc: int): Type {
+  public variable(module: int, loc: int): Type {
     const door = this.door(module, loc);
     if (door == undefined) {
       return this.store.plain(TypeKind.Error);

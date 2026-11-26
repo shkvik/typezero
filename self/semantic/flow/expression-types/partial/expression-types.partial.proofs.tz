@@ -16,7 +16,7 @@ import {
 } from "../../proof-rules/types/proof-rules.types.tz";
 
 partial class ExpressionTypes {
-  private readonly requireBetween(
+  private requireBetween(
     expr: Expr,
     given: Type,
     range: ProofRange,
@@ -50,7 +50,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private readonly canProveBetween(expr: Expr, range: ProofRange, module: int): boolean {
+  private canProveBetween(expr: Expr, range: ProofRange, module: int): boolean {
     if (expr.kind == ExprKind.Conditional) {
       return (
         this.canProveBetween(expr.thenExpr, range, module) &&
@@ -92,7 +92,7 @@ partial class ExpressionTypes {
     return this.canProve(value.term, kZeroTerm, value.offset - high);
   }
 
-  private readonly requireUpTo(
+  private requireUpTo(
     value: Expr | undefined,
     object: Expr,
     limit: OffsetLimit,
@@ -135,7 +135,7 @@ partial class ExpressionTypes {
     return this.sources.valueText(value, module);
   }
 
-  private readonly canProveUpTo(
+  private canProveUpTo(
     value: Expr | undefined,
     object: Expr,
     less: decimal,
@@ -177,7 +177,7 @@ partial class ExpressionTypes {
     return this.canProve(value.term, length.term, room);
   }
 
-  private readonly measuredLength(object: Expr, module: int): Linear | undefined {
+  private measuredLength(object: Expr, module: int): Linear | undefined {
     if (object.kind == ExprKind.Member && object.name == kBufferName) {
       return this.bufferLength(object.object, module);
     }
@@ -201,7 +201,7 @@ partial class ExpressionTypes {
     return { term, offset: 0 };
   }
 
-  private readonly bufferLength(view: Expr, module: int): Linear | undefined {
+  private bufferLength(view: Expr, module: int): Linear | undefined {
     const type = this.peekType(view, module);
     const size = this.byteSources.elementSize(type);
     const length = this.measuredLength(view, module);

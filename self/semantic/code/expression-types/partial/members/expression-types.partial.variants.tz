@@ -15,7 +15,7 @@ import {
 } from "../../../../../program/type/types/type.types.tz";
 
 partial class ExpressionTypes {
-  private readonly variantMember(expr: MemberExpr, union: UnionType, module: int): Type {
+  private variantMember(expr: MemberExpr, union: UnionType, module: int): Type {
     const isUnknown = union.parts.some(
       (part) => part.kind == TypeKind.Error || part.kind == TypeKind.Operation,
     );
@@ -73,7 +73,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private readonly variantField(
+  private variantField(
     expr: MemberExpr,
     part: Type,
     union: UnionType,
@@ -107,7 +107,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private readonly partField(part: Type, name: string): Type | undefined {
+  private partField(part: Type, name: string): Type | undefined {
     if (part.kind == TypeKind.Object) {
       const field = part.fields.find((one) => one.name == name);
       if (field == undefined) {
@@ -129,7 +129,7 @@ partial class ExpressionTypes {
     return this.fieldTypeOf(entry, field);
   }
 
-  private readonly reportLacking(
+  private reportLacking(
     expr: MemberExpr,
     part: Type,
     union: UnionType,
@@ -163,7 +163,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private readonly lackingHint(expr: MemberExpr, union: UnionType): string {
+  private lackingHint(expr: MemberExpr, union: UnionType): string {
     const first = union.parts[0];
     let fallback = "";
 
@@ -186,7 +186,7 @@ partial class ExpressionTypes {
     return this.holderHint(expr, union);
   }
 
-  private readonly tagHint(
+  private tagHint(
     expr: MemberExpr,
     union: UnionType,
     tagName: string,
@@ -206,7 +206,7 @@ partial class ExpressionTypes {
     return `, e.g. 'if (${field} == ${shown})'`;
   }
 
-  private readonly isTagField(union: UnionType, tagName: string): boolean {
+  private isTagField(union: UnionType, tagName: string): boolean {
     return union.parts.every((part) => {
       const type = this.partField(part, tagName);
 
@@ -214,7 +214,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private readonly holderTag(
+  private holderTag(
     expr: MemberExpr,
     union: UnionType,
     tagName: string,
@@ -230,7 +230,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private readonly isTagUnique(
+  private isTagUnique(
     expr: MemberExpr,
     union: UnionType,
     tagName: string,
@@ -255,7 +255,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly holderHint(expr: MemberExpr, union: UnionType): string {
+  private holderHint(expr: MemberExpr, union: UnionType): string {
     const holders = union.parts.filter(
       (part) => this.partField(part, expr.name) != undefined,
     );
@@ -300,7 +300,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private readonly lackingVariantCheck(
+  private lackingVariantCheck(
     expr: CallExpr,
     member: MemberExpr,
     union: UnionType,
@@ -359,7 +359,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly unionTargetCheck(target: Expr, module: int): boolean {
+  private unionTargetCheck(target: Expr, module: int): boolean {
     if (target.kind != ExprKind.Member) {
       return false;
     }

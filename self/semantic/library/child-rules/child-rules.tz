@@ -39,7 +39,7 @@ export class ChildRules {
     return name == kExecName;
   }
 
-  public readonly options(): string[] {
+  public readonly options(): Read<string[]> {
     return kChildOptions;
   }
 

@@ -85,7 +85,7 @@ partial class ExpressionTypes {
     return this.store.classOf(instance, true);
   }
 
-  private readonly valueNew(expr: NewExpr, callee: Type, loc: int, module: int): Type {
+  private valueNew(expr: NewExpr, callee: Type, loc: int, module: int): Type {
     const error = this.store.plain(TypeKind.Error);
 
     switch (callee.kind) {
@@ -103,7 +103,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly classValueNew(expr: NewExpr, callee: ClassType, module: int): Type {
+  private classValueNew(expr: NewExpr, callee: ClassType, module: int): Type {
     const instance = callee.instance;
     const isSpread = expr.args.some((arg) => arg.spread);
     if (!isSpread) {
@@ -124,7 +124,7 @@ partial class ExpressionTypes {
     return this.constructed(expr, instance, decl, module);
   }
 
-  private readonly namedValueNew(
+  private namedValueNew(
     expr: NewExpr,
     target: ValueTarget,
     module: int,
@@ -140,7 +140,7 @@ partial class ExpressionTypes {
     return this.valueNew(expr, type, expr.loc, module);
   }
 
-  private readonly targetValue(target: ValueTarget): Type {
+  private targetValue(target: ValueTarget): Type {
     const fact = this.factOf(target);
     if (fact != undefined) {
       return fact;
@@ -166,7 +166,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private readonly classValueCall(
+  private classValueCall(
     expr: CallExpr,
     member: MemberExpr,
     object: ClassType,
@@ -183,7 +183,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly valueOwner(target: ValueTarget): StaticOwner | undefined {
+  private valueOwner(target: ValueTarget): StaticOwner | undefined {
     const isValue =
       target.kind == SymbolKind.Variable || target.kind == SymbolKind.Parameter;
     if (!isValue) {
@@ -227,7 +227,7 @@ partial class ExpressionTypes {
     return code;
   }
 
-  private readonly valueClassOf(expr: Expr, module: int): ClassType | undefined {
+  private valueClassOf(expr: Expr, module: int): ClassType | undefined {
     if (expr.kind != ExprKind.Name) {
       return undefined;
     }
@@ -248,7 +248,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private readonly classExprTyped(expr: ClassExpr, module: int): Type {
+  private classExprTyped(expr: ClassExpr, module: int): Type {
     const error = this.store.plain(TypeKind.Error);
     const decl = expr.decl;
     const base = decl.baseExpr;
@@ -296,7 +296,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private readonly baseValue(base: Expr | undefined, module: int): Type | undefined {
+  private baseValue(base: Expr | undefined, module: int): Type | undefined {
     if (base == undefined) {
       return this.store.plain(TypeKind.Void);
     }

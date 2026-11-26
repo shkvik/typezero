@@ -13,7 +13,7 @@ import { kNullName } from "../../const/expression-types.const.tz";
 import { LiteralValue } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly literalOf(expr: Expr, module: int): LiteralValue | undefined {
+  private literalOf(expr: Expr, module: int): LiteralValue | undefined {
     switch (expr.kind) {
       case ExprKind.IntLit:
         return {
@@ -42,7 +42,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly literalTyped(
+  private literalTyped(
     expr: Expr,
     literal: LiteralValue,
     wanted: Type | undefined,
@@ -87,7 +87,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly baseType(expr: Expr, literal: LiteralValue, module: int): Type {
+  private baseType(expr: Expr, literal: LiteralValue, module: int): Type {
     if (expr.kind == ExprKind.Name) {
       return this.named(expr, undefined, module);
     }

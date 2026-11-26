@@ -28,7 +28,9 @@ partial class OwnershipCheck {
 
     for (const key of captured) {
       if (isKept && !this.isCopiedCapture(key, exprs)) {
-        this.captureKept(frame, key, loc);
+        const used = this.firstUseOf(key, exprs, loc);
+
+        this.captureKept(frame, key, loc, used);
       } else if (!isKept) {
         this.captureDuring(key, exprs, loc);
       }
@@ -63,7 +65,17 @@ partial class OwnershipCheck {
     return keys;
   }
 
-  private captureKept(frame: Read<FunctionFrame>, key: int, loc: int): void {
+  private readonly firstUseOf(key: int, exprs: Read<Expr[]>, fallback: int): int {
+    for (const expr of exprs) {
+      if (expr.kind == ExprKind.Name && this.keyOfName(expr) == key) {
+        return expr.loc;
+      }
+    }
+
+    return fallback;
+  }
+
+  private captureKept(frame: Read<FunctionFrame>, key: int, loc: int, used: int): void {
     const variable = frame.variables.get(key);
     if (variable == undefined || variable.holding == Holding.Global) {
       return;
@@ -72,12 +84,12 @@ partial class OwnershipCheck {
     const word = variable.name;
 
     if (key == kThisKey) {
-      this.report(loc, Code.OwnKeptThis, {});
+      this.report(used, Code.OwnKeptThis, {});
 
       return;
     }
     if (!variable.isConst) {
-      this.report(loc, Code.OwnKeptLet, { word });
+      this.report(used, Code.OwnKeptLet, { word });
 
       return;
     }

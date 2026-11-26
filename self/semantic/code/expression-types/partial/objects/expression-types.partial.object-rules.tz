@@ -29,7 +29,7 @@ import {
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly loopCannotCheck(loop: ForOfStmt, base: Type, module: int): void {
+  private loopCannotCheck(loop: ForOfStmt, base: Type, module: int): void {
     const loc = loop.iterable.loc;
 
     switch (base.kind) {
@@ -71,7 +71,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly arrayNew(
+  private arrayNew(
     expr: NewExpr,
     name: string,
     wanted: Type | undefined,
@@ -121,7 +121,7 @@ partial class ExpressionTypes {
     return goal.item;
   }
 
-  private readonly newArrayCheck(
+  private newArrayCheck(
     expr: NewExpr,
     name: string,
     wanted: Type | undefined,
@@ -163,7 +163,7 @@ partial class ExpressionTypes {
     this.requireBetween(length.expr, given, range, module);
   }
 
-  private readonly undefinedTargetCheck(target: MemberExpr, module: int): boolean {
+  private undefinedTargetCheck(target: MemberExpr, module: int): boolean {
     const object = target.object;
     if (object.kind == ExprKind.Name && object.name == kThisName) {
       return false;
@@ -185,7 +185,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly openVariable(
+  private openVariable(
     door: VariableDoor,
     variable: DeclaredVariable,
     module: int,
@@ -229,7 +229,7 @@ partial class ExpressionTypes {
     this.report(module, expr.loc, Code.OwnInitializer, { word: expr.name });
   }
 
-  private readonly assignedFieldNames(): Set<string> {
+  private assignedFieldNames(): Set<string> {
     if (this.writtenFields != undefined) {
       return new Set<string>(this.writtenFields);
     }
@@ -262,7 +262,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly forgetFieldsNamed(target: Expr): void {
+  private forgetFieldsNamed(target: Expr): void {
     if (target.kind != ExprKind.Member) {
       return;
     }
@@ -279,7 +279,7 @@ partial class ExpressionTypes {
     this.facts = kept;
   }
 
-  private readonly forgetCalledFields(): void {
+  private forgetCalledFields(): void {
     const names = this.assignedFieldNames();
     const kept = new Map<string, Type>();
 
@@ -292,7 +292,7 @@ partial class ExpressionTypes {
     this.facts = kept;
   }
 
-  private readonly isOwnCall(callee: Expr, module: int): boolean {
+  private isOwnCall(callee: Expr, module: int): boolean {
     if (callee.kind == ExprKind.Name) {
       const target = this.targetOfName(callee, module);
 

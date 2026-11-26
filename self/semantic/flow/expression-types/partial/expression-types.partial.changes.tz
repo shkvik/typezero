@@ -9,6 +9,7 @@ import {
   Destination,
   HiddenName,
   ParamSlot,
+  ValueDraft,
   ValueRecord,
 } from "../../../code/expression-types/types/expression-types.types.tz";
 import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
@@ -27,7 +28,7 @@ import { kDot } from "../../../code/source-texts/const/source-texts.const.tz";
 import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
 
 partial class ExpressionTypes {
-  private readonly forgetPatterned(target: Expr, module: int): void {
+  private forgetPatterned(target: Expr, module: int): void {
     switch (target.kind) {
       case ExprKind.Name:
       case ExprKind.Member: {
@@ -59,7 +60,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly forgetCallChanged(module: int): void {
+  private forgetCallChanged(module: int): void {
     for (const key of this.callChangedKeys(module)) {
       if (this.hasFactOf(key)) {
         this.forgetPath(key);
@@ -77,7 +78,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private readonly callChangedKeys(module: int): string[] {
+  private callChangedKeys(module: int): string[] {
     const known = this.callChanged.get(module)?.slice();
     if (known != undefined) {
       return known;
@@ -152,12 +153,12 @@ partial class ExpressionTypes {
     return found;
   }
 
-  private readonly forgetPath(key: string): void {
+  private forgetPath(key: string): void {
     this.forgetFacts(key);
     this.forgetBounds(key, BoundSide.None);
   }
 
-  private readonly forgetFacts(key: string): void {
+  private forgetFacts(key: string): void {
     const prefix = key + kDot;
     const kept = new Map<string, Type>();
 
@@ -170,13 +171,13 @@ partial class ExpressionTypes {
     this.facts = kept;
   }
 
-  private readonly forgetLooped(statement: Stmt, module: int): void {
+  private forgetLooped(statement: Stmt, module: int): void {
     const record = this.record(module);
     if (record == undefined) {
       return;
     }
 
-    const scratch: ValueRecord = {
+    const scratch: ValueDraft = {
       uses: new Map<int, NameUse>(record.uses),
       hidden: new Map<string, HiddenName>(record.hidden),
       variables: new Map<int, DeclaredVariable>(),
@@ -205,7 +206,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly forgetChangedPart(change: Expr, module: int): void {
+  private forgetChangedPart(change: Expr, module: int): void {
     const target = this.bounds.changedTarget(change);
     if (target == undefined) {
       return;

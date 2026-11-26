@@ -464,7 +464,7 @@ partial class Lowering {
 
     const lent: IrValue = { type, value, tz, owned: false };
     const isFromTemporary = temporaries.some(
-      (one) => one.owned == true && this.isManaged(one.tz),
+      (one) => (one.owned == true || one.ownedFlag != undefined) && this.isManaged(one.tz),
     );
     if (!isFromTemporary) {
       return lent;
@@ -537,7 +537,12 @@ partial class Lowering {
         return undefined;
       }
 
-      const given = this.wantedValue(frame, arg.expr, wanted);
+      const declared = callee?.params[index];
+      const isLent =
+        declared != undefined &&
+        this.isBorrowedParam(declared) &&
+        this.isManaged(wanted);
+      const given = this.argumentValue(frame, arg.expr, wanted, isLent);
       if (given == undefined) {
         return undefined;
       }
@@ -546,14 +551,10 @@ partial class Lowering {
       if (value == undefined) {
         return undefined;
       }
-
-      const declared = callee?.params[index];
-      const isLent =
-        declared != undefined &&
-        this.isBorrowedParam(declared) &&
-        this.isManaged(wanted);
       if (isLent) {
-        kept.push(value);
+        const lent = this.withOwnedFlag(value, given.ownedFlag);
+
+        kept.push(lent);
         args.push(value.value);
 
         continue;

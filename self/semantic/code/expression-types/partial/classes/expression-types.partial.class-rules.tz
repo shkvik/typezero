@@ -30,7 +30,7 @@ import { kDateName } from "../../../../types/type-questions/const/type-questions
 import { kMapClass } from "../../../class-rules/const/class-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly instanceofTyped(expr: BinaryExpr, module: int): Type {
+  private instanceofTyped(expr: BinaryExpr, module: int): Type {
     const left = this.typed(expr.lhs, undefined, module);
     const boolean = this.store.plain(TypeKind.Boolean);
     if (this.collectionInstanceof(expr, left, module)) {
@@ -124,7 +124,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly testedClass(rhs: Expr, module: int): ClassDecl | undefined {
+  private testedClass(rhs: Expr, module: int): ClassDecl | undefined {
     if (rhs.kind != ExprKind.Name) {
       this.typed(rhs, undefined, module);
 
@@ -170,7 +170,7 @@ partial class ExpressionTypes {
     return this.resolver.classInstance(target.module, decl, []);
   }
 
-  private readonly memberTargetDeclared(
+  private memberTargetDeclared(
     target: MemberExpr,
     module: int,
   ): Type | undefined {
@@ -227,7 +227,7 @@ partial class ExpressionTypes {
     return isThis && !this.isThisName(object, module);
   }
 
-  private readonly instanceTargetCheck(
+  private instanceTargetCheck(
     target: MemberExpr,
     object: Type,
     module: int,

@@ -25,7 +25,7 @@ import {
 import { CryptoCall } from "../../../crypto-rules/types/crypto-rules.types.tz";
 
 partial class ExpressionTypes {
-  private readonly signOnceCheck(
+  private signOnceCheck(
     call: CryptoCall,
     keyLabel: string,
     isCounted: boolean,
@@ -45,7 +45,7 @@ partial class ExpressionTypes {
     this.signKeyCheck(call, keyArg, keyLabel, module);
   }
 
-  private readonly verifyOnceCheck(
+  private verifyOnceCheck(
     call: CryptoCall,
     isCounted: boolean,
     module: int,
@@ -62,7 +62,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly signKeyCheck(
+  private signKeyCheck(
     call: CryptoCall,
     keyArg: Expr,
     keyLabel: string,
@@ -88,7 +88,7 @@ partial class ExpressionTypes {
     this.cryptoKeyDataCheck(key, kKeyLabel, module);
   }
 
-  private readonly cryptoKeyDataCheck(key: Expr, label: string, module: int): void {
+  private cryptoKeyDataCheck(key: Expr, label: string, module: int): void {
     const given = this.peekType(key, module);
     const dataError = this.crypto.dataError(
       key.loc,
@@ -146,7 +146,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private readonly primeCheck(call: CryptoCall, module: int): void {
+  private primeCheck(call: CryptoCall, module: int): void {
     const expr = call.expr;
     const count = expr.args.length;
     if (count < 1 || count > 2) {
@@ -165,7 +165,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly cryptoIntAt(expr: CallExpr, index: int, module: int): void {
+  private cryptoIntAt(expr: CallExpr, index: int, module: int): void {
     const arg = expr.args[index]?.expr;
     if (arg == undefined) {
       return;

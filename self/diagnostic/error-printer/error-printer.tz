@@ -22,7 +22,8 @@ export class ErrorPrinter {
       const piece = pieces[index];
       const next = pieces[index + 1];
       const end = next?.start ?? text.length;
-      const pieceText = text.subarray(piece.start, end);
+      const pieceView = text.subarray(piece.start, end);
+      const pieceText = Buffer.from(pieceView);
       const lines = new SourceLines(pieceText);
 
       this.views.push({ path: piece.path, start: piece.start, lines });

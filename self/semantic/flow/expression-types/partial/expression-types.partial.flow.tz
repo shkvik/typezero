@@ -17,7 +17,7 @@ import {
 } from "../../../code/source-texts/const/source-texts.const.tz";
 
 partial class ExpressionTypes {
-  private readonly pathKey(expr: Expr, module: int): string | undefined {
+  private pathKey(expr: Expr, module: int): string | undefined {
     if (expr.kind == ExprKind.OptionalChain) {
       return this.pathKey(expr.chain, module);
     }
@@ -54,7 +54,7 @@ partial class ExpressionTypes {
     return key;
   }
 
-  private readonly pathFact(expr: Expr, module: int): Type | undefined {
+  private pathFact(expr: Expr, module: int): Type | undefined {
     const key = this.pathKey(expr, module);
     if (key == undefined) {
       return undefined;
@@ -84,7 +84,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private readonly assignedTyped(expr: AssignExpr, module: int): Type {
+  private assignedTyped(expr: AssignExpr, module: int): Type {
     const target = expr.target;
 
     this.writtenTargets.add(target);
@@ -180,7 +180,7 @@ partial class ExpressionTypes {
     return given;
   }
 
-  private readonly assignedValue(
+  private assignedValue(
     expr: AssignExpr,
     declared: Type,
     tested: Type,
@@ -233,7 +233,7 @@ partial class ExpressionTypes {
     return this.fixedTargetCheck(target, found, module);
   }
 
-  private readonly updatedTyped(target: Expr, module: int): Type {
+  private updatedTyped(target: Expr, module: int): Type {
     if (this.dictTargetCheck(target, module)) {
       return this.store.plain(TypeKind.Error);
     }

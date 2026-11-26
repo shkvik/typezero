@@ -23,7 +23,7 @@ import { FunctionFrame } from "../../types/expression-types.types.tz";
 import { TruthUse } from "../../../../flow/truth-rules/types/truth-rules.types.tz";
 
 partial class ExpressionTypes {
-  public readonly checkModule(module: int): void {
+  public checkModule(module: int): void {
     const opened = this.program.modules[module];
     if (opened == undefined || this.checkedModules.has(module)) {
       return;
@@ -41,7 +41,7 @@ partial class ExpressionTypes {
     this.walkStatements(opened.file.items, frame, module);
   }
 
-  private readonly walkStatements(
+  private walkStatements(
     statements: Read<Stmt[]>,
     frame: FunctionFrame,
     module: int,
@@ -60,7 +60,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly walkOptionalStatement(
+  private walkOptionalStatement(
     statement: Stmt | undefined,
     frame: FunctionFrame,
     module: int,
@@ -70,7 +70,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly walkStatement(
+  private walkStatement(
     statement: Stmt,
     frame: FunctionFrame,
     module: int,
@@ -160,7 +160,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly declaredFact(module: int, loc: int): void {
+  private declaredFact(module: int, loc: int): void {
     const door = this.localDoor(module, loc);
     const given = door?.given;
     if (door == undefined || given == undefined) {
@@ -173,7 +173,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly walkIf(statement: IfStmt, frame: FunctionFrame, module: int): void {
+  private walkIf(statement: IfStmt, frame: FunctionFrame, module: int): void {
     const cond = statement.cond;
 
     this.branchCheck(cond, TruthUse.Condition, module);
@@ -244,7 +244,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly walkLoop(
+  private walkLoop(
     cond: Expr | undefined,
     body: Stmt | undefined,
     frame: FunctionFrame,
@@ -257,7 +257,7 @@ partial class ExpressionTypes {
     this.facts = before;
   }
 
-  private readonly walkFor(statement: ForStmt, frame: FunctionFrame, module: int): void {
+  private walkFor(statement: ForStmt, frame: FunctionFrame, module: int): void {
     const facts = this.loopFacts(statement.cond, module);
     const before = this.underFacts(facts);
 
@@ -266,13 +266,13 @@ partial class ExpressionTypes {
     this.facts = before;
   }
 
-  private readonly stepCheck(step: Expr | undefined, module: int): void {
+  private stepCheck(step: Expr | undefined, module: int): void {
     if (step != undefined) {
       this.statementUsed(step, undefined, module);
     }
   }
 
-  private readonly statementUsed(expr: Expr, at: int | undefined, module: int): void {
+  private statementUsed(expr: Expr, at: int | undefined, module: int): void {
     if (expr.kind != ExprKind.Sequence) {
       const type = this.typed(expr, undefined, module);
 
@@ -290,7 +290,7 @@ partial class ExpressionTypes {
     this.usedCheck(expr, last, at, module);
   }
 
-  private readonly loopFacts(cond: Expr | undefined, module: int): Map<string, Type> {
+  private loopFacts(cond: Expr | undefined, module: int): Map<string, Type> {
     if (cond == undefined) {
       return new Map<string, Type>();
     }
@@ -298,19 +298,19 @@ partial class ExpressionTypes {
     return this.factsOf(cond, true, module);
   }
 
-  private readonly conditionCheck(cond: Expr | undefined, module: int): void {
+  private conditionCheck(cond: Expr | undefined, module: int): void {
     if (cond != undefined) {
       this.branchCheck(cond, TruthUse.Condition, module);
     }
   }
 
-  private readonly valueCheck(value: Expr | undefined, module: int): void {
+  private valueCheck(value: Expr | undefined, module: int): void {
     if (value != undefined) {
       this.typed(value, undefined, module);
     }
   }
 
-  private readonly loopItem(loop: ForOfStmt, module: int): Type {
+  private loopItem(loop: ForOfStmt, module: int): Type {
     const iterable = this.typed(loop.iterable, undefined, module);
     if (loop.keys) {
       return this.forInKeys(loop, iterable, module);

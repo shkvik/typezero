@@ -40,7 +40,7 @@ export class FsRules {
     return name == kFsModule;
   }
 
-  public readonly call(name: string): FsCall | undefined {
+  public readonly call(name: string): Read<FsCall> | undefined {
     return kFsCalls.find((one) => one.name == name);
   }
 

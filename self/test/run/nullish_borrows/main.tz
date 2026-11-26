@@ -1,0 +1,41 @@
+// `a ?? b` where a is borrowed: the value carries a flag "owned" instead of a count on a —
+// a variable, the source of for…of and an argument for a borrowed parameter drop it only when
+// it came from b.
+class Shelf {
+  public readonly tags?: string[];
+
+  public constructor(tags?: Own<string[]>) {
+    this.tags = tags;
+  }
+}
+
+function count(items: Read<string[]>): int {
+  return items.length;
+}
+
+function listed(groups: Read<Map<string, string[]>>, key: string): string {
+  const list = groups.get(key) ?? [];
+  let text = "";
+
+  for (const item of groups.get(key) ?? ["-"]) {
+    text += item;
+  }
+
+  const counted = count(groups.get(key) ?? []);
+
+  return `${list.length} ${counted} ${text}`;
+}
+
+function tagged(shelf: Read<Shelf>): string {
+  const tags = shelf.tags ?? ["none"];
+
+  return tags.join(",");
+}
+
+const groups = new Map<string, string[]>();
+
+groups.set("a", ["x", "y"]);
+console.log(listed(groups, "a"));
+console.log(listed(groups, "b"));
+console.log(tagged(new Shelf(["p", "q"])));
+console.log(tagged(new Shelf()));

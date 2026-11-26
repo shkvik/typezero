@@ -48,7 +48,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly cryptoSyncCallback(
+  private cryptoSyncCallback(
     expr: CallExpr,
     index: int,
     name: string,
@@ -130,7 +130,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly scryptOptionsCheck(expr: CallExpr, shown: string, module: int): void {
+  private scryptOptionsCheck(expr: CallExpr, shown: string, module: int): void {
     if (!this.cryptoOptionsFine(expr, 3, shown, kScryptOptions, module)) {
       return;
     }
@@ -165,7 +165,7 @@ partial class ExpressionTypes {
     this.scryptCostCheck(options, module);
   }
 
-  private readonly scryptCostCheck(options: Expr, module: int): void {
+  private scryptCostCheck(options: Expr, module: int): void {
     const costs = kCostNames
       .map((name) => this.optionValue(options, name))
       .filter((value) => value != undefined);
@@ -180,7 +180,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly keyPairCheck(
+  private keyPairCheck(
     expr: CallExpr,
     shown: string,
     calleeLoc: int,
@@ -213,7 +213,7 @@ partial class ExpressionTypes {
     this.keyPairNeedsCheck(expr, type, calleeLoc, module);
   }
 
-  private readonly keyPairNeedsCheck(
+  private keyPairNeedsCheck(
     expr: CallExpr,
     type: string,
     calleeLoc: int,
@@ -242,7 +242,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly cryptoNew(
+  private cryptoNew(
     expr: NewExpr,
     name: string,
     home: int,
@@ -263,7 +263,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly cryptoMethodCall(
+  private cryptoMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -310,7 +310,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly cryptoMethodArguments(
+  private cryptoMethodArguments(
     expr: CallExpr,
     member: MemberExpr,
     shape: Read<CryptoClass>,
@@ -334,7 +334,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly cryptoUpdateCheck(
+  private cryptoUpdateCheck(
     expr: CallExpr,
     item: CryptoData,
     module: int,

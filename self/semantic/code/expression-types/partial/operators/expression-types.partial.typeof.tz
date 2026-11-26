@@ -11,7 +11,7 @@ import {
 import { ComparedSide } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly typeofTyped(expr: UnaryExpr, module: int): Type {
+  private typeofTyped(expr: UnaryExpr, module: int): Type {
     this.typed(expr.operand, undefined, module);
 
     return this.store.plain(TypeKind.String);

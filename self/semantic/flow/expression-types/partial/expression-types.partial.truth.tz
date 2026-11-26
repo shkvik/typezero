@@ -22,7 +22,7 @@ import { kDateName } from "../../../types/type-questions/const/type-questions.co
 import { kOtherPlaceholder } from "../../../code/logic-rules/const/logic-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly checkTruthy(
+  private checkTruthy(
     expr: Expr,
     type: Type,
     use: TruthUse,
@@ -66,7 +66,7 @@ partial class ExpressionTypes {
     return this.sources.hintText(expr, kUnnamedOperand);
   }
 
-  private readonly booleanCallCheck(expr: CallExpr, module: int): void {
+  private booleanCallCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     const arg = expr.args[0];
     const isBoolean =
@@ -81,7 +81,7 @@ partial class ExpressionTypes {
     this.checkTruthy(arg.expr, type, TruthUse.Condition, undefined, module);
   }
 
-  private readonly numberCallCheck(expr: CallExpr, module: int): void {
+  private numberCallCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     const arg = expr.args[0];
     const isNumber =
@@ -135,7 +135,7 @@ partial class ExpressionTypes {
     return Code.NumberOfWrongType;
   }
 
-  private readonly booleanCallbackCheck(
+  private booleanCallbackCheck(
     arg: Expr,
     plan: Read<CallbackPlan>,
     module: int,
@@ -154,7 +154,7 @@ partial class ExpressionTypes {
     this.checkTruthy(arg, item, use, undefined, module, kUnnamedOperand);
   }
 
-  private readonly narrowedCode(expr: Expr, code: Code, module: int): Code | undefined {
+  private narrowedCode(expr: Expr, code: Code, module: int): Code | undefined {
     const row = kNarrowedCodes.find((one) => one.code == code);
     if (row == undefined || expr.kind != ExprKind.Name) {
       return undefined;

@@ -1,0 +1,110 @@
+// A new collection from another one (decision 26.11, tmp/design/spread.tz, rule 5): copyable
+// entries are copied and the source stays; entries that do not copy move over and the source
+// is given away. Also concat and slice of objects, and walking keys, values and entries.
+class Point {
+  public x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+class Tag {
+  public readonly name: string;
+
+  public constructor(name: string) {
+    this.name = name;
+  }
+}
+
+function movedMap(): string {
+  const first = new Map<string, Point>();
+
+  first.set("a", new Point(1));
+  first.set("b", new Point(2));
+
+  const second = new Map(first);
+  const b = second.get("b");
+
+  return `${second.size} ${b?.x}`;
+}
+
+function copiedMap(): string {
+  const first = new Map<string, Tag>();
+
+  first.set("a", new Tag("one"));
+
+  const second = new Map(first);
+
+  second.set("b", new Tag("two"));
+
+  return `${first.size} ${second.size} ${second.get("a")?.name}`;
+}
+
+function movedSet(): int {
+  const points = [new Point(3), new Point(4)];
+  const set = new Set(points);
+  let total = 0;
+
+  for (const point of set) {
+    total += point.x;
+  }
+
+  return total;
+}
+
+function copiedSet(): string {
+  const words = ["x", "y", "x"];
+  const unique = new Set(words);
+
+  return `${words.length} ${unique.size}`;
+}
+
+function pairsMap(): int {
+  const pairs: [string, Point][] = [["c", new Point(5)], ["d", new Point(6)]];
+  const map = new Map(pairs);
+  let total = 0;
+
+  for (const [key, point] of map) {
+    total += point.x + key.length;
+  }
+
+  return total;
+}
+
+function joined(): string {
+  const first = [new Point(7)];
+  const second = [new Point(8), new Point(9)];
+  const both = first.concat(second);
+  const numbers = [1, 2].concat([3]);
+  const some = both.slice(1);
+
+  return `${both.length} ${numbers.length} ${some.length} ${some[0]?.x}`;
+}
+
+function walked(): string {
+  const map = new Map<string, Point>();
+
+  map.set("e", new Point(10));
+  map.set("f", new Point(11));
+
+  let keys = "";
+  let total = 0;
+
+  for (const key of map.keys()) {
+    keys += key;
+  }
+  for (const point of map.values()) {
+    total += point.x;
+  }
+
+  return `${keys} ${total}`;
+}
+
+console.log(movedMap());
+console.log(copiedMap());
+console.log(movedSet());
+console.log(copiedSet());
+console.log(pairsMap());
+console.log(joined());
+console.log(walked());

@@ -13,7 +13,7 @@ import {
 } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 
 partial class ExpressionTypes {
-  private readonly castTyped(expr: CastExpr, module: int): Type {
+  private castTyped(expr: CastExpr, module: int): Type {
     const context: TypeContext = {
       module,
       bindings: new Map<int, Type>(),

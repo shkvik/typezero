@@ -29,7 +29,7 @@ import {
 } from "../../../code/expression-types/types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly genericCall(
+  private genericCall(
     target: Own<GenericTarget>,
     args: Own<CallArgument[]>,
     wanted: Type | undefined,
@@ -82,7 +82,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly isGenericArity(
+  private isGenericArity(
     target: Read<GenericTarget>,
     args: Read<CallArgument[]>,
     module: int,
@@ -123,13 +123,13 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private readonly isArraySpread(spread: CallArgument, module: int): boolean {
+  private isArraySpread(spread: CallArgument, module: int): boolean {
     const type = this.typed(spread.expr, undefined, module);
 
     return type.kind == TypeKind.Array;
   }
 
-  private readonly explicitCall(draft: GenericDraft, module: int): Type {
+  private explicitCall(draft: GenericDraft, module: int): Type {
     const target = draft.target;
     const written = target.typeArgs;
     const total = target.params.length;
@@ -181,7 +181,7 @@ partial class ExpressionTypes {
     return shape.result;
   }
 
-  private readonly inferArguments(draft: GenericDraft, module: int): void {
+  private inferArguments(draft: GenericDraft, module: int): void {
     for (let index = 0; index < draft.args.length; index++) {
       const arg = draft.args[index];
       if (arg != undefined) {
@@ -190,7 +190,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly inferFromArgument(
+  private inferFromArgument(
     draft: GenericDraft,
     index: int,
     arg: CallArgument,
@@ -268,11 +268,11 @@ partial class ExpressionTypes {
     return expr.kind == ExprKind.Name && this.isNullName(expr, module);
   }
 
-  private readonly isWholeArgument(expr: Expr, type: Type, module: int): boolean {
+  private isWholeArgument(expr: Expr, type: Type, module: int): boolean {
     return type.kind == TypeKind.Int && this.isWholeTree(expr, module);
   }
 
-  private readonly plainArgument(
+  private plainArgument(
     draft: GenericDraft,
     index: int,
     expr: Expr,
@@ -289,7 +289,7 @@ partial class ExpressionTypes {
     draft.settled.add(index);
   }
 
-  private readonly literalText(
+  private literalText(
     draft: GenericDraft,
     index: int,
     expr: Expr,
@@ -343,8 +343,8 @@ partial class ExpressionTypes {
     return ArgumentForm.Inferred;
   }
 
-  private readonly contextualArguments(draft: GenericDraft, module: int): void {
-    for (const index of draft.contextual) {
+  private contextualArguments(draft: GenericDraft, module: int): void {
+    for (const index of draft.contextual.slice()) {
       const arg = draft.args[index];
       if (arg != undefined) {
         this.contextualArgument(draft, index, arg, module);
@@ -352,7 +352,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly contextualArgument(
+  private contextualArgument(
     draft: GenericDraft,
     index: int,
     arg: CallArgument,
@@ -377,7 +377,7 @@ partial class ExpressionTypes {
     this.moreCandidates(draft, index, pattern, module);
   }
 
-  private readonly callbackArgument(
+  private callbackArgument(
     draft: GenericDraft,
     index: int,
     expr: Expr,
@@ -467,7 +467,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly literalArgument(
+  private literalArgument(
     draft: GenericDraft,
     index: int,
     expr: Expr,
@@ -549,7 +549,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly boundCall(draft: GenericDraft, module: int): Type {
+  private boundCall(draft: GenericDraft, module: int): Type {
     if (draft.inference.isUnmatched) {
       this.uncheckedArguments(draft, module);
 
@@ -581,7 +581,7 @@ partial class ExpressionTypes {
     return shape.result;
   }
 
-  private readonly literalArguments(draft: GenericDraft, module: int): void {
+  private literalArguments(draft: GenericDraft, module: int): void {
     const bound = this.generics.boundById(draft);
     const shape = draft.target.shape;
 
@@ -600,7 +600,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly literalChecked(
+  private literalChecked(
     draft: Read<GenericDraft>,
     expr: Expr,
     hint: Type,
@@ -613,7 +613,7 @@ partial class ExpressionTypes {
     return this.checked(expr, hint, module, kNoPlace);
   }
 
-  private readonly boundArguments(
+  private boundArguments(
     draft: Read<GenericDraft>,
     shape: Read<FunctionShape>,
     module: int,
@@ -630,7 +630,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly uncheckedArguments(draft: Read<GenericDraft>, module: int): void {
+  private uncheckedArguments(draft: Read<GenericDraft>, module: int): void {
     if (draft.target.isLenient) {
       return;
     }
@@ -643,7 +643,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly rememberTypeArguments(
+  private rememberTypeArguments(
     draft: Read<GenericDraft>,
     module: int,
   ): void {

@@ -30,7 +30,7 @@ import { kConstructorName } from "../../../object-rules/const/object-rules.const
 import { InstanceField } from "../../../../../program/expression-answers/types/expression-answers.types.tz";
 
 partial class ExpressionTypes {
-  private readonly instanceMember(
+  private instanceMember(
     expr: MemberExpr,
     instance: InstanceType,
     module: int,
@@ -117,7 +117,7 @@ partial class ExpressionTypes {
     return this.methodTypeOf(entry, method);
   }
 
-  private readonly checkAccess(
+  private checkAccess(
     entry: Read<ClassMemberEntry>,
     access: Access,
     expr: MemberExpr,
@@ -182,12 +182,29 @@ partial class ExpressionTypes {
         return undefined;
       }
 
-      const fieldType = this.fieldTypeOf(entry, field);
+      const fieldType = this.seenFieldType(entry, field);
+      if (fieldType == undefined) {
+        return undefined;
+      }
 
       fields.push({ name: field.name, loc: field.loc, type: fieldType });
     }
 
     return fields;
+  }
+
+  private readonly seenFieldType(entry: Read<ClassMemberEntry>, field: ClassField): Type | undefined {
+    if (this.isArrowFieldOf(field)) {
+      return this.arrowFields.get(`${entry.instance.module} ${field.loc}`);
+    }
+
+    return this.writtenFieldType(entry, field);
+  }
+
+  private readonly isArrowFieldOf(field: ClassField): boolean {
+    const isArrow = this.classes.isArrowField(field);
+
+    return field.form == FieldKind.ArrowMethod || (isArrow && field.type == undefined);
   }
 
   private readonly classOf(instance: InstanceType): ClassDecl | undefined {
@@ -219,7 +236,7 @@ partial class ExpressionTypes {
     return this.classMember(parent, name);
   }
 
-  private readonly arrowFieldType(entry: Read<ClassMemberEntry>, field: ClassField): Type {
+  private arrowFieldType(entry: Read<ClassMemberEntry>, field: ClassField): Type {
     const init = field.init;
     const owner = entry.owner;
     if (init == undefined || init.kind != ExprKind.Function) {
@@ -232,15 +249,20 @@ partial class ExpressionTypes {
     return this.methodFunction(owner, init.fn, entry.instance.module);
   }
 
-  private readonly fieldTypeOf(entry: Read<ClassMemberEntry>, field: ClassField): Type {
-    const written = field.type;
-    const isArrow = this.classes.isArrowField(field);
-    if (
-      field.form == FieldKind.ArrowMethod ||
-      (isArrow && written == undefined)
-    ) {
-      return this.arrowFieldType(entry, field);
+  private fieldTypeOf(entry: Read<ClassMemberEntry>, field: ClassField): Type {
+    if (!this.isArrowFieldOf(field)) {
+      return this.writtenFieldType(entry, field);
     }
+
+    const type = this.arrowFieldType(entry, field);
+
+    this.arrowFields.set(`${entry.instance.module} ${field.loc}`, type);
+
+    return type;
+  }
+
+  private readonly writtenFieldType(entry: Read<ClassMemberEntry>, field: ClassField): Type {
+    const written = field.type;
     if (written == undefined) {
       return this.store.plain(TypeKind.Error);
     }
@@ -261,7 +283,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private readonly methodTypeOf(entry: Read<ClassMemberEntry>, method: FunctionDecl): Type {
+  private methodTypeOf(entry: Read<ClassMemberEntry>, method: FunctionDecl): Type {
     const written = method.returnType;
     const owner = entry.owner;
 
@@ -291,7 +313,7 @@ partial class ExpressionTypes {
     return this.resolver.signature(sites, written, context);
   }
 
-  private readonly inferredGenericMethod(
+  private inferredGenericMethod(
     entry: Read<ClassMemberEntry>,
     method: FunctionDecl,
   ): Type {
@@ -330,7 +352,7 @@ partial class ExpressionTypes {
     return this.partHomes.get(part) ?? module;
   }
 
-  private readonly newTyped(expr: NewExpr, wanted: Type | undefined, module: int): Type {
+  private newTyped(expr: NewExpr, wanted: Type | undefined, module: int): Type {
     const form = expr.form;
     if (form.kind == NewKind.Callee) {
       const callee = this.typed(form.callee, undefined, module);
@@ -508,7 +530,7 @@ partial class ExpressionTypes {
     return this.writtenArguments(expr.typeArgs, module);
   }
 
-  private readonly constructed(
+  private constructed(
     expr: NewExpr,
     instance: InstanceType,
     decl: ClassDecl,
@@ -578,7 +600,7 @@ partial class ExpressionTypes {
     return access == Access.Protected && this.isDerivedInside(owner);
   }
 
-  private readonly variantNew(
+  private variantNew(
     expr: NewExpr,
     instance: InstanceType,
     maker: Read<ClassMemberEntry>,
@@ -681,7 +703,7 @@ partial class ExpressionTypes {
     return { params, rest, loc, isLenient: false };
   }
 
-  private readonly memberNew(
+  private memberNew(
     expr: NewExpr,
     owner: string,
     name: string,

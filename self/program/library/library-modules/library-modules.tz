@@ -24,7 +24,7 @@ export class LibraryModules {
   public readonly imported(
     spec: string,
     fromLibrary: boolean,
-  ): LibraryModule | undefined {
+  ): Read<LibraryModule> | undefined {
     const module = kLibraryModules.find((one) => one.specs.includes(spec));
     if (module == undefined) {
       return undefined;
@@ -36,15 +36,15 @@ export class LibraryModules {
     return module;
   }
 
-  public readonly named(name: string): LibraryModule | undefined {
+  public readonly named(name: string): Read<LibraryModule> | undefined {
     return kLibraryModules.find((one) => one.name == name);
   }
 
-  public readonly globalModules(): LibraryModule[] {
+  public readonly globalModules(): Read<LibraryModule>[] {
     return kLibraryModules.filter((one) => one.access == LibraryAccess.Global);
   }
 
-  public readonly runtimeModules(): LibraryModule[] {
+  public readonly runtimeModules(): Read<LibraryModule>[] {
     return kLibraryModules.filter((one) => one.access == LibraryAccess.Runtime);
   }
 
@@ -52,11 +52,11 @@ export class LibraryModules {
     return this.globalsByName.get(name);
   }
 
-  public readonly globals(): LibraryGlobal[] {
+  public readonly globals(): Read<LibraryGlobal[]> {
     return kLibraryGlobals;
   }
 
-  public readonly members(): LibraryMember[] {
+  public readonly members(): Read<LibraryMember[]> {
     return kLibraryMembers;
   }
 

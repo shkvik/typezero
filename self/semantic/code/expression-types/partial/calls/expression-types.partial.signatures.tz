@@ -19,7 +19,7 @@ import {
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly signatureCall(
+  private signatureCall(
     expr: CallExpr,
     member: MemberExpr,
     fields: Read<ObjectField[]>,
@@ -46,7 +46,7 @@ partial class ExpressionTypes {
     this.rankedValueCheck(expr, ranked, module);
   }
 
-  private readonly contractSignatures(
+  private contractSignatures(
     decl: ClassDecl,
     instance: InstanceType,
     iface: string,
@@ -95,7 +95,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly methodTaking(
+  private methodTaking(
     entry: Read<ClassMemberEntry | undefined>,
     wanted: FunctionType,
   ): FunctionDecl | undefined {
@@ -116,7 +116,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private readonly contractMethods(
+  private contractMethods(
     entry: Read<ClassMemberEntry>,
     iface: string,
     field: ObjectField,
@@ -161,7 +161,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private readonly methodVariantText(entry: Read<ClassMemberEntry>, fn: FunctionDecl): string {
+  private methodVariantText(entry: Read<ClassMemberEntry>, fn: FunctionDecl): string {
     const type = this.methodTypeOf(entry, fn);
     if (type.kind != TypeKind.Function) {
       return fn.name;

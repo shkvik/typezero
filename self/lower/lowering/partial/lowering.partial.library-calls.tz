@@ -181,7 +181,7 @@ partial class Lowering {
     if (type == undefined || given == undefined) {
       return undefined;
     }
-    if (!this.isManaged(type) || this.isString(type)) {
+    if (!this.isManaged(type) || this.isString(type) || this.traits.isCopy(type, this.values)) {
       return this.owning(frame, given);
     }
 

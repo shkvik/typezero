@@ -17,7 +17,7 @@ import {
 } from "../../../code/expression-types/types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly destinationOf(
+  private destinationOf(
     variable: DeclaredVariable,
     init: Expr,
     module: int,
@@ -63,7 +63,7 @@ partial class ExpressionTypes {
     return chosen;
   }
 
-  private readonly conflictPlaces(
+  private conflictPlaces(
     variable: DeclaredVariable,
     init: Expr,
     module: int,
@@ -133,7 +133,7 @@ partial class ExpressionTypes {
     return isPlain && this.isResultMakerCall(callee, module);
   }
 
-  private readonly isFitting(init: Expr, wanted: Type, module: int): boolean {
+  private isFitting(init: Expr, wanted: Type, module: int): boolean {
     this.errors.beginTrial();
 
     const trial = this.typed(init, wanted, module);
@@ -153,7 +153,7 @@ partial class ExpressionTypes {
     return destination;
   }
 
-  private readonly destinationType(one: Destination, module: int): Type | undefined {
+  private destinationType(one: Destination, module: int): Type | undefined {
     const context: TypeContext = {
       module,
       bindings: new Map<int, Type>(),
@@ -177,7 +177,7 @@ partial class ExpressionTypes {
     return type.kind == TypeKind.Object;
   }
 
-  private readonly writtenDestination(
+  private writtenDestination(
     one: Destination,
     context: TypeContext,
     module: int,
@@ -209,7 +209,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly assignedDestination(one: Destination, module: int): Type | undefined {
+  private assignedDestination(one: Destination, module: int): Type | undefined {
     const value = one.value;
     if (value == undefined || !this.isResultLiteral(value, module)) {
       return undefined;
@@ -220,7 +220,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private readonly argumentDestination(one: Destination, module: int): Type | undefined {
+  private argumentDestination(one: Destination, module: int): Type | undefined {
     const callee = one.call?.callee;
     if (callee == undefined) {
       return undefined;
@@ -253,7 +253,7 @@ partial class ExpressionTypes {
     return params[one.index]?.type;
   }
 
-  private readonly memberDestination(
+  private memberDestination(
     one: Destination,
     member: MemberExpr,
     module: int,

@@ -67,14 +67,14 @@ export class NamesCommand {
       console.log(`  declared ${declared.join(" ")}`);
     }
 
-    for (const [name, exported] of names.exports) {
+    for (const [name, exported] of new Map(names.exports)) {
       const target = this.targetText(program, exported.target);
       const star = this.starText(exported);
 
       console.log(`  export ${name} -> ${target}${star}`);
     }
 
-    for (const [name, imported] of names.imports) {
+    for (const [name, imported] of new Map(names.imports)) {
       const target = this.targetText(program, imported.target);
 
       console.log(`  import ${name} -> ${target}`);

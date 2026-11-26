@@ -22,7 +22,7 @@ import {
 } from "../../../code/expression-types/const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private readonly callFacts(
+  private callFacts(
     call: CallExpr,
     isTrue: boolean,
     module: int,
@@ -63,7 +63,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly arrayFacts(
+  private arrayFacts(
     call: CallExpr,
     isTrue: boolean,
     module: int,
@@ -117,7 +117,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly jsonFacts(
+  private jsonFacts(
     call: CallExpr,
     isTrue: boolean,
     module: int,
@@ -136,7 +136,7 @@ partial class ExpressionTypes {
     return facts;
   }
 
-  private readonly functionGuardFacts(
+  private functionGuardFacts(
     call: CallExpr,
     callee: NameExpr,
     isTrue: boolean,
@@ -173,7 +173,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly predicateFacts(
+  private predicateFacts(
     call: CallExpr,
     fn: FunctionDecl,
     home: int,
@@ -205,7 +205,7 @@ partial class ExpressionTypes {
     return this.guardedFacts(arg.expr, guarded, isTrue, home);
   }
 
-  private readonly guardedFacts(
+  private guardedFacts(
     expr: Expr,
     guarded: Type,
     isTrue: boolean,
@@ -233,7 +233,7 @@ partial class ExpressionTypes {
     return facts;
   }
 
-  private readonly methodGuardFacts(
+  private methodGuardFacts(
     call: CallExpr,
     callee: MemberExpr,
     isTrue: boolean,
@@ -259,7 +259,7 @@ partial class ExpressionTypes {
     return this.unknownFacts(values, module);
   }
 
-  private readonly methodSummaryFacts(
+  private methodSummaryFacts(
     call: CallExpr,
     callee: MemberExpr,
     isTrue: boolean,
@@ -295,7 +295,7 @@ partial class ExpressionTypes {
     return this.summaryApplied(call, summary, isTrue, module);
   }
 
-  private readonly unknownFacts(values: Read<Expr[]>, module: int): Map<string, Type> {
+  private unknownFacts(values: Read<Expr[]>, module: int): Map<string, Type> {
     const facts = new Map<string, Type>();
     const unknown = this.store.plain(TypeKind.Error);
 

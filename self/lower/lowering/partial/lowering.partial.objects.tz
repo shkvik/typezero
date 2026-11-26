@@ -83,7 +83,14 @@ partial class Lowering {
       }
     }
 
-    return { type: kPointerType, value: object, tz: type, owned: true };
+    const made: IrValue = { type: kPointerType, value: object, tz: type, owned: true };
+    const isInterned = this.isArena(type) || (known != undefined && this.isArena(known));
+
+    if (isInterned) {
+      this.immortalized(frame, made);
+    }
+
+    return made;
   }
 
   private readonly knownOr(
@@ -461,6 +468,11 @@ partial class Lowering {
     }
 
     const loaded = this.loaded(frame, place);
+    if (object.owned != true && this.isMovedField(frame, expr, place)) {
+      frame.made.store(this.ir.zero(place.type), place.pointer);
+
+      return { type: loaded.type, value: loaded.value, tz: loaded.tz, owned: true };
+    }
     if (object.owned != true) {
       return loaded;
     }
@@ -576,6 +588,7 @@ partial class Lowering {
     const end = frame.made.block("field.end");
     const values: LLVMValue[] = [];
     const blocks: LLVMBlock[] = [];
+    const isStatic = this.isStaticUnionField(object, result, expr);
 
     for (const part of type.parts) {
       const layout = this.layoutOf(part);
@@ -603,7 +616,7 @@ partial class Lowering {
         return undefined;
       }
 
-      const kept = this.owning(frame, converted);
+      const kept = this.keptOrStatic(frame, converted, isStatic);
 
       values.push(kept.value);
       blocks.push(frame.made.currentBlock());
@@ -619,6 +632,10 @@ partial class Lowering {
     const value = frame.made.phi(resultIr, values, blocks);
 
     this.dropping(frame, object);
+
+    if (isStatic) {
+      return { type: resultIr, value, tz: result, isStatic: true };
+    }
 
     return { type: resultIr, value, tz: result, owned: true };
   }

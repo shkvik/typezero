@@ -152,7 +152,7 @@ partial class ExpressionTypes {
     return signature;
   }
 
-  private readonly variantLibraryCall(
+  private variantLibraryCall(
     expr: CallExpr,
     member: MemberExpr,
     variants: Read<LibraryVariants>,
@@ -170,7 +170,7 @@ partial class ExpressionTypes {
     return this.calledWith(expr, chosen, member.loc, CallKind.Library, module);
   }
 
-  private readonly looseValues(args: Read<CallArgument[]>, module: int): void {
+  private looseValues(args: Read<CallArgument[]>, module: int): void {
     for (const arg of args) {
       if (arg.expr.kind != ExprKind.Function) {
         this.typed(arg.expr, undefined, module);
@@ -178,7 +178,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly quietVariant(
+  private quietVariant(
     args: Read<CallArgument[]>,
     name: string,
     variants: Read<LibraryVariants>,
@@ -243,7 +243,7 @@ partial class ExpressionTypes {
     return first;
   }
 
-  private readonly overloadedLibraryCall(
+  private overloadedLibraryCall(
     expr: CallExpr,
     callee: NameExpr,
     fn: FunctionDecl,
@@ -284,7 +284,7 @@ partial class ExpressionTypes {
     return result;
   }
 
-  private readonly cleanVariant(
+  private cleanVariant(
     expr: CallExpr,
     callee: NameExpr,
     types: Read<FunctionType[]>,
@@ -309,7 +309,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private readonly functionVariants(fn: FunctionDecl, home: int): LibraryVariants {
+  private functionVariants(fn: FunctionDecl, home: int): LibraryVariants {
     const items = this.program.modules[home]?.file.items ?? [];
     const types: FunctionType[] = [];
     const open: OpenVariant[] = [];

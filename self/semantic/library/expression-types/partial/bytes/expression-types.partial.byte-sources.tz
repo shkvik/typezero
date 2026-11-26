@@ -31,7 +31,7 @@ import {
 } from "../../../byte-source-rules/const/byte-source-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly newSourceCheck(expr: NewExpr, made: Type, module: int): void {
+  private newSourceCheck(expr: NewExpr, made: Type, module: int): void {
     const source = expr.args[0];
     const hasSpread = expr.args.some((arg) => arg.spread);
     if (source == undefined || hasSpread) {
@@ -118,7 +118,7 @@ partial class ExpressionTypes {
     return elementError == undefined;
   }
 
-  private readonly bytesStaticCheck(
+  private bytesStaticCheck(
     expr: CallExpr,
     instance: InstanceType,
     member: MemberExpr,
@@ -166,7 +166,7 @@ partial class ExpressionTypes {
     this.mappedSourceCheck(expr, source.expr, from, instance, module);
   }
 
-  private readonly mappedSourceCheck(
+  private mappedSourceCheck(
     expr: CallExpr,
     source: Expr,
     from: Type,
@@ -207,7 +207,7 @@ partial class ExpressionTypes {
     this.typed(mapper.expr, signature, module);
   }
 
-  private readonly namedMapperCheck(mapper: Expr, target: Type, module: int): void {
+  private namedMapperCheck(mapper: Expr, target: Type, module: int): void {
     if (mapper.kind == ExprKind.Function) {
       return;
     }
@@ -225,7 +225,7 @@ partial class ExpressionTypes {
     this.reportFound(module, mapFitError);
   }
 
-  private readonly allocFillCheck(expr: CallExpr, module: int): void {
+  private allocFillCheck(expr: CallExpr, module: int): void {
     const fill = expr.args[1];
     if (fill == undefined || fill.spread) {
       return;
@@ -248,7 +248,7 @@ partial class ExpressionTypes {
     this.byteValueFitCheck(fill.expr, base, module);
   }
 
-  private readonly byteValueFitCheck(value: Expr, base: Type, module: int): void {
+  private byteValueFitCheck(value: Expr, base: Type, module: int): void {
     const info = this.byteSources.byteInfo();
     if (base.kind != TypeKind.Int || info == undefined) {
       return;
@@ -257,7 +257,7 @@ partial class ExpressionTypes {
     this.byteFitCheck(value, info, this.byteSources.byteRange(), module);
   }
 
-  private readonly typedSetCall(
+  private typedSetCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -291,7 +291,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Void);
   }
 
-  private readonly setSourceTyped(
+  private setSourceTyped(
     source: Expr,
     element: Type,
     instance: InstanceType,
@@ -316,7 +316,7 @@ partial class ExpressionTypes {
     return this.byteSourceCheck(source, from, instance, module);
   }
 
-  private readonly byteValuesChecked(values: Expr, target: Type, module: int): boolean {
+  private byteValuesChecked(values: Expr, target: Type, module: int): boolean {
     const before = this.errors.count();
     const element = this.valueElement(target);
     const wanted = this.store.arrayOf(element);
@@ -334,7 +334,7 @@ partial class ExpressionTypes {
     return element;
   }
 
-  private readonly setOffsetTyped(offset: Expr | undefined, module: int): boolean {
+  private setOffsetTyped(offset: Expr | undefined, module: int): boolean {
     if (offset == undefined) {
       return true;
     }
@@ -349,7 +349,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly setRangeCheck(
+  private setRangeCheck(
     target: Expr,
     source: Expr,
     offset: Expr | undefined,
@@ -383,7 +383,7 @@ partial class ExpressionTypes {
     this.reportFound(module, setFitError);
   }
 
-  private readonly offsetLinear(
+  private offsetLinear(
     offset: Expr | undefined,
     module: int,
   ): Linear | undefined {
@@ -394,7 +394,7 @@ partial class ExpressionTypes {
     return this.linearOf(offset, module);
   }
 
-  private readonly mostLength(source: Expr, module: int): Linear | undefined {
+  private mostLength(source: Expr, module: int): Linear | undefined {
     switch (source.kind) {
       case ExprKind.ArrayLit: {
         const isPlain = source.elements.every(
@@ -415,7 +415,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly partLength(call: CallExpr, module: int): Linear | undefined {
+  private partLength(call: CallExpr, module: int): Linear | undefined {
     const callee = call.callee;
     const first = call.args[0]?.expr;
     const second = call.args[1]?.expr;
@@ -436,13 +436,13 @@ partial class ExpressionTypes {
     return { term: kZeroTerm, offset: to - from };
   }
 
-  private readonly partBound(value: Expr, module: int): decimal | undefined {
+  private partBound(value: Expr, module: int): decimal | undefined {
     const given = this.peekType(value, module);
 
     return this.intConstant(value, given, module);
   }
 
-  private readonly byteMethodCheck(
+  private byteMethodCheck(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -474,7 +474,7 @@ partial class ExpressionTypes {
     this.bufferPositionsCheck(expr, member, module);
   }
 
-  private readonly withIndexCheck(
+  private withIndexCheck(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -501,7 +501,7 @@ partial class ExpressionTypes {
     this.reportFound(module, withIndexError);
   }
 
-  private readonly isAtInBounds(object: Expr, index: Expr, module: int): boolean {
+  private isAtInBounds(object: Expr, index: Expr, module: int): boolean {
     const at = this.linearOf(index, module);
     const length = this.measuredLength(object, module);
     const isFromEnd =
@@ -518,7 +518,7 @@ partial class ExpressionTypes {
     return this.isProvenIndex(object, index, module);
   }
 
-  private readonly bufferValueCheck(
+  private bufferValueCheck(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -550,7 +550,7 @@ partial class ExpressionTypes {
     this.fillPositionsCheck(expr.args, member.object, module);
   }
 
-  private readonly fillPositionsCheck(
+  private fillPositionsCheck(
     args: Read<CallArgument[]>,
     buffer: Expr,
     module: int,
@@ -581,7 +581,7 @@ partial class ExpressionTypes {
     return kEndWhat;
   }
 
-  private readonly bufferPositionsCheck(
+  private bufferPositionsCheck(
     expr: CallExpr,
     member: MemberExpr,
     module: int,

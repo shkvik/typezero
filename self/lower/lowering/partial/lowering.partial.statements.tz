@@ -1,4 +1,5 @@
 import {
+  BinaryExpr,
   BinaryOp,
   Expr,
   ExprKind,
@@ -15,7 +16,7 @@ import {
 } from "../../../program/ast/types/ast.types.statements.tz";
 import { Module } from "../../../program/module/types/module.types.tz";
 import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
-import { LLVMBlock } from "../../llvm-api/llvm-api.tz";
+import { LLVMBlock, LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import { kBooleanType, kDebugger, kNoOwner } from "../const/lowering.const.tz";
 import { Frame, IrValue, LoopTarget, Place } from "../types/lowering.types.tz";
@@ -176,6 +177,9 @@ partial class Lowering {
     if (init == undefined) {
       return frame.made.store(this.ir.zero(place.type), place.pointer);
     }
+    if (place.flag != undefined && init.kind == ExprKind.Binary && init.op == BinaryOp.Nullish) {
+      return this.nullishInitialized(frame, place, init);
+    }
 
     const given = this.wantedValue(frame, init, place.tz);
     if (given == undefined) {
@@ -188,6 +192,34 @@ partial class Lowering {
     }
 
     this.initialized(frame, place, value);
+    this.immortalGlobal(frame, place, key);
+  }
+
+  private nullishInitialized(frame: Frame, place: Place, init: BinaryExpr): void {
+    const given = this.nullishValue(frame, init, true);
+    if (given == undefined) {
+      return;
+    }
+
+    const value = this.converted(frame, given, place.tz, init.loc);
+    if (value != undefined) {
+      this.flaggedInitialized(frame, place, value, given.ownedFlag);
+    }
+  }
+
+  private flaggedInitialized(
+    frame: Read<Frame>,
+    place: Place,
+    value: IrValue,
+    ownedFlag: LLVMValue | undefined,
+  ): void {
+    const flag = place.flag;
+    if (flag == undefined || ownedFlag == undefined) {
+      return this.initialized(frame, place, value);
+    }
+
+    frame.made.store(value.value, place.pointer);
+    frame.made.store(ownedFlag, flag);
   }
 
   private initialized(frame: Read<Frame>, place: Place, value: IrValue): void {

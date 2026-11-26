@@ -254,7 +254,7 @@ export class Loader {
       return this.linkedFile(from, resolution.file, resolution.package);
     }
     if (resolution.kind == ResolutionKind.Library) {
-      return this.linkedLibrary(from, resolution.module);
+      return this.linkedNamed(from, resolution.name);
     }
     if (resolution.kind == ResolutionKind.Problem) {
       module.problems.push({

@@ -17,14 +17,14 @@ import { kToStringName } from "../../const/expression-types.const.tz";
 import { ConcatLink } from "../../../concatenation-rules/types/concatenation-rules.types.tz";
 
 partial class ExpressionTypes {
-  private readonly concatenated(expr: BinaryExpr, pair: OperandPair, module: int): Type {
+  private concatenated(expr: BinaryExpr, pair: OperandPair, module: int): Type {
     this.textCheck(expr.lhs, pair.left, module);
     this.textCheck(expr.rhs, pair.right, module);
 
     return this.store.plain(TypeKind.String);
   }
 
-  private readonly textCheck(operand: Expr, type: Type, module: int): void {
+  private textCheck(operand: Expr, type: Type, module: int): void {
     const base = this.types.definedType(type);
     const isText = type.kind == TypeKind.String || type.kind == TypeKind.Error;
 

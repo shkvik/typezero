@@ -153,7 +153,7 @@ partial class ExpressionTypes {
     return member;
   }
 
-  private readonly libraryCall(
+  private libraryCall(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -311,7 +311,7 @@ partial class ExpressionTypes {
     return this.declaredVariants(receiver, name, false);
   }
 
-  private readonly libraryMethodCall(
+  private libraryMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     type: Type,
@@ -347,7 +347,7 @@ partial class ExpressionTypes {
     return this.genericResult(expr, generic, wanted, module);
   }
 
-  private readonly provedResult(
+  private provedResult(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -377,7 +377,7 @@ partial class ExpressionTypes {
     return this.types.optional(int);
   }
 
-  private readonly takenItem(member: MemberExpr, item: Type, module: int): Type {
+  private takenItem(member: MemberExpr, item: Type, module: int): Type {
     const isFilled = this.isProvenFilled(member.object, module);
 
     this.takenFrom(member.object, module);
@@ -389,7 +389,7 @@ partial class ExpressionTypes {
     return this.types.optional(item);
   }
 
-  private readonly valueMissingCheck(
+  private valueMissingCheck(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -434,7 +434,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private readonly namespaceMissingCheck(
+  private namespaceMissingCheck(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -456,7 +456,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private readonly mathMemberCheck(
+  private mathMemberCheck(
     expr: CallExpr,
     member: MemberExpr,
     module: int,

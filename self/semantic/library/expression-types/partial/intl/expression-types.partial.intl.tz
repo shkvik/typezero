@@ -25,7 +25,7 @@ import {
 import { IntlService } from "../../../intl-rules/types/intl-rules.types.tz";
 
 partial class ExpressionTypes {
-  private readonly intlNew(expr: NewExpr, name: string, module: int): Type {
+  private intlNew(expr: NewExpr, name: string, module: int): Type {
     if (name == kLocaleClass) {
       return this.localeNew(expr, module);
     }
@@ -59,7 +59,7 @@ partial class ExpressionTypes {
     return this.namedLibraryType(what, expr.loc, module);
   }
 
-  private readonly localeNew(expr: NewExpr, module: int): Type {
+  private localeNew(expr: NewExpr, module: int): Type {
     const what = `${kIntlPrefix}${kLocaleClass}`;
     const options = expr.args[1];
     if (options != undefined) {
@@ -100,7 +100,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private readonly intlArguments(
+  private intlArguments(
     args: Read<CallArgument[]>,
     from: int,
     service: Read<IntlService>,
@@ -132,7 +132,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly localeArgumentCheck(
+  private localeArgumentCheck(
     arg: Expr,
     given: Type,
     what: string,
@@ -167,7 +167,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly localeTagCheck(
+  private localeTagCheck(
     arg: Expr,
     given: Type,
     what: string,
@@ -211,7 +211,7 @@ partial class ExpressionTypes {
     return this.intl.tagUnknownError(loc, what);
   }
 
-  private readonly localeListCheck(list: Expr, what: string, module: int): boolean {
+  private localeListCheck(list: Expr, what: string, module: int): boolean {
     if (list.kind == ExprKind.ArrayLit) {
       const text = this.store.plain(TypeKind.String);
       const wanted = this.store.arrayOf(text);
@@ -244,7 +244,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private readonly localeElementsCheck(
+  private localeElementsCheck(
     elements: Read<ArrayElement[]>,
     what: string,
     module: int,

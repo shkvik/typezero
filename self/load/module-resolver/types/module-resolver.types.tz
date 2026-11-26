@@ -1,6 +1,5 @@
 import { Code } from "../../../diagnostic/code.tz";
 import { Details } from "../../../diagnostic/types/message.types.tz";
-import { LibraryModule } from "../../../program/library/library-modules/types/library-modules.types.tz";
 
 export enum ResolutionKind {
   File,
@@ -15,7 +14,7 @@ export type Resolution =
       readonly file: string;
       readonly package: int;
     }
-  | { readonly kind: ResolutionKind.Library; readonly module: LibraryModule }
+  | { readonly kind: ResolutionKind.Library; readonly name: string }
   | { readonly kind: ResolutionKind.Package }
   | {
       readonly kind: ResolutionKind.Problem;

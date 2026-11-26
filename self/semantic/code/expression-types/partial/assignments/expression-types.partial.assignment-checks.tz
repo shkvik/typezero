@@ -26,7 +26,7 @@ import { kNoPlace } from "../../const/expression-types.const.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 
 partial class ExpressionTypes {
-  private readonly lengthAssignCheck(expr: AssignExpr, given: Type, module: int): void {
+  private lengthAssignCheck(expr: AssignExpr, given: Type, module: int): void {
     const target = expr.target;
     const isLength =
       expr.op == undefined &&
@@ -59,7 +59,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private readonly isProvenLength(object: Expr, value: Expr, module: int): boolean {
+  private isProvenLength(object: Expr, value: Expr, module: int): boolean {
     const at = this.linearOf(value, module);
     const key = this.pathKey(object, module);
     if (at == undefined || key == undefined) {
@@ -74,7 +74,7 @@ partial class ExpressionTypes {
     return isNatural && this.canProve(at.term, kLengthTerm + key, at.offset);
   }
 
-  private readonly compoundValue(
+  private compoundValue(
     expr: AssignExpr,
     op: BinaryOp,
     type: Type,
@@ -110,7 +110,7 @@ partial class ExpressionTypes {
     return given;
   }
 
-  private readonly numericCompoundCheck(
+  private numericCompoundCheck(
     expr: AssignExpr,
     op: BinaryOp,
     type: Type,
@@ -159,7 +159,7 @@ partial class ExpressionTypes {
     this.coerce(value, given, type, module, kNoPlace);
   }
 
-  private readonly compoundUndefinedCheck(
+  private compoundUndefinedCheck(
     expr: AssignExpr,
     tested: Type,
     module: int,
@@ -195,7 +195,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private readonly arrayWriteCheck(
+  private arrayWriteCheck(
     target: IndexExpr,
     isCompound: boolean,
     module: int,
@@ -223,7 +223,7 @@ partial class ExpressionTypes {
     this.writeIndexCheck(target, isCompound, module);
   }
 
-  private readonly assignedDeclared(target: Expr, module: int): Type | undefined {
+  private assignedDeclared(target: Expr, module: int): Type | undefined {
     if (target.kind == ExprKind.Member) {
       return this.memberTargetDeclared(target, module);
     }
@@ -286,7 +286,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly bytesStoreCheck(target: IndexExpr, object: Type, module: int): void {
+  private bytesStoreCheck(target: IndexExpr, object: Type, module: int): void {
     if (this.isProvenIndex(target.object, target.index, module)) {
       return;
     }
@@ -311,7 +311,7 @@ partial class ExpressionTypes {
     this.reportFound(module, storeError);
   }
 
-  private readonly elementDeclared(target: IndexExpr, module: int): Type | undefined {
+  private elementDeclared(target: IndexExpr, module: int): Type | undefined {
     const object = this.peekType(target.object, module);
 
     const base = this.types.definedType(object);
@@ -325,7 +325,7 @@ partial class ExpressionTypes {
     return this.bytes.elementOf(base);
   }
 
-  private readonly fieldDeclared(target: MemberExpr, module: int): Type | undefined {
+  private fieldDeclared(target: MemberExpr, module: int): Type | undefined {
     const key = this.pathKey(target, module);
     if (key == undefined) {
       return undefined;
@@ -340,7 +340,7 @@ partial class ExpressionTypes {
     return declared;
   }
 
-  private readonly isLibraryTarget(target: Expr, module: int): boolean {
+  private isLibraryTarget(target: Expr, module: int): boolean {
     if (target.kind != ExprKind.Member) {
       return false;
     }

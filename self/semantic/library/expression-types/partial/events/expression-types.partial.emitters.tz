@@ -47,7 +47,7 @@ partial class ExpressionTypes {
     this.reportFound(module, this.events.mapError(expr.loc, events));
   }
 
-  private readonly emitterCall(
+  private emitterCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -101,7 +101,7 @@ partial class ExpressionTypes {
     return instance;
   }
 
-  private readonly eventArgsOf(
+  private eventArgsOf(
     expr: CallExpr,
     member: MemberExpr,
     events: Type | undefined,
@@ -153,7 +153,7 @@ partial class ExpressionTypes {
     return this.store.arrayOf(listener);
   }
 
-  private readonly emitChecked(
+  private emitChecked(
     expr: CallExpr,
     args: Type | undefined,
     module: int,
@@ -199,7 +199,7 @@ partial class ExpressionTypes {
     return boolean;
   }
 
-  private readonly emittedChecked(given: Read<CallArgument[]>, args: Type, module: int): void {
+  private emittedChecked(given: Read<CallArgument[]>, args: Type, module: int): void {
     if (args.kind != TypeKind.Tuple) {
       return;
     }
@@ -215,7 +215,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly listenerChecked(
+  private listenerChecked(
     expr: CallExpr,
     instance: InstanceType,
     args: Type | undefined,
@@ -244,7 +244,7 @@ partial class ExpressionTypes {
     this.looseArguments(rest, module);
   }
 
-  private readonly listenerLoose(listener: Expr, module: int): void {
+  private listenerLoose(listener: Expr, module: int): void {
     if (listener.kind != ExprKind.Function) {
       this.typed(listener, undefined, module);
 
@@ -261,7 +261,7 @@ partial class ExpressionTypes {
     this.typed(listener, wanted, module);
   }
 
-  private readonly listenerLiteral(
+  private listenerLiteral(
     listener: FunctionExpr,
     instance: InstanceType,
     args: Type,
@@ -322,7 +322,7 @@ partial class ExpressionTypes {
     return nothing;
   }
 
-  private readonly listenerValue(
+  private listenerValue(
     listener: Expr,
     event: string,
     args: Type,
@@ -380,7 +380,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly emitterNew(
+  private emitterNew(
     expr: NewExpr,
     decl: ClassDecl,
     home: int,
@@ -454,7 +454,7 @@ partial class ExpressionTypes {
     return this.program.modules[type.module]?.name == kEventsModule;
   }
 
-  private readonly encodedArgs(
+  private encodedArgs(
     expr: CallExpr,
     member: MemberExpr,
     args: Type | undefined,
@@ -490,7 +490,7 @@ partial class ExpressionTypes {
     return this.program.modules[type.module]?.name == kWebModule;
   }
 
-  private readonly targetCall(
+  private targetCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -520,7 +520,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Undefined);
   }
 
-  private readonly targetListenerCheck(listener: Expr, home: int, module: int): void {
+  private targetListenerCheck(listener: Expr, home: int, module: int): void {
     const event = this.webEventType(home);
     if (event == undefined) {
       this.typed(listener, undefined, module);
@@ -582,7 +582,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private readonly noteErrorEvent(
+  private noteErrorEvent(
     expr: CallExpr,
     member: MemberExpr,
     isEmitting: boolean,

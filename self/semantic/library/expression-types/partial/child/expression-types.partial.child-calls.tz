@@ -11,7 +11,7 @@ import { ExpressionTypes } from "../../../../code/expression-types/expression-ty
 import { FsCall, FsShape } from "../../../fs-rules/types/fs-rules.types.tz";
 
 partial class ExpressionTypes {
-  private readonly childCallCheck(expr: CallExpr, module: int): void {
+  private childCallCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Name || this.modules.isLibraryModule(module)) {
       return;
@@ -35,7 +35,7 @@ partial class ExpressionTypes {
     this.childRunCheck(expr, callee.name, module);
   }
 
-  private readonly childRunCheck(expr: CallExpr, name: string, module: int): void {
+  private childRunCheck(expr: CallExpr, name: string, module: int): void {
     const isExec = this.child.isExec(name);
     const file = expr.args[0];
     const list = expr.args[1];
@@ -57,10 +57,11 @@ partial class ExpressionTypes {
     }
 
     const index = this.childOptionsAt(isList);
+    const options = this.child.options().slice();
     const row: FsCall = {
       name,
       shape: FsShape.PathOnly,
-      options: this.child.options(),
+      options,
       isUtf8Only: false,
     };
     if (!this.fsOptionsCheck(expr, index, row, module)) {
@@ -116,7 +117,7 @@ partial class ExpressionTypes {
     return isFine;
   }
 
-  private readonly childOptionsCheck(
+  private childOptionsCheck(
     expr: CallExpr,
     index: int,
     name: string,
@@ -230,7 +231,7 @@ partial class ExpressionTypes {
     return operand.kind == ExprKind.IntLit || operand.kind == ExprKind.FloatLit;
   }
 
-  private readonly childInputCheck(
+  private childInputCheck(
     expr: CallExpr,
     index: int,
     name: string,
@@ -265,7 +266,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly childSignalCheck(expr: CallExpr, index: int, module: int): void {
+  private childSignalCheck(expr: CallExpr, index: int, module: int): void {
     const signal = this.fsOptionValue(expr, index, "killSignal");
     if (signal == undefined) {
       return;
@@ -283,7 +284,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly childShellCheck(
+  private childShellCheck(
     expr: CallExpr,
     index: int,
     name: string,

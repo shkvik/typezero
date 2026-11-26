@@ -14,7 +14,7 @@ import { Linear } from "../../../code/expression-types/types/expression-types.ty
 import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
 
 partial class ExpressionTypes {
-  private readonly literalLength(key: string, value: Expr): void {
+  private literalLength(key: string, value: Expr): void {
     if (value.kind != ExprKind.ArrayLit) {
       return;
     }
@@ -33,7 +33,7 @@ partial class ExpressionTypes {
     this.facts = facts;
   }
 
-  private readonly arrayMadeLength(key: string, value: Expr, module: int): void {
+  private arrayMadeLength(key: string, value: Expr, module: int): void {
     if (value.kind != ExprKind.New || value.args.length != 1) {
       return;
     }
@@ -60,7 +60,7 @@ partial class ExpressionTypes {
     this.facts = facts;
   }
 
-  private readonly madeLength(key: string, value: Expr, module: int): void {
+  private madeLength(key: string, value: Expr, module: int): void {
     const count = this.madeLinear(value, module);
     if (count == undefined) {
       return;
@@ -74,7 +74,7 @@ partial class ExpressionTypes {
     this.facts = facts;
   }
 
-  private readonly declaredLength(key: string, value: Expr, module: int): void {
+  private declaredLength(key: string, value: Expr, module: int): void {
     const count = this.madeLinear(value, module);
     if (count == undefined) {
       return;
@@ -88,7 +88,7 @@ partial class ExpressionTypes {
     this.facts = facts;
   }
 
-  private readonly madeLinear(value: Expr, module: int): Linear | undefined {
+  private madeLinear(value: Expr, module: int): Linear | undefined {
     const sized = this.sizedLinear(value, module);
     if (sized != undefined) {
       return sized;
@@ -97,7 +97,7 @@ partial class ExpressionTypes {
     return this.viewLinear(value, module);
   }
 
-  private readonly sizedLinear(value: Expr, module: int): Linear | undefined {
+  private sizedLinear(value: Expr, module: int): Linear | undefined {
     const size =
       this.shapes.madeSize(value) ?? this.shapes.allocatedSize(value);
     const source = this.shapes.copiedSource(value);
@@ -138,7 +138,7 @@ partial class ExpressionTypes {
     return { term: kZeroTerm, offset: size.toDecimal() };
   }
 
-  private readonly viewLinear(value: Expr, module: int): Linear | undefined {
+  private viewLinear(value: Expr, module: int): Linear | undefined {
     const view = this.shapes.viewOf(value);
     if (view == undefined) {
       return undefined;
@@ -171,7 +171,7 @@ partial class ExpressionTypes {
     return { term: kZeroTerm, offset: bytes / size };
   }
 
-  private readonly wholeLinear(buffer: Expr, module: int): Linear | undefined {
+  private wholeLinear(buffer: Expr, module: int): Linear | undefined {
     const size = this.shapes.madeBuffer(buffer);
     if (size != undefined) {
       return this.linearOf(size, module);
@@ -185,7 +185,7 @@ partial class ExpressionTypes {
     return this.freshLength(buffer, module);
   }
 
-  private readonly freshLength(buffer: Expr, module: int): Linear | undefined {
+  private freshLength(buffer: Expr, module: int): Linear | undefined {
     if (buffer.kind != ExprKind.Member || buffer.name != kBufferName) {
       return this.measuredLength(buffer, module);
     }
@@ -201,7 +201,7 @@ partial class ExpressionTypes {
     return { term: kZeroTerm, offset: count.offset * size };
   }
 
-  private readonly embeddedLength(key: string, value: Expr, module: int): void {
+  private embeddedLength(key: string, value: Expr, module: int): void {
     const relative = this.shapes.embeddedPath(value);
     const home = this.program.modules[module]?.source.path;
     if (relative == undefined || home == undefined) {

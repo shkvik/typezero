@@ -23,7 +23,7 @@ import { kZeroTerm } from "../../../../flow/bound-rules/const/bound-rules.const.
 import { kValueTerm } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private readonly closureTyped(
+  private closureTyped(
     expr: FunctionExpr,
     wanted: Type | undefined,
     module: int,
@@ -92,7 +92,7 @@ partial class ExpressionTypes {
     return made;
   }
 
-  private readonly closureShape(
+  private closureShape(
     fn: FunctionDecl,
     goal: FunctionType | undefined,
     context: TypeContext,
@@ -161,7 +161,7 @@ partial class ExpressionTypes {
     return this.functions.insideType(type, kind);
   }
 
-  private readonly closureParameter(
+  private closureParameter(
     param: Param,
     given: FunctionParameter | undefined,
     context: Read<TypeContext>,
@@ -198,7 +198,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private readonly closureResult(
+  private closureResult(
     fn: FunctionDecl,
     goal: FunctionType | undefined,
     context: TypeContext,
@@ -243,7 +243,7 @@ partial class ExpressionTypes {
     return type.kind == TypeKind.Promise;
   }
 
-  private readonly inferredClosure(
+  private inferredClosure(
     fn: FunctionDecl,
     isQuiet: boolean,
     module: int,

@@ -97,10 +97,12 @@ export type ClassDecl = {
   readonly baseArgs: readonly TypeRef[];
   readonly interfaces: readonly TypeRef[];
   readonly fields: readonly ClassField[];
-  readonly methods: Cell<FunctionDecl[]>;
+  methods: Cell<readonly FunctionDecl[]>;
   readonly constructors: readonly FunctionDecl[];
   readonly expression: boolean;
   readonly decorators: readonly Decorator[];
   readonly typeParams: readonly TypeParamDecl[];
   readonly source?: Span;
 };
+
+export type InternedMethods = Interned<readonly FunctionDecl[]>;

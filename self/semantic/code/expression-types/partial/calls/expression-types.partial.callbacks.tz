@@ -30,7 +30,7 @@ import {
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly callbackArgumentsCheck(
+  private callbackArgumentsCheck(
     expr: CallExpr,
     plan: CallbackPlan,
     module: int,
@@ -117,7 +117,7 @@ partial class ExpressionTypes {
     return use != undefined && use.symbol == undefined;
   }
 
-  private readonly callbackResultCheck(
+  private callbackResultCheck(
     expr: CallExpr,
     plan: Read<CallbackPlan>,
     module: int,
@@ -329,7 +329,7 @@ partial class ExpressionTypes {
     return ` '${param.name}'`;
   }
 
-  private readonly noteArguments(args: Read<CallArgument[]>): void {
+  private noteArguments(args: Read<CallArgument[]>): void {
     for (const arg of args) {
       this.argumentExprs.add(arg.expr);
     }
@@ -376,7 +376,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly builtinFunctionValue(
+  private builtinFunctionValue(
     expr: NameExpr,
     wanted: Type | undefined,
     module: int,
@@ -414,7 +414,7 @@ partial class ExpressionTypes {
     return goal;
   }
 
-  private readonly isHolderFunction(
+  private isHolderFunction(
     expr: MemberExpr,
     holder: string,
     module: int,
@@ -432,7 +432,7 @@ partial class ExpressionTypes {
     return type.kind == TypeKind.Function;
   }
 
-  private readonly holderValueCheck(
+  private holderValueCheck(
     expr: MemberExpr,
     wanted: Type | undefined,
     module: int,
@@ -459,7 +459,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly asyncCallbackCheck(
+  private asyncCallbackCheck(
     expr: CallExpr,
     arg: Expr,
     plan: Read<CallbackPlan>,

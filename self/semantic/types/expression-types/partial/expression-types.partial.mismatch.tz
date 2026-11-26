@@ -5,7 +5,7 @@ import { Type } from "../../../../program/type/types/type.types.tz";
 import { MismatchTexts } from "../../mismatch-rules/types/mismatch-rules.types.tz";
 
 partial class ExpressionTypes {
-  private readonly mismatch(
+  private mismatch(
     expr: Expr,
     given: Type,
     wanted: Type,
@@ -42,7 +42,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly isRangeProven(
+  private isRangeProven(
     expr: Expr,
     given: Type,
     wanted: Type,

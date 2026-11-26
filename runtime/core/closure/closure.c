@@ -5,6 +5,8 @@
 
 int64_t tz_obj_live_objects(void) { return tz_thread_sum(offsetof(TzThread, live_objects)); }
 
+void tz_obj_forget(void) { --tz_live_objects; }
+
 TZ_HOT void *tz_obj_alloc(int64_t size) {
   ++tz_live_objects;
 

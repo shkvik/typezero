@@ -1,4 +1,5 @@
 import { ClassDecl } from "../../../program/ast/types/ast.types.classes.tz";
+import { Expr } from "../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
 import { InstanceField } from "../../../program/expression-answers/types/expression-answers.types.tz";
 import {
@@ -19,6 +20,8 @@ export type IrValue = {
   readonly value: LLVMValue;
   readonly tz: Type;
   readonly owned?: boolean;
+  readonly ownedFlag?: LLVMValue;
+  readonly isStatic?: boolean;
 };
 
 export type Place = {
@@ -166,6 +169,12 @@ export type MethodCallSite = {
 export type MethodTarget = {
   readonly name: string;
   readonly shape: FunctionShape;
+};
+
+export type MapLoop = {
+  readonly map: Expr;
+  readonly type: Type;
+  readonly kind: string;
 };
 
 export type Unlowered = {

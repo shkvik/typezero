@@ -21,7 +21,7 @@ import {
 import { kArrayClass } from "../../../code/expression-types/const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private readonly redundantTestsCheck(expr: BinaryExpr, module: int): void {
+  private redundantTestsCheck(expr: BinaryExpr, module: int): void {
     const isAnd = expr.op == BinaryOp.LogAnd;
     const rhs = expr.rhs;
     const test = this.jsonTestOf(rhs, module);
@@ -51,7 +51,7 @@ partial class ExpressionTypes {
     return terms.reverse();
   }
 
-  private readonly jsonTestOf(rhs: Expr, module: int): JsonTest | undefined {
+  private jsonTestOf(rhs: Expr, module: int): JsonTest | undefined {
     const found = this.testedSide(rhs, module);
     if (found == undefined) {
       return undefined;

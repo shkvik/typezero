@@ -14,7 +14,7 @@ import {
 } from "../../library-rules/const/library-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly printVoidCheck(expr: CallExpr, module: int): void {
+  private printVoidCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Member || !kPrintNames.includes(callee.name)) {
       return;
@@ -39,7 +39,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly printSpreadCheck(value: Expr, module: int): void {
+  private printSpreadCheck(value: Expr, module: int): void {
     const given = this.peekType(value, module);
     const base = this.types.definedType(given);
     const isList =
@@ -69,7 +69,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly performanceCallCheck(expr: CallExpr, module: int): boolean {
+  private performanceCallCheck(expr: CallExpr, module: int): boolean {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Member) {
       return false;
@@ -93,7 +93,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly isJsonKnownCheck(expr: CallExpr, module: int): void {
+  private isJsonKnownCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     const value = expr.args[0]?.expr;
     if (callee.kind != ExprKind.Member || callee.name != "isJson") {

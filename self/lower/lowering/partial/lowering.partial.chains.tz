@@ -10,7 +10,7 @@ import {
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { Lowering } from "../lowering.tz";
-import { kThisName } from "../const/lowering.const.tz";
+import { kSameArrayMethods, kThisName } from "../const/lowering.const.tz";
 import { Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
@@ -108,6 +108,9 @@ partial class Lowering {
     if (object != undefined && object.kind == TypeKind.Dict) {
       return this.dictResultOf(callee.name, object);
     }
+    if (object != undefined && object.kind == TypeKind.Array) {
+      return this.arrayResultOf(callee.name, object);
+    }
     if (object == undefined || object.kind != TypeKind.Instance) {
       return undefined;
     }
@@ -119,6 +122,14 @@ partial class Lowering {
     }
 
     return this.methodShape(object.module, decl, fn)?.result;
+  }
+
+  private readonly arrayResultOf(name: string, array: Type): Type | undefined {
+    if (kSameArrayMethods.includes(name)) {
+      return array;
+    }
+
+    return undefined;
   }
 
   private readonly dictResultOf(name: string, dict: Type): Type | undefined {

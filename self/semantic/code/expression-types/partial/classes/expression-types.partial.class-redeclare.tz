@@ -18,7 +18,7 @@ import {
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly redeclareChecks(decl: ClassDecl, module: int): void {
+  private redeclareChecks(decl: ClassDecl, module: int): void {
     const hasParent = decl.base != undefined || decl.baseExpr != undefined;
     const self = this.declaredInstance(decl, module);
     if (self == undefined) {
@@ -60,7 +60,7 @@ partial class ExpressionTypes {
     return instance;
   }
 
-  private readonly redeclareCheck(
+  private redeclareCheck(
     decl: ClassDecl,
     self: InstanceType,
     field: ClassField,
@@ -160,7 +160,7 @@ partial class ExpressionTypes {
     this.report(module, field.loc, Code.ParentMethodField, { word, first });
   }
 
-  private readonly fieldLayoutCheck(
+  private fieldLayoutCheck(
     decl: ClassDecl,
     own: Read<ClassMemberEntry>,
     theirs: Read<ClassMemberEntry>,
@@ -256,7 +256,7 @@ partial class ExpressionTypes {
     return [];
   }
 
-  private readonly noteSelfCall(member: MemberExpr, module: int): void {
+  private noteSelfCall(member: MemberExpr, module: int): void {
     const fn = this.openFunctions[this.openFunctions.length - 1];
     if (fn == undefined || fn.role == undefined || fn.isArrow) {
       return;

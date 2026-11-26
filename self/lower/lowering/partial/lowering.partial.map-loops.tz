@@ -1,0 +1,264 @@
+import { ClassDecl } from "../../../program/ast/types/ast.types.classes.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { VarDeclarator } from "../../../program/ast/types/ast.types.patterns.tz";
+import {
+  ForOfStmt,
+  Stmt,
+  StmtKind,
+} from "../../../program/ast/types/ast.types.statements.tz";
+import {
+  DictKind,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { IrIntPredicate, IrOpcode } from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kEntriesLoop,
+  kIntType,
+  kKeysLoop,
+  kPointerType,
+  kValuesLoop,
+} from "../const/lowering.const.tz";
+import {
+  Frame,
+  IrValue,
+  MapLoop,
+  MethodTarget,
+} from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private mapLoopOf(frame: Frame, statement: ForOfStmt): MapLoop | undefined {
+    if (statement.isAwait || statement.keys) {
+      return undefined;
+    }
+
+    const loop = this.mapLoopSource(frame, statement.iterable);
+    if (loop == undefined) {
+      return undefined;
+    }
+    if (loop.kind == kEntriesLoop && this.pairNames(statement) == undefined) {
+      return undefined;
+    }
+
+    return loop;
+  }
+
+  private mapLoopSource(frame: Frame, iterable: Expr): MapLoop | undefined {
+    const listed = this.listedMap(frame, iterable);
+    if (listed != undefined) {
+      return listed;
+    }
+
+    const type = this.typeIn(frame, iterable);
+    if (type == undefined || type.kind != TypeKind.Dict || !this.isTzMap(type)) {
+      return undefined;
+    }
+    if (type.dict == DictKind.Set) {
+      return { map: iterable, type, kind: kKeysLoop };
+    }
+
+    return { map: iterable, type, kind: kEntriesLoop };
+  }
+
+  private listedMap(frame: Frame, iterable: Expr): MapLoop | undefined {
+    if (iterable.kind != ExprKind.Call || iterable.args.length != 0) {
+      return undefined;
+    }
+
+    const callee = iterable.callee;
+    if (callee.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    const type = this.typeIn(frame, callee.object);
+    const isListing =
+      callee.name == kKeysLoop || callee.name == kValuesLoop || callee.name == kEntriesLoop;
+    if (type == undefined || type.kind != TypeKind.Dict || !isListing) {
+      return undefined;
+    }
+    if (type.dict != DictKind.Map || !this.isTzMap(type)) {
+      return undefined;
+    }
+
+    return { map: callee.object, type, kind: callee.name };
+  }
+
+  private readonly pairNames(statement: ForOfStmt): VarDeclarator[] | undefined {
+    const body = statement.body;
+    const isGenerated = statement.binding.name.startsWith("%");
+    if (!isGenerated || body.kind != StmtKind.Block) {
+      return undefined;
+    }
+
+    const first = body.body[0];
+    if (first == undefined || first.kind != StmtKind.VarDecl) {
+      return undefined;
+    }
+
+    const isPair = first.decls.every((decl) => this.pairIndex(decl, statement) != undefined);
+    if (!isPair) {
+      return undefined;
+    }
+
+    return first.decls.slice();
+  }
+
+  private readonly pairIndex(decl: VarDeclarator, statement: ForOfStmt): int | undefined {
+    const init = decl.init;
+    if (init == undefined || init.kind != ExprKind.Index) {
+      return undefined;
+    }
+
+    const object = init.object;
+    const index = init.index;
+    const isBinding = object.kind == ExprKind.Name && object.name == statement.binding.name;
+    if (!isBinding || index.kind != ExprKind.IntLit) {
+      return undefined;
+    }
+
+    const position = index.value.toInt();
+    if (position != 0 && position != 1) {
+      return undefined;
+    }
+
+    return position;
+  }
+
+  private mapLoop(frame: Frame, statement: ForOfStmt, loop: MapLoop): void {
+    const instance = this.mapInstance(loop.type);
+    const decl = this.mapClass();
+    if (instance == undefined || decl == undefined) {
+      return this.notLowered(frame.module, statement.loc, "this loop");
+    }
+
+    const next = this.mapMember(instance, decl, "next");
+    const keyAt = this.mapMember(instance, decl, "keyAt");
+    const valueAt = this.mapMember(instance, decl, "valueAt");
+    const map = this.value(frame, loop.map);
+    if (next == undefined || keyAt == undefined || valueAt == undefined || map == undefined) {
+      return this.notLowered(frame.module, statement.loc, "this loop");
+    }
+
+    const cond = frame.made.block("map.loop.cond");
+    const body = frame.made.block("map.loop.body");
+    const end = frame.made.block("map.loop.end");
+    const position = frame.made.slot(kIntType, "map.loop.position");
+
+    this.openScope(frame);
+
+    const target = this.loopTarget(frame, end, cond);
+
+    frame.made.store(this.ir.zero(kIntType), position);
+    frame.made.open(cond);
+
+    const at = frame.made.load(kIntType, position);
+    const nextCallee = this.ir.declare(next.name, kIntType, [kPointerType, kIntType]);
+    const entry = frame.made.call(nextCallee, [map.value, at]);
+    const zero = this.ir.zero(kIntType);
+    const isDone = frame.made.integerCompare(IrIntPredicate.SignedLess, entry, zero);
+
+    frame.made.conditionalBranch(isDone, end, body);
+    frame.made.open(body);
+    this.openScope(frame);
+
+    const one = this.ir.integer(kIntType, "1");
+    const following = frame.made.binary(IrOpcode.Add, entry, one);
+
+    frame.made.store(following, position);
+
+    const rest = this.mapLoopBound(frame, statement, loop, map.value, entry, keyAt, valueAt);
+
+    frame.loops.push(target);
+    this.statements(frame, rest);
+    frame.loops.pop();
+    this.closeScope(frame);
+    this.jumpTo(frame, cond);
+    frame.made.open(end);
+    this.closeScope(frame);
+    this.dropping(frame, map);
+  }
+
+  private mapLoopBound(
+    frame: Frame,
+    statement: ForOfStmt,
+    loop: Read<MapLoop>,
+    map: LLVMValue,
+    entry: LLVMValue,
+    keyAt: Read<MethodTarget>,
+    valueAt: Read<MethodTarget>,
+  ): Stmt[] {
+    const body = statement.body;
+    const all: Stmt[] = [];
+
+    if (body.kind == StmtKind.Block) {
+      for (const one of body.body) {
+        all.push(one);
+      }
+    } else {
+      all.push(body);
+    }
+    if (loop.kind != kEntriesLoop) {
+      const item = this.mapCell(frame, map, entry, loop.kind == kKeysLoop, keyAt, valueAt);
+
+      this.loopItem(frame, statement, item);
+
+      return all;
+    }
+
+    for (const decl of this.pairNames(statement) ?? []) {
+      const isKey = this.pairIndex(decl, statement) == 0;
+      const item = this.mapCell(frame, map, entry, isKey, keyAt, valueAt);
+
+      this.pairBound(frame, decl, item);
+    }
+
+    return all.slice(1);
+  }
+
+  private mapCell(
+    frame: Read<Frame>,
+    map: LLVMValue,
+    entry: LLVMValue,
+    isKey: boolean,
+    keyAt: Read<MethodTarget>,
+    valueAt: Read<MethodTarget>,
+  ): IrValue {
+    let target = valueAt;
+
+    if (isKey) {
+      target = keyAt;
+    }
+
+    const result = this.irType(target.shape.result) ?? kPointerType;
+    const callee = this.ir.declare(target.name, result, [kPointerType, kIntType]);
+    const value = frame.made.call(callee, [map, entry]);
+
+    return { type: result, value, tz: target.shape.result };
+  }
+
+  private pairBound(frame: Frame, decl: VarDeclarator, item: IrValue): void {
+    const place = this.localPlace(frame, decl);
+    if (place == undefined) {
+      return;
+    }
+
+    const value = this.converted(frame, item, place.tz, decl.loc);
+    if (value != undefined) {
+      this.initialized(frame, place, value);
+    }
+  }
+
+  private mapMember(instance: Type, decl: ClassDecl, name: string): MethodTarget | undefined {
+    const fn = decl.methods.find((one) => one.name == name);
+    if (fn == undefined) {
+      return undefined;
+    }
+
+    return this.methodTarget(instance, decl, fn);
+  }
+}

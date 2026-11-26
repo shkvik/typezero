@@ -15,6 +15,7 @@ import { LLVMBlock, LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
   kAppendName,
+  kAppendTakenName,
   kArrayAppend,
   kArrayIndexOf,
   kArrayJoin,
@@ -956,7 +957,9 @@ partial class Lowering {
       return undefined;
     }
 
-    const appending = { module: kArrayModule, name: kAppendName };
+    const isCopy = this.traits.isCopy(object.item, this.values);
+    const name = this.pick(isCopy, kAppendName, kAppendTakenName);
+    const appending = { module: kArrayModule, name };
 
     for (const argument of call.args) {
       const passed = this.wantedValue(frame, argument.expr, object);

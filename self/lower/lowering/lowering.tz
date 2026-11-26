@@ -45,12 +45,13 @@ import "./partial/lowering.partial.maps.tz";
 import "./partial/lowering.partial.inheritance.tz";
 import "./partial/lowering.partial.closures.tz";
 import "./partial/lowering.partial.field-inits.tz";
+import "./partial/lowering.partial.arena.tz";
+import "./partial/lowering.partial.map-loops.tz";
 import { ExpressionAnswers } from "../../program/expression-answers/expression-answers.tz";
 import { Module, Program } from "../../program/module/types/module.types.tz";
 import { TypeStore } from "../../program/type/type-store/type-store.tz";
 import { ExpressionTypes } from "../../semantic/code/expression-types/expression-types.tz";
 import { TypeResolver } from "../../semantic/types/type-resolver/type-resolver.tz";
-import { CheckedProgram } from "../../pipeline/front-end/types/front-end.types.tz";
 import { TypeTraits } from "../../semantic/ownership/type-traits/type-traits.tz";
 import { IrFunction } from "../ir-function/ir-function.tz";
 import { IrCallee } from "../ir-function/types/ir-function.types.tz";
@@ -124,6 +125,7 @@ export class Lowering {
   private statementLoc: int;
   private readonly pendingClosures: PendingClosure[];
   private readonly letKeys: Set<string>;
+  private readonly immortalGlobals: Set<string>;
   private readonly functionObjects: Map<string, LLVMValue>;
   private readonly initFunctions: Map<int, IrCallee>;
   private readonly noInits: Set<int>;
@@ -131,7 +133,8 @@ export class Lowering {
   public constructor(
     store: TypeStore,
     program: Own<Program>,
-    checked: Read<CheckedProgram>,
+    resolver: TypeResolver,
+    values: Own<ExpressionTypes>,
     moves: Own<Set<Expr>>,
     borrows: Own<Set<string>>,
   ) {
@@ -139,9 +142,9 @@ export class Lowering {
 
     this.program = program;
     this.store = store;
-    this.values = checked.values;
-    this.resolver = checked.types;
-    this.answers = checked.values.answers;
+    this.values = values;
+    this.resolver = resolver;
+    this.answers = this.values.answers;
     this.ir = new IrModule(name);
     this.unlowered = [];
     this.places = new Map<string, Place>();
@@ -174,12 +177,13 @@ export class Lowering {
     this.instanceSuffix = "";
     this.moves = moves;
     this.borrows = borrows;
-    this.traits = new TypeTraits(store, this.values, this.program);
+    this.traits = new TypeTraits(store, this.program);
     this.isAuditing = false;
     this.audited = [];
     this.statementLoc = 0;
     this.pendingClosures = [];
     this.letKeys = new Set<string>();
+    this.immortalGlobals = new Set<string>();
     this.functionObjects = new Map<string, LLVMValue>();
     this.initFunctions = new Map<int, IrCallee>();
     this.noInits = new Set<int>();
@@ -187,6 +191,10 @@ export class Lowering {
 
   public audit(): void {
     this.isAuditing = true;
+  }
+
+  public readonly lateWork(): string[] {
+    return this.values.lateWorkList();
   }
 
   public auditedCounts(): string[] {

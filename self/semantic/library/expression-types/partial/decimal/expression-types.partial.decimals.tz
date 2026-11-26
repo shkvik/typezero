@@ -11,7 +11,7 @@ import {
 import { OperandPair } from "../../../../code/expression-types/types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly decimalResult(
+  private decimalResult(
     expr: BinaryExpr,
     pair: OperandPair,
     module: int,
@@ -35,7 +35,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Decimal);
   }
 
-  private readonly isDecimalSide(side: Expr, type: Type, module: int): boolean {
+  private isDecimalSide(side: Expr, type: Type, module: int): boolean {
     if (type.kind == TypeKind.Decimal) {
       return true;
     }
@@ -51,7 +51,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private readonly decimalDivisor(expr: BinaryExpr, right: Type, module: int): void {
+  private decimalDivisor(expr: BinaryExpr, right: Type, module: int): void {
     const isDividing = expr.op == BinaryOp.Div || expr.op == BinaryOp.Rem;
     if (!isDividing) {
       return;

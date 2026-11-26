@@ -211,7 +211,11 @@ partial class TypeRelation {
         return this.descends(from, to);
       }
 
-      return this.descends(from, to) || this.sameFields(from.fields, to.fields);
+      if (this.descends(from, to) || this.sameFields(from.fields, to.fields)) {
+        return true;
+      }
+
+      return this.copiedFields(from.fields, to.fields);
     }
     if (from.kind == TypeKind.Tuple && to.kind == TypeKind.Tuple) {
       return (
@@ -275,6 +279,42 @@ partial class TypeRelation {
     }
 
     return true;
+  }
+
+  private readonly copiedFields(own: Read<ObjectField[]>, wide: Read<ObjectField[]>): boolean {
+    const isCopyTarget = wide.every((field) => field.readonly && this.isPlainCopy(field.type));
+    if (!isCopyTarget || own.length <= wide.length) {
+      return false;
+    }
+
+    for (const field of wide) {
+      const other = own.find((one) => one.name == field.name);
+      const same =
+        other != undefined &&
+        other.type == field.type &&
+        other.optional == field.optional;
+      if (!same) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private readonly isPlainCopy(type: Type): boolean {
+    switch (type.kind) {
+      case TypeKind.Boolean:
+      case TypeKind.Double:
+      case TypeKind.Int:
+      case TypeKind.String:
+      case TypeKind.Literal:
+      case TypeKind.Undefined:
+        return true;
+      case TypeKind.Union:
+        return type.parts.every((part) => this.isPlainCopy(part));
+      default:
+        return false;
+    }
   }
 
   private readonly sameItems(own: Read<Type[]>, wide: Read<Type[]>): boolean {

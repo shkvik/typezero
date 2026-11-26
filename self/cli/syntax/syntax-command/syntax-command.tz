@@ -260,10 +260,12 @@ export class SyntaxCommand {
       }
 
       const number = lines.length + 1;
+      const view = text.subarray(start, end);
+      const copied = Buffer.from(view);
 
       lines.push({
         path: `${source.path}:${number}`,
-        text: text.subarray(start, end),
+        text: copied,
         isLibrary: source.isLibrary,
       });
       start = end + 1;

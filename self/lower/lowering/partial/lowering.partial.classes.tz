@@ -929,6 +929,10 @@ partial class Lowering {
     }
 
     const loaded = this.seenAs(frame, this.loaded(frame, place), expr);
+    const isLooked = object.owned != true || !this.isManaged(object.tz);
+    if (isLooked && this.isStaticField(object, expr)) {
+      return this.staticValue(loaded);
+    }
     if (object.owned != true && this.isMovedField(frame, expr, place)) {
       frame.made.store(this.ir.zero(place.type), place.pointer);
 
@@ -947,7 +951,7 @@ partial class Lowering {
 
   private isMovedField(
     frame: Read<Frame>,
-    expr: MemberExpr,
+    expr: Expr,
     place: Read<Place>,
   ): boolean {
     return (

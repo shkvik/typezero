@@ -59,19 +59,21 @@ export function reverse<T>(items: T[]): void {
   reason: "cells from … to - 1 are below length, so full",
 })
 export function slice<T>(
-  items: Read<T[]>,
+  items: Lent<T[]>,
   start: int,
   end: int,
   hasEnd: boolean,
-): T[] {
+): Read<T>[] {
   const length = items.length;
   const from = boundedIndex(start, length);
   const to = endIndex(end, hasEnd, length);
   const cells = arrayCells(items);
-  const out: T[] = [];
+  const out: Read<T>[] = [];
 
   for (let index = from; index < to; index++) {
-    out.push(peekAt(cells, index));
+    const item = peekAt(cells, index);
+
+    out.push(item);
   }
 
   return out;
@@ -85,7 +87,16 @@ export function append<T>(target: T[], source: Read<T[]>): void {
   const cells = arrayCells(source);
 
   for (let index = 0; index < source.length; index++) {
-    target.push(peekAt(cells, index));
+    const item = peekAt(cells, index);
+    const copy = structuredClone(item);
+
+    target.push(copy);
+  }
+}
+
+export function appendTaken<T>(target: T[], source: Own<T[]>): void {
+  for (const item of source.drain()) {
+    target.push(item);
   }
 }
 

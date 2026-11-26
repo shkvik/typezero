@@ -15,7 +15,7 @@ import { kAsyncIteratorKey } from "../../../../types/type-questions/const/type-q
 import { ExpressionTypes } from "../../expression-types.tz";
 
 partial class ExpressionTypes {
-  private readonly forAwaitCheck(statement: ForOfStmt, module: int): void {
+  private forAwaitCheck(statement: ForOfStmt, module: int): void {
     if (statement.keys || this.modules.isLibraryModule(module)) {
       return;
     }
@@ -60,7 +60,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly asyncNextCall(
+  private asyncNextCall(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -80,7 +80,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly asyncMethodCheck(
+  private asyncMethodCheck(
     iterable: Expr,
     instance: InstanceType,
     module: int,
@@ -112,7 +112,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private readonly awaitLoopItem(given: Type): Type {
+  private awaitLoopItem(given: Type): Type {
     const base = this.types.definedType(given);
 
     switch (base.kind) {
@@ -127,7 +127,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly asyncInstanceItem(instance: InstanceType): Type {
+  private asyncInstanceItem(instance: InstanceType): Type {
     const entry = this.classMember(instance, kAsyncIteratorKey).entry;
     const method = entry?.methods[0];
     if (entry == undefined || method == undefined) {

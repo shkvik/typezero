@@ -23,7 +23,7 @@ import {
 } from "../../../event-rules/const/event-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly inferredCall(
+  private inferredCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -64,7 +64,7 @@ partial class ExpressionTypes {
     return this.inferredResult(member, instance);
   }
 
-  private readonly inferredListener(
+  private inferredListener(
     expr: CallExpr,
     instance: InstanceType,
     event: string,
@@ -87,7 +87,7 @@ partial class ExpressionTypes {
     this.listenerChecked(expr, instance, args, module);
   }
 
-  private readonly inferredLoose(args: Read<CallArgument[]>, module: int): void {
+  private inferredLoose(args: Read<CallArgument[]>, module: int): void {
     for (const arg of args) {
       this.listenerLoose(arg.expr, module);
     }
@@ -124,7 +124,7 @@ partial class ExpressionTypes {
     return `${target.module} ${target.loc}`;
   }
 
-  private readonly inferredListen(
+  private inferredListen(
     name: Expr,
     event: string,
     key: string | undefined,
@@ -137,7 +137,7 @@ partial class ExpressionTypes {
     this.eventMarks.listens.push({ key, event, loc: name.loc, module });
   }
 
-  private readonly inferredEmit(
+  private inferredEmit(
     rest: Read<CallArgument[]>,
     name: Expr,
     event: string,
@@ -174,7 +174,7 @@ partial class ExpressionTypes {
     this.emittedAgainCheck(rest, name, event, given, first, module);
   }
 
-  private readonly emittedType(value: Expr, module: int): Type {
+  private emittedType(value: Expr, module: int): Type {
     const type = this.typed(value, undefined, module);
 
     return this.relation.baseOf(type) ?? type;

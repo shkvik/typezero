@@ -30,7 +30,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly processStreamTyped(expr: MemberExpr, module: int): Type | undefined {
+  private processStreamTyped(expr: MemberExpr, module: int): Type | undefined {
     if (!this.isProcessName(expr.object, module)) {
       return undefined;
     }
@@ -105,7 +105,7 @@ partial class ExpressionTypes {
     return `${kProcessName}.${expr.name}`;
   }
 
-  private readonly processCall(
+  private processCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -140,7 +140,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly signalCall(
+  private signalCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -203,7 +203,7 @@ partial class ExpressionTypes {
     return field?.type;
   }
 
-  private readonly processAssignCheck(expr: AssignExpr, module: int): boolean {
+  private processAssignCheck(expr: AssignExpr, module: int): boolean {
     const target = expr.target;
     if (target.kind != ExprKind.Member) {
       return false;
@@ -233,7 +233,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly streamAssignCheck(
+  private streamAssignCheck(
     expr: AssignExpr,
     target: MemberExpr,
     module: int,
@@ -250,7 +250,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly looseCallbacks(args: Read<CallArgument[]>, module: int): void {
+  private looseCallbacks(args: Read<CallArgument[]>, module: int): void {
     for (const arg of args) {
       this.listenerLoose(arg.expr, module);
     }

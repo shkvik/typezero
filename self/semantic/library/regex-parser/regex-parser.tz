@@ -1,5 +1,4 @@
 import {
-  kAtomNode,
   kDigits,
   kGroupMarkers,
   kModifierLetters,
@@ -153,7 +152,7 @@ export class RegexParser {
       this.isBroken = true;
       this.index += 1;
 
-      return kAtomNode;
+      return this.atomNode();
     }
 
     const atom = this.atom();
@@ -172,7 +171,7 @@ export class RegexParser {
       default:
         this.index += 1;
 
-        return kAtomNode;
+        return this.atomNode();
     }
   }
 
@@ -326,13 +325,13 @@ export class RegexParser {
       depth += this.classStep(char, depth);
 
       if (depth == 0) {
-        return kAtomNode;
+        return this.atomNode();
       }
     }
 
     this.isBroken = true;
 
-    return kAtomNode;
+    return this.atomNode();
   }
 
   private classStep(char: string, depth: int): int {
@@ -358,7 +357,11 @@ export class RegexParser {
 
     this.index += 2;
 
-    return kAtomNode;
+    return this.atomNode();
+  }
+
+  private readonly atomNode(): RegexNode {
+    return { kind: RegexNodeKind.Atom, parts: [], capture: 0, isRequired: true };
   }
 
   private readonly isAt(char: string): boolean {

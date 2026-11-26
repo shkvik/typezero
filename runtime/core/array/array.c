@@ -22,6 +22,8 @@
 
 int64_t tz_arr_live_objects(void) { return tz_thread_sum(offsetof(TzThread, live_arrays)); }
 
+void tz_arr_forget(void) { --tz_live_arrays; }
+
 const TzType tz_string_type = {TZ_T_STRING, sizeof(TzStr), NULL};
 const TzType tz_undefined_type = {TZ_T_UNDEFINED, 0, NULL};
 

@@ -27,7 +27,7 @@ import {
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly patternSource(
+  private patternSource(
     door: VariableDoor,
     variable: DeclaredVariable,
     module: int,
@@ -56,7 +56,7 @@ partial class ExpressionTypes {
     door.type = this.patternArray(init, given, module);
   }
 
-  private readonly patternGiven(
+  private patternGiven(
     init: Expr,
     written: TypeRef | undefined,
     module: int,
@@ -78,7 +78,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private readonly patternArray(init: Expr, given: Type, module: int): Type {
+  private patternArray(init: Expr, given: Type, module: int): Type {
     const base = this.types.apparent(given);
     if (this.library.isJsonHolder(given)) {
       return given;
@@ -142,7 +142,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly patternElement(expr: IndexExpr, module: int): Type {
+  private patternElement(expr: IndexExpr, module: int): Type {
     const object = this.typed(expr.object, undefined, module);
     const base = this.types.apparent(object);
     if (this.library.isJsonHolder(object)) {

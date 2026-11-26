@@ -22,14 +22,14 @@ import {
 import {
   Destination,
   DestinationKind,
-  ValueRecord,
+  ValueDraft,
 } from "../../../code/expression-types/types/expression-types.types.tz";
 import { kHiddenMark } from "../../../code/source-texts/const/source-texts.const.tz";
 
 partial class ExpressionTypes {
   private readonly indexStatements(
     statements: Read<Stmt[]>,
-    record: ValueRecord,
+    record: ValueDraft,
   ): void {
     for (const statement of statements) {
       this.indexStatement(statement, record);
@@ -38,14 +38,14 @@ partial class ExpressionTypes {
 
   private readonly indexOptionalStatement(
     statement: Stmt | undefined,
-    record: ValueRecord,
+    record: ValueDraft,
   ): void {
     if (statement != undefined) {
       this.indexStatement(statement, record);
     }
   }
 
-  private readonly indexStatement(statement: Stmt, record: ValueRecord): void {
+  private readonly indexStatement(statement: Stmt, record: ValueDraft): void {
     switch (statement.kind) {
       case StmtKind.Block:
         return this.indexStatements(statement.body, record);
@@ -111,7 +111,7 @@ partial class ExpressionTypes {
     name: string,
     kind: SymbolKind,
     loc: int,
-    record: ValueRecord,
+    record: ValueDraft,
   ): void {
     if (name.startsWith(kHiddenMark)) {
       record.hidden.set(name, { kind, loc });
@@ -120,7 +120,7 @@ partial class ExpressionTypes {
 
   private readonly indexVariables(
     statement: VarDeclStmt,
-    record: ValueRecord,
+    record: ValueDraft,
   ): void {
     const isConst = statement.isConst;
 
@@ -135,7 +135,7 @@ partial class ExpressionTypes {
   private readonly keepDestination(
     value: Expr | undefined,
     destination: Destination,
-    record: ValueRecord,
+    record: ValueDraft,
   ): void {
     if (value == undefined || value.kind != ExprKind.Name) {
       return;
@@ -157,7 +157,7 @@ partial class ExpressionTypes {
     target: Expr,
     value: Expr,
     op: BinaryOp | undefined,
-    record: ValueRecord,
+    record: ValueDraft,
   ): void {
     if (op == undefined) {
       const kind = DestinationKind.Assigned;
@@ -169,7 +169,7 @@ partial class ExpressionTypes {
   private readonly keepDeclared(
     value: Expr | undefined,
     written: TypeRef | undefined,
-    record: ValueRecord,
+    record: ValueDraft,
   ): void {
     if (written != undefined) {
       const kind = DestinationKind.Declared;
@@ -180,7 +180,7 @@ partial class ExpressionTypes {
 
   private readonly keepReturned(
     value: Expr | undefined,
-    record: ValueRecord,
+    record: ValueDraft,
   ): void {
     const fn = record.owners[record.owners.length - 1];
     if (fn != undefined && fn.returnType != undefined) {
@@ -190,7 +190,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly keepArguments(call: CallExpr, record: ValueRecord): void {
+  private readonly keepArguments(call: CallExpr, record: ValueDraft): void {
     const kind = DestinationKind.Argument;
 
     for (let index = 0; index < call.args.length; index++) {
@@ -201,7 +201,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly indexFunction(fn: FunctionDecl, record: ValueRecord): void {
+  private readonly indexFunction(fn: FunctionDecl, record: ValueDraft): void {
     record.functions.set(fn.loc, fn);
 
     for (const param of fn.params) {
@@ -223,7 +223,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly indexClass(decl: ClassDecl, record: ValueRecord): void {
+  private readonly indexClass(decl: ClassDecl, record: ValueDraft): void {
     record.classes.set(decl.loc, decl);
 
     for (const field of decl.fields) {
@@ -241,7 +241,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly indexAssigned(target: Expr, record: ValueRecord): void {
+  private readonly indexAssigned(target: Expr, record: ValueDraft): void {
     if (target.kind != ExprKind.Name) {
       return;
     }
@@ -254,7 +254,7 @@ partial class ExpressionTypes {
 
   private readonly indexOptionalExpression(
     expr: Expr | undefined,
-    record: ValueRecord,
+    record: ValueDraft,
   ): void {
     if (expr != undefined) {
       this.indexExpression(expr, record);
@@ -263,14 +263,14 @@ partial class ExpressionTypes {
 
   private readonly indexExpressions(
     exprs: Read<Expr[]>,
-    record: ValueRecord,
+    record: ValueDraft,
   ): void {
     for (const expr of exprs) {
       this.indexExpression(expr, record);
     }
   }
 
-  private readonly indexExpression(expr: Expr, record: ValueRecord): void {
+  private readonly indexExpression(expr: Expr, record: ValueDraft): void {
     switch (expr.kind) {
       case ExprKind.Member:
         return this.indexExpression(expr.object, record);

@@ -23,7 +23,11 @@ import { kLineBreak, kMapLibrary } from "../const/loader.const.tz";
 
 partial class Loader {
   private linkedImplicit(from: ModulePath): ModuleLink {
-    const library = kLibrary.named(from.path);
+    return this.linkedNamed(from, from.path);
+  }
+
+  private linkedNamed(from: ModulePath, name: string): ModuleLink {
+    const library = kLibrary.named(name);
     if (library == undefined) {
       return { kind: LinkKind.Missing, from };
     }
@@ -77,19 +81,21 @@ partial class Loader {
   }
 
   private loadRuntime(): void {
-    const map = kLibrary.named(kMapLibrary);
-    const all = kLibrary.runtimeModules();
-
-    if (map != undefined) {
-      all.push(map);
+    for (const library of kLibrary.runtimeModules()) {
+      this.runtimeVisited(library);
     }
 
-    for (const library of all) {
-      const id = this.libraryId(library);
-      const module = this.opened[id ?? -1];
-      if (module != undefined && module.state == ModuleState.New) {
-        this.visit(module);
-      }
+    const map = kLibrary.named(kMapLibrary);
+    if (map != undefined) {
+      this.runtimeVisited(map);
+    }
+  }
+
+  private runtimeVisited(library: Read<LibraryModule>): void {
+    const id = this.libraryId(library);
+    const module = this.opened[id ?? -1];
+    if (module != undefined && module.state == ModuleState.New) {
+      this.visit(module);
     }
   }
 

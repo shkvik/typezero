@@ -526,6 +526,9 @@ partial class Lowering {
     const address = frame.made.element(element, data, at);
     const value = frame.made.load(element, address);
     const loaded: IrValue = { type: element, value, tz: item };
+    if (array.owned != true && array.isStatic == true) {
+      return this.staticValue(loaded);
+    }
     if (array.owned != true) {
       return loaded;
     }
@@ -702,6 +705,11 @@ partial class Lowering {
       return this.textLoop(frame, statement);
     }
 
+    const mapLoop = this.mapLoopOf(frame, statement);
+    if (mapLoop != undefined) {
+      return this.mapLoop(frame, statement, mapLoop);
+    }
+
     const itemType = this.loopItemType(frame, statement.iterable);
     const binding = statement.binding;
     const isPlain = !statement.isAwait && !statement.keys;
@@ -718,7 +726,7 @@ partial class Lowering {
     this.openScope(frame);
 
     const target = this.loopTarget(frame, end, cond);
-    const source = this.loopSource(frame, statement.iterable);
+    const source = this.loopSourceValue(frame, statement.iterable);
     const element = this.irType(itemType);
     if (source == undefined || element == undefined) {
       return;
@@ -736,7 +744,7 @@ partial class Lowering {
 
     frame.made.entryStore(none, holder.pointer);
     this.keepPlace(frame, holder);
-    this.initialized(frame, holder, source);
+    this.flaggedInitialized(frame, holder, source, source.ownedFlag);
     frame.made.store(this.ir.zero(kIntType), counter);
     frame.made.open(cond);
 
@@ -760,11 +768,16 @@ partial class Lowering {
     const next = frame.made.binary(IrOpcode.Add, index, one);
 
     frame.made.store(next, counter);
-    this.loopItem(frame, statement, {
-      type: element,
-      value: item,
-      tz: itemType,
-    });
+
+    const isTaken = this.isTakenItem(source, statement.iterable, element, itemType);
+    if (isTaken) {
+      frame.made.store(this.ir.zero(element), address);
+    }
+
+    const looked: IrValue = { type: element, value: item, tz: itemType, owned: isTaken };
+    const staticItem = this.staticOrSame(looked, source.isStatic == true);
+
+    this.loopItem(frame, statement, staticItem);
     frame.loops.push(target);
     this.statement(frame, statement.body);
     frame.loops.pop();

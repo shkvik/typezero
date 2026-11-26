@@ -36,7 +36,7 @@ partial class ExpressionTypes {
     return fact;
   }
 
-  private readonly underFacts(facts: Read<Map<string, Type>>): Map<string, Type> {
+  private underFacts(facts: Read<Map<string, Type>>): Map<string, Type> {
     const merged = this.narrowings.mergedFacts(this.facts, facts);
 
     return replace(this.facts, merged);
@@ -46,7 +46,7 @@ partial class ExpressionTypes {
     return new Map<string, Type>(this.facts);
   }
 
-  private readonly factsOf(cond: Expr, isTrue: boolean, module: int): Map<string, Type> {
+  private factsOf(cond: Expr, isTrue: boolean, module: int): Map<string, Type> {
     switch (cond.kind) {
       case ExprKind.Unary:
         if (cond.op != UnaryOp.Not) {
@@ -68,7 +68,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly truthFacts(
+  private truthFacts(
     cond: Expr,
     isTrue: boolean,
     module: int,
@@ -94,7 +94,7 @@ partial class ExpressionTypes {
     return facts;
   }
 
-  private readonly linkFacts(expr: Expr, facts: Map<string, Type>, module: int): void {
+  private linkFacts(expr: Expr, facts: Map<string, Type>, module: int): void {
     if (expr.kind == ExprKind.OptionalChain) {
       return this.linkFacts(expr.chain, facts, module);
     }
@@ -117,7 +117,7 @@ partial class ExpressionTypes {
     this.linkFacts(object, facts, module);
   }
 
-  private readonly binaryFacts(
+  private binaryFacts(
     cond: BinaryExpr,
     isTrue: boolean,
     module: int,
@@ -161,7 +161,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly keyFacts(
+  private keyFacts(
     lhs: Expr,
     rhs: Expr,
     isTrue: boolean,
@@ -206,7 +206,7 @@ partial class ExpressionTypes {
     return (lookup.entry != undefined) == isTrue;
   }
 
-  private readonly bothFacts(
+  private bothFacts(
     cond: BinaryExpr,
     isTrue: boolean,
     module: int,
@@ -220,7 +220,7 @@ partial class ExpressionTypes {
     return this.narrowings.mergedFacts(left, right);
   }
 
-  private readonly eitherFacts(
+  private eitherFacts(
     cond: BinaryExpr,
     isLeftTrue: boolean,
     isTrue: boolean,
@@ -236,7 +236,7 @@ partial class ExpressionTypes {
     return this.narrowings.joinedFacts(left, right);
   }
 
-  private readonly equalityFacts(
+  private equalityFacts(
     lhs: Expr,
     rhs: Expr,
     isEqual: boolean,
@@ -279,7 +279,7 @@ partial class ExpressionTypes {
     return facts;
   }
 
-  private readonly tagFacts(
+  private tagFacts(
     tag: MemberExpr,
     other: Expr,
     isEqual: boolean,
@@ -294,7 +294,7 @@ partial class ExpressionTypes {
     this.literalTagFacts(tag, literal, isEqual, facts, module);
   }
 
-  private readonly literalTagFacts(
+  private literalTagFacts(
     tag: MemberExpr,
     literal: Type,
     isEqual: boolean,
@@ -324,7 +324,7 @@ partial class ExpressionTypes {
     facts.set(owner.key, union);
   }
 
-  private readonly isTagKept(
+  private isTagKept(
     part: Type,
     name: string,
     literal: Type,
@@ -344,7 +344,7 @@ partial class ExpressionTypes {
     return isOpen || this.objects.holdsLiteral(tag, literal);
   }
 
-  private readonly comparedType(
+  private comparedType(
     type: Type,
     other: Expr,
     isEqual: boolean,
@@ -365,7 +365,7 @@ partial class ExpressionTypes {
     return this.narrowings.withoutPart(type, literal);
   }
 
-  private readonly comparedLiteral(other: Expr, module: int): Type | undefined {
+  private comparedLiteral(other: Expr, module: int): Type | undefined {
     const isWritten =
       other.kind == ExprKind.StringLit ||
       other.kind == ExprKind.IntLit ||
@@ -380,7 +380,7 @@ partial class ExpressionTypes {
     return this.store.literal(literal.kind, literal.text);
   }
 
-  private readonly typeofFacts(
+  private typeofFacts(
     lhs: Expr,
     rhs: Expr,
     isEqual: boolean,
@@ -413,7 +413,7 @@ partial class ExpressionTypes {
     return facts;
   }
 
-  private readonly instanceFacts(
+  private instanceFacts(
     lhs: Expr,
     rhs: Expr,
     isTrue: boolean,
@@ -528,7 +528,7 @@ partial class ExpressionTypes {
     return instance;
   }
 
-  private readonly narrowable(expr: Expr, module: int): NarrowSlot | undefined {
+  private narrowable(expr: Expr, module: int): NarrowSlot | undefined {
     const key = this.pathKey(expr, module);
     if (key == undefined) {
       return undefined;
@@ -542,7 +542,7 @@ partial class ExpressionTypes {
     return { key, type };
   }
 
-  private readonly pathDeclared(expr: Expr, module: int): Type | undefined {
+  private pathDeclared(expr: Expr, module: int): Type | undefined {
     if (expr.kind != ExprKind.Name) {
       return this.typed(expr, undefined, module);
     }
@@ -555,7 +555,7 @@ partial class ExpressionTypes {
     return this.declaredOf(target);
   }
 
-  private readonly declaredOf(target: ValueTarget): Type | undefined {
+  private declaredOf(target: ValueTarget): Type | undefined {
     if (target.kind == SymbolKind.Parameter) {
       return this.parameterTyped(target);
     }

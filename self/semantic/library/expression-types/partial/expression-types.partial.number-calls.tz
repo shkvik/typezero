@@ -65,7 +65,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly mathOneTypeCheck(expr: CallExpr, module: int): void {
+  private mathOneTypeCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Member) {
       return;
@@ -123,7 +123,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly mathSpreadCall(expr: CallExpr, module: int): Type | undefined {
+  private mathSpreadCall(expr: CallExpr, module: int): Type | undefined {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Member) {
       return undefined;
@@ -188,7 +188,7 @@ partial class ExpressionTypes {
     return this.types.optional(common);
   }
 
-  private readonly spreadNumbers(arg: Expr, module: int): Type | undefined {
+  private spreadNumbers(arg: Expr, module: int): Type | undefined {
     const type = this.typed(arg, undefined, module);
     const base = this.types.apparent(type);
     if (base.kind == TypeKind.Error) {
@@ -210,7 +210,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private readonly mathSpreadItem(base: Type): Type | undefined {
+  private mathSpreadItem(base: Type): Type | undefined {
     if (base.kind == TypeKind.String || base.kind == TypeKind.Template) {
       return undefined;
     }
@@ -223,7 +223,7 @@ partial class ExpressionTypes {
     return this.types.apparent(item);
   }
 
-  private readonly isFilledSource(arg: Expr, module: int): boolean {
+  private isFilledSource(arg: Expr, module: int): boolean {
     if (arg.kind == ExprKind.ArrayLit) {
       return (
         arg.elements.length > 0 &&

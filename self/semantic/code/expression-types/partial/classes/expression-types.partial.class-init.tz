@@ -71,14 +71,14 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private readonly markFieldSet(name: string): void {
+  private markFieldSet(name: string): void {
     const key = `${kFieldSetKey}${name}`;
     const mark = this.store.plain(TypeKind.Void);
 
     this.facts = this.flows.withFact(this.facts, key, mark);
   }
 
-  private readonly initStart(fn: FunctionDecl): void {
+  private initStart(fn: FunctionDecl): void {
     const frame = this.initFrames[this.initFrames.length - 1];
     if (frame == undefined || !frame.isConstructor || frame.fn != fn) {
       return;
@@ -133,7 +133,7 @@ partial class ExpressionTypes {
     this.report(module, loc, Code.FieldsNotSet, { word, first });
   }
 
-  private readonly fieldSetMark(target: Expr, module: int): void {
+  private fieldSetMark(target: Expr, module: int): void {
     if (target.kind != ExprKind.Member) {
       return;
     }
@@ -144,7 +144,7 @@ partial class ExpressionTypes {
     this.markFieldSet(target.name);
   }
 
-  private readonly superFieldsSet(): void {
+  private superFieldsSet(): void {
     const frame = this.initFrames[this.initFrames.length - 1];
     if (frame == undefined || !frame.isConstructor) {
       return;
@@ -285,7 +285,7 @@ partial class ExpressionTypes {
     this.report(module, expr.loc, Code.ThisUsedEarly, { word });
   }
 
-  private readonly markThisObject(object: Expr, module: int): void {
+  private markThisObject(object: Expr, module: int): void {
     if (this.isThisName(object, module)) {
       this.thisObjects.add(object);
     }
@@ -336,7 +336,7 @@ partial class ExpressionTypes {
     return isLast;
   }
 
-  private readonly switchFieldsJoined(
+  private switchFieldsJoined(
     statement: SwitchStmt,
     exits: Read<Map<string, Type>[]>,
   ): void {

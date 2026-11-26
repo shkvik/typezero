@@ -23,7 +23,7 @@ import {
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly argumentsCheck(
+  private argumentsCheck(
     args: Read<CallArgument[]>,
     target: Read<CallTarget>,
     module: int,
@@ -96,7 +96,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly countCheck(
+  private countCheck(
     args: Read<CallArgument[]>,
     target: Read<CallTarget>,
     module: int,
@@ -127,7 +127,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly closureArguments(
+  private closureArguments(
     args: Read<CallArgument[]>,
     target: Read<CallTarget>,
     module: int,
@@ -141,7 +141,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly argumentSlots(args: Read<CallArgument[]>, module: int): ArgumentSlot[] {
+  private argumentSlots(args: Read<CallArgument[]>, module: int): ArgumentSlot[] {
     const slots: ArgumentSlot[] = [];
 
     for (const arg of args) {
@@ -160,7 +160,7 @@ partial class ExpressionTypes {
     return slots;
   }
 
-  private readonly spreadItems(arg: CallArgument, module: int): Type[] | undefined {
+  private spreadItems(arg: CallArgument, module: int): Type[] | undefined {
     const expr = arg.expr;
     if (!arg.spread || expr.kind != ExprKind.Name) {
       return undefined;
@@ -187,7 +187,7 @@ partial class ExpressionTypes {
     return type.items;
   }
 
-  private readonly kindArgumentCheck(
+  private kindArgumentCheck(
     slot: ArgumentSlot,
     param: FunctionParameter,
     index: int,
@@ -228,7 +228,7 @@ partial class ExpressionTypes {
     this.argumentCheck(slot, to, module);
   }
 
-  private readonly positionCheck(
+  private positionCheck(
     slot: ArgumentSlot,
     to: Type,
     method: string,
@@ -252,7 +252,7 @@ partial class ExpressionTypes {
     this.reportAll(module, positionUseErrors);
   }
 
-  private readonly mathArgumentCheck(
+  private mathArgumentCheck(
     slot: ArgumentSlot,
     to: Type,
     method: string,
@@ -292,7 +292,7 @@ partial class ExpressionTypes {
     this.report(module, slot.expr.loc, code, { word: this.text.of(given) });
   }
 
-  private readonly argumentCheck(slot: ArgumentSlot, to: Type, module: int): void {
+  private argumentCheck(slot: ArgumentSlot, to: Type, module: int): void {
     const element = slot.element;
     if (element != undefined) {
       return this.coerce(slot.expr, element, to, module, kNoPlace);
@@ -306,7 +306,7 @@ partial class ExpressionTypes {
     this.checked(slot.expr, to, module, kNoPlace);
   }
 
-  private readonly listArgumentsCheck(
+  private listArgumentsCheck(
     args: Read<CallArgument[]>,
     target: Read<CallTarget>,
     module: int,
@@ -324,7 +324,7 @@ partial class ExpressionTypes {
     return this.listRestCheck(slots, only.type, target.loc, module);
   }
 
-  private readonly listRestCheck(
+  private listRestCheck(
     slots: Read<ArgumentSlot[]>,
     to: Type,
     loc: int,
@@ -406,7 +406,7 @@ partial class ExpressionTypes {
     return `'${name}'`;
   }
 
-  private readonly restCheck(
+  private restCheck(
     slots: Read<ArgumentSlot[]>,
     to: Type,
     loc: int,
@@ -440,7 +440,7 @@ partial class ExpressionTypes {
     this.checked(literal, to, module, kNoPlace);
   }
 
-  private readonly restSlotsCheck(slots: Read<ArgumentSlot[]>, to: Type, module: int): void {
+  private restSlotsCheck(slots: Read<ArgumentSlot[]>, to: Type, module: int): void {
     const item = this.calls.restItem(to);
 
     for (const slot of slots) {
@@ -452,7 +452,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly looseArguments(args: Read<CallArgument[]>, module: int): void {
+  private looseArguments(args: Read<CallArgument[]>, module: int): void {
     for (const arg of args) {
       this.typed(arg.expr, undefined, module);
     }

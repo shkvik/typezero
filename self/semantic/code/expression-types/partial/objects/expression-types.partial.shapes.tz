@@ -161,7 +161,7 @@ partial class ExpressionTypes {
     return parts.some((part) => this.isOperationInside(part, seen));
   }
 
-  private readonly lenientClosure(expr: Expr, pattern: Type, module: int): void {
+  private lenientClosure(expr: Expr, pattern: Type, module: int): void {
     if (expr.kind != ExprKind.Function) {
       return;
     }

@@ -32,7 +32,7 @@ import {
 import { CallKind, StaticOwner } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly walkClass(decl: ClassDecl, module: int): void {
+  private walkClass(decl: ClassDecl, module: int): void {
     this.redeclareChecks(decl, module);
     this.decoratorChecks(decl, module);
     this.extendsCycleCheck(decl, module);
@@ -57,7 +57,7 @@ partial class ExpressionTypes {
     this.overriddenCallChecks(decl, module);
   }
 
-  private readonly methodFunction(decl: ClassDecl, fn: FunctionDecl, module: int): Type {
+  private methodFunction(decl: ClassDecl, fn: FunctionDecl, module: int): Type {
     const part = this.partOf(decl, fn);
     const home = this.partModule(part, module);
     const self = this.selfOf(decl, fn, module);
@@ -145,7 +145,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly staticOwner(object: Expr, module: int): StaticOwner | undefined {
+  private staticOwner(object: Expr, module: int): StaticOwner | undefined {
     if (object.kind != ExprKind.Name) {
       return undefined;
     }
@@ -169,7 +169,7 @@ partial class ExpressionTypes {
     return { decl, module: target.module };
   }
 
-  private readonly staticMemberTyped(
+  private staticMemberTyped(
     expr: MemberExpr,
     owner: StaticOwner,
     module: int,
@@ -229,7 +229,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly staticCall(
+  private staticCall(
     expr: CallExpr,
     member: MemberExpr,
     owner: StaticOwner,
@@ -245,7 +245,7 @@ partial class ExpressionTypes {
     return this.fieldValueCall(expr, member, found, CallKind.Own, module);
   }
 
-  private readonly staticMember(
+  private staticMember(
     expr: MemberExpr,
     owner: StaticOwner,
     module: int,

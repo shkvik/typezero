@@ -23,7 +23,7 @@ import {
 import { FsCall, FsShape } from "../../../fs-rules/types/fs-rules.types.tz";
 
 partial class ExpressionTypes {
-  private readonly fsCallCheck(expr: CallExpr, module: int): void {
+  private fsCallCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Name || this.modules.isLibraryModule(module)) {
       return;
@@ -63,7 +63,7 @@ partial class ExpressionTypes {
     return opened != undefined && this.fs.isPromisesModule(opened.name);
   }
 
-  private readonly fsPromisesCheck(
+  private fsPromisesCheck(
     expr: CallExpr,
     name: string,
     loc: int,
@@ -90,7 +90,7 @@ partial class ExpressionTypes {
     return opened != undefined && this.fs.isFsModule(opened.name);
   }
 
-  private readonly fsShapeCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
+  private fsShapeCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
     this.fsZeroPathCheck(expr, row, module);
 
     switch (row.shape) {
@@ -118,7 +118,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly fsReadCheck(
+  private fsReadCheck(
     expr: CallExpr,
     row: Read<FsCall>,
     index: int,
@@ -141,7 +141,7 @@ partial class ExpressionTypes {
     this.fsOpenFlagCheck(expr, index, row, module);
   }
 
-  private readonly fsWriteCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
+  private fsWriteCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
     const data = expr.args[1];
     if (data == undefined) {
       return;
@@ -227,7 +227,7 @@ partial class ExpressionTypes {
     this.reportFound(module, this.fs.copyModeError(mode.expr.loc, row.name));
   }
 
-  private readonly fsEncodingOrOptions(
+  private fsEncodingOrOptions(
     expr: CallExpr,
     index: int,
     row: Read<FsCall>,
@@ -464,7 +464,7 @@ partial class ExpressionTypes {
     return 1;
   }
 
-  private readonly statsDateCheck(expr: AssignExpr, module: int): boolean {
+  private statsDateCheck(expr: AssignExpr, module: int): boolean {
     const target = expr.target;
     if (target.kind != ExprKind.Member || !kStatsDates.includes(target.name)) {
       return false;

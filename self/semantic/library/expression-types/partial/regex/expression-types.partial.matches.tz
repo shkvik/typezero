@@ -75,7 +75,7 @@ partial class ExpressionTypes {
     return list;
   }
 
-  private readonly matchIndexed(
+  private matchIndexed(
     expr: IndexExpr,
     object: Type,
     module: int,
@@ -106,7 +106,7 @@ partial class ExpressionTypes {
     return this.valueMember(expr, list, module);
   }
 
-  private readonly matchMemberCall(
+  private matchMemberCall(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,

@@ -33,7 +33,7 @@ import {
 import { kDecoratorPlaces } from "../../../decorator-rules/const/decorator-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly decoratorChecks(decl: ClassDecl, module: int): void {
+  private decoratorChecks(decl: ClassDecl, module: int): void {
     if (!this.decorators.isDecoratedClass(decl)) {
       return;
     }
@@ -68,7 +68,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly decorate(run: Read<DecorateRun>, module: int): void {
+  private decorate(run: Read<DecorateRun>, module: int): void {
     if (run.field?.accessor == true) {
       return this.report(module, run.at, Code.DecoratorAccessor, kNoDetails);
     }
@@ -109,7 +109,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly decoratorType(expr: Expr, module: int): Type {
+  private decoratorType(expr: Expr, module: int): Type {
     if (this.isMetadataDecorator(expr, module)) {
       return this.store.plain(TypeKind.Error);
     }
@@ -156,7 +156,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private readonly decoratorResultCheck(
+  private decoratorResultCheck(
     run: Read<DecorateRun>,
     use: DecoratorUse,
     type: Type,
@@ -323,7 +323,7 @@ partial class ExpressionTypes {
     return this.targetOfName(expr, module)?.kind == SymbolKind.Parameter;
   }
 
-  private readonly oldObjectCheck(decl: ClassDecl, module: int): void {
+  private oldObjectCheck(decl: ClassDecl, module: int): void {
     const own = this.resolver.classInstance(module, decl, []);
     const owner: StaticOwner = { decl, module };
 
@@ -342,7 +342,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly staticHeldType(
+  private staticHeldType(
     field: ClassField,
     owner: StaticOwner,
   ): Type | undefined {

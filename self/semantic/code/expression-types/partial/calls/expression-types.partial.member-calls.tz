@@ -24,7 +24,7 @@ import { kTakingMethods } from "../../../statement-rules/const/statement-rules.c
 import { ExpressionTypes } from "../../expression-types.tz";
 
 partial class ExpressionTypes {
-  private readonly memberCall(
+  private memberCall(
     expr: CallExpr,
     member: MemberExpr,
     wanted: Type | undefined,
@@ -164,7 +164,7 @@ partial class ExpressionTypes {
     return this.receiverCall(expr, member, object, wanted, module);
   }
 
-  private readonly receiverCall(
+  private receiverCall(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -236,7 +236,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly parameterCall(
+  private parameterCall(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -266,7 +266,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly instanceCall(
+  private instanceCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -340,7 +340,7 @@ partial class ExpressionTypes {
     return result;
   }
 
-  private readonly otherCall(
+  private otherCall(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -386,7 +386,7 @@ partial class ExpressionTypes {
     return found ?? this.store.plain(TypeKind.Error);
   }
 
-  private readonly variantCall(
+  private variantCall(
     expr: CallExpr,
     member: MemberExpr,
     object: UnionType,
@@ -426,7 +426,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly fieldCall(
+  private fieldCall(
     expr: CallExpr,
     member: MemberExpr,
     object: ObjectType,
@@ -478,7 +478,7 @@ partial class ExpressionTypes {
     return this.fieldValueCall(expr, member, type, kind, module);
   }
 
-  private readonly fieldValueCall(
+  private fieldValueCall(
     expr: CallExpr,
     member: MemberExpr,
     type: Type,
@@ -512,7 +512,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly methodCall(
+  private methodCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -591,7 +591,7 @@ partial class ExpressionTypes {
     return this.calledWith(expr, type, member.loc, CallKind.Own, module);
   }
 
-  private readonly arrayFromCall(
+  private arrayFromCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,

@@ -4498,6 +4498,15 @@ export const kMessages: Record<Code, Message> = {
   [Code.OwnUnsafeUnused]: {
     text: "@Unsafe lists UnsafeUse.{word}, but the function does no such operation; take it out of 'uses'",
   },
+  [Code.OwnCloneField]: {
+    text: "'{word}' cannot be copied by structuredClone: it is {other}; give its class a [Symbol.clone]() method that says how to copy it",
+  },
+  [Code.OwnCellReach]: {
+    text: "'{word}' is called while '{other}' is borrowed from a Cell, and it could change that Cell; go over a copy ('.slice()') or make the call first, in its own statement",
+  },
+  [Code.OwnUnsafeRequires]: {
+    text: "'{word}' asks its caller to keep a condition (@Unsafe 'requires'), so call it only inside a function or method marked @Unsafe",
+  },
   [Code.OwnMutVariance]: {
     text: "'{word}' is passed to be changed as a wider type, so the function may put another kind of value into it; take Read<...> if it only reads, or pass a copy",
   },

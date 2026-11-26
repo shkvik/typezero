@@ -21,7 +21,7 @@ import {
 import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
 
 partial class ExpressionTypes {
-  private readonly streamFunctionCall(expr: CallExpr, name: string, module: int): Type {
+  private streamFunctionCall(expr: CallExpr, name: string, module: int): Type {
     if (name == kFinishedName) {
       for (const arg of expr.args) {
         this.listenerLoose(arg.expr, module);
@@ -132,7 +132,7 @@ partial class ExpressionTypes {
     return this.relation.extends(chunk, takes);
   }
 
-  private readonly streamFromCall(
+  private streamFromCall(
     expr: CallExpr,
     member: MemberExpr,
     owner: StaticOwner,
@@ -171,7 +171,7 @@ partial class ExpressionTypes {
     return this.resolver.classInstance(owner.module, owner.decl, [chunk]);
   }
 
-  private readonly fromChunk(given: Type): Type | undefined {
+  private fromChunk(given: Type): Type | undefined {
     if (this.isBufferChunk(given)) {
       return this.types.definedType(given);
     }

@@ -80,7 +80,7 @@ export class LiteralRanges {
     return `${name} >= ${low} && ${name} <= ${high}`;
   }
 
-  private readonly widestInterval(intervals: Read<Interval[]>): Interval | undefined {
+  private readonly widestInterval(intervals: Lent<Interval[]>): Read<Interval> | undefined {
     let widest: Interval | undefined = undefined;
 
     for (const interval of intervals) {

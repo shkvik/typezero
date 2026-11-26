@@ -24,7 +24,7 @@ import {
 import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
 
 partial class ExpressionTypes {
-  private readonly streamNew(
+  private streamNew(
     expr: NewExpr,
     decl: ClassDecl,
     home: int,
@@ -89,7 +89,7 @@ partial class ExpressionTypes {
       );
   }
 
-  private readonly hookedParameter(fn: FunctionDecl, param: Param, type: Type): Type {
+  private hookedParameter(fn: FunctionDecl, param: Param, type: Type): Type {
     const isHook = kStreamHookNames.includes(fn.name);
     if (type.kind != TypeKind.Double || !isHook) {
       return type;
@@ -105,7 +105,7 @@ partial class ExpressionTypes {
     return wanted;
   }
 
-  private readonly libraryHookType(fn: FunctionDecl): FunctionType | undefined {
+  private libraryHookType(fn: FunctionDecl): FunctionType | undefined {
     const current = this.ownerClasses[this.ownerClasses.length - 1];
     if (current == undefined || current.decl.typeParams.length > 0) {
       return undefined;
@@ -139,7 +139,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private readonly streamHookCheck(
+  private streamHookCheck(
     method: FunctionDecl,
     decl: ClassDecl,
     parent: InstanceType,
@@ -163,7 +163,7 @@ partial class ExpressionTypes {
     return Code.StreamHookOther;
   }
 
-  private readonly streamHookVariant(
+  private streamHookVariant(
     method: FunctionDecl,
     decl: ClassDecl,
     parent: InstanceType | undefined,

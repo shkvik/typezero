@@ -27,7 +27,7 @@ import { SymbolKind } from "../../../../../program/scopes/types/scopes.types.tz"
 import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
 
 partial class ExpressionTypes {
-  private readonly eventsFunctionCall(
+  private eventsFunctionCall(
     expr: CallExpr,
     callee: NameExpr,
     target: ValueTarget,
@@ -58,7 +58,7 @@ partial class ExpressionTypes {
     return this.emitterArgumentCall(expr, callee.name, callee.loc, module);
   }
 
-  private readonly emitterStaticCall(
+  private emitterStaticCall(
     expr: CallExpr,
     member: MemberExpr,
     owner: StaticOwner,
@@ -76,7 +76,7 @@ partial class ExpressionTypes {
     return this.emitterArgumentCall(expr, member.name, member.loc, module);
   }
 
-  private readonly emitterArgumentCall(
+  private emitterArgumentCall(
     expr: CallExpr,
     name: string,
     loc: int,

@@ -19,7 +19,7 @@ import {
 } from "../../library-rules/const/library-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly constructorCastNote(given: Type, wanted: Type): void {
+  private constructorCastNote(given: Type, wanted: Type): void {
     const goal = this.types.definedType(wanted);
     if (given.kind != TypeKind.Class || goal.kind != TypeKind.Class) {
       return;
@@ -48,7 +48,7 @@ partial class ExpressionTypes {
     this.constructorCasts.push({ decl, instance, target });
   }
 
-  private readonly constructorWideningNote(from: Type, to: Type): void {
+  private constructorWideningNote(from: Type, to: Type): void {
     if (from == to) {
       return;
     }
@@ -64,7 +64,7 @@ partial class ExpressionTypes {
     this.constructorWidenings.get(from.id)?.push(to);
   }
 
-  private readonly reflectedNewNote(expr: NewExpr, made: Type, module: int): void {
+  private reflectedNewNote(expr: NewExpr, made: Type, module: int): void {
     const exprs = expr.args.map((arg) => arg.expr);
     const args = exprs.map((one) => this.peekType(one, module));
     const loc = expr.loc;
@@ -72,18 +72,18 @@ partial class ExpressionTypes {
     this.reflectedNews.push({ loc, made, exprs, args, module });
   }
 
-  private readonly reflectedNewsCheck(module: int): void {
-    for (const reflected of this.reflectedNews) {
+  private reflectedNewsCheck(module: int): void {
+    for (const reflected of this.reflectedNews.slice()) {
       if (reflected.module == module) {
         this.reflectedNewCheck(reflected);
       }
     }
   }
 
-  private readonly reflectedNewCheck(reflected: Read<ReflectedNew>): void {
+  private reflectedNewCheck(reflected: Read<ReflectedNew>): void {
     const reached = this.reachedConstructors(reflected.made);
 
-    for (const cast of this.constructorCasts) {
+    for (const cast of this.constructorCasts.slice()) {
       if (!reached.includes(cast.target)) {
         continue;
       }
@@ -150,7 +150,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private readonly constructibleReason(
+  private constructibleReason(
     decl: ClassDecl,
     instance: InstanceType,
     reflected: Read<ReflectedNew>,
@@ -204,7 +204,7 @@ partial class ExpressionTypes {
     return kNoArgumentsReason;
   }
 
-  private readonly isConstructing(target: Read<CallTarget>, reflected: Read<ReflectedNew>): boolean {
+  private isConstructing(target: Read<CallTarget>, reflected: Read<ReflectedNew>): boolean {
     const args = reflected.args;
     const least = this.calls.leastArguments(target);
     const isTooMany = !target.rest && args.length > target.params.length;

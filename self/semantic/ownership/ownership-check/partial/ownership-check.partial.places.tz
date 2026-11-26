@@ -145,7 +145,7 @@ partial class OwnershipCheck {
       return false;
     }
 
-    for (const variable of frame.variables.values()) {
+    for (const variable of new Map(frame.variables).values()) {
       if (except.includes(variable.key) || !this.isLive(variable, loc)) {
         continue;
       }
@@ -166,7 +166,7 @@ partial class OwnershipCheck {
     place: Place,
     isMove: boolean,
   ): Loan | undefined {
-    for (const loan of variable.loans) {
+    for (const loan of variable.loans.slice()) {
       if (!this.overlaps(loan.place, place)) {
         continue;
       }
@@ -206,7 +206,7 @@ partial class OwnershipCheck {
 
     const found: Place[] = [];
 
-    for (const loan of variable.loans) {
+    for (const loan of variable.loans.slice()) {
       const path = loan.place.path.concat(place.path);
 
       found.push({ root: loan.place.root, path });
@@ -216,7 +216,7 @@ partial class OwnershipCheck {
   }
 
   private checkUsable(place: Place, loc: int): boolean {
-    for (const moved of this.state.moved) {
+    for (const moved of this.state.moved.slice()) {
       if (!this.overlaps(moved.place, place)) {
         continue;
       }

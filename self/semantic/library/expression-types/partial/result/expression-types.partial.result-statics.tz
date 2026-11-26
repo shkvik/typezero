@@ -16,7 +16,7 @@ import { kResultName } from "../../../../code/expression-types/const/expression-
 import { CombineDraft } from "../../../../code/expression-types/types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly resultStaticCall(
+  private resultStaticCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -71,7 +71,7 @@ partial class ExpressionTypes {
     return this.combinedArray(arg, draft, module);
   }
 
-  private readonly resultSearchCheck(
+  private resultSearchCheck(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -96,7 +96,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly combinedList(
+  private combinedList(
     literal: ArrayLitExpr,
     draft: CombineDraft,
     module: int,
@@ -233,7 +233,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly combinedArray(arg: Expr, draft: CombineDraft, module: int): Type {
+  private combinedArray(arg: Expr, draft: CombineDraft, module: int): Type {
     const error = this.store.plain(TypeKind.Error);
     const type = this.typed(arg, undefined, module);
     if (type.kind == TypeKind.Error) {

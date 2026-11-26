@@ -208,7 +208,7 @@ partial class OwnershipCheck {
       return;
     }
 
-    for (const variable of outer.variables.values()) {
+    for (const variable of new Map(outer.variables).values()) {
       if (frame.variables.has(variable.key)) {
         continue;
       }
@@ -285,12 +285,12 @@ partial class OwnershipCheck {
     if (mode == ParamMode.Lent) {
       frame.lentParams.add(param.loc);
     }
-    if (mode == ParamMode.Lent && type != undefined && this.traits.isCopy(type)) {
+    if (mode == ParamMode.Lent && type != undefined && this.traits.isCopy(type, this.values)) {
       this.report(param.loc, Code.OwnLentCopy, { word: param.name });
     }
 
     const isMarkedMut = param.type?.name == kMutName && param.type?.args.length == 1;
-    if (isMarkedMut && type != undefined && this.traits.isCopy(type)) {
+    if (isMarkedMut && type != undefined && this.traits.isCopy(type, this.values)) {
       this.report(param.loc, Code.OwnMutCopy, { word: param.name });
     }
 
@@ -310,7 +310,7 @@ partial class OwnershipCheck {
   }
 
   private paramHolding(mode: ParamMode, type: Type | undefined): Holding {
-    if (type != undefined && this.traits.isCopy(type)) {
+    if (type != undefined && this.traits.isCopy(type, this.values)) {
       return Holding.Copy;
     }
     if (mode == ParamMode.Own || mode == ParamMode.Once) {
@@ -333,6 +333,11 @@ partial class OwnershipCheck {
       const item = ref.args[0];
 
       return item != undefined && this.isBorrowRef(item);
+    }
+    if (ref.form.kind == TypeRefKind.Tuple) {
+      const parts = ref.form.elements;
+
+      return parts.length > 0 && parts.every((part) => this.isBorrowRef(part.type));
     }
     if (ref.args.length != 1) {
       return false;

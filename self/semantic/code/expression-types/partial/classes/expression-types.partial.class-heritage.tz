@@ -104,7 +104,7 @@ partial class ExpressionTypes {
     this.report(module, fn.loc, Code.MustCallSuper, { word, first });
   }
 
-  private readonly superCallTyped(expr: CallExpr, callee: Expr, module: int): Type {
+  private superCallTyped(expr: CallExpr, callee: Expr, module: int): Type {
     const frame = this.superFrames[this.superFrames.length - 1];
     const nothing = this.store.plain(TypeKind.Void);
     const place = this.thisPlaces[this.thisPlaces.length - 1];
@@ -130,7 +130,7 @@ partial class ExpressionTypes {
     return nothing;
   }
 
-  private readonly superArgumentsCheck(expr: CallExpr, module: int): void {
+  private superArgumentsCheck(expr: CallExpr, module: int): void {
     const target = this.parentConstructor(expr.loc);
     if (target == undefined) {
       for (const arg of expr.args) {
@@ -199,7 +199,7 @@ partial class ExpressionTypes {
     this.report(module, loc, Code.ReturnBeforeSuper, kNoDetails);
   }
 
-  private readonly overrideChecks(decl: ClassDecl, module: int): void {
+  private overrideChecks(decl: ClassDecl, module: int): void {
     if (decl.base == undefined) {
       return;
     }
@@ -223,7 +223,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly overrideCheck(
+  private overrideCheck(
     method: FunctionDecl,
     decl: ClassDecl,
     parent: InstanceType,
@@ -302,7 +302,7 @@ partial class ExpressionTypes {
     this.reportFound(module, overrideAccessError);
   }
 
-  private readonly ownMethodType(
+  private ownMethodType(
     decl: ClassDecl,
     method: FunctionDecl,
     module: int,
@@ -315,7 +315,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private readonly inheritedResult(fn: FunctionDecl, module: int): Type | undefined {
+  private inheritedResult(fn: FunctionDecl, module: int): Type | undefined {
     const owner = this.ownerClasses[this.ownerClasses.length - 1];
     const isMethod = fn.role != undefined && !this.classes.isStaticMethod(fn);
     if (owner == undefined || !isMethod || owner.decl.typeParams.length > 0) {
@@ -417,7 +417,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly protectedElsewhere(
+  private protectedElsewhere(
     owner: ClassDecl,
     access: Access,
     expr: MemberExpr,

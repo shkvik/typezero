@@ -15,7 +15,7 @@ import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import { kJsonGlobalName } from "../../../code/expression-types/const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private readonly jsonMethodCall(
+  private jsonMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -39,7 +39,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly jsonStaticCheck(
+  private jsonStaticCheck(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -70,7 +70,7 @@ partial class ExpressionTypes {
     return this.stringifyCheck(expr, module);
   }
 
-  private readonly stringifyCheck(expr: CallExpr, module: int): boolean {
+  private stringifyCheck(expr: CallExpr, module: int): boolean {
     const value = expr.args[0]?.expr;
     if (value == undefined || expr.args.length > 3) {
       return false;
@@ -100,7 +100,7 @@ partial class ExpressionTypes {
     return isRefused;
   }
 
-  private readonly nonNullArguments(expr: CallExpr, module: int): void {
+  private nonNullArguments(expr: CallExpr, module: int): void {
     for (const arg of expr.args) {
       const value = arg.expr;
       const isNull =
@@ -111,7 +111,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly stringifiedValueCheck(value: Expr, module: int): boolean {
+  private stringifiedValueCheck(value: Expr, module: int): boolean {
     const type = this.peekType(value, module);
 
     if (type.kind == TypeKind.Void) {
@@ -146,7 +146,7 @@ partial class ExpressionTypes {
     return option.kind != ExprKind.Name || !this.isNullName(option, module);
   }
 
-  private readonly spaceCheck(space: Expr, module: int): boolean {
+  private spaceCheck(space: Expr, module: int): boolean {
     const type = this.typed(space, undefined, module);
     const base = this.types.apparent(type);
     const isFitting =
@@ -166,7 +166,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private readonly jsonIndexed(expr: IndexExpr, module: int): Type {
+  private jsonIndexed(expr: IndexExpr, module: int): Type {
     const key = this.typed(expr.index, undefined, module);
     const base = this.types.apparent(key);
     const json = this.store.plain(TypeKind.Json);

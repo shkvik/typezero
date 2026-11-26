@@ -13,7 +13,7 @@ import {
 } from "../../library-rules/const/library-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly promiseListCheck(expr: CallExpr, module: int): void {
+  private promiseListCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     if (
       callee.kind != ExprKind.Member ||
@@ -36,7 +36,7 @@ partial class ExpressionTypes {
     this.promiseListArgument(callee, list, module);
   }
 
-  private readonly promiseListArgument(
+  private promiseListArgument(
     callee: MemberExpr,
     list: Expr,
     module: int,
@@ -91,7 +91,7 @@ partial class ExpressionTypes {
     return "values";
   }
 
-  private readonly promiseValueCheck(value: Expr, word: string, module: int): void {
+  private promiseValueCheck(value: Expr, word: string, module: int): void {
     const given = this.peekType(value, module);
 
     this.promiseItemCheck(value, given, word, module);

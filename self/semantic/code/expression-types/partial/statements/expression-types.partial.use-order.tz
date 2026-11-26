@@ -303,7 +303,7 @@ partial class ExpressionTypes {
     return code;
   }
 
-  private readonly arraySortCheck(
+  private arraySortCheck(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,

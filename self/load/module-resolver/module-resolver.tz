@@ -52,9 +52,9 @@ export class ModuleResolver {
     fromLibrary: boolean,
     home: int,
   ): Resolution {
-    const module = kLibrary.imported(spec, fromLibrary);
-    if (module != undefined) {
-      return { kind: ResolutionKind.Library, module };
+    const found = kLibrary.imported(spec, fromLibrary);
+    if (found != undefined) {
+      return { kind: ResolutionKind.Library, name: found.name };
     }
     if (kBuiltinModules.has(spec)) {
       return this.builtin(spec);

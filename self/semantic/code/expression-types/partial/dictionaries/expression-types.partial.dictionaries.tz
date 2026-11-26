@@ -14,7 +14,7 @@ import {
 import { kKeyPlace, kValuePlace } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private readonly recordObject(expr: ObjectLitExpr, record: Type, module: int): Type {
+  private recordObject(expr: ObjectLitExpr, record: Type, module: int): Type {
     if (record.kind != TypeKind.Dict) {
       return this.store.plain(TypeKind.Error);
     }
@@ -34,7 +34,7 @@ partial class ExpressionTypes {
     return record;
   }
 
-  private readonly recordProperty(
+  private recordProperty(
     property: Property,
     record: Type,
     module: int,
@@ -83,7 +83,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly recordKey(key: Expr, module: int): void {
+  private recordKey(key: Expr, module: int): void {
     const text = this.store.plain(TypeKind.String);
     const keyType = this.typed(key, text, module);
     const plain = this.types.definedType(keyType);
@@ -96,7 +96,7 @@ partial class ExpressionTypes {
     this.coerce(key, keyType, text, module, kKeyPlace);
   }
 
-  private readonly jsonObject(expr: ObjectLitExpr, json: Type, module: int): Type {
+  private jsonObject(expr: ObjectLitExpr, json: Type, module: int): Type {
     for (const property of expr.props) {
       this.jsonProperty(property, json, module);
     }
@@ -104,7 +104,7 @@ partial class ExpressionTypes {
     return json;
   }
 
-  private readonly jsonProperty(property: Property, json: Type, module: int): void {
+  private jsonProperty(property: Property, json: Type, module: int): void {
     const form = property.form;
     const loc = property.loc;
     const word = property.name;
@@ -140,7 +140,7 @@ partial class ExpressionTypes {
     this.coerce(property.value, given, target, module, place);
   }
 
-  private readonly jsonKey(key: Expr, module: int): void {
+  private jsonKey(key: Expr, module: int): void {
     const keyType = this.typed(key, undefined, module);
     const isText = keyType.kind == TypeKind.String;
     if (isText || keyType.kind == TypeKind.Error) {

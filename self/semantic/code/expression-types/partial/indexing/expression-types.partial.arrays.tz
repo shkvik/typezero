@@ -14,7 +14,7 @@ import { kNoPlace } from "../../const/expression-types.const.tz";
 import { ArrayDraft } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly arrayTyped(
+  private arrayTyped(
     expr: ArrayLitExpr,
     wanted: Type | undefined,
     module: int,
@@ -38,7 +38,7 @@ partial class ExpressionTypes {
     return this.listTyped(expr, item, module);
   }
 
-  private readonly looseElements(expr: ArrayLitExpr, module: int): Type {
+  private looseElements(expr: ArrayLitExpr, module: int): Type {
     for (const element of expr.elements) {
       if (!element.hole) {
         this.typed(element.expr, undefined, module);
@@ -48,7 +48,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly tupleTyped(expr: ArrayLitExpr, tuple: Type, module: int): Type {
+  private tupleTyped(expr: ArrayLitExpr, tuple: Type, module: int): Type {
     if (tuple.kind != TypeKind.Tuple) {
       return this.store.plain(TypeKind.Error);
     }
@@ -90,7 +90,7 @@ partial class ExpressionTypes {
     return tuple;
   }
 
-  private readonly listTyped(
+  private listTyped(
     expr: ArrayLitExpr,
     item: Type | undefined,
     module: int,
@@ -119,7 +119,7 @@ partial class ExpressionTypes {
     return array;
   }
 
-  private readonly firstPass(
+  private firstPass(
     expr: ArrayLitExpr,
     item: Type | undefined,
     draft: ArrayDraft,
@@ -134,7 +134,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly firstPassElement(
+  private firstPassElement(
     element: ArrayElement,
     index: int,
     item: Type | undefined,
@@ -157,7 +157,7 @@ partial class ExpressionTypes {
     this.arrays.seeElement(draft, type);
   }
 
-  private readonly spreadElement(
+  private spreadElement(
     expr: Expr,
     index: int,
     item: Type | undefined,
@@ -231,7 +231,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private readonly secondPass(
+  private secondPass(
     expr: ArrayLitExpr,
     hint: Type | undefined,
     draft: ArrayDraft,
@@ -262,7 +262,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private readonly coerceElements(
+  private coerceElements(
     expr: ArrayLitExpr,
     element: Type,
     array: Type,

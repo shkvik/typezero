@@ -9,7 +9,7 @@ import {
 import { EnumHome } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 
 partial class ExpressionTypes {
-  private readonly enumIndexed(expr: IndexExpr, home: EnumHome, module: int): Type {
+  private enumIndexed(expr: IndexExpr, home: EnumHome, module: int): Type {
     const whole = this.store.integer(64, false);
     const index = this.typed(expr.index, whole, module);
     const error = this.store.plain(TypeKind.Error);
@@ -37,7 +37,7 @@ partial class ExpressionTypes {
     return this.enumNameType(expr, home, whole, module);
   }
 
-  private readonly enumNameType(
+  private enumNameType(
     expr: IndexExpr,
     home: EnumHome,
     whole: Type,

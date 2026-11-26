@@ -61,7 +61,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly missingByteMethod(
+  private missingByteMethod(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -109,7 +109,7 @@ partial class ExpressionTypes {
     return this.declaredNamed(parent, name);
   }
 
-  private readonly byteIndexCheck(expr: IndexExpr, object: Type, module: int): boolean {
+  private byteIndexCheck(expr: IndexExpr, object: Type, module: int): boolean {
     const indexError = this.byteSources.notIndexedError(expr.loc, object);
     if (indexError == undefined) {
       return false;

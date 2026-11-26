@@ -26,17 +26,11 @@ import {
 export class DeclarationTypes {
   private readonly module: Module;
   private readonly resolver: TypeResolver;
-  private readonly expressions: ExpressionTypes;
   private readonly context: TypeContext;
   private declarations: TypedDeclaration[];
 
-  public constructor(
-    resolver: Own<TypeResolver>,
-    expressions: Own<ExpressionTypes>,
-    module: Own<Module>,
-  ) {
+  public constructor(resolver: Own<TypeResolver>, module: Own<Module>) {
     this.module = module;
-    this.expressions = expressions;
     this.resolver = resolver;
     this.context = {
       module: this.module.id,
@@ -54,25 +48,25 @@ export class DeclarationTypes {
     }
   }
 
-  public run(): ModuleTypes {
-    this.expressions.checkModule(this.module.id);
+  public run(expressions: ExpressionTypes): ModuleTypes {
+    expressions.checkModule(this.module.id);
 
     for (const item of this.module.file.items) {
-      this.typeItem(item);
+      this.typeItem(item, expressions);
     }
 
     return { module: this.module, declarations: replace(this.declarations, []) };
   }
 
-  private typeItem(item: Stmt): void {
+  private typeItem(item: Stmt, expressions: ExpressionTypes): void {
     switch (item.kind) {
       case StmtKind.VarDecl:
         for (const decl of item.decls) {
-          this.typeVariable(decl);
+          this.typeVariable(decl, expressions);
         }
         break;
       case StmtKind.Function:
-        this.typeFunction(item);
+        this.typeFunction(item, expressions);
         break;
       case StmtKind.Class:
         this.resolver.typeParameters(this.module.id, item.typeParams);
@@ -89,8 +83,8 @@ export class DeclarationTypes {
     }
   }
 
-  private typeVariable(decl: VarDeclarator): void {
-    const type = this.expressions.variable(this.module.id, decl.loc);
+  private typeVariable(decl: VarDeclarator, expressions: ExpressionTypes): void {
+    const type = expressions.variable(this.module.id, decl.loc);
     if (decl.typeAnn == undefined && type.kind == TypeKind.Error) {
       return;
     }
@@ -98,8 +92,8 @@ export class DeclarationTypes {
     this.declare(DeclarationForm.Value, decl.name, decl.loc, type);
   }
 
-  private typeFunction(fn: FunctionDecl): void {
-    const type = this.expressions.functionOf(this.module.id, fn.loc);
+  private typeFunction(fn: FunctionDecl, expressions: ExpressionTypes): void {
+    const type = expressions.functionTyped(this.module.id, fn.loc);
     if (type.kind == TypeKind.Error) {
       return;
     }
@@ -110,49 +104,49 @@ export class DeclarationTypes {
     this.declare(DeclarationForm.Value, fn.name, fn.loc, type);
 
     if (!this.module.source.isLibrary) {
-      this.typeLocals(fn.body?.body ?? []);
+      this.typeLocals(fn.body?.body ?? [], expressions);
     }
   }
 
-  private typeLocals(statements: Read<Stmt[]>): void {
+  private typeLocals(statements: Read<Stmt[]>, expressions: ExpressionTypes): void {
     for (const statement of statements) {
-      this.typeLocal(statement);
+      this.typeLocal(statement, expressions);
     }
   }
 
-  private typeLocal(statement: Stmt): void {
+  private typeLocal(statement: Stmt, expressions: ExpressionTypes): void {
     switch (statement.kind) {
       case StmtKind.VarDecl:
         for (const decl of statement.decls) {
-          this.typeVariable(decl);
+          this.typeVariable(decl, expressions);
         }
         break;
       case StmtKind.Function:
-        this.typeFunction(statement);
+        this.typeFunction(statement, expressions);
         break;
       case StmtKind.Block:
-        this.typeLocals(statement.body);
+        this.typeLocals(statement.body, expressions);
         break;
       case StmtKind.If:
-        this.typeLocal(statement.thenStmt);
-        this.typeOptionalLocal(statement.elseStmt);
+        this.typeLocal(statement.thenStmt, expressions);
+        this.typeOptionalLocal(statement.elseStmt, expressions);
         break;
       case StmtKind.While:
       case StmtKind.DoWhile:
       case StmtKind.Labeled:
-        this.typeLocal(statement.body);
+        this.typeLocal(statement.body, expressions);
         break;
       case StmtKind.For:
-        this.typeOptionalLocal(statement.init);
-        this.typeOptionalLocal(statement.body);
+        this.typeOptionalLocal(statement.init, expressions);
+        this.typeOptionalLocal(statement.body, expressions);
         break;
       case StmtKind.ForOf:
-        this.typeVariable(statement.binding);
-        this.typeLocal(statement.body);
+        this.typeVariable(statement.binding, expressions);
+        this.typeLocal(statement.body, expressions);
         break;
       case StmtKind.Switch:
         for (const option of statement.cases) {
-          this.typeLocals(option.body);
+          this.typeLocals(option.body, expressions);
         }
         break;
       default:
@@ -160,9 +154,12 @@ export class DeclarationTypes {
     }
   }
 
-  private typeOptionalLocal(statement: Stmt | undefined): void {
+  private typeOptionalLocal(
+    statement: Stmt | undefined,
+    expressions: ExpressionTypes,
+  ): void {
     if (statement != undefined) {
-      this.typeLocal(statement);
+      this.typeLocal(statement, expressions);
     }
   }
 

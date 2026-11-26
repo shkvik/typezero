@@ -61,7 +61,7 @@ partial class ExpressionTypes {
     return this.dateInstance() ?? this.store.plain(TypeKind.Error);
   }
 
-  private readonly dateNew(expr: NewExpr, module: int): Type {
+  private dateNew(expr: NewExpr, module: int): Type {
     const args = expr.args;
     const count = args.length;
     if (count > kMostDateFields) {
@@ -93,7 +93,7 @@ partial class ExpressionTypes {
     return this.dateOfValue(given, module);
   }
 
-  private readonly dateOfValue(given: Expr, module: int): Type {
+  private dateOfValue(given: Expr, module: int): Type {
     const type = this.typed(given, undefined, module);
     const base = this.types.apparent(type);
     if (base.kind == TypeKind.Error) {
@@ -129,7 +129,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly dateFunctionCall(
+  private dateFunctionCall(
     expr: CallExpr,
     callee: NameExpr,
     module: int,
@@ -144,7 +144,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.String);
   }
 
-  private readonly dateStaticCall(
+  private dateStaticCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -191,7 +191,7 @@ partial class ExpressionTypes {
     return result;
   }
 
-  private readonly textArgument(arg: Expr, module: int): void {
+  private textArgument(arg: Expr, module: int): void {
     const string = this.store.plain(TypeKind.String);
     const type = this.typed(arg, string, module);
     if (type.kind == TypeKind.Error) {
@@ -223,7 +223,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private readonly dateMethodCall(
+  private dateMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -307,7 +307,7 @@ partial class ExpressionTypes {
     return error;
   }
 
-  private readonly timeArgument(arg: Expr, module: int): Type {
+  private timeArgument(arg: Expr, module: int): Type {
     const int = this.store.integer(64, false);
     const type = this.typed(arg, int, module);
 
@@ -316,7 +316,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private readonly timeCoerce(arg: Expr, type: Type, module: int): void {
+  private timeCoerce(arg: Expr, type: Type, module: int): void {
     const base = this.types.apparent(type);
     if (base.kind == TypeKind.Error || base.kind == TypeKind.Int) {
       return;

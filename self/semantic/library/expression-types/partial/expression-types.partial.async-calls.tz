@@ -8,7 +8,7 @@ import {
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 
 partial class ExpressionTypes {
-  private readonly timerArgumentsCheck(expr: CallExpr, module: int): void {
+  private timerArgumentsCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     const isTimer =
       callee.kind == ExprKind.Name &&

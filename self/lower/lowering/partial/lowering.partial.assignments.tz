@@ -11,6 +11,7 @@ import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { Lowering } from "../lowering.tz";
 import {
   kArraySetLength,
+  kBooleanType,
   kDoubleType,
   kIntType,
   kLengthName,
@@ -47,9 +48,28 @@ partial class Lowering {
       return undefined;
     }
 
-    this.stored(frame, place, value);
+    const isLent = place.flag != undefined && value.owned != true && value.ownedFlag == undefined;
+    if (isLent) {
+      this.lentStored(frame, place, value);
+    } else {
+      this.stored(frame, place, value);
+    }
 
     return { type: value.type, value: value.value, tz: value.tz };
+  }
+
+  private lentStored(frame: Read<Frame>, place: Place, value: IrValue): void {
+    const flag = place.flag;
+    if (flag == undefined || !this.isManaged(place.tz)) {
+      return this.stored(frame, place, value);
+    }
+
+    const before = frame.made.load(place.type, place.pointer);
+    const old: IrValue = { type: place.type, value: before, tz: place.tz, owned: true };
+
+    this.flaggedDrop(frame, flag, old);
+    frame.made.store(value.value, place.pointer);
+    frame.made.store(this.ir.zero(kBooleanType), flag);
   }
 
   private lengthAssigned(

@@ -240,10 +240,10 @@ export class ByteSourceRules {
 
   public readonly positionsOf(name: string): BytePosition[] {
     if (name == "compare") {
-      return kComparePositions;
+      return kComparePositions.slice();
     }
     if (name == "copy") {
-      return kCopyPositions;
+      return kCopyPositions.slice();
     }
 
     return [];

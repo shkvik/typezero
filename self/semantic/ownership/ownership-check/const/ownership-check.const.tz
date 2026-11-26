@@ -6,6 +6,8 @@ import {
 } from "../types/ownership-check.types.tz";
 
 export const kThisKey = -1;
+export const kForeignKeyBase = -2;
+export const kForeignModuleSpan = 4294967296;
 export const kReadName = "Read";
 export const kOwnName = "Own";
 export const kLentName = "Lent";
@@ -14,6 +16,10 @@ export const kMutName = "Mut";
 export const kElementStep = "[]";
 export const kThisName = "this";
 export const kCellName = "Cell";
+export const kUnsafeRequiresName = "requires";
+export const kCloneKey = "[Symbol.clone]";
+export const kStructuredCloneName = "structuredClone";
+export const kSharingNames = ["Shared", "SharedMut", "WeakRef"];
 export const kTakeName = "take";
 export const kReplaceName = "replace";
 export const kSwapName = "swap";

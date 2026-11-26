@@ -347,13 +347,17 @@ export const kIntlServices: IntlService[] = [
   },
 ];
 
-export const kSupportedOptions: IntlOption[] = [
-  {
-    name: "localeMatcher",
-    kind: IntlOptionKind.Text,
-    values: ["lookup", "best fit"],
-  },
-];
+export const kSupportedService: IntlService = {
+  name: "",
+  callable: true,
+  options: [
+    {
+      name: "localeMatcher",
+      kind: IntlOptionKind.Text,
+      values: ["lookup", "best fit"],
+    },
+  ],
+};
 
 export const kDigitRanges: IntlDigitRange[] = [
   { name: "minimumIntegerDigits", low: 1, high: 21 },

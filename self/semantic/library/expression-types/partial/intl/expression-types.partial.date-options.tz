@@ -19,7 +19,7 @@ import {
 } from "../../../intl-rules/types/intl-rules.types.tz";
 
 partial class ExpressionTypes {
-  private readonly dateLocaleCall(
+  private dateLocaleCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -46,7 +46,7 @@ partial class ExpressionTypes {
     return DateLocaleKind.Any;
   }
 
-  private readonly dateFormatNew(expr: NewExpr, module: int): void {
+  private dateFormatNew(expr: NewExpr, module: int): void {
     if (expr.args.length > 2 || expr.args.some((one) => one.spread)) {
       return this.looseArguments(expr.args, module);
     }
@@ -59,7 +59,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly dateArguments(
+  private dateArguments(
     args: Read<CallArgument[]>,
     what: string,
     kind: DateLocaleKind,
@@ -78,7 +78,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly dateOptionsCheck(
+  private dateOptionsCheck(
     options: Expr,
     what: string,
     kind: DateLocaleKind,
@@ -204,7 +204,7 @@ partial class ExpressionTypes {
     return "";
   }
 
-  private readonly dateValuesCheck(
+  private dateValuesCheck(
     options: Expr,
     fields: Read<ObjectField[]>,
     module: int,
@@ -226,7 +226,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly dateDigitsCheck(
+  private dateDigitsCheck(
     field: ObjectField,
     given: Expr | undefined,
     loc: int,
@@ -253,7 +253,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly dateTextCheck(
+  private dateTextCheck(
     field: ObjectField,
     option: Read<DateOption>,
     given: Expr | undefined,
@@ -281,7 +281,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly dateTexts(
+  private dateTexts(
     field: ObjectField,
     given: Expr | undefined,
     module: int,
@@ -312,7 +312,7 @@ partial class ExpressionTypes {
     return this.sources.valueText(given, module);
   }
 
-  private readonly dateFormatRange(
+  private dateFormatRange(
     expr: CallExpr,
     member: MemberExpr,
     module: int,

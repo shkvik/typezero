@@ -1,6 +1,7 @@
 import { ClassDecl } from "../../../../program/ast/types/ast.types.classes.tz";
 import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+import { Type } from "../../../../program/type/types/type.types.tz";
 
 export enum Holding {
   Copy,
@@ -138,6 +139,19 @@ export type BuiltinMethod = {
   readonly result: ResultMode;
 };
 
+export type CellSource = {
+  readonly holder: Expr;
+  readonly field: string;
+};
+
+export type CellGuard = {
+  readonly holder: Expr;
+  readonly field: string;
+  readonly root: int | undefined;
+  readonly type: Type | undefined;
+  readonly loc: int;
+};
+
 export type ArgumentUse = {
   readonly operand: Operand;
   readonly mode: ParamMode;
@@ -163,3 +177,8 @@ export type InternedOwnership = Interned<
   | Variable
   | FunctionFrame
 >;
+
+export type CloneProblem = {
+  readonly word: string;
+  readonly other: string;
+};

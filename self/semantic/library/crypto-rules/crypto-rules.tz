@@ -329,7 +329,7 @@ export class CryptoRules {
     return { code: Code.CryptoNewClass, loc, details: { word: name, other } };
   }
 
-  public readonly classOf(type: Type, home: string): CryptoClass | undefined {
+  public readonly classOf(type: Type, home: string): Read<CryptoClass> | undefined {
     const base = this.types.definedType(type);
     if (base.kind != TypeKind.Instance || !this.isCryptoModule(home)) {
       return undefined;

@@ -21,7 +21,7 @@ import {
 } from "../../../event-rules/const/event-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly noteErrorPending(
+  private noteErrorPending(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -62,7 +62,7 @@ partial class ExpressionTypes {
     return events.fields.some((field) => field.name == kErrorEvent);
   }
 
-  private readonly errorPathsCheck(fn: FunctionDecl, module: int): void {
+  private errorPathsCheck(fn: FunctionDecl, module: int): void {
     const pending = this.eventMarks.errorPending.filter((one) => one.fn == fn);
     const reported = new Set<string>();
 
@@ -80,7 +80,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly isErrorHeardAlways(
+  private isErrorHeardAlways(
     fn: FunctionDecl,
     key: string,
     module: int,
@@ -92,7 +92,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly isErrorListening(statement: Stmt, key: string, module: int): boolean {
+  private isErrorListening(statement: Stmt, key: string, module: int): boolean {
     if (statement.kind != StmtKind.Expr) {
       return false;
     }

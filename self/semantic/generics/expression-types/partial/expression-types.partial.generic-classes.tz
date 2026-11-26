@@ -25,7 +25,7 @@ import {
 import { kConstructorName } from "../../../code/object-rules/const/object-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly genericMethodCall(
+  private genericMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     entry: Read<ClassMemberEntry>,
@@ -66,7 +66,7 @@ partial class ExpressionTypes {
     return this.genericCall(generic, expr.args, wanted, module);
   }
 
-  private readonly genericMethodShape(
+  private genericMethodShape(
     entry: Read<ClassMemberEntry>,
     method: FunctionDecl,
   ): FunctionShape | undefined {
@@ -99,7 +99,7 @@ partial class ExpressionTypes {
     return type.shape;
   }
 
-  private readonly genericNew(
+  private genericNew(
     expr: NewExpr,
     decl: ClassDecl,
     home: int,
@@ -169,7 +169,7 @@ partial class ExpressionTypes {
     return this.genericCall(generic, expr.args, wanted, module);
   }
 
-  private readonly copyVariantsCheck(
+  private copyVariantsCheck(
     expr: NewExpr,
     made: Type,
     decl: ClassDecl,
@@ -198,7 +198,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private readonly copyVariantsFinding(
+  private copyVariantsFinding(
     made: InstanceType,
     decl: ClassDecl,
   ): Finding | undefined {
@@ -212,7 +212,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private readonly copyPairsFinding(
+  private copyPairsFinding(
     made: InstanceType,
     decl: ClassDecl,
     variants: Read<FunctionDecl[]>,

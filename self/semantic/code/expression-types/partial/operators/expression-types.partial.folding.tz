@@ -14,7 +14,7 @@ import {
 import { kRoundDown } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private readonly foldBinary(expr: BinaryExpr, type: Type, module: int): void {
+  private foldBinary(expr: BinaryExpr, type: Type, module: int): void {
     if (type.kind != TypeKind.Int || type.wraps) {
       return;
     }
@@ -49,7 +49,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly foldUnsigned(expr: BinaryExpr, type: IntType, module: int): void {
+  private foldUnsigned(expr: BinaryExpr, type: IntType, module: int): void {
     const left = this.rawConstant(expr.lhs, type, module);
     const right = this.rawConstant(expr.rhs, type, module);
     if (left == undefined || right == undefined) {
@@ -76,7 +76,7 @@ partial class ExpressionTypes {
     this.reportFound(module, overflowError);
   }
 
-  private readonly foldUnary(expr: UnaryExpr, type: Type, module: int): void {
+  private foldUnary(expr: UnaryExpr, type: Type, module: int): void {
     if (type.kind != TypeKind.Int || type.wraps) {
       return;
     }

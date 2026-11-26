@@ -93,7 +93,7 @@ partial class ExpressionTypes {
     return `${lower}${rest}.${call}`;
   }
 
-  private readonly predicateReturnCheck(
+  private predicateReturnCheck(
     fn: FunctionDecl,
     value: Expr,
     module: int,
@@ -137,7 +137,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private readonly knownWhenTrue(value: Expr, target: ValueTarget, module: int): Type {
+  private knownWhenTrue(value: Expr, target: ValueTarget, module: int): Type {
     const before = this.factsCopy();
 
     this.errors.beginTrial();

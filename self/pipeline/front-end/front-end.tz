@@ -1,5 +1,6 @@
 import { SourceError } from "../../diagnostic/types/message.types.tz";
 import { LoadResult } from "../../load/loader/types/loader.types.tz";
+import { ModuleTypes } from "../../program/module-types/types/module-types.types.tz";
 import { Module, Program } from "../../program/module/types/module.types.tz";
 import { TypeStore } from "../../program/type/type-store/type-store.tz";
 import { ExpressionTypes } from "../../semantic/code/expression-types/expression-types.tz";
@@ -40,6 +41,8 @@ export class FrontEnd {
       resolved,
     );
 
+    values.prepare();
+
     const steps: DeclarationTypes[] = [];
 
     for (const scopes of resolved) {
@@ -48,15 +51,29 @@ export class FrontEnd {
         continue;
       }
 
-      const declarations = new DeclarationTypes(types, values, module);
+      const declarations = new DeclarationTypes(types, module);
 
       declarations.resolveAliases();
       steps.push(declarations);
     }
 
-    const typed = steps.map((declarations) => declarations.run());
+    const typed: ModuleTypes[] = [];
+
+    for (const declarations of steps) {
+      typed.push(declarations.run(values));
+    }
+
+    values.finish();
 
     return { names, resolved, types, values, typed };
+  }
+
+  private readonly valueProblems(checked: Read<CheckedProgram>, module: Module): SourceError[] {
+    if (!this.isChecked(module)) {
+      return [];
+    }
+
+    return checked.values.problems(module.id);
   }
 
   private readonly isChecked(module: Module): boolean {
@@ -79,7 +96,7 @@ export class FrontEnd {
 
       const module = scopes.module;
       const typeErrors = checked.types.problems(module.id);
-      const valueErrors = checked.values.problems(module.id);
+      const valueErrors = this.valueProblems(checked, module);
       const errors: SourceError[] = names.errors.concat(
         scopes.errors,
         typeErrors,

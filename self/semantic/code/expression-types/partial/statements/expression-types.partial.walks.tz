@@ -14,7 +14,7 @@ import {
 } from "../../../../../program/type/types/type.types.tz";
 
 partial class ExpressionTypes {
-  private readonly templateTyped(
+  private templateTyped(
     expr: TemplateExpr,
     wanted: Type | undefined,
     module: int,
@@ -26,7 +26,7 @@ partial class ExpressionTypes {
     return this.literals.templated(wanted);
   }
 
-  private readonly templatePart(part: Expr, module: int): void {
+  private templatePart(part: Expr, module: int): void {
     if (this.isHintNeeded(part, module)) {
       return;
     }
@@ -36,7 +36,7 @@ partial class ExpressionTypes {
     this.textCheck(part, type, module);
   }
 
-  private readonly childrenTyped(expr: Expr, module: int): Type {
+  private childrenTyped(expr: Expr, module: int): Type {
     for (const part of this.shapes.childrenOf(expr)) {
       this.walkedPart(part, module);
     }
@@ -44,7 +44,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly walkedArguments(args: Read<CallArgument[]>, module: int): void {
+  private walkedArguments(args: Read<CallArgument[]>, module: int): void {
     for (const arg of args) {
       if (!this.answers.isVisited(arg.expr)) {
         this.walkedPart(arg.expr, module);
@@ -52,7 +52,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly walkedPart(expr: Expr, module: int): void {
+  private walkedPart(expr: Expr, module: int): void {
     if (this.isHintNeeded(expr, module)) {
       return;
     }

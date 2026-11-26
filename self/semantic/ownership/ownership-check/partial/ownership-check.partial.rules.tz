@@ -1,0 +1,324 @@
+import { OwnershipCheck } from "../ownership-check.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  CallExpr,
+  ExprKind,
+  NameExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+import { TypeAliasDecl } from "../../../../program/ast/types/ast.types.classes.tz";
+import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  FunctionTypeParam,
+  TypeRefKind,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import { InstanceField } from "../../../../program/expression-answers/types/expression-answers.types.tz";
+import {
+  DictKind,
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  ArgumentUse,
+  Callee,
+  CalleeParam,
+  CloneProblem,
+  Loan,
+  LoanKind,
+  Operand,
+  OperandKind,
+  ParamMode,
+  ResultMode,
+} from "../types/ownership-check.types.tz";
+import {
+  kCloneKey,
+  kSharingNames,
+  kStructuredCloneName,
+  kUnsafeRequiresName,
+} from "../const/ownership-check.const.tz";
+
+partial class OwnershipCheck {
+  private readonly checkRequires(info: Read<Callee>, loc: int, word: string): void {
+    const decl = info.decl;
+    if (decl == undefined || !this.isRequiring(decl) || this.isInsideUnsafe()) {
+      return;
+    }
+
+    this.report(loc, Code.OwnUnsafeRequires, { word });
+  }
+
+  private readonly isRequiring(fn: FunctionDecl): boolean {
+    const options = fn.unsafe?.options;
+    if (options == undefined || options.kind != ExprKind.ObjectLit) {
+      return false;
+    }
+
+    return options.props.some((property) => property.name == kUnsafeRequiresName);
+  }
+
+  private readonly isInsideUnsafe(): boolean {
+    for (let index = this.frames.length - 1; index >= 0; index--) {
+      const fn = this.frames[index]?.fn;
+      if (fn == undefined) {
+        return false;
+      }
+      if (fn.unsafe != undefined) {
+        return true;
+      }
+      if (!fn.isArrow) {
+        return false;
+      }
+    }
+
+    return false;
+  }
+
+  private readonly heldLoans(operand: Read<Operand>): Loan[] {
+    const place = operand.place;
+    if (operand.kind != OperandKind.Place || place == undefined || place.path.length > 0) {
+      return this.loansOf(operand);
+    }
+
+    const variable = this.variableOf(place.root);
+    if (variable == undefined || variable.isBorrowArray != true) {
+      return this.loansOf(operand);
+    }
+
+    const held: Loan[] = [];
+
+    for (const loan of variable.loans) {
+      held.push(loan);
+    }
+
+    return held;
+  }
+
+  private readonly emptyResult(
+    info: Read<Callee>,
+    receiver: Read<Operand | undefined>,
+    uses: Read<ArgumentUse[]>,
+    loc: int,
+  ): Operand {
+    const isBorrow = info.result == ResultMode.Read || info.result == ResultMode.Mut;
+    const lent = uses.filter((use) => use.mode == ParamMode.Lent);
+    let isLasting = lent.every((use) => this.isLastingSource(use.operand));
+
+    if (lent.length == 0 && receiver != undefined) {
+      isLasting = this.isLastingSource(receiver);
+    }
+    if (isBorrow && isLasting) {
+      return this.borrowedOperand([], loc);
+    }
+
+    return this.freshOperand(loc);
+  }
+
+  private readonly isLastingSource(operand: Read<Operand>): boolean {
+    return operand.kind != OperandKind.Fresh && operand.kind != OperandKind.Nothing;
+  }
+
+  private collectionCallee(type: Type): Callee {
+    const mode = this.collectionSourceMode(type);
+    const params: CalleeParam[] = [{ mode, isRest: false, isCallback: false }];
+
+    return { params, receiver: LoanKind.Shared, result: ResultMode.Own };
+  }
+
+  public collectionSourceMode(type: Type): ParamMode {
+    if (type.kind != TypeKind.Dict) {
+      return ParamMode.Read;
+    }
+
+    const isKeyCopy = this.traits.isCopy(type.key, this.values);
+    const isValueCopy = type.dict == DictKind.Set || this.traits.isCopy(type.value, this.values);
+    if (isKeyCopy && isValueCopy) {
+      return ParamMode.Read;
+    }
+
+    return ParamMode.Own;
+  }
+
+  private checkClone(callee: NameExpr, expr: CallExpr): void {
+    const argument = expr.args[0]?.expr;
+    const isLocal = this.keyOfName(callee) != undefined;
+    if (callee.name != kStructuredCloneName || argument == undefined || isLocal) {
+      return;
+    }
+
+    const type = this.values.answers.typeOf(argument);
+    if (type == undefined) {
+      return;
+    }
+
+    const seen = new Set<int>();
+    const found = this.uncloneable(type, seen);
+    if (found == undefined) {
+      return;
+    }
+
+    const whole = this.exprText(argument);
+    let word = whole;
+
+    if (found.word != "") {
+      word = found.word;
+    }
+
+    this.report(argument.loc, Code.OwnCloneField, { word, other: found.other });
+  }
+
+  private uncloneable(type: Type, seen: Set<int>): CloneProblem | undefined {
+    if (seen.has(type.id) || this.traits.isCopy(type, this.values)) {
+      return undefined;
+    }
+
+    seen.add(type.id);
+
+    switch (type.kind) {
+      case TypeKind.Function:
+        return { word: "", other: "a function" };
+      case TypeKind.Iterator:
+        return { word: "", other: "an iterator" };
+      case TypeKind.Array:
+        return this.uncloneable(type.item, seen);
+      case TypeKind.Tuple:
+        return this.firstUncloneable(type.items, seen);
+      case TypeKind.Union:
+        return this.firstUncloneable(type.parts, seen);
+      case TypeKind.Dict: {
+        const parts = [type.key, type.value];
+
+        return this.firstUncloneable(parts, seen);
+      }
+      case TypeKind.Object:
+        return this.fieldUncloneable(type.fields, seen);
+      case TypeKind.Instance:
+        return this.instanceUncloneable(type, seen);
+      default:
+        return undefined;
+    }
+  }
+
+  private firstUncloneable(types: Read<Type[]>, seen: Set<int>): CloneProblem | undefined {
+    for (const one of types) {
+      const found = this.uncloneable(one, seen);
+      if (found != undefined) {
+        return found;
+      }
+    }
+
+    return undefined;
+  }
+
+  private fieldUncloneable(fields: Read<ObjectField[]>, seen: Set<int>): CloneProblem | undefined {
+    for (const field of fields) {
+      const found = this.namedUncloneable(field.name, field.type, seen);
+      if (found != undefined) {
+        return found;
+      }
+    }
+
+    return undefined;
+  }
+
+  private memberUncloneable(fields: Read<InstanceField[]>, seen: Set<int>): CloneProblem | undefined {
+    for (const field of fields) {
+      const found = this.namedUncloneable(field.name, field.type, seen);
+      if (found != undefined) {
+        return found;
+      }
+    }
+
+    return undefined;
+  }
+
+  private namedUncloneable(name: string, type: Type, seen: Set<int>): CloneProblem | undefined {
+    const found = this.uncloneable(type, seen);
+    if (found == undefined) {
+      return undefined;
+    }
+
+    let word = name;
+
+    if (found.word != "") {
+      word = `${name}.${found.word}`;
+    }
+
+    return { word, other: found.other };
+  }
+
+  private instanceUncloneable(type: Type, seen: Set<int>): CloneProblem | undefined {
+    if (type.kind != TypeKind.Instance || kSharingNames.includes(type.name)) {
+      return undefined;
+    }
+
+    const decl = this.values.classDeclOf(type);
+    if (decl == undefined || this.hasMethod(decl, kCloneKey)) {
+      return undefined;
+    }
+    if (this.traits.hasDispose(decl)) {
+      return { word: "", other: `a ${type.name}, which frees a resource in [Symbol.dispose]` };
+    }
+
+    const fields = this.values.instanceFields(type);
+    if (fields == undefined) {
+      return undefined;
+    }
+
+    return this.memberUncloneable(fields, seen);
+  }
+
+  private interfaceCallee(type: Type, name: string): Callee | undefined {
+    const label = this.store.labelOf(type);
+    if (label == undefined) {
+      return undefined;
+    }
+
+    const decl = this.aliasNamed(label);
+    const form = decl?.type.form;
+    if (form == undefined || form.kind != TypeRefKind.Object) {
+      return undefined;
+    }
+
+    const field = form.fields.find((one) => one.name == name);
+    const method = field?.type.form;
+    if (method == undefined || method.kind != TypeRefKind.Function) {
+      return undefined;
+    }
+
+    const params = method.params.map((param) => this.interfaceParam(param));
+    const result = method.result;
+    let mode: ResultMode = ResultMode.Own;
+
+    if (result != undefined) {
+      mode = this.resultModeOfRef(result);
+    }
+
+    return { params, receiver: LoanKind.Shared, result: mode };
+  }
+
+  private readonly interfaceParam(param: Read<FunctionTypeParam>): CalleeParam {
+    const ref = param.type;
+    const inner = ref.args[0];
+    const isWrapped = ref.args.length == 1 && inner != undefined;
+    let isCallback = ref.form.kind == TypeRefKind.Function;
+
+    if (isWrapped && inner != undefined) {
+      isCallback = inner.form.kind == TypeRefKind.Function;
+    }
+
+    return { mode: this.modeOfRef(ref), isRest: false, isCallback };
+  }
+
+  private readonly aliasNamed(name: string): TypeAliasDecl | undefined {
+    const home = this.program.modules[this.module];
+    const found = home?.file.items.find(
+      (item) => item.kind == StmtKind.TypeAlias && item.name == name,
+    );
+    if (found != undefined && found.kind == StmtKind.TypeAlias) {
+      return found;
+    }
+
+    return undefined;
+  }
+}

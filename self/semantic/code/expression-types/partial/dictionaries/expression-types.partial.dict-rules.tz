@@ -74,7 +74,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private readonly dictTargetCheck(target: Expr, module: int): boolean {
+  private dictTargetCheck(target: Expr, module: int): boolean {
     if (target.kind != ExprKind.Member && target.kind != ExprKind.Index) {
       return false;
     }
@@ -115,7 +115,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private readonly dictDeleteCheck(expr: UnaryExpr, module: int): boolean {
+  private dictDeleteCheck(expr: UnaryExpr, module: int): boolean {
     const target = expr.operand;
     if (target.kind != ExprKind.Member && target.kind != ExprKind.Index) {
       return false;
@@ -147,7 +147,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private readonly dictKeysCheck(expr: CallExpr, module: int): void {
+  private dictKeysCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     const arg = expr.args[0]?.expr;
     if (callee.kind != ExprKind.Member || arg == undefined) {

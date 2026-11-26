@@ -10,6 +10,7 @@ import {
   DestinationKind,
   HiddenName,
   ParamSlot,
+  ValueDraft,
   ValueRecord,
   VariableDoor,
 } from "../../types/expression-types.types.tz";
@@ -43,18 +44,25 @@ import { kNoPlace } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
   public readonly variableOf(module: int, loc: int): Type | undefined {
-    return this.door(module, loc)?.type;
+    return this.doors.get(`${module} ${loc}`)?.type;
+  }
+
+  public prepare(): void {
+    for (const module of this.program.modules) {
+      this.madeRecord(module.id);
+    }
+
+    this.indexGlobalValues();
   }
 
   private readonly record(module: int): ValueRecord | undefined {
-    const known = this.records.get(module);
-    if (known != undefined) {
-      return known;
-    }
+    return this.records.get(module);
+  }
 
+  private madeRecord(module: int): void {
     const opened = this.program.modules[module];
-    if (module < 0 || opened == undefined) {
-      return undefined;
+    if (this.records.has(module) || opened == undefined) {
+      return;
     }
 
     const uses = new Map<int, NameUse>();
@@ -65,7 +73,7 @@ partial class ExpressionTypes {
       }
     }
 
-    const record: ValueRecord = {
+    const record: ValueDraft = {
       uses,
       hidden: new Map<string, HiddenName>(),
       variables: new Map<int, DeclaredVariable>(),
@@ -79,17 +87,32 @@ partial class ExpressionTypes {
       owners: [],
     };
 
-    this.records.set(module, record);
     this.indexStatements(opened.file.items, record);
 
     for (const part of opened.parts) {
       this.indexClass(part, record);
     }
 
-    return record;
+    this.records.set(module, this.frozenRecord(record));
   }
 
-  private readonly doorOfName(expr: NameExpr, module: int): VariableDoor | undefined {
+  private readonly frozenRecord(draft: Own<ValueDraft>): ValueRecord {
+    return {
+      uses: draft.uses,
+      hidden: draft.hidden,
+      variables: draft.variables,
+      functions: draft.functions,
+      params: draft.params,
+      assigned: draft.assigned,
+      changes: draft.changes,
+      enums: draft.enums,
+      classes: draft.classes,
+      destinations: draft.destinations,
+      owners: draft.owners,
+    };
+  }
+
+  private doorOfName(expr: NameExpr, module: int): VariableDoor | undefined {
     const target = this.targetOfName(expr, module);
     if (target == undefined || target.kind != SymbolKind.Variable) {
       return undefined;
@@ -98,7 +121,7 @@ partial class ExpressionTypes {
     return this.door(target.module, target.loc);
   }
 
-  private readonly door(module: int, loc: int): VariableDoor | undefined {
+  private door(module: int, loc: int): VariableDoor | undefined {
     const before = replace(this.facts, new Map<string, Type>());
 
     const door = this.localDoor(module, loc);
@@ -108,7 +131,7 @@ partial class ExpressionTypes {
     return door;
   }
 
-  private readonly localDoor(module: int, loc: int): VariableDoor | undefined {
+  private localDoor(module: int, loc: int): VariableDoor | undefined {
     const key = `${module} ${loc}`;
     const known = this.doors.get(key);
     if (known != undefined) {
@@ -119,6 +142,8 @@ partial class ExpressionTypes {
     if (variable == undefined) {
       return undefined;
     }
+
+    this.noteLate("variable", module, loc);
 
     const door: VariableDoor = {
       state: DoorState.InWork,
@@ -137,7 +162,7 @@ partial class ExpressionTypes {
     return door;
   }
 
-  private readonly open(
+  private open(
     door: VariableDoor,
     variable: DeclaredVariable,
     module: int,
@@ -225,7 +250,7 @@ partial class ExpressionTypes {
     door.isWhole = this.isWholeConstant(door, init, given, module);
   }
 
-  private readonly constTexts(init: Expr, module: int): string[] | undefined {
+  private constTexts(init: Expr, module: int): string[] | undefined {
     if (init.kind == ExprKind.Name) {
       return this.doorOfName(init, module)?.texts;
     }
@@ -256,7 +281,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly keepConstant(
+  private keepConstant(
     door: VariableDoor,
     variable: DeclaredVariable,
     init: Expr,
@@ -273,7 +298,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly isWholeConstant(
+  private isWholeConstant(
     door: VariableDoor,
     init: Expr,
     given: Type,
@@ -289,7 +314,7 @@ partial class ExpressionTypes {
     return this.isWholeTree(init, module);
   }
 
-  private readonly assignedTypeText(
+  private assignedTypeText(
     decl: VarDeclarator,
     isUndefined: boolean,
     module: int,

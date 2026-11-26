@@ -17,13 +17,13 @@ import { LogicSide } from "../../types/expression-types.types.tz";
 import { TruthUse } from "../../../../flow/truth-rules/types/truth-rules.types.tz";
 
 partial class ExpressionTypes {
-  private readonly notTyped(expr: UnaryExpr, module: int): Type {
+  private notTyped(expr: UnaryExpr, module: int): Type {
     this.branchCheck(expr.operand, TruthUse.Not, module);
 
     return this.store.plain(TypeKind.Boolean);
   }
 
-  private readonly branchCheck(expr: Expr, use: TruthUse, module: int): void {
+  private branchCheck(expr: Expr, use: TruthUse, module: int): void {
     if (this.shapes.isLogical(expr) && expr.kind == ExprKind.Binary) {
       const isAnd = expr.op == BinaryOp.LogAnd;
 
@@ -59,7 +59,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly logicalTyped(
+  private logicalTyped(
     expr: BinaryExpr,
     wanted: Type | undefined,
     side: LogicSide,
@@ -95,7 +95,7 @@ partial class ExpressionTypes {
     return this.logicalResult(expr, left, right, isAnd, module);
   }
 
-  private readonly testedValue(
+  private testedValue(
     expr: Expr,
     expected: Type | undefined,
     use: TruthUse,
@@ -113,7 +113,7 @@ partial class ExpressionTypes {
     return this.typed(expr, expected, module);
   }
 
-  private readonly logicalRight(
+  private logicalRight(
     expr: BinaryExpr,
     hint: Type | undefined,
     side: LogicSide,
@@ -148,7 +148,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private readonly conditionalTyped(
+  private conditionalTyped(
     expr: ConditionalExpr,
     wanted: Type | undefined,
     module: int,
@@ -178,7 +178,7 @@ partial class ExpressionTypes {
     return this.joinedBranches(expr, thenType, elseType, start, module);
   }
 
-  private readonly branchTyped(
+  private branchTyped(
     expr: ConditionalExpr,
     isThen: boolean,
     wanted: Type | undefined,
@@ -194,7 +194,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private readonly joinedBranches(
+  private joinedBranches(
     expr: ConditionalExpr,
     thenType: Type,
     elseType: Type,
@@ -252,7 +252,7 @@ partial class ExpressionTypes {
     return thenType;
   }
 
-  private readonly adaptedBranch(
+  private adaptedBranch(
     isAdapting: boolean,
     branch: Expr,
     type: Type,

@@ -281,12 +281,24 @@ partial class OwnershipCheck {
     return ref.name == kCellName && ref.args.length == 1;
   }
 
+  private readonly indexStep(expr: IndexExpr): string {
+    const index = expr.index;
+    if (index.kind != ExprKind.IntLit || !this.isTupleItem(expr)) {
+      return kElementStep;
+    }
+
+    const position = index.value.toInt();
+
+    return `${position}`;
+  }
+
   private evaluateIndex(expr: IndexExpr, isChecked: boolean): Operand {
     const object = this.evaluateBase(expr.object);
 
     this.evaluate(expr.index);
 
-    const inner = this.stepInto(object, kElementStep, expr.loc, isChecked);
+    const step = this.indexStep(expr);
+    const inner = this.stepInto(object, step, expr.loc, isChecked);
     if (isChecked && (this.isCopyExpr(expr) || this.isInternedPart(expr))) {
       return this.copyOperand(expr.loc);
     }
@@ -498,7 +510,7 @@ partial class OwnershipCheck {
     const type = this.values.answers.typeOf(expr);
     const item = type == undefined ? undefined : this.values.iteratedItem(type);
 
-    return item != undefined && this.traits.isCopy(item);
+    return item != undefined && this.traits.isCopy(item, this.values);
   }
 
   private evaluateObject(expr: ObjectLitExpr): Operand {
@@ -542,7 +554,7 @@ partial class OwnershipCheck {
 
       const field = this.extended(place, name);
       const type = this.spreadFieldType(spread.value, name);
-      if (type != undefined && this.traits.isCopy(type)) {
+      if (type != undefined && this.traits.isCopy(type, this.values)) {
         continue;
       }
 
@@ -595,7 +607,7 @@ partial class OwnershipCheck {
       return true;
     }
 
-    return this.traits.isCopy(type);
+    return this.traits.isCopy(type, this.values);
   }
 
   private readonly loansOf(operand: Read<Operand>): Loan[] {

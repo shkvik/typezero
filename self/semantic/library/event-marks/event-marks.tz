@@ -7,17 +7,17 @@ import {
 } from "./types/event-marks.types.tz";
 
 export class EventMarks {
-  public errorEmits: Cell<ErrorEmit[]>;
-  public errorListened: Cell<Set<string>>;
-  public encodedStreams: Cell<Set<string>>;
-  public listenedStreams: Cell<Map<string, string>>;
-  public emittedNames: Cell<Map<string, string[]>>;
-  public firstEmits: Cell<Map<string, FirstEmit>>;
-  public listens: Cell<EventListen[]>;
-  public looseEmitModules: Cell<Set<int>>;
-  public selfListeners: Cell<Set<string>>;
-  public droppedNews: Cell<DroppedNew[]>;
-  public errorPending: Cell<ErrorPending[]>;
+  public errorEmits: ErrorEmit[];
+  public errorListened: Set<string>;
+  public encodedStreams: Set<string>;
+  public listenedStreams: Map<string, string>;
+  public emittedNames: Map<string, string[]>;
+  public firstEmits: Map<string, FirstEmit>;
+  public listens: EventListen[];
+  public looseEmitModules: Set<int>;
+  public selfListeners: Set<string>;
+  public droppedNews: DroppedNew[];
+  public errorPending: ErrorPending[];
 
   public constructor() {
     this.errorEmits = [];
@@ -33,5 +33,3 @@ export class EventMarks {
     this.errorPending = [];
   }
 }
-
-export type InternedEventMarks = Interned<EventMarks>;

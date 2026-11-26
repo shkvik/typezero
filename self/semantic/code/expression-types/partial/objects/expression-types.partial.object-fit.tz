@@ -22,7 +22,7 @@ import {
 import { kLengthName } from "../../../expression-shapes/const/expression-shapes.const.tz";
 
 partial class ExpressionTypes {
-  private readonly isPlacedLiteral(expr: Expr, wanted: Type, module: int): boolean {
+  private isPlacedLiteral(expr: Expr, wanted: Type, module: int): boolean {
     if (expr.kind != ExprKind.Name) {
       return false;
     }
@@ -52,7 +52,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly bothText(expr: Expr, wanted: Type, module: int): string {
+  private bothText(expr: Expr, wanted: Type, module: int): string {
     if (expr.kind != ExprKind.Name) {
       return "";
     }
@@ -151,7 +151,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly updateTargetCheck(target: Expr, module: int): void {
+  private updateTargetCheck(target: Expr, module: int): void {
     if (target.kind != ExprKind.Member) {
       return;
     }
@@ -165,7 +165,7 @@ partial class ExpressionTypes {
     this.objectTargetCheck(target, object, module);
   }
 
-  private readonly nullishTargetCheck(
+  private nullishTargetCheck(
     expr: AssignExpr,
     declared: Type,
     module: int,
@@ -199,7 +199,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly stringCallCheck(expr: CallExpr, callee: NameExpr, module: int): void {
+  private stringCallCheck(expr: CallExpr, callee: NameExpr, module: int): void {
     const arg = expr.args[0]?.expr;
     const isString =
       callee.name == kStringClass && this.isGlobalUse(callee, module);

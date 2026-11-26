@@ -170,7 +170,8 @@ import {
   MemberExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
 import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
-import { Program } from "../../../program/module/types/module.types.tz";
+import { Module, Program } from "../../../program/module/types/module.types.tz";
+import { StmtKind } from "../../../program/ast/types/ast.types.statements.tz";
 import { ModuleScopes } from "../../../program/scopes/types/scopes.types.tz";
 import { TypeStore } from "../../../program/type/type-store/type-store.tz";
 import { TypeText } from "../../../program/type/type-text/type-text.tz";
@@ -318,71 +319,74 @@ export class ExpressionTypes {
   private readonly events: EventRules;
   private readonly resolver: TypeResolver;
   private readonly errors: ErrorLog;
-  private memberObjects: Cell<Set<Expr>>;
-  private walkedClasses: Cell<Set<ClassDecl>>;
-  private staticFields: Cell<ClassField[]>;
+  private memberObjects: Set<Expr>;
+  private walkedClasses: Set<ClassDecl>;
+  private staticFields: ClassField[];
   private readonly program: Program;
-  private scopes: Cell<Map<int, ModuleScopes>>;
-  private records: Cell<Map<int, ValueRecord>>;
-  private doors: Cell<Map<string, VariableDoor>>;
-  private functionDoors: Cell<Map<string, FunctionDoor>>;
-  private paramTypes: Cell<Map<string, Type>>;
-  private checkedModules: Cell<Set<int>>;
-  private coveredSwitches: Cell<Set<string>>;
-  private recursions: Cell<string[]>;
-  private assumedCalls: Cell<string[]>;
-  private doorOrder: Cell<string[]>;
-  private functionOrder: Cell<string[]>;
-  private walking: Cell<string[]>;
-  private calledBack: Cell<Set<string>>;
-  private stalled: Cell<Map<string, StalledFunction[]>>;
-  private globalValues: Cell<Map<string, ValueTarget>>;
-  private overloadedGlobals: Cell<Set<string>>;
-  private facts: Cell<Map<string, Type>>;
-  private shortCircuits: Cell<int>;
-  private lenientCalls: Cell<Set<Expr>>;
-  private constKeys: Cell<Set<string>>;
-  private selves: Cell<Type[]>;
-  private literalOwners: Cell<Map<FunctionDecl, Type>>;
-  private ownerClasses: Cell<StaticOwner[]>;
+  private scopes: Map<int, ModuleScopes>;
+  private records: Map<int, ValueRecord>;
+  private doors: Map<string, VariableDoor>;
+  private functionDoors: Map<string, FunctionDoor>;
+  private paramTypes: Map<string, Type>;
+  private checkedModules: Set<int>;
+  private coveredSwitches: Set<string>;
+  private recursions: string[];
+  private assumedCalls: string[];
+  private doorOrder: string[];
+  private functionOrder: string[];
+  private walking: string[];
+  private calledBack: Set<string>;
+  private stalled: Map<string, StalledFunction[]>;
+  private globalValues: Map<string, ValueTarget>;
+  private overloadedGlobals: Set<string>;
+  private facts: Map<string, Type>;
+  private isFinished: boolean;
+  private lateWork: string[];
+  private arrowFields: Map<string, Type>;
+  private shortCircuits: int;
+  private lenientCalls: Set<Expr>;
+  private constKeys: Set<string>;
+  private selves: Type[];
+  private literalOwners: Map<FunctionDecl, Type>;
+  private ownerClasses: StaticOwner[];
   public readonly answers: ExpressionAnswers;
-  private thisPlaces: Cell<ThisPlace[]>;
-  private currentMethods: Cell<FunctionDecl[]>;
-  private superFrames: Cell<SuperFrame[]>;
-  private openFunctions: Cell<FunctionDecl[]>;
-  private initFrames: Cell<InitFrame[]>;
-  private thisObjects: Cell<Set<Expr>>;
-  private writtenTargets: Cell<Set<Expr>>;
-  private selfCalls: Cell<Map<FunctionDecl, MemberExpr[]>>;
-  private closureTypes: Cell<Map<Expr, Type>>;
-  private argumentExprs: Cell<Set<Expr>>;
-  private tupleCalls: Cell<Set<Expr>>;
-  private initializing: Cell<InitializingVariable[]>;
-  private generatorFrames: Cell<GeneratorFrame[]>;
-  private guardSummaries: Cell<Map<string, GuardSummary>>;
-  private positionMask: Cell<boolean[]>;
-  private resultsChecked: Cell<Set<int>>;
-  private positionMethod: Cell<string>;
-  private unusedYields: Cell<Set<Expr>>;
-  private yieldOf: Cell<Map<Expr, int>>;
-  private indexParams: Cell<Set<string>>;
-  private elementRanges: Cell<Map<string, ValueRange>>;
-  private fixedLengths: Cell<Set<string>>;
-  private fixedCounts: Cell<Map<string, decimal>>;
-  private requirements: Cell<Map<int, Requirement[]>>;
-  private pendingCalls: Cell<PendingCall[]>;
-  private metadataRecords: Cell<Map<string, Type>>;
-  private callChanged: Cell<Map<int, string[]>>;
+  private thisPlaces: ThisPlace[];
+  private currentMethods: FunctionDecl[];
+  private superFrames: SuperFrame[];
+  private openFunctions: FunctionDecl[];
+  private initFrames: InitFrame[];
+  private thisObjects: Set<Expr>;
+  private writtenTargets: Set<Expr>;
+  private selfCalls: Map<FunctionDecl, MemberExpr[]>;
+  private closureTypes: Map<Expr, Type>;
+  private argumentExprs: Set<Expr>;
+  private tupleCalls: Set<Expr>;
+  private initializing: InitializingVariable[];
+  private generatorFrames: GeneratorFrame[];
+  private guardSummaries: Map<string, GuardSummary>;
+  private positionMask: boolean[];
+  private resultsChecked: Set<int>;
+  private positionMethod: string;
+  private unusedYields: Set<Expr>;
+  private yieldOf: Map<Expr, int>;
+  private indexParams: Set<string>;
+  private elementRanges: Map<string, ValueRange>;
+  private fixedLengths: Set<string>;
+  private fixedCounts: Map<string, decimal>;
+  private requirements: Map<int, Requirement[]>;
+  private pendingCalls: PendingCall[];
+  private metadataRecords: Map<string, Type>;
+  private callChanged: Map<int, string[]>;
   private readonly eventMarks: EventMarks;
-  private constructorCasts: Cell<ConstructorCast[]>;
-  private constructorWidenings: Cell<Map<int, Type[]>>;
-  private reflectedNews: Cell<ReflectedNew[]>;
-  private ownedCalls: Cell<Map<string, PendingCall[]>>;
-  private writtenFields?: Cell<Set<string>>;
-  private methodParts: Cell<Map<FunctionDecl, ClassDecl>>;
-  private partHomes: Cell<Map<ClassDecl, int>>;
-  private unsafeUsed: Cell<Set<FunctionDecl>>;
-  private typeArguments: Cell<Map<string, readonly Type[]>>;
+  private constructorCasts: ConstructorCast[];
+  private constructorWidenings: Map<int, Type[]>;
+  private reflectedNews: ReflectedNew[];
+  private ownedCalls: Map<string, PendingCall[]>;
+  private writtenFields?: Set<string>;
+  private methodParts: Map<FunctionDecl, ClassDecl>;
+  private partHomes: Map<ClassDecl, int>;
+  private unsafeUsed: Set<FunctionDecl>;
+  private typeArguments: Map<string, readonly Type[]>;
 
   public constructor(
     store: TypeStore,
@@ -657,6 +661,9 @@ export class ExpressionTypes {
     this.globalValues = new Map<string, ValueTarget>();
     this.overloadedGlobals = new Set<string>();
     this.facts = new Map<string, Type>();
+    this.isFinished = false;
+    this.lateWork = [];
+    this.arrowFields = new Map<string, Type>();
     this.shortCircuits = 0;
     this.lenientCalls = new Set<Expr>();
     this.constKeys = new Set<string>();
@@ -719,6 +726,43 @@ export class ExpressionTypes {
     return this.record(module)?.functions.get(loc);
   }
 
+  public finish(): void {
+    for (const module of this.program.modules) {
+      if (module.isDeclarationOnly) {
+        this.declaredFunctionsTyped(module);
+      } else {
+        this.checkModule(module.id);
+      }
+    }
+    for (const module of this.program.modules) {
+      this.moduleChecksDone(module.id);
+    }
+
+    this.isFinished = true;
+  }
+
+  private declaredFunctionsTyped(module: Read<Module>): void {
+    for (const item of module.file.items) {
+      if (item.kind == StmtKind.Function) {
+        this.functionTyped(module.id, item.loc);
+      }
+    }
+  }
+
+  public readonly lateWorkList(): string[] {
+    return this.lateWork.slice();
+  }
+
+  private noteLate(kind: string, module: int, loc: int): void {
+    if (!this.isFinished) {
+      return;
+    }
+
+    const name = this.program.modules[module]?.name ?? "";
+
+    this.lateWork.push(`late ${kind} ${name} ${module} ${loc}`);
+  }
+
   public readonly typeArgumentsOf(
     module: int,
     loc: int,
@@ -726,7 +770,7 @@ export class ExpressionTypes {
     return this.typeArguments.get(`${module} ${loc}`);
   }
 
-  private readonly indexPart(part: ClassDecl, module: int): void {
+  private indexPart(part: ClassDecl, module: int): void {
     if (!this.partHomes.has(part)) {
       this.partHomes.set(part, module);
     }
@@ -738,5 +782,3 @@ export class ExpressionTypes {
     }
   }
 }
-
-export type InternedExpressionTypes = Interned<ExpressionTypes>;

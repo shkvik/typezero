@@ -17,7 +17,7 @@ import { ThisPlace } from "../../types/expression-types.types.tz";
 import { StmtKind } from "../../../../../program/ast/types/ast.types.statements.tz";
 
 partial class ExpressionTypes {
-  private readonly methodObject(
+  private methodObject(
     expr: ObjectLitExpr,
     target: Type | undefined,
     module: int,
@@ -86,7 +86,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly literalValueFields(
+  private literalValueFields(
     expr: ObjectLitExpr,
     goal: ObjectType | undefined,
     module: int,
@@ -121,7 +121,7 @@ partial class ExpressionTypes {
     return fields;
   }
 
-  private readonly literalMethods(
+  private literalMethods(
     expr: ObjectLitExpr,
     reserved: Type,
     goal: ObjectType | undefined,
@@ -159,7 +159,7 @@ partial class ExpressionTypes {
     return methods;
   }
 
-  private readonly literalMethodType(
+  private literalMethodType(
     property: Property,
     goal: ObjectType | undefined,
     module: int,

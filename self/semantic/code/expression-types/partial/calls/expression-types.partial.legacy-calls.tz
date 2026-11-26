@@ -16,7 +16,7 @@ import {
 } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private readonly legacyCallCheck(expr: CallExpr, module: int): boolean {
+  private legacyCallCheck(expr: CallExpr, module: int): boolean {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Name || !this.isGlobalUse(callee, module)) {
       return false;
@@ -101,7 +101,7 @@ partial class ExpressionTypes {
     return Code.UnescapeValueRefused;
   }
 
-  private readonly jsonParseTypesCheck(
+  private jsonParseTypesCheck(
     expr: CallExpr,
     member: MemberExpr,
     module: int,

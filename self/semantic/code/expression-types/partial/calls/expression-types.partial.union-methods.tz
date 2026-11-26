@@ -13,7 +13,7 @@ import {
 import { CallKind } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly unionShapeCall(
+  private unionShapeCall(
     expr: CallExpr,
     member: MemberExpr,
     object: UnionType,

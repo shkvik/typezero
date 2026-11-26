@@ -33,7 +33,7 @@ import {
 import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
 
 partial class ExpressionTypes {
-  private readonly intlOptionsCheck(
+  private intlOptionsCheck(
     options: Expr,
     service: Read<IntlService>,
     what: string,
@@ -101,7 +101,7 @@ partial class ExpressionTypes {
     return isTextOk && isRangeOk && isPairOk && isRoundOk;
   }
 
-  private readonly intlFieldCheck(
+  private intlFieldCheck(
     options: Expr,
     field: ObjectField,
     service: Read<IntlService>,
@@ -159,7 +159,7 @@ partial class ExpressionTypes {
     return this.intlValuesCheck(options, field, option, loc, module);
   }
 
-  private readonly intlValuesCheck(
+  private intlValuesCheck(
     options: Expr,
     field: ObjectField,
     option: Read<IntlOption>,
@@ -286,7 +286,7 @@ partial class ExpressionTypes {
     return listed;
   }
 
-  private readonly intlRangesCheck(
+  private intlRangesCheck(
     options: Expr,
     fields: Read<ObjectField[]>,
     module: int,
@@ -306,7 +306,7 @@ partial class ExpressionTypes {
     return isFine;
   }
 
-  private readonly digitRangeCheck(
+  private digitRangeCheck(
     options: Expr,
     field: ObjectField,
     range: IntlDigitRange,
@@ -355,7 +355,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private readonly intlPairsCheck(
+  private intlPairsCheck(
     options: Expr,
     fields: Read<ObjectField[]>,
     module: int,
@@ -395,7 +395,7 @@ partial class ExpressionTypes {
     return isFine;
   }
 
-  private readonly isNotAbove(
+  private isNotAbove(
     options: Expr,
     low: ObjectField,
     high: ObjectField,
@@ -421,7 +421,7 @@ partial class ExpressionTypes {
     return this.canProve(lowLinear.term, highLinear.term, room);
   }
 
-  private readonly optionLinear(
+  private optionLinear(
     options: Expr,
     field: ObjectField,
     constant: decimal | undefined,
@@ -441,7 +441,7 @@ partial class ExpressionTypes {
     return { term: kZeroTerm, offset: constant };
   }
 
-  private readonly intlRoundingCheck(
+  private intlRoundingCheck(
     options: Expr,
     fields: Read<ObjectField[]>,
     module: int,
@@ -475,7 +475,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private readonly incrementDigitsCheck(
+  private incrementDigitsCheck(
     options: Expr,
     fields: Read<ObjectField[]>,
     loc: int,

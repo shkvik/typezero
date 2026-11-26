@@ -14,7 +14,7 @@ import {
 } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private readonly awaitTyped(expr: AwaitExpr, module: int): Type {
+  private awaitTyped(expr: AwaitExpr, module: int): Type {
     this.awaitPlaceCheck(expr, module);
 
     const value = this.typed(expr.value, undefined, module);

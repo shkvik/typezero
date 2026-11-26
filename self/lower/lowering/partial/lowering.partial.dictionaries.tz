@@ -712,6 +712,9 @@ partial class Lowering {
     source: Expr,
     type: Type,
   ): IrValue | undefined {
+    if (this.isTzMap(type) && !this.isCopyEntries(type)) {
+      return this.mapMoved(frame, source, type);
+    }
     if (this.isTzMap(type)) {
       return this.mapListed(frame, kMapCopyName, source, type);
     }

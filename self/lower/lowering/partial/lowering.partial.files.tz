@@ -478,7 +478,7 @@ partial class Lowering {
           this.textLiterals(field.type).length == 1,
       );
       if (isPresent && isCovered) {
-        return order;
+        return order.slice();
       }
     }
 

@@ -25,7 +25,7 @@ import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import { kToStringName } from "../../../code/expression-types/const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private readonly requireOf(type: Type, kind: RequirementKind, word: string): void {
+  private requireOf(type: Type, kind: RequirementKind, word: string): void {
     if (type.kind != TypeKind.TypeParameter) {
       return;
     }
@@ -33,7 +33,7 @@ partial class ExpressionTypes {
     this.addRequirement(type.id, { kind, word, other: 0 });
   }
 
-  private readonly requireConstruct(type: Type, count: int): void {
+  private requireConstruct(type: Type, count: int): void {
     if (type.kind != TypeKind.TypeParameter) {
       return;
     }
@@ -43,7 +43,7 @@ partial class ExpressionTypes {
     this.addRequirement(type.id, { kind, word: "", other: count });
   }
 
-  private readonly captureRequirements(fn: FunctionDecl, module: int): void {
+  private captureRequirements(fn: FunctionDecl, module: int): void {
     const uses = this.record(module)?.uses;
     if (fn.typeParams.length == 0 || uses == undefined) {
       return;
@@ -72,7 +72,7 @@ partial class ExpressionTypes {
     return RequirementKind.LaterCapture;
   }
 
-  private readonly addRequirement(id: int, requirement: Requirement): void {
+  private addRequirement(id: int, requirement: Requirement): void {
     if (!this.requirements.has(id)) {
       this.requirements.set(id, []);
     }
@@ -80,7 +80,7 @@ partial class ExpressionTypes {
     this.requirements.get(id)?.push(requirement);
   }
 
-  private readonly requireFollowing(draft: Read<GenericDraft>, module: int): void {
+  private requireFollowing(draft: Read<GenericDraft>, module: int): void {
     const target = draft.target;
     const bound = this.generics.boundById(draft);
 
@@ -135,7 +135,7 @@ partial class ExpressionTypes {
     return params.map((param) => `${param.id}`).join(" ");
   }
 
-  private readonly pendingCallsCheck(module: int): void {
+  private pendingCallsCheck(module: int): void {
     const mine = this.pendingCalls.filter((call) => call.module == module);
     const rest = this.pendingCalls.filter((call) => call.module != module);
 
@@ -393,7 +393,7 @@ partial class ExpressionTypes {
     return { code: Code.ObjectToText, details: kNoDetails };
   }
 
-  private readonly requireJoin(expr: BinaryExpr, pair: OperandPair): void {
+  private requireJoin(expr: BinaryExpr, pair: OperandPair): void {
     const left = this.types.definedType(pair.left);
     const right = this.types.definedType(pair.right);
     const hasText =

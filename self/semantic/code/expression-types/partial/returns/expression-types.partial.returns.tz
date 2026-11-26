@@ -15,7 +15,7 @@ import { FunctionFrame } from "../../types/expression-types.types.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 
 partial class ExpressionTypes {
-  private readonly walkReturn(
+  private walkReturn(
     statement: ReturnStmt,
     frame: FunctionFrame,
     module: int,
@@ -24,7 +24,7 @@ partial class ExpressionTypes {
     this.noteGuardExit(statement.value, frame, module);
   }
 
-  private readonly walkReturnValue(
+  private walkReturnValue(
     statement: ReturnStmt,
     frame: FunctionFrame,
     module: int,
@@ -78,7 +78,7 @@ partial class ExpressionTypes {
     this.predicateReturnCheck(fn, value, module);
   }
 
-  private readonly returnedType(
+  private returnedType(
     value: Expr,
     wanted: Type | undefined,
     frame: Read<FunctionFrame>,
@@ -92,7 +92,7 @@ partial class ExpressionTypes {
     return given;
   }
 
-  private readonly collectReturn(
+  private collectReturn(
     value: Expr | undefined,
     frame: FunctionFrame,
     module: int,
@@ -118,7 +118,7 @@ partial class ExpressionTypes {
     frame.returns.push({ value, type });
   }
 
-  private readonly hintedReturn(
+  private hintedReturn(
     value: Expr,
     hint: Type | undefined,
     frame: Read<FunctionFrame>,
@@ -172,7 +172,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly voidReturn(
+  private voidReturn(
     value: Expr | undefined,
     frame: Read<FunctionFrame>,
     module: int,

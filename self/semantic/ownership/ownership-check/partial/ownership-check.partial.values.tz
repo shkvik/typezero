@@ -79,9 +79,19 @@ partial class OwnershipCheck {
     }
   }
 
+  private readonly isTupleItem(expr: Expr): boolean {
+    if (expr.kind != ExprKind.Index || expr.index.kind != ExprKind.IntLit) {
+      return false;
+    }
+
+    const object = this.values.answers.typeOf(expr.object);
+
+    return object != undefined && object.kind == TypeKind.Tuple;
+  }
+
   private ownedTaken(place: Place, expr: Expr): void {
     const isWhole = place.path.length == 0;
-    const isField = expr.kind == ExprKind.Member;
+    const isField = expr.kind == ExprKind.Member || this.isTupleItem(expr);
     const isMoved = this.moveOwned(place, expr.loc);
 
     if (isMoved && (isWhole || isField)) {
@@ -256,6 +266,12 @@ partial class OwnershipCheck {
   }
 
   private bind(variable: Variable, operand: Read<Operand>, init: Expr): void {
+    if (this.isUndefinedSide(init)) {
+      variable.holding = this.declaredHolding(variable.declared);
+      variable.loans = [];
+
+      return;
+    }
     if (operand.kind == OperandKind.Copy || this.isCopyExpr(init)) {
       variable.holding = Holding.Copy;
 
@@ -345,7 +361,7 @@ partial class OwnershipCheck {
 
     const loans: Loan[] = [];
 
-    for (const loan of root.loans) {
+    for (const loan of root.loans.slice()) {
       const path = loan.place.path.concat(place.path);
       const inner: Place = { root: loan.place.root, path };
       const isFrozen = loan.frozen || frozen;
@@ -358,7 +374,7 @@ partial class OwnershipCheck {
 
   private isFrozenExpr(expr: Expr): boolean {
     const type = this.values.answers.typeOf(expr);
-    if (type == undefined || !this.traits.isDeepImmutable(type)) {
+    if (type == undefined || !this.traits.isDeepImmutable(type, this.values)) {
       return false;
     }
 
@@ -499,6 +515,7 @@ partial class OwnershipCheck {
 
     this.revive(key);
     this.bind(variable, value, expr.value);
+    this.noteBorrowDecl(variable, variable.declared);
   }
 
   private walkReturn(value: Expr | undefined, loc: int): void {
@@ -575,7 +592,7 @@ partial class OwnershipCheck {
       return;
     }
 
-    const loans = this.loansOf(operand);
+    const loans = this.heldLoans(operand);
 
     for (const loan of loans) {
       const root = loan.place.root;

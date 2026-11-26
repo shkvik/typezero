@@ -30,7 +30,7 @@ import { IntlMethodKind } from "../../../intl-rules/types/intl-rules.types.tz";
 import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
 
 partial class ExpressionTypes {
-  private readonly intlNamespaceCall(
+  private intlNamespaceCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -85,7 +85,7 @@ partial class ExpressionTypes {
     return this.namedLibraryType(what, member.loc, module);
   }
 
-  private readonly intlRefusedCall(
+  private intlRefusedCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -106,7 +106,7 @@ partial class ExpressionTypes {
     return this.intl.valuesOfError(member.loc);
   }
 
-  private readonly canonicalCall(expr: CallExpr, module: int): Type {
+  private canonicalCall(expr: CallExpr, module: int): Type {
     const list = expr.args[0];
     const text = this.store.plain(TypeKind.String);
     if (list != undefined) {
@@ -116,7 +116,7 @@ partial class ExpressionTypes {
     return this.store.arrayOf(text);
   }
 
-  private readonly intlStaticCall(
+  private intlStaticCall(
     expr: CallExpr,
     member: MemberExpr,
     owner: MemberExpr,
@@ -158,7 +158,7 @@ partial class ExpressionTypes {
     return this.store.arrayOf(text);
   }
 
-  private readonly intlMethodCall(
+  private intlMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -202,7 +202,7 @@ partial class ExpressionTypes {
     return instance.name;
   }
 
-  private readonly intlUnsupported(
+  private intlUnsupported(
     expr: CallExpr,
     member: MemberExpr,
     isSelect: boolean,
@@ -227,7 +227,7 @@ partial class ExpressionTypes {
     return this.intl.rangeUnsupportedError(member.loc, member.name);
   }
 
-  private readonly compareCall(
+  private compareCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -245,7 +245,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly intlNumberCall(
+  private intlNumberCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -277,7 +277,7 @@ partial class ExpressionTypes {
     return method.shape.result;
   }
 
-  private readonly relativeCall(
+  private relativeCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -308,7 +308,7 @@ partial class ExpressionTypes {
     return this.intlResult(instance, member.name);
   }
 
-  private readonly containingCall(
+  private containingCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -325,7 +325,7 @@ partial class ExpressionTypes {
     return this.intlResult(instance, member.name);
   }
 
-  private readonly closedTextCheck(
+  private closedTextCheck(
     arg: Expr,
     given: Type,
     allowed: Read<string[]>,
@@ -376,7 +376,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly localeMethodCall(
+  private localeMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -403,7 +403,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private readonly numberLocaleCall(expr: CallExpr, module: int): Type {
+  private numberLocaleCall(expr: CallExpr, module: int): Type {
     const service = this.intl.service(kNumberFormatClass);
     if (service != undefined) {
       this.intlArguments(expr.args, 0, service, kToLocaleName, module);
@@ -412,7 +412,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.String);
   }
 
-  private readonly localeCompareCall(expr: CallExpr, module: int): Type {
+  private localeCompareCall(expr: CallExpr, module: int): Type {
     const that = expr.args[0];
     const text = this.store.plain(TypeKind.String);
     const service = this.intl.service(kCollatorClass);
@@ -426,7 +426,7 @@ partial class ExpressionTypes {
     return this.store.integer(64, false);
   }
 
-  private readonly normalizeCall(expr: CallExpr, module: int): Type {
+  private normalizeCall(expr: CallExpr, module: int): Type {
     const form = expr.args[0];
     const text = this.store.plain(TypeKind.String);
     if (form == undefined) {

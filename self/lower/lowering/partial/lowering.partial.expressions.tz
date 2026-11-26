@@ -86,11 +86,11 @@ partial class Lowering {
       case ExprKind.Template:
         return this.templateValue(frame, expr);
       case ExprKind.ArrayLit:
-        return this.arrayLiteral(frame, expr);
+        return this.madeLiteral(frame, expr);
       case ExprKind.ObjectLit:
         return this.objectLiteral(frame, expr);
       case ExprKind.New:
-        return this.newValue(frame, expr);
+        return this.madeObject(frame, expr);
       case ExprKind.Index:
         return this.indexValue(frame, expr);
       case ExprKind.Member:
@@ -201,7 +201,7 @@ partial class Lowering {
       return undefined;
     }
 
-    const loaded = this.loaded(frame, place);
+    const loaded = this.namedLoad(frame, expr, place);
     const seen = this.typeOf(expr);
     if (seen == undefined || seen.kind == TypeKind.Error) {
       return loaded;
@@ -212,10 +212,25 @@ partial class Lowering {
       return loaded;
     }
     if (seenType == place.type) {
-      return { type: loaded.type, value: loaded.value, tz: seen };
+      return this.retyped(loaded, loaded.type, seen);
     }
 
     return this.converted(frame, loaded, seen, expr.loc);
+  }
+
+  private namedLoad(frame: Read<Frame>, expr: NameExpr, place: Place): IrValue {
+    const loaded = this.loaded(frame, place);
+    const target = this.values.valueTargetOf(expr, frame.module);
+    if (target == undefined) {
+      return loaded;
+    }
+
+    const key = this.placeKey(target.module, target.loc);
+    if (!this.immortalGlobals.has(key)) {
+      return loaded;
+    }
+
+    return this.staticValue(loaded);
   }
 
   private namePlace(frame: Read<Frame>, expr: NameExpr): Place | undefined {

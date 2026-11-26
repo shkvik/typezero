@@ -27,7 +27,7 @@ import { kMapClass } from "../../../class-rules/const/class-rules.const.tz";
 import { kPromiseClass } from "../../../../library/library-rules/const/library-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly libraryNew(
+  private libraryNew(
     expr: NewExpr,
     name: string,
     target: ValueTarget,
@@ -91,7 +91,7 @@ partial class ExpressionTypes {
     return written;
   }
 
-  private readonly declaredNew(
+  private declaredNew(
     expr: NewExpr,
     target: ValueTarget,
     written: Read<Type[]>,
@@ -163,7 +163,7 @@ partial class ExpressionTypes {
     return instance;
   }
 
-  private readonly overloadedNew(
+  private overloadedNew(
     expr: NewExpr,
     instance: InstanceType,
     makers: Read<DeclaredMember[]>,

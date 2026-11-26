@@ -15,7 +15,7 @@ import {
 } from "../../../code/expression-types/const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private readonly bitCall(
+  private bitCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -59,7 +59,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readonly wrapFromCall(
+  private wrapFromCall(
     expr: CallExpr,
     member: MemberExpr,
     object: MemberExpr,
@@ -80,7 +80,7 @@ partial class ExpressionTypes {
     return this.store.wrapping(bits);
   }
 
-  private readonly bitHalvesCall(
+  private bitHalvesCall(
     expr: CallExpr,
     halves: Read<string[]>,
     module: int,

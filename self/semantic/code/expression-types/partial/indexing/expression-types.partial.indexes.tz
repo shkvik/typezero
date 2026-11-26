@@ -26,7 +26,7 @@ import {
 } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private readonly indexTyped(expr: IndexExpr, module: int): Type {
+  private indexTyped(expr: IndexExpr, module: int): Type {
     const isMade = expr.index.loc == expr.loc;
     if (isMade) {
       return this.patternElement(expr, module);
@@ -59,7 +59,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly otherIndexed(expr: IndexExpr, object: Type, module: int): Type {
+  private otherIndexed(expr: IndexExpr, object: Type, module: int): Type {
     if (this.unknownIndexCheck(expr, object, module)) {
       return this.store.plain(TypeKind.Error);
     }
@@ -103,7 +103,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly genericIndexCheck(
+  private genericIndexCheck(
     expr: IndexExpr,
     object: Type,
     module: int,
@@ -128,7 +128,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly listIndexed(expr: IndexExpr, list: Type, module: int): Type {
+  private listIndexed(expr: IndexExpr, list: Type, module: int): Type {
     const int = this.store.integer(64, false);
     const key = this.typed(expr.index, int, module);
     const item = this.indexes.listItem(list);
@@ -157,7 +157,7 @@ partial class ExpressionTypes {
     this.report(module, index.loc, code, { word });
   }
 
-  private readonly bytesIndexed(expr: IndexExpr, item: Type, module: int): Type {
+  private bytesIndexed(expr: IndexExpr, item: Type, module: int): Type {
     const int = this.store.integer(64, false);
     const key = this.typed(expr.index, int, module);
     if (key.kind != TypeKind.Int) {
@@ -173,7 +173,7 @@ partial class ExpressionTypes {
     return this.types.optional(item);
   }
 
-  private readonly isMadeIndex(expr: IndexExpr, key: Type, module: int): boolean {
+  private isMadeIndex(expr: IndexExpr, key: Type, module: int): boolean {
     const count = this.shapes.madeCount(expr.object);
     const at = this.intConstant(expr.index, key, module);
     if (count == undefined || at == undefined) {
@@ -183,7 +183,7 @@ partial class ExpressionTypes {
     return at >= 0 && at < count.toDecimal();
   }
 
-  private readonly tupleIndexed(expr: IndexExpr, tuple: TupleType, module: int): Type {
+  private tupleIndexed(expr: IndexExpr, tuple: TupleType, module: int): Type {
     const int = this.store.integer(64, false);
     const key = this.typed(expr.index, int, module);
     const error = this.store.plain(TypeKind.Error);
@@ -226,7 +226,7 @@ partial class ExpressionTypes {
     return item;
   }
 
-  private readonly objectIndexed(
+  private objectIndexed(
     expr: IndexExpr,
     object: ObjectType,
     module: int,
@@ -285,7 +285,7 @@ partial class ExpressionTypes {
     return this.keyedFieldType(object, choices);
   }
 
-  private readonly keyChoices(index: Expr, key: Type, module: int): Type | undefined {
+  private keyChoices(index: Expr, key: Type, module: int): Type | undefined {
     if (this.isTextChoice(key)) {
       return key;
     }
@@ -339,7 +339,7 @@ partial class ExpressionTypes {
     return common;
   }
 
-  private readonly keyedWriteCheck(target: Expr, module: int): boolean {
+  private keyedWriteCheck(target: Expr, module: int): boolean {
     if (target.kind != ExprKind.Index) {
       return false;
     }
@@ -402,7 +402,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private readonly keyedFieldWrite(
+  private keyedFieldWrite(
     target: Expr,
     object: ObjectType,
     field: Type,
@@ -435,7 +435,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readonly constantKeyOf(
+  private constantKeyOf(
     index: Expr,
     key: Type,
     module: int,
@@ -459,7 +459,7 @@ partial class ExpressionTypes {
     return literal.text;
   }
 
-  private readonly dictIndexed(expr: IndexExpr, dict: DictType, module: int): Type {
+  private dictIndexed(expr: IndexExpr, dict: DictType, module: int): Type {
     const word = this.sources.tupleText(expr.object);
     const error = this.store.plain(TypeKind.Error);
 
@@ -479,7 +479,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly recordIndexed(expr: IndexExpr, dict: DictType, module: int): Type {
+  private recordIndexed(expr: IndexExpr, dict: DictType, module: int): Type {
     const key = this.typed(expr.index, dict.key, module);
     const defined = this.types.definedType(key);
     if (defined.kind == TypeKind.Int || defined.kind == TypeKind.Double) {
@@ -493,7 +493,7 @@ partial class ExpressionTypes {
     return this.types.optional(dict.value);
   }
 
-  private readonly keyInTyped(expr: BinaryExpr, module: int): Type {
+  private keyInTyped(expr: BinaryExpr, module: int): Type {
     const boolean = this.store.plain(TypeKind.Boolean);
     const object = this.typed(expr.rhs, undefined, module);
 
@@ -541,7 +541,7 @@ partial class ExpressionTypes {
     return boolean;
   }
 
-  private readonly deleteTyped(expr: UnaryExpr, module: int): Type {
+  private deleteTyped(expr: UnaryExpr, module: int): Type {
     const target = expr.operand;
     const boolean = this.store.plain(TypeKind.Boolean);
 
@@ -588,7 +588,7 @@ partial class ExpressionTypes {
     return boolean;
   }
 
-  private readonly deletedName(target: Expr, module: int): string | undefined {
+  private deletedName(target: Expr, module: int): string | undefined {
     if (target.kind == ExprKind.Member) {
       return target.name;
     }
@@ -599,7 +599,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private readonly tupleCall(
+  private tupleCall(
     expr: CallExpr,
     member: MemberExpr,
     tuple: TupleType,

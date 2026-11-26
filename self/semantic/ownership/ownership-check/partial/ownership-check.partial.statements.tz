@@ -131,15 +131,27 @@ partial class OwnershipCheck {
 
       return;
     }
+    if (this.isFieldCopy(declarator.loc, init)) {
+      return this.fieldsLooked(variable, init);
+    }
 
     const operand = this.evaluateFor(init, CallbackMode.Local);
 
     this.bind(variable, operand, init);
+    this.checkCellKept(variable, operand, init);
     this.noteBorrowDecl(variable, declarator.loc);
 
-    if (this.isInternedPart(init)) {
+    if (this.isInternedPart(init) || this.isInternedFallback(init)) {
       this.borrowDecls.add(`${this.module} ${declarator.loc}`);
     }
+  }
+
+  private readonly isInternedFallback(init: Expr): boolean {
+    return (
+      init.kind == ExprKind.Binary &&
+      init.op == BinaryOp.Nullish &&
+      this.isInternedPart(init.lhs)
+    );
   }
 
   private readonly isRecordCopy(loc: int, init: Expr): boolean {
@@ -151,6 +163,33 @@ partial class OwnershipCheck {
       target.dict == DictKind.Record;
 
     return isRecord && given != undefined && given.kind == TypeKind.Object;
+  }
+
+  private isFieldCopy(loc: int, init: Expr): boolean {
+    const target = this.values.variableOf(this.module, loc);
+    const given = this.values.answers.typeOf(init);
+    const isObjects =
+      target != undefined &&
+      given != undefined &&
+      target.kind == TypeKind.Object &&
+      given.kind == TypeKind.Object &&
+      target != given;
+
+    return isObjects && target != undefined && this.traits.isCopy(target, this.values);
+  }
+
+  private fieldsLooked(variable: Variable, init: Expr): void {
+    const operand = this.evaluate(init);
+    const place = operand.place;
+    if (operand.kind != OperandKind.Place || place == undefined || this.isCopyExpr(init)) {
+      variable.holding = Holding.Own;
+      variable.loans = [];
+
+      return;
+    }
+
+    variable.holding = Holding.Borrow;
+    variable.loans = this.loansOfPlace(place);
   }
 
   private borrowsListed(variable: Variable, init: ArrayLitExpr): void {
@@ -178,7 +217,7 @@ partial class OwnershipCheck {
 
   private declaredHolding(loc: int): Holding {
     const type = this.values.variableOf(this.module, loc);
-    if (type != undefined && this.traits.isCopy(type)) {
+    if (type != undefined && this.traits.isCopy(type, this.values)) {
       return Holding.Copy;
     }
 
@@ -336,6 +375,7 @@ partial class OwnershipCheck {
     }
 
     const before = this.copyState(this.state);
+    const isGuarded = this.cellGuardFor(stmt.iterable, stmt.loc);
 
     this.walkStatement(stmt.body);
     this.state.isDead = false;
@@ -350,6 +390,7 @@ partial class OwnershipCheck {
 
     this.walkStatement(stmt.body);
     this.state = this.merged(before, this.state);
+    this.cellGuardDone(isGuarded);
   }
 
   private readonly checkUsingElement(binding: Read<Variable>, stmt: ForOfStmt): void {
@@ -362,6 +403,21 @@ partial class OwnershipCheck {
     this.report(stmt.binding.loc, Code.OwnUsingBorrow, { word: binding.name, other });
   }
 
+  private loopSourceLoans(operand: Read<Operand>, iterable: Expr): Loan[] {
+    const place = operand.place;
+    if (operand.kind == OperandKind.Place && place != undefined) {
+      const element = this.extended(place, kElementStep);
+      const isFrozen = this.isFrozenExpr(iterable);
+
+      return this.loansOfPlaceAs(element, LoanKind.Shared, isFrozen);
+    }
+    if (operand.kind == OperandKind.Borrowed) {
+      return operand.loans.slice();
+    }
+
+    return [];
+  }
+
   private bindElement(key: int, operand: Read<Operand>, stmt: ForOfStmt): void {
     const variable = this.variableOf(key);
     if (variable == undefined) {
@@ -369,8 +425,9 @@ partial class OwnershipCheck {
     }
 
     const type = this.values.variableOf(this.module, stmt.binding.loc);
-    if (type != undefined && this.traits.isCopy(type)) {
+    if (type != undefined && this.traits.isCopy(type, this.values)) {
       variable.holding = Holding.Copy;
+      variable.loans = this.loopSourceLoans(operand, stmt.iterable);
 
       return;
     }

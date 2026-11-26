@@ -98,7 +98,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly iterableArgumentCheck(
+  private iterableArgumentCheck(
     slot: ArgumentSlot,
     to: Type,
     target: Read<CallTarget>,
@@ -141,7 +141,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  public readonly iteratedItem(given: Type): Type | undefined {
+  public iteratedItem(given: Type): Type | undefined {
     const base = this.types.apparent(given);
 
     switch (base.kind) {
@@ -165,7 +165,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly instanceItem(instance: InstanceType): Type | undefined {
+  private instanceItem(instance: InstanceType): Type | undefined {
     if (this.isDeclaredLibrary(instance.module, instance.loc)) {
       return this.store.plain(TypeKind.Error);
     }
@@ -189,7 +189,7 @@ partial class ExpressionTypes {
     return result.shape.yielded;
   }
 
-  private readonly instanceLoopCheck(
+  private instanceLoopCheck(
     loop: Expr,
     instance: InstanceType,
     module: int,

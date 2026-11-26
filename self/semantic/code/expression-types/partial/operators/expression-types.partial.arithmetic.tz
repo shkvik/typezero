@@ -19,7 +19,7 @@ import {
 import { ConcatLink } from "../../../concatenation-rules/types/concatenation-rules.types.tz";
 
 partial class ExpressionTypes {
-  private readonly binaryTyped(
+  private binaryTyped(
     expr: BinaryExpr,
     wanted: Type | undefined,
     module: int,
@@ -61,7 +61,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly parameterArithmetic(
+  private parameterArithmetic(
     expr: BinaryExpr,
     pair: OperandPair,
     module: int,
@@ -74,7 +74,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private readonly arithmeticTyped(
+  private arithmeticTyped(
     expr: BinaryExpr,
     wanted: Type | undefined,
     module: int,
@@ -102,7 +102,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private readonly arithmeticOperands(
+  private arithmeticOperands(
     expr: BinaryExpr,
     wanted: Type | undefined,
     module: int,
@@ -138,7 +138,7 @@ partial class ExpressionTypes {
     return this.adapted(expr, { left, right }, module);
   }
 
-  private readonly literalLeftOperands(
+  private literalLeftOperands(
     expr: BinaryExpr,
     hints: OperandHints,
     module: int,
@@ -163,7 +163,7 @@ partial class ExpressionTypes {
     return this.adapted(expr, { left, right }, module);
   }
 
-  private readonly leftTyped(
+  private leftTyped(
     expr: BinaryExpr,
     hint: Type | undefined,
     module: int,
@@ -182,13 +182,13 @@ partial class ExpressionTypes {
     return this.types.apparent(type);
   }
 
-  private readonly operandTyped(expr: Expr, hint: Type | undefined, module: int): Type {
+  private operandTyped(expr: Expr, hint: Type | undefined, module: int): Type {
     const type = this.valueTyped(expr, hint, module);
 
     return this.types.apparent(type);
   }
 
-  private readonly valueTyped(expr: Expr, hint: Type | undefined, module: int): Type {
+  private valueTyped(expr: Expr, hint: Type | undefined, module: int): Type {
     if (expr.kind == ExprKind.Name) {
       return this.named(expr, hint, module);
     }
@@ -196,7 +196,7 @@ partial class ExpressionTypes {
     return this.typed(expr, hint, module);
   }
 
-  private readonly integerHint(
+  private integerHint(
     literal: Expr,
     other: Expr,
     otherType: Type,
@@ -217,7 +217,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private readonly adapted(
+  private adapted(
     expr: BinaryExpr,
     pair: OperandPair,
     module: int,
@@ -256,7 +256,7 @@ partial class ExpressionTypes {
     return pair;
   }
 
-  private readonly arithmeticResult(
+  private arithmeticResult(
     expr: BinaryExpr,
     given: OperandPair,
     module: int,
@@ -298,7 +298,7 @@ partial class ExpressionTypes {
     return this.numberResult(expr, pair, module);
   }
 
-  private readonly numberResult(expr: BinaryExpr, pair: OperandPair, module: int): Type {
+  private numberResult(expr: BinaryExpr, pair: OperandPair, module: int): Type {
     const left = pair.left;
     const written = pair.right;
     const isFloatPower =
@@ -334,7 +334,7 @@ partial class ExpressionTypes {
     return common;
   }
 
-  private readonly integerChecks(
+  private integerChecks(
     expr: BinaryExpr,
     common: Type,
     right: Type,
@@ -368,7 +368,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly divisorCheck(expr: BinaryExpr, right: Type, module: int): void {
+  private divisorCheck(expr: BinaryExpr, right: Type, module: int): void {
     const isDividing = expr.op == BinaryOp.Div || expr.op == BinaryOp.Rem;
     if (!isDividing) {
       return;
@@ -382,7 +382,7 @@ partial class ExpressionTypes {
     this.report(module, expr.rhs.loc, Code.DivisionByZero, kNoDetails);
   }
 
-  private readonly wrappingResult(
+  private wrappingResult(
     expr: BinaryExpr,
     pair: OperandPair,
     module: int,
@@ -408,7 +408,7 @@ partial class ExpressionTypes {
     return right;
   }
 
-  private readonly shiftTyped(
+  private shiftTyped(
     expr: BinaryExpr,
     wanted: Type | undefined,
     module: int,
@@ -428,7 +428,7 @@ partial class ExpressionTypes {
     return this.bitsResult(expr, pair, module);
   }
 
-  private readonly bitsResult(expr: BinaryExpr, pair: OperandPair, module: int): Type {
+  private bitsResult(expr: BinaryExpr, pair: OperandPair, module: int): Type {
     const left = pair.left;
     const right = pair.right;
 
@@ -468,7 +468,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private readonly shiftConstants(
+  private shiftConstants(
     expr: BinaryExpr,
     pair: OperandPair,
     module: int,

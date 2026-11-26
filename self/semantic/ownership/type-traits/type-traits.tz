@@ -16,22 +16,20 @@ import { kDisposeKey } from "../../code/dispose-rules/const/dispose-rules.const.
 
 export class TypeTraits {
   private readonly store: TypeStore;
-  private readonly values: ExpressionTypes;
   private readonly program: Program;
   private readonly copies: Map<int, boolean>;
   private readonly frozen: Map<int, boolean>;
   private readonly open: Set<string>;
 
-  public constructor(store: TypeStore, values: Own<ExpressionTypes>, program: Own<Program>) {
+  public constructor(store: TypeStore, program: Own<Program>) {
     this.store = store;
-    this.values = values;
     this.program = program;
     this.copies = new Map<int, boolean>();
     this.frozen = new Map<int, boolean>();
     this.open = new Set<string>();
   }
 
-  public isCopy(type: Type): boolean {
+  public isCopy(type: Type, values: Read<ExpressionTypes>): boolean {
     const known = this.copies.get(type.id);
     if (known != undefined) {
       return known;
@@ -43,7 +41,7 @@ export class TypeTraits {
     }
 
     this.open.add(key);
-    const answer = this.copyOf(type);
+    const answer = this.copyOf(type, values);
 
     this.open.delete(key);
     this.copies.set(type.id, answer);
@@ -51,7 +49,7 @@ export class TypeTraits {
     return answer;
   }
 
-  public isDeepImmutable(type: Type): boolean {
+  public isDeepImmutable(type: Type, values: Read<ExpressionTypes>): boolean {
     const known = this.frozen.get(type.id);
     if (known != undefined) {
       return known;
@@ -63,7 +61,7 @@ export class TypeTraits {
     }
 
     this.open.add(key);
-    const answer = this.frozenOf(type);
+    const answer = this.frozenOf(type, values);
 
     this.open.delete(key);
     this.frozen.set(type.id, answer);
@@ -75,7 +73,7 @@ export class TypeTraits {
     return decl.methods.some((method) => method.name == kDisposeKey);
   }
 
-  private copyOf(type: Type): boolean {
+  private copyOf(type: Type, values: Read<ExpressionTypes>): boolean {
     if (this.store.isInterned(type)) {
       return true;
     }
@@ -95,21 +93,21 @@ export class TypeTraits {
       case TypeKind.Template:
         return true;
       case TypeKind.Union:
-        return type.parts.every((part) => this.isCopy(part));
+        return type.parts.every((part) => this.isCopy(part, values));
       case TypeKind.Result:
-        return this.isCopy(type.value) && this.isCopy(type.error);
+        return this.isCopy(type.value, values) && this.isCopy(type.error, values);
       case TypeKind.Tuple:
-        return type.readonly && type.items.every((item) => this.isCopy(item));
+        return type.readonly && type.items.every((item) => this.isCopy(item, values));
       case TypeKind.Object:
-        return this.isCopyObject(type.fields);
+        return this.isCopyObject(type.fields, values);
       case TypeKind.Instance:
-        return this.isCopyInstance(type);
+        return this.isCopyInstance(type, values);
       default:
         return false;
     }
   }
 
-  private isCopyObject(fields: Read<ObjectField[]>): boolean {
+  private isCopyObject(fields: Read<ObjectField[]>, values: Read<ExpressionTypes>): boolean {
     for (const field of fields) {
       if (!field.readonly || field.method == true) {
         return false;
@@ -117,7 +115,7 @@ export class TypeTraits {
       if (field.type.kind == TypeKind.Function) {
         return false;
       }
-      if (!this.isCopy(field.type)) {
+      if (!this.isCopy(field.type, values)) {
         return false;
       }
     }
@@ -125,13 +123,13 @@ export class TypeTraits {
     return true;
   }
 
-  private isCopyInstance(type: Type): boolean {
+  private isCopyInstance(type: Type, values: Read<ExpressionTypes>): boolean {
     if (type.kind == TypeKind.Instance && this.isHandle(type.module, type.loc)) {
       return true;
     }
 
-    const decl = this.values.classDeclOf(type);
-    const fields = this.values.instanceFields(type);
+    const decl = values.classDeclOf(type);
+    const fields = values.instanceFields(type);
     if (decl == undefined || fields == undefined) {
       return false;
     }
@@ -144,7 +142,7 @@ export class TypeTraits {
       if (declared == undefined || !this.isReadonlyField(declared)) {
         return false;
       }
-      if (!this.isCopy(field.type)) {
+      if (!this.isCopy(field.type, values)) {
         return false;
       }
     }
@@ -152,32 +150,32 @@ export class TypeTraits {
     return true;
   }
 
-  private frozenOf(type: Type): boolean {
-    if (this.isCopy(type)) {
+  private frozenOf(type: Type, values: Read<ExpressionTypes>): boolean {
+    if (this.isCopy(type, values)) {
       return true;
     }
 
     switch (type.kind) {
       case TypeKind.Array:
-        return type.readonly == true && this.isDeepImmutable(type.item);
+        return type.readonly == true && this.isDeepImmutable(type.item, values);
       case TypeKind.Tuple:
-        return type.readonly && this.areDeepImmutable(type.items);
+        return type.readonly && this.areDeepImmutable(type.items, values);
       case TypeKind.Union:
-        return type.parts.every((part) => this.isDeepImmutable(part));
+        return type.parts.every((part) => this.isDeepImmutable(part, values));
       case TypeKind.Object:
-        return this.isFrozenObject(type.fields);
+        return this.isFrozenObject(type.fields, values);
       case TypeKind.Instance:
-        return this.isFrozenInstance(type);
+        return this.isFrozenInstance(type, values);
       default:
         return false;
     }
   }
 
-  private areDeepImmutable(types: Read<Type[]>): boolean {
-    return types.every((type) => this.isDeepImmutable(type));
+  private areDeepImmutable(types: Read<Type[]>, values: Read<ExpressionTypes>): boolean {
+    return types.every((type) => this.isDeepImmutable(type, values));
   }
 
-  private isFrozenObject(fields: Read<ObjectField[]>): boolean {
+  private isFrozenObject(fields: Read<ObjectField[]>, values: Read<ExpressionTypes>): boolean {
     for (const field of fields) {
       if (!field.readonly) {
         return false;
@@ -185,7 +183,7 @@ export class TypeTraits {
       if (field.method == true || field.type.kind == TypeKind.Function) {
         continue;
       }
-      if (!this.isDeepImmutable(field.type)) {
+      if (!this.isDeepImmutable(field.type, values)) {
         return false;
       }
     }
@@ -193,9 +191,9 @@ export class TypeTraits {
     return true;
   }
 
-  private isFrozenInstance(type: Type): boolean {
-    const decl = this.values.classDeclOf(type);
-    const fields = this.values.instanceFields(type);
+  private isFrozenInstance(type: Type, values: Read<ExpressionTypes>): boolean {
+    const decl = values.classDeclOf(type);
+    const fields = values.instanceFields(type);
     if (decl == undefined || fields == undefined) {
       return false;
     }
@@ -208,7 +206,7 @@ export class TypeTraits {
       if (declared == undefined || !this.isReadonlyField(declared)) {
         return false;
       }
-      if (!this.isDeepImmutable(field.type)) {
+      if (!this.isDeepImmutable(field.type, values)) {
         return false;
       }
     }

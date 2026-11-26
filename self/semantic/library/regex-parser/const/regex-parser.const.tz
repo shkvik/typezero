@@ -1,16 +1,8 @@
 import {
   RegexGroupKind,
   RegexGroupMarker,
-  RegexNode,
-  RegexNodeKind,
 } from "../types/regex-parser.types.tz";
 
-export const kAtomNode: RegexNode = {
-  kind: RegexNodeKind.Atom,
-  parts: [],
-  capture: 0,
-  isRequired: true,
-};
 export const kGroupMarkers: RegexGroupMarker[] = [
   { text: "?:", kind: RegexGroupKind.Plain },
   { text: "?=", kind: RegexGroupKind.Look },

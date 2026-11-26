@@ -71,7 +71,7 @@ partial class ExpressionTypes {
     this.reportFound(module, this.foreign.takesError(loc, type));
   }
 
-  private readonly handleNew(
+  private handleNew(
     expr: NewExpr,
     name: string,
     target: ValueTarget,

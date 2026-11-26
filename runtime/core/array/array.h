@@ -14,6 +14,8 @@ typedef struct TzArray {
 } TzArray;
 
 int64_t tz_arr_live_objects(void);
+/* An array made immortal (Interned, a copyable module constant) is never freed and is no leak. */
+void tz_arr_forget(void);
 TzArray *tz_arr_new(const TzType *type, int64_t length, int64_t capacity);
 TzArray *tz_arr_new_group(const TzType *type, int64_t length, int64_t capacity);
 TzArray *tz_arr_new_length_group(const TzType *type, int64_t length);

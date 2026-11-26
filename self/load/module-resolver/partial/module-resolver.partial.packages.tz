@@ -224,7 +224,7 @@ partial class ModuleResolver {
       return [found.main];
     }
 
-    return kEntryCandidates;
+    return kEntryCandidates.slice();
   }
 
   private exportedFile(

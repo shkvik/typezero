@@ -32,10 +32,11 @@ partial class ExpressionTypes {
     }
 
     const index = this.timerOptionsAt(name);
+    const options = kTimerOptions.slice();
     const row: FsCall = {
       name,
       shape: FsShape.PathOnly,
-      options: kTimerOptions,
+      options,
       isUtf8Only: false,
     };
     if (expr.args.length <= index + 1) {

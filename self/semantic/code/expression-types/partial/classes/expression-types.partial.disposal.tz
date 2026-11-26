@@ -70,7 +70,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private readonly usingCheck(
+  private usingCheck(
     statement: VarDeclStmt,
     following: Read<Stmt[]>,
     module: int,

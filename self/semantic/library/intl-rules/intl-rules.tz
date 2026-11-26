@@ -19,7 +19,7 @@ import {
   kPerSeparator,
   kRelativeUnits,
   kSanctionedUnits,
-  kSupportedOptions,
+  kSupportedService,
   kValueMethods,
 } from "./const/intl-rules.const.tz";
 import {
@@ -38,12 +38,12 @@ export class IntlRules {
     this.types = types;
   }
 
-  public readonly service(name: string): IntlService | undefined {
+  public readonly service(name: string): Read<IntlService> | undefined {
     return kIntlServices.find((one) => one.name == name);
   }
 
-  public readonly supportedService(): IntlService {
-    return { name: "", callable: true, options: kSupportedOptions };
+  public readonly supportedService(): Read<IntlService> {
+    return kSupportedService;
   }
 
   public readonly method(service: string, name: string): IntlMethodRow | undefined {
@@ -106,11 +106,11 @@ export class IntlRules {
     return kRelativeUnits.includes(unit);
   }
 
-  public readonly relativeUnits(): string[] {
+  public readonly relativeUnits(): Read<string[]> {
     return kRelativeUnits;
   }
 
-  public readonly normalizationForms(): string[] {
+  public readonly normalizationForms(): Read<string[]> {
     return kNormalizationForms;
   }
 

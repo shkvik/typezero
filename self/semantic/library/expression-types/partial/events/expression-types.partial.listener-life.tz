@@ -33,7 +33,7 @@ import {
 } from "../../../event-rules/const/event-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly listenerLife(expr: CallExpr, member: MemberExpr, module: int): void {
+  private listenerLife(expr: CallExpr, member: MemberExpr, module: int): void {
     const name = member.name;
     const listener = expr.args[1]?.expr;
     const isRemoving = name == kOffName || name == kRemoveListenerName;
@@ -44,7 +44,7 @@ partial class ExpressionTypes {
     this.listenerLifeCheck(listener, member.object, false, module);
   }
 
-  private readonly listenerLifeCheck(
+  private listenerLifeCheck(
     listener: Expr,
     emitter: Expr | undefined,
     isTimer: boolean,
@@ -142,7 +142,7 @@ partial class ExpressionTypes {
     return `${head} and ${last}`;
   }
 
-  private readonly listenerShape(listener: Expr, module: int): ListenerShape {
+  private listenerShape(listener: Expr, module: int): ListenerShape {
     if (listener.kind == ExprKind.Function) {
       return this.listenerClosure(listener.fn, module);
     }
@@ -170,7 +170,7 @@ partial class ExpressionTypes {
     return this.record(target.module)?.functions.get(target.loc);
   }
 
-  private readonly memberShape(listener: MemberExpr, module: int): ListenerShape {
+  private memberShape(listener: MemberExpr, module: int): ListenerShape {
     const object = this.types.definedType(
       this.peekType(listener.object, module),
     );
@@ -193,7 +193,7 @@ partial class ExpressionTypes {
     return entry != undefined && entry.field == undefined && !entry.isStatic;
   }
 
-  private readonly listenerClosure(fn: FunctionDecl, module: int): ListenerShape {
+  private listenerClosure(fn: FunctionDecl, module: int): ListenerShape {
     const captured = this.capturesOf(fn, module);
     const only = captured[0];
     if (only == undefined) {
@@ -212,7 +212,7 @@ partial class ExpressionTypes {
     return { form: ListenerForm.Captures, captured, isSelf: false };
   }
 
-  private readonly capturesOf(fn: FunctionDecl, module: int): Capture[] {
+  private capturesOf(fn: FunctionDecl, module: int): Capture[] {
     const exprs = this.collector.functionExprs(fn, true);
     let last = fn.loc;
 
@@ -346,7 +346,7 @@ partial class ExpressionTypes {
     return this.isLocalTarget(target, module);
   }
 
-  private readonly noteSelfListener(): void {
+  private noteSelfListener(): void {
     const owner = this.ownerClasses[this.ownerClasses.length - 1];
     const fn = this.currentMethods[this.currentMethods.length - 1];
     if (owner == undefined || fn == undefined || fn.name != kConstructorWord) {
@@ -356,7 +356,7 @@ partial class ExpressionTypes {
     this.eventMarks.selfListeners.add(`${owner.module} ${owner.decl.loc}`);
   }
 
-  private readonly noteDroppedNew(expr: Expr, type: Type, module: int): void {
+  private noteDroppedNew(expr: Expr, type: Type, module: int): void {
     if (expr.kind != ExprKind.New || type.kind != TypeKind.Instance) {
       return;
     }
@@ -390,7 +390,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly endlessWaitCheck(expr: CallExpr, name: string, module: int): void {
+  private endlessWaitCheck(expr: CallExpr, name: string, module: int): void {
     const first = expr.args[0]?.expr;
     if (first == undefined || this.isTimedWait(expr)) {
       return;

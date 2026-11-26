@@ -178,7 +178,7 @@ partial class ExpressionTypes {
     return this.isGlobalUse(expr, module);
   }
 
-  private readonly regexMethodCall(
+  private regexMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -203,7 +203,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly regexRunCall(expr: CallExpr, member: MemberExpr, module: int): Type {
+  private regexRunCall(expr: CallExpr, member: MemberExpr, module: int): Type {
     const count = expr.args.length;
     const text = expr.args[0];
     if (count != 1 || text == undefined) {
@@ -256,7 +256,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly regExpStaticCall(
+  private regExpStaticCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -273,7 +273,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly regExpNew(expr: NewExpr, module: int): Type | undefined {
+  private regExpNew(expr: NewExpr, module: int): Type | undefined {
     if (!this.isRegExpNew(expr, module)) {
       return undefined;
     }
@@ -281,7 +281,7 @@ partial class ExpressionTypes {
     return this.regExpMade(expr.loc, expr.args, module);
   }
 
-  private readonly regExpCalled(expr: CallExpr, module: int): Type | undefined {
+  private regExpCalled(expr: CallExpr, module: int): Type | undefined {
     const callee = expr.callee;
     if (!this.isRegExpName(callee, module)) {
       return undefined;
@@ -290,7 +290,7 @@ partial class ExpressionTypes {
     return this.regExpMade(callee.loc, expr.args, module);
   }
 
-  private readonly regExpMade(loc: int, args: Read<CallArgument[]>, module: int): Type {
+  private regExpMade(loc: int, args: Read<CallArgument[]>, module: int): Type {
     const count = args.length;
     const pattern = args[0];
     if (count > 2 || pattern == undefined) {
@@ -317,7 +317,7 @@ partial class ExpressionTypes {
     return this.escapedRegExp(loc, pattern, args[1], module);
   }
 
-  private readonly escapedRegExp(
+  private escapedRegExp(
     loc: int,
     pattern: CallArgument,
     second: CallArgument | undefined,
@@ -359,7 +359,7 @@ partial class ExpressionTypes {
     return this.constantText(second.expr);
   }
 
-  private readonly looseSecond(second: CallArgument | undefined, module: int): void {
+  private looseSecond(second: CallArgument | undefined, module: int): void {
     if (second != undefined) {
       this.looseArguments([second], module);
     }

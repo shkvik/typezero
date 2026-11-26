@@ -20,7 +20,7 @@ import {
 } from "../../../byte-number-rules/types/byte-number-rules.types.tz";
 
 partial class ExpressionTypes {
-  private readonly refusedByteCall(
+  private refusedByteCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -49,7 +49,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private readonly byteNumberCheck(
+  private byteNumberCheck(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -90,7 +90,7 @@ partial class ExpressionTypes {
     this.requireUpTo(offset, member.object, { what, less: info.size }, module);
   }
 
-  private readonly variableNumberCheck(
+  private variableNumberCheck(
     expr: CallExpr,
     member: MemberExpr,
     method: NumberMethod,
@@ -150,7 +150,7 @@ partial class ExpressionTypes {
     return expr.args[place]?.expr;
   }
 
-  private readonly isFittingValue(value: Expr, range: ProofRange, module: int): boolean {
+  private isFittingValue(value: Expr, range: ProofRange, module: int): boolean {
     const given = this.peekType(value, module);
     const base = this.types.definedType(given);
     if (base.kind != TypeKind.Int) {
@@ -165,7 +165,7 @@ partial class ExpressionTypes {
     return constant != undefined && this.proofs.isInside(constant, range);
   }
 
-  private readonly byteFitCheck(
+  private byteFitCheck(
     value: Expr,
     info: ByteKindInfo,
     range: ProofRange,

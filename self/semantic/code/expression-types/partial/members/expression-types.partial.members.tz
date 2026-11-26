@@ -24,7 +24,7 @@ import {
 } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private readonly memberTyped(expr: MemberExpr, module: int): Type {
+  private memberTyped(expr: MemberExpr, module: int): Type {
     const isRefused =
       this.thisPlaceCheck(expr, module) || this.superReadCheck(expr, module);
     if (isRefused || this.memberReadEarly(expr, module)) {
@@ -86,7 +86,7 @@ partial class ExpressionTypes {
     return this.memberOf(expr, object, module);
   }
 
-  private readonly chainTyped(
+  private chainTyped(
     expr: OptionalChainExpr,
     wanted: Type | undefined,
     module: int,
@@ -104,7 +104,7 @@ partial class ExpressionTypes {
     return this.types.optional(inner);
   }
 
-  private readonly receiverOf(object: Expr, optional: boolean, module: int): Type {
+  private receiverOf(object: Expr, optional: boolean, module: int): Type {
     this.memberObjects.add(object);
     this.markThisObject(object, module);
 
@@ -113,7 +113,7 @@ partial class ExpressionTypes {
     return this.linkOf(type, optional);
   }
 
-  private readonly linkOf(type: Type, optional: boolean): Type {
+  private linkOf(type: Type, optional: boolean): Type {
     if (!optional || !this.types.isOptional(type)) {
       return type;
     }
@@ -123,7 +123,7 @@ partial class ExpressionTypes {
     return this.types.definedType(type);
   }
 
-  private readonly memberOf(expr: MemberExpr, object: Type, module: int): Type {
+  private memberOf(expr: MemberExpr, object: Type, module: int): Type {
     if (this.unknownMemberCheck(expr, object, module)) {
       return this.store.plain(TypeKind.Error);
     }
@@ -194,7 +194,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly unionMemberOf(
+  private unionMemberOf(
     expr: MemberExpr,
     object: UnionType,
     module: int,
@@ -216,7 +216,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly parameterMemberOf(expr: MemberExpr, object: Type, module: int): Type {
+  private parameterMemberOf(expr: MemberExpr, object: Type, module: int): Type {
     const constraint = this.store.constraintOf(object);
     if (constraint == undefined) {
       const word = expr.name;
@@ -306,7 +306,7 @@ partial class ExpressionTypes {
     return { module: target.module, decl };
   }
 
-  private readonly objectAnswered(object: Expr, module: int): void {
+  private objectAnswered(object: Expr, module: int): void {
     if (this.answers.isVisited(object)) {
       return;
     }

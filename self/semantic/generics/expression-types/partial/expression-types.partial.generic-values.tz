@@ -10,7 +10,7 @@ import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import { ValueTarget } from "../../../code/expression-types/types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private readonly genericValue(
+  private genericValue(
     expr: NameExpr,
     target: ValueTarget,
     wanted: Type | undefined,

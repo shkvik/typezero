@@ -255,6 +255,8 @@ export type InternedType = Interned<Type>;
 
 export type InternedTypeList = Interned<readonly Type[]>;
 
+export type InternedFields = Interned<readonly ObjectField[]>;
+
 export type InternedWriters = Interned<readonly ParamWriter[]>;
 
 export type InternedParams = Interned<readonly FunctionParameter[]>;

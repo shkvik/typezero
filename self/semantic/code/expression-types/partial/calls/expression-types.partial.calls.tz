@@ -38,7 +38,7 @@ import {
 import { kDateName } from "../../../../types/type-questions/const/type-questions.const.tz";
 
 partial class ExpressionTypes {
-  private readonly callTyped(
+  private callTyped(
     expr: CallExpr,
     wanted: Type | undefined,
     module: int,
@@ -80,7 +80,7 @@ partial class ExpressionTypes {
     return !this.modules.isLibraryModule(target.module);
   }
 
-  private readonly namedCall(
+  private namedCall(
     expr: CallExpr,
     callee: NameExpr,
     wanted: Type | undefined,
@@ -137,7 +137,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly numberCall(expr: CallExpr, module: int): Type {
+  private numberCall(expr: CallExpr, module: int): Type {
     const double = this.store.plain(TypeKind.Double);
     const arg = expr.args[0];
     if (arg == undefined) {
@@ -157,7 +157,7 @@ partial class ExpressionTypes {
     return this.store.resultOf(double, error);
   }
 
-  private readonly functionCall(
+  private functionCall(
     expr: CallExpr,
     callee: NameExpr,
     target: ValueTarget,
@@ -273,19 +273,19 @@ partial class ExpressionTypes {
     };
   }
 
-  private readonly takenFrom(object: Expr, module: int): void {
+  private takenFrom(object: Expr, module: int): void {
     const key = this.pathKey(object, module);
     if (key != undefined) {
       this.forgetAllLengths();
     }
   }
 
-  private readonly changedArguments(expr: CallExpr, module: int): void {
+  private changedArguments(expr: CallExpr, module: int): void {
     this.forgetLengths(expr.args, module);
     this.forgetAllLengths();
   }
 
-  private readonly genericResult(
+  private genericResult(
     expr: CallExpr,
     generic: Read<GenericTarget>,
     wanted: Type | undefined,
@@ -335,7 +335,7 @@ partial class ExpressionTypes {
     return same.length > 1;
   }
 
-  private readonly valueCall(expr: CallExpr, module: int): Type {
+  private valueCall(expr: CallExpr, module: int): Type {
     const callee = expr.callee;
     const type = this.typed(callee, undefined, module);
     const link = this.linkOf(type, expr.optional);
@@ -343,7 +343,7 @@ partial class ExpressionTypes {
     return this.calledValue(expr, link, module);
   }
 
-  private readonly calledValue(expr: CallExpr, type: Type, module: int): Type {
+  private calledValue(expr: CallExpr, type: Type, module: int): Type {
     const callee = expr.callee;
     const loc = callee.loc;
 
@@ -375,7 +375,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private readonly calledWith(
+  private calledWith(
     expr: CallExpr,
     type: FunctionType,
     loc: int,
@@ -431,7 +431,7 @@ partial class ExpressionTypes {
     return shape.result;
   }
 
-  private readonly spreadRefused(
+  private spreadRefused(
     expr: CallExpr,
     kind: CallKind,
     method: string,

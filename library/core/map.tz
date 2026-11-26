@@ -395,36 +395,42 @@ export class HashMap<K, V> {
   }
 }
 
-export function mapKeys<K, V>(map: Read<HashMap<K, V>>): K[] {
-  const items: K[] = [];
+export function mapKeys<K, V>(map: Lent<HashMap<K, V>>): Read<K>[] {
+  const items: Read<K>[] = [];
   let entry = map.next(0);
 
   while (entry >= 0) {
-    items.push(map.keyAt(entry));
+    const key = map.keyAt(entry);
+
+    items.push(key);
     entry = map.next(entry + 1);
   }
 
   return items;
 }
 
-export function mapValues<K, V>(map: Read<HashMap<K, V>>): V[] {
-  const items: V[] = [];
+export function mapValues<K, V>(map: Lent<HashMap<K, V>>): Read<V>[] {
+  const items: Read<V>[] = [];
   let entry = map.next(0);
 
   while (entry >= 0) {
-    items.push(map.valueAt(entry));
+    const value = map.valueAt(entry);
+
+    items.push(value);
     entry = map.next(entry + 1);
   }
 
   return items;
 }
 
-export function mapEntries<K, V>(map: Read<HashMap<K, V>>): [K, V][] {
-  const items: [K, V][] = [];
+export function mapEntries<K, V>(map: Lent<HashMap<K, V>>): [Read<K>, Read<V>][] {
+  const items: [Read<K>, Read<V>][] = [];
   let entry = map.next(0);
 
   while (entry >= 0) {
-    const pair: [K, V] = [map.keyAt(entry), map.valueAt(entry)];
+    const key = map.keyAt(entry);
+    const value = map.valueAt(entry);
+    const pair: [Read<K>, Read<V>] = [key, value];
 
     items.push(pair);
     entry = map.next(entry + 1);
@@ -438,7 +444,12 @@ export function mapCopy<K, V>(map: Read<HashMap<K, V>>): HashMap<K, V> {
   let entry = map.next(0);
 
   while (entry >= 0) {
-    copy.set(map.keyAt(entry), map.valueAt(entry));
+    const key = map.keyAt(entry);
+    const value = map.valueAt(entry);
+    const keyCopy = structuredClone(key);
+    const valueCopy = structuredClone(value);
+
+    copy.set(keyCopy, valueCopy);
     entry = map.next(entry + 1);
   }
 
@@ -447,6 +458,15 @@ export function mapCopy<K, V>(map: Read<HashMap<K, V>>): HashMap<K, V> {
 
 export function mapAdded<K, V>(map: HashMap<K, V>, entries: Read<[K, V][]>): void {
   for (const entry of entries) {
+    const key = structuredClone(entry[0]);
+    const value = structuredClone(entry[1]);
+
+    map.set(key, value);
+  }
+}
+
+export function mapTaken<K, V>(map: HashMap<K, V>, entries: Own<[K, V][]>): void {
+  for (const entry of entries.drain()) {
     map.set(entry[0], entry[1]);
   }
 }
@@ -457,6 +477,14 @@ export function setAdd<T>(set: HashMap<T, boolean>, item: Own<T>): void {
 
 export function setAdded<T>(set: HashMap<T, boolean>, items: Read<T[]>): void {
   for (const item of items) {
+    const copy = structuredClone(item);
+
+    set.set(copy, true);
+  }
+}
+
+export function setTaken<T>(set: HashMap<T, boolean>, items: Own<T[]>): void {
+  for (const item of items.drain()) {
     set.set(item, true);
   }
 }

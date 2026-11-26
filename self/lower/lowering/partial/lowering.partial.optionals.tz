@@ -60,7 +60,7 @@ partial class Lowering {
   private somewhere(frame: Read<Frame>, value: IrValue, target: Type): IrValue {
     const type = this.irType(target) ?? kPointerType;
     if (type == value.type) {
-      return { type, value: value.value, tz: target, owned: value.owned };
+      return this.retyped(value, type, target);
     }
 
     const empty = this.ir.undefinedOf(type);
@@ -74,7 +74,7 @@ partial class Lowering {
   private insideValue(frame: Read<Frame>, value: IrValue, inner: Type): IrValue {
     const type = this.irType(inner) ?? kPointerType;
     if (type == value.type) {
-      return { type, value: value.value, tz: inner, owned: value.owned };
+      return this.retyped(value, type, inner);
     }
 
     const made = frame.made.extract(value.value, 0);
@@ -172,6 +172,14 @@ partial class Lowering {
   }
 
   private nullish(frame: Frame, expr: BinaryExpr): IrValue | undefined {
+    return this.nullishValue(frame, expr, false);
+  }
+
+  private nullishValue(
+    frame: Frame,
+    expr: BinaryExpr,
+    isFlagWanted: boolean,
+  ): IrValue | undefined {
     const result = this.nullishResult(frame, expr);
     const type = this.typeOrUndefined(result);
     const left = this.value(frame, expr.lhs);
@@ -186,6 +194,11 @@ partial class Lowering {
       return this.converted(frame, left, result, expr.loc);
     }
 
+    const isFlagged = isFlagWanted && left.owned != true && this.isManaged(result);
+    if (isFlagged) {
+      return this.flaggedNullish(frame, expr, left, inner, result);
+    }
+
     const has = this.hasValue(frame, left);
     const given = frame.made.block("nullish.given");
     const other = frame.made.block("nullish.other");
@@ -195,7 +208,7 @@ partial class Lowering {
     frame.made.open(given);
 
     const inside = this.insideValue(frame, left, inner);
-    const first = this.branchOwned(frame, inside, result, expr.loc);
+    const first = this.nullishFirst(frame, inside, result, expr.loc);
     const firstBlock = frame.made.currentBlock();
 
     this.jumpTo(frame, end);
@@ -217,9 +230,25 @@ partial class Lowering {
       [firstBlock, secondBlock],
     );
 
-    this.dropping(frame, left);
-
     return { type, value, tz: result, owned: true };
+  }
+
+  private nullishFirst(
+    frame: Frame,
+    inside: IrValue,
+    result: Type,
+    loc: int,
+  ): IrValue | undefined {
+    if (inside.owned != true) {
+      return this.branchOwned(frame, inside, result, loc);
+    }
+
+    const converted = this.converted(frame, inside, result, loc);
+    if (converted == undefined) {
+      return undefined;
+    }
+
+    return this.owning(frame, converted);
   }
 
   private nullishResult(frame: Frame, expr: BinaryExpr): Type | undefined {
@@ -235,6 +264,93 @@ partial class Lowering {
     }
 
     return result;
+  }
+
+  private flaggedNullish(
+    frame: Frame,
+    expr: BinaryExpr,
+    left: IrValue,
+    inner: Type,
+    result: Type,
+  ): IrValue | undefined {
+    const type = this.irType(result) ?? kPointerType;
+    const has = this.hasValue(frame, left);
+    const given = frame.made.block("nullish.given");
+    const other = frame.made.block("nullish.other");
+    const end = frame.made.block("nullish.end");
+
+    frame.made.conditionalBranch(has, given, other);
+    frame.made.open(given);
+
+    const inside = this.insideValue(frame, left, inner);
+    const first = this.converted(frame, inside, result, expr.loc);
+    const firstBlock = frame.made.currentBlock();
+
+    this.jumpTo(frame, end);
+    frame.made.open(other);
+
+    const wanted = this.wantedValue(frame, expr.rhs, result);
+    const second = this.convertedOrNone(frame, wanted, result, expr.rhs.loc);
+    const secondBlock = frame.made.currentBlock();
+
+    this.jumpTo(frame, end);
+    frame.made.open(end);
+
+    if (first == undefined || second == undefined) {
+      return undefined;
+    }
+
+    const value = frame.made.phi(
+      type,
+      [first.value, second.value],
+      [firstBlock, secondBlock],
+    );
+    const firstFlag = this.ownedBit(first);
+    const secondFlag = this.ownedBit(second);
+    const ownedFlag = frame.made.phi(
+      kBooleanType,
+      [firstFlag, secondFlag],
+      [firstBlock, secondBlock],
+    );
+
+    return { type, value, tz: result, owned: false, ownedFlag };
+  }
+
+  private readonly ownedBit(value: Read<IrValue>): LLVMValue {
+    if (value.owned == true) {
+      return this.ir.integer(kBooleanType, "1");
+    }
+
+    return this.ir.integer(kBooleanType, "0");
+  }
+
+  private argumentValue(
+    frame: Frame,
+    expr: Expr,
+    wanted: Type,
+    isLent: boolean,
+  ): IrValue | undefined {
+    if (isLent && expr.kind == ExprKind.Binary && expr.op == BinaryOp.Nullish) {
+      return this.nullishValue(frame, expr, true);
+    }
+
+    return this.wantedValue(frame, expr, wanted);
+  }
+
+  private readonly withOwnedFlag(value: IrValue, ownedFlag: LLVMValue | undefined): IrValue {
+    if (ownedFlag == undefined) {
+      return value;
+    }
+
+    return { type: value.type, value: value.value, tz: value.tz, owned: false, ownedFlag };
+  }
+
+  private loopSourceValue(frame: Frame, expr: Expr): IrValue | undefined {
+    if (expr.kind == ExprKind.Binary && expr.op == BinaryOp.Nullish) {
+      return this.nullishValue(frame, expr, true);
+    }
+
+    return this.loopSource(frame, expr);
   }
 
   private branchOwned(

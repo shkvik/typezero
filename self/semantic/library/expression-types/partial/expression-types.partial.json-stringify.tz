@@ -18,7 +18,7 @@ import {
 } from "../../library-rules/const/library-rules.const.tz";
 
 partial class ExpressionTypes {
-  private readonly stringifiedType(
+  private stringifiedType(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -82,7 +82,7 @@ partial class ExpressionTypes {
     return text;
   }
 
-  private readonly canHoldItself(type: Type): boolean {
+  private canHoldItself(type: Type): boolean {
     const open: Type[] = [];
     const steps: HeldStep[] = [{ type, isLeave: false }];
 
@@ -128,7 +128,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private readonly heldParts(type: Type): Type[] {
+  private heldParts(type: Type): Type[] {
     switch (type.kind) {
       case TypeKind.Instance:
         return this.heldFields(type);
@@ -147,7 +147,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private readonly heldFields(instance: InstanceType): Type[] {
+  private heldFields(instance: InstanceType): Type[] {
     const types: Type[] = [];
     let current: Type | undefined = instance;
 

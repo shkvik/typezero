@@ -47,7 +47,7 @@ partial class Lowering {
       return this.reshaped(frame, value, target, loc);
     }
     if (type == value.type) {
-      return { type, value: value.value, tz: target, owned: value.owned };
+      return this.retyped(value, type, target);
     }
     if (this.isInteger(value.tz) && this.isInteger(target)) {
       return this.integerConverted(frame, value, target, type);

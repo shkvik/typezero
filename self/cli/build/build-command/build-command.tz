@@ -82,7 +82,14 @@ export class BuildCommand {
 
     const moves = ownership.takeMoves();
     const borrows = ownership.takeBorrows();
-    const lowering = new Lowering(this.store, program, checked, moves, borrows);
+    const lowering = new Lowering(
+      this.store,
+      program,
+      checked.types,
+      ownership.values,
+      moves,
+      borrows,
+    );
 
     if (options.isAuditing) {
       lowering.audit();
@@ -92,6 +99,7 @@ export class BuildCommand {
 
     if (options.isAuditing) {
       this.auditPrinted(lowering.auditedCounts());
+      this.auditPrinted(lowering.lateWork());
     }
     if (lowered.unlowered.length > 0) {
       return this.unloweredReport(program, lowered.unlowered);
@@ -274,7 +282,8 @@ export class BuildCommand {
     const linker = this.toolPath(kLinkerTool);
     const runtime = this.toolPath(kRuntimeLibrary);
     const inputs = [`/out:${output}`, objectPath, runtime].concat(libraries);
-    const args = kLinkerArguments.concat(inputs, kSystemLibraries);
+    const system = kSystemLibraries.slice();
+    const args = kLinkerArguments.concat(inputs, system);
 
     return this.toolRan(linker, args);
   }

@@ -1,0 +1,330 @@
+import {
+  ArrayLitExpr,
+  Expr,
+  ExprKind,
+  MemberExpr,
+  NewExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrFunction } from "../../ir-function/ir-function.tz";
+import {
+  IrCallee,
+  IrIntPredicate,
+  IrOpcode,
+} from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kArrayForget,
+  kCellTypeName,
+  kFreshArrayMethods,
+  kImmortalCount,
+  kImmortalFloor,
+  kImmortalName,
+  kIntType,
+  kNoOwner,
+  kObjectForget,
+  kPointerType,
+  kThisName,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue, LayoutField, Place } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private isImmortalKind(type: Type): boolean {
+    const inner = this.optionalInner(type) ?? type;
+    const isKept = this.isManaged(inner) || this.isArena(inner);
+    if (this.isString(inner) || !isKept) {
+      return false;
+    }
+    if (this.isArray(inner)) {
+      return true;
+    }
+
+    return (
+      this.isObjectLike(inner) &&
+      inner.kind != TypeKind.Union &&
+      this.layoutOf(inner) != undefined
+    );
+  }
+
+  private staticValue(value: Read<IrValue>): IrValue {
+    const isStatic = this.isImmortalKind(value.tz);
+    if (!isStatic) {
+      return { type: value.type, value: value.value, tz: value.tz, owned: value.owned };
+    }
+
+    return { type: value.type, value: value.value, tz: value.tz, isStatic: true };
+  }
+
+  private madeImmortal(frame: Read<Frame>, made: IrValue | undefined): IrValue | undefined {
+    if (made != undefined && this.isArena(made.tz)) {
+      this.immortalized(frame, made);
+    }
+
+    return made;
+  }
+
+  private readonly retyped(value: Read<IrValue>, type: string, tz: Type): IrValue {
+    return {
+      type,
+      value: value.value,
+      tz,
+      owned: value.owned,
+      ownedFlag: value.ownedFlag,
+      isStatic: value.isStatic,
+    };
+  }
+
+  private madeLiteral(frame: Frame, expr: ArrayLitExpr): IrValue | undefined {
+    const made = this.arrayLiteral(frame, expr);
+
+    return this.madeImmortal(frame, made);
+  }
+
+  private madeObject(frame: Frame, expr: NewExpr): IrValue | undefined {
+    const made = this.newValue(frame, expr);
+
+    return this.madeImmortal(frame, made);
+  }
+
+  private isStaticUnionField(object: Read<IrValue>, result: Type, expr: MemberExpr): boolean {
+    const type = object.tz;
+    if (type.kind != TypeKind.Union || !this.isStaticSource(object)) {
+      return false;
+    }
+    if (!this.isImmortalKind(result)) {
+      return false;
+    }
+
+    return type.parts.every((part) => !this.isCellFieldOf(part, expr.name));
+  }
+
+  private keptOrStatic(frame: Read<Frame>, value: IrValue, isStatic: boolean): IrValue {
+    if (isStatic) {
+      return value;
+    }
+
+    return this.owning(frame, value);
+  }
+
+  private isTakenItem(
+    source: Read<IrValue>,
+    iterable: Expr,
+    element: string,
+    item: Type,
+  ): boolean {
+    const isFresh = source.owned == true && this.isFreshArray(iterable);
+
+    return isFresh && element == kPointerType && this.isManaged(item);
+  }
+
+  private readonly isFreshArray(expr: Expr): boolean {
+    if (expr.kind == ExprKind.ArrayLit) {
+      return true;
+    }
+    if (expr.kind != ExprKind.Call) {
+      return false;
+    }
+
+    const callee = expr.callee;
+    if (callee.kind != ExprKind.Member) {
+      return false;
+    }
+
+    const receiver = this.typeOf(callee.object);
+    const isArray = receiver != undefined && receiver.kind == TypeKind.Array;
+
+    return isArray && kFreshArrayMethods.includes(callee.name);
+  }
+
+  private staticOrSame(value: IrValue, isStatic: boolean): IrValue {
+    if (!isStatic) {
+      return value;
+    }
+
+    return this.staticValue(value);
+  }
+
+  private isStaticSource(object: Read<IrValue>): boolean {
+    if (object.isStatic == true) {
+      return true;
+    }
+
+    const inner = this.optionalInner(object.tz) ?? object.tz;
+    if (inner.kind == TypeKind.Union) {
+      return inner.parts.every((part) => this.isArena(part));
+    }
+
+    return this.isArena(inner) && this.isImmortalKind(inner);
+  }
+
+  private isStaticField(object: Read<IrValue>, expr: MemberExpr): boolean {
+    const isThis = expr.object.kind == ExprKind.Name && expr.object.name == kThisName;
+
+    return this.isStaticSource(object) && !isThis && !this.isCellFieldOf(object.tz, expr.name);
+  }
+
+  private readonly isCellFieldOf(type: Type, name: string): boolean {
+    if (type.kind == TypeKind.Object) {
+      const found = type.fields.find((one) => one.name == name);
+
+      return found != undefined && found.cell == true;
+    }
+
+    const decl = this.values.classDeclOf(type);
+    const field = decl?.fields.find((one) => one.name == name);
+    const ref = field?.type;
+
+    return ref != undefined && ref.name == kCellTypeName && ref.args.length == 1;
+  }
+
+  private deepImmortalCallee(type: Type): IrCallee | undefined {
+    const inner = this.optionalInner(type) ?? type;
+    if (!this.isImmortalKind(inner)) {
+      return undefined;
+    }
+
+    const name = `${kImmortalName}.${inner.id}`;
+    const known = this.ir.callee(name);
+    if (known != undefined) {
+      return known;
+    }
+
+    const made = new IrFunction(this.ir, name, kVoidType, [kPointerType]);
+    const frame: Frame = {
+      made,
+      id: this.frameId(),
+      module: 0,
+      loops: [],
+      scopes: [],
+    };
+    const object = made.param(0);
+    const check = made.block("check");
+    const work = made.block("work");
+    const done = made.block("done");
+    const none = this.ir.zero(kPointerType);
+    const isObject = made.integerCompare(IrIntPredicate.NotEqual, object, none);
+
+    made.conditionalBranch(isObject, check, done);
+    made.open(check);
+
+    const count = made.load(kIntType, object);
+    const floor = this.ir.integer(kIntType, kImmortalFloor);
+    const isImmortal = made.integerCompare(IrIntPredicate.SignedLess, floor, count);
+
+    made.conditionalBranch(isImmortal, done, work);
+    made.open(work);
+    made.store(this.ir.integer(kIntType, kImmortalCount), object);
+    made.call(this.forgetCallee(inner), []);
+    this.immortalChildren(frame, object, inner);
+    made.branch(done);
+    made.open(done);
+    made.finishVoid();
+
+    return made.callee;
+  }
+
+  private readonly forgetCallee(type: Type): IrCallee {
+    if (this.isArray(type)) {
+      return this.ir.declare(kArrayForget, kVoidType, []);
+    }
+
+    return this.ir.declare(kObjectForget, kVoidType, []);
+  }
+
+  private isImmortalGlobal(place: Read<Place>, key: string): boolean {
+    const isGlobal = place.owner == kNoOwner && !this.letKeys.has(key);
+
+    return isGlobal && this.traits.isCopy(place.tz, this.values) && this.isImmortalKind(place.tz);
+  }
+
+  private immortalGlobal(frame: Read<Frame>, place: Place, key: string): void {
+    if (!this.isImmortalGlobal(place, key)) {
+      return;
+    }
+
+    const kept = this.loaded(frame, place);
+
+    this.immortalized(frame, kept);
+    this.immortalGlobals.add(key);
+  }
+
+  private immortalChildren(frame: Frame, object: LLVMValue, type: Type): void {
+    if (this.isArray(type) && type.kind == TypeKind.Array) {
+      return this.immortalItems(frame, object, type.item);
+    }
+
+    const layout = this.layoutOf(type);
+    if (layout == undefined) {
+      return;
+    }
+
+    for (const field of layout.fields) {
+      this.immortalField(frame, object, type, layout.struct, field);
+    }
+  }
+
+  private immortalField(
+    frame: Frame,
+    object: LLVMValue,
+    owner: Type,
+    struct: string,
+    field: Read<LayoutField>,
+  ): void {
+    const isPointer = field.ir == kPointerType;
+    if (!isPointer || this.isCellFieldOf(owner, field.name)) {
+      return;
+    }
+
+    const callee = this.deepImmortalCallee(field.type);
+    if (callee == undefined) {
+      return;
+    }
+
+    const address = frame.made.field(struct, object, field.index);
+    const value = frame.made.load(kPointerType, address);
+
+    frame.made.call(callee, [value]);
+  }
+
+  private immortalItems(frame: Frame, array: LLVMValue, item: Type): void {
+    const isPointer = this.irType(item) == kPointerType;
+    if (!isPointer) {
+      return;
+    }
+
+    const callee = this.deepImmortalCallee(item);
+    if (callee == undefined) {
+      return;
+    }
+
+    const made = frame.made;
+    const data = this.arrayData(frame, array);
+    const length = this.arrayLength(frame, array);
+    const counter = made.slot(kIntType, "immortal.index");
+    const cond = made.block("immortal.cond");
+    const body = made.block("immortal.body");
+    const end = made.block("immortal.end");
+
+    made.store(this.ir.zero(kIntType), counter);
+    made.branch(cond);
+    made.open(cond);
+
+    const index = made.load(kIntType, counter);
+    const isInside = made.integerCompare(IrIntPredicate.SignedLess, index, length);
+
+    made.conditionalBranch(isInside, body, end);
+    made.open(body);
+
+    const address = made.element(kPointerType, data, index);
+    const element = made.load(kPointerType, address);
+    const one = this.ir.integer(kIntType, "1");
+    const next = made.binary(IrOpcode.Add, index, one);
+
+    made.call(callee, [element]);
+    made.store(next, counter);
+    made.branch(cond);
+    made.open(end);
+  }
+}

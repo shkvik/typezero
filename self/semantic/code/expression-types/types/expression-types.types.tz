@@ -51,17 +51,31 @@ export type ParamSlot = {
 };
 
 export type ValueRecord = {
-  readonly uses: Cell<Map<int, NameUse>>;
-  readonly hidden: Cell<Map<string, HiddenName>>;
-  readonly variables: Cell<Map<int, DeclaredVariable>>;
-  readonly functions: Cell<Map<int, FunctionDecl>>;
-  readonly params: Cell<Map<int, ParamSlot>>;
-  readonly assigned: Cell<Set<int>>;
-  readonly changes: Cell<Expr[]>;
-  readonly enums: Cell<Map<int, EnumDecl>>;
-  readonly classes: Cell<Map<int, ClassDecl>>;
-  readonly destinations: Cell<Map<int, Destination[]>>;
-  readonly owners: Cell<FunctionDecl[]>;
+  readonly uses: Map<int, NameUse>;
+  readonly hidden: Map<string, HiddenName>;
+  readonly variables: Map<int, DeclaredVariable>;
+  readonly functions: Map<int, FunctionDecl>;
+  readonly params: Map<int, ParamSlot>;
+  readonly assigned: Set<int>;
+  readonly changes: Expr[];
+  readonly enums: Map<int, EnumDecl>;
+  readonly classes: Map<int, ClassDecl>;
+  readonly destinations: Map<int, Destination[]>;
+  readonly owners: FunctionDecl[];
+};
+
+export type ValueDraft = {
+  uses: Map<int, NameUse>;
+  hidden: Map<string, HiddenName>;
+  variables: Map<int, DeclaredVariable>;
+  functions: Map<int, FunctionDecl>;
+  params: Map<int, ParamSlot>;
+  assigned: Set<int>;
+  changes: Expr[];
+  enums: Map<int, EnumDecl>;
+  classes: Map<int, ClassDecl>;
+  destinations: Map<int, Destination[]>;
+  owners: FunctionDecl[];
 };
 
 export type NarrowSlot = {
@@ -583,4 +597,5 @@ export type InternedExpressionParts = Interned<
   | ClassMemberEntry
   | ClassLookup
   | DecorateRun
+  | ReflectedNew
 >;

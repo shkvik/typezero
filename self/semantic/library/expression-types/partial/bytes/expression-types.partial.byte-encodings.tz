@@ -18,7 +18,7 @@ partial class ExpressionTypes {
     return this.byteSources.isEncodingLabel(label);
   }
 
-  private readonly encodingArgumentCheck(value: Expr, module: int): void {
+  private encodingArgumentCheck(value: Expr, module: int): void {
     const given = this.typed(value, undefined, module);
     if (given.kind == TypeKind.Error || this.modules.isLibraryModule(module)) {
       return;
@@ -38,7 +38,7 @@ partial class ExpressionTypes {
     this.reportFound(module, encodingError);
   }
 
-  private readonly encodingTexts(
+  private encodingTexts(
     value: Expr,
     given: Type,
     module: int,
@@ -98,7 +98,7 @@ partial class ExpressionTypes {
     return texts;
   }
 
-  private readonly encodingBranchTexts(
+  private encodingBranchTexts(
     first: Expr,
     second: Expr,
     module: int,
@@ -115,7 +115,7 @@ partial class ExpressionTypes {
     return [...one, ...other];
   }
 
-  private readonly encodingConstTexts(
+  private encodingConstTexts(
     value: Expr,
     module: int,
     depth: int,
@@ -149,7 +149,7 @@ partial class ExpressionTypes {
     return base.kind == TypeKind.String || this.isEncodingParam(type);
   }
 
-  private readonly bytesLengthCheck(expr: AssignExpr, module: int): void {
+  private bytesLengthCheck(expr: AssignExpr, module: int): void {
     const target = expr.target;
     if (target.kind != ExprKind.Member) {
       return;

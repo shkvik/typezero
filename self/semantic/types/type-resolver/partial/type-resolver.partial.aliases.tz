@@ -72,8 +72,10 @@ partial class TypeResolver {
     };
 
     this.doors.set(key, door);
+    const step = this.nestingStep(isTail);
+
     this.working.set(home, depth + 1);
-    this.nesting.set(home, nested + this.nestingStep(isTail));
+    this.nesting.set(home, nested + step);
 
     const body = this.aliasBody(decl, {
       module,
