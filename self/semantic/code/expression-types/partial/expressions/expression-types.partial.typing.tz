@@ -9,7 +9,7 @@ import {
 import { ExpressionTypes } from "../../expression-types.tz";
 
 partial class ExpressionTypes {
-  private typed(expr: Expr, wanted: Type | undefined, module: int): Type {
+  private readonly typed(expr: Expr, wanted: Type | undefined, module: int): Type {
     const isTrying = this.errors.isTrying();
     if (!isTrying) {
       this.answers.visit(expr);
@@ -26,7 +26,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private typedByKind(expr: Expr, wanted: Type | undefined, module: int): Type {
+  private readonly typedByKind(expr: Expr, wanted: Type | undefined, module: int): Type {
     const literal = this.literalOf(expr, module);
     if (literal != undefined) {
       return this.literalTyped(expr, literal, wanted, module);
@@ -136,7 +136,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private peekType(expr: Expr, module: int): Type {
+  private readonly peekType(expr: Expr, module: int): Type {
     this.errors.beginTrial();
 
     const given = this.typed(expr, undefined, module);
@@ -146,7 +146,7 @@ partial class ExpressionTypes {
     return given;
   }
 
-  private checked(expr: Expr, wanted: Type, module: int, place: string): Type {
+  private readonly checked(expr: Expr, wanted: Type, module: int, place: string): Type {
     const given = this.typed(expr, wanted, module);
 
     this.coerce(expr, given, wanted, module, place);
@@ -154,7 +154,7 @@ partial class ExpressionTypes {
     return given;
   }
 
-  private coerce(
+  private readonly coerce(
     expr: Expr,
     given: Type,
     wanted: Type,

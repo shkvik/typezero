@@ -23,7 +23,7 @@ import {
 } from "../../../event-rules/const/event-rules.const.tz";
 
 partial class ExpressionTypes {
-  private inferredCall(
+  private readonly inferredCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -64,7 +64,7 @@ partial class ExpressionTypes {
     return this.inferredResult(member, instance);
   }
 
-  private inferredListener(
+  private readonly inferredListener(
     expr: CallExpr,
     instance: InstanceType,
     event: string,
@@ -87,13 +87,13 @@ partial class ExpressionTypes {
     this.listenerChecked(expr, instance, args, module);
   }
 
-  private inferredLoose(args: CallArgument[], module: int): void {
+  private readonly inferredLoose(args: Read<CallArgument[]>, module: int): void {
     for (const arg of args) {
       this.listenerLoose(arg.expr, module);
     }
   }
 
-  private inferredResult(member: MemberExpr, instance: InstanceType): Type {
+  private readonly inferredResult(member: MemberExpr, instance: InstanceType): Type {
     if (member.name == kEmitName) {
       return this.store.plain(TypeKind.Boolean);
     }
@@ -104,7 +104,7 @@ partial class ExpressionTypes {
     return instance;
   }
 
-  private inferredKey(
+  private readonly inferredKey(
     object: Expr,
     instance: InstanceType,
     module: int,
@@ -124,7 +124,7 @@ partial class ExpressionTypes {
     return `${target.module} ${target.loc}`;
   }
 
-  private inferredListen(
+  private readonly inferredListen(
     name: Expr,
     event: string,
     key: string | undefined,
@@ -137,8 +137,8 @@ partial class ExpressionTypes {
     this.eventMarks.listens.push({ key, event, loc: name.loc, module });
   }
 
-  private inferredEmit(
-    rest: CallArgument[],
+  private readonly inferredEmit(
+    rest: Read<CallArgument[]>,
     name: Expr,
     event: string,
     key: string | undefined,
@@ -151,12 +151,10 @@ partial class ExpressionTypes {
       return;
     }
 
-    const names = this.eventMarks.emittedNames.get(key) ?? [];
+    const names = this.eventMarks.emittedNames.getOrInsert(key, []);
     if (!names.includes(event)) {
       names.push(event);
     }
-
-    this.eventMarks.emittedNames.set(key, names);
 
     const slot = `${key} ${event}`;
     const first = this.eventMarks.firstEmits.get(slot);
@@ -171,18 +169,18 @@ partial class ExpressionTypes {
     this.emittedAgainCheck(rest, name, event, given, first, module);
   }
 
-  private emittedType(value: Expr, module: int): Type {
+  private readonly emittedType(value: Expr, module: int): Type {
     const type = this.typed(value, undefined, module);
 
     return this.relation.baseOf(type) ?? type;
   }
 
-  private emittedAgainCheck(
-    rest: CallArgument[],
+  private readonly emittedAgainCheck(
+    rest: Read<CallArgument[]>,
     name: Expr,
     event: string,
-    given: Type[],
-    first: FirstEmit,
+    given: Read<Type[]>,
+    first: Read<FirstEmit>,
     module: int,
   ): void {
     const shown = this.emittedText(first.args);
@@ -222,13 +220,13 @@ partial class ExpressionTypes {
     }
   }
 
-  private emittedText(args: Type[]): string {
+  private readonly emittedText(args: Read<Type[]>): string {
     const parts = args.map((one) => this.text.of(one));
 
     return `[${parts.join(", ")}]`;
   }
 
-  private countMark(count: int): string {
+  private readonly countMark(count: int): string {
     if (count == 1) {
       return "";
     }
@@ -236,7 +234,7 @@ partial class ExpressionTypes {
     return "s";
   }
 
-  private placeText(module: int, loc: int): string {
+  private readonly placeText(module: int, loc: int): string {
     const opened = this.program.modules[module];
     if (opened == undefined) {
       return "";
@@ -250,7 +248,7 @@ partial class ExpressionTypes {
     return `${file}:${place.line}:${place.column}`;
   }
 
-  private unemittedListensCheck(module: int): void {
+  private readonly unemittedListensCheck(module: int): void {
     if (this.eventMarks.looseEmitModules.size > 0) {
       return;
     }
@@ -260,7 +258,7 @@ partial class ExpressionTypes {
         continue;
       }
 
-      const names = this.eventMarks.emittedNames.get(listen.key) ?? [];
+      const names = this.eventMarks.emittedNames.get(listen.key)?.slice() ?? [];
       if (names.includes(listen.event)) {
         continue;
       }

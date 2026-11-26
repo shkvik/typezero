@@ -34,9 +34,9 @@ export class ArrayRules {
 
   public constructor(
     store: TypeStore,
-    relation: TypeRelation,
-    types: TypeQuestions,
-    unifier: TypeUnifier,
+    relation: Own<TypeRelation>,
+    types: Own<TypeQuestions>,
+    unifier: Own<TypeUnifier>,
     shapes: ExpressionShapes,
     text: TypeText,
   ) {
@@ -48,7 +48,7 @@ export class ArrayRules {
     this.text = text;
   }
 
-  public jsonArrayOr(wanted: Type | undefined): Type | undefined {
+  public readonly jsonArrayOr(wanted: Type | undefined): Type | undefined {
     const target = this.types.wantedPart(wanted);
     if (target == undefined || target.kind != TypeKind.Json) {
       return wanted;
@@ -57,7 +57,7 @@ export class ArrayRules {
     return this.store.arrayOf(target);
   }
 
-  public wantedArray(expected: Type | undefined): Type | undefined {
+  public readonly wantedArray(expected: Type | undefined): Type | undefined {
     if (expected == undefined) {
       return undefined;
     }
@@ -75,7 +75,7 @@ export class ArrayRules {
     return array ?? expected;
   }
 
-  public wantedItem(plain: Type | undefined): Type | undefined {
+  public readonly wantedItem(plain: Type | undefined): Type | undefined {
     if (plain == undefined || plain.kind != TypeKind.Array) {
       return undefined;
     }
@@ -83,11 +83,11 @@ export class ArrayRules {
     return plain.item;
   }
 
-  public elementPlace(index: int): string {
+  public readonly elementPlace(index: int): string {
     return ` of element ${index}`;
   }
 
-  public elementHint(
+  public readonly elementHint(
     expr: Expr,
     item: Type | undefined,
     seen: Type | undefined,
@@ -105,7 +105,7 @@ export class ArrayRules {
     return seen;
   }
 
-  public seeElement(draft: ArrayDraft, type: Type): void {
+  public readonly seeElement(draft: ArrayDraft, type: Type): void {
     const seen = draft.seen;
     const isBroken = seen != undefined && seen.kind == TypeKind.Error;
     if (type.kind != TypeKind.Error && !isBroken) {
@@ -116,7 +116,7 @@ export class ArrayRules {
     }
   }
 
-  public spreadHint(item: Type | undefined): Type | undefined {
+  public readonly spreadHint(item: Type | undefined): Type | undefined {
     if (item == undefined) {
       return undefined;
     }
@@ -124,7 +124,7 @@ export class ArrayRules {
     return this.store.arrayOf(item);
   }
 
-  public isUnsupportedSpread(type: Type): boolean {
+  public readonly isUnsupportedSpread(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.Iterator:
       case TypeKind.Instance:
@@ -143,7 +143,7 @@ export class ArrayRules {
     }
   }
 
-  public spreadSource(type: Type): Type {
+  public readonly spreadSource(type: Type): Type {
     if (this.isUnsupportedSpread(type)) {
       return this.store.plain(TypeKind.Error);
     }
@@ -151,7 +151,7 @@ export class ArrayRules {
     return type;
   }
 
-  public joinedItem(element: Type | undefined, part: Type): Type | undefined {
+  public readonly joinedItem(element: Type | undefined, part: Type): Type | undefined {
     if (element == undefined) {
       return part;
     }
@@ -159,7 +159,7 @@ export class ArrayRules {
     return this.unifier.unionUnify(element, part);
   }
 
-  public literalHint(expr: ArrayLitExpr, draft: ArrayDraft): Type | undefined {
+  public readonly literalHint(expr: ArrayLitExpr, draft: Read<ArrayDraft>): Type | undefined {
     if (draft.hasDecimal) {
       return this.store.plain(TypeKind.Decimal);
     }
@@ -195,7 +195,7 @@ export class ArrayRules {
     return undefined;
   }
 
-  public elementTypes(expr: ArrayLitExpr, draft: ArrayDraft): Type[] {
+  public readonly elementTypes(expr: ArrayLitExpr, draft: Read<ArrayDraft>): Type[] {
     const types: Type[] = [];
     let index = 0;
 
@@ -210,7 +210,7 @@ export class ArrayRules {
     return types;
   }
 
-  public spreadFits(type: Type, element: Type, array: Type): boolean {
+  public readonly spreadFits(type: Type, element: Type, array: Type): boolean {
     if (type == array || type.kind == TypeKind.Error) {
       return true;
     }
@@ -229,15 +229,15 @@ export class ArrayRules {
     }
   }
 
-  public isDecimalLike(type: Type): boolean {
+  public readonly isDecimalLike(type: Type): boolean {
     const plain = this.types.definedType(type);
 
     return plain.kind == TypeKind.Decimal;
   }
 
-  public elementsError(
+  public readonly elementsError(
     expr: ArrayLitExpr,
-    types: Type[],
+    types: Read<Type[]>,
     before: Type | undefined,
     index: int,
   ): SourceError | undefined {
@@ -276,7 +276,7 @@ export class ArrayRules {
     };
   }
 
-  public refusedSpread(expr: Expr, type: Type, code: Code): Checked<Type> {
+  public readonly refusedSpread(expr: Expr, type: Type, code: Code): Checked<Type> {
     const first = this.text.of(type);
 
     return {
@@ -285,7 +285,7 @@ export class ArrayRules {
     };
   }
 
-  public tupleItem(expr: Expr, tuple: Type): Checked<Type> {
+  public readonly tupleItem(expr: Expr, tuple: Type): Checked<Type> {
     if (tuple.kind != TypeKind.Tuple) {
       return { value: this.store.plain(TypeKind.Error) };
     }
@@ -315,9 +315,9 @@ export class ArrayRules {
     return { value: element };
   }
 
-  public joinedElement(
+  public readonly joinedElement(
     expr: ArrayLitExpr,
-    draft: ArrayDraft,
+    draft: Read<ArrayDraft>,
   ): Checked<Type | undefined> {
     if (expr.elements.length == 0) {
       return {
@@ -365,7 +365,7 @@ export class ArrayRules {
     return { value: element };
   }
 
-  private seenJoined(seen: Type | undefined, type: Type): Type | undefined {
+  private readonly seenJoined(seen: Type | undefined, type: Type): Type | undefined {
     if (seen == undefined) {
       return type;
     }
@@ -373,7 +373,7 @@ export class ArrayRules {
     return this.unifier.unify(seen, type);
   }
 
-  private fitsObjectArray(inner: Type, element: Type): boolean {
+  private readonly fitsObjectArray(inner: Type, element: Type): boolean {
     const plainInner = this.types.definedType(inner);
     const plainElement = this.types.definedType(element);
     const isObjects =

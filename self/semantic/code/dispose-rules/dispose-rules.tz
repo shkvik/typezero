@@ -31,15 +31,15 @@ export class DisposeRules {
     this.collector = collector;
   }
 
-  public ownDispose(decl: ClassDecl): FunctionDecl | undefined {
+  public readonly ownDispose(decl: ClassDecl): FunctionDecl | undefined {
     return decl.methods.find((method) => method.name == kDisposeKey);
   }
 
-  public isDisposeMethod(fn: FunctionDecl | undefined): boolean {
+  public readonly isDisposeMethod(fn: FunctionDecl | undefined): boolean {
     return fn != undefined && fn.name == kDisposeKey;
   }
 
-  public disposeErrors(
+  public readonly disposeErrors(
     dispose: FunctionDecl,
     isGivingValue: boolean,
     inherited: string | undefined,
@@ -70,9 +70,9 @@ export class DisposeRules {
     return errors;
   }
 
-  public outlivesErrors(
+  public readonly outlivesErrors(
     statement: VarDeclStmt,
-    following: Stmt[],
+    following: Read<Stmt[]>,
   ): SourceError[] {
     const errors: SourceError[] = [];
 
@@ -92,7 +92,7 @@ export class DisposeRules {
     return errors;
   }
 
-  public isDisposeCall(expr: CallExpr): boolean {
+  public readonly isDisposeCall(expr: CallExpr): boolean {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Index) {
       return false;
@@ -101,7 +101,7 @@ export class DisposeRules {
     return this.isDisposeKey(callee.index);
   }
 
-  public isSuperDisposeCall(expr: CallExpr): boolean {
+  public readonly isSuperDisposeCall(expr: CallExpr): boolean {
     const callee = expr.callee;
     if (callee.kind == ExprKind.Member) {
       return callee.name == kDisposeKey;
@@ -115,7 +115,7 @@ export class DisposeRules {
     );
   }
 
-  private isDisposeKey(key: Expr): boolean {
+  private readonly isDisposeKey(key: Expr): boolean {
     if (key.kind != ExprKind.Member || key.name != kDisposeName) {
       return false;
     }
@@ -123,7 +123,7 @@ export class DisposeRules {
     return this.isNamed(key.object, kSymbolName);
   }
 
-  private hasSuperDisposeCall(dispose: FunctionDecl): boolean {
+  private readonly hasSuperDisposeCall(dispose: FunctionDecl): boolean {
     const exprs = this.collector.functionExprs(dispose, false);
 
     return exprs.some(
@@ -131,7 +131,7 @@ export class DisposeRules {
     );
   }
 
-  private isLeavingThis(dispose: FunctionDecl): boolean {
+  private readonly isLeavingThis(dispose: FunctionDecl): boolean {
     const exprs = this.collector.functionExprs(dispose, false);
     const reads = new Set<Expr>();
 
@@ -151,7 +151,7 @@ export class DisposeRules {
     });
   }
 
-  private isEscaping(name: string, statement: Stmt): boolean {
+  private readonly isEscaping(name: string, statement: Stmt): boolean {
     const exprs: Expr[] = [];
     const values: Expr[] = [];
 
@@ -170,7 +170,7 @@ export class DisposeRules {
     });
   }
 
-  private isCaptured(expr: Expr, name: string): boolean {
+  private readonly isCaptured(expr: Expr, name: string): boolean {
     if (expr.kind != ExprKind.Function) {
       return false;
     }
@@ -180,7 +180,7 @@ export class DisposeRules {
     return inner.some((one) => this.isNamed(one, name));
   }
 
-  private heldParts(expr: Expr): Expr[] {
+  private readonly heldParts(expr: Expr): Expr[] {
     switch (expr.kind) {
       case ExprKind.Assign:
         return [expr.value];
@@ -197,7 +197,7 @@ export class DisposeRules {
     }
   }
 
-  private isNamed(expr: Expr, name: string): boolean {
+  private readonly isNamed(expr: Expr, name: string): boolean {
     return expr.kind == ExprKind.Name && expr.name == name;
   }
 }

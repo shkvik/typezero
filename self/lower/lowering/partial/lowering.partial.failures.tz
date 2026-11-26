@@ -20,7 +20,7 @@ import { Frame, IrValue } from "../types/lowering.types.tz";
 partial class Lowering {
   private failureMaker(
     error: Type,
-    extra: string[] = [],
+    extra: Read<string[]> = [],
   ): LLVMValue | undefined {
     const known = this.makers.get(error.id);
     if (known != undefined) {
@@ -83,7 +83,7 @@ partial class Lowering {
     return made.callee.fn;
   }
 
-  private failurePartsType(extra: int): string {
+  private readonly failurePartsType(extra: int): string {
     let parts = `{ ${kPointerType}, ${kStringType}`;
 
     for (let index = 0; index < extra; index++) {
@@ -93,8 +93,7 @@ partial class Lowering {
     return `${parts} }`;
   }
 
-  private codeChosen(frame: Frame, text: LLVMValue, type: Type): LLVMValue {
-    const made = frame.made;
+  private codeChosen(frame: Read<Frame>, text: LLVMValue, type: Type): LLVMValue {
     const literals = this.textLiterals(type);
     const first = literals[0] ?? "";
     let chosen: LLVMValue = this.stringValue(first).value;
@@ -105,17 +104,17 @@ partial class Lowering {
     const zero = this.ir.zero(kFlagType);
 
     for (const literal of literals.slice(1)) {
-      const order = made.call(compare, [text, this.cText(literal)]);
-      const isSame = made.integerCompare(IrIntPredicate.Equal, order, zero);
+      const order = frame.made.call(compare, [text, this.cText(literal)]);
+      const isSame = frame.made.integerCompare(IrIntPredicate.Equal, order, zero);
       const value = this.stringValue(literal).value;
 
-      chosen = made.select(isSame, value, chosen);
+      chosen = frame.made.select(isSame, value, chosen);
     }
 
     return chosen;
   }
 
-  private textLiterals(type: Type): string[] {
+  private readonly textLiterals(type: Type): string[] {
     if (type.kind == TypeKind.Literal) {
       return [type.text];
     }
@@ -134,7 +133,7 @@ partial class Lowering {
     return texts;
   }
 
-  private failedSlot(): LLVMValue {
+  private readonly failedSlot(): LLVMValue {
     return this.ir.external(kFailedSlot, "{ ptr }");
   }
 
@@ -149,18 +148,17 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const slot = this.failedSlot();
-    const failure = made.load(kPointerType, slot);
+    const failure = frame.made.load(kPointerType, slot);
     const none = this.ir.zero(kPointerType);
-    const isFailed = made.integerCompare(IrIntPredicate.NotEqual, failure, none);
-    const failed = made.block("call.failed");
-    const fine = made.block("call.ok");
-    const end = made.block("call.end");
+    const isFailed = frame.made.integerCompare(IrIntPredicate.NotEqual, failure, none);
+    const failed = frame.made.block("call.failed");
+    const fine = frame.made.block("call.ok");
+    const end = frame.made.block("call.end");
 
-    made.conditionalBranch(isFailed, failed, fine);
-    made.open(failed);
-    made.store(none, slot);
+    frame.made.conditionalBranch(isFailed, failed, fine);
+    frame.made.open(failed);
+    frame.made.store(none, slot);
 
     const error: IrValue = {
       type: kPointerType,
@@ -169,22 +167,22 @@ partial class Lowering {
       owned: true,
     };
     const bad = this.madeResult(frame, type, false, error, loc);
-    const badEnd = made.currentBlock();
+    const badEnd = frame.made.currentBlock();
 
-    made.branch(end);
-    made.open(fine);
+    frame.made.branch(end);
+    frame.made.open(fine);
 
     const good = this.madeResult(frame, type, true, value, loc);
-    const goodEnd = made.currentBlock();
+    const goodEnd = frame.made.currentBlock();
 
-    made.branch(end);
-    made.open(end);
+    frame.made.branch(end);
+    frame.made.open(end);
 
     if (bad == undefined || good == undefined) {
       return undefined;
     }
 
-    const result = made.phi(
+    const result = frame.made.phi(
       layout.struct,
       [bad.value, good.value],
       [badEnd, goodEnd],

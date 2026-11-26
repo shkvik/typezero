@@ -28,7 +28,7 @@ export class BoundRules {
     this.store = store;
   }
 
-  public constantLinear(value: uint64): Linear | undefined {
+  public readonly constantLinear(value: uint64): Linear | undefined {
     if (value > kMostBoundConstant) {
       return undefined;
     }
@@ -36,7 +36,7 @@ export class BoundRules {
     return { term: kZeroTerm, offset: value.toDecimal() };
   }
 
-  public addBound(
+  public readonly addBound(
     facts: Map<string, Type>,
     upper: Linear,
     lower: Linear,
@@ -53,7 +53,7 @@ export class BoundRules {
     facts.set(key, mark);
   }
 
-  public addEquality(
+  public readonly addEquality(
     facts: Map<string, Type>,
     first: Linear,
     second: Linear,
@@ -62,13 +62,13 @@ export class BoundRules {
     this.addBound(facts, second, first, 0);
   }
 
-  public keepLength(term: string, lengths: Set<string>): void {
+  public readonly keepLength(term: string, lengths: Set<string>): void {
     if (term.startsWith(kLengthTerm)) {
       lengths.add(term);
     }
   }
 
-  public edgeOf(key: string): BoundEdge | undefined {
+  public readonly edgeOf(key: string): BoundEdge | undefined {
     const parts = key.split(kBoundSeparator);
     const mark = parts[0];
     const upper = parts[1];
@@ -87,8 +87,8 @@ export class BoundRules {
     return { upper, lower, room: parsed.value };
   }
 
-  public orderBounds(
-    facts: Map<string, Type>,
+  public readonly orderBounds(
+    facts: Own<Map<string, Type>>,
     small: Linear,
     large: Linear,
     isTrue: boolean,
@@ -105,8 +105,8 @@ export class BoundRules {
     return facts;
   }
 
-  public equalBounds(
-    facts: Map<string, Type>,
+  public readonly equalBounds(
+    facts: Own<Map<string, Type>>,
     op: BinaryOp,
     left: Linear,
     right: Linear,
@@ -133,7 +133,7 @@ export class BoundRules {
     return facts;
   }
 
-  public isKeptBound(
+  public readonly isKeptBound(
     edge: BoundEdge,
     value: string,
     length: string,
@@ -157,7 +157,7 @@ export class BoundRules {
     return false;
   }
 
-  public changedTarget(change: Expr): Expr | undefined {
+  public readonly changedTarget(change: Expr): Expr | undefined {
     if (change.kind == ExprKind.Update || change.kind == ExprKind.Assign) {
       return change.target;
     }
@@ -165,7 +165,7 @@ export class BoundRules {
     return undefined;
   }
 
-  public boundTerms(key: string): string[] {
+  public readonly boundTerms(key: string): string[] {
     const edge = this.edgeOf(key);
     if (edge == undefined) {
       return [];
@@ -174,7 +174,7 @@ export class BoundRules {
     return [edge.upper, edge.lower];
   }
 
-  public movedBound(key: string, moves: Map<string, string>): string {
+  public readonly movedBound(key: string, moves: Read<Map<string, string>>): string {
     const edge = this.edgeOf(key);
     if (edge == undefined) {
       return "";
@@ -189,7 +189,7 @@ export class BoundRules {
     return this.boundKey(upper, lower, edge.room);
   }
 
-  public writeCode(isCompound: boolean): Code {
+  public readonly writeCode(isCompound: boolean): Code {
     if (isCompound) {
       return Code.IndexWriteRange;
     }
@@ -197,7 +197,7 @@ export class BoundRules {
     return Code.IndexWriteHoles;
   }
 
-  public writeRoom(isCompound: boolean, offset: decimal): decimal {
+  public readonly writeRoom(isCompound: boolean, offset: decimal): decimal {
     if (isCompound) {
       return offset + 1;
     }
@@ -205,11 +205,11 @@ export class BoundRules {
     return offset;
   }
 
-  public isBoundConstant(value: decimal): boolean {
+  public readonly isBoundConstant(value: decimal): boolean {
     return value.abs() <= kMostBoundConstant.toDecimal();
   }
 
-  public linearSum(first: Linear, second: Linear): Linear | undefined {
+  public readonly linearSum(first: Linear, second: Linear): Linear | undefined {
     const offset = first.offset + second.offset;
     if (first.term == kZeroTerm) {
       return { term: second.term, offset };
@@ -226,13 +226,13 @@ export class BoundRules {
     return { term, offset };
   }
 
-  private boundKey(upper: string, lower: string, room: decimal): string {
+  private readonly boundKey(upper: string, lower: string, room: decimal): string {
     const parts = [kBoundMark, upper, lower, `${room}`];
 
     return parts.join(kBoundSeparator);
   }
 
-  private movedTerm(term: string, moves: Map<string, string>): string {
+  private readonly movedTerm(term: string, moves: Read<Map<string, string>>): string {
     if (term == kZeroTerm) {
       return term;
     }
@@ -240,7 +240,7 @@ export class BoundRules {
     return moves.get(term) ?? "";
   }
 
-  private sumTerm(first: string, second: string): string {
+  private readonly sumTerm(first: string, second: string): string {
     if (first < second) {
       return `${kSumTerm}${first}${kSumSeparator}${second}`;
     }

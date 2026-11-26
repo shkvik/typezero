@@ -53,12 +53,15 @@ partial class FileParser {
         return pattern;
       }
 
+      const isRest = element.rest;
+      const elementLoc = element.loc;
+
       pattern.elements.push(element);
       if (!this.cursor.accept(TokenKind.Comma)) {
         break;
       }
-      if (element.rest) {
-        this.cursor.report(element.loc, Code.RestElementNotLast);
+      if (isRest) {
+        this.cursor.report(elementLoc, Code.RestElementNotLast);
       }
     }
 
@@ -136,12 +139,15 @@ partial class FileParser {
         return pattern;
       }
 
+      const isRest = element.rest;
+      const elementLoc = element.loc;
+
       pattern.elements.push(element);
       if (!this.cursor.accept(TokenKind.Comma)) {
         break;
       }
-      if (element.rest) {
-        this.cursor.report(element.loc, Code.RestElementNotLast);
+      if (isRest) {
+        this.cursor.report(elementLoc, Code.RestElementNotLast);
       }
     }
 
@@ -179,7 +185,7 @@ partial class FileParser {
     return element;
   }
 
-  private patternExample(pattern: Pattern): string {
+  private readonly patternExample(pattern: Read<Pattern>): string {
     if (pattern.object) {
       return kObjectPatternExample;
     }
@@ -187,7 +193,7 @@ partial class FileParser {
     return kArrayPatternExample;
   }
 
-  private keyExample(element: PatternElement): string {
+  private readonly keyExample(element: Read<PatternElement>): string {
     if (element.keyExpr != undefined) {
       return kComputedKeyExample;
     }
@@ -366,7 +372,7 @@ partial class FileParser {
 
   private declarePattern(
     decls: VarDeclarator[],
-    pattern: Pattern,
+    pattern: Read<Pattern>,
     value: Expr,
     typeAnn: TypeRef | undefined,
   ): void {
@@ -379,7 +385,7 @@ partial class FileParser {
 
   private declareElements(
     decls: VarDeclarator[],
-    pattern: Pattern,
+    pattern: Read<Pattern>,
     base: string,
   ): void {
     const keyReads: IndexExpr[] = [];
@@ -408,11 +414,8 @@ partial class FileParser {
     }
   }
 
-  private assignPattern(loc: int, pattern: Pattern, value: Expr): Stmt {
+  private assignPattern(loc: int, pattern: Read<Pattern>, value: Expr): Stmt {
     const decls: VarDeclarator[] = [];
-    const body: Stmt[] = [
-      { kind: StmtKind.VarDecl, loc, isConst: true, isUsing: false, decls },
-    ];
     const direct = this.isDirect(pattern, value);
     const values: string[] = [];
 
@@ -437,6 +440,9 @@ partial class FileParser {
 
     const base = decls[0]?.name ?? "";
     const keyReads: IndexExpr[] = [];
+    const body: Stmt[] = [
+      { kind: StmtKind.VarDecl, loc, isConst: true, isUsing: false, decls },
+    ];
 
     for (let i = 0; i < pattern.elements.length; i++) {
       const element = pattern.elements[i];
@@ -469,7 +475,7 @@ partial class FileParser {
     return { kind: StmtKind.Block, loc, body };
   }
 
-  private directElement(element: PatternElement, name: string): Expr {
+  private readonly directElement(element: Read<PatternElement>, name: string): Expr {
     const read: Expr = {
       kind: ExprKind.Name,
       loc: element.loc,
@@ -491,9 +497,9 @@ partial class FileParser {
     };
   }
 
-  private elementOf(
+  private readonly elementOf(
     base: string,
-    pattern: Pattern,
+    pattern: Read<Pattern>,
     i: int,
     keyReads: IndexExpr[],
   ): Expr {
@@ -517,7 +523,7 @@ partial class FileParser {
     return this.arrayElementOf(element, source, i);
   }
 
-  private arrayElementOf(element: PatternElement, source: Expr, i: int): Expr {
+  private readonly arrayElementOf(element: Read<PatternElement>, source: Expr, i: int): Expr {
     const position: Expr = {
       kind: ExprKind.IntLit,
       loc: element.loc,
@@ -539,7 +545,7 @@ partial class FileParser {
     return this.withDefault(element, read);
   }
 
-  private sliceFrom(loc: int, source: Expr, position: Expr): Expr {
+  private readonly sliceFrom(loc: int, source: Expr, position: Expr): Expr {
     const slice: Expr = {
       kind: ExprKind.Member,
       loc,
@@ -560,9 +566,9 @@ partial class FileParser {
     };
   }
 
-  private objectElementOf(
-    pattern: Pattern,
-    element: PatternElement,
+  private readonly objectElementOf(
+    pattern: Read<Pattern>,
+    element: Read<PatternElement>,
     source: Expr,
     keyReads: IndexExpr[],
   ): Expr {
@@ -598,7 +604,7 @@ partial class FileParser {
     return this.withDefault(element, read);
   }
 
-  private withDefault(element: PatternElement, read: Expr): Expr {
+  private readonly withDefault(element: Read<PatternElement>, read: Expr): Expr {
     const fallback = element.defaultValue;
     if (fallback == undefined) {
       return read;
@@ -613,11 +619,11 @@ partial class FileParser {
     };
   }
 
-  private restOf(
-    pattern: Pattern,
-    element: PatternElement,
+  private readonly restOf(
+    pattern: Read<Pattern>,
+    element: Read<PatternElement>,
     source: Expr,
-    keyReads: IndexExpr[],
+    keyReads: Read<IndexExpr[]>,
   ): Expr {
     const omit: string[] = [];
 
@@ -641,11 +647,11 @@ partial class FileParser {
     };
   }
 
-  private emptyElement(loc: int): PatternElement {
+  private readonly emptyElement(loc: int): PatternElement {
     return { loc, hole: false, rest: false, name: "", key: "" };
   }
 
-  private formOf(pattern: Pattern): BindingForm {
+  private readonly formOf(pattern: Read<Pattern>): BindingForm {
     if (pattern.object) {
       return { kind: BindingKind.Object };
     }
@@ -656,7 +662,7 @@ partial class FileParser {
     return { kind: BindingKind.Array, length: pattern.elements.length, rest };
   }
 
-  private isDirect(pattern: Pattern, value: Expr): boolean {
+  private readonly isDirect(pattern: Read<Pattern>, value: Expr): boolean {
     if (pattern.object || value.kind != ExprKind.ArrayLit) {
       return false;
     }
@@ -679,11 +685,11 @@ partial class FileParser {
     return true;
   }
 
-  private assignedPart(
-    element: PatternElement,
+  private readonly assignedPart(
+    element: Read<PatternElement>,
     name: string | undefined,
     base: string,
-    pattern: Pattern,
+    pattern: Read<Pattern>,
     i: int,
     keyReads: IndexExpr[],
   ): Expr {

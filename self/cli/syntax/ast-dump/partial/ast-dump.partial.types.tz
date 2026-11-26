@@ -17,13 +17,13 @@ partial class Dumper {
     this.dumpType(ref);
   }
 
-  private dumpTypes(refs: TypeRef[]): void {
+  private dumpTypes(refs: Read<TypeRef[]>): void {
     for (const ref of refs) {
       this.dumpType(ref);
     }
   }
 
-  private typeExtras(ref: TypeRef): string {
+  private readonly typeExtras(ref: TypeRef): string {
     const form = ref.form;
 
     switch (form.kind) {
@@ -91,7 +91,7 @@ partial class Dumper {
     }
   }
 
-  private objectExtras(fields: ObjectTypeField[]): string {
+  private readonly objectExtras(fields: Read<ObjectTypeField[]>): string {
     const fieldNames = fields.map((field) => field.name);
     const fieldLocs = fields.map((field) => `${field.loc}`);
     const optionalFields = fields.map((field) => field.optional);
@@ -112,7 +112,7 @@ partial class Dumper {
     );
   }
 
-  private callsText(fields: ObjectTypeField[]): string {
+  private readonly callsText(fields: Read<ObjectTypeField[]>): string {
     const callFields = fields.map((field) => field.call);
     if (!callFields.includes(true)) {
       return "";
@@ -123,7 +123,7 @@ partial class Dumper {
     return ` calls=${calls}`;
   }
 
-  private genericText(fields: ObjectTypeField[]): string {
+  private readonly genericText(fields: Read<ObjectTypeField[]>): string {
     const counts = fields.map((field) => field.typeParams.length);
     if (!counts.some((count) => count > 0)) {
       return "";
@@ -132,7 +132,7 @@ partial class Dumper {
     return ` generic=${counts.join("")}`;
   }
 
-  private innerTypes(ref: TypeRef): TypeRef[] {
+  private readonly innerTypes(ref: TypeRef): TypeRef[] {
     const form = ref.form;
 
     switch (form.kind) {
@@ -147,7 +147,7 @@ partial class Dumper {
     }
   }
 
-  private signatureTypes(form: FunctionTypeForm): TypeRef[] {
+  private readonly signatureTypes(form: FunctionTypeForm): TypeRef[] {
     const types = form.params.map((param) => param.type);
     const result = form.result;
     if (result != undefined) {
@@ -173,7 +173,7 @@ partial class Dumper {
     this.back();
   }
 
-  private upToLastTrue(flags: boolean[]): boolean[] {
+  private readonly upToLastTrue(flags: Read<boolean[]>): boolean[] {
     let end = flags.length;
 
     while (end > 0 && flags[end - 1] == false) {
@@ -183,7 +183,7 @@ partial class Dumper {
     return flags.slice(0, end);
   }
 
-  private changeNumber(change: ModifierChange): int {
+  private readonly changeNumber(change: ModifierChange): int {
     switch (change) {
       case ModifierChange.Add:
         return 1;
@@ -194,7 +194,7 @@ partial class Dumper {
     }
   }
 
-  private typeRefKindName(kind: TypeRefKind): string {
+  private readonly typeRefKindName(kind: TypeRefKind): string {
     switch (kind) {
       case TypeRefKind.Name:
         return "Name";

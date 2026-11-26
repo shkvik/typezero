@@ -11,7 +11,7 @@ import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
 import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 
 partial class ExpressionTypes {
-  private genericClassRules(decl: ClassDecl, module: int): void {
+  private readonly genericClassRules(decl: ClassDecl, module: int): void {
     this.classGrowthCheck(decl, module);
 
     for (const fn of decl.methods) {
@@ -24,7 +24,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private classGrowthCheck(decl: ClassDecl, module: int): void {
+  private readonly classGrowthCheck(decl: ClassDecl, module: int): void {
     const name = decl.name ?? "";
     if (decl.typeParams.length == 0 || name == "") {
       return;
@@ -48,7 +48,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private genericMethodValue(
+  private readonly genericMethodValue(
     expr: MemberExpr,
     method: FunctionDecl,
     module: int,
@@ -60,7 +60,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private genericInstanceofCheck(
+  private readonly genericInstanceofCheck(
     expr: BinaryExpr,
     left: Type,
     decl: ClassDecl,

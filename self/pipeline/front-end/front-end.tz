@@ -14,22 +14,22 @@ export class FrontEnd {
   private readonly store: TypeStore;
   private readonly program: Program;
 
-  public constructor(store: TypeStore, program: Program) {
+  public constructor(store: TypeStore, program: Own<Program>) {
     this.store = store;
     this.program = program;
   }
 
-  public isCheckable(loaded: LoadResult): boolean {
+  public readonly isCheckable(loaded: Read<LoadResult>): boolean {
     const isReadable =
       loaded.unreadable.length == 0 && loaded.packageErrors.length == 0;
 
     return isReadable && this.isRecoverable();
   }
 
-  public run(): CheckedProgram {
+  public readonly run(): CheckedProgram {
     const binder = new ModuleBinder(this.program);
     const names = binder.run();
-    const resolver = new NameResolver(this.program, names);
+    const resolver = new NameResolver(this.program, names.slice());
     const resolved = resolver.run();
     const types = new TypeResolver(this.store, this.program, resolved);
     const values = new ExpressionTypes(
@@ -58,7 +58,7 @@ export class FrontEnd {
     return { names, resolved, types, values, typed };
   }
 
-  public problems(checked: CheckedProgram): ModuleProblems[] {
+  public readonly problems(checked: Read<CheckedProgram>): ModuleProblems[] {
     const found: ModuleProblems[] = [];
 
     for (let index = 0; index < checked.resolved.length; index++) {
@@ -84,7 +84,7 @@ export class FrontEnd {
     return found;
   }
 
-  private isRecoverable(): boolean {
+  private readonly isRecoverable(): boolean {
     const hasBroken = this.program.builtins.some(
       (builtin) => builtin.parsed.errors.length > 0,
     );
@@ -97,7 +97,7 @@ export class FrontEnd {
     );
   }
 
-  private isRecoverableModule(module: Module): boolean {
+  private readonly isRecoverableModule(module: Module): boolean {
     const declared = module.declaration?.errors ?? [];
     const errors = module.errors.concat(declared);
 

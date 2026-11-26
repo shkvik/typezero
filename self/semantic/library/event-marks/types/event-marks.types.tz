@@ -11,9 +11,11 @@ export type ErrorEmit = {
 };
 
 export type FirstEmit = {
-  readonly args: Type[];
+  readonly args: readonly Type[];
   readonly place: string;
 };
+
+export type InternedFirstEmit = Interned<FirstEmit>;
 
 export type EventListen = {
   readonly key: string;

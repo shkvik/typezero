@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import "./partial/file-parser.partial.types.tz";
 import { Code } from "../../../diagnostic/code.tz";
 import "./partial/file-parser.partial.expressions.tz";
@@ -36,6 +37,7 @@ import {
   TypePlace,
 } from "./types/file-parser.types.context.tz";
 import {
+  DeclarationDraft,
   DeclarationResult,
   ParseResult,
 } from "./types/file-parser.types.result.tz";
@@ -46,18 +48,18 @@ export class FileParser {
   private readonly literals: LiteralReader;
   private readonly library: boolean;
   private readonly bracesMissing: boolean;
-  private readonly fieldNames: Set<string>;
-  private readonly stringConstants: Map<string, string[]>;
-  private readonly imports: ImportDecl[];
-  private readonly exports: ExportDecl[];
+  private fieldNames: Set<string>;
+  private stringConstants: Map<string, string[]>;
+  private imports: ImportDecl[];
+  private exports: ExportDecl[];
   private context: ParseContext;
   private names: int;
   private statementStart: int;
 
-  public constructor(source: Buffer, tokens: Token[], library: boolean) {
+  public constructor(source: Own<Buffer>, tokens: readonly Token[], library: boolean) {
     this.source = source;
     this.cursor = new Cursor(tokens);
-    this.literals = new LiteralReader(source);
+    this.literals = new LiteralReader(this.source);
     this.library = library;
     this.bracesMissing = this.cursor.bracesMissing();
     this.fieldNames = new Set<string>();
@@ -90,22 +92,17 @@ export class FileParser {
 
     const file: SourceFile = {
       items,
-      imports: this.imports,
-      exports: this.exports,
-      fieldNames: this.fieldNames,
-      stringConstants: this.stringConstants,
+      imports: replace(this.imports, []),
+      exports: replace(this.exports, []),
+      fieldNames: replace(this.fieldNames, new Set<string>()),
+      stringConstants: replace(this.stringConstants, new Map<string, string[]>()),
     };
 
-    return { file, errors: this.cursor.errors };
+    return { file, errors: this.cursor.takeErrors() };
   }
 
   public runDeclaration(): DeclarationResult {
-    const file: DeclarationFile = {
-      items: [],
-      classes: [],
-      imports: this.imports,
-      exports: this.exports,
-    };
+    const draft: DeclarationDraft = { items: [], classes: [] };
 
     while (!this.cursor.is(TokenKind.End)) {
       if (this.cursor.is(TokenKind.RBrace)) {
@@ -114,10 +111,17 @@ export class FileParser {
         continue;
       }
 
-      this.declarationItem(file);
+      this.declarationItem(draft);
     }
 
-    return { file, errors: this.cursor.errors };
+    const file: DeclarationFile = {
+      items: draft.items,
+      classes: draft.classes,
+      imports: replace(this.imports, []),
+      exports: replace(this.exports, []),
+    };
+
+    return { file, errors: this.cursor.takeErrors() };
   }
 
   private strayBrace(): void {
@@ -127,7 +131,7 @@ export class FileParser {
     this.cursor.stopRecovering();
   }
 
-  private written(start: int, end: int): string {
+  private readonly written(start: int, end: int): string {
     return this.source.toString("utf8", start, end);
   }
 

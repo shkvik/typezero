@@ -13,9 +13,9 @@ export class TypeUnifier {
 
   public constructor(
     store: TypeStore,
-    relation: TypeRelation,
-    types: TypeQuestions,
-    resolver: TypeResolver,
+    relation: Own<TypeRelation>,
+    types: Own<TypeQuestions>,
+    resolver: Own<TypeResolver>,
   ) {
     this.store = store;
     this.relation = relation;
@@ -23,7 +23,7 @@ export class TypeUnifier {
     this.resolver = resolver;
   }
 
-  public unify(first: Type, second: Type): Type | undefined {
+  public readonly unify(first: Type, second: Type): Type | undefined {
     const known = this.shortUnify(first, second);
     if (known.decided) {
       return known.type;
@@ -44,7 +44,7 @@ export class TypeUnifier {
     return this.optionalLike(first, second, base);
   }
 
-  public unionUnify(first: Type, second: Type): Type | undefined {
+  public readonly unionUnify(first: Type, second: Type): Type | undefined {
     const common = this.unify(first, second);
     if (common != undefined) {
       return common;
@@ -53,7 +53,7 @@ export class TypeUnifier {
     return this.unionFallback(first, second);
   }
 
-  public commonType(first: Type, second: Type): Type | undefined {
+  public readonly commonType(first: Type, second: Type): Type | undefined {
     if (this.relation.converts(first, second)) {
       return second;
     }
@@ -64,7 +64,7 @@ export class TypeUnifier {
     return undefined;
   }
 
-  private shortUnify(first: Type, second: Type): UnifyAnswer {
+  private readonly shortUnify(first: Type, second: Type): UnifyAnswer {
     if (first == second) {
       return this.decided(first);
     }
@@ -118,15 +118,15 @@ export class TypeUnifier {
     return { decided: false };
   }
 
-  private decided(type: Type | undefined): UnifyAnswer {
+  private readonly decided(type: Type | undefined): UnifyAnswer {
     return { decided: true, type };
   }
 
-  private isChoice(type: Type): boolean {
+  private readonly isChoice(type: Type): boolean {
     return type.kind == TypeKind.Literal || type.kind == TypeKind.Union;
   }
 
-  private resultUnify(first: Type, second: Type): Type | undefined {
+  private readonly resultUnify(first: Type, second: Type): Type | undefined {
     if (first.kind != TypeKind.Result || second.kind != TypeKind.Result) {
       return undefined;
     }
@@ -140,7 +140,7 @@ export class TypeUnifier {
     return this.store.resultOf(value, error);
   }
 
-  private halfUnify(first: Type, second: Type): Type | undefined {
+  private readonly halfUnify(first: Type, second: Type): Type | undefined {
     if (first == second || second.kind == TypeKind.Never) {
       return first;
     }
@@ -159,7 +159,7 @@ export class TypeUnifier {
     return common;
   }
 
-  private baseUnify(first: Type, second: Type): Type | undefined {
+  private readonly baseUnify(first: Type, second: Type): Type | undefined {
     if (first == second) {
       return first;
     }
@@ -175,7 +175,7 @@ export class TypeUnifier {
     );
   }
 
-  private widerOfRelated(first: Type, second: Type): Type | undefined {
+  private readonly widerOfRelated(first: Type, second: Type): Type | undefined {
     const isNumbers =
       this.types.isNumberLike(first) && this.types.isNumberLike(second);
     const isObjects =
@@ -189,7 +189,7 @@ export class TypeUnifier {
     return this.commonType(first, second);
   }
 
-  private widerJson(first: Type, second: Type): Type | undefined {
+  private readonly widerJson(first: Type, second: Type): Type | undefined {
     if (first.kind != TypeKind.Json && second.kind != TypeKind.Json) {
       return undefined;
     }
@@ -197,7 +197,7 @@ export class TypeUnifier {
     return this.commonType(second, first);
   }
 
-  private commonParent(first: Type, second: Type): Type | undefined {
+  private readonly commonParent(first: Type, second: Type): Type | undefined {
     if (first.kind != TypeKind.Instance || second.kind != TypeKind.Instance) {
       return undefined;
     }
@@ -215,7 +215,7 @@ export class TypeUnifier {
     return undefined;
   }
 
-  private widerArray(first: Type, second: Type): Type | undefined {
+  private readonly widerArray(first: Type, second: Type): Type | undefined {
     if (first.kind != TypeKind.Array || second.kind != TypeKind.Array) {
       return undefined;
     }
@@ -223,7 +223,7 @@ export class TypeUnifier {
     return this.commonType(first, second);
   }
 
-  private settledPromise(first: Type, second: Type): Type | undefined {
+  private readonly settledPromise(first: Type, second: Type): Type | undefined {
     if (first.kind != TypeKind.Promise || second.kind != TypeKind.Promise) {
       return undefined;
     }
@@ -237,7 +237,7 @@ export class TypeUnifier {
     return undefined;
   }
 
-  private commonConstructor(first: Type, second: Type): Type | undefined {
+  private readonly commonConstructor(first: Type, second: Type): Type | undefined {
     if (first.kind != TypeKind.Class || second.kind != TypeKind.Class) {
       return undefined;
     }
@@ -252,7 +252,7 @@ export class TypeUnifier {
     return this.store.classOf(made, false);
   }
 
-  private commonAnyObject(first: Type, second: Type): Type | undefined {
+  private readonly commonAnyObject(first: Type, second: Type): Type | undefined {
     const hasAnyObject =
       first.kind == TypeKind.AnyObject || second.kind == TypeKind.AnyObject;
     const isReferences =
@@ -265,7 +265,7 @@ export class TypeUnifier {
     return this.store.plain(TypeKind.AnyObject);
   }
 
-  private unionFallback(first: Type, second: Type): Type | undefined {
+  private readonly unionFallback(first: Type, second: Type): Type | undefined {
     if (first.kind == TypeKind.Error || second.kind == TypeKind.Error) {
       return this.store.plain(TypeKind.Error);
     }
@@ -291,7 +291,7 @@ export class TypeUnifier {
     return joined;
   }
 
-  private optionalLike(
+  private readonly optionalLike(
     first: Type,
     second: Type,
     base: Type | undefined,

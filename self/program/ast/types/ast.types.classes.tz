@@ -39,9 +39,9 @@ export type TypeAliasDecl = {
   readonly kind: StmtKind.TypeAlias;
   readonly loc: int;
   readonly name: string;
-  readonly typeParams: TypeParamDecl[];
+  readonly typeParams: readonly TypeParamDecl[];
   readonly type: TypeRef;
-  readonly bases: TypeRef[];
+  readonly bases: readonly TypeRef[];
 };
 
 export type HandleDecl = {
@@ -60,13 +60,14 @@ export type EnumDecl = {
   readonly kind: StmtKind.Enum;
   readonly loc: int;
   readonly name: string;
-  readonly members: EnumMember[];
+  readonly members: readonly EnumMember[];
 };
 
 export type ClassMember = {
   readonly access: Access;
   readonly isOverride: boolean;
-  readonly decorators: Decorator[];
+  readonly isReadonly: boolean;
+  readonly decorators: readonly Decorator[];
   readonly method: MethodKind;
 };
 
@@ -80,25 +81,25 @@ export type ClassField = {
   readonly readonly: boolean;
   readonly isOverride: boolean;
   readonly access: Access;
-  readonly decorators: Decorator[];
+  readonly decorators: readonly Decorator[];
   readonly accessor: boolean;
 };
 
 export type ClassDecl = {
   readonly kind: StmtKind.Class;
   readonly loc: int;
-  name?: string;
-  isAbstract: boolean;
-  isPartial: boolean;
+  readonly name?: string;
+  readonly isAbstract: boolean;
+  readonly isPartial: boolean;
   readonly base?: TypeRef;
   readonly baseExpr?: Expr;
-  readonly baseArgs: TypeRef[];
-  readonly interfaces: TypeRef[];
-  readonly fields: ClassField[];
-  readonly methods: FunctionDecl[];
-  readonly constructors: FunctionDecl[];
+  readonly baseArgs: readonly TypeRef[];
+  readonly interfaces: readonly TypeRef[];
+  readonly fields: readonly ClassField[];
+  readonly methods: Cell<FunctionDecl[]>;
+  readonly constructors: readonly FunctionDecl[];
   readonly expression: boolean;
-  decorators: Decorator[];
-  readonly typeParams: TypeParamDecl[];
-  source?: Span;
+  readonly decorators: readonly Decorator[];
+  readonly typeParams: readonly TypeParamDecl[];
+  readonly source?: Span;
 };

@@ -12,9 +12,8 @@ import { Frame, LoopTarget, Place } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private switchStatement(frame: Frame, statement: SwitchStmt): void {
-    const made = frame.made;
-    const end = made.block("switch.end");
-    const bodies = statement.cases.map(() => made.block("switch.case"));
+    const end = frame.made.block("switch.end");
+    const bodies = statement.cases.map(() => frame.made.block("switch.case"));
 
     this.openScope(frame);
 
@@ -42,15 +41,15 @@ partial class Lowering {
         return;
       }
 
-      const next = made.block("switch.next");
+      const next = frame.made.block("switch.next");
 
-      made.conditionalBranch(isMatch, body, next);
-      made.open(next);
+      frame.made.conditionalBranch(isMatch, body, next);
+      frame.made.open(next);
     }
 
-    made.branch(missed);
+    frame.made.branch(missed);
     this.caseBodies(frame, statement, bodies, end);
-    made.open(end);
+    frame.made.open(end);
     this.closeScope(frame);
   }
 
@@ -104,10 +103,9 @@ partial class Lowering {
   private caseBodies(
     frame: Frame,
     statement: SwitchStmt,
-    bodies: LLVMBlock[],
+    bodies: Read<LLVMBlock[]>,
     end: LLVMBlock,
   ): void {
-    const made = frame.made;
     const target: LoopTarget = {
       breakBlock: end,
       label: "",
@@ -123,7 +121,7 @@ partial class Lowering {
         continue;
       }
 
-      made.open(body);
+      frame.made.open(body);
       this.statements(frame, item.body);
     }
 

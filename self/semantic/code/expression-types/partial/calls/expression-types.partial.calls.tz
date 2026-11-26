@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
@@ -36,7 +37,7 @@ import {
 import { kDateName } from "../../../../types/type-questions/const/type-questions.const.tz";
 
 partial class ExpressionTypes {
-  private callTyped(
+  private readonly callTyped(
     expr: CallExpr,
     wanted: Type | undefined,
     module: int,
@@ -65,7 +66,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private isOwnTag(callee: Expr, module: int): boolean {
+  private readonly isOwnTag(callee: Expr, module: int): boolean {
     if (callee.kind != ExprKind.Name) {
       return false;
     }
@@ -78,7 +79,7 @@ partial class ExpressionTypes {
     return !this.modules.isLibraryModule(target.module);
   }
 
-  private namedCall(
+  private readonly namedCall(
     expr: CallExpr,
     callee: NameExpr,
     wanted: Type | undefined,
@@ -135,7 +136,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private numberCall(expr: CallExpr, module: int): Type {
+  private readonly numberCall(expr: CallExpr, module: int): Type {
     const double = this.store.plain(TypeKind.Double);
     const arg = expr.args[0];
     if (arg == undefined) {
@@ -155,7 +156,7 @@ partial class ExpressionTypes {
     return this.store.resultOf(double, error);
   }
 
-  private functionCall(
+  private readonly functionCall(
     expr: CallExpr,
     callee: NameExpr,
     target: ValueTarget,
@@ -248,7 +249,7 @@ partial class ExpressionTypes {
     return shape.result;
   }
 
-  private genericFunction(
+  private readonly genericFunction(
     callee: NameExpr,
     fn: FunctionDecl,
     type: FunctionType,
@@ -268,21 +269,21 @@ partial class ExpressionTypes {
     };
   }
 
-  private takenFrom(object: Expr, module: int): void {
+  private readonly takenFrom(object: Expr, module: int): void {
     const key = this.pathKey(object, module);
     if (key != undefined) {
       this.forgetAllLengths();
     }
   }
 
-  private changedArguments(expr: CallExpr, module: int): void {
+  private readonly changedArguments(expr: CallExpr, module: int): void {
     this.forgetLengths(expr.args, module);
     this.forgetAllLengths();
   }
 
-  private genericResult(
+  private readonly genericResult(
     expr: CallExpr,
-    generic: GenericTarget,
+    generic: Read<GenericTarget>,
     wanted: Type | undefined,
     module: int,
   ): Type {
@@ -303,7 +304,7 @@ partial class ExpressionTypes {
     return result;
   }
 
-  private isCallable(fn: FunctionDecl, module: int): boolean {
+  private readonly isCallable(fn: FunctionDecl, module: int): boolean {
     if (this.isOverloaded(fn, module)) {
       return false;
     }
@@ -321,7 +322,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private isOverloaded(fn: FunctionDecl, module: int): boolean {
+  private readonly isOverloaded(fn: FunctionDecl, module: int): boolean {
     const items = this.program.modules[module]?.file.items ?? [];
     const same = items.filter(
       (item) => item.kind == StmtKind.Function && item.name == fn.name,
@@ -330,7 +331,7 @@ partial class ExpressionTypes {
     return same.length > 1;
   }
 
-  private valueCall(expr: CallExpr, module: int): Type {
+  private readonly valueCall(expr: CallExpr, module: int): Type {
     const callee = expr.callee;
     const type = this.typed(callee, undefined, module);
     const link = this.linkOf(type, expr.optional);
@@ -338,7 +339,7 @@ partial class ExpressionTypes {
     return this.calledValue(expr, link, module);
   }
 
-  private calledValue(expr: CallExpr, type: Type, module: int): Type {
+  private readonly calledValue(expr: CallExpr, type: Type, module: int): Type {
     const callee = expr.callee;
     const loc = callee.loc;
 
@@ -370,7 +371,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private calledWith(
+  private readonly calledWith(
     expr: CallExpr,
     type: FunctionType,
     loc: int,
@@ -378,11 +379,10 @@ partial class ExpressionTypes {
     module: int,
   ): Type {
     const isLenient = kind != CallKind.Own;
-    const positions = this.positionMask;
+    const positions = replace(this.positionMask, []);
     const method = this.positionMethod;
     const shape = type.shape;
 
-    this.positionMask = [];
     this.positionMethod = "";
 
     if (shape.self != undefined) {
@@ -427,7 +427,7 @@ partial class ExpressionTypes {
     return shape.result;
   }
 
-  private spreadRefused(
+  private readonly spreadRefused(
     expr: CallExpr,
     kind: CallKind,
     method: string,

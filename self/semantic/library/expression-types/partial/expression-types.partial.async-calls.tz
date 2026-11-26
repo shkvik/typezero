@@ -8,7 +8,7 @@ import {
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 
 partial class ExpressionTypes {
-  private timerArgumentsCheck(expr: CallExpr, module: int): void {
+  private readonly timerArgumentsCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     const isTimer =
       callee.kind == ExprKind.Name &&
@@ -29,7 +29,7 @@ partial class ExpressionTypes {
     this.report(module, extra.loc, Code.TimerArguments, kNoDetails);
   }
 
-  private uncaughtCheck(expr: CallExpr, module: int): void {
+  private readonly uncaughtCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     const event = expr.args[0]?.expr;
     if (callee.kind != ExprKind.Member || event == undefined) {

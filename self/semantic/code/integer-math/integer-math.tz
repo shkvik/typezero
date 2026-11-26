@@ -19,7 +19,7 @@ import {
 import { IntLimit } from "./types/integer-math.types.tz";
 
 export class IntegerMath {
-  public isInside(value: decimal, type: IntType): boolean {
+  public readonly isInside(value: decimal, type: IntType): boolean {
     const limit = this.limitOf(type);
     if (limit == undefined) {
       return false;
@@ -31,7 +31,7 @@ export class IntegerMath {
     return value >= -lowest && value <= highest;
   }
 
-  public wrapTo(value: decimal, type: IntType): decimal {
+  public readonly wrapTo(value: decimal, type: IntType): decimal {
     const span = this.spanOf(type);
     const pattern = this.patternOf(value, span);
     const half = span / 2;
@@ -43,7 +43,7 @@ export class IntegerMath {
     return pattern - span;
   }
 
-  public patternOf(value: decimal, span: decimal): decimal {
+  public readonly patternOf(value: decimal, span: decimal): decimal {
     if (span <= 0) {
       return value;
     }
@@ -53,13 +53,13 @@ export class IntegerMath {
     return (rest + span) % span;
   }
 
-  public spanOf(type: IntType): decimal {
+  public readonly spanOf(type: IntType): decimal {
     const bits = type.bits.toDecimal();
 
     return this.twoPower(bits);
   }
 
-  public twoPower(count: decimal): decimal {
+  public readonly twoPower(count: decimal): decimal {
     let power: decimal = 1;
     let rest: decimal = count;
 
@@ -71,7 +71,7 @@ export class IntegerMath {
     return power;
   }
 
-  public unsignedValue(
+  public readonly unsignedValue(
     op: BinaryOp,
     left: decimal,
     right: decimal,
@@ -88,7 +88,7 @@ export class IntegerMath {
     }
   }
 
-  public bitOf(op: BinaryOp, one: decimal, other: decimal): decimal {
+  public readonly bitOf(op: BinaryOp, one: decimal, other: decimal): decimal {
     switch (op) {
       case BinaryOp.BitAnd:
         return one * other;
@@ -99,7 +99,7 @@ export class IntegerMath {
     }
   }
 
-  public exactPower(base: decimal, exponent: decimal): decimal | undefined {
+  public readonly exactPower(base: decimal, exponent: decimal): decimal | undefined {
     const size = base.abs();
     if (size <= 1) {
       return this.unitPower(base, exponent);
@@ -120,7 +120,7 @@ export class IntegerMath {
     return product;
   }
 
-  public wrappedPower(
+  public readonly wrappedPower(
     base: decimal,
     exponent: decimal,
     type: IntType,
@@ -143,7 +143,7 @@ export class IntegerMath {
     return this.wrapTo(result, type);
   }
 
-  public powerShown(
+  public readonly powerShown(
     exact: decimal | undefined,
     base: decimal,
     exponent: decimal,
@@ -162,7 +162,7 @@ export class IntegerMath {
     return digits;
   }
 
-  public overflowCode(type: IntType): Code {
+  public readonly overflowCode(type: IntType): Code {
     if (type.bits < 64) {
       return Code.ConstantOverflow;
     }
@@ -170,7 +170,7 @@ export class IntegerMath {
     return Code.WideConstantOverflow;
   }
 
-  private limitOf(type: IntType): IntLimit | undefined {
+  private readonly limitOf(type: IntType): IntLimit | undefined {
     const bits = type.bits;
     const unsigned = type.unsigned;
 
@@ -179,7 +179,7 @@ export class IntegerMath {
     );
   }
 
-  private unitPower(base: decimal, exponent: decimal): decimal {
+  private readonly unitPower(base: decimal, exponent: decimal): decimal {
     if (base == 1 || exponent == 0) {
       return 1;
     }
@@ -193,7 +193,7 @@ export class IntegerMath {
     return -1;
   }
 
-  private powerDigits(size: decimal, exponent: decimal): string {
+  private readonly powerDigits(size: decimal, exponent: decimal): string {
     let product: decimal = 1;
     let rest: decimal = exponent;
 
@@ -213,7 +213,7 @@ export class IntegerMath {
     return `${nearest}`;
   }
 
-  private nearestDouble(size: decimal): decimal {
+  private readonly nearestDouble(size: decimal): decimal {
     let top: decimal = 1;
     let bits = 0;
 
@@ -233,7 +233,7 @@ export class IntegerMath {
     return steps * unit;
   }
 
-  private exponentText(value: decimal): string {
+  private readonly exponentText(value: decimal): string {
     const text = value.toExponential(kShownDigits - 1);
     const mark = text.indexOf(kExponentMark);
     if (mark < 0) {

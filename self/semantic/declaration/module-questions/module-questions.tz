@@ -4,11 +4,11 @@ import { kTypedLibraries } from "./const/module-questions.const.tz";
 export class ModuleQuestions {
   private readonly program: Program;
 
-  public constructor(program: Program) {
+  public constructor(program: Own<Program>) {
     this.program = program;
   }
 
-  public isLibraryModule(module: int): boolean {
+  public readonly isLibraryModule(module: int): boolean {
     const opened = this.program.modules[module];
     if (module < 0 || opened == undefined) {
       return true;
@@ -17,7 +17,7 @@ export class ModuleQuestions {
     return opened.source.isLibrary;
   }
 
-  public isTypedLibrary(module: int): boolean {
+  public readonly isTypedLibrary(module: int): boolean {
     const opened = this.program.modules[module];
     if (opened == undefined || !opened.source.isLibrary) {
       return false;

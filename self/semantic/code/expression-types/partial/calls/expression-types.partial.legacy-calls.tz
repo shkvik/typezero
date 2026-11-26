@@ -16,7 +16,7 @@ import {
 } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private legacyCallCheck(expr: CallExpr, module: int): boolean {
+  private readonly legacyCallCheck(expr: CallExpr, module: int): boolean {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Name || !this.isGlobalUse(callee, module)) {
       return false;
@@ -36,7 +36,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private legacyCode(
+  private readonly legacyCode(
     name: string,
     expr: CallExpr,
     module: int,
@@ -59,7 +59,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private soleCallName(expr: CallExpr, module: int): string {
+  private readonly soleCallName(expr: CallExpr, module: int): string {
     const arg = expr.args[0]?.expr;
     if (expr.args.length != 1 || arg == undefined) {
       return "";
@@ -76,7 +76,7 @@ partial class ExpressionTypes {
     return callee.name;
   }
 
-  private legacyValueCheck(expr: NameExpr, module: int): boolean {
+  private readonly legacyValueCheck(expr: NameExpr, module: int): boolean {
     const isEscape = expr.name == kEscapeName;
     const isUnescape = expr.name == kUnescapeName;
     if (!isEscape && !isUnescape) {
@@ -93,7 +93,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private legacyValueCode(isEscape: boolean): Code {
+  private readonly legacyValueCode(isEscape: boolean): Code {
     if (isEscape) {
       return Code.EscapeValueRefused;
     }
@@ -101,7 +101,7 @@ partial class ExpressionTypes {
     return Code.UnescapeValueRefused;
   }
 
-  private jsonParseTypesCheck(
+  private readonly jsonParseTypesCheck(
     expr: CallExpr,
     member: MemberExpr,
     module: int,

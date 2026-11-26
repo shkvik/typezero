@@ -19,9 +19,9 @@ import {
 import { kSubmodules } from "../const/module-binder.const.tz";
 
 partial class ModuleBinder {
-  private exportsOf(bound: BoundModule): Map<string, ModuleExport> {
+  private readonly exportsOf(bound: BoundModule): Map<string, ModuleExport> {
     if (bound.state != BindState.New) {
-      return bound.names.exports;
+      return new Map<string, ModuleExport>(bound.names.exports);
     }
 
     bound.state = BindState.Exporting;
@@ -39,10 +39,10 @@ partial class ModuleBinder {
 
     bound.state = BindState.Exported;
 
-    return bound.names.exports;
+    return new Map<string, ModuleExport>(bound.names.exports);
   }
 
-  private exportDeclared(bound: BoundModule): void {
+  private readonly exportDeclared(bound: Read<BoundModule>): void {
     const names = bound.names;
     const module = names.module;
     if (!module.isDeclarationOnly) {
@@ -54,7 +54,7 @@ partial class ModuleBinder {
     }
   }
 
-  private exportNames(bound: BoundModule, decl: ExportDecl): void {
+  private readonly exportNames(bound: BoundModule, decl: ExportDecl): void {
     const from = decl.from;
     const isLibrary = bound.names.module.source.isLibrary;
     if (from != undefined && !isLibrary && kBuiltinModules.has(from.path)) {
@@ -70,7 +70,7 @@ partial class ModuleBinder {
     }
   }
 
-  private exportName(
+  private readonly exportName(
     bound: BoundModule,
     decl: ExportDecl,
     name: ModuleName,
@@ -80,8 +80,7 @@ partial class ModuleBinder {
       return;
     }
 
-    const exports = bound.names.exports;
-    const previous = exports.get(name.as);
+    const previous = bound.names.exports.get(name.as);
     if (previous != undefined) {
       const other = this.lineOf(bound, previous.loc);
 
@@ -93,10 +92,10 @@ partial class ModuleBinder {
       return;
     }
 
-    exports.set(name.as, { target, loc: name.asLoc });
+    bound.names.exports.set(name.as, { target, loc: name.asLoc });
   }
 
-  private exportTarget(
+  private readonly exportTarget(
     bound: BoundModule,
     decl: ExportDecl,
     name: ModuleName,
@@ -116,12 +115,12 @@ partial class ModuleBinder {
     return this.exportedBy(bound, source, from.path, name, theirs);
   }
 
-  private exportedBy(
+  private readonly exportedBy(
     bound: BoundModule,
-    source: BoundModule,
+    source: Read<BoundModule>,
     path: string,
     name: ModuleName,
-    theirs: Map<string, ModuleExport>,
+    theirs: Read<Map<string, ModuleExport>>,
   ): NameTarget | undefined {
     const word = name.name;
     const found = theirs.get(word);
@@ -164,11 +163,11 @@ partial class ModuleBinder {
     return undefined;
   }
 
-  private isSubmodule(module: string, word: string): boolean {
+  private readonly isSubmodule(module: string, word: string): boolean {
     return kSubmodules.some((one) => one.parent == module && one.name == word);
   }
 
-  private localTarget(
+  private readonly localTarget(
     bound: BoundModule,
     name: ModuleName,
   ): NameTarget | undefined {
@@ -209,8 +208,8 @@ partial class ModuleBinder {
     return found.target;
   }
 
-  private importedAs(
-    bound: BoundModule,
+  private readonly importedAs(
+    bound: Read<BoundModule>,
     word: string,
   ): ImportedName | undefined {
     for (const decl of bound.names.module.file.imports) {
@@ -223,7 +222,7 @@ partial class ModuleBinder {
     return undefined;
   }
 
-  private unknownExportCode(bound: BoundModule, word: string): Code {
+  private readonly unknownExportCode(bound: Read<BoundModule>, word: string): Code {
     const imports = bound.names.module.file.imports;
     const whole = imports.some((decl) => decl.whole?.name == word);
     if (whole) {
@@ -233,7 +232,7 @@ partial class ModuleBinder {
     return Code.ExportNotFound;
   }
 
-  private exportAll(bound: BoundModule, decl: ExportDecl): void {
+  private readonly exportAll(bound: BoundModule, decl: ExportDecl): void {
     const from = decl.from;
     if (decl.form != ExportForm.All || from == undefined) {
       return;
@@ -251,17 +250,16 @@ partial class ModuleBinder {
     }
   }
 
-  private exportThroughStar(
+  private readonly exportThroughStar(
     bound: BoundModule,
     decl: ExportDecl,
     from: ModulePath,
     name: string,
     exported: ModuleExport,
   ): void {
-    const exports = bound.names.exports;
-    const ours = exports.get(name);
+    const ours = bound.names.exports.get(name);
     if (ours == undefined) {
-      exports.set(name, { target: exported.target, loc: decl.loc, star: from });
+      bound.names.exports.set(name, { target: exported.target, loc: decl.loc, star: from });
 
       return;
     }
@@ -278,7 +276,7 @@ partial class ModuleBinder {
     });
   }
 
-  private sameTarget(first: NameTarget, second: NameTarget): boolean {
+  private readonly sameTarget(first: NameTarget, second: NameTarget): boolean {
     return first.module == second.module && first.name == second.name;
   }
 }

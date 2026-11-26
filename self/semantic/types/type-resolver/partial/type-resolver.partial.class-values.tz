@@ -6,10 +6,10 @@ import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import { TypeContext } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  private constructorType(
+  private readonly constructorType(
     ref: TypeRef,
-    args: Type[],
-    context: TypeContext,
+    args: Read<Type[]>,
+    context: Read<TypeContext>,
   ): Type {
     const made = args[0];
     if (made == undefined) {
@@ -33,7 +33,7 @@ partial class TypeResolver {
     return this.store.classOf(made, false);
   }
 
-  private isConstructedObject(type: Type): boolean {
+  private readonly isConstructedObject(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.Object:
       case TypeKind.Instance:
@@ -45,7 +45,7 @@ partial class TypeResolver {
     }
   }
 
-  private typeOfClass(ref: TypeRef, context: TypeContext): Type {
+  private readonly typeOfClass(ref: TypeRef, context: TypeContext): Type {
     const error = this.store.plain(TypeKind.Error);
     const uses = this.scopes.get(context.module)?.uses ?? [];
     const use = uses.find((one) => one.loc == ref.loc && !one.isType);

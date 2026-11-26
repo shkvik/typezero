@@ -1,7 +1,7 @@
 import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
 
 partial class ExpressionTypes {
-  private unreadResultsCheck(module: int): void {
+  private readonly unreadResultsCheck(module: int): void {
     const record = this.records.get(module);
     if (record == undefined || this.resultsChecked.has(module)) {
       return;

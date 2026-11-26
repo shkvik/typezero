@@ -119,7 +119,7 @@ main.tz → a.tz → b.tz → (a.tz уже начат). Вычисли это в
 
 ## 5. Файлы данных и JSON
 
-**Импорт файла JSON** (решено и сделано 29 октября; примеры — `tmp/design/json-import.tz`):
+**Импорт файла JSON** (решено и сделано 29 октября):
 
 ```ts
 import config from "./config.json" with { type: "json" }

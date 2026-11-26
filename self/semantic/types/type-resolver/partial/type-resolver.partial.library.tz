@@ -6,7 +6,7 @@ import { Type } from "../../../../program/type/types/type.types.tz";
 import { ClassHome, LibraryClass } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  public libraryShape(name: string, args: Type[]): Type | undefined {
+  public readonly libraryShape(name: string, args: Own<Type[]>): Type | undefined {
     const module = this.globals.get(name);
     if (module == undefined) {
       return undefined;
@@ -29,11 +29,11 @@ partial class TypeResolver {
     return shape;
   }
 
-  public isLibraryShape(type: Type): boolean {
+  public readonly isLibraryShape(type: Type): boolean {
     return this.libraryShapes.has(type.id);
   }
 
-  public libraryClass(name: string): LibraryClass | undefined {
+  public readonly libraryClass(name: string): LibraryClass | undefined {
     const module = this.globals.get(name);
     if (module == undefined) {
       return undefined;
@@ -47,7 +47,7 @@ partial class TypeResolver {
     return { module, declared };
   }
 
-  public libraryInstance(name: string, args: Type[]): Type | undefined {
+  public readonly libraryInstance(name: string, args: Read<Type[]>): Type | undefined {
     const found = this.libraryClass(name);
     if (found == undefined) {
       return undefined;
@@ -56,10 +56,10 @@ partial class TypeResolver {
     return this.declaredInstance(found.module, found.declared, args);
   }
 
-  public declaredInstance(
+  public readonly declaredInstance(
     module: int,
     declared: DeclaredClass,
-    args: Type[],
+    args: Read<Type[]>,
   ): Type | undefined {
     if (!this.isFilling(declared.typeParams, args)) {
       return undefined;
@@ -78,7 +78,7 @@ partial class TypeResolver {
     return instance;
   }
 
-  private isFilling(params: TypeParamDecl[], args: Type[]): boolean {
+  private readonly isFilling(params: Read<TypeParamDecl[]>, args: Read<Type[]>): boolean {
     if (args.length > params.length) {
       return false;
     }

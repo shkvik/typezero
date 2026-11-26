@@ -23,7 +23,7 @@ import {
 import { TypeContext, TypePlace } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  private memberFields(instance: InstanceType): ObjectField[] {
+  private readonly memberFields(instance: InstanceType): ObjectField[] {
     const record = this.record(instance.module);
     if (record == undefined) {
       return [];
@@ -44,7 +44,7 @@ partial class TypeResolver {
     return [];
   }
 
-  private classFields(instance: InstanceType, decl: ClassDecl): ObjectField[] {
+  private readonly classFields(instance: InstanceType, decl: ClassDecl): ObjectField[] {
     const context = this.inside(instance, decl.typeParams);
     const fields: ObjectField[] = [];
 
@@ -67,7 +67,7 @@ partial class TypeResolver {
     return fields;
   }
 
-  private declaredFields(
+  private readonly declaredFields(
     instance: InstanceType,
     declared: DeclaredClass,
   ): ObjectField[] {
@@ -94,9 +94,9 @@ partial class TypeResolver {
     return fields;
   }
 
-  public classContext(
+  public readonly classContext(
     instance: InstanceType,
-    params: TypeParamDecl[],
+    params: Read<TypeParamDecl[]>,
     home: int,
   ): TypeContext {
     const inside = this.inside(instance, params);
@@ -104,7 +104,7 @@ partial class TypeResolver {
     return { module: home, bindings: inside.bindings, place: inside.place };
   }
 
-  private inside(instance: InstanceType, params: TypeParamDecl[]): TypeContext {
+  private readonly inside(instance: InstanceType, params: Read<TypeParamDecl[]>): TypeContext {
     const bindings = new Map<int, Type>();
 
     for (let index = 0; index < params.length; index++) {
@@ -118,7 +118,7 @@ partial class TypeResolver {
     return { module: instance.module, bindings, place: TypePlace.Plain };
   }
 
-  private memberType(written: TypeRef | undefined, context: TypeContext): Type {
+  private readonly memberType(written: TypeRef | undefined, context: TypeContext): Type {
     if (written == undefined) {
       return this.store.plain(TypeKind.Error);
     }

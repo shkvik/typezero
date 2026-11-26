@@ -132,6 +132,13 @@ export const kGlobalValues = ["escape", "Symbol", "unescape"];
 
 export const kGlobalTypes = [
   "ArrayBufferLike",
+  "Cell",
+  "Interned",
+  "Lent",
+  "Mut",
+  "Once",
+  "Own",
+  "Read",
   "Capitalize",
   "Constructor",
   "ConstructorArgs",

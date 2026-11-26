@@ -13,7 +13,7 @@ import {
 import { CallKind } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private unionShapeCall(
+  private readonly unionShapeCall(
     expr: CallExpr,
     member: MemberExpr,
     object: UnionType,
@@ -35,7 +35,7 @@ partial class ExpressionTypes {
     return this.calledWith(expr, shared, member.loc, CallKind.Own, module);
   }
 
-  private shapeParts(object: UnionType): ObjectType[] | undefined {
+  private readonly shapeParts(object: UnionType): ObjectType[] | undefined {
     const parts: ObjectType[] = [];
 
     for (const part of object.parts) {
@@ -53,10 +53,10 @@ partial class ExpressionTypes {
     return parts;
   }
 
-  private sharedMethod(
+  private readonly sharedMethod(
     member: MemberExpr,
     object: UnionType,
-    parts: ObjectType[],
+    parts: Read<ObjectType[]>,
     module: int,
   ): FunctionType | undefined {
     const checked = this.calls.sharedMethod(member, object, parts);

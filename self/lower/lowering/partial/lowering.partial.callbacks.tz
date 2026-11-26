@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import {
   Expr,
   ExprKind,
@@ -18,7 +19,7 @@ import {
 } from "../types/lowering.types.tz";
 
 partial class Lowering {
-  private isInlineable(expr: Expr): boolean {
+  private readonly isInlineable(expr: Expr): boolean {
     if (expr.kind != ExprKind.Function) {
       return false;
     }
@@ -34,7 +35,7 @@ partial class Lowering {
     );
   }
 
-  private callbackShape(frame: Frame, expr: Expr): FunctionShape | undefined {
+  private readonly callbackShape(frame: Read<Frame>, expr: Expr): FunctionShape | undefined {
     if (expr.kind != ExprKind.Function) {
       return undefined;
     }
@@ -55,7 +56,7 @@ partial class Lowering {
   private inlineCall(
     frame: Frame,
     callee: Expr,
-    args: IrValue[],
+    args: Read<IrValue[]>,
     wanted?: Type,
   ): IrValue | undefined {
     const shape = this.callbackShape(frame, callee);
@@ -76,8 +77,7 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
-    const end = made.block("inline.end");
+    const end = frame.made.block("inline.end");
     if (returns == undefined) {
       return undefined;
     }
@@ -92,23 +92,26 @@ partial class Lowering {
       depth: frame.scopes.length,
     };
     const inner: Frame = {
-      made,
+      made: frame.made,
       id: frame.id,
       module: frame.module,
       result: returns,
       loops: [],
-      scopes: frame.scopes,
+      scopes: replace(frame.scopes, []),
       self: frame.self,
       inline: target,
       place: "",
     };
     const isBound = this.callbackParameters(inner, callee, shape, args);
     if (!isBound) {
+      frame.scopes = inner.scopes;
+
       return undefined;
     }
 
     this.statements(inner, body.body);
-    made.open(end);
+    frame.scopes = inner.scopes;
+    frame.made.open(end);
     this.closeScope(frame);
 
     if (result == undefined) {
@@ -117,15 +120,15 @@ partial class Lowering {
       return { type: kVoidType, value: none, tz: returns };
     }
 
-    const value = made.load(result.type, result.pointer);
+    const value = frame.made.load(result.type, result.pointer);
 
-    made.store(this.ir.zero(result.type), result.pointer);
+    frame.made.store(this.ir.zero(result.type), result.pointer);
 
     return { type: result.type, value, tz: returns, owned: true };
   }
 
-  private callbackResult(
-    shape: FunctionShape | undefined,
+  private readonly callbackResult(
+    shape: Read<FunctionShape | undefined>,
     wanted: Type | undefined,
   ): Type | undefined {
     if (wanted != undefined) {
@@ -135,8 +138,8 @@ partial class Lowering {
     return shape?.result;
   }
 
-  private inlineResult(
-    frame: Frame,
+  private readonly inlineResult(
+    frame: Read<Frame>,
     type: string,
     returns: Type,
   ): Place | undefined {
@@ -154,8 +157,8 @@ partial class Lowering {
   private callbackParameters(
     frame: Frame,
     callee: Expr,
-    shape: FunctionShape,
-    args: IrValue[],
+    shape: Read<FunctionShape>,
+    args: Read<IrValue[]>,
   ): boolean {
     if (callee.kind != ExprKind.Function) {
       return false;

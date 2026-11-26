@@ -14,7 +14,7 @@ import { kNoPlace } from "../../const/expression-types.const.tz";
 import { ArrayDraft } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private arrayTyped(
+  private readonly arrayTyped(
     expr: ArrayLitExpr,
     wanted: Type | undefined,
     module: int,
@@ -38,7 +38,7 @@ partial class ExpressionTypes {
     return this.listTyped(expr, item, module);
   }
 
-  private looseElements(expr: ArrayLitExpr, module: int): Type {
+  private readonly looseElements(expr: ArrayLitExpr, module: int): Type {
     for (const element of expr.elements) {
       if (!element.hole) {
         this.typed(element.expr, undefined, module);
@@ -48,7 +48,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private tupleTyped(expr: ArrayLitExpr, tuple: Type, module: int): Type {
+  private readonly tupleTyped(expr: ArrayLitExpr, tuple: Type, module: int): Type {
     if (tuple.kind != TypeKind.Tuple) {
       return this.store.plain(TypeKind.Error);
     }
@@ -90,7 +90,7 @@ partial class ExpressionTypes {
     return tuple;
   }
 
-  private listTyped(
+  private readonly listTyped(
     expr: ArrayLitExpr,
     item: Type | undefined,
     module: int,
@@ -119,7 +119,7 @@ partial class ExpressionTypes {
     return array;
   }
 
-  private firstPass(
+  private readonly firstPass(
     expr: ArrayLitExpr,
     item: Type | undefined,
     draft: ArrayDraft,
@@ -134,7 +134,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private firstPassElement(
+  private readonly firstPassElement(
     element: ArrayElement,
     index: int,
     item: Type | undefined,
@@ -157,7 +157,7 @@ partial class ExpressionTypes {
     this.arrays.seeElement(draft, type);
   }
 
-  private spreadElement(
+  private readonly spreadElement(
     expr: Expr,
     index: int,
     item: Type | undefined,
@@ -186,7 +186,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private spreadItem(expr: Expr, type: Type, module: int): Type {
+  private readonly spreadItem(expr: Expr, type: Type, module: int): Type {
     const matched = this.matchItem(type);
     if (matched != undefined) {
       return matched;
@@ -215,7 +215,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private refusedSpread(expr: Expr, type: Type, code: Code, module: int): Type {
+  private readonly refusedSpread(expr: Expr, type: Type, code: Code, module: int): Type {
     const checked = this.arrays.refusedSpread(expr, type, code);
 
     this.reportFound(module, checked.error);
@@ -223,7 +223,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private tupleItem(expr: Expr, tuple: Type, module: int): Type {
+  private readonly tupleItem(expr: Expr, tuple: Type, module: int): Type {
     const checked = this.arrays.tupleItem(expr, tuple);
 
     this.reportFound(module, checked.error);
@@ -231,7 +231,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private secondPass(
+  private readonly secondPass(
     expr: ArrayLitExpr,
     hint: Type | undefined,
     draft: ArrayDraft,
@@ -250,9 +250,9 @@ partial class ExpressionTypes {
     }
   }
 
-  private joinedElement(
+  private readonly joinedElement(
     expr: ArrayLitExpr,
-    draft: ArrayDraft,
+    draft: Read<ArrayDraft>,
     module: int,
   ): Type | undefined {
     const checked = this.arrays.joinedElement(expr, draft);
@@ -262,11 +262,11 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private coerceElements(
+  private readonly coerceElements(
     expr: ArrayLitExpr,
     element: Type,
     array: Type,
-    draft: ArrayDraft,
+    draft: Read<ArrayDraft>,
     module: int,
   ): void {
     let index = 0;

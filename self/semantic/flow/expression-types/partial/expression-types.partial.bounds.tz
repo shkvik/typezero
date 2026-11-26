@@ -30,7 +30,7 @@ import {
 import { kLengthName } from "../../../code/expression-shapes/const/expression-shapes.const.tz";
 
 partial class ExpressionTypes {
-  private linearOf(expr: Expr, module: int): Linear | undefined {
+  private readonly linearOf(expr: Expr, module: int): Linear | undefined {
     switch (expr.kind) {
       case ExprKind.IntLit:
         return this.bounds.constantLinear(expr.value);
@@ -62,7 +62,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private negatedLinear(expr: UnaryExpr): Linear | undefined {
+  private readonly negatedLinear(expr: UnaryExpr): Linear | undefined {
     const operand = expr.operand;
     if (expr.op != UnaryOp.Neg || operand.kind != ExprKind.IntLit) {
       return undefined;
@@ -76,7 +76,7 @@ partial class ExpressionTypes {
     return { term: kZeroTerm, offset: -value.offset };
   }
 
-  private valueTypeOf(expr: NameExpr, module: int): Type | undefined {
+  private readonly valueTypeOf(expr: NameExpr, module: int): Type | undefined {
     const target = this.targetOfName(expr, module);
     const isValue =
       target != undefined &&
@@ -89,7 +89,7 @@ partial class ExpressionTypes {
     return this.declaredOf(target);
   }
 
-  private lengthLinear(expr: Expr, module: int): Linear | undefined {
+  private readonly lengthLinear(expr: Expr, module: int): Linear | undefined {
     if (expr.kind != ExprKind.Member) {
       return undefined;
     }
@@ -116,14 +116,14 @@ partial class ExpressionTypes {
     return { term, offset: 0 };
   }
 
-  private rememberFixedCount(object: Expr, term: string, module: int): void {
+  private readonly rememberFixedCount(object: Expr, term: string, module: int): void {
     const count = this.fixedCount(object, module);
     if (count != undefined) {
       this.fixedCounts.set(term, count);
     }
   }
 
-  private fixedCount(object: Expr, module: int): decimal | undefined {
+  private readonly fixedCount(object: Expr, module: int): decimal | undefined {
     const count = this.constLength(object, module);
     if (count == undefined || count.term != kZeroTerm) {
       return undefined;
@@ -132,7 +132,7 @@ partial class ExpressionTypes {
     return count.offset;
   }
 
-  private pinnedLinear(linear: Linear | undefined): Linear | undefined {
+  private readonly pinnedLinear(linear: Linear | undefined): Linear | undefined {
     if (linear == undefined || linear.term == kZeroTerm) {
       return linear;
     }
@@ -146,7 +146,7 @@ partial class ExpressionTypes {
     return { term: kZeroTerm, offset: least + linear.offset };
   }
 
-  private constLength(object: Expr, module: int): Linear | undefined {
+  private readonly constLength(object: Expr, module: int): Linear | undefined {
     if (object.kind != ExprKind.Name) {
       return undefined;
     }
@@ -165,7 +165,7 @@ partial class ExpressionTypes {
     return this.sizedLinear(init, target.module);
   }
 
-  private isByteLength(expr: MemberExpr, module: int): boolean {
+  private readonly isByteLength(expr: MemberExpr, module: int): boolean {
     const object = expr.object;
     if (expr.name != kByteLengthName || object.kind != ExprKind.Name) {
       return false;
@@ -176,7 +176,7 @@ partial class ExpressionTypes {
     return type != undefined && this.bytes.isByteSized(type);
   }
 
-  private shiftedLinear(expr: BinaryExpr, module: int): Linear | undefined {
+  private readonly shiftedLinear(expr: BinaryExpr, module: int): Linear | undefined {
     const isAdd = expr.op == BinaryOp.Add;
     if (!isAdd && expr.op != BinaryOp.Sub) {
       return undefined;
@@ -196,13 +196,13 @@ partial class ExpressionTypes {
     return { term: base.term, offset: base.offset - step.offset };
   }
 
-  private canProve(lower: string, upper: string, room: decimal): boolean {
+  private readonly canProve(lower: string, upper: string, room: decimal): boolean {
     const found = this.bestRoom(lower, upper);
 
     return found != undefined && found >= room;
   }
 
-  private bestRoom(lower: string, upper: string): decimal | undefined {
+  private readonly bestRoom(lower: string, upper: string): decimal | undefined {
     if (lower == upper) {
       return 0;
     }
@@ -237,7 +237,7 @@ partial class ExpressionTypes {
     return distances.get(upper);
   }
 
-  private boundEdges(): BoundEdge[] {
+  private readonly boundEdges(): BoundEdge[] {
     const edges: BoundEdge[] = [];
     const lengths = new Set<string>();
 
@@ -264,7 +264,7 @@ partial class ExpressionTypes {
     return edges;
   }
 
-  private isProvenIndex(object: Expr, index: Expr, module: int): boolean {
+  private readonly isProvenIndex(object: Expr, index: Expr, module: int): boolean {
     const at = this.linearOf(index, module);
     const key = this.pathKey(object, module);
     if (at == undefined || key == undefined) {
@@ -280,7 +280,7 @@ partial class ExpressionTypes {
     return this.canProve(at.term, length, at.offset + 1);
   }
 
-  private comparisonBounds(
+  private readonly comparisonBounds(
     cond: BinaryExpr,
     isTrue: boolean,
     module: int,
@@ -306,7 +306,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private declaredBounds(decl: VarDeclarator, module: int): void {
+  private readonly declaredBounds(decl: VarDeclarator, module: int): void {
     const init = decl.init;
     if (init == undefined) {
       return;
@@ -330,7 +330,7 @@ partial class ExpressionTypes {
     this.facts = facts;
   }
 
-  private assignedBounds(expr: AssignExpr, module: int): void {
+  private readonly assignedBounds(expr: AssignExpr, module: int): void {
     const target = expr.target;
     if (expr.op != undefined || target.kind != ExprKind.Name) {
       return;
@@ -361,7 +361,7 @@ partial class ExpressionTypes {
     this.facts = facts;
   }
 
-  private rangeBounds(key: string, init: Expr, module: int): void {
+  private readonly rangeBounds(key: string, init: Expr, module: int): void {
     const declared = this.doors.get(key)?.type;
     if (declared == undefined || declared.kind != TypeKind.Int) {
       return;
@@ -388,7 +388,7 @@ partial class ExpressionTypes {
     this.facts = facts;
   }
 
-  private isFixedLength(expr: Expr, module: int): boolean {
+  private readonly isFixedLength(expr: Expr, module: int): boolean {
     if (expr.kind != ExprKind.Name) {
       return false;
     }
@@ -402,7 +402,7 @@ partial class ExpressionTypes {
     return this.bytes.elementOf(type) != undefined || this.bytes.isRaw(type);
   }
 
-  private forgetLengths(args: CallArgument[], module: int): void {
+  private readonly forgetLengths(args: Read<CallArgument[]>, module: int): void {
     for (const arg of args) {
       const key = this.pathKey(arg.expr, module);
       if (key != undefined && !this.isFixedLength(arg.expr, module)) {
@@ -411,7 +411,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private forgetLength(key: string): void {
+  private readonly forgetLength(key: string): void {
     const length = kLengthTerm + key;
     const facts = new Map<string, Type>();
 
@@ -427,7 +427,7 @@ partial class ExpressionTypes {
     this.facts = facts;
   }
 
-  private forgetBounds(key: string, kept: BoundSide): void {
+  private readonly forgetBounds(key: string, kept: BoundSide): void {
     const value = kValueTerm + key;
     const length = kLengthTerm + key;
     const facts = new Map<string, Type>();
@@ -445,7 +445,7 @@ partial class ExpressionTypes {
     this.facts = facts;
   }
 
-  private loopDirection(changes: Expr[], loc: int, module: int): BoundSide {
+  private readonly loopDirection(changes: Read<Expr[]>, loc: int, module: int): BoundSide {
     let side: BoundSide = BoundSide.None;
 
     for (const change of changes) {
@@ -463,7 +463,7 @@ partial class ExpressionTypes {
     return side;
   }
 
-  private stepSide(change: Expr, loc: int, module: int): BoundSide {
+  private readonly stepSide(change: Expr, loc: int, module: int): BoundSide {
     const target = this.bounds.changedTarget(change);
     if (target == undefined || target.kind != ExprKind.Name) {
       return BoundSide.None;
@@ -495,7 +495,7 @@ partial class ExpressionTypes {
     return BoundSide.Both;
   }
 
-  private forgetAllLengths(): void {
+  private readonly forgetAllLengths(): void {
     const facts = new Map<string, Type>();
 
     for (const [known, type] of this.facts) {
@@ -512,7 +512,7 @@ partial class ExpressionTypes {
     this.facts = facts;
   }
 
-  private isFixedEdge(edge: BoundEdge | undefined): boolean {
+  private readonly isFixedEdge(edge: BoundEdge | undefined): boolean {
     if (edge == undefined) {
       return false;
     }
@@ -524,7 +524,7 @@ partial class ExpressionTypes {
     return lengths.every((term) => this.fixedLengths.has(term));
   }
 
-  private isProvenFilled(object: Expr, module: int): boolean {
+  private readonly isProvenFilled(object: Expr, module: int): boolean {
     const key = this.pathKey(object, module);
     if (key == undefined) {
       return false;
@@ -533,7 +533,7 @@ partial class ExpressionTypes {
     return this.canProve(kZeroTerm, kLengthTerm + key, 1);
   }
 
-  private writeIndexCheck(
+  private readonly writeIndexCheck(
     target: IndexExpr,
     isCompound: boolean,
     module: int,

@@ -28,12 +28,7 @@ partial class ScopeTraversal {
       return;
     }
 
-    const known = this.memberUses.get(object.name);
-    if (known == undefined) {
-      this.memberUses.set(object.name, [name]);
-
-      return;
-    }
+    const known = this.memberUses.getOrInsert(object.name, []);
     if (!known.includes(name)) {
       known.push(name);
     }
@@ -76,7 +71,7 @@ partial class ScopeTraversal {
     }
   }
 
-  private wholeImportError(
+  private readonly wholeImportError(
     path: string,
     whole: WholeImport,
     row: KnownModuleRow,
@@ -111,7 +106,7 @@ partial class ScopeTraversal {
     };
   }
 
-  private knownModule(path: string): KnownModuleRow | undefined {
+  private readonly knownModule(path: string): KnownModuleRow | undefined {
     const bare = this.barePath(path);
 
     return kKnownModules.find((row) => {
@@ -123,7 +118,7 @@ partial class ScopeTraversal {
     });
   }
 
-  private barePath(path: string): string {
+  private readonly barePath(path: string): string {
     if (path.startsWith(kNodePrefix)) {
       return path.slice(kNodePrefix.length);
     }
@@ -131,7 +126,7 @@ partial class ScopeTraversal {
     return path;
   }
 
-  private importForm(isDefault: boolean): string {
+  private readonly importForm(isDefault: boolean): string {
     if (isDefault) {
       return kDefaultImportForm;
     }

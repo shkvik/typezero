@@ -1,4 +1,5 @@
 import {
+  ArrayType,
   Change,
   DictKind,
   FunctionShape,
@@ -16,65 +17,85 @@ import {
 import { kParentDepthLimit } from "./const/type-store.const.tz";
 
 export class TypeStore {
-  private readonly plains: Map<TypeKind, Type>;
-  private readonly byKey: Map<string, Type>;
-  private readonly labels: Map<Type, string>;
-  private readonly parents: Map<Type, Type[]>;
-  private readonly bases: Set<Type>;
-  private readonly constraints: Map<Type, Type>;
-  private readonly writers: Map<string, ParamWriter[]>;
-  private count: int;
+  private plains: Cell<Map<TypeKind, Type>>;
+  private byKey: Cell<Map<string, Type>>;
+  private labels: Cell<Map<Type, string>>;
+  private parents: Cell<Map<Type, readonly Type[]>>;
+  private bases: Cell<Set<Type>>;
+  private constraints: Cell<Map<Type, Type>>;
+  private writers: Cell<Map<string, readonly ParamWriter[]>>;
+  private interned: Cell<Set<int>>;
+  private count: Cell<int>;
 
   public constructor() {
     this.plains = new Map<TypeKind, Type>();
     this.byKey = new Map<string, Type>();
     this.labels = new Map<Type, string>();
-    this.parents = new Map<Type, Type[]>();
+    this.parents = new Map<Type, readonly Type[]>();
     this.bases = new Set<Type>();
     this.constraints = new Map<Type, Type>();
-    this.writers = new Map<string, ParamWriter[]>();
+    this.writers = new Map<string, readonly ParamWriter[]>();
+    this.interned = new Set<int>();
     this.count = 0;
   }
 
-  public inherit(instance: Type, parents: Type[]): void {
+  public readonly markInterned(type: Type): void {
+    if (this.interned.has(type.id)) {
+      return;
+    }
+
+    this.interned.add(type.id);
+
+    if (type.kind == TypeKind.Union) {
+      for (const part of type.parts) {
+        this.markInterned(part);
+      }
+    }
+  }
+
+  public readonly isInterned(type: Type): boolean {
+    return this.interned.has(type.id);
+  }
+
+  public readonly inherit(instance: Type, parents: Own<Type[]>): void {
     this.parents.set(instance, parents);
   }
 
-  public markBase(base: Type): void {
+  public readonly markBase(base: Type): void {
     this.bases.add(base);
   }
 
-  public isBase(type: Type): boolean {
+  public readonly isBase(type: Type): boolean {
     return this.bases.has(type);
   }
 
-  public hasParents(instance: Type): boolean {
+  public readonly hasParents(instance: Type): boolean {
     return this.parents.has(instance);
   }
 
-  public parentsOf(instance: Type): Type[] {
+  public readonly parentsOf(instance: Type): Type[] {
     return this.parents.get(instance) ?? [];
   }
 
-  public constrain(parameter: Type, constraint: Type): void {
+  public readonly constrain(parameter: Type, constraint: Type): void {
     this.constraints.set(parameter, constraint);
   }
 
-  public constraintOf(parameter: Type): Type | undefined {
+  public readonly constraintOf(parameter: Type): Type | undefined {
     return this.constraints.get(parameter);
   }
 
-  public label(type: Type, text: string): void {
+  public readonly label(type: Type, text: string): void {
     if (!this.labels.has(type)) {
       this.labels.set(type, text);
     }
   }
 
-  public labelOf(type: Type): string | undefined {
+  public readonly labelOf(type: Type): string | undefined {
     return this.labels.get(type);
   }
 
-  public plain(kind: PlainKind): Type {
+  public readonly plain(kind: PlainKind): Type {
     const known = this.plains.get(kind);
     if (known != undefined) {
       return known;
@@ -88,7 +109,7 @@ export class TypeStore {
     return made;
   }
 
-  public integer(bits: int, unsigned: boolean): Type {
+  public readonly integer(bits: int, unsigned: boolean): Type {
     const key = `int ${bits} ${unsigned}`;
     const known = this.byKey.get(key);
     if (known != undefined) {
@@ -107,7 +128,7 @@ export class TypeStore {
     return this.keep(key, made);
   }
 
-  public wrapping(bits: int): Type {
+  public readonly wrapping(bits: int): Type {
     const key = `wrap ${bits}`;
     const known = this.byKey.get(key);
     if (known != undefined) {
@@ -126,7 +147,7 @@ export class TypeStore {
     return this.keep(key, made);
   }
 
-  public literal(literal: LiteralKind, text: string): Type {
+  public readonly literal(literal: LiteralKind, text: string): Type {
     const word = this.literalWord(literal);
     const key = `literal ${word} ${text}`;
     const known = this.byKey.get(key);
@@ -140,7 +161,28 @@ export class TypeStore {
     return this.keep(key, made);
   }
 
-  public arrayOf(item: Type): Type {
+  public readonly sameArrayOf(array: ArrayType, item: Type): Type {
+    if (array.readonly == true) {
+      return this.readonlyArrayOf(item);
+    }
+
+    return this.arrayOf(item);
+  }
+
+  public readonly readonlyArrayOf(item: Type): Type {
+    const key = `readonly array ${item.id}`;
+    const known = this.byKey.get(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const id = this.nextId();
+    const made: Type = { id, kind: TypeKind.Array, item, readonly: true };
+
+    return this.keep(key, made);
+  }
+
+  public readonly arrayOf(item: Type): Type {
     const key = `array ${item.id}`;
     const known = this.byKey.get(key);
     if (known != undefined) {
@@ -153,7 +195,7 @@ export class TypeStore {
     return this.keep(key, made);
   }
 
-  public tupleOf(shape: TupleShape): Type {
+  public readonly tupleOf(shape: TupleShape): Type {
     const ids = this.idsText(shape.items);
     const head = `tuple ${shape.readonly} ${shape.required} ${shape.rest}`;
     const key = `${head} ${ids}`;
@@ -175,16 +217,18 @@ export class TypeStore {
     return this.keep(key, made);
   }
 
-  public plainTuple(items: Type[]): Type {
+  public readonly plainTuple(items: Own<Type[]>): Type {
+    const required = items.length;
+
     return this.tupleOf({
       items,
       readonly: false,
-      required: items.length,
+      required,
       rest: -1,
     });
   }
 
-  public objectOf(fields: ObjectField[]): Type {
+  public readonly objectOf(fields: Own<ObjectField[]>): Type {
     const sorted = fields.slice();
 
     sorted.sort((first, second) => this.compareNames(first, second));
@@ -202,7 +246,7 @@ export class TypeStore {
     return this.keep(key, made);
   }
 
-  public functionOf(shape: FunctionShape): Type {
+  public readonly functionOf(shape: Own<FunctionShape>): Type {
     const params = shape.params.map(
       (param) => `${param.type.id}:${param.optional}`,
     );
@@ -220,7 +264,7 @@ export class TypeStore {
     return this.keep(key, made);
   }
 
-  public unionOf(parts: Type[]): Type {
+  public readonly unionOf(parts: Read<Type[]>): Type {
     const flat = this.flatParts(parts);
     const unknown = flat.find((part) => part.kind == TypeKind.Unknown);
     if (unknown != undefined) {
@@ -258,39 +302,35 @@ export class TypeStore {
     return this.keep(key, made);
   }
 
-  public reserveObject(): Type {
+  public readonly reserveObject(): Type {
     const id = this.nextId();
 
     return { id, kind: TypeKind.Object, fields: [] };
   }
 
-  public fillObject(reserved: Type, fields: ObjectField[]): void {
+  public readonly fillObject(reserved: Type, fields: Read<ObjectField[]>): void {
     if (reserved.kind != TypeKind.Object) {
       return;
     }
 
-    for (const field of fields) {
-      reserved.fields.push(field);
-    }
+    reserved.fields = reserved.fields.concat(fields.slice());
   }
 
-  public reserveUnion(): Type {
+  public readonly reserveUnion(): Type {
     const id = this.nextId();
 
     return { id, kind: TypeKind.Union, parts: [], recursive: true };
   }
 
-  public fillUnion(reserved: Type, parts: Type[]): void {
+  public readonly fillUnion(reserved: Type, parts: Read<Type[]>): void {
     if (reserved.kind != TypeKind.Union) {
       return;
     }
 
-    for (const part of parts) {
-      reserved.parts.push(part);
-    }
+    reserved.parts = reserved.parts.concat(parts.slice());
   }
 
-  public instanceOf(module: int, loc: int, name: string, args: Type[]): Type {
+  public readonly instanceOf(module: int, loc: int, name: string, args: Own<Type[]>): Type {
     const ids = this.idsText(args);
     const key = `instance ${module} ${loc} ${ids}`;
     const known = this.byKey.get(key);
@@ -304,7 +344,7 @@ export class TypeStore {
     return this.keep(key, made);
   }
 
-  public typeParameter(module: int, loc: int, name: string): Type {
+  public readonly typeParameter(module: int, loc: int, name: string): Type {
     const key = `parameter ${module} ${loc}`;
     const known = this.byKey.get(key);
     if (known != undefined) {
@@ -317,7 +357,7 @@ export class TypeStore {
     return this.keep(key, made);
   }
 
-  public resultOf(value: Type, error: Type): Type {
+  public readonly resultOf(value: Type, error: Type): Type {
     const key = `result ${value.id} ${error.id}`;
     const known = this.byKey.get(key);
     if (known != undefined) {
@@ -330,7 +370,7 @@ export class TypeStore {
     return this.keep(key, made);
   }
 
-  public promiseOf(value: Type): Type {
+  public readonly promiseOf(value: Type): Type {
     const key = `promise ${value.id}`;
     const known = this.byKey.get(key);
     if (known != undefined) {
@@ -343,7 +383,7 @@ export class TypeStore {
     return this.keep(key, made);
   }
 
-  public classOf(instance: Type, exact: boolean): Type {
+  public readonly classOf(instance: Type, exact: boolean): Type {
     const key = `class ${exact} ${instance.id}`;
     const known = this.byKey.get(key);
     if (known != undefined) {
@@ -356,7 +396,7 @@ export class TypeStore {
     return this.keep(key, made);
   }
 
-  public iteratorOf(shape: IteratorShape): Type {
+  public readonly iteratorOf(shape: IteratorShape): Type {
     const ids = this.idsText([shape.yielded, shape.returned, shape.sent]);
     const key = `iterator ${shape.async} ${ids}`;
     const known = this.byKey.get(key);
@@ -370,7 +410,7 @@ export class TypeStore {
     return this.keep(key, made);
   }
 
-  public dictOf(dict: DictKind, key: Type, value: Type): Type {
+  public readonly dictOf(dict: DictKind, key: Type, value: Type): Type {
     const word = this.dictWord(dict);
     const text = `dict ${word} ${key.id} ${value.id}`;
     const known = this.byKey.get(text);
@@ -384,7 +424,7 @@ export class TypeStore {
     return this.keep(text, made);
   }
 
-  public templateOf(texts: string[], parts: Type[]): Type {
+  public readonly templateOf(texts: Own<string[]>, parts: Own<Type[]>): Type {
     const sized = texts.map((text) => `${text.length}:${text}`);
     const ids = this.idsText(parts);
     const key = `template ${ids} ${sized.join("")}`;
@@ -399,7 +439,7 @@ export class TypeStore {
     return this.keep(key, made);
   }
 
-  public operationOf(shape: OperationShape): Type {
+  public readonly operationOf(shape: OperationShape): Type {
     const op = this.operationWord(shape.op);
     const optional = this.changeWord(shape.optional);
     const readonly = this.changeWord(shape.readonly);
@@ -417,7 +457,7 @@ export class TypeStore {
     return this.keep(key, made);
   }
 
-  private operationWord(op: OperationKind): string {
+  private readonly operationWord(op: OperationKind): string {
     switch (op) {
       case OperationKind.KeyOf:
         return "keyof";
@@ -436,7 +476,7 @@ export class TypeStore {
     }
   }
 
-  private changeWord(change: Change): string {
+  private readonly changeWord(change: Change): string {
     switch (change) {
       case Change.Add:
         return "add";
@@ -447,7 +487,7 @@ export class TypeStore {
     }
   }
 
-  private flatParts(parts: Type[]): Type[] {
+  private readonly flatParts(parts: Read<Type[]>): Type[] {
     const flat: Type[] = [];
 
     for (const part of parts) {
@@ -461,7 +501,7 @@ export class TypeStore {
     return flat;
   }
 
-  private addParts(flat: Type[], parts: Type[]): void {
+  private readonly addParts(flat: Type[], parts: Read<Type[]>): void {
     for (const part of parts) {
       if (!flat.includes(part)) {
         flat.push(part);
@@ -469,7 +509,7 @@ export class TypeStore {
     }
   }
 
-  private orderedParts(flat: Type[]): Type[] {
+  private readonly orderedParts(flat: Read<Type[]>): Type[] {
     const ordered: Type[] = [];
     const absent: Type[] = [];
 
@@ -495,7 +535,7 @@ export class TypeStore {
     return ordered;
   }
 
-  private isAbsorbed(part: Type, flat: Type[]): boolean {
+  private readonly isAbsorbed(part: Type, flat: Read<Type[]>): boolean {
     let current = this.parentsOf(part);
 
     for (let depth = 0; depth < kParentDepthLimit; depth++) {
@@ -512,7 +552,7 @@ export class TypeStore {
     return false;
   }
 
-  private isUninhabited(part: Type): boolean {
+  private readonly isUninhabited(part: Type): boolean {
     if (part.kind != TypeKind.Object) {
       return false;
     }
@@ -522,7 +562,7 @@ export class TypeStore {
     );
   }
 
-  private compareNames(first: ObjectField, second: ObjectField): int {
+  private readonly compareNames(first: ObjectField, second: ObjectField): int {
     if (first.name < second.name) {
       return -1;
     }
@@ -533,20 +573,21 @@ export class TypeStore {
     return 0;
   }
 
-  private fieldKey(field: ObjectField): string {
+  private readonly fieldKey(field: ObjectField): string {
     const name = `${field.name.length}:${field.name}`;
-    const flags = `${field.optional}:${field.readonly}:${field.method ?? false}`;
+    const kinds = `${field.method ?? false}:${field.cell ?? false}`;
+    const flags = `${field.optional}:${field.readonly}:${kinds}`;
 
     return `${name}:${field.type.id}:${flags}`;
   }
 
-  private idsText(types: Type[]): string {
+  private readonly idsText(types: Read<Type[]>): string {
     const ids = types.map((type) => `${type.id}`);
 
     return ids.join(" ");
   }
 
-  private literalWord(literal: LiteralKind): string {
+  private readonly literalWord(literal: LiteralKind): string {
     switch (literal) {
       case LiteralKind.String:
         return "string";
@@ -559,7 +600,7 @@ export class TypeStore {
     }
   }
 
-  private dictWord(dict: DictKind): string {
+  private readonly dictWord(dict: DictKind): string {
     switch (dict) {
       case DictKind.Record:
         return "record";
@@ -570,23 +611,25 @@ export class TypeStore {
     }
   }
 
-  private keep(key: string, made: Type): Type {
+  private readonly keep(key: string, made: Type): Type {
     this.byKey.set(key, made);
 
     return made;
   }
 
-  private nextId(): int {
+  private readonly nextId(): int {
     this.count += 1;
 
     return this.count;
   }
 
-  public setWriters(module: int, loc: int, writers: ParamWriter[]): void {
+  public readonly setWriters(module: int, loc: int, writers: Own<ParamWriter[]>): void {
     this.writers.set(`${module} ${loc}`, writers);
   }
 
-  public writersOf(module: int, loc: int): ParamWriter[] | undefined {
+  public readonly writersOf(module: int, loc: int): ParamWriter[] | undefined {
     return this.writers.get(`${module} ${loc}`);
   }
 }
+
+export type InternedTypeStore = Interned<TypeStore>;

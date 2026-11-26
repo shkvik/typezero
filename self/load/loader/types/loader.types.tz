@@ -24,21 +24,23 @@ export type OpenModule = {
   readonly file: string;
   readonly parsed: ParsedFile;
   readonly declaration?: ParsedDeclaration;
-  readonly links: ModuleLink[];
-  readonly implicit: ImportDecl[];
-  readonly parts: ClassDecl[];
+  readonly links: Cell<ModuleLink[]>;
+  readonly implicit: readonly ImportDecl[];
+  readonly parts: Cell<ClassDecl[]>;
   readonly isDeclarationOnly: boolean;
-  readonly declared: DeclaredClass[];
-  readonly problems: SourceError[];
-  state: ModuleState;
+  readonly declared: readonly DeclaredClass[];
+  readonly problems: Cell<SourceError[]>;
+  state: Cell<ModuleState>;
 };
 
 export type Request = {
   readonly owner: OpenModule;
   readonly from: ModulePath;
-  readonly names: string[];
+  readonly names: readonly string[];
   readonly isImplicit: boolean;
 };
+
+export type InternedLoad = Interned<OpenModule | Request>;
 
 export type LoadResult = {
   readonly program: Program;

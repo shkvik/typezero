@@ -15,7 +15,7 @@ export class NamesCommand {
   private readonly entry?: string;
   private readonly report: ProgramReport;
 
-  public constructor(args: string[]) {
+  public constructor(args: Read<string[]>) {
     this.entry = args[3];
     this.report = new ProgramReport();
   }
@@ -50,7 +50,7 @@ export class NamesCommand {
     }
   }
 
-  private printNames(program: Program, names: ModuleNames): void {
+  private readonly printNames(program: Program, names: Read<ModuleNames>): void {
     if (program.ambient.includes(names.module)) {
       return;
     }
@@ -81,7 +81,7 @@ export class NamesCommand {
     }
   }
 
-  private targetText(program: Program, target: NameTarget): string {
+  private readonly targetText(program: Program, target: NameTarget): string {
     const module = program.modules[target.module];
     if (module == undefined) {
       return target.name;
@@ -90,7 +90,7 @@ export class NamesCommand {
     return `${module.name}:${target.name}`;
   }
 
-  private starText(exported: ModuleExport): string {
+  private readonly starText(exported: ModuleExport): string {
     const star = exported.star;
     if (star == undefined) {
       return "";

@@ -18,7 +18,7 @@ import {
 import { Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
-  private isBitHolder(frame: Frame, expr: Expr): boolean {
+  private readonly isBitHolder(frame: Frame, expr: Expr): boolean {
     if (expr.kind == ExprKind.Member) {
       return this.isBitHolder(frame, expr.object);
     }
@@ -111,7 +111,7 @@ partial class Lowering {
   }
 
   private wrappedFrom(
-    frame: Frame,
+    frame: Read<Frame>,
     given: IrValue,
     result: Type,
   ): IrValue | undefined {
@@ -126,8 +126,8 @@ partial class Lowering {
     return { type, value, tz: result };
   }
 
-  private resizedBits(
-    frame: Frame,
+  private readonly resizedBits(
+    frame: Read<Frame>,
     given: IrValue,
     from: int,
     to: int,
@@ -146,9 +146,9 @@ partial class Lowering {
   }
 
   private wideBits(
-    frame: Frame,
+    frame: Read<Frame>,
     name: string,
-    values: IrValue[],
+    values: Read<IrValue[]>,
     result: Type,
   ): IrValue | undefined {
     const layout = this.layoutOf(result);
@@ -156,9 +156,8 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const wide = values.map((one) =>
-      made.cast(IrOpcode.ZExt, one.value, kWordPairType),
+      frame.made.cast(IrOpcode.ZExt, one.value, kWordPairType),
     );
     const first = wide[0];
     const second = wide[1];
@@ -169,20 +168,20 @@ partial class Lowering {
     let total: LLVMValue = first;
 
     if (name == "mul64") {
-      total = made.binary(IrOpcode.Mul, first, second);
+      total = frame.made.binary(IrOpcode.Mul, first, second);
     } else if (name == "add64") {
       total = this.summed(frame, IrOpcode.Add, wide);
     } else {
       total = this.summed(frame, IrOpcode.Sub, wide);
     }
 
-    const low = made.cast(IrOpcode.Trunc, total, kIntType);
+    const low = frame.made.cast(IrOpcode.Trunc, total, kIntType);
     const shift = this.ir.integer(kWordPairType, "64");
-    const top = made.binary(IrOpcode.LShr, total, shift);
-    let high: LLVMValue = made.cast(IrOpcode.Trunc, top, kIntType);
+    const top = frame.made.binary(IrOpcode.LShr, total, shift);
+    let high: LLVMValue = frame.made.cast(IrOpcode.Trunc, top, kIntType);
 
     if (name != "mul64") {
-      high = made.binary(IrOpcode.And, high, this.ir.integer(kIntType, "1"));
+      high = frame.made.binary(IrOpcode.And, high, this.ir.integer(kIntType, "1"));
     }
 
     const object = this.allocated(frame, layout);
@@ -195,16 +194,16 @@ partial class Lowering {
         value = low;
       }
 
-      made.store(value, made.field(layout.struct, object, field.index));
+      frame.made.store(value, frame.made.field(layout.struct, object, field.index));
     }
 
     return { type: kPointerType, value: object, tz: result, owned: true };
   }
 
-  private summed(
-    frame: Frame,
+  private readonly summed(
+    frame: Read<Frame>,
     opcode: IrOpcode,
-    wide: LLVMValue[],
+    wide: Read<LLVMValue[]>,
   ): LLVMValue {
     const first = wide[0];
     if (first == undefined) {
@@ -220,7 +219,7 @@ partial class Lowering {
     return total;
   }
 
-  private halfNames(name: string): string[] {
+  private readonly halfNames(name: string): string[] {
     switch (name) {
       case "mul64":
         return ["hi", "lo"];
@@ -232,9 +231,9 @@ partial class Lowering {
   }
 
   private rotated(
-    frame: Frame,
+    frame: Read<Frame>,
     name: string,
-    values: IrValue[],
+    values: Read<IrValue[]>,
     result: Type,
   ): IrValue | undefined {
     const first = values[0];
@@ -254,7 +253,7 @@ partial class Lowering {
   }
 
   private bitIntrinsic(
-    frame: Frame,
+    frame: Read<Frame>,
     name: string,
     given: IrValue,
     result: Type,

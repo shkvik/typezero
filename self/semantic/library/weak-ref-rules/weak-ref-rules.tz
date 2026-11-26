@@ -18,15 +18,15 @@ export class WeakRefRules {
 
   public constructor(
     text: TypeText,
-    types: TypeQuestions,
-    modules: ModuleQuestions,
+    types: Own<TypeQuestions>,
+    modules: Own<ModuleQuestions>,
   ) {
     this.text = text;
     this.types = types;
     this.modules = modules;
   }
 
-  public isWeakRef(type: Type): boolean {
+  public readonly isWeakRef(type: Type): boolean {
     const base = this.types.definedType(type);
 
     return (
@@ -36,15 +36,15 @@ export class WeakRefRules {
     );
   }
 
-  public isWeakRefName(name: string): boolean {
+  public readonly isWeakRefName(name: string): boolean {
     return name == kWeakRefName;
   }
 
-  public isDeref(name: string): boolean {
+  public readonly isDeref(name: string): boolean {
     return name == kDerefName;
   }
 
-  public targetError(loc: int, target: Type): SourceError | undefined {
+  public readonly targetError(loc: int, target: Type): SourceError | undefined {
     const base = this.types.definedType(target);
     if (this.isUnknownYet(base)) {
       return undefined;
@@ -76,25 +76,25 @@ export class WeakRefRules {
     return { code: Code.WeakRefNotObject, loc, details: { word, other } };
   }
 
-  public oneObjectError(loc: int): SourceError {
+  public readonly oneObjectError(loc: int): SourceError {
     return { code: Code.WeakRefOneObject, loc, details: kNoDetails };
   }
 
-  public typeArgumentsError(loc: int): SourceError {
+  public readonly typeArgumentsError(loc: int): SourceError {
     return { code: Code.WeakRefTypeArguments, loc, details: kNoDetails };
   }
 
-  public noMethodError(loc: int, name: string, type: Type): SourceError {
+  public readonly noMethodError(loc: int, name: string, type: Type): SourceError {
     const first = this.text.of(type);
 
     return { code: Code.WeakRefNoMethod, loc, details: { word: name, first } };
   }
 
-  public derefValueError(loc: int, name: string): SourceError {
+  public readonly derefValueError(loc: int, name: string): SourceError {
     return { code: Code.WeakRefDerefValue, loc, details: { word: name } };
   }
 
-  public readError(loc: int, name: string, type: Type): SourceError {
+  public readonly readError(loc: int, name: string, type: Type): SourceError {
     if (this.isDeref(name)) {
       return this.derefValueError(loc, name);
     }
@@ -102,7 +102,7 @@ export class WeakRefRules {
     return this.noMethodError(loc, name, type);
   }
 
-  private objectHint(isOptional: boolean): string {
+  private readonly objectHint(isOptional: boolean): string {
     if (isOptional) {
       return "; make it of the object and check for undefined before";
     }
@@ -110,7 +110,7 @@ export class WeakRefRules {
     return "; hold the value itself";
   }
 
-  private isUnknownYet(type: Type): boolean {
+  private readonly isUnknownYet(type: Type): boolean {
     return (
       type.kind == TypeKind.Error ||
       type.kind == TypeKind.TypeParameter ||

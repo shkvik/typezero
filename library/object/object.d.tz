@@ -29,3 +29,9 @@ export interface ObjectConstructor {
 }
 
 export declare const Object: ObjectConstructor;
+
+/**
+ * A deep copy of the value: the copy shares nothing with it.
+ * @example const copy = structuredClone(line.start)
+ */
+export declare function structuredClone<T>(value: Read<T>): T;

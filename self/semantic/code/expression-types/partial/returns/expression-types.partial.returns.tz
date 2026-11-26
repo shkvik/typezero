@@ -15,7 +15,7 @@ import { FunctionFrame } from "../../types/expression-types.types.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 
 partial class ExpressionTypes {
-  private walkReturn(
+  private readonly walkReturn(
     statement: ReturnStmt,
     frame: FunctionFrame,
     module: int,
@@ -24,7 +24,7 @@ partial class ExpressionTypes {
     this.noteGuardExit(statement.value, frame, module);
   }
 
-  private walkReturnValue(
+  private readonly walkReturnValue(
     statement: ReturnStmt,
     frame: FunctionFrame,
     module: int,
@@ -78,10 +78,10 @@ partial class ExpressionTypes {
     this.predicateReturnCheck(fn, value, module);
   }
 
-  private returnedType(
+  private readonly returnedType(
     value: Expr,
     wanted: Type | undefined,
-    frame: FunctionFrame,
+    frame: Read<FunctionFrame>,
     module: int,
   ): Type {
     const given = this.typed(value, wanted, module);
@@ -92,7 +92,7 @@ partial class ExpressionTypes {
     return given;
   }
 
-  private collectReturn(
+  private readonly collectReturn(
     value: Expr | undefined,
     frame: FunctionFrame,
     module: int,
@@ -118,10 +118,10 @@ partial class ExpressionTypes {
     frame.returns.push({ value, type });
   }
 
-  private hintedReturn(
+  private readonly hintedReturn(
     value: Expr,
     hint: Type | undefined,
-    frame: FunctionFrame,
+    frame: Read<FunctionFrame>,
     module: int,
   ): Type {
     const given = this.returnedType(value, hint, frame, module);
@@ -133,9 +133,9 @@ partial class ExpressionTypes {
     return given;
   }
 
-  private returnShapeHint(
+  private readonly returnShapeHint(
     value: Expr,
-    frame: FunctionFrame,
+    frame: Read<FunctionFrame>,
     module: int,
   ): Type | undefined {
     if (!this.isReturnShaped(value, module)) {
@@ -149,7 +149,7 @@ partial class ExpressionTypes {
     return earlier?.type;
   }
 
-  private isReturnShaped(value: Expr, module: int): boolean {
+  private readonly isReturnShaped(value: Expr, module: int): boolean {
     switch (value.kind) {
       case ExprKind.ObjectLit:
       case ExprKind.ArrayLit:
@@ -172,9 +172,9 @@ partial class ExpressionTypes {
     }
   }
 
-  private voidReturn(
+  private readonly voidReturn(
     value: Expr | undefined,
-    frame: FunctionFrame,
+    frame: Read<FunctionFrame>,
     module: int,
   ): void {
     if (value == undefined) {

@@ -33,7 +33,7 @@ import {
 } from "../../../event-rules/const/event-rules.const.tz";
 
 partial class ExpressionTypes {
-  private listenerLife(expr: CallExpr, member: MemberExpr, module: int): void {
+  private readonly listenerLife(expr: CallExpr, member: MemberExpr, module: int): void {
     const name = member.name;
     const listener = expr.args[1]?.expr;
     const isRemoving = name == kOffName || name == kRemoveListenerName;
@@ -44,7 +44,7 @@ partial class ExpressionTypes {
     this.listenerLifeCheck(listener, member.object, false, module);
   }
 
-  private listenerLifeCheck(
+  private readonly listenerLifeCheck(
     listener: Expr,
     emitter: Expr | undefined,
     isTimer: boolean,
@@ -83,7 +83,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private lifeCode(isTimer: boolean, timer: Code, listener: Code): Code {
+  private readonly lifeCode(isTimer: boolean, timer: Code, listener: Code): Code {
     if (isTimer) {
       return timer;
     }
@@ -91,9 +91,9 @@ partial class ExpressionTypes {
     return listener;
   }
 
-  private capturesReport(
+  private readonly capturesReport(
     listener: Expr,
-    captured: Capture[],
+    captured: Read<Capture[]>,
     isTimer: boolean,
     module: int,
   ): void {
@@ -130,7 +130,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private namesText(captured: Capture[]): string {
+  private readonly namesText(captured: Read<Capture[]>): string {
     const quoted = captured.map((one) => `'${one.name}'`);
     const last = quoted[quoted.length - 1] ?? "";
     if (quoted.length < 2) {
@@ -142,7 +142,7 @@ partial class ExpressionTypes {
     return `${head} and ${last}`;
   }
 
-  private listenerShape(listener: Expr, module: int): ListenerShape {
+  private readonly listenerShape(listener: Expr, module: int): ListenerShape {
     if (listener.kind == ExprKind.Function) {
       return this.listenerClosure(listener.fn, module);
     }
@@ -160,7 +160,7 @@ partial class ExpressionTypes {
     return { form: ListenerForm.Unknown, captured: [], isSelf: false };
   }
 
-  private declaredFunction(
+  private readonly declaredFunction(
     target: ValueTarget | undefined,
   ): FunctionDecl | undefined {
     if (target == undefined || target.kind != SymbolKind.Function) {
@@ -170,7 +170,7 @@ partial class ExpressionTypes {
     return this.record(target.module)?.functions.get(target.loc);
   }
 
-  private memberShape(listener: MemberExpr, module: int): ListenerShape {
+  private readonly memberShape(listener: MemberExpr, module: int): ListenerShape {
     const object = this.types.definedType(
       this.peekType(listener.object, module),
     );
@@ -187,13 +187,13 @@ partial class ExpressionTypes {
     return { form: ListenerForm.Receiver, captured: [], isSelf };
   }
 
-  private isOwnMethod(instance: InstanceType, name: string): boolean {
+  private readonly isOwnMethod(instance: InstanceType, name: string): boolean {
     const entry = this.classMember(instance, name).entry;
 
     return entry != undefined && entry.field == undefined && !entry.isStatic;
   }
 
-  private listenerClosure(fn: FunctionDecl, module: int): ListenerShape {
+  private readonly listenerClosure(fn: FunctionDecl, module: int): ListenerShape {
     const captured = this.capturesOf(fn, module);
     const only = captured[0];
     if (only == undefined) {
@@ -212,7 +212,7 @@ partial class ExpressionTypes {
     return { form: ListenerForm.Captures, captured, isSelf: false };
   }
 
-  private capturesOf(fn: FunctionDecl, module: int): Capture[] {
+  private readonly capturesOf(fn: FunctionDecl, module: int): Capture[] {
     const exprs = this.collector.functionExprs(fn, true);
     let last = fn.loc;
 
@@ -259,7 +259,7 @@ partial class ExpressionTypes {
     return captured;
   }
 
-  private thisCapture(): Capture {
+  private readonly thisCapture(): Capture {
     const self = this.selves[this.selves.length - 1];
 
     return {
@@ -270,7 +270,7 @@ partial class ExpressionTypes {
     };
   }
 
-  private changedNames(exprs: Expr[], module: int): Set<int> {
+  private readonly changedNames(exprs: Read<Expr[]>, module: int): Set<int> {
     const changed = new Set<int>();
 
     for (const expr of exprs) {
@@ -288,7 +288,7 @@ partial class ExpressionTypes {
     return changed;
   }
 
-  private changedTarget(expr: Expr): Expr | undefined {
+  private readonly changedTarget(expr: Expr): Expr | undefined {
     if (expr.kind == ExprKind.Update || expr.kind == ExprKind.Assign) {
       return expr.target;
     }
@@ -296,7 +296,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private isLocalTarget(target: ValueTarget, module: int): boolean {
+  private readonly isLocalTarget(target: ValueTarget, module: int): boolean {
     const isValue =
       target.kind == SymbolKind.Variable || target.kind == SymbolKind.Parameter;
     if (!isValue || target.module != module) {
@@ -306,7 +306,7 @@ partial class ExpressionTypes {
     return !this.isModuleVariable(target);
   }
 
-  private isModuleVariable(target: ValueTarget): boolean {
+  private readonly isModuleVariable(target: ValueTarget): boolean {
     const opened = this.program.modules[target.module];
     if (opened == undefined) {
       return false;
@@ -317,7 +317,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private canReceive(type: Type): boolean {
+  private readonly canReceive(type: Type): boolean {
     const base = this.types.definedType(type);
     if (base.kind == TypeKind.Object) {
       return true;
@@ -326,7 +326,7 @@ partial class ExpressionTypes {
     return base.kind == TypeKind.Instance && !kNotReceivers.includes(base.name);
   }
 
-  private isOwningEmitter(emitter: Expr, module: int): boolean {
+  private readonly isOwningEmitter(emitter: Expr, module: int): boolean {
     if (emitter.kind == ExprKind.New) {
       return true;
     }
@@ -346,7 +346,7 @@ partial class ExpressionTypes {
     return this.isLocalTarget(target, module);
   }
 
-  private noteSelfListener(): void {
+  private readonly noteSelfListener(): void {
     const owner = this.ownerClasses[this.ownerClasses.length - 1];
     const fn = this.currentMethods[this.currentMethods.length - 1];
     if (owner == undefined || fn == undefined || fn.name != kConstructorWord) {
@@ -356,7 +356,7 @@ partial class ExpressionTypes {
     this.eventMarks.selfListeners.add(`${owner.module} ${owner.decl.loc}`);
   }
 
-  private noteDroppedNew(expr: Expr, type: Type, module: int): void {
+  private readonly noteDroppedNew(expr: Expr, type: Type, module: int): void {
     if (expr.kind != ExprKind.New || type.kind != TypeKind.Instance) {
       return;
     }
@@ -364,7 +364,7 @@ partial class ExpressionTypes {
     this.eventMarks.droppedNews.push({ instance: type, loc: expr.loc, module });
   }
 
-  private droppedNewsCheck(module: int): void {
+  private readonly droppedNewsCheck(module: int): void {
     for (const dropped of this.eventMarks.droppedNews) {
       if (dropped.module != module) {
         continue;
@@ -390,7 +390,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private endlessWaitCheck(expr: CallExpr, name: string, module: int): void {
+  private readonly endlessWaitCheck(expr: CallExpr, name: string, module: int): void {
     const first = expr.args[0]?.expr;
     if (first == undefined || this.isTimedWait(expr)) {
       return;
@@ -415,7 +415,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private isTimedWait(expr: CallExpr): boolean {
+  private readonly isTimedWait(expr: CallExpr): boolean {
     const options = expr.args[2]?.expr;
     if (options == undefined || options.kind != ExprKind.ObjectLit) {
       return false;
@@ -424,7 +424,7 @@ partial class ExpressionTypes {
     return options.props.some((prop) => prop.name == kTimeoutField);
   }
 
-  private isEndingSource(given: InstanceType): boolean {
+  private readonly isEndingSource(given: InstanceType): boolean {
     const isPlain = this.types
       .ancestorsOf(given)
       .some(
@@ -437,7 +437,7 @@ partial class ExpressionTypes {
     return isLibrary && !this.isEventsClass(given, kEmitterName) && !isPlain;
   }
 
-  private emitterWord(first: Expr): string {
+  private readonly emitterWord(first: Expr): string {
     if (first.kind == ExprKind.Name) {
       return `'${first.name}'`;
     }

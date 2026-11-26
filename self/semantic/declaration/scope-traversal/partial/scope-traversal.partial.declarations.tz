@@ -51,7 +51,7 @@ partial class ScopeTraversal {
     this.scopes.declareType(symbol);
   }
 
-  private declareStatements(statements: Stmt[]): void {
+  private declareStatements(statements: Read<Stmt[]>): void {
     for (const statement of statements) {
       this.declareStatement(statement);
     }
@@ -111,7 +111,7 @@ partial class ScopeTraversal {
     }
   }
 
-  private declareClasses(classes: DeclaredClass[]): void {
+  private declareClasses(classes: Read<DeclaredClass[]>): void {
     for (const one of classes) {
       this.declareBoth({
         name: one.name,
@@ -148,7 +148,7 @@ partial class ScopeTraversal {
     return false;
   }
 
-  private duplicateCode(symbol: NameSymbol, previous: NameSymbol): Code {
+  private readonly duplicateCode(symbol: NameSymbol, previous: NameSymbol): Code {
     const functions =
       symbol.kind == SymbolKind.Function &&
       previous.kind == SymbolKind.Function;
@@ -173,7 +173,7 @@ partial class ScopeTraversal {
     this.report(symbol.loc, Code.DuplicateType, { word: name, other });
   }
 
-  private declareTypeParams(params: TypeParamDecl[]): void {
+  private declareTypeParams(params: Read<TypeParamDecl[]>): void {
     for (const param of params) {
       const name = param.name;
       const loc = param.loc;

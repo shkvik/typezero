@@ -75,11 +75,11 @@ export class DateRules {
   private readonly store: TypeStore;
 
   public constructor(
-    types: TypeQuestions,
+    types: Own<TypeQuestions>,
     text: TypeText,
-    calls: CallRules,
-    sources: SourceTexts,
-    operators: OperatorRules,
+    calls: Own<CallRules>,
+    sources: Own<SourceTexts>,
+    operators: Own<OperatorRules>,
     store: TypeStore,
   ) {
     this.types = types;
@@ -90,15 +90,15 @@ export class DateRules {
     this.store = store;
   }
 
-  public fieldValue(fields: DateFieldValues, field: int): int | undefined {
+  public readonly fieldValue(fields: Read<DateFieldValues>, field: int): int | undefined {
     return fields.values[field - fields.first];
   }
 
-  public isShortYear(fields: DateFieldValues, year: int): boolean {
+  public readonly isShortYear(fields: Read<DateFieldValues>, year: int): boolean {
     return fields.setter == "" && year >= 0 && year <= kLastShortYear;
   }
 
-  public knownYear(fields: DateFieldValues): int | undefined {
+  public readonly knownYear(fields: Read<DateFieldValues>): int | undefined {
     const year = this.fieldValue(fields, 0);
     if (year == undefined) {
       return undefined;
@@ -110,7 +110,7 @@ export class DateRules {
     return year;
   }
 
-  public nextYearText(year: int | undefined, month: int): string {
+  public readonly nextYearText(year: int | undefined, month: int): string {
     if (year == undefined) {
       return kUnknownYear;
     }
@@ -121,7 +121,7 @@ export class DateRules {
     return `${year}`;
   }
 
-  public yearPart(year: int | undefined): string {
+  public readonly yearPart(year: int | undefined): string {
     if (year == undefined) {
       return "";
     }
@@ -129,11 +129,11 @@ export class DateRules {
     return `${year}, `;
   }
 
-  public monthName(month: int): string {
+  public readonly monthName(month: int): string {
     return kMonthNames[month] ?? "";
   }
 
-  public daysInMonth(year: int, month: int): int {
+  public readonly daysInMonth(year: int, month: int): int {
     if (month == 1 && this.isLeapYear(year)) {
       return 29;
     }
@@ -141,7 +141,7 @@ export class DateRules {
     return kMonthDays[month] ?? 31;
   }
 
-  public lastDayOf(year: int | undefined, month: int): int {
+  public readonly lastDayOf(year: int | undefined, month: int): int {
     if (year != undefined) {
       return this.daysInMonth(year, month);
     }
@@ -152,7 +152,7 @@ export class DateRules {
     return this.daysInMonth(2001, month);
   }
 
-  public missingDay(year: int | undefined, month: int, day: int): string {
+  public readonly missingDay(year: int | undefined, month: int, day: int): string {
     const name = this.monthName(month);
     if (year == undefined) {
       const after = this.monthName((month + 1) % 12);
@@ -168,7 +168,7 @@ export class DateRules {
     return `${lack}, and JavaScript would make it ${moved}`;
   }
 
-  public dateTextOf(expr: Expr): string | undefined {
+  public readonly dateTextOf(expr: Expr): string | undefined {
     if (expr.kind == ExprKind.StringLit) {
       return expr.value;
     }
@@ -179,7 +179,7 @@ export class DateRules {
     return undefined;
   }
 
-  public isDateInRange(fields: DateFields): boolean {
+  public readonly isDateInRange(fields: DateFields): boolean {
     const day = fields.day;
     if (day.year < -kDateYearLimit || day.year > kDateYearLimit) {
       return false;
@@ -202,7 +202,7 @@ export class DateRules {
     return value >= -kDateTimeLimit && value <= kDateTimeLimit;
   }
 
-  public dateValuePlace(type: Type, base: Type): string {
+  public readonly dateValuePlace(type: Type, base: Type): string {
     if (this.types.isOptional(type)) {
       return "; the value may be undefined: check it first";
     }
@@ -213,7 +213,7 @@ export class DateRules {
     return "";
   }
 
-  public jsonExtra(isJson: boolean): int {
+  public readonly jsonExtra(isJson: boolean): int {
     if (isJson) {
       return 1;
     }
@@ -221,7 +221,7 @@ export class DateRules {
     return 0;
   }
 
-  public setterFirst(name: string): int | undefined {
+  public readonly setterFirst(name: string): int | undefined {
     if (!name.startsWith(kSetterPrefix)) {
       return undefined;
     }
@@ -232,7 +232,7 @@ export class DateRules {
     return setter?.first;
   }
 
-  public dateMissingError(
+  public readonly dateMissingError(
     member: MemberExpr,
     instance: InstanceType,
   ): SourceError | undefined {
@@ -260,7 +260,7 @@ export class DateRules {
     return undefined;
   }
 
-  public dateStaticError(member: MemberExpr): SourceError | undefined {
+  public readonly dateStaticError(member: MemberExpr): SourceError | undefined {
     const word = member.name;
     const known = kDateStatics.find((one) => one.name == word);
     if (known == undefined) {
@@ -284,7 +284,7 @@ export class DateRules {
     };
   }
 
-  public dateTextCheck(expr: Expr): SourceError[] {
+  public readonly dateTextCheck(expr: Expr): SourceError[] {
     const errors: SourceError[] = [];
 
     const text = this.dateTextOf(expr);
@@ -340,8 +340,8 @@ export class DateRules {
     return errors;
   }
 
-  public fieldErrors(
-    fields: DateFieldValues,
+  public readonly fieldErrors(
+    fields: Read<DateFieldValues>,
     field: int,
     code: Code,
     details: Details,
@@ -356,7 +356,7 @@ export class DateRules {
     return errors;
   }
 
-  public dateCountCheck(
+  public readonly dateCountCheck(
     expr: CallExpr,
     member: MemberExpr,
     method: FunctionType,
@@ -385,7 +385,7 @@ export class DateRules {
     };
   }
 
-  public dateOperatorError(
+  public readonly dateOperatorError(
     expr: BinaryExpr,
     pair: OperandPair,
   ): SourceError | undefined {
@@ -412,8 +412,8 @@ export class DateRules {
     }
   }
 
-  public dayInMonthCheck(
-    fields: DateFieldValues,
+  public readonly dayInMonthCheck(
+    fields: Read<DateFieldValues>,
     day: int,
     month: int,
   ): SourceError[] {
@@ -469,7 +469,7 @@ export class DateRules {
     return errors;
   }
 
-  public timeFieldsCheck(fields: DateFieldValues): SourceError[] {
+  public readonly timeFieldsCheck(fields: Read<DateFieldValues>): SourceError[] {
     const errors: SourceError[] = [];
 
     const end = fields.first + fields.args.length;
@@ -500,7 +500,7 @@ export class DateRules {
     return errors;
   }
 
-  public yearFieldCheck(fields: DateFieldValues): SourceError[] {
+  public readonly yearFieldCheck(fields: Read<DateFieldValues>): SourceError[] {
     const errors: SourceError[] = [];
 
     const year = this.fieldValue(fields, 0);
@@ -520,7 +520,7 @@ export class DateRules {
     return errors;
   }
 
-  public dateComparisonErrors(
+  public readonly dateComparisonErrors(
     expr: BinaryExpr,
     pair: OperandPair,
   ): SourceError[] {
@@ -539,8 +539,8 @@ export class DateRules {
     return errors;
   }
 
-  public dayFieldCheck(
-    fields: DateFieldValues,
+  public readonly dayFieldCheck(
+    fields: Read<DateFieldValues>,
     month: int | undefined,
   ): SourceError[] {
     const errors: SourceError[] = [];
@@ -582,7 +582,7 @@ export class DateRules {
     return errors;
   }
 
-  public dateArithmetic(expr: BinaryExpr, pair: OperandPair): Checked<Type> {
+  public readonly dateArithmetic(expr: BinaryExpr, pair: OperandPair): Checked<Type> {
     const isBoth =
       this.types.isDate(pair.left) && this.types.isDate(pair.right);
     if (isBoth && expr.op == BinaryOp.Sub) {
@@ -597,13 +597,13 @@ export class DateRules {
     };
   }
 
-  public dateStaticRead(expr: MemberExpr): Checked<Type> {
+  public readonly dateStaticRead(expr: MemberExpr): Checked<Type> {
     const dateStaticError = this.dateStaticError(expr);
 
     return { value: this.store.plain(TypeKind.Error), error: dateStaticError };
   }
 
-  public validMonth(fields: DateFieldValues): Checked<int | undefined> {
+  public readonly validMonth(fields: Read<DateFieldValues>): Checked<int | undefined> {
     const month = this.fieldValue(fields, 1);
     if (month == undefined || (month >= 0 && month <= 11)) {
       return { value: month };
@@ -621,13 +621,13 @@ export class DateRules {
     return { value: undefined, error: outside[0] };
   }
 
-  private isLeapYear(year: int): boolean {
+  private readonly isLeapYear(year: int): boolean {
     const isCentury = year % 100 == 0;
 
     return year % 4 == 0 && (!isCentury || year % 400 == 0);
   }
 
-  private carriedDay(year: int, month: int, day: int): CarriedDay {
+  private readonly carriedDay(year: int, month: int, day: int): CarriedDay {
     const cycles = (day - 1) / kDaysInCycle;
     let currentYear = year + cycles * kYearsInCycle;
     let currentMonth = month;
@@ -646,7 +646,7 @@ export class DateRules {
     return { month: currentMonth, day: currentDay };
   }
 
-  private daysFromEpoch(day: DayValue): int {
+  private readonly daysFromEpoch(day: DayValue): int {
     const shifted = day.year + kDateYearShift;
     const epoch = kEpochYear + kDateYearShift;
     const before = this.shiftedDays(shifted) - this.shiftedDays(epoch);
@@ -657,11 +657,11 @@ export class DateRules {
     return before + start + leap - 1 + day.day;
   }
 
-  private shiftedDays(shifted: int): int {
+  private readonly shiftedDays(shifted: int): int {
     return 365 * shifted + shifted / 4 - shifted / 100 + shifted / 400;
   }
 
-  private leapDay(isLeap: boolean): int {
+  private readonly leapDay(isLeap: boolean): int {
     if (isLeap) {
       return 1;
     }
@@ -669,7 +669,7 @@ export class DateRules {
     return 0;
   }
 
-  private setterField(name: string): string {
+  private readonly setterField(name: string): string {
     if (name.startsWith(kUtcSetterPrefix)) {
       return name.slice(kUtcSetterPrefix.length);
     }

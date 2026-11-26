@@ -30,7 +30,7 @@ import {
 } from "../../../types/type-resolver/types/type-resolver.types.tz";
 
 partial class ExpressionTypes {
-  private declaredVariants(
+  private readonly declaredVariants(
     instance: InstanceType,
     name: string,
     isStatic: boolean,
@@ -60,8 +60,8 @@ partial class ExpressionTypes {
     return this.variantsOf(members, context);
   }
 
-  private variantsOf(
-    members: DeclaredMember[],
+  private readonly variantsOf(
+    members: Read<DeclaredMember[]>,
     context: TypeContext,
   ): LibraryVariants {
     const types: FunctionType[] = [];
@@ -84,7 +84,7 @@ partial class ExpressionTypes {
     return { types, open };
   }
 
-  private openResult(
+  private readonly openResult(
     member: DeclaredMember,
     context: TypeContext,
   ): Type | undefined {
@@ -106,7 +106,7 @@ partial class ExpressionTypes {
     return result;
   }
 
-  private parentVariantTypes(
+  private readonly parentVariantTypes(
     instance: InstanceType,
     name: string,
   ): LibraryVariants {
@@ -118,7 +118,7 @@ partial class ExpressionTypes {
     return this.declaredVariants(parent, name, false);
   }
 
-  private variantType(
+  private readonly variantType(
     member: DeclaredMember,
     context: TypeContext,
   ): FunctionType | undefined {
@@ -152,10 +152,10 @@ partial class ExpressionTypes {
     return signature;
   }
 
-  private variantLibraryCall(
+  private readonly variantLibraryCall(
     expr: CallExpr,
     member: MemberExpr,
-    variants: LibraryVariants,
+    variants: Read<LibraryVariants>,
     module: int,
   ): Type {
     const chosen = this.quietVariant(expr.args, member.name, variants, module);
@@ -170,7 +170,7 @@ partial class ExpressionTypes {
     return this.calledWith(expr, chosen, member.loc, CallKind.Library, module);
   }
 
-  private looseValues(args: CallArgument[], module: int): void {
+  private readonly looseValues(args: Read<CallArgument[]>, module: int): void {
     for (const arg of args) {
       if (arg.expr.kind != ExprKind.Function) {
         this.typed(arg.expr, undefined, module);
@@ -178,10 +178,10 @@ partial class ExpressionTypes {
     }
   }
 
-  private quietVariant(
-    args: CallArgument[],
+  private readonly quietVariant(
+    args: Read<CallArgument[]>,
     name: string,
-    variants: LibraryVariants,
+    variants: Read<LibraryVariants>,
     module: int,
   ): FunctionType | undefined {
     const count = args.length;
@@ -222,7 +222,7 @@ partial class ExpressionTypes {
     return chosen?.type;
   }
 
-  private sharedResult(variants: LibraryVariants): Type {
+  private readonly sharedResult(variants: Read<LibraryVariants>): Type {
     const results: (Type | undefined)[] = [];
 
     for (const type of variants.types) {
@@ -243,7 +243,7 @@ partial class ExpressionTypes {
     return first;
   }
 
-  private overloadedLibraryCall(
+  private readonly overloadedLibraryCall(
     expr: CallExpr,
     callee: NameExpr,
     fn: FunctionDecl,
@@ -284,10 +284,10 @@ partial class ExpressionTypes {
     return result;
   }
 
-  private cleanVariant(
+  private readonly cleanVariant(
     expr: CallExpr,
     callee: NameExpr,
-    types: FunctionType[],
+    types: Read<FunctionType[]>,
     module: int,
   ): FunctionType | undefined {
     const count = expr.args.length;
@@ -309,7 +309,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private functionVariants(fn: FunctionDecl, home: int): LibraryVariants {
+  private readonly functionVariants(fn: FunctionDecl, home: int): LibraryVariants {
     const items = this.program.modules[home]?.file.items ?? [];
     const types: FunctionType[] = [];
     const open: OpenVariant[] = [];

@@ -35,11 +35,11 @@ export class RegexParser {
     return root;
   }
 
-  public groupNames(): string[] {
-    return this.names;
+  public readonly groupNames(): string[] {
+    return this.names.slice();
   }
 
-  public requiredGroups(node: RegexNode, isByName: boolean): Set<int> {
+  public requiredGroups(node: Read<RegexNode>, isByName: boolean): Set<int> {
     switch (node.kind) {
       case RegexNodeKind.Alternation:
         return this.commonGroups(node.parts, isByName);
@@ -50,7 +50,7 @@ export class RegexParser {
     }
   }
 
-  private sequenceGroups(node: RegexNode, isByName: boolean): Set<int> {
+  private sequenceGroups(node: Read<RegexNode>, isByName: boolean): Set<int> {
     const found = new Set<int>();
     if (!node.isRequired) {
       return found;
@@ -69,7 +69,7 @@ export class RegexParser {
     return found;
   }
 
-  private addCapture(found: Set<int>, capture: int, isByName: boolean): void {
+  private readonly addCapture(found: Set<int>, capture: int, isByName: boolean): void {
     found.add(capture);
 
     const name = this.names[capture] ?? "";
@@ -84,7 +84,7 @@ export class RegexParser {
     }
   }
 
-  private commonGroups(branches: RegexNode[], isByName: boolean): Set<int> {
+  private commonGroups(branches: Read<RegexNode[]>, isByName: boolean): Set<int> {
     const first = branches[0];
     if (first == undefined) {
       return new Set<int>();
@@ -134,15 +134,15 @@ export class RegexParser {
     return this.wrapped(terms, 0, true);
   }
 
-  private wrapped(
-    parts: RegexNode[],
+  private readonly wrapped(
+    parts: Own<RegexNode[]>,
     capture: int,
     isRequired: boolean,
   ): RegexNode {
     return { kind: RegexNodeKind.Sequence, parts, capture, isRequired };
   }
 
-  private isTermNext(): boolean {
+  private readonly isTermNext(): boolean {
     const char = this.current();
 
     return !this.isBroken && char != "" && char != "|" && char != ")";
@@ -176,7 +176,7 @@ export class RegexParser {
     }
   }
 
-  private quantified(atom: RegexNode): RegexNode {
+  private quantified(atom: Own<RegexNode>): RegexNode {
     const char = this.current();
     if (char == "{") {
       return this.braced(atom);
@@ -191,7 +191,7 @@ export class RegexParser {
     return this.wrapped([atom], 0, char == "+");
   }
 
-  private braced(atom: RegexNode): RegexNode {
+  private braced(atom: Own<RegexNode>): RegexNode {
     const start = this.index + 1;
     const leastEnd = this.digitsEnd(start);
     if (leastEnd == start) {
@@ -212,7 +212,7 @@ export class RegexParser {
     return this.wrapped([atom], 0, isRequired);
   }
 
-  private mostEnd(leastEnd: int): int {
+  private readonly mostEnd(leastEnd: int): int {
     if (this.text.slice(leastEnd, leastEnd + 1) != ",") {
       return leastEnd;
     }
@@ -220,7 +220,7 @@ export class RegexParser {
     return this.digitsEnd(leastEnd + 1);
   }
 
-  private digitsEnd(start: int): int {
+  private readonly digitsEnd(start: int): int {
     let end = start;
 
     while (kDigits.includes(this.text.slice(end, end + 1))) {
@@ -361,11 +361,11 @@ export class RegexParser {
     return kAtomNode;
   }
 
-  private isAt(char: string): boolean {
+  private readonly isAt(char: string): boolean {
     return this.current() == char;
   }
 
-  private current(): string {
+  private readonly current(): string {
     return this.text.slice(this.index, this.index + 1);
   }
 }

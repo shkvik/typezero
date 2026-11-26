@@ -31,7 +31,7 @@ partial class Lowering {
     return { type: kStringType, value: constant, tz };
   }
 
-  private stringConstant(text: string): LLVMValue {
+  private readonly stringConstant(text: string): LLVMValue {
     const units = this.codeUnits(text);
     const isTwoBytes = units.some((unit) => unit > kLatinLimit);
     const isAscii = units.every((unit) => unit <= kAsciiLimit);
@@ -56,7 +56,7 @@ partial class Lowering {
     return this.ir.constStruct([buffer, meta]);
   }
 
-  private bufferConstant(units: int[], isTwoBytes: boolean): LLVMValue {
+  private readonly bufferConstant(units: Read<int[]>, isTwoBytes: boolean): LLVMValue {
     const name = this.ir.uniqueName(".str.");
     const length = units.length;
     let element: string = "i8";
@@ -83,7 +83,7 @@ partial class Lowering {
     return this.ir.global(name, layout, value, true);
   }
 
-  private unitsData(units: int[], isTwoBytes: boolean): LLVMValue {
+  private readonly unitsData(units: Read<int[]>, isTwoBytes: boolean): LLVMValue {
     if (!isTwoBytes) {
       return this.byteArray(units);
     }
@@ -93,7 +93,7 @@ partial class Lowering {
     return this.ir.constArray("i16", items);
   }
 
-  private byteText(message: string): TextConstant {
+  private readonly byteText(message: string): TextConstant {
     const bytes = Buffer.from(message, "utf8");
     const name = this.ir.uniqueName(".text.");
     const data = this.ir.bytes(bytes, false);
@@ -103,7 +103,7 @@ partial class Lowering {
     return { pointer, length: bytes.length };
   }
 
-  private byteArray(units: int[]): LLVMValue {
+  private readonly byteArray(units: Read<int[]>): LLVMValue {
     const bytes = Buffer.alloc(units.length);
 
     for (let index = 0; index < units.length; index++) {
@@ -115,7 +115,7 @@ partial class Lowering {
     return this.ir.bytes(bytes, false);
   }
 
-  private codeUnits(text: string): int[] {
+  private readonly codeUnits(text: string): int[] {
     const units: int[] = [];
 
     for (let index = 0; index < text.length; index++) {
@@ -125,7 +125,7 @@ partial class Lowering {
     return units;
   }
 
-  private flagIf(isSet: boolean, flag: int): int {
+  private readonly flagIf(isSet: boolean, flag: int): int {
     if (isSet) {
       return flag;
     }
@@ -133,14 +133,14 @@ partial class Lowering {
     return 0;
   }
 
-  private metaValue(length: int, flags: int): LLVMValue {
+  private readonly metaValue(length: int, flags: int): LLVMValue {
     const top = flags.toString(16);
     const rest = length.toString(16).padStart(15, "0");
 
     return this.ir.hexInteger(kIntType, `${top}${rest}`);
   }
 
-  private inlineBits(units: int[]): string {
+  private readonly inlineBits(units: Read<int[]>): string {
     const bytes: string[] = [];
 
     for (let index = kInlineLimit - 1; index >= 0; index--) {
@@ -152,7 +152,7 @@ partial class Lowering {
     return bytes.join("");
   }
 
-  private hexByte(unit: int): string {
+  private readonly hexByte(unit: int): string {
     const text = unit.toString(16).padStart(2, "0");
 
     return text.toUpperCase();

@@ -51,17 +51,17 @@ export type ParamSlot = {
 };
 
 export type ValueRecord = {
-  readonly uses: Map<int, NameUse>;
-  readonly hidden: Map<string, HiddenName>;
-  readonly variables: Map<int, DeclaredVariable>;
-  readonly functions: Map<int, FunctionDecl>;
-  readonly params: Map<int, ParamSlot>;
-  readonly assigned: Set<int>;
-  readonly changes: Expr[];
-  readonly enums: Map<int, EnumDecl>;
-  readonly classes: Map<int, ClassDecl>;
-  readonly destinations: Map<int, Destination[]>;
-  readonly owners: FunctionDecl[];
+  readonly uses: Cell<Map<int, NameUse>>;
+  readonly hidden: Cell<Map<string, HiddenName>>;
+  readonly variables: Cell<Map<int, DeclaredVariable>>;
+  readonly functions: Cell<Map<int, FunctionDecl>>;
+  readonly params: Cell<Map<int, ParamSlot>>;
+  readonly assigned: Cell<Set<int>>;
+  readonly changes: Cell<Expr[]>;
+  readonly enums: Cell<Map<int, EnumDecl>>;
+  readonly classes: Cell<Map<int, ClassDecl>>;
+  readonly destinations: Cell<Map<int, Destination[]>>;
+  readonly owners: Cell<FunctionDecl[]>;
 };
 
 export type NarrowSlot = {
@@ -133,9 +133,9 @@ export type ValueTarget = {
 };
 
 export type FunctionDoor = {
-  state: DoorState;
-  type: Type;
-  isAssumed: boolean;
+  state: Cell<DoorState>;
+  type: Cell<Type>;
+  isAssumed: Cell<boolean>;
 };
 
 export type StalledFunction = {
@@ -165,14 +165,14 @@ export type GuardBuild = {
 };
 
 export type GuardSummary = {
-  readonly params: string[];
+  readonly params: readonly string[];
   readonly whenTrue?: Map<string, Type>;
   readonly whenFalse?: Map<string, Type>;
 };
 
 export type GeneratorFrame = {
   readonly fn: FunctionDecl;
-  readonly yields: ReturnedValue[];
+  readonly yields: Cell<ReturnedValue[]>;
   readonly isOpen: boolean;
   readonly yielded?: Type;
   readonly sent?: Type;
@@ -209,7 +209,7 @@ export type ClassMemberEntry = {
   readonly owner: ClassDecl;
   readonly instance: InstanceType;
   readonly field?: ClassField;
-  readonly methods: FunctionDecl[];
+  readonly methods: readonly FunctionDecl[];
   readonly isStatic: boolean;
 };
 
@@ -227,18 +227,18 @@ export type ArgumentSlot = {
 export type RankedVariant = {
   readonly fn: FunctionDecl;
   readonly type: FunctionType;
-  ranks: int[];
-  isAdapted: boolean;
-  failed: int;
+  ranks: Cell<int[]>;
+  isAdapted: Cell<boolean>;
+  failed: Cell<int>;
 };
 
 export type CallTarget = {
-  readonly params: FunctionParameter[];
+  readonly params: readonly FunctionParameter[];
   readonly rest: boolean;
   readonly loc: int;
   readonly isLenient: boolean;
   readonly kind?: CallKind;
-  readonly positions?: boolean[];
+  readonly positions?: readonly boolean[];
   readonly method?: string;
   readonly isCounted?: boolean;
   readonly isTagged?: boolean;
@@ -259,13 +259,13 @@ export type LiteralValue = {
 };
 
 export type VariableDoor = {
-  state: DoorState;
-  type: Type;
-  given?: Type;
-  literal?: LiteralValue;
-  constant?: decimal;
-  isWhole: boolean;
-  texts?: string[];
+  state: Cell<DoorState>;
+  type: Cell<Type>;
+  given?: Cell<Type>;
+  literal?: Cell<LiteralValue>;
+  constant?: Cell<decimal>;
+  isWhole: Cell<boolean>;
+  texts?: Cell<string[]>;
 };
 
 export type ArrayDraft = {
@@ -330,7 +330,7 @@ export type InitFrame = {
   readonly fn: FunctionDecl;
   readonly decl: ClassDecl;
   readonly isDerived: boolean;
-  readonly closures: boolean[];
+  readonly closures: Cell<boolean[]>;
 };
 
 export type OverriddenSite = {
@@ -367,9 +367,9 @@ export type InitializingVariable = {
 
 export type SuperFrame = {
   readonly isConstructor: boolean;
-  readonly roots: Set<Expr>;
+  readonly roots: Cell<Set<Expr>>;
   readonly parent: string;
-  isBefore: boolean;
+  isBefore: Cell<boolean>;
 };
 
 export type Linear = {
@@ -399,12 +399,12 @@ export enum ThisPlace {
 
 export type GenericTarget = {
   readonly name: string;
-  readonly params: Type[];
-  readonly decls: TypeParamDecl[];
+  readonly params: readonly Type[];
+  readonly decls: readonly TypeParamDecl[];
   readonly home: int;
   readonly shape: FunctionShape;
   readonly loc: int;
-  readonly typeArgs: TypeRef[];
+  readonly typeArgs: readonly TypeRef[];
   readonly isLenient: boolean;
 };
 
@@ -484,7 +484,7 @@ export type DecorateRun = {
   readonly decl: ClassDecl;
   readonly field?: ClassField;
   readonly method?: FunctionDecl;
-  readonly uses: DecoratorUse[];
+  readonly uses: readonly DecoratorUse[];
   readonly place: DecoratorPlace;
   readonly isStatic: boolean;
   readonly at: int;
@@ -523,7 +523,7 @@ export type Requirement = {
 
 export type PendingCall = {
   readonly name: string;
-  readonly params: Type[];
+  readonly params: readonly Type[];
   readonly bound: Map<int, Type>;
   readonly loc: int;
   readonly module: int;
@@ -566,3 +566,21 @@ export type PromiseValues = {
   readonly element?: Type;
   readonly tuple: Type[];
 };
+
+export type InternedDoors = Interned<FunctionDoor | VariableDoor>;
+
+export type InternedExpressionParts = Interned<
+  | SuperFrame
+  | InitFrame
+  | GeneratorFrame
+  | ValueRecord
+  | GuardSummary
+  | PendingCall
+  | ReturnedValue
+  | CallTarget
+  | GenericTarget
+  | RankedVariant
+  | ClassMemberEntry
+  | ClassLookup
+  | DecorateRun
+>;

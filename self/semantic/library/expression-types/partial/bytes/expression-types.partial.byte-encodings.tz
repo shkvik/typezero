@@ -12,13 +12,13 @@ import {
 import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
 
 partial class ExpressionTypes {
-  private isEncodingParam(type: Type): boolean {
+  private readonly isEncodingParam(type: Type): boolean {
     const label = this.store.labelOf(type);
 
     return this.byteSources.isEncodingLabel(label);
   }
 
-  private encodingArgumentCheck(value: Expr, module: int): void {
+  private readonly encodingArgumentCheck(value: Expr, module: int): void {
     const given = this.typed(value, undefined, module);
     if (given.kind == TypeKind.Error || this.modules.isLibraryModule(module)) {
       return;
@@ -38,7 +38,7 @@ partial class ExpressionTypes {
     this.reportFound(module, encodingError);
   }
 
-  private encodingTexts(
+  private readonly encodingTexts(
     value: Expr,
     given: Type,
     module: int,
@@ -69,7 +69,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private encodingLiteralTexts(given: Type): string[] | undefined {
+  private readonly encodingLiteralTexts(given: Type): string[] | undefined {
     if (this.isEncodingParam(given)) {
       return [];
     }
@@ -98,7 +98,7 @@ partial class ExpressionTypes {
     return texts;
   }
 
-  private encodingBranchTexts(
+  private readonly encodingBranchTexts(
     first: Expr,
     second: Expr,
     module: int,
@@ -115,7 +115,7 @@ partial class ExpressionTypes {
     return [...one, ...other];
   }
 
-  private encodingConstTexts(
+  private readonly encodingConstTexts(
     value: Expr,
     module: int,
     depth: int,
@@ -140,7 +140,7 @@ partial class ExpressionTypes {
     return this.encodingTexts(init, type, target.module, depth + 1);
   }
 
-  private isTextType(type: Type): boolean {
+  private readonly isTextType(type: Type): boolean {
     const base = this.types.definedType(type);
     if (base.kind == TypeKind.Literal) {
       return base.literal == LiteralKind.String;
@@ -149,7 +149,7 @@ partial class ExpressionTypes {
     return base.kind == TypeKind.String || this.isEncodingParam(type);
   }
 
-  private bytesLengthCheck(expr: AssignExpr, module: int): void {
+  private readonly bytesLengthCheck(expr: AssignExpr, module: int): void {
     const target = expr.target;
     if (target.kind != ExprKind.Member) {
       return;

@@ -13,7 +13,7 @@ import {
 import { SpreadSlot } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private spreadObject(
+  private readonly spreadObject(
     expr: ObjectLitExpr,
     target: Type | undefined,
     module: int,
@@ -48,7 +48,7 @@ partial class ExpressionTypes {
     return result;
   }
 
-  private spreadProperty(
+  private readonly spreadProperty(
     property: Property,
     target: Type | undefined,
     slots: SpreadSlot[],
@@ -64,10 +64,14 @@ partial class ExpressionTypes {
       return false;
     }
 
-    const slot = slots.find((one) => one.name == property.name);
-    if (slot == undefined) {
+    if (!slots.some((one) => one.name == property.name)) {
       slots.push({ name: property.name, type: type });
 
+      return true;
+    }
+
+    const slot = slots.find((one) => one.name == property.name);
+    if (slot == undefined) {
       return true;
     }
     if (type.kind == TypeKind.Undefined) {
@@ -81,7 +85,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private spreadMerged(
+  private readonly spreadMerged(
     property: Property,
     slots: SpreadSlot[],
     module: int,
@@ -121,7 +125,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private mergeSpreadField(
+  private readonly mergeSpreadField(
     property: Property,
     field: ObjectField,
     spread: ObjectType,

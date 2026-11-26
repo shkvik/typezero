@@ -1,8 +1,11 @@
 import {
+  AssignExpr,
   CallExpr,
+  Expr,
+  ExprKind,
   NameExpr,
 } from "../../../program/ast/types/ast.types.expressions.tz";
-import { TypeKind } from "../../../program/type/types/type.types.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { IrIntPredicate } from "../../ir-function/types/ir-function.types.tz";
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
@@ -16,6 +19,15 @@ import {
   kPathExtname,
   kPathIsAbsolute,
   kFsModule,
+  kMemModule,
+  kVoidType,
+  kCharType,
+  kReplaceName,
+  kSwapName,
+  kTakeName,
+  kDropName,
+  kStructuredCloneName,
+  kArrayCopy,
   kNumberName,
   kOsModule,
   kOsText,
@@ -32,6 +44,192 @@ import {
 import { Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
+  private memCall(
+    frame: Frame,
+    call: CallExpr,
+    callee: NameExpr,
+  ): IrValue | undefined {
+    const first = call.args[0];
+    const second = call.args[1];
+    if (first != undefined && callee.name == kTakeName) {
+      return this.memTaken(frame, first.expr);
+    }
+    if (first != undefined && callee.name == kDropName) {
+      return this.memDropped(frame, first.expr);
+    }
+    if (first == undefined || second == undefined) {
+      this.notLowered(frame.module, call.loc, "this call");
+
+      return undefined;
+    }
+    if (callee.name == kReplaceName) {
+      return this.memReplaced(frame, call.loc, first.expr, second.expr);
+    }
+    if (callee.name == kSwapName) {
+      return this.memSwapped(frame, call.loc, first.expr, second.expr);
+    }
+
+    this.notLowered(frame.module, call.loc, "a call of this function");
+
+    return undefined;
+  }
+
+  private memReplaced(
+    frame: Frame,
+    loc: int,
+    place: Expr,
+    value: Expr,
+  ): IrValue | undefined {
+    const current = this.value(frame, place);
+    if (current == undefined) {
+      return undefined;
+    }
+
+    const old = this.owning(frame, current);
+    const assignment: AssignExpr = {
+      kind: ExprKind.Assign,
+      loc,
+      target: place,
+      value,
+    };
+
+    this.assigned(frame, assignment);
+
+    return old;
+  }
+
+  private clonedValue(frame: Frame, call: CallExpr): IrValue | undefined {
+    const argument = call.args[0];
+    if (argument == undefined) {
+      return undefined;
+    }
+
+    const type = this.typeOf(argument.expr);
+    const given = this.value(frame, argument.expr);
+    if (type == undefined || given == undefined) {
+      return undefined;
+    }
+    if (!this.isManaged(type) || this.isString(type)) {
+      return this.owning(frame, given);
+    }
+
+    const isFlat =
+      type.kind == TypeKind.Array &&
+      (!this.isManaged(type.item) || this.isString(type.item));
+    if (!isFlat) {
+      this.notLowered(frame.module, call.loc, "a deep copy of this type");
+
+      return undefined;
+    }
+
+    const copying = this.ir.declare(kArrayCopy, kPointerType, [kPointerType]);
+    const value = frame.made.call(copying, [given.value]);
+
+    this.dropping(frame, given);
+
+    return { type: kPointerType, value, tz: type, owned: true };
+  }
+
+  private memDropped(frame: Frame, value: Expr): IrValue | undefined {
+    const place = value.kind == ExprKind.Name ? this.targetPlace(frame, value) : undefined;
+    const empty = place == undefined ? undefined : this.undefinedValue(place.tz);
+
+    if (place != undefined && empty != undefined) {
+      this.stored(frame, place, empty);
+    } else {
+      const given = this.value(frame, value);
+      if (given == undefined) {
+        return undefined;
+      }
+
+      this.dropping(frame, given);
+    }
+
+    const tz = this.store.plain(TypeKind.Void);
+
+    return { type: kVoidType, value: this.ir.zero(kCharType), tz };
+  }
+
+  private memTaken(frame: Frame, place: Expr): IrValue | undefined {
+    const type = this.typeOf(place);
+    const current = this.value(frame, place);
+    if (type == undefined || current == undefined) {
+      return undefined;
+    }
+
+    const empty = this.emptyValueOf(frame, type, place.loc);
+    const target = this.targetPlace(frame, place);
+    if (empty == undefined || target == undefined) {
+      return undefined;
+    }
+
+    const old = this.owning(frame, current);
+
+    this.stored(frame, target, empty);
+
+    return old;
+  }
+
+  private emptyValueOf(frame: Read<Frame>, type: Type, loc: int): IrValue | undefined {
+    if (this.isString(type)) {
+      return this.stringValue("");
+    }
+    if (type.kind == TypeKind.Array) {
+      const descriptor = this.descriptor(type.item);
+      if (descriptor != undefined) {
+        const value = this.emptyArray(frame, descriptor);
+
+        return { type: kPointerType, value, tz: type, owned: true };
+      }
+    }
+
+    const isPlain =
+      type.kind == TypeKind.Int ||
+      type.kind == TypeKind.Double ||
+      type.kind == TypeKind.Boolean ||
+      this.optionalInner(type) != undefined;
+    if (isPlain) {
+      return this.undefinedValue(type);
+    }
+
+    this.notLowered(frame.module, loc, "take of a value without an empty one");
+
+    return undefined;
+  }
+
+  private memSwapped(
+    frame: Frame,
+    loc: int,
+    first: Expr,
+    second: Expr,
+  ): IrValue | undefined {
+    const current = this.value(frame, first);
+    if (current == undefined) {
+      return undefined;
+    }
+
+    const old = this.owning(frame, current);
+    const toFirst: AssignExpr = {
+      kind: ExprKind.Assign,
+      loc,
+      target: first,
+      value: second,
+    };
+
+    this.assigned(frame, toFirst);
+
+    const place = this.targetPlace(frame, second);
+    if (place == undefined) {
+      return undefined;
+    }
+
+    this.stored(frame, place, old);
+
+    const tz = this.store.plain(TypeKind.Void);
+
+    return { type: kVoidType, value: this.ir.zero(kCharType), tz };
+  }
+
   private libraryCall(
     frame: Frame,
     call: CallExpr,
@@ -44,8 +242,14 @@ partial class Lowering {
     if (callee.name == kParseIntName) {
       return this.parsedInteger(frame, call);
     }
+    if (callee.name == kStructuredCloneName) {
+      return this.clonedValue(frame, call);
+    }
 
     const opened = this.program.modules[module];
+    if (opened != undefined && opened.name == kMemModule) {
+      return this.memCall(frame, call, callee);
+    }
     if (opened != undefined && opened.name == kFsModule) {
       return this.filesCall(frame, call, callee);
     }
@@ -83,7 +287,7 @@ partial class Lowering {
   }
 
   private osCall(
-    frame: Frame,
+    frame: Read<Frame>,
     call: CallExpr,
     callee: NameExpr,
   ): IrValue | undefined {
@@ -122,11 +326,11 @@ partial class Lowering {
     return texts;
   }
 
-  private pathStyle(): LLVMValue {
+  private readonly pathStyle(): LLVMValue {
     return this.ir.integer(kIntType, `${kPathStyle}`);
   }
 
-  private textsDropped(frame: Frame, texts: IrValue[]): void {
+  private textsDropped(frame: Read<Frame>, texts: Read<IrValue[]>): void {
     for (const text of texts) {
       this.dropping(frame, text);
     }
@@ -144,7 +348,6 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const array = this.newArray(frame, descriptor, texts.length);
     const data = this.arrayData(frame, array);
 
@@ -156,9 +359,9 @@ partial class Lowering {
 
       const owned = this.owning(frame, text);
       const position = this.ir.integer(kIntType, `${index}`);
-      const at = made.element(text.type, data, position);
+      const at = frame.made.element(text.type, data, position);
 
-      made.store(owned.value, at);
+      frame.made.store(owned.value, at);
     }
 
     const runtime = this.pick(name == "join", kPathJoin, kPathResolve);
@@ -200,7 +403,7 @@ partial class Lowering {
     return result;
   }
 
-  private pathPartRuntime(name: string): string {
+  private readonly pathPartRuntime(name: string): string {
     switch (name) {
       case "dirname":
         return kPathDirname;
@@ -267,13 +470,12 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const params = [kPointerType, kIntType, kIntType];
     const callee = this.ir.declare(kPathIsAbsolute, kFlagType, params);
     const args = this.textParts(frame, text).concat([this.pathStyle()]);
-    const flag = made.call(callee, args);
+    const flag = frame.made.call(callee, args);
     const zero = this.ir.zero(kFlagType);
-    const value = made.integerCompare(IrIntPredicate.NotEqual, flag, zero);
+    const value = frame.made.integerCompare(IrIntPredicate.NotEqual, flag, zero);
     const tz = this.store.plain(TypeKind.Boolean);
 
     this.textsDropped(frame, texts);

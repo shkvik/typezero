@@ -20,12 +20,15 @@ import {
 import {
   kRecordTypeName,
   kSymbolAsyncIteratorName,
+  kSymbolCloneName,
   kSymbolDisposeName,
+  kSymbolEqualsName,
+  kSymbolHashName,
   kSymbolIteratorName,
 } from "../const/file-parser.const.object-types.tz";
 
 partial class FileParser {
-  private mappedTypeAhead(): boolean {
+  private readonly mappedTypeAhead(): boolean {
     const next = this.cursor.lookahead();
     const after = this.cursor.tokenAt(2);
 
@@ -63,7 +66,9 @@ partial class FileParser {
       this.cursor.skipToClosingBrace();
       return ref;
     }
-    mapped.optionalChange = this.acceptModifier(TokenKind.Question);
+    const optionalChange = this.acceptModifier(TokenKind.Question);
+
+    ref.form = { ...mapped, optionalChange };
     if (!this.cursor.expect(TokenKind.Colon, Code.ExpectedBeforeMappedValues)) {
       this.cursor.skipToClosingBrace();
       return ref;
@@ -156,7 +161,7 @@ partial class FileParser {
     return undefined;
   }
 
-  private fieldNameProblem(kind: TokenKind): Code {
+  private readonly fieldNameProblem(kind: TokenKind): Code {
     switch (kind) {
       case TokenKind.LBracket:
         return Code.FieldNameInBrackets;
@@ -205,7 +210,7 @@ partial class FileParser {
     return name;
   }
 
-  private symbolMemberName(known: KnownName): string | undefined {
+  private readonly symbolMemberName(known: KnownName): string | undefined {
     switch (known) {
       case KnownName.AsyncIterator:
         return kSymbolAsyncIteratorName;
@@ -213,6 +218,12 @@ partial class FileParser {
         return kSymbolDisposeName;
       case KnownName.Iterator:
         return kSymbolIteratorName;
+      case KnownName.Equals:
+        return kSymbolEqualsName;
+      case KnownName.Hash:
+        return kSymbolHashName;
+      case KnownName.Clone:
+        return kSymbolCloneName;
       default:
         return undefined;
     }
@@ -222,9 +233,6 @@ partial class FileParser {
     const brace = this.cursor.next();
     const ref = this.typeRef(brace.start);
     const fields: ObjectTypeField[] = [];
-    const object: ObjectTypeForm = { kind: TypeRefKind.Object, fields };
-
-    ref.form = object;
 
     while (this.cursor.insideList(TokenKind.RBrace)) {
       const first = this.cursor.peek();
@@ -243,16 +251,23 @@ partial class FileParser {
         return this.mappedType(ref.loc, afterFields, readonlyChange);
       }
       if (this.cursor.is(TokenKind.LBracket) && !this.cursor.symbolKeyAhead()) {
+        ref.form = this.objectForm(fields);
+
         return this.indexSignature(ref, loc, afterFields);
       }
       if (this.cursor.is(TokenKind.New) || this.refusedCallAhead()) {
         this.skipBraced(loc, Code.CallSignatures);
+
+        ref.form = this.objectForm(fields);
+
 
         return ref;
       }
 
       const member = this.objectTypeMember(loc, readonly);
       if (member == undefined) {
+        ref.form = this.objectForm(fields);
+
         return ref;
       }
 
@@ -260,20 +275,29 @@ partial class FileParser {
 
       const separatorCode = this.separatorCode(member);
       if (!this.endObjectTypeMember(separatorCode)) {
+        ref.form = this.objectForm(fields);
+
         return ref;
       }
     }
 
     this.cursor.expect(TokenKind.RBrace, Code.ExpectedObjectTypeClose);
 
+    ref.form = this.objectForm(fields);
+
+
     return ref;
   }
 
-  private callSignatureAhead(): boolean {
+  private readonly objectForm(fields: Own<ObjectTypeField[]>): ObjectTypeForm {
+    return { kind: TypeRefKind.Object, fields };
+  }
+
+  private readonly callSignatureAhead(): boolean {
     return this.cursor.is(TokenKind.LParen) || this.cursor.is(TokenKind.Less);
   }
 
-  private refusedCallAhead(): boolean {
+  private readonly refusedCallAhead(): boolean {
     return this.callSignatureAhead() && !this.library;
   }
 
@@ -402,7 +426,7 @@ partial class FileParser {
     loc: int,
     optional: boolean,
     call: boolean,
-    typeParams: TypeParamDecl[],
+    typeParams: Own<TypeParamDecl[]>,
   ): ObjectTypeField | undefined {
     const parsed = this.signatureParams();
     if (!parsed.complete || this.cursor.isRecovering()) {
@@ -452,7 +476,7 @@ partial class FileParser {
     return true;
   }
 
-  private wrongIndexToken(): Token {
+  private readonly wrongIndexToken(): Token {
     if (this.cursor.atName()) {
       return this.cursor.lookahead();
     }
@@ -518,7 +542,7 @@ partial class FileParser {
     return this.type();
   }
 
-  private memberLoc(first: Token, readonly: boolean): int {
+  private readonly memberLoc(first: Token, readonly: boolean): int {
     if (!readonly) {
       return first.start;
     }
@@ -528,7 +552,7 @@ partial class FileParser {
     return head.start;
   }
 
-  private separatorCode(member: ObjectTypeField): Code {
+  private readonly separatorCode(member: ObjectTypeField): Code {
     if (member.method) {
       return Code.ExpectedSemicolonAfterMethod;
     }

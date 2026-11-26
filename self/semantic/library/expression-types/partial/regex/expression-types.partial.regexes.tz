@@ -30,7 +30,7 @@ import {
 } from "../../../regex-rules/const/regex-rules.const.tz";
 
 partial class ExpressionTypes {
-  private regexLiteralTyped(expr: RegexLitExpr, module: int): Type {
+  private readonly regexLiteralTyped(expr: RegexLitExpr, module: int): Type {
     const flags = expr.flags;
     if (!this.regexes.isFlagsValid(flags)) {
       const loc = expr.loc + expr.written - flags.length;
@@ -47,7 +47,7 @@ partial class ExpressionTypes {
     return this.regExpType();
   }
 
-  private syntaxCheck(
+  private readonly syntaxCheck(
     written: RegexText,
     loc: int,
     isWritten: boolean,
@@ -59,13 +59,13 @@ partial class ExpressionTypes {
     }
   }
 
-  private regExpType(): Type {
+  private readonly regExpType(): Type {
     const made = this.resolver.libraryInstance(kRegExpName, []);
 
     return made ?? this.store.plain(TypeKind.Error);
   }
 
-  private knownRegex(expr: Expr, module: int): RegexShape | undefined {
+  private readonly knownRegex(expr: Expr, module: int): RegexShape | undefined {
     const written = this.regexTextOf(expr, module);
     if (written == undefined) {
       return undefined;
@@ -74,7 +74,7 @@ partial class ExpressionTypes {
     return this.regexes.shapeOf(written);
   }
 
-  private regexTextOf(expr: Expr, module: int): RegexText | undefined {
+  private readonly regexTextOf(expr: Expr, module: int): RegexText | undefined {
     switch (expr.kind) {
       case ExprKind.RegexLit:
         return { pattern: expr.pattern, flags: expr.flags };
@@ -87,7 +87,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private madeRegexText(expr: NewExpr, module: int): RegexText | undefined {
+  private readonly madeRegexText(expr: NewExpr, module: int): RegexText | undefined {
     if (!this.isRegExpNew(expr, module)) {
       return undefined;
     }
@@ -95,7 +95,7 @@ partial class ExpressionTypes {
     return this.constantRegexText(expr.args);
   }
 
-  private isRegExpNew(expr: NewExpr, module: int): boolean {
+  private readonly isRegExpNew(expr: NewExpr, module: int): boolean {
     const form = expr.form;
     const isNamed =
       form.kind == NewKind.Named &&
@@ -114,7 +114,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private heldRegexText(expr: NameExpr, module: int): RegexText | undefined {
+  private readonly heldRegexText(expr: NameExpr, module: int): RegexText | undefined {
     const target = this.targetOfName(expr, module);
     if (target == undefined || target.kind != SymbolKind.Variable) {
       return undefined;
@@ -136,7 +136,7 @@ partial class ExpressionTypes {
     return this.regexTextOf(init, target.module);
   }
 
-  private constantRegexText(args: CallArgument[]): RegexText | undefined {
+  private readonly constantRegexText(args: Read<CallArgument[]>): RegexText | undefined {
     const first = args[0];
     if (first == undefined || args.length > 2) {
       return undefined;
@@ -159,7 +159,7 @@ partial class ExpressionTypes {
     return { pattern, flags };
   }
 
-  private constantText(expr: Expr): string | undefined {
+  private readonly constantText(expr: Expr): string | undefined {
     if (expr.kind == ExprKind.StringLit) {
       return expr.value;
     }
@@ -170,7 +170,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private isRegExpName(expr: Expr, module: int): boolean {
+  private readonly isRegExpName(expr: Expr, module: int): boolean {
     if (expr.kind != ExprKind.Name || expr.name != kRegExpName) {
       return false;
     }
@@ -178,7 +178,7 @@ partial class ExpressionTypes {
     return this.isGlobalUse(expr, module);
   }
 
-  private regexMethodCall(
+  private readonly regexMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -203,7 +203,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private regexRunCall(expr: CallExpr, member: MemberExpr, module: int): Type {
+  private readonly regexRunCall(expr: CallExpr, member: MemberExpr, module: int): Type {
     const count = expr.args.length;
     const text = expr.args[0];
     if (count != 1 || text == undefined) {
@@ -234,7 +234,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Boolean);
   }
 
-  private regexMemberRead(
+  private readonly regexMemberRead(
     expr: MemberExpr,
     instance: InstanceType,
     module: int,
@@ -250,13 +250,13 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private regExpStaticRead(expr: MemberExpr, module: int): Type {
+  private readonly regExpStaticRead(expr: MemberExpr, module: int): Type {
     this.reportFound(module, this.regexes.staticError(expr.loc, expr.name));
 
     return this.store.plain(TypeKind.Error);
   }
 
-  private regExpStaticCall(
+  private readonly regExpStaticCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -273,7 +273,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private regExpNew(expr: NewExpr, module: int): Type | undefined {
+  private readonly regExpNew(expr: NewExpr, module: int): Type | undefined {
     if (!this.isRegExpNew(expr, module)) {
       return undefined;
     }
@@ -281,7 +281,7 @@ partial class ExpressionTypes {
     return this.regExpMade(expr.loc, expr.args, module);
   }
 
-  private regExpCalled(expr: CallExpr, module: int): Type | undefined {
+  private readonly regExpCalled(expr: CallExpr, module: int): Type | undefined {
     const callee = expr.callee;
     if (!this.isRegExpName(callee, module)) {
       return undefined;
@@ -290,7 +290,7 @@ partial class ExpressionTypes {
     return this.regExpMade(callee.loc, expr.args, module);
   }
 
-  private regExpMade(loc: int, args: CallArgument[], module: int): Type {
+  private readonly regExpMade(loc: int, args: Read<CallArgument[]>, module: int): Type {
     const count = args.length;
     const pattern = args[0];
     if (count > 2 || pattern == undefined) {
@@ -317,7 +317,7 @@ partial class ExpressionTypes {
     return this.escapedRegExp(loc, pattern, args[1], module);
   }
 
-  private escapedRegExp(
+  private readonly escapedRegExp(
     loc: int,
     pattern: CallArgument,
     second: CallArgument | undefined,
@@ -351,7 +351,7 @@ partial class ExpressionTypes {
     return this.regExpType();
   }
 
-  private flagsText(second: CallArgument | undefined): string | undefined {
+  private readonly flagsText(second: CallArgument | undefined): string | undefined {
     if (second == undefined) {
       return "";
     }
@@ -359,13 +359,13 @@ partial class ExpressionTypes {
     return this.constantText(second.expr);
   }
 
-  private looseSecond(second: CallArgument | undefined, module: int): void {
+  private readonly looseSecond(second: CallArgument | undefined, module: int): void {
     if (second != undefined) {
       this.looseArguments([second], module);
     }
   }
 
-  private isRegExpEscape(expr: Expr, module: int): boolean {
+  private readonly isRegExpEscape(expr: Expr, module: int): boolean {
     if (expr.kind != ExprKind.Call) {
       return false;
     }

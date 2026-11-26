@@ -30,7 +30,7 @@ import {
 import { Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
-  private isStaticHolder(frame: Frame, expr: Expr): boolean {
+  private readonly isStaticHolder(frame: Read<Frame>, expr: Expr): boolean {
     if (expr.kind != ExprKind.Name || !kStaticHolders.includes(expr.name)) {
       return false;
     }
@@ -90,7 +90,7 @@ partial class Lowering {
     }
   }
 
-  private nameOf(expr: Expr): string {
+  private readonly nameOf(expr: Expr): string {
     if (expr.kind != ExprKind.Name) {
       return "";
     }
@@ -142,36 +142,34 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     let picked: LLVMValue = first;
 
     for (const value of values.slice(1)) {
       const isLess = this.lessTest(frame, value, picked, result);
       if (isMin) {
-        picked = made.select(isLess, value, picked);
+        picked = frame.made.select(isLess, value, picked);
       } else {
-        picked = made.select(isLess, picked, value);
+        picked = frame.made.select(isLess, picked, value);
       }
     }
 
     return { type, value: picked, tz: result };
   }
 
-  private lessTest(
-    frame: Frame,
+  private readonly lessTest(
+    frame: Read<Frame>,
     left: LLVMValue,
     right: LLVMValue,
     type: Type,
   ): LLVMValue {
-    const made = frame.made;
     if (this.isDouble(type)) {
-      return made.realCompare(IrRealPredicate.OrderedLess, left, right);
+      return frame.made.realCompare(IrRealPredicate.OrderedLess, left, right);
     }
     if (this.isUnsigned(type)) {
-      return made.integerCompare(IrIntPredicate.UnsignedLess, left, right);
+      return frame.made.integerCompare(IrIntPredicate.UnsignedLess, left, right);
     }
 
-    return made.integerCompare(IrIntPredicate.SignedLess, left, right);
+    return frame.made.integerCompare(IrIntPredicate.SignedLess, left, right);
   }
 
   private mathAbsolute(frame: Frame, call: CallExpr): IrValue | undefined {
@@ -187,25 +185,24 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     if (this.isDouble(result)) {
       const params = [kDoubleType];
       const callee = this.ir.declare(kMathAbsolute, kDoubleType, params);
 
-      return { type, value: made.call(callee, [value]), tz: result };
+      return { type, value: frame.made.call(callee, [value]), tz: result };
     }
     if (this.isUnsigned(result)) {
       return { type, value, tz: result };
     }
 
     const zero = this.ir.zero(type);
-    const isNegative = made.integerCompare(
+    const isNegative = frame.made.integerCompare(
       IrIntPredicate.SignedLess,
       value,
       zero,
     );
-    const negative = made.binary(IrOpcode.Sub, zero, value);
-    const picked = made.select(isNegative, negative, value);
+    const negative = frame.made.binary(IrOpcode.Sub, zero, value);
+    const picked = frame.made.select(isNegative, negative, value);
 
     return { type, value: picked, tz: result };
   }
@@ -227,7 +224,6 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const inside = this.proven(frame, given);
     if (!this.isDouble(inside.tz)) {
       return this.converted(frame, inside, result, call.loc);
@@ -235,7 +231,7 @@ partial class Lowering {
 
     const runtime = this.roundingRuntime(name);
     const callee = this.ir.declare(runtime, kDoubleType, [kDoubleType]);
-    const rounded = made.call(callee, [inside.value]);
+    const rounded = frame.made.call(callee, [inside.value]);
     const double = this.store.plain(TypeKind.Double);
     if (this.isDouble(result)) {
       return { type, value: rounded, tz: result };
@@ -246,7 +242,7 @@ partial class Lowering {
     return this.integerFitted(frame, value, this.widened(result));
   }
 
-  private roundingRuntime(name: string): string {
+  private readonly roundingRuntime(name: string): string {
     switch (name) {
       case "floor":
         return kMathFloor;
@@ -266,15 +262,14 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const count = values.length;
     const array = `[${count} x i32]`;
-    const slot = made.slot(array, "char.codes");
+    const slot = frame.made.slot(array, "char.codes");
 
     for (let index = 0; index < count; index++) {
       const value = values[index];
       if (value != undefined) {
-        made.store(value, made.field(array, slot, index));
+        frame.made.store(value, frame.made.field(array, slot, index));
       }
     }
 
@@ -291,15 +286,14 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const count = values.length;
     const array = `[${count} x ${kDoubleType}]`;
-    const slot = made.slot(array, "code.points");
+    const slot = frame.made.slot(array, "code.points");
 
     for (let index = 0; index < count; index++) {
       const value = values[index];
       if (value != undefined) {
-        made.store(value, made.field(array, slot, index));
+        frame.made.store(value, frame.made.field(array, slot, index));
       }
     }
 

@@ -23,7 +23,7 @@ import { kPromiseClass } from "../../library-rules/const/library-rules.const.tz"
 import { kResultMethods } from "../../result-rules/const/result-rules.const.tz";
 
 partial class ExpressionTypes {
-  private promiseMisuse(
+  private readonly promiseMisuse(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -54,7 +54,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private resultOnPromiseCheck(
+  private readonly resultOnPromiseCheck(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -82,7 +82,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private thenTwoCheck(expr: CallExpr, module: int): boolean {
+  private readonly thenTwoCheck(expr: CallExpr, module: int): boolean {
     const second = expr.args[1];
     if (second == undefined) {
       return false;
@@ -94,7 +94,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private thenCall(
+  private readonly thenCall(
     expr: CallExpr,
     member: MemberExpr,
     value: Type,
@@ -153,7 +153,7 @@ partial class ExpressionTypes {
     return this.store.promiseOf(returned);
   }
 
-  private thenResult(returned: Type): Type {
+  private readonly thenResult(returned: Type): Type {
     if (returned.kind == TypeKind.Promise) {
       return returned.value;
     }
@@ -161,7 +161,7 @@ partial class ExpressionTypes {
     return returned;
   }
 
-  private promiseMissing(
+  private readonly promiseMissing(
     member: MemberExpr,
     object: Type,
     module: int,
@@ -184,7 +184,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private promiseStatic(member: MemberExpr, module: int): boolean {
+  private readonly promiseStatic(member: MemberExpr, module: int): boolean {
     const object = member.object;
     if (object.kind != ExprKind.Name || object.name != kPromiseClass) {
       return false;
@@ -215,7 +215,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private promiseMissingCheck(member: MemberExpr, module: int): boolean {
+  private readonly promiseMissingCheck(member: MemberExpr, module: int): boolean {
     const checked = this.library.promiseMissingCheck(member);
 
     this.reportFound(module, checked.error);

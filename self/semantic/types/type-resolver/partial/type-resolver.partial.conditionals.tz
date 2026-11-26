@@ -18,7 +18,7 @@ import {
 } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  private conditional(ref: TypeRef, context: TypeContext): Type {
+  private readonly conditional(ref: TypeRef, context: Read<TypeContext>): Type {
     const spread = this.distribution(ref.args[0], context);
     if (spread == undefined) {
       return this.decided(ref, context);
@@ -36,9 +36,9 @@ partial class TypeResolver {
     return this.store.unionOf(results);
   }
 
-  private distribution(
+  private readonly distribution(
     check: TypeRef | undefined,
-    context: TypeContext,
+    context: Read<TypeContext>,
   ): Distribution | undefined {
     if (check == undefined || check.form.kind != TypeRefKind.Name) {
       return undefined;
@@ -64,7 +64,7 @@ partial class TypeResolver {
     return { loc: symbol.loc, parts: bound.parts };
   }
 
-  private decided(ref: TypeRef, context: TypeContext): Type {
+  private readonly decided(ref: TypeRef, context: Own<TypeContext>): Type {
     const checkRef = ref.args[0];
     const wantedRef = ref.args[1];
     const yes = ref.args[2];
@@ -92,7 +92,11 @@ partial class TypeResolver {
       return this.store.plain(TypeKind.Error);
     }
 
-    const captured = this.relation.matches(check, wanted, holes);
+    const captured = this.relation.matches(
+      check,
+      wanted,
+      new Map<int, InferHole>(holes),
+    );
     if (captured == undefined) {
       return this.result(no, context);
     }
@@ -113,7 +117,7 @@ partial class TypeResolver {
     });
   }
 
-  private findHoles(
+  private readonly findHoles(
     ref: TypeRef,
     context: TypeContext,
     holes: Map<int, InferHole>,
@@ -168,7 +172,7 @@ partial class TypeResolver {
     }
   }
 
-  private holeConstraint(
+  private readonly holeConstraint(
     written: TypeRef | undefined,
     context: TypeContext,
   ): Type | undefined {
@@ -179,7 +183,7 @@ partial class TypeResolver {
     return this.resolve(written, context);
   }
 
-  private result(ref: TypeRef | undefined, context: TypeContext): Type {
+  private readonly result(ref: TypeRef | undefined, context: TypeContext): Type {
     if (ref == undefined) {
       return this.store.plain(TypeKind.Void);
     }
@@ -187,7 +191,7 @@ partial class TypeResolver {
     return this.resolve(ref, context);
   }
 
-  private depends(type: Type, seen: Set<int>): boolean {
+  private readonly depends(type: Type, seen: Set<int>): boolean {
     if (seen.has(type.id)) {
       return false;
     }
@@ -232,7 +236,7 @@ partial class TypeResolver {
     }
   }
 
-  private shapeDepends(shape: FunctionShape, seen: Set<int>): boolean {
+  private readonly shapeDepends(shape: Read<FunctionShape>, seen: Set<int>): boolean {
     const types = shape.params.map((param) => param.type);
     const self = shape.self;
     if (self != undefined) {
@@ -244,7 +248,7 @@ partial class TypeResolver {
     return this.anyDepends(types, seen);
   }
 
-  private anyDepends(types: Type[], seen: Set<int>): boolean {
+  private readonly anyDepends(types: Read<Type[]>, seen: Set<int>): boolean {
     for (const type of types) {
       if (this.depends(type, seen)) {
         return true;

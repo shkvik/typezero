@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import {
   EnumDecl,
   TypeAliasDecl,
@@ -27,25 +28,25 @@ export class DeclarationTypes {
   private readonly resolver: TypeResolver;
   private readonly expressions: ExpressionTypes;
   private readonly context: TypeContext;
-  private readonly declarations: TypedDeclaration[];
+  private declarations: TypedDeclaration[];
 
   public constructor(
-    resolver: TypeResolver,
-    expressions: ExpressionTypes,
-    module: Module,
+    resolver: Own<TypeResolver>,
+    expressions: Own<ExpressionTypes>,
+    module: Own<Module>,
   ) {
     this.module = module;
     this.expressions = expressions;
     this.resolver = resolver;
     this.context = {
-      module: module.id,
+      module: this.module.id,
       bindings: new Map<int, Type>(),
       place: TypePlace.Plain,
     };
     this.declarations = [];
   }
 
-  public resolveAliases(): void {
+  public readonly resolveAliases(): void {
     for (const item of this.module.file.items) {
       if (item.kind == StmtKind.TypeAlias && item.typeParams.length == 0) {
         this.resolver.declaredAlias(this.module.id, item);
@@ -60,7 +61,7 @@ export class DeclarationTypes {
       this.typeItem(item);
     }
 
-    return { module: this.module, declarations: this.declarations };
+    return { module: this.module, declarations: replace(this.declarations, []) };
   }
 
   private typeItem(item: Stmt): void {
@@ -113,7 +114,7 @@ export class DeclarationTypes {
     }
   }
 
-  private typeLocals(statements: Stmt[]): void {
+  private typeLocals(statements: Read<Stmt[]>): void {
     for (const statement of statements) {
       this.typeLocal(statement);
     }
@@ -165,7 +166,7 @@ export class DeclarationTypes {
     }
   }
 
-  private isBroken(type: Type): boolean {
+  private readonly isBroken(type: Type): boolean {
     if (type.kind != TypeKind.Function) {
       return false;
     }
@@ -187,7 +188,7 @@ export class DeclarationTypes {
     this.declare(DeclarationForm.Enum, decl.name, decl.loc, type);
   }
 
-  private genericName(name: string, params: string[]): string {
+  private readonly genericName(name: string, params: Read<string[]>): string {
     if (params.length == 0) {
       return name;
     }

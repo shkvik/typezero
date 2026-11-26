@@ -88,12 +88,11 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const params = [kPointerType, kIntType];
     const callee = this.ir.declare(kFsExists, kFlagType, params);
-    const flag = made.call(callee, this.textParts(frame, path));
+    const flag = frame.made.call(callee, this.textParts(frame, path));
     const zero = this.ir.zero(kFlagType);
-    const value = made.integerCompare(IrIntPredicate.NotEqual, flag, zero);
+    const value = frame.made.integerCompare(IrIntPredicate.NotEqual, flag, zero);
     const tz = this.store.plain(TypeKind.Boolean);
 
     this.dropping(frame, path);
@@ -102,7 +101,7 @@ partial class Lowering {
   }
 
   private fileResultParts(
-    frame: Frame,
+    frame: Read<Frame>,
     call: CallExpr,
   ): FileCallParts | undefined {
     const type = this.typeOf(call);
@@ -129,7 +128,6 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const flag = this.stringValue(kReadFlag);
     const args = this.textParts(frame, path).concat(
       this.textParts(frame, flag),
@@ -138,7 +136,7 @@ partial class Lowering {
       const params = [kPointerType, kIntType, kPointerType, kIntType];
       const all = params.concat([kPointerType]);
       const callee = this.ir.declare(kFsReadFileBytes, kPointerType, all);
-      const read = made.call(callee, args.concat([parts.maker]));
+      const read = frame.made.call(callee, args.concat([parts.maker]));
       const value: IrValue = {
         type: kPointerType,
         value: read,
@@ -152,7 +150,7 @@ partial class Lowering {
     }
 
     const encoding = this.encodingOf(frame, call.args[1]?.expr);
-    const wide = made.cast(IrOpcode.SExt, encoding, kIntType);
+    const wide = frame.made.cast(IrOpcode.SExt, encoding, kIntType);
     const params = [kPointerType, kIntType, kPointerType, kIntType, kIntType];
     const all = args.concat([wide]);
     const text = this.fileOut(frame, kFsReadFile, params, all, parts);
@@ -162,21 +160,20 @@ partial class Lowering {
     return this.caughtResult(frame, text, parts.type, call.loc);
   }
 
-  private fileOut(
-    frame: Frame,
+  private readonly fileOut(
+    frame: Read<Frame>,
     name: string,
-    params: string[],
-    args: LLVMValue[],
+    params: Own<string[]>,
+    args: Own<LLVMValue[]>,
     parts: FileCallParts,
   ): IrValue {
-    const made = frame.made;
-    const out = made.slot(kStringType, "file.out");
+    const out = frame.made.slot(kStringType, "file.out");
     const all = [kPointerType].concat(params).concat([kPointerType]);
     const callee = this.ir.declare(name, kVoidType, all);
 
-    made.call(callee, [out].concat(args).concat([parts.maker]));
+    frame.made.call(callee, [out].concat(args).concat([parts.maker]));
 
-    const value = made.load(kStringType, out);
+    const value = frame.made.load(kStringType, out);
     const tz = this.store.plain(TypeKind.String);
 
     return { type: kStringType, value, tz, owned: true };
@@ -217,7 +214,6 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const params = [
       kPointerType,
       kIntType,
@@ -234,7 +230,7 @@ partial class Lowering {
       statsMaker,
       parts.maker,
     ]);
-    const found = made.call(callee, args);
+    const found = frame.made.call(callee, args);
     const value: IrValue = {
       type: kPointerType,
       value: found,
@@ -262,7 +258,6 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const params = [
       kPointerType,
       kIntType,
@@ -278,7 +273,7 @@ partial class Lowering {
       this.ir.zero(kPointerType),
       parts.maker,
     ]);
-    const listed = made.call(callee, args);
+    const listed = frame.made.call(callee, args);
     const value: IrValue = {
       type: kPointerType,
       value: listed,
@@ -335,7 +330,7 @@ partial class Lowering {
     return this.caughtResult(frame, done, parts.type, call.loc);
   }
 
-  private optionFlag(options: Expr | undefined, name: string): boolean {
+  private readonly optionFlag(options: Expr | undefined, name: string): boolean {
     if (options == undefined || options.kind != ExprKind.ObjectLit) {
       return false;
     }
@@ -419,7 +414,7 @@ partial class Lowering {
   private variantChosen(
     made: IrFunction,
     code: LLVMValue,
-    variants: Type[],
+    variants: Read<Type[]>,
   ): LLVMValue {
     const compare = this.ir.declare(kTextCompareC, kFlagType, [
       kPointerType,
@@ -443,7 +438,7 @@ partial class Lowering {
     return index;
   }
 
-  private variantCodes(variant: Type | undefined): string[] {
+  private readonly variantCodes(variant: Type | undefined): string[] {
     if (variant == undefined || variant.kind != TypeKind.Object) {
       return [];
     }
@@ -456,7 +451,7 @@ partial class Lowering {
     return this.textLiterals(field.type);
   }
 
-  private unknownVariant(variants: Type[]): int {
+  private readonly unknownVariant(variants: Read<Type[]>): int {
     for (let position = 0; position < variants.length; position++) {
       if (this.variantCodes(variants[position]).includes("UNKNOWN")) {
         return position;
@@ -466,12 +461,12 @@ partial class Lowering {
     return 0;
   }
 
-  private errorOrder(variant: Type): string[] {
+  private readonly errorOrder(variant: Type): string[] {
     if (variant.kind != TypeKind.Object) {
       return [];
     }
 
-    const fields = variant.fields;
+    const fields = variant.fields.slice();
 
     for (const order of kFsErrorOrders) {
       const isPresent = order.every((name) =>
@@ -492,7 +487,7 @@ partial class Lowering {
 
   private orderMakerOrNone(
     type: Type,
-    order: string[],
+    order: Read<string[]>,
   ): LLVMValue | undefined {
     if (order.length == 0) {
       return undefined;
@@ -501,7 +496,7 @@ partial class Lowering {
     return this.orderMaker(type, order);
   }
 
-  private orderMaker(type: Type, order: string[]): LLVMValue | undefined {
+  private orderMaker(type: Type, order: Read<string[]>): LLVMValue | undefined {
     const key = `${type.id} ${order.join(" ")}`;
     const known = this.orderMakers.get(key);
     if (known != undefined) {
@@ -556,7 +551,7 @@ partial class Lowering {
     return made.callee.fn;
   }
 
-  private partIr(type: Type, ir: string): string {
+  private readonly partIr(type: Type, ir: string): string {
     if (this.textLiterals(type).length > 0) {
       return kPointerType;
     }
@@ -565,29 +560,26 @@ partial class Lowering {
   }
 
   private partValue(
-    frame: Frame,
+    frame: Read<Frame>,
     address: LLVMValue,
     type: Type,
     ir: string,
   ): LLVMValue {
-    const made = frame.made;
     if (this.textLiterals(type).length > 0) {
-      const text = made.load(kPointerType, address);
+      const text = frame.made.load(kPointerType, address);
 
       return this.codeChosen(frame, text, type);
     }
 
-    return made.load(ir, address);
+    return frame.made.load(ir, address);
   }
 
   private fixedFields(
-    frame: Frame,
+    frame: Read<Frame>,
     object: LLVMValue,
-    layout: ClassLayout,
-    order: string[],
+    layout: Read<ClassLayout>,
+    order: Read<string[]>,
   ): void {
-    const made = frame.made;
-
     for (const field of layout.fields) {
       const literals = this.textLiterals(field.type);
       const only = literals[0];
@@ -595,9 +587,9 @@ partial class Lowering {
         continue;
       }
       if (only != undefined) {
-        const address = made.field(layout.struct, object, field.index);
+        const address = frame.made.field(layout.struct, object, field.index);
 
-        made.store(this.stringValue(only).value, address);
+        frame.made.store(this.stringValue(only).value, address);
       }
     }
   }

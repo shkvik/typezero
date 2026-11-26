@@ -17,7 +17,7 @@ import {
 } from "../../../code/expression-types/types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private destinationOf(
+  private readonly destinationOf(
     variable: DeclaredVariable,
     init: Expr,
     module: int,
@@ -63,7 +63,7 @@ partial class ExpressionTypes {
     return chosen;
   }
 
-  private conflictPlaces(
+  private readonly conflictPlaces(
     variable: DeclaredVariable,
     init: Expr,
     module: int,
@@ -100,7 +100,7 @@ partial class ExpressionTypes {
     return places;
   }
 
-  private chosenPlace(chosen: Type | undefined, type: Type): Type | undefined {
+  private readonly chosenPlace(chosen: Type | undefined, type: Type): Type | undefined {
     if (chosen == undefined || chosen == type) {
       return type;
     }
@@ -117,7 +117,7 @@ partial class ExpressionTypes {
     return this.store.resultOf(value, error);
   }
 
-  private isResultLiteral(expr: Expr, module: int): boolean {
+  private readonly isResultLiteral(expr: Expr, module: int): boolean {
     if (expr.kind != ExprKind.Call) {
       return false;
     }
@@ -133,7 +133,7 @@ partial class ExpressionTypes {
     return isPlain && this.isResultMakerCall(callee, module);
   }
 
-  private isFitting(init: Expr, wanted: Type, module: int): boolean {
+  private readonly isFitting(init: Expr, wanted: Type, module: int): boolean {
     this.errors.beginTrial();
 
     const trial = this.typed(init, wanted, module);
@@ -142,7 +142,7 @@ partial class ExpressionTypes {
     return isClean && this.relation.converts(trial, wanted);
   }
 
-  private placedType(given: Type, destination: Type | undefined): Type {
+  private readonly placedType(given: Type, destination: Type | undefined): Type {
     if (destination == undefined || destination.kind == TypeKind.Union) {
       return given;
     }
@@ -153,7 +153,7 @@ partial class ExpressionTypes {
     return destination;
   }
 
-  private destinationType(one: Destination, module: int): Type | undefined {
+  private readonly destinationType(one: Destination, module: int): Type | undefined {
     const context: TypeContext = {
       module,
       bindings: new Map<int, Type>(),
@@ -163,7 +163,7 @@ partial class ExpressionTypes {
     return this.writtenDestination(one, context, module);
   }
 
-  private isLiteralPlace(init: Expr, type: Type, module: int): boolean {
+  private readonly isLiteralPlace(init: Expr, type: Type, module: int): boolean {
     if (this.isResultLiteral(init, module)) {
       return type.kind == TypeKind.Result;
     }
@@ -177,7 +177,7 @@ partial class ExpressionTypes {
     return type.kind == TypeKind.Object;
   }
 
-  private writtenDestination(
+  private readonly writtenDestination(
     one: Destination,
     context: TypeContext,
     module: int,
@@ -209,7 +209,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private assignedDestination(one: Destination, module: int): Type | undefined {
+  private readonly assignedDestination(one: Destination, module: int): Type | undefined {
     const value = one.value;
     if (value == undefined || !this.isResultLiteral(value, module)) {
       return undefined;
@@ -220,7 +220,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private argumentDestination(one: Destination, module: int): Type | undefined {
+  private readonly argumentDestination(one: Destination, module: int): Type | undefined {
     const callee = one.call?.callee;
     if (callee == undefined) {
       return undefined;
@@ -253,7 +253,7 @@ partial class ExpressionTypes {
     return params[one.index]?.type;
   }
 
-  private memberDestination(
+  private readonly memberDestination(
     one: Destination,
     member: MemberExpr,
     module: int,

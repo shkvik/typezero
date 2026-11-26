@@ -1,5 +1,9 @@
 import { SourceFile } from "../../../../program/ast/types/ast.types.modules.tz";
-import { DeclarationFile } from "../../../../program/ast/types/ast.types.declarations.tz";
+import {
+  DeclarationFile,
+  DeclaredClass,
+} from "../../../../program/ast/types/ast.types.declarations.tz";
+import { Stmt } from "../../../../program/ast/types/ast.types.statements.tz";
 import { SourceError } from "../../../../diagnostic/types/message.types.tz";
 
 export type ParseResult = {
@@ -10,4 +14,9 @@ export type ParseResult = {
 export type DeclarationResult = {
   readonly file: DeclarationFile;
   readonly errors: SourceError[];
+};
+
+export type DeclarationDraft = {
+  readonly items: Stmt[];
+  readonly classes: DeclaredClass[];
 };

@@ -151,6 +151,9 @@ export enum KnownName {
   String,
   Super,
   Symbol,
+  Equals,
+  Hash,
+  Clone,
 }
 
 export type Token = {
@@ -162,3 +165,5 @@ export type Token = {
   readonly newline: boolean;
   readonly hash: boolean;
 };
+
+export type InternedTokens = Interned<readonly Token[]>;

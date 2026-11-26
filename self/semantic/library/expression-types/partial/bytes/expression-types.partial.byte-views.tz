@@ -19,7 +19,7 @@ import {
 } from "../../../byte-source-rules/const/byte-source-rules.const.tz";
 
 partial class ExpressionTypes {
-  private dataViewCheck(expr: NewExpr, buffer: Expr, module: int): void {
+  private readonly dataViewCheck(expr: NewExpr, buffer: Expr, module: int): void {
     const found = this.peekType(buffer, module);
     const base = this.types.definedType(found);
     if (base.kind == TypeKind.Error) {
@@ -37,7 +37,7 @@ partial class ExpressionTypes {
     this.viewCheck(buffer, offset, length, 1, kDataViewWhat, module);
   }
 
-  private typedViewCheck(expr: NewExpr, made: Type, module: int): void {
+  private readonly typedViewCheck(expr: NewExpr, made: Type, module: int): void {
     const buffer = expr.args[0]?.expr;
     const size = this.byteSources.elementSize(made);
     const name = this.byteSources.typedName(made);
@@ -51,7 +51,7 @@ partial class ExpressionTypes {
     this.viewCheck(buffer, offset, length, size, `the ${name}`, module);
   }
 
-  private viewCheck(
+  private readonly viewCheck(
     buffer: Expr,
     offset: Expr | undefined,
     length: Expr | undefined,
@@ -96,7 +96,7 @@ partial class ExpressionTypes {
     this.viewFitCheck(buffer, offset, length, size, what, module);
   }
 
-  private isAlignedOffset(
+  private readonly isAlignedOffset(
     offset: Expr | undefined,
     size: decimal,
     what: string,
@@ -123,7 +123,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private wholeViewCheck(
+  private readonly wholeViewCheck(
     buffer: Expr,
     size: decimal,
     what: string,
@@ -150,7 +150,7 @@ partial class ExpressionTypes {
     this.reportFound(module, sizeAlignedError);
   }
 
-  private viewFitCheck(
+  private readonly viewFitCheck(
     buffer: Expr,
     offset: Expr | undefined,
     length: Expr,
@@ -183,7 +183,7 @@ partial class ExpressionTypes {
     this.reportFound(module, notFitsError);
   }
 
-  private viewCount(
+  private readonly viewCount(
     length: Expr,
     size: decimal,
     module: int,
@@ -201,7 +201,7 @@ partial class ExpressionTypes {
     return { term: kZeroTerm, offset: exact.offset * size };
   }
 
-  private isSameView(
+  private readonly isSameView(
     buffer: Expr,
     offset: Expr | undefined,
     length: Expr | undefined,
@@ -230,7 +230,7 @@ partial class ExpressionTypes {
     return held == size;
   }
 
-  private viewOwner(
+  private readonly viewOwner(
     expr: Expr,
     field: string,
     module: int,
@@ -252,7 +252,7 @@ partial class ExpressionTypes {
     return this.pathKey(object, module);
   }
 
-  private viewOwnerSize(buffer: Expr, module: int): decimal | undefined {
+  private readonly viewOwnerSize(buffer: Expr, module: int): decimal | undefined {
     if (buffer.kind != ExprKind.Member) {
       return undefined;
     }

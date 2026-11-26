@@ -38,10 +38,10 @@ export class LibraryRules {
   private readonly mismatches: MismatchRules;
 
   public constructor(
-    types: TypeQuestions,
-    modules: ModuleQuestions,
-    sources: SourceTexts,
-    mismatches: MismatchRules,
+    types: Own<TypeQuestions>,
+    modules: Own<ModuleQuestions>,
+    sources: Own<SourceTexts>,
+    mismatches: Own<MismatchRules>,
   ) {
     this.types = types;
     this.modules = modules;
@@ -49,11 +49,11 @@ export class LibraryRules {
     this.mismatches = mismatches;
   }
 
-  public isJsonHolder(type: Type): boolean {
+  public readonly isJsonHolder(type: Type): boolean {
     return this.types.definedType(type).kind == TypeKind.Json;
   }
 
-  public instanceReceiver(type: InstanceType): Type | undefined {
+  public readonly instanceReceiver(type: InstanceType): Type | undefined {
     if (!this.modules.isLibraryModule(type.module)) {
       return undefined;
     }
@@ -61,7 +61,7 @@ export class LibraryRules {
     return type;
   }
 
-  public isPlainReceiver(object: Type): boolean {
+  public readonly isPlainReceiver(object: Type): boolean {
     const base = this.types.apparent(object);
 
     switch (base.kind) {
@@ -77,7 +77,7 @@ export class LibraryRules {
     }
   }
 
-  public namespaceCode(name: string): Code | undefined {
+  public readonly namespaceCode(name: string): Code | undefined {
     switch (name) {
       case "Math":
       case "Number":
@@ -95,7 +95,7 @@ export class LibraryRules {
     }
   }
 
-  public mathEndSign(word: string): string {
+  public readonly mathEndSign(word: string): string {
     if (word == "max") {
       return "-";
     }
@@ -103,7 +103,7 @@ export class LibraryRules {
     return "";
   }
 
-  public maskOf(object: Type, method: Type): boolean[] {
+  public readonly maskOf(object: Type, method: Type): boolean[] {
     if (object.kind == TypeKind.Dict) {
       return [];
     }
@@ -111,7 +111,7 @@ export class LibraryRules {
     return this.positionsOf(method);
   }
 
-  public receiverKind(object: Type): CallKind {
+  public readonly receiverKind(object: Type): CallKind {
     const base = this.types.apparent(object);
 
     switch (base.kind) {
@@ -127,7 +127,7 @@ export class LibraryRules {
     }
   }
 
-  public isRegexSplit(expr: CallExpr, member: MemberExpr): boolean {
+  public readonly isRegexSplit(expr: CallExpr, member: MemberExpr): boolean {
     const first = expr.args[0]?.expr;
 
     return (
@@ -137,11 +137,11 @@ export class LibraryRules {
     );
   }
 
-  public isMathNumber(type: Type): boolean {
+  public readonly isMathNumber(type: Type): boolean {
     return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
   }
 
-  public mathOneHint(arg: Expr, type: Type, common: Type): string {
+  public readonly mathOneHint(arg: Expr, type: Type, common: Type): string {
     const code = this.mismatches.numberCode(type, common);
     const word = this.sources.operandName(arg);
     const other = this.mismatches.conversionName(common);
@@ -155,7 +155,7 @@ export class LibraryRules {
     return "";
   }
 
-  public promiseHolderText(holder: Expr): string {
+  public readonly promiseHolderText(holder: Expr): string {
     if (holder.kind == ExprKind.Name) {
       return holder.name;
     }
@@ -163,7 +163,7 @@ export class LibraryRules {
     return kPromisePlaceholder;
   }
 
-  public executorCheck(expr: NewExpr, name: string): SourceError[] {
+  public readonly executorCheck(expr: NewExpr, name: string): SourceError[] {
     const errors: SourceError[] = [];
 
     const executor = expr.args[0]?.expr;
@@ -186,7 +186,7 @@ export class LibraryRules {
     return errors;
   }
 
-  public promiseMissingCheck(member: MemberExpr): Checked<boolean> {
+  public readonly promiseMissingCheck(member: MemberExpr): Checked<boolean> {
     if (kPromiseStatics.includes(member.name)) {
       return { value: false };
     }
@@ -203,7 +203,7 @@ export class LibraryRules {
     };
   }
 
-  public argumentRange(object: Type, name: string): ProofRange | undefined {
+  public readonly argumentRange(object: Type, name: string): ProofRange | undefined {
     const receiver = this.rangeReceiver(object);
     const row = kArgumentRanges.find(
       (one) => one.receiver == receiver && one.name == name,
@@ -212,7 +212,7 @@ export class LibraryRules {
     return row?.range;
   }
 
-  private positionsOf(method: Type): boolean[] {
+  private readonly positionsOf(method: Type): boolean[] {
     if (method.kind != TypeKind.Function) {
       return [];
     }
@@ -224,7 +224,7 @@ export class LibraryRules {
     });
   }
 
-  private rangeReceiver(object: Type): RangeReceiver {
+  private readonly rangeReceiver(object: Type): RangeReceiver {
     const base = this.types.definedType(object);
     if (this.types.isNumber(base)) {
       return RangeReceiver.Number;

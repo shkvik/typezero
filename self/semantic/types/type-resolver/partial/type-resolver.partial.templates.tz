@@ -18,7 +18,7 @@ import {
 } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  private template(
+  private readonly template(
     ref: TypeRef,
     form: TemplateTypeForm,
     context: TypeContext,
@@ -61,9 +61,9 @@ partial class TypeResolver {
     return this.store.unionOf(literals);
   }
 
-  private combined(
-    starts: string[],
-    choices: string[],
+  private readonly combined(
+    starts: Read<string[]>,
+    choices: Read<string[]>,
     after: string,
   ): string[] {
     const texts: string[] = [];
@@ -77,7 +77,7 @@ partial class TypeResolver {
     return texts;
   }
 
-  private textChoices(type: Type | undefined): string[] | undefined {
+  private readonly textChoices(type: Type | undefined): string[] | undefined {
     if (type == undefined) {
       return undefined;
     }
@@ -108,7 +108,7 @@ partial class TypeResolver {
     }
   }
 
-  private textChange(
+  private readonly textChange(
     ref: TypeRef,
     row: TextChangeName,
     context: TypeContext,
@@ -137,7 +137,7 @@ partial class TypeResolver {
     return this.changedText(text, row);
   }
 
-  private isHoleType(type: Type): boolean {
+  private readonly isHoleType(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.String:
       case TypeKind.Int:
@@ -157,7 +157,7 @@ partial class TypeResolver {
     }
   }
 
-  private isTextType(type: Type): boolean {
+  private readonly isTextType(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.String:
       case TypeKind.Template:
@@ -174,7 +174,7 @@ partial class TypeResolver {
     }
   }
 
-  private changedText(type: Type, row: TextChangeName): Type {
+  private readonly changedText(type: Type, row: TextChangeName): Type {
     switch (type.kind) {
       case TypeKind.Literal: {
         const changed = this.changedWord(type.text, row.change);
@@ -200,7 +200,7 @@ partial class TypeResolver {
     }
   }
 
-  private changedWord(text: string, change: TextChange): string {
+  private readonly changedWord(text: string, change: TextChange): string {
     const head = text.slice(0, 1);
     const tail = text.slice(1);
 

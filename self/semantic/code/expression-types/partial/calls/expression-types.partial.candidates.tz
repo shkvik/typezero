@@ -13,7 +13,7 @@ import {
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private inferArgument(
+  private readonly inferArgument(
     set: InferenceSet,
     pattern: Type,
     actual: Type,
@@ -29,7 +29,7 @@ partial class ExpressionTypes {
     set.isIntLiteral = false;
   }
 
-  private inferPair(set: InferenceSet, pattern: Type, actual: Type): void {
+  private readonly inferPair(set: InferenceSet, pattern: Type, actual: Type): void {
     if (actual.kind == TypeKind.Error) {
       return;
     }
@@ -49,7 +49,7 @@ partial class ExpressionTypes {
     this.inferInside(set, pattern, actual);
   }
 
-  private inferHeld(set: InferenceSet, pattern: Type, actual: Type): void {
+  private readonly inferHeld(set: InferenceSet, pattern: Type, actual: Type): void {
     const index = set.params.indexOf(pattern);
     if (index >= 0 && actual.kind == TypeKind.Void) {
       const strength = this.generics.heldStrength(set);
@@ -60,7 +60,7 @@ partial class ExpressionTypes {
     this.inferPair(set, pattern, actual);
   }
 
-  private inferInside(set: InferenceSet, pattern: Type, actual: Type): void {
+  private readonly inferInside(set: InferenceSet, pattern: Type, actual: Type): void {
     if (!this.generics.isSameShape(pattern, actual)) {
       set.isUnmatched = true;
 
@@ -110,7 +110,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private inferHolder(set: InferenceSet, pattern: Type, actual: Type): void {
+  private readonly inferHolder(set: InferenceSet, pattern: Type, actual: Type): void {
     switch (pattern.kind) {
       case TypeKind.Iterator: {
         if (actual.kind != TypeKind.Iterator) {
@@ -135,7 +135,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private inferItems(set: InferenceSet, want: Type[], have: Type[]): void {
+  private readonly inferItems(set: InferenceSet, want: Read<Type[]>, have: Read<Type[]>): void {
     const shared = Math.min(want.length, have.length);
 
     for (let index = 0; index < shared; index++) {
@@ -147,7 +147,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private inferUnion(
+  private readonly inferUnion(
     set: InferenceSet,
     pattern: UnionType,
     actual: Type,
@@ -190,7 +190,7 @@ partial class ExpressionTypes {
     this.inferPair(set, first, joined);
   }
 
-  private inferMember(set: InferenceSet, open: Type[], actual: Type): void {
+  private readonly inferMember(set: InferenceSet, open: Read<Type[]>, actual: Type): void {
     const value = this.types.definedType(actual);
 
     for (const member of open) {
@@ -200,7 +200,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private inferInstance(set: InferenceSet, pattern: Type, actual: Type): void {
+  private readonly inferInstance(set: InferenceSet, pattern: Type, actual: Type): void {
     if (pattern.kind != TypeKind.Instance || pattern.args.length == 0) {
       return;
     }
@@ -213,7 +213,7 @@ partial class ExpressionTypes {
     this.inferItems(set, pattern.args, found.args);
   }
 
-  private inferObject(
+  private readonly inferObject(
     set: InferenceSet,
     pattern: ObjectType,
     actual: Type,
@@ -237,7 +237,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private inferFunction(
+  private readonly inferFunction(
     set: InferenceSet,
     pattern: FunctionType,
     actual: Type,
@@ -262,7 +262,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private inferDict(set: InferenceSet, pattern: Type, actual: Type): void {
+  private readonly inferDict(set: InferenceSet, pattern: Type, actual: Type): void {
     if (pattern.kind != TypeKind.Dict) {
       return;
     }
@@ -283,7 +283,7 @@ partial class ExpressionTypes {
     this.inferPair(set, pattern.value, actual.value);
   }
 
-  private isMentioning(type: Type, params: Type[]): boolean {
+  private readonly isMentioning(type: Type, params: Read<Type[]>): boolean {
     const ids = new Set<int>();
 
     for (const param of params) {

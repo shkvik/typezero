@@ -50,14 +50,14 @@ export class IrFunction {
   private readonly entryBuilder: LLVMBuilder;
   private readonly entry: LLVMBlock;
   private readonly start: LLVMBlock;
-  private current: LLVMBlock;
-  private next: int;
+  private current: Cell<LLVMBlock>;
+  private next: Cell<int>;
 
   public constructor(
-    module: IrModule,
+    module: Own<IrModule>,
     name: string,
     result: string,
-    params: string[],
+    params: Read<string[]>,
   ) {
     const callee = module.declare(name, result, params);
     const fn = callee.fn;
@@ -82,21 +82,21 @@ export class IrFunction {
     this.next = 0;
   }
 
-  public param(index: int): LLVMValue {
+  public readonly param(index: int): LLVMValue {
     return LLVMGetParam(this.callee.fn, index.toUint32());
   }
 
-  public slot(type: string, name: string): LLVMValue {
+  public readonly slot(type: string, name: string): LLVMValue {
     const cname = this.module.cname(name);
 
     return LLVMBuildAlloca(this.entryBuilder, this.module.type(type), cname);
   }
 
-  public entryStore(value: LLVMValue, pointer: LLVMValue): void {
+  public readonly entryStore(value: LLVMValue, pointer: LLVMValue): void {
     LLVMBuildStore(this.entryBuilder, value, pointer);
   }
 
-  public block(prefix: string): LLVMBlock {
+  public readonly block(prefix: string): LLVMBlock {
     const name = this.module.cname(`${prefix}${this.counted()}`);
 
     const fn = this.callee.fn;
@@ -104,7 +104,7 @@ export class IrFunction {
     return LLVMAppendBasicBlockInContext(this.module.context, fn, name);
   }
 
-  public open(block: LLVMBlock): void {
+  public readonly open(block: LLVMBlock): void {
     if (!this.isClosed()) {
       LLVMBuildBr(this.builder, block);
     }
@@ -113,15 +113,15 @@ export class IrFunction {
     this.current = block;
   }
 
-  public currentBlock(): LLVMBlock {
+  public readonly currentBlock(): LLVMBlock {
     return this.current;
   }
 
-  public isClosed(): boolean {
+  public readonly isClosed(): boolean {
     return LLVMGetBasicBlockTerminator(this.current) != undefined;
   }
 
-  public binary(
+  public readonly binary(
     opcode: IrOpcode,
     left: LLVMValue,
     right: LLVMValue,
@@ -133,13 +133,13 @@ export class IrFunction {
     return LLVMBuildBinOp(this.builder, code.toInt32(), left, right, "");
   }
 
-  public negated(value: LLVMValue): LLVMValue {
+  public readonly negated(value: LLVMValue): LLVMValue {
     this.alive();
 
     return LLVMBuildFNeg(this.builder, value, "");
   }
 
-  public integerCompare(
+  public readonly integerCompare(
     predicate: IrIntPredicate,
     left: LLVMValue,
     right: LLVMValue,
@@ -151,7 +151,7 @@ export class IrFunction {
     return LLVMBuildICmp(this.builder, code.toInt32(), left, right, "");
   }
 
-  public realCompare(
+  public readonly realCompare(
     predicate: IrRealPredicate,
     left: LLVMValue,
     right: LLVMValue,
@@ -163,7 +163,7 @@ export class IrFunction {
     return LLVMBuildFCmp(this.builder, code.toInt32(), left, right, "");
   }
 
-  public cast(opcode: IrOpcode, value: LLVMValue, type: string): LLVMValue {
+  public readonly cast(opcode: IrOpcode, value: LLVMValue, type: string): LLVMValue {
     const code: int = opcode;
 
     this.alive();
@@ -177,18 +177,18 @@ export class IrFunction {
     );
   }
 
-  public load(type: string, pointer: LLVMValue): LLVMValue {
+  public readonly load(type: string, pointer: LLVMValue): LLVMValue {
     this.alive();
 
     return LLVMBuildLoad2(this.builder, this.module.type(type), pointer, "");
   }
 
-  public store(value: LLVMValue, pointer: LLVMValue): void {
+  public readonly store(value: LLVMValue, pointer: LLVMValue): void {
     this.alive();
     LLVMBuildStore(this.builder, value, pointer);
   }
 
-  public element(
+  public readonly element(
     type: string,
     pointer: LLVMValue,
     index: LLVMValue,
@@ -207,7 +207,7 @@ export class IrFunction {
     );
   }
 
-  public field(type: string, pointer: LLVMValue, index: int): LLVMValue {
+  public readonly field(type: string, pointer: LLVMValue, index: int): LLVMValue {
     this.alive();
 
     const struct = this.module.type(type);
@@ -217,7 +217,7 @@ export class IrFunction {
     return LLVMBuildStructGEP2(this.builder, struct, pointer, at, "");
   }
 
-  public call(callee: IrCallee, args: LLVMValue[]): LLVMValue {
+  public readonly call(callee: IrCallee, args: Read<LLVMValue[]>): LLVMValue {
     this.alive();
 
     return LLVMBuildCall2(
@@ -230,10 +230,10 @@ export class IrFunction {
     );
   }
 
-  public indirectCall(
+  public readonly indirectCall(
     type: LLVMType,
     fn: LLVMValue,
-    args: LLVMValue[],
+    args: Read<LLVMValue[]>,
   ): LLVMValue {
     this.alive();
 
@@ -242,10 +242,10 @@ export class IrFunction {
     return LLVMBuildCall2(this.builder, type, fn, args, count, "");
   }
 
-  public phi(
+  public readonly phi(
     type: string,
-    values: LLVMValue[],
-    blocks: LLVMBlock[],
+    values: Read<LLVMValue[]>,
+    blocks: Read<LLVMBlock[]>,
   ): LLVMValue {
     this.alive();
 
@@ -256,7 +256,7 @@ export class IrFunction {
     return made;
   }
 
-  public select(
+  public readonly select(
     condition: LLVMValue,
     then: LLVMValue,
     otherwise: LLVMValue,
@@ -266,7 +266,7 @@ export class IrFunction {
     return LLVMBuildSelect(this.builder, condition, then, otherwise, "");
   }
 
-  public extract(aggregate: LLVMValue, index: int): LLVMValue {
+  public readonly extract(aggregate: LLVMValue, index: int): LLVMValue {
     this.alive();
 
     const at = index.toUint32();
@@ -274,7 +274,7 @@ export class IrFunction {
     return LLVMBuildExtractValue(this.builder, aggregate, at, "");
   }
 
-  public insert(aggregate: LLVMValue, value: LLVMValue, index: int): LLVMValue {
+  public readonly insert(aggregate: LLVMValue, value: LLVMValue, index: int): LLVMValue {
     this.alive();
 
     const at = index.toUint32();
@@ -282,12 +282,12 @@ export class IrFunction {
     return LLVMBuildInsertValue(this.builder, aggregate, value, at, "");
   }
 
-  public branch(block: LLVMBlock): void {
+  public readonly branch(block: LLVMBlock): void {
     this.alive();
     LLVMBuildBr(this.builder, block);
   }
 
-  public conditionalBranch(
+  public readonly conditionalBranch(
     condition: LLVMValue,
     then: LLVMBlock,
     otherwise: LLVMBlock,
@@ -296,22 +296,22 @@ export class IrFunction {
     LLVMBuildCondBr(this.builder, condition, then, otherwise);
   }
 
-  public returned(value: LLVMValue): void {
+  public readonly returned(value: LLVMValue): void {
     this.alive();
     LLVMBuildRet(this.builder, value);
   }
 
-  public returnedVoid(): void {
+  public readonly returnedVoid(): void {
     this.alive();
     LLVMBuildRetVoid(this.builder);
   }
 
-  public unreachable(): void {
+  public readonly unreachable(): void {
     this.alive();
     LLVMBuildUnreachable(this.builder);
   }
 
-  public finishVoid(): void {
+  public readonly finishVoid(): void {
     if (!this.isClosed()) {
       LLVMBuildRetVoid(this.builder);
     }
@@ -319,7 +319,7 @@ export class IrFunction {
     this.sealed();
   }
 
-  public finishValue(value: LLVMValue): void {
+  public readonly finishValue(value: LLVMValue): void {
     if (!this.isClosed()) {
       LLVMBuildRet(this.builder, value);
     }
@@ -327,7 +327,7 @@ export class IrFunction {
     this.sealed();
   }
 
-  public finishUnreachable(): void {
+  public readonly finishUnreachable(): void {
     if (!this.isClosed()) {
       LLVMBuildUnreachable(this.builder);
     }
@@ -335,11 +335,11 @@ export class IrFunction {
     this.sealed();
   }
 
-  private sealed(): void {
+  private readonly sealed(): void {
     LLVMBuildBr(this.entryBuilder, this.start);
   }
 
-  private alive(): void {
+  private readonly alive(): void {
     if (this.isClosed()) {
       const dead = this.block(kDeadLabel);
 
@@ -348,7 +348,7 @@ export class IrFunction {
     }
   }
 
-  private counted(): int {
+  private readonly counted(): int {
     const value = this.next;
 
     this.next += 1;
@@ -356,3 +356,5 @@ export class IrFunction {
     return value;
   }
 }
+
+export type InternedIrFunction = Interned<IrFunction>;

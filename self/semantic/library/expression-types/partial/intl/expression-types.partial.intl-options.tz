@@ -33,9 +33,9 @@ import {
 import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
 
 partial class ExpressionTypes {
-  private intlOptionsCheck(
+  private readonly intlOptionsCheck(
     options: Expr,
-    service: IntlService,
+    service: Read<IntlService>,
     what: string,
     isLocaleOk: boolean,
     isDisplay: boolean,
@@ -101,10 +101,10 @@ partial class ExpressionTypes {
     return isTextOk && isRangeOk && isPairOk && isRoundOk;
   }
 
-  private intlFieldCheck(
+  private readonly intlFieldCheck(
     options: Expr,
     field: ObjectField,
-    service: IntlService,
+    service: Read<IntlService>,
     what: string,
     module: int,
   ): boolean {
@@ -159,10 +159,10 @@ partial class ExpressionTypes {
     return this.intlValuesCheck(options, field, option, loc, module);
   }
 
-  private intlValuesCheck(
+  private readonly intlValuesCheck(
     options: Expr,
     field: ObjectField,
-    option: IntlOption,
+    option: Read<IntlOption>,
     loc: int,
     module: int,
   ): boolean {
@@ -195,10 +195,10 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private intlTextsCheck(
+  private readonly intlTextsCheck(
     options: Expr,
-    fields: ObjectField[],
-    service: IntlService,
+    fields: Read<ObjectField[]>,
+    service: Read<IntlService>,
     module: int,
   ): boolean {
     let isFine = true;
@@ -242,10 +242,10 @@ partial class ExpressionTypes {
     return isFine && isStyleOk;
   }
 
-  private intlStyleCheck(
+  private readonly intlStyleCheck(
     options: Expr,
-    fields: ObjectField[],
-    service: IntlService,
+    fields: Read<ObjectField[]>,
+    service: Read<IntlService>,
     module: int,
   ): boolean {
     const style = fields.find((one) => one.name == kStyleOption);
@@ -275,9 +275,9 @@ partial class ExpressionTypes {
     return isFine;
   }
 
-  private writtenStyles(
+  private readonly writtenStyles(
     written: string | undefined,
-    listed: string[],
+    listed: Own<string[]>,
   ): string[] {
     if (written != undefined) {
       return [written];
@@ -286,9 +286,9 @@ partial class ExpressionTypes {
     return listed;
   }
 
-  private intlRangesCheck(
+  private readonly intlRangesCheck(
     options: Expr,
-    fields: ObjectField[],
+    fields: Read<ObjectField[]>,
     module: int,
   ): boolean {
     let isFine = true;
@@ -306,7 +306,7 @@ partial class ExpressionTypes {
     return isFine;
   }
 
-  private digitRangeCheck(
+  private readonly digitRangeCheck(
     options: Expr,
     field: ObjectField,
     range: IntlDigitRange,
@@ -355,9 +355,9 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private intlPairsCheck(
+  private readonly intlPairsCheck(
     options: Expr,
-    fields: ObjectField[],
+    fields: Read<ObjectField[]>,
     module: int,
   ): boolean {
     if (options.kind != ExprKind.ObjectLit) {
@@ -395,7 +395,7 @@ partial class ExpressionTypes {
     return isFine;
   }
 
-  private isNotAbove(
+  private readonly isNotAbove(
     options: Expr,
     low: ObjectField,
     high: ObjectField,
@@ -421,7 +421,7 @@ partial class ExpressionTypes {
     return this.canProve(lowLinear.term, highLinear.term, room);
   }
 
-  private optionLinear(
+  private readonly optionLinear(
     options: Expr,
     field: ObjectField,
     constant: decimal | undefined,
@@ -441,9 +441,9 @@ partial class ExpressionTypes {
     return { term: kZeroTerm, offset: constant };
   }
 
-  private intlRoundingCheck(
+  private readonly intlRoundingCheck(
     options: Expr,
-    fields: ObjectField[],
+    fields: Read<ObjectField[]>,
     module: int,
   ): boolean {
     const field = fields.find((one) => one.name == kRoundingOption);
@@ -475,9 +475,9 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private incrementDigitsCheck(
+  private readonly incrementDigitsCheck(
     options: Expr,
-    fields: ObjectField[],
+    fields: Read<ObjectField[]>,
     loc: int,
     module: int,
   ): void {
@@ -502,7 +502,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private optionValue(options: Expr, name: string): Expr | undefined {
+  private readonly optionValue(options: Expr, name: string): Expr | undefined {
     if (options.kind != ExprKind.ObjectLit) {
       return undefined;
     }
@@ -514,13 +514,13 @@ partial class ExpressionTypes {
     return found?.value;
   }
 
-  private optionLoc(options: Expr, name: string): int {
+  private readonly optionLoc(options: Expr, name: string): int {
     const value = this.optionValue(options, name);
 
     return value?.loc ?? options.loc;
   }
 
-  private optionText(options: Expr, field: ObjectField): string | undefined {
+  private readonly optionText(options: Expr, field: ObjectField): string | undefined {
     const value = this.optionValue(options, field.name);
     if (value != undefined) {
       const written = this.textCoders.literalLabel(value);
@@ -542,9 +542,9 @@ partial class ExpressionTypes {
     return texts[0];
   }
 
-  private optionTextNamed(
+  private readonly optionTextNamed(
     options: Expr,
-    fields: ObjectField[],
+    fields: Read<ObjectField[]>,
     name: string,
   ): string | undefined {
     const field = fields.find((one) => one.name == name);
@@ -555,7 +555,7 @@ partial class ExpressionTypes {
     return this.optionText(options, field);
   }
 
-  private optionNumber(options: Expr, field: ObjectField): decimal | undefined {
+  private readonly optionNumber(options: Expr, field: ObjectField): decimal | undefined {
     const value = this.optionValue(options, field.name);
     if (value != undefined) {
       const written = this.writtenNumber(value);
@@ -567,7 +567,7 @@ partial class ExpressionTypes {
     return this.intl.literalNumber(field.type);
   }
 
-  private writtenNumber(value: Expr): decimal | undefined {
+  private readonly writtenNumber(value: Expr): decimal | undefined {
     if (value.kind == ExprKind.Unary && value.op == UnaryOp.Neg) {
       const inner = this.writtenNumber(value.operand);
 

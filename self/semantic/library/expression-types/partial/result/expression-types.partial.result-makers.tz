@@ -16,13 +16,13 @@ import {
 import { kNoPlace } from "../../../../code/expression-types/const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private isResultMakerCall(callee: NameExpr, module: int): boolean {
+  private readonly isResultMakerCall(callee: NameExpr, module: int): boolean {
     const isMaker = callee.name == "ok" || callee.name == "err";
 
     return isMaker && this.isGlobalUse(callee, module);
   }
 
-  private resultMakerCall(
+  private readonly resultMakerCall(
     expr: CallExpr,
     callee: NameExpr,
     wanted: Type | undefined,
@@ -67,7 +67,7 @@ partial class ExpressionTypes {
     return this.halfValueTyped(expr, callee, written, true, module);
   }
 
-  private writtenResult(callee: NameExpr, module: int): ResultType | undefined {
+  private readonly writtenResult(callee: NameExpr, module: int): ResultType | undefined {
     const context: TypeContext = {
       module,
       bindings: new Map<int, Type>(),
@@ -93,7 +93,7 @@ partial class ExpressionTypes {
     return made;
   }
 
-  private halfValueTyped(
+  private readonly halfValueTyped(
     expr: CallExpr,
     callee: NameExpr,
     goal: ResultType | undefined,

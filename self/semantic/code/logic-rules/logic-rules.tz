@@ -44,12 +44,12 @@ export class LogicRules {
 
   public constructor(
     store: TypeStore,
-    types: TypeQuestions,
-    truth: TruthRules,
+    types: Own<TypeQuestions>,
+    truth: Own<TruthRules>,
     shapes: ExpressionShapes,
-    sources: SourceTexts,
+    sources: Own<SourceTexts>,
     text: TypeText,
-    unifier: TypeUnifier,
+    unifier: Own<TypeUnifier>,
   ) {
     this.store = store;
     this.types = types;
@@ -60,7 +60,7 @@ export class LogicRules {
     this.unifier = unifier;
   }
 
-  public equalsText(isNegated: boolean): string {
+  public readonly equalsText(isNegated: boolean): string {
     if (isNegated) {
       return kNotEquals;
     }
@@ -68,7 +68,7 @@ export class LogicRules {
     return kEquals;
   }
 
-  public emptyTest(type: Type, isNegated: boolean): string {
+  public readonly emptyTest(type: Type, isNegated: boolean): string {
     const test = this.equalsText(!isNegated);
     const base = this.types.definedType(type);
 
@@ -82,7 +82,7 @@ export class LogicRules {
     return `${test} ${kZeroText}`;
   }
 
-  public logicalUse(isAnd: boolean): TruthUse {
+  public readonly logicalUse(isAnd: boolean): TruthUse {
     if (isAnd) {
       return TruthUse.And;
     }
@@ -90,7 +90,7 @@ export class LogicRules {
     return TruthUse.Or;
   }
 
-  public rightHint(
+  public readonly rightHint(
     isAnd: boolean,
     left: Type,
     expected: Type | undefined,
@@ -104,7 +104,7 @@ export class LogicRules {
     return this.types.definedType(left);
   }
 
-  public logicalText(isAnd: boolean): string {
+  public readonly logicalText(isAnd: boolean): string {
     if (isAnd) {
       return kAndText;
     }
@@ -112,7 +112,7 @@ export class LogicRules {
     return kOrText;
   }
 
-  public negatedText(test: string, isAnd: boolean): string {
+  public readonly negatedText(test: string, isAnd: boolean): string {
     if (isAnd) {
       return test;
     }
@@ -120,7 +120,7 @@ export class LogicRules {
     return kNegation + test;
   }
 
-  public keptLeft(left: Type, isAnd: boolean): Type {
+  public readonly keptLeft(left: Type, isAnd: boolean): Type {
     if (!isAnd) {
       return this.types.definedType(left);
     }
@@ -137,7 +137,7 @@ export class LogicRules {
     return left;
   }
 
-  public noCommonCode(isAnd: boolean): Code {
+  public readonly noCommonCode(isAnd: boolean): Code {
     if (isAnd) {
       return Code.LogicalAndNoCommon;
     }
@@ -145,7 +145,7 @@ export class LogicRules {
     return Code.LogicalOrNoCommon;
   }
 
-  public branchHint(
+  public readonly branchHint(
     literal: Expr,
     other: Type,
     wanted: Type | undefined,
@@ -163,7 +163,7 @@ export class LogicRules {
     return other;
   }
 
-  public elseHint(
+  public readonly elseHint(
     expr: ConditionalExpr,
     thenType: Type,
     wanted: Type | undefined,
@@ -179,7 +179,7 @@ export class LogicRules {
     return wanted;
   }
 
-  public assignmentConditionError(
+  public readonly assignmentConditionError(
     expr: AssignExpr,
     type: Type,
     use: TruthUse,
@@ -223,7 +223,7 @@ export class LogicRules {
     };
   }
 
-  public rightVoid(expr: BinaryExpr, isAnd: boolean): Checked<Type> {
+  public readonly rightVoid(expr: BinaryExpr, isAnd: boolean): Checked<Type> {
     const word = this.logicalText(isAnd);
     const test = this.sources.hintText(expr.lhs, kUnnamedOperand);
     const first = this.negatedText(test, isAnd);
@@ -239,7 +239,7 @@ export class LogicRules {
     };
   }
 
-  public logicalResult(
+  public readonly logicalResult(
     expr: BinaryExpr,
     left: Type,
     right: Type,
@@ -276,7 +276,7 @@ export class LogicRules {
     };
   }
 
-  private decimalHint(other: Type, hint: Type | undefined): Type | undefined {
+  private readonly decimalHint(other: Type, hint: Type | undefined): Type | undefined {
     const plain = this.types.definedType(other);
     if (plain.kind == TypeKind.Decimal) {
       return plain;

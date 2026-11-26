@@ -19,8 +19,8 @@ import {
 } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  public signature(
-    sites: ParameterSite[],
+  public readonly signature(
+    sites: Read<ParameterSite[]>,
     result: TypeRef | undefined,
     context: TypeContext,
   ): Type {
@@ -59,7 +59,7 @@ partial class TypeResolver {
     return this.store.functionOf({ params, rest, self, result: returned });
   }
 
-  public parameterType(site: ParameterSite, context: TypeContext): Type {
+  public readonly parameterType(site: ParameterSite, context: Own<TypeContext>): Type {
     if (site.kind != ParamKind.Rest) {
       return this.value(site.type, context);
     }
@@ -86,7 +86,7 @@ partial class TypeResolver {
     return this.store.plain(TypeKind.Error);
   }
 
-  private isList(type: Type): boolean {
+  private readonly isList(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.Array:
       case TypeKind.Tuple:
@@ -103,7 +103,7 @@ partial class TypeResolver {
     }
   }
 
-  public returnType(ref: TypeRef | undefined, context: TypeContext): Type {
+  public readonly returnType(ref: TypeRef | undefined, context: TypeContext): Type {
     if (ref == undefined) {
       return this.store.plain(TypeKind.Void);
     }

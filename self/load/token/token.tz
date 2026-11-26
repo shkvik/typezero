@@ -1,11 +1,11 @@
 import { KnownName, TokenKind } from "./types/token.types.tz";
 
 export class TokenTable {
-  public isKeyword(kind: TokenKind): boolean {
+  public readonly isKeyword(kind: TokenKind): boolean {
     return kind >= TokenKind.Abstract && kind <= TokenKind.Yield;
   }
 
-  public isContextual(kind: TokenKind): boolean {
+  public readonly isContextual(kind: TokenKind): boolean {
     switch (kind) {
       case TokenKind.Abstract:
       case TokenKind.Accessor:
@@ -45,11 +45,11 @@ export class TokenTable {
     }
   }
 
-  public isName(kind: TokenKind): boolean {
+  public readonly isName(kind: TokenKind): boolean {
     return kind == TokenKind.Identifier || this.isContextual(kind);
   }
 
-  public keywordKind(word: string): TokenKind {
+  public readonly keywordKind(word: string): TokenKind {
     switch (word) {
       case "abstract":
         return TokenKind.Abstract;
@@ -196,7 +196,7 @@ export class TokenTable {
     }
   }
 
-  public knownName(word: string): KnownName {
+  public readonly knownName(word: string): KnownName {
     switch (word) {
       case "asyncIterator":
         return KnownName.AsyncIterator;
@@ -204,6 +204,12 @@ export class TokenTable {
         return KnownName.Dispose;
       case "iterator":
         return KnownName.Iterator;
+      case "equals":
+        return KnownName.Equals;
+      case "hash":
+        return KnownName.Hash;
+      case "clone":
+        return KnownName.Clone;
       case "raw":
         return KnownName.Raw;
       case "String":
@@ -217,7 +223,7 @@ export class TokenTable {
     }
   }
 
-  public spelling(kind: TokenKind): string {
+  public readonly spelling(kind: TokenKind): string {
     switch (kind) {
       case TokenKind.End:
         return "end of file";

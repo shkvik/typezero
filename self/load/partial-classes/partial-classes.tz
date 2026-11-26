@@ -25,7 +25,7 @@ export class PartialClasses {
   private readonly byId: Map<int, OpenModule>;
   private readonly homes: Map<string, OpenModule>;
 
-  public constructor(modules: OpenModule[]) {
+  public constructor(modules: Own<OpenModule[]>) {
     this.modules = modules;
     this.byId = new Map<int, OpenModule>();
     this.homes = new Map<string, OpenModule>();
@@ -45,7 +45,7 @@ export class PartialClasses {
     }
   }
 
-  private checkPartLists(module: OpenModule): void {
+  private readonly checkPartLists(module: OpenModule): void {
     for (const decl of module.parsed.file.imports) {
       if (decl.isPartList) {
         this.checkPartList(module, decl);
@@ -53,7 +53,7 @@ export class PartialClasses {
     }
   }
 
-  private checkPartList(module: OpenModule, decl: ImportDecl): void {
+  private readonly checkPartList(module: OpenModule, decl: ImportDecl): void {
     const listed = this.linkedModule(module, decl.from);
     if (listed == undefined) {
       return;
@@ -68,7 +68,7 @@ export class PartialClasses {
     }
   }
 
-  private partsIn(module: OpenModule): ClassDecl[] {
+  private readonly partsIn(module: Read<OpenModule>): ClassDecl[] {
     const parts: ClassDecl[] = [];
 
     for (const item of module.parsed.file.items) {
@@ -80,10 +80,10 @@ export class PartialClasses {
     return parts;
   }
 
-  private isPartOf(
+  private readonly isPartOf(
     part: ClassDecl,
-    module: OpenModule,
-    classModule: OpenModule,
+    module: Read<OpenModule>,
+    classModule: Read<OpenModule>,
   ): boolean {
     const imported = this.importedAs(module, part.name ?? "");
     if (imported == undefined) {
@@ -102,7 +102,7 @@ export class PartialClasses {
     }
   }
 
-  private joinPart(module: OpenModule, part: ClassDecl): void {
+  private joinPart(module: Own<OpenModule>, part: ClassDecl): void {
     const word = part.name ?? "";
     const target = this.partTarget(module, part, word);
     if (target == undefined) {
@@ -121,7 +121,7 @@ export class PartialClasses {
     this.joinMethods(module, part, target, word);
   }
 
-  private partTarget(
+  private readonly partTarget(
     module: OpenModule,
     part: ClassDecl,
     word: string,
@@ -172,8 +172,8 @@ export class PartialClasses {
     return { decl, module: classModule };
   }
 
-  private importedAs(
-    module: OpenModule,
+  private readonly importedAs(
+    module: Read<OpenModule>,
     word: string,
   ): ImportedClass | undefined {
     for (const decl of module.parsed.file.imports) {
@@ -186,8 +186,8 @@ export class PartialClasses {
     return undefined;
   }
 
-  private declaredClass(
-    module: OpenModule,
+  private readonly declaredClass(
+    module: Read<OpenModule>,
     name: string,
   ): ClassDecl | undefined {
     for (const item of module.parsed.file.items) {
@@ -202,7 +202,7 @@ export class PartialClasses {
     return undefined;
   }
 
-  private listsPart(classModule: OpenModule, module: OpenModule): boolean {
+  private readonly listsPart(classModule: Read<OpenModule>, module: Read<OpenModule>): boolean {
     const imports = classModule.parsed.file.imports;
     const lists = imports.filter((decl) => decl.isPartList);
 
@@ -211,7 +211,7 @@ export class PartialClasses {
     );
   }
 
-  private checkShape(module: OpenModule, part: ClassDecl, word: string): void {
+  private readonly checkShape(module: OpenModule, part: ClassDecl, word: string): void {
     const field = part.fields[0];
     if (field != undefined) {
       this.report(module, field.loc, Code.PartHasField, {
@@ -239,7 +239,7 @@ export class PartialClasses {
     }
   }
 
-  private hasSameTypeParams(part: ClassDecl, decl: ClassDecl): boolean {
+  private readonly hasSameTypeParams(part: ClassDecl, decl: ClassDecl): boolean {
     const written = part.typeParams;
     const declared = decl.typeParams;
     if (written.length != declared.length) {
@@ -260,7 +260,7 @@ export class PartialClasses {
     return true;
   }
 
-  private typeParamsText(decl: ClassDecl): string {
+  private readonly typeParamsText(decl: ClassDecl): string {
     if (decl.typeParams.length == 0) {
       return "";
     }
@@ -271,17 +271,15 @@ export class PartialClasses {
   }
 
   private joinMethods(
-    module: OpenModule,
+    module: Own<OpenModule>,
     part: ClassDecl,
-    target: PartTarget,
+    target: Read<PartTarget>,
     word: string,
   ): void {
-    const methods = target.decl.methods;
-
     for (const method of part.methods) {
       const name = method.name;
       const key = `${target.module.id} ${word} ${name}`;
-      const declared = methods.some((one) => one.name == name);
+      const declared = target.decl.methods.some((one) => one.name == name);
       const home = this.homes.get(key) ?? target.module;
       if (declared && home != module) {
         this.report(module, method.loc, Code.PartMethodTwice, {
@@ -290,14 +288,14 @@ export class PartialClasses {
           path: basename(home.file),
         });
       } else {
-        methods.push(method);
+        target.decl.methods.push(method);
         this.homes.set(key, module);
       }
     }
   }
 
-  private linkedModule(
-    module: OpenModule,
+  private readonly linkedModule(
+    module: Read<OpenModule>,
     from: ModulePath,
   ): OpenModule | undefined {
     const link = module.links.find((one) => one.from.loc == from.loc);
@@ -308,7 +306,7 @@ export class PartialClasses {
     return this.byId.get(link.target);
   }
 
-  private importPath(from: OpenModule, to: OpenModule): string {
+  private readonly importPath(from: Read<OpenModule>, to: Read<OpenModule>): string {
     const base = dirname(resolve(from.file));
     const target = resolve(to.file);
     const native = relative(base, target);
@@ -320,7 +318,7 @@ export class PartialClasses {
     return `${kHerePrefix}${path}`;
   }
 
-  private report(
+  private readonly report(
     module: OpenModule,
     loc: int,
     code: Code,

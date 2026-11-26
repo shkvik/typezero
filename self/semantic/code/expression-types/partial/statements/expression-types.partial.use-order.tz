@@ -28,7 +28,7 @@ import { LinkKind } from "../../../../../program/module/types/module.types.tz";
 import { DoorState } from "../../../../types/type-resolver/types/type-resolver.types.tz";
 
 partial class ExpressionTypes {
-  private laterBlockCheck(
+  private readonly laterBlockCheck(
     expr: NameExpr,
     target: ValueTarget,
     module: int,
@@ -56,7 +56,7 @@ partial class ExpressionTypes {
     this.report(module, expr.loc, Code.LaterInBlock, { word: expr.name });
   }
 
-  private notLoadedCheck(expr: NameExpr, module: int): boolean {
+  private readonly notLoadedCheck(expr: NameExpr, module: int): boolean {
     const symbol = this.record(module)?.uses.get(expr.loc)?.symbol;
     const source = symbol?.target;
     if (this.openFunctions.length > 0 || source == undefined) {
@@ -90,7 +90,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private importBackCheck(target: ValueTarget, module: int): void {
+  private readonly importBackCheck(target: ValueTarget, module: int): void {
     if (target.kind != SymbolKind.Variable || target.module == module) {
       return;
     }
@@ -114,15 +114,15 @@ partial class ExpressionTypes {
     });
   }
 
-  private loadIndex(module: int): int {
+  private readonly loadIndex(module: int): int {
     return this.program.order.findIndex((one) => one.id == module);
   }
 
-  private moduleName(module: int): string {
+  private readonly moduleName(module: int): string {
     return this.program.modules[module]?.name ?? "";
   }
 
-  private loadLabel(name: string, declared: string, source: int): string {
+  private readonly loadLabel(name: string, declared: string, source: int): string {
     const file = this.moduleName(source);
     if (name != declared) {
       return `'${name}' ('${declared}' of ${file})`;
@@ -131,7 +131,7 @@ partial class ExpressionTypes {
     return `'${name}' of ${file}`;
   }
 
-  private loadChain(reader: int, source: int): string {
+  private readonly loadChain(reader: int, source: int): string {
     const paths = new Map<int, int[]>();
 
     this.walkLoads(0, [], paths);
@@ -143,7 +143,7 @@ partial class ExpressionTypes {
     return `${names.join(kChainArrow)}${kChainArrow}(${this.moduleName(source)}${state})`;
   }
 
-  private loadState(isStarted: boolean): string {
+  private readonly loadState(isStarted: boolean): string {
     if (isStarted) {
       return kAlreadyStarted;
     }
@@ -151,10 +151,10 @@ partial class ExpressionTypes {
     return kNotLoadedYet;
   }
 
-  private walkLoads(id: int, path: int[], paths: Map<int, int[]>): void {
+  private readonly walkLoads(id: int, path: Read<int[]>, paths: Map<int, int[]>): void {
     const own = path.concat([id]);
 
-    paths.set(id, own);
+    paths.set(id, own.slice());
 
     for (const link of this.program.modules[id]?.links ?? []) {
       if (link.kind == LinkKind.Module && !paths.has(link.target)) {
@@ -163,7 +163,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private earlyCallCheck(
+  private readonly earlyCallCheck(
     expr: CallExpr,
     callee: NameExpr,
     target: ValueTarget,
@@ -194,7 +194,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private laterCapture(
+  private readonly laterCapture(
     fn: FunctionDecl,
     owner: FunctionDecl,
     at: int,
@@ -223,7 +223,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private functionMemberCall(
+  private readonly functionMemberCall(
     member: MemberExpr,
     object: Type,
     module: int,
@@ -246,7 +246,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private isLibraryFunctionName(expr: Expr, module: int): boolean {
+  private readonly isLibraryFunctionName(expr: Expr, module: int): boolean {
     if (expr.kind != ExprKind.Name) {
       return false;
     }
@@ -259,7 +259,7 @@ partial class ExpressionTypes {
     return this.modules.isLibraryModule(target.module);
   }
 
-  private arrayTextCheck(member: MemberExpr, object: Type, module: int): void {
+  private readonly arrayTextCheck(member: MemberExpr, object: Type, module: int): void {
     if (object.kind != TypeKind.Array || !kTextMethods.includes(member.name)) {
       return;
     }
@@ -272,7 +272,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private textElementsCode(held: Type): Code | undefined {
+  private readonly textElementsCode(held: Type): Code | undefined {
     switch (held.kind) {
       case TypeKind.Function:
         return Code.ArrayTextFunctions;
@@ -294,7 +294,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private unknownCode(code: Code): Code | undefined {
+  private readonly unknownCode(code: Code): Code | undefined {
     const isGeneric = this.openFunctions.some((fn) => fn.typeParams.length > 0);
     if (isGeneric) {
       return undefined;
@@ -303,7 +303,7 @@ partial class ExpressionTypes {
     return code;
   }
 
-  private arraySortCheck(
+  private readonly arraySortCheck(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -328,7 +328,7 @@ partial class ExpressionTypes {
     this.report(module, member.loc, code, { word, other });
   }
 
-  private sortProblem(element: Type): Code | undefined {
+  private readonly sortProblem(element: Type): Code | undefined {
     const held = this.statements.heldValue(element);
 
     switch (held.kind) {

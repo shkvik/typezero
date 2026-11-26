@@ -29,7 +29,7 @@ export class ErrorPrinter {
     }
   }
 
-  public print(errors: SourceError[]): void {
+  public readonly print(errors: Read<SourceError[]>): void {
     for (const error of errors) {
       const text = this.describe(error);
 
@@ -37,7 +37,7 @@ export class ErrorPrinter {
     }
   }
 
-  private describe(error: SourceError): string {
+  private readonly describe(error: SourceError): string {
     const view = this.viewAt(error.loc);
     if (view == undefined) {
       return "";
@@ -55,7 +55,7 @@ export class ErrorPrinter {
     return `${headline}\n${line}\n${indent}${kPointer}`;
   }
 
-  private viewAt(loc: int): SourceView | undefined {
+  private readonly viewAt(loc: int): SourceView | undefined {
     let found = this.views[0];
 
     for (const view of this.views) {

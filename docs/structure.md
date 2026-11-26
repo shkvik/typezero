@@ -195,7 +195,7 @@ self/             компилятор на tz, пробный (порт compile
                   же — library/console/console.d.tz, math, json: интерфейс с методами и
                   константа этого типа; записи таблицы с доступом Global загружаются всегда,
                   лежат в Program.globals, и всё, что они объявляют, — глобальные имена (в
-                  выводе команд этих модулей нет). Пространство имён (`Bit`, `Intl`, `NodeJS`) — тоже файл объявлений (library/math/bit.d.tz, intl/intl.d.tz, timers/nodejs.d.tz): запись таблицы с полем `namespace`; типы файла зовутся с именем пространства впереди (`Intl.NumberFormat`, `Bit.Wrap32`), его значения — члены пространства (`Bit.rotateLeft32`), а тип, которого в файле нет, — TZ2302; intl.d.tz собирает tmp/selfhost/probes/intl_gen.py из данных таблиц C++. Модуль node, который отдаёт глобальное имя (`node:buffer` — `Buffer`), — файл объявлений с одним `export { Buffer } from "tz:global/buffer"` (library/buffer/node_buffer.d.tz): имя из импорта и глобальное — одно объявление; по своему имени глобальный модуль виден только коду библиотеки (программе — TZ2010), и только библиотеке разрешён `export … from` встроенного модуля. `node:process` (library/process/node_process.d.tz) отдаёт поля `process` по имени: `export declare const argv: Process["argv"]`. Потоки `process.stdin` / `stdout` / `stderr` объявлены отдельно (library/process/process_streams.d.tz, модуль `tz:process/streams`) и приходят в программу только по упоминанию — записи kLibraryMembers, как `Intl.Locale`: иначе библиотека потоков (около 4800 строк) загружалась бы в каждую программу. В интерфейсах библиотеки метод может
+                  выводе команд этих модулей нет). Пространство имён (`Bit`, `Intl`, `NodeJS`) — тоже файл объявлений (library/math/bit.d.tz, intl/intl.d.tz, timers/nodejs.d.tz): запись таблицы с полем `namespace`; типы файла зовутся с именем пространства впереди (`Intl.NumberFormat`, `Bit.Wrap32`), его значения — члены пространства (`Bit.rotateLeft32`), а тип, которого в файле нет, — TZ2302. Модуль node, который отдаёт глобальное имя (`node:buffer` — `Buffer`), — файл объявлений с одним `export { Buffer } from "tz:global/buffer"` (library/buffer/node_buffer.d.tz): имя из импорта и глобальное — одно объявление; по своему имени глобальный модуль виден только коду библиотеки (программе — TZ2010), и только библиотеке разрешён `export … from` встроенного модуля. `node:process` (library/process/node_process.d.tz) отдаёт поля `process` по имени: `export declare const argv: Process["argv"]`. Потоки `process.stdin` / `stdout` / `stderr` объявлены отдельно (library/process/process_streams.d.tz, модуль `tz:process/streams`) и приходят в программу только по упоминанию — записи kLibraryMembers, как `Intl.Locale`: иначе библиотека потоков (около 4800 строк) загружалась бы в каждую программу. В интерфейсах библиотеки метод может
                   иметь свои параметры типа (`max<N extends MathNumber>(...values: N[]): N`,
                   ObjectTypeField.typeParams); в коде программы это по-прежнему TZ1328.
                   То, что создаётся через `new` (`Map`, `Set`, `WeakRef`, `Date`, `Promise`,
@@ -229,10 +229,8 @@ self/             компилятор на tz, пробный (порт compile
                   именем. Все модули, которые компилятор держит внутри себя, описаны так
                   (15: `node:fs`, `node:fs/promises`, `tz:fs`, `node:readline` с `promises`,
                   `node:child_process`, `node:crypto`, `tz:crypto`, `tz:string` и описанные
-                  раньше); список печатает tmp/selfhost/probes/builtin_coverage.py. Файлы
-                  fs.d.tz и fs_promises.d.tz пишет tmp/selfhost/probes/fs_gen.py из одного
-                  списка функций, child_process.d.tz — child_gen.py: у функции своя подпись
-                  на каждое сочетание настроек, от которых зависит тип (`encoding`, `shell`,
+                  раньше). В fs.d.tz, fs_promises.d.tz и child_process.d.tz у функции своя
+                  подпись на каждое сочетание настроек, от которых зависит тип (`encoding`, `shell`,
                   `stdio`, `flag`). Типы ошибок — не глобальные имена: файлы ошибок
                   (fs_errors.d.tz, crypto_errors.d.tz, child_errors.d.tz) — модули только
                   для библиотеки (`tz:fs/errors`…), модуль node импортирует из такого
@@ -1079,8 +1077,6 @@ library/             по теме на папку; stream/stream.tz (класс
 
 ### Движок `semantic/` (9 ноября)
 
-Раскладка — по образцу `tmp/refactor/project_struct/`, правки сверх переносов — `tmp/refactor/project_struct.md`.
-
 - **Фасад.** `SemanticExternalFacade` (`semantic/semantic_external.h`) — единственный вход в движок,
   берёт `Program`; наружу один метод `run()` — `Result<void, ItemList<Diagnostic>>`: `ok()` без
   значения, `err` — всё найденное движком. Внутри закрытые шаги `collectDeclarations`,
@@ -1104,7 +1100,7 @@ library/             по теме на папку; stream/stream.tz (класс
 - **Части создаёт сборка.** `SemanticParts` (`semantic/semantic_parts/`) один раз создаёт все 165
   частей открытыми полями; каждая часть берёт соседей у сборки в теле своего конструктора
   (поля-указатели), поля сборки берут только конструкторы частей и фасад. Правила — [code_style.md](code_style.md),
-  раздел «Части движка `semantic/`»; проверка — `tmp/refactor/check_parts.py`.
+  раздел «Части движка `semantic/`».
 - **Ярусы — раскладка, а не направление вызовов.** Папки: `infer/`, `library/` → `bodies/` →
   `flow/`, `declare/` → `generics/` → `types/`, `names/` → `semantic_state/`. Части зовут друг
   друга по кругу (большая часть папок движка — один узел по `#include`), поэтому друг друга не
@@ -1133,7 +1129,7 @@ library/             по теме на папку; stream/stream.tz (класс
 ## Конвейер
 
 Сборка — две функции: `checkProgram` (`pipeline/check_program/`) и `BuildCommand::buildProgram`
-(`cli/build/build_command/`). Решено 11 ноября, пример — `tmp/refactor/examples/check_program_example.cpp`.
+(`cli/build/build_command/`). Решено 11 ноября.
 
 ```cpp
 ResultCheckedProgram checkProgram(Program &program, const BuildOptions &options) {

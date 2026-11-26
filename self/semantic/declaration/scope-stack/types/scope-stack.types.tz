@@ -3,8 +3,10 @@ import { NameSymbol } from "../../../../program/scopes/types/scopes.types.tz";
 export type ScopeEntry = {
   readonly symbol: NameSymbol;
   readonly depth: int;
-  live: boolean;
+  live: Cell<boolean>;
 };
+
+export type InternedScopeEntry = Interned<ScopeEntry>;
 
 export type Scope = {
   readonly values: Map<string, ScopeEntry>;

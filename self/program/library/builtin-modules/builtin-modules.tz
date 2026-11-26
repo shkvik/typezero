@@ -5,7 +5,7 @@ import {
 } from "./const/builtin-modules.const.prefixes.tz";
 
 export class BuiltinModules {
-  public has(path: string): boolean {
+  public readonly has(path: string): boolean {
     return (
       path.startsWith(kNodeModulePrefix) ||
       path.startsWith(kTzModulePrefix) ||
@@ -13,7 +13,7 @@ export class BuiltinModules {
     );
   }
 
-  public isNodeModule(path: string): boolean {
+  public readonly isNodeModule(path: string): boolean {
     if (path.startsWith(kTzModulePrefix)) {
       return false;
     }
@@ -24,7 +24,7 @@ export class BuiltinModules {
     return later || this.isBare(bare);
   }
 
-  public withoutNodePrefix(path: string): string {
+  public readonly withoutNodePrefix(path: string): string {
     if (path.startsWith(kNodeModulePrefix)) {
       return path.slice(kNodeModulePrefix.length);
     }
@@ -32,7 +32,7 @@ export class BuiltinModules {
     return path;
   }
 
-  private isBare(path: string): boolean {
+  private readonly isBare(path: string): boolean {
     switch (path) {
       case "assert":
       case "assert/strict":

@@ -5,3 +5,5 @@ export type SourceView = {
   readonly start: int;
   readonly lines: SourceLines;
 };
+
+export type InternedView = Interned<SourceView>;

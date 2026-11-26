@@ -85,7 +85,7 @@ partial class Lowering {
     return this.definedOf(type);
   }
 
-  private isUndefinedTest(expr: BinaryExpr): boolean {
+  private readonly isUndefinedTest(expr: BinaryExpr): boolean {
     return (
       expr.lhs.kind == ExprKind.Undefined || expr.rhs.kind == ExprKind.Undefined
     );
@@ -133,7 +133,7 @@ partial class Lowering {
   }
 
   private arithmetic(
-    frame: Frame,
+    frame: Read<Frame>,
     op: BinaryOp,
     left: IrValue,
     right: IrValue,
@@ -163,7 +163,7 @@ partial class Lowering {
     }
   }
 
-  private simpleOpcode(op: BinaryOp, isDouble: boolean): IrOpcode | undefined {
+  private readonly simpleOpcode(op: BinaryOp, isDouble: boolean): IrOpcode | undefined {
     switch (op) {
       case BinaryOp.Add:
         return this.opcodeFor(isDouble, IrOpcode.FAdd, IrOpcode.Add);
@@ -182,7 +182,7 @@ partial class Lowering {
     }
   }
 
-  private doubleOpcode(op: BinaryOp, isDouble: boolean): IrOpcode | undefined {
+  private readonly doubleOpcode(op: BinaryOp, isDouble: boolean): IrOpcode | undefined {
     if (!isDouble) {
       return undefined;
     }
@@ -196,7 +196,7 @@ partial class Lowering {
     return undefined;
   }
 
-  private opcodeFor(
+  private readonly opcodeFor(
     isFirst: boolean,
     first: IrOpcode,
     second: IrOpcode,
@@ -208,7 +208,7 @@ partial class Lowering {
     return second;
   }
 
-  private pick(isFirst: boolean, first: string, second: string): string {
+  private readonly pick(isFirst: boolean, first: string, second: string): string {
     if (isFirst) {
       return first;
     }
@@ -216,8 +216,8 @@ partial class Lowering {
     return second;
   }
 
-  private operated(
-    frame: Frame,
+  private readonly operated(
+    frame: Read<Frame>,
     opcode: IrOpcode,
     left: IrValue,
     right: IrValue,
@@ -227,23 +227,22 @@ partial class Lowering {
     return { type: left.type, value, tz: left.tz };
   }
 
-  private integerDivision(
-    frame: Frame,
+  private readonly integerDivision(
+    frame: Read<Frame>,
     left: IrValue,
     right: IrValue,
     isRemainder: boolean,
   ): IrValue {
-    const made = frame.made;
     const type = left.type;
     const zero = this.ir.zero(type);
-    const isZero = made.integerCompare(IrIntPredicate.Equal, right.value, zero);
-    const fails = made.block("div.zero");
-    const goes = made.block("div.ok");
+    const isZero = frame.made.integerCompare(IrIntPredicate.Equal, right.value, zero);
+    const fails = frame.made.block("div.zero");
+    const goes = frame.made.block("div.ok");
 
-    made.conditionalBranch(isZero, fails, goes);
-    made.open(fails);
+    frame.made.conditionalBranch(isZero, fails, goes);
+    frame.made.open(fails);
     this.panic(frame, kDivisionByZero);
-    made.open(goes);
+    frame.made.open(goes);
 
     if (this.isUnsigned(left.tz)) {
       const opcode = this.opcodeFor(isRemainder, IrOpcode.URem, IrOpcode.UDiv);
@@ -253,26 +252,26 @@ partial class Lowering {
 
     const minusOne = this.ir.integer(type, "-1");
     const one = this.ir.integer(type, "1");
-    const isMinusOne = made.integerCompare(
+    const isMinusOne = frame.made.integerCompare(
       IrIntPredicate.Equal,
       right.value,
       minusOne,
     );
-    const divisor = made.select(isMinusOne, one, right.value);
+    const divisor = frame.made.select(isMinusOne, one, right.value);
     if (isRemainder) {
-      const value = made.binary(IrOpcode.SRem, left.value, divisor);
+      const value = frame.made.binary(IrOpcode.SRem, left.value, divisor);
 
       return { type, value, tz: left.tz };
     }
 
-    const quotient = made.binary(IrOpcode.SDiv, left.value, divisor);
-    const negative = made.binary(IrOpcode.Sub, zero, left.value);
-    const value = made.select(isMinusOne, negative, quotient);
+    const quotient = frame.made.binary(IrOpcode.SDiv, left.value, divisor);
+    const negative = frame.made.binary(IrOpcode.Sub, zero, left.value);
+    const value = frame.made.select(isMinusOne, negative, quotient);
 
     return { type, value, tz: left.tz };
   }
 
-  private power(frame: Frame, left: IrValue, right: IrValue): IrValue {
+  private readonly power(frame: Read<Frame>, left: IrValue, right: IrValue): IrValue {
     if (left.type == kDoubleType) {
       const value = this.runtimeValue(frame, kPowDouble, kDoubleType, [
         left,
@@ -297,7 +296,7 @@ partial class Lowering {
     return { type: left.type, value, tz: left.tz };
   }
 
-  private toLong(frame: Frame, value: IrValue): IrValue {
+  private readonly toLong(frame: Read<Frame>, value: IrValue): IrValue {
     const tz = this.store.integer(64, false);
     if (value.type == kIntType) {
       return { type: kIntType, value: value.value, tz };
@@ -310,13 +309,12 @@ partial class Lowering {
   }
 
   private shifted(
-    frame: Frame,
+    frame: Read<Frame>,
     op: BinaryOp,
     left: IrValue,
     right: IrValue,
     loc: int,
   ): IrValue | undefined {
-    const made = frame.made;
     const plain = this.widened(left.tz);
     if (plain.kind == TypeKind.Int && plain.wraps) {
       this.notLowered(frame.module, loc, "a shift of a wrapping number");
@@ -326,7 +324,7 @@ partial class Lowering {
 
     const bits = this.bitsOf(left.tz);
     const mask = this.ir.integer(left.type, `${bits - 1}`);
-    const count = made.binary(IrOpcode.And, right.value, mask);
+    const count = frame.made.binary(IrOpcode.And, right.value, mask);
     let opcode: IrOpcode = IrOpcode.LShr;
 
     if (op == BinaryOp.Shl) {
@@ -335,13 +333,12 @@ partial class Lowering {
       opcode = IrOpcode.AShr;
     }
 
-    const value = made.binary(opcode, left.value, count);
+    const value = frame.made.binary(opcode, left.value, count);
 
     return { type: left.type, value, tz: left.tz };
   }
 
   private logical(frame: Frame, expr: BinaryExpr): IrValue | undefined {
-    const made = frame.made;
     const result = this.typeOf(expr);
     if (result != undefined && !this.isBoolean(result)) {
       const kind = this.kindName(result);
@@ -357,23 +354,23 @@ partial class Lowering {
     }
 
     const isAnd = expr.op == BinaryOp.LogAnd;
-    const start = made.currentBlock();
-    const rest = made.block("logic.rhs");
-    const end = made.block("logic.end");
+    const start = frame.made.currentBlock();
+    const rest = frame.made.block("logic.rhs");
+    const end = frame.made.block("logic.end");
 
     if (isAnd) {
-      made.conditionalBranch(left, rest, end);
+      frame.made.conditionalBranch(left, rest, end);
     } else {
-      made.conditionalBranch(left, end, rest);
+      frame.made.conditionalBranch(left, end, rest);
     }
 
-    made.open(rest);
+    frame.made.open(rest);
 
     const right = this.truth(frame, expr.rhs);
-    const restEnd = made.currentBlock();
+    const restEnd = frame.made.currentBlock();
 
     this.jumpTo(frame, end);
-    made.open(end);
+    frame.made.open(end);
 
     if (right == undefined) {
       return undefined;
@@ -381,13 +378,13 @@ partial class Lowering {
 
     const early = this.pick(isAnd, "0", "1");
     const first = this.ir.integer(kBooleanType, early);
-    const value = made.phi(kBooleanType, [first, right], [start, restEnd]);
+    const value = frame.made.phi(kBooleanType, [first, right], [start, restEnd]);
     const tz = this.store.plain(TypeKind.Boolean);
 
     return { type: kBooleanType, value, tz };
   }
 
-  private panic(frame: Frame, message: string): void {
+  private readonly panic(frame: Read<Frame>, message: string): void {
     const text = this.byteText(message);
     const tz = this.store.integer(64, false);
     const length = this.ir.integer(kIntType, `${text.length}`);

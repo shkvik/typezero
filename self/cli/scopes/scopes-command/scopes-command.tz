@@ -19,7 +19,7 @@ export class ScopesCommand {
   private readonly entry?: string;
   private readonly report: ProgramReport;
 
-  public constructor(args: string[]) {
+  public constructor(args: Read<string[]>) {
     this.entry = args[3];
     this.report = new ProgramReport();
   }
@@ -45,7 +45,7 @@ export class ScopesCommand {
 
     const binder = new ModuleBinder(program);
     const names = binder.run();
-    const resolver = new NameResolver(program, names);
+    const resolver = new NameResolver(program, names.slice());
     const resolved = resolver.run();
 
     for (const scopes of resolved) {
@@ -57,7 +57,7 @@ export class ScopesCommand {
     }
   }
 
-  private printUses(program: Program, scopes: ModuleScopes): void {
+  private readonly printUses(program: Program, scopes: Read<ModuleScopes>): void {
     const module = scopes.module;
     if (module.source.isLibrary) {
       return;
@@ -75,9 +75,9 @@ export class ScopesCommand {
     }
   }
 
-  private targetText(
+  private readonly targetText(
     program: Program,
-    lines: SourceLines,
+    lines: Read<SourceLines>,
     use: NameUse,
   ): string {
     const symbol = use.symbol;
@@ -94,7 +94,7 @@ export class ScopesCommand {
     return `${kind} ${where}`;
   }
 
-  private importText(program: Program, symbol: NameSymbol): string {
+  private readonly importText(program: Program, symbol: NameSymbol): string {
     const target = symbol.target;
     if (target == undefined) {
       return "import";
@@ -106,7 +106,7 @@ export class ScopesCommand {
     return `import ${name}:${target.name}`;
   }
 
-  private moduleName(module: Module | undefined): string {
+  private readonly moduleName(module: Module | undefined): string {
     if (module == undefined) {
       return "";
     }
@@ -114,7 +114,7 @@ export class ScopesCommand {
     return module.name;
   }
 
-  private kindText(kind: SymbolKind): string {
+  private readonly kindText(kind: SymbolKind): string {
     switch (kind) {
       case SymbolKind.Variable:
         return "variable";
@@ -139,15 +139,15 @@ export class ScopesCommand {
     }
   }
 
-  private placeText(lines: SourceLines, loc: int): string {
+  private readonly placeText(lines: Read<SourceLines>, loc: int): string {
     const place = lines.placeOf(loc);
 
     return `${place.line}:${place.column}`;
   }
 
   private printErrors(
-    names: ModuleNames | undefined,
-    scopes: ModuleScopes | undefined,
+    names: Read<ModuleNames | undefined>,
+    scopes: Read<ModuleScopes | undefined>,
   ): void {
     if (names == undefined || scopes == undefined) {
       return;

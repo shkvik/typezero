@@ -24,7 +24,6 @@ export enum TypeRefKind {
 export type PlainTypeForm = {
   readonly kind:
     | TypeRefKind.Name
-    | TypeRefKind.Array
     | TypeRefKind.Union
     | TypeRefKind.Generic
     | TypeRefKind.KeyOf
@@ -33,6 +32,11 @@ export type PlainTypeForm = {
     | TypeRefKind.Infer
     | TypeRefKind.Intersection
     | TypeRefKind.Invalid;
+};
+
+export type ArrayTypeForm = {
+  readonly kind: TypeRefKind.Array;
+  readonly readonly: boolean;
 };
 
 export type FunctionTypeParam = {
@@ -44,7 +48,7 @@ export type FunctionTypeParam = {
 
 export type FunctionTypeForm = {
   readonly kind: TypeRefKind.Function;
-  readonly params: FunctionTypeParam[];
+  readonly params: readonly FunctionTypeParam[];
   readonly rest: boolean;
   readonly result?: TypeRef;
 };
@@ -56,13 +60,13 @@ export type ObjectTypeField = {
   readonly readonly: boolean;
   readonly method: boolean;
   readonly call: boolean;
-  readonly typeParams: TypeParamDecl[];
+  readonly typeParams: readonly TypeParamDecl[];
   readonly type: TypeRef;
 };
 
 export type ObjectTypeForm = {
   readonly kind: TypeRefKind.Object;
-  readonly fields: ObjectTypeField[];
+  readonly fields: readonly ObjectTypeField[];
 };
 
 export type TupleElement = {
@@ -72,8 +76,8 @@ export type TupleElement = {
 
 export type TupleTypeForm = {
   readonly kind: TypeRefKind.Tuple;
-  readonly elements: TupleElement[];
-  readonly: boolean;
+  readonly elements: readonly TupleElement[];
+  readonly readonly: boolean;
 };
 
 export type LiteralTypeForm = {
@@ -91,7 +95,7 @@ export type PredicateTypeForm = {
 
 export type TypeOfTypeForm = {
   readonly kind: TypeRefKind.TypeOf;
-  readonly names: string[];
+  readonly names: readonly string[];
 };
 
 export enum ModifierChange {
@@ -102,17 +106,18 @@ export enum ModifierChange {
 
 export type MappedTypeForm = {
   readonly kind: TypeRefKind.Mapped;
-  optionalChange: ModifierChange;
+  readonly optionalChange: ModifierChange;
   readonly readonlyChange: ModifierChange;
 };
 
 export type TemplateTypeForm = {
   readonly kind: TypeRefKind.Template;
-  readonly texts: string[];
+  readonly texts: readonly string[];
 };
 
 export type TypeForm =
   | PlainTypeForm
+  | ArrayTypeForm
   | FunctionTypeForm
   | ObjectTypeForm
   | TupleTypeForm
@@ -123,11 +128,11 @@ export type TypeForm =
   | TemplateTypeForm;
 
 export type TypeRef = {
-  form: TypeForm;
-  name: string;
-  loc: int;
-  args: TypeRef[];
-  source?: Span;
+  readonly form: TypeForm;
+  readonly name: string;
+  readonly loc: int;
+  readonly args: readonly TypeRef[];
+  readonly source?: Span;
 };
 
 export type TypeParamDecl = {

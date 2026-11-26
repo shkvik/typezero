@@ -13,15 +13,15 @@ import { ExpressionTypes } from "../../../../code/expression-types/expression-ty
 import { kMatchArrayName } from "../../../regex-rules/const/regex-rules.const.tz";
 
 partial class ExpressionTypes {
-  private matchShape(): Type {
+  private readonly matchShape(): Type {
     return this.namedLibraryType(kMatchArrayName, 0, 0);
   }
 
-  private foundMatch(): Type {
+  private readonly foundMatch(): Type {
     return this.types.optional(this.matchShape());
   }
 
-  private allMatches(): Type {
+  private readonly allMatches(): Type {
     const nothing = this.store.plain(TypeKind.Void);
 
     return this.store.iteratorOf({
@@ -32,7 +32,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private matchItem(type: Type): Type | undefined {
+  private readonly matchItem(type: Type): Type | undefined {
     if (type.kind != TypeKind.Object || type != this.matchShape()) {
       return undefined;
     }
@@ -42,7 +42,7 @@ partial class ExpressionTypes {
     return this.types.optional(text);
   }
 
-  private matchList(type: Type): Type | undefined {
+  private readonly matchList(type: Type): Type | undefined {
     const item = this.matchItem(type);
     if (item == undefined) {
       return undefined;
@@ -51,7 +51,7 @@ partial class ExpressionTypes {
     return this.store.arrayOf(item);
   }
 
-  private matchListFor(type: Type, name: string): Type | undefined {
+  private readonly matchListFor(type: Type, name: string): Type | undefined {
     const list = this.matchList(type);
     if (list == undefined || type.kind != TypeKind.Object) {
       return undefined;
@@ -63,7 +63,7 @@ partial class ExpressionTypes {
     return list;
   }
 
-  private matchBeforeList(given: Type, other: Expr): Type {
+  private readonly matchBeforeList(given: Type, other: Expr): Type {
     const list = this.matchList(this.types.definedType(given));
     if (list == undefined || other.kind != ExprKind.ArrayLit) {
       return given;
@@ -75,7 +75,7 @@ partial class ExpressionTypes {
     return list;
   }
 
-  private matchIndexed(
+  private readonly matchIndexed(
     expr: IndexExpr,
     object: Type,
     module: int,
@@ -93,7 +93,7 @@ partial class ExpressionTypes {
     return this.listIndexed(expr, list, module);
   }
 
-  private matchMemberRead(
+  private readonly matchMemberRead(
     expr: MemberExpr,
     object: Type,
     module: int,
@@ -106,7 +106,7 @@ partial class ExpressionTypes {
     return this.valueMember(expr, list, module);
   }
 
-  private matchMemberCall(
+  private readonly matchMemberCall(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,

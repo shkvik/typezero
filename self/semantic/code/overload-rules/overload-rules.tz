@@ -27,10 +27,10 @@ export class OverloadRules {
 
   public constructor(
     text: TypeText,
-    types: TypeQuestions,
-    sources: SourceTexts,
-    mismatches: MismatchRules,
-    classes: ClassRules,
+    types: Own<TypeQuestions>,
+    sources: Own<SourceTexts>,
+    mismatches: Own<MismatchRules>,
+    classes: Own<ClassRules>,
   ) {
     this.text = text;
     this.types = types;
@@ -39,7 +39,7 @@ export class OverloadRules {
     this.classes = classes;
   }
 
-  public sharedCount(one: FunctionType, other: FunctionType): int {
+  public readonly sharedCount(one: FunctionType, other: FunctionType): int {
     const least = Math.max(this.leastOf(one), this.leastOf(other));
     const most = Math.min(one.shape.params.length, other.shape.params.length);
 
@@ -52,7 +52,7 @@ export class OverloadRules {
     return -1;
   }
 
-  public leastOf(type: FunctionType): int {
+  public readonly leastOf(type: FunctionType): int {
     let least = 0;
 
     for (const param of type.shape.params) {
@@ -68,7 +68,7 @@ export class OverloadRules {
     return least;
   }
 
-  public overloadText(fn: FunctionDecl, type: FunctionType): string {
+  public readonly overloadText(fn: FunctionDecl, type: FunctionType): string {
     const parts: string[] = [];
 
     for (let index = 0; index < fn.params.length; index++) {
@@ -89,7 +89,7 @@ export class OverloadRules {
     return `${name}(${parts.join(", ")})`;
   }
 
-  public variantList(texts: string[]): string {
+  public readonly variantList(texts: Read<string[]>): string {
     const last = texts[texts.length - 1];
     if (texts.length < 2 || last == undefined) {
       return texts.join("");
@@ -100,14 +100,14 @@ export class OverloadRules {
     return `${head.join(", ")} and ${last}`;
   }
 
-  public isCountFitting(type: FunctionType, count: int): boolean {
+  public readonly isCountFitting(type: FunctionType, count: int): boolean {
     const least = this.leastOf(type);
     const most = type.shape.params.length;
 
     return count >= least && (count <= most || type.shape.rest);
   }
 
-  public tieCode(isAdapted: boolean): Code {
+  public readonly tieCode(isAdapted: boolean): Code {
     if (isAdapted) {
       return Code.VariantTieLiteral;
     }
@@ -115,7 +115,7 @@ export class OverloadRules {
     return Code.VariantTie;
   }
 
-  public variantParam(type: FunctionType, index: int): Type | undefined {
+  public readonly variantParam(type: FunctionType, index: int): Type | undefined {
     const params = type.shape.params;
     const param = params[index] ?? params[params.length - 1];
     if (param == undefined) {
@@ -133,10 +133,10 @@ export class OverloadRules {
     return param.type;
   }
 
-  public variantHint(
-    args: CallArgument[],
-    given: Type[],
-    variant: RankedVariant,
+  public readonly variantHint(
+    args: Read<CallArgument[]>,
+    given: Read<Type[]>,
+    variant: Read<RankedVariant>,
     module: int,
   ): string {
     const index = variant.failed;
@@ -160,16 +160,16 @@ export class OverloadRules {
     return "";
   }
 
-  public isBestVariant(
-    variant: RankedVariant,
-    applicable: RankedVariant[],
+  public readonly isBestVariant(
+    variant: Read<RankedVariant>,
+    applicable: Read<RankedVariant[]>,
   ): boolean {
     return applicable.every(
       (other) => other == variant || this.isBetterVariant(variant, other),
     );
   }
 
-  public variantPairCheck(
+  public readonly variantPairCheck(
     first: FunctionDecl,
     second: FunctionDecl,
     one: FunctionType,
@@ -221,7 +221,7 @@ export class OverloadRules {
     };
   }
 
-  public isCountTaking(params: Param[], count: int): boolean {
+  public readonly isCountTaking(params: Read<Param[]>, count: int): boolean {
     const needed = params.filter(
       (param) => param.form.kind == ParamKind.Required,
     );
@@ -230,7 +230,7 @@ export class OverloadRules {
     return count >= needed.length && (hasRest || count <= params.length);
   }
 
-  private isSamePrefix(
+  private readonly isSamePrefix(
     one: FunctionType,
     other: FunctionType,
     count: int,
@@ -250,7 +250,7 @@ export class OverloadRules {
     return true;
   }
 
-  private optionalMark(isOptional: boolean): string {
+  private readonly optionalMark(isOptional: boolean): string {
     if (isOptional) {
       return "?";
     }
@@ -258,7 +258,7 @@ export class OverloadRules {
     return "";
   }
 
-  private variantName(fn: FunctionDecl): string {
+  private readonly variantName(fn: FunctionDecl): string {
     if (fn.name == "" || fn.name == "constructor") {
       return "constructor";
     }
@@ -266,9 +266,9 @@ export class OverloadRules {
     return fn.name;
   }
 
-  private isBetterVariant(
-    variant: RankedVariant,
-    other: RankedVariant,
+  private readonly isBetterVariant(
+    variant: Read<RankedVariant>,
+    other: Read<RankedVariant>,
   ): boolean {
     const isFuller = !this.isLeavingOut(variant) && this.isLeavingOut(other);
     let isStrictly = isFuller;
@@ -287,7 +287,7 @@ export class OverloadRules {
     return isStrictly;
   }
 
-  private isLeavingOut(variant: RankedVariant): boolean {
+  private readonly isLeavingOut(variant: Read<RankedVariant>): boolean {
     const shape = variant.type.shape;
 
     return shape.rest || variant.ranks.length < shape.params.length;

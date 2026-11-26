@@ -30,7 +30,7 @@ import {
 import { Frame, IrValue, Place } from "../types/lowering.types.tz";
 
 partial class Lowering {
-  private functionDeclared(frame: Frame, fn: FunctionDecl): void {
+  private functionDeclared(frame: Read<Frame>, fn: FunctionDecl): void {
     if (fn.bodySource == BodySource.Foreign) {
       return;
     }
@@ -79,7 +79,7 @@ partial class Lowering {
     this.finished(made, result);
   }
 
-  private finished(made: IrFunction, result: string): void {
+  private readonly finished(made: IrFunction, result: string): void {
     if (result == kVoidType) {
       return made.finishVoid();
     }
@@ -87,7 +87,7 @@ partial class Lowering {
     made.finishUnreachable();
   }
 
-  private shapeOf(module: int, loc: int): FunctionShape | undefined {
+  private readonly shapeOf(module: int, loc: int): FunctionShape | undefined {
     const type = this.values.functionOf(module, loc);
     if (type.kind != TypeKind.Function) {
       return undefined;
@@ -99,7 +99,7 @@ partial class Lowering {
   private parameterTypes(
     module: int,
     fn: FunctionDecl,
-    shape: FunctionShape,
+    shape: Read<FunctionShape>,
   ): string[] | undefined {
     const types: string[] = [];
 
@@ -120,7 +120,7 @@ partial class Lowering {
     return types;
   }
 
-  private isPlainParameter(param: Param): boolean {
+  private readonly isPlainParameter(param: Param): boolean {
     const kind = param.form.kind;
     const isTaken =
       kind == ParamKind.Required ||
@@ -130,7 +130,7 @@ partial class Lowering {
     return isTaken && param.pattern == undefined;
   }
 
-  private passedType(param: FunctionParameter): Type {
+  private readonly passedType(param: FunctionParameter): Type {
     if (!param.optional || this.optionalInner(param.type) != undefined) {
       return param.type;
     }
@@ -143,8 +143,8 @@ partial class Lowering {
   private parametersStored(
     frame: Frame,
     fn: FunctionDecl,
-    shape: FunctionShape,
-    types: string[],
+    shape: Read<FunctionShape>,
+    types: Read<string[]>,
   ): void {
     for (let index = 0; index < fn.params.length; index++) {
       const param = fn.params[index];
@@ -186,32 +186,31 @@ partial class Lowering {
     fallback: Expr,
     given: IrValue,
   ): void {
-    const made = frame.made;
     const inner = this.optionalInner(given.tz);
     const type = this.typeOrUndefined(inner);
     if (inner == undefined || type == undefined) {
       return this.notLowered(frame.module, param.loc, "this default value");
     }
 
-    const pointer = made.slot(type, param.name);
+    const pointer = frame.made.slot(type, param.name);
     const key = this.placeKey(frame.module, param.loc);
     const place: Place = { pointer, type, tz: inner, owner: frame.id };
     const has = this.hasValue(frame, given);
-    const passed = made.block("default.passed");
-    const missing = made.block("default.missing");
-    const end = made.block("default.end");
+    const passed = frame.made.block("default.passed");
+    const missing = frame.made.block("default.missing");
+    const end = frame.made.block("default.end");
 
-    made.entryStore(this.ir.zero(type), pointer);
+    frame.made.entryStore(this.ir.zero(type), pointer);
     this.places.set(key, place);
     this.keepPlace(frame, place);
-    made.conditionalBranch(has, passed, missing);
-    made.open(passed);
+    frame.made.conditionalBranch(has, passed, missing);
+    frame.made.open(passed);
 
     const inside = this.insideValue(frame, given, inner);
 
-    made.store(inside.value, pointer);
-    made.branch(end);
-    made.open(missing);
+    frame.made.store(inside.value, pointer);
+    frame.made.branch(end);
+    frame.made.open(missing);
 
     const value = this.value(frame, fallback);
     const converted = this.convertedOrNone(frame, value, inner, fallback.loc);
@@ -220,8 +219,8 @@ partial class Lowering {
       this.stored(frame, place, converted);
     }
 
-    made.branch(end);
-    made.open(end);
+    frame.made.branch(end);
+    frame.made.open(end);
   }
 
   private convertedOrNone(
@@ -237,7 +236,7 @@ partial class Lowering {
     return this.converted(frame, value, target, loc);
   }
 
-  private selfOffset(frame: Frame): int {
+  private readonly selfOffset(frame: Read<Frame>): int {
     if (frame.self != undefined) {
       return 1;
     }
@@ -245,7 +244,7 @@ partial class Lowering {
     return 0;
   }
 
-  private functionName(module: int, loc: int): string {
+  private readonly functionName(module: int, loc: int): string {
     return `tz.f${module}.${loc}`;
   }
 
@@ -319,7 +318,7 @@ partial class Lowering {
     return { type: result, value, tz: shape.result, owned: true };
   }
 
-  private shapeProblem(shape: FunctionShape): string {
+  private shapeProblem(shape: Read<FunctionShape>): string {
     const types = [shape.result].concat(shape.params.map((one) => one.type));
     const failed = types.find((type) => this.irType(type) == undefined);
     if (failed == undefined) {
@@ -329,7 +328,7 @@ partial class Lowering {
     return this.kindName(failed);
   }
 
-  private shapeTypes(shape: FunctionShape): string[] | undefined {
+  private shapeTypes(shape: Read<FunctionShape>): string[] | undefined {
     const types: string[] = [];
 
     for (const param of shape.params) {
@@ -346,8 +345,8 @@ partial class Lowering {
 
   private callArguments(
     frame: Frame,
-    passed: CallArgument[],
-    shape: FunctionShape,
+    passed: Read<CallArgument[]>,
+    shape: Read<FunctionShape>,
     loc: int,
   ): LLVMValue[] | undefined {
     const args: LLVMValue[] = [];
@@ -400,7 +399,7 @@ partial class Lowering {
   }
 
   private missingArgument(
-    frame: Frame,
+    frame: Read<Frame>,
     param: FunctionParameter,
     wanted: Type,
     loc: int,
@@ -477,7 +476,7 @@ partial class Lowering {
     return undefined;
   }
 
-  private calledName(call: CallExpr): string {
+  private readonly calledName(call: CallExpr): string {
     const callee = call.callee;
     if (callee.kind != ExprKind.Member) {
       return "?";
@@ -489,7 +488,7 @@ partial class Lowering {
     return `${kind}.${callee.name}`;
   }
 
-  private runtimeCall(made: IrFunction, name: string, args: IrValue[]): void {
+  private readonly runtimeCall(made: IrFunction, name: string, args: Read<IrValue[]>): void {
     const params = args.map((arg) => arg.type);
     const given = args.map((arg) => arg.value);
     const callee = this.ir.declare(name, kVoidType, params);
@@ -497,11 +496,11 @@ partial class Lowering {
     made.call(callee, given);
   }
 
-  private runtimeValue(
-    frame: Frame,
+  private readonly runtimeValue(
+    frame: Read<Frame>,
     name: string,
     result: string,
-    args: IrValue[],
+    args: Read<IrValue[]>,
   ): LLVMValue {
     const params = args.map((arg) => arg.type);
     const given = args.map((arg) => arg.value);

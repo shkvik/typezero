@@ -24,7 +24,7 @@ import {
 } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private memberTyped(expr: MemberExpr, module: int): Type {
+  private readonly memberTyped(expr: MemberExpr, module: int): Type {
     const isRefused =
       this.thisPlaceCheck(expr, module) || this.superReadCheck(expr, module);
     if (isRefused || this.memberReadEarly(expr, module)) {
@@ -86,7 +86,7 @@ partial class ExpressionTypes {
     return this.memberOf(expr, object, module);
   }
 
-  private chainTyped(
+  private readonly chainTyped(
     expr: OptionalChainExpr,
     wanted: Type | undefined,
     module: int,
@@ -104,7 +104,7 @@ partial class ExpressionTypes {
     return this.types.optional(inner);
   }
 
-  private receiverOf(object: Expr, optional: boolean, module: int): Type {
+  private readonly receiverOf(object: Expr, optional: boolean, module: int): Type {
     this.memberObjects.add(object);
     this.markThisObject(object, module);
 
@@ -113,7 +113,7 @@ partial class ExpressionTypes {
     return this.linkOf(type, optional);
   }
 
-  private linkOf(type: Type, optional: boolean): Type {
+  private readonly linkOf(type: Type, optional: boolean): Type {
     if (!optional || !this.types.isOptional(type)) {
       return type;
     }
@@ -123,7 +123,7 @@ partial class ExpressionTypes {
     return this.types.definedType(type);
   }
 
-  private memberOf(expr: MemberExpr, object: Type, module: int): Type {
+  private readonly memberOf(expr: MemberExpr, object: Type, module: int): Type {
     if (this.unknownMemberCheck(expr, object, module)) {
       return this.store.plain(TypeKind.Error);
     }
@@ -194,7 +194,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private unionMemberOf(
+  private readonly unionMemberOf(
     expr: MemberExpr,
     object: UnionType,
     module: int,
@@ -216,7 +216,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private parameterMemberOf(expr: MemberExpr, object: Type, module: int): Type {
+  private readonly parameterMemberOf(expr: MemberExpr, object: Type, module: int): Type {
     const constraint = this.store.constraintOf(object);
     if (constraint == undefined) {
       const word = expr.name;
@@ -230,7 +230,7 @@ partial class ExpressionTypes {
     return this.memberOf(expr, constraint, module);
   }
 
-  private objectField(expr: MemberExpr, object: ObjectType, module: int): Type {
+  private readonly objectField(expr: MemberExpr, object: ObjectType, module: int): Type {
     const fields = object.fields.filter((one) => one.name == expr.name);
     const field = fields[0];
     const isLibrary = this.resolver.isLibraryShape(object);
@@ -268,7 +268,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private tupleMember(expr: MemberExpr, tuple: TupleType, module: int): Type {
+  private readonly tupleMember(expr: MemberExpr, tuple: TupleType, module: int): Type {
     const checked = this.objectMembers.tupleMember(expr, tuple);
 
     this.reportFound(module, checked.error);
@@ -276,7 +276,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private valueMember(expr: MemberExpr, object: Type, module: int): Type {
+  private readonly valueMember(expr: MemberExpr, object: Type, module: int): Type {
     const checked = this.objectMembers.valueMember(expr, object);
 
     this.reportFound(module, checked.error);
@@ -284,11 +284,11 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private enumOfObject(object: Expr, module: int): EnumDecl | undefined {
+  private readonly enumOfObject(object: Expr, module: int): EnumDecl | undefined {
     return this.enumHomeOf(object, module)?.decl;
   }
 
-  private enumHomeOf(object: Expr, module: int): EnumHome | undefined {
+  private readonly enumHomeOf(object: Expr, module: int): EnumHome | undefined {
     if (object.kind != ExprKind.Name) {
       return undefined;
     }
@@ -306,7 +306,7 @@ partial class ExpressionTypes {
     return { module: target.module, decl };
   }
 
-  private objectAnswered(object: Expr, module: int): void {
+  private readonly objectAnswered(object: Expr, module: int): void {
     if (this.answers.isVisited(object)) {
       return;
     }
@@ -316,7 +316,7 @@ partial class ExpressionTypes {
     this.errors.endTrial();
   }
 
-  private enumMemberTyped(expr: MemberExpr, home: EnumHome, module: int): Type {
+  private readonly enumMemberTyped(expr: MemberExpr, home: EnumHome, module: int): Type {
     const step = this.resolver.enumMember(home.module, home.decl, expr.name);
     if (step == undefined) {
       this.report(module, expr.loc, Code.EnumMemberMissing, {
@@ -328,7 +328,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private enumLiteral(expr: MemberExpr, module: int): LiteralValue | undefined {
+  private readonly enumLiteral(expr: MemberExpr, module: int): LiteralValue | undefined {
     const home = this.enumHomeOf(expr.object, module);
     if (home == undefined) {
       return undefined;
@@ -355,7 +355,7 @@ partial class ExpressionTypes {
     return this.objects.wholeLiteral(number);
   }
 
-  private enumConstant(expr: MemberExpr, module: int): decimal | undefined {
+  private readonly enumConstant(expr: MemberExpr, module: int): decimal | undefined {
     const literal = this.enumLiteral(expr, module);
     if (literal == undefined || literal.kind != LiteralKind.Int) {
       return undefined;
@@ -369,7 +369,7 @@ partial class ExpressionTypes {
     return value.value;
   }
 
-  private enumWhole(expr: MemberExpr, module: int): Type {
+  private readonly enumWhole(expr: MemberExpr, module: int): Type {
     const home = this.enumHomeOf(expr.object, module);
     if (home == undefined) {
       return this.store.plain(TypeKind.String);
@@ -378,7 +378,7 @@ partial class ExpressionTypes {
     return this.resolver.declaredEnum(home.module, home.decl);
   }
 
-  private globalThisRead(expr: MemberExpr, module: int): Type | undefined {
+  private readonly globalThisRead(expr: MemberExpr, module: int): Type | undefined {
     const object = expr.object;
     const isGlobal =
       object.kind == ExprKind.Name &&

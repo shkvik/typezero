@@ -94,10 +94,11 @@ export type ArrayType = {
   readonly id: int;
   readonly kind: TypeKind.Array;
   readonly item: Type;
+  readonly readonly?: boolean;
 };
 
 export type TupleShape = {
-  readonly items: Type[];
+  readonly items: readonly Type[];
   readonly readonly: boolean;
   readonly required: int;
   readonly rest: int;
@@ -106,7 +107,7 @@ export type TupleShape = {
 export type TupleType = {
   readonly id: int;
   readonly kind: TypeKind.Tuple;
-  readonly items: Type[];
+  readonly items: readonly Type[];
   readonly readonly: boolean;
   readonly required: int;
   readonly rest: int;
@@ -118,12 +119,13 @@ export type ObjectField = {
   readonly optional: boolean;
   readonly readonly: boolean;
   readonly method?: boolean;
+  readonly cell?: boolean;
 };
 
 export type ObjectType = {
   readonly id: int;
   readonly kind: TypeKind.Object;
-  readonly fields: ObjectField[];
+  fields: Cell<readonly ObjectField[]>;
 };
 
 export type FunctionParameter = {
@@ -132,7 +134,7 @@ export type FunctionParameter = {
 };
 
 export type FunctionShape = {
-  readonly params: FunctionParameter[];
+  readonly params: readonly FunctionParameter[];
   readonly rest: boolean;
   readonly self?: Type;
   readonly result: Type;
@@ -147,7 +149,7 @@ export type FunctionType = {
 export type UnionType = {
   readonly id: int;
   readonly kind: TypeKind.Union;
-  readonly parts: Type[];
+  parts: Cell<readonly Type[]>;
   readonly recursive: boolean;
 };
 
@@ -191,7 +193,7 @@ export type InstanceType = {
   readonly module: int;
   readonly loc: int;
   readonly name: string;
-  readonly args: Type[];
+  readonly args: readonly Type[];
 };
 
 export type TypeParameterType = {
@@ -205,13 +207,13 @@ export type TypeParameterType = {
 export type TemplateType = {
   readonly id: int;
   readonly kind: TypeKind.Template;
-  readonly texts: string[];
-  readonly parts: Type[];
+  readonly texts: readonly string[];
+  readonly parts: readonly Type[];
 };
 
 export type OperationShape = {
   readonly op: OperationKind;
-  readonly operands: Type[];
+  readonly operands: readonly Type[];
   readonly word: string;
   readonly optional: Change;
   readonly readonly: Change;
@@ -248,6 +250,14 @@ export type Type =
   | TemplateType
   | OperationType
   | ClassType;
+
+export type InternedType = Interned<Type>;
+
+export type InternedTypeList = Interned<readonly Type[]>;
+
+export type InternedWriters = Interned<readonly ParamWriter[]>;
+
+export type InternedParams = Interned<readonly FunctionParameter[]>;
 export type ParamWriter = {
   readonly name: string;
   readonly writer: string;

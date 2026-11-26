@@ -61,14 +61,14 @@ export class StatementRules {
 
   public constructor(
     store: TypeStore,
-    relation: TypeRelation,
-    types: TypeQuestions,
-    modules: ModuleQuestions,
+    relation: Own<TypeRelation>,
+    types: Own<TypeQuestions>,
+    modules: Own<ModuleQuestions>,
     text: TypeText,
-    comparisons: ComparisonRules,
-    functions: FunctionRules,
-    sources: SourceTexts,
-    indexes: IndexRules,
+    comparisons: Own<ComparisonRules>,
+    functions: Own<FunctionRules>,
+    sources: Own<SourceTexts>,
+    indexes: Own<IndexRules>,
   ) {
     this.store = store;
     this.relation = relation;
@@ -81,7 +81,7 @@ export class StatementRules {
     this.indexes = indexes;
   }
 
-  public boundsText(isLiteral: boolean, index: string, below: string): string {
+  public readonly boundsText(isLiteral: boolean, index: string, below: string): string {
     if (isLiteral) {
       return below;
     }
@@ -89,7 +89,7 @@ export class StatementRules {
     return `${index} >= 0 && ${below}`;
   }
 
-  public simpleText(expr: Expr): string {
+  public readonly simpleText(expr: Expr): string {
     if (expr.kind == ExprKind.Name) {
       return expr.name;
     }
@@ -100,7 +100,7 @@ export class StatementRules {
     return "";
   }
 
-  public simpleOr(expr: Expr, fallback: string): string {
+  public readonly simpleOr(expr: Expr, fallback: string): string {
     const text = this.simpleText(expr);
     if (text == "") {
       return fallback;
@@ -109,7 +109,7 @@ export class StatementRules {
     return text;
   }
 
-  public knownOr(isKnown: boolean, text: string, fallback: string): string {
+  public readonly knownOr(isKnown: boolean, text: string, fallback: string): string {
     if (isKnown) {
       return text;
     }
@@ -117,7 +117,7 @@ export class StatementRules {
     return fallback;
   }
 
-  public taggedPlace(count: int): string {
+  public readonly taggedPlace(count: int): string {
     if (count == 2) {
       return " and 1 value";
     }
@@ -128,7 +128,7 @@ export class StatementRules {
     return "";
   }
 
-  public isRecordWanted(wanted: Type | undefined): boolean {
+  public readonly isRecordWanted(wanted: Type | undefined): boolean {
     if (wanted == undefined) {
       return false;
     }
@@ -138,7 +138,7 @@ export class StatementRules {
     return goal.kind == TypeKind.Dict && goal.dict == DictKind.Record;
   }
 
-  public itemTarget(
+  public readonly itemTarget(
     item: Stmt,
     module: int,
     name: string,
@@ -175,7 +175,7 @@ export class StatementRules {
     }
   }
 
-  public isMappingCall(expr: Expr): boolean {
+  public readonly isMappingCall(expr: Expr): boolean {
     if (expr.kind != ExprKind.Call) {
       return false;
     }
@@ -188,7 +188,7 @@ export class StatementRules {
     return callee.name == "map" || callee.name == "flatMap";
   }
 
-  public calleeLoc(expr: Expr): int {
+  public readonly calleeLoc(expr: Expr): int {
     if (expr.kind == ExprKind.Call && expr.callee.kind == ExprKind.Member) {
       return expr.callee.loc;
     }
@@ -196,7 +196,7 @@ export class StatementRules {
     return expr.loc;
   }
 
-  public shownText(text: string): string {
+  public readonly shownText(text: string): string {
     if (text == "") {
       return kPromisePlaceholder;
     }
@@ -204,7 +204,7 @@ export class StatementRules {
     return text;
   }
 
-  public heldType(type: Type): Type {
+  public readonly heldType(type: Type): Type {
     const defined = this.types.definedType(type);
     if (defined.kind == TypeKind.Array) {
       return this.heldType(defined.item);
@@ -213,7 +213,7 @@ export class StatementRules {
     return defined;
   }
 
-  public isTakingElement(expr: Expr): boolean {
+  public readonly isTakingElement(expr: Expr): boolean {
     if (expr.kind != ExprKind.Call) {
       return false;
     }
@@ -225,7 +225,7 @@ export class StatementRules {
     );
   }
 
-  public caseCode(hasResult: boolean): Code {
+  public readonly caseCode(hasResult: boolean): Code {
     if (hasResult) {
       return Code.CaseResultsCompared;
     }
@@ -233,7 +233,7 @@ export class StatementRules {
     return Code.CaseNotComparable;
   }
 
-  public listedNames(names: string[]): string {
+  public readonly listedNames(names: Read<string[]>): string {
     const last = names[names.length - 1];
     if (names.length < 2 || last == undefined) {
       return names.join("");
@@ -244,7 +244,7 @@ export class StatementRules {
     return `${front.join(kNameSeparator)}${kLastAndSeparator}${last}`;
   }
 
-  public isShapedType(type: Type): boolean {
+  public readonly isShapedType(type: Type): boolean {
     if (type.kind == TypeKind.Error) {
       return false;
     }
@@ -269,7 +269,7 @@ export class StatementRules {
     }
   }
 
-  public dictItem(dict: DictKind, key: Type, value: Type): Type {
+  public readonly dictItem(dict: DictKind, key: Type, value: Type): Type {
     switch (dict) {
       case DictKind.Map:
         return this.store.plainTuple([key, value]);
@@ -280,7 +280,7 @@ export class StatementRules {
     }
   }
 
-  public isInsideFunction(fn: FunctionDecl, loc: int): boolean {
+  public readonly isInsideFunction(fn: FunctionDecl, loc: int): boolean {
     const span = fn.source;
     if (span == undefined) {
       return false;
@@ -289,7 +289,7 @@ export class StatementRules {
     return loc >= span.start && loc < span.end;
   }
 
-  public heldValue(type: Type): Type {
+  public readonly heldValue(type: Type): Type {
     let held = this.types.definedType(type);
 
     while (held.kind == TypeKind.Array) {
@@ -299,7 +299,7 @@ export class StatementRules {
     return held;
   }
 
-  public instanceTextCode(held: Type): Code | undefined {
+  public readonly instanceTextCode(held: Type): Code | undefined {
     if (held.kind != TypeKind.Instance || this.isDateType(held)) {
       return undefined;
     }
@@ -307,7 +307,7 @@ export class StatementRules {
     return Code.ArrayTextObjects;
   }
 
-  public instanceSortCode(held: Type): Code {
+  public readonly instanceSortCode(held: Type): Code {
     if (this.isDateType(held)) {
       return Code.SortDates;
     }
@@ -315,7 +315,7 @@ export class StatementRules {
     return Code.SortObjects;
   }
 
-  public plainSortProblem(element: Type): Code | undefined {
+  public readonly plainSortProblem(element: Type): Code | undefined {
     const base = this.types.definedType(element);
     if (base.kind == TypeKind.Union && !this.isTextualUnion(base.parts)) {
       return Code.SortMixed;
@@ -333,7 +333,7 @@ export class StatementRules {
     return undefined;
   }
 
-  public sortExample(element: Type): string {
+  public readonly sortExample(element: Type): string {
     if (this.types.isOptional(element)) {
       return "(x ?? 0) - (y ?? 0)";
     }
@@ -341,7 +341,7 @@ export class StatementRules {
     return "x - y";
   }
 
-  public isItemDeclaring(item: Stmt, loc: int): boolean {
+  public readonly isItemDeclaring(item: Stmt, loc: int): boolean {
     if (item.kind != StmtKind.VarDecl) {
       return false;
     }
@@ -349,7 +349,7 @@ export class StatementRules {
     return item.decls.some((decl) => decl.loc == loc);
   }
 
-  private caseShown(type: Type, subject: Type): Type {
+  private readonly caseShown(type: Type, subject: Type): Type {
     const parts = this.types.unionMembers(subject);
     const hasLiterals = parts.some((part) => part.kind == TypeKind.Literal);
     if (hasLiterals && type.kind == TypeKind.Literal) {
@@ -359,7 +359,7 @@ export class StatementRules {
     return this.functions.widened(type);
   }
 
-  public caseTypeCheck(
+  public readonly caseTypeCheck(
     test: Expr,
     type: Type,
     subject: Type,
@@ -387,10 +387,10 @@ export class StatementRules {
     };
   }
 
-  public emptyReturnError(
+  public readonly emptyReturnError(
     statement: ReturnStmt,
     result: Type,
-    frame: FunctionFrame,
+    frame: Read<FunctionFrame>,
   ): SourceError | undefined {
     const isOpen =
       result.kind == TypeKind.Error ||
@@ -413,7 +413,7 @@ export class StatementRules {
     };
   }
 
-  public promiseUsedError(
+  public readonly promiseUsedError(
     expr: Expr,
     value: Type,
     at: int | undefined,
@@ -447,7 +447,7 @@ export class StatementRules {
     };
   }
 
-  public undefinedError(
+  public readonly undefinedError(
     variable: DeclaredVariable,
     init: Expr,
   ): SourceError | undefined {
@@ -471,9 +471,9 @@ export class StatementRules {
     };
   }
 
-  public returnAwaitCheck(
+  public readonly returnAwaitCheck(
     value: Expr | undefined,
-    frame: FunctionFrame,
+    frame: Read<FunctionFrame>,
   ): SourceError | undefined {
     const isAsync = frame.fn?.isAsync == true;
     if (value == undefined || !isAsync || value.kind != ExprKind.Await) {
@@ -486,7 +486,7 @@ export class StatementRules {
     return { code: Code.ReturnAwait, loc: value.loc, details: kNoDetails };
   }
 
-  public switchFunctionCheck(statement: Stmt): SourceError[] {
+  public readonly switchFunctionCheck(statement: Stmt): SourceError[] {
     const errors: SourceError[] = [];
 
     if (statement.kind == StmtKind.Function) {
@@ -500,7 +500,7 @@ export class StatementRules {
     return errors;
   }
 
-  public rawTextsCheck(expr: MemberExpr, object: Type): Checked<boolean> {
+  public readonly rawTextsCheck(expr: MemberExpr, object: Type): Checked<boolean> {
     if (expr.name != "raw" || object.kind != TypeKind.Array) {
       return { value: false };
     }
@@ -514,7 +514,7 @@ export class StatementRules {
     };
   }
 
-  public tupleLoopItem(loop: ForOfStmt, tuple: TupleType): Checked<Type> {
+  public readonly tupleLoopItem(loop: ForOfStmt, tuple: TupleType): Checked<Type> {
     const element = this.indexes.tupleElement(tuple);
     if (element != undefined) {
       return { value: element };
@@ -530,7 +530,7 @@ export class StatementRules {
     };
   }
 
-  public switchFunctionsCheck(statement: SwitchStmt): SourceError[] {
+  public readonly switchFunctionsCheck(statement: SwitchStmt): SourceError[] {
     const errors: SourceError[] = [];
 
     for (const option of statement.cases) {
@@ -546,7 +546,7 @@ export class StatementRules {
     return errors;
   }
 
-  public loopWord(loop: ForOfStmt): string {
+  public readonly loopWord(loop: ForOfStmt): string {
     if (loop.isAwait) {
       return kForAwaitWord;
     }
@@ -557,7 +557,7 @@ export class StatementRules {
     return kForOfWord;
   }
 
-  public untypedCode(first: string, isUndefined: boolean): Code {
+  public readonly untypedCode(first: string, isUndefined: boolean): Code {
     if (first != "" && isUndefined) {
       return Code.UndefinedLetWriteType;
     }
@@ -571,7 +571,7 @@ export class StatementRules {
     return Code.VariableNeedsType;
   }
 
-  private namedTarget(
+  private readonly namedTarget(
     declared: string,
     name: string,
     target: ValueTarget,
@@ -583,7 +583,7 @@ export class StatementRules {
     return target;
   }
 
-  private isDateType(type: Type): boolean {
+  private readonly isDateType(type: Type): boolean {
     return (
       type.kind == TypeKind.Instance &&
       type.name == "Date" &&
@@ -591,7 +591,7 @@ export class StatementRules {
     );
   }
 
-  private isTextualUnion(parts: Type[]): boolean {
+  private readonly isTextualUnion(parts: Read<Type[]>): boolean {
     return parts.every((part) => {
       const base = this.relation.baseOf(part) ?? part;
 

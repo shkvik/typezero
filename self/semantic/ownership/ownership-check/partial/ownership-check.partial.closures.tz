@@ -1,0 +1,142 @@
+import { OwnershipCheck } from "../ownership-check.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  Expr,
+  ExprKind,
+  NameExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+import { ExpressionCollector } from "../../../code/expression-collector/expression-collector.tz";
+import {
+  CallbackMode,
+  FunctionFrame,
+  Holding,
+  Place,
+} from "../types/ownership-check.types.tz";
+import { kThisKey } from "../const/ownership-check.const.tz";
+
+partial class OwnershipCheck {
+  private closure(fn: FunctionDecl, mode: CallbackMode, loc: int): void {
+    const frame = this.frame();
+    if (frame == undefined) {
+      return;
+    }
+
+    const exprs = this.closureExprs(fn);
+    const captured = this.capturedKeys(frame, exprs);
+    const isKept = mode == CallbackMode.Kept || mode == CallbackMode.Once;
+
+    for (const key of captured) {
+      if (isKept) {
+        this.captureKept(frame, key, loc);
+      } else {
+        this.captureDuring(key, exprs, loc);
+      }
+    }
+
+    this.checkFunction(fn, frame.owner, mode, frame);
+  }
+
+  private readonly closureExprs(fn: FunctionDecl): Expr[] {
+    const collector = new ExpressionCollector();
+
+    return collector.functionExprs(fn, true);
+  }
+
+  private readonly capturedKeys(frame: Read<FunctionFrame>, exprs: Read<Expr[]>): int[] {
+    const keys: int[] = [];
+
+    for (const expr of exprs) {
+      if (expr.kind != ExprKind.Name) {
+        continue;
+      }
+
+      const key = this.keyOfName(expr);
+      if (key == undefined || keys.includes(key)) {
+        continue;
+      }
+      if (frame.variables.has(key)) {
+        keys.push(key);
+      }
+    }
+
+    return keys;
+  }
+
+  private captureKept(frame: Read<FunctionFrame>, key: int, loc: int): void {
+    const variable = frame.variables.get(key);
+    if (variable == undefined || variable.holding == Holding.Global) {
+      return;
+    }
+
+    const word = variable.name;
+
+    if (key == kThisKey) {
+      this.report(loc, Code.OwnKeptThis, {});
+
+      return;
+    }
+    if (!variable.isConst) {
+      this.report(loc, Code.OwnKeptLet, { word });
+
+      return;
+    }
+
+    switch (variable.holding) {
+      case Holding.Own: {
+        const place: Place = { root: key, path: [] };
+
+        this.moveOwned(place, loc);
+        return;
+      }
+      case Holding.Borrow:
+      case Holding.Lent:
+        this.report(loc, Code.OwnKeptBorrow, { word });
+        return;
+      default:
+        return;
+    }
+  }
+
+  private captureDuring(key: int, exprs: Read<Expr[]>, loc: int): void {
+    if (!this.isChangedIn(key, exprs)) {
+      return;
+    }
+
+    const place: Place = { root: key, path: [] };
+
+    this.changePlace(place, loc);
+  }
+
+  private readonly isChangedIn(key: int, exprs: Read<Expr[]>): boolean {
+    for (const expr of exprs) {
+      const changed = this.changedRoot(expr);
+      if (changed == undefined) {
+        continue;
+      }
+
+      const found = this.keyOfName(changed);
+      if (found == key) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private readonly changedRoot(expr: Expr): NameExpr | undefined {
+    if (expr.kind == ExprKind.Assign || expr.kind == ExprKind.Update) {
+      return this.rootNameOf(expr.target);
+    }
+    if (expr.kind != ExprKind.Call || expr.callee.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    const member = expr.callee;
+    if (!this.isChangingMethod(member.object, member.name)) {
+      return undefined;
+    }
+
+    return this.rootNameOf(member.object);
+  }
+}

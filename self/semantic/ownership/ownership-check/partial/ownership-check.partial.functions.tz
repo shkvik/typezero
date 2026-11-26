@@ -1,0 +1,446 @@
+import { replace } from "tz:mem";
+import { OwnershipCheck } from "../ownership-check.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  ClassDecl,
+  MethodKind,
+} from "../../../../program/ast/types/ast.types.classes.tz";
+import {
+  FunctionDecl,
+  Param,
+  ParamKind,
+} from "../../../../program/ast/types/ast.types.functions.tz";
+import {
+  Stmt,
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import { Module } from "../../../../program/module/types/module.types.tz";
+import {
+  FunctionShape,
+  Type,
+  TypeKind,
+} from "../../../../program/type/types/type.types.tz";
+import {
+  CallbackMode,
+  FunctionFrame,
+  Holding,
+  ParamMode,
+  ResultMode,
+  Variable,
+} from "../types/ownership-check.types.tz";
+import {
+  kLentName,
+  kMutName,
+  kOnceName,
+  kOwnName,
+  kReadName,
+  kThisKey,
+} from "../const/ownership-check.const.tz";
+
+partial class OwnershipCheck {
+  private checkModule(module: Module): void {
+    this.module = module.id;
+    this.home = module.id;
+
+    const frame = this.emptyFrame(undefined, undefined, CallbackMode.During);
+
+    this.reportGlobalLets(module.file.items);
+    this.runFrame(frame, module.file.items);
+
+    for (const item of module.file.items) {
+      this.checkDeclared(item, undefined);
+    }
+    for (const part of module.parts) {
+      this.checkClass(part, undefined);
+    }
+  }
+
+  private readonly reportGlobalLets(items: Read<Stmt[]>): void {
+    for (const item of items) {
+      if (item.kind != StmtKind.VarDecl || item.isConst) {
+        continue;
+      }
+
+      for (const declarator of item.decls) {
+        this.report(declarator.loc, Code.OwnGlobalLet, {
+          word: declarator.name,
+        });
+      }
+    }
+  }
+
+  private checkDeclared(stmt: Stmt, outer: Read<FunctionFrame | undefined>): void {
+    switch (stmt.kind) {
+      case StmtKind.Function:
+        this.checkFunction(stmt, undefined, CallbackMode.During, outer);
+        break;
+      case StmtKind.Class:
+        this.checkClass(stmt, outer);
+        break;
+      default:
+        break;
+    }
+  }
+
+  private checkClass(decl: ClassDecl, outer: Read<FunctionFrame | undefined>): void {
+    for (const field of decl.fields) {
+      const ref = field.type;
+      if (ref != undefined && this.holdsBorrowRef(ref)) {
+        this.report(field.loc, Code.OwnBorrowField, { word: field.name });
+      }
+    }
+
+    for (const method of decl.methods) {
+      const isPart = !decl.isPartial && this.partHomes.has(method);
+      if (!isPart) {
+        this.checkFunction(method, decl, CallbackMode.During, outer);
+      }
+    }
+
+    for (const made of decl.constructors) {
+      this.checkFunction(made, decl, CallbackMode.During, outer);
+    }
+  }
+
+  private checkFunction(
+    fn: FunctionDecl,
+    owner: ClassDecl | undefined,
+    callback: CallbackMode,
+    outer: Read<FunctionFrame | undefined>,
+  ): void {
+    const body = fn.body;
+    if (body == undefined) {
+      return;
+    }
+
+    const frame = this.emptyFrame(fn, owner, callback);
+    const shape = this.shapeOf(fn);
+
+    this.addThis(frame, fn, owner);
+
+    for (let index: int = 0; index < fn.params.length; index++) {
+      const param = fn.params[index];
+      if (param != undefined) {
+        const type = this.paramTypeOf(shape, index);
+
+        this.addParam(frame, param, type);
+      }
+    }
+
+    this.copyOuter(frame, outer);
+
+    const saved = replace(this.state, { moved: [], isDead: false });
+    this.runFrame(frame, body.body);
+    this.state = saved;
+  }
+
+  private runFrame(frame: Own<FunctionFrame>, items: Read<Stmt[]>): void {
+    this.frames.push(frame);
+
+    const pushed = this.frame();
+    if (pushed != undefined) {
+      this.collectUses(pushed, items);
+    }
+
+    this.walkStatements(items);
+    this.noteHints();
+    this.frames.pop();
+  }
+
+  private noteHints(): void {
+    const frame = this.frame();
+    const fn = frame?.fn;
+    if (frame == undefined || fn == undefined || fn.isArrow) {
+      return;
+    }
+
+    const role = fn.role;
+    const isPlainMethod =
+      role != undefined &&
+      role.method == MethodKind.Instance &&
+      !role.isOverride &&
+      !role.isReadonly;
+    const self = frame.variables.get(kThisKey);
+    if (isPlainMethod && self != undefined && !self.isChanged) {
+      this.hint(fn.loc, "readonly-method", fn.name);
+    }
+
+    for (const param of fn.params) {
+      const variable = frame.variables.get(param.loc);
+      if (variable == undefined || variable.holding != Holding.Lent) {
+        continue;
+      }
+      if (!variable.isReadOnly && !variable.isChanged) {
+        this.hint(param.loc, "read-param", param.name);
+      }
+    }
+  }
+
+  private readonly emptyFrame(
+    fn: FunctionDecl | undefined,
+    owner: ClassDecl | undefined,
+    callback: CallbackMode,
+  ): FunctionFrame {
+    const result = this.resultModeOf(fn);
+
+    return {
+      fn,
+      module: this.module,
+      owner,
+      variables: new Map<int, Variable>(),
+      lentParams: new Set<int>(),
+      result,
+      thisHolding: Holding.Copy,
+      callback,
+      loops: [],
+      outer: new Set<int>(),
+      bindings: new Set<int>(),
+    };
+  }
+
+  private readonly copyOuter(frame: FunctionFrame, outer: Read<FunctionFrame | undefined>): void {
+    if (outer == undefined) {
+      return;
+    }
+
+    for (const variable of outer.variables.values()) {
+      if (frame.variables.has(variable.key)) {
+        continue;
+      }
+
+      const holding = this.capturedHolding(frame, variable);
+
+      frame.variables.set(variable.key, {
+        key: variable.key,
+        name: variable.name,
+        holding,
+        loans: [],
+        isReadOnly: variable.isReadOnly,
+        isConst: variable.isConst,
+        isUsing: variable.isUsing,
+        declared: -1,
+        lastUse: -1,
+        isChanged: false,
+        isCaptured: true,
+      });
+      frame.outer.add(variable.key);
+    }
+  }
+
+  private readonly capturedHolding(frame: Read<FunctionFrame>, variable: Read<Variable>): Holding {
+    if (variable.holding == Holding.Copy) {
+      return Holding.Copy;
+    }
+    if (variable.holding == Holding.Own && frame.callback == CallbackMode.Once) {
+      return Holding.Own;
+    }
+
+    return Holding.Lent;
+  }
+
+  private readonly addThis(
+    frame: FunctionFrame,
+    fn: FunctionDecl,
+    owner: ClassDecl | undefined,
+  ): void {
+    const role = fn.role;
+    if (owner == undefined || role == undefined) {
+      return;
+    }
+    if (role.method == MethodKind.Static) {
+      return;
+    }
+
+    const isConstructor = role.method == MethodKind.Constructor;
+    let holding: Holding = Holding.Lent;
+
+    if (isConstructor) {
+      holding = Holding.Own;
+    }
+
+    frame.variables.set(kThisKey, {
+      key: kThisKey,
+      name: "this",
+      holding,
+      loans: [],
+      isReadOnly: role.isReadonly,
+      isConst: true,
+      isUsing: false,
+      declared: fn.loc,
+      lastUse: -1,
+      isChanged: false,
+      isCaptured: false,
+    });
+  }
+
+  private addParam(frame: FunctionFrame, param: Param, type: Type | undefined): void {
+    const mode = this.paramMode(param);
+    const holding = this.paramHolding(mode, type);
+
+    if (mode == ParamMode.Lent) {
+      frame.lentParams.add(param.loc);
+    }
+    if (mode == ParamMode.Lent && type != undefined && this.traits.isCopy(type)) {
+      this.report(param.loc, Code.OwnLentCopy, { word: param.name });
+    }
+
+    const isMarkedMut = param.type?.name == kMutName && param.type?.args.length == 1;
+    if (isMarkedMut && type != undefined && this.traits.isCopy(type)) {
+      this.report(param.loc, Code.OwnMutCopy, { word: param.name });
+    }
+
+    frame.variables.set(param.loc, {
+      key: param.loc,
+      name: param.name,
+      holding,
+      loans: [],
+      isReadOnly: mode == ParamMode.Read || mode == ParamMode.Lent,
+      isConst: true,
+      isUsing: false,
+      declared: param.loc,
+      lastUse: -1,
+      isChanged: false,
+      isCaptured: false,
+    });
+  }
+
+  private paramHolding(mode: ParamMode, type: Type | undefined): Holding {
+    if (type != undefined && this.traits.isCopy(type)) {
+      return Holding.Copy;
+    }
+    if (mode == ParamMode.Own || mode == ParamMode.Once) {
+      return Holding.Own;
+    }
+
+    return Holding.Lent;
+  }
+
+  private readonly holdsBorrowRef(ref: TypeRef): boolean {
+    if (this.isBorrowRef(ref)) {
+      return true;
+    }
+
+    return ref.args.some((arg) => this.holdsBorrowRef(arg));
+  }
+
+  private readonly isBorrowRef(ref: TypeRef): boolean {
+    if (ref.form.kind == TypeRefKind.Array) {
+      const item = ref.args[0];
+
+      return item != undefined && this.isBorrowRef(item);
+    }
+    if (ref.args.length != 1) {
+      return false;
+    }
+
+    return ref.name == kReadName || ref.name == kMutName || ref.name == kLentName;
+  }
+
+  private readonly paramMode(param: Param): ParamMode {
+    const ref = param.type;
+    if (ref == undefined) {
+      return ParamMode.Mut;
+    }
+    if (param.form.kind == ParamKind.Rest && ref.form.kind == TypeRefKind.Array) {
+      const item = ref.args[0];
+      if (item != undefined) {
+        return this.modeOfRef(item);
+      }
+    }
+
+    return this.modeOfRef(ref);
+  }
+
+  private readonly modeOfRef(ref: TypeRef): ParamMode {
+    if (ref.args.length != 1) {
+      return ParamMode.Mut;
+    }
+
+    switch (ref.name) {
+      case kReadName:
+        return ParamMode.Read;
+      case kOwnName:
+        return ParamMode.Own;
+      case kLentName:
+        return ParamMode.Lent;
+      case kOnceName:
+        return ParamMode.Once;
+      default:
+        return ParamMode.Mut;
+    }
+  }
+
+  private readonly resultModeOf(fn: FunctionDecl | undefined): ResultMode {
+    const ref = fn?.returnType;
+    if (ref == undefined) {
+      return ResultMode.Own;
+    }
+
+    return this.resultModeOfRef(ref);
+  }
+
+  private readonly resultModeOfRef(ref: TypeRef): ResultMode {
+    const item = ref.args[0];
+    if (ref.form.kind == TypeRefKind.Array && item != undefined) {
+      return this.resultModeOfRef(item);
+    }
+    if (ref.form.kind == TypeRefKind.Union) {
+      for (const part of ref.args) {
+        const mode = this.resultModeOfRef(part);
+        if (mode != ResultMode.Own) {
+          return mode;
+        }
+      }
+
+      return ResultMode.Own;
+    }
+    if (ref.args.length != 1) {
+      return ResultMode.Own;
+    }
+    if (ref.name == kReadName) {
+      return ResultMode.Read;
+    }
+    if (ref.name == kMutName) {
+      return ResultMode.Mut;
+    }
+
+    return ResultMode.Own;
+  }
+
+  private readonly shapeOf(fn: FunctionDecl): FunctionShape | undefined {
+    const type = this.values.functionOf(this.module, fn.loc);
+    if (type.kind != TypeKind.Function) {
+      return undefined;
+    }
+
+    return type.shape;
+  }
+
+  private readonly paramTypeOf(
+    shape: Read<FunctionShape | undefined>,
+    index: int,
+  ): Type | undefined {
+    if (shape == undefined) {
+      return undefined;
+    }
+
+    const param = shape.params[index];
+    if (param == undefined) {
+      return undefined;
+    }
+
+    return param.type;
+  }
+
+  private readonly frame(): FunctionFrame | undefined {
+    return this.frames[this.frames.length - 1];
+  }
+
+  private readonly variableOf(key: int): Variable | undefined {
+    return this.frame()?.variables.get(key);
+  }
+}

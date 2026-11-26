@@ -27,7 +27,7 @@ const r = spawnSync("git", ["status"], { encoding: "utf8" })        // { status,
 - **Тип результата — по `encoding`:** с `encoding: "utf8"` — `string`, без него — `Buffer`
   ([bytes.md](bytes.md)), как в node.
 - **Ошибки — `Result`, у каждой функции свой тип** (раздел 3 ниже; решено 30 октября,
-  `tmp/design/process-errors.tz`, П0–П7): `execSync` — `ExecTextError` / `ExecBytesError`,
+  П0–П7): `execSync` — `ExecTextError` / `ExecBytesError`,
   `execFileSync` — `ExecFileTextError` / `ExecFileBytesError`, `spawnSync` — `SpawnTextError` /
   `SpawnBytesError` (Text — с `encoding`, вывод строкой; Bytes — без него, `Buffer`); с `shell`
   у `execFileSync` и `spawnSync` — `ExecFileShell…` / `SpawnShell…`. `spawnSync` код выхода

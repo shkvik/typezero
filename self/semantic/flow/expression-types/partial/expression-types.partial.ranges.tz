@@ -34,7 +34,7 @@ import {
 import { ValueRange } from "../../interval-math/types/interval-math.types.tz";
 
 partial class ExpressionTypes {
-  private valueRange(expr: Expr, module: int): ValueRange {
+  private readonly valueRange(expr: Expr, module: int): ValueRange {
     const given = this.peekType(expr, module);
 
     const type = this.types.definedType(given);
@@ -47,7 +47,7 @@ partial class ExpressionTypes {
     return this.intervals.clamped(type, computed);
   }
 
-  private computedRange(expr: Expr, type: Type, module: int): ValueRange {
+  private readonly computedRange(expr: Expr, type: Type, module: int): ValueRange {
     const constant = this.intConstant(expr, type, module);
     if (constant != undefined) {
       return this.intervals.exact(constant);
@@ -75,7 +75,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private nameRange(expr: NameExpr, type: Type, module: int): ValueRange {
+  private readonly nameRange(expr: NameExpr, type: Type, module: int): ValueRange {
     const key = this.pathKey(expr, module);
     if (key == undefined || type.kind != TypeKind.Int || type.wraps) {
       return {};
@@ -94,7 +94,7 @@ partial class ExpressionTypes {
     return this.intervals.meet(known, listed);
   }
 
-  private listedRange(list: Expr, module: int): ValueRange | undefined {
+  private readonly listedRange(list: Expr, module: int): ValueRange | undefined {
     if (list.kind != ExprKind.ArrayLit) {
       return undefined;
     }
@@ -118,7 +118,7 @@ partial class ExpressionTypes {
     return range;
   }
 
-  private widerRange(
+  private readonly widerRange(
     range: ValueRange | undefined,
     value: decimal,
   ): ValueRange {
@@ -130,7 +130,7 @@ partial class ExpressionTypes {
     return this.intervals.unite(range, exact);
   }
 
-  private rememberLoopElement(loop: ForOfStmt, module: int): void {
+  private readonly rememberLoopElement(loop: ForOfStmt, module: int): void {
     const range = this.listedRange(loop.iterable, module);
     const isPlain = loop.isConst && !loop.keys && !loop.isAwait;
     if (range != undefined && isPlain) {
@@ -138,10 +138,10 @@ partial class ExpressionTypes {
     }
   }
 
-  private rememberElementParam(
+  private readonly rememberElementParam(
     expr: CallExpr,
     member: MemberExpr,
-    plan: CallbackPlan | undefined,
+    plan: Read<CallbackPlan | undefined>,
     module: int,
   ): void {
     const callback = expr.args[0]?.expr;
@@ -165,7 +165,7 @@ partial class ExpressionTypes {
     this.elementRanges.set(`${module} ${param.loc}`, range);
   }
 
-  private indexFloor(
+  private readonly indexFloor(
     key: string,
     below: decimal | undefined,
   ): decimal | undefined {
@@ -177,9 +177,9 @@ partial class ExpressionTypes {
     return below;
   }
 
-  private rememberIndexParam(
+  private readonly rememberIndexParam(
     expr: CallExpr,
-    plan: CallbackPlan | undefined,
+    plan: Read<CallbackPlan | undefined>,
     module: int,
   ): void {
     const callback = expr.args[0]?.expr;
@@ -197,7 +197,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private oppositeOf(value: decimal | undefined): decimal | undefined {
+  private readonly oppositeOf(value: decimal | undefined): decimal | undefined {
     if (value == undefined) {
       return undefined;
     }
@@ -205,7 +205,7 @@ partial class ExpressionTypes {
     return -value;
   }
 
-  private memberRange(expr: MemberExpr): ValueRange {
+  private readonly memberRange(expr: MemberExpr): ValueRange {
     if (!kRangedLengths.includes(expr.name)) {
       return {};
     }
@@ -213,7 +213,7 @@ partial class ExpressionTypes {
     return { lo: 0, hi: kMostLength };
   }
 
-  private callRange(expr: CallExpr, module: int): ValueRange {
+  private readonly callRange(expr: CallExpr, module: int): ValueRange {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Member) {
       return {};
@@ -228,7 +228,7 @@ partial class ExpressionTypes {
     return this.minMaxRange(expr, callee, module);
   }
 
-  private minMaxRange(
+  private readonly minMaxRange(
     expr: CallExpr,
     callee: MemberExpr,
     module: int,
@@ -257,7 +257,7 @@ partial class ExpressionTypes {
     return range;
   }
 
-  private chosenRange(
+  private readonly chosenRange(
     isMin: boolean,
     first: ValueRange,
     second: ValueRange,
@@ -269,7 +269,7 @@ partial class ExpressionTypes {
     return this.intervals.upperOf(first, second);
   }
 
-  private unaryRange(expr: UnaryExpr, module: int): ValueRange {
+  private readonly unaryRange(expr: UnaryExpr, module: int): ValueRange {
     const operand = this.valueRange(expr.operand, module);
 
     switch (expr.op) {
@@ -284,7 +284,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private binaryRange(expr: BinaryExpr, module: int): ValueRange {
+  private readonly binaryRange(expr: BinaryExpr, module: int): ValueRange {
     const left = this.valueRange(expr.lhs, module);
     const right = this.valueRange(expr.rhs, module);
     if (expr.op == BinaryOp.Nullish) {

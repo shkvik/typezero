@@ -17,7 +17,7 @@ import {
 } from "../../bound-rules/const/bound-rules.const.tz";
 
 partial class ExpressionTypes {
-  private noteGuardExit(
+  private readonly noteGuardExit(
     value: Expr | undefined,
     frame: FunctionFrame,
     module: int,
@@ -42,7 +42,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private exitFacts(
+  private readonly exitFacts(
     value: Expr,
     isTrue: boolean,
     module: int,
@@ -56,9 +56,9 @@ partial class ExpressionTypes {
     return this.narrowings.mergedFacts(this.facts, facts);
   }
 
-  private rememberGuard(
+  private readonly rememberGuard(
     fn: FunctionDecl,
-    frame: FunctionFrame,
+    frame: Read<FunctionFrame>,
     module: int,
   ): void {
     if (fn.isGenerator) {
@@ -67,19 +67,17 @@ partial class ExpressionTypes {
 
     const params = fn.params.map((param) => `${module} ${param.loc}`);
     const guard = frame.guard;
-    const summary: GuardSummary = {
-      params,
-      whenTrue: this.projectedSide(guard, true, params),
-      whenFalse: this.projectedSide(guard, false, params),
-    };
+    const whenTrue = this.projectedSide(guard, true, params);
+    const whenFalse = this.projectedSide(guard, false, params);
+    const summary: GuardSummary = { params, whenTrue, whenFalse };
 
     this.guardSummaries.set(`${module} ${fn.loc}`, summary);
   }
 
-  private projectedSide(
-    guard: GuardBuild,
+  private readonly projectedSide(
+    guard: Read<GuardBuild>,
     isTrue: boolean,
-    params: string[],
+    params: Read<string[]>,
   ): Map<string, Type> | undefined {
     const side = this.narrowings.guardSide(guard, isTrue);
     if (side == undefined) {
@@ -100,7 +98,7 @@ partial class ExpressionTypes {
     return projected;
   }
 
-  private isParamBound(key: string, params: string[]): boolean {
+  private readonly isParamBound(key: string, params: Read<string[]>): boolean {
     const terms = this.bounds.boundTerms(key);
     if (terms.length == 0) {
       return false;
@@ -115,7 +113,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private summaryFacts(
+  private readonly summaryFacts(
     call: CallExpr,
     fn: FunctionDecl,
     home: int,
@@ -131,9 +129,9 @@ partial class ExpressionTypes {
     return this.summaryApplied(call, summary, isTrue, module);
   }
 
-  private summaryApplied(
+  private readonly summaryApplied(
     call: CallExpr,
-    summary: GuardSummary,
+    summary: Read<GuardSummary>,
     isTrue: boolean,
     module: int,
   ): Map<string, Type> {
@@ -159,9 +157,9 @@ partial class ExpressionTypes {
     return facts;
   }
 
-  private boundMoves(
+  private readonly boundMoves(
     call: CallExpr,
-    summary: GuardSummary,
+    summary: Read<GuardSummary>,
     module: int,
   ): Map<string, string> {
     const moves = new Map<string, string>();
@@ -185,9 +183,9 @@ partial class ExpressionTypes {
     return moves;
   }
 
-  private appliedFact(
+  private readonly appliedFact(
     call: CallExpr,
-    summary: GuardSummary,
+    summary: Read<GuardSummary>,
     key: string,
     narrowed: Type,
     facts: Map<string, Type>,
@@ -222,7 +220,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private currentOf(place: string, path: string, type: Type): Type | undefined {
+  private readonly currentOf(place: string, path: string, type: Type): Type | undefined {
     if (path == "") {
       return type;
     }
@@ -230,7 +228,7 @@ partial class ExpressionTypes {
     return this.knownFact(place);
   }
 
-  private keptByGuard(now: Type, narrowed: Type): Type | undefined {
+  private readonly keptByGuard(now: Type, narrowed: Type): Type | undefined {
     if (now.kind == TypeKind.Error || this.relation.converts(now, narrowed)) {
       return undefined;
     }

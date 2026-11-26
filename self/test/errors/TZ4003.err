@@ -1,0 +1,3 @@
+TZ4003.tz:2:3: error TZ4003: 'readonly' before a method means it only reads 'this'; a constructor has no 'this' to read
+  readonly constructor() {}
+  ^

@@ -24,7 +24,7 @@ import {
 import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
 
 partial class ExpressionTypes {
-  private streamNew(
+  private readonly streamNew(
     expr: NewExpr,
     decl: ClassDecl,
     home: int,
@@ -53,7 +53,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private reportAbstractStream(expr: NewExpr, name: string, module: int): void {
+  private readonly reportAbstractStream(expr: NewExpr, name: string, module: int): void {
     if (name == kReadableName) {
       this.report(module, expr.loc, Code.StreamAbstractReadable, kNoDetails);
 
@@ -70,7 +70,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private isWantedClass(
+  private readonly isWantedClass(
     wanted: Type | undefined,
     name: string,
     home: int,
@@ -89,7 +89,7 @@ partial class ExpressionTypes {
       );
   }
 
-  private hookedParameter(fn: FunctionDecl, param: Param, type: Type): Type {
+  private readonly hookedParameter(fn: FunctionDecl, param: Param, type: Type): Type {
     const isHook = kStreamHookNames.includes(fn.name);
     if (type.kind != TypeKind.Double || !isHook) {
       return type;
@@ -105,7 +105,7 @@ partial class ExpressionTypes {
     return wanted;
   }
 
-  private libraryHookType(fn: FunctionDecl): FunctionType | undefined {
+  private readonly libraryHookType(fn: FunctionDecl): FunctionType | undefined {
     const current = this.ownerClasses[this.ownerClasses.length - 1];
     if (current == undefined || current.decl.typeParams.length > 0) {
       return undefined;
@@ -139,7 +139,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private streamHookCheck(
+  private readonly streamHookCheck(
     method: FunctionDecl,
     decl: ClassDecl,
     parent: InstanceType,
@@ -155,7 +155,7 @@ partial class ExpressionTypes {
     this.report(module, method.loc, code, { word: method.name, first: hook });
   }
 
-  private hookCode(name: string): Code {
+  private readonly hookCode(name: string): Code {
     if (kStreamChunkHooks.includes(name)) {
       return Code.StreamHookOtherChunks;
     }
@@ -163,7 +163,7 @@ partial class ExpressionTypes {
     return Code.StreamHookOther;
   }
 
-  private streamHookVariant(
+  private readonly streamHookVariant(
     method: FunctionDecl,
     decl: ClassDecl,
     parent: InstanceType | undefined,

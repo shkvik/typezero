@@ -1,1 +1,2 @@
 export const kTypesWord = "types";
+export const kOwnershipFlag = "--ownership";

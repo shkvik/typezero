@@ -33,7 +33,7 @@ import {
 } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  private builtin(
+  private readonly builtin(
     name: string,
     ref: TypeRef,
     context: TypeContext,
@@ -63,7 +63,7 @@ partial class TypeResolver {
     return this.plain(plain.type);
   }
 
-  private generic(
+  private readonly generic(
     ref: TypeRef,
     row: GenericTypeName,
     context: TypeContext,
@@ -87,7 +87,7 @@ partial class TypeResolver {
 
     switch (row.type) {
       case GenericBuiltin.Array:
-        return this.listOf(ref, first, context);
+        return this.listOf(ref, first, false, context);
       case GenericBuiltin.Result:
         return this.store.resultOf(first, second);
       case GenericBuiltin.Promise:
@@ -102,12 +102,17 @@ partial class TypeResolver {
         return this.iterator(args, false);
       case GenericBuiltin.Constructor:
         return this.constructorType(ref, args, context);
+      case GenericBuiltin.Mode:
+        return first;
+      case GenericBuiltin.Interned:
+        this.store.markInterned(first);
+        return first;
       default:
         return this.iterator(args, true);
     }
   }
 
-  private iterator(args: Type[], async: boolean): Type {
+  private readonly iterator(args: Read<Type[]>, async: boolean): Type {
     const nothing = this.store.plain(TypeKind.Void);
     const yielded = args[0] ?? nothing;
     const returned = args[1] ?? nothing;
@@ -116,7 +121,7 @@ partial class TypeResolver {
     return this.store.iteratorOf({ yielded, returned, sent, async });
   }
 
-  private plain(type: PlainBuiltin): Type {
+  private readonly plain(type: PlainBuiltin): Type {
     switch (type) {
       case PlainBuiltin.Int:
         return this.store.integer(64, false);
@@ -161,7 +166,7 @@ partial class TypeResolver {
     }
   }
 
-  private countCode(row: GenericTypeName, count: int): Code {
+  private readonly countCode(row: GenericTypeName, count: int): Code {
     if (count == 0) {
       return row.few;
     }
@@ -169,7 +174,7 @@ partial class TypeResolver {
     return row.many;
   }
 
-  private builtinAliasCheck(module: int, decl: TypeAliasDecl): void {
+  private readonly builtinAliasCheck(module: int, decl: TypeAliasDecl): void {
     const name = decl.name;
     const isNumeric = kNumericNames.includes(name);
     const isBuiltin = isNumeric || kBuiltinNames.includes(name);
@@ -195,7 +200,7 @@ partial class TypeResolver {
     this.report(module, decl.loc, Code.BuiltinTypeRedefined, { word: name });
   }
 
-  private isBuiltinShadow(symbol: NameSymbol): boolean {
+  private readonly isBuiltinShadow(symbol: NameSymbol): boolean {
     if (symbol.kind != SymbolKind.TypeAlias) {
       return false;
     }
@@ -206,12 +211,12 @@ partial class TypeResolver {
     return isPlain || name == kArrayName;
   }
 
-  private keyedDict(
+  private readonly keyedDict(
     ref: TypeRef,
     dict: DictKind,
     key: Type,
     value: Type,
-    context: TypeContext,
+    context: Read<TypeContext>,
   ): Type {
     const written = ref.args[0];
     if (this.keyCheck(written, key, context.module)) {
@@ -221,7 +226,7 @@ partial class TypeResolver {
     return this.store.dictOf(dict, key, value);
   }
 
-  public keyCheck(
+  public readonly keyCheck(
     written: TypeRef | undefined,
     key: Type | undefined,
     module: int,
@@ -240,7 +245,7 @@ partial class TypeResolver {
     return true;
   }
 
-  private keyProblem(key: Type): Code | undefined {
+  private readonly keyProblem(key: Type): Code | undefined {
     if (key.kind == TypeKind.Unknown) {
       return Code.KeyUnknown;
     }

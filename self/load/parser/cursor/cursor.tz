@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import { KnownName, Token, TokenKind } from "../../token/types/token.types.tz";
 import { kTokenTable } from "../../token/const/token.const.tz";
 import { Span } from "../../../program/ast/types/ast.types.span.tz";
@@ -11,14 +12,14 @@ import { Mark } from "./types/cursor.types.tz";
 import { kEnd, kNotResumed } from "./const/cursor.const.tz";
 
 export class Cursor {
-  private readonly tokens: Token[];
+  private readonly tokens: readonly Token[];
   private at: int;
   private recovering: boolean;
   private discarding: int;
   private resumedAt: int;
-  public readonly errors: SourceError[];
+  public errors: SourceError[];
 
-  public constructor(tokens: Token[]) {
+  public constructor(tokens: readonly Token[]) {
     this.tokens = tokens;
     this.at = 0;
     this.recovering = false;
@@ -27,15 +28,15 @@ export class Cursor {
     this.errors = [];
   }
 
-  public peek(): Token {
+  public readonly peek(): Token {
     return this.tokens[this.at] ?? this.last();
   }
 
-  public lookahead(): Token {
+  public readonly lookahead(): Token {
     return this.tokens[this.at + 1] ?? this.last();
   }
 
-  public tokenAt(offset: int): Token {
+  public readonly tokenAt(offset: int): Token {
     return this.tokens[this.at + offset] ?? this.last();
   }
 
@@ -53,13 +54,13 @@ export class Cursor {
     }
   }
 
-  public is(kind: TokenKind): boolean {
+  public readonly is(kind: TokenKind): boolean {
     const token = this.peek();
 
     return token.kind == kind;
   }
 
-  public atName(): boolean {
+  public readonly atName(): boolean {
     const token = this.peek();
 
     return kTokenTable.isName(token.kind);
@@ -87,11 +88,11 @@ export class Cursor {
     return false;
   }
 
-  public insideList(close: TokenKind): boolean {
+  public readonly insideList(close: TokenKind): boolean {
     return !this.is(close) && !this.is(TokenKind.End);
   }
 
-  public atNameOrThis(): boolean {
+  public readonly atNameOrThis(): boolean {
     return this.atName() || this.is(TokenKind.This);
   }
 
@@ -135,7 +136,7 @@ export class Cursor {
     this.error(token.start, Code.ExpectedSemicolon, details);
   }
 
-  public spanFrom(start: int): Span {
+  public readonly spanFrom(start: int): Span {
     const end = this.previousEnd();
 
     if (end > start) {
@@ -162,13 +163,17 @@ export class Cursor {
     }
   }
 
+  public takeErrors(): SourceError[] {
+    return replace(this.errors, []);
+  }
+
   public report(loc: int, code: Code, details: Details = kNoDetails): void {
     if (!this.recovering) {
       this.record(loc, code, details);
     }
   }
 
-  public isRecovering(): boolean {
+  public readonly isRecovering(): boolean {
     return this.recovering;
   }
 
@@ -188,7 +193,7 @@ export class Cursor {
     this.discarding -= 1;
   }
 
-  public mark(): Mark {
+  public readonly mark(): Mark {
     return { at: this.at, recovering: this.recovering };
   }
 
@@ -197,7 +202,7 @@ export class Cursor {
     this.recovering = mark.recovering;
   }
 
-  public onlyOpenParens(from: int, to: int): boolean {
+  public readonly onlyOpenParens(from: int, to: int): boolean {
     if (from < 0) {
       return false;
     }
@@ -217,7 +222,7 @@ export class Cursor {
     return true;
   }
 
-  public symbolKeyAhead(): boolean {
+  public readonly symbolKeyAhead(): boolean {
     const next = this.lookahead();
 
     return this.is(TokenKind.LBracket) && next.known == KnownName.Symbol;
@@ -243,7 +248,7 @@ export class Cursor {
     }
   }
 
-  public statementEnded(): boolean {
+  public readonly statementEnded(): boolean {
     const last = this.tokens[this.at - 1];
     const next = this.peek();
     const closed =
@@ -300,7 +305,7 @@ export class Cursor {
     }
   }
 
-  public bracesMissing(): boolean {
+  public readonly bracesMissing(): boolean {
     let unclosed = 0;
 
     for (const token of this.tokens) {
@@ -408,7 +413,7 @@ export class Cursor {
     return false;
   }
 
-  private lineEnded(): boolean {
+  private readonly lineEnded(): boolean {
     const next = this.peek();
 
     switch (next.kind) {
@@ -421,13 +426,13 @@ export class Cursor {
     }
   }
 
-  private endedBySemicolon(from: int): boolean {
+  private readonly endedBySemicolon(from: int): boolean {
     const last = this.tokens[this.at - 1];
 
     return last?.kind == TokenKind.Semi && this.unclosedGroups(from) == 0;
   }
 
-  private unclosedGroups(from: int): int {
+  private readonly unclosedGroups(from: int): int {
     let unclosed = 0;
 
     for (let index = from; index < this.at; index++) {
@@ -450,7 +455,7 @@ export class Cursor {
     return unclosed;
   }
 
-  private unclosedBraces(from: int): int {
+  private readonly unclosedBraces(from: int): int {
     let unclosed = 0;
 
     for (let index = from; index < this.at; index++) {
@@ -471,13 +476,13 @@ export class Cursor {
     return unclosed;
   }
 
-  private reportedAt(loc: int): boolean {
+  private readonly reportedAt(loc: int): boolean {
     const last = this.errors[this.errors.length - 1];
 
     return last != undefined && last.loc == loc;
   }
 
-  private followsReport(): boolean {
+  private readonly followsReport(): boolean {
     const last = this.errors[this.errors.length - 1];
     const previous = this.tokens[this.at - 1];
     if (last == undefined || previous == undefined) {
@@ -487,7 +492,7 @@ export class Cursor {
     return last.loc >= previous.start;
   }
 
-  private previousEnd(): int {
+  private readonly previousEnd(): int {
     const previous = this.tokens[this.at - 1];
 
     if (previous == undefined) {
@@ -497,7 +502,7 @@ export class Cursor {
     return previous.end;
   }
 
-  private startsStatement(): boolean {
+  private readonly startsStatement(): boolean {
     const token = this.peek();
 
     switch (token.kind) {
@@ -543,7 +548,7 @@ export class Cursor {
     this.resumedAt = loc;
   }
 
-  private resumedOnLine(): boolean {
+  private readonly resumedOnLine(): boolean {
     const last = this.errors[this.errors.length - 1];
     if (last == undefined || last.loc != this.resumedAt) {
       return false;
@@ -562,7 +567,7 @@ export class Cursor {
     return true;
   }
 
-  private startsAction(): boolean {
+  private readonly startsAction(): boolean {
     const next = this.lookahead();
     if (!this.atName() || next.newline) {
       return false;
@@ -580,13 +585,13 @@ export class Cursor {
     }
   }
 
-  private namesAhead(): boolean {
+  private readonly namesAhead(): boolean {
     const next = this.lookahead();
 
     return kTokenTable.isName(next.kind) && !next.newline;
   }
 
-  private last(): Token {
+  private readonly last(): Token {
     return this.tokens[this.tokens.length - 1] ?? kEnd;
   }
 

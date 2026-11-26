@@ -9,7 +9,7 @@ import {
 import { ClassHome, TypeContext } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  private global(ref: TypeRef, context: TypeContext): Type {
+  private readonly global(ref: TypeRef, context: TypeContext): Type {
     if (ref.name == kNullTypeName) {
       return this.refusedNull(ref, context);
     }
@@ -38,11 +38,11 @@ partial class TypeResolver {
     return this.fromModule(ref, mentioned, ref.name, context);
   }
 
-  public namespaceModule(word: string): int | undefined {
+  public readonly namespaceModule(word: string): int | undefined {
     return this.namespaces.get(word);
   }
 
-  private mentionedModule(name: string): int | undefined {
+  private readonly mentionedModule(name: string): int | undefined {
     const row = kLibrary.global(name);
     if (row == undefined) {
       return undefined;
@@ -51,7 +51,7 @@ partial class TypeResolver {
     return this.moduleNamed(row.module);
   }
 
-  private memberModule(word: string, member: string): int | undefined {
+  private readonly memberModule(word: string, member: string): int | undefined {
     const rows = kLibrary.members();
     const row = rows.find((one) => one.owner == word && one.name == member);
     if (row == undefined) {
@@ -61,13 +61,13 @@ partial class TypeResolver {
     return this.moduleNamed(row.module);
   }
 
-  private moduleNamed(name: string): int | undefined {
+  private readonly moduleNamed(name: string): int | undefined {
     const module = this.program.modules.find((one) => one.name == name);
 
     return module?.id;
   }
 
-  private fromModule(
+  private readonly fromModule(
     ref: TypeRef,
     module: int | undefined,
     name: string,
@@ -117,11 +117,11 @@ partial class TypeResolver {
     return this.instance(home, params, written, parents);
   }
 
-  private isWeakTargetWrong(
+  private readonly isWeakTargetWrong(
     ref: TypeRef,
     name: string,
-    written: Type[],
-    context: TypeContext,
+    written: Read<Type[]>,
+    context: Read<TypeContext>,
   ): boolean {
     const target = written[0];
     const place = ref.args[0];

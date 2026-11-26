@@ -42,10 +42,10 @@ export class NarrowingRules {
   public constructor(
     store: TypeStore,
     text: TypeText,
-    relation: TypeRelation,
-    types: TypeQuestions,
-    modules: ModuleQuestions,
-    typeOfs: TypeOfRules,
+    relation: Own<TypeRelation>,
+    types: Own<TypeQuestions>,
+    modules: Own<ModuleQuestions>,
+    typeOfs: Own<TypeOfRules>,
   ) {
     this.store = store;
     this.text = text;
@@ -55,9 +55,9 @@ export class NarrowingRules {
     this.typeOfs = typeOfs;
   }
 
-  public joinedSide(
-    side: Map<string, Type> | undefined,
-    facts: Map<string, Type>,
+  public readonly joinedSide(
+    side: Read<Map<string, Type> | undefined>,
+    facts: Own<Map<string, Type>>,
   ): Map<string, Type> {
     if (side == undefined) {
       return facts;
@@ -66,23 +66,24 @@ export class NarrowingRules {
     return this.joinedFacts(side, facts);
   }
 
-  public guardSide(
-    guard: GuardBuild,
+  public readonly guardSide(
+    guard: Read<GuardBuild>,
     isTrue: boolean,
   ): Map<string, Type> | undefined {
-    if (isTrue) {
-      return guard.whenTrue;
+    const side = isTrue ? guard.whenTrue : guard.whenFalse;
+    if (side == undefined) {
+      return undefined;
     }
 
-    return guard.whenFalse;
+    return new Map<string, Type>(side);
   }
 
-  public isParamPath(key: string, param: string): boolean {
+  public readonly isParamPath(key: string, param: string): boolean {
     return key == param || key.startsWith(param + kDot);
   }
 
-  public summarySide(
-    summary: GuardSummary,
+  public readonly summarySide(
+    summary: Read<GuardSummary>,
     isTrue: boolean,
   ): Map<string, Type> | undefined {
     if (isTrue) {
@@ -92,7 +93,7 @@ export class NarrowingRules {
     return summary.whenFalse;
   }
 
-  public isBooleanFunction(type: Type): boolean {
+  public readonly isBooleanFunction(type: Type): boolean {
     if (type.kind != TypeKind.Function) {
       return false;
     }
@@ -102,11 +103,11 @@ export class NarrowingRules {
     return result.kind == TypeKind.Boolean;
   }
 
-  public isListType(type: Type): boolean {
+  public readonly isListType(type: Type): boolean {
     return type.kind == TypeKind.Array || type.kind == TypeKind.Tuple;
   }
 
-  public isOwnReceiver(type: Type): boolean {
+  public readonly isOwnReceiver(type: Type): boolean {
     const parts = this.types.unionMembers(type);
 
     return parts.some(
@@ -116,9 +117,9 @@ export class NarrowingRules {
     );
   }
 
-  public unknownFields(
+  public readonly unknownFields(
     key: string,
-    fields: ObjectField[],
+    fields: Read<ObjectField[]>,
     facts: Map<string, Type>,
   ): void {
     const unknown = this.store.plain(TypeKind.Error);
@@ -130,7 +131,7 @@ export class NarrowingRules {
     }
   }
 
-  public isGuardable(type: Type): boolean {
+  public readonly isGuardable(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.Union:
         return true;
@@ -141,9 +142,9 @@ export class NarrowingRules {
     }
   }
 
-  public mergedFacts(
-    first: Map<string, Type>,
-    second: Map<string, Type>,
+  public readonly mergedFacts(
+    first: Read<Map<string, Type>>,
+    second: Read<Map<string, Type>>,
   ): Map<string, Type> {
     const merged = new Map<string, Type>();
 
@@ -158,9 +159,9 @@ export class NarrowingRules {
     return merged;
   }
 
-  public joinedFacts(
-    first: Map<string, Type>,
-    second: Map<string, Type>,
+  public readonly joinedFacts(
+    first: Read<Map<string, Type>>,
+    second: Read<Map<string, Type>>,
   ): Map<string, Type> {
     const joined = new Map<string, Type>();
 
@@ -176,7 +177,7 @@ export class NarrowingRules {
     return joined;
   }
 
-  public comparedPath(expr: Expr): Expr {
+  public readonly comparedPath(expr: Expr): Expr {
     if (expr.kind == ExprKind.Assign && expr.op == undefined) {
       return expr.target;
     }
@@ -184,7 +185,7 @@ export class NarrowingRules {
     return expr;
   }
 
-  public tagOf(expr: Expr): MemberExpr | undefined {
+  public readonly tagOf(expr: Expr): MemberExpr | undefined {
     if (expr.kind == ExprKind.OptionalChain) {
       return this.tagOf(expr.chain);
     }
@@ -195,7 +196,7 @@ export class NarrowingRules {
     return expr;
   }
 
-  public flatMembers(type: Type): Type[] {
+  public readonly flatMembers(type: Type): Type[] {
     if (type.kind != TypeKind.Union) {
       return [type];
     }
@@ -211,7 +212,7 @@ export class NarrowingRules {
     return flat;
   }
 
-  public sideOf(isFirst: boolean, first: Expr, second: Expr): Expr {
+  public readonly sideOf(isFirst: boolean, first: Expr, second: Expr): Expr {
     if (isFirst) {
       return first;
     }
@@ -219,7 +220,7 @@ export class NarrowingRules {
     return second;
   }
 
-  public undefinedCompared(type: Type, isEqual: boolean): Type | undefined {
+  public readonly undefinedCompared(type: Type, isEqual: boolean): Type | undefined {
     if (!this.types.isOptional(type)) {
       return undefined;
     }
@@ -230,7 +231,7 @@ export class NarrowingRules {
     return this.types.definedType(type);
   }
 
-  public literalPart(type: Type, literal: Type): Type | undefined {
+  public readonly literalPart(type: Type, literal: Type): Type | undefined {
     const parts = this.types.unionMembers(type);
     if (parts.includes(literal)) {
       return literal;
@@ -244,7 +245,7 @@ export class NarrowingRules {
     return undefined;
   }
 
-  public withoutPart(type: Type, literal: Type): Type | undefined {
+  public readonly withoutPart(type: Type, literal: Type): Type | undefined {
     const parts = this.types.unionMembers(type);
     if (!parts.includes(literal)) {
       return undefined;
@@ -258,7 +259,7 @@ export class NarrowingRules {
     return this.store.unionOf(kept);
   }
 
-  public typeofType(
+  public readonly typeofType(
     type: Type,
     name: string,
     isEqual: boolean,
@@ -291,7 +292,7 @@ export class NarrowingRules {
     return this.store.unionOf(kept);
   }
 
-  public isInstanceOf(part: Type, name: string): boolean {
+  public readonly isInstanceOf(part: Type, name: string): boolean {
     switch (part.kind) {
       case TypeKind.Instance:
         return part.name == name;
@@ -306,13 +307,13 @@ export class NarrowingRules {
     }
   }
 
-  public isInstanceMethod(fn: FunctionDecl): boolean {
+  public readonly isInstanceMethod(fn: FunctionDecl): boolean {
     const method = fn.role?.method;
 
     return method == MethodKind.Instance || method == MethodKind.Abstract;
   }
 
-  public predicateParam(fn: FunctionDecl, name: string): Param | undefined {
+  public readonly predicateParam(fn: FunctionDecl, name: string): Param | undefined {
     let found: Param | undefined = undefined;
 
     for (const param of fn.params) {
@@ -324,7 +325,7 @@ export class NarrowingRules {
     return found;
   }
 
-  public shownPredicate(written: TypeRef, guarded: Type | undefined): string {
+  public readonly shownPredicate(written: TypeRef, guarded: Type | undefined): string {
     if (guarded == undefined) {
       return written.name;
     }
@@ -334,7 +335,7 @@ export class NarrowingRules {
     return `${written.name} is ${type}`;
   }
 
-  public assertsAdvice(shown: string, guarded: Type | undefined): string {
+  public readonly assertsAdvice(shown: string, guarded: Type | undefined): string {
     if (guarded == undefined) {
       return "boolean";
     }
@@ -342,7 +343,7 @@ export class NarrowingRules {
     return shown;
   }
 
-  public thisPredicateCheck(
+  public readonly thisPredicateCheck(
     fn: FunctionDecl,
     written: TypeRef,
   ): SourceError | undefined {
@@ -357,7 +358,7 @@ export class NarrowingRules {
     };
   }
 
-  private openPart(part: Type, name: string, isEqual: boolean): Type {
+  private readonly openPart(part: Type, name: string, isEqual: boolean): Type {
     const row = kTypeOfTypes.find((one) => one.name == name);
     if (isEqual && name == kArrayTypeOf && part.kind == TypeKind.Unknown) {
       return this.store.arrayOf(part);

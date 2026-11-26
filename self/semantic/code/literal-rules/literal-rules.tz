@@ -25,17 +25,17 @@ export class LiteralRules {
   private readonly types: TypeQuestions;
   private readonly text: TypeText;
 
-  public constructor(store: TypeStore, types: TypeQuestions, text: TypeText) {
+  public constructor(store: TypeStore, types: Own<TypeQuestions>, text: TypeText) {
     this.store = store;
     this.types = types;
     this.text = text;
   }
 
-  public plainLiteral(kind: LiteralKind, text: string): LiteralValue {
+  public readonly plainLiteral(kind: LiteralKind, text: string): LiteralValue {
     return { kind, text, whole: 0, negative: false };
   }
 
-  public signedLiteral(expr: UnaryExpr): LiteralValue | undefined {
+  public readonly signedLiteral(expr: UnaryExpr): LiteralValue | undefined {
     const operand = expr.operand;
     const negative = expr.op == UnaryOp.Neg;
     if (!negative && expr.op != UnaryOp.Plus) {
@@ -57,10 +57,10 @@ export class LiteralRules {
     return { kind: LiteralKind.Int, text, whole, negative: isBelow };
   }
 
-  public fractionTyped(
+  public readonly fractionTyped(
     expr: Expr,
     literal: LiteralValue,
-    parts: Type[],
+    parts: Read<Type[]>,
     base: Type,
   ): Type {
     if (this.hasLiteral(parts, LiteralKind.Double)) {
@@ -77,7 +77,7 @@ export class LiteralRules {
     return target ?? base;
   }
 
-  public literalPlace(expr: Expr): int {
+  public readonly literalPlace(expr: Expr): int {
     if (expr.kind == ExprKind.Unary) {
       return expr.operand.loc;
     }
@@ -85,7 +85,7 @@ export class LiteralRules {
     return expr.loc;
   }
 
-  public fits(literal: LiteralValue, target: IntType): boolean {
+  public readonly fits(literal: LiteralValue, target: IntType): boolean {
     const limit = kIntLimits.find(
       (row) => row.bits == target.bits && row.unsigned == target.unsigned,
     );
@@ -99,13 +99,13 @@ export class LiteralRules {
     return literal.whole <= limit.highest;
   }
 
-  public hasLiteral(parts: Type[], kind: LiteralKind): boolean {
+  public readonly hasLiteral(parts: Read<Type[]>, kind: LiteralKind): boolean {
     return parts.some(
       (part) => part.kind == TypeKind.Literal && part.literal == kind,
     );
   }
 
-  public isTextual(part: Type): boolean {
+  public readonly isTextual(part: Type): boolean {
     if (part.kind == TypeKind.Template) {
       return true;
     }
@@ -113,7 +113,7 @@ export class LiteralRules {
     return part.kind == TypeKind.Literal && part.literal == LiteralKind.String;
   }
 
-  public templated(wanted: Type | undefined): Type {
+  public readonly templated(wanted: Type | undefined): Type {
     const text = this.store.plain(TypeKind.String);
     const parts = this.types.definedParts(wanted ?? text);
     if (parts.some((part) => this.isTextual(part))) {
@@ -123,7 +123,7 @@ export class LiteralRules {
     return text;
   }
 
-  public textChoice(texts: string[], wanted: Type): Type | undefined {
+  public readonly textChoice(texts: Read<string[]>, wanted: Type): Type | undefined {
     const parts = this.types.definedParts(wanted);
     if (!parts.some((part) => this.isTextual(part))) {
       return undefined;
@@ -136,7 +136,7 @@ export class LiteralRules {
     return this.store.unionOf(literals);
   }
 
-  public nullTyped(expr: NameExpr, wanted: Type | undefined): Checked<Type> {
+  public readonly nullTyped(expr: NameExpr, wanted: Type | undefined): Checked<Type> {
     const target = this.types.wantedPart(wanted);
     if (target != undefined && target.kind == TypeKind.Json) {
       return { value: target };
@@ -148,10 +148,10 @@ export class LiteralRules {
     };
   }
 
-  public wholeTyped(
+  public readonly wholeTyped(
     expr: Expr,
     literal: LiteralValue,
-    parts: Type[],
+    parts: Read<Type[]>,
     base: Type,
   ): Checked<Type> {
     const exact = this.store.literal(LiteralKind.Int, literal.text);
@@ -189,7 +189,7 @@ export class LiteralRules {
     };
   }
 
-  private signedDouble(value: double, negative: boolean): double {
+  private readonly signedDouble(value: double, negative: boolean): double {
     if (negative) {
       return -value;
     }
@@ -197,7 +197,7 @@ export class LiteralRules {
     return value;
   }
 
-  private signedText(whole: uint64, negative: boolean): string {
+  private readonly signedText(whole: uint64, negative: boolean): string {
     if (negative) {
       return `-${whole}`;
     }

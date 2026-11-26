@@ -22,7 +22,7 @@ import {
 } from "../../../code/expression-types/const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private callFacts(
+  private readonly callFacts(
     call: CallExpr,
     isTrue: boolean,
     module: int,
@@ -49,7 +49,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private isArrayCheck(callee: Expr, module: int): boolean {
+  private readonly isArrayCheck(callee: Expr, module: int): boolean {
     if (callee.kind != ExprKind.Member || callee.name != kIsArrayName) {
       return false;
     }
@@ -63,7 +63,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private arrayFacts(
+  private readonly arrayFacts(
     call: CallExpr,
     isTrue: boolean,
     module: int,
@@ -106,7 +106,7 @@ partial class ExpressionTypes {
     return facts;
   }
 
-  private isJsonCheck(callee: MemberExpr, module: int): boolean {
+  private readonly isJsonCheck(callee: MemberExpr, module: int): boolean {
     const object = callee.object;
 
     return (
@@ -117,7 +117,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private jsonFacts(
+  private readonly jsonFacts(
     call: CallExpr,
     isTrue: boolean,
     module: int,
@@ -136,7 +136,7 @@ partial class ExpressionTypes {
     return facts;
   }
 
-  private functionGuardFacts(
+  private readonly functionGuardFacts(
     call: CallExpr,
     callee: NameExpr,
     isTrue: boolean,
@@ -173,7 +173,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private predicateFacts(
+  private readonly predicateFacts(
     call: CallExpr,
     fn: FunctionDecl,
     home: int,
@@ -205,7 +205,7 @@ partial class ExpressionTypes {
     return this.guardedFacts(arg.expr, guarded, isTrue, home);
   }
 
-  private guardedFacts(
+  private readonly guardedFacts(
     expr: Expr,
     guarded: Type,
     isTrue: boolean,
@@ -233,7 +233,7 @@ partial class ExpressionTypes {
     return facts;
   }
 
-  private methodGuardFacts(
+  private readonly methodGuardFacts(
     call: CallExpr,
     callee: MemberExpr,
     isTrue: boolean,
@@ -259,7 +259,7 @@ partial class ExpressionTypes {
     return this.unknownFacts(values, module);
   }
 
-  private methodSummaryFacts(
+  private readonly methodSummaryFacts(
     call: CallExpr,
     callee: MemberExpr,
     isTrue: boolean,
@@ -295,7 +295,7 @@ partial class ExpressionTypes {
     return this.summaryApplied(call, summary, isTrue, module);
   }
 
-  private unknownFacts(values: Expr[], module: int): Map<string, Type> {
+  private readonly unknownFacts(values: Read<Expr[]>, module: int): Map<string, Type> {
     const facts = new Map<string, Type>();
     const unknown = this.store.plain(TypeKind.Error);
 

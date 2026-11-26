@@ -35,7 +35,7 @@ import {
 } from "./const/fetch-rules.const.tz";
 
 export class FetchRules {
-  public urlTextError(
+  public readonly urlTextError(
     loc: int,
     text: string,
     isBased: boolean,
@@ -49,17 +49,17 @@ export class FetchRules {
     return { code: Code.UrlNotValid, loc, details: { word: text, other } };
   }
 
-  public urlUnknownError(loc: int, isBased: boolean): SourceError {
+  public readonly urlUnknownError(loc: int, isBased: boolean): SourceError {
     const other = this.basedHint(isBased);
 
     return { code: Code.UrlNewUnknown, loc, details: { other } };
   }
 
-  public urlBaseError(loc: int): SourceError {
+  public readonly urlBaseError(loc: int): SourceError {
     return { code: Code.UrlNewBase, loc, details: kNoDetails };
   }
 
-  public requestUrlError(loc: int, text: string): SourceError | undefined {
+  public readonly requestUrlError(loc: int, text: string): SourceError | undefined {
     if (!this.isValidUrlText(text, false)) {
       return { code: Code.UrlNotValid, loc, details: { word: text, other: "" } };
     }
@@ -70,11 +70,11 @@ export class FetchRules {
     return undefined;
   }
 
-  public requestUnknownError(loc: int): SourceError {
+  public readonly requestUnknownError(loc: int): SourceError {
     return { code: Code.RequestUnknownInput, loc, details: kNoDetails };
   }
 
-  public methodError(loc: int, method: string): SourceError | undefined {
+  public readonly methodError(loc: int, method: string): SourceError | undefined {
     if (!this.isToken(method)) {
       return {
         code: Code.RequestMethodInvalid,
@@ -95,11 +95,11 @@ export class FetchRules {
     return undefined;
   }
 
-  public isBodiless(method: string): boolean {
+  public readonly isBodiless(method: string): boolean {
     return kBodilessMethods.includes(method);
   }
 
-  public getBodyError(loc: int, method: string, isGiven: boolean): SourceError {
+  public readonly getBodyError(loc: int, method: string, isGiven: boolean): SourceError {
     const other = this.implicitHint(isGiven);
 
     return {
@@ -109,7 +109,7 @@ export class FetchRules {
     };
   }
 
-  public headerNameError(loc: int, name: string): SourceError | undefined {
+  public readonly headerNameError(loc: int, name: string): SourceError | undefined {
     if (this.isToken(name)) {
       return undefined;
     }
@@ -117,7 +117,7 @@ export class FetchRules {
     return { code: Code.HeaderNameNotToken, loc, details: { word: name } };
   }
 
-  public headerValueError(loc: int, text: string): SourceError | undefined {
+  public readonly headerValueError(loc: int, text: string): SourceError | undefined {
     if (this.isValidHeaderValue(text)) {
       return undefined;
     }
@@ -125,7 +125,7 @@ export class FetchRules {
     return { code: Code.HeaderValueBreak, loc, details: kNoDetails };
   }
 
-  public noBodyError(loc: int, status: decimal): SourceError {
+  public readonly noBodyError(loc: int, status: decimal): SourceError {
     return {
       code: Code.ResponseStatusNoBody,
       loc,
@@ -133,7 +133,7 @@ export class FetchRules {
     };
   }
 
-  public statusTextError(loc: int, text: string): SourceError | undefined {
+  public readonly statusTextError(loc: int, text: string): SourceError | undefined {
     const units = this.unitsOf(text);
     if (units.every((unit) => this.isReasonUnit(unit))) {
       return undefined;
@@ -142,7 +142,7 @@ export class FetchRules {
     return { code: Code.ResponseStatusText, loc, details: kNoDetails };
   }
 
-  public setterError(
+  public readonly setterError(
     loc: int,
     setter: string,
     value: string,
@@ -163,7 +163,7 @@ export class FetchRules {
     }
   }
 
-  public isValidUrlText(text: string, isRelative: boolean): boolean {
+  public readonly isValidUrlText(text: string, isRelative: boolean): boolean {
     const trimmed = this.trimmed(text);
     const colon = trimmed.indexOf(":");
     if (!this.hasScheme(trimmed, colon)) {
@@ -183,7 +183,7 @@ export class FetchRules {
     return this.isHostPortValid(hostPort);
   }
 
-  private requestHrefError(loc: int, value: string): SourceError | undefined {
+  private readonly requestHrefError(loc: int, value: string): SourceError | undefined {
     if (this.isValidUrlText(value, false)) {
       return undefined;
     }
@@ -191,7 +191,7 @@ export class FetchRules {
     return { code: Code.UrlNotValid, loc, details: { word: value, other: "" } };
   }
 
-  private protocolError(loc: int, value: string): SourceError | undefined {
+  private readonly protocolError(loc: int, value: string): SourceError | undefined {
     const scheme = this.withoutColon(value);
     const first = scheme.slice(0, 1);
     const isGood =
@@ -205,7 +205,7 @@ export class FetchRules {
     return { code: Code.UrlNotProtocol, loc, details: { word: value } };
   }
 
-  private portError(loc: int, value: string): SourceError | undefined {
+  private readonly portError(loc: int, value: string): SourceError | undefined {
     if (value == "" || this.isValidPort(value)) {
       return undefined;
     }
@@ -213,7 +213,7 @@ export class FetchRules {
     return { code: Code.UrlNotPort, loc, details: { word: value } };
   }
 
-  private hostError(
+  private readonly hostError(
     loc: int,
     value: string,
     hasPort: boolean,
@@ -231,7 +231,7 @@ export class FetchRules {
     return { code: Code.UrlNotHost, loc, details: { word: value, other } };
   }
 
-  private settableHost(value: string, hasPort: boolean): string {
+  private readonly settableHost(value: string, hasPort: boolean): string {
     if (!hasPort) {
       return value;
     }
@@ -247,7 +247,7 @@ export class FetchRules {
     return value.slice(0, close + 1);
   }
 
-  private portAfter(tail: string): string {
+  private readonly portAfter(tail: string): string {
     if (tail.startsWith(":")) {
       return tail.slice(1);
     }
@@ -255,7 +255,7 @@ export class FetchRules {
     return tail;
   }
 
-  private isHostPortValid(hostPort: string): boolean {
+  private readonly isHostPortValid(hostPort: string): boolean {
     if (!hostPort.startsWith("[")) {
       const host = this.beforeColon(hostPort);
       const port = hostPort.slice(host.length + 1);
@@ -279,7 +279,7 @@ export class FetchRules {
     return this.isValidHost(host) && (port == "" || this.isValidPort(port));
   }
 
-  private isValidHost(host: string): boolean {
+  private readonly isValidHost(host: string): boolean {
     if (host == "") {
       return false;
     }
@@ -290,7 +290,7 @@ export class FetchRules {
     return this.unitsOf(host).every((unit) => this.isHostUnit(unit));
   }
 
-  private isBracketHost(host: string): boolean {
+  private readonly isBracketHost(host: string): boolean {
     if (!host.endsWith("]") || host.length < 3) {
       return false;
     }
@@ -300,14 +300,14 @@ export class FetchRules {
     return inner.split("").every((char) => this.isAddressChar(char));
   }
 
-  private isAddressChar(char: string): boolean {
+  private readonly isAddressChar(char: string): boolean {
     const lowered = char.toLowerCase();
     const isHex = kDigits.includes(char) || (lowered >= "a" && lowered <= "f");
 
     return isHex || kAddressMarks.includes(char);
   }
 
-  private isHostUnit(unit: int): boolean {
+  private readonly isHostUnit(unit: int): boolean {
     const char = String.fromCharCode(unit);
 
     return (
@@ -315,7 +315,7 @@ export class FetchRules {
     );
   }
 
-  private isValidPort(port: string): boolean {
+  private readonly isValidPort(port: string): boolean {
     const isDigits = port.split("").every((char) => kDigits.includes(char));
     if (!isDigits || port.length > kPortDigits) {
       return false;
@@ -324,7 +324,7 @@ export class FetchRules {
     return this.portNumber(port) <= kHighestPort;
   }
 
-  private portNumber(port: string): int {
+  private readonly portNumber(port: string): int {
     let value = 0;
 
     for (let index = 0; index < port.length && index < kPortDigits; index++) {
@@ -336,7 +336,7 @@ export class FetchRules {
     return value;
   }
 
-  private hasScheme(text: string, colon: int): boolean {
+  private readonly hasScheme(text: string, colon: int): boolean {
     if (colon <= 0 || !this.isLetter(text.slice(0, 1))) {
       return false;
     }
@@ -346,7 +346,7 @@ export class FetchRules {
     return scheme.split("").every((char) => this.isSchemeChar(char));
   }
 
-  private isSchemeChar(char: string): boolean {
+  private readonly isSchemeChar(char: string): boolean {
     return (
       this.isLetter(char) ||
       kDigits.includes(char) ||
@@ -354,11 +354,11 @@ export class FetchRules {
     );
   }
 
-  private isLetter(char: string): boolean {
+  private readonly isLetter(char: string): boolean {
     return (char >= "a" && char <= "z") || (char >= "A" && char <= "Z");
   }
 
-  private isToken(text: string): boolean {
+  private readonly isToken(text: string): boolean {
     if (text == "") {
       return false;
     }
@@ -366,7 +366,7 @@ export class FetchRules {
     return text.split("").every((char) => this.isTokenChar(char));
   }
 
-  private isTokenChar(char: string): boolean {
+  private readonly isTokenChar(char: string): boolean {
     return (
       this.isLetter(char) ||
       kDigits.includes(char) ||
@@ -374,7 +374,7 @@ export class FetchRules {
     );
   }
 
-  private isValidHeaderValue(text: string): boolean {
+  private readonly isValidHeaderValue(text: string): boolean {
     const units = this.unitsOf(text);
     let start = 0;
     let end = units.length;
@@ -392,7 +392,7 @@ export class FetchRules {
     return inner.every((unit) => !this.isBreakUnit(unit));
   }
 
-  private isHttpSpace(unit: int): boolean {
+  private readonly isHttpSpace(unit: int): boolean {
     return (
       unit == kSpaceCode ||
       unit == kTabCode ||
@@ -401,18 +401,18 @@ export class FetchRules {
     );
   }
 
-  private isBreakUnit(unit: int): boolean {
+  private readonly isBreakUnit(unit: int): boolean {
     return unit == 0 || unit == kNewlineCode || unit == kReturnCode;
   }
 
-  private isReasonUnit(unit: int): boolean {
+  private readonly isReasonUnit(unit: int): boolean {
     const isVisible = unit >= kSpaceCode && unit <= kLastVisibleCode;
     const isHigh = unit >= kHighFirstCode && unit <= kHighLastCode;
 
     return unit == kTabCode || isVisible || isHigh;
   }
 
-  private hasCredentials(url: string): boolean {
+  private readonly hasCredentials(url: string): boolean {
     const scheme = url.indexOf(kSchemeEnd);
     if (scheme < 0) {
       return false;
@@ -423,7 +423,7 @@ export class FetchRules {
     return this.authorityOf(rest).includes("@");
   }
 
-  private authorityOf(rest: string): string {
+  private readonly authorityOf(rest: string): string {
     let end = 0;
 
     while (end < rest.length && !this.isAuthorityEnd(rest, end)) {
@@ -433,11 +433,11 @@ export class FetchRules {
     return rest.slice(0, end);
   }
 
-  private isAuthorityEnd(text: string, at: int): boolean {
+  private readonly isAuthorityEnd(text: string, at: int): boolean {
     return kAuthorityEnds.includes(text.slice(at, at + 1));
   }
 
-  private withoutSlashes(text: string): string {
+  private readonly withoutSlashes(text: string): string {
     let start = 0;
 
     while (start < text.length && this.isSlash(text.slice(start, start + 1))) {
@@ -447,11 +447,11 @@ export class FetchRules {
     return text.slice(start);
   }
 
-  private isSlash(char: string): boolean {
+  private readonly isSlash(char: string): boolean {
     return char == "/" || char == "\\";
   }
 
-  private trimmed(text: string): string {
+  private readonly trimmed(text: string): string {
     let start = 0;
     let end = text.length;
 
@@ -466,7 +466,7 @@ export class FetchRules {
     return text.slice(start, end);
   }
 
-  private beforeColon(text: string): string {
+  private readonly beforeColon(text: string): string {
     const colon = text.indexOf(":");
     if (colon < 0) {
       return text;
@@ -475,7 +475,7 @@ export class FetchRules {
     return text.slice(0, colon);
   }
 
-  private withoutColon(text: string): string {
+  private readonly withoutColon(text: string): string {
     if (text.endsWith(":")) {
       return text.slice(0, text.length - 1);
     }
@@ -483,7 +483,7 @@ export class FetchRules {
     return text;
   }
 
-  private unitsOf(text: string): int[] {
+  private readonly unitsOf(text: string): int[] {
     const units: int[] = [];
 
     for (let index = 0; index < text.length; index++) {
@@ -493,7 +493,7 @@ export class FetchRules {
     return units;
   }
 
-  private baseHint(isBased: boolean): string {
+  private readonly baseHint(isBased: boolean): string {
     if (isBased) {
       return "";
     }
@@ -501,7 +501,7 @@ export class FetchRules {
     return kNoBase;
   }
 
-  private basedHint(isBased: boolean): string {
+  private readonly basedHint(isBased: boolean): string {
     if (isBased) {
       return kWithBase;
     }
@@ -509,7 +509,7 @@ export class FetchRules {
     return "";
   }
 
-  private portHint(hasPort: boolean): string {
+  private readonly portHint(hasPort: boolean): string {
     if (hasPort) {
       return kWithPort;
     }
@@ -517,7 +517,7 @@ export class FetchRules {
     return "";
   }
 
-  private implicitHint(isGiven: boolean): string {
+  private readonly implicitHint(isGiven: boolean): string {
     if (isGiven) {
       return "";
     }

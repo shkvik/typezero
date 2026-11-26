@@ -16,7 +16,7 @@ import { kUnsupportedMark } from "../../../../code/expression-types/const/expres
 import { kResultMethods } from "../../../result-rules/const/result-rules.const.tz";
 
 partial class ExpressionTypes {
-  private resultFacts(
+  private readonly resultFacts(
     call: CallExpr,
     callee: MemberExpr,
     isTrue: boolean,
@@ -52,7 +52,7 @@ partial class ExpressionTypes {
     return facts;
   }
 
-  private resultMemberRead(
+  private readonly resultMemberRead(
     expr: MemberExpr,
     result: ResultType,
     module: int,
@@ -64,7 +64,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private resultMethodCall(
+  private readonly resultMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     result: ResultType,
@@ -109,7 +109,7 @@ partial class ExpressionTypes {
     return this.resultMethodTyped(expr, member, result, wanted, module);
   }
 
-  private resultMethodTyped(
+  private readonly resultMethodTyped(
     expr: CallExpr,
     member: MemberExpr,
     result: ResultType,
@@ -147,7 +147,7 @@ partial class ExpressionTypes {
     return this.resultCallTyped(name, first, result, returned, module);
   }
 
-  private resultCallback(
+  private readonly resultCallback(
     arg: Expr,
     half: Type,
     hint: Type | undefined,
@@ -173,7 +173,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private resultCallTyped(
+  private readonly resultCallTyped(
     name: string,
     arg: Expr,
     result: ResultType,
@@ -195,7 +195,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private chainedTyped(
+  private readonly chainedTyped(
     name: string,
     arg: Expr,
     result: ResultType,
@@ -225,7 +225,7 @@ partial class ExpressionTypes {
     return this.store.resultOf(result.value, common);
   }
 
-  private orElseTyped(
+  private readonly orElseTyped(
     arg: Expr,
     result: ResultType,
     returned: Type,
@@ -250,7 +250,7 @@ partial class ExpressionTypes {
     return this.store.resultOf(common, next.error);
   }
 
-  private notResultReport(
+  private readonly notResultReport(
     name: string,
     arg: Expr,
     returned: Type,
@@ -263,7 +263,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private resultHalfJoin(first: Type, second: Type): Type | undefined {
+  private readonly resultHalfJoin(first: Type, second: Type): Type | undefined {
     if (first == second || second.kind == TypeKind.Never) {
       return first;
     }
@@ -285,7 +285,7 @@ partial class ExpressionTypes {
     return joined;
   }
 
-  private resultUnionWhy(first: Type, second: Type): string {
+  private readonly resultUnionWhy(first: Type, second: Type): string {
     if (first.kind == TypeKind.Void || second.kind == TypeKind.Void) {
       return ": one of them is nothing, 'ok()'";
     }
@@ -302,7 +302,7 @@ partial class ExpressionTypes {
     return `: ${full.slice(mark + kUnsupportedMark.length)}`;
   }
 
-  private unwrapOrTyped(arg: Expr, result: ResultType, module: int): Type {
+  private readonly unwrapOrTyped(arg: Expr, result: ResultType, module: int): Type {
     const value = result.value;
     const isGiving =
       value.kind != TypeKind.Never && value.kind != TypeKind.Void;
@@ -325,7 +325,7 @@ partial class ExpressionTypes {
     return joined;
   }
 
-  private matchTyped(
+  private readonly matchTyped(
     expr: CallExpr,
     member: MemberExpr,
     result: ResultType,
@@ -366,7 +366,7 @@ partial class ExpressionTypes {
     return this.matchJoined(member, first, second, module);
   }
 
-  private matchJoined(
+  private readonly matchJoined(
     member: MemberExpr,
     first: Type,
     second: Type,

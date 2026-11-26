@@ -50,10 +50,10 @@ export class ByteSourceRules {
 
   public constructor(
     text: TypeText,
-    types: TypeQuestions,
-    bytes: BytesRules,
-    byteNumbers: ByteNumberRules,
-    modules: ModuleQuestions,
+    types: Own<TypeQuestions>,
+    bytes: Own<BytesRules>,
+    byteNumbers: Own<ByteNumberRules>,
+    modules: Own<ModuleQuestions>,
   ) {
     this.text = text;
     this.types = types;
@@ -62,13 +62,13 @@ export class ByteSourceRules {
     this.modules = modules;
   }
 
-  public isArrayBuffer(type: Type): boolean {
+  public readonly isArrayBuffer(type: Type): boolean {
     const base = this.types.definedType(type);
 
     return base.kind == TypeKind.Instance && base.name == kArrayBufferClass;
   }
 
-  public typedName(type: Type): string | undefined {
+  public readonly typedName(type: Type): string | undefined {
     const base = this.types.definedType(type);
     if (base.kind != TypeKind.Instance) {
       return undefined;
@@ -80,7 +80,7 @@ export class ByteSourceRules {
     return base.name;
   }
 
-  public infoOf(type: Type): ByteKindInfo | undefined {
+  public readonly infoOf(type: Type): ByteKindInfo | undefined {
     const element = this.bytes.elementOf(type);
     if (element == undefined || this.bytes.isClamped(type)) {
       return undefined;
@@ -89,7 +89,7 @@ export class ByteSourceRules {
     return this.byteNumbers.infoOfElement(element);
   }
 
-  public sourceShape(from: Type): SourceShape {
+  public readonly sourceShape(from: Type): SourceShape {
     const base = this.types.definedType(from);
     const typed = this.bytes.elementOf(base);
     if (typed != undefined) {
@@ -105,7 +105,7 @@ export class ByteSourceRules {
     return { isTyped: false };
   }
 
-  public notSourceError(loc: int, target: string, from: Type): SourceError {
+  public readonly notSourceError(loc: int, target: string, from: Type): SourceError {
     const base = this.types.definedType(from);
     const first = this.text.of(from);
     const other = this.stringHint(base.kind == TypeKind.String);
@@ -117,14 +117,14 @@ export class ByteSourceRules {
     };
   }
 
-  public notIterableError(loc: int, target: string, from: Type): SourceError {
+  public readonly notIterableError(loc: int, target: string, from: Type): SourceError {
     const word = `'${target}.from'`;
     const first = this.text.of(from);
 
     return { code: Code.BytesFromSource, loc, details: { word, first } };
   }
 
-  public elementError(
+  public readonly elementError(
     loc: int,
     target: Type,
     from: Type,
@@ -162,7 +162,7 @@ export class ByteSourceRules {
     return this.rangeError(loc, info, range, shape, word, first, shown);
   }
 
-  public setIteratorError(loc: int, from: Type): SourceError | undefined {
+  public readonly setIteratorError(loc: int, from: Type): SourceError | undefined {
     const base = this.types.definedType(from);
     if (base.kind != TypeKind.Iterator) {
       return undefined;
@@ -171,7 +171,7 @@ export class ByteSourceRules {
     return { code: Code.BytesSetIterator, loc, details: kNoDetails };
   }
 
-  public setFitError(
+  public readonly setFitError(
     loc: int,
     offset: string | undefined,
     source: string,
@@ -183,11 +183,11 @@ export class ByteSourceRules {
     return { code: Code.BytesSetUnproven, loc, details: { word } };
   }
 
-  public withIndexError(loc: int, array: string): SourceError {
+  public readonly withIndexError(loc: int, array: string): SourceError {
     return { code: Code.BytesWithIndex, loc, details: { word: array } };
   }
 
-  public valueArgumentError(loc: int, name: string, found: Type): SourceError {
+  public readonly valueArgumentError(loc: int, name: string, found: Type): SourceError {
     const first = this.text.of(found);
 
     return {
@@ -197,13 +197,13 @@ export class ByteSourceRules {
     };
   }
 
-  public allocFillError(loc: int, found: Type): SourceError {
+  public readonly allocFillError(loc: int, found: Type): SourceError {
     const first = this.text.of(found);
 
     return { code: Code.BufferAllocFill, loc, details: { first } };
   }
 
-  public mapFitError(loc: int, target: Type): SourceError | undefined {
+  public readonly mapFitError(loc: int, target: Type): SourceError | undefined {
     const info = this.infoOf(target);
     const range = info?.range;
     if (info == undefined || range == undefined) {
@@ -221,7 +221,7 @@ export class ByteSourceRules {
     };
   }
 
-  public isFillValue(type: Type): boolean {
+  public readonly isFillValue(type: Type): boolean {
     const base = this.types.definedType(type);
     if (base.kind == TypeKind.Int || base.kind == TypeKind.String) {
       return true;
@@ -230,15 +230,15 @@ export class ByteSourceRules {
     return this.isByteSource(base);
   }
 
-  public byteRange(): ProofRange {
+  public readonly byteRange(): ProofRange {
     return { what: "a byte", low: 0, high: 255 };
   }
 
-  public byteInfo(): ByteKindInfo | undefined {
+  public readonly byteInfo(): ByteKindInfo | undefined {
     return this.byteNumbers.byteInfo();
   }
 
-  public positionsOf(name: string): BytePosition[] {
+  public readonly positionsOf(name: string): BytePosition[] {
     if (name == "compare") {
       return kComparePositions;
     }
@@ -249,7 +249,7 @@ export class ByteSourceRules {
     return [];
   }
 
-  public elementSize(type: Type): decimal | undefined {
+  public readonly elementSize(type: Type): decimal | undefined {
     const base = this.types.definedType(type);
     if (base.kind != TypeKind.Instance) {
       return undefined;
@@ -260,13 +260,13 @@ export class ByteSourceRules {
     return row?.size;
   }
 
-  public sizeOfName(name: string): decimal | undefined {
+  public readonly sizeOfName(name: string): decimal | undefined {
     const row = kElementSizes.find((one) => one.name == name);
 
     return row?.size;
   }
 
-  public isByteView(type: Type): boolean {
+  public readonly isByteView(type: Type): boolean {
     const base = this.types.definedType(type);
     if (base.kind != TypeKind.Instance) {
       return false;
@@ -277,7 +277,7 @@ export class ByteSourceRules {
     );
   }
 
-  public offsetAlignedError(
+  public readonly offsetAlignedError(
     loc: int,
     what: string,
     size: decimal,
@@ -287,13 +287,13 @@ export class ByteSourceRules {
     return { code: Code.ViewOffsetAligned, loc, details };
   }
 
-  public sizeAlignedError(loc: int, what: string, size: decimal): SourceError {
+  public readonly sizeAlignedError(loc: int, what: string, size: decimal): SourceError {
     const details: Details = { word: what, other: `${size}` };
 
     return { code: Code.ViewSizeAligned, loc, details };
   }
 
-  public notFitsError(
+  public readonly notFitsError(
     loc: int,
     what: string,
     offset: string | undefined,
@@ -309,7 +309,7 @@ export class ByteSourceRules {
     return { code: Code.ViewNotFits, loc, details };
   }
 
-  public viewOverError(loc: int, found: Type): SourceError {
+  public readonly viewOverError(loc: int, found: Type): SourceError {
     const first = this.text.of(found);
     const isTyped = this.bytes.elementOf(found) != undefined;
     const other = this.viewHint(isTyped);
@@ -317,7 +317,7 @@ export class ByteSourceRules {
     return { code: Code.ViewOverBuffer, loc, details: { first, other } };
   }
 
-  public offsetOnlyError(loc: int, target: string, found: Type): SourceError {
+  public readonly offsetOnlyError(loc: int, target: string, found: Type): SourceError {
     const first = this.text.of(found);
 
     return {
@@ -327,11 +327,11 @@ export class ByteSourceRules {
     };
   }
 
-  public isEncodingLabel(label: string | undefined): boolean {
+  public readonly isEncodingLabel(label: string | undefined): boolean {
     return label == kBufferEncodingLabel;
   }
 
-  public encodingError(loc: int, texts: string[]): SourceError | undefined {
+  public readonly encodingError(loc: int, texts: Read<string[]>): SourceError | undefined {
     for (const text of texts) {
       const lower = text.toLowerCase();
       if (!kBufferEncodings.includes(lower)) {
@@ -346,15 +346,15 @@ export class ByteSourceRules {
     return undefined;
   }
 
-  public unknownEncodingError(loc: int): SourceError {
+  public readonly unknownEncodingError(loc: int): SourceError {
     return { code: Code.BufferEncodingNotKnown, loc, details: kNoDetails };
   }
 
-  public isSizeName(name: string): boolean {
+  public readonly isSizeName(name: string): boolean {
     return kSizeNames.includes(name);
   }
 
-  public lengthFixedError(loc: int, type: Type): SourceError | undefined {
+  public readonly lengthFixedError(loc: int, type: Type): SourceError | undefined {
     const isBytes = this.isByteView(type) || this.isArrayBuffer(type);
     if (!isBytes) {
       return undefined;
@@ -365,7 +365,7 @@ export class ByteSourceRules {
     return { code: Code.BytesLengthFixed, loc, details: { word } };
   }
 
-  public isBytesType(type: Type): boolean {
+  public readonly isBytesType(type: Type): boolean {
     const base = this.types.definedType(type);
     if (base.kind != TypeKind.Instance) {
       return false;
@@ -379,7 +379,7 @@ export class ByteSourceRules {
     return isView || kTextCoderNames.includes(base.name);
   }
 
-  public missingMemberError(
+  public readonly missingMemberError(
     loc: int,
     name: string,
     type: Type,
@@ -394,7 +394,7 @@ export class ByteSourceRules {
     return { code: Code.PropertyMissing, loc, details };
   }
 
-  public missingMethodError(
+  public readonly missingMethodError(
     loc: int,
     name: string,
     type: Type,
@@ -410,7 +410,7 @@ export class ByteSourceRules {
     return this.missingMemberError(loc, name, type, false);
   }
 
-  public notIndexedError(loc: int, type: Type): SourceError | undefined {
+  public readonly notIndexedError(loc: int, type: Type): SourceError | undefined {
     const base = this.types.definedType(type);
     if (!this.isBytesType(base) || this.typedName(base) != undefined) {
       return undefined;
@@ -422,7 +422,7 @@ export class ByteSourceRules {
     return { code: Code.BytesNotIndexed, loc, details: { first, other } };
   }
 
-  public noTextError(loc: int, type: Type): SourceError | undefined {
+  public readonly noTextError(loc: int, type: Type): SourceError | undefined {
     const base = this.types.definedType(type);
     if (!this.isBytesType(base) || this.typedName(base) != undefined) {
       return undefined;
@@ -434,14 +434,14 @@ export class ByteSourceRules {
     return { code: Code.BytesNoText, loc, details: { first, other } };
   }
 
-  public isBytesUnion(parts: Type[]): boolean {
+  public readonly isBytesUnion(parts: Read<Type[]>): boolean {
     return parts.length > 1 && parts.every((part) => this.isBytesType(part));
   }
 
-  public unionMemberError(
+  public readonly unionMemberError(
     loc: int,
     name: string,
-    parts: Type[],
+    parts: Read<Type[]>,
     union: Type,
   ): SourceError | undefined {
     const first = this.text.of(union);
@@ -466,11 +466,11 @@ export class ByteSourceRules {
     return { code: Code.BytesUnionLacking, loc, details };
   }
 
-  public isBufferName(name: string): boolean {
+  public readonly isBufferName(name: string): boolean {
     return name == kBufferName;
   }
 
-  public kindOf(type: Type): string | undefined {
+  public readonly kindOf(type: Type): string | undefined {
     if (this.types.isOptional(type)) {
       return undefined;
     }
@@ -483,7 +483,7 @@ export class ByteSourceRules {
     return base.name;
   }
 
-  public isKindName(name: string): boolean {
+  public readonly isKindName(name: string): boolean {
     const isView = kElementSizes.some((one) => one.name == name);
 
     return (
@@ -491,7 +491,7 @@ export class ByteSourceRules {
     );
   }
 
-  public instanceofError(
+  public readonly instanceofError(
     loc: int,
     left: Type,
     kind: string,
@@ -527,7 +527,7 @@ export class ByteSourceRules {
     return { code: Code.InstanceOfNeverBuiltin, loc, details: { word, first } };
   }
 
-  private isByteSource(base: Type): boolean {
+  private readonly isByteSource(base: Type): boolean {
     const element = this.bytes.elementOf(base);
     const isClamped = this.bytes.isClamped(base);
 
@@ -540,7 +540,7 @@ export class ByteSourceRules {
     );
   }
 
-  private rangeError(
+  private readonly rangeError(
     loc: int,
     info: ByteKindInfo,
     range: ProofRange,
@@ -576,13 +576,13 @@ export class ByteSourceRules {
     return { code: Code.BytesSourceMayNotFit, loc, details };
   }
 
-  private rangeText(range: ProofRange): string {
+  private readonly rangeText(range: ProofRange): string {
     const high = range.high ?? 0;
 
     return `${range.low} to ${high}`;
   }
 
-  private stringHint(isString: boolean): string {
+  private readonly stringHint(isString: boolean): string {
     if (isString) {
       return kStringBytesHint;
     }
@@ -590,7 +590,7 @@ export class ByteSourceRules {
     return "";
   }
 
-  private startText(offset: string | undefined): string {
+  private readonly startText(offset: string | undefined): string {
     if (offset == undefined) {
       return "";
     }
@@ -598,7 +598,7 @@ export class ByteSourceRules {
     return `${offset} + `;
   }
 
-  private timesText(size: decimal): string {
+  private readonly timesText(size: decimal): string {
     if (size > 1) {
       return ` * ${size}`;
     }
@@ -606,7 +606,7 @@ export class ByteSourceRules {
     return "";
   }
 
-  private viewHint(isTyped: boolean): string {
+  private readonly viewHint(isTyped: boolean): string {
     if (isTyped) {
       return kViewHint;
     }
@@ -614,7 +614,7 @@ export class ByteSourceRules {
     return "";
   }
 
-  private indexHint(base: Type): string {
+  private readonly indexHint(base: Type): string {
     if (this.isArrayBuffer(base)) {
       return kBufferIndexHint;
     }
@@ -625,7 +625,7 @@ export class ByteSourceRules {
     return kNoElementsHint;
   }
 
-  private textHint(base: Type): string {
+  private readonly textHint(base: Type): string {
     if (this.isArrayBuffer(base)) {
       return kBufferTextHint;
     }
@@ -633,7 +633,7 @@ export class ByteSourceRules {
     return "";
   }
 
-  private hasUnionMember(name: string, part: Type): boolean {
+  private readonly hasUnionMember(name: string, part: Type): boolean {
     if (name == kByteLengthName) {
       return this.isByteView(part) || this.isArrayBuffer(part);
     }
@@ -644,7 +644,7 @@ export class ByteSourceRules {
     return name == kLengthName && this.typedName(part) != undefined;
   }
 
-  private narrowHint(holder: Type | undefined): string {
+  private readonly narrowHint(holder: Type | undefined): string {
     if (holder == undefined) {
       return "";
     }
@@ -652,10 +652,10 @@ export class ByteSourceRules {
     return `, e.g. 'if (x instanceof ${this.text.of(holder)})'`;
   }
 
-  private unionInstanceofError(
+  private readonly unionInstanceofError(
     loc: int,
     left: Type,
-    parts: Type[],
+    parts: Read<Type[]>,
     kind: string,
   ): SourceError | undefined {
     const base = this.types.definedType(left);
@@ -679,7 +679,7 @@ export class ByteSourceRules {
     return undefined;
   }
 
-  private isKind(kind: string, type: Type): boolean {
+  private readonly isKind(kind: string, type: Type): boolean {
     const found = this.kindOf(type);
     if (found == undefined) {
       return false;
@@ -688,7 +688,7 @@ export class ByteSourceRules {
     return found == kind || (kind == kUint8Class && found == kBufferClass);
   }
 
-  private canBeBuffer(kind: string, type: Type): boolean {
+  private readonly canBeBuffer(kind: string, type: Type): boolean {
     return kind == kBufferClass && this.kindOf(type) == kUint8Class;
   }
 }

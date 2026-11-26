@@ -76,8 +76,8 @@ partial class Lowering {
     return undefined;
   }
 
-  private integerConverted(
-    frame: Frame,
+  private readonly integerConverted(
+    frame: Read<Frame>,
     value: IrValue,
     target: Type,
     type: string,
@@ -90,7 +90,7 @@ partial class Lowering {
     return { type, value: made, tz: target };
   }
 
-  private resizing(from: int, to: int, source: Type): IrOpcode {
+  private readonly resizing(from: int, to: int, source: Type): IrOpcode {
     if (to < from) {
       return IrOpcode.Trunc;
     }
@@ -101,7 +101,7 @@ partial class Lowering {
     return IrOpcode.SExt;
   }
 
-  private integerToDouble(source: Type): IrOpcode {
+  private readonly integerToDouble(source: Type): IrOpcode {
     if (this.isUnsigned(source)) {
       return IrOpcode.UIToFP;
     }
@@ -109,22 +109,22 @@ partial class Lowering {
     return IrOpcode.SIToFP;
   }
 
-  private isConstant(value: IrValue): boolean {
+  private readonly isConstant(value: IrValue): boolean {
     return this.ir.isConstant(value.value);
   }
 
-  private doubleValue(value: double): IrValue {
+  private readonly doubleValue(value: double): IrValue {
     const tz = this.store.plain(TypeKind.Double);
 
     return { type: kDoubleType, value: this.ir.real(value), tz };
   }
 
-  private integerValue(type: string, text: string, tz: Type): IrValue {
+  private readonly integerValue(type: string, text: string, tz: Type): IrValue {
     return { type, value: this.ir.integer(type, text), tz };
   }
 
-  private saturated(
-    frame: Frame,
+  private readonly saturated(
+    frame: Read<Frame>,
     value: IrValue,
     target: Type,
     type: string,

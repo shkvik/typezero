@@ -26,9 +26,9 @@ import {
 } from "../../../../code/expression-types/types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private foreignCheck(
+  private readonly foreignCheck(
     fn: FunctionDecl,
-    shape: ParameterShape,
+    shape: Read<ParameterShape>,
     context: TypeContext,
     module: int,
   ): void {
@@ -58,7 +58,7 @@ partial class ExpressionTypes {
     this.reportFound(module, this.foreign.givesError(fn.loc, result));
   }
 
-  private foreignParamCheck(
+  private readonly foreignParamCheck(
     loc: int,
     kind: ParamKind,
     type: Type,
@@ -71,7 +71,7 @@ partial class ExpressionTypes {
     this.reportFound(module, this.foreign.takesError(loc, type));
   }
 
-  private handleNew(
+  private readonly handleNew(
     expr: NewExpr,
     name: string,
     target: ValueTarget,
@@ -87,7 +87,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private isCStringType(type: Type): boolean {
+  private readonly isCStringType(type: Type): boolean {
     const base = this.types.definedType(type);
     if (base.kind != TypeKind.Instance || base.name != kCStringName) {
       return false;
@@ -96,7 +96,7 @@ partial class ExpressionTypes {
     return this.modules.isLibraryModule(base.module);
   }
 
-  private cstringLiteral(expr: Expr, to: Type): Type | undefined {
+  private readonly cstringLiteral(expr: Expr, to: Type): Type | undefined {
     if (!this.isCStringType(to)) {
       return undefined;
     }
@@ -109,7 +109,7 @@ partial class ExpressionTypes {
     return to;
   }
 
-  private cstringMismatch(
+  private readonly cstringMismatch(
     expr: Expr,
     given: Type,
     wanted: Type,

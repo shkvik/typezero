@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import "./partial/loader.partial.files.tz";
 import "./partial/loader.partial.library.tz";
 import { basename, dirname } from "node:path";
@@ -40,8 +41,8 @@ export class Loader {
   private readonly byFile: Map<string, int>;
   private readonly libraries: Map<string, int>;
   private readonly order: OpenModule[];
-  private readonly unreadable: string[];
-  private readonly packageErrors: string[];
+  private unreadable: string[];
+  private packageErrors: string[];
   private readonly packageOf: Map<int, int>;
 
   public constructor(entryPath: string, libraryDirectory: string) {
@@ -55,8 +56,8 @@ export class Loader {
     this.entryDirectory = entryDirectory;
     this.libraryDirectory = libraryDirectory;
     this.parser = new Parser([]);
+    this.packageErrors = packages.errors();
     this.resolver = new ModuleResolver(packages);
-    this.packageErrors = reader.errors;
     this.packageOf = new Map<int, int>();
     this.mentions = new LibraryMentions();
     this.opened = [];
@@ -76,7 +77,7 @@ export class Loader {
 
     const reached = this.opened.length;
     const globalIds = this.loadGlobals();
-    const parts = new PartialClasses(this.order);
+    const parts = new PartialClasses(this.order.slice());
 
     parts.join();
 
@@ -93,12 +94,12 @@ export class Loader {
 
     return {
       program: { modules, order, globals, ambient, builtins },
-      unreadable: this.unreadable,
-      packageErrors: this.packageErrors,
+      unreadable: replace(this.unreadable, []),
+      packageErrors: replace(this.packageErrors, []),
     };
   }
 
-  private visit(module: OpenModule): void {
+  private visit(module: Own<OpenModule>): void {
     module.state = ModuleState.Loading;
 
     const requests = this.requests(module);
@@ -135,7 +136,7 @@ export class Loader {
     return this.opened[link.target];
   }
 
-  private requests(module: OpenModule): Request[] {
+  private readonly requests(module: Own<OpenModule>): Request[] {
     const file = module.parsed.file;
     const requests: Request[] = [];
 
@@ -175,7 +176,7 @@ export class Loader {
     return requests;
   }
 
-  private askedRequests(module: OpenModule, names: string[]): Request[] {
+  private readonly askedRequests(module: Own<OpenModule>, names: Read<string[]>): Request[] {
     const requests: Request[] = [];
 
     if (!module.isDeclarationOnly) {
@@ -204,15 +205,15 @@ export class Loader {
     return requests;
   }
 
-  private askedNames(names: ModuleName[]): string[] {
+  private readonly askedNames(names: Read<ModuleName[]>): string[] {
     return names.map((name) => name.name);
   }
 
-  private isLinked(module: OpenModule, from: ModulePath): boolean {
+  private readonly isLinked(module: Read<OpenModule>, from: ModulePath): boolean {
     return module.links.some((link) => link.from.loc == from.loc);
   }
 
-  private linked(request: Request): ModuleLink {
+  private linked(request: Read<Request>): ModuleLink {
     const module = request.owner;
     const from = request.from;
 
@@ -248,14 +249,12 @@ export class Loader {
     return { kind: LinkKind.Package, from };
   }
 
-  private finished(module: OpenModule): Module {
+  private readonly finished(module: Read<OpenModule>): Module {
     const parsed = module.parsed;
     const file = parsed.file;
-    const problems = module.problems;
+    module.problems.sort((first, second) => first.loc - second.loc);
 
-    problems.sort((first, second) => first.loc - second.loc);
-
-    const errors = this.mergedByPlace(parsed.errors, problems);
+    const errors = this.mergedByPlace(parsed.errors, module.problems.slice());
     const items = this.withoutParts(file.items);
 
     return {
@@ -271,15 +270,15 @@ export class Loader {
       },
       errors,
       declaration: module.declaration,
-      links: module.links,
+      links: module.links.slice(),
       implicit: module.implicit,
-      parts: module.parts,
+      parts: module.parts.slice(),
       isDeclarationOnly: module.isDeclarationOnly,
       declared: module.declared,
     };
   }
 
-  private withoutParts(items: Stmt[]): Stmt[] {
+  private readonly withoutParts(items: Read<Stmt[]>): Stmt[] {
     const kept: Stmt[] = [];
 
     for (const item of items) {
@@ -291,9 +290,9 @@ export class Loader {
     return kept;
   }
 
-  private mergedByPlace(
-    syntactic: SourceError[],
-    problems: SourceError[],
+  private readonly mergedByPlace(
+    syntactic: Own<SourceError[]>,
+    problems: Read<SourceError[]>,
   ): SourceError[] {
     if (problems.length == 0) {
       return syntactic;

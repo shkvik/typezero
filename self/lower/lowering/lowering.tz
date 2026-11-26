@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import "./partial/lowering.partial.statements.tz";
 import "./partial/lowering.partial.loops.tz";
 import "./partial/lowering.partial.functions.tz";
@@ -77,9 +78,9 @@ export class Lowering {
   private readonly resolver: TypeResolver;
   private readonly answers: ExpressionAnswers;
   public readonly ir: IrModule;
-  private readonly unlowered: Unlowered[];
+  private unlowered: Unlowered[];
   private readonly places: Map<string, Place>;
-  private readonly managedGlobals: Place[];
+  private managedGlobals: Place[];
   private readonly strings: Map<string, LLVMValue>;
   private readonly descriptors: Map<int, LLVMValue>;
   private readonly layouts: Map<int, ClassLayout>;
@@ -102,8 +103,8 @@ export class Lowering {
 
   public constructor(
     store: TypeStore,
-    program: Program,
-    checked: CheckedProgram,
+    program: Own<Program>,
+    checked: Read<CheckedProgram>,
   ) {
     const name = program.modules[0]?.name ?? "";
 
@@ -168,26 +169,26 @@ export class Lowering {
     this.runtimeCall(main, kRuntimeShutdown, []);
     main.finishValue(this.ir.integer(kFlagType, "0"));
 
-    return { unlowered: this.unlowered };
+    return { unlowered: replace(this.unlowered, []) };
   }
 
-  private globalsReleased(main: IrFunction): void {
+  private globalsReleased(main: Own<IrFunction>): void {
     const frame: Frame = {
       made: main,
       id: kMainFrame,
       module: 0,
       loops: [],
-      scopes: [this.managedGlobals],
+      scopes: [replace(this.managedGlobals, [])],
     };
 
     this.cleanupsTo(frame, 0);
   }
 
-  private isProgramModule(module: Module): boolean {
+  private readonly isProgramModule(module: Module): boolean {
     return !module.source.isLibrary && !module.isDeclarationOnly;
   }
 
-  private placeKey(module: int, loc: int): string {
+  private readonly placeKey(module: int, loc: int): string {
     return `${module} ${loc}`;
   }
 

@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import { ClassDecl } from "../../../../../program/ast/types/ast.types.classes.tz";
 import {
   Expr,
@@ -22,7 +23,7 @@ import { FunctionFrame } from "../../types/expression-types.types.tz";
 import { TruthUse } from "../../../../flow/truth-rules/types/truth-rules.types.tz";
 
 partial class ExpressionTypes {
-  public checkModule(module: int): void {
+  public readonly checkModule(module: int): void {
     const opened = this.program.modules[module];
     if (opened == undefined || this.checkedModules.has(module)) {
       return;
@@ -40,8 +41,8 @@ partial class ExpressionTypes {
     this.walkStatements(opened.file.items, frame, module);
   }
 
-  private walkStatements(
-    statements: Stmt[],
+  private readonly walkStatements(
+    statements: Read<Stmt[]>,
     frame: FunctionFrame,
     module: int,
   ): void {
@@ -59,7 +60,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private walkOptionalStatement(
+  private readonly walkOptionalStatement(
     statement: Stmt | undefined,
     frame: FunctionFrame,
     module: int,
@@ -69,7 +70,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private walkStatement(
+  private readonly walkStatement(
     statement: Stmt,
     frame: FunctionFrame,
     module: int,
@@ -141,7 +142,7 @@ partial class ExpressionTypes {
         this.forgetLooped(statement, module);
         this.rememberLoopElement(statement, module);
 
-        const before = this.facts;
+        const before = this.factsCopy();
 
         this.walkStatement(statement.body, frame, module);
         this.facts = before;
@@ -159,7 +160,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private declaredFact(module: int, loc: int): void {
+  private readonly declaredFact(module: int, loc: int): void {
     const door = this.localDoor(module, loc);
     const given = door?.given;
     if (door == undefined || given == undefined) {
@@ -172,7 +173,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private walkIf(statement: IfStmt, frame: FunctionFrame, module: int): void {
+  private readonly walkIf(statement: IfStmt, frame: FunctionFrame, module: int): void {
     const cond = statement.cond;
 
     this.branchCheck(cond, TruthUse.Condition, module);
@@ -180,24 +181,21 @@ partial class ExpressionTypes {
     const thenFacts = this.factsOf(cond, true, module);
     const elseFacts = this.factsOf(cond, false, module);
     const before = this.underFacts(thenFacts);
-    const thenStart = this.facts;
+    const thenStart = this.factsCopy();
 
     this.walkStatement(statement.thenStmt, frame, module);
 
-    const thenEnd = this.facts;
+    const thenEnd = replace(this.facts, new Map<string, Type>(before));
 
-    this.facts = before;
     this.underFacts(elseFacts);
 
-    const elseStart = this.facts;
+    const elseStart = this.factsCopy();
 
     this.walkOptionalStatement(statement.elseStmt, frame, module);
 
-    const elseEnd = this.facts;
+    const elseEnd = replace(this.facts, new Map<string, Type>(before));
     const isThenLeaving = this.isLeaving(statement.thenStmt, module);
     const isElseLeaving = this.isLeaving(statement.elseStmt, module);
-
-    this.facts = before;
 
     if (isThenLeaving && isElseLeaving) {
       return;
@@ -222,7 +220,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private isLeaving(statement: Stmt | undefined, module: int): boolean {
+  private readonly isLeaving(statement: Stmt | undefined, module: int): boolean {
     if (statement == undefined) {
       return false;
     }
@@ -246,7 +244,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private walkLoop(
+  private readonly walkLoop(
     cond: Expr | undefined,
     body: Stmt | undefined,
     frame: FunctionFrame,
@@ -259,7 +257,7 @@ partial class ExpressionTypes {
     this.facts = before;
   }
 
-  private walkFor(statement: ForStmt, frame: FunctionFrame, module: int): void {
+  private readonly walkFor(statement: ForStmt, frame: FunctionFrame, module: int): void {
     const facts = this.loopFacts(statement.cond, module);
     const before = this.underFacts(facts);
 
@@ -268,13 +266,13 @@ partial class ExpressionTypes {
     this.facts = before;
   }
 
-  private stepCheck(step: Expr | undefined, module: int): void {
+  private readonly stepCheck(step: Expr | undefined, module: int): void {
     if (step != undefined) {
       this.statementUsed(step, undefined, module);
     }
   }
 
-  private statementUsed(expr: Expr, at: int | undefined, module: int): void {
+  private readonly statementUsed(expr: Expr, at: int | undefined, module: int): void {
     if (expr.kind != ExprKind.Sequence) {
       const type = this.typed(expr, undefined, module);
 
@@ -292,7 +290,7 @@ partial class ExpressionTypes {
     this.usedCheck(expr, last, at, module);
   }
 
-  private loopFacts(cond: Expr | undefined, module: int): Map<string, Type> {
+  private readonly loopFacts(cond: Expr | undefined, module: int): Map<string, Type> {
     if (cond == undefined) {
       return new Map<string, Type>();
     }
@@ -300,19 +298,19 @@ partial class ExpressionTypes {
     return this.factsOf(cond, true, module);
   }
 
-  private conditionCheck(cond: Expr | undefined, module: int): void {
+  private readonly conditionCheck(cond: Expr | undefined, module: int): void {
     if (cond != undefined) {
       this.branchCheck(cond, TruthUse.Condition, module);
     }
   }
 
-  private valueCheck(value: Expr | undefined, module: int): void {
+  private readonly valueCheck(value: Expr | undefined, module: int): void {
     if (value != undefined) {
       this.typed(value, undefined, module);
     }
   }
 
-  private loopItem(loop: ForOfStmt, module: int): Type {
+  private readonly loopItem(loop: ForOfStmt, module: int): Type {
     const iterable = this.typed(loop.iterable, undefined, module);
     if (loop.keys) {
       return this.forInKeys(loop, iterable, module);
@@ -354,7 +352,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private tupleLoopItem(loop: ForOfStmt, tuple: TupleType, module: int): Type {
+  private readonly tupleLoopItem(loop: ForOfStmt, tuple: TupleType, module: int): Type {
     const checked = this.statements.tupleLoopItem(loop, tuple);
 
     this.reportFound(module, checked.error);
@@ -362,7 +360,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private loopVariableCheck(loop: ForOfStmt, module: int): void {
+  private readonly loopVariableCheck(loop: ForOfStmt, module: int): void {
     const written = loop.binding.typeAnn;
     if (written == undefined) {
       return;
@@ -373,7 +371,7 @@ partial class ExpressionTypes {
     this.report(module, written.loc, Code.LoopVariableTyped, { word });
   }
 
-  private classPlaceCheck(statement: ClassDecl, module: int): void {
+  private readonly classPlaceCheck(statement: ClassDecl, module: int): void {
     const opened = this.program.modules[module];
     if (opened == undefined || opened.file.items.includes(statement)) {
       return;
@@ -384,13 +382,13 @@ partial class ExpressionTypes {
     });
   }
 
-  private optionalBodyCheck(body: Stmt | undefined, module: int): void {
+  private readonly optionalBodyCheck(body: Stmt | undefined, module: int): void {
     if (body != undefined) {
       this.bodyCheck(body, module);
     }
   }
 
-  private bodyCheck(body: Stmt, module: int): void {
+  private readonly bodyCheck(body: Stmt, module: int): void {
     switch (body.kind) {
       case StmtKind.VarDecl:
       case StmtKind.TypeAlias:

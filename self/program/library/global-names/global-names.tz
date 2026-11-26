@@ -15,19 +15,19 @@ export class GlobalNames {
     this.types = new Set<string>(kGlobalTypes);
   }
 
-  public hasValue(name: string): boolean {
+  public readonly hasValue(name: string): boolean {
     return this.values.has(name);
   }
 
-  public hasType(name: string): boolean {
+  public readonly hasType(name: string): boolean {
     return this.types.has(name);
   }
 
-  public isUnbound(name: string): boolean {
+  public readonly isUnbound(name: string): boolean {
     return kUnboundNames.includes(name);
   }
 
-  public absent(name: string): AbsentName | undefined {
+  public readonly absent(name: string): AbsentName | undefined {
     return kAbsentNames.find((absent) => absent.name == name);
   }
 }

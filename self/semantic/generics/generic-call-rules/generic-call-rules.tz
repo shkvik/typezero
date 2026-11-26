@@ -45,10 +45,10 @@ export class GenericCallRules {
   private readonly generics: GenericRules;
 
   public constructor(
-    modules: ModuleQuestions,
+    modules: Own<ModuleQuestions>,
     parts: TypeParts,
     text: TypeText,
-    generics: GenericRules,
+    generics: Own<GenericRules>,
   ) {
     this.modules = modules;
     this.parts = parts;
@@ -56,7 +56,7 @@ export class GenericCallRules {
     this.generics = generics;
   }
 
-  public hasArgumentErrors(draft: GenericDraft): boolean {
+  public readonly hasArgumentErrors(draft: Read<GenericDraft>): boolean {
     for (const type of draft.given.values()) {
       if (this.parts.hasUnknownInside(type)) {
         return true;
@@ -66,7 +66,7 @@ export class GenericCallRules {
     return false;
   }
 
-  public genericTellCode(home: int): Code {
+  public readonly genericTellCode(home: int): Code {
     if (this.modules.isLibraryModule(home)) {
       return Code.InstanceOfGenericLibrary;
     }
@@ -74,7 +74,7 @@ export class GenericCallRules {
     return Code.InstanceOfGenericUnknown;
   }
 
-  public typeArgumentText(count: int): string {
+  public readonly typeArgumentText(count: int): string {
     if (count == 1) {
       return `${count}${kOneTypeArgument}`;
     }
@@ -82,7 +82,7 @@ export class GenericCallRules {
     return `${count}${kManyTypeArguments}`;
   }
 
-  public genericMethodErrors(decl: ClassDecl, fn: FunctionDecl): SourceError[] {
+  public readonly genericMethodErrors(decl: ClassDecl, fn: FunctionDecl): SourceError[] {
     const errors: SourceError[] = [];
 
     const role = fn.role;
@@ -118,7 +118,7 @@ export class GenericCallRules {
     return errors;
   }
 
-  public literalMethodCheck(property: Property): SourceError | undefined {
+  public readonly literalMethodCheck(property: Property): SourceError | undefined {
     const value = property.value;
     if (value.kind != ExprKind.Function || value.fn.typeParams.length == 0) {
       return undefined;
@@ -131,9 +131,9 @@ export class GenericCallRules {
     };
   }
 
-  public nestedGenericCheck(
+  public readonly nestedGenericCheck(
     fn: FunctionDecl,
-    frame: FunctionFrame,
+    frame: Read<FunctionFrame>,
   ): SourceError | undefined {
     if (frame.fn == undefined || fn.typeParams.length == 0) {
       return undefined;
@@ -142,8 +142,8 @@ export class GenericCallRules {
     return { code: Code.GenericNotTopLevel, loc: fn.loc, details: kNoDetails };
   }
 
-  public callbackError(
-    draft: GenericDraft,
+  public readonly callbackError(
+    draft: Read<GenericDraft>,
     closure: FunctionExpr,
     param: Type,
     position: int,
@@ -181,7 +181,7 @@ export class GenericCallRules {
     };
   }
 
-  public typeArgumentCountErrors(target: GenericTarget): SourceError[] {
+  public readonly typeArgumentCountErrors(target: Read<GenericTarget>): SourceError[] {
     const errors: SourceError[] = [];
 
     const total = target.params.length;
@@ -204,8 +204,8 @@ export class GenericCallRules {
     return errors;
   }
 
-  public uninferredError(
-    draft: GenericDraft,
+  public readonly uninferredError(
+    draft: Read<GenericDraft>,
     param: Type,
   ): SourceError | undefined {
     const target = draft.target;
@@ -229,7 +229,7 @@ export class GenericCallRules {
     };
   }
 
-  public sampleOf(param: Type): string {
+  public readonly sampleOf(param: Type): string {
     if (this.parts.isListParameter(param)) {
       return kSampleList;
     }
@@ -237,7 +237,7 @@ export class GenericCallRules {
     return kSampleArgument;
   }
 
-  public splitLists(shape: FunctionShape): Type[] {
+  public readonly splitLists(shape: Read<FunctionShape>): Type[] {
     const found: Type[] = [];
 
     for (const param of shape.params) {
@@ -265,7 +265,7 @@ export class GenericCallRules {
     return found;
   }
 
-  private isGivenList(shape: FunctionShape, list: Type): boolean {
+  private readonly isGivenList(shape: Read<FunctionShape>, list: Type): boolean {
     return shape.params.some((param) => {
       const type = param.type;
 
@@ -276,7 +276,7 @@ export class GenericCallRules {
     });
   }
 
-  public clash(
+  public readonly clash(
     draft: GenericDraft,
     index: int,
     type: Type | undefined,
@@ -311,7 +311,7 @@ export class GenericCallRules {
     };
   }
 
-  public genericMethodValue(
+  public readonly genericMethodValue(
     expr: MemberExpr,
     method: FunctionDecl,
   ): Checked<boolean> {
@@ -329,7 +329,7 @@ export class GenericCallRules {
     };
   }
 
-  public refusedCode(isClass: boolean): Code {
+  public readonly refusedCode(isClass: boolean): Code {
     if (isClass) {
       return Code.GenericClassRefused;
     }
@@ -337,7 +337,7 @@ export class GenericCallRules {
     return Code.GenericCallRefused;
   }
 
-  public refusedName(name: string, isClass: boolean): string {
+  public readonly refusedName(name: string, isClass: boolean): string {
     if (isClass) {
       return name.slice(kNewPrefix.length);
     }

@@ -63,7 +63,7 @@ partial class ModuleResolver {
     return this.packageFile(spec, specifier, target, found);
   }
 
-  private packageTarget(target: int | undefined): PackageInfo | undefined {
+  private readonly packageTarget(target: int | undefined): PackageInfo | undefined {
     if (target == undefined) {
       return undefined;
     }
@@ -71,7 +71,7 @@ partial class ModuleResolver {
     return this.packages.packageAt(target);
   }
 
-  private jsrImport(spec: string): Resolution {
+  private readonly jsrImport(spec: string): Resolution {
     const rest = this.withoutSlash(spec.slice(kJsrPrefix.length));
     if (!rest.startsWith(kScopeMark)) {
       return this.problem(Code.PackageJsrNotName, { word: spec });
@@ -89,7 +89,7 @@ partial class ModuleResolver {
     });
   }
 
-  private withoutSlash(text: string): string {
+  private readonly withoutSlash(text: string): string {
     if (text.startsWith(kPathSeparator)) {
       return text.slice(kPathSeparator.length);
     }
@@ -97,7 +97,7 @@ partial class ModuleResolver {
     return text;
   }
 
-  private nextSlash(text: string, slash: int): int {
+  private readonly nextSlash(text: string, slash: int): int {
     if (slash < 0) {
       return -1;
     }
@@ -105,7 +105,7 @@ partial class ModuleResolver {
     return text.indexOf(kPathSeparator, slash + 1);
   }
 
-  private headOf(text: string, end: int): string {
+  private readonly headOf(text: string, end: int): string {
     if (end < 0) {
       return text;
     }
@@ -113,7 +113,7 @@ partial class ModuleResolver {
     return text.slice(0, end);
   }
 
-  private tailOf(text: string, end: int): string {
+  private readonly tailOf(text: string, end: int): string {
     if (end < 0) {
       return "";
     }
@@ -121,7 +121,7 @@ partial class ModuleResolver {
     return text.slice(end);
   }
 
-  private packageSpecifier(spec: string): PackageSpecifier | undefined {
+  private readonly packageSpecifier(spec: string): PackageSpecifier | undefined {
     const slash = spec.indexOf(kPathSeparator);
     if (spec.startsWith(kScopeMark) && slash < 0) {
       return undefined;
@@ -136,7 +136,7 @@ partial class ModuleResolver {
     return { name, subpath: this.subpathOf(spec, end) };
   }
 
-  private nameEnd(spec: string, slash: int): int {
+  private readonly nameEnd(spec: string, slash: int): int {
     if (spec.startsWith(kScopeMark)) {
       return spec.indexOf(kPathSeparator, slash + 1);
     }
@@ -144,7 +144,7 @@ partial class ModuleResolver {
     return slash;
   }
 
-  private subpathOf(spec: string, end: int): string {
+  private readonly subpathOf(spec: string, end: int): string {
     if (end < 0) {
       return kHere;
     }
@@ -154,9 +154,9 @@ partial class ModuleResolver {
     return `${kHerePrefix}${rest}`;
   }
 
-  private notDependency(
+  private readonly notDependency(
     name: string,
-    owner: PackageInfo,
+    owner: Read<PackageInfo>,
     home: int,
   ): Resolution {
     if (home == 0) {
@@ -175,7 +175,7 @@ partial class ModuleResolver {
     });
   }
 
-  private manifestPlace(owner: PackageInfo): string {
+  private readonly manifestPlace(owner: Read<PackageInfo>): string {
     if (owner.manifestPath == "") {
       return kNoManifestPlace;
     }
@@ -187,7 +187,7 @@ partial class ModuleResolver {
     spec: string,
     specifier: PackageSpecifier,
     target: int,
-    found: PackageInfo,
+    found: Read<PackageInfo>,
   ): Resolution {
     if (found.exports.length > 0) {
       return this.exportedFile(spec, specifier, target, found);
@@ -219,7 +219,7 @@ partial class ModuleResolver {
     return this.packageFound(spec, target, found, candidates);
   }
 
-  private entryCandidates(found: PackageInfo): string[] {
+  private readonly entryCandidates(found: Read<PackageInfo>): string[] {
     if (found.main != "") {
       return [found.main];
     }
@@ -231,7 +231,7 @@ partial class ModuleResolver {
     spec: string,
     specifier: PackageSpecifier,
     target: int,
-    found: PackageInfo,
+    found: Read<PackageInfo>,
   ): Resolution {
     const exports = found.exports;
     const matching = exports.filter((one) => one.key == specifier.subpath);
@@ -251,7 +251,7 @@ partial class ModuleResolver {
     });
   }
 
-  private exportShown(name: string, key: string): string {
+  private readonly exportShown(name: string, key: string): string {
     if (key == kHere) {
       return `'${name}'`;
     }
@@ -264,8 +264,8 @@ partial class ModuleResolver {
   private packageFound(
     spec: string,
     target: int,
-    found: PackageInfo,
-    candidates: string[],
+    found: Read<PackageInfo>,
+    candidates: Read<string[]>,
   ): Resolution {
     for (const candidate of candidates) {
       const location = this.locate(found.directory, candidate);
@@ -283,7 +283,7 @@ partial class ModuleResolver {
     return this.packageMissing(spec, found, candidates);
   }
 
-  private packageModule(spec: string, target: int, file: string): Resolution {
+  private readonly packageModule(spec: string, target: int, file: string): Resolution {
     const extension = extname(file);
     const isKnown =
       extension == kSourceExtension || extension == kJsonExtension;
@@ -301,10 +301,10 @@ partial class ModuleResolver {
     });
   }
 
-  private packageMissing(
+  private readonly packageMissing(
     spec: string,
-    found: PackageInfo,
-    candidates: string[],
+    found: Read<PackageInfo>,
+    candidates: Read<string[]>,
   ): Resolution {
     const first = candidates[0] ?? "";
     const second = candidates[1] ?? "";

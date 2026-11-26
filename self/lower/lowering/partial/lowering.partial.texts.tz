@@ -27,8 +27,8 @@ import { Frame, IrValue } from "../types/lowering.types.tz";
 partial class Lowering {
   private concatenated(
     frame: Frame,
-    given: IrValue[],
-    exprs: Expr[],
+    given: Read<IrValue[]>,
+    exprs: Read<Expr[]>,
   ): IrValue | undefined {
     const leaves: Expr[] = [];
 
@@ -50,7 +50,7 @@ partial class Lowering {
     return this.joined(frame, parts);
   }
 
-  private concatLeaves(expr: Expr, leaves: Expr[]): void {
+  private readonly concatLeaves(expr: Expr, leaves: Expr[]): void {
     const type = this.typeOf(expr);
     const isText = type == undefined || this.isString(type);
     if (expr.kind != ExprKind.Binary || expr.op != BinaryOp.Add || !isText) {
@@ -108,20 +108,18 @@ partial class Lowering {
     return undefined;
   }
 
-  private numberPart(frame: Frame, bits: LLVMValue, meta: string): IrValue {
-    const made = frame.made;
+  private readonly numberPart(frame: Read<Frame>, bits: LLVMValue, meta: string): IrValue {
     const tz = this.store.plain(TypeKind.Unknown);
-    const pointer = made.cast(IrOpcode.IntToPtr, bits, kPointerType);
+    const pointer = frame.made.cast(IrOpcode.IntToPtr, bits, kPointerType);
     const empty = this.ir.undefinedOf(kStringType);
-    const first = made.insert(empty, pointer, 0);
+    const first = frame.made.insert(empty, pointer, 0);
     const mark = this.ir.hexInteger(kIntType, meta);
-    const value = made.insert(first, mark, 1);
+    const value = frame.made.insert(first, mark, 1);
 
     return { type: kStringType, value, tz };
   }
 
-  private joined(frame: Frame, parts: IrValue[]): IrValue {
-    const made = frame.made;
+  private joined(frame: Read<Frame>, parts: Read<IrValue[]>): IrValue {
     const tz = this.store.plain(TypeKind.String);
     const count = parts.length;
     if (count == 0) {
@@ -129,8 +127,8 @@ partial class Lowering {
     }
 
     const array = `[${count} x ${kStringType}]`;
-    const slot = made.slot(array, "concat.parts");
-    const out = made.slot(kStringType, "str.out");
+    const slot = frame.made.slot(array, "concat.parts");
+    const out = frame.made.slot(kStringType, "str.out");
 
     for (let index = 0; index < count; index++) {
       const part = parts[index];
@@ -138,9 +136,9 @@ partial class Lowering {
         continue;
       }
 
-      const at = made.field(array, slot, index);
+      const at = frame.made.field(array, slot, index);
 
-      made.store(part.value, at);
+      frame.made.store(part.value, at);
     }
 
     const concat = this.ir.declare(kStringConcat, kVoidType, [
@@ -150,9 +148,9 @@ partial class Lowering {
     ]);
     const size = this.ir.integer(kIntType, `${count}`);
 
-    made.call(concat, [out, slot, size]);
+    frame.made.call(concat, [out, slot, size]);
 
-    const value = made.load(kStringType, out);
+    const value = frame.made.load(kStringType, out);
 
     for (const part of parts) {
       this.dropping(frame, part);
@@ -256,10 +254,9 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
-    const meta = made.extract(text.value, 1);
+    const meta = frame.made.extract(text.value, 1);
     const mask = this.ir.hexInteger(kIntType, kLengthMask);
-    const length = made.binary(IrOpcode.And, meta, mask);
+    const length = frame.made.binary(IrOpcode.And, meta, mask);
     const tz = this.store.integer(64, false);
 
     this.dropping(frame, text);

@@ -16,7 +16,7 @@ import { ExpressionTypes } from "../../../../code/expression-types/expression-ty
 import { NodeName } from "../../../node-value-rules/types/node-value-rules.types.tz";
 
 partial class ExpressionTypes {
-  private nodeNameOf(expr: Expr, module: int): NodeName | undefined {
+  private readonly nodeNameOf(expr: Expr, module: int): NodeName | undefined {
     if (expr.kind != ExprKind.Name || this.modules.isLibraryModule(module)) {
       return undefined;
     }
@@ -38,7 +38,7 @@ partial class ExpressionTypes {
     return this.nodeValues.nodeName(opened.name, target.name);
   }
 
-  private nodeValueCheck(expr: NameExpr, module: int): boolean {
+  private readonly nodeValueCheck(expr: NameExpr, module: int): boolean {
     const node = this.nodeNameOf(expr, module);
     if (node == undefined) {
       return false;
@@ -55,7 +55,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private nodeCallCheck(
+  private readonly nodeCallCheck(
     expr: CallExpr,
     callee: NameExpr,
     module: int,
@@ -76,7 +76,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private nodeMemberCallCheck(
+  private readonly nodeMemberCallCheck(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -98,7 +98,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private nodeMemberReadCheck(expr: MemberExpr, module: int): boolean {
+  private readonly nodeMemberReadCheck(expr: MemberExpr, module: int): boolean {
     const node = this.nodeNameOf(expr.object, module);
     if (node == undefined || node.name != "") {
       return false;
@@ -115,7 +115,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private fileClassNew(
+  private readonly fileClassNew(
     expr: NewExpr,
     word: string,
     home: int,

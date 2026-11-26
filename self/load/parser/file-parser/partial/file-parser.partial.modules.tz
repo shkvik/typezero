@@ -158,7 +158,7 @@ partial class FileParser {
     loc: int,
     clause: ImportClause,
     formLoc: int,
-    names: ModuleName[],
+    names: Own<ModuleName[]>,
     from: ModulePath,
   ): Stmt {
     const json = from.path.endsWith(kJsonExtension);
@@ -205,7 +205,7 @@ partial class FileParser {
     loc: int,
     clause: ImportClause,
     formLoc: int,
-    names: ModuleName[],
+    names: Own<ModuleName[]>,
     from: ModulePath,
     jsonType: boolean,
   ): Stmt {
@@ -264,7 +264,7 @@ partial class FileParser {
 
   private addImport(
     loc: int,
-    names: ModuleName[],
+    names: Own<ModuleName[]>,
     from: ModulePath,
     whole?: WholeImport,
   ): void {
@@ -303,7 +303,7 @@ partial class FileParser {
     this.closeBraced(codes.close);
   }
 
-  private pathAhead(): boolean {
+  private readonly pathAhead(): boolean {
     const next = this.cursor.lookahead();
 
     return this.cursor.is(TokenKind.From) && next.kind == TokenKind.String;
@@ -501,7 +501,7 @@ partial class FileParser {
     return { path, loc: token.start };
   }
 
-  private clauseName(clause: ImportClause): string | undefined {
+  private readonly clauseName(clause: ImportClause): string | undefined {
     if (clause.kind == ImportForm.Named) {
       return undefined;
     }

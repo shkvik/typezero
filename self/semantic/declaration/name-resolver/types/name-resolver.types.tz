@@ -3,3 +3,11 @@ export type GlobalScope = {
   readonly types: Set<string>;
   readonly namespaces: Map<string, Set<string>>;
 };
+
+export type InternedGlobals = Interned<GlobalScope>;
+
+export type GlobalDraft = {
+  values: Set<string>;
+  types: Set<string>;
+  namespaces: Map<string, Set<string>>;
+};

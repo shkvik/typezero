@@ -30,7 +30,7 @@ import { IntlMethodKind } from "../../../intl-rules/types/intl-rules.types.tz";
 import { ExpressionTypes } from "../../../../code/expression-types/expression-types.tz";
 
 partial class ExpressionTypes {
-  private intlNamespaceCall(
+  private readonly intlNamespaceCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -85,7 +85,7 @@ partial class ExpressionTypes {
     return this.namedLibraryType(what, member.loc, module);
   }
 
-  private intlRefusedCall(
+  private readonly intlRefusedCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -98,7 +98,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private intlRefusedError(member: MemberExpr): SourceError {
+  private readonly intlRefusedError(member: MemberExpr): SourceError {
     if (member.name == kLocaleClass) {
       return this.intl.localeNewError(member.loc);
     }
@@ -106,7 +106,7 @@ partial class ExpressionTypes {
     return this.intl.valuesOfError(member.loc);
   }
 
-  private canonicalCall(expr: CallExpr, module: int): Type {
+  private readonly canonicalCall(expr: CallExpr, module: int): Type {
     const list = expr.args[0];
     const text = this.store.plain(TypeKind.String);
     if (list != undefined) {
@@ -116,7 +116,7 @@ partial class ExpressionTypes {
     return this.store.arrayOf(text);
   }
 
-  private intlStaticCall(
+  private readonly intlStaticCall(
     expr: CallExpr,
     member: MemberExpr,
     owner: MemberExpr,
@@ -158,7 +158,7 @@ partial class ExpressionTypes {
     return this.store.arrayOf(text);
   }
 
-  private intlMethodCall(
+  private readonly intlMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -193,7 +193,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private intlServiceOf(instance: InstanceType): string | undefined {
+  private readonly intlServiceOf(instance: InstanceType): string | undefined {
     const home = this.resolver.namespaceModule(kIntlName);
     if (home == undefined || instance.module != home) {
       return undefined;
@@ -202,7 +202,7 @@ partial class ExpressionTypes {
     return instance.name;
   }
 
-  private intlUnsupported(
+  private readonly intlUnsupported(
     expr: CallExpr,
     member: MemberExpr,
     isSelect: boolean,
@@ -216,7 +216,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private intlUnsupportedError(
+  private readonly intlUnsupportedError(
     member: MemberExpr,
     isSelect: boolean,
   ): SourceError {
@@ -227,7 +227,7 @@ partial class ExpressionTypes {
     return this.intl.rangeUnsupportedError(member.loc, member.name);
   }
 
-  private compareCall(
+  private readonly compareCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -245,7 +245,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private intlNumberCall(
+  private readonly intlNumberCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -268,7 +268,7 @@ partial class ExpressionTypes {
     return this.intlResult(instance, member.name);
   }
 
-  private intlResult(instance: InstanceType, name: string): Type {
+  private readonly intlResult(instance: InstanceType, name: string): Type {
     const method = this.receiverMember(instance, name, true);
     if (method == undefined || method.kind != TypeKind.Function) {
       return this.store.plain(TypeKind.Error);
@@ -277,7 +277,7 @@ partial class ExpressionTypes {
     return method.shape.result;
   }
 
-  private relativeCall(
+  private readonly relativeCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -308,7 +308,7 @@ partial class ExpressionTypes {
     return this.intlResult(instance, member.name);
   }
 
-  private containingCall(
+  private readonly containingCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -325,10 +325,10 @@ partial class ExpressionTypes {
     return this.intlResult(instance, member.name);
   }
 
-  private closedTextCheck(
+  private readonly closedTextCheck(
     arg: Expr,
     given: Type,
-    allowed: string[],
+    allowed: Read<string[]>,
     what: string,
     module: int,
   ): void {
@@ -348,7 +348,7 @@ partial class ExpressionTypes {
     this.reportFound(module, closedError);
   }
 
-  private intlMemberRead(
+  private readonly intlMemberRead(
     expr: MemberExpr,
     instance: InstanceType,
     module: int,
@@ -376,7 +376,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private localeMethodCall(
+  private readonly localeMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -403,7 +403,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private numberLocaleCall(expr: CallExpr, module: int): Type {
+  private readonly numberLocaleCall(expr: CallExpr, module: int): Type {
     const service = this.intl.service(kNumberFormatClass);
     if (service != undefined) {
       this.intlArguments(expr.args, 0, service, kToLocaleName, module);
@@ -412,7 +412,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.String);
   }
 
-  private localeCompareCall(expr: CallExpr, module: int): Type {
+  private readonly localeCompareCall(expr: CallExpr, module: int): Type {
     const that = expr.args[0];
     const text = this.store.plain(TypeKind.String);
     const service = this.intl.service(kCollatorClass);
@@ -426,7 +426,7 @@ partial class ExpressionTypes {
     return this.store.integer(64, false);
   }
 
-  private normalizeCall(expr: CallExpr, module: int): Type {
+  private readonly normalizeCall(expr: CallExpr, module: int): Type {
     const form = expr.args[0];
     const text = this.store.plain(TypeKind.String);
     if (form == undefined) {

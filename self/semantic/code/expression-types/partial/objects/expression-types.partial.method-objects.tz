@@ -17,7 +17,7 @@ import { ThisPlace } from "../../types/expression-types.types.tz";
 import { StmtKind } from "../../../../../program/ast/types/ast.types.statements.tz";
 
 partial class ExpressionTypes {
-  private methodObject(
+  private readonly methodObject(
     expr: ObjectLitExpr,
     target: Type | undefined,
     module: int,
@@ -66,7 +66,7 @@ partial class ExpressionTypes {
     return reserved;
   }
 
-  private genericLiteralCheck(expr: ObjectLitExpr, module: int): boolean {
+  private readonly genericLiteralCheck(expr: ObjectLitExpr, module: int): boolean {
     const fn = this.openFunctions[this.openFunctions.length - 1];
     const body = fn?.body;
     if (fn == undefined || body == undefined || fn.typeParams.length == 0) {
@@ -86,7 +86,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private literalValueFields(
+  private readonly literalValueFields(
     expr: ObjectLitExpr,
     goal: ObjectType | undefined,
     module: int,
@@ -121,7 +121,7 @@ partial class ExpressionTypes {
     return fields;
   }
 
-  private literalMethods(
+  private readonly literalMethods(
     expr: ObjectLitExpr,
     reserved: Type,
     goal: ObjectType | undefined,
@@ -159,7 +159,7 @@ partial class ExpressionTypes {
     return methods;
   }
 
-  private literalMethodType(
+  private readonly literalMethodType(
     property: Property,
     goal: ObjectType | undefined,
     module: int,
@@ -184,10 +184,10 @@ partial class ExpressionTypes {
     return this.functionType(value.fn, module);
   }
 
-  private methodTargetCheck(
+  private readonly methodTargetCheck(
     expr: ObjectLitExpr,
     goal: ObjectType,
-    methods: ObjectField[],
+    methods: Read<ObjectField[]>,
     module: int,
   ): boolean {
     const checked = this.objectMembers.methodTargetCheck(expr, goal, methods);

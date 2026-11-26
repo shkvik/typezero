@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import "./partial/scope-traversal.partial.imports.tz";
 import "./partial/scope-traversal.partial.declarations.tz";
 import "./partial/scope-traversal.partial.statements.tz";
@@ -35,8 +36,8 @@ export class ScopeTraversal {
   private readonly globals: GlobalScope;
   private readonly partMethods: FunctionDecl[];
   private readonly scopes: ScopeStack;
-  private readonly uses: NameUse[];
-  private readonly errors: SourceError[];
+  private uses: NameUse[];
+  private errors: SourceError[];
   private readonly otherCaseVariables: Set<int>;
   private readonly classFrames: ClassFrame[];
   private jumpTargets: JumpTarget[];
@@ -46,9 +47,9 @@ export class ScopeTraversal {
   private readonly memberUses: Map<string, string[]>;
 
   public constructor(
-    names: ModuleNames,
-    globals: GlobalScope,
-    partMethods: FunctionDecl[],
+    names: Own<ModuleNames>,
+    globals: Own<GlobalScope>,
+    partMethods: Own<FunctionDecl[]>,
   ) {
     this.module = names.module;
     this.names = names;
@@ -87,7 +88,11 @@ export class ScopeTraversal {
     this.wholeImportsCheck();
     this.errors.sort((first, second) => first.loc - second.loc);
 
-    return { module: this.module, uses: this.uses, errors: this.errors };
+    return {
+      module: this.module,
+      uses: replace(this.uses, []),
+      errors: replace(this.errors, []),
+    };
   }
 
   private useValue(
@@ -148,7 +153,7 @@ export class ScopeTraversal {
     return CapturePlace.None;
   }
 
-  private captureCode(place: CapturePlace): Code {
+  private readonly captureCode(place: CapturePlace): Code {
     if (place == CapturePlace.StaticInit) {
       return Code.ClassExprStaticCapture;
     }
@@ -203,7 +208,7 @@ export class ScopeTraversal {
     this.reportMissingType(name, loc, missing);
   }
 
-  private ownsType(owner: string, member: string): boolean {
+  private readonly ownsType(owner: string, member: string): boolean {
     const declared = this.globals.namespaces.get(owner);
     if (declared != undefined) {
       return declared.has(member) || kLibrary.hasMember(owner, member);
@@ -212,14 +217,14 @@ export class ScopeTraversal {
     return this.ownsNames(owner);
   }
 
-  private isValueName(name: string): boolean {
+  private readonly isValueName(name: string): boolean {
     const typed = this.scopes.findType(name) != undefined;
     const valued = this.scopes.findValue(name) != undefined;
 
     return valued && !typed;
   }
 
-  private firstPart(name: string, point: int): string {
+  private readonly firstPart(name: string, point: int): string {
     if (point < 0) {
       return name;
     }
@@ -227,7 +232,7 @@ export class ScopeTraversal {
     return name.slice(0, point);
   }
 
-  private ownsNames(owner: string): boolean {
+  private readonly ownsNames(owner: string): boolean {
     return (
       this.scopes.findValue(owner) != undefined ||
       this.globals.values.has(owner) ||
@@ -245,7 +250,7 @@ export class ScopeTraversal {
     this.errors.push({ code, loc, details });
   }
 
-  private lineOf(loc: int): string {
+  private readonly lineOf(loc: int): string {
     const lines = new SourceLines(this.module.source.text);
     const place = lines.placeOf(loc);
 

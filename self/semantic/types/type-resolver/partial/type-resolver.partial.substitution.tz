@@ -23,7 +23,7 @@ import {
 } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  public parameterTypes(module: int, params: TypeParamDecl[]): Type[] {
+  public readonly parameterTypes(module: int, params: Read<TypeParamDecl[]>): Type[] {
     const types: Type[] = [];
 
     for (const param of params) {
@@ -36,11 +36,11 @@ partial class TypeResolver {
     return types;
   }
 
-  public constraintMiss(
+  public readonly constraintMiss(
     home: int,
     param: TypeParamDecl,
     given: Type,
-    bindings: Map<int, Type>,
+    bindings: Own<Map<int, Type>>,
   ): string | undefined {
     const constraint = param.constraint;
     if (constraint == undefined) {
@@ -60,7 +60,7 @@ partial class TypeResolver {
     return this.writtenConstraint(home, param, constraint);
   }
 
-  private writtenConstraint(
+  private readonly writtenConstraint(
     home: int,
     param: TypeParamDecl,
     written: TypeRef,
@@ -77,10 +77,10 @@ partial class TypeResolver {
     return names.join(kUnionSeparator);
   }
 
-  public defaultOf(
+  public readonly defaultOf(
     home: int,
     param: TypeParamDecl,
-    bindings: Map<int, Type>,
+    bindings: Own<Map<int, Type>>,
   ): Type | undefined {
     const written = param.defaultType;
     if (written == undefined) {
@@ -96,13 +96,13 @@ partial class TypeResolver {
     return this.resolve(written, inside);
   }
 
-  public mentions(type: Type, ids: Set<int>): boolean {
+  public readonly mentions(type: Type, ids: Set<int>): boolean {
     const seen = new Set<int>();
 
     return this.mentionsSeen(type, ids, seen);
   }
 
-  private mentionsSeen(type: Type, ids: Set<int>, seen: Set<int>): boolean {
+  private readonly mentionsSeen(type: Type, ids: Set<int>, seen: Set<int>): boolean {
     if (seen.has(type.id)) {
       return false;
     }
@@ -118,7 +118,7 @@ partial class TypeResolver {
     return parts.some((part) => this.mentionsSeen(part, ids, seen));
   }
 
-  private innerTypes(type: Type): Type[] {
+  private readonly innerTypes(type: Type): Type[] {
     switch (type.kind) {
       case TypeKind.Array:
         return [type.item];
@@ -154,7 +154,7 @@ partial class TypeResolver {
     }
   }
 
-  private shapeTypes(shape: FunctionShape): Type[] {
+  private readonly shapeTypes(shape: Read<FunctionShape>): Type[] {
     const types = shape.params.map((param) => param.type);
     const self = shape.self;
 
@@ -167,17 +167,17 @@ partial class TypeResolver {
     return types;
   }
 
-  public substitute(type: Type, bound: Map<int, Type>): Type {
+  public readonly substitute(type: Type, bound: Read<Map<int, Type>>): Type {
     return this.substituteAt(type, bound, false);
   }
 
-  public substituteValue(type: Type, bound: Map<int, Type>): Type {
+  public readonly substituteValue(type: Type, bound: Read<Map<int, Type>>): Type {
     return this.substituteAt(type, bound, true);
   }
 
-  private substituteAt(
+  private readonly substituteAt(
     type: Type,
-    bound: Map<int, Type>,
+    bound: Read<Map<int, Type>>,
     isValue: boolean,
   ): Type {
     const ids = new Set<int>();
@@ -187,12 +187,16 @@ partial class TypeResolver {
       ids.add(id);
     }
 
-    const walk: SubstitutionWalk = { bound, ids, visiting };
+    const walk: SubstitutionWalk = {
+      bound: new Map<int, Type>(bound),
+      ids,
+      visiting,
+    };
 
     return this.substituted(type, walk, isValue);
   }
 
-  private substituted(
+  private readonly substituted(
     type: Type,
     walk: SubstitutionWalk,
     isValue: boolean,
@@ -217,13 +221,13 @@ partial class TypeResolver {
     return made;
   }
 
-  public hasAliasOrigin(type: Type): boolean {
+  public readonly hasAliasOrigin(type: Type): boolean {
     return this.aliasOrigins.has(type.id);
   }
 
-  private substitutedOrigin(
+  private readonly substitutedOrigin(
     type: Type,
-    origin: AliasOrigin | undefined,
+    origin: Read<AliasOrigin | undefined>,
     walk: SubstitutionWalk,
   ): Type {
     if (origin == undefined) {
@@ -241,9 +245,9 @@ partial class TypeResolver {
     return made;
   }
 
-  private boundParameter(
+  private readonly boundParameter(
     type: Type,
-    walk: SubstitutionWalk,
+    walk: Read<SubstitutionWalk>,
     isValue: boolean,
   ): Type {
     const found = walk.bound.get(type.id);
@@ -257,12 +261,12 @@ partial class TypeResolver {
     return found;
   }
 
-  private substitutedParts(type: Type, walk: SubstitutionWalk): Type {
+  private readonly substitutedParts(type: Type, walk: SubstitutionWalk): Type {
     switch (type.kind) {
       case TypeKind.Array: {
         const item = this.substituted(type.item, walk, true);
 
-        return this.store.arrayOf(item);
+        return this.store.sameArrayOf(type, item);
       }
       case TypeKind.Tuple: {
         const items = this.substitutedAll(type.items, walk, true);
@@ -307,7 +311,7 @@ partial class TypeResolver {
     }
   }
 
-  private substitutedHolder(type: Type, walk: SubstitutionWalk): Type {
+  private readonly substitutedHolder(type: Type, walk: SubstitutionWalk): Type {
     switch (type.kind) {
       case TypeKind.Iterator: {
         const shape = type.shape;
@@ -334,15 +338,15 @@ partial class TypeResolver {
     }
   }
 
-  private substitutedAll(
-    parts: Type[],
+  private readonly substitutedAll(
+    parts: Read<Type[]>,
     walk: SubstitutionWalk,
     isValue: boolean,
   ): Type[] {
     return parts.map((part) => this.substituted(part, walk, isValue));
   }
 
-  private substitutedField(
+  private readonly substitutedField(
     field: ObjectField,
     walk: SubstitutionWalk,
   ): ObjectField {
@@ -356,8 +360,8 @@ partial class TypeResolver {
     };
   }
 
-  private substitutedFunction(
-    shape: FunctionShape,
+  private readonly substitutedFunction(
+    shape: Read<FunctionShape>,
     walk: SubstitutionWalk,
   ): Type {
     const params: FunctionParameter[] = shape.params.map((param) => ({
@@ -377,7 +381,7 @@ partial class TypeResolver {
     return this.store.functionOf({ params, rest, self, result });
   }
 
-  public instanceWith(instance: InstanceType, args: Type[]): Type {
+  public readonly instanceWith(instance: InstanceType, args: Read<Type[]>): Type {
     const record = this.record(instance.module);
     const found = record?.declarations.get(instance.name);
     if (found != undefined && found.kind == StmtKind.Class) {
@@ -394,10 +398,10 @@ partial class TypeResolver {
     return made ?? this.store.plain(TypeKind.Error);
   }
 
-  private ownInstanceWith(
+  private readonly ownInstanceWith(
     instance: InstanceType,
     decl: ClassDecl,
-    args: Type[],
+    args: Read<Type[]>,
   ): Type {
     if (decl.loc != instance.loc) {
       return this.store.plain(TypeKind.Error);

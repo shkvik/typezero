@@ -14,7 +14,7 @@ import {
 } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  private indexGlobals(): void {
+  private readonly indexGlobals(): void {
     for (let index = 0; index < this.program.builtins.length; index++) {
       this.indexModule(-1 - index);
     }
@@ -38,7 +38,7 @@ partial class TypeResolver {
     }
   }
 
-  private indexModule(module: int): void {
+  private readonly indexModule(module: int): void {
     const record = this.record(module);
     if (record == undefined) {
       return;
@@ -53,7 +53,7 @@ partial class TypeResolver {
     }
   }
 
-  private record(module: int): ModuleRecord | undefined {
+  private readonly record(module: int): ModuleRecord | undefined {
     const known = this.records.get(module);
     if (known != undefined) {
       return known;
@@ -67,7 +67,7 @@ partial class TypeResolver {
     return record;
   }
 
-  private openRecord(module: int): ModuleRecord | undefined {
+  private readonly openRecord(module: int): ModuleRecord | undefined {
     if (module < 0) {
       const builtin = this.program.builtins[-1 - module];
       if (builtin == undefined) {
@@ -75,8 +75,9 @@ partial class TypeResolver {
       }
 
       const items = builtin.parsed.file.items;
+      const none = new Map<int, NameUse>();
 
-      return this.recordOf(items, [], { library: true, native: false });
+      return this.recordOf(items, [], none, { library: true, native: false });
     }
 
     const opened = this.program.modules[module];
@@ -84,27 +85,26 @@ partial class TypeResolver {
       return undefined;
     }
 
-    const record = this.recordOf(opened.file.items, opened.declared, {
-      library: opened.source.isLibrary,
-      native: opened.isDeclarationOnly,
-    });
-    const scopes = this.scopes.get(module);
+    const uses = new Map<int, NameUse>();
 
-    for (const use of scopes?.uses ?? []) {
+    for (const use of this.scopes.get(module)?.uses ?? []) {
       if (use.isType) {
-        record.uses.set(use.loc, use);
+        uses.set(use.loc, use);
       }
     }
 
-    return record;
+    return this.recordOf(opened.file.items, opened.declared, uses, {
+      library: opened.source.isLibrary,
+      native: opened.isDeclarationOnly,
+    });
   }
 
-  private recordOf(
-    items: Stmt[],
-    declared: DeclaredClass[],
+  private readonly recordOf(
+    items: Read<Stmt[]>,
+    declared: Read<DeclaredClass[]>,
+    uses: Own<Map<int, NameUse>>,
     origin: ModuleOrigin,
   ): ModuleRecord {
-    const uses = new Map<int, NameUse>();
     const declarations = new Map<string, TypeDeclaration>();
     const classes = new Map<string, DeclaredClass>();
 
@@ -136,7 +136,7 @@ partial class TypeResolver {
     };
   }
 
-  private declareFirst(
+  private readonly declareFirst(
     declarations: Map<string, TypeDeclaration>,
     name: string,
     item: TypeDeclaration,

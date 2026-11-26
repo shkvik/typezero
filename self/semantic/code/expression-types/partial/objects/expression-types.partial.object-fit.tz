@@ -22,7 +22,7 @@ import {
 import { kLengthName } from "../../../expression-shapes/const/expression-shapes.const.tz";
 
 partial class ExpressionTypes {
-  private isPlacedLiteral(expr: Expr, wanted: Type, module: int): boolean {
+  private readonly isPlacedLiteral(expr: Expr, wanted: Type, module: int): boolean {
     if (expr.kind != ExprKind.Name) {
       return false;
     }
@@ -52,7 +52,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private bothText(expr: Expr, wanted: Type, module: int): string {
+  private readonly bothText(expr: Expr, wanted: Type, module: int): string {
     if (expr.kind != ExprKind.Name) {
       return "";
     }
@@ -80,7 +80,7 @@ partial class ExpressionTypes {
     return `${kBothStart}${word}${kBothEnd}`;
   }
 
-  private objectTargetCheck(
+  private readonly objectTargetCheck(
     target: MemberExpr,
     object: Type,
     module: int,
@@ -133,7 +133,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private isInferredName(expr: Expr, module: int): boolean {
+  private readonly isInferredName(expr: Expr, module: int): boolean {
     if (expr.kind != ExprKind.Name) {
       return false;
     }
@@ -151,7 +151,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private updateTargetCheck(target: Expr, module: int): void {
+  private readonly updateTargetCheck(target: Expr, module: int): void {
     if (target.kind != ExprKind.Member) {
       return;
     }
@@ -165,7 +165,7 @@ partial class ExpressionTypes {
     this.objectTargetCheck(target, object, module);
   }
 
-  private nullishTargetCheck(
+  private readonly nullishTargetCheck(
     expr: AssignExpr,
     declared: Type,
     module: int,
@@ -199,7 +199,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private stringCallCheck(expr: CallExpr, callee: NameExpr, module: int): void {
+  private readonly stringCallCheck(expr: CallExpr, callee: NameExpr, module: int): void {
     const arg = expr.args[0]?.expr;
     const isString =
       callee.name == kStringClass && this.isGlobalUse(callee, module);

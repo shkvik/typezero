@@ -36,7 +36,7 @@ import {
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private superFrameOf(
+  private readonly superFrameOf(
     decl: ClassDecl,
     fn: FunctionDecl,
     module: int,
@@ -57,7 +57,7 @@ partial class ExpressionTypes {
     return { isConstructor, roots, parent: parent ?? "", isBefore: true };
   }
 
-  private rootSuperOf(statement: Stmt, module: int): Expr | undefined {
+  private readonly rootSuperOf(statement: Stmt, module: int): Expr | undefined {
     if (statement.kind != StmtKind.Expr) {
       return undefined;
     }
@@ -73,7 +73,7 @@ partial class ExpressionTypes {
     return expr;
   }
 
-  private parentClassName(decl: ClassDecl, module: int): string | undefined {
+  private readonly parentClassName(decl: ClassDecl, module: int): string | undefined {
     if (decl.base == undefined) {
       return undefined;
     }
@@ -89,7 +89,7 @@ partial class ExpressionTypes {
     return parent?.name;
   }
 
-  private superCheck(decl: ClassDecl, fn: FunctionDecl, module: int): void {
+  private readonly superCheck(decl: ClassDecl, fn: FunctionDecl, module: int): void {
     const frame = this.superFrames[this.superFrames.length - 1];
     if (frame == undefined || !frame.isConstructor || frame.roots.size > 0) {
       return;
@@ -104,7 +104,7 @@ partial class ExpressionTypes {
     this.report(module, fn.loc, Code.MustCallSuper, { word, first });
   }
 
-  private superCallTyped(expr: CallExpr, callee: Expr, module: int): Type {
+  private readonly superCallTyped(expr: CallExpr, callee: Expr, module: int): Type {
     const frame = this.superFrames[this.superFrames.length - 1];
     const nothing = this.store.plain(TypeKind.Void);
     const place = this.thisPlaces[this.thisPlaces.length - 1];
@@ -130,7 +130,7 @@ partial class ExpressionTypes {
     return nothing;
   }
 
-  private superArgumentsCheck(expr: CallExpr, module: int): void {
+  private readonly superArgumentsCheck(expr: CallExpr, module: int): void {
     const target = this.parentConstructor(expr.loc);
     if (target == undefined) {
       for (const arg of expr.args) {
@@ -143,7 +143,7 @@ partial class ExpressionTypes {
     this.argumentsCheck(expr.args, target, module);
   }
 
-  private parentConstructor(loc: int): CallTarget | undefined {
+  private readonly parentConstructor(loc: int): CallTarget | undefined {
     const owner = this.ownerClasses[this.ownerClasses.length - 1];
     if (owner == undefined) {
       return undefined;
@@ -176,7 +176,7 @@ partial class ExpressionTypes {
     return this.constructorTarget(maker, chosen, loc);
   }
 
-  private thisBeforeSuper(expr: NameExpr, module: int): void {
+  private readonly thisBeforeSuper(expr: NameExpr, module: int): void {
     const frame = this.superFrames[this.superFrames.length - 1];
     if (frame == undefined || !frame.isConstructor || !frame.isBefore) {
       return;
@@ -190,7 +190,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private returnBeforeSuper(loc: int, module: int): void {
+  private readonly returnBeforeSuper(loc: int, module: int): void {
     const frame = this.superFrames[this.superFrames.length - 1];
     if (frame == undefined || !frame.isConstructor || !frame.isBefore) {
       return;
@@ -199,7 +199,7 @@ partial class ExpressionTypes {
     this.report(module, loc, Code.ReturnBeforeSuper, kNoDetails);
   }
 
-  private overrideChecks(decl: ClassDecl, module: int): void {
+  private readonly overrideChecks(decl: ClassDecl, module: int): void {
     if (decl.base == undefined) {
       return;
     }
@@ -223,7 +223,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private overrideCheck(
+  private readonly overrideCheck(
     method: FunctionDecl,
     decl: ClassDecl,
     parent: InstanceType,
@@ -302,7 +302,7 @@ partial class ExpressionTypes {
     this.reportFound(module, overrideAccessError);
   }
 
-  private ownMethodType(
+  private readonly ownMethodType(
     decl: ClassDecl,
     method: FunctionDecl,
     module: int,
@@ -315,7 +315,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private inheritedResult(fn: FunctionDecl, module: int): Type | undefined {
+  private readonly inheritedResult(fn: FunctionDecl, module: int): Type | undefined {
     const owner = this.ownerClasses[this.ownerClasses.length - 1];
     const isMethod = fn.role != undefined && !this.classes.isStaticMethod(fn);
     if (owner == undefined || !isMethod || owner.decl.typeParams.length > 0) {
@@ -358,7 +358,7 @@ partial class ExpressionTypes {
     return result;
   }
 
-  private contractResultOf(
+  private readonly contractResultOf(
     decl: ClassDecl,
     fn: FunctionDecl,
     module: int,
@@ -385,7 +385,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private parentEntry(
+  private readonly parentEntry(
     parent: InstanceType,
     fn: FunctionDecl,
   ): ClassMemberEntry | undefined {
@@ -398,7 +398,7 @@ partial class ExpressionTypes {
     return entry;
   }
 
-  private isLibraryHookPrefix(own: Type, theirs: Type, home: int): boolean {
+  private readonly isLibraryHookPrefix(own: Type, theirs: Type, home: int): boolean {
     const isFunctions =
       own.kind == TypeKind.Function && theirs.kind == TypeKind.Function;
     if (!isFunctions || !this.modules.isTypedLibrary(home)) {
@@ -417,7 +417,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private protectedElsewhere(
+  private readonly protectedElsewhere(
     owner: ClassDecl,
     access: Access,
     expr: MemberExpr,

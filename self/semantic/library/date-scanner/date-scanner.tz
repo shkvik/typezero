@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import {
   kDateKeywords,
   kDateSymbols,
@@ -41,47 +42,45 @@ export class DateScanner {
     this.next = this.scan();
   }
 
-  public peek(): DateToken {
+  public readonly peek(): DateToken {
     return this.next;
   }
 
-  public isNextFixed(length: int): boolean {
+  public readonly isNextFixed(length: int): boolean {
     return this.isFixedNumber(this.next, length);
   }
 
-  public isNextNumber(): boolean {
+  public readonly isNextNumber(): boolean {
     return this.next.kind == DateTokenKind.Number;
   }
 
-  public isNextSign(): boolean {
+  public readonly isNextSign(): boolean {
     return this.isSign(this.next);
   }
 
-  public isNextZ(): boolean {
+  public readonly isNextZ(): boolean {
     return this.isZ(this.next);
   }
 
-  public isNextSymbol(char: int): boolean {
+  public readonly isNextSymbol(char: int): boolean {
     return this.isSymbol(this.next, char);
   }
 
   public nextToken(): DateToken {
-    const token = this.next;
-
-    this.next = this.scan();
+    const token = replace(this.next, this.scan());
 
     return token;
   }
 
-  public isSymbol(token: DateToken, char: int): boolean {
+  public readonly isSymbol(token: DateToken, char: int): boolean {
     return token.kind == DateTokenKind.Symbol && token.value == char;
   }
 
-  public isSign(token: DateToken): boolean {
+  public readonly isSign(token: DateToken): boolean {
     return this.isSymbol(token, kPlus) || this.isSymbol(token, kMinus);
   }
 
-  public signOf(token: DateToken): int {
+  public readonly signOf(token: DateToken): int {
     if (token.value == kMinus) {
       return -1;
     }
@@ -89,11 +88,11 @@ export class DateScanner {
     return 1;
   }
 
-  public isFixedNumber(token: DateToken, length: int): boolean {
+  public readonly isFixedNumber(token: DateToken, length: int): boolean {
     return token.kind == DateTokenKind.Number && token.length == length;
   }
 
-  public isWord(token: DateToken): boolean {
+  public readonly isWord(token: DateToken): boolean {
     switch (token.kind) {
       case DateTokenKind.Other:
       case DateTokenKind.Month:
@@ -106,7 +105,7 @@ export class DateScanner {
     }
   }
 
-  public isZ(token: DateToken): boolean {
+  public readonly isZ(token: DateToken): boolean {
     return (
       token.kind == DateTokenKind.Zone && token.length == 1 && token.value == 0
     );
@@ -135,11 +134,11 @@ export class DateScanner {
     this.index = index + 1;
   }
 
-  private isDigit(char: int): boolean {
+  private readonly isDigit(char: int): boolean {
     return char >= kZero && char <= kNine;
   }
 
-  private isWhiteSpace(char: int): boolean {
+  private readonly isWhiteSpace(char: int): boolean {
     if (kWhiteSpaces.includes(char)) {
       return true;
     }
@@ -147,11 +146,11 @@ export class DateScanner {
     return char >= kWideSpaceFirst && char <= kWideSpaceLast;
   }
 
-  private isSpace(char: int): boolean {
+  private readonly isSpace(char: int): boolean {
     return this.isWhiteSpace(char) || kLineTerminators.includes(char);
   }
 
-  private isLetter(char: int): boolean {
+  private readonly isLetter(char: int): boolean {
     return char >= kUpperA && !this.isWhiteSpace(char);
   }
 
@@ -194,7 +193,7 @@ export class DateScanner {
     return this.keyword(prefix, length);
   }
 
-  private keyword(prefix: int[], length: int): DateToken {
+  private readonly keyword(prefix: Read<int[]>, length: int): DateToken {
     for (const keyword of kDateKeywords) {
       const isLong = length > kPrefixLength;
       const isFitting = !isLong || keyword.kind == DateTokenKind.Month;
@@ -206,7 +205,7 @@ export class DateScanner {
     return { kind: DateTokenKind.Other, length, value: 0 };
   }
 
-  private isPrefix(prefix: int[], word: string): boolean {
+  private readonly isPrefix(prefix: Read<int[]>, word: string): boolean {
     if (prefix.length != word.length) {
       return false;
     }
@@ -271,7 +270,7 @@ export class DateScanner {
     }
   }
 
-  private parenStep(char: int): int {
+  private readonly parenStep(char: int): int {
     if (char == kRightParen) {
       return -1;
     }

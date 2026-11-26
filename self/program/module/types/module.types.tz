@@ -16,19 +16,19 @@ export type SourceText = {
   readonly path: string;
   readonly text: Buffer;
   readonly isLibrary: boolean;
-  readonly pieces?: SourcePiece[];
+  readonly pieces?: readonly SourcePiece[];
 };
 
 export type ParsedFile = {
   readonly source: SourceText;
   readonly file: SourceFile;
-  readonly errors: SourceError[];
+  readonly errors: readonly SourceError[];
 };
 
 export type ParsedDeclaration = {
   readonly source: SourceText;
   readonly file: DeclarationFile;
-  readonly errors: SourceError[];
+  readonly errors: readonly SourceError[];
 };
 
 export enum LinkKind {
@@ -54,13 +54,13 @@ export type Module = {
   readonly name: string;
   readonly source: SourceText;
   readonly file: SourceFile;
-  readonly errors: SourceError[];
+  readonly errors: readonly SourceError[];
   readonly declaration?: ParsedDeclaration;
-  readonly links: ModuleLink[];
-  readonly implicit: ImportDecl[];
-  readonly parts: ClassDecl[];
+  readonly links: readonly ModuleLink[];
+  readonly implicit: readonly ImportDecl[];
+  readonly parts: readonly ClassDecl[];
   readonly isDeclarationOnly: boolean;
-  readonly declared: DeclaredClass[];
+  readonly declared: readonly DeclaredClass[];
 };
 
 export enum BuiltinText {
@@ -73,9 +73,20 @@ export type BuiltinFile = {
 };
 
 export type Program = {
-  readonly modules: Module[];
-  readonly order: Module[];
-  readonly globals: Module[];
-  readonly ambient: Module[];
-  readonly builtins: BuiltinFile[];
+  readonly modules: readonly Module[];
+  readonly order: readonly Module[];
+  readonly globals: readonly Module[];
+  readonly ambient: readonly Module[];
+  readonly builtins: readonly BuiltinFile[];
 };
+
+export type InternedModules = Interned<
+  | Program
+  | Module
+  | SourceText
+  | SourcePiece
+  | ParsedFile
+  | ParsedDeclaration
+  | ModuleLink
+  | BuiltinFile
+>;

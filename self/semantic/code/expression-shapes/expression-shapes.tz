@@ -33,7 +33,7 @@ import {
 } from "../../../program/ast/types/ast.types.statements.tz";
 
 export class ExpressionShapes {
-  public isNumberLiteral(expr: Expr): boolean {
+  public readonly isNumberLiteral(expr: Expr): boolean {
     if (expr.kind == ExprKind.FloatLit || expr.kind == ExprKind.IntLit) {
       return true;
     }
@@ -45,7 +45,7 @@ export class ExpressionShapes {
     );
   }
 
-  public isFieldLiteral(init: Expr): boolean {
+  public readonly isFieldLiteral(init: Expr): boolean {
     if (init.kind == ExprKind.Unary && init.op == UnaryOp.Neg) {
       return this.isFieldLiteral(init.operand);
     }
@@ -62,7 +62,7 @@ export class ExpressionShapes {
     }
   }
 
-  public isPlainLiteral(expr: Expr): boolean {
+  public readonly isPlainLiteral(expr: Expr): boolean {
     switch (expr.kind) {
       case ExprKind.IntLit:
       case ExprKind.FloatLit:
@@ -81,11 +81,11 @@ export class ExpressionShapes {
     }
   }
 
-  public isLiteralShaped(expr: Expr): boolean {
+  public readonly isLiteralShaped(expr: Expr): boolean {
     return expr.kind == ExprKind.ArrayLit || expr.kind == ExprKind.ObjectLit;
   }
 
-  public isNumberTree(expr: Expr): boolean {
+  public readonly isNumberTree(expr: Expr): boolean {
     switch (expr.kind) {
       case ExprKind.IntLit:
       case ExprKind.FloatLit:
@@ -103,7 +103,7 @@ export class ExpressionShapes {
     }
   }
 
-  public isIntTree(expr: Expr): boolean {
+  public readonly isIntTree(expr: Expr): boolean {
     switch (expr.kind) {
       case ExprKind.IntLit:
         return true;
@@ -120,11 +120,11 @@ export class ExpressionShapes {
     }
   }
 
-  public isSign(op: UnaryOp): boolean {
+  public readonly isSign(op: UnaryOp): boolean {
     return op == UnaryOp.Neg || op == UnaryOp.Plus;
   }
 
-  public isWholeArithmetic(op: BinaryOp): boolean {
+  public readonly isWholeArithmetic(op: BinaryOp): boolean {
     switch (op) {
       case BinaryOp.Add:
       case BinaryOp.Sub:
@@ -137,7 +137,7 @@ export class ExpressionShapes {
     }
   }
 
-  public isSpreadOnly(expr: ObjectLitExpr): boolean {
+  public readonly isSpreadOnly(expr: ObjectLitExpr): boolean {
     const hasSpread = expr.props.some(
       (property) => property.form.kind == PropertyKind.Spread,
     );
@@ -150,7 +150,7 @@ export class ExpressionShapes {
     return hasSpread && !hasOther;
   }
 
-  public isNeedingContext(expr: Expr): boolean {
+  public readonly isNeedingContext(expr: Expr): boolean {
     switch (expr.kind) {
       case ExprKind.Function:
         return expr.fn.params.some((param) => param.type == undefined);
@@ -176,7 +176,7 @@ export class ExpressionShapes {
     }
   }
 
-  public isWrittenLiteral(expr: Expr): boolean {
+  public readonly isWrittenLiteral(expr: Expr): boolean {
     switch (expr.kind) {
       case ExprKind.IntLit:
       case ExprKind.FloatLit:
@@ -191,7 +191,7 @@ export class ExpressionShapes {
     }
   }
 
-  public isLogical(expr: Expr): boolean {
+  public readonly isLogical(expr: Expr): boolean {
     if (expr.kind != ExprKind.Binary) {
       return false;
     }
@@ -199,15 +199,15 @@ export class ExpressionShapes {
     return expr.op == BinaryOp.LogAnd || expr.op == BinaryOp.LogOr;
   }
 
-  public isWaiting(branch: Expr): boolean {
+  public readonly isWaiting(branch: Expr): boolean {
     return this.isShapedBranch(branch) || this.isNumberTree(branch);
   }
 
-  public isClosure(fn: FunctionDecl): boolean {
+  public readonly isClosure(fn: FunctionDecl): boolean {
     return fn.isArrow || fn.place == FunctionPlace.Expression;
   }
 
-  public childrenOf(expr: Expr): Expr[] {
+  public readonly childrenOf(expr: Expr): Expr[] {
     switch (expr.kind) {
       case ExprKind.Index:
         return [expr.object, expr.index];
@@ -232,13 +232,13 @@ export class ExpressionShapes {
     }
   }
 
-  public isLogicOp(op: BinaryOp): boolean {
+  public readonly isLogicOp(op: BinaryOp): boolean {
     return (
       op == BinaryOp.Nullish || op == BinaryOp.LogOr || op == BinaryOp.LogAnd
     );
   }
 
-  public isSimpleTarget(target: Expr): boolean {
+  public readonly isSimpleTarget(target: Expr): boolean {
     switch (target.kind) {
       case ExprKind.Name:
         return true;
@@ -255,11 +255,11 @@ export class ExpressionShapes {
     }
   }
 
-  public isLiteralTruth(value: Expr, truth: boolean): boolean {
+  public readonly isLiteralTruth(value: Expr, truth: boolean): boolean {
     return value.kind == ExprKind.BoolLit && value.value == truth;
   }
 
-  public literalCondition(cond: Expr): boolean | undefined {
+  public readonly literalCondition(cond: Expr): boolean | undefined {
     if (cond.kind != ExprKind.BoolLit) {
       return undefined;
     }
@@ -267,19 +267,19 @@ export class ExpressionShapes {
     return cond.value;
   }
 
-  public isTrueLiteral(cond: Expr): boolean {
+  public readonly isTrueLiteral(cond: Expr): boolean {
     return this.literalCondition(cond) == true;
   }
 
-  public isForever(cond: Expr | undefined): boolean {
+  public readonly isForever(cond: Expr | undefined): boolean {
     return cond == undefined || this.isTrueLiteral(cond);
   }
 
-  public hasBreak(statement: Stmt | undefined): boolean {
+  public readonly hasBreak(statement: Stmt | undefined): boolean {
     return this.breaksOut(statement, false);
   }
 
-  public isLength(expr: Expr): boolean {
+  public readonly isLength(expr: Expr): boolean {
     if (expr.kind == ExprKind.OptionalChain) {
       return this.isLength(expr.chain);
     }
@@ -287,7 +287,7 @@ export class ExpressionShapes {
     return expr.kind == ExprKind.Member && expr.name == kLengthName;
   }
 
-  public isZeroLiteral(expr: Expr): boolean {
+  public readonly isZeroLiteral(expr: Expr): boolean {
     switch (expr.kind) {
       case ExprKind.IntLit:
         return expr.value == 0;
@@ -300,7 +300,7 @@ export class ExpressionShapes {
     }
   }
 
-  public isPlainList(literal: ArrayLitExpr): boolean {
+  public readonly isPlainList(literal: ArrayLitExpr): boolean {
     if (literal.elements.length == 0) {
       return false;
     }
@@ -310,7 +310,7 @@ export class ExpressionShapes {
     );
   }
 
-  public isFresh(expr: Expr): boolean {
+  public readonly isFresh(expr: Expr): boolean {
     switch (expr.kind) {
       case ExprKind.ArrayLit:
       case ExprKind.ObjectLit:
@@ -322,7 +322,7 @@ export class ExpressionShapes {
     }
   }
 
-  public madeSize(value: Expr): Expr | undefined {
+  public readonly madeSize(value: Expr): Expr | undefined {
     if (value.kind != ExprKind.New) {
       return undefined;
     }
@@ -344,7 +344,7 @@ export class ExpressionShapes {
     return size.expr;
   }
 
-  public madeCount(value: Expr): int | undefined {
+  public readonly madeCount(value: Expr): int | undefined {
     const size = this.madeSize(value);
     if (size == undefined || size.kind != ExprKind.ArrayLit) {
       return undefined;
@@ -358,7 +358,7 @@ export class ExpressionShapes {
     return size.elements.length;
   }
 
-  public embeddedPath(value: Expr): string | undefined {
+  public readonly embeddedPath(value: Expr): string | undefined {
     if (value.kind != ExprKind.Call) {
       return undefined;
     }
@@ -376,7 +376,7 @@ export class ExpressionShapes {
     return path.value;
   }
 
-  public allocatedSize(value: Expr): Expr | undefined {
+  public readonly allocatedSize(value: Expr): Expr | undefined {
     const call = this.bufferCall(value, kAllocNames);
     const size = call?.args[0];
     if (size == undefined || size.spread) {
@@ -386,7 +386,7 @@ export class ExpressionShapes {
     return size.expr;
   }
 
-  public copiedSource(value: Expr): Expr | undefined {
+  public readonly copiedSource(value: Expr): Expr | undefined {
     const call = this.bufferCall(value, kCopyNames);
     const source = call?.args[0];
     if (call == undefined || source == undefined || source.spread) {
@@ -405,7 +405,7 @@ export class ExpressionShapes {
     return source.expr;
   }
 
-  public viewOf(value: Expr): ViewShape | undefined {
+  public readonly viewOf(value: Expr): ViewShape | undefined {
     if (value.kind != ExprKind.New) {
       return undefined;
     }
@@ -433,7 +433,7 @@ export class ExpressionShapes {
     };
   }
 
-  public madeBuffer(value: Expr): Expr | undefined {
+  public readonly madeBuffer(value: Expr): Expr | undefined {
     if (value.kind != ExprKind.New) {
       return undefined;
     }
@@ -446,11 +446,11 @@ export class ExpressionShapes {
     return this.madeSize(value);
   }
 
-  private isArithmetic(op: BinaryOp): boolean {
+  private readonly isArithmetic(op: BinaryOp): boolean {
     return op == BinaryOp.Div || this.isWholeArithmetic(op);
   }
 
-  private isShapedBranch(branch: Expr): boolean {
+  private readonly isShapedBranch(branch: Expr): boolean {
     if (this.isLiteralShaped(branch)) {
       return true;
     }
@@ -464,7 +464,7 @@ export class ExpressionShapes {
     );
   }
 
-  private isSimpleChain(expr: Expr): boolean {
+  private readonly isSimpleChain(expr: Expr): boolean {
     switch (expr.kind) {
       case ExprKind.Name:
       case ExprKind.IntLit:
@@ -477,7 +477,7 @@ export class ExpressionShapes {
     }
   }
 
-  private breaksOut(statement: Stmt | undefined, isNested: boolean): boolean {
+  private readonly breaksOut(statement: Stmt | undefined, isNested: boolean): boolean {
     if (statement == undefined) {
       return false;
     }
@@ -509,7 +509,7 @@ export class ExpressionShapes {
     }
   }
 
-  private bufferCall(value: Expr, names: string[]): CallExpr | undefined {
+  private readonly bufferCall(value: Expr, names: Read<string[]>): CallExpr | undefined {
     if (value.kind != ExprKind.Call) {
       return undefined;
     }

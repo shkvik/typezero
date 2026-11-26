@@ -26,15 +26,15 @@ export class EventRules {
     this.text = text;
   }
 
-  public isListenerMethod(name: string): boolean {
+  public readonly isListenerMethod(name: string): boolean {
     return kListenerMethods.includes(name);
   }
 
-  public isServiceEvent(name: string): boolean {
+  public readonly isServiceEvent(name: string): boolean {
     return kServiceEvents.includes(name);
   }
 
-  public serviceArgs(): Type {
+  public readonly serviceArgs(): Type {
     const text = this.store.plain(TypeKind.String);
     const unknown = this.store.plain(TypeKind.Unknown);
     const change = this.store.objectOf([
@@ -55,7 +55,7 @@ export class EventRules {
     });
   }
 
-  public mapError(loc: int, events: Type): SourceError | undefined {
+  public readonly mapError(loc: int, events: Type): SourceError | undefined {
     if (events.kind == TypeKind.Error) {
       return undefined;
     }
@@ -78,7 +78,7 @@ export class EventRules {
     return undefined;
   }
 
-  public eventArgs(events: Type, name: string): Type | undefined {
+  public readonly eventArgs(events: Type, name: string): Type | undefined {
     if (this.isServiceEvent(name)) {
       return this.serviceArgs();
     }
@@ -89,7 +89,7 @@ export class EventRules {
     return events.fields.find((field) => field.name == name)?.type;
   }
 
-  public noEventError(loc: int, events: Type, name: string): SourceError {
+  public readonly noEventError(loc: int, events: Type, name: string): SourceError {
     const names = this.eventNames(events);
     const first = this.listText(names);
     const other = this.nearestHint(names, name);
@@ -101,7 +101,7 @@ export class EventRules {
     };
   }
 
-  public listenerType(args: Type, result: Type, self: Type | undefined): Type {
+  public readonly listenerType(args: Type, result: Type, self: Type | undefined): Type {
     if (args.kind != TypeKind.Tuple) {
       return this.store.plain(TypeKind.Error);
     }
@@ -116,7 +116,7 @@ export class EventRules {
     return this.store.functionOf({ params, rest, self, result });
   }
 
-  public arityError(
+  public readonly arityError(
     loc: int,
     event: string,
     args: Type,
@@ -135,13 +135,13 @@ export class EventRules {
     };
   }
 
-  public notFunctionError(loc: int, given: Type): SourceError {
+  public readonly notFunctionError(loc: int, given: Type): SourceError {
     const first = this.text.of(given);
 
     return { code: Code.ListenerNotFunction, loc, details: { first } };
   }
 
-  public getsError(
+  public readonly getsError(
     loc: int,
     event: string,
     args: Type,
@@ -158,13 +158,13 @@ export class EventRules {
     };
   }
 
-  public asyncResultError(loc: int, result: Type): SourceError {
+  public readonly asyncResultError(loc: int, result: Type): SourceError {
     const first = this.text.of(result);
 
     return { code: Code.ListenerAsyncResult, loc, details: { first } };
   }
 
-  public thisTypeError(loc: int, self: Type, emitter: Type): SourceError {
+  public readonly thisTypeError(loc: int, self: Type, emitter: Type): SourceError {
     return {
       code: Code.ListenerThisType,
       loc,
@@ -172,11 +172,11 @@ export class EventRules {
     };
   }
 
-  public asyncThisError(loc: int): SourceError {
+  public readonly asyncThisError(loc: int): SourceError {
     return { code: Code.ListenerAsyncThis, loc, details: kNoDetails };
   }
 
-  public notEmittedError(loc: int, names: string[], name: string): SourceError {
+  public readonly notEmittedError(loc: int, names: Read<string[]>, name: string): SourceError {
     if (names.length == 0) {
       return { code: Code.EventNeverEmitted, loc, details: { word: name } };
     }
@@ -191,7 +191,7 @@ export class EventRules {
     };
   }
 
-  private recordMapError(loc: int, args: Type): SourceError | undefined {
+  private readonly recordMapError(loc: int, args: Type): SourceError | undefined {
     if (args.kind != TypeKind.Tuple) {
       const shown = this.text.of(args);
       const why = `the arguments of each event are '${shown}' here, which is not a tuple`;
@@ -211,7 +211,7 @@ export class EventRules {
     return undefined;
   }
 
-  private fieldError(loc: int, field: ObjectField): SourceError | undefined {
+  private readonly fieldError(loc: int, field: ObjectField): SourceError | undefined {
     const type = field.type;
     const word = field.name;
     if (field.optional) {
@@ -242,7 +242,7 @@ export class EventRules {
     return undefined;
   }
 
-  private eventNames(events: Type): string[] {
+  private readonly eventNames(events: Type): string[] {
     if (events.kind != TypeKind.Object) {
       return [];
     }
@@ -250,7 +250,7 @@ export class EventRules {
     return events.fields.map((field) => field.name);
   }
 
-  private listText(names: string[]): string {
+  private readonly listText(names: Read<string[]>): string {
     if (names.length == 0) {
       return kNoEvents;
     }
@@ -266,7 +266,7 @@ export class EventRules {
     return `${head} and ${last}`;
   }
 
-  private nearestHint(names: string[], name: string): string {
+  private readonly nearestHint(names: Read<string[]>, name: string): string {
     let best = "";
     let bestDistance = -1;
 
@@ -286,7 +286,7 @@ export class EventRules {
     return `; did you mean '${best}'?`;
   }
 
-  private distanceLimit(name: string): int {
+  private readonly distanceLimit(name: string): int {
     let third = 0;
 
     while ((third + 1) * 3 <= name.length) {
@@ -300,7 +300,7 @@ export class EventRules {
     return 2;
   }
 
-  private editDistance(first: string, second: string): int {
+  private readonly editDistance(first: string, second: string): int {
     let previous: int[] = [];
 
     for (let column = 0; column <= second.length; column++) {
@@ -327,7 +327,7 @@ export class EventRules {
     return previous[second.length] ?? 0;
   }
 
-  private changeCost(first: string, second: string): int {
+  private readonly changeCost(first: string, second: string): int {
     if (first == second) {
       return 0;
     }
@@ -335,7 +335,7 @@ export class EventRules {
     return 1;
   }
 
-  private smallest(first: int, second: int, third: int): int {
+  private readonly smallest(first: int, second: int, third: int): int {
     let least = first;
     if (second < least) {
       least = second;

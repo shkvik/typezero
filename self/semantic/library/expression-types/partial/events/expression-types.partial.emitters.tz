@@ -38,7 +38,7 @@ import {
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 
 partial class ExpressionTypes {
-  private emitterMapCheck(expr: NewExpr, made: Type, module: int): void {
+  private readonly emitterMapCheck(expr: NewExpr, made: Type, module: int): void {
     const events = this.eventMapOf(made);
     if (events == undefined || this.modules.isLibraryModule(module)) {
       return;
@@ -47,7 +47,7 @@ partial class ExpressionTypes {
     this.reportFound(module, this.events.mapError(expr.loc, events));
   }
 
-  private emitterCall(
+  private readonly emitterCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -101,7 +101,7 @@ partial class ExpressionTypes {
     return instance;
   }
 
-  private eventArgsOf(
+  private readonly eventArgsOf(
     expr: CallExpr,
     member: MemberExpr,
     events: Type | undefined,
@@ -140,7 +140,7 @@ partial class ExpressionTypes {
     return args;
   }
 
-  private listenersOf(args: Type | undefined): Type {
+  private readonly listenersOf(args: Type | undefined): Type {
     const nothing = this.store.plain(TypeKind.Void);
     if (args == undefined) {
       const unknown = this.store.plain(TypeKind.Error);
@@ -153,7 +153,7 @@ partial class ExpressionTypes {
     return this.store.arrayOf(listener);
   }
 
-  private emitChecked(
+  private readonly emitChecked(
     expr: CallExpr,
     args: Type | undefined,
     module: int,
@@ -199,7 +199,7 @@ partial class ExpressionTypes {
     return boolean;
   }
 
-  private emittedChecked(given: CallArgument[], args: Type, module: int): void {
+  private readonly emittedChecked(given: Read<CallArgument[]>, args: Type, module: int): void {
     if (args.kind != TypeKind.Tuple) {
       return;
     }
@@ -215,7 +215,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private listenerChecked(
+  private readonly listenerChecked(
     expr: CallExpr,
     instance: InstanceType,
     args: Type | undefined,
@@ -244,7 +244,7 @@ partial class ExpressionTypes {
     this.looseArguments(rest, module);
   }
 
-  private listenerLoose(listener: Expr, module: int): void {
+  private readonly listenerLoose(listener: Expr, module: int): void {
     if (listener.kind != ExprKind.Function) {
       this.typed(listener, undefined, module);
 
@@ -261,7 +261,7 @@ partial class ExpressionTypes {
     this.typed(listener, wanted, module);
   }
 
-  private listenerLiteral(
+  private readonly listenerLiteral(
     listener: FunctionExpr,
     instance: InstanceType,
     args: Type,
@@ -294,7 +294,7 @@ partial class ExpressionTypes {
     this.checked(listener, wanted, module, kNoPlace);
   }
 
-  private listenerReceiver(
+  private readonly listenerReceiver(
     first: string | undefined,
     instance: InstanceType,
   ): Type | undefined {
@@ -305,7 +305,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private listenerSelf(type: Type): Type | undefined {
+  private readonly listenerSelf(type: Type): Type | undefined {
     if (type.kind != TypeKind.Function) {
       return undefined;
     }
@@ -313,7 +313,7 @@ partial class ExpressionTypes {
     return type.shape.self;
   }
 
-  private listenerResult(isAsync: boolean): Type {
+  private readonly listenerResult(isAsync: boolean): Type {
     const nothing = this.store.plain(TypeKind.Void);
     if (isAsync) {
       return this.store.promiseOf(nothing);
@@ -322,7 +322,7 @@ partial class ExpressionTypes {
     return nothing;
   }
 
-  private listenerValue(
+  private readonly listenerValue(
     listener: Expr,
     event: string,
     args: Type,
@@ -361,7 +361,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private emitterMethodValueCheck(
+  private readonly emitterMethodValueCheck(
     expr: MemberExpr,
     object: Type,
     module: int,
@@ -380,7 +380,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private emitterNew(
+  private readonly emitterNew(
     expr: NewExpr,
     decl: ClassDecl,
     home: int,
@@ -402,7 +402,7 @@ partial class ExpressionTypes {
     return this.constructed(expr, instance, decl, module);
   }
 
-  private isPlainEmitter(type: Type): boolean {
+  private readonly isPlainEmitter(type: Type): boolean {
     return this.types
       .ancestorsOf(type)
       .some(
@@ -411,7 +411,7 @@ partial class ExpressionTypes {
       );
   }
 
-  private isStreamEmitter(type: Type): boolean {
+  private readonly isStreamEmitter(type: Type): boolean {
     if (type.kind != TypeKind.Instance || type.name != kStreamEmitterName) {
       return false;
     }
@@ -419,13 +419,13 @@ partial class ExpressionTypes {
     return this.program.modules[type.module]?.name == kStreamModule;
   }
 
-  private isEmitter(type: Type): boolean {
+  private readonly isEmitter(type: Type): boolean {
     return this.types
       .ancestorsOf(type)
       .some((one) => this.isEventsClass(one, kEmitterBaseName));
   }
 
-  private eventMapOf(type: Type): Type | undefined {
+  private readonly eventMapOf(type: Type): Type | undefined {
     for (const one of this.types.ancestorsOf(type)) {
       const isMap =
         one.kind == TypeKind.Instance &&
@@ -438,7 +438,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private knownMap(events: Type | undefined): Type | undefined {
+  private readonly knownMap(events: Type | undefined): Type | undefined {
     if (events == undefined || events.kind == TypeKind.Error) {
       return undefined;
     }
@@ -446,7 +446,7 @@ partial class ExpressionTypes {
     return events;
   }
 
-  private isEventsClass(type: Type, name: string): boolean {
+  private readonly isEventsClass(type: Type, name: string): boolean {
     if (type.kind != TypeKind.Instance || type.name != name) {
       return false;
     }
@@ -454,7 +454,7 @@ partial class ExpressionTypes {
     return this.program.modules[type.module]?.name == kEventsModule;
   }
 
-  private encodedArgs(
+  private readonly encodedArgs(
     expr: CallExpr,
     member: MemberExpr,
     args: Type | undefined,
@@ -482,7 +482,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private isWebClass(type: Type, name: string): boolean {
+  private readonly isWebClass(type: Type, name: string): boolean {
     if (type.kind != TypeKind.Instance || type.name != name) {
       return false;
     }
@@ -490,7 +490,7 @@ partial class ExpressionTypes {
     return this.program.modules[type.module]?.name == kWebModule;
   }
 
-  private targetCall(
+  private readonly targetCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -520,7 +520,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Undefined);
   }
 
-  private targetListenerCheck(listener: Expr, home: int, module: int): void {
+  private readonly targetListenerCheck(listener: Expr, home: int, module: int): void {
     const event = this.webEventType(home);
     if (event == undefined) {
       this.typed(listener, undefined, module);
@@ -559,7 +559,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private isEventKind(type: Type, event: Type): boolean {
+  private readonly isEventKind(type: Type, event: Type): boolean {
     if (type.kind == TypeKind.Error) {
       return true;
     }
@@ -567,7 +567,7 @@ partial class ExpressionTypes {
     return this.types.ancestorsOf(type).some((one) => one == event);
   }
 
-  private webEventType(home: int): Type | undefined {
+  private readonly webEventType(home: int): Type | undefined {
     const classes = this.record(home)?.classes;
     if (classes == undefined) {
       return undefined;
@@ -582,7 +582,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private noteErrorEvent(
+  private readonly noteErrorEvent(
     expr: CallExpr,
     member: MemberExpr,
     isEmitting: boolean,
@@ -605,7 +605,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private emitterKey(object: Expr, module: int): string | undefined {
+  private readonly emitterKey(object: Expr, module: int): string | undefined {
     if (object.kind != ExprKind.Name) {
       return undefined;
     }
@@ -618,7 +618,7 @@ partial class ExpressionTypes {
     return `${target.module} ${target.loc}`;
   }
 
-  private unheardErrorsCheck(module: int): void {
+  private readonly unheardErrorsCheck(module: int): void {
     for (const emit of this.eventMarks.errorEmits) {
       const isHeard = this.eventMarks.errorListened.has(emit.key);
       if (emit.module == module && !isHeard) {

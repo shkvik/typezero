@@ -17,7 +17,7 @@ import { CallKind } from "../../../code/expression-types/types/expression-types.
 import { ExpressionTypes } from "../../../code/expression-types/expression-types.tz";
 
 partial class ExpressionTypes {
-  private argumentRangeCheck(
+  private readonly argumentRangeCheck(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -33,7 +33,7 @@ partial class ExpressionTypes {
     this.requireBetween(arg.expr, given, range, module);
   }
 
-  private codePointCall(
+  private readonly codePointCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -60,7 +60,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private madeSizeCheck(expr: NewExpr, name: string, module: int): void {
+  private readonly madeSizeCheck(expr: NewExpr, name: string, module: int): void {
     const what = this.bytes.sizeWhat(name);
     const size = expr.args[0];
     const isSized = expr.args.length == 1 && size != undefined;
@@ -83,7 +83,7 @@ partial class ExpressionTypes {
     this.requireBetween(size.expr, given, { what, low: 0 }, module);
   }
 
-  private libraryStaticCall(
+  private readonly libraryStaticCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -144,7 +144,7 @@ partial class ExpressionTypes {
     return this.calledWith(expr, found, member.loc, CallKind.Library, module);
   }
 
-  private staticRangeCheck(
+  private readonly staticRangeCheck(
     expr: CallExpr,
     owner: string,
     name: string,

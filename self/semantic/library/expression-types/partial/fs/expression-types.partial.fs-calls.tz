@@ -23,7 +23,7 @@ import {
 import { FsCall, FsShape } from "../../../fs-rules/types/fs-rules.types.tz";
 
 partial class ExpressionTypes {
-  private fsCallCheck(expr: CallExpr, module: int): void {
+  private readonly fsCallCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Name || this.modules.isLibraryModule(module)) {
       return;
@@ -44,7 +44,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private isFsPromisesName(expr: Expr, module: int): boolean {
+  private readonly isFsPromisesName(expr: Expr, module: int): boolean {
     if (expr.kind != ExprKind.Name) {
       return false;
     }
@@ -63,7 +63,7 @@ partial class ExpressionTypes {
     return opened != undefined && this.fs.isPromisesModule(opened.name);
   }
 
-  private fsPromisesCheck(
+  private readonly fsPromisesCheck(
     expr: CallExpr,
     name: string,
     loc: int,
@@ -75,7 +75,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private isFsName(expr: Expr, kind: SymbolKind, module: int): boolean {
+  private readonly isFsName(expr: Expr, kind: SymbolKind, module: int): boolean {
     if (expr.kind != ExprKind.Name) {
       return false;
     }
@@ -90,7 +90,7 @@ partial class ExpressionTypes {
     return opened != undefined && this.fs.isFsModule(opened.name);
   }
 
-  private fsShapeCheck(expr: CallExpr, row: FsCall, module: int): void {
+  private readonly fsShapeCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
     this.fsZeroPathCheck(expr, row, module);
 
     switch (row.shape) {
@@ -118,9 +118,9 @@ partial class ExpressionTypes {
     }
   }
 
-  private fsReadCheck(
+  private readonly fsReadCheck(
     expr: CallExpr,
-    row: FsCall,
+    row: Read<FsCall>,
     index: int,
     module: int,
   ): void {
@@ -141,7 +141,7 @@ partial class ExpressionTypes {
     this.fsOpenFlagCheck(expr, index, row, module);
   }
 
-  private fsWriteCheck(expr: CallExpr, row: FsCall, module: int): void {
+  private readonly fsWriteCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
     const data = expr.args[1];
     if (data == undefined) {
       return;
@@ -169,7 +169,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private fsStatCheck(expr: CallExpr, row: FsCall, module: int): void {
+  private readonly fsStatCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
     if (!this.fsOptionsCheck(expr, 1, row, module)) {
       return;
     }
@@ -198,7 +198,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private fsMkdirCheck(expr: CallExpr, row: FsCall, module: int): void {
+  private readonly fsMkdirCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
     const options = expr.args[1]?.expr;
     const isMode =
       options != undefined &&
@@ -209,7 +209,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private fsRmdirCheck(expr: CallExpr, module: int): void {
+  private readonly fsRmdirCheck(expr: CallExpr, module: int): void {
     const options = expr.args[1]?.expr;
     if (options == undefined || options.kind == ExprKind.Undefined) {
       return;
@@ -218,7 +218,7 @@ partial class ExpressionTypes {
     this.reportFound(module, this.fs.rmdirError(options.loc));
   }
 
-  private fsCopyCheck(expr: CallExpr, row: FsCall, module: int): void {
+  private readonly fsCopyCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
     const mode = expr.args[2];
     if (mode == undefined || expr.args.length != 3) {
       return;
@@ -227,10 +227,10 @@ partial class ExpressionTypes {
     this.reportFound(module, this.fs.copyModeError(mode.expr.loc, row.name));
   }
 
-  private fsEncodingOrOptions(
+  private readonly fsEncodingOrOptions(
     expr: CallExpr,
     index: int,
-    row: FsCall,
+    row: Read<FsCall>,
     module: int,
   ): boolean {
     const arg = expr.args[index]?.expr;
@@ -260,10 +260,10 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private fsOptionsCheck(
+  private readonly fsOptionsCheck(
     expr: CallExpr,
     index: int,
-    row: FsCall,
+    row: Read<FsCall>,
     module: int,
   ): boolean {
     const arg = expr.args[index]?.expr;
@@ -315,7 +315,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private fsOptionValue(
+  private readonly fsOptionValue(
     expr: CallExpr,
     index: int,
     name: string,
@@ -328,7 +328,7 @@ partial class ExpressionTypes {
     return this.optionValue(arg, name);
   }
 
-  private givenEncoding(expr: CallExpr, index: int): Expr | undefined {
+  private readonly givenEncoding(expr: CallExpr, index: int): Expr | undefined {
     const arg = expr.args[index]?.expr;
     if (arg != undefined && arg.kind == ExprKind.StringLit) {
       return arg;
@@ -342,9 +342,9 @@ partial class ExpressionTypes {
     return encoding;
   }
 
-  private fsEncodingCheck(
+  private readonly fsEncodingCheck(
     encoding: Expr | undefined,
-    row: FsCall,
+    row: Read<FsCall>,
     module: int,
   ): boolean {
     if (encoding == undefined) {
@@ -376,10 +376,10 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private fsOpenFlagCheck(
+  private readonly fsOpenFlagCheck(
     expr: CallExpr,
     index: int,
-    row: FsCall,
+    row: Read<FsCall>,
     module: int,
   ): void {
     const flag = this.fsOptionValue(expr, index, kFlagOption);
@@ -395,7 +395,7 @@ partial class ExpressionTypes {
     this.reportFound(module, this.fs.flagError(flag.loc, row.name, written));
   }
 
-  private writtenFlag(flag: Expr): string | undefined {
+  private readonly writtenFlag(flag: Expr): string | undefined {
     if (flag.kind != ExprKind.StringLit) {
       return undefined;
     }
@@ -403,11 +403,11 @@ partial class ExpressionTypes {
     return flag.value;
   }
 
-  private fsFlagOption(
+  private readonly fsFlagOption(
     expr: CallExpr,
     index: int,
     option: string,
-    row: FsCall,
+    row: Read<FsCall>,
     module: int,
   ): boolean {
     const value = this.fsOptionValue(expr, index, option);
@@ -425,7 +425,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private fsConstantCheck(expr: MemberExpr, module: int): boolean {
+  private readonly fsConstantCheck(expr: MemberExpr, module: int): boolean {
     const object = expr.object;
     if (object.kind != ExprKind.Name || object.name != kConstantsName) {
       return false;
@@ -442,7 +442,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private fsZeroPathCheck(expr: CallExpr, row: FsCall, module: int): void {
+  private readonly fsZeroPathCheck(expr: CallExpr, row: Read<FsCall>, module: int): void {
     const count = this.fsPathCount(row.shape);
 
     for (let index = 0; index < count; index++) {
@@ -456,7 +456,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private fsPathCount(shape: FsShape): int {
+  private readonly fsPathCount(shape: FsShape): int {
     if (shape == FsShape.TwoPaths) {
       return 2;
     }
@@ -464,7 +464,7 @@ partial class ExpressionTypes {
     return 1;
   }
 
-  private statsDateCheck(expr: AssignExpr, module: int): boolean {
+  private readonly statsDateCheck(expr: AssignExpr, module: int): boolean {
     const target = expr.target;
     if (target.kind != ExprKind.Member || !kStatsDates.includes(target.name)) {
       return false;

@@ -12,12 +12,12 @@ export class TypeQuestions {
   private readonly store: TypeStore;
   private readonly relation: TypeRelation;
 
-  public constructor(store: TypeStore, relation: TypeRelation) {
+  public constructor(store: TypeStore, relation: Own<TypeRelation>) {
     this.store = store;
     this.relation = relation;
   }
 
-  public isOptional(type: Type): boolean {
+  public readonly isOptional(type: Type): boolean {
     if (type.kind != TypeKind.Union) {
       return false;
     }
@@ -25,7 +25,7 @@ export class TypeQuestions {
     return type.parts.some((part) => part.kind == TypeKind.Undefined);
   }
 
-  public optional(type: Type): Type {
+  public readonly optional(type: Type): Type {
     const nothing = this.store.plain(TypeKind.Undefined);
     const result = this.store.unionOf([type, nothing]);
     const label = this.store.labelOf(type);
@@ -41,7 +41,7 @@ export class TypeQuestions {
     return result;
   }
 
-  public definedType(type: Type): Type {
+  public readonly definedType(type: Type): Type {
     const parts = this.definedParts(type);
     if (parts.length == 0) {
       return type;
@@ -50,7 +50,7 @@ export class TypeQuestions {
     return this.store.unionOf(parts);
   }
 
-  public definedParts(type: Type): Type[] {
+  public readonly definedParts(type: Type): Type[] {
     if (type.kind != TypeKind.Union) {
       return [type];
     }
@@ -66,7 +66,7 @@ export class TypeQuestions {
     return parts;
   }
 
-  public wantedPart(wanted: Type | undefined): Type | undefined {
+  public readonly wantedPart(wanted: Type | undefined): Type | undefined {
     if (wanted == undefined) {
       return undefined;
     }
@@ -74,7 +74,7 @@ export class TypeQuestions {
     return this.definedType(wanted);
   }
 
-  public apparent(type: Type): Type {
+  public readonly apparent(type: Type): Type {
     const base = this.relation.baseOf(type);
     if (base != undefined) {
       return base;
@@ -95,7 +95,7 @@ export class TypeQuestions {
     return firstBase;
   }
 
-  public unionMembers(base: Type): Type[] {
+  public readonly unionMembers(base: Type): Type[] {
     if (base.kind != TypeKind.Union) {
       return [base];
     }
@@ -103,7 +103,7 @@ export class TypeQuestions {
     return base.parts;
   }
 
-  public isNumberLike(type: Type): boolean {
+  public readonly isNumberLike(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.Int:
       case TypeKind.Double:
@@ -114,7 +114,7 @@ export class TypeQuestions {
     }
   }
 
-  public isObjectKind(type: Type): boolean {
+  public readonly isObjectKind(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.Object:
       case TypeKind.Instance:
@@ -126,7 +126,7 @@ export class TypeQuestions {
     }
   }
 
-  public isObjectReference(type: Type): boolean {
+  public readonly isObjectReference(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.Iterator:
       case TypeKind.Dict:
@@ -140,19 +140,19 @@ export class TypeQuestions {
     }
   }
 
-  public isOpenParameter(type: Type): boolean {
+  public readonly isOpenParameter(type: Type): boolean {
     const isParameter = type.kind == TypeKind.TypeParameter;
 
     return isParameter && this.store.constraintOf(type) == undefined;
   }
 
-  public baseClassOf(type: Type): Type | undefined {
+  public readonly baseClassOf(type: Type): Type | undefined {
     const parents = this.store.parentsOf(type);
 
     return parents.find((parent) => parent.kind == TypeKind.Instance);
   }
 
-  public isNumber(type: Type): boolean {
+  public readonly isNumber(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.Int:
       case TypeKind.Double:
@@ -163,7 +163,7 @@ export class TypeQuestions {
     }
   }
 
-  public isSameClass(first: Type, second: Type): boolean {
+  public readonly isSameClass(first: Type, second: Type): boolean {
     if (first.kind != TypeKind.Instance || second.kind != TypeKind.Instance) {
       return false;
     }
@@ -171,7 +171,7 @@ export class TypeQuestions {
     return first.module == second.module && first.loc == second.loc;
   }
 
-  public ancestorsOf(type: Type): Type[] {
+  public readonly ancestorsOf(type: Type): Type[] {
     const chain: Type[] = [type];
 
     for (let index = 0; index < chain.length; index++) {
@@ -190,7 +190,7 @@ export class TypeQuestions {
     return chain;
   }
 
-  public onlyPart(wanted: Type): Type {
+  public readonly onlyPart(wanted: Type): Type {
     const parts = this.definedParts(wanted);
     const only = parts[0];
     if (parts.length != 1 || only == undefined) {
@@ -200,7 +200,7 @@ export class TypeQuestions {
     return only;
   }
 
-  public hasMethodFields(type: Type): boolean {
+  public readonly hasMethodFields(type: Type): boolean {
     const base = this.definedType(type);
     if (base.kind != TypeKind.Object) {
       return false;
@@ -209,7 +209,7 @@ export class TypeQuestions {
     return base.fields.some((field) => field.method ?? false);
   }
 
-  public isIterableTarget(wanted: Type): boolean {
+  public readonly isIterableTarget(wanted: Type): boolean {
     const defined = this.definedType(wanted);
     const parts = this.unionMembers(defined);
 
@@ -220,19 +220,19 @@ export class TypeQuestions {
     );
   }
 
-  public isDate(type: Type): boolean {
+  public readonly isDate(type: Type): boolean {
     return type.kind == TypeKind.Instance && type.name == kDateName;
   }
 
-  public isRegExp(type: Type): boolean {
+  public readonly isRegExp(type: Type): boolean {
     return type.kind == TypeKind.Instance && type.name == kRegExpName;
   }
 
-  public isNumeric(type: Type): boolean {
+  public readonly isNumeric(type: Type): boolean {
     return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
   }
 
-  public holdsKind(type: Type, kind: TypeKind): boolean {
+  public readonly holdsKind(type: Type, kind: TypeKind): boolean {
     const held = this.definedType(type);
     if (held.kind == TypeKind.Array) {
       return this.holdsKind(held.item, kind);
@@ -241,7 +241,7 @@ export class TypeQuestions {
     return held.kind == kind;
   }
 
-  public holdsObjects(type: Type): boolean {
+  public readonly holdsObjects(type: Type): boolean {
     const held = this.definedType(type);
     if (held.kind == TypeKind.Array) {
       return this.holdsObjects(held.item);
@@ -250,7 +250,7 @@ export class TypeQuestions {
     return this.isObjectKind(held) || held.kind == TypeKind.Dict;
   }
 
-  private optionalBase(type: Type | undefined): Type | undefined {
+  private readonly optionalBase(type: Type | undefined): Type | undefined {
     if (type == undefined) {
       return undefined;
     }
@@ -258,7 +258,7 @@ export class TypeQuestions {
     return this.relation.baseOf(type);
   }
 
-  private isObjectUnion(parts: Type[]): boolean {
+  private readonly isObjectUnion(parts: Read<Type[]>): boolean {
     const first = parts[0];
     if (first == undefined || this.relation.isTagged(parts)) {
       return false;

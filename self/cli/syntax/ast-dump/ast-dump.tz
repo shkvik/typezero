@@ -28,18 +28,18 @@ export class Dumper {
   private readonly indents: string[];
   private depth: int;
 
-  public constructor(source: Buffer) {
+  public constructor(source: Own<Buffer>) {
     this.source = source;
     this.lines = [];
     this.indents = [""];
     this.depth = 0;
   }
 
-  public text(): string {
+  public readonly text(): string {
     return this.lines.join("\n");
   }
 
-  public dumpFile(file: SourceFile): void {
+  public dumpFile(file: Read<SourceFile>): void {
     this.line(`items ${file.items.length}`);
 
     for (const item of file.items) {
@@ -50,7 +50,7 @@ export class Dumper {
     this.dumpTables(file);
   }
 
-  public dumpDeclarationFile(file: DeclarationFile): void {
+  public dumpDeclarationFile(file: Read<DeclarationFile>): void {
     this.line(`items ${file.items.length}`);
 
     for (const item of file.items) {
@@ -78,7 +78,7 @@ export class Dumper {
     this.lines.push(`${indent}${text}`);
   }
 
-  private hex4(value: int): string {
+  private readonly hex4(value: int): string {
     const digits: string[] = [];
 
     for (let shift = 12; shift >= 0; shift -= 4) {
@@ -91,13 +91,13 @@ export class Dumper {
     return digits.join("");
   }
 
-  private unicodeEscape(code: int): string {
+  private readonly unicodeEscape(code: int): string {
     const hex = this.hex4(code);
 
     return `\\u${hex}`;
   }
 
-  private needsEscape(code: int, quoting: Quoting): boolean {
+  private readonly needsEscape(code: int, quoting: Quoting): boolean {
     const control = code < kSpace || code == kDelete;
     const delimiter = code == kQuote || code == kBackslash;
     if (control || delimiter) {
@@ -107,7 +107,7 @@ export class Dumper {
     return quoting == Quoting.EscapeUnicode && code >= kHigh;
   }
 
-  private quote(text: string, quoting: Quoting = Quoting.KeepUnicode): string {
+  private readonly quote(text: string, quoting: Quoting = Quoting.KeepUnicode): string {
     const parts: string[] = [];
 
     for (let i = 0; i < text.length; i++) {
@@ -130,7 +130,7 @@ export class Dumper {
     return `"${joined}"`;
   }
 
-  private bits(value: double): string {
+  private readonly bits(value: double): string {
     const buffer = Buffer.alloc(8);
 
     buffer.writeDoubleBE(value, 0);
@@ -138,7 +138,7 @@ export class Dumper {
     return buffer.toString("hex");
   }
 
-  private flag(value: boolean): string {
+  private readonly flag(value: boolean): string {
     if (value) {
       return "1";
     }
@@ -146,7 +146,7 @@ export class Dumper {
     return "0";
   }
 
-  private flags(values: boolean[]): string {
+  private readonly flags(values: Read<boolean[]>): string {
     if (values.length == 0) {
       return "-";
     }
@@ -162,7 +162,7 @@ export class Dumper {
     return parts.join("");
   }
 
-  private quoteAll(names: string[]): string {
+  private readonly quoteAll(names: Read<string[]>): string {
     const parts: string[] = [];
 
     for (const name of names) {
@@ -176,7 +176,7 @@ export class Dumper {
     return `[${joined}]`;
   }
 
-  private span(text?: Span): string {
+  private readonly span(text?: Span): string {
     if (text == undefined || text.end <= text.start) {
       return "-";
     }
@@ -184,7 +184,7 @@ export class Dumper {
     return `${text.start}-${text.end}`;
   }
 
-  private spanText(text?: Span): string {
+  private readonly spanText(text?: Span): string {
     if (text == undefined || text.end <= text.start) {
       return "";
     }
@@ -204,7 +204,7 @@ export class Dumper {
     this.depth -= 1;
   }
 
-  private dumpModules(imports: ImportDecl[], exports: ExportDecl[]): void {
+  private dumpModules(imports: Read<ImportDecl[]>, exports: Read<ExportDecl[]>): void {
     this.line(`imports ${imports.length}`);
 
     for (const decl of imports) {
@@ -237,7 +237,7 @@ export class Dumper {
     }
   }
 
-  private dumpModuleNames(names: ModuleName[]): void {
+  private dumpModuleNames(names: Read<ModuleName[]>): void {
     this.nested();
 
     for (const name of names) {
@@ -250,7 +250,7 @@ export class Dumper {
     this.back();
   }
 
-  private dumpTables(file: SourceFile): void {
+  private dumpTables(file: Read<SourceFile>): void {
     const fields: string[] = [];
 
     for (const field of file.fieldNames) {
@@ -279,8 +279,7 @@ export class Dumper {
     this.line(`constants ${keys.length}`);
 
     for (const key of keys) {
-      const found = file.stringConstants.get(key);
-      const values = found ?? [];
+      const values = file.stringConstants.get(key)?.slice() ?? [];
       const quotedValues: string[] = [];
 
       for (const value of values) {

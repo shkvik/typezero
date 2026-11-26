@@ -40,7 +40,7 @@ import {
 } from "../../../fetch-rules/const/fetch-rules.const.tz";
 
 partial class ExpressionTypes {
-  private fetchNewCheck(
+  private readonly fetchNewCheck(
     expr: NewExpr,
     decl: ClassDecl,
     home: int,
@@ -79,11 +79,11 @@ partial class ExpressionTypes {
     }
   }
 
-  private isFailedArgument(expr: Expr, module: int): boolean {
+  private readonly isFailedArgument(expr: Expr, module: int): boolean {
     return this.peekType(expr, module).kind == TypeKind.Error;
   }
 
-  private urlNewCheck(expr: NewExpr, module: int): void {
+  private readonly urlNewCheck(expr: NewExpr, module: int): void {
     const input = expr.args[0]?.expr;
     const base = expr.args[1]?.expr;
     if (input == undefined) {
@@ -108,7 +108,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private requestNewCheck(expr: NewExpr, module: int): void {
+  private readonly requestNewCheck(expr: NewExpr, module: int): void {
     const input = expr.args[0]?.expr;
     if (input == undefined) {
       return;
@@ -132,7 +132,7 @@ partial class ExpressionTypes {
     this.requestInitCheck(init, isPlainInput, module);
   }
 
-  private requestInputCheck(input: Expr, module: int): void {
+  private readonly requestInputCheck(input: Expr, module: int): void {
     const text = this.fetchText(input);
     if (text != undefined) {
       return this.reportFound(
@@ -145,7 +145,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private requestInitCheck(
+  private readonly requestInitCheck(
     init: ObjectLitExpr,
     isPlainInput: boolean,
     module: int,
@@ -174,7 +174,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private isMethodKnown(
+  private readonly isMethodKnown(
     property: Property | undefined,
     method: string,
     isPlainInput: boolean,
@@ -186,7 +186,7 @@ partial class ExpressionTypes {
     return method != "";
   }
 
-  private methodOrGet(method: string): string {
+  private readonly methodOrGet(method: string): string {
     if (method == "") {
       return kGetMethod;
     }
@@ -194,7 +194,7 @@ partial class ExpressionTypes {
     return method;
   }
 
-  private requestMethod(property: Property | undefined, module: int): string {
+  private readonly requestMethod(property: Property | undefined, module: int): string {
     if (property == undefined) {
       return "";
     }
@@ -211,7 +211,7 @@ partial class ExpressionTypes {
     return text.toUpperCase();
   }
 
-  private responseNewCheck(expr: NewExpr, module: int): void {
+  private readonly responseNewCheck(expr: NewExpr, module: int): void {
     const body = expr.args[0]?.expr;
     const init = expr.args[1]?.expr;
     if (body == undefined || init == undefined) {
@@ -228,7 +228,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private responseFieldCheck(
+  private readonly responseFieldCheck(
     body: Expr,
     property: Property,
     module: int,
@@ -247,7 +247,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private responseStatusCheck(body: Expr, value: Expr, module: int): void {
+  private readonly responseStatusCheck(body: Expr, value: Expr, module: int): void {
     const int = this.store.integer(64, false);
     const status = this.intConstant(value, int, module);
     if (status == undefined) {
@@ -260,21 +260,21 @@ partial class ExpressionTypes {
     }
   }
 
-  private statusTextCheck(value: Expr, module: int): void {
+  private readonly statusTextCheck(value: Expr, module: int): void {
     const text = this.fetchText(value);
     if (text != undefined) {
       this.reportFound(module, this.fetches.statusTextError(value.loc, text));
     }
   }
 
-  private headersNewCheck(expr: NewExpr, module: int): void {
+  private readonly headersNewCheck(expr: NewExpr, module: int): void {
     const init = expr.args[0]?.expr;
     if (init != undefined) {
       this.headersInitCheck(init, module);
     }
   }
 
-  private headersInitCheck(init: Expr, module: int): void {
+  private readonly headersInitCheck(init: Expr, module: int): void {
     if (init.kind == ExprKind.ObjectLit) {
       for (const property of init.props) {
         this.headerPropertyCheck(property, module);
@@ -293,7 +293,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private headerPropertyCheck(property: Property, module: int): void {
+  private readonly headerPropertyCheck(property: Property, module: int): void {
     if (property.form.kind != PropertyKind.Value) {
       return;
     }
@@ -304,7 +304,7 @@ partial class ExpressionTypes {
     this.headerValueCheck(property.value, module);
   }
 
-  private headerPairCheck(pair: Expr, module: int): void {
+  private readonly headerPairCheck(pair: Expr, module: int): void {
     if (pair.kind != ExprKind.ArrayLit || pair.elements.length != 2) {
       return;
     }
@@ -322,21 +322,21 @@ partial class ExpressionTypes {
     this.headerValueCheck(value.expr, module);
   }
 
-  private headerNameCheck(expr: Expr, module: int): void {
+  private readonly headerNameCheck(expr: Expr, module: int): void {
     const text = this.fetchText(expr);
     if (text != undefined) {
       this.reportFound(module, this.fetches.headerNameError(expr.loc, text));
     }
   }
 
-  private headerValueCheck(expr: Expr, module: int): void {
+  private readonly headerValueCheck(expr: Expr, module: int): void {
     const text = this.fetchText(expr);
     if (text != undefined) {
       this.reportFound(module, this.fetches.headerValueError(expr.loc, text));
     }
   }
 
-  private fetchCallChecked(
+  private readonly fetchCallChecked(
     expr: CallExpr,
     member: MemberExpr,
     instance: Type,
@@ -364,7 +364,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Undefined);
   }
 
-  private headersCallCheck(
+  private readonly headersCallCheck(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -379,7 +379,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private isProvenSetter(
+  private readonly isProvenSetter(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -402,7 +402,7 @@ partial class ExpressionTypes {
     return error == undefined;
   }
 
-  private isKnownAbsolute(expr: Expr, module: int): boolean {
+  private readonly isKnownAbsolute(expr: Expr, module: int): boolean {
     const text = this.fetchText(expr);
     if (text != undefined) {
       return this.fetches.isValidUrlText(text, false);
@@ -422,13 +422,13 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private isRequestUrl(expr: MemberExpr, module: int): boolean {
+  private readonly isRequestUrl(expr: MemberExpr, module: int): boolean {
     const object = this.peekType(expr.object, module);
 
     return expr.name == kUrlField && this.isFetchClass(object, kRequestName);
   }
 
-  private isHrefCall(callee: Expr, module: int): boolean {
+  private readonly isHrefCall(callee: Expr, module: int): boolean {
     if (callee.kind != ExprKind.Member || callee.name != kHrefName) {
       return false;
     }
@@ -438,7 +438,7 @@ partial class ExpressionTypes {
     return this.isFetchClass(object, kUrlName);
   }
 
-  private isFetchClass(type: Type, name: string): boolean {
+  private readonly isFetchClass(type: Type, name: string): boolean {
     const base = this.types.definedType(type);
     if (base.kind != TypeKind.Instance) {
       return false;
@@ -447,7 +447,7 @@ partial class ExpressionTypes {
     return this.modules.isTypedLibrary(base.module) && base.name == name;
   }
 
-  private hasBody(body: Expr, module: int): boolean {
+  private readonly hasBody(body: Expr, module: int): boolean {
     const type = this.peekType(body, module);
 
     return (
@@ -457,7 +457,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private fetchText(expr: Expr): string | undefined {
+  private readonly fetchText(expr: Expr): string | undefined {
     if (expr.kind == ExprKind.StringLit) {
       return expr.value;
     }
@@ -468,7 +468,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private literalProperty(
+  private readonly literalProperty(
     init: ObjectLitExpr,
     name: string,
   ): Property | undefined {
@@ -478,7 +478,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private fetchMismatchHint(given: Type, wanted: Type): string {
+  private readonly fetchMismatchHint(given: Type, wanted: Type): string {
     const from = this.types.definedType(given);
     const to = this.types.definedType(wanted);
     const parts = this.unionParts(to);
@@ -500,7 +500,7 @@ partial class ExpressionTypes {
     return "";
   }
 
-  private unionParts(type: Type): Type[] {
+  private readonly unionParts(type: Type): Type[] {
     if (type.kind == TypeKind.Union) {
       return type.parts;
     }

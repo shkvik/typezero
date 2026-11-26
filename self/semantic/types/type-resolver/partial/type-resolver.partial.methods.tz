@@ -20,7 +20,7 @@ import {
 import { ParameterSite, TypeContext } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  private inheritedFields(instance: InstanceType): ObjectField[] {
+  private readonly inheritedFields(instance: InstanceType): ObjectField[] {
     const fields = this.memberFields(instance).slice();
 
     for (const parent of this.store.parentsOf(instance)) {
@@ -38,7 +38,7 @@ partial class TypeResolver {
     return fields;
   }
 
-  private methodTypes(instance: InstanceType, name: string): Type[] {
+  private readonly methodTypes(instance: InstanceType, name: string): Type[] {
     const types = this.ownMethods(instance, name);
 
     for (const parent of this.store.parentsOf(instance)) {
@@ -54,7 +54,7 @@ partial class TypeResolver {
     return types;
   }
 
-  private ownMethods(instance: InstanceType, name: string): Type[] {
+  private readonly ownMethods(instance: InstanceType, name: string): Type[] {
     const record = this.record(instance.module);
     if (record == undefined) {
       return [];
@@ -75,7 +75,7 @@ partial class TypeResolver {
     return [];
   }
 
-  private classMethods(
+  private readonly classMethods(
     instance: InstanceType,
     decl: ClassDecl,
     name: string,
@@ -101,7 +101,7 @@ partial class TypeResolver {
     return types;
   }
 
-  private declaredMethods(
+  private readonly declaredMethods(
     instance: InstanceType,
     declared: DeclaredClass,
     name: string,
@@ -128,8 +128,8 @@ partial class TypeResolver {
     return types;
   }
 
-  private methodType(
-    params: Param[],
+  private readonly methodType(
+    params: Read<Param[]>,
     result: TypeRef | undefined,
     context: TypeContext,
   ): Type {

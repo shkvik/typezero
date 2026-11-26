@@ -17,7 +17,7 @@ import {
 } from "../../../code/source-texts/const/source-texts.const.tz";
 
 partial class ExpressionTypes {
-  private pathKey(expr: Expr, module: int): string | undefined {
+  private readonly pathKey(expr: Expr, module: int): string | undefined {
     if (expr.kind == ExprKind.OptionalChain) {
       return this.pathKey(expr.chain, module);
     }
@@ -54,7 +54,7 @@ partial class ExpressionTypes {
     return key;
   }
 
-  private pathFact(expr: Expr, module: int): Type | undefined {
+  private readonly pathFact(expr: Expr, module: int): Type | undefined {
     const key = this.pathKey(expr, module);
     if (key == undefined) {
       return undefined;
@@ -68,7 +68,7 @@ partial class ExpressionTypes {
     return this.unknownPrefix(key);
   }
 
-  private unknownPrefix(key: string): Type | undefined {
+  private readonly unknownPrefix(key: string): Type | undefined {
     let dot = key.lastIndexOf(kDot);
 
     while (dot > 0) {
@@ -84,7 +84,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private assignedTyped(expr: AssignExpr, module: int): Type {
+  private readonly assignedTyped(expr: AssignExpr, module: int): Type {
     const target = expr.target;
 
     this.writtenTargets.add(target);
@@ -180,7 +180,7 @@ partial class ExpressionTypes {
     return given;
   }
 
-  private assignedValue(
+  private readonly assignedValue(
     expr: AssignExpr,
     declared: Type,
     tested: Type,
@@ -209,7 +209,7 @@ partial class ExpressionTypes {
     return given;
   }
 
-  private assignedCurrent(
+  private readonly assignedCurrent(
     key: string | undefined,
     declared: Type | undefined,
   ): Type | undefined {
@@ -220,7 +220,7 @@ partial class ExpressionTypes {
     return this.knownFact(key) ?? declared;
   }
 
-  private fixedUpdateCheck(target: Expr, module: int): boolean {
+  private readonly fixedUpdateCheck(target: Expr, module: int): boolean {
     if (target.kind != ExprKind.Name) {
       return false;
     }
@@ -233,7 +233,7 @@ partial class ExpressionTypes {
     return this.fixedTargetCheck(target, found, module);
   }
 
-  private updatedTyped(target: Expr, module: int): Type {
+  private readonly updatedTyped(target: Expr, module: int): Type {
     if (this.dictTargetCheck(target, module)) {
       return this.store.plain(TypeKind.Error);
     }

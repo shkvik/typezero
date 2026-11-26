@@ -30,7 +30,7 @@ export class TypeText {
     this.store = store;
   }
 
-  public of(type: Type): string {
+  public readonly of(type: Type): string {
     const label = this.store.labelOf(type);
     if (label != undefined) {
       return label;
@@ -39,7 +39,7 @@ export class TypeText {
     return this.structure(type);
   }
 
-  public structure(type: Type): string {
+  public readonly structure(type: Type): string {
     switch (type.kind) {
       case TypeKind.Void:
         return "void";
@@ -98,7 +98,7 @@ export class TypeText {
     }
   }
 
-  private classText(type: ClassType): string {
+  private readonly classText(type: ClassType): string {
     const instance = this.of(type.instance);
     if (type.exact) {
       return `typeof ${instance}`;
@@ -110,7 +110,7 @@ export class TypeText {
     return `Constructor<${instance}>`;
   }
 
-  private templateText(type: TemplateType): string {
+  private readonly templateText(type: TemplateType): string {
     let text = type.texts[0] ?? "";
 
     for (let index = 0; index < type.parts.length; index++) {
@@ -123,7 +123,7 @@ export class TypeText {
     return `\`${text}\``;
   }
 
-  private holeText(part: Type | undefined): string {
+  private readonly holeText(part: Type | undefined): string {
     if (part == undefined) {
       return "";
     }
@@ -134,7 +134,7 @@ export class TypeText {
     return this.of(part);
   }
 
-  private operationText(shape: OperationShape): string {
+  private readonly operationText(shape: OperationShape): string {
     const texts = shape.operands.map((operand) => this.of(operand));
     const first = texts[0] ?? "";
     const second = texts[1] ?? "";
@@ -161,7 +161,7 @@ export class TypeText {
     }
   }
 
-  private mappedText(shape: OperationShape, texts: string[]): string {
+  private readonly mappedText(shape: OperationShape, texts: Read<string[]>): string {
     const keys = texts[0] ?? "";
     const value = texts[1] ?? "";
     const renamed = this.renameText(texts[2]);
@@ -172,7 +172,7 @@ export class TypeText {
     return `{ ${head}${optional}: ${value} }`;
   }
 
-  private renameText(renamed: string | undefined): string {
+  private readonly renameText(renamed: string | undefined): string {
     if (renamed == undefined) {
       return "";
     }
@@ -180,7 +180,7 @@ export class TypeText {
     return ` as ${renamed}`;
   }
 
-  private changeText(change: Change, mark: string): string {
+  private readonly changeText(change: Change, mark: string): string {
     switch (change) {
       case Change.Add:
         return mark;
@@ -191,7 +191,7 @@ export class TypeText {
     }
   }
 
-  private instanceText(type: InstanceType): string {
+  private readonly instanceText(type: InstanceType): string {
     if (type.args.length == 0) {
       return type.name;
     }
@@ -201,7 +201,7 @@ export class TypeText {
     return `${type.name}<${args.join(", ")}>`;
   }
 
-  private intText(type: IntType): string {
+  private readonly intText(type: IntType): string {
     if (type.wraps) {
       return `Bit.Wrap${type.bits}`;
     }
@@ -215,7 +215,7 @@ export class TypeText {
     return `int${type.bits}`;
   }
 
-  private literalText(type: LiteralType): string {
+  private readonly literalText(type: LiteralType): string {
     if (type.literal == LiteralKind.String) {
       return `"${type.text}"`;
     }
@@ -223,7 +223,16 @@ export class TypeText {
     return type.text;
   }
 
-  private arrayText(type: ArrayType): string {
+  private readonly arrayText(type: ArrayType): string {
+    const plain = this.plainArrayText(type);
+    if (type.readonly == true) {
+      return `readonly ${plain}`;
+    }
+
+    return plain;
+  }
+
+  private readonly plainArrayText(type: ArrayType): string {
     const item = type.item;
     const text = this.of(item);
 
@@ -234,26 +243,26 @@ export class TypeText {
     return `${text}[]`;
   }
 
-  private resultText(type: ResultType): string {
+  private readonly resultText(type: ResultType): string {
     const value = this.of(type.value);
     const error = this.of(type.error);
 
     return `Result<${value}, ${error}>`;
   }
 
-  private promiseText(type: PromiseType): string {
+  private readonly promiseText(type: PromiseType): string {
     const value = this.of(type.value);
 
     return `Promise<${value}>`;
   }
 
-  private listText(types: Type[], separator: string): string {
+  private readonly listText(types: Read<Type[]>, separator: string): string {
     const texts = types.map((type) => this.partText(type));
 
     return texts.join(separator);
   }
 
-  private partText(part: Type): string {
+  private readonly partText(part: Type): string {
     const text = this.of(part);
 
     if (part.kind == TypeKind.Function) {
@@ -263,7 +272,7 @@ export class TypeText {
     return text;
   }
 
-  private tupleText(type: TupleType): string {
+  private readonly tupleText(type: TupleType): string {
     const texts: string[] = [];
 
     for (let index = 0; index < type.items.length; index++) {
@@ -281,7 +290,7 @@ export class TypeText {
     return list;
   }
 
-  private itemText(type: TupleType, index: int): string {
+  private readonly itemText(type: TupleType, index: int): string {
     const item = type.items[index];
     if (item == undefined) {
       return "";
@@ -299,7 +308,7 @@ export class TypeText {
     return text;
   }
 
-  private objectText(type: ObjectType): string {
+  private readonly objectText(type: ObjectType): string {
     if (type.fields.length == 0) {
       return "{}";
     }
@@ -309,7 +318,7 @@ export class TypeText {
     return `{ ${texts.join("; ")} }`;
   }
 
-  private fieldText(field: ObjectField): string {
+  private readonly fieldText(field: ObjectField): string {
     if (field.method ?? false) {
       return `${field.name}()`;
     }
@@ -324,7 +333,7 @@ export class TypeText {
     return `${name}: ${type}`;
   }
 
-  private fieldName(field: ObjectField): string {
+  private readonly fieldName(field: ObjectField): string {
     if (field.optional) {
       return `${field.name}?`;
     }
@@ -332,7 +341,7 @@ export class TypeText {
     return field.name;
   }
 
-  private functionText(shape: FunctionShape): string {
+  private readonly functionText(shape: Read<FunctionShape>): string {
     const texts: string[] = [];
     const self = shape.self;
     if (self != undefined) {
@@ -352,7 +361,7 @@ export class TypeText {
     return `(${texts.join(", ")}) => ${result}`;
   }
 
-  private paramText(shape: FunctionShape, index: int): string {
+  private readonly paramText(shape: Read<FunctionShape>, index: int): string {
     const param = shape.params[index];
     if (param == undefined) {
       return "";
@@ -370,7 +379,7 @@ export class TypeText {
     return text;
   }
 
-  private iteratorText(shape: IteratorShape): string {
+  private readonly iteratorText(shape: IteratorShape): string {
     const name = this.iteratorName(shape.async);
     const yielded = this.of(shape.yielded);
     const plain =
@@ -389,7 +398,7 @@ export class TypeText {
     return `${name}<${yielded}, ${returned}, ${sent}>`;
   }
 
-  private iteratorName(async: boolean): string {
+  private readonly iteratorName(async: boolean): string {
     if (async) {
       return "AsyncGenerator";
     }
@@ -397,7 +406,7 @@ export class TypeText {
     return "Generator";
   }
 
-  private dictText(type: DictType): string {
+  private readonly dictText(type: DictType): string {
     const key = this.of(type.key);
     const value = this.of(type.value);
 

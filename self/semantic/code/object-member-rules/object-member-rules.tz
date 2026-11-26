@@ -46,10 +46,10 @@ export class ObjectMemberRules {
   public constructor(
     store: TypeStore,
     text: TypeText,
-    relation: TypeRelation,
-    types: TypeQuestions,
-    sources: SourceTexts,
-    typeOfs: TypeOfRules,
+    relation: Own<TypeRelation>,
+    types: Own<TypeQuestions>,
+    sources: Own<SourceTexts>,
+    typeOfs: Own<TypeOfRules>,
   ) {
     this.store = store;
     this.text = text;
@@ -59,7 +59,7 @@ export class ObjectMemberRules {
     this.typeOfs = typeOfs;
   }
 
-  public isSized(type: Type): boolean {
+  public readonly isSized(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.String:
       case TypeKind.Template:
@@ -70,11 +70,11 @@ export class ObjectMemberRules {
     }
   }
 
-  public isWrappedValue(type: Type, name: string): boolean {
+  public readonly isWrappedValue(type: Type, name: string): boolean {
     return type.kind == TypeKind.Int && type.wraps && name == kWrappedValueName;
   }
 
-  public unsignedOf(type: Type): Type {
+  public readonly unsignedOf(type: Type): Type {
     if (type.kind != TypeKind.Int) {
       return type;
     }
@@ -82,11 +82,11 @@ export class ObjectMemberRules {
     return this.store.integer(type.bits, true);
   }
 
-  public isTextList(type: Type): boolean {
+  public readonly isTextList(type: Type): boolean {
     return type.kind == TypeKind.Array && type.item.kind == TypeKind.String;
   }
 
-  public methodObjectName(expr: ObjectLitExpr, fields: ObjectField[]): string {
+  public readonly methodObjectName(expr: ObjectLitExpr, fields: Own<ObjectField[]>): string {
     const calls = expr.props
       .filter((property) => property.form.kind == PropertyKind.Method)
       .map((property) => `${property.name}()`)
@@ -100,7 +100,7 @@ export class ObjectMemberRules {
     return `${plain.slice(0, plain.length - 2)}; ${calls} }`;
   }
 
-  public plainMember(
+  public readonly plainMember(
     goal: ObjectType | undefined,
     name: string,
   ): ObjectField | undefined {
@@ -112,7 +112,7 @@ export class ObjectMemberRules {
     return same[0];
   }
 
-  public keyError(key: Expr, keyType: Type): SourceError | undefined {
+  public readonly keyError(key: Expr, keyType: Type): SourceError | undefined {
     const plain = this.types.definedType(keyType);
     if (this.types.isNumeric(plain)) {
       return { code: Code.NumberKey, loc: key.loc, details: kNoDetails };
@@ -126,7 +126,7 @@ export class ObjectMemberRules {
     return { code: Code.KeyNotString, loc: key.loc, details: { first } };
   }
 
-  public missingFieldError(
+  public readonly missingFieldError(
     expr: MemberExpr,
     object: Type,
   ): SourceError | undefined {
@@ -151,7 +151,7 @@ export class ObjectMemberRules {
     };
   }
 
-  public noFieldError(
+  public readonly noFieldError(
     entry: FieldEntry,
     target: Type,
   ): SourceError | undefined {
@@ -174,7 +174,7 @@ export class ObjectMemberRules {
     return { code: Code.NoSuchField, loc, details: { first, word } };
   }
 
-  public unknownUseError(
+  public readonly unknownUseError(
     value: Expr,
     object: Type,
     what: string,
@@ -186,7 +186,7 @@ export class ObjectMemberRules {
     return { code, loc: value.loc, details: { word, other: what } };
   }
 
-  public voidFieldCheck(value: Expr, type: Type, name: string): SourceError[] {
+  public readonly voidFieldCheck(value: Expr, type: Type, name: string): SourceError[] {
     const errors: SourceError[] = [];
 
     if (type.kind == TypeKind.Void) {
@@ -200,7 +200,7 @@ export class ObjectMemberRules {
     return errors;
   }
 
-  public unknownUseCode(isObject: boolean, isIndex: boolean): Code {
+  public readonly unknownUseCode(isObject: boolean, isIndex: boolean): Code {
     if (isObject && isIndex) {
       return Code.ObjectIndexUnknown;
     }
@@ -214,7 +214,7 @@ export class ObjectMemberRules {
     return Code.UnknownMember;
   }
 
-  public isUsableField(entry: FieldEntry, type: Type): Checked<boolean> {
+  public readonly isUsableField(entry: FieldEntry, type: Type): Checked<boolean> {
     if (type.kind == TypeKind.Error) {
       return { value: false };
     }
@@ -234,10 +234,10 @@ export class ObjectMemberRules {
     };
   }
 
-  public methodPropertyFits(
+  public readonly methodPropertyFits(
     property: Property,
     goal: ObjectType,
-    methods: ObjectField[],
+    methods: Read<ObjectField[]>,
     first: string,
   ): Checked<boolean> {
     const word = property.name;
@@ -309,7 +309,7 @@ export class ObjectMemberRules {
     };
   }
 
-  public tupleMember(expr: MemberExpr, tuple: TupleType): Checked<Type> {
+  public readonly tupleMember(expr: MemberExpr, tuple: TupleType): Checked<Type> {
     if (expr.name == kLengthName) {
       return { value: this.store.integer(64, false) };
     }
@@ -327,7 +327,7 @@ export class ObjectMemberRules {
     };
   }
 
-  public valueMember(expr: MemberExpr, object: Type): Checked<Type> {
+  public readonly valueMember(expr: MemberExpr, object: Type): Checked<Type> {
     const name = expr.name;
     const isSized = this.isSized(object);
     if (isSized && name == kLengthName) {
@@ -364,7 +364,7 @@ export class ObjectMemberRules {
     };
   }
 
-  public reportValueMember(expr: MemberExpr, union: UnionType): Checked<Type> {
+  public readonly reportValueMember(expr: MemberExpr, union: UnionType): Checked<Type> {
     const head = union.parts[0];
     if (head != undefined) {
       const word = expr.name;
@@ -388,7 +388,7 @@ export class ObjectMemberRules {
     return { value: this.store.plain(TypeKind.Error) };
   }
 
-  public unknownMemberCheck(expr: MemberExpr, object: Type): Checked<boolean> {
+  public readonly unknownMemberCheck(expr: MemberExpr, object: Type): Checked<boolean> {
     if (!this.isUnknownValue(object)) {
       return { value: false };
     }
@@ -410,14 +410,14 @@ export class ObjectMemberRules {
     return { value: true, error: unknownUseError };
   }
 
-  public isUnknownValue(type: Type): boolean {
+  public readonly isUnknownValue(type: Type): boolean {
     return type.kind == TypeKind.Unknown || type.kind == TypeKind.AnyObject;
   }
 
-  public methodTargetCheck(
+  public readonly methodTargetCheck(
     expr: ObjectLitExpr,
     goal: ObjectType,
-    methods: ObjectField[],
+    methods: Read<ObjectField[]>,
   ): Checked<boolean> {
     const first = this.text.of(goal);
 

@@ -12,7 +12,7 @@ import {
 import { kWideBits } from "../const/type-relation.const.tz";
 
 partial class TypeRelation {
-  public converts(from: Type, to: Type): boolean {
+  public readonly converts(from: Type, to: Type): boolean {
     if (from == to || from.kind == TypeKind.Never) {
       return true;
     }
@@ -34,7 +34,7 @@ partial class TypeRelation {
     }
   }
 
-  public baseOf(type: Type): Type | undefined {
+  public readonly baseOf(type: Type): Type | undefined {
     if (type.kind != TypeKind.Literal) {
       return undefined;
     }
@@ -51,7 +51,7 @@ partial class TypeRelation {
     }
   }
 
-  private isObjectValue(from: Type): boolean {
+  private readonly isObjectValue(from: Type): boolean {
     switch (from.kind) {
       case TypeKind.Object:
       case TypeKind.Instance:
@@ -73,7 +73,7 @@ partial class TypeRelation {
     }
   }
 
-  private jsonHolds(from: Type): boolean {
+  private readonly jsonHolds(from: Type): boolean {
     switch (from.kind) {
       case TypeKind.String:
       case TypeKind.Template:
@@ -99,11 +99,11 @@ partial class TypeRelation {
     }
   }
 
-  private isWideInteger(type: Type): boolean {
+  private readonly isWideInteger(type: Type): boolean {
     return type.kind == TypeKind.Int && type.bits >= kWideBits;
   }
 
-  private intoUnion(from: Type, to: UnionType): boolean {
+  private readonly intoUnion(from: Type, to: UnionType): boolean {
     const sources = this.partsOf(from);
 
     if (!to.parts.some((part) => part.kind == TypeKind.Undefined)) {
@@ -120,7 +120,7 @@ partial class TypeRelation {
     return this.converts(present, wanted);
   }
 
-  private memberFits(member: Type, to: UnionType): boolean {
+  private readonly memberFits(member: Type, to: UnionType): boolean {
     const base = this.baseOf(member);
     const exact =
       to.parts.includes(member) ||
@@ -138,7 +138,7 @@ partial class TypeRelation {
     );
   }
 
-  private fromSource(from: Type, to: Type): boolean {
+  private readonly fromSource(from: Type, to: Type): boolean {
     switch (from.kind) {
       case TypeKind.Union:
         return this.fromUnion(from, to);
@@ -167,7 +167,7 @@ partial class TypeRelation {
     }
   }
 
-  private fromUnion(from: UnionType, to: Type): boolean {
+  private readonly fromUnion(from: UnionType, to: Type): boolean {
     const parts = from.parts;
     const refused = parts.some(
       (part) =>
@@ -180,7 +180,7 @@ partial class TypeRelation {
     return parts.every((part) => this.converts(part, to));
   }
 
-  private plainConverts(from: Type, to: Type): boolean {
+  private readonly plainConverts(from: Type, to: Type): boolean {
     if (from.kind == TypeKind.Array && to.kind == TypeKind.Array) {
       return this.sameReference(from.item, to.item);
     }
@@ -233,7 +233,7 @@ partial class TypeRelation {
     return false;
   }
 
-  private classConverts(from: ClassType, to: ClassType): boolean {
+  private readonly classConverts(from: ClassType, to: ClassType): boolean {
     if (to.exact) {
       return false;
     }
@@ -244,7 +244,7 @@ partial class TypeRelation {
     return this.converts(from.instance, to.instance);
   }
 
-  private descends(from: Type, to: Type): boolean {
+  private readonly descends(from: Type, to: Type): boolean {
     if (from == to) {
       return true;
     }
@@ -258,7 +258,7 @@ partial class TypeRelation {
     return false;
   }
 
-  private sameFields(own: ObjectField[], wide: ObjectField[]): boolean {
+  private readonly sameFields(own: Read<ObjectField[]>, wide: Read<ObjectField[]>): boolean {
     if (own.length != wide.length) {
       return false;
     }
@@ -277,7 +277,7 @@ partial class TypeRelation {
     return true;
   }
 
-  private sameItems(own: Type[], wide: Type[]): boolean {
+  private readonly sameItems(own: Read<Type[]>, wide: Read<Type[]>): boolean {
     if (own.length != wide.length) {
       return false;
     }
@@ -291,7 +291,7 @@ partial class TypeRelation {
     return true;
   }
 
-  private copiesInto(fields: ObjectField[], value: Type): boolean {
+  private readonly copiesInto(fields: Read<ObjectField[]>, value: Type): boolean {
     for (const field of fields) {
       const isMethod = field.type.kind == TypeKind.Function;
       if (isMethod || !this.converts(field.type, value)) {
@@ -302,14 +302,14 @@ partial class TypeRelation {
     return true;
   }
 
-  private halvesConvert(from: ResultType, to: ResultType): boolean {
+  private readonly halvesConvert(from: ResultType, to: ResultType): boolean {
     return (
       this.halfConverts(from.value, to.value) &&
       this.halfConverts(from.error, to.error)
     );
   }
 
-  private halfConverts(from: Type, to: Type): boolean {
+  private readonly halfConverts(from: Type, to: Type): boolean {
     if (from == to || from.kind == TypeKind.Never) {
       return true;
     }
@@ -320,7 +320,7 @@ partial class TypeRelation {
     return this.converts(from, to);
   }
 
-  private partsOf(type: Type): Type[] {
+  private readonly partsOf(type: Type): Type[] {
     if (type.kind == TypeKind.Union) {
       return type.parts;
     }
@@ -328,7 +328,7 @@ partial class TypeRelation {
     return [type];
   }
 
-  private defined(type: Type): Type {
+  private readonly defined(type: Type): Type {
     const kept: Type[] = [];
 
     for (const part of this.partsOf(type)) {

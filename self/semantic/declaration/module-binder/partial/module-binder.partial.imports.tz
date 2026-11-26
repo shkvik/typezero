@@ -8,7 +8,7 @@ import { ModuleExport } from "../../../../program/module-names/types/module-name
 import { BoundModule } from "../types/module-binder.types.tz";
 
 partial class ModuleBinder {
-  private bindImports(bound: BoundModule): void {
+  private readonly bindImports(bound: BoundModule): void {
     const module = bound.names.module;
 
     for (const decl of module.file.imports) {
@@ -20,7 +20,7 @@ partial class ModuleBinder {
     }
   }
 
-  private bindImport(bound: BoundModule, decl: ImportDecl): void {
+  private readonly bindImport(bound: BoundModule, decl: ImportDecl): void {
     const from = decl.from;
     const source = this.linkedModule(bound, from);
     if (source == undefined) {
@@ -34,12 +34,12 @@ partial class ModuleBinder {
     }
   }
 
-  private importName(
+  private readonly importName(
     bound: BoundModule,
-    source: BoundModule,
+    source: Read<BoundModule>,
     path: string,
     name: ModuleName,
-    theirs: Map<string, ModuleExport>,
+    theirs: Read<Map<string, ModuleExport>>,
   ): void {
     const target = this.exportedBy(bound, source, path, name, theirs);
     if (target == undefined) {

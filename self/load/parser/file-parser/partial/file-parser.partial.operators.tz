@@ -16,7 +16,7 @@ import {
 } from "../types/file-parser.types.operators.tz";
 
 partial class FileParser {
-  private operator(): Operator {
+  private readonly operator(): Operator {
     const token = this.cursor.peek();
     if (token.kind != TokenKind.Greater) {
       return { kind: token.kind, width: 1 };
@@ -42,7 +42,7 @@ partial class FileParser {
     return { kind: TokenKind.Greater, width: 1 };
   }
 
-  private glued(offset: int, kind: TokenKind): boolean {
+  private readonly glued(offset: int, kind: TokenKind): boolean {
     const token = this.cursor.tokenAt(offset);
     const before = this.cursor.tokenAt(offset - 1);
 
@@ -101,11 +101,11 @@ partial class FileParser {
     });
   }
 
-  private isLogical(kind: TokenKind): boolean {
+  private readonly isLogical(kind: TokenKind): boolean {
     return kind == TokenKind.PipePipe || kind == TokenKind.AmpAmp;
   }
 
-  private binaryOperator(): BinaryOperator {
+  private readonly binaryOperator(): BinaryOperator {
     const token = this.cursor.peek();
 
     switch (token.kind) {
@@ -300,7 +300,7 @@ partial class FileParser {
     this.cursor.report(start, Code.OptionalChainChanged, { word });
   }
 
-  private binaryPrecedence(kind: TokenKind): Precedence {
+  private readonly binaryPrecedence(kind: TokenKind): Precedence {
     switch (kind) {
       case TokenKind.PipePipe:
       case TokenKind.QuestionQuestion:
@@ -342,7 +342,7 @@ partial class FileParser {
     }
   }
 
-  private binaryOpFor(kind: TokenKind): BinaryOp {
+  private readonly binaryOpFor(kind: TokenKind): BinaryOp {
     switch (kind) {
       case TokenKind.PipePipe:
         return BinaryOp.LogOr;
@@ -393,7 +393,7 @@ partial class FileParser {
     }
   }
 
-  private assignmentOp(kind: TokenKind): BinaryOp | undefined {
+  private readonly assignmentOp(kind: TokenKind): BinaryOp | undefined {
     switch (kind) {
       case TokenKind.PlusAssign:
         return BinaryOp.Add;
@@ -430,7 +430,7 @@ partial class FileParser {
     }
   }
 
-  private isAssignment(kind: TokenKind): boolean {
+  private readonly isAssignment(kind: TokenKind): boolean {
     if (kind == TokenKind.Assign) {
       return true;
     }
@@ -440,7 +440,7 @@ partial class FileParser {
     return compound != undefined;
   }
 
-  private unaryExample(kind: TokenKind, operator: string): string {
+  private readonly unaryExample(kind: TokenKind, operator: string): string {
     if (kTokenTable.isKeyword(kind)) {
       return `${operator} x`;
     }
@@ -448,7 +448,7 @@ partial class FileParser {
     return `${operator}x`;
   }
 
-  private unaryOpFor(kind: TokenKind): UnaryOp | undefined {
+  private readonly unaryOpFor(kind: TokenKind): UnaryOp | undefined {
     switch (kind) {
       case TokenKind.Minus:
         return UnaryOp.Neg;
@@ -469,7 +469,7 @@ partial class FileParser {
     }
   }
 
-  private relationalUnless(blocked: boolean): Precedence {
+  private readonly relationalUnless(blocked: boolean): Precedence {
     if (blocked) {
       return Precedence.None;
     }
@@ -477,7 +477,7 @@ partial class FileParser {
     return Precedence.Relational;
   }
 
-  private rightFloor(op: BinaryOperator): Precedence {
+  private readonly rightFloor(op: BinaryOperator): Precedence {
     switch (op.kind) {
       case TokenKind.StarStar:
         return Precedence.Multiplicative;

@@ -14,7 +14,7 @@ import {
 } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private awaitTyped(expr: AwaitExpr, module: int): Type {
+  private readonly awaitTyped(expr: AwaitExpr, module: int): Type {
     this.awaitPlaceCheck(expr, module);
 
     const value = this.typed(expr.value, undefined, module);
@@ -43,7 +43,7 @@ partial class ExpressionTypes {
     return awaited;
   }
 
-  private awaitedType(type: Type): Type | undefined {
+  private readonly awaitedType(type: Type): Type | undefined {
     const defined = this.types.definedType(type);
     const awaited = this.awaitedPlain(defined);
     if (awaited == undefined || !this.types.isOptional(type)) {
@@ -56,7 +56,7 @@ partial class ExpressionTypes {
     return this.types.optional(awaited);
   }
 
-  private awaitedPlain(type: Type): Type | undefined {
+  private readonly awaitedPlain(type: Type): Type | undefined {
     if (type.kind == TypeKind.Promise) {
       return type.value;
     }
@@ -84,7 +84,7 @@ partial class ExpressionTypes {
     return result;
   }
 
-  private promisedOrSelf(type: Type): Type {
+  private readonly promisedOrSelf(type: Type): Type {
     if (type.kind == TypeKind.Promise) {
       return type.value;
     }
@@ -92,7 +92,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private joinedAwaited(
+  private readonly joinedAwaited(
     result: Type | undefined,
     candidate: Type,
   ): Type | undefined {
@@ -109,7 +109,7 @@ partial class ExpressionTypes {
     return this.unifier.unionUnify(result, candidate);
   }
 
-  private awaitPlaceCheck(expr: AwaitExpr, module: int): void {
+  private readonly awaitPlaceCheck(expr: AwaitExpr, module: int): void {
     const fn = this.openFunctions[this.openFunctions.length - 1];
     if (fn == undefined || fn.isAsync) {
       return;
@@ -120,7 +120,7 @@ partial class ExpressionTypes {
     this.report(module, expr.loc, Code.AwaitOutsideAsync, { word });
   }
 
-  private asyncHint(fn: FunctionDecl): string {
+  private readonly asyncHint(fn: FunctionDecl): string {
     if (fn.role != undefined) {
       return `${kAsyncWord}${fn.name}${kAsyncMethodEnd}`;
     }

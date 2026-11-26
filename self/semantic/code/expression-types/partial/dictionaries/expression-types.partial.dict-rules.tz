@@ -21,7 +21,7 @@ import {
 import { kLengthName } from "../../../expression-shapes/const/expression-shapes.const.tz";
 
 partial class ExpressionTypes {
-  private dictMemberCheck(
+  private readonly dictMemberCheck(
     expr: MemberExpr,
     object: Type,
     isCalled: boolean,
@@ -60,7 +60,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private dictMissingCall(
+  private readonly dictMissingCall(
     expr: MemberExpr,
     dict: DictKind,
     word: string,
@@ -74,7 +74,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private dictTargetCheck(target: Expr, module: int): boolean {
+  private readonly dictTargetCheck(target: Expr, module: int): boolean {
     if (target.kind != ExprKind.Member && target.kind != ExprKind.Index) {
       return false;
     }
@@ -107,7 +107,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private setTargetCheck(target: Expr, word: string, module: int): boolean {
+  private readonly setTargetCheck(target: Expr, word: string, module: int): boolean {
     const checked = this.dictionaries.setTargetCheck(target, word);
 
     this.reportFound(module, checked.error);
@@ -115,7 +115,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private dictDeleteCheck(expr: UnaryExpr, module: int): boolean {
+  private readonly dictDeleteCheck(expr: UnaryExpr, module: int): boolean {
     const target = expr.operand;
     if (target.kind != ExprKind.Member && target.kind != ExprKind.Index) {
       return false;
@@ -139,7 +139,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private dictInCheck(expr: BinaryExpr, object: Type, module: int): boolean {
+  private readonly dictInCheck(expr: BinaryExpr, object: Type, module: int): boolean {
     const checked = this.dictionaries.dictInCheck(expr, object);
 
     this.reportFound(module, checked.error);
@@ -147,7 +147,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private dictKeysCheck(expr: CallExpr, module: int): void {
+  private readonly dictKeysCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     const arg = expr.args[0]?.expr;
     if (callee.kind != ExprKind.Member || arg == undefined) {
@@ -193,7 +193,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private listedFieldsCheck(
+  private readonly listedFieldsCheck(
     arg: Expr,
     type: Type,
     word: string,

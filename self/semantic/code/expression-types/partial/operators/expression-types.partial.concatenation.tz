@@ -17,14 +17,14 @@ import { kToStringName } from "../../const/expression-types.const.tz";
 import { ConcatLink } from "../../../concatenation-rules/types/concatenation-rules.types.tz";
 
 partial class ExpressionTypes {
-  private concatenated(expr: BinaryExpr, pair: OperandPair, module: int): Type {
+  private readonly concatenated(expr: BinaryExpr, pair: OperandPair, module: int): Type {
     this.textCheck(expr.lhs, pair.left, module);
     this.textCheck(expr.rhs, pair.right, module);
 
     return this.store.plain(TypeKind.String);
   }
 
-  private textCheck(operand: Expr, type: Type, module: int): void {
+  private readonly textCheck(operand: Expr, type: Type, module: int): void {
     const base = this.types.definedType(type);
     const isText = type.kind == TypeKind.String || type.kind == TypeKind.Error;
 
@@ -41,7 +41,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private instanceTextCheck(operand: Expr, base: Type, module: int): void {
+  private readonly instanceTextCheck(operand: Expr, base: Type, module: int): void {
     if (this.byteTextCheck(operand, base, module)) {
       return;
     }
@@ -69,7 +69,7 @@ partial class ExpressionTypes {
     this.report(module, operand.loc, Code.OwnToString, { word });
   }
 
-  private checkMixedConcat(links: ConcatLink[], module: int): void {
+  private readonly checkMixedConcat(links: Read<ConcatLink[]>, module: int): void {
     const answer = this.concatenations.mixedAnswer(links, module);
     if (answer != undefined) {
       this.report(module, answer.loc, answer.code, answer.details);

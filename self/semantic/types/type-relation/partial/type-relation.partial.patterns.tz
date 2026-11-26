@@ -9,7 +9,7 @@ import {
 import { InferHole } from "../types/type-relation.types.tz";
 
 partial class TypeRelation {
-  private capture(hole: InferHole, source: Type): boolean {
+  private readonly capture(hole: InferHole, source: Type): boolean {
     const value = this.fitted(hole, source);
     if (value == undefined) {
       return false;
@@ -29,7 +29,7 @@ partial class TypeRelation {
     return true;
   }
 
-  private fitted(hole: InferHole, source: Type): Type | undefined {
+  private readonly fitted(hole: InferHole, source: Type): Type | undefined {
     const constraint = hole.constraint;
     if (constraint == undefined) {
       return source;
@@ -43,7 +43,7 @@ partial class TypeRelation {
     return value;
   }
 
-  private asNumber(source: Type, constraint: Type): Type {
+  private readonly asNumber(source: Type, constraint: Type): Type {
     if (source.kind != TypeKind.Literal || constraint.kind != TypeKind.Int) {
       return source;
     }
@@ -60,7 +60,7 @@ partial class TypeRelation {
     return this.store.literal(LiteralKind.Int, text);
   }
 
-  private openRest(target: FunctionShape): int {
+  private readonly openRest(target: Read<FunctionShape>): int {
     const last = target.params.length - 1;
     const rest = target.params[last]?.type;
     if (!target.rest || rest == undefined || !this.holes.has(rest.id)) {
@@ -70,9 +70,9 @@ partial class TypeRelation {
     return last;
   }
 
-  private captureArguments(
-    source: FunctionShape,
-    target: FunctionShape,
+  private readonly captureArguments(
+    source: Read<FunctionShape>,
+    target: Read<FunctionShape>,
     open: int,
   ): boolean {
     const wanted = target.params[open]?.type;
@@ -100,7 +100,7 @@ partial class TypeRelation {
     return this.extends(given, wanted);
   }
 
-  private textFits(text: string, target: Type): boolean {
+  private readonly textFits(text: string, target: Type): boolean {
     if (target.kind == TypeKind.Template) {
       return this.templateFits(text, target);
     }
@@ -108,7 +108,7 @@ partial class TypeRelation {
     return target.kind == TypeKind.String;
   }
 
-  private templateFits(text: string, target: TemplateType): boolean {
+  private readonly templateFits(text: string, target: TemplateType): boolean {
     const first = target.texts[0] ?? "";
     if (!text.startsWith(first)) {
       return false;
@@ -136,7 +136,7 @@ partial class TypeRelation {
     return rest == "";
   }
 
-  private pieceSize(rest: string, after: string, isLast: boolean): int {
+  private readonly pieceSize(rest: string, after: string, isLast: boolean): int {
     if (isLast) {
       if (!rest.endsWith(after)) {
         return -1;
@@ -154,7 +154,7 @@ partial class TypeRelation {
     return 1;
   }
 
-  private pieceFits(piece: string, part: Type): boolean {
+  private readonly pieceFits(piece: string, part: Type): boolean {
     if (part.kind == TypeKind.Int || part.kind == TypeKind.Double) {
       const number = Number(piece);
 

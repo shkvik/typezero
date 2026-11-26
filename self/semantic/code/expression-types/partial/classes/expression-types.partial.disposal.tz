@@ -17,7 +17,7 @@ import {
 import { kSuperName } from "../../../dispose-rules/const/dispose-rules.const.tz";
 
 partial class ExpressionTypes {
-  private disposeCheck(decl: ClassDecl, module: int): void {
+  private readonly disposeCheck(decl: ClassDecl, module: int): void {
     const dispose = this.disposes.ownDispose(decl);
     if (dispose == undefined || this.modules.isLibraryModule(module)) {
       return;
@@ -39,7 +39,7 @@ partial class ExpressionTypes {
     this.reportAll(module, disposeErrors);
   }
 
-  private resultOfFunction(type: Type | undefined): Type | undefined {
+  private readonly resultOfFunction(type: Type | undefined): Type | undefined {
     if (type == undefined || type.kind != TypeKind.Function) {
       return undefined;
     }
@@ -47,7 +47,7 @@ partial class ExpressionTypes {
     return type.shape.result;
   }
 
-  private inheritedDispose(decl: ClassDecl, module: int): string | undefined {
+  private readonly inheritedDispose(decl: ClassDecl, module: int): string | undefined {
     if (decl.typeParams.length > 0) {
       return undefined;
     }
@@ -70,9 +70,9 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private usingCheck(
+  private readonly usingCheck(
     statement: VarDeclStmt,
-    following: Stmt[],
+    following: Read<Stmt[]>,
     module: int,
   ): void {
     const first = statement.decls[0];
@@ -93,7 +93,7 @@ partial class ExpressionTypes {
     this.reportAll(module, outlivesErrors);
   }
 
-  private isDisposable(type: Type): boolean {
+  private readonly isDisposable(type: Type): boolean {
     let current: Type | undefined = this.types.definedType(type);
 
     while (current != undefined && current.kind == TypeKind.Instance) {
@@ -115,7 +115,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private disposeCallCheck(expr: CallExpr, module: int): void {
+  private readonly disposeCallCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Index || this.modules.isLibraryModule(module)) {
       return;

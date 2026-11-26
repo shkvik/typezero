@@ -24,10 +24,10 @@ import {
 } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  private alias(
+  private readonly alias(
     module: int,
     decl: TypeAliasDecl,
-    written: Type[],
+    written: Own<Type[]>,
     isTail: boolean,
   ): Type {
     const bindings = this.bind(module, decl.typeParams, written);
@@ -98,10 +98,10 @@ partial class TypeResolver {
     return result;
   }
 
-  private keepOrigin(
+  private readonly keepOrigin(
     module: int,
     decl: TypeAliasDecl,
-    args: Type[],
+    args: Own<Type[]>,
     result: Type,
   ): void {
     if (decl.typeParams.length == 0 || this.aliasOrigins.has(result.id)) {
@@ -111,7 +111,7 @@ partial class TypeResolver {
     this.aliasOrigins.set(result.id, { module, decl, args });
   }
 
-  private endedOr(home: string, settled: Type): Type {
+  private readonly endedOr(home: string, settled: Type): Type {
     if (this.endless.has(home)) {
       return this.store.plain(TypeKind.Error);
     }
@@ -119,7 +119,7 @@ partial class TypeResolver {
     return settled;
   }
 
-  private nestingStep(isTail: boolean): int {
+  private readonly nestingStep(isTail: boolean): int {
     if (isTail) {
       return 0;
     }
@@ -127,7 +127,7 @@ partial class TypeResolver {
     return 1;
   }
 
-  private markTailUses(root: TypeRef): void {
+  private readonly markTailUses(root: TypeRef): void {
     const waiting: TypeRef[] = [root];
 
     while (waiting.length > 0) {
@@ -143,7 +143,7 @@ partial class TypeResolver {
     }
   }
 
-  private reportDepth(
+  private readonly reportDepth(
     module: int,
     decl: TypeAliasDecl,
     home: string,
@@ -170,7 +170,7 @@ partial class TypeResolver {
     this.report(module, decl.loc, code, { word: decl.name });
   }
 
-  private deepCode(isNested: boolean): Code {
+  private readonly deepCode(isNested: boolean): Code {
     if (isNested) {
       return Code.AliasNests;
     }
@@ -178,11 +178,11 @@ partial class TypeResolver {
     return Code.AliasTooDeep;
   }
 
-  private reenter(
+  private readonly reenter(
     module: int,
     decl: TypeAliasDecl,
     door: AliasDoor,
-    args: Type[],
+    args: Own<Type[]>,
     label: string,
   ): Type {
     if (door.state == DoorState.Done) {
@@ -211,7 +211,7 @@ partial class TypeResolver {
     return this.store.plain(TypeKind.Error);
   }
 
-  private reserve(ref: TypeRef, label: string): Type | undefined {
+  private readonly reserve(ref: TypeRef, label: string): Type | undefined {
     switch (ref.form.kind) {
       case TypeRefKind.Object: {
         const reserved = this.store.reserveObject();
@@ -232,7 +232,7 @@ partial class TypeResolver {
     }
   }
 
-  private aliasBody(decl: TypeAliasDecl, context: TypeContext): Type {
+  private readonly aliasBody(decl: TypeAliasDecl, context: TypeContext): Type {
     if (decl.bases.length == 0) {
       return this.ownBody(decl.type, context);
     }
@@ -262,7 +262,7 @@ partial class TypeResolver {
     return made;
   }
 
-  private addParents(type: Type, parents: Type[]): void {
+  private readonly addParents(type: Type, parents: Read<Type[]>): void {
     const known = this.store.parentsOf(type);
     const added = parents.filter((parent) => !known.includes(parent));
     if (added.length > 0) {
@@ -270,7 +270,7 @@ partial class TypeResolver {
     }
   }
 
-  private baseFields(
+  private readonly baseFields(
     decl: TypeAliasDecl,
     base: TypeRef,
     owners: Map<string, string>,
@@ -309,7 +309,7 @@ partial class TypeResolver {
     parents.push(parent);
   }
 
-  private notObjectBase(parent: Type, base: TypeRef, module: int): void {
+  private readonly notObjectBase(parent: Type, base: TypeRef, module: int): void {
     if (parent.kind == TypeKind.Error || this.isLibrary(module)) {
       return;
     }
@@ -319,11 +319,11 @@ partial class TypeResolver {
     });
   }
 
-  private narrowedChecks(
+  private readonly narrowedChecks(
     decl: TypeAliasDecl,
     own: Type,
-    owners: Map<string, string>,
-    fields: Map<string, ObjectField>,
+    owners: Read<Map<string, string>>,
+    fields: Read<Map<string, ObjectField>>,
     module: int,
   ): void {
     const form = decl.type.form;
@@ -351,7 +351,7 @@ partial class TypeResolver {
     }
   }
 
-  private isSameLayout(own: Type, theirs: Type): boolean {
+  private readonly isSameLayout(own: Type, theirs: Type): boolean {
     const isOpen = own.kind == TypeKind.Error || theirs.kind == TypeKind.Error;
     if (own == theirs || isOpen) {
       return true;
@@ -381,7 +381,7 @@ partial class TypeResolver {
     return false;
   }
 
-  private ownBody(ref: TypeRef, context: TypeContext): Type {
+  private readonly ownBody(ref: TypeRef, context: TypeContext): Type {
     const form = ref.form;
     if (form.kind == TypeRefKind.Object) {
       return this.object(form, context, true);
@@ -390,7 +390,7 @@ partial class TypeResolver {
     return this.resolve(ref, context);
   }
 
-  private inherit(fields: Map<string, ObjectField>, from: Type): void {
+  private readonly inherit(fields: Map<string, ObjectField>, from: Type): void {
     if (from.kind != TypeKind.Object) {
       return;
     }
@@ -400,7 +400,7 @@ partial class TypeResolver {
     }
   }
 
-  private settle(
+  private readonly settle(
     module: int,
     decl: TypeAliasDecl,
     door: AliasDoor,
@@ -431,7 +431,7 @@ partial class TypeResolver {
     return this.store.plain(TypeKind.Error);
   }
 
-  private isClosed(body: UnionType, reserved: Type): boolean {
+  private readonly isClosed(body: UnionType, reserved: Type): boolean {
     if (body == reserved || body.parts.includes(reserved)) {
       return false;
     }
@@ -439,7 +439,7 @@ partial class TypeResolver {
     return !body.parts.some((part) => part.kind == TypeKind.Undefined);
   }
 
-  private labelLibraryUnion(
+  private readonly labelLibraryUnion(
     module: int,
     decl: TypeAliasDecl,
     result: Type,
@@ -461,7 +461,7 @@ partial class TypeResolver {
     }
   }
 
-  private labelAlias(decl: TypeAliasDecl, result: Type, label: string): void {
+  private readonly labelAlias(decl: TypeAliasDecl, result: Type, label: string): void {
     const written = decl.type.form.kind == TypeRefKind.Object;
     if (written && result.kind == TypeKind.Object) {
       this.store.label(result, label);

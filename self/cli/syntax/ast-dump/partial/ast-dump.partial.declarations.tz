@@ -13,7 +13,7 @@ import {
 } from "../../../../program/ast/types/ast.types.classes.tz";
 
 partial class Dumper {
-  private role(declaration: FunctionDecl): string {
+  private readonly role(declaration: FunctionDecl): string {
     const member = declaration.role;
     if (member == undefined) {
       return "plain";
@@ -81,7 +81,7 @@ partial class Dumper {
     this.back();
   }
 
-  private dumpTypeParams(params: TypeParamDecl[]): void {
+  private dumpTypeParams(params: Read<TypeParamDecl[]>): void {
     for (const param of params) {
       const name = this.quote(param.name);
 
@@ -93,7 +93,7 @@ partial class Dumper {
     }
   }
 
-  private dumpDecorators(decorators: Decorator[]): void {
+  private dumpDecorators(decorators: Read<Decorator[]>): void {
     for (const decorator of decorators) {
       this.line(`Decorator ${decorator.loc}`);
       this.dumpChildren([decorator.expr]);
@@ -170,7 +170,7 @@ partial class Dumper {
     this.back();
   }
 
-  private propertyText(property: ParamProperty | undefined): string {
+  private readonly propertyText(property: ParamProperty | undefined): string {
     if (property == undefined) {
       return "-";
     }

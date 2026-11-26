@@ -13,35 +13,35 @@ import {
 } from "./const/process-rules.const.tz";
 
 export class ProcessRules {
-  public isValueMember(name: string): boolean {
+  public readonly isValueMember(name: string): boolean {
     return kValueMembers.includes(name);
   }
 
-  public isPlainCall(name: string): boolean {
+  public readonly isPlainCall(name: string): boolean {
     return kCalledMembers.includes(name) || name == kNextTickName;
   }
 
-  public isSignalMember(name: string): boolean {
+  public readonly isSignalMember(name: string): boolean {
     return kSignalMembers.includes(name);
   }
 
-  public isThrownListener(name: string, event: string): boolean {
+  public readonly isThrownListener(name: string, event: string): boolean {
     return kListenerMembers.includes(name) && kThrownEvents.includes(event);
   }
 
-  public isSignal(event: string): boolean {
+  public readonly isSignal(event: string): boolean {
     return kSignals.includes(event);
   }
 
-  public isStream(name: string): boolean {
+  public readonly isStream(name: string): boolean {
     return name == kStdoutName || name == kStderrName;
   }
 
-  public isStreamPart(name: string): boolean {
+  public readonly isStreamPart(name: string): boolean {
     return kStreamParts.includes(name);
   }
 
-  public valueCode(name: string): Code {
+  public readonly valueCode(name: string): Code {
     if (kCalledMembers.includes(name)) {
       return Code.ProcessOnlyCalled;
     }
@@ -49,7 +49,7 @@ export class ProcessRules {
     return Code.ProcessNotYet;
   }
 
-  public callCode(name: string): Code {
+  public readonly callCode(name: string): Code {
     if (kValueMembers.includes(name)) {
       return Code.ProcessNotFunction;
     }

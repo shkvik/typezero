@@ -13,7 +13,7 @@ main.tz
   27:5 soon: Immediate
   29:5 plain: double
   30:5 steps: Generator<int>
-  31:5 frozen: string[]
+  31:5 frozen: readonly string[]
   32:5 good: Result<int, never>
   33:5 encoding: BufferEncoding
   34:5 failure: NumberError | undefined

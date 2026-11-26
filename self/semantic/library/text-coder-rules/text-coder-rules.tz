@@ -27,23 +27,23 @@ export class TextCoderRules {
 
   public constructor(
     text: TypeText,
-    types: TypeQuestions,
-    byteSources: ByteSourceRules,
+    types: Own<TypeQuestions>,
+    byteSources: Own<ByteSourceRules>,
   ) {
     this.text = text;
     this.types = types;
     this.byteSources = byteSources;
   }
 
-  public isDecoderNew(type: Type): boolean {
+  public readonly isDecoderNew(type: Type): boolean {
     return this.isNamed(type, kTextDecoderClass);
   }
 
-  public isFatalNew(type: Type): boolean {
+  public readonly isFatalNew(type: Type): boolean {
     return this.isNamed(type, kFatalDecoderClass);
   }
 
-  public isDecodeCall(type: Type, name: string): boolean {
+  public readonly isDecodeCall(type: Type, name: string): boolean {
     const base = this.types.definedType(type);
     const isDecoder =
       base.kind == TypeKind.Instance && kDecoderClasses.includes(base.name);
@@ -53,15 +53,15 @@ export class TextCoderRules {
     );
   }
 
-  public isParseName(name: string): boolean {
+  public readonly isParseName(name: string): boolean {
     return name == kParseName;
   }
 
-  public isFatalName(name: string): boolean {
+  public readonly isFatalName(name: string): boolean {
     return name == kFatalName;
   }
 
-  public literalLabel(label: Expr): string | undefined {
+  public readonly literalLabel(label: Expr): string | undefined {
     if (label.kind == ExprKind.StringLit) {
       return label.value;
     }
@@ -72,7 +72,7 @@ export class TextCoderRules {
     return undefined;
   }
 
-  public labelError(loc: int, labels: string[]): SourceError | undefined {
+  public readonly labelError(loc: int, labels: Read<string[]>): SourceError | undefined {
     for (const label of labels) {
       const plain = this.trimmed(label).toLowerCase();
       if (!kDecoderLabels.includes(plain)) {
@@ -87,11 +87,11 @@ export class TextCoderRules {
     return undefined;
   }
 
-  public unknownLabelError(loc: int): SourceError {
+  public readonly unknownLabelError(loc: int): SourceError {
     return { code: Code.DecoderLabelNotKnown, loc, details: kNoDetails };
   }
 
-  public isFatalFlag(value: Expr): boolean {
+  public readonly isFatalFlag(value: Expr): boolean {
     if (value.kind == ExprKind.Undefined) {
       return false;
     }
@@ -99,7 +99,7 @@ export class TextCoderRules {
     return value.kind != ExprKind.BoolLit || value.value;
   }
 
-  public decodeInputError(loc: int, found: Type): SourceError | undefined {
+  public readonly decodeInputError(loc: int, found: Type): SourceError | undefined {
     const base = this.types.definedType(found);
     const isFitting =
       base.kind == TypeKind.Error ||
@@ -115,15 +115,15 @@ export class TextCoderRules {
     return { code: Code.DecodeInput, loc, details: { first } };
   }
 
-  public fatalNewError(loc: int): SourceError {
+  public readonly fatalNewError(loc: int): SourceError {
     return { code: Code.FatalDecoderNew, loc, details: kNoDetails };
   }
 
-  public resizableError(loc: int): SourceError {
+  public readonly resizableError(loc: int): SourceError {
     return { code: Code.ResizableBuffer, loc, details: kNoDetails };
   }
 
-  private isNamed(type: Type, name: string): boolean {
+  private readonly isNamed(type: Type, name: string): boolean {
     const base = this.types.definedType(type);
 
     return (
@@ -133,7 +133,7 @@ export class TextCoderRules {
     );
   }
 
-  private trimmed(label: string): string {
+  private readonly trimmed(label: string): string {
     let start = 0;
     let end = label.length;
 

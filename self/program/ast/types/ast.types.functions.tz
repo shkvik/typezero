@@ -24,7 +24,10 @@ export enum ParamKind {
   Rest,
 }
 
-export type ParamProperty = { readonly: boolean; access: Access };
+export type ParamProperty = {
+  readonly readonly: boolean;
+  readonly access: Access;
+};
 
 export type PlainParam = {
   readonly kind: ParamKind.Required | ParamKind.Optional | ParamKind.Rest;
@@ -44,23 +47,23 @@ export type Param = {
   readonly form: ParamForm;
   readonly property?: ParamProperty;
   readonly pattern?: Span;
-  readonly decorators: Decorator[];
+  readonly decorators: readonly Decorator[];
 };
 
 export type FunctionDecl = {
   readonly kind: StmtKind.Function;
   readonly loc: int;
   readonly name: string;
-  readonly typeParams: TypeParamDecl[];
-  readonly params: Param[];
+  readonly typeParams: readonly TypeParamDecl[];
+  readonly params: readonly Param[];
   readonly returnType?: TypeRef;
-  body?: BlockStmt;
+  readonly body?: BlockStmt;
   readonly source?: Span;
   readonly isArrow: boolean;
   readonly concise: boolean;
   readonly ownName: string;
   readonly place: FunctionPlace;
-  bodySource: BodySource;
+  readonly bodySource: BodySource;
   readonly isGenerator: boolean;
   readonly isAsync: boolean;
   readonly role?: ClassMember;

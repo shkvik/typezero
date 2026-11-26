@@ -41,7 +41,7 @@ export class ModuleResolver {
   private readonly listings: Map<string, string[]>;
   private readonly packages: PackageGraph;
 
-  public constructor(packages: PackageGraph) {
+  public constructor(packages: Own<PackageGraph>) {
     this.listings = new Map<string, string[]>();
     this.packages = packages;
   }
@@ -81,17 +81,17 @@ export class ModuleResolver {
     return this.found(directory, spec, candidates, home);
   }
 
-  private problem(code: Code, details: Details): Resolution {
+  private readonly problem(code: Code, details: Details): Resolution {
     return { kind: ResolutionKind.Problem, code, details };
   }
 
-  private builtin(spec: string): Resolution {
+  private readonly builtin(spec: string): Resolution {
     const code = this.builtinProblem(spec);
 
     return this.problem(code, { word: spec });
   }
 
-  private builtinProblem(spec: string): Code {
+  private readonly builtinProblem(spec: string): Code {
     if (!kBuiltinModules.isNodeModule(spec)) {
       return this.unknownBuiltin(spec);
     }
@@ -115,7 +115,7 @@ export class ModuleResolver {
     }
   }
 
-  private unknownBuiltin(spec: string): Code {
+  private readonly unknownBuiltin(spec: string): Code {
     if (spec.startsWith(kTzModulePrefix)) {
       return Code.TzModuleUnknown;
     }
@@ -123,7 +123,7 @@ export class ModuleResolver {
     return Code.BuiltinModuleUnknown;
   }
 
-  private laterModule(bare: string): Code {
+  private readonly laterModule(bare: string): Code {
     if (bare.startsWith(kStreamModules)) {
       return Code.StreamModuleNotYet;
     }
@@ -131,7 +131,7 @@ export class ModuleResolver {
     return Code.BuiltinModuleNotYet;
   }
 
-  private isRelative(spec: string): boolean {
+  private readonly isRelative(spec: string): boolean {
     return (
       spec == kHere ||
       spec == kParent ||
@@ -157,14 +157,14 @@ export class ModuleResolver {
     return this.packageResolution(spec, home);
   }
 
-  private namesDirectory(spec: string): boolean {
+  private readonly namesDirectory(spec: string): boolean {
     const slash = spec.lastIndexOf(kPathSeparator);
     const last = spec.slice(slash + 1);
 
     return last == "" || last == kHere || last == kParent;
   }
 
-  private indexOf(spec: string): string {
+  private readonly indexOf(spec: string): string {
     let directory = spec;
 
     while (directory.endsWith(kPathSeparator)) {
@@ -174,7 +174,7 @@ export class ModuleResolver {
     return `${directory}${kPathSeparator}${kIndexFile}`;
   }
 
-  private candidates(spec: string): string[] {
+  private readonly candidates(spec: string): string[] {
     const extension = extname(spec);
     if (extension == kSourceExtension || extension == kJsonExtension) {
       return [spec];
@@ -215,7 +215,7 @@ export class ModuleResolver {
   private found(
     directory: string,
     spec: string,
-    candidates: string[],
+    candidates: Read<string[]>,
     home: int,
   ): Resolution {
     for (const candidate of candidates) {
@@ -241,7 +241,7 @@ export class ModuleResolver {
   private notFound(
     directory: string,
     spec: string,
-    candidates: string[],
+    candidates: Read<string[]>,
   ): Resolution {
     const shown = candidates.map((candidate) => this.shownCandidate(candidate));
     const path = shown.join(kCandidateJoin);
@@ -261,7 +261,7 @@ export class ModuleResolver {
     });
   }
 
-  private shownCandidate(candidate: string): string {
+  private readonly shownCandidate(candidate: string): string {
     if (candidate.startsWith(kHerePrefix)) {
       return candidate.slice(kHerePrefix.length);
     }
@@ -269,7 +269,7 @@ export class ModuleResolver {
     return candidate;
   }
 
-  private typescriptNames(candidates: string[]): string[] {
+  private readonly typescriptNames(candidates: Read<string[]>): string[] {
     const sources = candidates.filter((name) =>
       name.endsWith(kSourceExtension),
     );
@@ -277,7 +277,7 @@ export class ModuleResolver {
     return sources.map((name) => this.typescriptName(name));
   }
 
-  private typescriptName(name: string): string {
+  private readonly typescriptName(name: string): string {
     const stem = name.slice(0, name.length - kSourceExtension.length);
 
     return `${stem}${kTypeScriptExtension}`;
@@ -334,18 +334,18 @@ export class ModuleResolver {
   private namesIn(directory: string): string[] {
     const known = this.listings.get(directory);
     if (known != undefined) {
-      return known;
+      return known.slice();
     }
 
     const listed = readdirSync(directory);
     const names = listed.unwrapOr([]);
 
-    this.listings.set(directory, names);
+    this.listings.set(directory, names.slice());
 
     return names;
   }
 
-  private isFile(path: string): boolean {
+  private readonly isFile(path: string): boolean {
     const stat = statSync(path);
     if (stat.isErr()) {
       return false;

@@ -10,7 +10,7 @@ import {
 import { BoundModule } from "../types/module-binder.types.tz";
 
 partial class ModuleBinder {
-  private declareNames(bound: BoundModule): void {
+  private readonly declareNames(bound: Read<BoundModule>): void {
     const module = bound.names.module;
 
     for (const item of module.file.items) {
@@ -22,7 +22,7 @@ partial class ModuleBinder {
     }
   }
 
-  private declareItem(bound: BoundModule, item: Stmt): void {
+  private readonly declareItem(bound: Read<BoundModule>, item: Stmt): void {
     switch (item.kind) {
       case StmtKind.VarDecl:
         this.declareVariables(bound, item.decls);
@@ -41,7 +41,7 @@ partial class ModuleBinder {
     }
   }
 
-  private declareVariables(bound: BoundModule, decls: VarDeclarator[]): void {
+  private readonly declareVariables(bound: Read<BoundModule>, decls: Read<VarDeclarator[]>): void {
     for (const decl of decls) {
       if (decl.origin == NameOrigin.Written) {
         this.declare(bound, decl.name, decl.loc);
@@ -49,10 +49,9 @@ partial class ModuleBinder {
     }
   }
 
-  private declare(bound: BoundModule, name: string, loc: int): void {
-    const declared = bound.names.declared;
-    if (name != "" && !declared.has(name)) {
-      declared.set(name, loc);
+  private readonly declare(bound: Read<BoundModule>, name: string, loc: int): void {
+    if (name != "" && !bound.names.declared.has(name)) {
+      bound.names.declared.set(name, loc);
     }
   }
 }

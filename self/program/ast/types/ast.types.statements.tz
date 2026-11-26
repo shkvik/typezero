@@ -1,3 +1,39 @@
+import {
+  ClassField,
+  ClassMember,
+  Decorator,
+  EnumMember,
+} from "./ast.types.classes.tz";
+import {
+  DeclaredClass,
+  DeclaredMember,
+} from "./ast.types.declarations.tz";
+import {
+  ArrayElement,
+  CallArgument,
+  NewForm,
+  Property,
+  PropertyForm,
+} from "./ast.types.expressions.tz";
+import { Param, ParamForm } from "./ast.types.functions.tz";
+import {
+  ExportDecl,
+  ImportDecl,
+  ModuleName,
+  ModulePath,
+  WholeImport,
+} from "./ast.types.modules.tz";
+import { BindingForm } from "./ast.types.patterns.tz";
+import { Span } from "./ast.types.span.tz";
+import {
+  FunctionTypeParam,
+  ObjectTypeField,
+  TupleElement,
+  TypeForm,
+  TypeParamDecl,
+  TypeRef,
+} from "./ast.types.types.tz";
+
 import { Expr } from "./ast.types.expressions.tz";
 import { VarDeclarator } from "./ast.types.patterns.tz";
 import { FunctionDecl } from "./ast.types.functions.tz";
@@ -34,7 +70,7 @@ export enum StmtKind {
 export type BlockStmt = {
   readonly kind: StmtKind.Block;
   readonly loc: int;
-  body: Stmt[];
+  readonly body: readonly Stmt[];
   readonly end?: int;
 };
 
@@ -43,7 +79,7 @@ export type VarDeclStmt = {
   readonly loc: int;
   readonly isConst: boolean;
   readonly isUsing: boolean;
-  readonly decls: VarDeclarator[];
+  readonly decls: readonly VarDeclarator[];
 };
 
 export type ExprStmt = {
@@ -98,14 +134,14 @@ export type ForOfStmt = {
 export type SwitchCase = {
   readonly loc: int;
   readonly test?: Expr;
-  readonly body: Stmt[];
+  readonly body: readonly Stmt[];
 };
 
 export type SwitchStmt = {
   readonly kind: StmtKind.Switch;
   readonly loc: int;
   readonly discriminant: Expr;
-  readonly cases: SwitchCase[];
+  readonly cases: readonly SwitchCase[];
 };
 
 export type LabeledStmt = {
@@ -151,3 +187,36 @@ export type Stmt =
   | EnumDecl
   | ClassDecl
   | HandleDecl;
+
+export type AstNode = Interned<
+  | Stmt
+  | Expr
+  | SwitchCase
+  | VarDeclarator
+  | BindingForm
+  | Param
+  | ParamForm
+  | Property
+  | PropertyForm
+  | ArrayElement
+  | CallArgument
+  | NewForm
+  | ClassField
+  | ClassMember
+  | Decorator
+  | EnumMember
+  | DeclaredClass
+  | DeclaredMember
+  | ImportDecl
+  | ExportDecl
+  | ModuleName
+  | ModulePath
+  | WholeImport
+  | Span
+  | TypeRef
+  | TypeForm
+  | TypeParamDecl
+  | FunctionTypeParam
+  | ObjectTypeField
+  | TupleElement
+>;

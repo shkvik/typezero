@@ -30,7 +30,7 @@ import { kConstructorName } from "../../../object-rules/const/object-rules.const
 import { InstanceField } from "../../../../../program/expression-answers/types/expression-answers.types.tz";
 
 partial class ExpressionTypes {
-  private instanceMember(
+  private readonly instanceMember(
     expr: MemberExpr,
     instance: InstanceType,
     module: int,
@@ -117,8 +117,8 @@ partial class ExpressionTypes {
     return this.methodTypeOf(entry, method);
   }
 
-  private checkAccess(
-    entry: ClassMemberEntry,
+  private readonly checkAccess(
+    entry: Read<ClassMemberEntry>,
     access: Access,
     expr: MemberExpr,
     module: int,
@@ -130,7 +130,7 @@ partial class ExpressionTypes {
     return this.reportAccess(entry.owner, access, expr.name, expr.loc, module);
   }
 
-  private reportAccess(
+  private readonly reportAccess(
     owner: ClassDecl,
     access: Access,
     word: string,
@@ -156,7 +156,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  public classDeclOf(type: Type): ClassDecl | undefined {
+  public readonly classDeclOf(type: Type): ClassDecl | undefined {
     if (type.kind != TypeKind.Instance) {
       return undefined;
     }
@@ -164,7 +164,7 @@ partial class ExpressionTypes {
     return this.classOf(type);
   }
 
-  public instanceFields(type: Type): InstanceField[] | undefined {
+  public readonly instanceFields(type: Type): InstanceField[] | undefined {
     const decl = this.classDeclOf(type);
     if (decl == undefined || type.kind != TypeKind.Instance) {
       return undefined;
@@ -190,7 +190,7 @@ partial class ExpressionTypes {
     return fields;
   }
 
-  private classOf(instance: InstanceType): ClassDecl | undefined {
+  private readonly classOf(instance: InstanceType): ClassDecl | undefined {
     if (this.isDeclaredLibrary(instance.module, instance.loc)) {
       return undefined;
     }
@@ -198,7 +198,7 @@ partial class ExpressionTypes {
     return this.record(instance.module)?.classes.get(instance.loc);
   }
 
-  private classMember(instance: InstanceType, name: string): ClassLookup {
+  private readonly classMember(instance: InstanceType, name: string): ClassLookup {
     const decl = this.classOf(instance);
     if (decl == undefined || decl.decorators.length > 0) {
       return { isKnown: false };
@@ -219,7 +219,7 @@ partial class ExpressionTypes {
     return this.classMember(parent, name);
   }
 
-  private arrowFieldType(entry: ClassMemberEntry, field: ClassField): Type {
+  private readonly arrowFieldType(entry: Read<ClassMemberEntry>, field: ClassField): Type {
     const init = field.init;
     const owner = entry.owner;
     if (init == undefined || init.kind != ExprKind.Function) {
@@ -232,7 +232,7 @@ partial class ExpressionTypes {
     return this.methodFunction(owner, init.fn, entry.instance.module);
   }
 
-  private fieldTypeOf(entry: ClassMemberEntry, field: ClassField): Type {
+  private readonly fieldTypeOf(entry: Read<ClassMemberEntry>, field: ClassField): Type {
     const written = field.type;
     const isArrow = this.classes.isArrowField(field);
     if (
@@ -261,7 +261,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private methodTypeOf(entry: ClassMemberEntry, method: FunctionDecl): Type {
+  private readonly methodTypeOf(entry: Read<ClassMemberEntry>, method: FunctionDecl): Type {
     const written = method.returnType;
     const owner = entry.owner;
 
@@ -291,8 +291,8 @@ partial class ExpressionTypes {
     return this.resolver.signature(sites, written, context);
   }
 
-  private inferredGenericMethod(
-    entry: ClassMemberEntry,
+  private readonly inferredGenericMethod(
+    entry: Read<ClassMemberEntry>,
     method: FunctionDecl,
   ): Type {
     const instance = entry.instance;
@@ -317,7 +317,7 @@ partial class ExpressionTypes {
     return this.resolver.substitute(generic, bound);
   }
 
-  private partOf(owner: ClassDecl, method: FunctionDecl): ClassDecl {
+  private readonly partOf(owner: ClassDecl, method: FunctionDecl): ClassDecl {
     for (const opened of this.program.modules) {
       const part = opened.parts.find(
         (one) => one.name == owner.name && one.methods.includes(method),
@@ -330,7 +330,7 @@ partial class ExpressionTypes {
     return owner;
   }
 
-  private partModule(part: ClassDecl, module: int): int {
+  private readonly partModule(part: ClassDecl, module: int): int {
     const home = this.program.modules.find((opened) =>
       opened.parts.includes(part),
     );
@@ -338,7 +338,7 @@ partial class ExpressionTypes {
     return home?.id ?? module;
   }
 
-  private newTyped(expr: NewExpr, wanted: Type | undefined, module: int): Type {
+  private readonly newTyped(expr: NewExpr, wanted: Type | undefined, module: int): Type {
     const form = expr.form;
     if (form.kind == NewKind.Callee) {
       const callee = this.typed(form.callee, undefined, module);
@@ -476,7 +476,7 @@ partial class ExpressionTypes {
     return made;
   }
 
-  private newArguments(
+  private readonly newArguments(
     expr: NewExpr,
     decl: ClassDecl,
     module: int,
@@ -510,7 +510,7 @@ partial class ExpressionTypes {
     return this.writtenArguments(expr.typeArgs, module);
   }
 
-  private constructed(
+  private readonly constructed(
     expr: NewExpr,
     instance: InstanceType,
     decl: ClassDecl,
@@ -561,7 +561,7 @@ partial class ExpressionTypes {
     return instance;
   }
 
-  private visibleConstructors(owner: ClassDecl): FunctionDecl[] {
+  private readonly visibleConstructors(owner: ClassDecl): FunctionDecl[] {
     const all = owner.constructors;
     const visible = all.filter((fn) => this.isVisibleConstructor(owner, fn));
     if (visible.length == 0) {
@@ -571,7 +571,7 @@ partial class ExpressionTypes {
     return visible;
   }
 
-  private isVisibleConstructor(owner: ClassDecl, fn: FunctionDecl): boolean {
+  private readonly isVisibleConstructor(owner: ClassDecl, fn: FunctionDecl): boolean {
     const access = this.classes.accessOf(fn);
     if (access == Access.Public || this.isInsideClass(owner)) {
       return true;
@@ -580,11 +580,11 @@ partial class ExpressionTypes {
     return access == Access.Protected && this.isDerivedInside(owner);
   }
 
-  private variantNew(
+  private readonly variantNew(
     expr: NewExpr,
     instance: InstanceType,
-    maker: ClassMemberEntry,
-    constructors: FunctionDecl[],
+    maker: Read<ClassMemberEntry>,
+    constructors: Read<FunctionDecl[]>,
     decl: ClassDecl,
     module: int,
   ): Type {
@@ -620,7 +620,7 @@ partial class ExpressionTypes {
     return instance;
   }
 
-  private makerOf(
+  private readonly makerOf(
     instance: InstanceType,
     decl: ClassDecl,
   ): ClassMemberEntry | undefined {
@@ -653,8 +653,8 @@ partial class ExpressionTypes {
     return this.makerOf(parent, parentDecl);
   }
 
-  private constructorTarget(
-    maker: ClassMemberEntry,
+  private readonly constructorTarget(
+    maker: Read<ClassMemberEntry>,
     chosen: FunctionDecl,
     loc: int,
   ): CallTarget | undefined {
@@ -683,7 +683,7 @@ partial class ExpressionTypes {
     return { params, rest, loc, isLenient: false };
   }
 
-  private memberNew(
+  private readonly memberNew(
     expr: NewExpr,
     owner: string,
     name: string,
@@ -696,7 +696,7 @@ partial class ExpressionTypes {
     return this.intlNew(expr, name, module);
   }
 
-  private isDeclaredLibrary(module: int, loc: int): boolean {
+  private readonly isDeclaredLibrary(module: int, loc: int): boolean {
     if (!this.modules.isLibraryModule(module)) {
       return false;
     }

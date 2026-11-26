@@ -166,7 +166,7 @@ partial class Lowering {
     return { type: kPointerType, value: array, tz: type, owned: true };
   }
 
-  private newArray(frame: Frame, descriptor: LLVMValue, count: int): LLVMValue {
+  private readonly newArray(frame: Read<Frame>, descriptor: LLVMValue, count: int): LLVMValue {
     const tz = this.store.integer(64, false);
     const size = this.ir.integer(kIntType, `${count}`);
     const args: IrValue[] = [
@@ -178,17 +178,17 @@ partial class Lowering {
     return this.runtimeValue(frame, kArrayNew, kPointerType, args);
   }
 
-  private arrayField(frame: Frame, array: LLVMValue, field: int): LLVMValue {
+  private readonly arrayField(frame: Read<Frame>, array: LLVMValue, field: int): LLVMValue {
     return frame.made.field(kArrayLayout, array, field);
   }
 
-  private arrayData(frame: Frame, array: LLVMValue): LLVMValue {
+  private readonly arrayData(frame: Read<Frame>, array: LLVMValue): LLVMValue {
     const field = this.arrayField(frame, array, kArrayDataField);
 
     return frame.made.load(kPointerType, field);
   }
 
-  private arrayLength(frame: Frame, array: LLVMValue): LLVMValue {
+  private readonly arrayLength(frame: Read<Frame>, array: LLVMValue): LLVMValue {
     const field = this.arrayField(frame, array, kArrayLengthField);
     const short = frame.made.load(kFlagType, field);
 
@@ -336,7 +336,7 @@ partial class Lowering {
     }
   }
 
-  private integerKind(bits: int, isUnsigned: boolean): int {
+  private readonly integerKind(bits: int, isUnsigned: boolean): int {
     switch (bits) {
       case 8:
         return this.choose(isUnsigned, 20, 18);
@@ -349,7 +349,7 @@ partial class Lowering {
     }
   }
 
-  private choose(isFirst: boolean, first: int, second: int): int {
+  private readonly choose(isFirst: boolean, first: int, second: int): int {
     if (isFirst) {
       return first;
     }
@@ -409,7 +409,7 @@ partial class Lowering {
     return checked;
   }
 
-  private itemOf(object: Type): Type | undefined {
+  private readonly itemOf(object: Type): Type | undefined {
     if (object.kind != TypeKind.Array) {
       return undefined;
     }
@@ -418,7 +418,7 @@ partial class Lowering {
   }
 
   private elementRead(
-    frame: Frame,
+    frame: Read<Frame>,
     array: IrValue,
     at: LLVMValue,
     item: Type,
@@ -436,35 +436,34 @@ partial class Lowering {
   }
 
   private checkedRead(
-    frame: Frame,
+    frame: Read<Frame>,
     array: IrValue,
     at: LLVMValue,
     item: Type,
     result: Type,
   ): IrValue {
-    const made = frame.made;
     const type = this.irType(result) ?? kPointerType;
     const length = this.arrayLength(frame, array.value);
-    const isInside = made.integerCompare(
+    const isInside = frame.made.integerCompare(
       IrIntPredicate.UnsignedLess,
       at,
       length,
     );
-    const before = made.currentBlock();
-    const read = made.block("read");
-    const end = made.block("read.end");
+    const before = frame.made.currentBlock();
+    const read = frame.made.block("read");
+    const end = frame.made.block("read.end");
 
-    made.conditionalBranch(isInside, read, end);
-    made.open(read);
+    frame.made.conditionalBranch(isInside, read, end);
+    frame.made.open(read);
 
     const loaded = this.elementRead(frame, array, at, item);
     const placed = this.somewhere(frame, loaded, result);
-    const readEnd = made.currentBlock();
+    const readEnd = frame.made.currentBlock();
 
-    made.open(end);
+    frame.made.open(end);
 
     const missing = this.ir.zero(type);
-    const value = made.phi(type, [missing, placed.value], [before, readEnd]);
+    const value = frame.made.phi(type, [missing, placed.value], [before, readEnd]);
 
     return { type, value, tz: result, owned: loaded.owned };
   }
@@ -556,48 +555,47 @@ partial class Lowering {
   }
 
   private pushed(
-    frame: Frame,
+    frame: Read<Frame>,
     array: LLVMValue,
     value: IrValue,
     item: Type,
   ): LLVMValue {
-    const made = frame.made;
     const element = this.irType(item) ?? kPointerType;
     const owned = this.owning(frame, value);
     const lengthField = this.arrayField(frame, array, kArrayLengthField);
     const capacityField = this.arrayField(frame, array, kArrayCapacityField);
-    const length = made.load(kFlagType, lengthField);
-    const capacity = made.load(kFlagType, capacityField);
+    const length = frame.made.load(kFlagType, lengthField);
+    const capacity = frame.made.load(kFlagType, capacityField);
     const one = this.ir.integer(kFlagType, "1");
-    const next = made.binary(IrOpcode.Add, length, one);
-    const isFull = made.integerCompare(
+    const next = frame.made.binary(IrOpcode.Add, length, one);
+    const isFull = frame.made.integerCompare(
       IrIntPredicate.UnsignedGreater,
       next,
       capacity,
     );
-    const grow = made.block("push.grow");
-    const place = made.block("push.store");
+    const grow = frame.made.block("push.grow");
+    const place = frame.made.block("push.store");
 
-    made.conditionalBranch(isFull, grow, place);
-    made.open(grow);
+    frame.made.conditionalBranch(isFull, grow, place);
+    frame.made.open(grow);
 
-    const wanted = made.cast(IrOpcode.ZExt, next, kIntType);
+    const wanted = frame.made.cast(IrOpcode.ZExt, next, kIntType);
     const growing = this.ir.declare(kArrayGrow, kVoidType, [
       kPointerType,
       kIntType,
     ]);
 
-    made.call(growing, [array, wanted]);
-    made.open(place);
+    frame.made.call(growing, [array, wanted]);
+    frame.made.open(place);
 
     const data = this.arrayData(frame, array);
-    const at = made.cast(IrOpcode.ZExt, length, kIntType);
-    const address = made.element(element, data, at);
+    const at = frame.made.cast(IrOpcode.ZExt, length, kIntType);
+    const address = frame.made.element(element, data, at);
 
-    made.store(owned.value, address);
-    made.store(next, lengthField);
+    frame.made.store(owned.value, address);
+    frame.made.store(next, lengthField);
 
-    return made.cast(IrOpcode.ZExt, next, kIntType);
+    return frame.made.cast(IrOpcode.ZExt, next, kIntType);
   }
 
   private forOfLoop(frame: Frame, statement: ForOfStmt): void {
@@ -615,10 +613,9 @@ partial class Lowering {
 
     const iterable = this.store.arrayOf(itemType);
 
-    const made = frame.made;
-    const cond = made.block("for.of.cond");
-    const body = made.block("for.of.body");
-    const end = made.block("for.of.end");
+    const cond = frame.made.block("for.of.cond");
+    const body = frame.made.block("for.of.body");
+    const end = frame.made.block("for.of.end");
 
     this.openScope(frame);
 
@@ -630,40 +627,40 @@ partial class Lowering {
     }
 
     const holder: Place = {
-      pointer: made.slot(kPointerType, "for.iterable"),
+      pointer: frame.made.slot(kPointerType, "for.iterable"),
       type: kPointerType,
       tz: iterable,
       owner: frame.id,
     };
-    const counter = made.slot(kIntType, "for.index");
+    const counter = frame.made.slot(kIntType, "for.index");
     const none = this.ir.zero(kPointerType);
 
-    made.entryStore(none, holder.pointer);
+    frame.made.entryStore(none, holder.pointer);
     this.keepPlace(frame, holder);
     this.stored(frame, holder, source);
-    made.store(this.ir.zero(kIntType), counter);
-    made.open(cond);
+    frame.made.store(this.ir.zero(kIntType), counter);
+    frame.made.open(cond);
 
-    const array = made.load(kPointerType, holder.pointer);
-    const index = made.load(kIntType, counter);
+    const array = frame.made.load(kPointerType, holder.pointer);
+    const index = frame.made.load(kIntType, counter);
     const length = this.arrayLength(frame, array);
-    const isInside = made.integerCompare(
+    const isInside = frame.made.integerCompare(
       IrIntPredicate.UnsignedLess,
       index,
       length,
     );
 
-    made.conditionalBranch(isInside, body, end);
-    made.open(body);
+    frame.made.conditionalBranch(isInside, body, end);
+    frame.made.open(body);
     this.openScope(frame);
 
     const data = this.arrayData(frame, array);
-    const address = made.element(element, data, index);
-    const item = made.load(element, address);
+    const address = frame.made.element(element, data, index);
+    const item = frame.made.load(element, address);
     const one = this.ir.integer(kIntType, "1");
-    const next = made.binary(IrOpcode.Add, index, one);
+    const next = frame.made.binary(IrOpcode.Add, index, one);
 
-    made.store(next, counter);
+    frame.made.store(next, counter);
     this.loopItem(frame, statement, {
       type: element,
       value: item,
@@ -674,7 +671,7 @@ partial class Lowering {
     frame.loops.pop();
     this.closeScope(frame);
     this.jumpTo(frame, cond);
-    made.open(end);
+    frame.made.open(end);
     this.closeScope(frame);
   }
 

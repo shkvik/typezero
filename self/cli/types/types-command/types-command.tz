@@ -11,15 +11,21 @@ import { TypeText } from "../../../program/type/type-text/type-text.tz";
 import { FrontEnd } from "../../../pipeline/front-end/front-end.tz";
 import { ProgramReport } from "../../program-report/program-report.tz";
 import { ProgramSource } from "../../program-source/program-source.tz";
+import { Program } from "../../../program/module/types/module.types.tz";
+import { ExpressionTypes } from "../../../semantic/code/expression-types/expression-types.tz";
+import { OwnershipCheck } from "../../../semantic/ownership/ownership-check/ownership-check.tz";
+import { kOwnershipFlag } from "./const/types-command.const.tz";
 
 export class TypesCommand {
   private readonly entry?: string;
+  private readonly isOwnershipChecked: boolean;
   private readonly report: ProgramReport;
   private readonly store: TypeStore;
   private readonly text: TypeText;
 
-  public constructor(args: string[]) {
+  public constructor(args: Read<string[]>) {
     this.entry = args[3];
+    this.isOwnershipChecked = args.includes(kOwnershipFlag);
     this.report = new ProgramReport();
     this.store = new TypeStore();
     this.text = new TypeText(this.store);
@@ -55,9 +61,33 @@ export class TypesCommand {
     for (const problems of front.problems(checked)) {
       this.report.sourceErrors(problems.source, problems.errors);
     }
+
+    if (this.isOwnershipChecked) {
+      this.checkOwnership(program, checked.values);
+    }
   }
 
-  private printTypes(types: ModuleTypes): void {
+  private checkOwnership(program: Program, values: Own<ExpressionTypes>): void {
+    const ownership = new OwnershipCheck(this.store, values, program);
+
+    ownership.run();
+
+    for (const line of ownership.hints()) {
+      console.log(line);
+    }
+
+    for (const module of program.modules) {
+      const errors = ownership.problems(module.id);
+      if (errors.length > 0) {
+        const sorted = errors.slice();
+
+        sorted.sort((first, second) => first.loc - second.loc);
+        this.report.sourceErrors(module.source, sorted);
+      }
+    }
+  }
+
+  private readonly printTypes(types: Read<ModuleTypes>): void {
     const module = types.module;
     const lines = new SourceLines(module.source.text);
 
@@ -71,7 +101,7 @@ export class TypesCommand {
     }
   }
 
-  private declarationText(declaration: TypedDeclaration): string {
+  private readonly declarationText(declaration: TypedDeclaration): string {
     const name = declaration.name;
 
     switch (declaration.form) {

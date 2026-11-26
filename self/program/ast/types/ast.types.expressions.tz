@@ -118,8 +118,8 @@ export type UndefinedExpr = {
 export type TemplateExpr = {
   readonly kind: ExprKind.Template;
   readonly loc: int;
-  readonly quasis: string[];
-  readonly exprs: Expr[];
+  readonly quasis: readonly string[];
+  readonly exprs: readonly Expr[];
 };
 
 export type ArrayElement = {
@@ -131,7 +131,7 @@ export type ArrayElement = {
 export type ArrayLitExpr = {
   readonly kind: ExprKind.ArrayLit;
   readonly loc: int;
-  readonly elements: ArrayElement[];
+  readonly elements: readonly ArrayElement[];
 };
 
 export type PlainProperty = {
@@ -146,8 +146,8 @@ export type ComputedProperty = {
 
 export type SpreadProperty = {
   readonly kind: PropertyKind.Spread;
-  readonly omit: string[];
-  readonly omitKeys: IndexExpr[];
+  readonly omit: readonly string[];
+  readonly omitKeys: readonly IndexExpr[];
 };
 
 export type PropertyForm = PlainProperty | ComputedProperty | SpreadProperty;
@@ -162,7 +162,7 @@ export type Property = {
 export type ObjectLitExpr = {
   readonly kind: ExprKind.ObjectLit;
   readonly loc: int;
-  readonly props: Property[];
+  readonly props: readonly Property[];
 };
 
 export type NameExpr = {
@@ -170,7 +170,7 @@ export type NameExpr = {
   readonly loc: int;
   readonly name: string;
   readonly known: KnownName;
-  typeArgs: TypeRef[];
+  readonly typeArgs: readonly TypeRef[];
 };
 
 export type MemberExpr = {
@@ -180,7 +180,7 @@ export type MemberExpr = {
   readonly name: string;
   readonly known: KnownName;
   readonly optional: boolean;
-  typeArgs: TypeRef[];
+  readonly typeArgs: readonly TypeRef[];
 };
 
 export type IndexExpr = {
@@ -233,7 +233,7 @@ export type CallExpr = {
   readonly kind: ExprKind.Call;
   readonly loc: int;
   readonly callee: Expr;
-  readonly args: CallArgument[];
+  readonly args: readonly CallArgument[];
   readonly optional: boolean;
   readonly tagged: boolean;
 };
@@ -255,8 +255,8 @@ export type NewExpr = {
   readonly kind: ExprKind.New;
   readonly loc: int;
   readonly form: NewForm;
-  readonly typeArgs: TypeRef[];
-  readonly args: CallArgument[];
+  readonly typeArgs: readonly TypeRef[];
+  readonly args: readonly CallArgument[];
 };
 
 export type ConditionalExpr = {
@@ -277,7 +277,7 @@ export type CastExpr = {
 export type SequenceExpr = {
   readonly kind: ExprKind.Sequence;
   readonly loc: int;
-  readonly exprs: Expr[];
+  readonly exprs: readonly Expr[];
 };
 
 export type OptionalChainExpr = {

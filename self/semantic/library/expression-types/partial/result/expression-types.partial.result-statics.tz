@@ -16,7 +16,7 @@ import { kResultName } from "../../../../code/expression-types/const/expression-
 import { CombineDraft } from "../../../../code/expression-types/types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private resultStaticCall(
+  private readonly resultStaticCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -71,7 +71,7 @@ partial class ExpressionTypes {
     return this.combinedArray(arg, draft, module);
   }
 
-  private resultSearchCheck(
+  private readonly resultSearchCheck(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -96,7 +96,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private combinedList(
+  private readonly combinedList(
     literal: ArrayLitExpr,
     draft: CombineDraft,
     module: int,
@@ -138,7 +138,7 @@ partial class ExpressionTypes {
     return this.tupleCombined(literal, results, draft, module);
   }
 
-  private combinedCommon(results: ResultType[]): ResultType | undefined {
+  private readonly combinedCommon(results: Read<ResultType[]>): ResultType | undefined {
     let common = results[0];
 
     for (const result of results) {
@@ -152,7 +152,7 @@ partial class ExpressionTypes {
     return common;
   }
 
-  private sameValues(
+  private readonly sameValues(
     first: ResultType,
     second: ResultType,
   ): ResultType | undefined {
@@ -170,7 +170,7 @@ partial class ExpressionTypes {
     return made;
   }
 
-  private sameCombined(
+  private readonly sameCombined(
     literal: ArrayLitExpr,
     common: ResultType,
     draft: CombineDraft,
@@ -183,9 +183,9 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private tupleCombined(
+  private readonly tupleCombined(
     literal: ArrayLitExpr,
-    results: ResultType[],
+    results: Read<ResultType[]>,
     draft: CombineDraft,
     module: int,
   ): Type {
@@ -233,7 +233,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private combinedArray(arg: Expr, draft: CombineDraft, module: int): Type {
+  private readonly combinedArray(arg: Expr, draft: CombineDraft, module: int): Type {
     const error = this.store.plain(TypeKind.Error);
     const type = this.typed(arg, undefined, module);
     if (type.kind == TypeKind.Error) {

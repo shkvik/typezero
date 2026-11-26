@@ -45,7 +45,7 @@ import {
 import { JsonCursor, JsonProblem } from "./types/json-text.types.tz";
 
 export class JsonText {
-  public problemOf(text: string): JsonProblem | undefined {
+  public readonly problemOf(text: string): JsonProblem | undefined {
     const cursor: JsonCursor = {
       text,
       at: 0,
@@ -78,7 +78,7 @@ export class JsonText {
     }
   }
 
-  public position(text: string, offset: int): int[] {
+  public readonly position(text: string, offset: int): int[] {
     let line = 1;
     let column = 1;
 
@@ -97,7 +97,7 @@ export class JsonText {
     return [line, column];
   }
 
-  private value(cursor: JsonCursor): JsonProblem | undefined {
+  private readonly value(cursor: JsonCursor): JsonProblem | undefined {
     const code = this.codeAt(cursor);
 
     if (code == kQuote) {
@@ -113,7 +113,7 @@ export class JsonText {
     return this.wordValue(cursor, code);
   }
 
-  private stringValue(cursor: JsonCursor): JsonProblem | undefined {
+  private readonly stringValue(cursor: JsonCursor): JsonProblem | undefined {
     const start = cursor.at;
     const message = this.stringBody(cursor);
     if (message == undefined) {
@@ -126,7 +126,7 @@ export class JsonText {
     return this.problem(cursor, message);
   }
 
-  private wordValue(cursor: JsonCursor, code: int): JsonProblem | undefined {
+  private readonly wordValue(cursor: JsonCursor, code: int): JsonProblem | undefined {
     const rest = cursor.text.slice(cursor.at);
     if (rest.startsWith(kTrueWord) || rest.startsWith(kNullWord)) {
       cursor.at += 4;
@@ -147,7 +147,7 @@ export class JsonText {
     return this.problem(cursor, kExpectedValue);
   }
 
-  private container(cursor: JsonCursor, code: int): JsonProblem | undefined {
+  private readonly container(cursor: JsonCursor, code: int): JsonProblem | undefined {
     cursor.at += 1;
     this.skipSpace(cursor);
 
@@ -168,7 +168,7 @@ export class JsonText {
     return this.keyProblem(cursor);
   }
 
-  private afterValue(cursor: JsonCursor): JsonProblem | undefined {
+  private readonly afterValue(cursor: JsonCursor): JsonProblem | undefined {
     while (true) {
       this.skipSpace(cursor);
 
@@ -199,7 +199,7 @@ export class JsonText {
     }
   }
 
-  private commaProblem(
+  private readonly commaProblem(
     cursor: JsonCursor,
     isObject: boolean,
   ): JsonProblem | undefined {
@@ -210,7 +210,7 @@ export class JsonText {
     return undefined;
   }
 
-  private endProblem(cursor: JsonCursor): JsonProblem | undefined {
+  private readonly endProblem(cursor: Read<JsonCursor>): JsonProblem | undefined {
     if (cursor.at < cursor.text.length) {
       return this.problem(cursor, kTextAfter);
     }
@@ -218,7 +218,7 @@ export class JsonText {
     return undefined;
   }
 
-  private keyProblem(cursor: JsonCursor): JsonProblem | undefined {
+  private readonly keyProblem(cursor: JsonCursor): JsonProblem | undefined {
     const message = this.keyMessage(cursor);
     if (message == undefined) {
       return undefined;
@@ -227,7 +227,7 @@ export class JsonText {
     return this.problem(cursor, message);
   }
 
-  private keyMessage(cursor: JsonCursor): string | undefined {
+  private readonly keyMessage(cursor: JsonCursor): string | undefined {
     this.skipSpace(cursor);
 
     if (this.codeAt(cursor) != kQuote) {
@@ -250,7 +250,7 @@ export class JsonText {
     return undefined;
   }
 
-  private stringBody(cursor: JsonCursor): string | undefined {
+  private readonly stringBody(cursor: JsonCursor): string | undefined {
     const text = cursor.text;
 
     cursor.at += 1;
@@ -281,7 +281,7 @@ export class JsonText {
     }
   }
 
-  private escape(cursor: JsonCursor): string | undefined {
+  private readonly escape(cursor: JsonCursor): string | undefined {
     const text = cursor.text;
 
     cursor.at += 1;
@@ -303,7 +303,7 @@ export class JsonText {
     return undefined;
   }
 
-  private unicodeEscape(cursor: JsonCursor): string | undefined {
+  private readonly unicodeEscape(cursor: JsonCursor): string | undefined {
     const text = cursor.text;
 
     for (let count = 0; count < 4; count++) {
@@ -320,7 +320,7 @@ export class JsonText {
     return undefined;
   }
 
-  private numberValue(cursor: JsonCursor): JsonProblem | undefined {
+  private readonly numberValue(cursor: JsonCursor): JsonProblem | undefined {
     const text = cursor.text;
 
     if (this.codeAt(cursor) == kMinus) {
@@ -348,7 +348,7 @@ export class JsonText {
     return this.exponent(cursor);
   }
 
-  private exponent(cursor: JsonCursor): JsonProblem | undefined {
+  private readonly exponent(cursor: JsonCursor): JsonProblem | undefined {
     const text = cursor.text;
     const code = this.codeAt(cursor);
     if (code != kSmallE && code != kUpperE) {
@@ -368,7 +368,7 @@ export class JsonText {
     return undefined;
   }
 
-  private digits(cursor: JsonCursor): boolean {
+  private readonly digits(cursor: JsonCursor): boolean {
     const start = cursor.at;
 
     while (this.isDigit(this.codeAt(cursor))) {
@@ -378,13 +378,13 @@ export class JsonText {
     return cursor.at > start;
   }
 
-  private skipSpace(cursor: JsonCursor): void {
+  private readonly skipSpace(cursor: JsonCursor): void {
     while (this.isSpace(this.codeAt(cursor))) {
       cursor.at += 1;
     }
   }
 
-  private isSpace(code: int): boolean {
+  private readonly isSpace(code: int): boolean {
     return (
       code == kSpace ||
       code == kTab ||
@@ -393,11 +393,11 @@ export class JsonText {
     );
   }
 
-  private isDigit(code: int): boolean {
+  private readonly isDigit(code: int): boolean {
     return code >= 48 && code <= 57;
   }
 
-  private closingOf(isObject: boolean): int {
+  private readonly closingOf(isObject: boolean): int {
     if (isObject) {
       return kClosingBrace;
     }
@@ -405,11 +405,11 @@ export class JsonText {
     return kClosingBracket;
   }
 
-  private codeAt(cursor: JsonCursor): int {
+  private readonly codeAt(cursor: Read<JsonCursor>): int {
     return cursor.text.charCodeAt(cursor.at) ?? -1;
   }
 
-  private problem(cursor: JsonCursor, message: string): JsonProblem {
+  private readonly problem(cursor: Read<JsonCursor>, message: string): JsonProblem {
     return { message, offset: cursor.at };
   }
 }

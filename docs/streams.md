@@ -92,7 +92,7 @@ child.stdout.on("data", s => s.length)          // s: string
 - **Всё, что ждёт поток, отдаёт `Result`:** каждый элемент `for await` — `Result<T, E>` (как
   `lines()` в Rust: ошибку не пропустить); `pipeline`, `finished`, `once`, `text` / `json` /
   `buffer` из `node:stream/consumers` — `Promise<Result<...>>`. Слушатель `error` там не нужен.
-- **Тип ошибки — у потока** (решено 30 октября, `tmp/design/stream-errors*.tz`, Т1–Т8):
+- **Тип ошибки — у потока** (решено 30 октября, Т1–Т8):
   `Readable<T, E extends StreamError = StreamError>`, `Writable<T, E>`, `Duplex<W, R, E>`,
   `Transform<W, R, E>`; `interface StreamError { message: string }` — у ошибки любого потока
   есть текст, своя ошибка своего потока — `interface CsvError extends StreamError { kind; … }`.
@@ -109,7 +109,7 @@ child.stdout.on("data", s => s.length)          // s: string
   PushAfterEndError>`, `end()` — `Result<void, E | WriteAfterEndError | …>`. Ошибка, положенная в
   ядро мимо `E` (метод ядра `breakWith`, его видят и подклассы), приходит как `PrematureCloseError`
   с её текстом: в `E` чужое не попадает.
-- **Поток делается только подклассом** (вариант Г, `tmp/design/stream-options-destroy.tz`):
+- **Поток делается только подклассом** (вариант Г):
   `Readable` / `Writable` / `Duplex` / `Transform` — абстрактные, работа — в `onRead` / `onWrite` /
   `onTransform`; запись опциями из node (`new Readable({ read() {} })`) — ошибка сборки с
   подсказкой; поток из готовых данных — `Readable.from(...)`. Конец потока — `pushEnd()`

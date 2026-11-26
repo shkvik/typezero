@@ -32,7 +32,7 @@ import {
 } from "../../../crypto-rules/types/crypto-rules.types.tz";
 
 partial class ExpressionTypes {
-  private cryptoAsyncCallback(
+  private readonly cryptoAsyncCallback(
     expr: CallExpr,
     shown: string,
     module: int,
@@ -48,7 +48,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private cryptoSyncCallback(
+  private readonly cryptoSyncCallback(
     expr: CallExpr,
     index: int,
     name: string,
@@ -72,11 +72,11 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private cryptoOptionsFine(
+  private readonly cryptoOptionsFine(
     expr: CallExpr,
     index: int,
     shown: string,
-    allowed: string[],
+    allowed: Read<string[]>,
     module: int,
   ): boolean {
     const options = expr.args[index]?.expr;
@@ -130,7 +130,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private scryptOptionsCheck(expr: CallExpr, shown: string, module: int): void {
+  private readonly scryptOptionsCheck(expr: CallExpr, shown: string, module: int): void {
     if (!this.cryptoOptionsFine(expr, 3, shown, kScryptOptions, module)) {
       return;
     }
@@ -165,7 +165,7 @@ partial class ExpressionTypes {
     this.scryptCostCheck(options, module);
   }
 
-  private scryptCostCheck(options: Expr, module: int): void {
+  private readonly scryptCostCheck(options: Expr, module: int): void {
     const costs = kCostNames
       .map((name) => this.optionValue(options, name))
       .filter((value) => value != undefined);
@@ -180,7 +180,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private keyPairCheck(
+  private readonly keyPairCheck(
     expr: CallExpr,
     shown: string,
     calleeLoc: int,
@@ -213,7 +213,7 @@ partial class ExpressionTypes {
     this.keyPairNeedsCheck(expr, type, calleeLoc, module);
   }
 
-  private keyPairNeedsCheck(
+  private readonly keyPairNeedsCheck(
     expr: CallExpr,
     type: string,
     calleeLoc: int,
@@ -242,7 +242,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private cryptoNew(
+  private readonly cryptoNew(
     expr: NewExpr,
     name: string,
     home: int,
@@ -263,7 +263,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private cryptoMethodCall(
+  private readonly cryptoMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -289,7 +289,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private cryptoMemberRead(
+  private readonly cryptoMemberRead(
     expr: MemberExpr,
     instance: InstanceType,
     module: int,
@@ -310,10 +310,10 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private cryptoMethodArguments(
+  private readonly cryptoMethodArguments(
     expr: CallExpr,
     member: MemberExpr,
-    shape: CryptoClass,
+    shape: Read<CryptoClass>,
     module: int,
   ): void {
     const isHash = kHashClasses.includes(shape.name);
@@ -334,7 +334,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private cryptoUpdateCheck(
+  private readonly cryptoUpdateCheck(
     expr: CallExpr,
     item: CryptoData,
     module: int,
@@ -344,7 +344,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private cryptoEncodingCheck(
+  private readonly cryptoEncodingCheck(
     expr: CallExpr,
     index: int,
     name: string,

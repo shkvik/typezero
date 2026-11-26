@@ -52,9 +52,9 @@ export class FunctionRules {
 
   public constructor(
     store: TypeStore,
-    relation: TypeRelation,
-    types: TypeQuestions,
-    unifier: TypeUnifier,
+    relation: Own<TypeRelation>,
+    types: Own<TypeQuestions>,
+    unifier: Own<TypeUnifier>,
     text: TypeText,
   ) {
     this.store = store;
@@ -64,8 +64,8 @@ export class FunctionRules {
     this.text = text;
   }
 
-  public adaptedParams(
-    params: FunctionParameter[],
+  public readonly adaptedParams(
+    params: Own<FunctionParameter[]>,
     goal: FunctionType | undefined,
   ): FunctionParameter[] {
     const given = goal?.shape.params ?? [];
@@ -78,7 +78,7 @@ export class FunctionRules {
     return params.concat(missing);
   }
 
-  public contextualFunction(
+  public readonly contextualFunction(
     wanted: Type | undefined,
   ): FunctionType | undefined {
     const goal = this.types.wantedPart(wanted);
@@ -89,8 +89,8 @@ export class FunctionRules {
     return this.spreadListShape(goal);
   }
 
-  public isParameterClash(
-    shape: ParameterShape,
+  public readonly isParameterClash(
+    shape: Read<ParameterShape>,
     goal: FunctionType | undefined,
   ): boolean {
     if (goal == undefined) {
@@ -111,7 +111,7 @@ export class FunctionRules {
     });
   }
 
-  public rootOf(key: string, dot: int): string {
+  public readonly rootOf(key: string, dot: int): string {
     if (dot < 0) {
       return key;
     }
@@ -119,7 +119,7 @@ export class FunctionRules {
     return key.slice(0, dot);
   }
 
-  public functionPlace(
+  public readonly functionPlace(
     fn: FunctionDecl,
     self: Type | undefined,
   ): ThisPlace | undefined {
@@ -133,7 +133,7 @@ export class FunctionRules {
     return ThisPlace.Function;
   }
 
-  public widenedResult(assumed: Type | undefined, found: Type): Type {
+  public readonly widenedResult(assumed: Type | undefined, found: Type): Type {
     if (assumed == undefined || found.kind == TypeKind.Error) {
       return found;
     }
@@ -144,15 +144,15 @@ export class FunctionRules {
     );
   }
 
-  public signatureOf(shape: ParameterShape, result: Type): Type {
-    const params = shape.params;
+  public readonly signatureOf(shape: Read<ParameterShape>, result: Type): Type {
+    const params = shape.params.slice();
     const rest = shape.rest;
     const self = shape.self;
 
     return this.store.functionOf({ params, rest, self, result });
   }
 
-  public insideType(type: Type, kind: ParamKind): Type {
+  public readonly insideType(type: Type, kind: ParamKind): Type {
     if (kind != ParamKind.Optional || type.kind == TypeKind.Error) {
       return type;
     }
@@ -160,7 +160,7 @@ export class FunctionRules {
     return this.types.optional(type);
   }
 
-  public isAssertion(fn: FunctionDecl): boolean {
+  public readonly isAssertion(fn: FunctionDecl): boolean {
     const form = fn.returnType?.form;
 
     return (
@@ -168,7 +168,7 @@ export class FunctionRules {
     );
   }
 
-  public innerResult(result: Type, fn: FunctionDecl): Type {
+  public readonly innerResult(result: Type, fn: FunctionDecl): Type {
     if (fn.isGenerator) {
       return this.store.plain(TypeKind.Error);
     }
@@ -179,7 +179,7 @@ export class FunctionRules {
     return result;
   }
 
-  public frameOf(fn: FunctionDecl, result: Type | undefined): FunctionFrame {
+  public readonly frameOf(fn: FunctionDecl, result: Type | undefined): FunctionFrame {
     return {
       fn,
       isAsync: fn.isAsync,
@@ -191,11 +191,11 @@ export class FunctionRules {
     };
   }
 
-  public isVoided(value: Expr): boolean {
+  public readonly isVoided(value: Expr): boolean {
     return value.kind == ExprKind.Unary && value.op == UnaryOp.Void;
   }
 
-  public isFunctionAdapting(
+  public readonly isFunctionAdapting(
     expr: Expr,
     given: Type,
     wanted: Type,
@@ -231,7 +231,7 @@ export class FunctionRules {
     return isFitting && theirs.params.length >= needed && isResult;
   }
 
-  public functionName(fn: FunctionDecl): string {
+  public readonly functionName(fn: FunctionDecl): string {
     if (fn.name == "") {
       return kAnonymousFunction;
     }
@@ -239,7 +239,7 @@ export class FunctionRules {
     return `'${fn.name}'`;
   }
 
-  public functionLabel(fn: FunctionDecl): string {
+  public readonly functionLabel(fn: FunctionDecl): string {
     if (fn.name == "") {
       return kAnonymousFunction;
     }
@@ -247,7 +247,7 @@ export class FunctionRules {
     return `${kFunctionWord} '${fn.name}'`;
   }
 
-  public generatorFrameOf(
+  public readonly generatorFrameOf(
     fn: FunctionDecl,
     result: Type | undefined,
   ): GeneratorFrame {
@@ -266,7 +266,7 @@ export class FunctionRules {
     };
   }
 
-  public sentType(frame: GeneratorFrame): Type {
+  public readonly sentType(frame: Read<GeneratorFrame>): Type {
     const sent = frame.sent;
     if (sent == undefined) {
       return this.store.plain(TypeKind.Error);
@@ -275,7 +275,7 @@ export class FunctionRules {
     return sent;
   }
 
-  public widened(type: Type | undefined): Type {
+  public readonly widened(type: Type | undefined): Type {
     if (type == undefined) {
       return this.store.integer(64, false);
     }
@@ -283,7 +283,7 @@ export class FunctionRules {
     return this.relation.baseOf(type) ?? type;
   }
 
-  public asyncResultCheck(
+  public readonly asyncResultCheck(
     fn: FunctionDecl,
     written: TypeRef,
     result: Type,
@@ -306,7 +306,7 @@ export class FunctionRules {
     };
   }
 
-  public resumedCheck(
+  public readonly resumedCheck(
     iterable: Expr,
     type: Type,
     code: Code,
@@ -336,11 +336,11 @@ export class FunctionRules {
     };
   }
 
-  public writtenGeneratorCheck(
+  public readonly writtenGeneratorCheck(
     fn: FunctionDecl,
     written: TypeRef,
     result: Type,
-    generator: GeneratorFrame,
+    generator: Read<GeneratorFrame>,
   ): SourceError | undefined {
     if (!fn.isGenerator || result.kind == TypeKind.Error) {
       return undefined;
@@ -361,7 +361,7 @@ export class FunctionRules {
     };
   }
 
-  private asyncGeneratorError(
+  private readonly asyncGeneratorError(
     written: TypeRef,
     result: Type,
   ): SourceError | undefined {
@@ -379,7 +379,7 @@ export class FunctionRules {
     };
   }
 
-  private yieldedOf(result: Type): Type {
+  private readonly yieldedOf(result: Type): Type {
     if (result.kind == TypeKind.Iterator) {
       return result.shape.yielded;
     }
@@ -387,7 +387,7 @@ export class FunctionRules {
     return result;
   }
 
-  private shownElement(element: Type): string {
+  private readonly shownElement(element: Type): string {
     if (element.kind == TypeKind.Void) {
       return kIntName;
     }
@@ -395,7 +395,7 @@ export class FunctionRules {
     return this.text.of(element);
   }
 
-  public checkedParameter(
+  public readonly checkedParameter(
     param: Param,
     type: Type,
     given: FunctionParameter | undefined,
@@ -427,7 +427,7 @@ export class FunctionRules {
     };
   }
 
-  public delegatedItem(value: Expr, type: Type): Checked<Type> {
+  public readonly delegatedItem(value: Expr, type: Type): Checked<Type> {
     const base = this.types.apparent(type);
 
     switch (base.kind) {
@@ -459,7 +459,7 @@ export class FunctionRules {
     }
   }
 
-  public iteratorMissingCheck(
+  public readonly iteratorMissingCheck(
     member: MemberExpr,
     object: Type,
   ): Checked<boolean> {
@@ -480,10 +480,10 @@ export class FunctionRules {
     };
   }
 
-  public writtenResultCheck(
+  public readonly writtenResultCheck(
     fn: FunctionDecl,
     result: Type,
-    frame: FunctionFrame,
+    frame: Read<FunctionFrame>,
   ): SourceError | undefined {
     const written = fn.returnType;
     const generator = frame.generator;
@@ -501,7 +501,7 @@ export class FunctionRules {
     return writtenGeneratorError;
   }
 
-  public iteratorCallCheck(member: MemberExpr, object: Type): Checked<boolean> {
+  public readonly iteratorCallCheck(member: MemberExpr, object: Type): Checked<boolean> {
     if (object.kind != TypeKind.Iterator) {
       return { value: false };
     }
@@ -532,7 +532,7 @@ export class FunctionRules {
     }
   }
 
-  private spreadListShape(goal: FunctionType): FunctionType {
+  private readonly spreadListShape(goal: FunctionType): FunctionType {
     const shape = goal.shape;
     const last = shape.params[shape.params.length - 1];
     const list = last?.type;
@@ -566,7 +566,7 @@ export class FunctionRules {
     return made;
   }
 
-  private isParamFitting(
+  private readonly isParamFitting(
     mine: FunctionParameter | undefined,
     wanted: FunctionParameter,
   ): boolean {

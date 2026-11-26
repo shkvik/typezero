@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import { ExpressionTypes } from "../../expression-types.tz";
 import { Code } from "../../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
@@ -32,11 +33,11 @@ import {
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  public functionOf(module: int, loc: int): Type {
+  public readonly functionOf(module: int, loc: int): Type {
     return this.functionAt(module, loc);
   }
 
-  private functionAt(module: int, loc: int): Type {
+  private readonly functionAt(module: int, loc: int): Type {
     const fn = this.record(module)?.functions.get(loc);
     if (fn == undefined) {
       return this.store.plain(TypeKind.Error);
@@ -45,7 +46,7 @@ partial class ExpressionTypes {
     return this.functionType(fn, module);
   }
 
-  private functionType(fn: FunctionDecl, module: int): Type {
+  private readonly functionType(fn: FunctionDecl, module: int): Type {
     const key = `${module} ${fn.loc}`;
     const known = this.functionDoors.get(key);
     if (known != undefined) {
@@ -58,10 +59,9 @@ partial class ExpressionTypes {
       isAssumed: false,
     };
 
-    const before = this.facts;
+    const before = replace(this.facts, new Map<string, Type>());
     const owned = this.errors.mark();
 
-    this.facts = new Map<string, Type>();
     this.functionDoors.set(key, door);
     this.functionOrder.push(key);
     this.walking.push(key);
@@ -74,7 +74,7 @@ partial class ExpressionTypes {
     return door.type;
   }
 
-  private openFunction(
+  private readonly openFunction(
     door: FunctionDoor,
     fn: FunctionDecl,
     module: int,
@@ -120,10 +120,10 @@ partial class ExpressionTypes {
     }
   }
 
-  private openBody(
+  private readonly openBody(
     door: FunctionDoor,
     fn: FunctionDecl,
-    shape: ParameterShape,
+    shape: Read<ParameterShape>,
     context: TypeContext,
     module: int,
   ): void {
@@ -156,10 +156,10 @@ partial class ExpressionTypes {
     this.inferRounds(door, fn, shape, module);
   }
 
-  private inferRounds(
+  private readonly inferRounds(
     door: FunctionDoor,
     fn: FunctionDecl,
-    shape: ParameterShape,
+    shape: Read<ParameterShape>,
     module: int,
   ): void {
     const key = `${module} ${fn.loc}`;
@@ -218,10 +218,10 @@ partial class ExpressionTypes {
     }
   }
 
-  private stall(
+  private readonly stall(
     fn: FunctionDecl,
-    frame: FunctionFrame,
-    hits: string[],
+    frame: Read<FunctionFrame>,
+    hits: Read<string[]>,
     module: int,
   ): void {
     const isValued = frame.returns.some(
@@ -232,14 +232,13 @@ partial class ExpressionTypes {
     }
 
     for (const hit of hits) {
-      const list = this.stalled.get(hit) ?? [];
+      const list = this.stalled.getOrInsert(hit, []);
 
       list.push({ fn, module });
-      this.stalled.set(hit, list);
     }
   }
 
-  private forgetSince(doors: int, functions: int): void {
+  private readonly forgetSince(doors: int, functions: int): void {
     for (const key of this.doorOrder.slice(doors)) {
       this.doors.delete(key);
     }
@@ -249,9 +248,9 @@ partial class ExpressionTypes {
     }
   }
 
-  private cycleResult(
+  private readonly cycleResult(
     fn: FunctionDecl,
-    frame: FunctionFrame,
+    frame: Read<FunctionFrame>,
     isOwn: boolean,
     assumed: Type | undefined,
     module: int,
@@ -278,9 +277,9 @@ partial class ExpressionTypes {
     return joined ?? found;
   }
 
-  private quietResult(
+  private readonly quietResult(
     fn: FunctionDecl,
-    frame: FunctionFrame,
+    frame: Read<FunctionFrame>,
     module: int,
   ): Type {
     this.errors.beginTrial();
@@ -292,7 +291,7 @@ partial class ExpressionTypes {
     return result;
   }
 
-  private usedFunction(module: int, loc: int): Type {
+  private readonly usedFunction(module: int, loc: int): Type {
     const fn = this.record(module)?.functions.get(loc);
     const type = this.functionAt(module, loc);
 
@@ -314,7 +313,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private parameterShape(
+  private readonly parameterShape(
     fn: FunctionDecl,
     context: TypeContext,
     module: int,
@@ -354,7 +353,7 @@ partial class ExpressionTypes {
     return { params, rest, self };
   }
 
-  private parameterOf(param: Param, context: TypeContext, module: int): Type {
+  private readonly parameterOf(param: Param, context: Read<TypeContext>, module: int): Type {
     const written = param.type;
     const form = param.form;
     const word = param.name;
@@ -390,10 +389,10 @@ partial class ExpressionTypes {
     return this.typed(form.defaultValue, undefined, module);
   }
 
-  private methodParameter(
+  private readonly methodParameter(
     fn: FunctionDecl,
     param: Param,
-    context: TypeContext,
+    context: Read<TypeContext>,
     module: int,
   ): Type {
     const isOpen =
@@ -410,7 +409,7 @@ partial class ExpressionTypes {
     return this.hookedParameter(fn, param, type);
   }
 
-  private isLibraryOverride(fn: FunctionDecl): boolean {
+  private readonly isLibraryOverride(fn: FunctionDecl): boolean {
     const current = this.ownerClasses[this.ownerClasses.length - 1];
     if (current == undefined || fn.role == undefined) {
       return false;
@@ -440,13 +439,13 @@ partial class ExpressionTypes {
     return isOwn || this.receiverMember(parent, fn.name, true) != undefined;
   }
 
-  private isExtending(): boolean {
+  private readonly isExtending(): boolean {
     const current = this.ownerClasses[this.ownerClasses.length - 1];
 
     return current != undefined && current.decl.base != undefined;
   }
 
-  private isBodyWalked(fn: FunctionDecl, module: int): boolean {
+  private readonly isBodyWalked(fn: FunctionDecl, module: int): boolean {
     const opened = this.program.modules[module];
     if (opened == undefined) {
       return false;
@@ -461,7 +460,7 @@ partial class ExpressionTypes {
     return fn.body != undefined && fn.bodySource == BodySource.Written;
   }
 
-  private walkWritten(fn: FunctionDecl, result: Type, module: int): void {
+  private readonly walkWritten(fn: FunctionDecl, result: Type, module: int): void {
     const body = fn.body;
     if (body == undefined || !this.isBodyWalked(fn, module)) {
       return;
@@ -503,7 +502,7 @@ partial class ExpressionTypes {
     this.report(module, fn.loc, Code.ReturnOnEveryPath, { word, first });
   }
 
-  private inferredFrame(
+  private readonly inferredFrame(
     fn: FunctionDecl,
     module: int,
   ): FunctionFrame | undefined {
@@ -525,9 +524,9 @@ partial class ExpressionTypes {
     return frame;
   }
 
-  private frameResult(
+  private readonly frameResult(
     fn: FunctionDecl,
-    frame: FunctionFrame,
+    frame: Read<FunctionFrame>,
     module: int,
   ): Type {
     const generator = frame.generator;
@@ -546,9 +545,9 @@ partial class ExpressionTypes {
     return this.store.promiseOf(value);
   }
 
-  private commonResult(
+  private readonly commonResult(
     fn: FunctionDecl,
-    frame: FunctionFrame,
+    frame: Read<FunctionFrame>,
     module: int,
   ): Type {
     const returns = frame.returns;
@@ -589,9 +588,9 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private reportRecursive(
+  private readonly reportRecursive(
     fn: FunctionDecl,
-    frame: FunctionFrame,
+    frame: Read<FunctionFrame>,
     module: int,
   ): Type {
     const key = `${module} ${fn.loc}`;
@@ -616,9 +615,9 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private joinedReturns(
+  private readonly joinedReturns(
     fn: FunctionDecl,
-    returns: ReturnedValue[],
+    returns: Read<ReturnedValue[]>,
     module: int,
     code: Code = Code.ReturnsDiffer,
   ): Type | undefined {
@@ -656,7 +655,7 @@ partial class ExpressionTypes {
     return common;
   }
 
-  private literalsLast(returns: ReturnedValue[], module: int): ReturnedValue[] {
+  private readonly literalsLast(returns: Read<ReturnedValue[]>, module: int): ReturnedValue[] {
     const typed = returns.filter((one) => one.type.kind != TypeKind.Undefined);
     const plain = typed.filter((one) => !this.isWholeReturn(one, module));
     const wholes = typed.filter((one) => this.isWholeReturn(one, module));
@@ -664,7 +663,7 @@ partial class ExpressionTypes {
     return plain.concat(wholes);
   }
 
-  private isWholeReturn(one: ReturnedValue, module: int): boolean {
+  private readonly isWholeReturn(one: ReturnedValue, module: int): boolean {
     return one.type.kind == TypeKind.Int && this.isWholeTree(one.value, module);
   }
 }

@@ -74,22 +74,21 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
-    const request = made.slot(kSpawnRequest, "spawn.request");
+    const request = frame.made.slot(kSpawnRequest, "spawn.request");
 
-    made.store(this.ir.zero(kSpawnRequest), request);
-    made.store(file.value, made.field(kSpawnRequest, request, 0));
-    made.store(list.value, made.field(kSpawnRequest, request, 1));
-    made.store(descriptor, made.field(kSpawnRequest, request, 9));
+    frame.made.store(this.ir.zero(kSpawnRequest), request);
+    frame.made.store(file.value, frame.made.field(kSpawnRequest, request, 0));
+    frame.made.store(list.value, frame.made.field(kSpawnRequest, request, 1));
+    frame.made.store(descriptor, frame.made.field(kSpawnRequest, request, 9));
 
     const code = this.ir.integer(kFlagType, `${encoding}`);
 
-    made.store(code, made.field(kSpawnRequest, request, 23));
+    frame.made.store(code, frame.made.field(kSpawnRequest, request, 23));
 
-    const parts = made.slot(kSpawnParts, "spawn.parts");
+    const parts = frame.made.slot(kSpawnParts, "spawn.parts");
     const params = [kPointerType, kPointerType, kPointerType, kPointerType];
     const running = this.ir.declare(kChildRun, kPointerType, params);
-    const ran = made.call(running, [request, parts, errorMaker, resultMaker]);
+    const ran = frame.made.call(running, [request, parts, errorMaker, resultMaker]);
     const value: IrValue = {
       type: kPointerType,
       value: ran,
@@ -112,7 +111,7 @@ partial class Lowering {
     return this.definedOf(type).kind == TypeKind.Array;
   }
 
-  private listOf(
+  private readonly listOf(
     argument: CallArgument | undefined,
     hasList: boolean,
   ): Expr | undefined {
@@ -123,7 +122,7 @@ partial class Lowering {
     return argument.expr;
   }
 
-  private optionsOf(call: CallExpr, hasList: boolean): Expr | undefined {
+  private readonly optionsOf(call: CallExpr, hasList: boolean): Expr | undefined {
     let position = 1;
 
     if (hasList) {
@@ -133,8 +132,8 @@ partial class Lowering {
     return call.args[position]?.expr;
   }
 
-  private spawnEncoding(
-    frame: Frame,
+  private readonly spawnEncoding(
+    frame: Read<Frame>,
     options: Expr | undefined,
   ): int | undefined {
     if (options == undefined) {
@@ -180,7 +179,7 @@ partial class Lowering {
     return { type: kPointerType, value, tz, owned: true };
   }
 
-  private makerFrame(made: IrFunction): Frame {
+  private makerFrame(made: Own<IrFunction>): Frame {
     return {
       made,
       id: this.frameId(),
@@ -223,14 +222,13 @@ partial class Lowering {
     return made.callee.fn;
   }
 
-  private spawnPart(frame: Frame, parts: LLVMValue, index: int): LLVMValue {
-    const made = frame.made;
+  private readonly spawnPart(frame: Read<Frame>, parts: LLVMValue, index: int): LLVMValue {
     const type = this.spawnPartType(index);
 
-    return made.load(type, made.field(kSpawnParts, parts, index));
+    return frame.made.load(type, frame.made.field(kSpawnParts, parts, index));
   }
 
-  private spawnPartType(index: int): string {
+  private readonly spawnPartType(index: int): string {
     if (index == 4 || (index >= 16 && index <= 18)) {
       return kPointerType;
     }
@@ -248,7 +246,7 @@ partial class Lowering {
   }
 
   private spawnField(
-    frame: Frame,
+    frame: Read<Frame>,
     parts: LLVMValue,
     name: string,
     type: Type,
@@ -308,7 +306,7 @@ partial class Lowering {
   }
 
   private chosenPart(
-    frame: Frame,
+    frame: Read<Frame>,
     parts: LLVMValue,
     chosen: int,
     plain: int,
@@ -323,7 +321,7 @@ partial class Lowering {
   }
 
   private signalPart(
-    frame: Frame,
+    frame: Read<Frame>,
     parts: LLVMValue,
     type: Type,
     isChosen: boolean,
@@ -339,7 +337,7 @@ partial class Lowering {
   }
 
   private maybePart(
-    frame: Frame,
+    frame: Read<Frame>,
     parts: LLVMValue,
     index: int,
     flag: int,
@@ -351,11 +349,10 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     let raw: LLVMValue = this.spawnPart(frame, parts, index);
 
     if (this.isInteger(inner)) {
-      raw = made.cast(IrOpcode.SExt, raw, kIntType);
+      raw = frame.made.cast(IrOpcode.SExt, raw, kIntType);
     }
 
     const innerIr = this.irType(inner) ?? kIntType;
@@ -363,19 +360,18 @@ partial class Lowering {
     const placed = this.somewhere(frame, present, type);
     const has = this.spawnPart(frame, parts, flag);
     const zero = this.ir.zero(kFlagType);
-    const isGiven = made.integerCompare(IrIntPredicate.NotEqual, has, zero);
+    const isGiven = frame.made.integerCompare(IrIntPredicate.NotEqual, has, zero);
 
-    return made.select(isGiven, placed.value, this.ir.zero(typeIr));
+    return frame.made.select(isGiven, placed.value, this.ir.zero(typeIr));
   }
 
   private spawnStream(
-    frame: Frame,
+    frame: Read<Frame>,
     parts: LLVMValue,
     stream: int,
     type: Type,
     isKept: boolean,
   ): LLVMValue | undefined {
-    const made = frame.made;
     const inner = this.optionalInner(type);
     const plain = this.definedOf(type);
     const isText = this.isString(plain);
@@ -385,10 +381,10 @@ partial class Lowering {
       index = 6;
     }
 
-    const list = made.field(kSpawnParts, parts, index);
+    const list = frame.made.field(kSpawnParts, parts, index);
     const itemType = this.pick(isText, kStringType, kPointerType);
     const position = this.ir.integer(kIntType, `${stream}`);
-    const loaded = made.load(itemType, made.element(itemType, list, position));
+    const loaded = frame.made.load(itemType, frame.made.element(itemType, list, position));
 
     let raw: IrValue = { type: itemType, value: loaded, tz: plain };
 
@@ -405,17 +401,17 @@ partial class Lowering {
     }
 
     const placed = this.somewhere(frame, raw, type);
-    const piped = made.field(kSpawnParts, parts, 15);
-    const pipedAt = made.element(kFlagType, piped, position);
-    const flag = made.load(kFlagType, pipedAt);
+    const piped = frame.made.field(kSpawnParts, parts, 15);
+    const pipedAt = frame.made.element(kFlagType, piped, position);
+    const flag = frame.made.load(kFlagType, pipedAt);
     const zero = this.ir.zero(kFlagType);
-    const isPiped = made.integerCompare(IrIntPredicate.NotEqual, flag, zero);
+    const isPiped = frame.made.integerCompare(IrIntPredicate.NotEqual, flag, zero);
 
-    return made.select(isPiped, placed.value, this.ir.zero(typeIr));
+    return frame.made.select(isPiped, placed.value, this.ir.zero(typeIr));
   }
 
   private spawnOutput(
-    frame: Frame,
+    frame: Read<Frame>,
     parts: LLVMValue,
     type: Type,
   ): LLVMValue | undefined {
@@ -429,7 +425,6 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const array = this.newArray(frame, descriptor, 3);
     const data = this.arrayData(frame, array);
 
@@ -441,7 +436,7 @@ partial class Lowering {
 
       const position = this.ir.integer(kIntType, `${stream}`);
 
-      made.store(value, made.element(element, data, position));
+      frame.made.store(value, frame.made.element(element, data, position));
     }
 
     return array;
@@ -503,7 +498,7 @@ partial class Lowering {
     return made.callee.fn;
   }
 
-  private makerCalled(
+  private readonly makerCalled(
     made: IrFunction,
     maker: LLVMValue,
     parts: LLVMValue,

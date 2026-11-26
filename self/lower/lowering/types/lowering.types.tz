@@ -36,7 +36,7 @@ export type Frame = {
   readonly module: int;
   readonly result?: Type;
   readonly loops: LoopTarget[];
-  readonly scopes: Place[][];
+  scopes: Place[][];
   readonly self?: Place;
   readonly inline?: InlineTarget;
   readonly place?: string;
@@ -136,7 +136,7 @@ export type LayoutField = {
 export type ClassLayout = {
   readonly struct: string;
   readonly size: int;
-  readonly fields: LayoutField[];
+  readonly fields: readonly LayoutField[];
   readonly descriptor: LLVMValue;
   readonly classId: int;
   readonly shape: LayoutShape;
@@ -153,6 +153,8 @@ export type DictLayout = {
 
 export type LayoutShape = {
   readonly name: string;
-  readonly fields: InstanceField[];
+  readonly fields: readonly InstanceField[];
   readonly flags: int;
 };
+
+export type InternedLayouts = Interned<ClassLayout | LayoutShape>;

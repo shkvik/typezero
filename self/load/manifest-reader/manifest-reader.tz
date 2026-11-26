@@ -45,13 +45,13 @@ import {
 } from "./const/manifest-reader.const.tz";
 
 export class ManifestReader {
-  public readonly errors: string[];
+  public errors: Cell<string[]>;
 
   public constructor() {
     this.errors = [];
   }
 
-  public findAbove(directory: string): string | undefined {
+  public readonly findAbove(directory: string): string | undefined {
     let current = resolve(directory);
     let parent = dirname(current);
 
@@ -67,14 +67,14 @@ export class ManifestReader {
     return join(current, kManifestFile);
   }
 
-  public canonical(directory: string): string {
+  public readonly canonical(directory: string): string {
     const absolute = resolve(directory);
     const real = realpathSync(absolute);
 
     return real.unwrapOr(absolute);
   }
 
-  public isDirectory(path: string): boolean {
+  public readonly isDirectory(path: string): boolean {
     const stat = statSync(path);
     if (stat.isErr()) {
       return false;
@@ -83,7 +83,7 @@ export class ManifestReader {
     return stat.value.isDirectory();
   }
 
-  public read(path: string): Manifest | undefined {
+  public readonly read(path: string): Manifest | undefined {
     const root = this.rootOf(path);
     if (root == undefined) {
       return undefined;
@@ -127,7 +127,7 @@ export class ManifestReader {
     };
   }
 
-  public readPackageDirectory(directory: string): Manifest | undefined {
+  public readonly readPackageDirectory(directory: string): Manifest | undefined {
     const file = join(directory, kManifestFile);
     if (this.isFile(file) && this.namesSourceFiles(file)) {
       return this.read(file);
@@ -151,7 +151,7 @@ export class ManifestReader {
     };
   }
 
-  private otherManifest(path: string, directory: string): Manifest | undefined {
+  private readonly otherManifest(path: string, directory: string): Manifest | undefined {
     const root = this.rootOf(path);
     if (root == undefined) {
       return undefined;
@@ -174,7 +174,7 @@ export class ManifestReader {
     };
   }
 
-  private rootOf(path: string): JsonNode | undefined {
+  private readonly rootOf(path: string): JsonNode | undefined {
     const bytes = readFileSync(path);
     if (bytes.isErr()) {
       this.errors.push(`cannot read '${path}'`);
@@ -191,10 +191,10 @@ export class ManifestReader {
     return root;
   }
 
-  private isFieldFine(
+  private readonly isFieldFine(
     path: string,
     key: string,
-    value: JsonNode,
+    value: Read<JsonNode>,
     texts: Map<string, string>,
   ): boolean {
     if (kTextFields.includes(key)) {
@@ -214,10 +214,10 @@ export class ManifestReader {
     return true;
   }
 
-  private isListFine(
+  private readonly isListFine(
     path: string,
     key: string,
-    value: JsonNode,
+    value: Read<JsonNode>,
     exports: PackageExport[],
     dependencies: ManifestDependency[],
   ): boolean {
@@ -231,7 +231,7 @@ export class ManifestReader {
     return true;
   }
 
-  private isScriptsFine(path: string, value: JsonNode): boolean {
+  private readonly isScriptsFine(path: string, value: Read<JsonNode>): boolean {
     if (value.kind != JsonNodeKind.Object) {
       return this.failedField(path, kScriptsObjectText);
     }
@@ -246,9 +246,9 @@ export class ManifestReader {
     return true;
   }
 
-  private isExportsFine(
+  private readonly isExportsFine(
     path: string,
-    value: JsonNode,
+    value: Read<JsonNode>,
     exports: PackageExport[],
   ): boolean {
     if (value.kind == JsonNodeKind.String) {
@@ -275,10 +275,10 @@ export class ManifestReader {
     return true;
   }
 
-  private isExportFine(
+  private readonly isExportFine(
     path: string,
     key: string,
-    target: JsonNode,
+    target: Read<JsonNode>,
     exports: PackageExport[],
   ): boolean {
     const text = this.textOf(target);
@@ -291,9 +291,9 @@ export class ManifestReader {
     return true;
   }
 
-  private isDependenciesFine(
+  private readonly isDependenciesFine(
     path: string,
-    value: JsonNode,
+    value: Read<JsonNode>,
     dependencies: ManifestDependency[],
   ): boolean {
     if (value.kind != JsonNodeKind.Object) {
@@ -318,7 +318,7 @@ export class ManifestReader {
     return true;
   }
 
-  private aliasProblem(alias: string): string | undefined {
+  private readonly aliasProblem(alias: string): string | undefined {
     if (!this.isAliasValid(alias)) {
       return `'${alias}' cannot be imported as a package name: write a name like 'zod' or '@std/path'`;
     }
@@ -331,7 +331,7 @@ export class ManifestReader {
     return undefined;
   }
 
-  private isAliasValid(alias: string): boolean {
+  private readonly isAliasValid(alias: string): boolean {
     if (!alias.startsWith(kScopeMark)) {
       return this.isAliasPart(alias);
     }
@@ -348,7 +348,7 @@ export class ManifestReader {
     return this.isAliasPart(scope) && this.isAliasPart(name);
   }
 
-  private isAliasPart(part: string): boolean {
+  private readonly isAliasPart(part: string): boolean {
     if (part == "" || part.startsWith(".")) {
       return false;
     }
@@ -356,7 +356,7 @@ export class ManifestReader {
     return part.split("").every((char) => this.isAliasChar(char));
   }
 
-  private isAliasChar(char: string): boolean {
+  private readonly isAliasChar(char: string): boolean {
     const isLetter =
       (char >= "a" && char <= "z") || (char >= "A" && char <= "Z");
     const isDigit = char >= "0" && char <= "9";
@@ -364,7 +364,7 @@ export class ManifestReader {
     return isLetter || isDigit || kAliasPunctuation.includes(char);
   }
 
-  private namesSourceFiles(path: string): boolean {
+  private readonly namesSourceFiles(path: string): boolean {
     const bytes = readFileSync(path);
     if (bytes.isErr()) {
       return false;
@@ -391,13 +391,13 @@ export class ManifestReader {
     return exported.items.some((item) => this.isSourceText(item));
   }
 
-  private isSourceText(node: JsonNode | undefined): boolean {
+  private readonly isSourceText(node: Read<JsonNode | undefined>): boolean {
     const text = this.textOf(node);
 
     return text != undefined && text.endsWith(kSourceExtension);
   }
 
-  private fieldOf(root: JsonNode, name: string): JsonNode | undefined {
+  private readonly fieldOf(root: JsonNode, name: string): JsonNode | undefined {
     for (let index = 0; index < root.keys.length; index++) {
       if (this.decoded(root.keys[index] ?? "") == name) {
         return root.items[index];
@@ -407,13 +407,13 @@ export class ManifestReader {
     return undefined;
   }
 
-  private fieldText(root: JsonNode, name: string): string {
+  private readonly fieldText(root: Read<JsonNode>, name: string): string {
     const field = this.fieldOf(root, name);
 
     return this.textOf(field) ?? "";
   }
 
-  private textOf(node: JsonNode | undefined): string | undefined {
+  private readonly textOf(node: Read<JsonNode | undefined>): string | undefined {
     if (node == undefined || node.kind != JsonNodeKind.String) {
       return undefined;
     }
@@ -421,7 +421,7 @@ export class ManifestReader {
     return this.decoded(node.raw);
   }
 
-  private decoded(raw: string): string {
+  private readonly decoded(raw: string): string {
     const inner = raw.slice(1, raw.length - 1);
     if (!inner.includes(kEscapeMark)) {
       return inner;
@@ -456,7 +456,7 @@ export class ManifestReader {
     return text;
   }
 
-  private hexValue(digits: string): int {
+  private readonly hexValue(digits: string): int {
     const lowered = digits.toLowerCase();
     let value = 0;
 
@@ -473,7 +473,7 @@ export class ManifestReader {
     return value;
   }
 
-  private escapedChar(letter: string): string {
+  private readonly escapedChar(letter: string): string {
     switch (letter) {
       case "n":
         return "\n";
@@ -490,7 +490,7 @@ export class ManifestReader {
     }
   }
 
-  private withoutHere(file: string): string {
+  private readonly withoutHere(file: string): string {
     if (file.startsWith(kHerePrefix)) {
       return file.slice(kHerePrefix.length);
     }
@@ -498,7 +498,7 @@ export class ManifestReader {
     return file;
   }
 
-  private isFile(path: string): boolean {
+  private readonly isFile(path: string): boolean {
     const stat = statSync(path);
     if (stat.isErr()) {
       return false;
@@ -507,21 +507,23 @@ export class ManifestReader {
     return stat.value.isFile();
   }
 
-  private failed(path: string, message: string): Manifest | undefined {
+  private readonly failed(path: string, message: string): Manifest | undefined {
     this.errors.push(`${path}: ${message}`);
 
     return undefined;
   }
 
-  private failedNode(path: string, message: string): JsonNode | undefined {
+  private readonly failedNode(path: string, message: string): JsonNode | undefined {
     this.errors.push(`${path}: ${message}`);
 
     return undefined;
   }
 
-  private failedField(path: string, message: string): boolean {
+  private readonly failedField(path: string, message: string): boolean {
     this.errors.push(`${path}: ${message}`);
 
     return false;
   }
 }
+
+export type InternedManifestReader = Interned<ManifestReader>;

@@ -2,10 +2,10 @@ import { Expr } from "../ast/types/ast.types.expressions.tz";
 import { Type } from "../type/types/type.types.tz";
 
 export class ExpressionAnswers {
-  private readonly visited: Set<Expr>;
-  private readonly types: Map<Expr, Type>;
-  private readonly tried: Map<Expr, Type>;
-  private readonly folded: Map<Expr, decimal>;
+  private visited: Cell<Set<Expr>>;
+  private types: Cell<Map<Expr, Type>>;
+  private tried: Cell<Map<Expr, Type>>;
+  private folded: Cell<Map<Expr, decimal>>;
 
   public constructor() {
     this.visited = new Set<Expr>();
@@ -14,33 +14,35 @@ export class ExpressionAnswers {
     this.folded = new Map<Expr, decimal>();
   }
 
-  public visit(expr: Expr): void {
+  public readonly visit(expr: Expr): void {
     this.visited.add(expr);
   }
 
-  public isVisited(expr: Expr): boolean {
+  public readonly isVisited(expr: Expr): boolean {
     return this.visited.has(expr);
   }
 
-  public answer(expr: Expr, type: Type): void {
+  public readonly answer(expr: Expr, type: Type): void {
     this.types.set(expr, type);
   }
 
-  public tryAnswer(expr: Expr, type: Type): void {
+  public readonly tryAnswer(expr: Expr, type: Type): void {
     if (!this.tried.has(expr)) {
       this.tried.set(expr, type);
     }
   }
 
-  public typeOf(expr: Expr): Type | undefined {
+  public readonly typeOf(expr: Expr): Type | undefined {
     return this.types.get(expr) ?? this.tried.get(expr);
   }
 
-  public fold(expr: Expr, value: decimal): void {
+  public readonly fold(expr: Expr, value: decimal): void {
     this.folded.set(expr, value);
   }
 
-  public foldedOf(expr: Expr): decimal | undefined {
+  public readonly foldedOf(expr: Expr): decimal | undefined {
     return this.folded.get(expr);
   }
 }
+
+export type InternedExpressionAnswers = Interned<ExpressionAnswers>;

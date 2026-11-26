@@ -6,11 +6,15 @@ import {
   TemplateTypeForm,
   TupleElement,
   TupleTypeForm,
+  TypeForm,
   TypeRefKind,
   TypeRef,
 } from "../../../../program/ast/types/ast.types.types.tz";
 import { ExprKind } from "../../../../program/ast/types/ast.types.expressions.tz";
-import { TypePlace } from "../types/file-parser.types.context.tz";
+import {
+  TypePlace,
+  TypeRefDraft,
+} from "../types/file-parser.types.context.tz";
 import {
   kBooleanTypeName,
   kNumberTypeName,
@@ -114,15 +118,15 @@ partial class FileParser {
     return this.suffixedType();
   }
 
-  private keyofAhead(): boolean {
+  private readonly keyofAhead(): boolean {
     return this.cursor.is(TokenKind.Keyof) && this.typeFollows();
   }
 
-  private readonlyAhead(): boolean {
+  private readonly readonlyAhead(): boolean {
     return this.cursor.is(TokenKind.Readonly) && this.typeFollows();
   }
 
-  private typeFollows(): boolean {
+  private readonly typeFollows(): boolean {
     const next = this.cursor.lookahead();
 
     switch (next.kind) {
@@ -173,10 +177,10 @@ partial class FileParser {
     return ref;
   }
 
-  private arrayOf(element: TypeRef): TypeRef {
+  private readonly arrayOf(element: TypeRef): TypeRef {
     const ref = this.typeRef(element.loc);
 
-    ref.form = { kind: TypeRefKind.Array };
+    ref.form = { kind: TypeRefKind.Array, readonly: false };
     ref.args.push(element);
 
     return ref;
@@ -194,7 +198,7 @@ partial class FileParser {
     return ref;
   }
 
-  private indexAhead(): boolean {
+  private readonly indexAhead(): boolean {
     const token = this.cursor.peek();
 
     return token.kind == TokenKind.LBracket && !token.newline;
@@ -205,13 +209,15 @@ partial class FileParser {
     const ref = this.prefixedType();
     const form = ref.form;
     if (form.kind == TypeRefKind.Tuple) {
-      form.readonly = true;
+      const elements = form.elements;
 
-      return ref;
+      return this.withForm(ref, { kind: TypeRefKind.Tuple, elements, readonly: true });
     }
-    if (form.kind != TypeRefKind.Array) {
-      this.cursor.report(keyword.start, Code.ReadonlyOnlyArrays);
+    if (form.kind == TypeRefKind.Array) {
+      return this.withForm(ref, { kind: TypeRefKind.Array, readonly: true });
     }
+
+    this.cursor.report(keyword.start, Code.ReadonlyOnlyArrays);
 
     return ref;
   }
@@ -273,7 +279,7 @@ partial class FileParser {
     }
   }
 
-  private signatureAhead(): boolean {
+  private readonly signatureAhead(): boolean {
     const first = this.cursor.tokenAt(1);
     const second = this.cursor.tokenAt(2);
     const twoNames =
@@ -285,7 +291,7 @@ partial class FileParser {
     return twoNames || this.parametersAhead();
   }
 
-  private isTypeOperator(kind: TokenKind): boolean {
+  private readonly isTypeOperator(kind: TokenKind): boolean {
     switch (kind) {
       case TokenKind.Keyof:
       case TokenKind.Readonly:
@@ -415,11 +421,7 @@ partial class FileParser {
       return ref;
     }
 
-    const parts: TemplateTypeForm = {
-      kind: TypeRefKind.Template,
-      texts: [first],
-    };
-    ref.form = parts;
+    const texts: string[] = [first];
 
     let piece = token;
     while (
@@ -440,9 +442,13 @@ partial class FileParser {
       }
 
       const text = this.templatePartText(middle);
-      parts.texts.push(text);
+      texts.push(text);
       piece = this.cursor.next();
     }
+
+    const parts: TemplateTypeForm = { kind: TypeRefKind.Template, texts };
+
+    ref.form = parts;
 
     return ref;
   }
@@ -485,7 +491,6 @@ partial class FileParser {
     const keyword = this.cursor.peek();
     const ref = this.typeRef(keyword.start);
     const names: string[] = [];
-    ref.form = { kind: TypeRefKind.TypeOf, names };
 
     this.cursor.next();
 
@@ -494,6 +499,7 @@ partial class FileParser {
       this.cursor.error(token.start, Code.ExpectedTypeofName, {
         found: token.kind,
       });
+      ref.form = { kind: TypeRefKind.TypeOf, names };
 
       return ref;
     }
@@ -506,6 +512,8 @@ partial class FileParser {
       const part = this.cursor.next();
       names.push(part.text);
     }
+
+    ref.form = { kind: TypeRefKind.TypeOf, names };
 
     return ref;
   }
@@ -551,7 +559,7 @@ partial class FileParser {
     return parsed;
   }
 
-  private followsTypeArguments(callOnly: boolean): boolean {
+  private readonly followsTypeArguments(callOnly: boolean): boolean {
     const token = this.cursor.peek();
 
     switch (token.kind) {
@@ -570,7 +578,7 @@ partial class FileParser {
     }
   }
 
-  private qualifiedPartAhead(): boolean {
+  private readonly qualifiedPartAhead(): boolean {
     const next = this.cursor.lookahead();
 
     return this.cursor.is(TokenKind.Dot) && kTokenTable.isName(next.kind);
@@ -581,13 +589,7 @@ partial class FileParser {
     const ref = this.typeRef(bracket.start);
 
     const elements: TupleElement[] = [];
-    const tuple: TupleTypeForm = {
-      kind: TypeRefKind.Tuple,
-      elements,
-      readonly: false,
-    };
 
-    ref.form = tuple;
     this.cursor.next();
 
     while (this.cursor.insideList(TokenKind.RBracket)) {
@@ -613,10 +615,18 @@ partial class FileParser {
 
     this.cursor.expect(TokenKind.RBracket, Code.ExpectedTupleClose);
 
+    const tuple: TupleTypeForm = {
+      kind: TypeRefKind.Tuple,
+      elements,
+      readonly: false,
+    };
+
+    ref.form = tuple;
+
     return ref;
   }
 
-  private integerAsDouble(whole: uint64): double {
+  private readonly integerAsDouble(whole: uint64): double {
     if (whole <= kExactDoubleLimit) {
       return whole.toDouble();
     }
@@ -626,7 +636,7 @@ partial class FileParser {
     return parsed.unwrapOr(0.0);
   }
 
-  private invalidType(loc: int): TypeRef {
+  private readonly invalidType(loc: int): TypeRef {
     return {
       form: { kind: TypeRefKind.Invalid },
       name: "",
@@ -635,7 +645,17 @@ partial class FileParser {
     };
   }
 
-  private typeRef(loc: int): TypeRef {
+  private readonly withForm(ref: TypeRef, form: TypeForm): TypeRef {
+    return {
+      form,
+      name: ref.name,
+      loc: ref.loc,
+      args: ref.args,
+      source: ref.source,
+    };
+  }
+
+  private readonly typeRef(loc: int): TypeRefDraft {
     return {
       form: { kind: TypeRefKind.Name },
       name: "",
@@ -662,7 +682,7 @@ partial class FileParser {
     return args ?? [];
   }
 
-  private truthNumber(kind: TokenKind): double {
+  private readonly truthNumber(kind: TokenKind): double {
     if (kind == TokenKind.True) {
       return 1.0;
     }

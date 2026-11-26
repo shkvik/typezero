@@ -7,12 +7,13 @@ import {
 import {
   kElementMethods,
   kFillMethod,
+  kGetOrInsertMethod,
   kKeyMethods,
   kSetMethod,
 } from "./const/destination-rules.const.tz";
 
 export class DestinationRules {
-  public memberParameter(
+  public readonly memberParameter(
     object: Type,
     name: string,
     index: int,
@@ -27,7 +28,7 @@ export class DestinationRules {
     return undefined;
   }
 
-  private arrayParameter(
+  private readonly arrayParameter(
     item: Type,
     name: string,
     index: int,
@@ -42,13 +43,13 @@ export class DestinationRules {
     return undefined;
   }
 
-  private dictParameter(
+  private readonly dictParameter(
     dict: DictType,
     name: string,
     index: int,
   ): Type | undefined {
     const isMap = dict.dict == DictKind.Map;
-    if (isMap && name == kSetMethod) {
+    if (isMap && (name == kSetMethod || name == kGetOrInsertMethod)) {
       return this.pairPart(dict, index);
     }
 
@@ -60,7 +61,7 @@ export class DestinationRules {
     return undefined;
   }
 
-  private pairPart(dict: DictType, index: int): Type | undefined {
+  private readonly pairPart(dict: DictType, index: int): Type | undefined {
     switch (index) {
       case 0:
         return dict.key;

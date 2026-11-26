@@ -16,7 +16,7 @@ import {
 } from "../const/lowering.const.tz";
 
 partial class Lowering {
-  private widened(type: Type): Type {
+  private readonly widened(type: Type): Type {
     if (this.isNumberUnion(type)) {
       return this.store.integer(64, false);
     }
@@ -39,7 +39,7 @@ partial class Lowering {
     }
   }
 
-  private isNumberUnion(type: Type): boolean {
+  private readonly isNumberUnion(type: Type): boolean {
     if (type.kind != TypeKind.Union) {
       return false;
     }
@@ -50,7 +50,7 @@ partial class Lowering {
     );
   }
 
-  private isTextUnion(type: Type): boolean {
+  private readonly isTextUnion(type: Type): boolean {
     if (type.kind != TypeKind.Union) {
       return false;
     }
@@ -109,17 +109,17 @@ partial class Lowering {
     return this.optionalType(inner);
   }
 
-  private isInteger(type: Type): boolean {
+  private readonly isInteger(type: Type): boolean {
     return this.widened(type).kind == TypeKind.Int;
   }
 
-  private isUnsigned(type: Type): boolean {
+  private readonly isUnsigned(type: Type): boolean {
     const plain = this.widened(type);
 
     return plain.kind == TypeKind.Int && plain.unsigned;
   }
 
-  private bitsOf(type: Type): int {
+  private readonly bitsOf(type: Type): int {
     const plain = this.widened(type);
     if (plain.kind != TypeKind.Int) {
       return 0;
@@ -128,23 +128,23 @@ partial class Lowering {
     return plain.bits;
   }
 
-  private isDouble(type: Type): boolean {
+  private readonly isDouble(type: Type): boolean {
     return this.widened(type).kind == TypeKind.Double;
   }
 
-  private isBoolean(type: Type): boolean {
+  private readonly isBoolean(type: Type): boolean {
     return this.widened(type).kind == TypeKind.Boolean;
   }
 
-  private isString(type: Type): boolean {
+  private readonly isString(type: Type): boolean {
     return this.widened(type).kind == TypeKind.String;
   }
 
-  private isArray(type: Type): boolean {
+  private readonly isArray(type: Type): boolean {
     return type.kind == TypeKind.Array;
   }
 
-  private isInstance(type: Type): boolean {
+  private readonly isInstance(type: Type): boolean {
     return type.kind == TypeKind.Instance;
   }
 
@@ -208,7 +208,7 @@ partial class Lowering {
     }
   }
 
-  private kindName(type: Type | undefined): string {
+  private readonly kindName(type: Type | undefined): string {
     if (type == undefined) {
       return "unknown";
     }

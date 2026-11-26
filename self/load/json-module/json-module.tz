@@ -67,7 +67,7 @@ export class JsonModule {
     return root;
   }
 
-  private current(): string {
+  private readonly current(): string {
     return this.text.slice(this.position, this.position + 1);
   }
 
@@ -111,18 +111,29 @@ export class JsonModule {
     }
   }
 
-  private node(kind: JsonNodeKind, raw: string): JsonNode {
+  private readonly node(kind: JsonNodeKind, raw: string): JsonNode {
     return { kind, raw, items: [], keys: [] };
   }
 
   private objectNode(): JsonNode {
-    const node = this.node(JsonNodeKind.Object, "");
+    const fields: JsonFields = { keys: [], items: [] };
 
+    this.objectFields(fields);
+
+    return {
+      kind: JsonNodeKind.Object,
+      raw: "",
+      keys: fields.keys,
+      items: fields.items,
+    };
+  }
+
+  private objectFields(fields: JsonFields): void {
     this.position += 1;
     this.skipSpace();
 
     if (this.accept("}")) {
-      return node;
+      return;
     }
 
     while (!this.isBroken) {
@@ -131,7 +142,7 @@ export class JsonModule {
       if (this.current() != '"') {
         this.isBroken = true;
 
-        return node;
+        return;
       }
 
       const key = this.stringNode().raw;
@@ -141,36 +152,42 @@ export class JsonModule {
       if (!this.accept(":")) {
         this.isBroken = true;
 
-        return node;
+        return;
       }
 
       this.skipSpace();
 
       const item = this.value();
 
-      node.keys.push(key);
-      node.items.push(item);
+      fields.keys.push(key);
+      fields.items.push(item);
       this.skipSpace();
 
       if (this.accept("}")) {
-        return node;
+        return;
       }
       if (!this.accept(",")) {
         this.isBroken = true;
       }
     }
 
-    return node;
+    return;
   }
 
   private arrayNode(): JsonNode {
-    const node = this.node(JsonNodeKind.Array, "");
+    const items: JsonNode[] = [];
 
+    this.arrayItems(items);
+
+    return { kind: JsonNodeKind.Array, raw: "", keys: [], items };
+  }
+
+  private arrayItems(items: JsonNode[]): void {
     this.position += 1;
     this.skipSpace();
 
     if (this.accept("]")) {
-      return node;
+      return;
     }
 
     while (!this.isBroken) {
@@ -178,18 +195,18 @@ export class JsonModule {
 
       const item = this.value();
 
-      node.items.push(item);
+      items.push(item);
       this.skipSpace();
 
       if (this.accept("]")) {
-        return node;
+        return;
       }
       if (!this.accept(",")) {
         this.isBroken = true;
       }
     }
 
-    return node;
+    return;
   }
 
   private stringNode(): JsonNode {
@@ -250,11 +267,11 @@ export class JsonModule {
     return this.node(JsonNodeKind.Number, raw);
   }
 
-  private shape(kind: JsonShapeKind): JsonShape {
+  private readonly shape(kind: JsonShapeKind): JsonShape {
     return { kind, items: [], keys: [], optional: [] };
   }
 
-  private shapeOf(node: JsonNode): JsonShape {
+  private readonly shapeOf(node: Read<JsonNode>): JsonShape {
     switch (node.kind) {
       case JsonNodeKind.Null:
         return this.shape(JsonShapeKind.Json);
@@ -271,7 +288,7 @@ export class JsonModule {
     }
   }
 
-  private numberShape(raw: string): JsonShape {
+  private readonly numberShape(raw: string): JsonShape {
     if (this.isIntegral(raw)) {
       return this.shape(JsonShapeKind.Int);
     }
@@ -279,7 +296,7 @@ export class JsonModule {
     return this.shape(JsonShapeKind.Double);
   }
 
-  private hasFraction(raw: string): boolean {
+  private readonly hasFraction(raw: string): boolean {
     for (const mark of kFractionMarks) {
       if (raw.includes(mark)) {
         return true;
@@ -289,7 +306,7 @@ export class JsonModule {
     return false;
   }
 
-  private isIntegral(raw: string): boolean {
+  private readonly isIntegral(raw: string): boolean {
     if (this.hasFraction(raw)) {
       return false;
     }
@@ -302,7 +319,7 @@ export class JsonModule {
     return digits <= kLargestInteger;
   }
 
-  private arrayShape(node: JsonNode): JsonShape {
+  private readonly arrayShape(node: Read<JsonNode>): JsonShape {
     let element = this.shape(JsonShapeKind.Unknown);
 
     for (const item of node.items) {
@@ -317,7 +334,7 @@ export class JsonModule {
     };
   }
 
-  private objectShape(node: JsonNode): JsonShape {
+  private readonly objectShape(node: Read<JsonNode>): JsonShape {
     const fields = this.fieldsOf(node);
     const items = fields.items.map((item) => this.shapeOf(item));
     const optional = fields.keys.map(() => false);
@@ -325,7 +342,7 @@ export class JsonModule {
     return { kind: JsonShapeKind.Object, items, keys: fields.keys, optional };
   }
 
-  private fieldsOf(node: JsonNode): JsonFields {
+  private readonly fieldsOf(node: Read<JsonNode>): JsonFields {
     const keys: string[] = [];
     const items: JsonNode[] = [];
 
@@ -349,7 +366,7 @@ export class JsonModule {
     return { keys, items };
   }
 
-  private join(first: JsonShape, second: JsonShape): JsonShape {
+  private readonly join(first: Own<JsonShape>, second: Own<JsonShape>): JsonShape {
     if (first.kind == JsonShapeKind.Unknown) {
       return second;
     }
@@ -372,7 +389,7 @@ export class JsonModule {
     return this.joinedObject(first, second);
   }
 
-  private isNumberPair(first: JsonShape, second: JsonShape): boolean {
+  private readonly isNumberPair(first: Read<JsonShape>, second: Read<JsonShape>): boolean {
     const isFirstNumber =
       first.kind == JsonShapeKind.Int || first.kind == JsonShapeKind.Double;
     const isSecondNumber =
@@ -381,7 +398,7 @@ export class JsonModule {
     return isFirstNumber && isSecondNumber && first.kind != second.kind;
   }
 
-  private joinedArray(first: JsonShape, second: JsonShape): JsonShape {
+  private readonly joinedArray(first: Read<JsonShape>, second: Read<JsonShape>): JsonShape {
     const unknown = this.shape(JsonShapeKind.Unknown);
     const firstItem = first.items[0] ?? unknown;
     const secondItem = second.items[0] ?? unknown;
@@ -395,8 +412,10 @@ export class JsonModule {
     };
   }
 
-  private joinedObject(first: JsonShape, second: JsonShape): JsonShape {
-    const merged: JsonShape = this.shape(JsonShapeKind.Object);
+  private readonly joinedObject(first: Read<JsonShape>, second: Read<JsonShape>): JsonShape {
+    const keys: string[] = [];
+    const items: JsonShape[] = [];
+    const optional: boolean[] = [];
 
     for (let index = 0; index < first.keys.length; index++) {
       const key = first.keys[index];
@@ -408,34 +427,34 @@ export class JsonModule {
       const there = second.keys.indexOf(key);
       const theirs = second.items[there];
 
-      merged.keys.push(key);
+      keys.push(key);
       if (theirs == undefined) {
-        merged.items.push(item);
-        merged.optional.push(true);
+        items.push(item);
+        optional.push(true);
         continue;
       }
 
       const isOptional =
         first.optional[index] == true || second.optional[there] == true;
 
-      merged.items.push(this.join(item, theirs));
-      merged.optional.push(isOptional);
+      items.push(this.join(item, theirs));
+      optional.push(isOptional);
     }
 
     for (let index = 0; index < second.keys.length; index++) {
       const key = second.keys[index];
       const item = second.items[index];
       if (key != undefined && item != undefined && !first.keys.includes(key)) {
-        merged.keys.push(key);
-        merged.items.push(item);
-        merged.optional.push(true);
+        keys.push(key);
+        items.push(item);
+        optional.push(true);
       }
     }
 
-    return merged;
+    return { kind: JsonShapeKind.Object, items, keys, optional };
   }
 
-  private typeText(shape: JsonShape): string {
+  private readonly typeText(shape: Read<JsonShape>): string {
     switch (shape.kind) {
       case JsonShapeKind.Bool:
         return kBooleanTypeName;
@@ -454,13 +473,13 @@ export class JsonModule {
     }
   }
 
-  private arrayTypeText(shape: JsonShape): string {
+  private readonly arrayTypeText(shape: Read<JsonShape>): string {
     const element = shape.items[0] ?? this.shape(JsonShapeKind.Unknown);
 
     return `${this.typeText(element)}[]`;
   }
 
-  private objectTypeText(shape: JsonShape): string {
+  private readonly objectTypeText(shape: Read<JsonShape>): string {
     const parts: string[] = [];
 
     for (let index = 0; index < shape.keys.length; index++) {
@@ -478,7 +497,7 @@ export class JsonModule {
     return this.braced(parts, "; ");
   }
 
-  private optionalMark(isOptional: boolean): string {
+  private readonly optionalMark(isOptional: boolean): string {
     if (isOptional) {
       return "?:";
     }
@@ -486,7 +505,7 @@ export class JsonModule {
     return ":";
   }
 
-  private braced(parts: string[], separator: string): string {
+  private readonly braced(parts: Read<string[]>, separator: string): string {
     if (parts.length == 0) {
       return "{}";
     }
@@ -494,7 +513,7 @@ export class JsonModule {
     return `{ ${parts.join(separator)} }`;
   }
 
-  private valueText(node: JsonNode, shape: JsonShape): string {
+  private valueText(node: Read<JsonNode>, shape: JsonShape): string {
     switch (shape.kind) {
       case JsonShapeKind.Double:
         return this.doubleText(node.raw);
@@ -507,7 +526,7 @@ export class JsonModule {
     }
   }
 
-  private doubleText(raw: string): string {
+  private readonly doubleText(raw: string): string {
     if (this.hasFraction(raw)) {
       return raw;
     }
@@ -516,7 +535,7 @@ export class JsonModule {
   }
 
   private arrayValueText(
-    node: JsonNode,
+    node: Read<JsonNode>,
     element: JsonShape | undefined,
   ): string {
     const parts = node.items.map((item) => {
@@ -530,7 +549,7 @@ export class JsonModule {
     return `[${parts.join(", ")}]`;
   }
 
-  private objectValueText(node: JsonNode, shape: JsonShape): string {
+  private objectValueText(node: Read<JsonNode>, shape: Read<JsonShape>): string {
     const fields = this.fieldsOf(node);
     const parts: string[] = [];
 
@@ -549,7 +568,7 @@ export class JsonModule {
     return this.braced(parts, ", ");
   }
 
-  private jsonText(node: JsonNode): string {
+  private jsonText(node: Read<JsonNode>): string {
     switch (node.kind) {
       case JsonNodeKind.Number:
         return this.jsonNumberText(node.raw);
@@ -562,7 +581,7 @@ export class JsonModule {
     }
   }
 
-  private jsonNumberText(raw: string): string {
+  private readonly jsonNumberText(raw: string): string {
     if (this.isIntegral(raw)) {
       return raw;
     }
@@ -570,7 +589,7 @@ export class JsonModule {
     return this.doubleText(raw);
   }
 
-  private jsonObjectText(node: JsonNode): string {
+  private jsonObjectText(node: Read<JsonNode>): string {
     const fields = this.fieldsOf(node);
     const parts: string[] = [];
 

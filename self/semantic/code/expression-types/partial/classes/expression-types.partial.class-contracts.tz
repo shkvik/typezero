@@ -20,7 +20,7 @@ import { TypePlace } from "../../../../types/type-resolver/types/type-resolver.t
 import { ClassMemberEntry } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private contractChecks(decl: ClassDecl, module: int): void {
+  private readonly contractChecks(decl: ClassDecl, module: int): void {
     if (decl.typeParams.length > 0) {
       return;
     }
@@ -41,7 +41,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private extendsCheck(decl: ClassDecl, module: int): void {
+  private readonly extendsCheck(decl: ClassDecl, module: int): void {
     const base = decl.base;
     if (base == undefined) {
       return;
@@ -59,7 +59,7 @@ partial class ExpressionTypes {
     this.report(module, base.loc, Code.ExtendsNotClass, { word, first });
   }
 
-  private abstractParentsCheck(
+  private readonly abstractParentsCheck(
     decl: ClassDecl,
     instance: InstanceType,
     module: int,
@@ -102,7 +102,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private parentDeclOf(
+  private readonly parentDeclOf(
     parent: InstanceType | undefined,
   ): ClassDecl | undefined {
     if (parent == undefined) {
@@ -112,7 +112,7 @@ partial class ExpressionTypes {
     return this.classOf(parent);
   }
 
-  private abstractOwnerCheck(
+  private readonly abstractOwnerCheck(
     decl: ClassDecl,
     owner: ClassDecl,
     instance: InstanceType,
@@ -135,7 +135,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private reportAbstract(
+  private readonly reportAbstract(
     decl: ClassDecl,
     owner: ClassDecl,
     instance: InstanceType,
@@ -164,7 +164,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private implementsCheck(
+  private readonly implementsCheck(
     decl: ClassDecl,
     instance: InstanceType,
     ref: TypeRef,
@@ -203,7 +203,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private contractMember(
+  private readonly contractMember(
     decl: ClassDecl,
     instance: InstanceType,
     iface: string,
@@ -262,8 +262,8 @@ partial class ExpressionTypes {
     this.contractMethods(entry, iface, field, first, module);
   }
 
-  private contractField(
-    entry: ClassMemberEntry,
+  private readonly contractField(
+    entry: Read<ClassMemberEntry>,
     iface: string,
     field: ObjectField,
     first: string,
@@ -291,8 +291,8 @@ partial class ExpressionTypes {
     });
   }
 
-  private contractMethod(
-    entry: ClassMemberEntry,
+  private readonly contractMethod(
+    entry: Read<ClassMemberEntry>,
     method: FunctionDecl,
     iface: string,
     field: ObjectField,
@@ -327,7 +327,7 @@ partial class ExpressionTypes {
     this.reportFound(module, contractResultError);
   }
 
-  private superMethodCall(
+  private readonly superMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     wanted: Type | undefined,

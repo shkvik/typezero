@@ -32,13 +32,13 @@ export class IndexRules {
   private readonly text: TypeText;
   private readonly types: TypeQuestions;
 
-  public constructor(store: TypeStore, text: TypeText, types: TypeQuestions) {
+  public constructor(store: TypeStore, text: TypeText, types: Own<TypeQuestions>) {
     this.store = store;
     this.text = text;
     this.types = types;
   }
 
-  public listItem(list: Type): Type | undefined {
+  public readonly listItem(list: Type): Type | undefined {
     if (list.kind == TypeKind.Array) {
       return list.item;
     }
@@ -49,7 +49,7 @@ export class IndexRules {
     return undefined;
   }
 
-  public isUnindexable(type: Type): boolean {
+  public readonly isUnindexable(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.Int:
       case TypeKind.Double:
@@ -61,7 +61,7 @@ export class IndexRules {
     }
   }
 
-  public positionOf(value: decimal, count: int): int {
+  public readonly positionOf(value: decimal, count: int): int {
     for (let index = 0; index < count; index++) {
       if (index.toDecimal() == value) {
         return index;
@@ -71,7 +71,7 @@ export class IndexRules {
     return -1;
   }
 
-  public elementCountText(count: int): string {
+  public readonly elementCountText(count: int): string {
     if (count == 1) {
       return `${count}${kOneElement}`;
     }
@@ -79,7 +79,7 @@ export class IndexRules {
     return `${count}${kManyElements}`;
   }
 
-  public keyedMember(expr: IndexExpr, name: string): MemberExpr {
+  public readonly keyedMember(expr: IndexExpr, name: string): MemberExpr {
     return {
       kind: ExprKind.Member,
       loc: expr.loc,
@@ -91,7 +91,7 @@ export class IndexRules {
     };
   }
 
-  public deletedHolder(target: Expr): Expr | undefined {
+  public readonly deletedHolder(target: Expr): Expr | undefined {
     if (target.kind == ExprKind.Member || target.kind == ExprKind.Index) {
       return target.object;
     }
@@ -99,7 +99,7 @@ export class IndexRules {
     return undefined;
   }
 
-  public tupleElement(tuple: TupleType): Type | undefined {
+  public readonly tupleElement(tuple: TupleType): Type | undefined {
     const first = tuple.items[0];
     const isSame = tuple.items.every((item) => item == first);
     if (first == undefined || !isSame) {
@@ -109,7 +109,7 @@ export class IndexRules {
     return first;
   }
 
-  public iterableItem(to: Type): Type | undefined {
+  public readonly iterableItem(to: Type): Type | undefined {
     const label = this.store.labelOf(to);
     if (label == undefined || !label.startsWith(kIterableName + "<")) {
       return undefined;
@@ -132,7 +132,7 @@ export class IndexRules {
     return iterator.shape.yielded;
   }
 
-  public iteratedDictItem(
+  public readonly iteratedDictItem(
     dict: DictKind,
     key: Type,
     value: Type,
@@ -152,7 +152,7 @@ export class IndexRules {
     return undefined;
   }
 
-  public hasNextMethod(result: Type): boolean {
+  public readonly hasNextMethod(result: Type): boolean {
     if (result.kind != TypeKind.Object) {
       return false;
     }
@@ -162,7 +162,7 @@ export class IndexRules {
     return next != undefined && next.type.kind == TypeKind.Function;
   }
 
-  public tupleRangeError(
+  public readonly tupleRangeError(
     expr: IndexExpr,
     tuple: TupleType,
     word: string,
@@ -182,7 +182,7 @@ export class IndexRules {
     };
   }
 
-  public notPatternArray(init: Expr, given: Type): Checked<Type> {
+  public readonly notPatternArray(init: Expr, given: Type): Checked<Type> {
     const defined = this.types.definedType(given);
     const isMaybe =
       this.types.isOptional(given) && defined.kind == TypeKind.Array;

@@ -247,7 +247,7 @@ node — только для того, что ведёт себя одинако
    объект класса без конструктора); `Reflect.fill(cls, values: Map<string, unknown>)` — этот
    конструктор и поля по именам с проверкой типа при выполнении. Особых прав у JSON нет:
    значения уже нужных типов кладёт библиотека проверки. Ошибки — `ReflectFillError` с
-   `details`. Примеры — `tmp/design/reflect-fill-errors.tz`; тесты `run/reflect_fill`,
+   `details`. Тесты `run/reflect_fill`,
    `errors/reflect_fill`, `run/class_defaults`.
 8. **Мини-Nest для catan-backend** (4 ноября): декоратор, у которого второй параметр
    необязательный (`(cls: Constructor, method?: string) => void`), ставится и на класс, и на

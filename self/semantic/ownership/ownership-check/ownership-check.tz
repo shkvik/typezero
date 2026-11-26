@@ -1,0 +1,173 @@
+import "./partial/ownership-check.partial.functions.tz";
+import "./partial/ownership-check.partial.uses.tz";
+import "./partial/ownership-check.partial.statements.tz";
+import "./partial/ownership-check.partial.expressions.tz";
+import "./partial/ownership-check.partial.places.tz";
+import "./partial/ownership-check.partial.values.tz";
+import "./partial/ownership-check.partial.calls.tz";
+import "./partial/ownership-check.partial.closures.tz";
+import { Code } from "../../../diagnostic/code.tz";
+import { ErrorLog } from "../../../diagnostic/error-log/error-log.tz";
+import {
+  Details,
+  SourceError,
+} from "../../../diagnostic/types/message.types.tz";
+import { ClassDecl } from "../../../program/ast/types/ast.types.classes.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
+import {
+  Stmt,
+  StmtKind,
+} from "../../../program/ast/types/ast.types.statements.tz";
+import { Module, Program } from "../../../program/module/types/module.types.tz";
+import { SourceLines } from "../../../program/source-lines/source-lines.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import { ExpressionTypes } from "../../code/expression-types/expression-types.tz";
+import { TypeTraits } from "../type-traits/type-traits.tz";
+import { FlowState, FunctionFrame } from "./types/ownership-check.types.tz";
+
+export class OwnershipCheck {
+  private readonly store: TypeStore;
+  private readonly values: ExpressionTypes;
+  private readonly program: Program;
+  private readonly traits: TypeTraits;
+  private readonly errors: ErrorLog;
+  private readonly functions: Map<string, FunctionDecl>;
+  private readonly classes: Map<string, ClassDecl>;
+  private readonly partHomes: Map<FunctionDecl, int>;
+  private readonly lines: Map<int, SourceLines>;
+  private readonly frames: FunctionFrame[];
+  private readonly hintTexts: string[];
+  private state: FlowState;
+  private module: int;
+  private home: int;
+  private liveFrom: int;
+
+  public constructor(store: TypeStore, values: Own<ExpressionTypes>, program: Own<Program>) {
+    this.store = store;
+    this.values = values;
+    this.program = program;
+    this.traits = new TypeTraits(store, this.values, this.program);
+    this.errors = new ErrorLog();
+    this.functions = new Map<string, FunctionDecl>();
+    this.classes = new Map<string, ClassDecl>();
+    this.partHomes = new Map<FunctionDecl, int>();
+    this.lines = new Map<int, SourceLines>();
+    this.frames = [];
+    this.hintTexts = [];
+    this.state = { moved: [], isDead: false };
+    this.module = -1;
+    this.home = -1;
+    this.liveFrom = -1;
+  }
+
+  public run(): void {
+    for (const module of this.program.modules) {
+      if (this.isChecked(module)) {
+        this.indexModule(module);
+      }
+    }
+
+    for (const module of this.program.modules) {
+      if (this.isChecked(module)) {
+        this.checkModule(module);
+      }
+    }
+  }
+
+  public readonly problems(module: int): SourceError[] {
+    return this.errors.of(module);
+  }
+
+  public readonly hints(): string[] {
+    return this.hintTexts.slice();
+  }
+
+  private hint(loc: int, kind: string, name: string): void {
+    const module = this.program.modules[this.home];
+    const lines = this.sourceLines();
+    if (module == undefined || lines == undefined) {
+      return;
+    }
+
+    const place = lines.placeOf(loc);
+    const path = module.source.path;
+
+    this.hintTexts.push(`${path}:${place.line}:${place.column}: hint ${kind} ${name}`);
+  }
+
+  private readonly isChecked(module: Module): boolean {
+    return !module.source.isLibrary && !module.isDeclarationOnly;
+  }
+
+  private indexModule(module: Module): void {
+    for (const item of module.file.items) {
+      this.indexStatement(module.id, item);
+    }
+    for (const part of module.parts) {
+      for (const method of part.methods) {
+        this.partHomes.set(method, module.id);
+      }
+    }
+  }
+
+  private indexStatement(module: int, stmt: Stmt): void {
+    switch (stmt.kind) {
+      case StmtKind.Function:
+        this.functions.set(this.keyOf(module, stmt.loc), stmt);
+        break;
+      case StmtKind.Class:
+        this.indexClass(module, stmt);
+        break;
+      default:
+        break;
+    }
+  }
+
+  private indexClass(module: int, decl: ClassDecl): void {
+    this.classes.set(this.keyOf(module, decl.loc), decl);
+
+    for (const method of decl.methods) {
+      this.functions.set(this.keyOf(module, method.loc), method);
+    }
+    for (const made of decl.constructors) {
+      this.functions.set(this.keyOf(module, made.loc), made);
+    }
+  }
+
+  private readonly keyOf(module: int, loc: int): string {
+    return `${module}:${loc}`;
+  }
+
+  private readonly report(loc: int, code: Code, details: Details): void {
+    this.errors.write(this.home, loc, code, details);
+  }
+
+  private lineOf(loc: int): string {
+    const lines = this.sourceLines();
+    if (lines == undefined) {
+      return "?";
+    }
+
+    const place = lines.placeOf(loc);
+
+    return `${place.line}`;
+  }
+
+  private sourceLines(): SourceLines | undefined {
+    const known = this.lines.get(this.home);
+    if (known != undefined) {
+      return known;
+    }
+
+    const module = this.program.modules[this.home];
+    if (module == undefined) {
+      return undefined;
+    }
+
+    const made = new SourceLines(module.source.text);
+
+    this.lines.set(this.home, made);
+
+    return made;
+  }
+}

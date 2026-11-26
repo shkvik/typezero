@@ -15,7 +15,7 @@ import {
 import { ValueTarget } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private named(expr: NameExpr, wanted: Type | undefined, module: int): Type {
+  private readonly named(expr: NameExpr, wanted: Type | undefined, module: int): Type {
     if (this.isNullName(expr, module)) {
       return this.nullTyped(expr, wanted, module);
     }
@@ -91,7 +91,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private valueOfName(expr: NameExpr, module: int): Type | undefined {
+  private readonly valueOfName(expr: NameExpr, module: int): Type | undefined {
     const target = this.targetOfName(expr, module);
     if (target == undefined) {
       return undefined;
@@ -112,13 +112,13 @@ partial class ExpressionTypes {
     }
   }
 
-  private variableTyped(target: ValueTarget, wanted: Type | undefined): Type {
+  private readonly variableTyped(target: ValueTarget, wanted: Type | undefined): Type {
     const door = this.door(target.module, target.loc);
     if (door == undefined) {
       return this.store.plain(TypeKind.Error);
     }
 
-    const texts = door.texts;
+    const texts = door.texts?.slice();
     if (wanted == undefined || texts == undefined) {
       return door.type;
     }
@@ -126,7 +126,7 @@ partial class ExpressionTypes {
     return this.literals.textChoice(texts, wanted) ?? door.type;
   }
 
-  private parameterTyped(target: ValueTarget): Type {
+  private readonly parameterTyped(target: ValueTarget): Type {
     const key = `${target.module} ${target.loc}`;
     const known = this.paramTypes.get(key);
     if (known != undefined) {
@@ -143,7 +143,7 @@ partial class ExpressionTypes {
     return this.paramTypes.get(key) ?? this.store.plain(TypeKind.Error);
   }
 
-  private isLibraryName(expr: NameExpr, module: int): boolean {
+  private readonly isLibraryName(expr: NameExpr, module: int): boolean {
     const symbol = this.record(module)?.uses.get(expr.loc)?.symbol;
     if (symbol == undefined) {
       return true;
@@ -159,15 +159,15 @@ partial class ExpressionTypes {
     return opened != undefined && opened.source.isLibrary;
   }
 
-  public valueTargetOf(expr: NameExpr, module: int): ValueTarget | undefined {
+  public readonly valueTargetOf(expr: NameExpr, module: int): ValueTarget | undefined {
     return this.targetOfName(expr, module);
   }
 
-  private targetOfName(expr: NameExpr, module: int): ValueTarget | undefined {
+  private readonly targetOfName(expr: NameExpr, module: int): ValueTarget | undefined {
     return this.targetOfUse(expr.loc, expr.name, module);
   }
 
-  private targetOfUse(
+  private readonly targetOfUse(
     loc: int,
     name: string,
     module: int,
@@ -198,7 +198,7 @@ partial class ExpressionTypes {
     return this.exportedValue(target.module, target.name);
   }
 
-  private globalValue(name: string): ValueTarget | undefined {
+  private readonly globalValue(name: string): ValueTarget | undefined {
     if (this.globalValues.size == 0) {
       this.indexGlobalValues();
     }
@@ -209,7 +209,7 @@ partial class ExpressionTypes {
     return this.globalValues.get(name);
   }
 
-  private indexGlobalValues(): void {
+  private readonly indexGlobalValues(): void {
     for (const opened of this.program.globals) {
       const module = opened.id;
 
@@ -227,7 +227,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private indexGlobalItem(item: Stmt, module: int): void {
+  private readonly indexGlobalItem(item: Stmt, module: int): void {
     switch (item.kind) {
       case StmtKind.VarDecl:
         for (const decl of item.decls) {
@@ -250,7 +250,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private keepGlobal(name: string, target: ValueTarget): void {
+  private readonly keepGlobal(name: string, target: ValueTarget): void {
     if (this.globalValues.has(name)) {
       this.overloadedGlobals.add(name);
     }
@@ -258,7 +258,7 @@ partial class ExpressionTypes {
     this.globalValues.set(name, target);
   }
 
-  private exportedValue(module: int, name: string): ValueTarget | undefined {
+  private readonly exportedValue(module: int, name: string): ValueTarget | undefined {
     const opened = this.program.modules[module];
     if (module < 0 || opened == undefined) {
       return undefined;
@@ -279,7 +279,7 @@ partial class ExpressionTypes {
     return { module, kind: SymbolKind.Class, loc: declared.loc };
   }
 
-  private objectValueCheck(expr: NameExpr, module: int): boolean {
+  private readonly objectValueCheck(expr: NameExpr, module: int): boolean {
     const found = kObjectExamples.find((one) => one.name == expr.name);
     if (found == undefined || this.memberObjects.has(expr)) {
       return false;

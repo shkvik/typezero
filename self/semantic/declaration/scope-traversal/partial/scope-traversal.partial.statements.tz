@@ -16,7 +16,7 @@ import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
 import { JumpKind } from "../types/scope-traversal.types.tz";
 
 partial class ScopeTraversal {
-  private traverseStatements(statements: Stmt[]): void {
+  private traverseStatements(statements: Read<Stmt[]>): void {
     for (const statement of statements) {
       this.traverseStatement(statement);
     }
@@ -80,7 +80,7 @@ partial class ScopeTraversal {
     }
   }
 
-  private traverseBlock(body: Stmt[]): void {
+  private traverseBlock(body: Read<Stmt[]>): void {
     this.scopes.open();
     this.declareStatements(body);
     this.traverseStatements(body);
@@ -95,7 +95,7 @@ partial class ScopeTraversal {
     this.traverseBlock([statement]);
   }
 
-  private traverseDeclarators(decls: VarDeclarator[]): void {
+  private traverseDeclarators(decls: Read<VarDeclarator[]>): void {
     for (const decl of decls) {
       this.traverseDeclarator(decl);
     }

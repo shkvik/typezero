@@ -29,11 +29,11 @@ import {
 import { NodeName } from "./types/node-value-rules.types.tz";
 
 export class NodeValueRules {
-  public isKnown(module: string): boolean {
+  public readonly isKnown(module: string): boolean {
     return this.knownRow(module) != undefined;
   }
 
-  public nodeName(module: string, name: string): NodeName {
+  public readonly nodeName(module: string, name: string): NodeName {
     const submodule = kSubmodules.find(
       (one) => one.parent == module && one.name == name,
     );
@@ -44,7 +44,7 @@ export class NodeValueRules {
     return { module, name };
   }
 
-  public valueError(
+  public readonly valueError(
     node: NodeName,
     isMemberObject: boolean,
     loc: int,
@@ -71,7 +71,7 @@ export class NodeValueRules {
     return { code: Code.NodeOnlyCalled, loc, details: { word, other } };
   }
 
-  public callError(
+  public readonly callError(
     node: NodeName,
     word: string,
     loc: int,
@@ -94,7 +94,7 @@ export class NodeValueRules {
     return undefined;
   }
 
-  public memberCallError(
+  public readonly memberCallError(
     node: NodeName,
     name: string,
     loc: int,
@@ -111,11 +111,11 @@ export class NodeValueRules {
     return undefined;
   }
 
-  public isFileClass(module: string, name: string): boolean {
+  public readonly isFileClass(module: string, name: string): boolean {
     return module == kFsModule && kFileClasses.includes(name);
   }
 
-  private isQuietValue(node: NodeName, isMemberObject: boolean): boolean {
+  private readonly isQuietValue(node: NodeName, isMemberObject: boolean): boolean {
     if (kAliasModules.includes(node.module) || this.isStringValue(node)) {
       return true;
     }
@@ -129,7 +129,7 @@ export class NodeValueRules {
     return node.name == "" || node.name == kConstantsName || isScheduler;
   }
 
-  private isStringValue(node: NodeName): boolean {
+  private readonly isStringValue(node: NodeName): boolean {
     if (kPathModules.includes(node.module)) {
       return kPathStrings.includes(node.name);
     }
@@ -140,7 +140,7 @@ export class NodeValueRules {
     return false;
   }
 
-  private constantsCode(node: NodeName): Code | undefined {
+  private readonly constantsCode(node: NodeName): Code | undefined {
     if (node.name != kConstantsName) {
       return undefined;
     }
@@ -154,7 +154,7 @@ export class NodeValueRules {
     return undefined;
   }
 
-  private moduleValueError(module: string, loc: int): SourceError {
+  private readonly moduleValueError(module: string, loc: int): SourceError {
     const other = this.moduleExample(module);
 
     return {
@@ -164,7 +164,7 @@ export class NodeValueRules {
     };
   }
 
-  private moduleExample(module: string): string {
+  private readonly moduleExample(module: string): string {
     if (kPathModules.includes(module)) {
       return kPathExample;
     }
@@ -174,11 +174,11 @@ export class NodeValueRules {
     return `${typical}${kCallExample}`;
   }
 
-  private knownRow(module: string): KnownModuleRow | undefined {
+  private readonly knownRow(module: string): KnownModuleRow | undefined {
     return kKnownModules.find((row) => this.labelOf(row) == module);
   }
 
-  private labelOf(row: KnownModuleRow): string {
+  private readonly labelOf(row: KnownModuleRow): string {
     if (row.isNode) {
       return `${kNodePrefix}${row.path}`;
     }

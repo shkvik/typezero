@@ -48,46 +48,42 @@ import {
 import { Frame, GivenNumber, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
-  private isDecimal(type: Type): boolean {
+  private readonly isDecimal(type: Type): boolean {
     return this.widened(type).kind == TypeKind.Decimal;
   }
 
-  private decimalParts(frame: Frame, value: IrValue): LLVMValue[] {
-    const made = frame.made;
-
-    return [made.extract(value.value, 0), made.extract(value.value, 1)];
+  private readonly decimalParts(frame: Read<Frame>, value: IrValue): LLVMValue[] {
+    return [frame.made.extract(value.value, 0), frame.made.extract(value.value, 1)];
   }
 
-  private decimalOut(frame: Frame, name: string, args: LLVMValue[]): IrValue {
-    const made = frame.made;
-    const out = made.slot(kDecimalType, "decimal.out");
+  private readonly decimalOut(frame: Read<Frame>, name: string, args: Own<LLVMValue[]>): IrValue {
+    const out = frame.made.slot(kDecimalType, "decimal.out");
     const params = [kPointerType].concat(args.map(() => kIntType));
     const callee = this.ir.declare(name, kVoidType, params);
 
-    made.call(callee, [out].concat(args));
+    frame.made.call(callee, [out].concat(args));
 
-    const value = made.load(kDecimalType, out);
+    const value = frame.made.load(kDecimalType, out);
     const tz = this.store.plain(TypeKind.Decimal);
 
     return { type: kDecimalType, value, tz, owned: true };
   }
 
-  private decimalFrom(frame: Frame, value: IrValue): IrValue | undefined {
-    const made = frame.made;
+  private readonly decimalFrom(frame: Read<Frame>, value: IrValue): IrValue | undefined {
     const tz = this.store.plain(TypeKind.Decimal);
     if (this.isDecimal(value.tz)) {
       return value;
     }
     if (this.isDouble(value.tz)) {
-      const out = made.slot(kDecimalType, "decimal.out");
+      const out = frame.made.slot(kDecimalType, "decimal.out");
       const callee = this.ir.declare(kDecimalFromDouble, kVoidType, [
         kPointerType,
         kDoubleType,
       ]);
 
-      made.call(callee, [out, value.value]);
+      frame.made.call(callee, [out, value.value]);
 
-      const loaded = made.load(kDecimalType, out);
+      const loaded = frame.made.load(kDecimalType, out);
 
       return { type: kDecimalType, value: loaded, tz, owned: true };
     }
@@ -103,9 +99,9 @@ partial class Lowering {
 
     const long = this.toLong(frame, value);
     const empty = this.ir.undefinedOf(kDecimalType);
-    const first = made.insert(empty, long.value, 0);
+    const first = frame.made.insert(empty, long.value, 0);
     const zero = this.ir.zero(kIntType);
-    const placed = made.insert(first, zero, 1);
+    const placed = frame.made.insert(first, zero, 1);
 
     return { type: kDecimalType, value: placed, tz };
   }
@@ -158,18 +154,17 @@ partial class Lowering {
     return result;
   }
 
-  private decimalCall(
-    frame: Frame,
+  private readonly decimalCall(
+    frame: Read<Frame>,
     name: string,
-    args: LLVMValue[],
+    args: Own<LLVMValue[]>,
     op: BinaryOp,
   ): IrValue {
     if (op != BinaryOp.Div) {
       return this.decimalOut(frame, name, args);
     }
 
-    const made = frame.made;
-    const out = made.slot(kDecimalType, "decimal.out");
+    const out = frame.made.slot(kDecimalType, "decimal.out");
     const params = [
       kPointerType,
       kIntType,
@@ -182,9 +177,9 @@ partial class Lowering {
     const callee = this.ir.declare(name, kVoidType, params);
     const mode = this.ir.integer(kFlagType, `${kDecimalRoundHalfUp}`);
 
-    made.call(callee, [out].concat(args).concat([mode]));
+    frame.made.call(callee, [out].concat(args).concat([mode]));
 
-    const value = made.load(kDecimalType, out);
+    const value = frame.made.load(kDecimalType, out);
     const tz = this.store.plain(TypeKind.Decimal);
 
     return { type: kDecimalType, value, tz, owned: true };
@@ -218,7 +213,7 @@ partial class Lowering {
     return result;
   }
 
-  private decimalOperator(op: BinaryOp): string | undefined {
+  private readonly decimalOperator(op: BinaryOp): string | undefined {
     switch (op) {
       case BinaryOp.Add:
         return kDecimalAdd;
@@ -250,13 +245,12 @@ partial class Lowering {
     return converted;
   }
 
-  private decimalsCompared(
-    frame: Frame,
+  private readonly decimalsCompared(
+    frame: Read<Frame>,
     op: BinaryOp,
     left: IrValue,
     right: IrValue,
   ): LLVMValue | undefined {
-    const made = frame.made;
     const first = this.decimalFrom(frame, left);
     const second = this.decimalFrom(frame, right);
     if (first == undefined || second == undefined) {
@@ -271,20 +265,20 @@ partial class Lowering {
     const isEquality = op == BinaryOp.Eq || op == BinaryOp.Ne;
     if (isEquality) {
       const callee = this.ir.declare(kDecimalEqual, kFlagType, params);
-      const same = made.call(callee, args);
+      const same = frame.made.call(callee, args);
       const predicate = this.equalFlagPredicate(op);
 
-      return made.integerCompare(predicate, same, zero);
+      return frame.made.integerCompare(predicate, same, zero);
     }
 
     const callee = this.ir.declare(kDecimalCompare, kFlagType, params);
-    const order = made.call(callee, args);
+    const order = frame.made.call(callee, args);
     const predicate = this.integerPredicate(op, false);
 
-    return made.integerCompare(predicate, order, zero);
+    return frame.made.integerCompare(predicate, order, zero);
   }
 
-  private decimalToDouble(frame: Frame, value: IrValue): IrValue {
+  private decimalToDouble(frame: Read<Frame>, value: IrValue): IrValue {
     const parts = this.decimalParts(frame, value);
     const params = [kIntType, kIntType];
     const callee = this.ir.declare(kDecimalToDouble, kDoubleType, params);
@@ -296,7 +290,7 @@ partial class Lowering {
     return { type: kDoubleType, value: double, tz };
   }
 
-  private decimalNegated(frame: Frame, value: IrValue): IrValue {
+  private decimalNegated(frame: Read<Frame>, value: IrValue): IrValue {
     const parts = this.decimalParts(frame, value);
     const result = this.decimalOut(frame, kDecimalNegate, parts);
 
@@ -305,7 +299,7 @@ partial class Lowering {
     return result;
   }
 
-  private decimalText(frame: Frame, value: IrValue): IrValue {
+  private decimalText(frame: Read<Frame>, value: IrValue): IrValue {
     const parts = this.decimalParts(frame, value);
     const params = [kIntType, kIntType];
     const text = this.textOut(frame, kDecimalToText, params, parts);
@@ -325,7 +319,6 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const parts = this.decimalParts(frame, object);
     const params = [kIntType, kIntType];
 
@@ -342,8 +335,8 @@ partial class Lowering {
       case "isInteger": {
         const callee = this.ir.declare(kDecimalIsInteger, kFlagType, params);
         const zero = this.ir.zero(kFlagType);
-        const flag = made.call(callee, parts);
-        const value = made.integerCompare(IrIntPredicate.NotEqual, flag, zero);
+        const flag = frame.made.call(callee, parts);
+        const value = frame.made.integerCompare(IrIntPredicate.NotEqual, flag, zero);
         const tz = this.store.plain(TypeKind.Boolean);
 
         this.dropping(frame, object);
@@ -352,8 +345,8 @@ partial class Lowering {
       }
       case "decimalPlaces": {
         const callee = this.ir.declare(kDecimalPlaces, kFlagType, params);
-        const places = made.call(callee, parts);
-        const value = made.cast(IrOpcode.SExt, places, kIntType);
+        const places = frame.made.call(callee, parts);
+        const value = frame.made.cast(IrOpcode.SExt, places, kIntType);
         const tz = this.store.integer(64, false);
 
         this.dropping(frame, object);
@@ -363,7 +356,7 @@ partial class Lowering {
       case "toNumber":
       case "toDouble": {
         const callee = this.ir.declare(kDecimalToDouble, kDoubleType, params);
-        const value = made.call(callee, parts);
+        const value = frame.made.call(callee, parts);
         const tz = this.store.plain(TypeKind.Double);
 
         this.dropping(frame, object);
@@ -413,8 +406,7 @@ partial class Lowering {
     const args = this.decimalParts(frame, object).concat(
       this.decimalParts(frame, right),
     );
-    const made = frame.made;
-    const out = made.slot(kDecimalType, "decimal.out");
+    const out = frame.made.slot(kDecimalType, "decimal.out");
     const params = [
       kPointerType,
       kIntType,
@@ -426,9 +418,9 @@ partial class Lowering {
     ];
     const callee = this.ir.declare(kDecimalDivide, kVoidType, params);
 
-    made.call(callee, [out].concat(args).concat([places.value, mode]));
+    frame.made.call(callee, [out].concat(args).concat([places.value, mode]));
 
-    const value = made.load(kDecimalType, out);
+    const value = frame.made.load(kDecimalType, out);
     const tz = this.store.plain(TypeKind.Decimal);
     const result: IrValue = { type: kDecimalType, value, tz, owned: true };
 
@@ -474,15 +466,14 @@ partial class Lowering {
       maker = failure;
     }
 
-    const made = frame.made;
-    const out = made.slot(kDecimalType, "decimal.out");
+    const out = frame.made.slot(kDecimalType, "decimal.out");
     const params = [kPointerType, kPointerType, kIntType, kPointerType];
     const callee = this.ir.declare(kDecimalFromText, kVoidType, params);
     const args = [out].concat(this.textParts(frame, text)).concat([maker]);
 
-    made.call(callee, args);
+    frame.made.call(callee, args);
 
-    const value = made.load(kDecimalType, out);
+    const value = frame.made.load(kDecimalType, out);
     const tz = this.store.plain(TypeKind.Decimal);
     const parsed: IrValue = { type: kDecimalType, value, tz, owned: true };
 
@@ -495,8 +486,8 @@ partial class Lowering {
     return this.caughtResult(frame, parsed, type, call.loc);
   }
 
-  private decimalFromOrNone(
-    frame: Frame,
+  private readonly decimalFromOrNone(
+    frame: Read<Frame>,
     value: IrValue | undefined,
   ): IrValue | undefined {
     if (value == undefined) {
@@ -565,15 +556,14 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
-    const out = made.slot(kDecimalType, "decimal.out");
+    const out = frame.made.slot(kDecimalType, "decimal.out");
     const params = [kPointerType, kIntType, kIntType, kIntType, kFlagType];
     const callee = this.ir.declare(kDecimalRound, kVoidType, params);
     const parts = this.decimalParts(frame, object);
 
-    made.call(callee, [out].concat(parts).concat([places.value, mode]));
+    frame.made.call(callee, [out].concat(parts).concat([places.value, mode]));
 
-    const value = made.load(kDecimalType, out);
+    const value = frame.made.load(kDecimalType, out);
     const tz = this.store.plain(TypeKind.Decimal);
 
     this.dropping(frame, object);

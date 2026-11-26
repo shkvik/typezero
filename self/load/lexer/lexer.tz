@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import { KnownName, Token, TokenKind } from "../token/types/token.types.tz";
 import { kTokenTable } from "../token/const/token.const.tz";
 import { Code } from "../../diagnostic/code.tz";
@@ -66,8 +67,8 @@ import {
 export class Lexer {
   private readonly source: Buffer;
   private readonly end: int;
-  private readonly tokens: Token[];
-  private readonly errors: SourceError[];
+  private tokens: Token[];
+  private errors: SourceError[];
   private readonly braces: int[];
   private readonly headers: boolean[];
   private headerEnd: int;
@@ -75,9 +76,9 @@ export class Lexer {
   private start: int;
   private newline: boolean;
 
-  public constructor(source: Buffer) {
+  public constructor(source: Own<Buffer>) {
     this.source = source;
-    this.end = source.length;
+    this.end = this.source.length;
     this.tokens = [];
     this.errors = [];
     this.braces = [];
@@ -100,7 +101,7 @@ export class Lexer {
     this.start = this.position;
     this.push(TokenKind.End);
 
-    return { tokens: this.tokens, errors: this.errors };
+    return { tokens: replace(this.tokens, []), errors: replace(this.errors, []) };
   }
 
   private token(): void {
@@ -267,28 +268,28 @@ export class Lexer {
     }
   }
 
-  private atEnd(): boolean {
+  private readonly atEnd(): boolean {
     return this.position >= this.end;
   }
 
-  private at(offset: int): int {
+  private readonly at(offset: int): int {
     const value = this.source[this.position + offset] ?? 0;
 
     return value.toInt();
   }
 
-  private isDigit(code: int): boolean {
+  private readonly isDigit(code: int): boolean {
     return code >= kZero && code <= kNine;
   }
 
-  private isAlpha(code: int): boolean {
+  private readonly isAlpha(code: int): boolean {
     return (
       (code >= kLowerA && code <= kLowerZ) ||
       (code >= kUpperA && code <= kUpperZ)
     );
   }
 
-  private isIdentStart(code: int): boolean {
+  private readonly isIdentStart(code: int): boolean {
     return (
       this.isAlpha(code) ||
       code == kUnderscore ||
@@ -297,35 +298,35 @@ export class Lexer {
     );
   }
 
-  private isIdentChar(code: int): boolean {
+  private readonly isIdentChar(code: int): boolean {
     return this.isIdentStart(code) || this.isDigit(code);
   }
 
-  private digitAt(offset: int): boolean {
+  private readonly digitAt(offset: int): boolean {
     const code = this.at(offset);
 
     return this.isDigit(code);
   }
 
-  private alphaAt(offset: int): boolean {
+  private readonly alphaAt(offset: int): boolean {
     const code = this.at(offset);
 
     return this.isAlpha(code);
   }
 
-  private identStartAt(offset: int): boolean {
+  private readonly identStartAt(offset: int): boolean {
     const code = this.at(offset);
 
     return this.isIdentStart(code);
   }
 
-  private identCharAt(offset: int): boolean {
+  private readonly identCharAt(offset: int): boolean {
     const code = this.at(offset);
 
     return this.isIdentChar(code);
   }
 
-  private isLineBreak(): boolean {
+  private readonly isLineBreak(): boolean {
     const code = this.at(0);
     if (code == kNewline || code == kReturn) {
       return true;
@@ -388,7 +389,7 @@ export class Lexer {
     return newline;
   }
 
-  private commentAhead(): boolean {
+  private readonly commentAhead(): boolean {
     const next = this.at(1);
 
     return next == kSlash || next == kStar;
@@ -435,7 +436,7 @@ export class Lexer {
     return newline;
   }
 
-  private regexAllowed(): boolean {
+  private readonly regexAllowed(): boolean {
     let operand = this.tokens.length - 1;
 
     while (this.isBangAt(operand)) {
@@ -462,7 +463,7 @@ export class Lexer {
     this.push(TokenKind.RParen);
   }
 
-  private isHeaderWordAt(index: int): boolean {
+  private readonly isHeaderWordAt(index: int): boolean {
     const token = this.tokens[index];
     const before = this.tokens[index - 1];
     if (token == undefined || this.isAfterDot(before)) {
@@ -481,13 +482,13 @@ export class Lexer {
     }
   }
 
-  private isAfterDot(before: Token | undefined): boolean {
+  private readonly isAfterDot(before: Token | undefined): boolean {
     return (
       before?.kind == TokenKind.Dot || before?.kind == TokenKind.QuestionDot
     );
   }
 
-  private isBangAt(index: int): boolean {
+  private readonly isBangAt(index: int): boolean {
     const token = this.tokens[index];
     if (token == undefined) {
       return false;
@@ -496,7 +497,7 @@ export class Lexer {
     return token.kind == TokenKind.Bang && !token.newline;
   }
 
-  private endsOperand(index: int): boolean {
+  private readonly endsOperand(index: int): boolean {
     const token = this.tokens[index];
     if (token == undefined) {
       return false;
@@ -515,7 +516,7 @@ export class Lexer {
     return !this.regexMayFollow(token.kind);
   }
 
-  private isLoopOf(token: Token, before: Token | undefined): boolean {
+  private readonly isLoopOf(token: Token, before: Token | undefined): boolean {
     if (token.kind != TokenKind.Of || token.newline || before == undefined) {
       return false;
     }
@@ -540,20 +541,19 @@ export class Lexer {
   }
 
   private rightBrace(): void {
-    const braces = this.braces;
-    const last = braces.length - 1;
+    const last = this.braces.length - 1;
     if (last < 0) {
       return this.push(TokenKind.RBrace);
     }
 
-    const depth = braces[last] ?? 0;
+    const depth = this.braces[last] ?? 0;
     if (depth == 0) {
-      braces.pop();
+      this.braces.pop();
 
       return this.template(true);
     }
 
-    braces[last] = depth - 1;
+    this.braces[last] = depth - 1;
     this.push(TokenKind.RBrace);
   }
 
@@ -620,7 +620,7 @@ export class Lexer {
     this.finishNumber(TokenKind.Int);
   }
 
-  private isRadixLetter(code: int): boolean {
+  private readonly isRadixLetter(code: int): boolean {
     return (
       code == kLowerX ||
       code == kUpperX ||
@@ -814,7 +814,7 @@ export class Lexer {
     });
   }
 
-  private regexMayFollow(kind: TokenKind): boolean {
+  private readonly regexMayFollow(kind: TokenKind): boolean {
     switch (kind) {
       case TokenKind.Await:
       case TokenKind.Yield:

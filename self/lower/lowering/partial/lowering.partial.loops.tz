@@ -9,56 +9,53 @@ import { Frame, LoopTarget } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private whileLoop(frame: Frame, statement: WhileStmt): void {
-    const made = frame.made;
-    const cond = made.block("while.cond");
-    const body = made.block("while.body");
-    const end = made.block("while.end");
+    const cond = frame.made.block("while.cond");
+    const body = frame.made.block("while.body");
+    const end = frame.made.block("while.end");
     const target = this.loopTarget(frame, end, cond);
 
-    made.open(cond);
+    frame.made.open(cond);
 
     const test = this.truth(frame, statement.cond);
     if (test == undefined) {
       return;
     }
 
-    made.conditionalBranch(test, body, end);
-    made.open(body);
+    frame.made.conditionalBranch(test, body, end);
+    frame.made.open(body);
     frame.loops.push(target);
     this.statement(frame, statement.body);
     frame.loops.pop();
     this.jumpTo(frame, cond);
-    made.open(end);
+    frame.made.open(end);
   }
 
   private doWhileLoop(frame: Frame, statement: DoWhileStmt): void {
-    const made = frame.made;
-    const body = made.block("do.body");
-    const cond = made.block("do.cond");
-    const end = made.block("do.end");
+    const body = frame.made.block("do.body");
+    const cond = frame.made.block("do.cond");
+    const end = frame.made.block("do.end");
     const target = this.loopTarget(frame, end, cond);
 
-    made.open(body);
+    frame.made.open(body);
     frame.loops.push(target);
     this.statement(frame, statement.body);
     frame.loops.pop();
-    made.open(cond);
+    frame.made.open(cond);
 
     const test = this.truth(frame, statement.cond);
     if (test == undefined) {
       return;
     }
 
-    made.conditionalBranch(test, body, end);
-    made.open(end);
+    frame.made.conditionalBranch(test, body, end);
+    frame.made.open(end);
   }
 
   private forLoop(frame: Frame, statement: ForStmt): void {
-    const made = frame.made;
-    const cond = made.block("for.cond");
-    const body = made.block("for.body");
-    const step = made.block("for.step");
-    const end = made.block("for.end");
+    const cond = frame.made.block("for.cond");
+    const body = frame.made.block("for.body");
+    const step = frame.made.block("for.step");
+    const end = frame.made.block("for.end");
     const init = statement.init;
 
     this.openScope(frame);
@@ -69,9 +66,9 @@ partial class Lowering {
       this.statement(frame, init);
     }
 
-    made.open(cond);
+    frame.made.open(cond);
     this.forTest(frame, statement, body, end);
-    made.open(body);
+    frame.made.open(body);
     frame.loops.push(target);
 
     if (statement.body != undefined) {
@@ -79,14 +76,14 @@ partial class Lowering {
     }
 
     frame.loops.pop();
-    made.open(step);
+    frame.made.open(step);
 
     if (statement.step != undefined) {
       this.value(frame, statement.step);
     }
 
     this.jumpTo(frame, cond);
-    made.open(end);
+    frame.made.open(end);
     this.closeScope(frame);
   }
 
@@ -110,7 +107,7 @@ partial class Lowering {
   }
 
   private loopTarget(
-    frame: Frame,
+    frame: Read<Frame>,
     breakBlock: LLVMBlock,
     continueBlock: LLVMBlock,
   ): LoopTarget {

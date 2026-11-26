@@ -18,7 +18,7 @@ import { kNoPlace } from "../../const/expression-types.const.tz";
 import { StaticOwner, ThisPlace } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private checkFields(decl: ClassDecl, module: int): void {
+  private readonly checkFields(decl: ClassDecl, module: int): void {
     for (let index = 0; index < decl.fields.length; index++) {
       const memberNameErrors = this.overrides.memberNameErrors(decl, index);
 
@@ -30,7 +30,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private checkField(decl: ClassDecl, field: ClassField, module: int): void {
+  private readonly checkField(decl: ClassDecl, field: ClassField, module: int): void {
     const word = field.name;
 
     if (field.presence == FieldPresence.Definite) {
@@ -64,7 +64,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private checkFieldValue(
+  private readonly checkFieldValue(
     decl: ClassDecl,
     field: ClassField,
     module: int,
@@ -96,7 +96,7 @@ partial class ExpressionTypes {
     this.checked(init, type, module, kNoPlace);
   }
 
-  private staticValue(decl: ClassDecl, field: ClassField, module: int): void {
+  private readonly staticValue(decl: ClassDecl, field: ClassField, module: int): void {
     const owner: StaticOwner = { decl, module };
     const init = field.init;
     const word = field.name;
@@ -139,7 +139,7 @@ partial class ExpressionTypes {
     this.ownerClasses.pop();
   }
 
-  private staticInit(
+  private readonly staticInit(
     init: Expr,
     field: ClassField,
     type: Type,

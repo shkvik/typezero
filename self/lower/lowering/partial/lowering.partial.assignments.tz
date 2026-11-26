@@ -108,13 +108,13 @@ partial class Lowering {
     return place;
   }
 
-  private loaded(frame: Frame, place: Place): IrValue {
+  private readonly loaded(frame: Read<Frame>, place: Place): IrValue {
     const value = frame.made.load(place.type, place.pointer);
 
     return { type: place.type, value, tz: place.tz };
   }
 
-  private updated(frame: Frame, expr: UpdateExpr): IrValue | undefined {
+  private updated(frame: Read<Frame>, expr: UpdateExpr): IrValue | undefined {
     const target = expr.target;
     if (target.kind != ExprKind.Name) {
       this.notLowered(frame.module, expr.loc, "an update of this target");
@@ -146,7 +146,7 @@ partial class Lowering {
     return before;
   }
 
-  private stepped(frame: Frame, value: IrValue, isUp: boolean): IrValue {
+  private readonly stepped(frame: Read<Frame>, value: IrValue, isUp: boolean): IrValue {
     const isDouble = value.type == kDoubleType;
     const one = this.oneOf(value.type, isDouble);
     let opcode: IrOpcode = this.opcodeFor(
@@ -164,7 +164,7 @@ partial class Lowering {
     return { type: value.type, value: made, tz: value.tz };
   }
 
-  private oneOf(type: string, isDouble: boolean): LLVMValue {
+  private readonly oneOf(type: string, isDouble: boolean): LLVMValue {
     if (isDouble) {
       return this.ir.real(1);
     }

@@ -40,16 +40,16 @@ export class DecoratorRules {
   private readonly classes: ClassRules;
 
   public constructor(
-    types: TypeQuestions,
-    overloads: OverloadRules,
-    classes: ClassRules,
+    types: Own<TypeQuestions>,
+    overloads: Own<OverloadRules>,
+    classes: Own<ClassRules>,
   ) {
     this.types = types;
     this.overloads = overloads;
     this.classes = classes;
   }
 
-  public isDecoratedClass(decl: ClassDecl): boolean {
+  public readonly isDecoratedClass(decl: ClassDecl): boolean {
     const isMethod = decl.methods.some((fn) => this.isDecoratedFunction(fn));
     const isMade = decl.constructors.some((fn) => this.hasDecoratedParams(fn));
     const isField = decl.fields.some((field) => field.decorators.length > 0);
@@ -57,15 +57,15 @@ export class DecoratorRules {
     return decl.decorators.length > 0 || isMethod || isMade || isField;
   }
 
-  public hasDecoratedParams(fn: FunctionDecl): boolean {
+  public readonly hasDecoratedParams(fn: FunctionDecl): boolean {
     return fn.params.some((param) => param.decorators.length > 0);
   }
 
-  public decoratorNames(decorators: Decorator[]): string[] {
+  public readonly decoratorNames(decorators: Read<Decorator[]>): string[] {
     return decorators.map((decorator) => this.decoratorName(decorator.expr));
   }
 
-  public methodDecoratorNames(fn: FunctionDecl): string[] {
+  public readonly methodDecoratorNames(fn: FunctionDecl): string[] {
     const names = this.decoratorNames(fn.role?.decorators ?? []);
 
     for (const param of fn.params) {
@@ -77,7 +77,7 @@ export class DecoratorRules {
     return names;
   }
 
-  public clashWhat(earlier: DecoratedName, later: DecoratedName): string {
+  public readonly clashWhat(earlier: Read<DecoratedName>, later: Read<DecoratedName>): string {
     const name = later.name;
     if (earlier.isStatic != later.isStatic) {
       return `both the static member '${name}' and the member '${name}'`;
@@ -86,7 +86,7 @@ export class DecoratorRules {
     return `two variants of '${name}'`;
   }
 
-  public clashRecords(earlier: DecoratedName, later: DecoratedName): string {
+  public readonly clashRecords(earlier: Read<DecoratedName>, later: Read<DecoratedName>): string {
     const names = later.decorators.slice().reverse();
     const shared = names.find(
       (name) => name != "" && earlier.decorators.includes(name),
@@ -98,11 +98,11 @@ export class DecoratorRules {
     return `the records of '@${shared}'`;
   }
 
-  public ownUses(decorators: Decorator[]): DecoratorUse[] {
+  public readonly ownUses(decorators: Read<Decorator[]>): DecoratorUse[] {
     return decorators.map((decorator) => ({ decorator, param: -1 }));
   }
 
-  public addParamUses(uses: DecoratorUse[], fn: FunctionDecl): void {
+  public readonly addParamUses(uses: DecoratorUse[], fn: FunctionDecl): void {
     for (let index = 0; index < fn.params.length; index++) {
       const param = fn.params[index];
 
@@ -112,7 +112,7 @@ export class DecoratorRules {
     }
   }
 
-  public classUses(decl: ClassDecl): DecoratorUse[] {
+  public readonly classUses(decl: ClassDecl): DecoratorUse[] {
     const uses = this.ownUses(decl.decorators);
 
     for (const fn of decl.constructors) {
@@ -122,11 +122,11 @@ export class DecoratorRules {
     return uses;
   }
 
-  public isDescriptorUse(place: DecoratorPlace, count: int): boolean {
+  public readonly isDescriptorUse(place: DecoratorPlace, count: int): boolean {
     return place == DecoratorPlace.Method && count >= 3;
   }
 
-  public usePlace(run: DecorateRun, use: DecoratorUse): DecoratorPlace {
+  public readonly usePlace(run: Read<DecorateRun>, use: DecoratorUse): DecoratorPlace {
     if (use.param >= 0) {
       return DecoratorPlace.Parameter;
     }
@@ -134,7 +134,7 @@ export class DecoratorRules {
     return run.place;
   }
 
-  public thirdParameter(type: FunctionType): Type | undefined {
+  public readonly thirdParameter(type: FunctionType): Type | undefined {
     const third = type.shape.params[2];
     if (third == undefined) {
       return undefined;
@@ -143,7 +143,7 @@ export class DecoratorRules {
     return this.types.definedType(third.type);
   }
 
-  public isDescriptorType(type: Type): boolean {
+  public readonly isDescriptorType(type: Type): boolean {
     if (type.kind != TypeKind.Object) {
       return false;
     }
@@ -151,11 +151,11 @@ export class DecoratorRules {
     return type.fields.some((field) => field.name == kDescriptorValueName);
   }
 
-  public isPositionType(type: Type): boolean {
+  public readonly isPositionType(type: Type): boolean {
     return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
   }
 
-  public decoratorLabel(expr: Expr): string {
+  public readonly decoratorLabel(expr: Expr): string {
     const name = this.decoratorName(expr);
     if (name == "") {
       return "the decorator";
@@ -164,7 +164,7 @@ export class DecoratorRules {
     return `'${name}'`;
   }
 
-  public decoratedConstructorsCheck(decl: ClassDecl): SourceError | undefined {
+  public readonly decoratedConstructorsCheck(decl: ClassDecl): SourceError | undefined {
     const decorated = decl.constructors.filter((fn) =>
       this.hasDecoratedParams(fn),
     );
@@ -182,10 +182,10 @@ export class DecoratorRules {
     };
   }
 
-  public nameClashCheck(
+  public readonly nameClashCheck(
     decl: ClassDecl,
-    earlier: DecoratedName[],
-    later: DecoratedName,
+    earlier: Read<DecoratedName[]>,
+    later: Read<DecoratedName>,
   ): SourceError | undefined {
     const other = earlier.find((one) => one.name == later.name);
     if (other == undefined) {
@@ -206,7 +206,7 @@ export class DecoratorRules {
     };
   }
 
-  public parameterPlaceCheck(fn: FunctionDecl): SourceError[] {
+  public readonly parameterPlaceCheck(fn: FunctionDecl): SourceError[] {
     const errors: SourceError[] = [];
 
     if (fn.role != undefined) {
@@ -227,7 +227,7 @@ export class DecoratorRules {
     return errors;
   }
 
-  public decoratorFit(
+  public readonly decoratorFit(
     use: DecoratorUse,
     place: DecoratorPlace,
     type: Type,
@@ -293,7 +293,7 @@ export class DecoratorRules {
     return { value: count };
   }
 
-  public decoratedNamesCheck(decl: ClassDecl): SourceError[] {
+  public readonly decoratedNamesCheck(decl: ClassDecl): SourceError[] {
     const errors: SourceError[] = [];
 
     const members = this.decoratedNames(decl);
@@ -316,7 +316,7 @@ export class DecoratorRules {
     return errors;
   }
 
-  public decoratedNames(decl: ClassDecl): DecoratedName[] {
+  public readonly decoratedNames(decl: ClassDecl): DecoratedName[] {
     const members: DecoratedName[] = [];
 
     for (const field of decl.fields) {
@@ -346,7 +346,7 @@ export class DecoratorRules {
     return members;
   }
 
-  public memberRuns(decl: ClassDecl): DecorateRun[] {
+  public readonly memberRuns(decl: ClassDecl): DecorateRun[] {
     const runs: DecorateRun[] = [];
 
     for (const field of decl.fields) {
@@ -388,13 +388,13 @@ export class DecoratorRules {
     return instance.concat(statics);
   }
 
-  private isDecoratedFunction(fn: FunctionDecl): boolean {
+  private readonly isDecoratedFunction(fn: FunctionDecl): boolean {
     const own = fn.role?.decorators ?? [];
 
     return own.length > 0 || this.hasDecoratedParams(fn);
   }
 
-  private decoratorName(expr: Expr): string {
+  private readonly decoratorName(expr: Expr): string {
     const names: string[] = [];
     let link = this.withoutCalls(expr);
 
@@ -410,7 +410,7 @@ export class DecoratorRules {
     return [link.name].concat(names.reverse()).join(".");
   }
 
-  private withoutCalls(expr: Expr): Expr {
+  private readonly withoutCalls(expr: Expr): Expr {
     let callee = expr;
 
     while (callee.kind == ExprKind.Call) {

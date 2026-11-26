@@ -18,7 +18,7 @@ import {
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private redeclareChecks(decl: ClassDecl, module: int): void {
+  private readonly redeclareChecks(decl: ClassDecl, module: int): void {
     const hasParent = decl.base != undefined || decl.baseExpr != undefined;
     const self = this.declaredInstance(decl, module);
     if (self == undefined) {
@@ -47,7 +47,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private declaredInstance(
+  private readonly declaredInstance(
     decl: ClassDecl,
     module: int,
   ): InstanceType | undefined {
@@ -60,7 +60,7 @@ partial class ExpressionTypes {
     return instance;
   }
 
-  private redeclareCheck(
+  private readonly redeclareCheck(
     decl: ClassDecl,
     self: InstanceType,
     field: ClassField,
@@ -123,7 +123,7 @@ partial class ExpressionTypes {
     this.fieldLayoutCheck(decl, own, entry, module);
   }
 
-  private parentMethodChecks(decl: ClassDecl, module: int): void {
+  private readonly parentMethodChecks(decl: ClassDecl, module: int): void {
     const self = this.declaredInstance(decl, module);
     if (self == undefined) {
       return;
@@ -141,7 +141,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private parentMethodCheck(
+  private readonly parentMethodCheck(
     field: ClassField,
     parent: InstanceType,
     module: int,
@@ -160,10 +160,10 @@ partial class ExpressionTypes {
     this.report(module, field.loc, Code.ParentMethodField, { word, first });
   }
 
-  private fieldLayoutCheck(
+  private readonly fieldLayoutCheck(
     decl: ClassDecl,
-    own: ClassMemberEntry,
-    theirs: ClassMemberEntry,
+    own: Read<ClassMemberEntry>,
+    theirs: Read<ClassMemberEntry>,
     module: int,
   ): void {
     const field = own.field;
@@ -189,9 +189,9 @@ partial class ExpressionTypes {
     });
   }
 
-  private methodOverFieldCheck(
+  private readonly methodOverFieldCheck(
     method: FunctionDecl,
-    entry: ClassMemberEntry,
+    entry: Read<ClassMemberEntry>,
     parent: InstanceType,
     module: int,
   ): boolean {
@@ -202,7 +202,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private extendsCycleCheck(decl: ClassDecl, module: int): void {
+  private readonly extendsCycleCheck(decl: ClassDecl, module: int): void {
     const base = decl.base;
     const self = this.declaredInstance(decl, module);
     if (base == undefined || self == undefined) {
@@ -233,7 +233,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private cycleThrough(self: InstanceType, decl: ClassDecl): InstanceType[] {
+  private readonly cycleThrough(self: InstanceType, decl: ClassDecl): InstanceType[] {
     const chain: InstanceType[] = [self];
     let current = this.classes.parentOf(self, decl);
 
@@ -256,7 +256,7 @@ partial class ExpressionTypes {
     return [];
   }
 
-  private noteSelfCall(member: MemberExpr, module: int): void {
+  private readonly noteSelfCall(member: MemberExpr, module: int): void {
     const fn = this.openFunctions[this.openFunctions.length - 1];
     if (fn == undefined || fn.role == undefined || fn.isArrow) {
       return;
@@ -265,16 +265,14 @@ partial class ExpressionTypes {
       return;
     }
 
-    const calls = this.selfCalls.get(fn) ?? [];
+    const calls = this.selfCalls.getOrInsert(fn, []);
 
     if (!calls.includes(member)) {
       calls.push(member);
     }
-
-    this.selfCalls.set(fn, calls);
   }
 
-  private overriddenCallChecks(decl: ClassDecl, module: int): void {
+  private readonly overriddenCallChecks(decl: ClassDecl, module: int): void {
     const self = this.declaredInstance(decl, module);
     if (self == undefined || decl.typeParams.length > 0) {
       return;
@@ -288,14 +286,19 @@ partial class ExpressionTypes {
     for (const fn of decl.constructors) {
       for (const site of this.selfCalls.get(fn) ?? []) {
         const visited = new Set<FunctionDecl>([fn]);
-        const found: OverriddenSite = { self, children, visited, module };
+        const found: OverriddenSite = {
+          self,
+          children: children.slice(),
+          visited,
+          module,
+        };
 
         this.overriddenCall(found, site, site, decl);
       }
     }
   }
 
-  private overriddenCall(
+  private readonly overriddenCall(
     found: OverriddenSite,
     site: MemberExpr,
     call: MemberExpr,
@@ -329,7 +332,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private childClassesOf(self: InstanceType): ClassDecl[] {
+  private readonly childClassesOf(self: InstanceType): ClassDecl[] {
     const children: ClassDecl[] = [];
 
     for (const [module, record] of this.records) {
@@ -343,7 +346,7 @@ partial class ExpressionTypes {
     return children;
   }
 
-  private isChildClass(
+  private readonly isChildClass(
     decl: ClassDecl,
     module: int,
     ancestor: InstanceType,
@@ -362,7 +365,7 @@ partial class ExpressionTypes {
     return chain.some((one) => this.types.isSameClass(one, ancestor));
   }
 
-  private cycleFreeParents(
+  private readonly cycleFreeParents(
     self: InstanceType,
     decl: ClassDecl,
   ): InstanceType[] {

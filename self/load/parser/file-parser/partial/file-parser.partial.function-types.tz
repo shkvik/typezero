@@ -10,7 +10,7 @@ import {
 import { Signature } from "../types/file-parser.types.function-types.tz";
 
 partial class FileParser {
-  private subjectAhead(): boolean {
+  private readonly subjectAhead(): boolean {
     const next = this.cursor.lookahead();
     const subject =
       kTokenTable.isName(next.kind) || next.kind == TokenKind.This;
@@ -18,7 +18,7 @@ partial class FileParser {
     return subject && !next.newline;
   }
 
-  private isAhead(): boolean {
+  private readonly isAhead(): boolean {
     const next = this.cursor.lookahead();
 
     return next.kind == TokenKind.Is && !next.newline;
@@ -127,8 +127,8 @@ partial class FileParser {
     return this.functionTypeOf(signature, result);
   }
 
-  private functionTypeOf(
-    signature: Signature,
+  private readonly functionTypeOf(
+    signature: Own<Signature>,
     result: TypeRef | undefined,
   ): TypeRef {
     const ref = this.typeRef(signature.loc);

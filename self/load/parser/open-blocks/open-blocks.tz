@@ -8,17 +8,17 @@ import { Token, TokenKind } from "../../token/types/token.types.tz";
 import { LeftBlock } from "./types/open-blocks.types.tz";
 
 export class OpenBlocks {
-  private readonly tokens: Token[];
+  private readonly tokens: readonly Token[];
   private readonly lines: SourceLines;
   private readonly closedBefore: int[];
 
-  public constructor(source: Buffer, tokens: Token[]) {
+  public constructor(source: Own<Buffer>, tokens: readonly Token[]) {
     this.tokens = tokens;
     this.lines = new SourceLines(source);
     this.closedBefore = [];
   }
 
-  public explain(errors: SourceError[]): SourceError[] {
+  public explain(errors: Own<SourceError[]>): SourceError[] {
     if (errors.length == 0) {
       return errors;
     }
@@ -38,9 +38,9 @@ export class OpenBlocks {
     return named;
   }
 
-  private upToUnterminated(
+  private readonly upToUnterminated(
     unterminated: SourceError,
-    errors: SourceError[],
+    errors: Read<SourceError[]>,
   ): SourceError[] {
     const loc = unterminated.loc;
     const earlier = errors.filter((error) => error.loc < loc);
@@ -62,11 +62,11 @@ export class OpenBlocks {
     return earlier.concat([moved]);
   }
 
-  private closesSubstitution(error: SourceError): boolean {
+  private readonly closesSubstitution(error: SourceError): boolean {
     return error.code == Code.ExpectedSubstitutionClose;
   }
 
-  private takesBraces(error: SourceError): boolean {
+  private readonly takesBraces(error: SourceError): boolean {
     switch (error.code) {
       case Code.UnterminatedComment:
       case Code.UnterminatedTemplate:
@@ -76,14 +76,14 @@ export class OpenBlocks {
     }
   }
 
-  private reportedInside(left: LeftBlock, errors: SourceError[]): boolean {
+  private readonly reportedInside(left: LeftBlock, errors: Read<SourceError[]>): boolean {
     const from = this.startOf(left.block);
     const to = this.startOf(left.at);
 
     return errors.some((error) => error.loc >= from && error.loc < to);
   }
 
-  private upToLeftBlock(left: LeftBlock, errors: SourceError[]): SourceError[] {
+  private readonly upToLeftBlock(left: LeftBlock, errors: Read<SourceError[]>): SourceError[] {
     const loc = this.startOf(left.at);
     const line = this.lineOf(left.block);
     const earlier = errors.filter((error) => error.loc < loc);
@@ -96,7 +96,7 @@ export class OpenBlocks {
     return earlier.concat([notClosed]);
   }
 
-  private withBlocksBeforeElse(errors: SourceError[]): SourceError[] {
+  private withBlocksBeforeElse(errors: Read<SourceError[]>): SourceError[] {
     const placed: SourceError[] = [];
 
     for (const error of errors) {
@@ -122,7 +122,7 @@ export class OpenBlocks {
     return { code: error.code, loc, details: { word: `${line}` } };
   }
 
-  private withOpeningLine(error: SourceError): SourceError {
+  private readonly withOpeningLine(error: SourceError): SourceError {
     const opener = this.openerOf(error.details.expected);
     if (opener == undefined) {
       return error;
@@ -134,7 +134,7 @@ export class OpenBlocks {
     return { code: error.code, loc: error.loc, details };
   }
 
-  private openerOf(closer: TokenKind | undefined): TokenKind | undefined {
+  private readonly openerOf(closer: TokenKind | undefined): TokenKind | undefined {
     switch (closer) {
       case TokenKind.RBrace:
         return TokenKind.LBrace;
@@ -147,7 +147,7 @@ export class OpenBlocks {
     }
   }
 
-  private openingLine(loc: int, opener: TokenKind): int {
+  private readonly openingLine(loc: int, opener: TokenKind): int {
     const opening = this.openingBefore(loc, opener);
     if (opening == undefined) {
       const place = this.lines.placeOf(loc);
@@ -158,7 +158,7 @@ export class OpenBlocks {
     return this.lineOf(opening);
   }
 
-  private openingBefore(loc: int, opener: TokenKind): int | undefined {
+  private readonly openingBefore(loc: int, opener: TokenKind): int | undefined {
     if (opener == TokenKind.LBrace) {
       return this.blockBefore(loc);
     }
@@ -166,7 +166,7 @@ export class OpenBlocks {
     return this.groupBefore(loc, opener);
   }
 
-  private blockBefore(loc: int): int | undefined {
+  private readonly blockBefore(loc: int): int | undefined {
     const tokens = this.tokens;
     const open: int[] = [];
 
@@ -182,7 +182,7 @@ export class OpenBlocks {
     return open[open.length - 1];
   }
 
-  private groupBefore(loc: int, opener: TokenKind): int | undefined {
+  private readonly groupBefore(loc: int, opener: TokenKind): int | undefined {
     const tokens = this.tokens;
     const open: int[] = [];
 
@@ -200,7 +200,7 @@ export class OpenBlocks {
     return open[depth];
   }
 
-  private followGroups(open: int[], index: int, kind: TokenKind): void {
+  private readonly followGroups(open: int[], index: int, kind: TokenKind): void {
     switch (kind) {
       case TokenKind.LBrace:
       case TokenKind.LParen:
@@ -217,7 +217,7 @@ export class OpenBlocks {
     }
   }
 
-  private closeGroup(open: int[], closer: TokenKind): void {
+  private readonly closeGroup(open: int[], closer: TokenKind): void {
     const opener = this.openerOf(closer);
     if (opener == undefined) {
       return;
@@ -233,7 +233,7 @@ export class OpenBlocks {
     }
   }
 
-  private depthOf(open: int[], opener: TokenKind): int {
+  private readonly depthOf(open: Read<int[]>, opener: TokenKind): int {
     for (let depth = open.length - 1; depth >= 0; depth--) {
       const index = open[depth];
       if (index != undefined && this.kindOf(index) == opener) {
@@ -244,7 +244,7 @@ export class OpenBlocks {
     return -1;
   }
 
-  private leftBlock(): LeftBlock | undefined {
+  private readonly leftBlock(): LeftBlock | undefined {
     const tokens = this.tokens;
     const open: int[] = [];
     const left: LeftBlock[] = [];
@@ -267,7 +267,7 @@ export class OpenBlocks {
     return left[0];
   }
 
-  private follow(open: int[], index: int, kind: TokenKind): void {
+  private readonly follow(open: int[], index: int, kind: TokenKind): void {
     if (this.closedBefore.includes(index)) {
       open.pop();
     }
@@ -284,7 +284,7 @@ export class OpenBlocks {
     }
   }
 
-  private leavesBlock(open: int[], index: int, kind: TokenKind): boolean {
+  private readonly leavesBlock(open: Read<int[]>, index: int, kind: TokenKind): boolean {
     switch (kind) {
       case TokenKind.End:
         return false;
@@ -301,7 +301,7 @@ export class OpenBlocks {
     }
   }
 
-  private contentColumn(block: int | undefined): int {
+  private readonly contentColumn(block: int | undefined): int {
     if (block == undefined) {
       return 0;
     }
@@ -314,13 +314,13 @@ export class OpenBlocks {
     return this.columnOf(first);
   }
 
-  private startsLine(index: int): boolean {
+  private readonly startsLine(index: int): boolean {
     const token = this.tokens[index];
 
     return token != undefined && token.newline;
   }
 
-  private kindOf(index: int): TokenKind {
+  private readonly kindOf(index: int): TokenKind {
     const token = this.tokens[index];
     if (token == undefined) {
       return TokenKind.End;
@@ -329,7 +329,7 @@ export class OpenBlocks {
     return token.kind;
   }
 
-  private startOf(index: int): int {
+  private readonly startOf(index: int): int {
     const token = this.tokens[index];
     if (token == undefined) {
       return 0;
@@ -338,14 +338,14 @@ export class OpenBlocks {
     return token.start;
   }
 
-  private columnOf(index: int): int {
+  private readonly columnOf(index: int): int {
     const start = this.startOf(index);
     const place = this.lines.placeOf(start);
 
     return place.column;
   }
 
-  private lineOf(index: int): int {
+  private readonly lineOf(index: int): int {
     const start = this.startOf(index);
     const place = this.lines.placeOf(start);
 

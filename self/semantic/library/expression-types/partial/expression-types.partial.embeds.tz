@@ -12,7 +12,7 @@ import {
 } from "../../library-rules/const/library-rules.const.tz";
 
 partial class ExpressionTypes {
-  private embedCheck(expr: CallExpr, module: int): void {
+  private readonly embedCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Name || this.modules.isLibraryModule(module)) {
       return;
@@ -65,7 +65,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private embedExample(name: string): string {
+  private readonly embedExample(name: string): string {
     if (name == kEmbedTextName) {
       return `${name}("./page.html")`;
     }
@@ -73,7 +73,7 @@ partial class ExpressionTypes {
     return `${name}("./data.json")`;
   }
 
-  private isRelativePath(path: string): boolean {
+  private readonly isRelativePath(path: string): boolean {
     if (path == "" || path.startsWith("/")) {
       return false;
     }

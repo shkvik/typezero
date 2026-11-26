@@ -61,7 +61,7 @@ partial class Lowering {
     return isValueManaged || isErrorManaged;
   }
 
-  private owning(frame: Frame, value: IrValue): IrValue {
+  private owning(frame: Read<Frame>, value: IrValue): IrValue {
     const isFree =
       value.owned == true ||
       !this.isManaged(value.tz) ||
@@ -73,7 +73,7 @@ partial class Lowering {
     return { type: value.type, value: value.value, tz: value.tz, owned: true };
   }
 
-  private dropping(frame: Frame, value: IrValue): void {
+  private dropping(frame: Read<Frame>, value: IrValue): void {
     const isOwned =
       value.owned == true &&
       this.isManaged(value.tz) &&
@@ -83,7 +83,7 @@ partial class Lowering {
     }
   }
 
-  private countCall(frame: Frame, isRetain: boolean, value: IrValue): void {
+  private countCall(frame: Read<Frame>, isRetain: boolean, value: IrValue): void {
     const inner = this.optionalInner(value.tz);
     if (inner != undefined) {
       const inside = this.insideValue(frame, value, inner);
@@ -120,7 +120,7 @@ partial class Lowering {
     return this.countHelper(name, isRetain, CountForm.Pointer);
   }
 
-  private openScope(frame: Frame): void {
+  private readonly openScope(frame: Frame): void {
     frame.scopes.push([]);
   }
 
@@ -133,7 +133,7 @@ partial class Lowering {
     this.scopeCleanup(frame, scope);
   }
 
-  private cleanupsTo(frame: Frame, depth: int): void {
+  private cleanupsTo(frame: Read<Frame>, depth: int): void {
     for (let index = frame.scopes.length - 1; index >= depth; index--) {
       const scope = frame.scopes[index];
       if (scope != undefined) {
@@ -142,7 +142,7 @@ partial class Lowering {
     }
   }
 
-  private scopeCleanup(frame: Frame, scope: Place[]): void {
+  private scopeCleanup(frame: Read<Frame>, scope: Read<Place[]>): void {
     for (let index = scope.length - 1; index >= 0; index--) {
       const place = scope[index];
       if (place != undefined) {
@@ -151,9 +151,8 @@ partial class Lowering {
     }
   }
 
-  private placeReleased(frame: Frame, place: Place): void {
-    const made = frame.made;
-    const loaded = made.load(place.type, place.pointer);
+  private placeReleased(frame: Read<Frame>, place: Place): void {
+    const loaded = frame.made.load(place.type, place.pointer);
     const value: IrValue = {
       type: place.type,
       value: loaded,
@@ -161,7 +160,7 @@ partial class Lowering {
       owned: true,
     };
 
-    made.store(this.ir.zero(place.type), place.pointer);
+    frame.made.store(this.ir.zero(place.type), place.pointer);
     this.dropping(frame, value);
   }
 
@@ -172,14 +171,13 @@ partial class Lowering {
     }
   }
 
-  private stored(frame: Frame, place: Place, value: IrValue): void {
-    const made = frame.made;
+  private stored(frame: Read<Frame>, place: Place, value: IrValue): void {
     const owned = this.owning(frame, value);
     if (!this.isManaged(place.tz)) {
-      return made.store(owned.value, place.pointer);
+      return frame.made.store(owned.value, place.pointer);
     }
 
-    const before = made.load(place.type, place.pointer);
+    const before = frame.made.load(place.type, place.pointer);
     const old: IrValue = {
       type: place.type,
       value: before,
@@ -187,11 +185,11 @@ partial class Lowering {
       owned: true,
     };
 
-    made.store(owned.value, place.pointer);
+    frame.made.store(owned.value, place.pointer);
     this.dropping(frame, old);
   }
 
-  private countHelper(
+  private readonly countHelper(
     name: string,
     isRetain: boolean,
     form: CountForm,
@@ -231,7 +229,7 @@ partial class Lowering {
     return made.callee;
   }
 
-  private countParam(form: CountForm): string {
+  private readonly countParam(form: CountForm): string {
     switch (form) {
       case CountForm.Text:
         return kStringType;
@@ -242,7 +240,7 @@ partial class Lowering {
     }
   }
 
-  private freeName(form: CountForm): string {
+  private readonly freeName(form: CountForm): string {
     switch (form) {
       case CountForm.Text:
         return kStringFree;
@@ -253,7 +251,7 @@ partial class Lowering {
     }
   }
 
-  private countedObject(
+  private readonly countedObject(
     made: IrFunction,
     argument: LLVMValue,
     form: CountForm,
@@ -271,7 +269,7 @@ partial class Lowering {
     }
   }
 
-  private isCountedTest(
+  private readonly isCountedTest(
     made: IrFunction,
     argument: LLVMValue,
     form: CountForm,
@@ -288,7 +286,7 @@ partial class Lowering {
     return made.integerCompare(IrIntPredicate.NotEqual, argument, none);
   }
 
-  private lastReference(
+  private readonly lastReference(
     made: IrFunction,
     object: LLVMValue,
     count: LLVMValue,
@@ -309,7 +307,7 @@ partial class Lowering {
     made.open(after);
   }
 
-  private instanceReleaseHelper(): IrCallee {
+  private readonly instanceReleaseHelper(): IrCallee {
     const known = this.ir.callee(kInstanceRelease);
     if (known != undefined) {
       return known;

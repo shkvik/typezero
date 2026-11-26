@@ -27,7 +27,7 @@ import {
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private variantRules(decl: ClassDecl, module: int): void {
+  private readonly variantRules(decl: ClassDecl, module: int): void {
     for (const variants of this.variantGroups(decl)) {
       const what = this.variantsWhat(variants);
 
@@ -35,7 +35,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private variantGroups(decl: ClassDecl): FunctionDecl[][] {
+  private readonly variantGroups(decl: ClassDecl): FunctionDecl[][] {
     const seen = new Set<string>();
     const groups: FunctionDecl[][] = [];
 
@@ -61,7 +61,7 @@ partial class ExpressionTypes {
     return groups;
   }
 
-  private variantsWhat(variants: FunctionDecl[]): string {
+  private readonly variantsWhat(variants: Read<FunctionDecl[]>): string {
     const first = variants[0];
     const isConstructor = first?.role?.method == MethodKind.Constructor;
     if (first == undefined || isConstructor) {
@@ -71,9 +71,9 @@ partial class ExpressionTypes {
     return `'${first.name}'`;
   }
 
-  private variantPairs(
+  private readonly variantPairs(
     decl: ClassDecl,
-    variants: FunctionDecl[],
+    variants: Read<FunctionDecl[]>,
     what: string,
     module: int,
   ): void {
@@ -102,7 +102,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private variantPairCheck(
+  private readonly variantPairCheck(
     first: FunctionDecl,
     second: FunctionDecl,
     one: FunctionType,
@@ -123,10 +123,10 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private overloadCall(
+  private readonly overloadCall(
     expr: CallExpr,
     member: MemberExpr,
-    entry: ClassMemberEntry,
+    entry: Read<ClassMemberEntry>,
     module: int,
   ): Type {
     const error = this.store.plain(TypeKind.Error);
@@ -155,7 +155,7 @@ partial class ExpressionTypes {
     return this.calledWith(expr, chosen.type, member.loc, CallKind.Own, module);
   }
 
-  private rankedVariants(entry: ClassMemberEntry): RankedVariant[] {
+  private readonly rankedVariants(entry: Read<ClassMemberEntry>): RankedVariant[] {
     const ranked: RankedVariant[] = [];
     const seen = new Set<string>();
     let current: ClassMemberEntry | undefined = entry;
@@ -176,7 +176,7 @@ partial class ExpressionTypes {
     return ranked;
   }
 
-  private addVariants(entry: ClassMemberEntry, ranked: RankedVariant[]): void {
+  private readonly addVariants(entry: Read<ClassMemberEntry>, ranked: RankedVariant[]): void {
     for (const fn of entry.methods) {
       const type = this.methodTypeOf(entry, fn);
       if (type.kind != TypeKind.Function) {
@@ -192,8 +192,8 @@ partial class ExpressionTypes {
     }
   }
 
-  private parentVariants(
-    entry: ClassMemberEntry,
+  private readonly parentVariants(
+    entry: Read<ClassMemberEntry>,
     name: string,
   ): ClassMemberEntry | undefined {
     const parent = this.classes.parentOf(entry.instance, entry.owner);
@@ -209,9 +209,9 @@ partial class ExpressionTypes {
     return found;
   }
 
-  private chosenVariant(
-    args: CallArgument[],
-    ranked: RankedVariant[],
+  private readonly chosenVariant(
+    args: Read<CallArgument[]>,
+    ranked: Read<RankedVariant[]>,
     what: string,
     loc: int,
     module: int,
@@ -247,9 +247,9 @@ partial class ExpressionTypes {
     return this.rankedChoice(args, counted, what, loc, module);
   }
 
-  private rankedChoice(
-    args: CallArgument[],
-    counted: RankedVariant[],
+  private readonly rankedChoice(
+    args: Read<CallArgument[]>,
+    counted: Read<RankedVariant[]>,
     what: string,
     loc: int,
     module: int,
@@ -309,13 +309,13 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private quietArguments(args: CallArgument[], module: int): Type[] {
+  private readonly quietArguments(args: Read<CallArgument[]>, module: int): Type[] {
     return args.map((arg) => this.peekType(arg.expr, module));
   }
 
-  private variantRanks(
-    args: CallArgument[],
-    given: Type[],
+  private readonly variantRanks(
+    args: Read<CallArgument[]>,
+    given: Read<Type[]>,
     variant: RankedVariant,
     module: int,
   ): string {
@@ -347,7 +347,7 @@ partial class ExpressionTypes {
     return "";
   }
 
-  private argumentRank(
+  private readonly argumentRank(
     expr: Expr,
     type: Type,
     param: Type,
@@ -374,7 +374,7 @@ partial class ExpressionTypes {
     return 1;
   }
 
-  private isAdaptingLiteral(
+  private readonly isAdaptingLiteral(
     expr: Expr,
     type: Type,
     param: Type,
@@ -401,16 +401,16 @@ partial class ExpressionTypes {
     return adapted != undefined;
   }
 
-  private isFittingLiteral(expr: Expr, param: Type, module: int): boolean {
+  private readonly isFittingLiteral(expr: Expr, param: Type, module: int): boolean {
     this.errors.beginTrial();
     this.checked(expr, param, module, kNoPlace);
 
     return this.errors.endTrial();
   }
 
-  private variantValueCheck(
+  private readonly variantValueCheck(
     expr: MemberExpr,
-    entry: ClassMemberEntry,
+    entry: Read<ClassMemberEntry>,
     module: int,
   ): void {
     const ranked = this.rankedVariants(entry);
@@ -418,9 +418,9 @@ partial class ExpressionTypes {
     this.rankedValueCheck(expr, ranked, module);
   }
 
-  private rankedValueCheck(
+  private readonly rankedValueCheck(
     expr: MemberExpr,
-    ranked: RankedVariant[],
+    ranked: Read<RankedVariant[]>,
     module: int,
   ): void {
     if (this.argumentExprs.has(expr) || this.isTypedInit(expr, module)) {
@@ -448,7 +448,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private isTypedInit(expr: Expr, module: int): boolean {
+  private readonly isTypedInit(expr: Expr, module: int): boolean {
     const variables = this.record(module)?.variables;
     if (variables == undefined) {
       return false;
@@ -464,11 +464,11 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private constructorChoice(
+  private readonly constructorChoice(
     expr: Expr,
-    args: CallArgument[],
-    targets: CallTarget[],
-    variants: FunctionDecl[],
+    args: Read<CallArgument[]>,
+    targets: Read<CallTarget[]>,
+    variants: Read<FunctionDecl[]>,
     name: string,
     module: int,
   ): CallTarget | undefined {

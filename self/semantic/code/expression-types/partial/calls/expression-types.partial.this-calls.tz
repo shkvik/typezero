@@ -12,7 +12,7 @@ import {
 import { CallKind } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private thisMethodCall(
+  private readonly thisMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     type: FunctionType,

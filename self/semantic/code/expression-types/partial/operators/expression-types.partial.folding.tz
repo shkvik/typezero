@@ -14,7 +14,7 @@ import {
 import { kRoundDown } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private foldBinary(expr: BinaryExpr, type: Type, module: int): void {
+  private readonly foldBinary(expr: BinaryExpr, type: Type, module: int): void {
     if (type.kind != TypeKind.Int || type.wraps) {
       return;
     }
@@ -49,7 +49,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private foldUnsigned(expr: BinaryExpr, type: IntType, module: int): void {
+  private readonly foldUnsigned(expr: BinaryExpr, type: IntType, module: int): void {
     const left = this.rawConstant(expr.lhs, type, module);
     const right = this.rawConstant(expr.rhs, type, module);
     if (left == undefined || right == undefined) {
@@ -76,7 +76,7 @@ partial class ExpressionTypes {
     this.reportFound(module, overflowError);
   }
 
-  private foldUnary(expr: UnaryExpr, type: Type, module: int): void {
+  private readonly foldUnary(expr: UnaryExpr, type: Type, module: int): void {
     if (type.kind != TypeKind.Int || type.wraps) {
       return;
     }
@@ -106,7 +106,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private settle(expr: Expr, type: IntType, value: decimal, module: int): void {
+  private readonly settle(expr: Expr, type: IntType, value: decimal, module: int): void {
     if (this.integers.isInside(value, type)) {
       this.answers.fold(expr, value);
 
@@ -125,7 +125,7 @@ partial class ExpressionTypes {
     this.reportFound(module, overflowError);
   }
 
-  private foldDivision(
+  private readonly foldDivision(
     expr: BinaryExpr,
     type: IntType,
     left: decimal,
@@ -144,7 +144,7 @@ partial class ExpressionTypes {
     this.settle(expr, type, quotient, module);
   }
 
-  private foldPower(
+  private readonly foldPower(
     expr: BinaryExpr,
     type: IntType,
     base: decimal,
@@ -175,7 +175,7 @@ partial class ExpressionTypes {
     this.reportFound(module, overflowError);
   }
 
-  private foldBits(
+  private readonly foldBits(
     expr: BinaryExpr,
     type: IntType,
     left: decimal,
@@ -203,7 +203,7 @@ partial class ExpressionTypes {
     this.answers.fold(expr, value);
   }
 
-  private foldShift(
+  private readonly foldShift(
     expr: BinaryExpr,
     shifted: IntType,
     value: decimal,

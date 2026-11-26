@@ -26,7 +26,7 @@ import { kIterableName } from "../../../index-rules/const/index-rules.const.tz";
 import { kConcurrentMapName } from "../../../../library/fetch-rules/const/fetch-rules.const.tz";
 
 partial class ExpressionTypes {
-  private iterablePlaceCheck(fn: FunctionDecl, module: int): void {
+  private readonly iterablePlaceCheck(fn: FunctionDecl, module: int): void {
     for (const param of fn.params) {
       const ref = this.iterableRef(param.type);
       if (ref != undefined) {
@@ -40,7 +40,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private iterableParamCheck(
+  private readonly iterableParamCheck(
     fn: FunctionDecl,
     ref: TypeRef,
     module: int,
@@ -61,13 +61,13 @@ partial class ExpressionTypes {
     }
   }
 
-  private isTopFunction(fn: FunctionDecl, module: int): boolean {
+  private readonly isTopFunction(fn: FunctionDecl, module: int): boolean {
     const items = this.program.modules[module]?.file.items ?? [];
 
     return items.includes(fn);
   }
 
-  private iterableRef(root: TypeRef | undefined): TypeRef | undefined {
+  private readonly iterableRef(root: TypeRef | undefined): TypeRef | undefined {
     if (root == undefined) {
       return undefined;
     }
@@ -75,7 +75,7 @@ partial class ExpressionTypes {
     return this.resolver.namedRefs(root, kIterableName)[0];
   }
 
-  private iterableElementText(ref: TypeRef, module: int): string {
+  private readonly iterableElementText(ref: TypeRef, module: int): string {
     const arg = ref.args[0];
     if (arg == undefined) {
       return "T";
@@ -91,17 +91,17 @@ partial class ExpressionTypes {
     return this.text.of(type);
   }
 
-  private iterableAnnotationCheck(ref: TypeRef | undefined, module: int): void {
+  private readonly iterableAnnotationCheck(ref: TypeRef | undefined, module: int): void {
     const found = this.iterableRef(ref);
     if (found != undefined) {
       this.report(module, found.loc, Code.IterableNotParameter, kNoDetails);
     }
   }
 
-  private iterableArgumentCheck(
+  private readonly iterableArgumentCheck(
     slot: ArgumentSlot,
     to: Type,
-    target: CallTarget,
+    target: Read<CallTarget>,
     module: int,
   ): boolean {
     const wanted = this.indexes.iterableItem(to);
@@ -141,7 +141,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private iteratedItem(given: Type): Type | undefined {
+  private readonly iteratedItem(given: Type): Type | undefined {
     const base = this.types.apparent(given);
 
     switch (base.kind) {
@@ -165,7 +165,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private instanceItem(instance: InstanceType): Type | undefined {
+  private readonly instanceItem(instance: InstanceType): Type | undefined {
     if (this.isDeclaredLibrary(instance.module, instance.loc)) {
       return this.store.plain(TypeKind.Error);
     }
@@ -189,7 +189,7 @@ partial class ExpressionTypes {
     return result.shape.yielded;
   }
 
-  private instanceLoopCheck(
+  private readonly instanceLoopCheck(
     loop: Expr,
     instance: InstanceType,
     module: int,
@@ -240,7 +240,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private isConcurrentMap(instance: InstanceType): boolean {
+  private readonly isConcurrentMap(instance: InstanceType): boolean {
     return (
       this.modules.isTypedLibrary(instance.module) &&
       instance.name == kConcurrentMapName

@@ -11,7 +11,7 @@ import {
 } from "../../../../../program/type/types/type.types.tz";
 
 partial class ExpressionTypes {
-  private unknownMemberCheck(
+  private readonly unknownMemberCheck(
     expr: MemberExpr,
     object: Type,
     module: int,
@@ -23,7 +23,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private unknownCallCheck(
+  private readonly unknownCallCheck(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -47,7 +47,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private unknownIndexCheck(
+  private readonly unknownIndexCheck(
     expr: IndexExpr,
     object: Type,
     module: int,
@@ -68,7 +68,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private unknownCheckText(expr: Expr, given: Type, wanted: Type): string {
+  private readonly unknownCheckText(expr: Expr, given: Type, wanted: Type): string {
     const shown = this.sources.operandName(expr);
     const only = this.types.onlyPart(wanted);
     const target = this.types.definedType(only);
@@ -82,7 +82,7 @@ partial class ExpressionTypes {
     return this.typeofCheckText(shown, target);
   }
 
-  private typeofCheckText(shown: string, target: Type): string {
+  private readonly typeofCheckText(shown: string, target: Type): string {
     const base = this.types.apparent(target);
 
     switch (base.kind) {

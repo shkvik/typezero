@@ -1,4 +1,5 @@
 import { TypeResolver } from "../type-resolver.tz";
+import { kCellName } from "../const/type-resolver.const.tables.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
 import {
@@ -28,7 +29,7 @@ import {
 } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  private tuple(ref: TypeRef, form: TupleTypeForm, context: TypeContext): Type {
+  private readonly tuple(ref: TypeRef, form: TupleTypeForm, context: TypeContext): Type {
     const items: Type[] = [];
     const spreads: int[] = [];
 
@@ -62,15 +63,17 @@ partial class TypeResolver {
       return this.store.plain(TypeKind.Error);
     }
 
+    const required = items.length;
+
     return this.store.tupleOf({
       items,
       readonly: form.readonly,
-      required: items.length,
+      required,
       rest: spreads[spreads.length - 1] ?? -1,
     });
   }
 
-  private typeListCheck(item: Type, loc: int, context: TypeContext): void {
+  private readonly typeListCheck(item: Type, loc: int, context: Read<TypeContext>): void {
     if (item.kind != TypeKind.TypeParameter) {
       return;
     }
@@ -83,9 +86,9 @@ partial class TypeResolver {
     }
   }
 
-  private spreadProblem(
-    items: Type[],
-    spreads: int[],
+  private readonly spreadProblem(
+    items: Read<Type[]>,
+    spreads: Read<int[]>,
     place: TypePlace,
   ): Code | undefined {
     const last = items.length - 1;
@@ -106,7 +109,7 @@ partial class TypeResolver {
     return undefined;
   }
 
-  private object(
+  private readonly object(
     form: ObjectTypeForm,
     context: TypeContext,
     declared: boolean,
@@ -140,18 +143,21 @@ partial class TypeResolver {
         continue;
       }
 
+      const cell = field.type.name == kCellName && field.type.args.length == 1;
+
       fields.push({
         name: field.name,
         type,
         optional: field.optional,
         readonly: field.readonly,
+        cell,
       });
     }
 
     return this.store.objectOf(fields);
   }
 
-  private isOverloaded(form: ObjectTypeForm, name: string): boolean {
+  private readonly isOverloaded(form: ObjectTypeForm, name: string): boolean {
     let count = 0;
 
     for (const field of form.fields) {
@@ -168,8 +174,8 @@ partial class TypeResolver {
     return count > 1;
   }
 
-  private memberProblem(
-    kept: ObjectField[],
+  private readonly memberProblem(
+    kept: Read<ObjectField[]>,
     field: ObjectTypeField,
     type: Type,
     overloaded: boolean,
@@ -186,7 +192,7 @@ partial class TypeResolver {
     return undefined;
   }
 
-  private functionType(form: FunctionTypeForm, context: TypeContext): Type {
+  private readonly functionType(form: FunctionTypeForm, context: TypeContext): Type {
     const last = form.params.length - 1;
     const sites: ParameterSite[] = [];
 
@@ -208,7 +214,7 @@ partial class TypeResolver {
     return this.signature(sites, form.result, context);
   }
 
-  private assertsTypeCheck(
+  private readonly assertsTypeCheck(
     result: TypeRef | undefined,
     context: TypeContext,
   ): void {
@@ -228,7 +234,7 @@ partial class TypeResolver {
     });
   }
 
-  private assertedText(result: TypeRef, context: TypeContext): string {
+  private readonly assertedText(result: TypeRef, context: TypeContext): string {
     const ref = result.args[0];
     if (ref == undefined) {
       return result.name;
@@ -240,7 +246,7 @@ partial class TypeResolver {
     return `${result.name} is ${shown}`;
   }
 
-  private assertedAdvice(result: TypeRef, shown: string): string {
+  private readonly assertedAdvice(result: TypeRef, shown: string): string {
     if (result.args.length == 0) {
       return "boolean";
     }
@@ -248,7 +254,7 @@ partial class TypeResolver {
     return shown;
   }
 
-  private siteKind(optional: boolean, spread: boolean): ParamKind {
+  private readonly siteKind(optional: boolean, spread: boolean): ParamKind {
     if (spread) {
       return ParamKind.Rest;
     }
@@ -259,7 +265,7 @@ partial class TypeResolver {
     return ParamKind.Required;
   }
 
-  private literal(name: string, form: LiteralTypeForm): Type {
+  private readonly literal(name: string, form: LiteralTypeForm): Type {
     if (name == kStringTypeName) {
       return this.store.literal(LiteralKind.String, form.text);
     }
@@ -278,7 +284,7 @@ partial class TypeResolver {
     return this.store.literal(LiteralKind.Double, text);
   }
 
-  private truthText(number: double): string {
+  private readonly truthText(number: double): string {
     if (number == 0.0) {
       return "false";
     }

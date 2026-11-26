@@ -17,10 +17,10 @@ import {
 import { kNoPlace, kSetCombiners } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private dictSourceTyped(
+  private readonly dictSourceTyped(
     expr: NewExpr,
     dict: DictKind,
-    written: Type[],
+    written: Read<Type[]>,
     wanted: Type | undefined,
     module: int,
   ): Type {
@@ -55,7 +55,7 @@ partial class ExpressionTypes {
     return this.setFromValues(source, module);
   }
 
-  private dictSourceCheck(
+  private readonly dictSourceCheck(
     source: Expr | undefined,
     dict: DictKind,
     key: Type,
@@ -72,7 +72,7 @@ partial class ExpressionTypes {
     this.checked(source, list, module, kNoPlace);
   }
 
-  private mapFromPairs(source: Expr, module: int): Type {
+  private readonly mapFromPairs(source: Expr, module: int): Type {
     const error = this.store.plain(TypeKind.Error);
     if (source.kind != ExprKind.ArrayLit) {
       this.typed(source, undefined, module);
@@ -145,7 +145,7 @@ partial class ExpressionTypes {
     return this.store.dictOf(DictKind.Map, key, value);
   }
 
-  private setFromValues(source: Expr, module: int): Type {
+  private readonly setFromValues(source: Expr, module: int): Type {
     const type = this.typed(source, undefined, module);
     const base = this.types.apparent(type);
     const error = this.store.plain(TypeKind.Error);
@@ -160,7 +160,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private setCombineCheck(
+  private readonly setCombineCheck(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -193,7 +193,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private recordTargetCheck(target: Expr, module: int): boolean {
+  private readonly recordTargetCheck(target: Expr, module: int): boolean {
     if (target.kind != ExprKind.Member && target.kind != ExprKind.Index) {
       return false;
     }
@@ -215,7 +215,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private recordValueOf(holder: Expr, module: int): Type | undefined {
+  private readonly recordValueOf(holder: Expr, module: int): Type | undefined {
     const object = this.peekType(holder, module);
 
     const base = this.types.definedType(object);
@@ -226,7 +226,7 @@ partial class ExpressionTypes {
     return base.value;
   }
 
-  private recordMethodCheck(
+  private readonly recordMethodCheck(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -251,7 +251,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private spreadCheck(property: Property, module: int): void {
+  private readonly spreadCheck(property: Property, module: int): void {
     const type = this.peekType(property.value, module);
 
     if (this.types.hasMethodFields(type)) {
@@ -270,7 +270,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private recordSpreadCheck(property: Property, module: int): boolean {
+  private readonly recordSpreadCheck(property: Property, module: int): boolean {
     const type = this.peekType(property.value, module);
 
     const base = this.types.apparent(type);
@@ -286,7 +286,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private objectKeysCheck(expr: CallExpr, module: int): void {
+  private readonly objectKeysCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Member) {
       return;
@@ -311,7 +311,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private numberEnumListCheck(expr: CallExpr, name: string, module: int): void {
+  private readonly numberEnumListCheck(expr: CallExpr, name: string, module: int): void {
     const listed = expr.args[0]?.expr;
     if (listed == undefined || expr.args.length != 1) {
       return;
@@ -342,7 +342,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private groupByKeysCheck(expr: CallExpr, module: int): void {
+  private readonly groupByKeysCheck(expr: CallExpr, module: int): void {
     const items = expr.args[0]?.expr;
     const callback = expr.args[1]?.expr;
     if (items == undefined || callback == undefined) {
@@ -378,7 +378,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private fromEntriesKeysCheck(expr: CallExpr, module: int): void {
+  private readonly fromEntriesKeysCheck(expr: CallExpr, module: int): void {
     const pairs = expr.args[0]?.expr;
     if (pairs == undefined || pairs.kind != ExprKind.ArrayLit) {
       return;

@@ -13,12 +13,12 @@ import { Token, TokenKind } from "../token/types/token.types.tz";
 import { Mentions } from "./types/library-mentions.types.tz";
 
 export class LibraryMentions {
-  public imports(tokens: Token[], file: SourceFile): ImportDecl[] {
+  public readonly imports(tokens: readonly Token[], file: Read<SourceFile>): ImportDecl[] {
     const mentions = this.mentioned(tokens);
-    const imports: ImportDecl[] = [];
+    const grouped = new Map<string, ModuleName[]>();
 
     if (mentions.globals.size == 0 && mentions.members.size == 0) {
-      return imports;
+      return [];
     }
 
     const own = this.ownNames(file);
@@ -27,7 +27,7 @@ export class LibraryMentions {
       const name = global.name;
       const loc = mentions.globals.get(name);
       if (loc != undefined && !own.has(name)) {
-        this.addName(imports, global.module, {
+        grouped.getOrInsert(global.module, []).push({
           name,
           loc,
           as: name,
@@ -39,7 +39,7 @@ export class LibraryMentions {
     for (const member of kLibrary.members()) {
       const loc = mentions.members.get(member.alias);
       if (loc != undefined) {
-        this.addName(imports, member.module, {
+        grouped.getOrInsert(member.module, []).push({
           name: member.name,
           loc,
           as: member.alias,
@@ -48,10 +48,23 @@ export class LibraryMentions {
       }
     }
 
+    const imports: ImportDecl[] = [];
+
+    for (const [module, names] of grouped) {
+      const loc = names[0]?.loc ?? 0;
+
+      imports.push({
+        loc,
+        names: names.slice(),
+        from: { path: module, loc },
+        isPartList: false,
+      });
+    }
+
     return imports;
   }
 
-  private mentioned(tokens: Token[]): Mentions {
+  private readonly mentioned(tokens: readonly Token[]): Mentions {
     const mentions: Mentions = {
       globals: new Map<string, int>(),
       members: new Map<string, int>(),
@@ -67,9 +80,9 @@ export class LibraryMentions {
     return mentions;
   }
 
-  private noteName(
+  private readonly noteName(
     mentions: Mentions,
-    tokens: Token[],
+    tokens: readonly Token[],
     index: int,
     token: Token,
   ): void {
@@ -90,21 +103,21 @@ export class LibraryMentions {
     }
   }
 
-  private noteGlobal(mentions: Mentions, name: string, loc: int): void {
+  private readonly noteGlobal(mentions: Mentions, name: string, loc: int): void {
     if (kLibrary.global(name) != undefined) {
       this.noteFirst(mentions.globals, name, loc);
     }
   }
 
-  private noteFirst(places: Map<string, int>, name: string, loc: int): void {
+  private readonly noteFirst(places: Map<string, int>, name: string, loc: int): void {
     if (!places.has(name)) {
       places.set(name, loc);
     }
   }
 
-  private isMember(
+  private readonly isMember(
     member: LibraryMember,
-    tokens: Token[],
+    tokens: readonly Token[],
     index: int,
     name: string,
   ): boolean {
@@ -122,7 +135,7 @@ export class LibraryMentions {
     return owned && (plain || optional);
   }
 
-  private ownNames(file: SourceFile): Set<string> {
+  private readonly ownNames(file: Read<SourceFile>): Set<string> {
     const own = new Set<string>();
 
     for (const item of file.items) {
@@ -136,7 +149,7 @@ export class LibraryMentions {
     return own;
   }
 
-  private addDeclared(own: Set<string>, item: Stmt): void {
+  private readonly addDeclared(own: Set<string>, item: Stmt): void {
     switch (item.kind) {
       case StmtKind.VarDecl:
         for (const decl of item.decls) {
@@ -157,7 +170,7 @@ export class LibraryMentions {
     }
   }
 
-  private addImported(own: Set<string>, decl: ImportDecl): void {
+  private readonly addImported(own: Set<string>, decl: ImportDecl): void {
     for (const name of decl.names) {
       own.add(name.as);
     }
@@ -166,27 +179,5 @@ export class LibraryMentions {
     if (whole != undefined) {
       own.add(whole.name);
     }
-  }
-
-  private addName(
-    imports: ImportDecl[],
-    module: string,
-    name: ModuleName,
-  ): void {
-    const known = imports.find((decl) => decl.from.path == module);
-    if (known != undefined) {
-      known.names.push(name);
-
-      return;
-    }
-
-    const loc = name.loc;
-
-    imports.push({
-      loc,
-      names: [name],
-      from: { path: module, loc },
-      isPartList: false,
-    });
   }
 }

@@ -2,6 +2,6 @@ import { SourceError } from "../../../diagnostic/types/message.types.tz";
 import { Token } from "../../token/types/token.types.tz";
 
 export type LexResult = {
-  readonly tokens: Token[];
+  readonly tokens: readonly Token[];
   readonly errors: SourceError[];
 };

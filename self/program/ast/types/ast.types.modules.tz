@@ -23,7 +23,7 @@ export type WholeImport = {
 
 export type ImportDecl = {
   readonly loc: int;
-  readonly names: ModuleName[];
+  readonly names: readonly ModuleName[];
   readonly from: ModulePath;
   readonly whole?: WholeImport;
   readonly isPartList: boolean;
@@ -32,14 +32,14 @@ export type ImportDecl = {
 export type ExportDecl = {
   readonly loc: int;
   readonly form: ExportForm;
-  readonly names: ModuleName[];
+  readonly names: readonly ModuleName[];
   readonly from?: ModulePath;
 };
 
 export type SourceFile = {
-  readonly items: Stmt[];
-  readonly imports: ImportDecl[];
-  readonly exports: ExportDecl[];
+  readonly items: readonly Stmt[];
+  readonly imports: readonly ImportDecl[];
+  readonly exports: readonly ExportDecl[];
   readonly fieldNames: Set<string>;
   readonly stringConstants: Map<string, string[]>;
 };

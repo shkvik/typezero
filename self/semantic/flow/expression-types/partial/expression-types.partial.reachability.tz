@@ -16,7 +16,7 @@ import {
 } from "../../../code/expression-types/const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private isAlwaysReturning(statement: Stmt | undefined, module: int): boolean {
+  private readonly isAlwaysReturning(statement: Stmt | undefined, module: int): boolean {
     if (statement == undefined) {
       return false;
     }
@@ -55,7 +55,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private isExit(expr: Expr, module: int): boolean {
+  private readonly isExit(expr: Expr, module: int): boolean {
     if (expr.kind != ExprKind.Call) {
       return false;
     }
@@ -76,7 +76,7 @@ partial class ExpressionTypes {
     return this.record(module)?.uses.get(owner.loc)?.symbol == undefined;
   }
 
-  private isIfReturning(statement: IfStmt, module: int): boolean {
+  private readonly isIfReturning(statement: IfStmt, module: int): boolean {
     const literal = this.shapes.literalCondition(statement.cond);
     const elseStmt = statement.elseStmt;
     if (literal == true && elseStmt == undefined) {
@@ -97,7 +97,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private isSwitchReturning(statement: SwitchStmt, module: int): boolean {
+  private readonly isSwitchReturning(statement: SwitchStmt, module: int): boolean {
     const cases = statement.cases;
     const last = cases[cases.length - 1];
     const hasDefault = cases.some((option) => option.test == undefined);

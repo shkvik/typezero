@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import { ScopeTraversal } from "../scope-traversal.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { kNoDetails } from "../../../../diagnostic/const/message.const.tz";
@@ -12,15 +13,13 @@ import { JumpKind, JumpTarget } from "../types/scope-traversal.types.tz";
 
 partial class ScopeTraversal {
   private traverseTarget(statement: Stmt, kind: JumpKind): void {
-    const labels = this.pendingLabels;
-
-    this.pendingLabels = [];
+    const labels = replace(this.pendingLabels, []);
     this.jumpTargets.push({ kind, labels });
     this.traverseInTarget(statement);
     this.jumpTargets.pop();
   }
 
-  private traverseLabeled(statement: LabeledStmt, labels: string[]): void {
+  private traverseLabeled(statement: LabeledStmt, labels: Read<string[]>): void {
     const label = statement.label;
     if (labels.includes(label) || this.hasLabel(label)) {
       this.report(statement.loc, Code.LabelDuplicate, { word: label });
@@ -48,7 +47,7 @@ partial class ScopeTraversal {
     this.traverseTarget(body, JumpKind.Block);
   }
 
-  private targetKind(statement: Stmt): JumpKind {
+  private readonly targetKind(statement: Stmt): JumpKind {
     switch (statement.kind) {
       case StmtKind.While:
       case StmtKind.DoWhile:
@@ -62,7 +61,7 @@ partial class ScopeTraversal {
     }
   }
 
-  private isDeclaration(statement: Stmt): boolean {
+  private readonly isDeclaration(statement: Stmt): boolean {
     switch (statement.kind) {
       case StmtKind.VarDecl:
       case StmtKind.Function:
@@ -74,7 +73,7 @@ partial class ScopeTraversal {
     }
   }
 
-  private hasLabel(label: string): boolean {
+  private readonly hasLabel(label: string): boolean {
     return this.jumpTargets.some((target) => target.labels.includes(label));
   }
 
@@ -106,7 +105,7 @@ partial class ScopeTraversal {
     this.report(statement.loc, Code.ContinueOutside, kNoDetails);
   }
 
-  private jumpTarget(label: string, isBreak: boolean): JumpTarget | undefined {
+  private readonly jumpTarget(label: string, isBreak: boolean): JumpTarget | undefined {
     for (let index = this.jumpTargets.length - 1; index >= 0; index--) {
       const target = this.jumpTargets[index];
       if (target != undefined && this.isJumpingTo(target, label, isBreak)) {
@@ -117,8 +116,8 @@ partial class ScopeTraversal {
     return undefined;
   }
 
-  private isJumpingTo(
-    target: JumpTarget,
+  private readonly isJumpingTo(
+    target: Read<JumpTarget>,
     label: string,
     isBreak: boolean,
   ): boolean {
@@ -145,7 +144,7 @@ partial class ScopeTraversal {
     }
   }
 
-  private forgetCaseVariables(noted: int[]): void {
+  private forgetCaseVariables(noted: Read<int[]>): void {
     for (const loc of noted) {
       this.otherCaseVariables.delete(loc);
     }

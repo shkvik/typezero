@@ -32,7 +32,7 @@ import {
 import { CallKind, StaticOwner } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private walkClass(decl: ClassDecl, module: int): void {
+  private readonly walkClass(decl: ClassDecl, module: int): void {
     this.redeclareChecks(decl, module);
     this.decoratorChecks(decl, module);
     this.extendsCycleCheck(decl, module);
@@ -57,7 +57,7 @@ partial class ExpressionTypes {
     this.overriddenCallChecks(decl, module);
   }
 
-  private methodFunction(decl: ClassDecl, fn: FunctionDecl, module: int): Type {
+  private readonly methodFunction(decl: ClassDecl, fn: FunctionDecl, module: int): Type {
     const part = this.partOf(decl, fn);
     const home = this.partModule(part, module);
     const self = this.selfOf(decl, fn, module);
@@ -86,7 +86,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private selfOf(decl: ClassDecl, fn: FunctionDecl, module: int): Type {
+  private readonly selfOf(decl: ClassDecl, fn: FunctionDecl, module: int): Type {
     if (this.classes.isStaticMethod(fn)) {
       return this.store.plain(TypeKind.Error);
     }
@@ -98,7 +98,7 @@ partial class ExpressionTypes {
     return this.resolver.classInstance(module, decl, params);
   }
 
-  private thisTyped(expr: NameExpr, module: int): Type {
+  private readonly thisTyped(expr: NameExpr, module: int): Type {
     const self = this.selves[this.selves.length - 1];
 
     if (this.thisInFunction(expr, module)) {
@@ -117,7 +117,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private isThisName(expr: Expr, module: int): boolean {
+  private readonly isThisName(expr: Expr, module: int): boolean {
     if (expr.kind != ExprKind.Name || expr.name != kThisName) {
       return false;
     }
@@ -127,11 +127,11 @@ partial class ExpressionTypes {
     return use?.symbol == undefined;
   }
 
-  private isInsideClass(owner: ClassDecl): boolean {
+  private readonly isInsideClass(owner: ClassDecl): boolean {
     return this.ownerClasses.some((one) => one.decl == owner);
   }
 
-  private isDerivedInside(owner: ClassDecl): boolean {
+  private readonly isDerivedInside(owner: ClassDecl): boolean {
     const current = this.ownerClasses[this.ownerClasses.length - 1];
     if (current == undefined || current.decl.typeParams.length > 0) {
       return false;
@@ -145,7 +145,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private staticOwner(object: Expr, module: int): StaticOwner | undefined {
+  private readonly staticOwner(object: Expr, module: int): StaticOwner | undefined {
     if (object.kind != ExprKind.Name) {
       return undefined;
     }
@@ -169,7 +169,7 @@ partial class ExpressionTypes {
     return { decl, module: target.module };
   }
 
-  private staticMemberTyped(
+  private readonly staticMemberTyped(
     expr: MemberExpr,
     owner: StaticOwner,
     module: int,
@@ -188,7 +188,7 @@ partial class ExpressionTypes {
     return found;
   }
 
-  private staticOrderCheck(
+  private readonly staticOrderCheck(
     expr: MemberExpr,
     owner: StaticOwner,
     module: int,
@@ -229,7 +229,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private staticCall(
+  private readonly staticCall(
     expr: CallExpr,
     member: MemberExpr,
     owner: StaticOwner,
@@ -245,7 +245,7 @@ partial class ExpressionTypes {
     return this.fieldValueCall(expr, member, found, CallKind.Own, module);
   }
 
-  private staticMember(
+  private readonly staticMember(
     expr: MemberExpr,
     owner: StaticOwner,
     module: int,
@@ -309,7 +309,7 @@ partial class ExpressionTypes {
     return this.methodFunction(decl, method, owner.module);
   }
 
-  private staticFieldType(
+  private readonly staticFieldType(
     written: TypeRef | undefined,
     presence: FieldPresence,
     owner: StaticOwner,

@@ -22,18 +22,18 @@ export class SourceLines {
   private readonly source: Buffer;
   private readonly starts: int[];
 
-  public constructor(source: Buffer) {
+  public constructor(source: Own<Buffer>) {
     this.source = source;
     this.starts = [0];
 
-    for (let offset = 0; offset < source.length; offset++) {
+    for (let offset = 0; offset < this.source.length; offset++) {
       if (this.byteAt(offset) == kLineFeed) {
         this.starts.push(offset + 1);
       }
     }
   }
 
-  public placeOf(offset: int): SourcePlace {
+  public readonly placeOf(offset: int): SourcePlace {
     const index = this.lineIndexAt(offset);
     const start = this.startOf(index);
     const before = this.charactersBetween(start, offset);
@@ -41,7 +41,7 @@ export class SourceLines {
     return { line: index + 1, column: before + 1 };
   }
 
-  public textEndBefore(offset: int): int {
+  public readonly textEndBefore(offset: int): int {
     if (offset < this.source.length) {
       return offset;
     }
@@ -55,7 +55,7 @@ export class SourceLines {
     return end;
   }
 
-  public lineTextAt(offset: int): string {
+  public readonly lineTextAt(offset: int): string {
     const index = this.lineIndexAt(offset);
     const start = this.startOf(index);
     const end = this.endOf(index);
@@ -63,7 +63,7 @@ export class SourceLines {
     return this.source.toString("utf8", start, end);
   }
 
-  public indentTo(offset: int): string {
+  public readonly indentTo(offset: int): string {
     const index = this.lineIndexAt(offset);
     const start = this.startOf(index);
     let indent = "";
@@ -75,7 +75,7 @@ export class SourceLines {
     return indent;
   }
 
-  private lineIndexAt(offset: int): int {
+  private readonly lineIndexAt(offset: int): int {
     let left = 0;
     let right = this.starts.length;
 
@@ -93,11 +93,11 @@ export class SourceLines {
     return left - 1;
   }
 
-  private startOf(index: int): int {
+  private readonly startOf(index: int): int {
     return this.starts[index] ?? this.source.length;
   }
 
-  private endOf(index: int): int {
+  private readonly endOf(index: int): int {
     const next = this.starts[index + 1];
     if (next == undefined) {
       return this.source.length;
@@ -111,7 +111,7 @@ export class SourceLines {
     return lineFeed;
   }
 
-  private charactersBetween(start: int, end: int): int {
+  private readonly charactersBetween(start: int, end: int): int {
     let count = 0;
 
     for (let at = start; at < end; at++) {
@@ -125,7 +125,7 @@ export class SourceLines {
     return count;
   }
 
-  private indentAt(offset: int): string {
+  private readonly indentAt(offset: int): string {
     const byte = this.byteAt(offset);
     if (byte == kTab) {
       return "\t";
@@ -145,7 +145,7 @@ export class SourceLines {
     return " ";
   }
 
-  private codePointAt(offset: int): int {
+  private readonly codePointAt(offset: int): int {
     const lead = this.byteAt(offset);
     if (lead < kTwoByteLead) {
       return lead;
@@ -160,7 +160,7 @@ export class SourceLines {
     return this.joined(lead & kFourByteBits, offset, 3);
   }
 
-  private joined(leadBits: int, offset: int, tails: int): int {
+  private readonly joined(leadBits: int, offset: int, tails: int): int {
     let point = leadBits;
 
     for (let tail = 1; tail <= tails; tail++) {
@@ -173,7 +173,7 @@ export class SourceLines {
     return point;
   }
 
-  private within(ranges: CodePointRange[], point: int): boolean {
+  private readonly within(ranges: Read<CodePointRange[]>, point: int): boolean {
     for (const range of ranges) {
       if (point >= range.first && point <= range.last) {
         return true;
@@ -183,7 +183,7 @@ export class SourceLines {
     return false;
   }
 
-  private isBlank(offset: int): boolean {
+  private readonly isBlank(offset: int): boolean {
     const byte = this.byteAt(offset);
 
     switch (byte) {
@@ -197,13 +197,15 @@ export class SourceLines {
     }
   }
 
-  private isContinuation(byte: int): boolean {
+  private readonly isContinuation(byte: int): boolean {
     return byte >= kContinuationFirst && byte <= kContinuationLast;
   }
 
-  private byteAt(offset: int): int {
+  private readonly byteAt(offset: int): int {
     const value = this.source[offset] ?? 0;
 
     return value.toInt();
   }
 }
+
+export type InternedSourceLines = Interned<SourceLines>;

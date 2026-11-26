@@ -20,7 +20,7 @@ partial class Dumper {
     this.dumpExpr(expr);
   }
 
-  private dumpChildren(exprs: Expr[]): void {
+  private dumpChildren(exprs: Read<Expr[]>): void {
     this.nested();
 
     for (const expr of exprs) {
@@ -30,7 +30,7 @@ partial class Dumper {
     this.back();
   }
 
-  private propertyForm(prop: Property): string {
+  private readonly propertyForm(prop: Property): string {
     const form = prop.form;
 
     switch (form.kind) {
@@ -261,7 +261,7 @@ partial class Dumper {
     this.back();
   }
 
-  private spreadFlags(args: CallArgument[]): string {
+  private readonly spreadFlags(args: Read<CallArgument[]>): string {
     const spreads = args.map((argument) => argument.spread);
     if (!spreads.includes(true)) {
       return "-";
@@ -320,7 +320,7 @@ partial class Dumper {
     }
   }
 
-  private operatorText(op: BinaryOp | undefined): string {
+  private readonly operatorText(op: BinaryOp | undefined): string {
     if (op == undefined) {
       return "-";
     }

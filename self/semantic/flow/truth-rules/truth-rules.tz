@@ -40,8 +40,8 @@ export class TruthRules {
   public constructor(
     store: TypeStore,
     text: TypeText,
-    relation: TypeRelation,
-    types: TypeQuestions,
+    relation: Own<TypeRelation>,
+    types: Own<TypeQuestions>,
   ) {
     this.store = store;
     this.text = text;
@@ -49,7 +49,7 @@ export class TruthRules {
     this.types = types;
   }
 
-  public problemOf(type: Type): TruthProblem {
+  public readonly problemOf(type: Type): TruthProblem {
     if (type.kind == TypeKind.Void) {
       return TruthProblem.Void;
     }
@@ -62,7 +62,7 @@ export class TruthRules {
     return this.typeProblem(type, base);
   }
 
-  public answerOf(type: Type, use: TruthUse, texts: TruthTexts): TruthAnswer {
+  public readonly answerOf(type: Type, use: TruthUse, texts: TruthTexts): TruthAnswer {
     const base = this.baseOf(type);
     if (type.kind == TypeKind.Void) {
       return { code: Code.VoidTested, details: kNoDetails, base };
@@ -84,7 +84,7 @@ export class TruthRules {
     return { code, details, base };
   }
 
-  public isNumberMember(member: Type): boolean {
+  public readonly isNumberMember(member: Type): boolean {
     const plain = this.relation.baseOf(member) ?? member;
     const isOpen =
       plain.kind == TypeKind.TypeParameter || plain.kind == TypeKind.Json;
@@ -92,7 +92,7 @@ export class TruthRules {
     return this.types.isNumberLike(plain) || isOpen;
   }
 
-  public isTruthyObject(base: Type): boolean {
+  public readonly isTruthyObject(base: Type): boolean {
     switch (base.kind) {
       case TypeKind.Iterator:
       case TypeKind.Dict:
@@ -104,7 +104,7 @@ export class TruthRules {
     }
   }
 
-  public holderNoun(base: Type): string {
+  public readonly holderNoun(base: Type): string {
     switch (base.kind) {
       case TypeKind.Array:
         return "an array";
@@ -119,13 +119,13 @@ export class TruthRules {
     }
   }
 
-  private baseOf(type: Type): Type {
+  private readonly baseOf(type: Type): Type {
     const plain = this.types.definedType(type);
 
     return this.types.apparent(plain);
   }
 
-  private parameterAnswer(
+  private readonly parameterAnswer(
     type: Type,
     parameter: Type,
     use: TruthUse,
@@ -144,13 +144,13 @@ export class TruthRules {
     return { code, details, base: parameter };
   }
 
-  private codesOf(use: TruthUse): TruthCodes {
+  private readonly codesOf(use: TruthUse): TruthCodes {
     const codes = kTruthCodes.find((row) => row.use == use);
 
     return codes ?? kConditionCodes;
   }
 
-  private openParameterOf(type: Type): Type | undefined {
+  private readonly openParameterOf(type: Type): Type | undefined {
     const base = this.types.definedType(type);
     const isParameter = base.kind == TypeKind.TypeParameter;
     if (!isParameter || this.store.constraintOf(base) != undefined) {
@@ -160,7 +160,7 @@ export class TruthRules {
     return base;
   }
 
-  private parameterTruthCode(use: TruthUse): Code {
+  private readonly parameterTruthCode(use: TruthUse): Code {
     switch (use) {
       case TruthUse.Not:
         return Code.ParameterNot;
@@ -177,7 +177,7 @@ export class TruthRules {
     }
   }
 
-  private typeProblem(type: Type, base: Type): TruthProblem {
+  private readonly typeProblem(type: Type, base: Type): TruthProblem {
     if (this.isTestable(type, base)) {
       return TruthProblem.None;
     }
@@ -201,7 +201,7 @@ export class TruthRules {
     }
   }
 
-  private isTestable(type: Type, base: Type): boolean {
+  private readonly isTestable(type: Type, base: Type): boolean {
     const isPlain =
       type.kind == TypeKind.Undefined ||
       type.kind == TypeKind.Error ||
@@ -218,7 +218,7 @@ export class TruthRules {
     return this.types.isOptional(type) && this.isHolder(base);
   }
 
-  private isHolder(base: Type): boolean {
+  private readonly isHolder(base: Type): boolean {
     switch (base.kind) {
       case TypeKind.Array:
       case TypeKind.Class:
@@ -233,7 +233,7 @@ export class TruthRules {
     }
   }
 
-  private unionTruthProblem(type: Type, base: Type): TruthProblem {
+  private readonly unionTruthProblem(type: Type, base: Type): TruthProblem {
     const number = this.unionNumber(base);
     const isFalsy = this.types.isOptional(type) || this.hasFalsyMember(base);
 
@@ -247,7 +247,7 @@ export class TruthRules {
     return TruthProblem.UnionTruthy;
   }
 
-  private unionNumber(base: Type): Type | undefined {
+  private readonly unionNumber(base: Type): Type | undefined {
     let number: Type | undefined = undefined;
 
     for (const member of this.types.unionMembers(base)) {
@@ -259,13 +259,13 @@ export class TruthRules {
     return number;
   }
 
-  private hasFalsyMember(base: Type): boolean {
+  private readonly hasFalsyMember(base: Type): boolean {
     return this.types
       .unionMembers(base)
       .some((member) => this.isFalsyMember(member));
   }
 
-  private isFalsyMember(member: Type): boolean {
+  private readonly isFalsyMember(member: Type): boolean {
     if (member.kind != TypeKind.Literal) {
       return member.kind == TypeKind.Boolean || member.kind == TypeKind.String;
     }
@@ -276,7 +276,7 @@ export class TruthRules {
     return member.text == "0";
   }
 
-  private truthCode(
+  private readonly truthCode(
     problem: TruthProblem,
     codes: TruthCodes,
     type: Type,
@@ -301,7 +301,7 @@ export class TruthRules {
     }
   }
 
-  private lengthCode(isLength: boolean, code: Code): Code {
+  private readonly lengthCode(isLength: boolean, code: Code): Code {
     if (!isLength) {
       return code;
     }
@@ -324,7 +324,7 @@ export class TruthRules {
     }
   }
 
-  private resultTruthCode(use: TruthUse): Code {
+  private readonly resultTruthCode(use: TruthUse): Code {
     if (use == TruthUse.Not) {
       return Code.ResultTruthyNot;
     }
@@ -332,7 +332,7 @@ export class TruthRules {
     return Code.ResultTruthy;
   }
 
-  private numberTruthCode(codes: TruthCodes, type: Type, base: Type): Code {
+  private readonly numberTruthCode(codes: TruthCodes, type: Type, base: Type): Code {
     if (this.types.isOptional(type)) {
       return codes.maybe;
     }
@@ -343,7 +343,7 @@ export class TruthRules {
     return codes.number;
   }
 
-  private objectTruthCode(codes: TruthCodes, base: Type): Code {
+  private readonly objectTruthCode(codes: TruthCodes, base: Type): Code {
     if (base.kind == TypeKind.Array) {
       return codes.array;
     }
@@ -354,7 +354,7 @@ export class TruthRules {
     return codes.function;
   }
 
-  private truthDetails(
+  private readonly truthDetails(
     code: Code,
     type: Type,
     base: Type,
@@ -381,7 +381,7 @@ export class TruthRules {
     return { first, second, word: call, other };
   }
 
-  private unionNumberDetails(type: Type, base: Type, word: string): Details {
+  private readonly unionNumberDetails(type: Type, base: Type, word: string): Details {
     const number = this.unionNumber(base);
     const first = this.text.of(type);
 
@@ -394,7 +394,7 @@ export class TruthRules {
     return { first, second, word };
   }
 
-  private truthNoun(type: Type, base: Type): string {
+  private readonly truthNoun(type: Type, base: Type): string {
     if (base.kind == TypeKind.Promise) {
       return kPromiseNoun;
     }
@@ -414,7 +414,7 @@ export class TruthRules {
     return noun + kMaybeSuffix;
   }
 
-  private numberNoun(base: Type): string {
+  private readonly numberNoun(base: Type): string {
     if (base.kind == TypeKind.Decimal) {
       return kDecimalNoun;
     }
@@ -422,7 +422,7 @@ export class TruthRules {
     return kNumberNoun;
   }
 
-  private callOf(base: Type, word: string, use: TruthUse): string {
+  private readonly callOf(base: Type, word: string, use: TruthUse): string {
     const prefix = this.negationOf(use);
 
     if (this.minArguments(base) == 0) {
@@ -432,7 +432,7 @@ export class TruthRules {
     return prefix + word + kArgumentsCall;
   }
 
-  private negationOf(use: TruthUse): string {
+  private readonly negationOf(use: TruthUse): string {
     if (use == TruthUse.Not) {
       return kNegation;
     }
@@ -440,7 +440,7 @@ export class TruthRules {
     return "";
   }
 
-  private minArguments(base: Type): int {
+  private readonly minArguments(base: Type): int {
     if (base.kind != TypeKind.Function) {
       return 0;
     }

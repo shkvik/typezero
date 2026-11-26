@@ -11,13 +11,13 @@ import {
 import { ComparedSide } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private typeofTyped(expr: UnaryExpr, module: int): Type {
+  private readonly typeofTyped(expr: UnaryExpr, module: int): Type {
     this.typed(expr.operand, undefined, module);
 
     return this.store.plain(TypeKind.String);
   }
 
-  private typeOfCheck(side: ComparedSide, other: Expr, module: int): void {
+  private readonly typeOfCheck(side: ComparedSide, other: Expr, module: int): void {
     const tested = side.tested;
     if (tested == undefined || other.kind != ExprKind.StringLit) {
       return;

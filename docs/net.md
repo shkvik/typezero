@@ -132,7 +132,7 @@ const listening = new Server({ port: 3000 }, request => app(request)).listen()
 - **Параллельно.** Каждый запрос — async-задача, обработчики идут на всех ядрах. Общие данные
   (счётчик на уровне модуля, кэш в `Map`) — по очереди, как в [async.md](async.md); код
   остаётся таким же, как для node.
-- **HTTP/2** (сделано 31 октября, [tmp/spec/12-http2.md](../tmp/spec/12-http2.md)): с TLS сервер
+- **HTTP/2** (сделано 31 октября): с TLS сервер
   договаривается о нём сам (ALPN `h2`), старые клиенты получают HTTP/1.1; настройка
   `http2?: { enabled: false } | { enabled: true; cleartext?: boolean; maxConcurrentStreams?: int;
   webSocket?: boolean }` — без неё включено при `secure: true` и выключено без TLS;
@@ -326,8 +326,7 @@ async function repo(name: string) {
   ошибки у `fetch` нет (`fetch(request)`), — `ERR_BODY_FAILED`. Внутри тело хранит поток с
   `BodyError`: поток другого вида оборачивается (`bodyStream`), его ошибка становится `{ kind:
   "STREAM", code: "ERR_STREAM_FAILED", message }`. Упал поток ответа сервера — ошибка в stderr,
-  соединение обрывается (как в node). Пример — `tmp/design/stream-as-body.tz`, тест
-  `run/stream_bodies`.
+  соединение обрывается (как в node). Тест — `run/stream_bodies`.
 - **`BodyError`** (29 октября) — ошибка чтения тела:
   ```ts
   // каждый вариант — interface … extends StreamError (с 31 октября): тело — поток
@@ -502,7 +501,7 @@ const endedResult = await socket.end()
   Настройку, которую система не приняла, `Socket` пропускает молча, как node. `interface`
   (привязка к сетевому интерфейсу) — нет (в Windows — индекс интерфейса, не имя; потом).
   Тест — `run/net_path`.
-- **Ещё не сделано** из решения ([tmp/spec/09-sockets.md](../tmp/spec/09-sockets.md)):
+- **Ещё не сделано** из решения:
   обработчик-не-`async`, объявления для редактора (`patch.cmake`).
 
 ### Сокет любого вида: `tz:socket` (сделано 1 ноября)
@@ -645,7 +644,7 @@ const boundResult = await socket.bind()          // Result<void, UdpBindError>
 const sentResult = await socket.send("hi", { address: "127.0.0.1", port: 53 })  // Result<void, UdpSendError>
 await socket.close()                             // ждёт конца приёма, потом "close"
 ```
-- Решение — [tmp/design/udp.tz](../tmp/design/udp.tz) (U1–U9). `type` необязателен: без него
+- Решение — U1–U9. `type` необязателен: без него
   один сокет на IPv4 и IPv6 (двойной стек), адрес отправителя IPv4 — в обычном виде
   (`127.0.0.1`, а не `::ffff:127.0.0.1`); `"udp4"` / `"udp6"` — ровно одна версия.
 - Настройки — в конструкторе: `port`, `address` (IP, `localhost` или имя — ищется в DNS),
@@ -695,9 +694,7 @@ await socket.close()                             // ждёт конца приё
 
 `Server` и `fetch` прячут HTTP/2 за теми же `Request` и `Response`. `tz:http2` — для того, чего
 в `Response` нет: трейлеры (заголовки после тела, на них стоит gRPC), полный дуплекс (запрос и
-ответ идут одновременно) и отмена одного запроса с кодом из стандарта. Решения —
-[tmp/spec/12-http2.md](../tmp/spec/12-http2.md) (30 и 31 октября), примеры —
-[tmp/design/http2-layer.tz](../tmp/design/http2-layer.tz).
+ответ идут одновременно) и отмена одного запроса с кодом из стандарта. Решено 30 и 31 октября.
 
 ```ts
 import { Http2Client, Http2Server } from "tz:http2"
@@ -787,7 +784,7 @@ if (connected.isOk()) {
 `node:http` не будет.
 
 **HTTP/3 и QUIC не будет** (решено 1 ноября). Замер движков (ngtcp2 + nghttp3, OpenSSL QUIC,
-quic-go; `tmp/spec/13-http3.md`): HTTP/3 на запрос дороже HTTP/2 по процессору и у сервера, и у
+quic-go): HTTP/3 на запрос дороже HTTP/2 по процессору и у сервера, и у
 клиента, а выигрывает он только у клиентов на сети с потерями и при смене сети — на сервере за
 балансировщиком этого не видно. Кому HTTP/3 нужен — ставит перед сервером tz прокси, который его
 умеет (Caddy, nginx, Cloudflare): наружу HTTP/3, к tz — HTTP/1.1 или HTTP/2. Свой HTTP/3 поверх

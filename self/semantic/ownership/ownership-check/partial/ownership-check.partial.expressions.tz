@@ -1,0 +1,627 @@
+import { replace } from "tz:mem";
+import { OwnershipCheck } from "../ownership-check.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  ArrayLitExpr,
+  BinaryExpr,
+  BinaryOp,
+  ConditionalExpr,
+  Expr,
+  ExprKind,
+  IndexExpr,
+  MemberExpr,
+  NameExpr,
+  ObjectLitExpr,
+  Property,
+  PropertyKind,
+  UnaryOp,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { SymbolKind } from "../../../../program/scopes/types/scopes.types.tz";
+import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  CallbackMode,
+  Holding,
+  Loan,
+  Operand,
+  OperandKind,
+  Place,
+  Variable,
+} from "../types/ownership-check.types.tz";
+import {
+  kCellName,
+  kElementStep,
+  kSymbolEqualsKey,
+  kThisName,
+} from "../const/ownership-check.const.tz";
+import { MethodKind } from "../../../../program/ast/types/ast.types.classes.tz";
+
+partial class OwnershipCheck {
+  private evaluate(expr: Expr): Operand {
+    return this.evaluateFor(expr, CallbackMode.Local);
+  }
+
+  private evaluateFor(expr: Expr, callback: CallbackMode): Operand {
+    switch (expr.kind) {
+      case ExprKind.Name:
+        return this.evaluateName(expr, true);
+      case ExprKind.Member:
+        return this.evaluateMember(expr, true);
+      case ExprKind.Index:
+        return this.evaluateIndex(expr, true);
+      case ExprKind.Unary:
+        return this.evaluateUnary(expr.op, expr.operand, expr.loc);
+      case ExprKind.Binary:
+        return this.evaluateBinary(expr);
+      case ExprKind.Assign:
+        return this.evaluateAssign(expr);
+      case ExprKind.Update:
+        this.changePlaceOf(expr.target, expr.loc);
+        return this.copyOperand(expr.loc);
+      case ExprKind.Call:
+        return this.evaluateCall(expr);
+      case ExprKind.New:
+        return this.evaluateNew(expr);
+      case ExprKind.Conditional:
+        return this.evaluateConditional(expr);
+      case ExprKind.Cast:
+        return this.evaluateFor(expr.operand, callback);
+      case ExprKind.OptionalChain:
+        return this.evaluateFor(expr.chain, callback);
+      case ExprKind.Sequence:
+        return this.evaluateSequence(expr.exprs, expr.loc);
+      case ExprKind.Template:
+        return this.evaluateUsed(expr.exprs, expr.loc);
+      case ExprKind.ArrayLit:
+        return this.evaluateArray(expr);
+      case ExprKind.ObjectLit:
+        return this.evaluateObject(expr);
+      case ExprKind.Function:
+        this.closure(expr.fn, callback, expr.loc);
+        return this.freshOperand(expr.loc);
+      case ExprKind.Await:
+        return this.evaluateAwait(expr.value, expr.loc);
+      case ExprKind.Yield:
+        return this.evaluateYield(expr.value, expr.loc);
+      case ExprKind.RegexLit:
+      case ExprKind.Class:
+        return this.freshOperand(expr.loc);
+      default:
+        return this.copyOperand(expr.loc);
+    }
+  }
+
+  private evaluateBase(expr: Expr): Operand {
+    switch (expr.kind) {
+      case ExprKind.Name:
+        return this.evaluateName(expr, false);
+      case ExprKind.Member:
+        return this.evaluateMember(expr, false);
+      case ExprKind.Index:
+        return this.evaluateIndex(expr, false);
+      case ExprKind.Cast:
+        return this.evaluateBase(expr.operand);
+      case ExprKind.OptionalChain:
+        return this.evaluateBase(expr.chain);
+      case ExprKind.Unary:
+        if (expr.op == UnaryOp.NonNull) {
+          return this.evaluateBase(expr.operand);
+        }
+        return this.evaluate(expr);
+      default:
+        return this.evaluate(expr);
+    }
+  }
+
+  private evaluateName(expr: NameExpr, isChecked: boolean): Operand {
+    const key = this.keyOfName(expr);
+    if (key == undefined) {
+      return this.copyOperand(expr.loc);
+    }
+
+    const variable = this.knownVariable(expr, key);
+    if (variable == undefined) {
+      return this.copyOperand(expr.loc);
+    }
+
+    const place: Place = { root: key, path: [] };
+
+    if (isChecked) {
+      this.checkUsable(place, expr.loc);
+    }
+    if (variable.holding == Holding.Copy) {
+      return this.copyOperand(expr.loc);
+    }
+    if (isChecked && this.isCopyExpr(expr)) {
+      return this.copyOperand(expr.loc);
+    }
+
+    return this.placeOperand(place, expr.loc);
+  }
+
+  private readonly knownVariable(expr: NameExpr, key: int): Variable | undefined {
+    const known = this.variableOf(key);
+    if (known != undefined) {
+      return known;
+    }
+
+    const target = this.values.valueTargetOf(expr, this.module);
+    const frame = this.frame();
+    if (target == undefined || frame == undefined) {
+      return undefined;
+    }
+    if (target.kind != SymbolKind.Variable) {
+      return undefined;
+    }
+
+    const made: Variable = {
+      key,
+      name: expr.name,
+      holding: Holding.Global,
+      loans: [],
+      isReadOnly: false,
+      isConst: true,
+      isUsing: false,
+      declared: -1,
+      lastUse: -1,
+      isChanged: false,
+      isCaptured: false,
+    };
+
+    frame.variables.set(key, made);
+
+    return made;
+  }
+
+  private evaluateMember(expr: MemberExpr, isChecked: boolean): Operand {
+    const object = this.evaluateBase(expr.object);
+    const inner = this.stepInto(object, expr.name, expr.loc, isChecked);
+    if (isChecked && (this.isCopyExpr(expr) || this.isInternedPart(expr))) {
+      return this.copyOperand(expr.loc);
+    }
+
+    const isCell = object.isCell == true || this.isCellField(expr);
+    if (!isCell) {
+      return inner;
+    }
+
+    const isUntracked =
+      inner.kind == OperandKind.Copy || inner.kind == OperandKind.Fresh;
+    if (isUntracked && !this.isCopyExpr(expr)) {
+      return { kind: OperandKind.Borrowed, loans: [], loc: inner.loc, isCell };
+    }
+
+    return { kind: inner.kind, place: inner.place, loans: inner.loans, loc: inner.loc, isCell };
+  }
+
+  private readonly isInternedPart(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.Member:
+        if (this.isCellField(expr)) {
+          return false;
+        }
+
+        return this.isInternedValue(expr.object) || this.isInternedPart(expr.object);
+      case ExprKind.Index:
+        return this.isInternedValue(expr.object) || this.isInternedPart(expr.object);
+      case ExprKind.Cast:
+        return this.isInternedPart(expr.operand);
+      case ExprKind.OptionalChain:
+        return this.isInternedPart(expr.chain);
+      case ExprKind.Unary:
+        return expr.op == UnaryOp.NonNull && this.isInternedPart(expr.operand);
+      default:
+        return false;
+    }
+  }
+
+  private readonly isSharedPart(expr: Expr): boolean {
+    return this.isInternedPart(expr) && !this.isBuilding(expr);
+  }
+
+  private readonly isBuilding(expr: Expr): boolean {
+    const role = this.frame()?.fn?.role;
+    const root = this.rootNameOf(expr);
+
+    return (
+      role != undefined &&
+      role.method == MethodKind.Constructor &&
+      root != undefined &&
+      root.name == kThisName
+    );
+  }
+
+  private readonly isInternedValue(expr: Expr): boolean {
+    const type = this.values.answers.typeOf(expr);
+
+    return type != undefined && this.isInternedType(type);
+  }
+
+  private readonly isInternedType(type: Type): boolean {
+    if (this.store.isInterned(type)) {
+      return true;
+    }
+    if (type.kind != TypeKind.Union) {
+      return false;
+    }
+
+    let isFound = false;
+
+    for (const part of type.parts) {
+      if (part.kind == TypeKind.Undefined) {
+        continue;
+      }
+      if (!this.store.isInterned(part)) {
+        return false;
+      }
+
+      isFound = true;
+    }
+
+    return isFound;
+  }
+
+  private readonly isCellField(expr: MemberExpr): boolean {
+    const type = this.values.answers.typeOf(expr.object);
+    if (type == undefined) {
+      return false;
+    }
+    if (type.kind == TypeKind.Object) {
+      const found = type.fields.find((one) => one.name == expr.name);
+
+      return found != undefined && found.cell == true;
+    }
+
+    const decl = this.values.classDeclOf(type);
+    const field = decl?.fields.find((one) => one.name == expr.name);
+    const ref = field?.type;
+    if (ref == undefined) {
+      return false;
+    }
+
+    return ref.name == kCellName && ref.args.length == 1;
+  }
+
+  private evaluateIndex(expr: IndexExpr, isChecked: boolean): Operand {
+    const object = this.evaluateBase(expr.object);
+
+    this.evaluate(expr.index);
+
+    const inner = this.stepInto(object, kElementStep, expr.loc, isChecked);
+    if (isChecked && (this.isCopyExpr(expr) || this.isInternedPart(expr))) {
+      return this.copyOperand(expr.loc);
+    }
+
+    return inner;
+  }
+
+  private stepInto(
+    object: Read<Operand>,
+    step: string,
+    loc: int,
+    isChecked: boolean,
+  ): Operand {
+    const place = object.place;
+    const inner = this.stepped(object, step, loc, isChecked, place);
+    if (object.isCell != true) {
+      return inner;
+    }
+
+    return { kind: inner.kind, place: inner.place, loans: inner.loans, loc: inner.loc, isCell: true };
+  }
+
+  private stepped(
+    object: Read<Operand>,
+    step: string,
+    loc: int,
+    isChecked: boolean,
+    place: Read<Place | undefined>,
+  ): Operand {
+    switch (object.kind) {
+      case OperandKind.Place: {
+        if (place == undefined) {
+          return this.freshOperand(loc);
+        }
+
+        const inner = this.extended(place, step);
+
+        if (isChecked) {
+          this.checkUsable(inner, loc);
+        }
+
+        return this.placeOperand(inner, loc);
+      }
+      case OperandKind.Borrowed:
+        return this.borrowedOperand(object.loans, loc);
+      case OperandKind.Copy:
+        return this.copyOperand(loc);
+      default:
+        return this.freshOperand(loc);
+    }
+  }
+
+  private evaluateUnary(op: UnaryOp, operand: Expr, loc: int): Operand {
+    if (op == UnaryOp.NonNull) {
+      return this.evaluate(operand);
+    }
+    if (op == UnaryOp.Delete) {
+      this.changePlaceOf(operand, loc);
+
+      return this.copyOperand(loc);
+    }
+
+    this.evaluate(operand);
+
+    return this.copyOperand(loc);
+  }
+
+  private evaluateBinary(expr: BinaryExpr): Operand {
+    const isLogical =
+      expr.op == BinaryOp.LogAnd ||
+      expr.op == BinaryOp.LogOr ||
+      expr.op == BinaryOp.Nullish;
+    if (!isLogical) {
+      this.evaluate(expr.lhs);
+      this.evaluate(expr.rhs);
+      this.checkEquality(expr);
+
+      return this.copyOperand(expr.loc);
+    }
+
+    const lhs = this.evaluate(expr.lhs);
+    const before = this.copyState(this.state);
+    const rhs = this.evaluate(expr.rhs);
+
+    this.state = this.merged(before, this.state);
+
+    if (this.isCopyExpr(expr)) {
+      return this.copyOperand(expr.loc);
+    }
+
+    return this.either(lhs, rhs, expr.loc);
+  }
+
+  private checkEquality(expr: BinaryExpr): void {
+    if (expr.op != BinaryOp.Eq && expr.op != BinaryOp.Ne) {
+      return;
+    }
+    if (this.isUndefinedSide(expr.lhs) || this.isUndefinedSide(expr.rhs)) {
+      return;
+    }
+
+    const name = this.equalityWithout(expr.lhs) ?? this.equalityWithout(expr.rhs);
+    if (name != undefined) {
+      this.report(expr.loc, Code.OwnEqualsMissing, { word: name });
+    }
+  }
+
+  private readonly isUndefinedSide(side: Expr): boolean {
+    const type = this.values.answers.typeOf(side);
+
+    return type == undefined || type.kind == TypeKind.Undefined;
+  }
+
+  private equalityWithout(side: Expr): string | undefined {
+    const type = this.values.answers.typeOf(side);
+    const name = type == undefined ? undefined : this.copiedName(type);
+    if (type == undefined || name == undefined) {
+      return undefined;
+    }
+
+    const decl = this.values.classDeclOf(type);
+    if (decl != undefined && this.hasMethod(decl, kSymbolEqualsKey)) {
+      return undefined;
+    }
+
+    return name;
+  }
+
+  private evaluateConditional(expr: ConditionalExpr): Operand {
+    this.evaluate(expr.cond);
+
+    const before = this.copyState(this.state);
+    const first = this.evaluate(expr.thenExpr);
+    const afterThen = replace(this.state, before);
+
+    const second = this.evaluate(expr.elseExpr);
+
+    this.state = this.merged(afterThen, this.state);
+
+    if (this.isCopyExpr(expr)) {
+      return this.copyOperand(expr.loc);
+    }
+
+    return this.either(first, second, expr.loc);
+  }
+
+  private readonly either(first: Own<Operand>, second: Own<Operand>, loc: int): Operand {
+    const bothFresh =
+      this.isFreshLike(first.kind) && this.isFreshLike(second.kind);
+    if (bothFresh) {
+      return this.freshOperand(loc);
+    }
+    if (this.isFreshLike(first.kind)) {
+      return second;
+    }
+    if (this.isFreshLike(second.kind)) {
+      return first;
+    }
+
+    const loans: Loan[] = this.loansOf(first).concat(this.loansOf(second));
+
+    return this.borrowedOperand(loans, loc);
+  }
+
+  private readonly isFreshLike(kind: OperandKind): boolean {
+    return (
+      kind == OperandKind.Fresh ||
+      kind == OperandKind.Copy ||
+      kind == OperandKind.Nothing
+    );
+  }
+
+  private evaluateSequence(exprs: Read<Expr[]>, loc: int): Operand {
+    let last: Operand = this.copyOperand(loc);
+
+    for (const expr of exprs) {
+      last = this.evaluate(expr);
+    }
+
+    return last;
+  }
+
+  private evaluateUsed(exprs: Read<Expr[]>, loc: int): Operand {
+    for (const expr of exprs) {
+      this.evaluate(expr);
+    }
+
+    return this.copyOperand(loc);
+  }
+
+  private evaluateArray(expr: ArrayLitExpr): Operand {
+    for (const element of expr.elements) {
+      if (element.hole) {
+        continue;
+      }
+
+      const operand = this.evaluateFor(element.expr, CallbackMode.Kept);
+      if (element.spread && this.isArrayOfCopiesExpr(element.expr)) {
+        continue;
+      }
+
+      this.take(operand, element.expr);
+    }
+
+    return this.freshOperand(expr.loc);
+  }
+
+  private isArrayOfCopiesExpr(expr: Expr): boolean {
+    const type = this.values.answers.typeOf(expr);
+
+    return type != undefined && type.kind == TypeKind.Array && this.traits.isCopy(type.item);
+  }
+
+  private evaluateObject(expr: ObjectLitExpr): Operand {
+    for (const property of expr.props) {
+      const form = property.form;
+      if (form.kind == PropertyKind.Computed) {
+        this.evaluate(form.key);
+      }
+      if (form.kind == PropertyKind.Method) {
+        continue;
+      }
+
+      const operand = this.evaluateFor(property.value, CallbackMode.Kept);
+      const place = operand.place;
+      const isFields =
+        form.kind == PropertyKind.Spread &&
+        operand.kind == OperandKind.Place &&
+        place != undefined;
+      if (isFields && place != undefined) {
+        this.takeFields(expr, property, place);
+
+        continue;
+      }
+
+      this.take(operand, property.value);
+    }
+
+    return this.freshOperand(expr.loc);
+  }
+
+  private takeFields(expr: ObjectLitExpr, spread: Property, place: Place): void {
+    const later = expr.props.slice(expr.props.indexOf(spread) + 1);
+
+    for (const name of this.spreadFieldNames(spread.value)) {
+      const isWritten = later.some(
+        (one) => one.form.kind != PropertyKind.Spread && one.name == name,
+      );
+      if (isWritten) {
+        continue;
+      }
+
+      const field = this.extended(place, name);
+      const type = this.spreadFieldType(spread.value, name);
+      if (type != undefined && this.traits.isCopy(type)) {
+        continue;
+      }
+
+      this.take(this.placeOperand(field, spread.value.loc), spread.value);
+    }
+  }
+
+  private readonly spreadFieldNames(value: Expr): string[] {
+    const type = this.values.answers.typeOf(value);
+    if (type == undefined) {
+      return [];
+    }
+    if (type.kind == TypeKind.Object) {
+      return type.fields.map((field) => field.name);
+    }
+
+    const decl = this.values.classDeclOf(type);
+
+    return decl?.fields.map((field) => field.name) ?? [];
+  }
+
+  private readonly spreadFieldType(value: Expr, name: string): Type | undefined {
+    const type = this.values.answers.typeOf(value);
+    if (type == undefined || type.kind != TypeKind.Object) {
+      return undefined;
+    }
+
+    return type.fields.find((field) => field.name == name)?.type;
+  }
+
+  private evaluateAwait(value: Expr, loc: int): Operand {
+    this.evaluate(value);
+
+    return this.freshOperand(loc);
+  }
+
+  private evaluateYield(value: Expr | undefined, loc: int): Operand {
+    if (value != undefined) {
+      const operand = this.evaluate(value);
+
+      this.take(operand, value);
+    }
+
+    return this.freshOperand(loc);
+  }
+
+  private isCopyExpr(expr: Expr): boolean {
+    const type = this.values.answers.typeOf(expr);
+    if (type == undefined) {
+      return true;
+    }
+
+    return this.traits.isCopy(type);
+  }
+
+  private readonly loansOf(operand: Read<Operand>): Loan[] {
+    const place = operand.place;
+    if (operand.kind == OperandKind.Borrowed) {
+      return operand.loans;
+    }
+    if (operand.kind == OperandKind.Place && place != undefined) {
+      return this.loansOfPlace(place);
+    }
+
+    return [];
+  }
+
+  private readonly copyOperand(loc: int): Operand {
+    return { kind: OperandKind.Copy, loans: [], loc };
+  }
+
+  private readonly freshOperand(loc: int): Operand {
+    return { kind: OperandKind.Fresh, loans: [], loc };
+  }
+
+  private readonly placeOperand(place: Own<Place>, loc: int): Operand {
+    return { kind: OperandKind.Place, place, loans: [], loc };
+  }
+
+  private readonly borrowedOperand(loans: Own<Loan[]>, loc: int): Operand {
+    return { kind: OperandKind.Borrowed, loans, loc };
+  }
+}

@@ -1,0 +1,386 @@
+import { OwnershipCheck } from "../ownership-check.tz";
+import {
+  CallArgument,
+  Expr,
+  ExprKind,
+  NameExpr,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  BindingKind,
+  NameOrigin,
+  VarDeclarator,
+} from "../../../../program/ast/types/ast.types.patterns.tz";
+import {
+  Stmt,
+  StmtKind,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import { ExpressionCollector } from "../../../code/expression-collector/expression-collector.tz";
+import {
+  TypeRef,
+  TypeRefKind,
+} from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  Callee,
+  Derived,
+  FunctionFrame,
+  Holding,
+  LoopSpan,
+  ParamMode,
+  ResultMode,
+} from "../types/ownership-check.types.tz";
+import { kThisKey, kThisName } from "../const/ownership-check.const.tz";
+
+partial class OwnershipCheck {
+  private collectUses(frame: FunctionFrame, items: Read<Stmt[]>): void {
+    const derived: Derived[] = [];
+
+    for (const item of items) {
+      this.declareIn(frame, item, derived);
+    }
+
+    const collector = new ExpressionCollector();
+    const exprs: Expr[] = [];
+    const values: Expr[] = [];
+
+    for (const item of items) {
+      collector.statementExprs(item, exprs, values, true);
+    }
+
+    for (const expr of exprs) {
+      this.noteUse(frame, expr);
+    }
+
+    this.spreadChanges(frame, derived);
+    this.extendInLoops(frame);
+  }
+
+  private readonly declareIn(frame: FunctionFrame, stmt: Stmt, derived: Derived[]): void {
+    switch (stmt.kind) {
+      case StmtKind.VarDecl:
+        for (const declarator of stmt.decls) {
+          this.declareVariable(frame, declarator, stmt.isConst, stmt.isUsing);
+          this.noteDerived(declarator.loc, declarator.init, derived);
+        }
+        return;
+      case StmtKind.Block:
+        return this.declareAll(frame, stmt.body, derived);
+      case StmtKind.If:
+        this.declareIn(frame, stmt.thenStmt, derived);
+        return this.declareOptional(frame, stmt.elseStmt, derived);
+      case StmtKind.While:
+      case StmtKind.DoWhile:
+        this.noteLoop(frame, stmt.loc, stmt);
+        return this.declareIn(frame, stmt.body, derived);
+      case StmtKind.For:
+        this.noteLoop(frame, stmt.loc, stmt);
+        this.declareOptional(frame, stmt.init, derived);
+        return this.declareOptional(frame, stmt.body, derived);
+      case StmtKind.ForOf:
+        this.noteLoop(frame, stmt.loc, stmt);
+        this.declareVariable(frame, stmt.binding, stmt.isConst, stmt.isUsing);
+        this.noteDerived(stmt.binding.loc, stmt.iterable, derived);
+        return this.declareIn(frame, stmt.body, derived);
+      case StmtKind.Switch:
+        for (const option of stmt.cases) {
+          this.declareAll(frame, option.body, derived);
+        }
+        return;
+      case StmtKind.Labeled:
+        return this.declareIn(frame, stmt.body, derived);
+      default:
+        return;
+    }
+  }
+
+  private readonly declareAll(frame: FunctionFrame, items: Read<Stmt[]>, derived: Derived[]): void {
+    for (const item of items) {
+      this.declareIn(frame, item, derived);
+    }
+  }
+
+  private readonly declareOptional(
+    frame: FunctionFrame,
+    stmt: Stmt | undefined,
+    derived: Derived[],
+  ): void {
+    if (stmt != undefined) {
+      this.declareIn(frame, stmt, derived);
+    }
+  }
+
+  private readonly noteDerived(key: int, init: Expr | undefined, derived: Derived[]): void {
+    if (init != undefined) {
+      derived.push({ key, source: init });
+    }
+  }
+
+  private spreadChanges(frame: FunctionFrame, derived: Read<Derived[]>): void {
+    let isSpread = true;
+
+    while (isSpread) {
+      isSpread = false;
+
+      for (const one of derived) {
+        const variable = frame.variables.get(one.key);
+        if (variable == undefined || !variable.isChanged) {
+          continue;
+        }
+
+        const type = this.values.variableOf(this.module, one.key);
+        if (type != undefined && this.traits.isCopy(type)) {
+          continue;
+        }
+
+        const root = this.borrowRootOf(one.source);
+        const key = root == undefined ? undefined : this.keyOfName(root);
+        const source = key == undefined ? undefined : frame.variables.get(key);
+        if (source != undefined && !source.isChanged) {
+          source.isChanged = true;
+          isSpread = true;
+        }
+      }
+    }
+  }
+
+  private borrowRootOf(expr: Expr): NameExpr | undefined {
+    switch (expr.kind) {
+      case ExprKind.Name:
+        return expr;
+      case ExprKind.Member:
+      case ExprKind.Index:
+        return this.borrowRootOf(expr.object);
+      case ExprKind.Cast:
+        return this.borrowRootOf(expr.operand);
+      case ExprKind.OptionalChain:
+        return this.borrowRootOf(expr.chain);
+      case ExprKind.Unary:
+        return this.borrowRootOf(expr.operand);
+      case ExprKind.Call:
+        return this.callBorrowRoot(expr.callee, expr);
+      case ExprKind.Conditional:
+        return this.borrowRootOf(expr.thenExpr) ?? this.borrowRootOf(expr.elseExpr);
+      case ExprKind.Binary:
+        return this.borrowRootOf(expr.lhs) ?? this.borrowRootOf(expr.rhs);
+      default:
+        return undefined;
+    }
+  }
+
+  private callBorrowRoot(callee: Expr, call: Expr): NameExpr | undefined {
+    if (callee.kind != ExprKind.Member) {
+      return undefined;
+    }
+
+    const info = this.calleeForUses(callee, call);
+    if (info.result != ResultMode.Element && info.result != ResultMode.Mut) {
+      return undefined;
+    }
+
+    return this.borrowRootOf(callee.object);
+  }
+
+  private readonly declareVariable(
+    frame: FunctionFrame,
+    declarator: VarDeclarator,
+    isConst: boolean,
+    isUsing: boolean,
+  ): void {
+    frame.variables.set(declarator.loc, {
+      key: declarator.loc,
+      name: declarator.name,
+      holding: Holding.Own,
+      loans: [],
+      isReadOnly: false,
+      isConst,
+      isUsing,
+      declared: declarator.loc,
+      lastUse: declarator.loc,
+      isChanged: false,
+      isCaptured: false,
+      isBorrowArray: this.isBorrowArrayRef(declarator.typeAnn),
+      isPattern:
+        declarator.form.kind != BindingKind.Plain &&
+        declarator.origin == NameOrigin.Generated,
+    });
+  }
+
+  private readonly isBorrowArrayRef(ref: TypeRef | undefined): boolean {
+    return (
+      ref != undefined &&
+      ref.form.kind == TypeRefKind.Array &&
+      this.isBorrowRef(ref)
+    );
+  }
+
+  private readonly noteLoop(frame: FunctionFrame, start: int, stmt: Stmt): void {
+    const end = this.lastLocOf(stmt);
+    const span: LoopSpan = { start, end };
+
+    frame.loops.push(span);
+  }
+
+  private readonly lastLocOf(stmt: Stmt): int {
+    const collector = new ExpressionCollector();
+    const exprs: Expr[] = [];
+    const values: Expr[] = [];
+    let last: int = stmt.loc;
+
+    collector.statementExprs(stmt, exprs, values, true);
+
+    for (const expr of exprs) {
+      if (expr.loc > last) {
+        last = expr.loc;
+      }
+    }
+
+    return last;
+  }
+
+  private noteUse(frame: FunctionFrame, expr: Expr): void {
+    if (expr.kind == ExprKind.Name) {
+      this.noteName(frame, expr);
+
+      return;
+    }
+    if (expr.kind == ExprKind.Assign || expr.kind == ExprKind.Update) {
+      if (expr.target.kind != ExprKind.Name) {
+        this.noteChange(frame, expr.target);
+      }
+
+      return;
+    }
+    if (expr.kind == ExprKind.Call && expr.callee.kind == ExprKind.Member) {
+      this.noteChangingCall(frame, expr.callee.object, expr.callee.name);
+    }
+    if (expr.kind == ExprKind.Call) {
+      const info = this.calleeForUses(expr.callee, expr);
+
+      this.noteChangedArguments(frame, expr.args, info);
+    }
+  }
+
+  private calleeForUses(callee: Expr, call: Expr): Callee {
+    if (callee.kind == ExprKind.Member) {
+      return this.memberCallee(callee, call);
+    }
+    if (callee.kind == ExprKind.Name) {
+      return this.nameCallee(callee, call);
+    }
+
+    return this.libraryCallee(call);
+  }
+
+  private noteChangedArguments(
+    frame: FunctionFrame,
+    args: Read<CallArgument[]>,
+    info: Read<Callee>,
+  ): void {
+    for (let index: int = 0; index < args.length; index++) {
+      const arg = args[index];
+      const param = this.paramAt(info, index);
+      if (arg == undefined || param.mode != ParamMode.Mut) {
+        continue;
+      }
+      if (!this.isCopyExpr(arg.expr)) {
+        this.noteChange(frame, arg.expr);
+      }
+    }
+  }
+
+  private readonly noteName(frame: FunctionFrame, expr: NameExpr): void {
+    const key = this.keyOfName(expr);
+    if (key == undefined) {
+      return;
+    }
+
+    const variable = frame.variables.get(key);
+    if (variable == undefined) {
+      return;
+    }
+    if (expr.loc > variable.lastUse) {
+      variable.lastUse = expr.loc;
+    }
+  }
+
+  private readonly noteChange(frame: FunctionFrame, target: Expr): void {
+    const root = this.rootNameOf(target);
+    if (root == undefined) {
+      return;
+    }
+
+    const key = this.keyOfName(root);
+    if (key == undefined) {
+      return;
+    }
+
+    const variable = frame.variables.get(key);
+    if (variable != undefined) {
+      variable.isChanged = true;
+    }
+  }
+
+  private readonly noteChangingCall(
+    frame: FunctionFrame,
+    object: Expr,
+    method: string,
+  ): void {
+    const root = this.rootNameOf(object);
+    if (root == undefined) {
+      return;
+    }
+
+    const key = this.keyOfName(root);
+    if (key == undefined) {
+      return;
+    }
+
+    const variable = frame.variables.get(key);
+    if (variable == undefined) {
+      return;
+    }
+    if (this.isChangingMethod(object, method)) {
+      variable.isChanged = true;
+    }
+  }
+
+  private readonly extendInLoops(frame: FunctionFrame): void {
+    for (const variable of frame.variables.values()) {
+      for (const loop of frame.loops) {
+        const isInside = variable.lastUse >= loop.start;
+        const isBefore = variable.declared < loop.start;
+        if (isInside && isBefore && variable.lastUse <= loop.end) {
+          variable.lastUse = loop.end;
+        }
+      }
+    }
+  }
+
+  private readonly rootNameOf(expr: Expr): NameExpr | undefined {
+    switch (expr.kind) {
+      case ExprKind.Name:
+        return expr;
+      case ExprKind.Member:
+      case ExprKind.Index:
+        return this.rootNameOf(expr.object);
+      case ExprKind.Cast:
+        return this.rootNameOf(expr.operand);
+      case ExprKind.OptionalChain:
+        return this.rootNameOf(expr.chain);
+      default:
+        return undefined;
+    }
+  }
+
+  private readonly keyOfName(expr: NameExpr): int | undefined {
+    if (expr.name == kThisName) {
+      return kThisKey;
+    }
+
+    const target = this.values.valueTargetOf(expr, this.module);
+    if (target == undefined || target.module != this.module) {
+      return undefined;
+    }
+
+    return target.loc;
+  }
+}

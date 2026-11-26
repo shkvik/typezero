@@ -30,7 +30,7 @@ import {
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private callbackArgumentsCheck(
+  private readonly callbackArgumentsCheck(
     expr: CallExpr,
     plan: CallbackPlan,
     module: int,
@@ -56,9 +56,9 @@ partial class ExpressionTypes {
     }
   }
 
-  private functionValueCheck(
+  private readonly functionValueCheck(
     arg: Expr,
-    plan: CallbackPlan,
+    plan: Read<CallbackPlan>,
     module: int,
   ): boolean {
     const name = this.functionValueName(arg, module);
@@ -86,7 +86,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private functionValueName(arg: Expr, module: int): string | undefined {
+  private readonly functionValueName(arg: Expr, module: int): string | undefined {
     if (arg.kind == ExprKind.Name && this.isGlobalUse(arg, module)) {
       return arg.name;
     }
@@ -102,7 +102,7 @@ partial class ExpressionTypes {
     return `${object.name}.${arg.name}`;
   }
 
-  private functionValueLimit(arg: Expr, module: int): int | undefined {
+  private readonly functionValueLimit(arg: Expr, module: int): int | undefined {
     const name = this.functionValueName(arg, module);
     if (name == undefined) {
       return undefined;
@@ -111,15 +111,15 @@ partial class ExpressionTypes {
     return kFunctionValueNames.get(name) ?? kFunctionValueStatics.get(name);
   }
 
-  private isGlobalUse(expr: NameExpr, module: int): boolean {
+  private readonly isGlobalUse(expr: NameExpr, module: int): boolean {
     const use = this.record(module)?.uses.get(expr.loc);
 
     return use != undefined && use.symbol == undefined;
   }
 
-  private callbackResultCheck(
+  private readonly callbackResultCheck(
     expr: CallExpr,
-    plan: CallbackPlan,
+    plan: Read<CallbackPlan>,
     module: int,
   ): void {
     const arg = expr.args[0]?.expr;
@@ -137,9 +137,9 @@ partial class ExpressionTypes {
     this.passedFunctionCheck(arg, type, plan, module);
   }
 
-  private literalCallbackCheck(
+  private readonly literalCallbackCheck(
     arg: Expr,
-    plan: CallbackPlan,
+    plan: Read<CallbackPlan>,
     module: int,
   ): void {
     const type = this.closureTypes.get(arg);
@@ -178,10 +178,10 @@ partial class ExpressionTypes {
     this.report(module, arg.loc, Code.CompareNotNumber, { word: found });
   }
 
-  private passedFunctionCheck(
+  private readonly passedFunctionCheck(
     arg: Expr,
     type: Type,
-    plan: CallbackPlan,
+    plan: Read<CallbackPlan>,
     module: int,
   ): void {
     const method = plan.member.name;
@@ -236,7 +236,7 @@ partial class ExpressionTypes {
     this.reportAll(module, passedResultErrors);
   }
 
-  private callbackName(arg: Expr, module: int): string {
+  private readonly callbackName(arg: Expr, module: int): string {
     if (arg.kind != ExprKind.Name) {
       return "the function";
     }
@@ -253,17 +253,17 @@ partial class ExpressionTypes {
     return `'${arg.name}'`;
   }
 
-  private isConstFunction(module: int, loc: int): boolean {
+  private readonly isConstFunction(module: int, loc: int): boolean {
     const variable = this.record(module)?.variables.get(loc);
     const init = variable?.decl.init;
 
     return variable?.isConst == true && init?.kind == ExprKind.Function;
   }
 
-  private callbackParamsCheck(
+  private readonly callbackParamsCheck(
     arg: Expr,
     type: FunctionType,
-    plan: CallbackPlan,
+    plan: Read<CallbackPlan>,
     name: string,
     module: int,
   ): boolean {
@@ -310,7 +310,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private optionalParamName(arg: Expr, index: int, module: int): string {
+  private readonly optionalParamName(arg: Expr, index: int, module: int): string {
     if (arg.kind != ExprKind.Name) {
       return "";
     }
@@ -329,19 +329,19 @@ partial class ExpressionTypes {
     return ` '${param.name}'`;
   }
 
-  private noteArguments(args: CallArgument[]): void {
+  private readonly noteArguments(args: Read<CallArgument[]>): void {
     for (const arg of args) {
       this.argumentExprs.add(arg.expr);
     }
   }
 
-  private isLooseValue(expr: Expr, wanted: Type | undefined): boolean {
+  private readonly isLooseValue(expr: Expr, wanted: Type | undefined): boolean {
     return (
       !this.callbacks.isFunctionWanted(wanted) && !this.argumentExprs.has(expr)
     );
   }
 
-  private builtinValueCheck(
+  private readonly builtinValueCheck(
     expr: NameExpr,
     wanted: Type | undefined,
     module: int,
@@ -376,7 +376,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private builtinFunctionValue(
+  private readonly builtinFunctionValue(
     expr: NameExpr,
     wanted: Type | undefined,
     module: int,
@@ -414,7 +414,7 @@ partial class ExpressionTypes {
     return goal;
   }
 
-  private isHolderFunction(
+  private readonly isHolderFunction(
     expr: MemberExpr,
     holder: string,
     module: int,
@@ -432,7 +432,7 @@ partial class ExpressionTypes {
     return type.kind == TypeKind.Function;
   }
 
-  private holderValueCheck(
+  private readonly holderValueCheck(
     expr: MemberExpr,
     wanted: Type | undefined,
     module: int,
@@ -459,10 +459,10 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private asyncCallbackCheck(
+  private readonly asyncCallbackCheck(
     expr: CallExpr,
     arg: Expr,
-    plan: CallbackPlan,
+    plan: Read<CallbackPlan>,
     module: int,
   ): void {
     if (arg.kind != ExprKind.Function || !arg.fn.isAsync) {

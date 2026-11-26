@@ -17,7 +17,7 @@ import {
 import { FieldEntry, ObjectDraft } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private objectTyped(
+  private readonly objectTyped(
     expr: ObjectLitExpr,
     wanted: Type | undefined,
     module: int,
@@ -60,7 +60,7 @@ partial class ExpressionTypes {
     return this.inferredObject(draft, module);
   }
 
-  private unionObject(
+  private readonly unionObject(
     expr: ObjectLitExpr,
     draft: ObjectDraft,
     target: Type,
@@ -85,7 +85,7 @@ partial class ExpressionTypes {
     return this.inferredObject(draft, module);
   }
 
-  private objectKeys(expr: ObjectLitExpr, module: int): ObjectDraft {
+  private readonly objectKeys(expr: ObjectLitExpr, module: int): ObjectDraft {
     const draft: ObjectDraft = { entries: [], typed: true, deferred: false };
 
     for (const property of expr.props) {
@@ -97,7 +97,7 @@ partial class ExpressionTypes {
     return draft;
   }
 
-  private keyEntry(
+  private readonly keyEntry(
     property: Property,
     draft: ObjectDraft,
     module: int,
@@ -137,7 +137,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private computedEntry(
+  private readonly computedEntry(
     property: Property,
     key: Expr,
     draft: ObjectDraft,
@@ -167,7 +167,7 @@ partial class ExpressionTypes {
     return entry;
   }
 
-  private constantKey(key: Expr, module: int): string | undefined {
+  private readonly constantKey(key: Expr, module: int): string | undefined {
     switch (key.kind) {
       case ExprKind.StringLit:
         return key.value;
@@ -198,7 +198,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private inferredObject(draft: ObjectDraft, module: int): Type {
+  private readonly inferredObject(draft: ObjectDraft, module: int): Type {
     const fields: ObjectField[] = [];
 
     for (const entry of draft.entries) {
@@ -235,7 +235,7 @@ partial class ExpressionTypes {
     return this.store.objectOf(fields);
   }
 
-  private isUsableField(entry: FieldEntry, type: Type, module: int): boolean {
+  private readonly isUsableField(entry: FieldEntry, type: Type, module: int): boolean {
     const checked = this.objectMembers.isUsableField(entry, type);
 
     this.reportFound(module, checked.error);
@@ -243,7 +243,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private targetedObject(
+  private readonly targetedObject(
     expr: ObjectLitExpr,
     draft: ObjectDraft,
     target: Type,
@@ -294,9 +294,9 @@ partial class ExpressionTypes {
     return target;
   }
 
-  private literalMember(
-    draft: ObjectDraft,
-    members: Type[],
+  private readonly literalMember(
+    draft: Read<ObjectDraft>,
+    members: Read<Type[]>,
     module: int,
   ): Type | undefined {
     let best: Type | undefined = undefined;
@@ -327,8 +327,8 @@ partial class ExpressionTypes {
     return best;
   }
 
-  private candidateScore(
-    draft: ObjectDraft,
+  private readonly candidateScore(
+    draft: Read<ObjectDraft>,
     member: Type,
     module: int,
   ): int | undefined {
@@ -350,7 +350,7 @@ partial class ExpressionTypes {
     return score;
   }
 
-  private propertyScore(
+  private readonly propertyScore(
     entry: FieldEntry,
     member: Type,
     module: int,
@@ -386,7 +386,7 @@ partial class ExpressionTypes {
     return 0;
   }
 
-  private propertyTag(value: Expr, module: int): Type | undefined {
+  private readonly propertyTag(value: Expr, module: int): Type | undefined {
     const isPlus = value.kind == ExprKind.Unary && value.op == UnaryOp.Plus;
 
     if (value.kind == ExprKind.Name) {
@@ -401,7 +401,7 @@ partial class ExpressionTypes {
     return this.store.literal(literal.kind, literal.text);
   }
 
-  private knownLiteralSet(value: Expr, module: int): Type | undefined {
+  private readonly knownLiteralSet(value: Expr, module: int): Type | undefined {
     if (value.kind != ExprKind.Name) {
       return undefined;
     }

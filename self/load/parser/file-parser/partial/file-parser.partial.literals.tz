@@ -206,7 +206,7 @@ partial class FileParser {
     };
   }
 
-  private accessorAhead(): boolean {
+  private readonly accessorAhead(): boolean {
     const next = this.cursor.lookahead();
 
     return (
@@ -217,7 +217,7 @@ partial class FileParser {
     );
   }
 
-  private asyncMethodAhead(): boolean {
+  private readonly asyncMethodAhead(): boolean {
     const next = this.cursor.lookahead();
 
     return (
@@ -314,7 +314,7 @@ partial class FileParser {
     };
   }
 
-  private shorthandProperty(loc: int, name: string, word: Token): Property {
+  private readonly shorthandProperty(loc: int, name: string, word: Token): Property {
     if (word.kind == TokenKind.Undefined) {
       const value: Expr = { kind: ExprKind.Undefined, loc };
 

@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import { ScopeTraversal } from "../scope-traversal.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import {
@@ -49,9 +50,7 @@ partial class ScopeTraversal {
     this.traverseOptionalType(fn.returnType);
 
     const body = fn.body;
-    const targets = this.jumpTargets;
-
-    this.jumpTargets = [];
+    const targets = replace(this.jumpTargets, []);
 
     if (body != undefined) {
       this.declareStatements(body.body);
@@ -64,7 +63,7 @@ partial class ScopeTraversal {
     this.scopes.close();
   }
 
-  private genericMark(count: int): int {
+  private readonly genericMark(count: int): int {
     if (count > 0) {
       return 1;
     }
@@ -97,7 +96,7 @@ partial class ScopeTraversal {
     this.scopes.markLive(param.name);
   }
 
-  private traverseDecorators(decorators: Decorator[]): void {
+  private traverseDecorators(decorators: Read<Decorator[]>): void {
     for (const decorator of decorators) {
       this.traverseExpr(decorator.expr);
     }
@@ -156,7 +155,7 @@ partial class ScopeTraversal {
     this.scopes.close();
   }
 
-  private classFrameOf(isExpression: boolean): ClassFrame {
+  private readonly classFrameOf(isExpression: boolean): ClassFrame {
     const outer = this.scopes.currentDepth();
     const isGeneric = this.genericFunctions > 0;
     if (!isExpression || outer == 0) {
@@ -166,7 +165,7 @@ partial class ScopeTraversal {
     return { outer, place: CapturePlace.None, isGeneric };
   }
 
-  private fieldPlace(frame: ClassFrame, form: FieldKind): CapturePlace {
+  private readonly fieldPlace(frame: Read<ClassFrame>, form: FieldKind): CapturePlace {
     if (frame.outer == 0) {
       return CapturePlace.None;
     }
@@ -177,7 +176,7 @@ partial class ScopeTraversal {
     return CapturePlace.Later;
   }
 
-  private bodyPlace(frame: ClassFrame): CapturePlace {
+  private readonly bodyPlace(frame: Read<ClassFrame>): CapturePlace {
     if (frame.outer == 0) {
       return CapturePlace.None;
     }
@@ -185,15 +184,15 @@ partial class ScopeTraversal {
     return CapturePlace.Later;
   }
 
-  private ownMethods(decl: ClassDecl): FunctionDecl[] {
+  private readonly ownMethods(decl: ClassDecl): FunctionDecl[] {
     if (decl.isPartial) {
-      return decl.methods;
+      return decl.methods.slice();
     }
 
     return decl.methods.filter((method) => !this.partMethods.includes(method));
   }
 
-  private isStatic(method: FunctionDecl): boolean {
+  private readonly isStatic(method: FunctionDecl): boolean {
     return method.role?.method == MethodKind.Static;
   }
 

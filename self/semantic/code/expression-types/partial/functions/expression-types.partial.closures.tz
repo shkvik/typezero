@@ -23,7 +23,7 @@ import { kZeroTerm } from "../../../../flow/bound-rules/const/bound-rules.const.
 import { kValueTerm } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private closureTyped(
+  private readonly closureTyped(
     expr: FunctionExpr,
     wanted: Type | undefined,
     module: int,
@@ -40,7 +40,7 @@ partial class ExpressionTypes {
       bindings: new Map<int, Type>(),
       place: TypePlace.Plain,
     };
-    const before = this.facts;
+    const before = this.factsCopy();
     const shape = this.closureShape(fn, goal, context, module);
     if (this.functions.isParameterClash(shape, goal)) {
       return this.store.plain(TypeKind.Error);
@@ -92,7 +92,7 @@ partial class ExpressionTypes {
     return made;
   }
 
-  private closureShape(
+  private readonly closureShape(
     fn: FunctionDecl,
     goal: FunctionType | undefined,
     context: TypeContext,
@@ -136,7 +136,7 @@ partial class ExpressionTypes {
     return { params, rest, self };
   }
 
-  private closureGiven(
+  private readonly closureGiven(
     goal: FunctionType | undefined,
     index: int,
     isThis: boolean,
@@ -153,7 +153,7 @@ partial class ExpressionTypes {
     return { type: self, optional: false };
   }
 
-  private closureInside(type: Type, kind: ParamKind, isTaken: boolean): Type {
+  private readonly closureInside(type: Type, kind: ParamKind, isTaken: boolean): Type {
     if (isTaken) {
       return this.types.optional(type);
     }
@@ -161,10 +161,10 @@ partial class ExpressionTypes {
     return this.functions.insideType(type, kind);
   }
 
-  private closureParameter(
+  private readonly closureParameter(
     param: Param,
     given: FunctionParameter | undefined,
-    context: TypeContext,
+    context: Read<TypeContext>,
     module: int,
   ): Type {
     const isWritten =
@@ -185,7 +185,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private checkedParameter(
+  private readonly checkedParameter(
     param: Param,
     type: Type,
     given: FunctionParameter | undefined,
@@ -198,7 +198,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private closureResult(
+  private readonly closureResult(
     fn: FunctionDecl,
     goal: FunctionType | undefined,
     context: TypeContext,
@@ -235,7 +235,7 @@ partial class ExpressionTypes {
     return expected;
   }
 
-  private isPromising(type: Type): boolean {
+  private readonly isPromising(type: Type): boolean {
     if (type.kind == TypeKind.Union) {
       return type.parts.some((part) => part.kind == TypeKind.Promise);
     }
@@ -243,7 +243,7 @@ partial class ExpressionTypes {
     return type.kind == TypeKind.Promise;
   }
 
-  private inferredClosure(
+  private readonly inferredClosure(
     fn: FunctionDecl,
     isQuiet: boolean,
     module: int,
@@ -260,7 +260,7 @@ partial class ExpressionTypes {
     return this.frameResult(fn, frame, module);
   }
 
-  private constFacts(facts: Map<string, Type>): Map<string, Type> {
+  private readonly constFacts(facts: Read<Map<string, Type>>): Map<string, Type> {
     const kept = new Map<string, Type>();
 
     for (const [key, type] of facts) {
@@ -272,7 +272,7 @@ partial class ExpressionTypes {
     return kept;
   }
 
-  private isConstBound(key: string): boolean {
+  private readonly isConstBound(key: string): boolean {
     const edge = this.bounds.edgeOf(key);
     if (edge == undefined) {
       return false;
@@ -281,7 +281,7 @@ partial class ExpressionTypes {
     return this.isConstTerm(edge.upper) && this.isConstTerm(edge.lower);
   }
 
-  private isConstTerm(term: string): boolean {
+  private readonly isConstTerm(term: string): boolean {
     if (term == kZeroTerm) {
       return true;
     }
@@ -292,7 +292,7 @@ partial class ExpressionTypes {
     return this.constKeys.has(term.slice(kValueTerm.length));
   }
 
-  private isConstPath(key: string): boolean {
+  private readonly isConstPath(key: string): boolean {
     const dot = key.indexOf(kDot);
     const root = this.functions.rootOf(key, dot);
 

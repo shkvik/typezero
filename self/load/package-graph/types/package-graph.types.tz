@@ -14,8 +14,8 @@ export type Manifest = {
   readonly name: string;
   readonly version: string;
   readonly main: string;
-  readonly exports: PackageExport[];
-  readonly dependencies: ManifestDependency[];
+  readonly exports: readonly PackageExport[];
+  readonly dependencies: readonly ManifestDependency[];
 };
 
 export type PackageInfo = {
@@ -23,9 +23,9 @@ export type PackageInfo = {
   readonly directory: string;
   readonly manifestPath: string;
   readonly main: string;
-  readonly exports: PackageExport[];
+  readonly exports: readonly PackageExport[];
   readonly aliases: Map<string, int>;
-  readonly remote: string[];
+  readonly remote: readonly string[];
 };
 
 export enum DependencySourceKind {
@@ -49,3 +49,5 @@ export type PackageSpecifier = {
   readonly name: string;
   readonly subpath: string;
 };
+
+export type InternedPackages = Interned<Manifest | PackageInfo>;

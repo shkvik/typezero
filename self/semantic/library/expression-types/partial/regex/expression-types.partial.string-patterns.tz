@@ -23,7 +23,7 @@ import {
 } from "../../../regex-rules/const/regex-rules.const.tz";
 
 partial class ExpressionTypes {
-  private stringPatternCall(
+  private readonly stringPatternCall(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -60,7 +60,7 @@ partial class ExpressionTypes {
     return this.patternGivenCall(expr, member, given, module);
   }
 
-  private patternGivenCall(
+  private readonly patternGivenCall(
     expr: CallExpr,
     member: MemberExpr,
     given: Type,
@@ -88,13 +88,13 @@ partial class ExpressionTypes {
     return this.patternRestLoosely(expr, module);
   }
 
-  private patternRestLoosely(expr: CallExpr, module: int): Type {
+  private readonly patternRestLoosely(expr: CallExpr, module: int): Type {
     this.looseArguments(expr.args.slice(1), module);
 
     return this.store.plain(TypeKind.Error);
   }
 
-  private regexPatternCall(
+  private readonly regexPatternCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -135,9 +135,9 @@ partial class ExpressionTypes {
     }
   }
 
-  private regexMatchCall(
+  private readonly regexMatchCall(
     member: MemberExpr,
-    shape: RegexShape | undefined,
+    shape: Read<RegexShape | undefined>,
     module: int,
   ): Type {
     if (shape == undefined) {
@@ -154,17 +154,17 @@ partial class ExpressionTypes {
     return this.foundMatch();
   }
 
-  private splitLimitCheck(expr: CallExpr, module: int): void {
+  private readonly splitLimitCheck(expr: CallExpr, module: int): void {
     const limit = expr.args[1];
     if (limit != undefined) {
       this.checked(limit.expr, this.store.integer(64, false), module, "");
     }
   }
 
-  private regexReplaceCall(
+  private readonly regexReplaceCall(
     expr: CallExpr,
     member: MemberExpr,
-    shape: RegexShape | undefined,
+    shape: Read<RegexShape | undefined>,
     module: int,
   ): Type {
     const replacement = expr.args[1];
@@ -193,7 +193,7 @@ partial class ExpressionTypes {
     return text;
   }
 
-  private isFunctionReplacement(value: Expr, module: int): boolean {
+  private readonly isFunctionReplacement(value: Expr, module: int): boolean {
     if (value.kind == ExprKind.Function) {
       return true;
     }
@@ -217,10 +217,10 @@ partial class ExpressionTypes {
     return this.types.definedType(given).kind == TypeKind.Function;
   }
 
-  private functionReplaceCall(
+  private readonly functionReplaceCall(
     value: Expr,
     member: MemberExpr,
-    shape: RegexShape | undefined,
+    shape: Read<RegexShape | undefined>,
     module: int,
   ): Type {
     const params = this.regexes.replacerParams(shape);
@@ -260,7 +260,7 @@ partial class ExpressionTypes {
     return text;
   }
 
-  private closureParams(value: Expr): Param[] {
+  private readonly closureParams(value: Expr): Param[] {
     if (value.kind != ExprKind.Function) {
       return [];
     }
@@ -268,11 +268,11 @@ partial class ExpressionTypes {
     return value.fn.params;
   }
 
-  private extraParamsError(
+  private readonly extraParamsError(
     member: MemberExpr,
-    shape: RegexShape | undefined,
-    written: Param[],
-    params: Type[],
+    shape: Read<RegexShape | undefined>,
+    written: Read<Param[]>,
+    params: Read<Type[]>,
   ): SourceError | undefined {
     if (shape == undefined) {
       const second = written[1];
@@ -292,7 +292,7 @@ partial class ExpressionTypes {
     return this.regexes.passesError(extra.loc, member.name, count, shape);
   }
 
-  private textPatternCall(
+  private readonly textPatternCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,

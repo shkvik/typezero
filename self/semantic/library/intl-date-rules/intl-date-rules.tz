@@ -23,31 +23,31 @@ export class IntlDateRules {
   private readonly text: TypeText;
   private readonly intl: IntlRules;
 
-  public constructor(text: TypeText, intl: IntlRules) {
+  public constructor(text: TypeText, intl: Own<IntlRules>) {
     this.text = text;
     this.intl = intl;
   }
 
-  public dateOption(name: string): DateOption | undefined {
+  public readonly dateOption(name: string): DateOption | undefined {
     return kDateOptions.find((one) => one.name == name);
   }
 
-  public isHour12(name: string): boolean {
+  public readonly isHour12(name: string): boolean {
     return name == kHour12Name;
   }
 
-  public isDigitsName(name: string): boolean {
+  public readonly isDigitsName(name: string): boolean {
     return name == kDigitsName;
   }
 
-  public isForeignStyle(name: string, kind: DateLocaleKind): boolean {
+  public readonly isForeignStyle(name: string, kind: DateLocaleKind): boolean {
     const isTime = kind == DateLocaleKind.Date && name == kTimeStyleName;
     const isDate = kind == DateLocaleKind.Time && name == kDateStyleName;
 
     return isTime || isDate;
   }
 
-  public dateObjectError(loc: int, what: string, found: Type): SourceError {
+  public readonly dateObjectError(loc: int, what: string, found: Type): SourceError {
     const first = this.text.of(found);
 
     return {
@@ -57,7 +57,7 @@ export class IntlDateRules {
     };
   }
 
-  public dateUnknownError(loc: int, name: string, what: string): SourceError {
+  public readonly dateUnknownError(loc: int, name: string, what: string): SourceError {
     return {
       code: Code.DateOptionUnknown,
       loc,
@@ -65,7 +65,7 @@ export class IntlDateRules {
     };
   }
 
-  public dateKindError(
+  public readonly dateKindError(
     loc: int,
     name: string,
     wanted: string,
@@ -77,7 +77,7 @@ export class IntlDateRules {
     return { code: Code.IntlOptionKindWrong, loc, details };
   }
 
-  public styleOnlyError(loc: int, name: string, what: string): SourceError {
+  public readonly styleOnlyError(loc: int, name: string, what: string): SourceError {
     return {
       code: Code.DateStyleOnly,
       loc,
@@ -85,17 +85,17 @@ export class IntlDateRules {
     };
   }
 
-  public stylePartsError(loc: int): SourceError {
+  public readonly stylePartsError(loc: int): SourceError {
     return { code: Code.DateStyleParts, loc, details: kNoDetails };
   }
 
-  public digitsOpenError(loc: int): SourceError {
+  public readonly digitsOpenError(loc: int): SourceError {
     return { code: Code.DateDigitsOpen, loc, details: kNoDetails };
   }
 
-  public dateValueOpenError(
+  public readonly dateValueOpenError(
     loc: int,
-    option: DateOption,
+    option: Read<DateOption>,
     written: string,
   ): SourceError {
     const first = option.values[0] ?? "";
@@ -110,9 +110,9 @@ export class IntlDateRules {
     return { code: Code.DateOptionUnknownValue, loc, details };
   }
 
-  public dateValueError(
+  public readonly dateValueError(
     loc: int,
-    option: DateOption,
+    option: Read<DateOption>,
     text: string,
   ): SourceError {
     const other = this.intl.valuesText(option.values);
@@ -121,7 +121,7 @@ export class IntlDateRules {
     return { code: Code.IntlOptionValue, loc, details };
   }
 
-  public dateRangeError(loc: int, name: string): SourceError {
+  public readonly dateRangeError(loc: int, name: string): SourceError {
     return { code: Code.DateFormatRange, loc, details: { word: name } };
   }
 }

@@ -100,11 +100,10 @@ partial class Lowering {
   }
 
   private emptyCompared(
-    frame: Frame,
+    frame: Read<Frame>,
     op: BinaryOp,
     value: IrValue,
   ): LLVMValue {
-    const made = frame.made;
     const yes = this.ir.integer(kBooleanType, "1");
     let has: LLVMValue = yes;
 
@@ -115,7 +114,7 @@ partial class Lowering {
       return has;
     }
 
-    return made.binary(IrOpcode.Xor, has, yes);
+    return frame.made.binary(IrOpcode.Xor, has, yes);
   }
 
   private optionalsCompared(
@@ -124,7 +123,6 @@ partial class Lowering {
     left: IrValue,
     right: IrValue,
   ): LLVMValue | undefined {
-    const made = frame.made;
     const leftHas = this.hasValue(frame, left);
     const rightHas = this.hasValue(frame, right);
     const first = this.presentPart(frame, left);
@@ -141,20 +139,20 @@ partial class Lowering {
       return undefined;
     }
 
-    const isBothSet = made.binary(IrOpcode.And, leftHas, rightHas);
-    const isNoneSet = made.binary(IrOpcode.Or, leftHas, rightHas);
+    const isBothSet = frame.made.binary(IrOpcode.And, leftHas, rightHas);
+    const isNoneSet = frame.made.binary(IrOpcode.Or, leftHas, rightHas);
     const yes = this.ir.integer(kBooleanType, "1");
-    const isBothEmpty = made.binary(IrOpcode.Xor, isNoneSet, yes);
-    const isMatch = made.binary(IrOpcode.And, isBothSet, isInnerEqual);
-    const isEqual = made.binary(IrOpcode.Or, isMatch, isBothEmpty);
+    const isBothEmpty = frame.made.binary(IrOpcode.Xor, isNoneSet, yes);
+    const isMatch = frame.made.binary(IrOpcode.And, isBothSet, isInnerEqual);
+    const isEqual = frame.made.binary(IrOpcode.Or, isMatch, isBothEmpty);
     if (expr.op == BinaryOp.Eq) {
       return isEqual;
     }
 
-    return made.binary(IrOpcode.Xor, isEqual, yes);
+    return frame.made.binary(IrOpcode.Xor, isEqual, yes);
   }
 
-  private presentPart(frame: Frame, value: IrValue): IrValue {
+  private presentPart(frame: Read<Frame>, value: IrValue): IrValue {
     const inner = this.optionalInner(value.tz);
     if (inner == undefined) {
       return value;
@@ -171,7 +169,6 @@ partial class Lowering {
     left: IrValue,
     right: IrValue,
   ): LLVMValue | undefined {
-    const made = frame.made;
     if (this.isDouble(left.tz) || this.isDouble(right.tz)) {
       const double = this.store.plain(TypeKind.Double);
       const first = this.converted(frame, left, double, expr.lhs.loc);
@@ -182,39 +179,38 @@ partial class Lowering {
 
       const predicate = this.doublePredicate(expr.op);
 
-      return made.realCompare(predicate, first.value, second.value);
+      return frame.made.realCompare(predicate, first.value, second.value);
     }
     if (left.type == right.type && this.sameSign(left, right)) {
       const isUnsigned = this.isUnsigned(left.tz);
       const predicate = this.integerPredicate(expr.op, isUnsigned);
 
-      return made.integerCompare(predicate, left.value, right.value);
+      return frame.made.integerCompare(predicate, left.value, right.value);
     }
 
     const first = this.wide(frame, left);
     const second = this.wide(frame, right);
     const predicate = this.integerPredicate(expr.op, false);
 
-    return made.integerCompare(predicate, first, second);
+    return frame.made.integerCompare(predicate, first, second);
   }
 
-  private sameSign(left: IrValue, right: IrValue): boolean {
+  private readonly sameSign(left: IrValue, right: IrValue): boolean {
     return this.isUnsigned(left.tz) == this.isUnsigned(right.tz);
   }
 
-  private wide(frame: Frame, value: IrValue): LLVMValue {
+  private readonly wide(frame: Read<Frame>, value: IrValue): LLVMValue {
     const opcode = this.resizing(this.bitsOf(value.tz), 65, value.tz);
 
     return frame.made.cast(opcode, value.value, kWideType);
   }
 
-  private stringsCompared(
-    frame: Frame,
+  private readonly stringsCompared(
+    frame: Read<Frame>,
     op: BinaryOp,
     left: IrValue,
     right: IrValue,
   ): LLVMValue {
-    const made = frame.made;
     const first = this.stringParts(frame, left);
     const second = this.stringParts(frame, right);
     const parts = first.concat(second);
@@ -224,20 +220,19 @@ partial class Lowering {
       const equal = this.runtimeValue(frame, kStringEqual, kFlagType, parts);
       const predicate = this.equalFlagPredicate(op);
 
-      return made.integerCompare(predicate, equal, zero);
+      return frame.made.integerCompare(predicate, equal, zero);
     }
 
     const order = this.runtimeValue(frame, kStringCompare, kFlagType, parts);
     const predicate = this.integerPredicate(op, false);
 
-    return made.integerCompare(predicate, order, zero);
+    return frame.made.integerCompare(predicate, order, zero);
   }
 
-  private stringParts(frame: Frame, value: IrValue): IrValue[] {
-    const made = frame.made;
+  private readonly stringParts(frame: Read<Frame>, value: IrValue): IrValue[] {
     const tz = this.store.integer(64, false);
-    const pointer = made.extract(value.value, 0);
-    const meta = made.extract(value.value, 1);
+    const pointer = frame.made.extract(value.value, 0);
+    const meta = frame.made.extract(value.value, 1);
 
     return [
       { type: kPointerType, value: pointer, tz },
@@ -245,7 +240,7 @@ partial class Lowering {
     ];
   }
 
-  private equalFlagPredicate(op: BinaryOp): IrIntPredicate {
+  private readonly equalFlagPredicate(op: BinaryOp): IrIntPredicate {
     if (op == BinaryOp.Eq) {
       return IrIntPredicate.NotEqual;
     }
@@ -253,7 +248,7 @@ partial class Lowering {
     return IrIntPredicate.Equal;
   }
 
-  private doublePredicate(op: BinaryOp): IrRealPredicate {
+  private readonly doublePredicate(op: BinaryOp): IrRealPredicate {
     switch (op) {
       case BinaryOp.Lt:
         return IrRealPredicate.OrderedLess;
@@ -270,7 +265,7 @@ partial class Lowering {
     }
   }
 
-  private integerPredicate(op: BinaryOp, isUnsigned: boolean): IrIntPredicate {
+  private readonly integerPredicate(op: BinaryOp, isUnsigned: boolean): IrIntPredicate {
     switch (op) {
       case BinaryOp.Lt:
         return this.predicateFor(
@@ -303,7 +298,7 @@ partial class Lowering {
     }
   }
 
-  private predicateFor(
+  private readonly predicateFor(
     isFirst: boolean,
     first: IrIntPredicate,
     second: IrIntPredicate,

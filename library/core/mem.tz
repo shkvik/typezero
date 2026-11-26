@@ -1,0 +1,4 @@
+export declare function replace<T>(place: Mut<T>, value: Own<T>): T
+export declare function swap<T>(first: Mut<T>, second: Mut<T>): void
+export declare function take<T>(place: Mut<T>): T
+export declare function drop<T>(value: Own<T>): void

@@ -18,8 +18,8 @@ export type DeclaredField = {
 
 export type DeclaredSignature = {
   readonly kind: DeclaredMemberKind.Method | DeclaredMemberKind.Constructor;
-  readonly typeParams: TypeParamDecl[];
-  readonly params: Param[];
+  readonly typeParams: readonly TypeParamDecl[];
+  readonly params: readonly Param[];
 };
 
 export type DeclaredMemberForm = DeclaredField | DeclaredSignature;
@@ -38,15 +38,15 @@ export type DeclaredClass = {
   readonly name: string;
   readonly loc: int;
   readonly isAbstract: boolean;
-  readonly typeParams: TypeParamDecl[];
+  readonly typeParams: readonly TypeParamDecl[];
   readonly base?: TypeRef;
-  readonly implemented: TypeRef[];
-  readonly members: DeclaredMember[];
+  readonly implemented: readonly TypeRef[];
+  readonly members: readonly DeclaredMember[];
 };
 
 export type DeclarationFile = {
-  readonly items: Stmt[];
-  readonly classes: DeclaredClass[];
-  readonly imports: ImportDecl[];
-  readonly exports: ExportDecl[];
+  readonly items: readonly Stmt[];
+  readonly classes: readonly DeclaredClass[];
+  readonly imports: readonly ImportDecl[];
+  readonly exports: readonly ExportDecl[];
 };

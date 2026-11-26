@@ -27,7 +27,7 @@ import {
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private patternSource(
+  private readonly patternSource(
     door: VariableDoor,
     variable: DeclaredVariable,
     module: int,
@@ -56,7 +56,7 @@ partial class ExpressionTypes {
     door.type = this.patternArray(init, given, module);
   }
 
-  private patternGiven(
+  private readonly patternGiven(
     init: Expr,
     written: TypeRef | undefined,
     module: int,
@@ -78,7 +78,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private patternArray(init: Expr, given: Type, module: int): Type {
+  private readonly patternArray(init: Expr, given: Type, module: int): Type {
     const base = this.types.apparent(given);
     if (this.library.isJsonHolder(given)) {
       return given;
@@ -105,7 +105,7 @@ partial class ExpressionTypes {
     return this.store.arrayOf(item);
   }
 
-  private isMatchArray(type: Type): boolean {
+  private readonly isMatchArray(type: Type): boolean {
     if (type.kind == TypeKind.Instance) {
       const isLibrary = this.modules.isLibraryModule(type.module);
 
@@ -117,7 +117,7 @@ partial class ExpressionTypes {
     return isNamed && this.resolver.isLibraryShape(type);
   }
 
-  private notPatternArray(init: Expr, given: Type, module: int): Type {
+  private readonly notPatternArray(init: Expr, given: Type, module: int): Type {
     const checked = this.indexes.notPatternArray(init, given);
 
     this.reportFound(module, checked.error);
@@ -125,7 +125,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private loopShapeCheck(decl: VarDeclarator, item: Type, module: int): void {
+  private readonly loopShapeCheck(decl: VarDeclarator, item: Type, module: int): void {
     if (decl.form.kind != BindingKind.Array) {
       return;
     }
@@ -142,7 +142,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private patternElement(expr: IndexExpr, module: int): Type {
+  private readonly patternElement(expr: IndexExpr, module: int): Type {
     const object = this.typed(expr.object, undefined, module);
     const base = this.types.apparent(object);
     if (this.library.isJsonHolder(object)) {

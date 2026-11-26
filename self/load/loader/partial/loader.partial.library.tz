@@ -31,7 +31,7 @@ partial class Loader {
     return this.linkedLibrary(from, library);
   }
 
-  private linkedLibrary(from: ModulePath, library: LibraryModule): ModuleLink {
+  private linkedLibrary(from: ModulePath, library: Read<LibraryModule>): ModuleLink {
     const target = this.libraryId(library);
     if (target == undefined) {
       return { kind: LinkKind.Missing, from };
@@ -40,7 +40,7 @@ partial class Loader {
     return { kind: LinkKind.Module, from, target };
   }
 
-  private libraryId(library: LibraryModule): int | undefined {
+  private libraryId(library: Read<LibraryModule>): int | undefined {
     const known = this.libraries.get(library.name);
     if (known != undefined) {
       return known;
@@ -76,7 +76,7 @@ partial class Loader {
     return ids;
   }
 
-  private openLibrary(library: LibraryModule): OpenModule | undefined {
+  private openLibrary(library: Read<LibraryModule>): OpenModule | undefined {
     const file = join(this.libraryDirectory, library.file);
     if (file.endsWith(kDeclarationExtension)) {
       return this.openDeclared(library, file);
@@ -91,7 +91,7 @@ partial class Loader {
   }
 
   private openDeclared(
-    library: LibraryModule,
+    library: Read<LibraryModule>,
     file: string,
   ): OpenModule | undefined {
     const path = this.slashed(file);
@@ -134,7 +134,7 @@ partial class Loader {
   }
 
   private librarySource(
-    library: LibraryModule,
+    library: Read<LibraryModule>,
     file: string,
   ): SourceText | undefined {
     const path = this.slashed(file);
@@ -146,10 +146,9 @@ partial class Loader {
       return { path, text: main, isLibrary: true };
     }
 
+    let length = main.length;
     const texts: Buffer[] = [main];
     const pieces: SourcePiece[] = [{ path, start: 0 }];
-    const separator = Buffer.from(kLineBreak);
-    let length = main.length;
 
     for (const part of library.parts) {
       const partFile = join(this.libraryDirectory, part);
@@ -159,12 +158,14 @@ partial class Loader {
         return undefined;
       }
 
+      const separator = Buffer.from(kLineBreak);
       const start = length + separator.length;
+      const size = text.length;
 
       texts.push(separator);
       texts.push(text);
       pieces.push({ path: partPath, start });
-      length = start + text.length;
+      length = start + size;
     }
 
     const text = Buffer.concat(texts);
@@ -172,10 +173,10 @@ partial class Loader {
     return { path, text, isLibrary: true, pieces };
   }
 
-  private implicitImports(
+  private readonly implicitImports(
     source: SourceText,
-    file: SourceFile,
-    tokens: Token[],
+    file: Read<SourceFile>,
+    tokens: readonly Token[],
   ): ImportDecl[] {
     if (source.isLibrary) {
       return [];

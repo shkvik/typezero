@@ -64,13 +64,13 @@ partial class Lowering {
     }
   }
 
-  private block(frame: Frame, body: Stmt[]): void {
+  private block(frame: Frame, body: Read<Stmt[]>): void {
     this.openScope(frame);
     this.statements(frame, body);
     this.closeScope(frame);
   }
 
-  private statements(frame: Frame, body: Stmt[]): void {
+  private statements(frame: Frame, body: Read<Stmt[]>): void {
     for (const statement of body) {
       this.statement(frame, statement);
     }
@@ -227,15 +227,14 @@ partial class Lowering {
   }
 
   private ifStatement(frame: Frame, statement: IfStmt): void {
-    const made = frame.made;
     const test = this.truth(frame, statement.cond);
     if (test == undefined) {
       return;
     }
 
-    const then = made.block("if.then");
-    const otherwise = made.block("if.else");
-    const end = made.block("if.end");
+    const then = frame.made.block("if.then");
+    const otherwise = frame.made.block("if.else");
+    const end = frame.made.block("if.end");
     const elseStmt = statement.elseStmt;
     let missed: LLVMBlock = end;
 
@@ -243,22 +242,22 @@ partial class Lowering {
       missed = otherwise;
     }
 
-    made.conditionalBranch(test, then, missed);
-    made.open(then);
+    frame.made.conditionalBranch(test, then, missed);
+    frame.made.open(then);
     this.statement(frame, statement.thenStmt);
     this.jumpTo(frame, end);
 
-    made.open(otherwise);
+    frame.made.open(otherwise);
 
     if (elseStmt != undefined) {
       this.statement(frame, elseStmt);
     }
 
     this.jumpTo(frame, end);
-    made.open(end);
+    frame.made.open(end);
   }
 
-  private jumpTo(frame: Frame, block: LLVMBlock): void {
+  private readonly jumpTo(frame: Read<Frame>, block: LLVMBlock): void {
     if (!frame.made.isClosed()) {
       frame.made.branch(block);
     }
@@ -289,7 +288,7 @@ partial class Lowering {
     frame.made.open(end);
   }
 
-  private jump(frame: Frame, statement: JumpStmt): void {
+  private jump(frame: Read<Frame>, statement: JumpStmt): void {
     const isBreak = statement.kind == StmtKind.Break;
     const target = this.jumpTarget(frame, statement.label, isBreak);
     if (target == undefined) {
@@ -306,8 +305,8 @@ partial class Lowering {
     frame.made.branch(goal);
   }
 
-  private jumpTarget(
-    frame: Frame,
+  private readonly jumpTarget(
+    frame: Read<Frame>,
     label: string,
     isBreak: boolean,
   ): LoopTarget | undefined {

@@ -24,7 +24,7 @@ import {
 import { FsCall, FsShape } from "../../../fs-rules/types/fs-rules.types.tz";
 
 partial class ExpressionTypes {
-  private readlineCheck(expr: CallExpr, module: int): void {
+  private readonly readlineCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Name || this.modules.isLibraryModule(module)) {
       return;
@@ -46,7 +46,7 @@ partial class ExpressionTypes {
     this.readlineStreamsCheck(first, expr.args[1]?.expr, module);
   }
 
-  private isReadlineCreate(callee: Expr, module: int): boolean {
+  private readonly isReadlineCreate(callee: Expr, module: int): boolean {
     if (callee.kind != ExprKind.Name) {
       return false;
     }
@@ -70,7 +70,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private readlineOptionsCheck(
+  private readonly readlineOptionsCheck(
     expr: CallExpr,
     options: Expr,
     module: int,
@@ -104,7 +104,7 @@ partial class ExpressionTypes {
     this.readlineStreamsCheck(input, output, module);
   }
 
-  private readlineStreamsCheck(
+  private readonly readlineStreamsCheck(
     input: Expr,
     output: Expr | undefined,
     module: int,
@@ -124,7 +124,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private isProcessStream(value: Expr, name: string, module: int): boolean {
+  private readonly isProcessStream(value: Expr, name: string, module: int): boolean {
     return (
       value.kind == ExprKind.Member &&
       value.name == name &&
@@ -132,7 +132,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private isReadlineInterface(object: Type, module: int): boolean {
+  private readonly isReadlineInterface(object: Type, module: int): boolean {
     const base = this.types.definedType(object);
     if (base.kind != TypeKind.Instance || base.name != kInterfaceName) {
       return false;
@@ -146,7 +146,7 @@ partial class ExpressionTypes {
     return opened != undefined && kReadlineModules.includes(opened.name);
   }
 
-  private readlineMemberRead(
+  private readonly readlineMemberRead(
     expr: MemberExpr,
     object: Type,
     module: int,
@@ -163,7 +163,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private readlineMethodCall(
+  private readonly readlineMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,

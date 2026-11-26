@@ -40,15 +40,15 @@ import {
 export class RegexEscapes {
   private readonly cursor: RegexCursor;
 
-  public constructor(cursor: RegexCursor) {
+  public constructor(cursor: Own<RegexCursor>) {
     this.cursor = cursor;
   }
 
-  public isSetEscape(letter: string): boolean {
+  public readonly isSetEscape(letter: string): boolean {
     return kSetEscapes.includes(letter);
   }
 
-  public propertyEscape(isNegated: boolean): boolean {
+  public readonly propertyEscape(isNegated: boolean): boolean {
     const cursor = this.cursor;
     if (!cursor.accept("{")) {
       return cursor.fail(kInvalidPropertyText);
@@ -101,7 +101,7 @@ export class RegexEscapes {
     return true;
   }
 
-  public characterEscape(isInClass: boolean): int {
+  public readonly characterEscape(isInClass: boolean): int {
     const cursor = this.cursor;
     const start = cursor.index;
     const char = cursor.current();
@@ -134,7 +134,7 @@ export class RegexEscapes {
     return this.otherEscape(start, char, code, isInClass);
   }
 
-  public groupName(): string | undefined {
+  public readonly groupName(): string | undefined {
     const cursor = this.cursor;
     let name = "";
 
@@ -161,7 +161,7 @@ export class RegexEscapes {
     return name;
   }
 
-  private isPropertyChar(char: string, hasValue: boolean): boolean {
+  private readonly isPropertyChar(char: string, hasValue: boolean): boolean {
     if (char.length != 1) {
       return false;
     }
@@ -173,7 +173,7 @@ export class RegexEscapes {
     return isLetter || isDigit || char == "_";
   }
 
-  private isPropertyKnown(
+  private readonly isPropertyKnown(
     name: string,
     value: string,
     hasValue: boolean,
@@ -191,7 +191,7 @@ export class RegexEscapes {
     return false;
   }
 
-  private simpleEscape(char: string, isInClass: boolean): int {
+  private readonly simpleEscape(char: string, isInClass: boolean): int {
     switch (char) {
       case "f":
         return kFormFeedCode;
@@ -210,7 +210,7 @@ export class RegexEscapes {
     }
   }
 
-  private backspaceEscape(isInClass: boolean): int {
+  private readonly backspaceEscape(isInClass: boolean): int {
     if (isInClass) {
       return kBackspaceCode;
     }
@@ -218,7 +218,7 @@ export class RegexEscapes {
     return kNoUnit;
   }
 
-  private controlEscape(start: int, isInClass: boolean): int {
+  private readonly controlEscape(start: int, isInClass: boolean): int {
     const cursor = this.cursor;
     const letter = cursor.current();
     const isLetter =
@@ -244,7 +244,7 @@ export class RegexEscapes {
     return kBackslashCode;
   }
 
-  private hexEscape(): int {
+  private readonly hexEscape(): int {
     const cursor = this.cursor;
     const value = cursor.readHex(2);
     if (value >= 0) {
@@ -257,7 +257,7 @@ export class RegexEscapes {
     return cursor.unitAt(cursor.index - 1);
   }
 
-  private unicodeLetterEscape(): int {
+  private readonly unicodeLetterEscape(): int {
     const cursor = this.cursor;
     const value = cursor.unicodeEscape(cursor.isUnicode);
     if (value >= 0) {
@@ -270,7 +270,7 @@ export class RegexEscapes {
     return cursor.unitAt(cursor.index - 1);
   }
 
-  private otherEscape(
+  private readonly otherEscape(
     start: int,
     char: string,
     code: int,
@@ -292,7 +292,7 @@ export class RegexEscapes {
     return code;
   }
 
-  private unicodeOtherEscape(
+  private readonly unicodeOtherEscape(
     start: int,
     char: string,
     code: int,
@@ -313,7 +313,7 @@ export class RegexEscapes {
     return this.failed(this.escapeText(isInClass));
   }
 
-  private octalEscape(char: string): int {
+  private readonly octalEscape(char: string): int {
     const cursor = this.cursor;
     let value = cursor.digitAt(cursor.index - 1);
     if (!kOctalDigits.includes(cursor.current())) {
@@ -334,7 +334,7 @@ export class RegexEscapes {
     return value;
   }
 
-  private nameChar(): int {
+  private readonly nameChar(): int {
     const cursor = this.cursor;
     if (cursor.accept("\\")) {
       return this.escapedNameChar();
@@ -354,7 +354,7 @@ export class RegexEscapes {
     return unit;
   }
 
-  private escapedNameChar(): int {
+  private readonly escapedNameChar(): int {
     const cursor = this.cursor;
     if (!cursor.accept("u")) {
       return this.failed(kUnicodeEscapeText);
@@ -368,7 +368,7 @@ export class RegexEscapes {
     return value;
   }
 
-  private isNameChar(char: int, isFirst: boolean): boolean {
+  private readonly isNameChar(char: int, isFirst: boolean): boolean {
     if (char >= kAsciiEnd) {
       return true;
     }
@@ -385,19 +385,19 @@ export class RegexEscapes {
     return isLetter || isMark || isDigit;
   }
 
-  private failedName(): string | undefined {
+  private readonly failedName(): string | undefined {
     this.cursor.fail(kGroupNameText);
 
     return undefined;
   }
 
-  private failed(message: string): int {
+  private readonly failed(message: string): int {
     this.cursor.fail(message);
 
     return kNoUnit;
   }
 
-  private zeroEscapeText(isInClass: boolean): string {
+  private readonly zeroEscapeText(isInClass: boolean): string {
     if (isInClass) {
       return kClassEscapeText;
     }
@@ -405,7 +405,7 @@ export class RegexEscapes {
     return kDecimalEscapeText;
   }
 
-  private escapeText(isInClass: boolean): string {
+  private readonly escapeText(isInClass: boolean): string {
     if (isInClass) {
       return kClassEscapeText;
     }
@@ -413,7 +413,7 @@ export class RegexEscapes {
     return kEscapeText;
   }
 
-  private namedEscapeText(isInClass: boolean): string {
+  private readonly namedEscapeText(isInClass: boolean): string {
     if (isInClass) {
       return kEscapeText;
     }

@@ -15,7 +15,7 @@ import {
 } from "../../../../../program/type/types/type.types.tz";
 
 partial class ExpressionTypes {
-  private variantMember(expr: MemberExpr, union: UnionType, module: int): Type {
+  private readonly variantMember(expr: MemberExpr, union: UnionType, module: int): Type {
     const isUnknown = union.parts.some(
       (part) => part.kind == TypeKind.Error || part.kind == TypeKind.Operation,
     );
@@ -61,7 +61,7 @@ partial class ExpressionTypes {
     return joined;
   }
 
-  private reportValueMember(
+  private readonly reportValueMember(
     expr: MemberExpr,
     union: UnionType,
     module: int,
@@ -73,7 +73,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private variantField(
+  private readonly variantField(
     expr: MemberExpr,
     part: Type,
     union: UnionType,
@@ -107,7 +107,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private partField(part: Type, name: string): Type | undefined {
+  private readonly partField(part: Type, name: string): Type | undefined {
     if (part.kind == TypeKind.Object) {
       const field = part.fields.find((one) => one.name == name);
       if (field == undefined) {
@@ -129,7 +129,7 @@ partial class ExpressionTypes {
     return this.fieldTypeOf(entry, field);
   }
 
-  private reportLacking(
+  private readonly reportLacking(
     expr: MemberExpr,
     part: Type,
     union: UnionType,
@@ -163,7 +163,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private lackingHint(expr: MemberExpr, union: UnionType): string {
+  private readonly lackingHint(expr: MemberExpr, union: UnionType): string {
     const first = union.parts[0];
     let fallback = "";
 
@@ -186,7 +186,7 @@ partial class ExpressionTypes {
     return this.holderHint(expr, union);
   }
 
-  private tagHint(
+  private readonly tagHint(
     expr: MemberExpr,
     union: UnionType,
     tagName: string,
@@ -206,7 +206,7 @@ partial class ExpressionTypes {
     return `, e.g. 'if (${field} == ${shown})'`;
   }
 
-  private isTagField(union: UnionType, tagName: string): boolean {
+  private readonly isTagField(union: UnionType, tagName: string): boolean {
     return union.parts.every((part) => {
       const type = this.partField(part, tagName);
 
@@ -214,7 +214,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private holderTag(
+  private readonly holderTag(
     expr: MemberExpr,
     union: UnionType,
     tagName: string,
@@ -230,7 +230,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private isTagUnique(
+  private readonly isTagUnique(
     expr: MemberExpr,
     union: UnionType,
     tagName: string,
@@ -255,7 +255,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private holderHint(expr: MemberExpr, union: UnionType): string {
+  private readonly holderHint(expr: MemberExpr, union: UnionType): string {
     const holders = union.parts.filter(
       (part) => this.partField(part, expr.name) != undefined,
     );
@@ -270,7 +270,7 @@ partial class ExpressionTypes {
     return `, e.g. 'if ("${expr.name}" in x)'`;
   }
 
-  private commonBaseWith(union: UnionType, name: string): Type | undefined {
+  private readonly commonBaseWith(union: UnionType, name: string): Type | undefined {
     const isAllClasses = union.parts.every(
       (part) => part.kind == TypeKind.Instance,
     );
@@ -300,7 +300,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private lackingVariantCheck(
+  private readonly lackingVariantCheck(
     expr: CallExpr,
     member: MemberExpr,
     union: UnionType,
@@ -321,7 +321,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private isLackingMethod(part: Type, name: string): boolean {
+  private readonly isLackingMethod(part: Type, name: string): boolean {
     if (
       part.kind != TypeKind.Instance ||
       this.modules.isLibraryModule(part.module)
@@ -332,7 +332,7 @@ partial class ExpressionTypes {
     return this.classMember(part, name).entry == undefined;
   }
 
-  private unionInCheck(
+  private readonly unionInCheck(
     expr: BinaryExpr,
     name: string,
     union: UnionType,
@@ -359,7 +359,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private unionTargetCheck(target: Expr, module: int): boolean {
+  private readonly unionTargetCheck(target: Expr, module: int): boolean {
     if (target.kind != ExprKind.Member) {
       return false;
     }
@@ -398,7 +398,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private ownFieldType(part: Type, name: string): Type | undefined {
+  private readonly ownFieldType(part: Type, name: string): Type | undefined {
     if (part.kind != TypeKind.Object || this.resolver.isLibraryShape(part)) {
       return undefined;
     }
@@ -406,7 +406,7 @@ partial class ExpressionTypes {
     return part.fields.find((field) => field.name == name)?.type;
   }
 
-  private isCommonBase(
+  private readonly isCommonBase(
     candidate: Type,
     union: UnionType,
     name: string,
@@ -429,7 +429,7 @@ partial class ExpressionTypes {
     return entry != undefined && !entry.isStatic;
   }
 
-  private errnoHint(word: string): string {
+  private readonly errnoHint(word: string): string {
     if (word == kErrnoName) {
       return kErrnoHint;
     }

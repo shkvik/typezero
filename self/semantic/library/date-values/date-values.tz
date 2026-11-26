@@ -5,31 +5,31 @@ import {
 import { DateToken } from "../date-reader/types/date-reader.types.tz";
 
 export class DateValues {
-  public between(value: int, low: int, high: int): boolean {
+  public readonly between(value: int, low: int, high: int): boolean {
     return value >= low && value <= high;
   }
 
-  public isMonth(value: int): boolean {
+  public readonly isMonth(value: int): boolean {
     return this.between(value, 1, 12);
   }
 
-  public isDay(value: int): boolean {
+  public readonly isDay(value: int): boolean {
     return this.between(value, 1, 31);
   }
 
-  public isHour(value: int): boolean {
+  public readonly isHour(value: int): boolean {
     return this.between(value, 0, 23);
   }
 
-  public isMinute(value: int): boolean {
+  public readonly isMinute(value: int): boolean {
     return this.between(value, 0, 59);
   }
 
-  public isMillisecond(value: int): boolean {
+  public readonly isMillisecond(value: int): boolean {
     return this.between(value, 0, 999);
   }
 
-  public readMilliseconds(number: DateToken): int {
+  public readonly readMilliseconds(number: DateToken): int {
     const value = number.value;
     const length = number.length;
     if (length == 1) {
@@ -49,7 +49,7 @@ export class DateValues {
     return shortened;
   }
 
-  public signFor(isNegative: boolean): int {
+  public readonly signFor(isNegative: boolean): int {
     if (isNegative) {
       return -1;
     }
@@ -57,7 +57,7 @@ export class DateValues {
     return 1;
   }
 
-  public signed(value: int, isNegative: boolean): int {
+  public readonly signed(value: int, isNegative: boolean): int {
     if (isNegative) {
       return -value;
     }

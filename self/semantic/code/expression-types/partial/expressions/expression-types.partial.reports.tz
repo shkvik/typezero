@@ -10,7 +10,7 @@ import {
 import { ExpressionTypes } from "../../expression-types.tz";
 
 partial class ExpressionTypes {
-  public problems(module: int): SourceError[] {
+  public readonly problems(module: int): SourceError[] {
     this.unreadResultsCheck(module);
     this.pendingCallsCheck(module);
     this.reflectedNewsCheck(module);
@@ -21,7 +21,7 @@ partial class ExpressionTypes {
     return this.errors.of(module);
   }
 
-  public variable(module: int, loc: int): Type {
+  public readonly variable(module: int, loc: int): Type {
     const door = this.door(module, loc);
     if (door == undefined) {
       return this.store.plain(TypeKind.Error);
@@ -30,19 +30,19 @@ partial class ExpressionTypes {
     return door.type;
   }
 
-  private reportFound(module: int, error: SourceError | undefined): void {
+  private readonly reportFound(module: int, error: SourceError | undefined): void {
     if (error != undefined) {
       this.report(module, error.loc, error.code, error.details);
     }
   }
 
-  private reportAll(module: int, errors: SourceError[]): void {
+  private readonly reportAll(module: int, errors: Read<SourceError[]>): void {
     for (const error of errors) {
       this.report(module, error.loc, error.code, error.details);
     }
   }
 
-  private report(module: int, loc: int, code: Code, details: Details): void {
+  private readonly report(module: int, loc: int, code: Code, details: Details): void {
     const record = this.record(module);
     if (record == undefined || this.modules.isTypedLibrary(module)) {
       return;

@@ -63,13 +63,13 @@ export class RegexRules {
   private readonly text: TypeText;
   private readonly types: TypeQuestions;
 
-  public constructor(store: TypeStore, text: TypeText, types: TypeQuestions) {
+  public constructor(store: TypeStore, text: TypeText, types: Own<TypeQuestions>) {
     this.store = store;
     this.text = text;
     this.types = types;
   }
 
-  public shapeOf(written: RegexText): RegexShape | undefined {
+  public readonly shapeOf(written: RegexText): RegexShape | undefined {
     const flags = written.flags;
     if (!this.isFlagsValid(flags)) {
       return undefined;
@@ -102,7 +102,7 @@ export class RegexRules {
     };
   }
 
-  public isFlagsValid(flags: string): boolean {
+  public readonly isFlagsValid(flags: string): boolean {
     const letters = flags.split("");
     const isKnown = letters.every((letter) =>
       kRegexFlagLetters.includes(letter),
@@ -116,15 +116,15 @@ export class RegexRules {
     return isKnown && isOnce && !isBothUnicode;
   }
 
-  public isGlobal(shape: RegexShape): boolean {
+  public readonly isGlobal(shape: Read<RegexShape>): boolean {
     return shape.flags.includes(kGlobalFlag);
   }
 
-  public isRegExp(type: Type): boolean {
+  public readonly isRegExp(type: Type): boolean {
     return this.types.isRegExp(type);
   }
 
-  public isText(type: Type): boolean {
+  public readonly isText(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.String:
       case TypeKind.Template:
@@ -138,23 +138,23 @@ export class RegexRules {
     }
   }
 
-  public isPatternMethod(name: string): boolean {
+  public readonly isPatternMethod(name: string): boolean {
     return kPatternMethods.includes(name);
   }
 
-  public isField(name: string): boolean {
+  public readonly isField(name: string): boolean {
     return kRegexFields.includes(name);
   }
 
-  public isKnownStatic(name: string): boolean {
+  public readonly isKnownStatic(name: string): boolean {
     return name == kParseName || name == kEscapeName;
   }
 
-  public isEscape(name: string): boolean {
+  public readonly isEscape(name: string): boolean {
     return name == kEscapeName;
   }
 
-  public leastArguments(method: string): int {
+  public readonly leastArguments(method: string): int {
     if (method == kReplaceName || method == kReplaceAllName) {
       return 2;
     }
@@ -165,7 +165,7 @@ export class RegexRules {
     return 1;
   }
 
-  public mostArguments(method: string): int {
+  public readonly mostArguments(method: string): int {
     const isPair =
       method == kSplitName ||
       method == kReplaceName ||
@@ -177,29 +177,29 @@ export class RegexRules {
     return 1;
   }
 
-  public isTextAllowed(method: string): boolean {
+  public readonly isTextAllowed(method: string): boolean {
     return method == kSplitName || method == kReplaceAllName;
   }
 
-  public flagsError(loc: int, flags: string): SourceError {
+  public readonly flagsError(loc: int, flags: string): SourceError {
     return { code: Code.RegexFlagsInvalid, loc, details: { word: flags } };
   }
 
-  public testGlobalError(loc: int): SourceError {
+  public readonly testGlobalError(loc: int): SourceError {
     return { code: Code.RegexTestGlobal, loc, details: kNoDetails };
   }
 
-  public compileError(loc: int): SourceError {
+  public readonly compileError(loc: int): SourceError {
     return { code: Code.RegexCompile, loc, details: kNoDetails };
   }
 
-  public readError(loc: int, name: string): SourceError {
+  public readonly readError(loc: int, name: string): SourceError {
     const other = this.calledHint(kRunMethods.includes(name));
 
     return { code: Code.RegexNoMember, loc, details: { word: name, other } };
   }
 
-  public staticError(loc: int, name: string): SourceError {
+  public readonly staticError(loc: int, name: string): SourceError {
     if (name == kEscapeName) {
       return { code: Code.RegexStaticEscape, loc, details: kNoDetails };
     }
@@ -213,20 +213,20 @@ export class RegexRules {
     return { code: Code.RegexStaticNoMember, loc, details: { word: name } };
   }
 
-  public unknownNewError(loc: int, hasFlags: boolean): SourceError {
+  public readonly unknownNewError(loc: int, hasFlags: boolean): SourceError {
     const other = this.flagsHint(hasFlags);
 
     return { code: Code.RegexNewUnknown, loc, details: { other } };
   }
 
-  public matchFlagError(loc: int): SourceError {
+  public readonly matchFlagError(loc: int): SourceError {
     return { code: Code.RegexMatchFlag, loc, details: kNoDetails };
   }
 
-  public needsGlobalError(
+  public readonly needsGlobalError(
     loc: int,
     method: string,
-    shape: RegexShape,
+    shape: Read<RegexShape>,
   ): SourceError {
     const details = {
       word: method,
@@ -237,7 +237,7 @@ export class RegexRules {
     return { code: Code.RegexNeedsGlobal, loc, details };
   }
 
-  public notPatternError(loc: int, method: string, type: Type): SourceError {
+  public readonly notPatternError(loc: int, method: string, type: Type): SourceError {
     const other = this.orStringHint(this.isTextAllowed(method));
     const first = this.text.of(type);
     const details = { word: method, other, first };
@@ -245,7 +245,7 @@ export class RegexRules {
     return { code: Code.RegexNotPattern, loc, details };
   }
 
-  public textPatternError(
+  public readonly textPatternError(
     loc: int,
     method: string,
     pattern: Expr,
@@ -275,16 +275,16 @@ export class RegexRules {
     return { code: Code.RegexTextInclude, loc, details };
   }
 
-  public functionTextError(loc: int, pattern: Expr): SourceError {
+  public readonly functionTextError(loc: int, pattern: Expr): SourceError {
     const text = this.argumentText(pattern);
     const word = this.functionRegexText(pattern, text);
 
     return { code: Code.RegexFunctionText, loc, details: { word } };
   }
 
-  public groupReferenceError(
+  public readonly groupReferenceError(
     loc: int,
-    shape: RegexShape,
+    shape: Read<RegexShape>,
     value: string,
   ): SourceError | undefined {
     for (const at of this.groupReferences(value)) {
@@ -297,7 +297,7 @@ export class RegexRules {
     return undefined;
   }
 
-  public syntaxError(
+  public readonly syntaxError(
     written: RegexText,
     loc: int,
     isWritten: boolean,
@@ -314,15 +314,15 @@ export class RegexRules {
     return { code: Code.RegexInvalid, loc: at, details: { word } };
   }
 
-  public onlyMatchError(loc: int): SourceError {
+  public readonly onlyMatchError(loc: int): SourceError {
     return { code: Code.RegexOnlyMatch, loc, details: kNoDetails };
   }
 
-  public passesError(
+  public readonly passesError(
     loc: int,
     method: string,
     count: int,
-    shape: RegexShape,
+    shape: Read<RegexShape>,
   ): SourceError {
     const place = this.namedGroupsHint(this.hasNamedGroups(shape));
     const details = {
@@ -336,7 +336,7 @@ export class RegexRules {
     return { code: Code.RegexPasses, loc, details };
   }
 
-  public replacerParams(shape: RegexShape | undefined): Type[] {
+  public readonly replacerParams(shape: Read<RegexShape | undefined>): Type[] {
     const text = this.store.plain(TypeKind.String);
     if (shape == undefined) {
       return [text];
@@ -359,25 +359,25 @@ export class RegexRules {
     return params;
   }
 
-  public replacerType(params: Type[]): Type {
+  public readonly replacerType(params: Read<Type[]>): Type {
     const result = this.store.plain(TypeKind.String);
     const shaped = params.map((type) => ({ type, optional: false }));
 
     return this.store.functionOf({ params: shaped, rest: false, result });
   }
 
-  public splitType(shape: RegexShape | undefined): Type {
+  public readonly splitType(shape: Read<RegexShape | undefined>): Type {
     const hasOptional =
       shape == undefined || shape.mandatory.some((one) => !one);
 
     return this.store.arrayOf(this.groupType(!hasOptional));
   }
 
-  public textsType(): Type {
+  public readonly textsType(): Type {
     return this.store.arrayOf(this.store.plain(TypeKind.String));
   }
 
-  public namedGroupsType(shape: RegexShape): Type | undefined {
+  public readonly namedGroupsType(shape: Read<RegexShape>): Type | undefined {
     const fields: ObjectField[] = [];
 
     for (let group = 1; group <= shape.groups; group++) {
@@ -399,11 +399,11 @@ export class RegexRules {
     return this.store.objectOf(fields);
   }
 
-  public hasNamedGroups(shape: RegexShape): boolean {
+  public readonly hasNamedGroups(shape: Read<RegexShape>): boolean {
     return shape.names.some((name) => name != "");
   }
 
-  private syntaxText(message: string): string {
+  private readonly syntaxText(message: string): string {
     const first = message.slice(0, 1).toLowerCase();
     const lowered = `${first}${message.slice(1)}`;
     const isRepeat =
@@ -416,7 +416,7 @@ export class RegexRules {
     return lowered;
   }
 
-  private syntaxLoc(
+  private readonly syntaxLoc(
     pattern: string,
     at: int,
     loc: int,
@@ -435,7 +435,7 @@ export class RegexRules {
     return loc + 1 + bytes;
   }
 
-  private utf8Size(unit: int): int {
+  private readonly utf8Size(unit: int): int {
     if (unit < kOneByteEnd) {
       return 1;
     }
@@ -449,7 +449,7 @@ export class RegexRules {
     return 3;
   }
 
-  private groupType(isMandatory: boolean): Type {
+  private readonly groupType(isMandatory: boolean): Type {
     const text = this.store.plain(TypeKind.String);
     if (isMandatory) {
       return text;
@@ -458,9 +458,9 @@ export class RegexRules {
     return this.types.optional(text);
   }
 
-  private referenceError(
+  private readonly referenceError(
     loc: int,
-    shape: RegexShape,
+    shape: Read<RegexShape>,
     value: string,
     at: int,
   ): SourceError | undefined {
@@ -491,7 +491,7 @@ export class RegexRules {
     return { code: Code.RegexNoNamedGroups, loc, details: { word: name } };
   }
 
-  private groupReferences(value: string): int[] {
+  private readonly groupReferences(value: string): int[] {
     const found: int[] = [];
     let index = 0;
 
@@ -508,7 +508,7 @@ export class RegexRules {
     return found;
   }
 
-  private referenceStep(isEscaped: boolean): int {
+  private readonly referenceStep(isEscaped: boolean): int {
     if (isEscaped) {
       return 2;
     }
@@ -516,7 +516,7 @@ export class RegexRules {
     return 1;
   }
 
-  private isNumberedKnown(value: string, at: int, groups: int): boolean {
+  private readonly isNumberedKnown(value: string, at: int, groups: int): boolean {
     const one = kDigits.indexOf(value.slice(at + 1, at + 2));
     const next = kDigits.indexOf(value.slice(at + 2, at + 3));
     const two = this.twoDigits(one, next);
@@ -524,7 +524,7 @@ export class RegexRules {
     return (two != 0 && two <= groups) || one <= groups;
   }
 
-  private twoDigits(one: int, next: int): int {
+  private readonly twoDigits(one: int, next: int): int {
     if (next < 0) {
       return 0;
     }
@@ -532,7 +532,7 @@ export class RegexRules {
     return one * 10 + next;
   }
 
-  private referenceName(value: string, at: int): string {
+  private readonly referenceName(value: string, at: int): string {
     const close = value.indexOf(">", at + 2);
     if (close < 0) {
       return "";
@@ -541,7 +541,7 @@ export class RegexRules {
     return value.slice(at + 2, close);
   }
 
-  private argumentText(pattern: Expr): string {
+  private readonly argumentText(pattern: Expr): string {
     if (pattern.kind == ExprKind.StringLit) {
       const isPlain = pattern.value
         .split("")
@@ -557,11 +557,11 @@ export class RegexRules {
     return kTextPlaceholder;
   }
 
-  private isPlainQuoted(char: string): boolean {
+  private readonly isPlainQuoted(char: string): boolean {
     return kPlainQuoted.includes(char);
   }
 
-  private escapedLiteral(value: string): string {
+  private readonly escapedLiteral(value: string): string {
     const escaped = value
       .split("")
       .map((char) => this.escapedChar(char))
@@ -570,7 +570,7 @@ export class RegexRules {
     return `/${escaped}/`;
   }
 
-  private escapedChar(char: string): string {
+  private readonly escapedChar(char: string): string {
     if (kRegexSpecials.includes(char)) {
       return `\\${char}`;
     }
@@ -578,7 +578,7 @@ export class RegexRules {
     return char;
   }
 
-  private patternRegexText(pattern: Expr, text: string): string {
+  private readonly patternRegexText(pattern: Expr, text: string): string {
     if (pattern.kind == ExprKind.StringLit) {
       return this.escapedLiteral(pattern.value);
     }
@@ -586,7 +586,7 @@ export class RegexRules {
     return `new RegExp(RegExp.escape(${text}))`;
   }
 
-  private functionRegexText(pattern: Expr, text: string): string {
+  private readonly functionRegexText(pattern: Expr, text: string): string {
     if (pattern.kind == ExprKind.StringLit) {
       const escaped = this.escapedLiteral(pattern.value);
 
@@ -596,7 +596,7 @@ export class RegexRules {
     return `new RegExp(RegExp.escape(${text}), "g")`;
   }
 
-  private writtenRegex(
+  private readonly writtenRegex(
     isWritten: boolean,
     regex: string,
     method: string,
@@ -609,7 +609,7 @@ export class RegexRules {
     return `${method}(${regex})`;
   }
 
-  private globalSuffix(method: string): string {
+  private readonly globalSuffix(method: string): string {
     if (method == kMatchAllName) {
       return kGlobalFlag;
     }
@@ -617,7 +617,7 @@ export class RegexRules {
     return "";
   }
 
-  private calledHint(isMethod: boolean): string {
+  private readonly calledHint(isMethod: boolean): string {
     if (isMethod) {
       return kMethodsCalled;
     }
@@ -625,7 +625,7 @@ export class RegexRules {
     return "";
   }
 
-  private flagsHint(hasFlags: boolean): string {
+  private readonly flagsHint(hasFlags: boolean): string {
     if (hasFlags) {
       return kFlagsArgument;
     }
@@ -633,7 +633,7 @@ export class RegexRules {
     return "";
   }
 
-  private orStringHint(isTextAllowed: boolean): string {
+  private readonly orStringHint(isTextAllowed: boolean): string {
     if (isTextAllowed) {
       return kOrString;
     }
@@ -641,7 +641,7 @@ export class RegexRules {
     return "";
   }
 
-  private namedGroupsHint(hasNamed: boolean): string {
+  private readonly namedGroupsHint(hasNamed: boolean): string {
     if (hasNamed) {
       return kNamedGroupsHint;
     }
@@ -649,7 +649,7 @@ export class RegexRules {
     return "";
   }
 
-  private pluralEnd(count: int): string {
+  private readonly pluralEnd(count: int): string {
     if (count == 1) {
       return "";
     }
@@ -657,7 +657,7 @@ export class RegexRules {
     return "s";
   }
 
-  private isIn(found: Set<int>, group: int): boolean {
+  private readonly isIn(found: Read<Set<int>>, group: int): boolean {
     return group == 0 || found.has(group);
   }
 }

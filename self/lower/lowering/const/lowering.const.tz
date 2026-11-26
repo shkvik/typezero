@@ -91,6 +91,8 @@ export const kArrayIndexOf = "tz_arr_index_of";
 export const kArrayJoin = "tz_arr_join";
 export const kArraySlice = "tz_arr_slice";
 export const kArrayAppend = "tz_arr_append";
+export const kArraySetLength = "tz_arr_set_length";
+export const kArrayCopy = "tz_arr_copy";
 export const kPrintValue = "tz_print_value";
 export const kArrayLayout = "{ i64, ptr, ptr, i32, i32, ptr }";
 export const kDescriptorLayout = "{ i32, i32, ptr }";
@@ -209,6 +211,7 @@ export const kForeignNullText = " returned NULL, its declaration says it never d
 export const kBytesStruct = "{ i64, ptr, ptr, i32, i32, ptr }";
 export const kBytesDataField = 2;
 export const kBytesLengthField = 3;
+export const kBytesOffsetField = 4;
 export const kBytesNames = [
   "Buffer",
   "Uint8Array",
@@ -345,6 +348,12 @@ export const kChildModule = "node:child_process";
 export const kChildRun = "tz_child_run";
 export const kStrcmp = "strcmp";
 export const kOsModule = "node:os";
+export const kMemModule = "tz:mem";
+export const kReplaceName = "replace";
+export const kSwapName = "swap";
+export const kTakeName = "take";
+export const kDropName = "drop";
+export const kStructuredCloneName = "structuredClone";
 export const kOsText = "tz_os_string";
 export const kEncodingNames = [
   "utf8",

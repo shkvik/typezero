@@ -26,7 +26,7 @@ import { kNoPlace } from "../../const/expression-types.const.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 
 partial class ExpressionTypes {
-  private lengthAssignCheck(expr: AssignExpr, given: Type, module: int): void {
+  private readonly lengthAssignCheck(expr: AssignExpr, given: Type, module: int): void {
     const target = expr.target;
     const isLength =
       expr.op == undefined &&
@@ -59,7 +59,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private isProvenLength(object: Expr, value: Expr, module: int): boolean {
+  private readonly isProvenLength(object: Expr, value: Expr, module: int): boolean {
     const at = this.linearOf(value, module);
     const key = this.pathKey(object, module);
     if (at == undefined || key == undefined) {
@@ -74,7 +74,7 @@ partial class ExpressionTypes {
     return isNatural && this.canProve(at.term, kLengthTerm + key, at.offset);
   }
 
-  private compoundValue(
+  private readonly compoundValue(
     expr: AssignExpr,
     op: BinaryOp,
     type: Type,
@@ -110,7 +110,7 @@ partial class ExpressionTypes {
     return given;
   }
 
-  private numericCompoundCheck(
+  private readonly numericCompoundCheck(
     expr: AssignExpr,
     op: BinaryOp,
     type: Type,
@@ -159,7 +159,7 @@ partial class ExpressionTypes {
     this.coerce(value, given, type, module, kNoPlace);
   }
 
-  private compoundUndefinedCheck(
+  private readonly compoundUndefinedCheck(
     expr: AssignExpr,
     tested: Type,
     module: int,
@@ -187,7 +187,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private logicalTargetCheck(expr: AssignExpr, module: int): boolean {
+  private readonly logicalTargetCheck(expr: AssignExpr, module: int): boolean {
     const checked = this.flows.logicalTargetCheck(expr);
 
     this.reportFound(module, checked.error);
@@ -195,7 +195,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private arrayWriteCheck(
+  private readonly arrayWriteCheck(
     target: IndexExpr,
     isCompound: boolean,
     module: int,
@@ -223,7 +223,7 @@ partial class ExpressionTypes {
     this.writeIndexCheck(target, isCompound, module);
   }
 
-  private assignedDeclared(target: Expr, module: int): Type | undefined {
+  private readonly assignedDeclared(target: Expr, module: int): Type | undefined {
     if (target.kind == ExprKind.Member) {
       return this.memberTargetDeclared(target, module);
     }
@@ -250,7 +250,7 @@ partial class ExpressionTypes {
     return this.declaredOf(found);
   }
 
-  private importedCode(home: int): Code {
+  private readonly importedCode(home: int): Code {
     if (this.modules.isLibraryModule(home)) {
       return Code.AssignToImported;
     }
@@ -258,7 +258,7 @@ partial class ExpressionTypes {
     return Code.AssignToImportedVariable;
   }
 
-  private fixedTargetCheck(
+  private readonly fixedTargetCheck(
     target: NameExpr,
     found: ValueTarget,
     module: int,
@@ -286,7 +286,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private bytesStoreCheck(target: IndexExpr, object: Type, module: int): void {
+  private readonly bytesStoreCheck(target: IndexExpr, object: Type, module: int): void {
     if (this.isProvenIndex(target.object, target.index, module)) {
       return;
     }
@@ -311,7 +311,7 @@ partial class ExpressionTypes {
     this.reportFound(module, storeError);
   }
 
-  private elementDeclared(target: IndexExpr, module: int): Type | undefined {
+  private readonly elementDeclared(target: IndexExpr, module: int): Type | undefined {
     const object = this.peekType(target.object, module);
 
     const base = this.types.definedType(object);
@@ -325,13 +325,13 @@ partial class ExpressionTypes {
     return this.bytes.elementOf(base);
   }
 
-  private fieldDeclared(target: MemberExpr, module: int): Type | undefined {
+  private readonly fieldDeclared(target: MemberExpr, module: int): Type | undefined {
     const key = this.pathKey(target, module);
     if (key == undefined) {
       return undefined;
     }
 
-    const before = this.facts;
+    const before = this.factsCopy();
 
     this.forgetPath(key);
     const declared = this.peekType(target, module);
@@ -340,7 +340,7 @@ partial class ExpressionTypes {
     return declared;
   }
 
-  private isLibraryTarget(target: Expr, module: int): boolean {
+  private readonly isLibraryTarget(target: Expr, module: int): boolean {
     if (target.kind != ExprKind.Member) {
       return false;
     }

@@ -41,7 +41,7 @@ import { kMapClass } from "../../../code/class-rules/const/class-rules.const.tz"
 import { kPromiseClass } from "../../library-rules/const/library-rules.const.tz";
 
 partial class ExpressionTypes {
-  private libraryReceiver(type: Type): Type | undefined {
+  private readonly libraryReceiver(type: Type): Type | undefined {
     switch (type.kind) {
       case TypeKind.String:
       case TypeKind.Template:
@@ -76,7 +76,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private literalReceiver(literal: LiteralKind): Type | undefined {
+  private readonly literalReceiver(literal: LiteralKind): Type | undefined {
     switch (literal) {
       case LiteralKind.String:
         return this.resolver.libraryShape(kStringShape, []);
@@ -92,7 +92,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private integerReceiver(type: Type): Type | undefined {
+  private readonly integerReceiver(type: Type): Type | undefined {
     if (type.kind != TypeKind.Int || type.wraps) {
       return undefined;
     }
@@ -102,7 +102,7 @@ partial class ExpressionTypes {
     return this.resolver.libraryShape(name, []);
   }
 
-  private iteratorReceiver(type: Type): Type | undefined {
+  private readonly iteratorReceiver(type: Type): Type | undefined {
     if (type.kind != TypeKind.Iterator) {
       return undefined;
     }
@@ -117,7 +117,7 @@ partial class ExpressionTypes {
     return this.resolver.libraryShape(kGeneratorShape, args);
   }
 
-  private dictReceiver(type: Type): Type | undefined {
+  private readonly dictReceiver(type: Type): Type | undefined {
     if (type.kind != TypeKind.Dict) {
       return undefined;
     }
@@ -135,7 +135,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private libraryMemberTyped(
+  private readonly libraryMemberTyped(
     expr: MemberExpr,
     object: Type,
     module: int,
@@ -153,7 +153,7 @@ partial class ExpressionTypes {
     return member;
   }
 
-  private libraryCall(
+  private readonly libraryCall(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -235,7 +235,7 @@ partial class ExpressionTypes {
     return called;
   }
 
-  private filteredArray(expr: CallExpr, kept: Type): Type {
+  private readonly filteredArray(expr: CallExpr, kept: Type): Type {
     if (kept.kind != TypeKind.Array || !this.types.isOptional(kept.item)) {
       return kept;
     }
@@ -250,7 +250,7 @@ partial class ExpressionTypes {
     return this.store.arrayOf(defined);
   }
 
-  private keepsDefined(callback: Expr): boolean {
+  private readonly keepsDefined(callback: Expr): boolean {
     if (callback.kind != ExprKind.Function) {
       return false;
     }
@@ -282,7 +282,7 @@ partial class ExpressionTypes {
     return isLeft || isRight;
   }
 
-  private receiverVariants(receiver: Type, name: string): LibraryVariants {
+  private readonly receiverVariants(receiver: Type, name: string): LibraryVariants {
     if (receiver.kind != TypeKind.Instance) {
       return { types: [], open: [] };
     }
@@ -290,7 +290,7 @@ partial class ExpressionTypes {
     return this.declaredVariants(receiver, name, false);
   }
 
-  private libraryMethodCall(
+  private readonly libraryMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     type: Type,
@@ -326,7 +326,7 @@ partial class ExpressionTypes {
     return this.genericResult(expr, generic, wanted, module);
   }
 
-  private provedResult(
+  private readonly provedResult(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -356,7 +356,7 @@ partial class ExpressionTypes {
     return this.types.optional(int);
   }
 
-  private takenItem(member: MemberExpr, item: Type, module: int): Type {
+  private readonly takenItem(member: MemberExpr, item: Type, module: int): Type {
     const isFilled = this.isProvenFilled(member.object, module);
 
     this.takenFrom(member.object, module);
@@ -368,7 +368,7 @@ partial class ExpressionTypes {
     return this.types.optional(item);
   }
 
-  private valueMissingCheck(
+  private readonly valueMissingCheck(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -396,7 +396,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private namespaceReadCheck(expr: MemberExpr, module: int): void {
+  private readonly namespaceReadCheck(expr: MemberExpr, module: int): void {
     const object = expr.object;
     if (object.kind != ExprKind.Name || !this.isGlobalUse(object, module)) {
       return;
@@ -413,7 +413,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private namespaceMissingCheck(
+  private readonly namespaceMissingCheck(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -435,7 +435,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private mathMemberCheck(
+  private readonly mathMemberCheck(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -469,7 +469,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private positionShape(object: Type, name: string): Type | undefined {
+  private readonly positionShape(object: Type, name: string): Type | undefined {
     if (object.kind != TypeKind.Array) {
       return undefined;
     }
@@ -483,7 +483,7 @@ partial class ExpressionTypes {
     return this.receiverMember(receiver, name, true);
   }
 
-  private namespaceKind(member: MemberExpr, module: int): CallKind {
+  private readonly namespaceKind(member: MemberExpr, module: int): CallKind {
     const object = member.object;
     const isMath =
       object.kind == ExprKind.Name &&

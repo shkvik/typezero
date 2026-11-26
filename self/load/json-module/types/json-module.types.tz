@@ -10,8 +10,8 @@ export enum JsonNodeKind {
 export type JsonNode = {
   readonly kind: JsonNodeKind;
   readonly raw: string;
-  readonly items: JsonNode[];
-  readonly keys: string[];
+  readonly items: readonly JsonNode[];
+  readonly keys: readonly string[];
 };
 
 export type JsonFields = {
@@ -32,7 +32,9 @@ export enum JsonShapeKind {
 
 export type JsonShape = {
   readonly kind: JsonShapeKind;
-  readonly items: JsonShape[];
-  readonly keys: string[];
-  readonly optional: boolean[];
+  readonly items: readonly JsonShape[];
+  readonly keys: readonly string[];
+  readonly optional: readonly boolean[];
 };
+
+export type InternedJson = Interned<JsonNode | JsonShape>;

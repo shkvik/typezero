@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import { FileParser } from "../file-parser.tz";
 import { Code } from "../../../../diagnostic/code.tz";
 import { Details } from "../../../../diagnostic/types/message.types.tz";
@@ -61,7 +62,7 @@ partial class FileParser {
       case TokenKind.Export:
         return this.exportDecl(topLevel);
       case TokenKind.Class:
-        return this.classDeclaration();
+        return this.classStatement();
       case TokenKind.Namespace:
       case TokenKind.Module:
         return this.groupingStatement(token);
@@ -121,14 +122,20 @@ partial class FileParser {
     return this.marker(StmtKind.Empty, semicolon.start);
   }
 
+  private classStatement(): Stmt {
+    const draft = this.classDeclaration();
+
+    return this.finishedClass(draft);
+  }
+
   private decoratedStatement(topLevel: boolean): Stmt {
     const decorators = this.decorators();
     const stmt = this.statement(topLevel);
     if (stmt.kind == StmtKind.Class) {
-      stmt.decorators = decorators.concat(stmt.decorators);
-    } else {
-      this.rejectDecorators(decorators);
+      return this.decoratedClass(stmt, decorators);
     }
+
+    this.rejectDecorators(decorators);
 
     return stmt;
   }
@@ -161,13 +168,13 @@ partial class FileParser {
     return this.importDecl(topLevel);
   }
 
-  private nameOnLine(): boolean {
+  private readonly nameOnLine(): boolean {
     const next = this.cursor.lookahead();
 
     return kTokenTable.isName(next.kind) && !next.newline;
   }
 
-  private groupingAhead(): boolean {
+  private readonly groupingAhead(): boolean {
     const next = this.cursor.lookahead();
     const named =
       kTokenTable.isName(next.kind) ||
@@ -240,7 +247,7 @@ partial class FileParser {
 
     declaration.isAbstract = true;
 
-    return declaration;
+    return this.finishedClass(declaration);
   }
 
   private asyncStatement(loc: int): Stmt {
@@ -256,7 +263,7 @@ partial class FileParser {
     return this.functionDeclaration(true);
   }
 
-  private classWithoutKeywordAhead(): boolean {
+  private readonly classWithoutKeywordAhead(): boolean {
     if (!this.nameOnLine()) {
       return false;
     }
@@ -274,7 +281,7 @@ partial class FileParser {
     }
   }
 
-  private functionWithoutKeywordAhead(): boolean {
+  private readonly functionWithoutKeywordAhead(): boolean {
     if (!this.nameOnLine()) {
       return false;
     }
@@ -338,7 +345,7 @@ partial class FileParser {
 
     declaration.isPartial = true;
 
-    return declaration;
+    return this.finishedClass(declaration);
   }
 
   private strayHandler(keyword: Token): Stmt {
@@ -386,9 +393,7 @@ partial class FileParser {
   }
 
   private expressionStatement(loc: int): Stmt {
-    const outer = this.statementStart;
-
-    this.statementStart = loc;
+    const outer = replace(this.statementStart, loc);
     const expr = this.sequence();
 
     this.statementStart = outer;
@@ -570,7 +575,7 @@ partial class FileParser {
     }
   }
 
-  private writtenFrom(start: int): string {
+  private readonly writtenFrom(start: int): string {
     const span = this.cursor.spanFrom(start);
 
     return this.written(span.start, span.end);
@@ -631,7 +636,7 @@ partial class FileParser {
     return { kind: StmtKind.Block, loc, body, end };
   }
 
-  private insideBlock(ofIf: boolean): boolean {
+  private readonly insideBlock(ofIf: boolean): boolean {
     const token = this.cursor.peek();
 
     switch (token.kind) {
@@ -682,7 +687,7 @@ partial class FileParser {
     return { kind: StmtKind.Return, loc, value };
   }
 
-  private valueAhead(): boolean {
+  private readonly valueAhead(): boolean {
     const token = this.cursor.peek();
     const ends =
       token.kind == TokenKind.Semi ||
@@ -729,7 +734,7 @@ partial class FileParser {
     return block;
   }
 
-  private marker(kind: StmtKind.Empty | StmtKind.Debugger, loc: int): Stmt {
+  private readonly marker(kind: StmtKind.Empty | StmtKind.Debugger, loc: int): Stmt {
     return { kind, loc };
   }
 

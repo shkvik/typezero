@@ -1,0 +1,255 @@
+import {
+  BuiltinMethod,
+  LoanKind,
+  ParamMode,
+  ResultMode,
+} from "../types/ownership-check.types.tz";
+
+export const kThisKey = -1;
+export const kReadName = "Read";
+export const kOwnName = "Own";
+export const kLentName = "Lent";
+export const kOnceName = "Once";
+export const kMutName = "Mut";
+export const kElementStep = "[]";
+export const kThisName = "this";
+export const kCellName = "Cell";
+export const kTakeName = "take";
+export const kReplaceName = "replace";
+export const kSwapName = "swap";
+export const kLengthName = "length";
+export const kViewName = "view";
+export const kSymbolEqualsKey = "[Symbol.equals]";
+export const kSymbolHashKey = "[Symbol.hash]";
+export const kWeakRefName = "WeakRef";
+export const kMemModuleName = "tz:mem";
+
+export const kArrayMethods: BuiltinMethod[] = [
+  {
+    name: "push",
+    receiver: LoanKind.Exclusive,
+    params: [],
+    isRestOwn: true,
+    result: ResultMode.Copy,
+  },
+  {
+    name: "unshift",
+    receiver: LoanKind.Exclusive,
+    params: [],
+    isRestOwn: true,
+    result: ResultMode.Copy,
+  },
+  {
+    name: "pop",
+    receiver: LoanKind.Exclusive,
+    params: [],
+    isRestOwn: false,
+    result: ResultMode.Own,
+  },
+  {
+    name: "shift",
+    receiver: LoanKind.Exclusive,
+    params: [],
+    isRestOwn: false,
+    result: ResultMode.Own,
+  },
+  {
+    name: "splice",
+    receiver: LoanKind.Exclusive,
+    params: [ParamMode.Read, ParamMode.Read],
+    isRestOwn: true,
+    result: ResultMode.Own,
+  },
+  {
+    name: "sort",
+    receiver: LoanKind.Exclusive,
+    params: [ParamMode.Mut],
+    isRestOwn: false,
+    result: ResultMode.Mut,
+  },
+  {
+    name: "reverse",
+    receiver: LoanKind.Exclusive,
+    params: [],
+    isRestOwn: false,
+    result: ResultMode.Mut,
+  },
+  {
+    name: "fill",
+    receiver: LoanKind.Exclusive,
+    params: [ParamMode.Own, ParamMode.Read, ParamMode.Read],
+    isRestOwn: false,
+    result: ResultMode.Mut,
+  },
+  {
+    name: "at",
+    receiver: LoanKind.Shared,
+    params: [ParamMode.Read],
+    isRestOwn: false,
+    result: ResultMode.Element,
+  },
+  {
+    name: "find",
+    receiver: LoanKind.Shared,
+    params: [ParamMode.Mut],
+    isRestOwn: false,
+    result: ResultMode.Element,
+  },
+  {
+    name: "findLast",
+    receiver: LoanKind.Shared,
+    params: [ParamMode.Mut],
+    isRestOwn: false,
+    result: ResultMode.Element,
+  },
+  {
+    name: "filter",
+    receiver: LoanKind.Shared,
+    params: [ParamMode.Mut],
+    isRestOwn: false,
+    result: ResultMode.Read,
+  },
+  {
+    name: "slice",
+    receiver: LoanKind.Shared,
+    params: [ParamMode.Read, ParamMode.Read],
+    isRestOwn: false,
+    result: ResultMode.Read,
+  },
+  {
+    name: "map",
+    receiver: LoanKind.Shared,
+    params: [ParamMode.Mut],
+    isRestOwn: false,
+    result: ResultMode.Own,
+  },
+  {
+    name: "flatMap",
+    receiver: LoanKind.Shared,
+    params: [ParamMode.Mut],
+    isRestOwn: false,
+    result: ResultMode.Own,
+  },
+  {
+    name: "reduce",
+    receiver: LoanKind.Shared,
+    params: [ParamMode.Mut, ParamMode.Own],
+    isRestOwn: false,
+    result: ResultMode.Own,
+  },
+  {
+    name: "concat",
+    receiver: LoanKind.Shared,
+    params: [],
+    isRestOwn: true,
+    result: ResultMode.Own,
+  },
+  {
+    name: "drain",
+    receiver: LoanKind.Exclusive,
+    params: [],
+    isRestOwn: false,
+    result: ResultMode.Own,
+  },
+  {
+    name: "retain",
+    receiver: LoanKind.Exclusive,
+    params: [ParamMode.Mut],
+    isRestOwn: false,
+    result: ResultMode.Copy,
+  },
+  {
+    name: "view",
+    receiver: LoanKind.Shared,
+    params: [ParamMode.Read, ParamMode.Read],
+    isRestOwn: false,
+    result: ResultMode.Read,
+  },
+];
+
+export const kChangingArrayMethods = [
+  "push",
+  "unshift",
+  "pop",
+  "shift",
+  "splice",
+  "sort",
+  "reverse",
+  "fill",
+  "copyWithin",
+  "drain",
+  "retain",
+];
+
+export const kMapMethods: BuiltinMethod[] = [
+  {
+    name: "get",
+    receiver: LoanKind.Shared,
+    params: [ParamMode.Read],
+    isRestOwn: false,
+    result: ResultMode.Element,
+  },
+  {
+    name: "set",
+    receiver: LoanKind.Exclusive,
+    params: [ParamMode.Own, ParamMode.Own],
+    isRestOwn: false,
+    result: ResultMode.Copy,
+  },
+  {
+    name: "getOrInsert",
+    receiver: LoanKind.Exclusive,
+    params: [ParamMode.Own, ParamMode.Own],
+    isRestOwn: false,
+    result: ResultMode.Element,
+  },
+  {
+    name: "add",
+    receiver: LoanKind.Exclusive,
+    params: [ParamMode.Own],
+    isRestOwn: false,
+    result: ResultMode.Copy,
+  },
+  {
+    name: "delete",
+    receiver: LoanKind.Exclusive,
+    params: [ParamMode.Read],
+    isRestOwn: false,
+    result: ResultMode.Copy,
+  },
+  {
+    name: "clear",
+    receiver: LoanKind.Exclusive,
+    params: [],
+    isRestOwn: false,
+    result: ResultMode.Copy,
+  },
+  {
+    name: "retain",
+    receiver: LoanKind.Exclusive,
+    params: [ParamMode.Mut],
+    isRestOwn: false,
+    result: ResultMode.Copy,
+  },
+  {
+    name: "keys",
+    receiver: LoanKind.Shared,
+    params: [],
+    isRestOwn: false,
+    result: ResultMode.Read,
+  },
+  {
+    name: "values",
+    receiver: LoanKind.Shared,
+    params: [],
+    isRestOwn: false,
+    result: ResultMode.Read,
+  },
+  {
+    name: "entries",
+    receiver: LoanKind.Shared,
+    params: [],
+    isRestOwn: false,
+    result: ResultMode.Read,
+  },
+];

@@ -6,7 +6,7 @@ import { Access } from "../../../../program/ast/types/ast.types.classes.tz";
 import { Modifiers } from "../types/file-parser.types.classes.tz";
 
 partial class FileParser {
-  private memberModifierAhead(): boolean {
+  private readonly memberModifierAhead(): boolean {
     const token = this.cursor.peek();
     if (!this.isMemberModifier(token.kind)) {
       return false;
@@ -99,7 +99,7 @@ partial class FileParser {
     seen.push(word.kind);
   }
 
-  private accessGiven(seen: TokenKind[]): boolean {
+  private readonly accessGiven(seen: Read<TokenKind[]>): boolean {
     for (const kind of seen) {
       if (this.accessOf(kind) != undefined) {
         return true;
@@ -109,7 +109,7 @@ partial class FileParser {
     return false;
   }
 
-  private accessOf(kind: TokenKind): Access | undefined {
+  private readonly accessOf(kind: TokenKind): Access | undefined {
     switch (kind) {
       case TokenKind.Public:
         return Access.Public;
@@ -122,7 +122,7 @@ partial class FileParser {
     }
   }
 
-  private isMemberModifier(kind: TokenKind): boolean {
+  private readonly isMemberModifier(kind: TokenKind): boolean {
     switch (kind) {
       case TokenKind.Public:
       case TokenKind.Private:
@@ -140,7 +140,7 @@ partial class FileParser {
     }
   }
 
-  private endsModifiers(kind: TokenKind): boolean {
+  private readonly endsModifiers(kind: TokenKind): boolean {
     switch (kind) {
       case TokenKind.LParen:
       case TokenKind.Colon:

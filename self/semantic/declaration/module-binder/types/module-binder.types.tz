@@ -12,8 +12,10 @@ export enum BindState {
 
 export type BoundModule = {
   readonly names: ModuleNames;
-  state: BindState;
+  state: Cell<BindState>;
 };
+
+export type InternedBound = Interned<BoundModule>;
 
 export type ImportedName = {
   readonly decl: ImportDecl;

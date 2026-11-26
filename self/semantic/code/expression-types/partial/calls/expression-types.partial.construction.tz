@@ -27,7 +27,7 @@ import { kMapClass } from "../../../class-rules/const/class-rules.const.tz";
 import { kPromiseClass } from "../../../../library/library-rules/const/library-rules.const.tz";
 
 partial class ExpressionTypes {
-  private libraryNew(
+  private readonly libraryNew(
     expr: NewExpr,
     name: string,
     target: ValueTarget,
@@ -77,7 +77,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private writtenArguments(refs: TypeRef[], module: int): Type[] | undefined {
+  private readonly writtenArguments(refs: Read<TypeRef[]>, module: int): Type[] | undefined {
     const context: TypeContext = {
       module,
       bindings: new Map<int, Type>(),
@@ -91,10 +91,10 @@ partial class ExpressionTypes {
     return written;
   }
 
-  private declaredNew(
+  private readonly declaredNew(
     expr: NewExpr,
     target: ValueTarget,
-    written: Type[],
+    written: Read<Type[]>,
     module: int,
   ): Type {
     const home = target.module;
@@ -163,10 +163,10 @@ partial class ExpressionTypes {
     return instance;
   }
 
-  private overloadedNew(
+  private readonly overloadedNew(
     expr: NewExpr,
     instance: InstanceType,
-    makers: DeclaredMember[],
+    makers: Read<DeclaredMember[]>,
     declared: DeclaredClass,
     module: int,
   ): Type {

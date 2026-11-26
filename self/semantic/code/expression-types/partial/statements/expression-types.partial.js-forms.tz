@@ -17,7 +17,7 @@ import { kStringClass } from "../../const/expression-types.const.tz";
 import { OperandPair } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private listInCheck(expr: BinaryExpr, object: Type, module: int): boolean {
+  private readonly listInCheck(expr: BinaryExpr, object: Type, module: int): boolean {
     const right = this.types.definedType(object);
     if (right.kind != TypeKind.Array && right.kind != TypeKind.String) {
       return false;
@@ -54,7 +54,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private indexDeleteCheck(
+  private readonly indexDeleteCheck(
     expr: Expr,
     target: IndexExpr,
     module: int,
@@ -87,7 +87,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private plainDeleteCheck(expr: Expr, target: Expr, module: int): boolean {
+  private readonly plainDeleteCheck(expr: Expr, target: Expr, module: int): boolean {
     const isPath =
       target.kind == ExprKind.Member || target.kind == ExprKind.Index;
     if (isPath) {
@@ -102,7 +102,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private rawTextsCheck(expr: MemberExpr, object: Type, module: int): boolean {
+  private readonly rawTextsCheck(expr: MemberExpr, object: Type, module: int): boolean {
     const checked = this.statements.rawTextsCheck(expr, object);
 
     this.reportFound(module, checked.error);
@@ -110,7 +110,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private stringRawCheck(
+  private readonly stringRawCheck(
     expr: CallExpr,
     member: MemberExpr,
     module: int,

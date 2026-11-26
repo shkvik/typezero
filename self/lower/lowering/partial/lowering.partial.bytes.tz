@@ -19,22 +19,25 @@ import {
   kBufferName,
   kBufferToText,
   kByteType,
+  kBytesDataField,
   kBytesLengthField,
+  kBytesOffsetField,
   kBytesStruct,
   kBytesSubarray,
+  kCharType,
   kFlagType,
   kIntType,
   kPointerType,
+  kVoidType,
 } from "../const/lowering.const.tz";
 import { Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
-  private bytesLength(frame: Frame, bytes: LLVMValue): LLVMValue {
-    const made = frame.made;
-    const field = made.field(kBytesStruct, bytes, kBytesLengthField);
-    const length = made.load(kFlagType, field);
+  private readonly bytesLength(frame: Read<Frame>, bytes: LLVMValue): LLVMValue {
+    const field = frame.made.field(kBytesStruct, bytes, kBytesLengthField);
+    const length = frame.made.load(kFlagType, field);
 
-    return made.cast(IrOpcode.SExt, length, kIntType);
+    return frame.made.cast(IrOpcode.SExt, length, kIntType);
   }
 
   private bytesMember(frame: Frame, expr: MemberExpr): IrValue | undefined {
@@ -69,38 +72,37 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const position = this.toLong(frame, index).value;
     const length = this.bytesLength(frame, bytes.value);
-    const isInside = made.integerCompare(
+    const isInside = frame.made.integerCompare(
       IrIntPredicate.UnsignedLess,
       position,
       length,
     );
-    const before = made.currentBlock();
-    const read = made.block("byte.read");
-    const end = made.block("byte.end");
+    const before = frame.made.currentBlock();
+    const read = frame.made.block("byte.read");
+    const end = frame.made.block("byte.end");
 
-    made.conditionalBranch(isInside, read, end);
-    made.open(read);
+    frame.made.conditionalBranch(isInside, read, end);
+    frame.made.open(read);
 
     const data = this.bytesData(frame, bytes.value);
-    const address = made.element(kByteType, data, position);
-    const byte = made.load(kByteType, address);
+    const address = frame.made.element(kByteType, data, position);
+    const byte = frame.made.load(kByteType, address);
     const tz = this.store.integer(8, true);
     const loaded: IrValue = { type: kByteType, value: byte, tz };
     const placed = this.converted(frame, loaded, result, expr.loc);
-    const readEnd = made.currentBlock();
+    const readEnd = frame.made.currentBlock();
 
-    made.branch(end);
-    made.open(end);
+    frame.made.branch(end);
+    frame.made.open(end);
 
     if (placed == undefined) {
       return undefined;
     }
 
     const missing = this.ir.zero(resultIr);
-    const value = made.phi(
+    const value = frame.made.phi(
       resultIr,
       [missing, placed.value],
       [before, readEnd],
@@ -121,6 +123,8 @@ partial class Lowering {
         return this.bytesText(frame, call, member);
       case "subarray":
         return this.bytesView(frame, call, member);
+      case "advance":
+        return this.bytesAdvanced(frame, call, member);
       case "indexOf":
       case "lastIndexOf":
       case "includes":
@@ -143,7 +147,6 @@ partial class Lowering {
       return this.ir.zero(kFlagType);
     }
 
-    const made = frame.made;
     const given = this.value(frame, expr);
     if (given == undefined) {
       return this.ir.zero(kFlagType);
@@ -151,7 +154,7 @@ partial class Lowering {
 
     const params = [kPointerType, kIntType];
     const callee = this.ir.declare(kBufferEncoding, kFlagType, params);
-    const code = made.call(callee, this.textParts(frame, given));
+    const code = frame.made.call(callee, this.textParts(frame, given));
 
     this.dropping(frame, given);
 
@@ -237,7 +240,41 @@ partial class Lowering {
     return { type: kPointerType, value, tz: bytes.tz, owned: true };
   }
 
-  private isBufferName(expr: Expr): boolean {
+  private bytesAdvanced(
+    frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+  ): IrValue | undefined {
+    const bytes = this.value(frame, member.object);
+    const argument = call.args[0];
+    if (bytes == undefined || argument == undefined) {
+      return undefined;
+    }
+
+    const given = this.value(frame, argument.expr);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const count = frame.made.cast(IrOpcode.Trunc, given.value, kFlagType);
+    const dataAt = frame.made.field(kBytesStruct, bytes.value, kBytesDataField);
+    const lengthAt = frame.made.field(kBytesStruct, bytes.value, kBytesLengthField);
+    const offsetAt = frame.made.field(kBytesStruct, bytes.value, kBytesOffsetField);
+    const data = frame.made.load(kPointerType, dataAt);
+    const length = frame.made.load(kFlagType, lengthAt);
+    const offset = frame.made.load(kFlagType, offsetAt);
+
+    frame.made.store(frame.made.element(kByteType, data, count), dataAt);
+    frame.made.store(frame.made.binary(IrOpcode.Sub, length, count), lengthAt);
+    frame.made.store(frame.made.binary(IrOpcode.Add, offset, count), offsetAt);
+    this.dropping(frame, bytes);
+
+    const tz = this.store.plain(TypeKind.Void);
+
+    return { type: kVoidType, value: this.ir.zero(kCharType), tz };
+  }
+
+  private readonly isBufferName(expr: Expr): boolean {
     if (expr.kind != ExprKind.Name || expr.name != kBufferName) {
       return false;
     }
@@ -260,7 +297,6 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const given = this.value(frame, first.expr);
     if (given == undefined) {
       return undefined;
@@ -276,7 +312,7 @@ partial class Lowering {
       const params = [kIntType, kFlagType];
       const callee = this.ir.declare(kBufferAlloc, kPointerType, params);
       const zeroed = this.ir.integer(kFlagType, "1");
-      const value = made.call(callee, [size, zeroed]);
+      const value = frame.made.call(callee, [size, zeroed]);
 
       return { type: kPointerType, value, tz: result, owned: true };
     }
@@ -285,7 +321,7 @@ partial class Lowering {
       const params = [kPointerType, kIntType, kFlagType];
       const callee = this.ir.declare(kBufferFromText, kPointerType, params);
       const args = this.textParts(frame, given).concat([encoding]);
-      const value = made.call(callee, args);
+      const value = frame.made.call(callee, args);
 
       this.dropping(frame, given);
 

@@ -22,7 +22,7 @@ import { kDateName } from "../../../types/type-questions/const/type-questions.co
 import { kOtherPlaceholder } from "../../../code/logic-rules/const/logic-rules.const.tz";
 
 partial class ExpressionTypes {
-  private checkTruthy(
+  private readonly checkTruthy(
     expr: Expr,
     type: Type,
     use: TruthUse,
@@ -58,7 +58,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private shownWord(expr: Expr, shown: string): string {
+  private readonly shownWord(expr: Expr, shown: string): string {
     if (shown != "") {
       return shown;
     }
@@ -66,7 +66,7 @@ partial class ExpressionTypes {
     return this.sources.hintText(expr, kUnnamedOperand);
   }
 
-  private booleanCallCheck(expr: CallExpr, module: int): void {
+  private readonly booleanCallCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     const arg = expr.args[0];
     const isBoolean =
@@ -81,7 +81,7 @@ partial class ExpressionTypes {
     this.checkTruthy(arg.expr, type, TruthUse.Condition, undefined, module);
   }
 
-  private numberCallCheck(expr: CallExpr, module: int): void {
+  private readonly numberCallCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     const arg = expr.args[0];
     const isNumber =
@@ -100,7 +100,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private numberSourceCode(type: Type): Code | undefined {
+  private readonly numberSourceCode(type: Type): Code | undefined {
     if (type.kind == TypeKind.Error) {
       return undefined;
     }
@@ -127,7 +127,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private dateSourceCode(name: string): Code | undefined {
+  private readonly dateSourceCode(name: string): Code | undefined {
     if (name == kDateName) {
       return undefined;
     }
@@ -135,9 +135,9 @@ partial class ExpressionTypes {
     return Code.NumberOfWrongType;
   }
 
-  private booleanCallbackCheck(
+  private readonly booleanCallbackCheck(
     arg: Expr,
-    plan: CallbackPlan,
+    plan: Read<CallbackPlan>,
     module: int,
   ): void {
     const isBoolean =
@@ -154,7 +154,7 @@ partial class ExpressionTypes {
     this.checkTruthy(arg, item, use, undefined, module, kUnnamedOperand);
   }
 
-  private narrowedCode(expr: Expr, code: Code, module: int): Code | undefined {
+  private readonly narrowedCode(expr: Expr, code: Code, module: int): Code | undefined {
     const row = kNarrowedCodes.find((one) => one.code == code);
     if (row == undefined || expr.kind != ExprKind.Name) {
       return undefined;
@@ -173,7 +173,7 @@ partial class ExpressionTypes {
     return row.narrowed;
   }
 
-  private otherHint(other: Expr | undefined): string {
+  private readonly otherHint(other: Expr | undefined): string {
     if (other == undefined) {
       return kOtherPlaceholder;
     }

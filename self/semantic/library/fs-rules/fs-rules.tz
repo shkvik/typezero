@@ -28,35 +28,35 @@ export class FsRules {
 
   public constructor(
     text: TypeText,
-    types: TypeQuestions,
-    byteSources: ByteSourceRules,
+    types: Own<TypeQuestions>,
+    byteSources: Own<ByteSourceRules>,
   ) {
     this.text = text;
     this.types = types;
     this.byteSources = byteSources;
   }
 
-  public isFsModule(name: string): boolean {
+  public readonly isFsModule(name: string): boolean {
     return name == kFsModule;
   }
 
-  public call(name: string): FsCall | undefined {
+  public readonly call(name: string): FsCall | undefined {
     return kFsCalls.find((one) => one.name == name);
   }
 
-  public isFlag(text: string): boolean {
+  public readonly isFlag(text: string): boolean {
     return kOpenFlags.includes(text);
   }
 
-  public isConstant(name: string): boolean {
+  public readonly isConstant(name: string): boolean {
     return kFsConstants.includes(name);
   }
 
-  public isUtf8(name: string): boolean {
+  public readonly isUtf8(name: string): boolean {
     return kUtf8Names.includes(name.toLowerCase());
   }
 
-  public isWritable(type: Type): boolean {
+  public readonly isWritable(type: Type): boolean {
     const base = this.types.definedType(type);
     if (base.kind == TypeKind.String || base.kind == TypeKind.Error) {
       return true;
@@ -68,7 +68,7 @@ export class FsRules {
     return this.byteSources.isByteView(base);
   }
 
-  public dataError(loc: int, name: string, found: Type): SourceError {
+  public readonly dataError(loc: int, name: string, found: Type): SourceError {
     const base = this.types.definedType(found);
     const first = this.text.of(found);
     const other = this.dataHint(base);
@@ -77,25 +77,25 @@ export class FsRules {
     return { code: Code.FsData, loc, details };
   }
 
-  public encodingLiteralError(loc: int, name: string): SourceError {
+  public readonly encodingLiteralError(loc: int, name: string): SourceError {
     return { code: Code.FsEncodingLiteral, loc, details: { word: name } };
   }
 
-  public utf8OnlyError(loc: int, name: string, encoding: string): SourceError {
+  public readonly utf8OnlyError(loc: int, name: string, encoding: string): SourceError {
     const details: Details = { word: name, first: encoding };
 
     return { code: Code.FsEncodingUtf8Only, loc, details };
   }
 
-  public dependsError(loc: int, name: string): SourceError {
+  public readonly dependsError(loc: int, name: string): SourceError {
     return { code: Code.FsEncodingDepends, loc, details: { word: name } };
   }
 
-  public forTextError(loc: int, name: string): SourceError {
+  public readonly forTextError(loc: int, name: string): SourceError {
     return { code: Code.FsEncodingForText, loc, details: { word: name } };
   }
 
-  public flagError(
+  public readonly flagError(
     loc: int,
     name: string,
     written: string | undefined,
@@ -111,23 +111,23 @@ export class FsRules {
     return { code: Code.FsFlagUnknown, loc, details };
   }
 
-  public bigintError(loc: int): SourceError {
+  public readonly bigintError(loc: int): SourceError {
     return { code: Code.FsBigint, loc, details: kNoDetails };
   }
 
-  public rmdirError(loc: int): SourceError {
+  public readonly rmdirError(loc: int): SourceError {
     return { code: Code.FsRmdirOptions, loc, details: kNoDetails };
   }
 
-  public copyModeError(loc: int, name: string): SourceError {
+  public readonly copyModeError(loc: int, name: string): SourceError {
     return { code: Code.FsCopyMode, loc, details: { word: name } };
   }
 
-  public constantError(loc: int, name: string): SourceError {
+  public readonly constantError(loc: int, name: string): SourceError {
     return { code: Code.FsConstantNotYet, loc, details: { word: name } };
   }
 
-  public optionsLiteralError(
+  public readonly optionsLiteralError(
     loc: int,
     name: string,
     first: string,
@@ -139,7 +139,7 @@ export class FsRules {
     };
   }
 
-  public byNameError(loc: int, name: string, first: string): SourceError {
+  public readonly byNameError(loc: int, name: string, first: string): SourceError {
     return {
       code: Code.NodeOptionsByName,
       loc,
@@ -147,11 +147,11 @@ export class FsRules {
     };
   }
 
-  public unknownOptionError(
+  public readonly unknownOptionError(
     loc: int,
     name: string,
     option: string,
-    allowed: string[],
+    allowed: Read<string[]>,
   ): SourceError {
     const other = this.namesText(allowed);
     const details: Details = { word: name, first: option, other };
@@ -159,7 +159,7 @@ export class FsRules {
     return { code: Code.NodeOptionUnknown, loc, details };
   }
 
-  public flagOptionError(loc: int, name: string, option: string): SourceError {
+  public readonly flagOptionError(loc: int, name: string, option: string): SourceError {
     return {
       code: Code.NodeOptionFlag,
       loc,
@@ -167,11 +167,11 @@ export class FsRules {
     };
   }
 
-  public isPromisesModule(name: string): boolean {
+  public readonly isPromisesModule(name: string): boolean {
     return name == kFsPromisesModule;
   }
 
-  public promiseCall(name: string): FsCall | undefined {
+  public readonly promiseCall(name: string): FsCall | undefined {
     const row = this.call(`${name}${kSyncSuffix}`);
     if (row == undefined) {
       return undefined;
@@ -187,7 +187,7 @@ export class FsRules {
     };
   }
 
-  private dataHint(base: Type): string {
+  private readonly dataHint(base: Type): string {
     const isPlain =
       base.kind == TypeKind.Int ||
       base.kind == TypeKind.Double ||
@@ -202,7 +202,7 @@ export class FsRules {
     return "";
   }
 
-  private namesText(names: string[]): string {
+  private readonly namesText(names: Read<string[]>): string {
     const parts: string[] = [];
 
     for (let index = 0; index < names.length; index++) {
@@ -215,7 +215,7 @@ export class FsRules {
     return parts.join("");
   }
 
-  private nameJoint(index: int, count: int): string {
+  private readonly nameJoint(index: int, count: int): string {
     if (index == 0) {
       return "";
     }

@@ -11,7 +11,7 @@ import { ExpressionTypes } from "../../../../code/expression-types/expression-ty
 import { FsCall, FsShape } from "../../../fs-rules/types/fs-rules.types.tz";
 
 partial class ExpressionTypes {
-  private childCallCheck(expr: CallExpr, module: int): void {
+  private readonly childCallCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Name || this.modules.isLibraryModule(module)) {
       return;
@@ -35,7 +35,7 @@ partial class ExpressionTypes {
     this.childRunCheck(expr, callee.name, module);
   }
 
-  private childRunCheck(expr: CallExpr, name: string, module: int): void {
+  private readonly childRunCheck(expr: CallExpr, name: string, module: int): void {
     const isExec = this.child.isExec(name);
     const file = expr.args[0];
     const list = expr.args[1];
@@ -70,7 +70,7 @@ partial class ExpressionTypes {
     this.childOptionsCheck(expr, index, name, isExec, module);
   }
 
-  private childOptionsAt(isList: boolean): int {
+  private readonly childOptionsAt(isList: boolean): int {
     if (isList) {
       return 2;
     }
@@ -78,7 +78,7 @@ partial class ExpressionTypes {
     return 1;
   }
 
-  private childFileCheck(file: Expr, isExec: boolean, module: int): boolean {
+  private readonly childFileCheck(file: Expr, isExec: boolean, module: int): boolean {
     if (file.kind != ExprKind.StringLit) {
       return true;
     }
@@ -96,7 +96,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private childZeroCheck(elements: ArrayElement[], module: int): boolean {
+  private readonly childZeroCheck(elements: Read<ArrayElement[]>, module: int): boolean {
     let isFine = true;
 
     for (let index = 0; index < elements.length; index++) {
@@ -116,7 +116,7 @@ partial class ExpressionTypes {
     return isFine;
   }
 
-  private childOptionsCheck(
+  private readonly childOptionsCheck(
     expr: CallExpr,
     index: int,
     name: string,
@@ -133,7 +133,7 @@ partial class ExpressionTypes {
     this.childShellCheck(expr, index, name, isExec, module);
   }
 
-  private childEncodingCheck(
+  private readonly childEncodingCheck(
     encoding: Expr | undefined,
     name: string,
     module: int,
@@ -159,7 +159,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private childStdioCheck(
+  private readonly childStdioCheck(
     expr: CallExpr,
     index: int,
     name: string,
@@ -191,7 +191,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private childLimitsCheck(expr: CallExpr, index: int, module: int): void {
+  private readonly childLimitsCheck(expr: CallExpr, index: int, module: int): void {
     const directory = this.fsOptionValue(expr, index, "cwd");
     const isZero =
       directory != undefined &&
@@ -220,7 +220,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private isNegativeNumber(value: Expr): boolean {
+  private readonly isNegativeNumber(value: Expr): boolean {
     if (value.kind != ExprKind.Unary || value.op != UnaryOp.Neg) {
       return false;
     }
@@ -230,7 +230,7 @@ partial class ExpressionTypes {
     return operand.kind == ExprKind.IntLit || operand.kind == ExprKind.FloatLit;
   }
 
-  private childInputCheck(
+  private readonly childInputCheck(
     expr: CallExpr,
     index: int,
     name: string,
@@ -265,7 +265,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private childSignalCheck(expr: CallExpr, index: int, module: int): void {
+  private readonly childSignalCheck(expr: CallExpr, index: int, module: int): void {
     const signal = this.fsOptionValue(expr, index, "killSignal");
     if (signal == undefined) {
       return;
@@ -283,7 +283,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private childShellCheck(
+  private readonly childShellCheck(
     expr: CallExpr,
     index: int,
     name: string,

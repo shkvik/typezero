@@ -1,3 +1,8 @@
+import { Span } from "../../../../program/ast/types/ast.types.span.tz";
+import {
+  TypeForm,
+  TypeRef,
+} from "../../../../program/ast/types/ast.types.types.tz";
 export enum FunctionKind {
   Plain,
   Generator,
@@ -18,4 +23,12 @@ export type ParseContext = {
   readonly functionKind: FunctionKind;
   readonly expressionPlace: ExpressionPlace;
   readonly typePlace: TypePlace;
+};
+
+export type TypeRefDraft = {
+  form: TypeForm;
+  name: string;
+  loc: int;
+  args: TypeRef[];
+  source?: Span;
 };

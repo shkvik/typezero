@@ -46,11 +46,11 @@ import {
 export class LiteralReader {
   private readonly source: Buffer;
 
-  public constructor(source: Buffer) {
+  public constructor(source: Own<Buffer>) {
     this.source = source;
   }
 
-  public string(token: Token): DecodedText {
+  public readonly string(token: Token): DecodedText {
     const quote = this.byteAt(token.start);
     const closing = this.byteAt(token.end - 1);
     const closed = token.end > token.start + 1 && closing == quote;
@@ -63,13 +63,13 @@ export class LiteralReader {
     return this.decodeText(token.start + 1, last, TextKind.Quoted);
   }
 
-  public templatePart(token: Token): DecodedText {
+  public readonly templatePart(token: Token): DecodedText {
     const last = this.templateEnd(token);
 
     return this.decodeText(token.start + 1, last, TextKind.Template);
   }
 
-  public templateRaw(token: Token): string {
+  public readonly templateRaw(token: Token): string {
     const last = this.templateEnd(token);
     const decoded = this.decodeText(
       token.start + 1,
@@ -80,7 +80,7 @@ export class LiteralReader {
     return decoded.text;
   }
 
-  public regex(token: Token): RegexText {
+  public readonly regex(token: Token): RegexText {
     const from = token.start + 1;
     let slash = token.end;
 
@@ -105,7 +105,7 @@ export class LiteralReader {
     return { pattern, flags };
   }
 
-  public integer(token: Token): NumberText {
+  public readonly integer(token: Token): NumberText {
     const digits = this.digitsOf(token);
     const radix = this.radixOf(digits);
     let prefixLength = kRadixPrefixLength;
@@ -141,20 +141,20 @@ export class LiteralReader {
     };
   }
 
-  public float(token: Token): NumberText {
+  public readonly float(token: Token): NumberText {
     const digits = this.digitsOf(token);
     const text = this.textOfDigits(digits);
 
     return this.doubleOf(text);
   }
 
-  private byteAt(i: int): int {
+  private readonly byteAt(i: int): int {
     const value = this.source[i] ?? 0;
 
     return value.toInt();
   }
 
-  private hexValue(code: int): int | undefined {
+  private readonly hexValue(code: int): int | undefined {
     if (code >= kZero && code <= kNine) {
       return code - kZero;
     }
@@ -168,7 +168,7 @@ export class LiteralReader {
     return undefined;
   }
 
-  private hexEscape(at: int, end: int, count: int): Escape | undefined {
+  private readonly hexEscape(at: int, end: int, count: int): Escape | undefined {
     let value = 0;
 
     for (let index = 0; index < count; index++) {
@@ -190,7 +190,7 @@ export class LiteralReader {
     return { text, next: at + count };
   }
 
-  private unicodeEscape(at: int, end: int): Escape | undefined {
+  private readonly unicodeEscape(at: int, end: int): Escape | undefined {
     const open = this.byteAt(at);
     if (at >= end || open != kLeftBrace) {
       return this.hexEscape(at, end, 4);
@@ -228,7 +228,7 @@ export class LiteralReader {
     return { text, next: i + 1 };
   }
 
-  private simpleEscape(code: int): string | undefined {
+  private readonly simpleEscape(code: int): string | undefined {
     switch (code) {
       case kLowerN:
         return "\n";
@@ -249,7 +249,7 @@ export class LiteralReader {
     }
   }
 
-  private decodeText(start: int, end: int, kind: TextKind): DecodedText {
+  private readonly decodeText(start: int, end: int, kind: TextKind): DecodedText {
     let i = this.plainEnd(start, end, kind);
     const first = this.source.toString("utf8", start, i);
 
@@ -282,7 +282,7 @@ export class LiteralReader {
     return { text };
   }
 
-  private invalidEscape(at: int): InvalidEscape {
+  private readonly invalidEscape(at: int): InvalidEscape {
     const letter = this.byteAt(at + 1);
     if (letter == kLowerX) {
       return { loc: at, code: Code.InvalidHexEscape };
@@ -291,7 +291,7 @@ export class LiteralReader {
     return { loc: at, code: Code.InvalidUnicodeEscape };
   }
 
-  private plainEnd(from: int, end: int, kind: TextKind): int {
+  private readonly plainEnd(from: int, end: int, kind: TextKind): int {
     let i = from;
 
     while (i < end && !this.needsDecodingAt(i, kind)) {
@@ -301,7 +301,7 @@ export class LiteralReader {
     return i;
   }
 
-  private needsDecodingAt(i: int, kind: TextKind): boolean {
+  private readonly needsDecodingAt(i: int, kind: TextKind): boolean {
     const code = this.byteAt(i);
 
     if (kind == TextKind.Quoted) {
@@ -314,7 +314,7 @@ export class LiteralReader {
     return code == kBackslash || code == kReturn;
   }
 
-  private decodeAt(at: int, end: int): Escape | undefined {
+  private readonly decodeAt(at: int, end: int): Escape | undefined {
     const code = this.byteAt(at);
     if (code == kReturn) {
       const next = this.skipLineFeed(at + 1, end);
@@ -347,7 +347,7 @@ export class LiteralReader {
     }
   }
 
-  private plainEscape(letter: int, escaped: int): Escape {
+  private readonly plainEscape(letter: int, escaped: int): Escape {
     const after = escaped + 1;
     const simple = this.simpleEscape(letter);
     if (simple != undefined) {
@@ -362,7 +362,7 @@ export class LiteralReader {
     return { text: "", next: escaped };
   }
 
-  private skipLineFeed(at: int, end: int): int {
+  private readonly skipLineFeed(at: int, end: int): int {
     const code = this.byteAt(at);
     if (at < end && code == kNewline) {
       return at + 1;
@@ -371,7 +371,7 @@ export class LiteralReader {
     return at;
   }
 
-  private templateEnd(token: Token): int {
+  private readonly templateEnd(token: Token): int {
     const length = token.end - token.start;
     const beforeLast = this.byteAt(token.end - 2);
     const last = this.byteAt(token.end - 1);
@@ -387,7 +387,7 @@ export class LiteralReader {
     return token.end;
   }
 
-  private allDigitsValid(digits: int[], from: int, radix: int): boolean {
+  private readonly allDigitsValid(digits: Read<int[]>, from: int, radix: int): boolean {
     for (let i = from; i < digits.length; i++) {
       const code = digits[i] ?? 0;
       const digit = this.digitValue(code);
@@ -399,7 +399,7 @@ export class LiteralReader {
     return true;
   }
 
-  private appendDigit(
+  private readonly appendDigit(
     value: uint64,
     base: uint64,
     digit: int,
@@ -420,7 +420,7 @@ export class LiteralReader {
     return sum.value;
   }
 
-  private largeInteger(digits: int[], radix: int, from: int): NumberText {
+  private readonly largeInteger(digits: Read<int[]>, radix: int, from: int): NumberText {
     if (!this.allDigitsValid(digits, from, radix)) {
       return this.invalidInteger();
     }
@@ -430,7 +430,7 @@ export class LiteralReader {
     return this.doubleOf(text);
   }
 
-  private invalidInteger(): NumberText {
+  private readonly invalidInteger(): NumberText {
     return {
       isInt: true,
       intValue: 0,
@@ -440,7 +440,7 @@ export class LiteralReader {
     };
   }
 
-  private doubleOf(text: string): NumberText {
+  private readonly doubleOf(text: string): NumberText {
     const parsed = Number(text);
     const beyondDouble = parsed.isErr();
     const doubleValue = parsed.unwrapOr(0.0);
@@ -454,7 +454,7 @@ export class LiteralReader {
     };
   }
 
-  private digitsOf(token: Token): int[] {
+  private readonly digitsOf(token: Token): int[] {
     const digits: int[] = [];
 
     for (let i = token.start; i < token.end; i++) {
@@ -467,7 +467,7 @@ export class LiteralReader {
     return digits;
   }
 
-  private radixOf(digits: int[]): int {
+  private readonly radixOf(digits: Read<int[]>): int {
     if (digits.length <= kRadixPrefixLength || digits[0] != kZero) {
       return 10;
     }
@@ -486,7 +486,7 @@ export class LiteralReader {
     return 10;
   }
 
-  private digitValue(code: int): int | undefined {
+  private readonly digitValue(code: int): int | undefined {
     if (code >= kZero && code <= kNine) {
       return code - kZero;
     }
@@ -500,7 +500,7 @@ export class LiteralReader {
     return undefined;
   }
 
-  private textOfDigits(digits: int[]): string {
+  private readonly textOfDigits(digits: Read<int[]>): string {
     const chars: string[] = [];
 
     for (const code of digits) {

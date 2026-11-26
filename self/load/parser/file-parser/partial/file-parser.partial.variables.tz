@@ -80,7 +80,8 @@ partial class FileParser {
       return false;
     }
 
-    const init = this.initializer();
+    const written = this.initializer();
+    const init = this.namedClass(written, binding.name);
 
     decls.push({
       ...binding,
@@ -91,9 +92,6 @@ partial class FileParser {
     if (init == undefined) {
       return true;
     }
-    if (init.kind == ExprKind.Class && init.decl.name == undefined) {
-      init.decl.name = binding.name;
-    }
     if (isConst) {
       this.recordConstant(binding.name, init);
     }
@@ -101,21 +99,29 @@ partial class FileParser {
     return true;
   }
 
+  private readonly namedClass(init: Expr | undefined, name: string): Expr | undefined {
+    if (init == undefined || init.kind != ExprKind.Class) {
+      return init;
+    }
+    if (init.decl.name != undefined) {
+      return init;
+    }
+
+    const decl = this.namedClassDecl(init.decl, name);
+
+    return { kind: ExprKind.Class, loc: init.loc, decl };
+  }
+
   private recordConstant(name: string, init: Expr): void {
     const values = this.constantTexts(init);
-    const all = this.stringConstants.get(name);
-    if (all == undefined) {
-      this.stringConstants.set(name, values);
-
-      return;
-    }
+    const all = this.stringConstants.getOrInsert(name, []);
 
     for (const value of values) {
       all.push(value);
     }
   }
 
-  private constantTexts(init: Expr): string[] {
+  private readonly constantTexts(init: Expr): string[] {
     switch (init.kind) {
       case ExprKind.StringLit:
         return [init.value];

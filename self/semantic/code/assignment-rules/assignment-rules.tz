@@ -26,9 +26,9 @@ export class AssignmentRules {
 
   public constructor(
     text: TypeText,
-    types: TypeQuestions,
-    sources: SourceTexts,
-    mismatches: MismatchRules,
+    types: Own<TypeQuestions>,
+    sources: Own<SourceTexts>,
+    mismatches: Own<MismatchRules>,
   ) {
     this.text = text;
     this.types = types;
@@ -36,7 +36,7 @@ export class AssignmentRules {
     this.mismatches = mismatches;
   }
 
-  public isArithmetic(op: BinaryOp | undefined): boolean {
+  public readonly isArithmetic(op: BinaryOp | undefined): boolean {
     switch (op) {
       case undefined:
       case BinaryOp.LogOr:
@@ -48,15 +48,15 @@ export class AssignmentRules {
     }
   }
 
-  public isShift(op: BinaryOp): boolean {
+  public readonly isShift(op: BinaryOp): boolean {
     return op == BinaryOp.Shl || op == BinaryOp.Shr || op == BinaryOp.UShr;
   }
 
-  public isIntegerOnly(op: BinaryOp): boolean {
+  public readonly isIntegerOnly(op: BinaryOp): boolean {
     return this.isBitwise(op) || this.isShift(op);
   }
 
-  public isWrapping(type: Type, given: Type): boolean {
+  public readonly isWrapping(type: Type, given: Type): boolean {
     if (type.kind != TypeKind.Int || given.kind != TypeKind.Int) {
       return false;
     }
@@ -64,7 +64,7 @@ export class AssignmentRules {
     return type.wraps && (!given.wraps || given == type);
   }
 
-  public compoundTarget(declared: Type, narrowed: Type): Type {
+  public readonly compoundTarget(declared: Type, narrowed: Type): Type {
     const isPlain =
       this.types.isNumber(declared) || declared.kind == TypeKind.String;
     if (isPlain) {
@@ -74,7 +74,7 @@ export class AssignmentRules {
     return narrowed;
   }
 
-  public compoundHint(
+  public readonly compoundHint(
     op: BinaryOp,
     type: Type,
     isLiteralTree: boolean,
@@ -90,7 +90,7 @@ export class AssignmentRules {
     return type;
   }
 
-  public stringCompoundError(
+  public readonly stringCompoundError(
     expr: AssignExpr,
     op: BinaryOp,
     type: Type,
@@ -121,7 +121,7 @@ export class AssignmentRules {
     };
   }
 
-  public compoundOperandsError(
+  public readonly compoundOperandsError(
     expr: AssignExpr,
     op: BinaryOp,
     type: Type,
@@ -163,7 +163,7 @@ export class AssignmentRules {
     return { code: Code.CompoundMixedNumbers, loc, details };
   }
 
-  private isBitwise(op: BinaryOp): boolean {
+  private readonly isBitwise(op: BinaryOp): boolean {
     switch (op) {
       case BinaryOp.BitAnd:
       case BinaryOp.BitOr:
@@ -174,7 +174,7 @@ export class AssignmentRules {
     }
   }
 
-  private isWrongTarget(isBits: boolean, type: Type): boolean {
+  private readonly isWrongTarget(isBits: boolean, type: Type): boolean {
     if (isBits) {
       return type.kind != TypeKind.Int;
     }
@@ -182,25 +182,25 @@ export class AssignmentRules {
     return !this.types.isNumber(type);
   }
 
-  private isZero(expr: AssignExpr): boolean {
+  private readonly isZero(expr: AssignExpr): boolean {
     const value = expr.value;
 
     return value.kind == ExprKind.IntLit && value.value == 0;
   }
 
-  private wraps(type: Type): boolean {
+  private readonly wraps(type: Type): boolean {
     return type.kind == TypeKind.Int && type.wraps;
   }
 
-  private isUnsigned(type: Type): boolean {
+  private readonly isUnsigned(type: Type): boolean {
     return type.kind == TypeKind.Int && type.unsigned;
   }
 
-  private spelling(op: BinaryOp): string {
+  private readonly spelling(op: BinaryOp): string {
     return `${this.sources.operatorText(op)}${kAssignSuffix}`;
   }
 
-  private operandTypesError(
+  private readonly operandTypesError(
     expr: AssignExpr,
     op: BinaryOp,
     type: Type,
@@ -214,7 +214,7 @@ export class AssignmentRules {
     return { code, loc: expr.loc, details: { first, second, other } };
   }
 
-  private operandTypesCode(type: Type, given: Type): Code {
+  private readonly operandTypesCode(type: Type, given: Type): Code {
     const isUndefined =
       this.types.isOptional(type) ||
       this.types.isOptional(given) ||
@@ -227,7 +227,7 @@ export class AssignmentRules {
     return Code.OperandTypes;
   }
 
-  private joinHint(expr: AssignExpr, module: int): string {
+  private readonly joinHint(expr: AssignExpr, module: int): string {
     const texts = this.sources.assignTexts(expr, module);
     if (texts.left == "") {
       return kConvertWithString;
@@ -238,7 +238,7 @@ export class AssignmentRules {
     return `; write '${texts.left} += String(${shown})'`;
   }
 
-  private conversionHint(expr: AssignExpr, type: Type): string {
+  private readonly conversionHint(expr: AssignExpr, type: Type): string {
     const target = this.types.definedType(type);
     if (!this.types.isNumber(target)) {
       return "";

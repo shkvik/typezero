@@ -30,7 +30,7 @@ import { kFieldSetKey } from "../../const/expression-types.const.tz";
 import { InitFrame } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private constructorFrame(): InitFrame | undefined {
+  private readonly constructorFrame(): InitFrame | undefined {
     const frame = this.initFrames[this.initFrames.length - 1];
     if (frame == undefined || !frame.isConstructor) {
       return undefined;
@@ -44,11 +44,11 @@ partial class ExpressionTypes {
     return frame;
   }
 
-  private isInInit(frame: InitFrame): boolean {
+  private readonly isInInit(frame: Read<InitFrame>): boolean {
     return this.openFunctions[this.openFunctions.length - 1] == frame.fn;
   }
 
-  private isInsideInitClosure(frame: InitFrame): boolean {
+  private readonly isInsideInitClosure(frame: Read<InitFrame>): boolean {
     const start = this.openFunctions.lastIndexOf(frame.fn);
     const last = this.openFunctions.length - 1;
     if (start < 0 || start == last) {
@@ -60,7 +60,7 @@ partial class ExpressionTypes {
     return inner.every((fn) => fn.isArrow);
   }
 
-  private firstUnset(frame: InitFrame): string | undefined {
+  private readonly firstUnset(frame: Read<InitFrame>): string | undefined {
     for (const field of frame.decl.fields) {
       const key = `${kFieldSetKey}${field.name}`;
       if (this.classes.isRequiredField(field) && !this.facts.has(key)) {
@@ -71,14 +71,14 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private markFieldSet(name: string): void {
+  private readonly markFieldSet(name: string): void {
     const key = `${kFieldSetKey}${name}`;
     const mark = this.store.plain(TypeKind.Void);
 
     this.facts = this.flows.withFact(this.facts, key, mark);
   }
 
-  private initStart(fn: FunctionDecl): void {
+  private readonly initStart(fn: FunctionDecl): void {
     const frame = this.initFrames[this.initFrames.length - 1];
     if (frame == undefined || !frame.isConstructor || frame.fn != fn) {
       return;
@@ -97,7 +97,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private initEnd(fn: FunctionDecl, body: BlockStmt, module: int): void {
+  private readonly initEnd(fn: FunctionDecl, body: BlockStmt, module: int): void {
     const frame = this.constructorFrame();
     if (frame == undefined || frame.fn != fn) {
       return;
@@ -109,7 +109,7 @@ partial class ExpressionTypes {
     this.unsetPathCheck(frame, fn.loc, module);
   }
 
-  private returnFieldsCheck(
+  private readonly returnFieldsCheck(
     statement: ReturnStmt,
     fn: FunctionDecl | undefined,
     module: int,
@@ -122,7 +122,7 @@ partial class ExpressionTypes {
     this.unsetPathCheck(frame, statement.loc, module);
   }
 
-  private unsetPathCheck(frame: InitFrame, loc: int, module: int): void {
+  private readonly unsetPathCheck(frame: Read<InitFrame>, loc: int, module: int): void {
     const word = this.firstUnset(frame);
     if (word == undefined) {
       return;
@@ -133,7 +133,7 @@ partial class ExpressionTypes {
     this.report(module, loc, Code.FieldsNotSet, { word, first });
   }
 
-  private fieldSetMark(target: Expr, module: int): void {
+  private readonly fieldSetMark(target: Expr, module: int): void {
     if (target.kind != ExprKind.Member) {
       return;
     }
@@ -144,7 +144,7 @@ partial class ExpressionTypes {
     this.markFieldSet(target.name);
   }
 
-  private superFieldsSet(): void {
+  private readonly superFieldsSet(): void {
     const frame = this.initFrames[this.initFrames.length - 1];
     if (frame == undefined || !frame.isConstructor) {
       return;
@@ -159,7 +159,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private initThisMember(expr: MemberExpr, module: int): InitFrame | undefined {
+  private readonly initThisMember(expr: MemberExpr, module: int): InitFrame | undefined {
     const frame = this.constructorFrame();
     if (frame == undefined || !this.isInInit(frame)) {
       return undefined;
@@ -171,7 +171,7 @@ partial class ExpressionTypes {
     return frame;
   }
 
-  private fieldReadEarly(target: Expr, module: int): boolean {
+  private readonly fieldReadEarly(target: Expr, module: int): boolean {
     if (target.kind != ExprKind.Member) {
       return false;
     }
@@ -197,7 +197,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private memberReadEarly(expr: MemberExpr, module: int): boolean {
+  private readonly memberReadEarly(expr: MemberExpr, module: int): boolean {
     if (this.writtenTargets.has(expr)) {
       return false;
     }
@@ -210,7 +210,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private callReadEarly(member: MemberExpr, module: int): boolean {
+  private readonly callReadEarly(member: MemberExpr, module: int): boolean {
     if (this.fieldReadEarly(member, module)) {
       return true;
     }
@@ -220,7 +220,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private methodEarly(member: MemberExpr, code: Code, module: int): void {
+  private readonly methodEarly(member: MemberExpr, code: Code, module: int): void {
     const frame = this.initThisMember(member, module);
     if (frame == undefined) {
       return;
@@ -242,7 +242,7 @@ partial class ExpressionTypes {
     this.report(module, member.loc, code, { word, first });
   }
 
-  private isInitMethod(frame: InitFrame, name: string): boolean {
+  private readonly isInitMethod(frame: Read<InitFrame>, name: string): boolean {
     const self = this.selves[this.selves.length - 1];
     if (self == undefined || self.kind != TypeKind.Instance) {
       return frame.decl.methods.some(
@@ -263,7 +263,7 @@ partial class ExpressionTypes {
     return entry.methods.length > 0;
   }
 
-  private thisReadyCheck(expr: NameExpr, module: int): void {
+  private readonly thisReadyCheck(expr: NameExpr, module: int): void {
     const frame = this.constructorFrame();
     if (frame == undefined) {
       return;
@@ -285,13 +285,13 @@ partial class ExpressionTypes {
     this.report(module, expr.loc, Code.ThisUsedEarly, { word });
   }
 
-  private markThisObject(object: Expr, module: int): void {
+  private readonly markThisObject(object: Expr, module: int): void {
     if (this.isThisName(object, module)) {
       this.thisObjects.add(object);
     }
   }
 
-  private initClosureFrame(): InitFrame | undefined {
+  private readonly initClosureFrame(): InitFrame | undefined {
     const frame = this.initFrames[this.initFrames.length - 1];
     if (frame == undefined || !frame.isConstructor || !this.isInInit(frame)) {
       return undefined;
@@ -300,7 +300,7 @@ partial class ExpressionTypes {
     return frame;
   }
 
-  private enterInitClosure(frame: InitFrame | undefined): void {
+  private readonly enterInitClosure(frame: InitFrame | undefined): void {
     if (frame == undefined) {
       return;
     }
@@ -313,7 +313,7 @@ partial class ExpressionTypes {
     frame.closures.push(isSet && !isBefore);
   }
 
-  private isSwitchExit(
+  private readonly isSwitchExit(
     option: SwitchCase,
     isLast: boolean,
     module: int,
@@ -336,9 +336,9 @@ partial class ExpressionTypes {
     return isLast;
   }
 
-  private switchFieldsJoined(
+  private readonly switchFieldsJoined(
     statement: SwitchStmt,
-    exits: Map<string, Type>[],
+    exits: Read<Map<string, Type>[]>,
   ): void {
     const hasDefault = statement.cases.some((one) => one.test == undefined);
     const first = exits[0];
@@ -354,7 +354,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private fieldStartChecks(decl: ClassDecl, module: int): void {
+  private readonly fieldStartChecks(decl: ClassDecl, module: int): void {
     if (decl.constructors.length > 0) {
       return;
     }
@@ -372,7 +372,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private fieldStartCheck(
+  private readonly fieldStartCheck(
     instance: InstanceType,
     decl: ClassDecl,
     field: ClassField,
@@ -409,7 +409,7 @@ partial class ExpressionTypes {
     this.report(module, field.loc, Code.FieldNoStart, { word, first });
   }
 
-  private declaredFieldType(
+  private readonly declaredFieldType(
     instance: InstanceType,
     decl: ClassDecl,
     written: TypeRef,
@@ -423,7 +423,7 @@ partial class ExpressionTypes {
     return this.resolver.resolve(written, context);
   }
 
-  private hasMakerChain(instance: InstanceType): boolean {
+  private readonly hasMakerChain(instance: InstanceType): boolean {
     const seen = new Set<ClassDecl>();
     let current: InstanceType | undefined = instance;
 
@@ -446,7 +446,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private hasEmptyValue(
+  private readonly hasEmptyValue(
     type: Type,
     written: TypeRef | undefined,
     visiting: Set<ClassDecl>,
@@ -478,7 +478,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private hasEmptyInstance(
+  private readonly hasEmptyInstance(
     instance: InstanceType,
     visiting: Set<ClassDecl>,
   ): boolean {
@@ -506,7 +506,7 @@ partial class ExpressionTypes {
     return isEmpty;
   }
 
-  private hasEmptyFamily(
+  private readonly hasEmptyFamily(
     instance: InstanceType,
     visiting: Set<ClassDecl>,
   ): boolean {
@@ -530,7 +530,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private heldInstance(
+  private readonly heldInstance(
     instance: InstanceType,
     decl: ClassDecl,
     field: ClassField,

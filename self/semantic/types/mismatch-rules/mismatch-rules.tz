@@ -32,9 +32,9 @@ export class MismatchRules {
 
   public constructor(
     text: TypeText,
-    relation: TypeRelation,
-    types: TypeQuestions,
-    modules: ModuleQuestions,
+    relation: Own<TypeRelation>,
+    types: Own<TypeQuestions>,
+    modules: Own<ModuleQuestions>,
     ranges: LiteralRanges,
   ) {
     this.text = text;
@@ -44,7 +44,7 @@ export class MismatchRules {
     this.ranges = ranges;
   }
 
-  public answerOf(
+  public readonly answerOf(
     given: Type,
     wanted: Type,
     texts: MismatchTexts,
@@ -94,19 +94,19 @@ export class MismatchRules {
     return { code, details };
   }
 
-  public isUndecided(wanted: Type): boolean {
+  public readonly isUndecided(wanted: Type): boolean {
     const goal = this.types.definedType(wanted);
 
     return goal.kind == TypeKind.Operation;
   }
 
-  public isIteratorFromClass(given: Type, wanted: Type): boolean {
+  public readonly isIteratorFromClass(given: Type, wanted: Type): boolean {
     const target = this.types.definedType(wanted);
 
     return given.kind == TypeKind.Instance && target.kind == TypeKind.Iterator;
   }
 
-  public numberCode(given: Type, target: Type): Code {
+  public readonly numberCode(given: Type, target: Type): Code {
     if (given.kind == TypeKind.Int && this.types.isNumber(target)) {
       return Code.ConvertExplicitly;
     }
@@ -123,7 +123,7 @@ export class MismatchRules {
     return Code.NotAssignable;
   }
 
-  public sharedTag(target: Type): string | undefined {
+  public readonly sharedTag(target: Type): string | undefined {
     if (target.kind != TypeKind.Union) {
       return undefined;
     }
@@ -141,7 +141,7 @@ export class MismatchRules {
     return tag?.name;
   }
 
-  public conversionName(target: Type): string {
+  public readonly conversionName(target: Type): string {
     const name = this.text.of(target);
     const head = name.slice(0, 1).toUpperCase();
     const tail = name.slice(1);
@@ -149,7 +149,7 @@ export class MismatchRules {
     return `${kConversionPrefix}${head}${tail}`;
   }
 
-  private mismatchCode(
+  private readonly mismatchCode(
     given: Type,
     wanted: Type,
     source: Type,
@@ -215,7 +215,7 @@ export class MismatchRules {
     return this.numberCode(given, only);
   }
 
-  private hasObjectMember(target: Type): boolean {
+  private readonly hasObjectMember(target: Type): boolean {
     if (target.kind != TypeKind.Union) {
       return false;
     }
@@ -223,7 +223,7 @@ export class MismatchRules {
     return target.parts.some((part) => this.types.isObjectKind(part));
   }
 
-  private unionCode(target: Type): Code {
+  private readonly unionCode(target: Type): Code {
     if (this.sharedTag(target) == undefined) {
       return Code.ObjectIntoUnion;
     }
@@ -231,7 +231,7 @@ export class MismatchRules {
     return Code.ObjectIntoTaggedUnion;
   }
 
-  private hasLiteralField(part: Type, name: string): boolean {
+  private readonly hasLiteralField(part: Type, name: string): boolean {
     if (part.kind != TypeKind.Object) {
       return false;
     }
@@ -245,7 +245,7 @@ export class MismatchRules {
     );
   }
 
-  private jsonCode(source: Type, value: Type): Code {
+  private readonly jsonCode(source: Type, value: Type): Code {
     if (this.types.isObjectKind(source) || value.kind == TypeKind.Array) {
       return Code.ObjectIntoJson;
     }
@@ -259,7 +259,7 @@ export class MismatchRules {
     return Code.NotAssignable;
   }
 
-  private dictionaryCode(value: Type): Code {
+  private readonly dictionaryCode(value: Type): Code {
     const parts = this.types.definedParts(value);
     const isWide = parts.some(
       (part) => part.kind == TypeKind.Int && part.bits >= kWideBits,
@@ -271,7 +271,7 @@ export class MismatchRules {
     return Code.NotAssignable;
   }
 
-  private isReported(
+  private readonly isReported(
     isFresh: boolean,
     given: Type,
     wanted: Type,
@@ -297,7 +297,7 @@ export class MismatchRules {
     return isPlain || !this.isWidening(source, target);
   }
 
-  private isWidening(source: Type, target: Type): boolean {
+  private readonly isWidening(source: Type, target: Type): boolean {
     if (!this.types.isObjectKind(target)) {
       return false;
     }
@@ -305,7 +305,7 @@ export class MismatchRules {
     return this.types.isObjectKind(source) || source.kind == TypeKind.Union;
   }
 
-  private isOtherClass(source: Type, target: Type): boolean {
+  private readonly isOtherClass(source: Type, target: Type): boolean {
     if (
       source.kind != TypeKind.Instance ||
       this.modules.isLibraryModule(source.module)
@@ -325,13 +325,13 @@ export class MismatchRules {
     return !chain.some((one) => this.types.isSameClass(one, target));
   }
 
-  private isFunctionPair(given: Type, wanted: Type): boolean {
+  private readonly isFunctionPair(given: Type, wanted: Type): boolean {
     const goal = this.types.definedType(wanted);
 
     return given.kind == TypeKind.Function && goal.kind == TypeKind.Function;
   }
 
-  private isMaybeFitting(given: Type, wanted: Type): boolean {
+  private readonly isMaybeFitting(given: Type, wanted: Type): boolean {
     if (!this.types.isOptional(given) || this.types.isOptional(wanted)) {
       return false;
     }
@@ -341,7 +341,7 @@ export class MismatchRules {
     return this.relation.converts(defined, wanted);
   }
 
-  private classCode(target: Type): Code {
+  private readonly classCode(target: Type): Code {
     if (target.kind == TypeKind.Instance) {
       return Code.ClassNotExtended;
     }
@@ -349,7 +349,7 @@ export class MismatchRules {
     return Code.ClassNotImplemented;
   }
 
-  private isCertain(code: Code): boolean {
+  private readonly isCertain(code: Code): boolean {
     switch (code) {
       case Code.LiteralNotInstance:
       case Code.TupleNotArray:
@@ -369,7 +369,7 @@ export class MismatchRules {
     }
   }
 
-  private innerObject(type: Type, other: Type): Type {
+  private readonly innerObject(type: Type, other: Type): Type {
     const inner = this.types.definedType(type);
     const otherInner = this.types.definedType(other);
     if (inner.kind == TypeKind.Array && otherInner.kind == TypeKind.Array) {
@@ -379,12 +379,12 @@ export class MismatchRules {
     return inner;
   }
 
-  private mismatchWord(
+  private readonly mismatchWord(
     texts: MismatchTexts,
     code: Code,
     given: Type,
     wanted: Type,
-    intervals: Interval[],
+    intervals: Read<Interval[]>,
   ): string {
     const source = this.innerObject(given, wanted);
     const target = this.innerObject(wanted, given);
@@ -411,7 +411,7 @@ export class MismatchRules {
     }
   }
 
-  private mismatchOther(
+  private readonly mismatchOther(
     code: Code,
     holds: string,
     only: Type,
@@ -427,7 +427,7 @@ export class MismatchRules {
     return this.conversionName(only);
   }
 
-  private isPlainValue(type: Type): boolean {
+  private readonly isPlainValue(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.Int:
       case TypeKind.Double:
@@ -446,13 +446,13 @@ export class MismatchRules {
     }
   }
 
-  private isOptionalWidening(source: Type, target: Type): boolean {
+  private readonly isOptionalWidening(source: Type, target: Type): boolean {
     if (source.kind != TypeKind.Object || target.kind != TypeKind.Object) {
       return false;
     }
 
-    const own = source.fields;
-    const wide = target.fields;
+    const own = source.fields.slice();
+    const wide = target.fields.slice();
     const isEachKnown = own.every((field) => this.isWiderField(field, wide));
     const isRestOptional = wide.every(
       (field) => field.optional || this.hasField(own, field.name),
@@ -461,17 +461,17 @@ export class MismatchRules {
     return isEachKnown && isRestOptional;
   }
 
-  private isWiderField(field: ObjectField, wide: ObjectField[]): boolean {
+  private readonly isWiderField(field: ObjectField, wide: Read<ObjectField[]>): boolean {
     const other = wide.find((one) => one.name == field.name);
 
     return other != undefined && this.relation.converts(field.type, other.type);
   }
 
-  private hasField(fields: ObjectField[], name: string): boolean {
+  private readonly hasField(fields: Read<ObjectField[]>, name: string): boolean {
     return fields.some((one) => one.name == name);
   }
 
-  private objectDetail(source: Type, target: Type, hasOther: boolean): string {
+  private readonly objectDetail(source: Type, target: Type, hasOther: boolean): string {
     if (source.kind != TypeKind.Object || target.kind != TypeKind.Object) {
       return "";
     }
@@ -503,7 +503,7 @@ export class MismatchRules {
     return "";
   }
 
-  private fieldDetail(
+  private readonly fieldDetail(
     field: ObjectField,
     other: ObjectField,
     target: Type,
@@ -532,7 +532,7 @@ export class MismatchRules {
     return "";
   }
 
-  private objectFieldType(field: ObjectField): Type {
+  private readonly objectFieldType(field: ObjectField): Type {
     if (field.optional) {
       return this.types.optional(field.type);
     }
@@ -540,7 +540,7 @@ export class MismatchRules {
     return field.type;
   }
 
-  private objectTypeHint(own: Type, theirs: Type, to: string): string {
+  private readonly objectTypeHint(own: Type, theirs: Type, to: string): string {
     const isNumberPair =
       this.isNumberKind(this.types.definedType(own)) &&
       this.isNumberKind(this.types.definedType(theirs));
@@ -551,11 +551,11 @@ export class MismatchRules {
     return `: give the object its type where it is created, e.g. 'const p: ${to} = { ... }'`;
   }
 
-  private isNumberKind(type: Type): boolean {
+  private readonly isNumberKind(type: Type): boolean {
     return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
   }
 
-  private unsaidDetail(source: Type, target: Type): string {
+  private readonly unsaidDetail(source: Type, target: Type): string {
     if (source.kind != TypeKind.Instance || target.kind != TypeKind.Instance) {
       return "";
     }
@@ -576,7 +576,7 @@ export class MismatchRules {
     return "";
   }
 
-  private unsaidText(own: Type, wide: Type): string {
+  private readonly unsaidText(own: Type, wide: Type): string {
     const ownName = this.text.of(own);
     const wideName = this.text.of(wide);
     const isNamed = !ownName.startsWith("{") && own.kind != TypeKind.Union;
@@ -588,7 +588,7 @@ export class MismatchRules {
     return head + tail;
   }
 
-  private unsaidExample(isNamed: boolean, name: string): string {
+  private readonly unsaidExample(isNamed: boolean, name: string): string {
     if (isNamed) {
       return name;
     }
@@ -596,7 +596,7 @@ export class MismatchRules {
     return kUnsaidSample;
   }
 
-  private widenedDetail(source: Type, target: Type): string {
+  private readonly widenedDetail(source: Type, target: Type): string {
     if (source.kind != TypeKind.Instance || target.kind != TypeKind.Instance) {
       return "";
     }

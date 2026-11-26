@@ -141,7 +141,7 @@ while ((line = readLine()) != undefined) {    // без вопроса ниче�
 
 ## 5. Ошибки ОС
 
-Решено 30 октября (4.6, шаг 1; все решения — `tmp/design/fs-errors.tz`, Ф1–Ф10).
+Решено 30 октября (4.6, шаг 1; решения Ф1–Ф10).
 
 ```ts
 import { readFileSync, ReadFileError } from "node:fs"

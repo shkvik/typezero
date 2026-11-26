@@ -69,7 +69,7 @@ partial class Lowering {
     return this.irType(type);
   }
 
-  private isEmptyHalf(type: Type): boolean {
+  private readonly isEmptyHalf(type: Type): boolean {
     return type.kind == TypeKind.Void || type.kind == TypeKind.Never;
   }
 
@@ -176,11 +176,10 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const flag = this.ir.integer(kBooleanType, `${this.flagIf(isOk, 1)}`);
     const empty = this.ir.zero(layout.struct);
     const sited = this.sitedResult(frame, empty, layout, isOk, loc);
-    const flagged = made.insert(sited, flag, layout.ok);
+    const flagged = frame.made.insert(sited, flag, layout.ok);
     const target = this.pickType(isOk, type.value, type.error);
     const position = this.choose(isOk, layout.value, layout.error);
     if (half == undefined || this.isEmptyHalf(target)) {
@@ -193,12 +192,12 @@ partial class Lowering {
     }
 
     const owned = this.owning(frame, converted);
-    const value = made.insert(flagged, owned.value, position);
+    const value = frame.made.insert(flagged, owned.value, position);
 
     return { type: layout.struct, value, tz: type, owned: true };
   }
 
-  private pickType(isFirst: boolean, first: Type, second: Type): Type {
+  private readonly pickType(isFirst: boolean, first: Type, second: Type): Type {
     if (isFirst) {
       return first;
     }
@@ -232,7 +231,7 @@ partial class Lowering {
   }
 
   private sitedResult(
-    frame: Frame,
+    frame: Read<Frame>,
     empty: LLVMValue,
     layout: ResultLayout,
     isOk: boolean,
@@ -247,7 +246,7 @@ partial class Lowering {
     return frame.made.insert(empty, site, layout.site);
   }
 
-  private errorSite(frame: Frame, loc: int): LLVMValue {
+  private errorSite(frame: Read<Frame>, loc: int): LLVMValue {
     const module = this.program.modules[frame.module];
     if (module == undefined || module.source.isLibrary) {
       return this.ir.zero(kPointerType);
@@ -275,7 +274,7 @@ partial class Lowering {
     return global;
   }
 
-  private siteText(title: string, where: string): string {
+  private readonly siteText(title: string, where: string): string {
     if (title.length == 0) {
       return where;
     }
@@ -283,7 +282,7 @@ partial class Lowering {
     return `${title} (${where})`;
   }
 
-  private siteFile(path: string): string {
+  private readonly siteFile(path: string): string {
     const entry = this.program.modules[0]?.source.path ?? "";
     const base = dirname(resolve(entry));
     const native = relative(base, resolve(path));
@@ -291,7 +290,7 @@ partial class Lowering {
     return native.replaceAll(kWindowsSeparator, kPathSeparator);
   }
 
-  private linesOf(module: int, text: Buffer): SourceLines {
+  private linesOf(module: int, text: Own<Buffer>): SourceLines {
     const known = this.lines.get(module);
     if (known != undefined) {
       return known;
@@ -319,12 +318,11 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
-    const ok = made.extract(value.value, source.ok);
-    const site = made.extract(value.value, source.site);
+    const ok = frame.made.extract(value.value, source.ok);
+    const site = frame.made.extract(value.value, source.site);
     const empty = this.ir.zero(layout.struct);
-    const flagged = made.insert(empty, ok, layout.ok);
-    const sited = made.insert(flagged, site, layout.site);
+    const flagged = frame.made.insert(empty, ok, layout.ok);
+    const sited = frame.made.insert(flagged, site, layout.site);
     const withValue = this.halfMoved(
       frame,
       value,
@@ -402,8 +400,7 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
-    const ok = made.extract(result.value, layout.ok);
+    const ok = frame.made.extract(result.value, layout.ok);
     const tz = this.store.plain(TypeKind.Boolean);
 
     switch (member.name) {
@@ -413,7 +410,7 @@ partial class Lowering {
         return { type: kBooleanType, value: ok, tz };
       case "isErr": {
         const yes = this.ir.integer(kBooleanType, "1");
-        const value = made.binary(IrOpcode.Xor, ok, yes);
+        const value = frame.made.binary(IrOpcode.Xor, ok, yes);
 
         this.dropping(frame, result);
 
@@ -450,32 +447,31 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
-    const kept = made.block("unwrap.ok");
-    const other = made.block("unwrap.other");
-    const end = made.block("unwrap.end");
+    const kept = frame.made.block("unwrap.ok");
+    const other = frame.made.block("unwrap.other");
+    const end = frame.made.block("unwrap.end");
 
-    made.conditionalBranch(ok, kept, other);
-    made.open(kept);
+    frame.made.conditionalBranch(ok, kept, other);
+    frame.made.open(kept);
 
     const half = this.resultHalf(frame, result, layout.value, from.value);
     const first = this.branchOwned(frame, half, type, call.loc);
-    const firstEnd = made.currentBlock();
+    const firstEnd = frame.made.currentBlock();
 
-    made.branch(end);
-    made.open(other);
+    frame.made.branch(end);
+    frame.made.open(other);
 
     const second = this.branchValue(frame, fallback.expr, type);
-    const secondEnd = made.currentBlock();
+    const secondEnd = frame.made.currentBlock();
 
-    made.branch(end);
-    made.open(end);
+    frame.made.branch(end);
+    frame.made.open(end);
 
     if (first == undefined || second == undefined) {
       return undefined;
     }
 
-    const value = made.phi(
+    const value = frame.made.phi(
       resultIr,
       [first.value, second.value],
       [firstEnd, secondEnd],
@@ -487,7 +483,7 @@ partial class Lowering {
   }
 
   private resultHalf(
-    frame: Frame,
+    frame: Read<Frame>,
     result: IrValue,
     position: int,
     type: Type,
@@ -573,7 +569,7 @@ partial class Lowering {
   }
 
   private halfCounted(
-    frame: Frame,
+    frame: Read<Frame>,
     whole: IrValue,
     position: int,
     type: Type,

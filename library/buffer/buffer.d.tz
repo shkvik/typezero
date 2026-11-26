@@ -34,7 +34,12 @@ export declare class Buffer<B = ArrayBuffer> extends Uint8Array {
   public sort(compare?: (first: uint8, second: uint8) => int | double): Buffer;
   public reverse(): Buffer;
   /** A Buffer that looks into the same memory from `start` to `end`. */
-  public subarray(start?: int, end?: int): Buffer;
+  public subarray(start?: int, end?: int): Read<Buffer>;
+  /**
+   * Cuts `count` bytes off the start, in place and without a copy.
+   * @example buffered.advance(size)
+   */
+  public advance(count: int): void;
   public map(change: (item: uint8, index: int, all: Buffer) => uint8): Buffer;
   public filter(
     keep: (item: uint8, index: int, all: Buffer) => boolean,

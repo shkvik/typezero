@@ -23,7 +23,7 @@ import { Frame, IrValue, Place } from "../types/lowering.types.tz";
 partial class Lowering {
   private insertedItems(
     frame: Frame,
-    args: CallArgument[],
+    args: Read<CallArgument[]>,
     item: Type,
   ): IrValue[] | undefined {
     const items: IrValue[] = [];
@@ -52,14 +52,12 @@ partial class Lowering {
     return items;
   }
 
-  private itemsPlaced(
-    frame: Frame,
+  private readonly itemsPlaced(
+    frame: Read<Frame>,
     slots: LLVMValue,
-    items: IrValue[],
+    items: Read<IrValue[]>,
     element: string,
   ): void {
-    const made = frame.made;
-
     for (let index = 0; index < items.length; index++) {
       const item = items[index];
       if (item == undefined) {
@@ -67,9 +65,9 @@ partial class Lowering {
       }
 
       const position = this.ir.integer(kIntType, `${index}`);
-      const address = made.element(element, slots, position);
+      const address = frame.made.element(element, slots, position);
 
-      made.store(item.value, address);
+      frame.made.store(item.value, address);
     }
   }
 
@@ -99,8 +97,7 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
-    const slots = made.slot(kPointerType, "splice.slots");
+    const slots = frame.made.slot(kPointerType, "splice.slots");
     const params = [
       kPointerType,
       kIntType,
@@ -112,7 +109,7 @@ partial class Lowering {
     const splicing = this.ir.declare(kArraySplice, kPointerType, params);
     const hasCount = this.ir.integer(kFlagType, `${count.given}`);
     const inserted = this.ir.integer(kIntType, `${items.length}`);
-    const removed = made.call(splicing, [
+    const removed = frame.made.call(splicing, [
       array.value,
       start.value,
       count.value,
@@ -120,7 +117,7 @@ partial class Lowering {
       inserted,
       slots,
     ]);
-    const data = made.load(kPointerType, slots);
+    const data = frame.made.load(kPointerType, slots);
 
     this.itemsPlaced(frame, data, items, element);
     this.dropping(frame, array);
@@ -149,17 +146,16 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const params = [kPointerType, kIntType];
     const opening = this.ir.declare(kArrayUnshift, kPointerType, params);
     const count = this.ir.integer(kIntType, `${items.length}`);
-    const data = made.call(opening, [array.value, count]);
+    const data = frame.made.call(opening, [array.value, count]);
 
     this.itemsPlaced(frame, data, items, element);
 
     const lengthField = this.arrayField(frame, array.value, kArrayLengthField);
-    const length = made.load(kFlagType, lengthField);
-    const value = made.cast(IrOpcode.ZExt, length, kIntType);
+    const length = frame.made.load(kFlagType, lengthField);
+    const value = frame.made.cast(IrOpcode.ZExt, length, kIntType);
     const tz = this.store.integer(64, false);
 
     this.dropping(frame, array);
@@ -178,12 +174,11 @@ partial class Lowering {
       return false;
     }
 
-    const made = frame.made;
-    const array = made.load(kPointerType, place.pointer);
+    const array = frame.made.load(kPointerType, place.pointer);
     const params = [kPointerType, kPointerType];
     const appending = this.ir.declare(kArrayAppend, kVoidType, params);
 
-    made.call(appending, [array, part.value]);
+    frame.made.call(appending, [array, part.value]);
     this.dropping(frame, part);
 
     return true;

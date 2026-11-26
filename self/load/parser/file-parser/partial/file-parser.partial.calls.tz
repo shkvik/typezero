@@ -54,7 +54,7 @@ partial class FileParser {
     return index;
   }
 
-  private isPropertyName(): boolean {
+  private readonly isPropertyName(): boolean {
     const token = this.cursor.peek();
 
     return (
@@ -67,10 +67,10 @@ partial class FileParser {
     let optionalChain = false;
 
     while (true) {
-      const attached =
-        this.cursor.is(TokenKind.Less) &&
-        this.attachTypeArguments(expr, optionalChain);
-      if (attached) {
+      const attached = this.withTypeArguments(expr, optionalChain);
+      if (attached != undefined) {
+        expr = attached;
+
         continue;
       }
 
@@ -202,30 +202,58 @@ partial class FileParser {
     };
   }
 
-  private attachTypeArguments(expr: Expr, optionalChain: boolean): boolean {
+  private withTypeArguments(expr: Expr, optionalChain: boolean): Expr | undefined {
+    if (!this.cursor.is(TokenKind.Less)) {
+      return undefined;
+    }
     if (expr.kind == ExprKind.Name && !optionalChain) {
-      return this.attachTo(expr, false);
+      return this.nameWithTypeArguments(expr);
     }
     if (expr.kind == ExprKind.Member) {
-      return this.attachTo(expr, true);
+      return this.memberWithTypeArguments(expr);
     }
 
-    return false;
+    return undefined;
   }
 
-  private attachTo(expr: NameExpr | MemberExpr, callOnly: boolean): boolean {
+  private nameWithTypeArguments(expr: NameExpr): Expr | undefined {
     if (expr.typeArgs.length > 0) {
-      return false;
+      return undefined;
     }
 
-    const args = this.tryTypeArguments(callOnly);
-    if (args == undefined) {
-      return false;
+    const typeArgs = this.tryTypeArguments(false);
+    if (typeArgs == undefined) {
+      return undefined;
     }
 
-    expr.typeArgs = args;
+    return {
+      kind: ExprKind.Name,
+      loc: expr.loc,
+      name: expr.name,
+      known: expr.known,
+      typeArgs,
+    };
+  }
 
-    return true;
+  private memberWithTypeArguments(expr: MemberExpr): Expr | undefined {
+    if (expr.typeArgs.length > 0) {
+      return undefined;
+    }
+
+    const typeArgs = this.tryTypeArguments(true);
+    if (typeArgs == undefined) {
+      return undefined;
+    }
+
+    return {
+      kind: ExprKind.Member,
+      loc: expr.loc,
+      object: expr.object,
+      name: expr.name,
+      known: expr.known,
+      optional: expr.optional,
+      typeArgs,
+    };
   }
 
   private taggedTemplate(tag: Expr, optional: boolean): Expr {
@@ -275,7 +303,7 @@ partial class FileParser {
     };
   }
 
-  private isStringRaw(tag: Expr): boolean {
+  private readonly isStringRaw(tag: Expr): boolean {
     if (tag.kind != ExprKind.Member) {
       return false;
     }
@@ -435,7 +463,7 @@ partial class FileParser {
     return this.plainLink(expr, optionalChain);
   }
 
-  private newPathAhead(): boolean {
+  private readonly newPathAhead(): boolean {
     const token = this.cursor.peek();
 
     switch (token.kind) {

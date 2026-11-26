@@ -14,7 +14,7 @@ import {
 } from "../../library-rules/const/library-rules.const.tz";
 
 partial class ExpressionTypes {
-  private printVoidCheck(expr: CallExpr, module: int): void {
+  private readonly printVoidCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Member || !kPrintNames.includes(callee.name)) {
       return;
@@ -39,7 +39,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private printSpreadCheck(value: Expr, module: int): void {
+  private readonly printSpreadCheck(value: Expr, module: int): void {
     const given = this.peekType(value, module);
     const base = this.types.definedType(given);
     const isList =
@@ -54,7 +54,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private performanceRead(expr: MemberExpr, module: int): Type | undefined {
+  private readonly performanceRead(expr: MemberExpr, module: int): Type | undefined {
     const isPerformance = this.isGlobalNamed(
       expr.object,
       kPerformanceName,
@@ -69,7 +69,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private performanceCallCheck(expr: CallExpr, module: int): boolean {
+  private readonly performanceCallCheck(expr: CallExpr, module: int): boolean {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Member) {
       return false;
@@ -85,7 +85,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private isGlobalNamed(object: Expr, name: string, module: int): boolean {
+  private readonly isGlobalNamed(object: Expr, name: string, module: int): boolean {
     return (
       object.kind == ExprKind.Name &&
       object.name == name &&
@@ -93,7 +93,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private isJsonKnownCheck(expr: CallExpr, module: int): void {
+  private readonly isJsonKnownCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     const value = expr.args[0]?.expr;
     if (callee.kind != ExprKind.Member || callee.name != "isJson") {
@@ -124,7 +124,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private jsonAlreadyHint(isJson: boolean): string {
+  private readonly jsonAlreadyHint(isJson: boolean): string {
     if (isJson) {
       return ", and it is a Json already";
     }

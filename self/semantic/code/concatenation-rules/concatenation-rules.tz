@@ -37,9 +37,9 @@ export class ConcatenationRules {
 
   public constructor(
     text: TypeText,
-    relation: TypeRelation,
-    types: TypeQuestions,
-    sources: SourceTexts,
+    relation: Own<TypeRelation>,
+    types: Own<TypeQuestions>,
+    sources: Own<SourceTexts>,
   ) {
     this.text = text;
     this.relation = relation;
@@ -47,7 +47,7 @@ export class ConcatenationRules {
     this.sources = sources;
   }
 
-  public textAnswer(type: Type, base: Type): Finding | undefined {
+  public readonly textAnswer(type: Type, base: Type): Finding | undefined {
     const code = this.textProblem(type, base);
     if (code == undefined) {
       return undefined;
@@ -58,8 +58,8 @@ export class ConcatenationRules {
     return { code, details };
   }
 
-  public mixedAnswer(
-    links: ConcatLink[],
+  public readonly mixedAnswer(
+    links: Read<ConcatLink[]>,
     module: int,
   ): SourceError | undefined {
     const mixed = links.find((link) => this.isMixing(link.left, link.right));
@@ -92,7 +92,7 @@ export class ConcatenationRules {
     return { code: Code.MixedConcatTemplate, loc, details };
   }
 
-  private textProblem(type: Type, base: Type): Code | undefined {
+  private readonly textProblem(type: Type, base: Type): Code | undefined {
     if (this.types.holdsKind(type, TypeKind.Function)) {
       return Code.FunctionToText;
     }
@@ -124,7 +124,7 @@ export class ConcatenationRules {
     return undefined;
   }
 
-  private textDetails(code: Code, type: Type, base: Type): Details {
+  private readonly textDetails(code: Code, type: Type, base: Type): Details {
     if (code == Code.DictToText && base.kind == TypeKind.Dict) {
       const dict = base.dict;
       const row = kDictTexts.find((one) => one.dict == dict);
@@ -143,7 +143,7 @@ export class ConcatenationRules {
     return { first, second };
   }
 
-  private textMember(base: Type): Type | undefined {
+  private readonly textMember(base: Type): Type | undefined {
     if (base.kind != TypeKind.Union || !this.relation.isTagged(base.parts)) {
       return undefined;
     }
@@ -151,7 +151,7 @@ export class ConcatenationRules {
     return base.parts.find((part) => this.isHeldMember(part));
   }
 
-  private isHeldMember(part: Type): boolean {
+  private readonly isHeldMember(part: Type): boolean {
     const isSpecial = this.types.isDate(part) || this.types.isRegExp(part);
     if (this.types.isObjectKind(part) && !isSpecial) {
       return true;
@@ -167,22 +167,22 @@ export class ConcatenationRules {
     }
   }
 
-  private isMixing(left: Type, right: Type): boolean {
+  private readonly isMixing(left: Type, right: Type): boolean {
     const isLeftText = left.kind == TypeKind.String && this.joinsAsText(right);
     const isRightText = right.kind == TypeKind.String && this.joinsAsText(left);
 
     return isLeftText || isRightText;
   }
 
-  private joinsAsText(type: Type): boolean {
+  private readonly joinsAsText(type: Type): boolean {
     const base = this.types.definedType(type);
 
     return this.types.isNumberLike(base) || base.kind == TypeKind.Boolean;
   }
 
-  private concatParts(
+  private readonly concatParts(
     root: ConcatLink,
-    links: ConcatLink[],
+    links: Read<ConcatLink[]>,
     module: int,
   ): ConcatPart[] {
     const chain: ConcatLink[] = [root];
@@ -217,9 +217,9 @@ export class ConcatenationRules {
     return parts;
   }
 
-  private linkBelow(
+  private readonly linkBelow(
     link: ConcatLink,
-    links: ConcatLink[],
+    links: Read<ConcatLink[]>,
   ): ConcatLink | undefined {
     const left = link.binary.lhs;
 
@@ -228,7 +228,7 @@ export class ConcatenationRules {
     );
   }
 
-  private concatTemplate(parts: ConcatPart[]): TemplateText {
+  private readonly concatTemplate(parts: Read<ConcatPart[]>): TemplateText {
     let text = kBacktick;
     let values = 0;
     let only = "";
@@ -258,7 +258,7 @@ export class ConcatenationRules {
     return { text: closed, only };
   }
 
-  private templatePiece(part: ConcatPart): TemplatePiece {
+  private readonly templatePiece(part: ConcatPart): TemplatePiece {
     const text = part.text;
     const head = text.slice(0, 1);
     const tail = text.slice(text.length - 1);
@@ -278,7 +278,7 @@ export class ConcatenationRules {
     return { text: kOpenValue + value + kCloseValue, value };
   }
 
-  private escapedBody(text: string): string {
+  private readonly escapedBody(text: string): string {
     const body = text.slice(1, text.length - 1);
     let escaped = "";
     let index = 0;
@@ -306,7 +306,7 @@ export class ConcatenationRules {
     return escaped;
   }
 
-  private sumHint(parts: ConcatPart[]): string {
+  private readonly sumHint(parts: Read<ConcatPart[]>): string {
     const first = parts[0];
     const second = parts[1];
     if (parts.length != 2 || first == undefined || second == undefined) {
@@ -322,7 +322,7 @@ export class ConcatenationRules {
     return "";
   }
 
-  private isTextValue(part: ConcatPart): boolean {
+  private readonly isTextValue(part: ConcatPart): boolean {
     const kind = part.expr.kind;
     const isWritten = kind == ExprKind.StringLit || kind == ExprKind.Template;
 

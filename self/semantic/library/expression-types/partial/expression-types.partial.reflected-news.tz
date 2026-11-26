@@ -19,7 +19,7 @@ import {
 } from "../../library-rules/const/library-rules.const.tz";
 
 partial class ExpressionTypes {
-  private constructorCastNote(given: Type, wanted: Type): void {
+  private readonly constructorCastNote(given: Type, wanted: Type): void {
     const goal = this.types.definedType(wanted);
     if (given.kind != TypeKind.Class || goal.kind != TypeKind.Class) {
       return;
@@ -48,21 +48,20 @@ partial class ExpressionTypes {
     this.constructorCasts.push({ decl, instance, target });
   }
 
-  private constructorWideningNote(from: Type, to: Type): void {
+  private readonly constructorWideningNote(from: Type, to: Type): void {
     if (from == to) {
       return;
     }
 
-    const list = this.constructorWidenings.get(from.id) ?? [];
+    const list = this.constructorWidenings.getOrInsert(from.id, []);
     if (list.includes(to)) {
       return;
     }
 
     list.push(to);
-    this.constructorWidenings.set(from.id, list);
   }
 
-  private reflectedNewNote(expr: NewExpr, made: Type, module: int): void {
+  private readonly reflectedNewNote(expr: NewExpr, made: Type, module: int): void {
     const exprs = expr.args.map((arg) => arg.expr);
     const args = exprs.map((one) => this.peekType(one, module));
     const loc = expr.loc;
@@ -70,7 +69,7 @@ partial class ExpressionTypes {
     this.reflectedNews.push({ loc, made, exprs, args, module });
   }
 
-  private reflectedNewsCheck(module: int): void {
+  private readonly reflectedNewsCheck(module: int): void {
     for (const reflected of this.reflectedNews) {
       if (reflected.module == module) {
         this.reflectedNewCheck(reflected);
@@ -78,7 +77,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private reflectedNewCheck(reflected: ReflectedNew): void {
+  private readonly reflectedNewCheck(reflected: Read<ReflectedNew>): void {
     const reached = this.reachedConstructors(reflected.made);
 
     for (const cast of this.constructorCasts) {
@@ -102,7 +101,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private reachedConstructors(made: Type): Type[] {
+  private readonly reachedConstructors(made: Type): Type[] {
     const reached: Type[] = [];
     const waiting: Type[] = [];
 
@@ -124,7 +123,7 @@ partial class ExpressionTypes {
     return reaching;
   }
 
-  private isReaching(start: Type, made: Type): boolean {
+  private readonly isReaching(start: Type, made: Type): boolean {
     const seen: Type[] = [start];
     const waiting: Type[] = [start];
 
@@ -148,10 +147,10 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private constructibleReason(
+  private readonly constructibleReason(
     decl: ClassDecl,
     instance: InstanceType,
-    reflected: ReflectedNew,
+    reflected: Read<ReflectedNew>,
   ): string {
     if (decl.isAbstract) {
       return kAbstractReason;
@@ -194,7 +193,7 @@ partial class ExpressionTypes {
     return `${kTakesReason}${this.takesText(targets)}`;
   }
 
-  private noConstructorReason(count: int): string {
+  private readonly noConstructorReason(count: int): string {
     if (count == 0) {
       return "";
     }
@@ -202,7 +201,7 @@ partial class ExpressionTypes {
     return kNoArgumentsReason;
   }
 
-  private isConstructing(target: CallTarget, reflected: ReflectedNew): boolean {
+  private readonly isConstructing(target: Read<CallTarget>, reflected: Read<ReflectedNew>): boolean {
     const args = reflected.args;
     const least = this.calls.leastArguments(target);
     const isTooMany = !target.rest && args.length > target.params.length;
@@ -224,7 +223,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private isExactConstructor(target: CallTarget, args: Type[]): boolean {
+  private readonly isExactConstructor(target: Read<CallTarget>, args: Read<Type[]>): boolean {
     return args.every((arg, index) => {
       const param = this.constructorParam(target, index);
 
@@ -232,14 +231,14 @@ partial class ExpressionTypes {
     });
   }
 
-  private constructorParam(target: CallTarget, index: int): Type | undefined {
+  private readonly constructorParam(target: Read<CallTarget>, index: int): Type | undefined {
     const last = target.params[target.params.length - 1];
     const param = target.params[index] ?? last;
 
     return param?.type;
   }
 
-  private takesText(targets: CallTarget[]): string {
+  private readonly takesText(targets: Read<CallTarget[]>): string {
     const shown = targets.map((target) => {
       const params = target.params.map((param) => this.text.of(param.type));
 

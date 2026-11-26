@@ -58,7 +58,7 @@ partial class Lowering {
     return isHandle;
   }
 
-  private isCString(type: Type): boolean {
+  private readonly isCString(type: Type): boolean {
     const opened = this.program.modules[this.typeModule(type)];
 
     return (
@@ -69,7 +69,7 @@ partial class Lowering {
     );
   }
 
-  private typeModule(type: Type): int {
+  private readonly typeModule(type: Type): int {
     if (type.kind != TypeKind.Instance) {
       return -1;
     }
@@ -77,7 +77,7 @@ partial class Lowering {
     return type.module;
   }
 
-  private isBytesType(type: Type): boolean {
+  private readonly isBytesType(type: Type): boolean {
     if (type.kind != TypeKind.Instance) {
       return false;
     }
@@ -91,14 +91,13 @@ partial class Lowering {
     );
   }
 
-  private bytesData(frame: Frame, bytes: LLVMValue): LLVMValue {
-    const made = frame.made;
-    const field = made.field(kBytesStruct, bytes, kBytesDataField);
+  private readonly bytesData(frame: Read<Frame>, bytes: LLVMValue): LLVMValue {
+    const field = frame.made.field(kBytesStruct, bytes, kBytesDataField);
 
-    return made.load(kPointerType, field);
+    return frame.made.load(kPointerType, field);
   }
 
-  private declaredFunction(module: int, loc: int): FunctionDecl | undefined {
+  private readonly declaredFunction(module: int, loc: int): FunctionDecl | undefined {
     const opened = this.program.modules[module];
     if (opened == undefined) {
       return undefined;
@@ -138,7 +137,7 @@ partial class Lowering {
     return { type: kPointerType, value: global, tz };
   }
 
-  private definedOf(type: Type): Type {
+  private readonly definedOf(type: Type): Type {
     const inner = this.optionalInner(type);
     if (inner == undefined) {
       return type;
@@ -160,9 +159,8 @@ partial class Lowering {
     frame: Frame,
     call: CallExpr,
     fn: FunctionDecl,
-    shape: FunctionShape,
+    shape: Read<FunctionShape>,
   ): IrValue | undefined {
-    const made = frame.made;
     const given: IrValue[] = [];
     const args: LLVMValue[] = [];
     const params: string[] = [];
@@ -189,7 +187,7 @@ partial class Lowering {
     const result = shape.result;
     const returned = this.foreignType(result);
     const callee = this.ir.declare(fn.name, returned, params);
-    const value = made.call(callee, args);
+    const value = frame.made.call(callee, args);
 
     for (const one of given) {
       this.dropping(frame, one);
@@ -231,20 +229,19 @@ partial class Lowering {
     return value;
   }
 
-  private foreignValue(frame: Frame, value: IrValue): LLVMValue {
-    const made = frame.made;
+  private readonly foreignValue(frame: Read<Frame>, value: IrValue): LLVMValue {
     const type = this.definedOf(value.tz);
     if (this.isCString(type)) {
       const none = this.ir.zero(kPointerType);
-      const isAbsent = made.integerCompare(
+      const isAbsent = frame.made.integerCompare(
         IrIntPredicate.Equal,
         value.value,
         none,
       );
       const offset = this.ir.integer(kIntType, `${kCStringTextOffset}`);
-      const text = made.element(kByteType, value.value, offset);
+      const text = frame.made.element(kByteType, value.value, offset);
 
-      return made.select(isAbsent, none, text);
+      return frame.made.select(isAbsent, none, text);
     }
     if (type.kind == TypeKind.Array) {
       return this.arrayData(frame, value.value);
@@ -256,7 +253,7 @@ partial class Lowering {
     return value.value;
   }
 
-  private foreignType(type: Type): string {
+  private readonly foreignType(type: Type): string {
     const plain = this.widened(type);
 
     switch (plain.kind) {
@@ -274,7 +271,7 @@ partial class Lowering {
   }
 
   private foreignResult(
-    frame: Frame,
+    frame: Read<Frame>,
     fn: FunctionDecl,
     result: Type,
     value: LLVMValue,
@@ -298,57 +295,55 @@ partial class Lowering {
     return { type, value, tz: result, owned: true };
   }
 
-  private cstringCopied(
-    frame: Frame,
+  private readonly cstringCopied(
+    frame: Read<Frame>,
     value: LLVMValue,
     isOptional: boolean,
     fn: FunctionDecl,
   ): LLVMValue {
-    const made = frame.made;
     const params = [kPointerType];
     const copying = this.ir.declare(kCStringCopy, kPointerType, params);
     if (!isOptional) {
       this.notNullChecked(frame, value, fn);
 
-      return made.call(copying, [value]);
+      return frame.made.call(copying, [value]);
     }
 
     const none = this.ir.zero(kPointerType);
-    const isAbsent = made.integerCompare(IrIntPredicate.Equal, value, none);
-    const before = made.currentBlock();
-    const copy = made.block("foreign.copy");
-    const end = made.block("foreign.copied");
+    const isAbsent = frame.made.integerCompare(IrIntPredicate.Equal, value, none);
+    const before = frame.made.currentBlock();
+    const copy = frame.made.block("foreign.copy");
+    const end = frame.made.block("foreign.copied");
 
-    made.conditionalBranch(isAbsent, end, copy);
-    made.open(copy);
+    frame.made.conditionalBranch(isAbsent, end, copy);
+    frame.made.open(copy);
 
-    const copied = made.call(copying, [value]);
-    const copyEnd = made.currentBlock();
+    const copied = frame.made.call(copying, [value]);
+    const copyEnd = frame.made.currentBlock();
 
-    made.branch(end);
-    made.open(end);
+    frame.made.branch(end);
+    frame.made.open(end);
 
-    return made.phi(kPointerType, [none, copied], [before, copyEnd]);
+    return frame.made.phi(kPointerType, [none, copied], [before, copyEnd]);
   }
 
-  private notNullChecked(
-    frame: Frame,
+  private readonly notNullChecked(
+    frame: Read<Frame>,
     value: LLVMValue,
     fn: FunctionDecl,
   ): void {
-    const made = frame.made;
     const none = this.ir.zero(kPointerType);
-    const isNull = made.integerCompare(IrIntPredicate.Equal, value, none);
-    const bad = made.block("foreign.null");
-    const good = made.block("foreign.value");
+    const isNull = frame.made.integerCompare(IrIntPredicate.Equal, value, none);
+    const bad = frame.made.block("foreign.null");
+    const good = frame.made.block("foreign.value");
 
-    made.conditionalBranch(isNull, bad, good);
-    made.open(bad);
+    frame.made.conditionalBranch(isNull, bad, good);
+    frame.made.open(bad);
 
     const message = `${fn.name}${kForeignNullText}`;
 
     this.panic(frame, message);
-    made.unreachable();
-    made.open(good);
+    frame.made.unreachable();
+    frame.made.open(good);
   }
 }

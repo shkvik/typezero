@@ -17,13 +17,13 @@ import { LogicSide } from "../../types/expression-types.types.tz";
 import { TruthUse } from "../../../../flow/truth-rules/types/truth-rules.types.tz";
 
 partial class ExpressionTypes {
-  private notTyped(expr: UnaryExpr, module: int): Type {
+  private readonly notTyped(expr: UnaryExpr, module: int): Type {
     this.branchCheck(expr.operand, TruthUse.Not, module);
 
     return this.store.plain(TypeKind.Boolean);
   }
 
-  private branchCheck(expr: Expr, use: TruthUse, module: int): void {
+  private readonly branchCheck(expr: Expr, use: TruthUse, module: int): void {
     if (this.shapes.isLogical(expr) && expr.kind == ExprKind.Binary) {
       const isAnd = expr.op == BinaryOp.LogAnd;
 
@@ -59,7 +59,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private logicalTyped(
+  private readonly logicalTyped(
     expr: BinaryExpr,
     wanted: Type | undefined,
     side: LogicSide,
@@ -95,7 +95,7 @@ partial class ExpressionTypes {
     return this.logicalResult(expr, left, right, isAnd, module);
   }
 
-  private testedValue(
+  private readonly testedValue(
     expr: Expr,
     expected: Type | undefined,
     use: TruthUse,
@@ -113,7 +113,7 @@ partial class ExpressionTypes {
     return this.typed(expr, expected, module);
   }
 
-  private logicalRight(
+  private readonly logicalRight(
     expr: BinaryExpr,
     hint: Type | undefined,
     side: LogicSide,
@@ -126,7 +126,7 @@ partial class ExpressionTypes {
     return this.testedValue(expr.rhs, hint, TruthUse.Condition, module);
   }
 
-  private logicalResult(
+  private readonly logicalResult(
     expr: BinaryExpr,
     left: Type,
     right: Type,
@@ -140,7 +140,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private reportRightVoid(expr: BinaryExpr, isAnd: boolean, module: int): Type {
+  private readonly reportRightVoid(expr: BinaryExpr, isAnd: boolean, module: int): Type {
     const checked = this.logic.rightVoid(expr, isAnd);
 
     this.reportFound(module, checked.error);
@@ -148,7 +148,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private conditionalTyped(
+  private readonly conditionalTyped(
     expr: ConditionalExpr,
     wanted: Type | undefined,
     module: int,
@@ -178,7 +178,7 @@ partial class ExpressionTypes {
     return this.joinedBranches(expr, thenType, elseType, start, module);
   }
 
-  private branchTyped(
+  private readonly branchTyped(
     expr: ConditionalExpr,
     isThen: boolean,
     wanted: Type | undefined,
@@ -194,7 +194,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private joinedBranches(
+  private readonly joinedBranches(
     expr: ConditionalExpr,
     thenType: Type,
     elseType: Type,
@@ -238,7 +238,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private failedBranches(thenType: Type, elseType: Type, start: int): Type {
+  private readonly failedBranches(thenType: Type, elseType: Type, start: int): Type {
     const isPending = this.recursions.length > start;
     const isThenBroken = thenType.kind == TypeKind.Error;
     const isElseBroken = elseType.kind == TypeKind.Error;
@@ -252,7 +252,7 @@ partial class ExpressionTypes {
     return thenType;
   }
 
-  private adaptedBranch(
+  private readonly adaptedBranch(
     isAdapting: boolean,
     branch: Expr,
     type: Type,

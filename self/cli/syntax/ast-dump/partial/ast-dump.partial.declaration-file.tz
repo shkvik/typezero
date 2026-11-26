@@ -41,7 +41,7 @@ partial class Dumper {
     this.back();
   }
 
-  private declaredFormText(form: DeclaredMemberForm): string {
+  private readonly declaredFormText(form: Read<DeclaredMemberForm>): string {
     if (form.kind == DeclaredMemberKind.Field) {
       const isReadonly = this.flag(form.readonly);
       const optional = this.flag(form.optional);
@@ -54,7 +54,7 @@ partial class Dumper {
     return `${word} tp=${form.typeParams.length} params=${form.params.length}`;
   }
 
-  private signatureWord(kind: DeclaredMemberKind): string {
+  private readonly signatureWord(kind: DeclaredMemberKind): string {
     if (kind == DeclaredMemberKind.Constructor) {
       return "constructor";
     }
@@ -62,7 +62,7 @@ partial class Dumper {
     return "method";
   }
 
-  private dumpDeclaredSignature(form: DeclaredMemberForm): void {
+  private dumpDeclaredSignature(form: Read<DeclaredMemberForm>): void {
     if (form.kind == DeclaredMemberKind.Field) {
       return;
     }

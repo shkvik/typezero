@@ -21,7 +21,7 @@ export class LibraryModules {
     }
   }
 
-  public imported(
+  public readonly imported(
     spec: string,
     fromLibrary: boolean,
   ): LibraryModule | undefined {
@@ -36,27 +36,27 @@ export class LibraryModules {
     return module;
   }
 
-  public named(name: string): LibraryModule | undefined {
+  public readonly named(name: string): LibraryModule | undefined {
     return kLibraryModules.find((one) => one.name == name);
   }
 
-  public globalModules(): LibraryModule[] {
+  public readonly globalModules(): LibraryModule[] {
     return kLibraryModules.filter((one) => one.access == LibraryAccess.Global);
   }
 
-  public global(name: string): LibraryGlobal | undefined {
+  public readonly global(name: string): LibraryGlobal | undefined {
     return this.globalsByName.get(name);
   }
 
-  public globals(): LibraryGlobal[] {
+  public readonly globals(): LibraryGlobal[] {
     return kLibraryGlobals;
   }
 
-  public members(): LibraryMember[] {
+  public readonly members(): LibraryMember[] {
     return kLibraryMembers;
   }
 
-  public hasMember(owner: string, name: string): boolean {
+  public readonly hasMember(owner: string, name: string): boolean {
     return kLibraryMembers.some(
       (one) => one.owner == owner && one.name == name,
     );

@@ -25,10 +25,10 @@ import {
 import { kConstructorName } from "../../../code/object-rules/const/object-rules.const.tz";
 
 partial class ExpressionTypes {
-  private genericMethodCall(
+  private readonly genericMethodCall(
     expr: CallExpr,
     member: MemberExpr,
-    entry: ClassMemberEntry,
+    entry: Read<ClassMemberEntry>,
     method: FunctionDecl,
     wanted: Type | undefined,
     module: int,
@@ -66,8 +66,8 @@ partial class ExpressionTypes {
     return this.genericCall(generic, expr.args, wanted, module);
   }
 
-  private genericMethodShape(
-    entry: ClassMemberEntry,
+  private readonly genericMethodShape(
+    entry: Read<ClassMemberEntry>,
     method: FunctionDecl,
   ): FunctionShape | undefined {
     const owner = entry.owner;
@@ -99,7 +99,7 @@ partial class ExpressionTypes {
     return type.shape;
   }
 
-  private genericNew(
+  private readonly genericNew(
     expr: NewExpr,
     decl: ClassDecl,
     home: int,
@@ -169,7 +169,7 @@ partial class ExpressionTypes {
     return this.genericCall(generic, expr.args, wanted, module);
   }
 
-  private copyVariantsCheck(
+  private readonly copyVariantsCheck(
     expr: NewExpr,
     made: Type,
     decl: ClassDecl,
@@ -198,7 +198,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private copyVariantsFinding(
+  private readonly copyVariantsFinding(
     made: InstanceType,
     decl: ClassDecl,
   ): Finding | undefined {
@@ -212,10 +212,10 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private copyPairsFinding(
+  private readonly copyPairsFinding(
     made: InstanceType,
     decl: ClassDecl,
-    variants: FunctionDecl[],
+    variants: Read<FunctionDecl[]>,
   ): Finding | undefined {
     if (variants.length < 2) {
       return undefined;
@@ -272,7 +272,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private copiedMethodType(
+  private readonly copiedMethodType(
     made: InstanceType,
     decl: ClassDecl,
     method: FunctionDecl,
@@ -299,8 +299,8 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private makerTarget(
-    maker: ClassMemberEntry,
+  private readonly makerTarget(
+    maker: Read<ClassMemberEntry>,
     chosen: FunctionDecl | undefined,
     loc: int,
   ): CallTarget | undefined {

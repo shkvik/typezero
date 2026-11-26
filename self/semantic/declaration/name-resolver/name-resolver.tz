@@ -8,24 +8,24 @@ import { ModuleNames } from "../../../program/module-names/types/module-names.ty
 import { Module, Program } from "../../../program/module/types/module.types.tz";
 import { ModuleScopes } from "../../../program/scopes/types/scopes.types.tz";
 import { ScopeTraversal } from "../scope-traversal/scope-traversal.tz";
-import { GlobalScope } from "./types/name-resolver.types.tz";
+import { GlobalDraft, GlobalScope } from "./types/name-resolver.types.tz";
 
 export class NameResolver {
   private readonly program: Program;
   private readonly names: ModuleNames[];
 
-  public constructor(program: Program, names: ModuleNames[]) {
+  public constructor(program: Own<Program>, names: Own<ModuleNames[]>) {
     this.program = program;
     this.names = names;
   }
 
-  public run(): ModuleScopes[] {
+  public readonly run(): ModuleScopes[] {
     const globals = this.globalScope();
     const partMethods = this.partMethods();
     const resolved: ModuleScopes[] = [];
 
     for (const names of this.names) {
-      const traversal = new ScopeTraversal(names, globals, partMethods);
+      const traversal = new ScopeTraversal(names, globals, partMethods.slice());
       const scopes = traversal.run();
 
       resolved.push(scopes);
@@ -34,8 +34,8 @@ export class NameResolver {
     return resolved;
   }
 
-  private globalScope(): GlobalScope {
-    const globals: GlobalScope = {
+  private readonly globalScope(): GlobalScope {
+    const globals: GlobalDraft = {
       values: new Set<string>(),
       types: new Set<string>(),
       namespaces: new Map<string, Set<string>>(),
@@ -56,10 +56,14 @@ export class NameResolver {
       }
     }
 
-    return globals;
+    return {
+      values: globals.values,
+      types: globals.types,
+      namespaces: globals.namespaces,
+    };
   }
 
-  private addDeclared(names: GlobalScope, module: Module): void {
+  private readonly addDeclared(names: GlobalDraft, module: Module): void {
     for (const item of module.file.items) {
       this.addGlobal(names, item);
     }
@@ -70,12 +74,12 @@ export class NameResolver {
     }
   }
 
-  private addNamespace(
-    globals: GlobalScope,
+  private readonly addNamespace(
+    globals: GlobalDraft,
     module: Module,
     word: string,
   ): void {
-    const inside: GlobalScope = {
+    const inside: GlobalDraft = {
       values: new Set<string>(),
       types: new Set<string>(),
       namespaces: new Map<string, Set<string>>(),
@@ -89,7 +93,7 @@ export class NameResolver {
     }
   }
 
-  private addGlobal(globals: GlobalScope, item: Stmt): void {
+  private readonly addGlobal(globals: GlobalDraft, item: Stmt): void {
     switch (item.kind) {
       case StmtKind.VarDecl:
         for (const decl of item.decls) {
@@ -116,7 +120,7 @@ export class NameResolver {
     }
   }
 
-  private partMethods(): FunctionDecl[] {
+  private readonly partMethods(): FunctionDecl[] {
     const methods: FunctionDecl[] = [];
 
     for (const module of this.program.modules) {

@@ -13,7 +13,7 @@ import {
 import { kLargestInt } from "../../../integer-math/const/integer-math.const.tz";
 
 partial class ExpressionTypes {
-  public enumText(expr: Expr, module: int): string | undefined {
+  public readonly enumText(expr: Expr, module: int): string | undefined {
     if (expr.kind != ExprKind.Member) {
       return undefined;
     }
@@ -26,7 +26,7 @@ partial class ExpressionTypes {
     return literal.text;
   }
 
-  public enumNumber(expr: Expr, module: int): decimal | undefined {
+  public readonly enumNumber(expr: Expr, module: int): decimal | undefined {
     if (expr.kind != ExprKind.Member) {
       return undefined;
     }
@@ -34,7 +34,7 @@ partial class ExpressionTypes {
     return this.enumConstant(expr, module);
   }
 
-  private intConstant(
+  private readonly intConstant(
     expr: Expr,
     type: Type,
     module: int,
@@ -47,7 +47,7 @@ partial class ExpressionTypes {
     return value;
   }
 
-  private rawConstant(
+  private readonly rawConstant(
     expr: Expr,
     type: Type,
     module: int,
@@ -64,7 +64,7 @@ partial class ExpressionTypes {
     return value;
   }
 
-  private plainConstant(expr: Expr, module: int): decimal | undefined {
+  private readonly plainConstant(expr: Expr, module: int): decimal | undefined {
     switch (expr.kind) {
       case ExprKind.IntLit:
         return expr.value.toDecimal();
@@ -81,7 +81,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private unaryConstant(expr: UnaryExpr): decimal | undefined {
+  private readonly unaryConstant(expr: UnaryExpr): decimal | undefined {
     const operand = expr.operand;
     if (operand.kind != ExprKind.IntLit) {
       return this.answers.foldedOf(expr);
@@ -99,7 +99,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private isWholeTree(expr: Expr, module: int): boolean {
+  private readonly isWholeTree(expr: Expr, module: int): boolean {
     switch (expr.kind) {
       case ExprKind.IntLit:
         return true;
@@ -122,7 +122,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private literalTarget(
+  private readonly literalTarget(
     expr: Expr,
     type: Type,
     to: Type,
@@ -160,7 +160,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private numberTarget(to: Type): Type | undefined {
+  private readonly numberTarget(to: Type): Type | undefined {
     const target = this.types.definedType(to);
     if (target.kind != TypeKind.Union) {
       return target;

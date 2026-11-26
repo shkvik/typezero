@@ -8,14 +8,18 @@ export enum JumpKind {
 
 export type ClassFrame = {
   readonly outer: int;
-  place: CapturePlace;
+  place: Cell<CapturePlace>;
   readonly isGeneric: boolean;
 };
 
+export type InternedClassFrame = Interned<ClassFrame>;
+
 export type JumpTarget = {
   readonly kind: JumpKind;
-  readonly labels: string[];
+  readonly labels: readonly string[];
 };
+
+export type InternedJumpTarget = Interned<JumpTarget>;
 
 export type KnownModuleRow = {
   readonly path: string;

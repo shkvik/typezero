@@ -12,7 +12,7 @@ import {
 import { Bound, Interval } from "./types/literal-ranges.types.tz";
 
 export class LiteralRanges {
-  public rangeIntervals(given: Type, target: Type): Interval[] {
+  public readonly rangeIntervals(given: Type, target: Type): Interval[] {
     const isWhole =
       given.kind == TypeKind.Literal && given.literal == LiteralKind.Int;
     if (!isWhole && !this.isWordInt(given)) {
@@ -22,7 +22,7 @@ export class LiteralRanges {
     return this.wholeIntervals(target);
   }
 
-  public isWordInt(type: Type): boolean {
+  public readonly isWordInt(type: Type): boolean {
     if (type.kind != TypeKind.Int) {
       return false;
     }
@@ -30,7 +30,7 @@ export class LiteralRanges {
     return type.bits == 64 && !type.unsigned && !type.wraps;
   }
 
-  public wholeIntervals(target: Type): Interval[] {
+  public readonly wholeIntervals(target: Type): Interval[] {
     if (target.kind != TypeKind.Union) {
       return [];
     }
@@ -54,15 +54,15 @@ export class LiteralRanges {
     return intervals;
   }
 
-  public rangeText(intervals: Interval[]): string {
+  public readonly rangeText(intervals: Read<Interval[]>): string {
     const texts = intervals.map((interval) => this.intervalText(interval));
 
     return texts.join(kIntervalSeparator);
   }
 
-  public rangeCheck(
+  public readonly rangeCheck(
     name: string,
-    intervals: Interval[],
+    intervals: Read<Interval[]>,
     target: string,
   ): string {
     if (target == kHttpStatusName) {
@@ -80,7 +80,7 @@ export class LiteralRanges {
     return `${name} >= ${low} && ${name} <= ${high}`;
   }
 
-  private widestInterval(intervals: Interval[]): Interval | undefined {
+  private readonly widestInterval(intervals: Read<Interval[]>): Interval | undefined {
     let widest: Interval | undefined = undefined;
 
     for (const interval of intervals) {
@@ -95,7 +95,7 @@ export class LiteralRanges {
     return widest;
   }
 
-  private wholeValue(part: Type): Bound | undefined {
+  private readonly wholeValue(part: Type): Bound | undefined {
     if (part.kind != TypeKind.Literal || part.literal != LiteralKind.Int) {
       return undefined;
     }
@@ -108,7 +108,7 @@ export class LiteralRanges {
     return { value: value.value, text: part.text };
   }
 
-  private intervalsOf(values: Bound[]): Interval[] {
+  private readonly intervalsOf(values: Bound[]): Interval[] {
     const intervals: Interval[] = [];
 
     values.sort((first, second) => this.order(first.value, second.value));
@@ -127,7 +127,7 @@ export class LiteralRanges {
     return intervals;
   }
 
-  private order(first: decimal, second: decimal): int {
+  private readonly order(first: decimal, second: decimal): int {
     if (first < second) {
       return -1;
     }
@@ -138,8 +138,11 @@ export class LiteralRanges {
     return 0;
   }
 
-  private intervalText(interval: Interval): string {
-    if (interval.low == interval.high) {
+  private readonly intervalText(interval: Read<Interval>): string {
+    const isPoint =
+      interval.low.value == interval.high.value &&
+      interval.low.text == interval.high.text;
+    if (isPoint) {
       return interval.low.text;
     }
 

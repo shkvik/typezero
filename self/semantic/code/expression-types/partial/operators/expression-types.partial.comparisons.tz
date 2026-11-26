@@ -18,7 +18,7 @@ import {
 } from "../../../../../program/type/types/type.types.tz";
 
 partial class ExpressionTypes {
-  private equalityTyped(expr: BinaryExpr, module: int): Type {
+  private readonly equalityTyped(expr: BinaryExpr, module: int): Type {
     const boolean = this.store.plain(TypeKind.Boolean);
     const isNull =
       this.isNullSide(expr.lhs, module) || this.isNullSide(expr.rhs, module);
@@ -40,7 +40,7 @@ partial class ExpressionTypes {
     return boolean;
   }
 
-  private equalOperands(
+  private readonly equalOperands(
     expr: BinaryExpr,
     pair: OperandPair,
     module: int,
@@ -109,7 +109,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private comparedOperands(expr: BinaryExpr, module: int): ComparedPair {
+  private readonly comparedOperands(expr: BinaryExpr, module: int): ComparedPair {
     const isLiteralLeft = this.comparisons.isComparedLiteral(expr.lhs);
     const isLiteralRight = this.comparisons.isComparedLiteral(expr.rhs);
     if (isLiteralLeft && !isLiteralRight) {
@@ -131,7 +131,7 @@ partial class ExpressionTypes {
     return { left, right };
   }
 
-  private comparedSide(
+  private readonly comparedSide(
     expr: Expr,
     hint: Type | undefined,
     module: int,
@@ -146,11 +146,11 @@ partial class ExpressionTypes {
     return { type, tested };
   }
 
-  private isNullSide(expr: Expr, module: int): boolean {
+  private readonly isNullSide(expr: Expr, module: int): boolean {
     return expr.kind == ExprKind.Name && this.isNullName(expr, module);
   }
 
-  private nullEquality(expr: BinaryExpr, module: int): void {
+  private readonly nullEquality(expr: BinaryExpr, module: int): void {
     const isLeftNull = this.isNullSide(expr.lhs, module);
     const isRightNull = this.isNullSide(expr.rhs, module);
     const nullSide = this.comparisons.nullOperand(isLeftNull, expr);
@@ -166,7 +166,7 @@ partial class ExpressionTypes {
     this.report(module, nullSide.loc, Code.NullNeverEqual, { first, other });
   }
 
-  private nullOther(
+  private readonly nullOther(
     isLeftNull: boolean,
     isRightNull: boolean,
     expr: BinaryExpr,
@@ -182,7 +182,7 @@ partial class ExpressionTypes {
     return this.typed(expr.lhs, undefined, module);
   }
 
-  private orderTyped(expr: BinaryExpr, module: int): Type {
+  private readonly orderTyped(expr: BinaryExpr, module: int): Type {
     const boolean = this.store.plain(TypeKind.Boolean);
     const sides = this.comparedOperands(expr, module);
     const written = sides.left.type;
@@ -204,7 +204,7 @@ partial class ExpressionTypes {
     return boolean;
   }
 
-  private orderOperands(
+  private readonly orderOperands(
     expr: BinaryExpr,
     pair: OperandPair,
     module: int,
@@ -243,7 +243,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private decimalComparison(
+  private readonly decimalComparison(
     expr: BinaryExpr,
     pair: OperandPair,
     module: int,
@@ -257,7 +257,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private nullishTyped(
+  private readonly nullishTyped(
     expr: BinaryExpr,
     wanted: Type | undefined,
     module: int,

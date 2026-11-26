@@ -33,7 +33,7 @@ export class BuildCommand {
   private readonly report: ProgramReport;
   private readonly store: TypeStore;
 
-  public constructor(args: string[]) {
+  public constructor(args: Own<string[]>) {
     this.args = args;
     this.report = new ProgramReport();
     this.store = new TypeStore();
@@ -93,7 +93,7 @@ export class BuildCommand {
     this.executableMade(ir, output, options.libraries);
   }
 
-  private optionsOf(): BuildOptions {
+  private readonly optionsOf(): BuildOptions {
     let entry: string | undefined = undefined;
     let output: string | undefined = undefined;
     const libraries: string[] = [];
@@ -125,7 +125,7 @@ export class BuildCommand {
     return { entry, output, libraries, isEmittingIr, isWrong };
   }
 
-  private outputOf(options: BuildOptions, entry: string): string {
+  private readonly outputOf(options: Read<BuildOptions>, entry: string): string {
     const given = options.output;
     if (given != undefined) {
       return given;
@@ -140,7 +140,7 @@ export class BuildCommand {
     return `${stem}${kExecutableExtension}`;
   }
 
-  private unloweredReport(program: Program, unlowered: Unlowered[]): void {
+  private unloweredReport(program: Program, unlowered: Read<Unlowered[]>): void {
     for (const one of unlowered) {
       const module = program.modules[one.module];
       if (module == undefined) {
@@ -166,7 +166,7 @@ export class BuildCommand {
   private executableMade(
     ir: IrModule,
     output: string,
-    libraries: string[],
+    libraries: Own<string[]>,
   ): void {
     const prefix = join(tmpdir(), kTemporaryPrefix);
     const folder = mkdtempSync(prefix);
@@ -207,7 +207,7 @@ export class BuildCommand {
   private linked(
     objectPath: string,
     output: string,
-    libraries: string[],
+    libraries: Own<string[]>,
   ): boolean {
     const linker = this.toolPath(kLinkerTool);
     const runtime = this.toolPath(kRuntimeLibrary);
@@ -217,13 +217,13 @@ export class BuildCommand {
     return this.toolRan(linker, args);
   }
 
-  private toolPath(name: string): string {
+  private readonly toolPath(name: string): string {
     const home = dirname(process.execPath);
 
     return join(home, name);
   }
 
-  private toolRan(path: string, args: string[]): boolean {
+  private toolRan(path: string, args: Read<string[]>): boolean {
     const ran = spawnSync(path, args, { encoding: "utf8" });
     if (ran.isErr()) {
       this.report.failure(

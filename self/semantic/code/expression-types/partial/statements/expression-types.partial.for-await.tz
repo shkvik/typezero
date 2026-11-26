@@ -15,7 +15,7 @@ import { kAsyncIteratorKey } from "../../../../types/type-questions/const/type-q
 import { ExpressionTypes } from "../../expression-types.tz";
 
 partial class ExpressionTypes {
-  private forAwaitCheck(statement: ForOfStmt, module: int): void {
+  private readonly forAwaitCheck(statement: ForOfStmt, module: int): void {
     if (statement.keys || this.modules.isLibraryModule(module)) {
       return;
     }
@@ -60,7 +60,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private asyncNextCall(
+  private readonly asyncNextCall(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -80,7 +80,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private asyncMethodCheck(
+  private readonly asyncMethodCheck(
     iterable: Expr,
     instance: InstanceType,
     module: int,
@@ -112,7 +112,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private awaitLoopItem(given: Type): Type {
+  private readonly awaitLoopItem(given: Type): Type {
     const base = this.types.definedType(given);
 
     switch (base.kind) {
@@ -127,7 +127,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private asyncInstanceItem(instance: InstanceType): Type {
+  private readonly asyncInstanceItem(instance: InstanceType): Type {
     const entry = this.classMember(instance, kAsyncIteratorKey).entry;
     const method = entry?.methods[0];
     if (entry == undefined || method == undefined) {
@@ -149,7 +149,7 @@ partial class ExpressionTypes {
     return result.shape.yielded;
   }
 
-  private awaitedItem(item: Type): Type {
+  private readonly awaitedItem(item: Type): Type {
     if (item.kind == TypeKind.Promise) {
       return item.value;
     }

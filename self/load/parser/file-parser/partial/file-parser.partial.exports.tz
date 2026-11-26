@@ -23,13 +23,13 @@ import {
 import { kExportNames } from "../const/file-parser.const.modules.tz";
 
 partial class FileParser {
-  private partialClassAhead(): boolean {
+  private readonly partialClassAhead(): boolean {
     const next = this.cursor.lookahead();
 
     return next.kind == TokenKind.Class && !next.newline;
   }
 
-  private exportedDeclarationAhead(): boolean {
+  private readonly exportedDeclarationAhead(): boolean {
     const token = this.cursor.peek();
     const next = this.cursor.lookahead();
 
@@ -75,7 +75,9 @@ partial class FileParser {
 
       this.cursor.report(next.start, Code.ExportedClassNeedsName);
 
-      return this.classDecl(false);
+      const draft = this.classDecl(false);
+
+      return this.finishedClass(draft);
     }
     if (this.exportedDeclarationAhead()) {
       return this.exportedStatement(topLevel);
@@ -120,7 +122,7 @@ partial class FileParser {
     return this.marker(StmtKind.Empty, loc);
   }
 
-  private startsDeclaration(kind: TokenKind): boolean {
+  private readonly startsDeclaration(kind: TokenKind): boolean {
     switch (kind) {
       case TokenKind.Abstract:
       case TokenKind.Async:
@@ -170,10 +172,10 @@ partial class FileParser {
         this.exportDeclared(stmt);
       }
 
-      stmt.decorators = decorators.concat(stmt.decorators);
-    } else {
-      this.rejectDecorators(decorators);
+      return this.decoratedClass(stmt, decorators);
     }
+
+    this.rejectDecorators(decorators);
 
     return stmt;
   }
@@ -199,7 +201,7 @@ partial class FileParser {
   private recordExport(
     loc: int,
     form: ExportForm,
-    names: ModuleName[],
+    names: Own<ModuleName[]>,
     from: ModulePath | undefined,
   ): Stmt {
     this.cursor.expectSemicolon();
@@ -292,7 +294,7 @@ partial class FileParser {
     });
   }
 
-  private declaredNames(stmt: Stmt): ModuleName[] {
+  private readonly declaredNames(stmt: Stmt): ModuleName[] {
     switch (stmt.kind) {
       case StmtKind.Function:
       case StmtKind.TypeAlias:
@@ -313,7 +315,7 @@ partial class FileParser {
     }
   }
 
-  private writtenNames(decls: VarDeclarator[]): ModuleName[] {
+  private readonly writtenNames(decls: Read<VarDeclarator[]>): ModuleName[] {
     const names: ModuleName[] = [];
 
     for (const declarator of decls) {

@@ -72,7 +72,7 @@ partial class FileParser {
     }
   }
 
-  private endsHandleHead(): boolean {
+  private readonly endsHandleHead(): boolean {
     const token = this.cursor.peek();
 
     switch (token.kind) {

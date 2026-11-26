@@ -40,7 +40,7 @@ import {
 } from "../../../crypto-rules/types/crypto-rules.types.tz";
 
 partial class ExpressionTypes {
-  private cryptoCallCheck(expr: CallExpr, module: int): void {
+  private readonly cryptoCallCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     if (this.modules.isLibraryModule(module)) {
       return;
@@ -80,7 +80,7 @@ partial class ExpressionTypes {
     this.cryptoFormCheck(call, module);
   }
 
-  private globalCryptoCall(
+  private readonly globalCryptoCall(
     expr: CallExpr,
     callee: MemberExpr,
     module: int,
@@ -100,7 +100,7 @@ partial class ExpressionTypes {
     this.cryptoFormCheck(call, module);
   }
 
-  private isGlobalCrypto(object: Expr, module: int): boolean {
+  private readonly isGlobalCrypto(object: Expr, module: int): boolean {
     if (object.kind != ExprKind.Name || object.name != kGlobalCryptoName) {
       return false;
     }
@@ -108,7 +108,7 @@ partial class ExpressionTypes {
     return this.isGlobalUse(object, module);
   }
 
-  private globalCryptoRead(expr: MemberExpr, module: int): Type | undefined {
+  private readonly globalCryptoRead(expr: MemberExpr, module: int): Type | undefined {
     if (!this.isGlobalCrypto(expr.object, module)) {
       return undefined;
     }
@@ -123,7 +123,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private cryptoNamedCheck(call: CryptoCall, module: int): void {
+  private readonly cryptoNamedCheck(call: CryptoCall, module: int): void {
     const expr = call.expr;
     const count = expr.args.length;
 
@@ -149,7 +149,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private cryptoFormCheck(call: CryptoCall, module: int): void {
+  private readonly cryptoFormCheck(call: CryptoCall, module: int): void {
     const expr = call.expr;
     const count = expr.args.length;
 
@@ -197,10 +197,10 @@ partial class ExpressionTypes {
     }
   }
 
-  private cryptoOptionsAt(
+  private readonly cryptoOptionsAt(
     call: CryptoCall,
     index: int,
-    allowed: string[],
+    allowed: Read<string[]>,
     isCounted: boolean,
     module: int,
   ): void {
@@ -209,7 +209,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private scryptDataCheck(
+  private readonly scryptDataCheck(
     call: CryptoCall,
     isCounted: boolean,
     module: int,
@@ -233,7 +233,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private hmacCheck(expr: CallExpr, isCounted: boolean, module: int): void {
+  private readonly hmacCheck(expr: CallExpr, isCounted: boolean, module: int): void {
     if (!isCounted) {
       return;
     }
@@ -246,7 +246,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private dataAt(
+  private readonly dataAt(
     expr: CallExpr,
     index: int,
     what: string,
@@ -259,7 +259,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private timingSafeCheck(
+  private readonly timingSafeCheck(
     expr: CallExpr,
     isCounted: boolean,
     module: int,
@@ -278,7 +278,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private randomValuesCheck(
+  private readonly randomValuesCheck(
     expr: CallExpr,
     isCounted: boolean,
     module: int,
@@ -298,7 +298,7 @@ partial class ExpressionTypes {
     this.reportFound(module, fillError);
   }
 
-  private randomBytesForm(
+  private readonly randomBytesForm(
     call: CryptoCall,
     isCounted: boolean,
     module: int,
@@ -313,7 +313,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private randomIntForm(
+  private readonly randomIntForm(
     call: CryptoCall,
     isCounted: boolean,
     module: int,
@@ -333,7 +333,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private randomFillForm(
+  private readonly randomFillForm(
     call: CryptoCall,
     isCounted: boolean,
     module: int,
@@ -343,7 +343,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private callbackAt(
+  private readonly callbackAt(
     call: CryptoCall,
     index: int,
     hint: string,
@@ -355,7 +355,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private curveCheck(expr: CallExpr, module: int): void {
+  private readonly curveCheck(expr: CallExpr, module: int): void {
     const curve = expr.args[0]?.expr;
     if (expr.args.length != 1 || curve == undefined) {
       return;
@@ -367,7 +367,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private cryptoHashAt(
+  private readonly cryptoHashAt(
     expr: CallExpr,
     index: int,
     use: DigestUse,
@@ -379,7 +379,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private cryptoHashFine(
+  private readonly cryptoHashFine(
     expr: CallExpr,
     index: int,
     use: DigestUse,
@@ -405,7 +405,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private pbkdf2Check(expr: CallExpr, module: int): void {
+  private readonly pbkdf2Check(expr: CallExpr, module: int): void {
     if (expr.args.length != 5) {
       return;
     }
@@ -432,7 +432,7 @@ partial class ExpressionTypes {
     this.cryptoWholeFine(expr, 3, kKeylenName, module);
   }
 
-  private hkdfCheck(expr: CallExpr, module: int): void {
+  private readonly hkdfCheck(expr: CallExpr, module: int): void {
     if (expr.args.length != 5) {
       return;
     }
@@ -456,7 +456,7 @@ partial class ExpressionTypes {
     this.cryptoWholeFine(expr, 4, kKeylenName, module);
   }
 
-  private cipherCheck(expr: CallExpr, shown: string, module: int): void {
+  private readonly cipherCheck(expr: CallExpr, shown: string, module: int): void {
     const count = expr.args.length;
     const name = expr.args[0]?.expr;
     if (count < 3 || count > 4 || name == undefined) {
@@ -496,7 +496,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private cipherLengthsFine(
+  private readonly cipherLengthsFine(
     expr: CallExpr,
     text: string,
     module: int,
@@ -528,7 +528,7 @@ partial class ExpressionTypes {
     return isFine;
   }
 
-  private cryptoOptionAt(
+  private readonly cryptoOptionAt(
     expr: CallExpr,
     index: int,
     name: string,
@@ -541,7 +541,7 @@ partial class ExpressionTypes {
     return this.optionValue(options, name);
   }
 
-  private cipherNameError(
+  private readonly cipherNameError(
     name: Expr,
     text: string | undefined,
   ): SourceError | undefined {
@@ -552,9 +552,9 @@ partial class ExpressionTypes {
     return this.crypto.cipherError(name.loc, text);
   }
 
-  private cryptoDataFine(
+  private readonly cryptoDataFine(
     expr: CallExpr,
-    items: CryptoData[],
+    items: Read<CryptoData[]>,
     module: int,
   ): boolean {
     let isFine = true;
@@ -581,7 +581,7 @@ partial class ExpressionTypes {
     return isFine;
   }
 
-  private cryptoWholeFine(
+  private readonly cryptoWholeFine(
     expr: CallExpr,
     index: int,
     name: string,
@@ -604,7 +604,7 @@ partial class ExpressionTypes {
     return wholeError == undefined;
   }
 
-  private cryptoBytes(value: Expr, module: int): decimal | undefined {
+  private readonly cryptoBytes(value: Expr, module: int): decimal | undefined {
     const type = this.peekType(value, module);
     if (!this.crypto.isKeyBytes(type)) {
       return undefined;
@@ -623,7 +623,7 @@ partial class ExpressionTypes {
     return made.offset;
   }
 
-  private cryptoNumber(value: Expr, module: int): CryptoNumber | undefined {
+  private readonly cryptoNumber(value: Expr, module: int): CryptoNumber | undefined {
     if (value.kind == ExprKind.Unary && value.op == UnaryOp.Neg) {
       const inner = this.cryptoNumber(value.operand, module);
       if (inner == undefined) {
@@ -648,7 +648,7 @@ partial class ExpressionTypes {
     return { value: whole, isWhole: true, shown: `${whole}` };
   }
 
-  private fractionNumber(value: double): CryptoNumber | undefined {
+  private readonly fractionNumber(value: double): CryptoNumber | undefined {
     const floor = Math.floor(value);
     if (floor != value) {
       return { value: (0).toDecimal(), isWhole: false, shown: `${value}` };

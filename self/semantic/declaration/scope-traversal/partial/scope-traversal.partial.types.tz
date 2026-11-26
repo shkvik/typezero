@@ -13,7 +13,7 @@ partial class ScopeTraversal {
     }
   }
 
-  private traverseTypes(refs: TypeRef[]): void {
+  private traverseTypes(refs: Read<TypeRef[]>): void {
     for (const ref of refs) {
       this.traverseType(ref);
     }
@@ -41,7 +41,7 @@ partial class ScopeTraversal {
     }
   }
 
-  private traverseObjectType(fields: ObjectTypeField[]): void {
+  private traverseObjectType(fields: Read<ObjectTypeField[]>): void {
     for (const field of fields) {
       this.scopes.open();
       this.declareTypeParams(field.typeParams);
@@ -87,7 +87,7 @@ partial class ScopeTraversal {
     }
   }
 
-  private childTypes(ref: TypeRef): TypeRef[] {
+  private readonly childTypes(ref: TypeRef): TypeRef[] {
     const form = ref.form;
     const children = ref.args.slice();
 

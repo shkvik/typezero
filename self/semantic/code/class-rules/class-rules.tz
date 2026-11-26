@@ -42,16 +42,16 @@ export class ClassRules {
   private readonly text: TypeText;
   private readonly types: TypeQuestions;
 
-  public constructor(text: TypeText, types: TypeQuestions) {
+  public constructor(text: TypeText, types: Own<TypeQuestions>) {
     this.text = text;
     this.types = types;
   }
 
-  public contextOf(module: int, place: TypePlace): TypeContext {
+  public readonly contextOf(module: int, place: TypePlace): TypeContext {
     return { module, bindings: new Map<int, Type>(), place };
   }
 
-  public isScalarField(type: Type): boolean {
+  public readonly isScalarField(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.Int:
       case TypeKind.Double:
@@ -64,7 +64,7 @@ export class ClassRules {
     }
   }
 
-  public isSameParameters(own: FunctionType, theirs: FunctionType): boolean {
+  public readonly isSameParameters(own: FunctionType, theirs: FunctionType): boolean {
     const mine = own.shape.params;
     const other = theirs.shape.params;
     if (mine.length != other.length || own.shape.rest != theirs.shape.rest) {
@@ -82,7 +82,7 @@ export class ClassRules {
     });
   }
 
-  public accessRank(access: Access): int {
+  public readonly accessRank(access: Access): int {
     switch (access) {
       case Access.Public:
         return 0;
@@ -93,7 +93,7 @@ export class ClassRules {
     }
   }
 
-  public accessWord(access: Access): string {
+  public readonly accessWord(access: Access): string {
     switch (access) {
       case Access.Public:
         return kPublicWord;
@@ -104,7 +104,7 @@ export class ClassRules {
     }
   }
 
-  public variantText(fn: FunctionDecl, type: FunctionType): string {
+  public readonly variantText(fn: FunctionDecl, type: FunctionType): string {
     const params = type.shape.params;
     const parts: string[] = [];
 
@@ -121,28 +121,28 @@ export class ClassRules {
     return `${fn.name}(${parts.join(", ")})`;
   }
 
-  public initFrameOf(decl: ClassDecl, fn: FunctionDecl): InitFrame {
+  public readonly initFrameOf(decl: ClassDecl, fn: FunctionDecl): InitFrame {
     const isConstructor = fn.role?.method == MethodKind.Constructor;
     const isDerived = decl.base != undefined || decl.baseExpr != undefined;
 
     return { isConstructor, fn, decl, isDerived, closures: [] };
   }
 
-  public isArrowField(field: ClassField): boolean {
+  public readonly isArrowField(field: ClassField): boolean {
     const init = field.init;
     const isArrow = init?.kind == ExprKind.Function && init.fn.isArrow;
 
     return isArrow || field.form == FieldKind.ArrowMethod;
   }
 
-  public isRequiredField(field: ClassField): boolean {
+  public readonly isRequiredField(field: ClassField): boolean {
     const isValueField =
       field.form == FieldKind.Instance || field.form == FieldKind.Parameter;
 
     return isValueField && field.presence != FieldPresence.Optional;
   }
 
-  public ownValueField(frame: InitFrame, name: string): ClassField | undefined {
+  public readonly ownValueField(frame: Read<InitFrame>, name: string): ClassField | undefined {
     return frame.decl.fields.find(
       (field) =>
         field.name == name &&
@@ -151,13 +151,13 @@ export class ClassRules {
     );
   }
 
-  public leaveInitClosure(frame: InitFrame | undefined): void {
+  public readonly leaveInitClosure(frame: InitFrame | undefined): void {
     if (frame != undefined) {
       frame.closures.pop();
     }
   }
 
-  public isSameLayout(own: Type, theirs: Type): boolean {
+  public readonly isSameLayout(own: Type, theirs: Type): boolean {
     if (own == theirs) {
       return true;
     }
@@ -171,8 +171,8 @@ export class ClassRules {
     return this.types.ancestorsOf(own).includes(theirs);
   }
 
-  public previousInCycle(
-    cycle: InstanceType[],
+  public readonly previousInCycle(
+    cycle: Read<InstanceType[]>,
     member: InstanceType,
   ): InstanceType | undefined {
     const at = cycle.indexOf(member);
@@ -183,7 +183,7 @@ export class ClassRules {
     return cycle[at - 1];
   }
 
-  public earliestOf(cycle: InstanceType[]): InstanceType | undefined {
+  public readonly earliestOf(cycle: Read<InstanceType[]>): InstanceType | undefined {
     let earliest: InstanceType | undefined = undefined;
 
     for (const one of cycle) {
@@ -195,7 +195,7 @@ export class ClassRules {
     return earliest;
   }
 
-  public methodPlace(fn: FunctionDecl): ThisPlace {
+  public readonly methodPlace(fn: FunctionDecl): ThisPlace {
     if (this.isStaticMethod(fn)) {
       return ThisPlace.StaticMethod;
     }
@@ -203,7 +203,7 @@ export class ClassRules {
     return ThisPlace.Method;
   }
 
-  public hasInstanceMember(decl: ClassDecl, name: string): boolean {
+  public readonly hasInstanceMember(decl: ClassDecl, name: string): boolean {
     const isField = decl.fields.some(
       (one) => one.name == name && one.form != FieldKind.Static,
     );
@@ -214,11 +214,11 @@ export class ClassRules {
     return isField || isMethod;
   }
 
-  public accessOf(method: FunctionDecl): Access {
+  public readonly accessOf(method: FunctionDecl): Access {
     return method.role?.access ?? Access.Public;
   }
 
-  public parentOf(
+  public readonly parentOf(
     instance: InstanceType,
     decl: ClassDecl,
   ): InstanceType | undefined {
@@ -234,7 +234,7 @@ export class ClassRules {
     return parent;
   }
 
-  public ownMember(
+  public readonly ownMember(
     instance: InstanceType,
     owner: ClassDecl,
     name: string,
@@ -262,11 +262,11 @@ export class ClassRules {
     return undefined;
   }
 
-  public isStaticMethod(method: FunctionDecl): boolean {
+  public readonly isStaticMethod(method: FunctionDecl): boolean {
     return method.role?.method == MethodKind.Static;
   }
 
-  public parameterSites(fn: FunctionDecl): ParameterSite[] | undefined {
+  public readonly parameterSites(fn: FunctionDecl): ParameterSite[] | undefined {
     const sites: ParameterSite[] = [];
 
     for (const param of fn.params) {
@@ -287,7 +287,7 @@ export class ClassRules {
     return sites;
   }
 
-  public pluralMark(count: int): string {
+  public readonly pluralMark(count: int): string {
     if (count == 1) {
       return "";
     }
@@ -295,8 +295,8 @@ export class ClassRules {
     return "s";
   }
 
-  public closureThisCheck(
-    frame: InitFrame,
+  public readonly closureThisCheck(
+    frame: Read<InitFrame>,
     expr: NameExpr,
   ): SourceError | undefined {
     const isReady = frame.closures[frame.closures.length - 1] ?? true;
@@ -311,7 +311,7 @@ export class ClassRules {
     };
   }
 
-  public fieldAccessCheck(
+  public readonly fieldAccessCheck(
     decl: ClassDecl,
     field: ClassField,
     inherited: ClassField,
@@ -336,7 +336,7 @@ export class ClassRules {
     };
   }
 
-  private isDeclaredBefore(one: InstanceType, other: InstanceType): boolean {
+  private readonly isDeclaredBefore(one: InstanceType, other: InstanceType): boolean {
     if (one.module != other.module) {
       return one.module < other.module;
     }

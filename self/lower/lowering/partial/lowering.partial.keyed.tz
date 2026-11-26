@@ -44,14 +44,13 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const finder = this.keyedFinder(layout, names);
-    const text = made.extract(key.value, 0);
-    const meta = made.extract(key.value, 1);
-    const pointer = made.call(finder, [holder.value, text, meta]);
+    const text = frame.made.extract(key.value, 0);
+    const meta = frame.made.extract(key.value, 1);
+    const pointer = frame.made.call(finder, [holder.value, text, meta]);
     const loaded: IrValue = {
       type: first.ir,
-      value: made.load(first.ir, pointer),
+      value: frame.made.load(first.ir, pointer),
       tz: first.type,
     };
     const kept = this.owning(frame, loaded);
@@ -62,7 +61,7 @@ partial class Lowering {
     return kept;
   }
 
-  private widenedKey(type: Type | undefined): Type {
+  private readonly widenedKey(type: Type | undefined): Type {
     if (type == undefined) {
       return this.store.plain(TypeKind.Never);
     }
@@ -70,7 +69,7 @@ partial class Lowering {
     return type;
   }
 
-  private keyedFinder(layout: ClassLayout, names: string[]): IrCallee {
+  private keyedFinder(layout: Read<ClassLayout>, names: Read<string[]>): IrCallee {
     const key = `${layout.struct} ${names.join(" ")}`;
     const known = this.keyedFinders.get(key);
     if (known != undefined) {

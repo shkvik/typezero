@@ -168,7 +168,7 @@ partial class Lowering {
     return this.ir.global(name, kMapLayout, descriptor, true);
   }
 
-  private dictKindNumber(type: Type): int {
+  private readonly dictKindNumber(type: Type): int {
     if (type.kind != TypeKind.Dict) {
       return 0;
     }
@@ -183,7 +183,7 @@ partial class Lowering {
     }
   }
 
-  private newDict(frame: Frame, type: Type, loc: int): IrValue | undefined {
+  private newDict(frame: Read<Frame>, type: Type, loc: int): IrValue | undefined {
     const layout = this.dictLayout(type);
     if (layout == undefined) {
       this.notLowered(frame.module, loc, "a dictionary of these types");
@@ -218,6 +218,8 @@ partial class Lowering {
       case "set":
       case "add":
         return this.dictPut(frame, call, member, object);
+      case "getOrInsert":
+        return this.dictGetOrInsert(frame, call, member, object);
       case "delete":
         return this.dictDelete(frame, call, member, object);
       default: {
@@ -250,22 +252,21 @@ partial class Lowering {
     return this.converted(frame, given, object.key, argument.expr.loc);
   }
 
-  private dictFind(
-    frame: Frame,
+  private readonly dictFind(
+    frame: Read<Frame>,
     map: LLVMValue,
     key: IrValue,
   ): LLVMValue {
-    const made = frame.made;
     if (this.isString(key.tz)) {
-      const text = made.extract(key.value, 0);
-      const meta = made.extract(key.value, 1);
+      const text = frame.made.extract(key.value, 0);
+      const meta = frame.made.extract(key.value, 1);
       const finding = this.ir.declare(kMapFindText, kPointerType, [
         kPointerType,
         kPointerType,
         kIntType,
       ]);
 
-      return made.call(finding, [map, text, meta]);
+      return frame.made.call(finding, [map, text, meta]);
     }
 
     const slot = this.keySlot(frame, key);
@@ -274,15 +275,24 @@ partial class Lowering {
       kPointerType,
     ]);
 
-    return made.call(finding, [map, slot]);
+    return frame.made.call(finding, [map, slot]);
   }
 
-  private dictAdd(frame: Frame, map: LLVMValue, key: IrValue): LLVMValue {
-    const made = frame.made;
-    const added = made.slot(kFlagType, "map.added");
+  private readonly dictAdd(frame: Read<Frame>, map: LLVMValue, key: IrValue): LLVMValue {
+    const added = frame.made.slot(kFlagType, "map.added");
+
+    return this.dictAddFlagged(frame, map, key, added);
+  }
+
+  private readonly dictAddFlagged(
+    frame: Read<Frame>,
+    map: LLVMValue,
+    key: IrValue,
+    added: LLVMValue,
+  ): LLVMValue {
     if (this.isString(key.tz)) {
-      const text = made.extract(key.value, 0);
-      const meta = made.extract(key.value, 1);
+      const text = frame.made.extract(key.value, 0);
+      const meta = frame.made.extract(key.value, 1);
       const adding = this.ir.declare(kMapAddText, kPointerType, [
         kPointerType,
         kPointerType,
@@ -290,7 +300,7 @@ partial class Lowering {
         kPointerType,
       ]);
 
-      return made.call(adding, [map, text, meta, added]);
+      return frame.made.call(adding, [map, text, meta, added]);
     }
 
     const slot = this.keySlot(frame, key);
@@ -300,10 +310,10 @@ partial class Lowering {
       kPointerType,
     ]);
 
-    return made.call(adding, [map, slot, added]);
+    return frame.made.call(adding, [map, slot, added]);
   }
 
-  private keySlot(frame: Frame, key: IrValue): LLVMValue {
+  private readonly keySlot(frame: Read<Frame>, key: IrValue): LLVMValue {
     const slot = frame.made.slot(key.type, "map.key");
 
     frame.made.store(key.value, slot);
@@ -311,7 +321,7 @@ partial class Lowering {
     return slot;
   }
 
-  private entryField(frame: Frame, entry: LLVMValue, offset: int): LLVMValue {
+  private readonly entryField(frame: Read<Frame>, entry: LLVMValue, offset: int): LLVMValue {
     const at = this.ir.integer(kIntType, `${offset}`);
 
     return frame.made.element(kByteType, entry, at);
@@ -340,36 +350,35 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const entry = this.dictFind(frame, map.value, key);
     const none = this.ir.zero(kPointerType);
-    const isFound = made.integerCompare(IrIntPredicate.NotEqual, entry, none);
-    const before = made.currentBlock();
-    const read = made.block("map.read");
-    const end = made.block("map.got");
+    const isFound = frame.made.integerCompare(IrIntPredicate.NotEqual, entry, none);
+    const before = frame.made.currentBlock();
+    const read = frame.made.block("map.read");
+    const end = frame.made.block("map.got");
 
-    made.conditionalBranch(isFound, read, end);
-    made.open(read);
+    frame.made.conditionalBranch(isFound, read, end);
+    frame.made.open(read);
 
     const address = this.entryField(frame, entry, layout.valueOffset);
     const loaded: IrValue = {
       type: layout.value,
-      value: made.load(layout.value, address),
+      value: frame.made.load(layout.value, address),
       tz: object.value,
     };
     const owned = this.owning(frame, loaded);
     const placed = this.converted(frame, owned, result, call.loc);
-    const readEnd = made.currentBlock();
+    const readEnd = frame.made.currentBlock();
 
-    made.branch(end);
-    made.open(end);
+    frame.made.branch(end);
+    frame.made.open(end);
 
     if (placed == undefined) {
       return undefined;
     }
 
     const missing = this.ir.zero(resultIr);
-    const value = made.phi(
+    const value = frame.made.phi(
       resultIr,
       [missing, placed.value],
       [before, readEnd],
@@ -466,15 +475,67 @@ partial class Lowering {
     return this.owning(frame, value);
   }
 
-  private entryStored(
+  private dictGetOrInsert(
     frame: Frame,
+    call: CallExpr,
+    member: MemberExpr,
+    object: Type,
+  ): IrValue | undefined {
+    const layout = this.dictLayout(object);
+    const map = this.value(frame, member.object);
+    const key = this.dictKey(frame, call, object);
+    if (layout == undefined || object.kind != TypeKind.Dict) {
+      return undefined;
+    }
+    if (map == undefined || key == undefined) {
+      return undefined;
+    }
+
+    const stored = this.dictStoredValue(frame, call, object, false);
+    if (stored == undefined) {
+      return undefined;
+    }
+
+    const added = frame.made.slot(kFlagType, "map.added");
+    const entry = this.dictAddFlagged(frame, map.value, key, added);
+    const address = this.entryField(frame, entry, layout.valueOffset);
+    const flag = frame.made.load(kFlagType, added);
+    const zero = this.ir.zero(kFlagType);
+    const isAdded = frame.made.integerCompare(IrIntPredicate.NotEqual, flag, zero);
+    const putting = frame.made.block("map.put");
+    const keeping = frame.made.block("map.kept");
+    const end = frame.made.block("map.ready");
+
+    frame.made.conditionalBranch(isAdded, putting, keeping);
+    frame.made.open(putting);
+    frame.made.store(stored.value, address);
+    frame.made.branch(end);
+    frame.made.open(keeping);
+    this.dropping(frame, stored);
+    frame.made.branch(end);
+    frame.made.open(end);
+
+    const loaded: IrValue = {
+      type: layout.value,
+      value: frame.made.load(layout.value, address),
+      tz: object.value,
+    };
+    const owned = this.owning(frame, loaded);
+
+    this.dropping(frame, key);
+    this.dropping(frame, map);
+
+    return owned;
+  }
+
+  private entryStored(
+    frame: Read<Frame>,
     entry: LLVMValue,
     offset: int,
     value: IrValue,
   ): void {
-    const made = frame.made;
     const address = this.entryField(frame, entry, offset);
-    const before = made.load(value.type, address);
+    const before = frame.made.load(value.type, address);
     const old: IrValue = {
       type: value.type,
       value: before,
@@ -482,7 +543,7 @@ partial class Lowering {
       owned: true,
     };
 
-    made.store(value.value, address);
+    frame.made.store(value.value, address);
     this.dropping(frame, old);
   }
 
@@ -492,7 +553,6 @@ partial class Lowering {
     member: MemberExpr,
     object: Type,
   ): IrValue | undefined {
-    const made = frame.made;
     const map = this.value(frame, member.object);
     const key = this.dictKey(frame, call, object);
     if (map == undefined || key == undefined) {
@@ -501,7 +561,7 @@ partial class Lowering {
 
     const removed = this.dictRemoved(frame, map.value, key);
     const zero = this.ir.zero(kFlagType);
-    const value = made.integerCompare(IrIntPredicate.NotEqual, removed, zero);
+    const value = frame.made.integerCompare(IrIntPredicate.NotEqual, removed, zero);
     const tz = this.store.plain(TypeKind.Boolean);
 
     this.dropping(frame, key);
@@ -510,18 +570,17 @@ partial class Lowering {
     return { type: kBooleanType, value, tz };
   }
 
-  private dictRemoved(frame: Frame, map: LLVMValue, key: IrValue): LLVMValue {
-    const made = frame.made;
+  private readonly dictRemoved(frame: Read<Frame>, map: LLVMValue, key: IrValue): LLVMValue {
     if (this.isString(key.tz)) {
-      const text = made.extract(key.value, 0);
-      const meta = made.extract(key.value, 1);
+      const text = frame.made.extract(key.value, 0);
+      const meta = frame.made.extract(key.value, 1);
       const removing = this.ir.declare(kMapDeleteText, kFlagType, [
         kPointerType,
         kPointerType,
         kIntType,
       ]);
 
-      return made.call(removing, [map, text, meta]);
+      return frame.made.call(removing, [map, text, meta]);
     }
 
     const slot = this.keySlot(frame, key);
@@ -530,7 +589,7 @@ partial class Lowering {
       kPointerType,
     ]);
 
-    return made.call(removing, [map, slot]);
+    return frame.made.call(removing, [map, slot]);
   }
 
   private dictSize(frame: Frame, expr: MemberExpr): IrValue | undefined {
@@ -545,10 +604,9 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
-    const field = made.field(kMapStruct, map.value, kMapCountField);
-    const count = made.load(kFlagType, field);
-    const value = made.cast(IrOpcode.ZExt, count, kIntType);
+    const field = frame.made.field(kMapStruct, map.value, kMapCountField);
+    const count = frame.made.load(kFlagType, field);
+    const value = frame.made.cast(IrOpcode.ZExt, count, kIntType);
     const tz = this.store.integer(64, false);
 
     this.dropping(frame, map);
@@ -593,7 +651,7 @@ partial class Lowering {
     return { type: kPointerType, value: array, tz, owned: true };
   }
 
-  private dictItemType(object: Type, isKeys: boolean): Type {
+  private readonly dictItemType(object: Type, isKeys: boolean): Type {
     if (object.kind != TypeKind.Dict || isKeys) {
       return this.dictKeyType(object);
     }
@@ -601,7 +659,7 @@ partial class Lowering {
     return object.value;
   }
 
-  private dictKeyType(object: Type): Type {
+  private readonly dictKeyType(object: Type): Type {
     if (object.kind != TypeKind.Dict) {
       return object;
     }
@@ -651,7 +709,7 @@ partial class Lowering {
     return this.value(frame, expr);
   }
 
-  private listedDict(expr: Expr): MemberExpr | undefined {
+  private readonly listedDict(expr: Expr): MemberExpr | undefined {
     if (expr.kind != ExprKind.Call || expr.args.length != 0) {
       return undefined;
     }
@@ -700,7 +758,6 @@ partial class Lowering {
     items: IrValue,
     type: Type,
   ): void {
-    const made = frame.made;
     const array = items.value;
     const tz = items.tz;
     if (tz.kind != TypeKind.Array) {
@@ -712,38 +769,38 @@ partial class Lowering {
       return;
     }
 
-    const cond = made.block("fill.cond");
-    const body = made.block("fill.body");
-    const end = made.block("fill.end");
-    const counter = made.slot(kIntType, "fill.index");
+    const cond = frame.made.block("fill.cond");
+    const body = frame.made.block("fill.body");
+    const end = frame.made.block("fill.end");
+    const counter = frame.made.slot(kIntType, "fill.index");
 
-    made.store(this.ir.zero(kIntType), counter);
-    made.open(cond);
+    frame.made.store(this.ir.zero(kIntType), counter);
+    frame.made.open(cond);
 
-    const index = made.load(kIntType, counter);
+    const index = frame.made.load(kIntType, counter);
     const length = this.arrayLength(frame, array);
-    const isInside = made.integerCompare(
+    const isInside = frame.made.integerCompare(
       IrIntPredicate.UnsignedLess,
       index,
       length,
     );
 
-    made.conditionalBranch(isInside, body, end);
-    made.open(body);
+    frame.made.conditionalBranch(isInside, body, end);
+    frame.made.open(body);
 
     const data = this.arrayData(frame, array);
-    const address = made.element(item, data, index);
+    const address = frame.made.element(item, data, index);
     const loaded: IrValue = {
       type: item,
-      value: made.load(item, address),
+      value: frame.made.load(item, address),
       tz: tz.item,
     };
     const one = this.ir.integer(kIntType, "1");
 
     this.entryAdded(frame, map.value, loaded, type);
-    made.store(made.binary(IrOpcode.Add, index, one), counter);
-    made.branch(cond);
-    made.open(end);
+    frame.made.store(frame.made.binary(IrOpcode.Add, index, one), counter);
+    frame.made.branch(cond);
+    frame.made.open(end);
   }
 
   private entryAdded(
@@ -772,17 +829,16 @@ partial class Lowering {
       return;
     }
 
-    const made = frame.made;
-    const keyAddress = made.field(pair.struct, item.value, first.index);
-    const valueAddress = made.field(pair.struct, item.value, second.index);
+    const keyAddress = frame.made.field(pair.struct, item.value, first.index);
+    const valueAddress = frame.made.field(pair.struct, item.value, second.index);
     const keyRead: IrValue = {
       type: first.ir,
-      value: made.load(first.ir, keyAddress),
+      value: frame.made.load(first.ir, keyAddress),
       tz: first.type,
     };
     const valueRead: IrValue = {
       type: second.ir,
-      value: made.load(second.ir, valueAddress),
+      value: frame.made.load(second.ir, valueAddress),
       tz: second.type,
     };
     const key = this.converted(frame, keyRead, type.key, 0);
@@ -797,7 +853,7 @@ partial class Lowering {
     this.entryStored(frame, entry, dictLayout.valueOffset, owned);
   }
 
-  private isArrayFrom(member: MemberExpr): boolean {
+  private readonly isArrayFrom(member: MemberExpr): boolean {
     const object = member.object;
 
     return (

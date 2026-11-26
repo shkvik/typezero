@@ -30,30 +30,32 @@ export class ScopeStack {
   }
 
   public declaredValue(name: string): ScopeEntry | undefined {
-    const scope = this.current();
+    this.ensureScope();
 
-    return scope.values.get(name);
+    return this.scopes[this.scopes.length - 1]?.values.get(name);
   }
 
   public declaredType(name: string): ScopeEntry | undefined {
-    const scope = this.current();
+    this.ensureScope();
 
-    return scope.types.get(name);
+    return this.scopes[this.scopes.length - 1]?.types.get(name);
   }
 
   public declareValue(symbol: NameSymbol, live: boolean): void {
-    const scope = this.current();
+    const entry: ScopeEntry = { symbol, depth: this.depth, live };
 
-    scope.values.set(symbol.name, { symbol, depth: this.depth, live });
+    this.ensureScope();
+    this.scopes[this.scopes.length - 1]?.values.set(symbol.name, entry);
   }
 
   public declareType(symbol: NameSymbol): void {
-    const scope = this.current();
+    const entry: ScopeEntry = { symbol, depth: this.depth, live: true };
 
-    scope.types.set(symbol.name, { symbol, depth: this.depth, live: true });
+    this.ensureScope();
+    this.scopes[this.scopes.length - 1]?.types.set(symbol.name, entry);
   }
 
-  public findValue(name: string): ScopeEntry | undefined {
+  public readonly findValue(name: string): ScopeEntry | undefined {
     for (let index = this.scopes.length - 1; index >= 0; index--) {
       const entry = this.scopes[index]?.values.get(name);
       if (entry != undefined) {
@@ -64,7 +66,7 @@ export class ScopeStack {
     return undefined;
   }
 
-  public findType(name: string): ScopeEntry | undefined {
+  public readonly findType(name: string): ScopeEntry | undefined {
     for (let index = this.scopes.length - 1; index >= 0; index--) {
       const entry = this.scopes[index]?.types.get(name);
       if (entry != undefined) {
@@ -75,34 +77,24 @@ export class ScopeStack {
     return undefined;
   }
 
-  public markLive(name: string): void {
+  public readonly markLive(name: string): void {
     const entry = this.findValue(name);
     if (entry != undefined) {
       entry.live = true;
     }
   }
 
-  public currentDepth(): int {
+  public readonly currentDepth(): int {
     return this.depth;
   }
 
-  public isReadable(entry: ScopeEntry): boolean {
+  public readonly isReadable(entry: Read<ScopeEntry>): boolean {
     return entry.live || entry.depth != this.depth;
   }
 
-  private current(): Scope {
-    const scope = this.scopes[this.scopes.length - 1];
-    if (scope != undefined) {
-      return scope;
+  private ensureScope(): void {
+    if (this.scopes.length == 0) {
+      this.open();
     }
-
-    const first: Scope = {
-      values: new Map<string, ScopeEntry>(),
-      types: new Map<string, ScopeEntry>(),
-    };
-
-    this.scopes.push(first);
-
-    return first;
   }
 }

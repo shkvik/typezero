@@ -14,12 +14,10 @@ import {
 } from "../../../../program/ast/types/ast.types.expressions.tz";
 
 partial class ExpressionTypes {
-  private settleStrong(draft: GenericDraft, module: int): void {
-    const set = draft.inference;
-
+  private readonly settleStrong(draft: GenericDraft, module: int): void {
     for (let index = 0; index < draft.target.params.length; index++) {
       const strong = this.generics.candidatesOf(
-        set,
+        draft.inference,
         index,
         CandidateStrength.Strong,
       );
@@ -29,13 +27,13 @@ partial class ExpressionTypes {
     }
   }
 
-  private settleAll(draft: GenericDraft, module: int): void {
+  private readonly settleAll(draft: GenericDraft, module: int): void {
     for (let index = 0; index < draft.target.params.length; index++) {
       this.settleParameter(draft, index, module);
     }
   }
 
-  private settleParameter(draft: GenericDraft, index: int, module: int): void {
+  private readonly settleParameter(draft: GenericDraft, index: int, module: int): void {
     if (draft.bound.has(index)) {
       return;
     }
@@ -54,7 +52,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private joinCandidates(
+  private readonly joinCandidates(
     draft: GenericDraft,
     index: int,
     module: int,
@@ -108,7 +106,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private clash(
+  private readonly clash(
     draft: GenericDraft,
     index: int,
     type: Type | undefined,
@@ -122,7 +120,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private inferFromWanted(draft: GenericDraft): void {
+  private readonly inferFromWanted(draft: GenericDraft): void {
     const wanted = draft.wanted;
     const params = draft.target.params;
     const result = draft.target.shape.result;
@@ -151,7 +149,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private finishTypeArguments(draft: GenericDraft, module: int): void {
+  private readonly finishTypeArguments(draft: GenericDraft, module: int): void {
     const isSilent = this.genericCalls.hasArgumentErrors(draft);
 
     for (let index = 0; index < draft.target.params.length; index++) {
@@ -159,7 +157,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private finishTypeArgument(
+  private readonly finishTypeArgument(
     draft: GenericDraft,
     index: int,
     isSilent: boolean,
@@ -200,7 +198,7 @@ partial class ExpressionTypes {
     this.constraintCheck(draft, index, decl, found, module);
   }
 
-  private defaultArgument(
+  private readonly defaultArgument(
     draft: GenericDraft,
     index: int,
     decl: TypeParamDecl,
@@ -220,7 +218,7 @@ partial class ExpressionTypes {
     draft.bound.set(index, fallback);
   }
 
-  private constraintCheck(
+  private readonly constraintCheck(
     draft: GenericDraft,
     index: int,
     decl: TypeParamDecl,
@@ -249,7 +247,7 @@ partial class ExpressionTypes {
     this.generics.failParameter(draft, index);
   }
 
-  private fillDefaults(draft: GenericDraft): boolean {
+  private readonly fillDefaults(draft: GenericDraft): boolean {
     const decls = draft.target.decls;
     let isDefaulted = false;
 
@@ -269,8 +267,8 @@ partial class ExpressionTypes {
     return isDefaulted;
   }
 
-  private closedDefault(
-    draft: GenericDraft,
+  private readonly closedDefault(
+    draft: Read<GenericDraft>,
     decl: TypeParamDecl,
   ): Type | undefined {
     const target = draft.target;
@@ -286,7 +284,7 @@ partial class ExpressionTypes {
     return fallback;
   }
 
-  private inferObjectFields(
+  private readonly inferObjectFields(
     set: InferenceSet,
     pattern: Type,
     expr: Expr,

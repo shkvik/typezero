@@ -12,7 +12,7 @@ import {
 import { TypeContext, TypePlace } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  public value(ref: TypeRef, context: TypeContext): Type {
+  public readonly value(ref: TypeRef, context: TypeContext): Type {
     const type = this.resolve(ref, context);
     if (type.kind == TypeKind.Void && !this.isArgument(ref, context)) {
       this.report(context.module, ref.loc, Code.VoidPlace, kNoDetails);
@@ -23,14 +23,14 @@ partial class TypeResolver {
     return this.present(ref, type, context);
   }
 
-  private isArgument(ref: TypeRef, context: TypeContext): boolean {
+  private readonly isArgument(ref: TypeRef, context: Read<TypeContext>): boolean {
     const record = this.record(context.module);
     const symbol = record?.uses.get(ref.loc)?.symbol;
 
     return symbol != undefined && symbol.kind == SymbolKind.TypeParameter;
   }
 
-  private present(ref: TypeRef, type: Type, context: TypeContext): Type {
+  private readonly present(ref: TypeRef, type: Type, context: Read<TypeContext>): Type {
     if (type.kind != TypeKind.Undefined || this.isLibrary(context.module)) {
       return type;
     }
@@ -40,14 +40,14 @@ partial class TypeResolver {
     return this.store.plain(TypeKind.Error);
   }
 
-  private isLibrary(module: int): boolean {
+  private readonly isLibrary(module: int): boolean {
     const record = this.record(module);
 
     return record != undefined && record.library;
   }
 
-  private genericArguments(
-    refs: TypeRef[],
+  private readonly genericArguments(
+    refs: Read<TypeRef[]>,
     values: int,
     context: TypeContext,
   ): Type[] {
@@ -62,7 +62,7 @@ partial class TypeResolver {
     return types;
   }
 
-  private argument(ref: TypeRef, isValue: boolean, context: TypeContext): Type {
+  private readonly argument(ref: TypeRef, isValue: boolean, context: TypeContext): Type {
     if (isValue) {
       return this.value(ref, context);
     }
@@ -70,17 +70,30 @@ partial class TypeResolver {
     return this.resolve(ref, context);
   }
 
-  private promised(ref: TypeRef, value: Type, context: TypeContext): Type {
+  private readonly promised(ref: TypeRef, value: Type, context: Read<TypeContext>): Type {
     const written = ref.args[0] ?? ref;
     const present = this.present(written, value, context);
 
     return this.store.promiseOf(present);
   }
 
-  private listOf(ref: TypeRef, item: Type, context: TypeContext): Type {
-    if (item.kind != TypeKind.Void && item.kind != TypeKind.Undefined) {
-      return this.store.arrayOf(item);
+  private readonly listOf(
+    ref: TypeRef,
+    item: Type,
+    readonly: boolean,
+    context: Read<TypeContext>,
+  ): Type {
+    if (item.kind == TypeKind.Void || item.kind == TypeKind.Undefined) {
+      return this.nothingList(ref, item, context);
     }
+    if (readonly) {
+      return this.store.readonlyArrayOf(item);
+    }
+
+    return this.store.arrayOf(item);
+  }
+
+  private readonly nothingList(ref: TypeRef, item: Type, context: Read<TypeContext>): Type {
 
     const word = this.text.of(item);
 
@@ -89,11 +102,11 @@ partial class TypeResolver {
     return this.store.plain(TypeKind.Error);
   }
 
-  private keyed(
+  private readonly keyed(
     ref: TypeRef,
     key: Type,
     value: Type,
-    context: TypeContext,
+    context: Read<TypeContext>,
   ): Type {
     const parts = this.partsOf(key);
     const texts = parts.every((part) => this.isText(part));
@@ -114,7 +127,7 @@ partial class TypeResolver {
     return this.store.plain(TypeKind.Error);
   }
 
-  private fieldPerKey(keys: Type[], value: Type): Type {
+  private readonly fieldPerKey(keys: Read<Type[]>, value: Type): Type {
     const type = this.withoutUndefined(value);
     const optional = type != value;
     const fields: ObjectField[] = [];
@@ -128,7 +141,7 @@ partial class TypeResolver {
     return this.store.objectOf(fields);
   }
 
-  private keyCode(key: Type): Code {
+  private readonly keyCode(key: Type): Code {
     if (key.kind == TypeKind.Int || key.kind == TypeKind.Double) {
       return Code.RecordNumberKeys;
     }
@@ -136,7 +149,7 @@ partial class TypeResolver {
     return Code.RecordKeys;
   }
 
-  private inferred(ref: TypeRef, context: TypeContext): Type {
+  private readonly inferred(ref: TypeRef, context: Read<TypeContext>): Type {
     if (context.place == TypePlace.Pattern) {
       return this.store.typeParameter(context.module, ref.loc, ref.name);
     }
@@ -146,7 +159,7 @@ partial class TypeResolver {
     return this.store.plain(TypeKind.Error);
   }
 
-  private refusedNull(ref: TypeRef, context: TypeContext): Type {
+  private readonly refusedNull(ref: TypeRef, context: Read<TypeContext>): Type {
     if (!this.isLibrary(context.module)) {
       this.report(context.module, ref.loc, Code.NullType, kNoDetails);
     }
@@ -154,7 +167,7 @@ partial class TypeResolver {
     return this.store.plain(TypeKind.Error);
   }
 
-  private placed(context: TypeContext, place: TypePlace): TypeContext {
+  private readonly placed(context: Own<TypeContext>, place: TypePlace): TypeContext {
     if (context.place == TypePlace.Pattern) {
       return context;
     }

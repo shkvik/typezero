@@ -23,7 +23,7 @@ import {
 } from "./const/decimal-text.const.tz";
 
 export class DecimalText {
-  public isNumber(text: string): boolean {
+  public readonly isNumber(text: string): boolean {
     if (this.isPlain(text)) {
       return true;
     }
@@ -45,7 +45,7 @@ export class DecimalText {
     return this.isPlain(this.withoutSeparators(trimmed));
   }
 
-  private codeAt(text: string, index: int): int {
+  private readonly codeAt(text: string, index: int): int {
     if (index < 0 || index >= text.length) {
       return 0;
     }
@@ -53,11 +53,11 @@ export class DecimalText {
     return text.charCodeAt(index);
   }
 
-  private isDigit(code: int): boolean {
+  private readonly isDigit(code: int): boolean {
     return code >= kZeroDigit && code <= kNineDigit;
   }
 
-  private isSpace(code: int): boolean {
+  private readonly isSpace(code: int): boolean {
     if (kSpaceCodes.includes(code)) {
       return true;
     }
@@ -65,7 +65,7 @@ export class DecimalText {
     return code >= kWideSpaceFirst && code <= kWideSpaceLast;
   }
 
-  private trimmedStart(text: string): int {
+  private readonly trimmedStart(text: string): int {
     let start = 0;
 
     while (start < text.length && this.isSpace(this.codeAt(text, start))) {
@@ -81,7 +81,7 @@ export class DecimalText {
     return start;
   }
 
-  private trimmedEnd(text: string, start: int): int {
+  private readonly trimmedEnd(text: string, start: int): int {
     let end = text.length;
 
     while (end > start && this.isSpace(this.codeAt(text, end - 1))) {
@@ -91,7 +91,7 @@ export class DecimalText {
     return end;
   }
 
-  private bodyOf(trimmed: string, isNegative: boolean): string {
+  private readonly bodyOf(trimmed: string, isNegative: boolean): string {
     if (isNegative) {
       return trimmed.slice(1);
     }
@@ -99,7 +99,7 @@ export class DecimalText {
     return trimmed;
   }
 
-  private prefixBase(body: string): int | undefined {
+  private readonly prefixBase(body: string): int | undefined {
     const isPrefixed =
       body.length > 2 &&
       this.codeAt(body, 0) == kZeroDigit &&
@@ -122,7 +122,7 @@ export class DecimalText {
     return undefined;
   }
 
-  private withoutSeparators(text: string): string {
+  private readonly withoutSeparators(text: string): string {
     const kept: string[] = [];
 
     for (let index = 0; index < text.length; index++) {
@@ -138,7 +138,7 @@ export class DecimalText {
     return kept.join("");
   }
 
-  private isPlain(text: string): boolean {
+  private readonly isPlain(text: string): boolean {
     let index = 0;
 
     if (this.codeAt(text, index) == kMinusSign) {
@@ -178,7 +178,7 @@ export class DecimalText {
     return exponent == text.length;
   }
 
-  private exponentEnd(text: string, from: int): int | undefined {
+  private readonly exponentEnd(text: string, from: int): int | undefined {
     const mark = this.codeAt(text, from);
     if (mark != kExponentLower && mark != kExponentUpper) {
       return from;
@@ -204,11 +204,11 @@ export class DecimalText {
     return index;
   }
 
-  private baseDigit(code: int, base: int): boolean {
+  private readonly baseDigit(code: int, base: int): boolean {
     return this.digitValue(code) < base;
   }
 
-  private digitValue(code: int): int {
+  private readonly digitValue(code: int): int {
     if (this.isDigit(code)) {
       return code - kZeroDigit;
     }
@@ -222,7 +222,7 @@ export class DecimalText {
     return kNoDigit;
   }
 
-  private isBaseNumber(text: string, base: int): boolean {
+  private readonly isBaseNumber(text: string, base: int): boolean {
     let hasUpper = false;
     let hasLower = false;
 
@@ -240,7 +240,7 @@ export class DecimalText {
     return this.isBaseBody(text, base);
   }
 
-  private isBaseBody(text: string, base: int): boolean {
+  private readonly isBaseBody(text: string, base: int): boolean {
     let hasDot = false;
     let isAfterDigit = false;
     let hasAny = false;

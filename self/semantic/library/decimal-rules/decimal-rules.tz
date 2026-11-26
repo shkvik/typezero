@@ -39,10 +39,10 @@ export class DecimalRules {
 
   public constructor(
     store: TypeStore,
-    types: TypeQuestions,
-    sources: SourceTexts,
+    types: Own<TypeQuestions>,
+    sources: Own<SourceTexts>,
     text: TypeText,
-    operators: OperatorRules,
+    operators: Own<OperatorRules>,
   ) {
     this.store = store;
     this.types = types;
@@ -51,11 +51,11 @@ export class DecimalRules {
     this.operators = operators;
   }
 
-  public decimalType(): Type {
+  public readonly decimalType(): Type {
     return this.store.plain(TypeKind.Decimal);
   }
 
-  public decimalOfHint(arg: Expr): Type | undefined {
+  public readonly decimalOfHint(arg: Expr): Type | undefined {
     const isLiteral =
       arg.kind == ExprKind.IntLit || arg.kind == ExprKind.FloatLit;
     if (isLiteral) {
@@ -65,7 +65,7 @@ export class DecimalRules {
     return undefined;
   }
 
-  public maybePlace(isOptional: boolean): string {
+  public readonly maybePlace(isOptional: boolean): string {
     if (isOptional) {
       return "; the value may be undefined: check it first or give a default with '??'";
     }
@@ -73,7 +73,7 @@ export class DecimalRules {
     return "";
   }
 
-  public isTextType(type: Type): boolean {
+  public readonly isTextType(type: Type): boolean {
     if (this.types.isOptional(type)) {
       return false;
     }
@@ -92,7 +92,7 @@ export class DecimalRules {
     );
   }
 
-  public literalPartText(part: Type): string {
+  public readonly literalPartText(part: Type): string {
     if (part.kind == TypeKind.Literal) {
       return part.text;
     }
@@ -100,7 +100,7 @@ export class DecimalRules {
     return "";
   }
 
-  public decimalStaticHint(name: string): string {
+  public readonly decimalStaticHint(name: string): string {
     if (name == "maximum" || name == "minimum") {
       return `; use 'decimal.${name.slice(0, 3)}'`;
     }
@@ -111,7 +111,7 @@ export class DecimalRules {
     return "";
   }
 
-  public decimalMissingHint(name: string): string {
+  public readonly decimalMissingHint(name: string): string {
     const replacement = kDecimalReplacements.find((one) => one.name == name);
     let hint = "";
 
@@ -125,7 +125,7 @@ export class DecimalRules {
     return hint;
   }
 
-  public decimalMethodResult(method: DecimalMethod): Type {
+  public readonly decimalMethodResult(method: Read<DecimalMethod>): Type {
     switch (method.result) {
       case DecimalResult.Text:
         return this.store.plain(TypeKind.String);
@@ -140,7 +140,7 @@ export class DecimalRules {
     }
   }
 
-  public decimalTop(text: string): int | undefined {
+  public readonly decimalTop(text: string): int | undefined {
     const clean = text.replaceAll("_", "").toLowerCase();
     const mark = clean.indexOf("e");
     const mantissa = this.mantissaOf(clean, mark);
@@ -160,7 +160,7 @@ export class DecimalRules {
     return exponent - zeros - 1;
   }
 
-  public otherSide(isLeftDecimal: boolean, left: Type, right: Type): Type {
+  public readonly otherSide(isLeftDecimal: boolean, left: Type, right: Type): Type {
     if (isLeftDecimal) {
       return right;
     }
@@ -168,7 +168,7 @@ export class DecimalRules {
     return left;
   }
 
-  public integerMixText(
+  public readonly integerMixText(
     isLeftDecimal: boolean,
     op: string,
     texts: OperandTexts,
@@ -184,7 +184,7 @@ export class DecimalRules {
     return `${converted}.toDecimal() ${op} ${texts.right}`;
   }
 
-  public inexactText(
+  public readonly inexactText(
     isLeftDecimal: boolean,
     op: string,
     texts: OperandTexts,
@@ -196,7 +196,7 @@ export class DecimalRules {
     return `decimal(${texts.left}) ${op} ${texts.right}`;
   }
 
-  public decimalStaticMissingError(
+  public readonly decimalStaticMissingError(
     member: MemberExpr,
   ): SourceError | undefined {
     const name = member.name;
@@ -211,7 +211,7 @@ export class DecimalRules {
     };
   }
 
-  public decimalMixError(
+  public readonly decimalMixError(
     expr: BinaryExpr,
     pair: OperandPair,
     module: int,
@@ -270,7 +270,7 @@ export class DecimalRules {
     };
   }
 
-  public decimalPower(expr: BinaryExpr, pair: OperandPair): Checked<Type> {
+  public readonly decimalPower(expr: BinaryExpr, pair: OperandPair): Checked<Type> {
     const right = pair.right;
 
     if (pair.left.kind != TypeKind.Decimal) {
@@ -306,7 +306,7 @@ export class DecimalRules {
     };
   }
 
-  public decimalStaticRead(expr: MemberExpr): Checked<Type> {
+  public readonly decimalStaticRead(expr: MemberExpr): Checked<Type> {
     if (kDecimalStatics.includes(expr.name)) {
       return {
         value: this.store.plain(TypeKind.Error),
@@ -325,7 +325,7 @@ export class DecimalRules {
     return { value: this.store.plain(TypeKind.Error), error };
   }
 
-  private mantissaOf(clean: string, mark: int): string {
+  private readonly mantissaOf(clean: string, mark: int): string {
     if (mark < 0) {
       return clean;
     }
@@ -333,7 +333,7 @@ export class DecimalRules {
     return clean.slice(0, mark);
   }
 
-  private exponentOf(clean: string, mark: int): int {
+  private readonly exponentOf(clean: string, mark: int): int {
     if (mark < 0) {
       return 0;
     }
@@ -350,13 +350,13 @@ export class DecimalRules {
     return value;
   }
 
-  private wholeDigits(mantissa: string, dot: int): string {
+  private readonly wholeDigits(mantissa: string, dot: int): string {
     const whole = this.wholePart(mantissa, dot);
 
     return whole.slice(this.leadingZeros(whole));
   }
 
-  private leadingZeros(text: string): int {
+  private readonly leadingZeros(text: string): int {
     let count = 0;
 
     while (count < text.length && text.charAt(count) == "0") {
@@ -366,7 +366,7 @@ export class DecimalRules {
     return count;
   }
 
-  private wholePart(mantissa: string, dot: int): string {
+  private readonly wholePart(mantissa: string, dot: int): string {
     if (dot < 0) {
       return mantissa;
     }

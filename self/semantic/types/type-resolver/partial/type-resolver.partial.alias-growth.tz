@@ -7,7 +7,7 @@ import {
 } from "../../../../program/ast/types/ast.types.types.tz";
 
 partial class TypeResolver {
-  private aliasGrowthCheck(module: int, decl: TypeAliasDecl): void {
+  private readonly aliasGrowthCheck(module: int, decl: TypeAliasDecl): void {
     if (decl.typeParams.length == 0 || this.record(module)?.library != false) {
       return;
     }
@@ -31,13 +31,13 @@ partial class TypeResolver {
     this.report(module, decl.loc, Code.AliasEndless, { word: decl.name });
   }
 
-  public namedRefs(root: TypeRef, name: string): TypeRef[] {
+  public readonly namedRefs(root: TypeRef, name: string): TypeRef[] {
     const refs = this.refsOf(root);
 
     return refs.filter((ref) => ref.name == name);
   }
 
-  public isGrowingUse(root: TypeRef, name: string, names: string[]): boolean {
+  public readonly isGrowingUse(root: TypeRef, name: string, names: Read<string[]>): boolean {
     const refs = this.refsOf(root);
 
     return refs.some(
@@ -45,7 +45,7 @@ partial class TypeResolver {
     );
   }
 
-  private isSameArguments(ref: TypeRef, names: string[]): boolean {
+  private readonly isSameArguments(ref: TypeRef, names: Read<string[]>): boolean {
     if (ref.args.length != names.length) {
       return true;
     }
@@ -56,7 +56,7 @@ partial class TypeResolver {
     );
   }
 
-  private refsOf(root: TypeRef): TypeRef[] {
+  private readonly refsOf(root: TypeRef): TypeRef[] {
     const found: TypeRef[] = [root];
 
     for (let index = 0; index < found.length; index++) {
@@ -69,7 +69,7 @@ partial class TypeResolver {
     return found;
   }
 
-  private addChildRefs(ref: TypeRef, found: TypeRef[]): void {
+  private readonly addChildRefs(ref: TypeRef, found: TypeRef[]): void {
     for (const arg of ref.args) {
       found.push(arg);
     }

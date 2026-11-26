@@ -25,7 +25,7 @@ import {
 import { CryptoCall } from "../../../crypto-rules/types/crypto-rules.types.tz";
 
 partial class ExpressionTypes {
-  private signOnceCheck(
+  private readonly signOnceCheck(
     call: CryptoCall,
     keyLabel: string,
     isCounted: boolean,
@@ -45,7 +45,7 @@ partial class ExpressionTypes {
     this.signKeyCheck(call, keyArg, keyLabel, module);
   }
 
-  private verifyOnceCheck(
+  private readonly verifyOnceCheck(
     call: CryptoCall,
     isCounted: boolean,
     module: int,
@@ -62,7 +62,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private signKeyCheck(
+  private readonly signKeyCheck(
     call: CryptoCall,
     keyArg: Expr,
     keyLabel: string,
@@ -88,7 +88,7 @@ partial class ExpressionTypes {
     this.cryptoKeyDataCheck(key, kKeyLabel, module);
   }
 
-  private cryptoKeyDataCheck(key: Expr, label: string, module: int): void {
+  private readonly cryptoKeyDataCheck(key: Expr, label: string, module: int): void {
     const given = this.peekType(key, module);
     const dataError = this.crypto.dataError(
       key.loc,
@@ -100,7 +100,7 @@ partial class ExpressionTypes {
     this.reportFound(module, dataError);
   }
 
-  private argonCheck(call: CryptoCall, module: int): void {
+  private readonly argonCheck(call: CryptoCall, module: int): void {
     const expr = call.expr;
     const first = expr.args[0]?.expr;
     if (expr.args.length != 2 || first == undefined) {
@@ -126,7 +126,7 @@ partial class ExpressionTypes {
     this.argonNeedsCheck(call, module);
   }
 
-  private argonNeedsCheck(call: CryptoCall, module: int): void {
+  private readonly argonNeedsCheck(call: CryptoCall, module: int): void {
     const expr = call.expr;
     const options = expr.args[1]?.expr;
     if (options == undefined || options.kind != ExprKind.ObjectLit) {
@@ -146,7 +146,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private primeCheck(call: CryptoCall, module: int): void {
+  private readonly primeCheck(call: CryptoCall, module: int): void {
     const expr = call.expr;
     const count = expr.args.length;
     if (count < 1 || count > 2) {
@@ -165,7 +165,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private cryptoIntAt(expr: CallExpr, index: int, module: int): void {
+  private readonly cryptoIntAt(expr: CallExpr, index: int, module: int): void {
     const arg = expr.args[index]?.expr;
     if (arg == undefined) {
       return;

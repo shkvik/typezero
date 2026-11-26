@@ -17,8 +17,12 @@ export type ModuleImport = {
 
 export type ModuleNames = {
   readonly module: Module;
-  readonly declared: Map<string, int>;
-  readonly exports: Map<string, ModuleExport>;
-  readonly imports: Map<string, ModuleImport>;
-  readonly errors: SourceError[];
+  readonly declared: Cell<Map<string, int>>;
+  readonly exports: Cell<Map<string, ModuleExport>>;
+  readonly imports: Cell<Map<string, ModuleImport>>;
+  readonly errors: Cell<SourceError[]>;
 };
+
+export type InternedNames = Interned<
+  ModuleNames | ModuleExport | ModuleImport | NameTarget
+>;

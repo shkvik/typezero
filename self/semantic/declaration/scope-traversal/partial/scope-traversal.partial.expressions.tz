@@ -17,7 +17,7 @@ partial class ScopeTraversal {
     }
   }
 
-  private traverseExprs(exprs: Expr[]): void {
+  private traverseExprs(exprs: Read<Expr[]>): void {
     for (const expr of exprs) {
       this.traverseExpr(expr);
     }
@@ -92,7 +92,7 @@ partial class ScopeTraversal {
     }
   }
 
-  private traverseArguments(args: CallArgument[]): void {
+  private traverseArguments(args: Read<CallArgument[]>): void {
     for (const argument of args) {
       this.traverseExpr(argument.expr);
     }

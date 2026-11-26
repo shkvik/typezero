@@ -27,13 +27,13 @@ export class ComparisonRules {
   private readonly decimals: DecimalRules;
 
   public constructor(
-    types: TypeQuestions,
-    unifier: TypeUnifier,
+    types: Own<TypeQuestions>,
+    unifier: Own<TypeUnifier>,
     shapes: ExpressionShapes,
     store: TypeStore,
-    relation: TypeRelation,
-    operators: OperatorRules,
-    decimals: DecimalRules,
+    relation: Own<TypeRelation>,
+    operators: Own<OperatorRules>,
+    decimals: Own<DecimalRules>,
   ) {
     this.types = types;
     this.unifier = unifier;
@@ -44,7 +44,7 @@ export class ComparisonRules {
     this.decimals = decimals;
   }
 
-  public literalComparisonHint(
+  public readonly literalComparisonHint(
     isLiteral: boolean,
     other: Type,
     self: Expr,
@@ -56,7 +56,7 @@ export class ComparisonRules {
     return this.comparisonHint(other, self);
   }
 
-  public isComparedLiteral(expr: Expr): boolean {
+  public readonly isComparedLiteral(expr: Expr): boolean {
     const isNegated = expr.kind == ExprKind.Unary && expr.op == UnaryOp.Neg;
     const operand = this.negatedOperand(isNegated, expr);
     const kind = operand.kind;
@@ -65,7 +65,7 @@ export class ComparisonRules {
     return this.shapes.isNumberTree(operand) || isWritten;
   }
 
-  public comparisonHint(other: Type, self: Expr): Type | undefined {
+  public readonly comparisonHint(other: Type, self: Expr): Type | undefined {
     const type = this.types.definedType(other);
     if (type.kind == TypeKind.Literal || type.kind == TypeKind.Union) {
       return other;
@@ -83,7 +83,7 @@ export class ComparisonRules {
     return undefined;
   }
 
-  public nullOperand(isLeftNull: boolean, expr: BinaryExpr): Expr {
+  public readonly nullOperand(isLeftNull: boolean, expr: BinaryExpr): Expr {
     if (isLeftNull) {
       return expr.lhs;
     }
@@ -91,7 +91,7 @@ export class ComparisonRules {
     return expr.rhs;
   }
 
-  public comparisonType(left: Type, right: Type): Type | undefined {
+  public readonly comparisonType(left: Type, right: Type): Type | undefined {
     if (left.kind == TypeKind.Void || right.kind == TypeKind.Void) {
       return undefined;
     }
@@ -109,7 +109,7 @@ export class ComparisonRules {
     return common;
   }
 
-  public nullishHint(left: Type, expected: Type | undefined): Type | undefined {
+  public readonly nullishHint(left: Type, expected: Type | undefined): Type | undefined {
     if (left.kind == TypeKind.Undefined || left.kind == TypeKind.Error) {
       return expected;
     }
@@ -117,7 +117,7 @@ export class ComparisonRules {
     return this.types.definedType(left);
   }
 
-  public nullishBase(left: Type, right: Type): Type | undefined {
+  public readonly nullishBase(left: Type, right: Type): Type | undefined {
     const plainLeft = this.types.definedType(left);
 
     if (right.kind == TypeKind.Undefined) {
@@ -129,7 +129,7 @@ export class ComparisonRules {
     return this.unifier.unionUnify(plainLeft, plainRight);
   }
 
-  public jsonEqualityError(
+  public readonly jsonEqualityError(
     expr: BinaryExpr,
     pair: OperandPair,
   ): SourceError | undefined {
@@ -159,7 +159,7 @@ export class ComparisonRules {
     return operandsError;
   }
 
-  public incomparableError(
+  public readonly incomparableError(
     expr: BinaryExpr,
     pair: OperandPair,
     module: int,
@@ -192,11 +192,11 @@ export class ComparisonRules {
     return operandsError;
   }
 
-  public isOrdering(op: string): boolean {
+  public readonly isOrdering(op: string): boolean {
     return kOrderingOperators.includes(op);
   }
 
-  private negatedOperand(isNegated: boolean, expr: Expr): Expr {
+  private readonly negatedOperand(isNegated: boolean, expr: Expr): Expr {
     if (!isNegated || expr.kind != ExprKind.Unary) {
       return expr;
     }
@@ -204,7 +204,7 @@ export class ComparisonRules {
     return expr.operand;
   }
 
-  private isFittingLiteral(expr: Expr, type: Type): boolean {
+  private readonly isFittingLiteral(expr: Expr, type: Type): boolean {
     if (type.kind != TypeKind.Int) {
       return false;
     }
@@ -226,7 +226,7 @@ export class ComparisonRules {
     return operand.value == 0 || (!unsigned && operand.value <= limit.lowest);
   }
 
-  private isComparable(base: Type): boolean {
+  private readonly isComparable(base: Type): boolean {
     switch (base.kind) {
       case TypeKind.Int:
       case TypeKind.Double:

@@ -83,7 +83,7 @@ partial class FileParser {
     }
   }
 
-  private patternValueCode(target: Expr): Code {
+  private readonly patternValueCode(target: Expr): Code {
     if (target.kind == ExprKind.ObjectLit) {
       return Code.ObjectPatternAssignmentNotStatement;
     }
@@ -91,7 +91,7 @@ partial class FileParser {
     return Code.PatternAssignmentNotStatement;
   }
 
-  private endsPatternStatement(): boolean {
+  private readonly endsPatternStatement(): boolean {
     let closed = 0;
 
     while (this.cursor.tokenAt(closed).kind == TokenKind.RParen) {
@@ -108,7 +108,7 @@ partial class FileParser {
     return closed == 0 || !this.usesValue(next);
   }
 
-  private usesValue(token: Token): boolean {
+  private readonly usesValue(token: Token): boolean {
     if (token.newline) {
       return false;
     }
@@ -134,7 +134,7 @@ partial class FileParser {
     }
   }
 
-  private closesStatement(kind: TokenKind): boolean {
+  private readonly closesStatement(kind: TokenKind): boolean {
     switch (kind) {
       case TokenKind.Semi:
       case TokenKind.RBrace:
@@ -177,7 +177,7 @@ partial class FileParser {
     return this.expression();
   }
 
-  private startsYieldOperand(kind: TokenKind): boolean {
+  private readonly startsYieldOperand(kind: TokenKind): boolean {
     return (
       this.binaryPrecedence(kind) == Precedence.None ||
       kind == TokenKind.Plus ||
@@ -388,7 +388,8 @@ partial class FileParser {
   }
 
   private classPrimary(token: Token): Expr {
-    const decl = this.classDecl(true);
+    const draft = this.classDecl(true);
+    const decl = this.finishedClass(draft);
 
     return { kind: ExprKind.Class, loc: token.start, decl };
   }
@@ -416,7 +417,7 @@ partial class FileParser {
     return { kind: ExprKind.Name, loc, name, known: token.known, typeArgs: [] };
   }
 
-  private endsYield(kind: TokenKind): boolean {
+  private readonly endsYield(kind: TokenKind): boolean {
     switch (kind) {
       case TokenKind.RParen:
       case TokenKind.RBracket:
@@ -434,7 +435,7 @@ partial class FileParser {
     }
   }
 
-  private invalid(loc: int): Expr {
+  private readonly invalid(loc: int): Expr {
     return { kind: ExprKind.IntLit, loc, value: 0 };
   }
 }

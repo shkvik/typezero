@@ -50,11 +50,11 @@ export class OperatorRules {
   public constructor(
     store: TypeStore,
     text: TypeText,
-    relation: TypeRelation,
-    types: TypeQuestions,
-    sources: SourceTexts,
-    unifier: TypeUnifier,
-    mismatches: MismatchRules,
+    relation: Own<TypeRelation>,
+    types: Own<TypeQuestions>,
+    sources: Own<SourceTexts>,
+    unifier: Own<TypeUnifier>,
+    mismatches: Own<MismatchRules>,
     shapes: ExpressionShapes,
     integers: IntegerMath,
   ) {
@@ -69,7 +69,7 @@ export class OperatorRules {
     this.integers = integers;
   }
 
-  public literalSideHint(
+  public readonly literalSideHint(
     isLiteral: boolean,
     other: Type,
     hint: Type | undefined,
@@ -86,7 +86,7 @@ export class OperatorRules {
     return hint;
   }
 
-  public operandHints(op: BinaryOp, expected: Type | undefined): OperandHints {
+  public readonly operandHints(op: BinaryOp, expected: Type | undefined): OperandHints {
     const isBitwise = this.isBitwise(op);
     const isPower = op == BinaryOp.Pow;
     const hint = this.numberHint(expected, isBitwise);
@@ -101,7 +101,7 @@ export class OperatorRules {
     return { left: hint, right: hint, isBitwise, canHint };
   }
 
-  public powerSide(isFloatPower: boolean, left: Type, right: Type): Type {
+  public readonly powerSide(isFloatPower: boolean, left: Type, right: Type): Type {
     if (isFloatPower) {
       return left;
     }
@@ -109,7 +109,7 @@ export class OperatorRules {
     return right;
   }
 
-  public commonNumber(
+  public readonly commonNumber(
     hasNumbers: boolean,
     left: Type,
     right: Type,
@@ -121,7 +121,7 @@ export class OperatorRules {
     return this.unifier.commonType(left, right);
   }
 
-  public shiftHint(
+  public readonly shiftHint(
     expr: BinaryExpr,
     isInteger: boolean,
     expected: Type | undefined,
@@ -133,7 +133,7 @@ export class OperatorRules {
     return expected;
   }
 
-  public isNothingChanged(expr: BinaryExpr, left: Type): boolean {
+  public readonly isNothingChanged(expr: BinaryExpr, left: Type): boolean {
     const isOrZero = expr.op == BinaryOp.BitOr || expr.op == BinaryOp.UShr;
     const zero = expr.rhs;
     const isZero = zero.kind == ExprKind.IntLit && zero.value == 0;
@@ -143,7 +143,7 @@ export class OperatorRules {
     );
   }
 
-  public mixedConversion(left: Type, right: Type): NumberConversion {
+  public readonly mixedConversion(left: Type, right: Type): NumberConversion {
     if (left.kind == TypeKind.Double || right.kind == TypeKind.Double) {
       const target = this.store.plain(TypeKind.Double);
       const isLeftConverted = left.kind != TypeKind.Double;
@@ -162,7 +162,7 @@ export class OperatorRules {
     return { target: int, isLeftConverted: left != int };
   }
 
-  public isBitwise(op: BinaryOp): boolean {
+  public readonly isBitwise(op: BinaryOp): boolean {
     switch (op) {
       case BinaryOp.BitAnd:
       case BinaryOp.BitOr:
@@ -173,7 +173,7 @@ export class OperatorRules {
     }
   }
 
-  public isShift(op: BinaryOp): boolean {
+  public readonly isShift(op: BinaryOp): boolean {
     switch (op) {
       case BinaryOp.Shl:
       case BinaryOp.Shr:
@@ -184,11 +184,11 @@ export class OperatorRules {
     }
   }
 
-  public isWrapping(type: Type): boolean {
+  public readonly isWrapping(type: Type): boolean {
     return type.kind == TypeKind.Int && type.wraps;
   }
 
-  public withoutNever(pair: OperandPair): OperandPair {
+  public readonly withoutNever(pair: OperandPair): OperandPair {
     const left = pair.left;
     const right = pair.right;
     const isLeftNever = left.kind == TypeKind.Never;
@@ -208,7 +208,7 @@ export class OperatorRules {
     return pair;
   }
 
-  public castHint(isArray: boolean, to: Type): Type | undefined {
+  public readonly castHint(isArray: boolean, to: Type): Type | undefined {
     if (!isArray || to.kind == TypeKind.Error) {
       return undefined;
     }
@@ -216,7 +216,7 @@ export class OperatorRules {
     return to;
   }
 
-  public castCode(from: Type, to: Type, isArray: boolean): Code {
+  public readonly castCode(from: Type, to: Type, isArray: boolean): Code {
     if (from.kind == TypeKind.Error || to.kind == TypeKind.Error) {
       return Code.CastPlain;
     }
@@ -235,7 +235,7 @@ export class OperatorRules {
     return this.castConversion(this.types.apparent(from), to);
   }
 
-  public castWord(expr: CastExpr, code: Code, to: Type): string {
+  public readonly castWord(expr: CastExpr, code: Code, to: Type): string {
     if (code == Code.CastDeclare || code == Code.CastItself) {
       return this.text.of(to);
     }
@@ -243,7 +243,7 @@ export class OperatorRules {
     return this.sources.operandName(expr.operand);
   }
 
-  public fractionText(left: Type, texts: OperandTexts): string {
+  public readonly fractionText(left: Type, texts: OperandTexts): string {
     if (left.kind == TypeKind.Double) {
       return texts.left;
     }
@@ -251,7 +251,7 @@ export class OperatorRules {
     return texts.right;
   }
 
-  public droppedValue(type: Type): Type {
+  public readonly droppedValue(type: Type): Type {
     if (type.kind != TypeKind.Promise) {
       return type;
     }
@@ -259,7 +259,7 @@ export class OperatorRules {
     return type.value;
   }
 
-  public droppedCode(isPromised: boolean): Code {
+  public readonly droppedCode(isPromised: boolean): Code {
     if (isPromised) {
       return Code.VoidDropsAsyncResult;
     }
@@ -267,7 +267,7 @@ export class OperatorRules {
     return Code.VoidDropsResult;
   }
 
-  public assertedText(expr: Expr): string | undefined {
+  public readonly assertedText(expr: Expr): string | undefined {
     switch (expr.kind) {
       case ExprKind.Name:
         if (expr.name.startsWith(kHiddenMark)) {
@@ -301,7 +301,7 @@ export class OperatorRules {
     }
   }
 
-  public signHint(expr: UnaryExpr, wanted: Type | undefined): Type | undefined {
+  public readonly signHint(expr: UnaryExpr, wanted: Type | undefined): Type | undefined {
     const plain = this.types.wantedPart(wanted);
     if (plain == undefined) {
       return undefined;
@@ -317,7 +317,7 @@ export class OperatorRules {
     return target;
   }
 
-  public integerOf(type: Type | undefined): Type | undefined {
+  public readonly integerOf(type: Type | undefined): Type | undefined {
     if (type == undefined || type.kind != TypeKind.Int) {
       return undefined;
     }
@@ -325,13 +325,13 @@ export class OperatorRules {
     return type;
   }
 
-  public unaryText(op: UnaryOp): string {
+  public readonly unaryText(op: UnaryOp): string {
     const row = kUnaryTexts.find((one) => one.op == op);
 
     return row?.text ?? "";
   }
 
-  public bitsOfDoubleError(
+  public readonly bitsOfDoubleError(
     expr: BinaryExpr,
     left: Type,
     module: int,
@@ -344,7 +344,7 @@ export class OperatorRules {
     return { code: Code.BitsOfDouble, loc: expr.loc, details: { other, word } };
   }
 
-  public mixedError(
+  public readonly mixedError(
     expr: BinaryExpr,
     pair: OperandPair,
     module: int,
@@ -389,7 +389,7 @@ export class OperatorRules {
     };
   }
 
-  public nothingChangedError(
+  public readonly nothingChangedError(
     expr: BinaryExpr,
     left: Type,
     module: int,
@@ -430,7 +430,7 @@ export class OperatorRules {
     };
   }
 
-  public operandsError(
+  public readonly operandsError(
     expr: BinaryExpr,
     pair: OperandPair,
   ): SourceError | undefined {
@@ -463,7 +463,7 @@ export class OperatorRules {
     };
   }
 
-  public overflowError(
+  public readonly overflowError(
     expr: Expr,
     type: IntType,
     shown: string,
@@ -480,7 +480,7 @@ export class OperatorRules {
     };
   }
 
-  public signedShiftError(
+  public readonly signedShiftError(
     expr: BinaryExpr,
     left: Type,
     module: int,
@@ -508,7 +508,7 @@ export class OperatorRules {
     };
   }
 
-  public parameterArithmetic(
+  public readonly parameterArithmetic(
     expr: BinaryExpr,
     pair: OperandPair,
   ): Checked<Type> {
@@ -529,7 +529,7 @@ export class OperatorRules {
     return { value: this.store.plain(TypeKind.Error) };
   }
 
-  public reportsBits(
+  public readonly reportsBits(
     expr: BinaryExpr,
     pair: OperandPair,
     module: int,
@@ -561,7 +561,7 @@ export class OperatorRules {
     return { value: false };
   }
 
-  private numberHint(
+  private readonly numberHint(
     expected: Type | undefined,
     isBitwise: boolean,
   ): Type | undefined {
@@ -575,7 +575,7 @@ export class OperatorRules {
     return undefined;
   }
 
-  private holds(wide: Type, narrow: Type): boolean {
+  private readonly holds(wide: Type, narrow: Type): boolean {
     if (wide.kind != TypeKind.Int || narrow.kind != TypeKind.Int) {
       return false;
     }
@@ -597,11 +597,11 @@ export class OperatorRules {
     return small.lowest <= big.lowest && small.highest <= big.highest;
   }
 
-  private isNeverTarget(type: Type): boolean {
+  private readonly isNeverTarget(type: Type): boolean {
     return type.kind != TypeKind.Error && type.kind != TypeKind.Void;
   }
 
-  private castConversion(from: Type, to: Type): Code {
+  private readonly castConversion(from: Type, to: Type): Code {
     const number = this.mismatches.numberCode(from, to);
     if (number == Code.ConvertExplicitly) {
       return Code.CastConvert;
@@ -622,7 +622,7 @@ export class OperatorRules {
     return Code.CastCannot;
   }
 
-  private numberMember(type: Type, isFraction: boolean): Type | undefined {
+  private readonly numberMember(type: Type, isFraction: boolean): Type | undefined {
     if (type.kind != TypeKind.Union) {
       return undefined;
     }

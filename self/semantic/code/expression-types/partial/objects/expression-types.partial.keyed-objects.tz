@@ -15,7 +15,7 @@ import {
 import { kNoPlace } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private keyedLiteralCheck(
+  private readonly keyedLiteralCheck(
     expr: ObjectLitExpr,
     target: Type | undefined,
     module: int,
@@ -58,7 +58,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private isEnumMemberKey(key: Expr, module: int): boolean {
+  private readonly isEnumMemberKey(key: Expr, module: int): boolean {
     if (key.kind != ExprKind.Member) {
       return false;
     }
@@ -66,7 +66,7 @@ partial class ExpressionTypes {
     return this.enumHomeOf(key.object, module) != undefined;
   }
 
-  private keyedPropertyFails(
+  private readonly keyedPropertyFails(
     property: Property,
     key: Expr,
     keyType: Type,
@@ -84,7 +84,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private targetedKeyFails(
+  private readonly targetedKeyFails(
     property: Property,
     key: Expr,
     keyType: Type,
@@ -115,7 +115,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private inferredKeyFails(
+  private readonly inferredKeyFails(
     property: Property,
     key: Expr,
     keyType: Type,

@@ -8,8 +8,8 @@ import { kDateFieldLimit } from "../../../../code/expression-types/const/express
 import { DateFieldValues } from "../../../../code/expression-types/types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private dateFieldsCheck(
-    args: CallArgument[],
+  private readonly dateFieldsCheck(
+    args: Own<CallArgument[]>,
     first: int,
     setter: string,
     module: int,
@@ -39,7 +39,7 @@ partial class ExpressionTypes {
     this.reportAll(module, timeFieldsErrors);
   }
 
-  private dateConstant(arg: Expr, type: Type, module: int): int | undefined {
+  private readonly dateConstant(arg: Expr, type: Type, module: int): int | undefined {
     const base = this.types.apparent(type);
     const value = this.intConstant(arg, base, module);
     if (value == undefined) {
@@ -54,7 +54,7 @@ partial class ExpressionTypes {
     return Math.trunc(double).toInt();
   }
 
-  private validMonth(fields: DateFieldValues, module: int): int | undefined {
+  private readonly validMonth(fields: Read<DateFieldValues>, module: int): int | undefined {
     const checked = this.dates.validMonth(fields);
 
     this.reportFound(module, checked.error);

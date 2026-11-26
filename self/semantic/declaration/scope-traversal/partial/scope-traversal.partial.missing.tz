@@ -23,7 +23,7 @@ partial class ScopeTraversal {
     this.report(loc, missing, { word: name });
   }
 
-  private isResultHalfName(name: string): boolean {
+  private readonly isResultHalfName(name: string): boolean {
     const isHalf = name == "Ok" || name == "Err";
 
     return isHalf && this.scopes.findType(name) == undefined;
@@ -61,11 +61,11 @@ partial class ScopeTraversal {
     this.report(loc, code, { word, other: absent.instead ?? "" });
   }
 
-  private isHinted(absent: AbsentName): boolean {
+  private readonly isHinted(absent: AbsentName): boolean {
     return absent.reason != AbsentReason.ErrorClass;
   }
 
-  private absentWord(absent: AbsentName, isMade: boolean): string {
+  private readonly absentWord(absent: AbsentName, isMade: boolean): string {
     const isCode =
       absent.reason == AbsentReason.CodeFromString ||
       absent.reason == AbsentReason.Proxy;
@@ -76,7 +76,7 @@ partial class ScopeTraversal {
     return absent.name;
   }
 
-  private isErrorClassBase(name: string): boolean {
+  private readonly isErrorClassBase(name: string): boolean {
     const absent = kGlobalNames.absent(name);
     if (absent == undefined || absent.reason != AbsentReason.ErrorClass) {
       return false;
@@ -85,7 +85,7 @@ partial class ScopeTraversal {
     return !this.isTypeName(name);
   }
 
-  private isTypeName(name: string): boolean {
+  private readonly isTypeName(name: string): boolean {
     const entry = this.scopes.findType(name);
 
     return (
@@ -95,7 +95,7 @@ partial class ScopeTraversal {
     );
   }
 
-  private absentCode(reason: AbsentReason): Code {
+  private readonly absentCode(reason: AbsentReason): Code {
     switch (reason) {
       case AbsentReason.CodeFromString:
         return Code.NoCodeFromString;

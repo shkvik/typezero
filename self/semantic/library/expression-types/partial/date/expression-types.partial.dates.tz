@@ -29,7 +29,7 @@ import { kDateName } from "../../../../types/type-questions/const/type-questions
 import { kGetYearName } from "../../../date-rules/const/date-rules.const.tz";
 
 partial class ExpressionTypes {
-  private isDateName(expr: Expr, module: int): boolean {
+  private readonly isDateName(expr: Expr, module: int): boolean {
     if (expr.kind != ExprKind.Name || expr.name != kDateName) {
       return false;
     }
@@ -37,7 +37,7 @@ partial class ExpressionTypes {
     return this.isGlobalUse(expr, module);
   }
 
-  private dateInstance(): InstanceType | undefined {
+  private readonly dateInstance(): InstanceType | undefined {
     const target = this.globalValue(kDateName);
     if (target == undefined) {
       return undefined;
@@ -57,11 +57,11 @@ partial class ExpressionTypes {
     return made;
   }
 
-  private dateType(): Type {
+  private readonly dateType(): Type {
     return this.dateInstance() ?? this.store.plain(TypeKind.Error);
   }
 
-  private dateNew(expr: NewExpr, module: int): Type {
+  private readonly dateNew(expr: NewExpr, module: int): Type {
     const args = expr.args;
     const count = args.length;
     if (count > kMostDateFields) {
@@ -93,7 +93,7 @@ partial class ExpressionTypes {
     return this.dateOfValue(given, module);
   }
 
-  private dateOfValue(given: Expr, module: int): Type {
+  private readonly dateOfValue(given: Expr, module: int): Type {
     const type = this.typed(given, undefined, module);
     const base = this.types.apparent(type);
     if (base.kind == TypeKind.Error) {
@@ -129,7 +129,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private dateFunctionCall(
+  private readonly dateFunctionCall(
     expr: CallExpr,
     callee: NameExpr,
     module: int,
@@ -144,7 +144,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.String);
   }
 
-  private dateStaticCall(
+  private readonly dateStaticCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -191,7 +191,7 @@ partial class ExpressionTypes {
     return result;
   }
 
-  private textArgument(arg: Expr, module: int): void {
+  private readonly textArgument(arg: Expr, module: int): void {
     const string = this.store.plain(TypeKind.String);
     const type = this.typed(arg, string, module);
     if (type.kind == TypeKind.Error) {
@@ -201,7 +201,7 @@ partial class ExpressionTypes {
     this.coerce(arg, type, string, module, kNoPlace);
   }
 
-  private dateCountCheck(
+  private readonly dateCountCheck(
     expr: CallExpr,
     member: MemberExpr,
     method: FunctionType,
@@ -215,7 +215,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private dateStaticRead(expr: MemberExpr, module: int): Type {
+  private readonly dateStaticRead(expr: MemberExpr, module: int): Type {
     const checked = this.dates.dateStaticRead(expr);
 
     this.reportFound(module, checked.error);
@@ -223,7 +223,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private dateMethodCall(
+  private readonly dateMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -280,7 +280,7 @@ partial class ExpressionTypes {
     return result;
   }
 
-  private dateMemberRead(
+  private readonly dateMemberRead(
     expr: MemberExpr,
     instance: InstanceType,
     module: int,
@@ -307,7 +307,7 @@ partial class ExpressionTypes {
     return error;
   }
 
-  private timeArgument(arg: Expr, module: int): Type {
+  private readonly timeArgument(arg: Expr, module: int): Type {
     const int = this.store.integer(64, false);
     const type = this.typed(arg, int, module);
 
@@ -316,7 +316,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private timeCoerce(arg: Expr, type: Type, module: int): void {
+  private readonly timeCoerce(arg: Expr, type: Type, module: int): void {
     const base = this.types.apparent(type);
     if (base.kind == TypeKind.Error || base.kind == TypeKind.Int) {
       return;
@@ -327,7 +327,7 @@ partial class ExpressionTypes {
     this.coerce(arg, type, int, module, kNoPlace);
   }
 
-  private dateArithmetic(
+  private readonly dateArithmetic(
     expr: BinaryExpr,
     pair: OperandPair,
     module: int,

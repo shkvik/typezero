@@ -36,6 +36,21 @@ export interface Array<T> {
   at(index: int): T | undefined;
   /** A new array of the items from `start` up to `end`. */
   slice(start?: int, end?: int): T[];
+  /**
+   * A look at the items from start to end, for reading only.
+   * @example const head = items.view(0, 3)
+   */
+  view(start?: int, end?: int): readonly T[];
+  /**
+   * Takes every item out, in order, and leaves the array empty.
+   * @example for (using file of files.drain()) {}
+   */
+  drain(): T[];
+  /**
+   * Keeps only the items the function says yes to, in place.
+   * @example items.retain((item) => item.isLive)
+   */
+  retain(keep: (item: T, index: int, all: T[]) => boolean): void;
   /** A new array of this one followed by the items and the items of arrays. */
   concat(...items: (T | T[])[]): T[];
 
@@ -125,4 +140,4 @@ export interface ArrayConstructor {
 export declare const Array: ArrayConstructor;
 
 /** The same as `T[]`. */
-export type ReadonlyArray<T> = T[];
+export type ReadonlyArray<T> = readonly T[];

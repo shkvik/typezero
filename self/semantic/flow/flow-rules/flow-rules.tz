@@ -26,8 +26,8 @@ export class FlowRules {
 
   public constructor(
     store: TypeStore,
-    relation: TypeRelation,
-    types: TypeQuestions,
+    relation: Own<TypeRelation>,
+    types: Own<TypeQuestions>,
     text: TypeText,
     shapes: ExpressionShapes,
   ) {
@@ -38,7 +38,7 @@ export class FlowRules {
     this.shapes = shapes;
   }
 
-  public logicalAssignWord(isAnd: boolean): string {
+  public readonly logicalAssignWord(isAnd: boolean): string {
     if (isAnd) {
       return "&&=";
     }
@@ -46,7 +46,7 @@ export class FlowRules {
     return "||=";
   }
 
-  public assignUse(op: BinaryOp | undefined): TruthUse {
+  public readonly assignUse(op: BinaryOp | undefined): TruthUse {
     if (op == BinaryOp.LogOr) {
       return TruthUse.OrAssign;
     }
@@ -54,7 +54,7 @@ export class FlowRules {
     return TruthUse.AndAssign;
   }
 
-  public assignedWanted(
+  public readonly assignedWanted(
     op: BinaryOp | undefined,
     declared: Type | undefined,
   ): Type | undefined {
@@ -70,7 +70,7 @@ export class FlowRules {
     return declared;
   }
 
-  public assignedFact(
+  public readonly assignedFact(
     op: BinaryOp | undefined,
     declared: Type,
     current: Type | undefined,
@@ -94,8 +94,8 @@ export class FlowRules {
     return given;
   }
 
-  public withFact(
-    facts: Map<string, Type>,
+  public readonly withFact(
+    facts: Read<Map<string, Type>>,
     key: string,
     type: Type,
   ): Map<string, Type> {
@@ -106,12 +106,12 @@ export class FlowRules {
     return copy;
   }
 
-  public branchesJoined(
-    before: Map<string, Type>,
-    thenStart: Map<string, Type>,
-    thenEnd: Map<string, Type>,
-    elseStart: Map<string, Type>,
-    elseEnd: Map<string, Type>,
+  public readonly branchesJoined(
+    before: Read<Map<string, Type>>,
+    thenStart: Read<Map<string, Type>>,
+    thenEnd: Read<Map<string, Type>>,
+    elseStart: Read<Map<string, Type>>,
+    elseEnd: Read<Map<string, Type>>,
   ): Map<string, Type> {
     const joined = new Map<string, Type>(before);
     const keys = new Set<string>(thenEnd.keys());
@@ -146,7 +146,7 @@ export class FlowRules {
     return joined;
   }
 
-  public tupleWriteCheck(
+  public readonly tupleWriteCheck(
     target: IndexExpr,
     tuple: Type,
   ): SourceError | undefined {
@@ -168,7 +168,7 @@ export class FlowRules {
     };
   }
 
-  public logicalTargetCheck(expr: AssignExpr): Checked<boolean> {
+  public readonly logicalTargetCheck(expr: AssignExpr): Checked<boolean> {
     const op = expr.op;
     const isLogical = op == BinaryOp.LogAnd || op == BinaryOp.LogOr;
     if (!isLogical || this.shapes.isSimpleTarget(expr.target)) {
@@ -187,7 +187,7 @@ export class FlowRules {
     };
   }
 
-  private defaultedFact(declared: Type, current: Type, given: Type): Type {
+  private readonly defaultedFact(declared: Type, current: Type, given: Type): Type {
     const defined = this.types.definedType(current);
     const isKnown =
       given.kind != TypeKind.Error && this.relation.converts(given, declared);

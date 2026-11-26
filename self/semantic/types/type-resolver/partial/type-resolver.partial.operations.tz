@@ -15,7 +15,7 @@ import { kLengthMember } from "../const/type-resolver.const.tables.tz";
 import { TypeContext } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  private keyOf(ref: TypeRef, context: TypeContext): Type {
+  private readonly keyOf(ref: TypeRef, context: TypeContext): Type {
     const operands = this.resolveAll(ref.args, context);
     const operand = operands[0];
     if (operand == undefined) {
@@ -38,7 +38,7 @@ partial class TypeResolver {
     }
   }
 
-  private keysOfOther(operand: Type, loc: int, context: TypeContext): Type {
+  private readonly keysOfOther(operand: Type, loc: int, context: Read<TypeContext>): Type {
     if (operand.kind == TypeKind.Dict && operand.dict == DictKind.Record) {
       return operand.key;
     }
@@ -53,7 +53,7 @@ partial class TypeResolver {
     return this.store.plain(TypeKind.Error);
   }
 
-  private namesOf(fields: ObjectField[]): Type {
+  private readonly namesOf(fields: Read<ObjectField[]>): Type {
     const names: Type[] = [];
 
     for (const field of fields) {
@@ -65,7 +65,7 @@ partial class TypeResolver {
     return this.store.unionOf(names);
   }
 
-  private indexed(ref: TypeRef, context: TypeContext): Type {
+  private readonly indexed(ref: TypeRef, context: TypeContext): Type {
     const operands = this.resolveAll(ref.args, context);
     const object = operands[0];
     const index = operands[1];
@@ -76,7 +76,7 @@ partial class TypeResolver {
     return this.member(object, index, ref.loc, context);
   }
 
-  private member(
+  private readonly member(
     object: Type,
     index: Type,
     loc: int,
@@ -113,7 +113,7 @@ partial class TypeResolver {
     return this.store.plain(TypeKind.Error);
   }
 
-  private memberOf(object: Type, index: Type): Type | undefined {
+  private readonly memberOf(object: Type, index: Type): Type | undefined {
     switch (object.kind) {
       case TypeKind.Object:
         return this.fieldOf(object.fields, index);
@@ -133,7 +133,7 @@ partial class TypeResolver {
     }
   }
 
-  private fieldOf(fields: ObjectField[], index: Type): Type | undefined {
+  private readonly fieldOf(fields: Read<ObjectField[]>, index: Type): Type | undefined {
     if (index.kind != TypeKind.Literal) {
       return undefined;
     }
@@ -149,7 +149,7 @@ partial class TypeResolver {
     return this.store.unionOf([field.type, nothing]);
   }
 
-  private tupleMember(tuple: TupleType, index: Type): Type | undefined {
+  private readonly tupleMember(tuple: TupleType, index: Type): Type | undefined {
     if (index.kind == TypeKind.Int) {
       return this.store.unionOf(tuple.items);
     }
@@ -170,7 +170,7 @@ partial class TypeResolver {
     return tuple.items[place.value];
   }
 
-  private atNumber(index: Type, item: Type): Type | undefined {
+  private readonly atNumber(index: Type, item: Type): Type | undefined {
     const isNumber =
       index.kind == TypeKind.Int ||
       (index.kind == TypeKind.Literal && index.literal == LiteralKind.Int);
@@ -181,7 +181,7 @@ partial class TypeResolver {
     return undefined;
   }
 
-  private atText(index: Type, value: Type): Type | undefined {
+  private readonly atText(index: Type, value: Type): Type | undefined {
     const isText =
       index.kind == TypeKind.String ||
       (index.kind == TypeKind.Literal && index.literal == LiteralKind.String);
@@ -192,7 +192,7 @@ partial class TypeResolver {
     return undefined;
   }
 
-  private onlyTexts(type: Type): Type {
+  private readonly onlyTexts(type: Type): Type {
     const texts: Type[] = [];
 
     for (const part of this.partsOf(type)) {
@@ -204,7 +204,7 @@ partial class TypeResolver {
     return this.store.unionOf(texts);
   }
 
-  private isText(type: Type): boolean {
+  private readonly isText(type: Type): boolean {
     if (type.kind == TypeKind.String || type.kind == TypeKind.Template) {
       return true;
     }
@@ -212,7 +212,7 @@ partial class TypeResolver {
     return type.kind == TypeKind.Literal && type.literal == LiteralKind.String;
   }
 
-  private withoutUndefined(type: Type): Type {
+  private readonly withoutUndefined(type: Type): Type {
     const kept: Type[] = [];
 
     for (const part of this.partsOf(type)) {
@@ -224,7 +224,7 @@ partial class TypeResolver {
     return this.store.unionOf(kept);
   }
 
-  private partsOf(type: Type): Type[] {
+  private readonly partsOf(type: Type): Type[] {
     if (type.kind == TypeKind.Union) {
       return type.parts;
     }
@@ -232,13 +232,13 @@ partial class TypeResolver {
     return [type];
   }
 
-  private isOpen(type: Type): boolean {
+  private readonly isOpen(type: Type): boolean {
     return (
       type.kind == TypeKind.TypeParameter || type.kind == TypeKind.Operation
     );
   }
 
-  private operation(op: OperationKind, operands: Type[], word: string): Type {
+  private readonly operation(op: OperationKind, operands: Own<Type[]>, word: string): Type {
     return this.store.operationOf({
       op,
       operands,
@@ -248,7 +248,7 @@ partial class TypeResolver {
     });
   }
 
-  private bound(context: TypeContext, loc: int, type: Type): TypeContext {
+  private readonly bound(context: Read<TypeContext>, loc: int, type: Type): TypeContext {
     const bindings = new Map<int, Type>(context.bindings);
 
     bindings.set(loc, type);

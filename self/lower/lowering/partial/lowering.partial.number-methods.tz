@@ -84,7 +84,7 @@ partial class Lowering {
     return this.textOut(frame, runtime, params, [value.value, count.value]);
   }
 
-  private numberText(frame: Frame, given: IrValue): IrValue | undefined {
+  private readonly numberText(frame: Read<Frame>, given: IrValue): IrValue | undefined {
     if (this.isDouble(given.tz)) {
       const params = [kDoubleType];
 
@@ -105,18 +105,17 @@ partial class Lowering {
   }
 
   private integerFitted(
-    frame: Frame,
+    frame: Read<Frame>,
     given: IrValue,
     target: Type,
   ): IrValue | undefined {
-    const made = frame.made;
     const type = this.irType(target);
     if (type == undefined || target.kind != TypeKind.Int) {
       return undefined;
     }
     if (this.isDouble(given.tz)) {
       const opcode = this.fromDouble(target);
-      const value = made.cast(opcode, given.value, type);
+      const value = frame.made.cast(opcode, given.value, type);
 
       return { type, value, tz: target };
     }
@@ -127,11 +126,11 @@ partial class Lowering {
     const isUnsigned = this.isUnsigned(given.tz);
     const long = this.toLong(frame, given);
     const fits = this.fitTest(frame, long.value, isUnsigned, target);
-    const good = made.block("int.fits");
-    const bad = made.block("int.does.not.fit");
+    const good = frame.made.block("int.fits");
+    const bad = frame.made.block("int.does.not.fit");
 
-    made.conditionalBranch(fits, good, bad);
-    made.open(bad);
+    frame.made.conditionalBranch(fits, good, bad);
+    frame.made.open(bad);
 
     const panic = this.ir.declare(kPanicIntegerFit, kVoidType, [
       kIntType,
@@ -142,9 +141,9 @@ partial class Lowering {
 
     const name = this.cText(this.integerName(target));
 
-    made.call(panic, [long.value, flag, name]);
-    made.unreachable();
-    made.open(good);
+    frame.made.call(panic, [long.value, flag, name]);
+    frame.made.unreachable();
+    frame.made.open(good);
 
     const from = this.bitsOf(given.tz);
     const resized = this.resizing(from, target.bits, given.tz);
@@ -153,8 +152,8 @@ partial class Lowering {
     return { type, value, tz: target };
   }
 
-  private sizedCast(
-    frame: Frame,
+  private readonly sizedCast(
+    frame: Read<Frame>,
     given: IrValue,
     opcode: IrOpcode,
     type: string,
@@ -166,7 +165,7 @@ partial class Lowering {
     return frame.made.cast(opcode, given.value, type);
   }
 
-  private fromDouble(target: Type): IrOpcode {
+  private readonly fromDouble(target: Type): IrOpcode {
     if (this.isUnsigned(target)) {
       return IrOpcode.FPToUI;
     }
@@ -174,23 +173,22 @@ partial class Lowering {
     return IrOpcode.FPToSI;
   }
 
-  private fitTest(
-    frame: Frame,
+  private readonly fitTest(
+    frame: Read<Frame>,
     long: LLVMValue,
     isUnsigned: boolean,
     target: Type,
   ): LLVMValue {
-    const made = frame.made;
     const highest = this.integerHighest(target);
     const top = this.ir.integer(kIntType, highest);
     if (isUnsigned) {
       const predicate = IrIntPredicate.UnsignedLessOrEqual;
 
-      return made.integerCompare(predicate, long, top);
+      return frame.made.integerCompare(predicate, long, top);
     }
 
     const lowest = this.ir.integer(kIntType, this.integerLowest(target));
-    const isAbove = made.integerCompare(
+    const isAbove = frame.made.integerCompare(
       IrIntPredicate.SignedGreaterOrEqual,
       long,
       lowest,
@@ -199,16 +197,16 @@ partial class Lowering {
       return isAbove;
     }
 
-    const isBelow = made.integerCompare(
+    const isBelow = frame.made.integerCompare(
       IrIntPredicate.SignedLessOrEqual,
       long,
       top,
     );
 
-    return made.binary(IrOpcode.And, isAbove, isBelow);
+    return frame.made.binary(IrOpcode.And, isAbove, isBelow);
   }
 
-  private integerHighest(target: Type): string {
+  private readonly integerHighest(target: Type): string {
     const bits = this.bitsOf(target);
     if (this.isUnsigned(target) && bits == 64) {
       return "-1";
@@ -223,7 +221,7 @@ partial class Lowering {
     return `${2 ** (bits - 1) - 1}`;
   }
 
-  private integerLowest(target: Type): string {
+  private readonly integerLowest(target: Type): string {
     const bits = this.bitsOf(target);
     if (this.isUnsigned(target)) {
       return "0";
@@ -235,7 +233,7 @@ partial class Lowering {
     return `${-(2 ** (bits - 1))}`;
   }
 
-  private integerName(target: Type): string {
+  private readonly integerName(target: Type): string {
     const bits = this.bitsOf(target);
     if (this.isUnsigned(target)) {
       return `uint${bits}`;

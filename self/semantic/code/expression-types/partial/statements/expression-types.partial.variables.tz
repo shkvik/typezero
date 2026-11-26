@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import {
   BindingKind,
   NameOrigin,
@@ -41,11 +42,11 @@ import { kNoDetails } from "../../../../../diagnostic/const/message.const.tz";
 import { kNoPlace } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  public variableOf(module: int, loc: int): Type | undefined {
+  public readonly variableOf(module: int, loc: int): Type | undefined {
     return this.door(module, loc)?.type;
   }
 
-  private record(module: int): ValueRecord | undefined {
+  private readonly record(module: int): ValueRecord | undefined {
     const known = this.records.get(module);
     if (known != undefined) {
       return known;
@@ -57,6 +58,13 @@ partial class ExpressionTypes {
     }
 
     const uses = new Map<int, NameUse>();
+
+    for (const use of this.scopes.get(module)?.uses ?? []) {
+      if (!use.isType) {
+        uses.set(use.loc, use);
+      }
+    }
+
     const record: ValueRecord = {
       uses,
       hidden: new Map<string, HiddenName>(),
@@ -71,12 +79,6 @@ partial class ExpressionTypes {
       owners: [],
     };
 
-    for (const use of this.scopes.get(module)?.uses ?? []) {
-      if (!use.isType) {
-        uses.set(use.loc, use);
-      }
-    }
-
     this.records.set(module, record);
     this.indexStatements(opened.file.items, record);
 
@@ -87,7 +89,7 @@ partial class ExpressionTypes {
     return record;
   }
 
-  private doorOfName(expr: NameExpr, module: int): VariableDoor | undefined {
+  private readonly doorOfName(expr: NameExpr, module: int): VariableDoor | undefined {
     const target = this.targetOfName(expr, module);
     if (target == undefined || target.kind != SymbolKind.Variable) {
       return undefined;
@@ -96,10 +98,8 @@ partial class ExpressionTypes {
     return this.door(target.module, target.loc);
   }
 
-  private door(module: int, loc: int): VariableDoor | undefined {
-    const before = this.facts;
-
-    this.facts = new Map<string, Type>();
+  private readonly door(module: int, loc: int): VariableDoor | undefined {
+    const before = replace(this.facts, new Map<string, Type>());
 
     const door = this.localDoor(module, loc);
 
@@ -108,7 +108,7 @@ partial class ExpressionTypes {
     return door;
   }
 
-  private localDoor(module: int, loc: int): VariableDoor | undefined {
+  private readonly localDoor(module: int, loc: int): VariableDoor | undefined {
     const key = `${module} ${loc}`;
     const known = this.doors.get(key);
     if (known != undefined) {
@@ -137,7 +137,7 @@ partial class ExpressionTypes {
     return door;
   }
 
-  private open(
+  private readonly open(
     door: VariableDoor,
     variable: DeclaredVariable,
     module: int,
@@ -225,7 +225,7 @@ partial class ExpressionTypes {
     door.isWhole = this.isWholeConstant(door, init, given, module);
   }
 
-  private constTexts(init: Expr, module: int): string[] | undefined {
+  private readonly constTexts(init: Expr, module: int): string[] | undefined {
     if (init.kind == ExprKind.Name) {
       return this.doorOfName(init, module)?.texts;
     }
@@ -239,7 +239,7 @@ partial class ExpressionTypes {
     return texts;
   }
 
-  private collectTexts(expr: Expr, texts: string[]): boolean {
+  private readonly collectTexts(expr: Expr, texts: string[]): boolean {
     if (expr.kind == ExprKind.Conditional) {
       return (
         this.collectTexts(expr.thenExpr, texts) &&
@@ -256,7 +256,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private keepConstant(
+  private readonly keepConstant(
     door: VariableDoor,
     variable: DeclaredVariable,
     init: Expr,
@@ -273,7 +273,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private isWholeConstant(
+  private readonly isWholeConstant(
     door: VariableDoor,
     init: Expr,
     given: Type,
@@ -289,7 +289,7 @@ partial class ExpressionTypes {
     return this.isWholeTree(init, module);
   }
 
-  private assignedTypeText(
+  private readonly assignedTypeText(
     decl: VarDeclarator,
     isUndefined: boolean,
     module: int,
@@ -323,7 +323,7 @@ partial class ExpressionTypes {
     return this.text.of(joined);
   }
 
-  private assignedJoin(joined: Type | undefined, given: Type): Type {
+  private readonly assignedJoin(joined: Type | undefined, given: Type): Type {
     if (joined == undefined) {
       return given;
     }

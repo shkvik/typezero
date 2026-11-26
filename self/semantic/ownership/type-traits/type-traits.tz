@@ -1,0 +1,237 @@
+import {
+  ClassDecl,
+  ClassField,
+  FieldKind,
+} from "../../../program/ast/types/ast.types.classes.tz";
+import { StmtKind } from "../../../program/ast/types/ast.types.statements.tz";
+import { Program } from "../../../program/module/types/module.types.tz";
+import { TypeStore } from "../../../program/type/type-store/type-store.tz";
+import {
+  ObjectField,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { ExpressionTypes } from "../../code/expression-types/expression-types.tz";
+import { kDisposeKey } from "../../code/dispose-rules/const/dispose-rules.const.tz";
+
+export class TypeTraits {
+  private readonly store: TypeStore;
+  private readonly values: ExpressionTypes;
+  private readonly program: Program;
+  private readonly copies: Map<int, boolean>;
+  private readonly frozen: Map<int, boolean>;
+  private readonly open: Set<string>;
+
+  public constructor(store: TypeStore, values: Own<ExpressionTypes>, program: Own<Program>) {
+    this.store = store;
+    this.values = values;
+    this.program = program;
+    this.copies = new Map<int, boolean>();
+    this.frozen = new Map<int, boolean>();
+    this.open = new Set<string>();
+  }
+
+  public isCopy(type: Type): boolean {
+    const known = this.copies.get(type.id);
+    if (known != undefined) {
+      return known;
+    }
+
+    const key = `copy ${type.id}`;
+    if (this.open.has(key)) {
+      return false;
+    }
+
+    this.open.add(key);
+    const answer = this.copyOf(type);
+
+    this.open.delete(key);
+    this.copies.set(type.id, answer);
+
+    return answer;
+  }
+
+  public isDeepImmutable(type: Type): boolean {
+    const known = this.frozen.get(type.id);
+    if (known != undefined) {
+      return known;
+    }
+
+    const key = `frozen ${type.id}`;
+    if (this.open.has(key)) {
+      return true;
+    }
+
+    this.open.add(key);
+    const answer = this.frozenOf(type);
+
+    this.open.delete(key);
+    this.frozen.set(type.id, answer);
+
+    return answer;
+  }
+
+  public readonly hasDispose(decl: ClassDecl): boolean {
+    return decl.methods.some((method) => method.name == kDisposeKey);
+  }
+
+  private copyOf(type: Type): boolean {
+    if (this.store.isInterned(type)) {
+      return true;
+    }
+
+    switch (type.kind) {
+      case TypeKind.Error:
+      case TypeKind.Void:
+      case TypeKind.Undefined:
+      case TypeKind.Never:
+      case TypeKind.Unknown:
+      case TypeKind.Boolean:
+      case TypeKind.Double:
+      case TypeKind.Decimal:
+      case TypeKind.String:
+      case TypeKind.Int:
+      case TypeKind.Literal:
+      case TypeKind.Template:
+        return true;
+      case TypeKind.Union:
+        return type.parts.every((part) => this.isCopy(part));
+      case TypeKind.Result:
+        return this.isCopy(type.value) && this.isCopy(type.error);
+      case TypeKind.Tuple:
+        return type.readonly && type.items.every((item) => this.isCopy(item));
+      case TypeKind.Object:
+        return this.isCopyObject(type.fields);
+      case TypeKind.Instance:
+        return this.isCopyInstance(type);
+      default:
+        return false;
+    }
+  }
+
+  private isCopyObject(fields: Read<ObjectField[]>): boolean {
+    for (const field of fields) {
+      if (!field.readonly || field.method == true) {
+        return false;
+      }
+      if (field.type.kind == TypeKind.Function) {
+        return false;
+      }
+      if (!this.isCopy(field.type)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private isCopyInstance(type: Type): boolean {
+    if (type.kind == TypeKind.Instance && this.isHandle(type.module, type.loc)) {
+      return true;
+    }
+
+    const decl = this.values.classDeclOf(type);
+    const fields = this.values.instanceFields(type);
+    if (decl == undefined || fields == undefined) {
+      return false;
+    }
+    if (this.store.isBase(type) || this.hasDispose(decl)) {
+      return false;
+    }
+
+    for (const field of fields) {
+      const declared = this.fieldNamed(decl, field.name);
+      if (declared == undefined || !this.isReadonlyField(declared)) {
+        return false;
+      }
+      if (!this.isCopy(field.type)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private frozenOf(type: Type): boolean {
+    if (this.isCopy(type)) {
+      return true;
+    }
+
+    switch (type.kind) {
+      case TypeKind.Array:
+        return type.readonly == true && this.isDeepImmutable(type.item);
+      case TypeKind.Tuple:
+        return type.readonly && this.areDeepImmutable(type.items);
+      case TypeKind.Union:
+        return type.parts.every((part) => this.isDeepImmutable(part));
+      case TypeKind.Object:
+        return this.isFrozenObject(type.fields);
+      case TypeKind.Instance:
+        return this.isFrozenInstance(type);
+      default:
+        return false;
+    }
+  }
+
+  private areDeepImmutable(types: Read<Type[]>): boolean {
+    return types.every((type) => this.isDeepImmutable(type));
+  }
+
+  private isFrozenObject(fields: Read<ObjectField[]>): boolean {
+    for (const field of fields) {
+      if (!field.readonly) {
+        return false;
+      }
+      if (field.method == true || field.type.kind == TypeKind.Function) {
+        continue;
+      }
+      if (!this.isDeepImmutable(field.type)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private isFrozenInstance(type: Type): boolean {
+    const decl = this.values.classDeclOf(type);
+    const fields = this.values.instanceFields(type);
+    if (decl == undefined || fields == undefined) {
+      return false;
+    }
+    if (this.store.isBase(type)) {
+      return false;
+    }
+
+    for (const field of fields) {
+      const declared = this.fieldNamed(decl, field.name);
+      if (declared == undefined || !this.isReadonlyField(declared)) {
+        return false;
+      }
+      if (!this.isDeepImmutable(field.type)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private readonly isHandle(module: int, loc: int): boolean {
+    const found = this.program.modules[module];
+    if (found == undefined) {
+      return false;
+    }
+
+    return found.file.items.some(
+      (item) => item.kind == StmtKind.Handle && item.loc == loc,
+    );
+  }
+
+  private readonly fieldNamed(decl: ClassDecl, name: string): ClassField | undefined {
+    return decl.fields.find((field) => field.name == name);
+  }
+
+  private readonly isReadonlyField(field: ClassField): boolean {
+    return field.readonly || field.form == FieldKind.ArrowMethod;
+  }
+}

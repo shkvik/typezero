@@ -33,36 +33,36 @@ export class IntlRules {
   private readonly text: TypeText;
   private readonly types: TypeQuestions;
 
-  public constructor(text: TypeText, types: TypeQuestions) {
+  public constructor(text: TypeText, types: Own<TypeQuestions>) {
     this.text = text;
     this.types = types;
   }
 
-  public service(name: string): IntlService | undefined {
+  public readonly service(name: string): IntlService | undefined {
     return kIntlServices.find((one) => one.name == name);
   }
 
-  public supportedService(): IntlService {
+  public readonly supportedService(): IntlService {
     return { name: "", callable: true, options: kSupportedOptions };
   }
 
-  public method(service: string, name: string): IntlMethodRow | undefined {
+  public readonly method(service: string, name: string): IntlMethodRow | undefined {
     return kIntlMethods.find(
       (one) => one.service == service && one.name == name,
     );
   }
 
-  public isValueMethod(service: string, name: string): boolean {
+  public readonly isValueMethod(service: string, name: string): boolean {
     return kValueMethods.some(
       (one) => one.service == service && one.name == name,
     );
   }
 
-  public option(service: IntlService, name: string): IntlOption | undefined {
+  public readonly option(service: Lent<IntlService>, name: string): Read<IntlOption> | undefined {
     return service.options.find((one) => one.name == name);
   }
 
-  public isLanguageTag(tag: string): boolean {
+  public readonly isLanguageTag(tag: string): boolean {
     const parts = tag.split("-");
     const language = parts[0] ?? "";
     const isWritten = parts.every(
@@ -74,7 +74,7 @@ export class IntlRules {
     return isWritten && isSized && this.isAlpha(language);
   }
 
-  public isKeywordType(text: string): boolean {
+  public readonly isKeywordType(text: string): boolean {
     const parts = text.split("-");
 
     return parts.every(
@@ -82,11 +82,11 @@ export class IntlRules {
     );
   }
 
-  public isCurrency(code: string): boolean {
+  public readonly isCurrency(code: string): boolean {
     return code.length == 3 && this.isAlpha(code);
   }
 
-  public isUnit(unit: string): boolean {
+  public readonly isUnit(unit: string): boolean {
     if (kSanctionedUnits.includes(unit)) {
       return true;
     }
@@ -102,19 +102,19 @@ export class IntlRules {
     );
   }
 
-  public isRelativeUnit(unit: string): boolean {
+  public readonly isRelativeUnit(unit: string): boolean {
     return kRelativeUnits.includes(unit);
   }
 
-  public relativeUnits(): string[] {
+  public readonly relativeUnits(): string[] {
     return kRelativeUnits;
   }
 
-  public normalizationForms(): string[] {
+  public readonly normalizationForms(): string[] {
     return kNormalizationForms;
   }
 
-  public isTextLike(type: Type): boolean {
+  public readonly isTextLike(type: Type): boolean {
     const base = this.types.definedType(type);
     if (base.kind == TypeKind.String || this.isTextLiteral(base)) {
       return true;
@@ -126,7 +126,7 @@ export class IntlRules {
     return base.parts.every((part) => this.isTextLiteral(part));
   }
 
-  public isNumberLike(type: Type): boolean {
+  public readonly isNumberLike(type: Type): boolean {
     const base = this.types.definedType(type);
     if (base.kind == TypeKind.Union) {
       return base.parts.every((part) => this.isNumberPart(part));
@@ -135,7 +135,7 @@ export class IntlRules {
     return this.isNumberPart(base);
   }
 
-  public kindFits(kind: IntlOptionKind, type: Type): boolean {
+  public readonly kindFits(kind: IntlOptionKind, type: Type): boolean {
     const base = this.types.definedType(type);
 
     switch (kind) {
@@ -150,7 +150,7 @@ export class IntlRules {
     }
   }
 
-  public literalTexts(type: Type): string[] | undefined {
+  public readonly literalTexts(type: Type): string[] | undefined {
     const base = this.types.definedType(type);
     const parts = this.partsOf(base);
     const texts: string[] = [];
@@ -169,7 +169,7 @@ export class IntlRules {
     return texts;
   }
 
-  public literalNumber(type: Type): decimal | undefined {
+  public readonly literalNumber(type: Type): decimal | undefined {
     const base = this.types.definedType(type);
     if (base.kind != TypeKind.Literal) {
       return undefined;
@@ -186,7 +186,7 @@ export class IntlRules {
     return parsed.value;
   }
 
-  public isIncrementUnion(type: Type, increments: decimal[]): boolean {
+  public readonly isIncrementUnion(type: Type, increments: Read<decimal[]>): boolean {
     const base = this.types.definedType(type);
     if (base.kind != TypeKind.Union) {
       return false;
@@ -199,37 +199,37 @@ export class IntlRules {
     });
   }
 
-  public isPlainOptions(type: Type): boolean {
+  public readonly isPlainOptions(type: Type): boolean {
     const base = this.types.definedType(type);
 
     return base.kind == TypeKind.Object || base.kind == TypeKind.Undefined;
   }
 
-  public unknownServiceError(loc: int, name: string): SourceError {
+  public readonly unknownServiceError(loc: int, name: string): SourceError {
     return { code: Code.IntlUnknownService, loc, details: { word: name } };
   }
 
-  public withNewError(loc: int, name: string): SourceError {
+  public readonly withNewError(loc: int, name: string): SourceError {
     return { code: Code.IntlWithNew, loc, details: { word: name } };
   }
 
-  public noTypeNewError(loc: int): SourceError {
+  public readonly noTypeNewError(loc: int): SourceError {
     return { code: Code.IntlNewNoType, loc, details: kNoDetails };
   }
 
-  public tagUnknownError(loc: int, what: string): SourceError {
+  public readonly tagUnknownError(loc: int, what: string): SourceError {
     return { code: Code.LanguageTagUnknown, loc, details: { word: what } };
   }
 
-  public tagUnknownLocaleError(loc: int): SourceError {
+  public readonly tagUnknownLocaleError(loc: int): SourceError {
     return { code: Code.LanguageTagUnknownLocale, loc, details: kNoDetails };
   }
 
-  public notTagError(loc: int, tag: string): SourceError {
+  public readonly notTagError(loc: int, tag: string): SourceError {
     return { code: Code.LanguageTagNot, loc, details: { word: tag } };
   }
 
-  public takesError(loc: int, what: string, found: Type): SourceError {
+  public readonly takesError(loc: int, what: string, found: Type): SourceError {
     const base = this.types.definedType(found);
     const first = this.text.of(found);
     const other = this.oneLanguageHint(base.kind == TypeKind.Array);
@@ -238,37 +238,37 @@ export class IntlRules {
     return { code: Code.LanguageTagTakes, loc, details };
   }
 
-  public listError(loc: int, what: string, found: Type): SourceError {
+  public readonly listError(loc: int, what: string, found: Type): SourceError {
     const first = this.text.of(found);
 
     return { code: Code.LanguageTagList, loc, details: { word: what, first } };
   }
 
-  public listOpenError(loc: int, what: string): SourceError {
+  public readonly listOpenError(loc: int, what: string): SourceError {
     return { code: Code.LanguageTagListOpen, loc, details: { word: what } };
   }
 
-  public spreadError(loc: int, what: string): SourceError {
+  public readonly spreadError(loc: int, what: string): SourceError {
     return { code: Code.LanguageTagSpread, loc, details: { word: what } };
   }
 
-  public localeOptionsError(loc: int): SourceError {
+  public readonly localeOptionsError(loc: int): SourceError {
     return { code: Code.IntlLocaleOptions, loc, details: kNoDetails };
   }
 
-  public localeNewError(loc: int): SourceError {
+  public readonly localeNewError(loc: int): SourceError {
     return { code: Code.IntlLocaleWithNew, loc, details: kNoDetails };
   }
 
-  public valuesOfError(loc: int): SourceError {
+  public readonly valuesOfError(loc: int): SourceError {
     return { code: Code.IntlValuesOf, loc, details: kNoDetails };
   }
 
-  public staticOnlyError(loc: int, what: string): SourceError {
+  public readonly staticOnlyError(loc: int, what: string): SourceError {
     return { code: Code.IntlStaticOnly, loc, details: { word: what } };
   }
 
-  public onlyCalledError(loc: int, name: string, service: string): SourceError {
+  public readonly onlyCalledError(loc: int, name: string, service: string): SourceError {
     const first = `Intl.${service}`;
 
     return {
@@ -278,7 +278,7 @@ export class IntlRules {
     };
   }
 
-  public notNumberError(
+  public readonly notNumberError(
     loc: int,
     method: string,
     found: Type,
@@ -301,10 +301,10 @@ export class IntlRules {
     return { code: Code.IntlNotNumber, loc, details };
   }
 
-  public closedUnknownError(
+  public readonly closedUnknownError(
     loc: int,
     what: string,
-    allowed: string[],
+    allowed: Read<string[]>,
   ): SourceError {
     const first = allowed[0] ?? "";
     const second = allowed[1] ?? "";
@@ -313,11 +313,11 @@ export class IntlRules {
     return { code: Code.ClosedArgUnknown, loc, details };
   }
 
-  public closedError(
+  public readonly closedError(
     loc: int,
     what: string,
-    allowed: string[],
-    texts: string[],
+    allowed: Read<string[]>,
+    texts: Read<string[]>,
   ): SourceError | undefined {
     const wrong = texts.find((one) => !allowed.includes(one));
     if (wrong == undefined) {
@@ -329,27 +329,27 @@ export class IntlRules {
     return { code: Code.ClosedArgNotAllowed, loc, details };
   }
 
-  public rangeUnsupportedError(loc: int, name: string): SourceError {
+  public readonly rangeUnsupportedError(loc: int, name: string): SourceError {
     return { code: Code.IntlRangeUnsupported, loc, details: { word: name } };
   }
 
-  public selectRangeError(loc: int): SourceError {
+  public readonly selectRangeError(loc: int): SourceError {
     return { code: Code.IntlSelectRange, loc, details: kNoDetails };
   }
 
-  public relativeUnitError(loc: int, unit: string): SourceError {
+  public readonly relativeUnitError(loc: int, unit: string): SourceError {
     return { code: Code.IntlRelativeUnit, loc, details: { word: unit } };
   }
 
-  public badFormError(loc: int, form: string): SourceError {
+  public readonly badFormError(loc: int, form: string): SourceError {
     return { code: Code.IntlBadForm, loc, details: { word: form } };
   }
 
-  public optionsNoTypeError(loc: int): SourceError {
+  public readonly optionsNoTypeError(loc: int): SourceError {
     return { code: Code.IntlOptionsNoType, loc, details: kNoDetails };
   }
 
-  public optionsObjectError(loc: int, what: string, found: Type): SourceError {
+  public readonly optionsObjectError(loc: int, what: string, found: Type): SourceError {
     const first = this.text.of(found);
 
     return {
@@ -359,11 +359,11 @@ export class IntlRules {
     };
   }
 
-  public unknownOptionError(
+  public readonly unknownOptionError(
     loc: int,
     name: string,
     what: string,
-    service: IntlService,
+    service: Read<IntlService>,
   ): SourceError {
     const names = service.options.map((one) => one.name);
     const other = this.namesText(names);
@@ -372,9 +372,9 @@ export class IntlRules {
     return { code: Code.IntlOptionUnknown, loc, details };
   }
 
-  public optionKindError(
+  public readonly optionKindError(
     loc: int,
-    option: IntlOption,
+    option: Read<IntlOption>,
     found: Type,
   ): SourceError {
     const first = this.kindName(option.kind);
@@ -384,9 +384,9 @@ export class IntlRules {
     return { code: Code.IntlOptionKindWrong, loc, details };
   }
 
-  public badValueError(
+  public readonly badValueError(
     loc: int,
-    option: IntlOption,
+    option: Read<IntlOption>,
     text: string,
   ): SourceError {
     const other = this.valuesText(option.values);
@@ -395,7 +395,7 @@ export class IntlRules {
     return { code: Code.IntlOptionValue, loc, details };
   }
 
-  public openValueError(loc: int, option: IntlOption): SourceError {
+  public readonly openValueError(loc: int, option: Read<IntlOption>): SourceError {
     const other = this.valuesText(option.values);
     const first = this.exampleTest(option.values);
     const details: Details = { word: option.name, first, other };
@@ -403,36 +403,36 @@ export class IntlRules {
     return { code: Code.IntlOptionOpen, loc, details };
   }
 
-  public isAllowedText(option: IntlOption, text: string): boolean {
+  public readonly isAllowedText(option: Read<IntlOption>, text: string): boolean {
     const isGrouping = option.kind == IntlOptionKind.Grouping;
 
     return option.values.includes(text) || (isGrouping && text == "");
   }
 
-  public currencyError(loc: int, code: string): SourceError {
+  public readonly currencyError(loc: int, code: string): SourceError {
     return { code: Code.IntlCurrency, loc, details: { word: code } };
   }
 
-  public unitError(loc: int, unit: string): SourceError {
+  public readonly unitError(loc: int, unit: string): SourceError {
     return { code: Code.IntlUnit, loc, details: { word: unit } };
   }
 
-  public keywordError(loc: int, value: string, name: string): SourceError {
+  public readonly keywordError(loc: int, value: string, name: string): SourceError {
     const other = this.keywordExample(name);
     const details: Details = { word: value, first: name, other };
 
     return { code: Code.IntlKeyword, loc, details };
   }
 
-  public styleCurrencyError(loc: int): SourceError {
+  public readonly styleCurrencyError(loc: int): SourceError {
     return { code: Code.IntlStyleCurrency, loc, details: kNoDetails };
   }
 
-  public styleUnitError(loc: int): SourceError {
+  public readonly styleUnitError(loc: int): SourceError {
     return { code: Code.IntlStyleUnit, loc, details: kNoDetails };
   }
 
-  public digitRangeError(
+  public readonly digitRangeError(
     loc: int,
     name: string,
     low: decimal,
@@ -451,7 +451,7 @@ export class IntlRules {
     return { code: Code.IntlDigitRangeOpen, loc, details };
   }
 
-  public aboveError(
+  public readonly aboveError(
     loc: int,
     low: string,
     high: string,
@@ -465,7 +465,7 @@ export class IntlRules {
     return { code: Code.IntlDigitsMayAbove, loc, details };
   }
 
-  public incrementsError(loc: int, isKnown: boolean): SourceError {
+  public readonly incrementsError(loc: int, isKnown: boolean): SourceError {
     if (isKnown) {
       return { code: Code.IntlIncrements, loc, details: kNoDetails };
     }
@@ -473,15 +473,15 @@ export class IntlRules {
     return { code: Code.IntlIncrementsOpen, loc, details: kNoDetails };
   }
 
-  public incrementSignificantError(loc: int): SourceError {
+  public readonly incrementSignificantError(loc: int): SourceError {
     return { code: Code.IntlIncrementSignificant, loc, details: kNoDetails };
   }
 
-  public incrementSameError(loc: int): SourceError {
+  public readonly incrementSameError(loc: int): SourceError {
     return { code: Code.IntlIncrementSame, loc, details: kNoDetails };
   }
 
-  public numberLiterals(type: Type): decimal[] | undefined {
+  public readonly numberLiterals(type: Type): decimal[] | undefined {
     const base = this.types.definedType(type);
     const parts = this.partsOf(base);
     const numbers: decimal[] = [];
@@ -498,11 +498,11 @@ export class IntlRules {
     return numbers;
   }
 
-  public isFlagType(type: Type): boolean {
+  public readonly isFlagType(type: Type): boolean {
     return this.isFlag(this.types.definedType(type));
   }
 
-  public isTextUnion(type: Type): boolean {
+  public readonly isTextUnion(type: Type): boolean {
     const base = this.types.definedType(type);
     if (base.kind == TypeKind.String) {
       return true;
@@ -511,11 +511,11 @@ export class IntlRules {
     return this.partsOf(base).every((part) => this.isTextLiteral(part));
   }
 
-  private isTextLiteral(type: Type): boolean {
+  private readonly isTextLiteral(type: Type): boolean {
     return type.kind == TypeKind.Literal && type.literal == LiteralKind.String;
   }
 
-  private isNumberPart(type: Type): boolean {
+  private readonly isNumberPart(type: Type): boolean {
     if (type.kind == TypeKind.Int || type.kind == TypeKind.Double) {
       return true;
     }
@@ -526,7 +526,7 @@ export class IntlRules {
     );
   }
 
-  private isFlag(type: Type): boolean {
+  private readonly isFlag(type: Type): boolean {
     if (type.kind == TypeKind.Boolean) {
       return true;
     }
@@ -534,7 +534,7 @@ export class IntlRules {
     return type.kind == TypeKind.Literal && type.literal == LiteralKind.Boolean;
   }
 
-  private isGroupingValue(base: Type): boolean {
+  private readonly isGroupingValue(base: Type): boolean {
     if (this.isTextLike(base) || this.isFlag(base)) {
       return true;
     }
@@ -547,7 +547,7 @@ export class IntlRules {
     );
   }
 
-  private partsOf(base: Type): Type[] {
+  private readonly partsOf(base: Type): Type[] {
     if (base.kind == TypeKind.Union) {
       return base.parts;
     }
@@ -555,7 +555,7 @@ export class IntlRules {
     return [base];
   }
 
-  private isAlnum(text: string): boolean {
+  private readonly isAlnum(text: string): boolean {
     for (const unit of text) {
       const isLetter = this.isLetterUnit(unit);
       const isDigit = unit >= "0" && unit <= "9";
@@ -567,7 +567,7 @@ export class IntlRules {
     return true;
   }
 
-  private isAlpha(text: string): boolean {
+  private readonly isAlpha(text: string): boolean {
     for (const unit of text) {
       if (!this.isLetterUnit(unit)) {
         return false;
@@ -577,11 +577,11 @@ export class IntlRules {
     return true;
   }
 
-  private isLetterUnit(unit: string): boolean {
+  private readonly isLetterUnit(unit: string): boolean {
     return (unit >= "a" && unit <= "z") || (unit >= "A" && unit <= "Z");
   }
 
-  private oneLanguageHint(isArray: boolean): string {
+  private readonly oneLanguageHint(isArray: boolean): string {
     if (isArray) {
       return "; pass one language";
     }
@@ -589,7 +589,7 @@ export class IntlRules {
     return "";
   }
 
-  private numberHint(isNumber: boolean, base: Type): string {
+  private readonly numberHint(isNumber: boolean, base: Type): string {
     if (isNumber) {
       return "; the value may be undefined: check it first";
     }
@@ -600,7 +600,7 @@ export class IntlRules {
     return "";
   }
 
-  private kindName(kind: IntlOptionKind): string {
+  private readonly kindName(kind: IntlOptionKind): string {
     switch (kind) {
       case IntlOptionKind.Text:
         return "a string";
@@ -613,7 +613,7 @@ export class IntlRules {
     }
   }
 
-  public valuesText(values: string[]): string {
+  public readonly valuesText(values: Read<string[]>): string {
     const parts: string[] = [];
 
     for (let index = 0; index < values.length; index++) {
@@ -626,7 +626,7 @@ export class IntlRules {
     return parts.join("");
   }
 
-  private valueJoint(index: int, count: int): string {
+  private readonly valueJoint(index: int, count: int): string {
     if (index == 0) {
       return "";
     }
@@ -637,7 +637,7 @@ export class IntlRules {
     return ", ";
   }
 
-  private namesText(names: string[]): string {
+  private readonly namesText(names: Read<string[]>): string {
     const parts: string[] = [];
 
     for (let index = 0; index < names.length; index++) {
@@ -650,7 +650,7 @@ export class IntlRules {
     return parts.join("");
   }
 
-  private nameJoint(index: int, count: int): string {
+  private readonly nameJoint(index: int, count: int): string {
     if (index == 0) {
       return "";
     }
@@ -661,13 +661,13 @@ export class IntlRules {
     return ", ";
   }
 
-  private exampleTest(values: string[]): string {
+  private readonly exampleTest(values: Read<string[]>): string {
     const shown = values.slice(0, 2).map((value) => `x == "${value}"`);
 
     return shown.join(" || ");
   }
 
-  private keywordExample(name: string): string {
+  private readonly keywordExample(name: string): string {
     if (name == kCollationName) {
       return "phonebk";
     }

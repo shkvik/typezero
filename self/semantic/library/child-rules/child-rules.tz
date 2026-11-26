@@ -27,61 +27,61 @@ export class ChildRules {
     this.text = text;
   }
 
-  public isChildModule(name: string): boolean {
+  public readonly isChildModule(name: string): boolean {
     return name == kChildModule;
   }
 
-  public isRun(name: string): boolean {
+  public readonly isRun(name: string): boolean {
     return kRunNames.includes(name);
   }
 
-  public isExec(name: string): boolean {
+  public readonly isExec(name: string): boolean {
     return name == kExecName;
   }
 
-  public options(): string[] {
+  public readonly options(): string[] {
     return kChildOptions;
   }
 
-  public isBufferMarker(text: string): boolean {
+  public readonly isBufferMarker(text: string): boolean {
     return text == kBufferMarker;
   }
 
-  public isSignal(name: string): boolean {
+  public readonly isSignal(name: string): boolean {
     return kSignals.includes(name);
   }
 
-  public optionsAtError(loc: int, name: string): SourceError {
+  public readonly optionsAtError(loc: int, name: string): SourceError {
     return { code: Code.ChildOptionsAt, loc, details: { word: name } };
   }
 
-  public zeroFileError(loc: int, isExec: boolean): SourceError {
+  public readonly zeroFileError(loc: int, isExec: boolean): SourceError {
     const word = this.fileWord(isExec);
 
     return { code: Code.ChildZeroFile, loc, details: { word } };
   }
 
-  public emptyNameError(loc: int): SourceError {
+  public readonly emptyNameError(loc: int): SourceError {
     return { code: Code.ChildEmptyName, loc, details: kNoDetails };
   }
 
-  public zeroArgError(loc: int, index: int): SourceError {
+  public readonly zeroArgError(loc: int, index: int): SourceError {
     return { code: Code.ChildZeroArg, loc, details: { word: `${index}` } };
   }
 
-  public encodingError(loc: int, name: string): SourceError {
+  public readonly encodingError(loc: int, name: string): SourceError {
     return { code: Code.ChildEncoding, loc, details: { word: name } };
   }
 
-  public stdioError(loc: int, name: string): SourceError {
+  public readonly stdioError(loc: int, name: string): SourceError {
     return { code: Code.ChildStdio, loc, details: { word: name } };
   }
 
-  public threeError(loc: int): SourceError {
+  public readonly threeError(loc: int): SourceError {
     return { code: Code.ChildStdioThree, loc, details: kNoDetails };
   }
 
-  public stdioKindError(loc: int, value: Expr): SourceError | undefined {
+  public readonly stdioKindError(loc: int, value: Expr): SourceError | undefined {
     if (value.kind != ExprKind.StringLit) {
       return { code: Code.ChildStdioLiteral, loc, details: kNoDetails };
     }
@@ -97,7 +97,7 @@ export class ChildRules {
     return { code: Code.ChildStdioUnknown, loc, details: { word: text } };
   }
 
-  public stdioEntryError(element: ArrayElement): SourceError | undefined {
+  public readonly stdioEntryError(element: ArrayElement): SourceError | undefined {
     const value = element.expr;
     const loc = value.loc;
     if (element.spread) {
@@ -118,49 +118,49 @@ export class ChildRules {
     return this.stdioKindError(loc, value);
   }
 
-  public zeroCwdError(loc: int): SourceError {
+  public readonly zeroCwdError(loc: int): SourceError {
     return { code: Code.ChildZeroCwd, loc, details: kNoDetails };
   }
 
-  public negativeError(loc: int, limit: string): SourceError {
+  public readonly negativeError(loc: int, limit: string): SourceError {
     return { code: Code.ChildNegative, loc, details: { word: limit } };
   }
 
-  public noSignalError(loc: int, signal: string): SourceError {
+  public readonly noSignalError(loc: int, signal: string): SourceError {
     return { code: Code.ChildNoSignal, loc, details: { word: signal } };
   }
 
-  public inputError(loc: int, name: string, found: Type): SourceError {
+  public readonly inputError(loc: int, name: string, found: Type): SourceError {
     const first = this.text.of(found);
 
     return { code: Code.ChildInput, loc, details: { word: name, first } };
   }
 
-  public bufferTextError(loc: int): SourceError {
+  public readonly bufferTextError(loc: int): SourceError {
     return { code: Code.ChildBufferText, loc, details: kNoDetails };
   }
 
-  public killSignalError(loc: int, found: Type): SourceError {
+  public readonly killSignalError(loc: int, found: Type): SourceError {
     const first = this.text.of(found);
 
     return { code: Code.ChildKillSignal, loc, details: { first } };
   }
 
-  public execShellError(loc: int): SourceError {
+  public readonly execShellError(loc: int): SourceError {
     return { code: Code.ChildExecShell, loc, details: kNoDetails };
   }
 
-  public shellFlagError(loc: int, name: string): SourceError {
+  public readonly shellFlagError(loc: int, name: string): SourceError {
     return { code: Code.ChildShellFlag, loc, details: { word: name } };
   }
 
-  public shellError(loc: int, found: Type): SourceError {
+  public readonly shellError(loc: int, found: Type): SourceError {
     const first = this.text.of(found);
 
     return { code: Code.ChildShell, loc, details: { first } };
   }
 
-  private fileWord(isExec: boolean): string {
+  private readonly fileWord(isExec: boolean): string {
     if (isExec) {
       return "command";
     }

@@ -86,7 +86,7 @@ partial class Lowering {
     return { type: kPointerType, value: object, tz: type, owned: true };
   }
 
-  private knownOr(
+  private readonly knownOr(
     known: Type | undefined,
     wanted: Type | undefined,
   ): Type | undefined {
@@ -97,8 +97,8 @@ partial class Lowering {
     return wanted;
   }
 
-  private literalTarget(
-    frame: Frame,
+  private readonly literalTarget(
+    frame: Read<Frame>,
     expr: ObjectLitExpr,
     type: Type | undefined,
   ): Type | undefined {
@@ -113,8 +113,8 @@ partial class Lowering {
     return parts[0];
   }
 
-  private isLiteralPart(
-    frame: Frame,
+  private readonly isLiteralPart(
+    frame: Read<Frame>,
     expr: ObjectLitExpr,
     part: Type,
   ): boolean {
@@ -139,7 +139,7 @@ partial class Lowering {
       }
     }
 
-    const fields = part.fields;
+    const fields = part.fields.slice();
 
     return expr.props.every(
       (one) =>
@@ -148,7 +148,7 @@ partial class Lowering {
     );
   }
 
-  private constantText(frame: Frame, expr: Expr): string | undefined {
+  private readonly constantText(frame: Read<Frame>, expr: Expr): string | undefined {
     if (expr.kind == ExprKind.StringLit) {
       return expr.value;
     }
@@ -166,7 +166,7 @@ partial class Lowering {
     return `${number}`;
   }
 
-  private isConstantKey(frame: Frame, property: Property): boolean {
+  private readonly isConstantKey(frame: Read<Frame>, property: Property): boolean {
     if (property.form.kind != PropertyKind.Computed) {
       return false;
     }
@@ -174,7 +174,7 @@ partial class Lowering {
     return this.propertyKey(frame, property) != undefined;
   }
 
-  private propertyKey(frame: Frame, property: Property): string | undefined {
+  private readonly propertyKey(frame: Read<Frame>, property: Property): string | undefined {
     const form = property.form;
     if (form.kind != PropertyKind.Computed) {
       return property.name;
@@ -189,9 +189,9 @@ partial class Lowering {
   }
 
   private literalOrder(
-    frame: Frame,
+    frame: Read<Frame>,
     expr: ObjectLitExpr,
-    layout: ClassLayout,
+    layout: Read<ClassLayout>,
   ): string[] {
     const names: string[] = [];
 
@@ -209,9 +209,9 @@ partial class Lowering {
   }
 
   private propertyNames(
-    frame: Frame,
+    frame: Read<Frame>,
     property: Property,
-    layout: ClassLayout,
+    layout: Read<ClassLayout>,
   ): string[] {
     if (property.form.kind != PropertyKind.Spread) {
       const key = this.propertyKey(frame, property);
@@ -246,7 +246,7 @@ partial class Lowering {
   private propertyStored(
     frame: Frame,
     object: LLVMValue,
-    layout: ClassLayout,
+    layout: Read<ClassLayout>,
     property: Property,
   ): boolean {
     if (property.form.kind == PropertyKind.Spread) {
@@ -279,10 +279,10 @@ partial class Lowering {
     return true;
   }
 
-  private fieldPlaceOf(
-    frame: Frame,
+  private readonly fieldPlaceOf(
+    frame: Read<Frame>,
     object: LLVMValue,
-    layout: ClassLayout,
+    layout: Read<ClassLayout>,
     field: LayoutField,
   ): Place {
     const pointer = frame.made.field(layout.struct, object, field.index);
@@ -293,7 +293,7 @@ partial class Lowering {
   private spreadStored(
     frame: Frame,
     object: LLVMValue,
-    layout: ClassLayout,
+    layout: Read<ClassLayout>,
     expr: Expr,
   ): boolean {
     const source = this.value(frame, expr);
@@ -336,9 +336,9 @@ partial class Lowering {
   }
 
   private unionFieldAt(
-    frame: Frame,
+    frame: Read<Frame>,
     object: LLVMValue,
-    parts: Type[],
+    parts: Read<Type[]>,
     name: string,
     loc: int,
   ): Place | undefined {
@@ -389,15 +389,14 @@ partial class Lowering {
     return { pointer, type: first.ir, tz, owner: -1 };
   }
 
-  private chosenField(
-    frame: Frame,
+  private readonly chosenField(
+    frame: Read<Frame>,
     object: LLVMValue,
-    layouts: ClassLayout[],
-    spots: LayoutField[],
+    layouts: Read<ClassLayout[]>,
+    spots: Read<LayoutField[]>,
   ): LLVMValue {
-    const made = frame.made;
     const id = this.objectClassId(frame, object);
-    const end = made.block("field.end");
+    const end = frame.made.block("field.end");
     const pointers: LLVMValue[] = [];
     const blocks: LLVMBlock[] = [];
     const last = layouts.length - 1;
@@ -409,38 +408,37 @@ partial class Lowering {
         continue;
       }
       if (index < last) {
-        const here = made.block("field.here");
-        const next = made.block("field.next");
+        const here = frame.made.block("field.here");
+        const next = frame.made.block("field.next");
         const wanted = this.ir.integer(kFlagType, `${layout.classId}`);
-        const test = made.integerCompare(IrIntPredicate.Equal, id, wanted);
+        const test = frame.made.integerCompare(IrIntPredicate.Equal, id, wanted);
 
-        made.conditionalBranch(test, here, next);
-        made.open(here);
-        pointers.push(made.field(layout.struct, object, spot.index));
-        blocks.push(made.currentBlock());
-        made.branch(end);
-        made.open(next);
+        frame.made.conditionalBranch(test, here, next);
+        frame.made.open(here);
+        pointers.push(frame.made.field(layout.struct, object, spot.index));
+        blocks.push(frame.made.currentBlock());
+        frame.made.branch(end);
+        frame.made.open(next);
 
         continue;
       }
 
-      pointers.push(made.field(layout.struct, object, spot.index));
-      blocks.push(made.currentBlock());
-      made.branch(end);
+      pointers.push(frame.made.field(layout.struct, object, spot.index));
+      blocks.push(frame.made.currentBlock());
+      frame.made.branch(end);
     }
 
-    made.open(end);
+    frame.made.open(end);
 
-    return made.phi(kPointerType, pointers, blocks);
+    return frame.made.phi(kPointerType, pointers, blocks);
   }
 
-  private objectClassId(frame: Frame, object: LLVMValue): LLVMValue {
-    const made = frame.made;
-    const kind = made.field(kObjectHeader, object, 1);
-    const layout = made.load(kPointerType, kind);
-    const id = made.field(kLayoutHead, layout, kClassIdIndex);
+  private readonly objectClassId(frame: Read<Frame>, object: LLVMValue): LLVMValue {
+    const kind = frame.made.field(kObjectHeader, object, 1);
+    const layout = frame.made.load(kPointerType, kind);
+    const id = frame.made.field(kLayoutHead, layout, kClassIdIndex);
 
-    return made.load(kFlagType, id);
+    return frame.made.load(kFlagType, id);
   }
 
   private tupleIndexed(frame: Frame, expr: IndexExpr): IrValue | undefined {
@@ -474,7 +472,7 @@ partial class Lowering {
     return kept;
   }
 
-  private constantIndex(expr: Expr): int | undefined {
+  private readonly constantIndex(expr: Expr): int | undefined {
     if (expr.kind == ExprKind.IntLit) {
       return expr.value.toInt();
     }
@@ -574,9 +572,8 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const id = this.objectClassId(frame, object.value);
-    const end = made.block("field.end");
+    const end = frame.made.block("field.end");
     const values: LLVMValue[] = [];
     const blocks: LLVMBlock[] = [];
 
@@ -587,18 +584,18 @@ partial class Lowering {
         continue;
       }
 
-      const here = made.block("field.here");
-      const next = made.block("field.next");
+      const here = frame.made.block("field.here");
+      const next = frame.made.block("field.next");
       const wanted = this.ir.integer(kFlagType, `${layout.classId}`);
-      const test = made.integerCompare(IrIntPredicate.Equal, id, wanted);
+      const test = frame.made.integerCompare(IrIntPredicate.Equal, id, wanted);
 
-      made.conditionalBranch(test, here, next);
-      made.open(here);
+      frame.made.conditionalBranch(test, here, next);
+      frame.made.open(here);
 
-      const pointer = made.field(layout.struct, object.value, spot.index);
+      const pointer = frame.made.field(layout.struct, object.value, spot.index);
       const loaded: IrValue = {
         type: spot.ir,
-        value: made.load(spot.ir, pointer),
+        value: frame.made.load(spot.ir, pointer),
         tz: spot.type,
       };
       const converted = this.converted(frame, loaded, result, expr.loc);
@@ -609,17 +606,17 @@ partial class Lowering {
       const kept = this.owning(frame, converted);
 
       values.push(kept.value);
-      blocks.push(made.currentBlock());
-      made.branch(end);
-      made.open(next);
+      blocks.push(frame.made.currentBlock());
+      frame.made.branch(end);
+      frame.made.open(next);
     }
 
     values.push(this.ir.zero(resultIr));
-    blocks.push(made.currentBlock());
-    made.branch(end);
-    made.open(end);
+    blocks.push(frame.made.currentBlock());
+    frame.made.branch(end);
+    frame.made.open(end);
 
-    const value = made.phi(resultIr, values, blocks);
+    const value = frame.made.phi(resultIr, values, blocks);
 
     this.dropping(frame, object);
 
@@ -643,7 +640,7 @@ partial class Lowering {
     return !to.fields.every((field) => this.isSameSpot(from, field));
   }
 
-  private isSameSpot(layout: ClassLayout, field: LayoutField): boolean {
+  private readonly isSameSpot(layout: Read<ClassLayout>, field: LayoutField): boolean {
     const spot = layout.fields.find((one) => one.name == field.name);
     if (spot == undefined) {
       return false;
@@ -664,7 +661,6 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const object = this.allocated(frame, to);
 
     for (const field of to.fields) {
@@ -673,10 +669,10 @@ partial class Lowering {
         continue;
       }
 
-      const pointer = made.field(from.struct, value.value, spot.index);
+      const pointer = frame.made.field(from.struct, value.value, spot.index);
       const loaded: IrValue = {
         type: spot.ir,
-        value: made.load(spot.ir, pointer),
+        value: frame.made.load(spot.ir, pointer),
         tz: spot.type,
       };
       const converted = this.converted(frame, loaded, field.type, loc);

@@ -16,7 +16,7 @@ export class ProofRules {
     this.text = text;
   }
 
-  public isInside(value: decimal, range: ProofRange): boolean {
+  public readonly isInside(value: decimal, range: ProofRange): boolean {
     const high = range.high;
     if (high != undefined && value > high) {
       return false;
@@ -25,15 +25,15 @@ export class ProofRules {
     return value >= range.low;
   }
 
-  public isFrom(known: ValueRange, low: decimal): boolean {
+  public readonly isFrom(known: ValueRange, low: decimal): boolean {
     return known.lo != undefined && known.lo >= low;
   }
 
-  public isUpTo(known: ValueRange, high: decimal): boolean {
+  public readonly isUpTo(known: ValueRange, high: decimal): boolean {
     return known.hi != undefined && known.hi <= high;
   }
 
-  public betweenError(
+  public readonly betweenError(
     loc: int,
     range: ProofRange,
     constant: decimal | undefined,
@@ -64,7 +64,7 @@ export class ProofRules {
     return { code: Code.ProofBetween, loc, details: { word, place, other } };
   }
 
-  public limitText(object: string, hasBytes: boolean, less: decimal): string {
+  public readonly limitText(object: string, hasBytes: boolean, less: decimal): string {
     const limit = `${object}${this.lengthWord(hasBytes)}`;
     if (less == 0) {
       return limit;
@@ -73,7 +73,7 @@ export class ProofRules {
     return `${limit} - ${less}`;
   }
 
-  public upToError(
+  public readonly upToError(
     loc: int,
     word: string,
     shown: string | undefined,
@@ -95,7 +95,7 @@ export class ProofRules {
     };
   }
 
-  private lengthWord(hasBytes: boolean): string {
+  private readonly lengthWord(hasBytes: boolean): string {
     if (hasBytes) {
       return kByteLengthSuffix;
     }
@@ -103,7 +103,7 @@ export class ProofRules {
     return kLengthSuffix;
   }
 
-  private rangeText(range: ProofRange): string {
+  private readonly rangeText(range: ProofRange): string {
     const high = range.high;
     if (high != undefined) {
       return `from ${range.low} to ${high}`;
@@ -115,7 +115,7 @@ export class ProofRules {
     return `at least ${range.low}`;
   }
 
-  private testText(shown: string, range: ProofRange): string {
+  private readonly testText(shown: string, range: ProofRange): string {
     const lower = `${shown} >= ${range.low}`;
     const high = range.high;
     if (high == undefined) {

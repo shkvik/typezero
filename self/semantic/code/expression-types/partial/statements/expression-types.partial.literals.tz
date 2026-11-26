@@ -13,7 +13,7 @@ import { kNullName } from "../../const/expression-types.const.tz";
 import { LiteralValue } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private literalOf(expr: Expr, module: int): LiteralValue | undefined {
+  private readonly literalOf(expr: Expr, module: int): LiteralValue | undefined {
     switch (expr.kind) {
       case ExprKind.IntLit:
         return {
@@ -42,7 +42,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private literalTyped(
+  private readonly literalTyped(
     expr: Expr,
     literal: LiteralValue,
     wanted: Type | undefined,
@@ -87,7 +87,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private baseType(expr: Expr, literal: LiteralValue, module: int): Type {
+  private readonly baseType(expr: Expr, literal: LiteralValue, module: int): Type {
     if (expr.kind == ExprKind.Name) {
       return this.named(expr, undefined, module);
     }
@@ -113,10 +113,10 @@ partial class ExpressionTypes {
     }
   }
 
-  private wholeTyped(
+  private readonly wholeTyped(
     expr: Expr,
     literal: LiteralValue,
-    parts: Type[],
+    parts: Read<Type[]>,
     base: Type,
     module: int,
   ): Type {
@@ -127,13 +127,13 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private isNullName(expr: NameExpr, module: int): boolean {
+  private readonly isNullName(expr: NameExpr, module: int): boolean {
     const symbol = this.record(module)?.uses.get(expr.loc)?.symbol;
 
     return expr.name == kNullName && symbol == undefined;
   }
 
-  private nullTyped(
+  private readonly nullTyped(
     expr: NameExpr,
     wanted: Type | undefined,
     module: int,

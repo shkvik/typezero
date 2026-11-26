@@ -15,43 +15,43 @@ export class IntervalMath {
     this.integers = integers;
   }
 
-  public exact(value: decimal): ValueRange {
+  public readonly exact(value: decimal): ValueRange {
     return { lo: value, hi: value };
   }
 
-  public unite(first: ValueRange, second: ValueRange): ValueRange {
+  public readonly unite(first: ValueRange, second: ValueRange): ValueRange {
     return {
       lo: this.least(first.lo, second.lo),
       hi: this.most(first.hi, second.hi),
     };
   }
 
-  public lowerOf(first: ValueRange, second: ValueRange): ValueRange {
+  public readonly lowerOf(first: ValueRange, second: ValueRange): ValueRange {
     return {
       lo: this.least(first.lo, second.lo),
       hi: this.least(first.hi, second.hi) ?? first.hi ?? second.hi,
     };
   }
 
-  public upperOf(first: ValueRange, second: ValueRange): ValueRange {
+  public readonly upperOf(first: ValueRange, second: ValueRange): ValueRange {
     return {
       lo: this.most(first.lo, second.lo) ?? first.lo ?? second.lo,
       hi: this.most(first.hi, second.hi),
     };
   }
 
-  public meet(first: ValueRange, second: ValueRange): ValueRange {
+  public readonly meet(first: ValueRange, second: ValueRange): ValueRange {
     return {
       lo: this.most(first.lo, second.lo) ?? first.lo ?? second.lo,
       hi: this.least(first.hi, second.hi) ?? first.hi ?? second.hi,
     };
   }
 
-  public negated(range: ValueRange): ValueRange {
+  public readonly negated(range: ValueRange): ValueRange {
     return this.arithmetic(BinaryOp.Sub, this.exact(0), range);
   }
 
-  public inverted(range: ValueRange): ValueRange {
+  public readonly inverted(range: ValueRange): ValueRange {
     const lo = range.lo;
     const hi = range.hi;
     if (lo == undefined || hi == undefined) {
@@ -61,7 +61,7 @@ export class IntervalMath {
     return { lo: -hi - 1, hi: -lo - 1 };
   }
 
-  public clamped(type: Type, range: ValueRange): ValueRange {
+  public readonly clamped(type: Type, range: ValueRange): ValueRange {
     if (type.kind != TypeKind.Int) {
       return range;
     }
@@ -83,7 +83,7 @@ export class IntervalMath {
     return { lo, hi };
   }
 
-  public operate(
+  public readonly operate(
     op: BinaryOp,
     left: ValueRange,
     right: ValueRange,
@@ -115,7 +115,7 @@ export class IntervalMath {
     }
   }
 
-  private lowestOf(isUnsigned: boolean, span: decimal): decimal {
+  private readonly lowestOf(isUnsigned: boolean, span: decimal): decimal {
     if (isUnsigned) {
       return 0;
     }
@@ -123,7 +123,7 @@ export class IntervalMath {
     return -span / 2;
   }
 
-  private highestOf(isUnsigned: boolean, span: decimal): decimal {
+  private readonly highestOf(isUnsigned: boolean, span: decimal): decimal {
     if (isUnsigned) {
       return span - 1;
     }
@@ -131,7 +131,7 @@ export class IntervalMath {
     return span / 2 - 1;
   }
 
-  private least(
+  private readonly least(
     first: decimal | undefined,
     second: decimal | undefined,
   ): decimal | undefined {
@@ -145,7 +145,7 @@ export class IntervalMath {
     return second;
   }
 
-  private most(
+  private readonly most(
     first: decimal | undefined,
     second: decimal | undefined,
   ): decimal | undefined {
@@ -159,7 +159,7 @@ export class IntervalMath {
     return second;
   }
 
-  private exactValue(range: ValueRange): decimal | undefined {
+  private readonly exactValue(range: ValueRange): decimal | undefined {
     if (range.lo == undefined || range.lo != range.hi) {
       return undefined;
     }
@@ -167,7 +167,7 @@ export class IntervalMath {
     return range.lo;
   }
 
-  private bounded(lo: decimal, hi: decimal): ValueRange {
+  private readonly bounded(lo: decimal, hi: decimal): ValueRange {
     if (lo < kSmallestInt || hi > kLargestInt) {
       return {};
     }
@@ -175,7 +175,7 @@ export class IntervalMath {
     return { lo, hi };
   }
 
-  private bitAnd(left: ValueRange, right: ValueRange): ValueRange {
+  private readonly bitAnd(left: ValueRange, right: ValueRange): ValueRange {
     const first = this.naturalTop(left);
     const second = this.naturalTop(right);
     const isNatural = this.isNatural(left) || this.isNatural(right);
@@ -186,11 +186,11 @@ export class IntervalMath {
     return { lo: 0, hi: this.least(first, second) ?? first ?? second };
   }
 
-  private isNatural(range: ValueRange): boolean {
+  private readonly isNatural(range: ValueRange): boolean {
     return range.lo != undefined && range.lo >= 0;
   }
 
-  private naturalTop(range: ValueRange): decimal | undefined {
+  private readonly naturalTop(range: ValueRange): decimal | undefined {
     if (!this.isNatural(range)) {
       return undefined;
     }
@@ -198,7 +198,7 @@ export class IntervalMath {
     return range.hi;
   }
 
-  private bitOr(op: BinaryOp, left: ValueRange, right: ValueRange): ValueRange {
+  private readonly bitOr(op: BinaryOp, left: ValueRange, right: ValueRange): ValueRange {
     const top = this.most(left.hi, right.hi);
     const bottom = this.most(left.lo, right.lo);
     const isNatural = this.isNatural(left) && this.isNatural(right);
@@ -212,7 +212,7 @@ export class IntervalMath {
     return { lo: 0, hi: this.allOnes(top) };
   }
 
-  private allOnes(value: decimal): decimal {
+  private readonly allOnes(value: decimal): decimal {
     let mask: decimal = 0;
 
     while (mask < value) {
@@ -222,7 +222,7 @@ export class IntervalMath {
     return mask;
   }
 
-  private shiftLeft(left: ValueRange, count: decimal | undefined): ValueRange {
+  private readonly shiftLeft(left: ValueRange, count: decimal | undefined): ValueRange {
     const lo = left.lo;
     const hi = left.hi;
     if (count == undefined || lo == undefined || hi == undefined) {
@@ -241,7 +241,7 @@ export class IntervalMath {
     return this.bounded(lo * factor, hi * factor);
   }
 
-  private shiftRight(left: ValueRange, count: decimal | undefined): ValueRange {
+  private readonly shiftRight(left: ValueRange, count: decimal | undefined): ValueRange {
     const lo = left.lo;
     const hi = left.hi;
     if (count == undefined || lo == undefined || hi == undefined) {
@@ -256,7 +256,7 @@ export class IntervalMath {
     return { lo: this.floored(lo, divisor), hi: this.floored(hi, divisor) };
   }
 
-  private unsignedShift(
+  private readonly unsignedShift(
     left: ValueRange,
     count: decimal | undefined,
   ): ValueRange {
@@ -279,11 +279,11 @@ export class IntervalMath {
     return {};
   }
 
-  private isShiftCount(count: decimal): boolean {
+  private readonly isShiftCount(count: decimal): boolean {
     return count >= 0 && count < kShiftWidth;
   }
 
-  private floored(value: decimal, divisor: decimal): decimal {
+  private readonly floored(value: decimal, divisor: decimal): decimal {
     if (divisor == 0) {
       return value;
     }
@@ -293,7 +293,7 @@ export class IntervalMath {
     return (value - rest) / divisor;
   }
 
-  private remainder(left: ValueRange, count: decimal | undefined): ValueRange {
+  private readonly remainder(left: ValueRange, count: decimal | undefined): ValueRange {
     if (count == undefined || count == 0) {
       return {};
     }
@@ -311,7 +311,7 @@ export class IntervalMath {
     return { lo: -most, hi: most };
   }
 
-  private division(left: ValueRange, count: decimal | undefined): ValueRange {
+  private readonly division(left: ValueRange, count: decimal | undefined): ValueRange {
     const lo = left.lo;
     const hi = left.hi;
     if (count == undefined || lo == undefined || hi == undefined) {
@@ -324,7 +324,7 @@ export class IntervalMath {
     return { lo: this.quotient(lo, count), hi: this.quotient(hi, count) };
   }
 
-  private quotient(value: decimal, divisor: decimal): decimal {
+  private readonly quotient(value: decimal, divisor: decimal): decimal {
     if (divisor == 0) {
       return 0;
     }
@@ -338,7 +338,7 @@ export class IntervalMath {
     return whole;
   }
 
-  private arithmetic(
+  private readonly arithmetic(
     op: BinaryOp,
     left: ValueRange,
     right: ValueRange,
@@ -358,7 +358,7 @@ export class IntervalMath {
     return this.corners(op, left, right);
   }
 
-  private openSum(
+  private readonly openSum(
     op: BinaryOp,
     left: ValueRange,
     right: ValueRange,
@@ -376,7 +376,7 @@ export class IntervalMath {
     };
   }
 
-  private sum(
+  private readonly sum(
     first: decimal | undefined,
     second: decimal | undefined,
   ): decimal | undefined {
@@ -387,7 +387,7 @@ export class IntervalMath {
     return first + second;
   }
 
-  private difference(
+  private readonly difference(
     first: decimal | undefined,
     second: decimal | undefined,
   ): decimal | undefined {
@@ -398,7 +398,7 @@ export class IntervalMath {
     return first - second;
   }
 
-  private checked(value: decimal | undefined): decimal | undefined {
+  private readonly checked(value: decimal | undefined): decimal | undefined {
     if (value == undefined || value < kSmallestInt || value > kLargestInt) {
       return undefined;
     }
@@ -406,7 +406,7 @@ export class IntervalMath {
     return value;
   }
 
-  private corners(
+  private readonly corners(
     op: BinaryOp,
     left: ValueRange,
     right: ValueRange,
@@ -431,7 +431,7 @@ export class IntervalMath {
     return { lo, hi };
   }
 
-  private applied(
+  private readonly applied(
     op: BinaryOp,
     first: decimal | undefined,
     second: decimal | undefined,

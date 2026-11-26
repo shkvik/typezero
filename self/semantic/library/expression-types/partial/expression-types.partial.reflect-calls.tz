@@ -29,7 +29,7 @@ import {
 } from "../../library-rules/const/library-rules.const.tz";
 
 partial class ExpressionTypes {
-  private reflectCallCheck(expr: CallExpr, module: int): void {
+  private readonly reflectCallCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     if (
       callee.kind != ExprKind.Member ||
@@ -67,7 +67,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private metadataValueCheck(start: int, loc: int, module: int): void {
+  private readonly metadataValueCheck(start: int, loc: int, module: int): void {
     const text = this.program.modules[module]?.source.text;
     const before = text?.[start - 1];
     if (before == 64) {
@@ -77,7 +77,7 @@ partial class ExpressionTypes {
     this.report(module, loc, Code.ReflectMetadataValue, kNoDetails);
   }
 
-  private reflectOtherCheck(
+  private readonly reflectOtherCheck(
     expr: CallExpr,
     name: string,
     loc: int,
@@ -126,7 +126,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private metadataIdentity(key: Expr, module: int): string | undefined {
+  private readonly metadataIdentity(key: Expr, module: int): string | undefined {
     if (key.kind != ExprKind.Name) {
       return undefined;
     }
@@ -141,7 +141,7 @@ partial class ExpressionTypes {
     return `${target.module} ${target.loc}`;
   }
 
-  private metadataWriteCheck(
+  private readonly metadataWriteCheck(
     key: Expr,
     value: Expr,
     given: Type,
@@ -182,7 +182,7 @@ partial class ExpressionTypes {
     this.metadataRecords.set(identity, record);
   }
 
-  private reflectRecordRead(
+  private readonly reflectRecordRead(
     expr: CallExpr,
     member: MemberExpr,
     wanted: Type | undefined,
@@ -224,7 +224,7 @@ partial class ExpressionTypes {
     return this.types.optional(written);
   }
 
-  private writtenRecord(wanted: Type | undefined): Type | undefined {
+  private readonly writtenRecord(wanted: Type | undefined): Type | undefined {
     if (wanted == undefined) {
       return undefined;
     }
@@ -241,7 +241,7 @@ partial class ExpressionTypes {
     return plain;
   }
 
-  private metadataTargetAt(isDefine: boolean): int {
+  private readonly metadataTargetAt(isDefine: boolean): int {
     if (isDefine) {
       return 2;
     }
@@ -249,7 +249,7 @@ partial class ExpressionTypes {
     return 1;
   }
 
-  private metadataKeyFine(key: Expr, isDefine: boolean, module: int): boolean {
+  private readonly metadataKeyFine(key: Expr, isDefine: boolean, module: int): boolean {
     const isDesign =
       key.kind == ExprKind.StringLit && key.value.startsWith("design:");
     if (isDefine && isDesign) {
@@ -276,7 +276,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private reflectGetCheck(expr: CallExpr, module: int): void {
+  private readonly reflectGetCheck(expr: CallExpr, module: int): void {
     const target = expr.args[0]?.expr;
     if (target == undefined) {
       return;
@@ -294,7 +294,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private reflectApplyCheck(expr: CallExpr, module: int): void {
+  private readonly reflectApplyCheck(expr: CallExpr, module: int): void {
     const fn = expr.args[0]?.expr;
     if (fn == undefined) {
       return;
@@ -315,7 +315,7 @@ partial class ExpressionTypes {
     this.reflectArgumentsCheck(expr.args[2]?.expr, module);
   }
 
-  private reflectConstructCheck(expr: CallExpr, module: int): void {
+  private readonly reflectConstructCheck(expr: CallExpr, module: int): void {
     const third = expr.args[2]?.expr;
     if (third != undefined) {
       return this.report(
@@ -342,7 +342,7 @@ partial class ExpressionTypes {
     this.reflectArgumentsCheck(expr.args[1]?.expr, module);
   }
 
-  private reflectArgumentsCheck(list: Expr | undefined, module: int): void {
+  private readonly reflectArgumentsCheck(list: Expr | undefined, module: int): void {
     if (list == undefined) {
       return;
     }
@@ -353,7 +353,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private isPlainReflectValue(kind: TypeKind): boolean {
+  private readonly isPlainReflectValue(kind: TypeKind): boolean {
     return (
       kind == TypeKind.Int ||
       kind == TypeKind.Double ||
@@ -364,7 +364,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private reflectStringRead(
+  private readonly reflectStringRead(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -394,7 +394,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Unknown);
   }
 
-  private reflectFillCall(
+  private readonly reflectFillCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -421,7 +421,7 @@ partial class ExpressionTypes {
     return this.filledType(cls, values, module);
   }
 
-  private filledType(cls: Expr, values: Expr, module: int): Type {
+  private readonly filledType(cls: Expr, values: Expr, module: int): Type {
     const error = this.store.plain(TypeKind.Error);
     if (this.libraryClassFill(cls, values, module)) {
       return error;
@@ -470,7 +470,7 @@ partial class ExpressionTypes {
     return this.filledResult(base.instance, kFillValueError, module);
   }
 
-  private libraryClassFill(cls: Expr, values: Expr, module: int): boolean {
+  private readonly libraryClassFill(cls: Expr, values: Expr, module: int): boolean {
     if (cls.kind != ExprKind.Name) {
       return false;
     }
@@ -489,7 +489,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private fillRefused(
+  private readonly fillRefused(
     cls: Expr,
     word: string,
     other: string,
@@ -500,7 +500,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private filledResult(made: Type, failure: string, module: int): Type {
+  private readonly filledResult(made: Type, failure: string, module: int): Type {
     const fails = this.namedLibraryType(failure, 0, module);
     if (fails.kind == TypeKind.Error) {
       return fails;

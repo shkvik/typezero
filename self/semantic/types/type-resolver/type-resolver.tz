@@ -57,30 +57,30 @@ export class TypeResolver {
   private readonly text: TypeText;
   private readonly relation: TypeRelation;
   private readonly program: Program;
-  private readonly scopes: Map<int, ModuleScopes>;
-  private readonly records: Map<int, ModuleRecord>;
-  private readonly doors: Map<string, AliasDoor>;
-  private readonly working: Map<string, int>;
-  private readonly nesting: Map<string, int>;
-  private readonly tailUses: Set<TypeRef>;
-  private readonly endless: Set<string>;
-  private readonly bounded: Set<int>;
-  private readonly holes: Set<int>;
-  private readonly globals: Map<string, int>;
-  private readonly namespaces: Map<string, int>;
-  private readonly prefixes: Map<int, string>;
-  private readonly libraryShapes: Set<int>;
-  private readonly aliasOrigins: Map<int, AliasOrigin>;
-  private readonly extending: TypeAliasDecl[];
-  private readonly enumCache: Map<string, EnumStep[]>;
-  private readonly enumOpen: Set<string>;
+  private scopes: Cell<Map<int, ModuleScopes>>;
+  private records: Cell<Map<int, ModuleRecord>>;
+  private doors: Cell<Map<string, AliasDoor>>;
+  private working: Cell<Map<string, int>>;
+  private nesting: Cell<Map<string, int>>;
+  private tailUses: Cell<Set<TypeRef>>;
+  private endless: Cell<Set<string>>;
+  private bounded: Cell<Set<int>>;
+  private holes: Cell<Set<int>>;
+  private globals: Cell<Map<string, int>>;
+  private namespaces: Cell<Map<string, int>>;
+  private prefixes: Cell<Map<int, string>>;
+  private libraryShapes: Cell<Set<int>>;
+  private aliasOrigins: Cell<Map<int, AliasOrigin>>;
+  private extending: Cell<TypeAliasDecl[]>;
+  private enumCache: Cell<Map<string, EnumStep[]>>;
+  private enumOpen: Cell<Set<string>>;
   private readonly errors: ErrorLog;
   private readonly weakRefs: WeakRefRules;
 
   public constructor(
     store: TypeStore,
-    program: Program,
-    resolved: ModuleScopes[],
+    program: Own<Program>,
+    resolved: Read<ModuleScopes[]>,
   ) {
     this.store = store;
     this.text = new TypeText(store);
@@ -107,7 +107,7 @@ export class TypeResolver {
     this.weakRefs = new WeakRefRules(
       this.text,
       new TypeQuestions(store, this.relation),
-      new ModuleQuestions(program),
+      new ModuleQuestions(this.program),
     );
 
     for (const scopes of resolved) {
@@ -117,11 +117,11 @@ export class TypeResolver {
     this.indexGlobals();
   }
 
-  public problems(module: int): SourceError[] {
+  public readonly problems(module: int): SourceError[] {
     return this.errors.of(module);
   }
 
-  public resolve(ref: TypeRef, context: TypeContext): Type {
+  public readonly resolve(ref: TypeRef, context: TypeContext): Type {
     const form = ref.form;
 
     switch (form.kind) {
@@ -133,7 +133,7 @@ export class TypeResolver {
         const error = this.store.plain(TypeKind.Error);
         const item = items[0] ?? error;
 
-        return this.listOf(ref, item, context);
+        return this.listOf(ref, item, form.readonly, context);
       }
       case TypeRefKind.Union:
         return this.union(ref, context);
@@ -168,7 +168,7 @@ export class TypeResolver {
     }
   }
 
-  public declaredAlias(module: int, decl: TypeAliasDecl): Type {
+  public readonly declaredAlias(module: int, decl: TypeAliasDecl): Type {
     const written: Type[] = [];
 
     this.builtinAliasCheck(module, decl);
@@ -184,13 +184,13 @@ export class TypeResolver {
     return this.alias(module, decl, written, false);
   }
 
-  public declaredEnum(module: int, decl: EnumDecl): Type {
+  public readonly declaredEnum(module: int, decl: EnumDecl): Type {
     const values = this.enumValues(module, decl);
 
     return this.enumWhole(decl, values);
   }
 
-  private resolveAll(refs: TypeRef[], context: TypeContext): Type[] {
+  private readonly resolveAll(refs: Read<TypeRef[]>, context: TypeContext): Type[] {
     const types: Type[] = [];
 
     for (const ref of refs) {
@@ -202,7 +202,7 @@ export class TypeResolver {
     return types;
   }
 
-  private named(ref: TypeRef, context: TypeContext): Type {
+  private readonly named(ref: TypeRef, context: TypeContext): Type {
     const record = this.record(context.module);
     const use = record?.uses.get(ref.loc);
     const symbol = use?.symbol;
@@ -213,7 +213,7 @@ export class TypeResolver {
     return this.declared(ref, symbol, context);
   }
 
-  private report(module: int, loc: int, code: Code, details: Details): void {
+  private readonly report(module: int, loc: int, code: Code, details: Details): void {
     const record = this.record(module);
     if (record == undefined) {
       return;
@@ -222,3 +222,5 @@ export class TypeResolver {
     this.errors.write(module, loc, code, details);
   }
 }
+
+export type InternedTypeResolver = Interned<TypeResolver>;

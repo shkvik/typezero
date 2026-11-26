@@ -32,7 +32,7 @@ import {
 } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  private enumConstant(
+  private readonly enumConstant(
     expr: Expr,
     frame: EnumFrame,
   ): EnumConstant | undefined {
@@ -64,21 +64,21 @@ partial class TypeResolver {
     }
   }
 
-  private numberConstant(number: decimal): EnumConstant {
+  private readonly numberConstant(number: decimal): EnumConstant {
     return { isText: false, number, text: "" };
   }
 
-  private endlessConstant(shown: string): EnumConstant {
+  private readonly endlessConstant(shown: string): EnumConstant {
     return { isText: false, number: 0, text: "", shown };
   }
 
-  private textConstant(text: string): EnumConstant {
+  private readonly textConstant(text: string): EnumConstant {
     return { isText: true, number: 0, text };
   }
 
-  private templateConstant(
-    quasis: string[],
-    exprs: Expr[],
+  private readonly templateConstant(
+    quasis: Read<string[]>,
+    exprs: Read<Expr[]>,
   ): EnumConstant | undefined {
     const text = quasis[0];
     if (exprs.length > 0 || text == undefined) {
@@ -88,8 +88,8 @@ partial class TypeResolver {
     return this.textConstant(text);
   }
 
-  private ownMemberConstant(
-    frame: EnumFrame,
+  private readonly ownMemberConstant(
+    frame: Read<EnumFrame>,
     name: string,
   ): EnumConstant | undefined {
     const members = frame.decl.members;
@@ -102,7 +102,7 @@ partial class TypeResolver {
     return this.stepConstant(step);
   }
 
-  private stepConstant(step: EnumStep): EnumConstant {
+  private readonly stepConstant(step: EnumStep): EnumConstant {
     const type = step.type;
     if (type.kind == TypeKind.Literal && type.literal == LiteralKind.String) {
       return this.textConstant(type.text);
@@ -114,9 +114,9 @@ partial class TypeResolver {
     return this.numberConstant(value);
   }
 
-  private otherMemberConstant(
+  private readonly otherMemberConstant(
     expr: MemberExpr,
-    frame: EnumFrame,
+    frame: Read<EnumFrame>,
   ): EnumConstant | undefined {
     const object = expr.object;
     if (object.kind != ExprKind.Name) {
@@ -146,7 +146,7 @@ partial class TypeResolver {
     return this.stepConstant(step);
   }
 
-  private unaryConstant(
+  private readonly unaryConstant(
     expr: UnaryExpr,
     frame: EnumFrame,
   ): EnumConstant | undefined {
@@ -175,7 +175,7 @@ partial class TypeResolver {
     }
   }
 
-  private binaryConstant(
+  private readonly binaryConstant(
     expr: BinaryExpr,
     frame: EnumFrame,
   ): EnumConstant | undefined {
@@ -197,7 +197,7 @@ partial class TypeResolver {
     return this.numberResult(expr.op, left.number, right.number);
   }
 
-  private joinedConstant(
+  private readonly joinedConstant(
     op: BinaryOp,
     left: EnumConstant,
     right: EnumConstant,
@@ -209,7 +209,7 @@ partial class TypeResolver {
     return this.textConstant(left.text + right.text);
   }
 
-  private numberResult(
+  private readonly numberResult(
     op: BinaryOp,
     left: decimal,
     right: decimal,
@@ -240,7 +240,7 @@ partial class TypeResolver {
     }
   }
 
-  private quotientConstant(left: decimal, right: decimal): EnumConstant {
+  private readonly quotientConstant(left: decimal, right: decimal): EnumConstant {
     if (right != 0) {
       return this.numberConstant(left / right);
     }
@@ -253,7 +253,7 @@ partial class TypeResolver {
     return this.endlessConstant(sign + kEndlessText);
   }
 
-  private remainderConstant(left: decimal, right: decimal): EnumConstant {
+  private readonly remainderConstant(left: decimal, right: decimal): EnumConstant {
     if (right == 0) {
       return this.endlessConstant(kNotNumberText);
     }
@@ -261,7 +261,7 @@ partial class TypeResolver {
     return this.numberConstant(left % right);
   }
 
-  private powerConstant(
+  private readonly powerConstant(
     base: decimal,
     exponent: decimal,
   ): EnumConstant | undefined {
@@ -275,7 +275,7 @@ partial class TypeResolver {
     return this.wholePower(base, exponent);
   }
 
-  private wholePower(base: decimal, exponent: decimal): EnumConstant {
+  private readonly wholePower(base: decimal, exponent: decimal): EnumConstant {
     let product: decimal = 1;
     let rest = exponent;
 
@@ -294,7 +294,7 @@ partial class TypeResolver {
     return this.numberConstant(product);
   }
 
-  private inversePower(base: decimal, exponent: decimal): EnumConstant {
+  private readonly inversePower(base: decimal, exponent: decimal): EnumConstant {
     const power = this.wholePower(base, exponent);
     if (power.shown != undefined) {
       return this.numberConstant(0);
@@ -303,11 +303,11 @@ partial class TypeResolver {
     return this.quotientConstant(1, power.number);
   }
 
-  private signText(value: decimal): string {
+  private readonly signText(value: decimal): string {
     return this.signOf(value < 0);
   }
 
-  private signOf(isNegative: boolean): string {
+  private readonly signOf(isNegative: boolean): string {
     if (isNegative) {
       return "-";
     }
@@ -315,7 +315,7 @@ partial class TypeResolver {
     return "";
   }
 
-  private int32Of(value: decimal): decimal {
+  private readonly int32Of(value: decimal): decimal {
     const whole = value.round(0, "down");
     let pattern = whole % kBitSpan;
 
@@ -329,7 +329,7 @@ partial class TypeResolver {
     return pattern;
   }
 
-  private uint32Of(value: decimal): decimal {
+  private readonly uint32Of(value: decimal): decimal {
     const signed = this.int32Of(value);
     if (signed < 0) {
       return signed + kBitSpan;
@@ -338,7 +338,7 @@ partial class TypeResolver {
     return signed;
   }
 
-  private bitsConstant(
+  private readonly bitsConstant(
     op: BinaryOp,
     left: decimal,
     right: decimal,
@@ -364,7 +364,7 @@ partial class TypeResolver {
     return this.numberConstant(signed);
   }
 
-  private joinedBit(op: BinaryOp, one: decimal, other: decimal): decimal {
+  private readonly joinedBit(op: BinaryOp, one: decimal, other: decimal): decimal {
     switch (op) {
       case BinaryOp.BitAnd:
         return one * other;
@@ -375,7 +375,7 @@ partial class TypeResolver {
     }
   }
 
-  private shiftConstant(
+  private readonly shiftConstant(
     op: BinaryOp,
     left: decimal,
     right: decimal,
@@ -408,7 +408,7 @@ partial class TypeResolver {
     }
   }
 
-  private shiftCount(right: decimal): int {
+  private readonly shiftCount(right: decimal): int {
     const count = this.uint32Of(right) % kShiftSpan;
     const double = Number(count);
     if (double < 0 || double > kShiftLimit) {
@@ -418,7 +418,7 @@ partial class TypeResolver {
     return Math.trunc(double).toInt();
   }
 
-  private shownNumber(value: decimal): string {
+  private readonly shownNumber(value: decimal): string {
     if (value == 0) {
       return "0";
     }
@@ -442,7 +442,7 @@ partial class TypeResolver {
     return this.fixedText(digits, exponent);
   }
 
-  private exponentOf(power: string): int {
+  private readonly exponentOf(power: string): int {
     const size = power.slice(1);
     const parsed = parseInt(size);
     if (parsed.isErr()) {
@@ -460,7 +460,7 @@ partial class TypeResolver {
     return exponent;
   }
 
-  private scientificText(digits: string, exponent: int): string {
+  private readonly scientificText(digits: string, exponent: int): string {
     const trimmed = this.withoutZeros(digits);
     const head = trimmed.slice(0, 1);
     const tail = trimmed.slice(1);
@@ -472,7 +472,7 @@ partial class TypeResolver {
     return `${mantissa}e${sign}${power}`;
   }
 
-  private exponentSign(exponent: int): string {
+  private readonly exponentSign(exponent: int): string {
     if (exponent < 0) {
       return "-";
     }
@@ -480,7 +480,7 @@ partial class TypeResolver {
     return "+";
   }
 
-  private fixedText(digits: string, exponent: int): string {
+  private readonly fixedText(digits: string, exponent: int): string {
     if (exponent < 0) {
       const zeros = this.zerosOf(-exponent - 1);
       const trimmed = this.withoutZeros(digits);
@@ -495,7 +495,7 @@ partial class TypeResolver {
     return this.joinedFraction(whole, trimmed);
   }
 
-  private zerosOf(count: int): string {
+  private readonly zerosOf(count: int): string {
     if (count <= 0) {
       return "";
     }
@@ -503,7 +503,7 @@ partial class TypeResolver {
     return "0".repeat(count);
   }
 
-  private joinedFraction(whole: string, fraction: string): string {
+  private readonly joinedFraction(whole: string, fraction: string): string {
     if (fraction.length == 0) {
       return whole;
     }
@@ -511,7 +511,7 @@ partial class TypeResolver {
     return `${whole}.${fraction}`;
   }
 
-  private withoutZeros(digits: string): string {
+  private readonly withoutZeros(digits: string): string {
     let end = digits.length;
 
     while (end > 0 && digits.charAt(end - 1) == "0") {

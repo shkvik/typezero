@@ -8,7 +8,7 @@ export class TypeParts {
     this.store = store;
   }
 
-  public genericParameters(type: Type): Type[] | undefined {
+  public readonly genericParameters(type: Type): Type[] | undefined {
     const found: Type[] = [];
     const seen = new Set<int>();
 
@@ -19,19 +19,19 @@ export class TypeParts {
     return found;
   }
 
-  public hasUnknownInside(type: Type): boolean {
+  public readonly hasUnknownInside(type: Type): boolean {
     const seen = new Set<int>();
 
     return this.isUnknownInside(type, seen);
   }
 
-  public isOpaqueResult(type: Type): boolean {
+  public readonly isOpaqueResult(type: Type): boolean {
     const seen = new Set<int>();
 
     return type.kind == TypeKind.Unknown || this.isVoidChoice(type, seen);
   }
 
-  public isListParameter(param: Type): boolean {
+  public readonly isListParameter(param: Type): boolean {
     const constraint = this.store.constraintOf(param);
     if (constraint == undefined) {
       return false;
@@ -42,7 +42,7 @@ export class TypeParts {
     );
   }
 
-  public typeParts(type: Type): Type[] {
+  public readonly typeParts(type: Type): Type[] {
     switch (type.kind) {
       case TypeKind.Array:
         return [type.item];
@@ -78,7 +78,7 @@ export class TypeParts {
     }
   }
 
-  public mentionsParameter(type: Type): boolean {
+  public readonly mentionsParameter(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.TypeParameter:
       case TypeKind.Operation:
@@ -117,7 +117,7 @@ export class TypeParts {
     }
   }
 
-  private collectParameters(
+  private readonly collectParameters(
     type: Type,
     found: Type[],
     seen: Set<int>,
@@ -145,7 +145,7 @@ export class TypeParts {
     }
   }
 
-  private isUnknownInside(type: Type, seen: Set<int>): boolean {
+  private readonly isUnknownInside(type: Type, seen: Set<int>): boolean {
     if (seen.has(type.id)) {
       return false;
     }
@@ -161,7 +161,7 @@ export class TypeParts {
     return parts.some((part) => this.isUnknownInside(part, seen));
   }
 
-  private isVoidChoice(type: Type, seen: Set<int>): boolean {
+  private readonly isVoidChoice(type: Type, seen: Set<int>): boolean {
     if (seen.has(type.id) || type.kind == TypeKind.Function) {
       return false;
     }

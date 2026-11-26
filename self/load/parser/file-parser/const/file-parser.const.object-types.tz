@@ -4,4 +4,10 @@ export const kSymbolDisposeName = "[Symbol.dispose]";
 
 export const kSymbolIteratorName = "[Symbol.iterator]";
 
+export const kSymbolEqualsName = "[Symbol.equals]";
+
+export const kSymbolHashName = "[Symbol.hash]";
+
+export const kSymbolCloneName = "[Symbol.clone]";
+
 export const kRecordTypeName = "Record";

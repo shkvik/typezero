@@ -14,7 +14,7 @@ export declare class LLVMMessageSlot {}
 
 export declare function LLVMContextCreate(): LLVMContext;
 export declare function LLVMModuleCreateWithNameInContext(
-  name: cstring,
+  name: Read<cstring>,
   context: LLVMContext,
 ): LLVMModule;
 
@@ -30,7 +30,7 @@ export declare function LLVMPointerTypeInContext(
 ): LLVMType;
 export declare function LLVMStructTypeInContext(
   context: LLVMContext,
-  elements: LLVMType[],
+  elements: Read<LLVMType[]>,
   count: uint32,
   packed: int32,
 ): LLVMType;
@@ -40,14 +40,14 @@ export declare function LLVMArrayType2(
 ): LLVMType;
 export declare function LLVMFunctionType(
   result: LLVMType,
-  params: LLVMType[],
+  params: Read<LLVMType[]>,
   count: uint32,
   isVariadic: int32,
 ): LLVMType;
 
 export declare function LLVMConstIntOfString(
   type: LLVMType,
-  text: cstring,
+  text: Read<cstring>,
   radix: uint8,
 ): LLVMValue;
 export declare function LLVMConstReal(type: LLVMType, value: double): LLVMValue;
@@ -55,18 +55,18 @@ export declare function LLVMConstNull(type: LLVMType): LLVMValue;
 export declare function LLVMGetUndef(type: LLVMType): LLVMValue;
 export declare function LLVMConstStructInContext(
   context: LLVMContext,
-  values: LLVMValue[],
+  values: Read<LLVMValue[]>,
   count: uint32,
   packed: int32,
 ): LLVMValue;
 export declare function LLVMConstArray2(
   element: LLVMType,
-  values: LLVMValue[],
+  values: Read<LLVMValue[]>,
   count: uint64,
 ): LLVMValue;
 export declare function LLVMConstStringInContext2(
   context: LLVMContext,
-  bytes: Buffer,
+  bytes: Read<Buffer>,
   length: uint64,
   isUnterminated: int32,
 ): LLVMValue;
@@ -79,7 +79,7 @@ export declare function LLVMIsConstant(value: LLVMValue): int32;
 export declare function LLVMAddGlobal(
   module: LLVMModule,
   type: LLVMType,
-  name: cstring,
+  name: Read<cstring>,
 ): LLVMValue;
 export declare function LLVMSetInitializer(
   global: LLVMValue,
@@ -98,14 +98,14 @@ export declare function LLVMSetAlignment(value: LLVMValue, bytes: uint32): void;
 
 export declare function LLVMAddFunction(
   module: LLVMModule,
-  name: cstring,
+  name: Read<cstring>,
   type: LLVMType,
 ): LLVMValue;
 export declare function LLVMGetParam(fn: LLVMValue, index: uint32): LLVMValue;
 export declare function LLVMAppendBasicBlockInContext(
   context: LLVMContext,
   fn: LLVMValue,
-  name: cstring,
+  name: Read<cstring>,
 ): LLVMBlock;
 
 export declare function LLVMCreateBuilderInContext(
@@ -141,45 +141,45 @@ export declare function LLVMBuildBinOp(
   opcode: int32,
   left: LLVMValue,
   right: LLVMValue,
-  name: cstring,
+  name: Read<cstring>,
 ): LLVMValue;
 export declare function LLVMBuildFNeg(
   builder: LLVMBuilder,
   value: LLVMValue,
-  name: cstring,
+  name: Read<cstring>,
 ): LLVMValue;
 export declare function LLVMBuildICmp(
   builder: LLVMBuilder,
   predicate: int32,
   left: LLVMValue,
   right: LLVMValue,
-  name: cstring,
+  name: Read<cstring>,
 ): LLVMValue;
 export declare function LLVMBuildFCmp(
   builder: LLVMBuilder,
   predicate: int32,
   left: LLVMValue,
   right: LLVMValue,
-  name: cstring,
+  name: Read<cstring>,
 ): LLVMValue;
 export declare function LLVMBuildCast(
   builder: LLVMBuilder,
   opcode: int32,
   value: LLVMValue,
   type: LLVMType,
-  name: cstring,
+  name: Read<cstring>,
 ): LLVMValue;
 
 export declare function LLVMBuildAlloca(
   builder: LLVMBuilder,
   type: LLVMType,
-  name: cstring,
+  name: Read<cstring>,
 ): LLVMValue;
 export declare function LLVMBuildLoad2(
   builder: LLVMBuilder,
   type: LLVMType,
   pointer: LLVMValue,
-  name: cstring,
+  name: Read<cstring>,
 ): LLVMValue;
 export declare function LLVMBuildStore(
   builder: LLVMBuilder,
@@ -190,34 +190,34 @@ export declare function LLVMBuildInBoundsGEP2(
   builder: LLVMBuilder,
   type: LLVMType,
   pointer: LLVMValue,
-  indices: LLVMValue[],
+  indices: Read<LLVMValue[]>,
   count: uint32,
-  name: cstring,
+  name: Read<cstring>,
 ): LLVMValue;
 export declare function LLVMBuildStructGEP2(
   builder: LLVMBuilder,
   type: LLVMType,
   pointer: LLVMValue,
   index: uint32,
-  name: cstring,
+  name: Read<cstring>,
 ): LLVMValue;
 export declare function LLVMBuildCall2(
   builder: LLVMBuilder,
   type: LLVMType,
   fn: LLVMValue,
-  args: LLVMValue[],
+  args: Read<LLVMValue[]>,
   count: uint32,
-  name: cstring,
+  name: Read<cstring>,
 ): LLVMValue;
 export declare function LLVMBuildPhi(
   builder: LLVMBuilder,
   type: LLVMType,
-  name: cstring,
+  name: Read<cstring>,
 ): LLVMValue;
 export declare function LLVMAddIncoming(
   phi: LLVMValue,
-  values: LLVMValue[],
-  blocks: LLVMBlock[],
+  values: Read<LLVMValue[]>,
+  blocks: Read<LLVMBlock[]>,
   count: uint32,
 ): void;
 export declare function LLVMBuildSelect(
@@ -225,20 +225,20 @@ export declare function LLVMBuildSelect(
   condition: LLVMValue,
   then: LLVMValue,
   otherwise: LLVMValue,
-  name: cstring,
+  name: Read<cstring>,
 ): LLVMValue;
 export declare function LLVMBuildExtractValue(
   builder: LLVMBuilder,
   aggregate: LLVMValue,
   index: uint32,
-  name: cstring,
+  name: Read<cstring>,
 ): LLVMValue;
 export declare function LLVMBuildInsertValue(
   builder: LLVMBuilder,
   aggregate: LLVMValue,
   value: LLVMValue,
   index: uint32,
-  name: cstring,
+  name: Read<cstring>,
 ): LLVMValue;
 
 export declare function LLVMVerifyModule(
@@ -248,7 +248,7 @@ export declare function LLVMVerifyModule(
 ): int32;
 export declare function LLVMPrintModuleToFile(
   module: LLVMModule,
-  file: cstring,
+  file: Read<cstring>,
   message: LLVMMessageSlot | undefined,
 ): int32;
 
@@ -258,13 +258,13 @@ export declare function LLVMInitializeX86TargetMC(): void;
 export declare function LLVMInitializeX86AsmPrinter(): void;
 export declare function LLVMGetDefaultTargetTriple(): LLVMText;
 export declare function LLVMGetTargetFromName(
-  name: cstring,
+  name: Read<cstring>,
 ): LLVMTarget | undefined;
 export declare function LLVMCreateTargetMachine(
   target: LLVMTarget,
   triple: LLVMText,
-  cpu: cstring,
-  features: cstring,
+  cpu: Read<cstring>,
+  features: Read<cstring>,
   level: int32,
   relocation: int32,
   model: int32,
@@ -283,7 +283,7 @@ export declare function LLVMSetModuleDataLayout(
 export declare function LLVMTargetMachineEmitToFile(
   machine: LLVMTargetMachine,
   module: LLVMModule,
-  file: cstring,
+  file: Read<cstring>,
   kind: int32,
   message: LLVMMessageSlot | undefined,
 ): int32;

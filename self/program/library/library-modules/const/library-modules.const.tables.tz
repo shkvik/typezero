@@ -98,6 +98,13 @@ export const kLibraryModules: LibraryModule[] = [
     access: LibraryAccess.Program,
   },
   {
+    name: "tz:mem",
+    file: "mem.tz",
+    parts: [],
+    specs: ["tz:mem"],
+    access: LibraryAccess.Program,
+  },
+  {
     name: "tz:ffi",
     file: "ffi.tz",
     parts: [],

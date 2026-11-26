@@ -10,7 +10,7 @@ import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import { ValueTarget } from "../../../code/expression-types/types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private genericValue(
+  private readonly genericValue(
     expr: NameExpr,
     target: ValueTarget,
     wanted: Type | undefined,
@@ -58,7 +58,7 @@ partial class ExpressionTypes {
     return this.resolver.substituteValue(used, bound);
   }
 
-  private genericValueReport(expr: NameExpr, module: int): Type | undefined {
+  private readonly genericValueReport(expr: NameExpr, module: int): Type | undefined {
     if (this.argumentExprs.has(expr) || this.isConstInit(expr, module)) {
       return undefined;
     }
@@ -70,7 +70,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private isConstInit(expr: NameExpr, module: int): boolean {
+  private readonly isConstInit(expr: NameExpr, module: int): boolean {
     const variables = this.record(module)?.variables;
     if (variables == undefined) {
       return false;
@@ -85,7 +85,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private genericClosureCheck(expr: FunctionExpr, module: int): void {
+  private readonly genericClosureCheck(expr: FunctionExpr, module: int): void {
     if (expr.fn.typeParams.length == 0 || this.isTopConstant(expr, module)) {
       return;
     }
@@ -93,7 +93,7 @@ partial class ExpressionTypes {
     this.report(module, expr.loc, Code.GenericClosureNotTopLevel, kNoDetails);
   }
 
-  private isTopConstant(expr: FunctionExpr, module: int): boolean {
+  private readonly isTopConstant(expr: FunctionExpr, module: int): boolean {
     const items = this.program.modules[module]?.file.items ?? [];
 
     for (const item of items) {

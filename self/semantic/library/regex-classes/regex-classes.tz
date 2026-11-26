@@ -27,12 +27,12 @@ export class RegexClasses {
   private readonly cursor: RegexCursor;
   private readonly escapes: RegexEscapes;
 
-  public constructor(cursor: RegexCursor, escapes: RegexEscapes) {
+  public constructor(cursor: Own<RegexCursor>, escapes: Own<RegexEscapes>) {
     this.cursor = cursor;
     this.escapes = escapes;
   }
 
-  public legacyClass(): boolean {
+  public readonly legacyClass(): boolean {
     const cursor = this.cursor;
     let isAfterLead = false;
 
@@ -67,11 +67,11 @@ export class RegexClasses {
     return true;
   }
 
-  public setClass(): boolean {
+  public readonly setClass(): boolean {
     return this.classContents() != undefined;
   }
 
-  private isRangeNext(): boolean {
+  private readonly isRangeNext(): boolean {
     const cursor = this.cursor;
     const next = cursor.index + 1;
 
@@ -82,7 +82,7 @@ export class RegexClasses {
     );
   }
 
-  private isRangeFine(first: RegexClassAtom): boolean {
+  private readonly isRangeFine(first: RegexClassAtom): boolean {
     const cursor = this.cursor;
 
     cursor.index += 1;
@@ -105,7 +105,7 @@ export class RegexClasses {
     return true;
   }
 
-  private classAtom(): RegexClassAtom | undefined {
+  private readonly classAtom(): RegexClassAtom | undefined {
     const cursor = this.cursor;
     if (cursor.isAtEnd()) {
       return this.failedAtom(kUnterminatedClassText);
@@ -140,7 +140,7 @@ export class RegexClasses {
     return { char: value, isSet: false };
   }
 
-  private propertyAtom(letter: string): RegexClassAtom | undefined {
+  private readonly propertyAtom(letter: string): RegexClassAtom | undefined {
     this.cursor.index += 1;
 
     const isNegated = letter == kNegatedProperty;
@@ -151,13 +151,13 @@ export class RegexClasses {
     return { char: kNoUnit, isSet: true };
   }
 
-  private failedAtom(message: string): RegexClassAtom | undefined {
+  private readonly failedAtom(message: string): RegexClassAtom | undefined {
     this.cursor.fail(message);
 
     return undefined;
   }
 
-  private classContents(): Set<string> | undefined {
+  private readonly classContents(): Set<string> | undefined {
     const cursor = this.cursor;
     const isNegated = cursor.accept("^");
     const strings = new Set<string>();
@@ -174,7 +174,7 @@ export class RegexClasses {
     return strings;
   }
 
-  private isContentFine(strings: Set<string>): boolean {
+  private readonly isContentFine(strings: Set<string>): boolean {
     const first = this.classElement(strings, true);
     if (first == 0) {
       return false;
@@ -191,7 +191,7 @@ export class RegexClasses {
     return this.isOperationFine(strings, operator);
   }
 
-  private isUnionFine(strings: Set<string>): boolean {
+  private readonly isUnionFine(strings: Set<string>): boolean {
     const cursor = this.cursor;
 
     while (!cursor.accept("]")) {
@@ -215,7 +215,7 @@ export class RegexClasses {
     return true;
   }
 
-  private isOperationFine(strings: Set<string>, operator: string): boolean {
+  private readonly isOperationFine(strings: Set<string>, operator: string): boolean {
     const cursor = this.cursor;
 
     while (cursor.isDoubleAt(operator.slice(0, 1))) {
@@ -243,9 +243,9 @@ export class RegexClasses {
     return cursor.fail(kSetOperationText);
   }
 
-  private combine(
+  private readonly combine(
     strings: Set<string>,
-    operand: Set<string>,
+    operand: Read<Set<string>>,
     operator: string,
   ): void {
     for (const text of Array.from(strings)) {
@@ -257,7 +257,7 @@ export class RegexClasses {
     }
   }
 
-  private setOperator(): string {
+  private readonly setOperator(): string {
     const cursor = this.cursor;
     if (cursor.isDoubleAt("&")) {
       return kIntersection;
@@ -269,7 +269,7 @@ export class RegexClasses {
     return "";
   }
 
-  private classElement(strings: Set<string>, isRangeAllowed: boolean): int {
+  private readonly classElement(strings: Set<string>, isRangeAllowed: boolean): int {
     const cursor = this.cursor;
     const first = this.classOperand(strings);
     if (first == undefined) {
@@ -304,7 +304,7 @@ export class RegexClasses {
     return 2;
   }
 
-  private classOperand(strings: Set<string>): RegexClassAtom | undefined {
+  private readonly classOperand(strings: Set<string>): RegexClassAtom | undefined {
     const cursor = this.cursor;
     if (cursor.accept("[")) {
       return this.nestedOperand(strings);
@@ -327,7 +327,7 @@ export class RegexClasses {
     return { char: cursor.nextChar(), isSet: false };
   }
 
-  private nestedOperand(strings: Set<string>): RegexClassAtom | undefined {
+  private readonly nestedOperand(strings: Set<string>): RegexClassAtom | undefined {
     const cursor = this.cursor;
 
     cursor.depth += 1;
@@ -351,7 +351,7 @@ export class RegexClasses {
     return { char: kNoUnit, isSet: true };
   }
 
-  private escapedOperand(strings: Set<string>): RegexClassAtom | undefined {
+  private readonly escapedOperand(strings: Set<string>): RegexClassAtom | undefined {
     const cursor = this.cursor;
     if (cursor.isAtEnd()) {
       return this.failedAtom(kBackslashEndText);
@@ -380,7 +380,7 @@ export class RegexClasses {
     return { char: value, isSet: false };
   }
 
-  private stringsOperand(strings: Set<string>): RegexClassAtom | undefined {
+  private readonly stringsOperand(strings: Set<string>): RegexClassAtom | undefined {
     const cursor = this.cursor;
     if (!cursor.accept("{")) {
       return this.failedAtom(kEscapeText);
@@ -415,13 +415,13 @@ export class RegexClasses {
     return { char: kNoUnit, isSet: true };
   }
 
-  private addString(strings: Set<string>, text: string, count: int): void {
+  private readonly addString(strings: Set<string>, text: string, count: int): void {
     if (count != 1) {
       strings.add(text);
     }
   }
 
-  private stringChar(): int {
+  private readonly stringChar(): int {
     const cursor = this.cursor;
     if (cursor.accept("\\")) {
       return this.escapes.characterEscape(true);

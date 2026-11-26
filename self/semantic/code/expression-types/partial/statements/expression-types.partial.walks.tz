@@ -14,7 +14,7 @@ import {
 } from "../../../../../program/type/types/type.types.tz";
 
 partial class ExpressionTypes {
-  private templateTyped(
+  private readonly templateTyped(
     expr: TemplateExpr,
     wanted: Type | undefined,
     module: int,
@@ -26,7 +26,7 @@ partial class ExpressionTypes {
     return this.literals.templated(wanted);
   }
 
-  private templatePart(part: Expr, module: int): void {
+  private readonly templatePart(part: Expr, module: int): void {
     if (this.isHintNeeded(part, module)) {
       return;
     }
@@ -36,7 +36,7 @@ partial class ExpressionTypes {
     this.textCheck(part, type, module);
   }
 
-  private childrenTyped(expr: Expr, module: int): Type {
+  private readonly childrenTyped(expr: Expr, module: int): Type {
     for (const part of this.shapes.childrenOf(expr)) {
       this.walkedPart(part, module);
     }
@@ -44,7 +44,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private walkedArguments(args: CallArgument[], module: int): void {
+  private readonly walkedArguments(args: Read<CallArgument[]>, module: int): void {
     for (const arg of args) {
       if (!this.answers.isVisited(arg.expr)) {
         this.walkedPart(arg.expr, module);
@@ -52,7 +52,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private walkedPart(expr: Expr, module: int): void {
+  private readonly walkedPart(expr: Expr, module: int): void {
     if (this.isHintNeeded(expr, module)) {
       return;
     }
@@ -60,7 +60,7 @@ partial class ExpressionTypes {
     this.typed(expr, undefined, module);
   }
 
-  private isHintNeeded(expr: Expr, module: int): boolean {
+  private readonly isHintNeeded(expr: Expr, module: int): boolean {
     switch (expr.kind) {
       case ExprKind.ArrayLit:
       case ExprKind.ObjectLit:
@@ -92,7 +92,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private isPlainNew(expr: NewExpr, module: int): boolean {
+  private readonly isPlainNew(expr: NewExpr, module: int): boolean {
     const form = expr.form;
     if (form.kind != NewKind.Named || form.member != undefined) {
       return false;

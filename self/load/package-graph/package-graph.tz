@@ -24,7 +24,7 @@ export class PackageGraph {
   private readonly reader: ManifestReader;
   private readonly names: Set<string>;
 
-  public constructor(reader: ManifestReader) {
+  public constructor(reader: Own<ManifestReader>) {
     this.packages = [];
     this.reader = reader;
     this.names = new Set<string>();
@@ -67,18 +67,22 @@ export class PackageGraph {
     }
   }
 
-  public isPresent(): boolean {
+  public readonly errors(): string[] {
+    return this.reader.errors.slice();
+  }
+
+  public readonly isPresent(): boolean {
     return this.packages.length > 0;
   }
 
-  public packageAt(index: int): PackageInfo | undefined {
+  public readonly packageAt(index: int): PackageInfo | undefined {
     return this.packages[index];
   }
 
   private packageOf(
-    manifest: Manifest,
+    manifest: Read<Manifest>,
     at: int,
-    index: Map<string, int>,
+    index: Read<Map<string, int>>,
   ): PackageInfo {
     const aliases = new Map<string, int>();
     const remote: string[] = [];
@@ -109,7 +113,7 @@ export class PackageGraph {
     };
   }
 
-  private packageName(manifest: Manifest, at: int): string {
+  private packageName(manifest: Read<Manifest>, at: int): string {
     if (at == 0) {
       return "";
     }
@@ -134,7 +138,7 @@ export class PackageGraph {
     return unique;
   }
 
-  private localManifests(root: Manifest): Map<string, Manifest> {
+  private localManifests(root: Own<Manifest>): Map<string, Manifest> {
     const found = new Map<string, Manifest>();
     const queue = [root];
     let next = 0;
@@ -153,7 +157,7 @@ export class PackageGraph {
   }
 
   private addLocals(
-    manifest: Manifest,
+    manifest: Read<Manifest>,
     found: Map<string, Manifest>,
     queue: Manifest[],
   ): void {
@@ -181,13 +185,13 @@ export class PackageGraph {
     }
   }
 
-  private localId(directory: string): string {
+  private readonly localId(directory: string): string {
     const slashed = directory.replaceAll("\\", "/");
 
     return `${kLocalPrefix}${slashed}`;
   }
 
-  private sourceOf(spec: string, base: string): DependencySource {
+  private readonly sourceOf(spec: string, base: string): DependencySource {
     const isRemote = kRemotePrefixes.some((prefix) => spec.startsWith(prefix));
     if (isRemote) {
       return { kind: DependencySourceKind.Remote };
@@ -217,7 +221,7 @@ export class PackageGraph {
     );
   }
 
-  private localRest(spec: string, isLocal: boolean): string {
+  private readonly localRest(spec: string, isLocal: boolean): string {
     if (isLocal) {
       return spec.slice(kLocalPrefix.length);
     }
@@ -225,7 +229,7 @@ export class PackageGraph {
     return spec;
   }
 
-  private localSource(rest: string, base: string): DependencySource {
+  private readonly localSource(rest: string, base: string): DependencySource {
     const full = this.fullPath(rest, base);
     if (!this.reader.isDirectory(full)) {
       return this.sourceProblem(`there is no directory '${rest}' in ${base}`);
@@ -236,7 +240,7 @@ export class PackageGraph {
     return { kind: DependencySourceKind.Local, directory };
   }
 
-  private fullPath(rest: string, base: string): string {
+  private readonly fullPath(rest: string, base: string): string {
     if (isAbsolute(rest)) {
       return rest;
     }
@@ -244,13 +248,13 @@ export class PackageGraph {
     return join(base, rest);
   }
 
-  private isVersion(rest: string): boolean {
+  private readonly isVersion(rest: string): boolean {
     const first = rest.slice(0, 1);
 
     return rest == kLatestWord || kVersionStarts.includes(first);
   }
 
-  private shownRange(rest: string): string {
+  private readonly shownRange(rest: string): string {
     if (rest == kLatestWord) {
       return kFirstRange;
     }
@@ -258,7 +262,7 @@ export class PackageGraph {
     return rest;
   }
 
-  private sourceProblem(message: string): DependencySource {
+  private readonly sourceProblem(message: string): DependencySource {
     return { kind: DependencySourceKind.Problem, message };
   }
 }

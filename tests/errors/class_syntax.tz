@@ -19,8 +19,8 @@ class Shape {
   *items: int
   // expect-error: a constructor cannot be a generator: 'new' gives the object
   *constructor() {}
-  // expect-error: a method cannot be 'readonly': a method cannot be replaced anyway
-  readonly paint() {}
+  // expect-error: 'readonly' before a method means it only reads 'this'; a static method has no 'this' to read
+  static readonly paint() {}
   // expect-error: method 'add' has no body; overload signatures over one body are not supported: give each variant a body of its own
   add(v: int): int
   // expect-error: a constructor cannot have a return type

@@ -37,10 +37,10 @@ export class ClassValueRules {
 
   public constructor(
     text: TypeText,
-    types: TypeQuestions,
-    modules: ModuleQuestions,
+    types: Own<TypeQuestions>,
+    modules: Own<ModuleQuestions>,
     store: TypeStore,
-    classes: ClassRules,
+    classes: Own<ClassRules>,
   ) {
     this.text = text;
     this.types = types;
@@ -49,7 +49,7 @@ export class ClassValueRules {
     this.classes = classes;
   }
 
-  public hasEmptyCollection(
+  public readonly hasEmptyCollection(
     dict: DictKind,
     written: TypeRef | undefined,
   ): boolean {
@@ -58,7 +58,7 @@ export class ClassValueRules {
     return isCollection && written?.form.kind == TypeRefKind.Generic;
   }
 
-  public isCollectionOf(word: string, type: Type): boolean {
+  public readonly isCollectionOf(word: string, type: Type): boolean {
     if (word == kDateName) {
       return this.types.isDate(type);
     }
@@ -72,7 +72,7 @@ export class ClassValueRules {
     return type.dict == DictKind.Set;
   }
 
-  public isOpenTested(base: Type): boolean {
+  public readonly isOpenTested(base: Type): boolean {
     switch (base.kind) {
       case TypeKind.Error:
       case TypeKind.Unknown:
@@ -86,7 +86,7 @@ export class ClassValueRules {
     }
   }
 
-  public isObjectTested(base: Type): boolean {
+  public readonly isObjectTested(base: Type): boolean {
     switch (base.kind) {
       case TypeKind.Object:
       case TypeKind.Instance:
@@ -103,7 +103,7 @@ export class ClassValueRules {
     }
   }
 
-  public canHoldClass(parts: Type[], instance: Type): boolean {
+  public readonly canHoldClass(parts: Read<Type[]>, instance: Type): boolean {
     return parts.some((part) => {
       const isObject =
         part.kind == TypeKind.Object || part.kind == TypeKind.Instance;
@@ -112,7 +112,7 @@ export class ClassValueRules {
     });
   }
 
-  public isUnrelatedClass(part: Type, instance: Type): boolean {
+  public readonly isUnrelatedClass(part: Type, instance: Type): boolean {
     if (
       part.kind != TypeKind.Instance ||
       this.modules.isLibraryModule(part.module)
@@ -123,7 +123,7 @@ export class ClassValueRules {
     return !this.isSameLine(part, instance);
   }
 
-  public collectionTypeCheck(
+  public readonly collectionTypeCheck(
     expr: BinaryExpr,
     left: Type,
     base: Type,
@@ -159,10 +159,10 @@ export class ClassValueRules {
     };
   }
 
-  public collectionUnionCheck(
+  public readonly collectionUnionCheck(
     expr: BinaryExpr,
     left: Type,
-    parts: Type[],
+    parts: Read<Type[]>,
     word: string,
   ): SourceError[] {
     const errors: SourceError[] = [];
@@ -197,7 +197,7 @@ export class ClassValueRules {
     return errors;
   }
 
-  public relatedCheck(
+  public readonly relatedCheck(
     expr: BinaryExpr,
     base: Type,
     instance: Type,
@@ -237,9 +237,9 @@ export class ClassValueRules {
     return errors;
   }
 
-  public staticError(
+  public readonly staticError(
     expr: MemberExpr,
-    entry: ClassMemberEntry,
+    entry: Read<ClassMemberEntry>,
   ): SourceError | undefined {
     return {
       code: Code.StaticViaInstance,
@@ -251,7 +251,7 @@ export class ClassValueRules {
     };
   }
 
-  public instanceofCheck(
+  public readonly instanceofCheck(
     expr: BinaryExpr,
     left: Type,
     instance: Type,
@@ -303,9 +303,9 @@ export class ClassValueRules {
     return errors;
   }
 
-  public staticCallError(
+  public readonly staticCallError(
     expr: MemberExpr,
-    entry: ClassMemberEntry,
+    entry: Read<ClassMemberEntry>,
   ): SourceError | undefined {
     const owner = entry.owner;
     const isMethod = owner.methods.some(
@@ -327,7 +327,7 @@ export class ClassValueRules {
     };
   }
 
-  public classValueMember(expr: MemberExpr, object: ClassType): Checked<Type> {
+  public readonly classValueMember(expr: MemberExpr, object: ClassType): Checked<Type> {
     const error = this.store.plain(TypeKind.Error);
     if (expr.name == "prototype") {
       return {
@@ -358,7 +358,7 @@ export class ClassValueRules {
     return { value: error };
   }
 
-  private isSameLine(first: Type, second: Type): boolean {
+  private readonly isSameLine(first: Type, second: Type): boolean {
     const up = this.types.ancestorsOf(first).includes(second);
     const down = this.types.ancestorsOf(second).includes(first);
 

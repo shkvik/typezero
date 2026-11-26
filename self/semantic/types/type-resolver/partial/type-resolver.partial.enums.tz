@@ -29,11 +29,11 @@ import {
 } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  private enumType(
+  private readonly enumType(
     ref: TypeRef,
     decl: EnumDecl,
     module: int,
-    context: TypeContext,
+    context: Read<TypeContext>,
   ): Type {
     const values = this.enumValues(module, decl);
     const point = ref.name.indexOf(kNamePoint);
@@ -57,7 +57,7 @@ partial class TypeResolver {
     return values[index] ?? error;
   }
 
-  private enumWhole(decl: EnumDecl, values: Type[]): Type {
+  private readonly enumWhole(decl: EnumDecl, values: Read<Type[]>): Type {
     const texts = values.filter(
       (value) =>
         value.kind == TypeKind.Literal && value.literal == LiteralKind.String,
@@ -73,7 +73,7 @@ partial class TypeResolver {
     return whole;
   }
 
-  public enumMember(
+  public readonly enumMember(
     module: int,
     decl: EnumDecl,
     name: string,
@@ -88,15 +88,15 @@ partial class TypeResolver {
     return steps[index];
   }
 
-  private enumValues(module: int, decl: EnumDecl): Type[] {
+  private readonly enumValues(module: int, decl: EnumDecl): Type[] {
     const steps = this.enumSteps(module, decl);
 
     return steps.map((step) => step.type);
   }
 
-  private enumSteps(module: int, decl: EnumDecl): EnumStep[] {
+  private readonly enumSteps(module: int, decl: EnumDecl): EnumStep[] {
     const key = `${module} ${decl.loc}`;
-    const known = this.enumCache.get(key);
+    const known = this.enumCache.get(key)?.slice();
     if (known != undefined) {
       return known;
     }
@@ -108,13 +108,13 @@ partial class TypeResolver {
     const steps = this.countedSteps(module, decl);
 
     this.enumOpen.delete(key);
-    this.enumCache.set(key, steps);
+    this.enumCache.set(key, steps.slice());
     this.errors.keepSince(owned);
 
     return steps;
   }
 
-  private countedSteps(module: int, decl: EnumDecl): EnumStep[] {
+  private readonly countedSteps(module: int, decl: EnumDecl): EnumStep[] {
     const frame: EnumFrame = { module, decl, steps: [] };
     const count: EnumCount = {
       next: 0,
@@ -138,7 +138,7 @@ partial class TypeResolver {
     return frame.steps;
   }
 
-  private uniqueMemberCheck(frame: EnumFrame, member: EnumMember): void {
+  private readonly uniqueMemberCheck(frame: Read<EnumFrame>, member: EnumMember): void {
     const earlier = frame.decl.members.slice(0, frame.steps.length);
     if (!earlier.some((other) => other.name == member.name)) {
       return;
@@ -149,7 +149,7 @@ partial class TypeResolver {
     });
   }
 
-  private countedStep(
+  private readonly countedStep(
     frame: EnumFrame,
     member: EnumMember,
     count: EnumCount,
@@ -178,8 +178,8 @@ partial class TypeResolver {
     return this.constantStep(frame, member, constant, count);
   }
 
-  private constantStep(
-    frame: EnumFrame,
+  private readonly constantStep(
+    frame: Read<EnumFrame>,
     member: EnumMember,
     constant: EnumConstant,
     count: EnumCount,
@@ -195,8 +195,8 @@ partial class TypeResolver {
     return this.errorStep();
   }
 
-  private numberStep(
-    frame: EnumFrame,
+  private readonly numberStep(
+    frame: Read<EnumFrame>,
     member: EnumMember,
     value: decimal,
     count: EnumCount,
@@ -231,7 +231,7 @@ partial class TypeResolver {
     return { type, number };
   }
 
-  private wholeOf(value: decimal): int {
+  private readonly wholeOf(value: decimal): int {
     const double = Number(value);
     if (double < -kSafeWholeSize || double > kSafeWholeSize) {
       return 0;
@@ -240,8 +240,8 @@ partial class TypeResolver {
     return Math.trunc(double).toInt();
   }
 
-  private notWholeReport(
-    frame: EnumFrame,
+  private readonly notWholeReport(
+    frame: Read<EnumFrame>,
     member: EnumMember,
     shown: string,
   ): void {
@@ -253,13 +253,13 @@ partial class TypeResolver {
     });
   }
 
-  private errorStep(): EnumStep {
+  private readonly errorStep(): EnumStep {
     const type = this.store.plain(TypeKind.Error);
 
     return { type };
   }
 
-  private enumNamed(name: NameExpr, module: int): EnumHome | undefined {
+  private readonly enumNamed(name: NameExpr, module: int): EnumHome | undefined {
     const uses = this.scopes.get(module)?.uses ?? [];
     const use = uses.find((one) => one.loc == name.loc && !one.isType);
     const symbol = use?.symbol;
@@ -278,7 +278,7 @@ partial class TypeResolver {
     return this.enumDeclared(target.module, target.name, undefined);
   }
 
-  private enumDeclared(
+  private readonly enumDeclared(
     module: int,
     name: string,
     loc: int | undefined,
@@ -294,7 +294,7 @@ partial class TypeResolver {
     return { module, decl: found };
   }
 
-  private otherEnumSteps(home: EnumHome): EnumStep[] | undefined {
+  private readonly otherEnumSteps(home: EnumHome): EnumStep[] | undefined {
     const key = `${home.module} ${home.decl.loc}`;
     if (!this.enumOpen.has(key)) {
       return this.enumSteps(home.module, home.decl);

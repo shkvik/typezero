@@ -27,7 +27,7 @@ import {
 import { kNextName } from "../../../index-rules/const/index-rules.const.tz";
 
 partial class ExpressionTypes {
-  private enterGenerator(frame: FunctionFrame, result: Type | undefined): void {
+  private readonly enterGenerator(frame: FunctionFrame, result: Type | undefined): void {
     const fn = frame.fn;
     if (fn == undefined || !fn.isGenerator) {
       return;
@@ -39,13 +39,13 @@ partial class ExpressionTypes {
     this.generatorFrames.push(generator);
   }
 
-  private leaveGenerator(frame: FunctionFrame): void {
+  private readonly leaveGenerator(frame: Read<FunctionFrame>): void {
     if (frame.generator != undefined) {
       this.generatorFrames.pop();
     }
   }
 
-  private iteratorCallCheck(
+  private readonly iteratorCallCheck(
     member: MemberExpr,
     object: Type,
     module: int,
@@ -57,7 +57,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private iteratorMissingCheck(
+  private readonly iteratorMissingCheck(
     member: MemberExpr,
     object: Type,
     module: int,
@@ -69,7 +69,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private yieldTyped(expr: YieldExpr, module: int): Type {
+  private readonly yieldTyped(expr: YieldExpr, module: int): Type {
     const frame = this.generatorFrames[this.generatorFrames.length - 1];
     const value = expr.value;
 
@@ -102,8 +102,8 @@ partial class ExpressionTypes {
     return this.functions.sentType(frame);
   }
 
-  private yieldValue(
-    frame: GeneratorFrame,
+  private readonly yieldValue(
+    frame: Read<GeneratorFrame>,
     value: Expr | undefined,
     module: int,
   ): Type {
@@ -124,8 +124,8 @@ partial class ExpressionTypes {
     return this.checked(value, yielded, module, kNoPlace);
   }
 
-  private asyncYieldValue(
-    frame: GeneratorFrame,
+  private readonly asyncYieldValue(
+    frame: Read<GeneratorFrame>,
     value: Expr,
     module: int,
   ): Type | undefined {
@@ -155,7 +155,7 @@ partial class ExpressionTypes {
     return awaited;
   }
 
-  private yieldPromiseCheck(
+  private readonly yieldPromiseCheck(
     fn: FunctionDecl,
     value: Expr,
     awaited: Type,
@@ -176,7 +176,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private delegateTyped(
+  private readonly delegateTyped(
     frame: GeneratorFrame,
     value: Expr | undefined,
     module: int,
@@ -195,7 +195,7 @@ partial class ExpressionTypes {
     return error;
   }
 
-  private delegatedItem(value: Expr, type: Type, module: int): Type {
+  private readonly delegatedItem(value: Expr, type: Type, module: int): Type {
     const checked = this.functions.delegatedItem(value, type);
 
     this.reportFound(module, checked.error);
@@ -203,13 +203,13 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private generatorResult(
+  private readonly generatorResult(
     fn: FunctionDecl,
-    frame: FunctionFrame,
-    generator: GeneratorFrame,
+    frame: Read<FunctionFrame>,
+    generator: Read<GeneratorFrame>,
     module: int,
   ): Type {
-    const written = generator.yields;
+    const written = generator.yields.slice();
     const yields = written.filter((one) => one.type.kind != TypeKind.Error);
     if (written.length > 0 && yields.length == 0) {
       return this.store.plain(TypeKind.Error);
@@ -239,9 +239,9 @@ partial class ExpressionTypes {
     return this.store.iteratorOf(shape);
   }
 
-  private generatorReturned(
+  private readonly generatorReturned(
     fn: FunctionDecl,
-    frame: FunctionFrame,
+    frame: Read<FunctionFrame>,
     module: int,
   ): Type {
     const valued = frame.returns.filter(
@@ -256,7 +256,7 @@ partial class ExpressionTypes {
     return this.functions.widened(joined);
   }
 
-  private nextUnionCheck(member: MemberExpr, object: Type, module: int): void {
+  private readonly nextUnionCheck(member: MemberExpr, object: Type, module: int): void {
     if (object.kind != TypeKind.Iterator || member.name != kNextName) {
       return;
     }
@@ -289,7 +289,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private flatMapResultCheck(
+  private readonly flatMapResultCheck(
     expr: CallExpr,
     member: MemberExpr,
     object: Type,
@@ -337,7 +337,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private staticSourceCheck(
+  private readonly staticSourceCheck(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -361,7 +361,7 @@ partial class ExpressionTypes {
     return this.iteratorSourceCheck(expr, module);
   }
 
-  private iteratorSourceCheck(expr: CallExpr, module: int): boolean {
+  private readonly iteratorSourceCheck(expr: CallExpr, module: int): boolean {
     const arg = expr.args[0]?.expr;
     if (arg == undefined) {
       return false;

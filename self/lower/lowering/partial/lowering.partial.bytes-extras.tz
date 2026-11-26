@@ -27,7 +27,6 @@ partial class Lowering {
     call: CallExpr,
     given: IrValue,
   ): IrValue | undefined {
-    const made = frame.made;
     const tz = this.store.integer(64, false);
     if (this.isBytesType(given.tz)) {
       const length = this.bytesLength(frame, given.value);
@@ -41,8 +40,8 @@ partial class Lowering {
     const params = [kPointerType, kIntType, kFlagType];
     const callee = this.ir.declare(kBufferByteLength, kFlagType, params);
     const args = this.textParts(frame, given).concat([encoding]);
-    const length = made.call(callee, args);
-    const value = made.cast(IrOpcode.SExt, length, kIntType);
+    const length = frame.made.call(callee, args);
+    const value = frame.made.cast(IrOpcode.SExt, length, kIntType);
 
     this.dropping(frame, given);
 
@@ -89,7 +88,6 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const encoding = this.encodingOf(frame, call.args[2]?.expr);
     const params = [
       kPointerType,
@@ -106,20 +104,20 @@ partial class Lowering {
     const args = [bytes.value]
       .concat(this.textParts(frame, given))
       .concat([from.value, hasFrom, encoding, mode]);
-    const found = made.call(callee, args);
+    const found = frame.made.call(callee, args);
 
     this.dropping(frame, given);
     this.dropping(frame, bytes);
 
     if (member.name == "includes") {
       const zero = this.ir.zero(kFlagType);
-      const value = made.integerCompare(IrIntPredicate.NotEqual, found, zero);
+      const value = frame.made.integerCompare(IrIntPredicate.NotEqual, found, zero);
       const tz = this.store.plain(TypeKind.Boolean);
 
       return { type: kBooleanType, value, tz };
     }
 
-    const value = made.cast(IrOpcode.SExt, found, kIntType);
+    const value = frame.made.cast(IrOpcode.SExt, found, kIntType);
     const tz = this.store.integer(64, false);
 
     return { type: kIntType, value, tz };
@@ -144,23 +142,22 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
-    const raw = made.cast(IrOpcode.BitCast, number.value, kIntType);
+    const raw = frame.made.cast(IrOpcode.BitCast, number.value, kIntType);
     const data = this.bytesData(frame, bytes.value);
     const isBig = member.name == "writeDoubleBE";
 
     for (let index = 0; index < 8; index++) {
       const shift = this.byteShift(index, isBig);
-      const moved = made.binary(IrOpcode.LShr, raw, shift);
-      const byte = made.cast(IrOpcode.Trunc, moved, kByteType);
+      const moved = frame.made.binary(IrOpcode.LShr, raw, shift);
+      const byte = frame.made.cast(IrOpcode.Trunc, moved, kByteType);
       const step = this.ir.integer(kIntType, `${index}`);
-      const at = made.binary(IrOpcode.Add, offset.value, step);
+      const at = frame.made.binary(IrOpcode.Add, offset.value, step);
 
-      made.store(byte, made.element(kByteType, data, at));
+      frame.made.store(byte, frame.made.element(kByteType, data, at));
     }
 
     const size = this.ir.integer(kIntType, "8");
-    const value = made.binary(IrOpcode.Add, offset.value, size);
+    const value = frame.made.binary(IrOpcode.Add, offset.value, size);
     const tz = this.store.integer(64, false);
 
     this.dropping(frame, bytes);
@@ -168,7 +165,7 @@ partial class Lowering {
     return { type: kIntType, value, tz };
   }
 
-  private byteShift(index: int, isBig: boolean): LLVMValue {
+  private readonly byteShift(index: int, isBig: boolean): LLVMValue {
     let place = index;
 
     if (isBig) {

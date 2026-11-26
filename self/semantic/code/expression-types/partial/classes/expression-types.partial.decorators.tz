@@ -33,7 +33,7 @@ import {
 import { kDecoratorPlaces } from "../../../decorator-rules/const/decorator-rules.const.tz";
 
 partial class ExpressionTypes {
-  private decoratorChecks(decl: ClassDecl, module: int): void {
+  private readonly decoratorChecks(decl: ClassDecl, module: int): void {
     if (!this.decorators.isDecoratedClass(decl)) {
       return;
     }
@@ -68,7 +68,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private decorate(run: DecorateRun, module: int): void {
+  private readonly decorate(run: Read<DecorateRun>, module: int): void {
     if (run.field?.accessor == true) {
       return this.report(module, run.at, Code.DecoratorAccessor, kNoDetails);
     }
@@ -109,7 +109,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private decoratorType(expr: Expr, module: int): Type {
+  private readonly decoratorType(expr: Expr, module: int): Type {
     if (this.isMetadataDecorator(expr, module)) {
       return this.store.plain(TypeKind.Error);
     }
@@ -125,7 +125,7 @@ partial class ExpressionTypes {
     return this.functionAt(target.module, target.loc);
   }
 
-  private isMetadataDecorator(expr: Expr, module: int): boolean {
+  private readonly isMetadataDecorator(expr: Expr, module: int): boolean {
     if (expr.kind != ExprKind.Call) {
       return false;
     }
@@ -143,7 +143,7 @@ partial class ExpressionTypes {
     return this.targetOfName(object, module) == undefined;
   }
 
-  private decoratorFit(
+  private readonly decoratorFit(
     use: DecoratorUse,
     place: DecoratorPlace,
     type: Type,
@@ -156,8 +156,8 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private decoratorResultCheck(
-    run: DecorateRun,
+  private readonly decoratorResultCheck(
+    run: Read<DecorateRun>,
     use: DecoratorUse,
     type: Type,
     hasDescriptor: boolean,
@@ -226,7 +226,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private isReplacement(
+  private readonly isReplacement(
     decl: ClassDecl,
     decorator: Type,
     module: int,
@@ -253,7 +253,7 @@ partial class ExpressionTypes {
     return this.relation.converts(result.instance, own);
   }
 
-  private isExtendingDecorator(
+  private readonly isExtendingDecorator(
     expr: Expr,
     result: Type,
     module: int,
@@ -282,7 +282,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private isGivenSubclass(statement: Stmt, given: string): boolean {
+  private readonly isGivenSubclass(statement: Stmt, given: string): boolean {
     if (statement.kind != StmtKind.Return) {
       return false;
     }
@@ -301,7 +301,7 @@ partial class ExpressionTypes {
     return decl.base?.name == given;
   }
 
-  private isBuiltOnGiven(instance: Type): boolean {
+  private readonly isBuiltOnGiven(instance: Type): boolean {
     if (instance.kind != TypeKind.Instance) {
       return false;
     }
@@ -323,7 +323,7 @@ partial class ExpressionTypes {
     return this.targetOfName(expr, module)?.kind == SymbolKind.Parameter;
   }
 
-  private oldObjectCheck(decl: ClassDecl, module: int): void {
+  private readonly oldObjectCheck(decl: ClassDecl, module: int): void {
     const own = this.resolver.classInstance(module, decl, []);
     const owner: StaticOwner = { decl, module };
 
@@ -342,7 +342,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private staticHeldType(
+  private readonly staticHeldType(
     field: ClassField,
     owner: StaticOwner,
   ): Type | undefined {
@@ -356,7 +356,7 @@ partial class ExpressionTypes {
     return this.peekType(field.init, owner.module);
   }
 
-  private isHolding(type: Type, own: Type): boolean {
+  private readonly isHolding(type: Type, own: Type): boolean {
     if (type == own) {
       return true;
     }
@@ -364,7 +364,7 @@ partial class ExpressionTypes {
     return this.parts.typeParts(type).some((part) => this.isHolding(part, own));
   }
 
-  private isReplacing(decl: ClassDecl, result: Type, module: int): boolean {
+  private readonly isReplacing(decl: ClassDecl, result: Type, module: int): boolean {
     if (result.kind != TypeKind.Class || !result.exact) {
       return false;
     }

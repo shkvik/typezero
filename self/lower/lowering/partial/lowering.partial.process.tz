@@ -20,7 +20,7 @@ import {
 import { Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
-  private isProcessName(frame: Frame, expr: Expr): boolean {
+  private readonly isProcessName(frame: Read<Frame>, expr: Expr): boolean {
     if (expr.kind != ExprKind.Name || expr.name != kProcessName) {
       return false;
     }
@@ -34,7 +34,7 @@ partial class Lowering {
     return opened.source.isLibrary;
   }
 
-  private processMember(frame: Frame, expr: MemberExpr): IrValue | undefined {
+  private processMember(frame: Read<Frame>, expr: MemberExpr): IrValue | undefined {
     switch (expr.name) {
       case "argv":
         return this.processArgv(frame);
@@ -49,7 +49,7 @@ partial class Lowering {
     }
   }
 
-  private processArgv(frame: Frame): IrValue | undefined {
+  private processArgv(frame: Read<Frame>): IrValue | undefined {
     const string = this.store.plain(TypeKind.String);
     const descriptor = this.descriptor(string);
     if (descriptor == undefined) {

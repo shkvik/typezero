@@ -114,7 +114,7 @@ export class DateReader {
     return true;
   }
 
-  private isTimeExpecting(value: int): boolean {
+  private readonly isTimeExpecting(value: int): boolean {
     const count = this.timeParts.length;
     const isMinute = count == 1 && this.values.isMinute(value);
     const isSecond = count == 2 && this.values.isMinute(value);
@@ -131,7 +131,7 @@ export class DateReader {
     this.zoneMinute = 0;
   }
 
-  private isZoneExpecting(value: int): boolean {
+  private readonly isZoneExpecting(value: int): boolean {
     return (
       this.zoneHour != kNone &&
       this.zoneMinute == kNone &&
@@ -139,7 +139,7 @@ export class DateReader {
     );
   }
 
-  private isUtcZone(): boolean {
+  private readonly isUtcZone(): boolean {
     return this.zoneHour == 0 && this.zoneMinute == 0;
   }
 
@@ -285,7 +285,7 @@ export class DateReader {
     return this.scanner.nextToken();
   }
 
-  private isClockPart(isMidnight: boolean): boolean {
+  private readonly isClockPart(isMidnight: boolean): boolean {
     const part = this.scanner.peek();
     const isLate = isMidnight && part.value > 0;
 
@@ -573,7 +573,7 @@ export class DateReader {
     return { year, month: read.month - 1, day: read.day };
   }
 
-  private orderedDay(first: int, second: int, third: int): DayValue {
+  private readonly orderedDay(first: int, second: int, third: int): DayValue {
     if (this.namedMonth != kNone) {
       return this.namedDay(first, second);
     }
@@ -584,7 +584,7 @@ export class DateReader {
     return { year: third, month: first, day: second };
   }
 
-  private namedDay(first: int, second: int): DayValue {
+  private readonly namedDay(first: int, second: int): DayValue {
     const month = this.namedMonth;
     if (!this.values.isDay(first)) {
       return { year: first, month, day: second };
@@ -593,7 +593,7 @@ export class DateReader {
     return { year: second, month, day: first };
   }
 
-  private fullYear(year: int): int {
+  private readonly fullYear(year: int): int {
     if (this.isIso) {
       return year;
     }
@@ -637,7 +637,7 @@ export class DateReader {
     return { hour, minute, second, millisecond };
   }
 
-  private dayHour(written: int): int {
+  private readonly dayHour(written: int): int {
     if (this.hourOffset == kNone) {
       return written;
     }
@@ -645,7 +645,7 @@ export class DateReader {
     return (written % 12) + this.hourOffset;
   }
 
-  private writtenZone(): ZoneValue | undefined {
+  private readonly writtenZone(): ZoneValue | undefined {
     if (this.zoneSign == kNone) {
       return { isLocal: true, offset: 0 };
     }
@@ -662,7 +662,7 @@ export class DateReader {
     return { isLocal: false, offset };
   }
 
-  private knownPart(value: int): int {
+  private readonly knownPart(value: int): int {
     if (value == kNone) {
       return 0;
     }

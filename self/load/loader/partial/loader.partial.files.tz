@@ -132,7 +132,7 @@ partial class Loader {
     return module;
   }
 
-  private rejectReferences(module: OpenModule, text: Buffer): void {
+  private readonly rejectReferences(module: OpenModule, text: Read<Buffer>): void {
     let from = 0;
 
     while (from < text.length) {
@@ -152,7 +152,7 @@ partial class Loader {
     }
   }
 
-  private isReferenceAt(text: Buffer, at: int): boolean {
+  private readonly isReferenceAt(text: Read<Buffer>, at: int): boolean {
     let before = at - 1;
 
     while (before >= 0 && this.isBlankByte(this.byteAt(text, before))) {
@@ -172,7 +172,7 @@ partial class Loader {
     return isLineStart && word == kReferenceWord;
   }
 
-  private byteAt(text: Buffer, at: int): int {
+  private readonly byteAt(text: Read<Buffer>, at: int): int {
     const byte = text[at];
     if (byte == undefined) {
       return 0;
@@ -181,7 +181,7 @@ partial class Loader {
     return byte.toInt();
   }
 
-  private isBlankByte(byte: int): boolean {
+  private readonly isBlankByte(byte: int): boolean {
     return byte == kSpaceByte || byte == kTabByte;
   }
 
@@ -216,13 +216,13 @@ partial class Loader {
     return this.parser.parseDeclaration(source);
   }
 
-  private declarationPath(path: string): string {
+  private readonly declarationPath(path: string): string {
     const stem = path.slice(0, path.length - kSourceExtension.length);
 
     return `${stem}${kDeclarationExtension}`;
   }
 
-  private keyOf(file: string): string {
+  private readonly keyOf(file: string): string {
     const absolute = resolve(file);
     const real = realpathSync(absolute);
     const path = real.unwrapOr(absolute);
@@ -234,7 +234,7 @@ partial class Loader {
     return path;
   }
 
-  private nameOf(file: string): string {
+  private readonly nameOf(file: string): string {
     const from = resolve(this.entryDirectory);
     const to = resolve(file);
     const name = relative(from, to);
@@ -242,13 +242,13 @@ partial class Loader {
     return this.slashed(name);
   }
 
-  private shownPath(name: string): string {
+  private readonly shownPath(name: string): string {
     const path = join(this.entryDirectory, name);
 
     return this.slashed(path);
   }
 
-  private slashed(path: string): string {
+  private readonly slashed(path: string): string {
     return path.replaceAll(kWindowsSeparator, kPathSeparator);
   }
 }

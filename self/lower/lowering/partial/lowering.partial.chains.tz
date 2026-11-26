@@ -14,7 +14,7 @@ import { kThisName } from "../const/lowering.const.tz";
 import { Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
-  private typeOf(expr: Expr): Type | undefined {
+  private readonly typeOf(expr: Expr): Type | undefined {
     return this.knownTypes.get(expr) ?? this.answers.typeOf(expr);
   }
 
@@ -44,7 +44,7 @@ partial class Lowering {
     }
   }
 
-  private literalTypeOf(expr: Expr): Type | undefined {
+  private readonly literalTypeOf(expr: Expr): Type | undefined {
     switch (expr.kind) {
       case ExprKind.StringLit:
         return this.store.plain(TypeKind.String);
@@ -114,7 +114,7 @@ partial class Lowering {
     return this.methodShape(object.module, decl, fn)?.result;
   }
 
-  private dictResultOf(name: string, dict: Type): Type | undefined {
+  private readonly dictResultOf(name: string, dict: Type): Type | undefined {
     if (dict.kind != TypeKind.Dict || name != "get") {
       return undefined;
     }
@@ -124,7 +124,7 @@ partial class Lowering {
     return this.store.unionOf([dict.value, empty]);
   }
 
-  private declaredTypeOf(frame: Frame, expr: NameExpr): Type | undefined {
+  private readonly declaredTypeOf(frame: Read<Frame>, expr: NameExpr): Type | undefined {
     const self = frame.self;
     if (expr.name == kThisName && self != undefined) {
       return self.tz;
@@ -168,7 +168,7 @@ partial class Lowering {
     return this.store.unionOf(types);
   }
 
-  private objectParts(type: Type): Type[] {
+  private readonly objectParts(type: Type): Type[] {
     if (type.kind == TypeKind.Union) {
       return type.parts;
     }
@@ -191,7 +191,6 @@ partial class Lowering {
     frame: Frame,
     expr: OptionalChainExpr,
   ): IrValue | undefined {
-    const made = frame.made;
     const result = this.typeIn(frame, expr);
     const type = this.typeOrUndefined(result);
     if (result == undefined || type == undefined) {
@@ -202,8 +201,8 @@ partial class Lowering {
       return undefined;
     }
 
-    const missing = made.block("chain.missing");
-    const end = made.block("chain.end");
+    const missing = frame.made.block("chain.missing");
+    const end = frame.made.block("chain.end");
 
     this.chainExits.push(missing);
 
@@ -221,15 +220,15 @@ partial class Lowering {
     }
 
     const owned = this.owning(frame, converted);
-    const valueEnd = made.currentBlock();
+    const valueEnd = frame.made.currentBlock();
 
-    made.branch(end);
-    made.open(missing);
-    made.branch(end);
-    made.open(end);
+    frame.made.branch(end);
+    frame.made.open(missing);
+    frame.made.branch(end);
+    frame.made.open(end);
 
     const none = this.ir.zero(type);
-    const value = made.phi(type, [owned.value, none], [valueEnd, missing]);
+    const value = frame.made.phi(type, [owned.value, none], [valueEnd, missing]);
 
     return { type, value, tz: result, owned: true };
   }
@@ -248,13 +247,12 @@ partial class Lowering {
       return false;
     }
 
-    const made = frame.made;
     const inner = this.optionalInner(given.tz);
     const has = this.hasValue(frame, given);
-    const present = made.block("chain.present");
+    const present = frame.made.block("chain.present");
 
-    made.conditionalBranch(has, present, exit);
-    made.open(present);
+    frame.made.conditionalBranch(has, present, exit);
+    frame.made.open(present);
 
     if (inner == undefined) {
       this.evaluated.set(object, given);
@@ -270,7 +268,7 @@ partial class Lowering {
     return true;
   }
 
-  private optionalObject(expr: Expr): Expr | undefined {
+  private readonly optionalObject(expr: Expr): Expr | undefined {
     switch (expr.kind) {
       case ExprKind.Member:
       case ExprKind.Index:

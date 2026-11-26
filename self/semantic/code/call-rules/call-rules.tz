@@ -56,10 +56,10 @@ export class CallRules {
 
   public constructor(
     store: TypeStore,
-    types: TypeQuestions,
+    types: Own<TypeQuestions>,
     parts: TypeParts,
     text: TypeText,
-    objects: ObjectRules,
+    objects: Own<ObjectRules>,
   ) {
     this.store = store;
     this.types = types;
@@ -68,7 +68,7 @@ export class CallRules {
     this.objects = objects;
   }
 
-  public parameterWanted(param: FunctionParameter): Type {
+  public readonly parameterWanted(param: FunctionParameter): Type {
     const type = param.type;
     if (type.kind == TypeKind.Void) {
       return this.store.plain(TypeKind.Undefined);
@@ -80,7 +80,7 @@ export class CallRules {
     return this.types.optional(type);
   }
 
-  public fixedCount(target: CallTarget): int {
+  public readonly fixedCount(target: Read<CallTarget>): int {
     if (target.rest) {
       return target.params.length - 1;
     }
@@ -88,7 +88,7 @@ export class CallRules {
     return target.params.length;
   }
 
-  public spreadLimit(target: CallTarget, fixed: int, count: int): int {
+  public readonly spreadLimit(target: Read<CallTarget>, fixed: int, count: int): int {
     if (target.rest) {
       return fixed;
     }
@@ -96,7 +96,7 @@ export class CallRules {
     return count;
   }
 
-  public leastArguments(target: CallTarget): int {
+  public readonly leastArguments(target: Read<CallTarget>): int {
     const fixed = this.fixedCount(target);
     let least = 0;
 
@@ -110,7 +110,7 @@ export class CallRules {
     return least;
   }
 
-  public argumentCountText(least: int, most: int, rest: boolean): string {
+  public readonly argumentCountText(least: int, most: int, rest: boolean): string {
     const range = this.countRange(least, most, rest);
 
     if (least == 1 && most == 1 && !rest) {
@@ -120,7 +120,7 @@ export class CallRules {
     return range + kManyArguments;
   }
 
-  public positionCode(given: Type, base: Type): Code {
+  public readonly positionCode(given: Type, base: Type): Code {
     if (base.kind == TypeKind.Double) {
       return Code.PositionFraction;
     }
@@ -131,7 +131,7 @@ export class CallRules {
     return Code.PositionNotInteger;
   }
 
-  public mathArgumentCode(given: Type, base: Type): Code {
+  public readonly mathArgumentCode(given: Type, base: Type): Code {
     const isNumber = base.kind == TypeKind.Int || base.kind == TypeKind.Double;
     if (this.types.isOptional(given) && isNumber) {
       return Code.MathArgumentMaybe;
@@ -143,7 +143,7 @@ export class CallRules {
     return Code.MathArgument;
   }
 
-  public restItem(to: Type): Type {
+  public readonly restItem(to: Type): Type {
     if (to.kind == TypeKind.Array) {
       return to.item;
     }
@@ -151,8 +151,8 @@ export class CallRules {
     return this.store.plain(TypeKind.Error);
   }
 
-  public directParams(
-    params: FunctionParameter[],
+  public readonly directParams(
+    params: Own<FunctionParameter[]>,
     self: Type | undefined,
   ): FunctionParameter[] {
     if (self == undefined) {
@@ -164,19 +164,19 @@ export class CallRules {
     return [first].concat(params);
   }
 
-  public isOpenRest(params: FunctionParameter[], rest: boolean): boolean {
+  public readonly isOpenRest(params: Read<FunctionParameter[]>, rest: boolean): boolean {
     const last = params[params.length - 1];
 
     return rest && last != undefined && this.parts.mentionsParameter(last.type);
   }
 
-  public isOptionalFunction(type: UnionType): boolean {
+  public readonly isOptionalFunction(type: UnionType): boolean {
     const defined = this.types.definedType(type);
 
     return this.types.isOptional(type) && defined.kind == TypeKind.Function;
   }
 
-  public isUncallable(type: Type): boolean {
+  public readonly isUncallable(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.Int:
       case TypeKind.Double:
@@ -196,7 +196,7 @@ export class CallRules {
     }
   }
 
-  public libraryKind(isLibrary: boolean): CallKind {
+  public readonly libraryKind(isLibrary: boolean): CallKind {
     if (isLibrary) {
       return CallKind.Library;
     }
@@ -204,7 +204,7 @@ export class CallRules {
     return CallKind.Own;
   }
 
-  public isPlainRest(params: FunctionParameter[]): boolean {
+  public readonly isPlainRest(params: Read<FunctionParameter[]>): boolean {
     const last = params[params.length - 1];
     if (last == undefined || last.type.kind != TypeKind.Array) {
       return false;
@@ -213,11 +213,11 @@ export class CallRules {
     return last.type.item.kind != TypeKind.Union;
   }
 
-  public isStrictShape(params: FunctionParameter[]): boolean {
+  public readonly isStrictShape(params: Read<FunctionParameter[]>): boolean {
     return params.every((param) => this.isStrictParam(param.type));
   }
 
-  public promiseNew(written: Type[], wanted: Type | undefined): Type {
+  public readonly promiseNew(written: Read<Type[]>, wanted: Type | undefined): Type {
     const value = written[0];
     if (value != undefined) {
       return this.store.promiseOf(value);
@@ -231,9 +231,9 @@ export class CallRules {
     return goal;
   }
 
-  public signatureVariants(
+  public readonly signatureVariants(
     name: string,
-    fields: ObjectField[],
+    fields: Read<ObjectField[]>,
   ): RankedVariant[] {
     const ranked: RankedVariant[] = [];
 
@@ -249,7 +249,7 @@ export class CallRules {
     return ranked;
   }
 
-  public thisCallProblem(expr: CallExpr, word: string): Code | undefined {
+  public readonly thisCallProblem(expr: CallExpr, word: string): Code | undefined {
     if (word == "bind") {
       return Code.ThisBindUnsupported;
     }
@@ -269,7 +269,7 @@ export class CallRules {
     return undefined;
   }
 
-  public thisCallTail(word: string): string {
+  public readonly thisCallTail(word: string): string {
     if (word == "apply") {
       return ", args)";
     }
@@ -277,7 +277,7 @@ export class CallRules {
     return ", ...)";
   }
 
-  public positionUseErrors(
+  public readonly positionUseErrors(
     slot: ArgumentSlot,
     word: string,
     name: string,
@@ -302,7 +302,7 @@ export class CallRules {
     return errors;
   }
 
-  public thisParameterCheck(fn: FunctionDecl, param: Param): SourceError[] {
+  public readonly thisParameterCheck(fn: FunctionDecl, param: Param): SourceError[] {
     const errors: SourceError[] = [];
 
     if (fn.isArrow) {
@@ -325,7 +325,7 @@ export class CallRules {
     return errors;
   }
 
-  public partMethod(
+  public readonly partMethod(
     member: MemberExpr,
     receiver: string,
     part: ObjectType,
@@ -381,10 +381,10 @@ export class CallRules {
     return { value: type };
   }
 
-  public sharedMethod(
+  public readonly sharedMethod(
     member: MemberExpr,
     object: UnionType,
-    parts: ObjectType[],
+    parts: Read<ObjectType[]>,
   ): Checked<FunctionType | undefined> {
     const receiver = this.text.of(object);
     let common: FunctionType | undefined = undefined;
@@ -417,7 +417,7 @@ export class CallRules {
     return { value: common };
   }
 
-  public typeVariants(name: string, types: FunctionType[]): RankedVariant[] {
+  public readonly typeVariants(name: string, types: Read<FunctionType[]>): RankedVariant[] {
     return types.map((type) => {
       const fn = this.signatureDecl(name, type);
       const variant: RankedVariant = {
@@ -432,7 +432,7 @@ export class CallRules {
     });
   }
 
-  private countRange(least: int, most: int, rest: boolean): string {
+  private readonly countRange(least: int, most: int, rest: boolean): string {
     if (rest) {
       return `${least}${kOrMore}`;
     }
@@ -443,7 +443,7 @@ export class CallRules {
     return `${least}`;
   }
 
-  private isStrictParam(type: Type): boolean {
+  private readonly isStrictParam(type: Type): boolean {
     if (this.parts.mentionsParameter(type)) {
       return false;
     }
@@ -453,7 +453,7 @@ export class CallRules {
     return parts.every((part) => this.isPlainParam(part));
   }
 
-  private isPlainParam(part: Type): boolean {
+  private readonly isPlainParam(part: Type): boolean {
     switch (part.kind) {
       case TypeKind.Error:
       case TypeKind.Function:
@@ -469,9 +469,9 @@ export class CallRules {
     }
   }
 
-  private dictNew(
+  private readonly dictNew(
     dict: DictKind,
-    written: Type[],
+    written: Read<Type[]>,
     wanted: Type | undefined,
   ): Type {
     const first = written[0];
@@ -488,7 +488,7 @@ export class CallRules {
     return goal;
   }
 
-  private signatureDecl(name: string, type: FunctionType): FunctionDecl {
+  private readonly signatureDecl(name: string, type: FunctionType): FunctionDecl {
     const params: Param[] = [];
 
     for (let index = 0; index < type.shape.params.length; index++) {
@@ -511,7 +511,7 @@ export class CallRules {
     };
   }
 
-  private signatureParam(type: FunctionType, index: int): Param {
+  private readonly signatureParam(type: FunctionType, index: int): Param {
     const count = kParameterLetters.length;
     const name = kParameterLetters.charAt(index % count);
     const kind = this.signatureParamKind(type, index);
@@ -519,7 +519,7 @@ export class CallRules {
     return { name, loc: 0, form: { kind }, decorators: [] };
   }
 
-  private signatureParamKind(
+  private readonly signatureParamKind(
     type: FunctionType,
     index: int,
   ): ParamKind.Required | ParamKind.Optional | ParamKind.Rest {

@@ -19,7 +19,7 @@ partial class Dumper {
     this.dumpStmt(stmt);
   }
 
-  private dumpStmts(stmts: Stmt[]): void {
+  private dumpStmts(stmts: Read<Stmt[]>): void {
     this.nested();
 
     for (const stmt of stmts) {
@@ -192,7 +192,7 @@ partial class Dumper {
     this.back();
   }
 
-  private bindingShape(form: BindingForm): string {
+  private readonly bindingShape(form: BindingForm): string {
     switch (form.kind) {
       case BindingKind.Object:
         return "form=object";

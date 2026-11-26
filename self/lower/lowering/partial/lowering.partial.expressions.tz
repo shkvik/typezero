@@ -104,7 +104,7 @@ partial class Lowering {
     }
   }
 
-  private constantOf(frame: Frame, expr: Expr): IrValue | undefined {
+  private constantOf(frame: Read<Frame>, expr: Expr): IrValue | undefined {
     if (expr.kind == ExprKind.IntLit) {
       return this.intLiteral(frame, expr);
     }
@@ -150,7 +150,7 @@ partial class Lowering {
     }
   }
 
-  private enumText(frame: Frame, expr: Expr): string | undefined {
+  private readonly enumText(frame: Read<Frame>, expr: Expr): string | undefined {
     if (expr.kind != ExprKind.Member) {
       return undefined;
     }
@@ -158,7 +158,7 @@ partial class Lowering {
     return this.values.enumText(expr, frame.module);
   }
 
-  private enumNumber(frame: Frame, expr: Expr): decimal | undefined {
+  private readonly enumNumber(frame: Read<Frame>, expr: Expr): decimal | undefined {
     if (expr.kind != ExprKind.Member) {
       return undefined;
     }
@@ -166,7 +166,7 @@ partial class Lowering {
     return this.values.enumNumber(expr, frame.module);
   }
 
-  private booleanValue(value: boolean): IrValue {
+  private readonly booleanValue(value: boolean): IrValue {
     const tz = this.store.plain(TypeKind.Boolean);
     let text: string = "0";
 
@@ -205,7 +205,7 @@ partial class Lowering {
     return this.converted(frame, loaded, seen, expr.loc);
   }
 
-  private namePlace(frame: Frame, expr: NameExpr): Place | undefined {
+  private namePlace(frame: Read<Frame>, expr: NameExpr): Place | undefined {
     const target = this.values.valueTargetOf(expr, frame.module);
     const isValue =
       target != undefined &&
@@ -309,7 +309,6 @@ partial class Lowering {
     frame: Frame,
     expr: ConditionalExpr,
   ): IrValue | undefined {
-    const made = frame.made;
     const result = this.typeOf(expr);
     const type = this.typeOrUndefined(result);
     const test = this.truth(frame, expr.cond);
@@ -319,30 +318,30 @@ partial class Lowering {
       return undefined;
     }
 
-    const then = made.block("cond.then");
-    const otherwise = made.block("cond.else");
-    const end = made.block("cond.end");
+    const then = frame.made.block("cond.then");
+    const otherwise = frame.made.block("cond.else");
+    const end = frame.made.block("cond.end");
 
-    made.conditionalBranch(test, then, otherwise);
-    made.open(then);
+    frame.made.conditionalBranch(test, then, otherwise);
+    frame.made.open(then);
 
     const first = this.branchValue(frame, expr.thenExpr, result);
-    const firstBlock = made.currentBlock();
+    const firstBlock = frame.made.currentBlock();
 
     this.jumpTo(frame, end);
-    made.open(otherwise);
+    frame.made.open(otherwise);
 
     const second = this.branchValue(frame, expr.elseExpr, result);
-    const secondBlock = made.currentBlock();
+    const secondBlock = frame.made.currentBlock();
 
     this.jumpTo(frame, end);
-    made.open(end);
+    frame.made.open(end);
 
     if (first == undefined || second == undefined) {
       return undefined;
     }
 
-    const value = made.phi(
+    const value = frame.made.phi(
       type,
       [first.value, second.value],
       [firstBlock, secondBlock],
@@ -377,7 +376,7 @@ partial class Lowering {
     return this.irType(type);
   }
 
-  private sequence(frame: Frame, exprs: Expr[]): IrValue | undefined {
+  private sequence(frame: Frame, exprs: Read<Expr[]>): IrValue | undefined {
     let last: IrValue | undefined = undefined;
 
     for (const expr of exprs) {
@@ -433,23 +432,22 @@ partial class Lowering {
   }
 
   private truthOf(
-    frame: Frame,
+    frame: Read<Frame>,
     value: IrValue,
     expr: Expr,
   ): LLVMValue | undefined {
-    const made = frame.made;
     if (this.isBoolean(value.tz)) {
       return value.value;
     }
     if (this.isInteger(value.tz)) {
       const zero = this.ir.zero(value.type);
 
-      return made.integerCompare(IrIntPredicate.NotEqual, value.value, zero);
+      return frame.made.integerCompare(IrIntPredicate.NotEqual, value.value, zero);
     }
     if (this.isDouble(value.tz)) {
       const zero = this.ir.zero(kDoubleType);
 
-      return made.realCompare(
+      return frame.made.realCompare(
         IrRealPredicate.OrderedNotEqual,
         value.value,
         zero,
@@ -461,11 +459,11 @@ partial class Lowering {
       return this.ir.integer(kBooleanType, "1");
     }
     if (this.isString(value.tz)) {
-      const meta = made.extract(value.value, 1);
+      const meta = frame.made.extract(value.value, 1);
       const mask = this.ir.hexInteger(kIntType, kLengthMask);
-      const length = made.binary(IrOpcode.And, meta, mask);
+      const length = frame.made.binary(IrOpcode.And, meta, mask);
       const zero = this.ir.zero(kIntType);
-      const test = made.integerCompare(IrIntPredicate.NotEqual, length, zero);
+      const test = frame.made.integerCompare(IrIntPredicate.NotEqual, length, zero);
 
       this.dropping(frame, value);
 
@@ -477,7 +475,7 @@ partial class Lowering {
     return undefined;
   }
 
-  private intLiteral(frame: Frame, expr: IntLitExpr): IrValue {
+  private intLiteral(frame: Read<Frame>, expr: IntLitExpr): IrValue {
     const answered = this.typeOf(expr);
     let tz = this.store.integer(64, false);
 
@@ -499,7 +497,7 @@ partial class Lowering {
     return this.integerValue(type, written, tz);
   }
 
-  private writtenDigits(frame: Frame, expr: IntLitExpr): string | undefined {
+  private readonly writtenDigits(frame: Read<Frame>, expr: IntLitExpr): string | undefined {
     const span = expr.text;
     const module = this.program.modules[frame.module];
     if (span == undefined || module == undefined) {
@@ -519,7 +517,7 @@ partial class Lowering {
     return written;
   }
 
-  private isDigitText(text: string): boolean {
+  private readonly isDigitText(text: string): boolean {
     if (text.length == 0) {
       return false;
     }

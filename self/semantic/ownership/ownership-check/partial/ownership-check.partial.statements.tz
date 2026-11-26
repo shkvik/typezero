@@ -1,0 +1,312 @@
+import { replace } from "tz:mem";
+import { OwnershipCheck } from "../ownership-check.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  ForOfStmt,
+  IfStmt,
+  Stmt,
+  StmtKind,
+  SwitchStmt,
+  VarDeclStmt,
+} from "../../../../program/ast/types/ast.types.statements.tz";
+import { VarDeclarator } from "../../../../program/ast/types/ast.types.patterns.tz";
+import {
+  CallbackMode,
+  FlowState,
+  Holding,
+  LoanKind,
+  Operand,
+  OperandKind,
+  Variable,
+} from "../types/ownership-check.types.tz";
+import { kElementStep } from "../const/ownership-check.const.tz";
+
+partial class OwnershipCheck {
+  private walkStatements(items: Read<Stmt[]>): void {
+    for (const item of items) {
+      this.walkStatement(item);
+    }
+  }
+
+  private walkStatement(stmt: Stmt): void {
+    switch (stmt.kind) {
+      case StmtKind.Block:
+        return this.walkStatements(stmt.body);
+      case StmtKind.VarDecl:
+        return this.walkDeclaration(stmt);
+      case StmtKind.Function:
+        return this.walkNestedFunction(stmt);
+      case StmtKind.Class:
+        return this.walkNestedClass(stmt);
+      case StmtKind.Expr:
+        this.evaluate(stmt.expr);
+        return;
+      case StmtKind.If:
+        return this.walkIf(stmt);
+      case StmtKind.While:
+        return this.walkLoop(stmt.cond, stmt.body, undefined);
+      case StmtKind.DoWhile:
+        return this.walkLoop(stmt.cond, stmt.body, undefined);
+      case StmtKind.For:
+        return this.walkFor(stmt.init, stmt.cond, stmt.step, stmt.body);
+      case StmtKind.ForOf:
+        return this.walkForOf(stmt);
+      case StmtKind.Switch:
+        return this.walkSwitch(stmt);
+      case StmtKind.Labeled:
+        return this.walkStatement(stmt.body);
+      case StmtKind.Return:
+        return this.walkReturn(stmt.value, stmt.loc);
+      case StmtKind.Break:
+      case StmtKind.Continue:
+        this.state.isDead = true;
+        return;
+      default:
+        return;
+    }
+  }
+
+  private walkNestedFunction(stmt: Stmt): void {
+    const frame = this.frame();
+    if (stmt.kind != StmtKind.Function || frame == undefined || this.isModuleItem(stmt)) {
+      return;
+    }
+
+    this.checkFunction(stmt, frame.owner, CallbackMode.Local, frame);
+  }
+
+  private walkNestedClass(stmt: Stmt): void {
+    const frame = this.frame();
+    if (stmt.kind != StmtKind.Class || frame == undefined || this.isModuleItem(stmt)) {
+      return;
+    }
+
+    this.checkClass(stmt, frame);
+  }
+
+  private readonly isModuleItem(stmt: Stmt): boolean {
+    const home = this.program.modules[this.module];
+
+    return home != undefined && home.file.items.includes(stmt);
+  }
+
+  private walkDeclaration(stmt: VarDeclStmt): void {
+    for (const declarator of stmt.decls) {
+      this.walkDeclarator(declarator);
+    }
+  }
+
+  private walkDeclarator(declarator: VarDeclarator): void {
+    const variable = this.variableOf(declarator.loc);
+    const init = declarator.init;
+    if (variable == undefined) {
+      return;
+    }
+
+    this.revive(variable.key);
+    if (init == undefined) {
+      variable.holding = this.declaredHolding(declarator.loc);
+
+      return;
+    }
+
+    const operand = this.evaluateFor(init, CallbackMode.Local);
+
+    this.bind(variable, operand, init);
+  }
+
+  private declaredHolding(loc: int): Holding {
+    const type = this.values.variableOf(this.module, loc);
+    if (type != undefined && this.traits.isCopy(type)) {
+      return Holding.Copy;
+    }
+
+    return Holding.Own;
+  }
+
+  private walkIf(stmt: IfStmt): void {
+    this.evaluate(stmt.cond);
+
+    const before = this.copyState(this.state);
+
+    this.walkStatement(stmt.thenStmt);
+
+    const afterThen = replace(this.state, before);
+
+    const elseStmt = stmt.elseStmt;
+    if (elseStmt != undefined) {
+      this.walkStatement(elseStmt);
+    }
+
+    this.state = this.merged(afterThen, this.state);
+  }
+
+  private walkLoop(cond: Expr, body: Stmt, step: Expr | undefined): void {
+    const before = this.copyState(this.state);
+
+    this.loopPass(cond, body, step);
+
+    const first = this.state;
+
+    this.state = this.merged(before, first);
+    this.loopPass(cond, body, step);
+    this.state = this.merged(before, this.state);
+  }
+
+  private loopPass(cond: Expr, body: Stmt, step: Expr | undefined): void {
+    this.evaluate(cond);
+    this.walkStatement(body);
+    this.state.isDead = false;
+
+    if (step != undefined) {
+      this.evaluate(step);
+    }
+  }
+
+  private walkFor(
+    init: Stmt | undefined,
+    cond: Expr | undefined,
+    step: Expr | undefined,
+    body: Stmt | undefined,
+  ): void {
+    if (init != undefined) {
+      this.walkStatement(init);
+    }
+
+    const before = this.copyState(this.state);
+
+    this.forPass(cond, step, body);
+
+    const first = this.state;
+
+    this.state = this.merged(before, first);
+    this.forPass(cond, step, body);
+    this.state = this.merged(before, this.state);
+  }
+
+  private forPass(
+    cond: Expr | undefined,
+    step: Expr | undefined,
+    body: Stmt | undefined,
+  ): void {
+    if (cond != undefined) {
+      this.evaluate(cond);
+    }
+    if (body != undefined) {
+      this.walkStatement(body);
+    }
+
+    this.state.isDead = false;
+
+    if (step != undefined) {
+      this.evaluate(step);
+    }
+  }
+
+  private walkForOf(stmt: ForOfStmt): void {
+    const frame = this.frame();
+    const binding = this.variableOf(stmt.binding.loc);
+    const operand = this.evaluate(stmt.iterable);
+
+    if (frame != undefined && binding != undefined) {
+      this.revive(binding.key);
+      frame.bindings.add(binding.key);
+      binding.lastUse = this.lastLocOf(stmt);
+      this.bindElement(binding.key, operand, stmt);
+      this.checkUsingElement(binding, stmt);
+    }
+
+    const before = this.copyState(this.state);
+
+    this.walkStatement(stmt.body);
+    this.state.isDead = false;
+
+    const first = this.state;
+
+    this.state = this.merged(before, first);
+
+    if (binding != undefined) {
+      this.revive(binding.key);
+    }
+
+    this.walkStatement(stmt.body);
+    this.state = this.merged(before, this.state);
+  }
+
+  private readonly checkUsingElement(binding: Read<Variable>, stmt: ForOfStmt): void {
+    if (!stmt.isUsing || binding.holding != Holding.Borrow) {
+      return;
+    }
+
+    const other = this.exprText(stmt.iterable);
+
+    this.report(stmt.binding.loc, Code.OwnUsingBorrow, { word: binding.name, other });
+  }
+
+  private bindElement(key: int, operand: Read<Operand>, stmt: ForOfStmt): void {
+    const variable = this.variableOf(key);
+    if (variable == undefined) {
+      return;
+    }
+
+    const type = this.values.variableOf(this.module, stmt.binding.loc);
+    if (type != undefined && this.traits.isCopy(type)) {
+      variable.holding = Holding.Copy;
+
+      return;
+    }
+
+    const place = operand.place;
+    if (operand.kind == OperandKind.Place && place != undefined) {
+      const element = this.extended(place, kElementStep);
+      const kind = this.loanKindOf(variable.isChanged);
+
+      if (kind == LoanKind.Exclusive) {
+        this.changePlaceExcept(element, stmt.loc, key);
+      }
+
+      variable.holding = Holding.Borrow;
+      variable.loans = this.loansOfPlaceAs(element, kind, false);
+
+      return;
+    }
+    if (operand.kind == OperandKind.Borrowed) {
+      variable.holding = Holding.Borrow;
+      variable.loans = this.inferredLoans(variable, operand, stmt.loc);
+
+      return;
+    }
+
+    variable.holding = Holding.Own;
+  }
+
+  private readonly loanKindOf(isChanged: boolean): LoanKind {
+    if (isChanged) {
+      return LoanKind.Exclusive;
+    }
+
+    return LoanKind.Shared;
+  }
+
+  private walkSwitch(stmt: SwitchStmt): void {
+    this.evaluate(stmt.discriminant);
+
+    const before = this.copyState(this.state);
+    let after: FlowState = { moved: [], isDead: true };
+
+    for (const option of stmt.cases) {
+      this.state = this.copyState(before);
+
+      const test = option.test;
+      if (test != undefined) {
+        this.evaluate(test);
+      }
+
+      this.walkStatements(option.body);
+      after = this.merged(after, this.state);
+    }
+
+    this.state = this.merged(after, before);
+  }
+}

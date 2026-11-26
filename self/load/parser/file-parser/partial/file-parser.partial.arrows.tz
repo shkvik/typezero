@@ -120,7 +120,7 @@ partial class FileParser {
     return this.cursor.is(TokenKind.Arrow);
   }
 
-  private parametersAhead(): boolean {
+  private readonly parametersAhead(): boolean {
     const first = this.cursor.tokenAt(1);
     const second = this.cursor.tokenAt(2);
     const third = this.cursor.tokenAt(3);
@@ -163,7 +163,7 @@ partial class FileParser {
   }
 
   private arrow(
-    typeParams: TypeParamDecl[],
+    typeParams: Own<TypeParamDecl[]>,
     isAsync: boolean,
     from?: int,
   ): FunctionExpr {
@@ -182,9 +182,8 @@ partial class FileParser {
 
     this.cursor.expect(TokenKind.Arrow, Code.ExpectedAfterArrowParameters);
     const concise = !this.cursor.is(TokenKind.LBrace);
-    const body = this.arrowBody(concise);
-
-    this.addPrologue(body, patterns);
+    const written = this.arrowBody(concise);
+    const body = this.withPrologue(written, patterns);
     const declaration: FunctionDecl = {
       kind: StmtKind.Function,
       loc,
@@ -271,7 +270,7 @@ partial class FileParser {
     return this.arrowBlock();
   }
 
-  private onlyStatement(body: BlockStmt): Stmt | undefined {
+  private readonly onlyStatement(body: BlockStmt): Stmt | undefined {
     if (body.body.length != 1) {
       return undefined;
     }

@@ -38,7 +38,7 @@ import { DecimalArgument } from "../../../../code/expression-types/types/express
 import { kDecimalStatics } from "../../../decimal-rules/const/decimal-rules.const.tz";
 
 partial class ExpressionTypes {
-  private isDecimalName(expr: Expr, module: int): boolean {
+  private readonly isDecimalName(expr: Expr, module: int): boolean {
     if (expr.kind != ExprKind.Name || expr.name != kDecimalName) {
       return false;
     }
@@ -46,7 +46,7 @@ partial class ExpressionTypes {
     return this.isGlobalUse(expr, module);
   }
 
-  private decimalOfCall(expr: CallExpr, callee: NameExpr, module: int): Type {
+  private readonly decimalOfCall(expr: CallExpr, callee: NameExpr, module: int): Type {
     const error = this.store.plain(TypeKind.Error);
     const arg = expr.args[0]?.expr;
     if (arg == undefined || expr.args.length != 1) {
@@ -84,7 +84,7 @@ partial class ExpressionTypes {
     return error;
   }
 
-  private decimalOfText(arg: Expr, type: Type, module: int): Type {
+  private readonly decimalOfText(arg: Expr, type: Type, module: int): Type {
     const texts = this.knownTextsOf(arg, type, module);
     if (texts == undefined) {
       const failure = this.resolver.libraryShape(kDecimalError, []);
@@ -106,7 +106,7 @@ partial class ExpressionTypes {
     return this.decimals.decimalType();
   }
 
-  private knownTextsOf(
+  private readonly knownTextsOf(
     arg: Expr,
     type: Type,
     module: int,
@@ -139,7 +139,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private branchTexts(
+  private readonly branchTexts(
     cond: Expr,
     branch: Expr,
     isTrue: boolean,
@@ -158,7 +158,7 @@ partial class ExpressionTypes {
     return texts;
   }
 
-  private decimalStaticCall(
+  private readonly decimalStaticCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -214,7 +214,7 @@ partial class ExpressionTypes {
     return this.types.optional(this.decimals.decimalType());
   }
 
-  private decimalSpreadCheck(arg: CallArgument, module: int): boolean {
+  private readonly decimalSpreadCheck(arg: CallArgument, module: int): boolean {
     const list = this.store.arrayOf(this.decimals.decimalType());
     const type = this.typed(arg.expr, list, module);
     if (type == list || type.kind == TypeKind.Error) {
@@ -228,7 +228,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private decimalStaticRead(expr: MemberExpr, module: int): Type {
+  private readonly decimalStaticRead(expr: MemberExpr, module: int): Type {
     const checked = this.decimals.decimalStaticRead(expr);
 
     this.reportFound(module, checked.error);
@@ -236,7 +236,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private decimalMethodCall(
+  private readonly decimalMethodCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -286,7 +286,7 @@ partial class ExpressionTypes {
     return this.decimals.decimalMethodResult(method);
   }
 
-  private decimalArgument(
+  private readonly decimalArgument(
     arg: Expr,
     kind: DecimalArgument,
     method: string,
@@ -310,7 +310,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private placesRange(method: string): ProofRange {
+  private readonly placesRange(method: string): ProofRange {
     if (kPositivePlacesMethods.includes(method)) {
       return kPositivePlacesRange;
     }
@@ -318,7 +318,7 @@ partial class ExpressionTypes {
     return kPlacesRange;
   }
 
-  private decimalCount(arg: Expr, range: ProofRange, module: int): void {
+  private readonly decimalCount(arg: Expr, range: ProofRange, module: int): void {
     const int = this.store.integer(64, false);
     const type = this.typed(arg, int, module);
     const base = this.types.apparent(type);
@@ -338,7 +338,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private roundingModeCheck(arg: Expr, module: int): void {
+  private readonly roundingModeCheck(arg: Expr, module: int): void {
     const string = this.store.plain(TypeKind.String);
     const type = this.checked(arg, string, module, kNoPlace);
     if (type.kind == TypeKind.Error) {
@@ -360,7 +360,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private decimalRangeCheck(expr: Expr, module: int): void {
+  private readonly decimalRangeCheck(expr: Expr, module: int): void {
     if (expr.kind != ExprKind.FloatLit) {
       return;
     }
@@ -378,7 +378,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private mathDecimalCheck(expr: CallExpr, module: int): boolean {
+  private readonly mathDecimalCheck(expr: CallExpr, module: int): boolean {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Member) {
       return false;
@@ -409,7 +409,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private decimalAssignCheck(
+  private readonly decimalAssignCheck(
     expr: AssignExpr,
     tested: Type,
     module: int,
@@ -420,7 +420,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private decimalZeroCheck(divisor: Expr, module: int): void {
+  private readonly decimalZeroCheck(divisor: Expr, module: int): void {
     const value = this.plainConstant(divisor, module);
     const isZero = value != undefined && value == 0;
     if (isZero || this.shapes.isZeroLiteral(divisor)) {

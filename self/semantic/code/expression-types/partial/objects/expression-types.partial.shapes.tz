@@ -18,7 +18,7 @@ import {
 import { kResultMakers } from "../../const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private literalShapeOf(expr: Expr): Type | undefined {
+  private readonly literalShapeOf(expr: Expr): Type | undefined {
     switch (expr.kind) {
       case ExprKind.IntLit:
         return this.store.integer(64, false);
@@ -41,7 +41,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private signedShape(expr: UnaryExpr): Type | undefined {
+  private readonly signedShape(expr: UnaryExpr): Type | undefined {
     const operand = expr.operand;
     const isNumber =
       operand.kind == ExprKind.IntLit || operand.kind == ExprKind.FloatLit;
@@ -52,7 +52,7 @@ partial class ExpressionTypes {
     return this.literalShapeOf(operand);
   }
 
-  private arrayShape(expr: ArrayLitExpr): Type | undefined {
+  private readonly arrayShape(expr: ArrayLitExpr): Type | undefined {
     let element: Type | undefined = undefined;
 
     for (const item of expr.elements) {
@@ -80,7 +80,7 @@ partial class ExpressionTypes {
     return this.store.arrayOf(element);
   }
 
-  private objectShape(expr: ObjectLitExpr): Type | undefined {
+  private readonly objectShape(expr: ObjectLitExpr): Type | undefined {
     const fields: ObjectField[] = [];
 
     for (const prop of expr.props) {
@@ -101,7 +101,7 @@ partial class ExpressionTypes {
     return this.store.objectOf(fields);
   }
 
-  private isContextual(expr: Expr, module: int): boolean {
+  private readonly isContextual(expr: Expr, module: int): boolean {
     if (this.shapes.isNeedingContext(expr)) {
       return true;
     }
@@ -109,7 +109,7 @@ partial class ExpressionTypes {
     return this.isResultMaker(expr, module) || this.isBareGeneric(expr, module);
   }
 
-  private isResultMaker(expr: Expr, module: int): boolean {
+  private readonly isResultMaker(expr: Expr, module: int): boolean {
     if (expr.kind != ExprKind.Name || !kResultMakers.includes(expr.name)) {
       return false;
     }
@@ -119,7 +119,7 @@ partial class ExpressionTypes {
     return target != undefined && this.modules.isLibraryModule(target.module);
   }
 
-  private isBareGeneric(expr: Expr, module: int): boolean {
+  private readonly isBareGeneric(expr: Expr, module: int): boolean {
     if (expr.kind != ExprKind.Name || expr.typeArgs.length > 0) {
       return false;
     }
@@ -134,7 +134,7 @@ partial class ExpressionTypes {
     return fn != undefined && fn.typeParams.length > 0;
   }
 
-  private hasOperationParameter(shape: FunctionShape): boolean {
+  private readonly hasOperationParameter(shape: Read<FunctionShape>): boolean {
     const seen = new Set<int>();
 
     return shape.params.some((param) =>
@@ -142,7 +142,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private isOperationInside(type: Type, seen: Set<int>): boolean {
+  private readonly isOperationInside(type: Type, seen: Set<int>): boolean {
     if (seen.has(type.id)) {
       return false;
     }
@@ -161,7 +161,7 @@ partial class ExpressionTypes {
     return parts.some((part) => this.isOperationInside(part, seen));
   }
 
-  private lenientClosure(expr: Expr, pattern: Type, module: int): void {
+  private readonly lenientClosure(expr: Expr, pattern: Type, module: int): void {
     if (expr.kind != ExprKind.Function) {
       return;
     }

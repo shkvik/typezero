@@ -59,9 +59,9 @@ export class CryptoRules {
 
   public constructor(
     text: TypeText,
-    types: TypeQuestions,
-    modules: ModuleQuestions,
-    byteSources: ByteSourceRules,
+    types: Own<TypeQuestions>,
+    modules: Own<ModuleQuestions>,
+    byteSources: Own<ByteSourceRules>,
   ) {
     this.text = text;
     this.types = types;
@@ -69,17 +69,17 @@ export class CryptoRules {
     this.byteSources = byteSources;
   }
 
-  public isCryptoModule(name: string): boolean {
+  public readonly isCryptoModule(name: string): boolean {
     return kCryptoModules.includes(name);
   }
 
-  public syncName(name: string): string {
+  public readonly syncName(name: string): string {
     const index = kAsyncCryptoNames.indexOf(name);
 
     return kSyncCryptoNames[index] ?? name;
   }
 
-  public hashError(
+  public readonly hashError(
     loc: int,
     text: string,
     use: DigestUse,
@@ -101,7 +101,7 @@ export class CryptoRules {
     return { code: Code.CryptoHashUnknown, loc, details: { word: text } };
   }
 
-  public cipherError(loc: int, text: string): SourceError | undefined {
+  public readonly cipherError(loc: int, text: string): SourceError | undefined {
     const name = text.toLowerCase();
     const isKnown =
       this.directCipher(text) != undefined || kCipherNames.includes(name);
@@ -115,7 +115,7 @@ export class CryptoRules {
     return { code: Code.CryptoCipherUnknown, loc, details: { word: text } };
   }
 
-  public directCipher(text: string): DirectCipher | undefined {
+  public readonly directCipher(text: string): DirectCipher | undefined {
     const name = text.toLowerCase();
     const alias = kCipherAliases.find((one) => one.alias == name);
     const canonical = alias?.name ?? name;
@@ -123,15 +123,15 @@ export class CryptoRules {
     return kDirectCiphers.find((one) => one.name == canonical);
   }
 
-  public needsTagLength(text: string): boolean {
+  public readonly needsTagLength(text: string): boolean {
     return text.toLowerCase().includes(kCcmMode);
   }
 
-  public tagLengthError(loc: int, text: string): SourceError {
+  public readonly tagLengthError(loc: int, text: string): SourceError {
     return { code: Code.CryptoTagLength, loc, details: { word: text } };
   }
 
-  public isKeyBytes(type: Type): boolean {
+  public readonly isKeyBytes(type: Type): boolean {
     const base = this.types.definedType(type);
 
     return (
@@ -141,7 +141,7 @@ export class CryptoRules {
     );
   }
 
-  public keyError(
+  public readonly keyError(
     loc: int,
     cipher: DirectCipher,
     have: decimal,
@@ -159,7 +159,7 @@ export class CryptoRules {
     return { code: Code.CryptoKeyBytes, loc, details };
   }
 
-  public ivError(
+  public readonly ivError(
     loc: int,
     cipher: DirectCipher,
     have: decimal,
@@ -183,7 +183,7 @@ export class CryptoRules {
     return { code: Code.CryptoIvBytes, loc, details };
   }
 
-  public wholeError(
+  public readonly wholeError(
     loc: int,
     name: string,
     least: int,
@@ -198,7 +198,7 @@ export class CryptoRules {
     return { code: Code.CryptoWhole, loc, details };
   }
 
-  public costError(loc: int, number: CryptoNumber): SourceError | undefined {
+  public readonly costError(loc: int, number: CryptoNumber): SourceError | undefined {
     const isZero = number.isWhole && number.value == (0).toDecimal();
     if (isZero || (number.isWhole && this.isPowerOfTwo(number.value))) {
       return undefined;
@@ -211,35 +211,35 @@ export class CryptoRules {
     };
   }
 
-  public isAsyncName(name: string): boolean {
+  public readonly isAsyncName(name: string): boolean {
     return kAsyncCryptoNames.includes(name);
   }
 
-  public optionsLiteralError(
+  public readonly optionsLiteralError(
     loc: int,
     shown: string,
-    allowed: string[],
+    allowed: Read<string[]>,
   ): SourceError {
     const details = { word: shown, first: allowed[0] ?? "" };
 
     return { code: Code.CryptoOptionsLiteral, loc, details };
   }
 
-  public optionsByNameError(
+  public readonly optionsByNameError(
     loc: int,
     shown: string,
-    allowed: string[],
+    allowed: Read<string[]>,
   ): SourceError {
     const details = { word: shown, first: allowed[0] ?? "" };
 
     return { code: Code.CryptoOptionsByName, loc, details };
   }
 
-  public optionUnknownError(
+  public readonly optionUnknownError(
     loc: int,
     shown: string,
     name: string,
-    allowed: string[],
+    allowed: Read<string[]>,
   ): SourceError {
     const other = this.andList(allowed);
     const details = { word: shown, first: name, other };
@@ -247,23 +247,23 @@ export class CryptoRules {
     return { code: Code.CryptoOptionUnknown, loc, details };
   }
 
-  public togetherError(loc: int, first: string, second: string): SourceError {
+  public readonly togetherError(loc: int, first: string, second: string): SourceError {
     const details = { word: first, first: second };
 
     return { code: Code.CryptoOptionsTogether, loc, details };
   }
 
-  public asyncCallbackError(loc: int, shown: string): SourceError {
+  public readonly asyncCallbackError(loc: int, shown: string): SourceError {
     return { code: Code.CryptoAsyncCallback, loc, details: { word: shown } };
   }
 
-  public syncCallbackError(loc: int, name: string, hint: string): SourceError {
+  public readonly syncCallbackError(loc: int, name: string, hint: string): SourceError {
     const details = { word: name, other: hint };
 
     return { code: Code.CryptoSyncCallback, loc, details };
   }
 
-  public curveError(loc: int, name: string): SourceError | undefined {
+  public readonly curveError(loc: int, name: string): SourceError | undefined {
     if (kCurveNames.includes(name)) {
       return undefined;
     }
@@ -271,7 +271,7 @@ export class CryptoRules {
     return { code: Code.CryptoCurveUnknown, loc, details: { word: name } };
   }
 
-  public pairTypeError(loc: int, text: string): SourceError | undefined {
+  public readonly pairTypeError(loc: int, text: string): SourceError | undefined {
     if (kPairTypes.includes(text)) {
       return undefined;
     }
@@ -282,11 +282,11 @@ export class CryptoRules {
     return { code: Code.CryptoChoiceUnknown, loc, details };
   }
 
-  public pairOptionError(loc: int, name: string): SourceError {
+  public readonly pairOptionError(loc: int, name: string): SourceError {
     return { code: Code.CryptoPairOption, loc, details: { word: name } };
   }
 
-  public pairNeedsError(
+  public readonly pairNeedsError(
     loc: int,
     type: string,
     hasModulus: boolean,
@@ -302,7 +302,7 @@ export class CryptoRules {
     return undefined;
   }
 
-  public smallModulusError(
+  public readonly smallModulusError(
     loc: int,
     type: string,
     number: CryptoNumber,
@@ -315,11 +315,11 @@ export class CryptoRules {
     return { code: Code.CryptoPairSmall, loc, details: { word: number.shown } };
   }
 
-  public isCryptoClass(name: string): boolean {
+  public readonly isCryptoClass(name: string): boolean {
     return kCryptoClasses.includes(name);
   }
 
-  public newError(loc: int, name: string): SourceError {
+  public readonly newError(loc: int, name: string): SourceError {
     if (name == kCertificateClass) {
       return { code: Code.CryptoNewCertificate, loc, details: kNoDetails };
     }
@@ -329,7 +329,7 @@ export class CryptoRules {
     return { code: Code.CryptoNewClass, loc, details: { word: name, other } };
   }
 
-  public classOf(type: Type, home: string): CryptoClass | undefined {
+  public readonly classOf(type: Type, home: string): CryptoClass | undefined {
     const base = this.types.definedType(type);
     if (base.kind != TypeKind.Instance || !this.isCryptoModule(home)) {
       return undefined;
@@ -338,9 +338,9 @@ export class CryptoRules {
     return kCryptoClassShapes.find((one) => one.name == base.name);
   }
 
-  public methodError(
+  public readonly methodError(
     loc: int,
-    shape: CryptoClass,
+    shape: Read<CryptoClass>,
     name: string,
   ): SourceError | undefined {
     if (shape.methods.includes(name)) {
@@ -357,9 +357,9 @@ export class CryptoRules {
     return { code: Code.CryptoNoMethod, loc, details };
   }
 
-  public memberError(
+  public readonly memberError(
     loc: int,
-    shape: CryptoClass,
+    shape: Read<CryptoClass>,
     name: string,
   ): SourceError | undefined {
     if (name == kKeyDetailsName) {
@@ -377,7 +377,7 @@ export class CryptoRules {
     return { code: Code.CryptoOnlyCalled, loc, details };
   }
 
-  public dataError(
+  public readonly dataError(
     loc: int,
     what: string,
     kinds: CryptoDataKinds,
@@ -405,11 +405,11 @@ export class CryptoRules {
     return { code: Code.CryptoNotData, loc, details };
   }
 
-  public encodingLiteralError(loc: int, name: string): SourceError {
+  public readonly encodingLiteralError(loc: int, name: string): SourceError {
     return { code: Code.CryptoEncodingLiteral, loc, details: { word: name } };
   }
 
-  public randomValuesError(loc: int, type: Type): SourceError | undefined {
+  public readonly randomValuesError(loc: int, type: Type): SourceError | undefined {
     const name = this.byteSources.typedName(type);
     const isFilled =
       name != undefined &&
@@ -425,7 +425,7 @@ export class CryptoRules {
     return { code: Code.CryptoRandomValues, loc, details: { word } };
   }
 
-  public globalMemberError(loc: int, name: string): SourceError | undefined {
+  public readonly globalMemberError(loc: int, name: string): SourceError | undefined {
     if (kGlobalCryptoCalls.includes(name)) {
       return { code: Code.CryptoGlobalCalled, loc, details: { word: name } };
     }
@@ -436,7 +436,7 @@ export class CryptoRules {
     return { code: Code.CryptoGlobalMember, loc, details: { word: name } };
   }
 
-  public greaterCode(hasMinimum: boolean): Code {
+  public readonly greaterCode(hasMinimum: boolean): Code {
     if (hasMinimum) {
       return Code.CryptoGreaterMinimum;
     }
@@ -444,11 +444,11 @@ export class CryptoRules {
     return Code.CryptoGreaterZero;
   }
 
-  public choiceError(
+  public readonly choiceError(
     loc: int,
     label: string,
     text: string,
-    values: string[],
+    values: Read<string[]>,
   ): SourceError | undefined {
     if (values.includes(text)) {
       return undefined;
@@ -460,7 +460,7 @@ export class CryptoRules {
     return { code: Code.CryptoChoiceUnknown, loc, details };
   }
 
-  private isPowerOfTwo(value: decimal): boolean {
+  private readonly isPowerOfTwo(value: decimal): boolean {
     const two = (2).toDecimal();
     const one = (1).toDecimal();
     if (value < two) {
@@ -476,7 +476,7 @@ export class CryptoRules {
     return rest == one;
   }
 
-  private isTurnedOffCipher(name: string): boolean {
+  private readonly isTurnedOffCipher(name: string): boolean {
     if (kKeptCipherPrefixes.some((kept) => name.startsWith(kept))) {
       return false;
     }
@@ -490,7 +490,7 @@ export class CryptoRules {
     });
   }
 
-  private andList(values: string[]): string {
+  private readonly andList(values: Read<string[]>): string {
     const last = values[values.length - 1] ?? "";
     if (values.length <= 1) {
       return last;
@@ -501,7 +501,7 @@ export class CryptoRules {
     return `${head} and ${last}`;
   }
 
-  private orList(values: string[]): string {
+  private readonly orList(values: Read<string[]>): string {
     const last = values[values.length - 1] ?? "";
     if (values.length <= 1) {
       return `'${last}'`;
@@ -512,7 +512,7 @@ export class CryptoRules {
     return `'${head}' or '${last}'`;
   }
 
-  private makerHint(name: string): string {
+  private readonly makerHint(name: string): string {
     switch (name) {
       case "KeyObject":
         return "use 'createSecretKey', 'createPublicKey' or 'createPrivateKey'";
@@ -528,7 +528,7 @@ export class CryptoRules {
     }
   }
 
-  private isCryptoData(type: Type, kinds: CryptoDataKinds): boolean {
+  private readonly isCryptoData(type: Type, kinds: CryptoDataKinds): boolean {
     const isText =
       type.kind == TypeKind.String ||
       (type.kind == TypeKind.Literal && type.literal == LiteralKind.String);
@@ -545,7 +545,7 @@ export class CryptoRules {
     );
   }
 
-  private dataKindsText(isString: boolean): string {
+  private readonly dataKindsText(isString: boolean): string {
     if (isString) {
       return "a string or bytes";
     }
@@ -553,7 +553,7 @@ export class CryptoRules {
     return "bytes";
   }
 
-  private dataExtrasText(kinds: CryptoDataKinds): string {
+  private readonly dataExtrasText(kinds: CryptoDataKinds): string {
     let text = "";
 
     if (kinds.isArrayBuffer) {
@@ -566,7 +566,7 @@ export class CryptoRules {
     return text;
   }
 
-  private numericHint(type: Type): string {
+  private readonly numericHint(type: Type): string {
     if (this.types.isNumeric(type)) {
       return "; make text of it with 'String(x)'";
     }
@@ -574,7 +574,7 @@ export class CryptoRules {
     return "";
   }
 
-  private textOf(type: Type): string {
+  private readonly textOf(type: Type): string {
     return this.text.of(type);
   }
 }

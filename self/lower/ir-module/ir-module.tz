@@ -58,10 +58,10 @@ import {
 export class IrModule {
   public readonly context: LLVMContext;
   private readonly module: LLVMModule;
-  private readonly types: Map<string, LLVMType>;
-  private readonly callees: Map<string, IrCallee>;
-  private readonly externals: Map<string, LLVMValue>;
-  private next: int;
+  private types: Cell<Map<string, LLVMType>>;
+  private callees: Cell<Map<string, IrCallee>>;
+  private externals: Cell<Map<string, LLVMValue>>;
+  private next: Cell<int>;
 
   public constructor(name: string) {
     const context = LLVMContextCreate();
@@ -75,7 +75,7 @@ export class IrModule {
     this.next = 0;
   }
 
-  public type(key: string): LLVMType {
+  public readonly type(key: string): LLVMType {
     const known = this.types.get(key);
     if (known != undefined) {
       return known;
@@ -88,11 +88,11 @@ export class IrModule {
     return made;
   }
 
-  public callee(name: string): IrCallee | undefined {
+  public readonly callee(name: string): IrCallee | undefined {
     return this.callees.get(name);
   }
 
-  public signature(result: string, params: string[]): LLVMType {
+  public readonly signature(result: string, params: Read<string[]>): LLVMType {
     const elements = params.map((param) => this.type(param));
     const returned = this.type(result);
 
@@ -101,7 +101,7 @@ export class IrModule {
     return LLVMFunctionType(returned, elements, count, 0);
   }
 
-  public declare(name: string, result: string, params: string[]): IrCallee {
+  public readonly declare(name: string, result: string, params: Read<string[]>): IrCallee {
     const known = this.callees.get(name);
     if (known != undefined) {
       return known;
@@ -116,39 +116,39 @@ export class IrModule {
     return callee;
   }
 
-  public integer(key: string, text: string): LLVMValue {
+  public readonly integer(key: string, text: string): LLVMValue {
     return LLVMConstIntOfString(this.type(key), this.cname(text), 10);
   }
 
-  public hexInteger(key: string, hex: string): LLVMValue {
+  public readonly hexInteger(key: string, hex: string): LLVMValue {
     return LLVMConstIntOfString(this.type(key), this.cname(hex), 16);
   }
 
-  public real(value: double): LLVMValue {
+  public readonly real(value: double): LLVMValue {
     return LLVMConstReal(this.type("double"), value);
   }
 
-  public zero(key: string): LLVMValue {
+  public readonly zero(key: string): LLVMValue {
     return LLVMConstNull(this.type(key));
   }
 
-  public undefinedOf(key: string): LLVMValue {
+  public readonly undefinedOf(key: string): LLVMValue {
     return LLVMGetUndef(this.type(key));
   }
 
-  public constStruct(values: LLVMValue[]): LLVMValue {
+  public readonly constStruct(values: Read<LLVMValue[]>): LLVMValue {
     const count = values.length.toUint32();
 
     return LLVMConstStructInContext(this.context, values, count, 0);
   }
 
-  public constArray(element: string, values: LLVMValue[]): LLVMValue {
+  public readonly constArray(element: string, values: Read<LLVMValue[]>): LLVMValue {
     const count = values.length.toUint64();
 
     return LLVMConstArray2(this.type(element), values, count);
   }
 
-  public bytes(data: Buffer, isTerminated: boolean): LLVMValue {
+  public readonly bytes(data: Read<Buffer>, isTerminated: boolean): LLVMValue {
     let unterminated: int32 = 1;
 
     if (isTerminated) {
@@ -163,17 +163,17 @@ export class IrModule {
     );
   }
 
-  public pointerFromBits(hex: string): LLVMValue {
+  public readonly pointerFromBits(hex: string): LLVMValue {
     const bits = this.hexInteger("i64", hex);
 
     return LLVMConstIntToPtr(bits, this.type("ptr"));
   }
 
-  public isConstant(value: LLVMValue): boolean {
+  public readonly isConstant(value: LLVMValue): boolean {
     return LLVMIsConstant(value) != 0;
   }
 
-  public global(
+  public readonly global(
     name: string,
     key: string,
     init: LLVMValue,
@@ -196,7 +196,7 @@ export class IrModule {
     return global;
   }
 
-  public external(name: string, key: string): LLVMValue {
+  public readonly external(name: string, key: string): LLVMValue {
     const known = this.externals.get(name);
     if (known != undefined) {
       return known;
@@ -209,7 +209,7 @@ export class IrModule {
     return global;
   }
 
-  public uniqueName(prefix: string): string {
+  public readonly uniqueName(prefix: string): string {
     const name = `${prefix}${this.next}`;
 
     this.next += 1;
@@ -217,7 +217,7 @@ export class IrModule {
     return name;
   }
 
-  public cname(text: string): cstring {
+  public readonly cname(text: string): cstring {
     const made = text.toCString();
     if (made == undefined) {
       return "";
@@ -226,15 +226,15 @@ export class IrModule {
     return made;
   }
 
-  public isValid(): boolean {
+  public readonly isValid(): boolean {
     return LLVMVerifyModule(this.module, kPrintMessageAction, undefined) == 0;
   }
 
-  public printed(path: string): boolean {
+  public readonly printed(path: string): boolean {
     return LLVMPrintModuleToFile(this.module, this.cname(path), undefined) == 0;
   }
 
-  public emitted(path: string): boolean {
+  public readonly emitted(path: string): boolean {
     LLVMInitializeX86TargetInfo();
     LLVMInitializeX86Target();
     LLVMInitializeX86TargetMC();
@@ -272,7 +272,7 @@ export class IrModule {
     return failed == 0;
   }
 
-  private parsedType(key: string): LLVMType {
+  private readonly parsedType(key: string): LLVMType {
     if (key.startsWith("{")) {
       const inner = key.slice(1, key.length - 1);
       const parts = this.topLevelParts(inner);
@@ -309,7 +309,7 @@ export class IrModule {
     }
   }
 
-  private topLevelParts(text: string): string[] {
+  private readonly topLevelParts(text: string): string[] {
     const parts: string[] = [];
     let depth: int = 0;
     let start: int = 0;
@@ -334,7 +334,7 @@ export class IrModule {
     return parts;
   }
 
-  private digits(text: string): int {
+  private readonly digits(text: string): int {
     let value: int = 0;
 
     for (const char of text.trim()) {
@@ -346,3 +346,5 @@ export class IrModule {
     return value;
   }
 }
+
+export type InternedIrModule = Interned<IrModule>;

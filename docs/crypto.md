@@ -139,7 +139,7 @@ OpenSSL быстрее Go. В node те же функции идут через 
 
 ### Ошибки
 
-Решено 30 октября (`tmp/design/crypto-errors.tz`, К1–К8), по правилам `node:fs` и
+Решено 30 октября (К1–К8), по правилам `node:fs` и
 `node:child_process`: у каждой функции свой тип ошибки, общего `CryptoError` нет.
 
 ```ts
@@ -249,7 +249,7 @@ if (tail.isErr()) {
    (с 30 октября — свой тип у каждого метода, раздел 5)
    (`code` — имя `DOMException` node; с 29 октября — наш вид: `kind: "SUBTLE"`,
    `ERR_INVALID_DATA`, `ERR_NOT_SUPPORTED`, `ERR_OPERATION_FAILED`… — README, «Web Crypto»); внутри `webcrypto.tz` исключений нет с шагом 5 (27 октября).
-7. **Ошибки по функциям** (сделано 30 октября, 4.6 шаг 3, `tmp/design/crypto-errors.tz` К1–К8):
+7. **Ошибки по функциям** (сделано 30 октября, 4.6 шаг 3, К1–К8):
    32 типа `node:crypto` и 12 типов `crypto.subtle` вместо `CryptoError` и `SubtleError`, причины
    в `kind`, поля по месту, коды OpenSSL, разбор нечитаемых ключей самим tz, тексты К6, ошибки
    сборки К4, `Result` и у имён в коде (К4а), `WRONG_ORDER` (К5). Раздел 5, «Ошибки».

@@ -17,11 +17,11 @@ export class ProgramReport {
     this.failed = false;
   }
 
-  public hasFailed(): boolean {
+  public readonly hasFailed(): boolean {
     return this.failed;
   }
 
-  public wrongUsage(): void {
+  public readonly wrongUsage(): void {
     console.error(kUsage);
     process.exitCode = kUsageExitCode;
   }
@@ -35,7 +35,7 @@ export class ProgramReport {
     this.fail();
   }
 
-  public loadProblems(loaded: LoadResult): void {
+  public loadProblems(loaded: Read<LoadResult>): void {
     this.unreadable(loaded.unreadable);
 
     for (const message of loaded.packageErrors) {
@@ -44,7 +44,7 @@ export class ProgramReport {
     }
   }
 
-  public unreadable(paths: string[]): void {
+  public unreadable(paths: Read<string[]>): void {
     for (const path of paths) {
       console.error(`${kProgramName}: cannot read '${path}'`);
       this.fail();
@@ -68,7 +68,7 @@ export class ProgramReport {
     }
   }
 
-  public sourceErrors(source: SourceText, errors: SourceError[]): void {
+  public sourceErrors(source: SourceText, errors: Read<SourceError[]>): void {
     if (errors.length == 0) {
       return;
     }
@@ -84,7 +84,7 @@ export class ProgramReport {
     this.fail();
   }
 
-  private renameAdvice(entry: string): string {
+  private readonly renameAdvice(entry: string): string {
     if (extname(entry) != kTypeScriptExtension) {
       return "";
     }

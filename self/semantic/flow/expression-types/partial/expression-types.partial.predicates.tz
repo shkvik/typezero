@@ -19,7 +19,7 @@ import { kThisName } from "../../../code/expression-types/const/expression-types
 import { ValueTarget } from "../../../code/expression-types/types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private predicateDeclCheck(
+  private readonly predicateDeclCheck(
     fn: FunctionDecl,
     written: TypeRef,
     module: int,
@@ -48,7 +48,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private assertsReport(fn: FunctionDecl, written: TypeRef, module: int): void {
+  private readonly assertsReport(fn: FunctionDecl, written: TypeRef, module: int): void {
     const guarded = this.predicateGuard(written, module);
     const shown = this.narrowings.shownPredicate(written, guarded);
     const other = this.narrowings.assertsAdvice(shown, guarded);
@@ -61,7 +61,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private predicateGuard(written: TypeRef, module: int): Type | undefined {
+  private readonly predicateGuard(written: TypeRef, module: int): Type | undefined {
     const ref = written.args[0];
     if (ref == undefined) {
       return undefined;
@@ -76,7 +76,7 @@ partial class ExpressionTypes {
     return this.resolver.resolve(ref, context);
   }
 
-  private assertsCall(fn: FunctionDecl): string {
+  private readonly assertsCall(fn: FunctionDecl): string {
     const names = fn.params.map((param) => param.name);
     const args = names.join(", ");
     const call = `${fn.name}(${args})`;
@@ -93,7 +93,7 @@ partial class ExpressionTypes {
     return `${lower}${rest}.${call}`;
   }
 
-  private predicateReturnCheck(
+  private readonly predicateReturnCheck(
     fn: FunctionDecl,
     value: Expr,
     module: int,
@@ -137,8 +137,8 @@ partial class ExpressionTypes {
     });
   }
 
-  private knownWhenTrue(value: Expr, target: ValueTarget, module: int): Type {
-    const before = this.facts;
+  private readonly knownWhenTrue(value: Expr, target: ValueTarget, module: int): Type {
+    const before = this.factsCopy();
 
     this.errors.beginTrial();
 

@@ -14,7 +14,7 @@ export class LoadCommand {
   private readonly entry?: string;
   private readonly report: ProgramReport;
 
-  public constructor(args: string[]) {
+  public constructor(args: Read<string[]>) {
     this.entry = args[3];
     this.report = new ProgramReport();
   }
@@ -36,7 +36,7 @@ export class LoadCommand {
     this.report.moduleErrors(loaded.program);
   }
 
-  private printProgram(program: Program): void {
+  private readonly printProgram(program: Program): void {
     const ambient = program.ambient;
     const modules = program.order.filter((one) => !ambient.includes(one));
 
@@ -47,7 +47,7 @@ export class LoadCommand {
     }
   }
 
-  private printModule(program: Program, module: Module): void {
+  private readonly printModule(program: Program, module: Module): void {
     if (module.source.isLibrary) {
       console.log(`${module.name}${kLibraryMark}`);
 
@@ -77,7 +77,7 @@ export class LoadCommand {
     }
   }
 
-  private targetText(program: Program, link: ModuleLink): string {
+  private readonly targetText(program: Program, link: ModuleLink): string {
     switch (link.kind) {
       case LinkKind.Module:
         return this.moduleName(program, link.target);
@@ -90,7 +90,7 @@ export class LoadCommand {
     }
   }
 
-  private moduleName(program: Program, id: int): string {
+  private readonly moduleName(program: Program, id: int): string {
     const module = program.modules[id];
     if (module == undefined) {
       return "";

@@ -15,7 +15,7 @@ import { kPlainTypes } from "../const/type-resolver.const.tables.tz";
 import { TypeContext, TypePlace } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  public typeParameters(module: int, params: TypeParamDecl[]): void {
+  public readonly typeParameters(module: int, params: Read<TypeParamDecl[]>): void {
     const context = this.plainContext(module);
     let defaulted = false;
 
@@ -42,7 +42,7 @@ partial class TypeResolver {
     }
   }
 
-  private checkDefault(
+  private readonly checkDefault(
     param: TypeParamDecl,
     fallback: TypeRef,
     context: TypeContext,
@@ -68,11 +68,11 @@ partial class TypeResolver {
     });
   }
 
-  private plainContext(module: int): TypeContext {
+  private readonly plainContext(module: int): TypeContext {
     return { module, bindings: new Map<int, Type>(), place: TypePlace.Plain };
   }
 
-  private opened(
+  private readonly opened(
     module: int,
     loc: int,
     name: string,
@@ -96,7 +96,7 @@ partial class TypeResolver {
     return type;
   }
 
-  private constraintText(
+  private readonly constraintText(
     module: int,
     param: TypeParamDecl,
     written: TypeRef,
@@ -111,18 +111,18 @@ partial class TypeResolver {
     return this.text.of(declared);
   }
 
-  private argumentsFit(
+  private readonly argumentsFit(
     ref: TypeRef,
     home: int,
     name: string,
-    params: TypeParamDecl[],
-    written: Type[],
-    context: TypeContext,
+    params: Read<TypeParamDecl[]>,
+    written: Read<Type[]>,
+    context: Read<TypeContext>,
   ): boolean {
     const bindings = this.bind(home, params, written);
     const inside: TypeContext = {
       module: home,
-      bindings,
+      bindings: new Map<int, Type>(bindings),
       place: TypePlace.Plain,
     };
 
@@ -154,7 +154,7 @@ partial class TypeResolver {
     return true;
   }
 
-  private constraintWays(written: TypeRef, context: TypeContext): Type[] {
+  private readonly constraintWays(written: TypeRef, context: TypeContext): Type[] {
     if (written.form.kind != TypeRefKind.Union) {
       return [this.resolve(written, context)];
     }
@@ -167,7 +167,7 @@ partial class TypeResolver {
     return ways;
   }
 
-  private satisfies(given: Type, ways: Type[]): boolean {
+  private readonly satisfies(given: Type, ways: Type[]): boolean {
     if (given.kind == TypeKind.Error || given.kind == TypeKind.Operation) {
       return true;
     }
@@ -186,7 +186,7 @@ partial class TypeResolver {
     return this.partsOf(own).every((part) => this.satisfies(part, ways));
   }
 
-  private fitsWay(given: Type, way: Type): boolean {
+  private readonly fitsWay(given: Type, way: Type): boolean {
     const seen = new Set<int>();
     if (way.kind == TypeKind.Unknown || this.depends(way, seen)) {
       return true;
@@ -205,7 +205,7 @@ partial class TypeResolver {
     return way.kind == TypeKind.Object && this.hasMembers(given, way.fields);
   }
 
-  private startsWith(given: Type, wanted: Type[]): boolean {
+  private readonly startsWith(given: Type, wanted: Read<Type[]>): boolean {
     if (given.kind != TypeKind.Tuple || given.items.length < wanted.length) {
       return false;
     }
@@ -226,7 +226,7 @@ partial class TypeResolver {
     return true;
   }
 
-  private hasMembers(given: Type, wanted: ObjectField[]): boolean {
+  private readonly hasMembers(given: Type, wanted: Read<ObjectField[]>): boolean {
     for (const part of this.partsOf(given)) {
       if (!this.partHasMembers(part, wanted)) {
         return false;
@@ -236,7 +236,7 @@ partial class TypeResolver {
     return true;
   }
 
-  private partHasMembers(part: Type, wanted: ObjectField[]): boolean {
+  private readonly partHasMembers(part: Type, wanted: Read<ObjectField[]>): boolean {
     if (part.kind != TypeKind.Object && part.kind != TypeKind.Instance) {
       return false;
     }
@@ -256,9 +256,9 @@ partial class TypeResolver {
     return true;
   }
 
-  private fieldsOf(part: Type): ObjectField[] {
+  private readonly fieldsOf(part: Type): ObjectField[] {
     if (part.kind == TypeKind.Object) {
-      return part.fields;
+      return part.fields.slice();
     }
     if (part.kind == TypeKind.Instance) {
       return this.inheritedFields(part);
@@ -267,7 +267,7 @@ partial class TypeResolver {
     return [];
   }
 
-  private isSameMember(have: ObjectField, wanted: ObjectField): boolean {
+  private readonly isSameMember(have: ObjectField, wanted: ObjectField): boolean {
     const isExact =
       have.type == wanted.type && have.optional == wanted.optional;
     const isNarrower =
@@ -277,14 +277,14 @@ partial class TypeResolver {
     return (isExact || isNarrower) && mayWrite;
   }
 
-  private isTextual(type: Type): boolean {
+  private readonly isTextual(type: Type): boolean {
     return this.partsOf(type).every(
       (part) =>
         part.kind == TypeKind.Literal && part.literal == LiteralKind.String,
     );
   }
 
-  private isSpared(part: Type, wanted: ObjectField): boolean {
+  private readonly isSpared(part: Type, wanted: ObjectField): boolean {
     const isMethod = wanted.readonly && wanted.type.kind == TypeKind.Function;
     if (part.kind != TypeKind.Instance || !isMethod) {
       return wanted.optional;

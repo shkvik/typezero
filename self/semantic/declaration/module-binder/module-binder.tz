@@ -24,7 +24,7 @@ export class ModuleBinder {
   private readonly byId: Map<int, BoundModule>;
   private readonly exports: LibraryExports;
 
-  public constructor(program: Program) {
+  public constructor(program: Own<Program>) {
     this.program = program;
     this.ordered = [];
     this.byId = new Map<int, BoundModule>();
@@ -52,15 +52,13 @@ export class ModuleBinder {
     }
 
     for (const bound of this.ordered) {
-      const errors = bound.names.errors;
-
-      errors.sort((first, second) => first.loc - second.loc);
+      bound.names.errors.sort((first, second) => first.loc - second.loc);
     }
 
     return this.ordered.map((bound) => bound.names);
   }
 
-  private boundModule(module: Module): BoundModule {
+  private readonly boundModule(module: Own<Module>): BoundModule {
     const names: ModuleNames = {
       module,
       declared: new Map<string, int>(),
@@ -72,8 +70,8 @@ export class ModuleBinder {
     return { names, state: BindState.New };
   }
 
-  private linkedModule(
-    bound: BoundModule,
+  private readonly linkedModule(
+    bound: Read<BoundModule>,
     from: ModulePath,
   ): BoundModule | undefined {
     const links = bound.names.module.links;
@@ -85,7 +83,7 @@ export class ModuleBinder {
     return this.byId.get(link.target);
   }
 
-  private report(
+  private readonly report(
     bound: BoundModule,
     loc: int,
     code: Code,
@@ -94,7 +92,7 @@ export class ModuleBinder {
     bound.names.errors.push({ code, loc, details });
   }
 
-  private lineOf(bound: BoundModule, loc: int): string {
+  private readonly lineOf(bound: Read<BoundModule>, loc: int): string {
     const lines = new SourceLines(bound.names.module.source.text);
     const place = lines.placeOf(loc);
 

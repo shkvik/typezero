@@ -19,7 +19,7 @@ import {
 } from "../../../intl-rules/types/intl-rules.types.tz";
 
 partial class ExpressionTypes {
-  private dateLocaleCall(
+  private readonly dateLocaleCall(
     expr: CallExpr,
     member: MemberExpr,
     module: int,
@@ -35,7 +35,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.String);
   }
 
-  private dateLocaleKind(name: string): DateLocaleKind {
+  private readonly dateLocaleKind(name: string): DateLocaleKind {
     if (name == "toLocaleDateString") {
       return DateLocaleKind.Date;
     }
@@ -46,7 +46,7 @@ partial class ExpressionTypes {
     return DateLocaleKind.Any;
   }
 
-  private dateFormatNew(expr: NewExpr, module: int): void {
+  private readonly dateFormatNew(expr: NewExpr, module: int): void {
     if (expr.args.length > 2 || expr.args.some((one) => one.spread)) {
       return this.looseArguments(expr.args, module);
     }
@@ -59,8 +59,8 @@ partial class ExpressionTypes {
     );
   }
 
-  private dateArguments(
-    args: CallArgument[],
+  private readonly dateArguments(
+    args: Read<CallArgument[]>,
     what: string,
     kind: DateLocaleKind,
     module: int,
@@ -78,7 +78,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private dateOptionsCheck(
+  private readonly dateOptionsCheck(
     options: Expr,
     what: string,
     kind: DateLocaleKind,
@@ -106,9 +106,9 @@ partial class ExpressionTypes {
     this.dateValuesCheck(options, base.fields, module);
   }
 
-  private dateKindsCheck(
+  private readonly dateKindsCheck(
     options: Expr,
-    fields: ObjectField[],
+    fields: Read<ObjectField[]>,
     what: string,
     kind: DateLocaleKind,
     module: int,
@@ -158,7 +158,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private dateKindFits(
+  private readonly dateKindFits(
     options: Expr,
     field: ObjectField,
     module: int,
@@ -180,7 +180,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private dateWanted(field: ObjectField): string {
+  private readonly dateWanted(field: ObjectField): string {
     const value = this.types.definedType(field.type);
     if (this.intlDates.isHour12(field.name)) {
       return this.wantedIf(!this.intl.isFlagType(value), "a boolean");
@@ -196,7 +196,7 @@ partial class ExpressionTypes {
     return this.wantedIf(!this.intl.isTextUnion(value), "a string");
   }
 
-  private wantedIf(isWrong: boolean, wanted: string): string {
+  private readonly wantedIf(isWrong: boolean, wanted: string): string {
     if (isWrong) {
       return wanted;
     }
@@ -204,9 +204,9 @@ partial class ExpressionTypes {
     return "";
   }
 
-  private dateValuesCheck(
+  private readonly dateValuesCheck(
     options: Expr,
-    fields: ObjectField[],
+    fields: Read<ObjectField[]>,
     module: int,
   ): void {
     for (const field of fields) {
@@ -226,7 +226,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private dateDigitsCheck(
+  private readonly dateDigitsCheck(
     field: ObjectField,
     given: Expr | undefined,
     loc: int,
@@ -253,9 +253,9 @@ partial class ExpressionTypes {
     }
   }
 
-  private dateTextCheck(
+  private readonly dateTextCheck(
     field: ObjectField,
-    option: DateOption,
+    option: Read<DateOption>,
     given: Expr | undefined,
     loc: int,
     module: int,
@@ -281,7 +281,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private dateTexts(
+  private readonly dateTexts(
     field: ObjectField,
     given: Expr | undefined,
     module: int,
@@ -304,7 +304,7 @@ partial class ExpressionTypes {
     return texts;
   }
 
-  private writtenOption(given: Expr | undefined, module: int): string {
+  private readonly writtenOption(given: Expr | undefined, module: int): string {
     if (given == undefined) {
       return "value";
     }
@@ -312,7 +312,7 @@ partial class ExpressionTypes {
     return this.sources.valueText(given, module);
   }
 
-  private dateFormatRange(
+  private readonly dateFormatRange(
     expr: CallExpr,
     member: MemberExpr,
     module: int,

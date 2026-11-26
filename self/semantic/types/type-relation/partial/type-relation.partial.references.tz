@@ -7,7 +7,7 @@ import {
 import { ValueSlot } from "../types/type-relation.types.tz";
 
 partial class TypeRelation {
-  public isTagged(parts: Type[]): boolean {
+  public readonly isTagged(parts: Read<Type[]>): boolean {
     const first = parts[0];
     if (first == undefined) {
       return false;
@@ -16,7 +16,7 @@ partial class TypeRelation {
     return parts.some((part) => !this.sameSlot(first, part));
   }
 
-  private sameSlot(first: Type, second: Type): boolean {
+  private readonly sameSlot(first: Type, second: Type): boolean {
     const slot = this.slotOf(first);
     if (slot != this.slotOf(second)) {
       return false;
@@ -28,11 +28,11 @@ partial class TypeRelation {
     return this.numberOf(first) == this.numberOf(second);
   }
 
-  private numberOf(type: Type): Type {
+  private readonly numberOf(type: Type): Type {
     return this.baseOf(type) ?? type;
   }
 
-  private slotOf(type: Type): ValueSlot {
+  private readonly slotOf(type: Type): ValueSlot {
     switch (type.kind) {
       case TypeKind.String:
       case TypeKind.Template:
@@ -69,7 +69,7 @@ partial class TypeRelation {
     }
   }
 
-  private literalSlot(literal: LiteralKind): ValueSlot {
+  private readonly literalSlot(literal: LiteralKind): ValueSlot {
     switch (literal) {
       case LiteralKind.String:
         return ValueSlot.Atom;
@@ -82,7 +82,7 @@ partial class TypeRelation {
     }
   }
 
-  private isSameUnion(own: Type, wide: Type): boolean {
+  private readonly isSameUnion(own: Type, wide: Type): boolean {
     if (own.kind != TypeKind.Union || wide.kind != TypeKind.Union) {
       return false;
     }
@@ -95,7 +95,7 @@ partial class TypeRelation {
     return own.parts.every((part) => theirs.includes(part));
   }
 
-  private sameReference(from: Type, to: Type): boolean {
+  private readonly sameReference(from: Type, to: Type): boolean {
     let own = from;
     let wide = to;
 
@@ -131,13 +131,13 @@ partial class TypeRelation {
     );
   }
 
-  private goesDeeper(own: Type, wide: Type): boolean {
+  private readonly goesDeeper(own: Type, wide: Type): boolean {
     const arrays = own.kind == TypeKind.Array && wide.kind == TypeKind.Array;
 
     return arrays || this.isOptional(wide);
   }
 
-  private isOptional(type: Type): boolean {
+  private readonly isOptional(type: Type): boolean {
     if (type.kind != TypeKind.Union) {
       return false;
     }
@@ -145,11 +145,11 @@ partial class TypeRelation {
     return type.parts.some((part) => part.kind == TypeKind.Undefined);
   }
 
-  private isReference(type: Type): boolean {
+  private readonly isReference(type: Type): boolean {
     return type.kind == TypeKind.Array || this.isObjectLike(type);
   }
 
-  private isObjectLike(type: Type): boolean {
+  private readonly isObjectLike(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.Object:
       case TypeKind.Instance:
@@ -161,7 +161,7 @@ partial class TypeRelation {
     }
   }
 
-  private objectsShare(from: Type, to: Type): boolean {
+  private readonly objectsShare(from: Type, to: Type): boolean {
     if (!this.isObjectLike(from) || !this.isObjectLike(to)) {
       return false;
     }

@@ -1,0 +1,606 @@
+import { OwnershipCheck } from "../ownership-check.tz";
+import { ExpressionCollector } from "../../../code/expression-collector/expression-collector.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  AssignExpr,
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import { TypeKind } from "../../../../program/type/types/type.types.tz";
+import {
+  CallbackMode,
+  FunctionFrame,
+  Holding,
+  Loan,
+  LoanKind,
+  Operand,
+  OperandKind,
+  Place,
+  ResultMode,
+  Variable,
+} from "../types/ownership-check.types.tz";
+import { kElementStep, kLengthName, kThisKey } from "../const/ownership-check.const.tz";
+
+partial class OwnershipCheck {
+  private take(operand: Read<Operand>, expr: Expr): void {
+    const place = operand.place;
+    if (operand.isCell == true && this.isTracked(operand)) {
+      const word = this.exprText(expr);
+
+      this.report(expr.loc, Code.OwnCellBorrow, { word });
+
+      return;
+    }
+
+    switch (operand.kind) {
+      case OperandKind.Borrowed: {
+        const word = this.exprText(expr);
+
+        this.report(expr.loc, Code.OwnStoreBorrow, { word });
+        return;
+      }
+      case OperandKind.Place:
+        if (place != undefined) {
+          this.takePlace(place, expr);
+        }
+        return;
+      default:
+        return;
+    }
+  }
+
+  private takePlace(place: Place, expr: Expr): void {
+    const variable = this.variableOf(place.root);
+    const word = this.placeText(place);
+    if (variable == undefined) {
+      return;
+    }
+
+    switch (variable.holding) {
+      case Holding.Own:
+        return this.moveOwned(place, expr.loc);
+      case Holding.Borrow:
+        this.report(expr.loc, Code.OwnStoreBorrow, { word });
+        return;
+      case Holding.Lent:
+        return this.reportLentTaken(variable, place, expr.loc);
+      case Holding.Global:
+        this.report(expr.loc, Code.OwnGiveGlobal, { word });
+        return;
+      default:
+        return;
+    }
+  }
+
+  private moveOwned(place: Place, loc: int): void {
+    if (place.path.includes(kElementStep)) {
+      const word = this.placeText(place);
+
+      this.report(loc, Code.OwnTakeElement, { word });
+
+      return;
+    }
+    if (!this.checkUsable(place, loc)) {
+      return;
+    }
+
+    this.checkWrite(place, loc, true);
+    this.markMoved(place, loc);
+  }
+
+  private readonly reportLentTaken(variable: Read<Variable>, place: Place, loc: int): void {
+    const frame = this.frame();
+    const word = this.placeText(place);
+    const isParam =
+      frame != undefined &&
+      place.path.length == 0 &&
+      variable.key != kThisKey &&
+      !frame.outer.has(variable.key);
+
+    if (isParam) {
+      this.report(loc, Code.OwnNeedsOwnParam, { word });
+
+      return;
+    }
+
+    this.report(loc, Code.OwnTakeBorrowed, { word });
+  }
+
+  private access(operand: Read<Operand>, kind: LoanKind, expr: Expr): void {
+    if (kind == LoanKind.Exclusive) {
+      this.changeOperand(operand, expr);
+    }
+  }
+
+  private readonly isTracked(operand: Read<Operand>): boolean {
+    return (
+      operand.kind == OperandKind.Place || operand.kind == OperandKind.Borrowed
+    );
+  }
+
+  private changeOperand(operand: Read<Operand>, expr: Expr): void {
+    if (operand.isCell == true) {
+      return;
+    }
+
+    const place = operand.place;
+    if (operand.kind == OperandKind.Place && place != undefined) {
+      this.changePlace(place, expr.loc);
+
+      return;
+    }
+    if (operand.kind != OperandKind.Borrowed) {
+      return;
+    }
+
+    const isShared = operand.loans.some(
+      (loan) => loan.kind == LoanKind.Shared,
+    );
+    if (isShared && operand.loans.length > 0) {
+      const word = this.exprText(expr);
+
+      this.report(expr.loc, Code.OwnReadChanged, { word });
+    }
+  }
+
+  private changePlace(place: Place, loc: int): void {
+    this.changePlaceExcept(place, loc, place.root);
+  }
+
+  private changePlaceExcept(place: Place, loc: int, except: int): void {
+    const variable = this.variableOf(place.root);
+    const frame = this.frame();
+    const word = this.placeText(place);
+    if (variable == undefined || frame == undefined) {
+      return;
+    }
+    if (variable.holding == Holding.Lent && variable.isReadOnly) {
+      this.report(loc, Code.OwnReadChanged, { word });
+
+      return;
+    }
+    if (variable.holding == Holding.Global) {
+      this.reportGlobalChange(frame, word, loc);
+
+      return;
+    }
+    if (variable.holding == Holding.Borrow && this.isSharedOnly(variable)) {
+      this.report(loc, Code.OwnReadChanged, { word });
+
+      return;
+    }
+    if (variable.holding == Holding.Lent) {
+      variable.isChanged = true;
+    }
+
+    this.checkWriteExcept(place, loc, false, except);
+  }
+
+  private readonly reportGlobalChange(
+    frame: Read<FunctionFrame>,
+    word: string,
+    loc: int,
+  ): void {
+    if (frame.fn == undefined) {
+      return;
+    }
+
+    this.report(loc, Code.OwnGlobalChanged, { word });
+  }
+
+  private readonly isSharedOnly(variable: Read<Variable>): boolean {
+    return variable.loans.every((loan) => loan.kind == LoanKind.Shared);
+  }
+
+  private changePlaceOf(target: Expr, loc: int): void {
+    if (this.isArrayLength(target) && target.kind == ExprKind.Member) {
+      return this.changePlaceOf(target.object, loc);
+    }
+    if (this.isSharedPart(target)) {
+      const word = this.exprText(target);
+
+      this.report(loc, Code.OwnInternedField, { word });
+
+      return;
+    }
+
+    const operand = this.evaluateBase(target);
+
+    this.reportReadonlyArray(target, loc);
+    this.changeOperand(operand, target);
+  }
+
+  private readonly isArrayLength(target: Expr): boolean {
+    if (target.kind != ExprKind.Member || target.name != kLengthName) {
+      return false;
+    }
+
+    const type = this.values.answers.typeOf(target.object);
+
+    return type != undefined && type.kind == TypeKind.Array;
+  }
+
+  private readonly reportReadonlyArray(target: Expr, loc: int): void {
+    if (target.kind != ExprKind.Index) {
+      return;
+    }
+
+    const type = this.values.answers.typeOf(target.object);
+    if (type == undefined || type.kind != TypeKind.Array) {
+      return;
+    }
+    if (type.readonly == true) {
+      const word = this.exprText(target.object);
+
+      this.report(loc, Code.OwnReadonlyArray, { word });
+    }
+  }
+
+  private bind(variable: Variable, operand: Read<Operand>, init: Expr): void {
+    if (operand.kind == OperandKind.Copy || this.isCopyExpr(init)) {
+      variable.holding = Holding.Copy;
+
+      return;
+    }
+    if (operand.isCell == true && this.isTracked(operand)) {
+      const word = this.exprText(init);
+
+      this.report(init.loc, Code.OwnCellBorrow, { word });
+      variable.holding = Holding.Own;
+      variable.loans = [];
+
+      return;
+    }
+
+    const place = operand.place;
+
+    switch (operand.kind) {
+      case OperandKind.Borrowed:
+        variable.holding = Holding.Borrow;
+        variable.loans = this.inferredLoans(variable, operand, init.loc);
+        return;
+      case OperandKind.Place:
+        if (place != undefined) {
+          this.bindPlace(variable, place, init);
+        }
+        return;
+      default:
+        variable.holding = Holding.Own;
+        variable.loans = [];
+        return;
+    }
+  }
+
+  private inferredLoans(variable: Read<Variable>, operand: Read<Operand>, loc: int): Loan[] {
+    if (operand.isInferred != true || !variable.isChanged) {
+      return operand.loans;
+    }
+
+    const loans: Loan[] = [];
+
+    for (const loan of operand.loans) {
+      this.changePlaceExcept(loan.place, loc, variable.key);
+      loans.push(this.loanOn(loan.place, LoanKind.Exclusive, loan.frozen));
+    }
+
+    return loans;
+  }
+
+  private bindPlace(variable: Variable, place: Place, init: Expr): void {
+    const root = this.variableOf(place.root);
+    if (root == undefined) {
+      variable.holding = Holding.Own;
+
+      return;
+    }
+    const isMove =
+      root.holding == Holding.Own && place.path.length == 0 && variable.isPattern != true;
+    if (isMove) {
+      this.moveOwned(place, init.loc);
+      variable.holding = Holding.Own;
+      variable.loans = [];
+
+      return;
+    }
+
+    const kind = this.loanKindOf(variable.isChanged);
+    const frozen = this.isFrozenExpr(init);
+
+    variable.holding = Holding.Borrow;
+    variable.loans = this.loansOfPlaceAs(place, kind, frozen);
+
+    if (kind == LoanKind.Exclusive) {
+      this.changePlaceExcept(place, init.loc, variable.key);
+    }
+  }
+
+  private readonly loansOfPlace(place: Place): Loan[] {
+    return this.loansOfPlaceAs(place, LoanKind.Shared, false);
+  }
+
+  private readonly loansOfPlaceAs(place: Place, kind: LoanKind, frozen: boolean): Loan[] {
+    const root = this.variableOf(place.root);
+    if (root == undefined || root.holding != Holding.Borrow) {
+      return [this.loanOn(place, kind, frozen)];
+    }
+
+    const loans: Loan[] = [];
+
+    for (const loan of root.loans) {
+      const path = loan.place.path.concat(place.path);
+      const inner: Place = { root: loan.place.root, path };
+      const isFrozen = loan.frozen || frozen;
+
+      loans.push(this.loanOn(inner, kind, isFrozen));
+    }
+
+    return loans;
+  }
+
+  private isFrozenExpr(expr: Expr): boolean {
+    const type = this.values.answers.typeOf(expr);
+    if (type == undefined || !this.traits.isDeepImmutable(type)) {
+      return false;
+    }
+
+    return this.isReadonlyChain(expr);
+  }
+
+  private readonly isReadonlyChain(expr: Expr): boolean {
+    switch (expr.kind) {
+      case ExprKind.Name:
+        return true;
+      case ExprKind.Member:
+        return (
+          this.isReadonlyMember(expr.object, expr.name) &&
+          this.isReadonlyChain(expr.object)
+        );
+      case ExprKind.Index:
+        return (
+          this.isReadonlyArrayExpr(expr.object) &&
+          this.isReadonlyChain(expr.object)
+        );
+      case ExprKind.Cast:
+        return this.isReadonlyChain(expr.operand);
+      case ExprKind.OptionalChain:
+        return this.isReadonlyChain(expr.chain);
+      case ExprKind.Unary:
+        return this.isReadonlyChain(expr.operand);
+      default:
+        return false;
+    }
+  }
+
+  private readonly isReadonlyMember(object: Expr, name: string): boolean {
+    const type = this.values.answers.typeOf(object);
+    if (type == undefined) {
+      return false;
+    }
+    if (type.kind == TypeKind.Object) {
+      const field = type.fields.find((one) => one.name == name);
+
+      return field != undefined && field.readonly;
+    }
+
+    const decl = this.values.classDeclOf(type);
+    if (decl == undefined) {
+      return false;
+    }
+
+    const field = decl.fields.find((one) => one.name == name);
+
+    return field != undefined && field.readonly;
+  }
+
+  private readonly isReadonlyArrayExpr(object: Expr): boolean {
+    const type = this.values.answers.typeOf(object);
+    if (type == undefined || type.kind != TypeKind.Array) {
+      return false;
+    }
+
+    return type.readonly == true;
+  }
+
+  private evaluateAssign(expr: AssignExpr): Operand {
+    if (expr.op != undefined) {
+      this.evaluate(expr.value);
+      this.changePlaceOf(expr.target, expr.loc);
+
+      return this.copyOperand(expr.loc);
+    }
+
+    const target = expr.target;
+    if (target.kind == ExprKind.Name) {
+      this.assignName(target.name, expr);
+
+      return this.copyOperand(expr.loc);
+    }
+    if (target.kind == ExprKind.Member || target.kind == ExprKind.Index) {
+      const value = this.evaluateFor(expr.value, CallbackMode.Kept);
+
+      this.liveFrom = this.lastLocIn(expr.value);
+      this.changePlaceOf(target, expr.loc);
+      this.liveFrom = -1;
+      this.take(value, expr.value);
+
+      return this.copyOperand(expr.loc);
+    }
+
+    this.evaluate(expr.value);
+
+    return this.copyOperand(expr.loc);
+  }
+
+  private readonly lastLocIn(expr: Expr): int {
+    const collector = new ExpressionCollector();
+    const exprs: Expr[] = [];
+    let last: int = expr.loc;
+
+    collector.exprs(expr, exprs, false);
+
+    for (const one of exprs) {
+      if (one.loc > last) {
+        last = one.loc;
+      }
+    }
+
+    return last;
+  }
+
+  private assignName(name: string, expr: AssignExpr): void {
+    const target = expr.target;
+    const value = this.evaluate(expr.value);
+    if (target.kind != ExprKind.Name) {
+      return;
+    }
+
+    const key = this.keyOfName(target);
+    if (key == undefined) {
+      return;
+    }
+
+    const variable = this.knownVariable(target, key);
+    if (variable == undefined || variable.holding == Holding.Copy) {
+      return;
+    }
+    if (variable.holding == Holding.Global) {
+      const frame = this.frame();
+      if (frame != undefined) {
+        this.reportGlobalChange(frame, name, expr.loc);
+      }
+
+      return;
+    }
+
+    const whole: Place = { root: key, path: [] };
+
+    if (variable.holding == Holding.Own) {
+      this.checkWrite(whole, expr.loc, true);
+    }
+
+    this.revive(key);
+    this.bind(variable, value, expr.value);
+  }
+
+  private walkReturn(value: Expr | undefined, loc: int): void {
+    const frame = this.frame();
+    if (value == undefined || frame == undefined) {
+      this.state.isDead = true;
+
+      return;
+    }
+
+    const operand = this.evaluateFor(value, CallbackMode.Kept);
+
+    if (frame.result == ResultMode.Read || frame.result == ResultMode.Mut) {
+      this.returnBorrow(frame, operand, value);
+    } else {
+      this.returnOwn(operand, value);
+    }
+
+    this.state.isDead = true;
+  }
+
+  private returnOwn(operand: Read<Operand>, value: Expr): void {
+    const place = operand.place;
+    if (operand.kind == OperandKind.Borrowed) {
+      this.reportReturnPart(value, operand.loans);
+
+      return;
+    }
+    if (operand.kind != OperandKind.Place || place == undefined) {
+      return;
+    }
+
+    const root = this.variableOf(place.root);
+    if (root == undefined) {
+      return;
+    }
+    if (root.holding == Holding.Own || root.holding == Holding.Global) {
+      this.take(operand, value);
+
+      return;
+    }
+    if (root.holding == Holding.Borrow) {
+      this.reportReturnPart(value, root.loans);
+
+      return;
+    }
+    if (place.path.length == 0) {
+      this.reportLentTaken(root, place, value.loc);
+
+      return;
+    }
+
+    const word = this.exprText(value);
+
+    this.report(value.loc, Code.OwnReturnPart, { word, other: root.name });
+  }
+
+  private readonly reportReturnPart(value: Expr, loans: Read<Loan[]>): void {
+    const word = this.exprText(value);
+    const first = loans[0];
+    let other: string = "another value";
+
+    if (first != undefined) {
+      other = this.rootName(first.place.root);
+    }
+
+    this.report(value.loc, Code.OwnReturnPart, { word, other });
+  }
+
+  private readonly returnBorrow(frame: Read<FunctionFrame>, operand: Read<Operand>, value: Expr): void {
+    if (operand.kind == OperandKind.Fresh) {
+      this.report(value.loc, Code.OwnFreshBorrow, {});
+
+      return;
+    }
+
+    const loans = this.loansOf(operand);
+
+    for (const loan of loans) {
+      const root = loan.place.root;
+      const variable = this.variableOf(root);
+      if (variable == undefined || variable.holding == Holding.Global) {
+        continue;
+      }
+      if (variable.holding == Holding.Own && !frame.outer.has(root)) {
+        this.report(value.loc, Code.OwnFreshBorrow, {});
+
+        return;
+      }
+      if (!this.isAllowedSource(frame, root, value.loc)) {
+        return;
+      }
+    }
+  }
+
+  private readonly isAllowedSource(frame: Read<FunctionFrame>, root: int, loc: int): boolean {
+    if (frame.lentParams.size > 0) {
+      if (frame.lentParams.has(root)) {
+        return true;
+      }
+
+      const other = this.rootName(root);
+
+      this.report(loc, Code.OwnReturnSource, { word: "its Lent parameters", other });
+
+      return false;
+    }
+    if (frame.variables.has(kThisKey)) {
+      if (root == kThisKey) {
+        return true;
+      }
+
+      const other = this.rootName(root);
+
+      this.report(loc, Code.OwnReturnSource, { word: "this", other });
+
+      return false;
+    }
+
+    this.report(loc, Code.OwnLentMissing, {});
+
+    return false;
+  }
+}

@@ -38,7 +38,7 @@ import {
 } from "../types/lowering.types.tz";
 
 partial class Lowering {
-  private classDeclared(frame: Frame, decl: ClassDecl): void {
+  private classDeclared(frame: Read<Frame>, decl: ClassDecl): void {
     if (!this.isPlainClass(decl)) {
       return this.notLowered(frame.module, decl.loc, "this class");
     }
@@ -54,7 +54,7 @@ partial class Lowering {
     }
   }
 
-  private isPlainClass(decl: ClassDecl): boolean {
+  private readonly isPlainClass(decl: ClassDecl): boolean {
     return (
       decl.typeParams.length == 0 &&
       decl.base == undefined &&
@@ -64,13 +64,13 @@ partial class Lowering {
     );
   }
 
-  private methodName(module: int, decl: ClassDecl, fn: FunctionDecl): string {
+  private readonly methodName(module: int, decl: ClassDecl, fn: FunctionDecl): string {
     const home = this.methodHome(module, decl, fn);
 
     return `tz.k${module}.${decl.loc}.${fn.name}.${home}.${fn.loc}`;
   }
 
-  private methodHome(module: int, decl: ClassDecl, fn: FunctionDecl): int {
+  private readonly methodHome(module: int, decl: ClassDecl, fn: FunctionDecl): int {
     for (const opened of this.program.modules) {
       const part = opened.parts.find(
         (one) => one.name == decl.name && one.methods.includes(fn),
@@ -83,7 +83,7 @@ partial class Lowering {
     return module;
   }
 
-  private methodTitle(decl: ClassDecl, fn: FunctionDecl): string {
+  private readonly methodTitle(decl: ClassDecl, fn: FunctionDecl): string {
     const name = decl.name ?? "";
     if (decl.constructors.includes(fn)) {
       return `new ${name}`;
@@ -92,7 +92,7 @@ partial class Lowering {
     return `${name}.${fn.name}`;
   }
 
-  private methodShape(
+  private readonly methodShape(
     module: int,
     decl: ClassDecl,
     fn: FunctionDecl,
@@ -134,7 +134,7 @@ partial class Lowering {
     }
 
     const name = this.methodName(classModule, decl, fn);
-    const all = [kPointerType].concat(params);
+    const all = [kPointerType].concat(params.slice());
     const made = new IrFunction(this.ir, name, result, all);
     const selfPlace: Place = {
       pointer: made.slot(kPointerType, "this"),
@@ -202,7 +202,7 @@ partial class Lowering {
     return layout;
   }
 
-  private layoutShape(type: Type): LayoutShape | undefined {
+  private readonly layoutShape(type: Type): LayoutShape | undefined {
     if (type.kind == TypeKind.Object) {
       const fields = type.fields.map((field) => this.objectField(field));
 
@@ -232,7 +232,7 @@ partial class Lowering {
     return { name: decl.name ?? "", fields, flags: 0 };
   }
 
-  private libraryShape(type: Type): LayoutShape | undefined {
+  private readonly libraryShape(type: Type): LayoutShape | undefined {
     if (type.kind != TypeKind.Instance) {
       return undefined;
     }
@@ -282,7 +282,7 @@ partial class Lowering {
     return `type ${this.kindName(failed.type)}`;
   }
 
-  private objectField(field: ObjectField): InstanceField {
+  private readonly objectField(field: ObjectField): InstanceField {
     const type = field.type;
     const empty = this.store.plain(TypeKind.Undefined);
     const isBare = this.optionalInner(type) == undefined;
@@ -295,7 +295,7 @@ partial class Lowering {
     return { name: field.name, loc: 0, type };
   }
 
-  private placedFields(fields: InstanceField[]): LayoutField[] | undefined {
+  private placedFields(fields: Read<InstanceField[]>): LayoutField[] | undefined {
     const order = fields.slice();
 
     order.sort((first, second) => this.fieldOrder(first, second));
@@ -358,7 +358,7 @@ partial class Lowering {
     return 0;
   }
 
-  private structSize(fields: LayoutField[]): int {
+  private structSize(fields: Read<LayoutField[]>): int {
     let end: int = 16;
 
     for (const field of fields) {
@@ -368,7 +368,7 @@ partial class Lowering {
     return this.aligned(end, 8);
   }
 
-  private aligned(offset: int, align: int): int {
+  private readonly aligned(offset: int, align: int): int {
     const rest = offset % align;
     if (rest == 0) {
       return offset;
@@ -380,7 +380,7 @@ partial class Lowering {
   private dropFunction(
     name: string,
     struct: string,
-    fields: LayoutField[],
+    fields: Read<LayoutField[]>,
   ): LLVMValue {
     const dropName = this.ir.uniqueName(`tz.drop.${name}.`);
     const made = new IrFunction(this.ir, dropName, kVoidType, [kPointerType]);
@@ -419,9 +419,9 @@ partial class Lowering {
   }
 
   private layoutDescriptor(
-    shape: LayoutShape,
+    shape: Read<LayoutShape>,
     drop: LLVMValue,
-    placed: LayoutField[],
+    placed: Read<LayoutField[]>,
     classId: int,
   ): LLVMValue {
     const entries: LLVMValue[] = [];
@@ -470,7 +470,7 @@ partial class Lowering {
     return this.ir.global(globalName, globalType, descriptor, true);
   }
 
-  private layoutTitle(name: string): string {
+  private readonly layoutTitle(name: string): string {
     if (name.length == 0) {
       return "object";
     }
@@ -503,7 +503,7 @@ partial class Lowering {
     return global;
   }
 
-  private resultType(shape: FunctionShape | undefined): string | undefined {
+  private resultType(shape: Read<FunctionShape | undefined>): string | undefined {
     if (shape == undefined) {
       return undefined;
     }
@@ -511,7 +511,7 @@ partial class Lowering {
     return this.irType(shape.result);
   }
 
-  private shapeTypesOf(shape: FunctionShape | undefined): string[] | undefined {
+  private shapeTypesOf(shape: Read<FunctionShape | undefined>): string[] | undefined {
     if (shape == undefined) {
       return undefined;
     }
@@ -519,7 +519,7 @@ partial class Lowering {
     return this.shapeTypes(shape);
   }
 
-  private shapeProblemOf(shape: FunctionShape | undefined): string {
+  private shapeProblemOf(shape: Read<FunctionShape | undefined>): string {
     if (shape == undefined) {
       return "unknown";
     }
@@ -554,7 +554,6 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const object = this.allocated(frame, layout);
 
     const value: IrValue = {
@@ -585,12 +584,12 @@ partial class Lowering {
     const all = [kPointerType].concat(params);
     const callee = this.ir.declare(name, kVoidType, all);
 
-    made.call(callee, [object].concat(args));
+    frame.made.call(callee, [object].concat(args));
 
     return value;
   }
 
-  private orderedDescriptor(layout: ClassLayout, names: string[]): LLVMValue {
+  private orderedDescriptor(layout: Read<ClassLayout>, names: Read<string[]>): LLVMValue {
     const fields = layout.shape.fields;
     const isSame = names.every((name, index) => fields[index]?.name == name);
     if (isSame) {
@@ -630,28 +629,27 @@ partial class Lowering {
     return descriptor;
   }
 
-  private allocated(frame: Frame, layout: ClassLayout): LLVMValue {
-    const made = frame.made;
+  private readonly allocated(frame: Read<Frame>, layout: Read<ClassLayout>): LLVMValue {
     const tz = this.store.integer(64, false);
     const size = this.ir.integer(kIntType, `${layout.size}`);
     const sizeValue: IrValue = { type: kIntType, value: size, tz };
     const object = this.runtimeValue(frame, kObjectAllocate, kPointerType, [
       sizeValue,
     ]);
-    const count = made.field(kObjectHeader, object, 0);
-    const kind = made.field(kObjectHeader, object, 1);
+    const count = frame.made.field(kObjectHeader, object, 0);
+    const kind = frame.made.field(kObjectHeader, object, 1);
 
-    made.store(this.ir.integer(kIntType, "1"), count);
-    made.store(layout.descriptor, kind);
+    frame.made.store(this.ir.integer(kIntType, "1"), count);
+    frame.made.store(layout.descriptor, kind);
     this.zeroFields(frame, object, layout);
 
     return object;
   }
 
-  private zeroFields(
-    frame: Frame,
+  private readonly zeroFields(
+    frame: Read<Frame>,
     object: LLVMValue,
-    layout: ClassLayout,
+    layout: Read<ClassLayout>,
   ): void {
     for (const field of layout.fields) {
       const address = frame.made.field(layout.struct, object, field.index);

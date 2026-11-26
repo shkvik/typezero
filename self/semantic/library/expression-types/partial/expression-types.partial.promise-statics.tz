@@ -31,7 +31,7 @@ import {
 } from "../../library-rules/const/library-rules.const.tz";
 
 partial class ExpressionTypes {
-  private promiseStaticCall(
+  private readonly promiseStaticCall(
     expr: CallExpr,
     member: MemberExpr,
     wanted: Type | undefined,
@@ -65,9 +65,9 @@ partial class ExpressionTypes {
     }
   }
 
-  private promiseNew(
+  private readonly promiseNew(
     expr: NewExpr,
-    written: Type[],
+    written: Read<Type[]>,
     wanted: Type | undefined,
     module: int,
   ): Type {
@@ -107,7 +107,7 @@ partial class ExpressionTypes {
     return this.store.promiseOf(value);
   }
 
-  private resolvedExprs(fn: FunctionDecl, resolve: string | undefined): Expr[] {
+  private readonly resolvedExprs(fn: FunctionDecl, resolve: string | undefined): Expr[] {
     const values: Expr[] = [];
 
     for (const expr of this.collector.functionExprs(fn, true)) {
@@ -120,7 +120,7 @@ partial class ExpressionTypes {
     return values;
   }
 
-  private resolvedExpr(
+  private readonly resolvedExpr(
     expr: Expr,
     resolve: string | undefined,
   ): Expr | undefined {
@@ -136,7 +136,7 @@ partial class ExpressionTypes {
     return expr.args[0]?.expr;
   }
 
-  private joinedResolved(types: Type[]): Type | undefined {
+  private readonly joinedResolved(types: Read<Type[]>): Type | undefined {
     let found: Type | undefined = undefined;
 
     for (const type of types) {
@@ -155,7 +155,7 @@ partial class ExpressionTypes {
     return found;
   }
 
-  private promisedWanted(wanted: Type | undefined): Type | undefined {
+  private readonly promisedWanted(wanted: Type | undefined): Type | undefined {
     if (wanted == undefined) {
       return undefined;
     }
@@ -168,7 +168,7 @@ partial class ExpressionTypes {
     return base.value;
   }
 
-  private staticCountCheck(
+  private readonly staticCountCheck(
     expr: CallExpr,
     member: MemberExpr,
     least: int,
@@ -191,7 +191,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private promiseResolveCall(
+  private readonly promiseResolveCall(
     expr: CallExpr,
     member: MemberExpr,
     wanted: Type | undefined,
@@ -229,7 +229,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private resolveHint(value: Expr, wanted: Type | undefined): Type | undefined {
+  private readonly resolveHint(value: Expr, wanted: Type | undefined): Type | undefined {
     if (value.kind == ExprKind.Undefined) {
       return undefined;
     }
@@ -237,7 +237,7 @@ partial class ExpressionTypes {
     return this.promisedWanted(wanted);
   }
 
-  private resolvedValue(given: Type, hint: Type | undefined): Type {
+  private readonly resolvedValue(given: Type, hint: Type | undefined): Type {
     if (hint != undefined && this.relation.converts(given, hint)) {
       return hint;
     }
@@ -245,7 +245,7 @@ partial class ExpressionTypes {
     return this.types.apparent(given);
   }
 
-  private withResolversCall(
+  private readonly withResolversCall(
     expr: CallExpr,
     member: MemberExpr,
     wanted: Type | undefined,
@@ -293,7 +293,7 @@ partial class ExpressionTypes {
     ]);
   }
 
-  private resolversValue(
+  private readonly resolversValue(
     member: MemberExpr,
     wanted: Type | undefined,
     module: int,
@@ -313,7 +313,7 @@ partial class ExpressionTypes {
     return this.awaitedValue(type);
   }
 
-  private expectedResolversValue(wanted: Type | undefined): Type | undefined {
+  private readonly expectedResolversValue(wanted: Type | undefined): Type | undefined {
     if (wanted == undefined || wanted.kind != TypeKind.Object) {
       return undefined;
     }
@@ -327,7 +327,7 @@ partial class ExpressionTypes {
     return promise.value;
   }
 
-  private awaitedValue(type: Type): Type {
+  private readonly awaitedValue(type: Type): Type {
     if (type.kind == TypeKind.Promise) {
       return type.value;
     }
@@ -335,7 +335,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private promiseCombinatorCall(
+  private readonly promiseCombinatorCall(
     expr: CallExpr,
     member: MemberExpr,
     wanted: Type | undefined,
@@ -364,7 +364,7 @@ partial class ExpressionTypes {
     return this.allResult(values, element, list, module);
   }
 
-  private combinatorWanted(
+  private readonly combinatorWanted(
     wanted: Type | undefined,
     isRace: boolean,
   ): Type | undefined {
@@ -379,7 +379,7 @@ partial class ExpressionTypes {
     return value.item;
   }
 
-  private promiseValues(
+  private readonly promiseValues(
     list: Expr,
     wanted: Type | undefined,
     word: string,
@@ -407,11 +407,11 @@ partial class ExpressionTypes {
     return { tuple: base.items.map((item) => this.awaitedValue(item)) };
   }
 
-  private isPlainPromised(type: Type): boolean {
+  private readonly isPlainPromised(type: Type): boolean {
     return type.kind == TypeKind.Promise || this.awaitedType(type) == type;
   }
 
-  private literalPromiseValues(
+  private readonly literalPromiseValues(
     list: ArrayLitExpr,
     wanted: Type | undefined,
     word: string,
@@ -451,7 +451,7 @@ partial class ExpressionTypes {
     return { tuple: types.map((type) => this.awaitedValue(type)) };
   }
 
-  private commonPromised(types: Type[]): Type | undefined {
+  private readonly commonPromised(types: Read<Type[]>): Type | undefined {
     let common: Type | undefined = types[0];
 
     for (const type of types) {
@@ -467,7 +467,7 @@ partial class ExpressionTypes {
     return common;
   }
 
-  private settledElement(
+  private readonly settledElement(
     element: Type | undefined,
     wanted: Type | undefined,
   ): Type {
@@ -482,8 +482,8 @@ partial class ExpressionTypes {
     return wanted ?? nothing;
   }
 
-  private allResult(
-    values: PromiseValues,
+  private readonly allResult(
+    values: Read<PromiseValues>,
     wanted: Type | undefined,
     list: Expr,
     module: int,
@@ -495,7 +495,7 @@ partial class ExpressionTypes {
         return this.store.plain(TypeKind.Error);
       }
 
-      return this.store.promiseOf(this.store.plainTuple(values.tuple));
+      return this.store.promiseOf(this.store.plainTuple(values.tuple.slice()));
     }
 
     const element = this.settledElement(values.element, wanted);
@@ -506,8 +506,8 @@ partial class ExpressionTypes {
     return this.store.promiseOf(this.store.arrayOf(element));
   }
 
-  private raceResult(
-    values: PromiseValues,
+  private readonly raceResult(
+    values: Read<PromiseValues>,
     wanted: Type | undefined,
     list: Expr,
     word: string,
@@ -533,7 +533,7 @@ partial class ExpressionTypes {
     return this.store.promiseOf(this.settledElement(joined, wanted));
   }
 
-  private raceJoin(joined: Type | undefined, part: Type): Type | undefined {
+  private readonly raceJoin(joined: Type | undefined, part: Type): Type | undefined {
     if (joined == undefined || joined == part) {
       return part;
     }

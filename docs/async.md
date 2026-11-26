@@ -509,8 +509,7 @@ for (const [id, note] of notes.entries()) { ... }           // снимок: н�
 
 ## 10. `AsyncLocalStorage`
 
-Решено и сделано 3 ноября. Из `node:async_hooks` есть только `AsyncLocalStorage`; примеры
-правил — `tmp/design/async-local-storage.tz`.
+Решено и сделано 3 ноября. Из `node:async_hooks` есть только `AsyncLocalStorage`.
 
 ```ts
 import { AsyncLocalStorage } from "node:async_hooks"
@@ -591,7 +590,7 @@ function log(message: string) {
 
 Решено 3 ноября, сделано 4 ноября. Пул объектов, которыми в каждый момент пользуется одна задача
 и которые дорого создавать заново: соединения с базой, соединения со своим протоколом поверх
-TCP, большие буферы, дочерние процессы. Примеры — `tmp/design/pool-plain.tz` и `tmp/design/pool.tz`.
+TCP, большие буферы, дочерние процессы.
 
 ```ts
 import { Pool } from "tz:sync"
@@ -636,7 +635,7 @@ console.log(length.value)                              // Result<int, never>: б
   `this` метода — тот же объект), передать функции программы (правило проверяется в ней),
   `await`, `Promise.all` над его вызовами. Те же правила — у параметра `alive` и `reset`.
 - **Объект пула в хранилище `AsyncLocalStorage`** (4 ноября, для неявных транзакций базы, как
-  `typeorm-transactional`; примеры — `tmp/design/pool-in-store.tz`):
+  `typeorm-transactional`):
 
   ```ts
   const transactions = new AsyncLocalStorage<{ connection: PgConnection }>()

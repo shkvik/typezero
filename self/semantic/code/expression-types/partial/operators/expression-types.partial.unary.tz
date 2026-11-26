@@ -13,7 +13,7 @@ import {
 import { kUnnamedOperand } from "../../../source-texts/const/source-texts.const.tz";
 
 partial class ExpressionTypes {
-  private unaryTyped(
+  private readonly unaryTyped(
     expr: UnaryExpr,
     wanted: Type | undefined,
     module: int,
@@ -39,7 +39,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private voidTyped(expr: UnaryExpr, module: int): Type {
+  private readonly voidTyped(expr: UnaryExpr, module: int): Type {
     const type = this.typed(expr.operand, undefined, module);
     const isPromised = type.kind == TypeKind.Promise;
     const dropped = this.operators.droppedValue(type);
@@ -52,7 +52,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Undefined);
   }
 
-  private nonNullTyped(
+  private readonly nonNullTyped(
     expr: UnaryExpr,
     wanted: Type | undefined,
     module: int,
@@ -79,7 +79,7 @@ partial class ExpressionTypes {
     return this.types.definedType(type);
   }
 
-  private signTyped(
+  private readonly signTyped(
     expr: UnaryExpr,
     wanted: Type | undefined,
     module: int,
@@ -127,7 +127,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private bitNotTyped(
+  private readonly bitNotTyped(
     expr: UnaryExpr,
     wanted: Type | undefined,
     module: int,

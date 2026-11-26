@@ -21,7 +21,7 @@ import {
 import { kArrayClass } from "../../../code/expression-types/const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private redundantTestsCheck(expr: BinaryExpr, module: int): void {
+  private readonly redundantTestsCheck(expr: BinaryExpr, module: int): void {
     const isAnd = expr.op == BinaryOp.LogAnd;
     const rhs = expr.rhs;
     const test = this.jsonTestOf(rhs, module);
@@ -37,7 +37,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private sameOperatorTerms(expr: Expr, op: BinaryOp): Expr[] {
+  private readonly sameOperatorTerms(expr: Expr, op: BinaryOp): Expr[] {
     const terms: Expr[] = [];
     let current = expr;
 
@@ -51,7 +51,7 @@ partial class ExpressionTypes {
     return terms.reverse();
   }
 
-  private jsonTestOf(rhs: Expr, module: int): JsonTest | undefined {
+  private readonly jsonTestOf(rhs: Expr, module: int): JsonTest | undefined {
     const found = this.testedSide(rhs, module);
     if (found == undefined) {
       return undefined;
@@ -65,7 +65,7 @@ partial class ExpressionTypes {
     return found;
   }
 
-  private testedSide(rhs: Expr, module: int): JsonTest | undefined {
+  private readonly testedSide(rhs: Expr, module: int): JsonTest | undefined {
     if (rhs.kind == ExprKind.Binary) {
       const isEquality = rhs.op == BinaryOp.Eq || rhs.op == BinaryOp.Ne;
       const isLeftNull = this.isNullValue(rhs.lhs, module);
@@ -89,11 +89,11 @@ partial class ExpressionTypes {
     return { tested, isNullTest: false };
   }
 
-  private isNullValue(expr: Expr, module: int): boolean {
+  private readonly isNullValue(expr: Expr, module: int): boolean {
     return expr.kind == ExprKind.Name && this.isNullName(expr, module);
   }
 
-  private withoutNot(expr: Expr): Expr {
+  private readonly withoutNot(expr: Expr): Expr {
     if (expr.kind == ExprKind.Unary && expr.op == UnaryOp.Not) {
       return expr.operand;
     }
@@ -101,7 +101,7 @@ partial class ExpressionTypes {
     return expr;
   }
 
-  private isArrayArgument(expr: Expr, module: int): Expr | undefined {
+  private readonly isArrayArgument(expr: Expr, module: int): Expr | undefined {
     if (expr.kind != ExprKind.Call) {
       return undefined;
     }
@@ -124,7 +124,7 @@ partial class ExpressionTypes {
     return expr.args[0]?.expr;
   }
 
-  private typeOfTextFor(
+  private readonly typeOfTextFor(
     term: Expr,
     tested: Expr,
     isAnd: boolean,
@@ -157,7 +157,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private typeOfName(isTest: boolean, name: string): string | undefined {
+  private readonly typeOfName(isTest: boolean, name: string): string | undefined {
     if (isTest) {
       return name;
     }
@@ -165,7 +165,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private testOperator(isAnd: boolean): BinaryOp {
+  private readonly testOperator(isAnd: boolean): BinaryOp {
     if (isAnd) {
       return BinaryOp.Eq;
     }
@@ -173,7 +173,7 @@ partial class ExpressionTypes {
     return BinaryOp.Ne;
   }
 
-  private isSameRef(first: Expr, second: Expr, module: int): boolean {
+  private readonly isSameRef(first: Expr, second: Expr, module: int): boolean {
     let left = first;
     let right = second;
 
@@ -202,7 +202,7 @@ partial class ExpressionTypes {
     );
   }
 
-  private typeOfAgreesCheck(
+  private readonly typeOfAgreesCheck(
     rhs: Expr,
     test: JsonTest,
     name: string,
@@ -220,7 +220,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private testOperatorText(isAnd: boolean): string {
+  private readonly testOperatorText(isAnd: boolean): string {
     if (isAnd) {
       return kEqualText;
     }
@@ -228,7 +228,7 @@ partial class ExpressionTypes {
     return kNotEqualText;
   }
 
-  private refText(expr: Expr): string {
+  private readonly refText(expr: Expr): string {
     const names: string[] = [];
     let link = expr;
 

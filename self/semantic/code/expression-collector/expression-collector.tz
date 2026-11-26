@@ -12,7 +12,7 @@ import {
 } from "../../../program/ast/types/ast.types.statements.tz";
 
 export class ExpressionCollector {
-  public optionalPart(expr: Expr | undefined): Expr[] {
+  public readonly optionalPart(expr: Expr | undefined): Expr[] {
     if (expr == undefined) {
       return [];
     }
@@ -20,7 +20,7 @@ export class ExpressionCollector {
     return [expr];
   }
 
-  public functionExprs(fn: FunctionDecl, isDeep: boolean): Expr[] {
+  public readonly functionExprs(fn: FunctionDecl, isDeep: boolean): Expr[] {
     const exprs: Expr[] = [];
     const values: Expr[] = [];
     const body = fn.body;
@@ -35,7 +35,7 @@ export class ExpressionCollector {
     return exprs;
   }
 
-  public statementExprs(
+  public readonly statementExprs(
     statement: Stmt,
     exprs: Expr[],
     values: Expr[],
@@ -105,9 +105,9 @@ export class ExpressionCollector {
     }
   }
 
-  private switchExprs(
+  private readonly switchExprs(
     discriminant: Expr,
-    cases: SwitchCase[],
+    cases: Read<SwitchCase[]>,
     exprs: Expr[],
     values: Expr[],
     isDeep: boolean,
@@ -123,7 +123,7 @@ export class ExpressionCollector {
     }
   }
 
-  private optionalStatement(
+  private readonly optionalStatement(
     statement: Stmt | undefined,
     exprs: Expr[],
     values: Expr[],
@@ -134,7 +134,7 @@ export class ExpressionCollector {
     }
   }
 
-  private optionalExprs(
+  private readonly optionalExprs(
     expr: Expr | undefined,
     exprs: Expr[],
     isDeep: boolean,
@@ -144,7 +144,7 @@ export class ExpressionCollector {
     }
   }
 
-  private exprs(expr: Expr, exprs: Expr[], isDeep: boolean): void {
+  public readonly exprs(expr: Expr, exprs: Expr[], isDeep: boolean): void {
     exprs.push(expr);
 
     if (expr.kind == ExprKind.Function) {
@@ -156,7 +156,7 @@ export class ExpressionCollector {
     }
   }
 
-  private innerExprs(fn: FunctionDecl, exprs: Expr[], isDeep: boolean): void {
+  private readonly innerExprs(fn: FunctionDecl, exprs: Expr[], isDeep: boolean): void {
     const body = fn.body;
     const values: Expr[] = [];
     if (!isDeep || body == undefined) {
@@ -168,7 +168,7 @@ export class ExpressionCollector {
     }
   }
 
-  private children(expr: Expr): Expr[] {
+  private readonly children(expr: Expr): Expr[] {
     switch (expr.kind) {
       case ExprKind.Member:
         return [expr.object];
@@ -207,7 +207,7 @@ export class ExpressionCollector {
     }
   }
 
-  private newChildren(expr: NewExpr): Expr[] {
+  private readonly newChildren(expr: NewExpr): Expr[] {
     const args = expr.args.map((arg) => arg.expr);
     const form = expr.form;
     if (form.kind == NewKind.Named) {

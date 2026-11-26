@@ -20,7 +20,7 @@ import {
 } from "../../../byte-number-rules/types/byte-number-rules.types.tz";
 
 partial class ExpressionTypes {
-  private refusedByteCall(
+  private readonly refusedByteCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -49,7 +49,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private byteNumberCheck(
+  private readonly byteNumberCheck(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -90,7 +90,7 @@ partial class ExpressionTypes {
     this.requireUpTo(offset, member.object, { what, less: info.size }, module);
   }
 
-  private variableNumberCheck(
+  private readonly variableNumberCheck(
     expr: CallExpr,
     member: MemberExpr,
     method: NumberMethod,
@@ -132,14 +132,14 @@ partial class ExpressionTypes {
     this.reportFound(module, variableError);
   }
 
-  private isPlacedCall(expr: CallExpr, places: NumberPlaces): boolean {
+  private readonly isPlacedCall(expr: CallExpr, places: NumberPlaces): boolean {
     const count = expr.args.length;
     const hasSpread = expr.args.some((arg) => arg.spread);
 
     return !hasSpread && count >= places.least && count <= places.most;
   }
 
-  private placedArgument(
+  private readonly placedArgument(
     expr: CallExpr,
     place: int | undefined,
   ): Expr | undefined {
@@ -150,7 +150,7 @@ partial class ExpressionTypes {
     return expr.args[place]?.expr;
   }
 
-  private isFittingValue(value: Expr, range: ProofRange, module: int): boolean {
+  private readonly isFittingValue(value: Expr, range: ProofRange, module: int): boolean {
     const given = this.peekType(value, module);
     const base = this.types.definedType(given);
     if (base.kind != TypeKind.Int) {
@@ -165,7 +165,7 @@ partial class ExpressionTypes {
     return constant != undefined && this.proofs.isInside(constant, range);
   }
 
-  private byteFitCheck(
+  private readonly byteFitCheck(
     value: Expr,
     info: ByteKindInfo,
     range: ProofRange,

@@ -1,3 +1,4 @@
+import { replace } from "tz:mem";
 import {
   Expr,
   ExprKind,
@@ -13,7 +14,7 @@ import { FunctionFrame } from "../../types/expression-types.types.tz";
 import { ExpressionTypes } from "../../expression-types.tz";
 
 partial class ExpressionTypes {
-  private walkSwitch(
+  private readonly walkSwitch(
     statement: SwitchStmt,
     frame: FunctionFrame,
     module: int,
@@ -32,7 +33,7 @@ partial class ExpressionTypes {
 
     this.forgetLooped(statement, module);
 
-    const before = this.facts;
+    const before = this.factsCopy();
     const discriminant = statement.discriminant;
     let reached: Map<string, Type> | undefined = undefined;
     let passed = new Map<string, Type>();
@@ -55,28 +56,31 @@ partial class ExpressionTypes {
         continue;
       }
 
-      this.facts = this.narrowings.mergedFacts(before, reached);
+      const entered = this.narrowings.mergedFacts(before, reached);
+
+      this.facts = entered;
       this.walkStatements(option.body, frame, module);
 
+      const left = replace(this.facts, new Map<string, Type>(before));
+
       if (this.isSwitchExit(option, option == lastCase, module)) {
-        exits.push(this.facts);
+        exits.push(left);
       }
 
-      this.facts = before;
       reached = undefined;
     }
 
     this.switchFieldsJoined(statement, exits);
   }
 
-  private caseFacts(
+  private readonly caseFacts(
     discriminant: Expr,
     test: Expr | undefined,
-    passed: Map<string, Type>,
+    passed: Read<Map<string, Type>>,
     module: int,
   ): Map<string, Type> {
     if (test == undefined) {
-      return passed;
+      return new Map<string, Type>(passed);
     }
 
     const facts = this.factsOfCase(discriminant, test, passed, true, module);
@@ -84,10 +88,10 @@ partial class ExpressionTypes {
     return this.narrowings.mergedFacts(passed, facts);
   }
 
-  private factsOfCase(
+  private readonly factsOfCase(
     discriminant: Expr,
     test: Expr,
-    passed: Map<string, Type>,
+    passed: Read<Map<string, Type>>,
     isEqual: boolean,
     module: int,
   ): Map<string, Type> {
@@ -99,9 +103,9 @@ partial class ExpressionTypes {
     return facts;
   }
 
-  private reachedFacts(
-    reached: Map<string, Type> | undefined,
-    facts: Map<string, Type>,
+  private readonly reachedFacts(
+    reached: Read<Map<string, Type> | undefined>,
+    facts: Own<Map<string, Type>>,
   ): Map<string, Type> {
     if (reached == undefined) {
       return facts;
@@ -110,7 +114,7 @@ partial class ExpressionTypes {
     return this.narrowings.joinedFacts(reached, facts);
   }
 
-  private caseTypes(statement: SwitchStmt, subject: Type, module: int): Type[] {
+  private readonly caseTypes(statement: SwitchStmt, subject: Type, module: int): Type[] {
     const tests: Type[] = [];
 
     if (subject.kind == TypeKind.Error) {
@@ -136,10 +140,10 @@ partial class ExpressionTypes {
     return tests;
   }
 
-  private casesCheck(
+  private readonly casesCheck(
     statement: SwitchStmt,
     subject: Type,
-    tests: Type[],
+    tests: Read<Type[]>,
     module: int,
   ): void {
     const key = `${module} ${statement.loc}`;
@@ -181,7 +185,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private typeOfCasesCheck(statement: SwitchStmt, module: int): void {
+  private readonly typeOfCasesCheck(statement: SwitchStmt, module: int): void {
     const subject = statement.discriminant;
     if (subject.kind != ExprKind.Unary || subject.op != UnaryOp.TypeOf) {
       return;

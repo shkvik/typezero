@@ -36,13 +36,13 @@ import {
 } from "./const/library-exports.const.tz";
 
 export class LibraryExports {
-  public isPendingCall(module: string, word: string): boolean {
+  public readonly isPendingCall(module: string, word: string): boolean {
     return kPendingCalls.some(
       (one) => one.module == module && one.name == word,
     );
   }
 
-  public missing(module: string, path: string, word: string): Finding {
+  public readonly missing(module: string, path: string, word: string): Finding {
     const kind = this.kindOf(module, word);
 
     if (module == kFsModule) {
@@ -67,7 +67,7 @@ export class LibraryExports {
     return this.none(path, word, hint);
   }
 
-  private kindOf(module: string, name: string): ExportKind | undefined {
+  private readonly kindOf(module: string, name: string): ExportKind | undefined {
     const row = kLibraryExports.find(
       (one) => one.module == module && one.name == name,
     );
@@ -75,11 +75,11 @@ export class LibraryExports {
     return row?.kind;
   }
 
-  private isFunction(module: string, name: string): boolean {
+  private readonly isFunction(module: string, name: string): boolean {
     return this.kindOf(module, name) == ExportKind.Function;
   }
 
-  private missingInFs(
+  private readonly missingInFs(
     path: string,
     word: string,
     kind: ExportKind | undefined,
@@ -106,7 +106,7 @@ export class LibraryExports {
     return this.none(path, word, "");
   }
 
-  private exampleOf(word: string): string {
+  private readonly exampleOf(word: string): string {
     if (word == kReadFileName) {
       return kReadFileExample;
     }
@@ -114,7 +114,7 @@ export class LibraryExports {
     return "";
   }
 
-  private missingInPromises(
+  private readonly missingInPromises(
     path: string,
     word: string,
     kind: ExportKind | undefined,
@@ -135,7 +135,7 @@ export class LibraryExports {
     return this.none(path, word, "");
   }
 
-  private missingInChild(
+  private readonly missingInChild(
     path: string,
     word: string,
     kind: ExportKind | undefined,
@@ -152,7 +152,7 @@ export class LibraryExports {
     }
   }
 
-  private missingInCrypto(
+  private readonly missingInCrypto(
     path: string,
     word: string,
     kind: ExportKind | undefined,
@@ -165,7 +165,7 @@ export class LibraryExports {
     }
   }
 
-  private hintOf(module: string, word: string): string {
+  private readonly hintOf(module: string, word: string): string {
     if (kReadlineModules.includes(module)) {
       return kReadlineHint;
     }
@@ -188,7 +188,7 @@ export class LibraryExports {
     }
   }
 
-  private eventsHint(word: string): string {
+  private readonly eventsHint(word: string): string {
     if (kEventsSymbols.includes(word)) {
       return kEventsSymbolHint;
     }
@@ -205,7 +205,7 @@ export class LibraryExports {
     return "";
   }
 
-  private tzFsHint(word: string): string {
+  private readonly tzFsHint(word: string): string {
     const isInNode =
       this.isFunction(kFsModule, word) ||
       this.isFunction(kPromisesModule, word);
@@ -216,11 +216,11 @@ export class LibraryExports {
     return kTzFsHint;
   }
 
-  private notYet(path: string, word: string, other: string): Finding {
+  private readonly notYet(path: string, word: string, other: string): Finding {
     return { code: Code.ExportNotYet, details: { path, word, other } };
   }
 
-  private none(path: string, word: string, other: string): Finding {
+  private readonly none(path: string, word: string, other: string): Finding {
     if (other == "") {
       return { code: Code.NoExportNamed, details: { path, word } };
     }

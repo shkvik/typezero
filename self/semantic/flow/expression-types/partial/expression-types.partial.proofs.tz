@@ -16,7 +16,7 @@ import {
 } from "../../proof-rules/types/proof-rules.types.tz";
 
 partial class ExpressionTypes {
-  private requireBetween(
+  private readonly requireBetween(
     expr: Expr,
     given: Type,
     range: ProofRange,
@@ -50,7 +50,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private canProveBetween(expr: Expr, range: ProofRange, module: int): boolean {
+  private readonly canProveBetween(expr: Expr, range: ProofRange, module: int): boolean {
     if (expr.kind == ExprKind.Conditional) {
       return (
         this.canProveBetween(expr.thenExpr, range, module) &&
@@ -70,7 +70,7 @@ partial class ExpressionTypes {
     return this.isAtMost(value, high) || this.proofs.isUpTo(known, high);
   }
 
-  private isAtLeast(value: Linear | undefined, low: decimal): boolean {
+  private readonly isAtLeast(value: Linear | undefined, low: decimal): boolean {
     if (value == undefined) {
       return false;
     }
@@ -81,7 +81,7 @@ partial class ExpressionTypes {
     return this.canProve(kZeroTerm, value.term, low - value.offset);
   }
 
-  private isAtMost(value: Linear | undefined, high: decimal): boolean {
+  private readonly isAtMost(value: Linear | undefined, high: decimal): boolean {
     if (value == undefined) {
       return false;
     }
@@ -92,7 +92,7 @@ partial class ExpressionTypes {
     return this.canProve(value.term, kZeroTerm, value.offset - high);
   }
 
-  private requireUpTo(
+  private readonly requireUpTo(
     value: Expr | undefined,
     object: Expr,
     limit: OffsetLimit,
@@ -124,7 +124,7 @@ partial class ExpressionTypes {
     return false;
   }
 
-  private shownOffset(
+  private readonly shownOffset(
     value: Expr | undefined,
     module: int,
   ): string | undefined {
@@ -135,7 +135,7 @@ partial class ExpressionTypes {
     return this.sources.valueText(value, module);
   }
 
-  private canProveUpTo(
+  private readonly canProveUpTo(
     value: Expr | undefined,
     object: Expr,
     less: decimal,
@@ -171,13 +171,13 @@ partial class ExpressionTypes {
     return this.isLinearUpTo(top, length, less);
   }
 
-  private isLinearUpTo(value: Linear, length: Linear, less: decimal): boolean {
+  private readonly isLinearUpTo(value: Linear, length: Linear, less: decimal): boolean {
     const room = value.offset + less - length.offset;
 
     return this.canProve(value.term, length.term, room);
   }
 
-  private measuredLength(object: Expr, module: int): Linear | undefined {
+  private readonly measuredLength(object: Expr, module: int): Linear | undefined {
     if (object.kind == ExprKind.Member && object.name == kBufferName) {
       return this.bufferLength(object.object, module);
     }
@@ -201,7 +201,7 @@ partial class ExpressionTypes {
     return { term, offset: 0 };
   }
 
-  private bufferLength(view: Expr, module: int): Linear | undefined {
+  private readonly bufferLength(view: Expr, module: int): Linear | undefined {
     const type = this.peekType(view, module);
     const size = this.byteSources.elementSize(type);
     const length = this.measuredLength(view, module);
@@ -220,7 +220,7 @@ partial class ExpressionTypes {
     return { term: kZeroTerm, offset: exact.offset * size };
   }
 
-  private settledLinear(value: Linear): Linear {
+  private readonly settledLinear(value: Linear): Linear {
     if (value.term == kZeroTerm) {
       return value;
     }

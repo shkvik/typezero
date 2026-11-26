@@ -55,37 +55,36 @@ partial class Lowering {
   }
 
   private elementPlaced(
-    frame: Frame,
+    frame: Read<Frame>,
     array: LLVMValue,
     position: LLVMValue,
     value: IrValue,
     item: Type,
   ): void {
-    const made = frame.made;
     const element = value.type;
     const length = this.arrayLength(frame, array);
-    const isInside = made.integerCompare(
+    const isInside = frame.made.integerCompare(
       IrIntPredicate.UnsignedLess,
       position,
       length,
     );
-    const replace = made.block("element.replace");
-    const append = made.block("element.append");
-    const end = made.block("element.end");
+    const replace = frame.made.block("element.replace");
+    const append = frame.made.block("element.append");
+    const end = frame.made.block("element.end");
 
-    made.conditionalBranch(isInside, replace, append);
-    made.open(replace);
+    frame.made.conditionalBranch(isInside, replace, append);
+    frame.made.open(replace);
 
     const data = this.arrayData(frame, array);
-    const pointer = made.element(element, data, position);
+    const pointer = frame.made.element(element, data, position);
     const place: Place = { pointer, type: element, tz: item, owner: frame.id };
 
     this.stored(frame, place, value);
-    made.branch(end);
-    made.open(append);
+    frame.made.branch(end);
+    frame.made.open(append);
     this.pushed(frame, array, value, item);
-    made.branch(end);
-    made.open(end);
+    frame.made.branch(end);
+    frame.made.open(end);
   }
 
   private byteAssigned(
@@ -106,26 +105,25 @@ partial class Lowering {
       return undefined;
     }
 
-    const made = frame.made;
     const position = this.toLong(frame, index).value;
     const length = this.bytesLength(frame, bytes.value);
-    const isInside = made.integerCompare(
+    const isInside = frame.made.integerCompare(
       IrIntPredicate.UnsignedLess,
       position,
       length,
     );
-    const write = made.block("byte.write");
-    const end = made.block("byte.end");
+    const write = frame.made.block("byte.write");
+    const end = frame.made.block("byte.end");
 
-    made.conditionalBranch(isInside, write, end);
-    made.open(write);
+    frame.made.conditionalBranch(isInside, write, end);
+    frame.made.open(write);
 
     const data = this.bytesData(frame, bytes.value);
-    const address = made.element(kByteType, data, position);
+    const address = frame.made.element(kByteType, data, position);
 
-    made.store(value.value, address);
-    made.branch(end);
-    made.open(end);
+    frame.made.store(value.value, address);
+    frame.made.branch(end);
+    frame.made.open(end);
     this.dropping(frame, bytes);
 
     return value;

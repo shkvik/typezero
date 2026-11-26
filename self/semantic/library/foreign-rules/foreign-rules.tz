@@ -22,11 +22,11 @@ export class ForeignRules {
   private readonly byteSources: ByteSourceRules;
 
   public constructor(
-    program: Program,
+    program: Own<Program>,
     text: TypeText,
-    types: TypeQuestions,
-    modules: ModuleQuestions,
-    byteSources: ByteSourceRules,
+    types: Own<TypeQuestions>,
+    modules: Own<ModuleQuestions>,
+    byteSources: Own<ByteSourceRules>,
   ) {
     this.program = program;
     this.text = text;
@@ -35,19 +35,19 @@ export class ForeignRules {
     this.byteSources = byteSources;
   }
 
-  public plainError(loc: int): SourceError {
+  public readonly plainError(loc: int): SourceError {
     return { code: Code.ForeignPlain, loc, details: kNoDetails };
   }
 
-  public optionalError(loc: int): SourceError {
+  public readonly optionalError(loc: int): SourceError {
     return { code: Code.ForeignOptional, loc, details: kNoDetails };
   }
 
-  public noReturnError(loc: int): SourceError {
+  public readonly noReturnError(loc: int): SourceError {
     return { code: Code.ForeignNoReturn, loc, details: kNoDetails };
   }
 
-  public takesError(loc: int, type: Type): SourceError | undefined {
+  public readonly takesError(loc: int, type: Type): SourceError | undefined {
     if (type.kind == TypeKind.Error || this.isArgument(type)) {
       return undefined;
     }
@@ -57,7 +57,7 @@ export class ForeignRules {
     return { code: Code.ForeignTakes, loc, details: { word } };
   }
 
-  public givesError(loc: int, type: Type): SourceError | undefined {
+  public readonly givesError(loc: int, type: Type): SourceError | undefined {
     const isPassing =
       type.kind == TypeKind.Error ||
       type.kind == TypeKind.Void ||
@@ -71,11 +71,11 @@ export class ForeignRules {
     return { code: Code.ForeignGives, loc, details: { word } };
   }
 
-  public handleNewError(loc: int, name: string): SourceError {
+  public readonly handleNewError(loc: int, name: string): SourceError {
     return { code: Code.ForeignHandleNew, loc, details: { word: name } };
   }
 
-  private isArgument(type: Type): boolean {
+  private readonly isArgument(type: Type): boolean {
     return (
       this.isResult(type) ||
       this.isArray(type) ||
@@ -84,7 +84,7 @@ export class ForeignRules {
     );
   }
 
-  private isResult(type: Type): boolean {
+  private readonly isResult(type: Type): boolean {
     return (
       this.isNumber(type) ||
       type.kind == TypeKind.Boolean ||
@@ -92,17 +92,17 @@ export class ForeignRules {
     );
   }
 
-  private isNumber(type: Type): boolean {
+  private readonly isNumber(type: Type): boolean {
     return type.kind == TypeKind.Int || type.kind == TypeKind.Double;
   }
 
-  private isPointer(type: Type): boolean {
+  private readonly isPointer(type: Type): boolean {
     const pointed = this.types.definedType(type);
 
     return this.isHandle(pointed) || this.isCString(pointed);
   }
 
-  private isArray(type: Type): boolean {
+  private readonly isArray(type: Type): boolean {
     if (type.kind != TypeKind.Array) {
       return false;
     }
@@ -112,13 +112,13 @@ export class ForeignRules {
     return this.isNumber(item) || this.isHandle(item);
   }
 
-  private isBytes(type: Type): boolean {
+  private readonly isBytes(type: Type): boolean {
     const name = this.byteSources.typedName(type);
 
     return this.byteSources.isByteView(type) && name != kDataViewName;
   }
 
-  private isOut(type: Type): boolean {
+  private readonly isOut(type: Type): boolean {
     const isOut =
       type.kind == TypeKind.Instance &&
       type.name == kOutName &&
@@ -135,7 +135,7 @@ export class ForeignRules {
     );
   }
 
-  private isCString(type: Type): boolean {
+  private readonly isCString(type: Type): boolean {
     return (
       type.kind == TypeKind.Instance &&
       type.name == kCStringName &&
@@ -143,7 +143,7 @@ export class ForeignRules {
     );
   }
 
-  private isHandle(type: Type): boolean {
+  private readonly isHandle(type: Type): boolean {
     if (type.kind != TypeKind.Instance) {
       return false;
     }

@@ -73,10 +73,14 @@ partial class FileParser {
       return declaration;
     }
 
-    declaration.bodySource = this.declaredBodySource();
-    declaration.body = { kind: StmtKind.Block, loc: declaration.loc, body: [] };
+    const bodySource = this.declaredBodySource();
+    const body: BlockStmt = {
+      kind: StmtKind.Block,
+      loc: declaration.loc,
+      body: [],
+    };
 
-    return declaration;
+    return this.withBody(declaration, body, bodySource);
   }
 
   private functionDecl(expression: boolean, isAsync: boolean): FunctionDecl {
@@ -141,7 +145,7 @@ partial class FileParser {
 
   private functionBody(
     expression: boolean,
-    patterns: ParamPattern[],
+    patterns: Read<ParamPattern[]>,
   ): BlockStmt | undefined {
     if (!this.cursor.is(TokenKind.LBrace)) {
       return this.missingBody(expression);
@@ -149,9 +153,7 @@ partial class FileParser {
 
     const body = this.block();
 
-    this.addPrologue(body, patterns);
-
-    return body;
+    return this.withPrologue(body, patterns);
   }
 
   private missingBody(expression: boolean): BlockStmt | undefined {
@@ -205,7 +207,7 @@ partial class FileParser {
     return params;
   }
 
-  private brokenParams(params: Param[], opened: boolean): Param[] {
+  private brokenParams(params: Own<Param[]>, opened: boolean): Param[] {
     if (opened) {
       this.cursor.skipToClosingParen();
     }
@@ -305,7 +307,7 @@ partial class FileParser {
     return this.expression();
   }
 
-  private paramForm(
+  private readonly paramForm(
     rest: boolean,
     optional: boolean,
     defaultValue: Expr | undefined,
@@ -324,7 +326,7 @@ partial class FileParser {
     return { kind: ParamKind.Required };
   }
 
-  private paramModifierAhead(): boolean {
+  private readonly paramModifierAhead(): boolean {
     const token = this.cursor.peek();
     const next = this.cursor.lookahead();
     const named =
@@ -334,8 +336,10 @@ partial class FileParser {
   }
 
   private paramModifiers(constructor: boolean): ParamProperty | undefined {
-    let property: ParamProperty | undefined = undefined;
     const seen: TokenKind[] = [];
+    let isProperty: boolean = false;
+    let isReadonly: boolean = false;
+    let access: Access = Access.Public;
 
     while (this.paramModifierAhead()) {
       const word = this.cursor.next();
@@ -347,28 +351,38 @@ partial class FileParser {
         });
       }
 
-      const found = property ?? { readonly: false, access: Access.Public };
-
-      property = found;
+      isProperty = true;
       if (word.kind == TokenKind.Readonly) {
-        found.readonly = true;
+        isReadonly = true;
       }
 
-      const access = this.accessOf(word.kind);
-      if (access != undefined) {
-        found.access = access;
+      const found = this.accessOf(word.kind);
+      if (found != undefined) {
+        access = found;
       }
     }
 
-    return property;
+    return this.paramProperty(isProperty, isReadonly, access);
   }
 
-  private addPrologue(
+  private readonly paramProperty(
+    isProperty: boolean,
+    isReadonly: boolean,
+    access: Access,
+  ): ParamProperty | undefined {
+    if (!isProperty) {
+      return undefined;
+    }
+
+    return { readonly: isReadonly, access };
+  }
+
+  private withPrologue(
     body: BlockStmt | undefined,
-    patterns: ParamPattern[],
-  ): void {
+    patterns: Read<ParamPattern[]>,
+  ): BlockStmt | undefined {
     if (patterns.length == 0 || body == undefined) {
-      return;
+      return body;
     }
 
     const decls: VarDeclarator[] = [];
@@ -387,10 +401,12 @@ partial class FileParser {
       },
     ];
 
-    body.body = prologue.concat(body.body);
+    const statements = prologue.concat(body.body);
+
+    return { kind: StmtKind.Block, loc: body.loc, body: statements, end: body.end };
   }
 
-  private asyncFunctionAhead(): boolean {
+  private readonly asyncFunctionAhead(): boolean {
     const next = this.cursor.lookahead();
 
     return (
@@ -501,13 +517,11 @@ partial class FileParser {
     };
   }
 
-  private methodBody(patterns: ParamPattern[]): BlockStmt | undefined {
+  private methodBody(patterns: Read<ParamPattern[]>): BlockStmt | undefined {
     if (this.cursor.is(TokenKind.LBrace)) {
       const body = this.block();
 
-      this.addPrologue(body, patterns);
-
-      return body;
+      return this.withPrologue(body, patterns);
     }
     if (this.cursor.accept(TokenKind.Semi)) {
       return undefined;
@@ -525,7 +539,7 @@ partial class FileParser {
     return undefined;
   }
 
-  private isParamModifier(kind: TokenKind): boolean {
+  private readonly isParamModifier(kind: TokenKind): boolean {
     switch (kind) {
       case TokenKind.Public:
       case TokenKind.Private:
@@ -562,7 +576,7 @@ partial class FileParser {
     return this.type();
   }
 
-  private functionKindOf(generator: boolean): FunctionKind {
+  private readonly functionKindOf(generator: boolean): FunctionKind {
     if (generator) {
       return FunctionKind.Generator;
     }
@@ -570,7 +584,7 @@ partial class FileParser {
     return FunctionKind.Plain;
   }
 
-  private functionPlace(expression: boolean): FunctionPlace {
+  private readonly functionPlace(expression: boolean): FunctionPlace {
     if (expression) {
       return FunctionPlace.Expression;
     }
@@ -578,7 +592,7 @@ partial class FileParser {
     return FunctionPlace.Declared;
   }
 
-  private ownNameOf(expression: boolean, name: string): string {
+  private readonly ownNameOf(expression: boolean, name: string): string {
     if (expression) {
       return name;
     }
@@ -586,7 +600,7 @@ partial class FileParser {
     return "";
   }
 
-  private declaredBodySource(): BodySource {
+  private readonly declaredBodySource(): BodySource {
     if (this.library) {
       return BodySource.External;
     }

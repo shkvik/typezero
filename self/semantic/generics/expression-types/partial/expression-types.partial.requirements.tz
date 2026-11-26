@@ -25,7 +25,7 @@ import { Type, TypeKind } from "../../../../program/type/types/type.types.tz";
 import { kToStringName } from "../../../code/expression-types/const/expression-types.const.tz";
 
 partial class ExpressionTypes {
-  private requireOf(type: Type, kind: RequirementKind, word: string): void {
+  private readonly requireOf(type: Type, kind: RequirementKind, word: string): void {
     if (type.kind != TypeKind.TypeParameter) {
       return;
     }
@@ -33,7 +33,7 @@ partial class ExpressionTypes {
     this.addRequirement(type.id, { kind, word, other: 0 });
   }
 
-  private requireConstruct(type: Type, count: int): void {
+  private readonly requireConstruct(type: Type, count: int): void {
     if (type.kind != TypeKind.TypeParameter) {
       return;
     }
@@ -43,7 +43,7 @@ partial class ExpressionTypes {
     this.addRequirement(type.id, { kind, word: "", other: count });
   }
 
-  private captureRequirements(fn: FunctionDecl, module: int): void {
+  private readonly captureRequirements(fn: FunctionDecl, module: int): void {
     const uses = this.record(module)?.uses;
     if (fn.typeParams.length == 0 || uses == undefined) {
       return;
@@ -64,7 +64,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private captureKind(capture: CapturePlace): RequirementKind {
+  private readonly captureKind(capture: CapturePlace): RequirementKind {
     if (capture == CapturePlace.StaticInit) {
       return RequirementKind.StaticCapture;
     }
@@ -72,14 +72,13 @@ partial class ExpressionTypes {
     return RequirementKind.LaterCapture;
   }
 
-  private addRequirement(id: int, requirement: Requirement): void {
-    const list = this.requirements.get(id) ?? [];
+  private readonly addRequirement(id: int, requirement: Requirement): void {
+    const list = this.requirements.getOrInsert(id, []);
 
     list.push(requirement);
-    this.requirements.set(id, list);
   }
 
-  private requireFollowing(draft: GenericDraft, module: int): void {
+  private readonly requireFollowing(draft: Read<GenericDraft>, module: int): void {
     const target = draft.target;
     const bound = this.generics.boundById(draft);
 
@@ -108,14 +107,13 @@ partial class ExpressionTypes {
     this.pendingCalls.push(call);
 
     if (owner != "") {
-      const owned = this.ownedCalls.get(owner) ?? [];
+      const owned = this.ownedCalls.getOrInsert(owner, []);
 
       owned.push(call);
-      this.ownedCalls.set(owner, owned);
     }
   }
 
-  private ownerKey(module: int): string {
+  private readonly ownerKey(module: int): string {
     for (let index = this.openFunctions.length - 1; index >= 0; index--) {
       const fn = this.openFunctions[index];
       if (fn != undefined && fn.typeParams.length > 0) {
@@ -128,11 +126,11 @@ partial class ExpressionTypes {
     return "";
   }
 
-  private paramsKey(params: Type[]): string {
+  private readonly paramsKey(params: Read<Type[]>): string {
     return params.map((param) => `${param.id}`).join(" ");
   }
 
-  private pendingCallsCheck(module: int): void {
+  private readonly pendingCallsCheck(module: int): void {
     const mine = this.pendingCalls.filter((call) => call.module == module);
     const rest = this.pendingCalls.filter((call) => call.module != module);
 
@@ -147,7 +145,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private pendingCallCheck(call: PendingCall): void {
+  private readonly pendingCallCheck(call: Read<PendingCall>): void {
     for (const param of call.params) {
       if (param.kind != TypeKind.TypeParameter) {
         continue;
@@ -179,7 +177,7 @@ partial class ExpressionTypes {
     this.chainCheck(call);
   }
 
-  private chainCheck(call: PendingCall): void {
+  private readonly chainCheck(call: Read<PendingCall>): void {
     if (call.owner != "") {
       return;
     }
@@ -198,10 +196,10 @@ partial class ExpressionTypes {
     });
   }
 
-  private chainFinding(
+  private readonly chainFinding(
     key: string,
-    call: PendingCall,
-    bound: Map<int, Type>,
+    call: Read<PendingCall>,
+    bound: Read<Map<int, Type>>,
     path: string[],
     seen: Set<string>,
   ): Finding | undefined {
@@ -231,7 +229,7 @@ partial class ExpressionTypes {
     return found;
   }
 
-  private boundTypes(params: Type[], bound: Map<int, Type>): Type[] {
+  private readonly boundTypes(params: Read<Type[]>, bound: Read<Map<int, Type>>): Type[] {
     const types: Type[] = [];
 
     for (const param of params) {
@@ -244,9 +242,9 @@ partial class ExpressionTypes {
     return types;
   }
 
-  private ownedFinding(
+  private readonly ownedFinding(
     key: string,
-    bound: Map<int, Type>,
+    bound: Read<Map<int, Type>>,
     path: string[],
     seen: Set<string>,
   ): Finding | undefined {
@@ -271,7 +269,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private callBindings(call: PendingCall): string {
+  private readonly callBindings(call: Read<PendingCall>): string {
     const names: string[] = [];
     const types: Type[] = [];
 
@@ -290,7 +288,7 @@ partial class ExpressionTypes {
     return this.bindingsText(names, types);
   }
 
-  private bindingsText(names: string[], types: Type[]): string {
+  private readonly bindingsText(names: Read<string[]>, types: Read<Type[]>): string {
     const parts: string[] = [];
 
     for (let index = 0; index < names.length; index++) {
@@ -304,7 +302,7 @@ partial class ExpressionTypes {
     return parts.join(", ");
   }
 
-  private parameterFinding(
+  private readonly parameterFinding(
     id: int,
     type: Type,
     seen: Set<int>,
@@ -325,7 +323,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private requirementFinding(
+  private readonly requirementFinding(
     one: Requirement,
     type: Type,
     seen: Set<int>,
@@ -356,7 +354,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private textFinding(type: Type): Finding | undefined {
+  private readonly textFinding(type: Type): Finding | undefined {
     const base = this.types.definedType(type);
     const isText = type.kind == TypeKind.String || type.kind == TypeKind.Error;
     if (base.kind == TypeKind.Instance) {
@@ -369,7 +367,7 @@ partial class ExpressionTypes {
     return this.concatenations.textAnswer(type, base);
   }
 
-  private instanceTextFinding(base: Type): Finding | undefined {
+  private readonly instanceTextFinding(base: Type): Finding | undefined {
     if (
       base.kind != TypeKind.Instance ||
       this.modules.isLibraryModule(base.module)
@@ -390,7 +388,7 @@ partial class ExpressionTypes {
     return { code: Code.ObjectToText, details: kNoDetails };
   }
 
-  private requireJoin(expr: BinaryExpr, pair: OperandPair): void {
+  private readonly requireJoin(expr: BinaryExpr, pair: OperandPair): void {
     const left = this.types.definedType(pair.left);
     const right = this.types.definedType(pair.right);
     const hasText =
@@ -403,7 +401,7 @@ partial class ExpressionTypes {
     this.requireOf(right, RequirementKind.Text, "");
   }
 
-  private comparisonFinding(type: Type, other: string): Finding | undefined {
+  private readonly comparisonFinding(type: Type, other: string): Finding | undefined {
     const base = this.types.definedType(type);
     if (base.kind == TypeKind.Result) {
       return { code: Code.ResultsCompared, details: { other } };
@@ -428,7 +426,7 @@ partial class ExpressionTypes {
     };
   }
 
-  private sortFinding(type: Type): Finding | undefined {
+  private readonly sortFinding(type: Type): Finding | undefined {
     const code = this.sortProblem(type);
     if (code == undefined) {
       return undefined;
@@ -440,7 +438,7 @@ partial class ExpressionTypes {
     return { code, details: { word, other } };
   }
 
-  private constructFinding(type: Type, count: int): Finding | undefined {
+  private readonly constructFinding(type: Type, count: int): Finding | undefined {
     const base = this.types.definedType(type);
     if (base.kind != TypeKind.Instance) {
       return undefined;
@@ -473,7 +471,7 @@ partial class ExpressionTypes {
     return this.countFinding(target, count);
   }
 
-  private countFinding(target: CallTarget, count: int): Finding | undefined {
+  private readonly countFinding(target: Read<CallTarget>, count: int): Finding | undefined {
     const params = target.params;
     const least = this.calls.leastArguments(target);
     const isTooMany = !target.rest && count > params.length;
@@ -490,7 +488,7 @@ partial class ExpressionTypes {
     return { code: Code.ArgumentCount, details: { word, other: `${count}` } };
   }
 
-  private unusedFinding(type: Type): Finding | undefined {
+  private readonly unusedFinding(type: Type): Finding | undefined {
     const base = this.types.definedType(type);
     if (base.kind != TypeKind.Result) {
       return undefined;

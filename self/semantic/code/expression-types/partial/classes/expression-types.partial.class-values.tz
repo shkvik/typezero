@@ -30,7 +30,7 @@ import {
 } from "../../types/expression-types.types.tz";
 
 partial class ExpressionTypes {
-  private genericClassValueCheck(
+  private readonly genericClassValueCheck(
     expr: NameExpr,
     target: ValueTarget,
     wanted: Type | undefined,
@@ -58,7 +58,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private genericClassExample(word: string, home: int): string {
+  private readonly genericClassExample(word: string, home: int): string {
     if (this.modules.isLibraryModule(home)) {
       return `${kBusExample}${word}${kExampleEnd}`;
     }
@@ -66,7 +66,7 @@ partial class ExpressionTypes {
     return `${kIntExample}${word} extends ${word}<int>${kExampleEnd}`;
   }
 
-  private classValue(target: ValueTarget): Type {
+  private readonly classValue(target: ValueTarget): Type {
     const error = this.store.plain(TypeKind.Error);
     if (this.modules.isLibraryModule(target.module)) {
       return error;
@@ -85,7 +85,7 @@ partial class ExpressionTypes {
     return this.store.classOf(instance, true);
   }
 
-  private valueNew(expr: NewExpr, callee: Type, loc: int, module: int): Type {
+  private readonly valueNew(expr: NewExpr, callee: Type, loc: int, module: int): Type {
     const error = this.store.plain(TypeKind.Error);
 
     switch (callee.kind) {
@@ -103,7 +103,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private classValueNew(expr: NewExpr, callee: ClassType, module: int): Type {
+  private readonly classValueNew(expr: NewExpr, callee: ClassType, module: int): Type {
     const instance = callee.instance;
     const isSpread = expr.args.some((arg) => arg.spread);
     if (!isSpread) {
@@ -124,7 +124,7 @@ partial class ExpressionTypes {
     return this.constructed(expr, instance, decl, module);
   }
 
-  private namedValueNew(
+  private readonly namedValueNew(
     expr: NewExpr,
     target: ValueTarget,
     module: int,
@@ -140,7 +140,7 @@ partial class ExpressionTypes {
     return this.valueNew(expr, type, expr.loc, module);
   }
 
-  private targetValue(target: ValueTarget): Type {
+  private readonly targetValue(target: ValueTarget): Type {
     const fact = this.factOf(target);
     if (fact != undefined) {
       return fact;
@@ -154,7 +154,7 @@ partial class ExpressionTypes {
     return door?.type ?? this.store.plain(TypeKind.Error);
   }
 
-  private classValueMember(
+  private readonly classValueMember(
     expr: MemberExpr,
     object: ClassType,
     module: int,
@@ -166,7 +166,7 @@ partial class ExpressionTypes {
     return checked.value;
   }
 
-  private classValueCall(
+  private readonly classValueCall(
     expr: CallExpr,
     member: MemberExpr,
     object: ClassType,
@@ -183,7 +183,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private valueOwner(target: ValueTarget): StaticOwner | undefined {
+  private readonly valueOwner(target: ValueTarget): StaticOwner | undefined {
     const isValue =
       target.kind == SymbolKind.Variable || target.kind == SymbolKind.Parameter;
     if (!isValue) {
@@ -208,7 +208,7 @@ partial class ExpressionTypes {
     return { decl, module: instance.module };
   }
 
-  private classNameCode(expr: Expr, code: Code, base: Type, module: int): Code {
+  private readonly classNameCode(expr: Expr, code: Code, base: Type, module: int): Code {
     if (base.kind != TypeKind.Class || expr.kind != ExprKind.Name) {
       return code;
     }
@@ -227,7 +227,7 @@ partial class ExpressionTypes {
     return code;
   }
 
-  private valueClassOf(expr: Expr, module: int): ClassType | undefined {
+  private readonly valueClassOf(expr: Expr, module: int): ClassType | undefined {
     if (expr.kind != ExprKind.Name) {
       return undefined;
     }
@@ -248,7 +248,7 @@ partial class ExpressionTypes {
     return type;
   }
 
-  private classExprTyped(expr: ClassExpr, module: int): Type {
+  private readonly classExprTyped(expr: ClassExpr, module: int): Type {
     const error = this.store.plain(TypeKind.Error);
     const decl = expr.decl;
     const base = decl.baseExpr;
@@ -277,7 +277,7 @@ partial class ExpressionTypes {
     return this.store.classOf(instance, true);
   }
 
-  private classExprName(expr: ClassExpr, module: int): string | undefined {
+  private readonly classExprName(expr: ClassExpr, module: int): string | undefined {
     if (expr.decl.name != undefined) {
       return undefined;
     }
@@ -296,7 +296,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private baseValue(base: Expr | undefined, module: int): Type | undefined {
+  private readonly baseValue(base: Expr | undefined, module: int): Type | undefined {
     if (base == undefined) {
       return this.store.plain(TypeKind.Void);
     }
@@ -323,7 +323,7 @@ partial class ExpressionTypes {
     return type.instance;
   }
 
-  private constructorArgsCheck(fn: FunctionDecl, module: int): void {
+  private readonly constructorArgsCheck(fn: FunctionDecl, module: int): void {
     const owner = this.ownerClasses[this.ownerClasses.length - 1]?.decl;
     const isDerived =
       owner != undefined &&

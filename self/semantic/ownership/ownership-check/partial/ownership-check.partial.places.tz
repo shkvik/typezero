@@ -1,0 +1,284 @@
+import { OwnershipCheck } from "../ownership-check.tz";
+import { Code } from "../../../../diagnostic/code.tz";
+import {
+  Expr,
+  ExprKind,
+} from "../../../../program/ast/types/ast.types.expressions.tz";
+import {
+  FlowState,
+  Holding,
+  Loan,
+  LoanKind,
+  Moved,
+  Place,
+  Variable,
+} from "../types/ownership-check.types.tz";
+import { kElementStep, kThisKey } from "../const/ownership-check.const.tz";
+
+partial class OwnershipCheck {
+  private readonly extended(place: Read<Place>, step: string): Place {
+    const path = place.path.concat([step]);
+
+    return { root: place.root, path };
+  }
+
+  private readonly isPrefix(shorter: Place, longer: Place): boolean {
+    if (shorter.root != longer.root) {
+      return false;
+    }
+    if (shorter.path.length > longer.path.length) {
+      return false;
+    }
+
+    for (let index: int = 0; index < shorter.path.length; index++) {
+      if (!this.isSameStep(shorter.path[index], longer.path[index])) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private readonly isSameStep(
+    first: string | undefined,
+    second: string | undefined,
+  ): boolean {
+    return first == second;
+  }
+
+  private readonly overlaps(first: Place, second: Place): boolean {
+    return this.isPrefix(first, second) || this.isPrefix(second, first);
+  }
+
+  private readonly placeText(place: Place): string {
+    const root = this.rootName(place.root);
+    let text: string = root;
+
+    for (const step of place.path) {
+      text = this.stepText(text, step);
+    }
+
+    return text;
+  }
+
+  private readonly stepText(text: string, step: string): string {
+    if (step == kElementStep) {
+      return `${text}[...]`;
+    }
+
+    return `${text}.${step}`;
+  }
+
+  private readonly rootName(root: int): string {
+    if (root == kThisKey) {
+      return "this";
+    }
+
+    const variable = this.variableOf(root);
+    if (variable == undefined) {
+      return "the value";
+    }
+
+    return variable.name;
+  }
+
+  private readonly exprText(expr: Expr): string {
+    switch (expr.kind) {
+      case ExprKind.Name:
+        return expr.name;
+      case ExprKind.Member: {
+        const object = this.exprText(expr.object);
+
+        return `${object}.${expr.name}`;
+      }
+      case ExprKind.Index: {
+        const object = this.exprText(expr.object);
+
+        return `${object}[...]`;
+      }
+      case ExprKind.Cast:
+        return this.exprText(expr.operand);
+      case ExprKind.OptionalChain:
+        return this.exprText(expr.chain);
+      case ExprKind.Call: {
+        const callee = this.exprText(expr.callee);
+
+        return `${callee}(...)`;
+      }
+      default:
+        return "the value";
+    }
+  }
+
+  private readonly isLive(variable: Read<Variable>, loc: int): boolean {
+    const at = this.liveFrom > loc ? this.liveFrom : loc;
+
+    return variable.declared < loc && at < variable.lastUse;
+  }
+
+  private checkWrite(place: Place, loc: int, isMove: boolean): void {
+    this.checkWriteExcept(place, loc, isMove, place.root);
+  }
+
+  private checkWriteExcept(
+    place: Read<Place>,
+    loc: int,
+    isMove: boolean,
+    except: int,
+  ): void {
+    for (const target of this.underlying(place)) {
+      const isReported = this.checkWriteOn(target, loc, except, isMove);
+      if (isReported) {
+        return;
+      }
+    }
+  }
+
+  private checkWriteOn(
+    place: Place,
+    loc: int,
+    except: int,
+    isMove: boolean,
+  ): boolean {
+    const frame = this.frame();
+    if (frame == undefined) {
+      return false;
+    }
+
+    for (const variable of frame.variables.values()) {
+      if (variable.key == except || !this.isLive(variable, loc)) {
+        continue;
+      }
+
+      const loan = this.conflictingLoan(variable, place, isMove);
+      if (loan != undefined) {
+        this.reportInUse(place, variable, loc);
+
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private readonly conflictingLoan(
+    variable: Read<Variable>,
+    place: Place,
+    isMove: boolean,
+  ): Loan | undefined {
+    for (const loan of variable.loans) {
+      if (!this.overlaps(loan.place, place)) {
+        continue;
+      }
+
+      const isAbove = place.path.length < loan.place.path.length;
+      if (loan.frozen && isAbove && !isMove) {
+        continue;
+      }
+
+      return loan;
+    }
+
+    return undefined;
+  }
+
+  private reportInUse(place: Place, variable: Read<Variable>, loc: int): void {
+    const frame = this.frame();
+    const word = this.placeText(place);
+    const first = this.lineOf(variable.lastUse);
+
+    if (frame != undefined && frame.bindings.has(variable.key)) {
+      const other = this.lineOf(variable.declared);
+
+      this.report(loc, Code.OwnLoopChanged, { word, other });
+
+      return;
+    }
+
+    this.report(loc, Code.OwnInUse, { word, other: variable.name, first });
+  }
+
+  private readonly underlying(place: Own<Place>): Place[] {
+    const variable = this.variableOf(place.root);
+    if (variable == undefined || variable.holding != Holding.Borrow) {
+      return [place];
+    }
+
+    const found: Place[] = [];
+
+    for (const loan of variable.loans) {
+      const path = loan.place.path.concat(place.path);
+
+      found.push({ root: loan.place.root, path });
+    }
+
+    return found;
+  }
+
+  private checkUsable(place: Place, loc: int): boolean {
+    for (const moved of this.state.moved) {
+      if (!this.overlaps(moved.place, place)) {
+        continue;
+      }
+
+      const word = this.placeText(moved.place);
+      const other = this.lineOf(moved.loc);
+
+      if (moved.loc >= loc) {
+        this.report(loc, Code.OwnMovedInLoop, { word });
+      } else {
+        this.report(loc, Code.OwnMovedUsed, { word, other });
+      }
+
+      return false;
+    }
+
+    return true;
+  }
+
+  private markMoved(place: Own<Place>, loc: int): void {
+    this.state.moved.push({ place, loc });
+  }
+
+  private revive(root: int): void {
+    this.state.moved = this.state.moved.filter(
+      (moved) => moved.place.root != root,
+    );
+  }
+
+  private readonly copyState(state: Read<FlowState>): FlowState {
+    const moved: Moved[] = state.moved.slice();
+
+    return { moved, isDead: state.isDead };
+  }
+
+  private readonly merged(first: Read<FlowState>, second: Read<FlowState>): FlowState {
+    if (first.isDead) {
+      return this.copyState(second);
+    }
+    if (second.isDead) {
+      return this.copyState(first);
+    }
+
+    const moved: Moved[] = first.moved.slice();
+
+    for (const entry of second.moved) {
+      const isKnown = moved.some((known) => this.isSamePlace(known, entry));
+      if (!isKnown) {
+        moved.push(entry);
+      }
+    }
+
+    return { moved, isDead: false };
+  }
+
+  private readonly isSamePlace(first: Moved, second: Moved): boolean {
+    const isPrefix = this.isPrefix(first.place, second.place);
+
+    return isPrefix && first.place.path.length == second.place.path.length;
+  }
+
+  private readonly loanOn(place: Own<Place>, kind: LoanKind, frozen: boolean): Loan {
+    return { place, kind, frozen };
+  }
+}

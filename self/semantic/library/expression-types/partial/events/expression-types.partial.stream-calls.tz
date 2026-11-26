@@ -29,7 +29,7 @@ import {
 } from "../../../event-rules/const/event-rules.const.tz";
 
 partial class ExpressionTypes {
-  private streamCall(
+  private readonly streamCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -84,7 +84,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Boolean);
   }
 
-  private setEncodingCall(
+  private readonly setEncodingCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -130,7 +130,7 @@ partial class ExpressionTypes {
     return instance;
   }
 
-  private noteStreamListened(
+  private readonly noteStreamListened(
     member: MemberExpr,
     isListening: boolean,
     module: int,
@@ -147,7 +147,7 @@ partial class ExpressionTypes {
     this.eventMarks.listenedStreams.set(key, member.name);
   }
 
-  private streamRestArguments(
+  private readonly streamRestArguments(
     expr: CallExpr,
     instance: InstanceType,
     module: int,
@@ -164,7 +164,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private writeCallbackType(instance: InstanceType): Type | undefined {
+  private readonly writeCallbackType(instance: InstanceType): Type | undefined {
     const entry = this.classMember(instance, kWriteTypedName).entry;
     const fn = entry?.methods[0];
     if (entry == undefined || fn == undefined) {
@@ -184,7 +184,7 @@ partial class ExpressionTypes {
     return this.types.definedType(last);
   }
 
-  private typedMethodResult(instance: InstanceType, name: string): Type {
+  private readonly typedMethodResult(instance: InstanceType, name: string): Type {
     const entry = this.classMember(instance, name).entry;
     const fn = entry?.methods[0];
     if (entry == undefined || fn == undefined) {
@@ -199,7 +199,7 @@ partial class ExpressionTypes {
     return type.shape.result;
   }
 
-  private sideCode(isReading: boolean): Code {
+  private readonly sideCode(isReading: boolean): Code {
     if (isReading) {
       return Code.StreamNotReadable;
     }
@@ -207,7 +207,7 @@ partial class ExpressionTypes {
     return Code.StreamNotWritable;
   }
 
-  private streamChunkCheck(
+  private readonly streamChunkCheck(
     expr: CallExpr,
     name: string,
     chunk: Type,
@@ -252,7 +252,7 @@ partial class ExpressionTypes {
     });
   }
 
-  private chunkCode(isOnlyText: boolean): Code {
+  private readonly chunkCode(isOnlyText: boolean): Code {
     if (isOnlyText) {
       return Code.StreamTextChunk;
     }
@@ -260,7 +260,7 @@ partial class ExpressionTypes {
     return Code.StreamByteChunk;
   }
 
-  private isChunkValue(type: Type, isOnlyText: boolean): boolean {
+  private readonly isChunkValue(type: Type, isOnlyText: boolean): boolean {
     const isText =
       type.kind == TypeKind.String ||
       type.kind == TypeKind.Template ||
@@ -272,17 +272,17 @@ partial class ExpressionTypes {
     return this.byteSources.isBytesType(type) || this.isBufferChunk(type);
   }
 
-  private isByteChunk(chunk: Type): boolean {
+  private readonly isByteChunk(chunk: Type): boolean {
     return chunk.kind == TypeKind.String || this.isBufferChunk(chunk);
   }
 
-  private isBufferChunk(type: Type): boolean {
+  private readonly isBufferChunk(type: Type): boolean {
     const base = this.types.definedType(type);
 
     return base.kind == TypeKind.Instance && base.name == kBufferChunkName;
   }
 
-  private streamChunk(instance: Type, isReading: boolean): Type | undefined {
+  private readonly streamChunk(instance: Type, isReading: boolean): Type | undefined {
     for (const one of this.types.ancestorsOf(instance)) {
       if (one.kind != TypeKind.Instance || !this.isStreamModule(one.module)) {
         continue;
@@ -301,7 +301,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private duplexChunk(
+  private readonly duplexChunk(
     instance: InstanceType,
     isReading: boolean,
   ): Type | undefined {
@@ -313,7 +313,7 @@ partial class ExpressionTypes {
     return instance.args[1] ?? written;
   }
 
-  private isStream(type: Type): boolean {
+  private readonly isStream(type: Type): boolean {
     return this.types
       .ancestorsOf(type)
       .some(
@@ -326,11 +326,11 @@ partial class ExpressionTypes {
       );
   }
 
-  private isStreamModule(module: int): boolean {
+  private readonly isStreamModule(module: int): boolean {
     return this.program.modules[module]?.name == kStreamModule;
   }
 
-  private hasOwnStreamMethod(instance: InstanceType, name: string): boolean {
+  private readonly hasOwnStreamMethod(instance: InstanceType, name: string): boolean {
     const entry = this.classMember(instance, name).entry;
     if (entry == undefined || entry.field != undefined) {
       return false;

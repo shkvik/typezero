@@ -472,8 +472,8 @@ export const kMessages: Record<Code, Message> = {
   [Code.AsyncConstructor]: {
     text: "a constructor cannot be 'async': 'new' gives the object, not a Promise",
   },
-  [Code.ReadonlyMethod]: {
-    text: "a method cannot be 'readonly': a method cannot be replaced anyway",
+  [Code.ReadonlyNotMethod]: {
+    text: "'readonly' before a method means it only reads 'this'; {word} has no 'this' to read",
   },
   [Code.ConstructorModifier]: {
     text: "a constructor cannot be {found}",
@@ -4398,5 +4398,116 @@ export const kMessages: Record<Code, Message> = {
   },
   [Code.EventErrorPaths]: {
     text: "{word} may emit 'error', and nothing listens for it on every path here, so the error would be lost (node would end the program); listen in this function: '{first}.on(\"error\", (e) => ...)'",
+  },
+  [Code.ModeNeedsType]: {
+    text: "'{word}' needs the type it wraps, e.g. '{other}'",
+  },
+  [Code.ModeTakesOne]: {
+    text: "'{word}' takes one type, the one it wraps, e.g. '{other}'",
+  },
+  [Code.OwnMovedUsed]: {
+    text: "'{word}' was given away on line {other}, so it cannot be used here",
+  },
+  [Code.OwnMovedInLoop]: {
+    text: "'{word}' is given away inside the loop: on the next pass it is already gone",
+  },
+  [Code.OwnInUse]: {
+    text: "'{word}' cannot be changed here: '{other}' still looks at it until line {first}",
+  },
+  [Code.OwnChangedInUse]: {
+    text: "'{word}' cannot be used here: '{other}' changes it until line {first}",
+  },
+  [Code.OwnTakeBorrowed]: {
+    text: "'{word}' is only lent here, so it cannot be given away; give a copy (structuredClone) or take it with replace / take",
+  },
+  [Code.OwnStoreBorrow]: {
+    text: "'{word}' only looks at a value it does not own, and a borrow cannot be kept; keep the value itself or a copy",
+  },
+  [Code.OwnNeedsOwnParam]: {
+    text: "parameter '{word}' is only lent to the function; to keep it, write 'Own<T>' as its type",
+  },
+  [Code.OwnArgumentTwice]: {
+    text: "'{word}' is passed to be changed and, in the same call, once more",
+  },
+  [Code.OwnReturnPart]: {
+    text: "'{word}' belongs to '{other}', so it cannot be returned as a value of its own; return 'Read<T>' to lend it, or a copy",
+  },
+  [Code.OwnReturnSource]: {
+    text: "the result is lent from {word}, but this value comes from '{other}'",
+  },
+  [Code.OwnLentMissing]: {
+    text: "a function that returns a borrow says where it comes from: write 'Lent<T>' as the type of that parameter",
+  },
+  [Code.OwnFreshBorrow]: {
+    text: "a new value cannot be returned as a borrow: nothing would own it",
+  },
+  [Code.OwnKeptLet]: {
+    text: "a callback that is kept cannot use 'let {word}': it would keep a copy of its own; keep the state in an object it takes, or share it (Shared, Atomic)",
+  },
+  [Code.OwnKeptThis]: {
+    text: "a callback that is kept cannot use 'this': the method only borrows it; use SharedMut and WeakRef",
+  },
+  [Code.OwnKeptBorrow]: {
+    text: "a callback that is kept cannot use '{word}': it is only lent here",
+  },
+  [Code.OwnGlobalLet]: {
+    text: "a module cannot have 'let {word}' at its top level: use 'const' with Mutex or Atomic",
+  },
+  [Code.OwnGlobalChanged]: {
+    text: "'{word}' is a module constant, so a function cannot change it; keep it in Mutex or Atomic",
+  },
+  [Code.OwnReadChanged]: {
+    text: "'{word}' is only lent for reading here, so it cannot be changed",
+  },
+  [Code.OwnLoopChanged]: {
+    text: "'{word}' cannot be changed while 'for...of' goes over it (line {other})",
+  },
+  [Code.OwnReadonlyArray]: {
+    text: "'{word}' is a readonly array, so it cannot be changed",
+  },
+  [Code.OwnTakeElement]: {
+    text: "'{word}' is an element of an array, so it cannot be given away; take it out with pop, shift or splice, or give a copy (structuredClone)",
+  },
+  [Code.OwnInternedChanged]: {
+    text: "'{word}' is shared (Interned), so only its readonly methods can be called; '{other}' is not readonly",
+  },
+  [Code.OwnCellBorrow]: {
+    text: "'{word}' is inside a Cell, so only a copy can leave it, and its type does not copy",
+  },
+  [Code.OwnBorrowField]: {
+    text: "the field '{word}' cannot hold a borrow: a borrow lives only inside a function; keep the value itself or a copy",
+  },
+  [Code.OwnEqualsMissing]: {
+    text: "'{word}' is copied, so it has no address to compare by; give it a [Symbol.equals](other) method",
+  },
+  [Code.OwnKeyHash]: {
+    text: "'{word}' is copied, so a key of it needs both [Symbol.equals](other) and [Symbol.hash](hasher)",
+  },
+  [Code.OwnWeakCopy]: {
+    text: "'{word}' is copied, so it has no address for a weak reference to follow",
+  },
+  [Code.OwnMutVariance]: {
+    text: "'{word}' is passed to be changed as a wider type, so the function may put another kind of value into it; take Read<...> if it only reads, or pass a copy",
+  },
+  [Code.OwnMutCopy]: {
+    text: "'{word}' is copied when passed, so changing it changes nothing for the caller; give the new value back as the result",
+  },
+  [Code.OwnMemPlace]: {
+    text: "'{word}' takes a place (a variable, a field or an element) and puts a value back into it; a new value is no place",
+  },
+  [Code.OwnUsingBorrow]: {
+    text: "'{word}' only looks at an item the array still owns, so 'using' cannot free it; go over '{other}.drain()'",
+  },
+  [Code.OwnLentCopy]: {
+    text: "'{word}' is copied when passed, so it needs no Lent; take it as is",
+  },
+  [Code.OwnTakeEmpty]: {
+    text: "'{word}' has no empty value to leave in its place, so it cannot be taken; write replace({word}, value)",
+  },
+  [Code.OwnInternedField]: {
+    text: "'{word}' is part of a shared (Interned) value, so it cannot be changed; only its Cell fields can",
+  },
+  [Code.OwnGiveGlobal]: {
+    text: "'{word}' is a module constant, so it cannot be given away; give a copy (structuredClone)",
   },
 };

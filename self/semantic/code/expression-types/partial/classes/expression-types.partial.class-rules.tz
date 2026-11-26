@@ -30,7 +30,7 @@ import { kDateName } from "../../../../types/type-questions/const/type-questions
 import { kMapClass } from "../../../class-rules/const/class-rules.const.tz";
 
 partial class ExpressionTypes {
-  private instanceofTyped(expr: BinaryExpr, module: int): Type {
+  private readonly instanceofTyped(expr: BinaryExpr, module: int): Type {
     const left = this.typed(expr.lhs, undefined, module);
     const boolean = this.store.plain(TypeKind.Boolean);
     if (this.collectionInstanceof(expr, left, module)) {
@@ -67,7 +67,7 @@ partial class ExpressionTypes {
     return boolean;
   }
 
-  private collectionInstanceof(
+  private readonly collectionInstanceof(
     expr: BinaryExpr,
     left: Type,
     module: int,
@@ -124,7 +124,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private testedClass(rhs: Expr, module: int): ClassDecl | undefined {
+  private readonly testedClass(rhs: Expr, module: int): ClassDecl | undefined {
     if (rhs.kind != ExprKind.Name) {
       this.typed(rhs, undefined, module);
 
@@ -145,7 +145,7 @@ partial class ExpressionTypes {
     return undefined;
   }
 
-  private classHomeOf(rhs: Expr, module: int): int | undefined {
+  private readonly classHomeOf(rhs: Expr, module: int): int | undefined {
     if (rhs.kind != ExprKind.Name) {
       return undefined;
     }
@@ -153,7 +153,7 @@ partial class ExpressionTypes {
     return this.targetOfName(rhs, module)?.module;
   }
 
-  private testedInstance(
+  private readonly testedInstance(
     rhs: Expr,
     decl: ClassDecl,
     module: int,
@@ -170,7 +170,7 @@ partial class ExpressionTypes {
     return this.resolver.classInstance(target.module, decl, []);
   }
 
-  private memberTargetDeclared(
+  private readonly memberTargetDeclared(
     target: MemberExpr,
     module: int,
   ): Type | undefined {
@@ -211,7 +211,7 @@ partial class ExpressionTypes {
     return declared;
   }
 
-  private isMethodTarget(target: MemberExpr, object: InstanceType): boolean {
+  private readonly isMethodTarget(target: MemberExpr, object: InstanceType): boolean {
     if (this.isDeclaredLibrary(object.module, object.loc)) {
       return false;
     }
@@ -221,13 +221,13 @@ partial class ExpressionTypes {
     return entry != undefined && entry.field == undefined && !entry.isStatic;
   }
 
-  private isMadeThis(object: Expr, module: int): boolean {
+  private readonly isMadeThis(object: Expr, module: int): boolean {
     const isThis = object.kind == ExprKind.Name && object.name == kThisName;
 
     return isThis && !this.isThisName(object, module);
   }
 
-  private instanceTargetCheck(
+  private readonly instanceTargetCheck(
     target: MemberExpr,
     object: Type,
     module: int,
@@ -272,7 +272,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private isConstructorOf(owner: ClassDecl): boolean {
+  private readonly isConstructorOf(owner: ClassDecl): boolean {
     const method = this.currentMethods[this.currentMethods.length - 1];
     const current = this.ownerClasses[this.ownerClasses.length - 1];
     if (method == undefined || current == undefined) {
@@ -284,7 +284,7 @@ partial class ExpressionTypes {
     return isMaker && current.decl == owner;
   }
 
-  private staticTargetDeclared(
+  private readonly staticTargetDeclared(
     target: MemberExpr,
     owner: StaticOwner,
     module: int,
@@ -328,7 +328,7 @@ partial class ExpressionTypes {
     return this.store.plain(TypeKind.Error);
   }
 
-  private thisPlaceCheck(expr: MemberExpr, module: int): boolean {
+  private readonly thisPlaceCheck(expr: MemberExpr, module: int): boolean {
     if (!this.isThisName(expr.object, module)) {
       return false;
     }
@@ -354,7 +354,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private superReadCheck(expr: MemberExpr, module: int): boolean {
+  private readonly superReadCheck(expr: MemberExpr, module: int): boolean {
     if (!this.isSuperName(expr.object, module)) {
       return false;
     }
@@ -364,7 +364,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private isSuperName(expr: Expr, module: int): boolean {
+  private readonly isSuperName(expr: Expr, module: int): boolean {
     if (expr.kind != ExprKind.Name || expr.name != kSuperName) {
       return false;
     }
@@ -374,7 +374,7 @@ partial class ExpressionTypes {
     return use?.symbol == undefined;
   }
 
-  private thisInFunction(expr: NameExpr, module: int): boolean {
+  private readonly thisInFunction(expr: NameExpr, module: int): boolean {
     const place = this.thisPlaces[this.thisPlaces.length - 1];
     if (place != ThisPlace.Function) {
       return false;
@@ -392,7 +392,7 @@ partial class ExpressionTypes {
     return true;
   }
 
-  private methodTargetReport(
+  private readonly methodTargetReport(
     object: InstanceType,
     target: MemberExpr,
     owner: ClassDecl,

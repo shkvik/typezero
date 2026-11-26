@@ -1,5 +1,15 @@
-import { Access } from "../../../../program/ast/types/ast.types.classes.tz";
-import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
+import {
+  Access,
+  ClassField,
+  Decorator,
+} from "../../../../program/ast/types/ast.types.classes.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+import { Span } from "../../../../program/ast/types/ast.types.span.tz";
+import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
+import {
+  TypeParamDecl,
+  TypeRef,
+} from "../../../../program/ast/types/ast.types.types.tz";
 import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
 
 export type Modifiers = {
@@ -26,4 +36,23 @@ export type ClassBase = {
   readonly base?: TypeRef;
   readonly baseExpr?: Expr;
   readonly baseArgs: TypeRef[];
+};
+
+export type ClassDeclDraft = {
+  readonly kind: StmtKind.Class;
+  readonly loc: int;
+  name?: string;
+  isAbstract: boolean;
+  isPartial: boolean;
+  readonly base?: TypeRef;
+  readonly baseExpr?: Expr;
+  readonly baseArgs: TypeRef[];
+  readonly interfaces: TypeRef[];
+  readonly fields: ClassField[];
+  readonly methods: FunctionDecl[];
+  readonly constructors: FunctionDecl[];
+  readonly expression: boolean;
+  decorators: Decorator[];
+  readonly typeParams: TypeParamDecl[];
+  source?: Span;
 };

@@ -17,9 +17,9 @@ import { InferHole } from "./types/type-relation.types.tz";
 
 export class TypeRelation {
   private readonly store: TypeStore;
-  private readonly assumed: Set<string>;
-  private holes: Map<int, InferHole>;
-  private captured: Map<int, Type>;
+  private assumed: Cell<Set<string>>;
+  private holes: Cell<Map<int, InferHole>>;
+  private captured: Cell<Map<int, Type>>;
 
   public constructor(store: TypeStore) {
     this.store = store;
@@ -28,11 +28,11 @@ export class TypeRelation {
     this.captured = new Map<int, Type>();
   }
 
-  public writersOf(module: int, loc: int): ParamWriter[] | undefined {
+  public readonly writersOf(module: int, loc: int): ParamWriter[] | undefined {
     return this.store.writersOf(module, loc);
   }
 
-  public extends(source: Type, target: Type): boolean {
+  public readonly extends(source: Type, target: Type): boolean {
     if (source == target) {
       return true;
     }
@@ -65,16 +65,20 @@ export class TypeRelation {
     return fits;
   }
 
-  public matches(
+  public readonly matches(
     source: Type,
     target: Type,
-    holes: Map<int, InferHole>,
+    holes: Own<Map<int, InferHole>>,
   ): Map<int, Type> | undefined {
     this.holes = holes;
     this.captured = new Map<int, Type>();
 
     const fits = this.extends(source, target);
-    const captured = this.captured;
+    const captured = new Map<int, Type>();
+
+    for (const [key, value] of this.captured) {
+      captured.set(key, value);
+    }
 
     this.holes = new Map<int, InferHole>();
     if (!fits) {
@@ -84,7 +88,7 @@ export class TypeRelation {
     return captured;
   }
 
-  private fits(source: Type, target: Type): boolean {
+  private readonly fits(source: Type, target: Type): boolean {
     if (source.kind == TypeKind.Literal) {
       return this.literalFits(source, target);
     }
@@ -132,7 +136,7 @@ export class TypeRelation {
     }
   }
 
-  private instanceFits(source: Type, target: InstanceType): boolean {
+  private readonly instanceFits(source: Type, target: InstanceType): boolean {
     if (source.kind != TypeKind.Instance) {
       return false;
     }
@@ -147,7 +151,7 @@ export class TypeRelation {
     return parents.some((parent) => this.instanceFits(parent, target));
   }
 
-  private argumentsFit(source: InstanceType, target: InstanceType): boolean {
+  private readonly argumentsFit(source: InstanceType, target: InstanceType): boolean {
     const writers = this.store.writersOf(target.module, target.loc) ?? [];
 
     for (let index = 0; index < target.args.length; index++) {
@@ -176,14 +180,14 @@ export class TypeRelation {
     return true;
   }
 
-  public isUnsaid(own: Type, wide: Type): boolean {
+  public readonly isUnsaid(own: Type, wide: Type): boolean {
     const isObjects =
       own.kind == TypeKind.Object && wide.kind == TypeKind.Object;
 
     return isObjects && own != wide && !this.descends(own, wide);
   }
 
-  private literalFits(source: LiteralType, target: Type): boolean {
+  private readonly literalFits(source: LiteralType, target: Type): boolean {
     switch (source.literal) {
       case LiteralKind.String:
         return this.textFits(source.text, target);
@@ -196,7 +200,7 @@ export class TypeRelation {
     }
   }
 
-  private arrayFits(source: Type, item: Type): boolean {
+  private readonly arrayFits(source: Type, item: Type): boolean {
     if (source.kind == TypeKind.Array) {
       return this.extends(source.item, item);
     }
@@ -207,7 +211,7 @@ export class TypeRelation {
     return false;
   }
 
-  private tupleFits(source: TupleType, target: TupleType): boolean {
+  private readonly tupleFits(source: TupleType, target: TupleType): boolean {
     const before = target.rest;
     if (before < 0) {
       return this.allFit(source.items, target.items);
@@ -234,7 +238,7 @@ export class TypeRelation {
     return wanted != undefined && this.extends(rest, wanted);
   }
 
-  private allFit(sources: Type[], targets: Type[]): boolean {
+  private readonly allFit(sources: Read<Type[]>, targets: Read<Type[]>): boolean {
     if (sources.length != targets.length) {
       return false;
     }
@@ -253,7 +257,7 @@ export class TypeRelation {
     return true;
   }
 
-  private objectFits(source: Type, wanted: ObjectField[]): boolean {
+  private readonly objectFits(source: Type, wanted: Read<ObjectField[]>): boolean {
     if (source.kind != TypeKind.Object) {
       return false;
     }
@@ -275,7 +279,7 @@ export class TypeRelation {
     return true;
   }
 
-  private functionFits(source: FunctionShape, target: FunctionShape): boolean {
+  private readonly functionFits(source: Read<FunctionShape>, target: Read<FunctionShape>): boolean {
     if (!this.extends(source.result, target.result)) {
       return false;
     }
@@ -301,7 +305,7 @@ export class TypeRelation {
     return this.captureArguments(source, target, open);
   }
 
-  private fixedCount(source: FunctionShape, open: int): int {
+  private readonly fixedCount(source: Read<FunctionShape>, open: int): int {
     if (open < 0) {
       return source.params.length;
     }
@@ -309,7 +313,7 @@ export class TypeRelation {
     return open;
   }
 
-  private parameterAt(shape: FunctionShape, index: int): Type | undefined {
+  private readonly parameterAt(shape: Read<FunctionShape>, index: int): Type | undefined {
     const last = shape.params.length - 1;
     if (!shape.rest || index < last) {
       return shape.params[index]?.type;
@@ -323,3 +327,5 @@ export class TypeRelation {
     return rest;
   }
 }
+
+export type InternedTypeRelation = Interned<TypeRelation>;

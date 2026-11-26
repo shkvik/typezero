@@ -38,9 +38,9 @@ export class DictionaryRules {
 
   public constructor(
     store: TypeStore,
-    types: TypeQuestions,
-    modules: ModuleQuestions,
-    sources: SourceTexts,
+    types: Own<TypeQuestions>,
+    modules: Own<ModuleQuestions>,
+    sources: Own<SourceTexts>,
     text: TypeText,
   ) {
     this.store = store;
@@ -50,7 +50,7 @@ export class DictionaryRules {
     this.text = text;
   }
 
-  public collectionOf(type: Type): DictKind | undefined {
+  public readonly collectionOf(type: Type): DictKind | undefined {
     const base = this.types.definedType(type);
     if (base.kind != TypeKind.Dict || base.dict == DictKind.Record) {
       return undefined;
@@ -59,7 +59,7 @@ export class DictionaryRules {
     return base.dict;
   }
 
-  public collectionWord(dict: DictKind): string {
+  public readonly collectionWord(dict: DictKind): string {
     if (dict == DictKind.Map) {
       return "Map";
     }
@@ -67,7 +67,7 @@ export class DictionaryRules {
     return "Set";
   }
 
-  public iteratingSource(isMap: boolean): string {
+  public readonly iteratingSource(isMap: boolean): string {
     if (isMap) {
       return ".entries()";
     }
@@ -75,7 +75,7 @@ export class DictionaryRules {
     return ".values()";
   }
 
-  public dictAccess(target: Expr): string {
+  public readonly dictAccess(target: Expr): string {
     if (target.kind == ExprKind.Member) {
       return `.${target.name}`;
     }
@@ -83,7 +83,7 @@ export class DictionaryRules {
     return "[key]";
   }
 
-  public entryPart(isMap: boolean): string {
+  public readonly entryPart(isMap: boolean): string {
     if (isMap) {
       return "key";
     }
@@ -91,7 +91,7 @@ export class DictionaryRules {
     return "value";
   }
 
-  public listedElement(element: Type | undefined, candidate: Type): Type {
+  public readonly listedElement(element: Type | undefined, candidate: Type): Type {
     if (element == undefined) {
       return candidate;
     }
@@ -99,7 +99,7 @@ export class DictionaryRules {
     return this.store.unionOf([element, candidate]);
   }
 
-  public isNeverObject(type: Type): boolean {
+  public readonly isNeverObject(type: Type): boolean {
     const base = this.types.apparent(type);
 
     switch (base.kind) {
@@ -119,7 +119,7 @@ export class DictionaryRules {
     }
   }
 
-  public listingMethod(name: string, isSetEntries: boolean): string {
+  public readonly listingMethod(name: string, isSetEntries: boolean): string {
     if (isSetEntries) {
       return "values";
     }
@@ -127,7 +127,7 @@ export class DictionaryRules {
     return name;
   }
 
-  public dictText(expr: Expr, dict: DictKind): string {
+  public readonly dictText(expr: Expr, dict: DictKind): string {
     if (expr.kind == ExprKind.Name) {
       return expr.name;
     }
@@ -147,7 +147,7 @@ export class DictionaryRules {
     }
   }
 
-  public wantedDict(
+  public readonly wantedDict(
     wanted: Type | undefined,
     dict: DictKind,
   ): Type | undefined {
@@ -166,7 +166,7 @@ export class DictionaryRules {
     return found[0];
   }
 
-  public dictTypesCode(dict: DictKind): Code {
+  public readonly dictTypesCode(dict: DictKind): Code {
     if (dict == DictKind.Map) {
       return Code.NewMapNeedsTypes;
     }
@@ -174,7 +174,7 @@ export class DictionaryRules {
     return Code.NewSetNeedsType;
   }
 
-  public dictElement(dict: DictKind, key: Type, value: Type): Type {
+  public readonly dictElement(dict: DictKind, key: Type, value: Type): Type {
     if (dict == DictKind.Map) {
       return this.store.tupleOf({
         items: [key, value],
@@ -187,7 +187,7 @@ export class DictionaryRules {
     return key;
   }
 
-  public recordKeyText(target: Expr): string {
+  public readonly recordKeyText(target: Expr): string {
     if (target.kind == ExprKind.Member) {
       const holder = this.sources.hintText(target.object, kUnnamedOperand);
 
@@ -202,7 +202,7 @@ export class DictionaryRules {
     return "";
   }
 
-  public recordMissingCode(value: Type): Code {
+  public readonly recordMissingCode(value: Type): Code {
     const base = this.types.apparent(value);
     if (base.kind == TypeKind.String || base.kind == TypeKind.Template) {
       return Code.RecordTextKeyMissing;
@@ -211,7 +211,7 @@ export class DictionaryRules {
     return Code.RecordKeyMissing;
   }
 
-  public recordMemberTyped(expr: MemberExpr, object: Type): Type | undefined {
+  public readonly recordMemberTyped(expr: MemberExpr, object: Type): Type | undefined {
     const base = this.types.definedType(object);
     if (base.kind != TypeKind.Dict || base.dict != DictKind.Record) {
       return undefined;
@@ -220,7 +220,7 @@ export class DictionaryRules {
     return this.types.optional(base.value);
   }
 
-  public spreadCode(type: Type): Code | undefined {
+  public readonly spreadCode(type: Type): Code | undefined {
     if (this.types.isOptional(type)) {
       return this.optionalSpreadCode(type);
     }
@@ -255,7 +255,7 @@ export class DictionaryRules {
     }
   }
 
-  public recordSpreadCode(base: Type): Code | undefined {
+  public readonly recordSpreadCode(base: Type): Code | undefined {
     switch (base.kind) {
       case TypeKind.Dict:
         if (base.dict == DictKind.Record) {
@@ -276,15 +276,15 @@ export class DictionaryRules {
     }
   }
 
-  public isRecord(type: Type): boolean {
+  public readonly isRecord(type: Type): boolean {
     return type.kind == TypeKind.Dict && type.dict == DictKind.Record;
   }
 
-  public keyPlace(name: string): string {
+  public readonly keyPlace(name: string): string {
     return ` of key '${name}'`;
   }
 
-  public jsonTarget(json: Type, given: Type): Type {
+  public readonly jsonTarget(json: Type, given: Type): Type {
     if (this.types.isOptional(given) || given.kind == TypeKind.Undefined) {
       return this.types.optional(json);
     }
@@ -292,7 +292,7 @@ export class DictionaryRules {
     return json;
   }
 
-  public forInText(object: Expr, type: Type): string {
+  public readonly forInText(object: Expr, type: Type): string {
     if (object.kind == ExprKind.Name) {
       return object.name;
     }
@@ -305,7 +305,7 @@ export class DictionaryRules {
     return "a";
   }
 
-  public indexedWord(base: Type): string | undefined {
+  public readonly indexedWord(base: Type): string | undefined {
     switch (base.kind) {
       case TypeKind.Array:
         return "an array";
@@ -319,7 +319,7 @@ export class DictionaryRules {
     }
   }
 
-  public forEachPlace(base: Type, text: string): string {
+  public readonly forEachPlace(base: Type, text: string): string {
     if (base.kind != TypeKind.Array) {
       return "";
     }
@@ -327,7 +327,7 @@ export class DictionaryRules {
     return ` or '${text}.forEach((x, i) => ...)'`;
   }
 
-  public isKeyHolder(type: Type): boolean {
+  public readonly isKeyHolder(type: Type): boolean {
     switch (type.kind) {
       case TypeKind.Object:
       case TypeKind.Instance:
@@ -339,7 +339,7 @@ export class DictionaryRules {
     }
   }
 
-  public isKeyless(base: Type): boolean {
+  public readonly isKeyless(base: Type): boolean {
     switch (base.kind) {
       case TypeKind.Int:
       case TypeKind.Double:
@@ -353,7 +353,7 @@ export class DictionaryRules {
     }
   }
 
-  public forInCode(isMap: boolean): Code {
+  public readonly forInCode(isMap: boolean): Code {
     if (isMap) {
       return Code.MapForIn;
     }
@@ -361,7 +361,7 @@ export class DictionaryRules {
     return Code.SetForIn;
   }
 
-  public objectArgumentCheck(
+  public readonly objectArgumentCheck(
     arg: Expr,
     type: Type,
     word: string,
@@ -392,7 +392,7 @@ export class DictionaryRules {
     };
   }
 
-  public pairsDifferError(
+  public readonly pairsDifferError(
     expr: Expr,
     code: Code,
     first: Type,
@@ -408,7 +408,7 @@ export class DictionaryRules {
     };
   }
 
-  public dictInCheck(expr: BinaryExpr, object: Type): Checked<boolean> {
+  public readonly dictInCheck(expr: BinaryExpr, object: Type): Checked<boolean> {
     const dict = this.collectionOf(object);
     if (dict == undefined) {
       return { value: false };
@@ -430,7 +430,7 @@ export class DictionaryRules {
     };
   }
 
-  public dictMissingCall(
+  public readonly dictMissingCall(
     expr: MemberExpr,
     dict: DictKind,
     word: string,
@@ -473,7 +473,7 @@ export class DictionaryRules {
     };
   }
 
-  public forInKeys(loop: ForOfStmt, iterable: Type): Checked<Type> {
+  public readonly forInKeys(loop: ForOfStmt, iterable: Type): Checked<Type> {
     const error = this.store.plain(TypeKind.Error);
     const object = loop.iterable;
     const text = this.forInText(object, iterable);
@@ -532,7 +532,7 @@ export class DictionaryRules {
     return { value: this.store.plain(TypeKind.String) };
   }
 
-  public setTargetCheck(target: Expr, word: string): Checked<boolean> {
+  public readonly setTargetCheck(target: Expr, word: string): Checked<boolean> {
     if (target.kind == ExprKind.Index) {
       return {
         value: true,
@@ -549,7 +549,7 @@ export class DictionaryRules {
     return { value: false };
   }
 
-  private memberHolder(expr: Expr): string | undefined {
+  private readonly memberHolder(expr: Expr): string | undefined {
     if (expr.kind != ExprKind.Member) {
       return undefined;
     }
@@ -562,7 +562,7 @@ export class DictionaryRules {
     return `${object.name}.${expr.name}`;
   }
 
-  private optionalSpreadCode(type: Type): Code {
+  private readonly optionalSpreadCode(type: Type): Code {
     const base = this.types.apparent(this.types.definedType(type));
 
     switch (base.kind) {
@@ -590,7 +590,7 @@ export class DictionaryRules {
     }
   }
 
-  private isBuiltinValue(type: InstanceType): boolean {
+  private readonly isBuiltinValue(type: InstanceType): boolean {
     const isLibrary = this.modules.isLibraryModule(type.module);
 
     return isLibrary && kBuiltinValueClasses.includes(type.name);

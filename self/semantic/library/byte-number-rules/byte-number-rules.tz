@@ -47,8 +47,8 @@ export class ByteNumberRules {
   private readonly integers: IntegerMath;
 
   public constructor(
-    types: TypeQuestions,
-    modules: ModuleQuestions,
+    types: Own<TypeQuestions>,
+    modules: Own<ModuleQuestions>,
     integers: IntegerMath,
   ) {
     this.types = types;
@@ -56,7 +56,7 @@ export class ByteNumberRules {
     this.integers = integers;
   }
 
-  public ownerOf(type: Type): ByteOwner | undefined {
+  public readonly ownerOf(type: Type): ByteOwner | undefined {
     const base = this.types.definedType(type);
     const isLibrary =
       base.kind == TypeKind.Instance &&
@@ -75,7 +75,7 @@ export class ByteNumberRules {
     }
   }
 
-  public methodOf(name: string, owner: ByteOwner): NumberMethod | undefined {
+  public readonly methodOf(name: string, owner: ByteOwner): NumberMethod | undefined {
     const access = this.accessOf(name, owner);
     if (access == undefined) {
       return undefined;
@@ -84,11 +84,11 @@ export class ByteNumberRules {
     return this.kindOf(access, owner);
   }
 
-  public infoOf(method: NumberMethod): ByteKindInfo | undefined {
+  public readonly infoOf(method: NumberMethod): ByteKindInfo | undefined {
     return kKindInfos.find((one) => one.kind == method.kind);
   }
 
-  public infoOfElement(element: Type): ByteKindInfo | undefined {
+  public readonly infoOfElement(element: Type): ByteKindInfo | undefined {
     if (element.kind == TypeKind.Double) {
       return kKindInfos.find((one) => one.kind == ByteKind.Float64);
     }
@@ -105,11 +105,11 @@ export class ByteNumberRules {
     return kKindInfos.find((one) => one.kind == row?.kind);
   }
 
-  public byteInfo(): ByteKindInfo | undefined {
+  public readonly byteInfo(): ByteKindInfo | undefined {
     return kKindInfos.find((one) => one.kind == ByteKind.Uint8);
   }
 
-  public placesOf(
+  public readonly placesOf(
     method: NumberMethod,
     owner: ByteOwner,
     size: decimal,
@@ -130,7 +130,7 @@ export class ByteNumberRules {
     return { offset: 0, least: 0, most: 1 };
   }
 
-  public countOf(constant: decimal | undefined): decimal | undefined {
+  public readonly countOf(constant: decimal | undefined): decimal | undefined {
     const isWritten =
       constant != undefined &&
       constant >= kLeastByteCount &&
@@ -142,11 +142,11 @@ export class ByteNumberRules {
     return constant;
   }
 
-  public countError(loc: int, word: string): SourceError {
+  public readonly countError(loc: int, word: string): SourceError {
     return { code: Code.ByteCountNotWritten, loc, details: { word } };
   }
 
-  public variableRange(count: decimal, isSigned: boolean): ProofRange {
+  public readonly variableRange(count: decimal, isSigned: boolean): ProofRange {
     const what = `${count} bytes`;
     const bits = count * kBitsInByte;
     if (!isSigned) {
@@ -158,14 +158,14 @@ export class ByteNumberRules {
     return { what, low: -half, high: half - 1 };
   }
 
-  public variableError(loc: int, range: ProofRange): SourceError {
+  public readonly variableError(loc: int, range: ProofRange): SourceError {
     const word = range.what;
     const place = this.rangeText(range);
 
     return { code: Code.ByteValueUnproven, loc, details: { word, place } };
   }
 
-  public fitError(
+  public readonly fitError(
     loc: int,
     info: ByteKindInfo,
     range: ProofRange,
@@ -192,7 +192,7 @@ export class ByteNumberRules {
     return { code: Code.ByteFitUnproven, loc, details };
   }
 
-  public wrapHint(info: ByteKindInfo, value: string): string {
+  public readonly wrapHint(info: ByteKindInfo, value: string): string {
     const mask = info.mask ?? kByteMask;
     const top = info.top;
     if (top == undefined) {
@@ -202,7 +202,7 @@ export class ByteNumberRules {
     return `((${value} & ${mask}) ^ ${top}) - ${top}`;
   }
 
-  private viewPlaces(method: NumberMethod, size: decimal): NumberPlaces {
+  private readonly viewPlaces(method: NumberMethod, size: decimal): NumberPlaces {
     const extra = this.endianRoom(size);
     if (method.isWrite) {
       return { value: 1, offset: 0, least: 2, most: 2 + extra };
@@ -211,7 +211,7 @@ export class ByteNumberRules {
     return { offset: 0, least: 1, most: 1 + extra };
   }
 
-  private endianRoom(size: decimal): int {
+  private readonly endianRoom(size: decimal): int {
     if (size == 1) {
       return 0;
     }
@@ -219,7 +219,7 @@ export class ByteNumberRules {
     return 1;
   }
 
-  private accessOf(name: string, owner: ByteOwner): NumberAccess | undefined {
+  private readonly accessOf(name: string, owner: ByteOwner): NumberAccess | undefined {
     if (owner == ByteOwner.DataView) {
       return this.prefixed(name, kGetPrefix, kSetPrefix);
     }
@@ -244,7 +244,7 @@ export class ByteNumberRules {
     return access;
   }
 
-  private prefixed(
+  private readonly prefixed(
     name: string,
     reading: string,
     writing: string,
@@ -259,7 +259,7 @@ export class ByteNumberRules {
     return undefined;
   }
 
-  private kindOf(
+  private readonly kindOf(
     access: NumberAccess,
     owner: ByteOwner,
   ): NumberMethod | undefined {
@@ -292,7 +292,7 @@ export class ByteNumberRules {
     return undefined;
   }
 
-  private isForeignName(rest: string, isDataView: boolean): boolean {
+  private readonly isForeignName(rest: string, isDataView: boolean): boolean {
     const isFloatName = kBufferFloatNames.includes(rest);
     const isViewName = rest.startsWith(kFloatPrefix) && !isFloatName;
     const isBufferOnly = isFloatName || rest.startsWith(kBufferOnlyPrefix);
@@ -303,13 +303,13 @@ export class ByteNumberRules {
     return isViewName;
   }
 
-  private rangeText(range: ProofRange): string {
+  private readonly rangeText(range: ProofRange): string {
     const high = range.high ?? 0;
 
     return `${range.low} to ${high}`;
   }
 
-  private storedValue(info: ByteKindInfo, constant: decimal): decimal {
+  private readonly storedValue(info: ByteKindInfo, constant: decimal): decimal {
     const span = this.integers.twoPower(info.size * kBitsInByte);
     const pattern = this.integers.patternOf(constant, span);
     const isSigned = info.top != undefined;

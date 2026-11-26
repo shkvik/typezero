@@ -11,11 +11,11 @@ import { RegexBraces } from "../regex-syntax/types/regex-syntax.types.tz";
 export class RegexQuantifiers {
   private readonly cursor: RegexCursor;
 
-  public constructor(cursor: RegexCursor) {
+  public constructor(cursor: Own<RegexCursor>) {
     this.cursor = cursor;
   }
 
-  public quantifier(): boolean {
+  public readonly quantifier(): boolean {
     const cursor = this.cursor;
     const at = cursor.index;
     if (kRepeatChars.includes(cursor.current())) {
@@ -43,7 +43,7 @@ export class RegexQuantifiers {
     return true;
   }
 
-  private loneBrace(): boolean {
+  private readonly loneBrace(): boolean {
     if (this.cursor.isUnicode) {
       return this.cursor.fail(kIncompleteQuantifierText);
     }
@@ -51,7 +51,7 @@ export class RegexQuantifiers {
     return true;
   }
 
-  public isQuantifierStart(): boolean {
+  public readonly isQuantifierStart(): boolean {
     const cursor = this.cursor;
     if (kRepeatChars.includes(cursor.current())) {
       return true;
@@ -68,7 +68,7 @@ export class RegexQuantifiers {
     return braces != undefined;
   }
 
-  private braces(): RegexBraces | undefined {
+  private readonly braces(): RegexBraces | undefined {
     const cursor = this.cursor;
     const start = cursor.index;
 
@@ -91,7 +91,7 @@ export class RegexQuantifiers {
     return { least, most };
   }
 
-  private mostCount(least: int): int {
+  private readonly mostCount(least: int): int {
     const cursor = this.cursor;
     if (!cursor.accept(",")) {
       return least;
@@ -103,7 +103,7 @@ export class RegexQuantifiers {
     return this.number();
   }
 
-  private number(): int {
+  private readonly number(): int {
     const cursor = this.cursor;
     if (!cursor.isDigitAt(cursor.index)) {
       return -1;
@@ -121,7 +121,7 @@ export class RegexQuantifiers {
     return value;
   }
 
-  public clamped(value: int): int {
+  public readonly clamped(value: int): int {
     if (value > kInfinity - 1) {
       return kInfinity - 1;
     }

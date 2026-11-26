@@ -76,7 +76,7 @@ partial class FileParser {
     return this.classicFor(loc, awaitLoc, init);
   }
 
-  private forDeclarationAhead(): boolean {
+  private readonly forDeclarationAhead(): boolean {
     const head = this.cursor.peek();
 
     switch (head.kind) {
@@ -91,7 +91,7 @@ partial class FileParser {
     }
   }
 
-  private forUsingAhead(): boolean {
+  private readonly forUsingAhead(): boolean {
     const next = this.cursor.lookahead();
 
     return this.nameOnLine() && next.kind != TokenKind.Of;
@@ -140,7 +140,7 @@ partial class FileParser {
     return this.classicFor(loc, awaitLoc, init);
   }
 
-  private newVariableCode(word: TokenKind): Code {
+  private readonly newVariableCode(word: TokenKind): Code {
     if (word == TokenKind.In) {
       return Code.ForInNeedsNewVariable;
     }
@@ -155,7 +155,7 @@ partial class FileParser {
   }
 
   private forDeclarators(
-    target: ForTarget,
+    target: Read<ForTarget>,
     isConst: boolean,
   ): VarDeclarator[] | undefined {
     const decls: VarDeclarator[] = [];
@@ -238,7 +238,7 @@ partial class FileParser {
     loc: int,
     awaitLoc: int | undefined,
     declaration: ForDeclaration,
-    target: ForTarget,
+    target: Read<ForTarget>,
   ): Stmt {
     const word = this.cursor.next();
     const keys = word.kind == TokenKind.In;
@@ -277,7 +277,7 @@ partial class FileParser {
     };
   }
 
-  private forOfBinding(target: ForTarget, keys: boolean): VarDeclarator {
+  private forOfBinding(target: Read<ForTarget>, keys: boolean): VarDeclarator {
     if (target.kind == ForTargetKind.Name) {
       return {
         ...target.binding,
@@ -298,7 +298,7 @@ partial class FileParser {
     };
   }
 
-  private forOfForm(pattern: Pattern, keys: boolean): BindingForm {
+  private readonly forOfForm(pattern: Read<Pattern>, keys: boolean): BindingForm {
     if (keys) {
       return { kind: BindingKind.Plain };
     }
@@ -310,7 +310,7 @@ partial class FileParser {
   }
 
   private forOfBody(
-    target: ForTarget,
+    target: Read<ForTarget>,
     keys: boolean,
     isConst: boolean,
     name: string,

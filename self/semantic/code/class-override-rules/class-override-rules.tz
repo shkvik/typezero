@@ -31,15 +31,15 @@ export class ClassOverrideRules {
 
   public constructor(
     text: TypeText,
-    relation: TypeRelation,
-    classes: ClassRules,
+    relation: Own<TypeRelation>,
+    classes: Own<ClassRules>,
   ) {
     this.text = text;
     this.relation = relation;
     this.classes = classes;
   }
 
-  public contractFieldResult(type: Type): Type | undefined {
+  public readonly contractFieldResult(type: Type): Type | undefined {
     if (type.kind != TypeKind.Function) {
       return undefined;
     }
@@ -47,7 +47,7 @@ export class ClassOverrideRules {
     return type.shape.result;
   }
 
-  public overriddenCode(site: MemberExpr, call: MemberExpr): Code {
+  public readonly overriddenCode(site: MemberExpr, call: MemberExpr): Code {
     if (site == call) {
       return Code.ConstructorCallsOverride;
     }
@@ -55,8 +55,8 @@ export class ClassOverrideRules {
     return Code.ConstructorReachesOverride;
   }
 
-  public overridingChild(
-    children: ClassDecl[],
+  public readonly overridingChild(
+    children: Read<ClassDecl[]>,
     name: string,
   ): ClassDecl | undefined {
     return children.find((child) =>
@@ -66,7 +66,7 @@ export class ClassOverrideRules {
     );
   }
 
-  public abstractMethodsCheck(decl: ClassDecl): SourceError[] {
+  public readonly abstractMethodsCheck(decl: ClassDecl): SourceError[] {
     const errors: SourceError[] = [];
 
     if (decl.isAbstract) {
@@ -92,7 +92,7 @@ export class ClassOverrideRules {
     return errors;
   }
 
-  public memberNameErrors(decl: ClassDecl, index: int): SourceError[] {
+  public readonly memberNameErrors(decl: ClassDecl, index: int): SourceError[] {
     const errors: SourceError[] = [];
 
     const field = decl.fields[index];
@@ -135,7 +135,7 @@ export class ClassOverrideRules {
     return errors;
   }
 
-  public contractResultError(
+  public readonly contractResultError(
     method: FunctionDecl,
     type: FunctionType,
     wanted: FunctionType,
@@ -170,7 +170,7 @@ export class ClassOverrideRules {
     };
   }
 
-  public lonelyOverrideCheck(
+  public readonly lonelyOverrideCheck(
     decl: ClassDecl,
     field: ClassField,
     hasParent: boolean,
@@ -192,7 +192,7 @@ export class ClassOverrideRules {
     };
   }
 
-  public newFieldCheck(
+  public readonly newFieldCheck(
     field: ClassField,
     parent: InstanceType,
   ): SourceError | undefined {
@@ -210,7 +210,7 @@ export class ClassOverrideRules {
     };
   }
 
-  public overrideAccessCheck(
+  public readonly overrideAccessCheck(
     method: FunctionDecl,
     theirs: FunctionDecl,
     parent: InstanceType,
@@ -233,7 +233,7 @@ export class ClassOverrideRules {
     };
   }
 
-  public overrideResultCheck(
+  public readonly overrideResultCheck(
     method: FunctionDecl,
     decl: ClassDecl,
     own: FunctionType,
@@ -260,7 +260,7 @@ export class ClassOverrideRules {
     };
   }
 
-  public redeclaredValueCheck(
+  public readonly redeclaredValueCheck(
     decl: ClassDecl,
     field: ClassField,
     owner: string,
@@ -281,7 +281,7 @@ export class ClassOverrideRules {
     };
   }
 
-  public implementsClassError(
+  public readonly implementsClassError(
     decl: ClassDecl,
     ref: TypeRef,
   ): SourceError | undefined {
@@ -298,7 +298,7 @@ export class ClassOverrideRules {
     return { code: Code.ImplementsClass, loc: ref.loc, details: { word } };
   }
 
-  public missingMemberError(
+  public readonly missingMemberError(
     decl: ClassDecl,
     iface: string,
     field: ObjectField,
@@ -320,9 +320,9 @@ export class ClassOverrideRules {
     };
   }
 
-  public methodOverFieldCheck(
+  public readonly methodOverFieldCheck(
     method: FunctionDecl,
-    entry: ClassMemberEntry,
+    entry: Read<ClassMemberEntry>,
     parent: InstanceType,
   ): Checked<boolean> {
     const field = entry.field;

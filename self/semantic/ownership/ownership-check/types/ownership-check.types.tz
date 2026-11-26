@@ -1,0 +1,165 @@
+import { ClassDecl } from "../../../../program/ast/types/ast.types.classes.tz";
+import { Expr } from "../../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../../program/ast/types/ast.types.functions.tz";
+
+export enum Holding {
+  Copy,
+  Own,
+  Borrow,
+  Lent,
+  Global,
+}
+
+export enum LoanKind {
+  Shared,
+  Exclusive,
+}
+
+export enum ParamMode {
+  Mut,
+  Read,
+  Own,
+  Lent,
+  Once,
+}
+
+export enum Access {
+  Read,
+  Write,
+  Move,
+}
+
+export enum OperandKind {
+  Copy,
+  Fresh,
+  Place,
+  Borrowed,
+  Nothing,
+}
+
+export enum CallbackMode {
+  During,
+  Kept,
+  Once,
+  Local,
+}
+
+export type Place = {
+  readonly root: int;
+  readonly path: readonly string[];
+};
+
+export type Loan = {
+  readonly place: Place;
+  readonly kind: LoanKind;
+  readonly frozen: boolean;
+};
+
+export type Variable = {
+  readonly key: int;
+  readonly name: string;
+  holding: Cell<Holding>;
+  loans: Cell<readonly Loan[]>;
+  readonly isReadOnly: boolean;
+  readonly isConst: boolean;
+  readonly isUsing: boolean;
+  readonly declared: int;
+  lastUse: Cell<int>;
+  isChanged: Cell<boolean>;
+  isCaptured: Cell<boolean>;
+  readonly isBorrowArray?: boolean;
+  readonly isPattern?: boolean;
+};
+
+export type Moved = {
+  readonly place: Place;
+  readonly loc: int;
+};
+
+export type FlowState = {
+  moved: Moved[];
+  isDead: boolean;
+};
+
+export type Operand = {
+  readonly kind: OperandKind;
+  readonly place?: Place;
+  readonly loans: readonly Loan[];
+  readonly loc: int;
+  readonly isCell?: boolean;
+  readonly isInferred?: boolean;
+};
+
+export type CalleeParam = {
+  readonly mode: ParamMode;
+  readonly isRest: boolean;
+  readonly isCallback: boolean;
+};
+
+export type Callee = {
+  readonly params: readonly CalleeParam[];
+  readonly receiver: LoanKind;
+  readonly result: ResultMode;
+  readonly decl?: FunctionDecl;
+};
+
+export enum ResultMode {
+  Own,
+  Read,
+  Mut,
+  Copy,
+  Element,
+}
+
+export type FunctionFrame = {
+  readonly fn?: FunctionDecl;
+  readonly module: int;
+  readonly owner?: ClassDecl;
+  readonly variables: Cell<Map<int, Variable>>;
+  readonly lentParams: Cell<Set<int>>;
+  readonly result: ResultMode;
+  readonly thisHolding: Holding;
+  readonly callback: CallbackMode;
+  readonly loops: Cell<LoopSpan[]>;
+  readonly outer: Cell<Set<int>>;
+  readonly bindings: Cell<Set<int>>;
+};
+
+export type LoopSpan = {
+  readonly start: int;
+  readonly end: int;
+};
+
+export type BuiltinMethod = {
+  readonly name: string;
+  readonly receiver: LoanKind;
+  readonly params: readonly ParamMode[];
+  readonly isRestOwn: boolean;
+  readonly result: ResultMode;
+};
+
+export type ArgumentUse = {
+  readonly operand: Operand;
+  readonly mode: ParamMode;
+  readonly expr: Expr;
+};
+
+export type Derived = {
+  readonly key: int;
+  readonly source: Expr;
+};
+
+export type InternedOwnership = Interned<
+  | Place
+  | Loan
+  | Moved
+  | Operand
+  | CalleeParam
+  | Callee
+  | ArgumentUse
+  | BuiltinMethod
+  | LoopSpan
+  | Derived
+  | Variable
+  | FunctionFrame
+>;

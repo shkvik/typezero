@@ -10,7 +10,7 @@ import {
 import { TypeContext } from "../types/type-resolver.types.tz";
 
 partial class TypeResolver {
-  private intersection(ref: TypeRef, context: TypeContext): Type {
+  private readonly intersection(ref: TypeRef, context: TypeContext): Type {
     const parts = this.resolveAll(ref.args, context);
     let joined = parts[0] ?? this.store.plain(TypeKind.Error);
 
@@ -23,11 +23,11 @@ partial class TypeResolver {
     return joined;
   }
 
-  private joined(
+  private readonly joined(
     first: Type,
     second: Type,
     loc: int,
-    context: TypeContext,
+    context: Read<TypeContext>,
   ): Type {
     if (first == second) {
       return first;
@@ -57,7 +57,7 @@ partial class TypeResolver {
     return this.eachWithEach(first, second, loc, context);
   }
 
-  private notObject(type: Type): Type | undefined {
+  private readonly notObject(type: Type): Type | undefined {
     const parts = this.partsOf(type);
     if (parts.some((part) => part.kind == TypeKind.Undefined)) {
       return type;
@@ -66,11 +66,11 @@ partial class TypeResolver {
     return parts.find((part) => part.kind != TypeKind.Object);
   }
 
-  private eachWithEach(
+  private readonly eachWithEach(
     first: Type,
     second: Type,
     loc: int,
-    context: TypeContext,
+    context: Read<TypeContext>,
   ): Type {
     const merged: Type[] = [];
 
@@ -90,11 +90,11 @@ partial class TypeResolver {
     return this.store.unionOf(merged);
   }
 
-  private mergedFields(
+  private readonly mergedFields(
     left: Type,
     right: Type,
     loc: int,
-    context: TypeContext,
+    context: Read<TypeContext>,
   ): ObjectField[] | undefined {
     if (left.kind != TypeKind.Object || right.kind != TypeKind.Object) {
       return undefined;
@@ -121,11 +121,11 @@ partial class TypeResolver {
     return fields;
   }
 
-  private sameField(
+  private readonly sameField(
     first: ObjectField,
     second: ObjectField | undefined,
     loc: int,
-    context: TypeContext,
+    context: Read<TypeContext>,
   ): ObjectField | undefined {
     if (second == undefined) {
       return first;
@@ -153,7 +153,7 @@ partial class TypeResolver {
     };
   }
 
-  private commonType(first: Type, second: Type): Type | undefined {
+  private readonly commonType(first: Type, second: Type): Type | undefined {
     if (first == second || this.relation.baseOf(first) == second) {
       return first;
     }

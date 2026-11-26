@@ -16,7 +16,7 @@ import { kNoPlace } from "../../../../code/expression-types/const/expression-typ
 import { kFatalDecoderClass } from "../../../text-coder-rules/const/text-coder-rules.const.tz";
 
 partial class ExpressionTypes {
-  private codedNew(expr: NewExpr, made: Type, module: int): Type {
+  private readonly codedNew(expr: NewExpr, made: Type, module: int): Type {
     if (this.modules.isLibraryModule(module)) {
       return made;
     }
@@ -49,7 +49,7 @@ partial class ExpressionTypes {
     return fatal ?? made;
   }
 
-  private resizableCheck(expr: NewExpr, made: Type, module: int): Type {
+  private readonly resizableCheck(expr: NewExpr, made: Type, module: int): Type {
     const options = expr.args[1];
     if (options == undefined) {
       return made;
@@ -62,7 +62,7 @@ partial class ExpressionTypes {
     return made;
   }
 
-  private decoderLabelCheck(label: Expr, module: int): void {
+  private readonly decoderLabelCheck(label: Expr, module: int): void {
     const written = this.textCoders.literalLabel(label);
     if (written != undefined) {
       const labelError = this.textCoders.labelError(label.loc, [written]);
@@ -87,7 +87,7 @@ partial class ExpressionTypes {
     this.reportFound(module, labelError);
   }
 
-  private canBeFatal(options: Expr, module: int, depth: int): boolean {
+  private readonly canBeFatal(options: Expr, module: int, depth: int): boolean {
     if (options.kind != ExprKind.ObjectLit) {
       return this.isFatalShape(options, module);
     }
@@ -110,7 +110,7 @@ partial class ExpressionTypes {
     return isFatal;
   }
 
-  private isFatalShape(options: Expr, module: int): boolean {
+  private readonly isFatalShape(options: Expr, module: int): boolean {
     const type = this.peekType(options, module);
     const base = this.types.definedType(type);
     if (base.kind != TypeKind.Object) {
@@ -124,7 +124,7 @@ partial class ExpressionTypes {
     return field != undefined && field.type.kind != TypeKind.Undefined;
   }
 
-  private decodeCall(
+  private readonly decodeCall(
     expr: CallExpr,
     member: MemberExpr,
     instance: InstanceType,
@@ -167,7 +167,7 @@ partial class ExpressionTypes {
     return result;
   }
 
-  private decoderParseCheck(
+  private readonly decoderParseCheck(
     expr: CallExpr,
     instance: InstanceType,
     member: MemberExpr,

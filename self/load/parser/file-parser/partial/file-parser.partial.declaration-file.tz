@@ -6,16 +6,16 @@ import { VarDeclarator } from "../../../../program/ast/types/ast.types.patterns.
 import { TypeRef } from "../../../../program/ast/types/ast.types.types.tz";
 import { StmtKind } from "../../../../program/ast/types/ast.types.statements.tz";
 import {
-  DeclarationFile,
   DeclaredMember,
   DeclaredMemberForm,
   DeclaredMemberKind,
 } from "../../../../program/ast/types/ast.types.declarations.tz";
 import { Modifiers } from "../types/file-parser.types.classes.tz";
 import { ParamPattern } from "../types/file-parser.types.functions.tz";
+import { DeclarationDraft } from "../types/file-parser.types.result.tz";
 
 partial class FileParser {
-  private declarationItem(file: DeclarationFile): void {
+  private declarationItem(file: DeclarationDraft): void {
     this.importOrExport(file);
     if (this.cursor.isRecovering()) {
       this.cursor.stopRecovering();
@@ -23,7 +23,7 @@ partial class FileParser {
     }
   }
 
-  private importOrExport(file: DeclarationFile): void {
+  private importOrExport(file: DeclarationDraft): void {
     const token = this.cursor.peek();
 
     switch (token.kind) {
@@ -41,7 +41,7 @@ partial class FileParser {
     }
   }
 
-  private libraryType(file: DeclarationFile, word: Token): void {
+  private libraryType(file: DeclarationDraft, word: Token): void {
     if (!this.library) {
       this.cursor.report(word.start, Code.DeclarationHoldsExports);
 
@@ -54,7 +54,7 @@ partial class FileParser {
     return this.exportedInterface(file, word.start);
   }
 
-  private declarationExport(file: DeclarationFile): void {
+  private declarationExport(file: DeclarationDraft): void {
     if (this.exportListAhead()) {
       this.exportDecl(true);
 
@@ -78,7 +78,7 @@ partial class FileParser {
     }
   }
 
-  private exportListAhead(): boolean {
+  private readonly exportListAhead(): boolean {
     const next = this.cursor.lookahead();
     const third = this.cursor.tokenAt(2);
 
@@ -93,7 +93,7 @@ partial class FileParser {
     }
   }
 
-  private exportedType(file: DeclarationFile, loc: int, word: Token): void {
+  private exportedType(file: DeclarationDraft, loc: int, word: Token): void {
     if (!this.nameOnLine()) {
       this.unknownExport(loc, word);
 
@@ -105,14 +105,14 @@ partial class FileParser {
     file.items.push(alias);
   }
 
-  private exportedInterface(file: DeclarationFile, loc: int): void {
+  private exportedInterface(file: DeclarationDraft, loc: int): void {
     const declaration = this.interfaceStatement(loc);
     if (declaration.kind == StmtKind.TypeAlias) {
       file.items.push(declaration);
     }
   }
 
-  private exportedDeclare(file: DeclarationFile): void {
+  private exportedDeclare(file: DeclarationDraft): void {
     const next = this.cursor.lookahead();
     const isAbstract =
       this.cursor.is(TokenKind.Abstract) && next.kind == TokenKind.Class;
@@ -150,7 +150,7 @@ partial class FileParser {
     }
   }
 
-  private declarationAhead(): boolean {
+  private readonly declarationAhead(): boolean {
     const token = this.cursor.peek();
     const starts =
       token.kind == TokenKind.Import || token.kind == TokenKind.Export;
@@ -158,7 +158,7 @@ partial class FileParser {
     return starts && token.newline;
   }
 
-  private functionSignature(file: DeclarationFile): void {
+  private functionSignature(file: DeclarationDraft): void {
     const known = this.cursor.errors.length;
     const declaration = this.functionDecl(false, false);
     const wellFormed = this.cursor.errors.length == known;
@@ -169,14 +169,14 @@ partial class FileParser {
     file.items.push(declaration);
   }
 
-  private declaredEnum(file: DeclarationFile): void {
+  private declaredEnum(file: DeclarationDraft): void {
     const declaration = this.enumDecl();
     if (declaration.kind == StmtKind.Enum) {
       file.items.push(declaration);
     }
   }
 
-  private declaredVariables(file: DeclarationFile): void {
+  private declaredVariables(file: DeclarationDraft): void {
     const next = this.cursor.lookahead();
     if (next.kind == TokenKind.Enum) {
       this.cursor.next();
@@ -210,7 +210,7 @@ partial class FileParser {
     }
   }
 
-  private declaredClass(file: DeclarationFile, isAbstract: boolean): void {
+  private declaredClass(file: DeclarationDraft, isAbstract: boolean): void {
     this.cursor.next();
     const name = this.cursor.peek();
 
@@ -303,7 +303,7 @@ partial class FileParser {
 
   private declaredForm(
     token: Token,
-    modifiers: Modifiers,
+    modifiers: Read<Modifiers>,
     optional: boolean,
     loc: int,
   ): DeclaredMemberForm {
@@ -333,7 +333,7 @@ partial class FileParser {
     return { kind: DeclaredMemberKind.Method, typeParams, params };
   }
 
-  private reportFieldModifiers(modifiers: Modifiers, loc: int): void {
+  private reportFieldModifiers(modifiers: Read<Modifiers>, loc: int): void {
     const next = this.cursor.peek();
 
     if (modifiers.isAbstract) {
@@ -345,7 +345,7 @@ partial class FileParser {
   }
 
   private declaredType(
-    form: DeclaredMemberForm,
+    form: Read<DeclaredMemberForm>,
     token: Token,
     name: string,
   ): TypeRef | undefined {
@@ -371,7 +371,7 @@ partial class FileParser {
     return result;
   }
 
-  private endDeclaredMember(form: DeclaredMemberForm): void {
+  private endDeclaredMember(form: Read<DeclaredMemberForm>): void {
     if (form.kind == DeclaredMemberKind.Field) {
       return this.endDeclaredField();
     }

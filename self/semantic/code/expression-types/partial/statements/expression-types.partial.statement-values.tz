@@ -12,7 +12,7 @@ import {
 } from "../../../../../program/type/types/type.types.tz";
 
 partial class ExpressionTypes {
-  private usedCheck(
+  private readonly usedCheck(
     expr: Expr,
     type: Type,
     at: int | undefined,
@@ -51,7 +51,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private libraryUsedCheck(
+  private readonly libraryUsedCheck(
     expr: Expr,
     type: Type,
     at: int | undefined,
@@ -90,7 +90,7 @@ partial class ExpressionTypes {
     this.report(module, loc, Code.PromiseNotAwaitedHere, { word: text });
   }
 
-  private isValueMethodCall(expr: Expr, module: int): boolean {
+  private readonly isValueMethodCall(expr: Expr, module: int): boolean {
     if (expr.kind != ExprKind.Call) {
       return false;
     }

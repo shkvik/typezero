@@ -14,7 +14,7 @@ import {
 import { FsCall, FsShape } from "../../../fs-rules/types/fs-rules.types.tz";
 
 partial class ExpressionTypes {
-  private timerPromisesCheck(expr: CallExpr, module: int): void {
+  private readonly timerPromisesCheck(expr: CallExpr, module: int): void {
     const callee = expr.callee;
     if (callee.kind != ExprKind.Name || this.modules.isLibraryModule(module)) {
       return;
@@ -43,7 +43,7 @@ partial class ExpressionTypes {
     }
   }
 
-  private timerOptionsAt(name: string): int {
+  private readonly timerOptionsAt(name: string): int {
     if (name == kImmediateName) {
       return 1;
     }
@@ -51,7 +51,7 @@ partial class ExpressionTypes {
     return 2;
   }
 
-  private isTimersPromisesName(expr: NameExpr, module: int): boolean {
+  private readonly isTimersPromisesName(expr: NameExpr, module: int): boolean {
     const target = this.targetOfName(expr, module);
     const isCallable =
       target != undefined &&
@@ -66,7 +66,7 @@ partial class ExpressionTypes {
     return opened != undefined && opened.name == kTimersPromisesModule;
   }
 
-  private importedName(expr: NameExpr, module: int): string {
+  private readonly importedName(expr: NameExpr, module: int): string {
     const symbol = this.record(module)?.uses.get(expr.loc)?.symbol;
     const target = symbol?.target;
     if (symbol == undefined || symbol.kind != SymbolKind.Import) {
