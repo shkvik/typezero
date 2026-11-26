@@ -39,6 +39,8 @@ import "./partial/lowering.partial.keyed.tz";
 import "./partial/lowering.partial.file-kinds.tz";
 import "./partial/lowering.partial.bytes-extras.tz";
 import "./partial/lowering.partial.children.tz";
+import "./partial/lowering.partial.generics.tz";
+import "./partial/lowering.partial.unsafe.tz";
 import { ExpressionAnswers } from "../../program/expression-answers/expression-answers.tz";
 import { Module, Program } from "../../program/module/types/module.types.tz";
 import { TypeStore } from "../../program/type/type-store/type-store.tz";
@@ -67,6 +69,7 @@ import {
   Frame,
   IrValue,
   LoweredProgram,
+  PendingInstance,
   Place,
   Unlowered,
 } from "./types/lowering.types.tz";
@@ -100,6 +103,13 @@ export class Lowering {
   private classIds: int;
   private pendingLabel: string;
   private nextFrame: int;
+  private binding: Map<int, Type>;
+  private readonly wantedInstances: Set<string>;
+  private readonly pendingInstances: PendingInstance[];
+  private instanceModule: int;
+  private instanceStart: int;
+  private instanceEnd: int;
+  private instanceSuffix: string;
 
   public constructor(
     store: TypeStore,
@@ -136,6 +146,13 @@ export class Lowering {
     this.classIds = kFirstClassId;
     this.pendingLabel = "";
     this.nextFrame = kMainFrame + 1;
+    this.binding = new Map<int, Type>();
+    this.wantedInstances = new Set<string>();
+    this.pendingInstances = [];
+    this.instanceModule = -1;
+    this.instanceStart = 0;
+    this.instanceEnd = 0;
+    this.instanceSuffix = "";
   }
 
   public run(): LoweredProgram {
@@ -164,6 +181,7 @@ export class Lowering {
       }
     }
 
+    this.instancesLowered();
     this.runtimeCall(main, kRuntimeMainDone, []);
     this.globalsReleased(main);
     this.runtimeCall(main, kRuntimeShutdown, []);

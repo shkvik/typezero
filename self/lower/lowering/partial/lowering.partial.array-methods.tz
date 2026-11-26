@@ -87,7 +87,7 @@ partial class Lowering {
       case "sort":
         return this.sortedArray(frame, call, member, object);
       case "reverse":
-        return this.reversedArray(frame, member);
+        return this.reversedArray(frame, call, member, object);
       case "splice":
         return this.splicedArray(frame, call, member, object);
       case "unshift":
@@ -500,6 +500,17 @@ partial class Lowering {
       return undefined;
     }
 
+    if (this.isPlainElement(object.item)) {
+      const items = [object.item];
+      const given = [array, wanted];
+      const found = this.runtimeFunctionCall(frame, member.name, items, given, loc);
+
+      this.dropping(frame, wanted);
+      this.dropping(frame, array);
+
+      return found;
+    }
+
     const slot = frame.made.slot(wanted.type, "search.value");
     const mode = this.searchMode(member.name);
 
@@ -535,6 +546,22 @@ partial class Lowering {
     const tz = this.store.integer(64, false);
 
     return { type: kIntType, value, tz };
+  }
+
+  private isPlainElement(item: Type): boolean {
+    if (this.optionalInner(item) != undefined) {
+      return false;
+    }
+
+    const isInstance =
+      item.kind == TypeKind.Instance && !this.isHandleType(item);
+
+    return (
+      this.isInteger(item) ||
+      this.isBoolean(item) ||
+      this.isString(item) ||
+      isInstance
+    );
   }
 
   private readonly searchMode(name: string): int {
@@ -755,7 +782,9 @@ partial class Lowering {
     const result = this.typeOf(call);
     const resultIr = this.typeOrUndefined(result);
     if (result == undefined || resultIr == undefined) {
-      this.notLowered(frame.module, call.loc, "a result of this type");
+      const kind = this.kindName(result);
+
+      this.notLowered(frame.module, call.loc, `a result of type ${kind}`);
 
       return undefined;
     }
@@ -1013,11 +1042,28 @@ partial class Lowering {
 
   private reversedArray(
     frame: Frame,
+    call: CallExpr,
     member: MemberExpr,
+    object: Type,
   ): IrValue | undefined {
     const array = this.value(frame, member.object);
     if (array == undefined) {
       return undefined;
+    }
+    if (object.kind == TypeKind.Array && this.isPlainElement(object.item)) {
+      const items = [object.item];
+      const reversed = this.runtimeFunctionCall(
+        frame,
+        "reverse",
+        items,
+        [array],
+        call.loc,
+      );
+      if (reversed == undefined) {
+        return undefined;
+      }
+
+      return array;
     }
 
     const params = [kPointerType];

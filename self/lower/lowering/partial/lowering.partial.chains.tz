@@ -15,7 +15,14 @@ import { Frame, IrValue } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private readonly typeOf(expr: Expr): Type | undefined {
-    return this.knownTypes.get(expr) ?? this.answers.typeOf(expr);
+    const known = this.knownTypes.get(expr);
+    if (known != undefined) {
+      return known;
+    }
+
+    const answered = this.answers.typeOf(expr);
+
+    return this.boundOrNone(answered);
   }
 
   private typeIn(frame: Frame, expr: Expr): Type | undefined {

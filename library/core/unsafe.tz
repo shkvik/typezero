@@ -1,0 +1,17 @@
+export declare class Raw<T> {}
+
+export declare function allocate<T>(count: int): Raw<T>;
+export declare function reallocate<T>(raw: Raw<T>, count: int): Raw<T>;
+export declare function release<T>(raw: Raw<T>): void;
+export declare function putAt<T>(raw: Raw<T>, index: int, value: Own<T>): void;
+export declare function takeAt<T>(raw: Raw<T>, index: int): T;
+export declare function peekAt<T>(raw: Raw<T>, index: int): Read<T>;
+export declare function destroyAt<T>(raw: Raw<T>, index: int): void;
+export declare function shiftCells<T>(
+  raw: Raw<T>,
+  from: int,
+  to: int,
+  count: int,
+): void;
+export declare function forget<T>(value: Own<T>): void;
+export declare function arrayCells<T>(items: T[]): Raw<T>;

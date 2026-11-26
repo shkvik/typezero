@@ -5,16 +5,17 @@ import { kLibraryDirectory } from "../../program/library/library-modules/const/l
 
 export class ProgramSource {
   public readonly load(entry: string): LoadResult {
-    return this.loadWith(entry, []);
+    return this.loadWith(entry, [], false);
   }
 
   public readonly loadWith(
     entry: string,
     overlays: Read<Overlay[]>,
+    isBuilt: boolean,
   ): LoadResult {
     const home = dirname(process.execPath);
     const library = join(home, kLibraryDirectory);
-    const loader = new Loader(entry, library, overlays);
+    const loader = new Loader(entry, library, overlays, isBuilt);
 
     return loader.run();
   }

@@ -46,11 +46,13 @@ export class Loader {
   private packageErrors: string[];
   private readonly packageOf: Map<int, int>;
   private readonly overlays: Map<string, string>;
+  private readonly isBuilt: boolean;
 
   public constructor(
     entryPath: string,
     libraryDirectory: string,
     overlays: Read<Overlay[]>,
+    isBuilt: boolean,
   ) {
     const entryDirectory = dirname(entryPath);
     const reader = new ManifestReader();
@@ -72,6 +74,7 @@ export class Loader {
     this.order = [];
     this.unreadable = [];
     this.overlays = new Map<string, string>();
+    this.isBuilt = isBuilt;
 
     for (const overlay of overlays) {
       const key = this.keyOf(overlay.path);
@@ -90,6 +93,10 @@ export class Loader {
 
     const reached = this.opened.length;
     const globalIds = this.loadGlobals();
+
+    if (this.isBuilt) {
+      this.loadRuntime();
+    }
     const parts = new PartialClasses(this.order.slice());
 
     parts.join();

@@ -52,6 +52,7 @@ export declare function LLVMConstIntOfString(
 ): LLVMValue;
 export declare function LLVMConstReal(type: LLVMType, value: double): LLVMValue;
 export declare function LLVMConstNull(type: LLVMType): LLVMValue;
+export declare function LLVMSizeOf(type: LLVMType): LLVMValue;
 export declare function LLVMGetUndef(type: LLVMType): LLVMValue;
 export declare function LLVMConstStructInContext(
   context: LLVMContext,

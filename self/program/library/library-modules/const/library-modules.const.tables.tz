@@ -105,6 +105,27 @@ export const kLibraryModules: LibraryModule[] = [
     access: LibraryAccess.Program,
   },
   {
+    name: "tz:unsafe",
+    file: "unsafe.tz",
+    parts: [],
+    specs: ["tz:unsafe"],
+    access: LibraryAccess.Library,
+  },
+  {
+    name: "tz:list",
+    file: "list.tz",
+    parts: [],
+    specs: ["tz:list"],
+    access: LibraryAccess.Program,
+  },
+  {
+    name: "tz:array",
+    file: "array.tz",
+    parts: [],
+    specs: ["tz:array"],
+    access: LibraryAccess.Runtime,
+  },
+  {
     name: "tz:ffi",
     file: "ffi.tz",
     parts: [],

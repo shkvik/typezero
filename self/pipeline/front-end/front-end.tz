@@ -7,7 +7,10 @@ import { DeclarationTypes } from "../../semantic/declaration/declaration-types/d
 import { ModuleBinder } from "../../semantic/declaration/module-binder/module-binder.tz";
 import { NameResolver } from "../../semantic/declaration/name-resolver/name-resolver.tz";
 import { TypeResolver } from "../../semantic/types/type-resolver/type-resolver.tz";
-import { kRecoverableCodes } from "./const/front-end.const.tz";
+import {
+  kCheckedLibraryModules,
+  kRecoverableCodes,
+} from "./const/front-end.const.tz";
 import { CheckedProgram, ModuleProblems } from "./types/front-end.types.tz";
 
 export class FrontEnd {
@@ -43,7 +46,7 @@ export class FrontEnd {
 
     for (const scopes of resolved) {
       const module = scopes.module;
-      if (module.source.isLibrary) {
+      if (!this.isChecked(module)) {
         continue;
       }
 
@@ -56,6 +59,14 @@ export class FrontEnd {
     const typed = steps.map((declarations) => declarations.run());
 
     return { names, resolved, types, values, typed };
+  }
+
+  private readonly isChecked(module: Module): boolean {
+    if (!module.source.isLibrary) {
+      return true;
+    }
+
+    return kCheckedLibraryModules.includes(module.name);
   }
 
   public readonly problems(checked: Read<CheckedProgram>): ModuleProblems[] {

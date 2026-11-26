@@ -7,6 +7,7 @@ import {
   LLVMConstIntOfString,
   LLVMConstIntToPtr,
   LLVMConstNull,
+  LLVMSizeOf,
   LLVMConstReal,
   LLVMConstStringInContext2,
   LLVMConstStructInContext,
@@ -130,6 +131,10 @@ export class IrModule {
 
   public readonly zero(key: string): LLVMValue {
     return LLVMConstNull(this.type(key));
+  }
+
+  public readonly sizeOf(key: string): LLVMValue {
+    return LLVMSizeOf(this.type(key));
   }
 
   public readonly undefinedOf(key: string): LLVMValue {

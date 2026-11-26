@@ -1,5 +1,10 @@
+import { ClassDecl } from "../../../program/ast/types/ast.types.classes.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
 import { InstanceField } from "../../../program/expression-answers/types/expression-answers.types.tz";
-import { Type } from "../../../program/type/types/type.types.tz";
+import {
+  FunctionShape,
+  Type,
+} from "../../../program/type/types/type.types.tz";
 import { IrFunction } from "../../ir-function/ir-function.tz";
 import { LLVMBlock, LLVMValue } from "../../llvm-api/llvm-api.tz";
 
@@ -21,6 +26,7 @@ export type Place = {
   readonly type: string;
   readonly tz: Type;
   readonly owner: int;
+  readonly flag?: LLVMValue;
 };
 
 export type LoopTarget = {
@@ -102,6 +108,21 @@ export type InlineTarget = {
   readonly result?: Place;
   readonly end: LLVMBlock;
   readonly depth: int;
+};
+
+export type PendingInstance = {
+  readonly module: int;
+  readonly fn: FunctionDecl;
+  readonly name: string;
+  readonly params: readonly Type[];
+  readonly args: readonly Type[];
+  readonly owner?: ClassDecl;
+  readonly self?: Type;
+};
+
+export type MethodTarget = {
+  readonly name: string;
+  readonly shape: FunctionShape;
 };
 
 export type Unlowered = {

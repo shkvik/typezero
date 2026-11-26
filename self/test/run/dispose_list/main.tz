@@ -1,0 +1,33 @@
+// A List<T> frees its cells itself: the compiler calls [Symbol.dispose] when the
+// list is freed, and the dispose of List frees each element as T.
+import { List } from "tz:list";
+
+class Point {
+  public readonly x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+function filled(count: int): int {
+  const points = new List<Point>();
+
+  for (let index = 0; index < count; index++) {
+    points.push(new Point(index));
+  }
+
+  return points.length();
+}
+
+function words(): string {
+  const items = new List<string>();
+
+  items.push("one");
+  items.push("two");
+
+  return items.at(1) ?? "";
+}
+
+console.log(filled(10), filled(1000));
+console.log(words());

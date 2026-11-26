@@ -1,0 +1,87 @@
+// Generic classes: lower lays out each instance type (Box<int>, Box<string>)
+// apart and makes a copy of each method it calls for it.
+class Box<T> {
+  private value: T;
+  private changes: int;
+
+  public constructor(value: Own<T>) {
+    this.value = value;
+    this.changes = 0;
+  }
+
+  public readonly get(): Read<T> {
+    return this.value;
+  }
+
+  public put(value: Own<T>): void {
+    this.value = value;
+    this.changes += 1;
+  }
+
+  public readonly count(): int {
+    return this.changes;
+  }
+}
+
+class Pair<A, B> {
+  public readonly first: A;
+  public readonly second: B;
+
+  public constructor(first: Own<A>, second: Own<B>) {
+    this.first = first;
+    this.second = second;
+  }
+
+  public readonly text(): string {
+    return `${this.first}=${this.second}`;
+  }
+}
+
+class Stack<T> {
+  private readonly items: T[];
+
+  public constructor() {
+    this.items = [];
+  }
+
+  public push(item: Own<T>): void {
+    this.items.push(item);
+  }
+
+  public pop(): T | undefined {
+    return this.items.pop();
+  }
+
+  public readonly size(): int {
+    return this.items.length;
+  }
+}
+
+function filled<T>(first: Own<T>, second: Own<T>): Stack<T> {
+  const stack = new Stack<T>();
+
+  stack.push(first);
+  stack.push(second);
+
+  return stack;
+}
+
+const numbers = new Box(1);
+const words = new Box("one");
+
+numbers.put(2);
+numbers.put(3);
+words.put("two");
+
+console.log(numbers.get(), numbers.count());
+console.log(words.get(), words.count());
+console.log(new Pair("a", 1).text());
+console.log(new Pair(true, "b").text());
+
+const stack = filled("x", "y");
+
+console.log(stack.size());
+console.log(stack.pop());
+console.log(stack.pop());
+console.log(stack.pop() == undefined);
+console.log(filled(1, 2).size());

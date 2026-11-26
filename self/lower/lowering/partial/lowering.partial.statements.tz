@@ -18,7 +18,7 @@ import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
 import { LLVMBlock } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import { kDebugger, kNoOwner } from "../const/lowering.const.tz";
-import { Frame, LoopTarget, Place } from "../types/lowering.types.tz";
+import { Frame, IrValue, LoopTarget, Place } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private statement(frame: Frame, statement: Stmt): void {
@@ -116,7 +116,8 @@ partial class Lowering {
   }
 
   private variableTypeIn(frame: Frame, decl: VarDeclarator): Type | undefined {
-    const tz = this.values.variableOf(frame.module, decl.loc);
+    const variable = this.values.variableOf(frame.module, decl.loc);
+    const tz = this.boundOrNone(variable);
     const init = decl.init;
     if (init != undefined && init.kind == ExprKind.Binary) {
       if (init.op == BinaryOp.Nullish) {
@@ -159,7 +160,8 @@ partial class Lowering {
 
   private variable(frame: Frame, decl: VarDeclarator): void {
     const key = this.placeKey(frame.module, decl.loc);
-    const place = this.places.get(key) ?? this.localPlace(frame, decl);
+    const known = this.places.get(key);
+    const place = this.globalOrNone(known) ?? this.localPlace(frame, decl);
     if (place == undefined) {
       return;
     }
@@ -180,6 +182,14 @@ partial class Lowering {
     }
 
     this.stored(frame, place, value);
+  }
+
+  private readonly globalOrNone(place: Place | undefined): Place | undefined {
+    if (place == undefined || place.owner != kNoOwner) {
+      return undefined;
+    }
+
+    return place;
   }
 
   private boundPlace(
@@ -346,7 +356,8 @@ partial class Lowering {
       return frame.made.returnedVoid();
     }
 
-    const value = this.wantedValue(frame, given, result);
+    const moved = this.movedLocal(frame, given);
+    const value = moved ?? this.wantedValue(frame, given, result);
     if (value == undefined) {
       return;
     }
@@ -360,5 +371,31 @@ partial class Lowering {
 
     this.cleanupsTo(frame, 0);
     frame.made.returned(owned.value);
+  }
+
+  private movedLocal(frame: Read<Frame>, given: Expr): IrValue | undefined {
+    if (given.kind != ExprKind.Name) {
+      return undefined;
+    }
+
+    const target = this.values.valueTargetOf(given, frame.module);
+    if (target == undefined) {
+      return undefined;
+    }
+
+    const key = this.placeKey(target.module, target.loc);
+    const place = this.places.get(key);
+    if (place == undefined || place.owner != frame.id) {
+      return undefined;
+    }
+    if (place.flag != undefined || !this.isManaged(place.tz)) {
+      return undefined;
+    }
+
+    const value = frame.made.load(place.type, place.pointer);
+
+    frame.made.store(this.ir.zero(place.type), place.pointer);
+
+    return { type: place.type, value, tz: place.tz, owned: true };
   }
 }

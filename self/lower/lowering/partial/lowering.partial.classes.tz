@@ -27,6 +27,7 @@ import {
   kTupleFlag,
   kPointerType,
   kVoidType,
+  kDisposeName,
 } from "../const/lowering.const.tz";
 import {
   ClassLayout,
@@ -34,6 +35,7 @@ import {
   IrValue,
   LayoutField,
   LayoutShape,
+  MethodTarget,
   Place,
 } from "../types/lowering.types.tz";
 
@@ -42,26 +44,73 @@ partial class Lowering {
     if (!this.isPlainClass(decl)) {
       return this.notLowered(frame.module, decl.loc, "this class");
     }
+    if (decl.typeParams.length > 0) {
+      return;
+    }
+
+    const self = this.resolver.classInstance(frame.module, decl, []);
 
     for (const fn of decl.constructors) {
-      this.methodLowered(frame.module, decl, fn);
+      const name = this.methodName(frame.module, decl, fn);
+
+      this.methodLowered(frame.module, decl, fn, name, self);
     }
 
     for (const fn of decl.methods) {
       if (fn.body != undefined) {
-        this.methodLowered(frame.module, decl, fn);
+        const name = this.methodName(frame.module, decl, fn);
+
+        this.methodLowered(frame.module, decl, fn, name, self);
       }
     }
   }
 
   private readonly isPlainClass(decl: ClassDecl): boolean {
     return (
-      decl.typeParams.length == 0 &&
       decl.base == undefined &&
       decl.baseExpr == undefined &&
       decl.decorators.length == 0 &&
       !decl.isPartial
     );
+  }
+
+  private methodTarget(
+    object: Type,
+    decl: ClassDecl,
+    fn: FunctionDecl,
+  ): MethodTarget | undefined {
+    if (object.kind != TypeKind.Instance) {
+      return undefined;
+    }
+
+    const shape = this.methodShape(object.module, decl, fn);
+    const name = this.methodName(object.module, decl, fn);
+    if (shape == undefined) {
+      return undefined;
+    }
+    if (decl.typeParams.length == 0) {
+      return { name, shape };
+    }
+
+    const params = this.resolver.parameterTypes(object.module, decl.typeParams);
+    const args = object.args;
+    const binding = this.bindingOf(params, args);
+    const bound = this.shapeWith(shape, binding);
+    const ids = args.map((type) => `${type.id}`);
+    const instance = `${name}.i${ids.join("_")}`;
+    const home = this.methodHome(object.module, decl, fn);
+
+    this.instanceWanted({
+      module: home,
+      fn,
+      name: instance,
+      params,
+      args,
+      owner: decl,
+      self: object,
+    });
+
+    return { name: instance, shape: bound };
   }
 
   private readonly methodName(module: int, decl: ClassDecl, fn: FunctionDecl): string {
@@ -106,11 +155,12 @@ partial class Lowering {
     classModule: int,
     decl: ClassDecl,
     fn: FunctionDecl,
+    name: string,
+    self: Type,
   ): void {
     const body = fn.body;
     const module = this.methodHome(classModule, decl, fn);
     const shape = this.shapeOf(module, fn.loc);
-    const self = this.resolver.classInstance(classModule, decl, []);
     if (body == undefined || shape == undefined) {
       return this.notLowered(module, fn.loc, "this method");
     }
@@ -133,7 +183,6 @@ partial class Lowering {
       return this.notLowered(module, fn.loc, `a method of type ${kind}`);
     }
 
-    const name = this.methodName(classModule, decl, fn);
     const all = [kPointerType].concat(params.slice());
     const made = new IrFunction(this.ir, name, result, all);
     const selfPlace: Place = {
@@ -185,7 +234,9 @@ partial class Lowering {
     const size = this.structSize(placed);
     const name = shape.name;
     const classId = this.nextClassId();
-    const drop = this.dropFunction(this.layoutTitle(name), struct, placed);
+    const disposer = this.disposeTarget(type);
+    const title = this.layoutTitle(name);
+    const drop = this.dropFunction(title, struct, placed, disposer);
     const descriptor = this.layoutDescriptor(shape, drop, placed, classId);
     const layout: ClassLayout = {
       struct,
@@ -377,14 +428,34 @@ partial class Lowering {
     return offset + align - rest;
   }
 
+  private disposeTarget(type: Type): MethodTarget | undefined {
+    const decl = this.values.classDeclOf(type);
+    const fn = decl?.methods.find(
+      (one) => one.name == kDisposeName && one.body != undefined,
+    );
+    if (decl == undefined || fn == undefined) {
+      return undefined;
+    }
+
+    return this.methodTarget(type, decl, fn);
+  }
+
   private dropFunction(
     name: string,
     struct: string,
     fields: Read<LayoutField[]>,
+    disposer: MethodTarget | undefined,
   ): LLVMValue {
     const dropName = this.ir.uniqueName(`tz.drop.${name}.`);
     const made = new IrFunction(this.ir, dropName, kVoidType, [kPointerType]);
     const object = made.param(0);
+
+    if (disposer != undefined) {
+      const disposing = this.ir.declare(disposer.name, kVoidType, [kPointerType]);
+
+      made.call(disposing, [object]);
+    }
+
     const frame: Frame = {
       made,
       id: this.frameId(),
@@ -567,24 +638,32 @@ partial class Lowering {
       return value;
     }
 
-    const shape = this.methodShape(type.module, decl, ctor);
-    const params = this.shapeTypesOf(shape);
-    if (shape == undefined || params == undefined) {
+    const target = this.methodTarget(type, decl, ctor);
+    const params = this.shapeTypesOf(target?.shape);
+    if (target == undefined || params == undefined) {
       this.notLowered(frame.module, expr.loc, "this new");
 
       return undefined;
     }
 
-    const args = this.callArguments(frame, expr.args, shape, expr.loc);
+    const kept: IrValue[] = [];
+    const args = this.callArguments(
+      frame,
+      expr.args,
+      target.shape,
+      expr.loc,
+      ctor,
+      kept,
+    );
     if (args == undefined) {
       return undefined;
     }
 
-    const name = this.methodName(type.module, decl, ctor);
     const all = [kPointerType].concat(params);
-    const callee = this.ir.declare(name, kVoidType, all);
+    const callee = this.ir.declare(target.name, kVoidType, all);
 
     frame.made.call(callee, [object].concat(args));
+    this.droppedAll(frame, kept);
 
     return value;
   }
@@ -774,10 +853,16 @@ partial class Lowering {
       return undefined;
     }
 
-    const shape = this.methodShape(object.module, decl, fn);
+    const target = this.methodTarget(object, decl, fn);
+    const shape = target?.shape;
     const result = this.resultType(shape);
     const params = this.shapeTypesOf(shape);
-    if (shape == undefined || result == undefined || params == undefined) {
+    if (
+      target == undefined ||
+      shape == undefined ||
+      result == undefined ||
+      params == undefined
+    ) {
       const kind = this.shapeProblemOf(shape);
 
       this.notLowered(frame.module, call.loc, `a method call of type ${kind}`);
@@ -790,16 +875,17 @@ partial class Lowering {
       return undefined;
     }
 
-    const args = this.callArguments(frame, call.args, shape, call.loc);
+    const kept: IrValue[] = [];
+    const args = this.callArguments(frame, call.args, shape, call.loc, fn, kept);
     if (args == undefined) {
       return undefined;
     }
 
-    const name = this.methodName(object.module, decl, fn);
     const all = [kPointerType].concat(params);
-    const callee = this.ir.declare(name, result, all);
+    const callee = this.ir.declare(target.name, result, all);
     const made = frame.made.call(callee, [self.value].concat(args));
 
+    this.droppedAll(frame, kept);
     this.dropping(frame, self);
 
     return { type: result, value: made, tz: shape.result, owned: true };

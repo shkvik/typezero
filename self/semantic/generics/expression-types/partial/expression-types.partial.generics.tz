@@ -166,6 +166,8 @@ partial class ExpressionTypes {
       return this.store.plain(TypeKind.Error);
     }
 
+    this.rememberTypeArguments(draft, module);
+
     const shape = this.boundShape(draft);
     const call: CallTarget = {
       params: shape.params,
@@ -566,6 +568,7 @@ partial class ExpressionTypes {
     }
 
     this.literalArguments(draft, module);
+    this.rememberTypeArguments(draft, module);
 
     const shape = this.boundShape(draft);
 
@@ -638,6 +641,26 @@ partial class ExpressionTypes {
         this.typed(arg.expr, undefined, module);
       }
     }
+  }
+
+  private readonly rememberTypeArguments(
+    draft: Read<GenericDraft>,
+    module: int,
+  ): void {
+    const target = draft.target;
+    const types: Type[] = [];
+
+    for (let index = 0; index < target.params.length; index++) {
+      const param = target.params[index];
+      const bound = draft.bound.get(index);
+      if (bound != undefined) {
+        types.push(bound);
+      } else if (param != undefined) {
+        types.push(param);
+      }
+    }
+
+    this.typeArguments.set(`${module} ${target.loc}`, types);
   }
 
   private readonly boundShape(draft: Read<GenericDraft>): FunctionShape {

@@ -376,9 +376,6 @@ partial class FileParser {
         this.cursor.next();
         return this.declaredFunction();
       case TokenKind.Class:
-        if (this.library) {
-          return this.skipDeclaration(loc, Code.DeclareNotSupported);
-        }
         this.cursor.next();
         return this.handleClass();
       case TokenKind.Module:

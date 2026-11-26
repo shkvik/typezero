@@ -9,12 +9,17 @@ import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
   kArrayFree,
+  kArrayLengthField,
+  kBooleanType,
   kArrayRelease,
   kArrayRetain,
   kDecimalFree,
   kDecimalRelease,
   kDecimalRetain,
   kDecimalType,
+  kFlagType,
+  kImmortalCount,
+  kImmortalName,
   kInstanceRelease,
   kIntType,
   kObjectHeader,
@@ -34,6 +39,10 @@ import {
 
 partial class Lowering {
   private isManaged(type: Type): boolean {
+    if (this.store.isInterned(type)) {
+      return false;
+    }
+
     const inner = this.optionalInner(type);
     if (inner != undefined) {
       return this.isManaged(inner);
@@ -62,6 +71,10 @@ partial class Lowering {
   }
 
   private owning(frame: Read<Frame>, value: IrValue): IrValue {
+    if (this.isArena(value.tz) && !this.isConstant(value)) {
+      this.immortalized(frame, value);
+    }
+
     const isFree =
       value.owned == true ||
       !this.isManaged(value.tz) ||
@@ -71,6 +84,52 @@ partial class Lowering {
     }
 
     return { type: value.type, value: value.value, tz: value.tz, owned: true };
+  }
+
+  private readonly isArena(type: Type): boolean {
+    const inner = this.optionalInner(type) ?? type;
+
+    return this.store.isInterned(inner) || this.store.isInterned(type);
+  }
+
+  private immortalized(frame: Read<Frame>, value: IrValue): void {
+    const inner = this.optionalInner(value.tz);
+    if (inner != undefined) {
+      const inside = this.insideValue(frame, value, inner);
+
+      return this.immortalized(frame, inside);
+    }
+    if (value.type != kPointerType) {
+      return;
+    }
+
+    const helper = this.immortalHelper();
+
+    frame.made.call(helper, [value.value]);
+  }
+
+  private readonly immortalHelper(): IrCallee {
+    const known = this.ir.callee(kImmortalName);
+    if (known != undefined) {
+      return known;
+    }
+
+    const made = new IrFunction(this.ir, kImmortalName, kVoidType, [
+      kPointerType,
+    ]);
+    const object = made.param(0);
+    const kept = made.block("kept");
+    const done = made.block("done");
+    const none = this.ir.zero(kPointerType);
+    const isObject = made.integerCompare(IrIntPredicate.NotEqual, object, none);
+
+    made.conditionalBranch(isObject, kept, done);
+    made.open(kept);
+    made.store(this.ir.integer(kIntType, kImmortalCount), object);
+    made.open(done);
+    made.finishVoid();
+
+    return made.callee;
   }
 
   private dropping(frame: Read<Frame>, value: IrValue): void {
@@ -113,6 +172,9 @@ partial class Lowering {
     }
     if (this.isCounted(type) && !isRetain) {
       return this.instanceReleaseHelper();
+    }
+    if (!isRetain && type.kind == TypeKind.Array && this.isManaged(type.item)) {
+      return this.arrayReleaseHelper(type);
     }
 
     const name = this.pick(isRetain, kArrayRetain, kArrayRelease);
@@ -159,9 +221,30 @@ partial class Lowering {
       tz: place.tz,
       owned: true,
     };
+    const flag = place.flag;
 
     frame.made.store(this.ir.zero(place.type), place.pointer);
+
+    if (flag == undefined) {
+      return this.dropping(frame, value);
+    }
+
+    this.flaggedDrop(frame, flag, value);
+  }
+
+  private flaggedDrop(
+    frame: Read<Frame>,
+    flag: LLVMValue,
+    value: IrValue,
+  ): void {
+    const isOwned = frame.made.load(kBooleanType, flag);
+    const release = frame.made.block("flag.drop");
+    const after = frame.made.block("flag.after");
+
+    frame.made.conditionalBranch(isOwned, release, after);
+    frame.made.open(release);
     this.dropping(frame, value);
+    frame.made.open(after);
   }
 
   private keepPlace(frame: Frame, place: Place): void {
@@ -184,9 +267,16 @@ partial class Lowering {
       tz: place.tz,
       owned: true,
     };
+    const flag = place.flag;
 
     frame.made.store(owned.value, place.pointer);
-    this.dropping(frame, old);
+
+    if (flag == undefined) {
+      return this.dropping(frame, old);
+    }
+
+    this.flaggedDrop(frame, flag, old);
+    frame.made.store(this.ir.integer(kBooleanType, "1"), flag);
   }
 
   private readonly countHelper(
@@ -305,6 +395,70 @@ partial class Lowering {
     made.open(freed);
     made.call(freeing, [object]);
     made.open(after);
+  }
+
+  private arrayReleaseHelper(type: Type): IrCallee {
+    const name = `${kArrayRelease}.${type.id}`;
+    const known = this.ir.callee(name);
+    if (known != undefined) {
+      return known;
+    }
+
+    const made = new IrFunction(this.ir, name, kVoidType, [kPointerType]);
+    const frame: Frame = {
+      made,
+      id: this.frameId(),
+      module: 0,
+      loops: [],
+      scopes: [],
+    };
+    const array = made.param(0);
+    const counted = made.block("counted");
+    const freed = made.block("free");
+    const done = made.block("done");
+    const none = this.ir.zero(kPointerType);
+    const isArray = made.integerCompare(IrIntPredicate.NotEqual, array, none);
+
+    made.conditionalBranch(isArray, counted, done);
+    made.open(counted);
+
+    const count = made.load(kIntType, array);
+    const one = this.ir.integer(kIntType, "1");
+    const left = made.binary(IrOpcode.Sub, count, one);
+    const zero = this.ir.zero(kIntType);
+    const isLast = made.integerCompare(IrIntPredicate.Equal, left, zero);
+
+    made.store(left, array);
+    made.conditionalBranch(isLast, freed, done);
+    made.open(freed);
+    this.cellsReleased(frame, array, type);
+    made.open(done);
+    made.finishVoid();
+
+    return made.callee;
+  }
+
+  private cellsReleased(frame: Read<Frame>, array: LLVMValue, type: Type): void {
+    if (type.kind == TypeKind.Array) {
+      const loop = this.eachStart(frame, array, type.item);
+      if (loop != undefined) {
+        const item = loop.item;
+
+        this.dropping(frame, {
+          type: item.type,
+          value: item.value,
+          tz: item.tz,
+          owned: true,
+        });
+        this.eachEnd(frame, loop);
+      }
+    }
+
+    const length = this.arrayField(frame, array, kArrayLengthField);
+    const freeing = this.ir.declare(kArrayFree, kVoidType, [kPointerType]);
+
+    frame.made.store(this.ir.zero(kFlagType), length);
+    frame.made.call(freeing, [array]);
   }
 
   private readonly instanceReleaseHelper(): IrCallee {

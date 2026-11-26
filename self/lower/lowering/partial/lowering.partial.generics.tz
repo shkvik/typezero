@@ -1,0 +1,265 @@
+import { replace } from "tz:mem";
+import {
+  CallExpr,
+  Expr,
+  NameExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { FunctionDecl } from "../../../program/ast/types/ast.types.functions.tz";
+import { StmtKind } from "../../../program/ast/types/ast.types.statements.tz";
+import { Module } from "../../../program/module/types/module.types.tz";
+import {
+  FunctionParameter,
+  FunctionShape,
+  Type,
+  TypeKind,
+} from "../../../program/type/types/type.types.tz";
+import { Lowering } from "../lowering.tz";
+import { kArrayModule } from "../const/lowering.const.tz";
+import { Frame, IrValue, PendingInstance } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private readonly bound(type: Type): Type {
+    if (this.binding.size == 0) {
+      return type;
+    }
+
+    return this.resolver.substitute(type, this.binding);
+  }
+
+  private readonly boundOrNone(type: Type | undefined): Type | undefined {
+    if (type == undefined) {
+      return undefined;
+    }
+
+    return this.bound(type);
+  }
+
+  private readonly shapeWith(
+    shape: Read<FunctionShape>,
+    binding: Read<Map<int, Type>>,
+  ): FunctionShape {
+    const params: FunctionParameter[] = [];
+
+    for (const param of shape.params) {
+      const type = this.resolver.substitute(param.type, binding);
+
+      params.push({ type, optional: param.optional });
+    }
+
+    const result = this.resolver.substitute(shape.result, binding);
+    const self = this.selfWith(shape.self, binding);
+
+    return { params, rest: shape.rest, self, result };
+  }
+
+  private readonly selfWith(
+    self: Type | undefined,
+    binding: Read<Map<int, Type>>,
+  ): Type | undefined {
+    if (self == undefined) {
+      return undefined;
+    }
+
+    return this.resolver.substitute(self, binding);
+  }
+
+  private readonly bindingOf(
+    params: Read<Type[]>,
+    args: Read<Type[]>,
+  ): Map<int, Type> {
+    const binding = new Map<int, Type>();
+
+    for (let index = 0; index < params.length; index++) {
+      const param = params[index];
+      const arg = args[index];
+      if (param != undefined && arg != undefined) {
+        binding.set(param.id, arg);
+      }
+    }
+
+    return binding;
+  }
+
+  private genericCall(
+    frame: Frame,
+    call: CallExpr,
+    callee: NameExpr,
+    fn: FunctionDecl,
+    home: int,
+  ): IrValue | undefined {
+    const written = this.values.typeArgumentsOf(frame.module, callee.loc);
+    const declared = this.values.functionOf(home, fn.loc);
+    if (written == undefined || declared.kind != TypeKind.Function) {
+      this.notLowered(frame.module, call.loc, "a call of this generic function");
+
+      return undefined;
+    }
+
+    const params = this.resolver.parameterTypes(home, fn.typeParams);
+    const args = written.map((type) => this.bound(type));
+    const binding = this.bindingOf(params, args);
+    const shape = this.shapeWith(declared.shape, binding);
+    const name = this.instanceName(home, fn, args);
+
+    this.instanceWanted({ module: home, fn, name, params, args });
+
+    const kept: IrValue[] = [];
+    const given = this.callArguments(frame, call.args, shape, call.loc, fn, kept);
+    const result = this.irType(shape.result);
+    const types = this.shapeTypes(shape);
+    if (given == undefined || result == undefined || types == undefined) {
+      return undefined;
+    }
+
+    const made = this.ir.declare(name, result, types);
+    const value = frame.made.call(made, given);
+
+    this.droppedAll(frame, kept);
+
+    return { type: result, value, tz: shape.result, owned: true };
+  }
+
+  private runtimeFunctionCall(
+    frame: Read<Frame>,
+    name: string,
+    items: Read<Type[]>,
+    given: Read<IrValue[]>,
+    loc: int,
+  ): IrValue | undefined {
+    const home = this.program.modules.find((one) => one.name == kArrayModule);
+    const fn = this.functionNamed(home, name);
+    if (home == undefined || fn == undefined) {
+      this.notLowered(frame.module, loc, `${kArrayModule} ${name}`);
+
+      return undefined;
+    }
+
+    const declared = this.values.functionOf(home.id, fn.loc);
+    if (declared.kind != TypeKind.Function) {
+      this.notLowered(frame.module, loc, `${kArrayModule} ${name}`);
+
+      return undefined;
+    }
+
+    const params = this.resolver.parameterTypes(home.id, fn.typeParams);
+    const args = items.slice();
+    const binding = this.bindingOf(params, args);
+    const shape = this.shapeWith(declared.shape, binding);
+    const instance = this.instanceName(home.id, fn, args);
+    const result = this.irType(shape.result);
+    const types = this.shapeTypes(shape);
+    if (result == undefined || types == undefined) {
+      this.notLowered(frame.module, loc, `${kArrayModule} ${name}`);
+
+      return undefined;
+    }
+
+    this.instanceWanted({ module: home.id, fn, name: instance, params, args });
+
+    for (let index = 0; index < given.length; index++) {
+      const one = given[index];
+      const param = fn.params[index];
+      const isLent = param != undefined && this.isBorrowedParam(param);
+      if (one != undefined && !isLent && this.isManaged(one.tz)) {
+        this.countCall(frame, true, one);
+      }
+    }
+
+    const values = given.map((one) => one.value);
+    const made = this.ir.declare(instance, result, types);
+    const value = frame.made.call(made, values);
+
+    return { type: result, value, tz: shape.result, owned: true };
+  }
+
+  private readonly functionNamed(
+    module: Module | undefined,
+    name: string,
+  ): FunctionDecl | undefined {
+    if (module == undefined) {
+      return undefined;
+    }
+
+    for (const item of module.file.items) {
+      if (item.kind == StmtKind.Function && item.name == name) {
+        return item;
+      }
+    }
+
+    return undefined;
+  }
+
+  private readonly instanceName(
+    module: int,
+    fn: FunctionDecl,
+    args: Read<Type[]>,
+  ): string {
+    const base = this.functionName(module, fn.loc);
+    const ids = args.map((type) => `${type.id}`);
+
+    return `${base}.i${ids.join("_")}`;
+  }
+
+  private instanceWanted(instance: PendingInstance): void {
+    if (this.wantedInstances.has(instance.name)) {
+      return;
+    }
+
+    this.wantedInstances.add(instance.name);
+    this.pendingInstances.push(instance);
+  }
+
+  private instancesLowered(): void {
+    let next = this.pendingInstances.pop();
+
+    while (next != undefined) {
+      this.instanceLowered(next);
+      next = this.pendingInstances.pop();
+    }
+  }
+
+  private instanceLowered(instance: PendingInstance): void {
+    const fn = instance.fn;
+    const body = fn.body;
+
+    const suffixAt = instance.name.lastIndexOf(".") + 1;
+
+    this.binding = this.bindingOf(instance.params, instance.args);
+    this.instanceModule = instance.module;
+    this.instanceStart = body?.loc ?? fn.loc;
+    this.instanceEnd = body?.end ?? fn.loc;
+    this.instanceSuffix = instance.name.slice(suffixAt);
+    this.forgetExpressions();
+    this.instanceBody(instance);
+    this.binding = new Map<int, Type>();
+    this.instanceModule = -1;
+    this.instanceSuffix = "";
+    this.forgetExpressions();
+  }
+
+  private instanceBody(instance: PendingInstance): void {
+    const owner = instance.owner;
+    const self = instance.self;
+    if (owner == undefined || self == undefined) {
+      return this.functionLowered(instance.module, instance.fn, instance.name);
+    }
+    if (self.kind != TypeKind.Instance) {
+      return;
+    }
+
+    this.methodLowered(self.module, owner, instance.fn, instance.name, self);
+  }
+
+  private forgetExpressions(): void {
+    replace(this.knownTypes, new Map<Expr, Type>());
+    replace(this.evaluated, new Map<Expr, IrValue>());
+  }
+
+  private readonly isInsideInstance(module: int, loc: int): boolean {
+    return (
+      module == this.instanceModule &&
+      loc > this.instanceStart &&
+      loc < this.instanceEnd
+    );
+  }
+}

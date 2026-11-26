@@ -381,6 +381,7 @@ export class ExpressionTypes {
   private writtenFields?: Cell<Set<string>>;
   private methodParts: Cell<Map<FunctionDecl, ClassDecl>>;
   private partHomes: Cell<Map<ClassDecl, int>>;
+  private typeArguments: Cell<Map<string, readonly Type[]>>;
 
   public constructor(
     store: TypeStore,
@@ -696,6 +697,7 @@ export class ExpressionTypes {
     this.ownedCalls = new Map<string, PendingCall[]>();
     this.methodParts = new Map<FunctionDecl, ClassDecl>();
     this.partHomes = new Map<ClassDecl, int>();
+    this.typeArguments = new Map<string, readonly Type[]>();
 
     for (const scopes of resolved) {
       this.scopes.set(scopes.module.id, scopes);
@@ -706,6 +708,20 @@ export class ExpressionTypes {
         this.indexPart(part, opened.id);
       }
     }
+  }
+
+  public readonly functionDeclAt(
+    module: int,
+    loc: int,
+  ): FunctionDecl | undefined {
+    return this.record(module)?.functions.get(loc);
+  }
+
+  public readonly typeArgumentsOf(
+    module: int,
+    loc: int,
+  ): readonly Type[] | undefined {
+    return this.typeArguments.get(`${module} ${loc}`);
   }
 
   private readonly indexPart(part: ClassDecl, module: int): void {

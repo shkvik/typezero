@@ -1,0 +1,298 @@
+import {
+  CallExpr,
+  NameExpr,
+} from "../../../program/ast/types/ast.types.expressions.tz";
+import { Type, TypeKind } from "../../../program/type/types/type.types.tz";
+import { IrOpcode } from "../../ir-function/types/ir-function.types.tz";
+import { LLVMValue } from "../../llvm-api/llvm-api.tz";
+import { Lowering } from "../lowering.tz";
+import {
+  kCharType,
+  kIntType,
+  kMemoryAllocate,
+  kMemoryFree,
+  kMemoryMove,
+  kMemoryResize,
+  kPointerType,
+  kVoidType,
+} from "../const/lowering.const.tz";
+import { Frame, IrValue } from "../types/lowering.types.tz";
+
+partial class Lowering {
+  private unsafeCall(
+    frame: Frame,
+    call: CallExpr,
+    callee: NameExpr,
+  ): IrValue | undefined {
+    const written = this.values.typeArgumentsOf(frame.module, callee.loc);
+    const first = written?.[0];
+    const item = this.boundOrNone(first);
+    const cell = this.typeOrNone(item);
+    if (item == undefined || cell == undefined) {
+      this.notLowered(frame.module, call.loc, "a call of this unsafe function");
+
+      return undefined;
+    }
+
+    switch (callee.name) {
+      case "allocate":
+        return this.rawAllocated(frame, call, cell);
+      case "reallocate":
+        return this.rawReallocated(frame, call, cell);
+      case "release":
+        return this.rawReleased(frame, call);
+      case "putAt":
+        return this.cellPut(frame, call, cell, item);
+      case "takeAt":
+        return this.cellRead(frame, call, cell, item, true);
+      case "peekAt":
+        return this.cellRead(frame, call, cell, item, false);
+      case "destroyAt":
+        return this.cellDestroyed(frame, call, cell, item);
+      case "shiftCells":
+        return this.cellsShifted(frame, call, cell);
+      case "forget":
+        return this.forgotten(frame, call);
+      case "arrayCells":
+        return this.arrayCellsOf(frame, call);
+      default:
+        this.notLowered(frame.module, call.loc, "a call of this unsafe function");
+
+        return undefined;
+    }
+  }
+
+  private typeOrNone(type: Type | undefined): string | undefined {
+    if (type == undefined) {
+      return undefined;
+    }
+
+    return this.irType(type);
+  }
+
+  private rawAllocated(
+    frame: Frame,
+    call: CallExpr,
+    cell: string,
+  ): IrValue | undefined {
+    const count = this.intArgument(frame, call, 0);
+    if (count == undefined) {
+      return undefined;
+    }
+
+    const bytes = this.cellBytes(frame, cell, count);
+    const allocating = this.ir.declare(kMemoryAllocate, kPointerType, [kIntType]);
+    const value = frame.made.call(allocating, [bytes]);
+
+    return this.rawMade(call, value);
+  }
+
+  private rawReallocated(
+    frame: Frame,
+    call: CallExpr,
+    cell: string,
+  ): IrValue | undefined {
+    const raw = this.rawArgument(frame, call, 0);
+    const count = this.intArgument(frame, call, 1);
+    if (raw == undefined || count == undefined) {
+      return undefined;
+    }
+
+    const bytes = this.cellBytes(frame, cell, count);
+    const params = [kPointerType, kIntType];
+    const resizing = this.ir.declare(kMemoryResize, kPointerType, params);
+    const value = frame.made.call(resizing, [raw, bytes]);
+
+    return this.rawMade(call, value);
+  }
+
+  private rawReleased(frame: Frame, call: CallExpr): IrValue | undefined {
+    const raw = this.rawArgument(frame, call, 0);
+    if (raw == undefined) {
+      return undefined;
+    }
+
+    const freeing = this.ir.declare(kMemoryFree, kVoidType, [kPointerType]);
+
+    frame.made.call(freeing, [raw]);
+
+    return this.nothing();
+  }
+
+  private cellPut(
+    frame: Frame,
+    call: CallExpr,
+    cell: string,
+    item: Type,
+  ): IrValue | undefined {
+    const raw = this.rawArgument(frame, call, 0);
+    const index = this.intArgument(frame, call, 1);
+    const argument = call.args[2];
+    if (raw == undefined || index == undefined || argument == undefined) {
+      return undefined;
+    }
+
+    const given = this.wantedValue(frame, argument.expr, item);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    const value = this.converted(frame, given, item, argument.expr.loc);
+    if (value == undefined) {
+      return undefined;
+    }
+
+    const owned = this.owning(frame, value);
+    const address = frame.made.element(cell, raw, index);
+
+    frame.made.store(owned.value, address);
+
+    return this.nothing();
+  }
+
+  private cellRead(
+    frame: Frame,
+    call: CallExpr,
+    cell: string,
+    item: Type,
+    isTaken: boolean,
+  ): IrValue | undefined {
+    const raw = this.rawArgument(frame, call, 0);
+    const index = this.intArgument(frame, call, 1);
+    if (raw == undefined || index == undefined) {
+      return undefined;
+    }
+
+    const address = frame.made.element(cell, raw, index);
+    const value = frame.made.load(cell, address);
+
+    return { type: cell, value, tz: item, owned: isTaken };
+  }
+
+  private cellDestroyed(
+    frame: Frame,
+    call: CallExpr,
+    cell: string,
+    item: Type,
+  ): IrValue | undefined {
+    const read = this.cellRead(frame, call, cell, item, true);
+    if (read == undefined) {
+      return undefined;
+    }
+
+    this.dropping(frame, read);
+
+    return this.nothing();
+  }
+
+  private cellsShifted(
+    frame: Frame,
+    call: CallExpr,
+    cell: string,
+  ): IrValue | undefined {
+    const raw = this.rawArgument(frame, call, 0);
+    const from = this.intArgument(frame, call, 1);
+    const to = this.intArgument(frame, call, 2);
+    const count = this.intArgument(frame, call, 3);
+    if (raw == undefined || from == undefined) {
+      return undefined;
+    }
+    if (to == undefined || count == undefined) {
+      return undefined;
+    }
+
+    const source = frame.made.element(cell, raw, from);
+    const target = frame.made.element(cell, raw, to);
+    const bytes = this.cellBytes(frame, cell, count);
+    const params = [kPointerType, kPointerType, kIntType];
+    const moving = this.ir.declare(kMemoryMove, kPointerType, params);
+
+    frame.made.call(moving, [target, source, bytes]);
+
+    return this.nothing();
+  }
+
+  private forgotten(frame: Frame, call: CallExpr): IrValue | undefined {
+    const argument = call.args[0];
+    if (argument == undefined) {
+      return undefined;
+    }
+
+    const given = this.value(frame, argument.expr);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    return this.nothing();
+  }
+
+  private arrayCellsOf(frame: Frame, call: CallExpr): IrValue | undefined {
+    const argument = call.args[0];
+    if (argument == undefined) {
+      return undefined;
+    }
+
+    const array = this.value(frame, argument.expr);
+    if (array == undefined) {
+      return undefined;
+    }
+
+    const data = this.arrayData(frame, array.value);
+
+    return this.rawMade(call, data);
+  }
+
+  private readonly cellBytes(
+    frame: Read<Frame>,
+    cell: string,
+    count: LLVMValue,
+  ): LLVMValue {
+    const size = this.ir.sizeOf(cell);
+
+    return frame.made.binary(IrOpcode.Mul, count, size);
+  }
+
+  private rawArgument(
+    frame: Frame,
+    call: CallExpr,
+    position: int,
+  ): LLVMValue | undefined {
+    const argument = call.args[position];
+    if (argument == undefined) {
+      return undefined;
+    }
+
+    return this.value(frame, argument.expr)?.value;
+  }
+
+  private intArgument(
+    frame: Frame,
+    call: CallExpr,
+    position: int,
+  ): LLVMValue | undefined {
+    const argument = call.args[position];
+    if (argument == undefined) {
+      return undefined;
+    }
+
+    const int = this.store.integer(64, false);
+    const given = this.wantedValue(frame, argument.expr, int);
+    if (given == undefined) {
+      return undefined;
+    }
+
+    return this.converted(frame, given, int, argument.expr.loc)?.value;
+  }
+
+  private readonly rawMade(call: CallExpr, value: LLVMValue): IrValue {
+    const type = this.typeOf(call) ?? this.store.plain(TypeKind.Error);
+
+    return { type: kPointerType, value, tz: type, owned: true };
+  }
+
+  private readonly nothing(): IrValue {
+    const tz = this.store.plain(TypeKind.Void);
+
+    return { type: kVoidType, value: this.ir.zero(kCharType), tz };
+  }
+}

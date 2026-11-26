@@ -1,0 +1,58 @@
+// Generic functions: lower makes a copy of the function for each set of types
+// it is called with.
+class Point {
+  public readonly x: int;
+  public readonly y: int;
+
+  public constructor(x: int, y: int) {
+    this.x = x;
+    this.y = y;
+  }
+}
+
+function identity<T>(value: Own<T>): T {
+  return value;
+}
+
+function firstOf<T>(items: Lent<T[]>): Read<T> | undefined {
+  return items[0];
+}
+
+function both<T>(first: Own<T>, second: Own<T>): T[] {
+  const kept = identity(first);
+  const other = identity(second);
+
+  return [kept, other];
+}
+
+function described<A, B>(first: Read<A>, second: Read<B>): string {
+  return `${first} and ${second}`;
+}
+
+function counted<T>(items: Read<T[]>): int {
+  let count = 0;
+
+  for (const item of items) {
+    if (item != undefined) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+const point = new Point(3, 4);
+const numbers = [1, 2, 3];
+const letters = ["a", "b"];
+
+console.log(identity(5));
+console.log(identity("five"));
+console.log(identity(point).x);
+console.log(firstOf(numbers));
+console.log(firstOf(letters));
+console.log(both(7, 8).length);
+console.log(both("seven", "eight").join(", "));
+console.log(described(1, "a"));
+console.log(described(true, 2.5));
+console.log(counted([new Point(1, 1), new Point(2, 2)]));
+console.log(counted(["x", "y", "z"]));

@@ -717,7 +717,8 @@ partial class Lowering {
 
   private loopItem(frame: Frame, statement: ForOfStmt, item: IrValue): void {
     const binding = statement.binding;
-    const declared = this.values.variableOf(frame.module, binding.loc);
+    const variable = this.values.variableOf(frame.module, binding.loc);
+    const declared = this.boundOrNone(variable);
     const isUnknown = declared == undefined || declared.kind == TypeKind.Error;
     const place = this.boundPlace(frame, binding, item.tz, isUnknown);
     if (place == undefined) {

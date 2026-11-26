@@ -37,6 +37,15 @@ partial class ExpressionTypes {
     return this.functionAt(module, loc);
   }
 
+  public readonly typedFunctionOf(module: int, loc: int): Type | undefined {
+    const door = this.functionDoors.get(`${module} ${loc}`);
+    if (door == undefined || door.state != DoorState.Done) {
+      return undefined;
+    }
+
+    return door.type;
+  }
+
   private readonly functionAt(module: int, loc: int): Type {
     const fn = this.record(module)?.functions.get(loc);
     if (fn == undefined) {

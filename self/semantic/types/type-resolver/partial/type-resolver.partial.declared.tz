@@ -193,12 +193,13 @@ partial class TypeResolver {
         return this.enumType(ref, found, module, context);
       }
       default: {
-        const written = this.written(ref, found.name, [], context);
+        const params = found.typeParams;
+        const written = this.written(ref, found.name, params, context);
         if (written == undefined) {
           return this.store.plain(TypeKind.Error);
         }
 
-        return this.store.instanceOf(module, found.loc, found.name, []);
+        return this.store.instanceOf(module, found.loc, found.name, written);
       }
     }
   }

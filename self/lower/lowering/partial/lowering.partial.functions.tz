@@ -22,20 +22,28 @@ import { IrFunction } from "../../ir-function/ir-function.tz";
 import { LLVMValue } from "../../llvm-api/llvm-api.tz";
 import { Lowering } from "../lowering.tz";
 import {
+  kBooleanType,
   kDecimalName,
   kErrName,
+  kGivenModes,
   kOkName,
+  kRuntimeModules,
   kVoidType,
 } from "../const/lowering.const.tz";
 import { Frame, IrValue, Place } from "../types/lowering.types.tz";
 
 partial class Lowering {
   private functionDeclared(frame: Read<Frame>, fn: FunctionDecl): void {
-    if (fn.bodySource == BodySource.Foreign) {
+    if (fn.bodySource == BodySource.Foreign || fn.typeParams.length > 0) {
       return;
     }
 
-    const module = frame.module;
+    const name = this.functionName(frame.module, fn.loc);
+
+    this.functionLowered(frame.module, fn, name);
+  }
+
+  private functionLowered(module: int, fn: FunctionDecl, name: string): void {
     const body = fn.body;
     const shape = this.shapeOf(module, fn.loc);
     if (body == undefined || shape == undefined) {
@@ -43,7 +51,6 @@ partial class Lowering {
     }
 
     const isPlain =
-      fn.typeParams.length == 0 &&
       !fn.isAsync &&
       !fn.isGenerator &&
       !shape.rest &&
@@ -60,7 +67,6 @@ partial class Lowering {
       return this.notLowered(module, fn.loc, `a function of type ${kind}`);
     }
 
-    const name = this.functionName(module, fn.loc);
     const made = new IrFunction(this.ir, name, result, params);
     const inner: Frame = {
       made,
@@ -92,8 +98,11 @@ partial class Lowering {
     if (type.kind != TypeKind.Function) {
       return undefined;
     }
+    if (this.binding.size == 0) {
+      return type.shape;
+    }
 
-    return type.shape;
+    return this.shapeWith(type.shape, this.binding);
   }
 
   private parameterTypes(
@@ -156,11 +165,12 @@ partial class Lowering {
 
       const tz = this.passedType(passed);
       const position = index + this.selfOffset(frame);
+      const isBorrowed = this.isBorrowedParam(param) && this.isManaged(tz);
       const given: IrValue = {
         type,
         value: frame.made.param(position),
         tz,
-        owned: true,
+        owned: !isBorrowed,
       };
       const form = param.form;
       const isOptional = this.optionalInner(tz) != undefined;
@@ -172,11 +182,48 @@ partial class Lowering {
 
       const pointer = frame.made.slot(type, param.name);
       const key = this.placeKey(frame.module, param.loc);
-      const place: Place = { pointer, type, tz, owner: frame.id };
+      const flag = this.dropFlag(frame, isBorrowed);
+      const place: Place = { pointer, type, tz, owner: frame.id, flag };
 
       frame.made.store(given.value, pointer);
       this.places.set(key, place);
       this.keepPlace(frame, place);
+    }
+  }
+
+  private readonly isBorrowedParam(param: Param): boolean {
+    const kind = param.form.kind;
+    const isPlain =
+      (kind == ParamKind.Required || kind == ParamKind.Optional) &&
+      param.pattern == undefined &&
+      param.property == undefined;
+    const ref = param.type;
+    const isGiven =
+      ref != undefined &&
+      ref.args.length == 1 &&
+      kGivenModes.includes(ref.name);
+
+    return isPlain && !isGiven;
+  }
+
+  private readonly dropFlag(
+    frame: Read<Frame>,
+    isBorrowed: boolean,
+  ): LLVMValue | undefined {
+    if (!isBorrowed) {
+      return undefined;
+    }
+
+    const flag = frame.made.slot(kBooleanType, "param.owned");
+
+    frame.made.entryStore(this.ir.zero(kBooleanType), flag);
+
+    return flag;
+  }
+
+  private droppedAll(frame: Read<Frame>, kept: Read<IrValue[]>): void {
+    for (const value of kept) {
+      this.dropping(frame, value);
     }
   }
 
@@ -245,7 +292,12 @@ partial class Lowering {
   }
 
   private readonly functionName(module: int, loc: int): string {
-    return `tz.f${module}.${loc}`;
+    const name = `tz.f${module}.${loc}`;
+    if (!this.isInsideInstance(module, loc)) {
+      return name;
+    }
+
+    return `${name}.${this.instanceSuffix}`;
   }
 
   private callValue(frame: Frame, call: CallExpr): IrValue | undefined {
@@ -273,7 +325,7 @@ partial class Lowering {
       target != undefined &&
       target.kind == SymbolKind.Function &&
       opened != undefined &&
-      !opened.source.isLibrary;
+      (!opened.source.isLibrary || kRuntimeModules.includes(opened.name));
     if (callee.name == kDecimalName && !isOwn) {
       return this.decimalOf(frame, call);
     }
@@ -303,8 +355,21 @@ partial class Lowering {
     if (foreign != undefined && foreign.bodySource == BodySource.Foreign) {
       return this.foreignCall(frame, call, foreign, shape);
     }
+    if (foreign != undefined && foreign.typeParams.length > 0) {
+      return this.genericCall(frame, call, callee, foreign, target.module);
+    }
 
-    const args = this.callArguments(frame, call.args, shape, call.loc);
+    const known = this.values.functionDeclAt(target.module, target.loc);
+    const calleeDecl = known ?? foreign;
+    const kept: IrValue[] = [];
+    const args = this.callArguments(
+      frame,
+      call.args,
+      shape,
+      call.loc,
+      calleeDecl,
+      kept,
+    );
     const result = this.irType(shape.result);
     const params = this.shapeTypes(shape);
     if (args == undefined || result == undefined || params == undefined) {
@@ -314,6 +379,8 @@ partial class Lowering {
     const name = this.functionName(target.module, target.loc);
     const declared = this.ir.declare(name, result, params);
     const value = frame.made.call(declared, args);
+
+    this.droppedAll(frame, kept);
 
     return { type: result, value, tz: shape.result, owned: true };
   }
@@ -348,6 +415,8 @@ partial class Lowering {
     passed: Read<CallArgument[]>,
     shape: Read<FunctionShape>,
     loc: int,
+    callee: FunctionDecl | undefined,
+    kept: IrValue[],
   ): LLVMValue[] | undefined {
     const args: LLVMValue[] = [];
     if (passed.length > shape.params.length) {
@@ -388,6 +457,18 @@ partial class Lowering {
       const value = this.converted(frame, given, wanted, arg.expr.loc);
       if (value == undefined) {
         return undefined;
+      }
+
+      const declared = callee?.params[index];
+      const isLent =
+        declared != undefined &&
+        this.isBorrowedParam(declared) &&
+        this.isManaged(wanted);
+      if (isLent) {
+        kept.push(value);
+        args.push(value.value);
+
+        continue;
       }
 
       const owned = this.owning(frame, value);

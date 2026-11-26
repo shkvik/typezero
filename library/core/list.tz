@@ -1,0 +1,110 @@
+import {
+  Raw,
+  allocate,
+  destroyAt,
+  peekAt,
+  putAt,
+  reallocate,
+  release,
+  shiftCells,
+  takeAt,
+} from "tz:unsafe";
+
+export class List<T> {
+  private data: Raw<T>;
+  private count: int;
+  private capacity: int;
+
+  public constructor() {
+    this.data = allocate<T>(0);
+    this.count = 0;
+    this.capacity = 0;
+  }
+
+  public readonly length(): int {
+    return this.count;
+  }
+
+  public push(item: Own<T>): void {
+    if (this.count == this.capacity) {
+      this.grow();
+    }
+
+    putAt(this.data, this.count, item);
+    this.count += 1;
+  }
+
+  public pop(): T | undefined {
+    if (this.count == 0) {
+      return undefined;
+    }
+
+    this.count -= 1;
+
+    return takeAt(this.data, this.count);
+  }
+
+  public readonly at(index: int): Read<T> | undefined {
+    if (index < 0 || index >= this.count) {
+      return undefined;
+    }
+
+    return peekAt(this.data, index);
+  }
+
+  public insert(index: int, item: Own<T>): void {
+    if (index < 0 || index > this.count) {
+      return;
+    }
+    if (this.count == this.capacity) {
+      this.grow();
+    }
+
+    shiftCells(this.data, index, index + 1, this.count - index);
+    putAt(this.data, index, item);
+    this.count += 1;
+  }
+
+  public remove(index: int): T | undefined {
+    if (index < 0 || index >= this.count) {
+      return undefined;
+    }
+
+    const item = takeAt(this.data, index);
+
+    shiftCells(this.data, index + 1, index, this.count - index - 1);
+    this.count -= 1;
+
+    return item;
+  }
+
+  public clear(): void {
+    for (let index = 0; index < this.count; index++) {
+      destroyAt(this.data, index);
+    }
+
+    this.count = 0;
+  }
+
+  public free(): void {
+    this.clear();
+    release(this.data);
+    this.data = allocate<T>(0);
+    this.capacity = 0;
+  }
+
+  public [Symbol.dispose](): void {
+    this.clear();
+    release(this.data);
+  }
+
+  private grow(): void {
+    let capacity: int = this.capacity * 2;
+    if (capacity < 4) {
+      capacity = 4;
+    }
+
+    this.data = reallocate(this.data, capacity);
+    this.capacity = capacity;
+  }
+}

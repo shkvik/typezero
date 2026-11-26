@@ -40,10 +40,12 @@ partial class FileParser {
       return this.marker(StmtKind.Empty, name.start);
     }
 
+    const typeParams = this.optionalTypeParams();
     const handle: Stmt = {
       kind: StmtKind.Handle,
       loc: name.start,
       name: name.text,
+      typeParams,
     };
     const next = this.cursor.lookahead();
     const hasBody =

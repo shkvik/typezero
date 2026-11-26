@@ -52,7 +52,7 @@ export class TypesCommand {
     }
 
     const source = new ProgramSource();
-    const loaded = source.loadWith(entry, this.overlays);
+    const loaded = source.loadWith(entry, this.overlays, false);
     const program = loaded.program;
 
     this.report.loadProblems(loaded);

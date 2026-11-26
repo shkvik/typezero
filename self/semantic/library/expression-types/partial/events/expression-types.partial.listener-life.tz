@@ -116,7 +116,7 @@ partial class ExpressionTypes {
       return;
     }
 
-    const others = captured.filter((one) => one != kept);
+    const others = captured.filter((one) => one.name != kept.name);
     const code = this.lifeCode(
       isTimer,
       Code.TimerCaptures,

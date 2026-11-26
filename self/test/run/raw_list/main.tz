@@ -1,0 +1,62 @@
+// A list written in tz over Raw<T> of tz:unsafe (library/core/list.tz):
+// cells of memory without a counter of their own.
+import { List } from "tz:list";
+
+class Point {
+  public readonly x: int;
+  public readonly y: int;
+
+  public constructor(x: int, y: int) {
+    this.x = x;
+    this.y = y;
+  }
+}
+
+function texts(list: Read<List<string>>): string {
+  const parts: string[] = [];
+
+  for (let index = 0; index < list.length(); index++) {
+    const item = list.at(index);
+    if (item != undefined) {
+      parts.push(item);
+    }
+  }
+
+  return parts.join(",");
+}
+
+const numbers = new List<int>();
+
+for (let index = 0; index < 100; index++) {
+  numbers.push(index * index);
+}
+
+console.log(numbers.length(), numbers.at(0), numbers.at(9), numbers.at(99));
+console.log(numbers.at(100) == undefined, numbers.at(-1) == undefined);
+console.log(numbers.pop(), numbers.length());
+
+const words = new List<string>();
+
+words.push("b");
+words.push("d");
+words.insert(0, "a");
+words.insert(2, "c");
+words.insert(4, "e");
+console.log(texts(words));
+console.log(words.remove(1), texts(words));
+console.log(words.remove(10) == undefined);
+
+const points = new List<Point>();
+
+for (let index = 0; index < 10; index++) {
+  points.push(new Point(index, -index));
+}
+
+const last = points.pop();
+
+console.log(points.length(), last?.x, last?.y);
+console.log(points.at(3)?.x);
+points.clear();
+console.log(points.length());
+words.free();
+console.log(words.length(), texts(words));

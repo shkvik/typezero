@@ -191,7 +191,7 @@ partial class ExpressionTypes {
     const isGeneric =
       generic != undefined &&
       generic.kind == TypeKind.Function &&
-      this.parts.mentionsParameter(generic);
+      this.mentionsLibraryParameter(generic);
     const isSpecial = isProved || object.kind == TypeKind.Result;
     if (isGeneric && isSpecial) {
       return this.store.plain(TypeKind.Error);
@@ -233,6 +233,27 @@ partial class ExpressionTypes {
     }
 
     return called;
+  }
+
+  private readonly mentionsLibraryParameter(method: Type): boolean {
+    if (!this.parts.mentionsParameter(method)) {
+      return false;
+    }
+
+    const params = this.parts.genericParameters(method);
+    if (params == undefined) {
+      return true;
+    }
+
+    return params.some((param) => this.isLibraryParameter(param));
+  }
+
+  private readonly isLibraryParameter(param: Type): boolean {
+    if (param.kind != TypeKind.TypeParameter) {
+      return true;
+    }
+
+    return this.modules.isLibraryModule(param.module);
   }
 
   private readonly filteredArray(expr: CallExpr, kept: Type): Type {

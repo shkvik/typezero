@@ -6,4 +6,6 @@ export const kTypedLibraries = [
   "node:events",
   "tz:web",
   "node:stream",
+  "tz:list",
+  "tz:array",
 ];

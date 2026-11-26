@@ -7,6 +7,7 @@ import {
 } from "../../../../program/ast/types/ast.types.classes.tz";
 import {
   FunctionDecl,
+  FunctionPlace,
   Param,
   ParamKind,
 } from "../../../../program/ast/types/ast.types.functions.tz";
@@ -412,12 +413,20 @@ partial class OwnershipCheck {
   }
 
   private readonly shapeOf(fn: FunctionDecl): FunctionShape | undefined {
-    const type = this.values.functionOf(this.module, fn.loc);
-    if (type.kind != TypeKind.Function) {
+    const type = this.functionTypeOf(fn);
+    if (type == undefined || type.kind != TypeKind.Function) {
       return undefined;
     }
 
     return type.shape;
+  }
+
+  private readonly functionTypeOf(fn: FunctionDecl): Type | undefined {
+    if (fn.place != FunctionPlace.Expression) {
+      return this.values.functionOf(this.module, fn.loc);
+    }
+
+    return this.values.typedFunctionOf(this.module, fn.loc);
   }
 
   private readonly paramTypeOf(

@@ -49,8 +49,11 @@ partial class Lowering {
     if (type.kind != TypeKind.Function) {
       return undefined;
     }
+    if (this.binding.size == 0) {
+      return type.shape;
+    }
 
-    return type.shape;
+    return this.shapeWith(type.shape, this.binding);
   }
 
   private inlineCall(

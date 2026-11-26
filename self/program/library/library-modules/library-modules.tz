@@ -44,6 +44,10 @@ export class LibraryModules {
     return kLibraryModules.filter((one) => one.access == LibraryAccess.Global);
   }
 
+  public readonly runtimeModules(): LibraryModule[] {
+    return kLibraryModules.filter((one) => one.access == LibraryAccess.Runtime);
+  }
+
   public readonly global(name: string): LibraryGlobal | undefined {
     return this.globalsByName.get(name);
   }

@@ -1,0 +1,60 @@
+// Methods of arrays written in tz (library/core/array.tz): lower calls a copy of
+// the tz function for the type of the elements instead of a function of C.
+class Point {
+  public readonly x: int;
+
+  public constructor(x: int) {
+    this.x = x;
+  }
+}
+
+function numbers(): void {
+  const items = [5, 3, 5, 1];
+
+  console.log(items.indexOf(5), items.lastIndexOf(5), items.indexOf(7));
+  console.log(items.includes(1), items.includes(2));
+  items.reverse();
+  console.log(items.join(" "));
+}
+
+function words(): void {
+  const items = ["b", "a", "b", "c"];
+
+  console.log(items.indexOf("b"), items.lastIndexOf("b"), items.indexOf("z"));
+  console.log(items.includes("c"), items.includes("d"));
+  items.reverse();
+  console.log(items.join(""));
+}
+
+function points(): void {
+  const first = new Point(1);
+  const second = new Point(2);
+  const other = new Point(1);
+  const items: Point[] = [];
+
+  items.push(first);
+  items.push(second);
+  console.log(items.indexOf(second), items.includes(other));
+  items.reverse();
+  console.log(items.map((point) => point.x).join(","));
+}
+
+function flags(): void {
+  const items = [true, true, false];
+
+  console.log(items.indexOf(false), items.lastIndexOf(true));
+  items.reverse();
+  console.log(items.join(","));
+}
+
+function reals(): void {
+  const items = [1.5, 2.5];
+
+  console.log(items.indexOf(2.5), items.includes(3.5));
+}
+
+numbers();
+words();
+points();
+flags();
+reals();

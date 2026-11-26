@@ -20,6 +20,7 @@ import {
   kPathIsAbsolute,
   kFsModule,
   kMemModule,
+  kUnsafeModule,
   kVoidType,
   kCharType,
   kReplaceName,
@@ -249,6 +250,9 @@ partial class Lowering {
     const opened = this.program.modules[module];
     if (opened != undefined && opened.name == kMemModule) {
       return this.memCall(frame, call, callee);
+    }
+    if (opened != undefined && opened.name == kUnsafeModule) {
+      return this.unsafeCall(frame, call, callee);
     }
     if (opened != undefined && opened.name == kFsModule) {
       return this.filesCall(frame, call, callee);

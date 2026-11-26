@@ -10,6 +10,8 @@ import { IrModule } from "../../../lower/ir-module/ir-module.tz";
 import { Lowering } from "../../../lower/lowering/lowering.tz";
 import { Unlowered } from "../../../lower/lowering/types/lowering.types.tz";
 import { FrontEnd } from "../../../pipeline/front-end/front-end.tz";
+import { OwnershipCheck } from "../../../semantic/ownership/ownership-check/ownership-check.tz";
+import { ExpressionTypes } from "../../../semantic/code/expression-types/expression-types.tz";
 import { kProgramName } from "../../const/cli.const.tz";
 import { ProgramReport } from "../../program-report/program-report.tz";
 import { ProgramSource } from "../../program-source/program-source.tz";
@@ -50,7 +52,7 @@ export class BuildCommand {
     }
 
     const source = new ProgramSource();
-    const loaded = source.load(entry);
+    const loaded = source.loadWith(entry, [], true);
     const program = loaded.program;
 
     this.report.loadProblems(loaded);
@@ -66,6 +68,12 @@ export class BuildCommand {
     for (const problems of front.problems(checked)) {
       this.report.sourceErrors(problems.source, problems.errors);
     }
+
+    if (this.report.hasFailed()) {
+      return;
+    }
+
+    this.checkOwnership(program, checked.values);
 
     if (this.report.hasFailed()) {
       return;
@@ -138,6 +146,22 @@ export class BuildCommand {
     }
 
     return `${stem}${kExecutableExtension}`;
+  }
+
+  private checkOwnership(program: Program, values: Own<ExpressionTypes>): void {
+    const ownership = new OwnershipCheck(this.store, values, program);
+
+    ownership.run();
+
+    for (const module of program.modules) {
+      const errors = ownership.problems(module.id);
+      if (errors.length > 0) {
+        const sorted = errors.slice();
+
+        sorted.sort((first, second) => first.loc - second.loc);
+        this.report.sourceErrors(module.source, sorted);
+      }
+    }
   }
 
   private unloweredReport(program: Program, unlowered: Read<Unlowered[]>): void {

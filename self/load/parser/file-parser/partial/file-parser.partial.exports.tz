@@ -49,10 +49,7 @@ partial class FileParser {
       case TokenKind.Abstract:
         return next.kind == TokenKind.Class && !next.newline;
       case TokenKind.Declare:
-        return (
-          next.kind == TokenKind.Function ||
-          (!this.library && next.kind == TokenKind.Class)
-        );
+        return next.kind == TokenKind.Function || next.kind == TokenKind.Class;
       default:
         return this.asyncFunctionAhead();
     }

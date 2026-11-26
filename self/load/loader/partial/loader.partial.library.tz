@@ -76,6 +76,16 @@ partial class Loader {
     return ids;
   }
 
+  private loadRuntime(): void {
+    for (const library of kLibrary.runtimeModules()) {
+      const id = this.libraryId(library);
+      const module = this.opened[id ?? -1];
+      if (module != undefined && module.state == ModuleState.New) {
+        this.visit(module);
+      }
+    }
+  }
+
   private openLibrary(library: Read<LibraryModule>): OpenModule | undefined {
     const file = join(this.libraryDirectory, library.file);
     if (file.endsWith(kDeclarationExtension)) {

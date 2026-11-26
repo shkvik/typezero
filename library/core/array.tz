@@ -1,0 +1,43 @@
+import { arrayCells, peekAt, putAt, takeAt } from "tz:unsafe";
+
+export function indexOf<T>(items: Read<T[]>, value: Read<T>): int {
+  const cells = arrayCells(items);
+
+  for (let index = 0; index < items.length; index++) {
+    if (peekAt(cells, index) == value) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+export function lastIndexOf<T>(items: Read<T[]>, value: Read<T>): int {
+  const cells = arrayCells(items);
+
+  for (let index = items.length - 1; index >= 0; index--) {
+    if (peekAt(cells, index) == value) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+export function includes<T>(items: Read<T[]>, value: Read<T>): boolean {
+  return indexOf(items, value) >= 0;
+}
+
+export function reverse<T>(items: T[]): void {
+  const cells = arrayCells(items);
+  const last = items.length - 1;
+
+  for (let low = 0; low < last - low; low++) {
+    const high = last - low;
+    const first = takeAt(cells, low);
+    const second = takeAt(cells, high);
+
+    putAt(cells, low, second);
+    putAt(cells, high, first);
+  }
+}
